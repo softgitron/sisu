@@ -222,7 +222,9 @@ and the time spent building and running them.
   overflows the stack (`stack_overflow`: a panic naming the function, its
   drops and `defer`s run, the trace's ends), what a call leaves of an
   iterator given to an `Iterable[T]` parameter (`iterable_rest`: dropped
-  when it returns and when it unwinds), capabilities, and tests.
+  when it returns and when it unwinds), an iterator written in Sisu given
+  to one (`iterable_iterator`: lazy, through a generator), capabilities,
+  and tests.
 - `traits/` is traits and impls (18, Phase 4): provided methods,
   associated types, supertraits, coherence and the orphan rule, sealed
   traits, method resolution and ambiguity, `dyn Trait` and object safety,
@@ -238,20 +240,27 @@ and the time spent building and running them.
   (`const_expressions`, `const_expression_errors`).
 - `comptime/` is compile-time evaluation: constants computed by the
   compiler (`baked` pins the SIR built from literals), `comptime assert`,
-  `comptime def`, budgets, the evaluation errors, and derives written as
-  compile-time Sisu (`derive_default` and `derive_default_errors`: the
-  prelude's `Default`), with `proposal_derive`, the user-defined derive of
+  `comptime def` (`comptime_defs`: ones that reflect, take a type, `T:
+  type`, or belong to a trait), constants and defaults that reflect
+  (`reflecting_values`), budgets, the evaluation errors, and derives
+  written as compile-time Sisu (`derive_default` and
+  `derive_default_errors`: the prelude's `Default`), with
+  `proposal_derive`, the user-defined derive of
   `proposal/examples/comptime.sisu`, and `proposal_arrays`, its CRC table
   and ring buffer, each kept identical by a test; `generic_assert` is a
   `comptime assert` over a `const` parameter, checked at the call.
 - `reflect/` is reflection in generic functions, each made for the types
   it is called with: the `reflect` queries, attributes as data,
   `implements`, `reflect.construct` and `default_of`, promotion of generic
-  callers, `comptime panic` and the bound on instances, `embed`,
-  `target`, `std.x.cli`'s parser and `json.encode` written over
-  reflection in the standard library, and
-  `proposal_comptime`, the sections of `proposal/examples/comptime.sisu`
-  that stage 0 runs, each kept identical by a test.
+  callers, reflection in methods (`methods`), in a trait's own methods and
+  the methods of trait impls, generic ones too (`trait_methods`), in
+  tests, parametrised ones too (`tests`, with its `.test`), in closures
+  (`closures`), over methods (`methods_of`), the places it cannot unfold
+  (`methods_rejected`), `comptime panic` and the bound on instances,
+  `embed`, `target`, `std.x.cli`'s parser and `json.encode` written over
+  reflection in the standard library, and `proposal_comptime`, the
+  sections of `proposal/examples/comptime.sisu` that stage 0 runs, each
+  kept identical by a test.
 - `contracts/` is 07: `requires`, `ensures` with `result` and `old`,
   invariants, refinement types and their chains, the check levels, the
   failure messages with every part's value, `sisu check --explain`
@@ -296,9 +305,12 @@ and the time spent building and running them.
   `select`, races, mutexes across tasks with guards dropped by unwinding,
   the lowest-index rule of `pure` scopes, deadlock reports, generators
   (`generator_close`: one dropped before its end runs its drops and
-  `defer`s; `generator_close_panic`: a panic there aborts), the sync
-  types beside `Mutex` (`sync_types`: `Atomic`, `Once`, `Condvar` and
-  `RwLock`; `sync_errors`), `log`, and
+  `defer`s; `generator_close_panic`: a panic there aborts;
+  `generator_driven`: one inside another iterator or given to an
+  intrinsic runs to its `yield` there; `generator_driven_wait`: a wait
+  there aborts), the sync types beside `Mutex` (`sync_types`: `Atomic`,
+  `Once`, `Condvar` and `RwLock`; `rwlock_writers`: a waiting writer
+  goes before new readers; `sync_errors`), `log`, and
   the diagnostics of `Send`, `Sync`, what a task may borrow and what a
   channel may carry (`channel_owner_errors`: neither a view nor
   must-consume).
@@ -309,7 +321,9 @@ and the time spent building and running them.
   the fresh fakes of each test and the real `System` a test may declare
   (and the signatures it may not), the network over `Net.fake`, the
   host's objects, `DateTime`, objects dropped with the last copies of
-  their handles (`object_drops`), and what the capability rules reject.
+  their handles (`object_drops`) and with the last copies of the function
+  values whose `own` closures hold them (`closure_drops`), and what the
+  capability rules reject.
 - `http/` is std.x.http over the in-process network, under several
   schedules (a test of the driver runs it under a thousand).
 - `ownership/` is the ownership checker (18, Phase 3). Accepted programs

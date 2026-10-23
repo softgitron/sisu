@@ -112,7 +112,7 @@ impl<'p> Types<'p> {
             Type::Ref(inner, _) if fat(inner) => 2 * w,
             Type::Int | Type::Float | Type::Bool | Type::Char | Type::Ref(..) => w,
             Type::Str | Type::Dyn(..) => 2 * w,
-            Type::Fn(..) => (1 + self.env_words) * w,
+            Type::Fn(..) => (2 + self.env_words) * w,
             Type::Unit | Type::Never | Type::Const(_) => 0,
             Type::Tuple(items) => {
                 let mut n = 0;
@@ -236,7 +236,7 @@ impl<'p> Types<'p> {
                 simple(Kind::Ref(target), size)
             }
             Type::Dyn(..) => simple(Kind::Dyn, 2 * w),
-            Type::Fn(..) => simple(Kind::Fn, (1 + self.env_words) * w),
+            Type::Fn(..) => simple(Kind::Fn, (2 + self.env_words) * w),
             Type::Tuple(items) => {
                 let mut slots = Vec::new();
                 let mut off = 0;
@@ -546,8 +546,11 @@ impl<'p> Types<'p> {
             | Kind::Shared(_)
             | Kind::Weak(_)
             | Kind::Arena(_) => true,
-            // A capability handle's copies are counted (decision 237).
+            // A capability handle's copies are counted (decision 237), and
+            // so are those a function value's environment holds (decision
+            // 248).
             Kind::Opaque(n) => abi::counted_handle(&n),
+            Kind::Fn => true,
             Kind::Mutex(v) | Kind::RwLock(v) | Kind::Cell(v) => match self.type_of_id(v) {
                 Some(vt) => self.needs_drop_in(&vt, seen)?,
                 None => false,
@@ -610,6 +613,7 @@ impl<'p> Types<'p> {
         let Some(Some(e)) = self.entries.get(id as usize) else { return false };
         let parts: Vec<u32> = match &e.kind {
             Kind::Opaque(n) => return abi::counted_handle(n),
+            Kind::Fn => return true,
             Kind::Option(p) => vec![*p],
             Kind::Result(a, b) => vec![*a, *b],
             Kind::Tuple(slots) => slots.iter().map(|s| s.ty).collect(),

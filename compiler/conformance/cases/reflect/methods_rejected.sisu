@@ -1,19 +1,14 @@
-# Where compile-time code that unfolds is not made (decision 244): a
-# trait's own method, a method of a generic trait impl, a `comptime def`,
-# a constant and a test (`E0900`, each naming its place). A template
-# without type parameters is made where it is declared, so code that
-# cannot be unfolded stops there (`E0609`).
+# Where compile-time code cannot be unfolded (decisions 244 and 251): a
+# method of a trait impl is made once, as generic as the impl, so asking
+# about a type parameter (the impl's or its own) stops it (`E0609`), and
+# so does a provided method in an impl for every type, whose `Self` is a
+# parameter. A template without type parameters is made where it is
+# declared, so code that cannot be unfolded stops there. A refinement's
+# `where` clause does not unfold (`E0900`, naming the place).
 
 struct Point:
     x: int
     y: int
-
-trait Named:
-    def names(self) -> list[String]:
-        var out: list[String] = []
-        comptime for f in reflect.fields_of(Self):
-            out.push(f.name)
-        return out
 
 struct Pair[A]:
     a: A
@@ -23,21 +18,37 @@ trait Size:
 
 impl[A] Size for Pair[A]:
     def size(self) -> int:
-        return self.a.[0]
+        return len(reflect.fields_of(A))
+
+trait Probe:
+    def probe[T](self, x: T) -> bool
+
+impl Probe for Point:
+    def probe[T](self, x: T) -> bool:
+        return comptime reflect.is_struct(T)
+
+trait Marker:
+    def mark(self) -> int
+
+trait Named:
+    def names(self) -> list[String]:
+        var out: list[String] = []
+        comptime for f in reflect.fields_of(Self):
+            out.push(f.name)
+        return out
+
+impl[T: Marker] Named for T:
+    pass
 
 comptime def count() -> int:
     return 1 + reflect.fields_of(Point)
-
-const LIMIT: int = len(reflect.fields_of(Point))
 
 def unknown(p: Point) -> int:
     comptime for f in reflect.fields_of(p):
         print(f.name)
     return 0
 
-test "reflecting":
-    comptime for f in reflect.fields_of(Point):
-        assert f.name != ""
+type Small = int where self < len(reflect.fields_of(Point))
 
 def main():
-    print(LIMIT)
+    print(Pair(a=1).size())

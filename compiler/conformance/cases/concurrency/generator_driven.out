@@ -1,0 +1,6 @@
+(Ok(152), Ok(340), Err(TaskPanicked(message="no 2", trace="at closure in failing (generator_driven.sisu:36:13)\nat closure in main (generator_driven.sisu:51:31)")))
+[4, 8, 16]
+drop guarded
+True
+drop guarded
+[(7, 1), (8, 2)]

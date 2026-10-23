@@ -230,9 +230,27 @@ pub(crate) unsafe fn drop_value(p: *mut u8, t: u32) -> u8 {
             // A copy of a capability handle, or of a `Cap`: one count
             // fewer (decision 237).
             Kind::Opaque(n) if counted(n) => crate::caps::release_cell(mem::word(p, 0) as *mut u8),
+            // A function value goes with what its environment holds
+            // (decision 248).
+            Kind::Fn => match fn_env(p, entry) {
+                Some(env) => drop_value(p.add(8), env),
+                None => abi::OK,
+            },
             _ => abi::OK,
         }
     }
+}
+
+/// The type of what a function value's environment holds, when a drop or
+/// a copy of the value must reach it: the value's last word, the type's
+/// number plus one, or 0 (decision 248).
+///
+/// # Safety
+/// `p` must hold a function value of the type `entry` describes.
+unsafe fn fn_env(p: *mut u8, entry: &abi::TypeEntry) -> Option<u32> {
+    // SAFETY: as the caller guarantees.
+    let w = unsafe { mem::word(p, entry.size - 8) };
+    (w != 0).then(|| (w - 1) as u32)
 }
 
 /// Whether a type the runtime knows by its name is a counted handle
@@ -279,6 +297,11 @@ pub(crate) unsafe fn retain_value(p: *mut u8, t: u32) {
                     for f in &v.fields {
                         retain_value(p.add(f.offset as usize), f.ty);
                     }
+                }
+            }
+            Kind::Fn => {
+                if let Some(env) = fn_env(p, entry) {
+                    retain_value(p.add(8), env);
                 }
             }
             _ => {}
@@ -446,11 +469,18 @@ pub(crate) unsafe fn copy_value(dst: *mut u8, src: *mut u8, t: u32) {
                 mem::copy(dst, src, 8);
                 crate::caps::retain_cell(mem::word(src, 0) as *mut u8);
             }
+            // Another copy of a function value and what its environment
+            // holds (decision 248).
+            Kind::Fn => {
+                mem::copy(dst, src, entry.size as usize);
+                retain_value(dst, t);
+            }
             // An unlocked mutex holding a copy of the value.
             Kind::Mutex(v) | Kind::RwLock(v) => {
                 mem::set_word(dst, abi::MUTEX_LOCKED, 0);
                 mem::set_word(dst, abi::MUTEX_HOLDER, 0);
                 mem::set_word(dst, abi::MUTEX_POISONED, mem::word(src, abi::MUTEX_POISONED));
+                mem::set_word(dst, abi::MUTEX_WRITERS, 0);
                 let off = abi::MUTEX_HEADER as usize;
                 copy_value(dst.add(off), src.add(off), *v);
             }

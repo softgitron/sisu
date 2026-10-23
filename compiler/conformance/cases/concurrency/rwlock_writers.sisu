@@ -1,0 +1,33 @@
+# An `RwLock` prefers its writers (decision 249): once a task waits to
+# write, a task that asks to read waits behind it, so readers that keep
+# coming cannot keep a writer out. Three readers here read for as long as
+# the writer has not written, each holding the lock across a yield; the
+# writer still gets its turn, under every schedule.
+# explore 20
+
+def read_until_written(lock: task.RwLock[int], written: Atomic[bool]) -> int:
+    var reads = 0
+    while not written.load():
+        let g = lock.read()
+        reads += g.value + 1
+        task.yield_now()
+    return reads
+
+def main():
+    let lock = task.RwLock(0)
+    let written = Atomic(False)
+    let read = task.scope do s:
+        let readers = [s.spawn(() -> read_until_written(lock, written)) for _ in range(3)]
+        s.spawn do:
+            task.yield_now()
+            var w = lock.write()
+            w.value = 0
+            written.store(True)
+        var total = 0
+        for r in readers:
+            total += r.join().expect("read")
+        return total > 0
+    print("the readers read: {read}")
+    print("the writer wrote: {written.load()}")
+    let g = lock.read()
+    print("the value: {g.value}")

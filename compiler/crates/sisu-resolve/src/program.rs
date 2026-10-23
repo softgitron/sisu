@@ -102,6 +102,9 @@ pub struct TraitInfo {
     pub sealed: bool,
     /// `@marker`: no methods; implemented by the language's rules (`Copy`).
     pub marker: bool,
+    /// Its `comptime def`s but `derive`: compile-time functions a program
+    /// names through the trait, `Trait.name(...)` (decision 251).
+    pub comptime_fns: Vec<(String, DefId)>,
 }
 
 /// `impl[...] Trait[...] for Type`.
@@ -140,6 +143,9 @@ pub struct FieldInfo {
     pub name: String,
     pub ty: Ty,
     pub default: Option<ast::Expr>,
+    /// The file the default is written in: the struct's, or the text its
+    /// unfolding made when it reflects (decision 251).
+    pub default_file: FileId,
     pub span: Span,
     /// `pub x: int` (09): who may read, write and construct with it.
     pub vis: ast::Vis,
@@ -195,6 +201,9 @@ pub struct ParamInfo {
     pub mode: ast::Mode,
     pub ty: Ty,
     pub default: Option<ast::Expr>,
+    /// The file the default is written in: the function's, or the text its
+    /// unfolding made when it reflects (decision 251).
+    pub default_file: FileId,
     pub span: Span,
 }
 
@@ -257,6 +266,11 @@ pub struct FnInfo {
     pub template: bool,
     /// The template and type arguments an instance was made for.
     pub instance_of: Option<(DefId, Vec<Ty>)>,
+    /// The `T: type` parameters of a `comptime def` (08, "Reflection";
+    /// decision 251): each one's position among the arguments a call
+    /// writes and its name, and the generic parameter whose argument the
+    /// call's argument, a type, is. They are not among `params`.
+    pub type_params: Vec<(usize, String, u32)>,
     /// The header has a syntax error: the result type is `Error`, calls are
     /// not checked against the parameters, and names the body cannot find
     /// (most likely parameters lost in the error) are not reported.
@@ -264,6 +278,16 @@ pub struct FnInfo {
     /// The body has a syntax error: a name it cannot find may be a binding
     /// lost in that error, so it is not reported.
     pub body_broken: bool,
+}
+
+impl FnInfo {
+    /// Whether this template is made once, for all its type arguments at
+    /// once: one without type parameters (decision 244), or a method of a
+    /// trait impl, whose instance is as generic as the template, so that a
+    /// trait's call reaches it whatever the type arguments (decision 251).
+    pub fn made_once(&self) -> bool {
+        self.template && (self.generics.is_empty() || self.impl_.is_some())
+    }
 }
 
 #[derive(Clone, Debug)]

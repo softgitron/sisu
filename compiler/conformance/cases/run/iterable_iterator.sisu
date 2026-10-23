@@ -1,0 +1,40 @@
+# An iterator written in Sisu (an adapter such as `map`, or a program's
+# own type that implements `Iterator`) given to an `Iterable[T]`
+# parameter: the checker passes a generator that takes its items as they
+# are asked for (`iter_from`, decision 247), so `sum`, `any`, `zip` and
+# the rest stay lazy and stop where they stop, and a function that passes
+# its own `Iterable[T]` on passes the generator on.
+
+def total(xs: Iterable[int]) -> int:
+    return sum(xs)
+
+struct Countdown:
+    left: int
+
+impl Iterator for Countdown:
+    type Item = int
+    def next(mut self) -> int?:
+        if self.left == 0:
+            return None
+        self.left -= 1
+        print("  countdown gives {self.left}")
+        return Some(self.left)
+
+def noisy(x: int) -> bool:
+    print("  check {x}")
+    return x > 1
+
+def main():
+    let xs = [1, 2, 3]
+    print(total(xs))
+    print(total(xs.iter().map(x -> x * 2)))
+    print(sum(xs.iter().filter(it != 2)))
+    print(any(xs.iter().map(noisy(it))))
+    print(all(xs.iter().map(x -> x < 3)))
+    for (i, x) in enumerate(Countdown(left=3)):
+        print("{i}: {x}")
+    for (a, b) in zip(xs.iter().map(x -> x * 10), Countdown(left=3)):
+        print("{a} {b}")
+    print(sorted(Countdown(left=4)))
+    print(reversed(Countdown(left=2)).collect())
+    print(total(Countdown(left=4).map(x -> x + 100)))

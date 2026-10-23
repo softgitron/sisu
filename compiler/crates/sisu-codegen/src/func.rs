@@ -384,10 +384,38 @@ impl<'a, 'p> Cx<'a, 'p> {
         if !self.cg.types.counted(ty)? {
             return Ok(());
         }
+        // A function value counts only what its environment holds, when
+        // its last word names the environment's type (decision 248).
+        if let Some(env) = self.fn_env(addr, ty)? {
+            let (tw, done) = env;
+            let at = self.b.ins().iadd_imm(addr, i64::from(abi::WORD));
+            let t = self.b.ins().iadd_imm(tw, -1);
+            let t = self.b.ins().ireduce(types::I32, t);
+            self.rt(sym::RETAIN, &[at, t])?;
+            self.b.ins().jump(done, &[]);
+            self.b.switch_to_block(done);
+            return Ok(());
+        }
         let id = self.type_id(ty)?;
         let idv = self.i32const(id);
         self.rt(sym::RETAIN, &[addr, idv])?;
         Ok(())
+    }
+
+    /// For a function value at `addr`: its last word, the type of what its
+    /// environment holds plus one (decision 248), with the code from here
+    /// on reached only when it is not 0, and the block that follows.
+    fn fn_env(&mut self, addr: Value, ty: &Type) -> Result<Option<(Value, ir::Block)>, Error> {
+        if !matches!(ty, Type::Fn(..)) {
+            return Ok(None);
+        }
+        let size = self.size(ty)?;
+        let tw = self.load(addr, size - abi::WORD);
+        let go = self.b.create_block();
+        let done = self.b.create_block();
+        self.b.ins().brif(tw, go, &[], done, &[]);
+        self.b.switch_to_block(go);
+        Ok(Some((tw, done)))
     }
 
     fn size(&mut self, t: &Type) -> Result<u32, Error> {
@@ -1108,7 +1136,8 @@ impl<'a, 'p> Cx<'a, 'p> {
                 let r = self.func_ref(thunk);
                 let code = self.b.ins().func_addr(types::I64, r);
                 let mut words = vec![code];
-                for _ in 0..self.cg.types.env_words {
+                // An empty environment, which holds nothing to count.
+                for _ in 0..=self.cg.types.env_words {
                     words.push(self.iconst(0));
                 }
                 (Val::Words(words), ty)
@@ -1217,9 +1246,9 @@ impl<'a, 'p> Cx<'a, 'p> {
         let code = self.b.ins().func_addr(types::I64, r);
         let size = self.size(&env_ty)?;
         let held = self.cg.types.env_words * abi::WORD;
-        let value = self.slot(abi::WORD + held);
+        let value = self.slot(2 * abi::WORD + held);
         self.store_word(code, value, 0);
-        for k in 0..self.cg.types.env_words {
+        for k in 0..=self.cg.types.env_words {
             let zero = self.iconst(0);
             self.store_word(zero, value, abi::WORD * (k + 1));
         }
@@ -1239,6 +1268,14 @@ impl<'a, 'p> Cx<'a, 'p> {
             self.store_word(cell, value, abi::WORD);
             cell
         } else if size <= held {
+            // A drop or a copy of the value reaches the copies an `own`
+            // closure holds by the environment's type, in the value's last
+            // word (decision 248).
+            if !all_refs && self.cg.types.counted(&env_ty)? {
+                let id = self.type_id(&env_ty)?;
+                let tw = self.iconst(i64::from(id) + 1);
+                self.store_word(tw, value, abi::WORD + held);
+            }
             self.b.ins().iadd_imm(value, i64::from(abi::WORD))
         } else if all_refs {
             let env = self.slot(size);
@@ -1752,6 +1789,20 @@ impl<'a, 'p> Cx<'a, 'p> {
             }
         }
         let (addr, ty) = self.place(place, Some(done))?;
+        // A function value drops what its environment holds, when its last
+        // word names the environment's type (decision 248).
+        if let Some((tw, skip)) = self.fn_env(addr, &ty)? {
+            let at = self.b.ins().iadd_imm(addr, i64::from(abi::WORD));
+            let t = self.b.ins().iadd_imm(tw, -1);
+            let t = self.b.ins().ireduce(types::I32, t);
+            let st = self.rt_status(sym::DROP, &[at, t])?;
+            self.check(st);
+            self.b.ins().jump(skip, &[]);
+            self.b.switch_to_block(skip);
+            self.b.ins().jump(done, &[]);
+            self.b.switch_to_block(done);
+            return Ok(());
+        }
         let id = self.type_id(&ty)?;
         let idv = self.i32const(id);
         let st = self.rt_status(sym::DROP, &[addr, idv])?;
@@ -2059,6 +2110,7 @@ impl<'a, 'p> Cx<'a, 'p> {
             for (k, (o, (a, t))) in args.iter().zip(&argv).enumerate() {
                 let Operand::Move(p) = o else { continue };
                 if held.contains(&(k as u32))
+                    || i.takes_iterable(k)
                     || self.place_type(p)? != *t
                     || !self.cg.types.needs_drop(t)?
                     || self.cg.types.observable_drop(t)

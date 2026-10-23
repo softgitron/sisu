@@ -172,15 +172,15 @@ impl<'p> Checker<'p> {
     }
 
     /// `E0900` for compile-time code that unfolds (`what`) where nothing
-    /// unfolds it: a function or a method that has it is a template, made
-    /// for its type arguments (decision 244), and the other places are
-    /// named.
+    /// unfolds it: a function, a method, a test or a `comptime def` that
+    /// has it is a template (decisions 244 and 251), a constant's or a
+    /// default's value is unfolded, and the places left are named.
     pub fn no_unfolding(&mut self, range: TextRange, what: &str) {
-        let (place, places) = match self.prog.fn_info(self.def) {
-            Some(f) if matches!(f.kind, sisu_resolve::FnKind::Test(_)) => ("a test", "tests"),
-            Some(f) if f.comptime => ("a `comptime def`", "`comptime def`s"),
-            Some(f) if f.trait_.is_some() => ("a trait's own method", "a trait's own methods"),
-            Some(f) if f.impl_.is_some() => ("a method of a generic trait impl", "generic trait impls"),
+        let (place, places) = match self.prog.fn_info(self.def).map(|f| &f.kind) {
+            Some(sisu_resolve::FnKind::Predicate(_)) => {
+                ("a refinement's `where` clause", "refinements' `where` clauses")
+            }
+            Some(sisu_resolve::FnKind::Invariant(_)) => ("an `invariant`", "invariants"),
             Some(_) => ("this function", "more places"),
             None => ("a constant or a default", "constants and defaults"),
         };
@@ -709,7 +709,9 @@ impl<'p> Checker<'p> {
     pub fn check_block_in_scope(&mut self, b: &ast::Block) -> Block {
         let mut stmts = Vec::new();
         let mut diverged = false;
-        let mut warned = false;
+        // An instance's code is what unfolding left of its template's, where
+        // a `comptime if` that holds may end what follows (decision 251).
+        let mut warned = self.prog.fn_info(self.def).is_some_and(|f| f.instance_of.is_some());
         for s in &b.stmts {
             if diverged && !warned && !matches!(s.kind, ast::StmtKind::Pass | ast::StmtKind::Error) {
                 let d = self.error(msg::TYPE_UNREACHABLE_CODE, s.range);

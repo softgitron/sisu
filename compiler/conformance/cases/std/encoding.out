@@ -1,0 +1,30 @@
+000102030405060708090a0b0c0d0e0f
+True
+0:   True True
+1: 0g== 0g True True
+2: qqs= qqs True True
+3: goOE goOE True True
+4: WltcXQ== WltcXQ True True
+5: MjM0NTY= MjM0NTY True True
+6: CgsMDQ4P CgsMDQ4P True True
+344
+Ok(Ok("Hello, world!"))
+Err(Invalid(at=8))
+0 00 Ok((0, 1))
+1 01 Ok((1, 1))
+127 7f Ok((127, 1))
+128 8001 Ok((128, 2))
+16383 ff7f Ok((16383, 2))
+16384 808001 Ok((16384, 3))
+9223372036854775807 ffffffffffffffff7f Ok((9223372036854775807, 9))
+Err(Invalid(at=9))
+0 00 Ok((0, 1))
+-1 01 Ok((-1, 1))
+1 02 Ok((1, 1))
+-64 7f Ok((-64, 1))
+64 8001 Ok((64, 2))
+-9223372036854775808 ffffffffffffffffff01 Ok((-9223372036854775808, 10))
+9223372036854775807 feffffffffffffffff01 Ok((9223372036854775807, 10))
+[71, 114, 252, 223, 101, 44, 32, 19990, 30028, 32, 55356, 57101]
+Ok("Grüße, 世界 🌍")
+Err(Invalid(at=1))

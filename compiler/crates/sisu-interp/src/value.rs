@@ -72,6 +72,9 @@ pub struct MutexVal {
     pub poisoned: bool,
     /// For an `RwLock`, the read guards alive.
     pub readers: u32,
+    /// For an `RwLock`, the tasks waiting to write, ahead of which no
+    /// reader comes in (decision 249).
+    pub writers: Vec<u32>,
     /// An `RwLock` rather than a `Mutex`.
     pub rw: bool,
 }

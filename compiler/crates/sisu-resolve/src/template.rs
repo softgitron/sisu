@@ -65,6 +65,11 @@ pub(crate) enum Kind {
     Tuple,
     Struct,
     Enum,
+    /// A trait, which reflection sees for its methods (decision 251).
+    Trait,
+    /// A type parameter that stays one (a generic trait impl's, in its
+    /// method made once, decision 251): only its name is known.
+    Param,
     Other,
 }
 
@@ -85,6 +90,21 @@ pub(crate) struct TypeShape {
     pub impls: Vec<String>,
     /// A list's or an option's element type.
     pub elem: Option<Box<TypeShape>>,
+    /// A trait's methods, or a type's own (decision 251).
+    pub methods: Vec<MethodShape>,
+}
+
+/// A method as reflection sees it (`reflect.methods_of`, decision 251): its
+/// name, how it takes `self` (`self`, `mut self`, `own self`, or nothing
+/// for an associated function), its parameters (name, mode, type), its
+/// result type, and whether it has a body.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct MethodShape {
+    pub name: String,
+    pub receiver: String,
+    pub params: Vec<(String, String, Box<TypeShape>)>,
+    pub ret: Box<TypeShape>,
+    pub provided: bool,
 }
 
 /// An attribute as data: its name and the text of each argument.
@@ -115,6 +135,7 @@ impl TypeShape {
             attrs: Vec::new(),
             impls: Vec::new(),
             elem: None,
+            methods: Vec::new(),
         }
     }
 
@@ -164,6 +185,22 @@ enum Value {
         name: String,
         args: Vec<String>,
     },
+    /// A method of a trait or a type (decision 251).
+    Method {
+        name: String,
+        index: usize,
+        receiver: String,
+        params: Vec<Value>,
+        ret: Box<TypeShape>,
+        provided: bool,
+    },
+    /// A method's parameter: its name, its mode (``, `mut`, `own`) and type.
+    Param {
+        name: String,
+        index: usize,
+        mode: String,
+        ty: Box<TypeShape>,
+    },
     Variant {
         name: String,
         index: usize,
@@ -203,6 +240,25 @@ struct Unfold<'a> {
     params: Vec<(String, TypeShape)>,
     env: Vec<(String, Value)>,
     arms: Vec<ArmScope>,
+}
+
+/// The `T: type` parameters of a `comptime def` (decision 251): each one's
+/// position among the parameters a call gives arguments to, and its name.
+pub(crate) fn type_params(f: &ast::FnDef) -> Vec<(usize, String)> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    for p in &f.params {
+        let ast::ParamKind::Named { name, ty, .. } = &p.kind else { continue };
+        if let ast::TypeKind::Path { segments, args } = &ty.kind
+            && args.is_empty()
+            && segments.len() == 1
+            && segments[0].text == "type"
+        {
+            out.push((at, name.text.clone()));
+        }
+        at += 1;
+    }
+    out
 }
 
 /// Checks that `f` is a trait's derive template: `comptime def derive(T:
@@ -268,7 +324,9 @@ pub(crate) fn unfold(
 /// signature with each type parameter replaced, and its body unfolded.
 /// `types` are the other types its compile-time code names, known to it
 /// but not replaced in its text. A method's instance is a method of an
-/// inherent impl of `within`, its type.
+/// inherent impl of its type, whose header (`impl __S`, `impl[A] __S`)
+/// `within` is. A `generic` instance (a trait impl's method made once,
+/// decision 251) keeps the method's own type parameters.
 pub(crate) fn unfold_fn(
     f: &ast::FnDef,
     source: &str,
@@ -276,6 +334,7 @@ pub(crate) fn unfold_fn(
     types: Vec<(String, TypeShape)>,
     name: &str,
     within: Option<&str>,
+    generic: bool,
 ) -> Result<String, Failure> {
     let Some(body) = &f.body else {
         return Err((f.name.range, "a function without a body has no instance".into()));
@@ -286,7 +345,19 @@ pub(crate) fn unfold_fn(
     }
     // `def name[T: B](params) -> R:` becomes `def NAME(params) -> R:`.
     let header = slice(source, TextRange::new(f.name.range.end, body.range.start)).trim_end();
-    let rest = match header.strip_prefix('[') {
+    // A parametrised test's `for PAT in LIST` is its cases' (17): the
+    // instance is one case, whose body begins by binding it.
+    let header = if header.trim_start().starts_with("for ") {
+        let open =
+            f.params.first().and_then(|p| source.get(..p.range.start as usize)).and_then(|t| t.rfind('('));
+        match open {
+            Some(i) => slice(source, TextRange::new(i as u32, body.range.start)).trim_end(),
+            None => ":",
+        }
+    } else {
+        header
+    };
+    let rest = match header.strip_prefix('[').filter(|_| !generic) {
         Some(after) => {
             let mut depth = 1;
             let mut cut = after.len();
@@ -312,11 +383,21 @@ pub(crate) fn unfold_fn(
         Some(i) => format!("{}:", rest[..i].trim_end()),
         None => rest.to_string(),
     };
-    let pure = if f.is_pure { "pure " } else { "" };
+    // A `comptime def`'s `T: type` parameters are type parameters, which an
+    // instance has not either (decision 251); a test has no parameter list.
+    let rest = without_type_params(f, source, &rest);
+    let rest = if rest.trim_start().starts_with(':') { format!("(){}", rest.trim_start()) } else { rest };
+    let pure = if f.is_pure {
+        "pure "
+    } else if f.is_comptime {
+        "comptime "
+    } else {
+        ""
+    };
     let mut out = String::new();
     let depth = match within {
-        Some(ty) => {
-            line(&mut out, 0, &format!("impl {ty}:"));
+        Some(head) => {
+            line(&mut out, 0, &format!("{head}:"));
             1
         }
         None => 0,
@@ -326,6 +407,44 @@ pub(crate) fn unfold_fn(
         line(&mut out, depth + 1, "pass");
     }
     Ok(out)
+}
+
+/// The text of the expression `e` (from the file whose text is `source`)
+/// with its compile-time parts evaluated (decision 251): a constant's or a
+/// field default's value that reflects on `types`, the types it names.
+pub(crate) fn unfold_expr(
+    e: &Expr,
+    source: &str,
+    types: Vec<(String, TypeShape)>,
+) -> Result<String, Failure> {
+    let mut u = Unfold { source, params: Vec::new(), env: Vec::new(), arms: Vec::new() };
+    for (p, shape) in types {
+        u.env.push((p, Value::Type(Box::new(shape))));
+    }
+    u.text(e)
+}
+
+/// The header `rest` (`(params) -> R:`) of `f` without its `T: type`
+/// parameters.
+fn without_type_params(f: &ast::FnDef, source: &str, rest: &str) -> String {
+    let typed = type_params(f);
+    if typed.is_empty() {
+        return rest.to_string();
+    }
+    let names: Vec<&str> = typed.iter().map(|(_, n)| n.as_str()).collect();
+    let kept: Vec<&str> = f
+        .params
+        .iter()
+        .filter(
+            |p| !matches!(&p.kind, ast::ParamKind::Named { name, .. } if names.contains(&name.text.as_str())),
+        )
+        .map(|p| slice(source, p.range))
+        .collect();
+    let end = f.params.last().map(|p| p.range.end).unwrap_or(0) as usize;
+    let close = source.get(end..).and_then(|t| t.find(')')).map(|i| end + i + 1).unwrap_or(end);
+    let body = f.body.as_ref().map(|b| b.range.start as usize).unwrap_or(close);
+    let after = source.get(close..body).unwrap_or(":").trim_end();
+    format!("({}){after}", kept.join(", "))
 }
 
 fn slice(source: &str, r: TextRange) -> &str {
@@ -417,6 +536,8 @@ fn describe(v: &Value) -> &'static str {
     match v {
         Value::Type(_) => "a type",
         Value::Attr { .. } => "an attribute",
+        Value::Method { .. } => "a method",
+        Value::Param { .. } => "a parameter",
         Value::Field { .. } => "a field",
         Value::Variant { .. } => "a variant",
         Value::Str(_) => "text",
@@ -479,11 +600,14 @@ impl<'a> Unfold<'a> {
 
     /// Whether the expression mentions anything evaluated at compile time.
     fn depends(&self, e: &Expr) -> bool {
+        let unfolding = |c: &ast::Closure| matches!(&c.body, ast::ClosureBody::Block(b) if crate::instances::comptime_stmts(b));
         let mut found = false;
         walk(e, &mut |x| match &x.kind {
             ExprKind::Name(n) => found |= self.lookup(n).is_some() || n == "reflect",
             ExprKind::SelfType => found |= self.lookup("Self").is_some(),
             ExprKind::FieldOf { .. } | ExprKind::Comptime(_) => found = true,
+            ExprKind::Closure(c) => found |= unfolding(c),
+            ExprKind::Call { trailing: Some(c), .. } => found |= unfolding(c),
             _ => {}
         });
         found
@@ -502,12 +626,25 @@ impl<'a> Unfold<'a> {
                 }
             }),
             // The attributes of descriptors; anything else (a method) runs
-            // at run time on the value.
+            // at run time on the value, and a type's members (`T.default()`)
+            // are its associated functions.
             ExprKind::Field { base, name } => {
                 matches!(
                     name.text.as_str(),
-                    "name" | "index" | "named" | "fields" | "ty" | "default" | "args"
+                    "name"
+                        | "index"
+                        | "named"
+                        | "fields"
+                        | "ty"
+                        | "default"
+                        | "args"
+                        | "receiver"
+                        | "params"
+                        | "ret"
+                        | "provided"
+                        | "mode"
                 ) && self.is_static(base)
+                    && !self.names_type(base)
             }
             ExprKind::Call { callee, args, trailing: None } => {
                 let known = match &callee.kind {
@@ -541,6 +678,16 @@ impl<'a> Unfold<'a> {
             }
             _ => false,
         }
+    }
+
+    /// Whether `e` is a name bound to a type (`T`, `Self`).
+    fn names_type(&self, e: &Expr) -> bool {
+        let v = match &e.kind {
+            ExprKind::Name(n) => self.lookup(n),
+            ExprKind::SelfType => self.lookup("Self"),
+            _ => None,
+        };
+        matches!(v, Some(Value::Type(_)))
     }
 
     /// The environments a comprehension over compile-time lists makes,
@@ -628,6 +775,16 @@ impl<'a> Unfold<'a> {
                     (Value::Variant { name, .. }, "name") => Some(Value::Str(name.clone())),
                     (Value::Variant { index, .. }, "index") => Some(Value::Int(*index as i64)),
                     (Value::Variant { fields, .. }, "fields") => Some(Value::List(fields.clone())),
+                    (Value::Method { name, .. }, "name") => Some(Value::Str(name.clone())),
+                    (Value::Method { index, .. }, "index") => Some(Value::Int(*index as i64)),
+                    (Value::Method { receiver, .. }, "receiver") => Some(Value::Str(receiver.clone())),
+                    (Value::Method { params, .. }, "params") => Some(Value::List(params.clone())),
+                    (Value::Method { ret, .. }, "ret") => Some(Value::Type(ret.clone())),
+                    (Value::Method { provided, .. }, "provided") => Some(Value::Bool(*provided)),
+                    (Value::Param { name, .. }, "name") => Some(Value::Str(name.clone())),
+                    (Value::Param { index, .. }, "index") => Some(Value::Int(*index as i64)),
+                    (Value::Param { mode, .. }, "mode") => Some(Value::Str(mode.clone())),
+                    (Value::Param { ty, .. }, "ty") => Some(Value::Type(ty.clone())),
                     (Value::Attr { name, .. }, "name") => Some(Value::Str(name.clone())),
                     (Value::Attr { args, .. }, "args") => {
                         Some(Value::List(args.iter().map(|a| Value::Str(a.clone())).collect()))
@@ -655,6 +812,12 @@ impl<'a> Unfold<'a> {
                         let Some(Value::Type(t)) = vals.first() else {
                             return fail(format!("`reflect.{}` takes a type", name.text));
                         };
+                        if t.kind == Kind::Param && name.text != "name_of" {
+                            return fail(format!(
+                                "`{}` is a type parameter, which is not known at compile time",
+                                t.name
+                            ));
+                        }
                         if name.text == "implements" {
                             let Some(Value::Str(tr)) = vals.get(1) else {
                                 return fail("`reflect.implements` takes a type and a trait's name".into());
@@ -760,13 +923,17 @@ impl<'a> Unfold<'a> {
     fn count_of(&self, e: &Expr) -> R<Option<usize>> {
         let ExprKind::Call { callee, args, .. } = &e.kind else { return Ok(None) };
         let (ExprKind::Field { name, .. }, [a]) = (&callee.kind, args.as_slice()) else { return Ok(None) };
-        if !matches!(name.text.as_str(), "fields_of" | "variants_of" | "attributes_of") {
+        if !matches!(name.text.as_str(), "fields_of" | "variants_of" | "attributes_of" | "methods_of") {
             return Ok(None);
         }
         let Value::Type(t) = self.eval(&a.value)? else { return Ok(None) };
+        if t.kind == Kind::Param {
+            return Ok(None);
+        }
         Ok(Some(match name.text.as_str() {
             "fields_of" => t.fields.len(),
             "variants_of" => t.variants.len(),
+            "methods_of" => t.methods.len(),
             _ => t.attrs.len(),
         }))
     }
@@ -778,6 +945,7 @@ impl<'a> Unfold<'a> {
             "name_of" => Value::Str(t.name.clone()),
             "is_struct" => is(Kind::Struct),
             "is_enum" => is(Kind::Enum),
+            "is_trait" => is(Kind::Trait),
             "is_int" => is(Kind::Int),
             "is_float" => is(Kind::Float),
             "is_bool" => is(Kind::Bool),
@@ -830,6 +998,30 @@ impl<'a> Unfold<'a> {
                 t.attrs
                     .iter()
                     .map(|(name, args)| Value::Attr { name: name.clone(), args: args.clone() })
+                    .collect(),
+            ),
+            "methods_of" => Value::List(
+                t.methods
+                    .iter()
+                    .enumerate()
+                    .map(|(index, m)| Value::Method {
+                        name: m.name.clone(),
+                        index,
+                        receiver: m.receiver.clone(),
+                        params: m
+                            .params
+                            .iter()
+                            .enumerate()
+                            .map(|(pi, (n, mode, ty))| Value::Param {
+                                name: n.clone(),
+                                index: pi,
+                                mode: mode.clone(),
+                                ty: ty.clone(),
+                            })
+                            .collect(),
+                        ret: m.ret.clone(),
+                        provided: m.provided,
+                    })
                     .collect(),
             ),
             _ => return None,
@@ -1026,10 +1218,7 @@ impl<'a> Unfold<'a> {
                     }
                 }
             }
-            ExprKind::Closure(c) => match &c.body {
-                ast::ClosureBody::Expr(x) => self.replacements(x, out)?,
-                ast::ClosureBody::Block(b) => self.block_replacements(b, out)?,
-            },
+            ExprKind::Closure(c) => self.closure_replacements(c, out)?,
             // A comprehension over run-time values with compile-time values
             // in it: they are written in, unless a name it binds hides one.
             ExprKind::Comprehension { elem, value, clauses, .. } => {
@@ -1060,9 +1249,38 @@ impl<'a> Unfold<'a> {
                 for k in kids {
                     self.replacements(k, out)?;
                 }
+                if let ExprKind::Call { trailing: Some(c), .. } = &e.kind {
+                    self.closure_replacements(c, out)?;
+                }
             }
         }
         Ok(())
+    }
+
+    /// The replacements in a closure: in its body, or its block unfolded
+    /// where it is when the block has compile-time statements (decision
+    /// 251).
+    fn closure_replacements(&self, c: &ast::Closure, out: &mut Vec<(TextRange, String)>) -> R<()> {
+        match &c.body {
+            ast::ClosureBody::Expr(x) => self.replacements(x, out),
+            ast::ClosureBody::Block(b) if crate::instances::comptime_stmts(b) => {
+                let (Some(first), Some(last)) = (b.stmts.first(), b.stmts.last()) else { return Ok(()) };
+                let mut u = self.fork();
+                let mut text = String::new();
+                if u.stmts(&b.stmts, 0, &mut text)? == 0 {
+                    text.push_str("pass");
+                }
+                // Written where the block's statements are, at their column.
+                let pad = " ".repeat(self.column(first.range.start));
+                let lines: Vec<&str> = text.trim_end().lines().collect();
+                out.push((
+                    TextRange::new(first.range.start, last.range.end),
+                    lines.join(&format!("\n{pad}")),
+                ));
+                Ok(())
+            }
+            ast::ClosureBody::Block(b) => self.block_replacements(b, out),
+        }
     }
 
     /// The replacements in a block inside an expression, whose statements
@@ -1259,6 +1477,12 @@ impl<'a> Unfold<'a> {
                     Some(b) => self.stmts(&b.stmts, depth, out),
                     None => Ok(0),
                 }
+            }
+            // A parametrised test's case begins by binding its pattern to
+            // the case, a statement its source does not write (17).
+            StmtKind::Let { pat, init: Some(init), .. } if init.range == s.range => {
+                line(out, depth, &format!("let {} = {}", slice(self.source, pat.range), self.text(init)?));
+                Ok(1)
             }
             _ if !self.stmt_depends(s) => {
                 self.copy(s.range, Vec::new(), depth, out);
@@ -1616,6 +1840,10 @@ fn walk(e: &Expr, f: &mut dyn FnMut(&Expr)) {
     }
     match &e.kind {
         ExprKind::Closure(c) => match &c.body {
+            ast::ClosureBody::Expr(x) => walk(x, f),
+            ast::ClosureBody::Block(b) => walk_block(b, f),
+        },
+        ExprKind::Call { trailing: Some(c), .. } => match &c.body {
             ast::ClosureBody::Expr(x) => walk(x, f),
             ast::ClosureBody::Block(b) => walk_block(b, f),
         },

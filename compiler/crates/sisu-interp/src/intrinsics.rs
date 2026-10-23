@@ -1420,6 +1420,7 @@ impl Interp<'_, '_> {
                 holder: 0,
                 poisoned: false,
                 readers: 0,
+                writers: Vec::new(),
                 rw,
             }))),
             "lock" => {

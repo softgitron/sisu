@@ -256,6 +256,103 @@ impl[K: Ord, V] Len for SortedDict[K, V]:
     def len(self) -> int:
         return len(self.ks)
 
+## A set whose values are kept in order (11's B-tree set; stage 0's is a
+## sorted list, searched by halves): `values` goes from the smallest up.
+##
+## ```
+## var s: SortedSet[str] = SortedSet.new()
+## assert s.insert("pear")
+## assert s.insert("apple")
+## assert not s.insert("pear")
+## assert s.values() == ["apple", "pear"]
+## assert s.contains("apple") and not s.contains("fig")
+## assert s.remove("apple")
+## assert len(s) == 1
+## ```
+pub struct SortedSet[T: Ord]:
+    items: list[T]
+
+    pub pure def new() -> SortedSet[T]:
+        return SortedSet(items=[])
+
+    ## The index of the first value not smaller than `x`.
+    pure def position(self, x: T) -> int:
+        var lo = 0
+        var hi = len(self.items)
+        while lo < hi:
+            let mid = (lo + hi) // 2
+            if self.items[mid].cmp(x) == Ordering.Less:
+                lo = mid + 1
+            else:
+                hi = mid
+        return lo
+
+    pure def holds(self, i: int, x: T) -> bool:
+        return i < len(self.items) and self.items[i].cmp(x) == Ordering.Equal
+
+    ## Adds `x`; whether it was not there yet.
+    pub pure def insert(mut self, own x: T) -> bool:
+        let i = self.position(x)
+        if self.holds(i, x):
+            return False
+        self.items.insert(i, x)
+        return True
+
+    ## Removes `x`; whether it was there.
+    pub pure def remove(mut self, x: T) -> bool:
+        let i = self.position(x)
+        if not self.holds(i, x):
+            return False
+        let _ = self.items.remove(i)
+        return True
+
+    pub pure def contains(self, x: T) -> bool:
+        return self.holds(self.position(x), x)
+
+    ## The values, smallest first.
+    pub pure def values(self) -> list[T] where T: Copy:
+        return self.items.copy()
+
+    ## The smallest value, or `None`.
+    pub pure def first(self) -> ref T?:
+        return self.items.first()
+
+    ## The largest value, or `None`.
+    ##
+    ## ```
+    ## var s: SortedSet[int] = SortedSet.new()
+    ## for x in [5, 1, 9]:
+    ##     _ = s.insert(x)
+    ## assert s.last().copied() == Some(9)
+    ## assert s.first().copied() == Some(1)
+    ## ```
+    pub pure def last(self) -> ref T?:
+        return self.items.last()
+
+    ## The values from `low` (included) up to `high` (left out), smallest
+    ## first.
+    ##
+    ## ```
+    ## var s: SortedSet[int] = SortedSet.new()
+    ## for x in [1, 3, 5, 7, 9]:
+    ##     _ = s.insert(x)
+    ## assert s.range(3, 8) == [3, 5, 7]
+    ## ```
+    pub pure def range(self, low: T, high: T) -> list[T] where T: Copy:
+        var out: list[T] = []
+        var i = self.position(low)
+        while i < len(self.items) and self.items[i].cmp(high) == Ordering.Less:
+            out.push(self.items[i])
+            i += 1
+        return out
+
+    pub pure def is_empty(self) -> bool:
+        return self.items.is_empty()
+
+impl[T: Ord] Len for SortedSet[T]:
+    def len(self) -> int:
+        return len(self.items)
+
 ## A set of small non-negative integers, one bit each, in 64-bit words.
 ##
 ## ```

@@ -1,4 +1,9 @@
-##! std.math for stage 0: the constants the examples use.
+##! `std.math` (11): the constants and the functions on `f64` whose
+##! results IEEE 754 fixes exactly, the same bits on every target and at
+##! compile time (D-074): square roots, rounding to whole numbers, signs,
+##! the least and greatest of two values. The elementary functions (`exp`,
+##! `ln`, `sin`, ...) wait for Q-23, which is to say how they are rounded
+##! correctly, so that no result depends on the platform's `libm`.
 
 const PI: f64 = 3.141592653589793
 const E: f64 = 2.718281828459045
@@ -9,3 +14,165 @@ const E: f64 = 2.718281828459045
 ## assert E > 2.718 and E < 2.719
 ## ```
 const TAU: f64 = 6.283185307179586
+## The square root of 2.
+const SQRT_2: f64 = 1.4142135623730951
+## The natural logarithm of 2.
+const LN_2: f64 = 0.6931471805599453
+## The natural logarithm of 10.
+const LN_10: f64 = 2.302585092994046
+## Positive infinity, the result of `1.0 / 0.0`.
+const INFINITY: f64 = 1.0 / 0.0
+## Negative infinity.
+const NEG_INFINITY: f64 = -1.0 / 0.0
+## The gap between 1.0 and the next `f64`.
+##
+## ```
+## assert 1.0 + EPSILON > 1.0
+## assert 1.0 + EPSILON / 2.0 == 1.0
+## ```
+const EPSILON: f64 = 2.220446049250313e-16
+## The largest finite `f64`.
+##
+## ```
+## assert MAX * 2.0 == INFINITY
+## assert is_finite(MAX)
+## ```
+const MAX: f64 = 1.7976931348623157e308
+## The smallest positive normal `f64`.
+const MIN_POSITIVE: f64 = 2.2250738585072014e-308
+
+## A value that is not a number, `0.0 / 0.0`: unequal to everything, itself
+## too.
+##
+## ```
+## assert nan() != nan() and is_nan(nan())
+## ```
+pub pure def nan() -> f64:
+    let zero = 0.0
+    return zero / zero
+
+## The square root, rounded once (`NaN` below zero).
+##
+## ```
+## assert sqrt(2.0) == SQRT_2
+## assert sqrt(0.25) == 0.5
+## ```
+pub pure def sqrt(x: f64) -> f64:
+    return x.sqrt()
+
+## The largest whole number not above `x`.
+pub pure def floor(x: f64) -> f64:
+    return x.floor()
+
+## The smallest whole number not below `x`.
+pub pure def ceil(x: f64) -> f64:
+    return x.ceil()
+
+## The nearest whole number, a half away from zero.
+##
+## ```
+## assert round(2.5) == 3.0 and round(-2.5) == -3.0 and round(2.4) == 2.0
+## ```
+pub pure def round(x: f64) -> f64:
+    return x.round()
+
+## The nearest whole number, a half to the even one (IEEE 754's default).
+##
+## ```
+## assert round_even(2.5) == 2.0 and round_even(3.5) == 4.0
+## assert round_even(-0.5) == 0.0 and round_even(1.2) == 1.0
+## ```
+pub pure def round_even(x: f64) -> f64:
+    let r = x.round()
+    if (r - x).abs() == 0.5 and r - 2.0 * (r / 2.0).floor() != 0.0:
+        return if r > x: r - 1.0 else: r + 1.0
+    return r
+
+## The whole part: `x` rounded toward zero.
+##
+## ```
+## assert trunc(-2.7) == -2.0 and trunc(2.7) == 2.0
+## ```
+pub pure def trunc(x: f64) -> f64:
+    return if x < 0.0: x.ceil() else: x.floor()
+
+## What is left of `x` without its whole part, with `x`'s sign.
+##
+## ```
+## assert fract(2.25) == 0.25 and fract(-2.25) == -0.25
+## ```
+pub pure def fract(x: f64) -> f64:
+    return x - trunc(x)
+
+## The absolute value.
+pub pure def fabs(x: f64) -> f64:
+    return x.abs()
+
+## The magnitude of `x` with the sign of `y`.
+##
+## ```
+## assert copysign(3.0, -0.5) == -3.0 and copysign(-3.0, 1.0) == 3.0
+## ```
+pub pure def copysign(x: f64, y: f64) -> f64:
+    let negative = y < 0.0 or (y == 0.0 and 1.0 / y < 0.0)
+    return if negative: -x.abs() else: x.abs()
+
+## -1.0, 0.0 or 1.0 by the sign of `x` (`NaN` for `NaN`).
+pub pure def signum(x: f64) -> f64:
+    if x.is_nan():
+        return x
+    if x > 0.0:
+        return 1.0
+    if x < 0.0:
+        return -1.0
+    return 0.0
+
+## The smaller of two values; a `NaN` is ignored when the other is a
+## number (IEEE 754's `minNum`, C's `fmin`).
+##
+## ```
+## assert fmin(1.5, -2.0) == -2.0 and fmin(nan(), 3.0) == 3.0
+## ```
+pub pure def fmin(a: f64, b: f64) -> f64:
+    if a.is_nan():
+        return b
+    if b.is_nan():
+        return a
+    return if b < a: b else: a
+
+## The larger of two values; a `NaN` is ignored when the other is a
+## number.
+##
+## ```
+## assert fmax(1.5, -2.0) == 1.5 and fmax(3.0, nan()) == 3.0
+## ```
+pub pure def fmax(a: f64, b: f64) -> f64:
+    if a.is_nan():
+        return b
+    if b.is_nan():
+        return a
+    return if b > a: b else: a
+
+## `x` held between `low` and `high`.
+##
+## ```
+## assert clamp(5.0, 0.0, 1.0) == 1.0 and clamp(-1.0, 0.0, 1.0) == 0.0
+## ```
+pub pure def clamp(x: f64, low: f64, high: f64) -> f64:
+    requires low <= high
+    return fmax(low, fmin(x, high))
+
+## `x * y + z` with one rounding.
+pub pure def fma(x: f64, y: f64, z: f64) -> f64:
+    return x.mul_add(y, z)
+
+pub pure def is_nan(x: f64) -> bool:
+    return x.is_nan()
+
+## Whether `x` is infinite.
+pub pure def is_infinite(x: f64) -> bool:
+    return x == INFINITY or x == NEG_INFINITY
+
+## Whether `x` is neither infinite nor `NaN`.
+pub pure def is_finite(x: f64) -> bool:
+    return not x.is_nan() and not is_infinite(x)

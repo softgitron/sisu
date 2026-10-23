@@ -4,7 +4,9 @@ import render
 def mode() -> String:
     return "fast"
 
-@cfg(not any(feature="fast"))
+# A feature that is off: `not(feature="NAME")` (decision 250), or `not`
+# before any condition, as `report` below has it.
+@cfg(not(feature="fast"))
 def mode() -> String:
     return "careful"
 

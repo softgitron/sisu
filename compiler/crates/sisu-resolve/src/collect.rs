@@ -89,6 +89,21 @@ pub(crate) struct Resolver<'a> {
     pub promoted: std::collections::HashSet<DefId>,
     /// The syntax of each template, for its instances.
     pub template_asts: HashMap<DefId, ast::FnDef>,
+    /// Values that reflect (a constant's, a field's or a parameter's
+    /// default), unfolded once everything they may name is resolved
+    /// (decision 251).
+    pub(crate) unfold_later: Vec<Later>,
+    /// Each trait's provided methods that reflect, with the trait's module:
+    /// an impl that does not write one gets it as a template of its own,
+    /// made for its type (decision 251).
+    pub trait_templates: HashMap<DefId, Vec<(ModuleId, ast::FnDef)>>,
+    /// The provided methods that reflect each impl got from its trait
+    /// (decision 251): their instances name the impl's type parameters
+    /// apart, since the trait's code never names them.
+    pub provided_copies: std::collections::HashSet<DefId>,
+    /// The names reflection shows for the type parameters of the template
+    /// being made (a generic trait impl's, decision 251).
+    pub shape_names: Vec<String>,
     /// The template and type arguments of each instance declared.
     pub instance_of: HashMap<DefId, (DefId, Vec<Ty>)>,
     /// The attributes of each struct and enum, as data (`reflect.attributes_of`).
@@ -287,6 +302,10 @@ pub fn resolve_session<'a>(
             })
             .collect(),
         template_asts: HashMap::new(),
+        trait_templates: HashMap::new(),
+        provided_copies: std::collections::HashSet::new(),
+        shape_names: Vec::new(),
+        unfold_later: Vec::new(),
         instance_of: HashMap::new(),
         attrs_of: HashMap::new(),
         deferred_imports: None,
@@ -745,6 +764,7 @@ impl Resolver<'_> {
             quiet: false,
             template: false,
             instance_of: None,
+            type_params: Vec::new(),
             body: None,
             kind,
             file: self.file(module),
@@ -1491,6 +1511,49 @@ impl Resolver<'_> {
             }
             queue = std::mem::take(&mut self.pending);
         }
+        self.unfold_values();
+    }
+
+    /// Unfolds the values that reflect, now that every type and trait they
+    /// may name is resolved (decision 251).
+    fn unfold_values(&mut self) {
+        for later in std::mem::take(&mut self.unfold_later) {
+            match later {
+                Later::Const { def, module, value } => {
+                    let site = self.span(module, value.range);
+                    let file = self.file(module);
+                    let name = self.prog.def(def).name.clone();
+                    let unfolded = self.unfold_value(module, &name, &value, file, site);
+                    if let DefKind::Const(c) = &mut self.prog.defs[def.0 as usize].kind {
+                        match unfolded {
+                            Some((v, f)) => {
+                                c.value = Some(v);
+                                c.file = f;
+                            }
+                            None => c.value = None,
+                        }
+                    }
+                }
+                Later::Field { def, index, module, label, value } => {
+                    let (v, f) = self.unfolded_default(module, &label, Some(&value));
+                    if let DefKind::Struct(st) = &mut self.prog.defs[def.0 as usize].kind
+                        && let Some(field) = st.fields.get_mut(index)
+                    {
+                        field.default = v;
+                        field.default_file = f;
+                    }
+                }
+                Later::Param { def, index, module, label, value } => {
+                    let (v, f) = self.unfolded_default(module, &label, Some(&value));
+                    if let DefKind::Fn(info) = &mut self.prog.defs[def.0 as usize].kind
+                        && let Some(p) = info.params.get_mut(index)
+                    {
+                        p.default = v;
+                        p.default_file = f;
+                    }
+                }
+            }
+        }
     }
 
     pub fn resolve_alias(&mut self, d: DefId) -> Ty {
@@ -1592,10 +1655,18 @@ impl Resolver<'_> {
                                 .fix(msg::BORROW_DECLARE_VIEW, vec![("ty", s.name.text.clone())], edits),
                         );
                     }
+                    if let Some(v) = &f.default
+                        && crate::instances::value_unfolds(v)
+                    {
+                        let label = format!("{}.{}", s.name.text, f.name.text);
+                        let index = fields.len();
+                        self.unfold_later.push(Later::Field { def, index, module, label, value: v.clone() });
+                    }
                     fields.push(FieldInfo {
                         name: f.name.text.clone(),
                         ty,
                         default: f.default.clone(),
+                        default_file: self.file(module),
                         span: self.span(module, f.range),
                         vis: f.vis,
                     });
@@ -1691,11 +1762,22 @@ impl Resolver<'_> {
                             mode: p.mode,
                             ty,
                             default: None,
+                            default_file: self.file(module),
                             span: self.span(module, p.range),
                         });
                     }
                 }
                 info.body = t.body.clone();
+                // A test whose body runs code at compile time by unfolding is
+                // a template, made once as a function without type
+                // parameters is (decision 251), and so is each case of a
+                // parametrised one.
+                let f = test_fn(&self.prog.def(def).name, &t);
+                if crate::instances::unfolds(&f, &[]) && !self.instance_modules.contains(&module) {
+                    info.template = true;
+                    self.template_asts.insert(def, f);
+                }
+                info.instance_of = self.instance_of.get(&def).cloned();
                 self.prog.defs[def.0 as usize].kind = DefKind::Fn(Box::new(info));
             }
             Pending::Const { def, module, ast: c } => {
@@ -1713,8 +1795,17 @@ impl Resolver<'_> {
                         Ty::Error
                     }
                 };
+                // A value that reflects is unfolded where it is written, once
+                // everything is resolved, and checked as the text that makes
+                // (decision 251).
+                if let Some(v) = &c.value
+                    && crate::instances::value_unfolds(v)
+                {
+                    self.unfold_later.push(Later::Const { def, module, value: v.clone() });
+                }
+                let file = self.file(module);
                 self.prog.defs[def.0 as usize].kind =
-                    DefKind::Const(ConstInfo { ty, value: c.value.clone(), file: self.file(module) });
+                    DefKind::Const(ConstInfo { ty, value: c.value.clone(), file });
             }
             Pending::Impl { module, ast: imp, range, derived } => {
                 self.resolve_impl(module, &imp, range, derived)
@@ -1875,6 +1966,10 @@ impl Resolver<'_> {
         for g in &f.generics {
             names.push(g.name.text.clone());
         }
+        // A `comptime def`'s `T: type` parameters are generic parameters
+        // whose arguments a call writes among its arguments (decision 251).
+        let type_params: Vec<(usize, String)> =
+            if f.is_comptime { crate::template::type_params(f) } else { Vec::new() };
         let mut generics = outer.clone();
         for (k, g) in f.generics.iter().enumerate() {
             let default = g.default.as_ref().map(|d| {
@@ -1886,6 +1981,12 @@ impl Resolver<'_> {
                 self.report(Diagnostic::new(msg::RESOLVE_IMPL_DEFAULT, span));
             }
             generics.push(Generic { name: g.name.text.clone(), default: None, is_const: g.is_const });
+        }
+        let mut type_param_info = Vec::new();
+        for (at, n) in &type_params {
+            type_param_info.push((*at, n.clone(), generics.len() as u32));
+            names.push(n.clone());
+            generics.push(Generic { name: n.clone(), default: None, is_const: false });
         }
         let impl_assoc: Vec<(String, Ty)> =
             impl_def.and_then(|i| self.prog.impl_info(i)).map(|i| i.assoc.clone()).unwrap_or_default();
@@ -1920,6 +2021,7 @@ impl Resolver<'_> {
         info.owner = self_ty.clone();
         info.pure = f.is_pure;
         info.comptime = f.is_comptime;
+        info.type_params = type_param_info;
         info.body = f.body.clone();
         info.intrinsic = Self::builtin_attr(&f.attrs, "intrinsic");
         info.structural = Self::builtin_attr(&f.attrs, "structural");
@@ -1947,6 +2049,7 @@ impl Resolver<'_> {
                         info.self_mode = Some(p.mode);
                     }
                 }
+                ParamKind::Named { name, .. } if type_params.iter().any(|(_, n)| *n == name.text) => {}
                 ParamKind::Named { name, ty, default } => {
                     if info.params.iter().any(|x| x.name == name.text) {
                         let span = self.span(module, name.range);
@@ -1964,11 +2067,19 @@ impl Resolver<'_> {
                     let ty = self.resolve_ty(ty, &ctx);
                     let pspan = self.span(module, p.range);
                     self.check_sized(&ty, pspan);
+                    if let Some(v) = default
+                        && crate::instances::value_unfolds(v)
+                    {
+                        let label = format!("{}.{}", f.name.text, name.text);
+                        let index = info.params.len();
+                        self.unfold_later.push(Later::Param { def, index, module, label, value: v.clone() });
+                    }
                     info.params.push(ParamInfo {
                         name: name.text.clone(),
                         mode: p.mode,
                         ty,
                         default: default.clone(),
+                        default_file: self.file(module),
                         span: self.span(module, p.range),
                     });
                 }
@@ -2093,19 +2204,26 @@ impl Resolver<'_> {
         // A function whose body runs code at compile time by unfolding, or
         // that was promoted for calling a template with its own type
         // parameters, is a template (08, "Reflection"; decision 244): a
-        // free function, a method of a type or of an inherent impl, or a
-        // method of a trait impl without type parameters. It is made for
-        // each list of type arguments it is called with, and once, before
-        // anything calls it, when it has none. A trait's own methods and a
-        // `comptime def` are not templates.
-        let unfolding = crate::instances::unfolds(f, &names) || self.promoted.contains(&def);
+        // free function, a method of a type or of an impl, and a `comptime
+        // def` that reflects or has `T: type` parameters, which are type
+        // parameters made per type as a template's are (decision 251). It
+        // is made for each list of type arguments it is called with, and
+        // once, before anything calls it, when it has none; a method of a
+        // trait impl is made once whatever its type parameters, which stay
+        // parameters, so that a trait's call reaches it (decision 251).
+        let unfolding = crate::instances::unfolds(f, &names)
+            || self.promoted.contains(&def)
+            || !info.type_params.is_empty();
+        // A trait's own method that reflects is made in each impl that does
+        // not write it, as that impl's template (decision 251): it is a
+        // template only so that nothing checks it as written.
         info.template = unfolding
-            && !f.is_comptime
             && !self.instance_modules.contains(&module)
             && match &owner {
                 None | Some(Owner::Type(_)) | Some(Owner::Inherent { .. }) => true,
-                Some(Owner::Impl(_)) => info.generics.is_empty(),
-                Some(Owner::Trait(_)) | Some(Owner::Refinement(_)) => false,
+                Some(Owner::Impl(_)) => true,
+                Some(Owner::Trait(_)) => f.body.is_some(),
+                Some(Owner::Refinement(_)) => false,
             };
         if info.template {
             self.template_asts.insert(def, f.clone());
@@ -2129,6 +2247,60 @@ impl Resolver<'_> {
                 }
             }
         }
+    }
+}
+
+impl Resolver<'_> {
+    /// A field's or a parameter's default as it is checked, and the file it
+    /// is in: as written, or unfolded when it reflects (decision 251).
+    fn unfolded_default(
+        &mut self,
+        module: ModuleId,
+        label: &str,
+        default: Option<&ast::Expr>,
+    ) -> (Option<ast::Expr>, FileId) {
+        let file = self.file(module);
+        match default {
+            Some(e) if crate::instances::value_unfolds(e) => {
+                let site = self.span(module, e.range);
+                match self.unfold_value(module, label, e, file, site) {
+                    Some((v, f)) => (Some(v), f),
+                    None => (None, file),
+                }
+            }
+            other => (other.cloned(), file),
+        }
+    }
+}
+
+/// A value that reflects, unfolded once everything is resolved (decision
+/// 251): a constant's, a struct field's default, a parameter's default.
+pub(crate) enum Later {
+    Const { def: DefId, module: ModuleId, value: ast::Expr },
+    Field { def: DefId, index: usize, module: ModuleId, label: String, value: ast::Expr },
+    Param { def: DefId, index: usize, module: ModuleId, label: String, value: ast::Expr },
+}
+
+/// A test as the function its body is, for unfolding it (decision 251):
+/// its name's range starts the header the instance's is cut from.
+fn test_fn(name: &str, t: &ast::TestDef) -> ast::FnDef {
+    let node = t.body.as_ref().map(|b| b.node).unwrap_or(sisu_syntax::tree::NodeId(0));
+    ast::FnDef {
+        node,
+        range: t.name_range,
+        name: ast::Name { text: name.to_string(), range: t.name_range },
+        is_pure: false,
+        is_comptime: false,
+        generics: Vec::new(),
+        params: t.params.clone(),
+        ret: None,
+        from: Vec::new(),
+        where_: Vec::new(),
+        body: t.body.clone(),
+        attrs: Vec::new(),
+        header_broken: false,
+        body_broken: false,
+        vis: ast::Vis::Private,
     }
 }
 

@@ -346,3 +346,43 @@ fn the_test_cache_keeps_what_passed() {
     assert_eq!(held.lines().count(), 1, "{held}");
     let _ = std::fs::remove_file(&cache);
 }
+
+#[test]
+fn the_features_switch_turns_features_on() {
+    // A package whose `@cfg`s read its features (decision 250): `--features`
+    // turns them on, `--no-default-features` leaves `default` off, and a
+    // name that is no feature is a usage error.
+    let dir = std::env::temp_dir().join(format!("sisu-driver-features-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(dir.join("src"));
+    let _ = std::fs::write(
+        dir.join("sisu.toml"),
+        "[package]\nname = \"feat\"\nversion = \"0.1.0\"\n\n[features]\ndefault = [\"fast\"]\nfast = []\nloud = []\n",
+    );
+    let _ = std::fs::write(
+        dir.join("src/main.sisu"),
+        "@cfg(feature=\"fast\")\ndef speed() -> str:\n    return \"fast\"\n\n\
+         @cfg(not(feature=\"fast\"))\ndef speed() -> str:\n    return \"slow\"\n\n\
+         @cfg(feature=\"loud\")\ndef volume() -> str:\n    return \"loud\"\n\n\
+         @cfg(not(feature=\"loud\"))\ndef volume() -> str:\n    return \"quiet\"\n\n\
+         def main():\n    print(\"{speed()} {volume()}\")\n",
+    );
+    let d = dir.display().to_string();
+    let run = |args: &[&str]| {
+        let (code, host) = cli(args);
+        (code, host.out, host.err)
+    };
+    assert_eq!(run(&["run", &d]), (0, "fast quiet\n".to_string(), String::new()));
+    assert_eq!(run(&["run", "--features", "loud", &d]), (0, "fast loud\n".to_string(), String::new()));
+    assert_eq!(
+        run(&["run", "--no-default-features", "--features=loud", &d]),
+        (0, "slow loud\n".to_string(), String::new())
+    );
+    let (code, _, err) = run(&["check", "--features", "fast,nope", &d]);
+    assert_eq!(code, 2);
+    assert!(err.contains("error[D0112]") && err.contains("`nope`"), "{err}");
+    let f = temp_file("features_file.sisu", "def main():\n    print(1)\n");
+    let (code, _, err) = run(&["run", "--features", "x", &f]);
+    assert_eq!(code, 2);
+    assert!(err.contains("error[D0112]"), "{err}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

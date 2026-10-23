@@ -373,6 +373,9 @@ pub(crate) struct Sched<'p> {
     /// A generator dropped before its end is cleaning up, outside the
     /// schedule: no yield point switches (decision 236).
     pub abandoning: u32,
+    /// Generators another iterator or an intrinsic takes items from, run
+    /// to their next `yield` outside the schedule ([`Interp::drive_gen`]).
+    pub driving: u32,
 }
 
 impl<'p> Sched<'p> {
@@ -436,6 +439,7 @@ impl<'p> Sched<'p> {
             always: Vec::new(),
             checking: false,
             abandoning: 0,
+            driving: 0,
             check_skipped: false,
         }
     }
@@ -1971,8 +1975,13 @@ impl<'p> Interp<'p, '_> {
 
     /// `Iter.next` on a generator: its next item, its end, or (when its
     /// body panicked) the panic, in the consumer. Otherwise the generator
-    /// runs until it yields, and the consumer waits for it.
+    /// runs until it yields, and the consumer waits for it; a consumer that
+    /// is itself a generator being driven cannot wait, and drives this one
+    /// in turn.
     pub(crate) fn gen_next(&mut self, t: u32, args: Vec<Value>) -> Result<Value, Unwind> {
+        if self.sched.driving > 0 {
+            return Ok(Value::option(self.gen_item(t)?));
+        }
         if let Some(v) = self.gen_take(t)? {
             return Ok(Value::some(v));
         }
@@ -1993,6 +2002,93 @@ impl<'p> Interp<'p, '_> {
             keys: vec![Key::Task(t)],
             timer: None,
         })))
+    }
+
+    /// The next item of a generator that code which cannot wait takes
+    /// items from (another iterator's adapter, an intrinsic's
+    /// `Iterable[T]` argument, a generator being driven): the item it
+    /// yielded, else its end, else the panic it ended with, else it runs
+    /// until one of those ([`Interp::drive_gen`]).
+    pub(crate) fn gen_item(&mut self, t: u32) -> Result<Option<Value>, Unwind> {
+        if let Some(v) = self.gen_take(t)? {
+            return Ok(Some(v));
+        }
+        if !self.gen_done(t) {
+            self.drive_gen(t)?;
+            if let Some(v) = self.gen_take(t)? {
+                return Ok(Some(v));
+            }
+        }
+        match self.sched.tasks.get_mut(t as usize).and_then(|g| g.outcome.take()) {
+            Some(Outcome::Panic(p)) => Err(Unwind::Panic(p)),
+            _ => Ok(None),
+        }
+    }
+
+    /// Runs a generator until it yields its next item or ends, here and
+    /// now, outside the schedule, as a generator being closed runs
+    /// (decisions 236 and 247): the code asking for the item cannot wait
+    /// for it.
+    /// Its calls count on top of the asking code's, no yield point
+    /// switches, the budget and a `task.yield_now` are left as they were,
+    /// and an operation that would wait aborts the program
+    /// (`panic.driven-wait`), since nothing could run the asking code
+    /// meanwhile.
+    pub(crate) fn drive_gen(&mut self, t: u32) -> Result<(), Unwind> {
+        let ti = t as usize;
+        let depth = self.frames.len() + self.depth_base();
+        let cur = self.sched.cur;
+        std::mem::swap(&mut self.frames, &mut self.sched.tasks[cur as usize].frames);
+        std::mem::swap(&mut self.frames, &mut self.sched.tasks[ti].frames);
+        self.sched.cur = t;
+        let task = &mut self.sched.tasks[ti];
+        task.depth_base = depth;
+        task.state = TState::Running;
+        self.sched.ready.retain(|x| *x != t);
+        let (budget, asked) = (self.sched.budget, std::mem::take(&mut self.sched.yield_asked));
+        self.sched.driving += 1;
+        let r = self.run_driven(t);
+        self.sched.driving -= 1;
+        self.sched.budget = budget;
+        self.sched.yield_asked = asked;
+        std::mem::swap(&mut self.frames, &mut self.sched.tasks[ti].frames);
+        std::mem::swap(&mut self.frames, &mut self.sched.tasks[cur as usize].frames);
+        self.sched.cur = cur;
+        r
+    }
+
+    fn run_driven(&mut self, t: u32) -> Result<(), Unwind> {
+        use crate::exec::Event;
+        let ti = t as usize;
+        loop {
+            let ev = match self.sched.tasks[ti].pending.take() {
+                // Its `yield`, asked again: it goes on.
+                Some(pc) => self.retry(pc).map(|()| Event::Continue),
+                None => self.step_once(),
+            };
+            self.sched.steps += 1;
+            match ev {
+                Ok(Event::Continue) | Ok(Event::Yield) => {}
+                Ok(Event::Returned(v, ret)) => {
+                    if let Some(dest) = ret
+                        && let Err(e) = self.store(dest, v)
+                    {
+                        self.raise_in(e, t)?;
+                    }
+                }
+                Ok(Event::Resumed(p)) => self.raise_in(Unwind::Panic(p), t)?,
+                // It yielded, ended, or would wait.
+                Ok(Event::Switch) | Err(Unwind::Switch) | Err(Unwind::Block(_)) => {
+                    let task = &self.sched.tasks[ti];
+                    if task.yielded.is_some() || matches!(task.state, TState::Done) {
+                        return Ok(());
+                    }
+                    return Err(Unwind::Abort(render(msg::PANIC_DRIVEN_WAIT, &[])));
+                }
+                Err(e @ Unwind::Abort(_)) => return Err(e),
+                Err(e) => self.raise_in(e, t)?,
+            }
+        }
     }
 
     /// `yield v` in a generator's task: hands `v` to the consumer and
@@ -2031,7 +2127,9 @@ impl<'p> Interp<'p, '_> {
     // ---------------------------------------------------------------- mutexes
 
     /// `Mutex.lock` across tasks: waits while another task holds it. An
-    /// `RwLock`'s `write` is the same, and waits for its readers too.
+    /// `RwLock`'s `write` is the same, and waits for its readers too; while
+    /// it waits, it is among the lock's waiting writers, whom no new
+    /// reader passes (decision 249).
     pub(crate) fn lock(&mut self, args: &mut Vec<Value>) -> Result<Value, Unwind> {
         let p = self.pointer_of(&args[0])?;
         let cur = self.sched.cur;
@@ -2046,10 +2144,16 @@ impl<'p> Interp<'p, '_> {
                 }
                 return Err(panic(msg::PANIC_MUTEX_HELD, &[]));
             }
-            Value::Mutex(m) if m.locked || m.readers > 0 => true,
+            Value::Mutex(m) if m.locked || m.readers > 0 => {
+                if m.rw && !m.writers.contains(&cur) {
+                    m.writers.push(cur);
+                }
+                true
+            }
             Value::Mutex(m) => {
                 m.locked = true;
                 m.holder = cur;
+                m.writers.retain(|w| *w != cur);
                 false
             }
             other => return Err(ice(format!("Mutex.lock on {other:?}"))),
@@ -2065,8 +2169,8 @@ impl<'p> Interp<'p, '_> {
         Ok(Value::Guard(Box::new(p)))
     }
 
-    /// `RwLock.read`: waits while a task holds the write lock, then counts
-    /// one more reader.
+    /// `RwLock.read`: waits while a task holds the write lock or waits to
+    /// take it (decision 249), then counts one more reader.
     pub(crate) fn read_lock(&mut self, args: &mut Vec<Value>) -> Result<Value, Unwind> {
         let p = self.pointer_of(&args[0])?;
         let cur = self.sched.cur;
@@ -2078,7 +2182,7 @@ impl<'p> Interp<'p, '_> {
                 }
                 return Err(panic(msg::PANIC_MUTEX_HELD, &[]));
             }
-            Value::Mutex(m) if m.locked => true,
+            Value::Mutex(m) if m.locked || !m.writers.is_empty() => true,
             Value::Mutex(m) => {
                 m.readers += 1;
                 false

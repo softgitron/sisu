@@ -400,12 +400,14 @@ impl Program {
     }
 
     /// Whether a value of the type holds a capability handle (`Fs` and the
-    /// others of a `System`) or a `Cap` by value (decision 237). Such a
-    /// value is `Copy` (Q-51), but each copy of a handle is counted and
-    /// the object goes with the last one, so lowering drops it as it drops
-    /// a value that is not `Copy`. A `Lent` is a view of a handle, and
-    /// counts nothing; a type parameter holds none here (lowering drops a
-    /// value whose type is `Copy` only by a bound all the same).
+    /// others of a `System`) or a `Cap` by value (decision 237), or may: a
+    /// function value, whose environment (an `own` closure's) holds copies
+    /// of what it captured (decision 248). Such a value is `Copy` (Q-51),
+    /// but each copy of a handle is counted and the object goes with the
+    /// last one, so lowering drops it as it drops a value that is not
+    /// `Copy`. A `Lent` is a view of a handle, and counts nothing; a type
+    /// parameter holds none here (lowering drops a value whose type is
+    /// `Copy` only by a bound all the same).
     pub fn holds_capability(&self, ty: &Ty) -> bool {
         self.holds_capability_depth(ty, 0)
     }
@@ -415,6 +417,7 @@ impl Program {
             return false;
         }
         match ty {
+            Ty::Fn(_) => true,
             Ty::Tuple(e, _) => e.iter().any(|t| self.holds_capability_depth(t, depth + 1)),
             Ty::ErrSet(members) => members.iter().any(|d| self.def_holds_capability(*d, &[], depth + 1)),
             Ty::Adt(d, args) => self.def_holds_capability(*d, args, depth + 1),

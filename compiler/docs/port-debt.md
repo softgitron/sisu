@@ -214,14 +214,6 @@ lowering's rule says it needs them (a type parameter only in the result,
 or an `Iterable[T]` parameter). *Pay*: pass every intrinsic its type
 arguments, which the untyped drops above also want.
 
-**A handle an `own` closure captures lives as long as the run.** A
-capability's object goes with its handle's last copy (decision 237), but
-a function value's environment is never dropped (decision 224): a handle
-an `own` closure captures keeps its object until the run ends, when the
-cell is forgotten without its `Drop`. *Pay*: function values that drop
-their environment (a word naming the environment's type, copied and
-dropped as any value is), in both implementations.
-
 **Handles forward by dispatch.** A call on a capability handle or a
 `Lent` is a `call trait` that the dispatcher resolves by the object in
 the handle's cell (`cap.forward` in the prelude, a special case in
@@ -237,10 +229,10 @@ each standard capability's trait by hand, and for a program's own trait
 the resolver writes the impl and the fake as source text from the
 trait's declaration (`sisu-resolve/src/shims.rs`), only for a module
 whose text names `Wrap` or `Fake`, and only for traits whose methods can
-all be forwarded. *Pay*: reflection over a trait's methods
-(`reflect.methods_of`) and a way for compile-time code to write a method
-with a reflected signature (Q-27); then one generic impl and `Fake[T]` as
-std code, for every trait.
+all be forwarded. *Pay*: a way for compile-time code to write a method
+with a reflected signature (Q-27), now that `reflect.methods_of` gives
+the trait's methods (decision 251); then one generic impl and `Fake[T]`
+as std code, for every trait.
 
 **The host's network is polled.** A host socket that would block makes
 its task wait one millisecond on the host's clock and try again, in the
@@ -318,10 +310,12 @@ instances are its own.
 **Compile-time evaluation is incomplete.** There is no memory limit (08
 asks for one) and no progress report for a long evaluation; the order of
 evaluation follows direct calls and constants, not calls through a
-trait; and a `comptime` expression cannot depend on its function's type
-parameters, since nothing is monomorphised. *Pay*: count heap cells and
-collection sizes against a limit; report progress past a time; with
-monomorphisation (the backend), evaluate per instantiation.
+trait; and a `comptime` expression that depends on its function's type
+parameters makes the function a template, made per list of type
+arguments (decision 244), except in a trait impl's method, which is made
+once (decision 251). *Pay*: count heap cells and collection sizes
+against a limit; report progress past a time; with monomorphisation (the
+backend), evaluate per instantiation there too.
 
 **The library types of 04 are host values.** `Shared`, `Weak`, `Cell`,
 `Mutex` (and its guard), `RwLock` (and its read guard), `Atomic` and
@@ -335,11 +329,11 @@ contended, and an `Atomic`'s operations are atomic because one task runs
 at a time, every memory order acting as `SeqCst` (decision 239). The
 native runtime has them as objects of its own too, in Rust (decision
 207), freeing a `Shared` cell with its last handle, and its counts are
-never contended either. An `RwLock` lets readers that keep coming keep a
-writer waiting, and a `Condvar` makes a channel for each wait. *Pay*:
-write them in Sisu over raw memory and atomics (stage 1 and the backend),
-with the tags choosing the counting and the memory orders meaning what
-06 says on the `full` runtime; a writer-preferring `RwLock`.
+never contended either. An `RwLock` prefers its writers (decision 249),
+and a `Condvar` makes a channel for each wait. *Pay*: write them in Sisu
+over raw memory and atomics (stage 1 and the backend), with the tags
+choosing the counting and the memory orders meaning what 06 says on the
+`full` runtime.
 
 **The scheduler is the interpreter's.** Tasks are frame stacks swapped
 into the interpreter, a run is single-threaded, and a schedule is the
@@ -348,12 +342,14 @@ is no M:N runtime and no work stealing, and the exhaustive search has no
 state hashing, so it runs again schedules that reach a state it has
 seen. A generator dropped before its end is closed where its consumer
 dropped it, outside the schedule (decision 236), so its cleanup cannot
-wait (`R0129`); a receiver's or generator's iterator inside another
-iterator's adapter cannot wait (`R0091`); in a `pure` scope the
+wait (`R0129`); a generator that code which cannot wait takes items from
+(an adapter, an intrinsic's `Iterable[T]`) runs to its `yield` there, and
+a wait in it aborts (`R0130`, decision 247); a receiver's iterator inside
+another iterator's adapter cannot wait (`R0091`); in a `pure` scope the
 lowest-index failure is reported, but a body that joins a later task
 first sees it in time order. *Pay*: the runtime of 12's profiles; state
 hashing in the explorer (18, Phase 6); a closing generator that runs as
-a task of its own, which may wait.
+a task of its own, which may wait, and so a driven one.
 
 **Faults are injected by the interpreter.** In the `sim` profile, the
 interpreter decides a fault at a trait call of `FsOps` or `NetOps` whose
@@ -535,15 +531,6 @@ decisions 207 to 211) leaves:
 
 What round 1 does, and a later round must not copy:
 
-- **What still leaks natively** (decisions 213 to 218 free the first
-  round's four leaks of decision 200 and what the interpreter's host frees
-  unseen, decisions 220 to 225 what the second round left, and decisions
-  236 and 237 a generator closed before its end and the objects of
-  capabilities; the native mode holds every case of the list at no
-  allocation live at exit, decision 226): a capability handle an `own`
-  closure captures, whose object is freed when the run ends (above, "A
-  handle an `own` closure captures lives as long as the run"). *Pay*:
-  as there.
 - **Every part of a value is a word** (decision 188): a `u8` takes eight
   bytes, an option a word for its tag, a `bool` a word. *Pay*: in a
   release backend, each type its own width and alignment, and options
@@ -679,15 +666,17 @@ From Phase 4 (18, "Phase 4: traits, generics, std in Sisu"):
   there, and neither are `std.string`'s graphemes, normalisation and
   `Builder`.
 - **Reflection beyond templates** (Phase 8 in 18): `reflect`, `comptime
-  for` and `x.[f]` work in functions and methods (decision 244), but not
-  in a trait's own methods, the methods of a generic trait impl, a
-  `comptime def`, a constant or a test (`E0900`, naming the place). There
-  is no reflection over a trait's methods (no query names them, and no
-  syntax makes a method from a descriptor, which a recording fake derived
-  from an interface needs), and a `comptime def` in a trait other than
-  its derive is `E0900`: 08 gives it no call form. A `comptime def`
-  cannot take a type (`T: type`, 08's `field_names`). (`@cfg` is there:
-  decision 243.)
+  for` and `x.[f]` work in functions, methods, a trait's own methods,
+  the methods of trait impls, `comptime def`s (with `T: type`
+  parameters), constants, defaults, tests and closures (decisions 244 and
+  251), but not in a refinement's `where` clause or an `invariant`
+  (`E0900`, naming the place). A trait impl's method is made once for
+  every type argument, so it cannot ask about its type parameters
+  (`E0609`); per-type instances behind a trait's dispatch wait for
+  monomorphisation in the backend. `reflect.methods_of` names a trait's
+  methods, but no syntax makes a method from a descriptor (Q-27), which
+  a recording fake derived from an interface needs (below). (`@cfg` is
+  there: decision 243.)
 
 From Phase 6 (18, "Phase 6: tasks, capabilities, an HTTP server in
 Sisu"):

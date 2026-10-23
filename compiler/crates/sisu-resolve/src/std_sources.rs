@@ -21,6 +21,11 @@ pub const NUM: &str = include_str!("../../../std/num.sisu");
 pub const LIVE: &str = include_str!("../../../std/live.sisu");
 pub const STRING: &str = include_str!("../../../std/string.sisu");
 pub const FMT: &str = include_str!("../../../std/fmt.sisu");
+pub const PAR: &str = include_str!("../../../std/par.sisu");
+pub const IO: &str = include_str!("../../../std/io.sisu");
+pub const FS: &str = include_str!("../../../std/fs.sisu");
+pub const RAND: &str = include_str!("../../../std/rand.sisu");
+pub const ENCODING: &str = include_str!("../../../std/encoding.sisu");
 
 /// `target` (08, "Conditional compilation"): the build target's facts as
 /// constants. Stage 0's target is the interpreter on the host, so they are
@@ -63,6 +68,11 @@ pub const MODULE_PATHS: &[&str] = &[
     "std.core",
     "std.string",
     "std.fmt",
+    "std.par",
+    "std.io",
+    "std.fs",
+    "std.rand",
+    "std.encoding",
 ];
 
 /// The std module an import path names, as (module name, source).
@@ -86,6 +96,11 @@ pub fn module_for(path: &[&str]) -> Option<(&'static str, &'static str)> {
         ["std", "core"] => Some(("prelude", PRELUDE)),
         ["std", "string"] => Some(("string", STRING)),
         ["std", "fmt"] => Some(("fmt", FMT)),
+        ["std", "par"] => Some(("par", PAR)),
+        ["std", "io"] => Some(("io", IO)),
+        ["std", "fs"] => Some(("fs", FS)),
+        ["std", "rand"] => Some(("rand", RAND)),
+        ["std", "encoding"] => Some(("encoding", ENCODING)),
         _ => None,
     }
 }
@@ -96,9 +111,14 @@ pub const DOCUMENTED: &[(&str, &str)] = &[
     ("cap", CAP),
     ("cli", CLI),
     ("collections", COLLECTIONS),
+    ("encoding", ENCODING),
     ("fmt", FMT),
+    ("fs", FS),
+    ("io", IO),
     ("live", LIVE),
     ("num", NUM),
+    ("par", PAR),
+    ("rand", RAND),
     ("http", HTTP),
     ("json", JSON),
     ("log", LOG),
@@ -156,6 +176,10 @@ pub fn reexports(module: &str) -> &'static [&'static str] {
         ],
         "string" => &["String"],
         "fmt" => &["Display", "Debug", "Formatter", "Spec"],
+        "io" => &["Conn", "Stream", "IoError", "NetError", "Utf8Error", "Stdin"],
+        "fs" => &["Fs", "FsOps", "Path", "Metadata", "IoError"],
+        "rand" => &["Rand", "RandOps"],
+        "encoding" => &["Utf8Error"],
         _ => &[],
     }
 }

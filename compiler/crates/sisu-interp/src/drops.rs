@@ -38,8 +38,12 @@ pub(crate) enum After {
 }
 
 /// Whether dropping the value can do anything: values that own nothing a
-/// drop could observe are not queued.
+/// drop could observe are not queued. A function value's environment holds
+/// copies of `Copy` values, of which only handles count (decision 248).
 fn owns_anything(v: &Value) -> bool {
+    if let Value::Closure(c) = v {
+        return c.env.iter().any(crate::caps::holds_cap);
+    }
     matches!(
         v,
         Value::Struct(_)
@@ -209,6 +213,15 @@ impl<'p> Interp<'p, '_> {
                 self.queue_drops(a.slots.into_iter().map(|(_, x)| (x, t.clone())).collect());
             }
             v @ (Value::Sender(_) | Value::Receiver(_)) => self.drop_channel_end(&v),
+            // A function value goes with the copies its environment holds
+            // (decision 248).
+            Value::Closure(c) => {
+                let tys = self.env_types(&c);
+                let env = Rc::try_unwrap(c).map(|c| c.env).unwrap_or_else(|c| c.env.clone());
+                let items =
+                    env.into_iter().enumerate().map(|(i, x)| (x, tys.get(i).cloned())).rev().collect();
+                self.queue_drops(items);
+            }
             // A copy of a handle goes: its count with it (decision 237); a
             // `Lent` held none.
             Value::Cap(id) if !matches!(&ty, Some(Type::Named(n, _)) if n == "Lent") => self.release_cap(id),

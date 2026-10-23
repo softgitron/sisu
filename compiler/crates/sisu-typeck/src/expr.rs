@@ -230,16 +230,24 @@ impl Checker<'_> {
             self.report(d);
             return self.wrap(x, Coercion::Mismatch, exp);
         }
-        // `Iterable[T]` accepts any collection or iterator of `T`.
+        // `Iterable[T]` accepts any collection or iterator of `T`; a
+        // program's iterator through a generator that takes its items.
         if let Ty::Adt(d, args) = &exp
             && Some(*d) == prog.wk.iterable
-            && let Some((item, _)) = self.iteration_item(&actual, ast::Mode::Borrow)
+            && let Some((item, fmode)) = self.iteration_item(&actual, ast::Mode::Borrow)
         {
             let item = self.decay_ty(&item);
             if let Some(t) = args.first()
                 && self.infer.try_unify(&item, t)
             {
-                return x;
+                if fmode != ForMode::Trait {
+                    return x;
+                }
+                let t = t.clone();
+                let (call, made) = self.iter_from(x.clone(), &t);
+                if made {
+                    return call;
+                }
             }
         }
         // An error the expected error set does not include.
@@ -507,6 +515,42 @@ impl Checker<'_> {
             Ty::Ref(inner, _) if self.is_copy(&inner) => *inner,
             t => t,
         }
+    }
+
+    /// A value of a type that implements `Iterator` given to an
+    /// `Iterable[T]` parameter: `iter_from(x)` (the prelude), a generator
+    /// that takes the items from it as they are asked for, since the
+    /// functions that take an `Iterable[T]` iterate collections and `Iter`s
+    /// and never call the program's impls (decision 247). `item` is the
+    /// parameter's `T`.
+    /// A reference to such an iterator is given back, with `false`: it
+    /// cannot be moved into the generator.
+    pub fn iter_from(&mut self, x: Expr, item: &Ty) -> (Expr, bool) {
+        let prog = self.prog;
+        let ty = self.resolved(&x.ty);
+        let (Some(f), Some(iter)) = (prog.lookup_in(prog.prelude, "iter_from"), prog.wk.iter) else {
+            return (x, false);
+        };
+        if matches!(ty, Ty::Ref(..)) {
+            return (x, false);
+        }
+        let Some((given, _)) = self.iterator_item(&ty) else { return (x, false) };
+        let given = self.decay_ty(&given);
+        if !self.infer.try_unify(&given, item) {
+            return (x, false);
+        }
+        let Some((raw, _)) = self.iterator_item(&ty) else { return (x, false) };
+        let span = x.span;
+        let x = self.check_movable(x);
+        let call = Expr::new(
+            ExprKind::Call {
+                callee: Callee::Fn { def: f, type_args: vec![ty] },
+                args: vec![Arg { expr: x, mode: ArgMode::Value }],
+            },
+            Ty::Adt(iter, vec![raw]),
+            span,
+        );
+        (call, true)
     }
 
     /// Reports a move out of a borrowed place or an element.

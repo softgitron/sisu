@@ -25,17 +25,25 @@ fn main(0) source 0 @4:5-4:9 {
   bb1 (unwind bb2):
     _3 = ref mut _1 @6:16-6:50
     _2 = closure main#closure0(copy _3) @6:16-6:50
+    goto bb3
+  bb2 (cleanup):
+    drop _1
+    resume
+  bb3 (unwind bb4):
     _4 = call copy _2() @7:5-7:11
     _7 = ref _1 @8:15-8:18
     _6 = call intrinsic len(copy _7) @8:11-8:19
     _5 = call intrinsic print(copy _6) @8:5-8:20
     _8 = call copy _2() @9:5-9:11
     _0 = const ()
-    goto bb3
-  bb2 (cleanup):
-    drop _1
-    resume
-  bb3:
+    goto bb5
+  bb4 (cleanup):
+    drop _2
+    goto bb2
+  bb5 (unwind bb2):
+    drop _2 @9:11-9:11
+    goto bb6
+  bb6:
     drop _1 @9:11-9:11
     return
 }

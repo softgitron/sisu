@@ -1,0 +1,254 @@
+##! `std.fs` (11): paths, files, directories and metadata, through the
+##! file system capability. `Fs`'s operations (`read`, `write`,
+##! `read_to_string`, `write_text`, `exists`, `metadata`, `list_dir`,
+##! `create_dir`, `remove`, `sync`) and `Path`, `Metadata` and `IoError` are
+##! the prelude's, reached from here too; this module adds the operations
+##! on a path's text, which need no capability, and the ones made of
+##! several of `Fs`'s: walking a tree, copying, appending, lines. Paths
+##! are written with `/`. Watching a file waits for the host contract to
+##! report changes.
+
+## `part` after `base`, with one `/` between; `part` itself when it is
+## absolute.
+##
+## ```
+## assert "{join(Path.new("logs"), "today.txt")}" == "logs/today.txt"
+## assert "{join(Path.new("logs/"), "a/b")}" == "logs/a/b"
+## assert "{join(Path.new("logs"), "/etc")}" == "/etc"
+## assert "{join(Path.new(""), "x")}" == "x"
+## ```
+pub pure def join(base: Path, part: str) -> Path:
+    let b = base.as_str()
+    if part.starts_with("/") or b.is_empty():
+        return Path.new(part)
+    if b.ends_with("/"):
+        return Path.new("{b}{part}")
+    return Path.new("{b}/{part}")
+
+## The path without its last part, or `None` for the root or nothing.
+##
+## ```
+## assert parent(Path.new("a/b/c.txt")) == Some(Path.new("a/b"))
+## assert parent(Path.new("/a")) == Some(Path.new("/"))
+## assert parent(Path.new("a")) == Some(Path.new(""))
+## assert parent(Path.new("/")) == None
+## ```
+pub pure def parent(p: Path) -> Path?:
+    let text = trimmed(p.as_str())
+    if text == "/" or text.is_empty():
+        return None
+    var cut: int? = None
+    var i = 0
+    for c in text.chars():
+        if c == '/':
+            cut = Some(i)
+        i += c.len_utf8()
+    match cut:
+        case Some(0):
+            return Some(Path.new("/"))
+        case Some(at):
+            return Some(Path.new(trimmed(text.byte_slice(0, at))))
+        case None:
+            return Some(Path.new(""))
+
+## The text without the `/`s it ends with, but a lone `/`.
+pure def trimmed(text: str) -> String:
+    var end = text.byte_len()
+    while end > 1 and text.byte_at(end - 1) == 47u8:
+        end -= 1
+    return text.byte_slice(0, end).to_string()
+
+## The last part of the path, or `None` when it has none (the root, or a
+## path that ends in `..`).
+##
+## ```
+## assert file_name(Path.new("a/b/c.txt")) == Some(String.new("c.txt"))
+## assert file_name(Path.new("a/b/")) == Some(String.new("b"))
+## assert file_name(Path.new("a/..")) == None
+## ```
+pub pure def file_name(p: Path) -> String?:
+    let parts = components(p)
+    match parts.last():
+        case Some(last):
+            if last == ".." or last == "/":
+                return None
+            return Some(last.copy())
+        case None:
+            return None
+
+## The extension of the file name: what follows its last `.`, unless the
+## name starts with that `.` or has none.
+##
+## ```
+## assert extension(Path.new("notes/archive.tar.gz")) == Some(String.new("gz"))
+## assert extension(Path.new(".profile")) == None
+## assert extension(Path.new("README")) == None
+## ```
+pub pure def extension(p: Path) -> String?:
+    let name = file_name(p)?
+    let (_, ext) = split_extension(name)
+    return ext
+
+## The file name without its extension.
+##
+## ```
+## assert stem(Path.new("notes/archive.tar.gz")) == Some(String.new("archive.tar"))
+## assert stem(Path.new(".profile")) == Some(String.new(".profile"))
+## ```
+pub pure def stem(p: Path) -> String?:
+    let name = file_name(p)?
+    let (s, _) = split_extension(name)
+    return Some(s)
+
+## A file name's stem and extension.
+pure def split_extension(name: str) -> (String, String?):
+    var dot: int? = None
+    var i = 0
+    for c in name.chars():
+        if c == '.':
+            dot = Some(i)
+        i += c.len_utf8()
+    match dot:
+        case Some(at):
+            if at == 0:
+                return (name.to_string(), None)
+            return (
+                name.byte_slice(0, at).to_string(),
+                Some(name.byte_slice(at + 1, name.byte_len()).to_string()),
+            )
+        case None:
+            return (name.to_string(), None)
+
+## The path with its file name's extension replaced by `ext` (or taken
+## off, when `ext` is empty).
+##
+## ```
+## assert with_extension(Path.new("a/report.md"), "html") == Path.new("a/report.html")
+## assert with_extension(Path.new("a/report.md"), "") == Path.new("a/report")
+## assert with_extension(Path.new("Makefile"), "bak") == Path.new("Makefile.bak")
+## ```
+pub pure def with_extension(p: Path, ext: str) -> Path:
+    let name = file_name(p) ?? String.new()
+    let (s, _) = split_extension(name)
+    let renamed = if ext.is_empty(): s else: "{s}.{ext}"
+    match parent(p):
+        case Some(dir):
+            return join(dir, renamed)
+        case None:
+            return Path.new(renamed)
+
+## The parts of the path: `/` first for an absolute one, then each name
+## between the `/`s, without empty ones and `.`.
+##
+## ```
+## assert components(Path.new("/usr//lib/./x")) == ["/", "usr", "lib", "x"]
+## assert components(Path.new("a/../b")) == ["a", "..", "b"]
+## ```
+pub pure def components(p: Path) -> list[String]:
+    let text = p.as_str()
+    var out: list[String] = []
+    if text.starts_with("/"):
+        out.push(String.new("/"))
+    for part in text.split("/"):
+        if part != "" and part != ".":
+            out.push(part.to_string())
+    return out
+
+## Whether the path starts at the root.
+pub pure def is_absolute(p: Path) -> bool:
+    return p.as_str().starts_with("/")
+
+## The path with `.` and empty parts left out and each `..` taking off
+## the part before it, from the text alone (a link is not followed).
+##
+## ```
+## assert normalize(Path.new("a/./b/../c//d")) == Path.new("a/c/d")
+## assert normalize(Path.new("/../x")) == Path.new("/x")
+## assert normalize(Path.new("../a/..")) == Path.new("..")
+## assert normalize(Path.new("a/..")) == Path.new(".")
+## ```
+pub pure def normalize(p: Path) -> Path:
+    let absolute = is_absolute(p)
+    var kept: list[String] = []
+    for part in components(p):
+        if part == "/":
+            continue
+        if part == "..":
+            if not kept.is_empty() and kept[len(kept) - 1] != "..":
+                let _ = kept.pop()
+            elif not absolute:
+                kept.push(part.copy())
+        else:
+            kept.push(part.copy())
+    let body = kept.join("/")
+    if absolute:
+        return Path.new("/{body}")
+    if body.is_empty():
+        return Path.new(".")
+    return Path.new(body)
+
+## Every path under `dir`, depth first, each directory before what is in
+## it and the entries of a directory in order; `dir` itself is not among
+## them.
+##
+## ```
+## let fs = Fs.in_memory({"src/main.sisu": "", "src/lib/a.sisu": "", "README": ""})
+## let found = walk(fs, Path.new("src")).expect("in memory")
+## assert found == [Path.new("src/lib"), Path.new("src/lib/a.sisu"), Path.new("src/main.sisu")]
+## ```
+pub def walk[F: FsOps](fs: F, dir: Path) -> list[Path] ! IoError:
+    var out: list[Path] = []
+    var pending: list[Path] = [dir.copy()]
+    var first = True
+    while let Some(next) = pending.pop():
+        if not first:
+            out.push(next.copy())
+        first = False
+        let meta = fs.metadata(next)?
+        if meta.is_dir:
+            var entries = fs.list_dir(next)?
+            entries.reverse()
+            pending.extend(entries)
+    return Ok(out)
+
+## Copies the file at `source` to `target`, replacing it; gives the
+## number of bytes.
+##
+## ```
+## let fs = Fs.in_memory({"a.txt": "hello"})
+## assert copy_file(fs, Path.new("a.txt"), Path.new("b.txt")).expect("in memory") == 5
+## assert fs.read_to_string(Path.new("b.txt")).expect("in memory") == "hello"
+## ```
+pub def copy_file[F: FsOps](fs: F, source: Path, target: Path) -> int ! IoError:
+    let data = fs.read(source)?
+    let n = len(data)
+    fs.write(target, data)?
+    return Ok(n)
+
+## Adds `data` at the end of the file, which is created when missing.
+##
+## ```
+## let fs = Fs.in_memory()
+## append(fs, Path.new("log"), b"one\n").expect("in memory")
+## append(fs, Path.new("log"), b"two\n").expect("in memory")
+## assert fs.read_to_string(Path.new("log")).expect("in memory") == "one\ntwo\n"
+## ```
+pub def append[F: FsOps](fs: F, path: Path, data: bytes) -> ! IoError:
+    var old = bytes.new()
+    if fs.exists(path):
+        old = fs.read(path)?
+    return fs.write(path, old + data)
+
+## The file's lines, without their line breaks; `InvalidData` when it is
+## not UTF-8.
+##
+## ```
+## let fs = Fs.in_memory({"list": "a\nb\r\nc"})
+## assert read_lines(fs, Path.new("list")).expect("in memory") == ["a", "b", "c"]
+## ```
+pub def read_lines[F: FsOps](fs: F, path: Path) -> list[String] ! IoError:
+    let text = fs.read_to_string(path)?
+    var out: list[String] = []
+    for line in text.lines():
+        out.push(line.to_string())
+    return Ok(out)

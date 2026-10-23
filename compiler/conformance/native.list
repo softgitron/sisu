@@ -6,6 +6,7 @@
 # grows as the backend does (`--native-survey` names the cases outside it
 # that would pass).
 capabilities/attenuation
+capabilities/closure_drops
 capabilities/datetime
 capabilities/fakes
 capabilities/host
@@ -17,17 +18,21 @@ capabilities/revocable
 capabilities/wrap_trait
 comptime/baked
 comptime/cfg
+comptime/comptime_defs
 comptime/constants
 comptime/derive_default
 comptime/derive_user
 comptime/proposal_arrays
 comptime/proposal_derive
+comptime/reflecting_values
 concurrency/cancellation
 concurrency/channels
 concurrency/deadlock
 concurrency/failures
 concurrency/generator_close
 concurrency/generator_close_panic
+concurrency/generator_driven
+concurrency/generator_driven_wait
 concurrency/generators
 concurrency/join
 concurrency/logging
@@ -35,6 +40,7 @@ concurrency/mutex
 concurrency/panics
 concurrency/pure_scope
 concurrency/race
+concurrency/rwlock_writers
 concurrency/select
 concurrency/stack_overflow
 concurrency/sync_types
@@ -97,13 +103,17 @@ packages/path_dependency
 packages/script
 packages/workspace
 reflect/cli
+reflect/closures
 reflect/embed
 reflect/json
 reflect/methods
+reflect/methods_of
 reflect/promotion
 reflect/proposal_comptime
 reflect/queries
 reflect/target
+reflect/tests
+reflect/trait_methods
 replay/network
 replay/panic
 replay/stdin
@@ -129,6 +139,7 @@ run/f32
 run/format_specs
 run/integer_division
 run/interpolation
+run/iterable_iterator
 run/iterable_rest
 run/iterators
 run/let_else_copy

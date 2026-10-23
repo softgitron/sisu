@@ -92,13 +92,21 @@ impl Resolver<'_> {
             // A `comptime def` runs at compile time: the trait's derive
             // (collected with the trait) is not one of its methods.
             if m.is_comptime {
+                // Any other is a compile-time function of the trait's,
+                // `Trait.name(...)` (decision 251).
                 if m.name.text != "derive" {
-                    let span = self.span(module, m.name.range);
-                    self.unsupported(
-                        span,
-                        "a `comptime def` in a trait other than `derive`",
-                        "reflection beyond derive (Phase 8)",
+                    let fdef = self.new_def(
+                        module,
+                        &format!("{}.{}", t.name.text, m.name.text),
+                        m.name.range,
+                        ast::Vis::Pub,
+                        Vec::new(),
+                        DefKind::Fn(Box::new(self.placeholder_fn(module, FnKind::Free))),
                     );
+                    if let DefKind::Trait(info) = &mut self.prog.defs[def.0 as usize].kind {
+                        info.comptime_fns.push((m.name.text.clone(), fdef));
+                    }
+                    self.pending.push(Pending::Fn { def: fdef, module, ast: m.clone(), owner: None });
                 }
                 continue;
             }
@@ -122,6 +130,11 @@ impl Resolver<'_> {
                 Vec::new(),
                 DefKind::Fn(Box::new(self.placeholder_fn(module, FnKind::Method))),
             );
+            // A provided method that reflects is made in each impl that
+            // does not write it (decision 251).
+            if m.body.is_some() && crate::instances::unfolds(m, &names) {
+                self.trait_templates.entry(def).or_default().push((module, m.clone()));
+            }
             self.pending.push(Pending::Fn {
                 def: fdef,
                 module,
@@ -330,6 +343,31 @@ impl Resolver<'_> {
                 def: fdef,
                 module,
                 ast: m.clone(),
+                owner: Some(Owner::Impl(def)),
+            });
+        }
+        // The trait's provided methods that reflect and that the impl does
+        // not write: each a method of the impl, written where the trait's
+        // is, and so a template of the impl made for its type (decision
+        // 251).
+        let provided = self.trait_templates.get(&trait_ref.def).cloned().unwrap_or_default();
+        for (trait_module, m) in provided {
+            if imp.methods.iter().any(|x| x.name.text == m.name.text) {
+                continue;
+            }
+            let fdef = self.new_def(
+                trait_module,
+                &m.name.text,
+                m.name.range,
+                ast::Vis::Pub,
+                Vec::new(),
+                DefKind::Fn(Box::new(self.placeholder_fn(trait_module, FnKind::Method))),
+            );
+            self.provided_copies.insert(fdef);
+            self.pending.push(Pending::Fn {
+                def: fdef,
+                module: trait_module,
+                ast: m,
                 owner: Some(Owner::Impl(def)),
             });
         }

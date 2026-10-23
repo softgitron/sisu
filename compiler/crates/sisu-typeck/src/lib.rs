@@ -746,7 +746,13 @@ fn template_requests(
 ) -> (Vec<sisu_resolve::Request>, Vec<Diagnostic>) {
     let mut out: Vec<sisu_resolve::Request> = Vec::new();
     let mut diags = Vec::new();
-    let is_template = |d: &DefId| prog.fn_info(*d).is_some_and(|f| f.template);
+    // A trait's own method that reflects is made in the impls, never for
+    // a call, and a generic trait impl's method once, for all its type
+    // arguments (decision 251).
+    let is_template = |d: &DefId| {
+        prog.fn_info(*d)
+            .is_some_and(|f| f.template && f.trait_.is_none() && (f.generics.is_empty() || !f.made_once()))
+    };
     for b in bodies {
         let mut visit = |e: &thir::Expr| match &e.kind {
             thir::ExprKind::Call { callee: thir::Callee::Fn { def, type_args }, .. } if is_template(def) => {
@@ -792,10 +798,10 @@ fn template_requests(
     }
     // A template without type parameters (a function or a method that
     // reflects on the program's own types) is made once, whether anything
-    // calls it or not: `main`, a method a trait's call reaches, a value.
+    // calls it or not: `main`, a method a trait's call reaches, a value;
+    // so is a generic trait impl's method, as generic as the impl.
     for d in prog.functions_with_bodies() {
-        if is_template(&d)
-            && prog.fn_info(d).is_some_and(|f| f.generics.is_empty())
+        if prog.fn_info(d).is_some_and(|f| f.made_once() && f.trait_.is_none())
             && !prog.instances.contains_key(&(d, Vec::new()))
         {
             let q = sisu_resolve::Request::Instance { def: d, args: Vec::new(), site: prog.def(d).span };

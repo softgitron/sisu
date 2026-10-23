@@ -5,10 +5,11 @@
 //! hold is left out before the program is resolved, as if it were not
 //! written; one whose `@cfg` holds is kept as written. A condition is
 //! `test` (the program is built with its tests), `feature="NAME"` (its
-//! package turns the feature on), `not` and a condition, or `all(...)` and
-//! `any(...)` of conditions (so `not any(feature="tls")` is a feature
-//! that is off); several in one `@cfg` must all hold. A program built
-//! without its tests leaves out its `test`, `suite` and `bench` items too.
+//! package turns the feature on), `not` and a condition, `not(...)` of one
+//! condition (so `not(feature="tls")` is a feature that is off, decision
+//! 250), or `all(...)` and `any(...)` of conditions; several in one `@cfg`
+//! must all hold. A program built without its tests leaves out its `test`,
+//! `suite` and `bench` items too.
 
 use sisu_diag::TextRange;
 use sisu_syntax::ast::{self, Expr, ExprKind, FnDef, Item, ItemKind};
@@ -48,6 +49,16 @@ impl Filter<'_> {
             (None, ExprKind::Name(n)) if n == "test" => self.test,
             (None, ExprKind::Unary { op: ast::UnOp::Not, expr }) => !self.holds(expr, None),
             (None, ExprKind::Paren(inner)) => self.holds(inner, None),
+            // `not(...)` of one condition, keyword or not.
+            (None, ExprKind::Call { callee, args, trailing: None }) if matches!(&callee.kind, ExprKind::Name(n) if n == "not") => {
+                match args.as_slice() {
+                    [a] => !self.holds(&a.value, a.name.as_ref()),
+                    _ => {
+                        self.problems.push(Problem::NotACondition(e.range));
+                        true
+                    }
+                }
+            }
             (None, ExprKind::Call { callee, args, trailing: None }) => {
                 let all = match &callee.kind {
                     ExprKind::Name(n) if n == "all" => true,

@@ -437,7 +437,9 @@ pub enum Kind {
     /// A union of error sets: a value of one of the member enums (the
     /// numbers of their types), as that enum lays it out.
     ErrSet(Vec<u32>),
-    /// A function value: two words, the code and its environment.
+    /// A function value: its code, the words of its environment, and the
+    /// environment's type number plus one when a drop or a copy must reach
+    /// what it holds, else 0 (decisions 224 and 248).
     Fn,
     /// A type the runtime only moves and drops by its name.
     Opaque(String),
@@ -468,7 +470,8 @@ pub enum Kind {
     /// nanoseconds on that clock.
     Timer,
     /// `Mutex[T]`: [`MUTEX_HEADER`] bytes (whether it is locked, the task
-    /// holding it, whether it is poisoned), then the value.
+    /// holding it, whether it is poisoned, the writers waiting), then the
+    /// value.
     Mutex(u32),
     /// `MutexGuard[T]`: one word, the address of the value inside the
     /// mutex (its header is just before it), and the function-table index
@@ -507,11 +510,14 @@ pub const SHARED_ATOMIC: u64 = 1;
 pub const SHARED_CROSSED: u64 = 2;
 
 /// The bytes of a `Mutex`'s header, before its value.
-pub const MUTEX_HEADER: u32 = 24;
-/// The words of a `Mutex`'s header, from its start.
+pub const MUTEX_HEADER: u32 = 32;
+/// The words of a `Mutex`'s header, from its start: whether it is locked,
+/// the task holding it, whether it is poisoned, and, for an `RwLock`, the
+/// tasks waiting to write, whom no new reader passes (decision 249).
 pub const MUTEX_LOCKED: u32 = 0;
 pub const MUTEX_HOLDER: u32 = 8;
 pub const MUTEX_POISONED: u32 = 16;
+pub const MUTEX_WRITERS: u32 = 24;
 
 /// A part of a tuple: its offset and type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1267,6 +1273,23 @@ intrinsics! {
 }
 
 impl Intrinsic {
+    /// Whether the parameter at `k` is an `Iterable[T]`: the runtime takes
+    /// what the argument has left (an owned argument whole), so the caller
+    /// never drops a value it moved in there (decision 235).
+    pub fn takes_iterable(self, k: usize) -> bool {
+        match self {
+            Intrinsic::Zip | Intrinsic::ZipShortest => k < 2,
+            Intrinsic::Enumerate
+            | Intrinsic::Reversed
+            | Intrinsic::IterableList
+            | Intrinsic::Sorted
+            | Intrinsic::Sum
+            | Intrinsic::Any
+            | Intrinsic::All => k == 0,
+            _ => false,
+        }
+    }
+
     /// Whether a call may make its task wait (or, for a scope, wait at the
     /// scope's end): the code generator records where the call is before
     /// it ([`sym::SITE`]), for the deadlock report.

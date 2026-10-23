@@ -557,7 +557,10 @@ impl Resolver<'_> {
                     );
                     return Ty::Error;
                 }
-                return self.resolve_alias_public(d).subst(&args);
+                // An alias the compiler declares for an instance may stand
+                // for a type parameter of the impl it is in (decision 251).
+                let t = self.resolve_alias_public(d);
+                return if args.is_empty() { t } else { t.subst(&args) };
             }
             DefKind::Trait(_) => {
                 let at = Span::new(span.file, sisu_diag::TextRange::empty(span.range.start));

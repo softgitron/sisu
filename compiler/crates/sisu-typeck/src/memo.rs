@@ -96,12 +96,18 @@ fn region(prog: &Program, sources: &SourceMap, def: DefId, kind: &BodyKind) -> O
             let DefKind::Struct(info) = &prog.def(*s).kind else { return None };
             let field = info.fields.get(*i as usize)?;
             let e = field.default.as_ref()?;
+            if field.default_file != field.span.file {
+                return None;
+            }
             (field.span.file, field.span.range.start.min(e.range.start), e.range.end)
         }
         BodyKind::ParamDefault(fd, i) => {
             let f = prog.fn_info(*fd)?;
             let p = f.params.get(*i as usize)?;
             let e = p.default.as_ref()?;
+            if p.default_file != f.file {
+                return None;
+            }
             (f.file, p.span.range.start.min(e.range.start), e.range.end)
         }
         BodyKind::Const => {
@@ -305,22 +311,20 @@ pub(crate) fn check_body(
         BodyKind::FieldDefault(s, i) => match &prog.def(*s).kind {
             DefKind::Struct(info) => match info.fields.get(*i as usize) {
                 Some(f) => match &f.default {
-                    Some(e) => value(kind.clone(), e, &f.ty, f.span.file),
+                    Some(e) => value(kind.clone(), e, &f.ty, f.default_file),
                     None => crate::check_fn(prog, inferred, def, sources),
                 },
                 None => crate::check_fn(prog, inferred, def, sources),
             },
             _ => crate::check_fn(prog, inferred, def, sources),
         },
-        BodyKind::ParamDefault(fd, i) => {
-            match prog.fn_info(*fd).and_then(|f| f.params.get(*i as usize).map(|p| (f, p))) {
-                Some((f, p)) => match &p.default {
-                    Some(e) => value(kind.clone(), e, &p.ty, f.file),
-                    None => crate::check_fn(prog, inferred, def, sources),
-                },
+        BodyKind::ParamDefault(fd, i) => match prog.fn_info(*fd).and_then(|f| f.params.get(*i as usize)) {
+            Some(p) => match &p.default {
+                Some(e) => value(kind.clone(), e, &p.ty, p.default_file),
                 None => crate::check_fn(prog, inferred, def, sources),
-            }
-        }
+            },
+            None => crate::check_fn(prog, inferred, def, sources),
+        },
         BodyKind::Const => match &prog.def(def).kind {
             DefKind::Const(c) => match &c.value {
                 Some(e) => value(kind.clone(), e, &c.ty, c.file),

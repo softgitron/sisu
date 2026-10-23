@@ -1,0 +1,79 @@
+# Reflection in a trait's own methods and in the methods of generic trait
+# impls (08, "Reflection"; decision 251). A trait's provided method that
+# reflects is made in each impl that does not write it, for the impl's
+# type; a method of a trait impl is made once, as generic as the impl, so
+# that a call through a bound or a `dyn` reaches it: `Self`'s fields are
+# known, and a type parameter is known only by its name.
+
+struct Point:
+    x: int
+    y: int
+
+struct Pair[A]:
+    first: A
+    second: A
+
+# The trait's code names this type; the generic impl's parameter of the
+# same name does not hide it there.
+struct A:
+    v: int
+
+trait Fields:
+    def names(self) -> list[String]:
+        var out: list[String] = []
+        comptime for f in reflect.fields_of(Self):
+            out.push(f.name)
+        return out
+
+    def show(self) -> String:
+        let marker = A(v=1)
+        var parts: list[String] = []
+        comptime for f in reflect.fields_of(Self):
+            parts.push("{f.name}={self.[f]}")
+        return "{reflect.name_of(Self)}({parts.join(", ")}) {marker.v}"
+
+    def tag(self) -> String:
+        return "plain"
+
+impl Fields for Point:
+    def tag(self) -> String:
+        return "a point"
+
+impl[A: Display] Fields for Pair[A]:
+    # The impl's own method, made once for every `A`.
+    def tag(self) -> String:
+        var kinds: list[String] = []
+        comptime for f in reflect.fields_of(Self):
+            kinds.push("{f.name}: {reflect.name_of(f.ty)}")
+        return kinds.join(", ")
+
+trait Tagged:
+    def tagged[T: Display](self, tag: T) -> list[String]
+
+impl[A: Display] Tagged for Pair[A]:
+    # A method with type parameters of its own.
+    def tagged[T: Display](self, tag: T) -> list[String]:
+        var out: list[String] = []
+        comptime for f in reflect.fields_of(Self):
+            out.push("{tag}.{f.name}={self.[f]}")
+        return out
+
+def describe[T: Fields](x: T) -> String:
+    return "{x.tag()}: {x.names()} {x.show()}"
+
+def through_dyn(d: ref dyn Fields) -> String:
+    return d.show()
+
+def main():
+    let p = Point(x=3, y=4)
+    print(describe(p))
+    let q = Pair(first=1, second=2)
+    print(describe(q))
+    let s = Pair(first=String("a"), second=String("b"))
+    print(s.show())
+    print(through_dyn(ref p))
+    print(through_dyn(ref q))
+    let boxed: Box[dyn Fields] = Box(Pair(first=1.5, second=2.5))
+    print(boxed.names())
+    print(q.tagged("q"))
+    print(s.tagged(7))

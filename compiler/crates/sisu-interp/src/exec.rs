@@ -341,7 +341,7 @@ impl<'p> Interp<'p, '_> {
     }
 
     /// Retries the intrinsic call the running task waited in.
-    fn retry(&mut self, pc: crate::sched::PendingCall<'p>) -> Result<(), Unwind> {
+    pub(crate) fn retry(&mut self, pc: crate::sched::PendingCall<'p>) -> Result<(), Unwind> {
         let r = self.intrinsic(&pc.name, &pc.tys, pc.args, pc.ret.as_ref());
         self.finish_call(&pc.name, &pc.tys, pc.dest, pc.ret, r)
     }
@@ -1512,6 +1512,7 @@ impl<'p> Interp<'p, '_> {
                 holder: 0,
                 poisoned: m.poisoned,
                 readers: 0,
+                writers: Vec::new(),
                 rw: m.rw,
             })),
             Value::Sender(_) | Value::Receiver(_) => {
@@ -1526,10 +1527,15 @@ impl<'p> Interp<'p, '_> {
                 ty: d.ty.clone(),
                 value: self.copy_value(&d.value),
             })),
-            // A copy of a handle is counted (decision 237).
+            // A copy of a handle is counted (decision 237), and so is one
+            // a function value's environment holds (decision 248).
             Value::Cap(id) => {
                 self.retain_caps(v, None);
                 Value::Cap(*id)
+            }
+            Value::Closure(_) => {
+                self.retain_caps(v, None);
+                v.clone()
             }
             other => other.clone(),
         }

@@ -215,14 +215,14 @@ pub(crate) unsafe fn iterable(p: *mut u8, arg: u32, item: Option<u32>) -> Box<It
                 Kind::Dict(..) => (table_ref(crate::dict::table(q), Part::Items), None),
                 Kind::Set(e) => (table_ref(crate::dict::table(q), Part::Keys), Some(e)),
                 Kind::Receiver(e) => (receiver(mem::word(q, 0) as u32, e), None),
-                Kind::Iter(_) => {
+                Kind::Iter(e) => {
                     // An iterator behind a reference: its own object, which
                     // the reference does not own; take its remaining items.
                     let obj = mem::word(q, 0) as *mut IterObj;
                     let st = std::mem::replace(&mut (*obj).state, State::Done);
                     (
                         Box::new(IterObj { _live: mem::Live::new(), state: st, item_size: (*obj).item_size }),
-                        None,
+                        referent(e),
                     )
                 }
                 _ => rt::internal("iterating over a reference to something that is not a list"),
@@ -231,12 +231,25 @@ pub(crate) unsafe fn iterable(p: *mut u8, arg: u32, item: Option<u32>) -> Box<It
             (None, Kind::Dict(..) | Kind::Set(_)) => {
                 (table_own(Box::from_raw(mem::word(p, 0) as *mut Table)), None)
             }
-            (None, Kind::Iter(_)) => (Box::from_raw(mem::word(p, 0) as *mut IterObj), None),
+            (None, Kind::Iter(e)) => (Box::from_raw(mem::word(p, 0) as *mut IterObj), referent(*e)),
             _ => rt::internal("iterating over something that is not a list or an iterator"),
         }
     };
+    // An iterator of references (a generator's of `ref T`, `iter_from` of
+    // a program's iterator over a collection) decays as a borrowed
+    // collection's items do.
+    let iter_of_refs = match ty(arg).kind {
+        Kind::Ref(inner) if matches!(ty(inner).kind, Kind::Dyn) => {
+            // SAFETY: as above, the type of what the reference refers to.
+            matches!(ty(unsafe { mem::word(p, 0) } as u32).kind, Kind::Iter(e) if referent(e).is_some())
+        }
+        Kind::Ref(inner) => matches!(ty(inner).kind, Kind::Iter(e) if referent(e).is_some()),
+        Kind::Iter(e) => referent(e).is_some(),
+        _ => false,
+    };
     let yields_refs = matches!(base.state, State::ListRef { .. })
-        || matches!(base.state, State::TableRef { part, .. } if part != Part::Items);
+        || matches!(base.state, State::TableRef { part, .. } if part != Part::Items)
+        || (iter_of_refs && !matches!(base.state, State::Decay { .. }));
     let wants_ref = item.is_some_and(|t| matches!(ty(t).kind, Kind::Ref(_)));
     if yields_refs && !wants_ref {
         let decayed = item.or(elem);
@@ -248,6 +261,14 @@ pub(crate) unsafe fn iterable(p: *mut u8, arg: u32, item: Option<u32>) -> Box<It
         })
     } else {
         base
+    }
+}
+
+/// What an item of type `t` refers to, when it is a reference.
+fn referent(t: u32) -> Option<u32> {
+    match ty(t).kind {
+        Kind::Ref(r) => Some(r),
+        _ => None,
     }
 }
 
@@ -428,27 +449,19 @@ pub(crate) unsafe fn next(obj: &mut IterObj, out: *mut u8) -> u8 {
                 mem::copy(out.add(8), table.key_at(*idx), (table.ksize + table.vsize) as usize);
                 *idx += 1;
             }
-            // A generator or a receiver inside another iterator's adapter
-            // gives what is there already; only `Iter.next` on its own
-            // iterator waits (port-debt.md).
-            State::Gen { task } => {
-                let t = *task;
-                match crate::sched::with(|s| {
-                    let g = s.task(t);
-                    match g.yielded.take() {
-                        Some(v) => Some(Some(v)),
-                        None if matches!(g.state, crate::sched::TState::Done) => Some(None),
-                        None => None,
-                    }
-                }) {
-                    Some(Some(v)) => {
-                        some(out);
-                        mem::copy(out.add(8), v.as_ptr() as *const u8, obj.item_size as usize);
-                    }
-                    Some(None) => none(out),
-                    None => return rt::raise_msg(msg::PANIC_NESTED_RECV, &[]),
+            // A generator inside another iterator's adapter, or given to
+            // an intrinsic, runs until it yields (`sched::drive`).
+            State::Gen { task } => match crate::tasks::gen_item(*task) {
+                Ok(Some(v)) => {
+                    some(out);
+                    mem::copy(out.add(8), v.as_ptr() as *const u8, obj.item_size as usize);
                 }
-            }
+                Ok(None) => none(out),
+                Err(status) => return status,
+            },
+            // A receiver inside another iterator's adapter gives what is
+            // there already; only `Iter.next` on its own iterator waits
+            // (port-debt.md).
             State::Recv { chan } => {
                 let ch = *chan;
                 match crate::sched::with(|s| s.recv_now(ch)) {

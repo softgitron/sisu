@@ -1,0 +1,314 @@
+##! `std.io` (11): byte and text streams. A `Reader` gives bytes as they
+##! come and a `Writer` takes them; `BufReader` reads lines and runs of
+##! bytes over any reader, `BufWriter` gathers small writes into larger
+##! ones, and `Seek` moves within a stream that has positions. A network
+##! connection (`Conn`) is both a reader and a writer; `BytesReader` and
+##! `BytesWriter` are streams over bytes in memory, and `StdinReader`
+##! reads standard input through its capability. The file system
+##! capability reads and writes whole files (`std.fs`).
+
+## What a stream's operations fail with: the file system's errors, the
+## network's, or a wait for the stream cancelled.
+pub type StreamError = {IoError, NetError, TaskError}
+
+## A source of bytes.
+pub trait Reader:
+    ## At most `max` bytes (at least one), waiting for some; none at the
+    ## end of the stream.
+    def read(mut self, max: int) -> bytes ! StreamError
+
+## A sink of bytes.
+pub trait Writer:
+    ## Writes all of `data`.
+    def write(mut self, data: bytes) -> ! StreamError
+    ## Sends on what was written but is held back.
+    def flush(mut self) -> ! StreamError
+
+## Where `Seek.seek` moves to: an offset from the start, from the end, or
+## from the current position.
+pub enum SeekFrom:
+    Start(offset: int)
+    End(offset: int)
+    Current(offset: int)
+
+## A stream with positions.
+pub trait Seek:
+    ## Moves to `to` and gives the new position from the start; a position
+    ## before the start is `Other`.
+    def seek(mut self, to: SeekFrom) -> int ! IoError
+
+## Every byte of `r`, to the end of the stream.
+##
+## ```
+## var r = BytesReader.new(b"all of it")
+## assert read_to_end(mut r).expect("in memory") == b"all of it"
+## ```
+pub def read_to_end[R: Reader](mut r: R) -> bytes ! StreamError:
+    var out = bytes.new()
+    while True:
+        let chunk = r.read(65536)?
+        if chunk.is_empty():
+            return Ok(out)
+        out = out + chunk
+
+## Copies every byte of `r` to `w`; gives how many.
+##
+## ```
+## var r = BytesReader.new(b"copied")
+## var w = BytesWriter.new()
+## assert copy(mut r, mut w).expect("in memory") == 6
+## assert w.to_bytes() == b"copied"
+## ```
+pub def copy[R: Reader, W: Writer](mut r: R, mut w: W) -> int ! StreamError:
+    var n = 0
+    while True:
+        let chunk = r.read(65536)?
+        if chunk.is_empty():
+            w.flush()?
+            return Ok(n)
+        n += len(chunk)
+        w.write(chunk)?
+
+## A reader of bytes in memory, which can seek.
+##
+## ```
+## var r = BytesReader.new(b"hello world")
+## assert r.read(5).expect("in memory") == b"hello"
+## assert r.seek(SeekFrom.Current(1)).expect("in memory") == 6
+## assert r.read(100).expect("in memory") == b"world"
+## assert r.read(100).expect("in memory").is_empty()
+## assert r.seek(SeekFrom.End(-3)).expect("in memory") == 8
+## assert r.read(2).expect("in memory") == b"rl"
+## ```
+pub struct BytesReader:
+    data: bytes
+    at: int
+
+    pub pure def new(own data: bytes) -> BytesReader:
+        return BytesReader(data=data, at=0)
+
+    ## How many bytes are left to read.
+    pub pure def remaining(self) -> int:
+        return len(self.data) - self.at
+
+impl Reader for BytesReader:
+    def read(mut self, max: int) -> bytes ! StreamError:
+        let n = len(self.data)
+        let end = if n - self.at < max: n else: self.at + max
+        let out = self.data.slice(self.at, end)
+        self.at = end
+        return Ok(out)
+
+impl Seek for BytesReader:
+    def seek(mut self, to: SeekFrom) -> int ! IoError:
+        let target = match to:
+            case SeekFrom.Start(offset): offset
+            case SeekFrom.End(offset): len(self.data) + offset
+            case SeekFrom.Current(offset): self.at + offset
+        if target < 0:
+            return Err(Other(message=String.new("a seek to {target}, before the start")))
+        self.at = if target > len(self.data): len(self.data) else: target
+        return Ok(self.at)
+
+## A writer into bytes in memory.
+pub struct BytesWriter:
+    chunks: list[bytes]
+
+    pub pure def new() -> BytesWriter:
+        return BytesWriter(chunks=[])
+
+    ## Everything written so far.
+    pub pure def to_bytes(self) -> bytes:
+        var out = bytes.new()
+        for c in self.chunks:
+            out = out + c
+        return out
+
+    ## Everything written so far, as text; `InvalidUtf8` when it is not
+    ## UTF-8.
+    pub pure def to_text(self) -> String ! Utf8Error:
+        return self.to_bytes().decode()
+
+impl Writer for BytesWriter:
+    def write(mut self, data: bytes) -> ! StreamError:
+        self.chunks.push(data.slice(0, len(data)))
+        return Ok(())
+
+    def flush(mut self) -> ! StreamError:
+        return Ok(())
+
+impl Reader for Conn:
+    def read(mut self, max: int) -> bytes ! StreamError:
+        return Ok(self.stream.read(max)?)
+
+impl Writer for Conn:
+    def write(mut self, data: bytes) -> ! StreamError:
+        return Ok(self.stream.write(data)?)
+
+    def flush(mut self) -> ! StreamError:
+        return Ok(())
+
+## Standard input as a stream of bytes: its lines, each with its line
+## break.
+##
+## ```
+## var r = StdinReader.new(Stdin.fake(["one", "two"]))
+## var lines = BufReader.new(r)
+## assert lines.read_line().expect("in memory") == Some(String.new("one"))
+## assert lines.read_line().expect("in memory") == Some(String.new("two"))
+## assert lines.read_line().expect("in memory") == None
+## ```
+pub struct StdinReader:
+    stdin: Stdin
+    pending: bytes
+
+    pub def new(stdin: Stdin) -> StdinReader:
+        return StdinReader(stdin=stdin, pending=bytes.new())
+
+impl Reader for StdinReader:
+    def read(mut self, max: int) -> bytes ! StreamError:
+        if self.pending.is_empty():
+            match self.stdin.read_line():
+                case Some(line):
+                    self.pending = "{line}\n".encode()
+                case None:
+                    return Ok(bytes.new())
+        let n = len(self.pending)
+        let end = if n < max: n else: max
+        let out = self.pending.slice(0, end)
+        self.pending = self.pending.slice(end, n)
+        return Ok(out)
+
+## A reader with a buffer, which reads lines and runs of bytes over
+## another reader, asking it for `capacity` bytes at a time.
+##
+## ```
+## var r = BufReader.new(BytesReader.new(b"first\nsecond\r\nthird"))
+## assert r.read_line().expect("in memory") == Some(String.new("first"))
+## assert r.read_line().expect("in memory") == Some(String.new("second"))
+## assert r.read_line().expect("in memory") == Some(String.new("third"))
+## assert r.read_line().expect("in memory") == None
+## ```
+pub struct BufReader[R: Reader]:
+    inner: R
+    buf: bytes
+    capacity: int
+
+    pub def new(own inner: R, capacity: int = 8192) -> BufReader[R]:
+        requires capacity >= 1
+        return BufReader(inner=inner, buf=bytes.new(), capacity=capacity)
+
+    ## Reads into the buffer; whether anything came.
+    def fill(mut self) -> bool ! StreamError:
+        let more = self.inner.read(self.capacity)?
+        if more.is_empty():
+            return Ok(False)
+        self.buf = self.buf + more
+        return Ok(True)
+
+    ## The bytes up to and including the next `byte`, or to the end of the
+    ## stream; none at the end.
+    ##
+    ## ```
+    ## var r = BufReader.new(BytesReader.new(b"a,b,c"), capacity=1)
+    ## assert r.read_until(44u8).expect("in memory") == b"a,"
+    ## assert r.read_until(44u8).expect("in memory") == b"b,"
+    ## assert r.read_until(44u8).expect("in memory") == b"c"
+    ## ```
+    pub def read_until(mut self, byte: u8) -> bytes ! StreamError:
+        var searched = 0
+        while True:
+            var i = searched
+            while i < len(self.buf):
+                if self.buf[i] == byte:
+                    let out = self.buf.slice(0, i + 1)
+                    self.buf = self.buf.slice(i + 1, len(self.buf))
+                    return Ok(out)
+                i += 1
+            searched = len(self.buf)
+            if not self.fill()?:
+                let out = self.buf.copy()
+                self.buf = bytes.new()
+                return Ok(out)
+
+    ## The next line without its line break (`\n` or `\r\n`), or `None` at
+    ## the end of the stream.
+    pub def read_line(mut self) -> String? ! {IoError, NetError, TaskError, Utf8Error}:
+        let raw = self.read_until(10u8)?
+        if raw.is_empty():
+            return Ok(None)
+        var end = len(raw)
+        if raw[end - 1] == 10u8:
+            end -= 1
+            if end > 0 and raw[end - 1] == 13u8:
+                end -= 1
+        return Ok(Some(raw.slice(0, end).decode()?))
+
+    ## Every line left, without their line breaks.
+    ##
+    ## ```
+    ## var r = BufReader.new(BytesReader.new(b"x\ny\n"))
+    ## assert r.read_lines().expect("in memory") == [String.new("x"), String.new("y")]
+    ## ```
+    pub def read_lines(mut self) -> list[String] ! {IoError, NetError, TaskError, Utf8Error}:
+        var out: list[String] = []
+        while let Some(line) = self.read_line()?:
+            out.push(line)
+        return Ok(out)
+
+impl[R: Reader] Reader for BufReader[R]:
+    def read(mut self, max: int) -> bytes ! StreamError:
+        if self.buf.is_empty():
+            return self.inner.read(max)
+        let n = len(self.buf)
+        let end = if n < max: n else: max
+        let out = self.buf.slice(0, end)
+        self.buf = self.buf.slice(end, n)
+        return Ok(out)
+
+## A writer that gathers writes until it holds `capacity` bytes, then
+## writes them to another writer at once; `flush` writes what it holds.
+##
+## ```
+## var w = BufWriter.new(BytesWriter.new(), capacity=4)
+## w.write(b"ab").expect("in memory")
+## assert w.held() == 2
+## w.write(b"cd").expect("in memory")
+## assert w.held() == 0
+## w.write(b"e").expect("in memory")
+## w.flush().expect("in memory")
+## assert w.into_inner().to_bytes() == b"abcde"
+## ```
+pub struct BufWriter[W: Writer]:
+    inner: W
+    buf: bytes
+    capacity: int
+
+    pub def new(own inner: W, capacity: int = 8192) -> BufWriter[W]:
+        requires capacity >= 1
+        return BufWriter(inner=inner, buf=bytes.new(), capacity=capacity)
+
+    ## How many bytes it holds, not yet written on.
+    pub def held(self) -> int:
+        return len(self.buf)
+
+    ## The writer it writes to; what it holds is lost unless `flush` wrote
+    ## it on first.
+    pub def into_inner(own self) -> W:
+        return self.inner
+
+impl[W: Writer] Writer for BufWriter[W]:
+    def write(mut self, data: bytes) -> ! StreamError:
+        self.buf = self.buf + data
+        if len(self.buf) >= self.capacity:
+            let out = self.buf.copy()
+            self.buf = bytes.new()
+            self.inner.write(out)?
+        return Ok(())
+
+    def flush(mut self) -> ! StreamError:
+        if not self.buf.is_empty():
+            let out = self.buf.copy()
+            self.buf = bytes.new()
+            self.inner.write(out)?
+        return self.inner.flush()

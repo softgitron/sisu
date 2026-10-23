@@ -110,6 +110,19 @@ pub struct Layout {
     pub base: PathBuf,
     /// The root package is a script: a single file with a `#!` line.
     pub script: bool,
+    /// The features the command line asked for (`--features`) that are
+    /// not features: each name as given, and the package it names
+    /// (decision 250).
+    pub unknown_requested: Vec<(String, String)>,
+}
+
+/// The features a command line asks for (`--features`, `--no-default-features`;
+/// 09, decision 250): names of the root package's features, or `DEP/FEATURE`
+/// of a dependency's, on besides `default`, which `no_default` leaves off.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FeatureRequest {
+    pub names: Vec<String>,
+    pub no_default: bool,
 }
 
 impl Layout {
@@ -430,6 +443,11 @@ impl Loader {
 /// The layout of a package or workspace in `dir` (for a workspace, of the
 /// member `member`), with file names relative to `base`.
 pub fn load_package(dir: &Path, base: &Path) -> Layout {
+    load_package_with(dir, base, &FeatureRequest::default())
+}
+
+/// [`load_package`], with the features the command line asks for.
+pub fn load_package_with(dir: &Path, base: &Path, request: &FeatureRequest) -> Layout {
     let mut l = Loader {
         layout: Layout { base: canonical(base), ..Layout::default() },
         target: manifest::target_facts(),
@@ -439,7 +457,7 @@ pub fn load_package(dir: &Path, base: &Path) -> Layout {
     let mut stack = Vec::new();
     l.package(dir, &mut stack, None);
     let mut layout = l.layout;
-    turn_on_features(&mut layout);
+    turn_on_features(&mut layout, request);
     // The lockfile: beside the workspace's manifest when the package is a
     // member of one, else beside its own.
     let canon = canonical(dir);
@@ -473,6 +491,12 @@ pub fn workspace_of(dir: &Path) -> Option<(PathBuf, Vec<PathBuf>)> {
 /// no name. A script (`#!` on its first line) may declare dependencies in
 /// its inline metadata, by paths relative to its directory.
 pub fn load_file(name: &str, text: &str, cwd: &Path) -> Layout {
+    load_file_with(name, text, cwd, &FeatureRequest::default())
+}
+
+/// [`load_file`], with the features the command line asks for: a file
+/// that is no script declares none.
+pub fn load_file_with(name: &str, text: &str, cwd: &Path, request: &FeatureRequest) -> Layout {
     let disk = cwd.join(name);
     let mut layout = Layout { base: cwd.to_path_buf(), ..Layout::default() };
     layout.script = text.starts_with("#!");
@@ -490,11 +514,15 @@ pub fn load_file(name: &str, text: &str, cwd: &Path) -> Layout {
         package: 0,
     });
     if !layout.script {
+        turn_on_features(&mut layout, request);
         return layout;
     }
     let meta = match manifest::script_metadata(text) {
         Ok(Some(m)) => m,
-        Ok(None) => return layout,
+        Ok(None) => {
+            turn_on_features(&mut layout, request);
+            return layout;
+        }
         Err(range) => {
             layout.files.push((name.to_string(), text.to_string()));
             layout
@@ -527,17 +555,19 @@ pub fn load_file(name: &str, text: &str, cwd: &Path) -> Layout {
         }
     }
     let mut layout = l.layout;
-    turn_on_features(&mut layout);
+    turn_on_features(&mut layout, request);
     layout
 }
 
 /// The features each package of the build turns on (09; decision 243):
-/// the root package's `default` feature, each dependency's `default`
-/// unless every entry that reaches it says `default-features = false`,
-/// the features those entries list, and what each feature that is on
-/// turns on in turn, of its own package or (`DEP/FEATURE`) of a
-/// dependency. A name that is no feature is `E1018`.
-fn turn_on_features(layout: &mut Layout) {
+/// the root package's `default` feature (unless the command line says
+/// `--no-default-features`) and those the command line names (decision
+/// 250), each dependency's `default` unless every entry that reaches it
+/// says `default-features = false`, the features those entries list, and
+/// what each feature that is on turns on in turn, of its own package or
+/// (`DEP/FEATURE`) of a dependency. A name that is no feature is `E1018`
+/// in a manifest, and is kept in `unknown_requested` from the command line.
+fn turn_on_features(layout: &mut Layout, request: &FeatureRequest) {
     let n = layout.packages.len();
     let has =
         |p: usize, f: &str| layout.packages.get(p).is_some_and(|k| k.features.iter().any(|x| x.name == f));
@@ -588,7 +618,26 @@ fn turn_on_features(layout: &mut Layout) {
     // The packages the build reaches, and what reaching them turns on.
     let mut reached = vec![false; n];
     let mut stack = vec![0];
-    let mut work: Vec<(usize, String)> = vec![(0, "default".to_string())];
+    let mut work: Vec<(usize, String)> =
+        if request.no_default { Vec::new() } else { vec![(0, "default".to_string())] };
+    let mut unknown = Vec::new();
+    for name in &request.names {
+        let target = match name.split_once('/') {
+            Some((dep, x)) => layout
+                .packages
+                .first()
+                .and_then(|p| p.wants.iter().find(|w| w.name == dep && w.active))
+                .and_then(|w| w.package)
+                .map(|d| (d, x.to_string())),
+            None => Some((0, name.clone())),
+        };
+        match target {
+            Some((p, f)) if has(p, &f) => work.push((p, f)),
+            Some((p, _)) => unknown.push((name.clone(), shown(p))),
+            None => unknown.push((name.clone(), shown(0))),
+        }
+    }
+    layout.unknown_requested = unknown;
     while let Some(p) = stack.pop() {
         if p >= n || reached[p] {
             continue;

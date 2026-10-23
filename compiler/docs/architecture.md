@@ -386,7 +386,12 @@ types and of tuples are generated (`<std>/builtin_impls.sisu`, from
 
 `Iterable[T]`, a parameter type only, accepts a `list`, `set`, `dict` or
 `Iter` whose items are `T`; a borrowed collection's items are references,
-and an item `ref T` with a `Copy` type `T` decays to `T`.
+and an item `ref T` with a `Copy` type `T` decays to `T`. A value of any
+other type that implements `Iterator` (`xs.iter().map(f)`, a program's
+own iterator) is passed as `iter_from(x)`, a prelude generator that takes
+its items from it as they are asked for (decision 247); a reference to
+one is a mismatch (`E0300`), since nothing could own what it is moved
+into.
 
 Resolution (`sisu-resolve`) declares every item of every module of the
 program (next section) and of each std module they import (`import cli`,
@@ -657,9 +662,10 @@ of it compile-time (`if comptime a or b:`), and both branches are
 checked. `comptime assert c, "m"` and `comptime e` as statements run at
 compile time and leave nothing. A `comptime def` may be called only at
 compile time, inside `comptime` or another `comptime def` (`E0605`, also
-for taking it as a function value). `const X: T = comptime f()` is a
-constant computed by the compiler; a constant is computed even when
-nothing uses it.
+for taking it as a function value); one a trait declares besides its
+`derive` is called `Trait.name(...)` (decision 251). `const X: T =
+comptime f()` is a constant computed by the compiler; a constant is
+computed even when nothing uses it.
 
 **Evaluation.** Lowering makes each `comptime` expression a SIR function
 of no arguments, `OWNER#comptimeN`, of kind `comptime STEPS`, and the use
@@ -747,7 +753,10 @@ Reflection in templates adds to a derive's: `is_int`, `is_float`,
 `is_option`, `is_tuple`, `elem_of(T)` (a list's or option's element
 type), `attributes_of(T)` (each attribute on the declaration, with `name`
 and `args`, the text of each argument), `implements(T, "Trait")`; a
-field's `ty` and `default` (whether it has one); `comptime panic(msg)`
+field's `ty` and `default` (whether it has one); `is_trait(T)` and
+`methods_of(T)`, a trait's methods or a type's own (decision 251), each
+with `name`, `index`, `receiver`, `params` (each with `name`, `index`,
+`mode` and `ty`), `ret` and `provided`; `comptime panic(msg)`
 (a compile error for the types that reach it). Two queries make code
 rather than values: `reflect.default_of(f)` is the field's default,
 evaluated where it is written (a call `X.__default_f()`, which the
@@ -787,10 +796,20 @@ before anything calls it, and its instance takes its name, so a call, a
 trait's call, `dyn` and a function value all run it; a method's instance
 is a method of an inherent impl of its type, whose compile-time code
 names the type `Self`; and a method of a generic type is made for each
-type argument it is called with. A trait's own methods, the methods of a
-generic trait impl, a `comptime def`, a constant and a test have no
-instances, so `reflect`, `x.[f]` and `comptime for` there are `E0900`,
-naming the place, as is `return impl` outside a derive.
+type argument it is called with. So are the places decision 251 adds:
+a test (each case of a parametrised one too), made once; a `comptime
+def` that reflects or takes a type (`T: type`, whose argument a call
+writes among its arguments), made for each type it is given; a trait's
+provided method, made in each impl that does not write it, as that
+impl's method; and a method of a trait impl, made once whatever its type
+parameters, which stay parameters (known by name only, so asking about
+one stops the instance), in an impl with the impl's parameters, so that
+a trait's call reaches it through a bound or a `dyn`. A constant's or a
+default's value that reflects is unfolded once everything it names is
+declared, and compile-time code may be in a closure's block. A
+refinement's `where` clause and an `invariant` have no instances, so
+`reflect`, `x.[f]` and `comptime for` there are `E0900`, naming the
+place, as is `return impl` outside a derive.
 
 ### The interceptors and fakes of a program's traits
 
@@ -809,8 +828,9 @@ the log, each call written `method(arguments)`) and returns what
 `on_METHOD(result)` queued for it, the last result again once the others
 are used, or panics with nothing queued; copies share what it recorded.
 A module gets them only when its text names `Wrap` or `Fake`. In Sisu
-both are compile-time code over the trait's methods (`reflect.methods_of`,
-which waits for Q-27 to say how compile-time code writes a signature).
+both are compile-time code over the trait's methods: `reflect.methods_of`
+gives them (decision 251), and Q-27 is to say how compile-time code
+writes a method with a reflected signature.
 
 ## Type checking
 
@@ -1192,7 +1212,10 @@ closures). The rules, so that another front end produces the same SIR:
   type arguments of the function that makes it, and holds the loans of
   those references, so the ownership checker keeps it from escaping the
   frame of what it captures. An `own` closure's tuple holds copies
-  instead, and no loan.
+  instead, and no loan. A function value is dropped as a value that holds
+  a capability handle is, since its environment may hold copies of
+  handles (decision 248): lowering drops every value of a type that holds
+  a function value, and a callee drops a function value it was given.
 - **Functions as values.** A function used as a value is its constant,
   `const fn NAME`, unless it is generic, or borrows a parameter (a
   function value takes its arguments by value): then it is a closure of
@@ -1631,8 +1654,9 @@ through which the value is reached; locking a mutex another task holds
 waits, locking one the task itself holds panics (`R0073`), as does
 locking a poisoned one (`R0074`). An `RwLock` (std.task) is a mutex that
 also counts its readers: `read` gives a `ReadGuard` whose value is only
-read, and waits while a task writes; `write` gives the guard a `Mutex`
-gives, and waits while any task reads or writes. An `Atomic` is a `Cell`
+read, and waits while a task writes or waits to write, so readers that
+keep coming cannot keep a writer out (decision 249); `write` gives the
+guard a `Mutex` gives, and waits while any task reads or writes. An `Atomic` is a `Cell`
 that tasks may share, each of whose operations is one step; `Once` and
 `Condvar` are Sisu in std.task over a `Mutex` and channels (decision
 239). An `Arena[T]` holds
@@ -2013,15 +2037,23 @@ then all of them advance by the smallest wait among their timers (17,
 items come from a task-like closure run on demand: `next` switches to it
 until its next `yield`, which hands the item over and switches back. A
 generator runs only when its consumer asks, never because a scope's
-cancellation woke the tasks that wait. One dropped before its end is
+cancellation woke the tasks that wait. Code that cannot wait for it
+(another iterator's adapter, `zip` or `enumerate` over it; an intrinsic
+given it as an `Iterable[T]`, `sum` or `sorted`; a generator being
+driven so, whose own `next` on another generator) drives it instead:
+the generator runs there and then, outside the schedule, to its next
+`yield` or its end, with no yield point switching and the budget left as
+it was, so a seed's schedule is the same in both implementations; an
+operation in it that would wait aborts the program (`panic.driven-wait`,
+`R0130`), since nothing could run the code that asked (decision 247). One dropped before its end is
 closed, as Python's `close` closes one (decision 236): suspended at a
 `yield`, it unwinds from there at once, outside the schedule, running its
 frames' drops and `defer`s before the consumer goes on; one that never
 started drops what its closure captured. A panic while it cleans up
 aborts the program (`panic.during-abandon`), as a panic during unwinding
 does, and so does an operation that would wait there
-(`panic.abandoned-wait`). A receiver's or generator's iterator inside
-another iterator's adapter cannot wait (`R0091`).
+(`panic.abandoned-wait`). A receiver's iterator inside another
+iterator's adapter cannot wait (`R0091`).
 
 **`log`** writes records to the standard error with their level and,
 for a task, the task's path (`R0085`), which stands in for the trace
@@ -2130,10 +2162,13 @@ function's argument or an argument an intrinsic keeps, and each drop
 takes one; the last drop drops the object, running its `Drop`, and
 empties the cell, after which a reference into it dangles
 (`panic.dangling`), which the checker's loans keep a program from
-reaching. A `Lent` counts nothing. A function value's environment is
-never dropped (decision 224), so a handle an `own` closure captures keeps
-its object until the run ends. `capabilities/object_drops` and
-`ownership/handle_borrows` pin the two halves.
+reaching. A `Lent` counts nothing. A function value is dropped like a
+value that holds a handle, since an `own` closure's environment holds
+copies of what it captured (decision 248): a copy of the value counts
+the handles its environment holds, and its drop lets them go, so a handle
+an `own` closure captures goes with the last copy of the function value.
+`capabilities/object_drops`, `capabilities/closure_drops` and
+`ownership/handle_borrows` pin the three.
 
 **The root objects** are the host's: `HostFs`, `HostNet`, `HostClock`,
 `HostRand`, `HostEnv` and `HostProc`, builtin types that no code can
@@ -3050,7 +3085,7 @@ where the parts are:
 | a tuple or a struct | the sum | the parts in order |
 | an enum | 1 + the largest variant | the tag (the variant's index), then the variant's fields |
 | an `error` enum, a union of error sets | 3 + the largest variant | its own type's number, its return trace, the tag, then the fields |
-| a function value | 1 + K | the code's address, then its closure's environment, K words, the largest an `own` closure of the program needs and at least one, or the address of a larger environment of references (decision 224) |
+| a function value | 2 + K | the code's address, then its closure's environment, K words, the largest an `own` closure of the program needs and at least one, or the address of a larger environment of references (decision 224), then the environment's type number plus one when a copy or a drop must reach what it holds, else 0 (decision 248) |
 | `dict[K, V]`, `set[T]`, `Iter[T]` | 1 | the address of a runtime object |
 | a capability handle | 1 | the address of a cell that holds its object as a `dyn` holds its value: the object's type, its address, then the object (decision 209), after a word counting the handle's copies (decision 237) |
 | `Lent[T]` | T | the handle (or test clock) it lends |
@@ -3061,9 +3096,9 @@ where the parts are:
 | `Scope`, `Handle[T]`, `Cancellation` | 1 | the number of the scope or the task in the scheduler |
 | `Sender[T]`, `Receiver[T]` | 1 | the number of the channel |
 | `Timer` | 2 | the number of its clock, and the moment in nanoseconds on it |
-| `Mutex[T]` | 3 + T | whether it is locked, the task holding it, whether it is poisoned, then the value |
+| `Mutex[T]` | 4 + T | whether it is locked, the task holding it, whether it is poisoned, the tasks waiting to write an `RwLock` (decision 249), then the value |
 | `MutexGuard[T]` | 1 | the address of the value inside its mutex |
-| `RwLock[T]` | 3 + T | a `Mutex[T]` whose lock word is 2 while tasks read, its holder word then their number (decision 239) |
+| `RwLock[T]` | 4 + T | a `Mutex[T]` whose lock word is 2 while tasks read, its holder word then their number (decision 239), and whose fourth word counts the tasks waiting to write (decision 249) |
 | `ReadGuard[T]` | 1 | the address of the value inside its `RwLock` |
 | `Atomic[T]` | T | the value, as a `Cell[T]` |
 | `Shared[T]`, `Weak[T]` | 1 | the address of the value in a heap cell, after a header of four words: the owners, the weak handles, the task that made it, its flags (decision 207) |
@@ -3186,9 +3221,11 @@ A closure is its function's code and its environment, the tuple of its
 captures, held in the function value itself and copied with it: a
 function value has as many words of environment as the largest `own`
 closure of the program needs, at least one, so that nothing is allocated
-and nothing needs freeing (a function value is `Copy` and SIR never drops
-one, so a handle an `own` closure captures is counted until the run
-ends, decision 237). Which size that is only compiling finds, so a
+and nothing needs freeing, and a last word that names the environment's
+type (its number plus one) when what it holds is counted, an `own`
+closure's copies of handles, else 0: a copy of the value counts them and
+its drop lets them go, through the runtime only when the word is not 0
+(decision 248). Which size that is only compiling finds, so a
 program with a larger `own` environment is compiled again with wider
 function values. A call passes the callee the address of the
 environment's words in the value; a closure of references whose
@@ -3225,7 +3262,11 @@ A parameter of type `Iterable[T]` takes whatever iterable the caller has:
 the caller passes a reference to it together with the number of its type,
 as a reference to a `dyn` is passed, and the runtime iterates by that type
 (decision 210). A value the caller moved in is dropped, with whatever the
-callee left of it, when the call returns or unwinds (decision 235).
+callee left of it, when the call returns or unwinds (decision 235); an
+intrinsic takes such a value whole, so its caller leaves it alone. An
+iterator whose items are references (a generator's of `ref T`) decays
+for a `T` that is not one, as a borrowed collection's items do (decision
+247).
 
 ### The runtime
 
@@ -4607,7 +4648,8 @@ what transcribing the Rust type checker found in stage 0)
      second word, rather than the address of a cell: the call passes it as
      it passes an address, and the closure's code stores it in a slot of
      its frame, so the body reads its captures as before. A function value
-     is `Copy` and SIR never drops one, so a heap environment could never
+     is `Copy` and SIR never dropped one (decision 248 drops one for the
+     handles its environment holds), so a heap environment could never
      be freed; the suite's and stage 1's `own` closures all have
      environments of one word. A task's closure keeps its cell, which the
      runtime frees when the task ends (decision 206).
@@ -4957,40 +4999,40 @@ what transcribing the Rust type checker found in stage 0)
      tasks that wait, no longer wakes a suspended generator, which then ran
      its body on by itself. `concurrency/generator_close` and
      `concurrency/generator_close_panic` hold the two to the same output.
-237. A capability's object, and a `Cap`'s value, goes with the last copy
-     of its handle, in the interpreter as natively: each copy of a handle
-     is counted, and the drop of the last runs the object's `Drop` and
-     frees its cell, where the cell lived as long as the run and the
-     `Drop` never ran (decision 98), so a program that made fakes or
-     attenuations in a loop grew until it ended. Handles stay `Copy`
-     (Q-51); a copy is counted where it is made (a variable, a field, an
-     aggregate, a closure's environment, a function's argument, an
-     argument an intrinsic keeps, `sisu_rt_retain` natively) and a move
-     is not; a `Lent` counts nothing. This changes rules of the front end,
-     which stage 1 transcribes. Lowering's `needs_drop` holds for a value
-     whose type holds a handle or a `Cap` (`holds_capability`) and for one
-     whose type is `Copy` only by a bound (a generic function's `T: Copy`
-     may be a handle; the drop of an `int` does nothing); a temporary of
-     such a type is moved into what takes it, an argument a callee borrows
-     (not `own`) is a copy of a place, a temporary's being dropped with
-     the statement's others, and a comparison or an interpolation borrows
-     it. SIR's `drops_something` holds for the handles, `System` and
-     `Cap`, so drop glue drops them. A parameter holding a handle counts as
-     borrowed for the elision rules, only a `TestClock` lends nothing of
-     its own (`is_run_handle`), and the ownership checker gives a call's
-     result that may point into a handle's object (its `from`) a loan of
-     the place the call copied the handle from, which a `return` may carry
-     for a parameter in its `from`: `let v = Cap(x).get()` is `E0406` and
-     replacing a handle while a borrow of its object is used is `E0402`
-     (`ownership/handle_borrows`), where both ran with the object kept
-     alive. `System.assemble` takes its handles `own`, and the
-     interpreter's transcript runs give each run's `System` its own counts
-     of the world's handles. A function value's environment is never
-     dropped (decision 224), so a handle an `own` closure captures keeps
-     its object until the run ends, when the runtime forgets the cells
-     left (decision 223), a registry of live cells by address that a
-     release finds in logarithmic time. `capabilities/object_drops` holds
-     the two implementations to the same drops.
+237. A capability's object, and a `Cap`'s value, goes with the last copy of
+     its handle, in the interpreter as natively: each copy of a handle is
+     counted, and the drop of the last runs the object's `Drop` and frees
+     its cell, where the cell lived as long as the run and the `Drop` never
+     ran (decision 98), so a program that made fakes or attenuations in a
+     loop grew until it ended. Handles stay `Copy` (Q-51); a copy is counted
+     where it is made (a variable, a field, an aggregate, a closure's
+     environment, a function's argument, an argument an intrinsic keeps,
+     `sisu_rt_retain` natively) and a move is not; a `Lent` counts nothing.
+     This changes rules of the front end, which stage 1 transcribes.
+     Lowering's `needs_drop` holds for a value whose type holds a handle or
+     a `Cap` (`holds_capability`) and for one whose type is `Copy` only by a
+     bound (a generic function's `T: Copy` may be a handle; the drop of an
+     `int` does nothing); a temporary of such a type is moved into what
+     takes it, an argument a callee borrows (not `own`) is a copy of a
+     place, a temporary's being dropped with the statement's others, and a
+     comparison or an interpolation borrows it. SIR's `drops_something`
+     holds for the handles, `System` and `Cap`, so drop glue drops them. A
+     parameter holding a handle counts as borrowed for the elision rules,
+     only a `TestClock` lends nothing of its own (`is_run_handle`), and the
+     ownership checker gives a call's result that may point into a handle's
+     object (its `from`) a loan of the place the call copied the handle
+     from, which a `return` may carry for a parameter in its `from`: `let v
+     = Cap(x).get()` is `E0406` and replacing a handle while a borrow of its
+     object is used is `E0402` (`ownership/handle_borrows`), where both ran
+     with the object kept alive. `System.assemble` takes its handles `own`,
+     and the interpreter's transcript runs give each run's `System` its own
+     counts of the world's handles. A function value's environment is never
+     dropped (decision 224), so a handle an `own` closure captures keeps its
+     object until the run ends, when the runtime forgets the cells left
+     (decision 223; decision 248 drops a function value), a registry of live
+     cells by address that a release finds in logarithmic time.
+     `capabilities/object_drops` holds the two implementations to the same
+     drops.
 
 **Stage 2, round 4, continued: the language** (section "Traits and
 generics"; "Compile-time evaluation")
@@ -5032,7 +5074,8 @@ generics"; "Compile-time evaluation")
      reads or writes; neither wait is a point of cancellation, a task
      that writes and asks again panics (`R0073`), and a write guard
      dropped by unwinding poisons the lock as a mutex's does (D-077).
-     Readers that keep coming keep a writer waiting. It is `Send` when
+     Readers that keep coming keep a writer waiting (decision 249: no
+     longer). It is `Send` when
      `T` is, and `Sync` when `T` is also `Sync`. `Once.call_once` runs
      its function under a `Mutex[bool]`, so a caller that comes while it
      runs waits; a call that panics leaves it not done. `Condvar.wait`
@@ -5112,78 +5155,77 @@ generics"; "Compile-time evaluation")
      over 64 bits, as the replay tokens' hashes are: a collision would reuse
      a result, which a cache of passing results accepts.
 243. Conditional compilation (08, "`@cfg` on items and `if comptime` in
-     bodies"): an item, an item of a suite or an `extern` block, or a
-     method of an impl or a trait whose `@cfg` does not hold is left out
-     before names are resolved, as if it were not written; the driver
-     filters each module's syntax tree (`cfg.rs`), and a tool that shows
-     the file shows it whole. A condition is `test`, `feature="NAME"`,
-     `not` and a condition, or `all(...)` or `any(...)` of conditions,
-     and several in one `@cfg` must all hold. Sisu's `not` is the
-     operator, so `@cfg(not test)` is the canonical form, and a feature
-     that is off is `not any(feature="tls")`: `feature="tls"` is an
-     argument, not an expression, so `not(feature="tls")` does not
-     parse. Anything else is `E0266`, and its item is kept. `test` holds
-     when the program is built with its tests: `sisu test`, `sisu bench`,
-     `sisu check` and the tools that check (the language server, the
-     REPL, `sisu audit`). `sisu run`, `sisu build` and `sisu sir` build it
-     without them, and leave out its `test`, `suite` and `bench` items and
-     its doc examples too, as Rust's `cfg(test)` leaves out `#[test]`
-     functions: a test may use an `@cfg(test)` helper, and a run does not
-     stop at a mistake in a test. A feature belongs to a package (09):
-     the root package's `default` is on, and each dependency's unless
-     every entry that reaches it says `default-features = false`; an
-     entry's `features` are on; and what a feature that is on lists is
-     on in turn, a feature of its own package or (`DEP/FEATURE`) of a
-     dependency. These are Cargo's rules, without optional dependencies,
-     which arrive with a registry. A name a feature list gives that is no
-     feature is `E1018`, and a `feature="NAME"` whose package declares no
-     such feature is `W0006` (a single file declares none), the mistake
-     `rustc`'s `unexpected_cfgs` lint exists for. There is no
-     command-line switch for features yet (Cargo's `--features`). The
-     features are part of the program's layout, so a recorded run
-     replays with them. This changes rules stage 1 transcribes: the
-     filter and its diagnostics, a build without tests (the driver's
-     filter, and the resolver's `Sources::tests` for doc examples), the
-     manifest's `features` and `default-features` and the check of
-     feature names. `comptime/cfg`, `comptime/cfg_errors`,
+     bodies"): an item, an item of a suite or an `extern` block, or a method
+     of an impl or a trait whose `@cfg` does not hold is left out before
+     names are resolved, as if it were not written; the driver filters each
+     module's syntax tree (`cfg.rs`), and a tool that shows the file shows
+     it whole. A condition is `test`, `feature="NAME"`, `not` and a
+     condition, or `all(...)` or `any(...)` of conditions, and several in
+     one `@cfg` must all hold. Sisu's `not` is the operator, so `@cfg(not
+     test)` is the canonical form, and a feature that is off is `not
+     any(feature="tls")`: `feature="tls"` is an argument, not an expression,
+     so `not(feature="tls")` does not parse (decision 250 parses it).
+     Anything else is `E0266`, and its item is kept. `test` holds when the
+     program is built with its tests: `sisu test`, `sisu bench`, `sisu
+     check` and the tools that check (the language server, the REPL, `sisu
+     audit`). `sisu run`, `sisu build` and `sisu sir` build it without them,
+     and leave out its `test`, `suite` and `bench` items and its doc
+     examples too, as Rust's `cfg(test)` leaves out `#[test]` functions: a
+     test may use an `@cfg(test)` helper, and a run does not stop at a
+     mistake in a test. A feature belongs to a package (09): the root
+     package's `default` is on, and each dependency's unless every entry
+     that reaches it says `default-features = false`; an entry's `features`
+     are on; and what a feature that is on lists is on in turn, a feature of
+     its own package or (`DEP/FEATURE`) of a dependency. These are Cargo's
+     rules, without optional dependencies, which arrive with a registry. A
+     name a feature list gives that is no feature is `E1018`, and a
+     `feature="NAME"` whose package declares no such feature is `W0006` (a
+     single file declares none), the mistake `rustc`'s `unexpected_cfgs`
+     lint exists for. There is no command-line switch for features yet
+     (Cargo's `--features`; decision 250 adds it). The features are part of
+     the program's layout, so a recorded run replays with them. This changes
+     rules stage 1 transcribes: the filter and its diagnostics, a build
+     without tests (the driver's filter, and the resolver's `Sources::tests`
+     for doc examples), the manifest's `features` and `default-features` and
+     the check of feature names. `comptime/cfg`, `comptime/cfg_errors`,
      `packages/features` and `packages/feature_errors` pin it.
-244. Reflection beyond generic functions (08, "Reflection"; 18's Phase 8):
-     a function or a method whose body runs code at compile time by
-     unfolding (a `reflect` query, `x.[f]`, a `comptime for` or `comptime
-     if` among statements or arms, or a `comptime` expression over a type
-     parameter) is a template, as a generic function that reflects
-     already was: a free function, generic or not, a method declared in a
-     type or in an inherent impl, or a method of a trait impl without type
-     parameters. Its instances are made the way a generic function's are
-     (`template.rs`, `instances.rs`), with three additions. A template
-     without type parameters is asked for once by the type checker,
-     whether anything calls it or not, and its instance's SIR function
-     takes the template's name, so whatever names the template (a call, a
-     trait's dispatch to the impl's method, a vtable, a function value,
-     `main` as the entry) runs the instance, and nothing else changes. A
-     method's instance is a method of an inherent impl of its type (the
-     type's alias in the instance's module), with `Self` bound to the
-     type's shape, so `reflect.fields_of(Self)` and `self.[f]` work in it.
-     And the types the compile-time code names that are not type
-     parameters (`reflect.fields_of(Point)`, a non-generic struct, enum,
-     error set or alias in the function's scope) are known to the
-     unfolding without being replaced in the code's text. A generic method
-     that calls a template with its own type parameters is promoted as a
-     generic function is. An instance is never a template itself (its
-     module is an instance's), so code an instance could not unfold is an
-     error of the instance, not another instance. A trait's own methods
-     and the methods of a generic trait impl would need an instance for
-     each implementing type that a trait's call resolves to, at run time
-     behind `dyn`; a `comptime def`, a constant and a test are evaluated
-     or checked directly; all of them keep `E0900`, which now names the
-     place. An error in an instance's code is reported in the instance's
-     text (`<NAME>/FILE`), as a generic template's always was; the
-     reflection over a trait's methods and a `comptime def` in a trait
-     other than its derive are not here (port-debt.md). This changes rules
-     of the resolver (which functions are templates, `Self` and named
-     types in the unfolding, the instance's form) and of the type checker
-     (the eager request, a template without type parameters as a value,
-     the `E0900` texts) that stage 1 transcribes. `reflect/methods` and
+244. Reflection beyond generic functions (08, "Reflection"; 18's Phase 8): a
+     function or a method whose body runs code at compile time by unfolding
+     (a `reflect` query, `x.[f]`, a `comptime for` or `comptime if` among
+     statements or arms, or a `comptime` expression over a type parameter)
+     is a template, as a generic function that reflects already was: a free
+     function, generic or not, a method declared in a type or in an inherent
+     impl, or a method of a trait impl without type parameters. Its
+     instances are made the way a generic function's are (`template.rs`,
+     `instances.rs`), with three additions. A template without type
+     parameters is asked for once by the type checker, whether anything
+     calls it or not, and its instance's SIR function takes the template's
+     name, so whatever names the template (a call, a trait's dispatch to the
+     impl's method, a vtable, a function value, `main` as the entry) runs
+     the instance, and nothing else changes. A method's instance is a method
+     of an inherent impl of its type (the type's alias in the instance's
+     module), with `Self` bound to the type's shape, so
+     `reflect.fields_of(Self)` and `self.[f]` work in it. And the types the
+     compile-time code names that are not type parameters
+     (`reflect.fields_of(Point)`, a non-generic struct, enum, error set or
+     alias in the function's scope) are known to the unfolding without being
+     replaced in the code's text. A generic method that calls a template
+     with its own type parameters is promoted as a generic function is. An
+     instance is never a template itself (its module is an instance's), so
+     code an instance could not unfold is an error of the instance, not
+     another instance. A trait's own methods and the methods of a generic
+     trait impl would need an instance for each implementing type that a
+     trait's call resolves to, at run time behind `dyn`; a `comptime def`, a
+     constant and a test are evaluated or checked directly; all of them keep
+     `E0900`, which now names the place (decision 251 makes them all). An
+     error in an instance's code is reported in the instance's text
+     (`<NAME>/FILE`), as a generic template's always was; the reflection
+     over a trait's methods and a `comptime def` in a trait other than its
+     derive are not here (port-debt.md). This changes rules of the resolver
+     (which functions are templates, `Self` and named types in the
+     unfolding, the instance's form) and of the type checker (the eager
+     request, a template without type parameters as a value, the `E0900`
+     texts) that stage 1 transcribes. `reflect/methods` and
      `reflect/methods_rejected` pin it.
 245. `std.core`, `std.string` and `std.fmt` are modules an import names,
      as 11's table of `std` lists them: `std.core` is the prelude itself
@@ -5236,3 +5278,153 @@ generics"; "Compile-time evaluation")
      for byte the same. `run/integer_division` pins every sign of `//`
      and `%`, the ends of `int` and the shifts, natively in both
      profiles. This changes no front-end rule.
+
+**Round 9: what round 8 left** (sections "Names and the standard
+library", "Tasks and the scheduler", "Capabilities", "Stage 2")
+
+247. An iterator written in Sisu given to an `Iterable[T]` parameter
+     (`sum(xs.iter().map(f))`, a program's own type that implements
+     `Iterator`) is passed as `iter_from(x)`, an `@internal` generic
+     generator of the prelude that takes its items from `x` as they are
+     asked for, since the functions that take an `Iterable[T]` iterate
+     collections and `Iter`s and never call a program's impls: both
+     implementations stopped there with an internal error. The checker
+     writes the call where it accepts the argument (`Iterable[T]`'s
+     coercion, in `call.rs` and `expr.rs`); a reference to such an
+     iterator is `E0300`, since what it refers to cannot be moved into the
+     generator. A generator that code which cannot wait takes items from
+     (another iterator's adapter, `enumerate` or `zip` over it; an
+     intrinsic given it as an `Iterable[T]`; a generator being driven so,
+     whose own `Iter.next` on another generator) runs there and then to
+     its next `yield` or its end, outside the schedule, as decision 236's
+     closing runs one: no yield point switches and the budget and a
+     `task.yield_now` are left as they were (natively, a task the
+     generator made ready ends a starvation it found, which is what the
+     interpreter's budget then does), so a seed's schedule is the same in
+     both; its calls count on top of the asking code's (decision 234);
+     an operation in it that would wait aborts the program
+     (`panic.driven-wait`, `R0130`), since nothing could run the code
+     that asked meanwhile. It used to panic with `R0091` (a generator
+     inside an adapter gave only what it had yielded already), so
+     `sum(evens(xs))` of a generator function stopped at its first item.
+     Python's iterators are lazy where they are taken, and so these stay:
+     `any` stops at the first `True` and closes the generator, which
+     closes its program's iterator. Two native mistakes the cases found
+     go with it: an intrinsic takes an owned argument of an `Iterable[T]`
+     parameter whole, and its caller dropped it again after the call
+     when the intrinsic's result could not hold it (`any(reversed(xs))`
+     freed its iterator twice), and an iterator of references (a
+     generator's of `ref T`) given for a `T` that is not one was summed
+     as addresses rather than decayed to its items. This changes a rule
+     of the type checker (`iter_from` and the mismatch) and the prelude,
+     which stage 1 transcribes. `run/iterable_iterator`,
+     `concurrency/generator_driven` (under twenty schedules) and
+     `concurrency/generator_driven_wait` pin it.
+248. A function value goes with what its environment holds: an `own`
+     closure copies what it captures, and a copy of a capability handle is
+     counted (decision 237), so a function value is dropped as a value
+     that holds a handle is, in both implementations, rather than never
+     (decision 224), which kept a captured handle's object to the end of
+     the run (port-debt.md). Lowering's `needs_drop` holds for a type that
+     holds a function value (`holds_capability` holds for function types)
+     and SIR's `drops_something` for a function type, so drop glue drops
+     such a field, a callee drops a function value it was given, and a
+     copy of one is counted where a copy of a handle is. The interpreter
+     counts and drops what a closure's environment holds, by the types of
+     its function's environment parameter. Natively, a function value has
+     one more word, its last: the type number of its environment plus one
+     when what the environment holds is counted (an `own` closure of
+     handles, `Cap`s or function values), else 0, so a copy or a drop
+     calls the runtime only when the word is not 0; a closure of
+     references, a task's closure and a named function have 0. This
+     changes rules of lowering (the drops and counted copies of function
+     values) and of SIR (`drops_something`), which stage 1 transcribes;
+     every function that takes or keeps a function value drops it
+     (`sir/closure`). `capabilities/closure_drops` pins it.
+249. `RwLock` prefers its writers, the usual rule (POSIX's
+     `PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP`, Rust's futex lock),
+     since neither 06 nor 11 names one: a task that waits to write is
+     among the lock's waiting writers until it takes the lock, and `read`
+     waits while a task writes or waits to write, so readers that keep
+     coming cannot keep a writer out (decision 239 let them). A reader
+     that asks again while a writer waits waits behind it, and a task that
+     holds a read guard and asks for another then deadlocks, which the
+     scheduler reports, as Rust documents for its lock. The interpreter
+     keeps the waiting writers in the lock's value, the native runtime a
+     count in a fourth word of the lock's header, which each writer adds
+     to once while it waits. This changes no front-end rule.
+     `concurrency/rwlock_writers` pins it under twenty schedules.
+250. `sisu run`, `check`, `build`, `test` and `bench` take `--features
+     NAMES` (09: features are Cargo's additive booleans, and Cargo's
+     switch): the root package's features to turn on besides `default`,
+     separated by commas or spaces, `DEP/FEATURE` for a dependency's, any
+     number of times; and `--no-default-features`, which leaves the root
+     package's `default` off. A name that is not a feature of the package
+     it names is a usage error (`D0112`, status 2), as is any name for a
+     single file, which declares none. In an attribute's arguments,
+     `not(feature="tls")` is a call of `not` with a keyword argument, as
+     `all(...)` and `any(...)` are, since a parenthesised expression
+     cannot hold a keyword argument: the parser reads `not` followed by
+     `(`, a name and `=` there as a name called, and `@cfg` takes
+     `not(...)` of exactly one condition (`E0266` otherwise). Decision
+     243's `not any(feature="tls")` stays a condition. This changes a rule
+     of the parser (`not_expr` in an attribute) and of the driver's filter
+     (`cfg.rs`), which stage 1 transcribes. `comptime/cfg_errors`,
+     `packages/features` and the driver's tests pin it.
+251. Reflection reaches every place 08 lets it be but a refinement's `where`
+     clause and an `invariant` (still `E0900`, naming the place), by
+     templates and unfolding as decision 244's are. A test whose body
+     reflects is a template made once, like a function without type
+     parameters, and so is each case of a parametrised test: the case's
+     instance drops the header's `for PAT in LIST` and begins with `let PAT
+     = CASE`. A constant's value and a field's or a parameter's default that
+     reflects are unfolded once every declaration is resolved, from a text
+     of their own (`<NAME>/MODULE.sisu`, where their errors are reported,
+     `E0609` when one cannot be made), with the types they name written as
+     their module names them, and then checked and evaluated as written
+     ones. A `comptime def` that reflects is a template; its `T: type`
+     parameters (08's `field_names(T: type)`) are generic parameters whose
+     arguments a call writes among its arguments, by position or by name, so
+     the function is made for each type it is given (`E0308` for one not
+     given). A trait may declare `comptime def`s besides its `derive`,
+     functions of the trait's module called `Trait.name(...)` at compile
+     time (08 gives them no other form; `E0605` elsewhere). A trait's
+     provided method that reflects is made in each impl that does not write
+     it, as that impl's method, its code resolved in the trait's module; a
+     trait's own method is never made for a call. A method of a trait impl
+     is made once whatever its type parameters (the impl's, its own), which
+     stay parameters, since a trait's call through a bound or a `dyn`
+     reaches one function for every type argument: its instance is a method
+     of `impl[A, ...] __S` (the impl's names, or `__G0`, ... for a method
+     the trait wrote, whose code cannot name them), keeps the template's
+     bounds and `where` clauses, and an alias in its module may stand for a
+     type parameter. Reflection knows a type parameter by its name only
+     (`reflect.name_of(f.ty)` of a field of type `A` is `A`), so another
+     query about one stops the instance (`E0609`, "`A` is a type parameter,
+     which is not known at compile time"), as does an impl for every type
+     (`impl[T: B] Trait for T`), whose `Self` is one. A generic inherent
+     method stays made for each type argument (decision 244), where its type
+     parameters are known. Reflection over methods (08: reflection exposes
+     "methods") is `reflect.methods_of` of a trait (its methods, in order)
+     or of a type (its own, declared in it or in an inherent impl), each
+     with `name`, `index`, `receiver` (`self`, `mut self`, `own self`, or
+     empty for an associated function), `params` (each with `name`, `index`,
+     `mode`, empty, `mut` or `own`, and `ty`), `ret` and `provided` (whether
+     it has a body), and `reflect.is_trait`; a signature's types are known
+     by name. A closure's block in a template may have `comptime for` and
+     `comptime if` among its statements, unfolded where the block is, and a
+     trailing `do` block is read for compile-time values as any closure is;
+     `T.default()` on a type parameter is the type's associated function,
+     not a compile-time value. The unreachable-code warning (`W0004`) is not
+     reported in an instance, where a `comptime if` that holds may end what
+     follows. This changes rules of the resolver (which functions, tests and
+     values are templates or unfolded, the instances of trait impl methods
+     and provided methods, `T: type` parameters, a trait's `comptime def`s,
+     `methods_of`, `is_trait`, closures in the unfolding) and of the type
+     checker (calls with `T: type` arguments and of a trait's `comptime
+     def`, the eager requests, `W0004` in instances, the `E0900` places),
+     which stage 1 transcribes. `reflect/trait_methods`,
+     `reflect/methods_of`, `reflect/tests` (with its `.test`),
+     `reflect/closures`, `comptime/comptime_defs`,
+     `comptime/reflecting_values` and `reflect/methods_rejected` pin it,
+     natively too but the last.

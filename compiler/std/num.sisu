@@ -1,8 +1,11 @@
 ##! `std.num` (11): integer functions, overflow-checked arithmetic that
-##! reports instead of trapping, and `Ratio`, an exact fraction (D-076: the
-##! exact types are library types, and `int` stays 64-bit and trapping).
-##! The numeric types and traits are the prelude's (`int`, `f64`, the sized
-##! integers, `Num`), reached from here too.
+##! reports instead of trapping, and the exact types (D-076: library types,
+##! while `int` stays 64-bit and trapping): `Ratio`, an exact fraction of
+##! `int`s, `BigInt`, an integer of any size, and `Decimal`, a base-10
+##! number held exactly, with `Rounding` for the conversions that round.
+##! Wrapping and saturating arithmetic are the operators `+%`, `-%`, `*%`,
+##! `+|`, `-|` and `*|`. The numeric types and traits are the prelude's
+##! (`int`, `f64`, the sized integers, `Num`), reached from here too.
 
 ## The greatest common divisor, never negative; `gcd(0, 0)` is 0.
 ##
@@ -100,6 +103,40 @@ pub pure def checked_add(a: int, b: int) -> int?:
     if b < 0 and a < -9223372036854775807 - 1 - b:
         return None
     return Some(a + b)
+
+## The difference, or `None` where `-` would trap.
+##
+## ```
+## assert checked_sub(1, 3) == Some(-2)
+## assert checked_sub(-9223372036854775807 - 1, 1) == None
+## ```
+pub pure def checked_sub(a: int, b: int) -> int?:
+    if b < 0 and a > 9223372036854775807 + b:
+        return None
+    if b > 0 and a < -9223372036854775807 - 1 + b:
+        return None
+    return Some(a - b)
+
+## `base` to the power `exp` (not negative), or `None` where `**` would
+## trap.
+##
+## ```
+## assert checked_pow(3, 4) == Some(81)
+## assert checked_pow(2, 63) == None
+## assert checked_pow(-2, 63) == Some(-9223372036854775807 - 1)
+## ```
+pub pure def checked_pow(base: int, exp: int) -> int?:
+    requires exp >= 0
+    var result = 1
+    var b = base
+    var e = exp
+    while e > 0:
+        if e % 2 == 1:
+            result = checked_mul(result, b)?
+        e = e // 2
+        if e > 0:
+            b = checked_mul(b, b)?
+    return Some(result)
 
 ## The product, or `None` where `*` would trap.
 ##
@@ -209,3 +246,620 @@ impl Display for Ratio:
             f.write("{self.num}")
         else:
             f.write("{self.num}/{self.den}")
+
+## The base of a `BigInt`'s limbs: each holds nine decimal digits.
+const LIMB: int = 1_000_000_000
+
+## An integer of any size (D-076: the exact types are library types, and
+## `int` stays 64-bit). Its operators are exact: `+`, `-`, `*`, `%` (whose
+## result takes the divisor's sign, as `int`'s does) and unary `-`; a
+## floored division is `floor_div`, or `divmod` for both parts. A literal
+## within `int` is one where a `BigInt` is expected, and `parse` reads one
+## of any length.
+##
+## ```
+## let a = BigInt.parse("123456789012345678901234567890").expect("digits")
+## let b: BigInt = 987654321
+## assert "{a * b}" == "121932631124828532112482853211126352690"
+## assert "{a - a}" == "0"
+## assert "{-a + b}" == "-123456789012345678900246913569"
+## assert a.divmod(b) == (BigInt.parse("124999998873437499901").expect("digits"), BigInt.of(574845669))
+## assert BigInt.of(2).pow(100) == BigInt.parse("1267650600228229401496703205376").expect("digits")
+## assert a > b and -a < b
+## ```
+@derive(Eq, Hash)
+pub struct BigInt:
+    negative: bool
+    ## The magnitude's digits in base `LIMB`, least significant first,
+    ## without trailing zero limbs (zero has none, and is not negative).
+    limbs: list[int]
+
+    ## The integer `n`.
+    pub pure def of(n: int) -> BigInt:
+        if n == -9223372036854775807 - 1:
+            return BigInt(negative=True, limbs=[854775808, 223372036, 9])
+        var m = abs(n)
+        var limbs: list[int] = []
+        while m > 0:
+            limbs.push(m % LIMB)
+            m = m // LIMB
+        return BigInt(negative=n < 0, limbs=limbs)
+
+    ## The integer written in `text`: decimal digits, optionally after a
+    ## `-` or `+` and with `_` between digits; `None` for anything else.
+    ##
+    ## ```
+    ## assert BigInt.parse("-1_000") == Some(BigInt.of(-1000))
+    ## assert BigInt.parse("12a") == None
+    ## assert BigInt.parse("") == None
+    ## ```
+    pub pure def parse(text: str) -> BigInt?:
+        var digits: list[int] = []
+        var negative = False
+        var first = True
+        var last_digit = False
+        for c in text.chars():
+            if first and (c == '-' or c == '+'):
+                negative = c == '-'
+                first = False
+                continue
+            first = False
+            if c == '_' and last_digit:
+                last_digit = False
+                continue
+            match c.to_digit():
+                case Some(d):
+                    digits.push(d)
+                    last_digit = True
+                case None:
+                    return None
+        if digits.is_empty() or not last_digit:
+            return None
+        var limbs: list[int] = []
+        var end = len(digits)
+        while end > 0:
+            let start = if end >= 9: end - 9 else: 0
+            var limb = 0
+            for i in range(start, end):
+                limb = limb * 10 + digits[i]
+            limbs.push(limb)
+            end = start
+        return Some(BigInt.made(negative, limbs))
+
+    ## The integer of a sign and limbs that may end in zeros.
+    pure def made(negative: bool, own limbs: list[int]) -> BigInt:
+        var l = limbs
+        while not l.is_empty() and l[len(l) - 1] == 0:
+            let _ = l.pop()
+        let neg = negative and not l.is_empty()
+        return BigInt(negative=neg, limbs=l)
+
+    ## The value as an `int`, or `None` outside `int`'s range.
+    ##
+    ## ```
+    ## assert BigInt.of(-42).to_int() == Some(-42)
+    ## assert BigInt.of(2).pow(63).to_int() == None
+    ## assert (-BigInt.of(2).pow(63)).to_int() == Some(-9223372036854775807 - 1)
+    ## ```
+    pub pure def to_int(self) -> int?:
+        if len(self.limbs) > 3:
+            return None
+        # Accumulated as a negative number, whose range is the larger.
+        var n = 0
+        var i = len(self.limbs) - 1
+        while i >= 0:
+            if n < (-9223372036854775807 - 1 + self.limbs[i]) // LIMB:
+                return None
+            n = n * LIMB - self.limbs[i]
+            i -= 1
+        if self.negative:
+            return Some(n)
+        if n == -9223372036854775807 - 1:
+            return None
+        return Some(-n)
+
+    ## The nearest `f64`, near for values beyond 2**53.
+    pub pure def to_f64(self) -> f64:
+        var x = 0.0
+        var i = len(self.limbs) - 1
+        while i >= 0:
+            x = x * 1000000000.0 + self.limbs[i].to_f64()
+            i -= 1
+        return if self.negative: -x else: x
+
+    pub pure def is_zero(self) -> bool:
+        return self.limbs.is_empty()
+
+    pub pure def is_negative(self) -> bool:
+        return self.negative
+
+    ## The absolute value.
+    pub pure def abs(self) -> BigInt:
+        return BigInt(negative=False, limbs=self.limbs.copy())
+
+    ## `self` raised to `exp`, which must not be negative.
+    pub pure def pow(self, exp: int) -> BigInt:
+        requires exp >= 0
+        var result = BigInt.of(1)
+        var base = BigInt(negative=self.negative, limbs=self.limbs.copy())
+        var e = exp
+        while e > 0:
+            if e % 2 == 1:
+                result = result * base
+            e = e // 2
+            if e > 0:
+                base = base * base
+        return result
+
+    ## The quotient rounded toward negative infinity and the remainder,
+    ## which takes the divisor's sign (as `//` and `%` on `int`); panics
+    ## when `other` is zero.
+    ##
+    ## ```
+    ## assert BigInt.of(-7).divmod(BigInt.of(2)) == (BigInt.of(-4), BigInt.of(1))
+    ## assert BigInt.of(7).divmod(BigInt.of(-2)) == (BigInt.of(-4), BigInt.of(-1))
+    ## ```
+    pub pure def divmod(self, other: BigInt) -> (BigInt, BigInt):
+        requires not other.is_zero()
+        let (q, r) = mag_divmod(self.limbs, other.limbs)
+        var quotient = BigInt.made(self.negative != other.negative, q)
+        var remainder = BigInt.made(self.negative, r)
+        # Truncated so far; floor it where the signs differ.
+        if not remainder.is_zero() and self.negative != other.negative:
+            quotient = quotient - BigInt.of(1)
+            remainder = remainder + other
+        return (quotient, remainder)
+
+    ## The quotient rounded toward negative infinity (`//` on `int`).
+    pub pure def floor_div(self, other: BigInt) -> BigInt:
+        let (q, _) = self.divmod(other)
+        return q
+
+## Compares two magnitudes.
+pure def mag_cmp(a: list[int], b: list[int]) -> Ordering:
+    if len(a) != len(b):
+        return len(a).cmp(len(b))
+    var i = len(a) - 1
+    while i >= 0:
+        if a[i] != b[i]:
+            return a[i].cmp(b[i])
+        i -= 1
+    return Ordering.Equal
+
+pure def mag_add(a: list[int], b: list[int]) -> list[int]:
+    var out: list[int] = []
+    var carry = 0
+    var i = 0
+    while i < len(a) or i < len(b) or carry > 0:
+        var s = carry
+        if i < len(a):
+            s += a[i]
+        if i < len(b):
+            s += b[i]
+        out.push(s % LIMB)
+        carry = s // LIMB
+        i += 1
+    return out
+
+## `a - b` for `a` at least `b`.
+pure def mag_sub(a: list[int], b: list[int]) -> list[int]:
+    var out: list[int] = []
+    var borrow = 0
+    for i in range(len(a)):
+        var d = a[i] - borrow
+        if i < len(b):
+            d -= b[i]
+        if d < 0:
+            d += LIMB
+            borrow = 1
+        else:
+            borrow = 0
+        out.push(d)
+    while not out.is_empty() and out[len(out) - 1] == 0:
+        let _ = out.pop()
+    return out
+
+pure def mag_mul(a: list[int], b: list[int]) -> list[int]:
+    if a.is_empty() or b.is_empty():
+        return []
+    var out: list[int] = []
+    for _ in range(len(a) + len(b)):
+        out.push(0)
+    for i in range(len(a)):
+        var carry = 0
+        let x = a[i]
+        for j in range(len(b)):
+            let t = out[i + j] + x * b[j] + carry
+            out[i + j] = t % LIMB
+            carry = t // LIMB
+        var k = i + len(b)
+        while carry > 0:
+            let t = out[k] + carry
+            out[k] = t % LIMB
+            carry = t // LIMB
+            k += 1
+    while not out.is_empty() and out[len(out) - 1] == 0:
+        let _ = out.pop()
+    return out
+
+## `a * k` for `k` below `LIMB`.
+pure def mag_mul_small(a: list[int], k: int) -> list[int]:
+    var out: list[int] = []
+    var carry = 0
+    for x in a:
+        let t = x * k + carry
+        out.push(t % LIMB)
+        carry = t // LIMB
+    if carry > 0:
+        out.push(carry)
+    while not out.is_empty() and out[len(out) - 1] == 0:
+        let _ = out.pop()
+    return out
+
+## `a` divided by `k`, below `LIMB` and not 0: the quotient and the
+## remainder.
+pure def mag_div_small(a: list[int], k: int) -> (list[int], int):
+    var q: list[int] = []
+    for _ in a:
+        q.push(0)
+    var r = 0
+    var i = len(a) - 1
+    while i >= 0:
+        let cur = r * LIMB + a[i]
+        q[i] = cur // k
+        r = cur % k
+        i -= 1
+    while not q.is_empty() and q[len(q) - 1] == 0:
+        let _ = q.pop()
+    return (q, r)
+
+## The truncated quotient and remainder of two magnitudes, `b` not zero:
+## long division by limbs (Knuth's algorithm D), both scaled first so
+## that `b`'s top limb is at least half of `LIMB`, which makes each
+## estimated limb of the quotient at most two too large.
+pure def mag_divmod(a: list[int], b: list[int]) -> (list[int], list[int]):
+    if mag_cmp(a, b) == Ordering.Less:
+        return ([], a.copy())
+    if len(b) == 1:
+        let (q, r) = mag_div_small(a, b[0])
+        return (q, if r == 0: [] else: [r])
+    let scale = LIMB // (b[len(b) - 1] + 1)
+    let x = mag_mul_small(a, scale)
+    let y = mag_mul_small(b, scale)
+    let n = len(y)
+    let top = y[n - 1]
+    var q: list[int] = []
+    for _ in x:
+        q.push(0)
+    var r: list[int] = []
+    var i = len(x) - 1
+    while i >= 0:
+        # r = r * LIMB + x[i]
+        if not r.is_empty() or x[i] != 0:
+            r.insert(0, x[i])
+        if mag_cmp(r, y) != Ordering.Less:
+            var high = r[n - 1]
+            if len(r) > n:
+                high = r[n] * LIMB + r[n - 1]
+            var guess = high // top
+            if guess >= LIMB:
+                guess = LIMB - 1
+            var t = mag_mul_small(y, guess)
+            while mag_cmp(t, r) == Ordering.Greater:
+                guess -= 1
+                t = mag_sub(t, y)
+            r = mag_sub(r, t)
+            q[i] = guess
+        i -= 1
+    while not q.is_empty() and q[len(q) - 1] == 0:
+        let _ = q.pop()
+    let (rem, _) = mag_div_small(r, scale)
+    return (q, rem)
+
+impl Add for BigInt:
+    def add(self, other: BigInt) -> BigInt:
+        if self.negative == other.negative:
+            return BigInt.made(self.negative, mag_add(self.limbs, other.limbs))
+        if mag_cmp(self.limbs, other.limbs) == Ordering.Less:
+            return BigInt.made(other.negative, mag_sub(other.limbs, self.limbs))
+        return BigInt.made(self.negative, mag_sub(self.limbs, other.limbs))
+
+impl Sub for BigInt:
+    def sub(self, other: BigInt) -> BigInt:
+        return self + -other
+
+impl Mul for BigInt:
+    def mul(self, other: BigInt) -> BigInt:
+        return BigInt.made(self.negative != other.negative, mag_mul(self.limbs, other.limbs))
+
+impl Rem for BigInt:
+    ## The remainder of the floored division, with the divisor's sign.
+    def rem(self, other: BigInt) -> BigInt:
+        let (_, r) = self.divmod(other)
+        return r
+
+impl Neg for BigInt:
+    def neg(self) -> BigInt:
+        return BigInt.made(not self.negative, self.limbs.copy())
+
+impl PartialOrd for BigInt:
+    def partial_cmp(self, other: BigInt) -> Ordering?:
+        return Some(self.cmp(other))
+
+impl Ord for BigInt:
+    def cmp(self, other: BigInt) -> Ordering:
+        if self.negative != other.negative:
+            return if self.negative: Ordering.Less else: Ordering.Greater
+        let c = mag_cmp(self.limbs, other.limbs)
+        if self.negative:
+            return match c:
+                case Ordering.Less: Ordering.Greater
+                case Ordering.Greater: Ordering.Less
+                case Ordering.Equal: Ordering.Equal
+        return c
+
+impl FromLiteral[int] for BigInt:
+    def from_literal(literal: int) -> BigInt:
+        return BigInt.of(literal)
+
+impl Display for BigInt:
+    def fmt(self, mut f: Formatter):
+        if self.limbs.is_empty():
+            f.write("0")
+            return
+        var out = String.new(if self.negative: "-" else: "")
+        var i = len(self.limbs) - 1
+        out.push("{self.limbs[i]}")
+        i -= 1
+        while i >= 0:
+            let digits = "{self.limbs[i]}"
+            out.push("0".repeat(9 - digits.byte_len()))
+            out.push(digits)
+            i -= 1
+        f.write(out)
+
+impl Debug for BigInt:
+    def fmt_debug(self, mut f: Formatter):
+        f.write("{self}")
+
+## How `Decimal.round` and `Decimal.div` round a value that falls between
+## two of the precision asked for: to the nearer, a tie to the even one
+## (`HalfEven`, banker's rounding), away from zero (`HalfUp`) or toward
+## zero (`HalfDown`); or always toward zero (`Down`), away from zero
+## (`Up`), down (`Floor`) or up (`Ceiling`). Python's `decimal` names the
+## same seven.
+@derive(Copy, Eq)
+pub enum Rounding:
+    HalfEven
+    HalfUp
+    HalfDown
+    Down
+    Up
+    Floor
+    Ceiling
+
+## A base-10 number held exactly (D-076): a `BigInt` and how many of its
+## digits come after the point. `+`, `-` and `*` are exact without bound;
+## a division is `div` to the places asked for with a named rounding, and
+## rounding is `round`, never implicit (Q-53: there is no hidden
+## precision context). Two decimals of equal value are equal however many
+## places they were written with; each is shown with its own places (so
+## stage 0's `set` and `dict`, which key by structure, do not take one as
+## a key: `E0398`). A literal is one where a `Decimal` is expected, read
+## from the digits it is written with (`0.1` is one tenth exactly).
+##
+## ```
+## let price: Decimal = 0.1
+## let total = price + price + price
+## assert "{total}" == "0.3"
+## assert total == Decimal.parse("0.30").expect("digits")
+## assert "{Decimal.parse("1.50").expect("digits") * Decimal.of(3)}" == "4.50"
+## assert "{Decimal.of(2).div(Decimal.of(3), 4, Rounding.HalfEven)}" == "0.6667"
+## assert "{Decimal.parse("2.345").expect("digits").round(2, Rounding.HalfEven)}" == "2.34"
+## assert "{Decimal.parse("-2.345").expect("digits").round(2, Rounding.HalfUp)}" == "-2.35"
+## ```
+pub struct Decimal:
+    ## The value times `10 ** places`.
+    digits: BigInt
+    places: int
+
+    invariant self.places >= 0
+
+    ## The whole number `n`.
+    pub pure def of(n: int) -> Decimal:
+        return Decimal(digits=BigInt.of(n), places=0)
+
+    ## The number written in `text`: digits with an optional sign, point
+    ## and exponent (`-12.50`, `1e-3`, `2.5E+4`); `None` for anything else.
+    ##
+    ## ```
+    ## assert "{Decimal.parse("1e-3").expect("digits")}" == "0.001"
+    ## assert "{Decimal.parse("2.5E+4").expect("digits")}" == "25000"
+    ## assert "{Decimal.parse("-0.050").expect("digits")}" == "-0.050"
+    ## assert Decimal.parse("1.2.3") == None
+    ## ```
+    pub pure def parse(text: str) -> Decimal?:
+        var mantissa = text
+        var exponent = 0
+        var at = text.find("e")
+        if at == None:
+            at = text.find("E")
+        if let Some(i) = at:
+            mantissa = text.byte_slice(0, i)
+            var e = text.byte_slice(i + 1, text.byte_len())
+            if e.starts_with("+"):
+                e = e.byte_slice(1, e.byte_len())
+                if e.starts_with("-"):
+                    return None
+            exponent = e.parse_int()?
+        var whole = mantissa
+        var fraction = ""
+        if let Some((w, f)) = mantissa.split_once("."):
+            whole = w
+            fraction = f
+            if fraction.starts_with("+") or fraction.starts_with("-") or fraction.starts_with("_"):
+                return None
+        let digits = BigInt.parse("{whole}{fraction}")?
+        let places = fraction.byte_len() - exponent
+        if places < 0:
+            return Some(Decimal(digits=digits * BigInt.of(10).pow(-places), places=0))
+        return Some(Decimal(digits=digits, places=places))
+
+    ## The value with `places` digits after the point, rounded by `mode`
+    ## where digits are dropped; places are added as zeros.
+    ##
+    ## ```
+    ## let x = Decimal.parse("2.5").expect("digits")
+    ## assert "{x.round(0, Rounding.HalfEven)}" == "2"
+    ## assert "{x.round(0, Rounding.HalfUp)}" == "3"
+    ## assert "{x.round(0, Rounding.Floor)}" == "2"
+    ## assert "{(-x).round(0, Rounding.Floor)}" == "-3"
+    ## assert "{x.round(3, Rounding.Down)}" == "2.500"
+    ## ```
+    pub pure def round(self, places: int, mode: Rounding) -> Decimal:
+        requires places >= 0
+        if places >= self.places:
+            let scale = BigInt.of(10).pow(places - self.places)
+            return Decimal(digits=self.digits * scale, places=places)
+        let divisor = BigInt.of(10).pow(self.places - places)
+        return Decimal(digits=rounded_quotient(self.digits, divisor, mode), places=places)
+
+    ## `self / other` to `places` digits after the point, rounded by
+    ## `mode`; panics when `other` is zero.
+    pub pure def div(self, other: Decimal, places: int, mode: Rounding) -> Decimal:
+        requires places >= 0
+        requires not other.digits.is_zero()
+        # self / other = (a / 10**p) / (b / 10**q); scaled by 10**places.
+        let shift = places + other.places - self.places
+        var num = self.digits.copy()
+        var den = other.digits.copy()
+        if shift >= 0:
+            num = num * BigInt.of(10).pow(shift)
+        else:
+            den = den * BigInt.of(10).pow(-shift)
+        return Decimal(digits=rounded_quotient(num, den, mode), places=places)
+
+    ## The value as an exact fraction, or `None` where its numerator or
+    ## denominator is beyond `int`.
+    ##
+    ## ```
+    ## assert Decimal.parse("0.75").expect("digits").to_ratio() == Some(Ratio.of(3, 4))
+    ## ```
+    pub pure def to_ratio(self) -> Ratio?:
+        let num = self.digits.to_int()?
+        let den = BigInt.of(10).pow(self.places).to_int()?
+        return Some(Ratio.of(num, den))
+
+    ## The nearest `f64`, near for values with many digits.
+    pub pure def to_f64(self) -> f64:
+        return self.digits.to_f64() / 10.0 ** self.places.to_f64()
+
+    pub pure def is_zero(self) -> bool:
+        return self.digits.is_zero()
+
+    ## Both values' digits at the larger number of places, and that
+    ## number.
+    pure def aligned(self, other: Decimal) -> (BigInt, BigInt, int):
+        if self.places >= other.places:
+            let scale = BigInt.of(10).pow(self.places - other.places)
+            return (self.digits.copy(), other.digits * scale, self.places)
+        let scale = BigInt.of(10).pow(other.places - self.places)
+        return (self.digits * scale, other.digits.copy(), other.places)
+
+## `num / den` rounded to a whole number by `mode`.
+pure def rounded_quotient(num: BigInt, den: BigInt, mode: Rounding) -> BigInt:
+    let negative = num.is_negative() != den.is_negative()
+    let (q, r) = num.abs().divmod(den.abs())
+    if r.is_zero():
+        return if negative: -q else: q
+    # Compare the remainder with half the divisor: twice one with the other.
+    let twice = r + r
+    let half = twice.cmp(den.abs())
+    let odd = q % BigInt.of(2) == BigInt.of(1)
+    let away = match mode:
+        case Rounding.Down: False
+        case Rounding.Up: True
+        case Rounding.Floor: negative
+        case Rounding.Ceiling: not negative
+        case Rounding.HalfUp: half != Ordering.Less
+        case Rounding.HalfDown: half == Ordering.Greater
+        case Rounding.HalfEven: half == Ordering.Greater or (half == Ordering.Equal and odd)
+    let magnitude = if away: q + BigInt.of(1) else: q
+    return if negative: -magnitude else: magnitude
+
+impl Add for Decimal:
+    def add(self, other: Decimal) -> Decimal:
+        let (a, b, places) = self.aligned(other)
+        return Decimal(digits=a + b, places=places)
+
+impl Sub for Decimal:
+    def sub(self, other: Decimal) -> Decimal:
+        let (a, b, places) = self.aligned(other)
+        return Decimal(digits=a - b, places=places)
+
+impl Mul for Decimal:
+    def mul(self, other: Decimal) -> Decimal:
+        return Decimal(digits=self.digits * other.digits, places=self.places + other.places)
+
+impl Neg for Decimal:
+    def neg(self) -> Decimal:
+        return Decimal(digits=-self.digits, places=self.places)
+
+impl Eq for Decimal:
+    def eq(self, other: Decimal) -> bool:
+        return self.cmp(other) == Ordering.Equal
+
+impl PartialOrd for Decimal:
+    def partial_cmp(self, other: Decimal) -> Ordering?:
+        return Some(self.cmp(other))
+
+impl Ord for Decimal:
+    def cmp(self, other: Decimal) -> Ordering:
+        let (a, b, _) = self.aligned(other)
+        return a.cmp(b)
+
+impl Hash for Decimal:
+    ## The hash of the value without trailing zeros, so equal values hash
+    ## alike.
+    def hash(self, mut h: Hasher):
+        var digits = self.digits.copy()
+        var places = self.places
+        let ten = BigInt.of(10)
+        while places > 0 and (digits % ten).is_zero():
+            digits = digits.floor_div(ten)
+            places -= 1
+        digits.hash(mut h)
+        places.hash(mut h)
+
+impl FromLiteral[int] for Decimal:
+    def from_literal(literal: int) -> Decimal:
+        return Decimal.of(literal)
+
+impl FromLiteral[f64] for Decimal:
+    ## The literal's shortest digits, which are the ones written for any
+    ## literal of up to 15 significant digits.
+    def from_literal(literal: f64) -> Decimal:
+        return Decimal.parse("{literal}").expect("a float literal's digits")
+
+impl Display for Decimal:
+    def fmt(self, mut f: Formatter):
+        let negative = self.digits.is_negative()
+        let digits = "{self.digits.abs()}"
+        var out = String.new(if negative: "-" else: "")
+        if self.places == 0:
+            out.push(digits)
+        else:
+            let n = digits.byte_len()
+            if n <= self.places:
+                out.push("0.")
+                out.push("0".repeat(self.places - n))
+                out.push(digits)
+            else:
+                out.push(digits.byte_slice(0, n - self.places))
+                out.push(".")
+                out.push(digits.byte_slice(n - self.places, n))
+        f.write(out)
+
+impl Debug for Decimal:
+    def fmt_debug(self, mut f: Formatter):
+        f.write("{self}")

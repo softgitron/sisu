@@ -164,13 +164,9 @@ impl Interp<'_, '_> {
                 Some(_) => Ok(None),
                 None => Err(panic(msg::PANIC_NESTED_RECV, &[])),
             },
-            // A generator inside another iterator would have to run its
-            // body; it gives what it has yielded already (port-debt.md).
-            IterState::Gen(t) => match self.gen_take(*t)? {
-                Some(v) => Ok(Some(v)),
-                None if self.gen_done(*t) => Ok(None),
-                None => Err(panic(msg::PANIC_NESTED_RECV, &[])),
-            },
+            // A generator inside another iterator, or given to an
+            // intrinsic, runs until it yields (`drive_gen`).
+            IterState::Gen(t) => self.gen_item(*t),
             IterState::Done => Ok(None),
         }
     }

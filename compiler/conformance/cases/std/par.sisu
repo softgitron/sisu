@@ -1,0 +1,84 @@
+# `std.par` (11; 06, "Data parallelism"; D-069): `join`, the chunks a
+# reduction splits a list into, fixed by index, and reductions whose
+# result does not depend on the grain: `Sum` adds in the prelude's
+# pairwise shape, so a parallel sum of floats is the sequential one bit
+# for bit, `Collect` keeps index order, and a program's own reducer
+# merges adjacent chunks' views.
+import std.par
+from std.par import Collect, Reducer, Sum
+
+# The longest run of equal values: each view knows its first and last
+# runs, so two adjacent views merge exactly.
+struct Runs:
+    first: int?
+    first_len: int
+    last: int?
+    last_len: int
+    best: int
+    count: int
+
+impl Reducer for Runs:
+    type Item = int
+    type Output = int
+
+    pure def empty() -> Runs:
+        return Runs(first=None, first_len=0, last=None, last_len=0, best=0, count=0)
+
+    pure def add(mut self, own x: int):
+        if self.last == Some(x):
+            self.last_len += 1
+        else:
+            self.last = Some(x)
+            self.last_len = 1
+        if self.count == self.first_len and (self.first == None or self.first == Some(x)):
+            self.first = Some(x)
+            self.first_len += 1
+        self.count += 1
+        if self.last_len > self.best:
+            self.best = self.last_len
+
+    pure def merge(own self, own later: Runs) -> Runs:
+        if self.count == 0:
+            return later
+        if later.count == 0:
+            return self
+        var best = max(self.best, later.best)
+        var first = self.first
+        var first_len = self.first_len
+        var last = later.last
+        var last_len = later.last_len
+        if self.last == later.first:
+            let joined = self.last_len + later.first_len
+            best = max(best, joined)
+            if self.first_len == self.count:
+                first_len = joined
+            if later.last_len == later.count:
+                last_len = joined
+                last = self.last
+        return Runs(
+            first=first,
+            first_len=first_len,
+            last=last,
+            last_len=last_len,
+            best=best,
+            count=self.count + later.count,
+        )
+
+    pure def finish(own self) -> int:
+        return self.best
+
+def main():
+    let (a, b) = par.join(() -> 2 ** 10, () -> "both")
+    print("{a} {b}")
+    print(par.chunks(10, 3))
+    var xs: list[f64] = []
+    for i in range(1000):
+        xs.push(1.0 / (i + 1).to_f64())
+    let whole = sum(xs)
+    for grain in [1, 7, 64, 1000]:
+        print(par.reduce[Sum[f64]](xs.copy(), grain=grain) == whole)
+    print(par.reduce[Collect[int]]([5, 3, 8], grain=1))
+    print(par.map([1, 2, 3], it * it))
+    let values = [1, 1, 2, 2, 2, 3, 2, 2, 2, 2, 4, 4]
+    for grain in [1, 2, 3, 5, 12]:
+        print(par.reduce[Runs](values.copy(), grain=grain))

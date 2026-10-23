@@ -896,7 +896,7 @@ fn reach(
             for l in &f.locals {
                 type_names(&l.ty, &mut mentioned);
             }
-            reach_from(ctx, f, &mut work, &mut dispatched);
+            reach_from(ctx, f, &mut work, &mut dispatched, &mut mentioned);
             // Defaults and drops of declared types are reached through the
             // types, and so is a type's invariant check, which the run time
             // calls when unwinding drops a mutex guard (D-077). The types
@@ -967,17 +967,27 @@ fn type_names(t: &sir::Type, out: &mut HashSet<String>) {
 }
 
 /// What one function reaches: its callees, the functions it names as
-/// values, and the traits it calls through.
-fn reach_from(ctx: &Ctx, f: &sir::Function, work: &mut Vec<String>, dispatched: &mut HashSet<DefId>) {
+/// values, and the traits it calls through; and the types its calls take
+/// as type arguments, which a callee may make (`R.empty()` in a function
+/// generic over `R`), as `mentioned`.
+fn reach_from(
+    ctx: &Ctx,
+    f: &sir::Function,
+    work: &mut Vec<String>,
+    dispatched: &mut HashSet<DefId>,
+    mentioned: &mut HashSet<String>,
+) {
     let prog = ctx.prog;
     for b in &f.blocks {
         for s in &b.stmts {
             match &s.kind {
-                sir::StatementKind::Call { callee: sir::Callee::Fn(c, _), args, .. } => {
+                sir::StatementKind::Call { callee: sir::Callee::Fn(c, tys), args, .. } => {
                     work.push(c.clone());
                     refs_in_operands(args, work);
+                    tys.iter().for_each(|t| type_names(t, mentioned));
                 }
-                sir::StatementKind::Call { callee: sir::Callee::Trait(c, _), args, .. } => {
+                sir::StatementKind::Call { callee: sir::Callee::Trait(c, tys), args, .. } => {
+                    tys.iter().for_each(|t| type_names(t, mentioned));
                     refs_in_operands(args, work);
                     work.push(c.clone());
                     if let Some(m) = trait_method_def(ctx, c)

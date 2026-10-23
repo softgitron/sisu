@@ -1,0 +1,306 @@
+##! `std.encoding` (11): bytes as text and numbers as bytes. Hexadecimal,
+##! base64 (RFC 4648, the standard alphabet and the URL-safe one), the
+##! variable-length integers of LEB128 (and zigzag for signed ones, as
+##! Protocol Buffers writes them), and text as UTF-8 and UTF-16.
+
+## The error of a decoding: the input is not in the encoding from index
+## `at` on.
+pub error DecodeError:
+    Invalid(at: int)
+    Truncated
+
+const HEX: str = "0123456789abcdef"
+
+## The bytes as hexadecimal, two lowercase digits each.
+##
+## ```
+## assert hex_encode(b"\x00\xffAz") == "00ff417a"
+## ```
+pub pure def hex_encode(data: bytes) -> String:
+    var out = String.new()
+    for b in data.iter():
+        let n = b.to_int()
+        out.push_char(HEX.char_at(n >> 4))
+        out.push_char(HEX.char_at(n & 15))
+    return out
+
+## The value of a hexadecimal digit, of either case.
+pure def hex_digit(c: char) -> int?:
+    let n = c.code()
+    if 48 <= n <= 57:
+        return Some(n - 48)
+    if 97 <= n <= 102:
+        return Some(n - 87)
+    if 65 <= n <= 70:
+        return Some(n - 55)
+    return None
+
+## The bytes that `text`, pairs of hexadecimal digits of either case,
+## writes.
+##
+## ```
+## assert hex_decode("00FFa0") == Ok(b"\x00\xff\xa0")
+## assert hex_decode("0g") == Err(Invalid(at=1))
+## assert hex_decode("abc") == Err(Truncated)
+## ```
+pub pure def hex_decode(text: str) -> bytes ! DecodeError:
+    var out: list[u8] = []
+    var high: int? = None
+    var i = 0
+    for c in text.chars():
+        let d = hex_digit(c)
+        match d:
+            case None:
+                return Err(Invalid(at=i))
+            case Some(v):
+                match high:
+                    case Some(h):
+                        out.push((h * 16 + v).truncate_to[u8]())
+                        high = None
+                    case None:
+                        high = Some(v)
+        i += 1
+    if high != None:
+        return Err(Truncated)
+    return Ok(bytes.from_list(out))
+
+const STANDARD: str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+const URL_SAFE: str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+
+## The bytes in base64 (RFC 4648): the standard alphabet with `=`
+## padding, or with `url_safe` the alphabet of `-` and `_` without it.
+##
+## ```
+## assert base64_encode(b"Many hands make light work.") == "TWFueSBoYW5kcyBtYWtlIGxpZ2h0IHdvcmsu"
+## assert base64_encode(b"ab") == "YWI="
+## assert base64_encode(b"\xfb\xff", url_safe=True) == "-_8"
+## assert base64_encode(b"") == ""
+## ```
+pub pure def base64_encode(data: bytes, url_safe: bool = False) -> String:
+    let alphabet = if url_safe: URL_SAFE else: STANDARD
+    var out = String.new()
+    let n = len(data)
+    var i = 0
+    while i < n:
+        let b0 = data[i].to_int()
+        let b1 = if i + 1 < n: data[i + 1].to_int() else: 0
+        let b2 = if i + 2 < n: data[i + 2].to_int() else: 0
+        let group = (b0 << 16) | (b1 << 8) | b2
+        out.push_char(alphabet.char_at((group >> 18) & 63))
+        out.push_char(alphabet.char_at((group >> 12) & 63))
+        if i + 1 < n:
+            out.push_char(alphabet.char_at((group >> 6) & 63))
+        elif not url_safe:
+            out.push("=")
+        if i + 2 < n:
+            out.push_char(alphabet.char_at(group & 63))
+        elif not url_safe:
+            out.push("=")
+        i += 3
+    return out
+
+## The value of a base64 digit, in either alphabet.
+pure def base64_digit(c: char) -> int?:
+    let n = c.code()
+    if 65 <= n <= 90:
+        return Some(n - 65)
+    if 97 <= n <= 122:
+        return Some(n - 71)
+    if 48 <= n <= 57:
+        return Some(n + 4)
+    if c == '+' or c == '-':
+        return Some(62)
+    if c == '/' or c == '_':
+        return Some(63)
+    return None
+
+## The bytes that base64 `text` writes, in either alphabet, with its `=`
+## padding or without it.
+##
+## ```
+## assert base64_decode("TWFu") == Ok(b"Man")
+## assert base64_decode("YWI=") == Ok(b"ab")
+## assert base64_decode("YWI") == Ok(b"ab")
+## assert base64_decode("-_8") == Ok(b"\xfb\xff")
+## assert base64_decode("YW!=") == Err(Invalid(at=2))
+## assert base64_decode("Y") == Err(Truncated)
+## ```
+pub pure def base64_decode(text: str) -> bytes ! DecodeError:
+    var out: list[u8] = []
+    var acc = 0
+    var bits = 0
+    var count = 0
+    var padding = False
+    var i = 0
+    for c in text.chars():
+        if c == '=':
+            padding = True
+            i += 1
+            continue
+        if padding:
+            return Err(Invalid(at=i))
+        match base64_digit(c):
+            case None:
+                return Err(Invalid(at=i))
+            case Some(v):
+                acc = (acc << 6) | v
+                bits += 6
+                count += 1
+                if bits >= 8:
+                    bits -= 8
+                    out.push(((acc >> bits) & 255).truncate_to[u8]())
+                    acc = acc & ((1 << bits) - 1)
+        i += 1
+    if count % 4 == 1:
+        return Err(Truncated)
+    return Ok(bytes.from_list(out))
+
+## `n`, not negative, in unsigned LEB128: seven bits a byte, the least
+## significant first, each byte but the last with its top bit set.
+##
+## ```
+## assert varint_encode(0) == b"\x00"
+## assert varint_encode(300) == b"\xac\x02"
+## assert varint_encode(9223372036854775807) == b"\xff\xff\xff\xff\xff\xff\xff\xff\x7f"
+## ```
+pub pure def varint_encode(n: int) -> bytes:
+    requires n >= 0
+    var out: list[u8] = []
+    var x = n
+    while True:
+        let low = x & 127
+        x = x >> 7
+        if x == 0:
+            out.push(low.truncate_to[u8]())
+            return bytes.from_list(out)
+        out.push((low | 128).truncate_to[u8]())
+
+## The number an unsigned LEB128 varint starting at `at` in `data`
+## writes, and the index after it.
+##
+## ```
+## assert varint_decode(b"\xac\x02rest") == Ok((300, 2))
+## assert varint_decode(b"\x80") == Err(Truncated)
+## ```
+pub pure def varint_decode(data: bytes, at: int = 0) -> (int, int) ! DecodeError:
+    var n = 0
+    var shift = 0
+    var i = at
+    while i < len(data):
+        let b = data[i].to_int()
+        # Past 63 bits the number is beyond `int`.
+        if shift > 63 or (shift == 63 and b != 0):
+            return Err(Invalid(at=i))
+        n = n | ((b & 127) << shift)
+        i += 1
+        if b & 128 == 0:
+            return Ok((n, i))
+        shift += 7
+    return Err(Truncated)
+
+## `n` in zigzag LEB128: 0, -1, 1, -2, ... as 0, 1, 2, 3, ..., so a
+## small negative number is a short varint too.
+##
+## ```
+## assert zigzag_encode(-1) == b"\x01"
+## assert zigzag_encode(1) == b"\x02"
+## assert zigzag_decode(zigzag_encode(-1000)) == Ok((-1000, 2))
+## assert zigzag_decode(zigzag_encode(-9223372036854775807 - 1)) == Ok((-9223372036854775807 - 1, 10))
+## ```
+pub pure def zigzag_encode(n: int) -> bytes:
+    # The bits of (n << 1) ^ (n >> 63), as an unsigned 64-bit number.
+    let z = (n.truncate_to[u64]() << 1u64) ^ (n >> 63).truncate_to[u64]()
+    var out: list[u8] = []
+    var x = z
+    while True:
+        let low = (x & 127u64).to_int().expect("seven bits")
+        x = x >> 7u64
+        if x == 0u64:
+            out.push(low.truncate_to[u8]())
+            return bytes.from_list(out)
+        out.push((low | 128).truncate_to[u8]())
+
+## The number a zigzag LEB128 varint starting at `at` writes, and the
+## index after it.
+pub pure def zigzag_decode(data: bytes, at: int = 0) -> (int, int) ! DecodeError:
+    var z = 0u64
+    var shift = 0u64
+    var i = at
+    while i < len(data):
+        let b = data[i].to_int()
+        if shift > 63u64 or (shift == 63u64 and b > 1):
+            return Err(Invalid(at=i))
+        z = z | ((b & 127).truncate_to[u64]() << shift)
+        i += 1
+        if b & 128 == 0:
+            # (z >> 1) ^ -(z & 1), back in two's complement.
+            let half = (z >> 1u64).to_int().expect("63 bits")
+            let n = if z & 1u64 == 1u64: -half - 1 else: half
+            return Ok((n, i))
+        shift += 7u64
+    return Err(Truncated)
+
+## The text in UTF-8.
+##
+## ```
+## assert utf8_encode("aé€") == b"a\xc3\xa9\xe2\x82\xac"
+## ```
+pub pure def utf8_encode(text: str) -> bytes:
+    return text.encode()
+
+## The text UTF-8 `data` writes; `InvalidUtf8` at the first byte that
+## does not continue a valid sequence.
+##
+## ```
+## assert utf8_decode(b"a\xc3\xa9") == Ok(String.new("aé"))
+## assert utf8_decode(b"a\xc3") == Err(InvalidUtf8(at=1))
+## ```
+pub pure def utf8_decode(data: bytes) -> String ! Utf8Error:
+    return data.decode()
+
+## The text as UTF-16 code units: one for a character below `0x10000`,
+## a surrogate pair for the others.
+##
+## ```
+## assert utf16_encode("a€😀") == [0x61, 0x20ac, 0xd83d, 0xde00]
+## ```
+pub pure def utf16_encode(text: str) -> list[int]:
+    var out: list[int] = []
+    for c in text.chars():
+        let n = c.code()
+        if n < 0x10000:
+            out.push(n)
+        else:
+            let m = n - 0x10000
+            out.push(0xd800 + (m >> 10))
+            out.push(0xdc00 + (m & 0x3ff))
+    return out
+
+## The text UTF-16 code `units` write; `Invalid` at a unit that is not
+## part of one, a lone surrogate or a value beyond 16 bits.
+##
+## ```
+## assert utf16_decode([0x61, 0x20ac, 0xd83d, 0xde00]) == Ok(String.new("a€😀"))
+## assert utf16_decode([0xde00]) == Err(Invalid(at=0))
+## assert utf16_decode([0x61, 0xd83d]) == Err(Truncated)
+## ```
+pub pure def utf16_decode(units: list[int]) -> String ! DecodeError:
+    var out = String.new()
+    var i = 0
+    while i < len(units):
+        let u = units[i]
+        if u < 0 or u > 0xffff or 0xdc00 <= u <= 0xdfff:
+            return Err(Invalid(at=i))
+        if 0xd800 <= u <= 0xdbff:
+            if i + 1 >= len(units):
+                return Err(Truncated)
+            let low = units[i + 1]
+            if not (0xdc00 <= low <= 0xdfff):
+                return Err(Invalid(at=i + 1))
+            let n = 0x10000 + ((u - 0xd800) << 10) + (low - 0xdc00)
+            out.push_char(char.from_code(n).expect("a scalar value"))
+            i += 2
+        else:
+            out.push_char(char.from_code(u).expect("a scalar value"))
+            i += 1
+    return Ok(out)

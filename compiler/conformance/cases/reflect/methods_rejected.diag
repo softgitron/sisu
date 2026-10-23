@@ -1,9 +1,11 @@
-14:9-15:29 E0900 stage0.unsupported construct="`comptime for` and `comptime if` in a trait's own method" phase="reflection in a trait's own methods (Phase 8)"
-26:16-26:26 E0900 stage0.unsupported construct="a field named by a compile-time value (`x.[f]`) in a method of a generic trait impl" phase="reflection in generic trait impls (Phase 8)"
-29:16-29:23 E0900 stage0.unsupported construct="`reflect` in a `comptime def`" phase="reflection in `comptime def`s (Phase 8)"
-29:34-29:39 E0350 type.not-a-value name="Point" kind="type"
-31:24-31:31 E0900 stage0.unsupported construct="`reflect` in a constant or a default" phase="reflection in constants and defaults (Phase 8)"
-31:42-31:47 E0350 type.not-a-value name="Point" kind="type"
-33:5-33:12 E0609 comptime.instance-failed name="unknown" reason="`p` is not known at compile time"
-  label 34:41-34:42 comptime.instance-here
-39:5-40:28 E0900 stage0.unsupported construct="`comptime for` and `comptime if` in a test" phase="reflection in tests (Phase 8)"
+20:9-20:13 E0609 comptime.instance-failed name="size" reason="`A` is a type parameter, which is not known at compile time"
+  label 21:20-21:40 comptime.instance-here
+27:9-27:14 E0609 comptime.instance-failed name="probe" reason="`T` is a type parameter, which is not known at compile time"
+  label 28:25-28:45 comptime.instance-here
+34:9-34:14 E0609 comptime.instance-failed name="names" reason="`Self` is `T`, a type parameter, which is not known at compile time"
+43:14-43:19 E0609 comptime.instance-failed name="count" reason="`+` of an integer and a list"
+  label 44:12-44:40 comptime.instance-here
+46:5-46:12 E0609 comptime.instance-failed name="unknown" reason="`p` is not known at compile time"
+  label 47:41-47:42 comptime.instance-here
+51:35-51:42 E0900 stage0.unsupported construct="`reflect` in a refinement's `where` clause" phase="reflection in refinements' `where` clauses (Phase 8)"
+51:53-51:58 E0350 type.not-a-value name="Point" kind="type"

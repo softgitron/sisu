@@ -423,6 +423,18 @@ impl Checker<'_> {
     ) -> Expr {
         let span = self.span(range);
         let prog = self.prog;
+        // A `comptime def` of the trait's, called through it (decision 251).
+        let comptime_fn = prog
+            .trait_info(t)
+            .and_then(|i| i.comptime_fns.iter().find(|(n, _)| *n == name.text).map(|(_, d)| *d));
+        if let Some(f) = comptime_fn {
+            let Some((args, trailing, expected)) = call else {
+                let diag = self.error(msg::COMPTIME_ONLY, range).with("name", prog.def(f).name.clone());
+                self.report(diag);
+                return Expr::error(span);
+            };
+            return self.call_fn(f, None, None, None, args, trailing, range, expected);
+        }
         let Some(m) = prog.trait_method(t, &name.text) else {
             let diag = self
                 .error(msg::TYPE_UNKNOWN_ASSOCIATED, name.range)
@@ -1061,6 +1073,47 @@ impl Checker<'_> {
         } else {
             args
         };
+        // A `comptime def`'s `T: type` parameters take types, which are the
+        // call's type arguments (decision 251): `field_names(Point)`.
+        let typed_owned: Vec<ast::Arg>;
+        let args = match prog.fn_info(d).map(|f| f.type_params.clone()).filter(|t| !t.is_empty()) {
+            Some(typed) => {
+                let mut rest = Vec::new();
+                let mut given = vec![false; typed.len()];
+                let mut at = 0;
+                for a in args {
+                    let k = match &a.name {
+                        Some(n) => typed.iter().position(|(_, name, _)| *name == n.text),
+                        None => {
+                            let k = typed.iter().position(|(pos, _, _)| *pos == at);
+                            at += 1;
+                            k
+                        }
+                    };
+                    match k {
+                        Some(k) => {
+                            let t = self.expr_as_type(&a.value);
+                            if let Some(v) = sig.type_args.get(typed[k].2 as usize) {
+                                let v = v.clone();
+                                self.infer.try_unify(&v, &t);
+                            }
+                            given[k] = true;
+                        }
+                        None => rest.push(a.clone()),
+                    }
+                }
+                if let Some(k) = given.iter().position(|g| !g) {
+                    let d = self
+                        .error(msg::TYPE_MISSING_ARGUMENT, range)
+                        .with("arg", typed[k].1.clone())
+                        .with("name", prog.def(d).name.clone());
+                    self.report(d);
+                }
+                typed_owned = rest;
+                &typed_owned[..]
+            }
+            None => args,
+        };
         let mut out = Vec::new();
         if let Some(r) = recv {
             out.push(r);
@@ -1403,10 +1456,22 @@ impl Checker<'_> {
                                     .with("found", self.show(&x.ty));
                                 self.report(d);
                             }
-                            if mode == ForMode::Iter {
-                                Arg { expr: self.check_movable(x), mode: ArgMode::Value }
-                            } else {
-                                Arg { expr: x, mode: ArgMode::Borrow }
+                            match mode {
+                                ForMode::Iter => Arg { expr: self.check_movable(x), mode: ArgMode::Value },
+                                // A program's iterator, through a generator
+                                // that takes its items (`iter_from`).
+                                ForMode::Trait => match self.iter_from(x, &item_ty) {
+                                    (x, true) => Arg { expr: x, mode: ArgMode::Value },
+                                    (x, false) => {
+                                        let d = self
+                                            .error(msg::TYPE_MISMATCH, a.value.range)
+                                            .with("expected", self.show(&pty))
+                                            .with("found", self.show(&x.ty));
+                                        self.report(d);
+                                        Arg { expr: x, mode: ArgMode::Value }
+                                    }
+                                },
+                                _ => Arg { expr: x, mode: ArgMode::Borrow },
                             }
                         }
                         None => {

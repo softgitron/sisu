@@ -69,7 +69,25 @@ impl Interp<'_, '_> {
                     self.retain_caps(x, et.as_ref());
                 }
             }
+            // A copy of a function value copies its environment (decision
+            // 248).
+            Value::Closure(c) => {
+                let tys = self.env_types(c);
+                for (i, x) in c.env.iter().enumerate() {
+                    self.retain_caps(x, tys.get(i));
+                }
+            }
             _ => {}
+        }
+    }
+
+    /// The types of what a closure's environment holds, as its function's
+    /// environment parameter declares them.
+    pub(crate) fn env_types(&self, c: &crate::value::ClosureVal) -> Vec<sir::Type> {
+        let Ok(fi) = self.fn_index(&c.name) else { return Vec::new() };
+        match self.func(fi).and_then(|f| f.locals.get(1)).map(|l| l.ty.subst(&c.tys)) {
+            Some(sir::Type::Tuple(ts)) => ts,
+            _ => Vec::new(),
         }
     }
 
@@ -490,6 +508,9 @@ pub(crate) fn holds_cap(v: &Value) -> bool {
         Value::Cap(_) => true,
         Value::Struct(a) | Value::Variant(a) => a.fields.iter().any(holds_cap),
         Value::Tuple(xs) => xs.iter().any(holds_cap),
+        // An `own` closure's environment holds copies of what it captured
+        // (decision 248).
+        Value::Closure(c) => c.env.iter().any(holds_cap),
         _ => false,
     }
 }

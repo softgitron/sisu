@@ -169,6 +169,7 @@ const VALUE_FLAGS: &[&str] = &[
     "--diary",
     "--output",
     "--from-sir",
+    "--features",
 ];
 
 /// The most schedules a bounded exhaustive search runs of one test (or of
@@ -526,6 +527,7 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                     "--watch",
                     "--native",
                     "--release",
+                    "--no-default-features",
                 ],
                 "test" => &[
                     "--no-monitor",
@@ -535,10 +537,13 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                     "--locked",
                     "--std",
                     "--no-cache",
+                    "--no-default-features",
                 ],
-                "check" => &["--format=ids", "--format=human", "--explain", "--locked"],
-                "build" => &["--locked", "--native", "--release"],
-                "bench" => &["--locked"],
+                "check" => {
+                    &["--format=ids", "--format=human", "--explain", "--locked", "--no-default-features"]
+                }
+                "build" => &["--locked", "--native", "--release", "--no-default-features"],
+                "bench" => &["--locked", "--no-default-features"],
                 "tokens" => &["--trivia"],
                 "parse" => &["--tree", "--print", "--trivia", "--shape", "--ast"],
                 _ => &[],
@@ -558,6 +563,7 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                         && cmd == "build"
                         && p.flags.contains(&"--native"))
                     && !(*k == "--from-sir" && cmd == "build")
+                    && !(*k == "--features" && matches!(cmd.as_str(), "check" | "build"))
             }) {
                 host.stderr(&plain_error(
                     msg::CLI_UNKNOWN_OPTION,
@@ -587,6 +593,11 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
             let mut diary = None;
             let mut output = None;
             let mut from_sir = None;
+            // `--features a,b` (09, decision 250), given any number of times.
+            let mut features = crate::package::FeatureRequest {
+                names: Vec::new(),
+                no_default: p.flags.contains(&"--no-default-features"),
+            };
             for (k, v) in &p.values {
                 let only = match *k {
                     "--record" | "--redact" => Some("run"),
@@ -620,6 +631,14 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                     }
                     "--from-sir" if matches!(cmd.as_str(), "run" | "build") => {
                         from_sir = Some(*v);
+                        continue;
+                    }
+                    "--features" => {
+                        features.names.extend(
+                            v.split(|c: char| c == ',' || c.is_whitespace())
+                                .filter(|f| !f.is_empty())
+                                .map(str::to_string),
+                        );
                         continue;
                     }
                     "--redact" => {
@@ -736,10 +755,12 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                 Some(f) => (Some(f), p.file.map(str::to_string).into_iter().chain(p.rest.clone()).collect()),
                 None => (p.file, p.rest.clone()),
             };
-            let inputs = match inputs_for(cmd, target, locked, has_ids(&p.flags), from_sir.is_some(), host) {
-                Ok(i) => i,
-                Err(code) => return code,
-            };
+            let inputs =
+                match inputs_for(cmd, target, locked, has_ids(&p.flags), from_sir.is_some(), &features, host)
+                {
+                    Ok(i) => i,
+                    Err(code) => return code,
+                };
             if cmd != "run"
                 && let Some(extra) = program_args.first()
             {
@@ -957,8 +978,22 @@ fn inputs_for(
     locked: bool,
     ids: bool,
     from_sir: bool,
+    features: &crate::package::FeatureRequest,
     host: &mut dyn Host,
 ) -> Result<Vec<Input>, i32> {
+    // A name `--features` gives that is not a feature (D0112).
+    let unknown = |host: &mut dyn Host, layout: &crate::package::Layout| -> Result<(), i32> {
+        match layout.unknown_requested.first() {
+            Some((name, package)) => {
+                host.stderr(&plain_error(
+                    msg::CLI_UNKNOWN_FEATURE,
+                    &[("name", name.clone()), ("package", package.clone())],
+                ));
+                Err(EXIT_USAGE)
+            }
+            None => Ok(()),
+        }
+    };
     let cwd = std::env::current_dir().unwrap_or_default();
     let read = |host: &mut dyn Host, file: &str| -> Result<String, i32> {
         std::fs::read_to_string(file).map_err(|e| {
@@ -979,7 +1014,8 @@ fn inputs_for(
         if file_level {
             return Ok(vec![Input::single(f, source)]);
         }
-        let layout = crate::package::load_file(f, &source, &cwd);
+        let layout = crate::package::load_file_with(f, &source, &cwd, features);
+        unknown(host, &layout)?;
         if layout.packages.len() == 1 && layout.diagnostics.is_empty() {
             return Ok(vec![Input::single(f, source)]);
         }
@@ -1006,6 +1042,7 @@ fn inputs_for(
     let dirs = match found {
         crate::package::Target::File(f) => {
             let source = read(host, &f)?;
+            unknown(host, &crate::package::load_file_with(&f, &source, &cwd, features))?;
             return Ok(vec![Input::single(&f, source)]);
         }
         crate::package::Target::Package(d) => vec![d],
@@ -1061,7 +1098,10 @@ fn inputs_for(
         }
     };
     let layouts: Vec<crate::package::Layout> =
-        dirs.iter().map(|dir| crate::package::load_package(dir, dir)).collect();
+        dirs.iter().map(|dir| crate::package::load_package_with(dir, dir, features)).collect();
+    for layout in &layouts {
+        unknown(host, layout)?;
+    }
     // One lockfile for a workspace's members (09): what all of them resolved.
     let lock = match &found_workspace {
         Some((root, members)) => {

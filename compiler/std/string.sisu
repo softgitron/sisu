@@ -1,7 +1,76 @@
 ##! `std.string` (11): text. A `String` is its UTF-8 bytes, `str` is the
 ##! type of a text literal, and `char` is a Unicode scalar value; their
 ##! methods (`len`, `chars`, `split`, `trim`, `find`, `replace`,
-##! `to_upper`, ...) are the prelude's, and `String` is reached from here
-##! too (`from std.string import String`; `str` and `char` are built-in
-##! names). Grapheme iteration, case mapping beyond ASCII, normalisation
-##! forms and `Builder` are not here yet.
+##! `to_lowercase` and `to_uppercase`, which map case over all of Unicode,
+##! ...) are the prelude's, and `String` is reached from here too (`from
+##! std.string import String`; `str` and `char` are built-in names).
+##! `Builder` makes a text from many pieces. Grapheme iteration and the
+##! normalisation forms need Unicode's tables, which are not here yet.
+
+## A text made from many pieces: each `push` keeps its piece, and `build`
+## copies them all into one `String` once, so making a long text from
+## short pieces copies each byte once.
+##
+## ```
+## var b = Builder.new()
+## b.push("one")
+## b.push_char(',')
+## b.push(" two")
+## b.push_line("")
+## b.push_line("three")
+## assert b.build() == "one, two\nthree\n"
+## assert b.byte_len() == 15
+## ```
+pub struct Builder:
+    pieces: list[String]
+    bytes: int
+
+    ## An empty builder.
+    pub pure def new() -> Builder:
+        return Builder(pieces=[], bytes=0)
+
+    ## Adds `text`.
+    pub pure def push(mut self, text: str):
+        self.pieces.push(String.new(text))
+        self.bytes += text.byte_len()
+
+    ## Adds the character `c`.
+    pub pure def push_char(mut self, c: char):
+        var one = String.new()
+        one.push_char(c)
+        self.bytes += c.len_utf8()
+        self.pieces.push(one)
+
+    ## Adds `text` and then a line break.
+    pub pure def push_line(mut self, text: str):
+        self.push(text)
+        self.push("\n")
+
+    ## Adds the pieces of `parts` with `sep` between each two.
+    ##
+    ## ```
+    ## var b = Builder.new()
+    ## b.push("[")
+    ## b.push_joined(["a", "b", "c"], "; ")
+    ## b.push("]")
+    ## assert b.build() == "[a; b; c]"
+    ## ```
+    pub pure def push_joined(mut self, parts: list[str], sep: str):
+        for (i, p) in enumerate(parts):
+            if i > 0:
+                self.push(sep)
+            self.push(p)
+
+    ## The number of bytes of the text so far.
+    pub pure def byte_len(self) -> int:
+        return self.bytes
+
+    pub pure def is_empty(self) -> bool:
+        return self.bytes == 0
+
+    ## The text so far, as one `String`; the builder keeps its pieces.
+    pub pure def build(self) -> String:
+        var out = String.new()
+        for p in self.pieces:
+            out.push(p)
+        return out

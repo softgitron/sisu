@@ -21,7 +21,8 @@
 ##! methods are intrinsics named `structural.*` implements the trait the
 ##! way the interpreter compares, hashes and prints values structurally
 ##! (docs/architecture.md, "Traits and generics"). `Iterable[T]` in a
-##! parameter accepts a `list`, `set`, `dict` or `Iter` whose items are `T`.
+##! parameter accepts a `list`, `set`, `dict` or `Iter` whose items are `T`,
+##! and any other iterator through `iter_from` (decision 247).
 
 # ------------------------------------------------------------------ host-backed types
 
@@ -1213,6 +1214,18 @@ pure def sorted[T: Ord](xs: Iterable[T]) -> list[T]:
 ## references).
 @intrinsic("iterable_list")
 pure def iterable_list[T](xs: Iterable[T]) -> list[T]
+
+## The items of `it`, an iterator of a type that implements `Iterator`
+## (`xs.iter().map(f)`, a program's own), as an `Iter` that takes each one
+## from `it` only when it is asked for: what the checker passes to an
+## `Iterable[T]` parameter given such an iterator (`sum(xs.iter().map(f))`),
+## since the functions that take one iterate collections and `Iter`s. A
+## generator, which the code taking its items runs to each `yield`
+## (decision 247).
+@internal
+def iter_from[I: Iterator](own it: I) -> Iter[I.Item]:
+    for x in it:
+        yield x
 
 ## The smaller of `a` and `b` by their `Ord`; `a` when they are equal.
 @structural("min")

@@ -1,0 +1,36 @@
+# `std.encoding` (11): hexadecimal, base64 in both alphabets with and
+# without padding, LEB128 and zigzag varints across the range of `int`,
+# and UTF-8 and UTF-16, each with what its decoder rejects.
+from std.encoding import base64_decode, base64_encode, hex_decode, hex_encode
+from std.encoding import utf16_decode, utf16_encode, varint_decode, varint_encode
+from std.encoding import zigzag_decode, zigzag_encode
+
+def main():
+    var all: list[u8] = []
+    for i in range(256):
+        all.push(i.truncate_to[u8]())
+    let data = bytes.from_list(all)
+    let hex = hex_encode(data)
+    print(hex.byte_slice(0, 32))
+    print(hex_decode(hex) == Ok(data.copy()))
+    for n in range(7):
+        let part = data.slice(250 - n * 40, 250 - n * 40 + n)
+        let std = base64_encode(part)
+        let url = base64_encode(part, url_safe=True)
+        let same = base64_decode(std) == Ok(part.copy())
+        print("{n}: {std} {url} {same} {base64_decode(url) == Ok(part)}")
+    print(base64_encode(data).byte_len())
+    print(base64_decode("SGVsbG8sIHdvcmxkIQ==").map((b) -> b.decode()))
+    print(base64_decode("SGVsbG8=x"))
+    for n in [0, 1, 127, 128, 16383, 16384, 9223372036854775807]:
+        let v = varint_encode(n)
+        print("{n} {hex_encode(v)} {varint_decode(v)}")
+    print(varint_decode(b"\xff\xff\xff\xff\xff\xff\xff\xff\xff\x01"))
+    for n in [0, -1, 1, -64, 64, -9223372036854775807 - 1, 9223372036854775807]:
+        let z = zigzag_encode(n)
+        print("{n} {hex_encode(z)} {zigzag_decode(z)}")
+    let text = "Grüße, 世界 🌍"
+    let units = utf16_encode(text)
+    print(units)
+    print(utf16_decode(units))
+    print(utf16_decode([0xd800, 0x41]))

@@ -81,8 +81,10 @@ fn needs_drop_table(types: &[TypeEntry]) -> Vec<bool> {
                 | Kind::Shared(_)
                 | Kind::Weak(_)
                 | Kind::Arena(_) => true,
-                // A capability handle's copies are counted (decision 237).
+                // A capability handle's copies are counted (decision 237),
+                // and so are those a function value holds (decision 248).
                 Kind::Opaque(n) => crate::value::counted(n),
+                Kind::Fn => true,
                 Kind::Mutex(v) | Kind::RwLock(v) | Kind::Cell(v) => get(*v),
                 Kind::Entry(k, _) => get(*k),
                 Kind::Option(p) => get(*p),

@@ -19,10 +19,18 @@ fn main(0) source 0 @4:5-4:9 {
     _1 = const 10 @5:13-5:15
     _3 = ref _1 @6:17-6:27
     _2 = closure main#closure0(copy _3) @6:17-6:27
+    goto bb1
+  bb1 (unwind bb2):
     _1 = const 20 @7:5-7:11
     _5 = call copy _2(const 1) @8:11-8:19
     _4 = call intrinsic print(copy _5) @8:5-8:20
     _0 = const ()
+    goto bb3
+  bb2 (cleanup):
+    drop _2
+    resume
+  bb3:
+    drop _2 @8:20-8:20
     return
 }
 outcome: conflict reached; the run stopped at a concrete ownership conflict

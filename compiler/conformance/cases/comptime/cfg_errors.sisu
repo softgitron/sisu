@@ -24,6 +24,11 @@ def d() -> int:
 def e() -> int:
     return 5
 
+# `not(...)` turns one condition around (decision 250), not two.
+@cfg(not(feature="tls", test))
+def f() -> int:
+    return 6
+
 struct Counter:
     n: int
 
@@ -33,4 +38,4 @@ impl Counter:
         return self.n * 2
 
 def main():
-    print(a() + b() + c() + d() + Counter(n=2).twice())
+    print(a() + b() + c() + d() + f() + Counter(n=2).twice())

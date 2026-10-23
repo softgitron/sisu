@@ -340,6 +340,8 @@ thread_local! {
     static ON_SYSTEM: Cell<bool> = const { Cell::new(false) };
     /// Values whose drop runs Sisu code, moved aside on the system stack.
     static DEFERRED: RefCell<Vec<(Box<[u64]>, u32)>> = const { RefCell::new(Vec::new()) };
+    /// Generators being driven to their next `yield` ([`drive`]).
+    static DRIVING: Cell<u32> = const { Cell::new(0) };
 }
 
 /// Runs `f` on the scheduler's state. `f` must neither run Sisu code nor
@@ -581,6 +583,11 @@ pub(crate) fn blocking(mut attempt: impl FnMut() -> Attempt) -> u8 {
                 if abandoning() {
                     return system(|| rt::raise_msg(msg::PANIC_ABANDONED_WAIT, &[]));
                 }
+                // A generator being driven waits only at its own `yield`,
+                // which hands the item over.
+                if driving() && with(|s| s.task(s.cur).yielded.is_none()) {
+                    system(|| rt::abort(&rt::render(msg::PANIC_DRIVEN_WAIT, &[])));
+                }
                 switch(Suspend::Park(0));
                 // Woken to be closed: the call fails, and the frames unwind.
                 if abandoning() {
@@ -665,42 +672,109 @@ fn run_loop() {
         let r = co.resume(());
         YIELDER.with(|c| c.set(std::ptr::null()));
         save_ctx(&mut ctx);
-        match r {
-            CoroutineResult::Yield(why) => with(|s| {
-                let t = &mut s.tasks[next as usize];
-                let dirty = ctx.stack[(abi::STACK_DIRTY / 8) as usize] != 0;
-                t.mark.dirty |= dirty;
-                ctx.stack[(abi::STACK_DIRTY / 8) as usize] = 0;
-                if let (Suspend::Park(sp), Some(region)) = (why, t.region) {
-                    t.mark = s.pool.on_park(region, sp, t.mark);
-                }
-                let t = &mut s.tasks[next as usize];
-                // The probe doubles as the decommit watermark; after an
-                // exhaustion it stays at the floor.
-                if ctx.stack[(abi::STACK_FAILED / 8) as usize] == 0
-                    && ctx.stack[(abi::STACK_PROBE / 8) as usize] >= ctx.stack[(abi::STACK_REAL / 8) as usize]
-                {
-                    let real = ctx.stack[(abi::STACK_REAL / 8) as usize];
-                    ctx.stack[(abi::STACK_PROBE / 8) as usize] =
-                        if t.mark.dirty { real } else { real.max(t.mark.clean_below as u64) };
-                }
-                t.ctx = ctx;
-                t.co = Some(co);
-            }),
-            CoroutineResult::Return(()) => {
-                // The task has ended: its slot goes back to the pool.
-                let stack = co.into_stack();
-                with(|s| {
-                    let t = &mut s.tasks[next as usize];
-                    t.mark.dirty |= ctx.stack[(abi::STACK_DIRTY / 8) as usize] != 0;
-                    let mark = t.mark;
-                    t.region = None;
-                    s.pool.release(stack.0, mark);
-                });
-            }
-        }
+        suspended(next, r, co, ctx);
         last = next;
     }
+}
+
+/// Keeps what a task's coroutine left when it handed control back: its
+/// coroutine and runtime state when it gave way or waits, the stack's
+/// watermark when it parked; its slot goes back to the pool when it ended.
+fn suspended(t: u32, r: CoroutineResult<Suspend, ()>, co: Box<Co>, mut ctx: Ctx) {
+    match r {
+        CoroutineResult::Yield(why) => with(|s| {
+            let task = &mut s.tasks[t as usize];
+            let dirty = ctx.stack[(abi::STACK_DIRTY / 8) as usize] != 0;
+            task.mark.dirty |= dirty;
+            ctx.stack[(abi::STACK_DIRTY / 8) as usize] = 0;
+            if let (Suspend::Park(sp), Some(region)) = (why, task.region) {
+                task.mark = s.pool.on_park(region, sp, task.mark);
+            }
+            let task = &mut s.tasks[t as usize];
+            // The probe doubles as the decommit watermark; after an
+            // exhaustion it stays at the floor.
+            if ctx.stack[(abi::STACK_FAILED / 8) as usize] == 0
+                && ctx.stack[(abi::STACK_PROBE / 8) as usize] >= ctx.stack[(abi::STACK_REAL / 8) as usize]
+            {
+                let real = ctx.stack[(abi::STACK_REAL / 8) as usize];
+                ctx.stack[(abi::STACK_PROBE / 8) as usize] =
+                    if task.mark.dirty { real } else { real.max(task.mark.clean_below as u64) };
+            }
+            task.ctx = ctx;
+            task.co = Some(co);
+        }),
+        CoroutineResult::Return(()) => {
+            // The task has ended: its slot goes back to the pool.
+            let stack = co.into_stack();
+            with(|s| {
+                let task = &mut s.tasks[t as usize];
+                task.mark.dirty |= ctx.stack[(abi::STACK_DIRTY / 8) as usize] != 0;
+                let mark = task.mark;
+                task.region = None;
+                s.pool.release(stack.0, mark);
+            });
+        }
+    }
+}
+
+/// Whether a generator is being driven ([`drive`]).
+pub(crate) fn driving() -> bool {
+    DRIVING.with(Cell::get) > 0
+}
+
+/// Runs generator `t` until it yields its next item or ends, here and now,
+/// outside the schedule, as the interpreter's `drive_gen` does (decision
+/// 247): the code
+/// asking for the item (another iterator's adapter, an intrinsic's
+/// `Iterable[T]` argument, a generator being driven) cannot wait for it.
+/// It resumes the generator's coroutine as [`unwind_abandoned`] does; its
+/// calls count on top of the asking code's (decision 234); no yield point
+/// reaches the scheduler, and the budget is what it was, but that a task
+/// the generator made ready ends a starvation it found, as it would have
+/// in the interpreter; a wait other than its `yield` aborts ([`blocking`]).
+pub(crate) fn drive(t: u32) {
+    let taken = with(|s| {
+        let task = &mut s.tasks[t as usize];
+        task.co.take().map(|co| (co, std::mem::replace(&mut task.ctx, empty_ctx()), task.yielder))
+    });
+    let Some((mut co, mut ctx, yielder)) = taken else { return };
+    let depth = crate::entry::SISU_RT_DEPTH.load(Relaxed);
+    let (asking, was_starved) = with(|s| {
+        let g = s.task(t);
+        ctx.depth += depth - g.depth_base;
+        g.depth_base = depth;
+        g.state = TState::Running;
+        s.ready.retain(|x| *x != t);
+        let asking = s.cur;
+        s.cur = t;
+        (asking, s.starved)
+    });
+    let budget = SISU_RT_BUDGET.load(Relaxed);
+    SISU_RT_BUDGET.store(STARVED, Relaxed);
+    let mut mine = empty_ctx();
+    save_ctx(&mut mine);
+    let (my_yielder, on_system) = (YIELDER.with(Cell::get), ON_SYSTEM.with(Cell::get));
+    let deferred = DEFERRED.with(|d| std::mem::take(&mut *d.borrow_mut()));
+    PENDING.store(0, Relaxed);
+    DRIVING.with(|d| d.set(d.get() + 1));
+    load_ctx(&mut ctx);
+    // A generator that never ran sets its yielder when it starts.
+    YIELDER.with(|c| c.set(yielder));
+    ON_SYSTEM.with(|c| c.set(false));
+    let r = co.resume(());
+    save_ctx(&mut ctx);
+    YIELDER.with(|c| c.set(my_yielder));
+    ON_SYSTEM.with(|c| c.set(on_system));
+    DRIVING.with(|d| d.set(d.get() - 1));
+    PENDING.store(deferred.len(), Relaxed);
+    DEFERRED.with(|d| *d.borrow_mut() = deferred);
+    load_ctx(&mut mine);
+    with(|s| {
+        s.cur = asking;
+        let ended = was_starved && !s.starved;
+        SISU_RT_BUDGET.store(if ended { 0 } else { budget }, Relaxed);
+    });
+    suspended(t, r, co, ctx);
 }
 
 /// Closes a generator dropped while suspended in a call (a `yield`): it
@@ -762,6 +836,11 @@ fn empty_ctx() -> Ctx {
 /// A yield point found the budget spent ([`abi::sym::YIELD`]).
 #[unsafe(no_mangle)]
 extern "C" fn sisu_rt_yield() {
+    // A generator being driven runs to its `yield` without switching.
+    if driving() {
+        SISU_RT_BUDGET.store(STARVED, Relaxed);
+        return;
+    }
     if with(|s| s.yield_point(false)) {
         switch(Suspend::Preempt);
     }
@@ -770,6 +849,9 @@ extern "C" fn sisu_rt_yield() {
 /// `task.yield_now`: a yield point that gives way whenever another task is
 /// ready.
 pub(crate) fn yield_now() {
+    if driving() {
+        return;
+    }
     let go = with(|s| {
         if !s.starved {
             SISU_RT_BUDGET.fetch_sub(1, Relaxed);

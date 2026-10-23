@@ -1,0 +1,60 @@
+# `comptime def`s that reflect (08, "Reflection"; decision 251): a
+# `comptime def` whose body reflects is a template, made once when it has
+# no type parameters; a `T: type` parameter takes a type as its argument,
+# written among the call's arguments (positionally or by name), and makes
+# the function a template made for each type it is given. A trait may
+# declare `comptime def`s besides its `derive`, called as `Trait.name`.
+
+@derive(Default)
+struct Point:
+    x: int
+    y: int = 7
+
+enum Shape:
+    Circle(radius: int)
+    Square(side: int)
+
+comptime def field_names(T: type) -> list[str]:
+    return [f.name for f in reflect.fields_of(T)]
+
+comptime def count() -> int:
+    return len(reflect.fields_of(Point))
+
+comptime def describe(T: type, prefix: str) -> String:
+    if comptime reflect.is_struct(T):
+        return "{prefix} {reflect.name_of(T)} has {len(reflect.fields_of(T))} fields"
+    else:
+        return "{prefix} {reflect.name_of(T)} has {len(reflect.variants_of(T))} variants"
+
+comptime def origin(T: type) -> T:
+    return T.default()
+
+comptime def both(A: type, B: type) -> list[str]:
+    return [reflect.name_of(A), reflect.name_of(B)]
+
+trait Table:
+    def row(self) -> String
+
+    # A compile-time function of the trait's: the columns a type has.
+    comptime def columns(T: type) -> list[str]:
+        return [f.name for f in reflect.fields_of(T)]
+
+    comptime def width() -> int:
+        return 3
+
+impl Table for Point:
+    def row(self) -> String:
+        return "{self.x} {self.y}"
+
+const NAMES: list[str] = comptime field_names(Point)
+
+def main():
+    print(NAMES)
+    print(comptime count())
+    print(comptime describe(Point, "the struct"))
+    print(comptime describe(Shape, prefix="the enum"))
+    print("{comptime origin(Point):?}")
+    print(comptime both(Point, B=Shape))
+    print(comptime Table.columns(Point))
+    print(comptime Table.width())
+    print(Point(x=1, y=2).row())

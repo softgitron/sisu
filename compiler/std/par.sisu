@@ -1,0 +1,209 @@
+##! `std.par` (11; 06, "Data parallelism"; D-069): parallel computation
+##! over data as a library. A reduction over a list splits it into chunks
+##! fixed by index (halves, recursively, until a chunk holds at most
+##! `grain` values), reduces each chunk into a view of its own, and merges
+##! the views pairwise up the same tree, so its result is a function of the
+##! values, the length and the grain, never of which worker ran which
+##! chunk: removing the parallelism gives the same result, bit for bit.
+##! `Sum` follows the pairwise shape of the prelude's `sum` (D-074), so a
+##! parallel sum is the sequential one. A body is `pure` and cannot block.
+##!
+##! Stage 0 runs the chunks one after another, in the tree's order, on the
+##! task that asks: it has no worker pool apart from its scheduler (Q-6 is
+##! open), and a `pure` body cannot tell the difference.
+
+## The default number of values a chunk holds at most.
+const GRAIN: int = 1024
+
+## Runs `a` and `b`, which cannot block, and gives both results (06's
+## fork-join for divide and conquer).
+##
+## ```
+## let (x, y) = join(() -> 6 * 7, () -> "done")
+## assert x == 42 and y == "done"
+## ```
+pub pure def join[A, B](a: pure () -> A, b: pure () -> B) -> (A, B):
+    let x = a()
+    let y = b()
+    return (x, y)
+
+## Runs each of `fs` and gives their results, in order.
+##
+## ```
+## let fs: list[pure () -> int] = [() -> 1, () -> 2, () -> 3]
+## assert join_all(fs) == [1, 2, 3]
+## ```
+pub pure def join_all[T](fs: list[pure () -> T]) -> list[T]:
+    var out: list[T] = []
+    for f in fs:
+        out.push(f())
+    return out
+
+## The values of `xs` for a parallel loop, `for x in par.iter(xs):`, whose
+## body runs once for each value.
+pub pure def iter[T](xs: list[T]) -> Iter[ref T]:
+    return xs.iter()
+
+## The chunks a run of `n` values is split into, as `(start, end)` index
+## ranges in order: halves, recursively, until a chunk holds at most
+## `grain` values.
+##
+## ```
+## assert chunks(10, 3) == [(0, 2), (2, 5), (5, 7), (7, 10)]
+## assert chunks(4, 8) == [(0, 4)]
+## assert chunks(0, 8) == [(0, 0)]
+## ```
+pub pure def chunks(n: int, grain: int = GRAIN) -> list[(int, int)]:
+    requires n >= 0 and grain >= 1
+    var out: list[(int, int)] = []
+    split(0, n, grain, mut out)
+    return out
+
+pure def split(start: int, end: int, grain: int, mut out: list[(int, int)]):
+    if end - start <= grain:
+        out.push((start, end))
+        return
+    let mid = start + (end - start) // 2
+    split(start, mid, grain, mut out)
+    split(mid, end, grain, mut out)
+
+## A reduction (06): each chunk gets an empty view, adds its values to
+## it in order, and two adjacent chunks' views are merged, the earlier
+## one's first; `finish` gives the result of the whole.
+pub trait Reducer:
+    ## The values it reduces.
+    type Item
+    ## What it gives.
+    type Output
+    ## A view with nothing in it.
+    pure def empty() -> Self
+    ## Adds the next value of the chunk.
+    pure def add(mut self, own x: Item)
+    ## The view of a chunk followed by `later`'s.
+    pure def merge(own self, own later: Self) -> Self
+    ## The result.
+    pure def finish(own self) -> Output
+
+## Reduces `xs` with the reducer `R` over the chunks of `chunks(len(xs),
+## grain)`, merging up their tree.
+##
+## ```
+## let xs = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
+## assert reduce[Sum[f64]](xs.copy(), grain=2) == sum(xs)
+## assert reduce[Collect[int]]([3, 1, 2]) == [3, 1, 2]
+## ```
+pub pure def reduce[R: Reducer](own xs: list[R.Item], grain: int = GRAIN) -> R.Output:
+    requires grain >= 1
+    let n = len(xs)
+    let bounds = chunks(n, grain)
+    var leaves: list[R] = []
+    var part = R.empty()
+    var k = 0
+    var i = 0
+    for x in own xs:
+        while i >= bounds[k].1:
+            leaves.push(part)
+            part = R.empty()
+            k += 1
+        part.add(x)
+        i += 1
+    while k < len(bounds):
+        leaves.push(part)
+        part = R.empty()
+        k += 1
+    var views = iter_of(leaves)
+    return merge_run(0, n, grain, mut views).finish()
+
+## The views of the chunks of `start` to `end`, merged up their tree.
+pure def merge_run[R: Reducer](start: int, end: int, grain: int, mut views: Iter[R]) -> R:
+    if end - start <= grain:
+        return views.next().expect("a view for each chunk")
+    let mid = start + (end - start) // 2
+    let left = merge_run(start, mid, grain, mut views)
+    let right = merge_run(mid, end, grain, mut views)
+    return left.merge(right)
+
+## `f` of each value, in order: the parallel `map`.
+##
+## ```
+## assert map([1, 2, 3], it * 10) == [10, 20, 30]
+## ```
+pub pure def map[T, U](xs: list[T], f: pure (ref T) -> U) -> list[U]:
+    var out: list[U] = []
+    for x in xs:
+        out.push(f(x))
+    return out
+
+## The sum of the values (06's `par.Sum`), in the pairwise shape of the
+## prelude's `sum`: a chunk's values are summed by halves, and two
+## chunks' sums are added, so the result is `sum`'s whatever the grain.
+##
+## ```
+## let xs = [1.0e16, 1.0, -1.0e16, 1.0]
+## assert reduce[Sum[f64]](xs.copy(), grain=1) == sum(xs)
+## assert reduce[Sum[int]]([1, 2, 3]) == 6
+## ```
+pub struct Sum[T: Num + Add]:
+    values: list[T]
+    total: T?
+
+    ## The sum of the values the view has seen.
+    pure def value(own self) -> T?:
+        let values = self.values
+        if values.is_empty():
+            return self.total
+        let part = values.sum()
+        match self.total:
+            case Some(t):
+                return Some(t + part)
+            case None:
+                return Some(part)
+
+impl[T: Num + Add] Reducer for Sum[T]:
+    type Item = T
+    type Output = T
+
+    pure def empty() -> Sum[T]:
+        return Sum(values=[], total=None)
+
+    pure def add(mut self, own x: T):
+        self.values.push(x)
+
+    pure def merge(own self, own later: Sum[T]) -> Sum[T]:
+        let a = self.value()
+        let b = later.value()
+        let total = match (a, b):
+            case (Some(x), Some(y)): Some(x + y)
+            case (Some(x), None): Some(x)
+            case (None, y): y
+        return Sum(values=[], total=total)
+
+    pure def finish(own self) -> T:
+        match self.value():
+            case Some(t):
+                return t
+            case None:
+                let none: list[T] = []
+                return none.sum()
+
+## The values, in index order, in one list (06's `par.Collect`).
+pub struct Collect[T]:
+    items: list[T]
+
+impl[T] Reducer for Collect[T]:
+    type Item = T
+    type Output = list[T]
+
+    pure def empty() -> Collect[T]:
+        return Collect(items=[])
+
+    pure def add(mut self, own x: T):
+        self.items.push(x)
+
+    pure def merge(own self, own later: Collect[T]) -> Collect[T]:
+        var items = self.items
+        items.extend(later.items)
+        return Collect(items=items)
+
+    pure def finish(own self) -> list[T]:
+        return self.items

@@ -1,0 +1,1 @@
+a generator inside another iterator, or given to `sum`, `zip` and the other functions of an `Iterable[T]`, cannot wait; iterate it with `for`

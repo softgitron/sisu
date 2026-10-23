@@ -214,10 +214,12 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> u8 {
                 mem::set_word(c.ret, abi::MUTEX_LOCKED, 0);
                 mem::set_word(c.ret, abi::MUTEX_HOLDER, 0);
                 mem::set_word(c.ret, abi::MUTEX_POISONED, 0);
+                mem::set_word(c.ret, abi::MUTEX_WRITERS, 0);
                 mem::copy(c.ret.add(abi::MUTEX_HEADER as usize), c.arg(0), ty(t).size as usize);
                 abi::OK
             }),
-            I::MutexLock | I::RwLockWrite => lock(c),
+            I::MutexLock => lock(c, false),
+            I::RwLockWrite => lock(c, true),
             I::RwLockRead => read_lock(c),
             I::MutexIsPoisoned | I::RwLockIsPoisoned => {
                 let (p, _) = c.place(0);
@@ -1230,6 +1232,20 @@ unsafe fn iter_next(c: &Call<'_>) -> u8 {
     let state = unsafe { crate::iter::waits(&*obj) };
     let site = Site::current();
     match state {
+        // Code that cannot wait drives the generator instead.
+        Some(crate::iter::Waits::Gen(t, size)) if sched::driving() => match gen_item(t) {
+            Ok(Some(v)) => {
+                // SAFETY: the result is an option of the item.
+                unsafe { write_some(c.ret, &v, size) };
+                abi::OK
+            }
+            Ok(None) => {
+                // SAFETY: as above.
+                unsafe { c.none() };
+                abi::OK
+            }
+            Err(status) => status,
+        },
         Some(crate::iter::Waits::Gen(t, size)) => sched::blocking(|| {
             with(|s| {
                 let task = s.task(t);
@@ -1289,6 +1305,36 @@ unsafe fn iter_next(c: &Call<'_>) -> u8 {
     }
 }
 
+/// The next item of a generator that code which cannot wait takes items
+/// from (another iterator's adapter, an intrinsic's `Iterable[T]`
+/// argument, a generator being driven), as the interpreter's `gen_item`
+/// gives it: the item it yielded, else its end, else the panic it ended
+/// with (raised, its status the error), else it runs until one of those
+/// ([`sched::drive`]).
+pub(crate) fn gen_item(t: u32) -> Result<Option<Box<[u64]>>, u8> {
+    let ready = |s: &mut sched::Sched| {
+        let g = s.task(t);
+        if let Some(v) = g.yielded.take() {
+            return Some(Ok(Some(v)));
+        }
+        if matches!(g.state, TState::Done) {
+            return Some(match g.outcome.take() {
+                Some(Outcome::Panic(p)) => Err(p),
+                _ => Ok(None),
+            });
+        }
+        None
+    };
+    let r = match with(ready) {
+        Some(r) => r,
+        None => {
+            sched::drive(t);
+            with(ready).unwrap_or(Ok(None))
+        }
+    };
+    r.map_err(rt::raise_panic)
+}
+
 /// A generator's iterator was dropped before its end: the generator is
 /// closed (decision 236), as the interpreter closes it. One suspended at a
 /// `yield` unwinds its frames, running their drops and `defer`s
@@ -1338,13 +1384,16 @@ pub(crate) fn abandon(t: u32) -> u8 {
 
 // ------------------------------------------------------------------ mutexes
 
-/// `Mutex.lock`, and an `RwLock`'s `write`: waits while another task holds
-/// the lock, or reads it, and cannot be cancelled; panics when this task
-/// holds it, or it is poisoned.
-unsafe fn lock(c: &Call<'_>) -> u8 {
+/// `Mutex.lock`, and an `RwLock`'s `write` (`rw`): waits while another
+/// task holds the lock, or reads it, and cannot be cancelled; panics when
+/// this task holds it, or it is poisoned. A writer that waits counts among
+/// the lock's waiting writers until it takes it, and no new reader passes
+/// them (decision 249).
+unsafe fn lock(c: &Call<'_>, rw: bool) -> u8 {
     // SAFETY: the argument is a mutex, through a reference.
     let (p, _) = unsafe { c.place(0) };
     let site = Site::current();
+    let mut waiting = false;
     sched::blocking(|| {
         with(|s| {
             let cur = s.cur;
@@ -1360,8 +1409,15 @@ unsafe fn lock(c: &Call<'_>) -> u8 {
                     if state == 1 && mem::word(p, abi::MUTEX_HOLDER) == u64::from(cur) {
                         return Attempt::Done(rt::raise_msg(msg::PANIC_MUTEX_HELD, &[]));
                     }
+                    if rw && !waiting {
+                        waiting = true;
+                        mem::set_word(p, abi::MUTEX_WRITERS, mem::word(p, abi::MUTEX_WRITERS) + 1);
+                    }
                     s.block_on(Wait::Lock, &[Key::Lock], None, site);
                     return Attempt::Wait;
+                }
+                if waiting {
+                    mem::set_word(p, abi::MUTEX_WRITERS, mem::word(p, abi::MUTEX_WRITERS).saturating_sub(1));
                 }
                 mem::set_word(p, abi::MUTEX_LOCKED, 1);
                 mem::set_word(p, abi::MUTEX_HOLDER, u64::from(cur));
@@ -1373,7 +1429,8 @@ unsafe fn lock(c: &Call<'_>) -> u8 {
 }
 
 /// `RwLock.read`: waits while a task writes (panics when this task does,
-/// or the lock is poisoned), then counts one more reader.
+/// or the lock is poisoned) or waits to write (decision 249), then counts
+/// one more reader.
 unsafe fn read_lock(c: &Call<'_>) -> u8 {
     // SAFETY: the argument is an `RwLock`, through a reference.
     let (p, _) = unsafe { c.place(0) };
@@ -1391,6 +1448,10 @@ unsafe fn read_lock(c: &Call<'_>) -> u8 {
                         return Attempt::Done(rt::raise_msg(msg::PANIC_MUTEX_HELD, &[]));
                     }
                     1 => {
+                        s.block_on(Wait::Lock, &[Key::Lock], None, site);
+                        return Attempt::Wait;
+                    }
+                    _ if mem::word(p, abi::MUTEX_WRITERS) != 0 => {
                         s.block_on(Wait::Lock, &[Key::Lock], None, site);
                         return Attempt::Wait;
                     }

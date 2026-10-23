@@ -213,7 +213,12 @@ impl Parser<'_> {
     }
 
     fn not_expr(&mut self) -> Class {
-        if self.at(NOT_KW) && self.nth(1) != IN_KW {
+        // In an attribute's arguments, `not(feature="tls")` is a call of
+        // `not` with a keyword argument, as `all(...)` and `any(...)` are
+        // (decision 250): a parenthesised expression cannot hold one.
+        let not_call =
+            self.in_attribute && self.nth(1) == L_PAREN && self.nth(2) == IDENT && self.nth(3) == EQ;
+        if self.at(NOT_KW) && self.nth(1) != IN_KW && !not_call {
             self.start(PREFIX_EXPR);
             self.bump();
             self.not_expr();
