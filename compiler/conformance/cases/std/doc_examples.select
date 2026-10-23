@@ -39,7 +39,8 @@ test "std.json/encode (doc example)" ... ok
 test "std.math/TAU (doc example)" ... ok
 test "std.net/Url.parse (doc example)" ... ok
 test "std.task/scope (doc example)" ... ok
+test "std.task/Once (doc example)" ... ok
 test "std.test/Bench (doc example)" ... ok
 test "std.time/Ticker (doc example)" ... ok
 test "std.time/Timeline (doc example)" ... ok
-44 passed, 0 failed, 0 blocked
+45 passed, 0 failed, 0 blocked

@@ -60,3 +60,124 @@ def is_cancelled() -> bool
 ## running is cancelled, for long computations that want to stop early.
 @intrinsic("task.checkpoint")
 def checkpoint() -> ! TaskError
+
+## Runs a function once among the tasks that share it (11's `Once`): the
+## first `call_once` runs its function; one that comes while it runs waits
+## for it to finish; the later ones run nothing. A call whose function
+## panics leaves it not done, so the next call runs its own. A `Once` is
+## `Send` and `Sync`.
+##
+## ```
+## let once = task.Once()
+## var calls = 0
+## once.call_once do:
+##     calls += 1
+## once.call_once do:
+##     calls += 1
+## assert calls == 1 and once.is_completed()
+## ```
+pub struct Once:
+    done: Mutex[bool] = Mutex(False)
+
+impl Once:
+    ## Runs `f` if no call has run its function to the end yet; waits while
+    ## another task's runs.
+    pub def call_once(self, f: () -> ()):
+        var g = self.done.lock()
+        if not g.value:
+            f()
+            g.value = True
+
+    ## Whether a call has run its function to the end.
+    pub def is_completed(self) -> bool:
+        return self.done.lock().value
+
+## Waiting until other tasks make a condition true under a `Mutex` (11's
+## `Condvar`): `wait` lets go of the mutex's guard, waits for a
+## `notify_one` or a `notify_all`, and locks the mutex again. A notify that
+## comes while nobody waits wakes nobody, and a wait may end without one
+## (its task cancelled, for one), so callers wait in a loop on the
+## condition, or with `wait_while`. A `Condvar` is `Send` and `Sync`.
+pub struct Condvar:
+    waiters: Mutex[list[Sender[()]]] = Mutex([])
+
+impl Condvar:
+    ## Lets go of `guard`, the lock on `m`, waits to be notified, and locks
+    ## `m` again.
+    pub def wait[T](self, m: Mutex[T], own guard: MutexGuard[T]) -> MutexGuard[T] from m:
+        let tx, rx = channel[()](capacity=1)
+        self.waiters.lock().value.push(tx)
+        _ = guard
+        _ = rx.recv()
+        return m.lock()
+
+    ## Locks `m` and waits, as `wait` does, while `blocked` says so of its
+    ## value; returns the lock with the condition false.
+    pub def wait_while[T](self, m: Mutex[T], blocked: (ref T) -> bool) -> MutexGuard[T] from m:
+        var g = m.lock()
+        while blocked(ref g.value):
+            g = self.wait(m, g)
+        return g
+
+    ## Wakes one waiting task, the one that has waited longest, if any (a
+    ## waiter that has gone, cancelled, is passed over).
+    pub def notify_one(self):
+        var g = self.waiters.lock()
+        while len(g.value) > 0:
+            let tx = g.value.remove(0)
+            if tx.try_send(()).is_none():
+                return
+
+    ## Wakes every waiting task.
+    pub def notify_all(self):
+        var g = self.waiters.lock()
+        for tx in g.value.iter():
+            _ = tx.try_send(())
+        g.value.clear()
+
+## A value that many tasks may read at once or one task may change (11's
+## `RwLock`): `read` gives a guard to read the value through, and `write`
+## the guard a `Mutex` gives. `read` waits while a task writes, and `write`
+## while any task reads or writes; readers that keep coming keep a writer
+## waiting. Neither wait is a point of cancellation. A task that writes
+## and asks again panics, as `Mutex.lock` does; one that reads and asks to
+## write waits for itself. A write guard dropped by unwinding checks the
+## value's `invariant` and poisons the lock as a `Mutex`'s does (D-077),
+## and every later `read` or `write` then panics. An `RwLock` is `Send`
+## when its value is `Send`, and `Sync` when it is also `Sync`.
+@builtin("RwLock")
+pub struct RwLock[T]:
+    pass
+
+## The read lock on an `RwLock`, from `RwLock.read`: `guard.value` is the
+## value, which nobody changes while a read guard lives; dropping the guard
+## lets go of the lock.
+@builtin("ReadGuard")
+pub struct ReadGuard[T]:
+    pass
+
+impl[T] RwLock[T]:
+    @intrinsic("RwLock.new")
+    pub pure def new(own value: T) -> RwLock[T]
+    ## A read lock, until the guard is dropped.
+    @intrinsic("RwLock.read")
+    pub def read(self) -> ReadGuard[T]
+    ## The write lock, until the guard is dropped.
+    @intrinsic("RwLock.write")
+    pub def write(self) -> MutexGuard[T]
+    ## Whether a write guard dropped by unwinding left the value's
+    ## invariant broken.
+    @intrinsic("RwLock.is_poisoned")
+    pub pure def is_poisoned(self) -> bool
+    ## The value, taking the lock apart; panics if it is poisoned.
+    @intrinsic("RwLock.into_inner")
+    @keeps(self)
+    pub pure def into_inner(own self) -> T
+
+impl[T] Debug for RwLock[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)
+
+impl[T] Debug for ReadGuard[T]:
+    @intrinsic("structural.debug")
+    pure def fmt_debug(self, mut f: Formatter)

@@ -77,12 +77,23 @@ impl Loan {
     }
 }
 
-/// What a statement makes: the loan of its rvalue (a borrow) and the
-/// reborrows of its `ref mut` operands, by operand index.
+/// What a statement makes: the loan of its rvalue (a borrow), the
+/// reborrows of its `ref mut` operands, and the loans of the places a
+/// call copies capability handles from, for a result that may point into
+/// their objects (decision 237), by operand index.
 #[derive(Clone, Debug, Default)]
 struct Made {
     rvalue: Option<LoanId>,
     reborrows: HashMap<usize, LoanId>,
+    handles: HashMap<usize, LoanId>,
+}
+
+impl Made {
+    fn makes(&self, l: LoanId) -> bool {
+        self.rvalue == Some(l)
+            || self.reborrows.values().any(|v| *v == l)
+            || self.handles.values().any(|v| *v == l)
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -276,7 +287,26 @@ impl Analysis {
                         });
                     }
                 }
-                if m.rvalue.is_some() || !m.reborrows.is_empty() {
+                // A result that may point into the object of a capability
+                // handle the call copies borrows the place it copies from
+                // (decision 237).
+                if let StatementKind::Call { dest, callee, args } = &s.kind {
+                    for oi in handle_sources(p, types, callee, args.len(), &types.place_ty(f, dest)) {
+                        let (Some(Operand::Copy(pl) | Operand::Move(pl)), None) =
+                            (args.get(oi), m.reborrows.get(&oi))
+                        else {
+                            continue;
+                        };
+                        if types.place_ty(f, pl).is_some_and(|t| types.holds_handle(&t)) {
+                            m.handles.insert(oi, loans.len());
+                            loans.push(Loan {
+                                kind: LoanKind::Local { place: pl.clone(), mutable: false, two_phase: false },
+                                loc: s.loc,
+                            });
+                        }
+                    }
+                }
+                if m.rvalue.is_some() || !m.reborrows.is_empty() || !m.handles.is_empty() {
                     made.insert((b, si), m);
                 }
             }
@@ -465,7 +495,10 @@ impl Analysis {
                     d.insert(r);
                     return OpLoans { holds, direct: Some(d), inner };
                 }
-                let holds = self.value_loans(st, p);
+                let mut holds = self.value_loans(st, p);
+                if let Some(&r) = made.and_then(|m| m.handles.get(&oi)) {
+                    holds.insert(r);
+                }
                 // A reference read out of a value (an option's payload, a
                 // tuple's element) is treated as pointing into every place
                 // the value holds a loan of: the referent's loans are then
@@ -1004,7 +1037,7 @@ impl Analysis {
                     if let Some(&r) = made.and_then(|m| m.reborrows.get(&oi)) {
                         v.push((pl.project(Proj::Deref), Access::MutBorrow, Some(r)));
                     } else {
-                        v.push((pl.clone(), Access::Read, None));
+                        v.push((pl.clone(), Access::Read, made.and_then(|m| m.handles.get(&oi).copied())));
                     }
                 }
                 Operand::Move(pl) => {
@@ -1118,7 +1151,7 @@ impl Analysis {
         // The destination is written after the operands are evaluated.
         if let Some(d) = dest(s) {
             for y in post.iter() {
-                if made.is_some_and(|m| m.rvalue == Some(y) || m.reborrows.values().any(|v| *v == y)) {
+                if made.is_some_and(|m| m.makes(y)) {
                     continue;
                 }
                 if self.conflicts_with(d, Access::Write, y, before) {
@@ -1703,6 +1736,16 @@ impl Analysis {
                     if place.proj.iter().any(|x| matches!(x, Proj::Deref)) {
                         continue;
                     }
+                    // A handle the caller copied into a parameter the
+                    // result may borrow from: the caller's place is
+                    // borrowed in its stead (decision 237).
+                    let param = place.local.0.wrapping_sub(1);
+                    if param < f.param_count
+                        && (f.from.contains(&param) || f.inner.contains(&param))
+                        && types.place_ty(f, place).is_some_and(|t| types.holds_handle(&t))
+                    {
+                        continue;
+                    }
                     let note = if matches!(f.locals[0].ty, Type::Fn(..)) {
                         msg::BORROW_USE_OWN_CLOSURE
                     } else {
@@ -1879,4 +1922,24 @@ fn spawn_task_arg(callee: &Callee) -> Option<usize> {
 fn scope_body_spawn(f: &Function, args: &[Operand]) -> bool {
     matches!(f.kind, sisu_sir::FnKind::Closure(sisu_sir::ClosureRole::ScopeBody))
         && matches!(args.first(), Some(Operand::Copy(p) | Operand::Move(p)) if p.local.0 == 2 && p.proj.is_empty())
+}
+
+/// The arguments of a call whose capability handles a result may point
+/// into (decision 237): those the callee's result borrows from deeply, and
+/// every one of a call through a function value whose result can hold a
+/// loan.
+fn handle_sources(p: &Program, types: &Types, callee: &Callee, n: usize, dest: &Option<Type>) -> Vec<usize> {
+    let from: &[u32] = match callee {
+        Callee::Fn(name, _) => types.function(name).map(|g| g.from.as_slice()).unwrap_or_default(),
+        Callee::Intrinsic(name, _) => p.intrinsic(name).map(|d| d.from.as_slice()).unwrap_or_default(),
+        Callee::Trait(name, _) => p.trait_method(name).map(|d| d.from.as_slice()).unwrap_or_default(),
+        Callee::Value(_) => {
+            return if dest.as_ref().is_some_and(|t| types.may_hold(t)) {
+                (0..n).collect()
+            } else {
+                Vec::new()
+            };
+        }
+    };
+    from.iter().map(|i| *i as usize).filter(|i| *i < n).collect()
 }

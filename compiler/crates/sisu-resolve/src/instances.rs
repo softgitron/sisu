@@ -1,9 +1,15 @@
-//! Instances of templates (08, "Reflection"): a generic function that
-//! reflects on its type parameters (`if comptime reflect.is_struct(T):`,
-//! `comptime for f in reflect.fields_of(T):`, `value.[f]`) is made once for
-//! each list of type arguments it is called with, by unfolding its body for
-//! them (`template.rs`), and the instance is declared, checked and lowered
-//! like any other function; a call of the template calls its instance.
+//! Instances of templates (08, "Reflection"): a function or a method
+//! whose body runs code at compile time (`if comptime
+//! reflect.is_struct(T):`, `comptime for f in reflect.fields_of(T):`,
+//! `value.[f]`) is made once for each list of type arguments it is called
+//! with, by unfolding its body for them (`template.rs`), and the instance
+//! is declared, checked and lowered like any other function; a call of the
+//! template calls its instance. One without type parameters (a function or
+//! a method that reflects on the program's own types, decision 244) is
+//! made once, whether anything calls it or not, and its instance takes its
+//! name, so `main`, a trait's call and a function value run it. A method's
+//! instance is a method of an inherent impl of its type, whose
+//! compile-time code names the type `Self`.
 //!
 //! Which instances a program needs is known only once its calls are
 //! typed, so the driver checks the program, collects the type checker's
@@ -26,18 +32,19 @@ use crate::ty::Ty;
 use sisu_diag::{Diagnostic, msg};
 use sisu_syntax::ast::{self, ExprKind};
 
-/// Whether `f`'s body reflects on one of its type parameters: a `reflect`
-/// query, a field reached by a compile-time descriptor, or a compile-time
-/// expression that names a type parameter.
-pub(crate) fn reflects(f: &ast::FnDef) -> bool {
+/// Whether `f`'s body has code that runs at compile time by unfolding
+/// (08, "Reflection"): a `reflect` query, a field reached by a
+/// compile-time descriptor (`x.[f]`), a `comptime for` or `comptime if`
+/// (among statements or a `match`'s arms), or a compile-time expression
+/// that names one of `names` (the type parameters in scope).
+pub(crate) fn unfolds(f: &ast::FnDef, names: &[String]) -> bool {
     let Some(body) = &f.body else { return false };
-    let names: Vec<&str> = f.generics.iter().map(|g| g.name.text.as_str()).collect();
-    let mut found = false;
+    let mut found = comptime_stmts(body);
     let mentions = |e: &ast::Expr| {
         let mut m = false;
         ast::visit::expr(e, &mut |x| {
             if let ExprKind::Name(n) = &x.kind
-                && names.contains(&n.as_str())
+                && names.contains(n)
             {
                 m = true;
             }
@@ -50,9 +57,60 @@ pub(crate) fn reflects(f: &ast::FnDef) -> bool {
             found = true
         }
         ExprKind::Comptime(inner) if mentions(inner) => found = true,
+        ExprKind::Match { arms, .. } => {
+            found |= arms.iter().any(|a| {
+                a.generated.is_some() || matches!(&a.body, ast::ArmBody::Block(b) if comptime_stmts(b))
+            })
+        }
+        ExprKind::Closure(c) => found |= matches!(&c.body, ast::ClosureBody::Block(b) if comptime_stmts(b)),
         _ => {}
     });
     found
+}
+
+/// Whether a block has a `comptime for` or `comptime if` among its
+/// statements, at any depth of statements.
+fn comptime_stmts(b: &ast::Block) -> bool {
+    b.stmts.iter().any(comptime_stmt)
+}
+
+fn comptime_stmt(s: &ast::Stmt) -> bool {
+    use ast::StmtKind as K;
+    match &s.kind {
+        K::Comptime(inner) => !matches!(inner.kind, K::Assert { .. } | K::Expr(_)),
+        K::If { branches, else_block } => {
+            branches.iter().any(|(_, b)| comptime_stmts(b)) || else_block.as_ref().is_some_and(comptime_stmts)
+        }
+        K::While { body, .. } | K::For { body, .. } | K::With { body, .. } | K::Defer(body) => {
+            comptime_stmts(body)
+        }
+        K::Let { else_: Some(le), .. } => matches!(&le.body, ast::ElseBody::Block(b) if comptime_stmts(b)),
+        _ => false,
+    }
+}
+
+/// The names the compile-time code of `f` passes to `reflect`'s queries
+/// or computes with (`comptime ...`), in order: the types it may name.
+fn named_types(f: &ast::FnDef) -> Vec<String> {
+    let Some(body) = &f.body else { return Vec::new() };
+    let mut out: Vec<String> = Vec::new();
+    let mut names = |e: &ast::Expr| {
+        ast::visit::expr(e, &mut |x| {
+            if let ExprKind::Name(n) = &x.kind
+                && !out.contains(n)
+            {
+                out.push(n.clone());
+            }
+        })
+    };
+    ast::visit::block(body, &mut |e| match &e.kind {
+        ExprKind::Call { callee, args, .. } if matches!(&callee.kind, ExprKind::Field { base, .. } if matches!(&base.kind, ExprKind::Name(n) if n == "reflect")) => {
+            args.iter().for_each(|a| names(&a.value))
+        }
+        ExprKind::Comptime(inner) => names(inner),
+        _ => {}
+    });
+    out
 }
 
 /// The most instances one resolution declares, so that a template whose
@@ -95,6 +153,7 @@ impl Resolver<'_> {
         }
         if made > 0 {
             self.resolve_pending();
+            self.record_method_instances();
         }
     }
 
@@ -102,21 +161,39 @@ impl Resolver<'_> {
         let module = self.prog.def(def).module;
         let name = self.prog.def(def).name.clone();
         let shown: Vec<String> = args.iter().map(|a| self.prog.display(a)).collect();
-        let what = format!("{name}[{}]", shown.join(", "));
+        let what = if args.is_empty() { name.clone() } else { format!("{name}[{}]", shown.join(", ")) };
         let Some(ast) = self.template_ast(def) else { return };
         let source = self.sources.get(info.file).map(|f| f.text.clone()).unwrap_or_default();
         // Each type the unfolded code may name (an argument, a field's
         // type, an element type) is an alias in the instance's module.
         let mut aliases: Vec<(String, Ty)> = Vec::new();
-        let params: Vec<(String, TypeShape)> = info
+        let mut params: Vec<(String, TypeShape)> = info
             .generics
             .iter()
             .zip(args)
             .enumerate()
             .map(|(i, (g, t))| (g.name.clone(), self.shape(t, &format!("__T{i}"), 0, &mut aliases)))
             .collect();
-        let inst = format!("__instance_{}", self.prog.instances.len());
-        let text = match crate::template::unfold_fn(&ast, &source, params, &inst) {
+        // A method's instance is a method of its type, which its
+        // compile-time code names `Self` (decision 244).
+        let within = info.owner.as_ref().map(|t| {
+            let self_ty = t.subst(args);
+            params.push(("Self".to_string(), self.shape(&self_ty, "__S", 0, &mut aliases)));
+            "__S"
+        });
+        // The program's types its compile-time code names (`reflect.fields_of(Point)`).
+        let types: Vec<(String, TypeShape)> = named_types(&ast)
+            .into_iter()
+            .filter(|n| !params.iter().any(|(p, _)| p == n))
+            .filter_map(|n| self.named_type(module, &n).map(|t| (n, t)))
+            .enumerate()
+            .map(|(i, (n, t))| {
+                let shape = self.shape(&t, &format!("__C{i}"), 0, &mut aliases);
+                (n, shape)
+            })
+            .collect();
+        let inst = format!("__instance_{}", self.instances_declared);
+        let text = match crate::template::unfold_fn(&ast, &source, params, types, &inst, within) {
             Ok(t) => t,
             Err((range, reason)) => {
                 let mut d = Diagnostic::new(msg::COMPTIME_INSTANCE_FAILED, site)
@@ -132,6 +209,8 @@ impl Resolver<'_> {
             }
         };
         let Some(m) = self.declare_generated_in(module, &format!("<{what}>"), &text) else { return };
+        self.instances_declared += 1;
+        self.instance_modules.insert(m);
         // The types, by the names the unfolded code uses.
         for (alias, t) in aliases {
             let d = self.new_def(
@@ -144,10 +223,49 @@ impl Resolver<'_> {
             );
             self.prog.modules[m.0 as usize].items.insert(alias, d);
         }
-        if let Some(d) = self.prog.modules[m.0 as usize].items.get(&inst).copied() {
-            self.prog.instances.insert((def, args.to_vec()), d);
-            self.prog.instance_sites.insert(d, site);
-            self.instance_of.insert(d, (def, args.to_vec()));
+        // A function is an item of the module; a method exists once its
+        // impl is resolved.
+        match self.prog.modules[m.0 as usize].items.get(&inst).copied() {
+            Some(d) => self.record_instance(d, def, args.to_vec(), site),
+            None => self.method_instances.push((m, inst, def, args.to_vec(), site)),
+        }
+    }
+
+    fn record_instance(&mut self, d: DefId, template: DefId, args: Vec<Ty>, site: sisu_diag::Span) {
+        self.prog.instances.insert((template, args.clone()), d);
+        self.prog.instance_sites.insert(d, site);
+        if let DefKind::Fn(f) = &mut self.prog.defs[d.0 as usize].kind {
+            f.instance_of = Some((template, args.clone()));
+        }
+        self.instance_of.insert(d, (template, args));
+    }
+
+    /// The methods [`Resolver::declare_instance`] declared, now that their
+    /// impls are resolved.
+    fn record_method_instances(&mut self) {
+        for (m, inst, template, args, site) in std::mem::take(&mut self.method_instances) {
+            let found = (0..self.prog.defs.len()).rev().map(|i| DefId(i as u32)).find(|d| {
+                let x = self.prog.def(*d);
+                x.module == m && x.name == inst && matches!(x.kind, DefKind::Fn(_))
+            });
+            if let Some(d) = found {
+                self.record_instance(d, template, args, site);
+            }
+        }
+    }
+
+    /// The type `name` names in `module`, when it is a type without type
+    /// parameters: a struct, an enum, an error set or an alias.
+    fn named_type(&self, module: ModuleId, name: &str) -> Option<Ty> {
+        let d = self.prog.lookup(module, name)?;
+        match &self.prog.def(d).kind {
+            DefKind::Struct(_) | DefKind::Enum(_) | DefKind::ErrorSet(_)
+                if self.prog.type_generics(d).is_empty() =>
+            {
+                Some(Ty::Adt(d, Vec::new()))
+            }
+            DefKind::TypeAlias(t) => Some(t.clone()),
+            _ => None,
         }
     }
 

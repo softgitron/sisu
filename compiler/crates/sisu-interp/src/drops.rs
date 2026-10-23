@@ -56,9 +56,11 @@ fn owns_anything(v: &Value) -> bool {
             | Value::Cell(_)
             | Value::Mutex(_)
             | Value::Guard(_)
+            | Value::ReadGuard(_)
             | Value::Arena(_)
             | Value::Sender(_)
             | Value::Receiver(_)
+            | Value::Cap(_)
     )
 }
 
@@ -84,6 +86,18 @@ impl<'p> Interp<'p, '_> {
         }
         if let Some(fr) = self.frames.last_mut() {
             fr.drops.extend(items.into_iter().filter(|(v, _)| owns_anything(v)).rev());
+        }
+    }
+
+    /// Queues values to be dropped in the order given, after every drop
+    /// the top frame has pending.
+    pub(crate) fn queue_drops_after(&mut self, items: Vec<PendingDrop>) {
+        if !self.any_drop {
+            return;
+        }
+        if let Some(fr) = self.frames.last_mut() {
+            let items: Vec<PendingDrop> = items.into_iter().filter(|(v, _)| owns_anything(v)).rev().collect();
+            fr.drops.splice(0..0, items);
         }
     }
 
@@ -119,11 +133,13 @@ impl<'p> Interp<'p, '_> {
                 }
                 let (Value::Struct(a) | Value::Variant(a)) = v else { return Ok(()) };
                 // A type without glue drops nothing, except the payload of
-                // an option or result.
+                // an option or result, and the handles of a `System`
+                // (decision 237).
                 let payload = match (&*a.ty, a.variant) {
                     ("Option", 0) | ("Result", 0) => arg(&ty, 0),
                     ("Result", 1) => arg(&ty, 1),
                     ("Option" | "Result", _) => None,
+                    ("System", _) => None,
                     _ => return Ok(()),
                 };
                 let items = a.fields.into_iter().map(|f| (f, payload.clone())).collect();
@@ -156,6 +172,11 @@ impl<'p> Interp<'p, '_> {
                 self.queue_drops(items.collect());
             }
             Value::Iter(it) => {
+                // A generator dropped before its end is closed (decision
+                // 236).
+                if let crate::value::IterState::Gen(t) = *it {
+                    return self.abandon_gen(t);
+                }
                 let parts = crate::iter::owned_parts(*it);
                 self.queue_drops(parts.into_iter().map(|x| (x, None)).collect());
             }
@@ -182,11 +203,15 @@ impl<'p> Interp<'p, '_> {
             Value::Cell(v) => self.queue_drop(*v, arg(&ty, 0)),
             Value::Mutex(m) => self.queue_drop(m.value, arg(&ty, 0)),
             Value::Guard(p) => self.unlock(p, arg(&ty, 0))?,
+            Value::ReadGuard(p) => self.read_unlock(&p)?,
             Value::Arena(a) => {
                 let t = arg(&ty, 0);
                 self.queue_drops(a.slots.into_iter().map(|(_, x)| (x, t.clone())).collect());
             }
             v @ (Value::Sender(_) | Value::Receiver(_)) => self.drop_channel_end(&v),
+            // A copy of a handle goes: its count with it (decision 237); a
+            // `Lent` held none.
+            Value::Cap(id) if !matches!(&ty, Some(Type::Named(n, _)) if n == "Lent") => self.release_cap(id),
             _ => {}
         }
         Ok(())
@@ -219,6 +244,16 @@ impl<'p> Interp<'p, '_> {
             }
         }
         self.finish_unlock(&p, true)
+    }
+
+    /// Dropping a read guard counts one reader fewer on its `RwLock`.
+    fn read_unlock(&mut self, p: &Pointer) -> Result<(), Unwind> {
+        match self.write(p)? {
+            Value::Mutex(m) => m.readers = m.readers.saturating_sub(1),
+            other => return Err(ice(format!("a read guard on {other:?}"))),
+        }
+        self.wake_key(crate::sched::Key::Lock);
+        Ok(())
     }
 
     /// Unlocks the mutex a guard held, poisoning it when its invariant did

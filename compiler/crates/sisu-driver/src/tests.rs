@@ -271,3 +271,78 @@ fn run_stats_report_depths_and_shared_sites() {
     let (code, _) = cli(&["run", "--stats=nonsense", &f]);
     assert_eq!(code, crate::cli::EXIT_USAGE);
 }
+
+/// `sisu audit --caps`: the capability parameters of the functions that
+/// do I/O, the depth of each use from `main`, and the structs that bundle
+/// three or more capability types (decision 240).
+#[test]
+fn audit_caps_counts_capability_threading() {
+    let f = temp_file(
+        "audit_caps.sisu",
+        "struct Services:\n    fs: Fs\n    clock: Clock\n    rand: Rand\n\n\
+         def read_config(fs: Fs, name: Path) -> String:\n    return fs.read_to_string(name).expect(\"readable\")\n\n\
+         def load[F: FsOps](fs: F) -> bool:\n    return fs.exists(\"x\")\n\n\
+         def setup(sys: System) -> String:\n    print(load(sys.fs.lend()))\n    return read_config(sys.fs, \"app.conf\")\n\n\
+         def pure_math(x: int) -> int:\n    return x * 2\n\n\
+         def main(sys: System):\n    let s = Services(fs=sys.fs, clock=sys.clock, rand=sys.rand)\n    \
+         print(setup(sys))\n    print(s.clock.now())\n    print(pure_math(2))\n",
+    );
+    let (code, host) = cli(&["audit", "--caps", &f]);
+    assert_eq!(code, 0, "{}", host.err);
+    let lines: Vec<String> =
+        host.out.lines().map(|l| l.strip_prefix(&format!("{f} ")).unwrap_or(l).to_string()).collect();
+    for want in [
+        "function load caps=1 io=direct depth=2",
+        "function main caps=1 io=direct depth=0",
+        "function read_config caps=1 io=direct depth=2",
+        "function setup caps=1 io=calls depth=1",
+        "use load FsOps.exists depth=2",
+        "use read_config FsOps.read_to_string depth=2",
+        "struct Services caps=3 Fs,Clock,Rand",
+    ] {
+        assert!(lines.iter().any(|l| l == want), "missing `{want}` in:\n{}", host.out);
+    }
+    assert!(!lines.iter().any(|l| l.contains("pure_math")), "{}", host.out);
+    assert!(
+        lines.last().is_some_and(|l| l.starts_with("summary functions=4 median=1 max=1 ")),
+        "{}",
+        host.out
+    );
+    let (code, host) = cli(&["audit", "--caps", "--ownership", &f]);
+    assert_eq!(code, 2);
+    assert!(host.err.contains("error[D0022]"), "{}", host.err);
+}
+
+/// The test cache (decision 242): a test that passed is not run again
+/// while what it reaches is the same, and prints what it printed; an edit
+/// of what it reaches runs it again.
+#[test]
+fn the_test_cache_keeps_what_passed() {
+    let f = temp_file(
+        "cached_tests.sisu",
+        "def answer() -> int:\n    return 42\n\ndef other() -> int:\n    return 1\n\n\
+         test \"prints and passes\"(fs: Fs):\n    print(\"ran\")\n    assert answer() == 42\n\n\
+         test \"another\":\n    assert other() == 1\n",
+    );
+    let cache = std::path::Path::new(&f).with_extension("test-cache");
+    let _ = std::fs::remove_file(&cache);
+    let (code, first) = cli(&["test", &f]);
+    assert_eq!(code, 0, "{}", first.err);
+    let held = std::fs::read_to_string(&cache).unwrap_or_default();
+    assert_eq!(held.lines().count(), 2, "{held}");
+    assert!(held.contains("\"out\":\"ran\\n\""), "{held}");
+    // The same output from the cache.
+    let (code, second) = cli(&["test", &f]);
+    assert_eq!((code, second.out.as_str()), (0, first.out.as_str()));
+    // An edit of what `another` reaches runs it again, and it fails now;
+    // the first test stays cached.
+    let source = std::fs::read_to_string(&f).unwrap_or_default();
+    let _ = std::fs::write(&f, source.replace("return 1", "return 2"));
+    let (code, third) = cli(&["test", &f]);
+    assert_eq!(code, 1);
+    assert!(third.out.contains("test \"another\" ... FAILED"), "{}", third.out);
+    assert!(third.out.starts_with("ran\n"), "{}", third.out);
+    let held = std::fs::read_to_string(&cache).unwrap_or_default();
+    assert_eq!(held.lines().count(), 1, "{held}");
+    let _ = std::fs::remove_file(&cache);
+}

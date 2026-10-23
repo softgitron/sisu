@@ -1,0 +1,15 @@
+# Features are additive booleans (09) that `@cfg(feature="NAME")` reads
+# (decision 243). `default` is on in the root package; `verbose` is not,
+# and would turn on `render`'s `borders` if it were.
+[package]
+name = "app"
+version = "1.0.0"
+
+[dependencies]
+# `render`'s own `default` stays off, and `color` turns on what it lists.
+render = { path = "../render", default-features = false, features = ["color"] }
+
+[features]
+default = ["fast"]
+fast = []
+verbose = ["render/borders"]

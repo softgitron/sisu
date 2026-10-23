@@ -751,11 +751,16 @@ impl FnLower<'_, '_> {
                     continue;
                 };
                 let (callee, by_value) = self.callee_for(*def, type_args);
+                let owned = self.owned_params(*def);
                 let ops: Vec<Operand> = args
                     .iter()
                     .enumerate()
                     .map(|(i, x)| {
-                        let o = self.arg_operand_for(x, by_value.get(i).copied().unwrap_or(false));
+                        let o = self.arg_operand_for(
+                            x,
+                            by_value.get(i).copied().unwrap_or(false),
+                            owned.get(i).copied().unwrap_or(true),
+                        );
                         // Each operand in a temporary, so it is evaluated once.
                         match o {
                             Operand::Copy(p) if !p.proj.is_empty() => {

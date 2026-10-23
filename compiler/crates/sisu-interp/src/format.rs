@@ -144,7 +144,7 @@ impl Interp<'_, '_> {
                 out.push(')');
             }
             Value::Mutex(m) => {
-                out.push_str("Mutex(");
+                out.push_str(if m.rw { "RwLock(" } else { "Mutex(" });
                 if m.locked {
                     out.push_str("<locked>");
                 } else {
@@ -152,7 +152,8 @@ impl Interp<'_, '_> {
                 }
                 out.push(')');
             }
-            Value::Guard(p) => match self.read(&p.join(crate::value::Step::MutexValue)) {
+            Value::Guard(p) | Value::ReadGuard(p) => match self.read(&p.join(crate::value::Step::MutexValue))
+            {
                 Ok(t) => self.debug_into(t, out),
                 Err(_) => out.push_str("<dangling>"),
             },

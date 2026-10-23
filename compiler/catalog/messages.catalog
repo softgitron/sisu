@@ -148,6 +148,7 @@ E0265 error   resolve.const-not-int       a type's constant argument is an `int`
 -     note    resolve.rename-duplicate    rename one of them, or remove the one not wanted
 -     note    resolve.write-trait-method  write `{signature}` in the impl
 -     note    borrow.consume-with         consume it with one of its methods that take `own self`: {methods}
+E0266 error   resolve.bad-cfg             `@cfg` takes a condition: `test`, `feature="NAME"`, `not` and a condition, or `all(...)` or `any(...)` of conditions; this is none of them
 
 # ---------------------------------------------------------------- types
 E0300 error   type.mismatch               expected `{expected}`, found `{found}`
@@ -223,7 +224,7 @@ E0376 error   type.positional-after-keyword  a positional argument cannot follow
 # E0377 is retired: a call that leaves out a parameter without a default
 # is E0308, with the fix that passes a hole.
 E0378 error   type.main-signature         `main` must take nothing or one `System` parameter, and return nothing or `! E`
-E0702 error   type.test-signature         a test takes nothing, or the real `System` as its one parameter: `test "name"(sys: System):`
+E0702 error   type.test-signature         a test takes nothing, the real `System` as its one parameter (`test "name"(sys: System):`), or fresh fakes of the capabilities it names, one of each (`test "name"(fs: Fs, clock: Clock):`)
 E0379 error   type.assert-message         the message of `assert` must be a string
 E0380 error   type.no-display             `{ty}` has no text rendering for `{spec}`
 E0381 error   type.return-in-test         a test returns nothing
@@ -258,6 +259,7 @@ E0399 error   type.bad-format-spec        `{spec}` is not a format spec; it is `
 -     fix     type.convert-to-float       make the `int` an `{ty}`
 -     fix     type.interpolate            write the value into the text
 -     note    type.option-not-value       the value may be missing: give a default with `??`, or take it apart with `if let` or `match`
+-     note    type.read-guard-value       a read guard only reads the value; `write()` gives the guard that changes it
 -     fix     type.similar-member         the type has a member with a similar name
 -     fix     type.take-mut               take `{name}` with `mut`
 -     fix     type.remove-pure            remove `pure`
@@ -421,6 +423,7 @@ E1015 error   package.trust-unknown       `[trust] unsafe` names `{name}`, which
 E1016 error   package.no-package          `{path}` has `[workspace]` but no `[package]`, so it cannot be a dependency
 E1017 error   package.reserved-name       `{name}` is the name of a standard-library module, which `import {name}` names; a package of the program needs another name
 -     label   package.depends-here        `{name}` depends on `{dep}` here
+E1018 error   package.unknown-feature     `{name}` is not a feature of `{package}`; a package's features are the keys of its `[features]`
 
 # ---------------------------------------------------------------- warnings
 W0001 warning type.hole                   typed hole `{name}` of type `{ty}`
@@ -428,6 +431,7 @@ W0002 warning resolve.shadow-outer        `{name}` shadows a binding of an enclo
 W0003 warning type.unreachable-arm        this `case` arm is unreachable; the arms above it cover every value it matches
 W0004 warning type.unreachable-code       this code is unreachable
 W0005 warning package.unknown-key         `{key}` is not a key of `{table}` that stage 0 knows; it is ignored
+W0006 warning resolve.unknown-feature     no `[features]` of this package declares `{name}`, so `feature="{name}"` never holds
 
 # ---------------------------------------------------------------- run time
 R0001 runtime panic.explicit              {message}
@@ -460,7 +464,7 @@ R0026 runtime run.assert-right            right: {value}
 R0029 runtime panic.unreachable-plain     entered unreachable code
 R0030 runtime panic.expect-none           called `expect` on `None`
 R0031 runtime panic.expect-error          called `expect` on an error: {value}
-R0032 runtime panic.stack-overflow        stack overflow: more than {depth} nested calls
+R0032 runtime panic.stack-overflow        stack overflow in `{function}`: the calls nest deeper than the stack holds
 R0033 runtime panic.moved-value           use of a value after it was moved
 R0034 runtime panic.dangling              use of a reference to a value that no longer exists
 R0037 runtime panic.insert-out-of-bounds  insert index {index} is out of bounds for a list of length {len}
@@ -502,8 +506,8 @@ R0069 runtime monitor.unconsumed          `{name}` was dropped holding a `{ty}`,
 R0070 runtime defer.declarations-only     only rules about declarations reject the program, and the run reached no conflict: a candidate false positive
 R0071 runtime monitor.op-return           the return from the frame
 R0072 runtime panic.stale-key             stale arena key: slot {index}, generation {generation}, no longer holds its value
-R0073 runtime panic.mutex-held            the mutex is already locked by this task, which would wait for itself forever
-R0074 runtime panic.mutex-poisoned        the mutex is poisoned: a task panicked holding it and left its value's invariant broken
+R0073 runtime panic.mutex-held            the lock is already held by this task, which would wait for itself forever
+R0074 runtime panic.mutex-poisoned        the lock is poisoned: a task panicked holding it and left its value's invariant broken
 # R0075 is retired: `Cell.set` and `Cell.replace` swap the value before the
 # old one's `Drop` runs, so no `Drop` finds a cell half replaced.
 R0076 runtime panic.scope-ended           a task was spawned on a scope that has ended
@@ -522,7 +526,7 @@ R0087 runtime run.stats-latency           stats: scheduling latency p50 {p50} p9
 R0088 runtime run.stats-shared            stats shared: {local} cells from task-local sites, {crossing} from may-cross sites, {crossed} reached by another task
 R0089 runtime monitor.shared-crossed      a `Shared` whose construction site the escape analysis tagged task-local was reached by another task
 R0091 runtime panic.nested-recv           a receiver inside another iterator would have to wait; iterate the receiver itself
-R0090 runtime panic.into-inner-poisoned   `into_inner` of a poisoned mutex: a task panicked holding it and left its value's invariant broken
+R0090 runtime panic.into-inner-poisoned   `into_inner` of a poisoned lock: a task panicked holding it and left its value's invariant broken
 R0100 runtime contract.requires-failed    precondition of `{function}` failed: {clause}
 R0101 runtime contract.ensures-failed     postcondition of `{function}` failed: {clause}
 R0102 runtime contract.invariant-failed   invariant of `{ty}` failed: {clause}
@@ -550,9 +554,6 @@ R0121 runtime run.stats-tag-crossing      may-cross
 # A natively compiled program broke a rule its runtime relies on (stage 2;
 # docs/architecture.md, "Stage 2").
 R0122 runtime run.native-internal         internal error in the native runtime: {detail}
-# A task's stack ran out (stage 2, decision 203): the probe at a function's
-# entry found it below its limit.
-R0123 runtime panic.stack-exhausted       stack overflow: the stack of {bytes} bytes is used up (`SISU_TASK_STACK` sets a task's)
 # `--stats` of a native run: the latency in microseconds (native code counts
 # no statements).
 R0124 runtime run.stats-latency-native    stats: scheduling latency p50 {p50us} p99 {p99us} microseconds (native code counts no statements)
@@ -562,11 +563,19 @@ R0125 runtime run.live-allocations        allocations: {count} of the runtime's 
 # A native run under `SISU_RT_ALLOCS=peak` (decision 229): the most of the
 # runtime's allocations of values that were live at once, before R0125.
 R0126 runtime run.peak-allocations        allocations: at most {count} of the runtime's live at once
+# A panic's stack trace deeper than its innermost and outermost frames
+# shows (decision 234): the line that stands for the frames between.
+R0127 runtime run.trace-elided            ... (frames left out)
+# A generator dropped before its end is closed: its frames unwind, running
+# their drops and `defer`s (decision 236). A panic there aborts, as one
+# during unwinding does, and so does a wait.
+R0128 runtime panic.during-abandon        panic while a generator dropped before its end cleans up: {message}\n  a panic there aborts the program
+R0129 runtime panic.abandoned-wait        a generator dropped before its end cannot wait while it cleans up
 
 # ---------------------------------------------------------------- driver
 
 D0001 cli     cli.cannot-read             cannot read `{path}`: {reason}
-D0002 cli     cli.usage                   usage: sisu <command> [options] [<file>]\n\nWithout a file, a command works on the package of the current directory (`sisu.toml`).\n\ncommands:\n  run [<file>] [args...]  check and run a program (`--watch` swaps in each save, `--sir` runs a SIR file, `--monitor` checks ownership while it runs, `--defer-borrow` runs a program the ownership checker rejected under the monitor, `--contracts=off|preconditions|all` sets what it checks, `--record LOG` writes its capability log, `--stats` reports the scheduler's numbers, `--stats stack-depth` a histogram of the frame depths, `--stats shared` each `Shared` construction site, `--native` compiles it to an executable and runs that, `--release` with the release profile, `--native --from-sir` a file of serialised SIR)\n  check [<file>]         report diagnostics (`--format=ids` for the conformance form, `--explain` for the signatures with their contracts, `--diary LOG` appends them and what resolved the last check's to a JSONL log)\n  build [<file>]         check and lower a package, writing its lockfile (`--native` also compiles a program to an executable: a package's to `build/debug/NAME` beside its lockfile, `build/release/NAME` with `--release`, a file's beside it, named by its stem, or at `--output PATH`; `--native --from-sir` compiles a file of serialised SIR)\n  test [<file>]          run the tests and transcripts under the ownership monitor (`--no-monitor` without it, `--jobs N`, `--filter TEXT`, `--tag T`, `--skip-tag T`, `--update` for snapshots and transcripts, `--replay TOKEN`, `--sim` with `--faults P`, `--std` for the standard library's doc examples)\n  bench [<file>]         run the benchmarks (`--iterations N`)\n  replay <log>           run a recorded program again against its capability log\n  fmt [<path>...]        format files in place (`--check` reports what would change)\n  repl [<file>|<dir>]    an interactive session, with a package loaded from its directory\n  ws <file>              run a worksheet, showing each statement's value (`--run` with the real `System`)\n  lsp                    the language server, over standard input and output\n  new <name>             create a package (`--lib` for a library)\n  sir [<file>]           print the serialised SIR\n  tokens <file>          print the token stream (`--trivia` includes trivia)\n  parse <file>           `--tree` prints the syntax tree, `--ast` the AST built from it, `--print` reprints the source, `--shape` prints what formatting keeps\n  explain <code>         describe a diagnostic code\n  explain-borrow <file>:<line>  show every borrow live on a line\n  audit --ownership <file>...  count the uses of `Shared`, `Weak`, `Cell`, `Arena`, `Key`, `.copy()` and `unsafe` in each file\n\n`run`, `check`, `build`, `test` and `bench` take `--locked`, which keeps `sisu.lock` as it is. `run` and `test` take `--schedule-seed N`, `--explore N` (N seeds), `--scheduler random|pct|exhaustive` and `--depth N`.
+D0002 cli     cli.usage                   usage: sisu <command> [options] [<file>]\n\nWithout a file, a command works on the package of the current directory (`sisu.toml`).\n\ncommands:\n  run [<file>] [args...]  check and run a program (`--watch` swaps in each save, `--sir` runs a SIR file, `--monitor` checks ownership while it runs, `--defer-borrow` runs a program the ownership checker rejected under the monitor, `--contracts=off|preconditions|all` sets what it checks, `--record LOG` writes its capability log, `--stats` reports the scheduler's numbers, `--stats stack-depth` a histogram of the frame depths, `--stats shared` each `Shared` construction site, `--native` compiles it to an executable and runs that, `--release` with the release profile, `--native --from-sir` a file of serialised SIR)\n  check [<file>]         report diagnostics (`--format=ids` for the conformance form, `--explain` for the signatures with their contracts, `--diary LOG` appends them and what resolved the last check's to a JSONL log)\n  build [<file>]         check and lower a package, writing its lockfile (`--native` also compiles a program to an executable: a package's to `build/debug/NAME` beside its lockfile, `build/release/NAME` with `--release`, a file's beside it, named by its stem, or at `--output PATH`; `--native --from-sir` compiles a file of serialised SIR)\n  test [<file>]          run the tests and transcripts under the ownership monitor (`--no-monitor` without it, `--no-cache` runs the tests that passed before too, `--jobs N`, `--filter TEXT`, `--tag T`, `--skip-tag T`, `--update` for snapshots and transcripts, `--replay TOKEN`, `--sim` with `--faults P`, `--std` for the standard library's doc examples)\n  bench [<file>]         run the benchmarks (`--iterations N`)\n  replay <log>           run a recorded program again against its capability log\n  fmt [<path>...]        format files in place (`--check` reports what would change)\n  repl [<file>|<dir>]    an interactive session, with a package loaded from its directory\n  ws <file>              run a worksheet, showing each statement's value (`--run` with the real `System`)\n  lsp                    the language server, over standard input and output\n  new <name>             create a package (`--lib` for a library)\n  sir [<file>]           print the serialised SIR\n  tokens <file>          print the token stream (`--trivia` includes trivia)\n  parse <file>           `--tree` prints the syntax tree, `--ast` the AST built from it, `--print` reprints the source, `--shape` prints what formatting keeps\n  explain <code>         describe a diagnostic code\n  explain-borrow <file>:<line>  show every borrow live on a line\n  audit --ownership <file>...  count the uses of `Shared`, `Weak`, `Cell`, `Arena`, `Key`, `.copy()` and `unsafe` in each file\n  audit --caps <file>...  the capability parameters of each function that does I/O, the depth from `main` of each use of a capability, and the structs bundling three or more\n\n`run`, `check`, `build`, `test` and `bench` take `--locked`, which keeps `sisu.lock` as it is. `run` and `test` take `--schedule-seed N`, `--explore N` (N seeds), `--scheduler random|pct|exhaustive` and `--depth N`.
 D0003 cli     cli.unknown-command         unknown command `{command}`; run `sisu help`
 D0004 cli     cli.missing-file            `sisu {command}` needs a file
 D0005 cli     cli.no-main                 `{file}` has no `main` function
@@ -586,7 +595,7 @@ D0018 cli     cli.explain-borrow-usage    `sisu explain-borrow` takes FILE:LINE,
 D0019 cli     cli.explain-borrow-shared   a shared
 D0020 cli     cli.explain-borrow-mut      a `mut`
 D0021 cli     cli.ownership-errors        the program was not run: the ownership checker found errors ({count}); `--defer-borrow` runs it under the monitor
-D0022 cli     cli.audit-usage             `sisu audit` needs `--ownership`, the one audit stage 0 has: `sisu audit --ownership FILE...`
+D0022 cli     cli.audit-usage             `sisu audit` needs one of its audits: `sisu audit --ownership FILE...` or `sisu audit --caps FILE...`
 D0023 cli     cli.bad-option-value        `{option}` needs a number, not `{value}`
 D0024 cli     cli.explore-ok              explored {count} schedules (seeds {first} to {last}): every run exited with status 0
 D0025 cli     cli.explore-failed          schedule seed {seed} of {count} failed with exit status {status}; `--schedule-seed {seed}` runs it again

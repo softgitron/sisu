@@ -138,14 +138,16 @@ impl<'p> Types<'p> {
                     // The values of tasks and channels are numbers in the
                     // runtime's scheduler; a guard is the address of the
                     // value its mutex holds.
-                    "Scope" | "Handle" | "Cancellation" | "Sender" | "Receiver" | "MutexGuard" => w,
+                    "Scope" | "Handle" | "Cancellation" | "Sender" | "Receiver" | "MutexGuard"
+                    | "ReadGuard" => w,
                     "Timer" => 2 * w,
-                    "Mutex" => abi::MUTEX_HEADER + self.size(&arg(0))?,
+                    "Mutex" | "RwLock" => abi::MUTEX_HEADER + self.size(&arg(0))?,
                     // A `Shared` (or `Weak`) is the address of the value in
                     // its cell, an `Arena` the address of its slots, a
                     // `Cell` its value.
                     "Shared" | "Weak" | "Arena" => w,
-                    "Cell" => self.size(&arg(0))?,
+                    // An `Atomic` is a `Cell` that tasks may share.
+                    "Cell" | "Atomic" => self.size(&arg(0))?,
                     // A `Cap` is the address of its value's cell, a test
                     // clock its clock's number, and a `Lent` its handle.
                     "Cap" | "TestClock" | "HostStream" | "HostListener" => w,
@@ -279,10 +281,14 @@ impl<'p> Types<'p> {
             "Cap" | "TestClock" | "HostStream" | "HostListener" => {
                 return simple(Kind::Opaque(n.to_string()), w);
             }
-            // A lent capability is its handle (or test clock), at no cost.
+            // A lent capability is its handle (or test clock), at no cost,
+            // but not counted: its name says it is lent (decision 237).
             "Lent" => {
                 let inner = self.id(&arg(0))?;
                 return match self.entries.get(inner as usize) {
+                    Some(Some(TypeEntry { size, kind: Kind::Opaque(n) })) => {
+                        Ok(TypeEntry { size: *size, kind: Kind::Opaque(format!("Lent {n}")) })
+                    }
                     Some(Some(e)) => Ok(e.clone()),
                     _ => Err(Error::unsupported("a `Lent` of a type that holds itself")),
                 };
@@ -365,6 +371,14 @@ impl<'p> Types<'p> {
                 let (e, size) = self.part(&arg(0))?;
                 return simple(Kind::Mutex(e), abi::MUTEX_HEADER + size);
             }
+            "RwLock" => {
+                let (e, size) = self.part(&arg(0))?;
+                return simple(Kind::RwLock(e), abi::MUTEX_HEADER + size);
+            }
+            "ReadGuard" => {
+                let e = self.id(&arg(0))?;
+                return simple(Kind::ReadGuard(e), w);
+            }
             "Shared" => {
                 let e = self.id(&arg(0))?;
                 return simple(Kind::Shared(e), w);
@@ -377,7 +391,7 @@ impl<'p> Types<'p> {
                 let e = self.id(&arg(0))?;
                 return simple(Kind::Arena(e), w);
             }
-            "Cell" => {
+            "Cell" | "Atomic" => {
                 let (e, size) = self.part(&arg(0))?;
                 return simple(Kind::Cell(e), size);
             }
@@ -528,10 +542,13 @@ impl<'p> Types<'p> {
             | Kind::Sender(_)
             | Kind::Receiver(_)
             | Kind::Guard(..)
+            | Kind::ReadGuard(_)
             | Kind::Shared(_)
             | Kind::Weak(_)
             | Kind::Arena(_) => true,
-            Kind::Mutex(v) | Kind::Cell(v) => match self.type_of_id(v) {
+            // A capability handle's copies are counted (decision 237).
+            Kind::Opaque(n) => abi::counted_handle(&n),
+            Kind::Mutex(v) | Kind::RwLock(v) | Kind::Cell(v) => match self.type_of_id(v) {
                 Some(vt) => self.needs_drop_in(&vt, seen)?,
                 None => false,
             },
@@ -571,6 +588,38 @@ impl<'p> Types<'p> {
             }
             _ => false,
         })
+    }
+
+    /// Whether a value of the type holds a capability handle or a `Cap` by
+    /// value, through options, results, tuples, structs and enums: a copy
+    /// of it counts (decision 237). A `Lent` holds none.
+    pub(crate) fn counted(&mut self, t: &Type) -> Result<bool, Error> {
+        if !self.needs_drop(t)? {
+            return Ok(false);
+        }
+        let mut seen = Vec::new();
+        let id = self.id(t)?;
+        Ok(self.counted_in(id, &mut seen))
+    }
+
+    fn counted_in(&self, id: u32, seen: &mut Vec<u32>) -> bool {
+        if seen.contains(&id) {
+            return false;
+        }
+        seen.push(id);
+        let Some(Some(e)) = self.entries.get(id as usize) else { return false };
+        let parts: Vec<u32> = match &e.kind {
+            Kind::Opaque(n) => return abi::counted_handle(n),
+            Kind::Option(p) => vec![*p],
+            Kind::Result(a, b) => vec![*a, *b],
+            Kind::Tuple(slots) => slots.iter().map(|s| s.ty).collect(),
+            Kind::Struct { fields, .. } => fields.iter().map(|f| f.ty).collect(),
+            Kind::Enum { variants, .. } => {
+                variants.iter().flat_map(|v| v.fields.iter().map(|f| f.ty)).collect()
+            }
+            _ => return false,
+        };
+        parts.into_iter().any(|p| self.counted_in(p, seen))
     }
 
     /// The type a number stands for.

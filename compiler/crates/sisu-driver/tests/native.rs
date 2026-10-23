@@ -511,11 +511,11 @@ fn seeded_schedules_are_the_interpreters() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// A task that runs out of its stack fails cleanly (decision 203): the
-/// probe at a function's entry raises the panic, the task's frames unwind
-/// with their drops, and the joiner gets `TaskPanicked`. `SISU_TASK_STACK`
-/// gives tasks a larger stack. The root task keeps the interpreter's limit
-/// of nested calls.
+/// A task that runs out of its stack fails cleanly (decisions 203 and
+/// 234): the probe at a function's entry raises the stack overflow, which
+/// names the function, the task's frames unwind with their drops, and the
+/// joiner gets `TaskPanicked`. `SISU_TASK_STACK` gives tasks a larger
+/// stack. The root task keeps the interpreter's limit of nested calls.
 #[test]
 fn a_task_that_runs_out_of_stack_fails_cleanly() {
     let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
@@ -541,12 +541,9 @@ fn a_task_that_runs_out_of_stack_fails_cleanly() {
     };
     let (out, err, status) = run(None);
     assert_eq!(status, Some(0), "{err}");
-    assert!(out.starts_with("stack overflow: the stack of "), "{out}");
-    assert!(
-        out.ends_with(
-            " bytes is used up (`SISU_TASK_STACK` sets a task's)\ndropped the last frame's\n3000\n"
-        ),
-        "{out}"
+    assert_eq!(
+        out,
+        "stack overflow in `down`: the calls nest deeper than the stack holds\ndropped the last frame's\n3000\n"
     );
     let (out, err, status) = run(Some("64M"));
     assert_eq!(status, Some(0), "{err}");

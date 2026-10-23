@@ -1,0 +1,23 @@
+# A recursion without end overflows the stack (decision 234): a panic that
+# names the function, the same in the interpreter (whose limit is 100 000
+# frames) and in a native executable (whose limit is its stack's bytes).
+# The unwinding runs every drop and `defer` on the way out, and the trace
+# shows its innermost and outermost frames, whatever the depth was.
+
+struct Guard:
+    depth: int
+
+impl Drop for Guard:
+    def drop(mut self):
+        if self.depth == 0:
+            print("the outermost guard is dropped")
+
+def down(depth: int) -> int:
+    let guard = Guard(depth=depth)
+    return down(depth + 1) + 1
+
+def main():
+    defer:
+        print("main's defer runs")
+    print("recursing")
+    print(down(0))

@@ -1,0 +1,26 @@
+# A panic while a generator dropped before its end cleans up aborts the
+# program (decision 236), as a panic during unwinding does: the cleanup
+# runs where the consumer dropped the generator, which cannot take a panic.
+
+struct Loud:
+    name: String
+
+impl Drop for Loud:
+    def drop(mut self):
+        if self.name == "bad":
+            panic("a bad drop")
+        print("drop {self.name}")
+
+def counted() -> Iter[int]:
+    let guard = Loud(name="bad")
+    var i = 0
+    while True:
+        yield i
+        i += 1
+
+def main():
+    for x in counted():
+        print(x)
+        if x == 1:
+            break
+    print("not reached")

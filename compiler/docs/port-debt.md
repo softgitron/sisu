@@ -214,13 +214,13 @@ lowering's rule says it needs them (a type parameter only in the result,
 or an `Iterable[T]` parameter). *Pay*: pass every intrinsic its type
 arguments, which the untyped drops above also want.
 
-**Capability objects live as long as the run.** A capability handle's
-object and a `Cap`'s value live in a heap cell that every copy reaches
-and that nothing frees while the program runs, because a `Copy` handle
-has no last copy; a `Drop` of the object never runs. In the interpreter
-the cells go with the run; a native executable forgets them when the
-run ends, an arena per run (decisions 209 and 223). *Pay*: counting
-copies, which would make handles not `Copy`, or an arena per scope.
+**A handle an `own` closure captures lives as long as the run.** A
+capability's object goes with its handle's last copy (decision 237), but
+a function value's environment is never dropped (decision 224): a handle
+an `own` closure captures keeps its object until the run ends, when the
+cell is forgotten without its `Drop`. *Pay*: function values that drop
+their environment (a word naming the environment's type, copied and
+dropped as any value is), in both implementations.
 
 **Handles forward by dispatch.** A call on a capability handle or a
 `Lent` is a `call trait` that the dispatcher resolves by the object in
@@ -324,28 +324,36 @@ collection sizes against a limit; report progress past a time; with
 monomorphisation (the backend), evaluate per instantiation.
 
 **The library types of 04 are host values.** `Shared`, `Weak`, `Cell`,
-`Mutex` (and its guard) and `Arena` are values the interpreter
-represents (`sisu-interp/src/value.rs`), with their contracts in the
-prelude; a `Shared`'s value lives in a heap of cells that are never
-reused, and the monitor sees a mutex's interior through the guard's
-path. The escape analysis tags each `Shared` site atomic or not, but the
-interpreter's counts are never contended. The native runtime has them as
-objects of its own too, in Rust (decision 207), freeing a `Shared` cell
-with its last handle, and its counts are never contended either. *Pay*:
+`Mutex` (and its guard), `RwLock` (and its read guard), `Atomic` and
+`Arena` are values the interpreter represents (`sisu-interp/src/value.rs`;
+an `RwLock` is a mutex that counts readers, an `Atomic` a cell), with
+their contracts in the prelude and std.task; a `Shared`'s value lives in
+a heap of cells that are never reused, and the monitor sees a mutex's
+interior through the guard's path. The escape analysis tags each
+`Shared` site atomic or not, but the interpreter's counts are never
+contended, and an `Atomic`'s operations are atomic because one task runs
+at a time, every memory order acting as `SeqCst` (decision 239). The
+native runtime has them as objects of its own too, in Rust (decision
+207), freeing a `Shared` cell with its last handle, and its counts are
+never contended either. An `RwLock` lets readers that keep coming keep a
+writer waiting, and a `Condvar` makes a channel for each wait. *Pay*:
 write them in Sisu over raw memory and atomics (stage 1 and the backend),
-with the tags choosing the counting.
+with the tags choosing the counting and the memory orders meaning what
+06 says on the `full` runtime; a writer-preferring `RwLock`.
 
 **The scheduler is the interpreter's.** Tasks are frame stacks swapped
 into the interpreter, a run is single-threaded, and a schedule is the
 seeded random, PCT or bounded exhaustive scheduler's (`sched.rs`): there
 is no M:N runtime and no work stealing, and the exhaustive search has no
 state hashing, so it runs again schedules that reach a state it has
-seen. A generator dropped before its end is abandoned; a receiver's or
-generator's iterator inside another iterator's adapter cannot wait
-(`R0091`); in a `pure` scope the lowest-index failure is reported, but a
-body that joins a later task first sees it in time order. *Pay*: the
-runtime of 12's profiles; state hashing in the explorer (18, Phase 6);
-the generator's frames dropped with it.
+seen. A generator dropped before its end is closed where its consumer
+dropped it, outside the schedule (decision 236), so its cleanup cannot
+wait (`R0129`); a receiver's or generator's iterator inside another
+iterator's adapter cannot wait (`R0091`); in a `pure` scope the
+lowest-index failure is reported, but a body that joins a later task
+first sees it in time order. *Pay*: the runtime of 12's profiles; state
+hashing in the explorer (18, Phase 6); a closing generator that runs as
+a task of its own, which may wait.
 
 **Faults are injected by the interpreter.** In the `sim` profile, the
 interpreter decides a fault at a trait call of `FsOps` or `NetOps` whose
@@ -358,10 +366,10 @@ drawing from the run's seeded generator.
 **Tests share the host behind a lock.** The parallel test runner
 (`parallel.rs`) gives each test thread a view of the one host whose calls
 take a lock, and each thread a 256 MiB stack reserve, as every
-interpreter thread has. Only the tests that take no `System` run in
-parallel, so only the host's clock is really shared. *Pay*: the M:N
-runtime runs tests as tasks; per-test capability declarations (17) let
-the tests that touch only fakes of the world run in parallel too.
+interpreter thread has. Only the tests that do not take the real
+`System` run in parallel (those that name capabilities get fakes,
+decision 241), so only the host's clock is really shared. *Pay*: the M:N
+runtime runs tests as tasks.
 
 **The capability log is the host's wrapper.** Recording and replay wrap
 the host contract (`record.rs`), so they see the interpreter's host
@@ -470,7 +478,7 @@ have impls that the fast path respects.
 ## Stage 2: what the native backend leaves out
 
 The native debug backend (architecture.md, "Stage 2") compiles every
-program the conformance suite runs (`conformance/native.list`, 153
+program the conformance suite runs (`conformance/native.list`, 165
 cases), with the debug profile and the release one (decision 232), and
 every one of those runs frees what it allocated (decision 226). A
 construct it does not compile is `D0103` under `--native`, and the
@@ -501,22 +509,16 @@ leaves out:
 What round 2 (tasks, decisions 203 to 206; the rest of the suite,
 decisions 207 to 211) leaves:
 
-- **An owned value passed to an `Iterable[T]` parameter is dropped when
-  the call returns** (decision 210): an iterator the callee left part of
-  drops the rest, where the interpreter forgets the rest without running
-  its drops. Only an iterator of values with drop glue that the callee
-  does not finish shows it. *Pay*: the interpreter's frames dropping what
-  a parameter that is a reference was given by value, or lowering passing
-  such an argument by reference.
-
 - **A task's stack is finite natively.** The interpreter limits only the
   number of frames (decision 31); a native task has `SISU_TASK_STACK`
   (1 MiB) of stack, and the debug backend's frames are large (every
   temporary has a slot), so a recursion of a few thousand calls that the
-  interpreter runs in a task exhausts it natively (`R0123`; the root task
-  keeps 1 GiB). *Pay*: smaller frames (the entry on temporaries below), and
-  the default reservation from the corpus's histogram of depths (`--stats
-  stack-depth`), 8 MiB being the Phase 1 report's next step.
+  interpreter runs in a task overflows it natively (the same
+  `panic.stack-overflow` the interpreter raises at 100 000 frames,
+  decision 234; the root task keeps 1 GiB). *Pay*: smaller frames (the
+  entry on temporaries below), and the default reservation from the
+  corpus's histogram of depths (`--stats stack-depth`), 8 MiB being the
+  Phase 1 report's next step.
 - **Yield checks everywhere the interpreter has them**: at every
   function's entry and every back edge, so that a seed means the same
   schedule. The Phase 1 report found a slice of a few hundred microseconds
@@ -535,26 +537,23 @@ What round 1 does, and a later round must not copy:
 
 - **What still leaks natively** (decisions 213 to 218 free the first
   round's four leaks of decision 200 and what the interpreter's host frees
-  unseen, and decisions 220 to 225 what the second round left; the native
-  mode holds every case of the list at no allocation live at exit,
-  decision 226): a generator abandoned before its end whose cleanup runs
-  code of its own (a `defer`), whose frames are left as they are, since
-  unwinding them would run that code, which the interpreter's abandonment
-  does not (decision 223); and the objects of capabilities and the values
-  of `Cap`s, which are freed when the run ends, not when the last handle
-  goes, so a program that makes fakes in a loop grows until it ends.
-  *Pay*: the interpreter unwinding an abandoned generator's frames, its
-  `defer`s included, as Python's `close` runs `finally` (a decision of the
-  language, then both sides alike); handles that count their copies, or
-  an arena per scope.
+  unseen, decisions 220 to 225 what the second round left, and decisions
+  236 and 237 a generator closed before its end and the objects of
+  capabilities; the native mode holds every case of the list at no
+  allocation live at exit, decision 226): a capability handle an `own`
+  closure captures, whose object is freed when the run ends (above, "A
+  handle an `own` closure captures lives as long as the run"). *Pay*:
+  as there.
 - **Every part of a value is a word** (decision 188): a `u8` takes eight
   bytes, an option a word for its tag, a `bool` a word. *Pay*: in a
   release backend, each type its own width and alignment, and options
   that use a niche; the layout stays in `sisu_rt::abi`, so both sides
   change together.
 - **Every temporary has a stack slot of its own**, so a large function's
-  frame is the sum of its temporaries. *Pay*: scalars in Cranelift
-  variables and slots reused between statements.
+  frame is the sum of its temporaries, except a release build's scalars
+  and references, which are Cranelift variables (decision 246). *Pay*:
+  slots reused between statements, and the debug profile's scalars in
+  variables too once its debug information can describe them.
 - **Instances are not shared**: each list of type arguments compiles a
   function again (decision 191); 10 asks for sharing by shape and a
   budget. *Pay*: compile once per layout rather than per type where the
@@ -575,15 +574,16 @@ What round 1 does, and a later round must not copy:
   profiling"). *Pay*: lexical blocks from the code of each scope, and
   descriptions of the runtime's structures from the type table.
 - **The release profile is Cranelift's optimisation level** (decision
-  232), not 09's LLVM: nothing a contract proves removes a check, every
-  SIR local stays in a stack slot, which Cranelift does not keep in
-  registers, and the runtime's calls cost what they cost in a debug build,
-  so stage 1 runs no faster (arithmetic loops 8 to 20% faster), and there
-  is no `release-size`. *Pay*: scalar locals in Cranelift variables, the
-  integer division and the commonest intrinsics inline, an intrinsic's
-  call without the descriptor read again and its arguments decoded on
-  every call (decision 233 cut only the dispatch), and LLVM for release
-  builds (18, stage 2).
+  232), not 09's LLVM, with scalars in registers and the integer
+  division inline (decision 246: arithmetic loops 1.3 to 2.9 times
+  faster): nothing a contract proves removes a check, and the runtime's
+  calls cost what they cost in a debug build, so stage 1, whose time is
+  the intrinsics', runs 3 to 5% faster, and there is no `release-size`.
+  *Pay*: the commonest intrinsics inline (`len`, `byte_at`, `push`, the
+  iterators' `next`, an option's tests), an intrinsic's call without the
+  descriptor read again and its arguments decoded on every call
+  (decision 233 cut only the dispatch), and LLVM for release builds (18,
+  stage 2).
 - **The runtime trusts the generated code**: an address or a type number
   that breaks the runtime's rules is not checked everywhere, and where it
   is, it is `R0122` and status 134, not a diagnostic of the program.
@@ -631,9 +631,10 @@ What round 1 does, and a later round must not copy:
   `reflect/proposal_comptime`, and the CRC table and the ring buffer
   (`Array`, `u32` arithmetic, const generics and a generic `comptime
   assert`) as `comptime/proposal_arrays`, each section kept identical by
-  a test; the checked SQL needs the `sql` package, and `@cfg` is not
-  there. `capabilities.sisu` (its tests), `concurrency.sisu`,
-  `contracts.sisu` (`contracts/proposal_contracts`) and `testing.sisu`
+  a test (`sisu run` leaves out its `@cfg(test)` helper, decision 243);
+  the checked SQL needs the `sql` package. `capabilities.sisu` (its
+  tests), `concurrency.sisu`, `contracts.sisu`
+  (`contracts/proposal_contracts`) and `testing.sisu`
   (`testing/proposal_testing`, whose last test reads `HOME` from the
   real environment and fails in the suite's empty one) run with their
   missing declarations (and a `main`) appended, kept starting with the
@@ -666,19 +667,27 @@ From Phase 4 (18, "Phase 4: traits, generics, std in Sisu"):
   may be an integer expression of literals, `const` parameters and
   constants (03's `Array[T, W * H]`), folded where it is written (above),
   but not a call or `comptime` (`Array[u32, comptime size()]`).
-- **`@derive(Default)`**; the auto traits `Send`, `Sync` and `Escapable`
-  are inferred, and `Copy` is computed from fields.
 - **`std` as modules.** The core traits and their impls, the iterator
   adapters, the collection methods that take closures, formatting and
-  `parse_int` and the text methods are written in Sisu, but in the
-  prelude, not as `std.core`, `std.collections`, `std.string` and
-  `std.fmt` modules (std.collections and std.num re-export the
-  prelude's); the host-backed collections are intrinsics with their
-  contracts there.
+  `parse_int` and the text methods are written in Sisu in the prelude,
+  which 11 makes `std.core`; `std.core`, `std.collections`, `std.string`,
+  `std.fmt` and `std.num` are modules an import names (decision 245),
+  and the last four name the prelude's items besides their own. The
+  host-backed collections are intrinsics with their contracts there.
+  Most of 11's other modules (`std.io`, `std.fs`, `std.mem`, `std.par`,
+  `std.encoding`, `std.hash`, `std.sort`, `std.regex`, ...) are not
+  there, and neither are `std.string`'s graphemes, normalisation and
+  `Builder`.
 - **Reflection beyond templates** (Phase 8 in 18): `reflect`, `comptime
-  for` and `x.[f]` in methods and non-generic functions, reflection over
-  a trait's methods, and `comptime def` in a trait other than its derive
-  are `E0900`; `@cfg` is not there.
+  for` and `x.[f]` work in functions and methods (decision 244), but not
+  in a trait's own methods, the methods of a generic trait impl, a
+  `comptime def`, a constant or a test (`E0900`, naming the place). There
+  is no reflection over a trait's methods (no query names them, and no
+  syntax makes a method from a descriptor, which a recording fake derived
+  from an interface needs), and a `comptime def` in a trait other than
+  its derive is `E0900`: 08 gives it no call form. A `comptime def`
+  cannot take a type (`T: type`, 08's `field_names`). (`@cfg` is there:
+  decision 243.)
 
 From Phase 6 (18, "Phase 6: tasks, capabilities, an HTTP server in
 Sisu"):
@@ -686,19 +695,13 @@ Sisu"):
 - **The `sim` profile**'s network has partitions and faults but no
   latency or loss model, and the bounded exhaustive search has no state
   hashing (above).
-- **`RwLock`, `Atomic`, `Condvar`, `Once`**, and `task.scope`'s trace
-  context beyond the task path `log` prints.
-- **`sisu audit --caps`**: capability parameters per I/O function,
-  threading depth to `main`, structs bundling three or more.
+- **`task.scope`'s trace context** beyond the task path `log` prints.
 - **The 10k-connection echo server** (the exit criterion is functional,
   not fast): the polled host network above holds connections but has not
   been measured at that count; the corpus echo and HTTP servers run over
   `Net.fake` under `--explore 1000` (`http/server`).
 - **`--stats` latency of an I/O task under a compute-bound sibling** (the
   Q-34 number) is reported but not yet measured on a corpus program.
-- **Per-test capability declarations** beyond `sys: System` (which
-  receives the real one, or the simulated one under `--sim`), and the
-  test cache keyed by the capabilities a test touched.
 
 From Phase 8's tools (10, "Formatter", "Language server", "Debugging
 and profiling", "REPL and scripts"):

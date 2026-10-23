@@ -70,6 +70,10 @@ pub struct MutexVal {
     pub locked: bool,
     pub holder: u32,
     pub poisoned: bool,
+    /// For an `RwLock`, the read guards alive.
+    pub readers: u32,
+    /// An `RwLock` rather than a `Mutex`.
+    pub rw: bool,
 }
 
 /// An `Arena`: slots, each with its generation and its value (`Moved`
@@ -320,6 +324,8 @@ pub enum Value {
     Mutex(Box<MutexVal>),
     /// `MutexGuard[T]`: the lock on the mutex the pointer leads to.
     Guard(Box<Pointer>),
+    /// `ReadGuard[T]`: a read lock on the `RwLock` the pointer leads to.
+    ReadGuard(Box<Pointer>),
     /// `Arena[T]`.
     Arena(Box<ArenaVal>),
     Iter(Box<IterState>),

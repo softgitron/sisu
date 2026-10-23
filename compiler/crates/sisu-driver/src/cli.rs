@@ -527,7 +527,15 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                     "--native",
                     "--release",
                 ],
-                "test" => &["--no-monitor", "--defer-borrow", "--sim", "--update", "--locked", "--std"],
+                "test" => &[
+                    "--no-monitor",
+                    "--defer-borrow",
+                    "--sim",
+                    "--update",
+                    "--locked",
+                    "--std",
+                    "--no-cache",
+                ],
                 "check" => &["--format=ids", "--format=human", "--explain", "--locked"],
                 "build" => &["--locked", "--native", "--release"],
                 "bench" => &["--locked"],
@@ -1337,6 +1345,9 @@ fn command(
     }
     let mut db = FreedAside(Db::new());
     db.contracts = level;
+    // What runs or builds the program builds it without its tests
+    // (decision 243).
+    db.no_tests = matches!(cmd, "run" | "build" | "sir");
     input.load(&mut db);
     // `sisu test --std`: the standard library's doc examples run too.
     if cmd == "test" && has("--std") {
@@ -1682,6 +1693,7 @@ fn command(
                             bound: opts.bound,
                             search: false,
                             transcripts: Vec::new(),
+                            cache: None,
                         };
                         let (code, _) = run_tests(&prog, host, &options, seeds, &run);
                         return code;
@@ -1718,6 +1730,33 @@ fn command(
                             transcripts.push((shown, outcome.err()));
                         }
                     }
+                    // The test cache (decision 242), for a run whose results
+                    // the program's code and these options decide: not one
+                    // that searches schedules, simulates, updates snapshots
+                    // or defers the ownership checker.
+                    let cached = !has("--no-cache")
+                        && seeds.explore.is_none()
+                        && opts.sim.is_none()
+                        && !options.update
+                        && !deferring
+                        && matches!(options.strategy, sisu_interp::Strategy::Random);
+                    let cache = cached.then(|| {
+                        let path = match &input.package {
+                            Some((name, _)) => crate::native::output_for(
+                                &input.disk,
+                                Some(name),
+                                input.build_root.as_deref(),
+                                crate::native::Profile::of(false),
+                            )
+                            .with_file_name("test-cache"),
+                            None => input.disk.with_extension("test-cache"),
+                        };
+                        let salt = format!(
+                            "seed={} monitor={} fuel={:?} snapshots={:?}",
+                            options.seed, options.monitor, options.fuel, options.snapshots
+                        );
+                        (path, salt)
+                    });
                     let run = TestRun {
                         file: &input.shown,
                         hash,
@@ -1725,6 +1764,7 @@ fn command(
                         bound: opts.bound,
                         search: true,
                         transcripts,
+                        cache,
                     };
                     let (code, reports) = run_tests(&prog, host, &options, seeds, &run);
                     if options.update {
@@ -2108,6 +2148,9 @@ struct TestRun<'a> {
     search: bool,
     /// The transcripts that ran, by path, each with why it failed (17).
     transcripts: Vec<(String, Option<String>)>,
+    /// The test cache's file and the options its keys hash, when results
+    /// may come from it (decision 242).
+    cache: Option<(std::path::PathBuf, String)>,
 }
 
 /// A time in nanoseconds as a person reads it: `850 ns`, `12.4 µs`, `3.1 ms`.
@@ -2239,6 +2282,53 @@ pub(crate) fn text_line(id: sisu_diag::MsgId, params: &[(&str, String)]) -> Stri
     format!("{}\n", text(id, params))
 }
 
+/// The tests at `which`, those the cache holds taken from it (each prints
+/// what it printed when it ran), the others run; the cache then holds the
+/// tests that passed (decision 242). When every test ran (`all`), a key
+/// no test has any more goes.
+fn cached_tests(
+    prog: &sisu_sir::Program,
+    host: &mut dyn Host,
+    options: &Options,
+    which: &[usize],
+    path: &std::path::Path,
+    salt: &str,
+    all: bool,
+) -> Vec<(String, TestResult, sisu_interp::RunReport)> {
+    let have = crate::testcache::read(path);
+    let keys: Vec<Option<u64>> = which.iter().map(|&k| crate::testcache::key(prog, k, salt)).collect();
+    let held = |k: &Option<u64>| k.and_then(|k| have.get(&k).map(|e| (k, e.clone())));
+    let to_run: Vec<usize> =
+        which.iter().zip(&keys).filter(|(_, k)| held(k).is_none()).map(|(&w, _)| w).collect();
+    let mut quiet = Captured { inner: &mut *host, out: String::new(), err: String::new() };
+    let mut fresh = sisu_interp::run_tests_report_at(prog, &mut quiet, options, &to_run).into_iter();
+    let mut keep = if all { std::collections::BTreeMap::new() } else { have.clone() };
+    let mut out = Vec::new();
+    for (&w, k) in which.iter().zip(&keys) {
+        let (name, result, report) = match held(k) {
+            Some((key, (o, e))) => {
+                keep.insert(key, (o.clone(), e.clone()));
+                let report = sisu_interp::RunReport { out: o, err: e, ..Default::default() };
+                (prog.tests[w].0.clone(), TestResult::Passed, report)
+            }
+            None => {
+                let Some(r) = fresh.next() else { break };
+                if let (TestResult::Passed, Some(key)) = (&r.1, k) {
+                    keep.insert(*key, (r.2.out.clone(), r.2.err.clone()));
+                }
+                r
+            }
+        };
+        host.stdout(&report.out);
+        host.stderr(&report.err);
+        out.push((name, result, report));
+    }
+    if keep != have {
+        crate::testcache::write(path, &keep);
+    }
+    out
+}
+
 fn run_tests(
     prog: &sisu_sir::Program,
     host: &mut dyn Host,
@@ -2250,7 +2340,10 @@ fn run_tests(
         Some(only) => only.clone(),
         None => (0..prog.tests.len()).collect(),
     };
-    let mut results = sisu_interp::run_tests_report_at(prog, host, options, &which);
+    let mut results = match &run.cache {
+        Some((path, salt)) => cached_tests(prog, host, options, &which, path, salt, run.only.is_none()),
+        None => sisu_interp::run_tests_report_at(prog, host, options, &which),
+    };
     // `--explore N`: every test again under the other seeds, quietly; a
     // test fails with the first seed it fails under. Under the exhaustive
     // scheduler, every schedule within the bound instead, depth first.
@@ -2351,7 +2444,7 @@ fn run_tests(
                     .tests
                     .get(index)
                     .and_then(|(_, f)| prog.functions.iter().find(|x| x.name == *f))
-                    .is_some_and(|f| f.param_count == 1);
+                    .is_some_and(sisu_sir::takes_real_system);
                 // In the `sim` profile its `System` is simulated: it replays.
                 let replay = if takes_system && options.sim.is_none() {
                     text(msg::CLI_REPLAY_NO_TOKEN, &[])
@@ -2551,18 +2644,23 @@ fn explain_borrow(args: &[String], host: &mut dyn Host) -> i32 {
 
 /// `sisu audit --ownership FILE...`: per file, the uses of the ownership
 /// model's escape hatches ([`crate::audit`]), one line of data per file.
+/// `sisu audit --caps FILE...`: per program, its capability parameters,
+/// uses and bundles ([`crate::audit::caps`]).
 fn audit(args: &[String], host: &mut dyn Host) -> i32 {
     let (flags, files): (Vec<&String>, Vec<&String>) = args.iter().partition(|a| a.starts_with("--"));
-    if let Some(bad) = flags.iter().find(|f| f.as_str() != "--ownership") {
+    if let Some(bad) = flags.iter().find(|f| !matches!(f.as_str(), "--ownership" | "--caps")) {
         host.stderr(&plain_error(
             msg::CLI_UNKNOWN_OPTION,
             &[("option", bad.to_string()), ("command", "audit".into())],
         ));
         return EXIT_USAGE;
     }
-    if flags.is_empty() {
+    if flags.len() != 1 {
         host.stderr(&plain_error(msg::CLI_AUDIT_USAGE, &[]));
         return EXIT_USAGE;
+    }
+    if flags[0] == "--caps" {
+        return audit_caps(&files, host);
     }
     if files.is_empty() {
         host.stderr(&plain_error(msg::CLI_MISSING_FILE, &[("command", "audit".into())]));
@@ -2587,6 +2685,50 @@ fn audit(args: &[String], host: &mut dyn Host) -> i32 {
         let lexed = sisu_lexer::lex(p.file, &source);
         out.push_str(&crate::audit::ownership(&source, &lexed.tokens, &p.module).line(file));
         out.push('\n');
+    }
+    host.stdout(&out);
+    exit::OK
+}
+
+/// `sisu audit --caps FILE...`: each program checked and lowered, then
+/// its capability audit, read from its SIR.
+fn audit_caps(files: &[&String], host: &mut dyn Host) -> i32 {
+    if files.is_empty() {
+        host.stderr(&plain_error(msg::CLI_MISSING_FILE, &[("command", "audit".into())]));
+        return EXIT_USAGE;
+    }
+    let mut out = String::new();
+    for file in files {
+        let source = match std::fs::read_to_string(file) {
+            Ok(s) => s,
+            Err(e) => {
+                host.stdout(&out);
+                host.stderr(&plain_error(
+                    msg::CLI_CANNOT_READ,
+                    &[("path", file.to_string()), ("reason", e.to_string())],
+                ));
+                return exit::ERROR;
+            }
+        };
+        let mut db = Db::new();
+        db.set_file(file, &source);
+        let Some(c) = db.checked(file) else { return exit::ERROR };
+        let lowered = if c.has_errors() { None } else { db.lowered(file) };
+        let Some(lowered) = lowered.filter(|l| !l.has_errors()) else {
+            let mut all: Vec<sisu_diag::Diagnostic> = c.diagnostics.clone();
+            if !c.has_errors()
+                && let Some(l) = db.lowered(file)
+            {
+                all.extend(l.diagnostics.iter().cloned());
+            }
+            all.retain(|d| d.is_error());
+            let mut text = sisu_diag::render::render_human(&c.map, &all);
+            text.push_str(&plain_error(msg::CLI_ERRORS_FOUND, &[("count", all.len().to_string())]));
+            host.stdout(&out);
+            host.stderr(&text);
+            return exit::ERROR;
+        };
+        out.push_str(&crate::audit::caps(file, &lowered.sir, &crate::audit::own_structs(&c.program)));
     }
     host.stdout(&out);
     exit::OK

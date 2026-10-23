@@ -660,16 +660,34 @@ pub fn check_with(
             );
         }
     }
-    // A test takes nothing, or the real `System`, which it then receives
-    // (02; 17, "Isolation and parallelism").
+    // A test takes nothing, the real `System`, which it then receives, or
+    // the capabilities it names, one of each, which it receives as fresh
+    // fakes (02; 17, "Isolation and parallelism"; decision 241).
     for &t in &prog.tests {
         let Some(f) = prog.fn_info(t) else { continue };
         let sys = prog.wk.system;
-        let ok = f.params.is_empty()
-            || (f.params.len() == 1 && matches!(&f.params[0].ty, Ty::Adt(d, _) if Some(*d) == sys));
-        if !ok && !f.header_broken {
-            let span = f.params.first().map(|p| p.span).unwrap_or(prog.def(t).span);
-            diags.push(Diagnostic::new(msg::TYPE_TEST_SIGNATURE, span));
+        let real = f.params.len() == 1 && matches!(&f.params[0].ty, Ty::Adt(d, _) if Some(*d) == sys);
+        let mut named: Vec<&str> = Vec::new();
+        let bad = f.params.iter().find(|p| {
+            let fake = match &p.ty {
+                Ty::Adt(d, a) if a.is_empty() => prog.builtin(*d).filter(|b| {
+                    matches!(*b, "Fs" | "Net" | "Clock" | "TestClock" | "Rand" | "Env" | "Proc" | "Stdin")
+                }),
+                _ => None,
+            };
+            match fake {
+                Some(b) if !named.contains(&b) && p.mode == sisu_syntax::ast::Mode::Borrow => {
+                    named.push(b);
+                    false
+                }
+                _ => true,
+            }
+        });
+        if !real
+            && let Some(p) = bad
+            && !f.header_broken
+        {
+            diags.push(Diagnostic::new(msg::TYPE_TEST_SIGNATURE, p.span));
         }
     }
     let (requests, mut ds) = template_requests(prog, &typed.bodies);
@@ -755,7 +773,11 @@ fn template_requests(
                     out.push(q);
                 }
             }
-            thir::ExprKind::FnRef(def, _) if is_template(def) => {
+            // A template without type parameters has its one instance,
+            // which the value is (decision 244).
+            thir::ExprKind::FnRef(def, _)
+                if is_template(def) && prog.fn_info(*def).is_some_and(|f| !f.generics.is_empty()) =>
+            {
                 diags.push(
                     Diagnostic::new(msg::COMPTIME_TEMPLATE_VALUE, e.span)
                         .with("name", prog.def(*def).name.clone()),
@@ -766,6 +788,20 @@ fn template_requests(
         purity::visit_block(&b.block, &mut visit);
         for c in &b.closures {
             purity::visit_block(&c.body, &mut visit);
+        }
+    }
+    // A template without type parameters (a function or a method that
+    // reflects on the program's own types) is made once, whether anything
+    // calls it or not: `main`, a method a trait's call reaches, a value.
+    for d in prog.functions_with_bodies() {
+        if is_template(&d)
+            && prog.fn_info(d).is_some_and(|f| f.generics.is_empty())
+            && !prog.instances.contains_key(&(d, Vec::new()))
+        {
+            let q = sisu_resolve::Request::Instance { def: d, args: Vec::new(), site: prog.def(d).span };
+            if !out.iter().any(|x| x.same(&q)) {
+                out.push(q);
+            }
         }
     }
     (out, diags)

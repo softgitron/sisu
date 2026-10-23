@@ -1,10 +1,21 @@
 # The modules std is split into (11): `std.collections`, `std.num` and
 # `std.time` hold what the prelude does not, and name the prelude's
-# collections, numbers and times too.
+# collections, numbers and times too; `std.core` is the prelude, and
+# `std.string` and `std.fmt` name its text and its formatting.
+import std.core
 import std.num
 from std.collections import Arena, BitSet, Deque, Heap, SortedDict
+from std.fmt import Display, Formatter
 from std.num import Ratio, checked_mul, gcd, isqrt
+from std.string import String
 from std.time import Duration, Ticker
+
+struct Celsius:
+    degrees: int
+
+impl Display for Celsius:
+    def fmt(self, mut f: Formatter):
+        f.write("{self.degrees} C")
 
 def main(sys: System):
     var q: Deque[str] = Deque.new()
@@ -33,3 +44,6 @@ def main(sys: System):
     )
     t.wait().expect("ticks")
     print(t.missed)
+    let text: String = "{Celsius(degrees=21)}"
+    let first: core.Option[char] = text.chars().next()
+    print("{text} {first}")

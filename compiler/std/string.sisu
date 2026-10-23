@@ -1,0 +1,7 @@
+##! `std.string` (11): text. A `String` is its UTF-8 bytes, `str` is the
+##! type of a text literal, and `char` is a Unicode scalar value; their
+##! methods (`len`, `chars`, `split`, `trim`, `find`, `replace`,
+##! `to_upper`, ...) are the prelude's, and `String` is reached from here
+##! too (`from std.string import String`; `str` and `char` are built-in
+##! names). Grapheme iteration, case mapping beyond ASCII, normalisation
+##! forms and `Builder` are not here yet.

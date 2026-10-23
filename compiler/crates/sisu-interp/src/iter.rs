@@ -38,8 +38,18 @@ impl Interp<'_, '_> {
     /// iterator. When `T` is not a reference type the items are copies of
     /// what the collection holds (the checker's decay of `ref T` to `T`
     /// for a `Copy` type).
-    pub(crate) fn iterable(&self, v: Value, item: Option<&sir::Type>) -> Result<IterState, Unwind> {
+    pub(crate) fn iterable(&mut self, v: Value, item: Option<&sir::Type>) -> Result<IterState, Unwind> {
         let base = match v {
+            // An iterator behind a reference (an `Iterable[T]` parameter
+            // passed on, decision 235): what it has left is taken, and the
+            // iterator is left at its end, as the native runtime takes it.
+            Value::Ref(_) if matches!(self.target(&v)?, Value::Iter(_)) => {
+                let p = self.pointer_of(&v)?;
+                match std::mem::replace(self.write(&p)?, Value::Iter(Box::new(IterState::Done))) {
+                    Value::Iter(st) => *st,
+                    other => return Err(ice(format!("a borrowed iterator that is {other:?}"))),
+                }
+            }
             Value::Ref(_) => self.iter_borrow(&v)?,
             other => self.iter_own(other)?,
         };
@@ -135,7 +145,13 @@ impl Interp<'_, '_> {
                 }
             }
             IterState::Decay(inner) => match self.iter_next(inner)? {
-                Some(x @ Value::Ref(_)) => Ok(Some(self.target(&x)?.clone())),
+                Some(x @ Value::Ref(_)) => {
+                    // A copy of the item: its handles are counted
+                    // (decision 237).
+                    let v = self.target(&x)?.clone();
+                    self.retain_caps(&v, None);
+                    Ok(Some(v))
+                }
                 other => Ok(other),
             },
             // A receiver inside another iterator (`enumerate(rx)`) takes
@@ -159,13 +175,26 @@ impl Interp<'_, '_> {
         }
     }
 
-    /// The remaining items.
+    /// The remaining items. When a panic stops the iterator, what it has
+    /// left is dropped as the panic unwinds, as native code drops it
+    /// (decision 235).
     pub(crate) fn iter_collect(&mut self, st: &mut IterState) -> Result<Vec<Value>, Unwind> {
         let mut out = Vec::new();
-        while let Some(x) = self.iter_next(st)? {
-            out.push(x);
+        loop {
+            match self.iter_next(st) {
+                Ok(Some(x)) => out.push(x),
+                Ok(None) => return Ok(out),
+                Err(e) => {
+                    // After what the iterator dropped as it stopped: what
+                    // it has left, then the items taken, first to last.
+                    let rest = std::mem::replace(st, IterState::Done);
+                    let mut later = vec![(Value::Iter(Box::new(rest)), None)];
+                    later.extend(out.into_iter().map(|x| (x, None)));
+                    self.queue_drops_after(later);
+                    return Err(e);
+                }
+            }
         }
-        Ok(out)
     }
 
     /// Drops what is left in an iterator that is no longer needed.
@@ -185,6 +214,9 @@ pub(crate) fn owned_parts(st: IterState) -> Vec<Value> {
             v.extend(owned_parts(*b));
             v
         }
+        // A generator inside another iterator is closed when it is dropped
+        // (decision 236).
+        IterState::Gen(t) => vec![Value::Iter(Box::new(IterState::Gen(t)))],
         _ => Vec::new(),
     }
 }

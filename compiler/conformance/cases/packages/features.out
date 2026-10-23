@@ -1,0 +1,4 @@
+fast
+quiet
+[color] hello
+ascii=False unicode=True borders=False

@@ -403,8 +403,12 @@ impl<'c, 'a> FnLower<'c, 'a> {
         }
     }
 
+    /// Whether a value of the type is dropped: one that is not `Copy`, one
+    /// that holds a capability handle, whose copies are counted, and one
+    /// that is `Copy` only by a bound, since what the type parameter
+    /// stands for may be a handle (decision 237).
     pub fn needs_drop(&self, ty: &Ty) -> bool {
-        !self.ctx.prog.is_copy_in(ty, &self.bounds) && !matches!(ty, Ty::Ref(..))
+        !matches!(ty, Ty::Ref(..)) && (!self.ctx.prog.is_copy(ty) || self.ctx.prog.holds_capability(ty))
     }
 
     // ---------------------------------------------------------------- blocks

@@ -1,0 +1,36 @@
+# `//` rounds down and `%` takes the divisor's sign, for every pair of
+# signs, at the ends of `int` too; `MIN % -1` is 0, and a shift moves by 0
+# to 63 places (decision 246 computes them inline natively; the
+# interpreter is the reference).
+
+def div(a: int, b: int) -> int:
+    return a // b
+
+def rem(a: int, b: int) -> int:
+    return a % b
+
+def shl(a: int, n: int) -> int:
+    return a << n
+
+def shr(a: int, n: int) -> int:
+    return a >> n
+
+def main():
+    let least = -9223372036854775807 - 1
+    for (a, b) in [
+        (7, 2), (-7, 2), (7, -2), (-7, -2), (6, 3), (-6, 3), (6, -3), (-6, -3), (0, 5), (1, 9)
+    ]:
+        print("{a} // {b} = {div(a, b)}, {a} % {b} = {rem(a, b)}")
+    print(
+        (
+            div(least, 1),
+            div(least, 2),
+            div(least, -2),
+            rem(least, -1),
+            rem(least, 7),
+            rem(least, -7),
+        )
+    )
+    print((div(9223372036854775807, -1), rem(9223372036854775807, 10)))
+    print((shl(1, 0), shl(1, 62), shl(3, 63), shr(-16, 2), shr(least, 63), shr(12345, 0)))
+    print(shl(1, 64))

@@ -1,0 +1,61 @@
+# A generator dropped before its end is closed (decision 236), as Python's
+# `close` closes one: suspended at a `yield`, its frames unwind from there,
+# running their drops and `defer`s, before the consumer goes on; one that
+# never ran drops what its closure captured. In the interpreter and
+# natively alike, outside the schedule.
+
+struct Loud:
+    name: String
+
+impl Drop for Loud:
+    def drop(mut self):
+        print("drop {self.name}")
+
+def counted(label: String) -> Iter[int]:
+    let guard = Loud(name="{label}'s guard")
+    defer:
+        print("{label}'s defer runs")
+    var i = 0
+    while True:
+        let held = Loud(name="{label}'s item {i}")
+        yield i
+        i += 1
+
+def outer() -> Iter[int]:
+    defer:
+        print("outer's defer runs")
+    for x in counted("inner".to_string()):
+        yield x * 10
+
+def unstarted(own l: Loud) -> Iter[int]:
+    print("never printed: {l.name}")
+    yield 1
+
+def fails() -> int:
+    for x in counted("unwound".to_string()):
+        if x == 1:
+            panic("stop at {x}")
+    return 0
+
+def main():
+    for x in counted("first".to_string()):
+        print(x)
+        if x == 2:
+            break
+    print("after the first loop")
+    for y in outer():
+        print(y)
+        if y == 10:
+            break
+    print("after the nested loop")
+    let g = unstarted(Loud(name="captured"))
+    print("made a generator that never runs")
+    let r = task.scope do s:
+        let h = s.spawn(() -> fails())
+        return h.join()
+    match r:
+        case Err(TaskPanicked(message, _)):
+            print(message)
+        case _:
+            print("unexpected: {r}")
+    print("end")

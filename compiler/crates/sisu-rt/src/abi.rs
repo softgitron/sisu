@@ -28,9 +28,11 @@ pub const WORD: u32 = 8;
 /// The symbols of the runtime that generated code refers to.
 pub mod sym {
     /// `sisu_rt_start(argc, argv, entry, flags, ret_ty, types, types_len,
-    /// fns, fns_len, max_frame) -> i32`: runs the program and gives its
-    /// exit status; `max_frame` is the largest native frame of the program,
-    /// which the probe reserve of a task's stack must hold.
+    /// fns, fns_len, unprobed) -> i32`: runs the program and gives its
+    /// exit status; `unprobed` is the most a call may write below a probe
+    /// limit before a probe sees it (a function without a probe, and the
+    /// top of a probed function's frame, decision 234), which the probe
+    /// reserve of a task's stack must hold beyond the policy's 5 KiB.
     pub const START: &str = "sisu_rt_start";
     /// `sisu_rt_frame(name, name_len, file, file_len, line, col)`: a panic
     /// leaves a frame of the program; one line of its stack trace.
@@ -41,7 +43,8 @@ pub mod sym {
     pub const PANIC_OVERFLOW: &str = "sisu_rt_panic_overflow";
     /// `sisu_rt_panic_index(index, len, from_end) -> u8`: a bad index.
     pub const PANIC_INDEX: &str = "sisu_rt_panic_index";
-    /// `sisu_rt_panic_stack() -> u8`: too many nested calls.
+    /// `sisu_rt_panic_stack(name, name_len) -> u8`: entering the function
+    /// so named would nest more calls than the limit.
     pub const PANIC_STACK: &str = "sisu_rt_panic_stack";
     /// `sisu_rt_panic_unreachable() -> u8`: `unreachable` was reached.
     pub const PANIC_UNREACHABLE: &str = "sisu_rt_panic_unreachable";
@@ -96,7 +99,7 @@ pub mod sym {
     /// A 64-bit counter of the yield points the running task may pass
     /// before the scheduler is asked (`sisu_rt_yield` when it reaches 0).
     pub const BUDGET: &str = "SISU_RT_BUDGET";
-    /// The running task's stack limits, six words ([`super::STACK_PROBE`]
+    /// The running task's stack limits, seven words ([`super::STACK_PROBE`]
     /// and the others): what the probe at a function's entry compares the
     /// stack pointer with, and whether the task is a generator being
     /// abandoned ([`super::STACK_ABANDONED`]).
@@ -111,6 +114,10 @@ pub mod sym {
     /// `sisu_rt_shared_touch(value)`: code reached a `Shared`'s value, for
     /// the cells another task than their maker reaches (`--stats`).
     pub const SHARED_TOUCH: &str = "sisu_rt_shared_touch";
+    /// `sisu_rt_retain(value, ty)`: a copy of a value of type `ty` that
+    /// holds capability handles was made; each handle's cell counts one
+    /// more (decision 237).
+    pub const RETAIN: &str = "sisu_rt_retain";
 }
 
 /// The words of [`sym::STACK`]. The probe at a function's entry compares
@@ -118,25 +125,24 @@ pub mod sym {
 /// it is lower, a stack pointer at or above `STACK_REAL` only crossed the
 /// decommit watermark (set `STACK_DIRTY`, lower `STACK_PROBE` to
 /// `STACK_REAL`, go on), and one below it has exhausted the stack: the
-/// function sets `STACK_FAILED`, lowers `STACK_PROBE` to `STACK_FLOOR`
-/// (the part of the reserve kept for unwinding) and returns
-/// [`UNWINDING`] at once, calling nothing; the runtime raises the panic
-/// when it next looks at the panics in flight.
+/// function sets `STACK_FAILED` to the address of its name (as a trace
+/// shows it) and `STACK_FAILED_LEN` to its length, lowers `STACK_PROBE` to
+/// `STACK_FLOOR` (the part of the reserve kept for unwinding) and returns
+/// [`UNWINDING`] at once, calling nothing; the runtime raises the panic,
+/// which names the function, when it next looks at the panics in flight.
 pub const STACK_PROBE: u32 = 0;
 pub const STACK_REAL: u32 = 8;
 pub const STACK_FLOOR: u32 = 16;
 pub const STACK_DIRTY: u32 = 24;
 pub const STACK_FAILED: u32 = 32;
-/// 1 while the running task is a generator being abandoned: its yield
-/// returns [`UNWINDING`] without a panic, and its frames unwind running
-/// their drops, which forget what they drop (decisions 95 and 223). A generator's
-/// closure whose cleanup runs code of its own (a `defer`) sets it to
-/// [`ABANDON_KEEP`] when it starts: its frames are left as they are.
+/// 1 while the running task is a generator dropped before its end: the
+/// call it waits in returns [`UNWINDING`] without a panic, and its frames
+/// unwind running their drops and `defer`s (decision 236).
 pub const STACK_ABANDONED: u32 = 40;
-/// See [`STACK_ABANDONED`].
-pub const ABANDON_KEEP: u64 = 2;
+/// See [`STACK_PROBE`].
+pub const STACK_FAILED_LEN: u32 = 48;
 /// The words of [`sym::STACK`].
-pub const STACK_WORDS: usize = 6;
+pub const STACK_WORDS: usize = 7;
 
 /// The words of [`sym::SITE`]: the address and length of the file's name,
 /// the line and column of the call, and flags ([`SITE_PURE`]).
@@ -152,6 +158,10 @@ pub const SITE_PURE: u64 = 1;
 
 /// Nested calls beyond this many panic (the interpreter's limit).
 pub const MAX_DEPTH: i64 = 100_000;
+/// The calls beyond [`MAX_DEPTH`] that the unwinding of a panic may nest:
+/// the drops it runs call code of their own (the interpreter's
+/// `UNWIND_DEPTH`, decision 234).
+pub const UNWIND_DEPTH: i64 = 1_000;
 
 /// `flags` of `sisu_rt_start`: `main` returns `T ! E`.
 pub const ENTRY_RESULT: u32 = 1;
@@ -166,6 +176,13 @@ pub const SLOT_DROP: u32 = 2;
 
 /// The capability handles a `System` holds, in its fields' order
 /// (decision 101), and the host's object behind each.
+/// Whether a type the runtime knows by its name (`Kind::Opaque`) is a
+/// counted handle: a capability's (`Fs` and the others of a `System`) or
+/// a `Cap` (decision 237). A `Lent`'s name is `Lent` and its handle's.
+pub fn counted_handle(name: &str) -> bool {
+    name == "Cap" || CAPABILITIES.iter().any(|(h, _)| *h == name)
+}
+
 pub const CAPABILITIES: [(&str, &str); 7] = [
     ("Fs", "HostFs"),
     ("Net", "HostNet"),
@@ -458,6 +475,13 @@ pub enum Kind {
     /// of `T`'s `invariant` check, which a guard dropped by unwinding runs
     /// (D-077).
     Guard(u32, Option<u32>),
+    /// `RwLock[T]`: a `Mutex[T]` whose header's lock word is 0 when free, 1
+    /// while a task writes ([`MUTEX_HOLDER`] then the writer) and 2 while
+    /// tasks read ([`MUTEX_HOLDER`] then their number).
+    RwLock(u32),
+    /// `ReadGuard[T]`: one word, the address of the value inside the
+    /// `RwLock`; dropping it counts one reader fewer.
+    ReadGuard(u32),
     /// `Shared[T]` and `Weak[T]`: one word, the address of the value in its
     /// heap cell, whose header ([`SHARED_HEADER`] bytes: the owners, the
     /// weak handles, the task that made it, and flags) is just before it.
@@ -598,6 +622,8 @@ const K_CELL: u8 = 40;
 const K_ARENA: u8 = 41;
 const K_BYTES: u8 = 42;
 const K_DATETIME: u8 = 43;
+const K_RW_LOCK: u8 = 44;
+const K_READ_GUARD: u8 = 45;
 
 struct Writer(Vec<u8>);
 
@@ -763,6 +789,14 @@ pub fn encode(table: &[TypeEntry]) -> Vec<u8> {
                 w.u32(*t);
                 w.opt(*check);
             }
+            Kind::RwLock(t) => {
+                w.u8(K_RW_LOCK);
+                w.u32(*t);
+            }
+            Kind::ReadGuard(t) => {
+                w.u8(K_READ_GUARD);
+                w.u32(*t);
+            }
             Kind::Shared(t) => {
                 w.u8(K_SHARED);
                 w.u32(*t);
@@ -907,6 +941,8 @@ pub fn decode(bytes: &[u8]) -> Option<Vec<TypeEntry>> {
             K_TIMER => Kind::Timer,
             K_MUTEX => Kind::Mutex(r.u32()?),
             K_GUARD => Kind::Guard(r.u32()?, r.opt()?),
+            K_RW_LOCK => Kind::RwLock(r.u32()?),
+            K_READ_GUARD => Kind::ReadGuard(r.u32()?),
             K_SHARED => Kind::Shared(r.u32()?),
             K_WEAK => Kind::Weak(r.u32()?),
             K_CELL => Kind::Cell(r.u32()?),
@@ -1167,6 +1203,11 @@ intrinsics! {
     MutexLock = "Mutex.lock",
     MutexIsPoisoned = "Mutex.is_poisoned",
     MutexIntoInner = "Mutex.into_inner",
+    RwLockNew = "RwLock.new",
+    RwLockRead = "RwLock.read",
+    RwLockWrite = "RwLock.write",
+    RwLockIsPoisoned = "RwLock.is_poisoned",
+    RwLockIntoInner = "RwLock.into_inner",
     SharedNew = "Shared.new",
     SharedNewAtomic = "Shared.new_atomic",
     SharedGet = "Shared.get",
@@ -1177,6 +1218,7 @@ intrinsics! {
     CellGet = "Cell.get",
     CellSet = "Cell.set",
     CellReplace = "Cell.replace",
+    AtomicCompareExchange = "Atomic.compare_exchange",
     ArenaNew = "Arena.new",
     ArenaInsert = "Arena.insert",
     ArenaGet = "Arena.get",
@@ -1241,6 +1283,8 @@ impl Intrinsic {
                 | Intrinsic::SelectWait
                 | Intrinsic::GenYield
                 | Intrinsic::MutexLock
+                | Intrinsic::RwLockRead
+                | Intrinsic::RwLockWrite
                 | Intrinsic::IterNext
         )
     }
@@ -1310,6 +1354,8 @@ mod tests {
             Kind::Mutex(5),
             Kind::Guard(5, Some(2)),
             Kind::Guard(5, None),
+            Kind::RwLock(5),
+            Kind::ReadGuard(5),
             Kind::Shared(6),
             Kind::Weak(6),
             Kind::Cell(7),

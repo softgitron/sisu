@@ -231,6 +231,12 @@ pub(crate) struct Task<'p> {
     /// A generator's item, yielded and not taken yet.
     pub yielded: Option<Value>,
     pub generator: bool,
+    /// For a generator, the depth of its consumer's stack when it last
+    /// asked for an item: a generator's frames count on top of its
+    /// consumer's toward the limit of nested calls, so a recursion through
+    /// generators overflows as a recursion through calls does (decision
+    /// 234). 0 for any other task.
+    pub depth_base: usize,
     /// The epoch of hot replacement the task has adopted (`live.rs`): at
     /// its start, and at each `live.boundary()` since.
     pub epoch: usize,
@@ -364,6 +370,9 @@ pub(crate) struct Sched<'p> {
     pub checking: bool,
     /// A predicate met a lock its own task holds; the check is skipped.
     pub check_skipped: bool,
+    /// A generator dropped before its end is cleaning up, outside the
+    /// schedule: no yield point switches (decision 236).
+    pub abandoning: u32,
 }
 
 impl<'p> Sched<'p> {
@@ -386,6 +395,7 @@ impl<'p> Sched<'p> {
             ready_wall: None,
             yielded: None,
             generator: false,
+            depth_base: 0,
             epoch: 0,
         };
         let mut rng = Rng::new(seed);
@@ -425,6 +435,7 @@ impl<'p> Sched<'p> {
             forced: None,
             always: Vec::new(),
             checking: false,
+            abandoning: 0,
             check_skipped: false,
         }
     }
@@ -518,6 +529,26 @@ impl<'p> Interp<'p, '_> {
         }
     }
 
+    /// The depth the running task's frames start at: its consumer's, for a
+    /// generator (decision 234).
+    pub(crate) fn depth_base(&self) -> usize {
+        self.sched.tasks.get(self.sched.cur as usize).map_or(0, |t| t.depth_base)
+    }
+
+    /// The intrinsic that pushed an anchor, which names a stack overflow at
+    /// it (decision 234).
+    pub(crate) fn anchor_name(&self, a: &Anchor) -> String {
+        match a {
+            Anchor::Task => "task.spawn",
+            Anchor::Scope(s) if self.sched.scopes.get(*s as usize).is_some_and(|r| r.race) => "task.race",
+            Anchor::Scope(_) => "task.scope",
+            Anchor::Shield => "task.shield",
+            Anchor::Catch => "test.catch",
+            Anchor::Always => "sim.always",
+        }
+        .to_string()
+    }
+
     /// A frame the scheduler pushes, with one slot for a result.
     fn anchor_frame(&mut self, anchor: Anchor, ret: Option<&'p sir::Place>) -> Frame<'p> {
         self.serial += 1;
@@ -536,6 +567,7 @@ impl<'p> Interp<'p, '_> {
             resume_after_drops: false,
             anchor: Some(anchor),
             stack_bytes: 0,
+            lent: 0,
         }
     }
 
@@ -689,7 +721,10 @@ impl<'p> Interp<'p, '_> {
     fn panicked_err(&self, p: &PanicInfo) -> Value {
         Value::err(self.task_error(
             "TaskPanicked",
-            vec![Value::String(p.message.clone()), Value::String(p.stack.join("\n"))],
+            vec![
+                Value::String(p.message.clone()),
+                Value::String(sisu_diag::trace::shown(&p.stack).join("\n")),
+            ],
         ))
     }
 
@@ -810,6 +845,7 @@ impl<'p> Interp<'p, '_> {
             ready_wall: self.sched.keep_stats.then(std::time::Instant::now),
             yielded: None,
             generator: false,
+            depth_base: 0,
             epoch,
         });
         self.sched.ready.push(t);
@@ -1120,9 +1156,14 @@ impl<'p> Interp<'p, '_> {
         }
     }
 
+    /// Wakes every blocked task to look at its cancellation again, but for
+    /// generators, which run only when their consumer asks for an item
+    /// (decision 236).
     pub(crate) fn wake_all_blocked(&mut self) {
         for t in 0..self.sched.tasks.len() as u32 {
-            self.wake(t);
+            if !self.sched.tasks[t as usize].generator {
+                self.wake(t);
+            }
         }
     }
 
@@ -1130,8 +1171,9 @@ impl<'p> Interp<'p, '_> {
     /// spent and another task could run.
     pub(crate) fn yield_point(&mut self) -> bool {
         let asked = std::mem::take(&mut self.sched.yield_asked);
-        // A predicate of `sim.always` runs to its end.
-        if self.sched.checking {
+        // A predicate of `sim.always` runs to its end, and so does the
+        // cleanup of a generator dropped before its end.
+        if self.sched.checking || self.sched.abandoning > 0 {
             return false;
         }
         match self.sched.strategy.clone() {
@@ -1818,10 +1860,104 @@ impl<'p> Interp<'p, '_> {
             ready_wall: None,
             yielded: None,
             generator: true,
+            depth_base: 0,
             // A generator runs as part of its consumer's iterations.
             epoch: self.task_epoch(),
         });
         Ok(Value::Iter(Box::new(crate::value::IterState::Gen(t))))
+    }
+
+    /// A generator's iterator was dropped before its end: the generator is
+    /// closed, as Python's `close` closes one (decision 236). Suspended at
+    /// a `yield` (or any call it waits in), it unwinds its frames from
+    /// there, running their drops and `defer`s, here and now, outside the
+    /// schedule, and ends without an outcome; one that never ran drops
+    /// what its closure holds; an item it yielded that nobody took is
+    /// dropped after. A panic while it cleans up aborts, as one during
+    /// unwinding does, and so does a wait.
+    pub(crate) fn abandon_gen(&mut self, t: u32) -> Result<(), Unwind> {
+        let Some(task) = self.sched.tasks.get_mut(t as usize) else { return Ok(()) };
+        let item = task.yielded.take();
+        let mut env = Vec::new();
+        if !matches!(task.state, TState::Done) {
+            if task.pending.is_some() {
+                self.unwind_abandoned(t)?;
+            } else {
+                // It never ran: its frames are its anchor and its closure's
+                // first, whose locals hold what the closure captured.
+                let frames = std::mem::take(&mut task.frames);
+                task.state = TState::Done;
+                self.sched.ready.retain(|x| *x != t);
+                for fr in frames.into_iter().rev() {
+                    env.extend(fr.locals.into_iter().filter(|v| !v.is_moved()));
+                }
+            }
+        }
+        let mut later: Vec<crate::drops::PendingDrop> = item.into_iter().map(|v| (v, None)).collect();
+        later.extend(env.into_iter().map(|v| (v, None)));
+        self.queue_drops_after(later);
+        Ok(())
+    }
+
+    /// Runs the unwinding of an abandoned generator suspended in a call:
+    /// its frames are swapped in, the call fails with a pseudo-panic that
+    /// is not reported, and the steps run until only its anchor is left.
+    fn unwind_abandoned(&mut self, t: u32) -> Result<(), Unwind> {
+        let cur = self.sched.cur;
+        std::mem::swap(&mut self.frames, &mut self.sched.tasks[cur as usize].frames);
+        std::mem::swap(&mut self.frames, &mut self.sched.tasks[t as usize].frames);
+        self.sched.cur = t;
+        let task = &mut self.sched.tasks[t as usize];
+        task.pending = None;
+        task.state = TState::Running;
+        self.sched.ready.retain(|x| *x != t);
+        self.sched.abandoning += 1;
+        let r = self.run_abandoned(t);
+        self.sched.abandoning -= 1;
+        std::mem::swap(&mut self.frames, &mut self.sched.tasks[t as usize].frames);
+        std::mem::swap(&mut self.frames, &mut self.sched.tasks[cur as usize].frames);
+        self.sched.cur = cur;
+        let task = &mut self.sched.tasks[t as usize];
+        task.frames.clear();
+        task.state = TState::Done;
+        r
+    }
+
+    fn run_abandoned(&mut self, t: u32) -> Result<(), Unwind> {
+        use crate::exec::Event;
+        let close = Box::new(PanicInfo {
+            message: String::new(),
+            stack: Vec::new(),
+            hole: None,
+            refinement: None,
+            too_long: None,
+            abandon: true,
+        });
+        let waits = || {
+            Unwind::Abort(render(
+                msg::PANIC_DURING_ABANDON,
+                &[("message", render(msg::PANIC_ABANDONED_WAIT, &[]))],
+            ))
+        };
+        self.raise_in(Unwind::Panic(close), t)?;
+        // The generator's bottom frame is its anchor: there it ends.
+        while self.frames.len() > 1 || self.frames.last().is_some_and(|f| f.anchor.is_none()) {
+            match self.step_once() {
+                Ok(Event::Continue) | Ok(Event::Yield) => {}
+                Ok(Event::Returned(v, ret)) => {
+                    if let Some(dest) = ret
+                        && let Err(e) = self.store(dest, v)
+                    {
+                        self.raise_in(e, t)?;
+                    }
+                }
+                Ok(Event::Resumed(p)) => self.raise_in(Unwind::Panic(p), t)?,
+                Ok(Event::Switch) | Err(Unwind::Switch) | Err(Unwind::Block(_)) => return Err(waits()),
+                Err(e @ Unwind::Abort(_)) => return Err(e),
+                Err(e) => self.raise_in(e, t)?,
+            }
+        }
+        Ok(())
     }
 
     /// The item a generator has yielded, taken.
@@ -1845,6 +1981,10 @@ impl<'p> Interp<'p, '_> {
                 Some(Outcome::Panic(p)) => Err(Unwind::Panic(p)),
                 _ => Ok(Value::none()),
             };
+        }
+        let depth = self.frames.len() + self.depth_base();
+        if let Some(g) = self.sched.tasks.get_mut(t as usize) {
+            g.depth_base = depth;
         }
         self.wake(t);
         Err(Unwind::Block(Box::new(Blocked {
@@ -1890,7 +2030,8 @@ impl<'p> Interp<'p, '_> {
 
     // ---------------------------------------------------------------- mutexes
 
-    /// `Mutex.lock` across tasks: waits while another task holds it.
+    /// `Mutex.lock` across tasks: waits while another task holds it. An
+    /// `RwLock`'s `write` is the same, and waits for its readers too.
     pub(crate) fn lock(&mut self, args: &mut Vec<Value>) -> Result<Value, Unwind> {
         let p = self.pointer_of(&args[0])?;
         let cur = self.sched.cur;
@@ -1905,7 +2046,7 @@ impl<'p> Interp<'p, '_> {
                 }
                 return Err(panic(msg::PANIC_MUTEX_HELD, &[]));
             }
-            Value::Mutex(m) if m.locked => true,
+            Value::Mutex(m) if m.locked || m.readers > 0 => true,
             Value::Mutex(m) => {
                 m.locked = true;
                 m.holder = cur;
@@ -1922,6 +2063,37 @@ impl<'p> Interp<'p, '_> {
             })));
         }
         Ok(Value::Guard(Box::new(p)))
+    }
+
+    /// `RwLock.read`: waits while a task holds the write lock, then counts
+    /// one more reader.
+    pub(crate) fn read_lock(&mut self, args: &mut Vec<Value>) -> Result<Value, Unwind> {
+        let p = self.pointer_of(&args[0])?;
+        let cur = self.sched.cur;
+        let wait = match self.write(&p)? {
+            Value::Mutex(m) if m.poisoned => return Err(panic(msg::PANIC_MUTEX_POISONED, &[])),
+            Value::Mutex(m) if m.locked && m.holder == cur => {
+                if self.sched.checking {
+                    self.sched.check_skipped = true;
+                }
+                return Err(panic(msg::PANIC_MUTEX_HELD, &[]));
+            }
+            Value::Mutex(m) if m.locked => true,
+            Value::Mutex(m) => {
+                m.readers += 1;
+                false
+            }
+            other => return Err(ice(format!("RwLock.read on {other:?}"))),
+        };
+        if wait {
+            return Err(Unwind::Block(Box::new(Blocked {
+                args: std::mem::take(args),
+                wait: Wait::Lock,
+                keys: vec![Key::Lock],
+                timer: None,
+            })));
+        }
+        Ok(Value::ReadGuard(Box::new(p)))
     }
 
     /// The tasks a `Shared` cell was touched by: under the monitor, a cell

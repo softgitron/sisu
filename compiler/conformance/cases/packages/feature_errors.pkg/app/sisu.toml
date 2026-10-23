@@ -1,0 +1,13 @@
+# Every name a feature list gives is a feature (09; `E1018`): of this
+# package, or `DEP/FEATURE` of a dependency.
+[package]
+name = "app"
+version = "1.0.0"
+
+[dependencies]
+render = { path = "../render", features = ["colour"], default-features = "no" }
+
+[features]
+default = ["fats"]
+fast = []
+fancy = ["render/borders", "nope/x", "render/shadows"]

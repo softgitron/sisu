@@ -61,7 +61,7 @@ pub(crate) fn alloc(bytes: usize) -> *mut u8 {
 }
 
 /// A heap block that lives as long as the run and is not counted: the
-/// cells of capability handles and of `Cap`s (decision 209).
+/// empty view (decision 214).
 pub(crate) fn alloc_kept(bytes: usize) -> *mut u8 {
     if bytes == 0 {
         return std::ptr::null_mut();
@@ -73,14 +73,6 @@ pub(crate) fn alloc_kept(bytes: usize) -> *mut u8 {
         crate::rt::abort("out of memory");
     }
     p
-}
-
-/// Frees a block [`alloc_kept`] made.
-pub(crate) fn free_kept(p: *mut u8) {
-    if !p.is_null() {
-        // SAFETY: `p` is a block of this module, freed once.
-        unsafe { free(p) }
-    }
 }
 
 /// Grows (or makes) a heap block.

@@ -42,6 +42,40 @@ pub struct Package {
     /// Its manifest's `[profile.release] contracts`: what a release build
     /// checks (07).
     pub release_contracts: Option<String>,
+    /// Its manifest's `[features]` (09).
+    pub features: Vec<manifest::Feature>,
+    /// Its features that are on in this build, sorted (decision 243).
+    pub on: Vec<String>,
+    /// Its manifest's dependency entries, as far as features go.
+    pub wants: Vec<Want>,
+}
+
+/// What a dependency entry asks of the package it names (09).
+#[derive(Clone, Debug, Default)]
+pub struct Want {
+    /// The name the entry gives the dependency.
+    pub name: String,
+    /// The package, unless it could not be read or is not built (a
+    /// dependency's dev-dependency).
+    pub package: Option<usize>,
+    /// Its `when` holds on this target.
+    pub active: bool,
+    /// `features = [...]`.
+    pub features: Vec<(String, TextRange)>,
+    /// Not `default-features = false`.
+    pub defaults: bool,
+}
+
+impl Want {
+    fn of(dep: &Dependency, package: Option<usize>, active: bool) -> Want {
+        Want {
+            name: dep.name.clone(),
+            package,
+            active,
+            features: dep.features.clone(),
+            defaults: dep.default_features,
+        }
+    }
 }
 
 /// A module of the program: its path, its file and its package.
@@ -269,6 +303,9 @@ impl Loader {
             manifest: Some(file),
             locked_deps: m.dependencies.iter().filter(|d| !d.dev).map(|d| d.name.clone()).collect(),
             release_contracts: m.release_contracts.clone(),
+            features: m.features.clone(),
+            on: Vec::new(),
+            wants: Vec::new(),
         });
         self.dirs.push(canon.clone());
         self.modules_of(index, &canon, &info.name, file);
@@ -279,10 +316,13 @@ impl Loader {
             // A dev-dependency is the package's own tests' business: only
             // the root package's are built.
             if dep.dev && index != 0 {
+                self.layout.packages[index].wants.push(Want::of(dep, None, false));
                 continue;
             }
             let active = dep.when.as_ref().is_none_or(|w| w.holds(&self.target));
-            let Some(d) = self.package(&canon.join(&dep.path), stack, Some((index, dep))) else { continue };
+            let d = self.package(&canon.join(&dep.path), stack, Some((index, dep)));
+            self.layout.packages[index].wants.push(Want::of(dep, d, active));
+            let Some(d) = d else { continue };
             if active {
                 self.layout.packages[index].deps.push((dep.name.clone(), d));
             }
@@ -399,6 +439,7 @@ pub fn load_package(dir: &Path, base: &Path) -> Layout {
     let mut stack = Vec::new();
     l.package(dir, &mut stack, None);
     let mut layout = l.layout;
+    turn_on_features(&mut layout);
     // The lockfile: beside the workspace's manifest when the package is a
     // member of one, else beside its own.
     let canon = canonical(dir);
@@ -470,11 +511,14 @@ pub fn load_file(name: &str, text: &str, cwd: &Path) -> Layout {
     l.layout.diagnostics.extend(diags);
     l.layout.packages[0].manifest = Some(0);
     let Some(m) = m else { return l.layout };
+    l.layout.packages[0].features = m.features.clone();
     let dir = l.layout.packages[0].dir.clone();
     let mut stack = vec![0];
     for dep in &m.dependencies {
         let active = dep.when.as_ref().is_none_or(|w| w.holds(&l.target));
-        let Some(d) = l.package(&dir.join(&dep.path), &mut stack, Some((0, dep))) else { continue };
+        let d = l.package(&dir.join(&dep.path), &mut stack, Some((0, dep)));
+        l.layout.packages[0].wants.push(Want::of(dep, d, active));
+        let Some(d) = d else { continue };
         if active {
             l.layout.packages[0].deps.push((dep.name.clone(), d));
         }
@@ -482,7 +526,108 @@ pub fn load_file(name: &str, text: &str, cwd: &Path) -> Layout {
             l.layout.packages[d].trusted = true;
         }
     }
-    l.layout
+    let mut layout = l.layout;
+    turn_on_features(&mut layout);
+    layout
+}
+
+/// The features each package of the build turns on (09; decision 243):
+/// the root package's `default` feature, each dependency's `default`
+/// unless every entry that reaches it says `default-features = false`,
+/// the features those entries list, and what each feature that is on
+/// turns on in turn, of its own package or (`DEP/FEATURE`) of a
+/// dependency. A name that is no feature is `E1018`.
+fn turn_on_features(layout: &mut Layout) {
+    let n = layout.packages.len();
+    let has =
+        |p: usize, f: &str| layout.packages.get(p).is_some_and(|k| k.features.iter().any(|x| x.name == f));
+    let shown = |p: usize| match layout.packages.get(p) {
+        Some(k) if !k.name.is_empty() => k.name.clone(),
+        _ => layout.modules.first().map(|m| m.name.clone()).unwrap_or_default(),
+    };
+    let mut problems = Vec::new();
+    for (p, pkg) in layout.packages.iter().enumerate() {
+        let file = FileId(pkg.manifest.unwrap_or(0) as u32);
+        let check = |at: TextRange, of: usize, name: &str, problems: &mut Vec<Diagnostic>| {
+            if !has(of, name) {
+                problems.push(
+                    Diagnostic::new(msg::PACKAGE_UNKNOWN_FEATURE, Span::new(file, at))
+                        .with("name", name.to_string())
+                        .with("package", shown(of)),
+                );
+            }
+        };
+        for f in &pkg.features {
+            for (e, at) in &f.on {
+                match e.split_once('/') {
+                    Some((dep, x)) => match pkg.wants.iter().find(|w| w.name == dep) {
+                        Some(w) => {
+                            if let Some(d) = w.package {
+                                check(*at, d, x, &mut problems);
+                            }
+                        }
+                        None => problems.push(
+                            Diagnostic::new(msg::PACKAGE_UNKNOWN_FEATURE, Span::new(file, *at))
+                                .with("name", e.clone())
+                                .with("package", shown(p)),
+                        ),
+                    },
+                    None => check(*at, p, e, &mut problems),
+                }
+            }
+        }
+        for w in &pkg.wants {
+            if let Some(d) = w.package {
+                for (x, at) in &w.features {
+                    check(*at, d, x, &mut problems);
+                }
+            }
+        }
+    }
+    layout.diagnostics.extend(problems);
+    // The packages the build reaches, and what reaching them turns on.
+    let mut reached = vec![false; n];
+    let mut stack = vec![0];
+    let mut work: Vec<(usize, String)> = vec![(0, "default".to_string())];
+    while let Some(p) = stack.pop() {
+        if p >= n || reached[p] {
+            continue;
+        }
+        reached[p] = true;
+        for w in layout.packages[p].wants.iter().filter(|w| w.active) {
+            let Some(d) = w.package else { continue };
+            stack.push(d);
+            if w.defaults {
+                work.push((d, "default".to_string()));
+            }
+            work.extend(w.features.iter().map(|(x, _)| (d, x.clone())));
+        }
+    }
+    let mut on: Vec<Vec<String>> = vec![Vec::new(); n];
+    while let Some((p, f)) = work.pop() {
+        let Some(pkg) = layout.packages.get(p) else { continue };
+        let Some(feature) = pkg.features.iter().find(|x| x.name == f) else { continue };
+        if on[p].contains(&f) {
+            continue;
+        }
+        for (e, _) in &feature.on {
+            match e.split_once('/') {
+                Some((dep, x)) => {
+                    if let Some(d) =
+                        pkg.wants.iter().find(|w| w.name == dep && w.active).and_then(|w| w.package)
+                    {
+                        work.push((d, x.to_string()));
+                    }
+                }
+                None => work.push((p, e.clone())),
+            }
+        }
+        on[p].push(f);
+    }
+    for (pkg, mut fs) in layout.packages.iter_mut().zip(on) {
+        fs.sort();
+        pkg.on = fs;
+    }
 }
 
 /// `sisu.lock` (09): the packages the build resolved, as data. In stage 0

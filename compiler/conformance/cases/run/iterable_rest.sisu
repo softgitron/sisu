@@ -1,0 +1,51 @@
+# What a call leaves of an iterator given to an `Iterable[T]` parameter is
+# dropped when the call returns, and when it unwinds, in the interpreter as
+# natively (decision 235): every value is dropped (04), none twice. An
+# intrinsic the parameter is passed on to takes what is left of it, and
+# one that a panic stops drops what it took and what it left.
+
+struct Loud:
+    n: int
+
+impl Drop for Loud:
+    def drop(mut self):
+        print("drop {self.n}")
+
+def filled(k: int) -> Receiver[Loud]:
+    let (tx, rx) = channel[Loud](capacity=8)
+    for i in range(0, k):
+        let _ = tx.send(Loud(n=i))
+    tx.close()
+    return rx
+
+def ignore(xs: Iterable[Loud]) -> int:
+    return 0
+
+def twice(xs: Iterable[Loud]) -> int:
+    let a = len(iterable_list(xs))
+    let b = len(iterable_list(xs))
+    return a * 10 + b
+
+def boom(xs: Iterable[Loud]) -> int:
+    panic("boom")
+
+def pairs() -> int:
+    let a = filled(3)
+    let b = filled(2)
+    return len(iterable_list(zip(reversed(a), reversed(b))))
+
+def main():
+    let r1 = filled(2)
+    print("ignored: {ignore(reversed(r1))}")
+    let r2 = filled(3)
+    print("twice: {twice(reversed(r2))}")
+    let r = task.scope do s:
+        let h = s.spawn(() -> pairs())
+        return h.join()
+    match r:
+        case Err(TaskPanicked(message, _)):
+            print(message)
+        case other:
+            print("unexpected: {other}")
+    let r3 = filled(2)
+    print(boom(reversed(r3)))

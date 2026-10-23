@@ -62,7 +62,7 @@ impl Interp<'_, '_> {
                         ptr = Pointer { task: 0, frame: HEAP, serial, local: id, path: Vec::new(), tag: 0 };
                     }
                     // A guard leads to the value its mutex protects.
-                    Value::Guard(q) => ptr = q.join(Step::MutexValue),
+                    Value::Guard(q) | Value::ReadGuard(q) => ptr = q.join(Step::MutexValue),
                     Value::Moved => return Err(self.moved_at(&ptr)),
                     other => return Err(ice(format!("dereferencing {other:?}"))),
                 },

@@ -534,7 +534,9 @@ impl Runner<'_> {
                 // Tests run in parallel by default; on one thread they
                 // must print the same (17, "Isolation and parallelism").
                 self.report.serial += 1;
-                let one = invoke(self.sisu, &sandbox.dir, &s(&["test", "--jobs", "1", &file]));
+                // Run again, not taken from the test cache the first run
+                // filled (decision 242).
+                let one = invoke(self.sisu, &sandbox.dir, &s(&["test", "--jobs", "1", "--no-cache", &file]));
                 self.compare(
                     case,
                     "sisu test --jobs 1 prints what the parallel run printed",
@@ -803,7 +805,7 @@ impl Runner<'_> {
             self.compare(case, "sisu test", Some("test"), &expected, &out.stdout);
             self.replay_tokens_in(case, &cwd, &out.stdout);
             self.report.serial += 1;
-            let one = invoke(self.sisu, &cwd, &s(&["test", "--jobs", "1"]));
+            let one = invoke(self.sisu, &cwd, &s(&["test", "--jobs", "1", "--no-cache"]));
             self.compare(
                 case,
                 "sisu test --jobs 1 prints what the parallel run printed",

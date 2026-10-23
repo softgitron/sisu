@@ -77,10 +77,13 @@ fn needs_drop_table(types: &[TypeEntry]) -> Vec<bool> {
                 | Kind::Sender(_)
                 | Kind::Receiver(_)
                 | Kind::Guard(..)
+                | Kind::ReadGuard(_)
                 | Kind::Shared(_)
                 | Kind::Weak(_)
                 | Kind::Arena(_) => true,
-                Kind::Mutex(v) | Kind::Cell(v) => get(*v),
+                // A capability handle's copies are counted (decision 237).
+                Kind::Opaque(n) => crate::value::counted(n),
+                Kind::Mutex(v) | Kind::RwLock(v) | Kind::Cell(v) => get(*v),
                 Kind::Entry(k, _) => get(*k),
                 Kind::Option(p) => get(*p),
                 Kind::Result(a, b) => get(*a) || get(*b),
@@ -191,11 +194,18 @@ pub(crate) fn take_panic() -> Option<Panic> {
 pub(crate) fn abort_unwinding() -> ! {
     let (first, message) = with_panics(|p| {
         let n = p.len();
-        let first = if n >= 2 { p[n - 2].message.clone() } else { String::new() };
+        let first = if n >= 2 { Some(p[n - 2].message.clone()) } else { None };
         let message = p.last().map(|x| x.message.clone()).unwrap_or_default();
         (first, message)
     });
-    let text = render(msg::PANIC_DURING_UNWIND, &[("first", first), ("message", message)]);
+    let text = match first {
+        // A generator dropped before its end cleans up without a panic of
+        // its own (decision 236).
+        None if crate::sched::abandoning() => render(msg::PANIC_DURING_ABANDON, &[("message", message)]),
+        first => {
+            render(msg::PANIC_DURING_UNWIND, &[("first", first.unwrap_or_default()), ("message", message)])
+        }
+    };
     abort(&text)
 }
 

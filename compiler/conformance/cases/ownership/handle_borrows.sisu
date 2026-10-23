@@ -1,0 +1,23 @@
+# What a call returns from the object behind a capability handle or a
+# `Cap` borrows the place the call copied the handle from (decision 237):
+# the object goes with the handle's last copy, so the place must outlive
+# the borrow. A temporary handle goes at the end of its statement
+# (E0406), and a handle cannot be replaced while a borrow of its object
+# is used (E0402). A borrow through a handle that lives on is accepted.
+
+struct Tally:
+    count: int
+
+def read(c: Cap[Tally]) -> ref Tally:
+    return c.get()
+
+def main():
+    let kept = Cap(Tally(count=1))
+    let through = read(kept)
+    print(through.count)
+    let gone = Cap(Tally(count=2)).get()
+    print(gone.count)
+    var swapped = Cap(Tally(count=3))
+    let first = swapped.get()
+    swapped = Cap(Tally(count=4))
+    print(first.count)

@@ -12,10 +12,13 @@ capabilities/host
 capabilities/interceptors
 capabilities/lent
 capabilities/network
+capabilities/object_drops
 capabilities/revocable
 capabilities/wrap_trait
 comptime/baked
+comptime/cfg
 comptime/constants
+comptime/derive_default
 comptime/derive_user
 comptime/proposal_arrays
 comptime/proposal_derive
@@ -23,6 +26,8 @@ concurrency/cancellation
 concurrency/channels
 concurrency/deadlock
 concurrency/failures
+concurrency/generator_close
+concurrency/generator_close_panic
 concurrency/generators
 concurrency/join
 concurrency/logging
@@ -31,6 +36,8 @@ concurrency/panics
 concurrency/pure_scope
 concurrency/race
 concurrency/select
+concurrency/stack_overflow
+concurrency/sync_types
 contracts/checks
 contracts/invariants
 contracts/proposal_contracts
@@ -84,6 +91,7 @@ ownership/shared_param_passed_on
 ownership/str_views
 ownership/two_phase
 ownership/views
+packages/features
 packages/modules
 packages/path_dependency
 packages/script
@@ -91,6 +99,7 @@ packages/workspace
 reflect/cli
 reflect/embed
 reflect/json
+reflect/methods
 reflect/promotion
 reflect/proposal_comptime
 reflect/queries
@@ -118,7 +127,9 @@ run/errors
 run/expect
 run/f32
 run/format_specs
+run/integer_division
 run/interpolation
+run/iterable_rest
 run/iterators
 run/let_else_copy
 run/list_keys
@@ -132,6 +143,7 @@ run/parse_int
 run/pure_functions
 run/recursion
 run/sized_integers
+run/stack_overflow
 run/strings
 run/structs_enums
 run/text_bytes

@@ -27,7 +27,8 @@ use std::collections::HashMap;
 
 /// The host-backed types that have declarations in SIR (the others are
 /// [`sir::validate::BUILTIN_TYPES`]).
-const HOST_DECLARED: &[&str] = &["Shared", "Weak", "Cell", "Mutex", "MutexGuard", "Arena"];
+const HOST_DECLARED: &[&str] =
+    &["Shared", "Weak", "Cell", "Atomic", "Mutex", "RwLock", "MutexGuard", "ReadGuard", "Arena"];
 
 /// The glue functions of the declared types that need one.
 pub fn glue_functions(types: &[TypeDecl]) -> Vec<Function> {

@@ -53,6 +53,11 @@ pub(crate) fn handles(i: Intrinsic) -> bool {
             | I::MutexLock
             | I::MutexIsPoisoned
             | I::MutexIntoInner
+            | I::RwLockNew
+            | I::RwLockRead
+            | I::RwLockWrite
+            | I::RwLockIsPoisoned
+            | I::RwLockIntoInner
             | I::IterNext
     )
 }
@@ -204,7 +209,7 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> u8 {
             }),
             I::GenNew => system(|| gen_new(c)),
             I::GenYield => gen_yield(c),
-            I::MutexNew => system(|| {
+            I::MutexNew | I::RwLockNew => system(|| {
                 let (_, t) = (c.arg(0), c.ty(0));
                 mem::set_word(c.ret, abi::MUTEX_LOCKED, 0);
                 mem::set_word(c.ret, abi::MUTEX_HOLDER, 0);
@@ -212,15 +217,16 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> u8 {
                 mem::copy(c.ret.add(abi::MUTEX_HEADER as usize), c.arg(0), ty(t).size as usize);
                 abi::OK
             }),
-            I::MutexLock => lock(c),
-            I::MutexIsPoisoned => {
+            I::MutexLock | I::RwLockWrite => lock(c),
+            I::RwLockRead => read_lock(c),
+            I::MutexIsPoisoned | I::RwLockIsPoisoned => {
                 let (p, _) = c.place(0);
                 c.set_bool(mem::word(p, abi::MUTEX_POISONED) != 0);
                 abi::OK
             }
-            I::MutexIntoInner => sched::system_status(|| {
+            I::MutexIntoInner | I::RwLockIntoInner => sched::system_status(|| {
                 let (p, t) = (c.arg(0), c.ty(0));
-                let Kind::Mutex(v) = ty(t).kind else {
+                let (Kind::Mutex(v) | Kind::RwLock(v)) = ty(t).kind else {
                     rt::internal("`into_inner` of something not a mutex")
                 };
                 let value = p.add(abi::MUTEX_HEADER as usize);
@@ -256,7 +262,7 @@ pub(crate) unsafe fn clock_of(c: &Call<'_>) -> u32 {
     // SAFETY: the first argument is the clock's object or handle.
     let (p, t) = unsafe { c.place(0) };
     match &ty(t).kind {
-        Kind::Opaque(n) if n == "HostClock" || n == "Clock" => 0,
+        Kind::Opaque(n) if matches!(n.strip_prefix("Lent ").unwrap_or(n), "HostClock" | "Clock") => 0,
         // SAFETY: a test clock's handle is a word, its clock's number.
         _ => unsafe { mem::word(p, 0) as u32 },
     }
@@ -440,7 +446,7 @@ impl sched::Sched {
                     }
                 }
                 Some(Outcome::Panic(p)) => {
-                    let trace = p.stack.join("\n");
+                    let trace = sisu_diag::trace::shown(&p.stack).join("\n");
                     write_task_error(ret, ret_ty, "TaskPanicked", Some((&p.message, &trace)));
                 }
                 None => rt::internal("a finished task without an outcome"),
@@ -496,12 +502,12 @@ fn drop_queued(queue: Vec<(Box<[u64]>, u32)>) -> u8 {
 // ------------------------------------------------------------------ scopes
 
 /// Counts an anchor frame toward the limit of nested calls (the
-/// interpreter's anchors are frames); false past it, with the panic raised.
-fn enter_anchor() -> bool {
+/// interpreter's anchors are frames); false past it, with the panic raised,
+/// which names the intrinsic that opened the anchor (decision 234).
+fn enter_anchor(name: &str) -> bool {
     let d = crate::entry::SISU_RT_DEPTH.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-    if d > abi::MAX_DEPTH {
+    if d > abi::MAX_DEPTH && system(|| crate::entry::over_depth(name)) != abi::OK {
         crate::entry::SISU_RT_DEPTH.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-        rt::raise_msg(msg::PANIC_STACK_OVERFLOW, &[("depth", abi::MAX_DEPTH.to_string())]);
         return false;
     }
     true
@@ -544,7 +550,7 @@ unsafe fn closure_here(c: &Call<'_>, i: usize) -> (usize, usize) {
 unsafe fn shield(c: &Call<'_>) -> u8 {
     // SAFETY: the argument is the body.
     let (code, env) = unsafe { closure_here(c, 0) };
-    if !enter_anchor() {
+    if !enter_anchor("task.shield") {
         return abi::UNWINDING;
     }
     system(|| with(|s| s.task(s.cur).anchors.push(Anchor::Shield)));
@@ -587,7 +593,7 @@ unsafe fn scope(c: &Call<'_>, race: bool) -> u8 {
             id
         })
     });
-    if !enter_anchor() {
+    if !enter_anchor(if race { "task.race" } else { "task.scope" }) {
         system(|| {
             with(|sc| {
                 sc.task(sc.cur).anchors.pop();
@@ -726,7 +732,7 @@ unsafe fn scope_end(c: &Call<'_>, s: u32, status: u8, body: Box<[u64]>, body_ty:
     match outcome {
         Some(Outcome::Panic(p)) => {
             if sched::task_error().is_some_and(|te| carries(ret_ty, te)) {
-                let trace = p.stack.join("\n");
+                let trace = sisu_diag::trace::shown(&p.stack).join("\n");
                 // SAFETY: the scope's result carries `TaskError`.
                 system(|| unsafe {
                     write_task_error(c.ret, ret_ty, "TaskPanicked", Some((&p.message, &trace)))
@@ -853,7 +859,7 @@ fn task_main(t: u32, y: &Yielder<(), sched::Suspend>, generator: bool) {
     let status = sched::neutral(|| unsafe { std::mem::transmute::<usize, Body0>(code)(out, env as *mut u8) });
     // The closure dropped what its environment held; its cell is the
     // runtime's to free.
-    system(|| crate::entry::release_task_env(env, false));
+    let _ = system(|| crate::entry::release_task_env(env, false));
     // An abandoned generator's frames have unwound (decision 95): nothing
     // waits for it.
     if sched::abandoning() {
@@ -1185,15 +1191,15 @@ unsafe fn gen_new(c: &Call<'_>) -> u8 {
 }
 
 /// `yield v` in a generator: hands `v` to the consumer and waits to be
-/// asked for the next.
+/// asked for the next (closed while it waits, it returns
+/// [`abi::UNWINDING`], decision 236).
 unsafe fn gen_yield(c: &Call<'_>) -> u8 {
     let (vp, vt) = (c.arg(0), c.ty(0));
     let site = Site::current();
     let mut handed = false;
     sched::blocking(|| {
         if handed {
-            // Abandoned while it waited here: its frames unwind.
-            return Attempt::Done(if sched::abandoning() { abi::UNWINDING } else { abi::OK });
+            return Attempt::Done(abi::OK);
         }
         handed = true;
         with(|s| {
@@ -1242,6 +1248,12 @@ unsafe fn iter_next(c: &Call<'_>) -> u8 {
                         }
                     };
                 }
+                // The generator's calls count on top of the consumer's
+                // (decision 234).
+                let depth = crate::entry::SISU_RT_DEPTH.load(std::sync::atomic::Ordering::Relaxed);
+                let g = s.task(t);
+                g.ctx.depth += depth - g.depth_base;
+                g.depth_base = depth;
                 s.wake(t);
                 s.block_on(Wait::Join(t), &[Key::Task(t)], None, site);
                 Attempt::Wait
@@ -1278,12 +1290,13 @@ unsafe fn iter_next(c: &Call<'_>) -> u8 {
 }
 
 /// A generator's iterator was dropped before its end: the generator is
-/// abandoned (decisions 95 and 223). What its frames hold is let go of as the
-/// interpreter's host lets it go, running no Sisu code: a generator
-/// suspended at a `yield` unwinds its frames with their drops forgetting
-/// (`sched::unwind_abandoned`); one that never started forgets the values
-/// its environment holds. Its stack goes back to the pool.
-pub(crate) fn abandon(t: u32) {
+/// closed (decision 236), as the interpreter closes it. One suspended at a
+/// `yield` unwinds its frames, running their drops and `defer`s
+/// (`sched::unwind_abandoned`); then an item it yielded that nobody took
+/// is dropped, and the values the environment of one that never started
+/// holds. Its stack goes back to the pool. The status is that of those
+/// drops.
+pub(crate) fn abandon(t: u32) -> u8 {
     let started = with(|s| {
         let task = s.task(t);
         task.co.as_ref()?;
@@ -1312,19 +1325,22 @@ pub(crate) fn abandon(t: u32) {
         let env = std::mem::take(&mut task.body).1;
         (env, task.yielded.take().map(|v| (v, task.item_ty)))
     });
+    let mut status = abi::OK;
     if let Some((mut words, item_ty)) = item {
         // SAFETY: the words hold an item of the generator's type.
-        unsafe { crate::value::forget_value(words.as_mut_ptr() as *mut u8, item_ty) };
+        status = unsafe { value::drop_value(words.as_mut_ptr() as *mut u8, item_ty) };
     }
     if started == Some(false) {
-        crate::entry::release_task_env(env, true);
+        status = value::after_part(status, crate::entry::release_task_env(env, true));
     }
+    status
 }
 
 // ------------------------------------------------------------------ mutexes
 
-/// `Mutex.lock`: waits while another task holds the mutex, and cannot be
-/// cancelled; panics when this task holds it, or it is poisoned.
+/// `Mutex.lock`, and an `RwLock`'s `write`: waits while another task holds
+/// the lock, or reads it, and cannot be cancelled; panics when this task
+/// holds it, or it is poisoned.
 unsafe fn lock(c: &Call<'_>) -> u8 {
     // SAFETY: the argument is a mutex, through a reference.
     let (p, _) = unsafe { c.place(0) };
@@ -1337,8 +1353,11 @@ unsafe fn lock(c: &Call<'_>) -> u8 {
                 if mem::word(p, abi::MUTEX_POISONED) != 0 {
                     return Attempt::Done(rt::raise_msg(msg::PANIC_MUTEX_POISONED, &[]));
                 }
-                if mem::word(p, abi::MUTEX_LOCKED) != 0 {
-                    if mem::word(p, abi::MUTEX_HOLDER) == u64::from(cur) {
+                let state = mem::word(p, abi::MUTEX_LOCKED);
+                if state != 0 {
+                    // A lock word of 2 is an `RwLock`'s readers: its holder
+                    // word counts them.
+                    if state == 1 && mem::word(p, abi::MUTEX_HOLDER) == u64::from(cur) {
                         return Attempt::Done(rt::raise_msg(msg::PANIC_MUTEX_HELD, &[]));
                     }
                     s.block_on(Wait::Lock, &[Key::Lock], None, site);
@@ -1351,6 +1370,59 @@ unsafe fn lock(c: &Call<'_>) -> u8 {
             Attempt::Done(abi::OK)
         })
     })
+}
+
+/// `RwLock.read`: waits while a task writes (panics when this task does,
+/// or the lock is poisoned), then counts one more reader.
+unsafe fn read_lock(c: &Call<'_>) -> u8 {
+    // SAFETY: the argument is an `RwLock`, through a reference.
+    let (p, _) = unsafe { c.place(0) };
+    let site = Site::current();
+    sched::blocking(|| {
+        with(|s| {
+            let cur = s.cur;
+            // SAFETY: the lock's header is its first words.
+            unsafe {
+                if mem::word(p, abi::MUTEX_POISONED) != 0 {
+                    return Attempt::Done(rt::raise_msg(msg::PANIC_MUTEX_POISONED, &[]));
+                }
+                match mem::word(p, abi::MUTEX_LOCKED) {
+                    1 if mem::word(p, abi::MUTEX_HOLDER) == u64::from(cur) => {
+                        return Attempt::Done(rt::raise_msg(msg::PANIC_MUTEX_HELD, &[]));
+                    }
+                    1 => {
+                        s.block_on(Wait::Lock, &[Key::Lock], None, site);
+                        return Attempt::Wait;
+                    }
+                    0 => {
+                        mem::set_word(p, abi::MUTEX_LOCKED, 2);
+                        mem::set_word(p, abi::MUTEX_HOLDER, 1);
+                    }
+                    _ => mem::set_word(p, abi::MUTEX_HOLDER, mem::word(p, abi::MUTEX_HOLDER) + 1),
+                }
+                c.set_word(p.add(abi::MUTEX_HEADER as usize) as u64);
+            }
+            Attempt::Done(abi::OK)
+        })
+    })
+}
+
+/// Drops a read guard: one reader fewer, and the last one frees the lock.
+///
+/// # Safety
+/// `value` must be the address of a read-locked `RwLock`'s value.
+pub(crate) unsafe fn read_unlock(value: *mut u8) -> u8 {
+    // SAFETY: the header is just before the value.
+    unsafe {
+        let header = value.sub(abi::MUTEX_HEADER as usize);
+        let readers = mem::word(header, abi::MUTEX_HOLDER).saturating_sub(1);
+        mem::set_word(header, abi::MUTEX_HOLDER, readers);
+        if readers == 0 {
+            mem::set_word(header, abi::MUTEX_LOCKED, 0);
+        }
+    }
+    system(|| with(|s| s.wake_key(Key::Lock)));
+    abi::OK
 }
 
 /// Drops a mutex guard: unlocks the mutex. When a panic is unwinding, the

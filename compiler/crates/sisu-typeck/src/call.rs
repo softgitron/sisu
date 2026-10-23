@@ -1079,10 +1079,14 @@ impl Checker<'_> {
         // view nor must-consume (checked when the type is known): a
         // channel's receiver may keep what was sent longer than what it
         // borrows lives (decision 230).
+        let atomic = matches!(self.resolved(&ret), Ty::Adt(a, _) if prog.builtin(a) == Some("Atomic"));
         let owner = match prog.fn_info(d).and_then(|f| f.intrinsic.as_deref()) {
             Some("Shared.new") => Some("Shared"),
+            // An `Atomic` is a `Cell` tasks may share.
+            Some("Cell.new") if atomic => Some("Atomic"),
             Some("Cell.new") => Some("Cell"),
             Some("Mutex.new") => Some("Mutex"),
+            Some("RwLock.new") => Some("RwLock"),
             Some("Cap.new") => Some("Cap"),
             Some("channel") => Some("channel"),
             _ => None,

@@ -29,7 +29,23 @@ pub(crate) struct Code {
     pub alignment: u64,
     pub relocs: Vec<ModuleReloc>,
     pub frame_size: u32,
+    /// The top of the frame, above its stack slots: the saved registers
+    /// and the spill slots, which the entry may write before its probe.
+    pub top: u32,
     pub debug: Compiled,
+}
+
+/// The bytes of a function's stack slots as Cranelift lays them out: each
+/// at an offset aligned to a word or its own alignment, the whole rounded
+/// to a word. They are the bottom of the frame (above only the arguments
+/// of its calls), which nothing writes before the entry's probe.
+pub(crate) fn slots_size(func: &ir::Function) -> u32 {
+    let mut end: u32 = 0;
+    for (_, data) in func.sized_stack_slots.iter() {
+        let align = 8u32.max(1u32 << data.align_shift.min(31));
+        end = end.div_ceil(align).saturating_mul(align).saturating_add(data.size);
+    }
+    end.div_ceil(8).saturating_mul(8)
 }
 
 /// What the debug information needs of a compiled function: the source
@@ -68,6 +84,7 @@ pub(crate) fn compile(isa: &dyn TargetIsa, ctx: &mut Context, id: FuncId) -> Res
         alignment,
         relocs,
         frame_size: code.frame_size,
+        top: code.frame_size.saturating_sub(slots_size(&ctx.func)),
         debug: Compiled::of(code, isa),
     })
 }

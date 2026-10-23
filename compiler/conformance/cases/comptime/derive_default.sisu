@@ -1,0 +1,50 @@
+# `@derive(Default)` (11's `Default`, 18 Phase 4's built-in derives; D-051:
+# nothing is made without its value, and a type with a natural first value
+# says so with the trait): the struct with each field's own default where
+# it has one, and its type's `default()` otherwise. The numbers, `bool`,
+# the texts, the collections, options and tuples implement it; a generic
+# struct's derived impl asks it of its type parameters.
+
+@derive(Default, Eq)
+struct Config:
+    name: String
+    retries: int = 3
+    ratio: f64
+    verbose: bool
+    tags: list[String]
+    limits: dict[String, int]
+    parent: String?
+    pair: (int, bool)
+    small: u8
+
+@derive(Default)
+struct Wrapper[T]:
+    inner: T
+    count: int = 1
+
+struct Port:
+    n: int
+
+impl Default for Port:
+    def default() -> Port:
+        return Port(n=8080)
+
+@derive(Default)
+struct Server:
+    port: Port
+    name: String = "local".to_string()
+
+def fresh[T: Default]() -> T:
+    return T.default()
+
+def main():
+    let c = Config.default()
+    print("{c:?}")
+    let d: Config = Default.default()
+    print(c == d)
+    print("{Wrapper[list[int]].default():?}")
+    let s: Server = fresh()
+    print("{s.name}:{s.port.n}")
+    let zero: int = fresh()
+    let words: set[String] = fresh()
+    print("{zero} {len(words)}")

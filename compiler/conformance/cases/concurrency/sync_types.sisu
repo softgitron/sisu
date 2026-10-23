@@ -1,0 +1,89 @@
+# The sync types of 11 beside `Mutex` (decision 239): `Atomic` (the
+# prelude's, 01's counter: `Shared(Atomic(0))`), and std.task's `Once`,
+# `Condvar` and `RwLock`, under many schedules. Every read-modify-write
+# of an atomic is one step, so no increment is lost; a `Once` runs its
+# function once however many tasks call it; a `Condvar` wakes a consumer
+# that waits for items under a mutex; an `RwLock` lets two readers hold
+# it at once (each waits for the other's message while it reads) and a
+# writer change the value alone.
+# explore 30
+
+struct Queue:
+    items: list[int]
+    closed: bool
+
+struct Config:
+    name: String
+    version: int
+
+def count() -> int:
+    let hits = Shared(Atomic(0))
+    task.scope do s:
+        for _ in range(8):
+            s.spawn(() -> hits.fetch_add(1))
+    return hits.load()
+
+def once_among_tasks() -> int:
+    let once = task.Once()
+    let runs = Atomic(0)
+    task.scope do s:
+        for _ in range(4):
+            s.spawn do:
+                once.call_once(() -> print("set up once"))
+                _ = runs.fetch_add(1)
+    assert once.is_completed()
+    return runs.load()
+
+def consume() -> int:
+    let m = Mutex(Queue(items=[], closed=False))
+    let cv = task.Condvar()
+    return task.scope do s:
+        let consumer = s.spawn do:
+            var sum = 0
+            while True:
+                var g = cv.wait_while(m, q -> len(q.items) == 0 and not q.closed)
+                if len(g.value.items) == 0:
+                    return sum
+                sum += g.value.items.remove(0)
+        for i in range(1, 6):
+            var g = m.lock()
+            g.value.items.push(i)
+            _ = g
+            cv.notify_one()
+        var g = m.lock()
+        g.value.closed = True
+        _ = g
+        cv.notify_all()
+        return consumer.join().expect("summed")
+
+def read_and_write() -> String:
+    let lock = task.RwLock(Config(name="first".to_string(), version=1))
+    let (to_b, from_a) = channel[int](capacity=1)
+    let (to_a, from_b) = channel[int](capacity=1)
+    let both = task.scope do s:
+        let a = s.spawn do:
+            let g = lock.read()
+            to_b.send(10).expect("open")
+            return g.value.version + from_b.recv().expect("b's")
+        let b = s.spawn do:
+            let g = lock.read()
+            to_a.send(20).expect("open")
+            return g.value.version + from_a.recv().expect("a's")
+        return a.join().expect("read") + b.join().expect("read")
+    task.scope do s:
+        s.spawn do:
+            var w = lock.write()
+            w.value.version += 1
+            w.value.name = "second".to_string()
+    let g = lock.read()
+    return "readers saw {both}; now {g.value.name} {g.value.version}"
+
+def main():
+    print("hits: {count()}")
+    let flag = Atomic(False)
+    print(flag.compare_exchange(False, True))
+    print(flag.compare_exchange(False, True, success=AcqRel, failure=Acquire))
+    print("{flag:?} {flag.swap(False, order=Relaxed)} {flag.load()}")
+    print("callers: {once_among_tasks()}")
+    print("sum: {consume()}")
+    print(read_and_write())

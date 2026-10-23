@@ -485,6 +485,7 @@ fn kind_of(v: &Value) -> String {
         Value::Cell(_) => "a `Cell`",
         Value::Mutex(_) => "a `Mutex`",
         Value::Guard(_) => "a mutex guard",
+        Value::ReadGuard(_) => "a read guard",
         Value::Arena(_) => "an `Arena`",
         Value::Iter(_) => "an iterator",
         Value::Entry(_) => "a dict entry",

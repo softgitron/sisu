@@ -218,8 +218,11 @@ and the time spent building and running them.
   `Drop` that panics; `drop_chain`: a long chain dropped at constant
   depth; `drop_moved_parts`: what is left of a value once a part moves
   out, error values a pattern takes fields out of, and the operands a `?`
-  or a panic abandons), panics and their exit statuses, capabilities, and
-  tests.
+  or a panic abandons), panics and their exit statuses, a recursion that
+  overflows the stack (`stack_overflow`: a panic naming the function, its
+  drops and `defer`s run, the trace's ends), what a call leaves of an
+  iterator given to an `Iterable[T]` parameter (`iterable_rest`: dropped
+  when it returns and when it unwinds), capabilities, and tests.
 - `traits/` is traits and impls (18, Phase 4): provided methods,
   associated types, supertraits, coherence and the orphan rule, sealed
   traits, method resolution and ambiguity, `dyn Trait` and object safety,
@@ -236,7 +239,8 @@ and the time spent building and running them.
 - `comptime/` is compile-time evaluation: constants computed by the
   compiler (`baked` pins the SIR built from literals), `comptime assert`,
   `comptime def`, budgets, the evaluation errors, and derives written as
-  compile-time Sisu, with `proposal_derive`, the user-defined derive of
+  compile-time Sisu (`derive_default` and `derive_default_errors`: the
+  prelude's `Default`), with `proposal_derive`, the user-defined derive of
   `proposal/examples/comptime.sisu`, and `proposal_arrays`, its CRC table
   and ring buffer, each kept identical by a test; `generic_assert` is a
   `comptime assert` over a `const` parameter, checked at the call.
@@ -287,19 +291,25 @@ and the time spent building and running them.
   must respect a program's own `Ord`.
 - `concurrency/` is tasks (18, Phase 6), most cases under several
   schedules: joins and their error sets, failures and the scope's result,
-  panics in tasks, cancellation at the blocking points, shields and
-  deadlines, channels, `select`, races, mutexes across tasks with guards
-  dropped by unwinding, the lowest-index rule of `pure` scopes, deadlock
-  reports, generators, `log`, and the diagnostics of `Send`, `Sync`,
-  what a task may borrow and what a channel may carry
-  (`channel_owner_errors`: neither a view nor must-consume).
+  panics in tasks, a task's stack overflow (`stack_overflow`),
+  cancellation at the blocking points, shields and deadlines, channels,
+  `select`, races, mutexes across tasks with guards dropped by unwinding,
+  the lowest-index rule of `pure` scopes, deadlock reports, generators
+  (`generator_close`: one dropped before its end runs its drops and
+  `defer`s; `generator_close_panic`: a panic there aborts), the sync
+  types beside `Mutex` (`sync_types`: `Atomic`, `Once`, `Condvar` and
+  `RwLock`; `sync_errors`), `log`, and
+  the diagnostics of `Send`, `Sync`, what a task may borrow and what a
+  channel may carry (`channel_owner_errors`: neither a view nor
+  must-consume).
 - `capabilities/` is std.cap (06): attenuations, lent capabilities and
   their diagnostics, caretakers, interceptors (of the standard
   capabilities and, `wrap_trait`, of a program's own trait), the fakes
   (`fake_rejected`: what `cap.Fake` cannot fake), the test clock,
   the fresh fakes of each test and the real `System` a test may declare
   (and the signatures it may not), the network over `Net.fake`, the
-  host's objects, `DateTime`, and what the capability rules reject.
+  host's objects, `DateTime`, objects dropped with the last copies of
+  their handles (`object_drops`), and what the capability rules reject.
 - `http/` is std.x.http over the in-process network, under several
   schedules (a test of the driver runs it under a thousand).
 - `ownership/` is the ownership checker (18, Phase 3). Accepted programs
@@ -311,7 +321,8 @@ and the time spent building and running them.
   on from a parameter that only reads (`shared_param_passed_on`),
   `@must_consume`, the library types (`Box`, `Shared` and `Weak`,
   `Cell`, a `Mutex` with D-077's poisoning, `Arena` with generational
-  keys), `own` closures, and `proposal_core`, `proposal_shared` and
+  keys), `own` closures, borrows of a capability's object through its
+  handle (`handle_borrows`), and `proposal_core`, `proposal_shared` and
   `proposal_graph`, the sections of `proposal/examples/ownership.sisu`,
   kept identical to the original by tests. Rejected programs pin their diagnostics by code
   and span, and most also pin their counterexample run (`.defer`): the
