@@ -315,7 +315,7 @@ impl FnLower:
                 let v = self.copy_or_move(cx, payload, pty)
                 self.assign(cx, Place.local(l), Rvalue.Use(v), loc)
             case None:
-                self.bind_values(cx, pat, payload)
+                self.bind_values(cx, pat, payload, 1)
         self.goto(join)
         self.switch_to(cx, other)
         match e:
@@ -327,7 +327,7 @@ impl FnLower:
                         self.into(cx, Place.local(l), value)
                     case None:
                         let p = self.place_of(cx, value)
-                        self.bind_values(cx, pat, p)
+                        self.bind_values(cx, pat, p, 1)
                 self.pop_scope(cx)
                 self.goto(join)
             case TLetElse.Diverge(eb, body):

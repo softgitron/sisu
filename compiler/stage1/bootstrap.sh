@@ -43,6 +43,7 @@ if [ -n "$keep" ]; then
     work="$keep"
     rm -rf "$work"
     mkdir -p "$work"
+    work=$(cd "$work" && pwd)
 else
     work=$(mktemp -d)
     trap 'rm -rf "$work"' EXIT
@@ -73,7 +74,10 @@ if ! (cd "$here" && "$work/stage1-A" sir > "$work/A.sir" 2> "$work/A.err"); then
 fi
 t2=$(date +%s.%N)
 echo "stage1-B: the backend builds A.sir (sisu build --native --from-sir)"
-step "$work/B.log" "$sisu" build --native --from-sir "$work/A.sir" --output "$work/stage1-B"
+# In this directory, as stage1-A is built: the debug information records
+# the directory a build runs in (decision 227).
+step "$work/B.log" bash -c 'cd "$1" && "$2" build --native --from-sir "$3" --output "$4"' _ \
+    "$here" "$sisu" "$work/A.sir" "$work/stage1-B"
 t3=$(date +%s.%N)
 echo "B.sir: stage1-B prints the SIR of the package (sir)"
 if ! (cd "$here" && "$work/stage1-B" sir > "$work/B.sir" 2> "$work/B.err"); then

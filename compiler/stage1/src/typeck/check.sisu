@@ -41,7 +41,7 @@ from stage1.syntax.ast import (
 )
 from stage1.syntax.ast import visit
 from stage1.typeck.consts import ConstScope
-from stage1.typeck.generic_asserts import ConstCall, Fold, const_calls, fold_tree
+from stage1.typeck.generic_asserts import Assert, ConstCall, Fold, const_calls, fold_tree
 from stage1.typeck.infer import InferTable
 from stage1.typeck.pat import OrAlt
 from stage1.typeck.program import DefKind, FnKind, ModuleId, Predicate, Program, Request
@@ -134,9 +134,9 @@ pub struct Finished:
     pub requests: list[Request]
     ## The typed body, when lowering asked for it.
     pub typed: TBody?
-    ## The conditions of its asserts on `const` generic parameters, and its
-    ## calls with constant type arguments, which decide them.
-    pub asserts: list[Fold]
+    ## Its asserts on `const` generic parameters, and its calls with
+    ## constant type arguments, which decide them.
+    pub asserts: list[Assert]
     pub const_calls: list[ConstCall]
 
 pub struct Checker:
@@ -214,10 +214,11 @@ pub struct Checker:
     pub body_ret: Ty
     ## The function's contract, when it checks something.
     pub contracts: TContracts?
-    ## The conditions of the body's asserts at compile time on `const`
-    ## generic parameters, which each call with constant arguments decides
-    ## (`typeck.generic_asserts`).
-    pub generic_asserts: list[TExprId]
+    ## The body's asserts at compile time on `const` generic parameters,
+    ## which each call with constant arguments decides
+    ## (`typeck.generic_asserts`): the condition, the message and the
+    ## condition's text.
+    pub generic_asserts: list[(TExprId, TExprId?, String)]
     ## While an alternative of `|` after the first is checked: the names
     ## the first bound, which this one must bind to the same locals.
     pub or_alt: OrAlt?
@@ -279,9 +280,12 @@ impl Checker:
 
     pub pure def finish(own self) -> Finished:
         let absorbed = self.infer.absorbed()
-        var asserts: list[Fold] = []
-        for c in self.generic_asserts:
-            asserts.push(fold_tree(self.exprs, c))
+        var asserts: list[Assert] = []
+        for (c, m, text) in self.generic_asserts:
+            var message: Fold? = None
+            if let Some(x) = m:
+                message = Some(fold_tree(self.exprs, x))
+            asserts.push(Assert(cond=fold_tree(self.exprs, c), message=message, text=text.copy()))
         let calls = const_calls(self.exprs, self.types)
         return Finished(
             types=self.types,
@@ -318,6 +322,9 @@ impl Checker:
                     self.exprs[i].kind = TExprKind.RefineTry(
                         value=value, refinement=r, type_args=ts
                     )
+                case TExprKind.FnRef(d, targs):
+                    let ts = self.finalize_all(cx, targs)
+                    self.exprs[i].kind = TExprKind.FnRef(def_=d, type_args=ts)
                 case TExprKind.Comprehension(k, clauses, elem, value):
                     var out: list[TCompClause] = []
                     for c in clauses:
@@ -649,7 +656,7 @@ impl Checker:
                             if let TypeKind.Path(segs, a2) = cx.ast.type_expr(args[0]).kind:
                                 if len(segs) == 1 and a2.is_empty():
                                     as_expr = Some(segs[0].text.copy())
-                            return self.fake_named(cx, as_expr)
+                            return self.fake_named(cx, as_expr, cx.ast.type_expr(args[0]).range)
                 var targs: list[Ty] = []
                 for a in args:
                     targs.push(self.resolve_ty(cx, a))
@@ -660,7 +667,7 @@ impl Checker:
                 # A constant where a type's constant argument goes.
                 if len(names) == 1 and args.is_empty():
                     if let Some(d) = cx.prog.lookup(self.module, names[0]):
-                        if let DefKind.Const(_) = cx.prog.defs[d.index].kind:
+                        if let DefKind.Const(_) = cx.prog.defs[d.index].kind():
                             let (t, err) = consts.const_item(
                                 cx.prog, mut self.types, self.module, names[0], rng
                             )
@@ -680,8 +687,9 @@ impl Checker:
                             case Some(t):
                                 return cx.prog.normalize(mut self.types, t, self.env)
                             case None:
-                                # `resolve.no-assoc-type`.
-                                self.other("resolve.no-assoc-type")
+                                let shown = self.show(cx, s)
+                                let d = self.error(cx, Msg.ResolveNoAssocType, rng)
+                                self.report_other(d.with("ty", shown).with("name", names[1]))
                                 return Ty.error()
                 if len(names) == 1:
                     if let Some(p) = primitive(names[0]):
@@ -721,8 +729,7 @@ impl Checker:
                     case Some(e):
                         err_ty = self.resolve_err_set(cx, e)
                     case None:
-                        # `resolve.inferred-set-position`.
-                        self.other("resolve.inferred-set-position")
+                        self.report_other(self.error(cx, Msg.ResolveInferredSetPosition, rng))
                 let r = cx.prog.wk.result else:
                     return Ty.error()
                 return self.types.adt(r, [ok_ty, err_ty])
@@ -743,6 +750,7 @@ impl Checker:
                 let t = self.resolve_ty(cx, inner)
                 return self.types.ref_(t, mutable)
             case TypeKind.Dyn(inner):
+                let inner_range = cx.ast.type_expr(inner).range
                 let TypeKind.Path(segments, args) = cx.ast.type_expr(inner).kind.copy() else:
                     return Ty.error()
                 var names: list[String] = []
@@ -754,12 +762,11 @@ impl Checker:
                 if let Some(d) = self.lookup_type_path(cx, names):
                     if cx.prog.trait_info(d).is_some():
                         return self.types.intern(TyData.Dyn(TraitRef(def_=d, args=targs)))
-                # `resolve.not-a-trait`.
-                self.other("resolve.not-a-trait")
+                let d = self.error(cx, Msg.ResolveNotATrait, inner_range)
+                self.report_other(d.with("name", names.join(".")))
                 return Ty.error()
             case TypeKind.Union(_):
-                # `resolve.union-outside-result`.
-                self.other("resolve.union-outside-result")
+                self.report_other(self.error(cx, Msg.ResolveUnionOutsideResult, rng))
                 return Ty.error()
             case TypeKind.ConstArg(n):
                 return self.types.intern(TyData.Const(n))
@@ -795,16 +802,22 @@ impl Checker:
         elif d.msg == Msg.ResolveUndefinedName:
             self.other_rendered()
         else:
-            self.other(d.msg.id())
+            self.report_other(d)
 
-    ## The fake of the trait named `name` (`comptime.no-fake` when there is
-    ## none).
-    pub pure def fake_named(mut self, cx: Cx, name: String?) -> Ty:
+    ## The fake of the trait named `name`, written at `range`
+    ## (`comptime.no-fake` when there is none).
+    pub pure def fake_named(mut self, cx: Cx, name: String?, range: TextRange) -> Ty:
         if let Some(n) = name:
             if let Some(d) = cx.prog.lookup(self.module, n):
                 if let Some(f) = cx.prog.fakes.get(d):
                     return self.types.adt(f, [])
-        self.other("comptime.no-fake")
+        var shown = String.new()
+        match name:
+            case Some(n):
+                shown = n.copy()
+            case None:
+                shown = self.source_text(cx, range)
+        self.report_other(self.error(cx, Msg.ComptimeNoFake, range).with("name", shown))
         return Ty.error()
 
     ## Whether `d` is `cap.Fake`, whose argument is a trait.
@@ -860,8 +873,9 @@ impl Checker:
                 case TyData.Error:
                     return Ty.error()
                 case _:
-                    # `resolve.not-an-error-set`.
-                    self.other("resolve.not-an-error-set")
+                    let shown = self.show(cx, t)
+                    let d = self.error(cx, Msg.ResolveNotAnErrorSet, cx.ast.type_expr(p).range)
+                    self.report_other(d.with("name", shown))
                     return Ty.error()
         members.sort()
         var out: list[DefId] = []
@@ -876,7 +890,7 @@ impl Checker:
         var d = cx.prog.lookup(self.module, first) else:
             return None
         for i in range(1, len(names)):
-            match cx.prog.defs[d.index].kind:
+            match cx.prog.defs[d.index].kind():
                 case DefKind.Module(m):
                     let next = cx.prog.lookup_in(m, names[i]) else:
                         return None
@@ -887,7 +901,7 @@ impl Checker:
 
     pub pure def def_type(mut self, cx: Cx, d: DefId, args: list[Ty], at: TextRange) -> Ty:
         var generics = 0
-        match cx.prog.defs[d.index].kind:
+        match cx.prog.defs[d.index].kind():
             case DefKind.Struct(s):
                 generics = len(s.generics)
             case DefKind.Enum(e):
@@ -898,9 +912,15 @@ impl Checker:
                 return self.types.err_set([d])
             case DefKind.TypeAlias(t):
                 return self.types.subst(t, args)
+            case DefKind.Trait(_):
+                let name = cx.prog.defs[d.index].name.copy()
+                var diag = self.error(cx, Msg.ResolveTraitAsType, at).with("name", name)
+                diag = diag.fix(Msg.ResolveAddDyn, "name", name, at.start, at.start, "dyn ")
+                self.report_other(diag)
+                return Ty.error()
             case _:
-                # `resolve.trait-as-type` or `resolve.not-a-type`.
-                self.other("resolve.trait-as-type or resolve.not-a-type")
+                let name = cx.prog.defs[d.index].name.copy()
+                self.report_other(self.error(cx, Msg.ResolveNotAType, at).with("name", name))
                 return Ty.error()
         var targs = args.copy()
         # Omitted trailing arguments take their defaults (D-060).
@@ -918,8 +938,10 @@ impl Checker:
                 for _ in range(generics):
                     vars.push(self.infer.fresh(mut self.types))
                 return self.types.adt(d, vars)
-            # `resolve.type-argument-count`.
-            self.other("resolve.type-argument-count")
+            var diag = self.error(cx, Msg.ResolveTypeArgumentCount, at)
+            diag = diag.with("name", cx.prog.defs[d.index].name)
+            diag = diag.with("expected", "{generics}").with("found", "{len(targs)}")
+            self.report_other(diag)
             var errors: list[Ty] = []
             for _ in range(generics):
                 errors.push(Ty.error())
@@ -932,22 +954,26 @@ impl Checker:
             var const_param = False
             if let TyData.Param(k) = self.types.data(targs[i]):
                 const_param = k < len(self.const_generics) and self.const_generics[k]
-            var wrong = False
+            var wrong: Msg? = None
             if gs[i].is_const:
                 match self.types.data(targs[i]):
                     case TyData.Const(_) | TyData.ConstOp(_, _) | TyData.Error | TyData.Var(_):
-                        wrong = False
+                        pass
                     case _:
-                        wrong = not const_param
+                        if not const_param:
+                            wrong = Some(Msg.ResolveConstArgument)
             else:
+                var bad = const_param
                 match self.types.data(targs[i]):
                     case TyData.Const(_) | TyData.ConstOp(_, _):
-                        wrong = True
+                        bad = True
                     case _:
-                        wrong = const_param
-            if wrong:
-                # `resolve.const-argument` or `resolve.type-argument`.
-                self.other("resolve.const-argument or resolve.type-argument")
+                        pass
+                if bad:
+                    wrong = Some(Msg.ResolveTypeArgument)
+            if let Some(m) = wrong:
+                var diag = self.error(cx, m, at).with("name", cx.prog.defs[d.index].name)
+                self.report_other(diag.with("param", gs[i].name))
                 var errors: list[Ty] = []
                 for _ in range(generics):
                     errors.push(Ty.error())
@@ -1182,9 +1208,11 @@ impl Checker:
                     # call with constant arguments (stage 0's
                     # `generic_asserts.rs`), whose messages are `comptime.`.
                     let c = self.check_condition_expr(cx, cond)
-                    self.generic_asserts.push(c)
+                    var checked: TExprId? = None
                     if let Some(m) = message:
-                        _ = self.check_expr(cx, m, Ty.str())
+                        checked = Some(self.check_expr(cx, m, Ty.str()))
+                    let text = self.source_text(cx, cx.ast.expr(cond).range)
+                    self.generic_asserts.push((c, checked, text))
                     return
                 let b = Block(node=s.node, range=s.range, stmts=[inner])
                 let x = self.comptime_block(cx, b, range)
@@ -1642,11 +1670,12 @@ impl Checker:
             let x = self.infer_expr(cx, value, None)
             return TStmt.Return(value=Some(x), span=span)
         # A refinement's predicate: a `bool` over `self` (E0814).
-        var predicate = False
+        var refined: DefId? = None
         if let Some(f) = cx.prog.fn_info(self.def_):
-            if let FnKind.Predicate(_) = f.kind:
-                predicate = self.current_closure().is_none()
-        if predicate:
+            if let FnKind.Predicate(r) = f.kind:
+                if self.current_closure().is_none():
+                    refined = Some(r)
+        if let Some(r) = refined:
             let x = self.infer_expr(cx, value, Some(Ty.bool()))
             let found = self.resolved(self.ty_of(x))
             match self.types.data(found):
@@ -1654,8 +1683,10 @@ impl Checker:
                     let c = self.coerce(cx, x, Ty.bool())
                     return TStmt.Return(value=Some(c), span=span)
                 case _:
-                    # `refine.predicate-type`.
-                    self.other("refine.predicate-type")
+                    let shown = self.show(cx, found)
+                    var d = self.error(cx, Msg.RefinePredicateType, cx.ast.expr(value).range)
+                    d = d.with("ty", cx.prog.defs[r.index].name).with("found", shown)
+                    self.report_other(d)
                     let err = self.error_expr(self.span_of(x))
                     return TStmt.Return(value=Some(err), span=span)
         let x0 = self.check_expr(cx, value, ret)

@@ -68,17 +68,19 @@ impl MovePaths:
                         continue
                     let base = mp.add(t)
                     let depth = len(t.proj)
+                    # The variants `base` has a path for already: a child of
+                    # it has its projections and one more, which tells it
+                    # apart (found once, not once a variant).
+                    var have: set[int] = set()
+                    for c in mp.paths[base].children:
+                        let cp = ref mp.paths[c].place.proj
+                        if len(cp) == depth + 1:
+                            if let Proj.Downcast(w) = cp[depth]:
+                                _ = have.add(w)
                     for v in range(n):
-                        # A child of `base` has its projections and one
-                        # more: only that one tells it apart.
-                        let last = Proj.Downcast(v)
-                        var found = False
-                        for c in mp.paths[base].children:
-                            if ends_with(mp.paths[c].place.proj, depth, last):
-                                found = True
-                        if not found:
+                        if not have.contains(v):
                             var proj = t.proj.copy()
-                            proj.push(last)
+                            proj.push(Proj.Downcast(v))
                             let place = Place(local=t.local, proj=proj)
                             let id = len(mp.paths)
                             mp.paths.push(PathData(place=place, parent=Some(base), children=[]))

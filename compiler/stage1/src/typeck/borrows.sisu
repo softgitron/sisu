@@ -58,7 +58,7 @@ impl Program:
                         return True
                 return False
             case TyData.Adt(d, args):
-                match self.defs[d.index].kind:
+                match self.defs[d.index].kind():
                     case DefKind.Struct(s):
                         if let Some(b) = s.builtin:
                             let bs: str = b
@@ -120,7 +120,7 @@ impl Program:
                         return True
                 return False
             case TyData.Adt(d, args):
-                match self.defs[d.index].kind:
+                match self.defs[d.index].kind():
                     case DefKind.Struct(s):
                         if let Some(b) = s.builtin:
                             let bs: str = b
@@ -164,7 +164,7 @@ impl Program:
                 return self.most(mut types, es, depth)
             case TyData.Adt(d, args):
                 let of_args = self.most(mut types, args, depth)
-                match self.defs[d.index].kind:
+                match self.defs[d.index].kind():
                     case DefKind.Struct(s):
                         if let Some(b) = s.builtin:
                             let bs: str = b
@@ -214,7 +214,7 @@ impl Program:
                 for a in args:
                     if self.owns_text(mut types, a, depth + 1):
                         return True
-                match self.defs[d.index].kind:
+                match self.defs[d.index].kind():
                     case DefKind.Struct(s):
                         if let Some(b) = s.builtin:
                             let bs: str = b
@@ -283,7 +283,7 @@ impl Program:
                         return True
                 return False
             case TyData.Adt(d, args):
-                if let DefKind.Struct(s) = self.defs[d.index].kind:
+                if let DefKind.Struct(s) = self.defs[d.index].kind():
                     if s.view_:
                         return True
                 for a in args:

@@ -30,8 +30,11 @@ pub pure def check(p: Program, types: Types) -> list[Finding]:
         var todo: list[String] = [f.name.copy()]
         var seen: list[String] = [f.name.copy()]
         while let Some(gn) = todo.pop():
-            let g = p.function(gn) else:
+            # By name in the table of functions (`Types.function`), the
+            # first of a name, as `Program.function` finds it.
+            let gi = types.function(gn) else:
                 continue
+            let g = ref p.functions[gi]
             for b in range(len(g.blocks)):
                 let block = ref g.blocks[b]
                 for si in range(len(block.stmts)):
@@ -43,7 +46,8 @@ pub pure def check(p: Program, types: Types) -> list[Finding]:
                                 # A `comptime` expression is a value by the
                                 # time the program runs; the compiler ran it.
                                 case Callee.Fn(n, _):
-                                    if let Some(c) = p.function(n):
+                                    if let Some(ci) = types.function(n):
+                                        let c = ref p.functions[ci]
                                         var comptime_ = False
                                         if let FnKind.Comptime(_) = c.kind:
                                             comptime_ = True
@@ -88,8 +92,9 @@ pub pure def check(p: Program, types: Types) -> list[Finding]:
                             let t = types.place_ty(g, place) else:
                                 continue
                             for d in types.drop_fns(t):
-                                let c = p.function(d) else:
+                                let ci = types.function(d) else:
                                     continue
+                                let c = ref p.functions[ci]
                                 if c.pure:
                                     continue
                                 # `Type.Drop.drop`, the method of `impl Drop
@@ -113,7 +118,7 @@ pub pure def check(p: Program, types: Types) -> list[Finding]:
                                 fd = fd.label(f.loc, Msg.TypeDeclaredPureHere, pure_here(name))
                                 out.push(fd)
                         case StatementKind.Assign(_, Rvalue.Closure(c, _, _)):
-                            if not seen.contains(c) and p.function(c).is_some():
+                            if not seen.contains(c) and types.function(c).is_some():
                                 seen.push(c.copy())
                                 todo.push(c.copy())
                         case _:

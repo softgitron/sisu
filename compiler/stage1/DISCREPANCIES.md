@@ -48,3 +48,12 @@ difference is listed from D6 on.
   `\u{a0}`). Stage 1 reproduces both, with Rust's tables pinned in
   `src/text/unicode.sisu` (Unicode 17.0.0, from Rust 1.97); a written-down
   quoting for the tree dump would remove the dependency.
+- **The overflow of a sized integer's negation and of its literal.** Stage
+  0's `sized_op` (`sisu-interp/src/sized.rs`) writes the expression of a
+  `T`'s overflow as `{x} {sym} {y} as T`, and its negation and literal
+  pass `-` and `0`, and `as` and `0`: negating an `i8` that holds -128 at
+  compile time is `integer overflow: -128 - 0 as i8`, where an `int`'s
+  negation is `integer overflow: -(-9223372036854775808)`. The catalog's
+  `panic.overflow` gives only `{expr}`, so no document decides; stage 1
+  transcribes the code (`interp.sized_op`), and `-(-128) as i8` would read
+  as the `int` form does.

@@ -257,7 +257,7 @@ impl Checker:
             found = self.variant_in(cx, t, name)
             if found.is_none():
                 if let Some(d) = cx.prog.lookup(self.module, name):
-                    match cx.prog.defs[d.index].kind:
+                    match cx.prog.defs[d.index].kind():
                         case DefKind.Struct(_):
                             return self.struct_pat(cx, d, args, t, by_ref, mutable, rng)
                         case DefKind.Const(_):

@@ -74,11 +74,22 @@ pub struct Layout:
     pub base: String
     ## The root package is a script: a single file with a `#!` line.
     pub script: bool
+    ## Where the lockfile goes (stage 0's `lock`, without its text, which
+    ## stage 1 does not write): beside the workspace's manifest when the
+    ## package is a member of one, else beside its own; none for a single
+    ## file.
+    pub lock: String?
 
 impl Layout:
     pub pure def new(base: str) -> Layout:
         return Layout(
-            packages=[], modules=[], files=[], problems=[], base=base.to_string(), script=False
+            packages=[],
+            modules=[],
+            files=[],
+            problems=[],
+            base=base.to_string(),
+            script=False,
+            lock=None,
         )
 
     pub pure def has_errors(self, catalog: Catalog) -> bool:
@@ -98,6 +109,9 @@ pub enum Target:
 
 ## The manifest file of a directory.
 pub const MANIFEST: str = "sisu.toml"
+
+## The lockfile beside the root manifest (09).
+pub const LOCKFILE: str = "sisu.lock"
 
 ## `rel` joined to the directory `dir`: itself when it is absolute.
 pub pure def join(dir: str, rel: str) -> String:
@@ -427,7 +441,33 @@ pub def load_package(fs: Fs, dir: str, base: str) -> Layout:
     var l = Loader(layout=Layout.new(canonical(base)), target=target_facts(), dirs=[], edges=[])
     var stack: list[int] = []
     _ = l.package(fs, dir, mut stack, None)
+    # The lockfile: beside the workspace's manifest when the package is a
+    # member of one, else beside its own.
+    let canon = canonical(dir)
+    var lock_dir = canon.copy()
+    if let Some((d, _)) = workspace_of(fs, canon):
+        lock_dir = d
+    l.layout.lock = Some(join(lock_dir, LOCKFILE))
     return l.layout
+
+## The workspace that lists `dir` as a member: the nearest directory above
+## it whose manifest lists it, with its members' directories.
+pub def workspace_of(fs: Fs, dir: str) -> (String, list[String])?:
+    let canon = canonical(dir)
+    var up = canon.copy()
+    while up != "/":
+        let d = parent(up)
+        if let Some(text) = read_text(fs, join(d, MANIFEST)):
+            let (found, _) = manifest.read(text)
+            if let Some(m) = found:
+                if let Some(members) = m.members:
+                    var dirs: list[String] = []
+                    for (p, _) in members:
+                        dirs.push(canonical(join(d, p)))
+                    if dirs.contains(canon):
+                        return Some((d, dirs))
+        up = d
+    return None
 
 ## The layout of a single file: one module, in a package of its own with no
 ## name. A script (`#!` on its first line) may declare dependencies in its
@@ -541,3 +581,19 @@ test "paths":
     assert parent("/a/b/c.sisu") == "/a/b"
     assert file_name("/a/b/c.sisu") == "c.sisu"
     assert join("/a", "../b") == "/a/../b"
+
+test "the lockfile is beside the workspace's manifest, or the package's own":
+    let fs = Fs.in_memory(
+        {
+            "/w/sisu.toml": "[workspace]\nmembers = [\"app\", \"lib\"]\n",
+            "/w/app/sisu.toml": "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+            "/w/app/src/main.sisu": "def main():\n    pass\n",
+            "/p/sisu.toml": "[package]\nname = \"p\"\nversion = \"0.1.0\"\n",
+            "/p/src/main.sisu": "def main():\n    pass\n",
+        }
+    )
+    let members = ["/w/app".to_string(), "/w/lib".to_string()]
+    assert workspace_of(fs, "/w/app/") == Some(("/w".to_string(), members))
+    assert workspace_of(fs, "/p").is_none()
+    assert load_package(fs, "/w/app", "/w/app").lock == Some("/w/sisu.lock".to_string())
+    assert load_package(fs, "/p", "/p").lock == Some("/p/sisu.lock".to_string())

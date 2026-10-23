@@ -7,7 +7,16 @@
 ##! so every expression is read through `ex`.
 
 from stage1.diag import TextRange
-from stage1.lower.func import CompRest, Cx, DropEntry, FnLower, ForBody, closure_name, comptime_name
+from stage1.lower.func import (
+    CompRest,
+    Cx,
+    DropEntry,
+    FnLower,
+    ForBody,
+    closure_name,
+    comptime_name,
+    value_wrapped,
+)
 from stage1.sir import (
     Aggregate,
     BinOp as SirBinOp,
@@ -23,10 +32,10 @@ from stage1.sir import (
     Terminator,
     Type,
     UnOp as SirUnOp,
+    VALUE_WRAPPER,
 )
 from stage1.syntax.ast import BinOp, CmpOp, Mode, UnOp
-from stage1.typeck.program import Predicate
-from stage1.typeck.program import Program as Resolved
+from stage1.typeck.program import param_local_ty
 from stage1.typeck.std_sources import own_kind, sized
 from stage1.typeck.thir import (
     ArgMode,
@@ -79,34 +88,6 @@ pub pure def cmp_op(op: CmpOp) -> SirBinOp:
         case CmpOp.Gt: SirBinOp.Gt
         case CmpOp.Ge: SirBinOp.Ge
         case CmpOp.In | CmpOp.NotIn: SirBinOp.In
-
-## The type of a parameter as a local of its function (stage 0's
-## `sisu_typeck::param_local_ty`): a borrowed parameter is a `ref T`
-## unless `T` is `Copy`; a generic parameter, or an associated type of one,
-## only when its bounds make it `Copy`.
-pub pure def param_local_ty(
-    prog: Resolved, mut types: Types, ty: Ty, mode: Mode, env: list[Predicate]
-) -> Ty:
-    match mode:
-        case Mode.Own:
-            return ty
-        case Mode.Mut:
-            return types.ref_(ty, True)
-        case Mode.Borrow:
-            var opaque = False
-            match types.data(ty):
-                case TyData.Param(_) | TyData.Assoc(_, _, _):
-                    opaque = True
-                case _:
-                    pass
-            var copy = False
-            if opaque:
-                copy = prog.is_copy_in(mut types, ty, env)
-            else:
-                copy = prog.is_copy(mut types, ty)
-            if copy:
-                return ty
-            return types.ref_(ty, False)
 
 ## The two hex digits of a byte.
 pure def hex_byte(b: int) -> String:
@@ -252,7 +233,12 @@ impl FnLower:
                 if x.ty == Ty.str():
                     return Some(Const.Str(s.copy()))
                 return None
-            case TExprKind.FnRef(d):
+            case TExprKind.FnRef(d, _):
+                var wrapped = False
+                if let Some(f) = cx.prog.fn_info(d):
+                    wrapped = value_wrapped(cx.prog, mut self.types, f)
+                if wrapped:
+                    return None
                 return Some(Const.Fn(cx.ctx.fn_name(cx.prog, self.types, d)))
             case _:
                 return None
@@ -275,6 +261,88 @@ impl FnLower:
             if s == b:
                 return Some(b.copy())
         return None
+
+    ## Whether evaluating an expression may leave the statement it is part
+    ## of before the statement runs: by a `?`, a `return`, a `break`, or a
+    ## panic (a call, an index, arithmetic, a contract). Only literals,
+    ## locals, functions, closures, and the parts, borrows and aggregates of
+    ## such cannot; a struct with an invariant or a field's default can.
+    pub pure def may_leave(self, cx: Cx, e: TExprId) -> bool:
+        let n = len(cx.body.exprs)
+        if e.index < n:
+            return self.kind_may_leave(cx, cx.body.exprs[e.index].kind)
+        return self.kind_may_leave(cx, self.extra[e.index - n].kind)
+
+    pure def kind_may_leave(self, cx: Cx, kind: TExprKind) -> bool:
+        match kind:
+            case TExprKind.Int(_) | TExprKind.WideInt(_) | TExprKind.Float(_) | TExprKind.Bool(_):
+                return False
+            case TExprKind.Char(_) | TExprKind.Str(_) | TExprKind.Bytes(_) | TExprKind.Unit:
+                return False
+            case TExprKind.Local(_) | TExprKind.FnRef(_, _) | TExprKind.Closure(_):
+                return False
+            case TExprKind.Field(base, _):
+                return self.may_leave(cx, base)
+            case TExprKind.Deref(inner):
+                return self.may_leave(cx, inner)
+            case TExprKind.Borrow(place, _):
+                return self.may_leave(cx, place)
+            case TExprKind.Tuple(xs):
+                return self.any_may_leave(cx, xs)
+            case TExprKind.List(xs):
+                return self.any_may_leave(cx, xs)
+            case TExprKind.Variant(_, _, args):
+                return self.any_may_leave(cx, args)
+            case TExprKind.Struct(def_, fields):
+                if cx.prog.invariant_check(def_).is_some():
+                    return True
+                for f in fields:
+                    match f:
+                        case FieldInit.Value(x):
+                            if self.may_leave(cx, x):
+                                return True
+                        case FieldInit.Default(_):
+                            return True
+                return False
+            case _:
+                return True
+
+    pure def any_may_leave(self, cx: Cx, xs: list[TExprId]) -> bool:
+        for x in xs:
+            if self.may_leave(cx, x):
+                return True
+        return False
+
+    ## The values of expressions as the operands of one statement, in
+    ## order: each held while the ones after it are evaluated, when one of
+    ## them may leave (`hold`), so that leaving drops it.
+    pub pure def operands(mut self, cx: Cx, es: list[TExprId]) -> list[Operand]:
+        var may: list[bool] = []
+        for e in es:
+            may.push(self.may_leave(cx, e))
+        let later = self.leaving_after(may)
+        var held: list[LocalId] = []
+        var ops: list[Operand] = []
+        for i in range(len(es)):
+            let mark = len(self.locals)
+            let o = self.operand(cx, es[i])
+            if later[i]:
+                self.hold(cx, o, mark, self.ty_of(cx, es[i]), mut held)
+            ops.push(o)
+        self.release(cx, held)
+        return ops
+
+    ## For each of a statement's operands, whether one after it may leave
+    ## the statement, from whether each may.
+    pub pure def leaving_after(self, may: list[bool]) -> list[bool]:
+        var out: list[bool] = []
+        for _ in may:
+            out.push(False)
+        var i = len(may) - 2
+        while i >= 0:
+            out[i] = out[i + 1] or may[i + 1]
+            i -= 1
+        return out
 
     ## The value of an expression as an operand.
     pub pure def operand(mut self, cx: Cx, e: TExprId) -> Operand:
@@ -443,27 +511,48 @@ impl FnLower:
                         by_value = bv
                     case TCallee.Value(f):
                         c = Callee.Value(self.operand(cx, f))
+                var may: list[bool] = []
+                for a in args:
+                    may.push(self.may_leave(cx, a.expr))
+                let later = self.leaving_after(may)
+                var held: list[LocalId] = []
                 var ops: list[Operand] = []
                 for i in range(len(args)):
                     let bv = if i < len(by_value): by_value[i] else: False
-                    ops.push(self.arg_operand_for(cx, args[i], bv))
+                    let mark = len(self.locals)
+                    let o = self.arg_operand_for(cx, args[i], bv)
+                    if later[i]:
+                        self.hold(cx, o, mark, self.ty_of(cx, args[i].expr), mut held)
+                    ops.push(o)
+                self.release(cx, held)
                 self.emit(cx, StatementKind.Call(dest=dest, callee=c, args=ops), loc)
                 if x.ty == Ty.never():
                     self.terminate(Terminator.Unreachable, loc)
             case TExprKind.Variant(def_, variant, args):
-                var ops: list[Operand] = []
-                for a in args:
-                    ops.push(self.operand(cx, a))
+                let ops = self.operands(cx, args)
                 let (t, v) = self.variant_names(cx, def_, variant)
                 self.assign(
                     cx, dest, Rvalue.Aggregate(kind=Aggregate.Variant(t, v), operands=ops), loc
                 )
             case TExprKind.Struct(def_, fields):
                 var ops: list[Operand] = []
+                var held: list[LocalId] = []
+                var may: list[bool] = []
+                for f in fields:
+                    match f:
+                        case FieldInit.Value(v):
+                            may.push(self.may_leave(cx, v))
+                        case FieldInit.Default(_):
+                            may.push(True)
+                let later = self.leaving_after(may)
                 for i in range(len(fields)):
+                    let mark = len(self.locals)
                     match fields[i]:
                         case FieldInit.Value(v):
-                            ops.push(self.operand(cx, v))
+                            let o = self.operand(cx, v)
+                            if later[i]:
+                                self.hold(cx, o, mark, self.ty_of(cx, v), mut held)
+                            ops.push(o)
                         case FieldInit.Default(fi):
                             var fty = Ty.error()
                             if let Some(s) = cx.prog.struct_info(def_):
@@ -480,10 +569,13 @@ impl FnLower:
                                 ),
                                 loc,
                             )
+                            var o = Operand.Move(Place.local(t))
                             if cx.prog.is_copy(mut self.types, fty):
-                                ops.push(Operand.Copy(Place.local(t)))
-                            else:
-                                ops.push(Operand.Move(Place.local(t)))
+                                o = Operand.Copy(Place.local(t))
+                            if later[i]:
+                                self.hold(cx, o, mark, fty, mut held)
+                            ops.push(o)
+                self.release(cx, held)
                 let sname = cx.ctx.type_name(cx.prog, def_)
                 self.assign(
                     cx,
@@ -491,31 +583,36 @@ impl FnLower:
                     Rvalue.Aggregate(kind=Aggregate.Struct(sname), operands=ops),
                     loc,
                 )
-                # A struct with an invariant checks it once built (07).
+                # A struct with an invariant checks it once built (07); a
+                # panic of the check drops it.
                 var targs: list[Ty] = []
                 if let TyData.Adt(_, a) = self.types.data(x.ty):
                     targs = a.copy()
+                var unheld: LocalId? = None
+                if dest.proj.is_empty() and not self.is_registered(dest.local):
+                    if self.needs_drop(cx, x.ty) and cx.prog.invariant_check(def_).is_some():
+                        unheld = Some(dest.local)
+                if let Some(l) = unheld:
+                    self.register(DropEntry.Local(l))
+                    self.split(cx)
                 self.invariant_after_construction(cx, dest, def_, targs, loc)
+                if let Some(l) = unheld:
+                    self.release(cx, [l])
             case TExprKind.Tuple(xs):
-                var ops: list[Operand] = []
-                for a in xs:
-                    ops.push(self.operand(cx, a))
+                let ops = self.operands(cx, xs)
                 self.assign(cx, dest, Rvalue.Aggregate(kind=Aggregate.Tuple, operands=ops), loc)
             case TExprKind.List(xs):
-                var ops: list[Operand] = []
-                for a in xs:
-                    ops.push(self.operand(cx, a))
+                let ops = self.operands(cx, xs)
                 self.assign(cx, dest, Rvalue.Aggregate(kind=Aggregate.List, operands=ops), loc)
             case TExprKind.Set(xs):
-                var ops: list[Operand] = []
-                for a in xs:
-                    ops.push(self.operand(cx, a))
+                let ops = self.operands(cx, xs)
                 self.assign(cx, dest, Rvalue.Aggregate(kind=Aggregate.Set, operands=ops), loc)
             case TExprKind.Dict(kv):
-                var ops: list[Operand] = []
+                var es: list[TExprId] = []
                 for (k, v) in kv:
-                    ops.push(self.operand(cx, k))
-                    ops.push(self.operand(cx, v))
+                    es.push(k)
+                    es.push(v)
+                let ops = self.operands(cx, es)
                 self.assign(cx, dest, Rvalue.Aggregate(kind=Aggregate.Dict, operands=ops), loc)
             case TExprKind.Slice(base, lo, hi):
                 let b = self.borrow_operand(cx, base, False)
@@ -808,6 +905,15 @@ impl FnLower:
                 self.refine_try(cx, dest, value, refinement, type_args, loc)
             case TExprKind.Error:
                 self.terminate(Terminator.Unreachable, loc)
+            # A function that is its value wrapper as a value (`f#value`): a
+            # closure of it with nothing in its environment, for the type
+            # arguments (decision 225).
+            case TExprKind.FnRef(d, type_args):
+                let name = "{cx.ctx.fn_name(cx.prog, self.types, d)}{VALUE_WRAPPER}"
+                var tys: list[Type] = []
+                for t in type_args:
+                    tys.push(self.ty(cx, t))
+                self.assign(cx, dest, Rvalue.Closure(name=name, args=tys, operands=[]), loc)
             case _:
                 pass
 
@@ -1445,10 +1551,16 @@ impl FnLower:
                         cx, Place.local(t), "set.add", [], [Operand.Copy(Place.local(r)), v], loc
                     )
                 case TCompKind.Dict:
+                    let mark = len(self.locals)
                     let k = self.operand(cx, c.elem)
+                    var held: list[LocalId] = []
+                    if let Some(x) = c.value:
+                        if self.may_leave(cx, x):
+                            self.hold(cx, k, mark, self.ty_of(cx, c.elem), mut held)
                     var v = Operand.Const(Const.Unit)
                     if let Some(x) = c.value:
                         v = self.operand(cx, x)
+                    self.release(cx, held)
                     let vty = c.item_tys.1 ?? Ty.unit()
                     var opt = Ty.unit()
                     if let Some(o) = cx.prog.wk.option:

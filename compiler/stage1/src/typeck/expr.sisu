@@ -26,7 +26,7 @@ from stage1.syntax.ast import (
 )
 from stage1.syntax.ast import build
 from stage1.typeck.check import Checker, Cx, RetCtx, first_of
-from stage1.typeck.program import Answer, DefKind, FnInfo
+from stage1.typeck.program import Answer, DefKind, FnInfo, param_local_ty
 from stage1.typeck.std_sources import int_width, sized, widens
 from stage1.typeck.thir import (
     ArgMode,
@@ -142,8 +142,13 @@ impl Checker:
                         base_ok = True
                     self.infer.rollback(snap)
                 if base_ok or actual == Ty.never():
-                    # `refine.needs-try-from`.
-                    self.other("refine.needs-try-from")
+                    let name = cx.prog.defs[d.index].name.copy()
+                    let shown_exp = self.show(cx, exp)
+                    let shown_actual = self.show(cx, actual)
+                    var diag = self.error(cx, Msg.RefineNeedsTryFrom, self.span_of(x))
+                    diag = diag.with("expected", shown_exp).with("found", shown_actual)
+                    diag = diag.with("name", name).note_with(Msg.RefineUseTryFrom, "name", name)
+                    self.report_other(diag)
                     return self.wrap(x, Coercion.Mismatch, exp)
         let ad = self.types.data(actual).copy()
         let ed = self.types.data(exp).copy()
@@ -475,7 +480,7 @@ impl Checker:
             return
         var callee: String? = None
         match self.exprs[x.index].kind:
-            case TExprKind.FnRef(d):
+            case TExprKind.FnRef(d, _):
                 var pure = False
                 if let Some(i) = cx.prog.fn_info(d):
                     pure = i.pure
@@ -1159,24 +1164,56 @@ impl Checker:
 
     ## A declaration used as a value.
     pub pure def def_value(mut self, cx: Cx, d: DefId, n: str, range: TextRange) -> TExprId:
-        match cx.prog.defs[d.index].kind:
+        match cx.prog.defs[d.index].kind():
             case DefKind.Fn(f):
-                if not f.generics.is_empty() or f.self_mode.is_some():
+                # A generic intrinsic has no body to make an instance of.
+                let generic_intrinsic = not f.generics.is_empty() and f.intrinsic.is_some()
+                if f.self_mode.is_some() or generic_intrinsic:
                     let kind = if f.self_mode.is_some(): "method" else: "generic function"
                     var diag = self.error(cx, Msg.TypeNotAValue, range)
                     diag = diag.with("name", n).with("kind", kind)
                     self.report(diag)
                     return self.error_expr(range)
                 if f.comptime_ and not self.in_comptime:
-                    # `comptime.only`.
-                    self.other("comptime.only")
+                    self.report_other(self.error(cx, Msg.ComptimeOnly, range).with("name", n))
                 self.check_internal(cx, d, range)
+                # A function value takes its arguments by value, so a
+                # function that returns a borrow of a parameter it borrows
+                # cannot be one (decision 225).
+                let env = cx.prog.elaborate_env(mut self.types, f.predicates)
+                let deep = cx.prog.result_borrows_of(mut self.types, f).deep
+                # (`range` is the parameter here, so the loop counts itself.)
+                var i = 0
+                while i < len(f.params):
+                    let p = ref f.params[i]
+                    i += 1
+                    if not deep.contains(i - 1):
+                        continue
+                    if let TyData.Ref(_, _) = self.types.data(p.ty):
+                        continue
+                    let local = param_local_ty(cx.prog, mut self.types, p.ty, p.mode, env)
+                    if let TyData.Ref(_, _) = self.types.data(local):
+                        var diag = self.error(cx, Msg.TypeValueReturnsBorrow, range)
+                        diag = diag.with("name", n).with("param", p.name.copy())
+                        self.report(diag)
+                        return self.error_expr(range)
+                # A generic function's type arguments are inferred where the
+                # value is used, and its bounds required of them, as a
+                # call's are (decision 225).
+                if not f.generics.is_empty():
+                    let sig = self.instantiate(cx, d, None, range)
+                    var params: list[Ty] = []
+                    for p in sig.params:
+                        params.push(p.ty)
+                    let ty = self.types.fn_(params, sig.ret, f.pure)
+                    let kind = TExprKind.FnRef(def_=d, type_args=sig.type_args.copy())
+                    return self.add(kind, ty, range)
                 let ret = self.fn_ret(cx, d)
                 var params: list[Ty] = []
                 for p in f.params:
                     params.push(p.ty)
                 let ty = self.types.fn_(params, ret, f.pure)
-                return self.add(TExprKind.FnRef(d), ty, range)
+                return self.add(TExprKind.FnRef(def_=d, type_args=[]), ty, range)
             case DefKind.Const(c):
                 return self.add(TExprKind.Const(d), c.ty, range)
             case DefKind.Struct(_) | DefKind.Enum(_) | DefKind.ErrorSet(_):
@@ -1224,8 +1261,7 @@ impl Checker:
                         return Some((d, i))
         return None
 
-    ## A variant found by its unqualified name alone; ambiguity is the name
-    ## pass's to report.
+    ## A variant found by its unqualified name alone; ambiguity is reported.
     pub pure def global_variant(mut self, cx: Cx, name: str, range: TextRange) -> (DefId, int)?:
         let candidates = cx.prog.variants.get(name.to_string()) else:
             return None
@@ -1235,7 +1271,7 @@ impl Checker:
             var seen = m == self.module or m == cx.prog.prelude
             if not seen:
                 for (_, x) in cx.prog.modules[self.module.index].items:
-                    if let DefKind.Module(mm) = cx.prog.defs[x.index].kind:
+                    if let DefKind.Module(mm) = cx.prog.defs[x.index].kind():
                         if mm == m:
                             seen = True
             if seen:
@@ -1251,9 +1287,13 @@ impl Checker:
         if visible.is_empty():
             return None
         if len(visible) > 1:
-            # `resolve.ambiguous-variant`.
-            self.other("resolve.ambiguous-variant")
-        _ = range
+            var names: list[String] = []
+            for (d, _) in visible:
+                names.push(cx.prog.qualified_name(d))
+            let example = "{names[0]}.{name}"
+            var d = self.error(cx, Msg.ResolveAmbiguousVariant, range).with("name", name)
+            d = d.with("candidates", names.join(", ")).with("example", example)
+            self.report_other(d)
         return Some(visible[0])
 
     ## The type of a value of an enum or error-set definition, with fresh
@@ -2178,7 +2218,7 @@ impl Checker:
         self.in_comptime = was
         let TExprKind.Closure(id) = self.exprs[x.index].kind else:
             return self.error_expr(range)
-        self.comptime_closure(id, range)
+        self.comptime_closure(cx, id, range)
         return self.add(TExprKind.Comptime(id), ret, range)
 
     ## `comptime assert c, m` and other statements run at compile time: a
@@ -2191,14 +2231,18 @@ impl Checker:
         self.in_comptime = was
         let TExprKind.Closure(id) = self.exprs[x.index].kind else:
             return self.error_expr(range)
-        self.comptime_closure(id, range)
+        self.comptime_closure(cx, id, range)
         return self.add(TExprKind.Comptime(id), Ty.unit(), range)
 
-    pure def comptime_closure(mut self, id: ClosureId, range: TextRange):
+    pure def comptime_closure(mut self, cx: Cx, id: ClosureId, range: TextRange):
+        var names: list[String] = []
         if let Some(cl) = self.closures[id.index]:
-            if not cl.captures.is_empty():
-                # `comptime.not-constant`.
-                self.other("comptime.not-constant")
+            for cap in cl.captures:
+                let n = self.locals[cap.local].name.copy()
+                if not names.contains(n):
+                    names.push(n)
+        for n in names:
+            self.report_other(self.error(cx, Msg.ComptimeNotConstant, range).with("name", n))
         if let Some(cl) = ref mut self.closures[id.index]:
             cl.comptime_ = True
         self.comptime_sites.push((id, range))
@@ -2497,7 +2541,7 @@ impl Checker:
                 if let Some(s) = cx.prog.struct_info(d):
                     for i in range(len(s.fields)):
                         if s.fields[i].name == name.text:
-                            self.check_field_vis(cx, d, i)
+                            self.check_field_vis(cx, d, i, name.range)
                             let ty = self.types.subst(s.fields[i].ty, args)
                             return self.add(TExprKind.Field(base=b, index=i), ty, at)
             case TyData.Var(_):
@@ -2597,24 +2641,38 @@ impl Checker:
 
     ## A field of a struct of another module is reached only when it is
     ## `pub` (09).
-    pub pure def check_field_vis(mut self, cx: Cx, d: DefId, i: int):
+    pub pure def check_field_vis(mut self, cx: Cx, d: DefId, i: int, range: TextRange):
         let s = cx.prog.struct_info(d) else:
             return
         if i >= len(s.fields):
             return
-        if not cx.prog.vis_allows(s.fields[i].vis, cx.prog.defs[d.index].module, self.module):
-            # `resolve.private-field`.
-            self.other("resolve.private-field")
+        let home = cx.prog.defs[d.index].module
+        if not cx.prog.vis_allows(s.fields[i].vis, home, self.module):
+            var diag = self.error(cx, Msg.ResolvePrivateField, range).with(
+                "field", s.fields[i].name
+            )
+            diag = diag.with("ty", cx.prog.defs[d.index].name).with(
+                "module", cx.prog.module_path(home)
+            )
+            self.report_other(diag)
 
     ## A method or associated function of a type of another module is
-    ## called only when it is `pub` (09).
-    pub pure def check_method_vis(mut self, cx: Cx, m: DefId):
+    ## called only when it is `pub` (09); a trait's methods are as visible
+    ## as the trait.
+    pub pure def check_method_vis(mut self, cx: Cx, m: DefId, range: TextRange):
         let f = cx.prog.fn_info(m) else:
             return
         if f.trait_.is_some() or f.impl_.is_some() or cx.prog.visible_from(m, self.module):
             return
-        # `resolve.private-method`.
-        self.other("resolve.private-method")
+        var owner = String.new()
+        if let Some(o) = f.owner:
+            owner = cx.prog.display(self.types, o)
+        let home = cx.prog.defs[m.index].module
+        var diag = self.error(cx, Msg.ResolvePrivateMethod, range).with(
+            "name", cx.prog.defs[m.index].name
+        )
+        diag = diag.with("ty", owner).with("module", cx.prog.module_path(home))
+        self.report_other(diag)
 
     pure def index_expr(
         mut self, cx: Cx, base: ExprId, args: list[IndexArg], at: TextRange

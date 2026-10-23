@@ -133,6 +133,7 @@ pub enum Msg:
     TypeNotGeneric
     TypeTypeArgumentsNeeded
     TypeNotAValue
+    TypeValueReturnsBorrow
     TypeMethodNeedsReceiver
     TypeAssocNotMethod
     TypeTupleIndex
@@ -304,6 +305,98 @@ pub enum Msg:
     ResolveWriteTraitMethod
     TaskFieldPath
     TaskWrapMutex
+    # The front end's other messages, which `check` renders.
+    BorrowFromNotAParameter
+    BorrowFromWithoutBorrow
+    ComptimeBudget
+    ComptimeBudgetAttribute
+    ComptimeDeriveFailed
+    ComptimeDeriveTemplate
+    ComptimeEmbedFailed
+    ComptimeEmbedPath
+    ComptimeInstanceFailed
+    ComptimeInstancesUnbounded
+    ComptimeIo
+    ComptimeNotConstant
+    ComptimeNotKept
+    ComptimeOnly
+    ComptimeTemplateValue
+    ContractGeneratorEnsures
+    ContractInvariantField
+    ContractMisplaced
+    ContractNotInTest
+    ContractOldArguments
+    ContractOldOutside
+    RefineChangeThroughBase
+    RefineNeedsTryFrom
+    RefineNotSatisfied
+    RefineOwnImpl
+    RefinePredicateType
+    ResolveAliasCycle
+    ResolveAmbiguousVariant
+    ResolveAssocNeedsType
+    ResolveAssocOutsideTraitImpl
+    ResolveConstArgument
+    ResolveConstTypeRequired
+    ResolveDelegateField
+    ResolveDelegateSelf
+    ResolveDelegateTo
+    ResolveDeriveField
+    ResolveDropGeneric
+    ResolveDropSignature
+    ResolveDropTarget
+    ResolveDuplicateField
+    ResolveDuplicateMethod
+    ResolveDuplicateParameter
+    ResolveDuplicateVariant
+    ResolveGenericDefaultOrder
+    ResolveImplDefault
+    ResolveInferredSetPosition
+    ResolveMissingBody
+    ResolveNoAssocType
+    ResolveNotADependency
+    ResolveNotAModule
+    ResolveNotATrait
+    ResolveNotAType
+    ResolveNotAnErrorSet
+    ResolveNotDelegable
+    ResolveNotDerivable
+    ResolveNotObjectSafe
+    ResolveNotReexported
+    ResolveOverlappingImpl
+    ResolvePackageItem
+    ResolveParameterDefaultOrder
+    ResolvePrivateField
+    ResolvePrivateItem
+    ResolvePrivateMethod
+    ResolveScriptMain
+    ResolveSelfNotFirst
+    ResolveSelfOutsideMethod
+    ResolveSelfTypeOutside
+    ResolveStdOnlyAttribute
+    ResolveTraitAsType
+    ResolveTraitCycle
+    ResolveTypeArgument
+    ResolveTypeArgumentCount
+    ResolveUnionOutsideResult
+    ResolveUnknownAssocType
+    ResolveUnknownModule
+    Stage0Internal
+    TaskClosureLiteral
+    TaskRaceTypes
+    TaskResultUnknown
+    TaskScopeEscapes
+    TaskSelectArm
+    TestNoGenerator
+    TestRefinesMismatch
+    BorrowNoSuchParam
+    BorrowNotBorrowedParam
+    BorrowRemoveFrom
+    BorrowResultCannotBorrow
+    ComptimeDeriveHere
+    ComptimeInstanceHere
+    ResolveAddDyn
+    ResolveFirstImpl
 
 impl Msg:
     ## The catalog identifier.
@@ -430,6 +523,7 @@ impl Msg:
             case TypeNotGeneric: "type.not-generic"
             case TypeTypeArgumentsNeeded: "type.type-arguments-needed"
             case TypeNotAValue: "type.not-a-value"
+            case TypeValueReturnsBorrow: "type.value-returns-borrow"
             case TypeMethodNeedsReceiver: "type.method-needs-receiver"
             case TypeAssocNotMethod: "type.assoc-not-method"
             case TypeTupleIndex: "type.tuple-index"
@@ -598,6 +692,97 @@ impl Msg:
             case ResolveWriteTraitMethod: "resolve.write-trait-method"
             case TaskFieldPath: "task.field-path"
             case TaskWrapMutex: "task.wrap-mutex"
+            case BorrowFromNotAParameter: "borrow.from-not-a-parameter"
+            case BorrowFromWithoutBorrow: "borrow.from-without-borrow"
+            case ComptimeBudget: "comptime.budget"
+            case ComptimeBudgetAttribute: "comptime.budget-attribute"
+            case ComptimeDeriveFailed: "comptime.derive-failed"
+            case ComptimeDeriveTemplate: "comptime.derive-template"
+            case ComptimeEmbedFailed: "comptime.embed-failed"
+            case ComptimeEmbedPath: "comptime.embed-path"
+            case ComptimeInstanceFailed: "comptime.instance-failed"
+            case ComptimeInstancesUnbounded: "comptime.instances-unbounded"
+            case ComptimeIo: "comptime.io"
+            case ComptimeNotConstant: "comptime.not-constant"
+            case ComptimeNotKept: "comptime.not-kept"
+            case ComptimeOnly: "comptime.only"
+            case ComptimeTemplateValue: "comptime.template-value"
+            case ContractGeneratorEnsures: "contract.generator-ensures"
+            case ContractInvariantField: "contract.invariant-field"
+            case ContractMisplaced: "contract.misplaced"
+            case ContractNotInTest: "contract.not-in-test"
+            case ContractOldArguments: "contract.old-arguments"
+            case ContractOldOutside: "contract.old-outside"
+            case RefineChangeThroughBase: "refine.change-through-base"
+            case RefineNeedsTryFrom: "refine.needs-try-from"
+            case RefineNotSatisfied: "refine.not-satisfied"
+            case RefineOwnImpl: "refine.own-impl"
+            case RefinePredicateType: "refine.predicate-type"
+            case ResolveAliasCycle: "resolve.alias-cycle"
+            case ResolveAmbiguousVariant: "resolve.ambiguous-variant"
+            case ResolveAssocNeedsType: "resolve.assoc-needs-type"
+            case ResolveAssocOutsideTraitImpl: "resolve.assoc-outside-trait-impl"
+            case ResolveConstArgument: "resolve.const-argument"
+            case ResolveConstTypeRequired: "resolve.const-type-required"
+            case ResolveDelegateField: "resolve.delegate-field"
+            case ResolveDelegateSelf: "resolve.delegate-self"
+            case ResolveDelegateTo: "resolve.delegate-to"
+            case ResolveDeriveField: "resolve.derive-field"
+            case ResolveDropGeneric: "resolve.drop-generic"
+            case ResolveDropSignature: "resolve.drop-signature"
+            case ResolveDropTarget: "resolve.drop-target"
+            case ResolveDuplicateField: "resolve.duplicate-field"
+            case ResolveDuplicateMethod: "resolve.duplicate-method"
+            case ResolveDuplicateParameter: "resolve.duplicate-parameter"
+            case ResolveDuplicateVariant: "resolve.duplicate-variant"
+            case ResolveGenericDefaultOrder: "resolve.generic-default-order"
+            case ResolveImplDefault: "resolve.impl-default"
+            case ResolveInferredSetPosition: "resolve.inferred-set-position"
+            case ResolveMissingBody: "resolve.missing-body"
+            case ResolveNoAssocType: "resolve.no-assoc-type"
+            case ResolveNotADependency: "resolve.not-a-dependency"
+            case ResolveNotAModule: "resolve.not-a-module"
+            case ResolveNotATrait: "resolve.not-a-trait"
+            case ResolveNotAType: "resolve.not-a-type"
+            case ResolveNotAnErrorSet: "resolve.not-an-error-set"
+            case ResolveNotDelegable: "resolve.not-delegable"
+            case ResolveNotDerivable: "resolve.not-derivable"
+            case ResolveNotObjectSafe: "resolve.not-object-safe"
+            case ResolveNotReexported: "resolve.not-reexported"
+            case ResolveOverlappingImpl: "resolve.overlapping-impl"
+            case ResolvePackageItem: "resolve.package-item"
+            case ResolveParameterDefaultOrder: "resolve.parameter-default-order"
+            case ResolvePrivateField: "resolve.private-field"
+            case ResolvePrivateItem: "resolve.private-item"
+            case ResolvePrivateMethod: "resolve.private-method"
+            case ResolveScriptMain: "resolve.script-main"
+            case ResolveSelfNotFirst: "resolve.self-not-first"
+            case ResolveSelfOutsideMethod: "resolve.self-outside-method"
+            case ResolveSelfTypeOutside: "resolve.self-type-outside"
+            case ResolveStdOnlyAttribute: "resolve.std-only-attribute"
+            case ResolveTraitAsType: "resolve.trait-as-type"
+            case ResolveTraitCycle: "resolve.trait-cycle"
+            case ResolveTypeArgument: "resolve.type-argument"
+            case ResolveTypeArgumentCount: "resolve.type-argument-count"
+            case ResolveUnionOutsideResult: "resolve.union-outside-result"
+            case ResolveUnknownAssocType: "resolve.unknown-assoc-type"
+            case ResolveUnknownModule: "resolve.unknown-module"
+            case Stage0Internal: "stage0.internal"
+            case TaskClosureLiteral: "task.closure-literal"
+            case TaskRaceTypes: "task.race-types"
+            case TaskResultUnknown: "task.result-unknown"
+            case TaskScopeEscapes: "task.scope-escapes"
+            case TaskSelectArm: "task.select-arm"
+            case TestNoGenerator: "test.no-generator"
+            case TestRefinesMismatch: "test.refines-mismatch"
+            case BorrowNoSuchParam: "borrow.no-such-param"
+            case BorrowNotBorrowedParam: "borrow.not-borrowed-param"
+            case BorrowRemoveFrom: "borrow.remove-from"
+            case BorrowResultCannotBorrow: "borrow.result-cannot-borrow"
+            case ComptimeDeriveHere: "comptime.derive-here"
+            case ComptimeInstanceHere: "comptime.instance-here"
+            case ResolveAddDyn: "resolve.add-dyn"
+            case ResolveFirstImpl: "resolve.first-impl"
 
 ## A byte range of a text: from `start` up to, not including, `end`.
 @derive(Eq, Hash, Debug, Copy)

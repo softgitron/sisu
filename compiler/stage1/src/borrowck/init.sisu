@@ -314,16 +314,18 @@ impl Analysis:
             return
         let count = types.variant_count(ty) else:
             return
-        var listed: list[int] = []
-        var active: list[int] = []
+        # Sets rather than lists: an enum of hundreds of variants has as
+        # many cases and children.
+        var listed: set[int] = set()
+        var active: set[int] = set()
         for (c, t) in cases:
-            listed.push(c)
+            _ = listed.add(c)
             if t.index == target:
-                active.push(c)
+                _ = active.add(c)
         if default.index == target:
             for c in range(count):
                 if not listed.contains(c):
-                    active.push(c)
+                    _ = active.add(c)
         for c in self.paths.paths[id].children.copy():
             if let Some(Proj.Downcast(var_)) = self.paths.paths[c].place.proj.last():
                 if not active.contains(var_):

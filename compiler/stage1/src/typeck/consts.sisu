@@ -143,7 +143,7 @@ pure def named(
 ) -> (Ty, ConstError?):
     let d = prog.lookup(module, n) else:
         return (Ty.error(), Some(ConstError.Undefined(r, n.to_string())))
-    let DefKind.Const(info) = prog.defs[d.index].kind.copy() else:
+    let DefKind.Const(info) = prog.defs[d.index].kind().copy() else:
         return (Ty.error(), Some(ConstError.NotConstant(r)))
     if info.terms.is_empty():
         return (Ty.error(), Some(ConstError.NotConstant(r)))

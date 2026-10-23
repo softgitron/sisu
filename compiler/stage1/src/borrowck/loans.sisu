@@ -117,6 +117,9 @@ pub struct State:
     ## Loans a task spawned on this scope holds: live until the body
     ## returns, which is when the scope can end (06).
     pub pinned: BitSet
+    ## The locals whose rows and references a transfer wrote since the last
+    ## `join_touched`.
+    pub touched: list[int]
 
 impl State:
     ## A state of no rows, which nothing reads: the unwinding state of a
@@ -128,6 +131,7 @@ impl State:
             direct=[],
             activated=BitSet.new(0),
             pinned=BitSet.new(0),
+            touched=[],
         )
 
     pub pure def join(mut self, o: State) -> bool:
@@ -157,6 +161,38 @@ impl State:
             i += 1
         if self.activated.union(o.activated):
             changed = True
+        return changed
+
+    ## `join` for a state that has joined every earlier version of `o`:
+    ## only what `o` changed since then is joined, the rows and references
+    ## of the locals in `o.touched`, and its activated and pinned loans;
+    ## `o.touched` is cleared. The unwinding state of a block joins the state
+    ## after each statement so, which leaves it as `join` would.
+    pub pure def join_touched(mut self, mut o: State) -> bool:
+        var changed = False
+        if self.pinned.union(o.pinned):
+            changed = True
+        if self.activated.union(o.activated):
+            changed = True
+        let n = len(o.touched)
+        var k = 0
+        while k < n:
+            let i = o.touched[k]
+            if self.holds.union_from(i, o.holds):
+                changed = True
+            var gone = False
+            if let Some(x) = ref mut self.direct[i]:
+                match o.direct[i]:
+                    case Some(y):
+                        if x.union(y):
+                            changed = True
+                    case None:
+                        gone = True
+            if gone:
+                self.direct[i] = None
+                changed = True
+            k += 1
+        o.touched = []
         return changed
 
 ## One operand's loans: what the value holds, which of those are the
@@ -382,10 +418,12 @@ impl Analysis:
             slots=Shared(slots),
             uses=[],
         )
+        # Whether dropping a local runs a user `Drop`, asked once a local.
+        var glue: dict[int, bool] = {}
         for block in f.blocks:
             var block_uses: list[list[LocalId]] = []
             for s in block.stmts:
-                block_uses.push(a.used_locals(f, types, s))
+                block_uses.push(a.used_locals(f, types, s, mut glue))
             a.uses.push(block_uses)
         if f.blocks.is_empty():
             return a
@@ -411,38 +449,60 @@ impl Analysis:
             queued[b] = False
             var st = a.entry[b].copy() else:
                 continue
+            st.touched = []
             let block = ref f.blocks[b]
+            var succ: list[int] = []
+            for t in targets(block):
+                succ.push(t)
             # The unwinding block may start from the block's entry or from
-            # after any of its statements: the join of all of them (copied
-            # only for a block that unwinds, as stage 0 copies it).
-            let unwinds = block.unwind.is_some()
+            # after any of its statements: the join of all of them, each
+            # statement adding what it changed. It is joined into that
+            # block's entry as the statements run; when that block is this
+            # one or one of its other successors, it is gathered in a copy
+            # (made only for a block that unwinds, as stage 0 copies it) and
+            # joined after them, in stage 0's order.
+            var u = -1
+            if let Some(x) = block.unwind:
+                u = x.index
+            let into_entry = u >= 0 and u < len(f.blocks) and u != b and not succ.contains(u)
+            var unwind_changed = False
             var unwind = State.none()
-            if unwinds:
+            if into_entry:
+                if let Some(e) = ref mut a.entry[u]:
+                    unwind_changed = e.join(st)
+                else:
+                    a.entry[u] = Some(st.copy())
+                    unwind_changed = True
+            elif u >= 0:
                 unwind = st.copy()
             let count = len(block.stmts)
             var si = 0
             while si < count:
                 a.transfer(p, f, types, b, si, block.stmts[si], mut st)
-                if unwinds:
-                    _ = unwind.join(st)
+                if into_entry:
+                    if let Some(e) = ref mut a.entry[u]:
+                        if e.join_touched(mut st):
+                            unwind_changed = True
+                elif u >= 0:
+                    _ = unwind.join_touched(mut st)
                 si += 1
-            var succ: list[int] = []
-            for t in targets(block):
-                succ.push(t)
+            st.touched = []
             for idx in range(len(succ) + 1):
                 var t = 0
                 var from_unwind = False
                 if idx < len(succ):
                     t = succ[idx]
                 else:
-                    let u = block.unwind else:
+                    if u < 0:
                         continue
-                    t = u.index
+                    t = u
                     from_unwind = True
                 if t >= len(f.blocks):
                     continue
                 var changed = False
-                if let Some(e) = ref mut a.entry[t]:
+                if from_unwind and into_entry:
+                    changed = unwind_changed
+                elif let Some(e) = ref mut a.entry[t]:
                     # Joined in place, as stage 0 joins it.
                     changed = if from_unwind: e.join(unwind) else: e.join(st)
                 elif from_unwind:
@@ -489,6 +549,7 @@ impl Analysis:
             direct=direct,
             activated=BitSet.new(self.nloans),
             pinned=BitSet.new(self.nloans),
+            touched=[],
         )
 
     pure def made_at(self, b: int, si: int) -> Made?:
@@ -585,6 +646,7 @@ impl Analysis:
         match first_deref(d):
             case None:
                 let add = filtered(f, types, l, loans)
+                st.touched.push(l)
                 if d.proj.is_empty():
                     st.holds.set(l, add)
                     st.direct[l] = direct
@@ -602,6 +664,7 @@ impl Analysis:
                         if first_deref(place).is_none():
                             let root = place.local.index
                             let add = filtered(f, types, root, loans.copy())
+                            st.touched.push(root)
                             _ = st.holds.union_row(root, add)
                             st.direct[root] = None
 
@@ -685,6 +748,7 @@ impl Analysis:
                         pass
                 if let Rvalue.Use(Operand.Move(src)) = rv:
                     if src.proj.is_empty():
+                        st.touched.push(src.local.index)
                         st.holds.clear_row(src.local.index)
                         st.direct[src.local.index] = None
                 let written = self.with_keys(st, d, loans)
@@ -736,11 +800,13 @@ impl Analysis:
                                 if first_deref(place).is_none():
                                     let root = place.local.index
                                     if types.may_hold(f.locals[root].ty):
+                                        st.touched.push(root)
                                         _ = st.holds.union_row(root, stored)
                                         st.direct[root] = None
                 for o in args:
                     if let Operand.Move(src) = o:
                         if src.proj.is_empty():
+                            st.touched.push(src.local.index)
                             st.holds.clear_row(src.local.index)
                             st.direct[src.local.index] = None
                 # A task spawned on this body's own scope keeps what it
@@ -753,9 +819,11 @@ impl Analysis:
                 self.write(f, types, mut st, d, written, None)
             case StatementKind.Drop(place, _):
                 if place.proj.is_empty():
+                    st.touched.push(place.local.index)
                     st.holds.clear_row(place.local.index)
                     st.direct[place.local.index] = None
             case StatementKind.StorageDead(l):
+                st.touched.push(l.index)
                 st.holds.clear_row(l.index)
                 st.direct[l.index] = None
 
@@ -775,7 +843,9 @@ impl Analysis:
     # ---------------------------------------------------------------- liveness
 
     ## The locals a statement reads.
-    pure def used_locals(self, f: Function, types: Types, s: Statement) -> list[LocalId]:
+    pure def used_locals(
+        self, f: Function, types: Types, s: Statement, mut glue: dict[int, bool]
+    ) -> list[LocalId]:
         var out: list[LocalId] = []
         for o in operands(s):
             match o:
@@ -809,9 +879,16 @@ impl Analysis:
                     out.push(d.local)
             case StatementKind.Drop(p, _):
                 # A user `Drop` may read the references the value holds.
-                if let Some(t) = types.place_ty(f, p):
-                    if types.has_drop_glue(t):
-                        out.push(p.local)
+                var runs = False
+                if p.proj.is_empty() and glue.contains(p.local.index):
+                    runs = glue.get(p.local.index) ?? False
+                else:
+                    if let Some(t) = types.place_ty(f, p):
+                        runs = types.has_drop_glue(t)
+                    if p.proj.is_empty():
+                        _ = glue.insert(p.local.index, runs)
+                if runs:
+                    out.push(p.local)
                 for l in index_locals(p):
                     out.push(l)
             case StatementKind.StorageDead(_):
@@ -888,6 +965,7 @@ impl Analysis:
         while si < count:
             out.push(st.copy())
             self.transfer(p, f, types, b, si, f.blocks[b].stmts[si], mut st)
+            st.touched = []
             si += 1
         out.push(st)
         return Some(out)
@@ -933,6 +1011,7 @@ impl Analysis:
                 let s = ref block.stmts[si]
                 let before = after.copy()
                 self.transfer(p, f, types, b, si, s, mut after)
+                after.touched = []
                 let pre = self.live_loans(before, lives[si])
                 let post = self.live_loans(after, lives[si + 1])
                 self.check_conflicts(
@@ -1055,9 +1134,8 @@ impl Analysis:
         # later ones (two `mut` reborrows passed to one call).
         var pending = BitSet.new(self.nloans)
         # Activation of two-phase loans at their first use.
-        let used = self.used_locals(f, types, s)
         var activating: list[int] = []
-        for l in used:
+        for l in self.uses[b][si]:
             for x in before.holds.row_items(l.index):
                 if self.loans[x].two_phase()
                         and not before.activated.contains(x)
@@ -1279,7 +1357,7 @@ impl Analysis:
                 let s = ref block.stmts[k]
                 if s.loc.is_none():
                     continue
-                for l in self.used_locals(f, types, s):
+                for l in self.uses[blk][k]:
                     if states[k].holds.contains(l.index, y):
                         return Some((s.loc, Some(l)))
             let end = ref states[len(block.stmts)]

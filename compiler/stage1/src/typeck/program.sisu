@@ -9,7 +9,7 @@
 ##! reads or makes a type is given the table. A function's body and a
 ##! parameter's default stay in the AST of the module that declares them.
 
-from stage1.diag import TextRange
+from stage1.diag import Diagnostic, Msg, TextRange
 from stage1.resolve import closest
 from stage1.syntax.ast import Block, ExprId, Mode, Vis
 from stage1.typeck.folding import Term
@@ -25,7 +25,24 @@ pub struct Def:
     ## Where the name is written, in the module's file.
     pub span: TextRange
     pub vis: Vis
-    pub kind: DefKind
+    ## What it defines (`kind`), shared by the copies of the program: each
+    ## program checked against the base is a copy of the base's, and a
+    ## change makes a definition its own (`set_kind`).
+    kind_: Shared[DefKind]
+
+impl Def:
+    pub pure def new(
+        own name: String, module: ModuleId, span: TextRange, vis: Vis, own kind: DefKind
+    ) -> Def:
+        return Def(name=name, module=module, span=span, vis=vis, kind_=Shared(kind))
+
+    ## What it defines.
+    pub pure def kind(self) -> ref DefKind:
+        return Shared.get(self.kind_)
+
+    ## Replaces what it defines.
+    pub pure def set_kind(mut self, own kind: DefKind):
+        self.kind_ = Shared(kind)
 
 pub enum DefKind:
     Struct(StructInfo)
@@ -214,8 +231,10 @@ pub struct FnInfo:
     ## `@keeps(self, x)`: the positions among `self` and the parameters of
     ## the arguments whose every value the function keeps or returns.
     pub keeps: list[int]
-    ## The `from` clause of the result: the parameters it borrows from.
+    ## The `from` clause of the result: the parameters it borrows from,
+    ## and where each is written.
     pub from_: list[String]
+    pub from_spans: list[TextRange]
     pub internal: bool
     ## The body, in the AST of the module that declares it.
     pub body: Block?
@@ -234,20 +253,27 @@ pub struct FnInfo:
     ## in its instances, not as written.
     pub template: bool
 
+## A file an `embed("path")` call names, as the driver read it: its text,
+## or why it could not be read (stage 0's `Result<String, String>`).
+pub enum Embedded:
+    Read(String)
+    Failed(String)
+
 ## What the bodies ask of the next resolution (08, "Reflection"): an
-## instance of a template for concrete type arguments, or the promotion of
-## a generic function that calls one with its own type parameters (stage 0's
-## `Request`, without the site, which only places a `comptime.` message).
+## instance of a template for concrete type arguments, with where the
+## program needs it (the module and range of the call), or the promotion
+## of a generic function that calls one with its own type parameters
+## (stage 0's `Request`).
 pub enum Request:
-    Instance(def_: DefId, args: list[Ty])
+    Instance(def_: DefId, args: list[Ty], site: (ModuleId, TextRange))
     Promote(DefId)
 
 impl Request:
-    ## Whether the two ask for the same thing.
+    ## Whether the two ask for the same thing (wherever they are asked).
     pub pure def same(self, other: Request) -> bool:
         match self:
-            case Instance(a, x):
-                if let Instance(b, y) = other:
+            case Instance(a, x, _):
+                if let Instance(b, y, _) = other:
                     return a == b and x == y
             case Promote(a):
                 if let Promote(b) = other:
@@ -482,6 +508,8 @@ pub struct Program:
     pub benches: list[DefId]
     ## Every trait impl, in declaration order.
     pub impls: list[DefId]
+    ## The impls of each trait, in declaration order.
+    pub impls_of: dict[DefId, list[DefId]]
     ## Names in top-level code of the root module that failed to parse.
     pub poisoned: set[String]
     ## Associated constants by type and name (`Money.ZERO`).
@@ -490,19 +518,25 @@ pub struct Program:
     ## their text without whitespace: the generator the compiler writes
     ## for it, or `None` when it has none.
     pub generator_sites: dict[String, String?]
+    ## Why a type written in `arbitrary[T]` has no generator, by the same
+    ## key (stage 0's `Err` of `arbitrary_sites`).
+    pub generator_failures: dict[String, String]
     ## The call that stands for each such site, by the site's expression.
     pub generator_calls: dict[int, ExprId]
     ## The budget of steps of the `comptime` expressions of each item with
     ## `@comptime_budget(steps=N)` (08).
     pub comptime_budgets: dict[DefId, int]
-    ## The files the root module's `embed("path")` calls name, and whether
-    ## each could be read (the driver reads them, relative to the file).
-    pub embedded: dict[String, bool]
+    ## The files the root module's `embed("path")` calls name, as the
+    ## driver read them, relative to the file.
+    pub embedded: dict[String, Embedded]
     ## The fake the compiler wrote for each trait of the program's own.
     pub fakes: dict[DefId, DefId]
     ## Each instance of a template declared: the template, the type
     ## arguments and the instance.
     pub instances: list[(DefId, list[Ty], DefId)]
+    ## Where the program needs each instance: the call that asked for it,
+    ## or the one that asked for the instance it was asked from.
+    pub instance_sites: dict[DefId, (ModuleId, TextRange)]
     ## When each definition was made, as stage 0 makes them (`Resolver.phase`):
     ## stage 0 declares every module's items before it resolves any, so a
     ## definition's place in its order is its phase and then its index.
@@ -529,14 +563,17 @@ impl Program:
             tests=[],
             benches=[],
             impls=[],
+            impls_of={},
             poisoned=set(),
             assoc_consts={},
             generator_sites={},
+            generator_failures={},
             generator_calls={},
             comptime_budgets={},
             embedded={},
             fakes={},
             instances=[],
+            instance_sites={},
             phases=[],
             packages=[],
             user_modules=[],
@@ -550,27 +587,27 @@ impl Program:
         return self.defs[d.index].name
 
     pub pure def fn_info(self, d: DefId) -> ref FnInfo?:
-        if let Fn(f) = self.defs[d.index].kind:
+        if let Fn(f) = self.defs[d.index].kind():
             return Some(f)
         return None
 
     pub pure def struct_info(self, d: DefId) -> ref StructInfo?:
-        if let Struct(s) = self.defs[d.index].kind:
+        if let Struct(s) = self.defs[d.index].kind():
             return Some(s)
         return None
 
     pub pure def trait_info(self, d: DefId) -> ref TraitInfo?:
-        if let Trait(t) = self.defs[d.index].kind:
+        if let Trait(t) = self.defs[d.index].kind():
             return Some(t)
         return None
 
     pub pure def impl_info(self, d: DefId) -> ref ImplInfo?:
-        if let Impl(i) = self.defs[d.index].kind:
+        if let Impl(i) = self.defs[d.index].kind():
             return Some(i)
         return None
 
     pub pure def enum_info(self, d: DefId) -> ref EnumInfo?:
-        match self.defs[d.index].kind:
+        match self.defs[d.index].kind():
             case Enum(e):
                 return Some(e)
             case ErrorSet(e):
@@ -579,12 +616,12 @@ impl Program:
                 return None
 
     pub pure def is_error_set(self, d: DefId) -> bool:
-        if let ErrorSet(_) = self.defs[d.index].kind:
+        if let ErrorSet(_) = self.defs[d.index].kind():
             return True
         return False
 
     pub pure def is_fn(self, d: DefId) -> bool:
-        if let Fn(_) = self.defs[d.index].kind:
+        if let Fn(_) = self.defs[d.index].kind():
             return True
         return False
 
@@ -601,7 +638,7 @@ impl Program:
 
     ## The generic parameters of a struct, enum or refinement type.
     pub pure def type_generics(self, d: DefId) -> list[Generic]:
-        match self.defs[d.index].kind:
+        match self.defs[d.index].kind():
             case Struct(s):
                 return s.generics.copy()
             case Enum(e):
@@ -615,12 +652,12 @@ impl Program:
 
     ## The base of a refinement type with its arguments in it.
     pub pure def refinement_base(self, mut types: Types, d: DefId, args: list[Ty]) -> Ty?:
-        if let Refinement(r) = self.defs[d.index].kind:
+        if let Refinement(r) = self.defs[d.index].kind():
             return Some(types.subst(r.base, args))
         return None
 
     pub pure def refinement(self, d: DefId) -> ref RefinementInfo?:
-        if let Refinement(r) = self.defs[d.index].kind:
+        if let Refinement(r) = self.defs[d.index].kind():
             return Some(r)
         return None
 
@@ -737,7 +774,7 @@ impl Program:
     ## items are all public in stage 0.
     pub pure def visible_from(self, def_: DefId, from_: ModuleId) -> bool:
         let d = ref self.defs[def_.index]
-        if let Module(_) = d.kind:
+        if let Module(_) = d.kind():
             return True
         return self.vis_allows(d.vis, d.module, from_)
 
@@ -765,6 +802,46 @@ impl Program:
         if self.modules[m.index].is_std:
             return STD_PACKAGE
         return self.modules[m.index].package
+
+    ## The diagnostic of an item `d` of another module that code sees
+    ## through `m` but may not name (stage 0's `private_item`): an import
+    ## that is not re-exported, a `pub(package)` item of another package,
+    ## or a private one.
+    pub pure def private_item(self, d: DefId, m: ModuleId, range: TextRange) -> Diagnostic:
+        let def_ = ref self.defs[d.index]
+        let name = def_.name.copy()
+        let data = ref self.modules[m.index]
+        let imported = data.imported.contains(name.copy())
+        if imported or self.scope_module(def_.module) != self.scope_module(m):
+            # Seen through a module that imported it.
+            var same = False
+            if let Some(x) = data.items.get(name.copy()):
+                same = x == d
+            if same and imported:
+                var diag = Diagnostic.new(Msg.ResolveNotReexported, range.start, range.end)
+                diag = diag.with("name", name).with("module", self.module_path(m))
+                return diag.with("origin", self.module_path(def_.module))
+        let owner = def_.module
+        if def_.vis == Vis.PubPackage:
+            let package = self.package_of(owner)
+            var pname = String.new()
+            if package >= 0 and package < len(self.packages):
+                pname = self.packages[package].name.copy()
+            var diag = Diagnostic.new(Msg.ResolvePackageItem, range.start, range.end)
+            diag = diag.with("name", name).with("module", self.module_path(owner))
+            return diag.with("package", pname)
+        let diag = Diagnostic.new(Msg.ResolvePrivateItem, range.start, range.end).with("name", name)
+        return diag.with("module", self.module_path(owner))
+
+    ## The module's path as an import writes it, for messages: `std.json`
+    ## for a std module, `weather.parser` for a module of a package.
+    pub pure def module_path(self, m: ModuleId) -> String:
+        if m.index < 0 or m.index >= len(self.modules):
+            return String.new()
+        let data = ref self.modules[m.index]
+        if not data.path.is_empty():
+            return data.path.join(".")
+        return data.name.copy()
 
     ## `name` in module `m` as code in `from` sees it through the module
     ## (`m.name`, `from m import name`): the item, and whether `from` may
@@ -805,7 +882,7 @@ impl Program:
                         return True
                 return False
             case TyData.Adt(d, args):
-                match self.defs[d.index].kind:
+                match self.defs[d.index].kind():
                     case Struct(s):
                         if let Some(b) = s.builtin:
                             let bs: str = b
@@ -865,12 +942,12 @@ impl Program:
                         return True
                 return False
             case TyData.Adt(d, args):
-                if let Refinement(_) = self.defs[d.index].kind:
+                if let Refinement(_) = self.defs[d.index].kind():
                     let base = self.refinement_base(mut types, d, args) ?? Ty.error()
                     return self.must_consume_from(mut types, base, depth + 1, mut cleared)
                 var flag = False
                 var fields: list[Ty] = []
-                match self.defs[d.index].kind:
+                match self.defs[d.index].kind():
                     case Struct(s):
                         flag = s.must_consume
                         for f in s.fields:
@@ -1028,7 +1105,7 @@ impl Program:
                 return None
         seen.push((d, args.copy(), auto))
         var fields: list[(String, Ty)] = []
-        match self.defs[d.index].kind:
+        match self.defs[d.index].kind():
             case Struct(s):
                 for f in s.fields:
                     fields.push((f.name.copy(), f.ty))
@@ -1090,7 +1167,7 @@ impl Program:
                     if self.drops_impure_in(mut types, a, mut seen):
                         return True
                 var fields: list[Ty] = []
-                match self.defs[d.index].kind:
+                match self.defs[d.index].kind():
                     case Struct(s):
                         for f in s.fields:
                             fields.push(f.ty)
@@ -1146,7 +1223,7 @@ impl Program:
                 if info.derived:
                     # The derived impl compares or prints the fields.
                     var fields: list[Ty] = []
-                    match self.defs[d.index].kind:
+                    match self.defs[d.index].kind():
                         case Struct(s):
                             for f in s.fields:
                                 fields.push(types.subst(f.ty, args))
@@ -1394,7 +1471,7 @@ impl Program:
                     return self.is_copy_in_depth(mut types, base, env, depth + 1)
                 if args.is_empty():
                     return self.is_copy(mut types, ty)
-                match self.defs[d.index].kind:
+                match self.defs[d.index].kind():
                     case Struct(s):
                         if s.builtin.is_some():
                             return self.is_copy(mut types, ty)
@@ -1459,7 +1536,7 @@ impl Program:
     ## A `@derive(Copy)` type whose fields, with its arguments in them, are
     ## all `Copy`.
     pure def def_is_copy(self, mut types: Types, d: DefId, args: list[Ty], depth: int) -> bool:
-        match self.defs[d.index].kind:
+        match self.defs[d.index].kind():
             case Refinement(r):
                 # A refinement is represented as its base.
                 let base = types.subst(r.base, args)
@@ -1605,45 +1682,45 @@ impl Program:
                     return Answer.Yes(ImplSource.Builtin)
             case _:
                 pass
+        # The impls of the trait, in the order they were declared.
         var unknown = False
-        for i in self.impls:
-            let info = self.impl_info(i) else:
-                continue
-            if info.trait_ref.def_ != tr.def_:
-                continue
-            var binds: list[Ty?] = []
-            for _ in range(len(info.generics)):
-                binds.push(None)
-            var header = match_ty(types, info.self_ty, ty, mut binds)
-            for k in range(len(info.trait_ref.args)):
-                if k < len(tr.args):
-                    header = header.and(
-                        match_ty(types, info.trait_ref.args[k], tr.args[k], mut binds)
-                    )
-            if header == Match.No:
-                continue
-            if header == Match.Unknown:
-                unknown = True
-                continue
-            var args: list[Ty] = []
-            for b in binds:
-                args.push(b.copy() ?? Ty.error())
-            # The impl's own bounds, for these arguments.
-            var ok = Answer.Yes(ImplSource.Impl(def_=i, args=args.copy()))
-            for p in info.predicates:
-                let pt = types.subst(p.ty, args)
-                let pb = types.subst_trait(p.bound, args)
-                match self.implements_depth(mut types, pt, pb, env, depth + 1):
-                    case Yes(src):
-                        if not self.defaults_hold(mut types, pt, pb, src, env):
+        if let Some(candidates) = self.impls_of.get(tr.def_):
+            for i in candidates:
+                let info = self.impl_info(i) else:
+                    continue
+                var binds: list[Ty?] = []
+                for _ in range(len(info.generics)):
+                    binds.push(None)
+                var header = match_ty(types, info.self_ty, ty, mut binds)
+                for k in range(len(info.trait_ref.args)):
+                    if k < len(tr.args):
+                        header = header.and(
+                            match_ty(types, info.trait_ref.args[k], tr.args[k], mut binds)
+                        )
+                if header == Match.No:
+                    continue
+                if header == Match.Unknown:
+                    unknown = True
+                    continue
+                var args: list[Ty] = []
+                for b in binds:
+                    args.push(b.copy() ?? Ty.error())
+                # The impl's own bounds, for these arguments.
+                var ok = Answer.Yes(ImplSource.Impl(def_=i, args=args.copy()))
+                for p in info.predicates:
+                    let pt = types.subst(p.ty, args)
+                    let pb = types.subst_trait(p.bound, args)
+                    match self.implements_depth(mut types, pt, pb, env, depth + 1):
+                        case Yes(src):
+                            if not self.defaults_hold(mut types, pt, pb, src, env):
+                                ok = Answer.No
+                                break
+                        case No:
                             ok = Answer.No
                             break
-                    case No:
-                        ok = Answer.No
-                        break
-                    case Unknown:
-                        ok = Answer.Unknown
-            return ok
+                        case Unknown:
+                            ok = Answer.Unknown
+                return ok
         if unknown:
             return Answer.Unknown
         return Answer.No
@@ -1849,11 +1926,9 @@ impl Program:
                         let tr = TraitRef(def_=d, args=[])
                         if self.implements(mut types, ty, tr, env).holds():
                             push_method(self, tr, name, mut out)
-                    else:
-                        for im in self.impls:
+                    elif let Some(candidates) = self.impls_of.get(d):
+                        for im in candidates:
                             let ii = self.impl_info(im) else:
-                                continue
-                            if ii.trait_ref.def_ != d:
                                 continue
                             var binds: list[Ty?] = []
                             for _ in range(len(ii.generics)):
@@ -2005,3 +2080,31 @@ pure def is_copy_builtin(b: str) -> bool:
         case "TestClock" | "Cap" | "Lent" | "DateTime" | "Scope" | "Cancellation" | "Timer": True
         case "f32" | "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i128": True
         case _: False
+
+## The type of a parameter as a local of its function (stage 0's
+## `sisu_typeck::param_local_ty`): a borrowed parameter is a `ref T`
+## unless `T` is `Copy`; a generic parameter, or an associated type of one,
+## only when its bounds make it `Copy`.
+pub pure def param_local_ty(
+    prog: Program, mut types: Types, ty: Ty, mode: Mode, env: list[Predicate]
+) -> Ty:
+    match mode:
+        case Mode.Own:
+            return ty
+        case Mode.Mut:
+            return types.ref_(ty, True)
+        case Mode.Borrow:
+            var opaque = False
+            match types.data(ty):
+                case TyData.Param(_) | TyData.Assoc(_, _, _):
+                    opaque = True
+                case _:
+                    pass
+            var copy = False
+            if opaque:
+                copy = prog.is_copy_in(mut types, ty, env)
+            else:
+                copy = prog.is_copy(mut types, ty)
+            if copy:
+                return ty
+            return types.ref_(ty, False)

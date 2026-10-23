@@ -285,6 +285,26 @@ impl Rows:
             k += 1
         return changed
 
+    ## Adds the members of row `r` of `o`, which keeps the same rows, to
+    ## row `r` here; returns whether anything changed.
+    pub pure def union_from(mut self, r: int, o: Rows) -> bool:
+        if self.width != o.width:
+            return self.union_row(r, o.get(r))
+        let s = self.slot(r) else:
+            return False
+        let base = s * self.width
+        var changed = False
+        var k = 0
+        while k < self.width:
+            let x = o.words[base + k]
+            if x != 0:
+                let m = self.words[base + k] | x
+                if m != self.words[base + k]:
+                    self.words[base + k] = m
+                    changed = True
+            k += 1
+        return changed
+
     pub pure def clear_row(mut self, r: int):
         let s = self.slot(r) else:
             return

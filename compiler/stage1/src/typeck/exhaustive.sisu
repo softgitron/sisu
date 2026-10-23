@@ -245,7 +245,7 @@ impl Checker:
                         out.push((Ctor.Variant(def_=d, index=i), fs))
                 return Some(out)
             case TyData.Adt(d, args):
-                match cx.prog.defs[d.index].kind:
+                match cx.prog.defs[d.index].kind():
                     case DefKind.Enum(e):
                         var out: list[(Ctor, list[Ty])] = []
                         for i in range(len(e.variants)):

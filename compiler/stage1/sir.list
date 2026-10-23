@@ -26,6 +26,7 @@ compiler/conformance/cases/comptime/generic_assert.sisu
 compiler/conformance/cases/comptime/proposal_arrays.sisu
 compiler/conformance/cases/comptime/proposal_derive.sisu
 compiler/conformance/cases/concurrency/cancellation.sisu
+compiler/conformance/cases/concurrency/channel_owner_errors.sisu
 compiler/conformance/cases/concurrency/channels.sisu
 compiler/conformance/cases/concurrency/deadlock.sisu
 compiler/conformance/cases/concurrency/failures.sisu
@@ -62,6 +63,8 @@ compiler/conformance/cases/generics/const_generic.sisu
 compiler/conformance/cases/generics/const_generic_errors.sisu
 compiler/conformance/cases/generics/drop_generic.sisu
 compiler/conformance/cases/generics/drop_generic_errors.sisu
+compiler/conformance/cases/generics/function_value_errors.sisu
+compiler/conformance/cases/generics/function_values.sisu
 compiler/conformance/cases/generics/functions.sisu
 compiler/conformance/cases/generics/loan_through_own.sisu
 compiler/conformance/cases/generics/type_arg_count.sisu
@@ -212,6 +215,7 @@ compiler/conformance/cases/run/declarations.sisu
 compiler/conformance/cases/run/divide_by_zero.sisu
 compiler/conformance/cases/run/double_panic.sisu
 compiler/conformance/cases/run/drop_chain.sisu
+compiler/conformance/cases/run/drop_moved_parts.sisu
 compiler/conformance/cases/run/drop_order.sisu
 compiler/conformance/cases/run/drop_panic_fields.sisu
 compiler/conformance/cases/run/drop_torture.sisu

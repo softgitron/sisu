@@ -2,7 +2,7 @@
 ##! (stage 0's `sisu-lower/src/pats.rs`). Testing happens first and binds
 ##! nothing, so a failed test leaves the scrutinee as it was.
 
-from stage1.lower.func import Cx, FnLower
+from stage1.lower.func import Cx, DropEntry, FnLower
 from stage1.sir import (
     BinOp as SirBinOp,
     BlockId,
@@ -126,18 +126,20 @@ impl FnLower:
                 self.switch_to(cx, ok)
             case TPatKind.Variant(def_, variant, fields):
                 # A value of a union of error sets is a variant of one of
-                # them: test which before testing the variant index.
+                # them: test which before testing the variant index, then
+                # test the rest through a reference of that set's type, so
+                # that its fields are the set's own (decision 221).
+                var at = place.copy()
                 var union = False
                 if let TyData.ErrSet(ms) = self.types.data(p.ty):
                     union = len(ms) > 1
                 if union:
-                    let pt = self.ty(cx, p.ty)
-                    let r = self.temp_sir(Type.Ref(inner=[pt], mutable=False))
+                    let decl = Type.Named(name=cx.ctx.type_name(cx.prog, def_), args=[])
+                    let r = self.temp_sir(Type.Ref(inner=[decl.copy()], mutable=False))
                     self.assign(
                         cx, Place.local(r), Rvalue.Ref(place=place.copy(), mutable=False), loc
                     )
                     let is = self.temp_sir(Type.Bool)
-                    let decl = Type.Named(name=cx.ctx.type_name(cx.prog, def_), args=[])
                     self.emit(
                         cx,
                         StatementKind.Call(
@@ -155,8 +157,9 @@ impl FnLower:
                         loc,
                     )
                     self.switch_to(cx, ok)
+                    at = Place.local(r).project(Proj.Deref)
                 let d = self.temp_sir(Type.Int)
-                self.assign(cx, Place.local(d), Rvalue.Discriminant(place.copy()), loc)
+                self.assign(cx, Place.local(d), Rvalue.Discriminant(at.copy()), loc)
                 let ok = self.new_block()
                 self.terminate(
                     Terminator.Switch(
@@ -166,7 +169,7 @@ impl FnLower:
                 )
                 self.switch_to(cx, ok)
                 for i in range(len(fields)):
-                    let sub = place.project(Proj.Downcast(variant)).project(Proj.Field(i))
+                    let sub = at.project(Proj.Downcast(variant)).project(Proj.Field(i))
                     self.test(cx, fields[i], sub, fail)
             case TPatKind.Struct(_, fields):
                 for i in range(len(fields)):
@@ -239,14 +242,45 @@ impl FnLower:
     ## Binds, registering drops in the scope `below` levels under the
     ## innermost (a `let` registers in its block, not its statement).
     pub pure def bind_below(mut self, cx: Cx, pat: PatId, place: Place, below: int):
-        self.bind_with(cx, pat, place, Some(below))
+        self.bind_with(cx, pat, place, Some(below), below)
 
     ## Assigns a pattern's bindings without registering them, for a
     ## binding made on several paths and registered once where they join
     ## (`register_bindings`): the alternatives of `|`, and the two paths of
-    ## `let PATTERN = e else: fallback`.
-    pub pure def bind_values(mut self, cx: Cx, pat: PatId, place: Place):
-        self.bind_with(cx, pat, place, None)
+    ## `let PATTERN = e else: fallback`. An error value the pattern moves
+    ## fields out of is registered at once, in the scope `below` levels
+    ## under the innermost, where the bindings will be.
+    pub pure def bind_values(mut self, cx: Cx, pat: PatId, place: Place, below: int):
+        self.bind_with(cx, pat, place, None, below)
+
+    ## Whether binding the pattern moves a value out of the place it
+    ## matched: a value binding of a type that is not `Copy`.
+    pure def moves_out(mut self, cx: Cx, pat: PatId) -> bool:
+        let p = ref cx.body.pats[pat.index]
+        match p.kind:
+            case TPatKind.Bind(_, mode):
+                if mode != BindMode.Value:
+                    return False
+                let copy = cx.prog.is_copy_in(mut self.types, p.ty, self.bounds)
+                if let TyData.Ref(_, _) = self.types.data(p.ty):
+                    return False
+                return not copy
+            case TPatKind.Variant(_, _, fields):
+                return self.any_moves_out(cx, fields)
+            case TPatKind.Struct(_, fields):
+                return self.any_moves_out(cx, fields)
+            case TPatKind.Tuple(fields):
+                return self.any_moves_out(cx, fields)
+            case TPatKind.Or(alts):
+                return self.any_moves_out(cx, alts)
+            case _:
+                return False
+
+    pure def any_moves_out(mut self, cx: Cx, pats: list[PatId]) -> bool:
+        for f in pats:
+            if self.moves_out(cx, f):
+                return True
+        return False
 
     ## Registers the bindings of a pattern that `bind_values` assigned, in
     ## the scope `below` levels under the innermost.
@@ -298,7 +332,9 @@ impl FnLower:
                 if self.needs_drop(cx, ty):
                     self.split(cx)
 
-    pure def bind_with(mut self, cx: Cx, pat: PatId, place: Place, reg: int?):
+    ## `below`: the scope temporaries of the binding are registered in
+    ## (an error value whose fields it moves out).
+    pure def bind_with(mut self, cx: Cx, pat: PatId, place: Place, reg: int?, below: int):
         let p = ref cx.body.pats[pat.index]
         let loc = cx.loc(p.span)
         match p.kind:
@@ -321,18 +357,46 @@ impl FnLower:
                         )
                         if let Some(below) = reg:
                             self.scope_local(below, l)
-            case TPatKind.Variant(_, variant, fields):
+            case TPatKind.Variant(def_, variant, fields):
+                # An error value is never partly moved: a pattern that moves
+                # fields out of one takes the value out whole first, as its
+                # set's own type, and moves them out of that, which is then
+                # dropped with the bindings. A union's value is read through
+                # a reference of its set's type, as it was tested (decision
+                # 221).
+                let decl = Type.Named(name=cx.ctx.type_name(cx.prog, def_), args=[])
+                var moves = False
+                if cx.prog.is_error_set(def_):
+                    moves = self.any_moves_out(cx, fields)
+                var union = False
+                if let TyData.ErrSet(ms) = self.types.data(p.ty):
+                    union = len(ms) > 1
+                var base = place.copy()
+                if moves:
+                    let m = self.add_local(decl, None)
+                    self.scope_local(below, m)
+                    self.assign(cx, Place.local(m), Rvalue.Use(Operand.Move(place.copy())), loc)
+                    self.register_below(below, DropEntry.Local(m))
+                    self.split(cx)
+                    base = Place.local(m)
+                elif union and not pattern_bindings(cx.body.pats, pat).is_empty():
+                    let r = self.add_local(Type.Ref(inner=[decl], mutable=False), None)
+                    self.scope_local(below, r)
+                    self.assign(
+                        cx, Place.local(r), Rvalue.Ref(place=place.copy(), mutable=False), loc
+                    )
+                    base = Place.local(r).project(Proj.Deref)
                 for i in range(len(fields)):
-                    let sub = place.project(Proj.Downcast(variant)).project(Proj.Field(i))
-                    self.bind_with(cx, fields[i], sub, reg)
+                    let sub = base.project(Proj.Downcast(variant)).project(Proj.Field(i))
+                    self.bind_with(cx, fields[i], sub, reg, below)
             case TPatKind.Struct(_, fields):
                 for i in range(len(fields)):
-                    self.bind_with(cx, fields[i], place.project(Proj.Field(i)), reg)
+                    self.bind_with(cx, fields[i], place.project(Proj.Field(i)), reg, below)
             case TPatKind.Tuple(fields):
                 for i in range(len(fields)):
-                    self.bind_with(cx, fields[i], place.project(Proj.Field(i)), reg)
+                    self.bind_with(cx, fields[i], place.project(Proj.Field(i)), reg, below)
             case TPatKind.Deref(inner):
-                self.bind_with(cx, inner, place.project(Proj.Deref), reg)
+                self.bind_with(cx, inner, place.project(Proj.Deref), reg, below)
             case TPatKind.Or(alts):
                 # The alternatives bind the same locals: test again which one
                 # matched (testing binds nothing and changes nothing) and bind
@@ -344,11 +408,11 @@ impl FnLower:
                     if i + 1 < len(alts):
                         let next = self.new_block()
                         self.test(cx, alts[i], place, next)
-                        self.bind_values(cx, alts[i], place)
+                        self.bind_values(cx, alts[i], place, below)
                         self.goto(done)
                         self.switch_to(cx, next)
                     else:
-                        self.bind_values(cx, alts[i], place)
+                        self.bind_values(cx, alts[i], place, below)
                         self.goto(done)
                 self.switch_to(cx, done)
                 if let Some(below) = reg:
@@ -357,7 +421,7 @@ impl FnLower:
             case TPatKind.List(prefix, _, rest, suffix):
                 for i in range(len(prefix)):
                     let sub = self.element(cx, place, i, False)
-                    self.bind_with(cx, prefix[i], sub, reg)
+                    self.bind_with(cx, prefix[i], sub, reg, below)
                 if let Some(r) = rest:
                     let l = self.local_for(cx, r)
                     let pt = self.ty(cx, p.ty)
@@ -382,7 +446,7 @@ impl FnLower:
                     self.bind_value(cx, r, l, ty, reg)
                 for j in range(len(suffix)):
                     let sub = self.element(cx, place, len(suffix) - j, True)
-                    self.bind_with(cx, suffix[j], sub, reg)
+                    self.bind_with(cx, suffix[j], sub, reg, below)
             case _:
                 pass
 
