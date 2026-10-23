@@ -507,6 +507,15 @@ pub struct KindNames:
         _ = self.known.insert(kind, name.copy())
         return name
 
+    ## Writes the name of `kind` at the end of `out`.
+    pub pure def push_to(mut self, kind: SyntaxKind, mut out: String):
+        if let Some(name) = self.known.get(kind):
+            out.push(name)
+            return
+        let name = kind.name()
+        out.push(name)
+        _ = self.known.insert(kind, name)
+
 test "forty-seven keywords, each a keyword kind":
     assert len(KEYWORDS) == 47
     for (text, kind) in KEYWORDS:

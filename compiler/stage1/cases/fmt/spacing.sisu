@@ -1,0 +1,19 @@
+# Spaces between tokens as PEP 8 and Black put them: around binary
+# operators, after commas and colons, none inside brackets, before a call's
+# or an index's bracket, around a keyword argument's `=`, or after a prefix.
+struct Pair:
+    left:int
+    right :int=0
+
+def pick(xs:list[int],at:int=0,*,step:int=1)->int?:
+    let n=if xs[at:at+step][0]>0:xs[at]else:0
+    let m = - n+~n ** 2
+    let found = n in xs and not(n<0)
+    let fallback = xs.first() ?? -1
+    let p = Pair(left = n , right = m)
+    let closure = (a:int,b:int)->a+b
+    let text = """
+  kept   as   written {n}
+"""
+    let s = "{n:>4}  {m}"
+    return Some( closure(p.left,p.right) )

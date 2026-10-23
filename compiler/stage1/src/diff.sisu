@@ -1,0 +1,278 @@
+##! A line diff (stage 0's `sisu-interp/src/diff.rs`): the lines both texts
+##! have, unmarked, and the others marked `-` (the old text's) and `+` (the
+##! new one's), from the longest common subsequence of lines. `--locked`
+##! prints the whole of a lockfile's change (`lines`), and `fmt --check`
+##! the hunks of a file's (`hunks`).
+
+## `old` against `new`, one line per line, each marked `  `, `- ` or `+ `.
+pub pure def lines(old: str, new: str) -> String:
+    return marks(lines_of(old), lines_of(new)).join("\n")
+
+## The lines of a text, as Rust's `str::lines` gives them.
+pure def lines_of(text: str) -> list[String]:
+    var out: list[String] = []
+    for l in text.lines():
+        out.push(l.to_string())
+    return out
+
+## The lines of `a` and `b` marked, from their longest common subsequence.
+pure def marks(a: list[String], b: list[String]) -> list[String]:
+    let n = len(a)
+    let m = len(b)
+    # Each line as a number, the same for the same text.
+    var numbers: dict[String, int] = {}
+    let xa = numbered(a, mut numbers)
+    let xb = numbered(b, mut numbers)
+    let lcs = Lengths.of(xa, xb, len(numbers))
+    var out: list[String] = []
+    var x = 0
+    var y = 0
+    while x < n or y < m:
+        if x < n and y < m and xa[x] == xb[y]:
+            out.push("  {a[x]}")
+            x += 1
+            y += 1
+        elif x < n and (y == m or lcs.at(x + 1, y) >= lcs.at(x, y + 1)):
+            out.push("- {a[x]}")
+            x += 1
+        else:
+            out.push("+ {b[y]}")
+            y += 1
+    return out
+
+## The length of the longest common subsequence of `a[i:]` and `b[j:]`
+## for each `i` and `j` (Rust's table, `lcs[i][j]`), kept as rows of bits
+## as Hyyrö's bit-parallel computation of it makes them: with `p` and `q`
+## counting the lines of `a` and `b` from their ends, row `p`'s bit `q - 1`
+## is clear where the length for the last `p` lines of `a` and the last
+## `q` of `b` is one more than for the last `q - 1`, so a length is a count
+## of clear bits. A row is a word of bits for every 62 lines of `b`, made
+## in a few operations a word rather than one a line, and each row keeps
+## the count of its set bits before each word.
+struct Lengths:
+    n: int
+    m: int
+    words: int
+    rows: list[int]
+    ## For row `p` and word `w`, the bits set in its words before `w`, at
+    ## `p * (words + 1) + w`.
+    before: list[int]
+
+impl Lengths:
+    pure def of(xa: list[int], xb: list[int], numbers: int) -> Lengths:
+        let n = len(xa)
+        let m = len(xb)
+        let words = (m + 61) // 62
+        let full = (1 << 62) - 1
+        # The bits of `b`'s lines, from its end: for each number, the
+        # positions (from the end) of the lines with it.
+        var masks: list[list[int]] = []
+        for _ in range(numbers):
+            masks.push([])
+        var q = 0
+        while q < m:
+            let k = xb[m - 1 - q]
+            if masks[k].is_empty():
+                var zero: list[int] = []
+                for _ in range(words):
+                    zero.push(0)
+                masks[k] = zero
+            masks[k][q // 62] = masks[k][q // 62] | (1 << (q % 62))
+            q += 1
+        var rows: list[int] = []
+        for _ in range(words):
+            rows.push(full)
+        var p = 1
+        while p <= n:
+            let last = (p - 1) * words
+            let k = xa[n - p]
+            if masks[k].is_empty():
+                # A line `b` lacks: the row is the one before.
+                var w = 0
+                while w < words:
+                    rows.push(rows[last + w])
+                    w += 1
+            else:
+                let mask = ref masks[k]
+                var carry = 0
+                var w = 0
+                while w < words:
+                    let v = rows[last + w]
+                    let sum = v + (v & mask[w]) + carry
+                    carry = sum >> 62
+                    rows.push((sum & full) | (v & ~mask[w]))
+                    w += 1
+            p += 1
+        var before: list[int] = []
+        p = 0
+        while p <= n:
+            var count = 0
+            var w = 0
+            while w < words:
+                before.push(count)
+                count += pop(rows[p * words + w])
+                w += 1
+            before.push(count)
+            p += 1
+        return Lengths(n=n, m=m, words=words, rows=rows, before=before)
+
+    ## The length of the longest common subsequence of `a[i:]` and `b[j:]`.
+    pure def at(self, i: int, j: int) -> int:
+        let p = self.n - i
+        let q = self.m - j
+        let w = q // 62
+        var counted = self.before[p * (self.words + 1) + w]
+        let r = q % 62
+        if r > 0:
+            counted += pop(self.rows[p * self.words + w] & ((1 << r) - 1))
+        return q - counted
+
+## The bits set in a word of 62 bits, counted in parallel by halves.
+pure def pop(x: int) -> int:
+    var v = x - ((x >> 1) & 0x5555555555555555)
+    v = (v & 0x3333333333333333) + ((v >> 2) & 0x3333333333333333)
+    v = (v + (v >> 4)) & 0x0F0F0F0F0F0F0F0F
+    v = v + (v >> 8)
+    v = v + (v >> 16)
+    v = v + (v >> 32)
+    return v & 0x7F
+
+## The numbers of the lines, each text numbered the first time it comes.
+pure def numbered(lines: list[String], mut numbers: dict[String, int]) -> list[int]:
+    var out: list[int] = []
+    for l in lines:
+        match numbers.get(l.copy()):
+            case Some(k):
+                out.push(k)
+            case None:
+                let k = len(numbers)
+                _ = numbers.insert(l.copy(), k)
+                out.push(k)
+    return out
+
+## The lines `lo..hi` of `xs`.
+pure def part(xs: list[String], lo: int, hi: int) -> list[String]:
+    var out: list[String] = []
+    for i in range(lo, hi):
+        out.push(xs[i].copy())
+    return out
+
+## Only the lines that changed, with `context` lines around each run of
+## them, under a header naming the first line shown (`@@ line N @@`):
+## what `sisu fmt --check` prints. The lines both texts start and end
+## with are set aside before the common subsequence is computed, so a
+## small change in a long file costs little.
+pub pure def hunks(old: str, new: str, context: int) -> String:
+    let a = lines_of(old)
+    let b = lines_of(new)
+    var prefix = 0
+    while prefix < len(a) and prefix < len(b) and a[prefix] == b[prefix]:
+        prefix += 1
+    var suffix = 0
+    while suffix < len(a) - prefix and suffix < len(b) - prefix:
+        if a[len(a) - 1 - suffix] != b[len(b) - 1 - suffix]:
+            break
+        suffix += 1
+    let middle = marks(part(a, prefix, len(a) - suffix), part(b, prefix, len(b) - suffix))
+    # Every line in order, with its line number in `old` when it has one.
+    var marked: list[(int?, String)] = []
+    for i in range(prefix):
+        marked.push((Some(i + 1), "  {a[i]}"))
+    var at = prefix
+    for l in middle:
+        if l.starts_with("+ "):
+            marked.push((None, l.copy()))
+        else:
+            at += 1
+            marked.push((Some(at), l.copy()))
+    for i in range(suffix):
+        let k = len(a) - suffix + i
+        marked.push((Some(k + 1), "  {a[k]}"))
+    var changed: list[int] = []
+    for i in range(len(marked)):
+        if not marked[i].1.starts_with("  "):
+            changed.push(i)
+    var out: list[String] = []
+    var shown_to = 0
+    var k = 0
+    while k < len(changed):
+        let start = max(max(changed[k] - context, 0), shown_to)
+        var end = changed[k] + 1
+        while k + 1 < len(changed) and changed[k + 1] <= end + 2 * context:
+            k += 1
+            end = changed[k] + 1
+        let last = min(end + context, len(marked))
+        var line = len(a) + 1
+        for x in range(start, len(marked)):
+            if let Some(n) = marked[x].0:
+                line = n
+                break
+        out.push("@@ line {line} @@")
+        for x in range(start, last):
+            out.push(marked[x].1.copy())
+        shown_to = last
+        k += 1
+    return out.join("\n")
+
+test "hunks show what changed, with context":
+    let old = "a\nb\nc\nd\ne\nf\ng\nh"
+    let new = "a\nb\nc\nD\ne\nf\ng\nh"
+    assert hunks(old, new, 1) == "@@ line 3 @@\n  c\n- d\n+ D\n  e"
+    assert hunks("x\n\n\ny", "x\n\ny", 1) == "@@ line 2 @@\n  \n- \n  y"
+    let far = hunks("1\n2\n3\n4\n5\n6\n7\n8\n9", "0\n2\n3\n4\n5\n6\n7\n8\n0", 1)
+    assert far == "@@ line 1 @@\n- 1\n+ 0\n  2\n@@ line 8 @@\n  8\n- 9\n+ 0"
+
+test "a diff marks what changed":
+    assert lines("a\nb\nc", "a\nx\nc") == "  a\n- b\n+ x\n  c"
+    assert lines("", "new") == "+ new"
+    assert lines("same", "same") == "  same"
+
+## The marks as Rust's table gives them, a cell at a time: what `marks`
+## must give.
+pure def marks_by_table(a: list[String], b: list[String]) -> list[String]:
+    let n = len(a)
+    let m = len(b)
+    var lcs: list[int] = []
+    for _ in range((n + 1) * (m + 1)):
+        lcs.push(0)
+    var i = n - 1
+    while i >= 0:
+        var j = m - 1
+        while j >= 0:
+            if a[i] == b[j]:
+                lcs[i * (m + 1) + j] = lcs[(i + 1) * (m + 1) + j + 1] + 1
+            else:
+                lcs[i * (m + 1) + j] = max(lcs[(i + 1) * (m + 1) + j], lcs[i * (m + 1) + j + 1])
+            j -= 1
+        i -= 1
+    var out: list[String] = []
+    var x = 0
+    var y = 0
+    while x < n or y < m:
+        if x < n and y < m and a[x] == b[y]:
+            out.push("  {a[x]}")
+            x += 1
+            y += 1
+        elif x < n and (y == m or lcs[(x + 1) * (m + 1) + y] >= lcs[x * (m + 1) + y + 1]):
+            out.push("- {a[x]}")
+            x += 1
+        else:
+            out.push("+ {b[y]}")
+            y += 1
+    return out
+
+test "the rows of bits give the table's marks":
+    # Lines drawn from a few texts, so that they repeat, in lists long
+    # enough to take several words of bits.
+    var state = 7
+    for round in range(40):
+        var a: list[String] = []
+        var b: list[String] = []
+        let kinds = 2 + round % 5
+        for k in range(round * 4 % 150):
+            state = (state * 1103515245 + 12345) % 2147483648
+            a.push("{state % kinds}")
+        for k in range(round * 7 % 140):
+            state = (state * 1103515245 + 12345) % 2147483648
+            b.push("{state % kinds}")
+        assert marks(a, b) == marks_by_table(a, b)

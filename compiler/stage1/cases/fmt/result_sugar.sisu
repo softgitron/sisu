@@ -1,0 +1,26 @@
+# `Result[T, E]` written `T ! E` when `E` names an error set where the file
+# is: one it declares, or one of a module it imports; not a type
+# parameter, nor a result behind `ref` or `?`, nor one whose value is a
+# result or a function.
+import json
+
+error ParseError:
+    Empty
+    Bad(at: int)
+
+def parse(text: str) -> Result[int, ParseError]:
+    if text.is_empty():
+        return Err(Empty)
+    return Ok(1)
+
+def decode(text: str) -> Result[int, json.JsonError]:
+    return Ok(0)
+
+def generic[T, E](x: Result[T, E]) -> int:
+    return 0
+
+def kept(x: ref Result[int, ParseError], y: Result[int, ParseError]?, z: Result[(int) -> int, ParseError]) -> int:
+    return 0
+
+def nested(x: Result[Result[int, ParseError], ParseError], y: Result[ int , ParseError ]) -> int:
+    return 0

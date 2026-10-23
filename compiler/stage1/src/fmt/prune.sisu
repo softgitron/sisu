@@ -1,0 +1,127 @@
+##! Unused imports, which `sisu fmt` removes (09, "Unused import/variable
+##! as a hard error"; stage 0's `sisu-fmt/src/prune.rs`). The formatter
+##! works without name resolution, so an import is used when the file
+##! spells its name: as an identifier outside the imports, or as a word of
+##! a doc comment, whose examples are compiled as tests. That is enough,
+##! because nothing else needs an import: a method is found through every
+##! trait its receiver implements, imported or not. Kept whatever their
+##! use: a re-export (`pub` or `pub(package)`), and an import with a
+##! comment inside it, which would have nowhere to go.
+
+from stage1.fmt.lines import Src
+from stage1.syntax.kinds import SyntaxKind
+from stage1.text import is_alphanumeric
+
+## The imports to remove: whole `import` and `from` items, and single
+## names (`IMPORT_NAME` nodes) of a `from` item that keeps others.
+pub pure def unused(src: Src) -> set[int]:
+    var imports: list[int] = []
+    for n in src.child_nodes(src.tree.root):
+        match src.kind(n):
+            case ImportItem | FromImport:
+                imports.push(n)
+            case _:
+                pass
+    var out: set[int] = set()
+    if imports.is_empty():
+        return out
+    var used: set[String] = set()
+    # The imports are the file's children in order, so their ranges come
+    # one after another, as the tokens do: the first one that does not end
+    # before a token is the only one it may be inside.
+    var next = 0
+    for t in src.tree.tokens:
+        match t.kind:
+            case Ident:
+                while next < len(imports) and src.tree.nodes[imports[next]].end <= t.start:
+                    next += 1
+                if not inside(src, imports, next, t.start):
+                    _ = used.add(src.text.byte_slice(t.start, t.end).to_string())
+            case DocComment | ModuleDocComment:
+                for w in words(src.text.byte_slice(t.start, t.end)):
+                    _ = used.add(w.copy())
+            case _:
+                pass
+    for n in imports:
+        if src.first_child(n, SyntaxKind.Visibility).is_some() or has_comment(src, n):
+            continue
+        if src.kind(n) == SyntaxKind.ImportItem:
+            if let Some(b) = binding(src, n):
+                if not used.contains(b):
+                    _ = out.add(n)
+            continue
+        var names: list[int] = []
+        for c in src.child_nodes(n):
+            if src.kind(c) == SyntaxKind.ImportName:
+                names.push(c)
+        var gone: list[int] = []
+        for c in names:
+            if let Some(b) = binding(src, c):
+                if not used.contains(b):
+                    gone.push(c)
+        if not names.is_empty() and len(gone) == len(names):
+            _ = out.add(n)
+        else:
+            for c in gone:
+                _ = out.add(c)
+    return out
+
+## Whether the position is inside the import `imports[k]`, the first
+## that does not end before it.
+pure def inside(src: Src, imports: list[int], k: int, pos: int) -> bool:
+    if k >= len(imports):
+        return False
+    let node = ref src.tree.nodes[imports[k]]
+    return node.start <= pos and pos < node.end
+
+## The words of a doc comment: its runs of letters, digits and `_`.
+pure def words(text: str) -> list[String]:
+    var out: list[String] = []
+    var word = String.new()
+    for c in text.chars():
+        if is_alphanumeric(c) or c == '_':
+            word.push_char(c)
+        elif not word.is_empty():
+            out.push(word.copy())
+            word.clear()
+    if not word.is_empty():
+        out.push(word)
+    return out
+
+## The name an import binds: the one after `as`, or else the last part of
+## the module path (`import std.json`) or the imported name.
+pure def binding(src: Src, n: int) -> String?:
+    let toks = src.child_tokens(n)
+    for at in range(len(toks)):
+        if src.token_kind(toks[at]) == SyntaxKind.AsKw:
+            for k in range(at + 1, len(toks)):
+                if src.token_kind(toks[k]) == SyntaxKind.Ident:
+                    return Some(src.token_text(toks[k]).to_string())
+            return None
+    if src.kind(n) == SyntaxKind.ImportItem:
+        let path = src.first_child(n, SyntaxKind.ModulePath) else:
+            return None
+        var last: String? = None
+        for t in src.child_tokens(path):
+            if src.token_kind(t) == SyntaxKind.Ident:
+                last = Some(src.token_text(t).to_string())
+        return last
+    for t in toks:
+        if src.token_kind(t) == SyntaxKind.Ident:
+            return Some(src.token_text(t).to_string())
+    return None
+
+## Whether a comment is anywhere inside the node.
+pure def has_comment(src: Src, n: int) -> bool:
+    for e in src.tree.nodes[n].children:
+        match e:
+            case Leaf(t):
+                match src.tree.tokens[t].kind:
+                    case Comment | DocComment | ModuleDocComment:
+                        return True
+                    case _:
+                        pass
+            case Node(c):
+                if has_comment(src, c):
+                    return True
+    return False

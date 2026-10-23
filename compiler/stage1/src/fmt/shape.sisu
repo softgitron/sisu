@@ -1,0 +1,214 @@
+##! The shape of a tree: what formatting must keep (stage 0's
+##! `sisu-fmt/src/shape.rs`). Its nodes and their significant tokens, with
+##! what the formatter changes on purpose made equal: trailing commas, `T?`
+##! and `Option[T]`, `T ! E` and `Result[T, E]`, unused imports, and the
+##! order of a run of imports and of the names a `from` imports. `sisu fmt`
+##! checks that its output has the input's shape, and `sisu parse --shape`
+##! prints it, so the conformance runner can check any implementation's
+##! formatter.
+
+import stage1.fmt.prune
+from stage1.diag import Catalog
+from stage1.fmt.lines import Src, option_sugar, result_parts
+from stage1.parser import parse
+from stage1.syntax.kinds import KindNames, SyntaxKind
+from stage1.syntax.tree import Element, Tree
+from stage1.text import debug_str
+
+## The shape of a file's text; `None` when it has a syntax error.
+pub pure def shape(text: str, catalog: Catalog) -> String?:
+    let p = parse(text, catalog)
+    for d in p.diagnostics:
+        if catalog.is_error(d.msg):
+            return None
+    return Some(shape_of(p.tree))
+
+## The shape of a tree, one node per line, indented.
+pub pure def shape_of(tree: Tree) -> String:
+    let text: str = tree.text
+    let src = Src(tree=tree, text=text)
+    return shape_pruned(src, prune.unused(src))
+
+## The shape of the tree `src` reads, the imports `pruned` names left out
+## (`prune.unused` of the tree, which the formatter has found already for
+## the tree it formats).
+pub pure def shape_pruned(src: Src, pruned: set[int]) -> String:
+    var out = String.new()
+    var names = KindNames.new()
+    # The indentation of each line, as a view of one text.
+    let blanks = "  ".repeat(100)
+    let spaces: str = blanks
+    let cx = Shaping(src=Src(tree=src.tree, text=src.text), pruned=pruned, spaces=spaces)
+    node(cx, src.tree.root, 0, mut names, mut out)
+    return out
+
+## What the shape of a tree is written from: the tree, the imports left
+## out, and a view of spaces to indent with.
+view struct Shaping:
+    src: Src
+    pruned: ref set[int]
+    spaces: str
+
+impl Shaping:
+    ## Whether the node is an import left out.
+    pure def left_out(self, n: int) -> bool:
+        return not self.pruned.is_empty() and self.pruned.contains(n)
+
+    ## Writes the indentation of a line at `depth`.
+    pure def pad(self, depth: int, mut out: String):
+        if 2 * depth <= self.spaces.byte_len():
+            out.push(self.spaces.byte_slice(0, 2 * depth))
+        else:
+            out.push("  ".repeat(depth))
+
+pure def is_close(k: SyntaxKind) -> bool:
+    return match k:
+        case RParen | RBracket | RBrace: True
+        case _: False
+
+## Whether a token's text is part of its shape.
+pure def shows_text(k: SyntaxKind) -> bool:
+    return match k:
+        case Ident | IntNumber | FloatNumber | CharLit | RawString | ByteString: True
+        case FormatSpec | StringText: True
+        case _: False
+
+pure def node(cx: Shaping, n: int, depth: int, mut names: KindNames, mut out: String):
+    let src = ref cx.src
+    let kind = src.kind(n)
+    if kind == SyntaxKind.StringExpr:
+        cx.pad(depth, mut out)
+        out.push("STRING ")
+        out.push(debug_str(src.node_text(n)))
+        out.push("\n")
+        return
+    # `Result[T, E]` and `T ! E` are one shape.
+    if let Some(parts) = result_parts(src, n):
+        let (t, e) = parts
+        cx.pad(depth, mut out)
+        out.push("RESULT_TYPE\n")
+        node(cx, t, depth + 1, mut names, mut out)
+        cx.pad(depth, mut out)
+        out.push("  BANG\n")
+        node(cx, e, depth + 1, mut names, mut out)
+        return
+    # `Option[T]` and `T?` are one shape.
+    if let Some(arg) = option_sugar(src, n):
+        cx.pad(depth, mut out)
+        out.push("OPTION_TYPE\n")
+        node(cx, arg, depth + 1, mut names, mut out)
+        return
+    if kind == SyntaxKind.OptionType:
+        cx.pad(depth, mut out)
+        out.push("OPTION_TYPE\n")
+        for c in src.child_nodes(n):
+            node(cx, c, depth + 1, mut names, mut out)
+        return
+    cx.pad(depth, mut out)
+    names.push_to(kind, mut out)
+    out.push("\n")
+    # The children's shapes, each as its text, with the kind of a node's:
+    # kept apart and put in order for a file and a `from` import, whose
+    # imports and names are in any order, and written as they come for
+    # any other node. A trivia token is no part of a shape.
+    let apart = kind == SyntaxKind.SourceFile or kind == SyntaxKind.FromImport
+    var kinds: list[SyntaxKind?] = []
+    var parts: list[String] = []
+    let children = ref src.tree.nodes[n].children
+    for i in range(len(children)):
+        match children[i]:
+            case Node(c):
+                # An unused import is left out.
+                if cx.left_out(c):
+                    continue
+                if not apart:
+                    node(cx, c, depth + 1, mut names, mut out)
+                    continue
+                var s = String.new()
+                node(cx, c, depth + 1, mut names, mut s)
+                kinds.push(Some(src.kind(c)))
+                parts.push(s)
+            case Leaf(t):
+                let k = src.token_kind(t)
+                if k.is_trivia() or not counted(src, children, i, k, kind, n):
+                    continue
+                var shown = String.new()
+                cx.pad(depth, mut shown)
+                shown.push("  ")
+                names.push_to(k, mut shown)
+                if shows_text(k):
+                    shown.push(" ")
+                    shown.push(debug_str(src.token_text(t)))
+                shown.push("\n")
+                if not apart:
+                    out.push(shown)
+                    continue
+                kinds.push(None)
+                parts.push(shown)
+    if not apart:
+        return
+    # A run of imports, and the names one `from` imports, in any order.
+    if kind == SyntaxKind.SourceFile:
+        var i = 0
+        while i < len(parts):
+            if not is_import(kinds[i]):
+                i += 1
+                continue
+            var j = i
+            while j < len(parts) and is_import(kinds[j]):
+                j += 1
+            var run: list[String] = []
+            for k in range(i, j):
+                run.push(parts[k].copy())
+            run.sort_by((a, b) -> a.cmp(b))
+            for k in range(i, j):
+                parts[k] = run[k - i].copy()
+            i = j
+    if kind == SyntaxKind.FromImport:
+        var sorted: list[String] = []
+        for i in range(len(parts)):
+            if kinds[i] == Some(SyntaxKind.ImportName):
+                sorted.push(parts[i].copy())
+        sorted.sort_by((a, b) -> a.cmp(b))
+        var k = 0
+        for i in range(len(parts)):
+            if kinds[i] == Some(SyntaxKind.ImportName):
+                parts[i] = sorted[k].copy()
+                k += 1
+    for p in parts:
+        out.push(p)
+
+## Whether the token `children[i]` of the node `n` of kind `parent` is
+## part of its shape: not a comma among the names a `from` imports, which
+## removing one moves, nor a trailing comma (one before a closing bracket,
+## the next significant child, unless it makes a tuple of one).
+pure def counted(
+    src: Src, children: list[Element], i: int, k: SyntaxKind, parent: SyntaxKind, n: int
+) -> bool:
+    if k != SyntaxKind.Comma:
+        return True
+    if parent == SyntaxKind.FromImport:
+        return False
+    var next = i + 1
+    while next < len(children):
+        match children[next]:
+            case Leaf(c):
+                let after = src.token_kind(c)
+                if after.is_trivia():
+                    next += 1
+                    continue
+                if is_close(after):
+                    let elems = len(src.child_nodes(n))
+                    let tuple = match parent:
+                        case TupleExpr | TupleType | TuplePat: True
+                        case _: False
+                    return tuple and elems == 1
+                return True
+            case Node(_):
+                return True
+    return True
+
+pure def is_import(k: SyntaxKind?) -> bool:
+    return match k:
+        case Some(ImportItem) | Some(FromImport): True
+        case _: False

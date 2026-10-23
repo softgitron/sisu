@@ -75,6 +75,26 @@
 #                other is beyond it (it has an error of stage 0's front end
 #                that stage 1 notes without rendering it, which stage 1
 #                names) and may only report fewer of stage 0's diagnostics
+# Then the formatter, from one run of stage 1:
+#
+#   fmt          the text `sisu fmt FILE` leaves (stage 0 formats a copy),
+#                for every `.sisu` file of the conformance suite, the
+#                standard library, the proposal's examples, stage 1's own
+#                sources and its cases; a file with a syntax error is left
+#                as it is
+#   fmt-check    `sisu fmt --check FILE`, standard output and error and the
+#                exit status, for the same files
+#   fmt-again    stage 1's formatted text formatted again, which must be
+#                itself (the formatter's fixed point)
+#   fmt-joined   with --native, all three, of the same files with the lines
+#                inside each bracket joined (stage 1's `deform`), what the
+#                formatters must break again
+#   fmt-spread   with --native, all three, of the same files with a line
+#                break after each comma inside brackets, what the formatters
+#                must join again
+#   fmt-mutants  with --mutants N, all three, of the mutants: the refusals of
+#                those that do not parse, and those that do formatted
+#
 # A difference listed in DISCREPANCIES.md ("- Differs: `path`: outputs") is
 # expected; any other fails the check.
 #
@@ -105,7 +125,8 @@
 #                build --native`) and run that executable for every batch,
 #                instead of `sisu run --` on the interpreter; the outputs
 #                are the same, in minutes instead of an hour; it implies
-#                --self and --check
+#                --self and --check, and adds the classes `build`,
+#                `fmt-joined` and `fmt-spread`
 #   --self       check stage 1 over its own package and the fixed point
 #                (the classes `self` and `fixed`; the second builds stage 1
 #                natively also without --native)
@@ -254,7 +275,19 @@ stage0_sir_level() {
         "$sisu" sir --contracts="$level" "$2" > "$3/$1.sir" 2> /dev/null
     fi
 }
-export -f stage0_syntax check0 stage0_check stage0_sir stage0_human stage0_sir_level
+# What `sisu fmt --check FILE` prints and its status, and the text `sisu
+# fmt` leaves of a copy of the file.
+# (Each in a subshell, whose report of a stage 0 that aborted goes.)
+stage0_fmt() {
+    ("$sisu" fmt --check "$2" > "$3/$1.check.out" 2> "$3/$1.check.err"; exit $?) 2> /dev/null
+    echo "$?" > "$3/$1.check.status"
+    mkdir -p "$3/$1.copy"
+    cp "$2" "$3/$1.copy/file.sisu"
+    ("$sisu" fmt "$3/$1.copy/file.sisu" > /dev/null 2>&1; exit $?) 2> /dev/null
+    mv "$3/$1.copy/file.sisu" "$3/$1.fmt"
+    rmdir "$3/$1.copy"
+}
+export -f stage0_syntax check0 stage0_check stage0_sir stage0_human stage0_sir_level stage0_fmt
 
 # The differences DISCREPANCIES.md lists, one "path output" per line.
 allowed="$work/allowed.txt"
@@ -711,6 +744,137 @@ for class in $check_classes; do
     done
 done
 
+# The formatter: the text `sisu fmt` leaves of each file, what `sisu fmt
+# --check` prints of it and its status, against stage 1's `fmt-batch`; and
+# stage 1's text formatted again, which must be itself.
+find "$here/src" -name '*.sisu' | sort > "$work/sources.list"
+cat "$work/conformance.list" "$work/std.list" "$work/examples.list" "$work/sources.list" \
+    "$work/cases.list" > "$work/fmt.list"
+fmt_summary=""
+class=fmt
+list="$work/$class.list"
+n=$(wc -l < "$list" | tr -d ' ')
+ref="$work/$class.stage0"; out="$work/$class.stage1"
+mkdir -p "$ref" "$out"
+parallel stage0_fmt "$list" "$ref"
+start=$(date +%s.%N)
+if ! stage1 fmt-batch "$out" "$list" > "$work/$class.log" 2> "$work/$class.stderr"; then
+    cat "$work/$class.stderr" >&2
+    echo "check.sh: stage 1 failed formatting the $class files" >&2
+    exit 1
+fi
+end=$(date +%s.%N)
+seconds=$(awk "BEGIN { printf \"%.1f\", $end - $start }")
+for output in fmt fmt-check; do
+    same=0; class_listed=0; class_unlisted=0
+    i=0
+    while read -r f; do
+        i=$((i + 1))
+        rel="${f#"$repo"/}"
+        if [ "$output" = fmt ]; then
+            cmp -s "$ref/$i.fmt" "$out/$i.fmt" && { same=$((same + 1)); continue; }
+            where="stage 0 in $ref/$i.fmt, stage 1 in $out/$i.fmt"
+        else
+            cmp -s "$ref/$i.check.out" "$out/$i.check.out" && cmp -s "$ref/$i.check.err" "$out/$i.check.err" &&
+                cmp -s "$ref/$i.check.status" "$out/$i.check.status" && { same=$((same + 1)); continue; }
+            where="stage 0 in $ref/$i.check.*, stage 1 in $out/$i.check.*"
+        fi
+        if grep -qxF "$rel $output" "$allowed"; then
+            class_listed=$((class_listed + 1))
+            report="$report\n  listed:   $rel: $output"
+        else
+            class_unlisted=$((class_unlisted + 1))
+            report="$report\n  UNLISTED: $rel: $output ($where)"
+        fi
+    done < "$list"
+    total=$((total + n)); identical=$((identical + same))
+    listed=$((listed + class_listed)); unlisted=$((unlisted + class_unlisted))
+    line="$(printf '  %-12s %4d files, %4d identical, %3d differing as listed, %3d otherwise' \
+        "$output" "$n" "$same" "$class_listed" "$class_unlisted")"
+    if [ "$output" = fmt ]; then
+        fmt_summary="$fmt_summary\n$line; stage 1 $(printf '%6s' "$seconds")s"
+    else
+        fmt_summary="$fmt_summary\n$line (the same run)"
+    fi
+done
+# The fixed point: stage 1's text, formatted again, is itself.
+same=0; differing=0
+i=0
+while read -r f; do
+    i=$((i + 1))
+    if [ -s "$out/$i.again" ]; then
+        differing=$((differing + 1))
+        report="$report\n  UNLISTED: ${f#"$repo"/}: fmt-again (stage 1 in $out/$i.again)"
+    else
+        same=$((same + 1))
+    fi
+done < "$list"
+total=$((total + n)); identical=$((identical + same)); unlisted=$((unlisted + differing))
+fmt_summary="$fmt_summary\n$(printf '  %-12s %4d files, %4d unchanged, %3d otherwise (the same run)' \
+    fmt-again "$n" "$same" "$differing")"
+# The same files laid out otherwise, which the formatters must break and
+# join again: a file's text, its verdict and stage 1's fixed point at once.
+# A difference is a listed discrepancy's when it has its mark: stage 0
+# overflowing its stack (D6), or refusing its own output (`D0076`) for a
+# file with an `Option[` that stage 1 formats (D7).
+fmt_explained() {
+    grep -q "has overflowed its stack" "$1.check.err" && return 0
+    grep -q '^error\[D0076\]' "$1.check.err" && ! grep -q '^error\[D0076\]' "$2.check.err" &&
+        grep -qF 'Option[' "$3" && return 0
+    return 1
+}
+others=""
+if [ "$native" = 1 ]; then
+    others="fmt-joined fmt-spread"
+    mkdir -p "$work/deformed"
+    if ! stage1 deform "$work/deformed" "$list" > "$work/deform.log" 2>&1; then
+        cat "$work/deform.log" >&2
+        echo "check.sh: stage 1 could not deform the fmt files" >&2
+        exit 1
+    fi
+    for k in $(seq 1 "$n"); do echo "$work/deformed/j$k.sisu"; done > "$work/fmt-joined.list"
+    for k in $(seq 1 "$n"); do echo "$work/deformed/s$k.sisu"; done > "$work/fmt-spread.list"
+fi
+if [ "$mutants" -gt 0 ]; then
+    others="$others fmt-mutants"
+    cp "$work/mutants.list" "$work/fmt-mutants.list"
+fi
+for class in $others; do
+    list="$work/$class.list"
+    n=$(wc -l < "$list" | tr -d ' ')
+    ref="$work/$class.stage0"; out="$work/$class.stage1"
+    mkdir -p "$ref" "$out"
+    parallel stage0_fmt "$list" "$ref"
+    start=$(date +%s.%N)
+    if ! stage1 fmt-batch "$out" "$list" > "$work/$class.log" 2> "$work/$class.stderr"; then
+        cat "$work/$class.stderr" >&2
+        echo "check.sh: stage 1 failed formatting the $class files" >&2
+        exit 1
+    fi
+    end=$(date +%s.%N)
+    seconds=$(awk "BEGIN { printf \"%.1f\", $end - $start }")
+    same=0; class_listed=0; class_unlisted=0
+    i=0
+    while read -r f; do
+        i=$((i + 1))
+        if cmp -s "$ref/$i.fmt" "$out/$i.fmt" && cmp -s "$ref/$i.check.out" "$out/$i.check.out" &&
+            cmp -s "$ref/$i.check.err" "$out/$i.check.err" &&
+            cmp -s "$ref/$i.check.status" "$out/$i.check.status" && [ ! -s "$out/$i.again" ]; then
+            same=$((same + 1))
+        elif [ ! -s "$out/$i.again" ] && fmt_explained "$ref/$i" "$out/$i" "$f"; then
+            class_listed=$((class_listed + 1))
+            report="$report\n  listed:   $class: $f"
+        else
+            class_unlisted=$((class_unlisted + 1))
+            report="$report\n  UNLISTED: $class: $f (stage 0 in $ref/$i.*, stage 1 in $out/$i.*)"
+        fi
+    done < "$list"
+    total=$((total + n)); identical=$((identical + same))
+    listed=$((listed + class_listed)); unlisted=$((unlisted + class_unlisted))
+    fmt_summary="$fmt_summary\n$(printf '  %-12s %4d files, %4d identical, %3d differing as listed, %3d otherwise; stage 1 %6ss' \
+        "$class" "$n" "$same" "$class_listed" "$class_unlisted" "$seconds")"
+done
+
 # What `build` makes (with --native): the executables of `sisu build
 # --native`, in the debug and the release profile (decision 232), the
 # latter with its manifest's contracts or those `--contracts` names, of a
@@ -957,6 +1121,8 @@ echo "stage 1's lowering at the contract levels of a build against stage 0's (co
 printf "%b\n" "${contracts_summary#\\n}"
 echo "stage 1's check against stage 0's (every diagnostic, in the human and the conformance form):"
 printf "%b\n" "${check_summary#\\n}"
+echo "stage 1's formatter against stage 0's (fmt: the text \`sisu fmt\` leaves, what \`sisu fmt --check\` prints, and its fixed point):"
+printf "%b\n" "${fmt_summary#\\n}"
 if [ -n "$build_summary" ]; then
     echo "stage 1's build against stage 0's (build: the executables, the lockfile and what each prints):"
     printf "%b\n" "$build_summary"

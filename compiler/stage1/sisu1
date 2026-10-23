@@ -12,6 +12,9 @@
 #                                                profile with `--release` (decision 232)
 #   sisu1 run [PATH] [-- ARGS...]                the program built into a temporary directory and
 #                                                run with ARGS, with its exit status
+#   sisu1 fmt [--check] [PATH...]                each file formatted in place, as `sisu fmt`
+#                                                formats it, or with `--check` what would change,
+#                                                with `sisu fmt`'s exit status
 #
 # `check`, `build` and `run` take `--features NAMES` (the root package's
 # features to turn on, separated by commas or spaces, `DEP/FEATURE` for a
@@ -52,6 +55,26 @@ if [ "${1:-}" = build ]; then
     done
     [ "$native" = 1 ] || set -- --native "$@"
     exec "$exe" --home "$compiler" build "$@"
+fi
+# `fmt` exits with stage 0's status (2 for a usage error, 70 for a file
+# the formatter refused as changed), which stage 1 returns as the error
+# `Exit(status=N)`: the run time prints it as the last line of standard
+# error, which goes, and N is the exit status.
+if [ "${1:-}" = fmt ]; then
+    err=$(mktemp)
+    trap 'rm -f "$err"' EXIT
+    "$exe" --home "$compiler" "$@" 2> "$err"
+    status=$?
+    last=$(tail -n 1 "$err")
+    case "$last" in
+        "error: Exit(status="*")")
+            status=${last#error: Exit(status=}
+            status=${status%)}
+            sed '$d' "$err" >&2
+            ;;
+        *) cat "$err" >&2 ;;
+    esac
+    exit "$status"
 fi
 if [ "${1:-}" != run ]; then
     exec "$exe" --home "$compiler" "$@"
