@@ -5576,3 +5576,25 @@ library", "Tasks and the scheduler", "Capabilities", "Stage 2")
      checker (`param_local_ty`) and of lowering (`result` in a contract),
      which stage 1 transcribes. `ownership/reference_params` and
      `contracts/result_references` pin them, natively too.
+256. The structural hash of a value, which `dict` and `set` use for keys
+     and `hash` computes for any value a derived or prelude `Hash` impl
+     would hash, mixes the value's parts into the hasher's state as
+     `Hasher.write_int` mixes an `int`, `(state ^ n) *% 1099511628211`:
+     an integer of up to 64 bits, a `char`'s code, a `bool` as 0 or 1 and
+     a `DateTime`'s nanoseconds as one `int`; a 128-bit integer as its
+     low word, then its high one; a text or `bytes` as its length in
+     bytes, then each byte; a tuple's and a struct's fields in order; an
+     enum's variant index, then its fields; a list's length, then its
+     elements; a float as its bits; `()` and a handle as nothing. The
+     interpreter (`Interp::structural_hash`) and the native runtime
+     (`dict::structural_hash`) compute the same number, so a key hashes
+     alike in both, and a structural hash agrees with a written impl that
+     hashes the same parts in the same order. The hasher's state is its
+     one field.
+257. A type parameter bounded by `Escapable` holds no loan
+     (`Program::can_borrow_in`): every type argument it can stand for must
+     not, so a value of that type can be kept in an owner, sent to a task
+     or stored in a `Shared` without the ownership checker's view rules,
+     which 04's `Escapable` auto trait already requires of the arguments
+     (a type is `Escapable` when nothing in it is a view). A parameter
+     without the bound may hold a loan, as before.

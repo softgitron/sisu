@@ -89,7 +89,7 @@ impl Program {
 
     /// [`Program::can_borrow`] in an environment of bounds: a type
     /// parameter bounded by `Escapable` holds no loan, since every type
-    /// argument it stands for must not (decision 256).
+    /// argument it stands for must not (decision 257).
     pub fn can_borrow_in(&self, ty: &Ty, env: &[Predicate]) -> bool {
         if let Ty::Adt(d, args) = ty
             && let Some(b) = self.refinement_base(*d, args)
