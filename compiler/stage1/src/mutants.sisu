@@ -1,7 +1,12 @@
 ##! Mutated programs, to compare the two front ends where they recover from
 ##! mistakes: the mutations a typing hand makes (deleted, inserted and
 ##! swapped characters), as stage 0's own robustness test makes them,
-##! chosen by a seeded generator so that a run is reproducible.
+##! chosen by a seeded generator so that a run is reproducible. And
+##! programs laid out otherwise, to compare the two formatters on what they
+##! must break and join again (`joined`, `spread`).
+
+from stage1.lexer import lex
+from stage1.syntax.kinds import SyntaxKind
 
 ## What an insertion inserts.
 const PIECES: list[str] = [
@@ -107,3 +112,93 @@ test "mutation is deterministic and changes the text":
         if mutate(text, mut r) != text:
             changed = True
     assert changed
+
+## Where a token is: how deep in brackets and in strings.
+struct Depth:
+    brackets: int
+    strings: int
+
+impl Depth:
+    ## The depth after the token `kind`.
+    pure def after(mut self, kind: SyntaxKind):
+        match kind:
+            case LParen | LBracket | LBrace:
+                self.brackets += 1
+            case RParen | RBracket | RBrace:
+                self.brackets -= 1
+            case StringStart:
+                self.strings += 1
+            case StringEnd:
+                self.strings -= 1
+            case _:
+                pass
+
+    ## Inside brackets and outside every string, where line breaks and
+    ## spaces mean nothing.
+    pure def free(self) -> bool:
+        return self.brackets > 0 and self.strings == 0
+
+pure def is_comment(kind: SyntaxKind) -> bool:
+    return match kind:
+        case Comment | DocComment | ModuleDocComment: True
+        case _: False
+
+## The text with the lines inside each bracket joined: each line break
+## inside brackets and outside strings, with the indentation after it,
+## made a space, but after a comment. What `sisu fmt` must break again
+## where the line is too long.
+pub pure def joined(text: str) -> String:
+    let tokens = lex(text).tokens
+    var out = String.new()
+    var depth = Depth(brackets=0, strings=0)
+    var last = SyntaxKind.Whitespace
+    var i = 0
+    while i < len(tokens):
+        let t = tokens[i]
+        i += 1
+        if t.kind == SyntaxKind.LineBreak and depth.free() and not is_comment(last):
+            out.push(" ")
+            if i < len(tokens) and tokens[i].kind == SyntaxKind.Whitespace:
+                i += 1
+            continue
+        out.push(text.byte_slice(t.start, t.end))
+        depth.after(t.kind)
+        if t.kind != SyntaxKind.Whitespace:
+            last = t.kind
+    return out
+
+## The text with a line break after each comma inside brackets and outside
+## strings that a comment or a line break does not follow already. What
+## `sisu fmt` must join again where the line fits.
+pub pure def spread(text: str) -> String:
+    let tokens = lex(text).tokens
+    var out = String.new()
+    var depth = Depth(brackets=0, strings=0)
+    var i = 0
+    while i < len(tokens):
+        let t = tokens[i]
+        i += 1
+        out.push(text.byte_slice(t.start, t.end))
+        depth.after(t.kind)
+        if t.kind != SyntaxKind.Comma or not depth.free():
+            continue
+        var next = i
+        if next < len(tokens) and tokens[next].kind == SyntaxKind.Whitespace:
+            next += 1
+        if next < len(tokens):
+            let k = tokens[next].kind
+            if is_comment(k) or k == SyntaxKind.LineBreak:
+                continue
+        out.push("\n        ")
+        i = next
+    return out
+
+test "lines inside brackets are joined, but after a comment":
+    let text = "def f(\n    a: int,  # one\n    b: int,\n) -> int:\n    return [\n        a,\n    ][0]\n"
+    let expected = "def f( a: int,  # one\n    b: int, ) -> int:\n    return [ a, ][0]\n"
+    assert joined(text) == expected
+
+test "a line breaks after each comma inside brackets":
+    let text = "def f(a: int, b: int) -> int:\n    return g(a,  # one\n        b, \"x, y\")\n"
+    let expected = "def f(a: int,\n        b: int) -> int:\n    return g(a,  # one\n        b,\n        \"x, y\")\n"
+    assert spread(text) == expected

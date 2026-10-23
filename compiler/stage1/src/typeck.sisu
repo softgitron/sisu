@@ -427,6 +427,29 @@ pub pure def check_file(
         base, [module], [package], catalog, name_error, [], embedded, keep, False, True, features
     )
 
+## The declarations of a program of one file, the root module, resolved
+## against the prelude as a build with its tests resolves them, its bodies
+## unchecked: what `sisu fmt` asks of a file (stage 0's `Db::checked` of the
+## file alone, whose program's names are those its first resolution
+## binds), which written types name error sets.
+pub pure def resolve_file(base: Base, text: str, catalog: Catalog) -> Program:
+    let module = build.module(parse(text, catalog).tree)
+    var sources: list[SourceModule] = []
+    match cfg.filter(module, True, Some(Features.none())).module:
+        case Some(built):
+            sources.push(source_of(built, text))
+        case None:
+            sources.push(source_of(module, text))
+    var r = base.resolver.copy()
+    r.tests = True
+    let package = SourcePackage(name=String.new(), deps=[], trusted=True)
+    r.add_program(sources, [package], base.templates)
+    return r.prog
+
+## The root module of a program of one file, with its syntax.
+pure def source_of(own syntax: Module, text: str) -> SourceModule:
+    return SourceModule(path=[], file=String.new(), syntax=syntax, text=text.to_string(), package=0)
+
 ## Checks a program of several modules and packages (09) against the
 ## resolved prelude, as `check_file` checks one file; with `multi`, every
 ## position is in the conformance form of a program of several files, its

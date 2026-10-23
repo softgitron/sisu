@@ -1,0 +1,4 @@
+# `Option[Option[T]]`: the outer option's `T` is optional, so it stays
+# `Option[...]`, and the inner one is written `T?` (D6).
+def nested(x: Option[Option[int]]) -> int:
+    return 0

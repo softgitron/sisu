@@ -1,0 +1,330 @@
+##! The layout documents of one logical line and their printer (stage 0's
+##! `sisu-fmt/src/doc.rs`): Wadler's "prettier printer" with groups that
+##! print on one line when they fit and break otherwise, as Prettier
+##! implements it. A broken group's line breaks become new lines, indented
+##! by the group's indentation; a trailing comment waits for the next line
+##! break; a comment on a line of its own forces the lines around it.
+##!
+##! The documents of a line are kept in an arena (`Docs`): a document is
+##! its index there, and what a group or an indentation holds is a list of
+##! such indices, kept in the arena too, where the Rust holds a `Vec<Doc>`.
+
+## One piece of a layout.
+pub enum Doc:
+    Text(String)
+    ## A space when its group is flat, a line break when it is broken.
+    Line
+    ## Nothing when its group is flat, a line break when it is broken.
+    Soft
+    ## Its contents (a list of the arena's) `columns` deeper after each of
+    ## their line breaks.
+    Indent(columns: int, docs: int)
+    Group(Group)
+    ## The text only when the enclosing group is broken: a trailing comma.
+    IfBreak(String)
+    ## A trailing comment: printed before the next line break.
+    Suffix(String)
+    ## A comment on a line of its own: a line break before it unless the
+    ## line is empty, and one after it before anything else.
+    Comment(String)
+
+@derive(Eq, Copy)
+pub struct Group:
+    ## Its contents: a list of the arena's.
+    pub docs: int
+    ## Broken whatever the width: a magic trailing comma, a comment.
+    pub force: bool
+    ## Flat only when the rest of the line fits flat after it too, rather
+    ## than up to the rest's first possible line break: a definition's
+    ## parameters break before its return type does (Black's left-hand
+    ## split of a `def`).
+    pub whole_line: bool
+
+## The documents of a line: every piece, and the lists of pieces that
+## groups and indentations hold.
+pub struct Docs:
+    pub nodes: list[Doc]
+    pub lists: list[list[int]]
+
+impl Docs:
+    pub pure def new() -> Docs:
+        return Docs(nodes=[], lists=[])
+
+    ## Adds a piece, and gives its index.
+    pub pure def add(mut self, own d: Doc) -> int:
+        self.nodes.push(d)
+        return len(self.nodes) - 1
+
+    pub pure def text(mut self, s: str) -> int:
+        return self.add(Doc.Text(s.to_string()))
+
+    ## Keeps a list of pieces, and gives its index.
+    pub pure def list(mut self, own docs: list[int]) -> int:
+        self.lists.push(docs)
+        return len(self.lists) - 1
+
+    pub pure def indent(mut self, columns: int, own docs: list[int]) -> int:
+        let l = self.list(docs)
+        return self.add(Doc.Indent(columns=columns, docs=l))
+
+    ## A group of `docs` (stage 0's `Doc::group`).
+    pub pure def group(mut self, own docs: list[int], force: bool) -> int:
+        return self.group_with(docs, force, False)
+
+    pub pure def group_with(mut self, own docs: list[int], force: bool, whole_line: bool) -> int:
+        let l = self.list(docs)
+        return self.add(Doc.Group(Group(docs=l, force=force, whole_line=whole_line)))
+
+@derive(Eq, Copy)
+enum Mode:
+    Flat
+    Break
+
+## The width of a text as the formatter counts it: characters.
+pure def width(s: str) -> int:
+    return len(s)
+
+## Marks every group that holds a comment or a forced group as forced, so
+## it breaks whatever the width: a comment must end its line. Returns
+## whether the list `list` forces its group.
+pure def propagate(mut docs: Docs, list: int) -> bool:
+    var force = False
+    var k = 0
+    while k < len(docs.lists[list]):
+        let d = docs.lists[list][k]
+        k += 1
+        var inner = -1
+        var group: Group? = None
+        match docs.nodes[d]:
+            case Comment(_) | Suffix(_):
+                force = True
+            case Indent(_, l):
+                inner = l
+            case Group(g):
+                group = Some(g)
+            case _:
+                pass
+        if inner >= 0 and propagate(mut docs, inner):
+            force = True
+        if let Some(g) = group:
+            let held = propagate(mut docs, g.docs)
+            if held and not g.force:
+                docs.nodes[d] = Doc.Group(Group(docs=g.docs, force=True, whole_line=g.whole_line))
+            if held or g.force:
+                force = True
+    return force
+
+## Whether the documents of the list `next` fit in `room` columns printed
+## in `mode`, together with what follows them up to its first line break
+## (`rest`, the printer's stack, each with its own mode, or all flat when
+## `rest_flat`).
+pure def fits(
+    docs: Docs, mode: Mode, next: int, rest: list[(int, Mode, int)], room: int, rest_flat: bool
+) -> bool:
+    var left = room
+    var modes: list[Mode] = []
+    var stack: list[int] = []
+    var k = len(docs.lists[next]) - 1
+    while k >= 0:
+        modes.push(mode)
+        stack.push(docs.lists[next][k])
+        k -= 1
+    var rest_at = len(rest)
+    while True:
+        if left < 0:
+            return False
+        if stack.is_empty():
+            if rest_at == 0:
+                return True
+            rest_at -= 1
+            let (_, rest_mode, rest_doc) = rest[rest_at]
+            if rest_flat:
+                modes.push(Mode.Flat)
+            else:
+                modes.push(rest_mode)
+            stack.push(rest_doc)
+            continue
+        let m = modes.pop() ?? Mode.Flat
+        let d = stack.pop() ?? 0
+        var inner = -1
+        var inner_mode = m
+        match docs.nodes[d]:
+            case Text(s):
+                left -= width(s)
+            case Line:
+                if m == Mode.Break:
+                    return True
+                left -= 1
+            case Soft:
+                if m == Mode.Break:
+                    return True
+            case Comment(_):
+                return True
+            case Indent(_, l):
+                inner = l
+            case Group(g):
+                inner = g.docs
+                if g.force:
+                    inner_mode = Mode.Break
+            case IfBreak(s):
+                if m == Mode.Break:
+                    left -= width(s)
+            case Suffix(_):
+                pass
+        if inner >= 0:
+            var j = len(docs.lists[inner]) - 1
+            while j >= 0:
+                modes.push(inner_mode)
+                stack.push(docs.lists[inner][j])
+                j -= 1
+
+## The printer's position: the text so far, its column, and whether the
+## current line holds anything but its indentation. Spaces at the end of
+## the text are held back (`spaces`) until something else is written,
+## since a line ends without them.
+struct Out:
+    text: String
+    spaces: int
+    col: int
+    fresh: bool
+    suffixes: list[String]
+
+impl Out:
+    pure def newline(mut self, at: int):
+        for k in range(len(self.suffixes)):
+            let s = self.suffixes[k].copy()
+            self.write(s)
+        self.suffixes.clear()
+        self.spaces = 0
+        self.text.push("\n")
+        self.spaces = at
+        self.col = at
+        self.fresh = True
+
+    pure def push(mut self, s: str):
+        self.write(s)
+        self.col += width(s)
+        self.fresh = False
+
+    ## Adds `s` to the text, its spaces at the end held back.
+    pure def write(mut self, s: str):
+        let n = s.byte_len()
+        var k = n
+        while k > 0 and s.byte_at(k - 1) == 32:
+            k -= 1
+        if k == 0:
+            self.spaces += n
+            return
+        if self.spaces > 0:
+            self.text.push(" ".repeat(self.spaces))
+        if k == n:
+            self.text.push(s)
+        else:
+            self.text.push(s.byte_slice(0, k))
+        self.spaces = n - k
+
+## Prints the documents of the list `top`, one logical line, at
+## indentation `indent` in a line of `max` columns. The result has no
+## final line break.
+pub pure def print(mut docs: Docs, top: int, indent: int, max: int) -> String:
+    _ = propagate(mut docs, top)
+    var out = Out(text=String.new(), spaces=indent, col=indent, fresh=True, suffixes=[])
+    # Set after a comment on a line of its own: what comes next starts a
+    # new line.
+    var need_break = False
+    var stack: list[(int, Mode, int)] = []
+    var k = len(docs.lists[top]) - 1
+    while k >= 0:
+        stack.push((indent, Mode.Break, docs.lists[top][k]))
+        k -= 1
+    while not stack.is_empty():
+        let (ind, mode, d) = stack.pop() ?? (0, Mode.Break, 0)
+        var inner = -1
+        var inner_ind = ind
+        var inner_mode = mode
+        match docs.nodes[d]:
+            case Text(s):
+                if need_break:
+                    out.newline(ind)
+                    need_break = False
+                out.push(s)
+            case Line:
+                if mode == Mode.Break or need_break:
+                    out.newline(ind)
+                    need_break = False
+                else:
+                    out.push(" ")
+            case Soft:
+                if mode == Mode.Break or need_break:
+                    out.newline(ind)
+                    need_break = False
+            case Comment(c):
+                if not out.fresh:
+                    out.newline(ind)
+                out.push(c)
+                need_break = True
+            case Indent(n, l):
+                inner = l
+                inner_ind = ind + n
+            case Group(g):
+                inner = g.docs
+                if g.force:
+                    inner_mode = Mode.Break
+                elif mode == Mode.Flat:
+                    inner_mode = Mode.Flat
+                elif fits(docs, Mode.Flat, g.docs, stack, max - out.col, g.whole_line):
+                    inner_mode = Mode.Flat
+                else:
+                    inner_mode = Mode.Break
+            case IfBreak(s):
+                if mode == Mode.Break:
+                    out.push(s)
+            case Suffix(s):
+                out.suffixes.push(s.copy())
+        if inner >= 0:
+            var j = len(docs.lists[inner]) - 1
+            while j >= 0:
+                stack.push((inner_ind, inner_mode, docs.lists[inner][j]))
+                j -= 1
+    let held = out.suffixes.copy()
+    for s in held:
+        out.write(s)
+    return out.text
+
+## A call of `name` with `args`, as the formatter lays one out.
+pure def call(mut docs: Docs, name: str, args: list[str]) -> int:
+    var inner: list[int] = []
+    for i in range(len(args)):
+        if i > 0:
+            inner.push(docs.text(","))
+            inner.push(docs.add(Doc.Line))
+        inner.push(docs.text(args[i]))
+    inner.push(docs.add(Doc.IfBreak(",".to_string())))
+    let soft = docs.add(Doc.Soft)
+    let args_group = docs.group(inner, False)
+    var outer: list[int] = [docs.text("{name}(")]
+    outer.push(docs.indent(4, [soft, args_group]))
+    outer.push(docs.add(Doc.Soft))
+    outer.push(docs.text(")"))
+    let g = docs.group(outer, False)
+    return docs.list([g])
+
+test "a group is flat when it fits":
+    var docs = Docs.new()
+    let top = call(mut docs, "f", ["a", "b"])
+    assert print(mut docs, top, 0, 100) == "f(a, b)"
+
+test "a group hugs, then breaks one per line":
+    var docs = Docs.new()
+    let top = call(mut docs, "function", ["aaaa", "bbbb"])
+    assert print(mut docs, top, 0, 16) == "function(\n    aaaa, bbbb\n)"
+    var again = Docs.new()
+    let top_again = call(mut again, "function", ["aaaa", "bbbb"])
+    assert print(mut again, top_again, 0, 12) == "function(\n    aaaa,\n    bbbb,\n)"
+
+test "a trailing comment waits for the line break":
+    var docs = Docs.new()
+    let x = docs.text("x")
+    let c = docs.add(Doc.Suffix("  # c".to_string()))
+    let top = docs.list([x, c])
+    assert print(mut docs, top, 4, 100) == "    x  # c"

@@ -16,6 +16,10 @@
 ##! sisu run -- sir FILE                      # what `sisu sir FILE` prints: the program's SIR
 ##! sisu run -- ownership FILE                # the ownership checker's diagnostics, as `sisu check --format=ids`
 ##! sisu run -- sir-batch OUT LIST            # both, for every file LIST names
+##! sisu run -- fmt [--check] [PATH...]       # what `sisu fmt` does, its status as `Exit(status=N)`
+##! sisu run -- fmt-batch OUT LIST            # what it does of every file LIST names
+##! sisu run -- fmt-profile LIST              # where the formatter's time goes over them
+##! sisu run -- deform OUT LIST               # the files laid out otherwise, for the formatters
 ##! ```
 ##!
 ##! `tokens` and `parse` print to standard output, and the diagnostics in
@@ -45,11 +49,23 @@
 ##! them. `sir-batch` writes `OUT/n.sir`, `OUT/n.ownership` and
 ##! `OUT/n.beyond`, and prints the time the front end, lowering and the
 ##! ownership checker took.
+##! `fmt` formats each file or each `.sisu` file under each directory in
+##! place, or with `--check` prints what would change, as `sisu fmt` does
+##! (`fmt`, `format.sisu`); `fmt-batch` writes, for the `n`th file,
+##! `OUT/n.check.out`, `OUT/n.check.err` and `OUT/n.check.status` (what `fmt
+##! --check` prints of it, and its status), `OUT/n.fmt` (the text `fmt`
+##! leaves) and `OUT/n.again` (empty when formatting that text again changes
+##! nothing). `deform` writes `OUT/jN.sisu` and `OUT/sN.sisu`, the `N`th file
+##! with the lines inside its brackets joined, and with a line break after
+##! each comma inside them (`mutants.joined`, `mutants.spread`).
 ##! `--catalog PATH` names the message catalog, by default
 ##! `../catalog/messages.catalog`.
 
 import stage1.borrowck
 import stage1.cfg
+import stage1.diff
+import stage1.fmt
+import stage1.format
 import stage1.interp
 import stage1.lower
 import stage1.package
@@ -67,6 +83,7 @@ from stage1.diag import (
     Msg,
     Param,
     quote,
+    render_human,
     render_human_files,
     render_ids,
     render_ids_files,
@@ -74,9 +91,10 @@ from stage1.diag import (
     sort_filed,
     sort_unique,
 )
+from stage1.fmt import Refusal
 from stage1.lexer import Lexed, lex
 from stage1.lower.names import CONTRACTS_ALL, CONTRACTS_OFF, CONTRACTS_PRECONDITIONS
-from stage1.mutants import Rng, mutate
+from stage1.mutants import Rng, joined, mutate, spread
 from stage1.package import FeatureRequest, Layout, Problem, Target
 from stage1.parser import parse, parse_lexed
 from stage1.resolve import Environment, ModuleNames, NamedModule, imported_std_modules
@@ -98,8 +116,13 @@ error UsageError:
 ## Why a command failed after saying why on standard error: a Sisu program
 ## exits with status 1 only by returning an error from `main`, which the
 ## run time then prints, `error: Failed`, after what the command printed.
+## `fmt` fails with the status stage 0 exits with (2 for a usage error, 70
+## for a file the formatter refused as changed): the run time prints
+## `error: Exit(status=N)` as the last line, which `sisu1` turns into the
+## exit status.
 error CommandError:
     Failed
+    Exit(status: int)
 
 def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     var args = sys.env.args()
@@ -524,6 +547,101 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         return build_command(
             sys, home, path, native, release, locked, level, output, request, catalog
         )
+    if command == "fmt":
+        # `fmt [--check] [PATH...]`: what `sisu fmt` does, its exit status
+        # given as `Exit(status=N)`.
+        let status = fmt_command(sys, home, rest, catalog)?
+        if status != 0:
+            return Err(Exit(status=status))
+        return Ok(())
+    if command == "fmt-batch" and len(rest) == 3:
+        # For each file, what `sisu fmt --check FILE` prints and its status,
+        # the text `sisu fmt FILE` leaves, and whether formatting that text
+        # again changes it.
+        let out_dir = rest[1].copy()
+        let list = sys.fs.read_to_string(Path.new(rest[2].copy()))?
+        var base: typeck.Base? = None
+        var n = 0
+        for path in list.lines():
+            if path.is_empty():
+                continue
+            n += 1
+            var report = FmtReport(out=String.new(), err=String.new(), status=0, changed=None)
+            var text = String.new()
+            var again = String.new()
+            match sys.fs.read_to_string(Path.new(path)):
+                case Ok(t):
+                    text = t
+                    report = fmt_file(sys, home, path, text, True, mut base, catalog)?
+                    if let Some(out) = report.changed.copy():
+                        let next = fmt_file(sys, home, path, out, True, mut base, catalog)?
+                        if next.changed.is_some() or next.status != 0:
+                            again = "formatting the formatted text changes it\n{next.out}{next.err}"
+                case Err(e):
+                    report.err = cannot_read(path, e, catalog)
+                    report.status = 1
+            sys.fs.write_text(Path.new("{out_dir}/{n}.check.out"), report.out)?
+            sys.fs.write_text(Path.new("{out_dir}/{n}.check.err"), report.err)?
+            sys.fs.write_text(Path.new("{out_dir}/{n}.check.status"), "{report.status}\n")?
+            sys.fs.write_text(Path.new("{out_dir}/{n}.fmt"), report.changed ?? text)?
+            sys.fs.write_text(Path.new("{out_dir}/{n}.again"), again)?
+        print("files {n}")
+        return Ok(())
+    if command == "fmt-profile" and len(rest) == 2:
+        # Where the formatter's time goes over the files LIST names, each
+        # formatted as `fmt --check` formats it: parsing, laying out,
+        # parsing the result again, the two shapes, and the hunks.
+        let list = sys.fs.read_to_string(Path.new(rest[1].copy()))?
+        var times = [0, 0, 0, 0, 0, 0]
+        var n = 0
+        for path in list.lines():
+            if path.is_empty():
+                continue
+            n += 1
+            let text = sys.fs.read_to_string(Path.new(path))?
+            let t0 = now(sys)
+            let parsed = parse(text, catalog)
+            let t1 = now(sys)
+            let out = fmt.lines.format_tree(parsed.tree, set())
+            let t2 = now(sys)
+            times[0] += t1 - t0
+            times[1] += t2 - t1
+            if out == text:
+                continue
+            let again = parse(out, catalog)
+            let t3 = now(sys)
+            let a = fmt.shape.shape_of(parsed.tree)
+            let t4 = now(sys)
+            let b = fmt.shape.shape_of(again.tree)
+            let t5 = now(sys)
+            let d = diff.hunks(text, out, 2)
+            let t6 = now(sys)
+            times[2] += t3 - t2
+            times[3] += t4 - t3
+            times[4] += t5 - t4
+            times[5] += t6 - t5
+            if a != b or d.is_empty():
+                print("{path}: the shapes differ, or no hunks")
+        let parts = "parse {ms(times[0])} ms layout {ms(times[1])} ms parse again {ms(times[2])} ms"
+        print(
+            "files {n} {parts} shapes {ms(times[3])} and {ms(times[4])} ms hunks {ms(times[5])} ms"
+        )
+        return Ok(())
+    if command == "deform" and len(rest) == 3:
+        # For the `n`th file, its text with the lines inside brackets joined
+        # (`OUT/jN.sisu`) and with a line break after each comma inside
+        # brackets (`OUT/sN.sisu`): what a formatter must break and join.
+        let out_dir = rest[1].copy()
+        let list = sys.fs.read_to_string(Path.new(rest[2].copy()))?
+        var n = 0
+        for path in list.lines():
+            if path.is_empty():
+                continue
+            n += 1
+            let text = sys.fs.read_to_string(Path.new(path))?
+            sys.fs.write_text(Path.new("{out_dir}/j{n}.sisu"), joined(text))?
+            sys.fs.write_text(Path.new("{out_dir}/s{n}.sisu"), spread(text))?
+        return Ok(())
     if command == "mutate" and len(rest) == 5:
         let seed = rest[1].parse_int() ?? 1
         let count = rest[2].parse_int() ?? 0
@@ -1668,54 +1786,12 @@ def write_lockfile(
     if locked:
         var what = "there is none".to_string()
         if let Some(o) = old:
-            what = diff_lines(o, text)
+            what = diff.lines(o, text)
         let params = [Param(name="what".to_string(), value=what)]
         emit("", catalog.plain_error("cli.locked", params))
         return Ok(False)
     sys.fs.write_text(Path.new(at), text)?
     return Ok(True)
-
-## `old` against `new`, a line each, marked `  `, `- ` or `+ ` from their
-## longest common subsequence of lines (stage 0's `diff::lines`).
-pure def diff_lines(old: str, new: str) -> String:
-    var a: list[String] = []
-    for l in old.lines():
-        a.push(l.to_string())
-    var b: list[String] = []
-    for l in new.lines():
-        b.push(l.to_string())
-    let n = len(a)
-    let m = len(b)
-    # The length of the longest common subsequence of each pair of
-    # suffixes, a row of `m + 1` per line of `a` and one past them.
-    var lcs: list[int] = []
-    for _ in range((n + 1) * (m + 1)):
-        lcs.push(0)
-    var i = n - 1
-    while i >= 0:
-        var j = m - 1
-        while j >= 0:
-            if a[i] == b[j]:
-                lcs[i * (m + 1) + j] = lcs[(i + 1) * (m + 1) + j + 1] + 1
-            else:
-                lcs[i * (m + 1) + j] = max(lcs[(i + 1) * (m + 1) + j], lcs[i * (m + 1) + j + 1])
-            j -= 1
-        i -= 1
-    var out: list[String] = []
-    var x = 0
-    var y = 0
-    while x < n or y < m:
-        if x < n and y < m and a[x] == b[y]:
-            out.push("  {a[x]}")
-            x += 1
-            y += 1
-        elif x < n and (y == m or lcs[(x + 1) * (m + 1) + y] >= lcs[x * (m + 1) + y + 1]):
-            out.push("- {a[x]}")
-            x += 1
-        else:
-            out.push("+ {b[y]}")
-            y += 1
-    return out.join("\n")
 
 ## The members of a workspace with an application (`src/main.sisu`), the
 ## ones `sir` and `run` choose among.
@@ -2151,6 +2227,169 @@ struct Times:
     parse: int
     dump: int
     ast: int
+
+## What `sisu fmt` prints of one file, its status, and the canonical text
+## when it differs from the file's (stage 0's `fmt`, for one file).
+struct FmtReport:
+    out: String
+    err: String
+    status: int
+    changed: String?
+
+## `fmt [--check] [PATH...]` (stage 0's `sisu fmt`, 10, "Formatter"):
+## formats each file, and each `.sisu` file under each directory, in place;
+## without a path, the package's (the files under the directory of its
+## manifest). There are no options of style. `--check` writes nothing and
+## reports each file that is not formatted, with what would change. A file
+## with a syntax error is reported and left as it is. The exit status is
+## stage 0's: 0, 1 when a file is not formatted or could not be, 2 for a
+## usage error and 70 for a file the formatter refused as changed.
+def fmt_command(sys: System, home: str, rest: list[String], catalog: Catalog) -> int ! IoError:
+    var flags: list[String] = []
+    var paths: list[String] = []
+    for k in range(1, len(rest)):
+        if rest[k].starts_with("--"):
+            flags.push(rest[k].copy())
+        else:
+            paths.push(rest[k].copy())
+    for f in flags:
+        if f != "--check":
+            let params = [
+                Param(name="option".to_string(), value=f.copy()),
+                Param(name="command".to_string(), value="fmt".to_string()),
+            ]
+            emit("", catalog.plain_error("cli.unknown-option", params))
+            return Ok(2)
+    let check = not flags.is_empty()
+    var files: list[String] = []
+    if paths.is_empty():
+        let found = nearest_package(sys, "fmt", catalog) else:
+            return Ok(2)
+        sisu_files(sys, found, mut files)
+    for p in paths:
+        if package.is_dir(sys.fs, p):
+            let before = len(files)
+            sisu_files(sys, p, mut files)
+            if len(files) == before:
+                let params = [Param(name="path".to_string(), value=p.copy())]
+                emit("", catalog.plain_error("cli.fmt-nothing", params))
+        else:
+            files.push(p.copy())
+    var status = 0
+    var base: typeck.Base? = None
+    for f in files:
+        var text = String.new()
+        match sys.fs.read_to_string(Path.new(f)):
+            case Ok(t):
+                text = t
+            case Err(e):
+                emit("", cannot_read(f, e, catalog))
+                status = 1
+                continue
+        let report = fmt_file(sys, home, f, text, check, mut base, catalog)?
+        emit(report.out, report.err)
+        if report.status != 0:
+            status = report.status
+        if check:
+            continue
+        if let Some(out) = report.changed:
+            if let Err(e) = sys.fs.write_text(Path.new(f), out):
+                let params = [
+                    Param(name="path".to_string(), value=f.copy()),
+                    Param(name="reason".to_string(), value=io_reason(e)),
+                ]
+                emit("", catalog.plain_error("cli.cannot-write", params))
+                status = 1
+    return Ok(status)
+
+## What `sisu fmt` makes of the file `path` whose text is `text`: nothing
+## to say of a file already formatted; with `check`, the hunks of the
+## change on standard output, status 1; the syntax errors of a file that
+## has any, and `D0075`, status 1; `D0076` for one the formatter refused as
+## changed, status 70. The standard library is resolved, into `base`, when
+## a first file needs it.
+def fmt_file(
+    sys: System,
+    home: str,
+    path: str,
+    text: str,
+    check: bool,
+    mut base: typeck.Base?,
+    catalog: Catalog,
+) -> FmtReport ! IoError:
+    let written = format.to_resolve(text, catalog)
+    if not written.is_empty() and base.is_none():
+        base = Some(typeck.base(std_texts(sys, home)?, catalog))
+    return Ok(fmt_report(base, path, text, written, check, catalog))
+
+pure def fmt_report(
+    base: typeck.Base?, path: str, text: str, written: list[String], check: bool, catalog: Catalog
+) -> FmtReport:
+    var report = FmtReport(out=String.new(), err=String.new(), status=0, changed=None)
+    match format.format_file(base, text, written, catalog):
+        case Ok(out):
+            if out == text:
+                return report
+            if check:
+                let params = [
+                    Param(name="file".to_string(), value=path.to_string()),
+                    Param(name="diff".to_string(), value=diff.hunks(text, out, 2)),
+                ]
+                report.out = catalog.render("cli.fmt-would-change", params)
+                report.out.push("\n")
+                report.status = 1
+            report.changed = Some(out)
+        case Err(Refusal.Syntax(diagnostics)):
+            report.err = render_human(path, text, diagnostics, catalog)
+            let params = [Param(name="file".to_string(), value=path.to_string())]
+            report.err.push(catalog.plain_error("cli.fmt-syntax", params))
+            report.status = 1
+        case Err(Refusal.Changed(at)):
+            let params = [
+                Param(name="file".to_string(), value=path.to_string()),
+                Param(name="at".to_string(), value="{at}"),
+            ]
+            report.err = catalog.plain_error("cli.fmt-unstable", params)
+            report.status = 70
+    return report
+
+## `cli.cannot-read` for the file `path`.
+pure def cannot_read(path: str, e: IoError, catalog: Catalog) -> String:
+    let params = [
+        Param(name="path".to_string(), value=path.to_string()),
+        Param(name="reason".to_string(), value=io_reason(e)),
+    ]
+    return catalog.plain_error("cli.cannot-read", params)
+
+## The text of an I/O error as stage 0's messages give it, Rust's: the
+## host's own words for what is not one of the kinds of `IoError`.
+pure def io_reason(e: IoError) -> String:
+    return match e:
+        case NotFound(_): "No such file or directory (os error 2)".to_string()
+        case PermissionDenied(_): "Permission denied (os error 13)".to_string()
+        case AlreadyExists(_): "File exists (os error 17)".to_string()
+        case InvalidData(_): "stream did not contain valid UTF-8".to_string()
+        case Interrupted: "Interrupted system call (os error 4)".to_string()
+        case Other(message): message.copy()
+        case _: "{e:?}"
+
+## Every `.sisu` file under `dir`, sorted, leaving out hidden directories
+## and `target` (stage 0's `sisu_files`).
+def sisu_files(sys: System, dir: str, mut out: list[String]):
+    let entries = sys.fs.list_dir(Path.new(dir)) else:
+        return
+    var paths: list[String] = []
+    for e in entries:
+        paths.push(e.as_str().to_string())
+    paths.sort()
+    for p in paths:
+        let name = package.file_name(p)
+        if name.starts_with(".") or name == "target":
+            continue
+        if package.is_dir(sys.fs, p):
+            sisu_files(sys, p, mut out)
+        elif name.ends_with(".sisu"):
+            out.push(p.copy())
 
 def now(sys: System) -> int:
     return sys.clock.now().unix_nanos()

@@ -1,0 +1,57 @@
+##! The formatter with the names it needs (10, "Formatter": `T ! E`, not
+##! `Result[T, E]`; stage 0's `sisu-driver/src/format.rs`). `fmt` works on
+##! the syntax alone, and whether `E` is an error set is not in it: the
+##! driver resolves the file and tells the formatter which written types
+##! name error sets.
+
+import stage1.fmt
+import stage1.typeck
+from stage1.diag import Catalog
+from stage1.fmt import Refusal
+from stage1.typeck.program import DefKind, ModuleId, Program
+
+## Whether the type written `written` (`E`, `json.Error`) names an error
+## set where `module` sees it.
+pub pure def names_error_set(prog: Program, module: ModuleId, written: str) -> bool:
+    var segments: list[str] = []
+    for s in written.split("."):
+        segments.push(s.trim())
+    var found = prog.lookup(module, segments[0])
+    for k in range(1, len(segments)):
+        let d = found else:
+            return False
+        var inside: ModuleId? = None
+        if let DefKind.Module(m) = prog.defs[d.index].kind():
+            inside = Some(m)
+        let m = inside else:
+            return False
+        found = prog.lookup_in(m, segments[k])
+    if let Some(d) = found:
+        return prog.is_error_set(d)
+    return False
+
+## What the formatter asks of a file before it formats it: the types
+## written as the `E` of a `Result[T, E]` that it writes `T ! E` when `E`
+## names an error set. Stage 0 resolves only a file that writes `Result[`.
+pub pure def to_resolve(text: str, catalog: Catalog) -> list[String]:
+    if not text.contains("Result["):
+        return []
+    return fmt.written_errors(text, catalog)
+
+## The canonical text of `text`, resolved as a program of its own (stage
+## 0's `format_file`: a module of a package without the package's other
+## modules, so a name it imports from them is not known as an error set,
+## and its `Result[T, E]` stays as written). `written` are the types
+## `to_resolve` lists, which `base`, the resolved standard library, is
+## given for: a file that needs no answer is not resolved at all.
+pub pure def format_file(
+    base: typeck.Base?, text: str, written: list[String], catalog: Catalog
+) -> String ! Refusal:
+    var sets: set[String] = set()
+    if not written.is_empty():
+        if let Some(b) = base:
+            let prog = typeck.resolve_file(b, text, catalog)
+            for w in written:
+                if names_error_set(prog, prog.root, w):
+                    _ = sets.add(w.copy())
+    return fmt.format_with(text, sets, catalog)

@@ -1,22 +1,31 @@
 # Where stage 1 and stage 0 differ
 
 Stage 1 transcribes the Rust front end (`sisu-lexer`, `sisu-syntax`,
-`sisu-parser`, and in part `sisu-resolve` and `sisu-typeck`) rule for
-rule. Where the Rust behaviour is an accident rather than a rule, stage 1
-does what the documents say instead, and the difference is listed here,
-with the file that shows it, both outputs, and the documents that decide.
-The coordinator decides which side changes (D-079); until then `check.sh`
-accepts exactly the differences listed under **Differs** and fails on any
-other.
+`sisu-parser`, and in part `sisu-resolve` and `sisu-typeck`) and the
+formatter (`sisu-fmt`) rule for rule. Where the Rust behaviour is an
+accident rather than a rule, stage 1 does what the documents say instead,
+and the difference is listed here, with the file that shows it, both
+outputs, and the documents that decide. The coordinator decides which
+side changes (D-079); until then `check.sh` accepts exactly the
+differences listed under **Differs** and fails on any other.
 
 The **Differs** lines are read by `check.sh`: a path from the repository
 root, then the outputs that differ (`tokens` is `sisu tokens --trivia` with
 its diagnostics, `tree` is `sisu parse --tree` with its diagnostics,
 `trivia-tree` is `sisu parse --tree --trivia`, `names` is the name
 diagnostics of `sisu check --format=ids`, those stage 1's resolver
-reports, and `types` the type checker's diagnostics of the same command).
+reports, `types` the type checker's diagnostics of the same command, `fmt`
+the text `sisu fmt` leaves of the file, and `fmt-check` what `sisu fmt
+--check` prints of it, with its exit status).
 
-None is listed now. The first round's five (D1 to D5: a line break inside
+Two are listed now, both of the formatter, which stage 1 transcribed this
+round: D6 and D7, each shown by a case of its own in `cases/fmt/`, and
+neither met by any other file of the corpus, the standard library or
+stage 1's own sources, nor by their mutants (`check.sh --mutants 2000
+--seed 7`); in the classes of the files laid out otherwise, only those
+two cases' own copies show them, which `check.sh` knows by their marks
+(stage 0 overflowing its stack, or refusing its own output for a file
+with an `Option[`). The first round's five (D1 to D5: a line break inside
 the interpolation of a one-line string, `\u{+41}` as an escape, a nested
 struct resetting "reported once per body", one unknown name in a
 parametrised test reported once per case, and the count `E0305` reports
@@ -25,8 +34,95 @@ as stage 1 does (docs/architecture.md, decisions 165 to 168 and 179). The
 stage-1 cases that showed them stay in `cases/` and give identical outputs,
 and the conformance suite has a case for each (`syntax/newline_in_interpolation`,
 `syntax/unicode_escape_sign`, `syntax/nested_struct_members`,
-`testing/parametrised_once`, `types/keyword_only_count`). A new
-difference is listed from D6 on.
+`testing/parametrised_once`, `types/keyword_only_count`).
+
+## D6. `Option[Option[T]]` overflows the formatter's stack
+
+- Differs: `compiler/stage1/cases/fmt/option_of_option.sisu`: fmt, fmt-check
+
+```sisu
+def nested(x: Option[Option[int]]) -> int:
+    return 0
+```
+
+`option_sugar` (`sisu-fmt/src/lines.rs`) decides whether an `Option[T]`
+is written `T?`. For the inner option of `Option[Option[T]]` it asks
+whether the outer one is written so (`option_sugar(tree, outer) ==
+Some(n)`, since "`Option[Option[T]]` written `Option[T]?` would be
+`T??`"), and to answer, the outer one asks whether its argument, the inner
+one, is (`option_sugar(tree, arg)`, to know whether its `T` is itself
+optional): the two ask each other without end. `sisu fmt` overflows its
+stack and aborts on any file that writes `Option[Option[T]]` with a `T`
+that `?` may follow (a name, a tuple, `ref`, `dyn` or a parenthesised
+type), and so does `sisu parse --shape`, which asks the same.
+
+Stage 0 (`sisu fmt --check`, exit status 134; `sisu fmt` leaves the file
+as it is):
+
+```text
+thread 'main' has overflowed its stack
+fatal runtime error: stack overflow, aborting
+```
+
+Stage 1 (exit status 1; `sisu fmt` writes the new line):
+
+```text
+- def nested(x: Option[Option[int]]) -> int:
++ def nested(x: Option[int?]) -> int:
+```
+
+**The documents support stage 1.** Decision 152: the formatter writes
+`T?` for `Option[T]` "unless `T` is optional, a result or a function type,
+or the option is behind `ref`"; the outer option's `T` is optional, so it
+stays `Option[...]`, and the inner one's is `int`, so it is `int?` (10,
+"canonical spelling of sugar"; docs/architecture.md, "`Option[T]` written
+`T?` where that reads unambiguously"). Stage 1 breaks the cycle where it
+starts (`option_sugar_assuming`): the inner option, asking about the outer
+one, has it take its argument for written `T?`, so the outer one, whose
+`T` is then optional, is not, and the inner one is. The answer is the
+same for every other input, where neither asks about the other. The fix
+in stage 0 is the same: pass the asking option down to the outer one's
+question.
+
+## D7. Spaces inside `Option[ T ]` make the formatter refuse the file
+
+- Differs: `compiler/stage1/cases/fmt/option_with_spaces.sisu`: fmt, fmt-check
+
+```sisu
+def spaced(x: Option[ int ]) -> int:
+    return 0
+```
+
+`option_sugar` leaves an `Option[T]` as written when its node or its type
+arguments hold any trivia ("Nothing in it but the type: a comment would
+have nowhere to go"), spaces and line breaks among them. The formatter
+then writes the option's tokens without the spaces, `Option[int]`, whose
+shape is an option's (`shape.rs` asks `option_sugar` too), where the
+input's was a path's: the self-check refuses the formatter's own output,
+and the file is left as it is. A file that breaks a long `Option[...]`
+over lines is refused the same way.
+
+Stage 0 (`sisu fmt --check`, exit status 70):
+
+```text
+error[D0076]: internal error: the formatted `option_with_spaces.sisu` would not parse to the same program (from byte 132); it was left as it is
+```
+
+Stage 1 (exit status 1):
+
+```text
+- def spaced(x: Option[ int ]) -> int:
++ def spaced(x: int?) -> int:
+```
+
+**The documents support stage 1.** Spaces are not among decision 152's
+exceptions, `D0076` is "a bug of the formatter, reported rather than
+written" (`sisu-fmt/src/lib.rs`), and the code's own reason is the
+comment, which is all `result_parts` looks for in a `Result[T, E]`
+(`has_comment`), whose spaces never stop `T ! E`. Stage 1 leaves the
+option as written only when a comment is among its own tokens or its
+type arguments'. The fix in stage 0 is the same: `has_comment` in place of
+the test for trivia in `option_sugar`.
 
 ## Not discrepancies, but found on the way
 

@@ -1,0 +1,30 @@
+# Blank lines: none at the start of a block or of the file, one around each
+# top-level definition, at most one elsewhere, none between an attribute
+# and its item.
+const LIMIT: int = 3
+const OTHER: int = 4
+
+
+
+const LAST: int = 5
+@derive(Eq)
+
+struct Point:
+
+    x: int
+
+
+    y: int
+def norm(p: Point) -> int:
+
+
+    let a = p.x * p.x
+
+
+    let b = p.y * p.y
+    return a + b
+enum Shape:
+    Dot
+    Line(int)
+test "points compare":
+    assert Point(x=1, y=2) == Point(x=1, y=2)

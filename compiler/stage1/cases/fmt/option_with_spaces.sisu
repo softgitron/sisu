@@ -1,0 +1,4 @@
+# `Option[ T ]`, with spaces inside its brackets, written `T?` as any other
+# (D7).
+def spaced(x: Option[ int ]) -> int:
+    return 0

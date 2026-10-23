@@ -1,0 +1,21 @@
+# A run of imports sorted, `import`s first, with the names a `from`
+# imports sorted too, and the unused ones removed: a name is used when the
+# file spells it outside the imports, or in a doc comment. A run ends at a
+# blank line or a comment.
+import json
+from std.collections import SortedSet, Deque
+import std.string as text
+from std.collections import (Heap, BitSet)
+import std.time
+
+from std.string import Builder
+# A comment ends the run.
+import std.math  # kept: a comment inside
+
+## `Heap` is named here, so its import stays.
+def main():
+    print(json.parse("1"))
+    var q: Deque[int] = Deque.new()
+    q.push_back(1)
+    var b = text.Builder.new()
+    b.push("x")
