@@ -714,17 +714,20 @@ done
 # What `build` makes (with --native): the executables of `sisu build
 # --native`, in the debug and the release profile (decision 232), the
 # latter with its manifest's contracts or those `--contracts` names, of a
-# file, a package and a workspace (each member), copied into the work
-# directory, against those stage 1's `build` makes there from its own SIR,
-# with what each prints and the lockfile it writes (09), also by a plain
-# build and one that `--locked` stops. A run of stage 1 that fails ends
-# with the line `error: Failed` (its `main` returned an error), which is
-# not stage 0's and is left out.
+# file, a package, a workspace (each member) and a package with features
+# built with `--features` and `--no-default-features` (decision 250),
+# copied into the work directory, against those stage 1's `build` makes
+# there from its own SIR, with what each prints and the lockfile it writes
+# (09), also by a plain build, one that `--locked` stops and one that names
+# no feature (`D0112`). A run of stage 1 that fails ends with the line
+# `error: Failed` (its `main` returned an error), which is not stage 0's
+# and is left out.
 build_summary=""
 if [ "$native" = 1 ]; then
     mkdir -p "$work/build"
     cp "$compiler/conformance/cases/examples/hello.sisu" "$compiler/conformance/cases/contracts/checks.sisu" "$work/build/"
     cp -r "$compiler/conformance/cases/packages/workspace.pkg" "$work/build/workspace"
+    cp -r "$compiler/conformance/cases/packages/features.pkg" "$work/build/features"
     mkdir -p "$work/build/contracts/src"
     cp "$compiler/conformance/cases/contracts/checks.sisu" "$work/build/contracts/src/main.sisu"
     printf '[package]\nname = "contracts"\nversion = "0.1.0"\n\n[profile.release]\ncontracts = "off"\n' \
@@ -787,6 +790,10 @@ contracts . sisu.lock --native --locked
 workspace . build/release/greeter --native --release
 workspace . build/debug/greeter --native
 workspace . sisu.lock
+features/app . build/debug/app --native --features verbose
+features/app . build/release/app --native --release --no-default-features
+features/app . build/debug/app --native --features=render/borders,verbose
+features/app . sisu.lock --native --features bogus
 BUILDS
     end=$(date +%s.%N)
     total=$((total + builds)); identical=$((identical + same))

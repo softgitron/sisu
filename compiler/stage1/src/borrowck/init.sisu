@@ -61,6 +61,39 @@ impl State:
         let b = self.mu.union(o.mu)
         return a or b
 
+    ## `join` for a state that holds `o`'s bits but for those in the words
+    ## `words` names: only those words are joined.
+    pub pure def join_words(mut self, o: State, words: list[int]) -> bool:
+        let a = join_words_of(mut self.mi, o.mi, words)
+        let b = join_words_of(mut self.mu, o.mu, words)
+        return a or b
+
+## Adds the bits of the words `words` names of `o` to `set`; returns whether
+## anything changed.
+pure def join_words_of(mut set: BitSet, o: BitSet, words: list[int]) -> bool:
+    var changed = False
+    for w in words:
+        if w >= len(o.words):
+            continue
+        while len(set.words) <= w:
+            set.words.push(0)
+        let m = set.words[w] | o.words[w]
+        if m != set.words[w]:
+            set.words[w] = m
+            changed = True
+    return changed
+
+## What a switch on a discriminant teaches its edges (`switch_facts`): how
+## many variants the value has, each case's variant and target block, the
+## default block, the variants the cases list, and each payload path with
+## its variant.
+pub struct SwitchFacts:
+    count: int
+    cases: list[(int, int)]
+    default: int
+    listed: set[int]
+    children: list[(int, int)]
+
 pub struct Analysis:
     pub paths: MovePaths
     ## The predecessors of each block, through its terminator or its
@@ -191,31 +224,53 @@ impl Analysis:
             queued[b] = False
             let block = ref f.blocks[b]
             var st = entry[b].copy()
-            var unwind_states: list[State] = []
             # A `while` over the statements, with the unwinding edge asked
             # once: natively, a `for` loop's `next` and `is_some` are calls of
-            # intrinsics, which cost more than the rest of a step.
-            let unwinds = block.unwind.is_some()
+            # intrinsics, which cost more than the rest of a step. The state
+            # after each statement's moves is joined into the unwinding
+            # block's entry as it is reached, rather than copied and joined
+            # after the statements: nothing else is joined in between, so
+            # the joins and the blocks they queue are stage 0's.
+            # After the first join there, which is whole, only the words of
+            # the sets the statements changed since the last one are joined
+            # (`words`): the rest are in that entry already.
+            var u = -1
+            if let Some(x) = block.unwind:
+                u = x.index
+            var words: list[int] = []
+            var whole = True
             let count = len(block.stmts)
             var si = 0
             while si < count:
                 let s = ref block.stmts[si]
-                a.apply_moves(s, mut st)
-                if unwinds:
-                    unwind_states.push(st.copy())
-                a.apply_inits(s, mut st)
+                a.moves_noting(s, mut st, mut words)
+                if u >= 0:
+                    if whole:
+                        push_state(u, st, mut entry, mut reachable, mut queued, mut work)
+                        whole = False
+                    else:
+                        push_words(u, st, words, mut entry, mut reachable, mut queued, mut work)
+                    words.clear()
+                a.inits_noting(s, mut st, mut words)
                 si += 1
-            if unwinds:
-                unwind_states.push(st.copy())
-            if let Some(u) = block.unwind:
-                for s in unwind_states:
-                    push_state(u.index, s, mut entry, mut reachable, mut queued, mut work)
+            if u >= 0:
+                if whole:
+                    push_state(u, st, mut entry, mut reachable, mut queued, mut work)
+                else:
+                    push_words(u, st, words, mut entry, mut reachable, mut queued, mut work)
+            # Only a switch on a discriminant teaches its edges something
+            # (`switch_facts`, found once a visit, and `edge_effect`); the
+            # edges of another terminator take the state as it is.
+            let facts = a.switch_facts(f, types, block)
             for t in targets(block):
                 if t >= nb:
                     continue
-                var s = st.copy()
-                a.edge_effect(f, types, block, t, mut s)
-                push_state(t, s, mut entry, mut reachable, mut queued, mut work)
+                if let Some(fx) = facts:
+                    var s = st.copy()
+                    a.edge_effect(fx, t, mut s)
+                    push_state(t, s, mut entry, mut reachable, mut queued, mut work)
+                else:
+                    push_state(t, st, mut entry, mut reachable, mut queued, mut work)
         a.entry = entry
         a.reachable = reachable
         return a
@@ -263,6 +318,23 @@ impl Analysis:
             return Some(id)
         return None
 
+    ## `apply_moves`, noting in `words` each word of the sets it writes
+    ## (a path's word is `d // 62`, as `BitSet` writes `WORD` out).
+    pure def moves_noting(self, s: Statement, mut st: State, mut words: list[int]):
+        for id in self.removed_paths(s):
+            for d in self.paths.descendants(id):
+                st.mi.remove(d)
+                _ = st.mu.insert(d)
+                words.push(d // 62)
+
+    ## `apply_inits`, noting in `words` each word of the sets it writes.
+    pure def inits_noting(self, s: Statement, mut st: State, mut words: list[int]):
+        if let Some(id) = self.init_path(s):
+            for d in self.paths.descendants(id):
+                _ = st.mi.insert(d)
+                st.mu.remove(d)
+                words.push(d // 62)
+
     pub pure def apply_moves(self, s: Statement, mut st: State):
         for id in self.removed_paths(s):
             self.set_uninit(mut st, id)
@@ -275,16 +347,16 @@ impl Analysis:
         self.apply_moves(s, mut st)
         self.apply_inits(s, mut st)
 
-    ## What a switch on a discriminant teaches the edge to `target`.
-    pub pure def edge_effect(
-        self, f: Function, types: Types, block: BasicBlock, target: int, mut st: State
-    ):
+    ## What a switch on a discriminant teaches its edges, when the block
+    ## ends in one: the path of the value switched on, its variants, and
+    ## the paths of their payloads.
+    pure def switch_facts(self, f: Function, types: Types, block: BasicBlock) -> SwitchFacts?:
         let Terminator.Switch(value, cases, default) = block.term.copy() else:
-            return
+            return None
         let Operand.Copy(v) = value else:
-            return
+            return None
         if not v.proj.is_empty():
-            return
+            return None
         # The last statement that writes the switched local decides.
         var scrutinee: Place? = None
         var k = len(block.stmts) - 1
@@ -306,30 +378,45 @@ impl Analysis:
                 break
             k -= 1
         let q = scrutinee else:
-            return
+            return None
         let (id, cover) = self.paths.lookup(q)
         if cover != Cover.Exact:
-            return
+            return None
         let ty = types.place_ty(f, q) else:
-            return
+            return None
         let count = types.variant_count(ty) else:
-            return
+            return None
         # Sets rather than lists: an enum of hundreds of variants has as
         # many cases and children.
         var listed: set[int] = set()
-        var active: set[int] = set()
+        var targets: list[(int, int)] = []
         for (c, t) in cases:
             _ = listed.add(c)
-            if t.index == target:
-                _ = active.add(c)
-        if default.index == target:
-            for c in range(count):
-                if not listed.contains(c):
-                    _ = active.add(c)
-        for c in self.paths.paths[id].children.copy():
+            targets.push((c, t.index))
+        var children: list[(int, int)] = []
+        for c in self.paths.paths[id].children:
             if let Some(Proj.Downcast(var_)) = self.paths.paths[c].place.proj.last():
-                if not active.contains(var_):
-                    self.set_vacuous(mut st, c)
+                children.push((c, var_))
+        return Some(
+            SwitchFacts(
+                count=count, cases=targets, default=default.index, listed=listed, children=children
+            )
+        )
+
+    ## What the switch `fx` teaches the edge to `target`: the payload paths
+    ## of the variants that edge does not take hold nothing there.
+    pub pure def edge_effect(self, fx: SwitchFacts, target: int, mut st: State):
+        var active: set[int] = set()
+        for (c, t) in fx.cases:
+            if t == target:
+                _ = active.add(c)
+        if fx.default == target:
+            for c in range(fx.count):
+                if not fx.listed.contains(c):
+                    _ = active.add(c)
+        for (c, var_) in fx.children:
+            if not active.contains(var_):
+                self.set_vacuous(mut st, c)
 
     ## The state before each statement of a block, and at its terminator.
     pub pure def states(self, f: Function, b: int) -> list[State]:
@@ -679,6 +766,24 @@ pure def push_state(
     mut work: list[int],
 ):
     let changed = entry[t].join(s)
+    if (changed or not reachable[t]) and not queued[t]:
+        reachable[t] = True
+        queued[t] = True
+        work.push(t)
+    reachable[t] = True
+
+## `push_state` for a state whose bits but those of the words `words` names
+## block `t`'s entry holds already (`State.join_words`).
+pure def push_words(
+    t: int,
+    s: State,
+    words: list[int],
+    mut entry: list[State],
+    mut reachable: list[bool],
+    mut queued: list[bool],
+    mut work: list[int],
+):
+    let changed = entry[t].join_words(s, words)
     if (changed or not reachable[t]) and not queued[t]:
         reachable[t] = True
         queued[t] = True

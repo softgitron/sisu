@@ -222,7 +222,16 @@ impl Parser:
         return c
 
     pure def not_expr(mut self) -> Class:
-        if self.at(SyntaxKind.NotKw) and self.nth(1) != SyntaxKind.InKw:
+        # In an attribute's arguments, `not(feature="tls")` is a call of
+        # `not` with a keyword argument, as `all(...)` and `any(...)` are
+        # (decision 250): a parenthesised expression cannot hold one.
+        let not_call = (
+            self.in_attribute
+                and self.nth(1) == SyntaxKind.LParen
+                and self.nth(2) == SyntaxKind.Ident
+                and self.nth(3) == SyntaxKind.Eq
+        )
+        if self.at(SyntaxKind.NotKw) and self.nth(1) != SyntaxKind.InKw and not not_call:
             self.start(SyntaxKind.PrefixExpr)
             self.bump()
             _ = self.not_expr()

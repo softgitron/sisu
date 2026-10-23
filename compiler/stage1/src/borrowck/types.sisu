@@ -218,7 +218,7 @@ impl Types:
     ## Whether an intrinsic keeps or returns every value its argument `i`
     ## holds (the `keeps` of its declaration, from its contract).
     pub pure def intrinsic_keeps(self, p: Program, name: str, i: int) -> bool:
-        if let Some(d) = p.intrinsic(name):
+        if let Some(d) = self.intrinsic(p, name):
             return d.keeps.contains(i)
         return False
 

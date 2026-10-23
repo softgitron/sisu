@@ -51,12 +51,14 @@ from stage1.syntax.ast import (
     Ast,
     BinOp,
     Block,
+    Closure,
     ClosureBody,
     CmpOp,
     CompClause,
     CompKind,
     Cond,
     CondPart,
+    ElseBody,
     ExprId,
     ExprKind,
     FnDef,
@@ -120,6 +122,11 @@ pub enum Kind:
     Tuple
     Struct
     Enum
+    ## A trait, which reflection sees for its methods (decision 251).
+    Trait
+    ## A type parameter that stays one (a generic trait impl's, in its
+    ## method made once, decision 251): only its name is known.
+    Param
     Other
 
 ## What reflection sees of a type: an instance's type argument, the type a
@@ -138,6 +145,20 @@ pub struct TypeShape:
     pub impls: list[String]
     ## A list's or an option's element type (at most one).
     pub elem: list[TypeShape]
+    ## A trait's methods, or a type's own (decision 251).
+    pub methods: list[MethodShape]
+
+## A method as reflection sees it (`reflect.methods_of`, decision 251): its
+## name, how it takes `self` (`self`, `mut self`, `own self`, or nothing
+## for an associated function), its parameters (name, mode, type, the type
+## a list of one), its result type (a list of one), and whether it has a
+## body.
+pub struct MethodShape:
+    pub name: String
+    pub receiver: String
+    pub params: list[(String, String, list[TypeShape])]
+    pub ret: list[TypeShape]
+    pub provided: bool
 
 pub struct FieldShape:
     pub name: String
@@ -162,6 +183,7 @@ impl TypeShape:
             attrs=[],
             impls=[],
             elem=[],
+            methods=[],
         )
 
     ## The shape of a derive's target, from its declaration's names.
@@ -189,6 +211,8 @@ pure def same_shape(a: TypeShape, b: TypeShape) -> bool:
         return False
     if not same_shapes(a.elem, b.elem) or len(a.fields) != len(b.fields):
         return False
+    if not same_methods(a.methods, b.methods):
+        return False
     for i in range(len(a.fields)):
         let (x, y) = (ref a.fields[i], ref b.fields[i])
         if x.name != y.name or x.default != y.default or not same_shapes(x.ty, y.ty):
@@ -212,6 +236,22 @@ pure def same_shapes(a: list[TypeShape], b: list[TypeShape]) -> bool:
             return False
     return True
 
+pure def same_methods(a: list[MethodShape], b: list[MethodShape]) -> bool:
+    if len(a) != len(b):
+        return False
+    for i in range(len(a)):
+        let (x, y) = (ref a[i], ref b[i])
+        if x.name != y.name or x.receiver != y.receiver or x.provided != y.provided:
+            return False
+        if not same_shapes(x.ret, y.ret) or len(x.params) != len(y.params):
+            return False
+        for k in range(len(x.params)):
+            let (n1, m1, t1) = x.params[k].copy()
+            let (n2, m2, t2) = y.params[k].copy()
+            if n1 != n2 or m1 != m2 or not same_shapes(t1, t2):
+                return False
+    return True
+
 ## A compile-time value.
 pub enum Value:
     ## A type: a type parameter's argument, or a field's type.
@@ -228,6 +268,19 @@ pub enum Value:
     )
     ## An attribute on a declaration: its name and its arguments' text.
     Attr(name: String, args: list[String])
+    ## A method of a trait or a type (decision 251), its result type a list
+    ## of one.
+    Method(
+        name: String,
+        index: int,
+        receiver: String,
+        params: list[Value],
+        ret: list[TypeShape],
+        provided: bool
+    )
+    ## A method's parameter: its name, its mode (empty, `mut`, `own`) and
+    ## its type (a list of one).
+    Param(name: String, index: int, mode: String, ty: list[TypeShape])
     Variant(name: String, index: int, fields: list[Value])
     Str(String)
     Int(int)
@@ -253,6 +306,17 @@ pure def same_value(a: Value, b: Value) -> bool:
         case Value.Attr(n1, a1):
             if let Value.Attr(n2, a2) = b:
                 return n1 == n2 and a1 == a2
+        case Value.Method(n1, i1, r1, p1, t1, v1):
+            if let Value.Method(n2, i2, r2, p2, t2, v2) = b:
+                return n1 == n2
+                    and i1 == i2
+                    and r1 == r2
+                    and same_values(p1, p2)
+                    and same_shapes(t1, t2)
+                    and v1 == v2
+        case Value.Param(n1, i1, m1, t1):
+            if let Value.Param(n2, i2, m2, t2) = b:
+                return n1 == n2 and i1 == i2 and m1 == m2 and same_shapes(t1, t2)
         case Value.Variant(n1, i1, f1):
             if let Value.Variant(n2, i2, f2) = b:
                 return n1 == n2 and i1 == i2 and same_values(f1, f2)
@@ -306,6 +370,20 @@ pure def fail[T](at: TextRange, why: str) -> T ! Unfolding:
 
 ## What `reflect.construct` says of a second argument it cannot read.
 const NOT_A_DICT: str = "`reflect.construct` takes the fields as a dict whose keys are known at compile time"
+
+## The `T: type` parameters of a `comptime def` (decision 251): each one's
+## position among the parameters a call gives arguments to, and its name.
+pub pure def type_params(src: Src, f: FnDef) -> list[(int, String)]:
+    var out: list[(int, String)] = []
+    var at = 0
+    for p in f.params:
+        let ParamKind.Named(name, ty, _) = p.kind.copy() else:
+            continue
+        if let TypeKind.Path(segments, args) = src.ast.type_expr(ty).kind:
+            if args.is_empty() and len(segments) == 1 and segments[0].text == "type":
+                out.push((at, name.text.copy()))
+        at += 1
+    return out
 
 ## Checks that `f` is a trait's derive template: `comptime def derive(T:
 ## type) -> impl Trait for T` whose body is `return impl Trait for T:`.
@@ -371,7 +449,9 @@ pub pure def unfold(src: Src, template: FnDef, head: str, target: Target) -> Str
 ## its signature with each type parameter replaced, and its body unfolded.
 ## `types` are the other types its compile-time code names, known to it
 ## but not replaced in its text. A method's instance is a method of an
-## inherent impl of `within`, its type.
+## inherent impl of its type, whose header (`impl __S`, `impl[A] __S`)
+## `within` is. A `generic` instance (a trait impl's method made once,
+## decision 251) keeps the method's own type parameters.
 pub pure def unfold_fn(
     src: Src,
     f: FnDef,
@@ -379,6 +459,7 @@ pub pure def unfold_fn(
     types: list[(String, TypeShape)],
     name: str,
     within: str?,
+    generic: bool,
 ) -> String ! Unfolding:
     var body_start = 0
     var stmts: list[StmtId] = []
@@ -394,9 +475,23 @@ pub pure def unfold_fn(
     for (p, shape) in types:
         u.env.push((p.copy(), Value.Type(shape.copy())))
     # `def name[T: B](params) -> R:` becomes `def NAME(params) -> R:`.
-    let header = slice(src.source, TextRange.new(f.name.range.end, body_start)).trim_end()
-    var rest = header.to_string()
-    if header.starts_with("["):
+    var header = slice(
+        src.source, TextRange.new(f.name.range.end, body_start)
+    ).trim_end().to_string()
+    # A parametrised test's `for PAT in LIST` is its cases' (17): the
+    # instance is one case, whose body begins by binding it.
+    if header.trim_start().starts_with("for "):
+        var open: int? = None
+        if let Some(p) = f.params.first():
+            if p.range.start <= src.source.byte_len():
+                open = last_byte(src.source.byte_slice(0, p.range.start), 40)
+        match open:
+            case Some(i):
+                header = slice(src.source, TextRange.new(i, body_start)).trim_end().to_string()
+            case None:
+                header = ":".to_string()
+    var rest = header.copy()
+    if header.starts_with("[") and not generic:
         let after = header.byte_slice(1, header.byte_len())
         var depth = 1
         var cut = after.byte_len()
@@ -413,16 +508,76 @@ pub pure def unfold_fn(
     # A `where` clause names the parameters, which an instance has not.
     if let Some(i) = rest.byte_find(" where "):
         rest = "{rest.byte_slice(0, i).trim_end()}:"
-    let pure = if f.is_pure: "pure " else: ""
+    # A `comptime def`'s `T: type` parameters are type parameters, which an
+    # instance has not either (decision 251); a test has no parameter list.
+    rest = without_type_params(src, f, rest)
+    if rest.trim_start().starts_with(":"):
+        rest = "(){rest.trim_start()}"
+    var pure = ""
+    if f.is_pure:
+        pure = "pure "
+    elif f.is_comptime:
+        pure = "comptime "
     var out = String.new()
     var depth = 0
-    if let Some(ty) = within:
-        line(mut out, 0, "impl {ty}:")
+    if let Some(head) = within:
+        line(mut out, 0, "{head}:")
         depth = 1
     line(mut out, depth, "{pure}def {name}{u.substitute_param(rest)}")
     if u.stmts(src, stmts, depth + 1, mut out)? == 0:
         line(mut out, depth + 1, "pass")
     return Ok(out)
+
+## The text of the expression `e` (from the file whose syntax and text
+## `src` holds) with its compile-time parts evaluated (decision 251): a
+## constant's or a field default's value that reflects on `types`, the
+## types it names.
+pub pure def unfold_expr(
+    src: Src, e: ExprId, types: list[(String, TypeShape)]
+) -> String ! Unfolding:
+    var u = Unfold(params=[], env=[], arms=[])
+    for (p, shape) in types:
+        u.env.push((p.copy(), Value.Type(shape.copy())))
+    return u.text(src, e)
+
+## The header `rest` (`(params) -> R:`) of `f` without its `T: type`
+## parameters.
+pure def without_type_params(src: Src, f: FnDef, rest: str) -> String:
+    let typed = type_params(src, f)
+    if typed.is_empty():
+        return rest.to_string()
+    var names: list[String] = []
+    for (_, n) in typed:
+        names.push(n.copy())
+    var kept: list[String] = []
+    for p in f.params:
+        if let ParamKind.Named(name, _, _) = p.kind:
+            if names.contains(name.text):
+                continue
+        kept.push(slice(src.source, p.range).to_string())
+    var end = 0
+    if let Some(p) = f.params.last():
+        end = p.range.end
+    var close = end
+    if end <= src.source.byte_len():
+        if let Some(i) = src.source.byte_slice(end, src.source.byte_len()).byte_find(")"):
+            close = end + i + 1
+    var body = close
+    if let Some(b) = f.body:
+        body = b.range.start
+    var after = ":"
+    if close <= body and body <= src.source.byte_len():
+        after = src.source.byte_slice(close, body)
+    return "({kept.join(", ")}){after.trim_end()}"
+
+## The position of the last byte `b` of `text`.
+pure def last_byte(text: str, b: int) -> int?:
+    var i = text.byte_len() - 1
+    while i >= 0:
+        if text.byte_at(i).to_int() == b:
+            return Some(i)
+        i -= 1
+    return None
 
 pure def slice(source: str, r: TextRange) -> str from source:
     if r.start < 0 or r.end > source.byte_len() or r.start > r.end:
@@ -529,6 +684,8 @@ pure def describe(v: Value) -> str:
     return match v:
         case Value.Type(_): "a type"
         case Value.Attr(_, _): "an attribute"
+        case Value.Method(_, _, _, _, _, _): "a method"
+        case Value.Param(_, _, _, _): "a parameter"
         case Value.Field(_, _, _, _, _, _, _): "a field"
         case Value.Variant(_, _, _): "a variant"
         case Value.Str(_): "text"
@@ -609,7 +766,9 @@ impl Unfold:
 
     # ------------------------------------------------------------ values
 
-    ## Whether the expression mentions anything evaluated at compile time.
+    ## Whether the expression mentions anything evaluated at compile time:
+    ## a closure whose block has compile-time statements among them
+    ## (decision 251).
     pure def depends(self, src: Src, e: ExprId) -> bool:
         for x in walk(src, e):
             match src.ast.expr(x).kind:
@@ -621,6 +780,13 @@ impl Unfold:
                         return True
                 case ExprKind.FieldOf(_, _) | ExprKind.Comptime(_):
                     return True
+                case ExprKind.Closure(c):
+                    if unfolding_closure(src, c):
+                        return True
+                case ExprKind.Call(_, _, trailing):
+                    if let Some(c) = trailing:
+                        if unfolding_closure(src, c):
+                            return True
                 case _:
                     pass
         return False
@@ -641,12 +807,14 @@ impl Unfold:
                             return False
                 return True
             # The attributes of descriptors; anything else (a method) runs
-            # at run time on the value.
+            # at run time on the value, and a type's members (`T.default()`)
+            # are its associated functions.
             case ExprKind.Field(base, name):
                 let attribute = match name.text:
                     case "name" | "index" | "named" | "fields" | "ty" | "default" | "args": True
+                    case "receiver" | "params" | "ret" | "provided" | "mode": True
                     case _: False
-                return attribute and self.is_static(src, base)
+                return attribute and self.is_static(src, base) and not self.names_type(src, base)
             case ExprKind.Call(callee, args, trailing):
                 if trailing.is_some():
                     return False
@@ -706,6 +874,20 @@ impl Unfold:
                         return False
             case _:
                 return False
+
+    ## Whether `e` is a name bound to a type (`T`, `Self`).
+    pure def names_type(self, src: Src, e: ExprId) -> bool:
+        var v: Value? = None
+        match src.ast.expr(e).kind:
+            case ExprKind.Name(n):
+                v = self.lookup(n)
+            case ExprKind.SelfType:
+                v = self.lookup("Self")
+            case _:
+                pass
+        if let Some(Value.Type(_)) = v:
+            return True
+        return False
 
     pure def all_static(self, src: Src, xs: list[ExprId]) -> bool:
         for x in xs:
@@ -813,6 +995,36 @@ impl Unfold:
                                 got = Some(Value.List(fields.copy()))
                             case _:
                                 pass
+                    case Value.Method(n, index, receiver, params, ret, provided):
+                        match name.text:
+                            case "name":
+                                got = Some(Value.Str(n.copy()))
+                            case "index":
+                                got = Some(Value.Int(index))
+                            case "receiver":
+                                got = Some(Value.Str(receiver.copy()))
+                            case "params":
+                                got = Some(Value.List(params.copy()))
+                            case "ret":
+                                if let Some(t) = ret.first():
+                                    got = Some(Value.Type(t.copy()))
+                            case "provided":
+                                got = Some(Value.Bool(provided))
+                            case _:
+                                pass
+                    case Value.Param(n, index, mode, ty):
+                        match name.text:
+                            case "name":
+                                got = Some(Value.Str(n.copy()))
+                            case "index":
+                                got = Some(Value.Int(index))
+                            case "mode":
+                                got = Some(Value.Str(mode.copy()))
+                            case "ty":
+                                if let Some(t) = ty.first():
+                                    got = Some(Value.Type(t.copy()))
+                            case _:
+                                pass
                     case Value.Attr(n, args):
                         match name.text:
                             case "name":
@@ -841,6 +1053,13 @@ impl Unfold:
                                 t = x.copy()
                             case _:
                                 return fail(here, "`reflect.{name.text}` takes a type")
+                        # A type parameter that stays one is known by its
+                        # name alone (decision 251).
+                        if t.kind == Kind.Param and name.text != "name_of":
+                            return fail(
+                                here,
+                                "`{t.name}` is a type parameter, which is not known at compile time",
+                            )
                         if name.text == "implements":
                             var tr = String.new()
                             match vals.get(1):
@@ -1170,6 +1389,8 @@ impl Unfold:
                 if trailing.is_some() or made.is_none():
                     for k in children(src, e):
                         self.replacements(src, k, mut out)?
+                    if let Some(c) = trailing:
+                        self.closure_replacements(src, c, mut out)?
                     return Ok(())
                 var text = String.new()
                 if made == Some("default_of".to_string()):
@@ -1192,15 +1413,39 @@ impl Unfold:
                         case ArmBody.Block(b):
                             self.block_replacements(src, b, mut out)?
             case ExprKind.Closure(c):
-                match c.body:
-                    case ClosureBody.Expr(x):
-                        self.replacements(src, x, mut out)?
-                    case ClosureBody.Block(b):
-                        self.block_replacements(src, b, mut out)?
+                self.closure_replacements(src, c, mut out)?
             case _:
                 for k in children(src, e):
                     self.replacements(src, k, mut out)?
         return Ok(())
+
+    ## The replacements in a closure: in its body, or its block unfolded
+    ## where it is when the block has compile-time statements (decision
+    ## 251).
+    pure def closure_replacements(
+        self, src: Src, c: Closure, mut out: list[(TextRange, String)]
+    ) -> () ! Unfolding:
+        match c.body:
+            case ClosureBody.Expr(x):
+                return self.replacements(src, x, mut out)
+            case ClosureBody.Block(b):
+                if not unfolding_closure(src, c):
+                    return self.block_replacements(src, b, mut out)
+                if b.stmts.is_empty():
+                    return Ok(())
+                let first = src.ast.stmt(b.stmts[0]).range
+                let last = src.ast.stmt(b.stmts[len(b.stmts) - 1]).range
+                var u = self.fork()
+                var text = String.new()
+                if u.stmts(src, b.stmts, 0, mut text)? == 0:
+                    text.push("pass")
+                # Written where the block's statements are, at their column.
+                let pad = " ".repeat(column(src.source, first.start))
+                var lines: list[String] = []
+                for l in text.trim_end().lines():
+                    lines.push(l.to_string())
+                out.push((TextRange.new(first.start, last.end), lines.join("\n{pad}")))
+                return Ok(())
 
     ## The replacements in a block inside an expression, whose statements
     ## are copied as they are written (none of them runs at compile time).
@@ -1376,6 +1621,14 @@ impl Unfold:
                 if let Some(b) = else_block:
                     return self.stmts(src, b.stmts, depth, mut out)
                 return Ok(0)
+        # A parametrised test's case begins by binding its pattern to the
+        # case, a statement its source does not write (17).
+        if let StmtKind.Let(_, pat, _, init, _) = src.ast.stmt(s).kind:
+            if let Some(x) = init:
+                if src.ast.expr(x).range == here:
+                    let p = slice(src.source, src.ast.pattern(pat).range)
+                    line(mut out, depth, "let {p} = {self.text(src, x)?}")
+                    return Ok(1)
         if not self.stmt_depends(src, s):
             self.copy_stmt(src, here, [], depth, mut out)
             return Ok(1)
@@ -1636,6 +1889,8 @@ pure def reflect(f: str, t: TypeShape) -> Value?:
             return Some(Value.Bool(t.kind == Kind.Struct))
         case "is_enum":
             return Some(Value.Bool(t.kind == Kind.Enum))
+        case "is_trait":
+            return Some(Value.Bool(t.kind == Kind.Trait))
         case "is_int":
             return Some(Value.Bool(t.kind == Kind.Int))
         case "is_float":
@@ -1700,8 +1955,78 @@ pure def reflect(f: str, t: TypeShape) -> Value?:
             for (name, args) in t.attrs:
                 out.push(Value.Attr(name=name.copy(), args=args.copy()))
             return Some(Value.List(out))
+        case "methods_of":
+            var out: list[Value] = []
+            var index = 0
+            for m in t.methods:
+                var params: list[Value] = []
+                var pi = 0
+                for (n, mode, ty) in m.params:
+                    params.push(
+                        Value.Param(name=n.copy(), index=pi, mode=mode.copy(), ty=ty.copy())
+                    )
+                    pi += 1
+                out.push(
+                    Value.Method(
+                        name=m.name.copy(),
+                        index=index,
+                        receiver=m.receiver.copy(),
+                        params=params,
+                        ret=m.ret.copy(),
+                        provided=m.provided,
+                    )
+                )
+                index += 1
+            return Some(Value.List(out))
         case _:
             return None
+
+## Whether a closure's block has compile-time statements among its own
+## (`instances::comptime_stmts`), which unfold where the block is.
+pure def unfolding_closure(src: Src, c: Closure) -> bool:
+    if let ClosureBody.Block(b) = c.body:
+        for s in b.stmts:
+            if block_stmt_unfolds(src, s):
+                return True
+    return False
+
+## Whether a statement is `comptime for` or `comptime if`, or holds one
+## among its statements (stage 0's `instances::comptime_stmt`).
+pure def block_stmt_unfolds(src: Src, s: StmtId) -> bool:
+    match src.ast.stmt(s).kind:
+        case StmtKind.Comptime(inner):
+            return match src.ast.stmt(inner).kind:
+                case StmtKind.Assert(_, _) | StmtKind.Expr(_): False
+                case _: True
+        case StmtKind.If(branches, else_block):
+            for (_, b) in branches:
+                for x in b.stmts:
+                    if block_stmt_unfolds(src, x):
+                        return True
+            if let Some(b) = else_block:
+                for x in b.stmts:
+                    if block_stmt_unfolds(src, x):
+                        return True
+            return False
+        case StmtKind.While(_, body) | StmtKind.Defer(body):
+            for x in body.stmts:
+                if block_stmt_unfolds(src, x):
+                    return True
+            return False
+        case StmtKind.For(_, _, _, body) | StmtKind.With(_, _, body):
+            for x in body.stmts:
+                if block_stmt_unfolds(src, x):
+                    return True
+            return False
+        case StmtKind.Let(_, _, _, _, else_):
+            if let Some(le) = else_:
+                if let ElseBody.Block(b) = le.body:
+                    for x in b.stmts:
+                        if block_stmt_unfolds(src, x):
+                            return True
+            return False
+        case _:
+            return False
 
 ## The column of byte `at`: the bytes before it on its line.
 pure def column(source: str, at: int) -> int:
@@ -1910,6 +2235,13 @@ pure def walk_into(src: Src, e: ExprId, mut out: list[ExprId]):
                     walk_into(src, x, mut out)
                 case ClosureBody.Block(b):
                     walk_block(src, b, mut out)
+        case ExprKind.Call(_, _, trailing):
+            if let Some(c) = trailing:
+                match c.body:
+                    case ClosureBody.Expr(x):
+                        walk_into(src, x, mut out)
+                    case ClosureBody.Block(b):
+                        walk_block(src, b, mut out)
         case ExprKind.Match(scrutinee, arms):
             walk_into(src, scrutinee, mut out)
             for a in arms:
@@ -1974,7 +2306,7 @@ test "an instance keeps the branch its type argument picks":
     let f = first_fn(m) ?? panic("no template")
     let src = Src(ast=ref m.ast, source=source)
     let params = [("T".to_string(), TypeShape.named("int", "__T0", Kind.Int))]
-    match unfold_fn(src, f, params, [], "__instance_0", None):
+    match unfold_fn(src, f, params, [], "__instance_0", None, False):
         case Ok(text):
             assert text == "def __instance_0() -> String:\n    return \"int\".to_string()\n"
         case Err(_):
@@ -1986,9 +2318,25 @@ test "a failure names where the template stopped":
     let f = first_fn(m) ?? panic("no template")
     let src = Src(ast=ref m.ast, source=source)
     let params = [("T".to_string(), TypeShape.named("f64", "__T0", Kind.Float))]
-    match unfold_fn(src, f, params, [], "__instance_0", None):
+    match unfold_fn(src, f, params, [], "__instance_0", None, False):
         case Ok(_):
             assert False
         case Err(Failed(at, why)):
             assert why == "no f64"
             assert at.start == 34
+
+test "a `comptime def`'s type parameters leave its instance's header":
+    var source = String.new("comptime def describe(T: type, prefix: str) -> String:\n")
+    source.push("    return \"{{prefix}} {{reflect.name_of(T)}}\"\n")
+    let m = build.module(parse(source, Catalog.parse("")).tree)
+    let f = first_fn(m) ?? panic("no template")
+    let src = Src(ast=ref m.ast, source=source)
+    assert type_params(src, f) == [(0, "T".to_string())]
+    let params = [("T".to_string(), TypeShape.named("Point", "__T0", Kind.Struct))]
+    match unfold_fn(src, f, params, [], "__instance_0", None, False):
+        case Ok(text):
+            var expected = String.new("comptime def __instance_0(prefix: str) -> String:\n")
+            expected.push("    return \"{{prefix}} Point\"\n")
+            assert text == expected
+        case Err(_):
+            assert False

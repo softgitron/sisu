@@ -97,11 +97,20 @@ pub struct TraitInfo:
     pub sealed: bool
     ## `@marker`: no methods; implemented by the language's rules (`Copy`).
     pub marker: bool
+    ## Its `comptime def`s but `derive`: compile-time functions a program
+    ## names through the trait, `Trait.name(...)` (decision 251).
+    pub comptime_fns: list[(String, DefId)]
 
 impl TraitInfo:
     pub pure def new() -> TraitInfo:
         return TraitInfo(
-            generics=[], supertraits=[], assoc=[], methods=[], sealed=False, marker=False
+            generics=[],
+            supertraits=[],
+            assoc=[],
+            methods=[],
+            sealed=False,
+            marker=False,
+            comptime_fns=[],
         )
 
 ## `impl[...] Trait[...] for Type`.
@@ -137,6 +146,10 @@ pub struct FieldInfo:
     pub name: String
     pub ty: Ty
     pub default: ExprId?
+    ## The module whose syntax and file the default is in, when it is not
+    ## the struct's: the text its unfolding made when it reflects
+    ## (decision 251).
+    pub default_module: ModuleId?
     pub span: TextRange
     pub vis: Vis
 
@@ -194,6 +207,10 @@ pub struct ParamInfo:
     pub mode: Mode
     pub ty: Ty
     pub default: ExprId?
+    ## The module whose syntax and file the default is in, when it is not
+    ## the function's: the text its unfolding made when it reflects
+    ## (decision 251).
+    pub default_module: ModuleId?
     pub span: TextRange
 
 pub struct FnInfo:
@@ -252,6 +269,19 @@ pub struct FnInfo:
     ## promoted for calling one with them (08, "Reflection"): it is checked
     ## in its instances, not as written.
     pub template: bool
+    ## The `T: type` parameters of a `comptime def` (08, "Reflection";
+    ## decision 251): each one's position among the arguments a call writes
+    ## and its name, and the generic parameter whose argument the call's
+    ## argument, a type, is. They are not among `params`.
+    pub type_params: list[(int, String, int)]
+
+impl FnInfo:
+    ## Whether this template is made once, for all its type arguments at
+    ## once: one without type parameters (decision 244), or a method of a
+    ## trait impl, whose instance is as generic as the template, so that a
+    ## trait's call reaches it whatever the type arguments (decision 251).
+    pub pure def made_once(self) -> bool:
+        return self.template and (self.generics.is_empty() or self.impl_.is_some())
 
 ## A file an `embed("path")` call names, as the driver read it: its text,
 ## or why it could not be read (stage 0's `Result<String, String>`).
@@ -283,6 +313,10 @@ impl Request:
 pub struct ConstInfo:
     pub ty: Ty
     pub value: ExprId?
+    ## The module whose syntax and file the value is in, when it is not the
+    ## constant's: the text its unfolding made when it reflects (decision
+    ## 251).
+    pub value_module: ModuleId?
     ## The value as folding reads it (`typeck.folding`), empty without one.
     pub terms: list[Term]
 
@@ -369,6 +403,7 @@ pub struct WellKnown:
     pub ord: DefId?
     pub hash: DefId?
     pub len: DefId?
+    pub contains: DefId?
     pub copy: DefId?
     pub drop: DefId?
     pub iterator: DefId?
@@ -413,6 +448,7 @@ impl WellKnown:
             ord=None,
             hash=None,
             len=None,
+            contains=None,
             copy=None,
             drop=None,
             iterator=None,
@@ -868,18 +904,29 @@ impl Program:
     ## dict entry (they borrow what they walk). A generic parameter can,
     ## since it may stand for any of these.
     pub pure def can_borrow(self, mut types: Types, ty: Ty) -> bool:
+        return self.can_borrow_in(mut types, ty, [])
+
+    ## `can_borrow` in an environment of bounds: a type parameter bounded by
+    ## `Escapable` holds no loan, since every type argument it stands for
+    ## must not (decision 256).
+    pub pure def can_borrow_in(self, mut types: Types, ty: Ty, env: list[Predicate]) -> bool:
         let data = types.data(ty).copy()
         if let TyData.Adt(d, args) = data:
             if let Some(b) = self.refinement_base(mut types, d, args):
-                return self.can_borrow(mut types, b)
+                return self.can_borrow_in(mut types, b, env)
         match data:
-            case TyData.Ref(_, _) | TyData.Str | TyData.Fn(_, _, _) | TyData.Param(_) | TyData.Var(
-                _
-            ) | TyData.Error:
+            case TyData.Param(_):
+                for p in env:
+                    if p.ty == ty
+                            and Some(p.bound.def_) == self.wk.escapable
+                            and p.bound.args.is_empty():
+                        return False
+                return True
+            case TyData.Ref(_, _) | TyData.Str | TyData.Fn(_, _, _) | TyData.Var(_) | TyData.Error:
                 return True
             case TyData.Tuple(es, _):
                 for t in es:
-                    if self.can_borrow(mut types, t):
+                    if self.can_borrow_in(mut types, t, env):
                         return True
                 return False
             case TyData.Adt(d, args):
@@ -895,12 +942,12 @@ impl Program:
                         elif s.view_:
                             return True
                         for t in args:
-                            if self.can_borrow(mut types, t):
+                            if self.can_borrow_in(mut types, t, env):
                                 return True
                         return False
                     case Enum(_):
                         for t in args:
-                            if self.can_borrow(mut types, t):
+                            if self.can_borrow_in(mut types, t, env):
                                 return True
                         return False
                     case _:
@@ -1551,12 +1598,14 @@ impl Program:
                 return False
 
     ## Whether a value of the type holds a capability handle (`Fs` and the
-    ## others of a `System`) or a `Cap` by value (decision 237). Such a
-    ## value is `Copy` (Q-51), but each copy of a handle is counted and the
-    ## object goes with the last one, so lowering drops it as it drops a
-    ## value that is not `Copy`. A `Lent` is a view of a handle, and counts
-    ## nothing; a type parameter holds none here (lowering drops a value
-    ## whose type is `Copy` only by a bound all the same).
+    ## others of a `System`) or a `Cap` by value (decision 237), or may: a
+    ## function value, whose environment (an `own` closure's) holds copies
+    ## of what it captured (decision 248). Such a value is `Copy` (Q-51),
+    ## but each copy of a handle is counted and the object goes with the
+    ## last one, so lowering drops it as it drops a value that is not
+    ## `Copy`. A `Lent` is a view of a handle, and counts nothing; a type
+    ## parameter holds none here (lowering drops a value whose type is
+    ## `Copy` only by a bound all the same).
     pub pure def holds_capability(self, mut types: Types, ty: Ty) -> bool:
         return self.holds_capability_depth(mut types, ty, 0)
 
@@ -1564,6 +1613,10 @@ impl Program:
         if depth > 32:
             return False
         match types.data(ty).copy():
+            # A function value's environment (an `own` closure's) holds
+            # copies of what it captured (decision 248).
+            case TyData.Fn(_, _, _):
+                return True
             case TyData.Tuple(e, _):
                 for t in e:
                     if self.holds_capability_depth(mut types, t, depth + 1):
@@ -1733,7 +1786,7 @@ impl Program:
                 return Answer.Yes(ImplSource.Builtin)
             return Answer.No
         if t == self.wk.escapable:
-            if not self.can_borrow(mut types, ty):
+            if not self.can_borrow_in(mut types, ty, env):
                 return Answer.Yes(ImplSource.Builtin)
             return Answer.No
         # A refinement implements the reading traits of its base (07).
@@ -2178,8 +2231,14 @@ pub pure def param_local_ty(
         case Mode.Mut:
             return types.ref_(ty, True)
         case Mode.Borrow:
+            # A reference is passed as it is, a `ref mut T` too: the call
+            # passes the reference, not a borrow of it (decision 255). A
+            # generic parameter bounded by `Copy` is passed by value, as
+            # every type it stands for is.
             var opaque = False
             match types.data(ty):
+                case TyData.Ref(_, _):
+                    return ty
                 case TyData.Param(_) | TyData.Assoc(_, _, _):
                     opaque = True
                 case _:

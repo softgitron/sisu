@@ -116,6 +116,23 @@ pub struct Layout:
     ## package is a member of one, else beside its own; none for a single
     ## file.
     pub lock: String?
+    ## The features the command line asked for (`--features`) that are not
+    ## features: each name as given, and the package it names (decision
+    ## 250).
+    pub unknown_requested: list[(String, String)]
+
+## The features a command line asks for (`--features`,
+## `--no-default-features`; 09, decision 250): names of the root package's
+## features, or `DEP/FEATURE` of a dependency's, on besides `default`,
+## which `no_default` leaves off.
+pub struct FeatureRequest:
+    pub names: list[String]
+    pub no_default: bool
+
+impl FeatureRequest:
+    ## What a command line that names no feature asks for.
+    pub pure def none() -> FeatureRequest:
+        return FeatureRequest(names=[], no_default=False)
 
 impl Layout:
     pub pure def new(base: str) -> Layout:
@@ -127,6 +144,7 @@ impl Layout:
             base=base.to_string(),
             script=False,
             lock=None,
+            unknown_requested=[],
         )
 
     pub pure def has_errors(self, catalog: Catalog) -> bool:
@@ -483,10 +501,14 @@ impl Loader:
 ## The layout of a package in `dir`, with file names relative to `base`
 ## (both absolute).
 pub def load_package(fs: Fs, dir: str, base: str) -> Layout:
+    return load_package_with(fs, dir, base, FeatureRequest.none())
+
+## `load_package`, with the features the command line asks for.
+pub def load_package_with(fs: Fs, dir: str, base: str, request: FeatureRequest) -> Layout:
     var l = Loader(layout=Layout.new(canonical(base)), target=target_facts(), dirs=[], edges=[])
     var stack: list[int] = []
     _ = l.package(fs, dir, mut stack, None)
-    turn_on_features(mut l.layout)
+    turn_on_features(mut l.layout, request)
     # The lockfile: beside the workspace's manifest when the package is a
     # member of one, else beside its own.
     let canon = canonical(dir)
@@ -520,6 +542,11 @@ pub def workspace_of(fs: Fs, dir: str) -> (String, list[String])?:
 ## inline metadata, by paths relative to its directory. `disk` is the file's
 ## absolute path and `name` the name diagnostics give it.
 pub def load_file(fs: Fs, name: str, disk: str, text: str) -> Layout:
+    return load_file_with(fs, name, disk, text, FeatureRequest.none())
+
+## `load_file`, with the features the command line asks for: a file that is
+## no script declares none.
+pub def load_file_with(fs: Fs, name: str, disk: str, text: str, request: FeatureRequest) -> Layout:
     var layout = Layout.new(parent(disk))
     layout.script = text.starts_with("#!")
     layout.packages.push(
@@ -542,6 +569,7 @@ pub def load_file(fs: Fs, name: str, disk: str, text: str) -> Layout:
         ModuleFile(path=[], name=name.to_string(), disk=disk.to_string(), package=0)
     )
     if not layout.script:
+        turn_on_features(mut layout, request)
         return layout
     let (meta, broken) = manifest.script_metadata(text)
     if let Some(at) = broken:
@@ -555,6 +583,7 @@ pub def load_file(fs: Fs, name: str, disk: str, text: str) -> Layout:
         )
         return layout
     let found = meta else:
+        turn_on_features(mut layout, request)
         return layout
     # The script is the first package on the stack, reached by no edge.
     var l = Loader(layout=layout, target=target_facts(), dirs=[String.new()], edges=[None])
@@ -581,7 +610,7 @@ pub def load_file(fs: Fs, name: str, disk: str, text: str) -> Layout:
         for (t, _) in m.trust_unsafe:
             if t == dep.name:
                 l.layout.packages[d].trusted = True
-    turn_on_features(mut l.layout)
+    turn_on_features(mut l.layout, request)
     return l.layout
 
 ## The names of the dependencies but the dev-dependencies.
@@ -651,16 +680,19 @@ pure def check_feature(
     problems.push(Problem(file=file, diag=named, label_files=[]))
 
 ## The features each package of the build turns on (09; decision 243): the
-## root package's `default` feature, each dependency's `default` unless
-## every entry that reaches it says `default-features = false`, the
-## features those entries list, and what each feature that is on turns on
-## in turn, of its own package or (`DEP/FEATURE`) of a dependency. A name
-## that is no feature is `E1018`.
-pure def turn_on_features(mut layout: Layout):
+## root package's `default` feature (unless the command line says
+## `--no-default-features`) and those the command line names (decision
+## 250), each dependency's `default` unless every entry that reaches it
+## says `default-features = false`, the features those entries list, and
+## what each feature that is on turns on in turn, of its own package or
+## (`DEP/FEATURE`) of a dependency. A name that is no feature is `E1018` in
+## a manifest, and is kept in `unknown_requested` from the command line.
+pure def turn_on_features(mut layout: Layout, request: FeatureRequest):
     let problems = feature_problems(layout)
     for x in problems:
         layout.problems.push(x.copy())
-    let on = features_on(layout)
+    let (on, unknown) = features_on(layout, request)
+    layout.unknown_requested = unknown
     for p in range(len(on)):
         layout.packages[p].on = on[p].copy()
 
@@ -698,15 +730,48 @@ pure def feature_problems(layout: Layout) -> list[Problem]:
                     check_feature(layout, file, at, d, x, mut problems)
     return problems
 
-## The features that are on in each package, sorted.
-pure def features_on(layout: Layout) -> list[list[String]]:
+## The features that are on in each package, sorted, and the names the
+## command line asks for that are no feature, each with the package it
+## names.
+pure def features_on(
+    layout: Layout, request: FeatureRequest
+) -> (list[list[String]], list[(String, String)]):
     let n = len(layout.packages)
     # The packages the build reaches, and what reaching them turns on.
     var reached: list[bool] = []
     for _ in range(n):
         reached.push(False)
     var stack = [0]
-    var work: list[(int, String)] = [(0, "default".to_string())]
+    var work: list[(int, String)] = []
+    if not request.no_default:
+        work.push((0, "default".to_string()))
+    var unknown: list[(String, String)] = []
+    for name in request.names:
+        # The package it names: the root's, or for `DEP/FEATURE` the one
+        # the root package's first active entry of that name reaches.
+        var target: (int, String)? = None
+        match name.find("/"):
+            case Some(cut):
+                let dep = name.byte_slice(0, cut)
+                var seen = False
+                var reaches: int? = None
+                if n > 0:
+                    for w in layout.packages[0].wants:
+                        if w.name == dep and w.active and not seen:
+                            seen = True
+                            reaches = w.package
+                if let Some(d) = reaches:
+                    target = Some((d, name.byte_slice(cut + 1, name.byte_len()).to_string()))
+            case None:
+                target = Some((0, name.copy()))
+        match target:
+            case Some((p, f)):
+                if has_feature(layout, p, f):
+                    work.push((p, f.copy()))
+                else:
+                    unknown.push((name.copy(), shown_package(layout, p)))
+            case None:
+                unknown.push((name.copy(), shown_package(layout, 0)))
     while let Some(p) = stack.pop():
         if p >= n or reached[p]:
             continue
@@ -752,7 +817,7 @@ pure def features_on(layout: Layout) -> list[list[String]]:
         on[p].push(f)
     for p in range(n):
         on[p].sort()
-    return on
+    return (on, unknown)
 
 ## The layouts a command works on, read as stage 0's `sisu check` and
 ## `sisu sir` read them (`cli.rs`): a package's, or each member's of a
@@ -760,13 +825,13 @@ pure def features_on(layout: Layout) -> list[list[String]]:
 ## without a manifest is the only problem (its `Layout` holds the
 ## workspace's manifest and nothing else); a workspace whose `sir` names no
 ## single application gives no layout.
-pub def load_target(fs: Fs, target: Target, sir: bool) -> list[Layout]:
+pub def load_target(fs: Fs, target: Target, sir: bool, request: FeatureRequest) -> list[Layout]:
     match target:
         case Target.File(f):
             let text = read_text(fs, f) ?? String.new()
-            return [load_file(fs, file_name(f), f, text)]
+            return [load_file_with(fs, file_name(f), f, text, request)]
         case Target.Package(d):
-            return [load_package(fs, d, d)]
+            return [load_package_with(fs, d, d, request)]
         case Target.Workspace(root, members):
             let m = join(root, MANIFEST)
             let text = read_text(fs, m) ?? String.new()
@@ -793,7 +858,7 @@ pub def load_target(fs: Fs, target: Target, sir: bool) -> list[Layout]:
                 dirs = apps
             var out: list[Layout] = []
             for d in dirs:
-                out.push(load_package(fs, d, d))
+                out.push(load_package_with(fs, d, d, request))
             return out
 
 # ------------------------------------------------------------------ tests
@@ -822,3 +887,18 @@ test "the lockfile is beside the workspace's manifest, or the package's own":
     assert workspace_of(fs, "/p").is_none()
     assert load_package(fs, "/w/app", "/w/app").lock == Some("/w/sisu.lock".to_string())
     assert load_package(fs, "/p", "/p").lock == Some("/p/sisu.lock".to_string())
+
+test "the command line's features are turned on, and a name that is none is kept":
+    let fs = Fs.in_memory(
+        {
+            "/p/sisu.toml": "[package]\nname = \"p\"\nversion = \"0.1.0\"\n\n[features]\ndefault = [\"a\"]\na = []\nb = [\"a\"]\n",
+            "/p/src/main.sisu": "def main():\n    pass\n",
+        }
+    )
+    assert load_package(fs, "/p", "/p").packages[0].on == ["a".to_string(), "default".to_string()]
+    let none = FeatureRequest(names=[], no_default=True)
+    assert load_package_with(fs, "/p", "/p", none).packages[0].on.is_empty()
+    let named = FeatureRequest(names=["b".to_string(), "c".to_string()], no_default=True)
+    let l = load_package_with(fs, "/p", "/p", named)
+    assert l.packages[0].on == ["a".to_string(), "b".to_string()]
+    assert l.unknown_requested == [("c".to_string(), "p".to_string())]

@@ -52,6 +52,7 @@ from stage1.typeck import (
     StdBodies,
     Typed,
     base_from,
+    body_module,
     check_file,
     check_std_body,
     std_lines,
@@ -128,6 +129,9 @@ pub struct StdSlots:
     module_firsts: dict[ModuleId, int]
     agreed: String?
     names: dict[String, (int, DefId, BodyKind)]
+    ## The base's definitions of the intrinsics, by the name each
+    ## implements (`intrinsic_decls`).
+    intrinsic_defs: dict[String, DefId]
 
 impl StdSlots:
     pub pure def new() -> StdSlots:
@@ -140,6 +144,7 @@ impl StdSlots:
             module_firsts={},
             agreed=None,
             names={},
+            intrinsic_defs={},
         )
 
     ## Finds what does not depend on the program, the first time: of the
@@ -153,10 +158,11 @@ impl StdSlots:
         named.name_impls_from(prog, types, 0, impls, mut self.impl_counts)
         self.impl_names = named.impl_names.copy()
         self.slots = slots_in(prog, 0, shared)
-        for (key, d, _) in self.slots:
-            let m = prog.defs[d.index].module
+        for (key, d, kind) in self.slots:
+            let m = body_module(prog, d, kind)
             if not self.module_firsts.contains(m):
                 _ = self.module_firsts.insert(m, key)
+        intrinsic_defs_in(prog, 0, shared, mut self.intrinsic_defs)
 
     ## The names of the bodies' functions, for a program that agrees on
     ## `agreed`; `ctx` names them as that program does.
@@ -264,6 +270,7 @@ pub pure def lower(
         tests={},
         benches={},
         instances={},
+        traits=traits_by_name(prog),
     )
     ctx.index_names(prog)
     for (m, t) in typed.texts.items():
@@ -300,8 +307,8 @@ pub pure def lower(
     _ = ctx.source_index(prog, prog.root)
     let own_slots = slots_in(prog, shared, len(prog.defs))
     var firsts = kept_slots.module_firsts.copy()
-    for (key, d, _) in own_slots:
-        let m = prog.defs[d.index].module
+    for (key, d, kind) in own_slots:
+        let m = body_module(prog, d, kind)
         let earlier = firsts.get(m) ?? key
         _ = firsts.insert(m, min(earlier, key))
     var module_order: list[(int, ModuleId)] = []
@@ -385,7 +392,9 @@ pub pure def lower(
     let decls = collect_types(ctx, prog, mut types, functions, set())
     for g in glue_functions(decls):
         functions.push(g.copy())
-    let intrinsics = intrinsic_decls(prog, mut types, functions)
+    var intrinsic_defs = kept_slots.intrinsic_defs.copy()
+    intrinsic_defs_in(prog, shared, len(prog.defs), mut intrinsic_defs)
+    let intrinsics = intrinsic_decls(prog, mut types, functions, intrinsic_defs)
     let (trait_methods, impls) = trait_decls(ctx, prog, mut types, functions)
     let (sources, renumbered) = renumber_sources(ctx.file_names, mut functions)
     var source_modules: list[ModuleId] = []
@@ -418,7 +427,7 @@ pure def trait_decls(
     var methods: list[IntrinsicDecl] = []
     var traits: list[DefId] = []
     for name in called:
-        let m = trait_method_def(prog, name) else:
+        let m = trait_method_def(prog, ctx.traits, name) else:
             continue
         let f = prog.fn_info(m) else:
             continue
@@ -462,8 +471,12 @@ pure def trait_decls(
     for i in prog.impls:
         let info = prog.impl_info(i) else:
             continue
-        let trait_name = prog.qualified_name(info.trait_ref.def_)
+        # An impl of a trait no function calls through, and without
+        # associated types, gives nothing: its names and types are not made.
         let dispatched = traits.contains(info.trait_ref.def_)
+        if not dispatched and info.assoc.is_empty():
+            continue
+        let trait_name = prog.qualified_name(info.trait_ref.def_)
         let self_ty = ctx.ty(prog, mut types, info.self_ty)
         var has_assoc = not info.assoc.is_empty() and projected.contains(trait_name)
         if has_assoc:
@@ -566,26 +579,55 @@ pure def trait_calls(functions: list[Function]) -> list[String]:
     names.sort()
     return names
 
-## The trait method a `Trait.method` name stands for.
-pure def trait_method_def(prog: Resolved, name: str) -> DefId?:
+## The trait method a `Trait.method` name stands for: the method of the
+## first trait of that qualified name that has one (`traits`, by
+## `traits_by_name`).
+pure def trait_method_def(prog: Resolved, traits: dict[String, list[DefId]], name: str) -> DefId?:
     let cut = last_index_of(name, ".") else:
         return None
     let t = name.byte_slice(0, cut)
     let m = name.byte_slice(cut + 1, name.byte_len())
+    let ds = traits.get(t.to_string()) else:
+        return None
+    for d in ds:
+        if let Some(x) = prog.trait_method(d, m):
+            return Some(x)
+    return None
+
+## The program's traits by qualified name, each name's in the order of
+## their definitions: found once a program, rather than by a walk of every
+## definition for each `Trait.method` name.
+pure def traits_by_name(prog: Resolved) -> dict[String, list[DefId]]:
+    var out: dict[String, list[DefId]] = {}
     for i in range(len(prog.defs)):
         if let DefKind.Trait(_) = prog.defs[i].kind():
             let d = DefId(index=i)
-            if prog.qualified_name(d) == t:
-                if let Some(x) = prog.trait_method(d, m):
-                    return Some(x)
-    return None
+            let n = prog.qualified_name(d)
+            var ds: list[DefId] = []
+            if let Some(earlier) = out.get(n):
+                ds = earlier.copy()
+            ds.push(d)
+            _ = out.insert(n, ds)
+    return out
+
+## The definitions from `first` to `end` of the intrinsics, by the name
+## each implements, added to `by_name`: the last declaration of a name
+## wins, as a map's insertion does.
+pure def intrinsic_defs_in(prog: Resolved, first: int, end: int, mut by_name: dict[String, DefId]):
+    for i in range(first, end):
+        if let DefKind.Fn(f) = prog.defs[i].kind():
+            var n = f.intrinsic.copy()
+            if n.is_none():
+                n = f.structural.copy()
+            if let Some(x) = n:
+                _ = by_name.insert(x.copy(), DefId(index=i))
 
 ## The facts the SIR checkers need about every intrinsic the functions
-## call: the prelude's declaration reduced to purity and the arguments the
+## call (`by_name`, by `intrinsic_defs_in`): the prelude's declaration reduced to purity and the arguments the
 ## result borrows from, or, for the intrinsics lowering introduces, the
 ## table in docs/architecture.md ("Lowering-only intrinsics").
 pure def intrinsic_decls(
-    prog: Resolved, mut types: Types, functions: list[Function]
+    prog: Resolved, mut types: Types, functions: list[Function], by_name: dict[String, DefId]
 ) -> list[IntrinsicDecl]:
     var names: list[String] = []
     for f in functions:
@@ -595,15 +637,6 @@ pure def intrinsic_decls(
                     if not names.contains(n):
                         names.push(n.copy())
     names.sort()
-    # The last declaration of a name wins, as a map's insertion does.
-    var by_name: dict[String, DefId] = {}
-    for i in range(len(prog.defs)):
-        if let DefKind.Fn(f) = prog.defs[i].kind():
-            var n = f.intrinsic.copy()
-            if n.is_none():
-                n = f.structural.copy()
-            if let Some(x) = n:
-                _ = by_name.insert(x.copy(), DefId(index=i))
     var out: list[IntrinsicDecl] = []
     for name in names:
         if let Some(d) = by_name.get(name).copied():
@@ -861,7 +894,7 @@ pure def lower_reached(
             let f = ref fs[at]
             for l in f.locals:
                 type_names(l.ty, mut mentioned)
-            reach_from(prog, f, mut work, mut dispatched)
+            reach_from(prog, ctx.traits, f, mut work, mut dispatched, mut mentioned)
             # Defaults and drops of declared types are reached through the
             # types, and so is a type's invariant check, which the run time
             # calls when unwinding drops a mutex guard (D-077). A type met
@@ -944,22 +977,33 @@ pure def type_names(t: Type, mut out: set[String]):
             pass
 
 ## What one function reaches: its callees, the functions it names as
-## values, and the traits it calls through.
+## values, and the traits it calls through; and the types its calls take
+## as type arguments, which a callee may make (`R.empty()` in a function
+## generic over `R`, decision 252), as `mentioned`.
 pure def reach_from(
-    prog: Resolved, f: Function, mut work: list[String], mut dispatched: set[DefId]
+    prog: Resolved,
+    traits: dict[String, list[DefId]],
+    f: Function,
+    mut work: list[String],
+    mut dispatched: set[DefId],
+    mut mentioned: set[String],
 ):
     for b in f.blocks:
         for s in b.stmts:
             match s.kind:
                 case StatementKind.Call(_, callee, args):
                     match callee:
-                        case Callee.Fn(c, _):
+                        case Callee.Fn(c, tys):
                             work.push(c.copy())
                             refs_in_operands(args, mut work)
-                        case Callee.Trait(c, _):
+                            for t in tys:
+                                type_names(t, mut mentioned)
+                        case Callee.Trait(c, tys):
+                            for t in tys:
+                                type_names(t, mut mentioned)
                             refs_in_operands(args, mut work)
                             work.push(c.copy())
-                            if let Some(m) = trait_method_def(prog, c):
+                            if let Some(m) = trait_method_def(prog, traits, c):
                                 if let Some(fi) = prog.fn_info(m):
                                     if let Some(t) = fi.trait_:
                                         _ = dispatched.add(t)

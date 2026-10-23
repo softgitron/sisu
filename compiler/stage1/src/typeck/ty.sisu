@@ -103,10 +103,14 @@ pub enum TyKey:
 pub struct Types:
     data: list[TyData]
     ids: dict[String, int]
+    ## Whether each type mentions a generic parameter or an associated type
+    ## of one (`has_params`), found as it is made: substitution leaves any
+    ## other type as it is.
+    params: list[bool]
 
 impl Types:
     pub pure def new() -> Types:
-        var t = Types(data=[], ids={})
+        var t = Types(data=[], ids={}, params=[])
         # The fixed indices of `Ty.int()` to `Ty.error()`.
         _ = t.intern(TyData.Int)
         _ = t.intern(TyData.Float)
@@ -125,12 +129,77 @@ impl Types:
             return Ty(index=i)
         let i = len(self.data)
         _ = self.ids.insert(k, i)
+        self.params.push(self.mentions_params(d))
         self.data.push(d)
         return Ty(index=i)
+
+    ## Whether a structure is a generic parameter or an associated type, or
+    ## has a part that mentions one: the parts `walk` visits.
+    pure def mentions_params(self, d: TyData) -> bool:
+        match d:
+            case TyData.Param(_) | TyData.Assoc(_, _, _):
+                return True
+            case TyData.Adt(_, a):
+                return self.any_params(a)
+            case TyData.Tuple(e, _):
+                return self.any_params(e)
+            case TyData.Fn(ps, r, _):
+                return self.any_params(ps) or self.params[r.index]
+            case TyData.Ref(inner, _):
+                return self.params[inner.index]
+            case TyData.Dyn(tr):
+                return self.any_params(tr.args)
+            case TyData.ConstOp(_, a):
+                return self.any_params(a)
+            case _:
+                return False
+
+    pure def any_params(self, ts: list[Ty]) -> bool:
+        for t in ts:
+            if self.params[t.index]:
+                return True
+        return False
 
     ## How many types the table holds.
     pub pure def count(self) -> int:
         return len(self.data)
+
+    ## The type `t` of the table `from_`, made in this one: what a request
+    ## a resolution's check made names, declared in the next resolution,
+    ## whose table is made again.
+    pub pure def carried(mut self, from_: Types, t: Ty) -> Ty:
+        match from_.data(t).copy():
+            case TyData.Adt(d, args):
+                let made = self.carried_all(from_, args)
+                return self.intern(TyData.Adt(def_=d, args=made))
+            case TyData.Tuple(elems, labels):
+                let es = self.carried_all(from_, elems)
+                return self.intern(TyData.Tuple(elems=es, labels=labels))
+            case TyData.Fn(params, ret, pure):
+                let ps = self.carried_all(from_, params)
+                let r = self.carried(from_, ret)
+                return self.intern(TyData.Fn(params=ps, ret=r, pure=pure))
+            case TyData.Ref(inner, mutable):
+                let i = self.carried(from_, inner)
+                return self.intern(TyData.Ref(inner=i, mutable=mutable))
+            case TyData.Dyn(tr):
+                let tr2 = TraitRef(def_=tr.def_, args=self.carried_all(from_, tr.args))
+                return self.intern(TyData.Dyn(tr2))
+            case TyData.Assoc(s, tr, name):
+                let s2 = self.carried(from_, s)
+                let tr2 = TraitRef(def_=tr.def_, args=self.carried_all(from_, tr.args))
+                return self.intern(TyData.Assoc(self_ty=s2, trait_=tr2, name=name))
+            case TyData.ConstOp(op, args):
+                let made = self.carried_all(from_, args)
+                return self.intern(TyData.ConstOp(op=op, args=made))
+            case other:
+                return self.intern(other)
+
+    pure def carried_all(mut self, from_: Types, ts: list[Ty]) -> list[Ty]:
+        var out: list[Ty] = []
+        for t in ts:
+            out.push(self.carried(from_, t))
+        return out
 
     ## The structures of the types made from index `n` on, in the order
     ## they were made.
@@ -183,8 +252,12 @@ impl Types:
             case TyData.Adt(d, _): Some(TyKey.Adt(d))
             case _: None
 
-    ## Replaces `Param(i)` by `args[i]`.
+    ## Replaces `Param(i)` by `args[i]`. A type that mentions no parameter
+    ## is itself again, as substituting its parts and making it again
+    ## would make it.
     pub pure def subst(mut self, t: Ty, args: list[Ty]) -> Ty:
+        if not self.params[t.index]:
+            return t
         match self.data(t).copy():
             case TyData.Param(i):
                 if i < len(args):
@@ -284,13 +357,7 @@ impl Types:
     ## Whether the type mentions a generic parameter or an associated type
     ## of one: its meaning depends on the type arguments.
     pub pure def has_params(self, t: Ty) -> bool:
-        for x in self.walk(t):
-            match self.data(x):
-                case TyData.Param(_) | TyData.Assoc(_, _, _):
-                    return True
-                case _:
-                    pass
-        return False
+        return self.params[t.index]
 
     pub pure def contains_error(self, t: Ty) -> bool:
         for x in self.walk(t):

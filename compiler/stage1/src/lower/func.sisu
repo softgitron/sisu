@@ -42,6 +42,7 @@ from stage1.sir import (
     value_wrapper,
 )
 from stage1.syntax.ast import Mode
+from stage1.typeck import body_module
 from stage1.typeck.program import FnInfo, ModuleId, Predicate, param_local_ty
 from stage1.typeck.program import FnKind as DefFnKind
 from stage1.typeck.program import Program as Resolved
@@ -176,7 +177,9 @@ pub pure def lower_body(
 ) -> (list[Function], Types):
     var types = types_in
     let name = ctx.body_name(prog, types, body)
-    let module = prog.defs[body.def_.index].module
+    # The file the body is in: a value that reflects is in the text its
+    # unfolding made (decision 251).
+    let module = body_module(prog, body.def_, body.kind)
     let source = ctx.source_index(prog, module)
     var out: list[Function] = []
     var kind = FnKind.Value

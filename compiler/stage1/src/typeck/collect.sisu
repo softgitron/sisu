@@ -95,7 +95,7 @@ from stage1.typeck.program import (
     WellKnown,
 )
 from stage1.typeck.std_sources import ambient, builtin_impls, importable, module_for, module_paths, reexports, target
-from stage1.typeck.template import Src, Templates, template_parts
+from stage1.typeck.template import Src, Templates, template_parts, type_params
 from stage1.typeck.ty import DefId, TraitRef, Ty, TyData, TyKey, Types
 
 ## Where a method is declared, which decides the generics, bounds and
@@ -122,6 +122,14 @@ pub enum Pending:
     Test(def_: DefId, module: ModuleId, ast: TestDef)
     Const(def_: DefId, module: ModuleId, ast: ConstDef)
     Refinement(def_: DefId, module: ModuleId, ast: TypeAlias, node: int, range: TextRange)
+
+## A value that reflects, unfolded once everything is resolved (decision
+## 251): a constant's, a struct field's default, a parameter's default,
+## each with the module it is written in.
+pub enum Later:
+    Const(def_: DefId, module: ModuleId, value: ExprId)
+    Field(def_: DefId, index: int, module: ModuleId, label: String, value: ExprId)
+    Param(def_: DefId, index: int, module: ModuleId, label: String, value: ExprId)
 
 ## What a type expression may mention where it is written.
 struct TyCtx:
@@ -203,6 +211,21 @@ pub struct Resolver:
     pub derive_templates: dict[(int, String), FnDef]
     ## The syntax of each template, for its instances.
     pub template_fns: dict[DefId, FnDef]
+    ## Values that reflect (a constant's, a field's or a parameter's
+    ## default), unfolded once everything they may name is resolved
+    ## (decision 251).
+    pub unfold_later: list[Later]
+    ## Each trait's provided methods that reflect, with the trait's module:
+    ## an impl that does not write one gets it as a template of its own,
+    ## made for its type (decision 251).
+    pub trait_templates: dict[DefId, list[(ModuleId, FnDef)]]
+    ## The provided methods that reflect each impl got from its trait
+    ## (decision 251): their instances name the impl's type parameters
+    ## apart, since the trait's code never names them.
+    pub provided_copies: set[DefId]
+    ## The names reflection shows for the type parameters of the template
+    ## being made (a generic trait impl's, decision 251).
+    pub shape_names: list[String]
     ## Generic functions the last check found calling a template with their
     ## own type parameters: templates too.
     pub promoted: set[DefId]
@@ -290,6 +313,10 @@ impl Resolver:
             catalog=Shared(Catalog.parse("")),
             derive_templates={},
             template_fns={},
+            unfold_later=[],
+            trait_templates={},
+            provided_copies=set(),
+            shape_names=[],
             promoted=set(),
             instances_asked=0,
             instances_bounded=False,
@@ -313,6 +340,12 @@ impl Resolver:
     ## The prelude, the ambient std modules, `target` and `builtin_impls`,
     ## resolved: `texts` gives each std module's source by name.
     pub pure def base(texts: dict[String, String]) -> Resolver:
+        let (r, _) = Resolver.base_with_all(texts)
+        return r
+
+    ## `base`, and a copy of it that loads every std module a program may
+    ## import besides, which the base makes their derived impls on.
+    pub pure def base_with_all(texts: dict[String, String]) -> (Resolver, Resolver):
         var r = Resolver.new()
         # The prelude's derive templates, with its syntax and text, which
         # unfold the derived impls of every std module and stay for the
@@ -366,7 +399,10 @@ impl Resolver:
         # repeat.
         r.module_texts = {}
         r.std_derives = templates
-        return r
+        # The copy resolves them all, for what their bodies ask of a program
+        # that imports them (`typeck.std_promotions`).
+        all.resolve_pending()
+        return (r, all)
 
     ## A prelude of the given text alone, resolved: no ambient modules, no
     ## `target` and no `builtin_impls` (for the tests).
@@ -719,6 +755,12 @@ impl Resolver:
     pub pure def is_loaded(self, name: str) -> bool:
         return self.std_loaded.contains(name.to_string())
 
+    ## The std module loaded under `name`.
+    pub pure def loaded(self, name: str) -> ModuleId?:
+        if let Some(m) = self.std_loaded.get(name.to_string()):
+            return Some(m)
+        return None
+
     pure def load_std(mut self, name: str, text: str, templates: Templates) -> ModuleId:
         let module = build.module(parse(text, Catalog.parse("")).tree)
         return self.load_std_module(name, module, text, templates)
@@ -762,6 +804,7 @@ impl Resolver:
         wk.ord = self.prog.lookup_in(p, "Ord")
         wk.hash = self.prog.lookup_in(p, "Hash")
         wk.len = self.prog.lookup_in(p, "Len")
+        wk.contains = self.prog.lookup_in(p, "Contains")
         wk.copy = self.prog.lookup_in(p, "Copy")
         wk.drop = self.prog.lookup_in(p, "Drop")
         wk.iterator = self.prog.lookup_in(p, "Iterator")
@@ -977,6 +1020,7 @@ impl Resolver:
             body_broken=False,
             contracts=False,
             template=False,
+            type_params=[],
         )
 
     pub pure def ast(self, module: ModuleId) -> ref Ast:
@@ -1113,7 +1157,7 @@ impl Resolver:
                     # The value is known from here on, for a type's
                     # constant argument that names it (`typeck.consts`).
                     let ts = self.value_terms(module, c.value)
-                    let info = ConstInfo(ty=Ty.error(), value=c.value, terms=ts)
+                    let info = ConstInfo(ty=Ty.error(), value=c.value, value_module=None, terms=ts)
                     let def_ = self.new_def(
                         module, c.name.text, c.name.range, item.vis, DefKind.Const(info)
                     )
@@ -1262,7 +1306,57 @@ impl Resolver:
                 more.push(p)
             more.reverse()
             queue = more
+        self.unfold_values()
         self.phase = declaring
+
+    ## Unfolds the values that reflect, now that every type and trait they
+    ## may name is resolved (decision 251): each is checked from the text
+    ## its unfolding made, in a module of its own (`<NAME>/MODULE.sisu`).
+    pure def unfold_values(mut self):
+        let later = self.unfold_later.copy()
+        self.unfold_later = []
+        for l in later:
+            match l:
+                case Later.Const(def_, module, value):
+                    let name = self.prog.defs[def_.index].name.copy()
+                    let site = self.ast(module).expr(value).range
+                    let unfolded = self.unfold_value(module, name, value, site)
+                    var kind_now = self.prog.defs[def_.index].kind().copy()
+                    if let DefKind.Const(c) = ref mut kind_now:
+                        match unfolded:
+                            case Some((v, m)):
+                                c.value = Some(v)
+                                c.value_module = Some(m)
+                                c.terms = self.value_terms(m, Some(v))
+                            case None:
+                                c.value = None
+                    self.prog.defs[def_.index].set_kind(kind_now)
+                case Later.Field(def_, index, module, label, value):
+                    let site = self.ast(module).expr(value).range
+                    let unfolded = self.unfold_value(module, label, value, site)
+                    var kind_now = self.prog.defs[def_.index].kind().copy()
+                    if let DefKind.Struct(st) = ref mut kind_now:
+                        if index < len(st.fields):
+                            match unfolded:
+                                case Some((v, m)):
+                                    st.fields[index].default = Some(v)
+                                    st.fields[index].default_module = Some(m)
+                                case None:
+                                    st.fields[index].default = None
+                    self.prog.defs[def_.index].set_kind(kind_now)
+                case Later.Param(def_, index, module, label, value):
+                    let site = self.ast(module).expr(value).range
+                    let unfolded = self.unfold_value(module, label, value, site)
+                    var kind_now = self.prog.defs[def_.index].kind().copy()
+                    if let DefKind.Fn(info) = ref mut kind_now:
+                        if index < len(info.params):
+                            match unfolded:
+                                case Some((v, m)):
+                                    info.params[index].default = Some(v)
+                                    info.params[index].default_module = Some(m)
+                                case None:
+                                    info.params[index].default = None
+                    self.prog.defs[def_.index].set_kind(kind_now)
 
     pure def resolve_alias(mut self, d: DefId) -> Ty:
         if let DefKind.TypeAlias(t) = self.prog.defs[d.index].kind():
@@ -1338,8 +1432,14 @@ impl Resolver:
                         let at = c.name.range
                         let d = Diagnostic.new(Msg.ResolveConstTypeRequired, at.start, at.end)
                         self.report_other(module, d.with("name", c.name.text))
+                # A value that reflects is unfolded where it is written, once
+                # everything is resolved, and checked as the text that makes
+                # (decision 251).
+                if let Some(v) = c.value:
+                    if value_unfolds(self.ast(module), v):
+                        self.unfold_later.push(Later.Const(def_=def_, module=module, value=v))
                 let ts = self.value_terms(module, c.value)
-                let info = ConstInfo(ty=ty, value=c.value, terms=ts)
+                let info = ConstInfo(ty=ty, value=c.value, value_module=None, terms=ts)
                 self.prog.defs[def_.index].set_kind(DefKind.Const(info))
             case Pending.Impl(module, imp, rng):
                 self.resolve_impl(module, imp, rng)
@@ -1415,9 +1515,21 @@ impl Resolver:
                     edits.push(Edit(start=k, end=k, text="view ".to_string()))
                 let param = MsgParam(name="ty".to_string(), value=s.name.text.copy())
                 self.report_other(module, d.fix_params(Msg.BorrowDeclareView, [param], edits))
+            if let Some(v) = f.default:
+                if value_unfolds(self.ast(module), v):
+                    let label = "{s.name.text}.{f.name.text}"
+                    let index = len(fields)
+                    self.unfold_later.push(
+                        Later.Field(def_=def_, index=index, module=module, label=label, value=v)
+                    )
             fields.push(
                 FieldInfo(
-                    name=f.name.text.copy(), ty=ty, default=f.default, span=f.range, vis=f.vis
+                    name=f.name.text.copy(),
+                    ty=ty,
+                    default=f.default,
+                    default_module=None,
+                    span=f.range,
+                    vis=f.vis,
                 )
             )
         if not s.unsupported.is_empty():
@@ -1491,16 +1603,28 @@ impl Resolver:
 
     pure def resolve_test(mut self, def_: DefId, module: ModuleId, t: TestDef):
         let name = self.prog.defs[def_.index].name.copy()
-        var info = self.placeholder_fn(FnKind.Test(name))
+        var info = self.placeholder_fn(FnKind.Test(name.copy()))
         for p in t.params:
             if let ParamKind.Named(n, ty, _) = p.kind:
                 let resolved = self.resolve_ty(ty, TyCtx.plain(module, [], False))
                 info.params.push(
                     ParamInfo(
-                        name=n.text.copy(), mode=p.mode, ty=resolved, default=None, span=p.range
+                        name=n.text.copy(),
+                        mode=p.mode,
+                        ty=resolved,
+                        default=None,
+                        default_module=None,
+                        span=p.range,
                     )
                 )
         info.body = t.body.copy()
+        # A test whose body runs code at compile time by unfolding is a
+        # template, made once as a function without type parameters is
+        # (decision 251), and so is each case of a parametrised one.
+        let f = test_fn(name, t)
+        if unfolds(self.ast(module), f, []) and not self.instance_modules.contains(module):
+            info.template = True
+            _ = self.template_fns.insert(def_, f)
         self.prog.defs[def_.index].set_kind(DefKind.Fn(info))
 
     ## `Adt(d, [Param(0), ..., Param(n - 1)])`: a type in terms of its own
@@ -1575,6 +1699,11 @@ impl Resolver:
         var names = outer_names.copy()
         for g in f.generics:
             names.push(g.name.text.copy())
+        # A `comptime def`'s `T: type` parameters are generic parameters
+        # whose arguments a call writes among its arguments (decision 251).
+        var typed: list[(int, String)] = []
+        if f.is_comptime:
+            typed = type_params(Src(ast=self.ast(module), source=""), f)
         var generics = outer.copy()
         for k in range(len(f.generics)):
             let g = ref f.generics[k]
@@ -1587,6 +1716,11 @@ impl Resolver:
                 let at = g.name.range
                 self.report_other(module, Diagnostic.new(Msg.ResolveImplDefault, at.start, at.end))
             generics.push(Generic(name=g.name.text.copy(), default=None, is_const=g.is_const))
+        var type_param_info: list[(int, String, int)] = []
+        for (at, n) in typed:
+            type_param_info.push((at, n.copy(), len(generics)))
+            names.push(n.copy())
+            generics.push(Generic(name=n.copy(), default=None, is_const=False))
         var impl_assoc: list[(String, Ty)] = []
         if let Some(i) = impl_def:
             if let Some(info) = self.prog.impl_info(i):
@@ -1621,33 +1755,11 @@ impl Resolver:
         info.owner = self_ty
         info.pure = f.is_pure
         info.comptime_ = f.is_comptime
+        info.type_params = type_param_info
         info.body = f.body.copy()
         info.intrinsic = self.builtin_attr(module, f.attrs, "intrinsic")
         info.structural = self.builtin_attr(module, f.attrs, "structural")
         info.internal = has_attr(f.attrs, "internal")
-        # A function whose body runs code at compile time by unfolding, or
-        # that was promoted for calling a template with its own type
-        # parameters, is a template (08, "Reflection"; decision 244): a free
-        # function, a method of a type or of an inherent impl, or a method
-        # of a trait impl without type parameters. It is made for each list
-        # of type arguments it is called with, and once, before anything
-        # calls it, when it has none. A trait's own methods and a `comptime
-        # def` are not templates.
-        let unfolding = unfolds(self.ast(module), f, names) or self.promoted.contains(def_)
-        var placed = False
-        match owner:
-            case None | Some(Owner.Type(_)) | Some(Owner.Inherent(_, _, _, _)):
-                placed = True
-            case Some(Owner.Impl(_)):
-                placed = info.generics.is_empty()
-            case _:
-                placed = False
-        if unfolding
-                and not f.is_comptime
-                and not self.instance_modules.contains(module)
-                and placed:
-            info.template = True
-            _ = self.template_fns.insert(def_, f.copy())
         if self.is_root(module):
             info.contracts = not f.contracts(self.ast(module)).is_empty()
             if has_attr(f.attrs, "structural") or has_attr(f.attrs, "keeps"):
@@ -1677,6 +1789,14 @@ impl Resolver:
                     else:
                         info.self_mode = Some(p.mode)
                 case ParamKind.Named(name, ty, default):
+                    # A `T: type` parameter is a type parameter (decision
+                    # 251).
+                    var is_type = False
+                    for (_, n) in typed:
+                        if n == name.text:
+                            is_type = True
+                    if is_type:
+                        continue
                     var twice = False
                     for x in info.params:
                         if x.name == name.text:
@@ -1694,12 +1814,22 @@ impl Resolver:
                         self.report_other(module, d)
                     let resolved = self.resolve_ty(ty, ctx)
                     self.check_sized(module, resolved, p.range)
+                    if let Some(v) = default:
+                        if value_unfolds(self.ast(module), v):
+                            let label = "{f.name.text}.{name.text}"
+                            let index = len(info.params)
+                            self.unfold_later.push(
+                                Later.Param(
+                                    def_=def_, index=index, module=module, label=label, value=v
+                                )
+                            )
                     info.params.push(
                         ParamInfo(
                             name=name.text.copy(),
                             mode=p.mode,
                             ty=resolved,
                             default=default,
+                            default_module=None,
                             span=p.range,
                         )
                     )
@@ -1802,6 +1932,35 @@ impl Resolver:
                     pass
         if let Some(k) = self.special_kinds.get(def_):
             info.kind = k.copy()
+        # A function whose body runs code at compile time by unfolding, or
+        # that was promoted for calling a template with its own type
+        # parameters, is a template (08, "Reflection"; decision 244): a free
+        # function, a method of a type or of an impl, and a `comptime def`
+        # that reflects or has `T: type` parameters, which are type
+        # parameters made per type as a template's are (decision 251). It is
+        # made for each list of type arguments it is called with, and once,
+        # before anything calls it, when it has none; a method of a trait
+        # impl is made once whatever its type parameters, which stay
+        # parameters, so that a trait's call reaches it (decision 251). A
+        # trait's own method that reflects is made in each impl that does not
+        # write it, as that impl's template: it is a template only so that
+        # nothing checks it as written.
+        let unfolding = unfolds(self.ast(module), f, names)
+            or self.promoted.contains(def_)
+            or not info.type_params.is_empty()
+        var placed = False
+        match owner:
+            case None | Some(Owner.Type(_)) | Some(Owner.Inherent(_, _, _, _)):
+                placed = True
+            case Some(Owner.Impl(_)):
+                placed = True
+            case Some(Owner.Trait(_)):
+                placed = f.body.is_some()
+            case _:
+                placed = False
+        if unfolding and not self.instance_modules.contains(module) and placed:
+            info.template = True
+            _ = self.template_fns.insert(def_, f.copy())
         self.prog.defs[def_.index].set_kind(DefKind.Fn(info))
 
     ## Whether an impl is of `Drop`.
@@ -1896,6 +2055,24 @@ impl Resolver:
             # A `comptime def` runs at compile time: the trait's derive is
             # not one of its methods.
             if m.is_comptime:
+                # Any other is a compile-time function of the trait's,
+                # `Trait.name(...)` (decision 251).
+                if m.name.text != "derive":
+                    let placeholder = self.placeholder_fn(FnKind.Free)
+                    let fdef = self.new_def(
+                        module,
+                        "{t.name.text}.{m.name.text}",
+                        m.name.range,
+                        Vis.Pub,
+                        DefKind.Fn(placeholder),
+                    )
+                    var kind_now = self.prog.defs[def_.index].kind().copy()
+                    if let DefKind.Trait(info) = ref mut kind_now:
+                        info.comptime_fns.push((m.name.text.copy(), fdef))
+                    self.prog.defs[def_.index].set_kind(kind_now)
+                    self.pending.push(
+                        Pending.Fn(def_=fdef, module=module, ast=m.copy(), owner=None)
+                    )
                 continue
             var first = k
             for j in range(len(t.methods)):
@@ -1905,6 +2082,14 @@ impl Resolver:
                 continue
             let info = self.placeholder_fn(FnKind.Method)
             let fdef = self.new_def(module, m.name.text, m.name.range, Vis.Pub, DefKind.Fn(info))
+            # A provided method that reflects is made in each impl that does
+            # not write it (decision 251).
+            if m.body.is_some() and unfolds(self.ast(module), m, names):
+                var provided: list[(ModuleId, FnDef)] = []
+                if let Some(x) = self.trait_templates.get(def_):
+                    provided = x.copy()
+                provided.push((module, m.copy()))
+                _ = self.trait_templates.insert(def_, provided)
             self.pending.push(
                 Pending.Fn(def_=fdef, module=module, ast=m.copy(), owner=Some(Owner.Trait(def_)))
             )
@@ -2091,6 +2276,30 @@ impl Resolver:
                     self.prog.defs[d.index].set_kind(kind_now)
             self.pending.push(
                 Pending.Fn(def_=fdef, module=module, ast=m.copy(), owner=Some(Owner.Impl(def_)))
+            )
+        # The trait's provided methods that reflect and that the impl does
+        # not write: each a method of the impl, written where the trait's
+        # is, and so a template of the impl made for its type (decision
+        # 251).
+        var provided: list[(ModuleId, FnDef)] = []
+        if let Some(x) = self.trait_templates.get(trait_ref.def_):
+            provided = x.copy()
+        for (trait_module, m) in provided:
+            var written = False
+            for x in imp.methods:
+                if x.name.text == m.name.text:
+                    written = True
+            if written:
+                continue
+            let finfo = self.placeholder_fn(FnKind.Method)
+            let fdef = self.new_def(
+                trait_module, m.name.text, m.name.range, Vis.Pub, DefKind.Fn(finfo)
+            )
+            _ = self.provided_copies.add(fdef)
+            self.pending.push(
+                Pending.Fn(
+                    def_=fdef, module=trait_module, ast=m.copy(), owner=Some(Owner.Impl(def_))
+                )
             )
 
     # ---------------------------------------------------------------- imports
@@ -2674,7 +2883,7 @@ impl Resolver:
 
     ## An associated constant of a type (03), named `Type.NAME`.
     pure def declare_assoc_const(mut self, module: ModuleId, key: TyKey, owner: str, c: ConstDef):
-        let info = ConstInfo(ty=Ty.error(), value=None, terms=[])
+        let info = ConstInfo(ty=Ty.error(), value=None, value_module=None, terms=[])
         let name = "{owner}.{c.name.text}"
         let def_ = self.new_def(module, name, c.name.range, Vis.Pub, DefKind.Const(info))
         let k = (key, c.name.text.copy())
@@ -3811,7 +4020,11 @@ impl Resolver:
                 if len(args) != declared and not (args.is_empty() and declared == 0):
                     self.argument_count(module, at, name, declared, len(args))
                     return Ty.error()
+                # An alias the compiler declares for an instance may stand
+                # for a type parameter of the impl it is in (decision 251).
                 let t = self.resolve_alias(d)
+                if args.is_empty():
+                    return t
                 return self.types.subst(t, args)
             case DefKind.Trait(_):
                 var diag = Diagnostic.new(Msg.ResolveTraitAsType, at.start, at.end).with(
@@ -4045,6 +4258,48 @@ pure def unfolds(ast: Ast, f: FnDef, names: list[String]) -> bool:
             case _:
                 pass
     return False
+
+## Whether a value (a constant's, a field's default) runs code at compile
+## time by unfolding: a `reflect` query or a field reached by a
+## compile-time descriptor (stage 0's `instances::value_unfolds`; decision
+## 251).
+pub pure def value_unfolds(ast: Ast, e: ExprId) -> bool:
+    for x in visit.exprs_of(ast, e):
+        match ast.expr(x).kind:
+            case ExprKind.FieldOf(_, _):
+                return True
+            case ExprKind.Call(callee, _, _):
+                if let ExprKind.Field(base, _) = ast.expr(callee).kind:
+                    if let ExprKind.Name(n) = ast.expr(base).kind:
+                        if n == "reflect":
+                            return True
+            case _:
+                pass
+    return False
+
+## A test as the function its body is, for unfolding it (decision 251):
+## its name's range starts the header the instance's is cut from.
+pure def test_fn(name: str, t: TestDef) -> FnDef:
+    var node = 0
+    if let Some(b) = t.body:
+        node = b.node
+    return FnDef(
+        node=node,
+        range=t.name_range,
+        name=Name(text=name.to_string(), range=t.name_range),
+        is_pure=False,
+        is_comptime=False,
+        generics=[],
+        params=t.params.copy(),
+        ret=None,
+        from_=[],
+        where_=[],
+        body=t.body.copy(),
+        attrs=[],
+        header_broken=False,
+        body_broken=False,
+        vis=Vis.Private,
+    )
 
 ## Whether a block has a `comptime for` or `comptime if` among its
 ## statements, at any depth of statements.
