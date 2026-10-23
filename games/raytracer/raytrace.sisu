@@ -1,0 +1,585 @@
+##! A ray tracer written in Sisu, from the vector up: spheres of mirror,
+##! glass, gold and matte paint on a reflective checkerboard, under a
+##! sunset sky, lit by a soft area light and by glowing orbs, with
+##! antialiasing and depth of field. It writes a 24-bit BMP and shows a
+##! small preview in the terminal.
+##!
+##! Usage: sisu run raytrace.sisu [WIDTH] [SAMPLES] [OUTPUT]
+##! (defaults: 640, 16, render.bmp; the height is WIDTH * 9 / 16).
+##!
+##! Everything is computed here: no maths library beyond `sqrt` and
+##! `floor`, so `sin` and `cos` are Taylor series below, and the random
+##! numbers come from a xorshift generator with a fixed seed, which makes
+##! every render the same image, bit for bit.
+
+const PI: f64 = 3.141592653589793
+const MAX_DEPTH: int = 6
+## Where the sun is: low, ahead and to the left, so shadows stretch towards us.
+const SUN: Vec3 = Vec3(x=-0.55, y=0.21, z=-0.81)
+
+# ---------------------------------------------------------------------------
+# Vectors
+
+@derive(Copy, Debug)
+struct Vec3:
+    x: f64
+    y: f64
+    z: f64
+
+    pure def of(x: f64, y: f64, z: f64) -> Vec3:
+        return Vec3(x=x, y=y, z=z)
+
+    pure def all(v: f64) -> Vec3:
+        return Vec3(x=v, y=v, z=v)
+
+    pure def dot(self, o: Vec3) -> f64:
+        return self.x * o.x + self.y * o.y + self.z * o.z
+
+    pure def cross(self, o: Vec3) -> Vec3:
+        return Vec3(
+            x=self.y * o.z - self.z * o.y,
+            y=self.z * o.x - self.x * o.z,
+            z=self.x * o.y - self.y * o.x,
+        )
+
+    pure def length(self) -> f64:
+        return self.dot(self).sqrt()
+
+    pure def norm(self) -> Vec3:
+        return self * (1.0 / self.length())
+
+    ## Component by component, for colours.
+    pure def times(self, o: Vec3) -> Vec3:
+        return Vec3(x=self.x * o.x, y=self.y * o.y, z=self.z * o.z)
+
+    pure def lerp(self, o: Vec3, t: f64) -> Vec3:
+        return self * (1.0 - t) + o * t
+
+    ## The mirror image of `self` about the normal `n`.
+    pure def reflect(self, n: Vec3) -> Vec3:
+        return self - n * (2.0 * self.dot(n))
+
+impl Add for Vec3:
+    pure def add(self, o: Vec3) -> Vec3:
+        return Vec3(x=self.x + o.x, y=self.y + o.y, z=self.z + o.z)
+
+impl Sub for Vec3:
+    pure def sub(self, o: Vec3) -> Vec3:
+        return Vec3(x=self.x - o.x, y=self.y - o.y, z=self.z - o.z)
+
+impl Mul[f64] for Vec3:
+    pure def mul(self, k: f64) -> Vec3:
+        return Vec3(x=self.x * k, y=self.y * k, z=self.z * k)
+
+impl Neg for Vec3:
+    pure def neg(self) -> Vec3:
+        return Vec3(x=-self.x, y=-self.y, z=-self.z)
+
+# ---------------------------------------------------------------------------
+# Numbers
+
+## `sin(x)`, by reducing `x` to [-pi, pi] and summing its Taylor series.
+pure def sin(x: f64) -> f64:
+    let turns = ((x + PI) / (2.0 * PI)).floor()
+    let r = x - turns * 2.0 * PI
+    var term = r
+    var sum = r
+    for n in range(1, 12):
+        let k = (2 * n).to_f64()
+        term = -term * r * r / (k * (k + 1.0))
+        sum += term
+    return sum
+
+pure def cos(x: f64) -> f64:
+    return sin(x + PI / 2.0)
+
+pure def clamp01(x: f64) -> f64:
+    if x < 0.0:
+        return 0.0
+    if x > 1.0:
+        return 1.0
+    return x
+
+## A xorshift64* generator: fast, deterministic, good enough for jitter.
+struct Rng:
+    state: int
+
+    def next(mut self) -> f64:
+        var s = self.state
+        s = s ^ (s << 13)
+        s = s ^ ((s >> 7) & 0x01FFFFFFFFFFFFFF)
+        s = s ^ (s << 17)
+        self.state = s
+        return ((s >> 11) & 0x000FFFFFFFFFFFFF).to_f64() / 4503599627370496.0
+
+    ## A point in the unit disk, by rejection.
+    def disk(mut self) -> (f64, f64):
+        while True:
+            let x = 2.0 * self.next() - 1.0
+            let y = 2.0 * self.next() - 1.0
+            if x * x + y * y < 1.0:
+                return (x, y)
+
+# ---------------------------------------------------------------------------
+# The scene
+
+@derive(Copy, Debug)
+struct Material:
+    colour: Vec3
+    ## How much of the light is reflected as by a mirror.
+    mirror: f64
+    ## How much passes through, refracted with index `ior`.
+    glass: f64
+    ior: f64
+    ## Light given off: a glowing orb.
+    glow: Vec3
+    shininess: f64
+    ## Whether the colour is a checkerboard of `colour` and a darker tile.
+    checker: bool
+
+pure def matte(c: Vec3) -> Material:
+    return Material(
+        colour=c, mirror=0.0, glass=0.0, ior=1.0, glow=Vec3.all(0.0), shininess=30.0, checker=False
+    )
+
+@derive(Copy, Debug)
+struct Sphere:
+    centre: Vec3
+    radius: f64
+    material: Material
+
+@derive(Copy, Debug)
+struct Hit:
+    t: f64
+    point: Vec3
+    ## Facing the ray.
+    normal: Vec3
+    material: Material
+    ## Whether the ray came from outside the surface.
+    outside: bool
+
+## A light of some size: shadows soften by sampling a point within `radius`.
+@derive(Copy, Debug)
+struct Light:
+    centre: Vec3
+    radius: f64
+    colour: Vec3
+    ## Whether it fades with the square of distance (orbs) or not (the sun).
+    falloff: bool
+
+struct Scene:
+    spheres: list[Sphere]
+    lights: list[Light]
+    floor: Material
+
+    pure def build() -> Scene:
+        var spheres: list[Sphere] = []
+        let mirror = Material(
+            colour=Vec3.of(0.95, 0.95, 0.97),
+            mirror=0.92,
+            glass=0.0,
+            ior=1.0,
+            glow=Vec3.all(0.0),
+            shininess=400.0,
+            checker=False,
+        )
+        let gold = Material(
+            colour=Vec3.of(1.0, 0.76, 0.33),
+            mirror=0.65,
+            glass=0.0,
+            ior=1.0,
+            glow=Vec3.all(0.0),
+            shininess=120.0,
+            checker=False,
+        )
+        let glass = Material(
+            colour=Vec3.of(0.97, 1.0, 0.98),
+            mirror=0.0,
+            glass=0.95,
+            ior=1.5,
+            glow=Vec3.all(0.0),
+            shininess=600.0,
+            checker=False,
+        )
+        spheres.push(Sphere(centre=Vec3.of(0.0, 1.6, 0.0), radius=1.6, material=mirror))
+        spheres.push(Sphere(centre=Vec3.of(-1.3, 0.9, 2.7), radius=0.9, material=glass))
+        spheres.push(Sphere(centre=Vec3.of(2.8, 1.0, 1.2), radius=1.0, material=gold))
+        # A ring of painted spheres around the mirror.
+        let paints = [
+            Vec3.of(0.9, 0.15, 0.2),
+            Vec3.of(0.1, 0.55, 0.95),
+            Vec3.of(0.2, 0.8, 0.35),
+            Vec3.of(0.95, 0.5, 0.1),
+            Vec3.of(0.6, 0.2, 0.85),
+        ]
+        for i in range(9):
+            let a = 2.0 * PI * i.to_f64() / 9.0 + 0.4
+            let r = 0.32 + 0.08 * (i % 3).to_f64()
+            spheres.push(
+                Sphere(
+                    centre=Vec3.of(4.2 * cos(a), r, 4.2 * sin(a) - 0.5),
+                    radius=r,
+                    material=matte(paints[i % 5]),
+                )
+            )
+        # Glowing orbs, which also light the scene.
+        var lights: list[Light] = []
+        let orbs = [
+            (Vec3.of(-3.2, 0.45, 0.6), Vec3.of(0.2, 0.9, 1.0)),
+            (Vec3.of(1.2, 0.35, 3.4), Vec3.of(1.0, 0.25, 0.75)),
+            (Vec3.of(-1.0, 0.4, -3.4), Vec3.of(0.6, 1.0, 0.3)),
+        ]
+        for centre, c in orbs:
+            spheres.push(
+                Sphere(
+                    centre=centre,
+                    radius=0.3,
+                    material=Material(
+                        colour=c,
+                        mirror=0.0,
+                        glass=0.0,
+                        ior=1.0,
+                        glow=c * 1.6,
+                        shininess=1.0,
+                        checker=False,
+                    ),
+                )
+            )
+            lights.push(Light(centre=centre, radius=0.3, colour=c * 2.5, falloff=True))
+        # The low sun, big enough for soft shadows.
+        lights.push(
+            Light(
+                centre=SUN * 60.0, radius=5.0, colour=Vec3.of(1.0, 0.72, 0.45) * 2.6, falloff=False
+            )
+        )
+        # Blue skylight from behind the camera, so the sides facing us are not black.
+        lights.push(
+            Light(
+                centre=Vec3.of(8.0, 14.0, 30.0),
+                radius=6.0,
+                colour=Vec3.of(0.12, 0.16, 0.3),
+                falloff=False,
+            )
+        )
+        let floor = Material(
+            colour=Vec3.of(0.8, 0.78, 0.74),
+            mirror=0.1,
+            glass=0.0,
+            ior=1.0,
+            glow=Vec3.all(0.0),
+            shininess=60.0,
+            checker=True,
+        )
+        return Scene(spheres=spheres, lights=lights, floor=floor)
+
+    ## The nearest surface the ray from `origin` along `dir` meets, if any.
+    pure def hit(self, origin: Vec3, dir: Vec3) -> Hit?:
+        var best = 1.0e30
+        var found: Hit? = None
+        for s in self.spheres:
+            let oc = origin - s.centre
+            let b = oc.dot(dir)
+            let c = oc.dot(oc) - s.radius * s.radius
+            let disc = b * b - c
+            if disc <= 0.0:
+                continue
+            let root = disc.sqrt()
+            var t = -b - root
+            if t < 0.0001:
+                t = -b + root
+            if t < 0.0001 or t >= best:
+                continue
+            best = t
+            let p = origin + dir * t
+            let n = (p - s.centre) * (1.0 / s.radius)
+            let outside = n.dot(dir) < 0.0
+            found = Some(
+                Hit(
+                    t=t,
+                    point=p,
+                    normal=if outside: n else: -n,
+                    material=s.material,
+                    outside=outside,
+                )
+            )
+        # The floor, the plane y = 0.
+        if dir.y < -0.000001:
+            let t = -origin.y / dir.y
+            if t > 0.0001 and t < best and t < 200.0:
+                let p = origin + dir * t
+                var m = self.floor
+                let tile = (p.x * 0.8).floor() + (p.z * 0.8).floor()
+                if tile - 2.0 * (tile / 2.0).floor() != 0.0:
+                    m.colour = Vec3.of(0.04, 0.04, 0.06)
+                found = Some(
+                    Hit(t=t, point=p, normal=Vec3.of(0.0, 1.0, 0.0), material=m, outside=True)
+                )
+        return found
+
+    ## Whether anything but a glowing orb lies between `from` and `to`.
+    pure def blocked(self, start: Vec3, to: Vec3) -> bool:
+        let d = to - start
+        let dist = d.length()
+        let dir = d * (1.0 / dist)
+        for s in self.spheres:
+            if s.material.glow.x > 0.0:
+                continue
+            let oc = start - s.centre
+            let b = oc.dot(dir)
+            let c = oc.dot(oc) - s.radius * s.radius
+            let disc = b * b - c
+            if disc <= 0.0:
+                continue
+            let root = disc.sqrt()
+            let t = -b - root
+            if t > 0.0001 and t < dist:
+                return True
+            let t2 = -b + root
+            if t2 > 0.0001 and t2 < dist:
+                return True
+        return False
+
+## A sunset: deep blue overhead, orange at the horizon, and the sun's glow.
+pure def sky(dir: Vec3) -> Vec3:
+    let up = clamp01(dir.y)
+    let horizon = Vec3.of(1.0, 0.42, 0.18)
+    let middle = Vec3.of(0.42, 0.13, 0.26)
+    let zenith = Vec3.of(0.02, 0.03, 0.14)
+    var c = horizon.lerp(middle, clamp01(up * 6.0))
+    c = c.lerp(zenith, clamp01((up - 0.06) * 3.5))
+    let s = clamp01(dir.dot(SUN.norm()))
+    c = c
+        + Vec3.of(1.0, 0.5, 0.2) * (s ** 24.0 * 0.6)
+        + Vec3.of(1.0, 0.85, 0.6) * (s ** 3000.0 * 30.0)
+    if dir.y < 0.0:
+        c = horizon * 0.5
+    return c
+
+## The light coming back along the ray from `origin` in direction `dir`.
+def trace(scene: Scene, origin: Vec3, dir: Vec3, depth: int, mut rng: Rng) -> Vec3:
+    let Some(h) = scene.hit(origin, dir) else:
+        return sky(dir)
+    let m = h.material
+    if m.glow.x > 0.0 or m.glow.y > 0.0 or m.glow.z > 0.0:
+        return m.glow
+    let p = h.point + h.normal * 0.0005
+    # Direct light: ambient, then each light, its shadow sampled at a
+    # random point of it, so many samples make a soft penumbra.
+    var direct = m.colour.times(Vec3.of(0.05, 0.05, 0.08))
+    for l in scene.lights:
+        let jx, jy = rng.disk()
+        let target = l.centre + Vec3.of(jx * l.radius, jy * l.radius * 0.5, jy * l.radius * 0.866)
+        let to_light = target - p
+        let dist = to_light.length()
+        let ldir = to_light * (1.0 / dist)
+        let lambert = h.normal.dot(ldir)
+        if lambert <= 0.0 or scene.blocked(p, target):
+            continue
+        var c = l.colour
+        if l.falloff:
+            c = c * (1.0 / (1.0 + dist * dist * 0.6))
+        let half = (ldir - dir).norm()
+        let spec = clamp01(h.normal.dot(half)) ** m.shininess
+        direct = direct + m.colour.times(c) * (lambert * (1.0 - m.mirror)) + c * (spec * 0.6)
+    if depth >= MAX_DEPTH:
+        return direct
+    # Fresnel (Schlick): surfaces mirror more at grazing angles.
+    let cos_i = clamp01(-dir.dot(h.normal))
+    let r0 = 0.04
+    let fresnel = r0 + (1.0 - r0) * (1.0 - cos_i) ** 5.0
+    var colour = direct
+    if m.glass > 0.0:
+        let eta = if h.outside: 1.0 / m.ior else: m.ior
+        let k = 1.0 - eta * eta * (1.0 - cos_i * cos_i)
+        let reflected = trace(scene, p, dir.reflect(h.normal), depth + 1, mut rng)
+        if k < 0.0:
+            return reflected.times(m.colour)
+        let refracted_dir = (dir * eta + h.normal * (eta * cos_i - k.sqrt())).norm()
+        let inside = h.point - h.normal * 0.0005
+        let refracted = trace(scene, inside, refracted_dir, depth + 1, mut rng)
+        let f = fresnel + (1.0 - fresnel) * 0.02
+        colour = direct * (1.0 - m.glass)
+            + (reflected * f + refracted.times(m.colour) * (1.0 - f)) * m.glass
+    elif m.mirror > 0.0:
+        let amount = m.mirror + (1.0 - m.mirror) * fresnel
+        let reflected = trace(scene, p, dir.reflect(h.normal), depth + 1, mut rng)
+        let tint = if m.checker: Vec3.all(1.0) else: m.colour
+        colour = direct * (1.0 - amount) + reflected.times(tint) * amount
+    # Haze: far surfaces fade into the horizon's colour.
+    let haze = 1.0 - exp_neg(-h.t * 0.014)
+    return colour.lerp(Vec3.of(1.0, 0.42, 0.18) * 0.5, clamp01(haze))
+
+## `e ** x` for the small negative `x` the haze needs.
+pure def exp_neg(x: f64) -> f64:
+    return 2.718281828459045 ** x
+
+# ---------------------------------------------------------------------------
+# The camera and the image
+
+struct Camera:
+    eye: Vec3
+    u: Vec3
+    v: Vec3
+    w: Vec3
+    half_w: f64
+    half_h: f64
+    focus: f64
+    aperture: f64
+
+    pure def look(eye: Vec3, at: Vec3, aspect: f64) -> Camera:
+        let w = (eye - at).norm()
+        let u = Vec3.of(0.0, 1.0, 0.0).cross(w).norm()
+        let v = w.cross(u)
+        let half_h = 0.42
+        return Camera(
+            eye=eye,
+            u=u,
+            v=v,
+            w=w,
+            half_w=half_h * aspect,
+            half_h=half_h,
+            focus=(eye - at).length() * 0.92,
+            aperture=0.08,
+        )
+
+    ## A ray through the point `sx`, `sy` of the screen, each in [-1, 1],
+    ## from a random point of the lens.
+    def ray(self, sx: f64, sy: f64, mut rng: Rng) -> (Vec3, Vec3):
+        let lx, ly = rng.disk()
+        let lens = self.u * (lx * self.aperture) + self.v * (ly * self.aperture)
+        let target = self.eye
+            + (self.u * (sx * self.half_w) + self.v * (sy * self.half_h) - self.w) * self.focus
+        let origin = self.eye + lens
+        return (origin, (target - origin).norm())
+
+## A tone curve (ACES, fitted) and the sRGB gamma, to one byte.
+pure def to_byte(x: f64) -> u8:
+    let a = x * 0.9
+    let mapped = clamp01((a * (2.51 * a + 0.03)) / (a * (2.43 * a + 0.59) + 0.14))
+    let g = mapped ** (1.0 / 2.2)
+    return (g * 255.0 + 0.5).truncate_to_int().truncate_to[u8]()
+
+pure def le32(mut out: list[u8], n: int):
+    for i in range(4):
+        out.push(((n >> (8 * i)) & 255).truncate_to[u8]())
+
+## A 24-bit BMP of `pixels` (r, g, b by rows from the top).
+pure def bmp(width: int, height: int, pixels: list[u8]) -> bytes:
+    let row = (width * 3 + 3) // 4 * 4
+    var out: list[u8] = [66u8, 77u8]
+    le32(mut out, 54 + row * height)
+    le32(mut out, 0)
+    le32(mut out, 54)
+    le32(mut out, 40)
+    le32(mut out, width)
+    le32(mut out, height)
+    out.push(1u8)
+    out.push(0u8)
+    out.push(24u8)
+    out.push(0u8)
+    for v in [0, row * height, 2835, 2835, 0, 0]:
+        le32(mut out, v)
+    # Rows go bottom up, each pixel blue, green, red.
+    var y = height - 1
+    while y >= 0:
+        for x in range(width):
+            let i = (y * width + x) * 3
+            out.push(pixels[i + 2])
+            out.push(pixels[i + 1])
+            out.push(pixels[i])
+        for _ in range(row - width * 3):
+            out.push(0u8)
+        y -= 1
+    return bytes.from_list(out)
+
+## The image shrunk to `cols` columns and drawn with half blocks, two pixel
+## rows to a line, in 24-bit colour.
+pure def preview(width: int, height: int, pixels: list[u8], cols: int) -> String:
+    let step = width.to_f64() / cols.to_f64()
+    let rows = (height.to_f64() / step).truncate_to_int() // 2 * 2
+    var out = String()
+    var r = 0
+    while r < rows:
+        for c in range(cols):
+            let x = (c.to_f64() * step).truncate_to_int()
+            let top = ((r.to_f64() * step).truncate_to_int() * width + x) * 3
+            let bottom = (((r + 1).to_f64() * step).truncate_to_int() * width + x) * 3
+            out.push("\u{1b}[38;2;{pixels[top]};{pixels[top + 1]};{pixels[top + 2]}m")
+            out.push(
+                "\u{1b}[48;2;{pixels[bottom]};{pixels[bottom + 1]};{pixels[bottom + 2]}m\u{2580}"
+            )
+        out.push("\u{1b}[0m\n")
+        r += 2
+    return out
+
+def render(width: int, height: int, samples: int) -> list[u8]:
+    let scene = Scene.build()
+    let camera = Camera.look(
+        Vec3.of(1.2, 2.6, 10.5), Vec3.of(0.0, 1.0, 0.0), width.to_f64() / height.to_f64()
+    )
+    var rng = Rng(state=0x2545F4914F6CDD1D)
+    var pixels: list[u8] = []
+    for y in range(height):
+        for x in range(width):
+            var c = Vec3.all(0.0)
+            for _ in range(samples):
+                let sx = 2.0 * (x.to_f64() + rng.next()) / width.to_f64() - 1.0
+                let sy = 1.0 - 2.0 * (y.to_f64() + rng.next()) / height.to_f64()
+                let origin, dir = camera.ray(sx, sy, mut rng)
+                c = c + trace(scene, origin, dir, 0, mut rng)
+            c = c * (1.0 / samples.to_f64())
+            pixels.push(to_byte(c.x))
+            pixels.push(to_byte(c.y))
+            pixels.push(to_byte(c.z))
+        if (y + 1) * 10 // height != y * 10 // height:
+            print("rendering: {(y + 1) * 100 // height}%")
+    return pixels
+
+def main(sys: System):
+    let args = sys.env.args()
+    var width = 640
+    var samples = 16
+    var output = "render.bmp"
+    if len(args) > 0:
+        width = args[0].parse_int() ?? 640
+    if len(args) > 1:
+        samples = args[1].parse_int() ?? 16
+    if len(args) > 2:
+        output = args[2]
+    let height = width * 9 // 16
+    print("Sisu ray tracer: {width} x {height}, {samples} samples per pixel")
+    let started = sys.clock.now()
+    let pixels = render(width, height, samples)
+    let took = sys.clock.now() - started
+    sys.fs.write(Path.new(output), bmp(width, height, pixels)).expect("the image is written")
+    print(preview(width, height, pixels, 100))
+    print("wrote {output} in {took.as_millis()} ms")
+
+test "sin and cos agree with known values":
+    for x, want in [
+        (0.0, 0.0),
+        (PI / 6.0, 0.5),
+        (PI / 2.0, 1.0),
+        (PI, 0.0),
+        (-PI / 2.0, -1.0),
+        (7.0 * PI / 2.0, -1.0),
+    ]:
+        assert (sin(x) - want).abs() < 0.000000001
+    assert (cos(0.0) - 1.0).abs() < 0.000000001
+
+test "the random numbers stay in [0, 1)":
+    var rng = Rng(state=12345)
+    for _ in range(10000):
+        let v = rng.next()
+        assert v >= 0.0 and v < 1.0
+
+test "a ray down the middle hits the mirror sphere":
+    let scene = Scene.build()
+    let h = scene.hit(Vec3.of(0.0, 1.6, 10.0), Vec3.of(0.0, 0.0, -1.0)).expect("a hit")
+    assert (h.t - 8.4).abs() < 0.000001
+    assert h.material.mirror > 0.9
+
+test "a BMP has its header, and rows padded to four bytes":
+    let image = bmp(3, 2, [0u8 for _ in range(18)])
+    assert len(image) == 54 + 12 * 2
+    assert image[0] == 66u8 and image[1] == 77u8
