@@ -1801,7 +1801,9 @@ impl Analysis:
                                 "name", self.loan_name(f, types, x)
                             ).with("param", local_name(f, LocalId(index=i + 1))).with(
                                 "function", display_fn(f.name)
-                            ).label(self.loans[x].loc, lm, lp).at(b, si)
+                            ).label(self.loans[x].loc, lm, lp).note(Msg.BorrowStoreOwned, []).at(
+                                b, si
+                            )
                         )
                         return
         # A plain struct or enum cannot hold a loan.
@@ -1922,7 +1924,7 @@ impl Analysis:
                     "name", self.loan_name(f, types, x)
                 ).with("param", local_name(f, LocalId(index=i + 1))).with(
                     "function", display_fn(f.name)
-                ).label(self.loans[x].loc, lm, lp).at(b, si)
+                ).label(self.loans[x].loc, lm, lp).note(Msg.BorrowStoreOwned, []).at(b, si)
             )
             return True
         let lty = ref f.locals[d.local.index].ty

@@ -15,11 +15,13 @@
 #   sisu1 fmt [--check] [PATH...]                each file formatted in place, as `sisu fmt`
 #                                                formats it, or with `--check` what would change,
 #                                                with `sisu fmt`'s exit status
+#   sisu1 doc [PATH] [--output DIR]              the documentation, a Markdown page per module,
+#   sisu1 doc --std [MODULE...]                  as `sisu doc` writes it, with its exit status
 #
-# `check`, `build` and `run` take `--features NAMES` (the root package's
-# features to turn on, separated by commas or spaces, `DEP/FEATURE` for a
-# dependency's, any number of times) and `--no-default-features`, as `sisu`
-# does (decision 250).
+# `check`, `build`, `run` and `doc` take `--features NAMES` (the root
+# package's features to turn on, separated by commas or spaces,
+# `DEP/FEATURE` for a dependency's, any number of times) and
+# `--no-default-features`, as `sisu` does (decision 250).
 #
 # PATH is a file or the directory of a package or workspace (whose members
 # `build` builds in turn); without one, the package of the working
@@ -56,11 +58,11 @@ if [ "${1:-}" = build ]; then
     [ "$native" = 1 ] || set -- --native "$@"
     exec "$exe" --home "$compiler" build "$@"
 fi
-# `fmt` exits with stage 0's status (2 for a usage error, 70 for a file
-# the formatter refused as changed), which stage 1 returns as the error
-# `Exit(status=N)`: the run time prints it as the last line of standard
-# error, which goes, and N is the exit status.
-if [ "${1:-}" = fmt ]; then
+# `fmt` and `doc` exit with stage 0's status (2 for a usage error, 70 for
+# a file the formatter refused as changed), which stage 1 returns as the
+# error `Exit(status=N)`: the run time prints it as the last line of
+# standard error, which goes, and N is the exit status.
+if [ "${1:-}" = fmt ] || [ "${1:-}" = doc ]; then
     err=$(mktemp)
     trap 'rm -f "$err"' EXIT
     "$exe" --home "$compiler" "$@" 2> "$err"

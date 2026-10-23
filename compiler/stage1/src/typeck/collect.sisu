@@ -241,10 +241,21 @@ pub struct Resolver:
     ## The modules that hold an instance, whose functions are never
     ## templates themselves.
     pub instance_modules: set[ModuleId]
+    ## How many definitions the base made: a program's own come after them,
+    ## and nothing a program declares changes one of the base's.
+    pub base_defs: int
+    ## The base's functions that a program makes an instance of whether
+    ## anything calls them or not (a template made once, with a body, not a
+    ## trait's), found once: the walk of each round of instances over every
+    ## definition starts at the program's own.
+    pub base_eager: list[DefId]
     ## The instances that are methods, found once their impls are resolved:
     ## the module, the instance's name, the template, its type arguments and
     ## where the program needs it.
     pub method_instances: list[(ModuleId, String, DefId, list[Ty], (ModuleId, TextRange))]
+    ## Each instance's template and type arguments, which its definition
+    ## keeps when it is resolved (stage 0's `instance_of`).
+    pub instance_of: dict[DefId, (DefId, list[Ty])]
     ## Every module's generators are declared: a module the compiler writes
     ## from now on has the calls that stand for its generators' sites
     ## written as it is declared (`write_sites_in`).
@@ -323,7 +334,10 @@ impl Resolver:
             tests=True,
             instances_declared=0,
             instance_modules=set(),
+            base_defs=0,
+            base_eager=[],
             method_instances=[],
+            instance_of={},
             sites_known=False,
             attrs_of={},
             generated=[],
@@ -402,7 +416,19 @@ impl Resolver:
         # The copy resolves them all, for what their bodies ask of a program
         # that imports them (`typeck.std_promotions`).
         all.resolve_pending()
+        r.mark_base()
         return (r, all)
+
+    ## Records where the base's definitions end, and which of its functions
+    ## each program makes an instance of whatever calls it (`base_eager`).
+    pub pure def mark_base(mut self):
+        self.base_defs = len(self.prog.defs)
+        self.base_eager = []
+        for i in range(len(self.prog.defs)):
+            let d = DefId(index=i)
+            if let Some(f) = self.prog.fn_info(d):
+                if f.body.is_some() and f.made_once() and f.trait_.is_none():
+                    self.base_eager.push(d)
 
     ## A prelude of the given text alone, resolved: no ambient modules, no
     ## `target` and no `builtin_impls` (for the tests).
@@ -417,6 +443,7 @@ impl Resolver:
         r.build_variant_index(0)
         r.check_traits(0)
         r.module_texts = {}
+        r.mark_base()
         return r
 
     ## Declares and resolves the root module, `module`, the syntax of a
@@ -661,7 +688,7 @@ impl Resolver:
                                 file=-1,
                             )
                             d.labels.push(label)
-                        self.report_other(module, d)
+                        self.report_other(module, d.note(Msg.BorrowFromOnlyParameters))
                 continue
             if shape == ResultShape.Plain:
                 continue
@@ -1576,7 +1603,7 @@ impl Resolver:
                     d = d.label_with(
                         Msg.BorrowTypeDeclaredHere, named.start, named.end, "ty", e.name.text
                     )
-                    self.report_other(module, d)
+                    self.report_other(module, d.note(Msg.BorrowOwnedField))
                 var fname: String? = None
                 if let Some(n) = f.name:
                     fname = Some(n.text.copy())
@@ -1961,6 +1988,12 @@ impl Resolver:
         if unfolding and not self.instance_modules.contains(module) and placed:
             info.template = True
             _ = self.template_fns.insert(def_, f.copy())
+        # A test's instance is the test (decision 251), also once it is
+        # resolved, which makes its `FnInfo` again (decision 259).
+        if let Some((template, _)) = self.instance_of.get(def_):
+            if let Some(t) = self.prog.fn_info(template):
+                if let FnKind.Test(_) = t.kind:
+                    info.kind = t.kind.copy()
         self.prog.defs[def_.index].set_kind(DefKind.Fn(info))
 
     ## Whether an impl is of `Drop`.
@@ -3293,7 +3326,7 @@ impl Resolver:
             self.check_copy_fields(d, at)
         self.check_coherence(first)
         self.check_object_safety()
-        self.check_derives()
+        self.check_derives(first)
 
     ## At most one impl of a trait for any type (D-013): each impl from
     ## `first` on against the earlier ones of its trait
@@ -3313,11 +3346,16 @@ impl Resolver:
             let ha = self.header(ia.self_ty, ia.trait_ref.args)
             let na = len(ia.generics)
             let ta = ia.trait_ref.def_
-            for j in range(k):
-                let b = impls[j]
+            # The earlier impls of its trait, in their order among all the
+            # impls (`Program.impls_of`, which lists them as they come).
+            var earlier: list[DefId] = []
+            if let Some(of_trait) = self.prog.impls_of.get(ta):
+                for b in of_trait:
+                    if b.index == a.index:
+                        break
+                    earlier.push(b)
+            for b in earlier:
                 let found_b = self.prog.impl_info(b) else:
-                    continue
-                if found_b.trait_ref.def_ != ta:
                     continue
                 let ib = found_b.copy()
                 let oa = outermost(self.types, ia.self_ty)

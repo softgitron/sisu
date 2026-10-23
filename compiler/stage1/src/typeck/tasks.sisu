@@ -122,7 +122,7 @@ impl Checker:
                 if self.mentions_scope(cx, body_ret):
                     let shown = self.show(cx, body_ret)
                     let d = self.error(cx, Msg.TaskScopeEscapes, span).with("ty", shown)
-                    self.report_other(d)
+                    self.report_other(d.note(Msg.TaskJoinInside))
                 var sites: list[ClosureId] = []
                 for i in range(spawns_before, len(self.spawn_sites)):
                     let s = ref self.spawn_sites[i]
@@ -193,7 +193,7 @@ impl Checker:
                 return
             at = self.span_of(a.expr)
         let d = self.error(cx, Msg.TaskClosureLiteral, at).with("function", function)
-        self.report_other(d)
+        self.report_other(d.note(Msg.TaskWriteClosure))
 
     ## Whether a type holds a `Scope` or a `Handle`, which end with their
     ## scope.
@@ -363,6 +363,10 @@ impl Checker:
             case None:
                 if m == Msg.TaskNotSync:
                     d = d.note(Msg.TaskUseOwn)
+                elif m == Msg.TaskResultNotSend:
+                    d = d.note(Msg.TaskReturnSend)
+                else:
+                    d = d.note(Msg.TaskMakeInside)
         return d
 
     ## A value made into a capability handle must be `Send` and `Sync`: the
@@ -398,11 +402,13 @@ impl Checker:
             if cx.prog.can_borrow_in(mut self.types, t, self.env):
                 let shown = self.show(cx, t)
                 let d = Diagnostic.new(Msg.BorrowViewInOwner, span.start, span.end)
-                self.report_other(d.with("ty", shown).with("owner", owner))
+                let found = d.with("ty", shown).with("owner", owner)
+                self.report_other(found.note(Msg.BorrowOwnInstead))
             elif cx.prog.must_consume_ty(mut self.types, t, 0):
                 let shown = self.show(cx, t)
                 let d = Diagnostic.new(Msg.BorrowMustConsumeInOwner, span.start, span.end)
-                self.report_other(d.with("ty", shown).with("owner", owner))
+                let found = d.with("ty", shown).with("owner", owner)
+                self.report_other(found.note(Msg.BorrowConsumeFirst))
 
     ## `select:` (06, "Channels and select"): each arm waits for a call of
     ## `recv`, `send` or `join`, or for a `Timer` or a `Cancellation`; its

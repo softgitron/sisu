@@ -579,7 +579,7 @@ pub pure def check_program(
                     d = d.with("name", def_.name).with("count", "{len(requests)}")
                     unbounded = Some((def_.module, d))
                 let root_text = modules[0].text.copy()
-                let bodies = template_bodies(r.prog)
+                let bodies = template_bodies(r.prog, r.base_defs)
                 var name_error = other_error
                 for (m, at) in name_errors:
                     if not in_template(bodies, m, at):
@@ -819,8 +819,13 @@ pure def check_round(
     # the impl (decision 251). In stage 0's order of
     # `functions_with_bodies`: the root module's first, then by definition.
     var eager: list[(int, DefId)] = []
-    for i in range(len(prog.defs)):
-        let d = DefId(index=i)
+    # The base's candidates were found once (`Resolver.base_eager`); the
+    # program's own definitions follow them.
+    var candidates = r.base_eager.copy()
+    for i in range(min(r.base_defs, len(prog.defs)), len(prog.defs)):
+        candidates.push(DefId(index=i))
+    for d in candidates:
+        let i = d.index
         let f = prog.fn_info(d) else:
             continue
         if f.body.is_none() or not f.made_once() or f.trait_.is_some():
@@ -1133,14 +1138,14 @@ pure def finish_file(
 
 ## The bodies of the templates of the program's own modules, each with the
 ## index of its module among them (`Checked.template_bodies`).
-pure def template_bodies(prog: Program) -> list[(int, TextRange)]:
+pure def template_bodies(prog: Program, base_defs: int) -> list[(int, TextRange)]:
     var out: list[(int, TextRange)] = []
-    # A definition's module is asked first: one of the base's is in none of
-    # the program's own, and its kind is not looked at.
+    # A definition's module is asked first, and the base's definitions,
+    # which are in none of the program's own modules, are passed by.
     var users: set[int] = set()
     for m in prog.user_modules:
         _ = users.add(m.index)
-    for i in range(len(prog.defs)):
+    for i in range(min(base_defs, len(prog.defs)), len(prog.defs)):
         let m = prog.defs[i].module
         if not users.contains(m.index):
             continue

@@ -401,6 +401,26 @@ pub enum Msg:
     ComptimeInstanceHere
     ResolveAddDyn
     ResolveFirstImpl
+    # The notes that name a fix where the wrong-ownership corpus had none
+    # (decision 263).
+    TaskMakeInside
+    TaskReturnSend
+    TaskJoinInside
+    TaskWriteClosure
+    BorrowFromOnlyParameters
+    BorrowCopyPart
+    BorrowConsumeFirst
+    BorrowConsumeEach
+    BorrowConsumeBeforeCall
+    BorrowOwnInstead
+    BorrowStoreOwned
+    BorrowOwnedField
+    TypeCallInstead
+    TypeCaptureCopy
+    TypePlainClosure
+    TypeBorrowWithMut
+    TypeAssignEveryPath
+    TypeDynOwned
 
 impl Msg:
     ## The catalog identifier.
@@ -791,6 +811,24 @@ impl Msg:
             case ComptimeInstanceHere: "comptime.instance-here"
             case ResolveAddDyn: "resolve.add-dyn"
             case ResolveFirstImpl: "resolve.first-impl"
+            case TaskMakeInside: "task.make-inside"
+            case TaskReturnSend: "task.return-send"
+            case TaskJoinInside: "task.join-inside"
+            case TaskWriteClosure: "task.write-closure"
+            case BorrowFromOnlyParameters: "borrow.from-only-parameters"
+            case BorrowCopyPart: "borrow.copy-part"
+            case BorrowConsumeFirst: "borrow.consume-first"
+            case BorrowConsumeEach: "borrow.consume-each"
+            case BorrowConsumeBeforeCall: "borrow.consume-before-call"
+            case BorrowOwnInstead: "borrow.own-instead"
+            case BorrowStoreOwned: "borrow.store-owned"
+            case BorrowOwnedField: "borrow.owned-field"
+            case TypeCallInstead: "type.call-instead"
+            case TypeCaptureCopy: "type.capture-copy"
+            case TypePlainClosure: "type.plain-closure"
+            case TypeBorrowWithMut: "type.borrow-with-mut"
+            case TypeAssignEveryPath: "type.assign-every-path"
+            case TypeDynOwned: "type.dyn-owned"
 
 ## A byte range of a text: from `start` up to, not including, `end`.
 @derive(Eq, Hash, Debug, Copy)
