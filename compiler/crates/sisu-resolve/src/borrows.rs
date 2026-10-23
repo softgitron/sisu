@@ -97,9 +97,9 @@ impl Program {
             return self.can_borrow_in(&b, env);
         }
         match ty {
-            Ty::Param(_) => {
-                !env.iter().any(|p| p.ty == *ty && Some(p.bound.def) == self.wk.escapable && p.bound.args.is_empty())
-            }
+            Ty::Param(_) => !env
+                .iter()
+                .any(|p| p.ty == *ty && Some(p.bound.def) == self.wk.escapable && p.bound.args.is_empty()),
             Ty::Ref(..) | Ty::Str | Ty::Fn(_) | Ty::Var(_) | Ty::Error => true,
             Ty::Tuple(es, _) => es.iter().any(|t| self.can_borrow_in(t, env)),
             Ty::Adt(d, args) => match &self.def(*d).kind {

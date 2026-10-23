@@ -346,9 +346,10 @@ pub(crate) unsafe fn structural_hash(state: u64, p: *mut u8, t: u32) -> u64 {
                         let tag = value::tag(p, e);
                         let s = mix(state, tag);
                         match variants.get(tag as usize) {
-                            Some(v) => {
-                                v.fields.iter().fold(s, |s, f| structural_hash(s, p.add(f.offset as usize), f.ty))
-                            }
+                            Some(v) => v
+                                .fields
+                                .iter()
+                                .fold(s, |s, f| structural_hash(s, p.add(f.offset as usize), f.ty)),
                             None => s,
                         }
                     }
