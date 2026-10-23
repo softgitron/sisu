@@ -1,0 +1,592 @@
+##! `std.hash` (11): hash functions over bytes. SipHash-2-4, the keyed
+##! hash the prelude's `dict` and `set` use against flooding; FNV-1a, a
+##! fast unkeyed one for small keys; CRC-32 (IEEE 802.3), the checksum of
+##! zip and PNG; and the cryptographic SHA-256 and SHA-512 (FIPS 180-4) and
+##! BLAKE3. Each digest is bytes, `std.encoding.hex_encode` writes it out.
+
+# ------------------------------------------------------------------ words
+
+## The little-endian `u32` at `at` in `data`, the bytes past its end
+## counted as zeros.
+pure def le32(data: bytes, at: int) -> u32:
+    var w = 0u32
+    for k in range(4):
+        if at + k < len(data):
+            w = w | (data[at + k].to_int().truncate_to[u32]() << (8 * k).truncate_to[u32]())
+    return w
+
+pure def be32(data: bytes, at: int) -> u32:
+    var w = 0u32
+    for k in range(4):
+        w = (w << 8u32) | data[at + k].to_int().truncate_to[u32]()
+    return w
+
+pure def le64(data: bytes, at: int) -> u64:
+    var w = 0u64
+    for k in range(8):
+        if at + k < len(data):
+            w = w | (data[at + k].to_int().truncate_to[u64]() << (8 * k).truncate_to[u64]())
+    return w
+
+pure def be64(data: bytes, at: int) -> u64:
+    var w = 0u64
+    for k in range(8):
+        w = (w << 8u64) | data[at + k].to_int().truncate_to[u64]()
+    return w
+
+pure def push_be32(mut out: list[u8], w: u32):
+    for k in [24u32, 16u32, 8u32, 0u32]:
+        out.push(((w >> k) & 255u32).to_int().truncate_to[u8]())
+
+pure def push_le32(mut out: list[u8], w: u32):
+    for k in [0u32, 8u32, 16u32, 24u32]:
+        out.push(((w >> k) & 255u32).to_int().truncate_to[u8]())
+
+pure def push_be64(mut out: list[u8], w: u64):
+    var k = 56u64
+    for _ in range(8):
+        out.push(((w >> k) & 255u64).to_int().expect("a byte").truncate_to[u8]())
+        k = k -% 8u64
+
+pure def rotr32(x: u32, k: u32) -> u32:
+    return (x >> k) | (x << (32u32 - k))
+
+pure def rotr64(x: u64, k: u64) -> u64:
+    return (x >> k) | (x << (64u64 - k))
+
+pure def rotl64(x: u64, k: u64) -> u64:
+    return (x << k) | (x >> (64u64 - k))
+
+## The bits of `x` as an `int` (two's complement).
+pure def signed(x: u64) -> int:
+    match x.to_int():
+        case Some(n):
+            return n
+        case None:
+            return (x - 9223372036854775808u64).to_int().expect("below 2**63")
+                + (-9223372036854775807 - 1)
+
+# ------------------------------------------------------------------ FNV-1a
+
+## FNV-1a with 32 bits (Fowler, Noll and Vo).
+##
+## ```
+## assert fnv1a_32(b"") == 0x811c9dc5u32
+## assert fnv1a_32(b"a") == 0xe40c292cu32
+## ```
+pub pure def fnv1a_32(data: bytes) -> u32:
+    var h = 0x811c9dc5u32
+    for b in data.iter():
+        h = (h ^ b.to_int().truncate_to[u32]()) *% 16777619u32
+    return h
+
+## FNV-1a with 64 bits.
+##
+## ```
+## assert fnv1a_64(b"") == 0xcbf29ce484222325u64
+## assert fnv1a_64(b"foobar") == 0x85944171f73967e8u64
+## ```
+pub pure def fnv1a_64(data: bytes) -> u64:
+    var h = 0xcbf29ce484222325u64
+    for b in data.iter():
+        h = (h ^ b.to_int().truncate_to[u64]()) *% 0x100000001b3u64
+    return h
+
+# ------------------------------------------------------------------ CRC-32
+
+## The table of CRC-32 (the reflected polynomial `0xEDB88320`), one entry
+## per byte value.
+pure def crc_table() -> list[u32]:
+    var table: list[u32] = []
+    for n in range(256):
+        var c = n.truncate_to[u32]()
+        for _ in range(8):
+            c = if c & 1u32 == 1u32: 0xedb88320u32 ^ (c >> 1u32) else: c >> 1u32
+        table.push(c)
+    return table
+
+const CRC_TABLE: list[u32] = comptime crc_table()
+
+## The CRC-32 of `data` (IEEE 802.3, as zip, gzip and PNG compute it).
+##
+## ```
+## assert crc32(b"123456789") == 0xcbf43926u32
+## assert crc32(b"") == 0u32
+## ```
+pub pure def crc32(data: bytes) -> u32:
+    var c = 0xffffffffu32
+    for b in data.iter():
+        let i = ((c ^ b.to_int().truncate_to[u32]()) & 255u32).to_int()
+        c = CRC_TABLE[i] ^ (c >> 8u32)
+    return c ^ 0xffffffffu32
+
+# ------------------------------------------------------------------ SHA-2
+
+const SHA256_K: list[u32] = [
+    0x428a2f98u32,
+    0x71374491u32,
+    0xb5c0fbcfu32,
+    0xe9b5dba5u32,
+    0x3956c25bu32,
+    0x59f111f1u32,
+    0x923f82a4u32,
+    0xab1c5ed5u32,
+    0xd807aa98u32,
+    0x12835b01u32,
+    0x243185beu32,
+    0x550c7dc3u32,
+    0x72be5d74u32,
+    0x80deb1feu32,
+    0x9bdc06a7u32,
+    0xc19bf174u32,
+    0xe49b69c1u32,
+    0xefbe4786u32,
+    0x0fc19dc6u32,
+    0x240ca1ccu32,
+    0x2de92c6fu32,
+    0x4a7484aau32,
+    0x5cb0a9dcu32,
+    0x76f988dau32,
+    0x983e5152u32,
+    0xa831c66du32,
+    0xb00327c8u32,
+    0xbf597fc7u32,
+    0xc6e00bf3u32,
+    0xd5a79147u32,
+    0x06ca6351u32,
+    0x14292967u32,
+    0x27b70a85u32,
+    0x2e1b2138u32,
+    0x4d2c6dfcu32,
+    0x53380d13u32,
+    0x650a7354u32,
+    0x766a0abbu32,
+    0x81c2c92eu32,
+    0x92722c85u32,
+    0xa2bfe8a1u32,
+    0xa81a664bu32,
+    0xc24b8b70u32,
+    0xc76c51a3u32,
+    0xd192e819u32,
+    0xd6990624u32,
+    0xf40e3585u32,
+    0x106aa070u32,
+    0x19a4c116u32,
+    0x1e376c08u32,
+    0x2748774cu32,
+    0x34b0bcb5u32,
+    0x391c0cb3u32,
+    0x4ed8aa4au32,
+    0x5b9cca4fu32,
+    0x682e6ff3u32,
+    0x748f82eeu32,
+    0x78a5636fu32,
+    0x84c87814u32,
+    0x8cc70208u32,
+    0x90befffau32,
+    0xa4506cebu32,
+    0xbef9a3f7u32,
+    0xc67178f2u32,
+]
+
+## The message padded to whole blocks of `block` bytes, its length in
+## bits written big-endian in the last `size` bytes (FIPS 180-4, 5.1).
+pure def padded(data: bytes, block: int, size: int) -> bytes:
+    var tail: list[u8] = [128u8]
+    let n = len(data)
+    while (n + len(tail) + size) % block != 0:
+        tail.push(0u8)
+    for _ in range(size - 8):
+        tail.push(0u8)
+    push_be64(mut tail, (n * 8).truncate_to[u64]())
+    return data + bytes.from_list(tail)
+
+## The SHA-256 digest of `data`, 32 bytes.
+##
+## ```
+## assert sha256(b"abc")[0:4] == b"\xba\x78\x16\xbf"
+## assert sha256(b"")[28:32] == b"\x78\x52\xb8\x55"
+## ```
+pub pure def sha256(data: bytes) -> bytes:
+    var h: list[u32] = [
+        0x6a09e667u32,
+        0xbb67ae85u32,
+        0x3c6ef372u32,
+        0xa54ff53au32,
+        0x510e527fu32,
+        0x9b05688cu32,
+        0x1f83d9abu32,
+        0x5be0cd19u32,
+    ]
+    let msg = padded(data, 64, 8)
+    var start = 0
+    while start < len(msg):
+        var w: list[u32] = []
+        for t in range(16):
+            w.push(be32(msg, start + 4 * t))
+        for t in range(16, 64):
+            let s0 = rotr32(w[t - 15], 7u32) ^ rotr32(w[t - 15], 18u32) ^ (w[t - 15] >> 3u32)
+            let s1 = rotr32(w[t - 2], 17u32) ^ rotr32(w[t - 2], 19u32) ^ (w[t - 2] >> 10u32)
+            w.push(w[t - 16] +% s0 +% w[t - 7] +% s1)
+        var a = h[0]
+        var b = h[1]
+        var c = h[2]
+        var d = h[3]
+        var e = h[4]
+        var f = h[5]
+        var g = h[6]
+        var hh = h[7]
+        for t in range(64):
+            let s1 = rotr32(e, 6u32) ^ rotr32(e, 11u32) ^ rotr32(e, 25u32)
+            let ch = (e & f) ^ (~e & g)
+            let t1 = hh +% s1 +% ch +% SHA256_K[t] +% w[t]
+            let s0 = rotr32(a, 2u32) ^ rotr32(a, 13u32) ^ rotr32(a, 22u32)
+            let maj = (a & b) ^ (a & c) ^ (b & c)
+            let t2 = s0 +% maj
+            hh = g
+            g = f
+            f = e
+            e = d +% t1
+            d = c
+            c = b
+            b = a
+            a = t1 +% t2
+        h[0] = h[0] +% a
+        h[1] = h[1] +% b
+        h[2] = h[2] +% c
+        h[3] = h[3] +% d
+        h[4] = h[4] +% e
+        h[5] = h[5] +% f
+        h[6] = h[6] +% g
+        h[7] = h[7] +% hh
+        start += 64
+    var out: list[u8] = []
+    for x in h:
+        push_be32(mut out, x)
+    return bytes.from_list(out)
+
+const SHA512_K: list[u64] = [
+    0x428a2f98d728ae22u64,
+    0x7137449123ef65cdu64,
+    0xb5c0fbcfec4d3b2fu64,
+    0xe9b5dba58189dbbcu64,
+    0x3956c25bf348b538u64,
+    0x59f111f1b605d019u64,
+    0x923f82a4af194f9bu64,
+    0xab1c5ed5da6d8118u64,
+    0xd807aa98a3030242u64,
+    0x12835b0145706fbeu64,
+    0x243185be4ee4b28cu64,
+    0x550c7dc3d5ffb4e2u64,
+    0x72be5d74f27b896fu64,
+    0x80deb1fe3b1696b1u64,
+    0x9bdc06a725c71235u64,
+    0xc19bf174cf692694u64,
+    0xe49b69c19ef14ad2u64,
+    0xefbe4786384f25e3u64,
+    0x0fc19dc68b8cd5b5u64,
+    0x240ca1cc77ac9c65u64,
+    0x2de92c6f592b0275u64,
+    0x4a7484aa6ea6e483u64,
+    0x5cb0a9dcbd41fbd4u64,
+    0x76f988da831153b5u64,
+    0x983e5152ee66dfabu64,
+    0xa831c66d2db43210u64,
+    0xb00327c898fb213fu64,
+    0xbf597fc7beef0ee4u64,
+    0xc6e00bf33da88fc2u64,
+    0xd5a79147930aa725u64,
+    0x06ca6351e003826fu64,
+    0x142929670a0e6e70u64,
+    0x27b70a8546d22ffcu64,
+    0x2e1b21385c26c926u64,
+    0x4d2c6dfc5ac42aedu64,
+    0x53380d139d95b3dfu64,
+    0x650a73548baf63deu64,
+    0x766a0abb3c77b2a8u64,
+    0x81c2c92e47edaee6u64,
+    0x92722c851482353bu64,
+    0xa2bfe8a14cf10364u64,
+    0xa81a664bbc423001u64,
+    0xc24b8b70d0f89791u64,
+    0xc76c51a30654be30u64,
+    0xd192e819d6ef5218u64,
+    0xd69906245565a910u64,
+    0xf40e35855771202au64,
+    0x106aa07032bbd1b8u64,
+    0x19a4c116b8d2d0c8u64,
+    0x1e376c085141ab53u64,
+    0x2748774cdf8eeb99u64,
+    0x34b0bcb5e19b48a8u64,
+    0x391c0cb3c5c95a63u64,
+    0x4ed8aa4ae3418acbu64,
+    0x5b9cca4f7763e373u64,
+    0x682e6ff3d6b2b8a3u64,
+    0x748f82ee5defb2fcu64,
+    0x78a5636f43172f60u64,
+    0x84c87814a1f0ab72u64,
+    0x8cc702081a6439ecu64,
+    0x90befffa23631e28u64,
+    0xa4506cebde82bde9u64,
+    0xbef9a3f7b2c67915u64,
+    0xc67178f2e372532bu64,
+    0xca273eceea26619cu64,
+    0xd186b8c721c0c207u64,
+    0xeada7dd6cde0eb1eu64,
+    0xf57d4f7fee6ed178u64,
+    0x06f067aa72176fbau64,
+    0x0a637dc5a2c898a6u64,
+    0x113f9804bef90daeu64,
+    0x1b710b35131c471bu64,
+    0x28db77f523047d84u64,
+    0x32caab7b40c72493u64,
+    0x3c9ebe0a15c9bebcu64,
+    0x431d67c49c100d4cu64,
+    0x4cc5d4becb3e42b6u64,
+    0x597f299cfc657e2au64,
+    0x5fcb6fab3ad6faecu64,
+    0x6c44198c4a475817u64,
+]
+
+## The SHA-512 digest of `data`, 64 bytes.
+##
+## ```
+## assert sha512(b"abc")[0:4] == b"\xdd\xaf\x35\xa1"
+## ```
+pub pure def sha512(data: bytes) -> bytes:
+    var h: list[u64] = [
+        0x6a09e667f3bcc908u64,
+        0xbb67ae8584caa73bu64,
+        0x3c6ef372fe94f82bu64,
+        0xa54ff53a5f1d36f1u64,
+        0x510e527fade682d1u64,
+        0x9b05688c2b3e6c1fu64,
+        0x1f83d9abfb41bd6bu64,
+        0x5be0cd19137e2179u64,
+    ]
+    let msg = padded(data, 128, 16)
+    var start = 0
+    while start < len(msg):
+        var w: list[u64] = []
+        for t in range(16):
+            w.push(be64(msg, start + 8 * t))
+        for t in range(16, 80):
+            let s0 = rotr64(w[t - 15], 1u64) ^ rotr64(w[t - 15], 8u64) ^ (w[t - 15] >> 7u64)
+            let s1 = rotr64(w[t - 2], 19u64) ^ rotr64(w[t - 2], 61u64) ^ (w[t - 2] >> 6u64)
+            w.push(w[t - 16] +% s0 +% w[t - 7] +% s1)
+        var a = h[0]
+        var b = h[1]
+        var c = h[2]
+        var d = h[3]
+        var e = h[4]
+        var f = h[5]
+        var g = h[6]
+        var hh = h[7]
+        for t in range(80):
+            let s1 = rotr64(e, 14u64) ^ rotr64(e, 18u64) ^ rotr64(e, 41u64)
+            let ch = (e & f) ^ (~e & g)
+            let t1 = hh +% s1 +% ch +% SHA512_K[t] +% w[t]
+            let s0 = rotr64(a, 28u64) ^ rotr64(a, 34u64) ^ rotr64(a, 39u64)
+            let maj = (a & b) ^ (a & c) ^ (b & c)
+            let t2 = s0 +% maj
+            hh = g
+            g = f
+            f = e
+            e = d +% t1
+            d = c
+            c = b
+            b = a
+            a = t1 +% t2
+        h[0] = h[0] +% a
+        h[1] = h[1] +% b
+        h[2] = h[2] +% c
+        h[3] = h[3] +% d
+        h[4] = h[4] +% e
+        h[5] = h[5] +% f
+        h[6] = h[6] +% g
+        h[7] = h[7] +% hh
+        start += 128
+    var out: list[u8] = []
+    for x in h:
+        push_be64(mut out, x)
+    return bytes.from_list(out)
+
+# ------------------------------------------------------------------ SipHash
+
+pure def sip_round(mut v: list[u64]):
+    v[0] = v[0] +% v[1]
+    v[1] = rotl64(v[1], 13u64) ^ v[0]
+    v[0] = rotl64(v[0], 32u64)
+    v[2] = v[2] +% v[3]
+    v[3] = rotl64(v[3], 16u64) ^ v[2]
+    v[0] = v[0] +% v[3]
+    v[3] = rotl64(v[3], 21u64) ^ v[0]
+    v[2] = v[2] +% v[1]
+    v[1] = rotl64(v[1], 17u64) ^ v[2]
+    v[2] = rotl64(v[2], 32u64)
+
+## SipHash-2-4 (Aumasson and Bernstein) of `data` under the 16-byte
+## `key`: the keyed hash that resists flooding.
+##
+## ```
+## var key: list[u8] = []
+## for i in range(16):
+##     key.push(i.truncate_to[u8]())
+## assert siphash24(bytes.from_list(key), b"") == 0x726fdb47dd0e0e31u64
+## ```
+pub pure def siphash24(key: bytes, data: bytes) -> u64:
+    requires len(key) == 16
+    let k0 = le64(key, 0)
+    let k1 = le64(key, 8)
+    var v: list[u64] = [
+        k0 ^ 0x736f6d6570736575u64,
+        k1 ^ 0x646f72616e646f6du64,
+        k0 ^ 0x6c7967656e657261u64,
+        k1 ^ 0x7465646279746573u64,
+    ]
+    let n = len(data)
+    var at = 0
+    while at + 8 <= n:
+        let m = le64(data, at)
+        v[3] = v[3] ^ m
+        sip_round(mut v)
+        sip_round(mut v)
+        v[0] = v[0] ^ m
+        at += 8
+    let last = le64(data.slice(at, n), 0) | ((n & 255).truncate_to[u64]() << 56u64)
+    v[3] = v[3] ^ last
+    sip_round(mut v)
+    sip_round(mut v)
+    v[0] = v[0] ^ last
+    v[2] = v[2] ^ 255u64
+    for _ in range(4):
+        sip_round(mut v)
+    return v[0] ^ v[1] ^ v[2] ^ v[3]
+
+# ------------------------------------------------------------------ BLAKE3
+
+const BLAKE3_IV: list[u32] = [
+    0x6a09e667u32,
+    0xbb67ae85u32,
+    0x3c6ef372u32,
+    0xa54ff53au32,
+    0x510e527fu32,
+    0x9b05688cu32,
+    0x1f83d9abu32,
+    0x5be0cd19u32,
+]
+const PERMUTATION: list[int] = [2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8]
+const CHUNK_START: u32 = 1u32
+const CHUNK_END: u32 = 2u32
+const PARENT: u32 = 4u32
+const ROOT: u32 = 8u32
+
+pure def mix(mut s: list[u32], a: int, b: int, c: int, d: int, x: u32, y: u32):
+    s[a] = s[a] +% s[b] +% x
+    s[d] = rotr32(s[d] ^ s[a], 16u32)
+    s[c] = s[c] +% s[d]
+    s[b] = rotr32(s[b] ^ s[c], 12u32)
+    s[a] = s[a] +% s[b] +% y
+    s[d] = rotr32(s[d] ^ s[a], 8u32)
+    s[c] = s[c] +% s[d]
+    s[b] = rotr32(s[b] ^ s[c], 7u32)
+
+## BLAKE3's compression function: sixteen words from a chaining value, a
+## block of sixteen words, a counter, the block's length and flags.
+pure def compress(
+    cv: list[u32], block: list[u32], counter: int, block_len: int, flags: u32
+) -> list[u32]:
+    var s = cv.copy()
+    s.extend(BLAKE3_IV[0:4])
+    s.push((counter & 0xffffffff).truncate_to[u32]())
+    s.push(((counter >> 32) & 0xffffffff).truncate_to[u32]())
+    s.push(block_len.truncate_to[u32]())
+    s.push(flags)
+    var m = block.copy()
+    for r in range(7):
+        mix(mut s, 0, 4, 8, 12, m[0], m[1])
+        mix(mut s, 1, 5, 9, 13, m[2], m[3])
+        mix(mut s, 2, 6, 10, 14, m[4], m[5])
+        mix(mut s, 3, 7, 11, 15, m[6], m[7])
+        mix(mut s, 0, 5, 10, 15, m[8], m[9])
+        mix(mut s, 1, 6, 11, 12, m[10], m[11])
+        mix(mut s, 2, 7, 8, 13, m[12], m[13])
+        mix(mut s, 3, 4, 9, 14, m[14], m[15])
+        if r < 6:
+            m = [m[PERMUTATION[i]] for i in range(16)]
+    for i in range(8):
+        s[i] = s[i] ^ s[i + 8]
+        s[i + 8] = s[i + 8] ^ cv[i]
+    return s
+
+## The sixteen words of the 64-byte block at `at` of `data`, zeros past
+## its end.
+pure def block_words(data: bytes, at: int) -> list[u32]:
+    return [le32(data, at + 4 * i) for i in range(16)]
+
+## A chunk's output, before the root flag decides what it is: its
+## chaining value in, its last block, the counter, the length and flags.
+struct Output:
+    cv: list[u32]
+    block: list[u32]
+    counter: int
+    block_len: int
+    flags: u32
+
+## The output of the chunk `data` (at most 1024 bytes), the chunk number
+## `counter`.
+pure def chunk_output(data: bytes, counter: int) -> Output:
+    var cv = BLAKE3_IV.copy()
+    let n = len(data)
+    let blocks = if n == 0: 1 else: (n + 63) // 64
+    for b in range(blocks - 1):
+        let flags = if b == 0: CHUNK_START else: 0u32
+        cv = compress(cv, block_words(data, 64 * b), counter, 64, flags)[0:8]
+    let last = 64 * (blocks - 1)
+    let start = if blocks == 1: CHUNK_START else: 0u32
+    return Output(
+        cv=cv,
+        block=block_words(data, last),
+        counter=counter,
+        block_len=n - last,
+        flags=start | CHUNK_END,
+    )
+
+pure def chaining_value(o: Output) -> list[u32]:
+    return compress(o.cv, o.block, o.counter, o.block_len, o.flags)[0:8]
+
+pure def parent_output(left: list[u32], right: list[u32]) -> Output:
+    var block = left.copy()
+    block.extend(right.copy())
+    return Output(cv=BLAKE3_IV.copy(), block=block, counter=0, block_len=64, flags=PARENT)
+
+## The BLAKE3 digest of `data`, 32 bytes (the default length).
+##
+## ```
+## assert blake3(b"")[0:4] == b"\xaf\x13\x49\xb9"
+## assert blake3(b"abc")[0:4] == b"\x64\x37\xb3\xac"
+## ```
+pub pure def blake3(data: bytes) -> bytes:
+    let n = len(data)
+    let chunks = if n == 0: 1 else: (n + 1023) // 1024
+    # The chaining values of the subtrees finished so far: a chunk's,
+    # merged with the stack's top while the count of chunks is even
+    # (BLAKE3's reference implementation).
+    var stack: list[list[u32]] = []
+    for c in range(chunks - 1):
+        var cv = chaining_value(chunk_output(data.slice(1024 * c, 1024 * c + 1024), c))
+        var total = c + 1
+        while total & 1 == 0:
+            let left = stack.pop().expect("a subtree")
+            cv = chaining_value(parent_output(left, cv))
+            total = total >> 1
+        stack.push(cv)
+    let last = 1024 * (chunks - 1)
+    var output = chunk_output(data.slice(last, n), chunks - 1)
+    while let Some(left) = stack.pop():
+        output = parent_output(left, chaining_value(output))
+    let words = compress(output.cv, output.block, 0, output.block_len, output.flags | ROOT)
+    var out: list[u8] = []
+    for i in range(8):
+        push_le32(mut out, words[i])
+    return bytes.from_list(out)

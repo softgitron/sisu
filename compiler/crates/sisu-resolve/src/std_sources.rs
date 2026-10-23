@@ -26,6 +26,9 @@ pub const IO: &str = include_str!("../../../std/io.sisu");
 pub const FS: &str = include_str!("../../../std/fs.sisu");
 pub const RAND: &str = include_str!("../../../std/rand.sisu");
 pub const ENCODING: &str = include_str!("../../../std/encoding.sisu");
+pub const HASH: &str = include_str!("../../../std/hash.sisu");
+pub const SORT: &str = include_str!("../../../std/sort.sisu");
+pub const SEARCH: &str = include_str!("../../../std/search.sisu");
 
 /// `target` (08, "Conditional compilation"): the build target's facts as
 /// constants. Stage 0's target is the interpreter on the host, so they are
@@ -73,6 +76,9 @@ pub const MODULE_PATHS: &[&str] = &[
     "std.fs",
     "std.rand",
     "std.encoding",
+    "std.hash",
+    "std.sort",
+    "std.search",
 ];
 
 /// The std module an import path names, as (module name, source).
@@ -101,6 +107,9 @@ pub fn module_for(path: &[&str]) -> Option<(&'static str, &'static str)> {
         ["std", "fs"] => Some(("fs", FS)),
         ["std", "rand"] => Some(("rand", RAND)),
         ["std", "encoding"] => Some(("encoding", ENCODING)),
+        ["std", "hash"] => Some(("hash", HASH)),
+        ["std", "sort"] => Some(("sort", SORT)),
+        ["std", "search"] => Some(("search", SEARCH)),
         _ => None,
     }
 }
@@ -114,6 +123,7 @@ pub const DOCUMENTED: &[(&str, &str)] = &[
     ("encoding", ENCODING),
     ("fmt", FMT),
     ("fs", FS),
+    ("hash", HASH),
     ("io", IO),
     ("live", LIVE),
     ("num", NUM),
@@ -124,7 +134,9 @@ pub const DOCUMENTED: &[(&str, &str)] = &[
     ("log", LOG),
     ("math", MATH),
     ("net", NET),
+    ("search", SEARCH),
     ("sim", SIM),
+    ("sort", SORT),
     ("string", STRING),
     ("task", TASK),
     ("test", TEST),

@@ -1,0 +1,11 @@
+["ab", "de", "echo", "delta", "alpha", "bravo", "charlie"]
+[(1, "a"), (1, "b"), (2, "b"), (3, "c"), (3, "a")]
+[8, 5, 3, 1]
+0: True True True
+1: True True True
+17: True True True
+200: True True True
+1000: True True True
+600: True True True
+stable: True
+0 1999 True
