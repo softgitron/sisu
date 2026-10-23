@@ -102,8 +102,8 @@ impl Templates:
 
 ## The shape of the type being derived for.
 pub enum Body:
-    ## Field names.
-    Struct(list[String])
+    ## Field names, each with whether the field has a default.
+    Struct(list[(String, bool)])
     ## Variant names, each with its field names (`None` for positional).
     Enum(list[(String, list[String?])])
 
@@ -170,8 +170,8 @@ impl TypeShape:
         match t.body:
             case Body.Struct(fields):
                 s.kind = Kind.Struct
-                for n in fields:
-                    s.fields.push(FieldShape(name=n.copy(), ty=[], default=False))
+                for (n, default) in fields:
+                    s.fields.push(FieldShape(name=n.copy(), ty=[], default=default))
             case Body.Enum(vs):
                 s.kind = Kind.Enum
                 for (n, fs) in vs:
@@ -366,12 +366,19 @@ pub pure def unfold(src: Src, template: FnDef, head: str, target: Target) -> Str
                 return fail(m.name.range, "a derived method needs a body")
     return Ok(out)
 
-## The source of the instance of the generic function `f` (from the file
-## whose syntax and text `src` holds) for these type arguments, named
-## `name`: its signature with each type parameter replaced, and its body
-## unfolded.
+## The source of the instance of the template `f` (from the file whose
+## syntax and text `src` holds) for these type arguments, named `name`:
+## its signature with each type parameter replaced, and its body unfolded.
+## `types` are the other types its compile-time code names, known to it
+## but not replaced in its text. A method's instance is a method of an
+## inherent impl of `within`, its type.
 pub pure def unfold_fn(
-    src: Src, f: FnDef, params: list[(String, TypeShape)], name: str
+    src: Src,
+    f: FnDef,
+    params: list[(String, TypeShape)],
+    types: list[(String, TypeShape)],
+    name: str,
+    within: str?,
 ) -> String ! Unfolding:
     var body_start = 0
     var stmts: list[StmtId] = []
@@ -383,6 +390,8 @@ pub pure def unfold_fn(
             return fail(f.name.range, "a function without a body has no instance")
     var u = Unfold(params=params.copy(), env=[], arms=[])
     for (p, shape) in params:
+        u.env.push((p.copy(), Value.Type(shape.copy())))
+    for (p, shape) in types:
         u.env.push((p.copy(), Value.Type(shape.copy())))
     # `def name[T: B](params) -> R:` becomes `def NAME(params) -> R:`.
     let header = slice(src.source, TextRange.new(f.name.range.end, body_start)).trim_end()
@@ -406,9 +415,13 @@ pub pure def unfold_fn(
         rest = "{rest.byte_slice(0, i).trim_end()}:"
     let pure = if f.is_pure: "pure " else: ""
     var out = String.new()
-    line(mut out, 0, "{pure}def {name}{u.substitute_param(rest)}")
-    if u.stmts(src, stmts, 1, mut out)? == 0:
-        line(mut out, 1, "pass")
+    var depth = 0
+    if let Some(ty) = within:
+        line(mut out, 0, "impl {ty}:")
+        depth = 1
+    line(mut out, depth, "{pure}def {name}{u.substitute_param(rest)}")
+    if u.stmts(src, stmts, depth + 1, mut out)? == 0:
+        line(mut out, depth + 1, "pass")
     return Ok(out)
 
 pure def slice(source: str, r: TextRange) -> str from source:
@@ -603,6 +616,9 @@ impl Unfold:
                 case ExprKind.Name(n):
                     if self.bound(n) or n == "reflect":
                         return True
+                case ExprKind.SelfType:
+                    if self.bound("Self"):
+                        return True
                 case ExprKind.FieldOf(_, _) | ExprKind.Comptime(_):
                     return True
                 case _:
@@ -614,6 +630,8 @@ impl Unfold:
         match src.ast.expr(e).kind:
             case ExprKind.Name(n):
                 return self.bound(n) or n == "True" or n == "False"
+            case ExprKind.SelfType:
+                return self.bound("Self")
             case ExprKind.Int(_, _, _):
                 return True
             case ExprKind.Str(parts):
@@ -723,6 +741,10 @@ impl Unfold:
     pure def eval(self, src: Src, e: ExprId) -> Value ! Unfolding:
         let here = src.ast.expr(e).range
         match src.ast.expr(e).kind:
+            case ExprKind.SelfType:
+                if let Some(v) = self.lookup("Self"):
+                    return Ok(v)
+                return fail(here, "`Self` is not known at compile time")
             case ExprKind.Name(n):
                 if let Some(v) = self.lookup(n):
                     return Ok(v)
@@ -1930,7 +1952,7 @@ test "a derive template unfolds into the impl's source":
     let m = build.module(parse(source, Catalog.parse("")).tree)
     let f = first_fn(m) ?? panic("no template")
     let src = Src(ast=ref m.ast, source=source)
-    let fields = ["x".to_string(), "y".to_string()]
+    let fields = [("x".to_string(), False), ("y".to_string(), False)]
     let target = Target(
         name="Point".to_string(), written="Point".to_string(), body=Body.Struct(fields)
     )
@@ -1952,7 +1974,7 @@ test "an instance keeps the branch its type argument picks":
     let f = first_fn(m) ?? panic("no template")
     let src = Src(ast=ref m.ast, source=source)
     let params = [("T".to_string(), TypeShape.named("int", "__T0", Kind.Int))]
-    match unfold_fn(src, f, params, "__instance_0"):
+    match unfold_fn(src, f, params, [], "__instance_0", None):
         case Ok(text):
             assert text == "def __instance_0() -> String:\n    return \"int\".to_string()\n"
         case Err(_):
@@ -1964,7 +1986,7 @@ test "a failure names where the template stopped":
     let f = first_fn(m) ?? panic("no template")
     let src = Src(ast=ref m.ast, source=source)
     let params = [("T".to_string(), TypeShape.named("f64", "__T0", Kind.Float))]
-    match unfold_fn(src, f, params, "__instance_0"):
+    match unfold_fn(src, f, params, [], "__instance_0", None):
         case Ok(_):
             assert False
         case Err(Failed(at, why)):

@@ -1,0 +1,20 @@
+# A type written in a body (a `let`'s annotation, a closure's parameter),
+# which stage 0's type checker resolves rather than its resolver: a name it
+# cannot find is reported with its whole path and without a fix, and so is
+# a path whose first name is a module that has no such member.
+import json
+
+struct Point:
+    x: int
+    y: int
+
+def show(x: int) -> int:
+    let a: Strng = "a"
+    let c = (p: Piont) -> p.x
+    let g: list[Piont] = []
+    let h: json.Valu = json.Value.Null
+    let k: jsno.Value = 1
+    return x
+
+def main():
+    print(show(1))

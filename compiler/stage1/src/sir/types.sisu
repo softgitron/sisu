@@ -41,8 +41,10 @@ pub pure def place_ty(decls: Decls, f: Function, p: Place) -> Type?:
                     case Type.Ref(inner, _):
                         t = inner[0].copy()
                     case Type.Named(n, args):
-                        # A `Shared` and a mutex guard lead to the value.
-                        if (n == "Shared" or n == "MutexGuard") and not args.is_empty():
+                        # A `Shared` and a mutex or read guard lead to the
+                        # value.
+                        let pointer = n == "Shared" or n == "MutexGuard" or n == "ReadGuard"
+                        if pointer and not args.is_empty():
                             t = args[0].copy()
                         else:
                             return None

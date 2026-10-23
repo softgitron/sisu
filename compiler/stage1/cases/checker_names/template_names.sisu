@@ -1,0 +1,55 @@
+# The names of a template (08, "Reflection"): stage 0 checks a template in
+# its instances only, so what a template's body cannot find is reported in
+# each instance's file, at the instance's line, a type in an annotation
+# without a fix, and a `let` that shadows warns there; what its signature
+# cannot find is reported in the template's file and again in the
+# instance's, whose scope is the instance module's. A generic function
+# that calls a template with its own type parameters is a template too
+# (`outer`), a method that reflects on its type is one (decision 244), and
+# a template nothing calls has no instance and reports nothing (`unused`).
+
+struct Point:
+    x: int
+    y: int
+
+def show[T](x: T, y: Strng) -> String:
+    comptime if reflect.is_int(T):
+        let shown: Strng = "int"
+        return shown
+    return "other"
+
+def inner[T](x: T) -> String:
+    comptime if reflect.is_int(T):
+        return "int"
+    return "other"
+
+def outer[T](x: T) -> String:
+    let y: Strng = inner(x)
+    return y
+
+def label() -> String:
+    var out = String.new()
+    comptime for f in reflect.fields_of(Point):
+        let n = f.name
+        if True:
+            let n = "shadowed"
+            out.push(n)
+    return out
+
+impl Point:
+    def describe(self) -> String:
+        var out = String.new()
+        comptime for f in reflect.fields_of(Self):
+            out.push(nme)
+        return out
+
+def unused[T](x: T) -> String:
+    comptime if reflect.is_int(T):
+        return undefined_thing
+    return "other"
+
+def main():
+    print(show(1, "a"))
+    print(outer(2))
+    print(label())
+    print(Point(x=1, y=2).describe())

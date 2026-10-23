@@ -222,8 +222,7 @@ impl Checker:
                     return t
                 if let Some(StaticPath.Type(t)) = self.static_path(cx, e):
                     return t
-                # `resolve.undefined-type`.
-                self.other_rendered()
+                self.undefined_type(cx, n, cx.ast.expr(e).range)
                 return Ty.error()
             case ExprKind.Field(_, _) | ExprKind.Index(_, _):
                 if let Some(StaticPath.Type(t)) = self.static_path(cx, e):
@@ -523,8 +522,7 @@ impl Checker:
                         return self.variant_call(cx, def_, vi, args, trailing, at, expected)
                     if not self.quiet_unknown_names
                             and not cx.prog.poisoned.contains(n.to_string()):
-                        # `resolve.undefined-name`.
-                        self.other_rendered()
+                        self.undefined_name(cx, n, callee_range)
                     self.check_args_loosely(cx, args)
                     return self.error_expr(at)
             case _:
@@ -948,13 +946,21 @@ impl Checker:
         # view nor must-consume (checked when the type is known): a
         # channel's receiver may keep what was sent longer than what it
         # borrows lives (decision 230).
+        var atomic = False
+        if let TyData.Adt(a, _) = self.types.data(self.resolved(ret)).copy():
+            atomic = cx.prog.builtin(a) == Some("Atomic")
         var owner_name: String? = None
         if intrinsic == "Shared.new":
             owner_name = Some("Shared".to_string())
+        elif intrinsic == "Cell.new" and atomic:
+            # An `Atomic` is a `Cell` tasks may share.
+            owner_name = Some("Atomic".to_string())
         elif intrinsic == "Cell.new":
             owner_name = Some("Cell".to_string())
         elif intrinsic == "Mutex.new":
             owner_name = Some("Mutex".to_string())
+        elif intrinsic == "RwLock.new":
+            owner_name = Some("RwLock".to_string())
         elif intrinsic == "Cap.new":
             owner_name = Some("Cap".to_string())
         elif intrinsic == "channel":

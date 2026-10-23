@@ -18,8 +18,9 @@
 ##! where no symbolic link is involved. Stage 1 does not write the lockfile.
 
 import stage1.manifest
+import stage1.toml
 from stage1.diag import Catalog, Diagnostic, Label, Msg, Param, TextRange
-from stage1.manifest import Dependency, is_module_name, target_facts
+from stage1.manifest import Dependency, Feature, is_module_name, target_facts
 
 ## A package of the program.
 pub struct Package:
@@ -39,6 +40,42 @@ pub struct Package:
     pub application: bool
     ## Its manifest, as `Layout.files` numbers them.
     pub manifest: int?
+    ## Its manifest's `[features]` (09).
+    pub features: list[Feature]
+    ## Its features that are on in this build, sorted (decision 243).
+    pub on: list[String]
+    ## Its manifest's dependency entries, as far as features go.
+    pub wants: list[Want]
+    ## The names of its manifest's dependencies but the dev-dependencies,
+    ## which the lockfile records.
+    pub locked_deps: list[String]
+    ## Its manifest's `[profile.release] contracts`: what a release build
+    ## checks (07).
+    pub release_contracts: String?
+
+## What a dependency entry asks of the package it names (09).
+pub struct Want:
+    ## The name the entry gives the dependency.
+    pub name: String
+    ## The package, unless it could not be read or is not built (a
+    ## dependency's dev-dependency).
+    pub package: int?
+    ## Its `when` holds on this target.
+    pub active: bool
+    ## `features = [...]`.
+    pub features: list[(String, TextRange)]
+    ## Not `default-features = false`.
+    pub defaults: bool
+
+impl Want:
+    pure def of(dep: Dependency, package: int?, active: bool) -> Want:
+        return Want(
+            name=dep.name.copy(),
+            package=package,
+            active=active,
+            features=dep.features.copy(),
+            defaults=dep.default_features,
+        )
 
 ## A module of the program: its path, its file and its package.
 pub struct ModuleFile:
@@ -284,6 +321,7 @@ impl Loader:
                                 start=edge_at.start,
                                 end=edge_at.end,
                                 params=params,
+                                file=-1,
                             )
                         )
                         label_files.push(edge_file)
@@ -330,6 +368,11 @@ impl Loader:
                 trusted=index == 0,
                 application=False,
                 manifest=Some(file),
+                features=m.features.copy(),
+                on=[],
+                wants=[],
+                locked_deps=locked_deps(m.dependencies),
+                release_contracts=m.release_contracts.copy(),
             )
         )
         self.dirs.push(canon.copy())
@@ -344,6 +387,7 @@ impl Loader:
             # A dev-dependency is the package's own tests' business: only
             # the root package's are built.
             if dep.dev and index != 0:
+                self.layout.packages[index].wants.push(Want.of(dep, None, False))
                 continue
             var active = True
             if let Some(w) = dep.when:
@@ -351,6 +395,7 @@ impl Loader:
             let found = self.package(
                 fs, join(canon, dep.path), mut stack, Some((index, dep.copy()))
             )
+            self.layout.packages[index].wants.push(Want.of(dep, found, active))
             let d = found else:
                 continue
             if active:
@@ -441,6 +486,7 @@ pub def load_package(fs: Fs, dir: str, base: str) -> Layout:
     var l = Loader(layout=Layout.new(canonical(base)), target=target_facts(), dirs=[], edges=[])
     var stack: list[int] = []
     _ = l.package(fs, dir, mut stack, None)
+    turn_on_features(mut l.layout)
     # The lockfile: beside the workspace's manifest when the package is a
     # member of one, else beside its own.
     let canon = canonical(dir)
@@ -485,6 +531,11 @@ pub def load_file(fs: Fs, name: str, disk: str, text: str) -> Layout:
             trusted=True,
             application=True,
             manifest=None,
+            features=[],
+            on=[],
+            wants=[],
+            locked_deps=[],
+            release_contracts=None,
         )
     )
     layout.modules.push(
@@ -514,20 +565,194 @@ pub def load_file(fs: Fs, name: str, disk: str, text: str) -> Layout:
     l.layout.packages[0].manifest = Some(0)
     let m = read else:
         return l.layout
+    l.layout.packages[0].features = m.features.copy()
     let dir = l.layout.packages[0].dir.copy()
     var stack = [0]
     for dep in m.dependencies:
         var active = True
         if let Some(w) = dep.when:
             active = w.holds(l.target)
-        let d = l.package(fs, join(dir, dep.path), mut stack, Some((0, dep.copy()))) else:
+        let reached = l.package(fs, join(dir, dep.path), mut stack, Some((0, dep.copy())))
+        l.layout.packages[0].wants.push(Want.of(dep, reached, active))
+        let d = reached else:
             continue
         if active:
             l.layout.packages[0].deps.push((dep.name.copy(), d))
         for (t, _) in m.trust_unsafe:
             if t == dep.name:
                 l.layout.packages[d].trusted = True
+    turn_on_features(mut l.layout)
     return l.layout
+
+## The names of the dependencies but the dev-dependencies.
+pure def locked_deps(deps: list[Dependency]) -> list[String]:
+    var out: list[String] = []
+    for d in deps:
+        if not d.dev:
+            out.push(d.name.copy())
+    return out
+
+## `sisu.lock` (09): the packages a build resolved, as data (stage 0's
+## `lockfile_of`). Every dependency is a path, so the lock records each
+## package's name, version, source (its directory relative to `dir`, the
+## lockfile's) and dependencies, sorted, once, for every layout of a
+## workspace's members.
+pub pure def lockfile_of(layouts: list[Layout], dir: str) -> String:
+    var out = String.new()
+    out.push("# Written by `sisu` from the manifests: the packages this build resolved.\n")
+    out.push("# It is data; `sisu` rewrites it when a manifest changes.\nversion = 1\n")
+    var entries: list[(String, String, String, list[String])] = []
+    for l in layouts:
+        for p in l.packages:
+            let source = "path+{relative(dir, p.dir)}"
+            var deps = p.locked_deps.copy()
+            deps.sort()
+            let entry = (p.name.copy(), p.version.copy(), source, deps)
+            entries.push(entry)
+    entries.sort()
+    var last: (String, String, String, list[String])? = None
+    for e in entries:
+        if last == Some(e.copy()):
+            continue
+        last = Some(e.copy())
+        let (name, version, source, deps) = e.copy()
+        var quoted: list[String] = []
+        for d in deps:
+            quoted.push(toml.quote(d))
+        out.push("\n[[package]]\nname = {toml.quote(name)}\nversion = {toml.quote(version)}\n")
+        out.push("source = {toml.quote(source)}\ndependencies = [{quoted.join(", ")}]\n")
+    return out
+
+## Whether package `p` of the layout declares the feature `f`.
+pure def has_feature(layout: Layout, p: int, f: str) -> bool:
+    if p >= len(layout.packages):
+        return False
+    for x in layout.packages[p].features:
+        if x.name == f:
+            return True
+    return False
+
+## A package as `E1018` names it: its name, or for a script its file's.
+pure def shown_package(layout: Layout, p: int) -> String:
+    if p < len(layout.packages) and not layout.packages[p].name.is_empty():
+        return layout.packages[p].name.copy()
+    if let Some(m) = layout.modules.first():
+        return m.name.copy()
+    return String.new()
+
+## `E1018` for `name`, which is no feature of package `of`, unless it is.
+pure def check_feature(
+    layout: Layout, file: int, at: TextRange, of: int, name: str, mut problems: list[Problem]
+):
+    if has_feature(layout, of, name):
+        return
+    let d = Diagnostic.new(Msg.PackageUnknownFeature, at.start, at.end)
+    let named = d.with("name", name).with("package", shown_package(layout, of))
+    problems.push(Problem(file=file, diag=named, label_files=[]))
+
+## The features each package of the build turns on (09; decision 243): the
+## root package's `default` feature, each dependency's `default` unless
+## every entry that reaches it says `default-features = false`, the
+## features those entries list, and what each feature that is on turns on
+## in turn, of its own package or (`DEP/FEATURE`) of a dependency. A name
+## that is no feature is `E1018`.
+pure def turn_on_features(mut layout: Layout):
+    let problems = feature_problems(layout)
+    for x in problems:
+        layout.problems.push(x.copy())
+    let on = features_on(layout)
+    for p in range(len(on)):
+        layout.packages[p].on = on[p].copy()
+
+## `E1018` for each name a feature list gives that is no feature.
+pure def feature_problems(layout: Layout) -> list[Problem]:
+    var problems: list[Problem] = []
+    for p in range(len(layout.packages)):
+        let pkg = ref layout.packages[p]
+        let file = pkg.manifest ?? 0
+        for f in pkg.features:
+            for (e, at) in f.on:
+                match e.find("/"):
+                    case Some(cut):
+                        let dep = e.byte_slice(0, cut)
+                        let x = e.byte_slice(cut + 1, e.byte_len())
+                        var want: Want? = None
+                        for w in pkg.wants:
+                            if w.name == dep and want.is_none():
+                                want = Some(w.copy())
+                        match want:
+                            case Some(w):
+                                if let Some(d) = w.package:
+                                    check_feature(layout, file, at, d, x, mut problems)
+                            case None:
+                                let d = Diagnostic.new(Msg.PackageUnknownFeature, at.start, at.end)
+                                let named = d.with("name", e).with(
+                                    "package", shown_package(layout, p)
+                                )
+                                problems.push(Problem(file=file, diag=named, label_files=[]))
+                    case None:
+                        check_feature(layout, file, at, p, e, mut problems)
+        for w in pkg.wants:
+            if let Some(d) = w.package:
+                for (x, at) in w.features:
+                    check_feature(layout, file, at, d, x, mut problems)
+    return problems
+
+## The features that are on in each package, sorted.
+pure def features_on(layout: Layout) -> list[list[String]]:
+    let n = len(layout.packages)
+    # The packages the build reaches, and what reaching them turns on.
+    var reached: list[bool] = []
+    for _ in range(n):
+        reached.push(False)
+    var stack = [0]
+    var work: list[(int, String)] = [(0, "default".to_string())]
+    while let Some(p) = stack.pop():
+        if p >= n or reached[p]:
+            continue
+        reached[p] = True
+        for w in layout.packages[p].wants:
+            if not w.active:
+                continue
+            let d = w.package else:
+                continue
+            stack.push(d)
+            if w.defaults:
+                work.push((d, "default".to_string()))
+            for (x, _) in w.features:
+                work.push((d, x.copy()))
+    var on: list[list[String]] = []
+    for _ in range(n):
+        on.push([])
+    while let Some((p, f)) = work.pop():
+        if p >= n:
+            continue
+        var feature: Feature? = None
+        for x in layout.packages[p].features:
+            if x.name == f and feature.is_none():
+                feature = Some(x.copy())
+        let found = feature else:
+            continue
+        if on[p].contains(f):
+            continue
+        for (e, _) in found.on:
+            match e.find("/"):
+                case Some(cut):
+                    let dep = e.byte_slice(0, cut)
+                    let x = e.byte_slice(cut + 1, e.byte_len())
+                    var target: int? = None
+                    for w in layout.packages[p].wants:
+                        if w.name == dep and w.active and target.is_none():
+                            target = Some(w.package ?? -1)
+                    if let Some(d) = target:
+                        if d >= 0:
+                            work.push((d, x.to_string()))
+                case None:
+                    work.push((p, e.copy()))
+        on[p].push(f)
+    for p in range(n):
+        on[p].sort()
+    return on
 
 ## The layouts a command works on, read as stage 0's `sisu check` and
 ## `sisu sir` read them (`cli.rs`): a package's, or each member's of a

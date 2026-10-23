@@ -217,7 +217,9 @@ pure def std_agreement(ctx: Ctx, prog: Resolved, types: Types, shared: int) -> S
         if prog.lookup_in(prog.prelude, n).is_some():
             hidden.push(n.copy())
     hidden.sort()
-    var out = hidden.join(",")
+    # The contracts the build checks, which change what a body lowers to.
+    var out = "{ctx.level}|"
+    out.push(hidden.join(","))
     for (t, args, _) in prog.instances:
         if t.index < shared:
             var shown: list[String] = []
@@ -235,11 +237,13 @@ pub struct Lowered:
 
 ## Lowers a checked program (stage 0's `lower_reaching` for `sisu sir`):
 ## what the entry, the tests and the root module's functions and constants
-## reach, every contract checked. `path` is the program's file as given.
+## reach, with the contracts `level` checks (`CONTRACTS_ALL` but for a
+## build that asks for fewer). `path` is the program's file as given.
 pub pure def lower(
     own typed: Typed,
     base: Base,
     path: str,
+    level: int,
     catalog: Catalog,
     mut kept: StdBodies,
     mut kept_lowered: StdLowered,
@@ -252,7 +256,7 @@ pub pure def lower(
         file_names=[],
         path=path.to_string(),
         impl_names={},
-        level=CONTRACTS_ALL,
+        level=level,
         root_fns=set(),
         type_defs={},
         texts=typed.texts.copy(),
@@ -335,7 +339,7 @@ pub pure def lower(
     for d in prog.tests:
         let f = prog.fn_info(d) else:
             continue
-        if len(f.params) == 1:
+        if not f.params.is_empty():
             any_system = True
         if f.body.is_some():
             tests.push((prog.defs[d.index].name.copy(), ctx.fn_name(prog, types, d)))
@@ -346,9 +350,13 @@ pub pure def lower(
     for (_, f) in tests:
         roots.push(f.copy())
     # A test that declares a `System` gets `System.sim` in the `sim`
-    # profile, which the run time calls (17).
+    # profile, which the run time calls (17); one that names capabilities
+    # gets the fakes `System.fake` makes, a fake network and the test clock
+    # (decision 241), or the simulated ones.
     if any_system:
         roots.push("System.sim".to_string())
+        roots.push("System.fake".to_string())
+        roots.push("Net.fake".to_string())
     # A constant is computed even when nothing uses it: a `comptime` in it
     # that fails is an error of the program (08).
     for b in typed.bodies:
@@ -1202,7 +1210,14 @@ pure def beyond_of(program: str) -> list[String]:
     var kept_lowered = StdLowered.new()
     var kept_slots = StdSlots.new()
     return lower(
-        typed, base, "main.sisu", catalog, mut kept, mut kept_lowered, mut kept_slots
+        typed,
+        base,
+        "main.sisu",
+        CONTRACTS_ALL,
+        catalog,
+        mut kept,
+        mut kept_lowered,
+        mut kept_slots,
     ).beyond
 
 test "comptime expressions and contracts are within the slice of lowering":
@@ -1229,7 +1244,14 @@ pure def lowered_in_turn(prelude: str, programs: list[String]) -> list[String]:
             out.push("nothing to lower")
             continue
         let lowered = lower(
-            typed, base, "main.sisu", catalog, mut kept, mut kept_lowered, mut kept_slots
+            typed,
+            base,
+            "main.sisu",
+            CONTRACTS_ALL,
+            catalog,
+            mut kept,
+            mut kept_lowered,
+            mut kept_slots,
         )
         if lowered.beyond.is_empty():
             out.push(write.write(lowered.program))

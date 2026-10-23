@@ -1,0 +1,6 @@
+# A template of another module that cannot be made for the type a call
+# gives it (08, "Reflection"): the error is at the call, and its label where
+# the template stopped, in the template's module's file.
+[package]
+name = "counting"
+version = "0.1.0"

@@ -1,0 +1,13 @@
+# An instance of a template is code the compiler writes (08,
+# "Reflection"): its header is the template's with the type parameters
+# replaced and a `where` clause cut at the first " where ", which here is
+# inside a string. The instance's syntax error, and the missing body that
+# follows from it, are reported in the instance's file.
+
+def label[T](x: T, sep: str = " where ") -> String:
+    comptime if reflect.is_int(T):
+        return "int{sep}"
+    return "other{sep}"
+
+def main():
+    print(label(1))

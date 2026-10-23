@@ -38,7 +38,8 @@ from stage1.sir.types import glue_name
 ## `lower.is_builtin_type`'s).
 pure def host_declared(n: str) -> bool:
     return match n:
-        case "Shared" | "Weak" | "Cell" | "Mutex" | "MutexGuard" | "Arena": True
+        case "Shared" | "Weak" | "Cell" | "Atomic" | "Mutex" | "RwLock" | "MutexGuard": True
+        case "ReadGuard" | "Arena": True
         case _: False
 
 ## The glue functions of the declared types that need one.
@@ -106,19 +107,21 @@ pub pure def drops_something(t: Type, needs: dict[String, bool]) -> bool:
         case Type.Named(n, args):
             let ns: str = n
             match ns:
-                case "Shared" | "Weak" | "MutexGuard":
+                # A capability handle's and a `Cap`'s copies are counted,
+                # and the last one's drop drops the object (decision 237).
+                case "Shared" | "Weak" | "MutexGuard" | "ReadGuard" | "Fs" | "Net" | "Clock" | "Rand":
                     return True
-                case "String" | "Path" | "DateTime" | "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin":
+                case "Env" | "Proc" | "Stdin" | "System" | "Cap":
+                    return True
+                case "String" | "Path" | "DateTime" | "HostFs" | "HostNet" | "HostClock" | "HostRand":
                     return False
-                case "System" | "HostFs" | "HostNet" | "HostClock" | "HostRand" | "HostEnv" | "HostProc":
+                case "HostEnv" | "HostProc" | "HostStdin" | "TestClock" | "Lent" | "f32" | "u8" | "u16":
                     return False
-                case "HostStdin" | "TestClock" | "Cap" | "Lent" | "f32" | "u8" | "u16" | "u32" | "u64":
-                    return False
-                case "u128" | "i8" | "i16" | "i32" | "i128" | "bytes" | "Slice":
+                case "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i128" | "bytes" | "Slice":
                     return False
                 case "list" | "Array" | "dict" | "set" | "Iter" | "Entry" | "Iterable" | "Option" | "Result":
                     return any_drops(args, needs)
-                case "Cell" | "Mutex" | "Arena":
+                case "Cell" | "Atomic" | "Mutex" | "RwLock" | "Arena":
                     return any_drops(args, needs)
                 case _:
                     return needs.get(n.copy()).copied() ?? True

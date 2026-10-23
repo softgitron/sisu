@@ -550,6 +550,8 @@ impl Checker:
                 return Some("Shared".to_string())
             if cx.prog.is_builtin(d, "MutexGuard"):
                 return Some("MutexGuard".to_string())
+            if cx.prog.is_builtin(d, "ReadGuard"):
+                return Some("ReadGuard".to_string())
         return None
 
     ## The value a `Shared` owns or a mutex guard holds, as a place.
@@ -710,13 +712,7 @@ impl Checker:
             case ExprKind.Comptime(inner):
                 return self.comptime_expr(cx, inner, expected, span)
             case ExprKind.FieldOf(_, _):
-                let what = "a field named by a compile-time value (`x.[f]`) outside a derive or a generic function"
-                self.unsupported(
-                    cx,
-                    span,
-                    what,
-                    "compile-time code in methods and non-generic functions (Phase 8)",
-                )
+                self.no_unfolding(cx, span, "a field named by a compile-time value (`x.[f]`)")
                 return self.error_expr(span)
             case ExprKind.Unsupported(what):
                 self.unsupported(cx, span, what, "foreign functions (Phase 8)")
@@ -1138,11 +1134,9 @@ impl Checker:
         if self.quiet_unknown_names or cx.prog.poisoned.contains(n.to_string()):
             return self.error_expr(at)
         # The compile-time module `reflect` (08) exists only in a derive's
-        # template and in a generic function, which is made for each call.
+        # template and in a template, which is made for its type arguments.
         if n == "reflect":
-            let what = "`reflect` outside a derive or a generic function"
-            let phase = "compile-time code in methods and non-generic functions (Phase 8)"
-            self.unsupported(cx, at, what, phase)
+            self.no_unfolding(cx, at, "`reflect`")
             return self.error_expr(at)
         if n == "target":
             self.unsupported(cx, at, "`target`", "conditional compilation on the target (Phase 8)")
@@ -1158,8 +1152,8 @@ impl Checker:
                     let d = self.error(cx, Msg.ResolveFieldDefaultOrder, at)
                     self.report_other(d.note_with(Msg.ResolveDefaultInFunction, "name", n))
                     return self.error_expr(at)
-        # A name nothing declares: the name pass's `resolve.undefined-name`.
-        self.other_rendered()
+        # A name nothing declares (`resolve.undefined-name`).
+        self.undefined_name(cx, n, at)
         return self.error_expr(at)
 
     ## A declaration used as a value.
@@ -2128,14 +2122,12 @@ impl Checker:
         return self.add(TExprKind.Match(scrutinee=s, arms=out), ty, rng)
 
     ## Arms made by `comptime for` or `comptime if` exist only in a
-    ## derive's template (08); anywhere else they are reported.
+    ## derive's template and in a template (08); anywhere else they are
+    ## reported.
     pure def arm_made_at_compile_time(mut self, cx: Cx, a: Arm) -> bool:
         if a.generated.is_none():
             return False
-        let what = "arms made at compile time outside a derive or a generic function"
-        self.unsupported(
-            cx, a.range, what, "compile-time code in methods and non-generic functions (Phase 8)"
-        )
+        self.no_unfolding(cx, a.range, "arms made at compile time")
         return True
 
     ## A `match` in statement position: arms may hold blocks.
@@ -2323,7 +2315,7 @@ impl Checker:
                             given = Some(ps[i])
                     ty = given ?? self.infer.fresh(mut self.types)
             let l = self.new_local(p.name, ty, False, p.range)
-            self.declare(p.name, l)
+            self.declare(cx, p.name, l, False, p.range)
             params.push(l)
             ptys.push(ty)
         var block = BlockId(index=0)
@@ -2509,7 +2501,8 @@ impl Checker:
                 continue
             match self.smart_pointer(cx, self.ty_of(b)):
                 case Some(p):
-                    if p == "MutexGuard" and name.text == "value":
+                    let guard = p == "MutexGuard" or p == "ReadGuard"
+                    if guard and name.text == "value":
                         return self.deref_smart(b)
                     b = self.deref_smart(b)
                     b = self.auto_deref(b)

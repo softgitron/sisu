@@ -26,11 +26,14 @@ from stage1.parser import parse
 from stage1.resolve import closest
 from stage1.syntax.ast import (
     Arg,
+    ArmBody,
     Ast,
     Attr,
     BinOp,
     Block,
+    ClosureBody,
     ConstDef,
+    ElseBody,
     EnumDef,
     Expr,
     ExprId,
@@ -175,10 +178,6 @@ pub struct Resolver:
     ## Stage 0 reports an error about the root module's declarations that
     ## is not the type checker's (a `resolve.` message).
     pub other_error: bool
-    ## The rules of such errors that stage 1 notes without rendering them
-    ## (a second declaration of a name is the name pass's, which it
-    ## renders).
-    pub noted: list[String]
     ## The functions the compiler writes and checks elsewhere too, which
     ## report nothing of their own.
     pub quiet_fns: set[DefId]
@@ -211,6 +210,22 @@ pub struct Resolver:
     ## whether the bound on them was reported.
     pub instances_asked: int
     pub instances_bounded: bool
+    ## The program is built with its tests, so the root package's doc
+    ## examples are tests of it (stage 0's `Sources::tests`; decision 243).
+    pub tests: bool
+    ## How many instances this resolution declared: the next one's number.
+    pub instances_declared: int
+    ## The modules that hold an instance, whose functions are never
+    ## templates themselves.
+    pub instance_modules: set[ModuleId]
+    ## The instances that are methods, found once their impls are resolved:
+    ## the module, the instance's name, the template, its type arguments and
+    ## where the program needs it.
+    pub method_instances: list[(ModuleId, String, DefId, list[Ty], (ModuleId, TextRange))]
+    ## Every module's generators are declared: a module the compiler writes
+    ## from now on has the calls that stand for its generators' sites
+    ## written as it is declared (`write_sites_in`).
+    pub sites_known: bool
     ## The attributes on the root module's types, as data for
     ## `reflect.attributes_of`: each name and its arguments' text.
     pub attrs_of: dict[DefId, list[(String, list[String])]]
@@ -266,7 +281,6 @@ impl Resolver:
             deferring=False,
             deferred=[],
             other_error=False,
-            noted=[],
             quiet_fns=set(),
             special_kinds={},
             copy_checks=[],
@@ -279,6 +293,11 @@ impl Resolver:
             promoted=set(),
             instances_asked=0,
             instances_bounded=False,
+            tests=True,
+            instances_declared=0,
+            instance_modules=set(),
+            method_instances=[],
+            sites_known=False,
             attrs_of={},
             generated=[],
             shims=[],
@@ -454,17 +473,20 @@ impl Resolver:
             let prefix = test_prefix(modules[i].path)
             self.declare_items(id, declared, prefix)
             self.declare_trait_shims(id, declared)
-            # The root package's doc examples are its tests too (10).
-            if modules[i].package == 0:
+            # The root package's doc examples are its tests too (10), when
+            # the program is built with its tests.
+            if modules[i].package == 0 and self.tests:
                 self.declare_doc_tests(id, declared, prefix)
         self.deferring = False
         let deferred = self.deferred.copy()
         self.deferred = []
         for (m, id) in deferred:
             self.declare_import(m, id)
+        self.sites_known = False
         for i in range(len(modules)):
             self.declare_derived(ids[i], owned[i], templates)
             self.declare_generators(ids[i], owned[i])
+        self.declare_written_sites()
         self.resolve_pending()
         self.build_variant_index(first_def)
         self.check_traits(first_def)
@@ -600,6 +622,7 @@ impl Resolver:
                                     MsgParam(name="function".to_string(), value=fname.copy()),
                                     MsgParam(name="name".to_string(), value=name.copy()),
                                 ],
+                                file=-1,
                             )
                             d.labels.push(label)
                         self.report_other(module, d)
@@ -770,16 +793,51 @@ impl Resolver:
         return not self.is_std(module)
 
     ## A diagnostic of a type's constant argument: the type checker's are
-    ## kept, and the others reported but an undefined name, which the name
-    ## pass reports.
+    ## kept, and the others reported but an undefined name in the program's
+    ## own modules, which the name pass reports.
     pure def report_const(mut self, module: ModuleId, own d: Diagnostic):
         if d.msg.id().starts_with("type."):
             self.diags.push((module, d))
-        elif d.msg == Msg.ResolveUndefinedName:
+        elif d.msg == Msg.ResolveUndefinedName and not self.reports_names(module):
             if self.is_root(module):
                 self.other_error = True
         else:
             self.report_other(module, d)
+
+    ## Whether the names a module's declarations cannot find are the
+    ## resolver's to report, as stage 0's resolver reports them: the module
+    ## is one the compiler wrote for the program (an instance of a template,
+    ## derived and delegated impls, interceptors and fakes), which stage 1's
+    ## name pass, reading the program's own modules, never sees.
+    pub pure def reports_names(self, module: ModuleId) -> bool:
+        return not self.is_std(module) and not self.prog.user_modules.contains(module)
+
+    ## `resolve.undefined-type` for `name`, written at `at` in a module whose
+    ## names the resolver reports (`reports_names`), with the closest type
+    ## in scope as its fix (stage 0's `similar_type_fix`: the module's, the
+    ## prelude's, the builtin scalars); a name a failed import or a broken
+    ## declaration poisoned is not reported again.
+    pure def undefined_type(mut self, module: ModuleId, name: str, at: TextRange):
+        if not self.reports_names(module) or self.prog.poisoned.contains(name.to_string()):
+            return
+        var names: list[String] = []
+        for s in SIMILAR_SCALARS:
+            names.push(s.to_string())
+        for m in [module, self.prog.prelude]:
+            for (k, d) in self.prog.modules[m.index].items.items():
+                if k.starts_with("_"):
+                    continue
+                match self.prog.defs[d.index].kind():
+                    case DefKind.Struct(_) | DefKind.Enum(_) | DefKind.ErrorSet(_):
+                        names.push(k.copy())
+                    case DefKind.TypeAlias(_) | DefKind.Refinement(_) | DefKind.Trait(_):
+                        names.push(k.copy())
+                    case _:
+                        pass
+        var d = Diagnostic.new(Msg.ResolveUndefinedType, at.start, at.end).with("name", name)
+        if let Some(similar) = closest(name, names):
+            d = d.fix_at(Msg.ResolveSimilarType, at.start, at.end, similar)
+        self.report_other(module, d)
 
     ## A constant's value as folding reads it.
     pure def value_terms(self, module: ModuleId, value: ExprId?) -> list[Term]:
@@ -889,14 +947,6 @@ impl Resolver:
             let s = self.types.subst(t, a)
             ty = self.prog.normalize(mut self.types, s, env)
         return self.prog.display_in(self.types, ty, names)
-
-    ## Notes that stage 0 reports an error of the resolver's in `module`,
-    ## when that is the root module (the compiler's modules are checked by
-    ## what they are written from).
-    pub pure def note_error(mut self, module: ModuleId, rule: str):
-        if self.is_root(module):
-            self.other_error = True
-            self.noted.push(rule.to_string())
 
     pub pure def placeholder_fn(self, own kind: FnKind) -> FnInfo:
         return FnInfo(
@@ -1575,19 +1625,29 @@ impl Resolver:
         info.intrinsic = self.builtin_attr(module, f.attrs, "intrinsic")
         info.structural = self.builtin_attr(module, f.attrs, "structural")
         info.internal = has_attr(f.attrs, "internal")
-        # A free generic function that reflects on its type parameters, or
-        # was promoted for calling one with them, is a template (08): it is
-        # checked in its instances.
-        if owner.is_none()
-                and in_trait.is_none()
-                and impl_def.is_none()
-                and not f.generics.is_empty():
-            var reflecting = False
-            if let Some(b) = f.body:
-                reflecting = reflects(self.ast(module), b, f.generics)
-            if reflecting or self.promoted.contains(def_):
-                info.template = True
-                _ = self.template_fns.insert(def_, f.copy())
+        # A function whose body runs code at compile time by unfolding, or
+        # that was promoted for calling a template with its own type
+        # parameters, is a template (08, "Reflection"; decision 244): a free
+        # function, a method of a type or of an inherent impl, or a method
+        # of a trait impl without type parameters. It is made for each list
+        # of type arguments it is called with, and once, before anything
+        # calls it, when it has none. A trait's own methods and a `comptime
+        # def` are not templates.
+        let unfolding = unfolds(self.ast(module), f, names) or self.promoted.contains(def_)
+        var placed = False
+        match owner:
+            case None | Some(Owner.Type(_)) | Some(Owner.Inherent(_, _, _, _)):
+                placed = True
+            case Some(Owner.Impl(_)):
+                placed = info.generics.is_empty()
+            case _:
+                placed = False
+        if unfolding
+                and not f.is_comptime
+                and not self.instance_modules.contains(module)
+                and placed:
+            info.template = True
+            _ = self.template_fns.insert(def_, f.copy())
         if self.is_root(module):
             info.contracts = not f.contracts(self.ast(module)).is_empty()
             if has_attr(f.attrs, "structural") or has_attr(f.attrs, "keeps"):
@@ -2361,10 +2421,7 @@ impl Resolver:
         if examples.is_empty():
             return
         let text = doc_test_module(source, examples)
-        let parsed = parse(text, Catalog.parse(""))
-        if not parsed.diagnostics.is_empty():
-            self.other_error = True
-            self.noted.push("a syntax error in a doc example".to_string())
+        let parsed = parse(text, Shared.get(self.catalog))
         let generated = build.module(parsed.tree)
         let g_items = generated.items.copy()
         let name = "<doc>/{self.prog.modules[module.index].name}.sisu"
@@ -2373,6 +2430,10 @@ impl Resolver:
         self.prog.modules[g.index].package = self.prog.modules[module.index].package
         # The file keeps the module's name: its lines are the module's.
         self.prog.modules[g.index].file = self.prog.modules[module.index].file.copy()
+        # A syntax error in an example is in the examples' file (stage 0's
+        # `parse_generated`), at the line the module's file has it on.
+        for d in parsed.diagnostics:
+            self.report_other(g, d.copy())
         _ = self.module_texts.insert(g, text.copy())
         self.docs.push((g, text))
         self.declare_items(g, g_items, test_prefix)
@@ -3069,12 +3130,14 @@ impl Resolver:
                     var d = Diagnostic.new(Msg.ResolveOverlappingImpl, at.start, at.end)
                     d = d.with("trait", self.prog.display_trait_in(self.types, ia.trait_ref, names))
                     d = d.with("ty", self.prog.display_in(self.types, ia.self_ty, names))
-                    if self.prog.defs[b.index].module == module:
+                    let first_module = self.prog.defs[b.index].module
+                    if first_module == module:
                         d = d.label(Msg.ResolveFirstImpl, first_at.start, first_at.end)
-                        self.report_other(module, d)
                     else:
                         # The first impl is in another file.
-                        self.note_error(module, "resolve.overlapping-impl")
+                        let (s, e) = (first_at.start, first_at.end)
+                        d = d.label_in(Msg.ResolveFirstImpl, s, e, first_module.index)
+                    self.report_other(module, d)
                     break
 
     ## An impl's header as one type: its self type and its trait's
@@ -3420,10 +3483,9 @@ impl Resolver:
             targs.push(self.types.subst(default, env))
         return Some(TraitRef(def_=d, args=targs))
 
-    ## Resolves a possibly qualified name (`cli.Error`) to a definition.
     ## A possibly qualified name (`cli.Error`) as a definition, written at
     ## `span`, reporting what cannot be found (a first name that names
-    ## nothing is the name pass's).
+    ## nothing is the name pass's, in the program's own modules).
     pure def lookup_path(mut self, segments: list[Name], ctx: TyCtx, span: TextRange) -> DefId?:
         var module = ctx.module
         for i in range(len(segments)):
@@ -3442,6 +3504,8 @@ impl Resolver:
                     let mname = self.prog.modules[module.index].name.copy()
                     var diag = Diagnostic.new(Msg.ResolveNotInModule, span.start, span.end)
                     self.report_other(ctx.module, diag.with("module", mname).with("name", seg.text))
+                else:
+                    self.undefined_type(ctx.module, seg.text, span)
                 return None
             if i + 1 == len(segments):
                 return Some(d)
@@ -3696,6 +3760,7 @@ impl Resolver:
                             self.report_const(ctx.module, diag)
                         return t
                 return self.def_as_type(d, name, args, ctx.module, at)
+            self.undefined_type(ctx.module, name, at)
             return Ty.error()
         # `C.Item` and `Self.Item`: an associated type.
         if len(segments) == 2:
@@ -3939,11 +4004,19 @@ pure def text_of(texts: dict[String, String], name: str) -> String:
         return t.copy()
     return String.new()
 
-## Whether a body reflects on one of the type parameters `generics`: a
-## `reflect` query, a field reached by a compile-time descriptor, or a
-## compile-time expression that names a type parameter (stage 0's
-## `instances::reflects`).
-pure def reflects(ast: Ast, body: Block, generics: list[GenericParam]) -> bool:
+## Whether `f`'s body has code that runs at compile time by unfolding (08,
+## "Reflection"; stage 0's `instances::unfolds`): a `reflect` query, a
+## field reached by a compile-time descriptor (`x.[f]`), a `comptime for` or
+## `comptime if` (among statements or a `match`'s arms), or a compile-time
+## expression that names one of `names` (the type parameters in scope).
+pure def unfolds(ast: Ast, f: FnDef, names: list[String]) -> bool:
+    var stmts: Block? = None
+    if let Some(b) = f.body:
+        stmts = Some(b.copy())
+    let body = stmts else:
+        return False
+    if comptime_stmts(ast, body):
+        return True
     for e in visit.exprs_in_block(ast, body):
         match ast.expr(e).kind:
             case ExprKind.FieldOf(_, _):
@@ -3956,12 +4029,76 @@ pure def reflects(ast: Ast, body: Block, generics: list[GenericParam]) -> bool:
             case ExprKind.Comptime(inner):
                 for x in visit.exprs_of(ast, inner):
                     if let ExprKind.Name(n) = ast.expr(x).kind:
-                        for g in generics:
-                            if g.name.text == n:
-                                return True
+                        if names.contains(n):
+                            return True
+            case ExprKind.Match(_, arms):
+                for a in arms:
+                    if a.generated.is_some():
+                        return True
+                    if let ArmBody.Block(b) = a.body:
+                        if comptime_stmts(ast, b):
+                            return True
+            case ExprKind.Closure(c):
+                if let ClosureBody.Block(b) = c.body:
+                    if comptime_stmts(ast, b):
+                        return True
             case _:
                 pass
     return False
+
+## Whether a block has a `comptime for` or `comptime if` among its
+## statements, at any depth of statements.
+pure def comptime_stmts(ast: Ast, b: Block) -> bool:
+    for s in b.stmts:
+        if comptime_stmt(ast, s):
+            return True
+    return False
+
+pure def comptime_stmt(ast: Ast, s: StmtId) -> bool:
+    match ast.stmt(s).kind:
+        case StmtKind.Comptime(inner):
+            return match ast.stmt(inner).kind:
+                case StmtKind.Assert(_, _) | StmtKind.Expr(_): False
+                case _: True
+        case StmtKind.If(branches, else_block):
+            for (_, b) in branches:
+                if comptime_stmts(ast, b):
+                    return True
+            if let Some(b) = else_block:
+                return comptime_stmts(ast, b)
+            return False
+        case StmtKind.While(_, body) | StmtKind.Defer(body):
+            return comptime_stmts(ast, body)
+        case StmtKind.For(_, _, _, body) | StmtKind.With(_, _, body):
+            return comptime_stmts(ast, body)
+        case StmtKind.Let(_, _, _, _, else_):
+            if let Some(le) = else_:
+                if let ElseBody.Block(b) = le.body:
+                    return comptime_stmts(ast, b)
+            return False
+        case _:
+            return False
+
+## The builtin scalars a misspelt type's name is compared with (stage 0's
+## `similar_type_fix`, `i64` among them).
+const SIMILAR_SCALARS: list[str] = [
+    "int",
+    "f64",
+    "f32",
+    "bool",
+    "char",
+    "str",
+    "u8",
+    "u16",
+    "u32",
+    "u64",
+    "u128",
+    "i8",
+    "i16",
+    "i32",
+    "i64",
+    "i128",
+]
 
 ## The last part of a dotted path: `json` for `std.json`.
 pure def last_word(path: str) -> String:

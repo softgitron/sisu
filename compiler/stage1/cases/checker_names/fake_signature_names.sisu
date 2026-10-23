@@ -1,0 +1,10 @@
+# A trait whose module names `Fake` gets a fake the compiler writes (17,
+# "Fakes"), in a module of its own whose scope is the trait's: what the
+# trait's signature cannot find is reported in the trait's file and again
+# in the fake's, which repeats the signature.
+
+trait Store:
+    def get(self, key: Strng) -> int
+
+def main():
+    print("a store")

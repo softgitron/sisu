@@ -85,11 +85,14 @@ impl Loan:
             case LoanKind.Local(_, _, t): t
             case LoanKind.Param(_): False
 
-## What a statement makes: the loan of its rvalue (a borrow) and the
-## reborrows of its `ref mut` operands, by operand index.
+## What a statement makes: the loan of its rvalue (a borrow), the
+## reborrows of its `ref mut` operands, and the loans of the places a call
+## copies capability handles from, for a result that may point into their
+## objects (decision 237), by operand index.
 struct Made:
     rvalue: int?
     reborrows: list[(int, int)]
+    handles: list[(int, int)]
 
 impl Made:
     ## The reborrow operand `oi` makes.
@@ -99,9 +102,25 @@ impl Made:
                 return Some(l)
         return None
 
+    ## The loan of the handle operand `oi` copies.
+    pure def handle(self, oi: int) -> int?:
+        for (k, l) in self.handles:
+            if k == oi:
+                return Some(l)
+        return None
+
     ## Whether loan `l` is one of the reborrows.
     pure def reborrows_loan(self, l: int) -> bool:
         for (_, x) in self.reborrows:
+            if x == l:
+                return True
+        return False
+
+    ## Whether the statement makes loan `l`.
+    pure def makes(self, l: int) -> bool:
+        if self.rvalue == Some(l) or self.reborrows_loan(l):
+            return True
+        for (_, x) in self.handles:
             if x == l:
                 return True
         return False
@@ -120,6 +139,11 @@ pub struct State:
     ## The locals whose rows and references a transfer wrote since the last
     ## `join_touched`.
     pub touched: list[int]
+    ## While `logging`, each row and reference a transfer writes as it was
+    ## before the first write (`touch`), by local, for `undo`: the dataflow
+    ## transfers a block's entry state in place and puts it back.
+    log: list[(int, BitSet, BitSet?)]
+    logging: bool
 
 impl State:
     ## A state of no rows, which nothing reads: the unwinding state of a
@@ -132,13 +156,102 @@ impl State:
             activated=BitSet.new(0),
             pinned=BitSet.new(0),
             touched=[],
+            log=[],
+            logging=False,
         )
 
-    pub pure def join(mut self, o: State) -> bool:
+    ## Records that a transfer writes the row and the reference of local
+    ## `l`, and while `logging`, what they were before its first write.
+    pub pure def touch(mut self, l: int):
+        self.touched.push(l)
+        if not self.logging:
+            return
+        let n = len(self.log)
+        var k = 0
+        while k < n:
+            if self.log[k].0 == l:
+                return
+            k += 1
+        let row = self.holds.get(l)
+        let direct = self.direct[l].copy()
+        self.log.push((l, row, direct))
+
+    ## Puts back the rows and references `log` kept, and the activated and
+    ## pinned loans the state had when `logging` was set, and stops
+    ## logging: the state is again what it was then.
+    pub pure def undo(mut self, own activated: BitSet, own pinned: BitSet):
+        while let Some((l, row, direct)) = self.log.pop():
+            self.holds.set(l, row)
+            self.direct[l] = direct
+        self.activated = activated
+        self.pinned = pinned
+        self.touched = []
+        self.logging = False
+
+    ## A copy that keeps no log.
+    pure def detached(self) -> State:
+        var c = self.copy()
+        c.touched = []
+        c.log = []
+        c.logging = False
+        return c
+
+    ## Makes this state `o`, in place where it can: the rows' words, and
+    ## each reference into the set already there.
+    pub pure def assign(mut self, o: State):
+        self.holds.assign(o.holds)
+        let n = len(o.direct)
+        if len(self.direct) != n:
+            self.direct = o.direct.copy()
+        else:
+            var i = 0
+            while i < n:
+                self.assign_direct(i, o)
+                i += 1
+        self.activated.assign(o.activated)
+        self.pinned.assign(o.pinned)
+        self.touched = []
+
+    ## Makes the reference of local `i` `o`'s, in place where it can.
+    pure def assign_direct(mut self, i: int, o: State):
+        match o.direct[i]:
+            case Some(y):
+                var fresh = True
+                if let Some(x) = ref mut self.direct[i]:
+                    x.assign(y)
+                    fresh = False
+                if fresh:
+                    self.direct[i] = Some(y.copy())
+            case None:
+                var some = False
+                if let Some(_) = self.direct[i]:
+                    some = True
+                if some:
+                    self.direct[i] = None
+
+    ## Brings this state, which was `o` before the transfers since
+    ## `o.touched` was last cleared, up to `o`: only the rows and references
+    ## of the locals in `o.touched` and the activated and pinned loans can
+    ## differ. `o.touched` is cleared.
+    pub pure def catch_up(mut self, mut o: State):
+        self.activated.assign(o.activated)
+        self.pinned.assign(o.pinned)
+        let n = len(o.touched)
+        var k = 0
+        while k < n:
+            let i = o.touched[k]
+            self.holds.set_from(i, o.holds)
+            self.assign_direct(i, o)
+            k += 1
+        o.touched = []
+
+    ## Joins `o` into this state; returns whether anything changed, and
+    ## adds to `marks` each local whose row or reference did.
+    pub pure def join(mut self, o: State, mut marks: BitSet) -> bool:
         var changed = False
         if self.pinned.union(o.pinned):
             changed = True
-        if self.holds.union(o.holds):
+        if self.holds.union_marking(o.holds, mut marks):
             changed = True
         # Matched rather than asked `is_some`, here and in the other loops
         # over every statement or local: natively, a call of an intrinsic
@@ -152,47 +265,81 @@ impl State:
                 match o.direct[i]:
                     case Some(y):
                         if x.union(y):
+                            _ = marks.insert(i)
                             changed = True
                     case None:
                         gone = True
             if gone:
                 self.direct[i] = None
+                _ = marks.insert(i)
                 changed = True
             i += 1
         if self.activated.union(o.activated):
             changed = True
         return changed
 
+    ## `join` of the rows and references of the locals `rows` names, and
+    ## of the activated and pinned loans, for an `o` whose other rows and
+    ## references this state holds already.
+    pub pure def join_rows(mut self, o: State, rows: list[int], mut marks: BitSet) -> bool:
+        var changed = False
+        if self.pinned.union(o.pinned):
+            changed = True
+        if self.activated.union(o.activated):
+            changed = True
+        let n = len(rows)
+        var k = 0
+        while k < n:
+            let i = rows[k]
+            var row_changed = self.holds.union_from(i, o.holds)
+            var gone = False
+            if let Some(x) = ref mut self.direct[i]:
+                match o.direct[i]:
+                    case Some(y):
+                        if x.union(y):
+                            row_changed = True
+                    case None:
+                        gone = True
+            if gone:
+                self.direct[i] = None
+                row_changed = True
+            if row_changed:
+                _ = marks.insert(i)
+                changed = True
+            k += 1
+        return changed
+
     ## `join` for a state that has joined every earlier version of `o`:
     ## only what `o` changed since then is joined, the rows and references
-    ## of the locals in `o.touched`, and its activated and pinned loans;
-    ## `o.touched` is cleared. The unwinding state of a block joins the state
+    ## of the locals in `o.touched` from its `start`th on, and its activated
+    ## and pinned loans. The unwinding state of a block joins the state
     ## after each statement so, which leaves it as `join` would.
-    pub pure def join_touched(mut self, mut o: State) -> bool:
+    pub pure def join_touched(mut self, o: State, start: int, mut marks: BitSet) -> bool:
         var changed = False
         if self.pinned.union(o.pinned):
             changed = True
         if self.activated.union(o.activated):
             changed = True
         let n = len(o.touched)
-        var k = 0
+        var k = start
         while k < n:
             let i = o.touched[k]
-            if self.holds.union_from(i, o.holds):
-                changed = True
+            var row_changed = self.holds.union_from(i, o.holds)
             var gone = False
             if let Some(x) = ref mut self.direct[i]:
                 match o.direct[i]:
                     case Some(y):
                         if x.union(y):
-                            changed = True
+                            row_changed = True
                     case None:
                         gone = True
             if gone:
                 self.direct[i] = None
+                row_changed = True
+            if row_changed:
+                _ = marks.insert(i)
                 changed = True
             k += 1
-        o.touched = []
         return changed
 
 ## One operand's loans: what the value holds, which of those are the
@@ -317,6 +464,42 @@ pub pure def block_order(f: Function) -> list[int]:
             order.push(b)
     return order
 
+## Whether each block's entry state is within its unwinding block's entry
+## whenever the block is visited, so that joining it there changes nothing:
+## it is not the entry block, no block unwinds to it, and each of its
+## predecessors unwinds to the same block, where that predecessor's visit
+## joins its state after each of its statements, its state at its end
+## among them, before it joins that state into this block's entry.
+pure def within_unwind(f: Function) -> list[bool]:
+    let n = len(f.blocks)
+    var unwind: list[int] = []
+    var target: list[bool] = []
+    var reached: list[bool] = []
+    var agree: list[bool] = []
+    for i in range(n):
+        var u = -1
+        if let Some(x) = f.blocks[i].unwind:
+            u = x.index
+        unwind.push(u)
+        target.push(False)
+        reached.push(False)
+        agree.push(True)
+    for i in range(n):
+        let u = unwind[i]
+        if u >= 0 and u < n:
+            target[u] = True
+    for i in range(n):
+        for t in targets(f.blocks[i]):
+            if t < n:
+                reached[t] = True
+                if unwind[i] != unwind[t]:
+                    agree[t] = False
+    var out: list[bool] = []
+    for b in range(n):
+        let u = unwind[b]
+        out.push(b != 0 and u >= 0 and u < n and not target[b] and reached[b] and agree[b])
+    return out
+
 pub struct Analysis:
     pub loans: list[Loan]
     ## Whether a task's loans are pinned to the end of its scope's body
@@ -350,7 +533,7 @@ impl Analysis:
         for b in range(len(f.blocks)):
             for si in range(len(f.blocks[b].stmts)):
                 let s = ref f.blocks[b].stmts[si]
-                var m = Made(rvalue=None, reborrows=[])
+                var m = Made(rvalue=None, reborrows=[], handles=[])
                 if let StatementKind.Assign(d, rv) = s.kind:
                     match rv:
                         case Rvalue.Ref(pl, mutable):
@@ -380,7 +563,30 @@ impl Analysis:
                                 place=pl.project(Proj.Deref), mutable=True, two_phase=False
                             )
                             loans.push(Loan(kind=kind, loc=s.loc))
-                if m.rvalue.is_some() or not m.reborrows.is_empty():
+                # A result that may point into the object of a capability
+                # handle the call copies borrows the place it copies from
+                # (decision 237).
+                if let StatementKind.Call(dest_place, callee, args) = s.kind:
+                    let dest_ty = types.place_ty(f, dest_place)
+                    for oi in handle_sources(p, types, callee, len(args), dest_ty):
+                        if m.reborrow(oi).is_some():
+                            continue
+                        var pl: Place? = None
+                        match args[oi]:
+                            case Operand.Copy(x) | Operand.Move(x):
+                                pl = Some(x.copy())
+                            case _:
+                                pass
+                        let place = pl else:
+                            continue
+                        var handle = False
+                        if let Some(t) = types.place_ty(f, place):
+                            handle = types.holds_handle(t)
+                        if handle:
+                            m.handles.push((oi, len(loans)))
+                            let kind = LoanKind.Local(place=place, mutable=False, two_phase=False)
+                            loans.push(Loan(kind=kind, loc=s.loc))
+                if m.rvalue.is_some() or not m.reborrows.is_empty() or not m.handles.is_empty():
                     _ = made.insert(key(b, si), m)
         let nloc = len(f.locals)
         let nloans = len(loans)
@@ -445,11 +651,42 @@ impl Analysis:
         var queued: list[bool] = []
         for _ in range(len(f.blocks)):
             queued.push(True)
+        let nblocks = len(f.blocks)
+        let within = within_unwind(f)
+        # A block's entry state is taken out of `entry` for its visit (into
+        # a slot past the last block's), transferred in place while it logs
+        # what its statements write (`State.touch`), and put back as it was
+        # (`State.undo`), rather than copied as stage 0 copies it; a block
+        # that is its own successor or unwinding block, or whose unwinding
+        # block is one of its successors, reads its entry during the visit,
+        # and copies it.
+        a.entry.push(None)
+        # Each block's visit joins into its successors' entries (and its
+        # unwinding block's) only the rows and references that can have
+        # changed since its last visit joined there, those that changed in
+        # its entry since (`dirty`, which every join notes) and those its
+        # statements wrote then and now (`wrote`), or all of them on its
+        # first visit (`fresh`) or for an unwinding state gathered in a copy.
+        var dirty: list[BitSet] = []
+        var fresh: list[bool] = []
+        var wrote: list[list[int]] = []
+        for _ in range(nblocks):
+            dirty.push(BitSet.new(nloc))
+            fresh.push(True)
+            wrote.push([])
+        # The marks of the joins into a block's unwinding state, which no
+        # entry is.
+        var unmarked = BitSet.new(nloc)
         while let Some(b) = work.pop():
             queued[b] = False
-            var st = a.entry[b].copy() else:
+            if a.entry[b].is_none():
                 continue
-            st.touched = []
+            let first = fresh[b]
+            fresh[b] = False
+            var changed_rows: list[int] = []
+            if not first:
+                changed_rows = dirty[b].items()
+            dirty[b].clear()
             let block = ref f.blocks[b]
             var succ: list[int] = []
             for t in targets(block):
@@ -464,28 +701,59 @@ impl Analysis:
             var u = -1
             if let Some(x) = block.unwind:
                 u = x.index
-            let into_entry = u >= 0 and u < len(f.blocks) and u != b and not succ.contains(u)
+            let into_entry = u >= 0 and u < nblocks and u != b and not succ.contains(u)
+            let in_place = (into_entry or u < 0) and not succ.contains(b)
+            var st = State.none()
+            var activated = BitSet.new(0)
+            var pinned = BitSet.new(0)
+            if in_place:
+                a.entry.swap(b, nblocks)
+                if let Some(Some(e)) = a.entry.pop():
+                    st = e
+                activated = st.activated.copy()
+                pinned = st.pinned.copy()
+                st.logging = True
+            elif let Some(e) = a.entry[b]:
+                st = e.copy()
+            st.touched = []
             var unwind_changed = False
             var unwind = State.none()
             if into_entry:
-                if let Some(e) = ref mut a.entry[u]:
-                    unwind_changed = e.join(st)
+                # A block whose entry is within its unwinding block's
+                # already (`within_unwind`) joins nothing there.
+                if within[b] and a.entry[u].is_some():
+                    pass
+                elif let Some(e) = ref mut a.entry[u]:
+                    if first:
+                        unwind_changed = e.join(st, mut dirty[u])
+                    else:
+                        unwind_changed = e.join_rows(st, changed_rows, mut dirty[u])
                 else:
-                    a.entry[u] = Some(st.copy())
+                    a.entry[u] = Some(st.detached())
+                    fresh[u] = True
                     unwind_changed = True
             elif u >= 0:
                 unwind = st.copy()
             let count = len(block.stmts)
             var si = 0
             while si < count:
+                let start = len(st.touched)
                 a.transfer(p, f, types, b, si, block.stmts[si], mut st)
                 if into_entry:
                     if let Some(e) = ref mut a.entry[u]:
-                        if e.join_touched(mut st):
+                        if e.join_touched(st, start, mut dirty[u]):
                             unwind_changed = True
                 elif u >= 0:
-                    _ = unwind.join_touched(mut st)
+                    _ = unwind.join_touched(st, start, mut unmarked)
                 si += 1
+            # The rows the state at the end can differ in from the one the
+            # last visit joined into the successors.
+            var rows = changed_rows
+            for x in st.touched:
+                rows.push(x)
+            for x in wrote[b]:
+                rows.push(x)
+            wrote[b] = st.touched.copy()
             st.touched = []
             for idx in range(len(succ) + 1):
                 var t = 0
@@ -504,16 +772,28 @@ impl Analysis:
                     changed = unwind_changed
                 elif let Some(e) = ref mut a.entry[t]:
                     # Joined in place, as stage 0 joins it.
-                    changed = if from_unwind: e.join(unwind) else: e.join(st)
+                    if from_unwind:
+                        changed = e.join(unwind, mut dirty[t])
+                    elif first:
+                        changed = e.join(st, mut dirty[t])
+                    else:
+                        changed = e.join_rows(st, rows, mut dirty[t])
                 elif from_unwind:
-                    a.entry[t] = Some(unwind.copy())
+                    a.entry[t] = Some(unwind.detached())
+                    fresh[t] = True
                     changed = True
                 else:
-                    a.entry[t] = Some(st.copy())
+                    a.entry[t] = Some(st.detached())
+                    fresh[t] = True
                     changed = True
                 if changed and not queued[t]:
                     queued[t] = True
                     work.push(t)
+            if in_place:
+                st.undo(activated, pinned)
+                a.entry.push(Some(st))
+                a.entry.swap(b, nblocks)
+        _ = a.entry.pop()
         # Liveness: backward.
         var changed = True
         var rounds = 0
@@ -550,6 +830,8 @@ impl Analysis:
             activated=BitSet.new(self.nloans),
             pinned=BitSet.new(self.nloans),
             touched=[],
+            log=[],
+            logging=False,
         )
 
     pure def made_at(self, b: int, si: int) -> Made?:
@@ -609,7 +891,10 @@ impl Analysis:
             var d = BitSet.new(self.nloans)
             _ = d.insert(x)
             return OpLoans(holds=holds, direct=Some(d), inner=inner)
-        let holds = self.value_loans(st, p)
+        var holds = self.value_loans(st, p)
+        if let Some(m) = made:
+            if let Some(h) = m.handle(oi):
+                _ = holds.insert(h)
         # A reference read out of a value (an option's payload, a tuple's
         # element) is treated as pointing into every place the value holds
         # a loan of: the referent's loans are then what those places hold,
@@ -646,7 +931,7 @@ impl Analysis:
         match first_deref(d):
             case None:
                 let add = filtered(f, types, l, loans)
-                st.touched.push(l)
+                st.touch(l)
                 if d.proj.is_empty():
                     st.holds.set(l, add)
                     st.direct[l] = direct
@@ -664,7 +949,7 @@ impl Analysis:
                         if first_deref(place).is_none():
                             let root = place.local.index
                             let add = filtered(f, types, root, loans.copy())
-                            st.touched.push(root)
+                            st.touch(root)
                             _ = st.holds.union_row(root, add)
                             st.direct[root] = None
 
@@ -748,7 +1033,7 @@ impl Analysis:
                         pass
                 if let Rvalue.Use(Operand.Move(src)) = rv:
                     if src.proj.is_empty():
-                        st.touched.push(src.local.index)
+                        st.touch(src.local.index)
                         st.holds.clear_row(src.local.index)
                         st.direct[src.local.index] = None
                 let written = self.with_keys(st, d, loans)
@@ -800,13 +1085,13 @@ impl Analysis:
                                 if first_deref(place).is_none():
                                     let root = place.local.index
                                     if types.may_hold(f.locals[root].ty):
-                                        st.touched.push(root)
+                                        st.touch(root)
                                         _ = st.holds.union_row(root, stored)
                                         st.direct[root] = None
                 for o in args:
                     if let Operand.Move(src) = o:
                         if src.proj.is_empty():
-                            st.touched.push(src.local.index)
+                            st.touch(src.local.index)
                             st.holds.clear_row(src.local.index)
                             st.direct[src.local.index] = None
                 # A task spawned on this body's own scope keeps what it
@@ -819,11 +1104,11 @@ impl Analysis:
                 self.write(f, types, mut st, d, written, None)
             case StatementKind.Drop(place, _):
                 if place.proj.is_empty():
-                    st.touched.push(place.local.index)
+                    st.touch(place.local.index)
                     st.holds.clear_row(place.local.index)
                     st.direct[place.local.index] = None
             case StatementKind.StorageDead(l):
-                st.touched.push(l.index)
+                st.touch(l.index)
                 st.holds.clear_row(l.index)
                 st.direct[l.index] = None
 
@@ -991,27 +1276,34 @@ impl Analysis:
     pub pure def findings(self, p: Program, f: Function, types: Types) -> list[Finding]:
         var out: list[Finding] = []
         let nblocks = len(f.blocks)
+        # The states before and after the statement at hand, in two buffers
+        # that each block's entry is copied into (stage 0's); the state
+        # before the next statement is brought up to the one after this one
+        # by what this one wrote (`catch_up`), rather than copied.
+        var before = self.empty_state()
+        var after = self.empty_state()
         var next = 0
         while next < nblocks:
             let b = next
             next += 1
-            let start = self.entry[b].copy() else:
-                continue
             let block = ref f.blocks[b]
             # The unwinding path drops in the order of the normal one, so a
             # conflict there is one the normal path reports.
             if block.cleanup:
                 continue
+            match self.entry[b]:
+                case Some(e):
+                    after.assign(e)
+                    before.assign(e)
+                case None:
+                    continue
             let lout = self.live_out(f, b)
             let lives = self.live_before_each(f, types, b, lout)
-            var after = start
             let count = len(block.stmts)
             var si = 0
             while si < count:
                 let s = ref block.stmts[si]
-                let before = after.copy()
                 self.transfer(p, f, types, b, si, s, mut after)
-                after.touched = []
                 let pre = self.live_loans(before, lives[si])
                 let post = self.live_loans(after, lives[si + 1])
                 self.check_conflicts(
@@ -1019,6 +1311,7 @@ impl Analysis:
                 )
                 self.check_stores(p, f, types, b, si, s, before, mut out)
                 self.check_tasks(f, types, b, si, s, before, mut out)
+                before.catch_up(mut after)
                 si += 1
             if let Terminator.Return = block.term:
                 self.check_return(f, types, b, block.loc, after, mut out)
@@ -1074,7 +1367,10 @@ impl Analysis:
                     if let Some(x) = r:
                         v.push((pl.project(Proj.Deref), Access.MutBorrow, Some(x)))
                     else:
-                        v.push((pl.copy(), Access.Read, None))
+                        var h: int? = None
+                        if let Some(m) = made:
+                            h = m.handle(oi)
+                        v.push((pl.copy(), Access.Read, h))
                 case Operand.Move(pl):
                     for l in index_locals(pl):
                         v.push((Place.local(l), Access.Read, None))
@@ -1177,7 +1473,7 @@ impl Analysis:
         if let Some(d) = dest(s):
             for y in post.items():
                 if let Some(m) = made:
-                    if m.rvalue == Some(y) or m.reborrows_loan(y):
+                    if m.makes(y):
                         continue
                 if self.conflicts_with(d, Access.Write, y, before):
                     self.report(p, f, types, b, si, s, Access.Write, d, y, mut out)
@@ -1727,6 +2023,15 @@ impl Analysis:
                 case LoanKind.Local(place, _, _):
                     if first_deref(place).is_some():
                         continue
+                    # A handle the caller copied into a parameter the result
+                    # may borrow from: the caller's place is borrowed in its
+                    # stead (decision 237).
+                    let param = place.local.index - 1
+                    if param >= 0 and param < f.param_count:
+                        if f.from_.contains(param) or f.inner.contains(param):
+                            if let Some(t) = types.place_ty(f, place):
+                                if types.holds_handle(t):
+                                    continue
                     var note = Msg.BorrowReturnOwned
                     if let Type.Fn(_, _, _) = f.locals[0].ty:
                         note = Msg.BorrowUseOwnClosure
@@ -1868,3 +2173,34 @@ pure def scope_body_spawn(f: Function, args: list[Operand]) -> bool:
         case Operand.Copy(p): p.local.index == 2 and p.proj.is_empty()
         case Operand.Move(p): p.local.index == 2 and p.proj.is_empty()
         case _: False
+
+## The arguments of a call whose capability handles a result may point
+## into (decision 237): those the callee's result borrows from deeply, and
+## every one of a call through a function value whose result can hold a
+## loan.
+pure def handle_sources(p: Program, types: Types, callee: Callee, n: int, dest: Type?) -> list[int]:
+    var from_: list[int] = []
+    match callee:
+        case Callee.Fn(name, _):
+            if let Some(i) = types.function(name):
+                from_ = p.functions[i].from_.copy()
+        case Callee.Intrinsic(name, _):
+            if let Some(d) = types.intrinsic(p, name):
+                from_ = d.from_.copy()
+        case Callee.Trait(name, _):
+            if let Some(d) = types.trait_method(p, name):
+                from_ = d.from_.copy()
+        case Callee.Value(_):
+            var holds = False
+            if let Some(t) = dest:
+                holds = types.may_hold(t)
+            var out: list[int] = []
+            if holds:
+                for i in range(n):
+                    out.push(i)
+            return out
+    var out: list[int] = []
+    for i in from_:
+        if i < n:
+            out.push(i)
+    return out

@@ -1,0 +1,20 @@
+# A doc example may draw from the generator a test of the module asks for
+# (17, D-070): `arbitrary[Point]` there is the same `Gen` as in the test.
+
+struct Point:
+    x: int
+    y: int
+
+## The sum of a point's coordinates.
+##
+## ```
+## check(arbitrary[Point], p -> sum_of(p) == p.x + p.y)
+## ```
+def sum_of(p: Point) -> int:
+    return p.x + p.y
+
+test "sums":
+    check(arbitrary[Point], p -> sum_of(p) == p.x + p.y)
+
+def main():
+    print(sum_of(Point(x=1, y=2)))

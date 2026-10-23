@@ -496,10 +496,15 @@ impl FnLower:
         elif len(self.scopes) > 0 and at < 0:
             self.scopes[0].locals.push(l)
 
+    ## Whether a value of the type is dropped: one that is not `Copy`, one
+    ## that holds a capability handle, whose copies are counted, and one
+    ## that is `Copy` only by a bound, since what the type parameter stands
+    ## for may be a handle (decision 237).
     pub pure def needs_drop(mut self, cx: Cx, ty: Ty) -> bool:
         if let TyData.Ref(_, _) = self.types.data(ty):
             return False
-        return not cx.prog.is_copy_in(mut self.types, ty, self.bounds)
+        return not cx.prog.is_copy(mut self.types, ty)
+            or cx.prog.holds_capability(mut self.types, ty)
 
     # ---------------------------------------------------------------- blocks
 

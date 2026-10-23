@@ -261,6 +261,10 @@ pub enum Msg:
     PackageReservedName
     PackageDependsHere
     PackageUnknownKey
+    PackageUnknownFeature
+    ResolveBadCfg
+    ResolveUnknownFeature
+    TypeReadGuardValue
     CapUntrusted
     BorrowDeclareView
     BorrowConsumeWith
@@ -648,6 +652,10 @@ impl Msg:
             case PackageReservedName: "package.reserved-name"
             case PackageDependsHere: "package.depends-here"
             case PackageUnknownKey: "package.unknown-key"
+            case PackageUnknownFeature: "package.unknown-feature"
+            case ResolveBadCfg: "resolve.bad-cfg"
+            case ResolveUnknownFeature: "resolve.unknown-feature"
+            case TypeReadGuardValue: "type.read-guard-value"
             case CapUntrusted: "cap.untrusted"
             case BorrowDeclareView: "borrow.declare-view"
             case BorrowConsumeWith: "borrow.consume-with"
@@ -821,6 +829,11 @@ pub struct Label:
     pub start: int
     pub end: int
     pub params: list[Param]
+    ## The file the span is in when it is not the diagnostic's (-1): while
+    ## the type checker reports, the index of the module it is in; in what
+    ## `typeck.Checked` gives, the index of the checked file (0 the root
+    ## module's, `k + 1` the `k`th of `Checked.files`).
+    pub file: int
 
 ## A replacement of the text from byte `start` up to `end`.
 @derive(Eq)
@@ -868,7 +881,14 @@ impl Diagnostic:
     ## The diagnostic with a label at `start..end`.
     pub pure def label(own self, msg: Msg, start: int, end: int) -> Diagnostic:
         var d = self
-        d.labels.push(Label(msg=msg, start=start, end=end, params=[]))
+        d.labels.push(Label(msg=msg, start=start, end=end, params=[], file=-1))
+        return d
+
+    ## The diagnostic with a label at `start..end` of another file than its
+    ## own, `file` (`Label.file`).
+    pub pure def label_in(own self, msg: Msg, start: int, end: int, file: int) -> Diagnostic:
+        var d = self
+        d.labels.push(Label(msg=msg, start=start, end=end, params=[], file=file))
         return d
 
     ## The diagnostic with a label at `start..end` that has one parameter.
@@ -877,7 +897,7 @@ impl Diagnostic:
     ) -> Diagnostic:
         var d = self
         let param = Param(name=name.to_string(), value=value.to_string())
-        d.labels.push(Label(msg=msg, start=start, end=end, params=[param]))
+        d.labels.push(Label(msg=msg, start=start, end=end, params=[param], file=-1))
         return d
 
     ## The diagnostic with a fix that replaces `start..end` by `text`.

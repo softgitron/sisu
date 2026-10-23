@@ -94,6 +94,25 @@ impl Tree:
                     out.push(debug_str(text.byte_slice(token.start, token.end)))
                     out.push("\n")
 
+impl Tree:
+    ## The tree without the nodes `left_out` and what is in them: each is
+    ## taken out of its parent's children, so a walk of the tree passes it
+    ## by (the items a build leaves out, `cfg.filter`). The text and the
+    ## tokens stay as they are.
+    pub pure def without(self, left_out: list[int]) -> Tree:
+        var t = self.copy()
+        for n in left_out:
+            if n < 0 or n >= len(t.nodes):
+                continue
+            let parent = t.nodes[n].parent else:
+                continue
+            var kept: list[Element] = []
+            for e in t.nodes[parent].children:
+                if e != Element.Node(n):
+                    kept.push(e)
+            t.nodes[parent].children = kept
+        return t
+
 ## A name for a node that survives edits outside the node's item: the path
 ## of the enclosing items, outermost first, as `KIND:name#ordinal` (the
 ## ordinal counts earlier siblings of the same kind and name), and the

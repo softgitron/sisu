@@ -18,7 +18,8 @@
 #   names        `sisu check --format=ids FILE`, its name diagnostics only
 #                (E0200, E0201, E0202, E0220, E0234, E0389, W0002)
 #
-# for the conformance suite's names/ cases, stage 1's own cases, and the
+# for the conformance suite's names/ cases, stage 1's own cases (but those
+# whose names its type checker reports, cases/checker_names/), and the
 # programs of several modules: the conformance suite's packages (each
 # directory NAME.pkg, or the one its NAME.cwd names inside it, which stage
 # 0 checks from inside it) and scripts, and stage 1's own cases/packages/;
@@ -50,13 +51,24 @@
 # for the programs `sir.list` names, each of which must be within the slice
 # and match; and with --sir for every program of the corpus, where a file
 # within the slice must match and any other is beyond it (stage 1 says
-# why). Then what `check` prints, every diagnostic of a program in the
-# order `sisu check` prints them, from one run of stage 1 per class:
+# why). Then the SIR of a build that checks fewer contracts (07; decision
+# 232's release profile), for the programs of `sir.list` that have any:
+#
+#   contracts-off           `sisu sir --contracts=off FILE`, standard output
+#   contracts-preconditions `sisu sir --contracts=preconditions FILE`
+#
+# each of which must be within the slice and match. Then what `check`
+# prints, every diagnostic of a program in the order `sisu check` prints
+# them, from one run of stage 1 per class:
 #
 #   human        `sisu check FILE`, standard error: the human form, the
 #                diagnostics with their source lines, labels, notes and
 #                fixes, for the wrong programs of conformance/cases/wrong/,
 #                each of which must be within the slice and match
+#   cases-check  `sisu check --format=ids FILE`, the whole of it, and the
+#   cases-human  human form, for stage 1's own cases (but its packages, which
+#                are programs of the corpus), each of which must be within
+#                the slice and match
 #   corpus-check `sisu check --format=ids FILE`, the whole of it, and
 #   corpus-human the human form, with --check for every program of the
 #                corpus, where a file within the slice must match and any
@@ -234,7 +246,15 @@ stage0_human() {
     fi
     stage0_check "$@"
 }
-export -f stage0_syntax check0 stage0_check stage0_sir stage0_human
+# What `sisu sir --contracts=LEVEL` prints, the level in `$level`.
+stage0_sir_level() {
+    if [ -d "$2" ]; then
+        (cd "$2" && "$sisu" sir --contracts="$level" 2> /dev/null) > "$3/$1.sir"
+    else
+        "$sisu" sir --contracts="$level" "$2" > "$3/$1.sir" 2> /dev/null
+    fi
+}
+export -f stage0_syntax check0 stage0_check stage0_sir stage0_human stage0_sir_level
 
 # The differences DISCREPANCIES.md lists, one "path output" per line.
 allowed="$work/allowed.txt"
@@ -347,9 +367,13 @@ for class in $classes; do
         "$class" "$n" "$same" "$class_listed" "$class_unlisted" "$seconds" "$phases")"
 done
 
-# Name resolution, one module at a time.
+# Name resolution, one module at a time. Stage 1's cases in
+# `cases/checker_names/` have name diagnostics that its type checker
+# reports (in code the compiler writes, or a body's type whose path's
+# first name is a module), which the name pass alone does not: the classes
+# of `check` compare them.
 find "$compiler/conformance/cases/names" -name '*.sisu' | sort > "$work/names.list"
-grep -v '/packages/' "$work/cases.list" >> "$work/names.list"
+grep -v '/packages/' "$work/cases.list" | grep -v '/checker_names/' >> "$work/names.list"
 cat "$work/packages.list" >> "$work/names.list"
 name_classes="names"
 if [ "$all_names" = 1 ]; then
@@ -559,15 +583,60 @@ for class in $sir_classes; do
     done
 done
 
+# The SIR of the programs of `sir.list` that have contracts, lowered with
+# the fewer contracts a build may ask for (07; decision 232: a release
+# build checks its manifest's `[profile.release] contracts`, preconditions
+# by default), against `sisu sir --contracts=LEVEL`.
+while read -r f; do
+    if grep -rqE '^ *(requires|ensures|invariant) ' "$f" 2> /dev/null; then echo "$f"; fi
+done < "$work/sir.list" > "$work/contracts.list"
+contracts_summary=""
+for level in off preconditions; do
+    class="contracts-$level"
+    list="$work/contracts.list"
+    n=$(wc -l < "$list" | tr -d ' ')
+    ref="$work/$class.stage0"; out="$work/$class.stage1"
+    mkdir -p "$ref" "$out"
+    export level
+    parallel stage0_sir_level "$list" "$ref"
+    start=$(date +%s.%N)
+    if ! stage1 sir-batch "$out" "$list" --contracts="$level" > "$work/$class.log" 2> "$work/$class.stderr"; then
+        cat "$work/$class.stderr" >&2
+        echo "check.sh: stage 1 failed lowering the $class files" >&2
+        exit 1
+    fi
+    end=$(date +%s.%N)
+    seconds=$(awk "BEGIN { printf \"%.1f\", $end - $start }")
+    same=0; class_unlisted=0
+    i=0
+    while read -r f; do
+        i=$((i + 1))
+        rel="${f#"$repo"/}"
+        if [ -s "$out/$i.beyond" ]; then
+            class_unlisted=$((class_unlisted + 1))
+            report="$report\n  UNLISTED: $rel: $class (beyond the slice: $(head -1 "$out/$i.beyond"))"
+        elif cmp -s "$ref/$i.sir" "$out/$i.sir"; then
+            same=$((same + 1))
+        else
+            class_unlisted=$((class_unlisted + 1))
+            report="$report\n  UNLISTED: $rel: $class (stage 0 in $ref/$i.sir, stage 1 in $out/$i.sir)"
+        fi
+    done < "$list"
+    total=$((total + n)); identical=$((identical + same)); unlisted=$((unlisted + class_unlisted))
+    contracts_summary="$contracts_summary\n$(printf '  %-24s %4d files, %4d identical, %3d otherwise; stage 1 %6ss' \
+        "$class" "$n" "$same" "$class_unlisted" "$seconds")"
+done
+
 # What `check` prints: every diagnostic of a program, in the conformance
 # form (the whole of `sisu check --format=ids`) and in the human form (what
 # `sisu check` prints on standard error), against stage 1's `check-batch`.
 find "$compiler/conformance/cases/wrong" -name '*.sisu' | sort > "$work/human.list"
-check_classes="human"
+grep -v '/packages/' "$work/cases.list" > "$work/cases-check.list"
+check_classes="human cases-check"
 if [ "$all_check" = 1 ]; then
     find "$compiler/conformance/cases" -name '*.sisu' | grep -v '/packages/' | sort > "$work/corpus-check.list"
     cat "$work/examples.list" "$work/packages.list" >> "$work/corpus-check.list"
-    check_classes="human corpus-check"
+    check_classes="human corpus-check cases-check"
 fi
 check_summary=""
 for class in $check_classes; do
@@ -586,6 +655,7 @@ for class in $check_classes; do
     seconds=$(awk "BEGIN { printf \"%.1f\", $end - $start }")
     outputs="human"
     [ "$class" = corpus-check ] && outputs="ids human"
+    [ "$class" = cases-check ] && outputs="ids human"
     for output in $outputs; do
         same=0; beyond=0; class_listed=0; class_unlisted=0
         i=0
@@ -596,9 +666,9 @@ for class in $check_classes; do
             [ "$output" = ids ] && theirs="$(check0 "$f")"
             if [ -s "$out/$i.beyond" ]; then
                 why=$(head -1 "$out/$i.beyond")
-                if [ "$class" = human ]; then
+                if [ "$class" != corpus-check ]; then
                     class_unlisted=$((class_unlisted + 1))
-                    report="$report\n  UNLISTED: $rel: human (beyond the slice: $why)"
+                    report="$report\n  UNLISTED: $rel: $output (beyond the slice: $why)"
                     continue
                 fi
                 # Beyond the slice: only fewer of stage 0's diagnostics.
@@ -630,15 +700,99 @@ for class in $check_classes; do
         listed=$((listed + class_listed)); unlisted=$((unlisted + class_unlisted))
         label="$class"
         [ "$class" = corpus-check ] && [ "$output" = human ] && label=corpus-human
+        [ "$class" = cases-check ] && [ "$output" = human ] && label=cases-human
         line="$(printf '  %-12s %4d files, %4d identical, %3d beyond the slice, %3d differing as listed, %3d otherwise' \
             "$label" "$n" "$same" "$beyond" "$class_listed" "$class_unlisted")"
-        if [ "$output" = human ] && [ "$class" = corpus-check ]; then
+        if [ "$output" = human ] && [ "$class" != human ]; then
             check_summary="$check_summary\n$line (the same run)"
         else
             check_summary="$check_summary\n$line; stage 1 $(printf '%6s' "$seconds")s"
         fi
     done
 done
+
+# What `build` makes (with --native): the executables of `sisu build
+# --native`, in the debug and the release profile (decision 232), the
+# latter with its manifest's contracts or those `--contracts` names, of a
+# file, a package and a workspace (each member), copied into the work
+# directory, against those stage 1's `build` makes there from its own SIR,
+# with what each prints and the lockfile it writes (09), also by a plain
+# build and one that `--locked` stops. A run of stage 1 that fails ends
+# with the line `error: Failed` (its `main` returned an error), which is
+# not stage 0's and is left out.
+build_summary=""
+if [ "$native" = 1 ]; then
+    mkdir -p "$work/build"
+    cp "$compiler/conformance/cases/examples/hello.sisu" "$compiler/conformance/cases/contracts/checks.sisu" "$work/build/"
+    cp -r "$compiler/conformance/cases/packages/workspace.pkg" "$work/build/workspace"
+    mkdir -p "$work/build/contracts/src"
+    cp "$compiler/conformance/cases/contracts/checks.sisu" "$work/build/contracts/src/main.sisu"
+    printf '[package]\nname = "contracts"\nversion = "0.1.0"\n\n[profile.release]\ncontracts = "off"\n' \
+        > "$work/build/contracts/sisu.toml"
+    builds=0; same=0
+    start=$(date +%s.%N)
+    while read -r dir path made flags; do
+        builds=$((builds + 1))
+        what="$dir${path:+/$path} $flags"
+        here_dir="$work/build/$dir"
+        # What the build makes, and the lockfile, each once.
+        made=$(printf '%s\n' $made sisu.lock | sort -u)
+        # Stage 0's build, moved aside; then stage 1's, in the same
+        # directory (the debug information names it, decision 227).
+        (cd "$here_dir" && "$sisu" build $flags $path > "$work/build.0.out" 2>&1)
+        rm -rf "$work/build.0" && mkdir -p "$work/build.0"
+        for m in $made; do
+            [ -e "$here_dir/$m" ] && mkdir -p "$work/build.0/$(dirname "$m")" && mv "$here_dir/$m" "$work/build.0/$m"
+        done
+        if [ -n "$stage1_exe" ]; then
+            (cd "$here_dir" && "$stage1_exe" --home "$compiler" build $flags $path 2>&1) |
+                sed '${/^error: Failed$/d;}' > "$work/build.1.out"
+        fi
+        differs=""
+        kept="$work/build.$builds"
+        for m in $made; do
+            if [ -e "$work/build.0/$m" ] || [ -e "$here_dir/$m" ]; then
+                if ! cmp -s "$work/build.0/$m" "$here_dir/$m"; then
+                    differs="$differs $m"
+                    mkdir -p "$kept/0/$(dirname "$m")" "$kept/1/$(dirname "$m")"
+                    cp "$work/build.0/$m" "$kept/0/$m" 2> /dev/null
+                    cp "$here_dir/$m" "$kept/1/$m" 2> /dev/null
+                fi
+            fi
+            rm -f "$here_dir/$m"
+        done
+        if ! cmp -s "$work/build.0.out" "$work/build.1.out"; then
+            differs="$differs output"
+            mkdir -p "$kept/0" "$kept/1"
+            cp "$work/build.0.out" "$kept/0/out"
+            cp "$work/build.1.out" "$kept/1/out"
+        fi
+        rm -rf "$here_dir/build"
+        if [ -z "$differs" ]; then
+            same=$((same + 1))
+        else
+            unlisted=$((unlisted + 1))
+            report="$report\n  UNLISTED: build: $what:$differs (stage 0 in $kept/0, stage 1 in $kept/1)"
+        fi
+    done <<'BUILDS'
+. hello.sisu hello --native
+. hello.sisu hello --native --release
+. checks.sisu checks --native --release
+. checks.sisu checks --native --contracts=off
+. checks.sisu checks --native --release --contracts all
+contracts . build/release/contracts --native --release
+contracts . build/release/contracts --native --release --contracts=preconditions
+contracts . sisu.lock
+contracts . sisu.lock --native --locked
+workspace . build/release/greeter --native --release
+workspace . build/debug/greeter --native
+workspace . sisu.lock
+BUILDS
+    end=$(date +%s.%N)
+    total=$((total + builds)); identical=$((identical + same))
+    seconds=$(awk "BEGIN { printf \"%.1f\", $end - $start }")
+    build_summary="$(printf '  %-12s %4d builds, %4d identical, %3d otherwise; both %6ss' build "$builds" "$same" $((builds - same)) "$seconds")"
+fi
 
 # Stage 1 over its own package: its name and type diagnostics, and its
 # SIR, split by the file each function comes from (each function's source
@@ -792,8 +946,14 @@ echo "stage 1's lowering against stage 0's (sir):"
 printf "%b\n" "${sir_summary#\\n}"
 echo "stage 1's ownership checker against stage 0's (ownership):"
 printf "%b\n" "${own_summary#\\n}"
+echo "stage 1's lowering at the contract levels of a build against stage 0's (contracts):"
+printf "%b\n" "${contracts_summary#\\n}"
 echo "stage 1's check against stage 0's (every diagnostic, in the human and the conformance form):"
 printf "%b\n" "${check_summary#\\n}"
+if [ -n "$build_summary" ]; then
+    echo "stage 1's build against stage 0's (build: the executables, the lockfile and what each prints):"
+    printf "%b\n" "$build_summary"
+fi
 if [ -n "$self_summary" ]; then
     echo "stage 1 over its own package against stage 0 (self: names, types, the SIR by source file):"
     printf "%b\n" "${self_summary#\\n}"
