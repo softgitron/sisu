@@ -201,6 +201,14 @@ fn result_sugar(tree: &Tree, n: NodeId, error_set: &dyn Fn(&str) -> bool) -> Opt
 
 /// `Option[T]`'s `T`, when the formatter writes it `T?`.
 pub(crate) fn option_sugar(tree: &Tree, n: NodeId) -> Option<NodeId> {
+    option_sugar_asked(tree, n, None)
+}
+
+/// [`option_sugar`], asked by the option `asking` inside this one, which
+/// is taken to be written `T?`: of `Option[Option[T]]` the inner option is
+/// written `T?` and the outer one is not, `Option[T?]` (decision 152),
+/// and neither question asks the other again.
+fn option_sugar_asked(tree: &Tree, n: NodeId, asking: Option<NodeId>) -> Option<NodeId> {
     if tree.kind(n) != PATH_TYPE {
         return None;
     }
@@ -210,20 +218,13 @@ pub(crate) fn option_sugar(tree: &Tree, n: NodeId) -> Option<NodeId> {
     }
     let args = tree.first_child(n, GENERIC_ARGS)?;
     let ts = type_children(tree, args);
-    if ts.len() != 1 || tree.child_tokens(args).count() != 2 {
+    // `[` and `]`, and no trailing comma (the significant tokens); spaces
+    // and line breaks go, but a comment would have nowhere to go.
+    if ts.len() != 1 || tree.child_tokens(args).count() != 2 || has_comment(tree, n) || has_comment(tree, args) {
         return None;
     }
     let arg = ts[0];
-    // Nothing in it but the type: a comment would have nowhere to go.
-    if tree.children(n).iter().any(|e| matches!(e, Element::Token(t) if tree.token_kind(*t).is_trivia()))
-        || tree
-            .children(args)
-            .iter()
-            .any(|e| matches!(e, Element::Token(t) if tree.token_kind(*t).is_trivia()))
-    {
-        return None;
-    }
-    let arg_kind = if option_sugar(tree, arg).is_some() {
+    let arg_kind = if Some(arg) == asking || option_sugar_asked(tree, arg, None).is_some() {
         OPTION_TYPE
     } else if result_parts(tree, arg).is_some() {
         // `Result[T, E]?` would read `T ! E?` once written with `!`.
@@ -238,10 +239,11 @@ pub(crate) fn option_sugar(tree: &Tree, n: NodeId) -> Option<NodeId> {
     if matches!(parent, Some(REF_TYPE | OPTION_TYPE)) {
         return None;
     }
-    // `Option[Option[T]]` written `Option[T]?` would be `T??`.
+    // An option inside one written `T?` keeps its brackets, which `T??`
+    // would lose.
     if parent == Some(GENERIC_ARGS)
         && let Some(outer) = tree.parent(n).and_then(|p| tree.parent(p))
-        && option_sugar(tree, outer) == Some(n)
+        && option_sugar_asked(tree, outer, Some(n)) == Some(n)
     {
         return None;
     }

@@ -423,8 +423,17 @@ impl Runner<'_> {
         let canonical = !case.path("unformatted").exists();
         for f in files {
             let before = invoke(self.sisu, dir, &s(&["parse", "--shape", f]));
-            // A file with a syntax error is not formatted.
+            // A file with a syntax error (status 1) is not formatted; any
+            // other failure, a crash, is one.
+            if before.status == 1 {
+                continue;
+            }
             if before.status != 0 {
+                self.report.failures.push(Failure {
+                    case: case.name.clone(),
+                    check: format!("sisu parse --shape {f} succeeds"),
+                    detail: format!("status {}\n{}", before.status, before.stderr),
+                });
                 continue;
             }
             self.report.formatted += 1;

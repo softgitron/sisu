@@ -477,7 +477,7 @@ have impls that the fast path respects.
 ## Stage 2: what the native backend leaves out
 
 The native debug backend (architecture.md, "Stage 2") compiles every
-program the conformance suite runs (`conformance/native.list`, 196
+program the conformance suite runs (`conformance/native.list`, 199
 cases), with the debug profile and the release one (decision 232), and
 every one of those runs frees what it allocated (decision 226). A
 construct it does not compile is `D0103` under `--native`, and the

@@ -2639,7 +2639,9 @@ definition's parameters break before its return type does (the
 left-hand split), a comment at the end of a line does not count toward
 its width, every comment keeps its text and its line, one blank line
 around each top-level definition and at most one elsewhere, `Option[T]`
-written `T?` where that reads unambiguously, `Result[T, E]` written `T !
+written `T?` where that reads unambiguously (of `Option[Option[T]]` the
+inner one, `Option[T?]`; with spaces or line breaks inside too, not with
+a comment, decision 267), `Result[T, E]` written `T !
 E` when `E` names an error set (which is not in the syntax: the driver
 resolves the file and tells the formatter which written types do,
 `sisu-driver/src/format.rs`; `sisu fmt` resolves each file as a program
@@ -2655,7 +2657,8 @@ formatter changes on purpose (trailing commas, `T?` and `Option[T]`, `T
 internal error (`D0076`) and the file left alone. `sisu parse --shape`
 prints the shape, so the conformance suite checks any implementation's
 formatter: every case that parses keeps its shape and formats to a fixed
-point (`fmt(fmt(x)) == fmt(x)`), and every case without a
+point (`fmt(fmt(x)) == fmt(x)`), a crash of `sisu parse --shape` counting
+as a failure rather than as a syntax error, and every case without a
 `NAME.unformatted` must already be canonical. CI runs `sisu fmt --check`
 over `compiler/std/` and those cases.
 
@@ -3592,7 +3595,7 @@ serialised is checked against both of stage 0's ways of running it.
 ### Coverage
 
 `conformance/native.list` names the cases the backend builds and runs:
-196 of them, every case of the suite that runs a program (the others are
+199 of them, every case of the suite that runs a program (the others are
 diagnostics, `sisu test` files, and the tools' cases: `--watch`, the
 REPL, worksheets, tokens, SIR and documentation). Among them are every
 case of `concurrency/` that runs (tasks, scopes, cancellation, channels,
@@ -5647,7 +5650,8 @@ library", "Tasks and the scheduler", "Capabilities", "Stage 2")
      without the bound may hold a loan, as before.
 
 **Round 10: `sisu doc`, and what round 9 left** (sections
-"Documentation", "Contracts and refinements", "Stage 2")
+"Documentation", "Contracts and refinements", "The ownership checker",
+"The formatter", "Stage 2")
 
 258. `sisu doc [PATH] [--output DIR]` and `sisu doc --std [MODULE...]`
      write the documentation (09, "Documentation"; 10, which leaves the
@@ -5898,3 +5902,22 @@ library", "Tasks and the scheduler", "Capabilities", "Stage 2")
      `examples/wordcount`, 2.91 G against 3.46 G. The arithmetic loops of
      decision 246 compile to the same code as before and run in the same
      time, but for `max` and `min`: @@ARITH@@.
+267. Two accidents of the formatter that stage 1's transcription found
+     (its DISCREPANCIES.md, D6 and D7), decided for the written rule of
+     decision 152 (D-079). Whether an option inside another is written
+     `T?` depends on whether the outer one is, and the two questions asked
+     each other, so `sisu fmt` overflowed its stack on `Option[Option[T]]`
+     (status 134); now the inner option asks the outer one with itself
+     taken as written `T?`, so the outer keeps its brackets:
+     `Option[T?]`, and three deep `Option[T?]?`. And any space or line
+     break inside `Option[ T ]` kept its brackets, after which the
+     formatter's own check found that the result, `Option[T]`, read as
+     `T?` while the input had not, and refused the file (`D0076`, status
+     70); now only a comment inside keeps them, as for `Result[T, E]`.
+     This changes a rule of the formatter (`sisu-fmt/src/lines.rs`,
+     `option_sugar`), which stage 1 transcribes. `syntax/option_nested`
+     and `syntax/option_spaced`, spelled out (`.unformatted`), pin them
+     through the suite's formatting checks, which now count a crash of
+     `sisu parse --shape` as a failure rather than as a syntax error, and
+     `syntax/option_sugar`, their canonical spelling, through the
+     canonical-form check and CI's loop.

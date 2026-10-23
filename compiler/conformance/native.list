@@ -189,6 +189,9 @@ std/sort
 std/text_math
 syntax/comments
 syntax/continuation
+syntax/option_nested
+syntax/option_spaced
+syntax/option_sugar
 testing/doc_examples
 traits/assoc_types
 traits/basics

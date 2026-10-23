@@ -1,0 +1,3 @@
+Its spelling is what it tests: options of options written `Option[...]`,
+which `sisu fmt` rewrites as `syntax/option_sugar` writes them (it once
+overflowed its stack on `Option[Option[T]]`, decision 267).

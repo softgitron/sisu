@@ -113,14 +113,15 @@ These checks apply to every case without an expectation file:
 - For a case with `.watch`, `sisu run --watch --record LOG` prints what
   the watched run printed, and `sisu replay LOG` reproduces it, its
   `edit` records standing in for the saves.
-- Every file that parses keeps its tree when `sisu fmt` rewrites it:
-  `sisu parse --shape` prints the same before and after (the tree's nodes
-  and significant tokens, up to what the formatter changes on purpose:
-  trailing commas, `Option[T]` written `T?`, `Result[T, E]` written `T !
-  E`, unused imports, and the order of imports), and formatting it a
-  second time changes nothing. Unless
-  the case has a `NAME.unformatted`, `sisu fmt --check` must also accept
-  it as it is: the case is canonical text.
+- Every file that parses (`sisu parse --shape` exits 0; it exits 1 for a
+  syntax error, and any other status is a failure) keeps its tree when
+  `sisu fmt` rewrites it: `sisu parse --shape` prints the same before and
+  after (the tree's nodes and significant tokens, up to what the
+  formatter changes on purpose: trailing commas, `Option[T]` written
+  `T?`, `Result[T, E]` written `T ! E`, unused imports, and the order of
+  imports), and formatting it a second time changes nothing. Unless the
+  case has a `NAME.unformatted`, `sisu fmt --check` must also accept it
+  as it is: the case is canonical text.
 
 The summary line counts the cases (and the package cases among them),
 the checks, the files formatted, the runs under `--watch`, the runs
@@ -212,7 +213,9 @@ and the time spent building and running them.
   `concurrency.sisu` with what they leave undeclared and a `main` (or a
   test) appended, kept starting with the originals.
 - `syntax/` is lexing and parsing, with the error-tolerance cases: one
-  mistake gives one diagnostic, and the rest of the file is still parsed.
+  mistake gives one diagnostic, and the rest of the file is still parsed;
+  and how `sisu fmt` writes options (`option_nested` and `option_spaced`
+  spell them out, `option_sugar` as it writes them: decision 267).
 - `names/` is name resolution; `types/` is the checker, including cases
   where broken code still gets a typed tree and only the first error in a
   chain is reported.

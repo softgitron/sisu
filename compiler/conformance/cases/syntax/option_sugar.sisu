@@ -1,0 +1,36 @@
+# The options of `syntax/option_nested` and `syntax/option_spaced` as
+# `sisu fmt` writes them (decision 152): `T?` for `Option[T]`, but
+# `Option[T?]` for `Option[Option[T]]`, and `ref Option[T?]` behind a
+# reference, where a `?` would read otherwise.
+
+def depth(x: Option[int?]) -> int:
+    match x:
+        case None:
+            return 0
+        case Some(None):
+            return 1
+        case Some(Some(_)):
+            return 2
+
+def deepest(x: Option[int?]?) -> bool:
+    return x.is_some()
+
+def viewed(x: ref Option[int?]) -> bool:
+    return x.is_some()
+
+def spaced(x: int?) -> int:
+    match x:
+        case Some(n):
+            return n
+        case None:
+            return -1
+
+def main():
+    print(depth(Some(None)))
+    print(deepest(Some(Some(None))))
+    let five: Option[int?] = Some(Some(5))
+    print(viewed(ref five))
+    let all: list[Option[str?]] = [None, Some(None), Some(Some("s"))]
+    print(all.len())
+    let maybe: list[int?] = [Some(1), None]
+    print((spaced(maybe[0]), spaced(maybe[1])))
