@@ -1,0 +1,11 @@
+# A helper that formats money is not handed the file system or the
+# environment, so it has no way to reach them: no global `open`, no
+# `os.environ`. Only `main` receives `System`, and what it passes on is
+# visible at every call.
+
+def format_money(cents: int) -> String:
+    let peek = sys.fs.list_dir("/root")  # try to snoop
+    return String.new("{cents // 100}.{cents % 100:02} EUR")
+
+def main(sys: System):
+    print("total: {format_money(12345)}")

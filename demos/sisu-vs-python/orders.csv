@@ -1,0 +1,7 @@
+id,customer,status,quantity,price_cents
+1,aino,paid,2,500
+2,roni,shipped,1,1200
+3,mika,paid,3,250
+4,aino,refunded,1,500
+5,liisa,paid,two,800
+6,roni,paid,4,199

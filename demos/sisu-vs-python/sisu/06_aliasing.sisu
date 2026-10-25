@@ -1,0 +1,8 @@
+# Assigning a list moves it: there are never two names for one mutable
+# list, so changing the report cannot change today's orders behind them.
+
+def main():
+    let todays_orders = [1200, 500, 800]
+    var report = todays_orders  # a move, not a second name
+    report.push(2500)  # a totals row
+    print("orders today: {len(todays_orders)}")

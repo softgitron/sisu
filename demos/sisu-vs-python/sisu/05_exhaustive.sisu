@@ -1,0 +1,18 @@
+# A status gains a new variant, `Refunded`. Every `match` over it that
+# does not handle the new variant stops compiling, and says which.
+
+enum Status:
+    Paid
+    Shipped
+    Refunded
+
+def label(s: Status) -> str:
+    match s:
+        case Paid:
+            return "Paid, packing it"
+        case Shipped:
+            return "On its way"
+
+def main():
+    for s in [Status.Paid, Status.Shipped, Status.Refunded]:
+        print(label(s))

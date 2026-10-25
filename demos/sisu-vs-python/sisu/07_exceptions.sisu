@@ -1,0 +1,18 @@
+# The signature says the parse can fail (`int ! ParseError`), so the
+# caller cannot use the result as a number without deciding what a bad
+# line means, before any card is charged.
+
+error ParseError:
+    NotANumber(text: String)
+
+def parse_quantity(text: str) -> int ! ParseError:
+    let Some(n) = text.parse_int() else:
+        return Err(NotANumber(text=String.new(text)))
+    return Ok(n)
+
+def main():
+    var items = 0
+    for line in ["2", "1", "two", "3"]:
+        let n = parse_quantity(line)
+        items += n
+    print("charging the card for {items} items")

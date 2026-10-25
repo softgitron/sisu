@@ -1,0 +1,8 @@
+# "Use the customer's discount, or 10% if they have none." Sisu has no
+# truthiness, so 0 cannot be mistaken for "none".
+
+def main():
+    let customers = [("aino", 15), ("mika", 0)]
+    for name, discount in customers:
+        let percent = if discount: discount else: 10
+        print("{name} gets {percent} % off")

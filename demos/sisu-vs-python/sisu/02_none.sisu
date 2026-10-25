@@ -1,0 +1,12 @@
+# The lookup says in its type that it can find nothing (`int?`), and the
+# caller cannot use the result as if it had found something.
+
+def find_discount(customers: dict[str, int], name: str) -> ref int? from customers:
+    return customers.get(name)
+
+def main():
+    let customers = {"aino": 10, "roni": 5}
+    for name in ["aino", "roni", "mika"]:
+        let discount = find_discount(customers, name)
+        let price = 1000 - 1000 * discount // 100  # forgot the None case
+        print("{name} pays {price} cents")

@@ -1,0 +1,9 @@
+# A price read from a file is text until it is parsed. Passing the text
+# where a number belongs does not compile.
+
+def line_total(quantity: int, price: int) -> int:
+    return quantity * price
+
+def main():
+    print("2 x 250 = {line_total(2, 250)}")
+    print("2 x '250' = {line_total(2, "250")}")

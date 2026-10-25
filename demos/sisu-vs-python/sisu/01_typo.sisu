@@ -1,0 +1,19 @@
+# The same typo, in the branch that rarely runs. Sisu checks every branch
+# before the program runs, so it is found today, not at the first refund.
+
+struct Order:
+    quantity: int
+    price_cents: int
+    refunded: bool = False
+
+def line_total(o: Order) -> int:
+    if o.refunded:
+        return -o.quantitiy * o.price_cents  # typo
+    return o.quantity * o.price_cents
+
+def main():
+    let orders = [Order(quantity=2, price_cents=500), Order(quantity=1, price_cents=1200)]
+    var total = 0
+    for o in orders:
+        total += line_total(o)
+    print("today's total: {total}")

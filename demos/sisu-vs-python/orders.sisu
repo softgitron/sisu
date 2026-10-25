@@ -1,0 +1,163 @@
+##! The whole job done right: every mistake of `python/` and `sisu/`
+##! handled, and the compiler checked that each one is.
+##!
+##! Reads `orders.csv`, applies each customer's discount, and prints the
+##! day's report: the lines it could not read are reported, not fatal.
+
+error OrderError:
+    BadLine(line: int, reason: String)
+    UnknownCustomer(name: String)
+
+## An order's status. Adding a variant makes every `match` below that
+## does not handle it a compile error (05).
+enum Status:
+    Paid
+    Shipped
+    Refunded
+
+struct Order:
+    id: int
+    customer: String
+    status: Status
+    quantity: int
+    price_cents: int
+
+struct Customer:
+    name: String
+    ## `None`: no discount agreed, so the default applies. `Some(0)`: an
+    ## agreed discount of zero (03).
+    discount: int?
+
+pure def parse_status(text: str) -> Status?:
+    match text:
+        case "paid":
+            return Some(Status.Paid)
+        case "shipped":
+            return Some(Status.Shipped)
+        case "refunded":
+            return Some(Status.Refunded)
+        case _:
+            return None
+
+## A line of the file. Text becomes a number only by parsing, and the
+## signature says that parsing can fail (07, 08).
+def parse_order(number: int, line: str) -> Order ! OrderError:
+    let fields = line.split(",").collect()
+    if len(fields) != 5:
+        return Err(BadLine(line=number, reason=String.new("expected 5 fields")))
+    let Some(id) = fields[0].parse_int() else:
+        return Err(BadLine(line=number, reason=String.new("bad id `{fields[0]}`")))
+    let Some(status) = parse_status(fields[2]) else:
+        return Err(BadLine(line=number, reason=String.new("unknown status `{fields[2]}`")))
+    let Some(quantity) = fields[3].parse_int() else:
+        return Err(BadLine(line=number, reason=String.new("bad quantity `{fields[3]}`")))
+    let Some(price) = fields[4].parse_int() else:
+        return Err(BadLine(line=number, reason=String.new("bad price `{fields[4]}`")))
+    return Ok(
+        Order(
+            id=id,
+            customer=String.new(fields[1]),
+            status=status,
+            quantity=quantity,
+            price_cents=price,
+        )
+    )
+
+## The lookup's type says it can find nothing (02).
+pure def find_customer(customers: list[Customer], name: str) -> ref Customer? from customers:
+    for c in customers:
+        if c.name == name:
+            return Some(c)
+    return None
+
+pure def label(s: Status) -> str:
+    match s:
+        case Paid:
+            return "paid, packing it"
+        case Shipped:
+            return "on its way"
+        case Refunded:
+            return "refunded"
+
+## What the order adds to the day, after the discount, in whole cents:
+## integer division is `//`, written on purpose (04).
+pure def charge(o: Order, c: Customer) -> int:
+    let percent = c.discount ?? 10
+    let gross = o.quantity * o.price_cents
+    let net = gross - gross * percent // 100
+    match o.status:
+        case Refunded:
+            return -net
+        case Paid | Shipped:
+            return net
+
+## Money as text. It takes no capability, so it can read no file and
+## send nothing anywhere (09).
+pure def money(cents: int) -> String:
+    let sign = if cents < 0: "-" else: ""
+    let a = if cents < 0: -cents else: cents
+    return String.new("{sign}{a // 100}.{a % 100:02} EUR")
+
+def main(sys: System) -> ! IoError:
+    let fs = sys.fs.read_only()  # this program never writes
+    let text = fs.read_to_string("orders.csv")?
+    let customers = [
+        Customer(name=String.new("aino"), discount=Some(15)),
+        Customer(name=String.new("roni"), discount=None),
+        Customer(name=String.new("mika"), discount=Some(0)),
+    ]
+    var orders: list[Order] = []
+    var problems: list[OrderError] = []
+    for i, line in enumerate(text.lines()):
+        if i == 0 or line.is_empty():
+            continue
+        match parse_order(i + 1, line):
+            case Ok(o):
+                orders.push(o)
+            case Err(e):
+                problems.push(e)
+    var total = 0
+    for o in orders:
+        match find_customer(customers, o.customer):
+            case Some(c):
+                let cents = charge(o, c)
+                total += cents
+                print("order {o.id:>2}  {o.customer:<6} {label(o.status):<17} {money(cents):>12}")
+            case None:
+                problems.push(UnknownCustomer(name=o.customer.copy()))
+    print("total{money(total):>42}")
+    # The report is a new list; the orders are not changed by it (06).
+    let report_rows = len(orders) + 1
+    let noun = if len(problems) == 1: "problem" else: "problems"
+    print("{len(orders)} orders, {report_rows} report rows, {len(problems)} {noun}:")
+    for p in problems:
+        match p:
+            case BadLine(line, reason):
+                print("  line {line}: {reason}")
+            case UnknownCustomer(name):
+                print("  unknown customer `{name}`")
+    return Ok(())
+
+test "a discount of zero is not the default":
+    let o = Order(
+        id=1, customer=String.new("mika"), status=Status.Paid, quantity=1, price_cents=1000
+    )
+    assert charge(o, Customer(name=String.new("mika"), discount=Some(0))) == 1000
+    assert charge(o, Customer(name=String.new("roni"), discount=None)) == 900
+
+test "a refund is negative":
+    let o = Order(
+        id=2, customer=String.new("aino"), status=Status.Refunded, quantity=1, price_cents=500
+    )
+    assert charge(o, Customer(name=String.new("aino"), discount=Some(15))) == -425
+
+test "a bad quantity is an error, not a crash":
+    match parse_order(7, "7,aino,paid,two,800"):
+        case Err(BadLine(line, reason)):
+            assert line == 7 and reason == "bad quantity `two`"
+        case _:
+            assert False
+
+test "money keeps every cent":
+    assert money(12345) == "123.45 EUR"
+    assert money(-5) == "-0.05 EUR"
