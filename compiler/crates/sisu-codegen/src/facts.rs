@@ -959,6 +959,31 @@ impl Facts {
         if st.has(&Fact::Below(i, k.clone())) {
             return true;
         }
+        // Below another list's length, which a test found equal to this
+        // one's (`requires len(xs) == len(ys)`).
+        let lens_of = |key: &Key| -> Vec<u32> {
+            st.facts
+                .iter()
+                .filter_map(|f| match f {
+                    Fact::Len(e, g) if g == key => Some(*e),
+                    _ => None,
+                })
+                .collect()
+        };
+        let mine = lens_of(&k);
+        let equal = |a: u32, b: u32| {
+            st.has(&Fact::Holds(Atom::Local(a), Rel::Eq, Atom::Local(b)))
+                || st.has(&Fact::Holds(Atom::Local(b), Rel::Eq, Atom::Local(a)))
+        };
+        let below_equal = st.facts.iter().any(|f| match f {
+            Fact::Below(x, other) if *x == i && *other != k => {
+                lens_of(other).iter().any(|a| mine.iter().any(|b| equal(*a, *b)))
+            }
+            _ => false,
+        });
+        if below_equal {
+            return true;
+        }
         let len = |e: &Atom| matches!(e, Atom::Local(e) if st.has(&Fact::Len(*e, k.clone())));
         st.facts.iter().any(|f| match f {
             Fact::Holds(Atom::Local(a), Rel::Lt, e) if *a == i => len(e),

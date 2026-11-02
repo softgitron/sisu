@@ -27,6 +27,15 @@ use sisu_sir::{
     Aggregate, BinOp, Callee, Const, Operand, Place, Proj, Rvalue, StatementKind, Terminator, Type, UnOp,
 };
 
+/// An argument of the runtime call a failed check makes: a value, or a
+/// constant made in the failure's block.
+#[derive(Clone, Copy)]
+enum Arg {
+    V(Value),
+    I32(u32),
+    I64(i64),
+}
+
 /// Values larger than this many words are copied through memory rather
 /// than as words.
 const MAX_WORDS: u32 = 16;
@@ -115,6 +124,9 @@ struct Cx<'a, 'p> {
     /// translated.
     facts: Option<crate::facts::Facts>,
     known: Option<crate::facts::State>,
+    /// The failed checks of the SIR block being translated, written after
+    /// its terminator.
+    deferred: Vec<(Block, &'static str, [Arg; 3])>,
     /// The blocks every path from which ends in a panic or in unwinding:
     /// cold, placed after the rest of the function.
     cold: Vec<bool>,
@@ -286,6 +298,7 @@ impl<'a, 'p> Cx<'a, 'p> {
             frames,
             facts,
             known: None,
+            deferred: Vec::new(),
             cold: cold_blocks(f),
         };
         cx.prologue()?;
@@ -731,12 +744,7 @@ impl<'a, 'p> Cx<'a, 'p> {
     /// takes the failure path. The failure is a cold block, placed after
     /// the rest of the function, so the common path is one branch not
     /// taken; the arguments are made there (decision 270).
-    fn guard_if(
-        &mut self,
-        bad: Value,
-        raise: &'static str,
-        args: impl FnOnce(&mut Self) -> Vec<Value>,
-    ) -> Result<(), Error> {
+    fn guard_if(&mut self, bad: Value, raise: &'static str, args: [Arg; 3]) -> Result<(), Error> {
         let cont = self.b.create_block();
         let failed = self.b.create_block();
         if std::env::var_os("SISU_OK_FORM").is_some() {
@@ -745,15 +753,34 @@ impl<'a, 'p> Cx<'a, 'p> {
         } else {
             self.b.ins().brif(bad, failed, &[], cont, &[]);
         }
+        if std::env::var_os("SISU_DEFER").is_some() {
+            self.deferred.push((failed, raise, args));
+            self.b.switch_to_block(cont);
+            return Ok(());
+        }
         if std::env::var_os("SISU_NO_COLD").is_none() {
             self.b.set_cold_block(failed);
         }
         self.b.switch_to_block(failed);
-        let args = args(self);
+        self.raise(raise, args)?;
+        self.b.switch_to_block(cont);
+        Ok(())
+    }
+
+    /// A failed check's block: the runtime raises the panic, then the
+    /// failure path of the SIR block.
+    fn raise(&mut self, raise: &'static str, args: [Arg; 3]) -> Result<(), Error> {
+        let args: Vec<Value> = args
+            .iter()
+            .map(|a| match a {
+                Arg::V(v) => *v,
+                Arg::I32(n) => self.i32const(*n),
+                Arg::I64(n) => self.iconst(*n),
+            })
+            .collect();
         self.rt(raise, &args)?;
         let fail = self.fail_block();
         self.b.ins().jump(fail, &[]);
-        self.b.switch_to_block(cont);
         Ok(())
     }
 
@@ -820,6 +847,10 @@ impl<'a, 'p> Cx<'a, 'p> {
                 self.set_loc(loc);
             }
             self.terminator(&block.term)?;
+            for (failed, raise, args) in std::mem::take(&mut self.deferred) {
+                self.b.switch_to_block(failed);
+                self.raise(raise, args)?;
+            }
         }
         Ok(())
     }
@@ -1125,9 +1156,7 @@ impl<'a, 'p> Cx<'a, 'p> {
                         let len = self.load(addr, 8);
                         let probe = if from_end { self.b.ins().iadd_imm(idx, -1) } else { idx };
                         let bad = self.b.ins().icmp(IntCC::UnsignedGreaterThanOrEqual, probe, len);
-                        self.guard_if(bad, sym::PANIC_INDEX, |cx| {
-                            vec![idx, len, cx.iconst(i64::from(from_end))]
-                        })?;
+                        self.guard_if(bad, sym::PANIC_INDEX, [Arg::V(idx), Arg::V(len), Arg::I64(i64::from(from_end))])?;
                     }
                     let off = self.b.ins().imul_imm(at, i64::from(size));
                     addr = self.b.ins().iadd(data, off);
@@ -1444,9 +1473,7 @@ impl<'a, 'p> Cx<'a, 'p> {
         let r = match (op, k) {
             (UnOp::Neg, Some(Scalar::Int)) => {
                 let min = self.b.ins().icmp_imm(IntCC::Equal, x, i64::MIN);
-                self.guard_if(min, sym::PANIC_OVERFLOW, |cx| {
-                    vec![cx.i32const(IntOp::Neg as u32), x, cx.iconst(0)]
-                })?;
+                self.guard_if(min, sym::PANIC_OVERFLOW, [Arg::I32(IntOp::Neg as u32), Arg::V(x), Arg::I64(0)])?;
                 self.b.ins().ineg(x)
             }
             (UnOp::Neg, Some(Scalar::Float)) => {
@@ -1802,7 +1829,7 @@ impl<'a, 'p> Cx<'a, 'p> {
                 IntOp::Sub => self.b.ins().ssub_overflow(x, y),
                 _ => self.b.ins().smul_overflow(x, y),
             };
-            self.guard_if(of, sym::PANIC_OVERFLOW, |cx| vec![cx.i32const(iop as u32), x, y])?;
+            self.guard_if(of, sym::PANIC_OVERFLOW, [Arg::I32(iop as u32), Arg::V(x), Arg::V(y)])?;
             return Ok(r);
         }
         let runtime = match op {
