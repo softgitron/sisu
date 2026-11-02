@@ -52,7 +52,7 @@ last rows when reading code aloud in prose.
 | worksheet, script, REPL session | notebook | Sisu has no notebooks |
 | runtime profile (`full`, `single`, `freestanding`, `sim`), build profile (`debug`, `release`), teaching profile | mode | three different things |
 | standard output, standard error | console | |
-| `T ! E` is read "T or error E"; `x?` "x, or return its error"; `a ?? b` "a, or else b"; `x?.f` "f of x, if x is present"; `xs[^1]` "the last element of xs" | | spoken forms |
+| `T ! E` is read "T or error E"; `x?` "x, or return early"; `a ?? b` "a, or else b"; `x?.f` "f of x, if x is present"; `xs[^1]` "the last element of xs" | | spoken forms |
 
 ## Code
 
@@ -130,7 +130,8 @@ last rows when reading code aloud in prose.
   least two cases with different values, and keep the same tests in the
   solution.
 - Do not put the answer's code in a hint. The last hint names the idea.
-- Do not carry meaning by colour, bold, position or emoji, and do not
-  show images of code or of terminal output.
+- Do not carry meaning by colour, bold, position or emoji alone (a bold
+  label such as **Predict.** is a word first), and do not show images of
+  code or of terminal output.
 - Do not paste the proposal's rationale into the tutorial; link to the
   explanation that discusses it.

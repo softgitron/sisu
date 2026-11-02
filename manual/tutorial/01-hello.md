@@ -82,7 +82,7 @@ def main():
     prnt("Hei, maailma!")
 ```
 
-Run it, and then ask about the code the message carries:
+Run it, and then look up the diagnostic's code with `sisu explain`:
 
 <!-- output: examples/01-hello/misspelled.console -->
 ```console
@@ -116,7 +116,7 @@ A diagnostic reads from the top down.
 
 `sisu explain E0200` prints the entry for the code in Sisu's message
 catalog: the code, the message's identifier, `resolve.undefined-name`,
-and the message with a blank where the name goes. Every message the
+and the message, with `{name}` standing for the name. Every message the
 compiler writes comes from that catalog under an identifier that does not
 change, and this manual refers to messages by their codes.
 
@@ -129,7 +129,9 @@ change, and this manual refers to messages by their codes.
 The fastest way to learn what the messages mean is to cause them. Make
 each of the following changes to `hello.sisu`, decide what you expect
 Sisu to say, and then run the program. Open the box that follows each
-change to compare. Undo each change before you make the next one.
+change to compare. Each box shows the change saved as a file of its own,
+so the file's name in it differs from yours; the line and the column are
+the same. Undo each change before you make the next one.
 
 **1.** Delete the colon at the end of `def main():`.
 
@@ -272,8 +274,8 @@ error[E0200]: cannot find `greeting` in this scope
 error[D0006]: the program was not run: errors found (3)
 ```
 
-Without `let` nothing creates `greeting`, so both lines name something
-that does not exist.
+Without `let` nothing creates `greeting`, so every line that names it
+names something that does not exist.
 
 </details>
 
@@ -315,7 +317,7 @@ Braces are written { and }.
 
 Putting values into a string this way is called interpolation. A string
 without braces, such as `"Aino"`, is a `str`. A string with braces builds
-new text each time it runs, and that text is a `String`. Chapter 6
+new text each time its line runs, and that text is a `String`. Chapter 6
 explains why Sisu keeps the two apart; for now it is enough to know that
 both print the same way.
 
@@ -531,8 +533,9 @@ The answer is one string after `return`, with two pairs of braces in it.
 <summary>Hint 2</summary>
 
 Look at what the first test expects, `"Hei! I am Aino from Oulu."`, and
-find the two parts that would differ for another visitor. Those are the
-parts to write as `{name}` and `{town}`.
+find the two words that would differ for another visitor. Each of them
+is the value of one of the function's parameters, and a value goes into
+a string between braces.
 
 </details>
 

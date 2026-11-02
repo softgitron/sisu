@@ -1,0 +1,46 @@
+# The manual (manual/): every example and solution checked as a conformance
+# case, every page's blocks and sessions checked against the files they
+# name (manual/README.md, "How the manual is checked"). On pushes only,
+# like the rest of CI, never on a schedule.
+name: manual
+
+on:
+  push:
+
+jobs:
+  manual:
+    name: manual pages, examples, exercises and solutions
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: compiler
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          rustup toolchain install 1.97.0 --profile minimal
+          rustup override set 1.97.0
+          rustc --version
+          cc --version
+      - name: Cache the cargo registry and the build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            compiler/target
+          key: manual-${{ runner.os }}-rust-1.97.0-${{ hashFiles('compiler/Cargo.lock') }}
+          restore-keys: |
+            manual-${{ runner.os }}-rust-1.97.0-
+      - name: Build
+        run: cargo build -p sisu-driver -p sisu-conformance
+      - name: Stage 1, the front end of sisu (built natively on first use)
+        run: ./target/debug/sisu tokens std/prelude.sisu > /dev/null
+      - name: Examples, as conformance cases
+        run: ./target/debug/sisu-conformance --sisu target/debug/sisu ../manual/examples
+      - name: Solutions, as conformance cases
+        run: ./target/debug/sisu-conformance --sisu target/debug/sisu ../manual/solutions
+      - name: Pages, sessions, exercises and sources
+        run: python3 ../manual/tools/check.py --sisu target/debug/sisu

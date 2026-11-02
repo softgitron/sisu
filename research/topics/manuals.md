@@ -28,7 +28,7 @@ experts who want a reference.
 | SICP (1985, 1996) | Exercises woven into the text, a REPL throughout | Prediction from the first exercise (what does the interpreter print?) | Demanding for newcomers; Scheme-specific | [3] |
 | Python: Tutorial, Library Reference, Language Reference | Three documents with stated audiences; interactive sessions; `doctest` | The tutorial "does not attempt to be comprehensive"; the reference is browsed or searched, not read | Three places to keep in step | [4] |
 | Go: Tour, Effective Go, the Spec, example tests | Runnable pages with exercises checked by harness functions (`wc.Test`); an idiom guide; a versioned reference manual; `Example` functions with `// Output:` | Exercises check themselves; examples in the API docs are tests | Effective Go "is not actively updated" and says so | [5] |
-| Rust: the Book, Rust by Example, Rustlings, the Reference | Concept and project chapters, marked failing listings, regenerated outputs; runnable examples; local exercises with watch mode, hints and solutions; a reference beside a separate specification | Each audience has its own book; the Book's code blocks run in CI | Only 2% of instrumented readers reach chapter 19; error outputs are regenerated per toolchain bump; two normative-looking documents | [6][7][8][9][10][11] |
+| Rust: the Book, Rust by Example, Rustlings, the Reference | Concept and project chapters, marked failing listings, regenerated outputs; runnable examples; local exercises with watch mode, hints and solutions; a reference beside a separate specification | Each audience has its own book; the Book's code blocks run in CI | Only 2% of instrumented readers reach chapter 19; error outputs are regenerated per toolchain bump; a reference and a specification to keep in step | [6][7][8][9][10][11] |
 | Swift: A Swift Tour, Language Guide, Language Reference | Tour, then a chapter per feature, then a reference with the grammar | Progressive: the tour gives "enough information to start writing code" | | [12] |
 | Kotlin: the tour, Koans | Browser tour; koans as failing unit tests to make pass | No installation; tests judge the answer | Code is compiled on a server | [13] |
 | Elixir guides | Sequential guides around `iex`; doctests in `@doc` | The shell is the first tool | Doctests "do not run in any kind of sandbox" | [14] |
@@ -38,7 +38,7 @@ experts who want a reference.
 | Racket Guide and Reference | A friendlier guide beside a reference that "defines"; Scribble evaluates examples at build time | Precision and approachability kept apart | Two documents to keep in step | [18] |
 | *Real World OCaml* (2nd ed., 2022) | Every OCaml and shell block validated by mdx; examples split into `correct/` and `erroneous/` | A promote workflow for changed output | Tooling of its own | [19] |
 | Elm guide | Short chapters, an online editor, the compiler's messages as teachers | Small and friendly | Web-specific | [20] |
-| Exercism | Concept exercises in a syllabus tree; practice exercises; mentoring | One concept per exercise, with hints, an exemplar and tests | Built for fluency, "not about degree" | [21] |
+| Exercism | Concept exercises in a syllabus tree; practice exercises; mentoring | One concept per exercise, with hints, an exemplar and tests | Aims at fluency in a language, not at proficiency | [21] |
 | Advent of Code | A daily two-part puzzle with an answer checker | A difficulty curve and a reason to come back | Checks the answer, not the code | [22] |
 
 ## What the evidence says
@@ -85,8 +85,9 @@ experts who want a reference.
    program construction and had lower attrition (two groups of 28 and 29
    high-school students, ten lessons) [31]. Labelling the subgoals of a
    worked example improves performance and transfer (Margulieux, Guzdial
-   and Catrambone; [end-user-and-live.md](../ideation/end-user-and-live.md),
-   source 16). A typed hole is a completion problem by construction: the
+   and Catrambone) [32], which the ideation round already proposed for
+   `sisu doc --worked` ([end-user-and-live.md](../ideation/end-user-and-live.md)).
+   A typed hole is a completion problem by construction: the
    code around it is the worked part, and it type-checks before the
    learner writes anything.
 4. **Reading and tracing come before writing, and prediction is the
@@ -178,14 +179,14 @@ experts who want a reference.
     incompleteness, and incorrectness of content"; the six problems
     that respondents called blockers, which made them pick another API,
     were all problems of content, unexplained examples and obsolete
-    documentation among them [44]. Adding
-    three usage examples to an API's documentation reduced errors and
-    raised success and satisfaction in a controlled study of 26
-    engineers [45]. Practice says the same: show the expected output and
-    "always compile and test your code" [27]; K&R's examples "are
-    complete, real programs, rather than isolated fragments" [2]; Write
-    the Docs asks for exemplary content and treats "incorrect
-    documentation [as] worse than missing documentation" [25].
+    documentation among them [44]. Adding three usage examples to an
+    API's documentation reduced errors and raised success and
+    satisfaction in a controlled study of 26 engineers [45]. Practice
+    says the same: show the expected output and "always compile and test
+    your code" [27]; K&R's examples "are complete, real programs, rather
+    than isolated fragments" [2]; Write the Docs asks for exemplary
+    content and says to "consider incorrect documentation to be worse
+    than missing documentation" [25].
 11. **Tested documentation is established, and its weak spots are error
     output, side effects and prose that nothing runs.** K&R's examples
     were "tested directly from the text" in 1978 [2]. Python's `doctest`
@@ -285,8 +286,9 @@ model for the rest. What Sisu should take:
   Part I of the tutorial ends with a working command-line tool, and
   ownership has a part of its own, the part to test hardest with
   readers. This follows the learnability study's first-week path
-  ([learnability.md](learnability.md)) and the order of the teaching
-  ladder (D-073), whose levels the Q-41 trial settles.
+  ([learnability.md](learnability.md)) and is close to the order
+  proposed for the teaching ladder (D-073), whose levels the Q-41 trial
+  settles; how the two relate is Q-64.
 - **One concept per section, each with a runnable, checked example and a
   prediction prompt** (findings 3, 4, 10). Errors are shown as Sisu
   prints them and named by code (E0200) and catalog identifier

@@ -742,7 +742,7 @@ files are checked by the same CI.
 
 ## How the manual is checked
 
-Every push checks the whole manual. Two commands do it, and CI runs both
+Every push checks the whole manual. Two tools do it, and CI runs both
 in a job of its own (to add to [ci.yml](../.github/workflows/ci.yml)):
 
 ```yaml
