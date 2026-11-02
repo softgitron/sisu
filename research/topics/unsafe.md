@@ -525,7 +525,7 @@ The operations the task list names, against that runtime:
 | Allocation and release | every heap type | a global allocator in `std.mem`; allocation is safe, release is not |
 | Pointer arithmetic | buffers, cells | `p.offset(n)`, unsafe, within one allocation; typed header structs instead of negative offsets |
 | Uninitialised memory | spare capacity, ring buffers | only behind raw pointers; reading it is undefined, and the interpreter checks |
-| Stack switching | tasks, generators, the system stack | one machine intrinsic that saves and loads a `Context` (Cranelift's `stack_switch` on x86-64 Linux [59], the backend's own sequence elsewhere) |
+| Stack switching | tasks, generators, the system stack | one machine intrinsic that saves and loads a `Context` (Cranelift's `stack_switch` on x86-64 Linux [59] while Cranelift is the backend; the Sisu backend's own instructions, or inline assembly in the LLVM IR the release backend writes, after D-085) |
 | Atomics | `Shared` counts, the scheduler's flags | `Atomic[T]` fields in typed headers, already safe; an unsafe constructor over raw memory |
 | Volatile and memory-mapped I/O | `freestanding` drivers only | unsafe volatile reads and writes, and a pointer from an address |
 | Foreign calls | every host effect | `extern "C"` declarations, unsafe to call, `@blocking` when they can block |
@@ -537,7 +537,10 @@ The operations the task list names, against that runtime:
 
 The backend needs nothing beyond ordinary code. A code generator, a
 register allocator, an object and DWARF writer and a linker driver
-(through `Proc`) are byte-buffer programs. The interpreter, rewritten in
+(through `Proc`) are byte-buffer programs; the backend research
+([backends.md](backends.md), D-085 and D-086) plans a debug backend
+written in Sisu and LLVM, run as a separate program, for release builds,
+neither of which needs `unsafe` in the compiler. The interpreter, rewritten in
 Sisu, holds values as Sisu enums, and even a checked memory model for
 unsafe code (below) is safe code over byte arrays. The one exception
 would be native hot replacement (D-053) in an in-process JIT, which maps
@@ -769,7 +772,7 @@ for that reason.
   ecosystem fail to materialise [52]; an `Unsafe` capability (Austral).
 
 The design that follows is [proposal/22](../../proposal/22-unsafe.md),
-decisions D-080 to D-086.
+decisions D-080 to D-084, D-087 and D-088.
 
 ## Open questions
 
@@ -780,9 +783,9 @@ decisions D-080 to D-086.
 - Q-56: which aliasing rules raw pointers follow.
 - Q-57: whether the runtime's machine layer becomes public for
   `freestanding` programs.
-- Q-58: whether safe reinterpretation of plain data ships in version 1,
+- Q-71: whether safe reinterpretation of plain data ships in version 1,
   and as a derive or an inferred trait.
-- Q-59: whether safety obligations are checked names, and whether
+- Q-72: whether safety obligations are checked names, and whether
   fields can carry them.
 
 ## Sources

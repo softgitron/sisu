@@ -1160,6 +1160,20 @@ a year later (D-078).
 | 2 | The native backend in Rust, the non-LLVM debug backend of [10-tooling.md](10-tooling.md) first, LLVM for release later, compiling SIR; the runtime (tasks on the stacks Phase 1 chose, capabilities, allocators) in Rust, later partly in Sisu under `unsafe` | the host | the runtime engineer and the lead, in parallel with stage 1, about nine to twelve months | the stage-1 front end compiled natively meets the compile-speed targets of [10-tooling.md](10-tooling.md) |
 | 3 | The self-hosted compiler: stage 1 compiled by stage 2, then by itself | itself | the whole team, about three months | the fixed point: the compiler compiled by itself produces byte-identical output to the compiler compiled by stage 2, on itself and on the corpus; the Rust front end is retired |
 
+**Stage 2 in Sisu (addendum, November 2026; D-085 and D-086, leaning).**
+The Rust backend over Cranelift and the Rust runtime are stage 2's bootstrap,
+and they are replaced rather than kept. In order: a lowering in Sisu from SIR
+to a backend-neutral low IR, checked through the Rust backend; a debug backend
+written in Sisu that compiles that IR straight to x86-64 machine code (AArch64
+next, then Windows), with DWARF and the system linker; the runtime in Sisu
+under `unsafe`; and a release backend that writes LLVM bitcode for an LLVM the
+toolchain runs as a separate program, which also builds the targets the Sisu
+backend does not cover yet. Each part replaces its Rust counterpart only when
+the native conformance runs pass with it and the fixed point holds with it
+compiled by itself; the Rust crates then retire, and the Rust front end with
+them (D-078). What seeds the toolchain once no Rust remains is Q-58
+([`backends.md`](../research/topics/backends.md)).
+
 **What this plan must preserve for the bootstrap.** Each item is already
 in a phase; this list makes the reason explicit so that nobody trades it
 away under schedule pressure.

@@ -10,10 +10,11 @@ calls the operating system. This chapter is the sublanguage that lets
 Sisu do those things itself, kept as small as the runtime allows. The
 survey behind it is
 [`../research/topics/unsafe.md`](../research/topics/unsafe.md); the
-decisions are D-080 to D-086 (leaning, coordinator, November 2026) and the
-questions it leaves are Q-54 to Q-59. It replaces the short "Unsafe"
-section of [04](04-memory-and-ownership.md) and refines the enforcement
-rules of [06](06-concurrency-and-capabilities.md),
+decisions are D-080 to D-084, D-087 and D-088 (leaning, coordinator,
+November 2026), and the questions it leaves are Q-54 to Q-57, Q-71 and
+Q-72. It replaces the short "Unsafe" section of
+[04](04-memory-and-ownership.md) and refines the enforcement rules of
+[06](06-concurrency-and-capabilities.md),
 [09](09-modules-packages-and-build.md) and
 [12](12-interop-and-targets.md).
 
@@ -38,8 +39,8 @@ evidence on where to put it is consistent
   `MutexGuard` bug).
 - **Unsafe is small per package and transitive, and mostly foreign
   interop.** About one Rust crate in five uses `unsafe` and one in three
-  calls one that does; in Go one popular project in four uses `unsafe`
-  and nine in ten depend on one that does.
+  calls one that does; in Go one popular project in four uses `unsafe`,
+  and nine in ten have it somewhere in their dependency tree.
 - **An interpreter can check it.** Miri interprets Rust's MIR, tracks
   provenance and initialisation, runs 70% of the ecosystem's tests and has
   found bugs in the standard library. Sisu already interprets SIR, its
@@ -78,8 +79,8 @@ how a runtime is built on it.
    pointer, with its layout), strict provenance (no integer-to-pointer
    cast), `Escapable` exactly when `T` is, never `Send` or `Sync`. A typed
    raw buffer, `RawBuf[T]`, a layout type, the `Allocator` trait and a
-   plain-data marker with a safe bit cast are the safe layer above them
-   (D-081).
+   plain-data marker with a safe bit cast are the layer above them that
+   most unsafe code uses instead (D-081).
 5. **The block keeps a contract**, written out below: valid values,
    valid references for their whole origin, every value dropped once, no
    leaked views, scopes or frames, `Send` and `Sync` respected, no
@@ -93,7 +94,7 @@ how a runtime is built on it.
 7. **The audit lists every block with its reason.** Every block, `unsafe
    def`, `unsafe impl` and foreign declaration carries a safety comment;
    the comment names the obligations it discharges; `sisu audit --unsafe`
-   lists them by package and module; five lints keep the declarations
+   lists them by package and module; six lints keep the declarations
    honest (D-083).
 8. **Unsafe is not a capability; authority stays with capabilities.** A
    trusted package that reaches the world through foreign calls must make
@@ -104,11 +105,11 @@ how a runtime is built on it.
    is a checked model (allocations, bounds, alignment, initialisation, the
    validity of the bits read, the loans of the references made from raw
    pointers), so `sisu test` checks unsafe code on every run; comptime uses
-   the same model; purity is decided by operation, not by keyword (D-085).
+   the same model; purity is decided by operation, not by keyword (D-087).
 10. **The runtime is written in Sisu on this layer**, with three machine
     intrinsics instead of inline assembly, no mutable globals, and the
     Rust runtime retired only when the Sisu runtime reproduces it on every
-    native case (D-086).
+    native case (D-088).
 
 ## Syntax
 
@@ -195,7 +196,7 @@ nobody dereferences cannot hurt, which is the rule Rust always had and C#
 | Moving it | `p.cast[U]()`, `p.with_addr(a)` (keeps the provenance of `p`), the implicit `ptr mut T` to `ptr[T]` | `p.offset(n)` (`in_bounds`: stays within the allocation or one past it), `p.cast_mut()` (`writable`: `p` came from a `ptr mut`, not from a shared borrow) |
 | Reading and writing | | `p.read() -> T` (`valid`, `aligned`; for a non-`Copy` `T` the value is moved out), `p.write(own v)` (`writable`, `aligned`; the old contents are not dropped), `p.drop_in_place()`, `p.copy_from(q, n)`, `p.read_volatile()`, `p.write_volatile(v)` |
 | References | | `p.as_ref() -> ref T`, `p.as_mut() -> ref mut T` (`valid`, `aligned`, `valid_for_origin`) |
-| Observing | `p.addr() -> int` (impure: an address-derived value, D-074), `p == q` | |
+| Observing | `p.addr() -> int` and `p == q`, both impure: they are address-derived values, which `pure` code may not observe (D-074) | |
 
 A reference made from a raw pointer is second-class like every other:
 the checker gives it the origin its use asks for, the enclosing frame
@@ -248,7 +249,7 @@ reads and writes a fixed one. Everything else is `mem.transmute[U](own x)`,
 unsafe, sizes checked at compile time, with the obligation `valid_bits`.
 This takes the commonest reason application code reaches for `unsafe`
 (bytes in, structs out) out of unsafe code, as Go's `unsafe.String` and
-Rust's zerocopy crates did; whether it ships in version 1 is Q-58.
+Rust's zerocopy crates did; whether it ships in version 1 is Q-71.
 
 ### Foreign calls
 
@@ -280,8 +281,10 @@ bodies that the backend lowers:
 
 - `rt.switch(save: ptr mut Context, load: ptr[Context])` saves the
   running stack's registers into `save` and continues from those in
-  `load`; Cranelift's `stack_switch` instruction implements it on x86-64
-  Linux, and the backend emits its own sequence elsewhere;
+  `load`; while the backend is Cranelift, its `stack_switch` instruction
+  lowers it on x86-64 Linux, the backend written in Sisu (D-085) emits the
+  instructions as it emits any function, and the release backend writes
+  them into the LLVM IR it produces (D-086);
 - `rt.stack_pointer() -> int`, for the decommit watermark of the stack
   pool;
 - `rt.thread_slot()`, a pointer to one word of thread-local storage, which
@@ -372,11 +375,12 @@ rules exactly raw pointers follow is Q-56.
   std's implementation, ordinary unsafe code over a typed header with an
   `Atomic` count, takes the matching path, as `sisu-rt` reads its
   `SHARED_ATOMIC` flag today.
-- **`pure`.** Purity is decided by operation, not by keyword (D-085).
-  Raw memory operations touch only memory reachable from the function's
-  arguments or allocated by it, which clause 1 and 2 require, and they are
-  pure; foreign calls, the machine intrinsics and address observation are
-  not. So a `pure` function can push to a `list` that std implements over a
+- **`pure`.** Purity is decided by operation, not by keyword (D-087).
+  Raw memory operations can touch only memory reachable from the
+  function's arguments or allocated by it, since the ways to make a pointer
+  out of nothing (`ptr.from_address`, `rt.thread_slot`) are impure, so they
+  are pure; foreign calls, the machine intrinsics and address observation
+  are not. So a `pure` function can push to a `list` that std implements over a
   `RawBuf`, and a `pure def` whose unsafe block makes an impure call (an
   allocator calling `malloc`, a cache behind `std.x.incr`) asserts
   observational purity, which `sisu audit` lists. That is the trusted
@@ -434,7 +438,7 @@ The root package consents in the `[trust]` list it already has:
 
 ```toml
 [trust]
-unsafe = ["roni/zlib", "fasthash"]   # each may contain the unsafe code its manifest declares
+unsafe = ["zlib", "fasthash"]        # each may contain the unsafe code its manifest declares
 ```
 
 - A package with unsafe code and no declaration does not compile; one
@@ -477,7 +481,7 @@ functions, each marked with the capability its callers hold or the
 
 ```text
 $ sisu audit --unsafe
-roni/zlib 1.3.0   unsafe = "extern"   trusted in sisu.toml:14
+zlib 1.3.0   unsafe = "extern"   trusted in sisu.toml:14
   zlib (src/lib.sisu)   header import zlib.h, 1 block, module hash 7f3e...
     src/lib.sisu:3    import c "zlib.h"   # safety: zlib 1.3.1 headers, linked as -lz
     src/lib.sisu:12   crc32               # safety: valid: ...; pure: ...
@@ -500,7 +504,7 @@ listed otherwise, as cargo-vet records audits as deltas.
 |---|---|---|
 | unused unsafe | a block with no unsafe operation; `sisu fix` removes it | warning |
 | undocumented | a block, `unsafe def`, `unsafe trait`, `unsafe impl` or `extern` block without its comment or `Safety:` list | warning; an error at `sisu publish` |
-| unnamed obligation | a block whose comment does not name an obligation of one of the unsafe defs it calls (Q-59) | warning |
+| unnamed obligation | a block whose comment does not name an obligation of one of the unsafe defs it calls (Q-72) | warning |
 | level | a declared level above what the package uses, or a declaration with no unsafe code | warning |
 | auto-trait bound | an `unsafe impl Send` or `Sync` on a generic type whose parameters lack the matching bound (Rudra's check) | warning |
 | ambient authority | a public safe function that reaches a foreign call without taking a capability type, outside `std.rt` | warning |
@@ -619,12 +623,16 @@ A binding with authority looks different, because of clause 5. Here is
 how `std.rt.os` gives `sys.clock` its time:
 
 ```sisu
+from std.ffi import c_int
+
+const CLOCK_REALTIME: c_int = 0
+
 @repr(c)
 struct Timespec:
     sec: i64
     nsec: i64
 
-# safety: signatures as POSIX declares them, for 64-bit targets.
+# safety: signatures as POSIX declares them, for 64-bit Linux.
 extern "C":
     def clock_gettime(clock: c_int, out: ptr mut Timespec) -> c_int
 
@@ -654,6 +662,8 @@ The bump `Region` of [04](04-memory-and-ownership.md), which makes
 per-request memory safe, is a page of unsafe code:
 
 ```sisu
+from std.mem import Allocator, Global, Layout, align_up
+
 const REGION_ALIGN: int = 64
 
 ## Memory handed out in order and released all at once (04, "Allocators").
@@ -680,7 +690,7 @@ unsafe impl Allocator for Region:
     def acquire(self, layout: Layout) -> ptr mut u8?:
         if layout.align > REGION_ALIGN:
             return None
-        let start = round_up(self.used.get(), layout.align)
+        let start = align_up(self.used.get(), layout.align)
         if start + layout.size > self.size:
             return None
         self.used.set(start + layout.size)
@@ -759,7 +769,7 @@ can interrupt them, as code on Go's system stack is non-preemptible.
   `p.with_addr(a)` keeps an existing pointer's provenance, so code stays
   correct on CHERI-like targets and analysable by the monitor.
 - **An unsafe context a body inherits**, an unsafe module, file, closure
-  or attribute, and unsafe fields (Q-59): the block is the only
+  or attribute, and unsafe fields (Q-72): the block is the only
   permission.
 - **Unsafe code from comptime**, and raw pointers in constants.
 - **Asserting `Escapable`, `Sized` or `Copy`.**
@@ -786,7 +796,7 @@ the runtime takes typed values instead, and that class disappears:
 
 | Today (`sisu-rt`) | In Sisu | Unsafe left (estimate) |
 |---|---|---|
-| `abi.rs` (the type table), `entry.rs` (31 C entry points), `value.rs` and `dict.rs` (structural drop, copy, equality, order, hash, `Display`, `Debug`), `intrinsics.rs`, `iter.rs`, `bytes.rs`, `sized.rs`, `wide.rs`, `views.rs` | gone: generic functions instantiated per type (drop glue is SIR already), comptime reflection for the structural impls, intrinsics as ordinary std functions, `Slice[T]` over `RawBuf` | none |
+| `abi.rs` (the type table), `entry.rs` and the other exported entry points (31 in all), `value.rs` and `dict.rs` (structural drop, copy, equality, order, hash, `Display`, `Debug`), `intrinsics.rs`, `iter.rs`, `bytes.rs`, `sized.rs`, `wide.rs`, `views.rs` | gone: generic functions instantiated per type (drop glue is SIR already), comptime reflection for the structural impls, intrinsics as ordinary std functions, `Slice[T]` over `RawBuf` | none |
 | `mem.rs` | `std.mem`: `Global` over the C allocator, later an allocator in Sisu over `mmap`; `RawBuf`; `Box` | about 8 |
 | `cells.rs`, `caps.rs` | `Shared` and `Weak` as typed cells with `Atomic` counts and the compiler's crossing flag; capability handles as counted cells; `Arena` over `list`, safe | about 6 |
 | `stack.rs` | `std.rt`'s pool over `mmap`, `madvise` and `sysconf` | about 4 |
@@ -802,18 +812,22 @@ is rewritten in Sisu, its checked memory model included. The one later
 exception would be an in-process JIT for native hot replacement (D-053),
 which runs in the interpreter today.
 
-The port follows the rule D-079 set for the front end (D-086). The Sisu
-runtime replaces `sisu-rt` piece by piece, in this order: `std.mem` and
-`RawBuf` with the buffers of `list` and `String`; `Box`, `Shared` and
-`Weak`; `std.rt.os` for the standard streams, files and the clock; the
-stack pool and `switch` (Cranelift's `stack_switch` on x86-64 Linux
-first); the scheduler and `std.task`; sockets and processes; the process
-entry. Each step must keep every native conformance case's output
+The port is step 3 of the backend's order of work (D-085) and follows the
+rule D-079 set for the front end (D-088). The Sisu runtime replaces
+`sisu-rt` piece by piece, in this order: `std.mem` and `RawBuf` with the
+buffers of `list` and `String`; `Box`, `Shared` and `Weak`; `std.rt.os`
+for the standard streams, files and the clock; the stack pool and
+`switch`, on x86-64 Linux first; the scheduler and `std.task`; sockets and
+processes; the process entry. Each step must keep every native conformance case's output
 identical, zero live allocations at exit (`SISU_RT_ALLOCS`), the same
 schedule under every seed tried, and the Phase 1 harness's memory and
 switch-cost results on the same machines. `sisu-rt` is retired when the
-last piece passes; the toolchain is Sisu-only when the backend written in
-Sisu reaches D-078's fixed point on itself.
+last piece passes, and Rust leaves the toolchain at the fixed point of
+the whole toolchain that D-085 names. Generating copy, drop, equality and
+hashing per type instead of walking a type table is also what lets an
+optimiser inline the runtime's fast paths, which the backend research
+found to be half of stage 1's instructions
+([`backends.md`](../research/topics/backends.md)).
 
 ## What this costs, honestly
 

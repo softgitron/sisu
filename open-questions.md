@@ -8,7 +8,9 @@ decision log have been updated to match. The unconventional-languages
 round ([`research/unconventional/`](research/unconventional/),
 [`proposal/19-novel-features.md`](proposal/19-novel-features.md)) added
 Q-42 to Q-53, all answered by the owner in October 2026; Q-6, Q-21 and
-Q-23 are the only open questions.
+Q-23 were then the only open questions. The backend research (November
+2026, [`research/topics/backends.md`](research/topics/backends.md)) adds
+Q-58 to Q-61, which are open.
 
 What the research could not settle. Each question states the options, the
 evidence for each, the proposal's current lean (what the design documents
@@ -942,3 +944,313 @@ option, and whether a CAS maintainer wants to build on Sisu.
 
 **Decision (October 2026).** `Decimal` is exact without bound: a scaled `BigInt` (an integer mantissa and a decimal exponent), so addition, subtraction and multiplication never round, and division yields a `Ratio`; rounding is an explicit conversion with a named mode, and there is no hidden precision context. `BigInt`, `Ratio` and `Decimal` ship in `std.num` with suffix-free literals, kept simple in the first phase. Symbolic mathematics comes later, in the standard library, after 1.0.
 
+
+## Questions from the backend research (November 2026)
+
+Each question below comes from [`research/topics/backends.md`](research/topics/backends.md)
+and decisions D-085 and D-086, which choose a debug backend written in Sisu
+and LLVM, reached through bitcode, for release builds. All four are open.
+
+### Q-58. What seeds the toolchain once no Rust remains, and does Sisu write WebAssembly itself?
+
+**Question.** D-078 keeps the Rust front end until the backend and the
+runtime are Sisu too, and D-085 retires the Rust backend and runtime when
+the Sisu ones reach their fixed point. A toolchain written only in Sisu then
+needs a Sisu compiler to build it from source. Go and Rust build each release
+with the previous one; Zig commits a WebAssembly build of its compiler (637
+KB compressed) and a 4,000-line C translator, so that a fresh machine needs
+only a C compiler; Nim ships generated C. A Wasm seed needs Sisu to emit Wasm
+itself, since LLVM is optional (D-086), and that emitter would also be the
+debug backend for `wasm32-wasi`, where Sisu's tasks need stack switching
+(phase 3), JS Promise Integration (browsers only) or a transformation such
+as Binaryen's Asyncify (binaries about 50% larger).
+
+**Options.**
+- *The previous release* (Go, Rust): no new backend; a new platform is
+  cross-compiled from a supported one; trust rests on reproducible builds
+  along a chain of binaries.
+- *A committed WebAssembly seed* (Zig): a Wasm emitter in the Sisu backend,
+  the runtime's `single` profile on Wasm, and a small C program that
+  translates or interprets the seed, regenerated only when the compiler's
+  own needs change.
+- *A C seed* (Nim): a C backend kept for this one use.
+- *The frozen stage 0*: the Rust front end, backend and runtime kept
+  buildable at a tagged commit as the from-source path; Rust stays in the
+  repository's history, not in the toolchain.
+
+**Current lean.** The previous release as the routine path, with the frozen
+stage 0 kept buildable until a Wasm seed exists; Wasm emission as the Sisu
+backend's third target after x86-64 and AArch64, with tasks on it by a
+transformation until stack switching is standardised.
+
+**What would settle it.** The cost of the Wasm emitter and of the `single`
+profile on it, against keeping stage 0 buildable; whether the distributions
+that package Sisu require a bootstrap from source (Zig's packaging troubles,
+issue 16270); the stack-switching proposal's progress.
+
+### Q-59. How does LLVM ship, which versions does the release backend support, and what does `--release` do without it?
+
+**Question.** D-086 keeps LLVM out of the toolchain binary and runs it as a
+separate program on bitcode that Sisu writes. Something must provide that
+program, at a version that reads the bitcode and has the target.
+
+**Options.**
+- *Bundled*: a pinned LLVM (`clang`, or `opt` and `llc`, with `lld`) in
+  every toolchain download, as Zig ships one today; 100 to 170 MB more per
+  host (libLLVM alone is 118 to 137 MiB on the research machine).
+- *An optional component*: `sisu` fetches a pinned LLVM on the first
+  `--release` build or on request, content-addressed and cached like a
+  package ([09](proposal/09-modules-packages-and-build.md)).
+- *The system's*: any installed Clang inside a supported range, as GHC
+  accepts LLVM 13 up to 21 and Odin 17 to 22; the bitcode is written for the
+  oldest version in the range, which newer ones read (LLVM loads any bitcode
+  since 3.0).
+- *Without LLVM*, `--release` either fails and names the command that fetches
+  it, or builds with the Sisu backend's code under the release profile's
+  checks and contracts and says so.
+
+**Current lean.** The optional, pinned, content-addressed component, with a
+system Clang accepted inside a range of the last four LLVM releases;
+`--release` without LLVM fails and names the fix, because a silently
+unoptimised release build breaks priority 3 (predictable performance).
+
+**What would settle it.** Download and disk sizes per host; the bitcode
+features Sisu needs and the oldest LLVM that has them; the CI time to test
+each version in the range; whether `release-size` changes the answer.
+
+### Q-60. How fast must generated code be: what does LLVM buy on Sisu's own programs, and must the debug backend keep scalars in registers?
+
+**Question.** On stage 1, Cranelift's optimising level gains little because
+the time is in the runtime's intrinsic dispatch and its walks of the type
+table, while arithmetic loops gain 1.3 to 2.9 times (architecture decisions
+232, 233 and 246). Whether LLVM's pipeline changes that depends on its
+inlining the runtime's fast paths, which it can do only once the runtime is
+Sisu compiled with the program. On the debug side, a single-pass backend
+with every local in memory makes code like LLVM `-O0`, up to 1.64 times
+slower than Cranelift's in TPDE's comparison, and debug code is what `sisu
+test --native` and a developer's own runs execute.
+
+**Options.**
+- *Measure first*: LIR printed as LLVM textual IR (a few thousand lines of
+  Sisu), run on stage 1 and the corpus with the Rust runtime and again with
+  the Sisu runtime, before the bitcode writer is built.
+- *Build the bitcode writer at once* and measure with it.
+- *Debug builds*: every local in memory (today's debug profile and the
+  simplest debug information); scalars in registers by linear scan on SSA
+  with DWARF location lists (Wimmer and Franz; Go's allocator); or two debug
+  levels.
+
+**Current lean.** Measure first; keep every local in memory in debug builds
+until the measurement of tests and of stage 1's debug runs says otherwise.
+
+**What would settle it.** Stage 1's time to print its own SIR and to check
+the corpus under Cranelift's two levels, the textual-IR LLVM path at `-O0`
+and `-O2`, and the Sisu backend; the same for `sisu test --native` on the
+conformance corpus; each path's build time against 10's 10 s and 60 s.
+
+### Q-61. Which linker does the toolchain use?
+
+**Question.** Stage 2 links with the system's `cc`, using `ld.lld` when it
+is installed (87 against 224 ms for a small program). A toolchain written in
+Sisu still needs a linker for each object format, Windows debuggers need PDB
+files built from CodeView, and 10's one-second rebuild and relink wants
+incremental linking or patching. Zig wrote its own linkers, and they are
+what still holds its own backends back on Windows and AArch64 (its 0.17
+roadmap).
+
+**Options.**
+- *The system linker through `cc`* (today): no work; differences per
+  platform, and Windows needs MSVC's linker or `lld-link`.
+- *`lld`, bundled or fetched with LLVM* (Q-59): ELF, Mach-O, COFF and Wasm in
+  one tool, PDB from CodeView, Apache-2.0 with LLVM exceptions.
+- *A linker in Sisu* (Go, Zig): incremental relinking under the compiler's
+  control and no C++ anywhere; the largest cost of the three, per format.
+
+**Current lean.** `lld` as an external program, with the system linker as
+the fallback, through 0.x; a linker in Sisu only for ELF, and only if hot
+replacement (D-053) does not already meet 10's rebuild target.
+
+**What would settle it.** The relink time of a 100 kLOC program after a
+one-function edit with `lld`; whether `sisu run --watch` makes the relink
+target moot for the edit loop; the Windows story (`lld-link`'s PDB files
+against MSVC's in the debuggers people use).
+
+## Questions from the unsafe round (November 2026)
+
+Each question below comes from [`research/topics/unsafe.md`](research/topics/unsafe.md)
+and the design in [`proposal/22-unsafe.md`](proposal/22-unsafe.md), and
+names the leaning decision it belongs to (D-080 to D-084, D-087, D-088).
+All six are open.
+
+### Q-54. Are three machine intrinsics enough, or does Sisu need inline assembly?
+
+**Question.** D-088 writes the runtime in Sisu with no inline assembly:
+`rt.switch`, `rt.stack_pointer` and `rt.thread_slot` are `unsafe def`s
+whose bodies the backend lowers. The Rust runtime gets its context switch
+from corosensei's inline assembly, and the Phase 1 harness reads the stack
+pointer and a thread-local stack limit with `asm!`. A `freestanding`
+kernel or driver also needs interrupt entry and return, instructions such
+as `wfi`, `hlt` and `cpuid`, control-register access and cache
+maintenance.
+
+**Options.**
+- *A closed set of intrinsics, grown on demand* (lean). Each new need is a
+  named `unsafe def` in `std.rt` or a per-target module that the backend
+  lowers, as Rust's `core::arch` does for SIMD; the toolchain stays one
+  language and the interpreter's checked model can describe every
+  intrinsic. Costs a backend change for every new instruction.
+- *Inline assembly inside unsafe blocks* (Rust's `asm!`, Zig's `asm`).
+  General, but every target's assembler syntax and register constraints
+  become part of the language and the specification, and the interpreter
+  cannot run it.
+- *Assembly files assembled by the toolchain* (Go's `.s` files with its
+  own assembler). Keeps assembly out of the language, at the price of an
+  assembler per target and an ABI between Sisu and assembly functions.
+
+**Current lean.** Intrinsics only for version 1.
+
+**What would settle it.** The runtime ported to Sisu on x86-64 and
+AArch64 (switch, system stack, probes, decommit), and one `freestanding`
+port, the interrupt-driven UART driver that is already one of D-059's
+realtime ports: if either needs more than about a dozen intrinsics, or one
+that cannot be specified without naming registers, the question reopens.
+
+### Q-55. How does the interpreter run unsafe code and foreign calls, and what may checking cost?
+
+**Question.** D-087 makes the interpreter check raw memory as Miri checks
+Rust's MIR, so that `sisu test` checks unsafe code on every run and
+comptime can evaluate std's collections written over raw memory. Miri runs
+3,000 to 7,000 times slower than unoptimised native code and cannot run
+the tests of the 21.7% of crates that call into C. The interpreter has no
+raw memory and no foreign calls today; its host objects stand in for
+std's collections.
+
+**Options.**
+- *A checked model for user code, host kernels for std, models for
+  foreign calls* (lean). Unsafe code in user packages runs in the checked
+  model under `sisu test`; std's collections keep host kernels in the
+  interpreter, as D-076's exact types do, checked against their Sisu
+  implementation by the conformance suite; a foreign call runs in the
+  interpreter only through a model written in Sisu (the `sim` profile's
+  mechanism), so a binding package's other tests run natively.
+- *The checked model everywhere, std included.* One implementation of
+  `list` in every mode, and std's own tests become the main check of std's
+  unsafe code; every interpreted program pays the slowdown.
+- *A foreign-function bridge in the interpreter* (`dlopen` and a
+  libffi-style call), unchecked across the boundary, so bindings can be
+  tested in the interpreter at the price of trusting C there too.
+
+**Current lean.** The first.
+
+**What would settle it.** The slowdown of the checked model on std's own
+tests and on the ported runtime's (the lean holds if `sisu test` of an
+unsafe-heavy module stays within about 50 times its unchecked run), and the
+share of corpus packages with foreign calls whose tests cannot run without
+a bridge.
+
+### Q-56. Which aliasing rules do raw pointers follow?
+
+**Question.** The contract of [`proposal/22-unsafe.md`](proposal/22-unsafe.md)
+says that nothing writes behind a live `ref` except through a `Cell`,
+that nothing touches what a live `ref mut` points to except through it,
+and that a raw pointer made from a borrow carries that borrow's
+permission. How raw accesses interact with references made before and
+after them (when a raw write ends a reference; whether a raw pointer
+survives a reborrow of its parent) is what Rust spent Stacked Borrows and
+Tree Borrows on, and it decides which optimisations the release backend
+may make, such as `noalias` on `mut` parameters.
+
+**Options.**
+- *The monitor's loan tree extended to raw pointers* (lean). A raw
+  pointer carries the tag of the loan it came from and is a child of it,
+  and every access ends the loans it conflicts with, as the monitor
+  already does for references. This is close to Tree Borrows, which
+  rejects 54% fewer test cases than Stacked Borrows on 30,000 crates and
+  keeps most optimisations.
+- *Raw pointers outside the model.* Only references made from raw
+  pointers are checked, and raw accesses never end a loan: simpler, fewer
+  false reports, fewer optimisations.
+- *No aliasing guarantees beyond types* (C's and Zig's position): no
+  `noalias`, and nothing to check.
+
+**Current lean.** The loan tree extended, written into the specification
+from the monitor's rules.
+
+**What would settle it.** The ported runtime and std run under the
+extended monitor: the count of reports that are not bugs (more than one
+per thousand lines of unsafe code reopens the choice), and the release
+profile's measured gain from `noalias` on `mut` parameters.
+
+### Q-57. Should `std.rt`'s machine layer be public for `freestanding` programs?
+
+**Question.** D-088 keeps `std.rt` (the machine intrinsics, the stack
+pool, the scheduler beneath `std.task`, the C library bindings behind
+`System`) internal to `std`, so that only the runtime can switch stacks or
+reach the thread slot. A `freestanding` program supplies its own `System`
+([`proposal/12-interop-and-targets.md`](proposal/12-interop-and-targets.md))
+and may want its own scheduler, interrupt-driven tasks or stacks in memory
+it manages. Go's `linkname` history shows that runtime internals get used
+once they are reachable.
+
+**Options.**
+- *Internal in version 1* (lean): a `freestanding` program uses std's
+  scheduler over a platform trait, and a public `std.x.rt` follows if a
+  port needs more.
+- *Public in std from the start*, under the compatibility promise.
+- *Never public*: kernels in Sisu use std's scheduler or none.
+
+**Current lean.** Internal in version 1.
+
+**What would settle it.** A `freestanding` port with tasks (a small kernel
+or an embedded scheduler with interrupts): whether it can live with std's
+scheduler over a platform trait, and which of `std.rt`'s operations it
+asked for.
+
+### Q-71. Does safe reinterpretation of plain data ship in version 1?
+
+**Question.** D-081 proposes `@derive(Plain)` for `Copy`, `@repr(c)` types
+without padding, invariants or refinements whose fields are plain, with a
+safe `bit_cast`, `as_bytes`, `read_plain` and `view_plain`. Reinterpreting
+bytes as structs is a leading reason application packages use `unsafe`
+(Go's conversion patterns, Rust's zerocopy and bytemuck crates), but it
+adds a trait, a derive and layout rules to version 1.
+
+**Options.**
+- *Version 1, an opt-in derive checked by the compiler* (lean), as `Copy`
+  is opt-in.
+- *An auto trait inferred structurally*, like `Send`: no annotation, but a
+  type's plainness changes with a private field, and a type whose
+  invariant matters is plain by accident unless invariants exclude it.
+- *After the corpus*, if its parsers need `unsafe`.
+- *Never*: reinterpretation stays `mem.transmute` in unsafe code.
+
+**Current lean.** Version 1, opt-in.
+
+**What would settle it.** The count of `unsafe` blocks in the corpus's
+parsers and its protocol and file-format code that `Plain` would remove;
+more than one per program keeps it in version 1.
+
+### Q-72. Should safety obligations be checked names, and should fields carry them?
+
+**Question.** D-083 asks every `unsafe def` to list named obligations in a
+`Safety:` section and every block's `# safety:` comment to name the
+obligations it discharges, which a lint checks. Rust's RFC 3458 goes
+further with unsafe fields: writing a field that carries a safety
+invariant, such as a buffer's length, becomes an unsafe operation, because
+otherwise any safe code in the module can break what the blocks rely on.
+
+**Options.**
+- *Named obligations checked by a lint, no unsafe fields* (lean): the
+  module is the unit of review (D-083), and privacy keeps the fields that
+  carry invariants inside it.
+- *Free-text comments only*, as Rust and the Linux kernel have them.
+- *Named obligations and unsafe fields.*
+- *A safety-property language in attributes* (the Rust pre-RFC's
+  `#[safety]` tags), checked against call sites.
+
+**Current lean.** Named obligations checked by a lint, no unsafe fields.
+
+**What would settle it.** The runtime port: how many of its soundness
+bugs come from safe code in the same module breaking an invariant a block
+relied on (unsafe fields would have caught them), and how many
+undischarged obligations the name check finds.

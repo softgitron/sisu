@@ -28,3 +28,5 @@ the open questions it leaves (with the open-question IDs).
 | [python-idioms.md](python-idioms.md) | [02](../../proposal/02-syntax.md) |
 | [function-results.md](function-results.md) | [02](../../proposal/02-syntax.md), decision D-056 |
 | [unconventional-ideas.md](unconventional-ideas.md) | [19](../../proposal/19-novel-features.md), decisions D-058 to D-077, questions Q-42 to Q-53 |
+| [backends.md](backends.md) | [10](../../proposal/10-tooling.md), [18](../../proposal/18-next-steps.md) ("Bootstrapping"), decisions D-085 and D-086, questions Q-58 to Q-61 |
+| [unsafe.md](unsafe.md) | [22](../../proposal/22-unsafe.md), [04](../../proposal/04-memory-and-ownership.md), [06](../../proposal/06-concurrency-and-capabilities.md), [12](../../proposal/12-interop-and-targets.md), decisions D-080 to D-084, D-087 and D-088, questions Q-54 to Q-57, Q-71 and Q-72 |

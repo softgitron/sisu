@@ -51,6 +51,7 @@ options.
 | 19 | [Novel features](19-novel-features.md) | What unconventional languages teach and what exists in no language: 66 candidates assessed, 20 new decisions, 12 new questions |
 | 20 | [Pre-registration](20-pre-registration.md) | The rules of evidence for the experiment, to be frozen at the end of Phase 0: hypotheses, thresholds, procedure, analysis plan, decision rules, amendments |
 | 21 | [Recruitment brief](21-recruitment.md) | The outsiders the experiment needs: roles, eligibility, screening, consent, the call for participants |
+| 22 | [Unsafe](22-unsafe.md) | The unsafe sublanguage the runtime is written in: blocks that permit and markers that oblige, raw memory in `std.mem`, the soundness contract, the manifest declaration and `[trust]`, the audit, checking in the interpreter, the runtime in Sisu |
 | | [Examples](examples/) | Sisu source files |
 | | [Open questions](../open-questions.md) | What is not settled, and what would settle it |
 

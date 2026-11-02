@@ -33,6 +33,14 @@ What Sisu brings to the question:
   predictably, symbolised traces, `sisu run --profile`, hot function
   replacement through a per-definition indirection point (D-053) and frames
   that stay reifiable.
+- **Foreign calls** ([12](../../proposal/12-interop-and-targets.md),
+  [22](../../proposal/22-unsafe.md)): calling a C function is an `unsafe`
+  operation allowed only in a package whose manifest declares
+  `unsafe = "extern"` and which the root lists under `[trust]`; there is no
+  inline assembly, and the runtime's three machine intrinsics (`rt.switch`,
+  `rt.stack_pointer`, `rt.thread_slot`) are lowered by the backend. A
+  library backend reached through its C API lives in such a package; a
+  backend run as a separate program needs no foreign call at all.
 - **What stage 2 already fixed** ([architecture.md](../../compiler/docs/architecture.md),
   "Stage 2"): unwinding is SIR's cleanup blocks run as ordinary control
   flow, every function returning a status byte, so there is no unwinder, no
@@ -252,7 +260,10 @@ What Sisu brings to the question:
    toolchain under the Unlicense, and `rustc_codegen_gcc` needs a patched
    GCC [37]. GCC has no WebAssembly target [38], each target is a separate
    GCC build, and its `cc1` is 32.2 MB [39]. Its use to Rust is "platforms
-   unsupported by LLVM" [37], which Sisu's target list does not contain.
+   unsupported by LLVM" [37], which Sisu's target list does not contain. The
+   other way into GCC is a front end inside GCC's tree, as gccrs is for Rust:
+   C++ under the GPL at GCC's release pace, and gccrs's June 2026 report
+   still names compiling Rust's `core` as its milestone [58].
 
 10. **MIR is fast in both senses and is not an ahead-of-time backend.** On
     a C sieve it compiles in 249 microseconds against `gcc -O2`'s 27.1 ms and
@@ -266,9 +277,9 @@ What Sisu brings to the question:
     compiler's time.** Nim emits C, C++ or Objective-C, with `--lineDir` for
     `#line` directives and `--debugger:native` for gdb [40]; V reports about
     100,000 lines per second through Clang and 700,000 through tcc (its own
-    figures) [41]; TCC compiled 859,000 lines per second against GCC 3.2
-    `-O0`'s 98,000 on a 2.4 GHz Pentium 4 in 2002 and is LGPL, and its author
-    is "no longer working on TCC" [42]. A debugger on generated C sees C names
+    figures) [41]; TinyCC 0.9.22 compiled 859,000 lines per second against GCC
+    3.2 `-O0`'s 98,000 on a 2.4 GHz Pentium 4; it is LGPL, and its author is
+    "no longer working on TCC" [42]. A debugger on generated C sees C names
     and C types; GHC's C code generator, "generally not included any more",
     "produces much slower code" and serves only to port GHC [20]. Sisu's
     status-byte unwinding maps onto C without `setjmp`, but overflow checks
@@ -289,10 +300,12 @@ What Sisu brings to the question:
     ([`go.md`](../languages/go.md): "good but not LLVM-class"). Plan 9's
     compilers "compile quickly, load slowly, and produce medium quality
     object code"; a new machine took "a couple of weeks' work"; a 12,600-line
-    program compiled in 4.49 s (`vc -N`) against the vendor's 14.83 s and ran
-    in 89.96 s against the vendor's best 71.16 s [43]. Roc had direct
+    program compiled in 4.49 s unoptimised and 15.07 s optimised, against the
+    vendor's 14.83 s and 43.59 s, and ran in 89.96 s against the vendor's best
+    71.16 s [43]. Roc had direct
     machine-code dev backends and is replacing them with an interpreter,
-    "given how naive the current machine code generation is" [21]
+    which it expects to be not much slower because that machine code is
+    naive [21]
     ([`roc.md`](../languages/roc.md)). DMD's own backend gives D "very fast
     compilation speeds" beside LDC's and GDC's "strong optimization" [55]
     ([`d.md`](../languages/d.md)); Jai's beta measured 250,000 lines per
@@ -390,7 +403,8 @@ What Sisu brings to the question:
     The larger term is the front end: compiled by today's backend, stage 1
     is four to seven times slower than stage 0, and the release level does
     not help, because the time is in the runtime's intrinsic dispatch and
-    its walks of the type table (decisions 232, 233, 246, 262). A
+    its walks of the type table (architecture decisions 232, 233, 246 and
+    262). A
     self-hosted toolchain meets 10's targets only when the compiler itself
     is fast, which needs a runtime whose fast paths an optimiser can inline
     (written in Sisu and compiled with the program, not linked as a Rust
@@ -448,7 +462,7 @@ Reading the rows:
 
 ## Recommendation for Sisu
 
-Decided as D-085 and D-086 (leaning); 18's "Bootstrapping" gains an
+Recorded as D-085 and D-086 (leaning); 18's "Bootstrapping" gains an
 addendum.
 
 - **Debug builds: a backend written in Sisu.** SIR is lowered, in Sisu, to
@@ -459,7 +473,8 @@ addendum.
   analysis pass for liveness and loops, every SIR local in its frame slot,
   a local greedy allocator for temporaries, a frame pointer in every
   function, its own instruction encoders, ELF and then Mach-O and COFF
-  writers, DWARF line, type and frame information as decision 227 writes it,
+  writers, DWARF line, type and frame information as architecture decision
+  227 writes it,
   CodeView and `.pdata` for Windows, and the system linker as today.
   Functions compile in parallel through `std.par` (D-069) with a fixed
   merge order, so the output stays deterministic for the fixed point. Hot
@@ -483,10 +498,11 @@ addendum.
   for byte the same. (2) The x86-64 Linux debug backend, linked against the
   Rust runtime unchanged, done when the native conformance list and stage 1's
   native checks pass and the backend compiled by itself compiles itself to
-  the same bytes. (3) The runtime in Sisu under `unsafe`, with the context
-  switch emitted by the backend and per-type copy, drop, equality and hashing
+  the same bytes. (3) The runtime in Sisu under `unsafe` (D-088), with the
+  context switch emitted by the backend and per-type copy, drop, equality and hashing
   generated rather than walked from the type table; Rust retires on x86-64
-  Linux at the whole toolchain's fixed point. (4) The LLVM release backend;
+  Linux at the whole toolchain's fixed point. (4) The LLVM release backend,
+  which emits 22's machine intrinsics as inline assembly in the IR it writes;
   its textual-IR prototype can start right after step 1. (5) AArch64 on Linux
   and macOS, then COFF on Windows, in the Sisu backend; Cranelift retires
   when both architectures are covered on Linux and macOS.
@@ -497,17 +513,15 @@ addendum.
 
 ## Open questions
 
-- Q-58: what seeds the bootstrap once no Rust remains (a previous release,
-  a committed Wasm or C seed, the frozen stage 0).
-- Q-59: how LLVM ships with the toolchain, which versions the release
-  backend supports, and what `--release` does without it.
+- Q-58: what seeds the toolchain once no Rust remains, and whether Sisu
+  writes WebAssembly itself (which would make both a Zig-style seed and the
+  `wasm32-wasi` debug backend, and raises how tasks switch on Wasm).
+- Q-59: how LLVM ships, which versions the release backend supports, and
+  what `--release` does without it.
 - Q-60: what LLVM buys on Sisu's own programs, before and after the runtime
-  is in Sisu.
-- Q-61: whether the debug backend keeps every local in memory or allocates
-  registers across blocks with location lists.
-- Q-62: which linker the toolchain uses, and how a debug rebuild relinks in
+  is in Sisu, and whether the debug backend must keep scalars in registers.
+- Q-61: which linker the toolchain uses, and how a debug rebuild relinks in
   under a second.
-- Q-63: how Sisu reaches WebAssembly, and how tasks switch there.
 
 ## Sources
 
@@ -568,3 +582,4 @@ addendum.
 55. D, "Downloads" (DMD, GDC, LDC). https://dlang.org/download.html
 56. ziglang/zig issue 16268, "upstream Aro and use it for translate-c instead of clang". https://github.com/ziglang/zig/issues/16268
 57. Measured on this repository's machine (Ubuntu 24.04, x86-64, 2 November 2026): `libLLVM-17.so.1` 123,671,544 bytes, `libLLVM.so.18.1` 123,215,144, `libLLVM.so.20.1` 143,545,784; `llc --version` (LLVM 18.1.3) lists 44 registered targets.
+58. Rust-GCC, "2026-06 monthly report" (gccrs). https://raw.githubusercontent.com/Rust-GCC/Reporting/refs/heads/main/2026/2026-06-monthly-report.org
