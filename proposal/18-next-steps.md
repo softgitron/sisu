@@ -1160,7 +1160,7 @@ a year later (D-078).
 | 2 | The native backend in Rust, the non-LLVM debug backend of [10-tooling.md](10-tooling.md) first, LLVM for release later, compiling SIR; the runtime (tasks on the stacks Phase 1 chose, capabilities, allocators) in Rust, later partly in Sisu under `unsafe` | the host | the runtime engineer and the lead, in parallel with stage 1, about nine to twelve months | the stage-1 front end compiled natively meets the compile-speed targets of [10-tooling.md](10-tooling.md) |
 | 3 | The self-hosted compiler: stage 1 compiled by stage 2, then by itself | itself | the whole team, about three months | the fixed point: the compiler compiled by itself produces byte-identical output to the compiler compiled by stage 2, on itself and on the corpus; the Rust front end is retired |
 
-**Stage 2 in Sisu (addendum, November 2026; D-085 and D-086, leaning).**
+**Stage 2 in Sisu (addendum, November 2026; D-087 and D-088, leaning).**
 The Rust backend over Cranelift and the Rust runtime are stage 2's bootstrap,
 and they are replaced rather than kept. In order: a lowering in Sisu from SIR
 to a backend-neutral low IR, checked through the Rust backend; a debug backend

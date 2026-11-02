@@ -948,19 +948,19 @@ option, and whether a CAS maintainer wants to build on Sisu.
 ## Questions from the backend research (November 2026)
 
 Each question below comes from [`research/topics/backends.md`](research/topics/backends.md)
-and decisions D-085 and D-086, which choose a debug backend written in Sisu
+and decisions D-087 and D-088, which choose a debug backend written in Sisu
 and LLVM, reached through bitcode, for release builds. All four are open.
 
 ### Q-58. What seeds the toolchain once no Rust remains, and does Sisu write WebAssembly itself?
 
 **Question.** D-078 keeps the Rust front end until the backend and the
-runtime are Sisu too, and D-085 retires the Rust backend and runtime when
+runtime are Sisu too, and D-087 retires the Rust backend and runtime when
 the Sisu ones reach their fixed point. A toolchain written only in Sisu then
 needs a Sisu compiler to build it from source. Go and Rust build each release
 with the previous one; Zig commits a WebAssembly build of its compiler (637
 KB compressed) and a 4,000-line C translator, so that a fresh machine needs
 only a C compiler; Nim ships generated C. A Wasm seed needs Sisu to emit Wasm
-itself, since LLVM is optional (D-086), and that emitter would also be the
+itself, since LLVM is optional (D-088), and that emitter would also be the
 debug backend for `wasm32-wasi`, where Sisu's tasks need stack switching
 (phase 3), JS Promise Integration (browsers only) or a transformation such
 as Binaryen's Asyncify (binaries about 50% larger).
@@ -990,7 +990,7 @@ issue 16270); the stack-switching proposal's progress.
 
 ### Q-59. How does LLVM ship, which versions does the release backend support, and what does `--release` do without it?
 
-**Question.** D-086 keeps LLVM out of the toolchain binary and runs it as a
+**Question.** D-088 keeps LLVM out of the toolchain binary and runs it as a
 separate program on bitcode that Sisu writes. Something must provide that
 program, at a version that reads the bitcode and has the target.
 
@@ -1079,12 +1079,12 @@ against MSVC's in the debuggers people use).
 
 Each question below comes from [`research/topics/unsafe.md`](research/topics/unsafe.md)
 and the design in [`proposal/22-unsafe.md`](proposal/22-unsafe.md), and
-names the leaning decision it belongs to (D-080 to D-084, D-087, D-088).
+names the leaning decision it belongs to (D-080 to D-084, D-085, D-086).
 All six are open.
 
 ### Q-54. Are three machine intrinsics enough, or does Sisu need inline assembly?
 
-**Question.** D-088 writes the runtime in Sisu with no inline assembly:
+**Question.** D-086 writes the runtime in Sisu with no inline assembly:
 `rt.switch`, `rt.stack_pointer` and `rt.thread_slot` are `unsafe def`s
 whose bodies the backend lowers. The Rust runtime gets its context switch
 from corosensei's inline assembly, and the Phase 1 harness reads the stack
@@ -1117,7 +1117,7 @@ that cannot be specified without naming registers, the question reopens.
 
 ### Q-55. How does the interpreter run unsafe code and foreign calls, and what may checking cost?
 
-**Question.** D-087 makes the interpreter check raw memory as Miri checks
+**Question.** D-085 makes the interpreter check raw memory as Miri checks
 Rust's MIR, so that `sisu test` checks unsafe code on every run and
 comptime can evaluate std's collections written over raw memory. Miri runs
 3,000 to 7,000 times slower than unoptimised native code and cannot run
@@ -1183,7 +1183,7 @@ profile's measured gain from `noalias` on `mut` parameters.
 
 ### Q-57. Should `std.rt`'s machine layer be public for `freestanding` programs?
 
-**Question.** D-088 keeps `std.rt` (the machine intrinsics, the stack
+**Question.** D-086 keeps `std.rt` (the machine intrinsics, the stack
 pool, the scheduler beneath `std.task`, the C library bindings behind
 `System`) internal to `std`, so that only the runtime can switch stacks or
 reach the thread slot. A `freestanding` program supplies its own `System`
@@ -1237,7 +1237,9 @@ more than one per program keeps it in version 1.
 obligations it discharges, which a lint checks. Rust's RFC 3458 goes
 further with unsafe fields: writing a field that carries a safety
 invariant, such as a buffer's length, becomes an unsafe operation, because
-otherwise any safe code in the module can break what the blocks rely on.
+otherwise any safe code in the module can break what the blocks rely on;
+C# 15's updated rules make a field marked `unsafe` requires-unsafe in the
+same way.
 
 **Options.**
 - *Named obligations checked by a lint, no unsafe fields* (lean): the
@@ -1254,3 +1256,244 @@ otherwise any safe code in the module can break what the blocks rely on.
 bugs come from safe code in the same module breaking an invariant a block
 relied on (unsafe fields would have caught them), and how many
 undischarged obligations the name check finds.
+
+## Questions from the manual plan (November 2026)
+
+Each question below comes from [`research/topics/manuals.md`](research/topics/manuals.md)
+and the plan in [`manual/README.md`](manual/README.md), written with the
+first chapter of the tutorial. All nine are open.
+
+### Q-62. Is the manual's reference the specification?
+
+**Question.** P9 and D-036 promise a written specification before 1.0.
+The manual's reference (pages R1 to R22 of the plan) describes the
+language completely for users, while
+[`compiler/docs/architecture.md`](compiler/docs/architecture.md) states
+the rules that stage 1 transcribes for implementers, and the conformance
+suite checks both. Go has one document, "the reference manual for the Go
+programming language"; Rust adopted the FLS as a specification in March
+2025 and kept the Reference's status, so it has two; K&R's appendix was
+"not the standard" but a digest of it for programmers; Racket's
+Reference defines and its Guide explains.
+
+**Options.**
+- *One document*: the reference is the specification, with its normative
+  sentences marked (Go). One text to keep true, written for two
+  audiences at once.
+- *Two documents*: a specification for implementers and a reference for
+  users, each rule of the reference linking to the specification's clause
+  and to the conformance cases that check it (Rust; C and K&R). Users get
+  precision without austerity; two texts must stay in step.
+- *A generated reference*, built from the specification's clauses and
+  examples.
+
+**Current lean.** Two documents: the reference is written now from the
+proposal and the architecture notes, each rule linked to the conformance
+cases that check it, and whether it merges with the specification is
+decided when the specification is written.
+
+**What would settle it.** Writing R4 (expressions) and R7 (ownership)
+and counting the rules a user needs that the implementers' text states
+differently, and what keeping both true costs over two rounds of the
+compiler.
+
+### Q-63. Where does the exercise runner live?
+
+**Question.** The plan describes a `sisu learn` command that copies the
+exercises into a working directory, reports each as not started, in
+progress or solved, reruns the current one on every save, shows hints
+and reveals solutions. P6 puts the tools in one binary; Rustlings and
+Ziglings are programs of their own.
+
+**Options.**
+- *A subcommand of `sisu`*, with the manual's exercises bundled into the
+  toolchain so that it works offline: the most convenient, and it makes
+  the manual part of every release.
+- *A blessed package* (`std.x.learn`) that `sisu learn` dispatches to,
+  versioned with the manual rather than the compiler and written in
+  Sisu, which makes it a corpus program as well.
+- *A script in the manual* (`manual/tools/learn.py`): no change to the
+  toolchain, but Python becomes a requirement for learning Sisu.
+
+**Current lean.** A blessed package written in Sisu that `sisu learn`
+runs, so that the runner is versioned with the exercises. It needs `sisu
+test` to print the JSON event stream of
+[17](proposal/17-testing.md), which stage 0 does not print yet.
+
+**What would settle it.** The design of the 0.1-interp release
+([proposal/18](proposal/18-next-steps.md), Phase 9): whether `std.x`
+packages exist by then, and whether the manual ships with the
+toolchain.
+
+### Q-64. How do the tutorial and the teaching ladder relate?
+
+**Question.** D-073 makes the teaching profile a ladder of levels, and
+N-29 proposes an order for them: script mode, then `def`, then `struct`
+and `enum`, then `T?` and `T ! E`, then `test` and contracts, then `mut`
+and `own`, traits, tasks and full Sisu. The tutorial shows `test` blocks
+from chapter 1, because its exercises are judged by tests, meets moves in
+chapter 5, and teaches ownership in its second part.
+
+**Options.**
+- *The ladder follows the tutorial*: each part of the tutorial is a
+  level, and each exercise file declares the level of its chapter and
+  compiles under it.
+- *The tutorial follows the ladder*: once the Q-41 trial settles the
+  levels, chapters and exercises move to match, `test` included.
+- *Independent*: the tutorial is for programmers and the ladder for
+  courses, and exercise files compile as full Sisu.
+
+**Current lean.** Independent for now, with one request to the ladder:
+admit reading `test` and `assert` from its first level, since reading a
+test is not writing one; the exercise files of Part I would then compile
+under the early levels.
+
+**What would settle it.** The Q-41 trial, with Part I of the tutorial as
+the material of one arm.
+
+### Q-65. How hidden are the solutions and the tests?
+
+**Question.** The plan keeps the solutions in `manual/solutions/`, in the
+same repository as the exercises, and asks learners to open one after
+their tests pass. Rustlings 6 reveals a solution once an exercise is
+done; Exercism shows other people's solutions after a submission; Advent
+of Code checks only an answer and shows no solution. A learner who sees
+every test can also special-case them, which is why `sisu fill` keeps its
+judge out of the filler's reach ([proposal/10](proposal/10-tooling.md)).
+
+**Options.**
+- *Visible solutions and visible tests*: honest and simple, and it relies
+  on the learner.
+- *Solutions revealed by the runner*, after solving or on a confirmed
+  request, from a tree outside the learner's working copy.
+- *Hidden tests*, kept with the solution and added by the runner before
+  an exercise counts as solved, for `write` exercises and challenges.
+
+**Current lean.** Visible tests in every exercise; solutions in their own
+tree, revealed by the runner once it exists; hidden tests for the
+challenges only.
+
+**What would settle it.** The reader test in step 7 of the plan: how
+often readers open a solution before trying, and how often a passing
+answer special-cases the tests.
+
+### Q-66. Where is the long text of `sisu explain` written?
+
+**Question.** [10](proposal/10-tooling.md) gives every diagnostic a
+`sisu explain` page with examples; stage 0 prints the catalog's line.
+The reference's diagnostics page (R17) holds, for each code, a checked
+wrong program and its fix, which is what such a page needs. Rust keeps
+its long explanations in the compiler's source (`rustc --explain`).
+
+**Options.**
+- *The manual is the source*: a section per code in R17, checked by the
+  manual's checker and embedded into the binary for `sisu explain`.
+- *The catalog is the source*: a long-text field per entry, rendered into
+  R17.
+- *Both*, written separately.
+
+**Current lean.** The manual is the source, because its examples are
+checked programs and the wrong-program corpus already holds a case for
+most codes; the binary embeds the pages when it is built.
+
+**What would settle it.** Whether a translated catalog (D-065) should
+carry the explanations as well, which favours the catalog, and what
+embedding the pages costs in the binary.
+
+### Q-67. Which version does a page describe, and how does it show what is not implemented?
+
+**Question.** The manual is checked against the compiler on every push,
+so on the main branch it describes the compiler of that commit. The
+proposal also decides features that no compiler has yet (foreign
+functions, regions, `sisu fix`), and the experiment's prototypes may
+change or go.
+
+**Options.**
+- *One manual on the main branch*, describing the current compiler, with
+  each feature's status in the reference and nothing unimplemented in the
+  tutorial.
+- *A manual per release* once there are releases, built from the
+  release's tag and kept online with a version switcher, as Python's and
+  Rust's documentation are.
+- *A manual per edition*, since editions are where the language changes
+  incompatibly.
+
+**Current lean.** One manual on the main branch until 0.1, then one per
+minor release built from its tag, each page stating the version of
+`sisu` that checked it.
+
+**What would settle it.** The release plan of 0.1-interp and the
+stability tiers it introduces ([proposal/18](proposal/18-next-steps.md),
+Phase 9).
+
+### Q-68. Should learning be measured?
+
+**Question.** The instrumented Rust Book followed 62,526 readers, found
+where they stopped, and raised the scores on its hardest questions by 20%
+with twelve rewrites ([`research/topics/manuals.md`](research/topics/manuals.md),
+finding 8). An exercise runner could report, with consent, which
+exercises stay blocked, which diagnostics come before a learner gives up
+and which hints are opened; the playground's "submit as evidence" button
+is the same idea for programs.
+
+**Options.**
+- *No measurement* beyond the plan's reader test and the playground's
+  submissions.
+- *Opt-in reports from the runner*: counts per exercise and per
+  diagnostic code, no code text, sent only when the learner asks,
+  published as aggregates.
+- *Quizzes on the manual's site*, as mdbook-quiz provides, with opt-in
+  storage of the answers.
+
+**Current lean.** Opt-in reports and quizzes, both after 0.1, under a
+written consent text, and outside the experiment's data unless its
+pre-registration says otherwise.
+
+**What would settle it.** The pre-registration's rules for data from
+outsiders ([proposal/20](proposal/20-pre-registration.md)) and a privacy
+review of what a report holds.
+
+### Q-69. Is the manual translated?
+
+**Question.** The catalog keeps message identifiers apart from their
+text so that diagnostics can be translated (D-065), and Hedy shows what
+a language gains when learners can use their own. A translated chapter
+needs translated diagnostics in its sessions, or it shows English output
+inside translated prose. Python translates its documentation with
+gettext catalogues (PEP 545).
+
+**Options.**
+- *English only until 1.0*, with the text kept translatable: no text in
+  images, outputs generated rather than typed, one idea per sentence.
+- *Translatable from the start*, with a gettext pipeline and translated
+  catalogs, Finnish first.
+- *Community translations*, kept outside the repository.
+
+**Current lean.** English only until 1.0.
+
+**What would settle it.** Whether the courses of the teaching profile
+(Q-41) need another language first, and whether translated catalogs
+exist for the sessions to show.
+
+### Q-70. Do the manual's examples join the conformance suite?
+
+**Question.** The plan checks the manual's examples and solutions with
+the conformance runner pointed at `manual/`, in a CI job of its own. They
+could instead live in `compiler/conformance/cases/`, where `cargo test`,
+the native lists and stage 1's parity checks would run them too.
+
+**Options.**
+- *A separate root*: the manual owns its files, and a compiler change that
+  alters an example fails the manual's job and blesses the change there.
+- *Inside the suite*, as `cases/manual/`: one place for every expected
+  output, with the manual's files in the compiler's tree.
+- *A separate root added to the native lists and to stage 1's parity
+  run*, so that the native backend and stage 1 run every example as
+  well.
+
+**Current lean.** A separate root, with the examples added to the native
+lists once they run natively.
+
+**What would settle it.** The first compiler change that breaks a manual
+example: whether its author saw the failure in the same review as the
+conformance diff.

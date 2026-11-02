@@ -50,9 +50,9 @@ asymmetry: safe code trusts the unsafe code it calls, but unsafe code
 unsafe traits exist: they shift the obligation to the implementor [2].
 Raw pointers are neither `Send` nor `Sync`, "more of a lint", so that a
 type that holds one does not become thread-safe by accident [3].
-Dereferencing a raw pointer yields a reference with an unbounded lifetime
-that "becomes as big as context demands", the textbook use-after-free of
-unsafe Rust [3]. Unsafe code must be "exception safe to the point of not
+A reference taken to a dereferenced raw pointer has an unbounded
+lifetime that "becomes as big as context demands", and the Rustonomicon's
+own example of one is a use-after-free [3]. Unsafe code must be "exception safe to the point of not
 violating memory safety": a panic between `set_len` and the
 initialisation of the elements exposes uninitialised memory to the drop
 [3].
@@ -137,12 +137,14 @@ memory, rather than to the existence of pointer types". Declaring a
 pointer, taking an address, `fixed` and `sizeof` no longer need
 `unsafe`; dereference, `->`, element access and calls through function
 pointers still do; `unsafe` on a member now marks it *requires-unsafe*,
-so "the audit obligation flows to the caller"; a `safe` keyword marks
+so "the audit obligation flows to the caller", and "does *not* introduce
+an `unsafe` context" in its body; a field marked `unsafe` is
+requires-unsafe too, and lambdas cannot be; a `safe` keyword marks
 `extern` members that are safe to call; an `unsafe(expression)` form
 covers places a block cannot go; the assembly records which rules it was
 compiled under, and a compatibility mode treats an old assembly's
-pointer-typed signatures as requires-unsafe [31]. The research file
-calls this a redefinition of a 1.0 keyword after 24 years
+pointer-typed signatures as requires-unsafe [31]. The C# analysis calls
+this a redefinition of a 1.0 keyword after 24 years
 ([csharp.md](../languages/csharp.md)). It converges on Rust's shape:
 creating pointers is safe, using them is not, and an obligation on
 callers is a declaration of its own.
@@ -197,7 +199,8 @@ debug implementation catches use-after-free and double free at run time
 footguns from c" but "does not nearly approach the level of systematic
 prevention of memory unsafety that rust achieves" [40]. Allocators as
 values are worth taking; safety that depends on a build flag is not
-(D-038's profiles have no unchecked mode).
+(Sisu's profiles have no unchecked mode,
+[09](../../proposal/09-modules-packages-and-build.md)).
 
 ### Odin and Nim
 
@@ -236,9 +239,9 @@ Ada names every unchecked operation (`Ada.Unchecked_Conversion`,
 `Ada.Unchecked_Deallocation`, `'Unchecked_Access`), which makes them a
 grep away, and a program can forbid them outright with
 `pragma Restrictions (No_Dependence => Ada.Unchecked_Conversion)` and
-`No_Unchecked_Access` [44]. SPARK excludes them and proves the absence of run-time errors in
-what remains; `SPARK_Mode => Off` marks the bodies the prover does not
-analyse, which is SPARK's trust boundary, and general access types and
+`No_Unchecked_Access` [44]. SPARK excludes them and proves the absence
+of run-time errors in what remains; `SPARK_Mode => Off` marks the bodies
+the prover does not analyse, which is SPARK's trust boundary, and general access types and
 cycles are pushed into that unsafe subset
 ([ada-spark.md](../languages/ada-spark.md)). Restrictions per program and
 proof per body are the strong end of the spectrum.
@@ -322,8 +325,8 @@ Safe Haskell (GHC 7.2, 2011) marks modules `Safe`, `Trustworthy` or
 package is trusted by the user building the program, and that trust can
 be withdrawn when a package is found wanting [52]. It is the closest
 precedent for Sisu's `[trust]`, and its outcome is a warning: in a 2022
-discussion on deprecating it, maintainers said "the Safe ecosystem failed
-to materialise", partly because many forms of deriving could not be used
+discussion on deprecating it, participants said "the Safe ecosystem
+failed to materialise", partly because many forms of deriving could not be used
 in a `Safe` module, so library authors ignored it [52]. OCaml's `Obj` is
 "Not for the casual user" and `Obj.magic : 'a -> 'b` has no further
 documentation; `-unsafe` turns bounds checking off and then "anything can
@@ -393,12 +396,12 @@ code to one framework, provided the framework offers the abstractions
   (76 CVEs, 112 advisories, two in the standard library) in three
   patterns: panic safety, higher-order invariants (unsafe code trusting a
   trait implementation it does not control) and `Send`/`Sync` variance
-  (manual impls missing a bound) [17]. Xu et al. classify 186 memory-safety
-  bugs, among them every Rust CVE to the end of 2020: every one needs
-  unsafe code,
-  and they fall into automatic memory reclaim (a drop running on
-  uninitialised or freed memory), unsound functions (a safe wrapper with
-  an unchecked precondition) and unsound generic or trait bounds [18].
+  (manual impls missing a bound) [17]. Xu et al. classify 186
+  memory-safety bugs, among them every Rust CVE to the end of 2020: every
+  one needs unsafe code, and they fall into automatic memory reclaim (a
+  drop running on uninitialised or freed memory), unsound functions (a
+  safe wrapper with an unchecked precondition) and unsound generic or
+  trait bounds [18].
   Qin et al. (PLDI 2020) find that all memory-safety bugs in their corpus
   involve unsafe code, as do all non-blocking thread-safety bugs [19]
   ([studies.md](../evidence/studies.md)).
@@ -518,14 +521,15 @@ bindings, the rest in raw memory, cells and the switch, with the trusted
 base visible in one language rather than spread over Rust's standard
 library and an assembly crate.
 
-The operations the task list names, against that runtime:
+The low-level operations a runtime is usually said to need, against this
+one:
 
 | Operation | Needed for | Sisu form |
 |---|---|---|
 | Allocation and release | every heap type | a global allocator in `std.mem`; allocation is safe, release is not |
 | Pointer arithmetic | buffers, cells | `p.offset(n)`, unsafe, within one allocation; typed header structs instead of negative offsets |
 | Uninitialised memory | spare capacity, ring buffers | only behind raw pointers; reading it is undefined, and the interpreter checks |
-| Stack switching | tasks, generators, the system stack | one machine intrinsic that saves and loads a `Context` (Cranelift's `stack_switch` on x86-64 Linux [59] while Cranelift is the backend; the Sisu backend's own instructions, or inline assembly in the LLVM IR the release backend writes, after D-085) |
+| Stack switching | tasks, generators, the system stack | one machine intrinsic that saves and loads a `Context` (Cranelift's `stack_switch` on x86-64 Linux [59] while Cranelift is the backend; the Sisu backend's own instructions, or inline assembly in the LLVM IR the release backend writes, after D-087) |
 | Atomics | `Shared` counts, the scheduler's flags | `Atomic[T]` fields in typed headers, already safe; an unsafe constructor over raw memory |
 | Volatile and memory-mapped I/O | `freestanding` drivers only | unsafe volatile reads and writes, and a pointer from an address |
 | Foreign calls | every host effect | `extern "C"` declarations, unsafe to call, `@blocking` when they can block |
@@ -538,11 +542,11 @@ The operations the task list names, against that runtime:
 The backend needs nothing beyond ordinary code. A code generator, a
 register allocator, an object and DWARF writer and a linker driver
 (through `Proc`) are byte-buffer programs; the backend research
-([backends.md](backends.md), D-085 and D-086) plans a debug backend
+([backends.md](backends.md), D-087 and D-088) plans a debug backend
 written in Sisu and LLVM, run as a separate program, for release builds,
-neither of which needs `unsafe` in the compiler. The interpreter, rewritten in
-Sisu, holds values as Sisu enums, and even a checked memory model for
-unsafe code (below) is safe code over byte arrays. The one exception
+neither of which needs `unsafe` in the compiler. The interpreter,
+rewritten in Sisu, holds values as Sisu enums, and even a checked memory
+model for unsafe code (below) is safe code over byte arrays. The one exception
 would be native hot replacement (D-053) in an in-process JIT, which maps
 executable memory and calls through code addresses; it can wait, since
 hot replacement runs in the interpreter today.
@@ -551,7 +555,7 @@ hot replacement runs in the interpreter today.
 
 Rust's contract carries over: safe code cannot cause undefined behaviour
 whatever it does, and an `unsafe` block is its author's promise that the
-operations inside keep that true for every input, including every safe
+operations inside keep that true for every input, including any safe
 code its callers supply [2]. Sisu's model changes it in five places.
 
 - **References are second-class, so the unbounded lifetime cannot
@@ -583,7 +587,7 @@ code its callers supply [2]. Sisu's model changes it in five places.
   so soundness never rests on one.** Unsafe code may rely on invariants
   that its own module maintains through privacy, never on another
   function's `ensures` or on a check that a release profile may drop; the
-  Nomicon's `BTreeMap` rule [2] extends to contracts.
+  Rustonomicon's `BTreeMap` rule [2] extends to contracts.
 
 The task model adds three obligations that already exist in safe code
 and become the unsafe author's: nothing crosses `spawn` that is not
@@ -624,13 +628,17 @@ say `@blocking`, or it stalls the scheduler.
 - **`pure`.** Today's text says a `pure` function "contains no `unsafe`"
   ([06](../../proposal/06-concurrency-and-capabilities.md)). Read
   literally, that makes every function built on a standard collection
-  implemented in Sisu impure. The rule that keeps the property is about
-  operations: raw memory operations touch only memory reachable from the
-  function's arguments or allocated by it, which the contract requires,
-  and are pure; foreign calls, machine intrinsics and address observation
-  are not. A `pure` function whose unsafe block makes an impure call
-  asserts observational purity, which is what N-63 asks a trusted package
-  to declare for `std.x.incr`'s caches, so one existing form covers it.
+  implemented in Sisu impure. Stage 0 checks purity by declaration (a
+  `pure` function calls only `pure` functions; `Cell.set` is impure), and
+  that can stay: the raw memory operations are declared `pure`, provided
+  the contract confines their writes in `pure` code to memory the function
+  allocated or holds through `own` or `mut`, while address observation,
+  pointers made out of nothing, foreign calls and machine intrinsics are
+  impure. An impure operation inside an unsafe block of a `pure` function
+  is then the author's assertion of observational purity, which is what
+  N-63 asks a trusted package to declare for `std.x.incr`'s caches, and
+  what an allocator over `malloc` needs so that `pure` code can grow a
+  collection; one existing form covers both, and the audit lists it.
 - **Comptime.** [08](../../proposal/08-metaprogramming.md) evaluates
   functions with "no capabilities, no `unsafe`, and no `Shared`". The
   standard library's collections, written in Sisu over raw memory, must
@@ -686,9 +694,11 @@ say `@blocking`, or it stalls the scheduler.
   security boundary (raw memory can be made to do anything by a malicious
   author), it is a review signal and the simulation profile's input.
 - **An audit that lists every block with its reason.** `sisu audit`
-  groups blocks by module (the Nomicon's point that unsafe code relying on
-  a field's invariant "pollutes a whole module" makes the module the review
-  unit), prints each block's safety comment, checks that the comment names
+  groups blocks by module (the Rustonomicon's point that unsafe code
+  relying on a field's invariant "pollutes a whole _module_", and that
+  "the only bullet-proof way to limit the scope of unsafe code is at the
+  module boundary with privacy" [3], makes the module the review unit),
+  prints each block's safety comment, checks that the comment names
   every obligation of every unsafe callee (the tags of [25] reduced to the
   names in each callee's documentation), and hashes the module for the
   review ledger (N-43), as cargo-vet records audits as deltas [13].
@@ -708,8 +718,8 @@ say `@blocking`, or it stalls the scheduler.
 ## The capability angle
 
 Should `unsafe` be a capability, a value handed down from `main` like
-`Fs`, or a manifest permission? Austral tried both and called the
-capability "much more tedious to use"
+`Fs`, or a manifest permission? Austral's author weighed both and found
+the capability design "much more tedious to use"
 ([austral.md](../languages/austral.md)); the analysis for Sisu goes
 further:
 
@@ -772,7 +782,7 @@ for that reason.
   ecosystem fail to materialise [52]; an `Unsafe` capability (Austral).
 
 The design that follows is [proposal/22](../../proposal/22-unsafe.md),
-decisions D-080 to D-084, D-087 and D-088.
+decisions D-080 to D-084, D-085 and D-086.
 
 ## Open questions
 
@@ -792,7 +802,7 @@ decisions D-080 to D-084, D-087 and D-088.
 
 1. The Rust Reference, "Unsafety". https://doc.rust-lang.org/reference/unsafety.html (2026)
 2. The Rustonomicon, "How Safe and Unsafe Interact". https://doc.rust-lang.org/nomicon/safe-unsafe-meaning.html (2026)
-3. The Rustonomicon, "Send and Sync", "Unbounded Lifetimes", "Exception Safety", "Leaking". https://doc.rust-lang.org/nomicon/send-and-sync.html ; https://doc.rust-lang.org/nomicon/unbounded-lifetimes.html ; https://doc.rust-lang.org/nomicon/exception-safety.html ; https://doc.rust-lang.org/nomicon/leaking.html (2026)
+3. The Rustonomicon, "Working with Unsafe", "Send and Sync", "Unbounded Lifetimes", "Exception Safety", "Leaking". https://doc.rust-lang.org/nomicon/working-with-unsafe.html ; https://doc.rust-lang.org/nomicon/send-and-sync.html ; https://doc.rust-lang.org/nomicon/unbounded-lifetimes.html ; https://doc.rust-lang.org/nomicon/exception-safety.html ; https://doc.rust-lang.org/nomicon/leaking.html (2026)
 4. The Rust Edition Guide, Rust 2024: "`unsafe_op_in_unsafe_fn` warning", "Unsafe `extern` blocks", "Unsafe attributes". https://doc.rust-lang.org/edition-guide/rust-2024/unsafe-op-in-unsafe-fn.html ; https://doc.rust-lang.org/edition-guide/rust-2024/unsafe-extern.html ; https://doc.rust-lang.org/edition-guide/rust-2024/unsafe-attributes.html (February 2025)
 5. Rust Blog, "Announcing Rust 1.84.0" (strict provenance APIs). https://blog.rust-lang.org/2025/01/09/Rust-1.84.0/ (9 January 2025)
 6. A. Beingessner, "Rust's Unsafe Pointer Types Need An Overhaul". https://faultlore.com/blah/fix-rust-pointers/ (19 March 2022)
@@ -820,7 +830,7 @@ decisions D-080 to D-084, D-087 and D-088.
 28. Swift Evolution SE-0458, "Opt-in Strict Memory Safety Checking" (implemented in Swift 6.2). https://github.com/swiftlang/swift-evolution/blob/main/proposals/0458-strict-memory-safety.md (2025)
 29. Swift Evolution vision, "Optional Strict Memory Safety for Swift", and its acceptance by the Language Steering Group. https://github.com/swiftlang/swift-evolution/blob/main/visions/memory-safety.md ; https://forums.swift.org/t/accepted-vision-optional-strict-memory-safety-for-swift/77223 (15 January 2025)
 30. Swift Evolution SE-0447, "`Span`: Safe Access to Contiguous Storage" (Swift 6.2). https://github.com/swiftlang/swift-evolution/blob/main/proposals/0447-span-access-shared-contiguous-storage.md (2024-2025)
-31. Microsoft Learn, "What's new in C# 15" (memory safety preview), 19 October 2026; "C# Compiler Options: language feature rules" (`AllowUnsafeBlocks`, the updated memory safety rules), September 2026. https://learn.microsoft.com/en-us/dotnet/csharp/whats-new/csharp-15 ; https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/compiler-options/language
+31. Microsoft Learn, "What's new in C# 15" (memory safety preview), 19 October 2026; "Memory safety", C# feature specification (preview), updated 8 October 2026; "C# Compiler Options: language feature rules" (`AllowUnsafeBlocks`, the updated memory safety rules), September 2026. https://learn.microsoft.com/en-us/dotnet/csharp/whats-new/csharp-15 ; https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/proposals/unsafe-evolution ; https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/compiler-options/language
 32. Go standard library, package `unsafe` (the six patterns; `Add` and `Slice` in 1.17; `SliceData`, `String`, `StringData` in 1.20). https://pkg.go.dev/unsafe (2026)
 33. M. Dempsky, "cmd/compile: add -d=checkptr to validate unsafe.Pointer rules" (Go 1.14), and golang/go#34964. https://go.googlesource.com/go/+/80a6fedea05dbdab2e55b2ba922faeaf4155a981 ; https://golang.org/issue/34964 (2019-2020)
 34. Go command documentation, "cgo: Passing pointers". https://pkg.go.dev/cmd/cgo (2026)

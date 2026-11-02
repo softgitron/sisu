@@ -10,7 +10,7 @@ calls the operating system. This chapter is the sublanguage that lets
 Sisu do those things itself, kept as small as the runtime allows. The
 survey behind it is
 [`../research/topics/unsafe.md`](../research/topics/unsafe.md); the
-decisions are D-080 to D-084, D-087 and D-088 (leaning, coordinator,
+decisions are D-080 to D-084, D-085 and D-086 (leaning, coordinator,
 November 2026), and the questions it leaves are Q-54 to Q-57, Q-71 and
 Q-72. It replaces the short "Unsafe" section of
 [04](04-memory-and-ownership.md) and refines the enforcement rules of
@@ -105,11 +105,12 @@ how a runtime is built on it.
    is a checked model (allocations, bounds, alignment, initialisation, the
    validity of the bits read, the loans of the references made from raw
    pointers), so `sisu test` checks unsafe code on every run; comptime uses
-   the same model; purity is decided by operation, not by keyword (D-087).
+   the same model; an unsafe block does not make a function impure, its
+   impure operations do, unless a `pure` function asserts them (D-085).
 10. **The runtime is written in Sisu on this layer**, with three machine
     intrinsics instead of inline assembly, no mutable globals, and the
     Rust runtime retired only when the Sisu runtime reproduces it on every
-    native case (D-088).
+    native case (D-086).
 
 ## Syntax
 
@@ -136,12 +137,14 @@ unsafe def read_one[T: Copy](p: ptr[T]) -> T:
 ## - `valid_block`: `acquire` returns memory valid for reads and writes of
 ##   `layout.size` bytes, aligned to `layout.align`, overlapping no live block
 ## - `stable`: a block stays valid until it is released or the allocator ends
+## - `pure`: neither method has an effect that `pure` code can observe, other
+##   than the memory it hands out and takes back
 unsafe trait Allocator:
-    def acquire(self, layout: Layout) -> ptr mut u8?
+    pure def acquire(self, layout: Layout) -> ptr mut u8?
     ## Safety:
     ## - `from_here`: `block` came from `acquire` on this allocator with `layout`
     ## - `once`: it is released once and not used after
-    unsafe def release(self, block: ptr mut u8, layout: Layout)
+    pure unsafe def release(self, block: ptr mut u8, layout: Layout)
 
 # safety: a RawBuf owns the values in its slots, so moving it to another task moves
 #   them, which is sound exactly when T is Send.
@@ -202,9 +205,9 @@ A reference made from a raw pointer is second-class like every other:
 the checker gives it the origin its use asks for, the enclosing frame
 when it is bound to a local, or the `from` parameter (or the elision rule
 of [04](04-memory-and-ownership.md)) when it is returned. Its worst case
-is therefore the frame or the caller's borrow, never the "as big as
-context demands" lifetime that the Rustonomicon calls the commonest source
-of use-after-free in unsafe Rust. The obligation `valid_for_origin` is
+is therefore the frame or the caller's borrow, never the unbounded
+lifetime that "becomes as big as context demands", which the Rustonomicon
+traces mostly to references made from raw pointers. The obligation `valid_for_origin` is
 that the memory stays valid, and the aliasing rule holds, for that whole
 origin:
 
@@ -249,7 +252,8 @@ reads and writes a fixed one. Everything else is `mem.transmute[U](own x)`,
 unsafe, sizes checked at compile time, with the obligation `valid_bits`.
 This takes the commonest reason application code reaches for `unsafe`
 (bytes in, structs out) out of unsafe code, as Go's `unsafe.String` and
-Rust's zerocopy crates did; whether it ships in version 1 is Q-71.
+Rust's zerocopy and bytemuck crates did; whether it ships in version 1 is
+Q-71.
 
 ### Foreign calls
 
@@ -261,8 +265,9 @@ functions. A header import maps a C `T *` to `ptr mut T?` and a
 `const T *` to `ptr[T]?`, and annotated non-null pointers to the
 non-optional forms, as Swift imports C. A declaration that can block for
 an unbounded time is `@blocking`, so the scheduler moves the call off the
-task threads ([06](06-concurrency-and-capabilities.md)); one that cannot
-is a promise in the block's safety comment.
+task threads ([06](06-concurrency-and-capabilities.md)); a declaration
+without it is a promise, in the `extern` block's safety comment, that the
+call returns promptly.
 
 Unwinding never crosses a foreign frame: a panic that reaches the boundary
 of an `@export`ed function aborts the process, and since Sisu's unwinding
@@ -282,13 +287,13 @@ bodies that the backend lowers:
 - `rt.switch(save: ptr mut Context, load: ptr[Context])` saves the
   running stack's registers into `save` and continues from those in
   `load`; while the backend is Cranelift, its `stack_switch` instruction
-  lowers it on x86-64 Linux, the backend written in Sisu (D-085) emits the
+  lowers it on x86-64 Linux, the backend written in Sisu (D-087) emits the
   instructions as it emits any function, and the release backend writes
-  them into the LLVM IR it produces (D-086);
+  them into the LLVM IR it produces (D-088);
 - `rt.stack_pointer() -> int`, for the decommit watermark of the stack
   pool;
 - `rt.thread_slot()`, a pointer to one word of thread-local storage, which
-  holds the thread's runtime value.
+  holds a pointer to the thread's runtime value.
 
 There is no inline assembly. Whether three are enough, for the runtime on
 x86-64 and AArch64 and for a `freestanding` driver, is Q-54; whether
@@ -340,8 +345,10 @@ and at every point inside it where a panic can start unwinding:
    that takes no `Fs`.
 6. **Nothing observable depends on an address**, except alignment
    arithmetic on an aligned base, so `pure`, comptime, replay and the
-   simulation profile stay deterministic. A `pure` function whose unsafe
-   block makes an impure call promises that it is observationally pure.
+   simulation profile stay deterministic. In a `pure` function, unsafe code
+   writes only memory that the function allocated or holds through `own`
+   or `mut`, and an impure operation in one of its unsafe blocks is a
+   promise that the function is observationally pure.
 7. **Soundness never rests on safe code the block does not control**: a
    generic parameter's trait implementation, a caller's closure, another
    package's contract. A wrong `Hash` or `Ord` may make a collection
@@ -375,24 +382,34 @@ rules exactly raw pointers follow is Q-56.
   std's implementation, ordinary unsafe code over a typed header with an
   `Atomic` count, takes the matching path, as `sisu-rt` reads its
   `SHARED_ATOMIC` flag today.
-- **`pure`.** Purity is decided by operation, not by keyword (D-087).
-  Raw memory operations can touch only memory reachable from the
-  function's arguments or allocated by it, since the ways to make a pointer
-  out of nothing (`ptr.from_address`, `rt.thread_slot`) are impure, so they
-  are pure; foreign calls, the machine intrinsics and address observation
-  are not. So a `pure` function can push to a `list` that std implements over a
-  `RawBuf`, and a `pure def` whose unsafe block makes an impure call (an
-  allocator calling `malloc`, a cache behind `std.x.incr`) asserts
-  observational purity, which `sisu audit` lists. That is the trusted
-  "observationally pure" declaration that N-63 asked for
-  ([19](19-novel-features.md)), with no new form. The text of
+- **`pure`.** Purity stays declared and checked as today, a `pure`
+  function calling only `pure` functions, and an `unsafe` block neither
+  makes a function impure nor escapes the check (D-085). Std declares its
+  raw memory operations `pure` (reading, writing and offsetting a pointer,
+  `RawBuf`'s slots, `alloc_raw`), since clause 6 confines their writes to
+  memory the function allocated or holds through `own` or `mut`. The
+  impure operations are those that observe an address (`addr`, comparing
+  pointers), make a pointer out of nothing (`ptr.from_address`,
+  `rt.thread_slot`), mutate behind a shared reference (`Cell.set` and
+  `Cell.as_ptr`, as `Cell.set` already is), the other machine intrinsics,
+  and every foreign function. Inside a `pure def` an impure operation is
+  accepted only within an `unsafe` block, as its author's assertion that
+  the function stays observationally pure: the block's comment says why
+  under a `pure:` part, and `sisu audit` lists the function. So a `pure`
+  function can push to a `list` that std builds on `RawBuf`, and the
+  allocator underneath (`Global` over `malloc`, a `Region` whose counter is
+  a `Cell`) asserts its own purity once, in its own block. That is the
+  trusted "observationally pure" declaration that N-63 asked for
+  ([19](19-novel-features.md)), with no new form, and the text of
   [02](02-syntax.md) and [06](06-concurrency-and-capabilities.md) that a
   `pure` function "contains no `unsafe`" is amended to this rule.
 - **Comptime.** Raw memory operations evaluate at compile time in the
-  interpreter's checked model, which is how std's collections, written
-  over raw memory, keep working in `derive` and `const`; a foreign call, a
-  machine intrinsic, an address observation, or a raw pointer in a
-  constant's value stops compile-time evaluation with an error. Code that a
+  interpreter's checked model, and the interpreter supplies `Global`
+  itself (an allocation in that model, where native code calls `malloc`),
+  which is how std's collections, written over raw memory, keep working in
+  `derive` and `const`; a foreign call, a machine intrinsic, an address
+  observation, or a raw pointer in a constant's value stops compile-time
+  evaluation with an error. Code that a
   comptime function generates may contain no `unsafe` at all, so every
   block stays in a source file where the audit can show it. This amends
   "no `unsafe`" in [08](08-metaprogramming.md).
@@ -415,8 +432,9 @@ rules exactly raw pointers follow is Q-56.
   declared `unsafe = "memory"` and requires a simulation model for each
   reachable foreign call of an `extern` package, which is what stage 0's
   check already does ([17](17-testing.md)).
-- **Contracts** may not contain `unsafe` (their expressions are `pure` and
-  free of unsafe blocks), and unsafe code may not rely on them (clause 7).
+- **Contracts.** A contract expression may not contain an `unsafe` block
+  or expression itself, though it may call safe functions that are built on
+  one, and unsafe code may not rely on contracts (clause 7).
 - **Hot replacement** does not swap a module that contains `unsafe`: its
   change restarts the program, since its blocks rely on module invariants
   that old and new code could disagree about (D-068).
@@ -494,8 +512,8 @@ std (toolchain)   unsafe = "extern"   see sisu audit --unsafe --std
 
 The module, not the block, is the unit of review: unsafe code that relies
 on a field's invariant depends on every function of the module that can
-write the field, which is the Nomicon's "pollutes a whole module" and
-Modula-3's safe interface over an unsafe module. The module's hash is the
+write the field, which is the Rustonomicon's "pollutes a whole
+_module_" and Modula-3's safe interface over an unsafe module. The module's hash is the
 key of the review ledger (N-43), so a review carries over to the next
 version when the module is unchanged and only the changed modules are
 listed otherwise, as cargo-vet records audits as deltas.
@@ -677,7 +695,9 @@ pub struct Region:
         let base = Global.acquire(layout) else: panic("out of memory")
         return Region(base=base, size=capacity, used=Cell(0))
 
-    pub def reset(mut self):      # `mut`: the checker grants it only when no collection uses the region
+    ## Empties the region. Needs `mut`, which the checker grants only when no
+    ## collection still uses the region.
+    pub def reset(mut self):
         self.used.set(0)
 
 # safety: valid_block: blocks are disjoint, since `used` only grows until `reset`, which needs
@@ -687,17 +707,20 @@ pub struct Region:
 #   stable: blocks stay valid until the region ends or is reset, and neither can happen while
 #   a collection allocated in it is alive, because that collection is a view of the region.
 unsafe impl Allocator for Region:
-    def acquire(self, layout: Layout) -> ptr mut u8?:
+    pure def acquire(self, layout: Layout) -> ptr mut u8?:
         if layout.align > REGION_ALIGN:
             return None
         let start = align_up(self.used.get(), layout.align)
         if start + layout.size > self.size:
             return None
-        self.used.set(start + layout.size)
-        # safety: in_bounds: start + layout.size <= size, so the block lies inside the region.
-        return Some(unsafe self.base.offset(start))
+        # safety: in_bounds: start + layout.size <= size, so the block lies inside the region;
+        #   pure: the counter changes only what later calls return, and that depends on the
+        #   sizes asked for, never on an address, so the same calls give the same results.
+        unsafe:
+            self.used.set(start + layout.size)
+            return Some(self.base.offset(start))
 
-    unsafe def release(self, block: ptr mut u8, layout: Layout):
+    pure unsafe def release(self, block: ptr mut u8, layout: Layout):
         pass                      # a region releases everything at once
 
 impl Drop for Region:
@@ -709,9 +732,11 @@ impl Drop for Region:
 
 `Region` holds a `Cell` and a raw pointer, so it is neither `Sync` nor
 `Send`, which is the rule [04](04-memory-and-ownership.md) states for
-regions: a list in one cannot cross `spawn`. `Global.acquire` is a `pure
-def` over the C allocator, the observational-purity case of clause 6,
-which is why a `pure` function can still allocate.
+regions: a list in one cannot cross `spawn`. `acquire` is `pure` because
+the trait declares it so, which is what lets `pure` code grow a
+collection; the `Cell` update is the impure operation its block asserts,
+and `Global.acquire`, a `pure def` over the C allocator, asserts the same
+about `malloc`.
 
 ### A stack switch
 
@@ -812,18 +837,18 @@ is rewritten in Sisu, its checked memory model included. The one later
 exception would be an in-process JIT for native hot replacement (D-053),
 which runs in the interpreter today.
 
-The port is step 3 of the backend's order of work (D-085) and follows the
-rule D-079 set for the front end (D-088). The Sisu runtime replaces
+The port is step 3 of the backend's order of work (D-087) and follows the
+rule D-079 set for the front end (D-086). The Sisu runtime replaces
 `sisu-rt` piece by piece, in this order: `std.mem` and `RawBuf` with the
 buffers of `list` and `String`; `Box`, `Shared` and `Weak`; `std.rt.os`
 for the standard streams, files and the clock; the stack pool and
 `switch`, on x86-64 Linux first; the scheduler and `std.task`; sockets and
-processes; the process entry. Each step must keep every native conformance case's output
-identical, zero live allocations at exit (`SISU_RT_ALLOCS`), the same
-schedule under every seed tried, and the Phase 1 harness's memory and
-switch-cost results on the same machines. `sisu-rt` is retired when the
+processes; the process entry. Each step must keep every native conformance
+case's output identical, zero live allocations at exit
+(`SISU_RT_ALLOCS`), the same schedule under every seed tried, and the
+Phase 1 harness's memory and switch-cost results on the same machines. `sisu-rt` is retired when the
 last piece passes, and Rust leaves the toolchain at the fixed point of
-the whole toolchain that D-085 names. Generating copy, drop, equality and
+the whole toolchain that D-087 names. Generating copy, drop, equality and
 hashing per type instead of walking a type table is also what lets an
 optimiser inline the runtime's fast paths, which the backend research
 found to be half of stage 1's instructions

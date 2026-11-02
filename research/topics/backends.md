@@ -462,7 +462,7 @@ Reading the rows:
 
 ## Recommendation for Sisu
 
-Recorded as D-085 and D-086 (leaning); 18's "Bootstrapping" gains an
+Recorded as D-087 and D-088 (leaning); 18's "Bootstrapping" gains an
 addendum.
 
 - **Debug builds: a backend written in Sisu.** SIR is lowered, in Sisu, to
@@ -498,7 +498,7 @@ addendum.
   for byte the same. (2) The x86-64 Linux debug backend, linked against the
   Rust runtime unchanged, done when the native conformance list and stage 1's
   native checks pass and the backend compiled by itself compiles itself to
-  the same bytes. (3) The runtime in Sisu under `unsafe` (D-088), with the
+  the same bytes. (3) The runtime in Sisu under `unsafe` (D-086), with the
   context switch emitted by the backend and per-type copy, drop, equality and hashing
   generated rather than walked from the type table; Rust retires on x86-64
   Linux at the whole toolchain's fixed point. (4) The LLVM release backend,
