@@ -533,6 +533,9 @@ compiler/stage1/cases/type_calls.sisu
 compiler/stage1/cases/type_conversions.sisu
 compiler/stage1/cases/type_flow.sisu
 compiler/stage1/cases/doc/layout.sisu
+compiler/stage1/cases/channels/channel_of_closures.sisu
+compiler/stage1/cases/channels/channel_refusals.sisu
+compiler/stage1/cases/channels/generic_pipeline.sisu
 compiler/stage1/cases/checker_names/annotation_paths.sisu
 compiler/stage1/cases/checker_names/doc_example_names.sisu
 compiler/stage1/cases/checker_names/fake_signature_names.sisu

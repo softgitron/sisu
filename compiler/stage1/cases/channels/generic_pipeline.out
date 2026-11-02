@@ -1,0 +1,4 @@
+[1, 3, 5, 9]
+["apple", "fig", "pear"]
+[Count(word="a", times=1), Count(word="b", times=2)]
+["one", "two", "three"]

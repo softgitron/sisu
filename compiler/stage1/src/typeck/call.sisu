@@ -4,7 +4,7 @@
 
 from stage1.diag import Diagnostic, Edit, Msg, Param, TextRange
 from stage1.syntax.ast import Arg, Ast, Closure, ExprId, ExprKind, IndexArg, Mode, Name, StrPart
-from stage1.typeck.check import Checker, Cx, primitive
+from stage1.typeck.check import Checker, Cx, SendCheck, primitive
 from stage1.typeck.expr import ClosureParamSrc, ClosureSource, is_var_data
 from stage1.typeck.program import DefKind, ModuleId
 from stage1.typeck.tasks import task_call
@@ -1029,6 +1029,17 @@ impl Checker:
         if let Some(o) = owner_name:
             if let Some(t) = sig.type_args.first():
                 self.owner_checks.push((t, o.copy(), at))
+        # What a channel carries is `Send` (RULES.md, R1): a closure is
+        # checked where it is sent, and a value of a type parameter by the
+        # parameter's bounds, once types and captures are known.
+        # The value is the last argument, after the receiver.
+        if intrinsic == "Sender.send" or intrinsic == "Sender.try_send":
+            if len(out) >= 2 and not sig.params.is_empty():
+                let text = self.source_text(cx, at)
+                let elem = sig.params[len(sig.params) - 1].ty
+                let arg = out[len(out) - 1].expr
+                let sent = SendCheck(elem=elem, arg=arg, span=at, function=call_name(text))
+                self.send_checks.push(sent)
         # A typed hole is reported with the type it stands for (D-061).
         if intrinsic == "todo":
             var name = String.new()

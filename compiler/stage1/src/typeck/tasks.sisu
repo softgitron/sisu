@@ -19,9 +19,10 @@ from stage1.diag import Diagnostic, Msg, TextRange
 from stage1.diag import Param as MsgParam
 from stage1.syntax.ast import ArmBody, Block, ExprId, ExprKind, SelectArm, StmtId, StmtKind
 from stage1.syntax.ast import Ast
-from stage1.typeck.check import Checker, Cx, SpawnSite, pattern_is_refutable
+from stage1.typeck.check import Checker, Cx, SendCheck, SpawnSite, pattern_is_refutable
 from stage1.typeck.program import Auto, Obstacle
 from stage1.typeck.thir import (
+    ArgMode,
     Callee,
     ClosureId,
     ClosureRole,
@@ -34,7 +35,7 @@ from stage1.typeck.thir import (
     TSelectArm,
     TStmt,
 )
-from stage1.typeck.ty import DefId, Ty, TyData, union
+from stage1.typeck.ty import DefId, TraitRef, Ty, TyData, union
 
 ## The calls the rules apply to, by intrinsic.
 @derive(Eq, Copy)
@@ -390,7 +391,7 @@ impl Checker:
                 break
 
     ## What a `Shared`, `Cell`, `Mutex` or handle owns can be neither a view
-    ## nor must-consume.
+    ## nor must-consume; what a channel carries is `Send` besides.
     pub pure def check_owners(mut self, cx: Cx):
         let checks = self.owner_checks.copy()
         self.owner_checks = []
@@ -399,7 +400,9 @@ impl Checker:
             let t = cx.prog.normalize(mut self.types, z, self.env)
             if self.infer.has_vars(mut self.types, t) or self.types.contains_error(t):
                 continue
-            if cx.prog.can_borrow_in(mut self.types, t, self.env):
+            if owner == "channel":
+                self.check_channel_type(cx, t, span)
+            elif cx.prog.can_borrow_in(mut self.types, t, self.env):
                 let shown = self.show(cx, t)
                 let d = Diagnostic.new(Msg.BorrowViewInOwner, span.start, span.end)
                 let found = d.with("ty", shown).with("owner", owner)
@@ -409,6 +412,99 @@ impl Checker:
                 let d = Diagnostic.new(Msg.BorrowMustConsumeInOwner, span.start, span.end)
                 let found = d.with("ty", shown).with("owner", owner)
                 self.report_other(found.note(Msg.BorrowConsumeFirst))
+
+    ## What a channel carries (RULES.md, R1): a channel takes what is sent
+    ## from one task to another, which may keep it after the sender's frame
+    ## is gone, so its type is `Send`, as the bound asks it: it owns what
+    ## it holds (a view is decision 230's `E0421`, a must-consume value its
+    ## `E0422`), and is `Send`; a type parameter is by its bounds, which the
+    ## fix names. A function type is `Send` when its closure is, which the
+    ## type does not say: each closure is checked where it is sent
+    ## (`check_sends`).
+    pure def check_channel_type(mut self, cx: Cx, t: Ty, span: TextRange):
+        if let TyData.Fn(_, _, _) = self.types.data(t):
+            return
+        let generic = self.types.has_params(t)
+        if not generic and cx.prog.can_borrow_in(mut self.types, t, self.env):
+            let shown = self.show(cx, t)
+            let d = Diagnostic.new(Msg.BorrowViewInOwner, span.start, span.end)
+            let found = d.with("ty", shown).with("owner", "channel")
+            self.report_other(found.note(Msg.BorrowOwnInstead))
+        elif cx.prog.must_consume_ty(mut self.types, t, 0):
+            let shown = self.show(cx, t)
+            let d = Diagnostic.new(Msg.BorrowMustConsumeInOwner, span.start, span.end)
+            let found = d.with("ty", shown).with("owner", "channel")
+            self.report_other(found.note(Msg.BorrowConsumeFirst))
+        elif let Some(send) = cx.prog.wk.send:
+            self.bounds.push((t, TraitRef(def_=send, args=[]), span))
+
+    ## The sends on channels of the body (RULES.md, R1), once captures are
+    ## decided: what a channel of a function type carries is the closure
+    ## written at the send (`E0425` for a function value, as for `spawn`),
+    ## which owns what it captures (a plain closure that captures anything
+    ## borrows it, `E0421`), each capture owning what it holds and `Send`,
+    ## as an `own` task's moves; a value of a type parameter is `Send` by
+    ## the parameter's bounds, since the parameter may stand for a function
+    ## type, whose closures nothing else checks.
+    pub pure def check_sends(mut self, cx: Cx):
+        let checks = self.send_checks.copy()
+        self.send_checks = []
+        for c in checks:
+            let z = self.infer.zonk(mut self.types, c.elem)
+            let elem = cx.prog.normalize(mut self.types, z, self.env)
+            if self.infer.has_vars(mut self.types, elem) or self.types.contains_error(elem):
+                continue
+            match self.types.data(elem):
+                case TyData.Fn(_, _, _):
+                    self.check_sent_closure(cx, c, elem)
+                case TyData.Param(_) | TyData.Assoc(_, _, _):
+                    if let Some(send) = cx.prog.wk.send:
+                        self.bounds.push((elem, TraitRef(def_=send, args=[]), c.span))
+                case _:
+                    pass
+
+    pure def check_sent_closure(mut self, cx: Cx, c: SendCheck, elem: Ty):
+        let cid = self.closure_of(c.arg) else:
+            self.closure_needed(cx, Some(TArg(expr=c.arg, mode=ArgMode.Value)), c.span, c.function)
+            return
+        var owns = False
+        var caps: list[int] = []
+        if let Some(cl) = self.closures[cid.index]:
+            owns = cl.own_
+            for cap in cl.captures:
+                caps.push(cap.local)
+        let at = self.span_of(c.arg)
+        if not owns:
+            if not caps.is_empty():
+                let shown = self.show(cx, elem)
+                let d = Diagnostic.new(Msg.BorrowViewInOwner, at.start, at.end)
+                let found = d.with("ty", shown).with("owner", "channel")
+                self.report_other(found.note(Msg.BorrowUseOwnClosure))
+            return
+        for l in caps:
+            let z = self.infer.zonk(mut self.types, self.local_ty(l))
+            let ty = cx.prog.normalize(mut self.types, z, self.env)
+            if self.infer.has_vars(mut self.types, ty) or self.types.contains_error(ty):
+                continue
+            let name = self.locals[l].name.copy()
+            if cx.prog.can_borrow_in(mut self.types, ty, self.env):
+                let shown = self.show(cx, ty)
+                let d = Diagnostic.new(Msg.BorrowViewInOwner, at.start, at.end)
+                let found = d.with("ty", shown).with("owner", "channel")
+                let path = [
+                    MsgParam(name="path".to_string(), value=name.copy()),
+                    MsgParam(name="ty".to_string(), value=shown.copy()),
+                ]
+                let noted = found.note_params(Msg.TaskFieldPath, path)
+                self.report_other(noted.note(Msg.BorrowOwnInstead))
+            elif cx.prog.must_consume_ty(mut self.types, ty, 0):
+                let shown = self.show(cx, ty)
+                let d = Diagnostic.new(Msg.BorrowMustConsumeInOwner, at.start, at.end)
+                let found = d.with("ty", shown).with("owner", "channel")
+                self.report_other(found.note(Msg.BorrowConsumeFirst))
+            elif let Some(o) = cx.prog.auto_obstacle(mut self.types, ty, Auto.Send, self.env):
+                let d = self.obstacle_diag(cx, Msg.TaskNotSend, at, name, ty, o)
+                self.report_other(d)
 
     ## `select:` (06, "Channels and select"): each arm waits for a call of
     ## `recv`, `send` or `join`, or for a `Timer` or a `Cancellation`; its

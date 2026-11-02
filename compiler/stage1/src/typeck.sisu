@@ -53,6 +53,7 @@ from stage1.typeck.program import (
     FnKind,
     ModuleId,
     ParamInfo,
+    Predicate,
     Program,
     Request,
 )
@@ -1849,6 +1850,7 @@ impl Checker:
         self.check_spawns(cx)
         self.check_capabilities(cx)
         self.check_owners(cx)
+        self.check_sends(cx)
         var seen: list[(Ty, TraitRef)] = []
         var all: list[(Ty, TraitRef, TextRange, bool)] = []
         for (t, b, s) in self.bounds:
@@ -1915,8 +1917,28 @@ impl Checker:
             let after = cx.source.byte_slice(span.end, span.end + 1)
             if before == "{{" and after == "}}":
                 d = d.fix_at(Msg.TypeShowDebug, span.end, span.end, ":?")
-        # A type parameter without the bound: bound it.
+        # A type parameter without the bound: bound it. For `Send`, which
+        # a type holding type parameters may be when they are (RULES.md,
+        # R1), the first that is not, when bounding them all makes the type
+        # `Send`; a type that is not because it borrows is told to own what
+        # it holds.
+        var param: int? = None
         if let TyData.Param(i) = self.types.data(t):
+            param = Some(i)
+        elif Some(b.def_) == cx.prog.wk.send and b.args.is_empty():
+            var bounded = self.env.copy()
+            var first: int? = None
+            for x in self.types.walk(t):
+                if let TyData.Param(i) = self.types.data(x):
+                    if cx.prog.implements(mut self.types, x, b, self.env) == Answer.No:
+                        if first.is_none():
+                            first = Some(i)
+                        bounded.push(Predicate(ty=x, bound=b.copy(), span=span))
+            if first.is_some() and cx.prog.implements(mut self.types, t, b, bounded) != Answer.No:
+                param = first
+            elif cx.prog.can_borrow_in(mut self.types, t, bounded):
+                d = d.note(Msg.BorrowOwnInstead)
+        if let Some(i) = param:
             if let Some((name, edit)) = self.bound_edit(cx, i, bound):
                 let params = [
                     Param(name="param".to_string(), value=name),
@@ -2180,3 +2202,41 @@ test "a body beyond the slice reports nothing, and says why":
     let checked = check_file(r, beyond, catalog, False, {}, False)
     assert checked.diagnostics.is_empty()
     assert checked.beyond == ["an attribute of a function"]
+
+## The prelude of `test_prelude` with channels and the auto traits.
+pure def channel_prelude() -> String:
+    var p = test_prelude()
+    p.push("\n@marker\ntrait Send:\n    pass\n\n@marker\ntrait Escapable:\n    pass\n\n")
+    p.push("@builtin(\"Sender\")\nstruct Sender[T]:\n    pass\n\n")
+    p.push("@builtin(\"Receiver\")\nstruct Receiver[T]:\n    pass\n\n")
+    p.push(
+        "impl[T] Sender[T]:\n    @intrinsic(\"Sender.send\")\n    def send(self, own value: T)\n\n"
+    )
+    p.push("@intrinsic(\"channel\")\ndef channel[T](capacity: int) -> (Sender[T], Receiver[T])\n")
+    return p
+
+test "what a channel carries is `Send`, as the bound asks it (RULES.md, R1)":
+    let catalog = Catalog.parse("")
+    let r = base_from(channel_prelude(), catalog)
+    let body = "    let tx, rx = channel[T](capacity=1)\n    tx.send(x)\n    _ = rx\n"
+    # A type parameter is `Send` by its bounds, which the error asks for.
+    assert messages(r, "def f[T: Send](own x: T):\n{body}", catalog).is_empty()
+    let missing = [Msg.TypeBoundNotSatisfied]
+    assert messages(r, "def f[T](own x: T):\n{body}", catalog) == missing
+    assert messages(r, "def f[T: Escapable](own x: T):\n{body}", catalog) == missing
+    # A send of a type parameter's value asks the bound too.
+    let forward = "def f[T](tx: Sender[T], own x: T):\n    tx.send(x)\n"
+    assert messages(r, forward, catalog) == missing
+    # A view is not a `Send` type argument.
+    let keep = "def keep[T: Send](own x: T) -> T:\n    return x\n"
+    assert messages(r, "{keep}def f():\n    _ = keep(\"a view\")\n", catalog) == missing
+    assert messages(r, "{keep}def f():\n    _ = keep(1)\n", catalog).is_empty()
+    # A closure is checked where it is sent: it owns what it captures, and
+    # is written at the send.
+    let jobs = "type Job = () -> int\ndef f(k: int):\n    let tx, rx = channel[Job](capacity=1)\n"
+    let owned = "{jobs}    tx.send(own () -> k)\n    tx.send(() -> 1)\n    _ = rx\n"
+    assert messages(r, owned, catalog).is_empty()
+    let borrowed = "{jobs}    tx.send(() -> k)\n    _ = rx\n"
+    assert messages(r, borrowed, catalog) == [Msg.BorrowViewInOwner]
+    let value = "{jobs}    let job: Job = own () -> k\n    tx.send(job)\n    _ = rx\n"
+    assert messages(r, value, catalog) == [Msg.TaskClosureLiteral]

@@ -107,6 +107,15 @@ pub struct SpawnSite:
     pub scope: int?
     pub closure: ClosureId
 
+## A send on a channel seen while checking a body (RULES.md, R1): the
+## channel's element type, the value sent, the call, and the call's
+## function as written (`tx.send`).
+pub struct SendCheck:
+    pub elem: Ty
+    pub arg: TExprId
+    pub span: TextRange
+    pub function: String
+
 ## While `ensures` clauses are checked: the scope holding `result` and the
 ## labels, hidden inside `old(...)`, and the values `old` saves.
 pub struct EnsuresCtx:
@@ -184,6 +193,8 @@ pub struct Checker:
     pub spawn_checks: list[(ClosureId, TextRange)]
     ## The `own` closures, for the checks of their captures.
     pub own_checks: list[(ClosureId, TextRange)]
+    ## The sends on channels, for the checks of what they send.
+    pub send_checks: list[SendCheck]
     ## In a generator, the type of what `yield` gives.
     pub generator: Ty?
     ## Values made into capability handles, for the `Send` and `Sync`
@@ -258,6 +269,7 @@ impl Checker:
             spawn_sites=[],
             spawn_checks=[],
             own_checks=[],
+            send_checks=[],
             generator=None,
             cap_checks=[],
             ensures=None,

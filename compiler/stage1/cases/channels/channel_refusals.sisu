@@ -1,0 +1,60 @@
+# What the channel rule refuses (RULES.md, R1), each with its fix. What a
+# channel carries is `Send`, as the bound asks it: it owns what it holds
+# and may move to another task. A type parameter is so by its bounds, and
+# the error names the bound to add; a closure is so when it owns what it
+# captures and each capture is `Send`, checked where it is sent.
+
+## A job a worker runs.
+type Job = () -> int
+
+## No bound: the channel and the send each ask `T: Send`, reported once.
+def unbounded[T](own x: T):
+    let tx, rx = channel[T](capacity=1)
+    tx.send(x).expect("room")
+    _ = rx
+
+## `Escapable` owns what it holds, but another task may not take it.
+def owned_only[T: Escapable](own x: T):
+    let tx, rx = channel[T](capacity=1)
+    _ = tx.try_send(x)
+    _ = rx
+
+## A send of a type parameter's value asks the bound too: the parameter
+## may stand for a function type, whose closures nothing else checks.
+def forward[T](tx: Sender[T], own x: T):
+    tx.send(x).expect("room")
+
+## A type that holds a type parameter is `Send` when the parameter is.
+def batches[T](own x: T):
+    let tx, rx = channel[list[T]](capacity=1)
+    _ = tx.try_send([x])
+    _ = rx
+
+def keep[T: Send](own x: T) -> T:
+    return x
+
+def main():
+    # A view is not a `Send` type argument: a task may keep what it is
+    # given after what the view borrows is gone.
+    _ = keep("a view")
+    _ = keep("an owned text".to_string())
+    # A `Shared` of a `Cell` is not `Send`: tasks would change it at once.
+    let shared = channel[Shared[Cell[int]]](capacity=1)
+    _ = shared
+    let jobs_tx, jobs_rx = channel[Job](capacity=4)
+    var count = 0
+    # A plain closure borrows what it captures.
+    _ = jobs_tx.try_send(() -> count + 1)
+    # An `own` closure copies a view, which still borrows.
+    let name = "a view"
+    _ = jobs_tx.try_send(own () -> len(name))
+    # A function value does not say what it captures: write the closure at
+    # the send.
+    let job: Job = own () -> 3
+    _ = jobs_tx.try_send(job)
+    # These are fine: a closure that captures nothing, and one that owns
+    # what it captures.
+    _ = jobs_tx.try_send(() -> 42)
+    _ = jobs_tx.try_send(own () -> count * 2)
+    count += 1
+    _ = jobs_rx
