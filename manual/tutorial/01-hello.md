@@ -140,9 +140,9 @@ change to compare. Undo each change before you make the next one.
 ```console
 $ sisu run no_colon.sisu
 error[E0100]: expected `:`, found the end of the line
-  --> no_colon.sisu:1:11
+  --> no_colon.sisu:2:11
   |
-1 | def main()
+2 | def main()
   |           ^
   = fix: write the missing token: `:`
 
@@ -160,9 +160,9 @@ error[D0006]: the program was not run: errors found (1)
 ```console
 $ sisu run tab.sisu
 error[E0001]: a tab in indentation; Sisu indents with spaces only
-  --> tab.sisu:2:1
+  --> tab.sisu:3:1
   |
-2 | 	print("Hei, maailma!")
+3 | 	print("Hei, maailma!")
   | ^
   = note: replace each tab with spaces
 
@@ -180,9 +180,9 @@ error[D0006]: the program was not run: errors found (1)
 ```console
 $ sisu run open_string.sisu
 error[E0003]: this string literal is not closed before the end of the line
-  --> open_string.sisu:2:11
+  --> open_string.sisu:3:11
   |
-2 |     print("Hei, maailma!)
+3 |     print("Hei, maailma!)
   |           ^^^^^^^^^^^^^^^
   = fix: close it on its line: `"`
 
@@ -201,9 +201,9 @@ error[D0006]: the program was not run: errors found (1)
 ```console
 $ sisu run two_arguments.sisu
 error[E0305]: wrong number of arguments to `print`: expected 1, found 2
-  --> two_arguments.sisu:2:5
+  --> two_arguments.sisu:3:5
   |
-2 |     print("Hei,", "maailma!")
+3 |     print("Hei,", "maailma!")
   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
 
 error[D0006]: the program was not run: errors found (1)
@@ -252,18 +252,24 @@ and run the program again.
 ```console
 $ sisu run no_let.sisu
 error[E0200]: cannot find `greeting` in this scope
-  --> no_let.sisu:2:5
+  --> no_let.sisu:3:5
   |
-2 |     greeting = "Hei, maailma!"
+3 |     greeting = "Hei, maailma!"
   |     ^^^^^^^^
 
 error[E0200]: cannot find `greeting` in this scope
-  --> no_let.sisu:3:11
+  --> no_let.sisu:4:11
   |
-3 |     print(greeting)
+4 |     print(greeting)
   |           ^^^^^^^^
 
-error[D0006]: the program was not run: errors found (2)
+error[E0200]: cannot find `greeting` in this scope
+  --> no_let.sisu:5:11
+  |
+5 |     print(greeting)
+  |           ^^^^^^^^
+
+error[D0006]: the program was not run: errors found (3)
 ```
 
 Without `let` nothing creates `greeting`, so both lines name something

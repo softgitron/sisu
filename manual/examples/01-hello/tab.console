@@ -1,8 +1,8 @@
 $ sisu run tab.sisu
 error[E0001]: a tab in indentation; Sisu indents with spaces only
-  --> tab.sisu:2:1
+  --> tab.sisu:3:1
   |
-2 | 	print("Hei, maailma!")
+3 | 	print("Hei, maailma!")
   | ^
   = note: replace each tab with spaces
 

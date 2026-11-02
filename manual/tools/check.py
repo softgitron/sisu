@@ -13,7 +13,8 @@ manual is checked"). This script checks the rest:
    an expectation file (for .ws, .repl, .watch and .defer files, the
    standard output, before the line "--- stderr"), and
    <!-- unchecked: REASON --> says why a block is not checked. PATH is
-   relative to manual/. The block must equal the file.
+   relative to manual/. The block must equal the file; --bless copies
+   the file into the block, after rewriting the sessions.
 2. Sessions. A NAME.console file is a terminal session: a line starting
    "$ sisu " is a command and the lines after it are what it printed,
    standard output and standard error together. Each runs in a fresh
@@ -24,8 +25,8 @@ manual is checked"). This script checks the rest:
    "##! Exercise N.M, TITLE. Kind: KIND. Level: L."; the solution
    solutions/CHAPTER/NAME.sisu has the same `test` and `suite` blocks
    and passes them all; the exercise as it stands is not solved (a `fix`
-   exercise does not compile or fails a test; any other compiles and
-   passes no test).
+   exercise does not compile or fails a test, a challenge compiles and
+   passes no test, any other compiles with every test blocked by a hole).
 4. Sources. Every .sisu file has lines of at most 80 columns and is as
    `sisu fmt` writes it, unless it does not parse or NAME.unformatted
    says why; every example is shown by some page (its source, an
@@ -97,14 +98,16 @@ def sandbox(sources, extra):
     return tmp
 
 
-def check_pages(shown):
-    """Rule 1. Records in SHOWN every path a marker names."""
+def check_pages(shown, bless):
+    """Rule 1. Records in SHOWN every path a marker names; with BLESS,
+    rewrites a block that differs from its file."""
     blocks = unchecked = 0
     pages = []
     for top in PAGE_DIRS:
         pages += walk(top, ".md")
     for page in pages:
         lines = read(page).split("\n")
+        changed = False
         i = 0
         while i < len(lines):
             if not lines[i].startswith("```"):
@@ -135,8 +138,16 @@ def check_pages(shown):
             want = read(path)
             if kind == "output" and path.endswith(SECTIONED):
                 want = want.split("\n--- stderr\n")[0] + "\n"
-            if body != want:
+            if body != want and bless:
+                lines[start + 1:i - 1] = want[:-1].split("\n")
+                i = start + 1 + len(want[:-1].split("\n")) + 1
+                changed = True
+            elif body != want:
                 problem(where, f"the block differs from `{arg}`")
+        if changed:
+            with open(page, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+            print(f"blessed {rel(page)}")
     return len(pages), blocks, unchecked
 
 
@@ -252,10 +263,13 @@ def check_exercises(sisu, named):
             status, out = run(sisu, ["test", name], tmp)
             counts = summary(out)
             if kind == "fix":
-                if checked == 0 and status == 0 and counts and counts[1] == 0:
+                if checked == 0 and counts and counts[1] == 0:
                     problem(where, "a `fix` exercise must not compile, or must fail a test, as it stands")
-            elif checked != 0 or not counts or counts[0] != 0:
-                problem(where, f"a `{kind}` exercise must compile and pass no test as it stands")
+            elif kind == "challenge":
+                if checked != 0 or not counts or counts[0] != 0:
+                    problem(where, "a challenge must compile and pass no test as it stands")
+            elif checked != 0 or not counts or counts[:2] != (0, 0) or counts[2] == 0:
+                problem(where, f"a `{kind}` exercise must compile with every test blocked as it stands")
         finally:
             shutil.rmtree(tmp)
         tmp = sandbox(os.path.dirname(solution), os.path.join(os.path.dirname(solution), stem + ".files"))
@@ -314,8 +328,8 @@ def main():
         print(f"no sisu executable at {sisu}; build it or pass --sisu PATH")
         return 2
     shown = set()
-    pages, blocks, unchecked = check_pages(shown)
     sessions = check_sessions(sisu, bless)
+    pages, blocks, unchecked = check_pages(shown, bless)
     exercises = check_exercises(sisu, named_exercises())
     sources = check_sources(sisu, shown)
     for p in problems:

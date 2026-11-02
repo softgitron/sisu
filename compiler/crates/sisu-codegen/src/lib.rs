@@ -15,6 +15,7 @@
 //! has the mapping of each construct.
 
 mod debug;
+mod facts;
 mod func;
 mod fx;
 mod layout;

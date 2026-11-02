@@ -1,8 +1,8 @@
 $ sisu run open_string.sisu
 error[E0003]: this string literal is not closed before the end of the line
-  --> open_string.sisu:2:11
+  --> open_string.sisu:3:11
   |
-2 |     print("Hei, maailma!)
+3 |     print("Hei, maailma!)
   |           ^^^^^^^^^^^^^^^
   = fix: close it on its line: `"`
 

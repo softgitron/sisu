@@ -11,7 +11,7 @@ model that every other chapter follows. The research behind the plan is
 The tutorial is for programmers who know one language, most often
 Python, and know no Sisu. It assumes variables, functions, loops and
 lists, and it explains everything that is Sisu's own: blocks that have no
-value, `T ? `-free code without `null`, errors as values, ownership,
+value, optional values instead of `null`, errors as values, ownership,
 capabilities, tasks. It points out each place where a Python habit
 misleads ("From Python" notes; D-062 keeps the list short and exact).
 
@@ -79,7 +79,9 @@ of truthiness; `var` and augmented assignment; `const`; type annotations
 and local inference; implicit lossless widening and explicit conversions
 (`truncate_to`, `round_to`); rebinding in a scope and the shadowing
 warning. Exercises: predict the values of mixed expressions, fix a
-division, complete a temperature conversion. Stage 0 runs all of it.
+division, complete a temperature conversion. Stage 0 runs all of it
+except `round_to`, for which the chapter uses `round()` and
+`truncate_to_int()` until it lands.
 
 **3. Functions.** `def` with typed parameters and a result type, the
 rule that a value leaves only through `return` (D-056), functions that
@@ -89,8 +91,9 @@ arguments, keyword-only `*` and positional-only `/` parameters, variadic
 as an expression, recursion, doc comments `##` with examples that `sisu
 test` runs, `assert`, and typed holes in your own code (`todo`, D-061).
 Exercises: write small functions from their tests, including one whose
-doc example must pass. Stage 0 runs all of it except `sisu check
---holes`, which the section mentions as coming.
+doc example must pass. Stage 0 runs all of it except variadic `*xs`
+parameters and `sisu check --holes`, which the chapter mentions as
+coming.
 
 **4. Control flow.** `if`, `elif` and `else`; `while`; `for` over
 `range` (with a step) and over lists; `enumerate`; `break` and
@@ -104,13 +107,15 @@ Stage 0 runs all of it.
 **5. Collections.** `list` (literals, `push`, indexing, `xs[^1]` for the
 last element and the compile error for `xs[-1]`, slices), `dict`
 (literals, lookups, insertion-order iteration, `entry(k).or_insert(0) +=
-1`), `set`, tuples and star unpacking, `in`, comprehensions of all four
-kinds, the prelude functions (`len`, `sorted`, `sum`, `min`, `max`,
+1`), `set`, tuples and star unpacking, `in`, list, dict and set
+comprehensions, the prelude functions (`len`, `sorted`, `sum`, `min`, `max`,
 `any`, `all`, `zip` and `zip_shortest`, `reversed`), `Array[T, N]` in
 one section, and the first meeting with ownership: assigning a list moves
 it, the diagnostic that says so, and `.copy()`. Exercises: word
 frequencies, the second largest value, a fix exercise on a moved list.
-Stage 0 runs all of it.
+Stage 0 runs all of it except star unpacking in `let a, *rest = xs` (the
+list pattern `[a, *rest]` works in `match` and in `let ... else`) and
+list literals typed as `Array` (stage 0 builds one with `Array.filled`).
 
 **6. Text.** `str` and `String` and why both exist, interpolation in
 full (format specs such as `{x:>8}` and `{x:.2f}`, `{x:?}` for `Debug`),
@@ -121,7 +126,8 @@ instead (`byte_slice`), `char`, raw and multi-line literals, `bytes`
 literals, string literals that become a `Path` or a `Url` through
 `FromLiteral`, building text with `Builder`, and parsing numbers out of
 text. Exercises: a title-case function, a CSV line splitter, a Caesar
-cipher over `char`. Stage 0 runs all of it except grapheme iteration.
+cipher over `char`. Stage 0 runs all of it except grapheme iteration and
+the normalisation forms.
 
 **7. Structs and enums.** `struct` with fields and defaults,
 construction by keyword and by position, methods with `self` and `mut
@@ -142,7 +148,7 @@ free, inferred sets `T !`, results that must be used and `_ =`, `main`
 returning `! E` and the exit status, `.context(...)`, error traces, and
 panics as bugs, not errors. Exercises: parse a version string, a
 configuration lookup with a fallback, propagate through three layers.
-Stage 0 runs all of it.
+Stage 0 runs all of it except `.or_else`.
 
 **9. Project: a word counter.** The first complete program, built step
 by step: `sisu new`, the package layout (`sisu.toml`, `src/main.sisu`),
@@ -198,7 +204,7 @@ coherence and the orphan rule (with the root package's exception,
 D-013), newtypes with `@delegate` and `@derive(Into, From)`, and `impl
 Type` in another module (Q-12). Exercises: `Display` for a money type, an
 `Add` for vectors, a newtype that stops metres being added to seconds.
-Stage 0 runs all of it.
+Stage 0 runs all of it except `@derive(Into, From)`.
 
 **15. Generics.** Generic functions and types with bounds, `where`
 clauses, defaulted type parameters (D-060), bounds checked at the
@@ -215,7 +221,8 @@ the `Iterator` trait and its adapters (`map`, `filter`, `fold`, `take`,
 `collect[T]`), laziness, generators with `yield` and `Iter[T]`,
 generator expressions, and `?` inside closures with `try_map` and
 `try_collect`. Exercises: a pipeline over records, an infinite generator
-taken lazily, a fallible parse of many lines. Stage 0 runs all of it.
+taken lazily, a fallible parse of many lines. Stage 0 runs all of it
+except generator expressions, `try_map` and `try_collect`.
 
 **17. Modules and packages.** Files and directories as modules, `pub`
 and `pub(package)`, `import` and `from ... import`, re-exports, the
@@ -248,7 +255,8 @@ snapshots and transcripts with `--update`, doc examples, replay tokens,
 `@refines`, fakes of your own traits (`Fake[T]`), benchmarks, and the
 JSON output and cache. Exercises: turn three example-based tests into
 one property, write a transcript test for the word counter. Stage 0 runs
-all of it except `--fuzz`, `--cover` and `--mutate`.
+all of it except `@fixture`, `Expectation`, `--fuzz`, `--cover` and
+`--mutate`.
 
 **20. Concurrency.** `task.scope` and `spawn`, `join` and how error sets
 flatten, the scope's result, tasks that borrow from the frame, `Send`
@@ -307,8 +315,8 @@ attributes read as data, `embed`, `target` and `@cfg`, features,
 `@diagnostic_name`, `sisu eval` for configuration, and the checked string
 literals of [08](../proposal/08-metaprogramming.md). Exercises: a lookup
 table built at compile time, a derive that prints a struct's fields.
-Stage 0 runs all of it except `sisu eval` and the checked string
-literals.
+Stage 0 runs all of it except `@diagnostic_name`, `sisu eval` and the
+checked string literals.
 
 **26. Purity and data parallelism.** What `pure` promises and the rules
 behind it (insertion-ordered `dict`, strict floats, no operation that
@@ -316,7 +324,10 @@ observes the schedule), `pure` function types in higher-order code,
 `std.par` (`par_iter`, `par_iter_mut`, `par.join`, reducers, `grain`),
 serial elision, the lowest-index failure of `pure` scopes, and
 `SoaList[T]`. Exercises: a parallel histogram that gives the same bits on
-one worker and on eight. Stage 0 runs all of it except `SoaList`.
+one worker and on eight. Stage 0 spells the parallel loop `par.iter(xs)`
+and the parallel map `par.map`, runs the chunks on one task, and lacks
+`par_iter_mut` and `SoaList`; the chapter teaches the proposal's
+spelling once it runs.
 
 **27. Systems programming.** `unsafe` blocks and expressions, raw
 pointers, C interop (header import, `extern "C"`, `std.ffi`,
@@ -471,7 +482,7 @@ plan.
 | Blocks have no value; `return` only (D-056); `if` and `match` expressions | 3, 4 | R4, R5 | |
 | `else` and `else as e` fallbacks; `unsafe e`; `comptime e` | 8, 27, 25 | R4 | |
 | Places, assignment, augmented assignment, no walrus | 2, 5 | R5 | G2 |
-| Operators and precedence, `//`, `%`, `+%`, `+|`, mixing rules, chains | 2, 24 | R4 | |
+| Operators and precedence, `//`, `%`, `+%`, `+\|`, mixing rules, chains | 2, 24 | R4 | |
 | No truthiness, `and`, `or`, `not` (D-025); `==` without `is`; `in` | 2, 5, 13 | R4 | X8 |
 | `if`, chained conditions (D-071), `if let`, `let ... else`, `while`, `while let` | 4, 8 | R5 | |
 | `for` in three modes, `enumerate`, `range` | 4, 5, 11 | R5 | |
@@ -635,8 +646,9 @@ The conformance runner reads the forms of
 identifier (required whenever a program has diagnostics, since an absent
 `.diag` means none), `NAME.test` for `sisu test`, `NAME.ws` for a
 worksheet, and `NAME.unformatted` for a file kept unformatted on purpose,
-with the reason. Every example is therefore also a conformance case, run
-under the ownership monitor and recorded and replayed.
+with the reason. Every example is therefore a conformance case too, and
+one that runs is also run under the ownership monitor, recorded and
+replayed.
 
 The manual's checker reads one more form, the session: `NAME.console`,
 which is what a terminal shows. A line starting `$ sisu ` is a command,
@@ -685,7 +697,9 @@ Levels: **1** practises one idea of the chapter and takes minutes; **2**
 combines the chapter's ideas; **3** brings in earlier chapters and asks
 for a design. A chapter has three to eight exercises, starting at level
 1, with at least one `fix`; a `predict` exercise comes before the first
-`write` in any chapter that has one.
+`write` in any chapter that has one. Chapter 1 is the exception, with one
+exercise, because its section "Break it on purpose" is its practice in
+fixing.
 
 Hints live in the chapter, under the exercise, in folded `<details>`
 blocks, two or three per exercise, each narrower than the last; the last
@@ -747,6 +761,8 @@ in a job of its own (to add to [ci.yml](../.github/workflows/ci.yml)):
           rustup override set 1.97.0
       - name: Build
         run: cargo build -p sisu-driver -p sisu-conformance
+      - name: Stage 1, the front end of `sisu` (built natively on first use)
+        run: ./target/debug/sisu tokens std/prelude.sisu > /dev/null
       - name: Examples, as conformance cases
         run: ./target/debug/sisu-conformance --sisu target/debug/sisu ../manual/examples
       - name: Solutions, as conformance cases
@@ -821,17 +837,19 @@ The setup of R18, the generated library reference, belongs to step 12's
 site; until then `sisu doc --std` serves it locally. R17 grows with every
 chapter: each diagnostic a page shows gets its entry.
 
-## What writing chapter 1 found
+## What the plan found in stage 0
 
-Writing the first chapter against stage 0 turned up five things for the
-compiler's maintainers, recorded here so that later chapters do not
-rediscover them:
+Writing the first chapter, and trying the habits chapter 4 will meet,
+against stage 0 turned up five things for the compiler's maintainers,
+recorded here so that later chapters do not rediscover them:
 
 - `print("Hei,", "maailma!")`, the commonest Python habit, gets E0305
   (`type.argument-count`) with no fix; the fix that teaches is
   interpolation, `print("Hei, {x}")`.
 - An assignment to an undeclared name, `greeting = "..."`, gets E0200 on
-  each use and no fix; the fix is `let`.
+  each use and no fix; the fix is `let`. A Python loop `else` gets E0103
+  (`parse.expected-expression`), where the fix is the `if let` on the
+  search's result that [02](../proposal/02-syntax.md) gives.
 - `{x=:.1f}` ignores the precision for a float and prints every digit,
   though [02](../proposal/02-syntax.md) says a format spec may follow the
   `=`; `{n=:>5}` works.
@@ -843,6 +861,18 @@ rediscover them:
   session; the manual's sessions cover the first, and the manual shows
   worksheets rather than REPL sessions until the `sisu>` transcripts of
   [17](../proposal/17-testing.md) exist.
+
+Planning the later chapters turned up the parts of the proposal that
+they teach and stage 0 does not run yet, each named in its chapter's
+paragraph: variadic parameters, star unpacking in `let`, generator
+expressions, list literals typed as `Array`, `round_to`, `.or_else`,
+`try_map` and `try_collect`, `@derive(Into, From)`, `@fixture` and
+`Expectation`, grapheme iteration, `xs.par_iter()` and `par_iter_mut`,
+`SoaList`, `@float(fast)`, `@diagnostic_name`, `--fuzz`, `--cover` and
+`--mutate`, `sisu check --holes`, `sisu test`'s JSON output, and the
+commands `lint`, `add`, `update`, `publish`, `review`, `fix`, `why` and
+`eval`, besides the foreign functions, allocators, resource attributes
+and registry that chapters 27 and 28 wait for.
 
 ## Open questions
 

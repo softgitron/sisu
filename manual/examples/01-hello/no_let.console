@@ -1,14 +1,20 @@
 $ sisu run no_let.sisu
 error[E0200]: cannot find `greeting` in this scope
-  --> no_let.sisu:2:5
+  --> no_let.sisu:3:5
   |
-2 |     greeting = "Hei, maailma!"
+3 |     greeting = "Hei, maailma!"
   |     ^^^^^^^^
 
 error[E0200]: cannot find `greeting` in this scope
-  --> no_let.sisu:3:11
+  --> no_let.sisu:4:11
   |
-3 |     print(greeting)
+4 |     print(greeting)
   |           ^^^^^^^^
 
-error[D0006]: the program was not run: errors found (2)
+error[E0200]: cannot find `greeting` in this scope
+  --> no_let.sisu:5:11
+  |
+5 |     print(greeting)
+  |           ^^^^^^^^
+
+error[D0006]: the program was not run: errors found (3)

@@ -1,1 +1,1 @@
-2:5-2:30 E0305 type.argument-count name="print" expected="1" found="2"
+3:5-3:30 E0305 type.argument-count name="print" expected="1" found="2"

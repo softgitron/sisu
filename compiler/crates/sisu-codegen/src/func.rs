@@ -110,6 +110,14 @@ struct Cx<'a, 'p> {
     /// The slot of each local whose iterator lives in the frame
     /// ([`frame_iterators`]).
     frames: Vec<Option<ir::StackSlot>>,
+    /// In the release profile, what is known about the integers at each
+    /// point (decision 270), and the state before the statement being
+    /// translated.
+    facts: Option<crate::facts::Facts>,
+    known: Option<crate::facts::State>,
+    /// The blocks every path from which ends in a panic or in unwinding:
+    /// cold, placed after the rest of the function.
+    cold: Vec<bool>,
 }
 
 /// Whether a type is a number, `bool`, `char` or `()`: one word or none,
@@ -160,7 +168,15 @@ impl<'a, 'p> Cx<'a, 'p> {
         let tys: Vec<Type> = f.locals.iter().map(|l| cg.concrete(&l.ty, targs)).collect::<Result<_, _>>()?;
         let in_registers =
             if cg.release { register_locals(f, &tys, closure) } else { vec![false; tys.len()] };
-        let frames = frame_iterators(f, &tys)
+        let framed = frame_iterators(f, &tys);
+        let facts = cg.release.then(|| {
+            let constant = |name: &str| match cg.function(name).and_then(returned_constant) {
+                Some(Const::Int(c)) => Some(*c),
+                _ => None,
+            };
+            crate::facts::Facts::of(f, &tys, &in_registers, &framed, &constant)
+        });
+        let frames = framed
             .into_iter()
             .map(|framed| {
                 framed.then(|| {
@@ -268,6 +284,9 @@ impl<'a, 'p> Cx<'a, 'p> {
             kept,
             reload: Vec::new(),
             frames,
+            facts,
+            known: None,
+            cold: cold_blocks(f),
         };
         cx.prologue()?;
         Ok(cx)
@@ -707,14 +726,24 @@ impl<'a, 'p> Cx<'a, 'p> {
         self.b.switch_to_block(cont);
     }
 
-    /// Continues when `ok` holds; else calls the runtime entry point that
-    /// raises the panic (`raise`, with `args`) and takes the failure path.
-    fn guard(&mut self, ok: Value, raise: &'static str, args: &[Value]) -> Result<(), Error> {
+    /// Continues unless `bad` holds; else calls the runtime entry point
+    /// that raises the panic (`raise`, with the arguments `args` makes) and
+    /// takes the failure path. The failure is a cold block, placed after
+    /// the rest of the function, so the common path is one branch not
+    /// taken; the arguments are made there (decision 270).
+    fn guard_if(
+        &mut self,
+        bad: Value,
+        raise: &'static str,
+        args: impl FnOnce(&mut Self) -> Vec<Value>,
+    ) -> Result<(), Error> {
         let cont = self.b.create_block();
-        let bad = self.b.create_block();
-        self.b.ins().brif(ok, cont, &[], bad, &[]);
-        self.b.switch_to_block(bad);
-        self.rt(raise, args)?;
+        let failed = self.b.create_block();
+        self.b.ins().brif(bad, failed, &[], cont, &[]);
+        self.b.set_cold_block(failed);
+        self.b.switch_to_block(failed);
+        let args = args(self);
+        self.rt(raise, &args)?;
         let fail = self.fail_block();
         self.b.ins().jump(fail, &[]);
         self.b.switch_to_block(cont);
@@ -724,6 +753,7 @@ impl<'a, 'p> Cx<'a, 'p> {
     fn emit_fails(&mut self) -> Result<(), Error> {
         for i in 0..self.fails.len() {
             let Some(fb) = self.fails[i] else { continue };
+            self.b.set_cold_block(fb);
             self.b.switch_to_block(fb);
             let block = &self.f.blocks[i];
             if let Some(l) = block.loc.or(self.f.loc) {
@@ -760,7 +790,11 @@ impl<'a, 'p> Cx<'a, 'p> {
         for (i, block) in self.f.blocks.iter().enumerate() {
             self.cur = i;
             let cb = self.blocks[i];
+            if self.cold[i] {
+                self.b.set_cold_block(cb);
+            }
             self.b.switch_to_block(cb);
+            self.known = self.facts.as_ref().and_then(|f| f.entry(i));
             for s in &block.stmts {
                 self.cg.statements += 1;
                 if let Some(loc) = s.loc {
@@ -768,6 +802,9 @@ impl<'a, 'p> Cx<'a, 'p> {
                 }
                 self.statement(&s.kind)?;
                 self.reload_vars();
+                if let (Some(f), Some(st)) = (&self.facts, &mut self.known) {
+                    f.step(st, &s.kind);
+                }
             }
             self.cg.statements += 1;
             if let Some(loc) = block.loc {
@@ -794,6 +831,20 @@ impl<'a, 'p> Cx<'a, 'p> {
                     self.yield_check()?;
                 }
                 let target = self.blocks[bb.0 as usize];
+                self.b.ins().jump(target, &[]);
+            }
+            Terminator::Switch { value, cases, default }
+                if let (Some(f), Some(st)) = (&self.facts, &self.known)
+                    && let Some(v) = f.decided(st, value) =>
+            {
+                // A test the facts decide (decision 270): a jump to where
+                // its value goes.
+                let k = u64::from(v);
+                let t = cases.iter().find(|(c, _)| *c as u64 == k).map_or(default.0, |(_, b)| b.0) as usize;
+                if t <= self.cur {
+                    self.yield_check()?;
+                }
+                let target = self.blocks[t];
                 self.b.ins().jump(target, &[]);
             }
             Terminator::Switch { value, cases, default } => {
@@ -982,7 +1033,8 @@ impl<'a, 'p> Cx<'a, 'p> {
             None => self.local_addr(p.local)?,
         };
         let mut variant: Option<u32> = None;
-        for proj in projs {
+        let skipped = p.proj.len() - projs.len();
+        for (n, proj) in projs.iter().enumerate() {
             match proj {
                 Proj::Deref => {
                     let shared = matches!(&ty, Type::Named(n, _) if n == "Shared");
@@ -1039,13 +1091,28 @@ impl<'a, 'p> Cx<'a, 'p> {
                     let from_end = matches!(proj, Proj::IndexFromEnd(_));
                     let (idx, _) = self.scalar(&Operand::Copy(Place::local(*l)))?;
                     let data = self.load(addr, 0);
-                    let len = self.load(addr, 8);
-                    let at = if from_end { self.b.ins().isub(len, idx) } else { idx };
-                    // In bounds: `0 <= i < len`, or `0 < i <= len` from the end.
-                    let probe = if from_end { self.b.ins().iadd_imm(idx, -1) } else { idx };
-                    let ok = self.b.ins().icmp(IntCC::UnsignedLessThan, probe, len);
-                    let fe = self.iconst(i64::from(from_end));
-                    self.guard(ok, sym::PANIC_INDEX, &[idx, len, fe])?;
+                    // In the release profile, an index the facts prove in
+                    // bounds is not tested again (decision 270).
+                    let list = Place { local: p.local, proj: p.proj[..skipped + n].to_vec() };
+                    let proven = !from_end
+                        && match (&self.facts, &self.known) {
+                            (Some(f), Some(st)) => f.in_bounds(st, &list, l.0),
+                            _ => false,
+                        };
+                    let at = if from_end {
+                        let len = self.load(addr, 8);
+                        self.b.ins().isub(len, idx)
+                    } else {
+                        idx
+                    };
+                    if !proven {
+                        // In bounds: `0 <= i < len`, or `0 < i <= len` from
+                        // the end.
+                        let len = self.load(addr, 8);
+                        let probe = if from_end { self.b.ins().iadd_imm(idx, -1) } else { idx };
+                        let bad = self.b.ins().icmp(IntCC::UnsignedGreaterThanOrEqual, probe, len);
+                        self.guard_if(bad, sym::PANIC_INDEX, |cx| vec![idx, len, cx.iconst(i64::from(from_end))])?;
+                    }
                     let off = self.b.ins().imul_imm(at, i64::from(size));
                     addr = self.b.ins().iadd(data, off);
                     ty = elem;
@@ -1360,10 +1427,10 @@ impl<'a, 'p> Cx<'a, 'p> {
         let k = scalar_kind(&ty);
         let r = match (op, k) {
             (UnOp::Neg, Some(Scalar::Int)) => {
-                let min = self.b.ins().icmp_imm(IntCC::NotEqual, x, i64::MIN);
-                let code = self.i32const(IntOp::Neg as u32);
-                let zero = self.iconst(0);
-                self.guard(min, sym::PANIC_OVERFLOW, &[code, x, zero])?;
+                let min = self.b.ins().icmp_imm(IntCC::Equal, x, i64::MIN);
+                self.guard_if(min, sym::PANIC_OVERFLOW, |cx| {
+                    vec![cx.i32const(IntOp::Neg as u32), x, cx.iconst(0)]
+                })?;
                 self.b.ins().ineg(x)
             }
             (UnOp::Neg, Some(Scalar::Float)) => {
@@ -1473,7 +1540,16 @@ impl<'a, 'p> Cx<'a, 'p> {
             return Ok(Val::Words(vec![r]));
         }
         let r = match k {
-            Scalar::Int => self.int_op(op, x, y)?,
+            Scalar::Int => {
+                // In the release profile, an operation whose operands'
+                // bounds rule out an overflow is the plain instruction
+                // (decision 270).
+                let checked = match (&self.facts, &self.known) {
+                    (Some(f), Some(st)) => !f.cannot_overflow(st, op, a, b),
+                    _ => true,
+                };
+                self.int_op(op, x, y, checked)?
+            }
             Scalar::Float => {
                 let (fx, fy) = (
                     self.b.ins().bitcast(types::F64, MemFlags::new(), x),
@@ -1682,22 +1758,31 @@ impl<'a, 'p> Cx<'a, 'p> {
         }
     }
 
-    fn int_op(&mut self, op: BinOp, x: Value, y: Value) -> Result<Value, Error> {
-        let checked = |op: BinOp| match op {
+    /// An operation on two `int`s; `+`, `-` and `*` test the processor's
+    /// overflow flag (Cranelift's `sadd_overflow` and the others) and
+    /// branch to a cold block that raises the panic, unless `checked` is
+    /// false, when the facts prove it cannot overflow (decision 270).
+    fn int_op(&mut self, op: BinOp, x: Value, y: Value, checked: bool) -> Result<Value, Error> {
+        let overflowing = |op: BinOp| match op {
             BinOp::Add => Some(IntOp::Add),
             BinOp::Sub => Some(IntOp::Sub),
             BinOp::Mul => Some(IntOp::Mul),
             _ => None,
         };
-        if let Some(iop) = checked(op) {
+        if let Some(iop) = overflowing(op) {
+            if !checked {
+                return Ok(match iop {
+                    IntOp::Add => self.b.ins().iadd(x, y),
+                    IntOp::Sub => self.b.ins().isub(x, y),
+                    _ => self.b.ins().imul(x, y),
+                });
+            }
             let (r, of) = match iop {
                 IntOp::Add => self.b.ins().sadd_overflow(x, y),
                 IntOp::Sub => self.b.ins().ssub_overflow(x, y),
                 _ => self.b.ins().smul_overflow(x, y),
             };
-            let ok = self.b.ins().icmp_imm(IntCC::Equal, of, 0);
-            let code = self.i32const(iop as u32);
-            self.guard(ok, sym::PANIC_OVERFLOW, &[code, x, y])?;
+            self.guard_if(of, sym::PANIC_OVERFLOW, |cx| vec![cx.i32const(iop as u32), x, y])?;
             return Ok(r);
         }
         let runtime = match op {
@@ -3231,6 +3316,42 @@ impl Frames {
     fn operand(&mut self, o: &Operand) {
         if let Operand::Copy(p) | Operand::Move(p) = o {
             self.place(p);
+        }
+    }
+}
+
+/// The blocks every path from which ends in a panic or in unwinding: a
+/// cleanup block, one that ends in `unreachable` (after the call that
+/// panicked, a contract's failure among them) or `resume`, and one whose
+/// every successor is such; never the entry. Each is cold (decision 270).
+fn cold_blocks(f: &sir::Function) -> Vec<bool> {
+    let mut cold: Vec<bool> = f
+        .blocks
+        .iter()
+        .enumerate()
+        .map(|(i, b)| i != 0 && (b.cleanup || matches!(b.term, Terminator::Unreachable | Terminator::Resume)))
+        .collect();
+    loop {
+        let mut changed = false;
+        for (i, b) in f.blocks.iter().enumerate() {
+            if i == 0 || cold[i] {
+                continue;
+            }
+            let all = match &b.term {
+                Terminator::Goto(t) => cold.get(t.0 as usize).copied().unwrap_or(false),
+                Terminator::Switch { cases, default, .. } => {
+                    cases.iter().all(|(_, t)| cold.get(t.0 as usize).copied().unwrap_or(false))
+                        && cold.get(default.0 as usize).copied().unwrap_or(false)
+                }
+                _ => false,
+            };
+            if all {
+                cold[i] = true;
+                changed = true;
+            }
+        }
+        if !changed {
+            return cold;
         }
     }
 }

@@ -1,8 +1,8 @@
 $ sisu run no_colon.sisu
 error[E0100]: expected `:`, found the end of the line
-  --> no_colon.sisu:1:11
+  --> no_colon.sisu:2:11
   |
-1 | def main()
+2 | def main()
   |           ^
   = fix: write the missing token: `:`
 
