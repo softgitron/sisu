@@ -1,0 +1,11 @@
+$ sisu test wrong_shout.sisu
+test "shout ends with an exclamation mark" ... FAILED
+
+test "shout ends with an exclamation mark" ... FAILED
+panic: assertion failed: shout("hei") == "hei!"
+  left:  "hei."
+  right: "hei!"
+  at test "shout ends with an exclamation mark" (wrong_shout.sisu:6:5)
+replay: sisu test --replay 1-32eed1c1c3c9d5d9-0.0.1-t0-s0-r0 wrong_shout.sisu
+
+0 passed, 1 failed, 0 blocked

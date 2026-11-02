@@ -1,0 +1,9 @@
+# Values go into text between braces.
+def main():
+    let name = "Aino"
+    let year = 2026
+    print("Hei, {name}!")
+    print("{name} started learning Sisu in {year}.")
+    print("Next year is {year + 1}.")
+    print("{year=}")
+    print("Braces are written {{ and }}.")

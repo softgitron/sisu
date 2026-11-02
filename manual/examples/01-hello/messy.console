@@ -1,0 +1,10 @@
+$ sisu fmt --check messy.sisu
+`messy.sisu` is not formatted; `sisu fmt` would change it:
+@@ line 1 @@
+  def main():
+-   print("Hei, maailma!")
+-   print("Formatted by sisu fmt.")
++     print("Hei, maailma!")
++     print("Formatted by sisu fmt.")
+$ sisu fmt messy.sisu
+$ sisu fmt --check messy.sisu

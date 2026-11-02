@@ -14,7 +14,7 @@ fn compiler_dir() -> PathBuf {
 
 #[test]
 fn native_conformance() {
-    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let sisu = sisu_conformance::Sisu::new(env!("CARGO_BIN_EXE_sisu"));
     let root = compiler_dir().join("conformance/cases");
     let text =
         std::fs::read_to_string(compiler_dir().join("conformance/native.list")).expect("the coverage list");
@@ -30,7 +30,7 @@ fn native_conformance() {
 /// `sisu build --native --from-sir`, the front end not run.
 #[test]
 fn native_conformance_from_sir() {
-    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let sisu = sisu_conformance::Sisu::new(env!("CARGO_BIN_EXE_sisu"));
     let root = compiler_dir().join("conformance/cases");
     let text =
         std::fs::read_to_string(compiler_dir().join("conformance/native.list")).expect("the coverage list");
@@ -46,7 +46,7 @@ fn native_conformance_from_sir() {
 /// optimisations change nothing a program does.
 #[test]
 fn native_conformance_release() {
-    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let sisu = sisu_conformance::Sisu::new(env!("CARGO_BIN_EXE_sisu"));
     let root = compiler_dir().join("conformance/cases");
     let text =
         std::fs::read_to_string(compiler_dir().join("conformance/native.list")).expect("the coverage list");
@@ -62,7 +62,7 @@ fn native_conformance_release() {
 /// it: what a front end serialised meets the expectations the source does.
 #[test]
 fn interpreted_conformance_from_sir() {
-    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let sisu = sisu_conformance::Sisu::new(env!("CARGO_BIN_EXE_sisu"));
     let root = compiler_dir().join("conformance/cases");
     let text =
         std::fs::read_to_string(compiler_dir().join("conformance/native.list")).expect("the coverage list");

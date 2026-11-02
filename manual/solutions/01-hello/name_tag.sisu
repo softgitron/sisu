@@ -1,0 +1,14 @@
+##! Exercise 1.1, a name tag: the solution.
+##!
+##! One interpolated string does the work: each `{...}` is replaced by
+##! the value of the name between the braces.
+
+## The text of the name tag for `name`, who comes from `town`.
+def name_tag(name: str, town: str) -> String:
+    return "Hei! I am {name} from {town}."
+
+test "a tag for Aino from Oulu":
+    assert name_tag("Aino", "Oulu") == "Hei! I am Aino from Oulu."
+
+test "a tag for Eero from Turku":
+    assert name_tag("Eero", "Turku") == "Hei! I am Eero from Turku."

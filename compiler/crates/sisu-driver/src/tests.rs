@@ -39,9 +39,13 @@ fn temp_file(name: &str, text: &str) -> String {
     path.display().to_string()
 }
 
+/// The command line in this process, with the Rust front end: stage 1's
+/// path runs this executable as its backend, which a test harness is not
+/// (the `sisu` binary's tests and the conformance suite run that path).
 fn cli(args: &[&str]) -> (i32, TestHost) {
     let mut host = TestHost::default();
-    let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    let args: Vec<String> =
+        std::iter::once("--front-end=rust").chain(args.iter().copied()).map(|s| s.to_string()).collect();
     let code = execute(&args, &mut host);
     (code, host)
 }

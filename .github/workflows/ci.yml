@@ -58,7 +58,7 @@ jobs:
           if-no-files-found: warn
 
   compiler:
-    name: stage-0 compiler format, lints, build, tests and conformance
+    name: compiler format, lints, build, tests and conformance through stage 1
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -78,21 +78,32 @@ jobs:
         run: cargo clippy --all-targets
       - name: Build
         run: cargo build
+      - name: Stage 1, the front end of `sisu` (built natively on first use)
+        # `sisu` runs stage 1, the front end written in Sisu, for `check`,
+        # `sir`, `build`, `run`, `fmt`, `doc`, `tokens` and `parse`
+        # (decision 268); the first command builds it from compiler/stage1
+        # with the Rust front end into target/stage1/sisu1.
+        run: ./target/debug/sisu tokens std/prelude.sisu > /dev/null
       - name: sisu fmt --check (std and the canonical conformance cases)
+        # Stage 1's formatter, over every case file that parses, unless
+        # NAME.unformatted says why the case is not in canonical form
+        # (conformance/README.md), in one run.
         run: |
-          ./target/debug/sisu fmt --check std
-          # Every case file that parses, unless NAME.unformatted says why
-          # the case is not in canonical form (conformance/README.md).
-          status=0
+          files=()
           while read -r f; do
             base="${f%%.pkg/*}"
             [ "$base" = "$f" ] && base="${f%.sisu}"
             [ -e "$base.unformatted" ] && continue
             ./target/debug/sisu parse --shape "$f" > /dev/null 2>&1 || continue
-            ./target/debug/sisu fmt --check "$f" || status=1
+            files+=("$f")
           done < <(find conformance/cases -name '*.sisu' -not -path '*.files/*' | sort)
-          exit $status
-      - name: Tests (unit tests and the conformance suite)
+          ./target/debug/sisu fmt --check std "${files[@]}"
+      - name: Tests (unit tests and the conformance suite, through stage 1)
+        # The suite's expectations (`.diag`, `.sir`, `.doc`, `.out`, `.err`,
+        # `.status`, ...) against what `sisu` prints with stage 1 as its
+        # front end; the commands stage 1 does not serve yet (`test`,
+        # `bench`, `repl`, `ws`, `run --watch`, `replay`, ...) run on the
+        # Rust front end (docs/port-debt.md).
         run: cargo test
       - name: Speed (informational, never fails)
         # Front-end milliseconds per kLOC and interpreter nanoseconds per
@@ -134,10 +145,13 @@ jobs:
       - name: Build the compiler, the runtime and the runner
         run: cargo build
       - name: Native conformance (conformance/native.list)
+        # Each case built by `sisu build --native`, its front end stage 1's
+        # (decision 268), and run.
         run: ./target/debug/sisu-conformance --sisu target/debug/sisu --native conformance/native.list
       - name: Native conformance from serialised SIR (`--from-sir`)
         # The path a self-hosted front end takes (decision 212): each case
-        # built from its own `.sir`, else from what `sisu sir` prints.
+        # built from its own `.sir`, else from what `sisu sir` prints,
+        # which is stage 1's SIR.
         run: ./target/debug/sisu-conformance --sisu target/debug/sisu --native-from-sir conformance/native.list
       - name: Native conformance, release profile (`--release`)
         # Cranelift's optimisations, every contract checked (decision 232).
@@ -146,15 +160,16 @@ jobs:
         # What a front end serialised, run rather than compiled (decision 254).
         run: ./target/debug/sisu-conformance --sisu target/debug/sisu --interpreted-from-sir conformance/native.list
       - name: Stage 1 compiled natively (informational, never fails)
-        # The bootstrap path: stage 1 built by the backend, its token
-        # stream and tree of the prelude against stage 0's.
+        # The bootstrap path: stage 1 built by the backend with stage 1 as
+        # its front end, its token stream and tree of the prelude against
+        # the Rust front end's (`--front-end=rust`, the oracle).
         continue-on-error: true
         working-directory: compiler/stage1
         run: |
           ../target/debug/sisu build --native --output "$RUNNER_TEMP/stage1"
           "$RUNNER_TEMP/stage1" tokens --trivia ../std/prelude.sisu > "$RUNNER_TEMP/tokens.native"
-          ../target/debug/sisu tokens --trivia ../std/prelude.sisu > "$RUNNER_TEMP/tokens.stage0"
+          ../target/debug/sisu --front-end=rust tokens --trivia ../std/prelude.sisu > "$RUNNER_TEMP/tokens.stage0"
           cmp "$RUNNER_TEMP/tokens.native" "$RUNNER_TEMP/tokens.stage0"
           "$RUNNER_TEMP/stage1" parse --tree ../std/prelude.sisu > "$RUNNER_TEMP/tree.native"
-          ../target/debug/sisu parse --tree ../std/prelude.sisu > "$RUNNER_TEMP/tree.stage0"
+          ../target/debug/sisu --front-end=rust parse --tree ../std/prelude.sisu > "$RUNNER_TEMP/tree.stage0"
           cmp "$RUNNER_TEMP/tree.native" "$RUNNER_TEMP/tree.stage0"

@@ -485,6 +485,86 @@ in the host's display text (`format.rs`) because error sets display
 structurally. *Pay*: a `Display` impl in the prelude, when error sets can
 have impls that the fast path respects.
 
+## The Rust front end's roles still to replace
+
+Since decision 268 the `sisu` command's front end is stage 1, compiled
+natively: `check`, `sir`, `build` (`--native` too), `run` (in the
+interpreter from the SIR stage 1 serialised, and `--native`), `fmt`,
+`doc`, `tokens` and `parse` print what stage 1 prints. The Rust front end
+(the crates from `sisu-lexer` to `sisu-borrowck`, `sisu-fmt`, and the
+driver's `db.rs`, `doc.rs` and `format.rs`) is the oracle, behind
+`--front-end=rust` and `SISU_FRONT_END=rust`, and still does these, each a
+role to replace before it can be deleted, when the flag and the Rust
+branches of `cli.rs` go with it:
+
+- **The language server** (`sisu lsp`), **the REPL** (`sisu repl`),
+  **worksheets** (`sisu ws`), **hot replacement** (`sisu run --watch`),
+  and **the capability log and replay** (`sisu run --record`, `sisu
+  replay`, whose log `replay` compiles again from the source it holds):
+  each needs the front end in the process, its queries kept between edits
+  (the memo), or the diagnostics and the program as data. *Pay*: stage 1
+  as a library of the tools, or a server of its queries the tools ask;
+  the REPL and worksheets need only a program checked and lowered per
+  input, which stage 1's `build` gives.
+- **`sisu test` and `sisu bench`**: stage 1 has no command that prints the
+  SIR of a program built with its tests (its `sir` prints the program as
+  `sisu run` builds it, without them, decision 243; its `check` lowers the
+  tests for the ownership checker and prints only the diagnostics), and
+  SIR does not carry a test's tags nor a benchmark's name, which the
+  runner reads from the Rust front end's resolved program, nor the
+  transcript world's functions, which `sir_with` keeps. Stage 1's own
+  tests run on the Rust front end for the same reason. *Pay*: a stage-1
+  `sir --tests` printing that SIR with the tags and names, and the driver
+  running the tests of a SIR file, as `run --from-sir` runs a program.
+- **`sisu run --defer-borrow`** (the counterexample mode: the ownership
+  checker's findings beside the monitored run), **`sisu check --diary`**
+  (the diagnostics as data, with their bytes), **`sisu explain-borrow`**
+  (stage 1 has the checker but not `explain.rs`), **`sisu audit`** and
+  **`sisu parse --shape`** (what formatting keeps, which stage 1's
+  formatter computes but no command prints). *Pay*: each as a command of
+  stage 1, or its output in a form the driver reads.
+- **Building stage 1** the first time and after a source of it changed:
+  `compiler/target/stage1/sisu1` is built by the Rust front end (`sisu
+  build --native` in `compiler/stage1`), so stage 1's own sources must stay
+  within the language the Rust front end knows. *Pay*: once they need a
+  rule only stage 1 has, the previous stage-1 executable builds the next
+  (the fixed point says the result is the same program), from a seed kept
+  as a released executable.
+
+What the driver does around stage 1, because of what its commands are:
+
+- **Stage 1 names its backend `{home}/target/release/sisu`** (`--home`,
+  where it also reads the catalog and the standard library), so for a
+  native build the driver gives it a home of links whose
+  `target/release/sisu` is the running `sisu`, which the executable then
+  links its runtime from; and to run a program rather than compile it,
+  stage 1's `build --native` is asked for, with `SISU_KEEP_SIR` in its
+  environment, which makes that backend keep the SIR it is given instead
+  of compiling it. *Pay*: a stage-1 `build --sir OUT` (the build's
+  diagnostics and checks, then the SIR written out), and the backend named
+  by the caller.
+- **Stage 1's `sir` prints nothing for a program with a front-end error**
+  and no warnings at all, where the Rust front end's prints the errors and
+  `D0006` (status 1) and its warnings: the driver then runs stage 1's
+  plain `build` to report the errors, and `sisu sir` of a program that
+  warns prints only the SIR. *Pay*: the reports in stage 1's `sir`.
+- **A missing file and a directory without a package** are reported by
+  the driver, with the Rust front end's messages and statuses (`D0001`,
+  `D0064` with status 2), before stage 1 runs: stage 1 stops on them with
+  an `IoError` of its `main`, or a status of 1. So is the application of a
+  workspace that `sisu run` runs (`D0067`), whose directory stage 1 is
+  given, and a program without `main` (`D0005`, `D0069`).
+- **A Sisu program exits with 1 only by returning an error**, which its
+  run time prints last: the driver takes stage 1's `error: Failed` off its
+  standard error, and `error: Exit(status=N)` too, whose N is the status.
+  Stage 1 knows the working directory by `PWD`, which the driver sets.
+- **Stage 1 starts from nothing at every command**: the standard library
+  is resolved again each time (the base, about 0.3 s of the 0.5 s a small
+  program's `check` takes, against 55 ms for the Rust front end), so the
+  conformance suite takes about three times as long through stage 1.
+  *Pay*: what the memo is for the Rust front end ("The memo is not kept
+  between commands" above), for stage 1: its base kept between commands.
+
 ## Stage 2: what the native backend leaves out
 
 The native debug backend (architecture.md, "Stage 2") compiles every

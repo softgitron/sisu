@@ -1,0 +1,6 @@
+# A test that fails: `shout` ends the word with the wrong mark.
+def shout(word: str) -> String:
+    return "{word}."
+
+test "shout ends with an exclamation mark":
+    assert shout("hei") == "hei!"

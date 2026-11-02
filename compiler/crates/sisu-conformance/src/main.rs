@@ -1,6 +1,9 @@
-//! `sisu-conformance [--bless] [--sisu PATH] [ROOT]`: runs the suite with
-//! the `sisu` executable at PATH (default: `sisu` on the search path)
-//! over the cases under ROOT (default: `conformance/cases`).
+//! `sisu-conformance [--bless] [--sisu PATH] [--front-end=NAME] [ROOT]`:
+//! runs the suite with the `sisu` executable at PATH (default: `sisu` on
+//! the search path) over the cases under ROOT (default:
+//! `conformance/cases`). `--front-end=stage1` or `--front-end=rust` asks
+//! the executable for that front end (`SISU_FRONT_END`, decision 268);
+//! without it, the executable's default, stage 1.
 //!
 //! `--native LIST` builds and runs natively the cases the coverage list
 //! names instead (`sisu build --native`), `--native-from-sir LIST` builds
@@ -23,10 +26,16 @@ fn main() {
     let mut from_sir = false;
     let mut release = false;
     let mut interpreted = false;
+    let mut front_end: Option<String> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
+        if let Some(name) = a.strip_prefix("--front-end=") {
+            front_end = Some(name.to_string());
+            continue;
+        }
         match a.as_str() {
             "--bless" => bless = true,
+            "--front-end" => front_end = args.next(),
             "--sisu" => {
                 if let Some(p) = args.next() {
                     sisu = PathBuf::from(p);
@@ -48,7 +57,14 @@ fn main() {
             other => root = PathBuf::from(other),
         }
     }
+    if let Some(name) = front_end.as_deref()
+        && !matches!(name, "stage1" | "rust")
+    {
+        eprintln!("--front-end takes `stage1` or `rust`, not `{name}`");
+        std::process::exit(2);
+    }
     let sisu = std::fs::canonicalize(&sisu).unwrap_or(sisu);
+    let sisu = sisu_conformance::Sisu::new(sisu).with_front_end(front_end.as_deref());
     if let Some(list) = native {
         let text = std::fs::read_to_string(&list).unwrap_or_default();
         let names = sisu_conformance::native::read_list(&text);

@@ -1,0 +1,19 @@
+##! Exercise 1.1, a name tag. Kind: complete. Level: 1.
+##!
+##! A conference prints a tag for each visitor. `name_tag` takes the
+##! visitor's name and home town and gives back the text of the tag.
+##!
+##! Replace the hole, `todo("name tag")`, with an interpolated string
+##! that puts the name and the town into the text, so that both tests
+##! pass. Run the tests with `sisu test name_tag.sisu`. The hints are in
+##! chapter 1 of the tutorial, under "Exercise 1.1: a name tag".
+
+## The text of the name tag for `name`, who comes from `town`.
+def name_tag(name: str, town: str) -> String:
+    return todo("name tag")
+
+test "a tag for Aino from Oulu":
+    assert name_tag("Aino", "Oulu") == "Hei! I am Aino from Oulu."
+
+test "a tag for Eero from Turku":
+    assert name_tag("Eero", "Turku") == "Hei! I am Eero from Turku."

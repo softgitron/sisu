@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 #[test]
 fn conformance_suite() {
-    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let sisu = sisu_conformance::Sisu::new(env!("CARGO_BIN_EXE_sisu"));
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../conformance/cases");
     let bless = std::env::var_os("SISU_BLESS").is_some();
     let report = sisu_conformance::run_all(&sisu, &root, bless);

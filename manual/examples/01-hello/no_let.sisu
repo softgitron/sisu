@@ -1,0 +1,3 @@
+def main():
+    greeting = "Hei, maailma!"
+    print(greeting)

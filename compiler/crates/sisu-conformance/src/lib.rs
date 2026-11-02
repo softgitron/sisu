@@ -157,22 +157,53 @@ pub struct Output {
 /// check, so a case that loops forever cannot hang the suite.
 pub const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
+/// The implementation under test: a `sisu` executable, and the front end
+/// it is asked to use, `stage1` or `rust` (its `SISU_FRONT_END`, decision
+/// 268), or its own default when none is named.
+#[derive(Clone, Debug)]
+pub struct Sisu {
+    pub path: PathBuf,
+    pub front_end: Option<String>,
+}
+
+impl Sisu {
+    pub fn new(path: impl Into<PathBuf>) -> Sisu {
+        Sisu { path: path.into(), front_end: None }
+    }
+
+    /// The executable asked to use the front end `name`.
+    pub fn with_front_end(self, name: Option<&str>) -> Sisu {
+        Sisu { front_end: name.map(str::to_string), ..self }
+    }
+
+    /// A command of the executable with an empty environment, but for the
+    /// front end it is asked to use.
+    fn command(&self) -> Command {
+        let mut cmd = Command::new(&self.path);
+        cmd.env_clear();
+        if let Some(f) = &self.front_end {
+            cmd.env("SISU_FRONT_END", f);
+        }
+        cmd
+    }
+}
+
 /// Runs `sisu args...` in `cwd` with an empty environment.
-pub fn invoke(sisu: &Path, cwd: &Path, args: &[String]) -> Output {
+pub fn invoke(sisu: &Sisu, cwd: &Path, args: &[String]) -> Output {
     invoke_with_input(sisu, cwd, args, None)
 }
 
 /// [`invoke`], with `input` as the standard input (else none).
-pub fn invoke_with_input(sisu: &Path, cwd: &Path, args: &[String], input: Option<&str>) -> Output {
-    let spawned = Command::new(sisu)
+pub fn invoke_with_input(sisu: &Sisu, cwd: &Path, args: &[String], input: Option<&str>) -> Output {
+    let spawned = sisu
+        .command()
         .args(args)
         .current_dir(cwd)
-        .env_clear()
         .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn();
-    wait_output(spawned, input, sisu)
+    wait_output(spawned, input, &sisu.path)
 }
 
 /// Waits for a spawned command (killing it past [`TIMEOUT`]), feeding it
@@ -295,7 +326,7 @@ impl Drop for Sandbox {
 }
 
 struct Runner<'a> {
-    sisu: &'a Path,
+    sisu: &'a Sisu,
     bless: bool,
     report: Report,
     /// Numbers the sandboxes, across the runner's threads.
@@ -964,7 +995,7 @@ impl Runner<'_> {
 /// The cases run on as many threads as the machine has (at most eight),
 /// each case in a sandbox of its own; the report lists the failures in the
 /// cases' order, as one thread would.
-pub fn run_all(sisu: &Path, root: &Path, bless: bool) -> Report {
+pub fn run_all(sisu: &Sisu, root: &Path, bless: bool) -> Report {
     let cases = discover(root);
     let threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).clamp(1, 8);
     let counter = std::sync::atomic::AtomicUsize::new(0);

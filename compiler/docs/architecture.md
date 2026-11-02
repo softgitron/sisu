@@ -2998,6 +2998,19 @@ workspace, `check`, `build` and `test` work on every member, and `run`,
 `sir` and `bench` on the one application among them (`D0067`
 otherwise).
 
+**The front end** of `check`, `sir`, `build`, `run`, `fmt`, `doc`,
+`tokens` and `parse` is stage 1, the front end written in Sisu, compiled
+natively (`compiler/target/stage1/sisu1`, built from `compiler/stage1` when
+a source of it is newer): they run its commands and print what it prints,
+and a program runs from the SIR it serialised, in the interpreter or
+natively (decision 268). `--front-end=rust`, among a command's options, or
+`SISU_FRONT_END=rust` for a whole process, keeps the Rust front end this
+document describes, the oracle; the other commands (`test`, `bench`,
+`repl`, `ws`, `lsp`, `replay`, `explain-borrow`, `audit`, and `run
+--watch`, `--record` and `--defer-borrow`, `check --diary` and `parse
+--shape`) run on it whichever is chosen (port-debt.md, "The Rust front
+end's roles still to replace").
+
 `sisu audit --ownership` is the corpus study's count (18, Phase 3; T1.1
 and T1.2): for each file, one line of data, the file's name and then
 `lines=N Shared=N Weak=N Cell=N Arena=N Key=N copy=N unsafe=N`. The
@@ -3581,10 +3594,12 @@ and 254).
 This is the path of the self-hosted check of the bootstrap. Stage 1, the
 front end written in Sisu, is built natively and prints the SIR of a
 program; that text must be byte-identical to what stage 0's front end
-prints for the same program (`sisu sir`), and `sisu build --native
---from-sir` turns it into the executable that building the program from
-its source gives. Stage 1 then stands in for stage 0's front end: the same
-SIR, the same native code. The runner's mode `sisu-conformance --native-from-sir
+prints for the same program (`sisu sir --front-end=rust`), and `sisu build
+--native --from-sir` turns it into the executable that building the
+program from its source gives. Stage 1 then stands in for stage 0's front
+end: the same SIR, the same native code. Since decision 268 it does: the
+`sisu` command's front end is stage 1, whose `build --native` hands its
+SIR to this backend, and `sisu run` interprets the SIR it serialised. The runner's mode `sisu-conformance --native-from-sir
 conformance/native.list` builds every case of the list that way (from the
 case's own `.sir` where it has one, else from what `sisu sir` prints for
 it) and compares its runs with the interpreter's expectations, and CI runs
@@ -5939,3 +5954,93 @@ library", "Tasks and the scheduler", "Capabilities", "Stage 2")
      `sisu parse --shape` as a failure rather than as a syntax error, and
      `syntax/option_sugar`, their canonical spelling, through the
      canonical-form check and CI's loop.
+
+**Round 11: stage 1 as the front end, and the release profile's checks**
+(sections "The query layer and the driver", "Stage 2")
+
+268. The front end of the `sisu` command is stage 1, the front end
+     written in Sisu, compiled natively: it gives the Rust front end's SIR,
+     diagnostics, pages and formatting on the whole corpus and reaches the
+     fixed point (18's stage 3), the owner retires the Rust implementation
+     as early as each of its roles has a replacement, and new language
+     rules are written in stage 1 only, so the Rust front end becomes the
+     oracle, which falls behind. `sisu check`, `sir`, `build`, `fmt`,
+     `doc`, `tokens` and `parse` run stage 1's command of the same name
+     with the options as given (`--format=ids`, `--locked`, `--features`,
+     `--no-default-features`, `--contracts`, `--release`, `--output`) and
+     print what it prints, its exit status theirs. `sisu build --native`
+     runs stage 1's `build --native`, which checks, lowers and checks
+     ownership as `sisu build` does and hands the SIR to the backend (`sisu
+     build --native --from-sir`, decision 212): stage 1 calls
+     `{home}/target/release/sisu`, so the driver gives it a home of links
+     whose `target/release/sisu` is the running `sisu`, and whose `catalog/`
+     and `std/` are the compiler's, and the executable links the runtime
+     beside it, byte for byte the one the Rust front end's build makes.
+     `sisu run` runs the same build with `SISU_KEEP_SIR` in stage 1's
+     environment, which makes that backend keep the SIR it is given rather
+     than compile it, and runs the SIR in the interpreter with the run's
+     options (`--monitor`, `--stats`, `--schedule-seed`, `--explore`,
+     `--scheduler`), as `run --from-sir` would (decision 254); `sisu run
+     --native` builds with stage 1 and runs the executable (decision 197),
+     a package's kept where stage 1 put it, which the backend's `built` line
+     names. The stage-1 executable is `compiler/target/stage1/sisu1`, where
+     `stage1/sisu1` builds it; the first command after a `.sisu` file under
+     `stage1/src` became newer builds it, as the script does, with the Rust
+     front end (`sisu build --native` in `compiler/stage1`), under a lock so
+     that commands started at once build it once, into a file renamed over
+     the old one. `--front-end=rust` among a command's options, or
+     `SISU_FRONT_END=rust` for a whole process, keeps the Rust front end
+     (`--front-end=stage1` names the default; any other name is `D0115`),
+     and CI's `stage1/check.sh` runs under `SISU_FRONT_END=rust`, its
+     oracle. The commands stage 1 does not serve run on the Rust front end
+     whichever is chosen: `test` and `bench`, since stage 1 prints no SIR
+     of a program built with its tests; `lsp`, `repl`, `ws`, `run --watch`,
+     `run --record` and `replay`; `run --defer-borrow`, `check --diary`,
+     `explain-borrow`, `audit` and `parse --shape` (port-debt.md, "The Rust
+     front end's roles still to replace"). The driver does what stage 1's
+     commands leave to their caller: it reports a missing file and a
+     directory without a package before stage 1 runs, with the Rust front
+     end's messages and statuses (`D0001`, `D0064`), runs a workspace's one
+     application (`D0067`) and reports a program without `main` (`D0005`,
+     `D0069`), takes the `error: Failed` and `error: Exit(status=N)` that
+     stage 1's `main` returns off its standard error (N being the status),
+     sets `PWD`, by which stage 1 knows the working directory, keeps the
+     native runtime's variables (`SISU_RT_ALLOCS`, `SISU_SCHEDULE_SEED`,
+     `SISU_STATS`, `SISU_TASK_STACK`) from stage 1, which is a native
+     program, and reports the errors of a program whose stage-1 `sir`
+     printed nothing with stage 1's plain `build`, as `sisu sir` reports
+     them. A stage 1 that panics or aborts is an internal error (`D0118`,
+     status 70); one missing or failing to build is `D0116` or `D0117`.
+     Stage 1's `sir` prints no warnings, so the runner's native modes from
+     SIR know that a run starts with the front end's warnings from the
+     case's `.diag`. The stage-1 path uses none of the Rust front end's
+     crates: it parses the command line, finds what a command works on
+     (`package.rs`), runs stage 1, and hands SIR to the interpreter or the
+     backend (`front.rs`, and the `stage1_*` functions of `cli.rs`), so that
+     deleting the Rust front end deletes `FrontEnd::Rust`, the flag and the
+     branches of `cli.rs` that read a program (`inputs_for`, `command`),
+     once the roles above have replacements; building stage 1 is one of
+     them, its seed then the previous stage-1 executable. Through stage 1
+     the conformance suite passes whole, 504 cases and 5060 checks, in 4 min
+     54 s against 1 min 32 s through the Rust front end, on this machine's
+     4 cores with the debug `sisu`: stage 1 resolves the standard library
+     at every command, so a small program's `check` takes 0.55 s, its
+     `tokens` 0.02 s. This changes no rule of the language.
+     `front::tests` and the driver's own tests hold the choice and the
+     statuses, and every native and conformance test of `cargo test` runs
+     through stage 1.
+269. CI follows the new order (`.github/workflows`). The main job,
+     `compiler` in `ci.yml`, builds stage 1 with its first command and runs
+     `cargo test`, whose conformance suite and native modes go through
+     stage 1: the expectations (`.diag`, `.sir`, `.doc`, `.out`, `.err`,
+     `.status` and the rest) against stage 1's output, and the programs run
+     from stage 1's SIR in the interpreter and natively; the canonical-form
+     check is one run of stage 1's formatter over the standard library and
+     the canonical cases. The `native` job's modes go through stage 1 too.
+     The `stage1` workflow is the oracle's: the conformance suite through
+     the Rust front end (the runner's `--front-end=rust`, which puts
+     `SISU_FRONT_END` in the environment it gives every command) and
+     `check.sh` (stage 1 against the Rust front end, `SISU_FRONT_END=rust`),
+     both `continue-on-error: true`, since the Rust front end falls behind
+     as stage 1 moves; stage 1's own tests and its canonical form stay
+     required there. All of it runs on pushes only, never on a schedule.

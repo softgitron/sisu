@@ -1,6 +1,12 @@
 # Stage 1 of the bootstrap (compiler/stage1, the front end written in Sisu)
-# checked byte for byte against the Rust front end over the whole corpus,
-# and over its own package (D-078's first half of the fixed point). On
+# against the Rust front end, the oracle: the conformance suite through the
+# Rust front end, and stage 1 checked byte for byte against it over the
+# whole corpus and over its own package (D-078's first half of the fixed
+# point). Since decision 268 stage 1 is the front end of `sisu` and new
+# language rules are written in stage 1 only, so the Rust front end falls
+# behind as stage 1 moves: the two oracle steps are allowed to fail, and a
+# difference there is the Rust front end's lag, not a broken build. The
+# main CI job (ci.yml, `compiler`) holds the suite through stage 1. On
 # pushes only, like the rest of CI, never on a schedule.
 name: stage1
 
@@ -9,7 +15,7 @@ on:
 
 jobs:
   stage1:
-    name: stage-1 front end in Sisu against stage 0
+    name: the Rust front end (the oracle) against the suite and stage 1, allowed to fail
     runs-on: ubuntu-latest
     timeout-minutes: 60
     defaults:
@@ -38,14 +44,30 @@ jobs:
       - name: Build stage 0 (release)
         run: cargo build --release
       - name: Stage 1's own tests (on the interpreter)
+        # `sisu test` keeps the Rust front end until stage 1 prints the SIR
+        # of a program built with its tests (docs/port-debt.md).
         working-directory: compiler/stage1
         run: ../target/release/sisu test
       - name: Stage 1 formatted canonically
         working-directory: compiler/stage1
         run: ../target/release/sisu fmt --check src
-      - name: Stage 1 against stage 0 (tokens, trees, AST, names, types, SIR, ownership, self)
+      - name: The Rust front end against the conformance suite (allowed to fail)
+        # The oracle: every expectation of the suite against the Rust
+        # front end (`--front-end=rust`), which falls behind as stage 1
+        # moves (decision 268).
+        continue-on-error: true
+        run: ./target/release/sisu-conformance --sisu target/release/sisu --front-end=rust conformance/cases
+      - name: Stage 1 against the Rust front end (tokens, trees, AST, names, types, SIR, ownership, self; allowed to fail)
         # Stage 1 is built natively by the stage-2 backend and run over the
         # corpus and its own package; every difference must be listed in
-        # compiler/stage1/DISCREPANCIES.md (none are).
+        # compiler/stage1/DISCREPANCIES.md (none are). check.sh's `sisu` is
+        # the oracle, so the Rust front end answers for it
+        # (`SISU_FRONT_END=rust`); it is allowed to fail because the Rust
+        # front end is the oracle and falls behind as stage 1 moves: a rule
+        # written in stage 1 alone is a difference here until the Rust
+        # front end learns it or is retired (decision 268).
+        continue-on-error: true
         working-directory: compiler/stage1
+        env:
+          SISU_FRONT_END: rust
         run: ./check.sh --native --names --types --sir

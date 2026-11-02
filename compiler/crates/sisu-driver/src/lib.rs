@@ -11,6 +11,7 @@ pub mod db;
 pub mod diary;
 pub mod doc;
 pub mod format;
+pub mod front;
 pub mod items;
 pub mod json;
 pub mod lsp;

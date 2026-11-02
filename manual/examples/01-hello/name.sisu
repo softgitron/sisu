@@ -1,0 +1,5 @@
+# `let` gives a value a name.
+def main():
+    let greeting = "Hei, maailma!"
+    print(greeting)
+    print(greeting)

@@ -22,7 +22,7 @@
 //! of the standard error compared. Only a program that aborts (status
 //! 134) ends without one.
 
-use crate::{Case, Failure, Output, Sandbox, diff, discover, invoke_with_input};
+use crate::{Case, Failure, Output, Sandbox, Sisu, diff, discover, invoke_with_input};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -94,12 +94,12 @@ enum Mode {
 
 /// Builds and runs every case of `list` natively, on as many threads as
 /// the machine has (at most eight).
-pub fn run_native(sisu: &Path, root: &Path, list: &[String]) -> NativeReport {
+pub fn run_native(sisu: &Sisu, root: &Path, list: &[String]) -> NativeReport {
     run_list(sisu, root, list, Mode::Native)
 }
 
 /// [`run_native`], each case built from serialised SIR (decision 212).
-pub fn run_native_from_sir(sisu: &Path, root: &Path, list: &[String]) -> NativeReport {
+pub fn run_native_from_sir(sisu: &Sisu, root: &Path, list: &[String]) -> NativeReport {
     run_list(sisu, root, list, Mode::FromSir)
 }
 
@@ -107,17 +107,17 @@ pub fn run_native_from_sir(sisu: &Path, root: &Path, list: &[String]) -> NativeR
 /// contract checked (`sisu build --native --release --contracts=all`,
 /// decision 232): Cranelift's optimisations must not change what a program
 /// does.
-pub fn run_native_release(sisu: &Path, root: &Path, list: &[String]) -> NativeReport {
+pub fn run_native_release(sisu: &Sisu, root: &Path, list: &[String]) -> NativeReport {
     run_list(sisu, root, list, Mode::Release)
 }
 
 /// Every case of `list` interpreted from serialised SIR (`sisu run
 /// --from-sir`, decision 254): the case's own `.sir`, else `sisu sir`'s.
-pub fn run_interpreted_from_sir(sisu: &Path, root: &Path, list: &[String]) -> NativeReport {
+pub fn run_interpreted_from_sir(sisu: &Sisu, root: &Path, list: &[String]) -> NativeReport {
     run_list(sisu, root, list, Mode::Interpreted)
 }
 
-fn run_list(sisu: &Path, root: &Path, list: &[String], mode: Mode) -> NativeReport {
+fn run_list(sisu: &Sisu, root: &Path, list: &[String], mode: Mode) -> NativeReport {
     let all = discover(root);
     let mut report = NativeReport {
         release: mode == Mode::Release,
@@ -151,7 +151,7 @@ fn run_list(sisu: &Path, root: &Path, list: &[String], mode: Mode) -> NativeRepo
 
 /// For each runnable case outside `list`, whether it builds and passes
 /// natively: the cases a coverage list could grow by.
-pub fn survey(sisu: &Path, root: &Path, list: &[String]) -> Vec<(String, String)> {
+pub fn survey(sisu: &Sisu, root: &Path, list: &[String]) -> Vec<(String, String)> {
     let cases: Vec<Case> = discover(root)
         .into_iter()
         .filter(|c| !list.contains(&c.name) && ["out", "err", "status"].iter().any(|e| c.path(e).exists()))
@@ -202,7 +202,7 @@ struct CaseResult {
     own_sir: bool,
 }
 
-fn native_case(sisu: &Path, case: &Case, n: usize, mode: Mode) -> CaseResult {
+fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode) -> CaseResult {
     let (from_sir, release) = (matches!(mode, Mode::FromSir | Mode::Interpreted), mode == Mode::Release);
     let mut r = CaseResult {
         failures: Vec::new(),
@@ -247,17 +247,18 @@ fn native_case(sisu: &Path, case: &Case, n: usize, mode: Mode) -> CaseResult {
         None => sandbox.dir.clone(),
     };
     let start = Instant::now();
-    // From SIR: the case's own `.sir`, or `sisu sir`'s output, which also
-    // says whether the front end warns (its warnings precede the program's
-    // standard error in the interpreter's run).
-    let mut warned_by_sir = false;
+    // From SIR: the case's own `.sir`, or `sisu sir`'s output. The front
+    // end's warnings precede the program's standard error in the
+    // interpreter's run, and the case's `.diag` says whether there are any
+    // (stage 1's `sir` prints none; stage 0's prints them, decision 268).
+    let mut warned_by_sir = case.expected("diag").is_some_and(|d| warns(&d));
     if from_sir {
         let mut sir_args = s(&["sir"]);
         if !case.package {
             sir_args.push(format!("{}.sisu", case.stem));
         }
         let printed = invoke_with_input(sisu, &cwd, &sir_args, None);
-        warned_by_sir = !printed.stderr.is_empty();
+        warned_by_sir |= !printed.stderr.is_empty();
         let text = match case.expected("sir") {
             Some(own) => {
                 r.own_sir = true;
@@ -323,7 +324,7 @@ fn native_case(sisu: &Path, case: &Case, n: usize, mode: Mode) -> CaseResult {
 /// The interpreter's run of the SIR in `file` (`sisu run --from-sir`),
 /// compared with the case's expectations: the front end's warnings, which
 /// the source's run prints first, are not the program's.
-fn interpreted(sisu: &Path, case: &Case, cwd: &Path, file: &Path, warned: bool, r: &mut CaseResult) {
+fn interpreted(sisu: &Sisu, case: &Case, cwd: &Path, file: &Path, warned: bool, r: &mut CaseResult) {
     let mut fail = |check: &str, detail: String| {
         r.failures.push(Failure { case: case.name.clone(), check: check.to_string(), detail });
     };
@@ -348,6 +349,12 @@ fn interpreted(sisu: &Path, case: &Case, cwd: &Path, file: &Path, warned: bool, 
     if !same {
         fail("stderr", diff::diff(&err, &ran.stderr));
     }
+}
+
+/// Whether a `.diag` expectation holds a warning: a line whose code, the
+/// second word, is a `W` code.
+fn warns(diag: &str) -> bool {
+    diag.lines().any(|l| l.split_whitespace().nth(1).is_some_and(|c| c.starts_with('W')))
 }
 
 /// The exit status of a program that aborted (a deadlock, a panic during

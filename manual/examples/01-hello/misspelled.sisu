@@ -1,0 +1,3 @@
+# A program with one mistake: `print` is misspelled.
+def main():
+    prnt("Hei, maailma!")

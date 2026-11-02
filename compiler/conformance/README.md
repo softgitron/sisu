@@ -12,7 +12,27 @@ Run it with `cargo test -p sisu-driver --test conformance` (the stage-0
 
 ```text
 cargo run -p sisu-conformance -- --sisu path/to/sisu conformance/cases
+cargo run -p sisu-conformance -- --sisu path/to/sisu --front-end=rust conformance/cases
 ```
+
+**The front end.** The `sisu` of `compiler/` runs stage 1, the front end
+written in Sisu, compiled natively (`compiler/target/stage1/sisu1`, built
+from `compiler/stage1` by the Rust front end when a source of it is newer),
+for `check`, `sir`, `build`, `run`, `fmt`, `doc`, `tokens` and `parse`:
+their diagnostics, SIR and pages are stage 1's, and a program runs from
+the SIR stage 1 serialised, in the interpreter or natively
+([architecture.md](../docs/architecture.md), decision 268). The commands
+stage 1 does not serve yet run on the Rust front end: `test`, `bench`,
+`repl`, `ws`, `run --watch`, `run --record`, `replay`, `run
+--defer-borrow`, `explain-borrow` and `parse --shape`
+([port-debt.md](../docs/port-debt.md), "The Rust front end's roles").
+`cargo test` runs the suite so, with stage 1 as the front end.
+`--front-end=stage1` or `--front-end=rust` asks the executable for that
+front end, through `SISU_FRONT_END` in the empty environment the runner
+gives every command; `--front-end=rust` checks the Rust front end, the
+oracle, against the same files, which CI's `stage1` workflow does, allowed
+to fail, since new rules are written in stage 1 only and the Rust front
+end falls behind (decision 268).
 
 `--bless` (or `SISU_BLESS=1` for the cargo test) rewrites the expected
 files from what the implementation printed instead of failing. Review the
@@ -177,8 +197,10 @@ The expectations are the interpreter's: the native mode reads no file of
 its own and does not bless. With `--native-from-sir LIST` the runner
 builds each case from serialised SIR instead, `sisu build --native
 --from-sir NAME.sir`, with the case's own `NAME.sir` where it has one and
-what `sisu sir` prints for it otherwise (whose warnings stand for the
-build's), and compares the same way: the path a self-hosted front end's
+what `sisu sir` prints for it otherwise, and compares the same way (a
+case whose `NAME.diag` holds a warning, or whose `sisu sir` printed one,
+has the front end's warnings before the program's standard error, as a
+`sisu run` prints them; stage 1's `sir` prints none): the path a self-hosted front end's
 SIR takes to native code. With `--native-release LIST` it builds each case
 with the release profile, `sisu build --native --release
 --contracts=all`: every contract checked, as the interpreter checks them,
@@ -189,7 +211,9 @@ so that what is compared is what Cranelift's optimisations do. With
 and standard error as above, without the report of allocations: the path
 a self-hosted front end's SIR takes to be run rather than compiled.
 `cargo test -p sisu-driver --test native` runs the list all four ways,
-and CI runs them on every push. `--native-survey
+and CI runs them on every push, each through the front end the executable
+uses (stage 1 by default, so a case built from source or from `sisu sir`
+is built from stage 1's SIR). `--native-survey
 LIST` builds and runs every runnable case the list leaves out (one with
 an `.out`, `.err` or `.status`) and prints `pass` or the first thing that
 stopped it, which is how the list grows:

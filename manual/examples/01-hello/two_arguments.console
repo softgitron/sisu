@@ -1,0 +1,8 @@
+$ sisu run two_arguments.sisu
+error[E0305]: wrong number of arguments to `print`: expected 1, found 2
+  --> two_arguments.sisu:2:5
+  |
+2 |     print("Hei,", "maailma!")
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

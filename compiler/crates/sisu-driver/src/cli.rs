@@ -6,6 +6,7 @@
 //! internal compiler error.
 
 use crate::db::Db;
+use crate::front::FrontEnd;
 use sisu_diag::{Catalog, MsgId, msg};
 use sisu_interp::{Host, Options, TestResult, exit};
 use std::rc::Rc;
@@ -151,7 +152,7 @@ struct Parsed<'a> {
 const STATS_KINDS: &[&str] = &["stack-depth", "shared"];
 
 /// The flags that take a value.
-const VALUE_FLAGS: &[&str] = &[
+pub(crate) const VALUE_FLAGS: &[&str] = &[
     "--schedule-seed",
     "--explore",
     "--contracts",
@@ -491,8 +492,19 @@ impl Host for Captured<'_> {
 }
 
 /// Runs the command line `args` (without the program name). Program
-/// output and the driver's messages go to `host`.
+/// output and the driver's messages go to `host`. The front end is stage
+/// 1's unless `--front-end=rust` or `SISU_FRONT_END=rust` asks for the Rust
+/// one (decision 268).
 pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
+    let env = std::env::var(crate::front::FRONT_END_VAR).ok();
+    match crate::front::take_choice(args, env.as_deref(), VALUE_FLAGS, host) {
+        Ok((args, front)) => execute_with(&args, front, host),
+        Err(code) => code,
+    }
+}
+
+/// [`execute`], with the front end chosen.
+fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
     let Some(cmd) = args.first() else {
         host.stderr(&format!("{}\n", text(msg::CLI_USAGE, &[])));
         return EXIT_USAGE;
@@ -517,6 +529,9 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
         }
         "ws" => crate::repl::worksheet(rest, host),
         "new" => new_package(rest, host),
+        // Stage 1's formatter and `sisu doc` take the command's arguments
+        // as `sisu` does, with its messages and exit statuses.
+        "fmt" | "doc" if front == FrontEnd::Stage1 => stage1_as_is(cmd, rest, host),
         "fmt" => fmt(rest, host),
         "explain-borrow" => explain_borrow(rest, host),
         "doc" => doc(rest, host),
@@ -762,12 +777,23 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                 Some(f) => (Some(f), p.file.map(str::to_string).into_iter().chain(p.rest.clone()).collect()),
                 None => (p.file, p.rest.clone()),
             };
-            let inputs =
+            // Stage 1 reads the program itself; the driver only finds what
+            // the command works on, as it does for its own front end.
+            let stage1 = front == FrontEnd::Stage1 && stage1_serves(cmd, &p);
+            let mut target_of_stage1 = None;
+            let inputs = if stage1 {
+                match stage1_target(cmd, target, host) {
+                    Ok(t) => target_of_stage1 = Some(t),
+                    Err(code) => return code,
+                }
+                Vec::new()
+            } else {
                 match inputs_for(cmd, target, locked, has_ids(&p.flags), from_sir.is_some(), &features, host)
                 {
                     Ok(i) => i,
                     Err(code) => return code,
-                };
+                }
+            };
             if cmd != "run"
                 && let Some(extra) = program_args.first()
             {
@@ -847,6 +873,9 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
                 release,
                 contracts_given,
             };
+            if let Some(t) = &target_of_stage1 {
+                return stage1_command(cmd, &p, &opts, t, program_args, &features, locked, host);
+            }
             // Each member of a workspace in turn (09); the worst status wins.
             let mut status = exit::OK;
             for input in &inputs {
@@ -860,7 +889,7 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
         other if other.ends_with(".sisu") && std::path::Path::new(other).is_file() => {
             let mut again = vec!["run".to_string(), other.to_string()];
             again.extend(rest.iter().cloned());
-            execute(&again, host)
+            execute_with(&again, front, host)
         }
         other => {
             host.stderr(&plain_error(msg::CLI_UNKNOWN_COMMAND, &[("command", other.to_string())]));
@@ -906,6 +935,14 @@ fn from_sir(
     host: &mut dyn Host,
     stage: &std::cell::Cell<&'static str>,
 ) -> i32 {
+    // The backend of stage 1's build, when the driver asked stage 1 for the
+    // SIR rather than an executable (decision 268): the SIR, kept.
+    if cmd == "build"
+        && std::env::var_os(crate::front::KEEP_SIR).is_some()
+        && let Some(output) = &opts.output
+    {
+        return crate::front::keep_sir(&input.source, std::path::Path::new(output), host);
+    }
     stage.set("the SIR reader");
     let prog = match read_sir(&input.source, host) {
         Ok(p) => p,
@@ -945,6 +982,336 @@ fn from_sir(
         keep: None,
     };
     crate::native::run_command(&prog, &name, &args, &how, host)
+}
+
+/// Whether stage 1 serves the command with these options (decision 268).
+/// It has no SIR of a program built with its tests, so `sisu test` and
+/// `sisu bench` keep the Rust front end, and so do the modes that need
+/// more of the front end than its output: `run --watch` (the front end
+/// again at each save), `run --record` (whose log `sisu replay` compiles
+/// again), `run --defer-borrow` (the ownership checker's findings beside
+/// the run), `check --diary` (the diagnostics as data) and `parse --shape`.
+/// A file of SIR needs no front end at all.
+fn stage1_serves(cmd: &str, p: &Parsed<'_>) -> bool {
+    let value = |k: &str| p.values.iter().any(|(v, _)| *v == k);
+    match cmd {
+        "check" => !value("--diary"),
+        "sir" | "tokens" => true,
+        "build" => !value("--from-sir"),
+        "run" => {
+            !p.flags.iter().any(|f| matches!(*f, "--sir" | "--watch" | "--defer-borrow"))
+                && !value("--from-sir")
+                && !value("--record")
+        }
+        "parse" => !p.flags.contains(&"--shape"),
+        _ => false,
+    }
+}
+
+/// What a command served by stage 1 works on: the path given, which
+/// stage 1 reads, or none for the package of the working directory; and
+/// whether it is one file, or else the package or workspace directory.
+struct Stage1Target {
+    path: Option<String>,
+    file: bool,
+    /// The package directory, for a message about it.
+    dir: Option<std::path::PathBuf>,
+}
+
+/// Finds what the command works on as [`inputs_for`] does, with its
+/// messages, without reading the program: a file must be readable, a
+/// directory or the working directory must have a package, and `run` in a
+/// workspace runs its one application, whose directory stage 1 is given.
+fn stage1_target(cmd: &str, target: Option<&str>, host: &mut dyn Host) -> Result<Stage1Target, i32> {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let readable = |host: &mut dyn Host, f: &str| -> Result<(), i32> {
+        std::fs::read(cwd.join(f)).map(|_| ()).map_err(|e| {
+            host.stderr(&plain_error(
+                msg::CLI_CANNOT_READ,
+                &[("path", f.to_string()), ("reason", e.to_string())],
+            ));
+            exit::ERROR
+        })
+    };
+    if matches!(cmd, "tokens" | "parse") {
+        let Some(f) = target else {
+            host.stderr(&plain_error(msg::CLI_MISSING_FILE, &[("command", cmd.to_string())]));
+            return Err(EXIT_USAGE);
+        };
+        readable(host, f)?;
+        return Ok(Stage1Target { path: Some(f.to_string()), file: true, dir: None });
+    }
+    if let Some(f) = target
+        && !cwd.join(f).is_dir()
+    {
+        readable(host, f)?;
+        return Ok(Stage1Target { path: Some(f.to_string()), file: true, dir: None });
+    }
+    let Some(found) = crate::package::locate(target, &cwd) else {
+        let dir = target.map(str::to_string).unwrap_or_else(|| cwd.display().to_string());
+        host.stderr(&plain_error(msg::CLI_NO_PACKAGE, &[("dir", dir), ("command", cmd.to_string())]));
+        return Err(EXIT_USAGE);
+    };
+    match found {
+        crate::package::Target::Workspace(_, members) if cmd == "run" => {
+            let apps: Vec<&std::path::PathBuf> =
+                members.iter().filter(|m| m.join("src/main.sisu").is_file()).collect();
+            if let [app] = apps.as_slice() {
+                return Ok(Stage1Target {
+                    path: Some(app.display().to_string()),
+                    file: false,
+                    dir: Some(app.to_path_buf()),
+                });
+            }
+            let names: Vec<String> =
+                members.iter().map(|m| format!("`{}`", crate::package::relative(&cwd, m))).collect();
+            host.stderr(&plain_error(
+                msg::CLI_WORKSPACE_RUN,
+                &[("command", cmd.to_string()), ("members", names.join(", "))],
+            ));
+            Err(EXIT_USAGE)
+        }
+        crate::package::Target::Package(d) | crate::package::Target::Workspace(d, _) => {
+            Ok(Stage1Target { path: target.map(str::to_string), file: false, dir: Some(d) })
+        }
+        crate::package::Target::File(f) => Ok(Stage1Target { path: Some(f), file: true, dir: None }),
+    }
+}
+
+/// `sisu fmt` and `sisu doc` with stage 1: its command with the same
+/// arguments, which it checks as `sisu` does.
+fn stage1_as_is(cmd: &str, rest: &[String], host: &mut dyn Host) -> i32 {
+    let stage1 = match crate::front::Stage1::ready(host) {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+    let mut args = vec![cmd.to_string()];
+    args.extend(rest.iter().cloned());
+    match stage1.run(&args, crate::front::Backend::Unused, host) {
+        Ok(r) => {
+            host.stdout(&r.stdout);
+            host.stderr(&r.stderr);
+            r.status
+        }
+        Err(code) => code,
+    }
+}
+
+/// A command served by stage 1 (decision 268): stage 1's own command, its
+/// output and status as they are; for the SIR of a program to run or
+/// compile, stage 1's `build --native`, whose backend this executable is.
+#[allow(clippy::too_many_arguments)]
+fn stage1_command(
+    cmd: &str,
+    p: &Parsed<'_>,
+    opts: &Opts,
+    target: &Stage1Target,
+    args: Vec<String>,
+    features: &crate::package::FeatureRequest,
+    locked: bool,
+    host: &mut dyn Host,
+) -> i32 {
+    use crate::front::Backend;
+    let has = |f: &str| p.flags.contains(&f);
+    let stage1 = match crate::front::Stage1::ready(host) {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+    // The options every program command passes on: the lockfile and the
+    // features (decision 250), then the path.
+    let program = |words: &mut Vec<String>| {
+        if locked {
+            words.push("--locked".into());
+        }
+        if !features.names.is_empty() {
+            words.push("--features".into());
+            words.push(features.names.join(","));
+        }
+        if features.no_default {
+            words.push("--no-default-features".into());
+        }
+        if let Some(path) = &target.path {
+            words.push(path.clone());
+        }
+    };
+    let contracts = opts.contracts_given.then(|| format!("--contracts={}", opts.level.name()));
+    let shown = |host: &mut dyn Host, r: &crate::front::Ran| {
+        host.stdout(&r.stdout);
+        host.stderr(&r.stderr);
+        r.status
+    };
+    let run = |host: &mut dyn Host, words: &[String], backend: Backend| stage1.run(words, backend, host);
+    match cmd {
+        "tokens" | "parse" => {
+            let mut words = vec![cmd.to_string()];
+            words.extend(p.flags.iter().map(|f| f.to_string()));
+            words.extend(target.path.clone());
+            match run(host, &words, Backend::Unused) {
+                Ok(r) => shown(host, &r),
+                Err(code) => code,
+            }
+        }
+        "check" => {
+            let mut words = vec!["check".to_string()];
+            if has_ids(&p.flags) {
+                words.push("--format=ids".into());
+            }
+            program(&mut words);
+            match run(host, &words, Backend::Unused) {
+                Ok(r) => shown(host, &r),
+                Err(code) => code,
+            }
+        }
+        "sir" => {
+            let mut words = vec!["sir".to_string()];
+            words.extend(contracts);
+            program(&mut words);
+            let r = match run(host, &words, Backend::Unused) {
+                Ok(r) => r,
+                Err(code) => return code,
+            };
+            if !(r.stdout.is_empty() && r.stderr.is_empty() && r.status == exit::OK) {
+                return shown(host, &r);
+            }
+            // Stage 1's `sir` prints nothing for a program with an error of
+            // the front end; its plain `build` says which, as `sisu sir` does.
+            let mut words = vec!["build".to_string()];
+            program(&mut words);
+            match run(host, &words, Backend::Unused) {
+                Ok(r) => {
+                    host.stderr(&r.stderr);
+                    r.status.max(exit::ERROR)
+                }
+                Err(code) => code,
+            }
+        }
+        "build" => {
+            let native = has("--native");
+            let mut words = vec!["build".to_string()];
+            if native {
+                words.push("--native".into());
+            }
+            if opts.release {
+                words.push("--release".into());
+            }
+            words.extend(contracts);
+            if let Some(o) = &opts.output {
+                words.push("--output".into());
+                words.push(o.clone());
+            }
+            program(&mut words);
+            let backend = if native { Backend::Native } else { Backend::Unused };
+            match run(host, &words, backend) {
+                Ok(r) => shown(host, &r),
+                Err(code) => code,
+            }
+        }
+        _ if has("--native") => {
+            // `sisu run --native`: a file's executable built aside and
+            // removed after, a package's where its builds go (decision 231),
+            // which the backend's `built` line names.
+            let aside = std::env::temp_dir().join(format!("sisu-native-{}", std::process::id()));
+            let stem = |p: &str| {
+                std::path::Path::new(p)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            };
+            let exe = target.file.then(|| aside.join(target.path.as_deref().map(stem).unwrap_or_default()));
+            let mut words = vec!["build".to_string(), "--native".to_string()];
+            if opts.release {
+                words.push("--release".into());
+            }
+            words.extend(contracts);
+            program(&mut words);
+            if let Some(e) = &exe {
+                words.push("--output".into());
+                words.push(e.display().to_string());
+            }
+            let r = match run(host, &words, Backend::Native) {
+                Ok(r) => r,
+                Err(code) => return code,
+            };
+            host.stderr(&r.stderr);
+            let code = if r.status != exit::OK {
+                r.status
+            } else {
+                match exe.clone().or_else(|| crate::front::built_path(&r.stdout)).filter(|e| e.is_file()) {
+                    Some(e) => {
+                        let how = crate::native::Run {
+                            seed: opts.seeds.first,
+                            explore: opts.seeds.explore,
+                            stats: has("--stats"),
+                            profile: crate::native::Profile::of(opts.release),
+                            keep: None,
+                        };
+                        crate::native::run_built(&e, &args, &how, host)
+                    }
+                    None => no_main(target, host),
+                }
+            };
+            let _ = std::fs::remove_dir_all(&aside);
+            code
+        }
+        _ => {
+            // `sisu run`: the SIR stage 1's build hands its backend, kept
+            // rather than compiled, run by the interpreter.
+            let dir = std::env::temp_dir().join(format!("sisu-sir-{}", std::process::id()));
+            let _ = std::fs::create_dir_all(&dir);
+            let sir_file = dir.join("program.sir");
+            let mut words = vec!["build".to_string(), "--native".to_string()];
+            words.extend(contracts);
+            program(&mut words);
+            words.push("--output".into());
+            words.push(sir_file.display().to_string());
+            let r = run(host, &words, Backend::KeepSir);
+            let text = std::fs::read_to_string(&sir_file).ok();
+            let _ = std::fs::remove_dir_all(&dir);
+            let r = match r {
+                Ok(r) => r,
+                Err(code) => return code,
+            };
+            host.stderr(&r.stderr);
+            if r.status != exit::OK {
+                return r.status;
+            }
+            let Some(text) = text else { return no_main(target, host) };
+            let prog = match read_sir(&text, host) {
+                Ok(p) => p,
+                Err(code) => return code,
+            };
+            if prog.entry.is_none() {
+                return no_main(target, host);
+            }
+            let mut h = WithArgs { inner: host, args, watch: Vec::new() };
+            let options = Options {
+                monitor: has("--monitor"),
+                seed: opts.seeds.first,
+                stats: has("--stats"),
+                stats_kind: opts.stats,
+                strategy: opts.strategy.clone(),
+                ..Options::default()
+            };
+            run_main_seeds(&prog, &mut h, &options, opts.seeds, opts.bound)
+        }
+    }
+}
+
+/// `sisu run` of a program without `main`: a file's, or a library
+/// package's.
+fn no_main(target: &Stage1Target, host: &mut dyn Host) -> i32 {
+    let name = target.dir.as_ref().and_then(|d| {
+        let text = std::fs::read_to_string(d.join(crate::package::MANIFEST)).ok()?;
+        crate::manifest::read(sisu_diag::FileId(0), &text).0?.package.map(|p| p.name)
+    });
+    match name {
+        Some(name) => host.stderr(&plain_error(msg::CLI_NO_APPLICATION, &[("name", name)])),
+        None => host.stderr(&plain_error(
+            msg::CLI_NO_MAIN,
+            &[("file", target.path.clone().unwrap_or_else(|| ".".to_string()))],
+        )),
+    }
+    exit::ERROR
 }
 
 /// Whether diagnostics are asked for in the conformance form.

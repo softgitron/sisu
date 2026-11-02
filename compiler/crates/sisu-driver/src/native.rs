@@ -208,16 +208,22 @@ pub(crate) fn run_command(
         let _ = std::fs::create_dir_all(dir);
     }
     let code = match build(prog, &exe, how.profile, host) {
-        Ok(()) => match how.explore {
-            None => run_once(&exe, args, how.seed, how.stats, host),
-            Some(n) => explore(&exe, args, how, n, host),
-        },
+        Ok(()) => run_built(&exe, args, how, host),
         Err(code) => code,
     };
     if how.keep.is_none() {
         let _ = std::fs::remove_dir_all(&aside);
     }
     code
+}
+
+/// Runs a built executable as `sisu run --native` does: once with the seed
+/// of `how`, or under `--explore N` seeds; its exit status is the run's.
+pub(crate) fn run_built(exe: &Path, args: &[String], how: &Run, host: &mut dyn Host) -> i32 {
+    match how.explore {
+        None => run_once(exe, args, how.seed, how.stats, host),
+        Some(n) => explore(exe, args, how, n, host),
+    }
 }
 
 fn command(exe: &Path, args: &[String], seed: u64, stats: bool) -> std::process::Command {
