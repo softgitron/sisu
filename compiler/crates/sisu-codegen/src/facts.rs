@@ -57,9 +57,11 @@ impl Key {
     fn contains(&self, other: &Key) -> bool {
         self.root == other.root
             && self.steps.len() <= other.steps.len()
-            && self.steps.iter().zip(&other.steps).all(|(a, b)| {
-                a == b || matches!((a, b), (Step::Index(_), Step::Index(_)))
-            })
+            && self
+                .steps
+                .iter()
+                .zip(&other.steps)
+                .all(|(a, b)| a == b || matches!((a, b), (Step::Index(_), Step::Index(_))))
     }
 }
 
@@ -136,11 +138,11 @@ impl Fact {
         }
     }
 
-    /// The list a change of which ends the fact.
+    /// The list a change of which ends the fact: one about its length. A
+    /// reference to the list still refers to it after it changes.
     fn key(&self) -> Option<&Key> {
         match self {
-            Fact::Len(_, k) | Fact::Below(_, k) | Fact::RefTo(_, k) | Fact::MutTo(_, k) => Some(k),
-            Fact::Range(_, _, End::Len(k)) => Some(k),
+            Fact::Len(_, k) | Fact::Below(_, k) | Fact::Range(_, _, End::Len(k)) => Some(k),
             _ => None,
         }
     }
@@ -394,7 +396,7 @@ impl Facts {
 
     /// The list a place names, as a key: through a shared reference, or in
     /// a local the analysis follows, then fields and elements.
-    fn key_of(&self, p: &Place) -> Option<Key> {
+    fn key_of(&self, st: &State, p: &Place) -> Option<Key> {
         let root = p.local.0;
         let mut steps = Vec::new();
         let mut projs = p.proj.as_slice();
@@ -413,7 +415,7 @@ impl Facts {
         for q in projs {
             match q {
                 Proj::Field(i) => steps.push(Step::Field(*i)),
-                Proj::Index(l) if self.is_tracked(l.0) => steps.push(Step::Index(l.0)),
+                Proj::Index(l) if self.is_tracked(l.0) => steps.push(Step::Index(canonical(st, l.0))),
                 _ => return None,
             }
         }
@@ -435,10 +437,10 @@ impl Facts {
             }
             if matches!(self.tys.get(l as usize), Some(Type::Ref(_, false))) {
                 let deref = Place { local: p.local, proj: vec![Proj::Deref] };
-                return self.key_of(&deref);
+                return self.key_of(st, &deref);
             }
         }
-        self.key_of(p)
+        self.key_of(st, p)
     }
 
     /// Forgets what a new value of `l` makes untrue.
@@ -464,7 +466,9 @@ impl Facts {
             None => {
                 let mut k = Key { root: l, steps: Vec::new() };
                 let mut rest = p.proj.as_slice();
-                if matches!(self.tys.get(l as usize), Some(Type::Ref(..))) && rest.first() == Some(&Proj::Deref) {
+                if matches!(self.tys.get(l as usize), Some(Type::Ref(..)))
+                    && rest.first() == Some(&Proj::Deref)
+                {
                     k.steps.push(Step::Deref);
                     rest = &rest[1..];
                 }
@@ -588,8 +592,15 @@ impl Facts {
         match rv {
             Rvalue::Use(o) => {
                 if let Some(a) = self.atom(o) {
-                    if let Atom::Local(y) = a {
-                        facts.extend(st.facts.iter().filter(|f| !f.mentions(x)).filter_map(|f| f.renamed(y, x)));
+                    if let Atom::Local(y) = a
+                        && y != x
+                    {
+                        facts.extend(
+                            st.facts.iter().filter(|f| !f.mentions(x)).filter_map(|f| f.renamed(y, x)),
+                        );
+                        // Equal locals, the smaller first: an index held by
+                        // either names the same element.
+                        facts.push(Fact::Holds(Atom::Local(x.min(y)), Rel::Eq, Atom::Local(x.max(y))));
                     }
                     return (Some(self.bound(st, a)), facts);
                 }
@@ -655,9 +666,10 @@ impl Facts {
                 let (ba, bb) = (self.bound(st, a), self.bound(st, b));
                 let bound = match op {
                     BinOp::Add | BinOp::Sub | BinOp::Mul => arith(*op, ba, bb),
-                    BinOp::FloorDiv | BinOp::Div if bb.0 >= 1 => {
-                        Some((quotient(ba.0, if ba.0 >= 0 { bb.1 } else { bb.0 }), quotient(ba.1, if ba.1 >= 0 { bb.0 } else { bb.1 })))
-                    }
+                    BinOp::FloorDiv | BinOp::Div if bb.0 >= 1 => Some((
+                        quotient(ba.0, if ba.0 >= 0 { bb.1 } else { bb.0 }),
+                        quotient(ba.1, if ba.1 >= 0 { bb.0 } else { bb.1 }),
+                    )),
                     BinOp::Mod if bb.0 >= 1 && bb.0 == bb.1 => Some((0, bb.0 - 1)),
                     BinOp::BitAnd if bb.0 >= 0 && bb.0 == bb.1 => Some((0, bb.0)),
                     _ => None,
@@ -690,7 +702,7 @@ impl Facts {
                 (None, facts)
             }
             Rvalue::Ref(q, mutable) => {
-                if let Some(k) = self.key_of(q).filter(|k| !k.mentions(x)) {
+                if let Some(k) = self.key_of(st, q).filter(|k| !k.mentions(x)) {
                     facts.push(if *mutable { Fact::MutTo(x, k) } else { Fact::RefTo(x, k) });
                 }
                 (None, facts)
@@ -711,7 +723,8 @@ impl Facts {
         match callee {
             Callee::Intrinsic(name, _) => match Intrinsic::from_name(name) {
                 Some(Intrinsic::Len) => {
-                    if let Some(k) = args.first().and_then(|o| self.list_of(st, o)).filter(|k| !k.mentions(x)) {
+                    if let Some(k) = args.first().and_then(|o| self.list_of(st, o)).filter(|k| !k.mentions(x))
+                    {
                         facts.push(Fact::Len(x, k));
                     }
                     (Some((0, MAX)), facts)
@@ -743,7 +756,9 @@ impl Facts {
                                 st.facts
                                     .iter()
                                     .find_map(|f| match f {
-                                        Fact::Len(q, k) if *q == e && !k.mentions(x) => Some(End::Len(k.clone())),
+                                        Fact::Len(q, k) if *q == e && !k.mentions(x) => {
+                                            Some(End::Len(k.clone()))
+                                        }
                                         _ => None,
                                     })
                                     .or_else(|| self.is_tracked(e).then_some(End::Local(e)))
@@ -904,16 +919,16 @@ impl Facts {
         if !self.is_tracked(i) || self.bound(st, Atom::Local(i)).0 < 0 {
             return false;
         }
-        let Some(k) = self.key_of(list) else { return false };
+        let Some(k) = self.key_of(st, list) else { return false };
         if st.has(&Fact::Below(i, k.clone())) {
             return true;
         }
         let len = |e: &Atom| matches!(e, Atom::Local(e) if st.has(&Fact::Len(*e, k.clone())));
         st.facts.iter().any(|f| match f {
             Fact::Holds(Atom::Local(a), Rel::Lt, e) if *a == i => len(e),
-            Fact::Holds(Atom::Local(a), Rel::Le, m) if *a == i => st.facts.iter().any(|g| {
-                matches!(g, Fact::Holds(m2, Rel::Lt, e) if m2 == m && len(e))
-            }),
+            Fact::Holds(Atom::Local(a), Rel::Le, m) if *a == i => {
+                st.facts.iter().any(|g| matches!(g, Fact::Holds(m2, Rel::Lt, e) if m2 == m && len(e)))
+            }
             _ => false,
         })
     }
@@ -962,7 +977,7 @@ fn successors(t: &Terminator) -> Vec<(usize, Edge)> {
                 let t = b.0 as usize;
                 let many = t == d || cases.iter().filter(|(_, c)| c.0 as usize == t).count() > 1;
                 if !out.iter().any(|(u, _)| *u == t) {
-                    out.push((t, if many { Edge::Jump } else { Edge::Case(*k as i64) }));
+                    out.push((t, if many { Edge::Jump } else { Edge::Case(*k) }));
                 }
             }
             if !out.iter().any(|(u, _)| *u == d) {
@@ -1024,9 +1039,10 @@ fn wild_locals(f: &sir::Function, tys: &[Type]) -> Vec<bool> {
                         Rvalue::Aggregate(_, os) | Rvalue::Closure(_, _, os) => {
                             os.iter().for_each(|o| operand(o, &mut loose, &mut mark))
                         }
-                        Rvalue::Ref(q, _) | Rvalue::Discriminant(q) | Rvalue::CopyOf(q) | Rvalue::StrView(q) => {
-                            mark(q, &mut loose)
-                        }
+                        Rvalue::Ref(q, _)
+                        | Rvalue::Discriminant(q)
+                        | Rvalue::CopyOf(q)
+                        | Rvalue::StrView(q) => mark(q, &mut loose),
                     }
                 }
                 StatementKind::Call { dest, callee, args } => {
@@ -1061,6 +1077,21 @@ fn wild_locals(f: &sir::Function, tys: &[Type]) -> Vec<bool> {
         }
     }
     wild
+}
+
+/// The smallest local the state knows equal to `l`, through copies.
+fn canonical(st: &State, l: u32) -> u32 {
+    let mut c = l;
+    loop {
+        let smaller = st.facts.iter().find_map(|f| match f {
+            Fact::Holds(Atom::Local(a), Rel::Eq, Atom::Local(b)) if *b == c && *a < c => Some(*a),
+            _ => None,
+        });
+        match smaller {
+            Some(a) => c = a,
+            None => return c,
+        }
+    }
 }
 
 fn negate(a: Atom, r: Rel, b: Atom) -> (Atom, Rel, Atom) {

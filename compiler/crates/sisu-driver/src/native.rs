@@ -127,6 +127,14 @@ pub(crate) fn build(
             generated.as_secs_f64() * 1e3,
             start.elapsed().as_secs_f64() * 1e3
         ));
+        // The release profile's facts (decision 270).
+        let c = compiled.checks;
+        if profile == Profile::Release {
+            host.stderr(&format!(
+                "native: index checks {} of {} left out, overflow checks {} of {}, tests decided {}\n",
+                c.index_proven, c.index, c.overflow_proven, c.overflow, c.tests_decided
+            ));
+        }
     }
     linked
 }

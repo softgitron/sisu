@@ -90,6 +90,21 @@ pub struct Compiled {
     pub functions: usize,
     /// SIR statements and terminators compiled.
     pub statements: usize,
+    /// The checks the release profile compiled and those its facts left
+    /// out (decision 270).
+    pub checks: Checks,
+}
+
+/// The checks of a build: index and overflow checks compiled, those of
+/// them the facts prove unneeded, and the tests the facts decide (in the
+/// release profile, decision 270).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Checks {
+    pub index: usize,
+    pub index_proven: usize,
+    pub overflow: usize,
+    pub overflow_proven: usize,
+    pub tests_decided: usize,
 }
 
 /// Compiles a program to an object file defining the C `main`, with debug
@@ -225,6 +240,7 @@ fn compile_once(
     cg.define_main(main_id, flags, ret_ty)?;
     let functions = cg.compiled;
     let statements = cg.statements;
+    let checks = cg.checks;
     let missing = std::mem::take(&mut cg.missing);
     let mut product = cg.module.finish();
     step("the code placed", &mut tt);
@@ -232,7 +248,7 @@ fn compile_once(
     step("the debug information written", &mut tt);
     let object = product.emit().map_err(|e| Error::internal(format!("writing the object file: {e}")))?;
     step("the object emitted", &mut tt);
-    Ok(Ok((Compiled { object, functions, statements }, missing)))
+    Ok(Ok((Compiled { object, functions, statements, checks }, missing)))
 }
 
 /// `SISU_NATIVE_TIMES=1`, as the driver reads it: a line per step of code
@@ -407,6 +423,7 @@ pub(crate) struct Codegen<'p> {
     names: usize,
     pub compiled: usize,
     pub statements: usize,
+    pub checks: Checks,
     /// The words of environment the largest `own` closure compiled needs,
     /// beyond what a function value holds: the program is compiled again.
     pub env_needed: u32,
@@ -531,6 +548,7 @@ impl<'p> Codegen<'p> {
             names: 0,
             compiled: 0,
             statements: 0,
+            checks: Checks::default(),
             env_needed: 0,
         })
     }

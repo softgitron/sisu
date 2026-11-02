@@ -839,6 +839,7 @@ impl<'a, 'p> Cx<'a, 'p> {
             {
                 // A test the facts decide (decision 270): a jump to where
                 // its value goes.
+                self.cg.checks.tests_decided += 1;
                 let k = u64::from(v);
                 let t = cases.iter().find(|(c, _)| *c as u64 == k).map_or(default.0, |(_, b)| b.0) as usize;
                 if t <= self.cur {
@@ -1099,6 +1100,10 @@ impl<'a, 'p> Cx<'a, 'p> {
                             (Some(f), Some(st)) => f.in_bounds(st, &list, l.0),
                             _ => false,
                         };
+                    if !from_end {
+                        self.cg.checks.index += 1;
+                        self.cg.checks.index_proven += usize::from(proven);
+                    }
                     let at = if from_end {
                         let len = self.load(addr, 8);
                         self.b.ins().isub(len, idx)
@@ -1111,7 +1116,9 @@ impl<'a, 'p> Cx<'a, 'p> {
                         let len = self.load(addr, 8);
                         let probe = if from_end { self.b.ins().iadd_imm(idx, -1) } else { idx };
                         let bad = self.b.ins().icmp(IntCC::UnsignedGreaterThanOrEqual, probe, len);
-                        self.guard_if(bad, sym::PANIC_INDEX, |cx| vec![idx, len, cx.iconst(i64::from(from_end))])?;
+                        self.guard_if(bad, sym::PANIC_INDEX, |cx| {
+                            vec![idx, len, cx.iconst(i64::from(from_end))]
+                        })?;
                     }
                     let off = self.b.ins().imul_imm(at, i64::from(size));
                     addr = self.b.ins().iadd(data, off);
@@ -1548,6 +1555,10 @@ impl<'a, 'p> Cx<'a, 'p> {
                     (Some(f), Some(st)) => !f.cannot_overflow(st, op, a, b),
                     _ => true,
                 };
+                if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul) {
+                    self.cg.checks.overflow += 1;
+                    self.cg.checks.overflow_proven += usize::from(!checked);
+                }
                 self.int_op(op, x, y, checked)?
             }
             Scalar::Float => {
