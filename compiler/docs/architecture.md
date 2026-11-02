@@ -6023,9 +6023,9 @@ library", "Tasks and the scheduler", "Capabilities", "Stage 2")
      branches of `cli.rs` that read a program (`inputs_for`, `command`),
      once the roles above have replacements; building stage 1 is one of
      them, its seed then the previous stage-1 executable. Through stage 1
-     the conformance suite passes whole, 504 cases and 5060 checks, in 4 min
-     54 s against 1 min 32 s through the Rust front end, on this machine's
-     4 cores with the debug `sisu`: stage 1 resolves the standard library
+     the conformance suite passes whole, 505 cases and 5 075 checks, in 4
+     min 20 s against 1 min 23 s through the Rust front end, which passes
+     it whole too, on this machine's 4 cores with the debug `sisu`: stage 1 resolves the standard library
      at every command, so a small program's `check` takes 0.55 s, its
      `tokens` 0.02 s. This changes no rule of the language.
      `front::tests` and the driver's own tests hold the choice and the
@@ -6045,6 +6045,44 @@ library", "Tasks and the scheduler", "Capabilities", "Stage 2")
      true`, since the Rust front end falls behind as stage 1 moves; stage
      1's own tests and its canonical form stay required there. All of it
      runs on pushes only, never on a schedule.
+269. What a channel carries is `Send`, as the bound asks it, so a generic
+     function makes a channel of its type parameter and a program a
+     channel of closures, which decision 230 refused (a type parameter
+     and a function value counted as views). A channel takes what one
+     task sends to another, which may keep it after the sender's frame is
+     gone: `channel[T]` and a send (`send`, `try_send`, a `select` arm's)
+     of a value of a type parameter ask `T: Send`, and `Send` as a bound
+     asks the type to own what it holds besides being `Send` by its parts
+     (06, "Send, Sync, and shared state"; 04, "Views"), since a bound
+     cannot see how long what a value borrows lives: with `Send` alone a
+     generic function instantiated at `str` would hand its caller a
+     channel of views, decision 230's bug. So a type parameter bounded by
+     `Send` holds no loan, as one bounded by `Escapable` (decision 257),
+     and `def pipeline[T: Send](own xs: list[T])` makes a `channel[T]` and
+     keeps its values in a `Mutex`; a view is no `Send` type argument
+     (`E0347`, with the note `borrow.own-instead`); what a task captures
+     is still checked by its parts alone, since its scope sees how long a
+     view lives. A missing bound is `E0347` with the fix `type.add-bound`
+     naming `Send` (the first parameter in the way, for a type that holds
+     some and would be `Send` with them bounded), once a body for each
+     parameter; a concrete view or must-consume type is still `E0421` or
+     `E0422` at the channel, and another type that is not `Send` is
+     `E0347`. A function type is
+     `Send` when its closure is, which the type does not say (Q-52), so
+     each closure is checked where it is sent, as a task's where it is
+     spawned: a send on a channel of a function type takes a closure
+     written at the call (`E0425`, as `spawn`), which owns what it
+     captures (a plain closure that captures anything borrows it:
+     `E0421`, with the note `borrow.use-own-closure`), each capture owning
+     what it holds (`E0421`, naming it) and `Send` (`E0426`); the halves
+     of such a channel are `Send` and `Sync` and own what they hold, and
+     a function type is still no `Send` type argument, since a generic
+     body could send any closure of it. Lowering does not change: the SIR
+     is what stage 0 writes for `[T: Send + Escapable]` and for a closure
+     passed by value, and the interpreter and the native backend run it.
+     Known over-rejections 13 and 14 narrow accordingly. Stage 1 decides
+     it (its RULES.md, R1, with `cases/channels/`); the frozen Rust front
+     end keeps decision 230's rule.
 270. Release builds keep the checks of overflow, bounds and contracts (09:
      no profile turns them off; 07: the contracts the manifest names) and
      pay as little as the backend can for each, as the owner asked. In
