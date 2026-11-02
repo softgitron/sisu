@@ -739,8 +739,15 @@ impl<'a, 'p> Cx<'a, 'p> {
     ) -> Result<(), Error> {
         let cont = self.b.create_block();
         let failed = self.b.create_block();
-        self.b.ins().brif(bad, failed, &[], cont, &[]);
-        self.b.set_cold_block(failed);
+        if std::env::var_os("SISU_OK_FORM").is_some() {
+            let ok = self.b.ins().icmp_imm(IntCC::Equal, bad, 0);
+            self.b.ins().brif(ok, cont, &[], failed, &[]);
+        } else {
+            self.b.ins().brif(bad, failed, &[], cont, &[]);
+        }
+        if std::env::var_os("SISU_NO_COLD").is_none() {
+            self.b.set_cold_block(failed);
+        }
         self.b.switch_to_block(failed);
         let args = args(self);
         self.rt(raise, &args)?;
@@ -753,7 +760,9 @@ impl<'a, 'p> Cx<'a, 'p> {
     fn emit_fails(&mut self) -> Result<(), Error> {
         for i in 0..self.fails.len() {
             let Some(fb) = self.fails[i] else { continue };
-            self.b.set_cold_block(fb);
+            if std::env::var_os("SISU_NO_COLD").is_none() {
+                self.b.set_cold_block(fb);
+            }
             self.b.switch_to_block(fb);
             let block = &self.f.blocks[i];
             if let Some(l) = block.loc.or(self.f.loc) {
@@ -790,7 +799,7 @@ impl<'a, 'p> Cx<'a, 'p> {
         for (i, block) in self.f.blocks.iter().enumerate() {
             self.cur = i;
             let cb = self.blocks[i];
-            if self.cold[i] {
+            if self.cold[i] && std::env::var_os("SISU_NO_COLD").is_none() {
                 self.b.set_cold_block(cb);
             }
             self.b.switch_to_block(cb);

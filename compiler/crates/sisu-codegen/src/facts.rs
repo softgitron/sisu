@@ -313,6 +313,10 @@ impl Facts {
                         visits[t] += 1;
                         if visits[t] > WIDEN_AFTER {
                             self.widen(old, &mut joined);
+                            // What the facts that stay say of the bounds,
+                            // which widening may have lost (a loop inside
+                            // another widens the outer loop's counter).
+                            self.narrow(&mut joined);
                         }
                         if joined == *old {
                             continue;
@@ -377,6 +381,38 @@ impl Facts {
             let lo = if lo < olo { tlo } else { lo };
             let hi = if hi > ohi { thi } else { hi };
             self.set_bound(joined, l, (lo, hi));
+        }
+    }
+
+    /// Narrows the bounds by the comparisons the state holds.
+    fn narrow(&self, st: &mut State) {
+        for _ in 0..2 {
+            let held: Vec<(Atom, Rel, Atom)> = st
+                .facts
+                .iter()
+                .filter_map(|f| match f {
+                    Fact::Holds(a, r, b) => Some((*a, *r, *b)),
+                    _ => None,
+                })
+                .collect();
+            for (a, r, b) in held {
+                let ((alo, ahi), (blo, bhi)) = (self.bound(st, a), self.bound(st, b));
+                let (na, nb) = match r {
+                    Rel::Lt => ((alo, ahi.min(bhi.saturating_sub(1))), (blo.max(alo.saturating_add(1)), bhi)),
+                    Rel::Le => ((alo, ahi.min(bhi)), (blo.max(alo), bhi)),
+                    Rel::Eq => ((alo.max(blo), ahi.min(bhi)), (alo.max(blo), ahi.min(bhi))),
+                    Rel::Ne => continue,
+                };
+                if na.0 > na.1 || nb.0 > nb.1 {
+                    continue;
+                }
+                if let Atom::Local(l) = a {
+                    self.set_bound(st, l, na);
+                }
+                if let Atom::Local(l) = b {
+                    self.set_bound(st, l, nb);
+                }
+            }
         }
     }
 
