@@ -597,3 +597,39 @@ fn native_runs_take_seeds_and_report_the_schedulers_numbers() {
     assert_eq!(status, Some(2));
     assert!(err.contains("`--stats stack-depth`"), "{err}");
 }
+
+/// The release profile leaves out the checks its facts prove and keeps the
+/// rest (decision 270): of `run/proven_checks`, every index but the one
+/// into a list that shrinks in its loop, two additions that cannot
+/// overflow, and the postcondition its preconditions decide; and the
+/// executable meets the interpreter's expectations, the one kept check
+/// failing where it should.
+#[test]
+fn the_release_profile_leaves_out_the_checks_it_proves() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let dir = scratch("proven");
+    let case = compiler_dir().join("conformance/cases/run/proven_checks");
+    std::fs::copy(case.with_extension("sisu"), dir.join("proven_checks.sisu")).expect("the case");
+    let built = std::process::Command::new(&sisu)
+        .args([
+            "build",
+            "--native",
+            "--release",
+            "--contracts=all",
+            "--output",
+            "proven",
+            "proven_checks.sisu",
+        ])
+        .env("SISU_NATIVE_TIMES", "1")
+        .current_dir(&dir)
+        .output()
+        .expect("sisu runs");
+    let (_, err, status) = outcome(built);
+    assert_eq!(status, Some(0), "{err}");
+    assert!(err.contains("index checks 7 of 8 left out, overflow checks 2 of 9, tests decided 1"), "{err}");
+    let ran = std::process::Command::new(dir.join("proven")).current_dir(&dir).output().expect("it runs");
+    let (out, err, status) = outcome(ran);
+    let expected = |ext: &str| std::fs::read_to_string(case.with_extension(ext)).expect("an expectation");
+    assert_eq!((out, err, status), (expected("out"), expected("err"), Some(101)));
+    let _ = std::fs::remove_dir_all(&dir);
+}

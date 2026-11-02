@@ -265,8 +265,11 @@ and the time spent building and running them.
   gives (`constant_reads`), what a call leaves of an
   iterator given to an `Iterable[T]` parameter (`iterable_rest`: dropped
   when it returns and when it unwinds), an iterator written in Sisu given
-  to one (`iterable_iterator`: lazy, through a generator), capabilities,
-  and tests.
+  to one (`iterable_iterator`: lazy, through a generator), the checks a
+  release build leaves out because its facts prove them and the one it
+  keeps (`proven_checks`: indices below a length nothing changes,
+  additions that cannot overflow, a postcondition its preconditions
+  decide, and a list that shrinks in its loop), capabilities, and tests.
 - `traits/` is traits and impls (18, Phase 4): provided methods,
   associated types, supertraits, coherence and the orphan rule, sealed
   traits, method resolution and ambiguity, `dyn Trait` and object safety,

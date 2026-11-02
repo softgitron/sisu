@@ -1,0 +1,68 @@
+# The release profile keeps every check and leaves out those its facts prove
+# (decision 270): an index below the length of a list nothing changes
+# meanwhile, through a shared reference or in a local, a field or another
+# list's element; one a precondition bounds, or a test that two lengths are
+# equal; an addition whose operands' bounds cannot overflow; and a test an
+# earlier one decides. What a program prints is the same in every mode. The
+# last loop's list shrinks inside it, so its index stays checked and fails.
+
+struct Grid:
+    rows: list[list[int]]
+
+def total(xs: list[int]) -> int:
+    var s = 0
+    for i in range(len(xs)):
+        s += xs[i]
+    var k = 0
+    while k < len(xs):
+        s += xs[k]
+        k += 1
+    return s
+
+def at(xs: list[int], i: int) -> int:
+    requires i >= 0
+    requires i < len(xs)
+    return xs[i]
+
+def dot(xs: list[int], ys: list[int]) -> int:
+    requires len(xs) == len(ys)
+    var s = 0
+    for i in range(len(xs)):
+        s += at(xs, i) * ys[i]
+    return s
+
+def cells(g: Grid) -> int:
+    var s = 0
+    for r in range(len(g.rows)):
+        for c in range(len(g.rows[r])):
+            s += g.rows[r][c]
+    return s
+
+def scale(x: int, k: int) -> int:
+    requires x >= 0
+    requires k >= 1
+    ensures result >= 0
+    return x * k
+
+def steps(n: int) -> int:
+    var i = 0
+    var t = 0
+    while i < n:
+        t += i % 3
+        i += 1
+    return t
+
+def main():
+    var xs: list[int] = []
+    for i in range(10):
+        xs.push(i)
+    print(total(xs))
+    print(dot(xs, xs))
+    print(cells(Grid(rows=[[1, 2], [], [3, 4, 5]])))
+    print(scale(21, 2))
+    print(steps(10))
+    var ys = [1, 2, 3]
+    for i in range(len(ys)):
+        if i == 1:
+            _ = ys.pop()
+        print(ys[i])

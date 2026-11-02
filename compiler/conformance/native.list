@@ -157,6 +157,7 @@ run/options
 run/or_bindings
 run/overflow
 run/parse_int
+run/proven_checks
 run/pure_functions
 run/recursion
 run/sized_integers

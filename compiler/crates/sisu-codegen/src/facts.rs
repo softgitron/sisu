@@ -29,6 +29,11 @@ const MAX: i64 = i64::MAX;
 /// How often a block's entry may grow before its bounds are widened.
 const WIDEN_AFTER: u32 = 3;
 
+/// How often a block's entry may change at all before the analysis gives
+/// up on it, knowing nothing there: widening ends every analysis long
+/// before, and this keeps a mistake in that from looping.
+const GIVE_UP_AFTER: u32 = 64;
+
 /// A list whose length a fact speaks of: a local, then the referent of a
 /// shared reference (first, and only there), fields, and elements at
 /// indices held by tracked locals.
@@ -245,8 +250,15 @@ impl Facts {
         frames: &[bool],
         constant: &dyn Fn(&str) -> Option<i64>,
     ) -> Facts {
-        let tracked: Vec<Option<(i64, i64)>> =
-            tys.iter().zip(regs).map(|(t, r)| if *r { type_bounds(t) } else { None }).collect();
+        // The result too, which lives in the caller's memory, when the
+        // function only assigns it whole (its `ensures` read it).
+        let result = whole_only(f, 0);
+        let tracked: Vec<Option<(i64, i64)>> = tys
+            .iter()
+            .zip(regs)
+            .enumerate()
+            .map(|(i, (t, r))| if *r || (i == 0 && result) { type_bounds(t) } else { None })
+            .collect();
         let mut constants: Vec<(String, i64)> = Vec::new();
         for b in &f.blocks {
             for s in &b.stmts {
@@ -321,7 +333,7 @@ impl Facts {
                         if joined == *old {
                             continue;
                         }
-                        joined
+                        if visits[t] > GIVE_UP_AFTER { State::default() } else { joined }
                     }
                 };
                 self.entry[t] = Some(next);
@@ -348,7 +360,8 @@ impl Facts {
         let Some((tlo, thi)) = self.type_of(l) else { return };
         let (lo, hi) = (lo.max(tlo), hi.min(thi));
         let at = st.bounds.binary_search_by_key(&l, |e| e.0);
-        if (lo, hi) == (tlo, thi) {
+        // Bounds outside the type say nothing the type does not.
+        if (lo, hi) == (tlo, thi) || lo > hi {
             if let Ok(i) = at {
                 st.bounds.remove(i);
             }
@@ -1048,6 +1061,58 @@ fn successors(t: &Terminator) -> Vec<(usize, Edge)> {
         }
         _ => Vec::new(),
     }
+}
+
+/// Whether the function only reads and writes the local whole: no
+/// statement borrows it, projects through it or names a key with it.
+fn whole_only(f: &sir::Function, l: u32) -> bool {
+    let place = |p: &Place| p.local.0 != l || p.proj.is_empty();
+    let operand = |o: &Operand| match o {
+        Operand::Copy(p) | Operand::Move(p) => place(p),
+        Operand::Const(_) => true,
+    };
+    let keyless = |p: &Place| {
+        p.proj.iter().all(|q| !matches!(q, Proj::Index(k) | Proj::IndexFromEnd(k) | Proj::Key(k) if k.0 == l))
+    };
+    let operand_keyless = |o: &Operand| match o {
+        Operand::Copy(p) | Operand::Move(p) => keyless(p),
+        Operand::Const(_) => true,
+    };
+    f.blocks.iter().all(|b| {
+        b.stmts.iter().all(|s| match &s.kind {
+            StatementKind::Assign(d, rv) => {
+                place(d)
+                    && keyless(d)
+                    && match rv {
+                        Rvalue::Use(o) | Rvalue::Unary(_, o) => operand(o) && operand_keyless(o),
+                        Rvalue::Binary(_, a, c) => {
+                            operand(a) && operand(c) && operand_keyless(a) && operand_keyless(c)
+                        }
+                        Rvalue::Aggregate(_, os) | Rvalue::Closure(_, _, os) => {
+                            os.iter().all(|o| operand(o) && operand_keyless(o))
+                        }
+                        Rvalue::Ref(q, _)
+                        | Rvalue::Discriminant(q)
+                        | Rvalue::CopyOf(q)
+                        | Rvalue::StrView(q) => q.local.0 != l && keyless(q),
+                    }
+            }
+            StatementKind::Call { dest, callee, args } => {
+                place(dest)
+                    && keyless(dest)
+                    && args.iter().all(|o| operand(o) && operand_keyless(o))
+                    && match callee {
+                        Callee::Value(o) => operand(o),
+                        _ => true,
+                    }
+            }
+            StatementKind::Drop { place: p, .. } => place(p) && keyless(p),
+            StatementKind::StorageDead(_) => true,
+        }) && match &b.term {
+            Terminator::Switch { value, .. } => operand(value),
+            _ => true,
+        }
+    })
 }
 
 /// The locals some mutable borrow of which goes where the analysis cannot

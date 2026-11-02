@@ -66,9 +66,9 @@ architecture"); data flows down the table.
 | `sisu-borrowck` | 5686 | The ownership checker on SIR: initialisation and moves, drop elaboration, loans and the borrow rules, the task rules, escapes, must-consume, purity, `explain-borrow`, and the `Shared` escape analysis |
 | `sisu-interp` | 14186 | The trampolined SIR interpreter, values, drops, dispatch of trait calls, unwinding, host intrinsics, the task scheduler (random, PCT, bounded exhaustive) and the `sim` profile's faults, capabilities and the host's objects, the capability log, hot replacement in epochs, the parallel test runner, the dynamic ownership monitor, and the compile-time evaluator |
 | `sisu-rt` | 12340 | Stage 2's runtime, linked into every native executable: the shared ABI (the value layout, the type table's encoding, the entry points), panics and stack traces, allocation, the structural operations on values, iterators, dicts and sets, the intrinsics, the scheduler of tasks on pooled stacks, the library types, capabilities, and the host's files, network and processes |
-| `sisu-codegen` | 6540 | Stage 2's debug backend: SIR to Cranelift IR, one instance per function and list of type arguments, with trait calls resolved at compile time; the object file and the link |
-| `sisu-driver` | 12898 | The query layer and the `sisu` command line; manifests (a TOML reader of its own), the package layout and the lockfile; the counterexample mode, `audit --ownership` and `--caps`, `sisu doc`, replay tokens, snapshot files and transcripts, the `sim` build check; `fmt`, the REPL and worksheets, `run --watch`'s rebuilds, and the language server with its JSON; `build --native` and `run --native`; the soundness tests (fault injection, mutation fuzzing), the language server's protocol tests and the native conformance test |
-| `sisu-conformance` | 1520 | The language-agnostic conformance runner, and its native mode |
+| `sisu-codegen` | 8069 | Stage 2's debug backend: SIR to Cranelift IR, one instance per function and list of type arguments, with trait calls resolved at compile time; the release profile's facts about a function's integers, which leave out the checks they prove; the object file and the link |
+| `sisu-driver` | 13792 | The query layer and the `sisu` command line, whose front end is stage 1's unless the Rust one is asked for (`front.rs`); manifests (a TOML reader of its own), the package layout and the lockfile; the counterexample mode, `audit --ownership` and `--caps`, `sisu doc`, replay tokens, snapshot files and transcripts, the `sim` build check; `fmt`, the REPL and worksheets, `run --watch`'s rebuilds, and the language server with its JSON; `build --native` and `run --native`; the soundness tests (fault injection, mutation fuzzing), the language server's protocol tests and the native conformance test |
+| `sisu-conformance` | 1583 | The language-agnostic conformance runner, and its native mode; either front end of the executable |
 
 Line counts are of each crate's `src`, unit tests included. Besides the crates:
 `catalog/messages.catalog` (every message); the standard library, in
@@ -3109,7 +3109,9 @@ or `release` with `--release` (decision 232): Cranelift's `speed`
 optimisations, the checks of overflow and bounds as in every build, and
 the contracts the root package's `[profile.release] contracts` names,
 preconditions by default (07); `--contracts=LEVEL` overrides it, in
-either profile. `sisu run --native [FILE] [ARGS...]` builds a package
+either profile. A check is one branch the common path does not take, to a
+block out of its way, and the release profile leaves out the checks the
+facts it knows about a function's integers prove (decision 270). `sisu run --native [FILE] [ARGS...]` builds a package
 where its builds go and a file into a directory of its own under the
 system's temporary directory, which it removes after, runs the executable
 with the arguments, the standard streams and the environment of the
@@ -3610,12 +3612,12 @@ serialised is checked against both of stage 0's ways of running it.
 ### Coverage
 
 `conformance/native.list` names the cases the backend builds and runs:
-199 of them, every case of the suite that runs a program (the others are
+200 of them, every case of the suite that runs a program (the others are
 diagnostics, `sisu test` files, and the tools' cases: `--watch`, the
 REPL, worksheets, tokens, SIR and documentation). Among them are every
 case of `concurrency/` that runs (tasks, scopes, cancellation, channels,
 `select`, races, generators and their closing, `log`, mutexes across
-tasks, the deadlock report, a task's stack overflow), all 47 of `run/`
+tasks, the deadlock report, a task's stack overflow), all 48 of `run/`
 that have a `main` (`run/testing` is a test file without one), the 37 of
 `ownership/` that run (with `Mutex`, `Shared`, `Weak`, `Cell` and
 `Arena`), and the 11 of `capabilities/` (fakes, attenuations, caretakers,
@@ -6028,19 +6030,89 @@ library", "Tasks and the scheduler", "Capabilities", "Stage 2")
      `tokens` 0.02 s. This changes no rule of the language.
      `front::tests` and the driver's own tests hold the choice and the
      statuses, and every native and conformance test of `cargo test` runs
-     through stage 1.
-269. CI follows the new order (`.github/workflows`). The main job,
+     through stage 1. CI follows (`.github/workflows`): the main job,
      `compiler` in `ci.yml`, builds stage 1 with its first command and runs
      `cargo test`, whose conformance suite and native modes go through
-     stage 1: the expectations (`.diag`, `.sir`, `.doc`, `.out`, `.err`,
-     `.status` and the rest) against stage 1's output, and the programs run
-     from stage 1's SIR in the interpreter and natively; the canonical-form
-     check is one run of stage 1's formatter over the standard library and
-     the canonical cases. The `native` job's modes go through stage 1 too.
-     The `stage1` workflow is the oracle's: the conformance suite through
-     the Rust front end (the runner's `--front-end=rust`, which puts
+     stage 1 (the expectations, `.diag`, `.sir`, `.doc`, `.out`, `.err`,
+     `.status` and the rest, against stage 1's output, and the programs run
+     from stage 1's SIR in the interpreter and natively), and its
+     canonical-form check is one run of stage 1's formatter over the
+     standard library and the canonical cases; the `native` job's modes go
+     through stage 1 too. The `stage1` workflow is the oracle's: the suite
+     through the Rust front end (the runner's `--front-end=rust`, which puts
      `SISU_FRONT_END` in the environment it gives every command) and
-     `check.sh` (stage 1 against the Rust front end, `SISU_FRONT_END=rust`),
-     both `continue-on-error: true`, since the Rust front end falls behind
-     as stage 1 moves; stage 1's own tests and its canonical form stay
-     required there. All of it runs on pushes only, never on a schedule.
+     `check.sh` under `SISU_FRONT_END=rust`, both `continue-on-error:
+     true`, since the Rust front end falls behind as stage 1 moves; stage
+     1's own tests and its canonical form stay required there. All of it
+     runs on pushes only, never on a schedule.
+270. Release builds keep the checks of overflow, bounds and contracts (09:
+     no profile turns them off; 07: the contracts the manifest names) and
+     pay as little as the backend can for each, as the owner asked. In
+     both profiles, a check is one branch the common path does not take:
+     an overflow of `+`, `-` and `*` is tested on the processor's flag
+     (Cranelift's `sadd_overflow`, `ssub_overflow` and `smul_overflow`,
+     the branch on their flag result), an index by one unsigned comparison
+     with the length, and the block that raises the panic, its constants
+     made there, is written after the SIR block's terminator, out of the
+     way of the code after the check; the SIR blocks every path from which
+     ends in a panic or in unwinding (a failed contract's report and its
+     `contract.fail`, a `panic`, the cleanup blocks) and each block's
+     failure path are cold, placed after the function's other code. In the
+     release profile the code generator also knows facts about each
+     function's integers (`sisu-codegen/src/facts.rs`), a forward analysis
+     over its SIR whose states are joined where paths meet (the hull of
+     the bounds, the facts both paths have) and widened at a block that
+     keeps growing, then narrowed again by the comparisons that still
+     hold: the bounds of every integer and `bool` kept in a variable
+     (decision 246, so no code changes one behind its back) and of the
+     result, which only whole assignments change; the comparisons a
+     `switch` on one establishes on each edge; which local holds `len` of
+     a list that cannot change meanwhile, through a shared reference (04:
+     nothing changes what one refers to while it lives) or in a local
+     whose mutable borrows go only straight into a call whose result holds
+     no reference, each such call counting as a change of it (and a write,
+     a move, a drop or a new value of it, or of a part it lies in, as one
+     too); and what a range iterator of the frame (decision 253) yields,
+     from its start to below its end. With them it leaves out an index's
+     test that they prove (`0 <= i` and `i` below that list's length, or
+     below another's that a test found equal), the overflow test of an
+     operation whose operands' bounds rule it out (the plain instruction),
+     and the branch of a `switch` they decide, the test a dominating one
+     implies or the type of what it compares decides (a jump), which is
+     how a postcondition a precondition implies costs nothing; every
+     answer is a proof, and where they know nothing the check stays. The
+     facts are each function's own: a callee checks its preconditions
+     whatever its caller knows, a refinement is its base in SIR, and the
+     lists behind a `ref mut` are not followed (port-debt.md, "What the
+     release profile's facts cannot see"). `SISU_NATIVE_TIMES=1` reports
+     the index and overflow checks a release build compiled and those it
+     left out, and the tests it decided: of stage 1, 565 of its 3 192
+     index checks and 599 of its 1 405 overflow checks are left out, and
+     255 tests decided. Built by a release `sisu` and run in the release
+     profile, against the compiler before this decision, best of nine in
+     turn, valgrind's count of instructions after each, every output byte
+     for byte the same: Collatz's chains take 0.91 s against 1.14 s (7.82 G
+     instructions against 8.13 G), `fib(37)` 0.44 s against 0.53 s (4.77 G,
+     5.36 G), the product of 400x400 matrices 0.43 s against 0.61 s (5.17
+     G, 6.39 G), the loop of `max` and `min` 0.24 s against 0.30 s (2.92 G,
+     3.24 G), the sieve 0.27 s against 0.29 s (0.63 G, 0.66 G), a loop of
+     `while k < len(xs)` over a list 0.058 s against 0.080 s (0.54 G, 0.74
+     G), `dot` of two lists through a function with preconditions 0.112 s
+     against 0.133 s (1.38 G, 1.46 G), and Euclid 1.52 s against 1.55 s
+     (the same 4.44 G: nothing in its loop is a check the facts prove or
+     one that fails into the code after it). Two run fewer instructions
+     and take longer: a loop of `for i in range(len(xs))` over a list
+     behind a reference, whose index is no longer tested, 1.14 G against
+     1.20 G but 0.115 s against 0.090 s, and trial division 9.16 G against
+     9.70 G but 2.60 s against 2.45 s, because Cranelift's register
+     allocator, weighing the failure blocks where they now are, keeps the
+     loop's counter on the stack where it kept it in a register
+     (port-debt.md, "A check's flag is materialised before its branch").
+     Stage 1, built so, prints the SIR of its own package in 20.9 s as
+     before (medians 21.3 s and 21.5 s), and of `examples/wordcount` in
+     2.863 G instructions against 2.874 G, its output the same: its time
+     is the runtime's intrinsics' (decision 253), not its own checks'. A
+     release build of stage 1 spends 3.1 to 3.3 s generating code, against
+     2.7 to 2.9 s. `run/proven_checks` pins what the facts prove and the
+     check they keep, natively in the three modes, and the driver's tests
+     hold the counts of its release build. This changes no front-end rule.

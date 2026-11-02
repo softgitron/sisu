@@ -1,0 +1,2 @@
+panic: index out of bounds: the length is 2 but the index is 2
+  at main (proven_checks.sisu:68:9)

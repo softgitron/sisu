@@ -60,7 +60,9 @@ jobs:
   compiler:
     name: compiler format, lints, build, tests and conformance through stage 1
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # The suite through stage 1 takes about three times as long as through
+    # the Rust front end (decision 268).
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: compiler
@@ -119,7 +121,7 @@ jobs:
     name: stage-2 native backend conformance
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: compiler

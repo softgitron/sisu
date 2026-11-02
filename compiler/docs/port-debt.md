@@ -559,16 +559,17 @@ What the driver does around stage 1, because of what its commands are:
   standard error, and `error: Exit(status=N)` too, whose N is the status.
   Stage 1 knows the working directory by `PWD`, which the driver sets.
 - **Stage 1 starts from nothing at every command**: the standard library
-  is resolved again each time (the base, about 0.3 s of the 0.5 s a small
-  program's `check` takes, against 55 ms for the Rust front end), so the
-  conformance suite takes about three times as long through stage 1.
+  is resolved again each time (its base), so a small program's `check`
+  takes about 0.55 s, where its `tokens` take 0.02 s and the Rust front
+  end's `check` 55 ms, and the conformance suite takes about three times
+  as long through stage 1 (decision 268).
   *Pay*: what the memo is for the Rust front end ("The memo is not kept
   between commands" above), for stage 1: its base kept between commands.
 
 ## Stage 2: what the native backend leaves out
 
 The native debug backend (architecture.md, "Stage 2") compiles every
-program the conformance suite runs (`conformance/native.list`, 199
+program the conformance suite runs (`conformance/native.list`, 200
 cases), with the debug profile and the release one (decision 232), and
 every one of those runs frees what it allocated (decision 226). A
 construct it does not compile is `D0103` under `--native`, and the
@@ -658,8 +659,8 @@ What round 1 does, and a later round must not copy:
 - **The release profile is Cranelift's optimisation level** (decision
   232), not 09's LLVM, with scalars in registers and the integer
   division inline (decision 246: arithmetic loops 1.3 to 2.9 times
-  faster): nothing a contract proves removes a check, and the runtime's
-  calls cost what they cost in a debug build, and there is no
+  faster), and the checks its facts prove left out (decision 270); the
+  runtime's calls cost what they cost in a debug build, and there is no
   `release-size`. The commonest intrinsics are inline in both profiles
   (decision 253: stage 1 twice as fast; `max` and `min`, decision 264),
   and text building, a dict's and a set's lookups and a list's growth
@@ -671,6 +672,32 @@ What round 1 does, and a later round must not copy:
   lookup walks the key's type to hash it and again to compare it, about
   400 instructions in stage 1); and LLVM for release builds (18, stage
   2).
+- **What the release profile's facts cannot see** (decision 270): they
+  are a function's own, so a callee's precondition is checked again in
+  the callee even where its caller's facts imply it (no inlining, no
+  facts across a call); a refinement type is its base in SIR, so what it
+  promises (a `Port` is at most 65535, a `NonEmpty` list has an element)
+  proves nothing; a list's length is known after `len` only, not after
+  the pushes that made it (the sieve's `composite[i]` stays checked); the
+  lists behind a `ref mut` (a `mut self` method's own fields) and a
+  parameter's list taken by value are not followed; an index other than
+  a tracked local, or below a length less one (`xs[len(xs) - 1]`), is
+  checked; and the bounds are intervals with one comparison between two
+  locals, so `d * d <= n` says nothing of `d`. *Pay*: facts carried
+  across calls (a callee's preconditions as facts at its call, and the
+  facts its result has, or inlining); a refinement's predicate in SIR as a
+  fact of the values of its type; the length a loop of pushes leaves.
+- **A check's flag is materialised before its branch**: Cranelift 0.123's
+  x64 lowering of `sadd_overflow` and its kin sets a byte from the
+  overflow flag (`seto`) and tests it, rather than branching on the flag
+  (`jo`), so an overflow check is three instructions besides the
+  arithmetic, not one; and register allocation sees a check's failure
+  block, whose call clobbers registers, so where a cold block or a check
+  goes changes which value a loop keeps in a register (decision 270: a
+  loop-carried counter spilled to the stack made trial division slower
+  with fewer instructions). *Pay*: the flag's branch fused in the backend
+  (a lowering rule for `brif` of an overflow flag), or LLVM for release
+  builds.
 - **Where the link places a function moves a tight loop's time**:
   functions are placed one after another at the alignment their code
   needs (a byte), so the same instructions of a loop run up to a third

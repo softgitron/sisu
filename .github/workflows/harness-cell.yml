@@ -1,0 +1,114 @@
+# The cells of the Phase 1 harness (taskbench) that machine 2 could not
+# settle, run again on a runner large enough for them.
+#
+# taskbench/docs/report-phase1.md (sections 1, 9.3, 10.4 and 10.5): on the 7.75 GiB
+# runner of run 38518035636 the memory guard stopped the `idle-memory` cells
+# of a million tasks for strategies B and D(B) at the 1 MiB reservation (and
+# at 8 MiB), so the default reservation's 1M cells rest on machine 1 alone and
+# D(B) at 1 MiB is "inconclusive" on machine 2. The repository is public now,
+# so `ubuntu-latest` is a 4-vCPU, 16 GiB runner: this workflow prints what the
+# runner has, then runs `run_all.sh --scale full --only idle-memory`, the
+# narrowest selection the script offers (it selects benchmarks, not cells),
+# which holds those cells: a million idle tasks at the 1 MiB reservation for
+# D(B), B and C (C's exact stacks of 4, 8 and 16 KiB), with the 8 MiB
+# reservation and the 100k cells beside them, five repetitions in fresh
+# processes, and the Go and Java controls the report's ratios divide by.
+#
+# Triggered only by a push whose head commit message contains the marker
+# [harness-cell]. There is no schedule and no manual dispatch (the owner's
+# decision, October 2026). The results directory is uploaded as the artifact
+# taskbench-cell-<run id>.
+name: harness-cell
+
+on:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  cell:
+    if: contains(github.event.head_commit.message, '[harness-cell]')
+    name: taskbench idle-memory at 1M tasks on a 16 GiB runner (machine 2's missing cells)
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    defaults:
+      run:
+        working-directory: taskbench
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The runner's CPU and memory
+        run: |
+          echo "vCPUs: $(nproc)"
+          lscpu
+          free -b
+          grep -E '^(MemTotal|MemAvailable|SwapTotal):' /proc/meminfo
+          cat /sys/fs/cgroup/memory.max 2>/dev/null || true
+
+      # The image's default java is 17, which has no virtual threads.
+      - name: JDK 21 (virtual threads)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # The same Go minor release as machine 1.
+      - name: Go 1.24
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: false
+
+      - name: Kernel defaults, no swap, huge pages on request as on machine 1
+        run: |
+          # As harness-full.yml: the kernel default vm.max_map_count, no swap
+          # (resident memory per idle task must not be paged out), and
+          # transparent huge pages on request only, as on machine 1.
+          sudo sysctl -w vm.max_map_count=65530
+          sudo swapoff -a
+          echo madvise | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
+          sysctl vm.max_map_count vm.overcommit_memory kernel.threads-max kernel.pid_max
+          cat /sys/kernel/mm/transparent_hugepage/enabled /sys/kernel/mm/transparent_hugepage/defrag
+          free -b
+
+      - name: Toolchain versions and limits
+        run: |
+          rustc --version
+          cargo --version
+          go version
+          java -version 2>&1
+          ulimit -a
+          echo "RLIMIT_NOFILE hard: $(ulimit -Hn)"
+
+      - name: Build (release)
+        run: cargo build --release
+
+      - name: idle-memory at full scale (five repetitions, with the controls)
+        timeout-minutes: 120
+        # Inside a transient scope capped at 14 GiB, below the runner's 16,
+        # so that the harness's memory guards (which read the limit of the
+        # cgroup they run in) turn a cell too large for it into a failed row
+        # and the runner agent keeps its memory (harness-full.yml, run
+        # 38513665561).
+        run: |
+          sudo systemd-run --scope --quiet --same-dir \
+            --uid="$(id -u)" --gid="$(id -g)" \
+            -p MemoryMax=14G -p MemorySwapMax=0 \
+            --setenv=PATH="$PATH" --setenv=HOME="$HOME" --setenv=GITHUB_RUN_ID="$GITHUB_RUN_ID" \
+            --setenv=GITHUB_SHA="$GITHUB_SHA" --setenv=GITHUB_REF_NAME="$GITHUB_REF_NAME" \
+            --setenv=JAVA_HOME="${JAVA_HOME:-}" --setenv=GOROOT="${GOROOT:-}" \
+            ./run_all.sh --scale full --only idle-memory --machine-id github-runner-16g \
+            --out "results/github-runner/cell-${GITHUB_RUN_ID}"
+
+      - name: Summarise
+        if: always()
+        run: python3 summarize.py --markdown "results/github-runner/cell-${GITHUB_RUN_ID}" || true
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: taskbench-cell-${{ github.run_id }}
+          path: taskbench/results/github-runner/
+          if-no-files-found: warn

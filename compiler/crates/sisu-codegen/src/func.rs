@@ -740,29 +740,16 @@ impl<'a, 'p> Cx<'a, 'p> {
     }
 
     /// Continues unless `bad` holds; else calls the runtime entry point
-    /// that raises the panic (`raise`, with the arguments `args` makes) and
-    /// takes the failure path. The failure is a cold block, placed after
-    /// the rest of the function, so the common path is one branch not
-    /// taken; the arguments are made there (decision 270).
+    /// that raises the panic (`raise`, with `args`, the constants among
+    /// them made there) and takes the failure path. The failure's block is
+    /// written after the SIR block's terminator, out of the way of the
+    /// code that follows the check, so the common path is one branch not
+    /// taken (decision 270).
     fn guard_if(&mut self, bad: Value, raise: &'static str, args: [Arg; 3]) -> Result<(), Error> {
         let cont = self.b.create_block();
         let failed = self.b.create_block();
-        if std::env::var_os("SISU_OK_FORM").is_some() {
-            let ok = self.b.ins().icmp_imm(IntCC::Equal, bad, 0);
-            self.b.ins().brif(ok, cont, &[], failed, &[]);
-        } else {
-            self.b.ins().brif(bad, failed, &[], cont, &[]);
-        }
-        if std::env::var_os("SISU_DEFER").is_some() {
-            self.deferred.push((failed, raise, args));
-            self.b.switch_to_block(cont);
-            return Ok(());
-        }
-        if std::env::var_os("SISU_NO_COLD").is_none() {
-            self.b.set_cold_block(failed);
-        }
-        self.b.switch_to_block(failed);
-        self.raise(raise, args)?;
+        self.b.ins().brif(bad, failed, &[], cont, &[]);
+        self.deferred.push((failed, raise, args));
         self.b.switch_to_block(cont);
         Ok(())
     }
@@ -787,9 +774,7 @@ impl<'a, 'p> Cx<'a, 'p> {
     fn emit_fails(&mut self) -> Result<(), Error> {
         for i in 0..self.fails.len() {
             let Some(fb) = self.fails[i] else { continue };
-            if std::env::var_os("SISU_NO_COLD").is_none() {
-                self.b.set_cold_block(fb);
-            }
+            self.b.set_cold_block(fb);
             self.b.switch_to_block(fb);
             let block = &self.f.blocks[i];
             if let Some(l) = block.loc.or(self.f.loc) {
@@ -826,7 +811,7 @@ impl<'a, 'p> Cx<'a, 'p> {
         for (i, block) in self.f.blocks.iter().enumerate() {
             self.cur = i;
             let cb = self.blocks[i];
-            if self.cold[i] && std::env::var_os("SISU_NO_COLD").is_none() {
+            if self.cold[i] {
                 self.b.set_cold_block(cb);
             }
             self.b.switch_to_block(cb);
@@ -1156,7 +1141,11 @@ impl<'a, 'p> Cx<'a, 'p> {
                         let len = self.load(addr, 8);
                         let probe = if from_end { self.b.ins().iadd_imm(idx, -1) } else { idx };
                         let bad = self.b.ins().icmp(IntCC::UnsignedGreaterThanOrEqual, probe, len);
-                        self.guard_if(bad, sym::PANIC_INDEX, [Arg::V(idx), Arg::V(len), Arg::I64(i64::from(from_end))])?;
+                        self.guard_if(
+                            bad,
+                            sym::PANIC_INDEX,
+                            [Arg::V(idx), Arg::V(len), Arg::I64(i64::from(from_end))],
+                        )?;
                     }
                     let off = self.b.ins().imul_imm(at, i64::from(size));
                     addr = self.b.ins().iadd(data, off);
@@ -1473,7 +1462,11 @@ impl<'a, 'p> Cx<'a, 'p> {
         let r = match (op, k) {
             (UnOp::Neg, Some(Scalar::Int)) => {
                 let min = self.b.ins().icmp_imm(IntCC::Equal, x, i64::MIN);
-                self.guard_if(min, sym::PANIC_OVERFLOW, [Arg::I32(IntOp::Neg as u32), Arg::V(x), Arg::I64(0)])?;
+                self.guard_if(
+                    min,
+                    sym::PANIC_OVERFLOW,
+                    [Arg::I32(IntOp::Neg as u32), Arg::V(x), Arg::I64(0)],
+                )?;
                 self.b.ins().ineg(x)
             }
             (UnOp::Neg, Some(Scalar::Float)) => {
