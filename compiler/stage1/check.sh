@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # Checks stage 1 (this package, run on the stage-0 interpreter, or with
-# --native compiled by stage 0's native backend) against stage 0, byte for
-# byte. First its lexer and parser against the Rust front end:
+# --native compiled by stage 0's native backend), the front end since the
+# Rust one was frozen: against the conformance suite's expectations of
+# what each program does, the class `behaviour`, which is the primary
+# oracle, and against the frozen Rust front end, byte for byte, but where
+# RULES.md lists a rule stage 1 decides otherwise. First its lexer and
+# parser against the Rust front end:
 #
 #   tokens       `sisu tokens --trivia FILE`, standard output and error
 #   tree         `sisu parse --tree FILE`, standard output and error
@@ -57,9 +61,20 @@
 #   contracts-off           `sisu sir --contracts=off FILE`, standard output
 #   contracts-preconditions `sisu sir --contracts=preconditions FILE`
 #
-# each of which must be within the slice and match. Then what `check`
-# prints, every diagnostic of a program in the order `sisu check` prints
-# them, from one run of stage 1 per class:
+# each of which must be within the slice and match. Then what the
+# programs do:
+#
+#   behaviour    every runnable program of the corpus and of stage 1's own
+#                cases (one with an `.out`, `.err` or `.status`), lowered
+#                by stage 1 in a sandbox as the conformance runner makes
+#                one and run from that SIR by stage 0's interpreter (`sisu
+#                run --from-sir`) and natively (`sisu build --native
+#                --from-sir`): each must print the case's `.out` and
+#                `.err` and exit with its `.status`, natively with no
+#                allocation live at exit
+#
+# Then what `check` prints, every diagnostic of a program in the order
+# `sisu check` prints them, from one run of stage 1 per class:
 #
 #   human        `sisu check FILE`, standard error: the human form, the
 #                diagnostics with their source lines, labels, notes and
@@ -106,8 +121,10 @@
 #   doc-output   `sisu doc --output DIR`: the pages it writes into DIR, file
 #                for file, what it prints and its exit status, for the same
 #
-# A difference listed in DISCREPANCIES.md ("- Differs: `path`: outputs") is
-# expected; any other fails the check.
+# A difference listed in RULES.md or DISCREPANCIES.md ("- Differs: `path`:
+# outputs", under the rule or the discrepancy that makes it) is expected;
+# any other fails the check, and so does any program of `behaviour` that
+# does not do what its case says.
 #
 # Then stage 1 over its own package, the first half of D-078's fixed point:
 #
@@ -313,9 +330,11 @@ stage0_doc() {
 }
 export -f stage0_syntax check0 stage0_check stage0_sir stage0_human stage0_sir_level stage0_fmt stage0_doc
 
-# The differences DISCREPANCIES.md lists, one "path output" per line.
+# The differences DISCREPANCIES.md lists (stage 0's accidents) and those
+# RULES.md lists (the rules stage 1 decides where the frozen Rust front end
+# keeps its own), one "path output" per line.
 allowed="$work/allowed.txt"
-sed -n 's/^- Differs: `\([^`]*\)`: \(.*\)$/\1 \2/p' "$here/DISCREPANCIES.md" |
+cat "$here/DISCREPANCIES.md" "$here/RULES.md" | sed -n 's/^- Differs: `\([^`]*\)`: \(.*\)$/\1 \2/p' |
     while read -r path outputs; do
         for o in $(echo "$outputs" | tr ',' ' '); do echo "$path $o"; done
     done > "$allowed"
@@ -664,7 +683,7 @@ for level in off preconditions; do
     fi
     end=$(date +%s.%N)
     seconds=$(awk "BEGIN { printf \"%.1f\", $end - $start }")
-    same=0; class_unlisted=0
+    same=0; class_listed=0; class_unlisted=0
     i=0
     while read -r f; do
         i=$((i + 1))
@@ -674,15 +693,171 @@ for level in off preconditions; do
             report="$report\n  UNLISTED: $rel: $class (beyond the slice: $(head -1 "$out/$i.beyond"))"
         elif cmp -s "$ref/$i.sir" "$out/$i.sir"; then
             same=$((same + 1))
+        elif grep -qxF "$rel $class" "$allowed"; then
+            class_listed=$((class_listed + 1))
+            report="$report\n  listed:   $rel: $class"
         else
             class_unlisted=$((class_unlisted + 1))
             report="$report\n  UNLISTED: $rel: $class (stage 0 in $ref/$i.sir, stage 1 in $out/$i.sir)"
         fi
     done < "$list"
-    total=$((total + n)); identical=$((identical + same)); unlisted=$((unlisted + class_unlisted))
-    contracts_summary="$contracts_summary\n$(printf '  %-24s %4d files, %4d identical, %3d otherwise; stage 1 %6ss' \
-        "$class" "$n" "$same" "$class_unlisted" "$seconds")"
+    total=$((total + n)); identical=$((identical + same))
+    listed=$((listed + class_listed)); unlisted=$((unlisted + class_unlisted))
+    contracts_summary="$contracts_summary\n$(printf '  %-24s %4d files, %4d identical, %3d differing as listed, %3d otherwise; stage 1 %6ss' \
+        "$class" "$n" "$same" "$class_listed" "$class_unlisted" "$seconds")"
 done
+
+# The behaviour of stage 1's SIR, the primary oracle since the Rust front
+# end was frozen (RULES.md): every runnable program of the corpus and of
+# stage 1's own cases (one with an `.out`, `.err` or `.status`, as the
+# conformance runner has it), in a sandbox as the runner makes one (the
+# file and what its `.files/` holds, or a package case's directory, run in
+# the one its `.cwd` names), lowered by stage 1 (one run of `sir-batch`
+# over the sandboxes; the paths it writes into the SIR are the sandbox's,
+# which the runner's `sisu sir NAME.sisu` writes as the bare name), and
+# run with the case's `.args` and `.stdin` and an empty environment by
+# stage 0's interpreter (`sisu run --from-sir`) and by its native backend
+# (`sisu build --native --from-sir`, the executable run with
+# `SISU_RT_ALLOCS=1`), each of which must give the case's `.out`, `.err`
+# and `.status` (the warnings of a front end that warns come first in the
+# `.err`, and a run from SIR does not print them) and, natively, leave no
+# allocation live at exit (but for a run that aborts, 134).
+behaviour_box() {
+    # behaviour_box K PROGRAM DIR: the sandbox of the Kth program, and the
+    # path stage 1 lowers there.
+    local k="$1" p="$2" box="$3/$1" base pkg="" sub=""
+    mkdir -p "$box/run"
+    case "$p" in
+        *.pkg | *.pkg/*)
+            pkg="${p%%.pkg*}.pkg"
+            sub="${p#"$pkg"}"
+            base="${pkg%.pkg}"
+            cp -r "$pkg/." "$box/run/"
+            echo "$box/run$sub" > "$box/program"
+            ;;
+        *)
+            base="${p%.sisu}"
+            cp "$p" "$box/run/"
+            [ -d "$base.files" ] && cp -r "$base.files/." "$box/run/"
+            echo "$box/run/$(basename "$p")" > "$box/program"
+            ;;
+    esac
+    echo "$base" > "$box/base"
+}
+behaviour_one() {
+    # behaviour_one K PROGRAM DIR: the Kth program's runs, and what of them
+    # differs from the case, into DIR/K/result.
+    local k="$1" box="$3/$1" base cwd program args=() stdin=/dev/null
+    base=$(cat "$box/base")
+    program=$(cat "$box/program")
+    cwd="$program"
+    [ -d "$cwd" ] || cwd=$(dirname "$program")
+    if [ ! -s "$work/behaviour.sir/$k.sir" ]; then
+        echo "stage 1 printed no SIR" > "$box/result"
+        return 0
+    fi
+    # The sandbox's paths, which the runner's run in it names relatively.
+    local dir
+    dir=$(printf '%s' "$cwd" | sed 's/[.[\*^$|]/\\&/g')
+    sed "s|$dir/||g" "$work/behaviour.sir/$k.sir" > "$box/program.sir"
+    [ -f "$base.args" ] && mapfile -t args < "$base.args"
+    [ -f "$base.stdin" ] && stdin="$base.stdin"
+    local out="$box/expected.out" err="$box/expected.err" status=0
+    if [ -f "$base.out" ]; then cp "$base.out" "$out"; else : > "$out"; fi
+    if [ -f "$base.err" ]; then cp "$base.err" "$err"; else : > "$err"; fi
+    [ -f "$base.status" ] && status=$(tr -d ' \n' < "$base.status")
+    local failed=""
+    # same_err ERR: the run's standard error is the case's, or what follows
+    # the front end's warnings in it (each a block ending in a blank line).
+    same_err() {
+        cmp -s "$err" "$1" && return 0
+        local n e
+        n=$(wc -c < "$1" | tr -d ' ')
+        e=$(wc -c < "$err" | tr -d ' ')
+        [ "$e" -gt "$n" ] || return 1
+        cmp -s <(tail -c "$n" "$err") "$1" || return 1
+        head -c $((e - n)) "$err" > "$box/warnings"
+        head -c 8 "$box/warnings" | grep -q '^warning\[' && [ "$(tail -c 2 "$box/warnings" | od -An -c | tr -d ' ')" = '\n\n' ]
+    }
+    (cd "$cwd" && timeout 60 env -i "$sisu" run --from-sir "$box/program.sir" "${args[@]}" \
+        < "$stdin" > "$box/i.out" 2> "$box/i.err"; echo "$?" > "$box/i.status")
+    cmp -s "$out" "$box/i.out" || failed="$failed interpreted:stdout"
+    [ "$(cat "$box/i.status")" = "$status" ] || failed="$failed interpreted:status"
+    same_err "$box/i.err" || failed="$failed interpreted:stderr"
+    if ! (cd "$cwd" && timeout 120 "$sisu" build --native --from-sir "$box/program.sir" --output "$box/exe" \
+            > "$box/build.log" 2>&1); then
+        failed="$failed native:build"
+    else
+        (cd "$cwd" && timeout 60 env -i SISU_RT_ALLOCS=1 "$box/exe" "${args[@]}" \
+            < "$stdin" > "$box/n.out" 2> "$box/n.all"; echo "$?" > "$box/n.status")
+        local last ran
+        ran=$(cat "$box/n.status")
+        last=$(tail -n 1 "$box/n.all")
+        case "$last" in
+            "allocations: "*" of the runtime's live at exit")
+                sed '$d' "$box/n.all" > "$box/n.err"
+                [ "$last" = "allocations: 0 of the runtime's live at exit" ] || failed="$failed native:allocations"
+                ;;
+            *)
+                cp "$box/n.all" "$box/n.err"
+                [ "$ran" = 134 ] || failed="$failed native:allocations"
+                ;;
+        esac
+        cmp -s "$out" "$box/n.out" || failed="$failed native:stdout"
+        [ "$ran" = "$status" ] || failed="$failed native:status"
+        same_err "$box/n.err" || failed="$failed native:stderr"
+    fi
+    # An executable is kept only to look into a difference.
+    [ -z "$failed" ] && rm -f "$box/exe"
+    echo "${failed# }" > "$box/result"
+}
+export -f behaviour_box behaviour_one
+{
+    find "$compiler/conformance/cases" "$here/cases" -name '*.sisu' | grep -v '\.pkg/' | grep -v '\.files/' | sort |
+        while read -r f; do
+            b="${f%.sisu}"
+            if [ -e "$b.out" ] || [ -e "$b.err" ] || [ -e "$b.status" ]; then echo "$f"; fi
+        done
+    find "$compiler/conformance/cases" "$here/cases" -name '*.pkg' -type d -prune | sort | while read -r d; do
+        b="${d%.pkg}"
+        if [ -e "$b.out" ] || [ -e "$b.err" ] || [ -e "$b.status" ]; then
+            if [ -f "$b.cwd" ]; then echo "$d/$(cat "$b.cwd")"; else echo "$d"; fi
+        fi
+    done
+} > "$work/behaviour.list"
+class=behaviour
+list="$work/$class.list"
+n=$(wc -l < "$list" | tr -d ' ')
+mkdir -p "$work/behaviour" "$work/behaviour.sir"
+parallel behaviour_box "$list" "$work/behaviour"
+for k in $(seq 1 "$n"); do cat "$work/behaviour/$k/program"; done > "$work/behaviour.sandboxes"
+start=$(date +%s.%N)
+if ! stage1 sir-batch "$work/behaviour.sir" "$work/behaviour.sandboxes" > "$work/$class.log" 2> "$work/$class.stderr"; then
+    cat "$work/$class.stderr" >&2
+    echo "check.sh: stage 1 failed lowering the $class programs" >&2
+    exit 1
+fi
+middle=$(date +%s.%N)
+parallel behaviour_one "$list" "$work/behaviour"
+end=$(date +%s.%N)
+took_sir=$(awk "BEGIN { printf \"%.1f\", $middle - $start }")
+seconds=$(awk "BEGIN { printf \"%.1f\", $end - $middle }")
+same=0; class_unlisted=0
+i=0
+while read -r f; do
+    i=$((i + 1))
+    rel="${f#"$repo"/}"
+    result=$(cat "$work/behaviour/$i/result" 2> /dev/null || echo "not run")
+    if [ -z "$result" ]; then
+        same=$((same + 1))
+        continue
+    fi
+    class_unlisted=$((class_unlisted + 1))
+    report="$report\n  UNLISTED: $rel: behaviour: $result (in $work/behaviour/$i)"
+done < "$list"
+total=$((total + n)); identical=$((identical + same)); unlisted=$((unlisted + class_unlisted))
+behaviour_summary="$(printf '  %-12s %4d programs, %4d as expected interpreted and natively, %3d otherwise; stage 1 %6ss, the runs %6ss' \
+    "$class" "$n" "$same" "$class_unlisted" "$took_sir" "$seconds")"
 
 # What `check` prints: every diagnostic of a program, in the conformance
 # form (the whole of `sisu check --format=ids`) and in the human form (what
@@ -939,7 +1114,7 @@ fi
 end=$(date +%s.%N)
 seconds=$(awk "BEGIN { printf \"%.1f\", $end - $start }")
 for output in doc doc-output; do
-    same=0; class_unlisted=0
+    same=0; class_listed=0; class_unlisted=0
     i=0
     while read -r f; do
         i=$((i + 1))
@@ -963,11 +1138,18 @@ for output in doc doc-output; do
             fi
             where="stage 0 in $ref/$i.pages*, stage 1 in $out/$i.pages*"
         fi
+        if grep -qxF "$rel $output" "$allowed"; then
+            class_listed=$((class_listed + 1))
+            report="$report\n  listed:   $rel: $output"
+            continue
+        fi
         class_unlisted=$((class_unlisted + 1))
         report="$report\n  UNLISTED: $rel: $output ($where)"
     done < "$list"
-    total=$((total + n)); identical=$((identical + same)); unlisted=$((unlisted + class_unlisted))
-    line="$(printf '  %-12s %4d programs, %4d identical, %3d otherwise' "$output" "$n" "$same" "$class_unlisted")"
+    total=$((total + n)); identical=$((identical + same))
+    listed=$((listed + class_listed)); unlisted=$((unlisted + class_unlisted))
+    line="$(printf '  %-12s %4d programs, %4d identical, %3d differing as listed, %3d otherwise' \
+        "$output" "$n" "$same" "$class_listed" "$class_unlisted")"
     if [ "$output" = doc ]; then
         doc_summary="$doc_summary\n$line; stage 1 $(printf '%6s' "$seconds")s"
     else
@@ -1219,6 +1401,8 @@ echo "stage 1's ownership checker against stage 0's (ownership):"
 printf "%b\n" "${own_summary#\\n}"
 echo "stage 1's lowering at the contract levels of a build against stage 0's (contracts):"
 printf "%b\n" "${contracts_summary#\\n}"
+echo "stage 1's SIR run against the cases' expectations (behaviour: interpreted and native, from \`sisu sir\` as stage 1 prints it):"
+printf "%b\n" "$behaviour_summary"
 echo "stage 1's check against stage 0's (every diagnostic, in the human and the conformance form):"
 printf "%b\n" "${check_summary#\\n}"
 echo "stage 1's formatter against stage 0's (fmt: the text \`sisu fmt\` leaves, what \`sisu fmt --check\` prints, and its fixed point):"
@@ -1242,7 +1426,7 @@ beyond_note=""
 [ "$subsets" -gt 0 ] && beyond_note=", $subsets beyond the type checker's slice and a subset"
 [ "$lowered_beyond" -gt 0 ] && beyond_note="$beyond_note, $lowered_beyond beyond the slice of lowering"
 [ "$check_beyond" -gt 0 ] && beyond_note="$beyond_note, $check_beyond with an error stage 1 does not render"
-echo "total: $total files checked, $identical identical$beyond_note, $((listed + unlisted)) differing ($listed listed in DISCREPANCIES.md, $unlisted not)"
+echo "total: $total files checked, $identical identical$beyond_note, $((listed + unlisted)) differing ($listed listed in RULES.md or DISCREPANCIES.md, $unlisted not)"
 if [ "$unlisted" -gt 0 ]; then
     [ -z "$keep" ] && echo "(run with --keep DIR to inspect the outputs)"
     exit 1

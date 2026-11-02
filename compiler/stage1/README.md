@@ -8,12 +8,17 @@ lowering to SIR, the ownership checker with the `Shared` escape analysis,
 the evaluation of `comptime` code, the formatter, a `pure` function of
 the lossless syntax tree, and `sisu doc`, a `pure` function of the syntax
 trees, the resolved names and the inferred error sets, written in Sisu,
-run by the stage-0 interpreter or compiled by stage 0's native backend,
-and checked byte for byte against the Rust front end (`sisu-lexer`,
+run by the stage-0 interpreter or compiled by stage 0's native backend.
+Since this round it is Sisu's front end: the Rust one is frozen, and a
+rule of the language changes here only (below, "Stage 1 is the front
+end"). It is checked against what the conformance suite's programs must
+do, run from the SIR it writes by stage 0's interpreter and native
+backend, and byte for byte against the frozen Rust front end (`sisu-lexer`,
 `sisu-syntax`, `sisu-parser`, and `ast::build`), against the name, type
 and ownership diagnostics of `sisu check`, against the SIR `sisu sir`
 prints, against what `sisu fmt` writes, and against the pages `sisu doc`
-writes, for the whole corpus and for stage 1's own package. With `sisu
+writes, for the whole corpus and for stage 1's own package, but where
+[RULES.md](RULES.md) lists a rule stage 1 decides otherwise. With `sisu
 doc`, every part of stage 1 that [18](../../proposal/18-next-steps.md)'s
 stage table names exists: the lexer, the parser, name resolution, the
 type checker, the ownership checker, the emission of serialised SIR, the
@@ -32,7 +37,66 @@ documents and the difference is listed in
 parser's, one of name resolution and one of the type checker's) and the
 formatter's two (D6 and D7, below, "The formatter") were decided for the
 documents, and stage 0 now behaves as stage 1 does (docs/architecture.md,
-decisions 165 to 168, 179 and 267).
+decisions 165 to 168, 179 and 267). A rule that changes now changes in
+stage 1 alone, and [RULES.md](RULES.md) lists it with its cases: R1
+(decision 269), what a channel carries is `Send`, as the bound asks it,
+so that a generic function makes a channel of its type parameter and a
+program a channel of closures.
+
+## Stage 1 is the front end
+
+The Rust front end (`sisu-lexer`, `sisu-parser`, `sisu-resolve`,
+`sisu-typeck`, `sisu-lower`, `sisu-borrowck` and the front-end commands
+of `sisu-driver`) is frozen and will be retired; a rule of the language is
+implemented in stage 1 only, which no longer has to match stage 0's front
+end where the rule changed. Stage 0's interpreter and native backend stay
+as the oracles of what a program does: they run SIR (`sisu run
+--from-sir`, `sisu build --native --from-sir`, decision 212), whichever
+front end wrote it. So `check.sh` checks stage 1 two ways.
+
+- **What the programs do**, the class `behaviour`, the primary oracle
+  from now on: every runnable program of the corpus and of stage 1's own
+  cases (one with an `.out`, `.err` or `.status`: the 199 of the
+  conformance suite, which are its native list, and two of
+  `cases/channels/`) is put in a sandbox as the conformance runner puts a
+  case (the file and what its `.files/` holds, or a package case's
+  directory, run in the one its `.cwd` names), lowered there by stage 1
+  (one run of `sir-batch` over the sandboxes; the sandbox's paths it
+  writes into the SIR, the trace texts among them, become the bare names
+  `sisu sir NAME.sisu` writes there), and run from that SIR with the
+  case's `.args` and `.stdin` and an empty environment, by stage 0's
+  interpreter and by its native backend: each run must print the case's
+  `.out` and `.err` (after the front end's warnings, which a run from SIR
+  does not print) and exit with its `.status`, and natively leave no
+  allocation live at exit. It is the conformance runner's
+  `--interpreted-from-sir` and `--native-from-sir` with stage 1's SIR in
+  place of `sisu sir`'s, and it is what shows a rule's behaviour where
+  stage 0's front end refuses the program. It runs with or without
+  `--native` (stage 0's backend builds the programs either way), in about
+  half a minute natively (stage 1's batch about 8 s, then each program
+  run, built and run again natively, four at a time, about 20 s).
+- **Against the frozen Rust front end**, byte for byte, as before: the
+  classes `tokens` to `ast`, `names`, `types`, `sir`, `ownership`, the
+  `contracts-` classes, `human`, the `cases-` and `corpus-` classes, the
+  formatter's (`fmt`, `fmt-check` and the others) and the
+  documentation's (`doc`, `doc-output`), and `self` and `fixed`. These
+  are expected to differ where a rule of RULES.md changes what stage 1
+  reports, prints or writes, exactly for the programs the rule touches.
+  RULES.md is DISCREPANCIES.md's successor for differences that are
+  decisions rather than accidents: each rule has its reasons from the
+  documents, what stage 1 does, its cases and the decision text for
+  docs/architecture.md, and under it a line ``- Differs: `path`:
+  outputs`` for each case it changes, which `check.sh` accepts as it accepts
+  DISCREPANCIES.md's lines (the outputs `ids` and `human` are `sisu
+  check --format=ids` and `sisu check`, `doc` and `doc-output` the
+  documentation's). Any other difference fails the check. Where no rule
+  changed, stage 0's SIR stays an oracle too, through `sir` and
+  `corpus-sir`.
+
+A new rule is written in stage 1, with a case of each form it accepts
+(with its `.out`, so that `behaviour` runs it) and of each it refuses, its
+entry in RULES.md with the `- Differs:` lines its cases need, and the
+decision text the coordinator copies into docs/architecture.md.
 
 ## Running it
 
@@ -40,7 +104,7 @@ From this directory, with stage 0 built (`cargo build --release` in
 `compiler/`):
 
 ```text
-sisu test                                   # 130 tests, 76 of them stage 0's own, transcribed
+sisu test                                   # 131 tests, 76 of them stage 0's own, transcribed
 sisu run -- tokens [--trivia] FILE          # what `sisu tokens [--trivia] FILE` prints
 sisu run -- parse --tree [--trivia] FILE    # what `sisu parse --tree [--trivia] FILE` prints
 sisu run -- parse --print FILE              # the file, reprinted from the tree
@@ -155,15 +219,19 @@ standard library (`--std`, all its modules and some) and of arguments
 stage 0 refuses (`D0113`, an unknown option), against stage 1's
 `doc-batch`; and `doc-output`, the pages `sisu doc --output DIR` writes
 into DIR, file for file, with what it prints and its status (below,
-"Documentation").
+"Documentation"). And `behaviour`: every runnable program of the corpus
+and of stage 1's cases lowered by stage 1 and run from its SIR by the
+interpreter and natively, against the case's `.out`, `.err` and `.status`
+(above, "Stage 1 is the front end").
 With `--self` (which `--native` implies) it checks
 stage 1 over its own package, the class `self`: its name and type
 diagnostics against those of `sisu check --format=ids` run in this
 directory, and its SIR (`sir --partial`) against what `sisu sir` prints of
 the package, split by the source file each function comes from (with
 what is not a function as `(declarations)`), so that a difference names
-the module it is in. It exits non-zero on any difference that
-DISCREPANCIES.md does not list ("- Differs: `path`: outputs"). With
+the module it is in. It exits non-zero on any difference that neither
+RULES.md nor DISCREPANCIES.md lists ("- Differs: `path`: outputs"), and on
+any program of `behaviour` that does not do what its case says. With
 `--mutants N` it also compares N mutants of the corpus (deleted, inserted
 and swapped characters), where a difference must carry the mark of a
 listed discrepancy. Stage 0 writes a package's `sisu.lock` when it checks
@@ -188,7 +256,9 @@ in no file either; `corpus-check` was compared natively only), and stage
 --partial`, 83 s, 460 s and 1123 s, at a peak of 2.5 GB of memory) prints
 what the native executable prints. The native run, with the classes
 `self`, `fixed`, `build`, those of `check`, the formatter's and the
-documentation's, takes eight to nine minutes, as the machine goes; the
+documentation's, and now `behaviour`, takes eight and a half to twelve
+minutes, as the machine goes (this round's last, below, eight and a
+half); the
 interpreter's without them (but `human`, `cases-check` and `fmt`) about
 thirteen on a quiet machine, and the formatter's classes add about five
 (the documentation's were not timed there).
@@ -200,53 +270,78 @@ thirteen on a quiet machine, and the formatter's classes add about five
 
 ```text
 stage 1 against stage 0 (tokens, tree, trivia-tree, print, ast):
-  conformance   536 files,  536 identical,   0 differing as listed,   0 differing otherwise; stage 1    2.6s (370902 bytes; lex 133 ms, parse 142 ms, dumps 591 ms, ast 461 ms)
-  std            28 files,   28 identical,   0 differing as listed,   0 differing otherwise; stage 1    1.3s (412948 bytes; lex 76 ms, parse 99 ms, dumps 407 ms, ast 384 ms)
-  examples       11 files,   11 identical,   0 differing as listed,   0 differing otherwise; stage 1    0.1s (27495 bytes; lex 4 ms, parse 6 ms, dumps 22 ms, ast 19 ms)
-  cases          61 files,   61 identical,   0 differing as listed,   0 differing otherwise; stage 1    0.2s (31746 bytes; lex 11 ms, parse 13 ms, dumps 54 ms, ast 37 ms)
+  conformance   536 files,  536 identical,   0 differing as listed,   0 differing otherwise; stage 1    1.1s (370902 bytes; lex 86 ms, parse 88 ms, dumps 422 ms, ast 303 ms)
+  std            28 files,   28 identical,   0 differing as listed,   0 differing otherwise; stage 1    0.9s (412948 bytes; lex 55 ms, parse 61 ms, dumps 275 ms, ast 272 ms)
+  examples       11 files,   11 identical,   0 differing as listed,   0 differing otherwise; stage 1    0.1s (27495 bytes; lex 4 ms, parse 4 ms, dumps 22 ms, ast 17 ms)
+  cases          64 files,   64 identical,   0 differing as listed,   0 differing otherwise; stage 1    0.1s (37692 bytes; lex 8 ms, parse 8 ms, dumps 40 ms, ast 30 ms)
 stage 1's name resolution against stage 0's (names):
-  names          76 files,   76 identical,   0 differing as listed,   0 differing otherwise; stage 1    0.2s
+  names          79 files,   79 identical,   0 differing as listed,   0 differing otherwise; stage 1    0.2s
   corpus-names  491 files,  491 identical,   0 differing as listed,   0 differing otherwise; stage 1    0.6s
 stage 1's type checker against stage 0's (types):
-  types         539 files,  539 identical,   0 beyond the slice and a subset,   0 differing as listed,   0 otherwise; stage 1    3.9s
-  corpus-types  525 files,  525 identical,   0 beyond the slice and a subset,   0 differing as listed,   0 otherwise; stage 1    4.2s
+  types         542 files,  541 identical,   0 beyond the slice and a subset,   1 differing as listed,   0 otherwise; stage 1    4.1s
+  corpus-types  525 files,  525 identical,   0 beyond the slice and a subset,   0 differing as listed,   0 otherwise; stage 1    3.9s
 stage 1's lowering against stage 0's (sir):
-  sir           539 files,  539 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise; stage 1   13.5s (front end 4s, lowering 4s, ownership 4s)
-  corpus-sir    525 files,  525 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise; stage 1   14.5s (front end 4s, lowering 4s, ownership 4s)
+  sir           542 files,  540 identical,   0 beyond the slice,   2 differing as listed,   0 otherwise; stage 1   11.9s (front end 3s, lowering 3s, ownership 4s)
+  corpus-sir    525 files,  525 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise; stage 1   12.6s (front end 3s, lowering 3s, ownership 4s)
 stage 1's ownership checker against stage 0's (ownership):
-  ownership     539 files,  539 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise (the same run)
+  ownership     542 files,  542 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise (the same run)
   corpus-own    525 files,  525 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise (the same run)
 stage 1's lowering at the contract levels of a build against stage 0's (contracts):
-  contracts-off              16 files,   16 identical,   0 otherwise; stage 1    1.7s
-  contracts-preconditions    16 files,   16 identical,   0 otherwise; stage 1    1.5s
+  contracts-off              16 files,   16 identical,   0 differing as listed,   0 otherwise; stage 1    1.6s
+  contracts-preconditions    16 files,   16 identical,   0 differing as listed,   0 otherwise; stage 1    1.6s
+stage 1's SIR run against the cases' expectations (behaviour: interpreted and native, from `sisu sir` as stage 1 prints it):
+  behaviour     201 programs,  201 as expected interpreted and natively,   0 otherwise; stage 1    7.6s, the runs   17.2s
 stage 1's check against stage 0's (every diagnostic, in the human and the conformance form):
-  human          93 files,   93 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise; stage 1    1.2s
-  corpus-check  525 files,  525 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise; stage 1   12.0s
+  human          93 files,   93 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise; stage 1    0.9s
+  corpus-check  525 files,  525 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise; stage 1    9.6s
   corpus-human  525 files,  525 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise (the same run)
-  cases-check    46 files,   46 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise; stage 1    1.6s
-  cases-human    46 files,   46 identical,   0 beyond the slice,   0 differing as listed,   0 otherwise (the same run)
+  cases-check    49 files,   46 identical,   0 beyond the slice,   3 differing as listed,   0 otherwise; stage 1    1.6s
+  cases-human    49 files,   46 identical,   0 beyond the slice,   3 differing as listed,   0 otherwise (the same run)
 stage 1's formatter against stage 0's (fmt: the text `sisu fmt` leaves, what `sisu fmt --check` prints, and its fixed point):
-  fmt           718 files,  718 identical,   0 differing as listed,   0 otherwise; stage 1    5.8s
-  fmt-check     718 files,  718 identical,   0 differing as listed,   0 otherwise (the same run)
-  fmt-again     718 files,  718 unchanged,   0 otherwise (the same run)
-  fmt-joined    718 files,  718 identical,   0 differing as listed,   0 otherwise; stage 1   13.1s
-  fmt-spread    718 files,  718 identical,   0 differing as listed,   0 otherwise; stage 1   14.4s
+  fmt           721 files,  721 identical,   0 differing as listed,   0 otherwise; stage 1    4.3s
+  fmt-check     721 files,  721 identical,   0 differing as listed,   0 otherwise (the same run)
+  fmt-again     721 files,  721 unchanged,   0 otherwise (the same run)
+  fmt-joined    721 files,  721 identical,   0 differing as listed,   0 otherwise; stage 1    9.7s
+  fmt-spread    721 files,  721 identical,   0 differing as listed,   0 otherwise; stage 1   10.6s
 stage 1's documentation against stage 0's (doc: what `sisu doc` prints and its status, and the pages `--output` writes):
-  doc           577 programs,  577 identical,   0 otherwise; stage 1   18.7s
-  doc-output    577 programs,  577 identical,   0 otherwise (the same run)
+  doc           580 programs,  577 identical,   3 differing as listed,   0 otherwise; stage 1   15.0s
+  doc-output    580 programs,  577 identical,   3 differing as listed,   0 otherwise (the same run)
 stage 1's build against stage 0's (build: the executables, the lockfile and what each prints):
-  build          16 builds,   16 identical,   0 otherwise; both   15.2s
+  build          16 builds,   16 identical,   0 otherwise; both   13.4s
 stage 1 over its own package against stage 0 (self: names, types, the SIR by source file):
   self-names   identical
   self-types   identical
-  self-sir      114 files,  114 identical,   0 beyond the slice,   0 otherwise; stage 1   27.5s
+  self-sir      114 files,  114 identical,   0 beyond the slice,   0 otherwise; stage 1   22.9s
 the fixed point (fixed: stage1-A built by stage 0, stage1-B by the backend from stage1-A's SIR):
-  fixed-sir0   identical: stage1-A's SIR of its own package and stage 0's (16220630 bytes)
-  fixed-sir    identical: stage1-B's SIR of the package and stage1-A's (16220630 bytes)
-  fixed-exe    identical: stage1-B and stage1-A (23305640 bytes)
-  stage1-A 29.4s, the backend 3.3s, stage1-B 30.6s
-total: 10541 files checked, 10541 identical, 0 differing (0 listed in DISCREPANCIES.md, 0 not)
+  fixed-sir0   identical: stage1-A's SIR of its own package and stage 0's (16269545 bytes)
+  fixed-sir    identical: stage1-B's SIR of the package and stage1-A's (16269545 bytes)
+  fixed-exe    identical: stage1-B and stage1-A (23356960 bytes)
+  stage1-A 24.7s, the backend 3.2s, stage1-B 24.6s
+differences:
+  listed:   compiler/stage1/cases/channels/channel_refusals.sisu: types
+  listed:   compiler/stage1/cases/channels/channel_of_closures.sisu: sir
+  listed:   compiler/stage1/cases/channels/generic_pipeline.sisu: sir
+  listed:   compiler/stage1/cases/channels/channel_of_closures.sisu: ids
+  listed:   compiler/stage1/cases/channels/channel_refusals.sisu: ids
+  listed:   compiler/stage1/cases/channels/generic_pipeline.sisu: ids
+  listed:   compiler/stage1/cases/channels/channel_of_closures.sisu: human
+  listed:   compiler/stage1/cases/channels/channel_refusals.sisu: human
+  listed:   compiler/stage1/cases/channels/generic_pipeline.sisu: human
+  listed:   compiler/stage1/cases/channels/channel_of_closures.sisu: doc
+  listed:   compiler/stage1/cases/channels/channel_refusals.sisu: doc
+  listed:   compiler/stage1/cases/channels/generic_pipeline.sisu: doc
+  listed:   compiler/stage1/cases/channels/channel_of_closures.sisu: doc-output
+  listed:   compiler/stage1/cases/channels/channel_refusals.sisu: doc-output
+  listed:   compiler/stage1/cases/channels/generic_pipeline.sisu: doc-output
+total: 10784 files checked, 10769 identical, 15 differing (15 listed in RULES.md or DISCREPANCIES.md, 0 not)
 ```
+
+The fifteen differences are R1's (RULES.md), each for one of the three
+cases of `cases/channels/` that show it, as RULES.md lists them: the SIR
+of the two programs stage 0 refuses, the `E0347`s of the third, and what
+`check` and `doc` print of all three. Every runnable program, those two
+among them, does what its case says, from stage 1's SIR, interpreted and
+natively (`behaviour`).
 
 On the interpreter, `./check.sh --names --types --sir` (without
 `--self`) gave the same counts as the native run, the classes `build`,
@@ -304,9 +399,12 @@ the diagnostics no program of the corpus has that stage 1 rendered last
 module than its error, an error in a file the compiler wrote, and the
 names stage 0's type checker reports (`cases/checker_names/`); for the
 formatter's rules (`cases/fmt/`, below, "The formatter"), among them the
-two that showed D6 and D7, which stage 0 now shares; and for `sisu doc`'s
+two that showed D6 and D7, which stage 0 now shares; for `sisu doc`'s
 layout (`cases/doc/` and `cases/packages/doc_pages.pkg`, below,
-"Documentation"). With `--mutants 2000 --seed 7` all 2000 mutants give
+"Documentation"); and for the rules stage 1 decides (`cases/channels/`,
+RULES.md's R1: a generic pipeline and a channel of closures, with the
+`.out` the class `behaviour` holds their runs to, and the forms the rule
+refuses). With `--mutants 2000 --seed 7` all 2000 mutants give
 identical outputs, their ASTs and their formatting included (in the first
 round 21 differed, by D1).
 
@@ -318,11 +416,13 @@ stage 1's own four package cases. Every one gets stage 0's name
 diagnostics, its type diagnostics (the ownership checker's `type.`
 messages among them), its SIR, its ownership diagnostics, the whole of
 what `sisu check` prints, in both forms, and the pages `sisu doc` writes,
-exactly; `types.list` and `sir.list` name the 525 and stage 1's 14 cases
+exactly; `types.list` and `sir.list` name the 525 and stage 1's 17 cases
 of one module (three of type rules, ten of diagnostics no program of the
-corpus has, and `doc/layout.sisu`). Of the 539 of `sir.list`, 344 are
-lowered, 85 of them with diagnostics of the ownership checker, and 195
-have a front-end error, for which both print nothing. And stage 1 over
+corpus has, `doc/layout.sisu`, and the three of `cases/channels/`, which
+show R1 of RULES.md). Of the 542 of `sir.list`, 346 are lowered by stage
+1, 85 of them with diagnostics of the ownership checker, and 196 have a
+front-end error, for which both print nothing; stage 0 refuses two of
+the 346, those R1 lets in, whose differences RULES.md lists. And stage 1 over
 its own package, 66 000 lines in 82 modules, gets stage 0's name and type
 diagnostics (none), its pages (82) and its SIR, function for function,
 for all 114 of its source files: its own 82, the 28 the compiler writes
@@ -360,11 +460,11 @@ alone, and `check.sh --self` (which `--native` implies) as its class
    directory, as stage1-A is built.
 
 ```text
-  stage1-A   23305640 bytes  sha256 9e3cd8aed56a25febbc599d0f6f798dbcf8b2010ec5ad779251124f992f981bb  built by stage 0 (9.2 s)
-  A.sir      16220630 bytes  sha256 848c923662e007349ec00052da4d4d7f257d5366978f2f64d9ebd4024045f106  printed by stage1-A (27.4 s)
-  stage1-B   23305640 bytes  sha256 9e3cd8aed56a25febbc599d0f6f798dbcf8b2010ec5ad779251124f992f981bb  built by the backend from A.sir (3.2 s)
-  B.sir      16220630 bytes  sha256 848c923662e007349ec00052da4d4d7f257d5366978f2f64d9ebd4024045f106  printed by stage1-B (29.0 s)
-  stage0     16220630 bytes  sha256 848c923662e007349ec00052da4d4d7f257d5366978f2f64d9ebd4024045f106  printed by stage 0 (sisu sir)
+  stage1-A   23356960 bytes  sha256 8fc44e21b955904b729e12261869a589e10addbc6012a85243d0615c7456700f  built by stage 0 (7.5 s)
+  A.sir      16269545 bytes  sha256 adaa0fe804428cc7af0c8e937bed98c27098a3154758c64b2da4ad0f5f2f9ba2  printed by stage1-A (23.8 s)
+  stage1-B   23356960 bytes  sha256 8fc44e21b955904b729e12261869a589e10addbc6012a85243d0615c7456700f  built by the backend from A.sir (3.4 s)
+  B.sir      16269545 bytes  sha256 adaa0fe804428cc7af0c8e937bed98c27098a3154758c64b2da4ad0f5f2f9ba2  printed by stage1-B (24.4 s)
+  stage0     16269545 bytes  sha256 adaa0fe804428cc7af0c8e937bed98c27098a3154758c64b2da4ad0f5f2f9ba2  printed by stage 0 (sisu sir)
 
 the SIR, A.sir and B.sir: identical
 the executables, stage1-A and stage1-B: identical
@@ -553,10 +653,11 @@ it`) and fail, and `build` would stop.
 of `conformance/cases/wrong/`, each a single mistake written to read well
 in the human form, compares what `sisu check FILE` prints on standard
 error with what stage 1 prints, and every one must be within the slice and
-match; so must the 46 of stage 1's own cases outside `cases/packages/`
+match; so must the 49 of stage 1's own cases outside `cases/packages/`
 (the formatter's ten of `cases/fmt/` and `cases/doc/layout.sisu` among
 them), in both forms
-(`cases-check` and `cases-human`). With `--check` (which
+(`cases-check` and `cases-human`), but the three of `cases/channels/`,
+whose diagnostics are R1's (RULES.md). With `--check` (which
 `--native` implies) the classes `corpus-check` and `corpus-human` compare
 the whole of `sisu check --format=ids` and the human form for every
 program of the corpus: a program within the slice must match, and one
@@ -855,19 +956,20 @@ What is beyond it:
   generic function with a must-consume type argument (`E0397`). For any
   other program, the ownership checker decides them.
 
-No choice of stage 1 differs from stage 0 within the slice (the count
-`E0305` reports for positional arguments past a bare `*`, D5, is stage
-0's now). One difference of order has no effect on what is reported:
+No choice of stage 1 differs from stage 0 within the slice but the rules
+RULES.md lists (the count `E0305` reports for positional arguments past a
+bare `*`, D5, is stage 0's now). One difference of order has no effect on what is reported:
 stage 0 declares
 every module's items before it resolves any, so its definitions of the root
 module come before those the prelude's impls and traits make; stage 1
 resolves the prelude once, so they come after.
 
-`check.sh` checks the slice twice: `types.list` names the 539 programs
-within it, which must match (all 539 do): the 525 programs of the corpus
-(501 of one module, the 20 package and script cases of the conformance
-suite and stage 1's own four package cases) and stage 1's 14 other
-cases; `--types` checks the 525 of the corpus again. Round 6's 9
+`check.sh` checks the slice twice: `types.list` names the 542 programs
+within it, which must match (all do, but
+`cases/channels/channel_refusals.sisu`, whose `E0347`s are R1's): the 525
+programs of the corpus (501 of one module, the 20 package and script
+cases of the conformance suite and stage 1's own four package cases) and
+stage 1's 17 other cases; `--types` checks the 525 of the corpus again. Round 6's 9
 programs beyond the slice, each for one of the ownership checker's
 messages (a `let` without a value, 5; a pure body that calls an impure
 function, 2; one that drops a value with an impure `drop`, 1; a
@@ -957,7 +1059,10 @@ value is its wrapper `f#value` when it is generic or borrows a parameter,
 a generic one so used is instantiated, a generic intrinsic so used is
 `E0350`, and one whose result borrows from a parameter the value would
 take is `E0352` (225); and a channel's element type is checked as an
-owner's, `E0421` and `E0422` (230). The conformance suite's four new cases
+owner's, `E0421` and `E0422` (230), which R1 of RULES.md (decision 269)
+since widens: what a channel carries is `Send`, as the bound asks it,
+which a type parameter is by its bounds and a closure where it is sent
+(`check_channel_type`, `check_sends`). The conformance suite's four new cases
 (`concurrency/channel_owner_errors`, `generics/function_value_errors`,
 `generics/function_values` and `run/drop_moved_parts`) are in
 `types.list` and `sir.list`.
@@ -1088,9 +1193,10 @@ ownership checker's `type.` messages, which the ownership checker here
 decides; a body of the standard library beyond the type checker's slice;
 an ownership finding in a file other than the program's; and a
 `comptime` expression that needs what stage 1's evaluator does not run.
-Nothing in the corpus is: all 525 programs and stage 1's 14 other cases
-get stage 0's SIR and ownership diagnostics exactly, and `sir.list` names
-the 539. Round 6's 48 programs beyond the slice came in
+Nothing in the corpus is: all 525 programs and stage 1's 17 other cases
+get stage 0's SIR and ownership diagnostics exactly (but the SIR of the
+two R1 lets in, which stage 0's front end refuses, and which the class
+`behaviour` runs instead), and `sir.list` names the 542. Round 6's 48 programs beyond the slice came in
 by what this round added: the standard library's derived impls written
 from the templates (22; with them `<std>/<derive>/prelude.sisu` in the SIR
 of nearly every program), the `comptime` evaluator (9), the generators
@@ -1316,7 +1422,7 @@ text, summaries) and a page made against a small prelude.
 | `lexer` | 262 | `lex`, and stage 0's lexer tests | `sisu-lexer/src/lib.rs`, `tests.rs` |
 | `lexer.scan` | 558 | the raw scanner: every byte a token, strings and interpolation as tokens | `sisu-lexer/src/scan.rs` |
 | `lexer.layout` | 347 | Python's layout algorithm, continuation, bracket recovery and its fixes | `sisu-lexer/src/layout.rs` |
-| `parser` | 517 | `parse`, the diagnostic filters (bracket echoes, structure echoes, one per line), and stage 0's parser tests | `sisu-parser/src/lib.rs`, `tests.rs` |
+| `parser` | 516 | `parse`, the diagnostic filters (bracket echoes, structure echoes, one per line), and stage 0's parser tests | `sisu-parser/src/lib.rs`, `tests.rs` |
 | `parser.state` | 403 | the parser's state: looking, attaching tokens with their trivia, reporting, the fixes added later, Python's conditional | `sisu-parser/src/parser.rs` |
 | `parser.items`, `.stmts`, `.exprs`, `.patterns`, `.types` | 2222 | one function per rule of the grammar | the files of the same names |
 | `syntax.ast` | 748 | the AST: items, statements, expressions, types and patterns in arenas, referred to by id | `sisu-syntax/src/ast/mod.rs` |
@@ -1328,7 +1434,7 @@ text, summaries) and a page made against a small prelude.
 | `cfg` | 257 | conditional compilation: the items, test items and methods a build leaves out by their `@cfg`s, with `not(...)` (decision 250), and the problems of the conditions | `sisu-driver/src/cfg.rs` |
 | `sir`, `sir.types`, `sir.write`, `sir.simplify` | 1632 | SIR: programs, functions, blocks, statements and types, with the operations a type's constant argument may compute; the types of places; the text form `sisu sir` prints; jump threading | `lib.rs`, `types.rs`, `write.rs` and `simplify.rs` of `sisu-sir` |
 | `typeck.ty` | 451 | types, interned in a table | `sisu-resolve/src/ty.rs` |
-| `typeck.program` | 2253 | the resolved program, the spelling of types, `Copy`, the trait solver, `Send` and `Sync`, visibility, views and must-consume types | `program.rs`, `ty.rs`, `solve.rs` and `auto.rs` of `sisu-resolve` |
+| `typeck.program` | 2283 | the resolved program, the spelling of types, `Copy`, the trait solver, `Send` and `Sync` (`Send` as a bound owning what it holds, RULES.md's R1), visibility, views and must-consume types | `program.rs`, `ty.rs`, `solve.rs` and `auto.rs` of `sisu-resolve` |
 | `typeck.borrows` | 388 | what a signature borrows: the parameters a result may borrow from (`from`, and the elision rules), the borrowed-signature errors | `sisu-resolve/src/borrows.rs` |
 | `typeck.std_sources` | 552 | `target` and `builtin_impls`, the std text stage 0 writes, the import paths of the std modules, and those `sisu doc --std` documents | `sisu-resolve/src/std_sources.rs` |
 | `typeck.collect` | 4692 | declarations, signatures, imports, traits and impls of a program of several modules and packages, resolved, and what the compiler writes: interceptors and fakes, invariants, predicates, a script's `main`, test cases, doc tests | `collect.rs`, `types.rs`, `traits.rs`, `shims.rs`, `tests_of.rs` and `doctests.rs` of `sisu-resolve` |
@@ -1337,11 +1443,11 @@ text, summaries) and a page made against a small prelude.
 | `typeck.arbitrary` | 1386 | the generators of property tests, and the tests of contracts and `@refines` | `sisu-resolve/src/arbitrary.rs` |
 | `typeck.consts`, `typeck.folding` | 341 | a type's constant argument written as an expression, folded where it is written; an expression as folding reads it | `sisu-resolve/src/consts.rs` |
 | `typeck.infer`, `typeck.thir` | 767 | inference variables and unification; the typed tree | `infer.rs` and `thir.rs` of `sisu-typeck` |
-| `typeck.check`, `.expr`, `.call`, `.pat` | 7293 | the body checker: statements, expressions, calls, patterns | `check.rs`, `expr.rs`, `call.rs` and `pat.rs` of `sisu-typeck` |
+| `typeck.check`, `.expr`, `.call`, `.pat` | 7316 | the body checker: statements, expressions, calls, patterns | `check.rs`, `expr.rs`, `call.rs` and `pat.rs` of `sisu-typeck` |
 | `typeck.exhaustive` | 572 | exhaustiveness and unreachable arms of `match` | `sisu-typeck/src/exhaustive.rs` |
-| `typeck.contracts`, `.purity`, `.tasks` | 1455 | contracts and refinements, `pure`, structured concurrency and generators | `contracts.rs`, `purity.rs` and `tasks.rs` of `sisu-typeck` |
+| `typeck.contracts`, `.purity`, `.tasks` | 1551 | contracts and refinements, `pure`, structured concurrency and generators, and what a channel carries (R1) | `contracts.rs`, `purity.rs` and `tasks.rs` of `sisu-typeck` |
 | `typeck.generic_asserts` | 319 | `comptime assert` on `const` parameters, decided at each call | `sisu-typeck/src/generic_asserts.rs` |
-| `typeck` | 2182 | a body's checks, a program's, the inferred error sets, the driver, the typed bodies lowering reads, and the standard library's bodies, checked against the base and kept once per process; a file's declarations resolved alone, for the formatter | `sisu-typeck/src/lib.rs` |
+| `typeck` | 2242 | a body's checks, a program's, the inferred error sets, the driver, the typed bodies lowering reads, and the standard library's bodies, checked against the base and kept once per process; a file's declarations resolved alone, for the formatter | `sisu-typeck/src/lib.rs` |
 | `lower`, `lower.names`, `.func`, `.stmts`, `.exprs`, `.pats`, `.contracts`, `.glue` | 6300 | lowering the typed bodies to SIR: what `main` and the tests reach, names, functions and closures (with the value wrappers of decision 225), statements, expressions, patterns, contracts, drop glue, and the standard library's functions and what names them kept once per process | `lib.rs`, `func.rs`, `stmts.rs`, `exprs.rs`, `pats.rs`, `contracts.rs` and `glue.rs` of `sisu-lower` |
 | `borrowck`, `borrowck.paths`, `.init`, `.elaborate`, `.loans`, `.consume`, `.purity`, `.shared`, `.names`, `.types`, `.bitset`, `.finding` | 6469 | the ownership checker: move paths, initialisation and moves, drop placement (the standard library's kept once per process), loans, must-consume, purity, the `Shared` escape analysis, places in source terms, and the findings as diagnostics | `sisu-borrowck` (but `explain.rs`) |
 | `interp` | 1961 | compile-time evaluation: the `comptime` functions run on SIR and their values baked into it, or their failures, with the panics' messages | `sisu-interp/src/comptime.rs`, with what it needs of `exec.rs`, `place.rs`, `ops.rs`, `dispatch.rs`, `intrinsics.rs`, `sized.rs` and `format.rs` |
@@ -1352,7 +1458,7 @@ text, summaries) and a page made against a small prelude.
 | `mutants` | 204 | a seeded generator and the mutations of stage 0's robustness test; the files laid out otherwise that the formatters are compared on | `sisu-driver/src/tests.rs` |
 | `main` | 2873 | the command line, and the driver: `check` in both forms, the SIR of a whole program, `build --native` through stage 0's backend, `fmt`, `doc` | `sisu-driver/src/cli.rs`, `tokens`, `parse`, `check`, `sir`, `build`, `fmt` and `doc` |
 
-65899 lines in all, about 1550 of them tests; the Rust the lexer and the
+66117 lines in all, about 1580 of them tests; the Rust the lexer and the
 parser transcribe (`sisu-lexer`, `sisu-parser`, and `kinds.rs` and
 `tree.rs` of `sisu-syntax`) is 5821 lines with its tests, the AST and its
 builder 2809, `sisu-resolve` and `sisu-typeck`, of which stage 1
@@ -1919,6 +2025,28 @@ its parent's); and the corpus, mostly formatted, took about three times
 as long, since a text that came out as it went in was parsed again and
 its two shapes written (above, "The formatter").
 
+In the round that made stage 1 the front end (RULES.md), a profile of
+`types-batch` over a quarter of the corpus (callgrind, every fourth of
+the programs of `types.list`, 135) put the three items of "What is next"
+at about 4.6% of its instructions for the type checker's second parse of
+each module, 1.6% for each import of a std module (its derived impls'
+text parsed again among it), and the copy of the base's resolver inside
+each round of resolution; and it showed a cost no list had: every parse
+made its text's table of lines twice, once for the parser
+(`Parser.new`) and once more to keep one syntax diagnostic per line
+(`one_per_line`), 1.5% of the batch. The second is gone: the parser hands
+its table back with the tree (`Parser.finish`), and `one_per_line` reads
+it. Over those 135 programs `types-batch` executes 6.231 G instructions
+against 6.321 G (1.4% fewer), and the syntax batch over the standard
+library 5.105 G against 5.140 G, with the same outputs (`types-batch`,
+`sir-batch` and `check-batch` of the 542 programs of `sir.list` compared
+file for file, before and after, and every class of `check.sh`). Writing `TreeBuilder.finish_node`'s loops as `while` loops
+over indices saved 0.27% more and was left out, and giving its list of
+children their room up front saved nothing (a node has a handful). The
+three items stay where they were: each is a few per cent of a batch at
+most, less than the machine's speed varies from one run to the next, and
+each a change to what an input carries through the driver.
+
 ## What is next
 
 Every part of 18's stage table for stage 1 exists, `sisu doc` the last
@@ -1955,4 +2083,10 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
 5. **The discrepancies**: none is listed; the first five and the
    formatter's two (D6 and D7) were decided for the documents and stage 0
    changed. A new one is listed from D8 on and decided the same way
-   (D-079).
+   (D-079). A rule stage 1 changes is not a discrepancy but RULES.md's
+   (R1 now), since stage 0's front end no longer changes.
+6. **The documents R1 touches**, outside stage 1: decision 269 for
+   docs/architecture.md (RULES.md has its text), the prelude's
+   documentation of `channel` and `Send`, 06's "Channels and select", and
+   architecture.md's owners' bullet, "Send, Sync and what a task
+   captures" and known over-rejections 13 and 14.

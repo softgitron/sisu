@@ -1,0 +1,44 @@
+# A channel of closures (RULES.md, R1): a function type is `Send` when its
+# closure is, which the type does not say, so each closure is checked
+# where it is sent, as a task's is where it is spawned: it owns what it
+# captures (an `own` closure, or one that captures nothing), and each
+# capture is `Send`. The halves of such a channel are then `Send` and
+# `Sync`, and workers take jobs from it. Stage 0 refused it (E0421: a
+# function value counted as a view, decision 230).
+
+## A job a worker runs.
+type Job = () -> int
+
+## A step applied to a value.
+type Step = (int) -> int
+
+## Runs `n` jobs on `workers` tasks, and gives back their results in order.
+def run_jobs(n: int, workers: int) -> list[int]:
+    let tx, rx = channel[Job](capacity=2)
+    let results = Mutex(list())
+    task.scope do s:
+        for _ in range(workers):
+            s.spawn do:
+                for job in rx:
+                    results.lock().push(job())
+        for i in range(n):
+            submit(tx, i)
+        tx.close()
+    var out = results.into_inner()
+    out.sort()
+    return out
+
+## Sends a job that squares `k`: the closure owns its copy of `k`.
+def submit(tx: Sender[Job], k: int):
+    tx.send(own () -> k * k).expect("the workers outlive the sender")
+
+def main():
+    print(run_jobs(6, 3))
+    let tx, rx = channel[Step](capacity=3)
+    let base = 100
+    _ = tx.try_send(own x -> x + base)
+    # A closure that captures nothing borrows nothing.
+    _ = tx.try_send(x -> x * 2)
+    tx.close()
+    for f in rx:
+        print(f(7))

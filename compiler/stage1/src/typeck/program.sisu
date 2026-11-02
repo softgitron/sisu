@@ -908,7 +908,10 @@ impl Program:
 
     ## `can_borrow` in an environment of bounds: a type parameter bounded by
     ## `Escapable` holds no loan, since every type argument it stands for
-    ## must not (decision 256).
+    ## must not (decision 257), and neither does one bounded by `Send`,
+    ## which asks the same of its arguments (RULES.md, R1). A half of a
+    ## channel of closures holds none: each closure sent on it owns what it
+    ## captures, checked where it is sent.
     pub pure def can_borrow_in(self, mut types: Types, ty: Ty, env: list[Predicate]) -> bool:
         let data = types.data(ty).copy()
         if let TyData.Adt(d, args) = data:
@@ -917,10 +920,10 @@ impl Program:
         match data:
             case TyData.Param(_):
                 for p in env:
-                    if p.ty == ty
-                            and Some(p.bound.def_) == self.wk.escapable
-                            and p.bound.args.is_empty():
-                        return False
+                    if p.ty == ty and p.bound.args.is_empty():
+                        let b = Some(p.bound.def_)
+                        if b == self.wk.escapable or b == self.wk.send:
+                            return False
                 return True
             case TyData.Ref(_, _) | TyData.Str | TyData.Fn(_, _, _) | TyData.Var(_) | TyData.Error:
                 return True
@@ -937,6 +940,9 @@ impl Program:
                             match bs:
                                 case "Iter" | "Entry" | "Iterable" | "MutexGuard" | "ReadGuard" | "Lent" | "Slice":
                                     return True
+                                case "Sender" | "Receiver":
+                                    if carries_closures(types, args):
+                                        return False
                                 case _:
                                     pass
                         elif s.view_:
@@ -1106,7 +1112,15 @@ impl Program:
                         found = self.auto_depth(
                             mut types, arg0, Auto.Send, env, mut seen, depth + 1
                         )
-                    case "Mutex" | "Atomic" | "Sender" | "Receiver" | "Handle":
+                    # A channel of closures is both: each closure sent on
+                    # it was checked where it was sent (RULES.md, R1).
+                    case "Sender" | "Receiver":
+                        if carries_closures(types, args):
+                            return None
+                        found = self.auto_depth(
+                            mut types, arg0, Auto.Send, env, mut seen, depth + 1
+                        )
+                    case "Mutex" | "Atomic" | "Handle":
                         found = self.auto_depth(
                             mut types, arg0, Auto.Send, env, mut seen, depth + 1
                         )
@@ -1782,6 +1796,14 @@ impl Program:
         # whatever holds no reference or view.
         if t == self.wk.send or t == self.wk.sync:
             let auto = if t == self.wk.send: Auto.Send else: Auto.Sync
+            # As a bound, `Send` asks the type to own what it holds too
+            # (RULES.md, R1): what a generic body sends on a channel
+            # reaches a receiver that may keep it after what it borrows is
+            # gone, and a bound cannot see how long that is.
+            if auto == Auto.Send
+                    and not holds_var(types, ty)
+                    and self.can_borrow_in(mut types, ty, env):
+                return Answer.No
             if self.auto_trait(mut types, ty, auto, env):
                 return Answer.Yes(ImplSource.Builtin)
             return Answer.No
@@ -2251,3 +2273,21 @@ pub pure def param_local_ty(
             if copy:
                 return ty
             return types.ref_(ty, False)
+
+## Whether a type holds an inference variable, which `can_borrow_in` takes
+## for a view: whether it owns what it holds is not known yet.
+pure def holds_var(types: Types, ty: Ty) -> bool:
+    for x in types.walk(ty):
+        if let TyData.Var(_) = types.data(x):
+            return True
+    return False
+
+## Whether the type arguments of a channel half are those of a channel of
+## closures, whose closures are checked where they are sent (RULES.md,
+## R1): its element is a function type.
+pub pure def carries_closures(types: Types, args: list[Ty]) -> bool:
+    if args.is_empty():
+        return False
+    if let TyData.Fn(_, _, _) = types.data(args[0]):
+        return True
+    return False

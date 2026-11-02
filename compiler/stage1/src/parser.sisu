@@ -37,7 +37,7 @@ pub pure def parse_lexed(text: str, own lexed: Lexed, catalog: Catalog) -> Parse
             lex_errors.push(d.start)
     var p = Parser.new(text, lexed.tokens, lex_errors)
     p.source_file()
-    let (tree, parse_diags) = p.finish()
+    let (tree, parse_diags, lines) = p.finish()
     # A script (`#!` on its first line, 10) may have statements at the top
     # level: they run as its `main`.
     let script = text.starts_with("#!")
@@ -46,7 +46,7 @@ pub pure def parse_lexed(text: str, own lexed: Lexed, catalog: Catalog) -> Parse
             diagnostics.push(d)
     sort(mut diagnostics, catalog)
     let kept = without_structure_echoes(without_bracket_echoes(text, diagnostics), catalog)
-    return Parse(tree=tree, diagnostics=one_per_line(text, kept, catalog))
+    return Parse(tree=tree, diagnostics=one_per_line(lines, kept, catalog))
 
 ## When the lexer gives up on a bracket that is never closed, it does so at
 ## the start of a line (a statement keyword at the bracket's indentation)
@@ -122,9 +122,8 @@ pure def rank(d: Diagnostic, catalog: Catalog) -> int:
 ## missing operand), so this is the guard against diagnostic storms;
 ## errors on different lines are all reported.
 pure def one_per_line(
-    text: str, own diagnostics: list[Diagnostic], catalog: Catalog
+    lines: Lines, own diagnostics: list[Diagnostic], catalog: Catalog
 ) -> list[Diagnostic]:
-    let lines = Lines.of(text)
     var out: list[Diagnostic] = []
     var last_line = -1
     for d in own diagnostics:

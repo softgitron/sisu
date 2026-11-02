@@ -66,10 +66,10 @@ impl Parser:
             lines=Lines.of(text),
         )
 
-    ## The tree and the parser's diagnostics.
-    pub pure def finish(own self) -> (Tree, list[Diagnostic]):
+    ## The tree, the parser's diagnostics, and the lines of the text.
+    pub pure def finish(own self) -> (Tree, list[Diagnostic], Lines):
         var p = self
-        return (p.builder.finish(), p.diags)
+        return (p.builder.finish(), p.diags, p.lines)
 
     # ------------------------------------------------------------ looking
 
