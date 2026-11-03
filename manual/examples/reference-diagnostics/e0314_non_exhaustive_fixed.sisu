@@ -1,0 +1,14 @@
+# An arm for every variant.
+enum Light:
+    Red
+    Amber
+    Green
+
+def action(light: Light) -> str:
+    return match light:
+        case Red: "stop"
+        case Amber: "wait"
+        case Green: "go"
+
+def main():
+    print(action(Amber))

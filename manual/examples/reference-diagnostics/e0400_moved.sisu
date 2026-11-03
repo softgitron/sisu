@@ -1,0 +1,6 @@
+# A list used after it moved.
+def main():
+    let names = ["Aino"]
+    let team = names
+    print(names)
+    print(team)

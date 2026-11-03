@@ -1,0 +1,4 @@
+# A value the type holds.
+def main():
+    let level: u8 = 250
+    print(level)

@@ -1,0 +1,3 @@
+# A tab in the indentation.
+def main():
+	print("Hei, maailma!")

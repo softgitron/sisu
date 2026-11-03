@@ -1,0 +1,6 @@
+# A division by zero.
+def share(total: int, people: int) -> int:
+    return total // people
+
+def main():
+    print(share(10, 0))

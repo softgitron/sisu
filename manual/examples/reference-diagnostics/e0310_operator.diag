@@ -1,0 +1,2 @@
+4:11-4:23 E0310 type.binary-operator op="+" lhs="str" rhs="int"
+  fix type.interpolate 4:11-4:23 "\"age {age}\""

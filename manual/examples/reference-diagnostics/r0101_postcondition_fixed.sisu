@@ -1,0 +1,8 @@
+# A body that keeps its promise.
+def rounded_up(amount: int, step: int) -> int:
+    requires step > 0
+    ensures result >= amount
+    return (amount + step - 1) // step * step
+
+def main():
+    print(rounded_up(7, 5))

@@ -1,0 +1,4 @@
+# The number interpolated into the text.
+def main():
+    let age = 3
+    print("age {age}")

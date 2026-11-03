@@ -1,0 +1,12 @@
+# `main` returns the error of a failed parse.
+error InputError:
+    NotANumber(text: String)
+
+def number(text: str) -> int ! InputError:
+    let n = text.parse_int() else:
+        return Err(NotANumber(text.to_string()))
+    return Ok(n)
+
+def main() -> ! InputError:
+    print(number("kolme")?)
+    return Ok(())

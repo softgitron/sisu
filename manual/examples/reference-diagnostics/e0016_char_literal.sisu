@@ -1,0 +1,4 @@
+# Single quotes around a word.
+def main():
+    let name = 'Aino'
+    print(name)

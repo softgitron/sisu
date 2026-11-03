@@ -1,0 +1,3 @@
+test "two contacts" ... ok
+test "a line that the caller makes" ... ok
+2 passed, 0 failed, 0 blocked

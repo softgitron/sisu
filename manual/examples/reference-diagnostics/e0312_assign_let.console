@@ -1,0 +1,12 @@
+$ sisu run e0312_assign_let.sisu
+error[E0312]: `count` is immutable; declare it with `var` to assign to it
+  --> e0312_assign_let.sisu:4:5
+  |
+4 |     count = 2
+  |     ^^^^^
+  |
+3 |     let count = 1
+  |         ----- `count` is defined here
+  = fix: declare `count` with `var`
+
+error[D0006]: the program was not run: errors found (1)

@@ -1,0 +1,4 @@
+# `^1` counts from the end.
+def main():
+    let names = ["Aino", "Eero"]
+    print(names[^1])

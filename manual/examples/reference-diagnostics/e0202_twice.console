@@ -1,0 +1,12 @@
+$ sisu run e0202_twice.sisu
+error[E0202]: `area` is defined more than once in this module
+  --> e0202_twice.sisu:5:5
+  |
+5 | def area(width: int) -> int:
+  |     ^^^^
+  |
+2 | def area(width: int) -> int:
+  |     ---- first defined here
+  = note: rename one of them, or remove the one not wanted
+
+error[D0006]: the program was not run: errors found (1)

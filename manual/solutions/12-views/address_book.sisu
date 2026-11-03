@@ -1,0 +1,38 @@
+##! Exercise 12.3, an address book. Kind: fix. Level: 2.
+##!
+##! An address book keeps the contacts it reads from lines of text. The
+##! file does not compile. Run `sisu test address_book.sisu`, read the
+##! diagnostics, and fix the types and `add`, not the tests, so that
+##! every test passes. The hints are in chapter 12 of the tutorial, under
+##! "Exercise 12.3: an address book".
+
+## A person in the address book.
+struct Contact:
+    name: String
+    email: String
+
+struct AddressBook:
+    contacts: list[Contact] = []
+
+    ## Adds the contact that `line` describes, such as
+    ## "Aino <aino@example.org>"; a line without a "<" is left out.
+    def add(mut self, line: str):
+        let name, rest = line.split_once("<") else:
+            return
+        let email = rest.strip_suffix(">").to_string()
+        self.contacts.push(Contact(name.trim().to_string(), email))
+
+test "two contacts":
+    var book = AddressBook()
+    book.add("Aino <aino@example.org>")
+    book.add("Eero Virtanen <eero@example.org>")
+    book.add("not a contact")
+    assert len(book.contacts) == 2
+    assert book.contacts[1].name == "Eero Virtanen"
+    assert book.contacts[0].email == "aino@example.org"
+
+test "a line that the caller makes":
+    var book = AddressBook()
+    for name in ["Roni", "Ella"]:
+        book.add("{name} <{name.to_lowercase()}@example.org>")
+    assert book.contacts[1].email == "ella@example.org"

@@ -1,0 +1,10 @@
+$ sisu run tokens_escape.sisu
+error[E0407]: this returns a borrow of `source`, which belongs to `example_tokens` and is gone when it returns
+  --> tokens_escape.sisu:15:5
+   |
+15 |     return tokenize(source)
+   |     ^^^^^^^^^^^^^^^^^^^^^^^
+   |                     ------ borrowed here
+  = note: return an owned value instead, such as a copy made with `.copy()`
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

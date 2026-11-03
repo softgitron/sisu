@@ -1,0 +1,4 @@
+# A loop over the text's characters.
+def main():
+    for letter in "hei".chars():
+        print(letter)

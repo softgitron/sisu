@@ -1,0 +1,6 @@
+warning[W0003]: this `case` arm is unreachable; the arms above it cover every value it matches
+  --> w0003_unreachable.sisu:5:14
+  |
+5 |         case 0: "zero"
+  |              ^
+

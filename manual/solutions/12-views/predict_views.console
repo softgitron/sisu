@@ -1,0 +1,30 @@
+$ sisu test predict_views.sisu
+warning[W0001]: typed hole `how many settings` of type `int`
+  --> predict_views.sisu:24:20
+   |
+24 | const COUNT: int = todo("how many settings")
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the name of the second setting` of type `str`
+  --> predict_views.sisu:25:26
+   |
+25 | const SECOND_NAME: str = todo("the name of the second setting")
+   |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the value of the last setting` of type `str`
+  --> predict_views.sisu:26:25
+   |
+26 | const LAST_VALUE: str = todo("the value of the last setting")
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `how many settings an empty line has` of type `int`
+  --> predict_views.sisu:27:26
+   |
+27 | const NONE_AT_ALL: int = todo("how many settings an empty line has")
+   |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test "how many" ... blocked by todo("how many settings")
+test "the second name" ... blocked by todo("the name of the second setting")
+test "the last value" ... blocked by todo("the value of the last setting")
+test "an empty line" ... blocked by todo("how many settings an empty line has")
+0 passed, 0 failed, 4 blocked

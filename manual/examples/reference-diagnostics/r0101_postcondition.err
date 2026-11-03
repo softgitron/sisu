@@ -1,0 +1,6 @@
+panic: postcondition of `rounded_up` failed: result >= amount
+    result >= amount
+    │         │
+    5         7
+  at rounded_up (r0101_postcondition.sisu:4:13)
+  at main (r0101_postcondition.sisu:8:11)

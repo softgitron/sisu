@@ -1,0 +1,5 @@
+# A `let` whose pattern might not match.
+def main():
+    let maybe: int? = Some(3)
+    let Some(n) = maybe
+    print(n)

@@ -1,0 +1,44 @@
+##! Exercise 12.4, a tokenizer. Kind: write. Level: 3.
+##!
+##! A tokenizer cuts the source of a small language into tokens, each a
+##! view of a piece of the source, so that no text is copied. Write the
+##! body of `tokenize` so that every test passes. Run the tests with
+##! `sisu test tokenizer.sisu`. The hints are in chapter 12 of the
+##! tutorial, under "Exercise 12.4: a tokenizer".
+
+@derive(Eq)
+enum Kind:
+    Name
+    Number
+    Symbol
+
+## A piece of the source, and the number of its line, counted from 1.
+view struct Token:
+    kind: Kind
+    text: str
+    line: int
+
+## The tokens of `source`. Spaces separate the tokens of a line, and a
+## `#` starts a comment, which runs to the end of its line and gives no
+## tokens. A token is a `Number` if all of its characters are digits, a
+## `Name` if its first character is a letter, and a `Symbol` otherwise.
+def tokenize(source: str) -> list[Token]:
+    return todo("tokenize")
+
+test "one line":
+    let tokens = tokenize("total = 12 + x")
+    assert len(tokens) == 5
+    assert tokens[0].text == "total" and tokens[0].kind == Name
+    assert tokens[1].text == "=" and tokens[1].kind == Symbol
+    assert tokens[2].text == "12" and tokens[2].kind == Number
+    assert tokens[4].kind == Name
+
+test "lines are counted":
+    let tokens = tokenize("a = 1\n\nprint a")
+    assert [t.line for t in tokens] == [1, 1, 1, 3, 3]
+
+test "comments give no tokens":
+    let tokens = tokenize("x = 2  # the start\n# a whole line\nx2")
+    assert [t.text for t in tokens] == ["x", "=", "2", "x2"]
+    assert tokens[^1].line == 3
+    assert tokens[^1].kind == Name

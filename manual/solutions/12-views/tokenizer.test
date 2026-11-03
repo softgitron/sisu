@@ -1,0 +1,4 @@
+test "one line" ... ok
+test "lines are counted" ... ok
+test "comments give no tokens" ... ok
+3 passed, 0 failed, 0 blocked

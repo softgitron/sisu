@@ -1,0 +1,5 @@
+# Python's conditional expression.
+def main():
+    let size = 3
+    let label = "big" if size > 2 else "small"
+    print(label)

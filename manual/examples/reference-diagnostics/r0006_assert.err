@@ -1,0 +1,5 @@
+panic: assertion failed: len(names) == 3
+    len(names) == 3
+    │   │
+    2   ["Aino", "Eero"]
+  at main (r0006_assert.sisu:4:5)

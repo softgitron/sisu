@@ -1,0 +1,4 @@
+# A key that the dict does not hold.
+def main():
+    let ages = {"Aino": 7, "Eero": 9}
+    print(ages["Roni"])

@@ -1,0 +1,4 @@
+$ sisu run r0012_zip.sisu
+Aino 7
+panic: zip: the arguments have different lengths
+  at main (r0012_zip.sisu:3:5)

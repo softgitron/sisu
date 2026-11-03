@@ -1,1 +1,15 @@
 $ sisu test stock.sisu
+error[E0405]: `stock` is already borrowed on line 12, so it cannot be borrowed with `mut` until that borrow ends on line 15
+  --> stock.sisu:14:17
+   |
+14 |             _ = stock.remove(name)
+   |                 ^^^^^^^^^^^^^^^^^^
+   |
+12 |     for name, count in stock.items():
+   |                        ----- borrowed here by `name`
+   |
+14 |             _ = stock.remove(name)
+   |                 ------------------ the borrow is still used here
+  = note: move this after line 15, where the borrow ends, or work on a copy made with `.copy()`
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

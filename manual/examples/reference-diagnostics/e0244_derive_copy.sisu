@@ -1,0 +1,8 @@
+# `Copy` for a struct whose field is not `Copy`.
+@derive(Copy)
+struct Person:
+    name: String
+
+def main():
+    let aino = Person("Aino")
+    print(aino.name)

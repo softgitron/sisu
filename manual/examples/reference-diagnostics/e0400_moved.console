@@ -1,0 +1,12 @@
+$ sisu run e0400_moved.sisu
+error[E0400]: `names` was moved on line 4 and cannot be used afterwards
+  --> e0400_moved.sisu:5:11
+  |
+5 |     print(names)
+  |           ^^^^^
+  |
+4 |     let team = names
+  |                ----- `names` is moved here
+  = note: copy it with `.copy()` before it is moved, or move it later
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

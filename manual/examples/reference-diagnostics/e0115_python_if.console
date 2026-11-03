@@ -1,0 +1,9 @@
+$ sisu run e0115_python_if.sisu
+error[E0115]: `a if c else b` is not Sisu; write `if c: a else: b`
+  --> e0115_python_if.sisu:4:17
+  |
+4 |     let label = "big" if size > 2 else "small"
+  |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: write it as `if c: a else: b`: `if size > 2: "big" else: "small"`
+
+error[D0006]: the program was not run: errors found (1)

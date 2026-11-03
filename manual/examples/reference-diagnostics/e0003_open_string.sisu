@@ -1,0 +1,3 @@
+# A string literal that is not closed.
+def main():
+    print("Hei, maailma!)

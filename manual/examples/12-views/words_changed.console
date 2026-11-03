@@ -1,0 +1,28 @@
+$ sisu run words_changed.sisu
+error[E0405]: `line` is already borrowed on line 7, so it cannot be borrowed with `mut` until that borrow ends on line 10
+  --> words_changed.sisu:9:5
+   |
+ 9 |     line.push("!")
+   |     ^^^^^^^^^^^^^^
+   |
+ 7 |     let word = first_word(line)
+   |                           ---- borrowed here by `word`
+   |
+10 |     print("{word} | {trimmed}")
+   |             ---- the borrow is still used here
+  = note: move this after line 10, where the borrow ends, or work on a copy made with `.copy()`
+
+error[E0405]: `line` is already borrowed on line 8, so it cannot be borrowed with `mut` until that borrow ends on line 10
+  --> words_changed.sisu:9:5
+   |
+ 9 |     line.push("!")
+   |     ^^^^^^^^^^^^^^
+   |
+ 8 |     let trimmed = line.trim()
+   |                   ---- borrowed here by `trimmed`
+   |
+10 |     print("{word} | {trimmed}")
+   |                      ------- the borrow is still used here
+  = note: move this after line 10, where the borrow ends, or work on a copy made with `.copy()`
+
+error[D0021]: the program was not run: the ownership checker found errors (2); `--defer-borrow` runs it under the monitor

@@ -1,0 +1,8 @@
+$ sisu run e0108_and_or.sisu
+error[E0108]: `and` and `or` cannot be mixed without parentheses
+  --> e0108_and_or.sisu:6:25
+  |
+6 |     if raining and cold or windy:
+  |                         ^^
+
+error[D0006]: the program was not run: errors found (1)

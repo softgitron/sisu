@@ -1,0 +1,8 @@
+# The specific arm first.
+def describe(n: int) -> str:
+    return match n:
+        case 0: "zero"
+        case _: "a number"
+
+def main():
+    print(describe(0))

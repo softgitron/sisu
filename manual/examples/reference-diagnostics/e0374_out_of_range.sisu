@@ -1,0 +1,4 @@
+# A literal too large for its type.
+def main():
+    let level: u8 = 300
+    print(level)

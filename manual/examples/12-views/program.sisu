@@ -1,0 +1,12 @@
+# A plain struct that holds tokens, which are views.
+view struct Token:
+    text: str
+    line: int
+
+struct Program:
+    name: String
+    tokens: list[Token]
+
+def main():
+    let program = Program("empty", [])
+    print("{program.name}: {len(program.tokens)} tokens")

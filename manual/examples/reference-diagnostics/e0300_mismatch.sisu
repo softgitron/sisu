@@ -1,0 +1,4 @@
+# A text where a number is expected.
+def main():
+    let count: int = "3"
+    print(count)

@@ -1,0 +1,7 @@
+# Parentheses say which goes first.
+def main():
+    let raining = True
+    let cold = False
+    let windy = True
+    if (raining and cold) or windy:
+        print("stay in")

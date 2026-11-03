@@ -1,0 +1,8 @@
+# `_` matches every other value.
+def describe(n: int) -> str:
+    return match n:
+        case 0: "zero"
+        case _: "other"
+
+def main():
+    print(describe(0))

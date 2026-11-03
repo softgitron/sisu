@@ -1,0 +1,4 @@
+# `zip_shortest` stops at the shorter list.
+def main():
+    for name, age in zip_shortest(["Aino", "Eero"], [7]):
+        print("{name} {age}")

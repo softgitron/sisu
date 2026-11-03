@@ -1,0 +1,5 @@
+# A number used as a condition.
+def main():
+    let count = 3
+    if count:
+        print("some")

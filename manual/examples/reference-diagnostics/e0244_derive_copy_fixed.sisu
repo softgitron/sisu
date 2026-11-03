@@ -1,0 +1,7 @@
+# Without `Copy`; `.copy()` copies on request.
+struct Person:
+    name: String
+
+def main():
+    let aino = Person("Aino")
+    print(aino.name)

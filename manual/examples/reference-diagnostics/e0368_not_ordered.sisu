@@ -1,0 +1,7 @@
+# `<` on a struct that has no order.
+struct Point:
+    x: int
+    y: int
+
+def main():
+    print(Point(1, 2) < Point(2, 1))

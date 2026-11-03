@@ -1,0 +1,6 @@
+# A run that reaches a typed hole.
+def double(x: int) -> int:
+    return todo("double")
+
+def main():
+    print(double(21))

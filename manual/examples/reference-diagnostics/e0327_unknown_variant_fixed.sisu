@@ -1,0 +1,12 @@
+# Only the enum's own variants.
+enum Light:
+    Red
+    Green
+
+def action(light: Light) -> str:
+    return match light:
+        case Red: "stop"
+        case _: "go"
+
+def main():
+    print(action(Red))

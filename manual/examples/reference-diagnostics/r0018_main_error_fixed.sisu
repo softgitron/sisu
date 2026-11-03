@@ -1,0 +1,13 @@
+# The error handled where it happens.
+error InputError:
+    NotANumber(text: String)
+
+def number(text: str) -> int ! InputError:
+    let n = text.parse_int() else:
+        return Err(NotANumber(text.to_string()))
+    return Ok(n)
+
+def main():
+    match number("kolme"):
+        case Ok(n): print(n)
+        case Err(e): print("not a number: {e:?}")

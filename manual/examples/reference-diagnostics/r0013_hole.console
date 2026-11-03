@@ -1,0 +1,10 @@
+$ sisu run r0013_hole.sisu
+warning[W0001]: typed hole `double` of type `int`
+  --> r0013_hole.sisu:3:12
+  |
+3 |     return todo("double")
+  |            ^^^^^^^^^^^^^^
+
+panic: reached the typed hole `todo("double")`
+  at double (r0013_hole.sisu:3:12)
+  at main (r0013_hole.sisu:6:11)

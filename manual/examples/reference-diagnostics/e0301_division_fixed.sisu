@@ -1,0 +1,4 @@
+# `//` divides integers.
+def main():
+    let pieces = 7
+    print(pieces // 2)

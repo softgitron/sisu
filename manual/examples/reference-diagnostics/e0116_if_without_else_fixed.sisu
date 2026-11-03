@@ -1,0 +1,5 @@
+# Both branches give a value.
+def main():
+    let size = 3
+    let label = if size > 2: "big" else: "small"
+    print(label)

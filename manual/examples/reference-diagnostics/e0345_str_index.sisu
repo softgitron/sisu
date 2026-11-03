@@ -1,0 +1,4 @@
+# A text indexed by position.
+def main():
+    let word = "hei"
+    print(word[0])

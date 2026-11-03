@@ -1,0 +1,4 @@
+# The result used.
+def main():
+    let n = "42".parse_int() else: 0
+    print("done with {n}")

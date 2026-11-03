@@ -1,0 +1,2 @@
+6:11-6:18 E0308 type.missing-argument arg="height" name="area"
+  fix type.add-hole 6:17-6:17 ", todo(\"height\")"

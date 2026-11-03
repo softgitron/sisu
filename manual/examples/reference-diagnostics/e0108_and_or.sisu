@@ -1,0 +1,7 @@
+# `and` and `or` mixed without parentheses.
+def main():
+    let raining = True
+    let cold = False
+    let windy = True
+    if raining and cold or windy:
+        print("stay in")

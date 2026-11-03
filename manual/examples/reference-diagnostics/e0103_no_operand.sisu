@@ -1,0 +1,4 @@
+# An operator without its right operand.
+def main():
+    let total = 3 +
+    print(total)

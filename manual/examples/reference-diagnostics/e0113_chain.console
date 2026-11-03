@@ -1,0 +1,8 @@
+$ sisu run e0113_chain.sisu
+error[E0113]: a chained comparison must point one way; `<` and `>` do not
+  --> e0113_chain.sisu:4:20
+  |
+4 |     print(0 < size > 5)
+  |                    ^
+
+error[D0006]: the program was not run: errors found (1)

@@ -1,0 +1,2 @@
+panic: zip: the arguments have different lengths
+  at main (r0012_zip.sisu:3:5)

@@ -1,0 +1,3 @@
+8:5-8:24 E0411 borrow.view-field-in-plain-struct ty="Program" field="tokens" fty="list[Token]"
+  label 6:8-6:15 borrow.type-declared-here ty="Program"
+  fix borrow.declare-view 6:1-6:1 "view "

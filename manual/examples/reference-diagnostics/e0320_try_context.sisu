@@ -1,0 +1,4 @@
+# `?` in a function that returns nothing.
+def main():
+    let n = "42".parse_int()?
+    print(n)

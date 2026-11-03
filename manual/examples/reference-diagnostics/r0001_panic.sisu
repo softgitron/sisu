@@ -1,0 +1,9 @@
+# A panic for a case the program cannot handle.
+def weekday(n: int) -> str:
+    if n < 1 or n > 7:
+        panic("no weekday {n}")
+    return ["ma", "ti", "ke", "to", "pe", "la", "su"][n - 1]
+
+def main():
+    print(weekday(3))
+    print(weekday(8))

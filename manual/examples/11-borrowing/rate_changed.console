@@ -1,1 +1,15 @@
 $ sisu run rate_changed.sisu
+error[E0402]: `rate` is borrowed on line 10 and cannot be modified until that borrow ends on line 16
+  --> rate_changed.sisu:12:5
+   |
+12 |     rate = 10
+   |     ^^^^^^^^^
+   |
+10 |     let scale = x -> x * rate
+   |                 ------------- borrowed here by `scale`
+   |
+16 |     print(scale(1))
+   |           -------- the borrow is still used here
+  = note: move this after line 16, where the borrow ends, or work on a copy made with `.copy()`
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

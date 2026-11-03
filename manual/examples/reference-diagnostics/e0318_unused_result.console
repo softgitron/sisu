@@ -1,0 +1,9 @@
+$ sisu run e0318_unused_result.sisu
+error[E0318]: this `int?` is not used; handle it, or discard it with `_ = ...`
+  --> e0318_unused_result.sisu:3:5
+  |
+3 |     "42".parse_int()
+  |     ^^^^^^^^^^^^^^^^
+  = fix: discard it explicitly: `_ = `
+
+error[D0006]: the program was not run: errors found (1)

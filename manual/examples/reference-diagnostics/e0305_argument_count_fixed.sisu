@@ -1,0 +1,4 @@
+# One text, built by interpolation.
+def main():
+    let world = "maailma"
+    print("Hei, {world}!")

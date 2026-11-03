@@ -1,0 +1,4 @@
+# The integer converted first.
+def main():
+    let price = 3
+    print(price.to_f64() * 1.5)

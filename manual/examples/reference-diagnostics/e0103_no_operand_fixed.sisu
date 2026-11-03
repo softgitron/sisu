@@ -1,0 +1,4 @@
+# Both operands, on one line.
+def main():
+    let total = 3 + 4
+    print(total)

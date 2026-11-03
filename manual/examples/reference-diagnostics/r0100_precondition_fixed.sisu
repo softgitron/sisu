@@ -1,0 +1,11 @@
+# The call checks what the function requires.
+def average(total: int, count: int) -> int:
+    requires count > 0
+    return total // count
+
+def main():
+    let count = 0
+    if count > 0:
+        print(average(10, count))
+    else:
+        print("nothing to average")

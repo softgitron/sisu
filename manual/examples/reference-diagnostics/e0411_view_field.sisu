@@ -1,0 +1,7 @@
+# A borrowed text in a plain struct.
+struct Order:
+    item: str
+
+def main():
+    let order = Order("bread")
+    print(order.item)

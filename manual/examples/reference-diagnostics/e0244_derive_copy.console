@@ -1,0 +1,8 @@
+$ sisu run e0244_derive_copy.sisu
+error[E0244]: `Person` cannot derive `Copy`: its field `name` has type `String`, which does not implement `Copy`
+  --> e0244_derive_copy.sisu:2:9
+  |
+2 | @derive(Copy)
+  |         ^^^^
+
+error[D0006]: the program was not run: errors found (1)

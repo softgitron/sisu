@@ -1,0 +1,8 @@
+# The zero handled before dividing.
+def share(total: int, people: int) -> int:
+    if people == 0:
+        return 0
+    return total // people
+
+def main():
+    print(share(10, 0))

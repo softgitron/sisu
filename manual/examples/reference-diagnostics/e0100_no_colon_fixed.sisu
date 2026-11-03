@@ -1,0 +1,3 @@
+# The colon that opens the block.
+def main():
+    print("Hei, maailma!")

@@ -1,0 +1,4 @@
+# A slice that ends at a character boundary.
+def main():
+    let word = "äiti"
+    print(word.byte_slice(0, 2))

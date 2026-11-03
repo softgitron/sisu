@@ -1,0 +1,3 @@
+# Two arguments to a function that takes one.
+def main():
+    print("Hei,", "maailma!")

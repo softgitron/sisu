@@ -1,0 +1,12 @@
+# The variant named with its type.
+enum Light:
+    Red
+    Green
+
+enum Wine:
+    Red
+    White
+
+def main():
+    let colour = Light.Red
+    print("{colour:?}")

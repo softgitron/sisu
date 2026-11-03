@@ -1,0 +1,3 @@
+# The name as it is declared.
+def main():
+    print("Hei, maailma!")

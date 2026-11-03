@@ -1,0 +1,8 @@
+# `@derive(Eq)` gives the struct `==`.
+@derive(Eq)
+struct Point:
+    x: int
+    y: int
+
+def main():
+    print(Point(1, 2) == Point(1, 2))

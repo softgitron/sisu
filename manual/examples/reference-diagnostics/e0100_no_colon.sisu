@@ -1,0 +1,3 @@
+# A block opened without its colon.
+def main()
+    print("Hei, maailma!")

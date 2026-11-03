@@ -1,0 +1,13 @@
+# A pattern that names a variant the enum does not have.
+enum Light:
+    Red
+    Green
+
+def action(light: Light) -> str:
+    return match light:
+        case Red: "stop"
+        case Blue: "wait"
+        case _: "go"
+
+def main():
+    print(action(Red))

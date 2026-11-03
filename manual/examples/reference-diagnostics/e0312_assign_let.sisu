@@ -1,0 +1,5 @@
+# An assignment to a `let` binding.
+def main():
+    let count = 1
+    count = 2
+    print(count)

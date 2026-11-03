@@ -1,0 +1,6 @@
+panic: precondition of `average` failed: count > 0
+    count > 0
+    │
+    0
+  at average (r0100_precondition.sisu:3:14)
+  at main (r0100_precondition.sisu:7:11)

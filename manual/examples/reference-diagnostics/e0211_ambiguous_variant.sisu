@@ -1,0 +1,12 @@
+# A variant name that two enums share.
+enum Light:
+    Red
+    Green
+
+enum Wine:
+    Red
+    White
+
+def main():
+    let colour = Red
+    print("{colour:?}")

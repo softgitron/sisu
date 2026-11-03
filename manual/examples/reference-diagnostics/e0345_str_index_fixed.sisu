@@ -1,0 +1,5 @@
+# The first character, from the characters.
+def main():
+    let word = "hei"
+    let first = word.chars().next() else: ' '
+    print(first)

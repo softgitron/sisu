@@ -1,1 +1,13 @@
 $ sisu test friends.sisu
+error[E0405]: `guests` is already borrowed on line 11, so it cannot be borrowed with `mut` until that borrow ends on line 12
+  --> friends.sisu:12:9
+   |
+12 |         guests.push("{guest}'s friend")
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+11 |     for guest in guests:
+   |                  ------ borrowed here
+   |     ------------------- the borrow is still used here
+  = note: move this after line 12, where the borrow ends, or work on a copy made with `.copy()`
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

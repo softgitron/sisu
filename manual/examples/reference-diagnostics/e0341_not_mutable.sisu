@@ -1,0 +1,5 @@
+# A change to a `let` binding's list.
+def main():
+    let names = ["Aino"]
+    names.push("Eero")
+    print(names)

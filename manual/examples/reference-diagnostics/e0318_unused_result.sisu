@@ -1,0 +1,4 @@
+# A result that nothing uses.
+def main():
+    "42".parse_int()
+    print("done")

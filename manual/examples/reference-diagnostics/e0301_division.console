@@ -1,0 +1,9 @@
+$ sisu run e0301_division.sisu
+error[E0301]: `/` divides floats; for integers use `//`, or convert to `f64` first
+  --> e0301_division.sisu:4:11
+  |
+4 |     print(pieces / 2)
+  |           ^^^^^^^^^^
+  = fix: use `//` for integer division: `//`
+
+error[D0006]: the program was not run: errors found (1)

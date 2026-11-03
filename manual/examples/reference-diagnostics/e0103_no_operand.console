@@ -1,0 +1,8 @@
+$ sisu run e0103_no_operand.sisu
+error[E0103]: expected an expression, found the end of the line
+  --> e0103_no_operand.sisu:3:20
+  |
+3 |     let total = 3 +
+  |                    ^
+
+error[D0006]: the program was not run: errors found (1)

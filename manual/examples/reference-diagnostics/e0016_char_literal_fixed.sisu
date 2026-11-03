@@ -1,0 +1,4 @@
+# Text between double quotes.
+def main():
+    let name = "Aino"
+    print(name)

@@ -1,0 +1,7 @@
+# An inner binding that hides an outer one.
+def main():
+    let total = 1
+    if total > 0:
+        let total = 2
+        print(total)
+    print(total)

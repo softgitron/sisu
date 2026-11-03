@@ -1,0 +1,2 @@
+3:5-3:21 E0318 type.unused-result ty="int?"
+  fix type.discard 3:5-3:5 "_ = "

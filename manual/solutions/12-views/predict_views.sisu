@@ -1,0 +1,41 @@
+##! Exercise 12.1, predict the views. Kind: predict. Level: 1.
+##!
+##! Each constant is your prediction of the value of the expression in
+##! its test. Write each as a literal, then run
+##! `sisu test predict_views.sisu`. The hints are in chapter 12 of the
+##! tutorial, under "Exercise 12.1: predict the views".
+
+## A setting such as "name = Aino", as two views of the text it was
+## read from.
+view struct Setting:
+    name: str
+    value: str
+
+## The settings of `line`, which separates them with `;`. A part
+## without `=` is not a setting and is left out.
+def settings(line: str) -> list[Setting]:
+    var found: list[Setting] = []
+    for part in line.split(";"):
+        let name, value = part.split_once("=") else:
+            continue
+        found.push(Setting(name.trim(), value.trim()))
+    return found
+
+const COUNT: int = 2
+const SECOND_NAME: str = "age"
+const LAST_VALUE: str = ""
+const NONE_AT_ALL: int = 0
+
+test "how many":
+    assert len(settings("name = Aino; age=34; town")) == COUNT
+
+test "the second name":
+    let found = settings("name = Aino; age=34; town")
+    assert found[1].name == SECOND_NAME
+
+test "the last value":
+    let found = settings("lang=fi;  theme = dark mode ;size=")
+    assert found[^1].value == LAST_VALUE
+
+test "an empty line":
+    assert len(settings("")) == NONE_AT_ALL

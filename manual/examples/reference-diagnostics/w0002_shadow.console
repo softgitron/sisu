@@ -1,0 +1,9 @@
+$ sisu run w0002_shadow.sisu
+warning[W0002]: `total` shadows a binding of an enclosing scope
+  --> w0002_shadow.sisu:5:13
+  |
+5 |         let total = 2
+  |             ^^^^^
+
+2
+1

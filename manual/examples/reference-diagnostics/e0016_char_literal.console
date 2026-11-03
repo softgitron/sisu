@@ -1,0 +1,8 @@
+$ sisu run e0016_char_literal.sisu
+error[E0016]: a character literal holds exactly one character
+  --> e0016_char_literal.sisu:3:16
+  |
+3 |     let name = 'Aino'
+  |                ^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

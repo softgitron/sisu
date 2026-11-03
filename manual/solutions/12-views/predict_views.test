@@ -1,0 +1,5 @@
+test "how many" ... ok
+test "the second name" ... ok
+test "the last value" ... ok
+test "an empty line" ... ok
+4 passed, 0 failed, 0 blocked

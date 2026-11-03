@@ -1,0 +1,17 @@
+# A `view struct` holds borrows: each token views the source text.
+view struct Token:
+    text: str
+    line: int
+
+def tokenize(source: str) -> list[Token]:
+    var tokens: list[Token] = []
+    for i, line in enumerate(source.lines()):
+        for word in line.split_whitespace():
+            tokens.push(Token(word, i + 1))
+    return tokens
+
+def main():
+    let source: String = "let total = 4\nprint total"
+    let tokens = tokenize(source)
+    for token in tokens:
+        print("line {token.line}: {token.text}")

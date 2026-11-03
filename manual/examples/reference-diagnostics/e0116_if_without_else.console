@@ -1,0 +1,8 @@
+$ sisu run e0116_if_without_else.sisu
+error[E0116]: an `if` expression needs an `else` branch, because it must have a value
+  --> e0116_if_without_else.sisu:4:35
+  |
+4 |     let label = if size > 2: "big"
+  |                                   ^
+
+error[D0006]: the program was not run: errors found (1)

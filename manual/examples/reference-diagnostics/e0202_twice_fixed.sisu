@@ -1,0 +1,9 @@
+# Each function with a name of its own.
+def square_area(width: int) -> int:
+    return width * width
+
+def strip_area(width: int) -> int:
+    return width * 2
+
+def main():
+    print(square_area(3))

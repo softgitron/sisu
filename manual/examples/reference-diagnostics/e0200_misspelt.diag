@@ -1,0 +1,2 @@
+3:5-3:9 E0200 resolve.undefined-name name="prnt"
+  fix resolve.similar-name 3:5-3:9 "print"

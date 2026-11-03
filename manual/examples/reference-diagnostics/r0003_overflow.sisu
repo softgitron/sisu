@@ -1,0 +1,4 @@
+# An addition past the largest `int`.
+def main():
+    let big = 9_223_372_036_854_775_807
+    print(big + 1)

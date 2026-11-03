@@ -1,0 +1,10 @@
+$ sisu run e0300_mismatch.sisu
+error[E0300]: expected `int`, found `str`
+  --> e0300_mismatch.sisu:3:22
+  |
+3 |     let count: int = "3"
+  |                      ^^^
+  |                --- expected because of this
+  = fix: write the number without quotes: `3`
+
+error[D0006]: the program was not run: errors found (1)

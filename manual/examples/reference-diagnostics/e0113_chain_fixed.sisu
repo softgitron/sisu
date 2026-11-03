@@ -1,0 +1,4 @@
+# A chain that points one way.
+def main():
+    let size = 3
+    print(0 < size < 5)

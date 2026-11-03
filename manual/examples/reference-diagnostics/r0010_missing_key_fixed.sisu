@@ -1,0 +1,4 @@
+# `.get` gives an absent value for a missing key.
+def main():
+    let ages = {"Aino": 7, "Eero": 9}
+    print(ages.get("Roni") ?? 0)

@@ -1,0 +1,13 @@
+# A `match` that misses a variant.
+enum Light:
+    Red
+    Amber
+    Green
+
+def action(light: Light) -> str:
+    return match light:
+        case Red: "stop"
+        case Green: "go"
+
+def main():
+    print(action(Amber))

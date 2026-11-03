@@ -1,0 +1,7 @@
+# The struct owns its text.
+struct Order:
+    item: String
+
+def main():
+    let order = Order("bread")
+    print(order.item)

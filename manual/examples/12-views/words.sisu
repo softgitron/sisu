@@ -1,0 +1,11 @@
+# A `str` views text that a `String` owns, and keeps it borrowed.
+def first_word(text: str) -> str:
+    return text.split_whitespace().next() ?? ""
+
+def main():
+    var line: String = "  Hei maailma  "
+    let word = first_word(line)
+    let trimmed = line.trim()
+    print("{word} | {trimmed}")
+    line.push("!")
+    print("{line:?}")

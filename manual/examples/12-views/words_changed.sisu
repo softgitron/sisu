@@ -1,0 +1,11 @@
+# The `String` changes while a view of its text is still used.
+def first_word(text: str) -> str:
+    return text.split_whitespace().next() ?? ""
+
+def main():
+    var line: String = "  Hei maailma  "
+    let word = first_word(line)
+    let trimmed = line.trim()
+    line.push("!")
+    print("{word} | {trimmed}")
+    print("{line:?}")

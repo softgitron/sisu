@@ -1,0 +1,6 @@
+# `else` says what happens when it does not match.
+def main():
+    let maybe: int? = Some(3)
+    let Some(n) = maybe else:
+        return
+    print(n)

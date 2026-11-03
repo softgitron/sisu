@@ -1,0 +1,8 @@
+# `@derive(Eq, Ord)` orders the struct field by field.
+@derive(Eq, Ord)
+struct Point:
+    x: int
+    y: int
+
+def main():
+    print(Point(1, 2) < Point(2, 1))

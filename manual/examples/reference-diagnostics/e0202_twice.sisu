@@ -1,0 +1,9 @@
+# Two functions with one name.
+def area(width: int) -> int:
+    return width * width
+
+def area(width: int) -> int:
+    return width * 2
+
+def main():
+    print(area(3))

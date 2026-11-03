@@ -1,0 +1,8 @@
+# `not` in a pattern.
+def describe(n: int) -> str:
+    return match n:
+        case 0: "zero"
+        case not 0: "other"
+
+def main():
+    print(describe(0))

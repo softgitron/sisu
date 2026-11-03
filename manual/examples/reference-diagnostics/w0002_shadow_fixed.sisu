@@ -1,0 +1,7 @@
+# Each binding with a name of its own.
+def main():
+    let total = 1
+    if total > 0:
+        let doubled = 2
+        print(doubled)
+    print(total)

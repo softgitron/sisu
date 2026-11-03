@@ -1,0 +1,12 @@
+$ sisu run program.sisu
+error[E0411]: `Program` holds `tokens: list[Token]`, which borrows; only a `view struct` may hold a borrow
+  --> program.sisu:8:5
+  |
+8 |     tokens: list[Token]
+  |     ^^^^^^^^^^^^^^^^^^^
+  |
+6 | struct Program:
+  |        ------- `Program` is declared here
+  = fix: declare it `view struct Program`: `view `
+
+error[D0006]: the program was not run: errors found (1)

@@ -1,0 +1,22 @@
+##! Exercise 12.2, the longest line. Kind: fix. Level: 1.
+##!
+##! `longest_line` reads a file and gives its longest line. The file does
+##! not compile. Run `sisu test longest_line.sisu`, read the diagnostic,
+##! and fix `longest_line`, not the test, so that the test passes. The
+##! hints are in chapter 12 of the tutorial, under "Exercise 12.2: the
+##! longest line".
+
+## The longest line of the file at `path`, read from `fs`; the first of
+## them when two are as long.
+def longest_line(fs: Fs, path: Path) -> String ! IoError:
+    let text = fs.read_to_string(path)?
+    var longest = ""
+    for line in text.lines():
+        if len(line) > len(longest):
+            longest = line
+    return Ok(longest.to_string())
+
+test "the longest line":
+    let fs = Fs.in_memory({"poem.txt": "Hei\nmaailma, hei\nsisu", "e.txt": ""})
+    assert longest_line(fs, "poem.txt") == Ok("maailma, hei")
+    assert longest_line(fs, "e.txt") == Ok("")

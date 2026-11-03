@@ -1,0 +1,4 @@
+# An index past the end of a list.
+def main():
+    let scores = [3, 1, 4]
+    print(scores[3])

@@ -1,0 +1,4 @@
+$ sisu run r0004_division.sisu
+panic: division by zero
+  at share (r0004_division.sisu:3:12)
+  at main (r0004_division.sisu:6:11)

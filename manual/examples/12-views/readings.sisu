@@ -1,0 +1,14 @@
+# A `Slice` views a run of a list's elements, without copying them.
+def total(values: Slice[int]) -> int:
+    var sum_so_far = 0
+    for value in values:
+        sum_so_far += value
+    return sum_so_far
+
+def main():
+    var readings = [3, 5, 8, 2, 7]
+    let all = readings.as_slice()
+    let middle = all[1:4]
+    print("{total(all)} in all, {total(middle)} in {middle:?}")
+    readings.push(1)
+    print(total(readings))

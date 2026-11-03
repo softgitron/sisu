@@ -1,0 +1,5 @@
+# An `if` expression without an `else`.
+def main():
+    let size = 3
+    let label = if size > 2: "big"
+    print(label)

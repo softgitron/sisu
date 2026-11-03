@@ -1,0 +1,3 @@
+# The string literal closed on its line.
+def main():
+    print("Hei, maailma!")

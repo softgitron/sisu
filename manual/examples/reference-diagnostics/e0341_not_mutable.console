@@ -1,0 +1,12 @@
+$ sisu run e0341_not_mutable.sisu
+error[E0341]: cannot modify `names`; it is not declared with `var`
+  --> e0341_not_mutable.sisu:4:5
+  |
+4 |     names.push("Eero")
+  |     ^^^^^
+  |
+3 |     let names = ["Aino"]
+  |         ----- `names` is defined here
+  = fix: declare `names` with `var`
+
+error[D0006]: the program was not run: errors found (1)

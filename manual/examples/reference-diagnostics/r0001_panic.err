@@ -1,0 +1,3 @@
+panic: no weekday 8
+  at weekday (r0001_panic.sisu:4:9)
+  at main (r0001_panic.sisu:9:11)

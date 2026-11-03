@@ -1,1 +1,30 @@
 $ sisu test shopping.sisu
+error[E0341]: cannot modify `items`; it is not declared with `var`
+  --> shopping.sisu:14:5
+   |
+14 |     items.push(item.to_string())
+   |     ^^^^^
+  = fix: take `items` with `mut`: `mut `
+
+error[E0340]: `items` is not a `mut` parameter, so the argument takes no `mut`
+  --> shopping.sisu:18:14
+   |
+18 |     add_item(mut items, "milk")
+   |              ^^^^^^^^^
+  = fix: remove `mut`
+
+error[E0340]: `items` is not a `mut` parameter, so the argument takes no `mut`
+  --> shopping.sisu:19:14
+   |
+19 |     add_item(mut items, "bread")
+   |              ^^^^^^^^^
+  = fix: remove `mut`
+
+error[E0340]: `items` is not a `mut` parameter, so the argument takes no `mut`
+  --> shopping.sisu:20:14
+   |
+20 |     add_item(mut items, "milk")
+   |              ^^^^^^^^^
+  = fix: remove `mut`
+
+error[D0006]: the program was not run: errors found (4)

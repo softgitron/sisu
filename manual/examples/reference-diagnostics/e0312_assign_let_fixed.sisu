@@ -1,0 +1,5 @@
+# A `var` binding can be assigned.
+def main():
+    var count = 1
+    count = 2
+    print(count)

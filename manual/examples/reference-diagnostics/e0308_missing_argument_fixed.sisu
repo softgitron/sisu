@@ -1,0 +1,6 @@
+# Every argument given.
+def area(width: int, height: int) -> int:
+    return width * height
+
+def main():
+    print(area(3, 4))

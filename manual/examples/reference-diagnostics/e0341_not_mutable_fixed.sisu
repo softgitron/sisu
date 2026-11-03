@@ -1,0 +1,5 @@
+# A `var` binding can change.
+def main():
+    var names = ["Aino"]
+    names.push("Eero")
+    print(names)

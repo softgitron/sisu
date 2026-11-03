@@ -1,0 +1,6 @@
+# The hole filled.
+def double(x: int) -> int:
+    return x * 2
+
+def main():
+    print("ready, {double(21)}")

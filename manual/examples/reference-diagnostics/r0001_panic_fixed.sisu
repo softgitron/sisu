@@ -1,0 +1,9 @@
+# An absent value for a number that names no weekday.
+def weekday(n: int) -> str?:
+    if n < 1 or n > 7:
+        return None
+    return Some(["ma", "ti", "ke", "to", "pe", "la", "su"][n - 1])
+
+def main():
+    print(weekday(3) ?? "none")
+    print(weekday(8) ?? "none")

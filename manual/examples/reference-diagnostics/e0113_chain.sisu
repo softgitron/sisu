@@ -1,0 +1,4 @@
+# A chained comparison that points two ways.
+def main():
+    let size = 3
+    print(0 < size > 5)

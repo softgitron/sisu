@@ -1,0 +1,4 @@
+# An integer and a float in one operation.
+def main():
+    let price = 3
+    print(price * 1.5)

@@ -1,0 +1,33 @@
+# Two ways out: own the text, or finish the work where the text lives.
+view struct Token:
+    text: str
+    line: int
+
+struct Word:
+    text: String
+    line: int
+
+def tokenize(source: str) -> list[Token]:
+    var tokens: list[Token] = []
+    for i, line in enumerate(source.lines()):
+        for word in line.split_whitespace():
+            tokens.push(Token(word, i + 1))
+    return tokens
+
+def owned_words(source: str) -> list[Word]:
+    return [Word(t.text.to_string(), t.line) for t in tokenize(source)]
+
+def longest_token(source: str) -> int:
+    var longest = 0
+    for token in tokenize(source):
+        longest = max(longest, len(token.text))
+    return longest
+
+def example() -> (list[Word], int):
+    let source: String = "let total = 4\nprint total"
+    return (owned_words(source), longest_token(source))
+
+def main():
+    let words, longest = example()
+    print("{len(words)} words, the last is {words[^1].text:?}")
+    print("the longest token has {longest} characters")

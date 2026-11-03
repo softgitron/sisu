@@ -1,0 +1,4 @@
+# `+` between a text and a number.
+def main():
+    let age = 3
+    print("age " + age)

@@ -1,0 +1,2 @@
+4:17-4:47 E0115 parse.python-conditional
+  fix parse.use-if-expression 4:17-4:47 "if size > 2: \"big\" else: \"small\""

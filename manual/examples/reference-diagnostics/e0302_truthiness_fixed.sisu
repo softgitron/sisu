@@ -1,0 +1,5 @@
+# The test written out.
+def main():
+    let count = 3
+    if count != 0:
+        print("some")

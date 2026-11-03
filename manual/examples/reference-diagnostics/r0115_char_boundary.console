@@ -1,0 +1,3 @@
+$ sisu run r0115_char_boundary.sisu
+panic: the byte index 1 is inside a character of the text
+  at main (r0115_char_boundary.sisu:4:11)

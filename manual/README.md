@@ -171,7 +171,7 @@ values are dropped at the end of their scope in reverse order; `Drop`;
 say what each fix costs. Exercises: fix three move errors three different
 ways, predict a drop order. Stage 0 runs all of it.
 
-**11. Borrowing.** The three parameter conventions (borrow, `mut`, `own`)
+**11. Borrowing** ([written](tutorial/11-borrowing.md)). The three parameter conventions (borrow, `mut`, `own`)
 and `mut` at the call site; `ref` and `ref mut`; the rule of one mutable
 or many shared borrows; borrows that end at their last use; returning a
 borrow and the `from` clause; `for x in mut xs` and `for x in own xs`;
@@ -180,7 +180,7 @@ monitor's counterexample run (`--defer-borrow`). Exercises: from the
 wrong-ownership corpus, each a fix with the diagnostic as the guide.
 Stage 0 runs all of it.
 
-**12. Views.** `view struct`, `str` and `Slice[T]` as views, tokens that
+**12. Views** ([written](tutorial/12-views.md)). `view struct`, `str` and `Slice[T]` as views, tokens that
 point into a source buffer, why a view cannot leave the frame that owns
 what it borrows, views that make the structures holding them views, and
 the two ways out (own the data, or keep the work in the frame).
@@ -829,7 +829,7 @@ solutions and passing checks.
 | 3 | R16 the `sisu` command (2, done), R17 diagnostics, first codes (2), R1 lexical structure (2) | 6 |
 | 4 | Chapters 5 (2.5), 6 (2), 7 (2.5), 8 (3) | done |
 | 5 | Chapter 9 with challenge I (3, done); G2 Coming from Python (1); R19 false friends (1) | 2 |
-| 6 | Chapters 10 (3, done), 11 (4), 12 (3), 13 with challenge II (3); R7 ownership (3); G13 borrow errors (1); X3 (1) | 15 |
+| 6 | Chapters 10 (3, done), 11 (4, done), 12 (3, done), 13 with challenge II (3); R7 ownership (3); G13 borrow errors (1); X3 (1) | 8 |
 | 7 | Reader test of Parts I and II: five readers who know Python, their stuck points, the rewrites | 4 |
 | 8 | Chapters 14 (3), 15 (3), 16 (3), 17 with challenge III (2.5); R2 (3), R3 (2), R6 (1), R13 (2.5) | 20 |
 | 9 | Chapters 18 (3), 19 (3), 20 (4), 21 (3), 22 with challenge IV (4); R9 (2.5), R10 (2), R15 (2); G5 to G16 (9) | 32.5 |
@@ -970,6 +970,29 @@ Writing the rest of Part I turned up more, by chapter:
   the manual's limit is 80, so a line of 81 to 100 columns that the
   formatter keeps whole is too long for the checker; a trailing comma in
   the brackets makes the formatter break it.
+- Chapter 11. E0407 for a `str` result that borrows a `String` made in
+  the function names `.copy()` in its note; following it gets the same
+  E0407, since the copy is local too, and the fix, a `String` result,
+  is not named. A change inside a loop over the same list or dict gets
+  E0405 whose note says to move the change "after line N", N being the
+  last line of the loop's body, inside the loop, and whose label "the
+  borrow is still used here" points at the loop's head or at the
+  changing line itself. A borrowed parameter that the function changes
+  gets E0341 ("it is not declared with `var`") with the right fix, `mut`
+  on the parameter, while each call that already says `mut` gets E0340,
+  whose fix removes it: two fixes that contradict, of which a beginner
+  has to pick the one in the signature.
+- Chapter 12. A function that reads a file through `fs: Fs` and
+  `path: Path` and returns a `str` view of the text it read gets E0413
+  (`borrow.from-required`), whose fix names `fs` and `path` in a `from`
+  clause; the result borrows from neither, and the fix leads to E0407.
+  E0407's note offers `.copy()` for a returned list of views too, which
+  copies views that still borrow the local. In the address book of
+  exercise 12.3, accepting E0411's fix (`view struct`) twice leads to
+  E0410, where the fix that works, `String` fields, is offered by none
+  of the three. `print(part)` with `part` a `Slice[int]` gets E0347
+  ("does not implement `Display`"), though a list prints and
+  `{part:?}` works.
 
 Planning the later chapters turned up the parts of the proposal that
 they teach and stage 0 does not run yet, each named in its chapter's

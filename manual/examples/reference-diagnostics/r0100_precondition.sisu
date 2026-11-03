@@ -1,0 +1,7 @@
+# A call that breaks its function's precondition.
+def average(total: int, count: int) -> int:
+    requires count > 0
+    return total // count
+
+def main():
+    print(average(10, 0))

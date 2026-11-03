@@ -1,0 +1,22 @@
+$ sisu test address_book.sisu
+error[E0411]: `Contact` holds `name: str`, which borrows; only a `view struct` may hold a borrow
+  --> address_book.sisu:11:5
+   |
+11 |     name: str
+   |     ^^^^^^^^^
+   |
+10 | struct Contact:
+   |        ------- `Contact` is declared here
+  = fix: declare it `view struct Contact`: `view `
+
+error[E0411]: `Contact` holds `email: str`, which borrows; only a `view struct` may hold a borrow
+  --> address_book.sisu:12:5
+   |
+12 |     email: str
+   |     ^^^^^^^^^^
+   |
+10 | struct Contact:
+   |        ------- `Contact` is declared here
+  = fix: declare it `view struct Contact`: `view `
+
+error[D0006]: the program was not run: errors found (2)

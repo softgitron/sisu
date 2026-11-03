@@ -1,0 +1,6 @@
+# A typed hole in a function's body.
+def double(x: int) -> int:
+    return todo("double")
+
+def main():
+    print("ready")

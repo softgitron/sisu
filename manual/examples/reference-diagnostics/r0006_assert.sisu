@@ -1,0 +1,5 @@
+# An assertion that does not hold.
+def main():
+    let names = ["Aino", "Eero"]
+    assert len(names) == 3
+    print("three names")

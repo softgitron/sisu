@@ -1,0 +1,8 @@
+# An arm that the arm above it covers.
+def describe(n: int) -> str:
+    return match n:
+        case _: "a number"
+        case 0: "zero"
+
+def main():
+    print(describe(0))

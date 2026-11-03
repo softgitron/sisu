@@ -1,0 +1,4 @@
+# `zip` over two lists of different lengths.
+def main():
+    for name, age in zip(["Aino", "Eero"], [7]):
+        print("{name} {age}")

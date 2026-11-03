@@ -1,0 +1,11 @@
+$ sisu test longest_line.sisu
+error[E0413]: `longest_line` returns `str ! IoError`, which borrows, and has more than one borrowed parameter (fs, path); name the ones it borrows from with `from`
+  --> longest_line.sisu:11:41
+   |
+11 | def longest_line(fs: Fs, path: Path) -> str ! IoError:
+   |                                         ^^^^^^^^^^^^^
+   |                  ------ `fs` is a borrowed parameter
+   |                          ---------- `path` is a borrowed parameter
+  = fix: name `fs, path` in the `from` clause: ` from fs, path`
+
+error[D0006]: the program was not run: errors found (1)

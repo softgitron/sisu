@@ -1,0 +1,4 @@
+# `.get` gives an absent value past the end.
+def main():
+    let scores = [3, 1, 4]
+    print(scores.get(3) ?? 0)

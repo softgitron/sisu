@@ -1,0 +1,9 @@
+$ sisu run e0373_mixed_numbers.sisu
+error[E0373]: `*` cannot mix `int` and `f64`; convert one of them explicitly
+  --> e0373_mixed_numbers.sisu:4:11
+  |
+4 |     print(price * 1.5)
+  |           ^^^^^^^^^^^
+  = fix: make the `int` an `f64`: `.to_f64()`
+
+error[D0006]: the program was not run: errors found (1)

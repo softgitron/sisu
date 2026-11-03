@@ -1,0 +1,6 @@
+# A copy for the second owner.
+def main():
+    let names = ["Aino"]
+    let team = names.copy()
+    print(names)
+    print(team)
