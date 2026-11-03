@@ -1,0 +1,30 @@
+##! Exercise 2.2, split the bill: the solution.
+##!
+##! A share in whole cents is what `//` gives: the fraction of a cent is
+##! dropped, and `%` would give the cents left over. The mean needs its
+##! fraction, so both integers become floats before `/` divides them.
+##! Applying both fixes that the diagnostics offer for `mean_rating`
+##! gives `(total // count).to_f64()`, which compiles but drops the
+##! fraction before the conversion: the first mean comes out 4.0.
+
+## Each person's share of a bill of `total` cents, in whole cents. The
+## cents left over go into the tip jar.
+def share(total: int, people: int) -> int:
+    return total // people
+
+## The mean of ratings that add up to `total` over `count` ratings, with
+## its fraction.
+def mean_rating(total: int, count: int) -> f64:
+    return total.to_f64() / count.to_f64()
+
+test "a bill of 10 euros between three":
+    assert share(1000, 3) == 333
+
+test "a bill of 84 euros between four":
+    assert share(8400, 4) == 2100
+
+test "a mean with a fraction":
+    assert mean_rating(9, 2) == 4.5
+
+test "a whole mean":
+    assert mean_rating(12, 3) == 4.0

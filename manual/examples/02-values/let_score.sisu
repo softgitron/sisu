@@ -1,0 +1,6 @@
+# `var` makes a binding whose value can change.
+def main():
+    let score = 10
+    score = score + 5
+    score *= 2
+    print("score: {score}")

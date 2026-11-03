@@ -1,0 +1,6 @@
+4:5-4:10 E0312 type.assign-immutable name="score" what="score"
+  label 3:9-3:14 resolve.defined-here name="score"
+  fix type.declare-var
+5:5-5:10 E0312 type.assign-immutable name="score" what="score"
+  label 3:9-3:14 resolve.defined-here name="score"
+  fix type.declare-var

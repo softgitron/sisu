@@ -1,0 +1,12 @@
+#!/usr/bin/env sisu
+# Arithmetic on integers and on floats.
+7 + 2
+7 - 2
+7 * 2
+7 ** 2
+7 // 2
+7 % 2
+(-7) // 2
+(-7) % 2
+7.0 / 2.0
+abs(-7)

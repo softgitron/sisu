@@ -1,0 +1,8 @@
+$ sisu run mixed_logic.sisu
+error[E0108]: `and` and `or` cannot be mixed without parentheses
+  --> mixed_logic.sisu:6:39
+  |
+6 |     print("{raining and have_umbrella or have_coat}")
+  |                                       ^^
+
+error[D0006]: the program was not run: errors found (1)

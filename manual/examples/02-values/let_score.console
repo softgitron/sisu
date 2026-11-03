@@ -1,0 +1,22 @@
+$ sisu run let_score.sisu
+error[E0312]: `score` is immutable; declare it with `var` to assign to it
+  --> let_score.sisu:4:5
+  |
+4 |     score = score + 5
+  |     ^^^^^
+  |
+3 |     let score = 10
+  |         ----- `score` is defined here
+  = fix: declare `score` with `var`
+
+error[E0312]: `score` is immutable; declare it with `var` to assign to it
+  --> let_score.sisu:5:5
+  |
+5 |     score *= 2
+  |     ^^^^^
+  |
+3 |     let score = 10
+  |         ----- `score` is defined here
+  = fix: declare `score` with `var`
+
+error[D0006]: the program was not run: errors found (2)

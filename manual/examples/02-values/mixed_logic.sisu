@@ -1,0 +1,6 @@
+# `and` and `or` need parentheses when they meet.
+def main():
+    let raining = True
+    let have_umbrella = False
+    let have_coat = True
+    print("{raining and have_umbrella or have_coat}")

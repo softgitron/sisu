@@ -1,0 +1,4 @@
+$ sisu run overflow.sisu
+largest: 9223372036854775807
+panic: integer overflow: 9223372036854775807 + 1
+  at main (overflow.sisu:5:23)

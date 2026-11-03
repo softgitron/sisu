@@ -1,0 +1,9 @@
+$ sisu run truthy.sisu
+error[E0302]: a condition must be a `bool`, not `int`; Sisu has no truthiness
+  --> truthy.sisu:4:8
+  |
+4 |     if unread:
+  |        ^^^^^^
+  = note: write the test explicitly, as in `not xs.is_empty()` or `x != 0`
+
+error[D0006]: the program was not run: errors found (1)

@@ -1,0 +1,8 @@
+# `const` names a value that is fixed when the program is compiled.
+const SECONDS_PER_MINUTE: int = 60
+const MINUTES_PER_HOUR: int = 60
+const SECONDS_PER_HOUR: int = SECONDS_PER_MINUTE * MINUTES_PER_HOUR
+
+def main():
+    let hours = 3
+    print("{hours} hours is {hours * SECONDS_PER_HOUR} seconds")

@@ -1,0 +1,4 @@
+# A literal must fit the type it is given.
+def main():
+    let level: u8 = 300
+    print("{level}")

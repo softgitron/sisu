@@ -1,0 +1,10 @@
+#!/usr/bin/env sisu
+# Comparisons give a `bool`.
+3 == 3
+3 != 4
+2.5 < 3.0
+"Aino" < "Eero"
+'a' < 'b'
+let age = 34
+18 <= age < 65
+0 < age < 18

@@ -1,0 +1,5 @@
+test "a summer day" ... ok
+test "a winter day" ... ok
+test "water boils" ... ok
+test "the two scales meet" ... ok
+4 passed, 0 failed, 0 blocked

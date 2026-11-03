@@ -1,0 +1,2 @@
+4:21-4:26 E0300 type.mismatch expected="u8" found="int"
+  label 4:16-4:18 type.expected-because

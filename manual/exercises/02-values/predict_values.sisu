@@ -1,0 +1,38 @@
+##! Exercise 2.1, predict the values. Kind: predict. Level: 1.
+##!
+##! Each constant is a prediction of the value of the expression that
+##! its test compares it with. Replace each hole with the value you
+##! predict, written as a literal: a number, `True` or `False`. Decide
+##! before you run anything, then run `sisu test predict_values.sisu`.
+##! When a test fails, its report shows the value the expression really
+##! has; work out why before you change your answer. The hints are in
+##! chapter 2 of the tutorial, under "Exercise 2.1: predict the values".
+
+const QUOTIENT: int = todo("(-17) // 5")
+const REMAINDER: int = todo("(-17) % 5")
+const POWER: int = todo("2 ** 3 ** 2")
+const HALVES: f64 = todo("7.0 / 2.0 * 2.0")
+const CHAIN: bool = todo("1 < 5 <= 4")
+const NEGATION: bool = todo("not 2 + 2 == 5")
+const WRAPPED: u8 = todo("200u8 +% 100")
+
+test "floor division of a negative number":
+    assert (-17) // 5 == QUOTIENT
+
+test "the remainder of a negative number":
+    assert (-17) % 5 == REMAINDER
+
+test "a power of a power":
+    assert 2 ** 3 ** 2 == POWER
+
+test "dividing and multiplying floats":
+    assert 7.0 / 2.0 * 2.0 == HALVES
+
+test "a chain of comparisons":
+    assert (1 < 5 <= 4) == CHAIN
+
+test "what `not` applies to":
+    assert (not 2 + 2 == 5) == NEGATION
+
+test "wrapping a byte":
+    assert 200u8 +% 100 == WRAPPED

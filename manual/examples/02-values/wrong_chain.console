@@ -1,0 +1,8 @@
+$ sisu run wrong_chain.sisu
+error[E0113]: a chained comparison must point one way; `<` and `>` do not
+  --> wrong_chain.sisu:6:24
+  |
+6 |     print("{low < peak > high}")
+  |                        ^
+
+error[D0006]: the program was not run: errors found (1)

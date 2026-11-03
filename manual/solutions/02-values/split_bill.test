@@ -1,0 +1,5 @@
+test "a bill of 10 euros between three" ... ok
+test "a bill of 84 euros between four" ... ok
+test "a mean with a fraction" ... ok
+test "a whole mean" ... ok
+4 passed, 0 failed, 0 blocked

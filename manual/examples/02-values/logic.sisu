@@ -1,0 +1,8 @@
+#!/usr/bin/env sisu
+# `and`, `or` and `not` combine `bool` values.
+let raining = True
+let have_umbrella = False
+raining and not have_umbrella
+raining or have_umbrella
+not raining
+(raining and have_umbrella) or not raining

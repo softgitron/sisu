@@ -1,0 +1,9 @@
+# Conversions that can lose information are method calls.
+def main():
+    let count = 300
+    print("{count.to_f64() / 8.0}")
+    print("{count.to_u16()} {count.to_u8()}")
+    print("{count.truncate_to[u8]()}")
+    let price = 2.75
+    print("{price.round()} {price.round().truncate_to_int()}")
+    print("{price.truncate_to_int()}")

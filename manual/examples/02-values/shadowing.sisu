@@ -1,0 +1,8 @@
+# Reusing an outer name inside an inner block gets a warning.
+def main():
+    let total = 10
+    let with_tip = True
+    if with_tip:
+        let total = total + 2
+        print("inside the block: {total}")
+    print("after the block: {total}")

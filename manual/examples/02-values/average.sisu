@@ -1,0 +1,5 @@
+# Dividing two integers with `/` does not compile.
+def main():
+    let total = 17
+    let count = 4
+    print("average: {total / count}")

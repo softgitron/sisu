@@ -1,0 +1,5 @@
+# Arithmetic does not mix `int` and `f64`.
+def main():
+    let price = 2.5
+    let count = 3
+    print("total: {price * count}")

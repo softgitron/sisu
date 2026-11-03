@@ -1,0 +1,8 @@
+test "floor division of a negative number" ... ok
+test "the remainder of a negative number" ... ok
+test "a power of a power" ... ok
+test "dividing and multiplying floats" ... ok
+test "a chain of comparisons" ... ok
+test "what `not` applies to" ... ok
+test "wrapping a byte" ... ok
+7 passed, 0 failed, 0 blocked

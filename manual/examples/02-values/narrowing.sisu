@@ -1,0 +1,5 @@
+# Going to a smaller type could lose information, so it is not automatic.
+def main():
+    let large = 200
+    let small: u8 = large
+    print("{small}")

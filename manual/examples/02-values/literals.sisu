@@ -1,0 +1,11 @@
+# Ways to write a number.
+def main():
+    let population = 5_600_000
+    let red = 0xFF
+    let flags = 0b1010
+    let mode = 0o755
+    let level = 200u8
+    let wavelength = 6.5e-7
+    let distance = 1.5e8
+    print("{population} {red} {flags} {mode} {level}")
+    print("{wavelength} {distance}")

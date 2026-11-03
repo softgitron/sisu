@@ -1,0 +1,6 @@
+# Two ways to divide integers: in whole numbers, or as floats.
+def main():
+    let total = 17
+    let count = 4
+    print("whole: {total // count}, left over: {total % count}")
+    print("exact: {total.to_f64() / count.to_f64()}")

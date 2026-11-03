@@ -1,0 +1,7 @@
+# A type annotation states the type; without one, Sisu infers it.
+def main():
+    let year = 2026
+    let ratio: f64 = 0.75
+    let level: u8 = 200
+    let ready: bool = True
+    print("{year} {ratio} {level} {ready}")

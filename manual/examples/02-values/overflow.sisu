@@ -1,0 +1,5 @@
+# An `int` holds 64 bits; a result that does not fit stops the program.
+def main():
+    let largest = 9_223_372_036_854_775_807
+    print("largest: {largest}")
+    print("one more: {largest + 1}")

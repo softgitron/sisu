@@ -1,0 +1,6 @@
+warning[W0002]: `total` shadows a binding of an enclosing scope
+  --> shadowing.sisu:6:13
+  |
+6 |         let total = total + 2
+  |             ^^^^^
+

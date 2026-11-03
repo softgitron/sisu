@@ -1,0 +1,26 @@
+##! Exercise 2.3, a weather report: the solution.
+##!
+##! Every number in the conversion is written as a float, because `*`,
+##! `/` and `+` do not mix `f64` and `int`. `round()` rounds to the
+##! nearest whole number but gives an `f64`, and `truncate_to_int()`
+##! turns that whole `f64` into an `int` without losing anything more.
+##! Truncating without rounding first would turn 70.7 into 70.
+
+## A line of the report: `celsius`, and the same temperature in
+## Fahrenheit, rounded to the nearest whole degree.
+def report(celsius: f64) -> String:
+    let fahrenheit: f64 = celsius * 9.0 / 5.0 + 32.0
+    let whole: int = fahrenheit.round().truncate_to_int()
+    return "{celsius} °C is about {whole} °F"
+
+test "a summer day":
+    assert report(21.5) == "21.5 °C is about 71 °F"
+
+test "a winter day":
+    assert report(-12.0) == "-12.0 °C is about 10 °F"
+
+test "water boils":
+    assert report(100.0) == "100.0 °C is about 212 °F"
+
+test "the two scales meet":
+    assert report(-40.0) == "-40.0 °C is about -40 °F"

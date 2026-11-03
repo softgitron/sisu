@@ -1,0 +1,4 @@
+# Single quotes hold one character, not a string.
+def main():
+    let name = 'Aino'
+    print(name)

@@ -1,0 +1,29 @@
+##! Exercise 2.3, a weather report. Kind: complete. Level: 2.
+##!
+##! A weather station in Oulu measures in degrees Celsius, and its
+##! report also gives each temperature in degrees Fahrenheit, rounded to
+##! a whole degree. To convert, multiply by 9, divide by 5 and add 32.
+##!
+##! Replace the two holes in `report` so that every test passes. Each
+##! hole's type is written on its line. Run the tests with
+##! `sisu test weather_report.sisu`. The hints are in chapter 2 of the
+##! tutorial, under "Exercise 2.3: a weather report".
+
+## A line of the report: `celsius`, and the same temperature in
+## Fahrenheit, rounded to the nearest whole degree.
+def report(celsius: f64) -> String:
+    let fahrenheit: f64 = todo("celsius in Fahrenheit")
+    let whole: int = todo("fahrenheit rounded, as an int")
+    return "{celsius} °C is about {whole} °F"
+
+test "a summer day":
+    assert report(21.5) == "21.5 °C is about 71 °F"
+
+test "a winter day":
+    assert report(-12.0) == "-12.0 °C is about 10 °F"
+
+test "water boils":
+    assert report(100.0) == "100.0 °C is about 212 °F"
+
+test "the two scales meet":
+    assert report(-40.0) == "-40.0 °C is about -40 °F"

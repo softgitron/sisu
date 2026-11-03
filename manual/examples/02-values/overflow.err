@@ -1,0 +1,2 @@
+panic: integer overflow: 9223372036854775807 + 1
+  at main (overflow.sisu:5:23)

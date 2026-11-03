@@ -1,0 +1,7 @@
+#!/usr/bin/env sisu
+# One value of each basic type.
+let count = 42
+let price = 2.5
+let ready = True
+let initial = 'A'
+let name = "Aino"

@@ -1,0 +1,9 @@
+$ sisu run average.sisu
+error[E0301]: `/` divides floats; for integers use `//`, or convert to `f64` first
+  --> average.sisu:5:22
+  |
+5 |     print("average: {total / count}")
+  |                      ^^^^^^^^^^^^^
+  = fix: use `//` for integer division: `//`
+
+error[D0006]: the program was not run: errors found (1)

@@ -1,0 +1,8 @@
+# A value widens to a larger type by itself when nothing is lost.
+def main():
+    let small: u8 = 200
+    let medium: i32 = small
+    let large: int = medium
+    let single: f32 = 1.5
+    let double: f64 = single
+    print("{small} {medium} {large} {double}")

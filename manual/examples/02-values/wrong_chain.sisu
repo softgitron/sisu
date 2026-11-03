@@ -1,0 +1,6 @@
+# A chain of comparisons must point one way.
+def main():
+    let low = 1
+    let peak = 5
+    let high = 3
+    print("{low < peak > high}")

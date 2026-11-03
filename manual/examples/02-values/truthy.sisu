@@ -1,0 +1,5 @@
+# A number is not a truth value.
+def main():
+    let unread = 3
+    if unread:
+        print("{unread} new messages")

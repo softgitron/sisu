@@ -1,0 +1,6 @@
+# A new `let` can reuse a name in the same block.
+def main():
+    let celsius = 21.6
+    let celsius = celsius.round()
+    let celsius = celsius.truncate_to_int()
+    print("about {celsius} degrees")
