@@ -1,3 +1,4 @@
 3:5-3:14 E0411 borrow.view-field-in-plain-struct ty="Order" field="item" fty="str"
   label 2:8-2:13 borrow.type-declared-here ty="Order"
+  fix borrow.own-string 3:11-3:14 "String"
   fix borrow.declare-view 2:1-2:1 "view "

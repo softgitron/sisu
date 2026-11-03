@@ -1,1 +1,2 @@
 21:23-21:52 E0320 type.try-context ty="int ! ClockError" needed="T ! E" found="()"
+  fix type.return-errors 19:11-19:11 " -> ! ClockError" 23:1-23:1 "    return Ok(())\n"

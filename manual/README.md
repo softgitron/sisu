@@ -403,7 +403,7 @@ prototype in the experiment ([STYLE.md](STYLE.md)).
 |---|---|---|
 | R1 | Lexical structure ([written](reference/lexical-structure.md)) | Source text, identifiers and the naming rules, the 47 keywords and the contextual ones, comments and doc comments, every literal, line continuation, indentation, the formatter's layout. |
 | R2 | Types ([written](reference/types.md)) | Every builtin type, numeric conversions, text types, collections and literal typing (`FromLiteral`), tuples, unit and `Never`, `T?` and `T ! E`, error-set subtyping, function types and `pure`, references, views, the library pointer types, `dyn`, refinements, aliases, the auto traits, what the type system leaves out. |
-| R3 | Declarations | `let`, `var`, `const`, `def` and its parameters, `pure def`, `comptime def`, `struct`, `view struct`, `enum`, `error`, `trait`, `impl`, `type`, `test`, `suite`, `bench`, `import`, `extern`, visibility. |
+| R3 | Declarations ([written](reference/declarations.md)) | `let`, `var`, `const`, `def` and its parameters, `pure def`, `comptime def`, `struct`, `view struct`, `enum`, `error`, `trait`, `impl`, `type`, `test`, `suite`, `bench`, `import`, `extern`, visibility. |
 | R4 | Expressions and operators | The precedence table and each operator, calls and keyword arguments, indexing, slicing and `^`, comprehensions, closures and `it`, `if` and `match` expressions, `else` fallbacks, `?`, `?.`, `??`, interpolation and format specs, `comptime e`, `unsafe e`. |
 | R5 | Statements and control flow | Assignment and places, `if`, chained conditions, `if let`, `while let`, `let ... else`, `while`, the three `for` modes, `break`, `continue`, `return`, `match`, `select`, `with`, `defer`, `assert`, `debug_assert`, `expect`, `pass`, `unsafe` blocks. |
 | R6 | Patterns ([written](reference/patterns.md)) | Every pattern form, binding by case, exhaustiveness, guards, alternatives that bind. |
@@ -831,7 +831,7 @@ solutions and passing checks.
 | 5 | Chapter 9 with challenge I (3, done); G2 Coming from Python (1); R19 false friends (1, done) | 2 |
 | 6 | Chapters 10 (3, done), 11 (4, done), 12 (3, done), 13 with challenge II (3, done); R7 ownership (3, done); G13 borrow errors (1); X3 (1) | 5 |
 | 7 | Reader test of Parts I and II: five readers who know Python, their stuck points, the rewrites | 4 |
-| 8 | Chapters 14 (3, done), 15 (3, done), 16 (3, done), 17 with challenge III (2.5, done); R2 (3, done), R3 (2), R6 (1, done), R13 (2.5) | 20 |
+| 8 | Chapters 14 (3, done), 15 (3, done), 16 (3, done), 17 with challenge III (2.5, done); R2 (3, done), R3 (2, done), R6 (1, done), R13 (2.5) | 20 |
 | 9 | Chapters 18 (3, done), 19 (3, done), 20 (4, done), 21 (3, done), 22 with challenge IV (4, done); R9 (2.5), R10 (2), R15 (2); G5 to G16 (9) | 32.5 |
 | 10 | R4 (2), R5 (1.5), R8 (1.5), R14 (1.5), R20 (2), R21 (1), R22 (1); X1, X2, X4, X5, X8, X10, X12 (7) | 17.5 |
 | 11 | Chapters 23 (2), 24 (2), 25 (3), 26 (2); R11 (1), R12 (2); G17, G20, G21, G26, G27, G28, G29, G30, G31, G32 (7.5); X6, X7, X9, X13, X14 (5) | 26.5 |
@@ -1143,20 +1143,21 @@ Writing the rest of Part I turned up more, by chapter:
   exercise "write a transcript test for the word counter" cannot be
   judged by tests the learner does not edit, since the transcript is the
   test; exercise 19.4 fixes a program against its transcript instead.
-- Chapter 20. `assert visits.into_inner() == 2` gets E0400 twice
-  ("moved ... in an earlier iteration of the loop") where there is no
-  loop: an assertion whose expression moves a value is evaluated twice,
-  and binding the value with `let` first works. A task that changes a
-  captured `var`, `s.spawn do: count += 1`, gets E0402 whose message
-  names the closure's whole text as the value borrowed, says that it
-  "cannot be modified", and says nothing about a `Mutex`. E0428's note
-  offers `own () -> ...`, which moves the list into the first task and
-  leaves none for the next; the fix that works, making the value
-  outside the scope's block, is not offered. When a task fails while
-  the scope's block is joining an earlier sibling, the failure cancels
-  the sibling, the block's `join()?` returns `Err(Cancelled)`, and that
-  becomes the scope's result, hiding the failure that started the
-  cancelling, which [06](../proposal/06-concurrency-and-capabilities.md#tasks-and-scopes)
+- Chapter 20. `assert visits.into_inner() == 2` gets E0400 twice ("moved
+  ... in an earlier iteration of the loop") where there is no loop: an
+  assertion whose expression moves a value is evaluated twice, and
+  binding the value with `let` first works. Tasks spawned in a loop that
+  change a captured `var`, `for _ in range(3): s.spawn do: count += 1`,
+  get E0402 whose message names the closure's whole text as the value
+  borrowed, says that it "cannot be modified", and says nothing about a
+  `Mutex`. E0428's note offers `own () -> ...`, which moves the list
+  into the first task and leaves none for the next; the fix that works,
+  making the value outside the scope's block, is not offered. When a
+  task fails while the scope's block is joining an earlier sibling, the
+  failure cancels the sibling, the block's `join()?` returns
+  `Err(Cancelled)`, and that becomes the scope's result, hiding the
+  failure that started the cancelling, which
+  [06](../proposal/06-concurrency-and-capabilities.md#tasks-and-scopes)
   says the scope returns; exercise 20.4's test asks about the failing
   town first. A `dict[String, String]` field looked up with a `str` gets
   E0300 with the fix `.to_lowercase()`, as chapter 10 found. The plan's
@@ -1291,6 +1292,19 @@ Writing the reference turned up more, by page:
   `graphemes`, `@derive(Into, From)` (E0243), a list literal typed as
   an `Array`, `FromLiteral` for `Url`, which 02 lists and R1 claimed
   (corrected), and the sharing of instances with `--explain-size`.
+- R3, declarations. `sisu check` and `sisu run` (stage 1) report
+  neither a field declared twice (E0205) nor a variant declared twice
+  (E0206), and keep one of the two; the Rust front end of `sisu test`
+  reports both. E0247 comes only for `trait A(A)`: a supertrait cycle
+  through another trait, `trait A(B)` with `trait B(A)`, compiles in
+  both front ends. A `const` in an enum's body compiles, and reading it
+  as `Light.COUNT` gets E0351. Star unpacking, `let first, *rest = xs`,
+  gets E0326, E0329 and E0387, none of which says that the form is
+  designed and missing, where a nested `def` gets E0900. A `comptime`
+  call of a function that builds a list with a comprehension stops
+  stage 1 with "beyond the slice: a `comptime` expression that needs
+  the intrinsic `list.new`, which stage 1's evaluator does not run", a
+  message with no code; the Rust front end runs it.
 
 ## Open questions
 

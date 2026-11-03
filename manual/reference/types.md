@@ -6,8 +6,8 @@ take a method, how literals take the type expected, how generic code,
 traits and trait objects are typed, the auto traits, refinements and
 aliases, and what the type system leaves out on purpose. The
 declarations that make new types (`struct`, `enum`, `error`, `trait`,
-`impl`, `type`) are [R3](../README.md#the-reference), when it is
-written; this page says what the types mean.
+`impl`, `type`) are [R3](declarations.md); this page says what the
+types mean.
 
 **See also:** the tutorial's [chapter 2](../tutorial/02-values.md)
 (values and types), [chapter 5](../tutorial/05-collections.md)
@@ -1131,8 +1131,8 @@ error[E0347]: `Coffee` does not implement `Priced`
 error[D0006]: the program was not run: errors found (1)
 ```
 
-What a trait and an impl may declare is [R3](../README.md#the-reference),
-when it is written; the traits of the prelude (`Display`, `Debug`, `Eq`,
+What a trait and an impl may declare is [R3](declarations.md#traits);
+the traits of the prelude (`Display`, `Debug`, `Eq`,
 `PartialOrd`, `Ord`, `Hash`, `Default`, `Len`, `Iterator`, the operator
 traits, `FromLiteral`) are in the library's reference, and which of
 them `@derive` writes is [R14](../README.md#the-reference), when it is
@@ -1729,7 +1729,7 @@ These are left out on purpose ([03](../../proposal/03-types-and-generics.md#what
 | [E0235](diagnostics.md#e0235), E0236, E0240 | `resolve.overlapping-impl`, `resolve.orphan-impl`, `resolve.sealed-trait` | [One impl for each type and trait](#one-impl-for-each-type-and-trait) |
 | [E0368](diagnostics.md#e0368), E0208, E0349, E0375 | `type.not-ordered`, `resolve.type-argument-count`, `type.not-generic`, `type.type-arguments-needed` | [Generic types and functions](#generic-types-and-functions) |
 | E0245, E0246 | `resolve.generic-default-order`, `resolve.impl-default` | [Defaulted type parameters](#defaulted-type-parameters) |
-| E0262, E0263, E0264, E0265 | `resolve.const-argument`, `resolve.type-argument`, `resolve.const-expression`, `resolve.const-not-int` | [Constant parameters](#constant-parameters) |
+| E0262, E0263, E0264, E0265, E0602 | `resolve.const-argument`, `resolve.type-argument`, `resolve.const-expression`, `resolve.const-not-int`, `comptime.panicked` | [Constant parameters](#constant-parameters) |
 | [E0395](diagnostics.md#e0395), [E0241](diagnostics.md#e0241), E0396, [E0231](diagnostics.md#e0231) | `type.unsized-dyn`, `resolve.not-object-safe`, `type.view-to-dyn`, `resolve.trait-as-type` | [Trait objects](#trait-objects) |
 | [E0244](diagnostics.md#e0244), E0984, E0986 | `resolve.derive-field`, `unsafe.impl-needed`, `unsafe.never-asserted` | [The auto traits](#the-auto-traits) |
 | E0810, E0811, E0812 | `refine.not-satisfied`, `refine.needs-try-from`, `refine.change-through-base` | [Refinement types](#refinement-types) |

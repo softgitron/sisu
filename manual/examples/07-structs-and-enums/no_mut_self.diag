@@ -1,2 +1,4 @@
 12:9-12:15 E0341 type.not-mutable what="self.x"
+  fix type.take-mut 11:15-11:15 "mut "
 13:9-13:15 E0341 type.not-mutable what="self.y"
+  fix type.take-mut 11:15-11:15 "mut "
