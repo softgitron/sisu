@@ -27,7 +27,9 @@ and the outputs among `tokens`, `tree`, `trivia-tree`, `ast`, `names`,
 `types`, `sir`, `ownership`, `sir-tests`, `contracts-off`,
 `contracts-preconditions`, `ids` (all of what `sisu check --format=ids`
 prints), `human` (what `sisu check` prints), `fmt`, `fmt-check`, `doc`
-and `doc-output`. Any other difference fails the check. What a program
+and `doc-output`, and `behaviour` for a runnable case a rule refuses (R21
+on), which `check.sh` then does not run. Any other difference fails the
+check. What a program
 does is checked against the conformance suite's expectations instead, by
 the class `behaviour`, the primary oracle: every runnable program of the
 corpus and of stage 1's cases, a rule's own among them, lowered by stage
@@ -518,12 +520,14 @@ names differs from it; `foreign.sisu` and `pointers.sisu` also declare an
 - Differs: `compiler/conformance/cases/unsafe/gone.sisu`: ast, names, sir, ids, human, doc, doc-output
 - Differs: `compiler/conformance/cases/unsafe/invalid_bits.sisu`: ast, names, sir, ids, human, doc, doc-output
 - Differs: `compiler/conformance/cases/unsafe/leaked.sisu`: ast, names, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/layouts.sisu`: names, types, sir, ids, human, doc, doc-output
 - Differs: `compiler/conformance/cases/unsafe/misaligned.sisu`: ast, names, sir, ids, human, doc, doc-output
 - Differs: `compiler/conformance/cases/unsafe/mistyped.sisu`: ast, names, sir, ids, human, doc, doc-output
 - Differs: `compiler/conformance/cases/unsafe/no_memory.sisu`: ast, names, sir, ids, human, doc, doc-output
 - Differs: `compiler/conformance/cases/unsafe/out_of_bounds.sisu`: ast, names, sir, ids, human, doc, doc-output
 - Differs: `compiler/conformance/cases/unsafe/overwrite.sisu`: ast, names, sir, ids, human, doc, doc-output
 - Differs: `compiler/conformance/cases/unsafe/plain_casts.sisu`: ast, names, types, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/raw_buffer.sisu`: ast, names, sir, ids, human, doc, doc-output
 - Differs: `compiler/conformance/cases/unsafe/pointers.sisu`: tree, trivia-tree, ast, names, sir, ids, human, fmt-check, doc, doc-output
 - Differs: `compiler/conformance/cases/unsafe/read_plain_short.sisu`: names, types, sir, ids, human, doc, doc-output
 - Differs: `compiler/conformance/cases/unsafe/reference_behind.sisu`: ast, names, sir, ids, human, doc, doc-output
@@ -1356,7 +1360,7 @@ does not carry yet; the front end checks what it can.
      elsewhere). Stage 1 decides it (RULES.md, R19); what the backend makes
      of either is stage 2's.
 
-## R20. A float's `Debug` takes the whole format spec (decision 305)
+## R20. A float's `Debug` takes the whole format spec (decision 313)
 
 **The rule** (02, "Literals": "`{expr=}` ... the value takes its `Debug`
 rendering, as Python uses `repr`, and a format spec may follow, as in
@@ -1434,10 +1438,497 @@ what they print does not (the class `behaviour`). The case
 - Differs: `proposal/examples/ownership.sisu`: sir
 - Differs: `proposal/examples/traits.sisu`: sir
 
-**Decision 305**, for docs/architecture.md:
+**Decision 313**, for docs/architecture.md:
 
-305. The `Debug` impls of `f64` and `f32` that the front end writes apply a
+313. The `Debug` impls of `f64` and `f32` that the front end writes apply a
      format spec as their `Display` impls do (`Spec.float`, `Spec.float32`),
      since the two texts are the same: `{x=:.2f}` rounds (02), where the
      precision was dropped and the `Debug` text padded; a spec of type `?`
      still pads the `Debug` text. Stage 1 decides it (RULES.md, R20).
+
+## R21. A collection holds values or views, never references (decision 320)
+
+**The rule** (04, "The decision", rule 3: references "cannot be stored in
+ordinary structs, in `Shared`, in collections, or captured by closures
+that escape"; rule 4: "View types are the escape hatch for storing
+references"). A collection's items are values it owns, or views (`str`,
+`Slice[T]`, a `view struct`, an iterator over a borrowed collection), and
+never references: a `ref T` or `ref mut T` as the item type of `list`,
+`set`, `dict` (its keys or its values) or `Array`, or of `std.collections`'
+`Deque`, `Heap`, `SortedDict` or `SortedSet`, is `E0438`
+(`borrow.ref-in-collection`, "`list[ref String]` would hold references,
+and a collection holds values it owns or views, never references (04,
+rule 3)"), wherever the program's code has it:
+
+- written in a type (a parameter's, a result's or a field's, an
+  annotation, a type argument): at the item's type, with the fix
+  `borrow.own-items`, which takes the `ref` away ("hold the values
+  themselves: `list[String]`");
+- inferred in a body (`var names = []` that a `names.push(ref aino)`
+  decides, `[ref a, ref b]`, `{"k": ref x}`, a `collect()` of an iterator
+  over a borrowed collection, `xs.iter().filter(it > 4).collect()`): at
+  the first place the body has the type, the local it is inferred for or
+  the expression that makes it, once a body for each collection type,
+  with the fix `borrow.copy-items` (`.map(it.copy())` before a
+  `.collect()` that makes it) or the note `borrow.items-owned` (copies
+  made with `.copy()` or `.to_string()`, or views such as `str`; a
+  reference is kept only in a `view struct`'s `ref` field).
+
+A shared borrow of a `str` is the `str` (a declaration's type reads `ref
+str` so), so `list[str]` built from `d.keys()` of a `dict[str, V]` is a
+list of views. And `E0300` for a reference where what it refers to is
+expected, `names.push(ref aino)` into a `list[String]`, gets the fix
+`type.add-copy` with the copy, `aino.copy()`, so that the owned program
+the first fix leads to is one more fix away.
+
+Code the compiler writes (a template's instances, derived impls) and the
+standard library's bodies are not checked here: a generic body is checked
+once, with its type parameters opaque (D-017), and a type parameter may
+stand for a reference, as `Option[ref T]` and the iterator adapters of
+the prelude need. A generic struct whose type argument is a reference
+(`Bag[ref String]`) is view-like, as stage 0 has it (decision 257); what
+its body makes of the argument is a collection of references only where a
+program's body makes one (`Bag(items=[])`).
+
+**Why.** The manual's writer of chapter 11 found that `var names:
+list[ref String] = []` with `names.push(ref aino)` compiles and runs: the
+frozen Rust front end treats a list holding a reference as a view, as it
+treats a `list[str]`, so the list cannot outlive what it borrows, but the
+program has a reference stored in a collection, which rule 3 rules out.
+The view types are where a borrow is kept (rule 4, and 04's "Views": "the
+list is also a view: it holds views"), each a type declared for it, with
+one lifetime; a bare reference is bound to a local, passed, or returned,
+and that is all, which is what keeps Sisu without lifetime names. The fix
+names the owned alternative, as 10 asks of a diagnostic: the values
+themselves, or copies of them.
+
+**In stage 1.** `typeck.program`: `collection_name`, `ref_items` and
+`is_ref_item`; `typeck.collect.written_ref_items` (declarations);
+`typeck.check`: `written_ref_items` (annotations), `check_ref_items` (the
+body's locals and expressions, after its bounds), `owned_items`;
+`typeck.expr.mismatch_fix` (the copy).
+
+**What it changes.** Three programs of the corpus make a collection of
+references, which stage 1 now refuses: the conformance suite's
+`run/iterators` (`xs.iter().filter(it > 4).collect()`, a `list[ref
+int]`), `contracts/properties` (`d.keys().collect()` of a `dict[String,
+int]`, a `list[ref String]`) and `generics/loan_through_own`
+(`Bag[ref String]` made with `Bag(items=[])`, a `list[ref String]`). The
+cases `cases/references/ref_items.sisu` (the refused forms, its `.diag`)
+and `owned_items.sisu` (the owned program that replaces them, which runs:
+its `.out`).
+
+- Differs: `compiler/conformance/cases/contracts/properties.sisu`: ids, human
+- Differs: `compiler/conformance/cases/generics/loan_through_own.sisu`: sir, ownership, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/run/iterators.sisu`: sir, ids, human, doc, doc-output, behaviour
+- Differs: `compiler/stage1/cases/references/ref_items.sisu`: ids, human, doc, doc-output
+
+The output `behaviour` is the class of that name: the program a case
+expects to run is refused, so stage 1 lowers nothing and the run is not
+made (`check.sh` counts it "refused as listed").
+
+**Documents to bring along:** the conformance suite's `run/iterators`,
+whose fourth line becomes `print(xs.iter().filter(it > 4).map(it.copy()).collect())`
+with the same `.out`; `contracts/properties`, whose test "a dictionary's
+keys" counts `d.keys().count()` (or collects copies); and
+`generics/loan_through_own`, whose loan through an `own` argument a
+`Bag[str]` keeps (a list of views, which is allowed, holding a view of
+`s`), or which becomes an E0438 case with that `.diag`.
+
+**Decision 320**, for docs/architecture.md:
+
+320. A collection's items are values it owns or views, never references
+     (04, rule 3): a `ref T` as the item type of `list`, `set`, `dict`,
+     `Array` or a collection of `std.collections` is `E0438`, where a
+     type writes it (with the fix that takes the `ref` away) and where a
+     body's local or expression has it (with the fix that collects
+     copies, `.map(it.copy())`, or the note naming copies and views),
+     once a body for each collection type; a shared borrow of a `str` is
+     the view. Generic bodies and the code the compiler writes are
+     checked with their type parameters opaque, which may stand for a
+     reference. Stage 1 decides it (RULES.md, R21); the frozen Rust front
+     end treats such a collection as a view.
+
+## R22. What the checker let through that the language refuses (decision 321)
+
+**The rule.** Five programs the checker accepted are refused, each one
+whose run would take one type for another or do what its text does not
+say:
+
+- an impl's method whose parameter or result types are not its trait's,
+  with `Self` and the trait's arguments substituted and its associated
+  types bound (`def price(self) -> f64` for a trait's `-> int`; `impl
+  Mul[Vector] for f64` whose `mul` returns a `Vector` while `Output` is
+  `f64`), is `E0234` (`resolve.method-signature`), as stage 0's resolver
+  reports it, where stage 1 compared only the method's shape (its
+  receiver, its parameters' number and modes, its own generic
+  parameters);
+- `impl Copy for Token:` written by hand is `E0270`
+  (`resolve.copy-by-hand`, "`Copy` is derived, not implemented"), with
+  the fix `resolve.derive-copy`, which writes `@derive(Copy)` on the type
+  and takes the impl away: `Copy` is opt-in through `@derive(Copy)`
+  (03, "Auto traits"), which checks the fields, and an impl the program
+  writes left the type moved;
+- a `dyn Trait` of a trait that cannot be one, in a type a body writes
+  (`let shapes: list[Box[dyn Shape]]` with a method of `Shape` returning
+  `Self`), is `E0241` (`resolve.not-object-safe`), as it is in a
+  signature;
+- a call of a trait's method whose impl nothing decides (`"{a.into()}"`,
+  where nothing asks for a type) is `E0324` (`type.cannot-infer`, "the
+  type of `a.into()` cannot be inferred here"), in a body without another
+  error, as a local whose type nothing decides is;
+- an `assert` whose condition moves a value (`assert m.into_inner() ==
+  2`) does not show its parts when it fails, since showing them evaluates
+  them again: it shows the two sides of its comparison, computed once
+  (17, "Assertions": the capture records "each sub-expression", which a
+  condition that only reads allows). Its run moved the value twice,
+  `E0400` "moved in an earlier iteration of the loop" where there is no
+  loop.
+
+**Why.** The manual's writers found each (chapters 14, 15 and 20, and the
+reference's R2): `sisu check` accepting an impl whose method returns an
+`f64` for the trait's `int`, which the interpreter then added to an
+`int` ("internal error in the interpreter: add on Float(2.5) and
+Int(1)"); `impl Copy` compiling without a word and the type moving all
+the same; a call through a `dyn` of a trait that is not object safe
+stopping the interpreter (`Shape.area` on a `dyn` holding a struct); and
+`x.into()` passing the checker, its type left `()`, and the interpreter
+finding no impl of `Into` for `u8`. 03 makes the checker sound ("Static,
+sound, no `any`"), `Copy` opt-in by derive, and a `dyn` of a trait that
+cannot be one an error that says why; D-062 rules out a spelling that
+means something else than it says.
+
+**In stage 1.** `typeck.collect`: `check_method_types` (from the impl
+checks, where the associated types are all bound),
+`check_copy_by_hand` (from `resolve_impl`), `object_safety_problem`
+(now `typeck.program`'s, shared with the checker); `typeck.check.resolve_ty`
+(a `dyn` in a body's type); `typeck.Checker.check_bounds` and
+`report_uninferred` (`undecided_call`); `typeck.purity.moves_place`.
+
+**What it changes.** No program of the corpus. The cases
+`cases/soundness/checker_holes.sisu` (the four refused forms, its
+`.diag`), `checker_holes_fixed.sisu` (the programs the fixes leave, which
+run: its `.out`) and `assert_moves.sisu` (an assertion that moves the
+value it tests, once when it holds and once when it fails: its `.out`,
+`.err` and `.status`).
+
+- Differs: `compiler/stage1/cases/soundness/checker_holes.sisu`: names, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/soundness/assert_moves.sisu`: ids, human, doc, doc-output
+
+**Decision 321**, for docs/architecture.md:
+
+321. The checker refuses what it let through: an impl's method whose
+     parameter or result types are not its trait's (`E0234`, as stage 0's
+     resolver has it, where stage 1 compared the shape only); `impl Copy`
+     written by hand (`E0270`, with the fix that derives it, since `Copy`
+     is opt-in through `@derive(Copy)`, 03); a `dyn` of a trait that
+     cannot be one in a body's types (`E0241`, as in a signature); a call
+     of a trait's method whose impl nothing decides (`E0324`, the call
+     named as the expression to annotate). An `assert` whose condition
+     moves a value shows its comparison's sides, computed once, rather
+     than its parts, which it would evaluate again. Stage 1 decides it
+     (RULES.md, R22).
+
+## R23. What lowering wrote that the program did not say (decision 322)
+
+**The rule.** Two lowerings that gave a program another meaning than its
+text:
+
+- a sized integer's compound assignment is its operator's, at its width
+  (03, "Numbers": overflow traps in every build mode, `+%` wraps and `+|`
+  saturates): `level +%= 10` on a `u8` holding 250 leaves 4, `sat +|= 10`
+  leaves 255, and `level += 10` traps, as `level = level +% 10`,
+  `level = level +| 10` and `level = level + 10` do. Lowering wrote the
+  `int` operations (`wadd`, `sadd`, `add`) for them, which the
+  interpreter and the backend computed at the width of `int`, so a `u8`
+  held 260;
+- a borrowed parameter whose type holds the function's type parameters
+  (`p: (T, T)`, `p: T?`) is taken by value exactly when their bounds
+  make it `Copy`, and every call passes it so, whatever its type
+  arguments: by reference for `(T, T)` with `T` unbounded, as for a bare
+  `T`, even when the call's `(int, int)` is `Copy`; by value for `(T, T)`
+  with `T: Copy`. The function took `ref (T, T)` while a call with a
+  `Copy` instance passed the tuple itself, and the interpreter stopped at
+  `p.0` ("dereferencing Tuple"), as both front ends lowered it.
+
+**Why.** The manual's writers found both (chapter 2, `+%=` on a `u8`;
+the reference's R2, a generic function over a tuple): each is a program
+whose text says one thing and whose run did another, which the
+specification rules out (03; D-062). A generic function is checked and
+lowered once, with its type parameters opaque (D-017), so how it takes a
+parameter is decided by its signature and its bounds, which every call
+follows.
+
+**In stage 1.** `lower.stmts.aug_assign` (the sized integer's
+intrinsic, `lower.exprs.sized_op`, which the binary operators use);
+`typeck.program.param_local_ty` (`is_copy_in` for any type that holds
+the function's parameters) and `typeck.call.instantiate` (`opaque` for
+a parameter that the function takes by reference and whose type has
+`Copy` instances, which a call then borrows).
+
+**What it changes.** No program of the corpus: none makes a compound
+assignment on a sized integer, nor passes a `Copy` instance of a type
+that holds a type parameter to a generic function that borrows it (the
+corpus's calls of `sorted` and the other functions over an `Iterable[T]`
+keep their arguments, since no instance of `Iterable[T]` is `Copy`). The
+cases `cases/soundness/lowering_holes.sisu` (its `.out`) and
+`compound_overflow.sisu` (the trap: its `.out`, `.err` and `.status`),
+which run interpreted and natively.
+
+**Decision 322**, for docs/architecture.md:
+
+322. A sized integer's compound assignment (`+=`, `+%=`, `+|=` and the
+     others) lowers to its operator's intrinsic at its width
+     (`u8.wrap_add`), as the binary operator does, where it lowered to
+     the `int` operation; and a borrowed parameter whose type holds the
+     function's type parameters is taken by value exactly when their
+     bounds make it `Copy`, every call passing it so: a call with a
+     `Copy` instance of a type the function takes by reference (a tuple,
+     an option, a type that derives `Copy`) borrows its argument. Stage 1
+     decides it (RULES.md, R23).
+
+## R24. The fixes and notes the manual's later chapters found missing (decision 323)
+
+**The rule** (10, "Diagnostics": "a suggested fix as a diff the LSP can
+apply"; 02, "Departures from Python"; 04, rule 1). Each of these
+diagnostics gains the fix or the note that names what Sisu writes, or
+loses the one that leads to another error:
+
+- `E0304` for Python's `", ".join(names)` gets `type.join-items`, the
+  call written as Sisu's, `names.join(", ")`; for `append`, `clone`,
+  `strip`, `upper`, `lower`, `startswith`, `endswith` and `to_owned`,
+  `type.sisu-spelling` with Sisu's name (`push`, `copy`, `trim`, ...),
+  where the similar-name fix offered none or `iter` for `filter`; for an
+  iterator's method on a collection (`xs.map(f)`), `type.iterate-first`,
+  `.iter()` before it; and for a trait's method on a type parameter its
+  bounds do not give it, `type.add-bound` (the trait, when one trait
+  declares the method), as `E0347` offers. The arguments of a call that
+  failed are no longer checked where they mention `it`, which made each
+  `E0342`;
+- `E0300` for text where a `String` is expected calls `.to_string()`, not
+  the first conversion by name, `.to_lowercase()`;
+- `E0340` at a call that passes `mut` for a parameter its function changes
+  (the function's body has `E0341`, whose fix takes the parameter with
+  `mut`) gets that same fix, `type.take-mut` at the parameter, in place of
+  removing the call's `mut`: the two fixes undid each other. Where the
+  function does not change it, the call's `mut` still goes;
+- `E0413` for a result of text (`-> str`) gets `borrow.own-result` first,
+  the result as owned text (`-> String`): text read from a file or made in
+  the function borrows no parameter, and the `from` clause led to `E0407`;
+- `E0407` for a returned view of text gets the note `borrow.return-text`:
+  a copy of a `str` is the same view, so `.copy()`, which the note
+  offered, gave `E0407` again; a `String` result owns its text;
+- `E0400` and `E0401` get the note `borrow.move-remedies`, each remedy
+  with what it costs: a copy makes a second value (an allocation for a list
+  or a `String`), moving later costs nothing, and the third, a parameter
+  taken without `own` where the function only reads, lends the value;
+- `E0243` lists `Default` among the traits `@derive` takes (decision 238),
+  in the catalog's text both front ends print;
+- `from wordcount import words` of a name the package's root module
+  re-exports (`pub from wordcount.count import words`) binds it, where it
+  was `E0204` and each use `E0200`: a `from` import of a module of the
+  program waits for that module's own imports (`typeck.collect`), and the
+  name pass resolves the imports again once every module's are known.
+
+**Why.** The manual's writers list each (manual/README.md, chapters 10 to
+17 and the reference's R19): diagnostics with no fix, a fix that leads to
+the next error (`.to_lowercase()` changing the text, `from fs, path` for a
+`str` read from a file, `.copy()` of a view), two errors whose fixes undo
+each other, a note that names remedies without what they cost, and an
+import of a re-exported name, which 09 allows (`pub from` re-exports), that
+failed while the module path to it worked.
+
+**In stage 1.** `typeck.call`: `spelling_fix`, `sisu_spelling`,
+`method_bound_fix`, `callee_takes_mut` (with `Checker.arg_callee`) and
+`check_args_loosely`; `typeck.agree_mut_fixes`; `typeck.expr.mismatch_fix`
+(`to_string`); `typeck.collect`: the owned result of `E0413`,
+`import_waits` and `package_module`; `borrowck.loans.holds_text_view`;
+`borrowck.init` (the note); `resolve.resolve_program` (the second pass of
+imports).
+
+**What it changes.** The conformance suite's programs with these
+diagnostics, whose `ids` (for the fixes) and `human` outputs (and `doc`,
+which prints `check`'s errors) differ, as listed below: `E0413`'s
+`ownership/from_required` and `wrong/missing_from`, `E0304`'s
+`traits/method_needs_bound`, and the dozen of `E0400` and `E0401`, whose
+note is new. The cases `cases/habits/fixes.sisu` and `moves.sisu` (their
+`.diag`), and `cases/packages/reexport_import.pkg`, which runs (its
+`.out`).
+
+- Differs: `compiler/conformance/cases/ownership/from_required.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/ownership/partial_move_use.sisu`: human
+- Differs: `compiler/conformance/cases/ownership/rustc/reinit.sisu`: human
+- Differs: `compiler/conformance/cases/ownership/use_after_move.sisu`: human
+- Differs: `compiler/conformance/cases/ownership/use_after_move_loop.sisu`: human
+- Differs: `compiler/conformance/cases/testing/parametrised_once_ownership.sisu`: human
+- Differs: `compiler/conformance/cases/traits/method_needs_bound.sisu`: types, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/wrong/missing_from.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/wrong/moved_in_loop.sisu`: human
+- Differs: `compiler/conformance/cases/wrong/moved_in_one_branch.sisu`: human
+- Differs: `compiler/conformance/cases/wrong/moved_into_list.sisu`: human
+- Differs: `compiler/conformance/cases/wrong/moved_into_struct.sisu`: human
+- Differs: `compiler/conformance/cases/wrong/moved_twice_in_call.sisu`: human
+- Differs: `compiler/conformance/cases/wrong/partial_move_then_whole.sisu`: human
+- Differs: `compiler/conformance/cases/wrong/return_field_view_of_local.sisu`: human
+- Differs: `compiler/conformance/cases/wrong/return_local_view.sisu`: human
+- Differs: `compiler/conformance/cases/wrong/return_owned_param_view.sisu`: human
+- Differs: `compiler/conformance/cases/wrong/use_after_move.sisu`: human
+- Differs: `compiler/stage1/cases/habits/fixes.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/habits/moves.sisu`: human
+- Differs: `compiler/stage1/cases/packages/reexport_import.pkg/app`: names, sir, ids, human, doc, doc-output
+
+**Documents to bring along:** the manual's transcripts that show these
+diagnostics (its `examples/*.console` with `E0243`'s list, `E0400`'s
+note, `E0304`, `E0300`, `E0340` or `E0413`), which `sisu`, whose front
+end is stage 1, now prints otherwise; and the conformance suite's `.diag`
+files of `ownership/from_required`, `wrong/missing_from` and
+`traits/method_needs_bound`, which gain the fixes.
+
+**Decision 323**, for docs/architecture.md:
+
+323. The fixes and notes the manual's later chapters found missing: `E0304`
+     writes Sisu's spelling of Python's and Rust's methods (`names.join(",
+     ")`, `push`, `copy`, `trim`), iterates a collection before an
+     iterator's method, and bounds a type parameter by the trait whose
+     method it lacks; `E0300` converts text with `.to_string()`; `E0340`
+     at a call whose function changes the parameter offers the
+     function's `mut`, as `E0341` does, where the two undid each other;
+     `E0413` and `E0407` on text name a `String` result; `E0400`'s note
+     names what each remedy costs and the borrowed parameter; `E0243`
+     lists `Default`; and `from pkg import x` binds a name `pkg`
+     re-exports, the import waiting for the module's own. Stage 1 decides
+     it (RULES.md, R24).
+
+## R25. Forms the documents give that the checker refused, and three more habits (decision 324)
+
+**The rule.** Forms 02, 03 and 04 give, which the manual's writers found
+refused:
+
+- `with Booking.start("sauna"):`, without `as` (Python's `with lock:`),
+  keeps its value without a name to the end of the block, where it was
+  `E0100` ("expected `as`"): `with` is "a scoped binding whose value is
+  dropped at the end of the block" (02);
+- `ref` of a value that is no place, `show(ref Coffee(1))`, borrows a
+  temporary that lives to the end of its statement, as an argument a
+  parameter borrows does, where it was `E0313` ("this expression cannot be
+  assigned to"); a borrow kept past the statement is `E0406`, with its note
+  to bind the temporary first. `ref mut` of one stays `E0313`;
+- a `Box` has the length of its value (`len(b)`, `impl[T: Len] Len for
+  Box[T]`), whose methods it reaches, and a `Slice` prints as the list it
+  views (`impl[T: Debug] Display for Slice[T]`), where both were `E0347`:
+  two impls stage 1 adds after stage 0's text of `builtin_impls`;
+- a `Key[T]` is a set element or a dict key: a derived `Hash` or `Eq`
+  reads the type's fields, and a type argument only as a field holds it,
+  so `Key[Ship]`, whose `T` no field holds, is structural, where `E0398`
+  said it had an impl of its own;
+- a trait method's type arguments are its own, `xs.iter().map[int](f)`,
+  as an inherent method's are: they were dropped, so
+  `collect[set[int]]()` compiled and made a list. A method that takes none
+  is `E0349` (`collect[set[int]]()` and the tour's `collect[list[int]]()`
+  alike, until the prelude has a `collect` over the collection it makes).
+
+And three habits get a message that names what Sisu writes: Python's
+`sorted(xs, key=len)` (`E0306`) the note `type.sort-by-key` (`sort_by`,
+`max_by`, `min_by`), its `key=len` no longer `E0350`; a closure kept in a
+`let` without its parameters' types, `(a, b) -> a + b`, `E0324` at the
+operand (`type.annotate-params`) where `E0310` said "`+` cannot be applied
+to `_` and `_`"; and `from std.collections import *` `E0128`
+(`parse.glob-import`, Sisu has no glob imports) where `E0100` said
+"expected a name, found `*`".
+
+**Why.** 02 gives `with` as a scoped binding and Python's form is the
+habit; 04's rule 3 lets a reference be passed, and a temporary is what
+`ref` of a call's value borrows; 03 has a `Box` reach its value's methods
+and `print` take what has `Display`, and decision 256 makes a derived
+`Hash` agree with the structural one; a dropped type argument is a
+spelling that means something else than it says (D-062), which a refusal
+corrects until the prelude's `collect` takes the collection. The habits
+are the manual's (chapters 13 to 17).
+
+**In stage 1.** `parser.stmts.with_stmt` and `typeck.check` (`with`);
+`typeck.expr` (`ref` of a temporary, the closure's operands);
+`typeck.std_sources.builtin_impls` (the two impls); `typeck.program.structural_depth`;
+`typeck.call.trait_call` (the type arguments) and the unknown keyword's
+note; `parser.items.import_from`.
+
+**What it changes.** Two programs of the corpus key a set or a dict by a
+`Key[T]` (the conformance suite's `ownership/proposal_graph` and the
+proposal's `examples/ownership.sisu`), whose SIR now hashes the keys as
+the host does rather than through the derived impls, which print the
+same. The cases `cases/habits/forms.sisu` (the forms, which run: its
+`.out`), `refusals.sisu` and `glob_import.sisu` (their `.diag`).
+
+- Differs: `compiler/conformance/cases/ownership/proposal_graph.sisu`: sir
+- Differs: `compiler/stage1/cases/habits/forms.sisu`: tree, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/habits/glob_import.sisu`: tree, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/habits/refusals.sisu`: ids, human, doc, doc-output
+- Differs: `proposal/examples/ownership.sisu`: sir
+
+**Decision 324**, for docs/architecture.md:
+
+324. `with e:` without `as` keeps the value without a name to the end of
+     the block (02); `ref` of a value that is no place borrows a temporary
+     to the end of its statement; a `Box` has its value's `Len` and a
+     `Slice` a `Display`; a derived `Hash` or `Eq` is structural when the
+     fields are, whatever the type arguments no field holds (`Key[T]` as a
+     key); a trait method's type arguments are its own, and one that takes
+     none is `E0349` (`collect[set[int]]()`, which made a list). Python's
+     `sorted(xs, key=len)` names `sort_by`, `max_by` and `min_by`, a
+     closure kept in a `let` without its parameters' types is `E0324`,
+     and `import *` is `E0128`. Stage 1 decides it (RULES.md, R25).
+
+## R26. A generic struct's construction: the type expected and the fields' defaults (decision 325)
+
+**The rule** (02, "Declarations": "Struct fields may have defaults in any
+position"; 03, "Type inference": information flows "from the expected
+type to the expression"). Two rules of a generic struct's construction:
+
+- the type expected gives the struct's type arguments before its fields
+  are checked: `let r: Reading[f64, String] = Reading(21.5, "°C")` checks
+  the text against `String` (a literal takes the type expected), where the
+  fields decided the arguments first and the result, `Reading[f64, str]`,
+  was `E0300`. An expected type holding a `dyn` (a `Box[dyn Shape]`) or a
+  type not told yet gives nothing: the struct is made of its fields and
+  coerced after, as before;
+- a field's default in a generic struct is as generic as the struct: its
+  function in SIR takes the struct's type parameters
+  (`fn Shelf#items[T](0) value`), and each construction that leaves the
+  field out calls it with the struct's type arguments
+  (`Shelf#items[int]()`), its temporary of the field's type with them
+  substituted. Lowering wrote the function without type parameters and
+  the temporary with the struct's `$0`, which SIR's validation refused in
+  the program's `main` (`E0501`, "the type of _2 names a type parameter
+  the function does not have"); the Rust front end stops at it with
+  `E0901`.
+
+**Why.** The manual's writer of chapter 15 found both: the exercise of an
+empty stack made its value in an associated function to avoid the
+default, and a reading built with its type written still had to call
+`.to_string()`. 03's bidirectional inference is what lets an annotation
+pick a literal's type, and a default is a value of the field's type,
+which in a generic struct holds the struct's parameters.
+
+**In stage 1.** `typeck.call.construct` (the expected type);
+`lower.func.lower_body` (the default's type parameters) and
+`lower.exprs.into` (the call's type arguments).
+
+**What it changes.** The SIR of one program of the corpus whose generic
+struct has a field with a default (the conformance suite's
+`comptime/derive_default`, whose `Wrapper[T]`'s default of `count` is
+`Wrapper#count[T]`, called with `[$0]` from the derived `Default`), which
+prints what it printed. The case `cases/habits/generic_structs.sisu`
+(its `.out`: it runs, interpreted and natively).
+
+- Differs: `compiler/conformance/cases/comptime/derive_default.sisu`: sir, sir-tests
+- Differs: `compiler/stage1/cases/habits/generic_structs.sisu`: ids, human, doc, doc-output
+
+**Decision 325**, for docs/architecture.md:
+
+325. A generic struct's construction takes its type arguments from the
+     type expected, when that type is the struct's and holds no `dyn` and
+     nothing untold, before its fields are checked (`Reading(21.5, "°C")`
+     as a `Reading[f64, String]`); and a field's default in a generic
+     struct is a value function generic as the struct is, which each
+     construction calls with the struct's type arguments, where lowering
+     named the struct's parameter in the caller (`E0501`). Stage 1 decides
+     it (RULES.md, R26).

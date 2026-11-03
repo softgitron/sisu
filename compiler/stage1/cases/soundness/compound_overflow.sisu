@@ -1,0 +1,10 @@
+# RULES.md, R23: `+=` on a sized integer traps past its range, as `+`
+# does (03, "Numbers": overflow traps in every build mode), where it was
+# computed at the width of `int` and left 260 in a `u8`.
+
+def main():
+    var level: u8 = 250
+    level += 5
+    print(level)
+    level += 10
+    print(level)

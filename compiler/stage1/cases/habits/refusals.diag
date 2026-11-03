@@ -1,0 +1,3 @@
+9:23-9:26 E0306 type.unknown-keyword name="sorted" arg="key"
+12:25-12:26 E0324 type.cannot-infer name="a"
+16:13-16:54 E0349 type.not-generic name="collect"

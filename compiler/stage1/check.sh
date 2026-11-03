@@ -77,9 +77,11 @@
 #                by stage 1 in a sandbox as the conformance runner makes
 #                one and run from that SIR by stage 0's interpreter (`sisu
 #                run --from-sir`) and natively (`sisu build --native
-#                --from-sir`): each must print the case's `.out` and
-#                `.err` and exit with its `.status`, natively with no
-#                allocation live at exit
+#                --from-sir`; of the conformance suite's cases, those its
+#                native list names): each must print the case's `.out`
+#                and `.err` and exit with its `.status`, natively with no
+#                allocation live at exit; a case a rule of RULES.md
+#                refuses (its output `behaviour`) is not run
 #
 # Then what `check` prints, every diagnostic of a program in the order
 # `sisu check` prints them, from one run of stage 1 per class:
@@ -274,7 +276,7 @@ stage1() {
 # and the names, types and ownership classes read what it printed.
 jobs=$(nproc 2> /dev/null || echo 4)
 mkdir -p "$work/check0"
-export sisu work
+export sisu work compiler
 parallel() {
     awk -v ref="$3" '{ print NR " " $0 " " ref }' "$2" | xargs -P "$jobs" -L 1 bash -c "$1"' "$@"' _
 }
@@ -889,7 +891,19 @@ behaviour_one() {
     cmp -s "$out" "$box/i.out" || failed="$failed interpreted:stdout"
     [ "$(cat "$box/i.status")" = "$status" ] || failed="$failed interpreted:status"
     same_err "$box/i.err" || failed="$failed interpreted:stderr"
-    if ! (cd "$cwd" && timeout 120 "$sisu" build --native --from-sir "$box/program.sir" --output "$box/exe" \
+    # A case of the conformance suite runs natively when its native list
+    # names it (conformance/native.list): the others expect what only the
+    # interpreter does, such as the checked memory model's reports (D-085).
+    local native_case=1
+    case "$base" in
+        "$compiler/conformance/cases/"*)
+            grep -qxF -e "${base#"$compiler/conformance/cases/"}" "$compiler/conformance/native.list" || native_case=0
+            ;;
+    esac
+    echo "$native_case" > "$box/native"
+    if [ "$native_case" = 0 ]; then
+        :
+    elif ! (cd "$cwd" && timeout 120 "$sisu" build --native --from-sir "$box/program.sir" --output "$box/exe" \
             > "$box/build.log" 2>&1); then
         failed="$failed native:build"
     else
@@ -947,7 +961,7 @@ parallel behaviour_one "$list" "$work/behaviour"
 end=$(date +%s.%N)
 took_sir=$(awk "BEGIN { printf \"%.1f\", $middle - $start }")
 seconds=$(awk "BEGIN { printf \"%.1f\", $end - $middle }")
-same=0; class_unlisted=0
+same=0; class_listed=0; class_unlisted=0; natively=0
 i=0
 while read -r f; do
     i=$((i + 1))
@@ -955,14 +969,24 @@ while read -r f; do
     result=$(cat "$work/behaviour/$i/result" 2> /dev/null || echo "not run")
     if [ -z "$result" ]; then
         same=$((same + 1))
+        [ "$(cat "$work/behaviour/$i/native" 2> /dev/null)" = 1 ] && natively=$((natively + 1))
+        continue
+    fi
+    # A program a rule of RULES.md refuses (a line "path: behaviour"), whose
+    # case still expects the run of the frozen Rust front end: stage 1
+    # lowers nothing, as its `ids` output, also listed, says why.
+    if [ "$result" = "stage 1 printed no SIR" ] && grep -qxF -e "$rel behaviour" "$allowed"; then
+        class_listed=$((class_listed + 1))
+        report="$report\n  listed:   $rel: behaviour (refused by a rule)"
         continue
     fi
     class_unlisted=$((class_unlisted + 1))
     report="$report\n  UNLISTED: $rel: behaviour: $result (in $work/behaviour/$i)"
 done < "$list"
 total=$((total + n)); identical=$((identical + same)); unlisted=$((unlisted + class_unlisted))
-behaviour_summary="$(printf '  %-12s %4d programs, %4d as expected interpreted and natively, %3d otherwise; stage 1 %6ss, the runs %6ss' \
-    "$class" "$n" "$same" "$class_unlisted" "$took_sir" "$seconds")"
+listed=$((listed + class_listed))
+behaviour_summary="$(printf '  %-12s %4d programs, %4d as expected interpreted (%d of them natively too), %3d refused as listed, %3d otherwise; stage 1 %6ss, the runs %6ss' \
+    "$class" "$n" "$same" "$natively" "$class_listed" "$class_unlisted" "$took_sir" "$seconds")"
 
 # What `check` prints: every diagnostic of a program, in the conformance
 # form (the whole of `sisu check --format=ids`) and in the human form (what

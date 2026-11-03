@@ -1,0 +1,4 @@
+9:5-9:13 E0407 borrow.return-local name="s" function="greeting"
+  label 9:12-9:13 borrow.borrowed-here
+18:11-18:23 E0400 borrow.use-after-move name="items" line="17"
+  label 17:11-17:23 borrow.moved-here name="items"

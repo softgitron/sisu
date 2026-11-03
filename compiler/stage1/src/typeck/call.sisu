@@ -6,7 +6,7 @@ from stage1.diag import Diagnostic, Edit, Msg, Param, TextRange
 from stage1.syntax.ast import Arg, Ast, Closure, ExprId, ExprKind, IndexArg, Mode, Name, StrPart
 from stage1.typeck.check import Checker, Cx, SendCheck, primitive
 from stage1.typeck.expr import ClosureParamSrc, ClosureSource, is_var_data
-from stage1.typeck.program import DefKind, ModuleId
+from stage1.typeck.program import Answer, DefKind, ModuleId, param_local_ty
 from stage1.typeck.tasks import task_call
 from stage1.typeck.thir import ArgMode, Callee, FieldInit, ForMode, TArg, TExprId, TExprKind
 from stage1.typeck.ty import DefId, TraitRef, Ty, TyData, TyKey
@@ -59,6 +59,12 @@ impl Checker:
     ## Checks arguments for their own errors when the callee is unknown.
     pub pure def check_args_loosely(mut self, cx: Cx, args: list[Arg]):
         for a in args:
+            # An argument over `it` is a closure only where a function is
+            # expected, which a call that failed does not say: it is left
+            # unchecked rather than reported as `it` outside one (RULES.md,
+            # R24).
+            if mentions_it(cx.ast, a.value):
+                continue
             _ = self.infer_expr(cx, a.value, None)
 
     # ---------------------------------------------------------------- static paths
@@ -649,6 +655,24 @@ impl Checker:
             self.report(d)
             self.check_args_loosely(cx, args)
             return self.error_expr(at)
+        # The type expected gives the type arguments first, so that each
+        # field is checked against its type (`let r: Reading[f64, String] =
+        # Reading(21.5, "°C")` makes the text a `String`; RULES.md, R26).
+        # A type argument the value is coerced to (a `dyn`) is the
+        # coercion's, after the struct is made, and one the checker has not
+        # told yet tells nothing.
+        if let Some(e) = expected:
+            let ez = self.infer.zonk(mut self.types, e)
+            if let TyData.Adt(ed, eargs) = self.data(ez):
+                var plain = len(eargs) == len(targs) and not targs.is_empty()
+                for t in self.types.walk(ez):
+                    match self.types.data(t):
+                        case TyData.Dyn(_) | TyData.Var(_) | TyData.Error:
+                            plain = False
+                        case _:
+                            pass
+                if ed == def_ and plain:
+                    _ = self.infer.try_unify(mut self.types, ty, ez)
         # Fields by position, then by name.
         let n = len(s.fields)
         var slots: list[int?] = []
@@ -862,13 +886,32 @@ impl Checker:
         let fenv = cx.prog.elaborate_env(mut self.types, f.predicates)
         var params: list[InstParam] = []
         for p in f.params:
+            # A parameter the body takes by reference whatever the type
+            # arguments are: its type holds the function's type parameters
+            # and is not `Copy` by their bounds (a `T`, a `(T, T)`). An
+            # argument of a `Copy` instance is borrowed for it all the same
+            # (RULES.md, R23).
             var opaque = False
-            if has_body:
+            if has_body and self.types.has_params(p.ty):
                 match self.types.data(p.ty):
                     case TyData.Param(_) | TyData.Assoc(_, _, _):
                         opaque = not cx.prog.is_copy_in(mut self.types, p.ty, fenv)
-                    case _:
+                    case TyData.Ref(_, _):
                         pass
+                    case _:
+                        # A type some of whose instances are `Copy` (a tuple,
+                        # an option, a type that derives `Copy`), which the
+                        # function takes by reference.
+                        var ints: list[Ty] = []
+                        for _ in f.generics:
+                            ints.push(Ty.int())
+                        let instance = self.types.subst(p.ty, ints)
+                        if cx.prog.is_copy(mut self.types, instance):
+                            let local = param_local_ty(
+                                cx.prog, mut self.types, p.ty, Mode.Borrow, fenv
+                            )
+                            if let TyData.Ref(_, _) = self.types.data(local):
+                                opaque = True
             let ty = self.types.subst(p.ty, vars)
             params.push(
                 InstParam(
@@ -1187,8 +1230,23 @@ impl Checker:
                     if not named:
                         var d = self.error(cx, Msg.TypeUnknownKeyword, key.range)
                         d = d.with("name", sig.name).with("arg", key.text)
+                        # Python's `sorted(xs, key=len)`, `max(xs, key=f)`:
+                        # Sisu compares by a key with `sort_by` and picks by
+                        # one with `max_by` and `min_by` (RULES.md, R25).
+                        let by_key = key.text == "key"
+                        if by_key
+                                and (
+                                    sig.name == "sorted" or sig.name == "max" or sig.name == "min"
+                                ):
+                            d = d.note(Msg.TypeSortByKey)
                         self.report(d)
-                        _ = self.infer_expr(cx, a.value, None)
+                        # A function named as the value (`key=len`) is no
+                        # error of its own.
+                        var bare = False
+                        if let ExprKind.Name(_) = cx.ast.expr(a.value).kind:
+                            bare = True
+                        if not bare:
+                            _ = self.infer_expr(cx, a.value, None)
                 case None:
                     if seen_kw:
                         # Bound to the first parameter still unset that a
@@ -1281,7 +1339,9 @@ impl Checker:
             let p = sig.params[i].copy()
             match slots[i]:
                 case Some(a):
+                    self.arg_callee = Some((sig.def_, i))
                     out.push(self.check_arg(cx, a.copy(), p))
+                    self.arg_callee = None
                 case None:
                     if p.has_default:
                         out.push(self.default_arg(cx, sig, i, at))
@@ -1336,7 +1396,7 @@ impl Checker:
             self.report(d.fix_at(Msg.TypeAddMut, r.start, r.start, "mut "))
         elif p.mode != Mode.Mut and a.mutable:
             let d = self.error(cx, Msg.TypeMutArgumentUnexpected, a.range).with("param", p.name)
-            self.report(d.fix_edits(Msg.TypeRemoveMut, []))
+            self.report(self.callee_takes_mut(cx, d.fix_edits(Msg.TypeRemoveMut, []), p.name))
         # What earlier arguments inferred may settle an associated type.
         let z = self.infer.zonk(mut self.types, p.ty)
         let pty = cx.prog.normalize(mut self.types, z, self.env)
@@ -1591,11 +1651,96 @@ impl Checker:
             let shown = self.show(cx, base)
             var d = self.error(cx, Msg.TypeUnknownMethod, name.range)
             d = d.with("ty", shown).with("name", name.text)
-            if let Some(similar) = self.similar_member(cx, base, name.text):
-                d = d.fix_at(Msg.TypeSimilarMember, name.range.start, name.range.end, similar)
+            match self.spelling_fix(cx, base, recv, name, args, at):
+                case Some(fixed):
+                    d = fixed.with("ty", shown).with("name", name.text)
+                case None:
+                    if let Some(similar) = self.similar_member(cx, base, name.text):
+                        d = d.fix_at(
+                            Msg.TypeSimilarMember, name.range.start, name.range.end, similar
+                        )
+            d = self.method_bound_fix(cx, d, base, name.text)
             self.report(unknown_method_note(cx, d, name.text))
             self.check_args_loosely(cx, args)
             return self.error_expr(at)
+
+    ## The other fix of a `mut` argument for a borrowed parameter, when the
+    ## function is the module's own: its parameter taken with `mut`, which is
+    ## the fix `E0341` offers where the function changes it (RULES.md, R24),
+    ## so that the two errors agree.
+    pure def callee_takes_mut(self, cx: Cx, own d: Diagnostic, pname: str) -> Diagnostic:
+        let (callee, i) = self.arg_callee else:
+            return d
+        if cx.prog.defs[callee.index].module != self.module:
+            return d
+        let f = cx.prog.fn_info(callee) else:
+            return d
+        if i >= len(f.params) or f.params[i].mode != Mode.Borrow:
+            return d
+        let at = f.params[i].span
+        let edit = Edit(start=at.start, end=at.start, text="mut ".to_string())
+        let named = Param(name="name".to_string(), value=pname.to_string())
+        return d.fix_params(Msg.TypeTakeMut, [named], [edit])
+
+    ## The fix of a method another language spells so (RULES.md, R24): Python's
+    ## `", ".join(names)` is `names.join(", ")`, a method of the items; an
+    ## iterator's method on a collection iterates it first,
+    ## `xs.iter().map(f)`; and `append`, `clone`, `strip` and the others
+    ## have their Sisu names.
+    pure def spelling_fix(
+        mut self, cx: Cx, base: Ty, recv: TExprId, name: Name, args: list[Arg], at: TextRange
+    ) -> Diagnostic?:
+        let d = self.error(cx, Msg.TypeUnknownMethod, name.range)
+        let r = self.span_of(recv)
+        let n = cx.source.byte_len()
+        if name.text == "join" and len(args) == 1 and self.is_text(cx, base):
+            let a = cx.ast.expr(args[0].value).range
+            if args[0].name.is_none() and r.start < r.end and a.start < a.end and at.end <= n:
+                let items = cx.source.byte_slice(a.start, a.end)
+                let sep = cx.source.byte_slice(r.start, r.end)
+                return Some(d.fix_at(Msg.TypeJoinItems, r.start, at.end, "{items}.join({sep})"))
+        if let Some(sisu) = sisu_spelling(name.text):
+            let mut_name = sisu.to_string()
+            return Some(d.fix_at(Msg.TypeSisuSpelling, name.range.start, name.range.end, mut_name))
+        # An iterator's method on what can be iterated: `.iter()` first.
+        if let Some(it) = cx.prog.wk.iterator:
+            let tr = TraitRef(def_=it, args=[])
+            let is_iter = cx.prog.implements(mut self.types, base, tr, self.env) != Answer.No
+            if cx.prog.trait_method(it, name.text).is_some() and not is_iter:
+                if self.iteration_item(cx, base, Mode.Borrow).is_some():
+                    let dot = name.range.start
+                    if dot > 0 and cx.source.byte_at(dot - 1) == 46:
+                        return Some(d.fix_at(Msg.TypeIterateFirst, dot - 1, dot - 1, ".iter()"))
+        return None
+
+    ## A method of a trait called on a type parameter its bounds do not
+    ## give it: the fix bounds the parameter by the trait, as `E0347` does
+    ## (RULES.md, R24).
+    pure def method_bound_fix(
+        mut self, cx: Cx, own d: Diagnostic, base: Ty, name: str
+    ) -> Diagnostic:
+        let TyData.Param(i) = self.types.data(base) else:
+            return d
+        var found: DefId? = None
+        var count = 0
+        for k in range(len(cx.prog.defs)):
+            if let DefKind.Trait(info) = cx.prog.defs[k].kind():
+                if info.generics.is_empty()
+                        and cx.prog.trait_method(DefId(index=k), name).is_some():
+                    found = Some(DefId(index=k))
+                    count += 1
+        let t = found else:
+            return d
+        if count != 1:
+            return d
+        let bound = cx.prog.defs[t.index].name.copy()
+        let (pname, e) = self.bound_edit(cx, i, bound) else:
+            return d
+        let params = [
+            Param(name="param".to_string(), value=pname),
+            Param(name="bound".to_string(), value=bound.copy()),
+        ]
+        return d.fix_params(Msg.TypeAddBound, params, [e])
 
     pure def inherent_call(
         mut self,
@@ -1681,8 +1826,23 @@ impl Checker:
         var outer = [self_ty]
         for a in tr.args:
             outer.push(a)
+        # The brackets of `x.method[T](...)` are the trait method's own type
+        # arguments, as an inherent method's are (`E0349` for one that has
+        # none, `collect[set[int]]()`, where they were dropped; RULES.md,
+        # R25).
+        let explicit = self.explicit_method_args.copy()
+        self.explicit_method_args = None
         return self.call_fn_with(
-            cx, m, None, Some(outer), Some(self_ty), Some(recv_arg), args, trailing, at, expected
+            cx,
+            m,
+            explicit,
+            Some(outer),
+            Some(self_ty),
+            Some(recv_arg),
+            args,
+            trailing,
+            at,
+            expected,
         )
 
     ## Calls a value of function type.
@@ -1844,6 +2004,20 @@ pub pure def mentions_it(ast: Ast, e: ExprId) -> bool:
 
 ## A note naming the traits that have a method called `name`, when the
 ## receiver implements none of them (stage 0's `unknown_method_note`).
+## Python's and Rust's names of methods Sisu spells otherwise (02, "Departures
+## from Python"; RULES.md, R24).
+pure def sisu_spelling(name: str) -> str?:
+    return match name:
+        case "append": Some("push")
+        case "clone": Some("copy")
+        case "strip": Some("trim")
+        case "upper": Some("to_uppercase")
+        case "lower": Some("to_lowercase")
+        case "startswith": Some("starts_with")
+        case "endswith": Some("ends_with")
+        case "to_owned": Some("to_string")
+        case _: None
+
 pure def unknown_method_note(cx: Cx, own d: Diagnostic, name: str) -> Diagnostic:
     var traits = String.new()
     for i in range(len(cx.prog.defs)):

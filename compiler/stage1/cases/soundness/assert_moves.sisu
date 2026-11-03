@@ -1,0 +1,11 @@
+# RULES.md, R22: an assertion whose condition moves a value evaluates it
+# once: it shows the two sides of its comparison when it fails, where it
+# evaluated the condition's parts again to show them and moved the value
+# twice (E0400 "moved in an earlier iteration of the loop").
+
+def main():
+    let m = Mutex(2)
+    assert m.into_inner() == 2
+    print("unwrapped once")
+    let n = Mutex(3)
+    assert n.into_inner() == 4

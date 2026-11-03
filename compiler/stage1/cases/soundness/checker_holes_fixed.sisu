@@ -1,0 +1,42 @@
+# RULES.md, R22: the programs `checker_holes.sisu` writes, as the fixes
+# leave them: the trait's types in its impl, `@derive(Copy)`, a trait that
+# can be `dyn`, and the type the conversion gives.
+
+trait Priced:
+    def price(self) -> int
+
+struct Bun:
+    cents: int
+
+impl Priced for Bun:
+    def price(self) -> int:
+        return self.cents
+
+@derive(Copy)
+struct Token:
+    kind: int
+
+trait Shape:
+    def area(self) -> f64
+
+struct Square:
+    side: f64
+
+impl Shape for Square:
+    def area(self) -> f64:
+        return self.side * self.side
+
+def total[T: Priced](x: T) -> int:
+    return x.price() + 1
+
+def main():
+    print(total(Bun(cents=3)))
+    let t = Token(kind=1)
+    let u = t
+    print(t.kind + u.kind)
+    let all: list[Box[dyn Shape]] = [Box(Square(side=2.0))]
+    for s in all:
+        print(s.area())
+    let a: u8 = 5
+    let wide: int = a.into()
+    print(wide)

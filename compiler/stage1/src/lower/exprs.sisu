@@ -54,6 +54,29 @@ from stage1.typeck.thir import (
 from stage1.typeck.thir import Callee as TCallee
 from stage1.typeck.ty import DefId, Ty, TyData, TyKey, Types
 
+## The name of a sized integer's intrinsic for `op` (`u8.wrap_add`): its
+## arithmetic, at its width, is the host's, by type.
+pub pure def sized_op(op: BinOp) -> str:
+    return match op:
+        case BinOp.Add: "add"
+        case BinOp.Sub: "sub"
+        case BinOp.Mul: "mul"
+        case BinOp.FloorDiv | BinOp.Div: "floordiv"
+        case BinOp.Mod: "rem"
+        case BinOp.Pow: "pow"
+        case BinOp.WrapAdd: "wrap_add"
+        case BinOp.WrapSub: "wrap_sub"
+        case BinOp.WrapMul: "wrap_mul"
+        case BinOp.SatAdd: "sat_add"
+        case BinOp.SatSub: "sat_sub"
+        case BinOp.SatMul: "sat_mul"
+        case BinOp.Shl: "shl"
+        case BinOp.Shr: "shr"
+        case BinOp.BitAnd: "and"
+        case BinOp.BitOr: "or"
+        case BinOp.BitXor: "xor"
+        case BinOp.And | BinOp.Or | BinOp.Coalesce: "invalid"
+
 pub pure def bin_op(cx: Cx, types: Types, op: BinOp, ty: Ty) -> SirBinOp:
     var is_string = False
     if let TyData.Adt(d, _) = types.data(ty):
@@ -589,17 +612,23 @@ impl FnLower:
                                 self.hold(cx, o, mark, self.ty_of(cx, v), mut held)
                             ops.push(o)
                         case FieldInit.Default(fi):
+                            # The struct's type arguments, which the default
+                            # takes as a generic struct's (RULES.md, R26).
+                            var targs: list[Ty] = []
+                            if let TyData.Adt(_, a) = self.types.data(x.ty):
+                                targs = a.copy()
                             var fty = Ty.error()
                             if let Some(s) = cx.prog.struct_info(def_):
                                 if i < len(s.fields):
-                                    fty = s.fields[i].ty
+                                    fty = self.types.subst(s.fields[i].ty, targs)
                             let t = self.temp(cx, fty)
                             let name = cx.ctx.field_default_name(cx.prog, def_, fi)
+                            let tys = self.tys(cx, targs)
                             self.emit(
                                 cx,
                                 StatementKind.Call(
                                     dest=Place.local(t),
-                                    callee=Callee.Fn(name=name, args=[]),
+                                    callee=Callee.Fn(name=name, args=tys),
                                     args=[],
                                 ),
                                 loc,
@@ -708,25 +737,7 @@ impl FnLower:
                 let lty = self.ty_of(cx, lhs)
                 if let Some(k) = self.sized_int(cx, lty):
                     # The sized integers' arithmetic is the host's, by type.
-                    let name = match op:
-                        case BinOp.Add: "add"
-                        case BinOp.Sub: "sub"
-                        case BinOp.Mul: "mul"
-                        case BinOp.FloorDiv | BinOp.Div: "floordiv"
-                        case BinOp.Mod: "rem"
-                        case BinOp.Pow: "pow"
-                        case BinOp.WrapAdd: "wrap_add"
-                        case BinOp.WrapSub: "wrap_sub"
-                        case BinOp.WrapMul: "wrap_mul"
-                        case BinOp.SatAdd: "sat_add"
-                        case BinOp.SatSub: "sat_sub"
-                        case BinOp.SatMul: "sat_mul"
-                        case BinOp.Shl: "shl"
-                        case BinOp.Shr: "shr"
-                        case BinOp.BitAnd: "and"
-                        case BinOp.BitOr: "or"
-                        case BinOp.BitXor: "xor"
-                        case BinOp.And | BinOp.Or | BinOp.Coalesce: "invalid"
+                    let name = sized_op(op)
                     let a = self.operand(cx, lhs)
                     let b = self.operand(cx, rhs)
                     self.intrinsic_call(cx, dest, "{k}.{name}", [], [a, b], loc)

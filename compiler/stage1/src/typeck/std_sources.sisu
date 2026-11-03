@@ -398,6 +398,13 @@ pub pure def builtin_impls() -> String:
         s.push("    @intrinsic(\"op.neg\")\n    pure def neg(self) -> {ty}\n")
     for n in range(1, tuple_arity() + 1):
         tuple_impls(mut s, n)
+    # Stage 1's, after what stage 0 writes (RULES.md, R25): a `Box` has the
+    # length of its value, whose methods it reaches, and a `Slice` prints as
+    # the list it views does.
+    s.push("\nimpl[T: Len] Len for Box[T]:\n")
+    s.push("    pure def len(self) -> int:\n        return len(self.boxed)\n")
+    s.push("\nimpl[T: Debug] Display for Slice[T]:\n")
+    s.push("    pure def fmt(self, mut f: Formatter):\n        self.fmt_debug(mut f)\n")
     return s
 
 ## The capability handles and host objects among the leaves.

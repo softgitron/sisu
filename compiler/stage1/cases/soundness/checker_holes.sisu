@@ -1,0 +1,47 @@
+# RULES.md, R22: what the checker let through, each a program whose run
+# would have taken one type for another. An impl's method with types other
+# than its trait's (E0234), `impl Copy` written by hand (E0270), a `dyn` of
+# a trait that cannot be one in a local's type (E0241), and a trait's
+# method whose impl nothing decides (E0324).
+
+trait Priced:
+    def price(self) -> int
+
+struct Bun:
+    cents: int
+
+impl Priced for Bun:
+    def price(self) -> f64:
+        return 2.5
+
+struct Token:
+    kind: int
+
+impl Copy for Token:
+    pass
+
+trait Shape:
+    def area(self) -> f64
+    def grown(self) -> Self
+
+struct Square:
+    side: f64
+
+impl Shape for Square:
+    def area(self) -> f64:
+        return self.side * self.side
+
+    def grown(self) -> Square:
+        return Square(side=self.side * 2.0)
+
+def shapes() -> int:
+    let all: list[Box[dyn Shape]] = []
+    return len(all)
+
+def widened() -> String:
+    let a: u8 = 5
+    return "{a.into()}"
+
+def main():
+    print(shapes())
+    print(widened())

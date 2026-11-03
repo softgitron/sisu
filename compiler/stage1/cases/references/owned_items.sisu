@@ -1,0 +1,27 @@
+# RULES.md, R21: the programs `ref_items.sisu` writes, with the items a
+# collection owns: copies made with `.copy()`, a `collect()` of copies,
+# and the views a list may hold, `str` for a `String`, which keep it from
+# outliving the text it views.
+
+def longest(names: list[String]) -> int:
+    var most = 0
+    for n in names:
+        most = max(most, len(n))
+    return most
+
+def initials(names: list[str]) -> String:
+    var out = String.new()
+    for n in names:
+        out.push(n.byte_slice(0, 1))
+    return out
+
+def main():
+    let aino = "Aino".to_string()
+    let eino = "Eino".to_string()
+    var written: list[String] = []
+    written.push(aino.copy())
+    written.push(eino.copy())
+    let xs = [5, 2, 8]
+    let big = xs.iter().filter(it > 4).map(it.copy()).collect()
+    let views: list[str] = [aino, eino]
+    print("{longest(written)} {big} {initials(views)} {aino}")

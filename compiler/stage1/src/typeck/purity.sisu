@@ -16,6 +16,7 @@ from stage1.typeck.thir import (
     Callee,
     FieldInit,
     InterpPart,
+    TArg,
     TArmBody,
     TCompClause,
     TCondPart,
@@ -256,13 +257,19 @@ impl Checker:
     ## anything (07, "Contract expressions must be `pure`"): the impure
     ## function it calls, or what it changes. Closures it makes are looked
     ## into.
-    pub pure def reading_problem(self, cx: Cx, e: TExprId) -> Reading?:
+    pub pure def reading_problem(mut self, cx: Cx, e: TExprId) -> Reading?:
         var bodies: list[BlockId] = []
         var exprs: list[TExprId] = []
         self.visit_expr(e, mut exprs)
         for x in exprs:
             if let Some(name) = self.impure_callee(cx, x):
                 return Some(Reading.Calls(name))
+            var call_args: list[TArg] = []
+            if let TExprKind.Call(_, args) = self.exprs[x.index].kind:
+                call_args = args.copy()
+            for a in call_args:
+                if self.moves_place(cx, a):
+                    return Some(Reading.Changes)
             match self.exprs[x.index].kind:
                 case TExprKind.Call(_, args):
                     for a in args:
@@ -305,6 +312,19 @@ impl Checker:
                     case _:
                         pass
         return None
+
+    ## Whether an argument moves a place out of where it is (an `own`
+    ## receiver or argument given a variable whose type is not `Copy`): a
+    ## condition that does cannot be evaluated again to show its parts
+    ## (RULES.md, R22; 17, "Assertions").
+    pure def moves_place(mut self, cx: Cx, a: TArg) -> bool:
+        if a.mode != ArgMode.Value or not self.is_place(a.expr):
+            return False
+        let ty = self.resolved(self.ty_of(a.expr))
+        # A reference given on is passed, not moved out of its place.
+        if let TyData.Ref(_, _) = self.types.data(ty):
+            return False
+        return not self.is_copy(cx, ty) and ty != Ty.error()
 
     ## Whether the expression only reads; with `report`, a contract's
     ## condition that does not is an error (`contract.`).

@@ -1,0 +1,29 @@
+# RULES.md, R23: what lowering wrote that the program did not say. A sized
+# integer's compound assignment is its operator's, at its width (`+%=`
+# wraps a `u8` at 256, `+|=` saturates at 255, `+=` traps past it), and a
+# borrowed parameter whose type holds the function's type parameters is
+# passed as the function takes it, by value when their bounds make it
+# `Copy` and by reference otherwise, whatever the call's types are.
+
+def first[T: Copy](p: (T, T)) -> T:
+    return p.0
+
+def second[T: Display](p: (T, T)) -> String:
+    return "{p.1}"
+
+def or_zero[T: Copy + Num](p: T?) -> T?:
+    return p
+
+def main():
+    var level: u8 = 250
+    level +%= 10
+    print(level)
+    var sat: u8 = 250
+    sat +|= 10
+    print(sat)
+    var small: i8 = -100
+    small -%= 100
+    print(small)
+    print(first((1, 2)))
+    print(second((3, 4)))
+    print(or_zero(Some(5)))

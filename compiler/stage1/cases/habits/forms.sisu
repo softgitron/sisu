@@ -1,0 +1,45 @@
+# RULES.md, R25: forms the manual's later chapters found refused that the
+# documents give. `with` without `as` keeps its value to the end of the
+# block; `ref` of a value that is no place borrows a temporary for the
+# statement; a `Box` has its value's length; a `Slice` prints as a list; a
+# `Key[T]` is a set element (its derived `Hash` and `Eq` read its fields
+# only); and a trait method's type arguments are its own.
+
+from std.collections import Arena, Key
+
+struct Booking:
+    room: String
+
+impl Drop for Booking:
+    def drop(mut self):
+        print("released {self.room}")
+
+impl Booking:
+    def start(room: str) -> Booking:
+        print("booked {room}")
+        return Booking(room=room.to_string())
+
+struct Coffee:
+    size: int
+
+struct Ship:
+    name: String
+
+def show(c: Coffee):
+    print("coffee {c.size}")
+
+def main():
+    with Booking.start("sauna"):
+        print("inside")
+    show(ref Coffee(2))
+    let b = Box([1, 2, 3])
+    print(len(b))
+    let xs = [1, 2, 3]
+    let part = xs[0:2]
+    print(part)
+    var fleet: Arena[Ship] = Arena.new()
+    let k = fleet.insert(Ship(name="Aallotar".to_string()))
+    var seen: set[Key[Ship]] = set()
+    _ = seen.add(k)
+    print(len(seen))
+    print(xs.iter().map[int](it * 3).collect())

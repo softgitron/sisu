@@ -439,6 +439,17 @@ pub pure def resolve_program(
         for p in imported.poisoned:
             _ = poisoned.add(p.copy())
         tables.scopes[i] = imported
+    # A name a later module re-exports (`pub from m import x`, 09) is there
+    # once that module's imports are: the imports again, binding what the
+    # first pass could not (RULES.md, R24); what they report was reported.
+    for i in range(len(modules)):
+        let m = ref modules[i]
+        let scope = tables.scopes[i].copy()
+        var r = Resolver.new(m.text, m.tree, env, tables, i, scope, m.package != 0)
+        r.collect_imports()
+        r.declare_imports()
+        let again = r.module
+        tables.scopes[i] = again
     # Each module's bodies.
     var out: list[list[Diagnostic]] = []
     for i in range(len(modules)):

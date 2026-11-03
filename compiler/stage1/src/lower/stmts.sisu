@@ -3,7 +3,7 @@
 ##! `select`.
 
 from stage1.diag import TextRange
-from stage1.lower.exprs import bin_op, cmp_op
+from stage1.lower.exprs import bin_op, cmp_op, sized_op
 from stage1.lower.func import Cx, DropEntry, FnLower, ForBody, LoopCtx, stmt_span
 from stage1.sir import (
     BlockId,
@@ -216,6 +216,14 @@ impl FnLower:
         let v = self.operand(cx, value)
         let p = self.place_of(cx, place)
         let t = self.temp(cx, pty)
+        # A sized integer's `+=`, `+%=` and the others are its operators',
+        # at its width (RULES.md, R23), as `x = x + v` is.
+        if let Some(k) = self.sized_int(cx, pty):
+            let name = sized_op(op)
+            let args = [Operand.Copy(p.copy()), v]
+            self.intrinsic_call(cx, Place.local(t), "{k}.{name}", [], args, loc)
+            self.assign(cx, p, Rvalue.Use(Operand.Move(Place.local(t))), loc)
+            return
         let bop = bin_op(cx, self.types, op, pty)
         self.assign(
             cx, Place.local(t), Rvalue.Binary(op=bop, lhs=Operand.Copy(p.copy()), rhs=v), loc

@@ -1,0 +1,3 @@
+## The number of words of `text`, separated by white space.
+pub def words(text: str) -> int:
+    return text.split_whitespace().count()

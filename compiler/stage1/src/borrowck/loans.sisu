@@ -2062,6 +2062,9 @@ impl Analysis:
                     var note = Msg.BorrowReturnOwned
                     if let Type.Fn(_, _, _) = f.locals[0].ty:
                         note = Msg.BorrowUseOwnClosure
+                    elif holds_text_view(f.locals[0].ty):
+                        # A copy of a `str` is the same view (RULES.md, R24).
+                        note = Msg.BorrowReturnText
                     out.push(
                         Finding.new(Msg.BorrowReturnLocal, f, loc).with_arg(
                             "name", place_name(types, f, shorten(place))
@@ -2075,6 +2078,21 @@ impl Analysis:
         return match self.loans[l].kind:
             case LoanKind.Local(place, _, _): place_name(types, f, shorten(place))
             case LoanKind.Param(i): Arg.Text(local_name(f, LocalId(index=i + 1)))
+
+## Whether a result type holds a view of text, which `.copy()` copies as the
+## view it is (RULES.md, R24).
+pure def holds_text_view(t: Type) -> bool:
+    return match t:
+        case Type.Str: True
+        case Type.Named(_, args): any_text_view(args)
+        case Type.Tuple(es): any_text_view(es)
+        case _: False
+
+pure def any_text_view(ts: list[Type]) -> bool:
+    for t in ts:
+        if holds_text_view(t):
+            return True
+    return False
 
 ## A local, and the locals its index and key projections name.
 pure def push_place(p: Place, mut out: list[LocalId]):

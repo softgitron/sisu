@@ -1,0 +1,4 @@
+panic: assertion failed: n.into_inner() == 4
+  left:  3
+  right: 4
+  at main (assert_moves.sisu:11:5)

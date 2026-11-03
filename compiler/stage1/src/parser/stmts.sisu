@@ -387,7 +387,9 @@ impl Parser:
         let line = self.current_line()
         self.bump()
         _ = self.expr()
-        if self.expect(SyntaxKind.AsKw):
+        # `with lock:`, Python's form, keeps the value without a name to
+        # the end of the block (RULES.md, R25; 02, "Control flow").
+        if self.eat(SyntaxKind.AsKw):
             _ = self.expect_name()
         self.colon_block("with", line)
         self.finish_node()

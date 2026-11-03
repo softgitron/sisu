@@ -1,0 +1,46 @@
+# RULES.md, R21: a collection's items are values it owns, or views, and
+# never references (04, rule 3), wherever the program writes the type or
+# the checker infers it: a signature, an annotation, a list that a `push`
+# of a reference decides, a `collect()` of an iterator over a borrowed
+# list, a literal and a dict's values. Each gets E0438, once a body for
+# each type, with the fix that holds the values themselves or collects
+# copies; a reference where a value is expected gets the copy.
+
+def longest(names: list[ref String]) -> int:
+    var most = 0
+    for n in names:
+        most = max(most, len(n))
+    return most
+
+def written() -> int:
+    let aino = "Aino".to_string()
+    var names: list[ref String] = []
+    names.push(ref aino)
+    return len(names)
+
+def inferred() -> int:
+    let aino = "Aino".to_string()
+    var names = []
+    names.push(ref aino)
+    return len(names)
+
+def collected() -> int:
+    let xs = [5, 2, 8]
+    print(xs.iter().filter(it > 4).collect())
+    let big = xs.iter().filter(it > 4).collect()
+    return len(big)
+
+def literals() -> int:
+    let xs = [5, 2, 8]
+    let pair = [ref xs, ref xs]
+    let ages = {"aino": ref xs[0]}
+    return len(pair) + len(ages)
+
+def owned() -> int:
+    let aino = "Aino".to_string()
+    var names: list[String] = []
+    names.push(ref aino)
+    return len(names)
+
+def main():
+    print(written() + inferred() + collected() + literals() + owned())

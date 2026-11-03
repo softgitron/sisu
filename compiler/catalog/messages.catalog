@@ -70,6 +70,8 @@ E0126 error   parse.expected-member       a struct body holds fields, methods an
 # Stage 1's (RULES.md, R16; 02's departures from Python): `else` on a
 # loop, and the block a statement on a `case` line needs.
 E0127 error   parse.loop-else             a loop has no `else` in Sisu; keep what the loop finds in a variable and test it after the loop, as in `if let Some(i) = found:`
+# Stage 1's (RULES.md, R25): Python's glob import.
+E0128 error   parse.glob-import           Sisu has no glob imports: name what the module gives, as in `from std.collections import Deque, Heap`, or import the module and write `collections.Deque`
 -     fix     parse.arm-block             put it in an indented block under the `case`
 -     label   parse.opened-here           this `{keyword}` opens the block
 -     fix     parse.use-if-expression     write it as `if c: a else: b`
@@ -119,7 +121,7 @@ E0239 error   resolve.no-assoc-type       `{ty}` has no associated type `{name}`
 E0240 error   resolve.sealed-trait        `{trait}` is implemented only by the standard library, so `{ty}` cannot implement it
 E0241 error   resolve.not-object-safe     `{trait}` cannot be used as `dyn {trait}`: its method `{method}` cannot be called through it, because {reason}
 E0242 error   resolve.supertrait-missing  `{ty}` implements `{trait}`, which requires `{super}`, but `{ty}` does not implement `{super}`
-E0243 error   resolve.not-derivable       `{name}` cannot be derived; `@derive` takes `Copy` and the traits that have a `comptime def derive`: `Debug`, `Eq`, `PartialOrd`, `Ord`, `Hash`, and any trait that declares one
+E0243 error   resolve.not-derivable       `{name}` cannot be derived; `@derive` takes `Copy` and the traits that have a `comptime def derive`: `Debug`, `Default`, `Eq`, `PartialOrd`, `Ord`, `Hash`, and any trait that declares one
 E0244 error   resolve.derive-field        `{ty}` cannot derive `{trait}`: its field `{field}` has type `{fty}`, which does not implement `{trait}`
 E0245 error   resolve.generic-default-order  a type parameter without a default cannot follow one with a default
 E0246 error   resolve.impl-default        the type parameters of an `impl` or a function take no defaults; a default belongs to a type's or a trait's parameter
@@ -158,6 +160,9 @@ E0266 error   resolve.bad-cfg             `@cfg` takes a condition: `test`, `fea
 E0267 error   resolve.not-camel-case      the name of {kind} is written in CamelCase, and `{name}` is not
 E0268 error   resolve.not-snake-case      the name of {kind} is written in snake_case, and `{name}` is not
 E0269 error   resolve.not-screaming-case  the name of {kind} is written in SCREAMING_CASE, and `{name}` is not
+# Stage 1's (RULES.md, R22): `Copy` is derived, never implemented (03).
+E0270 error   resolve.copy-by-hand        `Copy` is derived, not implemented: an `impl Copy for {ty}` written by hand leaves `{ty}` moved, and `@derive(Copy)` makes it copied when every field is `Copy` (03)
+-     fix     resolve.derive-copy         derive `Copy` instead
 -     fix     resolve.rename              rename it
 -     fix     resolve.declare-with        declare it with `{keyword}`
 -     note    resolve.open-file           a program reaches files through the capability `Fs`, which `def main(sys: System)` holds as `sys.fs`: `sys.fs.read_to_string("data.txt")`
@@ -303,6 +308,14 @@ E0399 error   type.bad-format-spec        `{spec}` is not a format spec; it is `
 -     fix     type.iterate-chars          iterate over its characters
 -     fix     type.iterate-bytes          iterate over its bytes
 -     fix     type.char-as-text           write the character as text
+# Stage 1's (RULES.md, R24): the fixes the manual's later chapters found
+# missing.
+-     fix     type.join-items             join the items with their own method
+-     fix     type.sisu-spelling          Sisu spells it this way
+-     fix     type.iterate-first          iterate it first
+# Stage 1's (RULES.md, R25).
+-     note    type.annotate-params        a closure's parameters take their types from where the closure is passed; one kept in a `let` names them, as in `(a: int, b: int) -> a + b`
+-     note    type.sort-by-key            Sisu takes no `key=`: sort a list by a key with `sort_by`, as in `xs.sort_by((a, b) -> len(a).cmp(len(b)))`, and pick an item by one with an iterator's `max_by` or `min_by`, as in `xs.iter().max_by(len(it))`
 
 # ---------------------------------------------------------------- ownership
 # The signature rules (E0411-E0415) are the resolver's; the rest are the
@@ -323,6 +336,9 @@ E0412 error   borrow.view-in-enum         `{ty}` cannot hold `{fty}`, which borr
 E0413 error   borrow.from-required        `{name}` returns `{ret}`, which borrows, and has more than one borrowed parameter ({params}); name the ones it borrows from with `from`
 # Stage 1's (RULES.md, R16): a text field owns its text.
 -     fix     borrow.own-string           own the text instead
+# Stage 1's (RULES.md, R24): a result of text owns it.
+-     fix     borrow.own-result           return owned text instead
+-     note    borrow.return-text          a `str` views text, and a copy of it is the same view: return a `String`, which owns its text (`-> String`, or `list[String]` for views in a list)
 E0414 error   borrow.from-not-a-parameter  `{name}` in the `from` clause is not a borrowed parameter of `{function}`
 E0415 error   borrow.from-without-borrow  `{function}` returns `{ty}`, which does not borrow, so it takes no `from` clause
 E0416 error   borrow.move-out-of-drop     cannot move `{part}` out of `{name}`, because `{ty}` implements `Drop`, which needs the whole value
@@ -345,6 +361,12 @@ E0432 error   task.result-unknown         the type of the task's result must be 
 E0433 error   task.result-not-send        the task returns `{ty}`, which is not `Send`, so it cannot cross back to the task that joins it
 E0434 error   task.select-arm             a `select` arm waits for a `recv`, `send` or `join` call, a `Timer` or a `Cancellation`, not `{ty}`
 E0437 error   task.not-send-mut           `{name}` is changed by the task through a reference, but `{ty}` is not `Send`
+# Stage 1's (RULES.md, R21): a collection's items are values it owns, or
+# views, and never references (04, rule 3).
+E0438 error   borrow.ref-in-collection    `{ty}` would hold references, and a collection holds values it owns or views, never references (04, rule 3)
+-     fix     borrow.own-items            hold the values themselves: `{ty}`
+-     fix     borrow.copy-items           collect copies of the items
+-     note    borrow.items-owned          put copies in it, made with `.copy()` (or `.to_string()` for text), or views, such as `str` for a `String`; a reference is kept only in a `view struct`'s `ref` field
 E0435 error   type.yield-outside-generator  `yield` belongs in the body of a generator, a function that returns `Iter[T]` (not in a closure)
 E0436 error   type.generator-result       `{name}` yields, so it must return `Iter[T]`, not `{ty}`
 -     help    task.wrap-mutex             wrap it: `Mutex[{ty}]` shares mutation between tasks; or move the value with an `own` task
@@ -363,6 +385,8 @@ E0436 error   type.generator-result       `{name}` yields, so it must return `It
 -     label   borrow.assigned-here        `{name}` is assigned here first
 -     note    borrow.move-after           move this after line {end}, where the borrow ends, or work on a copy made with `.copy()`
 -     note    borrow.copy-before-move     copy it with `.copy()` before it is moved, or move it later
+# Stage 1's (RULES.md, R24): each remedy with its cost.
+-     note    borrow.move-remedies        copy it with `.copy()` before the move, which makes a second value (for a list or a `String`, an allocation); move it later, after its last use, which costs nothing; or, where what it moves into only reads it, take it there without `own`, and the call lends it
 -     note    borrow.use-own-closure      a closure that is stored or returned must own what it captures: write it as an `own` closure
 -     note    borrow.return-owned         return an owned value instead, such as a copy made with `.copy()`
 -     note    borrow.unvisited-rest       the loop that consumes `{name}` has not visited every element yet; finish the loop first, or return what is left

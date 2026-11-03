@@ -209,6 +209,10 @@ pub pure def lower_body(
             for g in f.generics:
                 type_params.push(g.name.copy())
             env = prog.elaborate_env(mut types, f.predicates)
+    # A field's default is as generic as its struct (RULES.md, R26).
+    if let BodyKind.FieldDefault(s, _) = body.kind:
+        for g in prog.type_generics(s):
+            type_params.push(g.name.copy())
     let cx = Cx(prog=ref prog, ctx=ctx, body=ref body, module=module)
     var main = FnLower.new(types, None, name)
     main.type_params = type_params.copy()
