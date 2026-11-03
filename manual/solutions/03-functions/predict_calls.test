@@ -1,0 +1,6 @@
+test "one adult" ... ok
+test "three twelve-year-olds" ... ok
+test "a student" ... ok
+test "two small children" ... ok
+test "halving a hundred" ... ok
+5 passed, 0 failed, 0 blocked

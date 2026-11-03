@@ -1,0 +1,36 @@
+##! Exercise 3.5, hours, minutes and seconds. Kind: write. Level: 2.
+##!
+##! A stopwatch counts seconds. Write the bodies of `split_time` and
+##! `show_time` so that every test passes; `show_time` can call
+##! `split_time`. Run the tests with `sisu test split_time.sisu`. The
+##! hints are in chapter 3 of the tutorial, under "Exercise 3.5: hours,
+##! minutes and seconds".
+
+## `total` seconds as whole hours, minutes and seconds.
+def split_time(total: int) -> (hours: int, minutes: int, seconds: int):
+    return todo("split_time")
+
+## `total` seconds as text, such as "1 h 2 min 5 s", or "1 h 2 min"
+## when `seconds` is False.
+def show_time(total: int, *, seconds: bool = True) -> String:
+    return todo("show_time")
+
+test "an hour, two minutes and five seconds":
+    let time = split_time(3725)
+    assert time.hours == 1
+    assert time.minutes == 2
+    assert time.seconds == 5
+
+test "less than a minute":
+    let time = split_time(59)
+    assert time.hours == 0
+    assert time.minutes == 0
+    assert time.seconds == 59
+
+test "shown with seconds":
+    assert show_time(3725) == "1 h 2 min 5 s"
+    assert show_time(86399) == "23 h 59 min 59 s"
+
+test "shown without seconds":
+    assert show_time(3725, seconds=False) == "1 h 2 min"
+    assert show_time(7200, seconds=False) == "2 h 0 min"

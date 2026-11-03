@@ -1,0 +1,22 @@
+##! Exercise 3.4, the sum of the digits. Kind: write. Level: 2.
+##!
+##! Write the body of `digit_sum` so that its doc example and every test
+##! pass. `sisu test digit_sum.sisu` runs the doc example as a test of
+##! its own. The hints are in chapter 3 of the tutorial, under
+##! "Exercise 3.4: the sum of the digits".
+
+## The sum of the decimal digits of `n`, which is not negative.
+##
+## ```
+## assert digit_sum(2026) == 10
+## ```
+def digit_sum(n: int) -> int:
+    return todo("digit_sum")
+
+test "one digit":
+    assert digit_sum(7) == 7
+    assert digit_sum(0) == 0
+
+test "many digits":
+    assert digit_sum(9_876_543_210) == 45
+    assert digit_sum(1_000_001) == 2

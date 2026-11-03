@@ -1,0 +1,8 @@
+# `assert` stops the program when something that must hold does not.
+def percent(part: int, whole: int) -> f64:
+    assert whole > 0, "a percentage of nothing"
+    return part.to_f64() * 100.0 / whole.to_f64()
+
+def main():
+    print("{percent(1, 4)}")
+    print("{percent(1, 0)}")

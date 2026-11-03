@@ -1,0 +1,14 @@
+$ sisu run keyword_name.sisu
+error[E0105]: expected a pattern, found `type`
+  --> keyword_name.sisu:3:9
+  |
+3 |     let type = "csv"
+  |         ^^^^
+
+error[E0103]: expected an expression, found `type`
+  --> keyword_name.sisu:4:23
+  |
+4 |     print("reading a {type} file")
+  |                       ^^^^
+
+error[D0006]: the program was not run: errors found (2)

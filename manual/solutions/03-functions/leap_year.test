@@ -1,0 +1,5 @@
+test "an ordinary year" ... ok
+test "every fourth year" ... ok
+test "a century year that is not a leap year" ... ok
+test "every fourth century year is a leap year" ... ok
+4 passed, 0 failed, 0 blocked

@@ -1,0 +1,12 @@
+# Arguments can be passed by name; `*` and `/` limit how.
+def url(host: str, *, port: int = 80, secure: bool = False) -> String:
+    let scheme = if secure: "https" else: "http"
+    return "{scheme}://{host}:{port}"
+
+def clamp(value: int, /, low: int, high: int) -> int:
+    return max(low, min(value, high))
+
+def main():
+    print(url("example.org"))
+    print(url("example.org", secure=True, port=443))
+    print("{clamp(15, 0, 10)} {clamp(-3, low=0, high=10)}")

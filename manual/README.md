@@ -69,7 +69,7 @@ message, place, fix; `sisu explain`), breaking the program on purpose,
 (`todo` holes, `test` blocks, blocked, failed and ok). One exercise.
 Stage 0 runs all of it.
 
-**2. Values and types.** The basic types and what Sisu does with them:
+**2. Values and types** ([written](tutorial/02-values.md)). The basic types and what Sisu does with them:
 `int` (64-bit, the type of indices), `f64`, `bool`, `char`, `str`;
 literals with underscores, bases and suffixes; arithmetic with `//` and
 `%` on integers and `/` on floats only (E0301 and its fix), overflow that
@@ -820,7 +820,7 @@ solutions and passing checks.
 | Step | Pages | Estimate |
 |---|---|---|
 | 1 | Chapter 1, this plan, [STYLE.md](STYLE.md), `tools/check.py` | done |
-| 2 | Chapters 2 (2), 3 (2), 4 (1.5) | 5.5 |
+| 2 | Chapters 2 (done), 3 (2), 4 (1.5) | 3.5 |
 | 3 | R16 the `sisu` command (2), R17 diagnostics, first codes (2), R1 lexical structure (2) | 6 |
 | 4 | Chapters 5 (2.5), 6 (2), 7 (2.5), 8 (3) | 10 |
 | 5 | Chapter 9 with challenge I (3); G2 Coming from Python (1); R19 false friends (1) | 5 |
@@ -861,6 +861,20 @@ recorded here so that later chapters do not rediscover them:
   session; the manual's sessions cover the first, and the manual shows
   worksheets rather than REPL sessions until the `sisu>` transcripts of
   [17](../proposal/17-testing.md) exist.
+
+Writing the rest of Part I turned up more, by chapter:
+
+- Chapter 2. `'Aino'` gets E0016 (`lex.bad-char-literal`) with no fix;
+  the fix is double quotes. A keyword used as a name, `let type =
+  "csv"`, gets E0105 and E0103, neither of which says that the word is a
+  keyword. `let Total = 10` gets E0327, E0329 and E0200, none of which
+  says that a binding's name starts with a lowercase letter. `let small:
+  u8 = large` gets E0300 with no fix, where `large.to_u8()` would teach.
+  The E0300 for `return total / count` in a function that returns an
+  `f64` has the note "`=` cannot mix `f64` and `int`", naming an `=` that
+  the line does not have. A bug: `+%=` and `+|=` on a `u8` work at the
+  width of `int`, so `level +%= 10` on a `u8` holding 250 leaves 260 in
+  it, where `level = level +% 10` gives 4.
 
 Planning the later chapters turned up the parts of the proposal that
 they teach and stage 0 does not run yet, each named in its chapter's

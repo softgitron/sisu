@@ -1,0 +1,36 @@
+##! Exercise 3.1, predict the calls: the solution.
+##!
+##! An adult pays 9. Three twelve-year-olds pay 5 each. `student=True`
+##! makes a 25-year-old pay 5. A child under 7 pays nothing, whatever
+##! the other arguments say, because the first branch of the `if` that
+##! holds decides. 100 halves to 50, 25, 12, 6, 3 and 1: six halvings.
+
+## The price in euros of tickets for `group` people of age `age`.
+def ticket(age: int, *, student: bool = False, group: int = 1) -> int:
+    let each = if age < 7: 0 elif age < 18 or student: 5 else: 9
+    return each * group
+
+## How many times `n` can be halved, rounding down, before it is 1.
+def halvings(n: int) -> int:
+    return if n <= 1: 0 else: 1 + halvings(n // 2)
+
+const ADULT: int = 9
+const SCHOOL_CLASS: int = 15
+const STUDENT: int = 5
+const TODDLERS: int = 0
+const HALVINGS: int = 6
+
+test "one adult":
+    assert ticket(30) == ADULT
+
+test "three twelve-year-olds":
+    assert ticket(12, group=3) == SCHOOL_CLASS
+
+test "a student":
+    assert ticket(25, student=True) == STUDENT
+
+test "two small children":
+    assert ticket(4, group=2, student=True) == TODDLERS
+
+test "halving a hundred":
+    assert halvings(100) == HALVINGS

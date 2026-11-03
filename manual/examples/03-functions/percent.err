@@ -1,0 +1,7 @@
+panic: assertion failed: whole > 0
+  message: a percentage of nothing
+    whole > 0
+    │
+    0
+  at percent (percent.sisu:3:5)
+  at main (percent.sisu:8:13)

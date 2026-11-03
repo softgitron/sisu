@@ -1,0 +1,4 @@
+# A keyword cannot be the name of a binding.
+def main():
+    let type = "csv"
+    print("reading a {type} file")

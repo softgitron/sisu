@@ -11,7 +11,7 @@
 const QUOTIENT: int = todo("(-17) // 5")
 const REMAINDER: int = todo("(-17) % 5")
 const POWER: int = todo("2 ** 3 ** 2")
-const HALVES: f64 = todo("7.0 / 2.0 * 2.0")
+const EXACT: bool = todo("0.1 + 0.2 == 0.3")
 const CHAIN: bool = todo("1 < 5 <= 4")
 const NEGATION: bool = todo("not 2 + 2 == 5")
 const WRAPPED: u8 = todo("200u8 +% 100")
@@ -25,8 +25,8 @@ test "the remainder of a negative number":
 test "a power of a power":
     assert 2 ** 3 ** 2 == POWER
 
-test "dividing and multiplying floats":
-    assert 7.0 / 2.0 * 2.0 == HALVES
+test "adding tenths":
+    assert (0.1 + 0.2 == 0.3) == EXACT
 
 test "a chain of comparisons":
     assert (1 < 5 <= 4) == CHAIN

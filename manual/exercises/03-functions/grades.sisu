@@ -1,0 +1,38 @@
+##! Exercise 3.2, exam grades. Kind: fix. Level: 1.
+##!
+##! An exam is marked out of 100 points. `grade` turns the points into
+##! a grade from 0 to 5, and `verdict` says whether the exam is passed.
+##! The file does not compile. Run `sisu test grades.sisu`, read the
+##! diagnostics, and fix both functions so that every test passes. The
+##! hints are in chapter 3 of the tutorial, under "Exercise 3.2: exam
+##! grades".
+
+## The grade for `points`: 5 for 90 or more, 4 for 75 or more, 3 for
+## 60 or more, 2 for 50 or more, 1 for 40 or more, and 0 below 40.
+def grade(points: int) -> int:
+    if points >= 90:
+        return 5
+    elif points >= 75:
+        return 4
+    elif points >= 60:
+        return 3
+    elif points >= 50:
+        return 2
+    elif points >= 40:
+        return 1
+
+## "passed" for a grade of 1 or more, and "failed" for 0.
+def verdict(points: int) -> str:
+    return if grade(points) >= 1: "passed"
+
+test "top grades":
+    assert grade(95) == 5
+    assert grade(75) == 4
+
+test "the lowest passing grade":
+    assert grade(40) == 1
+    assert verdict(40) == "passed"
+
+test "a failed exam":
+    assert grade(39) == 0
+    assert verdict(12) == "failed"

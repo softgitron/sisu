@@ -1,0 +1,10 @@
+# A function without `->` returns nothing; `return` can leave it early.
+def report(reading: f64):
+    if reading < 0.0:
+        print("no reading")
+        return
+    print("{reading} degrees")
+
+def main():
+    report(21.5)
+    report(-1.0)

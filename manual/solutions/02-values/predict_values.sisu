@@ -1,17 +1,18 @@
 ##! Exercise 2.1, predict the values: the solution.
 ##!
-##! `//` rounds down, towards minus infinity, so -3.4 becomes -4, and `%`
-##! takes the sign of the divisor, so that `(a // b) * b + a % b == a`.
-##! `**` groups from the right: `2 ** 3 ** 2` is `2 ** 9`. Operators of
-##! the same level run from the left, so the float expression halves 7
-##! and doubles the half. A chain holds when every pair in it holds, and
+##! `//` rounds down, towards minus infinity, so -3.4 becomes -4, and
+##! `%` takes the sign of the divisor, so that `(a // b) * b + a % b`
+##! is `a`.
+##! `**` groups from the right: `2 ** 3 ** 2` is `2 ** 9`. Neither 0.1
+##! nor 0.2 is exact in binary floating point, and their sum is
+##! 0.30000000000000004. A chain holds when every pair in it holds, and
 ##! `5 <= 4` does not. `not` applies to the whole comparison after it.
 ##! `+%` wraps at the width of `u8`: 300 is 256 + 44.
 
 const QUOTIENT: int = -4
 const REMAINDER: int = 3
 const POWER: int = 512
-const HALVES: f64 = 7.0
+const EXACT: bool = False
 const CHAIN: bool = False
 const NEGATION: bool = True
 const WRAPPED: u8 = 44
@@ -25,8 +26,8 @@ test "the remainder of a negative number":
 test "a power of a power":
     assert 2 ** 3 ** 2 == POWER
 
-test "dividing and multiplying floats":
-    assert 7.0 / 2.0 * 2.0 == HALVES
+test "adding tenths":
+    assert (0.1 + 0.2 == 0.3) == EXACT
 
 test "a chain of comparisons":
     assert (1 < 5 <= 4) == CHAIN

@@ -1,0 +1,8 @@
+# A function with two parameters and a result.
+def area(width: f64, height: f64) -> f64:
+    return width * height
+
+def main():
+    let floor = area(4.5, 3.0)
+    print("the floor is {floor} square metres")
+    print("the door is {area(0.8, 2.0)} square metres")

@@ -1,1 +1,51 @@
 $ sisu test predict_values.sisu
+warning[W0001]: typed hole `(-17) // 5` of type `int`
+  --> predict_values.sisu:11:23
+   |
+11 | const QUOTIENT: int = todo("(-17) // 5")
+   |                       ^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `(-17) % 5` of type `int`
+  --> predict_values.sisu:12:24
+   |
+12 | const REMAINDER: int = todo("(-17) % 5")
+   |                        ^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `2 ** 3 ** 2` of type `int`
+  --> predict_values.sisu:13:20
+   |
+13 | const POWER: int = todo("2 ** 3 ** 2")
+   |                    ^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `0.1 + 0.2 == 0.3` of type `bool`
+  --> predict_values.sisu:14:21
+   |
+14 | const EXACT: bool = todo("0.1 + 0.2 == 0.3")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `1 < 5 <= 4` of type `bool`
+  --> predict_values.sisu:15:21
+   |
+15 | const CHAIN: bool = todo("1 < 5 <= 4")
+   |                     ^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `not 2 + 2 == 5` of type `bool`
+  --> predict_values.sisu:16:24
+   |
+16 | const NEGATION: bool = todo("not 2 + 2 == 5")
+   |                        ^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `200u8 +% 100` of type `u8`
+  --> predict_values.sisu:17:21
+   |
+17 | const WRAPPED: u8 = todo("200u8 +% 100")
+   |                     ^^^^^^^^^^^^^^^^^^^^
+
+test "floor division of a negative number" ... blocked by todo("(-17) // 5")
+test "the remainder of a negative number" ... blocked by todo("(-17) % 5")
+test "a power of a power" ... blocked by todo("2 ** 3 ** 2")
+test "adding tenths" ... blocked by todo("0.1 + 0.2 == 0.3")
+test "a chain of comparisons" ... blocked by todo("1 < 5 <= 4")
+test "what `not` applies to" ... blocked by todo("not 2 + 2 == 5")
+test "wrapping a byte" ... blocked by todo("200u8 +% 100")
+0 passed, 0 failed, 7 blocked

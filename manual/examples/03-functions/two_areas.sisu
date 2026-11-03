@@ -1,0 +1,9 @@
+# Two functions in one module cannot share a name.
+def area(side: f64) -> f64:
+    return side * side
+
+def area(width: f64, height: f64) -> f64:
+    return width * height
+
+def main():
+    print("{area(2.0)}")

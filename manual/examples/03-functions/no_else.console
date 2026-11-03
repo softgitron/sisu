@@ -1,0 +1,8 @@
+$ sisu run no_else.sisu
+error[E0116]: an `if` expression needs an `else` branch, because it must have a value
+  --> no_else.sisu:3:55
+  |
+3 |     return if n > 0: "positive" elif n < 0: "negative"
+  |                                                       ^
+
+error[D0006]: the program was not run: errors found (1)

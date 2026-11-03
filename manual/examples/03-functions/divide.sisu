@@ -1,0 +1,9 @@
+# A function can return several values as a labelled tuple.
+def divide(total: int, people: int) -> (each: int, left_over: int):
+    return (total // people, total % people)
+
+def main():
+    let split = divide(17, 5)
+    print("{split.each} each, {split.left_over} left over")
+    let each, left_over = divide(100, 7)
+    print("{each=} {left_over=}")

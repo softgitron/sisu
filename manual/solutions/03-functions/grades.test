@@ -1,0 +1,4 @@
+test "top grades" ... ok
+test "the lowest passing grade" ... ok
+test "a failed exam" ... ok
+3 passed, 0 failed, 0 blocked

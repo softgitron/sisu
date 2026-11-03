@@ -1,4 +1,4 @@
-# Going to a smaller type could lose information, so it is not automatic.
+# A smaller type could lose information, so Sisu does not convert.
 def main():
     let large = 200
     let small: u8 = large

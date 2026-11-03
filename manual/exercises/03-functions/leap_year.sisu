@@ -1,0 +1,24 @@
+##! Exercise 3.3, leap years. Kind: write. Level: 1.
+##!
+##! Write the body of `is_leap_year` so that every test passes. Run the
+##! tests with `sisu test leap_year.sisu`. The hints are in chapter 3 of
+##! the tutorial, under "Exercise 3.3: leap years".
+
+## Whether `year` is a leap year in the Gregorian calendar: a year that
+## divides by 4, except a year that divides by 100 and not by 400.
+def is_leap_year(year: int) -> bool:
+    return todo("is_leap_year")
+
+test "an ordinary year":
+    assert not is_leap_year(2026)
+
+test "every fourth year":
+    assert is_leap_year(2024)
+    assert is_leap_year(1996)
+
+test "a century year that is not a leap year":
+    assert not is_leap_year(1900)
+    assert not is_leap_year(2100)
+
+test "every fourth century year is a leap year":
+    assert is_leap_year(2000)

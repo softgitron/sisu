@@ -1,0 +1,17 @@
+# A doc comment documents a function, and its example is a test.
+
+## The price of `quantity` items at `unit_price` cents each, with a
+## tenth off when `quantity` is 10 or more.
+##
+## ```
+## assert price(3, 250) == 750
+## assert price(10, 100) == 900
+## ```
+def price(quantity: int, unit_price: int) -> int:
+    let full = quantity * unit_price
+    if quantity >= 10:
+        return full - full // 10
+    return full
+
+test "one item":
+    assert price(1, 199) == 199

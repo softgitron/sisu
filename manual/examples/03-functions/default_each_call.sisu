@@ -1,0 +1,12 @@
+# A default value is computed at each call that leaves it out.
+def guest_name() -> str:
+    print("(working out the default)")
+    return "guest"
+
+def greet(name: str = guest_name()):
+    print("Hei, {name}!")
+
+def main():
+    greet()
+    greet("Aino")
+    greet()

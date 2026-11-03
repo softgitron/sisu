@@ -1,0 +1,9 @@
+warning[W0001]: typed hole `the price of a heavy parcel` of type `f64`
+  --> shipping.sisu:5:12
+  |
+5 |     return todo("the price of a heavy parcel")
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+panic: reached the typed hole `todo("the price of a heavy parcel")`
+  at shipping (shipping.sisu:5:12)
+  at main (shipping.sisu:9:20)

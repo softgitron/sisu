@@ -1,0 +1,5 @@
+test "an hour, two minutes and five seconds" ... ok
+test "less than a minute" ... ok
+test "shown with seconds" ... ok
+test "shown without seconds" ... ok
+4 passed, 0 failed, 0 blocked

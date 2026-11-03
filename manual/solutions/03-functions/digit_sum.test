@@ -1,0 +1,4 @@
+test "one digit" ... ok
+test "many digits" ... ok
+test "digit_sum (doc example)" ... ok
+3 passed, 0 failed, 0 blocked

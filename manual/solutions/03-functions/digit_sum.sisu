@@ -1,0 +1,23 @@
+##! Exercise 3.4, the sum of the digits: the solution.
+##!
+##! `n % 10` is the last digit and `n // 10` is the rest of the number.
+##! The sum is the last digit plus the sum of the rest, and a number of
+##! one digit is its own sum, which ends the recursion.
+
+## The sum of the decimal digits of `n`, which is not negative.
+##
+## ```
+## assert digit_sum(2026) == 10
+## ```
+def digit_sum(n: int) -> int:
+    if n < 10:
+        return n
+    return n % 10 + digit_sum(n // 10)
+
+test "one digit":
+    assert digit_sum(7) == 7
+    assert digit_sum(0) == 0
+
+test "many digits":
+    assert digit_sum(9_876_543_210) == 45
+    assert digit_sum(1_000_001) == 2

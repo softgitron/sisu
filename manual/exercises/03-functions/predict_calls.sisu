@@ -1,0 +1,38 @@
+##! Exercise 3.1, predict the calls. Kind: predict. Level: 1.
+##!
+##! A museum prices its tickets with `ticket`, and `halvings` counts
+##! how often a number can be halved before it reaches 1. Each constant
+##! is your prediction of the value of the call in its hole's name.
+##! Replace each hole with a literal number, then run
+##! `sisu test predict_calls.sisu`. The hints are in chapter 3 of the
+##! tutorial, under "Exercise 3.1: predict the calls".
+
+## The price in euros of tickets for `group` people of age `age`.
+def ticket(age: int, *, student: bool = False, group: int = 1) -> int:
+    let each = if age < 7: 0 elif age < 18 or student: 5 else: 9
+    return each * group
+
+## How many times `n` can be halved, rounding down, before it is 1.
+def halvings(n: int) -> int:
+    return if n <= 1: 0 else: 1 + halvings(n // 2)
+
+const ADULT: int = todo("ticket(30)")
+const SCHOOL_CLASS: int = todo("ticket(12, group=3)")
+const STUDENT: int = todo("ticket(25, student=True)")
+const TODDLERS: int = todo("ticket(4, group=2, student=True)")
+const HALVINGS: int = todo("halvings(100)")
+
+test "one adult":
+    assert ticket(30) == ADULT
+
+test "three twelve-year-olds":
+    assert ticket(12, group=3) == SCHOOL_CLASS
+
+test "a student":
+    assert ticket(25, student=True) == STUDENT
+
+test "two small children":
+    assert ticket(4, group=2, student=True) == TODDLERS
+
+test "halving a hundred":
+    assert halvings(100) == HALVINGS

@@ -1,0 +1,9 @@
+# A typed hole lets the program run before every part is written.
+def shipping(weight_kg: f64) -> f64:
+    if weight_kg <= 2.0:
+        return 4.9
+    return todo("the price of a heavy parcel")
+
+def main():
+    print("light: {shipping(1.5)}")
+    print("heavy: {shipping(7.0)}")

@@ -1,0 +1,2 @@
+3:9-3:13 E0105 parse.expected-pattern found="`type`"
+4:23-4:27 E0103 parse.expected-expression found="`type`"

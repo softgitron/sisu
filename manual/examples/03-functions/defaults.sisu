@@ -1,0 +1,7 @@
+# A parameter with a default value can be left out of a call.
+def greet(name: str, mark: str = "."):
+    print("Hei, {name}{mark}")
+
+def main():
+    greet("Aino")
+    greet("Eero", "!")

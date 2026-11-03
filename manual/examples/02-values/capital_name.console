@@ -1,0 +1,20 @@
+$ sisu run capital_name.sisu
+error[E0327]: `str` has no variant `Kind`
+  --> capital_name.sisu:3:9
+  |
+3 |     let Kind = "csv"
+  |         ^^^^
+
+error[E0329]: this pattern might not match; add `else:` with a block that leaves the scope
+  --> capital_name.sisu:3:9
+  |
+3 |     let Kind = "csv"
+  |         ^^^^
+
+error[E0200]: cannot find `Kind` in this scope
+  --> capital_name.sisu:4:23
+  |
+4 |     print("reading a {Kind} file")
+  |                       ^^^^
+
+error[D0006]: the program was not run: errors found (3)

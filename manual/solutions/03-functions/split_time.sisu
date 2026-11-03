@@ -1,0 +1,35 @@
+##! Exercise 3.5, hours, minutes and seconds: the solution.
+##!
+##! `//` and `%` by 3600 and by 60 split the seconds. `show_time` calls
+##! `split_time` once, and an `if` expression adds the seconds or not.
+
+## `total` seconds as whole hours, minutes and seconds.
+def split_time(total: int) -> (hours: int, minutes: int, seconds: int):
+    return (total // 3600, total % 3600 // 60, total % 60)
+
+## `total` seconds as text, such as "1 h 2 min 5 s", or "1 h 2 min"
+## when `seconds` is False.
+def show_time(total: int, *, seconds: bool = True) -> String:
+    let time = split_time(total)
+    let start = "{time.hours} h {time.minutes} min"
+    return if seconds: "{start} {time.seconds} s" else: start
+
+test "an hour, two minutes and five seconds":
+    let time = split_time(3725)
+    assert time.hours == 1
+    assert time.minutes == 2
+    assert time.seconds == 5
+
+test "less than a minute":
+    let time = split_time(59)
+    assert time.hours == 0
+    assert time.minutes == 0
+    assert time.seconds == 59
+
+test "shown with seconds":
+    assert show_time(3725) == "1 h 2 min 5 s"
+    assert show_time(86399) == "23 h 59 min 59 s"
+
+test "shown without seconds":
+    assert show_time(3725, seconds=False) == "1 h 2 min"
+    assert show_time(7200, seconds=False) == "2 h 0 min"

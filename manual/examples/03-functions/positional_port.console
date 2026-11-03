@@ -1,0 +1,8 @@
+$ sisu run positional_port.sisu
+error[E0305]: wrong number of arguments to `url`: expected 1, found 2
+  --> positional_port.sisu:7:11
+  |
+7 |     print(url("example.org", 443))
+  |           ^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

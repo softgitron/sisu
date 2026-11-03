@@ -1,0 +1,9 @@
+# A function can call itself.
+def gcd(a: int, b: int) -> int:
+    if b == 0:
+        return a
+    return gcd(b, a % b)
+
+def main():
+    print("{gcd(48, 18)}")
+    print("{gcd(17, 5)}")
