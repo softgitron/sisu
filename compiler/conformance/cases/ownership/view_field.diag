@@ -1,3 +1,4 @@
 5:5-5:14 E0411 borrow.view-field-in-plain-struct ty="Label" field="text" fty="str"
   label 4:8-4:13 borrow.type-declared-here ty="Label"
+  fix borrow.own-string 5:11-5:14 "String"
   fix borrow.declare-view 4:1-4:1 "view "

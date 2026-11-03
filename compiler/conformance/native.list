@@ -210,3 +210,5 @@ unsafe/plain_casts
 unsafe/pointers
 unsafe/stale_pointer
 unsafe/vector
+unsafe/layouts
+unsafe/raw_buffer
