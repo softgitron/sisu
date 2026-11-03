@@ -1,1 +1,2 @@
 8:14-8:18 E0304 type.unknown-method ty="T" name="area"
+  fix type.add-bound 7:14-7:14 ": Shape"

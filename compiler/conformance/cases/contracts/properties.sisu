@@ -56,7 +56,7 @@ test "a wrong claim about areas shrinks to a small case":
 
 test "a dictionary's keys":
     check(arbitrary[dict[String, int]]) do d:
-        return len(d.keys().collect()) == len(d)
+        return d.keys().count() == len(d)
 
 test "an option of a box":
     check(arbitrary[Option[Box[bool]]]) do o:

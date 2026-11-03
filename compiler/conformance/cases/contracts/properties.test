@@ -11,12 +11,12 @@ test "a wrong claim about areas shrinks to a small case" ... FAILED
 panic: the property failed for Circle(r=2) (case 2, shrunk 4 times)
   the property returned False
   at test "a wrong claim about areas shrinks to a small case" (properties.sisu:54:5)
-replay: sisu test --replay 1-aa3ff71b444ad8d6-0.0.1-t4-s0-r0-c0.0.3 properties.sisu
+replay: sisu test --replay 1-865f3f0d6f92b7a7-0.0.1-t4-s0-r0-c0.0.3 properties.sisu
 
 test "a case past its budget fails" ... FAILED
 panic: the property failed for 0 (case 1, shrunk once)
   it ran past its budget of 2000 statements
   at test "a case past its budget fails" (properties.sisu:66:5)
-replay: sisu test --replay 1-aa3ff71b444ad8d6-0.0.1-t7-s0-r0-c0.0 properties.sisu
+replay: sisu test --replay 1-865f3f0d6f92b7a7-0.0.1-t7-s0-r0-c0.0 properties.sisu
 
 6 passed, 2 failed, 0 blocked

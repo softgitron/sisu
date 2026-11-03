@@ -1,7 +1,7 @@
 def main():
     let xs = [5, 2, 8, 1, 9, 3]
     print(xs.iter().map(it * 10).collect())
-    print(xs.iter().filter(it > 4).collect())
+    print(xs.iter().filter(it > 4).map(it.copy()).collect())
     print(range(100).skip(10).take(3).collect())
     print(range(5).enumerate().collect())
     print(xs.iter().count())
