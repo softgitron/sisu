@@ -1,0 +1,18 @@
+# `None` as an optional value: `best` gives an `int?`.
+struct Player:
+    name: String
+    points: list[int] = []
+
+    ## The most points in one game, `None` before the first.
+    def best(self) -> int?:
+        if self.points.is_empty():
+            return None
+        return Some(sorted(self.points)[^1])
+
+def main():
+    let aino = Player("Aino", [12, 9])
+    print(aino.best() ?? 0)
+    if let Some(points) = Player("Roni").best():
+        print(points)
+    else:
+        print("Roni has not played")

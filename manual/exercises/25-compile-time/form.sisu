@@ -1,0 +1,40 @@
+##! Exercise 25.5, a derive that lays out the fields. Kind: write. Level: 3.
+##!
+##! `Form` shows a struct's fields as a form, a line for each field: its
+##! name, padded with spaces to the length of the longest name of the
+##! struct's fields, then " : " and its value, as `print` writes it. Write
+##! the body of `form` in the impl that `derive` writes, so that every
+##! struct that asks for `@derive(Form)` gets it and every test passes.
+##! Run the tests with `sisu test form.sisu`. The hints are in chapter 25
+##! of the tutorial, under "Exercise 25.5: a derive that lays out the
+##! fields".
+
+trait Form:
+    ## `self` as a form, a line for each field.
+    def form(self) -> String
+
+    comptime def derive(T: type) -> impl Form for T:
+        return impl Form for T:
+            def form(self) -> String:
+                return todo("form")
+
+## A turn in the sauna.
+@derive(Form)
+struct Booking:
+    name: String
+    hour: int
+    minutes: int
+
+## A sauna's stove.
+@derive(Form)
+struct Stove:
+    celsius: f64
+    lit: bool
+
+test "a booking":
+    let b = Booking(name="Aino", hour=18, minutes=90)
+    assert b.form() == "name    : Aino\nhour    : 18\nminutes : 90"
+
+test "a stove":
+    let s = Stove(celsius=78.5, lit=True)
+    assert s.form() == "celsius : 78.5\nlit     : True"

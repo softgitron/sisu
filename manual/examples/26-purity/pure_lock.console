@@ -1,0 +1,11 @@
+$ sisu run pure_lock.sisu
+error[E0333]: `lock` is not pure, so the pure function `visits` cannot call it
+  --> pure_lock.sisu:5:12
+  |
+5 |     return counter.lock().value
+  |            ^^^^^^^^^^^^^^
+  |
+4 | pure def visits(counter: Mutex[int]) -> int:
+  |          ------ `visits` is declared `pure` here
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

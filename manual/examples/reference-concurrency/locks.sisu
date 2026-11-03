@@ -1,0 +1,16 @@
+# A `Mutex` or an `RwLock` owns the value that tasks share.
+from std.task import RwLock
+
+def main():
+    let words = ["sauna", "löyly", "kiuas"]
+    let letters = Mutex(0)
+    let menu = RwLock(["coffee".to_string()])
+    task.scope do s:
+        for word in words:
+            s.spawn do:
+                var guard = letters.lock()
+                guard.value += len(word)
+        s.spawn do:
+            var guard = menu.write()
+            guard.value.push("bun".to_string())
+    print("{letters.into_inner()} letters, {menu.read().value}")

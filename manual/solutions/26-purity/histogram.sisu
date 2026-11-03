@@ -1,0 +1,57 @@
+##! Exercise 26.3, a histogram in parallel. Kind: write. Level: 2.
+##!
+##! A sauna logs its temperature each minute, and a histogram counts the
+##! readings in each band of ten degrees: below 10, 10 to 19, 20 to 29,
+##! and so on, with every reading from 120 up in the last band. Write the
+##! methods of `Histogram`, a reducer for `reduce`, so that every test
+##! passes: the counts must not depend on how the readings are split into
+##! chunks. Run the tests with `sisu test histogram.sisu`. The hints are
+##! in chapter 26 of the tutorial, under "Exercise 26.3: a histogram in
+##! parallel".
+
+from std.par import Reducer, reduce
+
+## How many bands a histogram has.
+const BANDS: int = 13
+
+## How many readings fell in each band of ten degrees.
+struct Histogram:
+    counts: list[int]
+
+impl Reducer for Histogram:
+    type Item = int
+    type Output = list[int]
+
+    pure def empty() -> Histogram:
+        var counts: list[int] = []
+        for _ in range(BANDS):
+            counts.push(0)
+        return Histogram(counts=counts)
+
+    pure def add(mut self, own celsius: int):
+        let band = min(max(celsius // 10, 0), BANDS - 1)
+        self.counts[band] += 1
+
+    pure def merge(own self, own later: Histogram) -> Histogram:
+        var counts = self.counts
+        for band in range(BANDS):
+            counts[band] += later.counts[band]
+        return Histogram(counts=counts)
+
+    pure def finish(own self) -> list[int]:
+        return self.counts
+
+test "an evening's readings":
+    let readings = [22, 45, 78, 81, 85, 90, 104, 98, 87, 125, 5]
+    let want = [1, 0, 1, 0, 1, 0, 0, 1, 3, 2, 1, 0, 1]
+    for grain in [1, 2, 1024]:
+        assert reduce[Histogram](readings.copy(), grain=grain) == want
+
+test "no readings":
+    assert reduce[Histogram]([]) == [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+test "the chunks change nothing":
+    check(arbitrary[list[int]]) do readings:
+        let one = reduce[Histogram](readings.copy(), grain=1)
+        let three = reduce[Histogram](readings.copy(), grain=3)
+        return one == three and sum(one) == len(readings)

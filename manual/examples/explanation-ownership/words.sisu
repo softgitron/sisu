@@ -1,0 +1,17 @@
+# A struct that borrows, and a function that returns a list of them:
+# no lifetime is named anywhere.
+view struct Word:
+    text: str
+    line: int
+
+def words(source: str) -> list[Word]:
+    var found: list[Word] = []
+    for i, line in enumerate(source.lines()):
+        for text in line.split_whitespace():
+            found.push(Word(text, i + 1))
+    return found
+
+def main():
+    let source = "sisu means grit\nand it lasts".to_string()
+    for word in words(source):
+        print("{word.line}: {word.text}")

@@ -1,0 +1,8 @@
+$ sisu run checks_run_time.sisu
+error[E0605]: `power_of_two` is a `comptime def`: it can be called only at compile time, inside `comptime`
+  --> checks_run_time.sisu:16:11
+   |
+16 |     print(power_of_two(SLOTS))
+   |           ^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

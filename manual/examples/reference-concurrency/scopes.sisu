@@ -1,0 +1,20 @@
+# A scope runs its tasks side by side and joins them before it ends.
+def count_vowels(word: str) -> int:
+    var n = 0
+    for c in word.chars():
+        if c in ['a', 'e', 'i', 'o', 'u', 'y', 'ä', 'ö']:
+            n += 1
+    return n
+
+def main():
+    let words = ["sauna", "löyly", "kiuas"]
+    let total = task.scope do s:
+        var handles: list[Handle[int]] = []
+        for w in words:
+            handles.push(s.spawn(() -> count_vowels(w)))
+        var sum = 0
+        for h in handles:
+            let n = h.join() else: 0
+            sum += n
+        return sum
+    print("{total} vowels")

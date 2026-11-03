@@ -1,0 +1,3 @@
+5:17-5:38 E0405 borrow.mut-while-borrowed name="bookings" line="3" end="5"
+  label 3:23-3:31 borrow.borrowed-here
+  label 3:5-3:39 borrow.later-used

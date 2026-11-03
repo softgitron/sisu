@@ -1,0 +1,15 @@
+# A signature says what a function may touch, how it can fail and
+# what it borrows; the body infers the rest.
+def longest_line(fs: Fs, path: Path) -> int ! IoError:
+    let text = fs.read_to_string(path)?
+    var longest = 0
+    for line in text.lines():
+        longest = max(longest, len(line))
+    return Ok(longest)
+
+test "the longest line of a file":
+    let fs = Fs.in_memory({"notes.txt": "sisu\nmeans grit\n"})
+    assert longest_line(fs, "notes.txt") == Ok(10)
+
+test "a missing file is an error, not a crash":
+    assert longest_line(Fs.in_memory(), "notes.txt").is_err()

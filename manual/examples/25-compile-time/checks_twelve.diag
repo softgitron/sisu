@@ -1,0 +1,1 @@
+12:5-12:79 E0602 comptime.panicked message="assertion failed: power_of_two(SLOTS)\n  message: 12 slots is not a power of two"

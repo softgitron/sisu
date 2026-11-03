@@ -1,0 +1,38 @@
+##! Exercise 25.3, a template that does not unfold. Kind: fix. Level: 2.
+##!
+##! `to_csv` writes a list of values as comma-separated values: a line of
+##! column names, then a line for each value. A struct has a column for
+##! each field; any other value has one column, `value`. The file does not
+##! compile. Run `sisu test csv.sisu`, read the diagnostic, and fix
+##! `to_csv`, not the tests, so that every test passes. The hints are in
+##! chapter 25 of the tutorial, under "Exercise 25.3: a template that does
+##! not unfold".
+
+## A turn in the sauna.
+struct Booking:
+    name: String
+    hour: int
+
+## `rows` as comma-separated values, with a line of column names first.
+def to_csv[T](rows: list[T]) -> String:
+    var names: list[String] = []
+    for f in reflect.fields_of(T):
+        names.push(f.name.to_string())
+    var lines = [names.join(",")]
+    for row in rows:
+        var cells: list[String] = []
+        comptime for f in reflect.fields_of(T):
+            cells.push("{row.[f]}")
+        lines.push(cells.join(","))
+    return lines.join("\n")
+
+test "bookings":
+    let rows = [Booking(name="Aino", hour=17), Booking(name="Eero", hour=18)]
+    assert to_csv(rows) == "name,hour\nAino,17\nEero,18"
+
+test "no bookings":
+    let rows: list[Booking] = []
+    assert to_csv(rows) == "name,hour"
+
+test "numbers":
+    assert to_csv([3, 1, 4]) == "value\n3\n1\n4"

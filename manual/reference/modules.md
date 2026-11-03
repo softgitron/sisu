@@ -59,24 +59,47 @@ list them (D-019):
 
 <!-- file: examples/reference-modules/atlas.pkg/sisu.toml -->
 ```toml
+[package]
+name = "atlas"
+version = "0.1.0"
+edition = "2027"
 ```
 
 <!-- file: examples/reference-modules/atlas.pkg/src/main.sisu -->
 ```sisu
+# The root module, `atlas`, from `src/main.sisu`.
+import atlas.geo
+from atlas.geo.point import Point
+
+def main():
+    let oulu = Point(65.0, 25.5)
+    print("{geo.describe(oulu)}, {geo.EARTH_KM} km from the centre")
 ```
 
 <!-- file: examples/reference-modules/atlas.pkg/src/geo.sisu -->
 ```sisu
+# The module `atlas.geo`, from the file beside the directory `src/geo/`.
+from atlas.geo.point import Point
+
+pub const EARTH_KM: int = 6371
+
+pub def describe(p: Point) -> String:
+    return "{p.lat} N, {p.lon} E"
 ```
 
 <!-- file: examples/reference-modules/atlas.pkg/src/geo/point.sisu -->
 ```sisu
+# The module `atlas.geo.point`, from `src/geo/point.sisu`.
+pub struct Point:
+    pub lat: f64
+    pub lon: f64
 ```
 
 `sisu run` in the package's directory prints:
 
 <!-- output: examples/reference-modules/atlas.out -->
 ```text
+65.0 N, 25.5 E, 6371 km from the centre
 ```
 
 Modules of one package may import each other in any pattern, cycles
@@ -103,15 +126,50 @@ An import binds names in the module that writes it:
 - An import that names nothing is E0220 for its first name, E0203 for
   a module further along the path, and E0204 for an item a module does
   not have; one of a package that is not a dependency is E0260.
-- Imports may stand only at the top level of a module, and the
-  formatter sorts them and removes the ones nothing uses.
+- Imports stand at the top level of a module, and the formatter sorts
+  them and removes the ones nothing uses. An import inside a function
+  is E0900 in stage 0.
 
 <!-- file: examples/reference-modules/imports.files/src/main.sisu -->
 ```sisu
+# Imports that name nothing.
+import atlas.geo
+import atlas.roads
+from atlas.geo import Route
+from std.collections import *
+import maps
+
+def main():
+    print(geo.EARTH_KM)
 ```
 
 <!-- output: examples/reference-modules/imports.console -->
 ```console
+$ sisu check
+error[E0203]: there is no module `atlas.roads`
+  --> src/main.sisu:3:8
+  |
+3 | import atlas.roads
+  |        ^^^^^^^^^^^
+
+error[E0204]: module `atlas.geo` has no item `Route`
+  --> src/main.sisu:4:23
+  |
+4 | from atlas.geo import Route
+  |                       ^^^^^
+
+error[E0100]: expected a name, found `*`
+  --> src/main.sisu:5:29
+  |
+5 | from std.collections import *
+  |                             ^
+
+error[E0220]: cannot import `maps`: it names no module of this package, of a dependency in `sisu.toml`, or of the standard library
+  --> src/main.sisu:6:8
+  |
+6 | import maps
+  |        ^^^^
+
 ```
 
 **Stage 0 differs.** 09 warns about an import nothing uses; stage 0
@@ -125,7 +183,7 @@ which is E0203 instead.
 
 Every module sees, besides its own items and what it imports, the
 prelude: the same fixed set of names in every module, which no import
-brings and none can remove
+brings
 ([09](../../proposal/09-modules-packages-and-build.md#modules)).
 
 | Kind | Names |
@@ -159,7 +217,7 @@ them, unless they say otherwise (D-045):
 
 | Declared | Seen by |
 |---|---|
-| (nothing) | the module that declares it, and the modules it contains |
+| (nothing) | the module that declares it, and no other, its own child modules included |
 | `pub(package)` | every module of the same package |
 | `pub` | every module that imports it, in any package |
 
@@ -173,14 +231,41 @@ them, unless they say otherwise (D-045):
 
 <!-- file: examples/reference-modules/private.files/src/geo/point.sisu -->
 ```sisu
+# A struct with a private field and a private method.
+pub struct Point:
+    pub lat: f64
+    lon: f64
+
+    def secret(self) -> int:
+        return 42
 ```
 
 <!-- file: examples/reference-modules/private.files/src/main.sisu -->
 ```sisu
+# Private items of another module.
+from atlas.geo.point import Point
+
+def main():
+    let p = Point(65.0, 25.5)
+    print("{p.lat} {p.secret()}")
 ```
 
 <!-- output: examples/reference-modules/private.console -->
 ```console
+$ sisu run
+error[E0258]: the field `lon` of `Point` is private to the module `atlas.geo.point`; declare it `pub` to use it from another module
+  --> src/main.sisu:5:13
+  |
+5 |     let p = Point(65.0, 25.5)
+  |             ^^^^^^^^^^^^^^^^^
+
+error[E0259]: the method `secret` of `atlas.geo.point.Point` is private to the module `atlas.geo.point`; declare it `pub` to call it from another module
+  --> src/main.sisu:6:23
+  |
+6 |     print("{p.lat} {p.secret()}")
+  |                       ^^^^^^
+
+error[D0006]: the program was not run: errors found (2)
 ```
 
 **Status.** In stage 0 (D-045).
@@ -209,12 +294,12 @@ and an unknown key is W0005, a warning, and is ignored. The tables:
 
 ### `[package]`
 
-| Key | Takes | |
+| Key | Takes | Notes |
 |---|---|---|
 | `name` | the package's name, in lowercase letters, digits and `_` | required; E1004 otherwise, E1017 for a standard-library module's name |
 | `version` | `"MAJOR.MINOR.PATCH"` | required |
 | `edition` | a year, as `"2027"` | [Editions](#editions) |
-| `description`, `license` | text | for `sisu doc` and the registry |
+| `description`, `license` | text | recorded for the registry |
 | `unsafe` | `"memory"` or `"extern"`: the unsafe code the package holds | D-082; [`[trust]`](#trust) |
 | `authors`, `repository`, `readme`, `keywords` | data for the registry | accepted and kept for later |
 | `profile` | the teaching profile | [The teaching profile](#the-teaching-profile) |
@@ -233,7 +318,7 @@ Each key is a dependency's name, and its value a table:
 
 A dependency is named by its own `[package] name` (E1006 for another
 key), its directory has a manifest (E1005), and a dev-dependency is seen
-only by the package's tests. `name = "1.2"`, a version range alone, is
+only by the package's tests. `NAME = "1.2"`, a version range alone, is
 E1010 in stage 0 ([The registry](#the-registry)).
 
 ### `[features]`
@@ -272,19 +357,77 @@ holds several mistakes, which `sisu check` reports together:
 
 <!-- file: examples/reference-modules/bad_manifest.files/sisu.toml -->
 ```toml
+[package]
+name = "stove"
+version = "1.0"
+edition = "2027"
+colour = "black"
+
+[dependencies]
+json = "2.1"
+stones = "0.4"
+
+[trust]
+unsafe = ["zlib"]
 ```
 
 <!-- output: examples/reference-modules/bad_manifest.console -->
 ```console
+$ sisu check
+error[E1002]: `[package]` needs `version`
+  --> sisu.toml:1:2
+  |
+1 | [package]
+  |  ^^^^^^^
+
+error[E1003]: `version` takes a version `MAJOR.MINOR.PATCH`, as in `"0.3.1"`, found `"1.0"`
+  --> sisu.toml:3:11
+  |
+3 | version = "1.0"
+  |           ^^^^^
+
+warning[W0005]: `colour` is not a key of `[package]` that stage 0 knows; it is ignored
+  --> sisu.toml:5:1
+  |
+5 | colour = "black"
+  | ^^^^^^
+
+error[E1017]: `json` is the name of a standard-library module, which `import json` names; a package of the program needs another name
+  --> sisu.toml:8:1
+  |
+8 | json = "2.1"
+  | ^^^^
+
+error[E1010]: the dependency `json` is not a `path` dependency; stage 0 has no registry, so a dependency is `json = { path = "../json" }`
+  --> sisu.toml:8:8
+  |
+8 | json = "2.1"
+  |        ^^^^^
+
+error[E1010]: the dependency `stones` is not a `path` dependency; stage 0 has no registry, so a dependency is `stones = { path = "../stones" }`
+  --> sisu.toml:9:10
+  |
+9 | stones = "0.4"
+  |          ^^^^^
+
+error[E1015]: `[trust] unsafe` names `zlib`, which is not a dependency of this package
+  --> sisu.toml:12:11
+   |
+12 | unsafe = ["zlib"]
+   |           ^^^^^^
+
 ```
 
 `json` is the name of a standard-library module, so no package of the
 program may take it, and neither dependency is a `path`.
 
 **Stage 0 differs.** A `version` that is not `MAJOR.MINOR.PATCH` gets
-both E1003 and E1002 ("needs `version`"), though the key is there. The
-`[review]` table of [10](../../proposal/10-tooling.md) is accepted and
-ignored.
+both E1003 and E1002 ("needs `version`"), though the key is there. A
+dev-dependency can be imported by the package's own code, not only by
+its tests. E1022 asks for `--accept-unsafe`, which `sisu check`, `run`
+and `build` reject as an option they do not take (D0009), so a raised
+level is accepted by deleting `sisu.lock`. The `[review]` table of
+[10](../../proposal/10-tooling.md) is accepted and ignored.
 
 **Status.** In stage 0 (D-063), with the differences above.
 
@@ -343,6 +486,21 @@ lockfile of the workspace in [Workspaces](#workspaces):
 
 <!-- output: examples/reference-modules/sauna.lock -->
 ```toml
+# Written by `sisu` from the manifests: the packages this build resolved.
+# It is data; `sisu` rewrites it when a manifest changes.
+version = 1
+
+[[package]]
+name = "booking"
+version = "0.1.0"
+source = "path+booking"
+dependencies = ["sauna"]
+
+[[package]]
+name = "sauna"
+version = "0.2.0"
+source = "path+sauna"
+dependencies = []
 ```
 
 **Status.** In stage 0.
@@ -362,6 +520,17 @@ lockfile of the workspace in [Workspaces](#workspaces):
 
 <!-- output: examples/reference-modules/cycle.console -->
 ```console
+$ sisu check stove
+error[E1007]: the packages depend on each other in a cycle: `stove` -> `benches` -> `stove`; packages build in dependency order, so their graph has no cycle
+  --> ../benches/sisu.toml:6:1
+  |
+6 | stove = { path = "../stove" }
+  | ^^^^^
+  ::: sisu.toml:6:1
+  |
+6 | benches = { path = "../benches" }
+  | ------- `stove` depends on `benches` here
+
 ```
 
 **Stage 0 differs.** Every dependency is a `path` in stage 0; versions,
@@ -374,46 +543,101 @@ so does linking two major versions of one package.
 
 A directory whose `sisu.toml` has `[workspace]` with `members` builds
 its member packages together, with one lockfile beside it. Each member
-is a directory with its own manifest (E1013 otherwise), and a members'
-dependencies on each other are ordinary `path` dependencies. A
+is a directory with its own manifest (E1013 otherwise), and the
+members' dependencies on each other are ordinary `path` dependencies. A
 manifest with `[workspace]` and no `[package]` is not a package, so it
 cannot be a dependency (E1016). `sisu run DIR` and `sisu test DIR`, in
 the workspace's directory, work on one member.
 
 <!-- file: examples/reference-modules/sauna.pkg/sisu.toml -->
 ```toml
+[workspace]
+members = ["sauna", "booking"]
 ```
 
 <!-- file: examples/reference-modules/sauna.pkg/sauna/sisu.toml -->
 ```toml
+[package]
+name = "sauna"
+version = "0.2.0"
+edition = "2027"
+description = "How hot a sauna is"
+license = "MIT"
+
+[features]
+default = []
+fahrenheit = []
 ```
 
 <!-- file: examples/reference-modules/sauna.pkg/sauna/src/lib.sisu -->
 ```sisu
+##! How hot a sauna is.
+pub from sauna.comfort import feel
+
+## The temperature of a good sauna, in degrees Celsius.
+pub const GOOD: int = 80
+
+pub(package) def round_to_ten(c: int) -> int:
+    return c // 10 * 10
+
+## `c` degrees Celsius in Fahrenheit, rounded down.
+@cfg(feature="fahrenheit")
+pub def to_fahrenheit(c: int) -> int:
+    return c * 9 // 5 + 32
 ```
 
 <!-- file: examples/reference-modules/sauna.pkg/sauna/src/comfort.sisu -->
 ```sisu
+# The module `sauna.comfort`.
+
+## How a sauna at `celsius` degrees feels.
+pub def feel(celsius: int) -> str:
+    return if celsius >= 70: "hot" else: "warm"
 ```
 
 <!-- file: examples/reference-modules/sauna.pkg/booking/sisu.toml -->
 ```toml
+[package]
+name = "booking"
+version = "0.1.0"
+edition = "2027"
+
+[dependencies]
+sauna = { path = "../sauna", features = ["fahrenheit"] }
 ```
 
 <!-- file: examples/reference-modules/sauna.pkg/booking/src/main.sisu -->
 ```sisu
+# An application that uses the library `sauna` of its workspace.
+import sauna
+from sauna.comfort import feel
+
+def main():
+    let c = sauna.GOOD
+    print("{c} °C is {sauna.feel(c)}, 60 °C is {feel(60)}")
+    print("{c} °C is {sauna.to_fahrenheit(c)} °F")
 ```
 
 `sisu run` in `booking` prints:
 
 <!-- output: examples/reference-modules/sauna.out -->
 ```text
+80 °C is hot, 60 °C is warm
+80 °C is 176 °F
 ```
 
 The library's `pub(package)` function is seen by its own modules only:
 
 <!-- output: examples/reference-modules/package_only.console -->
 ```console
+$ sisu run booking
+error[E0256]: `round_to_ten` is `pub(package)` in `sauna`, so only the modules of the package `sauna` can use it
+  --> src/main.sisu:5:17
+  |
+5 |     print(sauna.round_to_ten(84))
+  |                 ^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
 ```
 
 **Status.** In stage 0.
@@ -432,16 +656,35 @@ a manifest (Python's PEP 723 shape); a block that never ends is E1014.
 
 <!-- file: examples/reference-modules/heat.sisu -->
 ```sisu
+#!/usr/bin/env sisu
+# /// script
+# [dependencies]
+# sauna = { path = "sauna" }
+# ///
+# A script that names its dependency in its inline metadata.
+import sauna
+
+for arg in sys.env.args():
+    let celsius = arg.parse_int() ?? 0
+    print("{celsius} °C is {sauna.feel(celsius)}")
 ```
 
 <!-- output: examples/reference-modules/heat.console -->
 ```console
+$ sisu heat.sisu 80 60
+80 °C is hot
+60 °C is warm
 ```
 
 The library it names lives in the directory `sauna` beside it:
 
 <!-- file: examples/reference-modules/heat.files/sauna/src/lib.sisu -->
 ```sisu
+##! How hot a sauna is.
+
+## How a sauna at `celsius` degrees feels.
+pub def feel(celsius: int) -> str:
+    return if celsius >= 70: "hot" else: "warm"
 ```
 
 **Status.** In stage 0 (D-052).
@@ -482,7 +725,7 @@ waits out a cooldown and refuses new packages in unattended runs.
 (E1010), and `sisu add`, `update` and `publish` are designed
 ([R16](sisu-command.md#commands-that-are-designed)).
 
-**Status.** Designed (D-031, D-066).
+**Status.** Designed (D-031; D-066 leans).
 
 ## The teaching profile
 
@@ -526,4 +769,4 @@ C++ interop (Q-24).
 | E1007 | `package.cycle` | [Dependencies](#dependencies) |
 | E1013, E1016 | `package.no-member`, `package.no-package` | [Workspaces](#workspaces) |
 | E0261, E1014 | `resolve.script-main`, `package.script-metadata` | [Scripts and inline metadata](#scripts-and-inline-metadata) |
-| D0065 | `driver.lockfile-changed` | [The lockfile](#the-lockfile) |
+| D0065 | `cli.locked` | [The lockfile](#the-lockfile) |

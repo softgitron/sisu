@@ -1,0 +1,16 @@
+# A task's panic reaches the code that joins it as `TaskPanicked`.
+def risky(n: int) -> int:
+    if n > 2:
+        panic("too many: {n}")
+    return n
+
+def main():
+    task.scope do s:
+        let fine = s.spawn(() -> risky(1))
+        let broken = s.spawn(() -> risky(5))
+        print(fine.join())
+        match broken.join():
+            case Err(TaskPanicked(message, ..)):
+                print("the task panicked: {message}")
+            case other:
+                print("{other:?}")

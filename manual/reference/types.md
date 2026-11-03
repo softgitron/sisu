@@ -15,9 +15,11 @@ types mean.
 [chapter 7](../tutorial/07-structs-and-enums.md) (structs and enums),
 [chapter 8](../tutorial/08-errors.md) (absent values and errors),
 [chapter 14](../tutorial/14-traits.md) (traits),
-[chapter 15](../tutorial/15-generics.md) (generics) and
+[chapter 15](../tutorial/15-generics.md) (generics),
 [chapter 16](../tutorial/16-closures-and-iterators.md) (function
-types); the proposal's [03, Types and
+types), [chapter 23](../tutorial/23-contracts.md) (refinement types)
+and [chapter 24](../tutorial/24-numbers.md) (numbers in depth); the
+proposal's [03, Types and
 generics](../../proposal/03-types-and-generics.md); the compiler's
 [architecture notes](../../compiler/docs/architecture.md), "Type
 checking", "Traits and generics" and "Numbers, bytes and slices";
@@ -312,7 +314,7 @@ Every other conversion is a method, whose name says what it may lose:
 | `x.to_int()` | a sized integer | an `int`; for a `u64`, `u128` or `i128`, an `int?` that is `None` beyond `int`'s range |
 | `n.truncate_to[T]()` | an integer | the low bits of `n` in `T`, as two's complement wraps |
 | `n.to_f64()`, `n.to_f32()` | an `int` | the nearest float |
-| `x.truncate_to_int()` | a float | the whole part, toward zero |
+| `x.truncate_to_int()` | a float | the whole part, toward zero; a panic (R0023) for NaN or a value beyond `int` |
 | `x.round()`, `x.floor()`, `x.ceil()` | a float | a float with no fraction |
 | `x.to_f32()` | an `f64` | the nearest `f32`, or an infinity beyond its range |
 
@@ -392,8 +394,9 @@ workers.
   nothing, itself included; `x.is_nan()` tests for it.
 - A float has a partial order: `f64` and `f32` implement `PartialOrd`
   but not `Ord` or `Hash`, so `sorted` of floats and a float as a key of
-  a `dict` or `set` are E0347. `sort_by` with `partial_cmp` sorts them,
-  deciding what NaN does.
+  a `dict` or `set` are E0347. `x.partial_cmp(y)` gives `None` for NaN,
+  and `x.cmp(y)` panics on it (R0017), so `sort_by` with either sorts
+  floats, with what NaN does written out.
 - An `f32` is computed as an `f32`, rounded once from the exact result,
   and printed as the shortest text that reads back as the same `f32`.
 
@@ -1715,8 +1718,8 @@ These are left out on purpose ([03](../../proposal/03-types-and-generics.md#what
 | E0324, E0358 | `type.cannot-infer`, `type.let-needs-type` | [Static types and local inference](#static-types-and-local-inference) |
 | [E0374](diagnostics.md#e0374) | `type.literal-out-of-range` | [Integers](#integers) |
 | [R0003](diagnostics.md#r0003), [R0004](diagnostics.md#r0004), R0005, R0011, R0093 | `panic.overflow`, `panic.divide-by-zero`, `panic.shift-out-of-range`, `panic.negative-exponent`, `panic.shift-out-of-range-sized` | [Overflow traps](#overflow-traps) |
-| [E0373](diagnostics.md#e0373) | `type.mixed-numbers` | [Widening and conversions](#widening-and-conversions) |
-| [E0301](diagnostics.md#e0301), E0372 | `type.integer-division`, `type.float-floor-division` | [Floating point](#floating-point) |
+| [E0373](diagnostics.md#e0373), R0023 | `type.mixed-numbers`, `panic.conversion` | [Widening and conversions](#widening-and-conversions) |
+| [E0301](diagnostics.md#e0301), E0372, R0017 | `type.integer-division`, `type.float-floor-division`, `panic.unordered` | [Floating point](#floating-point) |
 | [E0347](diagnostics.md#e0347) | `type.bound-not-satisfied` | [Floating point](#floating-point), [Collections](#collections), [Traits are implemented by name](#traits-are-implemented-by-name), [Generic types and functions](#generic-types-and-functions), [The auto traits](#the-auto-traits) |
 | [E0302](diagnostics.md#e0302), [E0016](diagnostics.md#e0016) | `type.not-bool`, `lex.bad-char-literal` | [Truth values and characters](#truth-values-and-characters) |
 | [E0345](diagnostics.md#e0345), [R0115](diagnostics.md#r0115) | `type.str-not-indexable`, `panic.char-boundary` | [Text](#text) |

@@ -1,0 +1,5 @@
+$ sisu run targets.sisu
+hei: paths are written home/aino
+$ sisu test targets.sisu
+test "a test has its own greeting" ... ok
+1 passed, 0 failed, 0 blocked

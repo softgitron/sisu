@@ -1,0 +1,10 @@
+# `class Player` and its `__init__`, as a struct.
+struct Player:
+    name: String
+    points: list[int] = []
+
+def main():
+    var aino = Player("Aino")
+    aino.points.push(12)
+    print("{aino.name}: {aino.points}")
+    print(Player(name="Roni").points)

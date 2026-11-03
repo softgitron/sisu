@@ -1,0 +1,3 @@
+$ sisu run scores.sisu
+error: NotFound(path="scores.txt")
+  at scores.sisu:28:16

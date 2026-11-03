@@ -1,0 +1,58 @@
+##! Exercise 26.4, a sort by halves. Kind: write. Level: 3.
+##!
+##! Merge sort sorts a list by sorting its two halves and merging them.
+##! The halves do not depend on each other, so `par.join` can sort them
+##! side by side. Write `merge`, which merges two sorted lists, and
+##! `sort_halves`, which sorts a list that way, halving it until a part
+##! is small enough for `sorted`, so that every test passes. Run the tests
+##! with `sisu test halves.sisu`. The hints are in chapter 26 of the
+##! tutorial, under "Exercise 26.4: a sort by halves".
+
+import std.par
+
+## The items of `a` and `b`, which are both sorted, in one sorted list.
+pure def merge(a: Slice[int], b: Slice[int]) -> list[int]:
+    var out: list[int] = []
+    var i = 0
+    var j = 0
+    while i < len(a) and j < len(b):
+        if a[i] <= b[j]:
+            out.push(a[i])
+            i += 1
+        else:
+            out.push(b[j])
+            j += 1
+    while i < len(a):
+        out.push(a[i])
+        i += 1
+    while j < len(b):
+        out.push(b[j])
+        j += 1
+    return out
+
+## `xs` sorted: its halves sorted side by side with `par.join`, and a part
+## of at most `small` items sorted with `sorted`.
+pure def sort_halves(xs: Slice[int], small: int = 8) -> list[int]:
+    requires small >= 1
+    if len(xs) <= small:
+        return sorted(xs.iter())
+    let mid = len(xs) // 2
+    let (low, high) = par.join(
+        () -> sort_halves(xs[:mid], small),
+        () -> sort_halves(xs[mid:], small),
+    )
+    return merge(low, high)
+
+test "merging":
+    assert merge([1, 4, 9], [2, 3, 10]) == [1, 2, 3, 4, 9, 10]
+    assert merge([7, 7], [7]) == [7, 7, 7]
+    assert merge([], [5]) == [5]
+
+test "sorting":
+    assert sort_halves([5, 3, 8, 1, 9, 2], small=1) == [1, 2, 3, 5, 8, 9]
+    assert sort_halves([4, 2], small=8) == [2, 4]
+    assert sort_halves([]) == []
+
+test "sorting agrees with sorted":
+    check(arbitrary[list[int]]) do xs:
+        return sort_halves(xs, small=2) == sorted(xs)

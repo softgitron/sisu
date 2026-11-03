@@ -1,0 +1,8 @@
+$ sisu run world.sisu
+error[E0601]: the compile-time evaluation of this expression used the standard output; nothing reaches the world at compile time
+  --> world.sisu:8:26
+  |
+8 | const GREETING: String = comptime greet("Aino")
+  |                          ^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

@@ -1,0 +1,15 @@
+# What makes `pure` hold: a `dict` and a `set` keep insertion order.
+
+## The words of `text` in the order they first appear, and how often
+## each appears.
+pure def tally(text: str) -> dict[String, int]:
+    var counts: dict[String, int] = {}
+    for word in text.split_whitespace():
+        counts.entry(word.to_lowercase()).or_insert(0) += 1
+    return counts
+
+def main():
+    let counts = tally("Löyly kiuas löyly vihta kiuas löyly")
+    for word, n in counts:
+        print("{word} {n}")
+    print({3, 1, 2})

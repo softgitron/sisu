@@ -6,7 +6,7 @@ functions) and the bindings that a body declares with `let` and `var`.
 For each it gives the form, what it declares, where it may stand and the
 diagnostics that guard it. What the types mean is
 [R2](types.md); how the modules of a package see each other's items is
-[R13](../README.md#the-reference), when it is written.
+[R13](modules.md).
 
 **See also:** the tutorial's [chapter 2](../tutorial/02-values.md)
 (`let`, `var` and `const`), [chapter 3](../tutorial/03-functions.md)
@@ -50,7 +50,8 @@ A module is a sequence of items, each starting at the left margin:
 - Statements, `let` and `var` among them, stand only in the body of a
   function or a test; one at the top level of a module is E0107
   ([R17](diagnostics.md#e0107)). A script is the exception: its
-  top-level statements are its `main` ([R13](../README.md#the-reference)).
+  top-level statements are its `main`
+  ([R13](modules.md#scripts-and-inline-metadata)).
 
 <!-- file: examples/reference-declarations/items.sisu -->
 ```sisu
@@ -911,8 +912,7 @@ PATH import NAME, NAME as OTHER` binds items of the module. A path
 names a module of the standard library (`std.NAME`), of the program's
 own package by the package's name, or of a dependency by its name; one
 that names nothing is E0220. There are no glob imports and no cycles
-between packages. The rules are [R13](../README.md#the-reference), when
-it is written.
+between packages. The rules are [R13](modules.md#imports).
 
 <!-- file: examples/reference-declarations/imports.sisu -->
 ```sisu
@@ -960,7 +960,7 @@ of an item from where it is not visible is E0255, E0256 (for
 `pub(package)`), E0258 for a field and E0259 for a method; a name that a
 module imported is visible through it only when the import is `pub`
 (E0257). Visibility between the modules of a package is
-[R13](../README.md#the-reference), when it is written.
+[R13](modules.md#visibility).
 
 **Status.** In stage 0 (D-045).
 

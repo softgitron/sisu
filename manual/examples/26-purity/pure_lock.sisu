@@ -1,0 +1,8 @@
+# Nothing in `pure` code may observe the order in which tasks run.
+
+## The visits so far, read from a counter that tasks share.
+pure def visits(counter: Mutex[int]) -> int:
+    return counter.lock().value
+
+def main():
+    print(visits(Mutex(3)))

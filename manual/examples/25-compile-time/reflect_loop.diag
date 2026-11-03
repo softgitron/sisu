@@ -1,0 +1,2 @@
+28:20-28:36 E0609 comptime.instance-failed name="columns[Booking]" reason="a list is a compile-time value with no run-time form"
+  label 16:14-16:34 comptime.instance-here

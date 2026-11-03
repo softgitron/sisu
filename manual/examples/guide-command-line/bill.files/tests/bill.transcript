@@ -1,0 +1,17 @@
+$ bill --total 84.50 Aino Eero Roni
+Aino pays 30.98
+Eero pays 30.98
+Roni pays 30.98
+$ bill --total 84.50 --tip 0 --round Aino Eero Roni
+Aino pays 29.00
+Eero pays 29.00
+Roni pays 29.00
+$ bill --help
+usage: bill [OPTIONS] NAME...
+  --total <f64>
+  --tip <int>  (default: 10)
+  --round
+  names...  (String)
+$ bill --total lots Aino
+usage: bill [OPTIONS] NAME...; `bill --help` lists them
+error: InvalidValue(name="--total", value="lots") (exit 1)

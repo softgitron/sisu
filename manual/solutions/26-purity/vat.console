@@ -1,0 +1,8 @@
+$ sisu test vat.sisu
+error[E0335]: this function is passed where a pure function is required, but it calls `add_vat`, which is not pure
+  --> vat.sisu:19:28
+   |
+19 |     return par.map(prices, add_vat)
+   |                            ^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

@@ -1,0 +1,5 @@
+test "merging" ... ok
+test "sorting" ... ok
+test "sorting agrees with sorted" ... ok
+test "contract of sort_halves" ... ok
+4 passed, 0 failed, 0 blocked

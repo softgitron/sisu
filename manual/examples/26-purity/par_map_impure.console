@@ -1,0 +1,8 @@
+$ sisu run par_map_impure.sisu
+error[E0335]: this function is passed where a pure function is required, but it calls `fahrenheit`, which is not pure
+  --> par_map_impure.sisu:11:29
+   |
+11 |     print(par.map(readings, fahrenheit))
+   |                             ^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

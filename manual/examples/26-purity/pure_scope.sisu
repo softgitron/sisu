@@ -1,0 +1,33 @@
+# A `pure` scope reports the failure of the earliest task, not the first.
+error CheckError:
+    Bad(part: int)
+
+## Checks part `part` of a batch, after `work` steps; odd parts are bad.
+pure def check(part: int, work: int) -> int ! CheckError:
+    var total = 0
+    for k in range(work):
+        total += k
+    if part % 2 == 1:
+        return Err(Bad(part))
+    return Ok(total)
+
+## Checks the parts of a batch at once, as a `pure` function.
+pure def check_pure(work: list[int]) -> int ! {CheckError, TaskError}:
+    return task.scope do s:
+        for i in range(len(work)):
+            let n = work[i]
+            s.spawn(() -> check(i, n))
+        return Ok(len(work))
+
+## The same, in a function that is not `pure`.
+def check_any(work: list[int]) -> int ! {CheckError, TaskError}:
+    return task.scope do s:
+        for i in range(len(work)):
+            let n = work[i]
+            s.spawn(() -> check(i, n))
+        return Ok(len(work))
+
+def main():
+    let work = [5, 50_000, 10, 10]
+    print(check_pure(work))
+    print(check_any(work))

@@ -1,0 +1,36 @@
+##! Exercise 25.2, a constant over its budget. Kind: fix. Level: 1.
+##!
+##! `LONGEST` is worked out while the program compiles: the number below
+##! a thousand whose journey to 1, by the steps of chapter 4's Collatz
+##! exercise, is the longest. The file does not compile. Run
+##! `sisu test journeys.sisu`, read the diagnostic, and fix the program,
+##! not the tests, so that every test passes. The hints are in chapter 25
+##! of the tutorial, under "Exercise 25.2: a constant over its budget".
+
+## The number of steps from `n` to 1, halving an even number and taking
+## an odd one to three times itself plus one.
+def steps(n: int) -> int:
+    var count = 0
+    var k = n
+    while k != 1:
+        k = if k % 2 == 0: k // 2 else: 3 * k + 1
+        count += 1
+    return count
+
+## The number below `limit` whose journey to 1 has the most steps.
+def longest_below(limit: int) -> int:
+    var best = 1
+    for n in range(1, limit):
+        if steps(n) > steps(best):
+            best = n
+    return best
+
+const LONGEST: int = comptime longest_below(1000)
+
+test "a few journeys":
+    assert steps(1) == 0
+    assert steps(6) == 8
+
+test "the longest journey below a thousand":
+    assert LONGEST == 871
+    assert steps(LONGEST) == 178

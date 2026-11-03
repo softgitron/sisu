@@ -1,0 +1,11 @@
+$ sisu run pure_print.sisu
+error[E0333]: `print` is not pure, so the pure function `feel` cannot call it
+  --> pure_print.sisu:9:5
+  |
+9 |     print("feeling {len(temps)} readings")
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+6 | pure def feel(temps: Slice[int]) -> (mean: int, highest: int):
+  |          ---- `feel` is declared `pure` here
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

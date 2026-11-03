@@ -1,0 +1,3 @@
+Ok(Some(30))
+Ok(None)
+Err(NotANumber(key="timeout", text="half a minute"))

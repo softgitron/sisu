@@ -831,8 +831,8 @@ experiment ([17](../../proposal/17-testing.md); 18, Phase 6).
 - `--no-default-features` leaves out the features that the manifest's
   `default` list turns on.
 
-`@cfg(feature="NAME")` reads the features ([R13](../README.md#the-reference), when
-it is written; [09](../../proposal/09-modules-packages-and-build.md)).
+`@cfg(feature="NAME")` reads the features ([R13](modules.md#features);
+[09](../../proposal/09-modules-packages-and-build.md)).
 
 **Status.** In stage 0.
 

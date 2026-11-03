@@ -1,0 +1,6 @@
+test "the fields of a struct" ... ok
+test "the fields with defaults" ... ok
+test "the fields of each variant" ... ok
+test "a type's name" ... ok
+test "ordinary code at compile time" ... ok
+5 passed, 0 failed, 0 blocked

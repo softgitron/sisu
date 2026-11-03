@@ -1,0 +1,10 @@
+# An `Atomic` changes without a lock, with the ordering each call names.
+def main():
+    let bathers = Atomic(0)
+    let lit = task.Once()
+    task.scope do s:
+        for _ in range(5):
+            s.spawn do:
+                lit.call_once(() -> print("the stove is lit, once"))
+                _ = bathers.fetch_add(1, Relaxed)
+    print("{bathers.load(Acquire)} bathers")

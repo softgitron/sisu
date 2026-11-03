@@ -1,0 +1,19 @@
+# `select` waits for whichever of its arms is ready first.
+def next_order(orders: Receiver[String], clock: Clock) -> String:
+    select:
+        case got = orders.recv():
+            let order = got else:
+                return "the counter is closed"
+            return "order: {order}"
+        case _ = clock.after(Duration.minutes(5)):
+            return "no order in five minutes"
+
+test "an order that is waiting"(clock: TestClock):
+    let tx, rx = channel[String](capacity=1)
+    tx.send("coffee".to_string()).expect("there is room")
+    assert next_order(rx, clock) == "order: coffee"
+
+test "no order comes"(clock: TestClock):
+    let tx, rx = channel[String](capacity=1)
+    assert next_order(rx, clock) == "no order in five minutes"
+    _ = tx

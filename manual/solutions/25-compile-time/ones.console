@@ -1,0 +1,23 @@
+$ sisu test ones.sisu
+warning[W0001]: typed hole `ones_in` of type `int`
+  --> ones.sisu:13:12
+   |
+13 |     return todo("ones_in")
+   |            ^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `a table worked out with `comptime`` of type `list[int]`
+  --> ones.sisu:16:25
+   |
+16 | const ONES: list[int] = todo("a table worked out with `comptime`")
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `count_ones` of type `int`
+  --> ones.sisu:20:12
+   |
+20 |     return todo("count_ones")
+   |            ^^^^^^^^^^^^^^^^^^
+
+test "the bits of a byte" ... blocked by todo("ones_in")
+test "the table" ... blocked by todo("a table worked out with `comptime`")
+test "counting the bits of data" ... blocked by todo("count_ones")
+0 passed, 0 failed, 3 blocked

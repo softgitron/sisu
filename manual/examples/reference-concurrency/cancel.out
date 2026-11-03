@@ -1,0 +1,3 @@
+the heater: Err(Cancelled)
+True Err(Cancelled)
+in a shield: Ok(())

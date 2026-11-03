@@ -1,0 +1,16 @@
+# `std.par` runs `pure` code over data; the result never depends on it.
+import std.par
+
+pure def square(n: ref int) -> int:
+    return n * n
+
+def main():
+    let xs = [1, 2, 3, 4, 5]
+    print(par.map(xs, square))
+    let (low, high) = par.join(() -> sum([1, 2]), () -> sum([3, 4]))
+    print("{low} {high}")
+    print(par.reduce[par.Sum[f64]]([0.1, 0.2, 0.3], grain=1))
+    var total = 0
+    for x in par.iter(xs):
+        total += x
+    print(total)

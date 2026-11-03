@@ -1,0 +1,11 @@
+# `par.map` gives `f` of each value, and `f` must be `pure`.
+import std.par
+
+## The temperature in Fahrenheit.
+pure def fahrenheit(celsius: ref f64) -> f64:
+    return celsius * 9.0 / 5.0 + 32.0
+
+def main():
+    let readings = [72.5, 80.0, 85.0, 90.0]
+    print(par.map(readings, fahrenheit))
+    print(par.map(readings, it >= 85.0))

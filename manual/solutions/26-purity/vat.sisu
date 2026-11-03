@@ -1,0 +1,25 @@
+##! Exercise 26.2, a note in a parallel map. Kind: fix. Level: 1.
+##!
+##! `with_vat` adds 25.5 % VAT to prices with `par.map`, and the function
+##! it maps prints a note for each price. The file does not compile. Run
+##! `sisu test vat.sisu`, read the diagnostic, and fix the program, not
+##! the tests, so that every test passes and the program still prints a
+##! note of how many prices it changed. The hints are in chapter 26 of the
+##! tutorial, under "Exercise 26.2: a note in a parallel map".
+
+import std.par
+
+## `cents` with VAT added, rounded down to a cent.
+pure def add_vat(cents: ref int) -> int:
+    return cents * 1255 // 1000
+
+## The `prices` with VAT added, worked out in parallel.
+def with_vat(prices: list[int]) -> list[int]:
+    print("adding VAT to {len(prices)} prices")
+    return par.map(prices, add_vat)
+
+test "prices with VAT":
+    assert with_vat([1000, 250, 399]) == [1255, 313, 500]
+
+test "no prices":
+    assert with_vat([]) == []

@@ -1,0 +1,9 @@
+$ sisu run checks_twelve.sisu
+error[E0602]: the compile-time evaluation of this expression panicked: assertion failed: power_of_two(SLOTS)
+  message: 12 slots is not a power of two
+  --> checks_twelve.sisu:12:5
+   |
+12 |     comptime assert power_of_two(SLOTS), "{SLOTS} slots is not a power of two"
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

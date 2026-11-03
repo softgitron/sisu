@@ -1,0 +1,2 @@
+5:12-5:26 E0333 type.impure-call callee="lock" name="visits"
+  label 4:10-4:16 type.declared-pure-here name="visits"

@@ -1,0 +1,22 @@
+$ sisu check habits.sisu
+error[E0344]: a constant negative index does not compile; count from the end with `^`: `points[^1]`
+  --> habits.sisu:4:18
+  |
+4 |     print(points[-1])
+  |                  ^^
+  = fix: count from the end with `^`: `^1`
+
+error[E0301]: `/` divides floats; for integers use `//`, or convert to `f64` first
+  --> habits.sisu:5:11
+  |
+5 |     print(sum(points) / len(points))
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: use `//` for integer division: `//`
+
+error[E0302]: a condition must be a `bool`, not `list[int]`; Sisu has no truthiness
+  --> habits.sisu:6:8
+  |
+6 |     if points:
+  |        ^^^^^^
+  = note: write the test explicitly, as in `not xs.is_empty()` or `x != 0`
+

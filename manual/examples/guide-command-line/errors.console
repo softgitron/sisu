@@ -1,0 +1,9 @@
+$ sisu run bill.sisu --total lots Aino
+usage: bill [OPTIONS] NAME...; `bill --help` lists them
+error: InvalidValue(name="--total", value="lots")
+$ sisu run bill.sisu --tip 5 Aino
+usage: bill [OPTIONS] NAME...; `bill --help` lists them
+error: MissingArgument(name="--total")
+$ sisu run bill.sisu --totl 84.50 Aino
+usage: bill [OPTIONS] NAME...; `bill --help` lists them
+error: UnknownOption(name="--totl")

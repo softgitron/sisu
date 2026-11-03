@@ -1,0 +1,71 @@
+##! Exercise 25.1, predict the compile-time values. Kind: predict. Level: 1.
+##!
+##! Each constant is your prediction of what a compile-time expression
+##! gives, written as `print` would write it. Write each as a literal,
+##! then run `sisu test predict_comptime.sisu`. The hints are in chapter
+##! 25 of the tutorial, under "Exercise 25.1: predict the compile-time
+##! values".
+
+## A sauna's stove.
+struct Stove:
+    celsius: int
+    stones_kg: int = 60
+    lit: bool = False
+
+## What heats a stove.
+enum Fuel:
+    Wood
+    Electric(kilowatts: int)
+    Gas(litres: int, pressure: f64)
+
+## How many fields `T` has.
+comptime def field_count(T: type) -> int:
+    return len(reflect.fields_of(T))
+
+## The names of the fields of `T` that have a default.
+comptime def defaults(T: type) -> list[str]:
+    var names: list[str] = []
+    comptime for f in reflect.fields_of(T):
+        if f.default:
+            names.push(f.name)
+    return names
+
+## How many fields each variant of `T` has.
+comptime def variant_sizes(T: type) -> list[int]:
+    var sizes: list[int] = []
+    comptime for v in reflect.variants_of(T):
+        sizes.push(len(v.fields))
+    return sizes
+
+## The sum of the numbers from 1 to `n`.
+def triangle(n: int) -> int:
+    var total = 0
+    for k in range(1, n + 1):
+        total += k
+    return total
+
+# Three fields, whether or not they have defaults.
+const FIELDS: str = "3"
+# A list of text prints its items in quotes.
+const DEFAULTS: str = "[\"stones_kg\", \"lit\"]"
+# A unit variant has no fields.
+const SIZES: str = "[0, 1, 2]"
+# The name as the program writes it.
+const NAME: str = "Fuel"
+# The compiler runs the loop, as the program would.
+const TRIANGLE: str = "5050"
+
+test "the fields of a struct":
+    assert "{comptime field_count(Stove)}" == FIELDS
+
+test "the fields with defaults":
+    assert "{comptime defaults(Stove)}" == DEFAULTS
+
+test "the fields of each variant":
+    assert "{comptime variant_sizes(Fuel)}" == SIZES
+
+test "a type's name":
+    assert "{comptime reflect.name_of(Fuel)}" == NAME
+
+test "ordinary code at compile time":
+    assert "{comptime triangle(100)}" == TRIANGLE

@@ -1,0 +1,21 @@
+# `parse` returns an error where Python's raised `ValueError`.
+error LineError:
+    NotTwoWords
+    NotANumber(text: String)
+
+## The name and the points of a line `NAME POINTS`.
+def parse(line: str) -> (String, int) ! LineError:
+    let words = line.split_whitespace().collect()
+    if len(words) != 2:
+        return Err(NotTwoWords)
+    let points = words[1].parse_int() else:
+        return Err(NotANumber(words[1].to_string()))
+    return Ok((words[0].to_string(), points))
+
+def main():
+    for line in ["Aino 12", "Eero seven", "Roni"]:
+        match parse(line):
+            case Ok((name, points)):
+                print("{name} has {points}")
+            case Err(e):
+                print("skipped {line}: {e}")

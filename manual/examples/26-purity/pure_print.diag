@@ -1,0 +1,2 @@
+9:5-9:43 E0333 type.impure-call callee="print" name="feel"
+  label 6:10-6:14 type.declared-pure-here name="feel"

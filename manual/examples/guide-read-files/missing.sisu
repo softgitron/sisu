@@ -1,0 +1,9 @@
+# A missing file is an `IoError`, and `match` tells it from the others.
+def main(sys: System):
+    match sys.fs.read_to_string("settings.txt"):
+        case Ok(text):
+            print(text)
+        case Err(NotFound(path)):
+            print("no {path}, so the defaults")
+        case Err(e):
+            print("cannot read the settings: {e}")

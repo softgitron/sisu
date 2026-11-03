@@ -1,0 +1,3 @@
+test "a few journeys" ... ok
+test "the longest journey below a thousand" ... ok
+2 passed, 0 failed, 0 blocked

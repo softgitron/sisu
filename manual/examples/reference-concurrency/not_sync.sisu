@@ -1,0 +1,7 @@
+# A `Cell` cannot be shared with another task by reference.
+def main():
+    let visits = Cell(0)
+    task.scope do s:
+        s.spawn do:
+            visits.set(visits.get() + 1)
+    print(visits.get())

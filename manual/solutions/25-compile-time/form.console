@@ -1,0 +1,16 @@
+$ sisu test form.sisu
+warning[W0001]: typed hole `form` of type `String`
+  --> <derive>/main.sisu:4:16
+  |
+4 |         return todo("form")
+  |                ^^^^^^^^^^^^
+
+warning[W0001]: typed hole `form` of type `String`
+  --> <derive>/main.sisu:23:16
+   |
+23 |         return todo("form")
+   |                ^^^^^^^^^^^^
+
+test "a booking" ... blocked by todo("form")
+test "a stove" ... blocked by todo("form")
+0 passed, 0 failed, 2 blocked

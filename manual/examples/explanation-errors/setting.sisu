@@ -1,0 +1,16 @@
+# A missing setting is `None`; a setting that does not parse is an
+# error that says why. The types keep the two apart.
+error SettingError:
+    NotANumber(key: String, text: String)
+
+def timeout(settings: dict[str, str]) -> int? ! SettingError:
+    let text = settings.get("timeout") else:
+        return Ok(None)
+    let seconds = text.parse_int() else:
+        return Err(NotANumber("timeout".to_string(), text.to_string()))
+    return Ok(Some(seconds))
+
+def main():
+    print(timeout({"timeout": "30"}))
+    print(timeout({"retries": "3"}))
+    print(timeout({"timeout": "half a minute"}))

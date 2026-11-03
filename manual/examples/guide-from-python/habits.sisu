@@ -1,0 +1,7 @@
+# Three Python habits, which `sisu check` refuses with a fix or a note.
+def main():
+    let points = [12, 9, 11]
+    print(points[-1])
+    print(sum(points) / len(points))
+    if points:
+        print("played")

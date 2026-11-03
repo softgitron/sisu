@@ -1,0 +1,8 @@
+# Reads a whole file, through the file system that `main` receives.
+def main(sys: System) -> ! IoError:
+    let text = sys.fs.read_to_string("notes/sauna.txt")?
+    for line in text.lines():
+        print("- {line}")
+    let data = sys.fs.read("notes/sauna.txt")?
+    print("{len(data)} bytes")
+    return Ok(())

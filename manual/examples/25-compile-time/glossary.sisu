@@ -1,0 +1,15 @@
+# `embed` makes a file's text part of the program while it compiles.
+
+const GLOSSARY: str = embed("glossary.txt")
+
+## What `word` means, from the glossary.
+def meaning(word: str) -> str?:
+    for line in GLOSSARY.lines():
+        if let Some((name, text)) = line.split_once(" = "), name == word:
+            return Some(text)
+    return None
+
+def main():
+    print("{len(GLOSSARY.lines().collect())} words")
+    print(meaning("löyly"))
+    print(meaning("sisu"))

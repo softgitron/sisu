@@ -1,0 +1,6 @@
+$ sisu run bill.sisu --help
+usage: bill [OPTIONS] NAME...
+  --total <f64>
+  --tip <int>  (default: 10)
+  --round
+  names...  (String)

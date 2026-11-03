@@ -1,0 +1,4 @@
+$ sisu explain-borrow ended.sisu:5
+borrows live on line 5 of ended.sisu, in `remove_ended`:
+  a shared borrow of `bookings` from 3:23, held by `name`, used until 5:33
+  a `mut` borrow of `bookings` from 5:17, held by a temporary, used until 5:33

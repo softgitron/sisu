@@ -1,0 +1,26 @@
+# Splits a bill: the options are the fields of a struct.
+import cli
+
+## What the command line can say.
+struct Options:
+    total: f64
+    tip: int = 10
+    round: bool
+    names: list[String]
+
+def main(sys: System) -> ! cli.Error:
+    let args = sys.env.args()
+    if "--help" in args:
+        print("usage: bill [OPTIONS] NAME...")
+        print(cli.help_text[Options]())
+        return Ok(())
+    let options = cli.parse[Options](args) else as e:
+        print_err("usage: bill [OPTIONS] NAME...; `bill --help` lists them")
+        return Err(e)
+    let with_tip = options.total * (1.0 + options.tip.to_f64() / 100.0)
+    var share = with_tip / len(options.names).to_f64()
+    if options.round:
+        share = share.ceil()
+    for name in options.names:
+        print("{name} pays {share:.2f}")
+    return Ok(())

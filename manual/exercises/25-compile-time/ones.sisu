@@ -1,0 +1,35 @@
+##! Exercise 25.4, a table built while compiling. Kind: write. Level: 2.
+##!
+##! Counting the bits that are set in a file is quicker with a table that
+##! gives the count for each of the 256 bytes. Write `ones_in`, which
+##! counts the bits of one byte, make `ONES` the table of its counts for
+##! the bytes 0 to 255, worked out while the program compiles, and write
+##! `count_ones`, which looks each byte of its data up in the table. Run
+##! the tests with `sisu test ones.sisu`. The hints are in chapter 25 of
+##! the tutorial, under "Exercise 25.4: a table built while compiling".
+
+## How many bits are set in `byte`, from 0 to 255, counted one at a time.
+def ones_in(byte: int) -> int:
+    return todo("ones_in")
+
+## How many bits are set in each byte, from 0 to 255.
+const ONES: list[int] = todo("a table worked out with `comptime`")
+
+## How many bits are set in `data`, from `ONES`.
+def count_ones(data: bytes) -> int:
+    return todo("count_ones")
+
+test "the bits of a byte":
+    assert ones_in(0) == 0
+    assert ones_in(0b1011) == 3
+    assert ones_in(255) == 8
+
+test "the table":
+    assert len(ONES) == 256
+    assert ONES[0] == 0 and ONES[0b1011] == 3 and ONES[255] == 8
+    assert all([ONES[b] == ones_in(b) for b in range(256)])
+
+test "counting the bits of data":
+    assert count_ones(b"") == 0
+    assert count_ones(b"\x00\x01\x03") == 3
+    assert count_ones("sisu".encode()) == 19

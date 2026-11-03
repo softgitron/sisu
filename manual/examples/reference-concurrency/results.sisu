@@ -1,0 +1,18 @@
+# `join` gives a task's result; its errors and `TaskError` flatten.
+error ParseError:
+    NotANumber(text: String)
+
+def parse(text: str) -> int ! ParseError:
+    let n = text.parse_int() else:
+        return Err(NotANumber(text.to_string()))
+    return Ok(n)
+
+def add(a: str, b: str) -> int ! {ParseError, TaskError}:
+    return task.scope do s:
+        let x = s.spawn(() -> parse(a))
+        let y = s.spawn(() -> parse(b))
+        return Ok(x.join()? + y.join()?)
+
+def main():
+    print(add("12", "30"))
+    print(add("12", "kolme"))

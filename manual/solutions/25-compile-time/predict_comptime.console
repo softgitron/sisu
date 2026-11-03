@@ -1,0 +1,37 @@
+$ sisu test predict_comptime.sisu
+warning[W0001]: typed hole `field_count(Stove)` of type `str`
+  --> predict_comptime.sisu:47:21
+   |
+47 | const FIELDS: str = todo("field_count(Stove)")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `defaults(Stove)` of type `str`
+  --> predict_comptime.sisu:48:23
+   |
+48 | const DEFAULTS: str = todo("defaults(Stove)")
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `variant_sizes(Fuel)` of type `str`
+  --> predict_comptime.sisu:49:20
+   |
+49 | const SIZES: str = todo("variant_sizes(Fuel)")
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `reflect.name_of(Fuel)` of type `str`
+  --> predict_comptime.sisu:50:19
+   |
+50 | const NAME: str = todo("reflect.name_of(Fuel)")
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `triangle(100)` of type `str`
+  --> predict_comptime.sisu:51:23
+   |
+51 | const TRIANGLE: str = todo("triangle(100)")
+   |                       ^^^^^^^^^^^^^^^^^^^^^
+
+test "the fields of a struct" ... blocked by todo("field_count(Stove)")
+test "the fields with defaults" ... blocked by todo("defaults(Stove)")
+test "the fields of each variant" ... blocked by todo("variant_sizes(Fuel)")
+test "a type's name" ... blocked by todo("reflect.name_of(Fuel)")
+test "ordinary code at compile time" ... blocked by todo("triangle(100)")
+0 passed, 0 failed, 5 blocked

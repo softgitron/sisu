@@ -1,0 +1,4 @@
+kiuas = the stove of a sauna
+lauteet = the benches of a sauna
+löyly = the steam from water thrown on the stones
+vihta = a bundle of birch twigs

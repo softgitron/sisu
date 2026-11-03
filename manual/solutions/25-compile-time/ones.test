@@ -1,0 +1,4 @@
+test "the bits of a byte" ... ok
+test "the table" ... ok
+test "counting the bits of data" ... ok
+3 passed, 0 failed, 0 blocked

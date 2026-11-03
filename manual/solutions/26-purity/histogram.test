@@ -1,0 +1,4 @@
+test "an evening's readings" ... ok
+test "no readings" ... ok
+test "the chunks change nothing" ... ok
+3 passed, 0 failed, 0 blocked

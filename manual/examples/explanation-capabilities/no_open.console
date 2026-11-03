@@ -1,0 +1,9 @@
+$ sisu run no_open.sisu
+error[E0200]: cannot find `open` in this scope
+  --> no_open.sisu:4:15
+  |
+4 |     let key = open("/home/aino/.ssh/id_ed25519")
+  |               ^^^^
+  = note: a program reaches files through the capability `Fs`, which `def main(sys: System)` holds as `sys.fs`: `sys.fs.read_to_string("data.txt")`
+
+error[D0006]: the program was not run: errors found (1)

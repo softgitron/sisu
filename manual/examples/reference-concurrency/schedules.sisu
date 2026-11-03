@@ -1,0 +1,10 @@
+# Tasks that print without waiting for each other interleave by seed.
+def call(name: str):
+    for i in range(4):
+        print("{name} {i}")
+        task.yield_now()
+
+def main():
+    task.scope do s:
+        s.spawn(() -> call("Aino"))
+        s.spawn(() -> call("Eero"))

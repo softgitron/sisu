@@ -1,0 +1,12 @@
+# Writes a file in a new directory, makes it durable, and adds to it.
+import std.fs
+
+def main(sys: System) -> ! IoError:
+    sys.fs.create_dir("log/2026")?
+    sys.fs.write_text("log/2026/sauna.txt", "sauna at six\n")?
+    sys.fs.sync("log/2026/sauna.txt")?
+    fs.append(sys.fs, "log/2026/sauna.txt", "swim at seven\n".encode())?
+    let text = sys.fs.read_to_string("log/2026/sauna.txt")?
+    print(text.trim())
+    print(sys.fs.list_dir("log")?)
+    return Ok(())

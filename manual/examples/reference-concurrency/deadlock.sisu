@@ -1,0 +1,7 @@
+# Every task waits and no timer can wake one: the run stops.
+def main():
+    let tx, rx = channel[int](capacity=1)
+    task.scope do s:
+        s.spawn do:
+            print(rx.recv())
+    print("never here {tx.send(1)}")

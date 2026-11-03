@@ -1,0 +1,11 @@
+$ sisu run reflect_loop.sisu
+error[E0609]: making `columns[Booking]` stopped at compile time: a list is a compile-time value with no run-time form
+  --> reflect_loop.sisu:28:20
+   |
+28 |     print(comptime columns(Booking))
+   |                    ^^^^^^^^^^^^^^^^
+   |
+16 |     for f in reflect.fields_of(T):
+   |              -------------------- the template, where it stopped
+
+error[D0006]: the program was not run: errors found (1)

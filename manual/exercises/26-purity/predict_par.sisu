@@ -1,0 +1,50 @@
+##! Exercise 26.1, predict the parallel results. Kind: predict. Level: 1.
+##!
+##! Each constant is your prediction of what an expression gives, written
+##! as `print` would write it. Write each as a literal, then run
+##! `sisu test predict_par.sisu`. The hints are in chapter 26 of the
+##! tutorial, under "Exercise 26.1: predict the parallel results".
+
+import std.par
+from std.par import Collect, Sum, reduce
+
+error CheckError:
+    Bad(part: int)
+
+## Checks part `part` after `work` steps; parts above 1 are bad.
+pure def check(part: int, work: int) -> int ! CheckError:
+    var total = 0
+    for k in range(work):
+        total += k
+    if part > 1:
+        return Err(Bad(part))
+    return Ok(part)
+
+## Checks every part at once, in a `pure` scope.
+pure def check_all(work: list[int]) -> int ! {CheckError, TaskError}:
+    return task.scope do s:
+        for i in range(len(work)):
+            let n = work[i]
+            s.spawn(() -> check(i, n))
+        return Ok(len(work))
+
+const CHUNKS: str = todo("par.chunks(6, 2)")
+const ONE_CHUNK: str = todo("par.chunks(4, 4)")
+const COLLECTED: str = todo("reduce[Collect[int]]([5, 3, 8], grain=1)")
+const SUMMED: str = todo("reduce[Sum[int]]([5, 3, 8], grain=2)")
+const FAILED: str = todo("check_all([10, 10, 90_000, 10])")
+
+test "chunks of two":
+    assert "{par.chunks(6, 2)}" == CHUNKS
+
+test "a chunk that holds them all":
+    assert "{par.chunks(4, 4)}" == ONE_CHUNK
+
+test "collecting keeps the order":
+    assert "{reduce[Collect[int]]([5, 3, 8], grain=1)}" == COLLECTED
+
+test "a sum":
+    assert "{reduce[Sum[int]]([5, 3, 8], grain=2)}" == SUMMED
+
+test "the failure a pure scope reports":
+    assert "{check_all([10, 10, 90_000, 10])}" == FAILED

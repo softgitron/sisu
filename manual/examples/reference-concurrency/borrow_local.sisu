@@ -1,0 +1,7 @@
+# A task cannot borrow a local of the scope's body.
+def main():
+    let names = ["Aino", "Eero"]
+    task.scope do s:
+        let greeting = "Hei".to_string()
+        s.spawn do:
+            print("{greeting}, {names[0]}")

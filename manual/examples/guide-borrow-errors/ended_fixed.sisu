@@ -1,0 +1,10 @@
+# Finds the bookings that have ended first, then removes them.
+def remove_ended(mut bookings: dict[str, int], now: int):
+    let ended = [name for name, hour in bookings.items() if hour < now]
+    for name in ended:
+        _ = bookings.remove(name)
+
+def main():
+    var bookings = {"Aino": 18, "Eero": 16, "Roni": 20}
+    remove_ended(mut bookings, 17)
+    print(bookings)

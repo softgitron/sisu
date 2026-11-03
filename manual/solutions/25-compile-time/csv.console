@@ -1,0 +1,17 @@
+$ sisu test csv.sisu
+error[E0609]: making `to_csv[Booking]` stopped at compile time: a list is a compile-time value with no run-time form
+  --> csv.sisu:31:12
+   |
+31 |     assert to_csv(rows) == "name,hour\nAino,17\nEero,18"
+   |            ^^^^^^^^^^^^
+   |
+19 |     for f in reflect.fields_of(T):
+   |              -------------------- the template, where it stopped
+
+error[E0324]: the type of `f` cannot be inferred here; add a type annotation
+  --> <to_csv[int]>/main.sisu:4:20
+  |
+4 |         names.push(f.name.to_string())
+  |                    ^
+
+error[D0006]: the program was not run: errors found (2)

@@ -1,0 +1,8 @@
+$ sisu run bill.sisu --total 84.50 Aino Eero Roni
+Aino pays 30.98
+Eero pays 30.98
+Roni pays 30.98
+$ sisu run bill.sisu --total=84.50 --tip 0 --round Aino Eero Roni
+Aino pays 29.00
+Eero pays 29.00
+Roni pays 29.00

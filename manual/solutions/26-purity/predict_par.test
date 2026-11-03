@@ -1,0 +1,6 @@
+test "chunks of two" ... ok
+test "a chunk that holds them all" ... ok
+test "collecting keeps the order" ... ok
+test "a sum" ... ok
+test "the failure a pure scope reports" ... ok
+5 passed, 0 failed, 0 blocked

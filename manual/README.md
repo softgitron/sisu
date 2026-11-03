@@ -308,7 +308,7 @@ suffix-free literals and named rounding (D-076). Exercises: a checksum
 over `u32`, a mortgage table in `Decimal`. Stage 0 runs all of it
 except `@float(fast)` and `total_order`.
 
-**25. Compile-time code.** `comptime` expressions, `const`, `comptime
+**25. Compile-time code** ([written](tutorial/25-compile-time.md)). `comptime` expressions, `const`, `comptime
 def` and `comptime assert`, fuel and `@comptime_budget`, reflection
 (`reflect.fields_of`, `if comptime` that narrows a type, `comptime for`,
 `value.[f]`), writing a derive with `return impl Trait for T:`,
@@ -358,10 +358,10 @@ instead of teaching.
 | | Guide | What it does, and what it covers |
 |---|---|---|
 | G1 | Set up your editor | Connects an editor to `sisu lsp`: diagnostics, hover with error sets and capabilities, inlay hints, fixes, explain-borrow, worksheet values inline. |
-| G2 | Coming from Python | Ports a Python script and walks through every false friend (D-062, [R19](#the-reference)) and the idioms that replace `class`, `None`, exceptions and truthiness. |
+| G2 | Coming from Python ([written](guides/from-python.md)) | Ports a Python script and walks through every false friend (D-062, [R19](#the-reference)) and the idioms that replace `class`, `None`, exceptions and truthiness. |
 | G3 | Coming from Rust | Maps lifetimes to views and `from`, `Rc` to `Shared`, `Result` to `T ! E`, macros to `comptime`, `async` to tasks. |
 | G4 | Coming from Go | Maps goroutines to scopes, `context` to cancellation, interfaces to traits, `if err != nil` to `?`. |
-| G5 | Read and write files | `Fs` operations, missing files as `IoError`, walking a directory, testing with `Fs.in_memory`. |
+| G5 | Read and write files ([written](guides/read-files.md)) | `Fs` operations, missing files as `IoError`, walking a directory, testing with `Fs.in_memory`. |
 | G6 | Parse command-line arguments | `std.x.cli` derived from a struct, help text, errors, a transcript test. |
 | G7 | Read and write JSON | `@derive(Encode, Decode)`, `json.encode`, `json.decode` validating refinements at the boundary, `json.parse`. |
 | G8 | Match text with regular expressions | `std.regex`, groups, the linear-time guarantee and what it rules out. |
@@ -369,7 +369,7 @@ instead of teaching.
 | G10 | Test code that uses the network | `Net.fake`, `http.FakeNet().respond_to`, request counts. |
 | G11 | Write a property test | `check`, `arbitrary[T]`, `@derive(Arbitrary)`, reading a shrunk counterexample, the failure database. |
 | G12 | Test a command-line tool | Snapshots and transcripts, `--update` and reviewing the diff. |
-| G13 | Find and fix a borrow error | Reading E04xx diagnostics, `sisu explain-borrow`, `--defer-borrow` and the counterexample. |
+| G13 | Find and fix a borrow error ([written](guides/borrow-errors.md)) | Reading E04xx diagnostics, `sisu explain-borrow`, `--defer-borrow` and the counterexample. |
 | G14 | Find a concurrency bug | `--explore`, `--schedule-seed`, PCT and the exhaustive scheduler, `sisu test --sim` with faults. |
 | G15 | Reproduce a failure | Replay tokens, `sisu run --record`, `sisu replay`. |
 | G16 | Change a running program | `sisu run --watch`, epochs, `live.boundary()`, what restarts the program. |
@@ -413,7 +413,7 @@ prototype in the experiment ([STYLE.md](STYLE.md)).
 | R10 | Capabilities | `System`, each capability's operations, attenuations, lending, revocation, interceptors, fakes, what is ambient, how it is enforced. |
 | R11 | Contracts | `requires`, `ensures`, `invariant`, refinements, check levels, violations. |
 | R12 | Compile-time evaluation and reflection | The rules of `comptime`, fuel and budgets, the `reflect` API, `target`, `embed`, the derive protocol, `@cfg` and features. |
-| R13 | Modules, packages and the manifest | The module tree, imports and visibility, the prelude's fixed list, every key of `sisu.toml`, the lockfile, workspaces, scripts and inline metadata, editions. |
+| R13 | Modules, packages and the manifest ([written](reference/modules.md)) | The module tree, imports and visibility, the prelude's fixed list, every key of `sisu.toml`, the lockfile, workspaces, scripts and inline metadata, editions. |
 | R14 | Attributes | Every attribute, with where it may stand and what it does. |
 | R15 | Testing | `test` and its forms, outcomes, selection, a test's capabilities, the property-testing API, snapshots, the transcript format, replay tokens, simulation, benchmarks, output and caching. |
 | R16 | The `sisu` command ([written](reference/sisu-command.md)) | Every subcommand and option, each with an example and its exit statuses. |
@@ -432,9 +432,9 @@ chose otherwise, and links to the decision log for the evidence.
 
 | | Explanation | About |
 |---|---|---|
-| X1 | The design in one page | The priority order, the principles, and what Sisu leaves out on purpose ([00](../proposal/00-vision-and-principles.md), [14](../proposal/14-non-goals.md)). |
-| X2 | Errors without exceptions, absence without null | Error sets, panics as bugs, `T?`. |
-| X3 | Ownership without lifetimes | Second-class references, views, what is given up, compared with Rust, Swift and Python. |
+| X1 | The design in one page ([written](explanations/design.md)) | The priority order, the principles, and what Sisu leaves out on purpose ([00](../proposal/00-vision-and-principles.md), [14](../proposal/14-non-goals.md)). |
+| X2 | Errors without exceptions, absence without null ([written](explanations/errors.md)) | Error sets, panics as bugs, `T?`. |
+| X3 | Ownership without lifetimes ([written](explanations/ownership.md)) | Second-class references, views, what is given up, compared with Rust, Swift and Python. |
 | X4 | Capabilities and the supply chain | No ambient authority, testability, portability, the cost of one more parameter. |
 | X5 | Concurrency without colours | No `async`, scopes as supervisors, cancellation without tokens. |
 | X6 | Determinism | `pure`, insertion-ordered `dict`, strict floats, and what replay, simulation and `comptime` get from them. |
@@ -828,13 +828,13 @@ solutions and passing checks.
 | 2 | Chapters 2, 3 and 4 | done |
 | 3 | R16 the `sisu` command (2, done), R17 diagnostics, first codes (2, done), R1 lexical structure (2, done) | done |
 | 4 | Chapters 5 (2.5), 6 (2), 7 (2.5), 8 (3) | done |
-| 5 | Chapter 9 with challenge I (3, done); G2 Coming from Python (1); R19 false friends (1, done) | 2 |
-| 6 | Chapters 10 (3, done), 11 (4, done), 12 (3, done), 13 with challenge II (3, done); R7 ownership (3, done); G13 borrow errors (1); X3 (1) | 5 |
+| 5 | Chapter 9 with challenge I (3, done); G2 Coming from Python (1, done); R19 false friends (1, done) | done |
+| 6 | Chapters 10 (3, done), 11 (4, done), 12 (3, done), 13 with challenge II (3, done); R7 ownership (3, done); G13 borrow errors (1, done); X3 (1, done) | done |
 | 7 | Reader test of Parts I and II: five readers who know Python, their stuck points, the rewrites | 4 |
-| 8 | Chapters 14 (3, done), 15 (3, done), 16 (3, done), 17 with challenge III (2.5, done); R2 (3, done), R3 (2, done), R6 (1, done), R13 (2.5) | 20 |
-| 9 | Chapters 18 (3, done), 19 (3, done), 20 (4, done), 21 (3, done), 22 with challenge IV (4, done); R9 (2.5), R10 (2), R15 (2); G5 to G16 (9) | 32.5 |
-| 10 | R4 (2), R5 (1.5), R8 (1.5), R14 (1.5), R20 (2), R21 (1), R22 (1); X1, X2, X4, X5, X8, X10, X12 (7) | 17.5 |
-| 11 | Chapters 23 (2, done), 24 (2, done), 25 (3), 26 (2); R11 (1), R12 (2); G17, G20, G21, G26, G27, G28, G29, G30, G31, G32 (7.5); X6, X7, X9, X13, X14 (5) | 26.5 |
+| 8 | Chapters 14 (3, done), 15 (3, done), 16 (3, done), 17 with challenge III (2.5, done); R2 (3, done), R3 (2, done), R6 (1, done), R13 (2.5, done) | 20 |
+| 9 | Chapters 18 (3, done), 19 (3, done), 20 (4, done), 21 (3, done), 22 with challenge IV (4, done); R9 (2.5), R10 (2), R15 (2); G5 to G16 (9; G5 done) | 32.5 |
+| 10 | R4 (2), R5 (1.5), R8 (1.5), R14 (1.5), R20 (2), R21 (1), R22 (1); X1 (done), X2 (done), X4, X5, X8, X10, X12 (7) | 17.5 |
+| 11 | Chapters 23 (2, done), 24 (2, done), 25 (3, done), 26 (2); R11 (1), R12 (2); G17, G20, G21, G26, G27, G28, G29, G30, G31, G32 (7.5); X6, X7, X9, X13, X14 (5) | 26.5 |
 | 12 | When their features exist: chapters 27 (3) and 28 with challenge V (2); G18, G19, G22, G23, G24, G25 (4.5); X11 (1); the site (3) | 13.5 |
 | | Total | about 159 |
 
@@ -1207,6 +1207,34 @@ Writing the rest of Part I turned up more, by chapter:
   `@float(fast)` is accepted without a word and changes nothing. The
   comment of `std.num`'s `Rounding` says that Python's `decimal` names
   the same seven modes; it has an eighth, `ROUND_05UP`.
+- Chapter 25. Stage 1's compile-time evaluator, which `sisu run` and
+  `sisu check` use, stops at `String.push`, `list.join`, `str.byte_at`
+  (which `split_once` needs) and `todo` with "beyond the slice: a
+  `comptime` expression that needs the intrinsic ..., which stage 1's
+  evaluator does not run", a message with no code, after which `sisu
+  check` exits 0; the Rust front end of `sisu test` runs them all. So
+  text is built at compile time by interpolation in the chapter's
+  examples, and a literal checked at compile time, such as a time of
+  day parsed by `split_once`, works under `sisu test` only. The same
+  evaluator is slow on lists: a sieve of 20,000 numbers at compile time
+  takes 90 seconds, within the budget, and one of 4,000 takes 3.7
+  seconds where the Rust front end takes 0.3. E0609 for a plain `for`
+  over `reflect.fields_of(T)` says "a list is a compile-time value with
+  no run-time form" with no fix offering `comptime for`, and the copy
+  of the same template for `int` gets E0324 ("the type of `f` cannot be
+  inferred") in `<to_csv[int]>/main.sisu`. `reflect.fields_of(int)` is
+  an empty list, so a template that forgets `if comptime
+  reflect.is_struct(T)` compiles and gives empty output. A diagnostic in
+  a derived impl, such as E0347 for a field without `Eq`, is placed in
+  `<derive>/main.sisu`, which the reader cannot open, with no label at
+  the `@derive` that asked for it, and a hole in a derive's template is
+  reported there once for each type. A typed hole reached at compile
+  time is E0602 ("reached the typed hole"), so a test that uses a
+  constant computed from a hole does not compile instead of being
+  blocked; exercise 25.4 makes the constant itself the hole.
+  `target.runtime` is `interpreter` in a native build too (`sisu run
+  --native`). `@diagnostic_name(f)` compiles without a word and does
+  nothing, and `sisu eval` gets D0003, as planned.
 
 Planning the later chapters turned up the parts of the proposal that
 they teach and stage 0 does not run yet, each named in its chapter's
@@ -1315,6 +1343,51 @@ Writing the reference turned up more, by page:
   stage 1 with "beyond the slice: a `comptime` expression that needs
   the intrinsic `list.new`, which stage 1's evaluator does not run", a
   message with no code; the Rust front end runs it.
+- R13, modules and packages. A dev-dependency can be imported by the
+  package's own code, not only by its tests, in both front ends. E1022
+  asks for `--accept-unsafe`, which `sisu check`, `run` and `build`
+  reject as an option they do not take (D0009), though stage 1 reads
+  it; the only way to accept a raised `unsafe` level is to delete
+  `sisu.lock`. A `version` that is not `MAJOR.MINOR.PATCH` gets E1003
+  and also E1002 ("`[package]` needs `version`"), though the key is
+  there. An import of a dependency whose `when` excludes the target
+  gets E0260, whose message asks to add it to `[dependencies]`, where
+  it is. `import atlas.geo.point.Point`, an item named as a module,
+  gets E0203 ("there is no module"), where the catalog has E0223 for
+  it. An unused import gets no warning, though 09 says it warns; `sisu
+  fmt` removes it. An import inside a function gets E0900. The prelude
+  is wider than 09's fixed list: helpers such as `days_in_month` and
+  `Formatter` are visible to every program.
+
+Writing the guides turned up more, by guide:
+
+- G2, coming from Python. E0301's one fix for `sum(points) /
+  len(points)` writes `//`, which is Python 2's floor division; a port
+  of Python 3 means the float division that the message's "convert to
+  `f64` first" names and no fix offers. `name in players` accepts a
+  `str` for a `dict[String, Player]`, where `players[name]` gets E0300
+  with the fix `.to_lowercase()`, as chapter 10 found for `get`.
+- G13, a borrow error. Collecting the keys of a `dict[String, int]` to
+  remove after the loop, `[name for name, hour in bookings.items() if
+  ...]`, and then calling `bookings.remove(name)` gets E0300 ("expected
+  `String`, found `ref ref String`") with no fix; `name.copy()` in the
+  comprehension is what works. A counterexample run of `--defer-borrow`
+  prints the whole SIR of the function, 40 lines for a loop of three,
+  between the account of the conflict and its `outcome:` line.
+
+Writing the explanations turned up more, by page:
+
+- X1, the design in one page.
+  [00](../proposal/00-vision-and-principles.md#who-sisu-is-not-for-yet)
+  ("Anyone who needs it today. There is no compiler.") and
+  [14](../proposal/14-non-goals.md#not-finished) ("There is no
+  compiler.") predate stage 0. 14's list of features Sisu does not have
+  names "implicit conversions", where D-016 keeps implicit lossless
+  widening (the proposal's README says "implicit lossy conversions"),
+  and "variadic functions", where
+  [02](../proposal/02-syntax.md#declarations) gives `*xs: T`, which
+  collects variadic arguments into a `Slice[T]`, and chapter 3 of this
+  plan teaches it as coming. The page follows the README and 02.
 
 ## Open questions
 

@@ -1,0 +1,3 @@
+test "the longest line of a file" ... ok
+test "a missing file is an error, not a crash" ... ok
+2 passed, 0 failed, 0 blocked

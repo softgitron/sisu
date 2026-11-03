@@ -1,0 +1,18 @@
+$ sisu run schedules.sisu
+Eero 0
+Eero 1
+Eero 2
+Eero 3
+Aino 0
+Aino 1
+Aino 2
+Aino 3
+$ sisu run --schedule-seed 1 schedules.sisu
+Aino 0
+Aino 1
+Aino 2
+Eero 0
+Aino 3
+Eero 1
+Eero 2
+Eero 3

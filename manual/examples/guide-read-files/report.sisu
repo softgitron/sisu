@@ -1,0 +1,27 @@
+# Code that takes `Fs` is tested with a file system in memory.
+import std.fs
+
+## Writes `report.txt`: a line `PATH: N lines` for each `.txt` file
+## under `dir`.
+def write_report(files: Fs, dir: Path) -> ! IoError:
+    var lines: list[String] = []
+    for path in fs.walk(files, dir)?:
+        if fs.extension(path) == Some("txt"):
+            let text = files.read_to_string(path)?
+            lines.push("{path}: {text.lines().count()} lines")
+    return files.write_text("report.txt", lines.join("\n"))
+
+test "a line for each note":
+    let files = Fs.in_memory(
+        {
+            "notes/sauna.txt": "Heat the sauna.\nBuy logs.",
+            "notes/ideas.md": "# Ideas",
+        }
+    )
+    assert write_report(files, "notes") == Ok(())
+    let written = files.read_to_string("report.txt")
+    assert written == Ok("notes/sauna.txt: 2 lines")
+
+test "no notes at all"(files: Fs):
+    assert write_report(files, "notes") == Err(NotFound("notes"))
+    assert not files.exists("report.txt")

@@ -1,0 +1,31 @@
+# A reducer of your own: each chunk keeps a view, and views are merged.
+from std.par import Reducer, reduce
+
+## The longest word seen, the earliest of them on a tie.
+struct Longest:
+    word: String
+
+impl Reducer for Longest:
+    type Item = String
+    type Output = String
+
+    pure def empty() -> Longest:
+        return Longest(word="")
+
+    pure def add(mut self, own word: String):
+        if len(word) > len(self.word):
+            self.word = word
+
+    pure def merge(own self, own later: Longest) -> Longest:
+        if len(later.word) > len(self.word):
+            return later
+        return self
+
+    pure def finish(own self) -> String:
+        return self.word
+
+def main():
+    let words = ["sauna", "kiuaskivi", "löyly", "saunatupa", "vihta"]
+    for grain in [1, 2, 4]:
+        let copy = [w.to_string() for w in words]
+        print("{grain}: {reduce[Longest](copy, grain=grain)}")

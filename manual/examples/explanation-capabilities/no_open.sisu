@@ -1,0 +1,8 @@
+# A function that was handed no capability cannot reach a file: there
+# is no global function to call.
+def shout(text: str) -> String:
+    let key = open("/home/aino/.ssh/id_ed25519")
+    return text.to_uppercase()
+
+def main():
+    print(shout("sisu"))

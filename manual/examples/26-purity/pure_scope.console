@@ -1,0 +1,7 @@
+$ sisu run pure_scope.sisu
+Err(Bad(part=1))
+Err(Bad(part=3))
+$ sisu run --explore 5 pure_scope.sisu
+Err(Bad(part=1))
+Err(Bad(part=3))
+explored 5 schedules (seeds 0 to 4): every run exited with status 0

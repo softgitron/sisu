@@ -1,0 +1,15 @@
+# A reduction splits a list into chunks by index, and merges in a tree.
+import std.par
+from std.par import Collect, Sum, reduce
+
+def main():
+    print(par.chunks(10, 3))
+    let xs = [1.0e16, 1.0, -1.0e16, 1.0]
+    var folded = 0.0
+    for x in xs:
+        folded += x
+    print("folded {folded}, summed {sum(xs)}")
+    for grain in [1, 2, 4]:
+        let total = reduce[Sum[f64]](xs.copy(), grain=grain)
+        print("grain {grain}: {total}")
+    print(reduce[Collect[int]]([3, 1, 4, 1, 5], grain=2))

@@ -1,0 +1,11 @@
+# Walks a directory, and gives the size of each `.txt` file under it.
+import std.fs
+
+def main(sys: System) -> ! IoError:
+    for path in fs.walk(sys.fs, "notes")?:
+        let meta = sys.fs.metadata(path)?
+        if meta.is_dir:
+            print("{path}/")
+        elif fs.extension(path) == Some("txt"):
+            print("{path}: {meta.len} bytes")
+    return Ok(())

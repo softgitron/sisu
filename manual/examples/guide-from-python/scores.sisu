@@ -1,0 +1,40 @@
+# scores.py in Sisu: each player's best and average points.
+
+struct Player:
+    name: String
+    points: list[int] = []
+
+    ## The most points in one game, `None` before the first.
+    def best(self) -> int?:
+        if self.points.is_empty():
+            return None
+        return Some(sorted(self.points)[^1])
+
+error LineError:
+    NotTwoWords
+    NotANumber(text: String)
+
+## The name and the points of a line `NAME POINTS`.
+def parse(line: str) -> (String, int) ! LineError:
+    let words = line.split_whitespace().collect()
+    if len(words) != 2:
+        return Err(NotTwoWords)
+    let points = words[1].parse_int() else:
+        return Err(NotANumber(words[1].to_string()))
+    return Ok((words[0].to_string(), points))
+
+def main(sys: System) -> ! IoError:
+    var players: dict[String, Player] = {}
+    let text = sys.fs.read_to_string("scores.txt")?
+    for line in text.lines():
+        let (name, points) = parse(line) else:
+            print("skipped: {line.trim()}")
+            continue
+        let player = players.entry(name.copy()).or_insert(Player(name))
+        player.points.push(points)
+    for player in players.values():
+        let total = sum(player.points).to_f64()
+        let average = total / len(player.points).to_f64()
+        let best = player.best() ?? 0
+        print("{player.name}: best {best}, average {average:.1f}")
+    return Ok(())

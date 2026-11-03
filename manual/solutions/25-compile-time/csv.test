@@ -1,0 +1,4 @@
+test "bookings" ... ok
+test "no bookings" ... ok
+test "numbers" ... ok
+3 passed, 0 failed, 0 blocked

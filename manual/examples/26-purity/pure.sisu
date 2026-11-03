@@ -1,0 +1,16 @@
+# A `pure` function uses no capability, changes nothing shared, and
+# gives the same result for the same arguments, on every machine.
+
+## How hot a turn in the sauna felt: the mean of `temps`, rounded down,
+## and the highest of them.
+pure def feel(temps: Slice[int]) -> (mean: int, highest: int):
+    var total = 0
+    var highest = temps[0]
+    for t in temps:
+        total += t
+        highest = max(highest, t)
+    return (total // len(temps), highest)
+
+def main():
+    let turn = feel([78, 85, 92, 88])
+    print("{turn.mean} degrees on average, {turn.highest} at the most")

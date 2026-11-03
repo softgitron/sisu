@@ -1,0 +1,23 @@
+# The first task to fail cancels the others, and is the scope's result.
+error ParseError:
+    NotANumber(text: String)
+
+def parse(text: str) -> int ! ParseError:
+    let n = text.parse_int() else:
+        return Err(NotANumber(text.to_string()))
+    return Ok(n)
+
+def slow(clock: Clock) -> int ! TaskError:
+    match clock.sleep(Duration.minutes(10)):
+        case Ok(()):
+            return Ok(10)
+        case Err(e):
+            print("the slow task stops: {e}")
+            return Err(e)
+
+def main(sys: System):
+    let result = task.scope do s:
+        s.spawn(() -> slow(sys.clock))
+        s.spawn(() -> parse("kolme"))
+        return Ok(())
+    print(result)
