@@ -1,0 +1,28 @@
+##! Exercise 6.2, counting vowels. Kind: fix. Level: 1.
+##!
+##! `vowels` counts the vowels of a Finnish word, written the way a
+##! Python programmer would. It does not compile. Run
+##! `sisu test vowels.sisu`, read each diagnostic, and fix the function
+##! until every test passes; a second diagnostic appears once the first
+##! is fixed. The hints are in chapter 6 of the tutorial, under
+##! "Exercise 6.2: counting vowels".
+
+## The number of vowels in `word`, in either case. Finnish has eight:
+## a, e, i, o, u, y, ä and ö.
+def vowels(word: str) -> int:
+    var count = 0
+    for letter in word.to_lowercase():
+        if letter in "aeiouyäö":
+            count += 1
+    return count
+
+test "plain vowels":
+    assert vowels("kissa") == 2
+    assert vowels("Aino") == 3
+
+test "vowels with dots and capitals":
+    assert vowels("ÄITI") == 3
+    assert vowels("yö") == 2
+
+test "no vowels":
+    assert vowels("tsk") == 0

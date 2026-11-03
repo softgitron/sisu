@@ -1,1 +1,15 @@
 $ sisu test grades.sisu
+error[E0315]: `grade` returns `int`, but control can reach the end of its body without a `return`
+  --> grades.sisu:12:5
+   |
+12 | def grade(points: int) -> int:
+   |     ^^^^^
+  = note: return a value on that path too, or end the body with a `return`
+
+error[E0116]: an `if` expression needs an `else` branch, because it must have a value
+  --> grades.sisu:26:43
+   |
+26 |     return if grade(points) >= 1: "passed"
+   |                                           ^
+
+error[D0006]: the program was not run: errors found (2)

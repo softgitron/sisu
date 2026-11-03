@@ -14,9 +14,9 @@ starvation against Go with its default asynchronous preemption (no
 runtime.Gosched). Ratio intervals are 95% percentile bootstrap intervals from
 10,000 resamples of the runs (section 7.2; reported, never used for a decision),
 followed by the conservative range [min/max, max/min] that section 2.4 uses to
-call a cell inconclusive when it crosses a threshold; with two machines,
-section 2.4's rule is also applied to both (a configuration passes or fails only
-if it does so on each machine). The last table is the
+call a cell inconclusive when it crosses a threshold; with two or more machines,
+section 2.4's two-machine rule is also applied to each pair (a configuration
+passes or fails only if it does so on both machines of the pair). The last table is the
 machine's load during the runs (load.csv, written by load.sh): how many
 processes were measured again because other processes were busy, and how many
 CPUs the other processes used during the processes that were kept. Standard
@@ -24,6 +24,7 @@ library only.
 """
 import csv
 import glob
+import itertools
 import math
 import os
 import random
@@ -396,8 +397,8 @@ def rule_on_both(v1, v2):
 
 
 def t_memory_rule(cells, md):
-    """Prints memory_rule for every machine, then, with two machines, the
-    configuration's verdict on both (section 2.4)."""
+    """Prints memory_rule for every machine, then, for each pair of machines,
+    the configuration's verdict on both (section 2.4)."""
     b = "idle-memory"
     per = {}
     for m in machines(cells, b):
@@ -409,8 +410,7 @@ def t_memory_rule(cells, md):
         print_table(f"memory rule (proposal/20, section 2.4) on {m}: ratio to Go, worst over four conditions",
                     ["configuration", "100k shallow", "100k after excursion", "1M shallow", "1M after excursion",
                      "verdict on this machine"], [[lab] + conds + [text] for lab, conds, _, _, text in rows], md)
-    if len(per) == 2:
-        (m1, r1), (m2, r2) = sorted(per.items())
+    for (m1, r1), (m2, r2) in itertools.combinations(sorted(per.items()), 2):
         lines = [[lab, r1.get(lab, "not run"), r2.get(lab, "not run"),
                   rule_on_both(r1.get(lab), r2.get(lab))] for lab in sorted(set(r1) | set(r2))]
         print_table(f"memory rule (proposal/20, section 2.4) on both machines ({m1}, {m2})",

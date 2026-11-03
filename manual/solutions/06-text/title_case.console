@@ -1,0 +1,12 @@
+$ sisu test title_case.sisu
+warning[W0001]: typed hole `title_case` of type `String`
+  --> title_case.sisu:10:12
+   |
+10 |     return todo("title_case")
+   |            ^^^^^^^^^^^^^^^^^^
+
+test "two words" ... blocked by todo("title_case")
+test "capitals in the middle" ... blocked by todo("title_case")
+test "letters with dots and extra spaces" ... blocked by todo("title_case")
+test "no words" ... blocked by todo("title_case")
+0 passed, 0 failed, 4 blocked

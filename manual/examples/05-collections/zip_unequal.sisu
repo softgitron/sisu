@@ -1,0 +1,6 @@
+# `zip` needs two lists of the same length.
+def main():
+    let names = ["Aino", "Eero", "Roni"]
+    let ages = [34, 29]
+    for name, age in zip(names, ages):
+        print("{name} is {age}")

@@ -1,0 +1,11 @@
+# Passing a list to a function lends it; the caller keeps it.
+def total(scores: list[int]) -> int:
+    var sum_so_far = 0
+    for score in scores:
+        sum_so_far += score
+    return sum_so_far
+
+def main():
+    let scores = [7, 9, 4]
+    print("total: {total(scores)}")
+    print("scores: {scores}")

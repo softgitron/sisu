@@ -1,0 +1,12 @@
+$ sisu test second_largest.sisu
+warning[W0001]: typed hole `second_largest` of type `int`
+  --> second_largest.sisu:11:12
+   |
+11 |     return todo("second_largest")
+   |            ^^^^^^^^^^^^^^^^^^^^^^
+
+test "two values" ... blocked by todo("second_largest")
+test "the largest value twice" ... blocked by todo("second_largest")
+test "negative values" ... blocked by todo("second_largest")
+test "many repeats" ... blocked by todo("second_largest")
+0 passed, 0 failed, 4 blocked

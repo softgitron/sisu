@@ -1,1 +1,11 @@
 $ sisu test digit_sum.sisu
+warning[W0001]: typed hole `digit_sum` of type `int`
+  --> digit_sum.sisu:14:12
+   |
+14 |     return todo("digit_sum")
+   |            ^^^^^^^^^^^^^^^^^
+
+test "one digit" ... blocked by todo("digit_sum")
+test "many digits" ... blocked by todo("digit_sum")
+test "digit_sum (doc example)" ... blocked by todo("digit_sum")
+0 passed, 0 failed, 3 blocked

@@ -1,0 +1,2 @@
+6:48-6:50 E0344 type.constant-negative-index fix="shopping[^1]"
+  fix type.from-end-index 6:48-6:50 "^1"

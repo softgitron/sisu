@@ -1,0 +1,7 @@
+#!/usr/bin/env sisu
+# Comprehensions build a list, a set or a dict from a loop.
+let scores = [7, 9, 4, 9]
+[s * 10 for s in scores]
+[s for s in scores if s > 5]
+{s for s in scores}
+{name: len(name) for name in ["Aino", "Liisa"]}

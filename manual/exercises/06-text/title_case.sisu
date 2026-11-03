@@ -1,0 +1,22 @@
+##! Exercise 6.3, title case. Kind: write. Level: 1.
+##!
+##! Write the body of `title_case` so that every test passes. Run the
+##! tests with `sisu test title_case.sisu`. The hints are in chapter 6
+##! of the tutorial, under "Exercise 6.3: title case".
+
+## `text` with each word's first letter in upper case and the rest in
+## lower case, and one space between each two words.
+def title_case(text: str) -> String:
+    return todo("title_case")
+
+test "two words":
+    assert title_case("hei maailma") == "Hei Maailma"
+
+test "capitals in the middle":
+    assert title_case("tAMPERE AND turku") == "Tampere And Turku"
+
+test "letters with dots and extra spaces":
+    assert title_case("  äiti   ja isä ") == "Äiti Ja Isä"
+
+test "no words":
+    assert title_case("") == ""

@@ -1,0 +1,52 @@
+##! The stage-2 command line (`compiler/stage2/README.md`):
+##!
+##! ```text
+##! sisu2 lir FILE.sir [--release] [--output FILE.lir]   # the LIR of a serialised SIR program
+##! sisu2 sir FILE.sir                                   # the program read and written again
+##! ```
+##!
+##! `lir` lowers the program (`stage2.lower`) and prints its LIR, or writes
+##! it to `--output`. `sir` reads the program (`stage2.read`) and prints it
+##! with stage 1's writer, which gives the same bytes back: the reader's
+##! check.
+
+import stage1.sir.write
+import stage2.read
+from stage2.read import ReadError
+
+error UsageError:
+    Usage(text: String)
+
+## Why a command failed after saying why on standard error.
+error CommandError:
+    Failed
+
+## Prints a text that ends with a line break, as it is.
+def emit(text: str):
+    if text.is_empty():
+        return
+    if text.byte_at(text.byte_len() - 1) == 10:
+        print(text.byte_slice(0, text.byte_len() - 1))
+    else:
+        print(text)
+
+def usage() -> String:
+    return "usage: sisu2 lir FILE.sir [--release] [--output FILE.lir]\n       sisu2 sir FILE.sir".to_string()
+
+def main(sys: System) -> ! {IoError, UsageError, CommandError}:
+    let args = sys.env.args()
+    if len(args) < 2:
+        return Err(Usage(text=usage()))
+    let command = args[0].copy()
+    let path = args[1].copy()
+    let text = sys.fs.read_to_string(Path.new(path))?
+    let r = read.read(text)
+    if let Err(ReadError.Bad(line, message)) = r:
+        print_err("{path}:{line}: {message}")
+        return Err(Failed)
+    let Ok(prog) = r else:
+        return Err(Failed)
+    if command == "sir":
+        emit(write.write(prog))
+        return Ok(())
+    return Err(Usage(text=usage()))

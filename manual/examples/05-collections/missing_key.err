@@ -1,0 +1,2 @@
+panic: the key "Liisa" is not in the dict
+  at main (missing_key.sisu:4:22)

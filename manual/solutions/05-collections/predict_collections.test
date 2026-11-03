@@ -1,0 +1,6 @@
+test "a set of repeated numbers" ... ok
+test "the last of a sorted list" ... ok
+test "the sum of a slice" ... ok
+test "a comprehension with a condition" ... ok
+test "a name in lowercase among the keys of a dict" ... ok
+5 passed, 0 failed, 0 blocked

@@ -1,0 +1,13 @@
+# A Python loop `else` does not compile in Sisu.
+def first_frost(temperatures: list[f64]) -> String:
+    var message = String()
+    for hour, temperature in enumerate(temperatures):
+        if temperature < 0.0:
+            message = "frost at hour {hour}"
+            break
+    else:
+        message = "no frost"
+    return message
+
+def main():
+    print(first_frost([3.5, 1.0, -0.5, -2.0]))

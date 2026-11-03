@@ -1,0 +1,37 @@
+$ sisu test predict_loops.sisu
+warning[W0001]: typed hole `range_sum(1, 10, 3)` of type `int`
+  --> predict_loops.sisu:40:17
+   |
+40 | const UP: int = todo("range_sum(1, 10, 3)")
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `range_sum(10, 0, -4)` of type `int`
+  --> predict_loops.sisu:41:19
+   |
+41 | const DOWN: int = todo("range_sum(10, 0, -4)")
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `odd_count(7)` of type `int`
+  --> predict_loops.sisu:42:18
+   |
+42 | const ODD: int = todo("odd_count(7)")
+   |                  ^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `amount(-2)` of type `str`
+  --> predict_loops.sisu:43:23
+   |
+43 | const NEGATIVE: str = todo("amount(-2)")
+   |                       ^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `amount(4)` of type `str`
+  --> predict_loops.sisu:44:21
+   |
+44 | const PLENTY: str = todo("amount(4)")
+   |                     ^^^^^^^^^^^^^^^^^
+
+test "counting up in threes" ... blocked by todo("range_sum(1, 10, 3)")
+test "counting down in fours" ... blocked by todo("range_sum(10, 0, -4)")
+test "skipping even numbers" ... blocked by todo("odd_count(7)")
+test "a negative amount" ... blocked by todo("amount(-2)")
+test "four of something" ... blocked by todo("amount(4)")
+0 passed, 0 failed, 5 blocked

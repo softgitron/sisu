@@ -1,0 +1,2 @@
+4:19-4:30 E0308 type.missing-argument arg="b" name="max"
+  fix type.add-hole 4:29-4:29 ", todo(\"b\")"

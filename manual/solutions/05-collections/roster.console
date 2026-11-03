@@ -1,0 +1,12 @@
+$ sisu test roster.sisu
+error[E0400]: `joined` was moved on line 13 and cannot be used afterwards
+  --> roster.sisu:15:14
+   |
+15 |     return "{joined.join(" ")} / {by_name.join(" ")}"
+   |              ^^^^^^
+   |
+13 |     var by_name = joined
+   |                   ------ `joined` is moved here
+  = note: copy it with `.copy()` before it is moved, or move it later
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

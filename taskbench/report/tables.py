@@ -6,8 +6,11 @@ Usage: python3 -I -B report/tables.py TASKBENCH_DIR
 
 M1_DIR and M2_DIR name the two machines' full-scale results directories (five
 runs per cell on each); every table puts the two machines side by side, cell by
-cell. SMOKE_DIR is machine 2's earlier CI smoke run (harness 0.1.0, one run per
-cell). It is loaded on its own, so that its cells never mix with M2_DIR's
+cell. M3_DIR is machine 3, the 16 GiB runner, which ran `idle-memory` alone
+(five runs per cell) to measure the million-task cells machine 2 could not
+hold: the idle-memory tables show the three machines, and section 2.4's rule
+is applied to M1 with each runner. SMOKE_DIR is machine 2's earlier CI smoke
+run (harness 0.1.0, one run per cell). It is loaded on its own, so that its cells never mix with M2_DIR's
 (both have the machine id github-runner), and the report cites it only for what
 the full run cannot show: the runner image's own settings (before the workflow
 changes them), Go's memory under transparent huge pages "always", the first
@@ -27,12 +30,16 @@ spec.loader.exec_module(S)
 
 M1_DIR = f"{TB}/results/vm/2026-10-13-phase1"
 M2_DIR = f"{TB}/results/github-runner/full-38518035636"
+M3_DIR = f"{TB}/results/github-runner/cell-41548553538"
 SMOKE_DIR = f"{TB}/results/github-runner/2026-10-13-smoke-b5349dd405e8"
-cells = S.cells_of(S.load([M1_DIR, M2_DIR]))
+cells = S.cells_of(S.load([M1_DIR, M2_DIR, M3_DIR]))
 SMOKE = S.cells_of(S.load([SMOKE_DIR]))
-M1, M2 = "vm", "github-runner"
+M1, M2, M3 = "vm", "github-runner", "github-runner-16g"
+# Every benchmark ran on M1 and M2; M3 ran idle-memory only.
 MACHINES = (M1, M2)
-DIRS = {M1: M1_DIR, M2: M2_DIR}
+MEM_MACHINES = (M1, M2, M3)
+TAGS = {M1: "M1", M2: "M2", M3: "M3"}
+DIRS = {M1: M1_DIR, M2: M2_DIR, M3: M3_DIR}
 
 
 def c(m, bench, label):
@@ -79,7 +86,13 @@ def short(cell, metric, unit="", digits=None):
         gs = guard_stop(cell)
         if gs:
             return f"fails: {gs}"
-    return compact(cell_text(cell, metric, unit, digits))
+    text = compact(cell_text(cell, metric, unit, digits))
+    created = cell.values.get("tasks_created")
+    if text.startswith("fails: VMA limit at ") and created:
+        # The tasks created over the runs, not the first run's count.
+        lo, hi = min(created), max(created)
+        text = f"fails: VMA limit at {lo:,.0f} tasks" if lo == hi else f"fails: VMA limit at {lo:,.0f}-{hi:,.0f} tasks"
+    return text
 
 
 def ratio_text(cell, metric, ref, ref_metric=None, small=False):
@@ -146,7 +159,7 @@ def mem():
     for n in (100000, 1000000):
         rows = []
         for lab, name in MEM_CONFIGS:
-            xs = [c(m, b, f"{lab} N={n}") for m in MACHINES]
+            xs = [c(m, b, f"{lab} N={n}") for m in MEM_MACHINES]
             row = [name] + [short(x, "total_per_task_shallow", "KiB") for x in xs]
             for x in xs:
                 t = short(x, "total_per_task_excursion", "KiB")
@@ -156,28 +169,34 @@ def mem():
                 if lab == "java":
                     t += "; heap " + short(x, "java_heap_used_per_task_excursion", "KiB")
                 row.append(t)
-            row += [ratio_text(x, "total_per_task_shallow", c(m, b, f"go N={n}")) for m, x in zip(MACHINES, xs)]
-            row += [exc_ratio(m, x, n) for m, x in zip(MACHINES, xs)]
+            row += [ratio_text(x, "total_per_task_shallow", c(m, b, f"go N={n}")) for m, x in zip(MEM_MACHINES, xs)]
+            row += [exc_ratio(m, x, n) for m, x in zip(MEM_MACHINES, xs)]
             rows.append(row)
         print(f"*{n:,} tasks (KiB per task)*\n")
-        table(["Configuration", "shallow M1", "shallow M2", "after 32 KiB excursion M1", "after 32 KiB excursion M2",
-               "shallow / Go M1", "shallow / Go M2", "excursion / Go after GC M1", "excursion / Go after GC M2"], rows)
+        table(["Configuration"] + [f"shallow {TAGS[m]}" for m in MEM_MACHINES]
+              + [f"after 32 KiB excursion {TAGS[m]}" for m in MEM_MACHINES]
+              + [f"shallow / Go {TAGS[m]}" for m in MEM_MACHINES]
+              + [f"excursion / Go after GC {TAGS[m]}" for m in MEM_MACHINES], rows)
 
 
 def rule_rows(m):
     return {lab: (w, v, text, conds) for lab, conds, w, v, text in S.memory_rule(cells, m) or []}
 
 
-def rule_both():
-    """Section 2.4 per configuration: the verdict on each machine and on both."""
-    print("### Section 2.4 memory rule, both machines\n")
-    r1, r2 = rule_rows(M1), rule_rows(M2)
+def rule_pairs():
+    """Section 2.4 per configuration: the verdict on each machine, then on M1
+    with each runner (the rule names two machines; it passes or fails a
+    configuration only if both of the pair agree)."""
+    print("### Section 2.4 memory rule, each machine and M1 with each runner\n")
+    r = {m: rule_rows(m) for m in MEM_MACHINES}
+    none = (None, "not run", "not run", None)
     rows = []
-    for lab in sorted(set(r1) | set(r2)):
-        v1 = r1.get(lab, (None, "not run", "not run", None))
-        v2 = r2.get(lab, (None, "not run", "not run", None))
-        rows.append([lab, v1[2], v2[2], S.rule_on_both(v1[1], v2[1])])
-    table(["Configuration", "M1", "M2", "section 2.4 (passes or fails only if both machines agree)"], rows)
+    for lab in sorted(set().union(*r.values())):
+        v = {m: r[m].get(lab, none) for m in MEM_MACHINES}
+        rows.append([lab] + [v[m][2] for m in MEM_MACHINES]
+                    + [S.rule_on_both(v[M1][1], v[m][1]) for m in (M2, M3)])
+    table(["Configuration"] + [TAGS[m] for m in MEM_MACHINES]
+          + ["section 2.4 on M1 and M2", "section 2.4 on M1 and M3"], rows)
 
 
 def rule_detail(m):
@@ -194,6 +213,11 @@ def rule_m1():
 def rule_m2():
     print("### Section 2.4 memory rule, M2\n")
     rule_detail(M2)
+
+
+def rule_m3():
+    print("### Section 2.4 memory rule, M3\n")
+    rule_detail(M3)
 
 
 def spawn_join():
@@ -448,28 +472,38 @@ def timing():
            "seconds per repetition"], rows)
 
 
-def timing_m2():
-    print("### Timing on M2 (timing.csv)\n")
+def timing_runner(path, total_row=True):
     groups = []
-    read_timing(f"{M2_DIR}/timing.csv", "kept", groups)
+    read_timing(path, "kept", groups)
     total = sum(sum(x for _, x in v) for _, _, v in groups)
     rows = [[r[0], r[2], r[3], r[4], r[5]] for r in timing_rows(groups)]
-    rows.append(["total", "", "", f"{total / 60:.1f}", ""])
+    if total_row:
+        rows.append(["total", "", "", f"{total / 60:.1f}", ""])
     table(["Benchmark (with its controls)", "first start (UTC)", "repetitions", "minutes", "seconds per repetition"],
           rows)
 
 
+def timing_m2():
+    print("### Timing on M2 (timing.csv)\n")
+    timing_runner(f"{M2_DIR}/timing.csv")
+
+
+def timing_m3():
+    print("### Timing on M3 (timing.csv)\n")
+    timing_runner(f"{M3_DIR}/timing.csv", total_row=False)
+
+
 def load_summary():
     print("### Machine load (load.csv)\n")
-    S.t_load([M1_DIR, M2_DIR], True)
+    S.t_load([M1_DIR, M2_DIR, M3_DIR], True)
 
 
 def main():
-    for f in (mem, rule_both, rule_m1, rule_m2, spawn_join, max_tasks, echo, deep, starvation, probe, uring, timing,
-              timing_m2, load_summary):
+    for f in (mem, rule_pairs, rule_m1, rule_m2, rule_m3, spawn_join, max_tasks, echo, deep, starvation, probe, uring,
+              timing, timing_m2, timing_m3, load_summary):
         f()
     crashes = sum(1 for k, v in cells.items() for st in v.status.get("process_exit", []))
-    print(f"process_exit rows over both directories: {crashes}")
+    print(f"process_exit rows over the three directories: {crashes}")
 
 
 if __name__ == "__main__":

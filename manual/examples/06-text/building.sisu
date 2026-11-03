@@ -1,0 +1,15 @@
+# A `String` grows; `Builder` joins many pieces at once.
+from std.string import Builder
+
+def main():
+    var greeting = String()
+    greeting.push("Hei")
+    greeting.push_char(',')
+    greeting += " maailma"
+    print(greeting)
+    var report = Builder.new()
+    for n in range(1, 4):
+        if n > 1:
+            report.push(", ")
+        report.push("step {n}")
+    print(report.build())

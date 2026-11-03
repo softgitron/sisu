@@ -1,0 +1,6 @@
+# An `Array` has a length that is part of its type.
+def main():
+    var rgb: Array[int, 3] = Array.filled(0)
+    rgb[0] = 255
+    rgb[2] = 64
+    print("{rgb}, {len(rgb)} values")

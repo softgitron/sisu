@@ -1,0 +1,3 @@
+$ sisu run half_letter.sisu
+panic: the byte index 1 is inside a character of the text
+  at main (half_letter.sisu:4:11)

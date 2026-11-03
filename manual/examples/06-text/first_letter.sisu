@@ -1,0 +1,4 @@
+# Text cannot be indexed by position.
+def main():
+    let word = "Äiti"
+    print("the first letter is {word[0]}")

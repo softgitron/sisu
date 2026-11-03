@@ -1,0 +1,8 @@
+$ sisu test prime_or_not.sisu
+error[E0103]: expected an expression, found `else`
+  --> prime_or_not.sisu:18:5
+   |
+18 |     else:
+   |     ^^^^
+
+error[D0006]: the program was not run: errors found (1)

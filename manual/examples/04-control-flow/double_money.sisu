@@ -1,0 +1,12 @@
+# `while` repeats its block for as long as its condition holds.
+def years_to_double(rate: f64) -> int:
+    var money = 1.0
+    var years = 0
+    while money < 2.0:
+        money *= 1.0 + rate
+        years += 1
+    return years
+
+def main():
+    print("at 7%: {years_to_double(0.07)} years")
+    print("at 2%: {years_to_double(0.02)} years")

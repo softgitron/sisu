@@ -1,0 +1,4 @@
+# `byte_slice` cannot cut a character in two.
+def main():
+    let word = "Äiti"
+    print(word.byte_slice(0, 1))

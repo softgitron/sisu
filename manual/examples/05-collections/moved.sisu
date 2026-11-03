@@ -1,0 +1,7 @@
+# Assigning a list to another name moves it.
+def main():
+    let scores = [7, 9, 4]
+    var ranked = scores
+    ranked.sort()
+    print("ranked: {ranked}")
+    print("as entered: {scores}")

@@ -729,3 +729,6 @@ D0115 cli     cli.bad-front-end           `--front-end` takes `stage1` (the fron
 D0116 cli     front.no-stage1             the stage-1 front end is not in `{dir}`; `--front-end=rust` uses the Rust front end
 D0117 cli     front.stage1-build          building the stage-1 front end in `{dir}` failed; `--front-end=rust` uses the Rust front end:\n{detail}
 D0118 cli     front.stage1-failed         internal compiler error: the stage-1 front end stopped with status {status}; `--front-end=rust` uses the Rust front end
+# `--from-lir FILE` without `--native` (decision 274): LIR, the low IR
+# stage 2 writes, is compiled by the native backend; nothing interprets it.
+D0119 cli     native.from-lir             `--from-lir FILE` builds a LIR program (what stage 2's `sisu2 lir` writes) with the native backend; it goes with `--native`

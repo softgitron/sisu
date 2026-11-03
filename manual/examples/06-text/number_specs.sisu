@@ -1,0 +1,6 @@
+#!/usr/bin/env sisu
+# Format specs for integers.
+let n = 42
+"[{n:5}] [{n:<5}] [{n:^5}] [{n:05}]"
+"{n:x} {n:#x} {n:b} {n:o}"
+"{1234567:,}"

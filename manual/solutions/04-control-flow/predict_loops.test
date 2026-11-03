@@ -1,0 +1,6 @@
+test "counting up in threes" ... ok
+test "counting down in fours" ... ok
+test "skipping even numbers" ... ok
+test "a negative amount" ... ok
+test "four of something" ... ok
+5 passed, 0 failed, 0 blocked

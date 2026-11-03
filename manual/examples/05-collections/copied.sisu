@@ -1,0 +1,7 @@
+# `.copy()` makes a second list, so both names can be used.
+def main():
+    let scores = [7, 9, 4]
+    var ranked = scores.copy()
+    ranked.sort()
+    print("ranked: {ranked}")
+    print("as entered: {scores}")

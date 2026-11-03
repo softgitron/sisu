@@ -1,0 +1,12 @@
+$ sisu test fizzbuzz.sisu
+warning[W0001]: typed hole `fizzbuzz` of type `String`
+  --> fizzbuzz.sisu:12:12
+   |
+12 |     return todo("fizzbuzz")
+   |            ^^^^^^^^^^^^^^^^
+
+test "plain numbers" ... blocked by todo("fizzbuzz")
+test "multiples of three or five" ... blocked by todo("fizzbuzz")
+test "multiples of fifteen" ... blocked by todo("fizzbuzz")
+test "a line of words" ... blocked by todo("fizzbuzz")
+0 passed, 0 failed, 4 blocked

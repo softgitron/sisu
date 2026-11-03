@@ -1,0 +1,9 @@
+# A dict maps keys to values.
+def main():
+    var ages = {"Aino": 34, "Eero": 29}
+    ages["Roni"] = 41
+    print("{ages}")
+    print("Eero is {ages["Eero"]}")
+    print("{ages.get("Eero")} {ages.get("Liisa")}")
+    for name, age in ages:
+        print("{name} is {age}")

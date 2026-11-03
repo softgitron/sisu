@@ -1,0 +1,4 @@
+test "plain vowels" ... ok
+test "vowels with dots and capitals" ... ok
+test "no vowels" ... ok
+3 passed, 0 failed, 0 blocked

@@ -1,0 +1,15 @@
+# `if`, `elif` and `else` choose which lines run.
+def describe_wind(speed: f64) -> str:
+    if speed < 1.0:
+        return "calm"
+    elif speed < 8.0:
+        return "a breeze"
+    elif speed < 21.0:
+        return "a strong wind"
+    else:
+        return "a storm"
+
+def main():
+    print("0.5 m/s is {describe_wind(0.5)}")
+    print("12 m/s is {describe_wind(12.0)}")
+    print("25 m/s is {describe_wind(25.0)}")

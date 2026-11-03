@@ -1,0 +1,5 @@
+$ sisu run zip_unequal.sisu
+Aino is 34
+Eero is 29
+panic: zip: the arguments have different lengths
+  at main (zip_unequal.sisu:5:5)

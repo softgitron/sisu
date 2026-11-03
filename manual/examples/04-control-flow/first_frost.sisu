@@ -1,0 +1,10 @@
+# A search returns from inside the loop; after it, nothing matched.
+def first_frost(temperatures: list[f64]) -> String:
+    for hour, temperature in enumerate(temperatures):
+        if temperature < 0.0:
+            return "frost at hour {hour}"
+    return "no frost"
+
+def main():
+    print(first_frost([3.5, 1.0, -0.5, -2.0]))
+    print(first_frost([3.5, 1.0, 0.5]))

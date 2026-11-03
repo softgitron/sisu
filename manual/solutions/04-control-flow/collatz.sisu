@@ -1,0 +1,31 @@
+##! Exercise 4.4, the Collatz steps: the solution.
+##!
+##! The number changes, so it is a `var`, and so is the count of steps.
+##! A `while` loop fits, because the number of rounds is not known in
+##! advance. A parameter cannot be assigned to, so the loop works on a
+##! copy of `n`.
+
+## The number of steps that take `n` to 1, for `n` of 1 or more.
+def collatz_steps(n: int) -> int:
+    var value = n
+    var steps = 0
+    while value != 1:
+        if value % 2 == 0:
+            value //= 2
+        else:
+            value = 3 * value + 1
+        steps += 1
+    return steps
+
+test "one is already there":
+    assert collatz_steps(1) == 0
+
+test "a power of two only halves":
+    assert collatz_steps(16) == 4
+
+test "small numbers":
+    assert collatz_steps(6) == 8
+    assert collatz_steps(7) == 16
+
+test "twenty-seven takes a long way":
+    assert collatz_steps(27) == 111

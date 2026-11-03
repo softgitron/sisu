@@ -1,0 +1,7 @@
+#!/usr/bin/env sisu
+# Numbers out of text: the result is optional.
+let answer = "42".parse_int()
+let below_zero = "-7".parse_int()
+let not_a_number = "4x".parse_int()
+let ratio = "2.5".parse_float()
+let padded = " 42 ".trim().parse_int()

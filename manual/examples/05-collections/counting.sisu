@@ -1,0 +1,7 @@
+# `entry(key).or_insert(0) += 1` counts how often each key appears.
+def main():
+    let pets = ["kissa", "koira", "kissa", "kala", "kissa"]
+    var counts: dict[str, int] = {}
+    for pet in pets:
+        counts.entry(pet).or_insert(0) += 1
+    print("{counts}")

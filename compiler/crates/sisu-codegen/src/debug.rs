@@ -38,10 +38,24 @@ use sisu_sir as sir;
 use sisu_sir::Type;
 use std::collections::HashMap;
 
+/// The type of a named local: a SIR type, or the number of a LIR type's
+/// description (`type tN`, decision 271).
+pub(crate) enum DebugTy {
+    Sir(Type),
+    Lir(u32),
+}
+
+/// Where the debug information's types come from: the layouts of SIR's
+/// types, or LIR's descriptions of them.
+pub(crate) enum Describe<'t, 'p> {
+    Sir(&'t mut Types<'p>),
+    Lir(&'t [crate::lir::DType]),
+}
+
 /// A named local of a function, as the debug information describes it.
 pub(crate) struct Var {
     pub name: String,
-    pub ty: Type,
+    pub ty: DebugTy,
     pub slot: StackSlot,
     /// The slot holds the address of the value (a parameter's, whose
     /// memory the caller provides), not the value.
@@ -144,12 +158,12 @@ fn stack_pointer() -> Register {
 }
 
 /// Writes the debug information of the compiled functions `fns` into the
-/// object.
+/// object; `files` are the program's sources, as SIR numbers them.
 pub(crate) fn write(
     product: &mut ObjectProduct,
-    prog: &sir::Program,
+    files_of: &[String],
     fns: &[FnDebug],
-    types: &mut Types<'_>,
+    types: Describe<'_, '_>,
     sources: &Sources,
     isa: &dyn TargetIsa,
 ) -> Result<(), Error> {
@@ -163,7 +177,7 @@ pub(crate) fn write(
     };
     let comp_dir_text = clean(&sources.comp_dir, ".");
     let comp_dir = LineString::new(comp_dir_text.as_bytes(), encoding, &mut dwarf.line_strings);
-    let main_name = clean(prog.sources.first().map(String::as_str).unwrap_or(""), "<program>");
+    let main_name = clean(files_of.first().map(String::as_str).unwrap_or(""), "<program>");
     let main_file = LineString::new(main_name.as_bytes(), encoding, &mut dwarf.line_strings);
     dwarf.unit.line_program =
         LineProgram::new(encoding, LineEncoding::default(), comp_dir, None, main_file, None);
@@ -175,7 +189,7 @@ pub(crate) fn write(
         dwarf.unit.line_program.add_directory(s)
     });
     let mut files: Vec<FileId> = Vec::new();
-    for s in &prog.sources {
+    for s in files_of {
         let (dir, name) = match (s.strip_prefix("<std>/"), std_dir) {
             (Some(rest), Some(d)) => (d, rest),
             _ => (here, s.as_str()),
@@ -237,7 +251,18 @@ pub(crate) fn write(
         e.set(constants::DW_AT_low_pc, AttributeValue::Address(Address::Constant(0)));
         e.set(constants::DW_AT_ranges, AttributeValue::RangeListRef(range_list));
     }
-    let mut tb = TypeBuilder { types, ids: HashMap::new(), root, words: HashMap::new() };
+    let (sir_types, lir_types) = match types {
+        Describe::Sir(t) => (Some(t), &[][..]),
+        Describe::Lir(l) => (None, l),
+    };
+    let mut tb = TypeBuilder {
+        types: sir_types,
+        lir: lir_types,
+        ids: HashMap::new(),
+        lir_ids: HashMap::new(),
+        root,
+        words: HashMap::new(),
+    };
     for (k, f) in fns.iter().enumerate() {
         let sub = dwarf.unit.add(root, constants::DW_TAG_subprogram);
         let e = dwarf.unit.get_mut(sub);
@@ -253,7 +278,10 @@ pub(crate) fn write(
         }
         for v in &f.vars {
             let Some(&offset) = f.slots.get(v.slot.as_u32() as usize) else { continue };
-            let ty = tb.ty(&mut dwarf, &v.ty);
+            let ty = match &v.ty {
+                DebugTy::Sir(t) => tb.ty(&mut dwarf, t),
+                DebugTy::Lir(k) => tb.lir_ty(&mut dwarf, *k),
+            };
             let tag = if v.param { constants::DW_TAG_formal_parameter } else { constants::DW_TAG_variable };
             let var = dwarf.unit.add(sub, tag);
             let e = dwarf.unit.get_mut(var);
@@ -344,22 +372,19 @@ type Fields = Vec<(String, Type, u32)>;
 
 /// The DWARF types of the program's types, made once each.
 struct TypeBuilder<'t, 'p> {
-    types: &'t mut Types<'p>,
+    /// The layouts of SIR's types, or LIR's descriptions of them.
+    types: Option<&'t mut Types<'p>>,
+    lir: &'t [crate::lir::DType],
     ids: HashMap<Type, UnitEntryId>,
+    lir_ids: HashMap<u32, UnitEntryId>,
     root: UnitEntryId,
-    /// The base types of words, by name.
-    words: HashMap<&'static str, UnitEntryId>,
+    /// The base types, by name.
+    words: HashMap<String, UnitEntryId>,
 }
 
 impl TypeBuilder<'_, '_> {
     /// A base type of `size` bytes.
-    fn base(
-        &mut self,
-        dwarf: &mut DwarfUnit,
-        name: &'static str,
-        ate: constants::DwAte,
-        size: u32,
-    ) -> UnitEntryId {
+    fn base(&mut self, dwarf: &mut DwarfUnit, name: &str, ate: constants::DwAte, size: u32) -> UnitEntryId {
         if let Some(&id) = self.words.get(name) {
             return id;
         }
@@ -368,7 +393,7 @@ impl TypeBuilder<'_, '_> {
         e.set(constants::DW_AT_name, AttributeValue::String(name.as_bytes().to_vec()));
         e.set(constants::DW_AT_encoding, AttributeValue::Encoding(ate));
         e.set(constants::DW_AT_byte_size, AttributeValue::Udata(u64::from(size)));
-        self.words.insert(name, id);
+        self.words.insert(name.to_string(), id);
         id
     }
 
@@ -435,13 +460,23 @@ impl TypeBuilder<'_, '_> {
         id
     }
 
+    /// The bytes of a SIR type, 0 when it has no layout.
+    fn size(&mut self, t: &Type) -> u32 {
+        self.types.as_mut().and_then(|ty| ty.size(t).ok()).unwrap_or(0)
+    }
+
+    /// Where field `i` is, when the layout has it.
+    fn field(&mut self, t: &Type, variant: Option<u32>, i: u32) -> Option<(u32, Type)> {
+        self.types.as_mut().and_then(|ty| ty.field(t, variant, i).ok())
+    }
+
     /// The DWARF type of a (concrete) SIR type.
     fn ty(&mut self, dwarf: &mut DwarfUnit, t: &Type) -> UnitEntryId {
         if let Some(&id) = self.ids.get(t) {
             return id;
         }
         let name = sir::write::ty(t);
-        let size = self.types.size(t).unwrap_or(0);
+        let size = self.size(t);
         let id = match t {
             Type::Int => self.base(dwarf, "int", constants::DW_ATE_signed, 8),
             Type::Float => self.base(dwarf, "f64", constants::DW_ATE_float, 8),
@@ -470,7 +505,7 @@ impl TypeBuilder<'_, '_> {
                 let id = self.structure(dwarf, &name, size);
                 self.ids.insert(t.clone(), id);
                 for (k, it) in items.iter().enumerate() {
-                    if let Ok((off, _)) = self.types.field(t, None, k as u32) {
+                    if let Some((off, _)) = self.field(t, None, k as u32) {
                         let ty = self.ty(dwarf, it);
                         self.member(dwarf, id, &format!("__{k}"), ty, off);
                     }
@@ -497,7 +532,7 @@ impl TypeBuilder<'_, '_> {
                 for n in names {
                     let member = Type::Named(n.clone(), Vec::new());
                     // A member no value was made of is never the value's.
-                    let Some(number) = self.types.known_id(&member) else { continue };
+                    let Some(number) = self.types.as_ref().and_then(|ty| ty.known_id(&member)) else { continue };
                     let variant = dwarf.unit.add(part, constants::DW_TAG_variant);
                     dwarf
                         .unit
@@ -587,12 +622,12 @@ impl TypeBuilder<'_, '_> {
                     .collect();
                 self.enumeration(dwarf, t, name, size, 0, &[], variants)
             }
-            _ => match self.types.decl(n).cloned() {
+            _ => match self.types.as_ref().and_then(|ty| ty.decl(n)).cloned() {
                 Some(sir::TypeDecl::Struct { fields, .. }) => {
                     let id = self.structure(dwarf, name, size);
                     self.ids.insert(t.clone(), id);
                     for (k, f) in fields.iter().enumerate() {
-                        if let Ok((off, ft)) = self.types.field(t, None, k as u32) {
+                        if let Some((off, ft)) = self.field(t, None, k as u32) {
                             let ty = self.ty(dwarf, &ft);
                             self.member(dwarf, id, &f.name, ty, off);
                         }
@@ -604,7 +639,7 @@ impl TypeBuilder<'_, '_> {
                     for (v, var) in variants.iter().enumerate() {
                         let mut fields = Vec::new();
                         for (k, (fname, _)) in var.fields.iter().enumerate() {
-                            if let Ok((off, ft)) = self.types.field(t, Some(v as u32), k as u32) {
+                            if let Some((off, ft)) = self.field(t, Some(v as u32), k as u32) {
                                 let fname = fname.clone().unwrap_or_else(|| format!("__{k}"));
                                 fields.push((fname, ft, off));
                             }
@@ -649,6 +684,25 @@ impl TypeBuilder<'_, '_> {
     ) -> UnitEntryId {
         let id = self.structure(dwarf, name, size);
         self.ids.insert(t.clone(), id);
+        let variants = variants
+            .into_iter()
+            .map(|(v, fields)| (v, fields.into_iter().map(|(f, ft, off)| (f, DebugTy::Sir(ft), off)).collect()))
+            .collect();
+        self.variant_part(dwarf, id, size, tag, head, variants);
+        id
+    }
+
+    /// An enum's members after its struct: the words `head`, then the
+    /// variant part that chooses by the tag word at `tag`.
+    fn variant_part(
+        &mut self,
+        dwarf: &mut DwarfUnit,
+        id: UnitEntryId,
+        size: u32,
+        tag: u32,
+        head: &[(&str, u32)],
+        variants: Vec<(String, Vec<(String, DebugTy, u32)>)>,
+    ) {
         let w = self.word(dwarf);
         // Artificial, as the tag is: a debugger takes the first member that
         // is not for the variant the value holds.
@@ -667,11 +721,127 @@ impl TypeBuilder<'_, '_> {
             // covers the whole value (its fields at their own offsets).
             let vty = self.structure(dwarf, &vname, size);
             for (fname, ft, off) in fields {
-                let ty = self.ty(dwarf, &ft);
+                let ty = match &ft {
+                    DebugTy::Sir(t) => self.ty(dwarf, t),
+                    DebugTy::Lir(k) => self.lir_ty(dwarf, *k),
+                };
                 self.member(dwarf, vty, &fname, ty, off);
             }
             self.member(dwarf, variant, &vname, vty, 0);
         }
+    }
+
+    /// The DWARF type a LIR description gives (`type tN ...`): the same
+    /// entries, made in the same order, as [`TypeBuilder::ty`] makes for
+    /// the SIR type it describes.
+    fn lir_ty(&mut self, dwarf: &mut DwarfUnit, k: u32) -> UnitEntryId {
+        use crate::lir::DType;
+        if let Some(&id) = self.lir_ids.get(&k) {
+            return id;
+        }
+        let Some(t) = self.lir.get(k as usize).cloned() else {
+            let id = self.structure(dwarf, "()", 0);
+            self.lir_ids.insert(k, id);
+            return id;
+        };
+        let id = match t {
+            DType::Base { name, encoding, size } => self.base(dwarf, &name, encoding, size),
+            DType::Str => {
+                let byte = self.base(dwarf, "u8", constants::DW_ATE_unsigned_char, 1);
+                self.slice(dwarf, "&str", byte)
+            }
+            DType::Opaque { name, size } => self.opaque(dwarf, &name, size),
+            DType::Word(name) => {
+                let w = self.word(dwarf);
+                self.pointer(dwarf, &name, Some(w))
+            }
+            DType::Pointer { name, to } => {
+                let id = dwarf.unit.add(self.root, constants::DW_TAG_pointer_type);
+                self.lir_ids.insert(k, id);
+                let to = self.lir_ty(dwarf, to);
+                let e = dwarf.unit.get_mut(id);
+                e.set(constants::DW_AT_name, AttributeValue::String(name.into_bytes()));
+                e.set(constants::DW_AT_byte_size, AttributeValue::Udata(8));
+                e.set(constants::DW_AT_type, AttributeValue::UnitRef(to));
+                return id;
+            }
+            DType::Tuple { name, size, items } => {
+                let id = self.structure(dwarf, &name, size);
+                self.lir_ids.insert(k, id);
+                for (i, t, off) in items {
+                    let ty = self.lir_ty(dwarf, t);
+                    self.member(dwarf, id, &format!("__{i}"), ty, off);
+                }
+                return id;
+            }
+            DType::Struct { name, size, fields } => {
+                let id = self.structure(dwarf, &name, size);
+                self.lir_ids.insert(k, id);
+                for (f, t, off) in fields {
+                    let ty = self.lir_ty(dwarf, t);
+                    self.member(dwarf, id, &f, ty, off);
+                }
+                id
+            }
+            DType::Text { name, size } => {
+                let id = self.structure(dwarf, &name, size);
+                self.lir_ids.insert(k, id);
+                let byte = self.base(dwarf, "u8", constants::DW_ATE_unsigned_char, 1);
+                let text = self.slice(dwarf, "&str", byte);
+                self.member(dwarf, id, "text", text, 0);
+                let w = self.word(dwarf);
+                self.member(dwarf, id, "capacity", w, 16);
+                id
+            }
+            DType::List { name, size, slice, elem } => {
+                let id = self.structure(dwarf, &name, size);
+                self.lir_ids.insert(k, id);
+                let elem = self.lir_ty(dwarf, elem);
+                let items = self.slice(dwarf, &slice, elem);
+                self.member(dwarf, id, "items", items, 0);
+                let w = self.word(dwarf);
+                self.member(dwarf, id, "capacity", w, 16);
+                id
+            }
+            DType::Enum { name, size, tag, head, variants } => {
+                let id = self.structure(dwarf, &name, size);
+                self.lir_ids.insert(k, id);
+                let head: Vec<(&str, u32)> = head.iter().map(|(h, off)| (h.as_str(), *off)).collect();
+                let variants = variants
+                    .into_iter()
+                    .map(|(v, fields)| (v, fields.into_iter().map(|(f, t, off)| (f, DebugTy::Lir(t), off)).collect()))
+                    .collect();
+                self.variant_part(dwarf, id, size, tag, &head, variants);
+                id
+            }
+            DType::ErrSet { name, size, members } => {
+                let id = self.structure(dwarf, &name, size);
+                self.lir_ids.insert(k, id);
+                let w = self.word(dwarf);
+                let part = dwarf.unit.add(id, constants::DW_TAG_variant_part);
+                let discr = self.member(dwarf, part, "set", w, abi::ERROR_DECL);
+                dwarf.unit.get_mut(discr).set(constants::DW_AT_artificial, AttributeValue::Flag(true));
+                dwarf.unit.get_mut(part).set(constants::DW_AT_discr, AttributeValue::UnitRef(discr));
+                for (number, n, t) in members {
+                    let variant = dwarf.unit.add(part, constants::DW_TAG_variant);
+                    dwarf
+                        .unit
+                        .get_mut(variant)
+                        .set(constants::DW_AT_discr_value, AttributeValue::Udata(u64::from(number)));
+                    let ty = self.lir_ty(dwarf, t);
+                    let wrap = self.structure(dwarf, &n, size);
+                    self.member(dwarf, wrap, "__0", ty, 0);
+                    self.member(dwarf, variant, &n, wrap, 0);
+                }
+                return id;
+            }
+            DType::Alias(t) => {
+                let id = self.lir_ty(dwarf, t);
+                self.lir_ids.insert(k, id);
+                return id;
+            }
+        };
+        self.lir_ids.insert(k, id);
         id
     }
 }

@@ -1,0 +1,22 @@
+##! Exercise 6.4, a CSV line. Kind: write. Level: 2.
+##!
+##! A line of CSV holds fields separated by commas. A field in double
+##! quotes can hold commas, and its quotes are not part of the field.
+##! Write the body of `csv_fields` so that every test passes. Run the
+##! tests with `sisu test csv_fields.sisu`. The hints are in chapter 6
+##! of the tutorial, under "Exercise 6.4: a CSV line".
+
+## The fields of `line`, each without the spaces around it.
+def csv_fields(line: str) -> list[String]:
+    return todo("csv_fields")
+
+test "plain fields":
+    assert csv_fields("a,b,c") == ["a", "b", "c"]
+    assert csv_fields(" Oulu , 214000 ") == ["Oulu", "214000"]
+
+test "an empty field":
+    assert csv_fields("a,,b") == ["a", "", "b"]
+
+test "a comma inside quotes":
+    let fields = csv_fields("\"Oulu, Finland\",214000")
+    assert fields == ["Oulu, Finland", "214000"]

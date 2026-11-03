@@ -1,0 +1,6 @@
+test "len of a Finnish word" ... ok
+test "the bytes of the same word" ... ok
+test "splitting at every comma" ... ok
+test "a width with zeros" ... ok
+test "codes of characters" ... ok
+5 passed, 0 failed, 0 blocked

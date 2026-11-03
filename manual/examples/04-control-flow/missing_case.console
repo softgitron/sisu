@@ -1,0 +1,9 @@
+$ sisu run missing_case.sisu
+error[E0314]: this `match` does not cover `_`
+  --> missing_case.sisu:3:5
+  |
+3 |     match code:
+  |     ^^^^^^^^^^
+  = note: add an arm for `_`, or a `case _` arm
+
+error[D0006]: the program was not run: errors found (1)

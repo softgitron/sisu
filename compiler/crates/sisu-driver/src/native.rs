@@ -75,18 +75,31 @@ fn sources() -> sisu_codegen::Sources {
     sisu_codegen::Sources { comp_dir, std_dir }
 }
 
+/// What the backend compiles: a SIR program, or the text of a LIR program
+/// (stage 2's lowering of one, decision 274).
+#[derive(Clone, Copy)]
+pub(crate) enum Code<'a> {
+    Sir(&'a sisu_sir::Program),
+    Lir(&'a str),
+}
+
 /// Compiles the program and links it at `output`. On failure the message
 /// is reported to `host` and the exit status returned.
-pub(crate) fn build(
-    prog: &sisu_sir::Program,
-    output: &Path,
-    profile: Profile,
-    host: &mut dyn Host,
-) -> Result<(), i32> {
+pub(crate) fn build(code: Code<'_>, output: &Path, profile: Profile, host: &mut dyn Host) -> Result<(), i32> {
     let exe = std::env::current_exe().unwrap_or_default();
     let runtime = match sisu_codegen::find_runtime(&exe) {
         Ok(r) => r,
         Err(e) => return Err(report(e, output, host)),
+    };
+    let prog = match code {
+        Code::Sir(prog) => prog,
+        Code::Lir(text) => {
+            // A LIR program says its own profile.
+            let profile = Profile::of(sisu_codegen::lir_is_release(text));
+            let start = std::time::Instant::now();
+            let compiled = sisu_codegen::compile_lir(text, &sources()).map_err(|e| report(e, output, host))?;
+            return link(&compiled, start.elapsed(), &runtime, output, profile, host);
+        }
     };
     // `SISU_NATIVE_SURVEY=1`: every construct the backend does not compile
     // yet, rather than the first.
@@ -109,14 +122,26 @@ pub(crate) fn build(
         Ok(c) => c,
         Err(e) => return Err(report(e, output, host)),
     };
-    let generated = start.elapsed();
+    link(&compiled, start.elapsed(), &runtime, output, profile, host)
+}
+
+/// Links a compiled program at `output`, and reports where a build's time
+/// went when asked.
+fn link(
+    compiled: &sisu_codegen::Compiled,
+    generated: std::time::Duration,
+    runtime: &Path,
+    output: &Path,
+    profile: Profile,
+    host: &mut dyn Host,
+) -> Result<(), i32> {
     if let Some(dir) = output.parent()
         && !dir.as_os_str().is_empty()
     {
         let _ = std::fs::create_dir_all(dir);
     }
     let start = std::time::Instant::now();
-    let linked = sisu_codegen::link(&compiled.object, &runtime, output).map_err(|e| report(e, output, host));
+    let linked = sisu_codegen::link(&compiled.object, runtime, output).map_err(|e| report(e, output, host));
     // `SISU_NATIVE_TIMES=1`: where a build's time went, for measuring the
     // backend against 10's targets (docs/architecture.md, "Stage 2").
     if std::env::var_os("SISU_NATIVE_TIMES").is_some() {
@@ -164,13 +189,8 @@ fn report(e: sisu_codegen::Error, output: &Path, host: &mut dyn Host) -> i32 {
 }
 
 /// `sisu build --native`: the executable, and a line saying where it is.
-pub(crate) fn build_command(
-    prog: &sisu_sir::Program,
-    output: &Path,
-    profile: Profile,
-    host: &mut dyn Host,
-) -> i32 {
-    match build(prog, output, profile, host) {
+pub(crate) fn build_command(code: Code<'_>, output: &Path, profile: Profile, host: &mut dyn Host) -> i32 {
+    match build(code, output, profile, host) {
         Ok(()) => {
             host.stdout(&text(msg::NATIVE_BUILT, &[("output", output.display().to_string())]));
             0
@@ -201,7 +221,7 @@ pub(crate) struct Run {
 /// `--schedule-seed` on, as the interpreter's runs do, and reports the
 /// first seed whose run fails.
 pub(crate) fn run_command(
-    prog: &sisu_sir::Program,
+    code: Code<'_>,
     name: &str,
     args: &[String],
     how: &Run,
@@ -215,7 +235,7 @@ pub(crate) fn run_command(
     if let Some(dir) = exe.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let code = match build(prog, &exe, how.profile, host) {
+    let code = match build(code, &exe, how.profile, host) {
         Ok(()) => run_built(&exe, args, how, host),
         Err(code) => code,
     };

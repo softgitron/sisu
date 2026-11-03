@@ -1,1 +1,37 @@
 $ sisu test predict_calls.sisu
+warning[W0001]: typed hole `ticket(30)` of type `int`
+  --> predict_calls.sisu:19:20
+   |
+19 | const ADULT: int = todo("ticket(30)")
+   |                    ^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `ticket(12, group=3)` of type `int`
+  --> predict_calls.sisu:20:27
+   |
+20 | const SCHOOL_CLASS: int = todo("ticket(12, group=3)")
+   |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `ticket(25, student=True)` of type `int`
+  --> predict_calls.sisu:21:22
+   |
+21 | const STUDENT: int = todo("ticket(25, student=True)")
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `ticket(4, group=2, student=True)` of type `int`
+  --> predict_calls.sisu:22:23
+   |
+22 | const TODDLERS: int = todo("ticket(4, group=2, student=True)")
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `halvings(100)` of type `int`
+  --> predict_calls.sisu:23:23
+   |
+23 | const HALVINGS: int = todo("halvings(100)")
+   |                       ^^^^^^^^^^^^^^^^^^^^^
+
+test "one adult" ... blocked by todo("ticket(30)")
+test "three twelve-year-olds" ... blocked by todo("ticket(12, group=3)")
+test "a student" ... blocked by todo("ticket(25, student=True)")
+test "two small children" ... blocked by todo("ticket(4, group=2, student=True)")
+test "halving a hundred" ... blocked by todo("halvings(100)")
+0 passed, 0 failed, 5 blocked

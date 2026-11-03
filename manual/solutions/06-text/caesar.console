@@ -1,0 +1,12 @@
+$ sisu test caesar.sisu
+warning[W0001]: typed hole `caesar` of type `String`
+  --> caesar.sisu:13:12
+   |
+13 |     return todo("caesar")
+   |            ^^^^^^^^^^^^^^
+
+test "one place along" ... blocked by todo("caesar")
+test "past the end of the alphabet" ... blocked by todo("caesar")
+test "capitals and punctuation" ... blocked by todo("caesar")
+test "there and back" ... blocked by todo("caesar")
+0 passed, 0 failed, 4 blocked

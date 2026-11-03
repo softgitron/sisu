@@ -1,0 +1,39 @@
+##! Exercise 4.3, FizzBuzz: the solution.
+##!
+##! The test for 15 comes first: a multiple of 15 is also a multiple of
+##! 3, so checking 3 first would answer "Fizz" for it.
+
+## The FizzBuzz word for `n`: "FizzBuzz" when 3 and 5 both divide `n`,
+## "Fizz" when 3 does, "Buzz" when 5 does, and the number otherwise.
+def fizzbuzz(n: int) -> String:
+    if n % 15 == 0:
+        return "FizzBuzz"
+    elif n % 3 == 0:
+        return "Fizz"
+    elif n % 5 == 0:
+        return "Buzz"
+    return "{n}"
+
+## The FizzBuzz words for 1 to `last`, separated by spaces.
+def fizzbuzz_line(last: int) -> String:
+    var line = String()
+    for n in range(1, last + 1):
+        if n > 1:
+            line += " "
+        line += fizzbuzz(n)
+    return line
+
+test "plain numbers":
+    assert fizzbuzz(1) == "1"
+    assert fizzbuzz(98) == "98"
+
+test "multiples of three or five":
+    assert fizzbuzz(9) == "Fizz"
+    assert fizzbuzz(25) == "Buzz"
+
+test "multiples of fifteen":
+    assert fizzbuzz(30) == "FizzBuzz"
+
+test "a line of words":
+    assert fizzbuzz_line(3) == "1 2 Fizz"
+    assert fizzbuzz_line(10) == "1 2 Fizz 4 Buzz Fizz 7 8 Fizz Buzz"

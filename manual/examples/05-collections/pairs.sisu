@@ -1,0 +1,10 @@
+# `zip` pairs two lists; `reversed` goes backwards.
+def main():
+    let names = ["Aino", "Eero", "Roni"]
+    let ages = [34, 29, 41]
+    for name, age in zip(names, ages):
+        print("{name} is {age}")
+    for name, age in zip_shortest(names, [34, 29]):
+        print("{name} is {age}")
+    for name in reversed(names):
+        print(name)

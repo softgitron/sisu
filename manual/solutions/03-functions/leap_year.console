@@ -1,1 +1,12 @@
 $ sisu test leap_year.sisu
+warning[W0001]: typed hole `is_leap_year` of type `bool`
+  --> leap_year.sisu:10:12
+   |
+10 |     return todo("is_leap_year")
+   |            ^^^^^^^^^^^^^^^^^^^^
+
+test "an ordinary year" ... blocked by todo("is_leap_year")
+test "every fourth year" ... blocked by todo("is_leap_year")
+test "a century year that is not a leap year" ... blocked by todo("is_leap_year")
+test "every fourth century year is a leap year" ... blocked by todo("is_leap_year")
+0 passed, 0 failed, 4 blocked

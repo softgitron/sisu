@@ -1,0 +1,12 @@
+$ sisu test collatz.sisu
+warning[W0001]: typed hole `collatz_steps` of type `int`
+  --> collatz.sisu:12:12
+   |
+12 |     return todo("collatz_steps")
+   |            ^^^^^^^^^^^^^^^^^^^^^
+
+test "one is already there" ... blocked by todo("collatz_steps")
+test "a power of two only halves" ... blocked by todo("collatz_steps")
+test "small numbers" ... blocked by todo("collatz_steps")
+test "twenty-seven takes a long way" ... blocked by todo("collatz_steps")
+0 passed, 0 failed, 4 blocked

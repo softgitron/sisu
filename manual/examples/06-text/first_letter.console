@@ -1,0 +1,8 @@
+$ sisu run first_letter.sisu
+error[E0345]: `str` cannot be indexed by position; use `.chars()`, `.bytes()` or `.byte_slice(a, b)`
+  --> first_letter.sisu:4:33
+  |
+4 |     print("the first letter is {word[0]}")
+  |                                 ^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

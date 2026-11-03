@@ -1,0 +1,14 @@
+# Stage 2 of the bootstrap (proposal/18-next-steps.md, "Bootstrapping";
+# D-087, step 1): the backend written in Sisu. It lowers serialised SIR to
+# LIR, the backend-neutral low IR, which the Rust backend translates one to
+# one into Cranelift IR (`sisu build --native --from-lir`).
+[package]
+name = "stage2"
+version = "0.1.0"
+edition = "2027"
+description = "The Sisu backend in Sisu: SIR lowered to LIR, the backend-neutral low IR"
+license = "Apache-2.0 OR Unlicense"
+
+[dependencies]
+# The SIR types (`stage1.sir`) and their writer.
+stage1 = { path = "../stage1" }

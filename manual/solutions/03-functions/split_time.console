@@ -1,1 +1,18 @@
 $ sisu test split_time.sisu
+warning[W0001]: typed hole `split_time` of type `(hours: int, minutes: int, seconds: int)`
+  --> split_time.sisu:11:12
+   |
+11 |     return todo("split_time")
+   |            ^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `show_time` of type `String`
+  --> split_time.sisu:16:12
+   |
+16 |     return todo("show_time")
+   |            ^^^^^^^^^^^^^^^^^
+
+test "an hour, two minutes and five seconds" ... blocked by todo("split_time")
+test "less than a minute" ... blocked by todo("split_time")
+test "shown with seconds" ... blocked by todo("show_time")
+test "shown without seconds" ... blocked by todo("show_time")
+0 passed, 0 failed, 4 blocked

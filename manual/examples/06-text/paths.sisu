@@ -1,0 +1,8 @@
+# A string literal becomes a `Path` where a `Path` is expected.
+def describe(file: Path) -> String:
+    return "the file {file}"
+
+def main():
+    let config: Path = "settings/app.toml"
+    print(describe(config))
+    print(describe("notes.txt"))

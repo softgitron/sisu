@@ -3,13 +3,13 @@
 *Era label for every number in this report: **harness** (Rust code on native
 stacks, standing in for compiled Sisu). Filled from
 [`report-template.md`](report-template.md). Every number comes from the files in
-the two machines' full-scale results directories of section 0: the benchmark
+the three machines' full-scale results directories of section 0: the benchmark
 CSVs, `machine-spec.csv`, `versions.txt`, `controls-versions.txt`, `timing.csv`
 and `load.csv`. `summarize.py --markdown` on those directories prints the
 tables' values (medians and ranges over runs, ratios, bootstrap intervals, and
-section 2.4's rule on each machine and on both), and the few figures taken from
-a row's `note` column (decommit counts, limits) say so where they are used. The
-report itself is rendered from
+section 2.4's rule on each machine and on each pair of machines), and the few
+figures taken from a row's `note` column (decommit counts, limits) say so where
+they are used. The report itself is rendered from
 [`report/report-phase1.md.in`](../report/report-phase1.md.in) by
 `report/render.py`, which computes every figure in it from those files. Two
 labelled exceptions: machine 2's earlier CI smoke run, whose own CSVs supply
@@ -17,38 +17,41 @@ three measurements and the runner image's settings before the workflow changes
 them, and the cross-check of section 10.2, which quotes the log summary of a run
 whose CSVs were lost. A cell that was not run says so, with the reason; a cell
 that the memory guard stopped is a failed row and is reported as one. KiB = 1024
-bytes; "M1" is machine 1, "M2" machine 2.*
+bytes; "M1" is machine 1, "M2" machine 2, and "M3" machine 3, the 16 GiB runner,
+which ran the memory benchmark (`idle-memory`) alone, to measure the
+million-task cells that M2 could not hold.*
 
 **Status of these verdicts.** The pre-registration
 ([`proposal/20`](../../proposal/20-pre-registration.md)) is a draft (version
 1.0, "not frozen"), and its early harness protocol has no frozen commit either.
 Its section 1.3, rule 3, a proposed default, would make harness runs made before
 the freeze development runs. The verdicts below apply the draft's thresholds and
-rules, as they stand at commit `e93cd8a`, to both machines' full-scale runs.
-They remain provisional until the pre-registration is frozen. M2 is also smaller
-than section 4.4's machine (7.75 GiB rather than at least 16 GiB, section 10.2),
-so some of its 1M-task cells could not be measured.
+rules, as they stand at commit `e93cd8a`, to the machines' full-scale runs. They
+remain provisional until the pre-registration is frozen. M2 is also smaller than
+section 4.4's machine (7.75 GiB rather than at least 16 GiB, section 10.2), so
+some of its 1M-task cells could not be measured; M3, a runner with 16 GiB,
+measured them (section 1).
 
 ## Summary
 
-| Bet-3 row (role in proposal/20, 7.8) | Threshold | M1: this VM, full scale, five runs per cell | M2: GitHub-hosted runner, full scale, five runs per cell | Verdict (both machines) |
-|---|---|---|---|---|
-| Memory per idle task (primary) | every one of the four conditions within 4x Go on both machines; after the excursion, Go after its GC (policy 4) | D(B) passes at all three reservations: worst ratio w = 1.75 (128 KiB), 2.41 (1 MiB), 3.16 (8 MiB). B and C fail after the excursion (6.86x and 7.08x Go after GC at 100k); A and D(A) cannot create 100k tasks (VMA limit at 32,730) | D(B) passes at 128 KiB: w = 1.75. At 1 MiB and 8 MiB every condition M2 measured is within 4x (worst 2.41 and 3.16, at 100k), but the 1M cells are failed rows: the memory guard stopped them at 950,272-962,560 and 712,704-733,184 of 1,000,000 tasks. B and C fail after the excursion (6.94x and 7.15x); A and D(A): VMA limit at 32,738 | **holds** (provisional): D(B) at 128 KiB passes on both machines (w = 1.75 on both machines), and no configuration passes on one machine and fails on the other. At the proposed 1 MiB default, section 2.4 is inconclusive on M2 (too little data at 1M), so that reservation's 1M cells rest on M1 alone |
-| Stack exhaustion (guard) | no segfault; ordinary corpus depth within the default reservation | every exhaustion clean in 17 configurations x 5 runs; 0 crashes; at most 2,088 bytes of the 5 KiB reserve used | the same: every exhaustion clean in 17 configurations x 5 runs (0 unclean outcomes); 0 crashes; at most 2,088 bytes of the reserve | harness part **holds** on both machines; the guard itself is decided by the corpus histogram (interpreter era, week 40) |
-| Spawn plus join (secondary) | median within 3x Go with pooled stacks | B 1.40x Go (0.64 [0.64-0.80] us against 0.46 [0.41-0.55] us) | B 1.84x Go (0.73 [0.52-0.73] us against 0.39 [0.39-0.41] us) | **holds** on both machines, which differ by 0.44 (conservative ranges 1.15-1.92 and 1.26-1.86, all below 3); no design review |
-| Scale, 1M idle tasks on 16 GiB, default sysctls (secondary) | fail: guard-page-per-task is out | B, C, D(B), E, tokio, Go and Java park 1M tasks and keep them parked 60 s; A and D(A) stop at 32,730 (`vm.max_map_count` 65530) | the same: 1M tasks parked through the hold for B, C, D(B), E, tokio, Go and Java; A and D(A) stop at 32,738 (`vm.max_map_count` 65530), on a 7.75 GiB machine | **fails for guard pages per task** (A, D(A)) on both machines: pooled stacks with software probes are the design, as policy 5 already says; holds for B, C and D(B) |
-| Probe overhead on compute loops (with the scale row) | at most 3 % | `split` model: fib 13.3 [11.9-16.3] %, calls 0.0 [-0.1-0.9] %, tree 4.5 [1.9-5.3] %, back-edge yield check -0.1 [-0.2-0.5] % (B) | fib 8.6 [8.2-8.7] %, calls 0.2 %, tree 2.2 [1.8-2.3] %, back-edge yield check 3.5 % (B) | **not decided** (policy 1: no PMU on either machine); taken at face value `fib` exceeds 3 % on both machines, `tree` on M1 only and the back-edge check on M2 only, a warning for the native era (section 7) |
-| Echo p99 at 10k connections (secondary) | within 2x Go | not run: both ends in one process need 20,064 descriptors, the hard limit is 20,000. At 1000 connections D(B) 0.85x and B 0.88x Go | D(B) 0.91x and B 0.91x Go; every stackful strategy at most 1.07x. At 1000 connections D(B) 0.87x and B 0.79x | **not shown**: the 10k cell exists on M2 only, where it is within 2x; M1's descriptor limit cannot run it (policy 3) |
-| Idle RSS at 100k connections | reported | at 9,900 connections: D(B) 10.6 KiB against Go 7.06 [7.02-7.16] KiB | at 100,000 connections: D(B) 10.6 KiB against Go 5.41 [5.33-5.47] KiB; A and D(A) failed (the client's `connect` timed out) | reported (no threshold); the registered N on M2 only |
-| Starvation (secondary) | no worse than Go (default preemption) and p99 under 10 ms | yield points every 10k iterations: B p99 25.7 [25.0-30.0] us; every 100k: 229 [221-269] us; Go 39.3 [39.3-39.4] ms | every 10k: B 23.6 [23.3-23.7] us; every 100k: 316 [315-316] us; Go 39.2 ms | **holds** on both machines with compiler-inserted yield points; without them the probe starves (reported, not counted) |
-| Cancellation with a lent buffer, A1 (secondary) | 0 buffers written after their cancelled read returned | 0 bytes over 25 runs of 1M reads each, every read cancelled in flight, on A, B, C, D(A) and D(B), and 0 in the race mix; the negative control sees 195,718,784 bytes | 0 bytes over 25 runs of 1M cancelled reads, and 0 in the race mix; the negative control sees 192,795,904 bytes | **holds** on both machines |
+| Bet-3 row (role in proposal/20, 7.8) | Threshold | M1: this VM, full scale, five runs per cell | M2: GitHub-hosted runner, full scale, five runs per cell | M3: the 16 GiB runner, `idle-memory` only, five runs per cell | Verdict (the machines that ran the row) |
+|---|---|---|---|---|---|
+| Memory per idle task (primary) | every one of the four conditions within 4x Go on both machines; after the excursion, Go after its GC (policy 4) | D(B) passes at all three reservations: worst ratio w = 1.75 (128 KiB), 2.41 (1 MiB), 3.16 (8 MiB). B and C fail after the excursion (6.86x and 7.08x Go after GC at 100k); A and D(A) cannot create 100k tasks (VMA limit at 32,730) | D(B) passes at 128 KiB: w = 1.75. At 1 MiB and 8 MiB every condition M2 measured is within 4x (worst 2.41 and 3.16, at 100k), but the 1M cells are failed rows: the memory guard stopped them at 950,272-962,560 and 712,704-733,184 of 1,000,000 tasks. B and C fail after the excursion (6.94x and 7.15x); A and D(A): VMA limit at 32,738 | D(B) passes at all three reservations, the 1M cells included: w = 1.76 (128 KiB), 2.42 (1 MiB), 3.17 (8 MiB). At 1M tasks D(B)/1 MiB holds 6.44 KiB per task, shallow and after the excursion: 2.41x Go shallow, and after the excursion 1.28x Go after GC at 100k (2.42x Go shallow at 1M). B and C fail after the excursion (6.87x and 7.08x), although their 1M cells, shallow only (policy 7), are within 4x (B/1 MiB 2.41x, B/8 MiB 3.17x, C 2.06-2.07x); A and D(A): VMA limit at 32,732-32,733 | **holds** (provisional): D(B) at 128 KiB passes on all three machines (w = 1.75 on M1 and M2 and 1.76 on M3), and at every reservation on M1 and M3, the two machines with 16 GiB, the proposed 1 MiB default included (w = 2.41 and 2.42). No configuration passes on one machine and fails on another; on M1 and M2, section 2.4 stays inconclusive at 1 MiB and 8 MiB, because M2 could not hold the 1M cells |
+| Stack exhaustion (guard) | no segfault; ordinary corpus depth within the default reservation | every exhaustion clean in 17 configurations x 5 runs; 0 crashes; at most 2,088 bytes of the 5 KiB reserve used | the same: every exhaustion clean in 17 configurations x 5 runs (0 unclean outcomes); 0 crashes; at most 2,088 bytes of the reserve | not run (`idle-memory` only) | harness part **holds** on both machines; the guard itself is decided by the corpus histogram (interpreter era, week 40) |
+| Spawn plus join (secondary) | median within 3x Go with pooled stacks | B 1.40x Go (0.64 [0.64-0.80] us against 0.46 [0.41-0.55] us) | B 1.84x Go (0.73 [0.52-0.73] us against 0.39 [0.39-0.41] us) | not run (`idle-memory` only) | **holds** on both machines, which differ by 0.44 (conservative ranges 1.15-1.92 and 1.26-1.86, all below 3); no design review |
+| Scale, 1M idle tasks on 16 GiB, default sysctls (secondary) | fail: guard-page-per-task is out | B, C, D(B), E, tokio, Go and Java park 1M tasks and keep them parked 60 s; A and D(A) stop at 32,730 (`vm.max_map_count` 65530) | the same: 1M tasks parked through the hold for B, C, D(B), E, tokio, Go and Java; A and D(A) stop at 32,738 (`vm.max_map_count` 65530), on a 7.75 GiB machine | not run (`idle-memory` only) | **fails for guard pages per task** (A, D(A)) on both machines: pooled stacks with software probes are the design, as policy 5 already says; holds for B, C and D(B) |
+| Probe overhead on compute loops (with the scale row) | at most 3 % | `split` model: fib 13.3 [11.9-16.3] %, calls 0.0 [-0.1-0.9] %, tree 4.5 [1.9-5.3] %, back-edge yield check -0.1 [-0.2-0.5] % (B) | fib 8.6 [8.2-8.7] %, calls 0.2 %, tree 2.2 [1.8-2.3] %, back-edge yield check 3.5 % (B) | not run (`idle-memory` only) | **not decided** (policy 1: no PMU on either machine); taken at face value `fib` exceeds 3 % on both machines, `tree` on M1 only and the back-edge check on M2 only, a warning for the native era (section 7) |
+| Echo p99 at 10k connections (secondary) | within 2x Go | not run: both ends in one process need 20,064 descriptors, the hard limit is 20,000. At 1000 connections D(B) 0.85x and B 0.88x Go | D(B) 0.91x and B 0.91x Go; every stackful strategy at most 1.07x. At 1000 connections D(B) 0.87x and B 0.79x | not run (`idle-memory` only) | **not shown**: the 10k cell exists on M2 only, where it is within 2x; M1's descriptor limit cannot run it (policy 3) |
+| Idle RSS at 100k connections | reported | at 9,900 connections: D(B) 10.6 KiB against Go 7.06 [7.02-7.16] KiB | at 100,000 connections: D(B) 10.6 KiB against Go 5.41 [5.33-5.47] KiB; A and D(A) failed (the client's `connect` timed out) | not run (`idle-memory` only) | reported (no threshold); the registered N on M2 only |
+| Starvation (secondary) | no worse than Go (default preemption) and p99 under 10 ms | yield points every 10k iterations: B p99 25.7 [25.0-30.0] us; every 100k: 229 [221-269] us; Go 39.3 [39.3-39.4] ms | every 10k: B 23.6 [23.3-23.7] us; every 100k: 316 [315-316] us; Go 39.2 ms | not run (`idle-memory` only) | **holds** on both machines with compiler-inserted yield points; without them the probe starves (reported, not counted) |
+| Cancellation with a lent buffer, A1 (secondary) | 0 buffers written after their cancelled read returned | 0 bytes over 25 runs of 1M reads each, every read cancelled in flight, on A, B, C, D(A) and D(B), and 0 in the race mix; the negative control sees 195,718,784 bytes | 0 bytes over 25 runs of 1M cancelled reads, and 0 in the race mix; the negative control sees 192,795,904 bytes | not run (`idle-memory` only) | **holds** on both machines |
 
 **Q-6, provisional (harness era).** Strategy D(B), pooled stacks with software
-probes and decommit on park; default reservation 1 MiB, whose 1M-task cells only
-M1 could hold (M2 confirms it at 100k, and 128 KiB is the reservation that
-section 2.4 shows on both machines); probes, not guard pages; `spawn` ambient,
-without a capability; the stackless fallback is not needed. Section 9 gives the
-reasons and the conditions.
+probes and decommit on park; default reservation 1 MiB, which passes section 2.4
+at 100k and 1M tasks on M1 and M3, the two machines with 16 GiB (w = 2.41 and
+2.42; M2 confirms it at 100k, and 128 KiB passes on all three); probes, not
+guard pages; `spawn` ambient, without a capability; the stackless fallback is
+not needed. Section 9 gives the reasons and the conditions.
 
 ## 0. Provenance
 
@@ -59,21 +62,21 @@ probe reserve; the 1M-after-excursion cell required only of page-releasing
 strategies; compiler-inserted yield points with their cost in the probe budget).
 Section 10.1 lists what they changed in the plan.
 
-| | Machine 1 (owner) | Machine 2 (reproduction) |
-|---|---|---|
-| machine_id | `vm` | `github-runner` (host `runnervmmprz5`) |
-| CPU model, cores used (`--threads`) | Intel(R) Xeon(R) Processor @ 2.10GHz (family 6, model 207), a KVM guest (CPUID `KVMKVMKVM`), 4 vCPUs, 1 thread per core, no SMT; `--threads 4` | Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz, a Hyper-V guest (CPUID `Microsoft Hv`), 2 vCPUs that are one core's two hardware threads (`threads_per_core` 2, SMT `active=1 control=on`), governor `performance`; `--threads 2` |
-| memory, swap | 16,874,930,176 bytes (15.7 GiB); memory cgroup limit 14,343,688,192 bytes (13.4 GiB); no swap | 8,322,932,736 bytes (7.75 GiB); no swap (the workflow turns it off); memory cgroup limit 12,884,901,888 bytes (12.0 GiB), the workflow's scope, above the machine's memory (see below); pids cgroup 9491 |
-| kernel (`uname`) | Linux 6.18.44-fc-v114, Ubuntu 24.04.5 LTS userland | Linux 6.17.0-1022-azure, Ubuntu 24.04.5 LTS |
-| `vm.max_map_count`, `kernel.threads-max`, `kernel.pid_max` | 65530 (kernel default), 128599, 32768 | 65530 (the kernel default, restored by the workflow; the image sets 262144), 63275, 4194304 |
-| `vm.overcommit_memory`, THP `enabled`/`defrag` | 0, `madvise`/`madvise` | 0, `madvise`/`madvise` (the workflow sets `enabled` to `madvise`; the image's is `always`) |
-| `RLIMIT_NOFILE` soft/hard, `RLIMIT_NPROC` | 20000/20000, 64299 | 1048576/1048576 inside the workflow's scope (the runner's own processes had 65536/65536 in the smoke run), 31637 |
-| io_uring | enabled (`kernel.io_uring_disabled` 0) | enabled (`kernel.io_uring_disabled` 0) |
-| hardware counters (PMU) | none: "hardware counters unavailable: No such file or directory (os error 2)" | none: "hardware counters unavailable: Permission denied (os error 13)" |
-| rustc, taskbench version | rustc 1.97.0 (2d8144b78 2026-07-07); taskbench 0.2.0, sources sha256 `789d610d...`, `51e42157...` and `6a1fedf5...`, the last differing from the second only in the scripts (`versions.txt`, section 10.3) | rustc 1.99.0 (b940084d7 2026-09-28); taskbench 0.2.0, sources sha256 `6a1fedf5...`, the digest of M1's gated groups; binary `d402ccbd...` (another compiler, another binary) |
-| Go version, `GOMAXPROCS` | go1.24.7, 4 | go1.24.13, 2 |
-| JDK version, flags, warm-up | OpenJDK 21.0.12.1 (build 21.0.12.1+1-1-24.04.4-Ubuntu); `-Djdk.virtualThreadScheduler.parallelism=4 -Djdk.virtualThreadScheduler.maxPoolSize=4 -XX:+UseG1GC`; spawn-join Go 10000 rounds, Java 20000 rounds (JIT); echo 5 s unrecorded (`controls-versions.txt`) | OpenJDK 21.0.12.1 (Temurin-21.0.12.1+1, build 21.0.12.1+1-LTS), installed by the workflow; `-Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC`; spawn-join Go 10000 rounds, Java 20000 rounds (JIT); echo 5 s unrecorded |
-| results directory and run ids | [`results/vm/2026-10-13-phase1/`](../results/vm/2026-10-13-phase1/): 730 processes (run ids in every row), five per cell; `timing.csv` has each repetition's start and duration, `load.csv` the machine's load during every process of the gated groups (section 11); superseded and aborted runs are in subdirectories, each with a note | [`results/github-runner/full-38518035636/`](../results/github-runner/full-38518035636/): the `harness-full` workflow's run 38518035636, after which the workflow names the directory; 730 processes (run ids in every row), five per cell; `timing.csv`, `load.csv` (every process, no quiet gate), `versions.txt` and `controls-versions.txt`. Unlike the smoke run's directory it has no `artifact-provenance.txt` with the artifact's id and digest |
+| | Machine 1 (owner) | Machine 2 (reproduction) | Machine 3 (the 16 GiB runner, `idle-memory` only) |
+|---|---|---|---|
+| machine_id | `vm` | `github-runner` (host `runnervmmprz5`) | `github-runner-16g` (host `runnervmnwato`) |
+| CPU model, cores used (`--threads`) | Intel(R) Xeon(R) Processor @ 2.10GHz (family 6, model 207), a KVM guest (CPUID `KVMKVMKVM`), 4 vCPUs, 1 thread per core, no SMT; `--threads 4` | Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz, a Hyper-V guest (CPUID `Microsoft Hv`), 2 vCPUs that are one core's two hardware threads (`threads_per_core` 2, SMT `active=1 control=on`), governor `performance`; `--threads 2` | AMD EPYC 7763 64-Core Processor, a Hyper-V guest (CPUID `Microsoft Hv`), 4 vCPUs that the guest sees as two cores with two hardware threads each (`threads_per_core` 2, SMT `active=1 control=on`), governor "unreadable: No such file or directory (os error 2)"; `--threads 4` |
+| memory, swap | 16,874,930,176 bytes (15.7 GiB); memory cgroup limit 14,343,688,192 bytes (13.4 GiB); no swap | 8,322,932,736 bytes (7.75 GiB); no swap (the workflow turns it off); memory cgroup limit 12,884,901,888 bytes (12.0 GiB), the workflow's scope, above the machine's memory (see below); pids cgroup 9491 | 16,759,443,456 bytes (15.6 GiB); no swap (the workflow turns it off); memory cgroup limit 15,032,385,536 bytes (14.0 GiB), the workflow's scope, below the machine's memory; pids cgroup 17436 |
+| kernel (`uname`) | Linux 6.18.44-fc-v114, Ubuntu 24.04.5 LTS userland | Linux 6.17.0-1022-azure, Ubuntu 24.04.5 LTS | Linux 7.0.0-1017-azure, Ubuntu 26.04.1 LTS |
+| `vm.max_map_count`, `kernel.threads-max`, `kernel.pid_max` | 65530 (kernel default), 128599, 32768 | 65530 (the kernel default, restored by the workflow; the image sets 262144), 63275, 4194304 | 65530 (the kernel default, set by the workflow), 116242, 4194304 |
+| `vm.overcommit_memory`, THP `enabled`/`defrag` | 0, `madvise`/`madvise` | 0, `madvise`/`madvise` (the workflow sets `enabled` to `madvise`; the image's is `always`) | 0, `madvise`/`madvise` (the workflow sets `enabled` to `madvise`) |
+| `RLIMIT_NOFILE` soft/hard, `RLIMIT_NPROC` | 20000/20000, 64299 | 1048576/1048576 inside the workflow's scope (the runner's own processes had 65536/65536 in the smoke run), 31637 | 65536/65536 inside the workflow's scope, 58121 |
+| io_uring | enabled (`kernel.io_uring_disabled` 0) | enabled (`kernel.io_uring_disabled` 0) | enabled (`kernel.io_uring_disabled` 0) |
+| hardware counters (PMU) | none: "hardware counters unavailable: No such file or directory (os error 2)" | none: "hardware counters unavailable: Permission denied (os error 13)" | not recorded (the run made no `probe-overhead` cells) |
+| rustc, taskbench version | rustc 1.97.0 (2d8144b78 2026-07-07); taskbench 0.2.0, sources sha256 `789d610d...`, `51e42157...` and `6a1fedf5...`, the last differing from the second only in the scripts (`versions.txt`, section 10.3) | rustc 1.99.0 (b940084d7 2026-09-28); taskbench 0.2.0, sources sha256 `6a1fedf5...`, the digest of M1's gated groups; binary `d402ccbd...` (another compiler, another binary) | rustc 1.99.1 (58cf8f9c3 2026-10-13); taskbench 0.2.0, sources sha256 `6a1fedf5...`, the digest of M2's run and M1's gated groups; binary `a5942b2a...` |
+| Go version, `GOMAXPROCS` | go1.24.7, 4 | go1.24.13, 2 | go1.24.13, 4 |
+| JDK version, flags, warm-up | OpenJDK 21.0.12.1 (build 21.0.12.1+1-1-24.04.4-Ubuntu); `-Djdk.virtualThreadScheduler.parallelism=4 -Djdk.virtualThreadScheduler.maxPoolSize=4 -XX:+UseG1GC`; spawn-join Go 10000 rounds, Java 20000 rounds (JIT); echo 5 s unrecorded (`controls-versions.txt`) | OpenJDK 21.0.12.1 (Temurin-21.0.12.1+1, build 21.0.12.1+1-LTS), installed by the workflow; `-Djdk.virtualThreadScheduler.parallelism=2 -Djdk.virtualThreadScheduler.maxPoolSize=2 -XX:+UseG1GC`; spawn-join Go 10000 rounds, Java 20000 rounds (JIT); echo 5 s unrecorded | OpenJDK 21.0.13 (Temurin-21.0.13+9, build 21.0.13+9-LTS), installed by the workflow; `-Djdk.virtualThreadScheduler.parallelism=4 -Djdk.virtualThreadScheduler.maxPoolSize=4 -XX:+UseG1GC` |
+| results directory and run ids | [`results/vm/2026-10-13-phase1/`](../results/vm/2026-10-13-phase1/): 730 processes (run ids in every row), five per cell; `timing.csv` has each repetition's start and duration, `load.csv` the machine's load during every process of the gated groups (section 11); superseded and aborted runs are in subdirectories, each with a note | [`results/github-runner/full-38518035636/`](../results/github-runner/full-38518035636/): the `harness-full` workflow's run 38518035636, after which the workflow names the directory; 730 processes (run ids in every row), five per cell; `timing.csv`, `load.csv` (every process, no quiet gate), `versions.txt` and `controls-versions.txt`. Unlike the smoke run's directory it has no `artifact-provenance.txt` with the artifact's id and digest | [`results/github-runner/cell-41548553538/`](../results/github-runner/cell-41548553538/): the `harness-cell` workflow's run 41548553538 at commit `0333a08`, after which the workflow names the directory; 195 processes (run ids in every row), five per cell, `idle-memory` only; `timing.csv`, `load.csv` (every process, no quiet gate), `versions.txt` and `controls-versions.txt`, and no `artifact-provenance.txt` |
 
 Harness commit: the M1 runs used the working tree on top of commit `e93cd8a`,
 with the changes listed in section 10.3; the coordinator commits them with these
@@ -88,7 +91,11 @@ source_sha256)"), because the workflow's memory scope passes only `PATH`,
 `HOME`, `GITHUB_RUN_ID`, `JAVA_HOME` and `GOROOT` to `run_all.sh`, not
 `GITHUB_SHA`. Its source digest, `6a1fedf5...`, is the one M1's gated groups
 were built from, so M2 ran the harness, the controls and the scripts of those
-groups, which include the fix of A1's check.
+groups, which include the fix of A1's check. M3's run records its commit,
+`0333a08` (`versions.txt`: `0333a08b70db23b3e8ccccb483f60fc5c7048f2e`), because
+`.github/workflows/harness-cell.yml` passes `GITHUB_SHA` into its scope, and the
+same source digest, `6a1fedf5...`: the harness, the controls and the scripts of
+M2's run, built by another compiler (1.99.1) into another binary.
 
 **M2's memory scope.** M2's run executed inside `sudo systemd-run --scope -p
 MemoryMax=12G -p MemorySwapMax=0` (`.github/workflows/harness-full.yml`). The
@@ -134,14 +141,35 @@ contained a slash), and the summary captured from its job log,
 is used only for the cross-check of section 10.2, not as data of record; run
 38513665561, made without a memory cap, was lost as described above.
 
+**M3's run.** Machine 3 was added after M1 and M2 had run, for one purpose: the
+million-task `idle-memory` cells that M2's memory guard stopped. The workflow
+`.github/workflows/harness-cell.yml` runs on `ubuntu-latest`, which for this
+repository, public now, is a runner of 4 vCPUs and 16 GiB (the workflow's
+comment; `machine-spec.csv` records 16,759,443,456 bytes of `MemTotal`), and
+only when a push's head commit message carries `[harness-cell]`. Commit
+`0333a08` carried it, and run 41548553538 prepared the runner as M2's workflow
+does (the kernel's `vm.max_map_count`, swap off, transparent huge pages on
+`madvise`, JDK 21 and Go 1.24), built the harness, and made one invocation of
+`run_all.sh --scale full --only idle-memory` from 2026-11-02T23:51:50Z: five
+repetitions of every `idle-memory` cell with the Go and Java controls, without
+the quiet gate, inside `sudo systemd-run --scope -p MemoryMax=14G -p
+MemorySwapMax=0`. The workflow uploads the results directory as the artifact
+`taskbench-cell-41548553538`, after the run's id. Unlike M2's, this scope is
+below the machine's memory (14.0 GiB against 15.6 GiB), as M1's 13.4 GiB cgroup
+is, so the scope bounds what the memory guard sees. No cell met the guard: every
+cell created all its tasks in all five runs, 1,000,000 at 1M, except those of
+the guard-page strategies, which failed at the mapping limit (32,732-32,733
+tasks).
+
 Pre-registration commit: none yet. Thresholds are copied from proposal/20 at
 commit `e93cd8a` (draft 1.0, not frozen); there are no amendments beyond A1-A6,
 which are in that text.
 
 Every table can be regenerated with `python3 summarize.py --markdown
-results/vm/2026-10-13-phase1 results/github-runner/full-38518035636` (medians
-[min-max] over runs, ratios of medians, 95 % percentile bootstrap intervals over
-runs, and section 2.4's rule on each machine and on both).
+results/vm/2026-10-13-phase1 results/github-runner/full-38518035636
+results/github-runner/cell-41548553538` (medians [min-max] over runs, ratios of
+medians, 95 % percentile bootstrap intervals over runs, and section 2.4's rule
+on each machine and on each pair of machines).
 
 ## 1. Memory per idle task (threshold: within 4x Go at 100k and 1M)
 
@@ -155,84 +183,90 @@ its nominal size plus the excursion, as a compiler bounding the whole task body
 would choose (4 KiB + 32 KiB = 36 KiB, and so on). Ratio = median over Go's
 median on the same machine; ranges in brackets are the five runs' minimum and
 maximum, and for ratios the conservative [min/max, max/min] that section 2.4
-uses. Both machines ran every cell five times at 100k and at 1M tasks; where
-M2's memory guard stopped a cell, the table shows the stop and the range of
-tasks created over the runs.
+uses. All three machines ran every cell five times at 100k and at 1M tasks (M3
+ran this benchmark alone); where M2's memory guard stopped a cell, the table
+shows the stop and the range of tasks created over the runs. M3's guard stopped
+none.
 
 *100,000 tasks (KiB per task)*
 
-| Configuration | shallow M1 | shallow M2 | after 32 KiB excursion M1 | after 32 KiB excursion M2 | shallow / Go M1 | shallow / Go M2 | excursion / Go after GC M1 | excursion / Go after GC M2 |
-|---|---|---|---|---|---|---|---|---|
-| A, 128 KiB | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks |  |  |  |  |
-| A, 1 MiB | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks |  |  |  |  |
-| A, 8 MiB | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks |  |  |  |  |
-| B, 128 KiB | 4.68 [4.68-4.68] | 4.69 [4.69-4.69] | 32.7 [32.7-32.7] | 32.7 [32.7-32.7] | 1.73 [1.73-1.75] | 1.75 [1.74-1.75] | 6.51 [6.51-6.53] | 6.58 [6.52-6.63] |
-| B, 1 MiB | 6.44 [6.44-6.44] | 6.44 [6.44-6.44] | 34.4 [34.4-34.4] | 34.4 [34.4-34.4] | 2.38 [2.38-2.40] | 2.41 [2.39-2.41] | 6.86 [6.86-6.88] | 6.94 [6.87-6.99] |
-| B, 8 MiB | 8.45 [8.45-8.45] | 8.45 [8.45-8.46] | 36.5 [36.5-36.5] | 36.6 [36.6-36.6] | 3.13 [3.13-3.15] | 3.16 [3.14-3.16] | 7.28 [7.28-7.30] | 7.36 [7.29-7.42] |
-| C, 4 KiB (+32 KiB: 36 KiB) | 5.50 [5.50-5.50] | 5.50 [5.50-5.50] | 35.5 [35.5-35.5] | 35.5 [35.5-35.5] | 2.04 [2.03-2.05] | 2.06 [2.04-2.06] | 7.08 [7.08-7.09] | 7.15 [7.08-7.20] |
-| C, 8 KiB (+32 KiB: 40 KiB) | 5.50 [5.50-5.50] | 5.51 [5.51-5.51] | 35.5 [35.5-35.5] | 35.5 [35.5-35.5] | 2.04 [2.04-2.06] | 2.06 [2.05-2.06] | 7.08 [7.08-7.09] | 7.15 [7.08-7.21] |
-| C, 16 KiB (+32 KiB: 48 KiB) | 5.52 [5.52-5.52] | 5.53 [5.53-5.53] | 35.5 [35.5-35.5] | 35.5 [35.5-35.5] | 2.04 [2.04-2.06] | 2.06 [2.05-2.07] | 7.08 [7.08-7.09] | 7.16 [7.09-7.21] |
-| D(A), 128 KiB | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks |  |  |  |  |
-| D(A), 1 MiB | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks |  |  |  |  |
-| D(A), 8 MiB | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks |  |  |  |  |
-| D(B), 128 KiB | 4.68 [4.68-4.68] | 4.69 [4.69-4.69] | 4.69 [4.69-4.69] | 4.69 [4.69-4.69] | 1.73 [1.73-1.75] | 1.75 [1.74-1.75] | 0.93 [0.93-0.94] | 0.95 [0.94-0.95] |
-| D(B), 1 MiB | 6.44 [6.44-6.44] | 6.44 [6.44-6.44] | 6.44 [6.44-6.44] | 6.45 [6.45-6.45] | 2.38 [2.38-2.40] | 2.41 [2.39-2.41] | 1.28 [1.28-1.29] | 1.30 [1.29-1.31] |
-| D(B), 8 MiB | 8.45 [8.45-8.45] | 8.45 [8.45-8.46] | 8.45 [8.45-8.46] | 8.46 [8.46-8.46] | 3.13 [3.13-3.15] | 3.16 [3.14-3.16] | 1.68 [1.68-1.69] | 1.70 [1.69-1.72] |
-| E (stackless) | 0.64 [0.64-0.64] | 0.64 [0.64-0.64] | 0.64 [0.64-0.65] | 0.65 [0.64-0.65] | 0.24 | 0.24 | 0.13 | 0.13 |
-| tokio | 0.40 [0.40-0.40] | 0.40 [0.40-0.40] | 0.40 [0.40-0.41] | 0.40 [0.40-0.41] | 0.15 | 0.15 | 0.08 | 0.08 |
-| Go | 2.70 [2.68-2.70] | 2.68 [2.68-2.69] | 34.7 [33.4-34.7]; after GC 5.02 [5.01-5.02] | 34.4 [23.2-35.9]; after GC 4.96 [4.93-5.01] | 1.00 [0.99-1.01] | 1.00 [0.99-1.01] | 6.92 [6.66-6.93] | 6.93 [4.62-7.28] |
-| Java virtual threads | 1.93 [1.44-1.94] | 1.89 [1.79-2.65] | 3.16 [3.12-3.54]; heap 1.73 [1.16-1.82] | 3.23 [2.91-3.67]; heap 1.95 [1.72-2.45] | 0.72 [0.53-0.72] | 0.70 [0.67-0.99] | 0.63 [0.62-0.71] | 0.65 [0.58-0.74] |
+| Configuration | shallow M1 | shallow M2 | shallow M3 | after 32 KiB excursion M1 | after 32 KiB excursion M2 | after 32 KiB excursion M3 | shallow / Go M1 | shallow / Go M2 | shallow / Go M3 | excursion / Go after GC M1 | excursion / Go after GC M2 | excursion / Go after GC M3 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| A, 128 KiB | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,732-32,733 tasks | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,732-32,733 tasks |  |  |  |  |  |  |
+| A, 1 MiB | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,732-32,733 tasks | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,732-32,733 tasks |  |  |  |  |  |  |
+| A, 8 MiB | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,733 tasks | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,733 tasks |  |  |  |  |  |  |
+| B, 128 KiB | 4.68 [4.68-4.68] | 4.69 [4.69-4.69] | 4.69 [4.69-4.69] | 32.7 [32.7-32.7] | 32.7 [32.7-32.7] | 32.7 [32.7-32.7] | 1.73 [1.73-1.75] | 1.75 [1.74-1.75] | 1.74 [1.74-1.75] | 6.51 [6.51-6.53] | 6.58 [6.52-6.63] | 6.52 [6.52-6.61] |
+| B, 1 MiB | 6.44 [6.44-6.44] | 6.44 [6.44-6.44] | 6.45 [6.45-6.45] | 34.4 [34.4-34.4] | 34.4 [34.4-34.4] | 34.5 [34.5-34.5] | 2.38 [2.38-2.40] | 2.41 [2.39-2.41] | 2.39 [2.39-2.41] | 6.86 [6.86-6.88] | 6.94 [6.87-6.99] | 6.87 [6.86-6.96] |
+| B, 8 MiB | 8.45 [8.45-8.45] | 8.45 [8.45-8.46] | 8.46 [8.46-8.46] | 36.5 [36.5-36.5] | 36.6 [36.6-36.6] | 36.6 [36.6-36.6] | 3.13 [3.13-3.15] | 3.16 [3.14-3.16] | 3.13 [3.13-3.16] | 7.28 [7.28-7.30] | 7.36 [7.29-7.42] | 7.29 [7.28-7.39] |
+| C, 4 KiB (+32 KiB: 36 KiB) | 5.50 [5.50-5.50] | 5.50 [5.50-5.50] | 5.50 [5.50-5.51] | 35.5 [35.5-35.5] | 35.5 [35.5-35.5] | 35.5 [35.5-35.5] | 2.04 [2.03-2.05] | 2.06 [2.04-2.06] | 2.04 [2.04-2.06] | 7.08 [7.08-7.09] | 7.15 [7.08-7.20] | 7.08 [7.08-7.18] |
+| C, 8 KiB (+32 KiB: 40 KiB) | 5.50 [5.50-5.50] | 5.51 [5.51-5.51] | 5.51 [5.51-5.51] | 35.5 [35.5-35.5] | 35.5 [35.5-35.5] | 35.5 [35.5-35.5] | 2.04 [2.04-2.06] | 2.06 [2.05-2.06] | 2.04 [2.04-2.06] | 7.08 [7.08-7.09] | 7.15 [7.08-7.21] | 7.08 [7.08-7.18] |
+| C, 16 KiB (+32 KiB: 48 KiB) | 5.52 [5.52-5.52] | 5.53 [5.53-5.53] | 5.53 [5.53-5.53] | 35.5 [35.5-35.5] | 35.5 [35.5-35.5] | 35.5 [35.5-35.5] | 2.04 [2.04-2.06] | 2.06 [2.05-2.07] | 2.05 [2.05-2.06] | 7.08 [7.08-7.09] | 7.16 [7.09-7.21] | 7.08 [7.08-7.18] |
+| D(A), 128 KiB | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,733 tasks | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,733 tasks |  |  |  |  |  |  |
+| D(A), 1 MiB | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,733 tasks | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,733 tasks |  |  |  |  |  |  |
+| D(A), 8 MiB | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,732-32,733 tasks | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,732-32,733 tasks |  |  |  |  |  |  |
+| D(B), 128 KiB | 4.68 [4.68-4.68] | 4.69 [4.69-4.69] | 4.69 [4.69-4.69] | 4.69 [4.69-4.69] | 4.69 [4.69-4.69] | 4.70 [4.70-4.70] | 1.73 [1.73-1.75] | 1.75 [1.74-1.75] | 1.74 [1.74-1.75] | 0.93 [0.93-0.94] | 0.95 [0.94-0.95] | 0.94 [0.94-0.95] |
+| D(B), 1 MiB | 6.44 [6.44-6.44] | 6.44 [6.44-6.44] | 6.45 [6.44-6.45] | 6.44 [6.44-6.44] | 6.45 [6.45-6.45] | 6.45 [6.45-6.45] | 2.38 [2.38-2.40] | 2.41 [2.39-2.41] | 2.39 [2.39-2.41] | 1.28 [1.28-1.29] | 1.30 [1.29-1.31] | 1.29 [1.29-1.30] |
+| D(B), 8 MiB | 8.45 [8.45-8.45] | 8.45 [8.45-8.46] | 8.46 [8.46-8.46] | 8.45 [8.45-8.46] | 8.46 [8.46-8.46] | 8.46 [8.46-8.46] | 3.13 [3.13-3.15] | 3.16 [3.14-3.16] | 3.13 [3.13-3.16] | 1.68 [1.68-1.69] | 1.70 [1.69-1.72] | 1.69 [1.69-1.71] |
+| E (stackless) | 0.64 [0.64-0.64] | 0.64 [0.64-0.64] | 0.63 [0.63-0.64] | 0.64 [0.64-0.65] | 0.65 [0.64-0.65] | 0.64 [0.64-0.64] | 0.24 | 0.24 | 0.24 | 0.13 | 0.13 | 0.13 |
+| tokio | 0.40 [0.40-0.40] | 0.40 [0.40-0.40] | 0.40 [0.40-0.40] | 0.40 [0.40-0.41] | 0.40 [0.40-0.41] | 0.41 [0.41-0.41] | 0.15 | 0.15 | 0.15 | 0.08 | 0.08 | 0.08 |
+| Go | 2.70 [2.68-2.70] | 2.68 [2.68-2.69] | 2.70 [2.68-2.70] | 34.7 [33.4-34.7]; after GC 5.02 [5.01-5.02] | 34.4 [23.2-35.9]; after GC 4.96 [4.93-5.01] | 34.7 [26.2-34.7]; after GC 5.02 [4.95-5.02] | 1.00 [0.99-1.01] | 1.00 [0.99-1.01] | 1.00 [0.99-1.01] | 6.92 [6.66-6.93] | 6.93 [4.62-7.28] | 6.92 [5.22-7.02] |
+| Java virtual threads | 1.93 [1.44-1.94] | 1.89 [1.79-2.65] | 1.84 [1.51-2.10] | 3.16 [3.12-3.54]; heap 1.73 [1.16-1.82] | 3.23 [2.91-3.67]; heap 1.95 [1.72-2.45] | 2.99 [2.79-3.52]; heap 1.72 [1.17-2.15] | 0.72 [0.53-0.72] | 0.70 [0.67-0.99] | 0.68 [0.56-0.79] | 0.63 [0.62-0.71] | 0.65 [0.58-0.74] | 0.59 [0.56-0.71] |
 
 *1,000,000 tasks (KiB per task)*
 
-| Configuration | shallow M1 | shallow M2 | after 32 KiB excursion M1 | after 32 KiB excursion M2 | shallow / Go M1 | shallow / Go M2 | excursion / Go after GC M1 | excursion / Go after GC M2 |
-|---|---|---|---|---|---|---|---|---|
-| A, 128 KiB | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | not run (policy 7) | not run (policy 7) |  |  |  |  |
-| A, 1 MiB | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | not run (policy 7) | not run (policy 7) |  |  |  |  |
-| A, 8 MiB | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | not run (policy 7) | not run (policy 7) |  |  |  |  |
-| B, 128 KiB | 4.68 [4.68-4.68] | 4.68 [4.68-4.68] | not run (policy 7) | not run (policy 7) | 1.75 [1.73-1.77] | 1.74 [1.73-1.74] |  |  |
-| B, 1 MiB | 6.43 [6.43-6.43] | fails: memory guard at 946,176-962,560 of 1,000,000 tasks | not run (policy 7) | not run (policy 7) | 2.41 [2.38-2.43] |  |  |  |
-| B, 8 MiB | 8.45 [8.45-8.45] | fails: memory guard at 675,840-733,184 of 1,000,000 tasks | not run (policy 7) | not run (policy 7) | 3.16 [3.13-3.19] |  |  |  |
-| C, 4 KiB (+32 KiB: 36 KiB) | 5.50 [5.50-5.50] | 5.50 [5.50-5.50] | not run (policy 7) | not run (policy 7) | 2.06 [2.03-2.07] | 2.04 |  |  |
-| C, 8 KiB (+32 KiB: 40 KiB) | 5.50 [5.50-5.50] | 5.50 [5.50-5.50] | not run (policy 7) | not run (policy 7) | 2.06 [2.04-2.08] | 2.04 |  |  |
-| C, 16 KiB (+32 KiB: 48 KiB) | 5.52 [5.52-5.52] | 5.52 [5.52-5.52] | not run (policy 7) | not run (policy 7) | 2.07 [2.04-2.08] | 2.05 [2.04-2.05] |  |  |
-| D(A), 128 KiB | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks |  |  |  |  |
-| D(A), 1 MiB | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks |  |  |  |  |
-| D(A), 8 MiB | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks |  |  |  |  |
-| D(B), 128 KiB | 4.68 [4.68-4.68] | 4.68 [4.68-4.68] | 4.68 [4.68-4.68] | 4.69 [4.69-4.69] | 1.75 [1.73-1.77] | 1.74 [1.73-1.74] | 0.93 [0.93-0.94] (vs Go after GC at 100k); 1.75 [1.73-1.77] (vs Go shallow at 1M) | 0.94 [0.93-0.95] (vs Go after GC at 100k); 1.74 (vs Go shallow at 1M) |
-| D(B), 1 MiB | 6.43 [6.43-6.43] | fails: memory guard at 950,272-962,560 of 1,000,000 tasks | 6.44 [6.44-6.44] | fails: memory guard at 950,272-962,560 of 1,000,000 tasks | 2.41 [2.38-2.43] |  | 1.28 [1.28-1.29] (vs Go after GC at 100k); 2.41 [2.38-2.43] (vs Go shallow at 1M) |  |
-| D(B), 8 MiB | 8.45 [8.45-8.45] | fails: memory guard at 712,704-733,184 of 1,000,000 tasks | 8.45 [8.45-8.45] | fails: memory guard at 712,704-733,184 of 1,000,000 tasks | 3.16 [3.13-3.19] |  | 1.68 [1.68-1.69] (vs Go after GC at 100k); 3.16 [3.13-3.19] (vs Go shallow at 1M) |  |
-| E (stackless) | 0.63 [0.63-0.63] | 0.63 [0.63-0.63] | 0.64 [0.64-0.64] | 0.64 [0.64-0.64] | 0.24 [0.23-0.24] | 0.23 [0.23-0.24] | 0.13 (vs Go after GC at 100k); 0.24 (vs Go shallow at 1M) | 0.13 (vs Go after GC at 100k); 0.24 (vs Go shallow at 1M) |
-| tokio | 0.40 [0.40-0.40] | 0.40 [0.40-0.40] | 0.40 [0.40-0.40] | 0.40 [0.40-0.40] | 0.15 | 0.15 | 0.08 (vs Go after GC at 100k); 0.15 (vs Go shallow at 1M) | 0.08 (vs Go after GC at 100k); 0.15 (vs Go shallow at 1M) |
-| Go | 2.67 [2.65-2.70] | 2.70 [2.70-2.70] | not run (policy 7) | not run (policy 7) | 1.00 [0.98-1.02] | 1.00 |  |  |
-| Java virtual threads | 1.07 [1.00-1.14] | 1.06 [1.04-1.17] | 2.00 [1.81-2.01]; heap 0.92 [0.91-0.93] | 1.81 [1.76-1.92]; heap 0.93 [0.91-1.13] | 0.40 [0.37-0.43] | 0.39 [0.39-0.43] | 0.40 [0.36-0.40] (vs Go after GC at 100k); 0.75 [0.67-0.76] (vs Go shallow at 1M) | 0.37 [0.35-0.39] (vs Go after GC at 100k); 0.67 [0.65-0.71] (vs Go shallow at 1M) |
+| Configuration | shallow M1 | shallow M2 | shallow M3 | after 32 KiB excursion M1 | after 32 KiB excursion M2 | after 32 KiB excursion M3 | shallow / Go M1 | shallow / Go M2 | shallow / Go M3 | excursion / Go after GC M1 | excursion / Go after GC M2 | excursion / Go after GC M3 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| A, 128 KiB | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,732-32,733 tasks | not run (policy 7) | not run (policy 7) | not run (policy 7) |  |  |  |  |  |  |
+| A, 1 MiB | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,732-32,733 tasks | not run (policy 7) | not run (policy 7) | not run (policy 7) |  |  |  |  |  |  |
+| A, 8 MiB | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,732-32,733 tasks | not run (policy 7) | not run (policy 7) | not run (policy 7) |  |  |  |  |  |  |
+| B, 128 KiB | 4.68 [4.68-4.68] | 4.68 [4.68-4.68] | 4.68 [4.68-4.68] | not run (policy 7) | not run (policy 7) | not run (policy 7) | 1.75 [1.73-1.77] | 1.74 [1.73-1.74] | 1.76 [1.73-1.78] |  |  |  |
+| B, 1 MiB | 6.43 [6.43-6.43] | fails: memory guard at 946,176-962,560 of 1,000,000 tasks | 6.44 [6.44-6.44] | not run (policy 7) | not run (policy 7) | not run (policy 7) | 2.41 [2.38-2.43] |  | 2.41 [2.38-2.44] |  |  |  |
+| B, 8 MiB | 8.45 [8.45-8.45] | fails: memory guard at 675,840-733,184 of 1,000,000 tasks | 8.45 [8.45-8.45] | not run (policy 7) | not run (policy 7) | not run (policy 7) | 3.16 [3.13-3.19] |  | 3.17 [3.13-3.21] |  |  |  |
+| C, 4 KiB (+32 KiB: 36 KiB) | 5.50 [5.50-5.50] | 5.50 [5.50-5.50] | 5.50 [5.50-5.50] | not run (policy 7) | not run (policy 7) | not run (policy 7) | 2.06 [2.03-2.07] | 2.04 | 2.06 [2.03-2.09] |  |  |  |
+| C, 8 KiB (+32 KiB: 40 KiB) | 5.50 [5.50-5.50] | 5.50 [5.50-5.50] | 5.50 [5.50-5.50] | not run (policy 7) | not run (policy 7) | not run (policy 7) | 2.06 [2.04-2.08] | 2.04 | 2.07 [2.04-2.09] |  |  |  |
+| C, 16 KiB (+32 KiB: 48 KiB) | 5.52 [5.52-5.52] | 5.52 [5.52-5.52] | 5.52 [5.52-5.52] | not run (policy 7) | not run (policy 7) | not run (policy 7) | 2.07 [2.04-2.08] | 2.05 [2.04-2.05] | 2.07 [2.04-2.09] |  |  |  |
+| D(A), 128 KiB | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,732-32,733 tasks | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,732-32,733 tasks |  |  |  |  |  |  |
+| D(A), 1 MiB | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,732-32,733 tasks | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,732-32,733 tasks |  |  |  |  |  |  |
+| D(A), 8 MiB | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,732-32,733 tasks | fails: VMA limit at 32,730 tasks | fails: VMA limit at 32,738 tasks | fails: VMA limit at 32,732-32,733 tasks |  |  |  |  |  |  |
+| D(B), 128 KiB | 4.68 [4.68-4.68] | 4.68 [4.68-4.68] | 4.68 [4.68-4.68] | 4.68 [4.68-4.68] | 4.69 [4.69-4.69] | 4.69 [4.69-4.69] | 1.75 [1.73-1.77] | 1.74 [1.73-1.74] | 1.76 [1.73-1.78] | 0.93 [0.93-0.94] (vs Go after GC at 100k); 1.75 [1.73-1.77] (vs Go shallow at 1M) | 0.94 [0.93-0.95] (vs Go after GC at 100k); 1.74 (vs Go shallow at 1M) | 0.93 [0.93-0.95] (vs Go after GC at 100k); 1.76 [1.73-1.78] (vs Go shallow at 1M) |
+| D(B), 1 MiB | 6.43 [6.43-6.43] | fails: memory guard at 950,272-962,560 of 1,000,000 tasks | 6.44 [6.44-6.44] | 6.44 [6.44-6.44] | fails: memory guard at 950,272-962,560 of 1,000,000 tasks | 6.44 [6.44-6.44] | 2.41 [2.38-2.43] |  | 2.41 [2.38-2.44] | 1.28 [1.28-1.29] (vs Go after GC at 100k); 2.41 [2.38-2.43] (vs Go shallow at 1M) |  | 1.28 [1.28-1.30] (vs Go after GC at 100k); 2.42 [2.38-2.44] (vs Go shallow at 1M) |
+| D(B), 8 MiB | 8.45 [8.45-8.45] | fails: memory guard at 712,704-733,184 of 1,000,000 tasks | 8.45 [8.45-8.45] | 8.45 [8.45-8.45] | fails: memory guard at 712,704-733,184 of 1,000,000 tasks | 8.45 [8.45-8.45] | 3.16 [3.13-3.19] |  | 3.17 [3.13-3.21] | 1.68 [1.68-1.69] (vs Go after GC at 100k); 3.16 [3.13-3.19] (vs Go shallow at 1M) |  | 1.68 [1.68-1.71] (vs Go after GC at 100k); 3.17 [3.13-3.21] (vs Go shallow at 1M) |
+| E (stackless) | 0.63 [0.63-0.63] | 0.63 [0.63-0.63] | 0.63 [0.63-0.63] | 0.64 [0.64-0.64] | 0.64 [0.64-0.64] | 0.64 [0.64-0.64] | 0.24 [0.23-0.24] | 0.23 [0.23-0.24] | 0.24 [0.23-0.24] | 0.13 (vs Go after GC at 100k); 0.24 (vs Go shallow at 1M) | 0.13 (vs Go after GC at 100k); 0.24 (vs Go shallow at 1M) | 0.13 (vs Go after GC at 100k); 0.24 (vs Go shallow at 1M) |
+| tokio | 0.40 [0.40-0.40] | 0.40 [0.40-0.40] | 0.40 [0.40-0.40] | 0.40 [0.40-0.40] | 0.40 [0.40-0.40] | 0.40 [0.40-0.40] | 0.15 | 0.15 | 0.15 | 0.08 (vs Go after GC at 100k); 0.15 (vs Go shallow at 1M) | 0.08 (vs Go after GC at 100k); 0.15 (vs Go shallow at 1M) | 0.08 (vs Go after GC at 100k); 0.15 (vs Go shallow at 1M) |
+| Go | 2.67 [2.65-2.70] | 2.70 [2.70-2.70] | 2.67 [2.64-2.70] | not run (policy 7) | not run (policy 7) | not run (policy 7) | 1.00 [0.98-1.02] | 1.00 | 1.00 [0.98-1.02] |  |  |  |
+| Java virtual threads | 1.07 [1.00-1.14] | 1.06 [1.04-1.17] | 1.09 [1.05-1.15] | 2.00 [1.81-2.01]; heap 0.92 [0.91-0.93] | 1.81 [1.76-1.92]; heap 0.93 [0.91-1.13] | 1.81 [1.72-2.18]; heap 0.92 [0.90-0.93] | 0.40 [0.37-0.43] | 0.39 [0.39-0.43] | 0.41 [0.39-0.43] | 0.40 [0.36-0.40] (vs Go after GC at 100k); 0.75 [0.67-0.76] (vs Go shallow at 1M) | 0.37 [0.35-0.39] (vs Go after GC at 100k); 0.67 [0.65-0.71] (vs Go shallow at 1M) | 0.36 [0.34-0.44] (vs Go after GC at 100k); 0.68 [0.64-0.83] (vs Go shallow at 1M) |
 
-Section 2.4 of proposal/20, applied to each machine and then to both: each
-stackful configuration's worst ratio w over the four conditions (at 1M after the
-excursion, where Go's own cell fits neither machine, the larger of the ratios to
-Go after GC at 100k and to Go shallow at 1M, a lower bound of Go after GC at
-1M). A configuration passes if w is at or below 4 on both machines, fails if it
-is above 4 on both, and is inconclusive otherwise; a cell whose conservative
-range crosses 4, or that the memory guard stopped, makes it inconclusive on that
-machine.
+Section 2.4 of proposal/20, applied to each machine and then to pairs of
+machines: each stackful configuration's worst ratio w over the four conditions
+(at 1M after the excursion, where Go's own cell fits no machine, the larger of
+the ratios to Go after GC at 100k and to Go shallow at 1M, a lower bound of Go
+after GC at 1M). A configuration passes if w is at or below 4 on both machines,
+fails if it is above 4 on both, and is inconclusive otherwise; a cell whose
+conservative range crosses 4, or that the memory guard stopped, makes it
+inconclusive on that machine. The rule names two machines, M1 and the reviewer's
+M2. With a third, it is applied here to M1 with each runner: with M2, which ran
+every benchmark, and with M3, which ran this one on a 16 GiB machine, the size
+section 4.4 asks for, and holds the million-task cells that M2 could not. Which
+pair decides the primary is the owner's to confirm; the verdict of section 9.1
+is the same on either.
 
-| Configuration | M1 | M2 | section 2.4 (passes or fails only if both machines agree) |
-|---|---|---|---|
-| A/128K | fails | fails | fails |
-| A/1M | fails | fails | fails |
-| A/8M | fails | fails | fails |
-| B/128K | fails (w = 6.51) | fails (w = 6.58) | fails |
-| B/1M | fails (w = 6.86) | fails (w = 6.94) | fails |
-| B/8M | fails (w = 7.28) | fails (w = 7.36) | fails |
-| C/36K | fails (w = 7.08) | fails (w = 7.15) | fails |
-| C/40K | fails (w = 7.08) | fails (w = 7.15) | fails |
-| C/48K | fails (w = 7.08) | fails (w = 7.16) | fails |
-| D(A)/128K | fails | fails | fails |
-| D(A)/1M | fails | fails | fails |
-| D(A)/8M | fails | fails | fails |
-| D(B)/128K | passes (w = 1.75) | passes (w = 1.75) | passes |
-| D(B)/1M | passes (w = 2.41) | inconclusive (worst measured 2.41; the memory guard stopped a cell) | inconclusive |
-| D(B)/8M | passes (w = 3.16) | inconclusive (worst measured 3.16; the memory guard stopped a cell) | inconclusive |
+| Configuration | M1 | M2 | M3 | section 2.4 on M1 and M2 | section 2.4 on M1 and M3 |
+|---|---|---|---|---|---|
+| A/128K | fails | fails | fails | fails | fails |
+| A/1M | fails | fails | fails | fails | fails |
+| A/8M | fails | fails | fails | fails | fails |
+| B/128K | fails (w = 6.51) | fails (w = 6.58) | fails (w = 6.52) | fails | fails |
+| B/1M | fails (w = 6.86) | fails (w = 6.94) | fails (w = 6.87) | fails | fails |
+| B/8M | fails (w = 7.28) | fails (w = 7.36) | fails (w = 7.29) | fails | fails |
+| C/36K | fails (w = 7.08) | fails (w = 7.15) | fails (w = 7.08) | fails | fails |
+| C/40K | fails (w = 7.08) | fails (w = 7.15) | fails (w = 7.08) | fails | fails |
+| C/48K | fails (w = 7.08) | fails (w = 7.16) | fails (w = 7.08) | fails | fails |
+| D(A)/128K | fails | fails | fails | fails | fails |
+| D(A)/1M | fails | fails | fails | fails | fails |
+| D(A)/8M | fails | fails | fails | fails | fails |
+| D(B)/128K | passes (w = 1.75) | passes (w = 1.75) | passes (w = 1.76) | passes | passes |
+| D(B)/1M | passes (w = 2.41) | inconclusive (worst measured 2.41; the memory guard stopped a cell) | passes (w = 2.42) | inconclusive | passes |
+| D(B)/8M | passes (w = 3.16) | inconclusive (worst measured 3.16; the memory guard stopped a cell) | passes (w = 3.17) | inconclusive | passes |
 
 The four conditions on each machine (ratio to Go, its 95 % bootstrap interval
 over the runs, and the conservative range):
@@ -277,64 +311,100 @@ over the runs, and the conservative range):
 | D(B)/1M | 2.41 (CI 2.39-2.41; range 2.39-2.41) vs Go | 1.3 (CI 1.29-1.31; range 1.29-1.31) vs Go after GC | not computable: memory guard at 950,272-962,560 of 1,000,000 tasks | not computable: memory guard at 950,272-962,560 of 1,000,000 tasks | inconclusive (worst measured 2.41; the memory guard stopped a cell) |
 | D(B)/8M | 3.16 (CI 3.14-3.16; range 3.14-3.16) vs Go | 1.7 (CI 1.69-1.72; range 1.69-1.72) vs Go after GC | not computable: memory guard at 712,704-733,184 of 1,000,000 tasks | not computable: memory guard at 712,704-733,184 of 1,000,000 tasks | inconclusive (worst measured 3.16; the memory guard stopped a cell) |
 
+**M3**
+
+| Configuration | 100k shallow | 100k after excursion | 1M shallow | 1M after excursion | on this machine |
+|---|---|---|---|---|---|
+| A/128K | fails: VMA limit at 32,732-32,733 of 100,000 tasks | fails: VMA limit at 32,732-32,733 of 100,000 tasks | fails: VMA limit at 32,732-32,733 of 1,000,000 tasks | not required (policy 7) | fails |
+| A/1M | fails: VMA limit at 32,732-32,733 of 100,000 tasks | fails: VMA limit at 32,732-32,733 of 100,000 tasks | fails: VMA limit at 32,732-32,733 of 1,000,000 tasks | not required (policy 7) | fails |
+| A/8M | fails: VMA limit at 32,733 of 100,000 tasks | fails: VMA limit at 32,733 of 100,000 tasks | fails: VMA limit at 32,732-32,733 of 1,000,000 tasks | not required (policy 7) | fails |
+| B/128K | 1.74 (CI 1.74-1.75; range 1.74-1.75) vs Go | 6.52 (CI 6.52-6.61; range 6.52-6.61) vs Go after GC | 1.76 (CI 1.73-1.78; range 1.73-1.78) vs Go | not required (policy 7) | fails (w = 6.52) |
+| B/1M | 2.39 (CI 2.39-2.41; range 2.39-2.41) vs Go | 6.87 (CI 6.86-6.96; range 6.86-6.96) vs Go after GC | 2.41 (CI 2.38-2.44; range 2.38-2.44) vs Go | not required (policy 7) | fails (w = 6.87) |
+| B/8M | 3.13 (CI 3.13-3.16; range 3.13-3.16) vs Go | 7.29 (CI 7.28-7.39; range 7.28-7.39) vs Go after GC | 3.17 (CI 3.13-3.2; range 3.13-3.21) vs Go | not required (policy 7) | fails (w = 7.29) |
+| C/36K | 2.04 (CI 2.04-2.06; range 2.04-2.06) vs Go | 7.08 (CI 7.08-7.18; range 7.08-7.18) vs Go after GC | 2.06 (CI 2.03-2.09; range 2.03-2.09) vs Go | not required (policy 7) | fails (w = 7.08) |
+| C/40K | 2.04 (CI 2.04-2.06; range 2.04-2.06) vs Go | 7.08 (CI 7.08-7.18; range 7.08-7.18) vs Go after GC | 2.07 (CI 2.04-2.09; range 2.04-2.09) vs Go | not required (policy 7) | fails (w = 7.08) |
+| C/48K | 2.05 (CI 2.05-2.06; range 2.05-2.06) vs Go | 7.08 (CI 7.08-7.18; range 7.08-7.18) vs Go after GC | 2.07 (CI 2.04-2.09; range 2.04-2.09) vs Go | not required (policy 7) | fails (w = 7.08) |
+| D(A)/128K | fails: VMA limit at 32,733 of 100,000 tasks | fails: VMA limit at 32,733 of 100,000 tasks | fails: VMA limit at 32,732-32,733 of 1,000,000 tasks | fails: VMA limit at 32,732-32,733 of 1,000,000 tasks | fails |
+| D(A)/1M | fails: VMA limit at 32,733 of 100,000 tasks | fails: VMA limit at 32,733 of 100,000 tasks | fails: VMA limit at 32,732-32,733 of 1,000,000 tasks | fails: VMA limit at 32,732-32,733 of 1,000,000 tasks | fails |
+| D(A)/8M | fails: VMA limit at 32,732-32,733 of 100,000 tasks | fails: VMA limit at 32,732-32,733 of 100,000 tasks | fails: VMA limit at 32,732-32,733 of 1,000,000 tasks | fails: VMA limit at 32,732-32,733 of 1,000,000 tasks | fails |
+| D(B)/128K | 1.74 (CI 1.74-1.75; range 1.74-1.75) vs Go | 0.936 (CI 0.936-0.949; range 0.936-0.949) vs Go after GC | 1.76 (CI 1.73-1.78; range 1.73-1.78) vs Go | 0.934 (CI 0.934-0.947; range 0.934-0.947) vs Go after GC at 100k; 1.76 (CI 1.73-1.78; range 1.73-1.78) vs Go shallow at 1M | passes (w = 1.76) |
+| D(B)/1M | 2.39 (CI 2.39-2.41; range 2.39-2.41) vs Go | 1.29 (CI 1.29-1.3; range 1.29-1.3) vs Go after GC | 2.41 (CI 2.38-2.44; range 2.38-2.44) vs Go | 1.28 (CI 1.28-1.3; range 1.28-1.3) vs Go after GC at 100k; 2.42 (CI 2.38-2.44; range 2.38-2.44) vs Go shallow at 1M | passes (w = 2.42) |
+| D(B)/8M | 3.13 (CI 3.13-3.16; range 3.13-3.16) vs Go | 1.69 (CI 1.69-1.71; range 1.69-1.71) vs Go after GC | 3.17 (CI 3.13-3.2; range 3.13-3.21) vs Go | 1.68 (CI 1.68-1.71; range 1.68-1.71) vs Go after GC at 100k; 3.17 (CI 3.13-3.21; range 3.13-3.21) vs Go shallow at 1M | passes (w = 3.17) |
+
 * **The verdict.** D(B) is the only stackful strategy that passes. At 128 KiB it
-  passes, with w = 1.75 on both machines, which is what section 2.4's primary
-  asks of at least one stackful strategy (section 9.1). At 1 MiB and 8 MiB it
-  passes on M1 (w = 2.41 and 3.16). On M2 both 100k conditions pass at those
-  reservations (2.41x and 1.30x at 1 MiB, 3.16x and 1.70x at 8 MiB), but the 1M
-  cells are failed rows, stopped by the memory guard at 950,272-962,560 and
+  passes on all three machines, with w = 1.75 on M1 and M2 and 1.76 on M3, which
+  is what section 2.4's primary asks of at least one stackful strategy (section
+  9.1). At 1 MiB and 8 MiB it passes on M1 (w = 2.41 and 3.16) and on M3 (w =
+  2.42 and 3.17), so section 2.4 passes it at every reservation on M1 and M3. At
+  the 1 MiB default, M3's million-task cells hold 6.44 KiB per task in the
+  shallow phase and 6.44 KiB after the excursion (M1: 6.43 and 6.44 KiB): 2.41x
+  Go shallow at 1M, and after the excursion 1.28x Go after GC at 100k and 2.42x
+  Go shallow at 1M, the worst of the four conditions (conservative range
+  2.38-2.44, far from 4). On M2 both 100k conditions pass at those reservations
+  (2.41x and 1.30x at 1 MiB, 3.16x and 1.70x at 8 MiB), but the 1M cells are
+  failed rows, stopped by the memory guard at 950,272-962,560 and
   712,704-733,184 tasks, so section 2.4 calls these two configurations
-  inconclusive on M2, not failed. Over the tasks they had created when the guard
-  stopped them, the D(B)/1 MiB runs held 6.44 KiB per task, as at 100k (6.44
-  KiB); that is not a measurement of the cell, and no verdict uses it.
-* **The others fail on both machines.** B and C keep the excursion's pages
-  ("commit creep": after the excursion B/1 MiB holds 34.4 KiB per task on both
-  machines) and fail against Go after its collection (5.02 [5.01-5.02] and 4.96
-  [4.93-5.01] KiB), although measured against Go before its collection (34.7
-  [33.4-34.7] and 34.4 [23.2-35.9] KiB) B/1 MiB is at 0.99x and 1.00x. A and
-  D(A) fail on scale first: each guard page splits a mapping, and the process
-  stops at 32,730 tasks on M1 and 32,738 on M2 under `vm.max_map_count` 65530
-  (their per-task figures over the tasks that were created match B's and
+  inconclusive on M2, not failed, and inconclusive on M1 and M2 together. Over
+  the tasks they had created when the guard stopped them, the D(B)/1 MiB runs
+  held 6.44 KiB per task, as at 100k (6.44 KiB); that is not a measurement of
+  the cell, and no verdict uses it.
+* **The others fail on every machine.** B and C keep the excursion's pages
+  ("commit creep": after the excursion B/1 MiB holds 34.4 KiB per task on M1 and
+  M2 and 34.5 on M3) and fail against Go after its collection (5.02 [5.01-5.02],
+  4.96 [4.93-5.01] and 5.02 [4.95-5.02] KiB), although measured against Go
+  before its collection (34.7 [33.4-34.7], 34.4 [23.2-35.9] and 34.7 [26.2-34.7]
+  KiB) B/1 MiB is at 0.99x, 1.00x and 0.99x. Their million-task cells, the
+  shallow phase only (policy 7), are within 4x wherever they were measured (on
+  M3: B 1.76x, 2.41x and 3.17x at 128 KiB, 1 MiB and 8 MiB, C 2.06x to 2.07x),
+  so the excursion at 100k decides them, on every machine. A and D(A) fail on
+  scale first: each guard page splits a mapping, and the process stops at 32,730
+  tasks on M1, 32,738 on M2 and 32,732-32,733 on M3 under `vm.max_map_count`
+  65530 (their per-task figures over the tasks that were created match B's and
   D(B)'s).
 * **The machines agree.** Over every B, C and D(B) configuration at 100k, the
-  two machines' ratios to Go differ by at most 0.08 (D(B) alone: at most 0.03),
-  and D(B)/128 KiB's worst ratio is 1.75 on both machines. The most variable
+  three machines' ratios to Go differ by at most 0.08 (D(B) alone: at most
+  0.03), and at 1M, where M1 and M3 measured every one of them, their shallow
+  ratios differ by at most 0.01. D(B)/128 KiB's worst ratio is 1.75 on M1 and M2
+  and 1.76 on M3, and D(B)/1 MiB's 2.41 on M1 and 2.42 on M3. The most variable
   cell is a control's: Go's after-excursion figure before its GC, whose five
-  runs on M2 span 23.2-35.9 KiB; it is not a baseline of record.
+  runs span 23.2-35.9 KiB on M2 and 26.2-34.7 KiB on M3; it is not a baseline of
+  record.
 * **What a task costs.** D(B)/1 MiB holds 4.41 KiB resident per task at 1M on M1
-  (one stack page plus the task record) and 2.02 KiB of page tables; M2 measured
-  4.42 and 2.02 KiB at 100k. A 4 KiB page-table page maps 2 MiB, which two 1 MiB
-  slots share. The reservation costs page tables, not resident memory: at 1M on
-  M1, 128 KiB slots need 0.27 KiB and 8 MiB slots 4.03 KiB (M2: 0.27 KiB at 128
-  KiB and 1M, 4.03 KiB at 8 MiB and 100k). Measured on RSS alone, as section 6.5
-  literally defines the resident set, the stackful strategies' ratios are
-  smaller still (D(B)/1 MiB at 100k: 1.64x shallow on M1 and 1.66x on M2; the
-  RSS-only columns of `summarize.py`), because Go's page tables are negligible
-  and theirs are not.
+  (one stack page plus the task record) and 2.02 KiB of page tables, and M3 4.42
+  and 2.02 KiB at 1M; M2 measured 4.42 and 2.02 KiB at 100k. A 4 KiB page-table
+  page maps 2 MiB, which two 1 MiB slots share. The reservation costs page
+  tables, not resident memory: at 1M on M1, 128 KiB slots need 0.27 KiB and 8
+  MiB slots 4.03 KiB (M2: 0.27 KiB at 128 KiB and 1M, 4.03 KiB at 8 MiB and
+  100k). Measured on RSS alone, as section 6.5 literally defines the resident
+  set, the stackful strategies' ratios are smaller still (D(B)/1 MiB at 100k,
+  shallow: 1.64x on M1 and M3 and 1.66x on M2; the RSS-only columns of
+  `summarize.py`), because Go's page tables are negligible and theirs are not.
 * **Decommit on park.** D(B) made 1,000,001 `madvise(MADV_DONTNEED)` calls for
-  1M tasks on M1, and 1,000,001 in M2's D(B)/128 KiB cell at 1M (the
-  `decommits=` field of the rows' `note`): one per task, at the park after its
-  excursion. The park after shallow use made none, because the probe watermark
-  showed that the stack had not grown below its top page.
+  1M tasks on M1, 1,000,001 in M2's D(B)/128 KiB cell at 1M, and 1,000,001 in
+  M3's D(B)/1 MiB cell at 1M (the `decommits=` field of the rows' `note`): one
+  per task, at the park after its excursion. The park after shallow use made
+  none, because the probe watermark showed that the stack had not grown below
+  its top page.
 * **1M tasks.** Per-task memory does not change from 100k to 1M for any stackful
-  strategy on M1, nor on M2 for the cells it completed. At 1M, A, B, C and Go
-  measured the shallow phase only (policy 7): keeping the excursion's pages for
-  1M tasks needs about 33 GiB (B/1 MiB's figure at 100k times 1M).
-* **C and the 5 KiB reserve.** C's shallow figure is 5.50 KiB on both machines,
-  against 4.59 KiB in M2's smoke run of harness 0.1.0 (10k tasks, one run),
-  whose reserve was 8 KiB. A slot of 36 + 5 KiB is not a whole number of pages,
-  so a quarter of the slots have their top frames straddle a page boundary and
-  touch two pages. Rounding C's slots to pages (the reserve absorbing the
-  rounding) would restore the earlier figure; C does not pass either way.
+  strategy on M1 or M3, nor on M2 for the cells it completed. At 1M, A, B, C and
+  Go measured the shallow phase only (policy 7): keeping the excursion's pages
+  for 1M tasks needs about 33 GiB (B/1 MiB's figure at 100k times 1M).
+* **C and the 5 KiB reserve.** C's shallow figure is 5.50 KiB on all three
+  machines, against 4.59 KiB in M2's smoke run of harness 0.1.0 (10k tasks, one
+  run), whose reserve was 8 KiB. A slot of 36 + 5 KiB is not a whole number of
+  pages, so a quarter of the slots have their top frames straddle a page
+  boundary and touch two pages. Rounding C's slots to pages (the reserve
+  absorbing the rounding) would restore the earlier figure; C does not pass
+  either way.
 * **The controls.** Java's virtual threads copy a parked thread's frames into
   heap chunks, so Java's figures (1.07 [1.00-1.14] KiB shallow at 1M on M1, 1.06
-  [1.04-1.17] KiB on M2) are a managed baseline, not a non-moving-stack
-  precedent. E and tokio keep no stack per task (0.63 and 0.40 KiB on M1, 0.63
-  and 0.40 KiB on M2). Go's before-GC figure after the excursion, 34.4
-  [23.2-35.9] KiB on M2 with transparent huge pages on `madvise`, was 66.4 KiB
-  in M2's smoke run under the image's `always` (10k tasks, one run), which is
-  why the workflow sets `madvise`; after GC it was 5.04 KiB there and is 4.96
-  [4.93-5.01] KiB here.
+  [1.04-1.17] KiB on M2, 1.09 [1.05-1.15] KiB on M3) are a managed baseline, not
+  a non-moving-stack precedent. E and tokio keep no stack per task (E 0.63 KiB
+  on all three machines, tokio 0.40 KiB on all three machines). Go's before-GC
+  figure after the excursion, 34.4 [23.2-35.9] KiB on M2 with transparent huge
+  pages on `madvise`, was 66.4 KiB in M2's smoke run under the image's `always`
+  (10k tasks, one run), which is why the workflow sets `madvise`; after GC it
+  was 5.04 KiB there and is 4.96 [4.93-5.01] KiB here.
 
 ## 2. Spawn plus join (threshold: median within 3x Go with pooled stacks)
 
@@ -556,7 +626,7 @@ reached it.*
 
 * **Every exhaustion is clean** on both machines: 255 outcome rows on M1 and 255
   on M2, 0 unclean, and the follow-up task ran in every run. `process_exit` rows
-  (crashes) across every CSV of both results directories: **0**.
+  (crashes) across every CSV of the three results directories: **0**.
 * **Mechanism.** B, C and D(B) fail through the software probe and unwind, so
   every destructor runs (0 drop guards skipped). A and D(A) fail through the
   guard page; the trap handler ends the task without unwinding, so the frames'
@@ -791,69 +861,77 @@ pre-specified effect; **fails** means it is missed or a guard trips; anything
 else, including too little data or machines that disagree, is **not shown**, and
 no fallback is built on it. Section 2.4 states the two-machine rule for the
 primary, and the plan asks for every result on two machines, so every row below
-holds or fails only if both machines say so. Section 7.8: only the primary
-(memory) decides the bet, the guard (exhaustion in ordinary code) can only stop
-it, and each secondary triggers its own action.
+holds or fails only if both machines say so. M3 ran the primary's benchmark
+alone; the rule is applied to M1 with M2 and to M1 with M3 (section 1), and the
+primary holds on either pair. Section 7.8: only the primary (memory) decides the
+bet, the guard (exhaustion in ordinary code) can only stop it, and each
+secondary triggers its own action.
 
-| Row | Role | Verdict | M1 | M2 | Action (section 8.3) |
-|---|---|---|---|---|---|
-| Memory per idle task | primary | **holds** (provisional) | D(B) passes, w = 1.75 / 2.41 / 3.16 at 128 KiB / 1 MiB / 8 MiB, every five-run range far from 4; B (w = 7.28 at 8 MiB, 6.86 at 1 MiB) and C (7.08) fail after the excursion; A and D(A) fail at the VMA limit | D(B) passes at 128 KiB (w = 1.75); at 1 MiB and 8 MiB inconclusive: the 100k conditions pass (worst 2.41 and 3.16), the 1M cells are failed rows (memory guard at 950,272-962,560 and 712,704-733,184 tasks); B (w = 7.36 at 8 MiB, 6.94 at 1 MiB) and C (7.15) fail after the excursion; A and D(A) fail at the VMA limit | "holds at week 8": Q-6 is closed provisionally with the harness era label (section 9.2); the default reservation's 1M cells are shown on M1 only |
-| Stack exhaustion | guard | harness part **holds**; the guard is not decided | every exhaustion on every strategy and reservation is a clean "stack exhausted", five runs each; the runtime works afterwards; 0 crashes; the reserve's need is at most 2,088 bytes of its 5,120 | the same; 0 crashes; at most 2,088 bytes | the corpus `--stats stack-depth` histogram decides at week 40 |
-| Spawn plus join | secondary | **holds** | B 1.40x Go (95% bootstrap interval 1.16-1.73; range 1.15-1.92) | B 1.84x Go (95% bootstrap interval 1.31-1.86; range 1.26-1.86) | no design review |
-| Scale: 1M idle tasks, 16 GiB, default sysctls | secondary | **fails for A and D(A)**; holds for B, C and D(B) | A and D(A) stop at 32,730 tasks; B, C, D(B), E and tokio, and Go and Java, park 1M tasks and keep all of them parked through the 60-second hold | the same, A and D(A) at 32,738 tasks, on 7.75 GiB | "fails on creation cost or VMA limits only": pooled stacks with software probes become the design. Policy 5 already makes D(B) the default, and these runs are the rerun on that strategy |
-| Probe overhead (part of the scale row) | secondary | **not decided** (policy 1) | `fib` 13.3 [11.9-16.3] % (an upper bound), `tree` 4.5 [1.9-5.3] %, `calls` 0.0 [-0.1-0.9] %, back-edge yield check -0.1 [-0.2-0.5] % (B) | `fib` 8.6 [8.2-8.7] %, `tree` 2.2 [1.8-2.3] %, `calls` 0.2 %, back-edge yield check 3.5 % (B) | the native era, on a machine with a PMU and a fixed frequency, with Sisu's own probe placement |
-| Echo p99 at 10k connections | secondary | **not shown** (one machine) | not run (descriptor limit); at 1000 connections B 0.88x, D(B) 0.85x and D(A) 3.73x Go | B 0.91x, D(B) 0.91x, D(A) 1.07x Go at 10k; at 1000, 0.79x, 0.87x and 1.12x | none; a second machine that runs the 10k cell (or a client in a second process on M1) would decide it |
-| Idle RSS at 100k connections | reported | (no threshold) | at 9,900: D(B) 1.50x Go | at 100,000: D(B) 1.95x Go; A and D(A) failed | none |
-| Starvation | secondary | **holds** with compiler-inserted yield points | B's p99 25.7 [25.0-30.0] us (K = 10k) and 229 [221-269] us (K = 100k) against Go's 39.3 [39.3-39.4] ms; without yield points the probe waits the whole run (10,999 [10,994-11,002] ms), reported and not counted (policy 8) | 23.6 [23.3-23.7] us and 316 [315-316] us against Go's 39.2 ms; without yield points 11,000 [10,998-11,000] ms | asynchronous preemption is not revisited |
-| Cancellation with a lent buffer (A1) | secondary | **holds** | 0 bytes written after return in 50 runs on the five stackful strategies, 1M reads per run; the negative control detects its violations (195,718,784 bytes) | 0 bytes in 50 runs; the negative control 192,795,904 bytes | none; D-058 stands |
-| Semantics, `sim` study | secondary | not run | interpreter era | interpreter era | Phases 6-9 |
+| Row | Role | Verdict | M1 | M2 | M3 | Action (section 8.3) |
+|---|---|---|---|---|---|---|
+| Memory per idle task | primary | **holds** (provisional) | D(B) passes, w = 1.75 / 2.41 / 3.16 at 128 KiB / 1 MiB / 8 MiB, every five-run range far from 4; B (w = 7.28 at 8 MiB, 6.86 at 1 MiB) and C (7.08) fail after the excursion; A and D(A) fail at the VMA limit | D(B) passes at 128 KiB (w = 1.75); at 1 MiB and 8 MiB inconclusive: the 100k conditions pass (worst 2.41 and 3.16), the 1M cells are failed rows (memory guard at 950,272-962,560 and 712,704-733,184 tasks); B (w = 7.36 at 8 MiB, 6.94 at 1 MiB) and C (7.15) fail after the excursion; A and D(A) fail at the VMA limit | D(B) passes, w = 1.76 / 2.42 / 3.17 at 128 KiB / 1 MiB / 8 MiB, the 1M cells included; B (w = 7.29 at 8 MiB, 6.87 at 1 MiB) and C (7.08) fail after the excursion; A and D(A) fail at the VMA limit | "holds at week 8": Q-6 is closed provisionally with the harness era label (section 9.2); the default reservation's 1M cells are shown on M1 and M3 |
+| Stack exhaustion | guard | harness part **holds**; the guard is not decided | every exhaustion on every strategy and reservation is a clean "stack exhausted", five runs each; the runtime works afterwards; 0 crashes; the reserve's need is at most 2,088 bytes of its 5,120 | the same; 0 crashes; at most 2,088 bytes | not run (`idle-memory` only) | the corpus `--stats stack-depth` histogram decides at week 40 |
+| Spawn plus join | secondary | **holds** | B 1.40x Go (95% bootstrap interval 1.16-1.73; range 1.15-1.92) | B 1.84x Go (95% bootstrap interval 1.31-1.86; range 1.26-1.86) | not run (`idle-memory` only) | no design review |
+| Scale: 1M idle tasks, 16 GiB, default sysctls | secondary | **fails for A and D(A)**; holds for B, C and D(B) | A and D(A) stop at 32,730 tasks; B, C, D(B), E and tokio, and Go and Java, park 1M tasks and keep all of them parked through the 60-second hold | the same, A and D(A) at 32,738 tasks, on 7.75 GiB | not run (`idle-memory` only) | "fails on creation cost or VMA limits only": pooled stacks with software probes become the design. Policy 5 already makes D(B) the default, and these runs are the rerun on that strategy |
+| Probe overhead (part of the scale row) | secondary | **not decided** (policy 1) | `fib` 13.3 [11.9-16.3] % (an upper bound), `tree` 4.5 [1.9-5.3] %, `calls` 0.0 [-0.1-0.9] %, back-edge yield check -0.1 [-0.2-0.5] % (B) | `fib` 8.6 [8.2-8.7] %, `tree` 2.2 [1.8-2.3] %, `calls` 0.2 %, back-edge yield check 3.5 % (B) | not run (`idle-memory` only) | the native era, on a machine with a PMU and a fixed frequency, with Sisu's own probe placement |
+| Echo p99 at 10k connections | secondary | **not shown** (one machine) | not run (descriptor limit); at 1000 connections B 0.88x, D(B) 0.85x and D(A) 3.73x Go | B 0.91x, D(B) 0.91x, D(A) 1.07x Go at 10k; at 1000, 0.79x, 0.87x and 1.12x | not run (`idle-memory` only) | none; a second machine that runs the 10k cell (or a client in a second process on M1) would decide it |
+| Idle RSS at 100k connections | reported | (no threshold) | at 9,900: D(B) 1.50x Go | at 100,000: D(B) 1.95x Go; A and D(A) failed | not run (`idle-memory` only) | none |
+| Starvation | secondary | **holds** with compiler-inserted yield points | B's p99 25.7 [25.0-30.0] us (K = 10k) and 229 [221-269] us (K = 100k) against Go's 39.3 [39.3-39.4] ms; without yield points the probe waits the whole run (10,999 [10,994-11,002] ms), reported and not counted (policy 8) | 23.6 [23.3-23.7] us and 316 [315-316] us against Go's 39.2 ms; without yield points 11,000 [10,998-11,000] ms | not run (`idle-memory` only) | asynchronous preemption is not revisited |
+| Cancellation with a lent buffer (A1) | secondary | **holds** | 0 bytes written after return in 50 runs on the five stackful strategies, 1M reads per run; the negative control detects its violations (195,718,784 bytes) | 0 bytes in 50 runs; the negative control 192,795,904 bytes | not run (`idle-memory` only) | none; D-058 stands |
+| Semantics, `sim` study | secondary | not run | interpreter era | interpreter era | interpreter era | Phases 6-9 |
 
 **Bet 3 at week 8: holds, provisionally.** Through its primary: D(B), the
-default strategy, passes section 2.4 on both machines at 128 KiB (w = 1.75 on
-both machines) and on M1 at every reservation; the machines agree wherever both
-measured, and M2 could not hold D(B)'s 1M cells at 1 MiB and 8 MiB. No guard has
-tripped: the exhaustion guard is decided at week 40, against the default
-reservation chosen here, and can still stop the bet. The verdict, like every
-verdict in this report, stays provisional until the pre-registration is frozen.
+default strategy, passes section 2.4 at 128 KiB on all three machines (w = 1.75
+on M1 and M2 and 1.76 on M3), and at every reservation on M1 and M3, the two
+machines with 16 GiB, the 1 MiB default included (w = 2.41 and 2.42); the
+machines agree wherever they measured, and only M2 could not hold D(B)'s 1M
+cells at 1 MiB and 8 MiB. No guard has tripped: the exhaustion guard is decided
+at week 40, against the default reservation chosen here, and can still stop the
+bet. The verdict, like every verdict in this report, stays provisional until the
+pre-registration is frozen.
 
 ### 9.2 Q-6 recommendation (provisional, harness era)
 
 * **Strategy: D(B)**, pooled stacks carved from large reservations, with
   software probes and decommit on park, the probe doubling as the decommit
   watermark. It is the only stackful strategy that passes the memory primary: on
-  both machines at 128 KiB, on M1 at every reservation, and on M2 in every
-  condition it could measure. B and C fail it by commit creep (an excursion's
-  pages stay resident) on both machines, and A and D(A) cannot create 100k tasks
-  under default sysctls on either. Its cost over B is small: per spawn plus join
-  0.67 [0.66-0.83] against 0.64 [0.64-0.80] us on M1 and 0.75 [0.75-0.76]
-  against 0.73 [0.52-0.73] us on M2; echo p99 at 1000 connections 4.16
-  [4.03-4.39] against 4.32 [4.13-6.73] ms on M1 and 8.85 [7.39-11.7] against
-  8.05 [7.47-10.8] ms on M2. Decommit is needed, and its system call shows only
-  where it is paid on every park: D(A) has no watermark and makes one `madvise`
-  per park, and its echo throughput is 73,266 [72,715-74,131] requests per
-  second against D(B)'s 318,935 [316,259-328,027] on M1, and 103,887
+  all three machines at 128 KiB, on M1 and M3 at every reservation, and on M2 in
+  every condition it could measure. B and C fail it by commit creep (an
+  excursion's pages stay resident) on every machine, and A and D(A) cannot
+  create 100k tasks under default sysctls on any. Its cost over B is small: per
+  spawn plus join 0.67 [0.66-0.83] against 0.64 [0.64-0.80] us on M1 and 0.75
+  [0.75-0.76] against 0.73 [0.52-0.73] us on M2; echo p99 at 1000 connections
+  4.16 [4.03-4.39] against 4.32 [4.13-6.73] ms on M1 and 8.85 [7.39-11.7]
+  against 8.05 [7.47-10.8] ms on M2. Decommit is needed, and its system call
+  shows only where it is paid on every park: D(A) has no watermark and makes one
+  `madvise` per park, and its echo throughput is 73,266 [72,715-74,131] requests
+  per second against D(B)'s 318,935 [316,259-328,027] on M1, and 103,887
   [102,417-109,909] against 137,090 [118,321-143,329] on M2. In `idle-memory`,
   D(B) made one call per task, at the park after its excursion, and none at the
   park after shallow use.
-* **Default reservation: 1 MiB, with one condition.** Under D(B) a reservation
-  costs page tables, not resident memory: on M1, w = 1.75, 2.41 and 3.16 at 128
-  KiB, 1 MiB and 8 MiB; on M2, w = 1.75 at 128 KiB, and the worst 100k
-  conditions are 2.41 at 1 MiB and 3.16 at 8 MiB. 1 MiB keeps a margin under the
-  bar for the runtime's growth, is the size of the JVM's default thread stack,
-  and runs 21,900 levels of a small recursion and 2,856 levels of the four-frame
-  parser before a clean failure, on both machines. The condition: section 2.4
-  shows 1 MiB at 1M tasks on M1 alone, because M2 (7.75 GiB) could not hold 1M
-  D(B) tasks at 1 MiB beside its 1 GiB guard. The reservation that passes on
-  both machines is 128 KiB, which runs only 2,786 levels of the small recursion
-  and 363 of the parser (M1; 2,785 and 363 on M2). So the 1 MiB default stands
-  provisionally on M1's 1M cells and M2's 100k cells, and its 1M cells should be
-  reproduced on a second machine with the 16 GiB that section 4.4 requires
-  before the default is final. This does not change how the guard is decided:
-  section 2.4 trips it only when an ordinary program needs a default above 8 MiB
-  that then fails the memory primary. 8 MiB is admissible on memory on M1 (it
-  completes the 10k-deep parse) and is the step to take if the corpus histogram
-  finds ordinary programs deeper than 1 MiB; above 8 MiB, memory must be
-  re-measured (the plan's exhaustion row).
+* **Default reservation: 1 MiB.** Under D(B) a reservation costs page tables,
+  not resident memory: on M1, w = 1.75, 2.41 and 3.16 at 128 KiB, 1 MiB and 8
+  MiB; on M3, w = 1.76, 2.42 and 3.17; on M2, w = 1.75 at 128 KiB, and the worst
+  100k conditions are 2.41 at 1 MiB and 3.16 at 8 MiB. 1 MiB keeps a margin
+  under the bar for the runtime's growth, is the size of the JVM's default
+  thread stack, and runs 21,900 levels of a small recursion and 2,856 levels of
+  the four-frame parser before a clean failure, on both machines that ran the
+  recursion (M1 and M2). Its 1M cells, which M2 (7.75 GiB) could not hold beside
+  its 1 GiB guard, were measured on M3: there D(B)/1 MiB holds 6.44 KiB per task
+  at 1M tasks, shallow and after the excursion, 2.41x Go shallow and 1.28x Go
+  after GC (2.42x against Go shallow at 1M, the stricter substitute), as on M1.
+  Section 2.4 therefore passes 1 MiB on M1 and M3, the two machines of the size
+  section 4.4 asks for (15.7 and 15.6 GiB of `MemTotal`, section 10.2), and the
+  default no longer rests on M1 alone; like every verdict here it stays
+  provisional until the pre-registration is frozen. The reservation that passes
+  on all three machines is 128 KiB, which runs only 2,786 levels of the small
+  recursion and 363 of the parser (M1; 2,785 and 363 on M2). This does not
+  change how the guard is decided: section 2.4 trips it only when an ordinary
+  program needs a default above 8 MiB that then fails the memory primary. 8 MiB
+  is admissible on memory on M1 and M3 (it completes the 10k-deep parse on M1
+  and M2) and is the step to take if the corpus histogram finds ordinary
+  programs deeper than 1 MiB; above 8 MiB, memory must be re-measured (the
+  plan's exhaustion row).
 * **Probes, not guard pages.** One guard page per task stops at 32,730 tasks on
   M1 and 32,738 on M2 under the default `vm.max_map_count`, and a guard-page
   trap discards the exhausted task's frames without running their destructors
@@ -873,9 +951,9 @@ verdict in this report, stays provisional until the pre-registration is frozen.
   supply-chain attack that gating `spawn` would have stopped, and nothing in the
   harness argues otherwise: a task costs 0.67 [0.66-0.83] us (M1) and 0.75
   [0.75-0.76] us (M2) to spawn and join and 6.43 KiB at rest (M1 at 1M tasks;
-  M2: 6.44 KiB at 100k), and the risk of code that spawns too many is a resource
-  limit for the runtime to enforce (the scale row's guards), not an authority to
-  grant.
+  M3: 6.44 KiB at 1M; M2: 6.44 KiB at 100k), and the risk of code that spawns
+  too many is a resource limit for the runtime to enforce (the scale row's
+  guards), not an authority to grant.
 * **Yield checks (Q-34)**, decided as compiler-inserted, need an interval and a
   placement. Yielding every 100k iterations of the test loop (slices of about
   202 [189-224] us on M1 and 183 [181-184] us on M2) held the probe's p99 at 229
@@ -891,15 +969,17 @@ verdict in this report, stays provisional until the pre-registration is frozen.
   vectorisation, or behind a counter), should be chosen to fit what the probes
   leave of the 3 % budget, which the native era measures.
 * **The stackless fallback is not needed** on this evidence: the default
-  strategy passes the memory primary on both machines with a wide margin (at 128
-  KiB on both, at every reservation on M1), and every exhaustion is clean on
-  both. Its cost stays on file
+  strategy passes the memory primary with a wide margin (at 128 KiB on all three
+  machines, at every reservation on M1 and M3, the 1 MiB default included), and
+  every exhaustion is clean on both machines that ran the recursion. Its cost
+  stays on file
   ([`stackless-fallback-estimate.md`](stackless-fallback-estimate.md): 17-21
-  engineer-weeks, plus 3 if frames become values), for the cases that would call
-  for it: a 16 GiB second machine contradicting M1's 1M cells at the default
-  reservation, or the corpus histogram (week 40) finding ordinary depth beyond 8
-  MiB. The yield-point frame-boundary question is therefore not flagged to Phase
-  3.
+  engineer-weeks, plus 3 if frames become values), for the case that would call
+  for it: the corpus histogram (week 40) finding ordinary depth beyond 8 MiB.
+  The other case, a 16 GiB second machine contradicting M1's 1M cells at the
+  default reservation, did not arise: M3's shallow ratios at 1M are within 0.01
+  of M1's, and D(B)/1 MiB's worst ratio is 2.42 there against 2.41 on M1. The
+  yield-point frame-boundary question is therefore not flagged to Phase 3.
 
 ### 9.3 What the harness era cannot settle
 
@@ -926,8 +1006,6 @@ verdict in this report, stays provisional until the pre-registration is frozen.
 * **The registered echo and connection cells.** The 10k-connection echo and the
   100k idle connections ran on M2 only (M1's descriptor limit), and the
   open-loop load generator on disjoint cores of section 6.5 on neither machine.
-* **A second machine with 16 GiB.** M2 has 7.75 GiB, so the 1M-task cells of B
-  and D(B) at 1 MiB and 8 MiB are measured on M1 only.
 
 ## 10. Deviations, amendments, gaps
 
@@ -943,13 +1021,13 @@ decisions") changed that, and this report follows them:
 
 | Policy | The plan's original wording | What this report does instead |
 |---|---|---|
-| 1. Machines | two machines, the second the reviewer's, implicitly bare metal | M1 is a 4-vCPU KVM virtual machine without a PMU and with an unpinned frequency; M2 is a GitHub-hosted runner (2 vCPUs on one core, 7.75 GiB, a Hyper-V guest without a PMU), driven by a workflow rather than by a reviewer. The 3 % probe bar is reported with its noise and not decided (section 7) |
+| 1. Machines | two machines, the second the reviewer's, implicitly bare metal | M1 is a 4-vCPU KVM virtual machine without a PMU and with an unpinned frequency; M2 is a GitHub-hosted runner (2 vCPUs on one core, 7.75 GiB, a Hyper-V guest without a PMU), driven by a workflow rather than by a reviewer; M3, for the memory benchmark only, is another GitHub-hosted runner (4 vCPUs, 15.6 GiB, a Hyper-V guest), driven by a second workflow. The 3 % probe bar is reported with its noise and not decided (section 7) |
 | 2. Context switch | "an assembly context switch from an existing library" | corosensei 0.3.x, unchanged since the harness was built |
-| 3. Sysctls and limits | default sysctls; the earlier full-scale script needed `RLIMIT_NOFILE` of 200,064 | default sysctls on both machines; on M2 the workflow restores the kernel default `vm.max_map_count=65530`, which the runner image raises to 262144. The 10k echo and the 100k idle connections run only where the hard limit allows: on M1 (20,000) the 10k echo is a failed row and idle connections ran at 9,900; on M2 (1,048,576 inside the workflow's scope, section 10.2) both ran |
+| 3. Sysctls and limits | default sysctls; the earlier full-scale script needed `RLIMIT_NOFILE` of 200,064 | default sysctls on every machine; on M2 and M3 the workflows restore the kernel default `vm.max_map_count=65530`, which M2's runner image raises to 262144. The 10k echo and the 100k idle connections run only where the hard limit allows: on M1 (20,000) the 10k echo is a failed row and idle connections ran at 9,900; on M2 (1,048,576 inside the workflow's scope, section 10.2) both ran |
 | 4. Go after the excursion | "within 4x Go", the Go figure unspecified | Go after four `runtime.GC()` and `FreeOSMemory` |
 | 5. Default strategy | none named | D(B) |
 | 6. Probe reserve | the harness defaults of 16 KiB (B) and 8 KiB (C) | 5 KiB for B, C and D(B), now the harness default (version 0.2.0) |
-| 7. 1M tasks after the excursion | every strategy | only D(A) and D(B); A, B, C and Go measure the shallow phase at 1M (`--skip-excursion`) on both machines, and their cell reads "not run (policy 7)" |
+| 7. 1M tasks after the excursion | every strategy | only D(A) and D(B); A, B, C and Go measure the shallow phase at 1M (`--skip-excursion`) on every machine, and their cell reads "not run (policy 7)" |
 | 8. Yield points | compute tasks "that yield every K iterations", Go with or without `Gosched` | compiler-inserted yield points every K = 10k and 100k iterations (and 1k); the baseline is Go with its default asynchronous preemption only; no yield points at all is reported, not counted |
 
 ### 10.2 Deviations from the harness protocol (proposal/20, section 6.5)
@@ -976,7 +1054,23 @@ decisions") changed that, and this report follows them:
   stopped the 1M-task `idle-memory` cells of B and D(B) at 1 MiB and 8 MiB
   (section 0), so section 2.4 is inconclusive on M2 for D(B) at those
   reservations; `max-tasks`'s 1M pooled tasks fit (section 3). The workflow's 12
-  GiB scope did not bind on this machine (section 0).
+  GiB scope did not bind on this machine (section 0). M3 measured those cells
+  (section 1).
+* **A third machine, for one benchmark.** Section 4.4 has two machines, the
+  second the reviewer's, on which every configuration is reproduced. M3 was
+  added after both had run, by a workflow rather than by the reviewer, to
+  measure the cells M2 could not hold, and it ran `idle-memory` alone (every
+  cell of it, five runs each, with the Go and Java controls); section 2.4's
+  two-machine rule is applied to M1 with each runner (section 1). M3 has
+  16,759,443,456 bytes (15.6 GiB) of `MemTotal`, as M1 has 15.7 GiB, and its
+  runs had a 14.0 GiB scope, not a 16 GiB cgroup on a machine of at least 16
+  GiB. It runs Linux 7.0.0-1017-azure on Ubuntu 26.04.1 LTS, where M2 ran
+  6.17.0-1022-azure on Ubuntu 24.04.5 LTS: the image behind `ubuntu-latest`
+  changed between the two runs, and the processor too (AMD EPYC 7763 64-Core
+  Processor against M2's Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz). M3's
+  processor differs from M1's in vendor, as section 4.4 asks of the two machines
+  where the available runners allow it. Its controls are go1.24.13 and JDK
+  21.0.13.
 * **M2's descriptor limit.** Inside the scope the processes had an
   `RLIMIT_NOFILE` of 1048576/1048576; the runner's own processes had 65536/65536
   in the smoke run, and the lost run 38495423545, outside any scope, ran idle
@@ -1035,11 +1129,15 @@ decisions") changed that, and this report follows them:
   0.047 CPUs per benchmark (section 11). 32 of its 730 processes saw them use
   0.3 CPUs or more, none of them longer than 0.64 s: 20 in spawn-join (the
   pooled strategies' cells, section 2), 11 in deep-recursion and 1 in max-tasks,
-  whose figures do not depend on CPU time.
+  whose figures do not depend on CPU time. M3, also a hosted runner measured
+  without the gate, saw the other processes use 0.3 CPUs or more during 2 of its
+  195 processes, none of them longer than 3.36 s, in a benchmark whose figures
+  do not depend on CPU time either.
 * **Workers** are the VMs' vCPUs: 4 on M1, which the guest sees as four
-  single-thread cores, and 2 on M2, which it sees as one core's two hardware
-  threads. Section 4.4's default is one worker per physical core; on M2 that
-  would be one.
+  single-thread cores, 2 on M2, which it sees as one core's two hardware
+  threads, and 4 on M3, which it sees as two cores with two hardware threads
+  each. Section 4.4's default is one worker per physical core; on M2 that would
+  be one, on M3 two.
 * **Memory** is resident plus page tables (VmRSS + VmPTE from
   `/proc/self/status`), the harness's figure of record since its first version;
   section 6.5 says "resident set" from `/proc/self/smaps_rollup`. The RSS-only
@@ -1072,15 +1170,16 @@ decisions") changed that, and this report follows them:
   call returned" cannot happen by construction in the safe API (`read` returns
   only on the completion) and are counted only in the negative control's
   `abandoned_reads`.
-* **Controls.** Go is go1.24.7 on M1 and go1.24.13 on M2, not the latest stable
-  release; the JDK is 21.0.12 on both (Ubuntu's build on M1, Temurin's on M2;
-  JEP 491's unpinning is 24 and later). The "C or Rust stackful coroutine
-  library" control is strategy A itself (corosensei's own default stack is a
-  guarded mapping per coroutine), not a separate library.
+* **Controls.** Go is go1.24.7 on M1 and go1.24.13 on M2 and M3, not the latest
+  stable release; the JDK is 21.0.12 on M1 and M2 (Ubuntu's build on M1,
+  Temurin's on M2) and Temurin's 21.0.13 on M3 (JEP 491's unpinning is 24 and
+  later). The "C or Rust stackful coroutine library" control is strategy A
+  itself (corosensei's own default stack is a guarded mapping per coroutine),
+  not a separate library.
 * **Reviewer.** No Go/Java reviewer has configured or checked the controls, M2
-  was run by a workflow rather than by the reviewer, and no referee has applied
-  the thresholds; the verdicts are the runtime engineer's reading of the draft
-  rules.
+  and M3 were run by workflows rather than by the reviewer, and no referee has
+  applied the thresholds; the verdicts are the runtime engineer's reading of the
+  draft rules.
 
 ### 10.3 Changes to the harness in this phase (version 0.2.0)
 
@@ -1151,10 +1250,11 @@ decisions") changed that, and this report follows them:
   default preemption only, and record a connection count beyond the hard limit
   as a failed row. `summarize.py` reports medians and ranges over runs,
   bootstrap intervals, the policies' baselines and section 2.4's rule, on each
-  machine and on both, and gives the range of tasks created over a cell's runs
-  when the memory guard stops it; `report/tables.py` puts the two machines side
-  by side in every table. The report's scripts change no measurement and are
-  outside the sources' digest.
+  machine and on each pair of machines, and gives the range of tasks created
+  over a cell's runs when the memory guard stops it; `report/tables.py` puts the
+  machines side by side in every table, the three of them in the memory tables.
+  The report's scripts change no measurement and are outside the sources'
+  digest.
 
 ### 10.4 Not run, and why
 
@@ -1162,8 +1262,9 @@ decisions") changed that, and this report follows them:
 |---|---|---|
 | Echo at 10k connections | M1 | both ends in one process need 2 x 10,000 + 64 = 20,064 descriptors; the hard `RLIMIT_NOFILE` is 20,000 and cannot be raised (policy 3). A client in a second process would fit, and is not implemented |
 | Idle connections at 100k | M1 | the same limit; run at 9,900, the most it allows |
-| 1M tasks after the excursion for A, B, C and Go | M1, M2 | policy 7; about 33 GiB |
-| `idle-memory` at 1M tasks: B and D(B) at 1 MiB and 8 MiB | M2 | failed rows: the memory guard stopped them at 946,176-962,560 (B/1 MiB), 675,840-733,184 (B/8 MiB), 950,272-962,560 (D(B)/1 MiB) and 712,704-733,184 (D(B)/8 MiB) of 1,000,000 tasks, on a 7.75 GiB machine; the 12 GiB scope did not bind (section 0) |
+| 1M tasks after the excursion for A, B, C and Go | M1, M2, M3 | policy 7; about 33 GiB |
+| `idle-memory` at 1M tasks: B and D(B) at 1 MiB and 8 MiB | M2 | failed rows: the memory guard stopped them at 946,176-962,560 (B/1 MiB), 675,840-733,184 (B/8 MiB), 950,272-962,560 (D(B)/1 MiB) and 712,704-733,184 (D(B)/8 MiB) of 1,000,000 tasks, on a 7.75 GiB machine; the 12 GiB scope did not bind (section 0). M3 measured them (section 1) |
+| Every benchmark except `idle-memory` | M3 | the run was made for the million-task `idle-memory` cells that M2 could not hold (`run_all.sh --only idle-memory`, section 0); M1 and M2 ran every benchmark |
 | Idle connections at 100k for A and D(A) | M2 | failed rows: the client's `connect` timed out in every run; a guarded mapping per server task meets the VMA limit near 32,738 tasks (section 4) |
 | OS threads beyond 9,489 (`idle-memory` at 10k, `max-tasks`) | M2 | the scope's pids cgroup of 9491 tasks: thread creation fails with `EAGAIN`, a failed row |
 | Instruction counts for probe overhead | M1, M2 | no PMU on either machine |
@@ -1171,13 +1272,15 @@ decisions") changed that, and this report follows them:
 
 ### 10.5 Measured on one machine only
 
-On M1 only: the 1M-task `idle-memory` cells of B and D(B) at 1 MiB and 8 MiB,
-which M2's memory guard stopped, and OS threads beyond M2's pids limit. On M2
-only: the 10k-connection echo and idle connections at 100k (where A and D(A)
-failed), which M1's descriptor limit excludes. Every other full-scale cell (100k
-and 1M tasks, five runs, 1M cancelled reads, the 60-second hold, starvation with
-four tasks per worker, the framed recursion, the back-edge yield check) was
-measured on both machines, five runs each.
+On M1 only: OS threads beyond M2's pids limit in `max-tasks` (in `idle-memory`,
+M1 and M3 ran the 10k OS threads that the limit stopped on M2). On M2 only: the
+10k-connection echo and idle connections at 100k (where A and D(A) failed),
+which M1's descriptor limit excludes. The 1M-task `idle-memory` cells of B and
+D(B) at 1 MiB and 8 MiB, which M2's memory guard stopped, were measured on M1
+and M3. Every other full-scale cell (100k and 1M tasks, five runs, 1M cancelled
+reads, the 60-second hold, starvation with four tasks per worker, the framed
+recursion, the back-edge yield check) was measured on M1 and M2, five runs each,
+and every `idle-memory` cell on M3 as well.
 
 ## 11. How the runs were made
 
@@ -1257,8 +1360,24 @@ hosted runner runs nothing but the job. Wall-clock time per group, from its
 | cancel-uring | 2026-10-14 06:25 | 5 | 32.9 | 392-400 |
 | total |  |  | 243.8 |  |
 
-The machine's load during every process of M1's gated groups and of every M2
-group, from `load.csv` (the other processes' CPU time is all CPUs' busy time
+On M3, the workflow `.github/workflows/harness-cell.yml` prepared the runner as
+M2's does, built the harness, and ran one invocation of the memory benchmark
+inside its 14 GiB scope (section 0):
+
+```
+./run_all.sh --scale full --only idle-memory --machine-id github-runner-16g --out results/github-runner/cell-${GITHUB_RUN_ID}
+```
+
+The five repetitions run in rep-major order (every configuration and its
+controls once, then again), without the quiet gate. Wall-clock time, from its
+`timing.csv`:
+
+| Benchmark (with its controls) | first start (UTC) | repetitions | minutes | seconds per repetition |
+|---|---|---|---|---|
+| idle-memory | 2026-11-02 23:52 | 5 | 20.6 | 246-247 |
+
+The machine's load during every process of M1's gated groups and of every M2 and
+M3 group, from `load.csv` (the other processes' CPU time is all CPUs' busy time
 from `/proc/stat` less the process's own; it can be a few ticks below zero):
 
 **Machine load during the runs (load.csv)**
@@ -1279,6 +1398,7 @@ from `/proc/stat` less the process's own; it can be a few ticks below zero):
 | github-runner/full-38518035636 | probe-overhead | off | 25 | 0 | 0 | 0 | 0.008 | 0.031 | 0.000 | 0 / 0 |
 | github-runner/full-38518035636 | spawn-join | off | 70 | 0 | 0 | 0 | 0.047 | 0.845 | 0.000 | 0 / 0 |
 | github-runner/full-38518035636 | starvation | off | 105 | 0 | 0 | 0 | 0.006 | 0.045 | 0.000 | 0 / 0 |
+| github-runner/cell-41548553538 | idle-memory | off | 195 | 0 | 0 | 0 | -0.002 | 0.327 | 0.000 | 0 / 0 |
 
 The other work on M1 came in bursts: the gate measured a process again 64 times.
 Four processes were kept on their third attempt although the other processes had
@@ -1286,6 +1406,6 @@ used more than 0.3 CPUs while they ran (the last attempt is kept whatever its
 load): two starvation runs at K = 10k (C and D(A)) and two echo runs at 1000
 connections (A and C). The two echo runs have the highest p99 of their cells,
 and the two starvation runs lie within their cells' ranges, far under the
-threshold; none of these cells decides a verdict. On M2 no process was measured
-again (the gate was off); section 10.2 counts the processes during which the
-other processes used 0.3 CPUs or more.
+threshold; none of these cells decides a verdict. On M2 and M3 no process was
+measured again (the gate was off); section 10.2 counts the processes during
+which the other processes used 0.3 CPUs or more.

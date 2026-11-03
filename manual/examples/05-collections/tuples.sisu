@@ -1,0 +1,11 @@
+# A tuple groups a fixed number of values of any types.
+def main():
+    let city = ("Oulu", 214_000)
+    print("{city.0} has {city.1} people")
+    let name, people = city
+    print("{name}: {people}")
+    match [3, 1, 4, 1]:
+        case [first, *rest]:
+            print("{first}, then {rest}")
+        case []:
+            print("nothing")

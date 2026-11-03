@@ -1,0 +1,8 @@
+# A set holds each value once.
+def main():
+    var visited = {"Oulu", "Turku"}
+    visited.add("Oulu")
+    visited.add("Tampere")
+    print("{visited}, {len(visited)} cities")
+    let none_yet: set[str] = set()
+    print("{none_yet}, {len(none_yet)} cities")

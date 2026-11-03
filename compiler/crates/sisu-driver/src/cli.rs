@@ -170,6 +170,7 @@ pub(crate) const VALUE_FLAGS: &[&str] = &[
     "--diary",
     "--output",
     "--from-sir",
+    "--from-lir",
     "--features",
 ];
 
@@ -217,6 +218,9 @@ struct Opts {
     output: Option<String>,
     /// `--native --from-sir FILE`: the input is a serialised SIR program.
     from_sir: bool,
+    /// `--native --from-lir FILE`: the input is a LIR program, stage 2's
+    /// lowering of one (decision 274).
+    from_lir: bool,
     /// `--native --release`: the native backend's release profile (09,
     /// decision 232).
     release: bool,
@@ -582,7 +586,7 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                     && !(matches!(*k, "--output" | "--contracts")
                         && cmd == "build"
                         && p.flags.contains(&"--native"))
-                    && !(*k == "--from-sir" && cmd == "build")
+                    && !(matches!(*k, "--from-sir" | "--from-lir") && cmd == "build")
                     && !(*k == "--features" && matches!(cmd.as_str(), "check" | "build"))
             }) {
                 host.stderr(&plain_error(
@@ -613,6 +617,7 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
             let mut diary = None;
             let mut output = None;
             let mut from_sir = None;
+            let mut from_lir = None;
             // `--features a,b` (09, decision 250), given any number of times.
             let mut features = crate::package::FeatureRequest {
                 names: Vec::new(),
@@ -651,6 +656,10 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                     }
                     "--from-sir" if matches!(cmd.as_str(), "run" | "build") => {
                         from_sir = Some(*v);
+                        continue;
+                    }
+                    "--from-lir" if matches!(cmd.as_str(), "run" | "build") => {
+                        from_lir = Some(*v);
                         continue;
                     }
                     "--features" => {
@@ -766,6 +775,12 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                 host.stderr(&plain_error(msg::NATIVE_FROM_SIR, &[]));
                 return EXIT_USAGE;
             }
+            // `--from-lir FILE` reads a LIR program, which only the native
+            // backend compiles (decision 274).
+            if from_lir.is_some() && !p.flags.contains(&"--native") {
+                host.stderr(&plain_error(msg::NATIVE_FROM_LIR, &[]));
+                return EXIT_USAGE;
+            }
             // `--release` is the native backend's release profile (09,
             // decision 232); the interpreter has no profiles.
             let release = p.flags.contains(&"--release");
@@ -773,7 +788,7 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                 host.stderr(&plain_error(msg::NATIVE_RELEASE, &[]));
                 return EXIT_USAGE;
             }
-            let (target, program_args) = match from_sir {
+            let (target, program_args) = match from_sir.or(from_lir) {
                 Some(f) => (Some(f), p.file.map(str::to_string).into_iter().chain(p.rest.clone()).collect()),
                 None => (p.file, p.rest.clone()),
             };
@@ -788,7 +803,8 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                 }
                 Vec::new()
             } else {
-                match inputs_for(cmd, target, locked, has_ids(&p.flags), from_sir.is_some(), &features, host)
+                let file_level = from_sir.is_some() || from_lir.is_some();
+                match inputs_for(cmd, target, locked, has_ids(&p.flags), file_level, &features, host)
                 {
                     Ok(i) => i,
                     Err(code) => return code,
@@ -870,6 +886,7 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                 diary,
                 output,
                 from_sir: from_sir.is_some(),
+                from_lir: from_lir.is_some(),
                 release,
                 contracts_given,
             };
@@ -971,7 +988,7 @@ fn from_sir(
             Some(o) => std::path::PathBuf::from(o),
             None => crate::native::output_for(&input.disk, None, None, profile),
         };
-        return crate::native::build_command(&prog, &output, profile, host);
+        return crate::native::build_command(crate::native::Code::Sir(&prog), &output, profile, host);
     }
     let name = input.disk.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let how = crate::native::Run {
@@ -981,7 +998,40 @@ fn from_sir(
         profile,
         keep: None,
     };
-    crate::native::run_command(&prog, &name, &args, &how, host)
+    crate::native::run_command(crate::native::Code::Sir(&prog), &name, &args, &how, host)
+}
+
+/// `sisu build --native --from-lir FILE` and `sisu run --native --from-lir
+/// FILE`: a LIR program, what stage 2's lowering writes (`sisu2 lir`),
+/// translated one to one into Cranelift IR and compiled as a program from
+/// its SIR is (decision 274). The executable is named by the file's stem.
+fn from_lir(
+    cmd: &str,
+    opts: &Opts,
+    input: &Input,
+    args: Vec<String>,
+    host: &mut dyn Host,
+    stage: &std::cell::Cell<&'static str>,
+) -> i32 {
+    stage.set("the native backend");
+    let profile = crate::native::Profile::of(sisu_codegen::lir_is_release(&input.source));
+    let code = crate::native::Code::Lir(&input.source);
+    if cmd == "build" {
+        let output = match &opts.output {
+            Some(o) => std::path::PathBuf::from(o),
+            None => crate::native::output_for(&input.disk, None, None, profile),
+        };
+        return crate::native::build_command(code, &output, profile, host);
+    }
+    let name = input.disk.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let how = crate::native::Run {
+        seed: opts.seeds.first,
+        explore: opts.seeds.explore,
+        stats: false,
+        profile,
+        keep: None,
+    };
+    crate::native::run_command(code, &name, &args, &how, host)
 }
 
 /// Whether stage 1 serves the command with these options (decision 268).
@@ -997,10 +1047,11 @@ fn stage1_serves(cmd: &str, p: &Parsed<'_>) -> bool {
     match cmd {
         "check" => !value("--diary"),
         "sir" | "tokens" => true,
-        "build" => !value("--from-sir"),
+        "build" => !value("--from-sir") && !value("--from-lir"),
         "run" => {
             !p.flags.iter().any(|f| matches!(*f, "--sir" | "--watch" | "--defer-borrow"))
                 && !value("--from-sir")
+                && !value("--from-lir")
                 && !value("--record")
         }
         "parse" => !p.flags.contains(&"--shape"),
@@ -1751,6 +1802,9 @@ fn command(
         (true, None) => sisu_lower::ContractLevel::Preconditions,
         (false, _) => opts.level,
     };
+    if opts.from_lir {
+        return from_lir(cmd, opts, input, args, host, stage);
+    }
     if opts.from_sir {
         return from_sir(cmd, flags, opts, input, args, host, stage);
     }
@@ -1962,7 +2016,7 @@ fn command(
                             profile,
                         ),
                     };
-                    crate::native::build_command(&prog, &output, profile, host)
+                    crate::native::build_command(crate::native::Code::Sir(&prog), &output, profile, host)
                 }
                 "build" => {
                     let line = match input.package.clone() {
@@ -2234,7 +2288,7 @@ fn command(
                                 })
                             }),
                         };
-                        return crate::native::run_command(&prog, &name, &args, &how, host);
+                        return crate::native::run_command(crate::native::Code::Sir(&prog), &name, &args, &how, host);
                     }
                     let options = Options {
                         monitor: defer || has("--monitor"),
@@ -3464,6 +3518,7 @@ fn replay(args: &[String], host: &mut dyn Host) -> i32 {
         diary: None,
         output: None,
         from_sir: false,
+        from_lir: false,
         release: false,
         contracts_given: true,
     };

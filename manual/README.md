@@ -83,7 +83,7 @@ division, complete a temperature conversion. Stage 0 runs all of it
 except `round_to`, for which the chapter uses `round()` and
 `truncate_to_int()` until it lands.
 
-**3. Functions.** `def` with typed parameters and a result type, the
+**3. Functions** ([written](tutorial/03-functions.md)). `def` with typed parameters and a result type, the
 rule that a value leaves only through `return` (D-056), functions that
 return nothing, default arguments evaluated at each call, keyword
 arguments, keyword-only `*` and positional-only `/` parameters, variadic
@@ -95,7 +95,7 @@ doc example must pass. Stage 0 runs all of it except variadic `*xs`
 parameters and `sisu check --holes`, which the chapter mentions as
 coming.
 
-**4. Control flow.** `if`, `elif` and `else`; `while`; `for` over
+**4. Control flow** ([written](tutorial/04-control-flow.md)). `if`, `elif` and `else`; `while`; `for` over
 `range` (with a step) and over lists; `enumerate`; `break` and
 `continue`; `match` on values with literal patterns, `|`, guards and `_`;
 `pass`; and what Sisu leaves out (no `switch`, `do-while`, C-style
@@ -104,7 +104,7 @@ Exercises: FizzBuzz written as a function returning a `String`, a
 Collatz step count, a fix exercise built on a loop `else` from Python.
 Stage 0 runs all of it.
 
-**5. Collections.** `list` (literals, `push`, indexing, `xs[^1]` for the
+**5. Collections** ([written](tutorial/05-collections.md)). `list` (literals, `push`, indexing, `xs[^1]` for the
 last element and the compile error for `xs[-1]`, slices), `dict`
 (literals, lookups, insertion-order iteration, `entry(k).or_insert(0) +=
 1`), `set`, tuples and star unpacking, `in`, list, dict and set
@@ -820,7 +820,7 @@ solutions and passing checks.
 | Step | Pages | Estimate |
 |---|---|---|
 | 1 | Chapter 1, this plan, [STYLE.md](STYLE.md), `tools/check.py` | done |
-| 2 | Chapters 2 (done), 3 (2), 4 (1.5) | 3.5 |
+| 2 | Chapters 2, 3 and 4 | done |
 | 3 | R16 the `sisu` command (2), R17 diagnostics, first codes (2), R1 lexical structure (2) | 6 |
 | 4 | Chapters 5 (2.5), 6 (2), 7 (2.5), 8 (3) | 10 |
 | 5 | Chapter 9 with challenge I (3); G2 Coming from Python (1); R19 false friends (1) | 5 |
@@ -875,6 +875,34 @@ Writing the rest of Part I turned up more, by chapter:
   the line does not have. A bug: `+%=` and `+|=` on a `u8` work at the
   width of `int`, so `level +%= 10` on a `u8` holding 250 leaves 260 in
   it, where `level = level +% 10` gives 4.
+- Chapter 3. A keyword-only argument passed by position,
+  `url("example.org", 443)`, gets E0305 counting only the positional
+  parameters, with no word that `port` is keyword-only. A positional-only
+  parameter passed by name gets E0306 ("has no parameter named
+  `value`") and E0308, whose fix adds `value=todo("value")`, the same
+  mistake again. A misspelt keyword, `prot=443`, gets E0306 without the
+  similar-name fix that E0200 has. A variadic parameter (`*prices: int`)
+  stops stage 1 with "beyond the slice: beyond the type checker's slice:
+  variadic parameters", a message with no code.
+- Chapter 4. `switch day:` gets E0117 ("unexpected `day` after the end
+  of the statement") and `i++` gets E0103, neither pointing at `match`
+  or `i += 1`. An assignment to a parameter, `n //= 2`, gets E0312,
+  whose message says to declare it with `var` and whose fix makes the
+  parameter `mut`, which changes every call; the fix a beginner wants,
+  a local `var value = n`, is not offered.
+- Chapter 5. `max(scores)` gets E0308 ("missing the argument `b` of
+  `max`") with a fix that adds a hole: stage 0's `max` and `min` compare
+  two values, and Python's form over a collection, which the prelude
+  list of [02](../proposal/02-syntax.md) suggests, is missing. `^` in a
+  slice bound, `xs[:^1]`, gets E0383 in both front ends, though 02
+  gives `a[i:^1]`. `[p for p in zip([1, 2], ["a", "b"])]` gets E0406
+  ("does not live long enough") for the two temporary lists, whose
+  borrow ends inside the statement. `var in_order = readings`, with
+  `readings` a borrowed `list[int]` parameter, followed by
+  `in_order.sort()`, gets E0341 ("not declared with `var`"), though it
+  is; the binding holds a borrow, and `.copy()` is not offered. A test
+  name is interpolated, so `test "len({3, 1})":` gets E0103, and an
+  escaped quote in a test name gets E0005.
 
 Planning the later chapters turned up the parts of the proposal that
 they teach and stage 0 does not run yet, each named in its chapter's

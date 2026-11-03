@@ -1,0 +1,9 @@
+#!/usr/bin/env sisu
+# `in` asks whether a collection holds a value.
+let primes = [2, 3, 5, 7]
+5 in primes
+4 in primes
+4 not in primes
+let ages = {"Aino": 34, "Eero": 29}
+"Aino" in ages
+"in" in "Aino"

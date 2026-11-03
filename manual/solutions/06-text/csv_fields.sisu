@@ -1,0 +1,33 @@
+##! Exercise 6.4, a CSV line: the solution.
+##!
+##! The loop goes through the characters once and remembers whether it
+##! is inside quotes. A comma outside quotes ends a field, a quote
+##! changes the state and is not kept, and the field after the last
+##! comma ends with the line.
+
+## The fields of `line`, each without the spaces around it.
+def csv_fields(line: str) -> list[String]:
+    var fields: list[String] = []
+    var field = String()
+    var in_quotes = False
+    for c in line.chars():
+        if c == '"':
+            in_quotes = not in_quotes
+        elif c == ',' and not in_quotes:
+            fields.push(field.trim().to_string())
+            field = String()
+        else:
+            field.push_char(c)
+    fields.push(field.trim().to_string())
+    return fields
+
+test "plain fields":
+    assert csv_fields("a,b,c") == ["a", "b", "c"]
+    assert csv_fields(" Oulu , 214000 ") == ["Oulu", "214000"]
+
+test "an empty field":
+    assert csv_fields("a,,b") == ["a", "", "b"]
+
+test "a comma inside quotes":
+    let fields = csv_fields("\"Oulu, Finland\",214000")
+    assert fields == ["Oulu, Finland", "214000"]

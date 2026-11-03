@@ -1,0 +1,10 @@
+# `chars()` goes through the characters, and `bytes()` the bytes.
+def main():
+    let word = "Äiti"
+    print("{len(word)} characters, {word.byte_len()} bytes")
+    for c in word.chars():
+        print("{c}: code {c.code()}, alphabetic {c.is_alphabetic()}")
+    var total = 0
+    for b in word.bytes():
+        total += b.to_int()
+    print("the bytes add up to {total}")

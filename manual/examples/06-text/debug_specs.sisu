@@ -1,0 +1,7 @@
+# `{x:?}` shows a value the way it is written in code.
+def main():
+    let name = "Aino"
+    let initial = 'A'
+    print("{name} {initial}")
+    print("{name:?} {initial:?}")
+    print("{name=} {["Aino", "Eero"]}")

@@ -89,6 +89,21 @@ pub(crate) fn compile(isa: &dyn TargetIsa, ctx: &mut Context, id: FuncId) -> Res
     })
 }
 
+/// `SISU_NATIVE_CLIF=DIR`: each function's Cranelift IR, as it is handed
+/// to be compiled, written to `DIR/N.clif` (`N` counting the functions in
+/// the order they are defined), to compare what two ways of writing the IR
+/// make (the backend from SIR, the translation of LIR, decision 273).
+pub(crate) fn dump_clif(func: &ir::Function) {
+    static DIR: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+    static COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let Some(dir) = DIR.get_or_init(|| std::env::var_os("SISU_NATIVE_CLIF").map(std::path::PathBuf::from)) else {
+        return;
+    };
+    let n = COUNT.fetch_add(1, Ordering::Relaxed);
+    let _ = std::fs::create_dir_all(dir);
+    let _ = std::fs::write(dir.join(format!("{n:05}.clif")), func.display().to_string());
+}
+
 /// How many threads compile: as many as the machine runs at once, at most
 /// 8; one means the code generator compiles each function itself.
 pub(crate) fn count() -> usize {

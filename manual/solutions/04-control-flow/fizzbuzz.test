@@ -1,0 +1,5 @@
+test "plain numbers" ... ok
+test "multiples of three or five" ... ok
+test "multiples of fifteen" ... ok
+test "a line of words" ... ok
+4 passed, 0 failed, 0 blocked

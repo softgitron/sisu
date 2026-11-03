@@ -1,0 +1,9 @@
+# Raw, multi-line and byte literals.
+def main():
+    let folder = r"C:\new\temp"
+    print(folder)
+    let poem = """Tuuli tuli,
+ja tuuli meni."""
+    print(poem)
+    let magic = b"PNG"
+    print("{magic:?} has {len(magic)} bytes")

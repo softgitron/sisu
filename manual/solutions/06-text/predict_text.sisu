@@ -1,0 +1,28 @@
+##! Exercise 6.1, predict the text: the solution.
+##!
+##! `len` counts characters, four in "Äiti", while `byte_len` counts
+##! the bytes of the UTF-8 encoding, in which Ä takes two. Splitting at
+##! three commas gives four pieces, one of them empty. `03` pads to a
+##! width of three with zeros. `e` comes four letters after `a`, and
+##! their codes are 101 and 97.
+
+const LETTERS: int = 4
+const BYTES: int = 5
+const PIECES: int = 4
+const PADDED: str = "007"
+const DISTANCE: int = 4
+
+test "len of a Finnish word":
+    assert len("Äiti") == LETTERS
+
+test "the bytes of the same word":
+    assert "Äiti".byte_len() == BYTES
+
+test "splitting at every comma":
+    assert len([piece for piece in "a,b,,c".split(",")]) == PIECES
+
+test "a width with zeros":
+    assert "{7:03}" == PADDED
+
+test "codes of characters":
+    assert 'e'.code() - 'a'.code() == DISTANCE

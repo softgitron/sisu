@@ -1,0 +1,9 @@
+# A `str` parameter accepts a literal and a `String` alike.
+def shout(text: str) -> String:
+    return "{text.to_uppercase()}!"
+
+def main():
+    let literal = "hei"
+    let built = "hei, {"Aino"}"
+    print(shout(literal))
+    print(shout(built))

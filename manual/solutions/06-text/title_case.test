@@ -1,0 +1,5 @@
+test "two words" ... ok
+test "capitals in the middle" ... ok
+test "letters with dots and extra spaces" ... ok
+test "no words" ... ok
+4 passed, 0 failed, 0 blocked

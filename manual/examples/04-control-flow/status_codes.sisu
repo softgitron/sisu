@@ -1,0 +1,17 @@
+# `match` compares a value with patterns, from the top.
+def explain(code: int) -> str:
+    match code:
+        case 200:
+            return "OK"
+        case 301 | 302:
+            return "moved"
+        case 404:
+            return "not found"
+        case _ if code >= 500:
+            return "a server error"
+        case _:
+            return "something else"
+
+def main():
+    for code in [200, 302, 404, 503, 418]:
+        print("{code}: {explain(code)}")

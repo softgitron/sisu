@@ -1,0 +1,8 @@
+$ sisu test vowels.sisu
+error[E0325]: a `for` loop cannot iterate over `String`
+  --> vowels.sisu:14:19
+   |
+14 |     for letter in word.to_lowercase():
+   |                   ^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

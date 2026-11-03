@@ -1,0 +1,29 @@
+##! Exercise 4.2, prime or not. Kind: fix. Level: 1.
+##!
+##! `describe` was ported from Python's tutorial, which uses an `else`
+##! on its `for` loop: the `else` block runs when the loop ends without
+##! a `break`. Sisu has no `else` on loops, so the file does not
+##! compile. Rewrite `describe` without one, so that every test passes.
+##! Run the tests with `sisu test prime_or_not.sisu`. The hints are in
+##! chapter 4 of the tutorial, under "Exercise 4.2: prime or not".
+
+## "N is prime", or "N = A * B" where A is the smallest factor of `n`
+## above 1. `n` is 2 or more.
+def describe(n: int) -> String:
+    var text = String()
+    for d in range(2, n):
+        if n % d == 0:
+            text = "{n} = {d} * {n // d}"
+            break
+    else:
+        text = "{n} is prime"
+    return text
+
+test "primes":
+    assert describe(2) == "2 is prime"
+    assert describe(7) == "7 is prime"
+    assert describe(97) == "97 is prime"
+
+test "numbers with factors":
+    assert describe(9) == "9 = 3 * 3"
+    assert describe(12) == "12 = 2 * 6"

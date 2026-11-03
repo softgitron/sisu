@@ -1,0 +1,5 @@
+# An index past the end stops the program.
+def main():
+    let shopping = ["milk", "rye bread", "cloudberries"]
+    let wanted = 3
+    print("number {wanted} is {shopping[wanted]}")

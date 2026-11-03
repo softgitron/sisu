@@ -1,0 +1,2 @@
+4:19-4:67 E0115 parse.python-conditional
+  fix parse.use-if-expression 4:19-4:67 "if temperature < 0: \"a warm coat\" else: \"a jacket\""

@@ -1,0 +1,9 @@
+$ sisu run max_of_list.sisu
+error[E0308]: missing the argument `b` of `max`
+  --> max_of_list.sisu:4:19
+  |
+4 |     print("best: {max(scores)}")
+  |                   ^^^^^^^^^^^
+  = fix: pass `b` as a hole to fill: `, todo("b")`
+
+error[D0006]: the program was not run: errors found (1)

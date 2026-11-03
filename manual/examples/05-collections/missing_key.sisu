@@ -1,0 +1,4 @@
+# Looking up a key that is not there stops the program.
+def main():
+    let ages = {"Aino": 34, "Eero": 29}
+    print("Liisa is {ages["Liisa"]}")

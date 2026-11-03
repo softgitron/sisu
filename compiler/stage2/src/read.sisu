@@ -1,0 +1,1083 @@
+##! The serialised SIR read back (stage 0's `sisu-sir/src/read.rs`;
+##! docs/architecture.md, "SIR", "The text form"): a line-oriented reader
+##! with a cursor per line, every error naming its line. Stage 1 writes the
+##! form (`stage1.sir.write`) but has no reader of it, so this one is
+##! stage 2's. Reading what `sisu sir` printed gives a program that writes
+##! the same bytes again.
+
+from stage1.sir import (
+    Aggregate,
+    BasicBlock,
+    BinOp,
+    BlockId,
+    Callee,
+    ClosureRole,
+    Const,
+    ConstOp,
+    Entry,
+    FieldDecl,
+    FnKind,
+    Function,
+    ImplDecl,
+    ImplTarget,
+    IntrinsicDecl,
+    LocalDecl,
+    LocalId,
+    Loc,
+    Operand,
+    Place,
+    Program,
+    Proj,
+    Rvalue,
+    Statement,
+    StatementKind,
+    Terminator,
+    Type,
+    TypeDecl,
+    UnOp,
+    VariantDecl,
+    VERSION,
+)
+
+## Why the text is not SIR: the line (from 1) and what was wrong there.
+pub error ReadError:
+    Bad(line: int, message: String)
+
+## Why a line could not be read.
+error LineError:
+    Wrong(message: String)
+
+## A cursor over one line of the text: the bytes from `pos` up to `end`.
+view struct Cur:
+    s: str
+    pos: int
+    end: int
+
+pure def wrong[T](message: str) -> T ! LineError:
+    return Err(Wrong(message=message.to_string()))
+
+pure def is_digit(b: int) -> bool:
+    return b >= 48 and b <= 57
+
+pure def is_hex(b: int) -> bool:
+    return is_digit(b) or (b >= 97 and b <= 102) or (b >= 65 and b <= 70)
+
+## A byte that may be part of a name: a letter, a digit, `_`, or a byte
+## of a character beyond ASCII (Rust's `is_alphanumeric` holds for the
+## letters among them, which are all a name may hold).
+pure def is_word(b: int) -> bool:
+    return (
+        is_digit(b) or (b >= 97 and b <= 122) or (b >= 65 and b <= 90) or b == 95 or b >= 128
+    )
+
+impl Cur:
+    pure def byte(self, i: int) -> int:
+        return self.s.byte_at(i).to_int()
+
+    pure def rest(self) -> str from self:
+        return self.s.byte_slice(self.pos, self.end)
+
+    pure def ws(mut self):
+        while self.pos < self.end and self.byte(self.pos) == 32:
+            self.pos += 1
+
+    pure def at_end(mut self) -> bool:
+        self.ws()
+        return self.pos >= self.end
+
+    pure def starts(self, t: str) -> bool:
+        let n = t.byte_len()
+        if self.pos + n > self.end:
+            return False
+        for i in range(n):
+            if self.byte(self.pos + i) != t.byte_at(i).to_int():
+                return False
+        return True
+
+    pure def eat(mut self, t: str) -> bool:
+        self.ws()
+        if self.starts(t):
+            self.pos += t.byte_len()
+            return True
+        return False
+
+    pure def expect(mut self, t: str) -> () ! LineError:
+        if self.eat(t):
+            return Ok(())
+        return wrong("expected `{t}` at `{self.rest()}`")
+
+    pure def take_name(mut self, dots: bool, hashes: bool) -> str from self:
+        self.ws()
+        let start = self.pos
+        while self.pos < self.end:
+            let b = self.byte(self.pos)
+            if is_word(b) or (dots and b == 46) or (hashes and b == 35):
+                self.pos += 1
+            else:
+                break
+        return self.s.byte_slice(start, self.pos)
+
+    ## A function, type or intrinsic name.
+    pure def name(mut self) -> String ! LineError:
+        let n = self.take_name(True, True)
+        if n.is_empty():
+            return wrong("expected a name at `{self.rest()}`")
+        return Ok(n.to_string())
+
+    pure def type_name(mut self) -> String ! LineError:
+        let n = self.take_name(True, False)
+        if n.is_empty():
+            return wrong("expected a type name at `{self.rest()}`")
+        return Ok(n.to_string())
+
+    pure def int(mut self) -> int ! LineError:
+        self.ws()
+        let start = self.pos
+        var negative = False
+        if self.pos < self.end and self.byte(self.pos) == 45:
+            negative = True
+            self.pos += 1
+        let digits = self.pos
+        # Accumulated negatively, so that the least `int` fits.
+        var n = 0
+        while self.pos < self.end and is_digit(self.byte(self.pos)):
+            let d = self.byte(self.pos) - 48
+            if n < (-9223372036854775807 - 1 + d) // 10:
+                return wrong("expected an integer at `{self.s.byte_slice(start, self.end)}`")
+            n = n * 10 - d
+            self.pos += 1
+        if self.pos == digits:
+            return wrong("expected an integer at `{self.s.byte_slice(start, self.end)}`")
+        if negative:
+            return Ok(n)
+        if n == -9223372036854775807 - 1:
+            return wrong("expected an integer at `{self.s.byte_slice(start, self.end)}`")
+        return Ok(-n)
+
+    pure def uint(mut self) -> int ! LineError:
+        let n = self.int()?
+        if n < 0 or n > 4294967295:
+            return wrong("expected a small non-negative integer, found {n}")
+        return Ok(n)
+
+    pure def string(mut self) -> String ! LineError:
+        self.expect("\"")?
+        var out = String.new()
+        var start = self.pos
+        while True:
+            if self.pos >= self.end:
+                return wrong("unterminated string")
+            let b = self.byte(self.pos)
+            if b == 34:
+                out.push(self.s.byte_slice(start, self.pos))
+                self.pos += 1
+                return Ok(out)
+            if b == 92:
+                out.push(self.s.byte_slice(start, self.pos))
+                self.pos += 1
+                out.push_char(self.escape()?)
+                start = self.pos
+            else:
+                self.pos += 1
+
+    pure def escape(mut self) -> char ! LineError:
+        if self.pos >= self.end:
+            return wrong("bad escape")
+        let b = self.byte(self.pos)
+        self.pos += 1
+        match b:
+            case 110:
+                return Ok('\n')
+            case 116:
+                return Ok('\t')
+            case 114:
+                return Ok('\r')
+            case 48:
+                return Ok('\0')
+            case 92:
+                return Ok('\\')
+            case 34:
+                return Ok('"')
+            case 39:
+                return Ok('\'')
+            case 117:
+                self.expect("{{")?
+                var code = 0
+                var digits = 0
+                while self.pos < self.end and is_hex(self.byte(self.pos)):
+                    let h = self.byte(self.pos)
+                    var d = h - 48
+                    if h >= 97:
+                        d = h - 87
+                    elif h >= 65:
+                        d = h - 55
+                    if digits < 8:
+                        code = code * 16 + d
+                    digits += 1
+                    self.pos += 1
+                self.expect("}}")?
+                let Some(c) = char.from_code(code) else:
+                    return wrong("bad unicode escape")
+                if digits == 0 or digits > 8:
+                    return wrong("bad unicode escape")
+                return Ok(c)
+            case _:
+                return wrong("unknown escape `\\{self.s.byte_slice(self.pos - 1, self.pos)}`")
+
+    pure def char_lit(mut self) -> char ! LineError:
+        self.expect("'")?
+        if self.pos >= self.end:
+            return wrong("bad char")
+        var c = '\0'
+        if self.byte(self.pos) == 92:
+            self.pos += 1
+            c = self.escape()?
+        else:
+            # One character: its UTF-8 bytes.
+            let lead = self.byte(self.pos)
+            var n = 1
+            if lead >= 240:
+                n = 4
+            elif lead >= 224:
+                n = 3
+            elif lead >= 192:
+                n = 2
+            if self.pos + n > self.end:
+                return wrong("bad char")
+            let text = self.s.byte_slice(self.pos, self.pos + n)
+            self.pos += n
+            for ch in text.chars():
+                c = ch
+        if self.pos >= self.end or self.byte(self.pos) != 39:
+            return wrong("unterminated char")
+        self.pos += 1
+        return Ok(c)
+
+    pure def local(mut self) -> LocalId ! LineError:
+        self.expect("_")?
+        return Ok(LocalId(index=self.uint()?))
+
+    ## ` word 0 1 2`: indices after a keyword, if the keyword is next.
+    pure def indices(mut self, word: str) -> list[int] ! LineError:
+        var out: list[int] = []
+        let save = self.pos
+        if not self.eat(word):
+            return Ok(out)
+        if self.pos >= self.end or self.byte(self.pos) != 32:
+            self.pos = save
+            return Ok(out)
+        while True:
+            self.ws()
+            if self.pos >= self.end or not is_digit(self.byte(self.pos)):
+                break
+            out.push(self.uint()?)
+        return Ok(out)
+
+    pure def block_id(mut self) -> BlockId ! LineError:
+        self.expect("bb")?
+        return Ok(BlockId(index=self.uint()?))
+
+    ## `[A, B]` if next, else nothing.
+    pure def type_args(mut self) -> list[Type] ! LineError:
+        var args: list[Type] = []
+        if self.pos < self.end and self.byte(self.pos) == 91:
+            self.pos += 1
+            while True:
+                args.push(self.ty()?)
+                if self.eat("]"):
+                    break
+                self.expect(",")?
+        return Ok(args)
+
+    ## `[T, U]` after a declaration's name, if next.
+    pure def param_names(mut self) -> list[String] ! LineError:
+        var out: list[String] = []
+        if self.pos < self.end and self.byte(self.pos) == 91:
+            self.pos += 1
+            while True:
+                out.push(self.type_name()?)
+                if self.eat("]"):
+                    break
+                self.expect(",")?
+        return Ok(out)
+
+    pure def ty(mut self) -> Type ! LineError:
+        self.ws()
+        if self.eat("()"):
+            return Ok(Type.Unit)
+        if self.eat("$"):
+            return Ok(Type.Param(self.uint()?))
+        if self.pos < self.end and (is_digit(self.byte(self.pos)) or self.byte(self.pos) == 45):
+            return Ok(Type.Const(self.int()?))
+        if self.eat("dyn "):
+            let n = self.type_name()?
+            let args = self.type_args()?
+            return Ok(Type.Dyn(name=n, args=args))
+        if self.eat("<"):
+            let t = self.ty()?
+            self.expect("as ")?
+            let tr = self.type_name()?
+            let args = self.type_args()?
+            self.expect(">.")?
+            let n = self.type_name()?
+            return Ok(Type.Assoc(self_ty=[t], trait_=tr, args=args, name=n))
+        if self.eat("ref mut "):
+            return Ok(Type.Ref(inner=[self.ty()?], mutable=True))
+        if self.eat("ref "):
+            return Ok(Type.Ref(inner=[self.ty()?], mutable=False))
+        let pure = self.eat("pure fn(")
+        if pure or self.eat("fn("):
+            var ps: list[Type] = []
+            if not self.eat(")"):
+                while True:
+                    ps.push(self.ty()?)
+                    if self.eat(")"):
+                        break
+                    self.expect(",")?
+            self.expect("->")?
+            return Ok(Type.Fn(params=ps, ret=[self.ty()?], pure=pure))
+        if self.eat("("):
+            var es: list[Type] = []
+            while True:
+                es.push(self.ty()?)
+                if self.eat(")"):
+                    break
+                self.expect(",")?
+                if self.eat(")"):
+                    break
+            return Ok(Type.Tuple(es))
+        if self.eat("{{"):
+            var ms: list[String] = []
+            if not self.eat("}}"):
+                while True:
+                    ms.push(self.type_name()?)
+                    if self.eat("}}"):
+                        break
+                    self.expect(",")?
+            return Ok(Type.ErrSet(ms))
+        let n = self.type_name()?
+        # A constant operation, `mul($1, $2)`: no type name is followed by
+        # `(`.
+        if let Some(op) = ConstOp.from_name(n):
+            if self.eat("("):
+                var args: list[Type] = []
+                while True:
+                    args.push(self.ty()?)
+                    if self.eat(")"):
+                        break
+                    self.expect(",")?
+                return Ok(Type.ConstOp(op=op, args=args))
+        if n == "int":
+            return Ok(Type.Int)
+        if n == "f64":
+            return Ok(Type.Float)
+        if n == "bool":
+            return Ok(Type.Bool)
+        if n == "char":
+            return Ok(Type.Char)
+        if n == "str":
+            return Ok(Type.Str)
+        if n == "Never":
+            return Ok(Type.Never)
+        let args = self.type_args()?
+        return Ok(Type.Named(name=n, args=args))
+
+    pure def place(mut self) -> Place ! LineError:
+        let local = self.local()?
+        var proj: list[Proj] = []
+        while True:
+            if self.starts(".*"):
+                self.pos += 2
+                proj.push(Proj.Deref)
+            elif self.starts(".as("):
+                self.pos += 4
+                let v = self.uint()?
+                self.expect(")")?
+                proj.push(Proj.Downcast(v))
+            elif self.starts(".") and self.pos + 1 < self.end and is_digit(self.byte(self.pos + 1)):
+                self.pos += 1
+                proj.push(Proj.Field(self.uint()?))
+            elif self.starts("[^"):
+                self.pos += 2
+                let l = self.local()?
+                self.expect("]")?
+                proj.push(Proj.IndexFromEnd(l))
+            elif self.starts("["):
+                self.pos += 1
+                let l = self.local()?
+                self.expect("]")?
+                proj.push(Proj.Index(l))
+            elif self.starts("{{"):
+                self.pos += 1
+                let l = self.local()?
+                self.expect("}}")?
+                proj.push(Proj.Key(l))
+            else:
+                break
+        return Ok(Place(local=local, proj=proj))
+
+    pure def constant(mut self) -> Const ! LineError:
+        self.ws()
+        if self.starts("\""):
+            return Ok(Const.Str(self.string()?))
+        if self.starts("'"):
+            return Ok(Const.Char(self.char_lit()?))
+        if self.eat("()"):
+            return Ok(Const.Unit)
+        if self.eat("true"):
+            return Ok(Const.Bool(True))
+        if self.eat("false"):
+            return Ok(Const.Bool(False))
+        if self.eat("fn "):
+            return Ok(Const.Fn(self.name()?))
+        if self.eat("nan"):
+            let zero = 0.0
+            return Ok(Const.Float(zero / zero))
+        if self.eat("inf"):
+            return Ok(Const.Float(1.0 / 0.0))
+        if self.eat("-inf"):
+            return Ok(Const.Float(-1.0 / 0.0))
+        let start = self.pos
+        var float = False
+        while self.pos < self.end:
+            let b = self.byte(self.pos)
+            if is_digit(b) or b == 45 or b == 43:
+                self.pos += 1
+            elif b == 46 or b == 101 or b == 69:
+                float = True
+                self.pos += 1
+            else:
+                break
+        let num = self.s.byte_slice(start, self.pos)
+        if float:
+            let Some(f) = num.parse_float() else:
+                return wrong("bad float `{num}`")
+            return Ok(Const.Float(f))
+        var c = Cur(s=num, pos=0, end=num.byte_len())
+        match c.int():
+            case Ok(n):
+                if c.pos == c.end:
+                    return Ok(Const.Int(n))
+            case Err(_):
+                pass
+        return wrong("bad constant `{num}`")
+
+    pure def operand(mut self) -> Operand ! LineError:
+        if self.eat("copy "):
+            return Ok(Operand.Copy(self.place()?))
+        if self.eat("move "):
+            return Ok(Operand.Move(self.place()?))
+        if self.eat("const "):
+            return Ok(Operand.Const(self.constant()?))
+        return wrong("expected an operand at `{self.rest()}`")
+
+    pure def operands(mut self) -> list[Operand] ! LineError:
+        self.expect("(")?
+        var out: list[Operand] = []
+        if self.eat(")"):
+            return Ok(out)
+        while True:
+            out.push(self.operand()?)
+            if self.eat(")"):
+                return Ok(out)
+            self.expect(",")?
+
+    pure def rvalue(mut self) -> Rvalue ! LineError:
+        self.ws()
+        if self.starts("copy ") or self.starts("move ") or self.starts("const "):
+            return Ok(Rvalue.Use(self.operand()?))
+        if self.eat("ref mut "):
+            return Ok(Rvalue.Ref(place=self.place()?, mutable=True))
+        if self.eat("ref "):
+            return Ok(Rvalue.Ref(place=self.place()?, mutable=False))
+        if self.eat("tuple"):
+            return Ok(Rvalue.Aggregate(kind=Aggregate.Tuple, operands=self.operands()?))
+        if self.eat("struct "):
+            let n = self.type_name()?
+            return Ok(Rvalue.Aggregate(kind=Aggregate.Struct(n), operands=self.operands()?))
+        if self.eat("variant "):
+            # The type's name runs to `::`.
+            let start = self.pos
+            var at = start
+            while at + 1 < self.end and not (self.byte(at) == 58 and self.byte(at + 1) == 58):
+                at += 1
+            if at + 1 >= self.end:
+                return wrong("expected `::` in a variant")
+            let t = self.s.byte_slice(start, at).to_string()
+            self.pos = at + 2
+            let v = self.name()?
+            return Ok(Rvalue.Aggregate(kind=Aggregate.Variant(t, v), operands=self.operands()?))
+        if self.eat("list"):
+            return Ok(Rvalue.Aggregate(kind=Aggregate.List, operands=self.operands()?))
+        if self.eat("set"):
+            return Ok(Rvalue.Aggregate(kind=Aggregate.Set, operands=self.operands()?))
+        if self.eat("dict"):
+            return Ok(Rvalue.Aggregate(kind=Aggregate.Dict, operands=self.operands()?))
+        if self.eat("discriminant "):
+            return Ok(Rvalue.Discriminant(self.place()?))
+        if self.eat("closure "):
+            let n = self.name()?
+            let tys = self.type_args()?
+            return Ok(Rvalue.Closure(name=n, args=tys, operands=self.operands()?))
+        if self.eat("dyn "):
+            let t = self.ty()?
+            return Ok(Rvalue.Aggregate(kind=Aggregate.Dyn(t), operands=self.operands()?))
+        if self.eat("copyof "):
+            return Ok(Rvalue.CopyOf(self.place()?))
+        if self.eat("strview "):
+            return Ok(Rvalue.StrView(self.place()?))
+        self.ws()
+        let start = self.pos
+        while self.pos < self.end:
+            let b = self.byte(self.pos)
+            if is_digit(b) or (b >= 97 and b <= 122) or (b >= 65 and b <= 90):
+                self.pos += 1
+            else:
+                break
+        let word = self.s.byte_slice(start, self.pos)
+        if let Some(op) = bin_op(word):
+            let a = self.operand()?
+            self.expect(",")?
+            let b = self.operand()?
+            return Ok(Rvalue.Binary(op=op, lhs=a, rhs=b))
+        if let Some(op) = un_op(word):
+            return Ok(Rvalue.Unary(op=op, operand=self.operand()?))
+        return wrong("unknown rvalue `{word}`")
+
+pure def bin_op(n: str) -> BinOp?:
+    for op in [
+        BinOp.Add,
+        BinOp.Sub,
+        BinOp.Mul,
+        BinOp.Div,
+        BinOp.FloorDiv,
+        BinOp.Mod,
+        BinOp.Pow,
+        BinOp.WrapAdd,
+        BinOp.WrapSub,
+        BinOp.WrapMul,
+        BinOp.SatAdd,
+        BinOp.SatSub,
+        BinOp.SatMul,
+        BinOp.Shl,
+        BinOp.Shr,
+        BinOp.BitAnd,
+        BinOp.BitOr,
+        BinOp.BitXor,
+        BinOp.Concat,
+        BinOp.Eq,
+        BinOp.Ne,
+        BinOp.Lt,
+        BinOp.Le,
+        BinOp.Gt,
+        BinOp.Ge,
+        BinOp.In,
+    ]:
+        if op.name() == n:
+            return Some(op)
+    return None
+
+pure def un_op(n: str) -> UnOp?:
+    for op in [UnOp.Neg, UnOp.Not, UnOp.BitNot]:
+        if op.name() == n:
+            return Some(op)
+    return None
+
+## `L:C` as two numbers.
+pure def line_col(s: str, start: int, end: int) -> (int, int)?:
+    var colon = -1
+    for i in range(start, end):
+        if s.byte_at(i).to_int() == 58:
+            colon = i
+            break
+    if colon <= start or colon + 1 >= end:
+        return None
+    var l = 0
+    for i in range(start, colon):
+        let b = s.byte_at(i).to_int()
+        if not is_digit(b) or l > 100000000:
+            return None
+        l = l * 10 + b - 48
+    var c = 0
+    for i in range(colon + 1, end):
+        let b = s.byte_at(i).to_int()
+        if not is_digit(b) or c > 100000000:
+            return None
+        c = c * 10 + b - 48
+    return Some((l, c))
+
+## Where a trailing ` @L:C` or ` @L:C-L:C` starts in the line `s[start..end]`,
+## and the location; `end` and none when there is no such tail.
+pure def split_loc(s: str, start: int, end: int) -> (int, Loc?):
+    # The last ` @` of the line.
+    var i = end - 2
+    while i >= start:
+        if s.byte_at(i).to_int() == 32 and s.byte_at(i + 1).to_int() == 64:
+            break
+        i -= 1
+    if i < start:
+        return (end, None)
+    let tail = i + 2
+    var dash = -1
+    for k in range(tail, end):
+        if s.byte_at(k).to_int() == 45:
+            dash = k
+            break
+    let start_end = if dash >= 0: dash else: end
+    let Some((l, c)) = line_col(s, tail, start_end) else:
+        return (end, None)
+    if dash < 0:
+        return (i, Some(Loc.point(l, c)))
+    let Some((el, ec)) = line_col(s, dash + 1, end) else:
+        return (end, None)
+    return (i, Some(Loc(line=l, col=c, end_line=el, end_col=ec)))
+
+## The program the text spells.
+pub pure def read(text: str) -> Program ! ReadError:
+    var p = Program(
+        sources=[],
+        entry=None,
+        types=[],
+        intrinsics=[],
+        functions=[],
+        tests=[],
+        trait_methods=[],
+        impls=[],
+    )
+    var seen_header = False
+    var pos = 0
+    var line_no = 0
+    let n = text.byte_len()
+    while pos < n:
+        let (start, end, next) = line_at(text, pos)
+        pos = next
+        line_no += 1
+        let (s, e) = trimmed(text, start, end)
+        if s == e or text.byte_at(s).to_int() == 35:
+            continue
+        if starts_at(text, s, e, "fn "):
+            let (f, after, lines) = read_function(text, s, e, pos, line_no)?
+            p.functions.push(f)
+            pos = after
+            line_no = lines
+            continue
+        var c = Cur(s=text, pos=s, end=e)
+        let header = c.eat("sir ")
+        let r = header_line(mut c, mut p, text, s, e, header)
+        if let Err(Wrong(message)) = r:
+            return Err(Bad(line=line_no, message=message.copy()))
+        if header:
+            seen_header = True
+    if not seen_header:
+        return Err(Bad(line=1, message="missing `sir 0` header".to_string()))
+    return Ok(p)
+
+## The line starting at `pos`: its start, its end (before the line
+## break) and where the next starts.
+pure def line_at(text: str, pos: int) -> (int, int, int):
+    let n = text.byte_len()
+    var i = pos
+    while i < n and text.byte_at(i).to_int() != 10:
+        i += 1
+    var end = i
+    if end > pos and text.byte_at(end - 1).to_int() == 13:
+        end -= 1
+    return (pos, end, if i < n: i + 1 else: n)
+
+## The part of `text[start..end]` without spaces at either end.
+pure def trimmed(text: str, start: int, end: int) -> (int, int):
+    var s = start
+    var e = end
+    while s < e and is_space(text.byte_at(s).to_int()):
+        s += 1
+    while e > s and is_space(text.byte_at(e - 1).to_int()):
+        e -= 1
+    return (s, e)
+
+pure def is_space(b: int) -> bool:
+    return b == 32 or b == 9 or b == 13 or b == 11 or b == 12
+
+pure def starts_at(text: str, s: int, e: int, t: str) -> bool:
+    let n = t.byte_len()
+    if s + n > e:
+        return False
+    for i in range(n):
+        if text.byte_at(s + i) != t.byte_at(i):
+            return False
+    return True
+
+## A line before the functions: the header, a source, the entry, a test,
+## an intrinsic or a trait method, an impl, a struct or an enum.
+pure def header_line(mut c: Cur, mut p: Program, text: str, s: int, e: int, header: bool) -> () ! LineError:
+    if header:
+        let v = c.uint()?
+        if v != VERSION:
+            return wrong("SIR version {v} is not supported (this reader reads {VERSION})")
+        return Ok(())
+    if c.eat("source "):
+        let n = c.uint()?
+        let src = c.string()?
+        if n != len(p.sources):
+            return wrong("sources must be numbered in order")
+        p.sources.push(src)
+        return Ok(())
+    if c.eat("entry "):
+        let function = c.name()?
+        var entry = Entry(function=function, takes_system=False, returns_result=False)
+        while not c.at_end():
+            if c.eat("system"):
+                entry.takes_system = True
+            elif c.eat("result"):
+                entry.returns_result = True
+            else:
+                return wrong("unknown entry flag `{c.rest()}`")
+        p.entry = Some(entry)
+        return Ok(())
+    if c.eat("test "):
+        let name = c.string()?
+        let f = c.name()?
+        p.tests.push((name, f))
+        return Ok(())
+    let method = starts_at(text, s, e, "method ")
+    if c.eat("intrinsic ") or c.eat("method "):
+        let name = c.type_name()?
+        let pure = c.eat("pure")
+        let from_ = c.indices("from")?
+        let inner = c.indices("inner")?
+        let owns = c.indices("own")?
+        let keeps = c.indices("keeps")?
+        if not c.at_end():
+            return wrong("unexpected `{c.rest()}`")
+        let d = IntrinsicDecl(name=name, pure=pure, from_=from_, inner=inner, owns=owns, keeps=keeps)
+        if method:
+            p.trait_methods.push(d)
+        else:
+            p.intrinsics.push(d)
+        return Ok(())
+    if c.eat("impl"):
+        var params = 0
+        if c.pos < c.end and c.byte(c.pos) == 91:
+            c.pos += 1
+            params = c.uint()?
+            c.expect("]")?
+        let trait_name = c.type_name()?
+        let trait_args = c.type_args()?
+        c.expect("for ")?
+        let self_ty = c.ty()?
+        c.expect("{{")?
+        var methods: list[(String, ImplTarget)] = []
+        var assoc: list[(String, Type)] = []
+        if not c.eat("}}"):
+            while True:
+                if c.eat("type "):
+                    let n = c.name()?
+                    c.expect("=")?
+                    assoc.push((n, c.ty()?))
+                else:
+                    let m = c.name()?
+                    c.expect(":")?
+                    if c.eat("intrinsic "):
+                        methods.push((m, ImplTarget.Intrinsic(c.type_name()?)))
+                    else:
+                        methods.push((m, ImplTarget.Fn(c.name()?)))
+                if c.eat("}}"):
+                    break
+                c.expect(",")?
+        p.impls.push(
+            ImplDecl(
+                params=params,
+                trait_name=trait_name,
+                trait_args=trait_args,
+                self_ty=self_ty,
+                methods=methods,
+                assoc=assoc,
+            )
+        )
+        return Ok(())
+    let view_ = starts_at(text, s, e, "view ")
+    if c.eat("struct ") or c.eat("view struct "):
+        let name = c.type_name()?
+        let params = c.param_names()?
+        let must_consume = c.eat("must_consume")
+        var drop: String? = None
+        if c.eat("drop "):
+            drop = Some(c.name()?)
+        c.expect("{{")?
+        var fields: list[FieldDecl] = []
+        if not c.eat("}}"):
+            while True:
+                let fname = c.name()?
+                c.expect(":")?
+                let fty = c.ty()?
+                var default: String? = None
+                if c.eat("="):
+                    default = Some(c.name()?)
+                fields.push(FieldDecl(name=fname, ty=fty, default=default))
+                if c.eat("}}"):
+                    break
+                c.expect(",")?
+        p.types.push(
+            TypeDecl.Struct(
+                name=name,
+                params=params,
+                fields=fields,
+                drop=drop,
+                view_=view_,
+                must_consume=must_consume,
+            )
+        )
+        return Ok(())
+    let error_ = starts_at(text, s, e, "error ")
+    if c.eat("enum ") or c.eat("error "):
+        let name = c.type_name()?
+        let params = c.param_names()?
+        let open = c.eat("open")
+        let must_consume = c.eat("must_consume")
+        var drop: String? = None
+        if c.eat("drop "):
+            drop = Some(c.name()?)
+        c.expect("{{")?
+        var variants: list[VariantDecl] = []
+        if not c.eat("}}"):
+            while True:
+                let vname = c.name()?
+                var fields: list[(String?, Type)] = []
+                if c.eat("("):
+                    while True:
+                        # `name: T` or `T`.
+                        let save = c.pos
+                        let n = c.take_name(False, False).to_string()
+                        var named: String? = None
+                        if not n.is_empty() and c.eat(":"):
+                            named = Some(n)
+                        else:
+                            c.pos = save
+                        let fty = c.ty()?
+                        fields.push((named, fty))
+                        if c.eat(")"):
+                            break
+                        c.expect(",")?
+                variants.push(VariantDecl(name=vname, fields=fields))
+                if c.eat("}}"):
+                    break
+                c.expect(",")?
+        p.types.push(
+            TypeDecl.Enum(
+                name=name,
+                params=params,
+                variants=variants,
+                drop=drop,
+                error_=error_,
+                open=open,
+                must_consume=must_consume,
+            )
+        )
+        return Ok(())
+    return wrong("unknown line `{text.byte_slice(s, e)}`")
+
+## A function, from its header line `text[s..e]` to its `}`: the function,
+## where the text after it starts, and the number of the last line read.
+pure def read_function(
+    text: str, s: int, e: int, after_header: int, header_line_no: int
+) -> (Function, int, int) ! ReadError:
+    if not ends_with(text, s, e, " {{"):
+        return Err(bad(header_line_no, "expected `{{` at the end of the function header"))
+    # `fn ... @L:C-L:C {`: the declaration's location comes before the brace.
+    let (h_end, fn_loc) = split_loc(text, s, e - 2)
+    var c = Cur(s=text, pos=s, end=h_end)
+    let r = function_header(mut c)
+    if let Err(Wrong(m)) = r:
+        return Err(bad(header_line_no, m))
+    let Ok(header) = r else:
+        return Err(bad(header_line_no, "a bad header"))
+    let (name, type_params, param_count, kind, pure, source, from_, inner, owns) = header.copy()
+    var f = Function(
+        name=name,
+        type_params=type_params,
+        kind=kind,
+        param_count=param_count,
+        pure=pure,
+        from_=from_,
+        inner=inner,
+        owns=owns,
+        locals=[],
+        blocks=[],
+        loc=fn_loc,
+        source=source,
+    )
+    var pos = after_header
+    var line_no = header_line_no
+    # Whether the last block of `f` is still open, without its terminator.
+    var open = False
+    let n = text.byte_len()
+    while pos < n:
+        let (start, end, next) = line_at(text, pos)
+        pos = next
+        line_no += 1
+        let (ls, le) = trimmed(text, start, end)
+        if ls == le:
+            continue
+        if le - ls == 1 and text.byte_at(ls).to_int() == 125:
+            if open:
+                return Err(bad(line_no, "block without a terminator"))
+            return Ok((f, pos, line_no))
+        let line = body_line(text, ls, le, mut f, open)
+        match line:
+            case Ok(now_open):
+                open = now_open
+            case Err(Wrong(m)):
+                return Err(bad(line_no, m))
+    return Err(bad(line_no, "function is never closed"))
+
+pure def bad(line: int, m: str) -> ReadError:
+    return Bad(line=line, message=m.to_string())
+
+pure def ends_with(text: str, s: int, e: int, t: str) -> bool:
+    let n = t.byte_len()
+    if e - n < s:
+        return False
+    return starts_at(text, e - n, e, t)
+
+## The header of a function, after `fn`.
+pure def function_header(
+    mut c: Cur
+) -> (String, list[String], int, FnKind, bool, int, list[int], list[int], list[int]) ! LineError:
+    c.expect("fn ")?
+    let name = c.name()?
+    let tparams = c.param_names()?
+    c.expect("(")?
+    let n = c.uint()?
+    c.expect(")")?
+    var kind = FnKind.Normal
+    if c.eat("closure"):
+        if c.eat("scope"):
+            kind = FnKind.Closure(ClosureRole.ScopeBody)
+        elif c.eat("task"):
+            kind = FnKind.Closure(ClosureRole.Task)
+        else:
+            kind = FnKind.Closure(ClosureRole.Plain)
+    elif c.eat("drop"):
+        kind = FnKind.Drop
+    elif c.eat("glue"):
+        kind = FnKind.Glue
+    elif c.eat("comptime "):
+        let steps = c.int()?
+        if steps < 0:
+            return wrong("a negative budget, {steps}")
+        kind = FnKind.Comptime(steps)
+    elif c.eat("value"):
+        kind = FnKind.Value
+    elif c.eat("test"):
+        kind = FnKind.Test
+    let pure = c.eat("pure")
+    c.expect("source ")?
+    let src = c.uint()?
+    let from_ = c.indices("from")?
+    let inner = c.indices("inner")?
+    let owns = c.indices("own")?
+    if not c.at_end():
+        return wrong("expected `{{`, found `{c.rest()}`")
+    return Ok((name, tparams, n, kind, pure, src, from_, inner, owns))
+
+## A line of a function's body: a local, a block's label, a statement or
+## a terminator. `open` says whether the function's last block still lacks
+## its terminator; the result says whether it does after the line.
+pure def body_line(text: str, s: int, e: int, mut f: Function, open: bool) -> bool ! LineError:
+    let (line_end, loc) = split_loc(text, s, e)
+    var c = Cur(s=text, pos=s, end=line_end)
+    if c.eat("let "):
+        let l = c.local()?
+        if l.index != len(f.locals):
+            return wrong("locals must be numbered in order")
+        c.expect(":")?
+        let ty = c.ty()?
+        var name: String? = None
+        c.ws()
+        if c.starts("\""):
+            name = Some(c.string()?)
+        let once = c.eat("once")
+        if not c.at_end():
+            return wrong("unexpected `{c.rest()}`")
+        f.locals.push(LocalDecl(ty=ty, name=name, loc=loc, once=once))
+        return Ok(open)
+    if starts_at(text, s, line_end, "bb") and text.byte_at(line_end - 1).to_int() == 58:
+        if open:
+            return wrong("block without a terminator")
+        let id = c.block_id()?
+        if id.index != len(f.blocks):
+            return wrong("blocks must be numbered in order")
+        var b = BasicBlock(stmts=[], term=Terminator.Unreachable, unwind=None, cleanup=False, loc=None)
+        if c.eat("(cleanup)"):
+            b.cleanup = True
+        elif c.eat("(unwind "):
+            b.unwind = Some(c.block_id()?)
+            c.expect(")")?
+        c.expect(":")?
+        f.blocks.push(b)
+        return Ok(True)
+    if not open:
+        return wrong("statement outside a block")
+    let last = len(f.blocks) - 1
+    let line = text.byte_slice(s, line_end)
+    # Terminators.
+    var term: Terminator? = None
+    if c.eat("goto "):
+        term = Some(Terminator.Goto(c.block_id()?))
+    elif c.eat("switch "):
+        let value = c.operand()?
+        c.expect("[")?
+        var cases: list[(int, BlockId)] = []
+        var default = BlockId(index=0)
+        while True:
+            if c.eat("else:"):
+                default = c.block_id()?
+                c.expect("]")?
+                break
+            let v = c.int()?
+            c.expect(":")?
+            cases.push((v, c.block_id()?))
+            c.expect(",")?
+        term = Some(Terminator.Switch(value=value, cases=cases, default=default))
+    elif line == "return":
+        term = Some(Terminator.Return)
+    elif line == "resume":
+        term = Some(Terminator.Resume)
+    elif line == "unreachable":
+        term = Some(Terminator.Unreachable)
+    if let Some(t) = term:
+        f.blocks[last].term = t.copy()
+        f.blocks[last].loc = loc
+        return Ok(False)
+    var kind = StatementKind.StorageDead(LocalId(index=0))
+    if c.eat("drop "):
+        let place = c.place()?
+        var flag: LocalId? = None
+        if c.eat("if "):
+            flag = Some(c.local()?)
+        kind = StatementKind.Drop(place=place, flag=flag)
+    elif c.eat("dead "):
+        kind = StatementKind.StorageDead(c.local()?)
+    else:
+        let dest = c.place()?
+        c.expect("=")?
+        if c.eat("call "):
+            var callee = Callee.Fn(name=String.new(), args=[])
+            if c.eat("fn "):
+                let n = c.name()?
+                callee = Callee.Fn(name=n, args=c.type_args()?)
+            elif c.eat("intrinsic "):
+                let n = c.type_name()?
+                callee = Callee.Intrinsic(name=n, args=c.type_args()?)
+            elif c.eat("trait "):
+                let n = c.type_name()?
+                callee = Callee.Trait(name=n, args=c.type_args()?)
+            else:
+                callee = Callee.Value(c.operand()?)
+            let args = c.operands()?
+            kind = StatementKind.Call(dest=dest, callee=callee, args=args)
+        else:
+            kind = StatementKind.Assign(place=dest, value=c.rvalue()?)
+    if not c.at_end():
+        return wrong("unexpected `{c.rest()}`")
+    f.blocks[last].stmts.push(Statement(kind=kind, loc=loc))
+    return Ok(True)

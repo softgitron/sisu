@@ -1,0 +1,25 @@
+##! Exercise 6.5, a Caesar cipher. Kind: write. Level: 2.
+##!
+##! A Caesar cipher moves each letter a fixed number of places along
+##! the alphabet, and starts again from `a` after `z`. Write the body of
+##! `caesar` so that every test passes. Run the tests with
+##! `sisu test caesar.sisu`. The hints are in chapter 6 of the tutorial,
+##! under "Exercise 6.5: a Caesar cipher".
+
+## `text` with each letter from `a` to `z` moved `shift` places, each
+## capital letter from `A` to `Z` the same way, and every other
+## character as it is. `shift` is 0 to 25.
+def caesar(text: str, shift: int) -> String:
+    return todo("caesar")
+
+test "one place along":
+    assert caesar("abc", 1) == "bcd"
+
+test "past the end of the alphabet":
+    assert caesar("xyz", 3) == "abc"
+
+test "capitals and punctuation":
+    assert caesar("Hei, Aino!", 13) == "Urv, Nvab!"
+
+test "there and back":
+    assert caesar(caesar("Kissa", 5), 21) == "Kissa"

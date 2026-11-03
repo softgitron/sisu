@@ -1,0 +1,12 @@
+range(3) gives 0
+range(3) gives 1
+range(3) gives 2
+range(10, 13) gives 10
+range(10, 13) gives 11
+range(10, 13) gives 12
+range(0, 10, 4) gives 0
+range(0, 10, 4) gives 4
+range(0, 10, 4) gives 8
+range(3, 0, -1) gives 3
+range(3, 0, -1) gives 2
+range(3, 0, -1) gives 1

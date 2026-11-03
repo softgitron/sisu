@@ -1,0 +1,7 @@
+# `byte_slice` cuts text at byte positions.
+def main():
+    let date = "2026-11-03"
+    let year = date.byte_slice(0, 4)
+    let month = date.byte_slice(5, 7)
+    let day = date.byte_slice(8, 10)
+    print("day {day}, month {month}, year {year}")

@@ -1,0 +1,11 @@
+$ sisu test csv_fields.sisu
+warning[W0001]: typed hole `csv_fields` of type `list[String]`
+  --> csv_fields.sisu:11:12
+   |
+11 |     return todo("csv_fields")
+   |            ^^^^^^^^^^^^^^^^^^
+
+test "plain fields" ... blocked by todo("csv_fields")
+test "an empty field" ... blocked by todo("csv_fields")
+test "a comma inside quotes" ... blocked by todo("csv_fields")
+0 passed, 0 failed, 3 blocked

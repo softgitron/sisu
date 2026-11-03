@@ -1,0 +1,32 @@
+##! Exercise 6.3, title case: the solution.
+##!
+##! `split_whitespace` finds the words whatever the spaces between them.
+##! Each character becomes a one-character text by interpolation, so
+##! that `to_uppercase` and `to_lowercase` apply to it, and `join` puts
+##! the words back together with one space between each two.
+
+## `text` with each word's first letter in upper case and the rest in
+## lower case, and one space between each two words.
+def title_case(text: str) -> String:
+    var words: list[String] = []
+    for word in text.split_whitespace():
+        var titled = String()
+        for c in word.chars():
+            if titled.is_empty():
+                titled.push("{c}".to_uppercase())
+            else:
+                titled.push("{c}".to_lowercase())
+        words.push(titled)
+    return words.join(" ")
+
+test "two words":
+    assert title_case("hei maailma") == "Hei Maailma"
+
+test "capitals in the middle":
+    assert title_case("tAMPERE AND turku") == "Tampere And Turku"
+
+test "letters with dots and extra spaces":
+    assert title_case("  äiti   ja isä ") == "Äiti Ja Isä"
+
+test "no words":
+    assert title_case("") == ""

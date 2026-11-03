@@ -2,7 +2,8 @@
 evaluated against the committed CSVs (through summarize.py and tables.py) and
 the results directories' machine-spec.csv, versions files, timing.csv and
 load.csv, so that no number in the report is typed by hand, and the text is
-rewrapped at 80 columns. The only other source is the log summary of machine
+rewrapped at 80 columns. M1 and M2 ran every benchmark; M3, the 16 GiB runner,
+ran idle-memory only. The only other source is the log summary of machine
 2's lost first run (lost()), which the report quotes as a cross-check. A field
 that cannot be evaluated is an error (the report is not written), unless
 OUTPUT ends in ".draft".
@@ -186,6 +187,12 @@ def v24both(label):
     return S.rule_on_both(v24(RT.M1, label), v24(RT.M2, label))
 
 
+def v24pair(ma, mb, label):
+    """Section 2.4's verdict for a configuration on a pair of machines (M1 with
+    one runner): passes or fails only if both machines of the pair agree."""
+    return S.rule_on_both(v24(ma, label), v24(mb, label))
+
+
 def created(m, label, n, bench="idle-memory"):
     """The tasks created over the runs of a cell, 'a-b' (or 'a' when equal)."""
     v = cell(m, bench, f"{label} N={n}").values["tasks_created"]
@@ -256,6 +263,22 @@ def pair(a, b, noun=""):
     'a noun on M1 and b on M2'."""
     n = f" {noun}" if noun else ""
     return f"{a}{n} on both machines" if a == b else f"{a}{n} on M1 and {b} on M2"
+
+
+def trio(a, b, c, noun=""):
+    """The three machines' figures: 'a noun on all three machines' when equal,
+    else 'a noun on M1, b on M2 and c on M3' (two equal figures are named
+    once)."""
+    n = f" {noun}" if noun else ""
+    if a == b == c:
+        return f"{a}{n} on all three machines"
+    if a == b:
+        return f"{a}{n} on M1 and M2 and {c} on M3"
+    if a == c:
+        return f"{a}{n} on M1 and M3 and {b} on M2"
+    if b == c:
+        return f"{a}{n} on M1 and {b} on M2 and M3"
+    return f"{a}{n} on M1, {b} on M2 and {c} on M3"
 
 
 def loss(m, bench, label, ref_label, metric, digits=1):
@@ -423,14 +446,19 @@ def chg(m, bench, label, ref_label, metric, digits=1):
     return f"{(a / b - 1) * 100:+.{digits}f}"
 
 
-def mem_spread(labels, n=100000):
-    """The largest difference between the machines' ratios to Go (shallow, and
-    after the excursion against Go after GC) over idle-memory configurations."""
+def mem_spread(labels, n=100000, machines=None, phases=("shallow", "excursion")):
+    """The largest difference between two machines' ratios to Go (shallow, and
+    after the excursion against Go after GC) over idle-memory configurations;
+    by default M1 and M2."""
+    import itertools
+
+    machines = machines or (RT.M1, RT.M2)
     out = 0.0
     for lab in labels:
-        for phase in ("shallow", "excursion"):
-            a, b = float(imr(RT.M1, lab, n, phase)), float(imr(RT.M2, lab, n, phase))
-            out = max(out, abs(b - a))
+        for phase in phases:
+            for ma, mb in itertools.combinations(machines, 2):
+                a, b = float(imr(ma, lab, n, phase)), float(imr(mb, lab, n, phase))
+                out = max(out, abs(b - a))
     return f"{out:.2f}"
 
 
@@ -550,7 +578,7 @@ env["cells"] = cells
 env["SMOKE"] = RT.SMOKE
 env["SJ_POOLED"] = SJ_POOLED
 env["SJ_UNPOOLED"] = SJ_UNPOOLED
-env.update(M1=RT.M1, M2=RT.M2, IM="idle-memory", SJ="spawn-join", MT="max-tasks", EC="echo",
+env.update(M1=RT.M1, M2=RT.M2, M3=RT.M3, IM="idle-memory", SJ="spawn-join", MT="max-tasks", EC="echo",
            IC="idle-connections", DR="deep-recursion", ST="starvation", PO="probe-overhead", CU="cancel-uring")
 text = open(TEMPLATE).read()
 errors = []

@@ -1,0 +1,8 @@
+# A list holds values of one type, in order.
+def main():
+    var shopping = ["milk", "rye bread", "cloudberries"]
+    shopping.push("coffee")
+    print("{len(shopping)} things: {shopping}")
+    print("first {shopping[0]}, last {shopping[^1]}")
+    shopping[1] = "oat bread"
+    print("now the second is {shopping[1]}")

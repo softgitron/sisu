@@ -1,0 +1,7 @@
+# `match` gives a value when each arm is one expression.
+def main():
+    for day in range(1, 8):
+        let kind = match day:
+            case 6 | 7: "weekend"
+            case _: "weekday"
+        print("day {day} is a {kind}")

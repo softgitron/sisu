@@ -1,0 +1,26 @@
+##! Exercise 6.2, counting vowels: the solution.
+##!
+##! A `for` loop goes through the characters of a text only through
+##! `chars()`. A `char` is not a `str`, so `in` cannot look for it in
+##! the text "aeiouyäö"; a list of the eight vowels as characters can
+##! hold it.
+
+## The number of vowels in `word`, in either case. Finnish has eight:
+## a, e, i, o, u, y, ä and ö.
+def vowels(word: str) -> int:
+    var count = 0
+    for letter in word.to_lowercase().chars():
+        if letter in ['a', 'e', 'i', 'o', 'u', 'y', 'ä', 'ö']:
+            count += 1
+    return count
+
+test "plain vowels":
+    assert vowels("kissa") == 2
+    assert vowels("Aino") == 3
+
+test "vowels with dots and capitals":
+    assert vowels("ÄITI") == 3
+    assert vowels("yö") == 2
+
+test "no vowels":
+    assert vowels("tsk") == 0

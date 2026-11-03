@@ -1,0 +1,20 @@
+##! Exercise 5.2, the team roster: the solution.
+##!
+##! `var by_name = joined` moved the list, so `joined` could not be
+##! used in the last line. `.copy()` makes a second list to sort, and
+##! the first one keeps the order in which the members joined.
+
+## The three members in the order they joined, then sorted by name.
+def roster(first: str, second: str, third: str) -> String:
+    let joined = [first, second, third]
+    var by_name = joined.copy()
+    by_name.sort()
+    return "{joined.join(" ")} / {by_name.join(" ")}"
+
+test "a team of three":
+    let text = roster("Roni", "Aino", "Eero")
+    assert text == "Roni Aino Eero / Aino Eero Roni"
+
+test "a team that joined in the order of their names":
+    let text = roster("Aino", "Eero", "Liisa")
+    assert text == "Aino Eero Liisa / Aino Eero Liisa"

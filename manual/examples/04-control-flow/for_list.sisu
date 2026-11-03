@@ -1,0 +1,6 @@
+# `for` goes through the items of a list; `enumerate` counts them.
+def main():
+    for name in ["Aino", "Eero", "Roni"]:
+        print("Hei, {name}!")
+    for place, name in enumerate(["Aino", "Eero", "Roni"]):
+        print("{place + 1}. {name}")

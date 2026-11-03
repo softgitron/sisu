@@ -1,0 +1,5 @@
+test "two values" ... ok
+test "the largest value twice" ... ok
+test "negative values" ... ok
+test "many repeats" ... ok
+4 passed, 0 failed, 0 blocked

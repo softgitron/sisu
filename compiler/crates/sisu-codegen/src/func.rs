@@ -250,7 +250,7 @@ impl<'a, 'p> Cx<'a, 'p> {
                 let param = i >= 1 && i <= f.param_count as usize;
                 vars.push(crate::debug::Var {
                     name,
-                    ty: ty.clone(),
+                    ty: crate::debug::DebugTy::Sir(ty.clone()),
                     slot,
                     indirect,
                     param,

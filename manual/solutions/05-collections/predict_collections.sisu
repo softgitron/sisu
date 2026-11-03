@@ -1,0 +1,27 @@
+##! Exercise 5.1, predict the collections: the solution.
+##!
+##! A set keeps each value once, so `{3, 1, 3, 2, 1}` holds 3, 1 and 2.
+##! The last of `[1, 2, 5, 8]` is 8. The slice `[1:3]` holds the items
+##! at 1 and 2, which are 8 and 15. The comprehension keeps 0, 2, 4, 6
+##! and 8. `in` on a dict looks at its keys, and "oulu" is not "Oulu".
+
+const DISTINCT: int = 3
+const LARGEST: int = 8
+const SLICE_SUM: int = 23
+const EVENS: int = 5
+const FOUND: bool = False
+
+test "a set of repeated numbers":
+    assert len({3, 1, 3, 2, 1}) == DISTINCT
+
+test "the last of a sorted list":
+    assert sorted([5, 2, 8, 1])[^1] == LARGEST
+
+test "the sum of a slice":
+    assert sum([4, 8, 15, 16, 23][1:3]) == SLICE_SUM
+
+test "a comprehension with a condition":
+    assert len([n for n in range(10) if n % 2 == 0]) == EVENS
+
+test "a name in lowercase among the keys of a dict":
+    assert ("oulu" in {"Turku": 1, "Oulu": 2}) == FOUND

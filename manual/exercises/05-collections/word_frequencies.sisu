@@ -1,0 +1,21 @@
+##! Exercise 5.3, word frequencies. Kind: write. Level: 1.
+##!
+##! Write the body of `word_frequencies` so that every test passes. Run
+##! the tests with `sisu test word_frequencies.sisu`. The hints are in
+##! chapter 5 of the tutorial, under "Exercise 5.3: word frequencies".
+
+## How many times each word appears in `words`, with the words in the
+## order of their first appearance.
+def word_frequencies(words: list[str]) -> dict[str, int]:
+    return todo("word_frequencies")
+
+test "every word once":
+    let counts = word_frequencies(["kuu", "kissa", "kala"])
+    assert counts == {"kuu": 1, "kissa": 1, "kala": 1}
+
+test "repeated words":
+    let counts = word_frequencies(["a", "b", "a", "c", "a", "b"])
+    assert counts == {"a": 3, "b": 2, "c": 1}
+
+test "no words":
+    assert len(word_frequencies([])) == 0

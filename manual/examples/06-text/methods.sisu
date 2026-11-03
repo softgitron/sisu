@@ -1,0 +1,13 @@
+#!/usr/bin/env sisu
+# The common methods of text.
+let line = "  Hei, Maailma!  "
+line.trim()
+line.trim().to_lowercase()
+line.trim().starts_with("Hei")
+line.trim().replace("Maailma", "Aino")
+let at = line.find("M")
+let missing = line.find("x")
+"v1.2.0".strip_prefix("v")
+[part for part in "red,green,,blue".split(",")]
+[word for word in "one two\tthree".split_whitespace()]
+[row for row in "first\nsecond".lines()]

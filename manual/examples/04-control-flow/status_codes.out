@@ -1,0 +1,5 @@
+200: OK
+302: moved
+404: not found
+503: a server error
+418: something else

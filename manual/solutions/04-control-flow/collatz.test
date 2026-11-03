@@ -1,0 +1,5 @@
+test "one is already there" ... ok
+test "a power of two only halves" ... ok
+test "small numbers" ... ok
+test "twenty-seven takes a long way" ... ok
+4 passed, 0 failed, 0 blocked

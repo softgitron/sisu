@@ -1,0 +1,14 @@
+# `pass` is a block that does nothing.
+def show(level: str, message: str):
+    match level:
+        case "debug":
+            pass
+        case "warning" | "error":
+            print("{level.to_uppercase()}: {message}")
+        case _:
+            print(message)
+
+def main():
+    show("debug", "the cache holds 12 entries")
+    show("info", "starting")
+    show("error", "the disk is full")

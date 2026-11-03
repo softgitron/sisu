@@ -1,0 +1,25 @@
+##! Exercise 5.4, the second largest value: the solution.
+##!
+##! A set comprehension keeps each value once, `sorted` puts the values
+##! in ascending order, and `^2` counts two from the end. A loop that
+##! keeps the largest and the second largest seen so far also works,
+##! and does not sort.
+
+## The second largest of `values`, counting each value once: for
+## [5, 9, 9, 3] it is 5. `values` holds at least two different values.
+def second_largest(values: list[int]) -> int:
+    let distinct = sorted({value for value in values})
+    return distinct[^2]
+
+test "two values":
+    assert second_largest([1, 2]) == 1
+    assert second_largest([2, 1]) == 1
+
+test "the largest value twice":
+    assert second_largest([5, 9, 9, 3]) == 5
+
+test "negative values":
+    assert second_largest([-4, -8, -4]) == -8
+
+test "many repeats":
+    assert second_largest([7, 3, 7, 7, 1, 3]) == 3

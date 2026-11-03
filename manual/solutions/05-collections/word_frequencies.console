@@ -1,0 +1,11 @@
+$ sisu test word_frequencies.sisu
+warning[W0001]: typed hole `word_frequencies` of type `dict[str, int]`
+  --> word_frequencies.sisu:10:12
+   |
+10 |     return todo("word_frequencies")
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^
+
+test "every word once" ... blocked by todo("word_frequencies")
+test "repeated words" ... blocked by todo("word_frequencies")
+test "no words" ... blocked by todo("word_frequencies")
+0 passed, 0 failed, 3 blocked

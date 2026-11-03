@@ -1,0 +1,4 @@
+test "every word once" ... ok
+test "repeated words" ... ok
+test "no words" ... ok
+3 passed, 0 failed, 0 blocked

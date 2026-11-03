@@ -1,0 +1,59 @@
+##! Exercise 4.1, predict the loops. Kind: predict. Level: 1.
+##!
+##! Each constant is your prediction of the value of the call in its
+##! hole's name. Trace each loop by hand, write the value as a literal,
+##! and then run `sisu test predict_loops.sisu`. The hints are in
+##! chapter 4 of the tutorial, under "Exercise 4.1: predict the loops".
+
+## The sum of the numbers that `range(start, stop, step)` gives.
+def range_sum(start: int, stop: int, step: int) -> int:
+    var total = 0
+    for i in range(start, stop, step):
+        total += i
+    return total
+
+## How many odd numbers from 1 to `limit` the loop counts.
+def odd_count(limit: int) -> int:
+    var count = 0
+    var n = 0
+    while True:
+        n += 1
+        if n > limit:
+            break
+        if n % 2 == 0:
+            continue
+        count += 1
+    return count
+
+## A word for how many there are of something.
+def amount(n: int) -> str:
+    match n:
+        case 0:
+            return "none"
+        case 1 | 2 | 3:
+            return "a few"
+        case _ if n < 0:
+            return "impossible"
+        case _:
+            return "many"
+
+const UP: int = todo("range_sum(1, 10, 3)")
+const DOWN: int = todo("range_sum(10, 0, -4)")
+const ODD: int = todo("odd_count(7)")
+const NEGATIVE: str = todo("amount(-2)")
+const PLENTY: str = todo("amount(4)")
+
+test "counting up in threes":
+    assert range_sum(1, 10, 3) == UP
+
+test "counting down in fours":
+    assert range_sum(10, 0, -4) == DOWN
+
+test "skipping even numbers":
+    assert odd_count(7) == ODD
+
+test "a negative amount":
+    assert amount(-2) == NEGATIVE
+
+test "four of something":
+    assert amount(4) == PLENTY

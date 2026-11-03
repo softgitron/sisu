@@ -1,0 +1,5 @@
+test "one place along" ... ok
+test "past the end of the alphabet" ... ok
+test "capitals and punctuation" ... ok
+test "there and back" ... ok
+4 passed, 0 failed, 0 blocked

@@ -1,0 +1,9 @@
+$ sisu run python_if.sisu
+error[E0115]: `a if c else b` is not Sisu; write `if c: a else: b`
+  --> python_if.sisu:4:19
+  |
+4 |     let clothes = "a warm coat" if temperature < 0 else "a jacket"
+  |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: write it as `if c: a else: b`: `if temperature < 0: "a warm coat" else: "a jacket"`
+
+error[D0006]: the program was not run: errors found (1)

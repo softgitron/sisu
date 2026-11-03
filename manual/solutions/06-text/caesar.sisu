@@ -1,0 +1,37 @@
+##! Exercise 6.5, a Caesar cipher: the solution.
+##!
+##! A letter's place in the alphabet is its code minus the code of `a`.
+##! Adding the shift and taking the remainder by 26 wraps past `z`, and
+##! cutting that place out of the alphabet gives the new letter. A
+##! capital letter goes the same way, through upper case.
+
+const ALPHABET: str = "abcdefghijklmnopqrstuvwxyz"
+
+## `text` with each letter from `a` to `z` moved `shift` places, each
+## capital letter from `A` to `Z` the same way, and every other
+## character as it is. `shift` is 0 to 25.
+def caesar(text: str, shift: int) -> String:
+    var result = String()
+    for c in text.chars():
+        if 'a' <= c <= 'z':
+            let place = (c.code() - 'a'.code() + shift) % 26
+            result.push(ALPHABET.byte_slice(place, place + 1))
+        elif 'A' <= c <= 'Z':
+            let place = (c.code() - 'A'.code() + shift) % 26
+            let letter = ALPHABET.byte_slice(place, place + 1)
+            result.push(letter.to_uppercase())
+        else:
+            result.push_char(c)
+    return result
+
+test "one place along":
+    assert caesar("abc", 1) == "bcd"
+
+test "past the end of the alphabet":
+    assert caesar("xyz", 3) == "abc"
+
+test "capitals and punctuation":
+    assert caesar("Hei, Aino!", 13) == "Urv, Nvab!"
+
+test "there and back":
+    assert caesar(caesar("Kissa", 5), 21) == "Kissa"

@@ -183,8 +183,12 @@ tasks), or a hybrid. Separately, Zig's design makes concurrency itself go
 through the `Io` value, so a library cannot spawn without being given the
 means; Sisu's lean makes `task.scope` ambient.
 
-**Current lean.** Lazily committed stacks with a per-task maximum and
-compiler-computed bounds where possible; `task.scope` ambient.
+**Current lean.** After Phase 1 (harness era, provisional; the decision below
+stays the owner's): pooled stacks carved from large reservations, with software
+probes rather than guard pages and decommit on park (the harness's strategy
+D(B)), a 1 MiB default reservation and no stackless fallback; `task.scope`
+ambient.
+Measured ([report](taskbench/docs/report-phase1.md); worst ratio to Go over 100k and 1M idle tasks, shallow and after a 32 KiB excursion, then against Go after its GC; the bar is 4): D(B) at the 1 MiB default 2.41 on machine 1 and 2.42 on the 16 GiB runner (machine 2, 7.75 GiB, could not hold the 1M cells: 2.41 at 100k), at 128 KiB 1.75-1.76 on all three; B 6.51-7.36 and C 7.08-7.16 after the excursion; one guard page per task stops at about 32,730 tasks under the default `vm.max_map_count`.
 
 **What would settle it.** The standalone stack harness in
 [proposal/18](proposal/18-next-steps.md) (Phase 1, weeks 1-8): task

@@ -1,0 +1,22 @@
+##! Exercise 4.2, prime or not: the solution.
+##!
+##! The search returns from inside the loop as soon as it finds a
+##! factor. Code after the loop runs only when the loop ended without
+##! finding one, which is what Python's loop `else` meant.
+
+## "N is prime", or "N = A * B" where A is the smallest factor of `n`
+## above 1. `n` is 2 or more.
+def describe(n: int) -> String:
+    for d in range(2, n):
+        if n % d == 0:
+            return "{n} = {d} * {n // d}"
+    return "{n} is prime"
+
+test "primes":
+    assert describe(2) == "2 is prime"
+    assert describe(7) == "7 is prime"
+    assert describe(97) == "97 is prime"
+
+test "numbers with factors":
+    assert describe(9) == "9 = 3 * 3"
+    assert describe(12) == "12 = 2 * 6"

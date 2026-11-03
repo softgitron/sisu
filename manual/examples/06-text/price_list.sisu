@@ -1,0 +1,7 @@
+# A format spec after a colon sets width, alignment and digits.
+def main():
+    let items = ["coffee", "cloudberries", "rye bread"]
+    let prices = [3.5, 12.0, 2.25]
+    for item, price in zip(items, prices):
+        print("{item:<14}{price:>8.2f} €")
+    print("{"total":<14}{sum(prices):>8.2f} €")

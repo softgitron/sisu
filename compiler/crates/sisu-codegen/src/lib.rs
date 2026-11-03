@@ -19,9 +19,12 @@ mod facts;
 mod func;
 mod fx;
 mod layout;
+mod lir;
+mod translate;
 mod workers;
 
 pub use debug::Sources;
+pub use translate::{compile_lir, lir_is_release};
 
 use cranelift_codegen::ir::MemFlags;
 use cranelift_codegen::ir::{self, AbiParam, InstBuilder, types};
@@ -244,7 +247,14 @@ fn compile_once(
     let missing = std::mem::take(&mut cg.missing);
     let mut product = cg.module.finish();
     step("the code placed", &mut tt);
-    debug::write(&mut product, prog, &cg.debug, &mut cg.types, &options.sources, &*cg.isa)?;
+    debug::write(
+        &mut product,
+        &prog.sources,
+        &cg.debug,
+        debug::Describe::Sir(&mut cg.types),
+        &options.sources,
+        &*cg.isa,
+    )?;
     step("the debug information written", &mut tt);
     let object = product.emit().map_err(|e| Error::internal(format!("writing the object file: {e}")))?;
     step("the object emitted", &mut tt);
@@ -778,6 +788,14 @@ impl<'p> Codegen<'p> {
         let mut fbctx = std::mem::take(&mut self.fbctx);
         {
             let mut b = FunctionBuilder::new(&mut ctx.func, &mut fbctx);
+            // A function's references to other functions and to data are
+            // made once each, at their first use, as everywhere (the
+            // translation of LIR makes them so, decision 273).
+            let mut funcs: fx::FxMap<FuncId, ir::FuncRef> = fx::FxMap::default();
+            let mut func_ref = |module: &mut ObjectModule, b: &mut FunctionBuilder<'_>, id: FuncId| {
+                *funcs.entry(id).or_insert_with(|| module.declare_func_in_func(id, b.func))
+            };
+            let mut datas: fx::FxMap<DataId, ir::GlobalValue> = fx::FxMap::default();
             let entry = b.create_block();
             b.append_block_params_for_function_params(entry);
             b.switch_to_block(entry);
@@ -825,11 +843,11 @@ impl<'p> Codegen<'p> {
                             }
                         };
                         if let (Some(rf), Some(t)) = (retain_fn, count) {
-                            let r = self.module.declare_func_in_func(rf, b.func);
                             let tv = b.ins().iconst(types::I32, i64::from(*t));
+                            let r = func_ref(&mut self.module, &mut b, rf);
                             b.ins().call(r, &[me, tv]);
                         }
-                        let r = self.module.declare_func_in_func(*callee, b.func);
+                        let r = func_ref(&mut self.module, &mut b, *callee);
                         let mut args = vec![ret, me];
                         args.extend(params.iter().skip(2).copied());
                         let c = b.ins().call(r, &args);
@@ -843,10 +861,10 @@ impl<'p> Codegen<'p> {
                         for (k, a) in params.iter().skip(2).enumerate() {
                             b.ins().store(flags, *a, arr, (8 * (k + 1)) as i32);
                         }
-                        let gv = self.module.declare_data_in_func(*desc, b.func);
+                        let gv = *datas.entry(*desc).or_insert_with(|| self.module.declare_data_in_func(*desc, b.func));
                         let d = b.ins().symbol_value(types::I64, gv);
                         let f = intrinsic_fn.ok_or_else(|| Error::internal("no intrinsic entry point"))?;
-                        let r = self.module.declare_func_in_func(f, b.func);
+                        let r = func_ref(&mut self.module, &mut b, f);
                         let c = b.ins().call(r, &[d, ret, arr]);
                         b.inst_results(c)[0]
                     }
@@ -874,6 +892,7 @@ impl<'p> Codegen<'p> {
         frame: Frame,
         dbg: debug::FnDebug,
     ) -> Result<(), Error> {
+        workers::dump_clif(&ctx.func);
         if let Some(jobs) = &self.jobs {
             let job = workers::Job { order: self.handed.len(), id, func: ctx.func };
             if jobs.send(job).is_err() {
@@ -1357,7 +1376,7 @@ impl<'p> Codegen<'p> {
             b.append_block_params_for_function_params(block);
             b.switch_to_block(block);
             let (argc, argv) = (b.block_params(block)[0], b.block_params(block)[1]);
-            let start_ref = self.module.declare_func_in_func(start, b.func);
+            // References made at their first use, as everywhere.
             let entry_ref = self.module.declare_func_in_func(entry, b.func);
             let entry_addr = b.ins().func_addr(types::I64, entry_ref);
             let types_gv = self.module.declare_data_in_func(types_id, b.func);
@@ -1374,6 +1393,7 @@ impl<'p> Codegen<'p> {
             // pointer, arguments on the stack).
             let unprobed = i64::from(self.max_unprobed) + i64::from(self.max_top) + 2 * FRAME_EXTRA;
             let unprobed = b.ins().iconst(types::I64, unprobed);
+            let start_ref = self.module.declare_func_in_func(start, b.func);
             let call = b.ins().call(
                 start_ref,
                 &[argc, argv, entry_addr, flags, ret_ty, types_addr, types_len, fns_addr, fns_len, unprobed],

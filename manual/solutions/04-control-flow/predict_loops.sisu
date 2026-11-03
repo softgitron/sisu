@@ -1,0 +1,61 @@
+##! Exercise 4.1, predict the loops: the solution.
+##!
+##! `range(1, 10, 3)` gives 1, 4 and 7, and `range(10, 0, -4)` gives
+##! 10, 6 and 2: a range stops before its end, in either direction.
+##! `odd_count(7)` counts 1, 3, 5 and 7; `continue` skips the even
+##! numbers, and `break` ends the loop at 8. For -2, the first arm whose
+##! pattern and guard both hold is `case _ if n < 0`. 4 is none of 0,
+##! 1, 2 and 3, and it is not negative, so it reaches the last arm.
+
+## The sum of the numbers that `range(start, stop, step)` gives.
+def range_sum(start: int, stop: int, step: int) -> int:
+    var total = 0
+    for i in range(start, stop, step):
+        total += i
+    return total
+
+## How many odd numbers from 1 to `limit` the loop counts.
+def odd_count(limit: int) -> int:
+    var count = 0
+    var n = 0
+    while True:
+        n += 1
+        if n > limit:
+            break
+        if n % 2 == 0:
+            continue
+        count += 1
+    return count
+
+## A word for how many there are of something.
+def amount(n: int) -> str:
+    match n:
+        case 0:
+            return "none"
+        case 1 | 2 | 3:
+            return "a few"
+        case _ if n < 0:
+            return "impossible"
+        case _:
+            return "many"
+
+const UP: int = 12
+const DOWN: int = 18
+const ODD: int = 4
+const NEGATIVE: str = "impossible"
+const PLENTY: str = "many"
+
+test "counting up in threes":
+    assert range_sum(1, 10, 3) == UP
+
+test "counting down in fours":
+    assert range_sum(10, 0, -4) == DOWN
+
+test "skipping even numbers":
+    assert odd_count(7) == ODD
+
+test "a negative amount":
+    assert amount(-2) == NEGATIVE
+
+test "four of something":
+    assert amount(4) == PLENTY

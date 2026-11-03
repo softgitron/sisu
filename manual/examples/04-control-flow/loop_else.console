@@ -1,0 +1,8 @@
+$ sisu run loop_else.sisu
+error[E0103]: expected an expression, found `else`
+  --> loop_else.sisu:8:5
+  |
+8 |     else:
+  |     ^^^^
+
+error[D0006]: the program was not run: errors found (1)

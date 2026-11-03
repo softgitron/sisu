@@ -1,0 +1,5 @@
+# `if` gives a value when each branch is one expression.
+def main():
+    let temperature = -4
+    let clothes = "a warm coat" if temperature < 0 else "a jacket"
+    print("wear {clothes}")
