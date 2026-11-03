@@ -158,19 +158,19 @@ rt-B.o (decision 353). It holds: each B is its A byte for byte, and
 stage1-A prints the SIR `sisu sir` prints, the runtime's seed among it.
 
 ```text
-  sisu2-C       23430184 bytes  sha256 5c9c7db73cd91fb4...  built through the Cranelift path (39.3 s)
-  A.stage2.sir   4146988 bytes  sha256 a52b09ff9c90c460...  printed by sisu sir
-  A.stage1.sir  17400595 bytes  sha256 43d60d4d210482e6...  printed by sisu sir
-  A.rt.sir        308916 bytes  sha256 82a711bab54c6695...  printed by sisu sir (all three 60.3 s)
-  rt-A.o          582664 bytes  sha256 b6d236430bb4332b...  built by sisu2-C
-  sisu2-A       27391840 bytes  sha256 e3636c7e02b0233f...  built by sisu2-C, with rt-A.o (6.0 s)
-  stage1-A      53156784 bytes  sha256 bcf0f8e759ec3a57...  built by sisu2-C, with rt-A.o (21.7 s)
-  B.stage2.sir   4146988 bytes  sha256 a52b09ff9c90c460...  printed by stage1-A
-  B.stage1.sir  17400595 bytes  sha256 43d60d4d210482e6...  printed by stage1-A
-  B.rt.sir        308916 bytes  sha256 82a711bab54c6695...  printed by stage1-A (all three 224.7 s)
-  rt-B.o          582664 bytes  sha256 b6d236430bb4332b...  built by sisu2-A
-  sisu2-B       27391840 bytes  sha256 e3636c7e02b0233f...  built by sisu2-A, with rt-B.o (12.4 s)
-  stage1-B      53156784 bytes  sha256 bcf0f8e759ec3a57...  built by sisu2-A, with rt-B.o (46.1 s)
+  sisu2-C       23536552 bytes  sha256 4ebfa64db1cd453d...  built through the Cranelift path (65.2 s)
+  A.stage2.sir   4204001 bytes  sha256 df41a8a5447a9444...  printed by sisu sir
+  A.stage1.sir  18015195 bytes  sha256 ddc542c20f268407...  printed by sisu sir
+  A.rt.sir        428692 bytes  sha256 4c985bfeab3977d8...  printed by sisu sir (all three 87.4 s)
+  rt-A.o          799152 bytes  sha256 b42a1b24b1059549...  built by sisu2-C
+  sisu2-A       27655024 bytes  sha256 c803f28b9d79495c...  built by sisu2-C, with rt-A.o (5.8 s)
+  stage1-A      54716320 bytes  sha256 32da331b9ba38535...  built by sisu2-C, with rt-A.o (26.5 s)
+  B.stage2.sir   4204001 bytes  sha256 df41a8a5447a9444...  printed by stage1-A
+  B.stage1.sir  18015195 bytes  sha256 ddc542c20f268407...  printed by stage1-A
+  B.rt.sir        428692 bytes  sha256 4c985bfeab3977d8...  printed by stage1-A (all three 224.2 s)
+  rt-B.o          799152 bytes  sha256 b42a1b24b1059549...  built by sisu2-A
+  sisu2-B       27655024 bytes  sha256 c803f28b9d79495c...  built by sisu2-A, with rt-B.o (13.3 s)
+  stage1-B      54716320 bytes  sha256 32da331b9ba38535...  built by sisu2-A, with rt-B.o (53.7 s)
 ```
 
 It takes six to eight minutes on four cores; `--keep DIR` leaves the files
@@ -196,7 +196,7 @@ What is done, and what is not, is kept here as the work goes.
   decisions 281 to 284).
 - The lowering: both profiles, the release one with its facts about
   integers (`facts.sisu`, transcribing `facts.rs`; decision 270).
-- The translation and the check: all 205 cases of `native.list` pass
+- The translation and the check: all 216 cases of `native.list` pass
   `--native-from-lir`, their executables byte for byte the ones from SIR
   in both profiles, the five unsafe ones included.
 - Unsafe code (decisions 302 and 305): the intrinsics of std.mem (277 to
@@ -211,7 +211,7 @@ What is done, and what is not, is kept here as the work goes.
   --tests`, decision 285), its tests' tags and its benchmarks included.
 - The Sisu backend (decisions 306 to 312): every operation of LIR but a
   jump with more than nine arguments and a return of more than one value;
-  all 212 cases of `native.list` run from its objects with the
+  all 216 cases of `native.list` run from its objects with the
   interpreter's output (`--native`), as they do from Cranelift's
   (`--native-cranelift`); stage 1 compiled by it checks the conformance
   suite's files as the Cranelift build does. What it leaves is in
@@ -219,13 +219,22 @@ What is done, and what is not, is kept here as the work goes.
 - Its fixed point holds (decision 330, `./bootstrap.sh`), and it is the
   debug profile's backend, Cranelift the release profile's and the
   oracle (decision 331).
-- The runtime in Sisu (decisions 335, 336 and 350 to 353): raw memory of
-  a word or a byte compiled inline, and `compiler/rt`, compiled once into
-  the object every native program is linked with, holding `==` of texts'
-  bytes, the structural operations by a value's parts, text building and
-  integers' digits, and text search, whose Rust counterparts are gone;
-  stage 2's library mode compiles it with the Sisu backend, and the fixed
-  point links its builds with the objects so made.
+- The runtime in Sisu (decisions 335, 336, 350 to 353, 358, 383 and 385):
+  raw memory of a word or a byte compiled inline, and `compiler/rt`,
+  compiled once into the object every native program is linked with,
+  holding `==` of texts' bytes, the structural operations by a value's
+  parts, text building and integers' digits, text search, a float's text,
+  `Display` and `Debug` by the type table, and lists over raw memory,
+  whose Rust counterparts are gone; stage 2's library mode compiles it
+  with the Sisu backend, and the fixed point links its builds with the
+  objects so made.
+- What native code leaked or refused (decisions 381 and 382): the text an
+  interpolation is building when a panic or a `?` in one of its values
+  leaves the function is freed on that path (`building_texts` in
+  `scan.sisu`, the failure paths of `func.sisu`), and an `own` closure
+  that keeps a function value has its environment in a heap cell, which a
+  copy of the value copies and its drop frees (`closure` in
+  `rvalue.sisu`), both as the Rust lowering does, byte for byte.
 - On threads (decisions 332 to 334): the runtime's words the code reaches
   are thread-local (`tls_value`), std.par's `map` runs its bodies on the
   runtime's workers, the backend compiles each batch of functions through

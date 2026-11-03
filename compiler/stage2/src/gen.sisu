@@ -117,8 +117,16 @@ pub struct Fx:
     pub locals: list[LocalSt]
     ## The LIR block of each SIR block.
     pub blocks: list[int]
-    ## The failure path of each SIR block, made when first needed.
-    pub fails: list[int?]
+    ## The failure paths of each SIR block, made when first needed: one for
+    ## each set of texts an interpolation is building where a failure
+    ## leaves (decision 381), which the path frees.
+    pub fails: list[list[(list[int], int)]]
+    ## The texts an interpolation is building at the start of each SIR
+    ## block, and at the statement being lowered; the locals each block's
+    ## cleanup drops.
+    pub building_at: list[list[int]]
+    pub building: list[int]
+    pub covered: list[list[int]]
     ## The variables holding the line and column of the statement.
     pub line: int
     pub col: int
@@ -137,8 +145,9 @@ pub struct Fx:
     pub reload: list[int]
     ## The slot of each local whose iterator lives in the frame.
     pub frames: list[int?]
-    ## The failed checks of the SIR block, written after its terminator.
-    pub deferred: list[(int, String, list[Arg])]
+    ## The failed checks of the SIR block, written after its terminator,
+    ## each with the texts being built where it is.
+    pub deferred: list[(int, String, list[Arg], list[int])]
     ## The blocks every path from which ends in a panic or in unwinding.
     pub cold: list[bool]
     ## In the release profile, what is known about the integers at each
@@ -154,6 +163,9 @@ impl Fx:
             locals=[],
             blocks=[],
             fails=[],
+            building_at=[],
+            building=[],
+            covered=[],
             line=0,
             col=0,
             trace=None,

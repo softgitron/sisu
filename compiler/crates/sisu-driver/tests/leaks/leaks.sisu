@@ -71,6 +71,14 @@ def pair(i: int) -> (String, int) ! ParseError:
 def count_of[T](xs: list[T]) -> int:
     return len(xs)
 
+def boom(i: int) -> int:
+    if i >= 0:
+        panic("boom {i}")
+    return i
+
+def labelled(i: int) -> String ! ParseError:
+    return Ok("v{i}{twice("q{i}")?}")
+
 def main():
     var total = 0
     for i in range(40):
@@ -143,6 +151,20 @@ def main():
         total += len(bytes_seen) + bytes_seen[0].to_int()
         let count: (list[String]) -> int = count_of
         total += count(["p{i}".to_string(), "q".to_string()])
+        # The text an interpolation is building, which a `?` in one of its
+        # values leaves, and one a panic in a task's leaves (decision 381).
+        match labelled(i):
+            case Ok(t):
+                total += len(t)
+            case Err(e):
+                total += len("{e}")
+        task.scope do s:
+            let h = s.spawn(() -> "p{i}{boom(i)}q")
+            match h.join():
+                case Ok(t):
+                    total += len(t)
+                case Err(_):
+                    total += 1
         print("{total}")
     let last = Loud(name="last", tags=["x".to_string(), "y".to_string()])
     print(len(last.name))

@@ -1,0 +1,560 @@
+##! A value's `Display` and `Debug` text, by its type in the program's table
+##! (decision 383), as the interpreter writes them (`sisu-interp/src/
+##! format.rs`): `fmt.display` and `fmt.debug` of a value whose impl is
+##! structural, `print` of one, `list.join`, the sides of a failed `assert`,
+##! the error `main` returns and the others the runtime in Rust shows. The
+##! names come from the table's texts (`desc.rs`), a float's digits from
+##! `floats.sisu` and an integer's from `text.sisu`; what the runtime in Rust
+##! keeps as objects of its own (the tables of dicts and sets, a task's path,
+##! a `Shared` cell, an arena, a time) it shows or reads out through calls of
+##! it. Each function appends to the `String` at `out`.
+
+import rt.floats
+import rt.text
+import rt.value
+from rt.host import sisu_rt_alloc
+from rt.host import sisu_rt_free
+from rt.host import sisu_rt_shared_alive
+from rt.host import sisu_rt_show_arena
+from rt.host import sisu_rt_show_datetime
+from rt.host import sisu_rt_show_task
+from rt.host import sisu_rt_table_key
+from rt.host import sisu_rt_table_len
+from rt.host import sisu_rt_table_value
+from rt.types import A
+from rt.types import ARENA
+from rt.types import B
+from rt.types import BARE
+from rt.types import BOOL
+from rt.types import BOX
+from rt.types import BYTES
+from rt.types import CANCELLATION
+from rt.types import CELL
+from rt.types import CHAR
+from rt.types import CONST
+from rt.types import CONTEXTUAL
+from rt.types import DATETIME
+from rt.types import DICT
+from rt.types import DYN
+from rt.types import ENTRY
+from rt.types import ENUM
+from rt.types import ERRSET
+from rt.types import F32
+from rt.types import FLAGS
+from rt.types import FLOAT
+from rt.types import FN
+from rt.types import GUARD
+from rt.types import HANDLE
+from rt.types import I128
+from rt.types import INT
+from rt.types import ITER
+from rt.types import LIST
+from rt.types import MUTEX
+from rt.types import OPAQUE
+from rt.types import OPTION
+from rt.types import PARTS
+from rt.types import PATH
+from rt.types import PTR
+from rt.types import READ_GUARD
+from rt.types import RECEIVER
+from rt.types import REF
+from rt.types import RESULT
+from rt.types import RW_LOCK
+from rt.types import SCOPE
+from rt.types import SENDER
+from rt.types import SET
+from rt.types import SHARED
+from rt.types import SHOWN
+from rt.types import SIZE
+from rt.types import SIZED
+from rt.types import STR
+from rt.types import STRING
+from rt.types import STRUCT
+from rt.types import TAG
+from rt.types import TIMER
+from rt.types import TUPLE
+from rt.types import Types
+from rt.types import U128
+from rt.types import U64
+from rt.types import UNIT
+from rt.types import WEAK
+from rt.types import WORDS
+from std.mem import ptr
+
+## The words `Debug` writes, each its bytes packed the first lowest, for
+## `text.put_word` (the runtime's code has no text of its own to point to).
+const W_UNIT: int = 0x2928
+const W_TRUE: int = 0x65757254
+const W_FALSE: int = 0x65736c6146
+const W_BOX: int = 0x65786f6228786f42
+const W_BOXED: int = 0x3d64
+const W_COMMA: int = 0x202c
+const W_COLON: int = 0x203a
+const W_SOME: int = 0x28656d6f53
+const W_NONE: int = 0x656e6f4e
+const W_OK: int = 0x286b4f
+const W_ERR: int = 0x28727245
+const W_EMPTY_SET: int = 0x2928746573
+const W_ENTRY: int = 0x3e7972746e653c
+const W_PTR: int = 0x727470
+const W_SCOPE: int = 0x3e65706f63733c
+const W_CANCEL: int = 0x6c6c65636e61633c
+const W_CANCEL_END: int = 0x3e6e6f697461
+const W_SENDER: int = 0x3e7265646e65733c
+const W_RECEIVER: int = 0x657669656365723c
+const W_RECEIVER_END: int = 0x3e72
+const W_TIMER: int = 0x3e72656d69743c
+const W_MUTEX: int = 0x28786574754d
+const W_LOCKED: int = 0x3e64656b636f6c3c
+const W_RW_LOCK: int = 0x286b636f4c7752
+const W_DROPPED: int = 0x646570706f72643c
+const W_WEAK: int = 0x296b61655728
+const W_CELL: int = 0x286c6c6543
+const W_FN: int = 0x3e6e663c
+const W_ITER: int = 0x3e726574693c
+
+## The bytes of a `Mutex`'s header, before its value; its first word says
+## whether it is locked (by a writer, for an `RwLock`).
+const MUTEX_HEADER: int = 32
+
+## The form of a float's text that `Debug` writes, of an `f64` and of an
+## `f32`'s bits (`floats.write`).
+const SHORTEST: int = 0
+const SHORTEST32: int = 1
+
+## Appends the `Display` text of the value at `p0` of type `t0`: the plain
+## text of a text or a `char`, `message: cause` of std's `Contextual`, and
+## the `Debug` text of everything else.
+##
+## Requires:
+## - `typed`: `types`' words are the program's table, `p0` holds a live
+##   value of type `t0`, and `out` a live `String`
+pub(package) def display(ts: Types, out: ptr mut u8, p0: ptr mut u8, t0: int):
+    let (p, t) = value.target(ts, p0, t0)
+    # safety: typed, in_bounds, valid, aligned: each part is where its type's
+    #   entry says, and a text's first two words its bytes and their number;
+    #   writable: the bytes are only read through the pointer.
+    unsafe:
+        let k = ts.words.offset(t * WORDS).read()
+        if k == STR or k == STRING or k == PATH:
+            let w = p.cast[int]()
+            text.push(out, p.cast[ptr[u8]]().read().cast_mut(), w.offset(1).read())
+            return
+        if k == CHAR:
+            put_char(out, p.cast[int]().read())
+            return
+        if k == SHARED:
+            # A `Shared` displays as its value does, as std's impl says
+            # (decision 384).
+            let cell = p.cast[ptr[u8]]().read().cast_mut()
+            if sisu_rt_shared_alive(cell):
+                display(ts, out, cell, ts.words.offset(t * WORDS + A).read())
+                return
+        if k == ENUM or k == ERRSET:
+            let decl = value.concrete(ts, p, t)
+            let h = ts.words.offset(decl * WORDS)
+            if h.read() == ENUM and (h.offset(FLAGS).read() & CONTEXTUAL) != 0:
+                let fields = value.variant(ts, p, h)
+                if fields != 0 and ts.words.offset(fields).read() == 2:
+                    let f = ts.words.offset(fields + 1)
+                    display(ts, out, p.offset(f.read()), f.offset(1).read())
+                    text.put_word(out, W_COLON, 2)
+                    display(ts, out, p.offset(f.offset(3).read()), f.offset(4).read())
+                    return
+    debug(ts, out, p, t)
+
+## Appends the `Debug` text of the value at `p` of type `t`, as it is
+## written.
+##
+## Requires:
+## - `typed`: `types`' words are the program's table, `p` holds a live
+##   value of type `t`, and `out` a live `String`
+pub(package) def debug(ts: Types, out: ptr mut u8, p: ptr mut u8, t: int):
+    # safety: typed, in_bounds, valid, aligned: each part is where its type's
+    #   entry in the table says, an option's or a result's tag is its first
+    #   word and its payload after it, and a box's, a guard's and a cell's
+    #   word the address of their value; writable: what the pointers made
+    #   mutable reach is only read; returns_promptly: the runtime in Rust
+    #   reads its objects out, or shows them.
+    unsafe:
+        let h = ts.words.offset(t * WORDS)
+        let k = h.read()
+        let w = p.cast[int]()
+        if k == UNIT:
+            text.put_word(out, W_UNIT, 2)
+        elif k == INT or k == SIZED:
+            text.push_int(out, w.read())
+        elif k == U64:
+            text.push_digits(out, w.read(), 0, 10, False)
+        elif k == I128:
+            var low = w.read()
+            var high = w.offset(1).read()
+            if high < 0:
+                text.put(out, 45)
+                # The magnitude, the two's complement of the words.
+                low = ~low +% 1
+                high = ~high +% (if low == 0: 1 else: 0)
+            text.push_digits(out, low, high, 10, False)
+        elif k == U128:
+            text.push_digits(out, w.read(), w.offset(1).read(), 10, False)
+        elif k == FLOAT:
+            put_float(out, w.read(), SHORTEST)
+        elif k == F32:
+            put_float(out, w.read() & 4294967295, SHORTEST32)
+        elif k == BOOL:
+            if w.read() != 0:
+                text.put_word(out, W_TRUE, 4)
+            else:
+                text.put_word(out, W_FALSE, 5)
+        elif k == CHAR:
+            quote_char(out, w.read())
+        elif k == STR or k == STRING or k == PATH:
+            quote_str(out, p.cast[ptr[u8]]().read().cast_mut(), w.offset(1).read())
+        elif k == BYTES:
+            quote_bytes(out, p.cast[ptr[u8]]().read().cast_mut(), w.offset(1).read())
+        elif k == DATETIME:
+            sisu_rt_show_datetime(out, w.read())
+        elif k == REF or k == DYN:
+            let (q, u) = value.target(ts, p, t)
+            debug(ts, out, q, u)
+        elif k == BOX:
+            # `Box` is a struct of one field, `boxed`, to the structural
+            # impls.
+            text.put_word(out, W_BOX, 8)
+            text.put_word(out, W_BOXED, 2)
+            debug(ts, out, p.cast[ptr[u8]]().read().cast_mut(), h.offset(A).read())
+            text.put(out, 41)
+        elif k == TUPLE:
+            text.put(out, 40)
+            let fields = h.offset(PARTS).read()
+            let n = ts.words.offset(fields).read()
+            var i = 0
+            while i < n:
+                if i > 0:
+                    text.put_word(out, W_COMMA, 2)
+                let f = ts.words.offset(fields + 1 + 3 * i)
+                debug(ts, out, p.offset(f.read()), f.offset(1).read())
+                i += 1
+            if n == 1:
+                text.put(out, 44)
+            text.put(out, 41)
+        elif k == LIST:
+            let e = h.offset(A).read()
+            let size = ts.words.offset(e * WORDS + SIZE).read()
+            let items = p.cast[ptr[u8]]().read().cast_mut()
+            text.put(out, 91)
+            var i = 0
+            while i < w.offset(1).read():
+                if i > 0:
+                    text.put_word(out, W_COMMA, 2)
+                debug(ts, out, items.offset(i * size), e)
+                i += 1
+            text.put(out, 93)
+        elif k == OPTION:
+            if p.offset(h.offset(TAG).read()).cast[int]().read() == 0:
+                text.put_word(out, W_SOME, 5)
+                debug(ts, out, p.offset(8), h.offset(A).read())
+                text.put(out, 41)
+            else:
+                text.put_word(out, W_NONE, 4)
+        elif k == RESULT:
+            if p.offset(h.offset(TAG).read()).cast[int]().read() == 0:
+                text.put_word(out, W_OK, 3)
+                debug(ts, out, p.offset(8), h.offset(A).read())
+            else:
+                text.put_word(out, W_ERR, 4)
+                debug(ts, out, p.offset(8), h.offset(B).read())
+            text.put(out, 41)
+        elif k == STRUCT:
+            let names = h.offset(SHOWN).read()
+            put_name(ts, out, names)
+            if (h.offset(FLAGS).read() & BARE) == 0:
+                text.put(out, 40)
+                put_fields(ts, out, p, h.offset(PARTS).read(), names + 2)
+                text.put(out, 41)
+        elif k == ENUM:
+            let fields = value.variant(ts, p, h)
+            if fields == 0:
+                text.put(out, 63)
+            else:
+                let tag = p.offset(h.offset(TAG).read()).cast[int]().read()
+                let names = h.offset(SHOWN).read() + 3 * tag
+                put_name(ts, out, names)
+                if ts.words.offset(fields).read() > 0:
+                    text.put(out, 40)
+                    put_fields(ts, out, p, fields, ts.words.offset(names + 2).read())
+                    text.put(out, 41)
+        elif k == ERRSET:
+            let decl = value.concrete(ts, p, t)
+            if decl != t:
+                debug(ts, out, p, decl)
+        elif k == DICT:
+            text.put(out, 123)
+            var i = 0
+            while i < sisu_rt_table_len(p):
+                if i > 0:
+                    text.put_word(out, W_COMMA, 2)
+                debug(ts, out, sisu_rt_table_key(p, i), h.offset(A).read())
+                text.put_word(out, W_COLON, 2)
+                debug(ts, out, sisu_rt_table_value(p, i), h.offset(B).read())
+                i += 1
+            text.put(out, 125)
+        elif k == SET:
+            let n = sisu_rt_table_len(p)
+            if n == 0:
+                text.put_word(out, W_EMPTY_SET, 5)
+            else:
+                text.put(out, 123)
+                var i = 0
+                while i < n:
+                    if i > 0:
+                        text.put_word(out, W_COMMA, 2)
+                    debug(ts, out, sisu_rt_table_key(p, i), h.offset(A).read())
+                    i += 1
+                text.put(out, 125)
+        elif k == ENTRY:
+            text.put_word(out, W_ENTRY, 7)
+        elif k == PTR:
+            # As std's `Debug` for raw pointers writes one, without its
+            # address (22, clause 6).
+            text.put_word(out, W_PTR, 3)
+        elif k == SCOPE:
+            text.put_word(out, W_SCOPE, 7)
+        elif k == HANDLE:
+            sisu_rt_show_task(out, w.read())
+        elif k == CANCELLATION:
+            text.put_word(out, W_CANCEL, 8)
+            text.put_word(out, W_CANCEL_END, 6)
+        elif k == SENDER:
+            text.put_word(out, W_SENDER, 8)
+        elif k == RECEIVER:
+            text.put_word(out, W_RECEIVER, 8)
+            text.put_word(out, W_RECEIVER_END, 2)
+        elif k == TIMER:
+            text.put_word(out, W_TIMER, 7)
+        elif k == MUTEX or k == RW_LOCK:
+            # Readers leave the value to be read; a writer does not.
+            if k == MUTEX:
+                text.put_word(out, W_MUTEX, 6)
+            else:
+                text.put_word(out, W_RW_LOCK, 7)
+            let locked = w.read()
+            if (k == MUTEX and locked != 0) or (k == RW_LOCK and locked == 1):
+                text.put_word(out, W_LOCKED, 8)
+            else:
+                debug(ts, out, p.offset(MUTEX_HEADER), h.offset(A).read())
+            text.put(out, 41)
+        elif k == GUARD or k == READ_GUARD:
+            debug(ts, out, p.cast[ptr[u8]]().read().cast_mut(), h.offset(A).read())
+        elif k == SHARED:
+            let cell = p.cast[ptr[u8]]().read().cast_mut()
+            if sisu_rt_shared_alive(cell):
+                debug(ts, out, cell, h.offset(A).read())
+            else:
+                text.put_word(out, W_DROPPED, 8)
+                text.put(out, 62)
+        elif k == WEAK:
+            text.put_word(out, W_WEAK, 6)
+        elif k == CELL:
+            text.put_word(out, W_CELL, 5)
+            debug(ts, out, p, h.offset(A).read())
+            text.put(out, 41)
+        elif k == ARENA:
+            sisu_rt_show_arena(out, p)
+        elif k == FN:
+            text.put_word(out, W_FN, 4)
+        elif k == ITER:
+            text.put_word(out, W_ITER, 6)
+        elif k == OPAQUE:
+            put_name(ts, out, h.offset(SHOWN).read())
+        elif k == CONST:
+            text.push_int(out, h.offset(A).read())
+
+## Appends the name whose address and length are the words at position `at`
+## of the table, if it has bytes.
+##
+## Requires:
+## - `typed`: `at` is the position of a name of the table, and `out` holds a
+##   live `String`
+def put_name(ts: Types, out: ptr mut u8, at: int):
+    # safety: in_bounds, valid, aligned: a name is two words of the table,
+    #   the address of its bytes, which live for the run, and their number;
+    #   writable: the bytes are only read through the pointer.
+    unsafe:
+        let w = ts.words.offset(at)
+        let n = w.offset(1).read()
+        if n > 0:
+            text.push(out, w.cast[ptr[u8]]().read().cast_mut(), n)
+
+## Appends the fields of the list at position `fields`, each its value's
+## `Debug` after `name=` when the name at `names` (two words for each field)
+## has bytes, separated by `, `.
+##
+## Requires:
+## - `typed`: `p` holds a live value whose fields `fields` lists, `names` is
+##   the position of their names, and `out` holds a live `String`
+def put_fields(ts: Types, out: ptr mut u8, p: ptr mut u8, fields: int, names: int):
+    # safety: in_bounds, valid, aligned: a list of fields holds three words
+    #   for each field after its length, and each is where its offset says.
+    unsafe:
+        let n = ts.words.offset(fields).read()
+        var i = 0
+        while i < n:
+            if i > 0:
+                text.put_word(out, W_COMMA, 2)
+            if ts.words.offset(names + 2 * i + 1).read() > 0:
+                put_name(ts, out, names + 2 * i)
+                text.put(out, 61)
+            let f = ts.words.offset(fields + 1 + 3 * i)
+            debug(ts, out, p.offset(f.read()), f.offset(1).read())
+            i += 1
+
+## Appends the text of the float whose bits are `bits` in `mode`, through a
+## `String` of its own (`floats.write` writes a new one).
+##
+## Requires:
+## - `text`: `out` holds a live `String`
+def put_float(out: ptr mut u8, bits: int, mode: int):
+    # safety: valid, aligned, writable, in_bounds: the block holds the three
+    #   words of a `String`, whose buffer is freed with it; returns_promptly:
+    #   the runtime in Rust gives and frees the block.
+    unsafe:
+        let shown = sisu_rt_alloc(24)
+        floats.write(shown, bits, mode, 0)
+        let w = shown.cast[int]()
+        let bytes = shown.cast[ptr[u8]]().read().cast_mut()
+        text.push(out, bytes, w.offset(1).read())
+        if w.read() != 0:
+            sisu_rt_free(bytes)
+        sisu_rt_free(shown)
+
+## Appends the UTF-8 bytes of the character whose code is `c`.
+##
+## Requires:
+## - `text`: `out` holds a live `String`
+def put_char(out: ptr mut u8, c: int):
+    if c < 128:
+        text.put(out, c)
+    elif c < 2048:
+        text.put(out, 192 | (c >> 6))
+        text.put(out, 128 | (c & 63))
+    elif c < 65536:
+        text.put(out, 224 | (c >> 12))
+        text.put(out, 128 | ((c >> 6) & 63))
+        text.put(out, 128 | (c & 63))
+    else:
+        text.put(out, 240 | (c >> 18))
+        text.put(out, 128 | ((c >> 12) & 63))
+        text.put(out, 128 | ((c >> 6) & 63))
+        text.put(out, 128 | (c & 63))
+
+## Appends `\u{X}`, the code `c` in lowercase hexadecimal digits.
+##
+## Requires:
+## - `text`: `out` holds a live `String`
+def put_escape(out: ptr mut u8, c: int):
+    text.put(out, 92)
+    text.put(out, 117)
+    text.put(out, 123)
+    text.push_digits(out, c, 0, 16, False)
+    text.put(out, 125)
+
+## The escape of a character that `Debug` writes as two characters, the
+## second's code (`n`, `t`, `r`), or 0.
+pure def short_escape(c: int) -> int:
+    if c == 10:
+        return 110
+    if c == 9:
+        return 116
+    if c == 13:
+        return 114
+    return 0
+
+## Whether the character whose code is `c` is a control character (Unicode's
+## `Cc`: 0 to 31 and 127 to 159), which `Debug` writes as `\u{X}`.
+pure def control(c: int) -> bool:
+    return c < 32 or (c >= 127 and c < 160)
+
+## Appends the `n` bytes at `b`, a text, quoted as `Debug` writes it: a `"`,
+## a `\` and the control characters escaped.
+##
+## Requires:
+## - `text`: `out` holds a live `String`, and `b` points to `n` bytes of
+##   UTF-8
+def quote_str(out: ptr mut u8, b: ptr mut u8, n: int):
+    text.put(out, 34)
+    # safety: in_bounds, valid: the `n` bytes at `b` are live, by `text`, and
+    #   a byte needs no alignment.
+    unsafe:
+        var i = 0
+        while i < n:
+            let c = b.offset(i).read().to_int()
+            let short = short_escape(c)
+            if c == 34 or c == 92:
+                text.put(out, 92)
+                text.put(out, c)
+            elif short != 0:
+                text.put(out, 92)
+                text.put(out, short)
+            elif c < 32 or c == 127:
+                put_escape(out, c)
+            elif c == 194 and i + 1 < n and b.offset(i + 1).read().to_int() < 160:
+                # U+0080 to U+009F, two bytes of UTF-8.
+                put_escape(out, b.offset(i + 1).read().to_int())
+                i += 1
+            else:
+                text.put(out, c)
+            i += 1
+    text.put(out, 34)
+
+## Appends the character whose code is `c` quoted as `Debug` writes it: a
+## `'`, a `\` and the control characters escaped.
+##
+## Requires:
+## - `text`: `out` holds a live `String`
+def quote_char(out: ptr mut u8, c: int):
+    text.put(out, 39)
+    let short = short_escape(c)
+    if c == 39 or c == 92:
+        text.put(out, 92)
+        text.put(out, c)
+    elif short != 0:
+        text.put(out, 92)
+        text.put(out, short)
+    elif control(c):
+        put_escape(out, c)
+    else:
+        put_char(out, c)
+    text.put(out, 39)
+
+## Appends the `n` bytes at `b` as `Debug` writes a `bytes`, `b"..."`: the
+## printable ASCII bytes as they are, the others escaped.
+##
+## Requires:
+## - `text`: `out` holds a live `String`, and `b` points to `n` live bytes
+def quote_bytes(out: ptr mut u8, b: ptr mut u8, n: int):
+    text.put(out, 98)
+    text.put(out, 34)
+    # safety: in_bounds, valid: the `n` bytes at `b` are live, by `text`, and
+    #   a byte needs no alignment.
+    unsafe:
+        var i = 0
+        while i < n:
+            let c = b.offset(i).read().to_int()
+            let short = short_escape(c)
+            if c == 34 or c == 92:
+                text.put(out, 92)
+                text.put(out, c)
+            elif short != 0:
+                text.put(out, 92)
+                text.put(out, short)
+            elif c >= 32 and c < 127:
+                text.put(out, c)
+            else:
+                text.put(out, 92)
+                text.put(out, 120)
+                if c < 16:
+                    text.put(out, 48)
+                text.push_digits(out, c, 0, 16, False)
+            i += 1
+    text.put(out, 34)

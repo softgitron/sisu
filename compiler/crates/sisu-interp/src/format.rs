@@ -37,6 +37,12 @@ impl Interp<'_, '_> {
                 Err(_) => out.push_str("<dangling>"),
             },
             Value::Dyn(d) => self.display_into(&d.value, out),
+            // A `Shared` displays as its value does, as std's impl says
+            // (decision 384).
+            Value::Shared(id) => match self.heap.get(*id as usize) {
+                Some(c) if c.strong > 0 => self.display_into(&c.value, out),
+                _ => out.push_str("<dropped>"),
+            },
             // std's `Contextual` (prelude): `message: cause`.
             Value::Variant(a) if &*a.ty == "Contextual" && a.fields.len() == 2 => {
                 self.display_into(&a.fields[0], out);

@@ -71,7 +71,10 @@ every binding in scope), and the runner reports the test as blocked by
 that hole, neither passed nor failed (D-061). A suite can therefore be
 written before the code it tests, and its report says which hole each test
 is waiting on; `sisu check --holes` adds the values each test reached the
-hole with ([10](10-tooling.md)). Release builds and `sisu publish` reject
+hole with ([10](10-tooling.md)). `sisu test` exits with status 0 when every
+test passed, 1 when a test failed, whatever else is blocked, and 3 when no
+test failed and one is blocked, so that a pipeline can tell a suite waiting
+on holes from a finished one. Release builds and `sisu publish` reject
 holes, so blocked is never a shipped state.
 
 ## Fixtures

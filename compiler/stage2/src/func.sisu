@@ -42,7 +42,16 @@ from stage2.gen import (
 )
 from stage2.layout import fat
 from stage2.lir import Fb, LirError, internal, unsupported
-from stage2.scan import cold_blocks, drop_flag, frame_iterators, register_locals
+from stage2.scan import (
+    building_begun,
+    building_taken,
+    building_texts,
+    cleanup_drops,
+    cold_blocks,
+    drop_flag,
+    frame_iterators,
+    register_locals,
+)
 
 ## Values larger than this many words are copied through memory rather
 ## than as words.
@@ -170,9 +179,12 @@ impl Cg:
         self.b.def_var(self.fx.line, lv)
         let cv = self.b.iconst("i64", start.1)
         self.b.def_var(self.fx.col, cv)
-        for _ in f.blocks:
+        for i in range(len(f.blocks)):
             self.fx.blocks.push(self.b.create_block())
-            self.fx.fails.push(None)
+            self.fx.fails.push([])
+            self.fx.covered.push(cleanup_drops(f, i))
+        self.fx.building_at = building_texts(f)
+        self.fx.building = []
         # The runtime in Sisu is the runtime's own code, as drop glue is
         # (decision 336).
         self.fx.glue = f.kind == FnKind.Glue or self.library
@@ -557,10 +569,17 @@ impl Cg:
     # ------------------------------------------------------ failure paths
 
     pub pure def fail_block(mut self) -> int:
-        if let Some(b) = self.fx.fails[self.fx.cur]:
-            return b
+        let building = self.fx.building.copy()
+        return self.fail_block_for(building)
+
+    ## The failure path of the SIR block being lowered that frees the texts
+    ## `building` holds (decision 381).
+    pub pure def fail_block_for(mut self, own building: list[int]) -> int:
+        for (set, b) in self.fx.fails[self.fx.cur]:
+            if set == building:
+                return b
         let b = self.b.create_block()
-        self.fx.fails[self.fx.cur] = Some(b)
+        self.fx.fails[self.fx.cur].push((building, b))
         return b
 
     ## Continues when `status` is `OK`; else takes the failure path.
@@ -577,12 +596,14 @@ impl Cg:
         let cont = self.b.create_block()
         let failed = self.b.create_block()
         self.b.brif(bad, failed, [], cont, [])
-        self.fx.deferred.push((failed, raise.to_string(), args.copy()))
+        self.fx.deferred.push((failed, raise.to_string(), args.copy(), self.fx.building.copy()))
         self.b.switch_to_block(cont)
 
     ## A failed check's block: the runtime raises the panic, then the
     ## failure path of the SIR block.
-    pub pure def raise(mut self, raise: str, args: list[Arg]) -> () ! LirError:
+    pub pure def raise(
+        mut self, raise: str, args: list[Arg], own building: list[int]
+    ) -> () ! LirError:
         var vs: list[int] = []
         for a in args:
             match a:
@@ -593,40 +614,69 @@ impl Cg:
                 case Arg.I64(n):
                     vs.push(self.iconst(n))
         _ = self.rt(raise, vs)?
-        let fail = self.fail_block()
+        let fail = self.fail_block_for(building)
         self.b.jump(fail, [])
         return Ok(())
 
     pub pure def emit_fails(mut self, p: Program) -> () ! LirError:
-        let f = ref p.functions[self.fx.fi]
         for i in range(len(self.fx.fails)):
-            let fb = self.fx.fails[i] else:
-                continue
-            self.b.set_cold_block(fb)
-            self.b.switch_to_block(fb)
-            let block = ref f.blocks[i]
-            var loc = block.loc
-            if loc.is_none():
-                loc = f.loc
-            if let Some(l) = loc:
-                self.b.set_srcloc(l.line, l.col)
-            if block.cleanup:
-                _ = self.rt(abi.SYM_ABORT_UNWIND, [])?
-                self.b.trap(1)
-                continue
-            if let Some((n, nl, fl, fll)) = self.fx.trace:
-                let name = self.data_addr(n)
-                let file = self.data_addr(fl)
-                let nlv = self.iconst(nl)
-                let fllv = self.iconst(fll)
-                let line = self.b.use_var(self.fx.line)
-                let col = self.b.use_var(self.fx.col)
-                _ = self.rt(abi.SYM_FRAME, [name, nlv, file, fllv, line, col])?
-            match block.unwind:
-                case Some(u):
-                    self.b.jump(self.fx.blocks[u.index], [])
-                case None:
-                    self.leave(abi.UNWINDING)
+            let paths = self.fx.fails[i].copy()
+            self.fx.fails[i] = []
+            for (building, fb) in paths:
+                self.emit_fail(p, i, building, fb)?
+        return Ok(())
+
+    ## The failure path `fb` of SIR block `i`: the trace's line, the texts an
+    ## interpolation was building freed (decision 381), then the block's
+    ## cleanup, or the return of the failure.
+    pub pure def emit_fail(
+        mut self, p: Program, i: int, building: list[int], fb: int
+    ) -> () ! LirError:
+        let f = ref p.functions[self.fx.fi]
+        self.b.set_cold_block(fb)
+        self.b.switch_to_block(fb)
+        let block = ref f.blocks[i]
+        var loc = block.loc
+        if loc.is_none():
+            loc = f.loc
+        if let Some(l) = loc:
+            self.b.set_srcloc(l.line, l.col)
+        if block.cleanup:
+            _ = self.rt(abi.SYM_ABORT_UNWIND, [])?
+            self.b.trap(1)
+            return Ok(())
+        if let Some((n, nl, fl, fll)) = self.fx.trace:
+            let name = self.data_addr(n)
+            let file = self.data_addr(fl)
+            let nlv = self.iconst(nl)
+            let fllv = self.iconst(fll)
+            let line = self.b.use_var(self.fx.line)
+            let col = self.b.use_var(self.fx.col)
+            _ = self.rt(abi.SYM_FRAME, [name, nlv, file, fllv, line, col])?
+        var k = len(building)
+        while k > 0:
+            k -= 1
+            self.free_text(building[k])?
+        match block.unwind:
+            case Some(u):
+                self.b.jump(self.fx.blocks[u.index], [])
+            case None:
+                self.leave(abi.UNWINDING)
+        return Ok(())
+
+    ## Frees the `String` local `l` holds, which an interpolation was building
+    ## where the function leaves without its statement's end: nothing of the
+    ## SIR drops it there (decision 381).
+    pub pure def free_text(mut self, l: int) -> () ! LirError:
+        let addr = self.local_addr(LocalId(index=l))?
+        let ptr = self.load(addr, 0)
+        let free = self.b.create_block()
+        let done = self.b.create_block()
+        self.b.brif(ptr, free, [], done, [])
+        self.b.switch_to_block(free)
+        _ = self.rt(abi.SYM_FREE, [ptr])?
+        self.b.jump(done, [])
+        self.b.switch_to_block(done)
         return Ok(())
 
     # --------------------------------------------------------------- body
@@ -643,22 +693,25 @@ impl Cg:
             self.fx.known = None
             if let Some(fa) = self.fx.facts:
                 self.fx.known = fa.entry_of(i)
+            self.fx.building = self.fx.building_at[i].copy()
             for s in block.stmts:
                 self.statements += 1
                 if let Some(loc) = s.loc:
                     self.set_loc(loc)
+                building_taken(mut self.fx.building, s.kind)
                 self.statement(p, s.kind)?
                 self.reload_vars()
                 self.step_facts(s.kind)
+                building_begun(mut self.fx.building, s.kind, self.fx.covered[i])
             self.statements += 1
             if let Some(loc) = block.loc:
                 self.set_loc(loc)
             self.terminator(p, block.term)?
             let deferred = self.fx.deferred.copy()
             self.fx.deferred = []
-            for (failed, raise, args) in deferred:
+            for (failed, raise, args, building) in deferred:
                 self.b.switch_to_block(failed)
-                self.raise(raise, args)?
+                self.raise(raise, args, building.copy())?
         return Ok(())
 
     ## The state after the statement, in the release profile.
@@ -714,6 +767,14 @@ impl Cg:
                     self.yield_check()?
                     self.b.jump(self.fx.blocks[to], [])
             case Terminator.Return:
+                # A text an interpolation was building when a `?` left it is
+                # freed; the result is the caller's (decision 381).
+                let building = self.fx.building.copy()
+                var k = len(building)
+                while k > 0:
+                    k -= 1
+                    if building[k] != 0:
+                        self.free_text(building[k])?
                 self.leave(abi.OK)
             case Terminator.Resume:
                 self.leave(abi.UNWINDING)

@@ -82,15 +82,16 @@ problem.
 
 ## Shortcuts in the interpreter
 
-**A hole's report is its name.** A blocked test and a run that reaches a
-typed hole print the hole's name and type, not its closure (the `Debug`
-rendering of every binding in scope that 17 and 10 describe), and `sisu
-test` exits 0 when its tests pass or are blocked (architecture.md, rule
-32), so a suite of holes reads as finished to a pipeline that looks only
-at the status. A hole a task reaches blocks the test as one the test's
-own code reaches (decision 359). *Pay*: the closure from the named locals
-of the frame at the `todo`, through the frames below it; a status for a
-suite with blocked tests, which 17 leaves open.
+**A hole's closure leaves bindings out.** A blocked test and a run that
+reaches a typed hole print the hole's closure (decision 340): each binding
+that holds its whole value there, holds no loan or is a parameter, whose
+`Debug` the host writes and which holds no capability, so a value of a
+type with a `Debug` of its own, of a type parameter or behind a reference
+kept in a local is not shown, and `sisu check --holes` is not there. `sisu
+test` exits with 3 when no test failed and one is blocked (decision 380),
+and a hole a task reaches blocks the test as one the test's own code
+reaches (decision 359). *Pay*: the program's own `Debug` impls run at the
+hole for the bindings left out; `sisu check --holes` (10).
 
 **Structural operations recurse.** The host's structural printing,
 comparison, hashing and `.copy()` recurse over a value on the host
@@ -557,16 +558,18 @@ branches of `cli.rs` go with it:
   as a library of the tools, or a server of its queries the tools ask;
   the REPL and worksheets need only a program checked and lowered per
   input, which stage 1's `build` gives.
-- **`sisu test` of a program's transcripts, `sisu test --std` and `sisu
-  test --defer-borrow`**: a program's tests and benchmarks run from stage
-  1's SIR (decision 357), but transcripts run against a world of
-  transcripts (`transcript_world`, `transcript_system`) that only the Rust
-  front end's `sir_with` adds to the SIR, the standard library's doc
-  examples are the Rust front end's tests of `compiler/std`, and the
-  deferral is the Rust ownership checker's; a program with transcripts is
-  tested by the Rust front end whole. Stage 1's own tests run on the Rust
-  front end too. *Pay*: stage 1's `sir --tests` writing the world of
-  transcripts and the standard library's examples; the deferral as a
+- **A program's transcripts, `sisu test --std` and `sisu test
+  --defer-borrow`**: a program's tests and benchmarks run from stage 1's
+  SIR (decision 357), and so do those of a program with transcripts, but
+  the transcripts themselves run against a world of transcripts
+  (`transcript_world`, `transcript_system`) that only the Rust front end's
+  `sir_with` adds to the SIR, so they run on its build of the program,
+  which must check (`D0128` otherwise; decision 380); the standard
+  library's doc examples are the Rust front end's tests of `compiler/std`;
+  and the deferral is the Rust ownership checker's. Stage 1's own tests
+  run on the Rust front end too. *Pay*: stage 1's `sir --tests` writing
+  the world of transcripts (`--transcripts`, rooting the two functions)
+  and the standard library's examples (`--std`); the deferral as a
   command of stage 1 (below).
 - **`sisu run --defer-borrow`** (the counterexample mode: the ownership
   checker's findings beside the monitored run), **`sisu check --diary`**
@@ -620,19 +623,22 @@ What the driver does around stage 1, because of what its commands are:
 - **Tests and benchmarks from stage 1's SIR** (decision 357): `sisu test`
   and `sisu bench` ask stage 1 for `sir --tests` and run its SIR, with the
   program's files for its replay tokens, snapshots and test cache; stage 1
-  prints nothing for a program with an error of the front end, so the
-  driver runs its `check` for the diagnostics, a second run of stage 1.
-  `expect` is lowered as `assert` by both front ends, so it stops a test at
-  its first failure, where 17 lets the test go on and report every failure
-  (manual, chapter 19). *Pay*: the reports in stage 1's `sir`; `expect`
-  lowered to intrinsics of its own (`expect.fail`, `expect.fail_compare`,
-  `expect.fail_parts`) that record the failure in the test's report and
-  return, which the interpreter and the runner then implement.
+  prints nothing for a program with an error of the front end, and the
+  SIR of one its ownership checker rejects, so the driver runs its `check`
+  first for the diagnostics, a second run of stage 1 (about 0.6 s for a
+  small file; decision 380). `expect` is lowered as `assert` by both front
+  ends, so it stops a test at its first failure, where 17 lets the test go
+  on and report every failure (manual, chapter 19). *Pay*: the reports in
+  stage 1's `sir` (`--tests` refusing a program its ownership checker
+  rejects); `expect` lowered to intrinsics of its own (`expect.fail`,
+  `expect.fail_compare`, `expect.fail_parts`) that record the failure in
+  the test's report and return, which the interpreter and the runner then
+  implement.
 
 ## Stage 2: what the native backend leaves out
 
 The native debug backend (architecture.md, "Stage 2") compiles every
-program the conformance suite runs (`conformance/native.list`, 205
+program the conformance suite runs (`conformance/native.list`, 216
 cases), with the debug profile and the release one (decision 232), and
 every one of those runs frees what it allocated (decision 226). A
 construct it does not compile is `D0103` under `--native`, and the
@@ -882,34 +888,39 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   without optimisations, and there is no AArch64, Mach-O or COFF. *Pay*:
   D-087's steps.
 - **The runtime in Sisu has its first pieces** (decisions 335, 336, 350
-  to 353 and 358): `compiler/rt` holds `==` of two texts' bytes, the
-  structural operations by a value's parts (equality, order, the hash of
-  decision 256, `.copy()`, the drop, the count of a copy's handles), text
-  building and an integer's digits, text search, and a float's text.
-  Still `sisu-rt`'s: `Display` and `Debug` by the type table (which call
-  the float's text), lists (growth, `pop`, `insert`, slices and the other
-  intrinsics) rather than over `RawBuf`, the tables of dicts and sets,
-  iterators, the scheduler with its tasks, channels and mutexes,
-  capabilities and the host, panics and their traces, allocation's count,
-  the descriptor-driven dispatch of the intrinsics, and the type table's
-  words themselves (`desc.rs`), which the runtime in Rust lays out from
-  the table it decodes. A struct's or enum's glue that runs on a task's
-  own stack is run by the runtime in Rust, since the Sisu walk's frames
-  are 1 to 3 KB, every argument of a call being in memory (decision 350),
-  and the walk calls back for each object the runtime in Rust keeps. The
-  structural operations are meant per type in the end (22's table, R9's
-  std.mem), not walked. *Pay*: the pieces in D-086's order, each deleting
-  its Rust counterpart: `Display` and `Debug`, lists over `RawBuf`, then
-  the tables; smaller frames for the walk (the arguments of a call in
-  registers, or the backend's own frames for the runtime's code), after
+  to 353, 358, 383 and 385): `compiler/rt` holds `==` of two texts'
+  bytes, the structural operations by a value's parts (equality, order,
+  the hash of decision 256, `.copy()`, the drop, the count of a copy's
+  handles), text building and an integer's digits, text search, a float's
+  text, `Display` and `Debug` by the type table, and lists over raw memory
+  (growth, the moves of `insert`, `remove`, `pop`, `extend`, `reverse` and
+  `swap`, a slice's copies, the sort, `in`, `join`). Still `sisu-rt`'s: the
+  decoding of each list intrinsic's call and its index checks, whose
+  panics its messages name, the tables of dicts and sets, iterators, the
+  scheduler with its tasks, channels and mutexes, capabilities and the
+  host, panics and their traces, allocation's count, the
+  descriptor-driven dispatch of the intrinsics, the text of a time and of
+  an arena, and the type table's words themselves (`desc.rs`), which the
+  runtime in Rust lays out from the table it decodes. A struct's or
+  enum's glue that runs on a task's own stack is run by the runtime in
+  Rust, since the Sisu walk's frames are 1 to 3 KB, every argument of a
+  call being in memory (decision 350), and the walk calls back for each
+  object the runtime in Rust keeps. The words `Debug` writes are packed
+  into constants, since the runtime's code has no data of its own
+  (decision 383). The structural operations are meant per type in the end
+  (22's table, R9's std.mem), not walked. *Pay*: the pieces in D-086's
+  order, each deleting its Rust counterpart: the tables of dicts and sets
+  next, then iterators; text constants for the runtime's code (its data in
+  the library mode); smaller frames for the walk (the arguments of a call
+  in registers, or the backend's own frames for the runtime's code), after
   which a glue's drop can stay in Sisu.
-- **An `own` closure that keeps a function value is not compiled**
-  (decision 360): a function value holds the widest `own` environment in
-  place (decision 224), which one that keeps a function value only widens,
-  so both lowerings refuse it with `D0103`; the interpreter runs it.
-  *Pay*: such an environment on the heap, its address in the value and
-  its type in the last word, copied and freed with the value as a task's
-  environment is.
+- **An `own` closure that keeps a function value has its environment on
+  the heap** (decision 382, where decision 360 refused it): a cell
+  allocated where the closure is made, copied whole at each copy of the
+  value and freed at its drop, where a narrower environment is in the
+  value's words. *Pay*: the function value's width from its type rather
+  than the widest environment's (D-086's layouts per type), after which
+  only an environment wider than its type holds goes on the heap.
 - **Stage 2 reads SIR itself**: stage 1 writes SIR but has no reader, so
   `stage2/src/read.sisu` transcribes `sisu-sir/src/read.rs`. *Pay*: the
   reader moves to stage 1's `sir` module when stage 1 needs one (`sisu
@@ -1018,10 +1029,11 @@ From Phase 4 (18, "Phase 4: traits, generics, std in Sisu"):
   without input and has no current directory), time zones in
   `std.time`, decoding an enum in `std.json` (reflection makes no
   variant), and a `BigInt` literal beyond `int` (03: checked at compile
-  time; a literal reaches `FromLiteral[int]` only). `Decimal` reads a
-  float literal from its shortest digits, so one with more significant
-  digits than an `f64` holds is rounded; a `str` literal through
-  `Decimal.parse` is exact. The modules run their work on the asking
+  time; a literal reaches `FromLiteral[int]` only). The frozen Rust front
+  end reads a float literal of a `Decimal` from its shortest digits, so one
+  with more significant digits than an `f64` holds is rounded, where stage
+  1 keeps its text and places (decisions 346 and 387); a `str` literal
+  through `Decimal.parse` is exact. The modules run their work on the asking
   task, `std.par`'s chunks one after another (natively, `map`'s bodies run
   on the runtime's workers, decision 333), and `std.io` has no
   stream over a file, since the file capability reads and writes whole

@@ -73,6 +73,9 @@ pub struct NativeReport {
     /// With the Sisu backend: the cases its build said it compiled, and the
     /// time it took.
     pub sisu: Option<(usize, Duration)>,
+    /// With the release profile: the cases a release build refuses as their
+    /// `.release` says (a typed hole, decision 340), which nothing lowers.
+    pub refused: usize,
     /// Built with Cranelift, the oracle (`--backend=cranelift`).
     pub cranelift: bool,
     pub failures: Vec<Failure>,
@@ -110,6 +113,9 @@ impl NativeReport {
             Some((n, t)) => format!(", {n} lowered by stage 2 in {:.2} s", t.as_secs_f64()),
             None => String::new(),
         };
+        if self.refused > 0 {
+            lowered.push_str(&format!(", {} refused as their `.release` says", self.refused));
+        }
         if let Some((n, t)) = self.sisu {
             lowered.push_str(&format!(", {n} compiled by the Sisu backend in {:.2} s", t.as_secs_f64()));
         }
@@ -307,6 +313,7 @@ fn run_list(sisu: &Sisu, root: &Path, list: &[String], mode: Mode, stage2: Optio
     }
     for r in results {
         report.cases += 1;
+        report.refused += usize::from(r.refused);
         report.build += r.build;
         report.run += r.run;
         report.lines += r.lines;
@@ -372,6 +379,8 @@ struct CaseResult {
     /// compile it, as its build said.
     stage2: Option<Duration>,
     sisu: Option<Duration>,
+    /// A release build refused it, as its `.release` expects.
+    refused: bool,
 }
 
 fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&Path>) -> CaseResult {
@@ -386,6 +395,7 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&P
         identical: false,
         stage2: None,
         sisu: None,
+        refused: false,
     };
     let fail = |r: &mut CaseResult, check: &str, detail: String| {
         r.failures.push(Failure { case: case.name.clone(), check: check.to_string(), detail });
@@ -575,6 +585,8 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&P
             fail(&mut r, "sisu build --native --release", "the release build succeeded".into());
         } else if built.stderr != expected {
             fail(&mut r, "release", diff::diff(&expected, &built.stderr));
+        } else {
+            r.refused = true;
         }
         return r;
     }

@@ -1,12 +1,12 @@
 //! The boundary with the runtime in Sisu (`compiler/rt`, decision 350): the
 //! structural operations the runtime in Rust calls there (equality, the
-//! structural hash, `.copy()`, the drop, and the counts of a copy's
-//! capability handles), which walk a value by the type table's words
-//! (`desc.rs`), and the functions that code calls back here, for what the
-//! runtime in Rust keeps as objects of its own (iterators, the tables of
-//! dicts and sets, channels, the guards of mutexes, `Shared` cells, arenas,
-//! the cells of capability handles, return traces) and for the program's
-//! drop glue.
+//! structural hash, `.copy()`, the drop, the counts of a copy's capability
+//! handles, and the `Display` and `Debug` texts, decision 383), which walk
+//! a value by the type table's words (`desc.rs`), and the functions that
+//! code calls back here, for what the runtime in Rust keeps as objects of
+//! its own (iterators, the tables of dicts and sets, channels, the guards
+//! of mutexes, `Shared` cells, arenas, the cells of capability handles,
+//! return traces, tasks) and for the program's drop glue.
 //!
 //! Each export of the runtime in Sisu has Sisu's convention (decision 189):
 //! the address of its result, the address of each argument, and its status,
@@ -92,6 +92,78 @@ unsafe extern "C" {
         mode: *const i64,
         precision: *const i64,
     ) -> u8;
+    fn sisu_rt_value_display(
+        ret: *mut u64,
+        types: *const *const u64,
+        out: *const *mut u8,
+        p: *const *mut u8,
+        t: *const i64,
+    ) -> u8;
+    fn sisu_rt_value_debug(
+        ret: *mut u64,
+        types: *const *const u64,
+        out: *const *mut u8,
+        p: *const *mut u8,
+        t: *const i64,
+    ) -> u8;
+    fn sisu_rt_list_grow(ret: *mut u64, l: *const *mut u8, extra: *const i64, size: *const i64) -> u8;
+    fn sisu_rt_list_pop(
+        ret: *mut u64,
+        types: *const *const u64,
+        l: *const *mut u8,
+        e: *const i64,
+        out: *const *mut u8,
+    ) -> u8;
+    fn sisu_rt_list_insert(
+        ret: *mut u64,
+        l: *const *mut u8,
+        k: *const i64,
+        value: *const *mut u8,
+        size: *const i64,
+    ) -> u8;
+    fn sisu_rt_list_remove(
+        ret: *mut u64,
+        l: *const *mut u8,
+        k: *const i64,
+        out: *const *mut u8,
+        size: *const i64,
+    ) -> u8;
+    fn sisu_rt_list_extend(ret: *mut u64, l: *const *mut u8, other: *const *mut u8, size: *const i64) -> u8;
+    fn sisu_rt_list_reverse(ret: *mut u64, l: *const *mut u8, size: *const i64) -> u8;
+    fn sisu_rt_list_swap(
+        ret: *mut u64,
+        l: *const *mut u8,
+        i: *const i64,
+        j: *const i64,
+        size: *const i64,
+    ) -> u8;
+    fn sisu_rt_list_copies(
+        ret: *mut u64,
+        types: *const *const u64,
+        dst: *const *mut u8,
+        l: *const *mut u8,
+        e: *const i64,
+        lo: *const i64,
+        hi: *const i64,
+    ) -> u8;
+    fn sisu_rt_list_contains(
+        ret: *mut u64,
+        types: *const *const u64,
+        l: *const *mut u8,
+        e: *const i64,
+        x: *const *mut u8,
+        tx: *const i64,
+    ) -> u8;
+    fn sisu_rt_list_join(
+        ret: *mut u64,
+        types: *const *const u64,
+        out: *const *mut u8,
+        l: *const *mut u8,
+        e: *const i64,
+        sep: *const *const u8,
+        n: *const i64,
+    ) -> u8;
+    fn sisu_rt_list_sort(ret: *mut u64, types: *const *const u64, l: *const *mut u8, e: *const i64) -> u8;
 }
 
 /// `mode` of a drop: it forgets (decision 223), or it defers what would run
@@ -251,6 +323,207 @@ pub(crate) unsafe fn retain(p: *mut u8, t: u32) {
     if unsafe { sisu_rt_value_retain(&mut ret, &types, &p, &t) } != abi::OK {
         failed("count of handles");
     }
+}
+
+/// Appends the `Display` text (`display`) or the `Debug` text of the value
+/// at `p` to `out` (the runtime in Sisu's `show.sisu`, decision 383).
+///
+/// # Safety
+/// `p` must hold a value of type `t`.
+pub(crate) unsafe fn show(out: &mut Vec<u8>, p: *mut u8, t: u32, display: bool) {
+    if !known(t) {
+        out.extend_from_slice(b"()");
+        return;
+    }
+    let types = crate::desc::base();
+    let mut text = mem::Text::empty();
+    let dst = (&raw mut text).cast::<u8>();
+    let t = i64::from(t);
+    let mut ret = 0u64;
+    // SAFETY: as for [`equal`]; `dst` holds a `String`.
+    let status = unsafe {
+        if display {
+            sisu_rt_value_display(&mut ret, &types, &dst, &p, &t)
+        } else {
+            sisu_rt_value_debug(&mut ret, &types, &dst, &p, &t)
+        }
+    };
+    if status != abi::OK {
+        failed("text of a value");
+    }
+    // SAFETY: the export appended to the `String`, which nothing else holds.
+    out.extend_from_slice(unsafe { text.bytes() });
+    mem::release(text.ptr);
+}
+
+// ------------------------------------------------------------------- lists
+
+/// Room in the list at `l` for `extra` more elements of `size` bytes (the
+/// runtime in Sisu's `list.reserve`, decision 385).
+///
+/// # Safety
+/// `l` must hold a list of elements of `size` bytes.
+pub(crate) unsafe fn list_grow(l: *mut u8, extra: u64, size: u32) {
+    let (extra, size) = (extra as i64, i64::from(size));
+    let mut ret = 0u64;
+    // SAFETY: as for [`equal`].
+    if unsafe { sisu_rt_list_grow(&mut ret, &l, &extra, &size) } != abi::OK {
+        failed("list's growth");
+    }
+}
+
+/// The last element of the list at `l`, of type `e`, moved out into the
+/// option at `out`.
+///
+/// # Safety
+/// `l` must hold a list of elements of type `e`, and `out` have room for
+/// an option of one.
+pub(crate) unsafe fn list_pop(l: *mut u8, e: u32, out: *mut u8) {
+    let types = crate::desc::base();
+    let e = i64::from(e);
+    let mut ret = 0u64;
+    // SAFETY: as for [`equal`].
+    if unsafe { sisu_rt_list_pop(&mut ret, &types, &l, &e, &out) } != abi::OK {
+        failed("list's pop");
+    }
+}
+
+/// The element at `value` moved into the list at `l` at index `k`, which
+/// the caller checked.
+///
+/// # Safety
+/// `l` must hold a list of elements of `size` bytes, `value` one, which
+/// moves in, and `k` be at most its length.
+pub(crate) unsafe fn list_insert(l: *mut u8, k: u64, value: *mut u8, size: u32) {
+    let (k, size) = (k as i64, i64::from(size));
+    let mut ret = 0u64;
+    // SAFETY: as for [`equal`].
+    if unsafe { sisu_rt_list_insert(&mut ret, &l, &k, &value, &size) } != abi::OK {
+        failed("list's insert");
+    }
+}
+
+/// Element `k` of the list at `l`, which the caller checked, moved out to
+/// `out`.
+///
+/// # Safety
+/// `l` must hold a list of elements of `size` bytes with an element `k`,
+/// and `out` have room for one.
+pub(crate) unsafe fn list_remove(l: *mut u8, k: u64, out: *mut u8, size: u32) {
+    let (k, size) = (k as i64, i64::from(size));
+    let mut ret = 0u64;
+    // SAFETY: as for [`equal`].
+    if unsafe { sisu_rt_list_remove(&mut ret, &l, &k, &out, &size) } != abi::OK {
+        failed("list's remove");
+    }
+}
+
+/// The elements of the list at `other` moved to the end of the one at `l`.
+///
+/// # Safety
+/// `l` and `other` must hold lists of elements of `size` bytes, and
+/// `other` not be used again.
+pub(crate) unsafe fn list_extend(l: *mut u8, other: *mut u8, size: u32) {
+    let size = i64::from(size);
+    let mut ret = 0u64;
+    // SAFETY: as for [`equal`].
+    if unsafe { sisu_rt_list_extend(&mut ret, &l, &other, &size) } != abi::OK {
+        failed("list's extend");
+    }
+}
+
+/// The elements of the list at `l` in the reverse order.
+///
+/// # Safety
+/// `l` must hold a list of elements of `size` bytes.
+pub(crate) unsafe fn list_reverse(l: *mut u8, size: u32) {
+    let size = i64::from(size);
+    let mut ret = 0u64;
+    // SAFETY: as for [`equal`].
+    if unsafe { sisu_rt_list_reverse(&mut ret, &l, &size) } != abi::OK {
+        failed("list's reverse");
+    }
+}
+
+/// Elements `i` and `j` of the list at `l`, which the caller checked,
+/// swapped.
+///
+/// # Safety
+/// `l` must hold a list of elements of `size` bytes with both indices.
+pub(crate) unsafe fn list_swap(l: *mut u8, i: u64, j: u64, size: u32) {
+    let (i, j, size) = (i as i64, j as i64, i64::from(size));
+    let mut ret = 0u64;
+    // SAFETY: as for [`equal`].
+    if unsafe { sisu_rt_list_swap(&mut ret, &l, &i, &j, &size) } != abi::OK {
+        failed("list's swap");
+    }
+}
+
+/// Writes at `dst` a new list of copies of the elements from `lo` to `hi`
+/// of the list at `l`, of type `e`.
+///
+/// # Safety
+/// `l` must hold a list of elements of type `e`, `dst` have room for a
+/// list, and `lo <= hi <=` its length.
+pub(crate) unsafe fn list_copies(dst: *mut u8, l: *mut u8, e: u32, lo: u64, hi: u64) {
+    let types = crate::desc::base();
+    let (e, lo, hi) = (i64::from(e), lo as i64, hi as i64);
+    let mut ret = 0u64;
+    // SAFETY: as for [`equal`].
+    if unsafe { sisu_rt_list_copies(&mut ret, &types, &dst, &l, &e, &lo, &hi) } != abi::OK {
+        failed("list's slice");
+    }
+}
+
+/// Whether the list at `l`, of type `e`, holds an element equal to the
+/// value at `x` of type `tx`.
+///
+/// # Safety
+/// `l` must hold a list of elements of type `e`, and `x` a value of type
+/// `tx`.
+pub(crate) unsafe fn list_contains(l: *mut u8, e: u32, x: *mut u8, tx: u32) -> bool {
+    let types = crate::desc::base();
+    let (e, tx) = (i64::from(e), i64::from(tx));
+    let mut ret = 0u64;
+    // SAFETY: as for [`equal`].
+    if unsafe { sisu_rt_list_contains(&mut ret, &types, &l, &e, &x, &tx) } != abi::OK {
+        failed("list's `in`");
+    }
+    ret != 0
+}
+
+/// Writes at `dst` a new `String` of each element's `Display` text of the
+/// list at `l`, of type `e`, `sep` between them.
+///
+/// # Safety
+/// `l` must hold a list of elements of type `e`, and `dst` have room for a
+/// `String`.
+pub(crate) unsafe fn list_join(dst: *mut u8, l: *mut u8, e: u32, sep: &[u8]) {
+    let types = crate::desc::base();
+    // SAFETY: `dst` has room for a `String`.
+    unsafe { (dst as *mut mem::Text).write(mem::Text::empty()) };
+    let (e, b, n) = (i64::from(e), sep.as_ptr(), sep.len() as i64);
+    let mut ret = 0u64;
+    // SAFETY: as for [`equal`]; `sep` lives for the call.
+    if unsafe { sisu_rt_list_join(&mut ret, &types, &dst, &l, &e, &b, &n) } != abi::OK {
+        failed("list's join");
+    }
+}
+
+/// Sorts the list at `l`, of type `e`, stably by its elements' order;
+/// `false`, leaving it as it was, when two have none.
+///
+/// # Safety
+/// `l` must hold a list of elements of type `e`.
+pub(crate) unsafe fn list_sort(l: *mut u8, e: u32) -> bool {
+    let types = crate::desc::base();
+    let e = i64::from(e);
+    let mut ret = 0u64;
+    // SAFETY: as for [`equal`].
+    if unsafe { sisu_rt_list_sort(&mut ret, &types, &l, &e) } != abi::OK {
+        failed("list's sort");
+    }
+    ret != 0
 }
 
 /// Writes at `dst` a new `String` of the digits of `mag` in `base` (2, 8,
@@ -470,6 +743,84 @@ unsafe extern "C" fn sisu_rt_object_eq(a: *mut u8, _ta: i64, b: *mut u8, _tb: i6
             None => false,
         })
     }
+}
+
+/// The number of entries of the dict or set at `p` (decision 383).
+///
+/// # Safety
+/// `p` must hold a dict or a set.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_table_len(p: *mut u8) -> i64 {
+    // SAFETY: as the caller guarantees.
+    unsafe { crate::dict::table(p).len() as i64 }
+}
+
+/// The address of the key of entry `i` of the dict or set at `p`.
+///
+/// # Safety
+/// `p` must hold a dict or a set of more than `i` entries.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_table_key(p: *mut u8, i: i64) -> *mut u8 {
+    // SAFETY: as the caller guarantees.
+    unsafe { crate::dict::table(p).key_at(i as u64) }
+}
+
+/// The address of the value of entry `i` of the dict at `p`.
+///
+/// # Safety
+/// `p` must hold a dict of more than `i` entries.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_table_value(p: *mut u8, i: i64) -> *mut u8 {
+    // SAFETY: as the caller guarantees.
+    unsafe { crate::dict::table(p).val_at(i as u64) }
+}
+
+/// Whether the `Shared` cell at `cell` still holds its value.
+///
+/// # Safety
+/// `cell` must be a `Shared` cell.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_shared_alive(cell: *mut u8) -> bool {
+    // SAFETY: as the caller guarantees.
+    unsafe { crate::cells::alive(cell) }
+}
+
+/// Appends to the `String` at `out` the `Debug` text of a task's handle,
+/// `<task PATH>`.
+///
+/// # Safety
+/// `out` must hold a `String`.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_show_task(out: *mut u8, task: i64) {
+    let shown = format!("<task {}>", crate::tasks::task_path(task as u32));
+    // SAFETY: as the caller guarantees.
+    unsafe { mem::at::<mem::Text>(out).push(shown.as_bytes()) }
+}
+
+/// Appends to the `String` at `out` the `Debug` text of the arena at `p`.
+///
+/// # Safety
+/// `out` must hold a `String`, and `p` an `Arena`.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_show_arena(out: *mut u8, p: *mut u8) {
+    let mut shown = Vec::new();
+    // SAFETY: as the caller guarantees.
+    unsafe {
+        crate::cells::debug_arena(&mut shown, p);
+        mem::at::<mem::Text>(out).push(&shown);
+    }
+}
+
+/// Appends to the `String` at `out` the RFC 3339 text of a time in
+/// nanoseconds since the epoch, as a `DateTime`'s `Debug` writes it.
+///
+/// # Safety
+/// `out` must hold a `String`.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_show_datetime(out: *mut u8, nanos: i64) {
+    let shown = crate::value::datetime_text(nanos);
+    // SAFETY: as the caller guarantees.
+    unsafe { mem::at::<mem::Text>(out).push(shown.as_bytes()) }
 }
 
 /// The error value at `p` is a copy: its return trace is held once more (a

@@ -411,7 +411,9 @@ Q-46; there is no `?name` form). The body type-checks around it, the
 interpreter runs until a test reaches it and then stops with the hole's
 closure (the `Debug` rendering of each binding in scope), and `sisu test`
 reports that test as blocked by the hole, a third outcome beside passed and
-failed. A placeholder meant to ship is `panic("...")`.
+failed, with a status of its own: `sisu test` exits with 3 when no test
+failed and one is blocked, 1 when one failed, and 0 when all passed. A
+placeholder meant to ship is `panic("...")`.
 
 `sisu check --holes` reports, per hole, the expected type and the definitions
 of the types it mentions, the bindings in scope with their conventions and

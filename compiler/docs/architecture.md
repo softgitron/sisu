@@ -2501,8 +2501,10 @@ output is held and written in declaration order, so a run prints the
 same at any number of threads (the conformance runner checks `--jobs 1`
 against every `.test`). A test that passed is not run again while its
 code is the same (`PROGRAM.test-cache` beside the program, or
-`build/test-cache` in a package; `--no-cache` runs everything; decision
-242): it prints what it printed when it ran.
+`build/debug/test-cache` in a package; `--no-cache` runs everything;
+decision 242): it prints what it printed when it ran. The run exits with 0 when
+every test passed, 1 when one failed, and 3 when none failed and one is
+blocked by a typed hole (decisions 340 and 380).
 
 - **Parametrised tests**: `test "name" for x, y in [(1, 2), (3, 4)]:` over
   a list written out is a test per element, named `name (1, 2)`, whose
@@ -2527,9 +2529,10 @@ code is the same (`PROGRAM.test-cache` beside the program, or
   fake `System` that persists between the runs of one file: an in-memory
   `Fs` with the files of `tests/NAME/`, a clock frozen at the epoch,
   `Rand.seeded(0)` and no network (`transcript_world` and
-  `transcript_system` in the prelude, which lowering keeps for this run
-  only). A difference fails with a diff (`D0061`); `--update` rewrites
-  the file.
+  `transcript_system` in the prelude, which the Rust front end's lowering
+  keeps for this run only, so the transcripts run on its SIR of the
+  program while the tests run on stage 1's, decision 380). A difference
+  fails with a diff (`D0061`); `--update` rewrites the file.
 - **Benchmarks**: `bench "name"(b: Bench):` is checked like a test and
   run by `sisu bench FILE [--iterations N]`, which reports the time of an
   iteration of `b.loop()` (the interpreter's: compare benchmarks with
@@ -3568,7 +3571,7 @@ when the program ends, so the two interleave as the interpreter's do.
 ### The runtime in Sisu
 
 The runtime is being written in Sisu, piece by piece, as D-086 orders
-(decisions 335, 336, 350 to 352 and 358). `compiler/rt` is a Sisu package
+(decisions 335, 336, 350 to 352, 358, 383 and 385). `compiler/rt` is a Sisu package
 (`unsafe = "extern"`) whose root module's `export_NAME` functions are the
 runtime's symbols `sisu_rt_NAME`, of Sisu's convention (decision 189),
 which the generated code and the runtime in Rust call as any function is
@@ -3597,14 +3600,17 @@ What is in Sisu (port-debt.md, "The runtime in Sisu", has what is not):
 | text appended to a `String`, an `int`'s digits appended, a `String` from a text (`sisu_rt_text_push`, `_push_int`, `_from`), and the digits of an integer of up to 128 bits in a base (`sisu_rt_int_digits`) | `text.sisu` | the generated code (decision 265), and the runtime in Rust for `fmt.digits` and `fmt.wide_digits` (decision 351) |
 | text search by Two-Way, and a prefix or suffix (`sisu_rt_find`, `sisu_rt_has_edge`) | `search.sisu` | the runtime in Rust, for `in` on texts and `bytes.find`, `starts_with` and `ends_with` (decision 352) |
 | a float's text: the shortest that reads back as the same `f64` or `f32`, the fixed form and the form with an exponent (`sisu_rt_float_digits`) | `floats.sisu` | the runtime in Rust, for `Display` and `Debug` of floats, `fmt.float_digits` and `fmt.float32_digits` (decision 358) |
+| `Display` and `Debug` of a value by its type (`sisu_rt_value_display`, `_debug`) | `show.sisu` | the runtime in Rust, for `fmt.display`, `fmt.debug`, `print`, `list.join`, a failed `assert`'s sides and the error `main` returns (decision 383) |
+| a list's growth and moves, a slice's copies, the sort, `in` and `join` (`sisu_rt_list_*`) | `list.sisu` | the runtime in Rust, for the list intrinsics and every list it builds, and the generated code's `sisu_rt_list_reserve` (decision 385) |
 
 The structural operations walk a value by the program's type table, which
 the runtime in Rust lays out in memory when the program starts
-(`sisu-rt/src/desc.rs`): a header of ten words for each type (its kind,
-size, flags, the types it holds, its name's number, where its lists are,
-the offset of its tag) and the lists after them (a struct's fields, a
-tuple's elements, an enum's variants, an error set's members, and the
-parts a drop and a copy reach in place, decisions 262 and 266). The
+(`sisu-rt/src/desc.rs`): a header of eleven words for each type (its
+kind, size, flags, the types it holds, its name's number, where its lists
+are, the offset of its tag, where its names are) and the lists after them
+(a struct's fields, a tuple's elements, an enum's variants, an error set's
+members, the parts a drop and a copy reach in place, decisions 262 and
+266, and the texts of the names `Debug` writes, decision 383). The
 runtime in Rust passes the table's address to each operation. What it
 keeps as objects of its own (iterators, the tables of dicts and sets,
 channels, guards, `Shared` cells, arenas, the cells of capability handles,
@@ -4219,7 +4225,7 @@ runs it on every push.
 ### Coverage
 
 `conformance/native.list` names the cases the backend builds and runs:
-212 of them, every case of the suite that runs a program but the
+216 of them, every case of the suite that runs a program but the
 refusals of the checked memory model, which are the interpreter's (the
 others are diagnostics, `sisu test` files, and the tools' cases:
 `--watch`, the REPL, worksheets, tokens, SIR and documentation). Among them are every
@@ -4452,14 +4458,16 @@ open to revision; the conformance cases pin the current choice.
 29. A key function's result that refers to the item passed to it is
     copied before the item is released (`max_by(it)` on references).
 30. Exit statuses: 0, 1 (an error returned by `main`, a failed test,
-    compile errors), 2 (usage), 70 (internal compiler error), 101
-    (panic), 134 (abort, including an ownership violation under the
+    compile errors), 2 (usage), 3 (`sisu test`: no test failed and one is
+    blocked by a typed hole, decision 380), 70 (internal compiler error),
+    101 (panic), 134 (abort, including an ownership violation under the
     monitor).
 31. Sisu frames are limited to 100 000; beyond that is a panic, not a
     crash (decision 234: the stack overflow names the function, natively
     as in the interpreter).
 32. A typed hole run by `sisu run` panics; in `sisu test` the test is
-    reported as blocked, and blocked tests do not fail the run.
+    reported as blocked, and blocked tests do not fail the run, which
+    exits with 3 when none failed (decision 380).
 
 **SIR**
 
@@ -7878,9 +7886,9 @@ driver"; 17, 10)
      `--std`, the standard library's examples; `--defer-borrow`; and a
      program's transcripts, which run against a world of transcripts
      (`transcript_world`) that only it writes into the SIR, so a program
-     with transcripts is tested by it whole. Every expectation of the suite
-     that runs `sisu test` holds unchanged. This changes no rule of the
-     language.
+     with transcripts is tested by it whole (decision 380 runs only the
+     transcripts on it). Every expectation of the suite that runs `sisu
+     test` holds unchanged. This changes no rule of the language.
 
 **The runtime in Sisu: a float's text** (section "Stage 2", "The runtime
 in Sisu"; D-086)
@@ -7945,5 +7953,175 @@ in Sisu"; D-086)
      references or a task's closure that keeps one is unchanged
      (`an_own_closure_that_keeps_a_function_value_is_refused_natively`).
      The other way was an environment on the heap for such a closure,
-     copied and freed with the value, which is port-debt.md's pay. This
-     changes no rule of the language.
+     copied and freed with the value, which is port-debt.md's pay, and
+     which decision 382 takes. This changes no rule of the language.
+
+**The test runner's status, and what native code leaked or refused**
+(sections "Testing", "The query layer and the driver" and "Stage 2"; 17,
+10; decisions 224, 340 and 360)
+
+380. `sisu test` exits with 3 when no test failed and one is blocked by
+     a typed hole, 1 when a test failed (whatever else is blocked) or the
+     program has an error, and 0 when every test passed, as decision 340
+     has it of stage 1's `test` and 17 and 10 now say, where blocked tests
+     left the status 0 (decision 32); a workspace's members combine by the
+     worst status, a 3 yielding to any other failure. The conformance
+     runner holds every run of `sisu test` it compares (`.test`,
+     `.explore`, `.sim`, `.schedule`, `.select`, a package's `.test`) to
+     the status its report gives, summed over its summary lines. A program
+     the ownership checker rejects no longer has its tests run: stage 1's
+     `sir --tests` prints the SIR of such a program, as `sisu sir` does, so
+     the driver asks stage 1's `check` first and runs nothing when it finds
+     an error, as the Rust front end's runner refused (`E0428` for a task
+     that borrows what a scope's body owns had reached the monitor, which
+     stopped it as a violation; `sisu bench` alike). A program's
+     transcripts no longer keep its tests on the Rust front end (decision
+     357): the tests run from stage 1's `sir --tests`, and only
+     the transcripts from the Rust front end's build of the program, with
+     the world of transcripts that only it writes (`transcript_world`,
+     `transcript_system`), so a program with transcripts and tests of
+     unsafe code runs both; a transcript of a program the Rust front end
+     rejects fails with its errors (`D0128`). `sisu test --std` outside a
+     package and without a file runs the standard library's examples
+     alone, on an empty program that a replay line names by the flag
+     (`--std`), where it was `D0064`; and a run with them takes nothing
+     from the test cache, since the program's hash leaves their code out.
+     What stays on the Rust front end is what stage 1's `sir` cannot give:
+     the standard library's examples as tests, the world of transcripts and
+     `--defer-borrow`'s deferral (port-debt.md). This changes no rule of
+     the language: it implements decision 340 in the runner.
+381. A text an interpolation is building is freed natively when a panic or
+     a `?` in one of its values leaves the function before the statement
+     that builds it ends: lowering registers the `String` that `fmt.new()`
+     makes for its scope only once that statement is done (section
+     "Lowering"), so no drop of the SIR reaches it on those paths, which
+     the interpreter's host frees and native code leaked (`"{f()}"` with
+     `f` panicking left the buffer live at exit, which stage 1's round
+     found; a `?` in a value did the same without a panic). Both lowerings
+     work out, for each block, the locals a `fmt.new()` made into that
+     nothing has moved, dropped, written over or ended since on every path
+     to it and that its cleanup does not drop (`building_texts`); each
+     failure path of a call frees those its statement holds, after the
+     trace's line and before the block's cleanup or the return of the
+     failure, and a `return` frees each but the result. A block has a
+     failure path for each set of such texts, so a function that has none
+     where it may fail compiles as before, and LIR still gives the Rust
+     lowering's executable byte for byte. `tests/leaks/leaks.sisu` holds
+     both shapes, a `?` in an interpolation's value and a panic in one in
+     a task. The other way was the front ends registering the buffer while
+     its values are evaluated, as an operand's temporary is, which is
+     stage 1's lowering (and the frozen Rust front end's) and changes
+     every program's SIR. This changes no rule of the language.
+382. An `own` closure that keeps a function value, directly or in a tuple,
+     an option, a result, a struct or an enum it captures, compiles
+     natively, where decision 360 refused it: its environment, wider than
+     any function value holds in place (decision 224), goes in a heap cell
+     (`sisu_rt_alloc`) whose address is the value's first word of
+     environment, which the closure's code reads as it reads a larger
+     environment of references, and the value's last word names a `Box`
+     of the environment's type (decision 248), so that a drop of the value
+     drops what the cell holds and frees it (the runtime's drop of a
+     `Box`) and a copy, the value's words copied and what they hold
+     counted (`sisu_rt_retain`), gives the copy a cell of its own, a copy
+     of the one it shared: the runtime in Sisu's `retain` of a `Box`, which
+     only a function value's environment reaches, since a `Box` is not
+     `Copy`. Both lowerings write the same code, and LIR gives the Rust
+     lowering's executable byte for byte. The driver's test
+     (`an_own_closure_that_keeps_a_function_value_runs_natively`) builds
+     such a program with stage 2 and the Sisu backend, with the Rust
+     lowering and Cranelift, and in the release profile, copying such
+     values through a `let`, a tuple and a list, and each run prints the
+     interpreter's output and frees what it allocated. The other way was a
+     count of the copies sharing one cell, which needs a header the
+     runtime's `Box` has not. This changes no rule of the language.
+
+**The runtime in Sisu: text of values and lists** (section "Stage 2", "The
+runtime in Sisu"; D-086, D-087 step 3)
+
+383. `Display` and `Debug` of a value whose impl is structural are the
+     runtime in Sisu's (`compiler/rt/src/show.sisu`, `sisu_rt_value_display`
+     and `sisu_rt_value_debug`), a walk of the value by its type in the
+     program's table as the interpreter writes it (`sisu-interp/src/
+     format.rs`): `fmt.display` and `fmt.debug`, `print` of a value that is
+     not text, `list.join`, the sides of a failed `assert` and the error
+     `main` returns, which the runtime in Rust asks for through `bridge.rs`
+     with a `String` the walk appends to. The table gains what `Debug`
+     writes (`desc.rs`, eleven words a header): the texts of a struct's
+     short name and its fields' names, of an enum's variants and their
+     fields', and of an opaque type as it is shown, each the address and
+     the length of the decoded table's bytes, which live for the run, and
+     flags for std's `Contextual` (`message: cause`) and a struct shown by
+     its name alone (`System`). A float's digits are `floats.sisu`'s and an
+     integer's `text.sisu`'s, which now appends them too (`push_digits`,
+     `push_int`, `put`); the tables of dicts and sets, a task's path, a
+     `Shared` cell's liveness, an arena and a time are read out or shown by
+     calls of the runtime in Rust (`sisu_rt_table_len`, `_key`, `_value`,
+     `sisu_rt_shared_alive`, `sisu_rt_show_task`, `_arena`, `_datetime`).
+     The words `Debug` writes are packed eight bytes to a constant, the
+     runtime's code having no text of its own to point to. What the runtime
+     in Rust no longer has: `value.rs`'s `display`, `debug`, `fields_debug`,
+     `quote_char`, `quote_bytes`, `int_digits` and `push_char`, which are
+     calls of the exports now. `run/debug_forms` holds every kind natively
+     as the interpreter writes it. The other way was the program's own
+     `Debug` impls generated for every structural type (22's end), which
+     changes every program's SIR. This changes no rule of the language.
+384. A `Shared` displays as its value does, as std's `impl[T: Display]
+     Display for Shared[T]` says: both front ends take that impl as the
+     host's (std's impls of the host-backed types render as the host does),
+     and the host showed the value's `Debug` form, `"Aino"` with its
+     quotes (the manual's maintenance round); the interpreter's
+     `display_into` and the runtime in Sisu's `display` follow a live
+     `Shared` to its value (`run/shared_display`). This changes no rule of
+     the language: it implements std's impl.
+385. Lists are the runtime in Sisu's over raw memory
+     (`compiler/rt/src/list.sisu`): a list is its buffer's address, its
+     length and its capacity, its elements in the buffer each its type's
+     size, moved as bits as std.mem's `RawBuf` moves slots, and the buffer
+     grows to twice its capacity, four elements at least
+     (`sisu_rt_list_grow`, which the runtime in Rust's `List::reserve` and
+     the generated code's `sisu_rt_list_reserve` call). Here are the moves
+     of `insert`, `remove` and `pop`, `extend`, `reverse`, `swap` and
+     `reversed`, the copies a slice makes (`list[a:b]`, `Slice` cuts), the
+     stable sort of `sort` and `sorted` (a merge sort of the indices by
+     `value.order`, refusing two elements without an order), `in` and
+     `join`; the runtime in Rust decodes the call and checks the indices,
+     whose panics its messages name. What it no longer has: `copies`,
+     `reverse`, `sort_list`, `merge_sort` and the growth of `List::reserve`.
+     `run/list_moves` holds them natively as the interpreter runs them.
+     With decision 383, the runtime's seed grows from 308 916 to 428 692
+     bytes of SIR and its object, as the fixed point builds it, from
+     582 664 to 799 152 bytes, which the fixed point still holds (rt-A.o
+     and rt-B.o the same bytes, as sisu2-A and sisu2-B, 27 655 024, and
+     stage1-A and stage1-B, 54 716 320). The other way was the list methods
+     written in Sisu over `RawBuf` in the prelude and compiled with every
+     program, which needs per-type code (22's end) and changes every
+     program's SIR. This changes no rule of the language.
+
+**The driver: what the manual found** (section "The query layer and the
+driver"; 10, 17; the manual's findings R13, R16, R17 and G14)
+
+386. `sisu --version` and `sisu version` print the toolchain's version
+     (`sisu 0.0.1`, `D0131`), the one replay tokens and capability logs
+     record; `sisu explain` without a code says it needs one (`D0129`) and
+     `sisu new` without a name that it needs the package's (`D0130`), where
+     both said a file was needed (`D0004`); `sisu explain CODE` shows the
+     message as a reader sees it, one brace where the catalog doubles it
+     and its line breaks, a parameter still named in its braces; `check`,
+     `run`, `build`, `sir`, `test` and `bench` take `--accept-unsafe`,
+     which `E1022` names, and pass it to stage 1, which lets a package's
+     `unsafe` level rise in its lockfile (22); `--stats` followed by a word
+     that names nothing there, before the file, takes it as the kind asked
+     for, so `sisu run --stats bogus FILE` is `D0094` where it read `bogus`
+     as the file; and under `--explore N` (or the exhaustive scheduler) a
+     test that fails under one of the schedules shows what that run
+     printed, where the first seed's lines were shown with the failure of
+     another (`testing/explore_output`). The test cache is
+     `build/debug/test-cache` in a package, as section "Testing" now says.
+     This changes no rule of the language.
+387. A float literal's `Decimal` is the same natively as in the interpreter:
+     stage 1 lowers it to `Decimal.of_literal` of its text, its places kept
+     (decision 346), whose Sisu code in std.num both run
+     (`std/decimal_literals`, in `native.list`: `3.50`, `0.10` and
+     `12345678901234567890.123456789` as written); the frozen Rust front end
+     still reads the literal from its `f64`'s shortest digits. This changes
+     no rule of the language.

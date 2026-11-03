@@ -1,0 +1,17 @@
+# A float literal reaches a `Decimal` from its text, its places kept (03;
+# stage 1's R33, decision 346): `3.50` stays `3.50`, and digits beyond an
+# `f64`'s are exact, in the interpreter and natively alike (decision 387).
+
+from std.num import Decimal
+
+def main():
+    let price: Decimal = 3.50
+    print(price)
+    let tip: Decimal = 0.10
+    print(price + tip)
+    let long: Decimal = 12345678901234567890.123456789
+    print(long)
+    let small: Decimal = 1e-3
+    print(small)
+    let whole: Decimal = 2.000
+    print(whole)

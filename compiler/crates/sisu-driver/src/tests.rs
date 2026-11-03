@@ -179,6 +179,31 @@ fn explain_names_the_catalog_entry() {
     let (code, host) = cli(&["explain", "E0200"]);
     assert_eq!(code, 0);
     assert!(host.out.contains("resolve.undefined-name"), "{}", host.out);
+    // As a reader sees the message: one brace where the catalog doubles it
+    // (decision 386).
+    let (code, host) = cli(&["explain", "E0121"]);
+    assert_eq!(code, 0);
+    assert!(host.out.contains("between `{` and `}`"), "{}", host.out);
+}
+
+/// The toolchain's version, and what `sisu explain`, `sisu new` and
+/// `--stats` need, said as such (decision 386; the manual's findings R16).
+#[test]
+fn the_version_and_what_a_command_needs() {
+    for args in [&["--version"][..], &["version"][..]] {
+        let (code, host) = cli(args);
+        assert_eq!((code, host.out.as_str()), (0, "sisu 0.0.1\n"), "{args:?}");
+    }
+    let (code, host) = cli(&["explain"]);
+    assert_eq!(code, crate::cli::EXIT_USAGE);
+    assert!(host.err.starts_with("error[D0129]: `sisu explain` needs a diagnostic's code"), "{}", host.err);
+    let (code, host) = cli(&["new"]);
+    assert_eq!(code, crate::cli::EXIT_USAGE);
+    assert!(host.err.starts_with("error[D0130]: `sisu new` needs the name"), "{}", host.err);
+    let path = temp_file("stats.sisu", "def main():\n    print(1)\n");
+    let (code, host) = cli(&["run", "--stats", "bogus", &path]);
+    assert_eq!(code, crate::cli::EXIT_USAGE);
+    assert!(host.err.starts_with("error[D0094]"), "{}", host.err);
 }
 
 /// The robustness property of 18, Phase 0, checked on mutated programs:

@@ -1,0 +1,11 @@
+# A `Shared` displays as its value does, as std's `impl Display for
+# Shared[T]` says, in an interpolation and in `print`, where it showed its
+# value's `Debug` form (decision 384; the manual's maintenance round).
+
+def main():
+    let name = Shared("Aino".to_string())
+    print("{name}")
+    print(name)
+    print("{name:?}")
+    let n = Shared(42)
+    print("{n} and {Shared([1, 2])}")

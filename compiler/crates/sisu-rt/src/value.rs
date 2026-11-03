@@ -1,10 +1,15 @@
 //! The structural operations on values in the native layout, by their
 //! types: drop, `.copy()`, equality, order, and the `Display` and `Debug`
 //! texts. Each follows the interpreter's rule for the same value
-//! (`sisu-interp/src/drops.rs`, `ops.rs`, `format.rs`, and `copy_value`).
+//! (`sisu-interp/src/drops.rs`, `ops.rs`, `format.rs`, and `copy_value`),
+//! and each walk is the runtime in Sisu's (`compiler/rt`, decisions 350 and
+//! 383), which these functions call through `bridge.rs`; what stays here is
+//! what the runtime in Rust keeps of its own: the forgetting of a drop
+//! (decision 223), the counted handles, and the texts of times and quoted
+//! names its messages write.
 
 use crate::abi::{self, Kind, TypeEntry};
-use crate::mem::{self, List, Str, Text};
+use crate::mem::{self, Str, Text};
 use crate::rt::{self, ty};
 use std::cmp::Ordering;
 
@@ -59,15 +64,6 @@ unsafe fn text_at<'a>(p: *mut u8, entry: &TypeEntry) -> Option<&'a [u8]> {
             _ => None,
         }
     }
-}
-
-/// The tag of the enum, option or result at `p`.
-///
-/// # Safety
-/// `p` must hold a value of an enum type `t`.
-pub(crate) unsafe fn tag(p: *const u8, t: &TypeEntry) -> u64 {
-    // SAFETY: as the caller guarantees.
-    unsafe { mem::word(p, t.kind.tag_offset()) }
 }
 
 /// The enum type an error value belongs to: an error set's value names
@@ -214,13 +210,6 @@ pub(crate) unsafe fn equal(a: *mut u8, ta: u32, b: *mut u8, tb: u32) -> bool {
     unsafe { crate::bridge::equal(a, ta, b, tb) }
 }
 
-/// # Safety
-/// `p` must hold an `f32`.
-unsafe fn f32_at(p: *const u8) -> f32 {
-    // SAFETY: an `f32` is the low half of its word.
-    unsafe { (p as *const f32).read() }
-}
-
 /// The order of two values of an ordered type; `None` for NaN and values
 /// without an order. The runtime in Sisu's (decision 350).
 ///
@@ -234,283 +223,24 @@ pub(crate) unsafe fn compare(a: *mut u8, ta: u32, b: *mut u8, tb: u32) -> Option
 // -------------------------------------------------------------- formatting
 
 /// The `Display` text of a value whose impl is structural: the plain text
-/// of texts and characters, and the `Debug` text of everything else.
+/// of texts and characters, and the `Debug` text of everything else. The
+/// runtime in Sisu's (decision 383).
 ///
 /// # Safety
 /// `p` must hold a value of type `t`.
 pub(crate) unsafe fn display(out: &mut Vec<u8>, p: *mut u8, t: u32) {
     // SAFETY: as the caller guarantees.
-    unsafe {
-        let (p, t) = target(p, t);
-        let entry = ty(t);
-        if let Some(b) = text_at(p, entry) {
-            out.extend_from_slice(b);
-            return;
-        }
-        match entry.kind {
-            Kind::Char => push_char(out, mem::word(p, 0) as u32),
-            // std's `Contextual` (prelude): `message: cause`.
-            Kind::Enum { .. } | Kind::ErrSet(_) => {
-                let decl = concrete(p, t);
-                let entry = ty(decl);
-                if let Kind::Enum { name, variants, .. } = &entry.kind
-                    && name == "Contextual"
-                    && let Some(v) = variants.get(tag(p, entry) as usize)
-                    && let [message, cause] = v.fields.as_slice()
-                {
-                    display(out, p.add(message.offset as usize), message.ty);
-                    out.extend_from_slice(b": ");
-                    display(out, p.add(cause.offset as usize), cause.ty);
-                    return;
-                }
-                debug(out, p, t)
-            }
-            _ => debug(out, p, t),
-        }
-    }
+    unsafe { crate::bridge::show(out, p, t, true) }
 }
 
-/// The decimal digits of `n`, after a `-` when it is negative, as
-/// `Display` writes an `int`, written at the end of `buf`.
-pub(crate) fn int_digits(n: i64, buf: &mut [u8; 20]) -> &[u8] {
-    let mut m = n.unsigned_abs();
-    let mut i = buf.len();
-    loop {
-        i -= 1;
-        buf[i] = b'0' + (m % 10) as u8;
-        m /= 10;
-        if m == 0 {
-            break;
-        }
-    }
-    if n < 0 {
-        i -= 1;
-        buf[i] = b'-';
-    }
-    &buf[i..]
-}
-
-fn push_char(out: &mut Vec<u8>, code: u32) {
-    let c = char::from_u32(code).unwrap_or('\u{fffd}');
-    let mut buf = [0u8; 4];
-    out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
-}
-
-/// The `Debug` text of a value: as it is written.
+/// The `Debug` text of a value: as it is written. The runtime in Sisu's
+/// (decision 383).
 ///
 /// # Safety
 /// `p` must hold a value of type `t`.
 pub(crate) unsafe fn debug(out: &mut Vec<u8>, p: *mut u8, t: u32) {
-    let entry = ty(t);
-    // SAFETY: the parts are where the type says.
-    unsafe {
-        match &entry.kind {
-            Kind::Unit => out.extend_from_slice(b"()"),
-            Kind::Int | Kind::Sized(_) => {
-                out.extend_from_slice(int_digits(mem::word(p, 0) as i64, &mut [0u8; 20]))
-            }
-            Kind::U64 => out.extend_from_slice(mem::word(p, 0).to_string().as_bytes()),
-            Kind::I128 => out.extend_from_slice((crate::wide::bits(p) as i128).to_string().as_bytes()),
-            Kind::U128 => out.extend_from_slice(crate::wide::bits(p).to_string().as_bytes()),
-            Kind::Float => out.extend_from_slice(float_repr(f64::from_bits(mem::word(p, 0))).as_bytes()),
-            Kind::F32 => out.extend_from_slice(float32_repr(f32_at(p)).as_bytes()),
-            Kind::Bool => out.extend_from_slice(if mem::word(p, 0) != 0 { b"True" } else { b"False" }),
-            Kind::Char => {
-                let c = char::from_u32(mem::word(p, 0) as u32).unwrap_or('\u{fffd}');
-                out.extend_from_slice(quote_char(c).as_bytes());
-            }
-            Kind::Str | Kind::String | Kind::Path => {
-                let b = text(p, t).unwrap_or(&[]);
-                out.extend_from_slice(quote_str(&String::from_utf8_lossy(b)).as_bytes());
-            }
-            Kind::Bytes => out.extend_from_slice(quote_bytes(mem::at::<Text>(p).bytes()).as_bytes()),
-            Kind::DateTime => out.extend_from_slice(datetime_text(mem::word(p, 0) as i64).as_bytes()),
-            Kind::Ref(_) | Kind::Dyn => {
-                let (q, t) = target(p, t);
-                debug(out, q, t)
-            }
-            // `Box` is a struct of one field, `boxed`, to the structural
-            // impls.
-            Kind::Box(inner) => {
-                out.extend_from_slice(b"Box(boxed=");
-                debug(out, mem::word(p, 0) as *mut u8, *inner);
-                out.push(b')');
-            }
-            Kind::Tuple(slots) => {
-                out.push(b'(');
-                for (i, s) in slots.iter().enumerate() {
-                    if i > 0 {
-                        out.extend_from_slice(b", ");
-                    }
-                    debug(out, p.add(s.offset as usize), s.ty);
-                }
-                if slots.len() == 1 {
-                    out.push(b',');
-                }
-                out.push(b')');
-            }
-            Kind::List(e) => {
-                let list = mem::at::<List>(p);
-                let size = ty(*e).size;
-                out.push(b'[');
-                for i in 0..list.len {
-                    if i > 0 {
-                        out.extend_from_slice(b", ");
-                    }
-                    debug(out, list.at(i, size), *e);
-                }
-                out.push(b']');
-            }
-            Kind::Option(payload) => {
-                if tag(p, entry) == 0 {
-                    out.extend_from_slice(b"Some(");
-                    debug(out, p.add(8), *payload);
-                    out.push(b')');
-                } else {
-                    out.extend_from_slice(b"None");
-                }
-            }
-            Kind::Result(ok, err) => {
-                if tag(p, entry) == 0 {
-                    out.extend_from_slice(b"Ok(");
-                    debug(out, p.add(8), *ok);
-                } else {
-                    out.extend_from_slice(b"Err(");
-                    debug(out, p.add(8), *err);
-                }
-                out.push(b')');
-            }
-            Kind::Struct { name, fields, .. } => {
-                let short = name.rsplit('.').next().unwrap_or(name);
-                out.extend_from_slice(short.as_bytes());
-                if short == "System" {
-                    return;
-                }
-                out.push(b'(');
-                fields_debug(out, p, fields);
-                out.push(b')');
-            }
-            Kind::Enum { variants, .. } => {
-                let tg = tag(p, entry);
-                match variants.get(tg as usize) {
-                    Some(v) => {
-                        out.extend_from_slice(v.name.as_bytes());
-                        if !v.fields.is_empty() {
-                            out.push(b'(');
-                            fields_debug(out, p, &v.fields);
-                            out.push(b')');
-                        }
-                    }
-                    None => out.extend_from_slice(b"?"),
-                }
-            }
-            Kind::ErrSet(_) => {
-                let decl = concrete(p, t);
-                if decl != t {
-                    debug(out, p, decl);
-                }
-            }
-            Kind::Dict(..) => {
-                let t = crate::dict::table(p);
-                out.push(b'{');
-                for i in 0..t.len() {
-                    if i > 0 {
-                        out.extend_from_slice(b", ");
-                    }
-                    debug(out, t.key_at(i), t.key);
-                    out.extend_from_slice(b": ");
-                    debug(out, t.val_at(i), t.val);
-                }
-                out.push(b'}');
-            }
-            Kind::Set(_) => {
-                let t = crate::dict::table(p);
-                if t.len() == 0 {
-                    out.extend_from_slice(b"set()");
-                } else {
-                    out.push(b'{');
-                    for i in 0..t.len() {
-                        if i > 0 {
-                            out.extend_from_slice(b", ");
-                        }
-                        debug(out, t.key_at(i), t.key);
-                    }
-                    out.push(b'}');
-                }
-            }
-            Kind::Entry(..) => out.extend_from_slice(b"<entry>"),
-            // As std's `Debug` for raw pointers writes one, without its
-            // address (22, clause 6).
-            Kind::Ptr(_) => out.extend_from_slice(b"ptr"),
-            Kind::Scope => out.extend_from_slice(b"<scope>"),
-            Kind::Handle(_) => {
-                let path = crate::tasks::task_path(mem::word(p, 0) as u32);
-                out.extend_from_slice(format!("<task {path}>").as_bytes());
-            }
-            Kind::Cancellation => out.extend_from_slice(b"<cancellation>"),
-            Kind::Sender(_) => out.extend_from_slice(b"<sender>"),
-            Kind::Receiver(_) => out.extend_from_slice(b"<receiver>"),
-            Kind::Timer => out.extend_from_slice(b"<timer>"),
-            Kind::Mutex(v) => {
-                out.extend_from_slice(b"Mutex(");
-                if mem::word(p, abi::MUTEX_LOCKED) != 0 {
-                    out.extend_from_slice(b"<locked>");
-                } else {
-                    debug(out, p.add(abi::MUTEX_HEADER as usize), *v);
-                }
-                out.push(b')');
-            }
-            // Readers leave the value to be read; a writer does not.
-            Kind::RwLock(v) => {
-                out.extend_from_slice(b"RwLock(");
-                if mem::word(p, abi::MUTEX_LOCKED) == 1 {
-                    out.extend_from_slice(b"<locked>");
-                } else {
-                    debug(out, p.add(abi::MUTEX_HEADER as usize), *v);
-                }
-                out.push(b')');
-            }
-            Kind::Guard(v, _) | Kind::ReadGuard(v) => debug(out, mem::word(p, 0) as *mut u8, *v),
-            Kind::Shared(v) => {
-                let cell = mem::word(p, 0) as *mut u8;
-                if crate::cells::alive(cell) {
-                    debug(out, cell, *v);
-                } else {
-                    out.extend_from_slice(b"<dropped>");
-                }
-            }
-            Kind::Weak(_) => out.extend_from_slice(b"(Weak)"),
-            Kind::Cell(v) => {
-                out.extend_from_slice(b"Cell(");
-                debug(out, p, *v);
-                out.push(b')');
-            }
-            Kind::Arena(_) => crate::cells::debug_arena(out, p),
-            Kind::Fn => out.extend_from_slice(b"<fn>"),
-            Kind::Iter(_) => out.extend_from_slice(b"<iter>"),
-            // A test clock shows as the interpreter's clocks do.
-            Kind::Opaque(n) if n == "TestClock" || n == "Lent TestClock" => out.extend_from_slice(b"Clock"),
-            // A `Lent` shows as its handle.
-            Kind::Opaque(n) => out.extend_from_slice(n.strip_prefix("Lent ").unwrap_or(n).as_bytes()),
-            Kind::Const(n) => out.extend_from_slice(n.to_string().as_bytes()),
-        }
-    }
-}
-
-/// # Safety
-/// `p` must hold the fields at their offsets.
-unsafe fn fields_debug(out: &mut Vec<u8>, p: *mut u8, fields: &[abi::Field]) {
-    for (i, f) in fields.iter().enumerate() {
-        if i > 0 {
-            out.extend_from_slice(b", ");
-        }
-        if let Some(n) = &f.name {
-            out.extend_from_slice(n.as_bytes());
-            out.push(b'=');
-        }
-        // SAFETY: the field is where the type says.
-        unsafe { debug(out, p.add(f.offset as usize), f.ty) };
-    }
+    // SAFETY: as the caller guarantees.
+    unsafe { crate::bridge::show(out, p, t, false) }
 }
 
 /// The shortest text that reads back as the same `f64`, always with a
@@ -606,37 +336,6 @@ pub(crate) fn strftime(nanos: i64, pattern: &str) -> String {
         }
     }
     out
-}
-
-/// `b"..."`: the printable ASCII bytes as they are, the others escaped
-/// (the interpreter's `quote_bytes`).
-pub(crate) fn quote_bytes(b: &[u8]) -> String {
-    let mut out = String::from("b\"");
-    for &x in b {
-        match x {
-            b'\n' => out.push_str("\\n"),
-            b'\t' => out.push_str("\\t"),
-            b'\r' => out.push_str("\\r"),
-            b'\\' => out.push_str("\\\\"),
-            b'"' => out.push_str("\\\""),
-            0x20..=0x7e => out.push(x as char),
-            _ => out.push_str(&format!("\\x{x:02x}")),
-        }
-    }
-    out.push('"');
-    out
-}
-
-pub(crate) fn quote_char(c: char) -> String {
-    match c {
-        '\'' => "'\\''".into(),
-        '\\' => "'\\\\'".into(),
-        '\n' => "'\\n'".into(),
-        '\t' => "'\\t'".into(),
-        '\r' => "'\\r'".into(),
-        c if c.is_control() => format!("'\\u{{{:x}}}'", c as u32),
-        c => format!("'{c}'"),
-    }
 }
 
 /// Writes `Str` for these bytes at `dst`.

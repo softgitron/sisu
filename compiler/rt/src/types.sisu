@@ -1,8 +1,9 @@
 ##! The program's types as the runtime in Rust lays them out for this
 ##! package when the program starts (`crates/sisu-rt/src/desc.rs`, decision
-##! 350): a header of ten words for each type, then the lists the headers
-##! point to. The runtime's code walks a value by them, as the runtime in
-##! Rust walked the type table it decodes.
+##! 350): a header of eleven words for each type, then the lists the headers
+##! point to, and the texts of the names `Debug` writes (decision 383). The
+##! runtime's code walks a value by them, as the runtime in Rust walked the
+##! type table it decodes.
 
 from std.mem import ptr
 
@@ -66,9 +67,14 @@ pub const ERROR: int = 4
 pub const COUNTED: int = 8
 pub const DROPS_BY_VARIANT: int = 16
 pub const COPIES_BY_VARIANT: int = 32
+## The flags of `Display` and `Debug` (decision 383): std's `Contextual`,
+## which displays as `message: cause`, and a struct whose `Debug` is its
+## name alone (`System`).
+pub const CONTEXTUAL: int = 64
+pub const BARE: int = 128
 
 ## The words of a type's header, and where each is in it.
-pub const WORDS: int = 10
+pub const WORDS: int = 11
 pub const KIND: int = 0
 pub const SIZE: int = 1
 pub const FLAGS: int = 2
@@ -79,14 +85,18 @@ pub const PARTS: int = 6
 pub const DROPS: int = 7
 pub const COPIES: int = 8
 pub const TAG: int = 9
+pub const SHOWN: int = 10
 
 ## A type's header: its kind, its size in bytes and its flags; `a` and `b`,
 ## what it holds (a reference's target, a list's or an option's element, a
 ## result's two types, a dict's key and value, a guard's check or a
 ## struct's or an enum's drop glue, each plus one); the number of its name,
 ## the same for types of one name; the positions of its parts, of the parts
-## its drop reaches and of those its copy reaches, 0 for none; and the
-## offset of its tag.
+## its drop reaches and of those its copy reaches, 0 for none; the offset
+## of its tag; and the position of the names its `Debug` writes, 0 for none
+## (each name the address and the length of its bytes: a struct's own and
+## then each field's, 0 and 0 for a positional one; each of an enum's
+## variants' and the position of its fields' names; an opaque type's).
 @derive(Copy)
 pub struct Header:
     pub kind: int
@@ -99,6 +109,7 @@ pub struct Header:
     pub drops: int
     pub copies: int
     pub tag: int
+    pub shown: int
 
 impl Header:
     ## Whether dropping a value of the type can do something.
@@ -136,7 +147,7 @@ impl Types:
     ## The header of type `t`.
     pub(package) pure def header(self, t: int) -> Header:
         # safety: in_bounds, valid, aligned: each type of the program has its
-        #   ten words at the start of the table, which lives for the run.
+        #   eleven words at the start of the table, which lives for the run.
         unsafe:
             let w = self.words.offset(t * WORDS)
             return Header(
@@ -150,6 +161,7 @@ impl Types:
                 drops=w.offset(7).read(),
                 copies=w.offset(8).read(),
                 tag=w.offset(9).read(),
+                shown=w.offset(10).read(),
             )
 
     ## The kind of type `t`.

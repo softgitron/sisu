@@ -1,9 +1,10 @@
 ##! The runtime in Rust (`crates/sisu-rt`) as the runtime's Sisu code calls
 ##! it (decision 350): its allocation, which counts the program's blocks;
-##! what it keeps as objects of its own, which it alone drops, copies and
-##! compares (iterators, the tables of dicts and sets, channels, the guards
-##! of mutexes, `Shared` cells, arenas, the cells of capability handles,
-##! return traces); the program's drop glue, which it calls through the
+##! what it keeps as objects of its own, which it alone drops, copies,
+##! compares and shows (iterators, the tables of dicts and sets, channels,
+##! the guards of mutexes, `Shared` cells, arenas, the cells of capability
+##! handles, return traces, tasks); the program's drop glue, which it calls
+##! through the
 ##! function table; and C's `memmove` and `memcmp`, which move and compare
 ##! bytes. The code the backend writes for this package makes no call of
 ##! `sisu_rt_flush` before these, as it does before a program's foreign
@@ -45,6 +46,19 @@ extern "C":
     pub def sisu_rt_trace_release(p: ptr mut u8)
     ## The error value at `p` is a copy: its return trace is held once more.
     pub def sisu_rt_trace_retain(p: ptr mut u8)
+    ## The number of entries of the dict or set at `p`, and the address of
+    ## entry `i`'s key and of its value (decision 383).
+    pub def sisu_rt_table_len(p: ptr mut u8) -> int
+    pub def sisu_rt_table_key(p: ptr mut u8, i: int) -> ptr mut u8
+    pub def sisu_rt_table_value(p: ptr mut u8, i: int) -> ptr mut u8
+    ## Whether the `Shared` cell at `cell` still holds its value.
+    pub def sisu_rt_shared_alive(cell: ptr mut u8) -> bool
+    ## Appends to the `String` at `out` the `Debug` text of the task whose
+    ## number is `task` (`<task PATH>`), of the arena at `p`, and of a time
+    ## in nanoseconds since the epoch.
+    pub def sisu_rt_show_task(out: ptr mut u8, task: int)
+    pub def sisu_rt_show_arena(out: ptr mut u8, p: ptr mut u8)
+    pub def sisu_rt_show_datetime(out: ptr mut u8, nanos: int)
     ## Copies `n` bytes from `src` to `dst`; the regions may overlap.
     pub def memmove(dst: ptr mut u8, src: ptr[u8], n: int) -> ptr mut u8
     ## The order of the `n` bytes at `a` and at `b`: 0 when they are the same.

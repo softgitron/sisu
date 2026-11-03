@@ -1,0 +1,94 @@
+# `Debug` and `Display` of values of every kind natively, the runtime in
+# Sisu's by the type table (decision 383): structs, enums, tuples, lists,
+# options, results, dicts, sets, floats, wide and sized integers, texts
+# with their escapes, bytes, boxes, a `Shared`, a `Weak`, a `Mutex`, a
+# `Cell`, a `dyn`, a time, a clock, the `System`, a task's handle and an
+# arena, as the interpreter writes them.
+
+struct Point:
+    x: int
+    y: f64
+
+enum Shape:
+    Circle(r: f64)
+    Square(side: int)
+    Dot
+
+error Problem:
+    Bad(text: String)
+    Empty
+
+def shapes():
+    let p = Point(x=3, y=-2.5)
+    print("{p:?}")
+    print("{[Shape.Circle(r=1.5), Shape.Square(side=2), Shape.Dot]:?}")
+    print("{(1, "two", 'c', '\n', "q\"uote\t\u{1}")}")
+    let o: int? = Some(4)
+    let n: int? = None
+    print("{o} {n}")
+    let r: int ! Problem = Err(Bad(text="x"))
+    print("{r}")
+    var d: dict[String, list[int]] = {}
+    _ = d.insert("a".to_string(), [1, 2])
+    _ = d.insert("b".to_string(), [])
+    print("{d}")
+    let s: set[int] = set()
+    print("{s}")
+    var s2: set[int] = set()
+    _ = s2.add(5)
+    print("{s2}")
+    print("{1.0} {0.1} {1e20} {-0.0} {2.5f32}")
+    print("{u64.wrapping_from(-1)} {-5i128}")
+    print("{True} {False} {()}")
+    print("{Box(7)}")
+    let b = "h\u{1}é".encode()
+    print("{b}")
+    print("{(5,)}")
+    print("{["x".to_string()]}")
+
+trait Named:
+    def name(self) -> String
+
+struct Cat:
+    lives: int
+
+impl Named for Cat:
+    def name(self) -> String:
+        return "cat"
+
+error Oops:
+    Broke(code: int)
+
+def fails() -> int ! Oops:
+    return Err(Broke(code=7))
+
+def kinds(sys: System):
+    let s = Shared("Aino".to_string())
+    print("{s:?}")
+    let w = Shared.downgrade(s)
+    print("{w:?}")
+    let m = Mutex([1, 2])
+    print("{m:?}")
+    let c = Cell(5)
+    print("{c:?}")
+    let d: Box[dyn Named] = Box(Cat(lives=9))
+    print("{d:?}")
+    print("{'é'} {'é':?} {'\u{85}':?} {"a\u{85}b":?} {'\u{1F600}'}")
+    print("{DateTime.epoch():?}")
+    print("{sys.clock:?}")
+    print("{sys:?}")
+    let r = fails()
+    print("{r:?}")
+    let rs = [Ok(1), Err("no")]
+    print("{rs:?}")
+    task.scope do sc:
+        let h = sc.spawn(() -> 1)
+        print("{h:?}")
+        _ = h.join()
+    var a: Arena[String] = Arena.new()
+    let k = a.insert("x".to_string())
+    print("{a:?} {k:?}")
+
+def main(sys: System):
+    shapes()
+    kinds(sys)

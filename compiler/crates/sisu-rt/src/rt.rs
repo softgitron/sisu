@@ -55,9 +55,11 @@ pub(crate) fn init(types: Vec<TypeEntry>, fns: Vec<usize>) {
     let plain = plain_table(&types, &needs);
     let parts = copy_parts_table(&types, &plain);
     let drops = drop_parts_table(&types, &needs);
-    crate::rawmem::set_up(&types);
-    crate::desc::set_up(&types, &needs, &plain, &drops, &parts);
     let _ = TYPES.set(types);
+    // The laid-out table names the decoded one's texts, kept for the run.
+    let types = TYPES.get().map_or(&[][..], |t| t.as_slice());
+    crate::rawmem::set_up(types);
+    crate::desc::set_up(types, &needs, &plain, &drops, &parts);
     let _ = NEEDS_DROP.set(needs);
     let _ = PLAIN.set(plain);
     let _ = FNS.set(fns);

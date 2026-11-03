@@ -10,20 +10,25 @@
 //! (the number `abi` encodes it by), its size in bytes, its flags, two
 //! words `a` and `b` (what it holds; a result's two types; a dict's key and
 //! value; a struct's or enum's drop glue, plus one), the number of its name
-//! (equal names, equal numbers), the positions of its lists, and the offset
-//! of its tag. The lists follow the headers, each its length and then its
-//! items: a struct's fields and a tuple's elements as offset, type and
-//! whether the glue drops it; an enum's variants, each the position of its
-//! fields' list; an error set's member types; the parts a drop reaches and
-//! those a copy reaches, as offset and type, of the value or of each
-//! variant. A position of 0 is no list.
+//! (equal names, equal numbers), the positions of its lists, the offset of
+//! its tag, and the position of the names its `Debug` writes. The lists
+//! follow the headers, each its length and then its items: a struct's
+//! fields and a tuple's elements as offset, type and whether the glue drops
+//! it; an enum's variants, each the position of its fields' list; an error
+//! set's member types; the parts a drop reaches and those a copy reaches,
+//! as offset and type, of the value or of each variant. A position of 0 is
+//! no list. The names are texts, each the address and the length of its
+//! bytes (decision 383): a struct's short name and then each field's (none,
+//! 0 and 0, for a positional one); an enum's variants, each its name and
+//! the position of its fields' names; an opaque type's name as `Debug`
+//! shows it.
 
 use crate::abi::{Kind, TypeEntry};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
 /// The words of a type's header.
-pub(crate) const WORDS: usize = 10;
+pub(crate) const WORDS: usize = 11;
 
 const KIND: usize = 0;
 const SIZE: usize = 1;
@@ -35,6 +40,7 @@ const PARTS: usize = 6;
 const DROPS: usize = 7;
 const COPIES: usize = 8;
 const TAG: usize = 9;
+const SHOWN: usize = 10;
 
 /// The flags: dropping a value of the type can do something; a copy is a
 /// copy of its bytes; an error value (an `error` enum or a union of error
@@ -47,6 +53,11 @@ const ERROR: u64 = 4;
 const COUNTED: u64 = 8;
 const DROPS_BY_VARIANT: u64 = 16;
 const COPIES_BY_VARIANT: u64 = 32;
+/// The flags of `Display` and `Debug` (decision 383): std's `Contextual`,
+/// which displays as `message: cause`, and a struct whose `Debug` is its
+/// name alone (`System`).
+const CONTEXTUAL: u64 = 64;
+const BARE: u64 = 128;
 
 /// The parts a drop or a copy reaches in place (`rt::DropParts`,
 /// `rt::CopyParts`): none when the kind's own rule applies, those of the
@@ -125,8 +136,52 @@ fn parts_words(out: &mut Vec<u64>, parts: Parts<'_>, by_variant: u64) -> (u64, u
     }
 }
 
+/// The words of a text: the address and the length of its bytes, which
+/// live as long as the decoded table, the whole run.
+fn text_words(out: &mut Vec<u64>, text: Option<&str>) {
+    match text {
+        Some(t) => {
+            out.push(t.as_ptr() as u64);
+            out.push(t.len() as u64);
+        }
+        None => out.extend([0, 0]),
+    }
+}
+
+/// The names a struct's `Debug` writes: its short name, then each field's.
+fn struct_names(out: &mut Vec<u64>, name: &str, fields: &[crate::abi::Field]) -> u64 {
+    let at = out.len() as u64;
+    text_words(out, Some(name.rsplit('.').next().unwrap_or(name)));
+    for f in fields {
+        text_words(out, f.name.as_deref());
+    }
+    at
+}
+
+/// The names an enum's `Debug` writes: each variant's name and the position
+/// of its fields' names.
+fn enum_names(out: &mut Vec<u64>, variants: &[crate::abi::Variant]) -> u64 {
+    let fields: Vec<u64> = variants
+        .iter()
+        .map(|v| {
+            let at = out.len() as u64;
+            for f in &v.fields {
+                text_words(out, f.name.as_deref());
+            }
+            at
+        })
+        .collect();
+    let at = out.len() as u64;
+    for (v, f) in variants.iter().zip(fields) {
+        text_words(out, Some(&v.name));
+        out.push(f);
+    }
+    at
+}
+
 /// Makes the words of the table once: `drops` and `copies` give each type's
-/// parts, `needs_drop` and `plain` its flags.
+/// parts, `needs_drop` and `plain` its flags. The table's texts must live
+/// for the run, as the decoded table does.
 pub(crate) fn set_up(
     types: &[TypeEntry],
     needs_drop: &[bool],
@@ -183,10 +238,18 @@ pub(crate) fn set_up(
                 h[B] = glue.map_or(0, |g| u64::from(g) + 1);
                 h[NAME] = *names.entry(name.as_str()).or_insert(next);
                 h[PARTS] = field_list(&mut out, fields.iter().map(|f| (f.offset, f.ty, f.glue)));
+                h[SHOWN] = struct_names(&mut out, name, fields);
+                if name.rsplit('.').next() == Some("System") {
+                    flags |= BARE;
+                }
             }
             Kind::Enum { name, variants, glue, error } => {
                 h[B] = glue.map_or(0, |g| u64::from(g) + 1);
                 h[NAME] = *names.entry(name.as_str()).or_insert(next);
+                h[SHOWN] = enum_names(&mut out, variants);
+                if name == "Contextual" {
+                    flags |= CONTEXTUAL;
+                }
                 if *error {
                     flags |= ERROR;
                 }
@@ -204,7 +267,19 @@ pub(crate) fn set_up(
                 out.push(members.len() as u64);
                 out.extend(members.iter().map(|m| u64::from(*m)));
             }
-            Kind::Opaque(n) if crate::value::counted(n) => flags |= COUNTED,
+            Kind::Opaque(n) => {
+                if crate::value::counted(n) {
+                    flags |= COUNTED;
+                }
+                // A test clock shows as the interpreter's clocks do, and a
+                // `Lent` as its handle.
+                let shown = match n.as_str() {
+                    "TestClock" | "Lent TestClock" => "Clock",
+                    n => n.strip_prefix("Lent ").unwrap_or(n),
+                };
+                h[SHOWN] = out.len() as u64;
+                text_words(&mut out, Some(shown));
+            }
             _ => {}
         }
         let (d, df) =

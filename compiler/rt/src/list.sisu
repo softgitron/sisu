@@ -1,0 +1,353 @@
+##! Lists over raw memory (decision 385): a `list` is three words, the
+##! address of its buffer (0 for none), its length and its capacity, and
+##! its elements are in the buffer one after another, each its type's size,
+##! as std.mem's `RawBuf` holds slots: they move as bits, so what was in a
+##! slot is in the one it moved to, and the buffer grows to twice its
+##! capacity (at least four elements) when it has no room. Here are a list's
+##! growth, the moves of `insert`, `remove` and `pop`, `extend`, `reverse`
+##! and `swap`, the copies a slice makes, the order a sort puts it in,
+##! `contains` and `join`; the runtime in Rust decodes the call, and checks
+##! the indices, whose panics its messages name.
+
+import rt.show
+import rt.text
+import rt.value
+from rt.host import memmove
+from rt.host import sisu_rt_alloc
+from rt.host import sisu_rt_free
+from rt.host import sisu_rt_grow
+from rt.types import Types
+from std.mem import ptr
+
+## The order a sort finds two elements in that have none (a NaN).
+const UNORDERED: int = 2
+
+## The address of the buffer of the list at `l`.
+##
+## Requires:
+## - `list`: `l` holds a live list
+def buffer(l: ptr mut u8) -> ptr mut u8:
+    # safety: valid, aligned, writable: a list's first word is its buffer's
+    #   address, by `list`.
+    return unsafe l.cast[ptr[u8]]().read().cast_mut()
+
+## The length of the list at `l`.
+##
+## Requires:
+## - `list`: `l` holds a live list
+def length(l: ptr mut u8) -> int:
+    # safety: in_bounds, valid, aligned: a list's second word is its length,
+    #   by `list`.
+    return unsafe l.offset(8).cast[int]().read()
+
+## Sets the length of the list at `l` to `n`.
+##
+## Requires:
+## - `list`: `l` holds a live list, whose first `n` slots hold elements
+def set_length(l: ptr mut u8, n: int):
+    # safety: in_bounds, valid, aligned, writable: a list's second word is
+    #   its length, by `list`.
+    unsafe l.offset(8).cast[int]().write(n)
+
+## Room in the list at `l` for `extra` more elements of `size` bytes: its
+## buffer grown, when it has too little, to twice its capacity, at least
+## four elements and at least as many as it then holds, keeping them.
+##
+## Requires:
+## - `list`: `l` holds a live list of elements of `size` bytes
+pub(package) def reserve(l: ptr mut u8, extra: int, size: int):
+    # safety: in_bounds, valid, aligned, writable: a list is its buffer's
+    #   address, its length and its capacity, by `list`; returns_promptly:
+    #   the runtime in Rust grows the buffer, keeping its bytes.
+    unsafe:
+        let w = l.cast[int]()
+        let need = w.offset(1).read() + extra
+        let cap = w.offset(2).read()
+        if need <= cap:
+            return
+        var room = max(need, cap * 2)
+        if room < 4:
+            room = 4
+        let grown = sisu_rt_grow(buffer(l), room * max(size, 1))
+        w.write(grown.addr())
+        w.offset(2).write(room)
+
+## Moves the last element of the list at `l`, of type `e`, out into the
+## option at `ret`, which is `None` for an empty list.
+##
+## Requires:
+## - `list`: `l` holds a live list of elements of type `e`, and `ret` has
+##   room for an option of one
+pub(package) def pop(ts: Types, l: ptr mut u8, e: int, ret: ptr mut u8):
+    let n = length(l)
+    # safety: in_bounds, valid, aligned, writable: an option is its tag and
+    #   its payload after a word, and the last slot holds an element, which
+    #   moves out; returns_promptly: memmove moves its bytes.
+    unsafe:
+        if n == 0:
+            ret.cast[int]().write(1)
+            return
+        let size = ts.size(e)
+        set_length(l, n - 1)
+        ret.cast[int]().write(0)
+        _ = memmove(ret.offset(8), buffer(l).offset((n - 1) * size).as_const(), size)
+
+## Moves the element at `value` into the list at `l` at index `k`, no
+## further than its length, the elements from `k` on one slot up.
+##
+## Requires:
+## - `list`: `l` holds a live list of elements of `size` bytes, `value` a
+##   live element, which moves in, and `0 <= k <= len`
+pub(package) def insert(l: ptr mut u8, k: int, value: ptr mut u8, size: int):
+    reserve(l, 1, size)
+    let n = length(l)
+    # safety: in_bounds, valid, writable: the buffer has room for one more
+    #   element, and `k` is within it; returns_promptly: memmove moves the
+    #   bytes.
+    unsafe:
+        let at = buffer(l).offset(k * size)
+        _ = memmove(at.offset(size), at.as_const(), (n - k) * size)
+        _ = memmove(at, value.as_const(), size)
+    set_length(l, n + 1)
+
+## Moves the element at index `k` of the list at `l` out to `ret`, those
+## after it one slot down.
+##
+## Requires:
+## - `list`: `l` holds a live list of elements of `size` bytes, `ret` has
+##   room for one, and `0 <= k < len`
+pub(package) def remove(l: ptr mut u8, k: int, ret: ptr mut u8, size: int):
+    let n = length(l)
+    # safety: in_bounds, valid, writable: `k` is an element of the buffer;
+    #   returns_promptly: memmove moves the bytes.
+    unsafe:
+        let at = buffer(l).offset(k * size)
+        _ = memmove(ret, at.as_const(), size)
+        _ = memmove(at, at.offset(size).as_const(), (n - k - 1) * size)
+    set_length(l, n - 1)
+
+## Moves the elements of the list at `other` to the end of the list at `l`,
+## and frees the other's buffer.
+##
+## Requires:
+## - `list`: `l` and `other` hold live lists of elements of `size` bytes,
+##   and `other` is not used again
+pub(package) def extend(l: ptr mut u8, other: ptr mut u8, size: int):
+    let m = length(other)
+    reserve(l, m, size)
+    let n = length(l)
+    # safety: in_bounds, valid, writable: the buffer has room for the other's
+    #   elements after its own; returns_promptly: memmove moves them, and the
+    #   runtime in Rust frees the other's buffer.
+    unsafe:
+        let source = buffer(other)
+        _ = memmove(buffer(l).offset(n * size), source.as_const(), m * size)
+        if source.addr() != 0:
+            sisu_rt_free(source)
+    set_length(l, n + m)
+
+## Swaps the `size` bytes at `a` and at `b`, through `tmp`, which has room
+## for them.
+##
+## Requires:
+## - `slots`: `a`, `b` and `tmp` each point to `size` live bytes
+def swap_bytes(a: ptr mut u8, b: ptr mut u8, tmp: ptr mut u8, size: int):
+    # safety: valid, writable: by `slots`; returns_promptly: memmove moves
+    #   the bytes.
+    unsafe:
+        _ = memmove(tmp, a.as_const(), size)
+        _ = memmove(a, b.as_const(), size)
+        _ = memmove(b, tmp.as_const(), size)
+
+## Reverses the order of the elements of the list at `l` in place.
+##
+## Requires:
+## - `list`: `l` holds a live list of elements of `size` bytes
+pub(package) def reverse(l: ptr mut u8, size: int):
+    let n = length(l)
+    if n < 2 or size == 0:
+        return
+    # safety: in_bounds, valid, writable: `a` and `b` are elements of the
+    #   buffer; returns_promptly: the runtime in Rust gives and frees the
+    #   room for one element.
+    unsafe:
+        let tmp = sisu_rt_alloc(size)
+        let items = buffer(l)
+        var a = 0
+        var b = n - 1
+        while a < b:
+            swap_bytes(items.offset(a * size), items.offset(b * size), tmp, size)
+            a += 1
+            b -= 1
+        sisu_rt_free(tmp)
+
+## Swaps the elements at indices `i` and `j` of the list at `l`.
+##
+## Requires:
+## - `list`: `l` holds a live list of elements of `size` bytes, and `i` and
+##   `j` are indices of it
+pub(package) def swap(l: ptr mut u8, i: int, j: int, size: int):
+    if i == j or size == 0:
+        return
+    # safety: in_bounds: `i` and `j` are elements of the buffer;
+    #   returns_promptly: the runtime in Rust gives and frees the room for one
+    #   element.
+    unsafe:
+        let tmp = sisu_rt_alloc(size)
+        let items = buffer(l)
+        swap_bytes(items.offset(i * size), items.offset(j * size), tmp, size)
+        sisu_rt_free(tmp)
+
+## Writes at `dst` a new list of copies (`.copy()`) of the elements from
+## `lo` to `hi` (not included) of the list at `l`, of type `e`.
+##
+## Requires:
+## - `list`: `l` holds a live list of elements of type `e`, `dst` has room
+##   for a list, and `0 <= lo <= hi <= len`
+pub(package) def copies(ts: Types, dst: ptr mut u8, l: ptr mut u8, e: int, lo: int, hi: int):
+    # safety: in_bounds, valid, aligned, writable: a list is three words, and
+    #   each element from `lo` to `hi` is in the buffers.
+    unsafe:
+        let w = dst.cast[int]()
+        w.write(0)
+        w.offset(1).write(0)
+        w.offset(2).write(0)
+        let size = ts.size(e)
+        reserve(dst, hi - lo, size)
+        let source = buffer(l)
+        let to = buffer(dst)
+        var k = lo
+        while k < hi:
+            value.copy(ts, to.offset((k - lo) * size), source.offset(k * size), e)
+            k += 1
+        w.offset(1).write(hi - lo)
+
+## Whether the list at `l`, of type `e`, holds an element equal to the
+## value at `x` of type `tx`.
+##
+## Requires:
+## - `list`: `l` holds a live list of elements of type `e`, and `x` a live
+##   value of type `tx`
+pub(package) def contains(ts: Types, l: ptr mut u8, e: int, x: ptr mut u8, tx: int) -> bool:
+    let size = ts.size(e)
+    let items = buffer(l)
+    var k = 0
+    while k < length(l):
+        # safety: in_bounds: `k` is an element of the buffer.
+        if value.equal(ts, unsafe items.offset(k * size), e, x, tx):
+            return True
+        k += 1
+    return False
+
+## Appends to the `String` at `out` the `Display` text of each element of
+## the list at `l`, of type `e`, the `n` bytes at `sep` between them.
+##
+## Requires:
+## - `list`: `l` holds a live list of elements of type `e`, `out` a live
+##   `String`, and `sep` points to `n` live bytes
+pub(package) def join(ts: Types, out: ptr mut u8, l: ptr mut u8, e: int, sep: ptr mut u8, n: int):
+    let size = ts.size(e)
+    let items = buffer(l)
+    var k = 0
+    while k < length(l):
+        if k > 0:
+            text.push(out, sep, n)
+        # safety: in_bounds: `k` is an element of the buffer.
+        show.display(ts, out, unsafe items.offset(k * size), e)
+        k += 1
+
+## Sorts the list at `l`, of type `e`, by the elements' order, stably (a
+## merge sort of their indices, then the elements moved to their places);
+## False, leaving it as it was, when two elements have no order.
+##
+## Requires:
+## - `list`: `l` holds a live list of elements of type `e`
+pub(package) def sort(ts: Types, l: ptr mut u8, e: int) -> bool:
+    let n = length(l)
+    if n < 2:
+        return True
+    let size = ts.size(e)
+    # safety: in_bounds, valid, aligned, writable: the index and spare blocks
+    #   hold `n` words each, and the copy of the buffer its `n` elements;
+    #   returns_promptly: the runtime in Rust gives and frees the blocks, and
+    #   memmove moves the elements.
+    unsafe:
+        let index = sisu_rt_alloc(n * 8).cast[int]()
+        let spare = sisu_rt_alloc(n * 8).cast[int]()
+        var k = 0
+        while k < n:
+            index.offset(k).write(k)
+            k += 1
+        let items = buffer(l)
+        let ordered = merge(ts, items, e, size, index, spare, 0, n)
+        if ordered and size > 0:
+            let old = sisu_rt_alloc(n * size)
+            _ = memmove(old, items.as_const(), n * size)
+            k = 0
+            while k < n:
+                _ = memmove(
+                    items.offset(k * size),
+                    old.offset(index.offset(k).read() * size).as_const(),
+                    size,
+                )
+                k += 1
+            sisu_rt_free(old)
+        sisu_rt_free(index.cast[u8]())
+        sisu_rt_free(spare.cast[u8]())
+        return ordered
+
+## Sorts the indices from `lo` to `hi` (not included) of `index` by the
+## order of the elements they name, the right half's first only when it is
+## the less (stable), through `spare`; False when two have no order.
+##
+## Requires:
+## - `sorting`: `index` and `spare` hold `hi` words or more, each index an
+##   element of the `size` bytes at `items`, of type `e`
+def merge(
+    ts: Types,
+    items: ptr mut u8,
+    e: int,
+    size: int,
+    index: ptr mut int,
+    spare: ptr mut int,
+    lo: int,
+    hi: int,
+) -> bool:
+    if hi - lo <= 1:
+        return True
+    let mid = lo + (hi - lo) // 2
+    if not merge(ts, items, e, size, index, spare, lo, mid):
+        return False
+    if not merge(ts, items, e, size, index, spare, mid, hi):
+        return False
+    # safety: in_bounds, valid, aligned, writable: by `sorting`;
+    #   returns_promptly: memmove moves the merged indices back.
+    unsafe:
+        var i = lo
+        var j = mid
+        var k = lo
+        while i < mid and j < hi:
+            let a = items.offset(index.offset(j).read() * size)
+            let b = items.offset(index.offset(i).read() * size)
+            let o = value.order(ts, a, e, b, e)
+            if o == UNORDERED:
+                return False
+            if o < 0:
+                spare.offset(k).write(index.offset(j).read())
+                j += 1
+            else:
+                spare.offset(k).write(index.offset(i).read())
+                i += 1
+            k += 1
+        while i < mid:
+            spare.offset(k).write(index.offset(i).read())
+            i += 1
+            k += 1
+        while j < hi:
+            spare.offset(k).write(index.offset(j).read())
+            j += 1
+            k += 1
+        _ = memmove(
+            index.offset(lo).cast[u8](), spare.offset(lo).cast[u8]().as_const(), (hi - lo) * 8
+        )
+    return True

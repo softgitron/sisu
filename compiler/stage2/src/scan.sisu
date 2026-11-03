@@ -121,6 +121,154 @@ pub pure def cold_blocks(f: Function) -> list[bool]:
         if not changed:
             return cold
 
+## The texts an interpolation is building at the start of each block
+## (decision 381): the locals a `fmt.new()` made into on every path to the
+## block that nothing has moved, dropped, written over or ended since, and
+## that the block's cleanup does not drop. Lowering registers an
+## interpolation's `String` for its scope only once the statement that
+## builds it is done, so a panic or a `?` in one of its values leaves it to
+## no drop of the SIR: the native code frees it on the failure path of each
+## call, and before a `return`, where such a text is still being built.
+## Ascending by local.
+pub pure def building_texts(f: Function) -> list[list[int]]:
+    let n = len(f.blocks)
+    var entry: list[list[int]?] = []
+    var covered: list[list[int]] = []
+    for i in range(n):
+        entry.push(None)
+        covered.push(cleanup_drops(f, i))
+    if n == 0:
+        return []
+    entry[0] = Some([])
+    while True:
+        var changed = False
+        for i in range(n):
+            let b = ref f.blocks[i]
+            if b.cleanup:
+                continue
+            let Some(start) = entry[i].copy() else:
+                continue
+            var set: list[int] = []
+            for l in start:
+                if not covered[i].contains(l):
+                    set.push(l)
+            for s in b.stmts:
+                building_taken(mut set, s.kind)
+                building_begun(mut set, s.kind, covered[i])
+            var succs: list[int] = []
+            match b.term:
+                case Terminator.Goto(t):
+                    succs.push(t.index)
+                case Terminator.Switch(_, cases, default):
+                    for (_, t) in cases:
+                        succs.push(t.index)
+                    succs.push(default.index)
+                case _:
+                    pass
+            for t in succs:
+                if t >= n or f.blocks[t].cleanup:
+                    continue
+                var next: list[int] = []
+                match entry[t]:
+                    case None:
+                        next = set.copy()
+                    case Some(old):
+                        for l in old:
+                            if set.contains(l):
+                                next.push(l)
+                var same = False
+                if let Some(old) = entry[t]:
+                    same = old == next
+                if not same:
+                    entry[t] = Some(next)
+                    changed = True
+        if not changed:
+            break
+    var out: list[list[int]] = []
+    for i in range(n):
+        var set: list[int] = []
+        if let Some(e) = entry[i]:
+            for l in e:
+                if not covered[i].contains(l):
+                    set.push(l)
+        out.push(set)
+    return out
+
+## The locals the cleanup of block `i` drops, through its chain of cleanup
+## blocks to its `resume`.
+pub pure def cleanup_drops(f: Function, i: int) -> list[int]:
+    var out: list[int] = []
+    var seen: list[int] = []
+    var next: int? = None
+    if let Some(u) = f.blocks[i].unwind:
+        next = Some(u.index)
+    while let Some(b) = next:
+        if b >= len(f.blocks) or seen.contains(b):
+            break
+        seen.push(b)
+        for s in f.blocks[b].stmts:
+            if let StatementKind.Drop(place, _) = s.kind:
+                if not out.contains(place.local.index):
+                    out.push(place.local.index)
+        next = None
+        if let Terminator.Goto(t) = f.blocks[b].term:
+            next = Some(t.index)
+    return out
+
+## What a statement takes of the texts being built, before it runs (and
+## before a failure inside it): a text it moves, drops, ends or writes over
+## is no longer the interpolation's to free (decision 381).
+pub pure def building_taken(mut set: list[int], s: StatementKind):
+    if set.is_empty():
+        return
+    var ops: list[Operand] = []
+    var gone: list[int] = []
+    match s:
+        case StatementKind.Assign(p, r):
+            gone.push(p.local.index)
+            match r:
+                case Rvalue.Use(o) | Rvalue.Unary(_, o):
+                    ops.push(o.copy())
+                case Rvalue.Binary(_, a, b):
+                    ops.push(a.copy())
+                    ops.push(b.copy())
+                case Rvalue.Aggregate(_, all) | Rvalue.Closure(_, _, all):
+                    for o in all:
+                        ops.push(o.copy())
+                case _:
+                    pass
+        case StatementKind.Call(dest, callee, args):
+            gone.push(dest.local.index)
+            if let Callee.Value(o) = callee:
+                ops.push(o.copy())
+            for o in args:
+                ops.push(o.copy())
+        case StatementKind.Drop(place, _):
+            gone.push(place.local.index)
+        case StatementKind.StorageDead(l):
+            gone.push(l.index)
+    for o in ops:
+        if let Operand.Move(p) = o:
+            gone.push(p.local.index)
+    var kept: list[int] = []
+    for l in set:
+        if not gone.contains(l):
+            kept.push(l)
+    set = kept
+
+## The text a statement begins to build: the local a `fmt.new()` makes
+## (decision 381), unless the block's cleanup drops it (`covered`).
+pub pure def building_begun(mut set: list[int], s: StatementKind, covered: list[int]):
+    if let StatementKind.Call(dest, callee, _) = s:
+        if let Callee.Intrinsic(name, _) = callee:
+            let l = dest.local.index
+            if name == "fmt.new"
+                    and dest.proj.is_empty()
+                    and not set.contains(l)
+                    and not covered.contains(l):
+                set.push(l)
+                set.sort()
+
 ## Whether a local of type `t` is one word the release profile may keep in
 ## a variable: a number, a `bool`, a `char`, a reference that is an
 ## address, or a raw pointer (decision 350).

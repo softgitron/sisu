@@ -4,7 +4,7 @@ The runtime of natively compiled Sisu is being written in Sisu, piece by
 piece, as D-086 orders ([15](../../proposal/15-decision-log.md)); this
 package holds what is written so far, and `crates/sisu-rt`, the runtime
 in Rust, the rest. `docs/architecture.md` ("Stage 2", "The runtime in
-Sisu"; decisions 335, 336, 350 to 353 and 358) describes it, and
+Sisu"; decisions 335, 336, 350 to 353, 358 and 382 to 385) describes it, and
 `docs/port-debt.md` ("The runtime in Sisu") lists what is left.
 
 ## What it is
@@ -25,10 +25,16 @@ and C's `memmove` and `memcmp` through foreign calls (`unsafe =
 | `lib.sisu` | the exports, `==` of two texts' bytes, and the text entries interpolation calls most (their bodies here, a call fewer) |
 | `types.sisu` | the program's type table, as the runtime in Rust lays it out in memory when the program starts (`crates/sisu-rt/src/desc.rs`) |
 | `host.sisu` | the runtime in Rust's functions this code calls, and C's |
-| `value.sisu` | equality, order, the structural hash, `.copy()`, the drop and the count of a copy's handles, each a walk of a value by its type's parts |
-| `text.sisu` | a `String`'s growth, a `String` made from a text, an integer's digits in a base |
+| `value.sisu` | equality, order, the structural hash, `.copy()`, the drop and the count of a copy's handles (a function value's environment in a heap cell copied whole, decision 382), each a walk of a value by its type's parts |
+| `text.sisu` | a `String`'s growth, a `String` made from a text, bytes, a byte and an integer's digits appended, an integer's digits in a base |
 | `search.sisu` | text search by Two-Way, and a prefix or a suffix |
 | `floats.sisu` | a float's text: the shortest that reads back as the same number, the fixed form and the form with an exponent, on plain integers or big numbers |
+| `show.sisu` | `Display` and `Debug` of a value by its type, with the names the table holds (decision 383) |
+| `list.sisu` | lists over raw memory: growth, the moves of `insert`, `remove`, `pop`, `extend`, `reverse` and `swap`, a slice's copies, the stable sort, `in` and `join` (decision 385) |
+
+The runtime's code has no text of its own to point to, so the words
+`Debug` writes are constants of their bytes packed eight to a word
+(`show.sisu`), and the names of the program's types come from the table.
 
 The functions are safe `def`s that say what they require of their
 arguments (`Requires:`), and their `unsafe` blocks name the obligations of

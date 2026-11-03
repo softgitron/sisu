@@ -436,6 +436,43 @@ impl Runner<'_> {
         });
     }
 
+    /// `sisu test` exits as its report says (decisions 340 and 380): 1 when a
+    /// test failed, 3 when none failed and one is blocked by a hole, 0 when
+    /// every test passed, summed over the summary lines it printed (one per
+    /// member of a workspace). A run that printed none, or reported an error
+    /// of the program, is held to nothing here.
+    fn test_status(&mut self, case: &Case, check: &str, out: &Output) {
+        let (mut summaries, mut failed, mut blocked) = (0, 0u64, 0u64);
+        for line in out.stdout.lines() {
+            let words: Vec<&str> = line.split([' ', ',']).filter(|w| !w.is_empty()).collect();
+            if let [p, "passed", f, "failed", b, "blocked"] = words.as_slice()
+                && p.parse::<u64>().is_ok()
+                && let (Ok(f), Ok(b)) = (f.parse::<u64>(), b.parse::<u64>())
+            {
+                summaries += 1;
+                failed += f;
+                blocked += b;
+            }
+        }
+        if summaries == 0 || out.stderr.lines().any(|l| l.starts_with("error")) {
+            return;
+        }
+        let expected = if failed > 0 {
+            1
+        } else if blocked > 0 {
+            3
+        } else {
+            0
+        };
+        self.compare(
+            case,
+            &format!("{check}: the exit status its report gives"),
+            None,
+            &format!("status {expected}\n"),
+            &format!("status {}\n", out.status),
+        );
+    }
+
     fn run_case(&mut self, case: &Case) {
         if case.package {
             return self.run_package_case(case);
@@ -612,6 +649,7 @@ impl Runner<'_> {
             let out = invoke(self.sisu, &sandbox.dir, &a);
             self.compare(case, &format!("sisu {}", args.join(" ")), Some(ext), &expected, &out.stdout);
             if ext == "test" {
+                self.test_status(case, "sisu test", &out);
                 self.replay_tokens(case, sandbox, &out.stdout);
                 // Tests run in parallel by default; on one thread they
                 // must print the same (17, "Isolation and parallelism").
@@ -675,6 +713,7 @@ impl Runner<'_> {
             let out = invoke(self.sisu, &sandbox.dir, &a);
             let expected = case.expected(ext).unwrap_or_default();
             self.compare(case, &format!("sisu {}", a.join(" ")), Some(ext), &expected, &out.stdout);
+            self.test_status(case, &format!("sisu {}", a.join(" ")), &out);
             self.replay_tokens(case, sandbox, &out.stdout);
         }
         // `sisu explain-borrow` at the line a `# explain-borrow N` comment names.
@@ -712,6 +751,7 @@ impl Runner<'_> {
             if let Some(expected) = case.expected("explore") {
                 let out = invoke(self.sisu, &sandbox.dir, &s(&["test", "--explore", &n.to_string(), &file]));
                 self.compare(case, "sisu test --explore", Some("explore"), &expected, &out.stdout);
+                self.test_status(case, "sisu test --explore", &out);
             }
             if wants_run {
                 let mut a = s(&["run", "--explore", &n.to_string(), &file]);
@@ -913,6 +953,7 @@ impl Runner<'_> {
         if let Some(expected) = case.expected("test") {
             let out = invoke(self.sisu, &cwd, &s(&["test"]));
             self.compare(case, "sisu test", Some("test"), &expected, &out.stdout);
+            self.test_status(case, "sisu test", &out);
             self.replay_tokens_in(case, &cwd, &out.stdout);
             self.report.serial += 1;
             let one = invoke(self.sisu, &cwd, &s(&["test", "--jobs", "1", "--no-cache"]));

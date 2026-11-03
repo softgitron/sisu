@@ -13,7 +13,9 @@
 ##! the runtime in Rust (`crates/sisu-rt`), which is deleted.
 
 import rt.floats
+import rt.list
 import rt.search
+import rt.show
 import rt.text
 import rt.value
 from rt.host import memcmp
@@ -95,6 +97,26 @@ def export_value_drop_rest(types: ptr[int], p: ptr mut u8, t: int, mode: int) ->
 ##   type `t`
 def export_value_retain(types: ptr[int], p: ptr mut u8, t: int):
     value.retain(Types(words=types), p, t)
+
+## Appends to the `String` at `out` the `Display` text of the value at `p`
+## of type `t` (`show.display`, decision 383): `fmt.display` of a value whose
+## impl is structural, `print`, `list.join`.
+##
+## Requires:
+## - `typed`: `types` is the program's table, `p` holds a live value of type
+##   `t`, and `out` a live `String`
+def export_value_display(types: ptr[int], out: ptr mut u8, p: ptr mut u8, t: int):
+    show.display(Types(words=types), out, p, t)
+
+## Appends to the `String` at `out` the `Debug` text of the value at `p` of
+## type `t` (`show.debug`, decision 383): `fmt.debug`, the sides of a failed
+## `assert`, the error `main` returns.
+##
+## Requires:
+## - `typed`: `types` is the program's table, `p` holds a live value of type
+##   `t`, and `out` a live `String`
+def export_value_debug(types: ptr[int], out: ptr mut u8, p: ptr mut u8, t: int):
+    show.debug(Types(words=types), out, p, t)
 
 ## Appends the `n` bytes at `b` to the `String` at `t`: `String.push`,
 ## `fmt.text`, and `fmt.display` of a text (decisions 265 and 351).
@@ -199,3 +221,104 @@ def export_find(text: ptr[u8], n: int, part: ptr[u8], m: int) -> int:
 ## - `readable`: `text` points to `n` live bytes and `part` to `m`
 def export_has_edge(text: ptr[u8], n: int, part: ptr[u8], m: int, at_end: bool) -> bool:
     return search.has_edge(text, n, part, m, at_end)
+
+## Room in the list at `l` for `extra` more elements of `size` bytes
+## (`list.reserve`, decision 385): a push without room, which the generated
+## code asks `sisu_rt_list_reserve` for, and every list the runtime builds.
+##
+## Requires:
+## - `list`: `l` holds a live list of elements of `size` bytes
+def export_list_grow(l: ptr mut u8, extra: int, size: int):
+    list.reserve(l, extra, size)
+
+## `list.pop`: the last element of the list at `l`, of type `e`, moved out
+## into the option at `ret` (`list.pop`).
+##
+## Requires:
+## - `typed`: `types` is the program's table, `l` holds a live list of
+##   elements of type `e`, and `ret` has room for an option of one
+def export_list_pop(types: ptr[int], l: ptr mut u8, e: int, ret: ptr mut u8):
+    list.pop(Types(words=types), l, e, ret)
+
+## `list.insert` once its index is checked: the element at `value` moved in
+## at index `k` (`list.insert`).
+##
+## Requires:
+## - `list`: `l` holds a live list of elements of `size` bytes, `value` a
+##   live element, which moves in, and `0 <= k <= len`
+def export_list_insert(l: ptr mut u8, k: int, value: ptr mut u8, size: int):
+    list.insert(l, k, value, size)
+
+## `list.remove` once its index is checked: element `k` moved out to `ret`
+## (`list.remove`).
+##
+## Requires:
+## - `list`: `l` holds a live list of elements of `size` bytes, `ret` has
+##   room for one, and `0 <= k < len`
+def export_list_remove(l: ptr mut u8, k: int, ret: ptr mut u8, size: int):
+    list.remove(l, k, ret, size)
+
+## `list.extend`: the elements of the list at `other` moved to the end of
+## the one at `l` (`list.extend`).
+##
+## Requires:
+## - `list`: `l` and `other` hold live lists of elements of `size` bytes,
+##   and `other` is not used again
+def export_list_extend(l: ptr mut u8, other: ptr mut u8, size: int):
+    list.extend(l, other, size)
+
+## `list.reverse` (`list.reverse`).
+##
+## Requires:
+## - `list`: `l` holds a live list of elements of `size` bytes
+def export_list_reverse(l: ptr mut u8, size: int):
+    list.reverse(l, size)
+
+## `list.swap` once its indices are checked (`list.swap`).
+##
+## Requires:
+## - `list`: `l` holds a live list of elements of `size` bytes, and `i` and
+##   `j` are indices of it
+def export_list_swap(l: ptr mut u8, i: int, j: int, size: int):
+    list.swap(l, i, j, size)
+
+## A slice of a list: a new list at `dst` of copies of the elements from
+## `lo` to `hi` of the one at `l`, of type `e` (`list.copies`).
+##
+## Requires:
+## - `typed`: `types` is the program's table, `l` holds a live list of
+##   elements of type `e`, `dst` has room for a list, and
+##   `0 <= lo <= hi <= len`
+def export_list_copies(types: ptr[int], dst: ptr mut u8, l: ptr mut u8, e: int, lo: int, hi: int):
+    list.copies(Types(words=types), dst, l, e, lo, hi)
+
+## Whether the list at `l`, of type `e`, holds an element equal to the
+## value at `x` of type `tx`: `in` on a list (`list.contains`).
+##
+## Requires:
+## - `typed`: `types` is the program's table, `l` holds a live list of
+##   elements of type `e`, and `x` a live value of type `tx`
+def export_list_contains(types: ptr[int], l: ptr mut u8, e: int, x: ptr mut u8, tx: int) -> bool:
+    return list.contains(Types(words=types), l, e, x, tx)
+
+## `list.join`: each element's `Display` text, the `n` bytes at `sep`
+## between them, appended to the `String` at `out` (`list.join`).
+##
+## Requires:
+## - `typed`: `types` is the program's table, `l` holds a live list of
+##   elements of type `e`, `out` a live `String`, and `sep` points to `n`
+##   live bytes
+def export_list_join(
+    types: ptr[int], out: ptr mut u8, l: ptr mut u8, e: int, sep: ptr mut u8, n: int
+):
+    list.join(Types(words=types), out, l, e, sep, n)
+
+## `list.sort`: the elements of the list at `l`, of type `e`, sorted stably
+## by their order; False, leaving it as it was, when two have none
+## (`list.sort`).
+##
+## Requires:
+## - `typed`: `types` is the program's table, and `l` holds a live list of
+##   elements of type `e`
+def export_list_sort(types: ptr[int], l: ptr mut u8, e: int) -> bool:
+    return list.sort(Types(words=types), l, e)

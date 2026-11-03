@@ -90,8 +90,17 @@ struct Cx<'a, 'p> {
     targs: &'a [Type],
     locals: Vec<Local>,
     blocks: Vec<Block>,
-    /// The failure path of each SIR block, made when first needed.
-    fails: Vec<Option<Block>>,
+    /// The failure paths of each SIR block, made when first needed: one for
+    /// each set of texts an interpolation is building where a failure
+    /// leaves (decision 381), which the path frees.
+    fails: Vec<Vec<(Vec<u32>, Block)>>,
+    /// The texts an interpolation is building at the start of each SIR
+    /// block ([`building_texts`]), and at the statement being translated.
+    building_at: Vec<Vec<u32>>,
+    building: Vec<u32>,
+    /// The locals each block's cleanup drops ([`cleanup_drops`]), which no
+    /// failure path of the block frees again.
+    covered: Vec<Vec<u32>>,
     line: Variable,
     col: Variable,
     funcs: FxMap<FuncId, FuncRef>,
@@ -125,8 +134,8 @@ struct Cx<'a, 'p> {
     facts: Option<crate::facts::Facts>,
     known: Option<crate::facts::State>,
     /// The failed checks of the SIR block being translated, written after
-    /// its terminator.
-    deferred: Vec<(Block, &'static str, [Arg; 3])>,
+    /// its terminator, each with the texts being built where it is.
+    deferred: Vec<(Block, &'static str, [Arg; 3], Vec<u32>)>,
     /// The blocks every path from which ends in a panic or in unwinding:
     /// cold, placed after the rest of the function.
     cold: Vec<bool>,
@@ -276,7 +285,7 @@ impl<'a, 'p> Cx<'a, 'p> {
         let shown = display_fn_name(&f.name, cg.prog);
         let name = (cg.text(shown.as_bytes())?, shown.len());
         let trace = if glue || std { None } else { Some((name.0, name.1, file_text.0, file.len())) };
-        let fails = vec![None; f.blocks.len()];
+        let fails = vec![Vec::new(); f.blocks.len()];
         let mut cx = Cx {
             cg,
             b,
@@ -285,6 +294,9 @@ impl<'a, 'p> Cx<'a, 'p> {
             locals,
             blocks,
             fails,
+            building_at: building_texts(f),
+            building: Vec::new(),
+            covered: (0..f.blocks.len()).map(|i| cleanup_drops(f, i)).collect(),
             line,
             col,
             funcs: FxMap::default(),
@@ -758,11 +770,18 @@ impl<'a, 'p> Cx<'a, 'p> {
     // ------------------------------------------------------- failure paths
 
     fn fail_block(&mut self) -> Block {
-        if let Some(b) = self.fails[self.cur] {
-            return b;
+        let building = self.building.clone();
+        self.fail_block_for(building)
+    }
+
+    /// The failure path of the SIR block being translated that frees the
+    /// texts `building` holds (decision 381).
+    fn fail_block_for(&mut self, building: Vec<u32>) -> Block {
+        if let Some((_, b)) = self.fails[self.cur].iter().find(|(set, _)| *set == building) {
+            return *b;
         }
         let b = self.b.create_block();
-        self.fails[self.cur] = Some(b);
+        self.fails[self.cur].push((building, b));
         b
     }
 
@@ -784,14 +803,14 @@ impl<'a, 'p> Cx<'a, 'p> {
         let cont = self.b.create_block();
         let failed = self.b.create_block();
         self.b.ins().brif(bad, failed, &[], cont, &[]);
-        self.deferred.push((failed, raise, args));
+        self.deferred.push((failed, raise, args, self.building.clone()));
         self.b.switch_to_block(cont);
         Ok(())
     }
 
     /// A failed check's block: the runtime raises the panic, then the
     /// failure path of the SIR block.
-    fn raise(&mut self, raise: &'static str, args: [Arg; 3]) -> Result<(), Error> {
+    fn raise(&mut self, raise: &'static str, args: [Arg; 3], building: Vec<u32>) -> Result<(), Error> {
         let args: Vec<Value> = args
             .iter()
             .map(|a| match a {
@@ -801,42 +820,70 @@ impl<'a, 'p> Cx<'a, 'p> {
             })
             .collect();
         self.rt(raise, &args)?;
-        let fail = self.fail_block();
+        let fail = self.fail_block_for(building);
         self.b.ins().jump(fail, &[]);
         Ok(())
     }
 
     fn emit_fails(&mut self) -> Result<(), Error> {
         for i in 0..self.fails.len() {
-            let Some(fb) = self.fails[i] else { continue };
-            self.b.set_cold_block(fb);
-            self.b.switch_to_block(fb);
-            let block = &self.f.blocks[i];
-            if let Some(l) = block.loc.or(self.f.loc) {
-                self.b.set_srcloc(srcloc(l.line, l.col));
-            }
-            if block.cleanup {
-                self.rt(sym::ABORT_UNWIND, &[])?;
-                self.b.ins().trap(ir::TrapCode::unwrap_user(1));
-                continue;
-            }
-            if let Some((n, nl, fl, fll)) = self.trace {
-                let name = self.data_addr(n);
-                let file = self.data_addr(fl);
-                let nl = self.iconst(nl as i64);
-                let fll = self.iconst(fll as i64);
-                let line = self.b.use_var(self.line);
-                let col = self.b.use_var(self.col);
-                self.rt(sym::FRAME, &[name, nl, file, fll, line, col])?;
-            }
-            match block.unwind {
-                Some(u) => {
-                    let target = self.blocks[u.0 as usize];
-                    self.b.ins().jump(target, &[]);
-                }
-                None => self.leave(abi::UNWINDING),
+            for (building, fb) in std::mem::take(&mut self.fails[i]) {
+                self.emit_fail(i, &building, fb)?;
             }
         }
+        Ok(())
+    }
+
+    /// The failure path `fb` of SIR block `i`: the trace's line, the texts
+    /// an interpolation was building freed (decision 381), then the
+    /// block's cleanup, or the return of the failure.
+    fn emit_fail(&mut self, i: usize, building: &[u32], fb: Block) -> Result<(), Error> {
+        self.b.set_cold_block(fb);
+        self.b.switch_to_block(fb);
+        let block = &self.f.blocks[i];
+        if let Some(l) = block.loc.or(self.f.loc) {
+            self.b.set_srcloc(srcloc(l.line, l.col));
+        }
+        if block.cleanup {
+            self.rt(sym::ABORT_UNWIND, &[])?;
+            self.b.ins().trap(ir::TrapCode::unwrap_user(1));
+            return Ok(());
+        }
+        if let Some((n, nl, fl, fll)) = self.trace {
+            let name = self.data_addr(n);
+            let file = self.data_addr(fl);
+            let nl = self.iconst(nl as i64);
+            let fll = self.iconst(fll as i64);
+            let line = self.b.use_var(self.line);
+            let col = self.b.use_var(self.col);
+            self.rt(sym::FRAME, &[name, nl, file, fll, line, col])?;
+        }
+        for &l in building.iter().rev() {
+            self.free_text(l)?;
+        }
+        match block.unwind {
+            Some(u) => {
+                let target = self.blocks[u.0 as usize];
+                self.b.ins().jump(target, &[]);
+            }
+            None => self.leave(abi::UNWINDING),
+        }
+        Ok(())
+    }
+
+    /// Frees the `String` local `l` holds, which an interpolation was
+    /// building where the function leaves without its statement's end:
+    /// nothing of the SIR drops it there (decision 381).
+    fn free_text(&mut self, l: u32) -> Result<(), Error> {
+        let addr = self.local_addr(sir::LocalId(l))?;
+        let ptr = self.load(addr, 0);
+        let free = self.b.create_block();
+        let done = self.b.create_block();
+        self.b.ins().brif(ptr, free, &[], done, &[]);
+        self.b.switch_to_block(free);
+        self.rt(sym::FREE, &[ptr])?;
+        self.b.ins().jump(done, &[]);
+        self.b.switch_to_block(done);
         Ok(())
     }
 
@@ -851,25 +898,28 @@ impl<'a, 'p> Cx<'a, 'p> {
             }
             self.b.switch_to_block(cb);
             self.known = self.facts.as_ref().and_then(|f| f.entry(i));
+            self.building = self.building_at[i].clone();
             for s in &block.stmts {
                 self.cg.statements += 1;
                 if let Some(loc) = s.loc {
                     self.set_loc(loc);
                 }
+                building_taken(&mut self.building, &s.kind);
                 self.statement(&s.kind)?;
                 self.reload_vars();
                 if let (Some(f), Some(st)) = (&self.facts, &mut self.known) {
                     f.step(st, &s.kind);
                 }
+                building_begun(&mut self.building, &s.kind, &self.covered[i]);
             }
             self.cg.statements += 1;
             if let Some(loc) = block.loc {
                 self.set_loc(loc);
             }
             self.terminator(&block.term)?;
-            for (failed, raise, args) in std::mem::take(&mut self.deferred) {
+            for (failed, raise, args, building) in std::mem::take(&mut self.deferred) {
                 self.b.switch_to_block(failed);
-                self.raise(raise, args)?;
+                self.raise(raise, args, building)?;
             }
         }
         Ok(())
@@ -937,7 +987,14 @@ impl<'a, 'p> Cx<'a, 'p> {
                     self.b.ins().jump(to, &[]);
                 }
             }
-            Terminator::Return => self.leave(abi::OK),
+            Terminator::Return => {
+                // A text an interpolation was building when a `?` left it
+                // is freed; the result is the caller's (decision 381).
+                for l in self.building.clone().into_iter().rev().filter(|&l| l != 0) {
+                    self.free_text(l)?;
+                }
+                self.leave(abi::OK)
+            }
             Terminator::Resume => self.leave(abi::UNWINDING),
             Terminator::Unreachable => {
                 self.rt(sym::PANIC_UNREACHABLE, &[])?;
@@ -1472,8 +1529,18 @@ impl<'a, 'p> Cx<'a, 'p> {
             env
         } else if self.cg.types.holds_fn(&env_ty)? {
             // It keeps a function value, which a wider function value only
-            // widens: no width holds it (decision 360).
-            return Err(Error::unsupported("an `own` closure that keeps a function value"));
+            // widens, so no width holds it in place: it goes in a heap cell
+            // whose address is the first word, the value's environment a
+            // `Box` of it by the last, which a drop frees and a copy copies
+            // (decision 382).
+            let bytes = self.iconst(i64::from(size));
+            let cell = self.rt_status(sym::ALLOC, &[bytes])?;
+            self.store_word(cell, value, abi::WORD);
+            let boxed = Type::Named("Box".into(), vec![env_ty.clone()]);
+            let id = self.type_id(&boxed)?;
+            let tw = self.iconst(i64::from(id) + 1);
+            self.store_word(tw, value, abi::WORD + held);
+            cell
         } else {
             // An `own` environment larger than a function value holds: the
             // program is compiled again with wider ones.
@@ -3692,6 +3759,149 @@ fn cold_blocks(f: &sir::Function) -> Vec<bool> {
         if !changed {
             return cold;
         }
+    }
+}
+
+/// The texts an interpolation is building at the start of each block
+/// (decision 381): the locals a `fmt.new()` made into on every path to the
+/// block that nothing has moved, dropped, written over or ended since, and
+/// that the block's cleanup does not drop. Lowering registers an
+/// interpolation's `String` for its scope only once the statement that
+/// builds it is done, so a panic or a `?` in one of its values leaves it
+/// to no drop of the SIR: the interpreter's host frees it, and the native
+/// code frees it on the failure path of each call, and before a `return`,
+/// where such a text is still being built. Ascending by local.
+fn building_texts(f: &sir::Function) -> Vec<Vec<u32>> {
+    let n = f.blocks.len();
+    let mut entry: Vec<Option<Vec<u32>>> = vec![None; n];
+    if n == 0 {
+        return Vec::new();
+    }
+    entry[0] = Some(Vec::new());
+    let covered: Vec<Vec<u32>> = (0..n).map(|i| cleanup_drops(f, i)).collect();
+    loop {
+        let mut changed = false;
+        for i in 0..n {
+            if f.blocks[i].cleanup {
+                continue;
+            }
+            let Some(start) = entry[i].clone() else { continue };
+            let mut set: Vec<u32> = start.into_iter().filter(|l| !covered[i].contains(l)).collect();
+            for s in &f.blocks[i].stmts {
+                building_taken(&mut set, &s.kind);
+                building_begun(&mut set, &s.kind, &covered[i]);
+            }
+            let succs: Vec<usize> = match &f.blocks[i].term {
+                Terminator::Goto(t) => vec![t.0 as usize],
+                Terminator::Switch { cases, default, .. } => {
+                    let mut v: Vec<usize> = cases.iter().map(|(_, t)| t.0 as usize).collect();
+                    v.push(default.0 as usize);
+                    v
+                }
+                _ => Vec::new(),
+            };
+            for t in succs {
+                if t >= n || f.blocks[t].cleanup {
+                    continue;
+                }
+                let next = match &entry[t] {
+                    None => set.clone(),
+                    Some(old) => old.iter().copied().filter(|l| set.contains(l)).collect(),
+                };
+                if entry[t].as_ref() != Some(&next) {
+                    entry[t] = Some(next);
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    entry
+        .into_iter()
+        .enumerate()
+        .map(|(i, e)| e.unwrap_or_default().into_iter().filter(|l| !covered[i].contains(l)).collect())
+        .collect()
+}
+
+/// The locals the cleanup of block `i` drops, through its chain of cleanup
+/// blocks to its `resume`.
+fn cleanup_drops(f: &sir::Function, i: usize) -> Vec<u32> {
+    let mut out = Vec::new();
+    let mut seen = Vec::new();
+    let mut next = f.blocks[i].unwind.map(|u| u.0 as usize);
+    while let Some(b) = next {
+        if b >= f.blocks.len() || seen.contains(&b) {
+            break;
+        }
+        seen.push(b);
+        for s in &f.blocks[b].stmts {
+            if let StatementKind::Drop { place, .. } = &s.kind
+                && !out.contains(&place.local.0)
+            {
+                out.push(place.local.0);
+            }
+        }
+        next = match &f.blocks[b].term {
+            Terminator::Goto(t) => Some(t.0 as usize),
+            _ => None,
+        };
+    }
+    out
+}
+
+/// What a statement takes of the texts being built, before it runs (and
+/// before a failure inside it): a text it moves, drops, ends or writes over
+/// is no longer the interpolation's to free (decision 381).
+fn building_taken(set: &mut Vec<u32>, s: &StatementKind) {
+    if set.is_empty() {
+        return;
+    }
+    let mut ops: Vec<&Operand> = Vec::new();
+    let mut gone: Vec<u32> = Vec::new();
+    match s {
+        StatementKind::Assign(p, r) => {
+            gone.push(p.local.0);
+            match r {
+                Rvalue::Use(o) | Rvalue::Unary(_, o) => ops.push(o),
+                Rvalue::Binary(_, a, b) => {
+                    ops.push(a);
+                    ops.push(b);
+                }
+                Rvalue::Aggregate(_, all) | Rvalue::Closure(_, _, all) => ops.extend(all),
+                Rvalue::Ref(..) | Rvalue::Discriminant(_) | Rvalue::CopyOf(_) | Rvalue::StrView(_) => {}
+            }
+        }
+        StatementKind::Call { dest, callee, args } => {
+            gone.push(dest.local.0);
+            if let Callee::Value(o) = callee {
+                ops.push(o);
+            }
+            ops.extend(args);
+        }
+        StatementKind::Drop { place, .. } => gone.push(place.local.0),
+        StatementKind::StorageDead(l) => gone.push(l.0),
+    }
+    for o in ops {
+        if let Operand::Move(p) = o {
+            gone.push(p.local.0);
+        }
+    }
+    set.retain(|l| !gone.contains(l));
+}
+
+/// The text a statement begins to build: the local a `fmt.new()` makes
+/// (decision 381), unless the block's cleanup drops it (`covered`).
+fn building_begun(set: &mut Vec<u32>, s: &StatementKind, covered: &[u32]) {
+    if let StatementKind::Call { dest, callee: Callee::Intrinsic(name, _), .. } = s
+        && name == "fmt.new"
+        && dest.proj.is_empty()
+        && !set.contains(&dest.local.0)
+        && !covered.contains(&dest.local.0)
+    {
+        set.push(dest.local.0);
+        set.sort_unstable();
     }
 }
 

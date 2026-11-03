@@ -625,22 +625,6 @@ def write_integer(dst: ptr mut u8, sign: int, f: int, e: int, fixed: bool, preci
     i = small_number(b, i, k - 1, 2)
     set_len(dst, i)
 
-## Appends the byte `c` to the `String` at `t`.
-##
-## Requires:
-## - `text`: `t` holds a live `String`
-def put(t: ptr mut u8, c: int):
-    # safety: valid, aligned, writable, in_bounds: a `String` is its
-    #   buffer's address, its length and its size, by `text`, and the buffer
-    #   has room for the byte once grown.
-    unsafe:
-        let words = t.cast[int]()
-        let len = words.offset(1).read()
-        if len >= words.offset(2).read():
-            _ = text.grow(t, len + 1, t)
-        words.cast[ptr[u8]]().read().cast_mut().offset(len).write(u8.wrapping_from(c))
-        words.offset(1).write(len + 1)
-
 ## Writes the byte `c` at position `i` of `b`; `i + 1`.
 ##
 ## Requires:
@@ -734,34 +718,34 @@ pub(package) def write(dst: ptr mut u8, bits: int, mode: int, precision: int):
     let biased = (bits >> fraction) & top
     let low = bits & ((1 << fraction) - 1)
     if biased == top and low != 0:
-        put(dst, 78)
-        put(dst, 97)
-        put(dst, 78)
+        text.put(dst, 78)
+        text.put(dst, 97)
+        text.put(dst, 78)
         return
     if negative:
-        put(dst, 45)
+        text.put(dst, 45)
     if biased == top:
-        put(dst, 105)
-        put(dst, 110)
-        put(dst, 102)
+        text.put(dst, 105)
+        text.put(dst, 110)
+        text.put(dst, 102)
         return
     if biased == 0 and low == 0:
-        put(dst, 48)
+        text.put(dst, 48)
         if shortest_form:
-            put(dst, 46)
-            put(dst, 48)
+            text.put(dst, 46)
+            text.put(dst, 48)
             return
         if precision > 0:
-            put(dst, 46)
+            text.put(dst, 46)
             var i = 0
             while i < precision:
-                put(dst, 48)
+                text.put(dst, 48)
                 i += 1
         if mode != FIXED:
-            put(dst, 101)
-            put(dst, 43)
-            put(dst, 48)
-            put(dst, 48)
+            text.put(dst, 101)
+            text.put(dst, 43)
+            text.put(dst, 48)
+            text.put(dst, 48)
         return
     let min_e = if single: -149 else: -1074
     var f = low

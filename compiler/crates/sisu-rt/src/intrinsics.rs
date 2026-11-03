@@ -269,7 +269,7 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                     Ok(l) => l,
                     Err(s) => return s,
                 };
-                reverse(&mut items, ty(c.targ(0)).size);
+                crate::bridge::list_reverse((&raw mut items).cast::<u8>(), ty(c.targ(0)).size);
                 c.set_word(iter::into_word(iter::items(items, c.targ(0))));
             }
             I::IterableList => {
@@ -286,7 +286,8 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                     Ok(l) => l,
                     Err(s) => return s,
                 };
-                if let Err(s) = sort_list(&mut items, t) {
+                if !crate::bridge::list_sort((&raw mut items).cast::<u8>(), t) {
+                    let s = rt::raise_msg(msg::PANIC_UNORDERED, &[]);
                     let _ = value::drop_value(&mut items as *mut List as *mut u8, c.ret_ty);
                     return s;
                 }
@@ -354,7 +355,7 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                         &[("len", len.to_string()), ("index", bad.to_string())],
                     );
                 }
-                (c.ret as *mut List).write(copies(l, e, s as u64, e2 as u64));
+                crate::bridge::list_copies(c.ret, (l as *mut List).cast::<u8>(), e, s as u64, e2 as u64);
             }
             I::IterRef | I::IterMut | I::ListIter | I::SetIter | I::SliceIter => {
                 let (p, t) = c.place(0);
@@ -777,14 +778,7 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
             }
             I::ListPop => {
                 let (l, e) = c.list(0);
-                if l.len == 0 {
-                    c.none();
-                } else {
-                    l.len -= 1;
-                    let size = ty(e).size;
-                    mem::set_word(c.ret, 0, 0);
-                    mem::copy(c.ret.add(8), l.at(l.len, size), size as usize);
-                }
+                crate::bridge::list_pop((l as *mut List).cast::<u8>(), e, c.ret);
             }
             I::ListGet | I::ListFirst | I::ListLast => {
                 let (l, e) = c.list(0);
@@ -815,12 +809,7 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                         &[("index", k.to_string()), ("len", len)],
                     );
                 }
-                let size = ty(e).size;
-                l.reserve(1, size);
-                let at = l.at(k as u64, size);
-                mem::copy(at.add(size as usize), at, ((l.len - k as u64) * u64::from(size)) as usize);
-                mem::copy(at, c.arg(2), size as usize);
-                l.len += 1;
+                crate::bridge::list_insert((l as *mut List).cast::<u8>(), k as u64, c.arg(2), ty(e).size);
             }
             I::ListRemove => {
                 let k = c.int(1);
@@ -831,24 +820,15 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                         &[("len", l.len.to_string()), ("index", k.to_string())],
                     );
                 }
-                let size = ty(e).size;
-                let at = l.at(k as u64, size);
-                mem::copy(c.ret, at, size as usize);
-                mem::copy(at, at.add(size as usize), ((l.len - k as u64 - 1) * u64::from(size)) as usize);
-                l.len -= 1;
+                crate::bridge::list_remove((l as *mut List).cast::<u8>(), k as u64, c.ret, ty(e).size);
             }
             I::ListExtend => {
                 let (l, e) = c.list(0);
-                let size = ty(e).size;
-                let other = (c.arg(1) as *mut List).read();
-                l.reserve(other.len, size);
-                mem::copy(l.at(l.len, size), other.ptr, (other.len * u64::from(size)) as usize);
-                l.len += other.len;
-                mem::release(other.ptr);
+                crate::bridge::list_extend((l as *mut List).cast::<u8>(), c.arg(1), ty(e).size);
             }
             I::ListReverse => {
                 let (l, e) = c.list(0);
-                reverse(l, ty(e).size);
+                crate::bridge::list_reverse((l as *mut List).cast::<u8>(), ty(e).size);
             }
             I::ListSwap => {
                 let (l, e) = c.list(0);
@@ -856,10 +836,7 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 let at = |k: i64| u64::try_from(k).ok().filter(|k| *k < l.len);
                 match (at(i), at(j)) {
                     (Some(a), Some(b)) => {
-                        let size = ty(e).size as usize;
-                        if a != b {
-                            std::ptr::swap_nonoverlapping(l.at(a, size as u32), l.at(b, size as u32), size);
-                        }
+                        crate::bridge::list_swap((l as *mut List).cast::<u8>(), a, b, ty(e).size);
                     }
                     _ => {
                         let bad = if at(i).is_none() { i } else { j };
@@ -900,27 +877,19 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                     let (p, _) = c.place(0);
                     c.set_word(crate::views::view(p, ty(e).size, lo, hi) as u64);
                 } else {
-                    (c.ret as *mut List).write(copies(l, e, lo, hi));
+                    crate::bridge::list_copies(c.ret, (l as *mut List).cast::<u8>(), e, lo, hi);
                 }
             }
             I::ListContains => c.set_bool(contains(c.arg(0), c.ty(0), c.arg(1), c.ty(1))),
             I::ListJoin => {
                 let sep = c.text(1).to_vec();
                 let (l, e) = c.list(0);
-                let size = ty(e).size;
-                let mut out = Vec::new();
-                for k in 0..l.len {
-                    if k > 0 {
-                        out.extend_from_slice(&sep);
-                    }
-                    value::display(&mut out, l.at(k, size), e);
-                }
-                c.set_string(&out);
+                crate::bridge::list_join(c.ret, (l as *mut List).cast::<u8>(), e, &sep);
             }
             I::ListSort => {
                 let (l, e) = c.list(0);
-                if let Err(s) = sort_list(l, e) {
-                    return s;
+                if !crate::bridge::list_sort((l as *mut List).cast::<u8>(), e) {
+                    return rt::raise_msg(msg::PANIC_UNORDERED, &[]);
                 }
             }
             I::OptionIsSome | I::ResultIsOk => {
@@ -1463,11 +1432,7 @@ pub(crate) unsafe fn contains(container: *mut u8, ct: u32, item: *mut u8, it: u3
     unsafe {
         let (p, t) = target(container, ct);
         match ty(t).kind {
-            Kind::List(e) => {
-                let l = mem::at::<List>(p);
-                let size = ty(e).size;
-                (0..l.len).any(|k| value::equal(l.at(k, size), e, item, it))
-            }
+            Kind::List(e) => crate::bridge::list_contains(p, e, item, it),
             Kind::Dict(..) | Kind::Set(_) => crate::dict::table(p).position(item, it).is_some(),
             Kind::Str | Kind::String | Kind::Path => {
                 let hay = value::text(p, t).unwrap_or(&[]);
@@ -1487,100 +1452,6 @@ pub(crate) unsafe fn contains(container: *mut u8, ct: u32, item: *mut u8, it: u3
 
 fn is_char_boundary(s: &[u8], i: usize) -> bool {
     i == 0 || i == s.len() || s.get(i).is_some_and(|b| (*b as i8) >= -0x40)
-}
-
-/// Copies of the elements `lo..hi` of a list.
-///
-/// # Safety
-/// The list must hold elements of type `e`.
-unsafe fn copies(l: &List, e: u32, lo: u64, hi: u64) -> List {
-    let size = ty(e).size;
-    let mut out = List::empty();
-    out.reserve(hi - lo, size);
-    for k in lo..hi {
-        // SAFETY: both elements are in their buffers.
-        unsafe { value::copy_value(out.at(k - lo, size), l.at(k, size), e) };
-    }
-    out.len = hi - lo;
-    out
-}
-
-/// Reverses a list's elements in place.
-fn reverse(l: &mut List, size: u32) {
-    if l.len < 2 {
-        return;
-    }
-    let mut tmp = vec![0u8; size as usize];
-    let (mut a, mut b) = (0u64, l.len - 1);
-    while a < b {
-        // SAFETY: both elements are in the buffer, and `tmp` holds one.
-        unsafe {
-            mem::copy(tmp.as_mut_ptr(), l.at(a, size), size as usize);
-            mem::copy(l.at(a, size), l.at(b, size), size as usize);
-            mem::copy(l.at(b, size), tmp.as_ptr(), size as usize);
-        }
-        a += 1;
-        b -= 1;
-    }
-}
-
-/// A stable merge sort by the elements' structural order; NaN panics.
-///
-/// # Safety
-/// The list must hold elements of type `e`.
-unsafe fn sort_list(l: &mut List, e: u32) -> Result<(), u8> {
-    let size = ty(e).size;
-    let mut idx: Vec<u64> = (0..l.len).collect();
-    let mut failed = false;
-    // SAFETY: the indices are within the list.
-    let cmp = |i: u64, j: u64| -> Ordering {
-        match unsafe { value::compare(l.at(i, size), e, l.at(j, size), e) } {
-            Some(o) => o,
-            None => {
-                failed = true;
-                Ordering::Equal
-            }
-        }
-    };
-    merge_sort(&mut idx, cmp);
-    if failed {
-        return Err(rt::raise_msg(msg::PANIC_UNORDERED, &[]));
-    }
-    let bytes = (l.len * u64::from(size)) as usize;
-    let mut old = vec![0u8; bytes];
-    // SAFETY: the buffer holds `bytes` bytes.
-    unsafe {
-        mem::copy(old.as_mut_ptr(), l.ptr, bytes);
-        for (k, i) in idx.into_iter().enumerate() {
-            mem::copy(l.at(k as u64, size), old.as_ptr().add((i * u64::from(size)) as usize), size as usize);
-        }
-    }
-    Ok(())
-}
-
-fn merge_sort(v: &mut Vec<u64>, mut cmp: impl FnMut(u64, u64) -> Ordering) {
-    fn go(v: &mut Vec<u64>, cmp: &mut dyn FnMut(u64, u64) -> Ordering) {
-        if v.len() <= 1 {
-            return;
-        }
-        let mut right = v.split_off(v.len() / 2);
-        go(v, cmp);
-        go(&mut right, cmp);
-        let left = std::mem::take(v);
-        let (mut i, mut j) = (0, 0);
-        while i < left.len() && j < right.len() {
-            if cmp(right[j], left[i]) == Ordering::Less {
-                v.push(right[j]);
-                j += 1;
-            } else {
-                v.push(left[i]);
-                i += 1;
-            }
-        }
-        v.extend_from_slice(&left[i..]);
-        v.extend_from_slice(&right[j..]);
-    }
-    go(v, &mut cmp);
 }
 
 /// `min` and `max`: the chosen value, copied out of a reference or moved;

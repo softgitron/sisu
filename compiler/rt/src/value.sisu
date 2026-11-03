@@ -140,7 +140,7 @@ pub(package) def target(ts: Types, p: ptr mut u8, t: int) -> (ptr mut u8, int):
 ##
 ## Requires:
 ## - `typed`: `p` holds a live value of type `t`
-def concrete(ts: Types, p: ptr mut u8, t: int) -> int:
+pub(package) def concrete(ts: Types, p: ptr mut u8, t: int) -> int:
     # safety: typed, in_bounds, valid, aligned: the type's flags are its
     #   header's, and an error value's first word is its type.
     unsafe:
@@ -153,7 +153,7 @@ def concrete(ts: Types, p: ptr mut u8, t: int) -> int:
 ##
 ## Requires:
 ## - `typed`: `p` holds a live value of that enum
-def variant(ts: Types, p: ptr mut u8, h: ptr[int]) -> int:
+pub(package) def variant(ts: Types, p: ptr mut u8, h: ptr[int]) -> int:
     # safety: typed, in_bounds, valid, aligned: an enum's tag is the word at
     #   its tag's offset, and its list of variants is the table's.
     unsafe:
@@ -912,13 +912,16 @@ pub(package) def copy(ts: Types, dst: ptr mut u8, src: ptr mut u8, t: int):
             move_bytes(dst, src, size)
 
 ## One more count for every capability handle the value at `p` of type `t`
-## holds: a copy of it was made (decision 237).
+## holds: a copy of it was made (decision 237). A function value's
+## environment in a heap cell is copied into a cell of the copy's own
+## (decision 382).
 ##
 ## Requires:
-## - `typed`: `p` holds a live value of type `t`
+## - `typed`: `p` holds a live value of type `t`, a copy of another's bytes
 pub(package) def retain(ts: Types, p: ptr mut u8, t: int):
     # safety: typed, in_bounds, valid, aligned: the value is of its type, and
-    #   each part is where its type's entry in the table says;
+    #   each part is where its type's entry in the table says; writable: a
+    #   box's cell is the copy's, read and written through its address;
     #   returns_promptly: the runtime in Rust counts a handle's cell.
     unsafe:
         let h = ts.words.offset(t * WORDS)
@@ -947,6 +950,15 @@ pub(package) def retain(ts: Types, p: ptr mut u8, t: int):
             let env = fn_env(p, h)
             if env >= 0:
                 retain(ts, p.offset(8), env)
+        elif k == BOX:
+            # A function value's environment in a heap cell (decision 382):
+            # the copy gets a cell of its own, a copy of the one it shares.
+            let old = p.cast[ptr[u8]]().read().cast_mut()
+            if old.addr() != 0:
+                let inner = h.offset(A).read()
+                let cell = sisu_rt_alloc(ts.words.offset(inner * WORDS + SIZE).read())
+                copy(ts, cell, old, inner)
+                p.cast[int]().write(cell.addr())
 
 # -------------------------------------------------------------------- drop
 

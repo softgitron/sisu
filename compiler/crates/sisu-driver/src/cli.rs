@@ -2,7 +2,8 @@
 //!
 //! Every message the driver prints is a catalog entry (D-065). Exit
 //! statuses: 0 success; 1 the program has errors, a test failed, or `main`
-//! returned an error; 2 a usage error; 101 a panic; 134 an abort; 70 an
+//! returned an error; 2 a usage error; 3 no test failed and one is blocked
+//! by a typed hole (decision 380); 101 a panic; 134 an abort; 70 an
 //! internal compiler error.
 
 use crate::db::Db;
@@ -13,6 +14,20 @@ use std::rc::Rc;
 
 pub const EXIT_USAGE: i32 = 2;
 pub const EXIT_ICE: i32 = 70;
+/// `sisu test`: no test failed and one is blocked by a typed hole (17, D-061;
+/// decisions 340 and 380).
+pub const EXIT_BLOCKED: i32 = 3;
+
+/// The status of commands run one after another (a workspace's members):
+/// the worst, where a blocked suite's 3 yields to every other failure, so
+/// that a failed test anywhere is 1 whatever else is blocked (decision 380).
+pub(crate) fn worse(a: i32, b: i32) -> i32 {
+    match (a, b) {
+        (EXIT_BLOCKED, b) if b != exit::OK => b,
+        (a, EXIT_BLOCKED) if a != exit::OK => a,
+        (a, b) => a.max(b),
+    }
+}
 
 pub(crate) fn text(id: MsgId, params: &[(&str, String)]) -> String {
     Catalog::builtin().render(id.id(), params)
@@ -275,6 +290,15 @@ impl Input {
         }
     }
 
+    /// What `sisu test --std` tests outside a package and without a file:
+    /// the standard library's examples alone, on an empty program, which a
+    /// replay line names by the flag (decision 380).
+    fn std_examples() -> Input {
+        let mut input = Input::single("<std>/examples.sisu", String::new());
+        input.shown = "--std".to_string();
+        input
+    }
+
     /// The files `sisu run --watch` watches, with the hashes of the texts
     /// the program was compiled from.
     fn watched(&self) -> Vec<(String, std::path::PathBuf, u64)> {
@@ -365,6 +389,13 @@ fn split_args(args: &[String], program_after_sir: bool) -> Parsed<'_> {
             if let Some(k) = a.strip_prefix("--stats=") {
                 stats = Some(k);
             } else if let Some(k) = args.get(i + 1).map(String::as_str).filter(|k| STATS_KINDS.contains(k)) {
+                stats = Some(k);
+                i += 1;
+            } else if let Some(k) = args.get(i + 1).map(String::as_str).filter(|k| {
+                // A word that names nothing there, before the file, is the
+                // kind asked for, which `D0094` refuses (decision 386).
+                !k.starts_with("--") && i + 2 < args.len() && !std::path::Path::new(k).exists()
+            }) {
                 stats = Some(k);
                 i += 1;
             }
@@ -535,6 +566,19 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
             host.stdout(&format!("{}\n", text(msg::CLI_USAGE, &[])));
             exit::OK
         }
+        // The toolchain's version, the one replay tokens and capability logs
+        // record (decision 386).
+        "version" | "--version" => {
+            if let Some(bad) = rest.first() {
+                host.stderr(&plain_error(
+                    msg::CLI_UNKNOWN_OPTION,
+                    &[("option", bad.clone()), ("command", "version".into())],
+                ));
+                return EXIT_USAGE;
+            }
+            host.stdout(&text_line(msg::CLI_VERSION, &[("version", crate::replay::TOOLCHAIN.to_string())]));
+            exit::OK
+        }
         "explain" => explain(rest, host),
         "repl" => crate::repl::repl(rest, host),
         "lsp" => {
@@ -560,6 +604,9 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
         "run" | "check" | "sir" | "test" | "bench" | "build" | "tokens" | "parse" => {
             let p = split_args(rest, cmd == "run");
             let allowed: &[&str] = match cmd.as_str() {
+                // `--accept-unsafe` lets a package's `unsafe` level rise in
+                // its lockfile (22, `E1022`), which stage 1 checks (decision
+                // 386).
                 "run" => &[
                     "--sir",
                     "--monitor",
@@ -570,6 +617,7 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                     "--native",
                     "--release",
                     "--no-default-features",
+                    "--accept-unsafe",
                 ],
                 "test" => &[
                     "--no-monitor",
@@ -580,13 +628,20 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                     "--std",
                     "--no-cache",
                     "--no-default-features",
+                    "--accept-unsafe",
                 ],
-                "check" => &["--format=ids", "--format=human", "--locked", "--no-default-features"],
-                "build" => &["--locked", "--native", "--release", "--no-default-features"],
-                "bench" => &["--locked", "--no-default-features"],
+                "check" => &[
+                    "--format=ids",
+                    "--format=human",
+                    "--locked",
+                    "--no-default-features",
+                    "--accept-unsafe",
+                ],
+                "build" => &["--locked", "--native", "--release", "--no-default-features", "--accept-unsafe"],
+                "bench" => &["--locked", "--no-default-features", "--accept-unsafe"],
                 // The program built with its tests and benchmarks (decision
                 // 285), for `sisu test --from-sir`.
-                "sir" => &["--tests"],
+                "sir" => &["--tests", "--accept-unsafe"],
                 "tokens" => &["--trivia"],
                 "parse" => &["--tree", "--print", "--trivia", "--shape", "--ast"],
                 _ => &[],
@@ -827,6 +882,14 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                     Err(code) => return code,
                 }
                 Vec::new()
+            } else if cmd == "test"
+                && p.flags.contains(&"--std")
+                && target.is_none()
+                && crate::package::locate(None, &std::env::current_dir().unwrap_or_default()).is_none()
+            {
+                // The standard library's examples need no program of the
+                // working directory (decision 380).
+                vec![Input::std_examples()]
             } else {
                 let file_level = from_sir.is_some() || from_lir.is_some();
                 match inputs_for(cmd, target, locked, has_ids(&p.flags), file_level, &features, host) {
@@ -921,7 +984,7 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
             let mut status = exit::OK;
             for input in &inputs {
                 let code = guarded(cmd, &p.flags, &opts, input, program_args.clone(), host);
-                status = status.max(code);
+                status = worse(status, code);
             }
             status
         }
@@ -1186,15 +1249,30 @@ fn test_from_sir(
         );
         (path, salt)
     });
-    let run = TestRun {
-        file: &input.shown,
-        hash,
-        only,
-        bound: opts.bound,
-        search: true,
-        transcripts: Vec::new(),
-        cache,
+    // The transcripts beside the program, when every test runs: they run
+    // against the world of transcripts, which only the Rust front end
+    // writes into the SIR, so on its build of the program (decision 380).
+    let mut transcripts = Vec::new();
+    let found = if sources && opts.select.is_all() {
+        crate::transcript::find(&input.disk.display().to_string())
+    } else {
+        Vec::new()
     };
+    if !found.is_empty() {
+        let world = match prog.entry {
+            Some(_) => transcript_sir(input, opts.level),
+            None => Err(text(msg::CLI_TRANSCRIPT_NO_MAIN, &[("file", file.to_string())])),
+        };
+        for path in found {
+            let shown = path.display().to_string();
+            let outcome = match &world {
+                Ok(sir) => run_transcript(sir, host, &options, &path),
+                Err(why) => Err(why.clone()),
+            };
+            transcripts.push((shown, outcome.err()));
+        }
+    }
+    let run = TestRun { file: &input.shown, hash, only, bound: opts.bound, search: true, transcripts, cache };
     let (code, reports) = run_tests(prog, host, &options, opts.seeds, &run);
     if options.update {
         let ran: Vec<&str> = which.iter().filter_map(|&k| prog.tests.get(k)).map(|t| t.0.as_str()).collect();
@@ -1203,6 +1281,27 @@ fn test_from_sir(
         }
     }
     code
+}
+
+/// The SIR a program's transcripts run (17): the program as the Rust front
+/// end builds it, with the world of transcripts (`transcript_world`,
+/// `transcript_system`) that only it writes (decision 380), or why it does
+/// not: its errors, which stage 1, whose SIR the tests run, did not find.
+fn transcript_sir(input: &Input, level: sisu_lower::ContractLevel) -> Result<sisu_sir::Program, String> {
+    let mut db = FreedAside(Db::new());
+    db.contracts = level;
+    input.load(&mut db);
+    let file = input.file.as_str();
+    if let Some(sir) = db.sir_with(file, &["transcript_world", "transcript_system"]) {
+        return Ok(sir);
+    }
+    let errors: Vec<sisu_diag::Diagnostic> =
+        db.diagnostics(file).into_iter().filter(|d| d.is_error()).collect();
+    let shown = match db.checked(file) {
+        Some(c) => sisu_diag::render::render_human(&c.map, &errors),
+        None => String::new(),
+    };
+    Err(text(msg::CLI_TRANSCRIPT_FRONT_END, &[("diagnostics", shown.trim_end().to_string())]))
 }
 
 /// `sisu bench --from-sir FILE`: the benchmarks of serialised SIR that
@@ -1275,12 +1374,14 @@ fn from_lir(
 }
 
 /// Whether stage 1 serves the command with these options (decision 268).
-/// It has no SIR of a program built with its tests, so `sisu test` and
-/// `sisu bench` keep the Rust front end, and so do the modes that need
-/// more of the front end than its output: `run --watch` (the front end
-/// again at each save), `run --defer-borrow` (the ownership checker's
-/// findings beside the run), `check --diary` (the diagnostics as data) and
-/// `parse --shape`. `run --record` is stage 1's, its log holding the SIR
+/// `sisu test` and `sisu bench` run from its SIR of the program built with
+/// its tests (decision 357), a program's transcripts on the Rust front
+/// end's beside them (decision 380), but for the standard library's
+/// examples; the Rust front end keeps the modes that need more of the
+/// front end than its output: `run --watch` (the front end again at each
+/// save), `run --defer-borrow` and `test --defer-borrow` (the ownership
+/// checker's findings beside the run), `check --diary` (the diagnostics as
+/// data) and `parse --shape`. `run --record` is stage 1's, its log holding the SIR
 /// that `sisu replay` runs (decision 303). A file of SIR needs no front end
 /// at all.
 fn stage1_serves(cmd: &str, p: &Parsed<'_>) -> bool {
@@ -1418,9 +1519,13 @@ fn stage1_command(
     };
     // The options every program command passes on: the lockfile and the
     // features (decision 250), then the path.
+    let accept = has("--accept-unsafe");
     let program = |words: &mut Vec<String>| {
         if locked {
             words.push("--locked".into());
+        }
+        if accept {
+            words.push("--accept-unsafe".into());
         }
         if !features.names.is_empty() {
             words.push("--features".into());
@@ -1496,59 +1601,62 @@ fn stage1_command(
             };
             let mut status = exit::OK;
             for input in &inputs {
-                // A program's transcripts run against its world of transcripts,
-                // which only the Rust front end writes: such a run stays its.
-                let transcripts = cmd == "test"
-                    && opts.select.is_all()
-                    && !crate::transcript::find(&input.disk.display().to_string()).is_empty();
-                let code = if transcripts {
-                    guarded(cmd, &p.flags, opts, input, Vec::new(), host)
-                } else {
-                    let mut words = vec!["sir".to_string(), "--tests".to_string()];
-                    words.extend(contracts.clone());
+                let code = {
+                    let mut common: Vec<String> = Vec::new();
                     if locked {
-                        words.push("--locked".into());
+                        common.push("--locked".into());
+                    }
+                    if accept {
+                        common.push("--accept-unsafe".into());
                     }
                     if !features.names.is_empty() {
-                        words.push("--features".into());
-                        words.push(features.names.join(","));
+                        common.push("--features".into());
+                        common.push(features.names.join(","));
                     }
                     if features.no_default {
-                        words.push("--no-default-features".into());
+                        common.push("--no-default-features".into());
                     }
-                    words.push(input.shown.clone());
-                    let r = match run(host, &words, Backend::Unused) {
-                        Ok(r) => r,
+                    common.push(input.shown.clone());
+                    // The program's errors, the ownership checker's among
+                    // them, stop it before its tests run, as they stop `sisu
+                    // run`: stage 1's `sir` prints nothing for a program with
+                    // an error of the front end, and the SIR of one the
+                    // ownership checker rejects, as `sisu sir` does
+                    // (decision 380); its `check` says which.
+                    let mut check = vec!["check".to_string()];
+                    if has_ids(&p.flags) {
+                        check.push("--format=ids".into());
+                    }
+                    check.extend(common.iter().cloned());
+                    let c = match run(host, &check, Backend::Unused) {
+                        Ok(c) => c,
                         Err(code) => return code,
                     };
-                    if r.status != exit::OK || r.stdout.is_empty() {
-                        // Stage 1's `sir` prints nothing for a program with an
-                        // error of the front end; its `check` says which.
-                        if !r.stderr.is_empty() || r.status != exit::OK {
-                            host.stderr(&r.stderr);
-                        }
-                        let mut words = vec!["check".to_string(), input.shown.clone()];
-                        if has_ids(&p.flags) {
-                            words.insert(1, "--format=ids".into());
-                        }
-                        match run(host, &words, Backend::Unused) {
-                            Ok(c) => {
-                                host.stderr(&c.stdout);
-                                host.stderr(&c.stderr);
-                                r.status.max(c.status).max(exit::ERROR)
-                            }
-                            Err(code) => code,
-                        }
+                    if c.status != exit::OK {
+                        host.stderr(&c.stdout);
+                        host.stderr(&c.stderr);
+                        c.status.max(exit::ERROR)
                     } else {
+                        let mut words = vec!["sir".to_string(), "--tests".to_string()];
+                        words.extend(contracts.clone());
+                        words.extend(common);
+                        let r = match run(host, &words, Backend::Unused) {
+                            Ok(r) => r,
+                            Err(code) => return code,
+                        };
                         host.stderr(&r.stderr);
-                        match read_sir(&r.stdout, host) {
-                            Ok(prog) if cmd == "bench" => bench_from_sir(&prog, opts, host),
-                            Ok(prog) => test_from_sir(&prog, &p.flags, opts, input, true, host),
-                            Err(code) => code,
+                        if r.status != exit::OK || r.stdout.is_empty() {
+                            r.status.max(exit::ERROR)
+                        } else {
+                            match read_sir(&r.stdout, host) {
+                                Ok(prog) if cmd == "bench" => bench_from_sir(&prog, opts, host),
+                                Ok(prog) => test_from_sir(&prog, &p.flags, opts, input, true, host),
+                                Err(code) => code,
+                            }
                         }
                     }
                 };
-                status = status.max(code);
+                status = worse(status, code);
             }
             status
         }
@@ -2554,9 +2662,11 @@ fn command(
                     }
                     // The test cache (decision 242), for a run whose results
                     // the program's code and these options decide: not one
-                    // that searches schedules, simulates, updates snapshots
-                    // or defers the ownership checker.
+                    // that searches schedules, simulates, updates snapshots,
+                    // defers the ownership checker or runs the standard
+                    // library's examples, whose code the hash leaves out.
                     let cached = !has("--no-cache")
+                        && !has("--std")
                         && seeds.explore.is_none()
                         && opts.sim.is_none()
                         && !options.update
@@ -3188,8 +3298,16 @@ fn run_tests(
         Some(only) => only.clone(),
         None => (0..prog.tests.len()).collect(),
     };
+    let exhaustive = matches!(options.strategy, sisu_interp::Strategy::Exhaustive { .. });
+    // A run that searches schedules writes each test's output once it knows
+    // which run to show: the one that failed, else the first (decision 386).
+    let exploring = run.search && (exhaustive || seeds.explore.is_some());
     let mut results = match &run.cache {
         Some((path, salt)) => cached_tests(prog, host, options, &which, path, salt, run.only.is_none()),
+        None if exploring => {
+            let mut quiet = Captured { inner: &mut *host, out: String::new(), err: String::new() };
+            sisu_interp::run_tests_report_at(prog, &mut quiet, options, &which)
+        }
         None => sisu_interp::run_tests_report_at(prog, host, options, &which),
     };
     // `--explore N`: every test again under the other seeds, quietly; a
@@ -3200,7 +3318,6 @@ fn run_tests(
         results.iter().map(|(_, _, rep)| rep.trail.iter().map(|c| c.taken).collect()).collect();
     let mut searched = 0u64;
     let mut stopped = false;
-    let exhaustive = matches!(options.strategy, sisu_interp::Strategy::Exhaustive { .. });
     if exhaustive && run.search {
         let cap = seeds.explore.unwrap_or(EXHAUSTIVE_CAP);
         for (i, &index) in which.iter().enumerate() {
@@ -3253,6 +3370,12 @@ fn run_tests(
             if failed_seed[i].is_none() && matches!(r, TestResult::Failed(_)) {
                 failed_seed[i] = Some(seeds.first);
             }
+        }
+    }
+    if exploring && run.cache.is_none() {
+        for (_, _, report) in &results {
+            host.stdout(&report.out);
+            host.stderr(&report.err);
         }
     }
     let (mut passed, mut failed, mut blocked) = (0, 0, 0);
@@ -3396,7 +3519,16 @@ fn run_tests(
     }
     host.stdout(&out);
     let reports = results.into_iter().map(|(_, _, r)| r).collect();
-    (if failed > 0 { exit::ERROR } else { exit::OK }, reports)
+    // A suite that waits on a hole is neither a success nor a failure
+    // (decision 340): 1 when a test failed, else 3 when one is blocked.
+    let status = if failed > 0 {
+        exit::ERROR
+    } else if blocked > 0 {
+        EXIT_BLOCKED
+    } else {
+        exit::OK
+    };
+    (status, reports)
 }
 
 /// The root module of the program `sisu doc --std` documents: an import of
@@ -4074,7 +4206,7 @@ fn new_package(args: &[String], host: &mut dyn Host) -> i32 {
         return EXIT_USAGE;
     }
     let [name] = names.as_slice() else {
-        host.stderr(&plain_error(msg::CLI_MISSING_FILE, &[("command", "new".into())]));
+        host.stderr(&plain_error(msg::CLI_MISSING_NAME, &[]));
         return EXIT_USAGE;
     };
     let lib = !flags.is_empty();
@@ -4115,7 +4247,7 @@ fn new_package(args: &[String], host: &mut dyn Host) -> i32 {
 
 fn explain(args: &[String], host: &mut dyn Host) -> i32 {
     let Some(code) = args.first() else {
-        host.stderr(&plain_error(msg::CLI_MISSING_FILE, &[("command", "explain".into())]));
+        host.stderr(&plain_error(msg::CLI_MISSING_CODE, &[]));
         return EXIT_USAGE;
     };
     let catalog = Catalog::builtin();
@@ -4131,7 +4263,10 @@ fn explain(args: &[String], host: &mut dyn Host) -> i32 {
                         ("code", e.code.clone().unwrap_or_default()),
                         ("kind", kind),
                         ("id", e.id.clone()),
-                        ("template", e.template.clone())
+                        // As a reader sees the message: one brace where the
+                        // catalog doubles it, and its line breaks (decision
+                        // 386); a parameter stays named in its braces.
+                        ("template", e.template.replace("{{", "{").replace("}}", "}").replace("\\n", "\n"))
                     ]
                 )
             ));

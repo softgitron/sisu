@@ -67,9 +67,10 @@ fn native_conformance_release() {
     println!("{}", report.render());
     assert!(report.cases > 0, "no cases in the coverage list");
     assert!(report.failures.is_empty(), "{}", report.render());
-    // Stage 2 lowered every case: none was built through the Rust lowering
+    // Stage 2 lowered every case but those a release build refuses (a
+    // typed hole, decision 340): none was built through the Rust lowering
     // (decision 305).
-    assert_eq!(report.stage2.map(|(n, _)| n), Some(report.cases), "{}", report.render());
+    assert_eq!(report.stage2.map(|(n, _)| n), Some(report.cases - report.refused), "{}", report.render());
 }
 
 /// The same cases lowered by stage 2, the backend written in Sisu
@@ -737,36 +738,52 @@ fn run_native_runs_the_program() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// An `own` closure that keeps a function value is refused natively
-/// (`D0103`), by stage 2's lowering and by the Rust one: a function value is
-/// as wide as the widest `own` environment, which one that keeps a function
-/// value only widens, so each compiled the program again with wider function
-/// values without end (decision 360). The interpreter runs it.
+/// An `own` closure that keeps a function value, directly, in a tuple or
+/// two of them, runs natively as the interpreter runs it, its environment in
+/// a heap cell (decision 382, where decision 360 refused it): a function
+/// value is as wide as the widest `own` environment, which one that keeps a
+/// function value only widens. Stage 2's lowering and the Rust one each
+/// build it, and the executable, which copies such values (a `let`, a
+/// capture, a list's items) and drops them, prints what the interpreter
+/// prints and frees what it allocated.
 #[test]
-fn an_own_closure_that_keeps_a_function_value_is_refused_natively() {
+fn an_own_closure_that_keeps_a_function_value_runs_natively() {
     let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
     let dir = scratch("keeps-fn");
     std::fs::write(
         dir.join("keeps.sisu"),
-        "def main():\n    let n = 2\n    let f = own () -> n\n    let g = own () -> f() + 1\n    print(g())\n",
+        "def compose(own f: (int) -> int, own g: (int) -> int) -> (int) -> int:\n    \
+         return own (x) -> g(f(x))\n\n\
+         def main():\n    let n = 2\n    let f = own () -> n\n    let g = own () -> f() + 1\n    \
+         print(g())\n    let h = g\n    print(h() + g())\n    \
+         let add = compose(own (x) -> x + n, own (x) -> x * 3)\n    var total = 0\n    \
+         for i in range(5):\n        total += add(i)\n    print(total)\n    \
+         let pair = (g, 5)\n    let first = pair.0\n    print(first() + pair.1)\n    \
+         var fs: list[() -> int] = []\n    for i in range(3):\n        \
+         let k = own () -> g() * i\n        fs.push(k)\n    for k in fs:\n        print(k())\n",
     )
     .expect("the program");
     let run = |args: &[&str]| {
         let out = std::process::Command::new(&sisu).args(args).current_dir(&dir).output().expect("sisu runs");
         outcome(out)
     };
-    let (out, err, status) = run(&["run", "keeps.sisu"]);
-    assert_eq!((out.as_str(), status), ("3\n", Some(0)), "{err}");
+    let (expected, err, status) = run(&["run", "keeps.sisu"]);
+    assert_eq!((expected.as_str(), status), ("3\n6\n60\n8\n0\n3\n6\n", Some(0)), "{err}");
     for lowering in [
-        &["build", "--native", "keeps.sisu"][..],
-        &["build", "--native", "--backend=cranelift", "--lower=rust", "keeps.sisu"][..],
+        &["build", "--native", "--output", "keeps", "keeps.sisu"][..],
+        &["build", "--native", "--backend=cranelift", "--lower=rust", "--output", "keeps", "keeps.sisu"][..],
+        &["build", "--native", "--release", "--output", "keeps", "keeps.sisu"][..],
     ] {
         let (_, err, status) = run(lowering);
-        assert_eq!(status, Some(1), "{lowering:?}: {err}");
-        assert!(
-            err.contains("does not compile an `own` closure that keeps a function value"),
-            "{lowering:?}: {err}"
-        );
+        assert_eq!(status, Some(0), "{lowering:?}: {err}");
+        let ran = std::process::Command::new(dir.join("keeps"))
+            .env("SISU_RT_ALLOCS", "1")
+            .current_dir(&dir)
+            .output()
+            .expect("the program runs");
+        let (out, err, status) = outcome(ran);
+        assert_eq!((out.as_str(), status), (expected.as_str(), Some(0)), "{lowering:?}: {err}");
+        assert_eq!(err, "allocations: 0 of the runtime's live at exit\n", "{lowering:?}");
     }
     let _ = std::fs::remove_dir_all(&dir);
 }

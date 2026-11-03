@@ -1,0 +1,39 @@
+# The moves of a list natively, the runtime in Sisu's (decision 385): growth,
+# `insert` at either end, `remove`, `pop`, `reverse`, `swap`, a slice's
+# copies, `extend`, a stable sort, `join`, `in`, `.copy()`, `sorted` and
+# `reversed`, as the interpreter runs them.
+
+struct P:
+    name: String
+    n: int
+
+def main():
+    var xs: list[String] = []
+    for i in range(10):
+        xs.push("s{i}")
+    xs.insert(0, "first".to_string())
+    xs.insert(len(xs), "last".to_string())
+    let r = xs.remove(3)
+    print("{r} {xs}")
+    print("{xs.pop()} {len(xs)}")
+    xs.reverse()
+    print("{xs}")
+    xs.swap(0, 2)
+    print("{xs[0:3]} {xs[len(xs) - 2:]}")
+    var ys = ["z".to_string(), "a".to_string()]
+    xs.extend(ys)
+    xs.sort()
+    print("{xs}")
+    print("{xs.join("-")}")
+    print("{"s3" in xs} {"q" in xs}")
+    var ps = [P(name="b", n=2), P(name="a", n=1)]
+    let qs = ps.copy()
+    print("{qs[0].name}")
+    let ws = ["b".to_string(), "a".to_string()]
+    print("{sorted([3, 1, 2])}")
+    var e: list[int] = []
+    print("{e.pop()}")
+    var nums = [5, 3, 9, 1, 3]
+    nums.sort()
+    let back: list[int] = reversed(nums.iter()).collect()
+    print("{nums} {back}")

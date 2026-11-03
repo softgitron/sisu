@@ -576,8 +576,18 @@ impl Cg:
             self.store_word(env, value, WORD)
         elif self.types.holds_fn(env_ty)?:
             # It keeps a function value, which a wider function value only
-            # widens: no width holds it (decision 360).
-            return unsupported("an `own` closure that keeps a function value")
+            # widens, so no width holds it in place: it goes in a heap cell
+            # whose address is the first word, the value's environment a
+            # `Box` of it by the last, which a drop frees and a copy copies
+            # (decision 382).
+            let bytes = self.iconst(size)
+            let cell = self.rt_status(abi.SYM_ALLOC, [bytes])?
+            self.store_word(cell, value, WORD)
+            let boxed = Type.Named("Box".to_string(), [env_ty.copy()])
+            let tid = self.type_id(boxed)?
+            let tw = self.iconst(tid + 1)
+            self.store_word(tw, value, WORD + held)
+            env = cell
         else:
             # An `own` environment larger than a function value holds: the
             # program is lowered again with wider ones.

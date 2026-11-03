@@ -139,6 +139,12 @@ These checks apply to every case without an expectation file:
   that test again with the same report.
 - For a case with `.test`, `sisu test --jobs 1` (the tests on one
   thread) prints what the default, parallel run printed.
+- Every run of `sisu test` compared with a `.test`, `.explore`, `.sim`,
+  `.schedule` or `.select` exits as its report says (decisions 340 and
+  380): 1 when a test failed, 3 when none failed and one is blocked by a
+  typed hole, 0 when every test passed, counted over its summary lines; a
+  run that printed none, or an error of the program, is held to nothing
+  here.
 - For a case with `.watch`, `sisu run --watch --record LOG` prints what
   the watched run printed, and `sisu replay LOG` reproduces it, its
   `edit` records standing in for the saves.
@@ -294,7 +300,9 @@ and the time spent building and running them.
   `sir/f32` its SIR), strings and
   their bytes (`text_bytes`: the text methods written in Sisu over the
   bytes; `char_boundary`), formatting (`format_specs`: the spec
-  mini-language, written in Sisu),
+  mini-language, written in Sisu; `debug_forms`: `Debug` and `Display` of
+  every kind of value, natively by the runtime in Sisu; `shared_display`: a
+  `Shared` shown as its value), the moves of lists (`list_moves`),
   collections, `match` (`or_bindings`: alternatives of `|` that bind
   names), loops, closures, errors and traces, options (`let_else_copy`),
   `Drop` order on normal and unwinding paths (`drop_panic_fields`: a
@@ -376,7 +384,9 @@ and the time spent building and running them.
 - `testing/` is `sisu test`'s surface (17): parametrised tests, suites
   and tags (`# select`), snapshots, transcripts, `@refines`, fakes of the
   program's traits, tests in parallel with their output in declaration
-  order, and `proposal_testing`, which starts with
+  order, holes that block a test (`hole_in_task`, whose run exits with 3),
+  the output of the schedule that failed under `--explore`
+  (`explore_output`), and `proposal_testing`, which starts with
   `proposal/examples/testing.sisu`.
 - `sir/` pins the serialised SIR of small programs.
 - `live/` is 10's tools that run programs: hot replacement under `sisu
@@ -398,7 +408,8 @@ and the time spent building and running them.
   as tests by `sisu test --std`, and the functions of the prelude that
   must respect a program's own `Ord`; a case for each module of 11 that
   is written in Sisu over the prelude (decision 252): `num_exact`
-  (`BigInt`, `Decimal`), `par`, `io`, `fs`, `rand`, `encoding`, `hash`
+  (`BigInt`, `Decimal`; `decimal_literals`, a float literal's places kept
+  natively as in the interpreter), `par`, `io`, `fs`, `rand`, `encoding`, `hash`
   (each digest against its reference), `sort`, `search`, `process_env`,
   `json_decode`, `regex` (and its rejected patterns) and `text_math`
   (`Builder`, `std.math`, `SortedSet`).

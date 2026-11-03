@@ -239,13 +239,12 @@ impl List {
         unsafe { self.ptr.add((i * u64::from(size)) as usize) }
     }
 
-    /// Room for `extra` more elements.
+    /// Room for `extra` more elements: the runtime in Sisu's growth of a
+    /// list (`list.reserve`, decision 385).
     pub(crate) fn reserve(&mut self, extra: u64, size: u32) {
-        let need = self.len + extra;
-        if need > self.cap {
-            let cap = need.max(self.cap * 2).max(4);
-            self.ptr = grow(self.ptr, (cap * u64::from(size.max(1))) as usize);
-            self.cap = cap;
+        if self.len + extra > self.cap {
+            // SAFETY: the list holds elements of `size` bytes.
+            unsafe { crate::bridge::list_grow((self as *mut List).cast::<u8>(), extra, size) }
         }
     }
 

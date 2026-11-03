@@ -1,0 +1,28 @@
+Point(x=3, y=-2.5)
+[Circle(r=1.5), Square(side=2), Dot]
+(1, "two", 'c', '\n', "q\"uote\t\u{1}")
+Some(4) None
+Err(Bad(text="x"))
+{"a": [1, 2], "b": []}
+set()
+{5}
+1.0 0.1 1e20 -0.0 2.5
+18446744073709551615 -5
+True False ()
+Box(boxed=7)
+b"h\x01\xc3\xa9"
+(5,)
+["x"]
+"Aino"
+(Weak)
+Mutex([1, 2])
+Cell(5)
+Cat(lives=9)
+é 'é' '\u{85}' "a\u{85}b" 😀
+1970-01-01T00:00:00Z
+Clock
+System
+Err(Broke(code=7))
+[Ok(1), Err("no")]
+<task 1>
+Arena(["x"]) Key(index=0, generation=0)

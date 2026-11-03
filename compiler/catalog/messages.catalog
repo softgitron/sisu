@@ -916,3 +916,11 @@ D0126 cli     native.rt-build             building the runtime in Sisu from `{se
 # `--explore N` (decision 356): a seed whose run exits as the first's did
 # but prints other output differs from it too.
 D0127 cli     cli.explore-differs         schedule seed {seed} of {count} printed other output than seed {first}, with the same exit status {status}; `--schedule-seed {seed}` runs it again
+# A program's tests run from stage 1's SIR, its transcripts from the Rust
+# front end's, which writes the world of transcripts (decision 380).
+D0128 cli     cli.transcript-front-end    a transcript runs on the Rust front end's build of the program, which stops at errors stage 1 does not report:\n{diagnostics}
+# What `sisu explain` and `sisu new` need, and the toolchain's version
+# (decision 386; the manual's findings R16).
+D0129 cli     cli.missing-code            `sisu explain` needs a diagnostic's code, such as `E0300`, or its name, such as `type.mismatch`
+D0130 cli     cli.missing-name            `sisu new` needs the name of the package to create
+D0131 cli     cli.version                 sisu {version}

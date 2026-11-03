@@ -1,8 +1,9 @@
 ##! Text built in place (decisions 265 and 351): the growth of a `String`'s
 ##! buffer, which the root module's text entries use (their bodies are
-##! there, a call fewer for what interpolation calls most), and an
-##! integer's digits in a base, which the runtime in Rust calls for
-##! `fmt.digits` and `fmt.wide_digits`. A `String` is three words: the
+##! there, a call fewer for what interpolation calls most), bytes and an
+##! integer's digits appended, which `Display` and `Debug` use (decision
+##! 383), and an integer's digits in a base, which the runtime in Rust calls
+##! for `fmt.digits` and `fmt.wide_digits`. A `String` is three words: the
 ##! address of its bytes' buffer (0 for none), their number, and the
 ##! buffer's size.
 
@@ -63,6 +64,89 @@ pub(package) def from_bytes(dst: ptr mut u8, b: ptr mut u8, n: int):
         words.offset(1).write(n)
         words.offset(2).write(room)
 
+## Appends the `n` bytes at `b` to the `String` at `t`, as the root module's
+## `export_text_push` does.
+##
+## Requires:
+## - `text`: `t` holds a live `String`, and `b` points to `n` live bytes
+pub(package) def push(t: ptr mut u8, b: ptr mut u8, n: int):
+    if n <= 0:
+        return
+    # safety: text: this function's; valid, aligned, writable, in_bounds: the
+    #   buffer has room for the bytes after its length; returns_promptly:
+    #   memmove copies them.
+    unsafe:
+        let words = t.cast[int]()
+        let len = words.offset(1).read()
+        var source = b
+        if len + n > words.offset(2).read():
+            source = grow(t, len + n, b)
+        let bytes = words.cast[ptr[u8]]().read().cast_mut()
+        _ = memmove(bytes.offset(len), source.as_const(), n)
+        words.offset(1).write(len + n)
+
+## Appends the byte `c` to the `String` at `t`.
+##
+## Requires:
+## - `text`: `t` holds a live `String`
+pub(package) def put(t: ptr mut u8, c: int):
+    # safety: valid, aligned, writable, in_bounds: a `String` is its
+    #   buffer's address, its length and its size, by `text`, and the buffer
+    #   has room for the byte once grown.
+    unsafe:
+        let words = t.cast[int]()
+        let len = words.offset(1).read()
+        if len >= words.offset(2).read():
+            _ = grow(t, len + 1, t)
+        words.cast[ptr[u8]]().read().cast_mut().offset(len).write(u8.wrapping_from(c))
+        words.offset(1).write(len + 1)
+
+## Appends the `n` bytes of `w`, the first its lowest (at most eight), to
+## the `String` at `t`: a word `Debug` writes.
+##
+## Requires:
+## - `text`: `t` holds a live `String`
+pub(package) def put_word(t: ptr mut u8, w: int, n: int):
+    var i = 0
+    while i < n:
+        put(t, (w >> (8 * i)) & 255)
+        i += 1
+
+## Appends the decimal digits of `n` to the `String` at `t`, after a `-`
+## when it is negative, as the root module's `export_text_push_int` does.
+##
+## Requires:
+## - `text`: `t` holds a live `String`
+pub(package) def push_int(t: ptr mut u8, n: int):
+    let m = if n < 0: n else: -n
+    var digits = 1
+    var x = m
+    while x <= -10:
+        x = (x + 9) // 10
+        digits += 1
+    let total = digits + (if n < 0: 1 else: 0)
+    # safety: text: this function's; valid, aligned, writable, in_bounds: the
+    #   buffer has room for `total` bytes after its length, and a byte needs
+    #   no alignment.
+    unsafe:
+        let words = t.cast[int]()
+        let len = words.offset(1).read()
+        if len + total > words.offset(2).read():
+            _ = grow(t, len + total, t)
+        let bytes = words.cast[ptr[u8]]().read().cast_mut().offset(len)
+        if n < 0:
+            bytes.write(u8.wrapping_from(45))
+        var pos = total - 1
+        x = m
+        while True:
+            let q = (x + 9) // 10
+            bytes.offset(pos).write(u8.wrapping_from(48 + q * 10 - x))
+            pos -= 1
+            x = q
+            if x == 0:
+                break
+        words.offset(1).write(len + total)
+
 ## The digit `d`, 0 to 15, as its character's code: `0` to `9`, then `a` to
 ## `f`, or `A` to `F` with `upper`.
 pure def digit_code(d: int, upper: bool) -> int:
@@ -78,6 +162,16 @@ pure def digit_code(d: int, upper: bool) -> int:
 ## Requires:
 ## - `text`: `dst` has room for a `String`
 pub(package) def digits(dst: ptr mut u8, low: int, high: int, base: int, upper: bool):
+    from_bytes(dst, dst, 0)
+    push_digits(dst, low, high, base, upper)
+
+## Appends to the `String` at `t` the digits of the magnitude whose low and
+## high words are `low` and `high`, unsigned, in `base` (2, 8, 10 or 16,
+## capitals with `upper`): at least one digit, no sign.
+##
+## Requires:
+## - `text`: `t` holds a live `String`
+pub(package) def push_digits(t: ptr mut u8, low: int, high: int, base: int, upper: bool):
     # The magnitude in four parts of 32 bits, the highest first, divided by
     # the base again and again; each remainder is the next digit, from the
     # last.
@@ -86,13 +180,15 @@ pub(package) def digits(dst: ptr mut u8, low: int, high: int, base: int, upper: 
     var p1 = (low >> 32) & 4294967295
     var p0 = low & 4294967295
     var count = 0
-    from_bytes(dst, dst, 0)
-    _ = grow(dst, 128, dst)
     # safety: valid, writable, aligned, in_bounds: the `String`'s buffer has
-    #   room for the 128 digits a magnitude has at most, and a byte needs no
-    #   alignment; returns_promptly: memmove moves them to its start.
+    #   room after its length for the 128 digits a magnitude has at most, and
+    #   a byte needs no alignment; returns_promptly: memmove moves them to
+    #   the end of its text.
     unsafe:
-        let bytes = dst.cast[ptr[u8]]().read().cast_mut()
+        let len = t.offset(8).cast[int]().read()
+        if len + 128 > t.offset(16).cast[int]().read():
+            _ = grow(t, len + 128, t)
+        let bytes = t.cast[ptr[u8]]().read().cast_mut().offset(len)
         while True:
             var r = p3 % base
             p3 = p3 // base
@@ -110,4 +206,4 @@ pub(package) def digits(dst: ptr mut u8, low: int, high: int, base: int, upper: 
             if p3 == 0 and p2 == 0 and p1 == 0 and p0 == 0:
                 break
         _ = memmove(bytes, bytes.offset(128 - count).as_const(), count)
-        dst.offset(8).cast[int]().write(count)
+        t.offset(8).cast[int]().write(len + count)
