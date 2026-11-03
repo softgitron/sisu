@@ -45,6 +45,8 @@ from stage1.typeck.thir import (
     TClosure,
     TCompClause,
     TCompKind,
+    TCond,
+    TCondPart,
     TExprId,
     TExprKind,
     TStmt,
@@ -328,14 +330,18 @@ impl Checker:
                 d = d.with("expected", expected_s).with("found", found_s)
                 if let Some(r) = because:
                     d = d.label(Msg.TypeExpectedBecause, r.start, r.end)
+        # An `int` where a float is expected is converted, which the fix
+        # writes (RULES.md, R45: the note named an `=` a `return` does not
+        # have).
         if actual == Ty.int():
             if let Some(k) = self.float_kind(cx, exp):
-                let params = [
-                    Param(name="op".to_string(), value="=".to_string()),
-                    Param(name="lhs".to_string(), value=k),
-                    Param(name="rhs".to_string(), value="int".to_string()),
-                ]
-                d = d.note_params(Msg.TypeMixedNumbers, params)
+                let r = self.span_of(x)
+                if r.start >= 0 and r.start < r.end and r.end <= cx.source.byte_len():
+                    let edits = self.to_float_edits(cx, x, k)
+                    let ty_param = Param(name="ty".to_string(), value=k)
+                    d.fixes.push(Fix(msg=Msg.TypeConvertToFloat, params=[ty_param], edits=edits))
+                    self.report(d)
+                    return self.wrap(x, Coercion.Mismatch, exp)
         d = self.mismatch_fix(cx, d, x, actual, exp)
         self.report(d)
         return self.wrap(x, Coercion.Mismatch, exp)
@@ -369,6 +375,16 @@ impl Checker:
         let r = self.span_of(x)
         if r.start < 0 or r.end > cx.source.byte_len() or r.start > r.end:
             return d
+        # A value where an option of its type is expected: `Some(5)` for an
+        # `int?` (RULES.md, R45).
+        if let TyData.Adt(o, oa) = self.data(exp):
+            if Some(o) == cx.prog.wk.option and len(oa) == 1 and r.start < r.end:
+                if self.resolved(oa[0]) == self.resolved(actual) and actual != Ty.error():
+                    let edits = [
+                        Edit(start=r.start, end=r.start, text="Some(".to_string()),
+                        Edit(start=r.end, end=r.end, text=")".to_string()),
+                    ]
+                    return d.fix_edits(Msg.TypeWrapSome, edits)
         # Text where a `Path` is expected: `Path.new` makes one (R16).
         if self.is_builtin(cx, exp, "Path") and self.is_text(cx, self.types.strip_ref(actual)):
             let edits = [
@@ -581,8 +597,20 @@ impl Checker:
                 and self.resolved(ty) != Ty.error():
             let r = self.span_of(x)
             let what = self.source_text(cx, r)
-            let d = self.error(cx, Msg.TypeMoveOutOfBorrow, r).with("what", what)
-            self.report(d.fix_at(Msg.TypeAddCopy, r.end, r.end, ".copy()"))
+            var d = self.error(cx, Msg.TypeMoveOutOfBorrow, r).with("what", what)
+            d = d.fix_at(Msg.TypeAddCopy, r.end, r.end, ".copy()")
+            # An item of a list the function owns is taken out of it with
+            # `remove` (RULES.md, R45).
+            if let TExprKind.Index(base, index, kind) = self.exprs[x.index].kind:
+                if kind == IndexKind.List and self.is_place(base):
+                    if let TExprKind.Local(l) = self.exprs[base.index].kind:
+                        if self.locals[l].mutable:
+                            let br = self.span_of(base)
+                            let ir = self.span_of(index)
+                            let list = self.source_text(cx, br)
+                            let at = self.source_text(cx, ir)
+                            d = d.fix_at(Msg.TypeTakeOut, r.start, r.end, "{list}.remove({at})")
+            self.report(d)
         return x
 
     ## Dereferences a reference value, so that its place can be used.
@@ -1523,15 +1551,29 @@ impl Checker:
         mut self, cx: Cx, op: BinOp, l: TExprId, r: TExprId?, range: TextRange
     ) -> TExprId?:
         let lt = self.operand_base(cx, self.ty_of(l))
+        var builtin_left = False
         match self.types.data(lt):
             case TyData.Int | TyData.Float | TyData.Str:
-                return None
+                builtin_left = True
             case TyData.Var(_) | TyData.Error | TyData.Never:
                 return None
             case _:
                 pass
         if self.is_string(cx, lt) or self.float_kind(cx, lt).is_some():
-            return None
+            builtin_left = True
+        # A number or text on the left reaches an impl of the operator for
+        # it when the right is a type of the program's own: `2.0 * v` with
+        # `impl Mul[Vector] for f64` (RULES.md, R43).
+        if builtin_left:
+            let x = r else:
+                return None
+            let other = self.operand_base(cx, self.ty_of(x))
+            let TyData.Adt(_, _) = self.types.data(other) else:
+                return None
+            if self.is_string(cx, other) or self.float_kind(cx, other).is_some():
+                return None
+            if self.int_kind(cx, other).is_some():
+                return None
         var tdef = DefId(index=0)
         var method = String.new()
         var rt: Ty? = None
@@ -1699,6 +1741,31 @@ impl Checker:
         if op == BinOp.Div and self.is_std_named(cx, lt, "num", "Decimal"):
             if self.is_std_named(cx, rt, "num", "Decimal"):
                 d = d.note(Msg.TypeDecimalQuotient)
+        # Python's `"0" * 64`: text is repeated with `repeat` (RULES.md, R45).
+        elif op == BinOp.Mul and self.is_text(cx, lt) and rt == Ty.int():
+            let lr = self.span_of(l)
+            let rr = self.span_of(r)
+            if lr.start < lr.end and rr.start < rr.end and rr.end <= cx.source.byte_len():
+                let text = cx.source.byte_slice(lr.start, lr.end)
+                let count = cx.source.byte_slice(rr.start, rr.end)
+                var receiver = text.to_string()
+                if not text.starts_with("\"") and text.contains(" "):
+                    receiver = "({text})"
+                let fixed = "{receiver}.repeat({count})"
+                d = d.fix_at(Msg.TypeSisuSpelling, range.start, range.end, fixed)
+        # A type of the program's own without the operator: its trait is
+        # what an impl gives it (RULES.md, R45).
+        elif let TyData.Adt(own_d, _) = self.data(lt):
+            let home = cx.prog.defs[own_d.index].module
+            if not cx.prog.modules[home.index].is_std:
+                if let Some((t, _)) = self.operator_trait(cx, op):
+                    var ps = [
+                        Param(name="op".to_string(), value=op.text().to_string()),
+                        Param(name="trait".to_string(), value=cx.prog.defs[t.index].name.copy()),
+                    ]
+                    ps.push(Param(name="ty".to_string(), value=shown_l.copy()))
+                    ps.push(Param(name="rhs".to_string(), value=shown_r.copy()))
+                    d = d.note_params(Msg.TypeOperatorTrait, ps)
         self.report(d)
         return (Ty.error(), False)
 
@@ -1830,19 +1897,34 @@ impl Checker:
         mut self, cx: Cx, first: ExprId, rest: list[(CmpOp, ExprId)], range: TextRange
     ) -> TExprId:
         let f0 = self.infer_expr(cx, first, None)
-        let f = self.unrefined(cx, f0)
+        var f = self.unrefined(cx, f0)
         var prev = f
         var out: list[(CmpOp, TExprId)] = []
         for (op, e) in rest:
             let pt = self.decay_ty(cx, self.ty_of(prev))
             let hint = if op == CmpOp.In or op == CmpOp.NotIn: None else: Some(pt)
             let x0 = self.infer_expr(cx, e, hint)
-            let x = self.unrefined(cx, x0)
+            var x = self.unrefined(cx, x0)
             # `x in xs` on a collection of a type's own is `xs.contains(x)`
             # by its `Contains` impl (02; decision 252).
             if len(rest) == 1 and (op == CmpOp.In or op == CmpOp.NotIn):
                 if let Some(call) = self.contains_call(cx, prev, x, op == CmpOp.NotIn, range):
                     return call
+            # Integers of two types compare as they add: the narrower widens
+            # when that loses nothing (D-016; RULES.md, R43).
+            if op != CmpOp.In and op != CmpOp.NotIn:
+                if let Some(a) = self.int_kind(cx, self.ty_of(prev)):
+                    if let Some(b) = self.int_kind(cx, self.ty_of(x)):
+                        if a != b and widens(b, a):
+                            x = self.wrap(x, Coercion.IntWiden, self.resolved(self.ty_of(prev)))
+                        elif a != b and widens(a, b):
+                            let to = self.resolved(self.ty_of(x))
+                            prev = self.wrap(prev, Coercion.IntWiden, to)
+                            match out.pop():
+                                case Some((o, _)):
+                                    out.push((o, prev))
+                                case None:
+                                    f = prev
             self.check_comparison(cx, op, prev, x, range)
             prev = x
             out.push((op, x))
@@ -2014,7 +2096,17 @@ impl Checker:
         let inner = self.as_option(cx, self.ty_of(o)) else:
             if self.ty_of(o) != Ty.error():
                 let shown = self.show(cx, self.ty_of(o))
-                let d = self.error(cx, Msg.TypeCoalesce, cx.ast.expr(lhs).range).with("ty", shown)
+                var d = self.error(cx, Msg.TypeCoalesce, cx.ast.expr(lhs).range).with("ty", shown)
+                # A result's value or a default is its `or` (RULES.md, R45).
+                if self.as_result(cx, self.ty_of(o)).is_some():
+                    let lr = cx.ast.expr(lhs).range
+                    let rr = cx.ast.expr(rhs).range
+                    if lr.end <= rr.start and rr.end <= cx.source.byte_len():
+                        let edits = [
+                            Edit(start=lr.end, end=rr.start, text=".or(".to_string()),
+                            Edit(start=rr.end, end=rr.end, text=")".to_string()),
+                        ]
+                        d = d.fix_edits(Msg.TypeResultOr, edits)
                 self.report(d)
             let r = self.infer_expr(cx, rhs, None)
             let kind = TExprKind.Coalesce(opt=o, default=r, deref=False)
@@ -2160,6 +2252,9 @@ impl Checker:
         clauses: list[CompClause],
         range: TextRange,
     ) -> TExprId:
+        # A generator expression is a lazy `Iter` (02; RULES.md, R42).
+        if kind == CompKind.Gen:
+            return self.generator_comprehension(cx, elem, clauses, range)
         self.push_scope()
         var out: list[TCompClause] = []
         for c in clauses:
@@ -2192,11 +2287,76 @@ impl Checker:
             if let Some(d) = cx.prog.wk.set:
                 ty = self.types.adt(d, [self.ty_of(el)])
         else:
-            if kind == CompKind.Gen:
-                self.unsupported(cx, range, "a generator expression", "generators (Phase 8)")
             ty = self.list_of(cx, self.ty_of(el))
         let k = TExprKind.Comprehension(kind=tkind, clauses=out, elem=el, value=val)
         return self.add(k, ty, range)
+
+    ## A generator expression, `(f(x) for x in xs if c(x))` (02: a
+    ## comprehension in parentheses is a lazy `Iter`; RULES.md, R42): the
+    ## closure that runs the clauses as loops and tests around a `yield` of
+    ## the element, task-like as a generator function's body is, whose
+    ## value is the `Iter` that runs it. It borrows what it reads of the
+    ## function's own, as a loop over it would, while the `Iter` lives, and
+    ## copies what is `Copy`.
+    pure def generator_comprehension(
+        mut self, cx: Cx, elem: ExprId, clauses: list[CompClause], range: TextRange
+    ) -> TExprId:
+        let id = ClosureId(index=len(self.closures))
+        self.closures.push(None)
+        let first_local = len(self.locals)
+        self.ret.push(
+            RetCtx(ty=Ty.unit(), closure=Some(id), first_local=first_local, loops=0, captures=[])
+        )
+        self.push_scope()
+        var shells: list[TCompClause] = []
+        for c in clauses:
+            match c:
+                case CompClause.For(pat, iter):
+                    let (x, mode, item) = self.check_iterable(cx, iter, Mode.Borrow)
+                    let p = self.check_pat(cx, pat, item, None)
+                    shells.push(TCompClause.For(pat=p, iter=x, mode=mode, item=item))
+                case CompClause.If(e):
+                    shells.push(TCompClause.If(self.check_condition_expr(cx, e)))
+        let el0 = self.infer_expr(cx, elem, None)
+        let el1 = self.decay(cx, el0)
+        let el = self.check_movable(cx, el1)
+        let item_ty = self.ty_of(el)
+        let espan = self.span_of(el)
+        var body = self.new_block([TStmt.Yield(value=el, span=espan)], espan)
+        var k = len(shells)
+        while k > 0:
+            k -= 1
+            match shells[k].copy():
+                case TCompClause.For(p, x, mode, item):
+                    let st = TStmt.For(pat=p, iter=x, mode=mode, item=item, body=body, span=range)
+                    body = self.new_block([st], range)
+                case TCompClause.If(cnd):
+                    let cond = TCond(parts=[TCondPart.Bool(cnd)])
+                    let st = TStmt.If(branches=[(cond, body)], else_=None, span=range)
+                    body = self.new_block([st], range)
+        self.pop_scope()
+        var captures: list[Capture] = []
+        if let Some(ctx) = self.ret.pop():
+            captures = ctx.captures
+        let pure = self.first_impure_in_block(cx, body).is_none()
+        let fn_ty = self.types.fn_([], Ty.unit(), pure)
+        self.closures[id.index] = Some(
+            TClosure(
+                params=[],
+                captures=captures,
+                own_=False,
+                ret=Ty.unit(),
+                body=body,
+                span=range,
+                fn_ty=fn_ty,
+                comptime_=False,
+                role=ClosureRole.Task,
+            )
+        )
+        var iter_ty = Ty.error()
+        if let Some(it) = cx.prog.wk.iter:
+            iter_ty = self.types.adt(it, [item_ty])
+        return self.add(TExprKind.Generator(id), iter_ty, range)
 
     # ---------------------------------------------------------------- if and match expressions
 
@@ -2460,7 +2620,9 @@ impl Checker:
                     let d = self.error(cx, Msg.TypeOwnClosureCapture, range).with(
                         "name", name
                     ).with("ty", shown)
-                    self.report(d.note(Msg.TypeCaptureCopy))
+                    # A copy made first is no `Copy` value either: the plain
+                    # closure is the way (RULES.md, R45).
+                    self.report(d.note_with(Msg.TypeCaptureBorrow, "name", name))
 
     pub pure def closure_from_parts(
         mut self,
@@ -2705,7 +2867,11 @@ impl Checker:
         let inner = self.as_option(cx, self.ty_of(b)) else:
             if self.ty_of(b) != Ty.error():
                 let shown = self.show(cx, self.ty_of(b))
-                let d = self.error(cx, Msg.TypeOptionalChain, base_range).with("ty", shown)
+                var d = self.error(cx, Msg.TypeOptionalChain, base_range).with("ty", shown)
+                # Rust's `read(path)?.lines()`: `?.` is one token here, and a
+                # result is passed on first (RULES.md, R45).
+                if self.as_result(cx, self.ty_of(b)).is_some():
+                    d = d.note(Msg.TypeQuestionDot)
                 self.report(d)
             return self.error_expr(range)
         self.push_scope()
@@ -3020,6 +3186,13 @@ impl Checker:
         diag = diag.with("ty", owner).with("module", cx.prog.module_path(home))
         self.report_other(diag)
 
+    ## A bound of a list's slice, an `int`, and whether it is written `^k`,
+    ## counting from the end (02; RULES.md, R43).
+    pure def slice_bound(mut self, cx: Cx, x: ExprId) -> (TExprId, bool):
+        if let ExprKind.FromEnd(inner) = cx.ast.expr(x).kind:
+            return (self.check_expr(cx, inner, Ty.int()), True)
+        return (self.check_expr(cx, x, Ty.int()), False)
+
     pure def index_expr(
         mut self, cx: Cx, base: ExprId, args: list[IndexArg], at: TextRange
     ) -> TExprId:
@@ -3083,14 +3256,22 @@ impl Checker:
                         )
                 case IndexArg.Slice(lo, hi):
                     if list:
+                        # A bound may count from the end, `xs[1:^1]` (02).
                         var l: TExprId? = None
                         var h: TExprId? = None
+                        var lo_end = False
+                        var hi_end = False
                         if let Some(x) = lo:
-                            l = Some(self.check_expr(cx, x, Ty.int()))
+                            let (y, e) = self.slice_bound(cx, x)
+                            l = Some(y)
+                            lo_end = e
                         if let Some(x) = hi:
-                            h = Some(self.check_expr(cx, x, Ty.int()))
+                            let (y, e) = self.slice_bound(cx, x)
+                            h = Some(y)
+                            hi_end = e
                         let ty = self.types.adt(d, a)
-                        return self.add(TExprKind.Slice(base=b, lo=l, hi=h), ty, at)
+                        let k = TExprKind.Slice(base=b, lo=l, hi=h, lo_end=lo_end, hi_end=hi_end)
+                        return self.add(k, ty, at)
             # `b[i]` and `s[i]`: a byte, a reference to a value; `b[i:j]` and
             # `s[i:j]`: a copy of the bytes, a view of the values.
             if cx.prog.is_builtin(d, "bytes") or cx.prog.is_builtin(d, "Slice"):

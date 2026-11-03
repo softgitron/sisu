@@ -1,0 +1,48 @@
+# RULES.md, R45: the fixes and notes the manual's writers found missing,
+# where stage 1 decides them: a variant a type does not have (`E0327`),
+# Python's conversion functions, a value where its option is expected,
+# text repeated with `*`, an operator of a type's own without its impl, a
+# misspelt keyword argument, a keyword-only argument by position, `??` on
+# a result, `?.` after a result, an assignment to a parameter, an item
+# moved out of a list, a field of a `Shared` assigned, an `own` closure's
+# capture that is not `Copy`, and an `int` where a float is expected.
+enum Light:
+    Red
+    Green
+
+struct Money:
+    cents: int
+
+error Bad:
+    Empty
+
+def url(host: str, *, port: int = 80) -> String:
+    return "{host}:{port}"
+
+def parse(s: str) -> String ! Bad:
+    return Ok(s.to_string())
+
+def halve(n: int) -> int:
+    n //= 2
+    return n
+
+def average(total: int, count: int) -> f64:
+    return total // count
+
+def main(sys: System):
+    print(Light.Gren)
+    let n = int("42")
+    print(str(n))
+    let maybe: int? = 5
+    print("0" * 64)
+    print((Money(cents=1) - Money(cents=2)).cents)
+    print(url("example.org", prot=443))
+    print(url("example.org", 443))
+    print(parse("a") ?? "")
+    print(sys.fs.read_to_string("a.txt")?.lines())
+    var queue = ["a".to_string(), "b".to_string()]
+    let first = queue[0]
+    var c = Shared(Money(cents=1))
+    c.cents = 3
+    let names = ["Aino"]
+    let f = own () -> names

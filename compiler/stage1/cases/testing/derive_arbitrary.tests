@@ -1,0 +1,14 @@
+test "a price is drawn its own way" ... ok
+test "a purchase's price is too" ... ok
+test "a bound draws through the derived impl" ... ok
+test "money stays under fifty euros" ... FAILED
+
+test "money stays under fifty euros" ... FAILED
+panic: the property failed for Money(cents=5000) (case 2, shrunk 6 times)
+  the property returned False
+  at test "money stays under fifty euros" (derive_arbitrary.sisu:47:5)
+replay: sisu test --replay 1-HASH-0.0.1-t3-s0-r0-c5000 derive_arbitrary.sisu
+
+3 passed, 1 failed, 0 blocked
+--- stderr
+error: Exit(status=1)

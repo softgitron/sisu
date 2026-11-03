@@ -1,0 +1,39 @@
+# RULES.md, R37: an impl gives each constant its trait declares without a
+# value (`E0232`), only those (`E0271`), with the trait's type (`E0272`),
+# as a constant and not a method (`E0273`); a trait's constant is read
+# through a type (`E0449`), and a trait with constants is no `dyn` type
+# (`E0241`); a constant has a type (`E0219`) and a SCREAMING_CASE name.
+trait Shape:
+    const SIDES: int
+    const NAME: str = "a shape"
+    const BARE = 2
+    const lower: int = 1
+
+    def area(self) -> f64
+
+struct Square:
+    side: f64
+
+impl Shape for Square:
+    const NAME: int = 4
+    const CORNERS: int = 4
+    def SIDES() -> int:
+        return 4
+    const AREA: f64 = 1.0
+
+    def area(self) -> f64:
+        return self.side * self.side
+
+struct Circle:
+    r: f64
+
+impl Shape for Circle:
+    def area(self) -> f64:
+        return 3.14 * self.r * self.r
+
+def largest(s: ref dyn Shape) -> f64:
+    return s.area()
+
+def main():
+    print(Shape.SIDES)
+    print(Square.MISSING)

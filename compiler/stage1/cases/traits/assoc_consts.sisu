@@ -1,0 +1,64 @@
+# RULES.md, R37: a trait declares associated constants (03, "Traits"),
+# which each impl gives or takes the trait's value of; they are read as
+# `T.NAME` through a type parameter, `Self.NAME` in the trait and its
+# impls, and `Type.NAME` for a type that implements the trait.
+
+## What a shape is called.
+trait Named:
+    ## Its name.
+    const NAME: String
+
+## A polygon.
+trait Shape(Named):
+    ## How many sides it has, which each impl gives.
+    const SIDES: int
+    ## How many corners, which an impl may give otherwise.
+    const CORNERS: int = Self.SIDES
+
+    def describe(self) -> String:
+        return "{Self.NAME}: {Self.SIDES} sides, {Self.CORNERS} corners"
+
+## A quantity's factor to its unit.
+trait Unit[T]:
+    const FACTOR: T
+
+struct Square:
+    side: int
+
+struct Triangle:
+    side: int
+
+impl Named for Square:
+    const NAME: String = "a square".to_string()
+
+impl Shape for Square:
+    const SIDES: int = 4
+
+impl Named for Triangle:
+    const NAME: String = "a triangle".to_string()
+
+impl Shape for Triangle:
+    const SIDES: int = 3
+    const CORNERS: int = 3
+
+impl[T] Named for list[T]:
+    const NAME: String = "a list".to_string()
+
+impl Unit[f64] for Square:
+    const FACTOR: f64 = 0.5
+
+## The sides of every shape of type `T`.
+def total_sides[T: Shape](count: int) -> int:
+    return count * T.SIDES
+
+def factor[T: Unit[f64]]() -> f64:
+    return T.FACTOR
+
+def main():
+    print(Square.SIDES)
+    print(Triangle.CORNERS)
+    print(total_sides[Triangle](4))
+    print(Square(side=2).describe())
+    print(Triangle(side=1).describe())
+    print(list[int].NAME)
+    print("{factor[Square]()}")

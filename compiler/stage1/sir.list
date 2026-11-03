@@ -545,3 +545,7 @@ compiler/stage1/cases/packages/names.pkg/app
 compiler/stage1/cases/packages/overlapping_impl.pkg
 compiler/stage1/cases/packages/template_elsewhere.pkg
 compiler/stage1/cases/comptime/evaluator.sisu
+compiler/stage1/cases/comptime/sieve.sisu
+compiler/stage1/cases/testing/refused_ownership.sisu
+compiler/stage1/cases/testing/refused_comptime.sisu
+compiler/stage1/cases/testing/refused_types.sisu

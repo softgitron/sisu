@@ -46,7 +46,13 @@ impl FnLower:
             return
         for (l, e) in c.olds:
             let sl = self.local_for(cx, l)
+            # An `old` of a trait's clause of another module stands at the
+            # method's name (RULES.md, R39).
+            let saved = self.fixed_loc
+            if c.foreign_olds.contains(l):
+                self.fixed_loc = self.foreign_loc(cx)
             self.into(cx, Place.local(sl), e)
+            self.fixed_loc = saved
             let ty = cx.body.locals[l].ty
             if self.needs_drop(cx, ty):
                 self.register(DropEntry.Local(sl))
@@ -176,6 +182,14 @@ impl FnLower:
             case _:
                 # A trait's clause names the trait's method (RULES.md, R29).
                 owner = c.owner.copy() ?? self.contract_owner(cx)
+        # A trait's clause of another module (RULES.md, R39): its parts are
+        # drawn from that module's text, and its statements stand at the
+        # method's name, in the method's own file.
+        let saved_loc = self.fixed_loc
+        let saved_text = self.text_module
+        if let Some(m) = c.module:
+            self.fixed_loc = self.foreign_loc(cx)
+            self.text_module = Some(m)
         var parts: list[TExprId] = [c.cond]
         if c.kind != TContractKind.Refinement:
             parts = self.conjuncts(cx, c.cond)
@@ -219,6 +233,13 @@ impl FnLower:
             self.terminate(Terminator.Unreachable, loc)
             self.pop_scope(cx)
             self.switch_to(cx, ok)
+        self.fixed_loc = saved_loc
+        self.text_module = saved_text
+
+    ## Where the statements of a trait's clause of another module stand
+    ## (RULES.md, R39): the name of the method that inherits it.
+    pure def foreign_loc(self, cx: Cx) -> Loc?:
+        return cx.loc(cx.prog.defs[cx.body.def_.index].span)
 
     ## Whether a failed `assert` of `cond` can show its parts: it fits on
     ## one line and has a part to show.
@@ -227,9 +248,11 @@ impl FnLower:
             return False
         return not self.parts_to_show(cx, cond).is_empty()
 
-    ## `assert cond` whose failure shows every part of `cond`.
+    ## `assert cond` whose failure shows every part of `cond` (and `expect
+    ## cond`, which `goes_on` in a program built with its tests: RULES.md,
+    ## R38).
     pub pure def assert_showing_parts(
-        mut self, cx: Cx, cond: TExprId, message: TExprId?, span: TextRange
+        mut self, cx: Cx, cond: TExprId, message: TExprId?, span: TextRange, goes_on: bool
     ):
         let loc = cx.loc(span)
         let v = self.operand(cx, cond)
@@ -244,24 +267,30 @@ impl FnLower:
         let shown = self.parts_to_show(cx, cond)
         let list = self.rendered_parts(cx, shown, loc)
         let text = self.source_of(cx, self.span_of(cx, cond))
-        let u = self.temp_sir(Type.Never)
+        let u = self.temp_sir(if goes_on: Type.Unit else: Type.Never)
         let args = [Operand.Const(Const.Str(text)), m, list]
+        let family = if goes_on: "expect" else: "assert"
         self.emit(
             cx,
             StatementKind.Call(
                 dest=Place.local(u),
-                callee=Callee.Intrinsic(name="assert.fail_parts", args=[]),
+                callee=Callee.Intrinsic(name="{family}.fail_parts", args=[]),
                 args=args,
             ),
             loc,
         )
-        self.terminate(Terminator.Unreachable, loc)
-        self.pop_scope(cx)
+        if goes_on:
+            self.pop_scope(cx)
+            self.goto(ok)
+        else:
+            self.terminate(Terminator.Unreachable, loc)
+            self.pop_scope(cx)
         self.switch_to(cx, ok)
 
-    ## The source text of a span, trimmed.
+    ## The source text of a span, trimmed: of the body's module, or of the
+    ## one a trait's clause of another module is written in.
     pure def source_of(self, cx: Cx, span: TextRange) -> String:
-        let text = cx.ctx.texts.get(cx.module) else:
+        let text = cx.ctx.texts.get(self.text_module ?? cx.module) else:
             return String.new()
         let end = min(span.end, text.byte_len())
         let start = min(span.start, end)
@@ -275,7 +304,7 @@ impl FnLower:
     ## the condition evaluates are shown.
     pure def parts_to_show(self, cx: Cx, cond: TExprId) -> list[(int, TExprId)]:
         var out: list[(int, TExprId)] = []
-        let text = cx.ctx.texts.get(cx.module) else:
+        let text = cx.ctx.texts.get(self.text_module ?? cx.module) else:
             return out
         let start = self.span_of(cx, cond).start
         self.walk_parts(cx, text, start, cond, True, mut out)

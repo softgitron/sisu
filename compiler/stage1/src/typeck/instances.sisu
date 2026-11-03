@@ -219,6 +219,10 @@ impl Resolver:
                     if written == "Copy":
                         # A flag on the type, checked against its fields.
                         self.copy_checks.push((ty, arg.range))
+                    elif written == "Arbitrary":
+                        # Written with the generators of property tests
+                        # (`typeck.arbitrary`; RULES.md, R41).
+                        pass
                     elif not written.is_empty()
                             and (
                                 derivable(written)

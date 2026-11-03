@@ -30,6 +30,7 @@ from stage1.diag import Diagnostic, Msg, TextRange
 from stage1.syntax.ast import (
     Arg,
     Ast,
+    Attr,
     BinOp,
     ClosureBody,
     CmpOp,
@@ -39,6 +40,7 @@ from stage1.syntax.ast import (
     ExprKind,
     FnDef,
     GenericParam,
+    ImplDef,
     IndexArg,
     ItemId,
     ItemKind,
@@ -104,6 +106,23 @@ impl Writer:
             if v:
                 return True
         return False
+
+    ## Why a shape has no generator: the first part without one.
+    pure def shape_why(self, ast: Ast, s: Shape) -> String?:
+        let params = s.generics()
+        match s:
+            case Shape.Struct(_, fields, _):
+                for (_, t) in fields:
+                    if let Some(why) = self.type_why(ast, t, params):
+                        return Some(why)
+            case Shape.Enum(_, variants):
+                for (_, fs) in variants:
+                    for (_, t) in fs:
+                        if let Some(why) = self.type_why(ast, t, params):
+                            return Some(why)
+            case Shape.Refinement(_, base, _):
+                return self.type_why(ast, base, params)
+        return None
 
     ## Whether every part of a type has a generator; `params` are the type
     ## parameters in scope (each given by a generator parameter).
@@ -255,8 +274,24 @@ impl Resolver:
     pub pure def declare_generators(mut self, module: ModuleId, items: list[ItemId]):
         var shapes: dict[String, Shape] = {}
         var order: list[(String, list[(String, String)])] = []
+        # The types `@derive(Arbitrary)` asks the impl of, where it asks;
+        # and those with an impl written by hand, whose generator is it
+        # (RULES.md, R41).
+        var derived: list[(String, TextRange, bool)] = []
+        var custom: set[String] = set()
         for it in items:
             let item = self.ast(module).item(it).copy()
+            if let Some(at) = self.derives_arbitrary(module, item.attrs):
+                match item.kind:
+                    case ItemKind.Struct(s):
+                        derived.push((s.name.text.copy(), at, s.generics.is_empty()))
+                    case ItemKind.Enum(e):
+                        derived.push((e.name.text.copy(), at, e.generics.is_empty()))
+                    case _:
+                        pass
+            if let ItemKind.Impl(i) = item.kind:
+                if let Some(n) = self.arbitrary_impl_of(module, i):
+                    _ = custom.add(n)
             let builtin = has_attr(item.attrs, "builtin")
             match item.kind:
                 case ItemKind.Struct(s):
@@ -331,7 +366,7 @@ impl Resolver:
         while True:
             var changed = False
             for (n, _) in order:
-                if not w.has(n):
+                if not w.has(n) or custom.contains(n):
                     continue
                 let found = w.shapes.get(n.copy()) else:
                     continue
@@ -366,6 +401,13 @@ impl Resolver:
             let start = w.out.byte_len()
             _ = gens.insert(n.copy(), String.new())
             w.header(n, bounds)
+            # A type with an impl written by hand draws its own way.
+            if custom.contains(n) and s.generics().is_empty():
+                w.out.push("    return {n}.arbitrary(d)\n")
+                let text = w.out.byte_slice(start, w.out.byte_len()).to_string()
+                w.out = w.out.byte_slice(0, start).to_string()
+                _ = gens.insert(n.copy(), text)
+                continue
             match s:
                 case Shape.Struct(_, fields, invariant):
                     var parts: list[String] = []
@@ -410,6 +452,23 @@ impl Resolver:
             let text = w.out.byte_slice(start, w.out.byte_len()).to_string()
             w.out = w.out.byte_slice(0, start).to_string()
             _ = gens.insert(n.copy(), text)
+        # `@derive(Arbitrary)`: the impl that draws the type's shape.
+        for (n, at, plain) in derived:
+            if not plain:
+                var d = Diagnostic.new(Msg.TestNoGenerator, at.start, at.end).with("ty", n)
+                let why = "`@derive(Arbitrary)` takes a type without type parameters, whose generator needs none"
+                self.report_other(module, d.with("why", why))
+                continue
+            if not w.has(n):
+                var why = "a part of it has no generator".to_string()
+                if let Some(s) = w.shapes.get(n.copy()):
+                    if let Some(x) = w.shape_why(self.ast(module), s):
+                        why = x
+                let d = Diagnostic.new(Msg.TestNoGenerator, at.start, at.end).with("ty", n)
+                self.report_other(module, d.with("why", why))
+                continue
+            w.out.push("\nimpl Arbitrary for {n}:\n    def arbitrary(d: Draws) -> {n}:\n")
+            w.out.push("        return __arbitrary_{n}(d)\n")
         self.declare_sites(module, items, mut w)
         # The contracts as properties.
         var tests = String.new()
@@ -648,6 +707,29 @@ impl Resolver:
         for (name, d) in names:
             if not self.prog.modules[module.index].items.contains(name.copy()):
                 _ = self.prog.modules[module.index].items.insert(name.copy(), d)
+
+    ## Where `@derive(Arbitrary)` is written among `attrs` (RULES.md, R41).
+    pure def derives_arbitrary(self, module: ModuleId, attrs: list[Attr]) -> TextRange?:
+        for a in attrs:
+            if a.name != "derive":
+                continue
+            for arg in a.args:
+                if let ExprKind.Name(n) = self.ast(module).expr(arg.value).kind:
+                    if n == "Arbitrary":
+                        return Some(arg.range)
+        return None
+
+    ## The type of the module an impl of `Arbitrary` written by hand is
+    ## for, `impl Arbitrary for Money:` (RULES.md, R41).
+    pure def arbitrary_impl_of(self, module: ModuleId, i: ImplDef) -> String?:
+        let t = i.trait_ty?
+        if type_text(self.ast(module), t) != "Arbitrary":
+            return None
+        let written = type_text(self.ast(module), i.self_ty)
+        for c in written.chars():
+            if not is_alphanumeric(c) and c != '_':
+                return None
+        return Some(written)
 
     ## The names and the text of the bounds of generic parameters.
     pure def bounds_of(self, module: ModuleId, gs: list[GenericParam]) -> list[(String, String)]:

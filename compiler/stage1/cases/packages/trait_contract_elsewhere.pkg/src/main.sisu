@@ -1,0 +1,31 @@
+from tally.counter import Counter
+
+struct Tally:
+    n: int
+
+impl Counter for Tally:
+    def add(mut self, by: int):
+        self.n += by
+    pure def total(self) -> int:
+        return self.n
+
+struct Sloppy:
+    n: int
+
+impl Counter for Sloppy:
+    def add(mut self, by: int):
+        self.n += by + 1
+    pure def total(self) -> int:
+        return self.n
+
+def fill[C: Counter](mut c: C, n: int):
+    c.add(n)
+
+def main():
+    var t = Tally(n=0)
+    t.add(2)
+    fill(mut t, 3)
+    print("total {t.total()}")
+    var s = Sloppy(n=0)
+    fill(mut s, 1)
+    print("not reached")

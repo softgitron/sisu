@@ -28,6 +28,17 @@ pub enum Msg:
     LexBadIndentChar
     LexBackslashContinuation
     LexBadCharLiteral
+    LexDoubleQuotes
+    ResolvePythonConversion
+    TypeWrapSome
+    TypeOperatorTrait
+    TypeKeywordOnly
+    TypeResultOr
+    TypeQuestionDot
+    TypeChangeCopy
+    TypeSharedChanges
+    TypeTakeOut
+    TypeCaptureBorrow
     LexNewlineInInterpolation
     LexOpenedHere
     LexUseSpaces
@@ -281,6 +292,10 @@ pub enum Msg:
     ResolveSealedTrait
     ResolveOrphanImpl
     ResolveNotATraitMethod
+    ResolveNotATraitConstant
+    ResolveConstantType
+    ResolveConstOrMethod
+    TypeTraitConstant
     ResolveMissingAssocType
     ResolveSupertraitMissing
     ResolveMissingTraitMethod
@@ -502,6 +517,7 @@ pub enum Msg:
     ContractTraitElsewhere
     ResolveUnknownAttribute
     ResolveMisspeltAttribute
+    ResolveMisplacedAttribute
     ResolveSimilarAttribute
     TypeDeprecated
     TypeDeprecatedPlain
@@ -529,6 +545,17 @@ impl Msg:
             case LexBadIndentChar: "lex.bad-indent-char"
             case LexBackslashContinuation: "lex.backslash-continuation"
             case LexBadCharLiteral: "lex.bad-char-literal"
+            case LexDoubleQuotes: "lex.double-quotes"
+            case ResolvePythonConversion: "resolve.python-conversion"
+            case TypeWrapSome: "type.wrap-some"
+            case TypeOperatorTrait: "type.operator-trait"
+            case TypeKeywordOnly: "type.keyword-only"
+            case TypeResultOr: "type.result-or"
+            case TypeQuestionDot: "type.question-dot"
+            case TypeChangeCopy: "type.change-copy"
+            case TypeSharedChanges: "type.shared-changes"
+            case TypeTakeOut: "type.take-out"
+            case TypeCaptureBorrow: "type.capture-borrow"
             case LexNewlineInInterpolation: "lex.newline-in-interpolation"
             case LexOpenedHere: "lex.opened-here"
             case LexUseSpaces: "lex.use-spaces"
@@ -779,6 +806,10 @@ impl Msg:
             case ResolveSealedTrait: "resolve.sealed-trait"
             case ResolveOrphanImpl: "resolve.orphan-impl"
             case ResolveNotATraitMethod: "resolve.not-a-trait-method"
+            case ResolveNotATraitConstant: "resolve.not-a-trait-constant"
+            case ResolveConstantType: "resolve.constant-type"
+            case ResolveConstOrMethod: "resolve.const-or-method"
+            case TypeTraitConstant: "type.trait-constant"
             case ResolveMissingAssocType: "resolve.missing-assoc-type"
             case ResolveSupertraitMissing: "resolve.supertrait-missing"
             case ResolveMissingTraitMethod: "resolve.missing-trait-method"
@@ -992,6 +1023,7 @@ impl Msg:
             case ContractTraitElsewhere: "contract.trait-elsewhere"
             case ResolveUnknownAttribute: "resolve.unknown-attribute"
             case ResolveMisspeltAttribute: "resolve.misspelt-attribute"
+            case ResolveMisplacedAttribute: "resolve.misplaced-attribute"
             case ResolveSimilarAttribute: "resolve.similar-attribute"
             case TypeDeprecated: "type.deprecated"
             case TypeDeprecatedPlain: "type.deprecated-plain"

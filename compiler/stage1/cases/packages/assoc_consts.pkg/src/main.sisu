@@ -1,0 +1,11 @@
+from shapes.shape import Shape
+from shapes.square import Square
+
+## The sides of `count` shapes of type `T`.
+def sides[T: Shape](count: int) -> int:
+    return count * T.SIDES
+
+def main():
+    print(sides[Square](3))
+    print(Square.NAME)
+    print(Square(side=1).describe())

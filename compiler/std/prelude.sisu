@@ -3053,6 +3053,15 @@ def embed(path: str) -> str
 @intrinsic("test.arbitrary")
 def arbitrary[T]() -> Gen[T]
 
+## A type whose cases a property test draws its own way (17,
+## "Property-based testing"): `arbitrary[T]`, and the generator of every
+## type of the module that holds a `T`, draw a `T` through its impl, which
+## builds a value from the draws (`d.draw(n)`, `Draws.gen_in(d, lo, hi)`,
+## ...). `@derive(Arbitrary)` gives a struct or an enum the impl that draws
+## its shape, the generator `arbitrary[T]` writes for any type.
+trait Arbitrary:
+    def arbitrary(d: Draws) -> Self
+
 ## Every case of `T` with at most `max_len` items in each collection, its
 ## integers bounded by their refinements (17, D-070).
 @intrinsic("test.exhaustive")

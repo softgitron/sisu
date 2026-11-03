@@ -1,0 +1,51 @@
+# RULES.md, R41: `@derive(Arbitrary)` gives a struct or an enum the impl
+# of the prelude's `Arbitrary` that draws its shape, the generator
+# `arbitrary[T]` writes for any type, so a bound `T: Arbitrary` draws it
+# too; an impl written by hand draws a type its own way, and
+# `arbitrary[T]` and the generators of the types that hold one use it
+# (17, "Property-based testing": "`@derive(Arbitrary)` for custom
+# shapes").
+
+## An amount in cents, which the tests draw between 0 and 100 euros.
+struct Money:
+    cents: int
+
+impl Arbitrary for Money:
+    def arbitrary(d: Draws) -> Money:
+        return Money(cents=Draws.gen_in(d, 0, 10000))
+
+## A purchase: a price and how many.
+@derive(Arbitrary)
+struct Purchase:
+    price: Money
+    count: int
+
+@derive(Arbitrary)
+enum Payment:
+    Cash(Money)
+    Card(number: int)
+
+## A value of any type that draws itself.
+def draw_one[T: Arbitrary](d: Draws) -> T:
+    return T.arbitrary(d)
+
+test "a price is drawn its own way":
+    check(arbitrary[Money]) do m:
+        return 0 <= m.cents and m.cents <= 10000
+
+test "a purchase's price is too":
+    check(arbitrary[Purchase]) do p:
+        return 0 <= p.price.cents and p.price.cents <= 10000
+
+test "a bound draws through the derived impl":
+    check(Gen.of((d: Draws) -> draw_one[Payment](d))) do pay:
+        return match pay:
+            case Cash(m): m.cents <= 10000
+            case Card(_): True
+
+test "money stays under fifty euros":
+    check(arbitrary[Money]) do m:
+        return m.cents < 5000
+
+def main():
+    pass

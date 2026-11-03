@@ -318,6 +318,16 @@ impl D:
                 self.fn_defs(mut out, t.methods)
                 out.push(", assoc_types: ")
                 self.assoc_types(mut out, t.assoc_types)
+                # Stage 1's own field (RULES.md, R37), written only when set.
+                if not t.consts.is_empty():
+                    out.push(", consts: [")
+                    var first_const = True
+                    for c in t.consts:
+                        if not first_const:
+                            out.push(", ")
+                        first_const = False
+                        self.const_def(mut out, c)
+                    out.push("]")
                 out.push(" }})")
             case Import(i):
                 out.push("Import(Import {{ path: ")
@@ -529,6 +539,10 @@ impl D:
         self.opt_expr(mut out, f.default)
         out.push(", vis: ")
         vis(mut out, f.vis)
+        # Stage 1's own field (RULES.md, R44), written only when set.
+        if not f.attrs.is_empty():
+            out.push(", attrs: ")
+            self.attrs(mut out, f.attrs)
         out.push(" }}")
 
     pure def enum_def(self, mut out: String, e: EnumDef):
@@ -547,6 +561,16 @@ impl D:
         self.fn_defs(mut out, e.methods)
         out.push(", open: ")
         bool_(mut out, e.open)
+        # Stage 1's own field (RULES.md, R43), written only when set.
+        if not e.consts.is_empty():
+            out.push(", consts: [")
+            var first_const = True
+            for c in e.consts:
+                if not first_const:
+                    out.push(", ")
+                first_const = False
+                self.const_def(mut out, c)
+            out.push("]")
         out.push(" }}")
 
     pure def variant_def(self, mut out: String, v: VariantDef):
@@ -567,7 +591,12 @@ impl D:
             out.push(", range: ")
             range_(mut out, f.range)
             out.push(" }}")
-        out.push("] }}")
+        out.push("]")
+        # Stage 1's own field (RULES.md, R40), written only when set.
+        if not v.attrs.is_empty():
+            out.push(", attrs: ")
+            self.attrs(mut out, v.attrs)
+        out.push(" }}")
 
     pure def impl_def(self, mut out: String, i: ImplDef):
         out.push("ImplDef {{ ")

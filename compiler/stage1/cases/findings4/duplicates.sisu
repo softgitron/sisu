@@ -1,0 +1,25 @@
+# RULES.md, R43: a field declared twice is `E0205` and a variant declared
+# twice `E0206`, as stage 0 reports them, where stage 1 kept one of the
+# two. Stage 0 warns too about the arm its derived impl writes for the
+# second `Red`, in a text the program does not have; stage 1 leaves the
+# second out of the derived impls.
+struct Point:
+    x: int
+    y: int
+    x: int
+
+enum Light:
+    Red
+    Green
+    Red
+
+def go(light: Light) -> bool:
+    match light:
+        case Green:
+            return True
+        case _:
+            return False
+
+def main():
+    print(Point(x=1, y=2).y)
+    print(go(Light.Green))

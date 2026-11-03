@@ -1,0 +1,13 @@
+# RULES.md, R43: a trait that is its own supertrait through another is
+# `E0247`, as one that names itself is.
+trait Shown(Named):
+    def show(self) -> String
+
+trait Named(Shown):
+    def name(self) -> String
+
+trait Itself(Itself):
+    def it(self)
+
+def main():
+    pass

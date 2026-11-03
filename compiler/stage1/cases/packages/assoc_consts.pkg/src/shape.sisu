@@ -1,0 +1,7 @@
+## A polygon, with the constants each kind gives.
+pub trait Shape:
+    const SIDES: int
+    const NAME: str = "a polygon"
+
+    def describe(self) -> String:
+        return "{Self.NAME} with {Self.SIDES} sides"

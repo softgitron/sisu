@@ -636,6 +636,65 @@ const READ_ATTRIBUTES: list[str] = [
     "vectorize",
 ]
 
+## Where an attribute Sisu reads means something (RULES.md, R40): the
+## kinds of declaration it may stand on, and how a message names them;
+## `None` for one that means something anywhere (`@cfg`, `@preview`) or
+## that only the standard library writes, whose checks are their own.
+pure def attribute_places(name: str) -> (list[SyntaxKind], str)?:
+    match name:
+        case "derive" | "must_consume":
+            let types = [SyntaxKind.StructDef, SyntaxKind.EnumDef, SyntaxKind.ErrorDef]
+            return Some((types, "a struct, an enum or an error set"))
+        case "repr" | "persisted":
+            return Some(([SyntaxKind.StructDef, SyntaxKind.EnumDef], "a struct or an enum"))
+        case "delegate":
+            return Some(([SyntaxKind.StructDef], "a struct"))
+        case "export" | "inline" | "float" | "fix_inline" | "fixture" | "refines":
+            return Some(([SyntaxKind.FnDef], "a function"))
+        case "no_alloc" | "no_block" | "no_panic" | "stack":
+            return Some(([SyntaxKind.FnDef], "a function"))
+        case "comptime_budget":
+            return Some(([SyntaxKind.FnDef, SyntaxKind.ConstDef], "a function or a constant"))
+        case "tag":
+            let tests = [SyntaxKind.TestDef, SyntaxKind.BenchDef, SyntaxKind.SuiteDef]
+            return Some((tests, "a test, a benchmark or a suite"))
+        case "deprecated":
+            let items = [
+                SyntaxKind.FnDef,
+                SyntaxKind.StructDef,
+                SyntaxKind.EnumDef,
+                SyntaxKind.ErrorDef,
+                SyntaxKind.TypeAlias,
+                SyntaxKind.ConstDef,
+                SyntaxKind.VariantDef,
+            ]
+            return Some((items, "a function, a type, a constant or a variant"))
+        case "tile" | "unroll" | "vectorize":
+            return Some(([], "a loop nest"))
+        case _:
+            return None
+
+## A declaration of the kind `k`, as a message names it; `None` for what
+## is no declaration.
+pure def declaration_kind(k: SyntaxKind) -> str?:
+    return match k:
+        case FnDef: Some("a function")
+        case StructDef: Some("a struct")
+        case EnumDef: Some("an enum")
+        case ErrorDef: Some("an error set")
+        case TraitDef: Some("a trait")
+        case ImplDef: Some("an impl")
+        case TypeAlias: Some("a type")
+        case ConstDef: Some("a constant")
+        case VariantDef: Some("a variant")
+        case FieldDef: Some("a field")
+        case TestDef: Some("a test")
+        case BenchDef: Some("a benchmark")
+        case SuiteDef: Some("a suite")
+        case ImportItem | FromImport: Some("an import")
+        case ExternBlock: Some("an `extern` block")
+        case _: None
+
 ## Whether Sisu reads the attribute `name`.
 pure def read_attribute(name: str) -> bool:
     for a in READ_ATTRIBUTES:
@@ -1332,7 +1391,12 @@ impl Resolver:
             return
         let token = self.tree.tokens[t]
         var d = Diagnostic.new(Msg.ResolveUndefinedName, token.start, token.end).with("name", name)
-        if let Some(similar) = self.similar_name(name):
+        # Python's conversions, `int("42")` and `str(n)`, are methods here
+        # (RULES.md, R45), and `uint` is no fix for `int`.
+        let conversion = name == "int" or name == "float" or name == "str" or name == "bool"
+        if conversion:
+            d = d.note(Msg.ResolvePythonConversion)
+        elif let Some(similar) = self.similar_name(name):
             d = d.fix(Msg.ResolveSimilarName, "name", similar, token.start, token.end, similar)
         # Python's `open(path)`: files are the capability `Fs`'s (R16).
         if name == "open":
@@ -1514,16 +1578,28 @@ impl Resolver:
             return
         var nodes = [self.tree.root]
         while let Some(n) = nodes.pop():
-            if self.kind(n) == SyntaxKind.Attribute:
-                self.attribute(n, reads)
-                continue
-            nodes.extend(child_nodes(self.tree, n))
+            for c in child_nodes(self.tree, n):
+                if self.kind(c) == SyntaxKind.Attribute:
+                    self.attribute(c, reads, self.kind(n))
+                else:
+                    nodes.push(c)
 
-    pure def attribute(mut self, n: int, reads: bool):
+    ## One attribute, on a declaration of the kind `on`.
+    pure def attribute(mut self, n: int, reads: bool, on: SyntaxKind):
         let t = first_token(self.tree, n, SyntaxKind.Ident) else:
             return
         let token = self.tree.tokens[t]
         let name = self.text.byte_slice(token.start, token.end).to_string()
+        # An attribute Sisu reads where it means nothing (RULES.md, R40):
+        # `@derive` on a function, `@export` on a struct.
+        if let Some((places, where_)) = attribute_places(name):
+            # One before nothing (a syntax error) is the parser's.
+            if let Some(what) = declaration_kind(on):
+                if not places.contains(on):
+                    var d = Diagnostic.new(Msg.ResolveMisplacedAttribute, token.start, token.end)
+                    d = d.with("name", name).with("places", where_)
+                    self.report(d.with("what", what))
+                    return
         # `@float(fast)` permits contraction and reassociation in the
         # function (03), which strict floating point satisfies; it takes
         # `fast` only. `@diagnostic_name` waits for compile-time type
@@ -1699,6 +1775,8 @@ impl Resolver:
                                         self.types_in(f)
                             case FnDef:
                                 self.function(v, True)
+                            case ConstDef:
+                                self.member_const(v)
                             case _:
                                 pass
             case ImplDef if self.implements_refinement(n):
@@ -1721,6 +1799,8 @@ impl Resolver:
                     for m in child_nodes(self.tree, b):
                         if self.kind(m) == SyntaxKind.FnDef:
                             self.function(m, True)
+                        elif self.kind(m) == SyntaxKind.ConstDef:
+                            self.member_const(m)
             case TraitDef:
                 self.check_item_style(n, Style.Camel, "a trait")
                 self.add_generics(n)
@@ -1737,6 +1817,8 @@ impl Resolver:
                     for m in child_nodes(self.tree, b):
                         if self.kind(m) == SyntaxKind.FnDef and not self.is_derive_template(m):
                             self.function(m, True)
+                        elif self.kind(m) == SyntaxKind.ConstDef:
+                            self.member_const(m)
                 self.assoc.clear()
             case ConstDef:
                 self.check_item_style(n, Style.Screaming, "a constant")
@@ -1868,6 +1950,8 @@ impl Resolver:
                     self.pop_scope()
                 case FnDef:
                     self.function(m, True)
+                case ConstDef:
+                    self.member_const(m)
                 case ContractStmt:
                     # `invariant e` is checked as a method of the struct.
                     self.push_scope()
@@ -1878,6 +1962,16 @@ impl Resolver:
                     self.pop_scope()
                 case _:
                     pass
+
+    ## An associated constant of a type, an impl or a trait (03, "Traits";
+    ## RULES.md, R37): its name, its type and its value, as a module's
+    ## constant's.
+    pure def member_const(mut self, n: int):
+        self.check_item_style(n, Style.Screaming, "a constant")
+        self.types_in(n)
+        self.push_scope()
+        self.exprs_in(n)
+        self.pop_scope()
 
     ## A function: its generic parameters, parameters and result type are
     ## in scope in its body. A header or body with a syntax error reports

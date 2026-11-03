@@ -1,0 +1,5 @@
+# RULES.md, R45: Python's text in single quotes gets the fix that writes
+# double quotes (`E0016`).
+def main():
+    let name = 'Aino'
+    print(name)

@@ -4,3 +4,4 @@
 7:11-7:22 E0308 type.missing-argument arg="b" name="add"
   fix type.add-hole 7:21-7:21 ", b=todo(\"b\")"
 7:18-7:19 E0306 type.unknown-keyword name="add" arg="c"
+  fix resolve.similar-name 7:18-7:19 "a"

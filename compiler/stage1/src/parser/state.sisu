@@ -27,6 +27,9 @@ pub view struct Parser:
     ## A struct body already has a line that is not a member, so the
     ## following ones are not reported again.
     pub(package) bad_member_reported: bool
+    ## In the body of a trait, whose `const` members may leave out their
+    ## value: each impl gives it (03, "Traits"; RULES.md, R37).
+    pub(package) in_trait_body: bool
     ## Byte offsets of the lexer's errors.
     pub(package) lex_errors: list[int]
     ## While positive, diagnostics are not reported (inside code that is
@@ -59,6 +62,7 @@ impl Parser:
             ended_with_block=False,
             in_attribute=False,
             bad_member_reported=False,
+            in_trait_body=False,
             lex_errors=lex_errors,
             quiet=0,
             attempts=0,

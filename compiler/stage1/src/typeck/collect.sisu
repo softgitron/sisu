@@ -233,6 +233,14 @@ pub struct Resolver:
     ## (decision 251): their instances name the impl's type parameters
     ## apart, since the trait's code never names them.
     pub provided_copies: set[DefId]
+    ## While a suite's items are declared: the `@tag`s of the suites around
+    ## them, which tag each of their tests (RULES.md, R40).
+    pub suite_tags: list[Attr]
+    ## While a type's declaration is resolved (its fields, its methods, an
+    ## impl of it): the type, whose own uses of itself are not deprecated
+    ## uses (RULES.md, R40); and while an impl's self type is, any use.
+    pub decl_owner: DefId?
+    pub quiet_deprecation: bool
     ## The names reflection shows for the type parameters of the template
     ## being made (a generic trait impl's, decision 251).
     pub shape_names: list[String]
@@ -347,6 +355,9 @@ impl Resolver:
             unfold_later=[],
             trait_templates={},
             provided_copies=set(),
+            suite_tags=[],
+            decl_owner=None,
+            quiet_deprecation=False,
             shape_names=[],
             promoted=set(),
             instances_asked=0,
@@ -538,6 +549,7 @@ impl Resolver:
         let first_def = len(self.prog.defs)
         if not modules.is_empty():
             self.root_text = modules[0].text.copy()
+        self.prog.with_tests = self.tests
         # The packages: the root package, std, then the dependencies.
         for k in range(len(packages)):
             var deps: list[(String, int)] = []
@@ -1104,7 +1116,12 @@ impl Resolver:
     ## argument's text without its quotes.
     pure def test_tags(mut self, def_: DefId, attrs: list[Attr], module: ModuleId):
         var tags: list[String] = []
+        # A suite's `@tag`s tag each of its tests, before their own (17;
+        # RULES.md, R40).
+        var all = self.suite_tags.copy()
         for a in attrs:
+            all.push(a.copy())
+        for a in all:
             if a.name != "tag":
                 continue
             for x in a.args:
@@ -1234,6 +1251,7 @@ impl Resolver:
             template=False,
             type_params=[],
             deprecated=None,
+            assoc_const=False,
         )
 
     pub pure def ast(self, module: ModuleId) -> ref Ast:
@@ -1293,6 +1311,7 @@ impl Resolver:
                         module, s.name.text, s.name.range, item.vis, DefKind.Struct(info)
                     )
                     self.bind(module, s.name.text, def_)
+                    self.deprecate(module, def_, item.attrs)
                     _ = self.type_params.insert(def_, s.generics.copy())
                     self.declare_methods(module, def_, s.methods)
                     for c in s.consts:
@@ -1358,7 +1377,12 @@ impl Resolver:
                         )
                 case ItemKind.Suite(s):
                     let prefix = prefixed(test_prefix, s.name)
+                    let outer = self.suite_tags.copy()
+                    for a in item.attrs:
+                        if a.name == "tag":
+                            self.suite_tags.push(a.copy())
                     self.declare_items(module, s.items, prefix)
+                    self.suite_tags = outer
                 # A benchmark is checked like a test; `sisu bench` runs it.
                 case ItemKind.Bench(t):
                     let name = prefixed(test_prefix, t.name)
@@ -1377,6 +1401,7 @@ impl Resolver:
                         module, c.name.text, c.name.range, item.vis, DefKind.Const(info)
                     )
                     self.bind(module, c.name.text, def_)
+                    self.deprecate(module, def_, item.attrs)
                     self.comptime_budget(module, def_, item.attrs)
                     self.pending.push(Pending.Const(def_=def_, module=module, ast=c.copy()))
                 case ItemKind.TypeAlias(a):
@@ -1394,6 +1419,7 @@ impl Resolver:
                             module, a.name.text, a.name.range, item.vis, DefKind.Refinement(info)
                         )
                         self.bind(module, a.name.text, def_)
+                        self.deprecate(module, def_, item.attrs)
                         _ = self.type_params.insert(def_, a.generics.copy())
                         self.pending.push(
                             Pending.Refinement(
@@ -1413,6 +1439,7 @@ impl Resolver:
                             DefKind.TypeAlias(Ty.error()),
                         )
                         self.bind(module, a.name.text, def_)
+                        self.deprecate(module, def_, item.attrs)
                         _ = self.aliases.insert(def_, (module, a.copy()))
                 # An `extern` block declares foreign functions (22, "Foreign
                 # calls"), each a function of the module without a body
@@ -1543,6 +1570,49 @@ impl Resolver:
         var d = Diagnostic.new(Msg.ResolveMethodSignature, at.start, at.end).with("name", name)
         d = d.with("trait", trait_name).with("expected", expected_text)
         self.report_other(module, d.with("found", found_text))
+
+    ## Whether `d` is the function that gives an associated constant
+    ## (RULES.md, R37).
+    pure def is_assoc_const(self, d: DefId) -> bool:
+        if let Some(f) = self.prog.fn_info(d):
+            return f.assoc_const
+        return False
+
+    ## An impl's associated constant has the type the trait declares it
+    ## with (RULES.md, R37): `E0272` otherwise.
+    pure def check_const_type(
+        mut self,
+        module: ModuleId,
+        tm: DefId,
+        m: DefId,
+        trait_ref: TraitRef,
+        self_ty: Ty,
+        env: list[Predicate],
+        names: list[String],
+    ):
+        let expected = self.prog.fn_info(tm) else:
+            return
+        let found = self.prog.fn_info(m) else:
+            return
+        let eret = expected.ret
+        let fret = found.ret
+        if eret == Ty.error() or fret == Ty.error():
+            return
+        var args = [self_ty]
+        for a in trait_ref.args:
+            args.push(a)
+        let declared = self.types.subst(eret, args)
+        let a = self.prog.normalize(mut self.types, declared, env)
+        let b = self.prog.normalize(mut self.types, fret, env)
+        if a == b:
+            return
+        let name = self.prog.defs[m.index].name.copy()
+        let at = found.ret_span ?? self.prog.defs[m.index].span
+        var d = Diagnostic.new(Msg.ResolveConstantType, at.start, at.end).with("name", name)
+        d = d.with("trait", self.prog.display_trait_in(self.types, trait_ref, []))
+        d = d.with("expected", self.prog.display_in(self.types, a, names))
+        d = d.with("found", self.prog.display_in(self.types, b, names))
+        self.report_other(module, d)
 
     ## `impl Copy for T` written by hand (RULES.md, R22): `Copy` is opt-in
     ## through `@derive(Copy)` (03, "Auto traits"), which checks that every
@@ -1730,9 +1800,60 @@ impl Resolver:
         let kind = if error_set: DefKind.ErrorSet(info) else: DefKind.Enum(info)
         let def_ = self.new_def(module, e.name.text, e.name.range, vis, kind)
         self.bind(module, e.name.text, def_)
+        self.deprecate(module, def_, attrs)
+        # Its constants, as a struct's (RULES.md, R43).
+        for c in e.consts:
+            self.declare_assoc_const(module, TyKey.Adt(def_), e.name.text, c)
+        for k in range(len(e.variants)):
+            if has_attr(e.variants[k].attrs, "deprecated"):
+                let why = self.builtin_attr(module, e.variants[k].attrs, "deprecated")
+                _ = self.prog.deprecated_variants.insert((def_, k), why ?? String.new())
         _ = self.type_params.insert(def_, e.generics.copy())
         self.declare_methods(module, def_, e.methods)
         self.pending.push(Pending.Enum(def_=def_, module=module, ast=e.copy(), attrs=attrs.copy()))
+
+    ## The type a method belongs to, whose declaration it is part of.
+    pure def owner_def(self, owner: Owner?) -> DefId?:
+        var st: Ty? = None
+        match owner:
+            case Some(Owner.Type(t)):
+                return Some(t)
+            case Some(Owner.Refinement(r)):
+                return Some(r)
+            case Some(Owner.Inherent(_, _, _, t)):
+                st = Some(t)
+            case Some(Owner.Impl(i)):
+                if let Some(info) = self.prog.impl_info(i):
+                    st = Some(info.self_ty)
+            case _:
+                pass
+        if let Some(t) = st:
+            if let TyData.Adt(d, _) = self.types.data(t):
+                return Some(d)
+        return None
+
+    ## Records a type or constant marked `@deprecated("...")` (13; RULES.md,
+    ## R40) with the attribute's text.
+    pure def deprecate(mut self, module: ModuleId, def_: DefId, attrs: list[Attr]):
+        if has_attr(attrs, "deprecated"):
+            let why = self.builtin_attr(module, attrs, "deprecated") ?? String.new()
+            _ = self.prog.deprecated.insert(def_, why)
+
+    ## `W0023` (or `W0025`) for a use at `at` in `module` of the deprecated
+    ## type `d` (RULES.md, R40), but in the type's own declaration (its
+    ## fields, its methods, its impls), which `decl_owner` names.
+    pure def deprecated_type_use(mut self, d: DefId, module: ModuleId, at: TextRange):
+        let why = self.prog.deprecated.get(d) else:
+            return
+        if self.decl_owner == Some(d) or self.quiet_deprecation or not self.lints_in(module):
+            return
+        let name = self.prog.defs[d.index].name.copy()
+        if why.is_empty():
+            let diag = Diagnostic.new(Msg.TypeDeprecatedPlain, at.start, at.end)
+            self.warn_in(module, diag.with("name", name))
+        else:
+            let diag = Diagnostic.new(Msg.TypeDeprecated, at.start, at.end)
+            self.warn_in(module, diag.with("name", name).with("reason", why))
 
     ## `E0225` for each attribute of `attrs` that only the standard library
     ## may write (stage 0's `check_attrs`), in a module of the program:
@@ -1941,14 +2062,22 @@ impl Resolver:
 
     pure def resolve_one(mut self, own p: Pending):
         match p:
+            # A type's own uses of itself are not deprecated uses (RULES.md,
+            # R40).
             case Pending.Struct(def_, module, s, attrs):
+                self.decl_owner = Some(def_)
                 self.resolve_struct(def_, module, s, attrs)
+                self.decl_owner = None
             case Pending.Enum(def_, module, e, attrs):
+                self.decl_owner = Some(def_)
                 self.resolve_enum(def_, module, e, attrs)
+                self.decl_owner = None
             case Pending.Trait(def_, module, t, _):
                 self.resolve_trait(def_, module, t)
             case Pending.Fn(def_, module, f, owner):
+                self.decl_owner = self.owner_def(owner)
                 self.resolve_fn(def_, module, f, owner)
+                self.decl_owner = None
             case Pending.Test(def_, module, t):
                 self.resolve_test(def_, module, t)
             case Pending.Const(def_, module, c):
@@ -2016,7 +2145,12 @@ impl Resolver:
             for x in fields:
                 if x.name == f.name.text:
                     dup = True
+            # A field declared twice is stage 0's `E0205`, which stage 1
+            # left out.
             if dup:
+                let at = f.name.range
+                var d = Diagnostic.new(Msg.ResolveDuplicateField, at.start, at.end)
+                self.report_other(module, d.with("name", f.name.text).with("owner", s.name.text))
                 continue
             var ctx = TyCtx.plain(module, names, True)
             ctx.self_ty = Some(self_ty)
@@ -2089,7 +2223,11 @@ impl Resolver:
             for x in variants:
                 if x.name == v.name.text:
                     dup = True
+            # And a variant declared twice its `E0206`.
             if dup:
+                let at = v.name.range
+                var d = Diagnostic.new(Msg.ResolveDuplicateVariant, at.start, at.end)
+                self.report_other(module, d.with("name", v.name.text).with("owner", e.name.text))
                 continue
             var ctx = TyCtx.plain(module, names, std)
             ctx.self_ty = Some(self_ty)
@@ -2322,6 +2460,7 @@ impl Resolver:
             info.intrinsic = Some("extern.{library}.{f.name.text}")
         info.structural = self.builtin_attr(module, f.attrs, "structural")
         info.internal = has_attr(f.attrs, "internal")
+        info.assoc_const = has_attr(f.attrs, ASSOC_CONST_ATTR)
         if has_attr(f.attrs, "deprecated"):
             info.deprecated = Some(self.builtin_attr(module, f.attrs, "deprecated") ?? String.new())
         if self.is_root(module):
@@ -2726,6 +2865,64 @@ impl Resolver:
             self.pending.push(
                 Pending.Fn(def_=fdef, module=module, ast=m.copy(), owner=Some(Owner.Trait(def_)))
             )
+        # Each associated constant (03, "Traits"; RULES.md, R37): the
+        # function that gives its value, a method of the trait without
+        # `self` that each impl gives and a value written here provides.
+        var declared: list[String] = []
+        for m in t.methods:
+            declared.push(m.name.text.copy())
+        for c in t.consts:
+            if declared.contains(c.name.text):
+                let at = c.name.range
+                var d = Diagnostic.new(Msg.ResolveDuplicateMethod, at.start, at.end)
+                d = d.with("owner", t.name.text)
+                self.report_other(module, d.with("name", c.name.text))
+                continue
+            declared.push(c.name.text.copy())
+            let f = self.const_fn(module, c) else:
+                continue
+            let info = self.placeholder_fn(FnKind.Method)
+            let fdef = self.new_def(module, c.name.text, c.name.range, Vis.Pub, DefKind.Fn(info))
+            self.pending.push(
+                Pending.Fn(def_=fdef, module=module, ast=f, owner=Some(Owner.Trait(def_)))
+            )
+
+    ## An associated constant of a trait or of a trait's impl as the
+    ## function that gives its value (RULES.md, R37): `pure def NAME() ->
+    ## T: return value`, without a body when the trait leaves the value to
+    ## each impl. `None` for a constant without a type, which is `E0219`.
+    pure def const_fn(mut self, module: ModuleId, c: ConstDef) -> FnDef?:
+        let range = c.name.range
+        let ty = c.ty else:
+            let d = Diagnostic.new(Msg.ResolveConstTypeRequired, range.start, range.end)
+            self.report_other(module, d.with("name", c.name.text))
+            return None
+        var body: Block? = None
+        if let Some(v) = c.value:
+            let e = self.sources[module.index].ast.expr(v).copy()
+            let st = Stmt(node=e.node, range=e.range, kind=StmtKind.Return(Some(v)))
+            let sid = self.sources[module.index].ast.add_stmt(st)
+            body = Some(Block(node=e.node, range=e.range, stmts=[sid]))
+        return Some(
+            FnDef(
+                node=0,
+                range=range,
+                name=Name(text=c.name.text.copy(), range=range),
+                is_pure=True,
+                is_comptime=False,
+                is_unsafe=False,
+                generics=[],
+                params=[],
+                ret=Some(ty),
+                from_=[],
+                where_=[],
+                body=body,
+                attrs=[Attr(name=ASSOC_CONST_ATTR.to_string(), args=[], range=range)],
+                header_broken=False,
+                body_broken=False,
+                vis=Vis.Pub,
+            )
+        )
 
     pure def resolve_impl(mut self, module: ModuleId, imp: ImplDef, range_in: TextRange):
         # The impl is named by its header, `impl[...] Trait for Type`.
@@ -2744,7 +2941,11 @@ impl Resolver:
         let predicates = self.resolve_bounds(module, imp.generics, names, 0, None)
         var ctx = TyCtx.plain(module, names, True)
         ctx.predicates = predicates.copy()
+        # An impl of a deprecated type is part of its declaration (RULES.md,
+        # R40).
+        self.quiet_deprecation = True
         let self_ty = self.resolve_ty(imp.self_ty, ctx)
+        self.quiet_deprecation = False
         if imp.is_unsafe and self.written_by_comptime(module):
             let at = TextRange.new(range_in.start, self_range.end)
             self.report_other(module, Diagnostic.new(Msg.ComptimeUnsafeWritten, at.start, at.end))
@@ -2922,6 +3123,16 @@ impl Resolver:
                     self.prog.defs[d.index].set_kind(kind_now)
             self.pending.push(
                 Pending.Fn(def_=fdef, module=module, ast=m.copy(), owner=Some(Owner.Impl(def_)))
+            )
+        # The trait's associated constants the impl gives (RULES.md, R37),
+        # each the function that gives its value, as the trait declares it.
+        for c in imp.consts:
+            let f = self.const_fn(module, c) else:
+                continue
+            let finfo = self.placeholder_fn(FnKind.Method)
+            let fdef = self.new_def(module, c.name.text, c.name.range, Vis.Pub, DefKind.Fn(finfo))
+            self.pending.push(
+                Pending.Fn(def_=fdef, module=module, ast=f, owner=Some(Owner.Impl(def_)))
             )
         # The trait's provided methods that reflect and that the impl does
         # not write: each a method of the impl, written where the trait's
@@ -3922,10 +4133,28 @@ impl Resolver:
                         assoc_missing = True
             let method_env = self.prog.elaborate_env(mut self.types, predicates)
             for (mname, mdef) in methods:
+                let given_const = self.is_assoc_const(mdef)
                 let tm = self.prog.trait_method(tr, mname) else:
                     let s = self.prog.defs[mdef.index].span
-                    var d = Diagnostic.new(Msg.ResolveNotATraitMethod, s.start, s.end)
+                    let m = if given_const: Msg.ResolveNotATraitConstant else: Msg.ResolveNotATraitMethod
+                    var d = Diagnostic.new(m, s.start, s.end)
                     self.report_other(module, d.with("name", mname).with("trait", trait_name))
+                    continue
+                # A constant is given as a constant and a method as a method
+                # (RULES.md, R37); a constant has the trait's type.
+                if given_const != self.is_assoc_const(tm):
+                    let s = self.prog.defs[mdef.index].span
+                    var d = Diagnostic.new(Msg.ResolveConstOrMethod, s.start, s.end)
+                    d = d.with("name", mname).with("trait", trait_name)
+                    if given_const:
+                        d = d.with("what", "a method").with("given", "a constant")
+                    else:
+                        d = d.with("what", "a constant").with("given", "a method")
+                    self.report_other(module, d)
+                    continue
+                if given_const:
+                    let tref = TraitRef(def_=tr, args=trait_args.copy())
+                    self.check_const_type(module, tm, mdef, tref, self_ty, method_env, names)
                     continue
                 var tpure = False
                 if let Some(f) = self.prog.fn_info(tm):
@@ -4012,16 +4241,54 @@ impl Resolver:
                     var args = targs.copy()
                     for k in range(max(len(f.generics) - f.impl_generics, 0)):
                         args.push(self.types.param(n_generics + k))
-                    let signature = self.signature_text(name, f, Some(args), env, names)
+                    var signature = self.signature_text(name, f, Some(args.copy()), env, names)
+                    if f.assoc_const:
+                        let declared = self.types.subst(f.ret, args)
+                        let ty = self.prog.normalize(mut self.types, declared, env)
+                        signature = "const {name}: {self.prog.display_in(self.types, ty, names)} = ..."
                     d = d.note_with(Msg.ResolveWriteTraitMethod, "signature", signature)
                 self.report_other(module, d)
         let checks = self.copy_checks.copy()
         self.copy_checks = []
         for (d, at) in checks:
             self.check_copy_fields(d, at)
+        self.check_trait_cycles(first)
         self.check_coherence(first)
         self.check_object_safety()
         self.check_derives(first)
+
+    ## A trait that is its own supertrait through others, `trait A(B)` and
+    ## `trait B(A)`, is `E0247` as one that names itself is (RULES.md, R43):
+    ## each trait from the definition `first` on whose supertraits lead
+    ## back to it, at its name.
+    pure def check_trait_cycles(mut self, first: int):
+        for i in range(first, len(self.prog.defs)):
+            let t = DefId(index=i)
+            let info = self.prog.trait_info(t) else:
+                continue
+            var seen: list[DefId] = []
+            var todo: list[DefId] = []
+            for s in info.supertraits:
+                # A trait that names itself was reported where it is named.
+                if s.def_ != t:
+                    todo.push(s.def_)
+            var cycle = False
+            while let Some(x) = todo.pop():
+                if x == t:
+                    cycle = True
+                    break
+                if seen.contains(x):
+                    continue
+                seen.push(x)
+                if let Some(xi) = self.prog.trait_info(x):
+                    for s in xi.supertraits:
+                        todo.push(s.def_)
+            if not cycle:
+                continue
+            let module = self.prog.defs[i].module
+            let at = self.prog.defs[i].span
+            let d = Diagnostic.new(Msg.ResolveTraitCycle, at.start, at.end)
+            self.report_other(module, d.with("name", self.prog.defs[i].name))
 
     ## At most one impl of a trait for any type (D-013): each impl from
     ## `first` on against the earlier ones of its trait
@@ -4759,6 +5026,7 @@ impl Resolver:
     pure def def_as_type(
         mut self, d: DefId, name: str, args: list[Ty], module: ModuleId, at: TextRange
     ) -> Ty:
+        self.deprecated_type_use(d, module, at)
         var generics: list[Generic] = []
         match self.prog.defs[d.index].kind():
             case DefKind.Struct(s):
@@ -4879,6 +5147,10 @@ impl Resolver:
                 return None
 
 ## A test's name within its suite: `suite/name`.
+## The attribute the compiler puts on the function that gives an
+## associated constant's value (RULES.md, R37), which no program writes.
+pub const ASSOC_CONST_ATTR: str = "<const>"
+
 pure def prefixed(prefix: str, name: str) -> String:
     if prefix.is_empty():
         return name.to_string()

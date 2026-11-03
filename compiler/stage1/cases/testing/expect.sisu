@@ -1,0 +1,21 @@
+# RULES.md, R38: `expect` is `assert`'s non-fatal form (17, "Assertions"):
+# in a program built with its tests, a failed `expect` records the failure
+# through `expect.fail`, `fail_compare` or `fail_parts` and the test goes
+# on, to fail at its end; `assert` stops the test as before, and outside a
+# build with its tests `expect` stops as `assert` does.
+def double(x: int) -> int:
+    return x * 2
+
+def even(x: int) -> bool:
+    return x % 2 == 0
+
+test "every expectation that fails is reported":
+    let four = double(2)
+    expect double(2) == 5
+    expect four > 5
+    expect even(double(3) + 1)
+    assert double(1) == 2
+
+def main():
+    expect double(3) == 6
+    print("six")

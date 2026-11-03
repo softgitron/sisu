@@ -1,0 +1,32 @@
+# RULES.md, R44: `@cfg` on a field, a variant or a method in a struct's or
+# an enum's own body leaves it out of a build its condition does not hold
+# in, as it leaves out an item and a method of an impl (08): a build
+# without its tests has no `calls`, no `calls_made` and no `Simulated`.
+struct Probe:
+    reading: int
+    @cfg(test)
+    calls: int = 0
+
+    @cfg(test)
+    def calls_made(self) -> int:
+        return self.calls
+
+enum Mode:
+    Live
+    @cfg(test)
+    Simulated
+
+def describe(m: Mode) -> str:
+    return match m:
+        case Live: "live"
+        case _: "a test's"
+
+def main():
+    let p = Probe(reading=3)
+    print(p.reading)
+    print(describe(Mode.Live))
+
+test "a build with its tests has the members":
+    let p = Probe(reading=1)
+    assert p.calls_made() == 0
+    assert describe(Mode.Simulated) == "a test's"

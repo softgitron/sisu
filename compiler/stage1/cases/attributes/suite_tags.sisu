@@ -1,0 +1,16 @@
+# RULES.md, R40: a suite's `@tag`s tag each of its tests (17: `@tag`
+# selects and skips), before a test's own, where they tagged none.
+@tag("slow")
+suite "lights":
+    test "red":
+        assert True
+
+    @tag("net")
+    test "green":
+        assert True
+
+test "alone":
+    assert True
+
+def main():
+    pass

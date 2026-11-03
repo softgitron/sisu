@@ -125,6 +125,12 @@ pub struct FnLower:
     pub bool_invariant: bool
     ## The expressions lowering makes, after the body's (`lower.exprs`).
     pub extra: list[TExpr]
+    ## While a trait's clause of another module is lowered (RULES.md, R39):
+    ## where each of its statements stands, the method's name in its own
+    ## file, which the clause's lines are not in; and the module whose text
+    ## the clause's parts are drawn from.
+    pub fixed_loc: Loc?
+    pub text_module: ModuleId?
 
 ## The rest of a comprehension inside its loops.
 pub struct CompRest:
@@ -290,7 +296,7 @@ pub pure def stmt_span(body: TBody, s: TStmt) -> TextRange:
         case TStmt.While(_, _, span): span
         case TStmt.For(_, _, _, _, _, span): span
         case TStmt.Match(_, _, span): span
-        case TStmt.Assert(_, _, _, span, _): span
+        case TStmt.Assert(_, _, _, span, _, _): span
         case TStmt.Contract(c): c.span
         case TStmt.Select(_, span): span
         case TStmt.Yield(_, span): span
@@ -325,6 +331,8 @@ impl FnLower:
             unit_temp=None,
             bool_invariant=False,
             extra=[],
+            fixed_loc=None,
+            text_module=None,
         )
 
     ## Lowers the body; `from_` and `inner` are the arguments the result may
@@ -583,7 +591,10 @@ impl FnLower:
             # block.
             let b = self.new_block()
             self.switch_to(cx, b)
-        self.blocks[self.cur].stmts.push(Statement(kind=kind, loc=loc))
+        var at = loc
+        if let Some(fixed) = self.fixed_loc:
+            at = Some(fixed)
+        self.blocks[self.cur].stmts.push(Statement(kind=kind, loc=at))
 
     pub pure def assign(mut self, cx: Cx, own p: Place, own r: Rvalue, loc: Loc?):
         self.emit(cx, StatementKind.Assign(place=p, value=r), loc)
@@ -591,7 +602,10 @@ impl FnLower:
     pub pure def terminate(mut self, own t: Terminator, loc: Loc?):
         if self.blocks[self.cur].term.is_none():
             self.blocks[self.cur].term = Some(t)
-            self.blocks[self.cur].loc = loc
+            var at = loc
+            if let Some(fixed) = self.fixed_loc:
+                at = Some(fixed)
+            self.blocks[self.cur].loc = at
 
     pub pure def goto(mut self, b: BlockId):
         self.terminate(Terminator.Goto(b), None)

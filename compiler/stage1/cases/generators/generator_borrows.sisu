@@ -1,0 +1,13 @@
+# RULES.md, R42: a generator expression borrows what it reads of the
+# function's own while it lives: what it reads cannot change meanwhile
+# (`E0405`), and it cannot outlive a local it reads (`E0407`).
+def leak() -> Iter[int]:
+    let local = [1, 2, 3]
+    return (x for x in local)
+
+def main():
+    var xs = [1, 2, 3, 4]
+    let g = (x * 2 for x in xs)
+    xs.push(5)
+    print(g.collect())
+    print(leak().collect())

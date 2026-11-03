@@ -1,0 +1,10 @@
+--- stderr
+error[E0300]: expected `int`, found `str`
+  --> refused_types.sisu:10:21
+   |
+10 |     let four: int = "four"
+   |                     ^^^^^^
+   |               --- expected because of this
+
+error[D0006]: the program was not run: errors found (1)
+error: Failed

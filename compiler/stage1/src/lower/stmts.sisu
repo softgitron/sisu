@@ -163,8 +163,13 @@ impl FnLower:
                 self.for_loop(cx, pat, iter, mode, item, ForBody.Block(body), sp)
             case TStmt.Match(scrutinee, arms, sp):
                 self.match_into(cx, None, scrutinee, arms, sp)
-            case TStmt.Assert(cond, message, text, sp, replay):
-                self.assert_(cx, cond, message, text, sp, replay)
+            case TStmt.Assert(cond, message, text, sp, replay, soft):
+                # In a program built with its tests, `expect` records its
+                # failure and goes on, and the runner fails the test at its
+                # end (17; RULES.md, R38); elsewhere it stops as `assert`
+                # does.
+                let goes_on = soft and cx.prog.with_tests
+                self.assert_(cx, cond, message, text, sp, replay, goes_on)
             case TStmt.Contract(c):
                 self.contract_stmt(cx, c)
             case TStmt.Defer(body, _):
@@ -621,14 +626,29 @@ impl FnLower:
         )
         return (starts, Some(rest))
 
+    ## `assert cond` and `expect cond`: the condition, and where it does not
+    ## hold the failure's intrinsic, `assert.fail`, `fail_compare` or
+    ## `fail_parts`, which stops the run; or, for an `expect` that `goes_on`
+    ## (in a program built with its tests; RULES.md, R38), `expect.fail`,
+    ## `fail_compare` or `fail_parts`, which take the same arguments, record
+    ## the failure in the running test's report and return, so the test goes
+    ## on and fails at its end.
     pure def assert_(
-        mut self, cx: Cx, cond: TExprId, message: TExprId?, text: str, span: TextRange, replay: bool
+        mut self,
+        cx: Cx,
+        cond: TExprId,
+        message: TExprId?,
+        text: str,
+        span: TextRange,
+        replay: bool,
+        goes_on: bool,
     ):
         let loc = cx.loc(span)
+        let family = if goes_on: "expect" else: "assert"
         # A condition that only reads shows every part's value when it fails
         # (17, "Assertions").
         if replay and self.can_show_parts(cx, cond):
-            self.assert_showing_parts(cx, cond, message, span)
+            self.assert_showing_parts(cx, cond, message, span, goes_on)
             return
         # `assert a == b` shows both sides when it fails.
         if let TExprKind.Compare(first, rest) = cx.body.exprs[cond.index].kind:
@@ -655,18 +675,21 @@ impl FnLower:
                 var m = Operand.Const(Const.Str(String.new()))
                 if let Some(x) = message:
                     m = self.str_operand(cx, x)
-                let u = self.temp_sir(Type.Never)
+                let u = self.temp_sir(if goes_on: Type.Unit else: Type.Never)
                 let args = [Operand.Const(Const.Str(text.to_string())), m, a, b]
                 self.emit(
                     cx,
                     StatementKind.Call(
                         dest=Place.local(u),
-                        callee=Callee.Intrinsic(name="assert.fail_compare", args=[]),
+                        callee=Callee.Intrinsic(name="{family}.fail_compare", args=[]),
                         args=args,
                     ),
                     loc,
                 )
-                self.terminate(Terminator.Unreachable, loc)
+                if goes_on:
+                    self.goto(ok)
+                else:
+                    self.terminate(Terminator.Unreachable, loc)
                 self.switch_to(cx, ok)
                 return
         let v = self.operand(cx, cond)
@@ -677,17 +700,20 @@ impl FnLower:
         var m = Operand.Const(Const.Str(String.new()))
         if let Some(x) = message:
             m = self.str_operand(cx, x)
-        let u = self.temp_sir(Type.Never)
+        let u = self.temp_sir(if goes_on: Type.Unit else: Type.Never)
         self.emit(
             cx,
             StatementKind.Call(
                 dest=Place.local(u),
-                callee=Callee.Intrinsic(name="assert.fail", args=[]),
+                callee=Callee.Intrinsic(name="{family}.fail", args=[]),
                 args=[Operand.Const(Const.Str(text.to_string())), m],
             ),
             loc,
         )
-        self.terminate(Terminator.Unreachable, loc)
+        if goes_on:
+            self.goto(ok)
+        else:
+            self.terminate(Terminator.Unreachable, loc)
         self.switch_to(cx, ok)
 
     ## `select:` (06, "Channels and select"): the arms' calls have their

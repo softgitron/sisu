@@ -261,6 +261,8 @@ pub struct FieldDef:
     pub ty: TypeExprId
     pub default: ExprId?
     pub vis: Vis
+    ## Its attributes (`@cfg`, RULES.md, R44).
+    pub attrs: list[Attr]
 
 @derive(Debug)
 pub struct EnumDef:
@@ -270,6 +272,9 @@ pub struct EnumDef:
     pub methods: list[FnDef]
     ## A trailing `..` line (05, open error sets).
     pub open: bool
+    ## Associated constants (`const COUNT: int = 2`), named `T.NAME`, as a
+    ## struct's (RULES.md, R43).
+    pub consts: list[ConstDef]
 
 @derive(Debug)
 pub struct VariantDef:
@@ -277,6 +282,8 @@ pub struct VariantDef:
     pub range: TextRange
     pub name: Name
     pub fields: list[VariantField]
+    ## Its attributes (`@deprecated`, RULES.md, R40).
+    pub attrs: list[Attr]
 
 @derive(Debug)
 pub struct VariantField:
@@ -308,6 +315,9 @@ pub struct TraitDef:
     ## Required (no body) and provided methods.
     pub methods: list[FnDef]
     pub assoc_types: list[AssocTypeDef]
+    ## Associated constants (03, "Traits"; RULES.md, R37): `const SIDES:
+    ## int`, which each impl gives, or with a default value.
+    pub consts: list[ConstDef]
 
 @derive(Debug)
 pub struct Import:

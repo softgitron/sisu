@@ -1,0 +1,3 @@
+3:7-3:12 E0247 resolve.trait-cycle name="Shown"
+6:7-6:12 E0247 resolve.trait-cycle name="Named"
+9:14-9:20 E0247 resolve.trait-cycle name="Itself"

@@ -1174,6 +1174,34 @@ while read -r f; do
         report="$report\n  UNLISTED: ${f#"$repo"/}: expected sir (the case's ${base##*/}.sir against stage 1 in $work/sir-expected/$k.out)"
     fi
 done < <(grep -F "$here/cases/" "$work/cases-check.list")
+# And what `sir --tests` prints of each case with a `NAME.sir-tests`
+# (RULES.md, R38: what a build with its tests lowers `expect` to), the same
+# way, followed, when there is any, by `--- stderr` and its standard error,
+# whose last line says the status (R46: a program with an error of a phase
+# has no SIR, and its diagnostics say why it is not run).
+mkdir -p "$work/sir-tests-expected"
+k=0
+while read -r f; do
+    base="${f%.sisu}"
+    [ -f "$base.sir-tests" ] || continue
+    k=$((k + 1)); n=$((n + 1))
+    dir=$(dirname "$f" | sed 's/[.[\*^$|]/\\&/g')
+    given="$work/sir-tests-expected/$k"
+    stage1 sir --tests "$f" > "$given.sir" 2> "$given.err"
+    {
+        cat "$given.sir"
+        if [ -s "$given.err" ]; then
+            echo "--- stderr"
+            cat "$given.err"
+        fi
+    } | sed "s|$dir/||g" > "$given.out"
+    if cmp -s "$base.sir-tests" "$work/sir-tests-expected/$k.out"; then
+        same=$((same + 1))
+    else
+        class_unlisted=$((class_unlisted + 1))
+        report="$report\n  UNLISTED: ${f#"$repo"/}: expected sir-tests (the case's ${base##*/}.sir-tests against stage 1 in $work/sir-tests-expected/$k.out)"
+    fi
+done < <(grep -F "$here/cases/" "$work/cases-check.list")
 # And what `build --native --release` prints of each case with a
 # `NAME.release` (RULES.md, R27: a release build rejects typed holes), its
 # directory taken off the paths it names, against that file.
@@ -1220,7 +1248,7 @@ while read -r f; do
     fi
 done < <(grep -F "$here/cases/" "$work/cases-check.list")
 total=$((total + n)); identical=$((identical + same)); unlisted=$((unlisted + class_unlisted))
-check_summary="$check_summary\n$(printf '  %-12s %4d files, %4d as their .diag, .audit, .lint, .sir, .release or .tests expects, %3d otherwise' expected "$n" "$same" "$class_unlisted")"
+check_summary="$check_summary\n$(printf '  %-12s %4d files, %4d as their .diag, .audit, .lint, .sir, .sir-tests, .release or .tests expects, %3d otherwise' expected "$n" "$same" "$class_unlisted")"
 
 # The formatter: the text `sisu fmt` leaves of each file, what `sisu fmt
 # --check` prints of it and its status, against stage 1's `fmt-batch`; and

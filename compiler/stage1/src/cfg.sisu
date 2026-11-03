@@ -17,8 +17,9 @@
 
 from stage1.diag import Catalog, TextRange
 from stage1.parser import parse
-from stage1.syntax.ast import Ast, Attr, ExprId, ExprKind, FnDef, ItemId, ItemKind, Module, Name
+from stage1.syntax.ast import Ast, Attr, ExprId, ExprKind, FieldDef, FnDef, ItemId, ItemKind, Module, Name
 from stage1.syntax.ast import UnOp
+from stage1.syntax.ast import VariantDef
 from stage1.syntax.ast import build
 
 ## A package's features: those its `[features]` declares, and those that
@@ -170,6 +171,26 @@ impl Filter:
                     imp.methods = self.methods(ast, imp.methods)
                 case ItemKind.Trait(t):
                     t.methods = self.methods(ast, t.methods)
+                # A struct's fields and methods, and an enum's variants and
+                # methods, as an impl's methods (RULES.md, R44).
+                case ItemKind.Struct(s):
+                    s.methods = self.methods(ast, s.methods)
+                    var fields: list[FieldDef] = []
+                    for f in s.fields:
+                        if self.kept(ast, f.attrs):
+                            fields.push(f.copy())
+                        else:
+                            self.left_out.push(f.node)
+                    s.fields = fields
+                case ItemKind.Enum(e) | ItemKind.ErrorSet(e):
+                    e.methods = self.methods(ast, e.methods)
+                    var variants: list[VariantDef] = []
+                    for v in e.variants:
+                        if self.kept(ast, v.attrs):
+                            variants.push(v.copy())
+                        else:
+                            self.left_out.push(v.node)
+                    e.variants = variants
                 case _:
                     pass
             ast.items[id.index].kind = kind
@@ -211,6 +232,18 @@ pure def affected(ast: Ast, items: list[ItemId], tests: bool) -> bool:
             case ItemKind.Trait(t):
                 if methods_have_cfg(t.methods):
                     return True
+            case ItemKind.Struct(s):
+                if methods_have_cfg(s.methods):
+                    return True
+                for f in s.fields:
+                    if has_cfg(f.attrs):
+                        return True
+            case ItemKind.Enum(e) | ItemKind.ErrorSet(e):
+                if methods_have_cfg(e.methods):
+                    return True
+                for v in e.variants:
+                    if has_cfg(v.attrs):
+                        return True
             case _:
                 pass
     return False

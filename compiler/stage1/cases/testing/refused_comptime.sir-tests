@@ -1,0 +1,9 @@
+--- stderr
+error[E0603]: the compile-time evaluation in `LONGEST` used up its budget of 10000 steps; raise it with `@comptime_budget(steps=N)` on `LONGEST`
+  --> refused_comptime.sisu:24:22
+   |
+24 | const LONGEST: int = comptime longest_below(1000)
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+error: Failed
