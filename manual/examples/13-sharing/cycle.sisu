@@ -1,0 +1,16 @@
+# Two `Shared` values that own each other are never dropped.
+struct Person:
+    name: String
+    friend: Cell[Shared[Person]?]
+
+impl Drop for Person:
+    def drop(mut self):
+        print("{self.name} is dropped")
+
+def main():
+    let aino = Shared(Person("Aino", Cell(None)))
+    let eero = Shared(Person("Eero", Cell(None)))
+    aino.friend.set(Some(eero.copy()))
+    eero.friend.set(Some(aino.copy()))
+    print("{Shared.count(aino)} owners of Aino")
+    print("the end of main")

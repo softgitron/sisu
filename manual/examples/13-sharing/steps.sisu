@@ -1,0 +1,17 @@
+# The compiler boxes a recursive type; `Box` puts a value on the heap.
+struct Step:
+    text: String
+    next: Step?
+
+def count(step: Step) -> int:
+    return match step.next:
+        case Some(rest): 1 + count(rest)
+        case None: 1
+
+def main():
+    let wait = Step("wait", None)
+    let tea = Step("boil water", Some(Step("add the leaves", Some(wait))))
+    print("{count(tea)} steps, starting with {tea.text}")
+    let boxed = Box(Step("pour", None))
+    let moved = boxed
+    print("then {moved.text}: {count(moved.boxed)} step")

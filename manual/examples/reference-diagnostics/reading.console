@@ -1,0 +1,14 @@
+$ sisu run e0200_misspelt.sisu
+error[E0200]: cannot find `prnt` in this scope
+  --> e0200_misspelt.sisu:3:5
+  |
+3 |     prnt("Hei, maailma!")
+  |     ^^^^
+  = fix: a similar name is in scope: `print`
+
+error[D0006]: the program was not run: errors found (1)
+$ sisu check --format=ids e0200_misspelt.sisu
+3:5-3:9 E0200 resolve.undefined-name name="prnt"
+  fix resolve.similar-name 3:5-3:9 "print"
+$ sisu explain E0200
+E0200 (error) resolve.undefined-name: cannot find `{name}` in this scope

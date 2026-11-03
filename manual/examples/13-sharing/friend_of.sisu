@@ -1,0 +1,19 @@
+# `upgrade` gives a `Weak` handle's value, while an owner keeps it.
+struct Person:
+    name: String
+    friend: Weak[Person]?
+
+impl Drop for Person:
+    def drop(mut self):
+        print("{self.name} is dropped")
+
+def friend_of(person: Shared[Person]) -> String:
+    if let Some(handle) = person.friend, let Some(friend) = handle.upgrade():
+        return "{person.name}'s friend is {friend.name}"
+    return "{person.name} has no friend here"
+
+def main():
+    let eero = Shared(Person("Eero", None))
+    let aino = Shared(Person("Aino", Some(Shared.downgrade(eero))))
+    print(friend_of(aino))
+    print("{Shared.count(eero)} owner of Eero")

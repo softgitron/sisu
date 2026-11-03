@@ -1,0 +1,28 @@
+# A draft that is never saved or discarded.
+error SaveError:
+    Empty
+
+@must_consume
+struct Draft:
+    text: String
+
+    ## Saves the draft into `saved`, which ends it; this can fail.
+    def save(own self, mut saved: list[String]) -> ! SaveError:
+        if self.text.is_empty():
+            return Err(Empty)
+        saved.push(self.text)
+        return Ok(())
+
+    ## Throws the draft away, which ends it too.
+    def discard(own self):
+        pass
+
+def main():
+    var saved: list[String] = []
+    let letter = Draft("Hei Aino")
+    let note = Draft("")
+    let scrap = Draft("a first try")
+    print(letter.save(mut saved))
+    print(note.save(mut saved))
+    print(scrap.text)
+    print(saved)

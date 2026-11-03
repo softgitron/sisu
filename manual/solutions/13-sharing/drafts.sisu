@@ -1,0 +1,48 @@
+##! Exercise 13.2, every draft. Kind: fix. Level: 2.
+##!
+##! A `Draft` must be saved or discarded, and `save_all` saves a list of
+##! them. The file does not compile. Run `sisu test drafts.sisu`, read
+##! the diagnostic, and fix `save_all`, not `Draft` or the tests, so that
+##! every test passes. The hints are in chapter 13 of the tutorial, under
+##! "Exercise 13.2: every draft".
+
+error SaveError:
+    Empty(position: int)
+
+## A text that must be saved or discarded before it goes away.
+@must_consume
+struct Draft:
+    text: String
+
+    ## Saves the draft into `saved`, which ends it; an empty draft cannot
+    ## be saved, and ends unsaved.
+    def save(own self, mut saved: list[String]) -> bool:
+        if self.text.is_empty():
+            return False
+        saved.push(self.text)
+        return True
+
+## Saves each of `drafts` into `saved`, in order. A draft that cannot
+## be saved does not stop the others; the result is the error for the
+## first of them, with its position in the list, counted from 0.
+def save_all(own drafts: list[Draft], mut saved: list[String]) -> ! SaveError:
+    var first_empty: int? = None
+    var position = 0
+    for draft in own drafts:
+        if not draft.save(mut saved) and first_empty.is_none():
+            first_empty = Some(position)
+        position += 1
+    if let Some(i) = first_empty:
+        return Err(Empty(i))
+    return Ok(())
+
+test "every draft is saved":
+    var saved: list[String] = []
+    assert save_all([Draft("a"), Draft("b")], mut saved) == Ok(())
+    assert saved == ["a", "b"]
+
+test "an empty draft does not stop the others":
+    var saved: list[String] = []
+    let drafts = [Draft("a"), Draft(""), Draft("c"), Draft("")]
+    assert save_all(drafts, mut saved) == Err(Empty(1))
+    assert saved == ["a", "c"]

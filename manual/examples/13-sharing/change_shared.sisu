@@ -1,0 +1,17 @@
+# A service tries to change the config it shares.
+struct Config:
+    region: String
+    retries: int
+
+struct Service:
+    name: String
+    config: Shared[Config]
+
+def main():
+    let config = Shared(Config("north", 3))
+    let web = Service("web", config.copy())
+    let mail = Service("mail", config.copy())
+    web.config.retries = 5
+    print("{Shared.count(config)} owners of one config")
+    print("{web.name} retries {web.config.retries} times")
+    print("{mail.name} runs in the {mail.config.region}")

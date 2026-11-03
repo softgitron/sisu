@@ -1,0 +1,16 @@
+# A `Cell` holds a value that every owner of a `Shared` can replace.
+struct Page:
+    path: String
+    visits: Shared[Cell[int]]
+
+def visit(page: Page):
+    page.visits.set(page.visits.get() + 1)
+
+def main():
+    let total = Shared(Cell(0))
+    let home = Page("/", total.copy())
+    let news = Page("/news", total.copy())
+    visit(home)
+    visit(news)
+    visit(news)
+    print("{total.get()} visits in all")

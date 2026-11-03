@@ -1,0 +1,16 @@
+# A `Weak` handle does not own, so two people can point at each other.
+struct Person:
+    name: String
+    friend: Cell[Weak[Person]?]
+
+impl Drop for Person:
+    def drop(mut self):
+        print("{self.name} is dropped")
+
+def main():
+    let aino = Shared(Person("Aino", Cell(None)))
+    let eero = Shared(Person("Eero", Cell(None)))
+    aino.friend.set(Some(Shared.downgrade(eero)))
+    eero.friend.set(Some(Shared.downgrade(aino)))
+    print("{Shared.count(aino)} owner of Aino")
+    print("the end of main")

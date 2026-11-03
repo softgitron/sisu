@@ -1,0 +1,67 @@
+##! Exercise 13.1, predict the owners. Kind: predict. Level: 1.
+##!
+##! Each constant is your prediction of what a function returns. Write
+##! each as a literal, then run `sisu test predict_owners.sisu`. The
+##! hints are in chapter 13 of the tutorial, under "Exercise 13.1:
+##! predict the owners".
+
+struct Song:
+    title: String
+
+def owners_after_copies() -> int:
+    let song = Shared(Song("Lake Song"))
+    let first = song.copy()
+    let second = first.copy()
+    return Shared.count(song)
+
+def owners_after_a_loop() -> int:
+    let song = Shared(Song("Lake Song"))
+    for _ in range(3):
+        let copy = song.copy()
+    return Shared.count(song)
+
+def owners_in_a_list() -> int:
+    let song = Shared(Song("Lake Song"))
+    let playlist = [song.copy(), song.copy()]
+    return Shared.count(playlist[1])
+
+def owners_with_a_weak_handle() -> int:
+    let song = Shared(Song("Lake Song"))
+    let handle = Shared.downgrade(song)
+    return Shared.count(song)
+
+def handle_of_a_dropped_song() -> Weak[Song]:
+    let song = Shared(Song("Lake Song"))
+    return Shared.downgrade(song)
+
+def plays() -> int:
+    let plays = Shared(Cell(0))
+    let other = plays.copy()
+    plays.set(plays.get() + 1)
+    other.set(other.get() + 1)
+    return plays.get()
+
+const COPIES: int = 3
+const LOOP: int = 1
+const LIST: int = 3
+const WEAK: int = 1
+const STILL_THERE: bool = False
+const PLAYS: int = 2
+
+test "copies":
+    assert owners_after_copies() == COPIES
+
+test "a loop":
+    assert owners_after_a_loop() == LOOP
+
+test "a list":
+    assert owners_in_a_list() == LIST
+
+test "a weak handle":
+    assert owners_with_a_weak_handle() == WEAK
+
+test "a dropped song":
+    assert handle_of_a_dropped_song().upgrade().is_some() == STILL_THERE
+
+test "a shared cell":
+    assert plays() == PLAYS
