@@ -44,3 +44,5 @@ jobs:
         run: ./target/debug/sisu-conformance --sisu target/debug/sisu ../manual/solutions
       - name: Pages, sessions, exercises and sources
         run: python3 ../manual/tools/check.py --sisu target/debug/sisu
+      - name: Links and anchors
+        run: python3 ../manual/tools/check_links.py

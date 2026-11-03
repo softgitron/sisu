@@ -6,7 +6,6 @@
 
 trait Shape:
     def area(self) -> int
-    def consume(own self) -> int
 
 struct Square:
     side: int
@@ -15,6 +14,8 @@ struct Square:
 impl Shape for Square:
     def area(self) -> int:
         return self.side * self.side
+
+impl Square:
     def consume(own self) -> int:
         return len(self.label)
 
@@ -94,13 +95,14 @@ def main():
                 total += 1
             case Ok(n):
                 total += n
-        # A box whose value moves into a `dyn`, a `dyn` whose value an
-        # `own self` method takes, and a box given a value again (decision
-        # 216).
+        # A box whose value moves into a `dyn`, a value an `own self`
+        # method takes (not through a `dyn`: a method callable through one
+        # takes `self` or `mut self`, E0241), and a box given a value again
+        # (decision 216).
         let b: Box[Square] = Box(Square(side=i, label="sq".to_string()))
         let d: Box[dyn Shape] = b
         total += d.area()
-        let g: Box[dyn Shape] = Box(Square(side=2, label="abc".to_string()))
+        let g = Square(side=2, label="abc".to_string())
         total += g.consume()
         var r = Box("one".to_string())
         let s = r.boxed

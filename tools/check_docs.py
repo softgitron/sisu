@@ -8,7 +8,7 @@ md = []
 for d, _, fs in os.walk(root):
     # Build output and the templates a generator fills in (manual/tools/*/tmpl)
     # are not documents.
-    if '.git' in d or 'target' in d.split(os.sep) or 'tmpl' in d.split(os.sep): continue
+    if '.git' in d or 'target' in d.split(os.sep): continue
     for f in fs:
         if f.endswith('.md'): md.append(os.path.join(d, f))
 qids = set(re.findall(r'^### (Q-\d+)\.', open(f'{root}/open-questions.md').read(), re.M))
