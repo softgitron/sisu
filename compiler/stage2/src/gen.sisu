@@ -27,9 +27,9 @@ from stage1.sir import (
     Terminator,
     Type,
 )
-from stage2.abi import WORD
-from stage2.layout import Types, arg, instance_key, named0
-from stage2.lir import Fb, LirError, in_function, internal, quote_bytes, text_bytes, unsupported
+from stage2.facts import Facts, State
+from stage2.layout import Types, instance_key, named0
+from stage2.lir import Fb, LirError, in_function, internal, quote_bytes, quote_text, text_bytes, unsupported
 
 ## What a call through a trait runs.
 @derive(Eq)
@@ -130,9 +130,13 @@ pub struct Fx:
     ## The slot of each local whose iterator lives in the frame.
     pub frames: list[int?]
     ## The failed checks of the SIR block, written after its terminator.
-    pub deferred: list[(int, str, list[Arg])]
+    pub deferred: list[(int, String, list[Arg])]
     ## The blocks every path from which ends in a panic or in unwinding.
     pub cold: list[bool]
+    ## In the release profile, what is known about the integers at each
+    ## point (decision 270), and the state before the statement lowered.
+    pub facts: Facts?
+    pub known: State?
 
 impl Fx:
     pub pure def empty() -> Fx:
@@ -155,6 +159,8 @@ impl Fx:
             frames=[],
             deferred=[],
             cold=[],
+            facts=None,
+            known=None,
         )
 
 ## What the lowering keeps across the functions of a program (stage 0's
@@ -205,6 +211,10 @@ pub struct Cg:
     pub env_needed: int
     ## The intrinsics by name.
     intrinsics: dict[String, int]
+    ## The descriptions of the debug information's types, by number, and
+    ## the number of each type described, by its text (`stage2.debug`).
+    pub dtypes: list[String]
+    pub dtype_ids: dict[String, int]
     ## The function being lowered: its builder and its state.
     pub b: Fb
     pub fx: Fx
@@ -254,6 +264,8 @@ impl Cg:
             tests_decided=0,
             env_needed=0,
             intrinsics=intrinsics,
+            dtypes=[],
+            dtype_ids={},
             b=Fb.new(0),
             fx=Fx.empty(),
         )
@@ -263,7 +275,7 @@ impl Cg:
         cg.site = cg.import_data(abi.SYM_SITE)
         return cg
 
-    pure def import_data(mut self, name: str) -> int:
+    pub pure def import_data(mut self, name: str) -> int:
         let d = self.data_count
         self.data_count += 1
         self.items.push(Item.Line("data d{d} import {name}"))
@@ -281,7 +293,7 @@ impl Cg:
             return Some(i)
         return None
 
-    pure def no_function[T](self, name: str) -> T ! LirError:
+    pub pure def no_function[T](self, name: str) -> T ! LirError:
         return internal("the program has no function `{name}`")
 
     ## The instance of `name` for these (concrete) type arguments, declared
@@ -361,7 +373,7 @@ impl Cg:
     ## Lowers everything the program needs: the queued instances, then what
     ## each dispatcher runs for each type its `dyn` holds a value of, until
     ## nothing is left; then writes the dispatchers.
-    pure def complete(mut self, p: Program) -> () ! LirError:
+    pub pure def complete(mut self, p: Program) -> () ! LirError:
         if self.dispatched:
             return self.drain(p)
         while True:
@@ -386,9 +398,10 @@ impl Cg:
                     if not tys.is_empty():
                         tys[0] = value_ty.copy()
                     let r = self.resolve_trait(p, name, tys)
-                    let (target, _) = match r:
-                        case Ok(x): x
-                        case Err(e): return Err(in_function(e, name))
+                    if let Err(e) = r:
+                        return Err(in_function(e, name))
+                    let Ok((target, _)) = r else:
+                        return internal("unreachable")
                     match target:
                         case Target.Fn(f, targs):
                             _ = self.instance(p, f, targs)?
@@ -409,7 +422,7 @@ impl Cg:
     ## Writes dispatcher `i`: a switch on the number of the type of the
     ## value the `dyn` holds, and for each type a call of what the call
     ## runs for it.
-    pure def define_dispatcher(mut self, p: Program, i: int) -> () ! LirError:
+    pub pure def define_dispatcher(mut self, p: Program, i: int) -> () ! LirError:
         let d = ref self.dispatchers[i]
         let symbol = d.symbol.copy()
         let dname = d.name.copy()
@@ -420,7 +433,8 @@ impl Cg:
         # What each case passes as `self`, and how: (callee, by_value,
         # count) for a method, the descriptor for an intrinsic.
         var calls: list[(String?, int?, int?, int)] = []
-        for (value_ty, _, target) in cases:
+        for (value_ty, _, case_target) in cases:
+            let target = case_target.copy()
             match target:
                 case Target.Fn(f, targs):
                     let fi = self.function(f) else:
@@ -485,10 +499,12 @@ impl Cg:
                     var me = 0
                     match by_value:
                         case None:
-                            me = b.stack_addr(b.create_slot(8))
+                            let ss = b.create_slot(8)
+                            me = b.stack_addr(ss)
                             b.store(value, me, 0)
                         case Some(size):
-                            me = b.stack_addr(b.create_slot(max(size, 8)))
+                            let ss = b.create_slot(max(size, 8))
+                            me = b.stack_addr(ss)
                             for w in range(size // 8):
                                 let x = b.load("i64", value, w * 8)
                                 b.store(x, me, w * 8)
@@ -500,9 +516,11 @@ impl Cg:
                         args.push(a)
                     status = b.call(callee, args, 1)[0]
                 case None:
-                    let me = b.stack_addr(b.create_slot(8))
+                    let ms = b.create_slot(8)
+                    let me = b.stack_addr(ms)
                     b.store(value, me, 0)
-                    let arr = b.stack_addr(b.create_slot(max(8 * n, 8)))
+                    let arr_slot = b.create_slot(max(8 * n, 8))
+                    let arr = b.stack_addr(arr_slot)
                     b.store(me, arr, 0)
                     for a in range(2, n + 1):
                         b.store(a, arr, 8 * (a - 1))
@@ -514,18 +532,26 @@ impl Cg:
 
     ## Defines a function: its LIR is the next item.
     pub pure def define(
-        mut self, symbol: str, frame: str, shown: str, source: (int, int)?, own b: Fb, own locals: list[DebugLocal]
+        mut self,
+        symbol: str,
+        frame: str,
+        shown: str,
+        source: (int, int)?,
+        own b: Fb,
+        own locals: list[DebugLocal],
     ):
-        var head = "{symbol} {frame} name {write.quote_lir(shown)}"
+        var head = "{symbol} {frame} name {quote_text(shown)}"
         if let Some((s, l)) = source:
             head.push(" source {s} line {l}")
         self.items.push(Item.Func(len(self.funcs)))
-        self.funcs.push(FnOut(head=head, slots=b.slots.copy(), vars=b.vars, locals=locals, body=b.out.copy()))
+        self.funcs.push(
+            FnOut(head=head, slots=b.slots.copy(), vars=b.vars, locals=locals, body=b.out.copy())
+        )
 
     ## Everything but `main`: the instances the entry reaches, the
     ## dispatchers and the drop glue; the entry's symbol, `main`'s flags
     ## and the number of the entry's result type.
-    pure def generate(mut self, p: Program, entry: Entry) -> (String, int, int) ! LirError:
+    pub pure def generate(mut self, p: Program, entry: Entry) -> (String, int, int) ! LirError:
         let main = self.instance(p, entry.function, [])?
         self.complete(p)?
         var ret = Type.Unit
@@ -540,7 +566,7 @@ impl Cg:
 
     ## Lowers every queued instance, and the drop glue the type table
     ## names, until nothing is left.
-    pure def drain(mut self, p: Program) -> () ! LirError:
+    pub pure def drain(mut self, p: Program) -> () ! LirError:
         while True:
             while len(self.glue_ids) < len(self.types.glue):
                 let (name, targs) = self.types.glue[len(self.glue_ids)].copy()
@@ -556,7 +582,9 @@ impl Cg:
             if let Err(e) = r:
                 return Err(in_function(e, name))
 
-    pure def compile_instance(mut self, p: Program, name: str, targs: list[Type], symbol: str) -> () ! LirError:
+    pub pure def compile_instance(
+        mut self, p: Program, name: str, targs: list[Type], symbol: str
+    ) -> () ! LirError:
         let fi = self.function(name) else:
             return self.no_function(name)
         let vars = self.translate(p, fi, targs)?
@@ -572,7 +600,7 @@ impl Cg:
         var line = 0
         if let Some(l) = f.loc:
             line = l.line
-        let b = self.b
+        let b = self.b.copy()
         self.b = Fb.new(0)
         self.define(symbol, "probed", shown, Some((f.source, line)), b, vars)
         self.compiled += 1
@@ -656,7 +684,7 @@ impl Cg:
             return Ok(t.copy())
         return self.resolve_assoc(p, t.subst(targs))
 
-    pure def resolve_assoc(self, p: Program, t: Type) -> Type ! LirError:
+    pub pure def resolve_assoc(self, p: Program, t: Type) -> Type ! LirError:
         match t:
             case Type.Assoc(base, tr, args, name):
                 let b = self.resolve_assoc(p, base[0])?
@@ -682,13 +710,15 @@ impl Cg:
             case Type.Ref(x, m):
                 return Ok(Type.Ref(inner=[self.resolve_assoc(p, x[0])?], mutable=m))
             case Type.Fn(ps, r, pure):
-                return Ok(Type.Fn(params=self.resolve_all(p, ps)?, ret=self.resolve_all(p, r)?, pure=pure))
+                return Ok(
+                    Type.Fn(params=self.resolve_all(p, ps)?, ret=self.resolve_all(p, r)?, pure=pure)
+                )
             case Type.Param(i):
                 return internal("the type parameter `${i}` has no argument")
             case _:
                 return Ok(t.copy())
 
-    pure def resolve_all(self, p: Program, ts: list[Type]) -> list[Type] ! LirError:
+    pub pure def resolve_all(self, p: Program, ts: list[Type]) -> list[Type] ! LirError:
         var out: list[Type] = []
         for t in ts:
             out.push(self.resolve_assoc(p, t)?)
@@ -697,15 +727,16 @@ impl Cg:
     ## A call through a capability handle (`cap.forward`): the operation of
     ## the object behind it (decisions 194 and 209). A `Lent` is its handle.
     pub pure def forward(
-        mut self, p: Program, name: str, handle: Type, own tys: list[Type], derefs: int
+        mut self, p: Program, name: str, handle: Type, own given: list[Type], derefs: int
     ) -> (Target, int) ! LirError:
+        var tys = given
         if let Type.Named(n, a) = handle:
             if n == "Lent" and len(a) == 1:
                 if not tys.is_empty():
                     tys[0] = a[0].copy()
                 let (target, more) = self.resolve_trait(p, name, tys)?
                 return Ok((target, derefs + more))
-        var host: str? = None
+        var host: String? = None
         var h = String.new()
         if let Type.Named(hn, a) = handle:
             if a.is_empty():
@@ -725,7 +756,10 @@ impl Cg:
     ## What a call through a trait runs for these (concrete) type
     ## arguments, and how many references its `Self` is behind
     ## (`sisu-interp/src/dispatch.rs`, at compile time).
-    pub pure def resolve_trait(mut self, p: Program, name: str, own tys: list[Type]) -> (Target, int) ! LirError:
+    pub pure def resolve_trait(
+        mut self, p: Program, name: str, own given: list[Type]
+    ) -> (Target, int) ! LirError:
+        var tys = given
         let (trait_name, method) = rsplit_dot(name) else:
             return internal("bad trait method `{name}`")
         if tys.is_empty():
@@ -787,7 +821,7 @@ impl Cg:
 
     ## C's `main`: hands the program's tables and its entry to
     ## `sisu_rt_start`.
-    pure def define_main(mut self, entry: str, flags: int, ret_ty: int) -> () ! LirError:
+    pub pure def define_main(mut self, entry: str, flags: int, ret_ty: int) -> () ! LirError:
         let table = abi.encode(self.types.table()?)
         let types_id = self.text(table)
         # The function table: the address of each glue instance.
@@ -827,7 +861,7 @@ impl Cg:
         var out = String.new("lir 1\n")
         out.push(if self.release: "profile release\n" else: "profile debug\n")
         for i in range(len(p.sources)):
-            out.push("source {i} {write.quote_lir(p.sources[i])}\n")
+            out.push("source {i} {quote_text(p.sources[i])}\n")
         let numbers = self.describe_locals()
         var k = 0
         for item in self.items:
@@ -842,7 +876,7 @@ impl Cg:
                         out.push("    slot s{s} {f.slots[s]}\n")
                     out.push("    vars {f.vars}\n")
                     for l in f.locals:
-                        out.push("    local {write.quote_lir(l.name)} t{numbers[k]} s{l.slot}")
+                        out.push("    local {quote_text(l.name)} t{numbers[k]} s{l.slot}")
                         k += 1
                         if l.indirect:
                             out.push(" indirect")
@@ -875,7 +909,6 @@ pub pure def lower(p: Program, release: bool) -> String ! LirError:
             continue
         cg.define_main(main, flags, ret_ty)?
         return Ok(cg.write_lir(p))
-    return unsupported("a program without `main`")
 
 ## The signature of the runtime's entry point `name` as LIR declares it.
 pub pure def runtime_signature(name: str) -> str?:
@@ -1001,9 +1034,9 @@ pub pure def match_type(pat: Type, ty: Type, mut binds: list[Type?]) -> bool:
             if let Type.Fn(qs, s, q) = ty:
                 return (
                     pure == q
-                    and len(ps) == len(qs)
-                    and match_pairs(ps, qs, mut binds)
-                    and match_type(r[0], s[0], mut binds)
+                        and len(ps) == len(qs)
+                        and match_pairs(ps, qs, mut binds)
+                        and match_type(r[0], s[0], mut binds)
                 )
             return False
         case Type.Dyn(n, a):
@@ -1126,7 +1159,7 @@ pub pure def reachable(p: Program) -> set[String]:
                         case _:
                             pass
             for x in found:
-                work.push(x)
+                work.push(x.copy())
         let after = (len(seen), count_objects(objects))
         if after == before:
             break
@@ -1157,7 +1190,9 @@ pure def operand_fn(o: Operand, mut out: list[String]):
         out.push(n.copy())
 
 ## What a call through `Trait.method` may run, as `reachable` finds it.
-pure def trait_targets(p: Program, n: str, tys: list[Type], objects: dict[String, list[Type]], mut found: list[String]):
+pure def trait_targets(
+    p: Program, n: str, tys: list[Type], objects: dict[String, list[Type]], mut found: list[String]
+):
     var tr = n
     var method = ""
     if let Some((a, b)) = rsplit_dot(n):
@@ -1185,7 +1220,7 @@ pure def trait_targets(p: Program, n: str, tys: list[Type], objects: dict[String
     match handle:
         case Some(objs):
             for o in objs:
-                impls_for(p, tr, method, Some(o), mut found)
+                impls_for(p, tr, method, Some(o.copy()), mut found)
         case None:
             var is_dyn = False
             if let Type.Dyn(_, _) = self_ty:

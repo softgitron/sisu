@@ -1,0 +1,46 @@
+##! Exercise 7.1, predict the matches. Kind: predict. Level: 1.
+##!
+##! Each constant is your prediction of the value of the expression in
+##! its test. Write each as a literal, then run
+##! `sisu test predict_matches.sisu`. The hints are in chapter 7 of the
+##! tutorial, under "Exercise 7.1: predict the matches".
+
+@derive(Copy, Eq, Ord)
+enum Size:
+    Small
+    Medium
+    Large
+
+@derive(Copy, Eq, Ord)
+struct Parcel:
+    size: Size
+    kilos: int = 1
+
+## The postage of `parcel`, in euros.
+def postage(parcel: Parcel) -> int:
+    return match parcel:
+        case Parcel(size=Small, ..): 3
+        case Parcel(kilos=k, ..) if k > 10: 20
+        case Parcel(Medium, _): 7
+        case _: 12
+
+const SMALL_AND_HEAVY: int = todo("a heavy small parcel")
+const MEDIUM_AND_HEAVY: int = todo("a heavy medium parcel")
+const LARGE: int = todo("a large parcel of the default weight")
+const SIZES: bool = todo("two sizes compared")
+const PARCELS: bool = todo("two parcels compared")
+
+test "a heavy small parcel":
+    assert postage(Parcel(Small, 30)) == SMALL_AND_HEAVY
+
+test "a heavy medium parcel":
+    assert postage(Parcel(Medium, 15)) == MEDIUM_AND_HEAVY
+
+test "a large parcel of the default weight":
+    assert postage(Parcel(Large)) == LARGE
+
+test "two sizes compared":
+    assert (Large > Small) == SIZES
+
+test "two parcels compared":
+    assert (Parcel(Medium, 2) < Parcel(Small, 9)) == PARCELS

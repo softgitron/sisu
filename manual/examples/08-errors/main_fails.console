@@ -1,0 +1,4 @@
+$ sisu run main_fails.sisu
+70 left after the first
+error: TooLittle(balance=70, wanted=80)
+  at main_fails.sisu:13:16

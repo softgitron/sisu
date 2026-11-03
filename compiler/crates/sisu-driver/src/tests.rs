@@ -102,6 +102,47 @@ fn run_from_sir_interprets_the_program_with_its_arguments() {
     let (code, host) = cli(&["build", "--from-sir", &s]);
     assert_eq!(code, crate::cli::EXIT_USAGE);
     assert!(host.err.contains("error[D0110]"), "{}", host.err);
+    // LIR, stage 2's lowering of SIR, is compiled by the native backend
+    // and nothing else (decision 284).
+    for cmd in ["build", "run"] {
+        let (code, host) = cli(&[cmd, "--from-lir", &s]);
+        assert_eq!(code, crate::cli::EXIT_USAGE, "{cmd}");
+        assert!(host.err.contains("error[D0119]"), "{cmd}: {}", host.err);
+    }
+}
+
+/// `sisu sir --tests` prints the program `sisu test` and `sisu bench` run,
+/// with each test's tags and the benchmarks, and `sisu test --from-sir`
+/// and `sisu bench --from-sir` run them as the program's source runs them
+/// (decision 285).
+#[test]
+fn tests_and_benches_run_from_sir() {
+    let f = temp_file(
+        "with_tests.sisu",
+        "def double(x: int) -> int:\n    return x * 2\n\ntest \"doubles\":\n    assert double(2) == 4\n\nsuite \"edges\":\n    @tag(\"slow\")\n    test \"zero\":\n        assert double(0) == 0\n\nbench \"doubling\":\n    _ = double(21)\n",
+    );
+    let (code, host) = cli(&["sir", "--tests", &f]);
+    assert_eq!(code, 0, "{}", host.err);
+    assert!(host.out.contains("\ntest \"doubles\" test#0\ntest \"edges/zero\" test#1 tags \"slow\"\nbench \"doubling\" bench#0\n"), "{}", host.out);
+    // Without `--tests`, the program is built without them, as before.
+    let (_, plain) = cli(&["sir", &f]);
+    assert!(!plain.out.contains("\ntest ") && !plain.out.contains("\nbench "), "{}", plain.out);
+    let s = temp_file("with_tests.sir", &host.out);
+    let (code, from_source) = cli(&["test", "--no-cache", &f]);
+    assert_eq!(code, 0, "{}", from_source.err);
+    let (code, from_sir) = cli(&["test", "--from-sir", &s]);
+    assert_eq!(code, 0, "{}", from_sir.err);
+    assert_eq!(from_sir.out, from_source.out);
+    let (code, tagged) = cli(&["test", "--from-sir", &s, "--tag", "slow"]);
+    assert_eq!(code, 0, "{}", tagged.err);
+    assert!(
+        tagged.out.contains("test \"edges/zero\" ... ok") && !tagged.out.contains("\"doubles\""),
+        "{}",
+        tagged.out
+    );
+    let (code, bench) = cli(&["bench", "--from-sir", &s, "--iterations", "3"]);
+    assert_eq!(code, 0, "{}", bench.err);
+    assert!(bench.out.starts_with("bench \"doubling\" ... 3 iterations"), "{}", bench.out);
 }
 
 #[test]

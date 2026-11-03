@@ -1,0 +1,18 @@
+# `type` gives an existing type a second name.
+type Row = list[int]
+type Grid = list[Row]
+type Metres = f64
+type Seconds = f64
+
+def total(grid: Grid) -> int:
+    var so_far = 0
+    for row in grid:
+        so_far += sum(row)
+    return so_far
+
+def main():
+    let grid: Grid = [[1, 2, 3], [4, 5, 6]]
+    print("the grid adds up to {total(grid)}")
+    let distance: Metres = 100.0
+    let time: Seconds = 9.58
+    print("metres plus seconds: {distance + time}")

@@ -1,0 +1,10 @@
+$ counter --top 3 poem.txt
+   6  the
+   5  is
+   3  lake
+$ counter --top 2 --min-length 4 poem.txt
+   3  lake
+   3  sauna
+$ counter --min-length 5 poem.txt
+   3  sauna
+   1  after

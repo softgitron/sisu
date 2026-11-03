@@ -1,0 +1,31 @@
+##! Exercise 7.2, the area of a shape. Kind: fix. Level: 1.
+##!
+##! `area` was written before `Shape` had triangles, and the file does
+##! not compile. Run `sisu test shape_area.sisu`, read the diagnostic,
+##! and fix `area` so that every test passes. The hints are in chapter
+##! 7 of the tutorial, under "Exercise 7.2: the area of a shape".
+
+from std.math import PI
+
+enum Shape:
+    Circle(radius: f64)
+    Rectangle(width: f64, height: f64)
+    Triangle(base: f64, height: f64)
+
+## The area of `shape`.
+def area(shape: Shape) -> f64:
+    return match shape:
+        case Circle(radius): PI * radius * radius
+        case Rectangle(width, height): width * height
+
+test "circles":
+    assert area(Circle(radius=1.0)) == PI
+    assert area(Circle(radius=2.0)) == 4.0 * PI
+
+test "rectangles":
+    assert area(Rectangle(width=3.0, height=2.0)) == 6.0
+    assert area(Rectangle(width=0.5, height=8.0)) == 4.0
+
+test "triangles":
+    assert area(Triangle(base=4.0, height=3.0)) == 6.0
+    assert area(Triangle(base=5.0, height=2.0)) == 5.0

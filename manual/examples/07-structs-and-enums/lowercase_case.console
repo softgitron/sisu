@@ -1,0 +1,14 @@
+$ sisu run lowercase_case.sisu
+warning[W0003]: this `case` arm is unreachable; the arms above it cover every value it matches
+  --> lowercase_case.sisu:10:14
+   |
+10 |         case Amber: "wait"
+   |              ^^^^^
+
+warning[W0003]: this `case` arm is unreachable; the arms above it cover every value it matches
+  --> lowercase_case.sisu:11:14
+   |
+11 |         case Red: "stop"
+   |              ^^^
+
+go

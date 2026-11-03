@@ -21,9 +21,9 @@ from stage1.sir import (
     ImplDecl,
     ImplTarget,
     IntrinsicDecl,
+    Loc,
     LocalDecl,
     LocalId,
-    Loc,
     Operand,
     Place,
     Program,
@@ -35,8 +35,8 @@ from stage1.sir import (
     Type,
     TypeDecl,
     UnOp,
-    VariantDecl,
     VERSION,
+    VariantDecl,
 )
 
 ## Why the text is not SIR: the line (from 1) and what was wrong there.
@@ -66,9 +66,7 @@ pure def is_hex(b: int) -> bool:
 ## of a character beyond ASCII (Rust's `is_alphanumeric` holds for the
 ## letters among them, which are all a name may hold).
 pure def is_word(b: int) -> bool:
-    return (
-        is_digit(b) or (b >= 97 and b <= 122) or (b >= 65 and b <= 90) or b == 95 or b >= 128
-    )
+    return (is_digit(b) or (b >= 97 and b <= 122) or (b >= 65 and b <= 90) or b == 95 or b >= 128)
 
 impl Cur:
     pure def byte(self, i: int) -> int:
@@ -708,7 +706,9 @@ pure def starts_at(text: str, s: int, e: int, t: str) -> bool:
 
 ## A line before the functions: the header, a source, the entry, a test,
 ## an intrinsic or a trait method, an impl, a struct or an enum.
-pure def header_line(mut c: Cur, mut p: Program, text: str, s: int, e: int, header: bool) -> () ! LineError:
+pure def header_line(
+    mut c: Cur, mut p: Program, text: str, s: int, e: int, header: bool
+) -> () ! LineError:
     if header:
         let v = c.uint()?
         if v != VERSION:
@@ -737,6 +737,21 @@ pure def header_line(mut c: Cur, mut p: Program, text: str, s: int, e: int, head
         let name = c.string()?
         let f = c.name()?
         p.tests.push((name, f))
+        # A test's `tags` (decision 285), which stage 1's SIR types do not
+        # hold yet: read and left out.
+        if c.eat("tags"):
+            while not c.at_end():
+                _ = c.string()?
+        if not c.at_end():
+            return wrong("unexpected `{c.rest()}`")
+        return Ok(())
+    if c.eat("bench "):
+        # A benchmark (decision 285), which stage 1's SIR types do not hold
+        # yet: read and left out.
+        _ = c.string()?
+        _ = c.name()?
+        if not c.at_end():
+            return wrong("unexpected `{c.rest()}`")
         return Ok(())
     let method = starts_at(text, s, e, "method ")
     if c.eat("intrinsic ") or c.eat("method "):
@@ -748,7 +763,9 @@ pure def header_line(mut c: Cur, mut p: Program, text: str, s: int, e: int, head
         let keeps = c.indices("keeps")?
         if not c.at_end():
             return wrong("unexpected `{c.rest()}`")
-        let d = IntrinsicDecl(name=name, pure=pure, from_=from_, inner=inner, owns=owns, keeps=keeps)
+        let d = IntrinsicDecl(
+            name=name, pure=pure, from_=from_, inner=inner, owns=owns, keeps=keeps
+        )
         if method:
             p.trait_methods.push(d)
         else:
@@ -1006,7 +1023,9 @@ pure def body_line(text: str, s: int, e: int, mut f: Function, open: bool) -> bo
         let id = c.block_id()?
         if id.index != len(f.blocks):
             return wrong("blocks must be numbered in order")
-        var b = BasicBlock(stmts=[], term=Terminator.Unreachable, unwind=None, cleanup=False, loc=None)
+        var b = BasicBlock(
+            stmts=[], term=Terminator.Unreachable, unwind=None, cleanup=False, loc=None
+        )
         if c.eat("(cleanup)"):
             b.cleanup = True
         elif c.eat("(unwind "):

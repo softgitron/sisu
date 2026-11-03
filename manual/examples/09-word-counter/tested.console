@@ -1,0 +1,4 @@
+$ sisu test
+test "a word counts in any case" ... ok
+test "every file counts" ... ok
+2 passed, 0 failed, 0 blocked

@@ -1,0 +1,9 @@
+##! wordcount: counts the words in text files.
+
+def main(sys: System) -> ! IoError:
+    for arg in sys.env.args():
+        let path = Path.new(arg)
+        let text = sys.fs.read_to_string(path)?
+        let words = text.split_whitespace().count()
+        print("{words} words in {path}")
+    return Ok(())

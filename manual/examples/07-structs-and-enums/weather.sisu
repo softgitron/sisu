@@ -1,0 +1,18 @@
+# A variant can carry values, by position or by name.
+enum Weather:
+    Sunny
+    Rain(f64)
+    Fog(metres: int)
+    Snow(cm: int, wet: bool)
+
+def report(weather: Weather) -> String:
+    return match weather:
+        case Sunny: "sunny"
+        case Rain(mm): "rain, {mm} mm"
+        case Fog(metres): "fog, {metres} m to see"
+        case Snow(cm, wet): "snow, {cm} cm, wet: {wet}"
+
+def main():
+    let week = [Sunny, Rain(2.5), Fog(metres=200), Snow(cm=10, wet=False)]
+    for day in week:
+        print(report(day))

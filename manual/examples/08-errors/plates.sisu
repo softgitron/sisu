@@ -1,0 +1,6 @@
+# `while let` repeats for as long as there is a value.
+def main():
+    var plates = ["blue", "green", "red"]
+    while let Some(plate) = plates.pop():
+        print("washing the {plate} plate")
+    print("{len(plates)} plates left")

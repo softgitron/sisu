@@ -92,10 +92,10 @@ pub pure def capabilities() -> list[(str, str)]:
     ]
 
 ## The host's object behind the capability handle `h`, if `h` is one.
-pub pure def host_object(h: str) -> str?:
+pub pure def host_object(h: str) -> String?:
     for (c, o) in capabilities():
         if c == h:
-            return Some(o)
+            return Some(o.to_string())
     return None
 
 ## Whether `n` is a capability handle or the host's object behind one.
@@ -469,18 +469,18 @@ pub pure def encode(table: list[TypeEntry]) -> list[int]:
 pub pure def may_wait(i: int) -> bool:
     return (
         i == I_TASK_SCOPE
-        or i == I_TASK_RACE
-        or i == I_HANDLE_JOIN
-        or i == I_CANCELLATION_WAIT
-        or i == I_SENDER_SEND
-        or i == I_RECEIVER_RECV
-        or i == I_TIMER_WAIT
-        or i == I_SELECT_WAIT
-        or i == I_GEN_YIELD
-        or i == I_MUTEX_LOCK
-        or i == I_RW_LOCK_READ
-        or i == I_RW_LOCK_WRITE
-        or i == I_ITER_NEXT
+            or i == I_TASK_RACE
+            or i == I_HANDLE_JOIN
+            or i == I_CANCELLATION_WAIT
+            or i == I_SENDER_SEND
+            or i == I_RECEIVER_RECV
+            or i == I_TIMER_WAIT
+            or i == I_SELECT_WAIT
+            or i == I_GEN_YIELD
+            or i == I_MUTEX_LOCK
+            or i == I_RW_LOCK_READ
+            or i == I_RW_LOCK_WRITE
+            or i == I_ITER_NEXT
     )
 
 ## Whether argument `k` of intrinsic `i` is an `Iterable[T]` it takes
@@ -490,12 +490,12 @@ pub pure def takes_iterable(i: int, k: int) -> bool:
         return k < 2
     let first = (
         i == I_ENUMERATE
-        or i == I_REVERSED
-        or i == I_ITERABLE_LIST
-        or i == I_SORTED
-        or i == I_SUM
-        or i == I_ANY
-        or i == I_ALL
+            or i == I_REVERSED
+            or i == I_ITERABLE_LIST
+            or i == I_SORTED
+            or i == I_SUM
+            or i == I_ANY
+            or i == I_ALL
     )
     return first and k == 0
 

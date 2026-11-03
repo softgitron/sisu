@@ -1,0 +1,11 @@
+# `??` gives a default, and `?.` reads a field if the value is there.
+struct Player:
+    name: String
+    level: int
+
+def main():
+    let players = [Player("Aino", 7), Player("Eero", 3)]
+    let first = players.first()
+    let sixth = players.get(5)
+    print("{first?.level} {sixth?.level}")
+    print("{first?.level ?? 0} {sixth?.level ?? 0}")

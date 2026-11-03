@@ -210,7 +210,19 @@ so that what is compared is what Cranelift's optimisations do. With
 --from-sir NAME.sir ARGS...`), and compares standard output, the status
 and standard error as above, without the report of allocations: the path
 a self-hosted front end's SIR takes to be run rather than compiled.
-`cargo test -p sisu-driver --test native` runs the list all four ways,
+With `--native-from-lir LIST` it lowers each case's SIR, the file
+`--native-from-sir` builds, with stage 2 (`compiler/stage2`, the backend
+written in Sisu: `sisu2 lir NAME.sir --output NAME.lir`), builds the LIR
+with `sisu build --native --from-lir NAME.lir`, runs the executable and
+compares as above, and requires the executable to be byte for byte the
+one `--from-sir` builds from the same SIR, and the release profile's
+(`sisu2 lir --release`) the one `--release --from-sir` builds; a
+construct stage 2 does not lower yet fails the case with stage 2's
+message. Stage 2 is the
+executable `--sisu2 PATH` names, else the runner builds
+`ROOT/../../stage2` with the `sisu` it tests (`sisu build --native`)
+before the cases.
+`cargo test -p sisu-driver --test native` runs the list all five ways,
 and CI runs them on every push, each through the front end the executable
 uses (stage 1 by default, so a case built from source or from `sisu sir`
 is built from stage 1's SIR). `--native-survey
@@ -223,6 +235,7 @@ cargo run -p sisu-conformance -- --sisu target/debug/sisu --native conformance/n
 cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-from-sir conformance/native.list
 cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-release conformance/native.list
 cargo run -p sisu-conformance -- --sisu target/debug/sisu --interpreted-from-sir conformance/native.list
+cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-from-lir conformance/native.list
 cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-survey conformance/native.list
 ```
 

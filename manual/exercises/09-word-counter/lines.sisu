@@ -1,0 +1,24 @@
+##! Exercise 9.1, reading a file. Kind: fix. Level: 1.
+##!
+##! `line_count` counts the lines of a file, written the way a Python
+##! programmer would write it. The file does not compile. Run
+##! `sisu test lines.sisu`, read the diagnostics, and fix `line_count`
+##! so that every test passes. The hints are in chapter 9 of the
+##! tutorial, under "Exercise 9.1: reading a file".
+
+## The number of lines in the file at `path`, read from `fs`.
+def line_count(path: Path) -> int ! IoError:
+    let text = open(path).read()
+    return Ok(text.lines().count())
+
+test "a file of three lines":
+    let fs = Fs.in_memory({"notes.txt": "one\ntwo\nthree\n"})
+    assert line_count(fs, "notes.txt") == Ok(3)
+
+test "an empty file":
+    let fs = Fs.in_memory({"empty.txt": ""})
+    assert line_count(fs, "empty.txt") == Ok(0)
+
+test "a file that is not there":
+    let fs = Fs.in_memory({})
+    assert line_count(fs, "missing.txt") == Err(NotFound("missing.txt"))

@@ -292,6 +292,8 @@ fn sample() -> Program {
             },
         ],
         tests: vec![("a test".into(), "main".into())],
+        test_tags: vec![vec!["slow".into(), "net io".into()]],
+        benches: vec![("a bench".into(), "main".into())],
         trait_methods: vec![IntrinsicDecl {
             name: "Display.fmt".into(),
             pure: true,
@@ -335,6 +337,8 @@ fn write_read_round_trip() {
 fn text_form_is_readable() {
     let text = write(&sample());
     assert!(text.starts_with("sir 0\nsource 0 \"t.sisu\"\nentry main\n"));
+    // A test's tags, and a benchmark (decision 285).
+    assert!(text.contains("\ntest \"a test\" main tags \"slow\" \"net io\"\nbench \"a bench\" main\n"));
     assert!(text.contains("struct Point { x: f64 = Point#x, tags: list[str] }"));
     assert!(text.contains("view struct Token must_consume { text: str }"));
     assert!(text.contains("error E open must_consume { A, B(at: int, char) }"));

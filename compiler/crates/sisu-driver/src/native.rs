@@ -76,7 +76,7 @@ fn sources() -> sisu_codegen::Sources {
 }
 
 /// What the backend compiles: a SIR program, or the text of a LIR program
-/// (stage 2's lowering of one, decision 274).
+/// (stage 2's lowering of one, decision 284).
 #[derive(Clone, Copy)]
 pub(crate) enum Code<'a> {
     Sir(&'a sisu_sir::Program),
@@ -97,7 +97,8 @@ pub(crate) fn build(code: Code<'_>, output: &Path, profile: Profile, host: &mut 
             // A LIR program says its own profile.
             let profile = Profile::of(sisu_codegen::lir_is_release(text));
             let start = std::time::Instant::now();
-            let compiled = sisu_codegen::compile_lir(text, &sources()).map_err(|e| report(e, output, host))?;
+            let compiled =
+                sisu_codegen::compile_lir(text, &sources()).map_err(|e| report(e, output, host))?;
             return link(&compiled, start.elapsed(), &runtime, output, profile, host);
         }
     };

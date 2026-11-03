@@ -1,0 +1,19 @@
+# Methods are functions in the struct's body that take `self`.
+struct Point:
+    x: f64
+    y: f64
+
+    def distance(self, other: Point) -> f64:
+        let dx = self.x - other.x
+        let dy = self.y - other.y
+        return (dx * dx + dy * dy).sqrt()
+
+    def shift(self, dx: f64, dy: f64):
+        self.x += dx
+        self.y += dy
+
+def main():
+    let home = Point(x=0.0, y=0.0)
+    var boat = Point(x=0.0, y=0.0)
+    boat.shift(3.0, 4.0)
+    print("the boat is {boat.distance(home)} from home")

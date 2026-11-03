@@ -1,0 +1,11 @@
+# `@derive` gives a struct comparisons and copies, field by field.
+struct Version:
+    major: int
+    minor: int
+
+def main():
+    let installed = Version(1, 4)
+    let wanted = installed
+    print("{installed == wanted} {installed < Version(2, 0)}")
+    print("{sorted([Version(1, 10), Version(0, 9), Version(1, 2)])}")
+    print("{len({installed, wanted})} different versions")

@@ -42,8 +42,16 @@ pub(crate) enum Item {
     Import(String),
     /// `data dN [align A] (bytes|u32|zeros) ...`: read-only data, with the
     /// words that hold functions' addresses.
-    Data { bytes: Vec<u8>, align: Option<u64>, funcs: Vec<(u32, String)> },
-    Declare { symbol: String, linkage: cranelift_module::Linkage, sig: Sig },
+    Data {
+        bytes: Vec<u8>,
+        align: Option<u64>,
+        funcs: Vec<(u32, String)>,
+    },
+    Declare {
+        symbol: String,
+        linkage: cranelift_module::Linkage,
+        sig: Sig,
+    },
     Function(Box<Func>),
 }
 
@@ -108,12 +116,13 @@ pub(crate) enum Bin {
     Fdiv,
 }
 
+/// An operation with a constant operand (`iadd_imm` and the others).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Imm {
-    IaddImm,
-    ImulImm,
-    BxorImm,
-    BorImm,
+    Iadd,
+    Imul,
+    Bxor,
+    Bor,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -184,18 +193,22 @@ pub(crate) enum Op {
     Trap(u8),
 }
 
+/// A struct's or a variant's fields as LIR describes them: each one's
+/// name, the number of its type's description, and its offset.
+pub(crate) type DFields = Vec<(String, u32, u32)>;
+
 /// The description of a Sisu type for the debug information
 /// (`compiler/stage2/README.md`, "Debug types").
 #[derive(Clone, Debug)]
 pub(crate) enum DType {
     Base { name: String, encoding: gimli::DwAte, size: u32 },
     Str,
-    Struct { name: String, size: u32, fields: Vec<(String, u32, u32)> },
+    Struct { name: String, size: u32, fields: DFields },
     Tuple { name: String, size: u32, items: Vec<(u32, u32, u32)> },
     Pointer { name: String, to: u32 },
     Text { name: String, size: u32 },
     List { name: String, size: u32, slice: String, elem: u32 },
-    Enum { name: String, size: u32, tag: u32, head: Vec<(String, u32)>, variants: Vec<(String, Vec<(String, u32, u32)>)> },
+    Enum { name: String, size: u32, tag: u32, head: Vec<(String, u32)>, variants: Vec<(String, DFields)> },
     ErrSet { name: String, size: u32, members: Vec<(u32, String, u32)> },
     Alias(u32),
     Opaque { name: String, size: u32 },
@@ -442,13 +455,8 @@ fn suffixed(w: &str) -> (&str, Option<&str>) {
 
 /// Reads the text form; an error names its line.
 pub(crate) fn read(text: &str) -> Result<Lir, Error> {
-    let mut r = Reader {
-        lir: None,
-        func: None,
-        next_value: 0,
-        data: 0,
-        params: std::collections::HashMap::new(),
-    };
+    let mut r =
+        Reader { lir: None, func: None, next_value: 0, data: 0, params: std::collections::HashMap::new() };
     for (i, line) in text.lines().enumerate() {
         let t = line.trim();
         if t.is_empty() || t.starts_with('#') {
@@ -591,8 +599,10 @@ impl Reader {
                 c.expect("line")?;
                 line = c.uint()?;
             }
-            self.next_value =
-                *self.params.get(&symbol).ok_or_else(|| format!("`{symbol}` is defined before it is declared"))?;
+            self.next_value = *self
+                .params
+                .get(&symbol)
+                .ok_or_else(|| format!("`{symbol}` is defined before it is declared"))?;
             self.func = Some(Func {
                 symbol,
                 frame,
@@ -726,10 +736,10 @@ impl Reader {
             }
             ("iadd_imm" | "imul_imm" | "bxor_imm" | "bor_imm", None) => {
                 let k = match op {
-                    "iadd_imm" => Imm::IaddImm,
-                    "imul_imm" => Imm::ImulImm,
-                    "bxor_imm" => Imm::BxorImm,
-                    _ => Imm::BorImm,
+                    "iadd_imm" => Imm::Iadd,
+                    "imul_imm" => Imm::Imul,
+                    "bxor_imm" => Imm::Bxor,
+                    _ => Imm::Bor,
                 };
                 let x = c.value()?;
                 c.expect(",")?;
@@ -925,7 +935,7 @@ fn dtype(c: &mut Cur<'_>) -> R<DType> {
         c.expect("@")?;
         c.uint()
     }
-    fn fields(c: &mut Cur<'_>) -> R<Vec<(String, u32, u32)>> {
+    fn fields(c: &mut Cur<'_>) -> R<DFields> {
         list(c, |c| {
             let n = c.text()?;
             let t = c.numbered(b't')?;

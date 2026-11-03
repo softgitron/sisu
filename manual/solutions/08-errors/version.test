@@ -1,0 +1,6 @@
+test "versions" ... ok
+test "an empty text" ... ok
+test "the wrong number of parts" ... ok
+test "a part that is not a number" ... ok
+test "versions in order" ... ok
+5 passed, 0 failed, 0 blocked

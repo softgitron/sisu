@@ -1,0 +1,47 @@
+$ sisu test counter.sisu
+warning[W0001]: typed hole `count_words` of type `dict[String, int]`
+  --> counter.sisu:40:12
+   |
+40 |     return todo("count_words")
+   |            ^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `top_words` of type `list[(String, int)]`
+  --> counter.sisu:44:12
+   |
+44 |     return todo("top_words")
+   |            ^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `main` of type `! {IoError, cli.Error}`
+  --> counter.sisu:47:12
+   |
+47 |     return todo("main")
+   |            ^^^^^^^^^^^^
+
+test "part 1, a minimum length/short words are left out" ... blocked by todo("count_words")
+test "part 1, a minimum length/every word counts in lower case" ... blocked by todo("count_words")
+test "part 2, punctuation/punctuation around a word" ... blocked by todo("count_words")
+test "part 2, punctuation/punctuation inside a word" ... blocked by todo("count_words")
+test "part 3, the top words/the most common first" ... blocked by todo("top_words")
+test "part 3, the top words/equal counts in alphabetical order" ... blocked by todo("top_words")
+transcript "tests/counter.transcript" ... FAILED
+
+transcript "tests/counter.transcript" ... FAILED
+what the program printed differs from the transcript (`sisu test --update` accepts it):
+  $ counter --top 3 poem.txt
+-    6  the
+-    5  is
+-    3  lake
++ panic: reached the typed hole `todo("main")`
++   at main (counter.sisu:47:12) (exit 101)
+  $ counter --top 2 --min-length 4 poem.txt
+-    3  lake
+-    3  sauna
++ panic: reached the typed hole `todo("main")`
++   at main (counter.sisu:47:12) (exit 101)
+  $ counter --min-length 5 poem.txt
+-    3  sauna
+-    1  after
++ panic: reached the typed hole `todo("main")`
++   at main (counter.sisu:47:12) (exit 101)
+
+0 passed, 1 failed, 6 blocked

@@ -475,12 +475,23 @@ fn lower_reaching(
             returns_result: matches!(&f.ret, Ty::Adt(d, _) if Some(*d) == prog.wk.result),
         })
     });
-    let tests: Vec<(String, String)> = prog
+    let has_body = |d: &&DefId| prog.fn_info(**d).is_some_and(|f| f.body.is_some());
+    let tests: Vec<(String, String)> =
+        prog.tests.iter().filter(has_body).map(|d| (prog.def(*d).name.clone(), ctx.fn_name(*d))).collect();
+    // Each test's `@tag`s and the benchmarks, which `sisu test --from-sir`
+    // and `sisu bench --from-sir` select and run (decision 285); the tags
+    // end at the last tagged test.
+    let mut test_tags: Vec<Vec<String>> = prog
         .tests
         .iter()
-        .filter(|d| prog.fn_info(**d).is_some_and(|f| f.body.is_some()))
-        .map(|d| (prog.def(*d).name.clone(), ctx.fn_name(*d)))
+        .filter(has_body)
+        .map(|d| prog.test_tags.get(d).cloned().unwrap_or_default())
         .collect();
+    while test_tags.last().is_some_and(Vec::is_empty) {
+        test_tags.pop();
+    }
+    let benches: Vec<(String, String)> =
+        prog.benches.iter().filter(has_body).map(|d| (prog.def(*d).name.clone(), ctx.fn_name(*d))).collect();
     // Keep what the entry, the tests and the root module's functions reach.
     let mut roots: Vec<String> = entry.iter().map(|e| e.function.clone()).collect();
     roots.extend(tests.iter().map(|(_, f)| f.clone()));
@@ -500,6 +511,9 @@ fn lower_reaching(
             roots.push(ctx.body_name(b));
         }
     }
+    // The benchmarks, after the rest, which a program of one module's
+    // already reached as the root module's functions.
+    roots.extend(benches.iter().map(|(_, f)| f.clone()));
     if every_body {
         let mut all: Vec<String> = bodies.keys().cloned().collect();
         all.sort();
@@ -511,7 +525,18 @@ fn lower_reaching(
     let intrinsics = intrinsic_decls(prog, &functions);
     let (trait_methods, impls) = trait_decls(&ctx, &functions);
     let sources = renumber_sources(&ctx.file_names, &mut functions);
-    sir::Program { sources, entry, types, intrinsics, functions, tests, trait_methods, impls }
+    sir::Program {
+        sources,
+        entry,
+        types,
+        intrinsics,
+        functions,
+        tests,
+        test_tags,
+        benches,
+        trait_methods,
+        impls,
+    }
 }
 
 /// The trait methods the functions call through `call trait`, with their

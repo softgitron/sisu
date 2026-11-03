@@ -1,0 +1,44 @@
+$ sisu test lines.sisu
+error[E0200]: cannot find `open` in this scope
+  --> lines.sisu:11:16
+   |
+11 |     let text = open(path).read()
+   |                ^^^^
+
+error[E0305]: wrong number of arguments to `line_count`: expected 1, found 2
+  --> lines.sisu:16:12
+   |
+16 |     assert line_count(fs, "notes.txt") == Ok(3)
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0300]: expected `Path`, found `Fs`
+  --> lines.sisu:16:23
+   |
+16 |     assert line_count(fs, "notes.txt") == Ok(3)
+   |                       ^^
+
+error[E0305]: wrong number of arguments to `line_count`: expected 1, found 2
+  --> lines.sisu:20:12
+   |
+20 |     assert line_count(fs, "empty.txt") == Ok(0)
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0300]: expected `Path`, found `Fs`
+  --> lines.sisu:20:23
+   |
+20 |     assert line_count(fs, "empty.txt") == Ok(0)
+   |                       ^^
+
+error[E0305]: wrong number of arguments to `line_count`: expected 1, found 2
+  --> lines.sisu:24:12
+   |
+24 |     assert line_count(fs, "missing.txt") == Err(NotFound("missing.txt"))
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0300]: expected `Path`, found `Fs`
+  --> lines.sisu:24:23
+   |
+24 |     assert line_count(fs, "missing.txt") == Err(NotFound("missing.txt"))
+   |                       ^^
+
+error[D0006]: the program was not run: errors found (7)

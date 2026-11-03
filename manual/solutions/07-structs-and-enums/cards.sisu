@@ -1,0 +1,46 @@
+##! Exercise 7.3, a hand of cards: the solution.
+##!
+##! `sorted` and `==` need `Ord` and `Eq`, which both types derive. A
+##! struct can derive them only when the types of its fields have them
+##! too, so `Suit` derives them as well (E0244). A derived order
+##! compares fields in the order they are declared, so `suit` comes
+##! before `rank`, and the variants of `Suit` are already in the order
+##! the game wants.
+
+@derive(Copy, Eq, Ord)
+enum Suit:
+    Clubs
+    Diamonds
+    Hearts
+    Spades
+
+## A playing card. `rank` is 2 to 10 for the number cards, and 11, 12,
+## 13 and 14 for the jack, queen, king and ace.
+@derive(Copy, Eq, Ord)
+struct Card:
+    suit: Suit
+    rank: int
+
+## `hand` sorted by suit, and by rank within a suit.
+def sort_hand(hand: list[Card]) -> list[Card]:
+    return sorted(hand)
+
+test "two cards of different suits":
+    let hand = [Card(rank=2, suit=Spades), Card(rank=14, suit=Clubs)]
+    let expected = [Card(rank=14, suit=Clubs), Card(rank=2, suit=Spades)]
+    assert sort_hand(hand) == expected
+
+test "a hand of four":
+    let hand = [
+        Card(rank=12, suit=Hearts),
+        Card(rank=3, suit=Spades),
+        Card(rank=9, suit=Diamonds),
+        Card(rank=2, suit=Hearts),
+    ]
+    let expected = [
+        Card(rank=9, suit=Diamonds),
+        Card(rank=2, suit=Hearts),
+        Card(rank=12, suit=Hearts),
+        Card(rank=3, suit=Spades),
+    ]
+    assert sort_hand(hand) == expected

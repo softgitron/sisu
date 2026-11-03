@@ -376,7 +376,9 @@ impl Types:
                 for i in range(len(caps)):
                     let (cap, _) = caps[i]
                     let ty = self.id(named0(cap))?
-                    fields.push(Field(name=Some(cap.to_lowercase()), offset=i * w, ty=ty, glue=False))
+                    fields.push(
+                        Field(name=Some(cap.to_lowercase()), offset=i * w, ty=ty, glue=False)
+                    )
                 return Ok(
                     TypeEntry(
                         size=len(caps) * w,
@@ -487,7 +489,9 @@ impl Types:
                     let (ty, size) = self.part(fields[i].ty.subst(args))?
                     out.push(Field(name=Some(fields[i].name.copy()), offset=off, ty=ty, glue=g))
                     off += size
-                return Ok(TypeEntry(size=off, kind=Kind.Struct(name=n.to_string(), fields=out, glue=glue)))
+                return Ok(
+                    TypeEntry(size=off, kind=Kind.Struct(name=n.to_string(), fields=out, glue=glue))
+                )
             case TypeDecl.Enum(_, _, variants, _, error_, _, _):
                 let start = if error_: abi.ERROR_PAYLOAD else: w
                 var vs: list[Variant] = []
@@ -550,7 +554,9 @@ impl Types:
                 return Ok(True)
             case Kind.Dict(_, _) | Kind.Set(_) | Kind.Dyn | Kind.Sender(_) | Kind.Receiver(_):
                 return Ok(True)
-            case Kind.Guard(_, _) | Kind.ReadGuard(_) | Kind.Shared(_) | Kind.Weak(_) | Kind.Arena(_):
+            case Kind.Guard(_, _) | Kind.ReadGuard(_) | Kind.Shared(_) | Kind.Weak(_) | Kind.Arena(
+                _
+            ):
                 return Ok(True)
             case Kind.Opaque(n):
                 return Ok(abi.counted_handle(n))

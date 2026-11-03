@@ -1,0 +1,3 @@
+test "two cards of different suits" ... ok
+test "a hand of four" ... ok
+2 passed, 0 failed, 0 blocked

@@ -1,0 +1,21 @@
+# Patterns nest, name fields, skip fields and test with `if`.
+struct Point:
+    x: int
+    y: int
+
+enum Shape:
+    Circle(center: Point, radius: int)
+    Square(corner: Point, side: int)
+
+def describe(shape: Shape) -> String:
+    return match shape:
+        case Circle(center=Point(x=0, y=0), ..): "a circle at the origin"
+        case Circle(radius=r, ..) if r > 10: "a big circle"
+        case Circle(Point(x, y), r): "a circle of radius {r} at {x}, {y}"
+        case Square(side=s, ..): "a square with sides of {s}"
+
+def main():
+    print(describe(Circle(Point(0, 0), 5)))
+    print(describe(Circle(Point(2, 3), 50)))
+    print(describe(Circle(Point(2, 3), 5)))
+    print(describe(Square(Point(1, 9), 2)))

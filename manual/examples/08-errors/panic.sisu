@@ -1,0 +1,6 @@
+# `expect` turns a missing value into a panic, for a bug in the program.
+def main():
+    let size = "42".parse_int().expect("the size is written in the code")
+    print("size {size}")
+    let count = "4x".parse_int().expect("the count is a number")
+    print("count {count}")

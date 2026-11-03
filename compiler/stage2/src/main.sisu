@@ -11,10 +11,10 @@
 ##! check.
 
 import stage1.sir.write
-import stage2.abi
-import stage2.layout
+import stage2.gen
 import stage2.lir
 import stage2.read
+from stage2.lir import LirError
 from stage2.read import ReadError
 
 error UsageError:
@@ -42,6 +42,20 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         return Err(Usage(text=usage()))
     let command = args[0].copy()
     let path = args[1].copy()
+    var release = False
+    var output: String? = None
+    var i = 2
+    while i < len(args):
+        if args[i] == "--release":
+            release = True
+        elif args[i] == "--output" and i + 1 < len(args):
+            output = Some(args[i + 1].to_string())
+            i += 1
+        else:
+            return Err(Usage(text=usage()))
+        i += 1
+    if command != "sir" and command != "lir":
+        return Err(Usage(text=usage()))
     let text = sys.fs.read_to_string(Path.new(path))?
     let r = read.read(text)
     if let Err(ReadError.Bad(line, message)) = r:
@@ -52,4 +66,22 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     if command == "sir":
         emit(write.write(prog))
         return Ok(())
-    return Err(Usage(text=usage()))
+    let lowered = gen.lower(prog, release)
+    if let Err(e) = lowered:
+        match e:
+            case LirError.Unsupported(what, function):
+                if function.is_empty():
+                    print_err("lir: not lowered: {what}")
+                else:
+                    print_err("lir: not lowered: {what} (in {function})")
+            case LirError.Internal(what):
+                print_err("lir: internal error: {what}")
+        return Err(Failed)
+    let Ok(lir_text) = lowered else:
+        return Err(Failed)
+    match output:
+        case Some(o):
+            sys.fs.write_text(Path.new(o), lir_text)?
+        case None:
+            emit(lir_text)
+    return Ok(())

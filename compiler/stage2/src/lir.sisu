@@ -50,7 +50,9 @@ pub struct Fb:
 impl Fb:
     ## A function of `params` parameters, before its entry block is made.
     pub pure def new(params: int) -> Fb:
-        return Fb(out=String.new(), values=params, blocks=0, slots=[], vars=0, cold=[], reserve=False)
+        return Fb(
+            out=String.new(), values=params, blocks=0, slots=[], vars=0, cold=[], reserve=False
+        )
 
     ## A line defining one value: its number.
     pure def def1(mut self, text: str) -> int:

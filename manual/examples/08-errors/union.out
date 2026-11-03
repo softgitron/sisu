@@ -1,0 +1,3 @@
+Ok(70)
+Err(NotANumber(text="lots"))
+Err(TooLittle(balance=70, wanted=80))

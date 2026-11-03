@@ -1,0 +1,24 @@
+##! Exercise 8.2, a scoreboard. Kind: fix. Level: 1.
+##!
+##! `total` adds up a scoreboard that has one score on each line. A line
+##! that is not a number, such as a note that a player did not finish,
+##! counts as 0. The file does not compile. Run
+##! `sisu test scoreboard.sisu`, read the diagnostic, and fix `total`
+##! so that every test passes. The hints are in chapter 8 of the
+##! tutorial, under "Exercise 8.2: a scoreboard".
+
+## The sum of the scores on the lines of `board`; a line that is not a
+## number counts as 0.
+def total(board: str) -> int:
+    var sum_so_far = 0
+    for line in board.lines():
+        sum_so_far += line.trim().parse_int()
+    return sum_so_far
+
+test "numbers only":
+    assert total("12\n30\n7") == 49
+    assert total("5") == 5
+
+test "a line that is not a number":
+    assert total("12\ndid not finish\n30") == 42
+    assert total("none") == 0

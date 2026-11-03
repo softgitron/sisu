@@ -1,0 +1,57 @@
+##! Exercise 8.5, three layers of errors. Kind: write. Level: 3.
+##!
+##! A café takes orders as text, one item on each line: a product, a
+##! space and a quantity, such as "coffee 2". `parse_line` reads one
+##! line, `parse_order` reads every line through it, and `order_total`
+##! prices the order that `parse_order` read. Each passes on the errors
+##! of the one it calls. Write the three bodies so that every test
+##! passes. Run the tests with `sisu test orders.sisu`. The hints are in
+##! chapter 8 of the tutorial, under "Exercise 8.5: three layers of
+##! errors".
+
+error LineError:
+    NoQuantity(line: String)
+    BadQuantity(text: String)
+
+error PriceError:
+    UnknownProduct(name: String)
+
+type Prices = dict[str, int]
+
+## The product and the quantity on `line`, such as ("coffee", 2) for
+## "coffee 2".
+def parse_line(line: str) -> (String, int) ! LineError:
+    return todo("parse_line")
+
+## The items of the order `text`, one for each line that is not blank.
+def parse_order(text: str) -> list[(String, int)] ! LineError:
+    return todo("parse_order")
+
+## The price in cents of the order `text`, with `prices` in cents.
+def order_total(text: str, prices: Prices) -> int ! {LineError, PriceError}:
+    return todo("order_total")
+
+## The café's prices, in cents.
+def menu() -> Prices:
+    return {"coffee": 350, "tea": 300, "bun": 280}
+
+test "one line":
+    assert parse_line("coffee 2") == Ok(("coffee", 2))
+    assert parse_line("bun 12") == Ok(("bun", 12))
+
+test "lines without a quantity":
+    assert parse_line("coffee") == Err(NoQuantity("coffee"))
+    assert parse_line("tea x") == Err(BadQuantity("x"))
+
+test "an order of several lines":
+    let items = parse_order("coffee 2\n\nbun 1\n")
+    assert items == Ok([("coffee", 2), ("bun", 1)])
+
+test "the total of an order":
+    assert order_total("coffee 2\nbun 1", menu()) == Ok(980)
+    assert order_total("", menu()) == Ok(0)
+
+test "errors from every layer":
+    assert order_total("tea 1\nbun", menu()) == Err(NoQuantity("bun"))
+    assert order_total("tea two", menu()) == Err(BadQuantity("two"))
+    assert order_total("cocoa 1", menu()) == Err(UnknownProduct("cocoa"))

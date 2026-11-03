@@ -1,0 +1,7 @@
+test "a number read from text" ... ok
+test "a word read as a number" ... ok
+test "an index past the end" ... ok
+test "two halvings" ... ok
+test "a halving that fails" ... ok
+test "a result as text" ... ok
+6 passed, 0 failed, 0 blocked

@@ -1,0 +1,2 @@
+error: reading line 2: NotANumber(text="kolme")
+at context.sisu:13:23

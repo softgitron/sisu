@@ -1,0 +1,4 @@
+test "circles" ... ok
+test "rectangles" ... ok
+test "triangles" ... ok
+3 passed, 0 failed, 0 blocked

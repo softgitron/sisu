@@ -1,0 +1,360 @@
+##! What the lowering of one function finds out about it before writing
+##! anything (stage 0's `sisu-codegen/src/func.rs`, its free functions):
+##! the blocks every path from which ends in a panic or in unwinding, the
+##! locals the release profile keeps in variables (decision 246), the
+##! iterators that live in the frame (decision 253), and what a type is
+##! behind a reference or as a list.
+
+import stage1.sir.write
+import stage2.abi
+from stage1.sir import (
+    Callee,
+    Function,
+    LocalDecl,
+    Operand,
+    Place,
+    Proj,
+    Rvalue,
+    StatementKind,
+    Terminator,
+    Type,
+)
+from stage2.gen import Cg
+from stage2.layout import arg, fat
+from stage2.lir import LirError, internal, unsupported
+
+## What a reference (or a mutex guard, or a `Shared`) points to.
+pub pure def deref_type(t: Type) -> Type ! LirError:
+    match t:
+        case Type.Ref(inner, _):
+            return Ok(inner[0].copy())
+        case Type.Named(n, a):
+            if n == "MutexGuard" or n == "ReadGuard" or n == "Shared":
+                return Ok(arg(a, 0))
+        case _:
+            pass
+    return unsupported("dereferencing a `{write.ty(t)}`")
+
+## What a value is behind its references.
+pub pure def target_type(t: Type) -> Type:
+    if let Type.Ref(inner, _) = t:
+        return target_type(inner[0])
+    return t.copy()
+
+## The element type of a list or an array.
+pub pure def element_type(t: Type) -> Type ! LirError:
+    if let Type.Named(n, a) = t:
+        if n == "list" or n == "Array" or n == "Slice":
+            if a.is_empty():
+                return internal("a list without an element type")
+            return Ok(a[0].copy())
+    return unsupported("indexing a `{write.ty(t)}`")
+
+## Whether a local is a flag of drop elaboration's: named `flag`, with no
+## place in the source.
+pub pure def drop_flag(l: LocalDecl) -> bool:
+    if let Some(n) = l.name:
+        return n == "flag" and l.loc.is_none()
+    return False
+
+## A sized integer type's operation an intrinsic names (`u8.wrap_add`, or
+## `int.to_u8` for the conversion to one): the type's number and the
+## operation.
+pub pure def sized_op(name: str) -> (int, int)?:
+    return typed_op(name, abi.sized_types())
+
+## An operation of `i128` or `u128` an intrinsic names.
+pub pure def wide_op(name: str) -> (int, int)?:
+    return typed_op(name, abi.wide_types())
+
+pure def typed_op(name: str, kinds: list[str]) -> (int, int)?:
+    let (owner, method) = name.split_once(".") else:
+        return None
+    if owner == "int":
+        if not method.starts_with("to_"):
+            return None
+        let k = index_of(kinds, method.byte_slice(3, method.byte_len())) else:
+            return None
+        return Some((k, abi.SIZED_TO_SIZED))
+    let k = index_of(kinds, owner) else:
+        return None
+    let op = abi.sized_op(method) else:
+        return None
+    return Some((k, op))
+
+pure def index_of(xs: list[str], x: str) -> int?:
+    for i in range(len(xs)):
+        if xs[i] == x:
+            return Some(i)
+    return None
+
+## The blocks every path from which ends in a panic or in unwinding: a
+## cleanup block, one that ends in `unreachable` or `resume`, and one whose
+## every successor is such; never the entry (decision 270).
+pub pure def cold_blocks(f: Function) -> list[bool]:
+    var cold: list[bool] = []
+    for i in range(len(f.blocks)):
+        let b = ref f.blocks[i]
+        var c = b.cleanup
+        if b.term == Terminator.Unreachable or b.term == Terminator.Resume:
+            c = True
+        cold.push(i != 0 and c)
+    while True:
+        var changed = False
+        for i in range(len(f.blocks)):
+            if i == 0 or cold[i]:
+                continue
+            var all = False
+            match f.blocks[i].term:
+                case Terminator.Goto(t):
+                    all = t.index < len(cold) and cold[t.index]
+                case Terminator.Switch(_, cases, default):
+                    all = default.index < len(cold) and cold[default.index]
+                    for (_, t) in cases:
+                        if not (t.index < len(cold) and cold[t.index]):
+                            all = False
+                case _:
+                    all = False
+            if all:
+                cold[i] = True
+                changed = True
+        if not changed:
+            return cold
+
+## Whether a local of type `t` is one word the release profile may keep in
+## a variable: a number, a `bool`, a `char`, or a reference that is an
+## address.
+pure def one_word(t: Type) -> bool:
+    match t:
+        case Type.Ref(inner, _):
+            return not fat(inner[0])
+        case Type.Int | Type.Float | Type.Bool | Type.Char:
+            return True
+        case Type.Named(n, a):
+            if not a.is_empty():
+                return False
+            return match n.to_string():
+                case "u8" | "u16" | "u32" | "i8" | "i16" | "i32" | "DateTime" | "u64" | "f32": True
+                case _: False
+        case _:
+            return False
+
+## The locals the release profile keeps in variables (decision 246).
+pub pure def register_locals(f: Function, tys: list[Type], closure: bool) -> list[bool]:
+    var u = Uses(ok=[], is_ref=[])
+    for i in range(len(tys)):
+        u.ok.push(i >= 1 and not (closure and i == 1) and one_word(tys[i]))
+        var r = False
+        if let Type.Ref(_, _) = tys[i]:
+            r = True
+        u.is_ref.push(r)
+    for b in f.blocks:
+        for st in b.stmts:
+            match st.kind:
+                case StatementKind.Assign(p, r):
+                    u.place(p)
+                    match r:
+                        case Rvalue.Use(o) | Rvalue.Unary(_, o):
+                            u.operand(o)
+                        case Rvalue.Binary(_, x, y):
+                            u.operand(x)
+                            u.operand(y)
+                        case Rvalue.Aggregate(_, os) | Rvalue.Closure(_, _, os):
+                            for o in os:
+                                u.operand(o)
+                        # These take the place's address: the local's own
+                        # memory, unless through its reference.
+                        case Rvalue.Ref(q, _) | Rvalue.Discriminant(q) | Rvalue.CopyOf(
+                            q
+                        ) | Rvalue.StrView(q):
+                            if q.proj.is_empty():
+                                u.no(q.local.index)
+                            u.place(q)
+                case StatementKind.Call(dest, callee, args):
+                    u.place(dest)
+                    if let Callee.Value(o) = callee:
+                        u.operand(o)
+                    for o in args:
+                        u.operand(o)
+                case StatementKind.Drop(place, _):
+                    u.place(place)
+                case StatementKind.StorageDead(_):
+                    pass
+        if let Terminator.Switch(value, _, _) = b.term:
+            u.operand(value)
+    return u.ok
+
+## Which locals may be variables, as `register_locals` finds them out.
+struct Uses:
+    ok: list[bool]
+    is_ref: list[bool]
+
+impl Uses:
+    pure def no(mut self, l: int):
+        if l < len(self.ok):
+            self.ok[l] = False
+
+    ## A place reaches its local's memory unless it is the local itself or
+    ## what a reference in it refers to.
+    pure def place(mut self, p: Place):
+        let i = p.local.index
+        let through = not p.proj.is_empty()
+            and p.proj[0] == Proj.Deref
+            and i < len(self.is_ref)
+            and self.is_ref[i]
+        if not p.proj.is_empty() and not through:
+            self.no(i)
+        for q in p.proj:
+            if let Proj.Key(k) = q:
+                self.no(k.index)
+
+    pure def operand(mut self, o: Operand):
+        match o:
+            case Operand.Copy(p) | Operand.Move(p):
+                self.place(p)
+            case _:
+                pass
+
+## The locals whose iterators live in the frame (decision 253): an
+## iterator made once, by `range` or over a borrowed list's elements, that
+## nothing but `Iter.next` reads, through references made for it.
+pub pure def frame_iterators(cg: Cg, f: Function, tys: list[Type]) -> list[bool]:
+    let n = len(tys)
+    var fr = Frames(ok=[], borrow=[])
+    for i in range(n):
+        var iter = False
+        if let Type.Named(name, _) = tys[i]:
+            iter = name == "Iter"
+        fr.ok.push(i > f.param_count and iter)
+        fr.borrow.push(None)
+    # The references that step them: `T = ref L`, and nothing else in T.
+    for b in f.blocks:
+        for st in b.stmts:
+            if let StatementKind.Assign(p, Rvalue.Ref(q, _)) = st.kind:
+                if p.proj.is_empty() and q.proj.is_empty():
+                    let ql = q.local.index
+                    if ql < len(fr.ok) and fr.ok[ql] and p.local.index < len(fr.borrow):
+                        match fr.borrow[p.local.index]:
+                            case None:
+                                fr.borrow[p.local.index] = Some(ql)
+                            case Some(m):
+                                if m != ql:
+                                    fr.no(m)
+                                    fr.no(ql)
+    var made: list[int] = []
+    for _ in range(n):
+        made.push(0)
+    for b in f.blocks:
+        for st in b.stmts:
+            match st.kind:
+                case StatementKind.Assign(p, r):
+                    if let Rvalue.Ref(q, _) = r:
+                        if p.proj.is_empty()
+                                and q.proj.is_empty()
+                                and p.local.index < len(fr.borrow):
+                            if fr.borrow[p.local.index] == Some(q.local.index):
+                                continue
+                    fr.place(p)
+                    match r:
+                        case Rvalue.Use(o) | Rvalue.Unary(_, o):
+                            fr.operand(o)
+                        case Rvalue.Binary(_, x, y):
+                            fr.operand(x)
+                            fr.operand(y)
+                        case Rvalue.Aggregate(_, os) | Rvalue.Closure(_, _, os):
+                            for o in os:
+                                fr.operand(o)
+                        case Rvalue.Ref(q, _) | Rvalue.Discriminant(q) | Rvalue.CopyOf(
+                            q
+                        ) | Rvalue.StrView(q):
+                            fr.place(q)
+                case StatementKind.Call(dest, callee, args):
+                    if let Callee.Intrinsic(name, _) = callee:
+                        if name == "Iter.next" and len(args) == 1:
+                            if let Some(pl) = operand_place(args[0]):
+                                if pl.proj.is_empty() and pl.local.index < len(fr.borrow):
+                                    if fr.borrow[pl.local.index].is_some():
+                                        fr.place(dest)
+                                        continue
+                        if dest.proj.is_empty() and dest.local.index < len(fr.ok):
+                            if fr.ok[dest.local.index] and maker(cg, name, args, tys):
+                                made[dest.local.index] += 1
+                                for o in args:
+                                    fr.operand(o)
+                                continue
+                    fr.place(dest)
+                    if let Callee.Value(o) = callee:
+                        fr.operand(o)
+                    for o in args:
+                        fr.operand(o)
+                case StatementKind.Drop(place, _):
+                    if not place.proj.is_empty():
+                        fr.place(place)
+                case StatementKind.StorageDead(_):
+                    pass
+        if let Terminator.Switch(value, _, _) = b.term:
+            fr.operand(value)
+    var out: list[bool] = []
+    for i in range(n):
+        out.push(fr.ok[i] and made[i] == 1)
+    return out
+
+pure def operand_place(o: Operand) -> Place?:
+    match o:
+        case Operand.Copy(p) | Operand.Move(p):
+            return Some(p.copy())
+        case _:
+            return None
+
+## Whether a call of the intrinsic `name` makes an iterator that may live
+## in the frame: a range, or the elements of a borrowed list.
+pure def maker(cg: Cg, name: str, args: list[Operand], tys: list[Type]) -> bool:
+    let i = cg.intrinsic(name) else:
+        return False
+    if i == abi.I_RANGE:
+        return True
+    if i == abi.I_ITER_REF or i == abi.I_ITER_MUT or i == abi.I_LIST_ITER or i == abi.I_SLICE_ITER:
+        if args.is_empty():
+            return False
+        let pl = operand_place(args[0]) else:
+            return False
+        if not pl.proj.is_empty() or pl.local.index >= len(tys):
+            return False
+        if let Type.Named(l, _) = target_type(tys[pl.local.index]):
+            return l == "list"
+    return False
+
+## What `frame_iterators` finds out as it goes: which locals may still hold
+## an iterator in the frame, and which reference steps which.
+struct Frames:
+    ok: list[bool]
+    borrow: list[int?]
+
+impl Frames:
+    pure def no(mut self, i: int):
+        if i < len(self.ok):
+            self.ok[i] = False
+
+    ## A use of a local other than the ones allowed: an iterator, or the
+    ## iterator a reference steps, keeps its object on the heap.
+    pure def mention(mut self, i: int):
+        self.no(i)
+        if i < len(self.borrow):
+            if let Some(m) = self.borrow[i]:
+                self.no(m)
+
+    pure def place(mut self, p: Place):
+        self.mention(p.local.index)
+        for q in p.proj:
+            match q:
+                case Proj.Index(k) | Proj.IndexFromEnd(k) | Proj.Key(k):
+                    self.mention(k.index)
+                case _:
+                    pass
+
+    pure def operand(mut self, o: Operand):
+        match o:
+            case Operand.Copy(p) | Operand.Move(p):
+                self.place(p)
+            case _:
+                pass

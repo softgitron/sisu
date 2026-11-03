@@ -1,0 +1,19 @@
+# A function that can fail returns its value or an error.
+error BankError:
+    NotPositive(amount: int)
+    TooLittle(balance: int, wanted: int)
+
+def withdraw(balance: int, amount: int) -> int ! BankError:
+    if amount <= 0:
+        return Err(NotPositive(amount))
+    if amount > balance:
+        return Err(TooLittle(balance, amount))
+    return Ok(balance - amount)
+
+def main():
+    for amount in [30, 0, 500]:
+        match withdraw(100, amount):
+            case Ok(left): print("took {amount}, {left} left")
+            case Err(NotPositive(n)): print("cannot take {n}")
+            case Err(TooLittle(balance, wanted)):
+                print("wanted {wanted}, but only {balance} is there")

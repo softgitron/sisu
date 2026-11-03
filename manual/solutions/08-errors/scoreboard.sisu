@@ -1,0 +1,21 @@
+##! Exercise 8.2, a scoreboard: the solution.
+##!
+##! `parse_int` gives an `int?`, which cannot be added to an `int`
+##! (E0310). `?? 0` takes the number out, or gives 0 for a line that
+##! is not one, which is what the scoreboard's rule says.
+
+## The sum of the scores on the lines of `board`; a line that is not a
+## number counts as 0.
+def total(board: str) -> int:
+    var sum_so_far = 0
+    for line in board.lines():
+        sum_so_far += line.trim().parse_int() ?? 0
+    return sum_so_far
+
+test "numbers only":
+    assert total("12\n30\n7") == 49
+    assert total("5") == 5
+
+test "a line that is not a number":
+    assert total("12\ndid not finish\n30") == 42
+    assert total("none") == 0

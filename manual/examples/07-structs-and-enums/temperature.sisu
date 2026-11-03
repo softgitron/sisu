@@ -1,0 +1,18 @@
+# A function in the body without `self` is called on the type.
+struct Temperature:
+    celsius: f64
+
+    def from_fahrenheit(degrees: f64) -> Temperature:
+        return Temperature((degrees - 32.0) * 5.0 / 9.0)
+
+    def freezing() -> Temperature:
+        return Temperature(0.0)
+
+    def is_below(self, other: Temperature) -> bool:
+        return self.celsius < other.celsius
+
+def main():
+    let outside = Temperature.from_fahrenheit(14.0)
+    let freezing = Temperature.freezing()
+    print("{outside.celsius} °C")
+    print("below freezing: {outside.is_below(freezing)}")

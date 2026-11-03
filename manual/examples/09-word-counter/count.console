@@ -1,0 +1,14 @@
+$ sisu run -- poem.txt
+   6  the
+   5  is
+   2  lake
+   2  warm
+   1  after
+   1  cold
+   1  cold.
+   1  lake.
+   1  sauna
+   1  sauna,
+   1  sauna.
+   1  too.
+   1  warm,

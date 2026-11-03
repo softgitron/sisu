@@ -1,0 +1,47 @@
+##! Exercise 8.1, predict the fallbacks: the solution.
+##!
+##! `??` gives the value inside `Some`, or the default after it when
+##! there is `None`: "17" is a number and "seventeen" is not, and a list
+##! of three has no item at index 5. In `quarter(6)`, the first halving
+##! gives 3 and the second fails, so `?` returns the error and `.or`
+##! gives its default. A result in text shows its variant and the
+##! error's fields.
+
+error OddError:
+    Odd(value: int)
+
+## Half of `n`, which must be even.
+def halve(n: int) -> int ! OddError:
+    if n % 2 != 0:
+        return Err(Odd(n))
+    return Ok(n // 2)
+
+## A quarter of `n`, which must be even, and so must its half.
+def quarter(n: int) -> int ! OddError:
+    let half = halve(n)?
+    return halve(half)
+
+const PARSED: int = 17
+const NOT_PARSED: int = 0
+const PAST_THE_END: int = -1
+const QUARTER: int = 3
+const NO_QUARTER: int = 0
+const SHOWN: str = "Err(Odd(value=5))"
+
+test "a number read from text":
+    assert ("17".parse_int() ?? 0) == PARSED
+
+test "a word read as a number":
+    assert ("seventeen".parse_int() ?? 0) == NOT_PARSED
+
+test "an index past the end":
+    assert ([10, 20, 30].get(5) ?? -1) == PAST_THE_END
+
+test "two halvings":
+    assert quarter(12).or(0) == QUARTER
+
+test "a halving that fails":
+    assert quarter(6).or(0) == NO_QUARTER
+
+test "a result as text":
+    assert "{halve(5)}" == SHOWN

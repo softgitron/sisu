@@ -1,0 +1,18 @@
+$ sisu test language.sisu
+warning[W0001]: typed hole `the code chosen, or a fallback` of type `str`
+  --> language.sisu:22:21
+   |
+22 |     let code: str = todo("the code chosen, or a fallback")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the error for an unknown code` of type `String ! SettingError`
+  --> language.sisu:24:16
+   |
+24 |         return todo("the error for an unknown code")
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test "the user's own choice" ... blocked by todo("the code chosen, or a fallback")
+test "the team's choice" ... blocked by todo("the code chosen, or a fallback")
+test "no choice at all" ... blocked by todo("the code chosen, or a fallback")
+test "a language without messages" ... blocked by todo("the code chosen, or a fallback")
+0 passed, 0 failed, 4 blocked

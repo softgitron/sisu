@@ -790,7 +790,7 @@ impl<'p> Codegen<'p> {
             let mut b = FunctionBuilder::new(&mut ctx.func, &mut fbctx);
             // A function's references to other functions and to data are
             // made once each, at their first use, as everywhere (the
-            // translation of LIR makes them so, decision 273).
+            // translation of LIR makes them so, decision 283).
             let mut funcs: fx::FxMap<FuncId, ir::FuncRef> = fx::FxMap::default();
             let mut func_ref = |module: &mut ObjectModule, b: &mut FunctionBuilder<'_>, id: FuncId| {
                 *funcs.entry(id).or_insert_with(|| module.declare_func_in_func(id, b.func))
@@ -861,7 +861,9 @@ impl<'p> Codegen<'p> {
                         for (k, a) in params.iter().skip(2).enumerate() {
                             b.ins().store(flags, *a, arr, (8 * (k + 1)) as i32);
                         }
-                        let gv = *datas.entry(*desc).or_insert_with(|| self.module.declare_data_in_func(*desc, b.func));
+                        let gv = *datas
+                            .entry(*desc)
+                            .or_insert_with(|| self.module.declare_data_in_func(*desc, b.func));
                         let d = b.ins().symbol_value(types::I64, gv);
                         let f = intrinsic_fn.ok_or_else(|| Error::internal("no intrinsic entry point"))?;
                         let r = func_ref(&mut self.module, &mut b, f);

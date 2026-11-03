@@ -161,6 +161,13 @@ jobs:
       - name: The same SIR in the interpreter (`sisu run --from-sir`)
         # What a front end serialised, run rather than compiled (decision 254).
         run: ./target/debug/sisu-conformance --sisu target/debug/sisu --interpreted-from-sir conformance/native.list
+      - name: Native conformance from LIR (stage 2's lowering, `--from-lir`)
+        # Stage 2, the backend written in Sisu (compiler/stage2), built here
+        # with `sisu build --native`, lowers each case's SIR to LIR, the
+        # backend-neutral low IR; the LIR is built with `sisu build --native
+        # --from-lir`, run, and its executable compared byte for byte with
+        # the one the SIR gives, in both profiles (decision 284).
+        run: ./target/debug/sisu-conformance --sisu target/debug/sisu --native-from-lir conformance/native.list
       - name: Stage 1 compiled natively (informational, never fails)
         # The bootstrap path: stage 1 built by the backend with stage 1 as
         # its front end, its token stream and tree of the prelude against

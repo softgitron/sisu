@@ -1,0 +1,4 @@
+7:45: Ok(465)
+12.30: Err(NoColon(text="12.30"))
+25:00: Err(OutOfRange(value=25))
+8:x: Err(NotANumber(text="x"))

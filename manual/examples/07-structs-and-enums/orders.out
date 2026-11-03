@@ -1,0 +1,3 @@
+Order(item="rye bread", quantity=1, express=False)
+Order(item="coffee", quantity=3, express=False)
+Order(item="cloudberries", quantity=1, express=True)

@@ -219,7 +219,7 @@ struct Opts {
     /// `--native --from-sir FILE`: the input is a serialised SIR program.
     from_sir: bool,
     /// `--native --from-lir FILE`: the input is a LIR program, stage 2's
-    /// lowering of one (decision 274).
+    /// lowering of one (decision 284).
     from_lir: bool,
     /// `--native --release`: the native backend's release profile (09,
     /// decision 232).
@@ -568,6 +568,9 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                 "check" => &["--format=ids", "--format=human", "--locked", "--no-default-features"],
                 "build" => &["--locked", "--native", "--release", "--no-default-features"],
                 "bench" => &["--locked", "--no-default-features"],
+                // The program built with its tests and benchmarks (decision
+                // 285), for `sisu test --from-sir`.
+                "sir" => &["--tests"],
                 "tokens" => &["--trivia"],
                 "parse" => &["--tree", "--print", "--trivia", "--shape", "--ast"],
                 _ => &[],
@@ -654,7 +657,7 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                         output = Some(v.to_string());
                         continue;
                     }
-                    "--from-sir" if matches!(cmd.as_str(), "run" | "build") => {
+                    "--from-sir" if matches!(cmd.as_str(), "run" | "build" | "test" | "bench") => {
                         from_sir = Some(*v);
                         continue;
                     }
@@ -776,7 +779,7 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                 return EXIT_USAGE;
             }
             // `--from-lir FILE` reads a LIR program, which only the native
-            // backend compiles (decision 274).
+            // backend compiles (decision 284).
             if from_lir.is_some() && !p.flags.contains(&"--native") {
                 host.stderr(&plain_error(msg::NATIVE_FROM_LIR, &[]));
                 return EXIT_USAGE;
@@ -804,8 +807,7 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                 Vec::new()
             } else {
                 let file_level = from_sir.is_some() || from_lir.is_some();
-                match inputs_for(cmd, target, locked, has_ids(&p.flags), file_level, &features, host)
-                {
+                match inputs_for(cmd, target, locked, has_ids(&p.flags), file_level, &features, host) {
                     Ok(i) => i,
                     Err(code) => return code,
                 }
@@ -965,6 +967,16 @@ fn from_sir(
         Ok(p) => p,
         Err(code) => return code,
     };
+    // The tests and benchmarks of a program built with them (`sisu sir
+    // --tests`), run in the interpreter (decision 285).
+    if cmd == "test" {
+        stage.set("the interpreter");
+        return test_from_sir(&prog, flags, opts, input, host);
+    }
+    if cmd == "bench" {
+        stage.set("the interpreter");
+        return bench_from_sir(&prog, opts, host);
+    }
     if prog.entry.is_none() {
         host.stderr(&plain_error(msg::CLI_NO_MAIN, &[("file", input.file.clone())]));
         return exit::ERROR;
@@ -1001,10 +1013,108 @@ fn from_sir(
     crate::native::run_command(crate::native::Code::Sir(&prog), &name, &args, &how, host)
 }
 
+/// `sisu test --from-sir FILE`: the tests of serialised SIR that `sisu sir
+/// --tests` printed (decision 285), selected by their names and tags and
+/// run as `sisu test` runs a program's, with its snapshots beside the file;
+/// what only the program's source gives (the ownership checker's deferral,
+/// the transcripts, the cache, replay tokens) is left out.
+fn test_from_sir(
+    prog: &sisu_sir::Program,
+    flags: &[&str],
+    opts: &Opts,
+    input: &Input,
+    host: &mut dyn Host,
+) -> i32 {
+    let has = |f: &str| flags.contains(&f);
+    if let Some(bad) = ["--defer-borrow", "--std"].into_iter().find(|f| has(f)) {
+        host.stderr(&plain_error(
+            msg::CLI_UNKNOWN_OPTION,
+            &[("option", bad.to_string()), ("command", "test --from-sir".to_string())],
+        ));
+        return EXIT_USAGE;
+    }
+    let options = Options {
+        monitor: !has("--no-monitor"),
+        seed: opts.seeds.first,
+        strategy: opts.strategy.clone(),
+        sim: opts.sim,
+        jobs: opts.jobs,
+        snapshots: std::sync::Arc::new(
+            std::fs::read_to_string(snap_path(&input.disk))
+                .map(|t| crate::snap::parse(&t))
+                .unwrap_or_default(),
+        ),
+        update: has("--update"),
+        ..Options::default()
+    };
+    let only = (!opts.select.is_all()).then(|| {
+        (0..prog.tests.len())
+            .filter(|&k| {
+                let tags = prog.test_tags.get(k).cloned().unwrap_or_default();
+                opts.select.picks(&prog.tests[k].0, &tags)
+            })
+            .collect::<Vec<usize>>()
+    });
+    let which = only.clone().unwrap_or_else(|| (0..prog.tests.len()).collect());
+    let run = TestRun {
+        file: &input.shown,
+        hash: input.hash(),
+        only,
+        bound: opts.bound,
+        search: true,
+        transcripts: Vec::new(),
+        cache: None,
+    };
+    let (code, reports) = run_tests(prog, host, &options, opts.seeds, &run);
+    if options.update {
+        let ran: Vec<&str> = which.iter().filter_map(|&k| prog.tests.get(k)).map(|t| t.0.as_str()).collect();
+        if let Err(code) = update_snapshots(&input.disk, &options.snapshots, &ran, &reports, prog, host) {
+            return code;
+        }
+    }
+    code
+}
+
+/// `sisu bench --from-sir FILE`: the benchmarks of serialised SIR that
+/// `sisu sir --tests` printed, run as `sisu bench` runs a program's
+/// (decision 285).
+fn bench_from_sir(prog: &sisu_sir::Program, opts: &Opts, host: &mut dyn Host) -> i32 {
+    let options = Options { seed: opts.seeds.first, ..Options::default() };
+    let mut failed = 0;
+    for (name, function) in &prog.benches {
+        let name = sisu_diag::render::quote(name);
+        let start = host.now_nanos();
+        let r = sisu_interp::run_bench(prog, host, &options, function, opts.iterations);
+        let took = host.now_nanos() - start;
+        let line = match r {
+            sisu_interp::TestResult::Passed => {
+                let each = took / i128::from(opts.iterations.max(1));
+                text(
+                    msg::CLI_BENCH_RESULT,
+                    &[("name", name), ("iterations", opts.iterations.to_string()), ("each", nanos(each))],
+                )
+            }
+            sisu_interp::TestResult::Failed(m) | sisu_interp::TestResult::Blocked(m) => {
+                failed += 1;
+                text(msg::CLI_BENCH_FAILED, &[("name", name), ("message", m)])
+            }
+        };
+        host.stdout(&format!("{line}\n"));
+    }
+    host.stdout(&format!(
+        "{}\n",
+        text(
+            msg::CLI_BENCH_SUMMARY,
+            &[("count", prog.benches.len().to_string()), ("failed", failed.to_string())]
+        )
+    ));
+    if failed > 0 { exit::ERROR } else { exit::OK }
+}
+
 /// `sisu build --native --from-lir FILE` and `sisu run --native --from-lir
 /// FILE`: a LIR program, what stage 2's lowering writes (`sisu2 lir`),
 /// translated one to one into Cranelift IR and compiled as a program from
-/// its SIR is (decision 274). The executable is named by the file's stem.
+/// its SIR is (decision 284). The executable is named by the file's stem.
 fn from_lir(
     cmd: &str,
     opts: &Opts,
@@ -1046,7 +1156,10 @@ fn stage1_serves(cmd: &str, p: &Parsed<'_>) -> bool {
     let value = |k: &str| p.values.iter().any(|(v, _)| *v == k);
     match cmd {
         "check" => !value("--diary"),
-        "sir" | "tokens" => true,
+        // Stage 1 prints no SIR of a program built with its tests yet
+        // (decision 285).
+        "sir" => !p.flags.contains(&"--tests"),
+        "tokens" => true,
         "build" => !value("--from-sir") && !value("--from-lir"),
         "run" => {
             !p.flags.iter().any(|f| matches!(*f, "--sir" | "--watch" | "--defer-borrow"))
@@ -1829,7 +1942,7 @@ fn command(
     db.contracts = level;
     // What runs or builds the program builds it without its tests
     // (decision 243).
-    db.no_tests = matches!(cmd, "run" | "build" | "sir");
+    db.no_tests = matches!(cmd, "run" | "build") || (cmd == "sir" && !flags.contains(&"--tests"));
     input.load(&mut db);
     // `sisu test --std`: the standard library's doc examples run too.
     if cmd == "test" && has("--std") {
@@ -2288,7 +2401,13 @@ fn command(
                                 })
                             }),
                         };
-                        return crate::native::run_command(crate::native::Code::Sir(&prog), &name, &args, &how, host);
+                        return crate::native::run_command(
+                            crate::native::Code::Sir(&prog),
+                            &name,
+                            &args,
+                            &how,
+                            host,
+                        );
                     }
                     let options = Options {
                         monitor: defer || has("--monitor"),

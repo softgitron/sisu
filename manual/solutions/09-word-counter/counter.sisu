@@ -1,0 +1,82 @@
+##! Exercise 9.3, Challenge I: a better word counter: the solution.
+##!
+##! Part 2 changes what a word is, so the solution keeps that in one
+##! function, `words_of`, and `count_words` counts whatever it gives;
+##! part 2 then changes `words_of` alone. `top_words` sorts pairs of a
+##! negated count and a word, so that the largest count comes first and
+##! equal counts fall back on the word. `main` adds the counts of every
+##! file into one dict before it ranks them.
+
+import cli
+
+## What the command line can say.
+struct Options:
+    top: int = 10
+    min_length: int = 1
+    paths: list[Path]
+
+## The words of `text` in lower case: its runs of letters and digits.
+def words_of(text: str) -> list[String]:
+    var words: list[String] = []
+    var word = String()
+    for c in text.chars():
+        if c.is_alphabetic() or c.is_digit():
+            word.push_char(c)
+        elif not word.is_empty():
+            words.push(word.to_lowercase())
+            word = String()
+    if not word.is_empty():
+        words.push(word.to_lowercase())
+    return words
+
+## How often each word of `text` with at least `min_length` characters
+## appears in it, in lower case.
+def count_words(text: str, min_length: int) -> dict[String, int]:
+    var counts: dict[String, int] = {}
+    for word in words_of(text):
+        if len(word) >= min_length:
+            counts.entry(word.copy()).or_insert(0) += 1
+    return counts
+
+## The `n` most common words of `counts`, with their counts.
+def top_words(counts: dict[String, int], n: int) -> list[(String, int)]:
+    let ranked = sorted([(-count, word) for word, count in counts])
+    return [(word.copy(), -minus) for minus, word in ranked[:n]]
+
+def main(sys: System) -> ! {IoError, cli.Error}:
+    let options = cli.parse[Options](sys.env.args())?
+    var counts: dict[String, int] = {}
+    for path in options.paths:
+        let text = sys.fs.read_to_string(path)?
+        for word, n in count_words(text, options.min_length):
+            counts.entry(word.copy()).or_insert(0) += n
+    for word, n in top_words(counts, options.top):
+        print("{n:>4}  {word}")
+    return Ok(())
+
+suite "part 1, a minimum length":
+    test "short words are left out":
+        assert count_words("a bb ccc bb", 2) == {"bb": 2, "ccc": 1}
+        assert count_words("I saw a cat", 3) == {"saw": 1, "cat": 1}
+
+    test "every word counts in lower case":
+        assert count_words("Hei hei HEI", 1) == {"hei": 3}
+
+suite "part 2, punctuation":
+    test "punctuation around a word":
+        let counts = count_words("Sauna, sauna. (SAUNA!)", 1)
+        assert counts == {"sauna": 3}
+
+    test "punctuation inside a word":
+        let counts = count_words("a well-known 2-minute walk", 2)
+        assert counts == {"well": 1, "known": 1, "minute": 1, "walk": 1}
+
+suite "part 3, the top words":
+    test "the most common first":
+        let counts: dict[String, int] = {"kissa": 1, "koira": 3, "kala": 2}
+        assert top_words(counts, 2) == [("koira", 3), ("kala", 2)]
+
+    test "equal counts in alphabetical order":
+        let counts: dict[String, int] = {"tuli": 1, "meni": 1, "kevät": 1}
+        let top = top_words(counts, 5)
+        assert top == [("kevät", 1), ("meni", 1), ("tuli", 1)]

@@ -1,0 +1,32 @@
+##! Exercise 7.2, the area of a shape: the solution.
+##!
+##! E0314 names the variant that `area` does not cover. The new arm
+##! takes the triangle apart like the other two. A `case _` arm would
+##! also make the file compile, but it would give every triangle the
+##! same area, and the tests for triangles would fail.
+
+from std.math import PI
+
+enum Shape:
+    Circle(radius: f64)
+    Rectangle(width: f64, height: f64)
+    Triangle(base: f64, height: f64)
+
+## The area of `shape`.
+def area(shape: Shape) -> f64:
+    return match shape:
+        case Circle(radius): PI * radius * radius
+        case Rectangle(width, height): width * height
+        case Triangle(base, height): base * height / 2.0
+
+test "circles":
+    assert area(Circle(radius=1.0)) == PI
+    assert area(Circle(radius=2.0)) == 4.0 * PI
+
+test "rectangles":
+    assert area(Rectangle(width=3.0, height=2.0)) == 6.0
+    assert area(Rectangle(width=0.5, height=8.0)) == 4.0
+
+test "triangles":
+    assert area(Triangle(base=4.0, height=3.0)) == 6.0
+    assert area(Triangle(base=5.0, height=2.0)) == 5.0

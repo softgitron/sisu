@@ -129,7 +129,7 @@ text. Exercises: a title-case function, a CSV line splitter, a Caesar
 cipher over `char`. Stage 0 runs all of it except grapheme iteration and
 the normalisation forms.
 
-**7. Structs and enums.** `struct` with fields and defaults,
+**7. Structs and enums** ([written](tutorial/07-structs-and-enums.md)). `struct` with fields and defaults,
 construction by keyword and by position, methods with `self` and `mut
 self`, associated functions such as `Point.origin()`, `@derive(Debug,
 Eq, Copy, ...)`, `enum` with unit, tuple and record variants, `match`
@@ -139,7 +139,7 @@ exhaustiveness check and its list of missing cases, recursive enums
 `match`, a playing-card type with an ordering, a tiny expression
 evaluator over a recursive enum. Stage 0 runs all of it.
 
-**8. Absent values and errors.** `T?` with `Some` and `None`, `?.` and
+**8. Absent values and errors** ([written](tutorial/08-errors.md)). `T?` with `Some` and `None`, `?.` and
 `??`, `if let`, chained conditions (D-071), `let ... else`, `while let`;
 error sets with `error`, `T ! E`, `Ok` and `Err`, `?` to propagate, the
 `else` and `else as e` fallbacks, `.or` and `.or_else`, `expect`,
@@ -150,14 +150,15 @@ panics as bugs, not errors. Exercises: parse a version string, a
 configuration lookup with a fallback, propagate through three layers.
 Stage 0 runs all of it except `.or_else`.
 
-**9. Project: a word counter.** The first complete program, built step
+**9. Project: a word counter** ([written](tutorial/09-word-counter.md)). The first complete program, built step
 by step: `sisu new`, the package layout (`sisu.toml`, `src/main.sisu`),
 `main(sys: System)` and the first capability, reading files through
 `Fs`, arguments through `sys.env.args()` and `std.x.cli`, counting with a
 `dict`, sorting and printing a table, `sisu run -- ARGS`, tests that hand
 the program an in-memory file system (`Fs.in_memory`), and `sisu build`.
 It follows [proposal/examples/wordcount.sisu](../proposal/examples/wordcount.sisu).
-Challenge I: extend the counter in three parts (a minimum length, ignore
+Exercises: read a file through an `Fs` (a fix), find the lines that
+hold a word. Challenge I: extend the counter in three parts (a minimum length, ignore
 punctuation, a `--top` option with a transcript test). Stage 0 runs all
 of it.
 
@@ -646,7 +647,9 @@ The conformance runner reads the forms of
 identifier (required whenever a program has diagnostics, since an absent
 `.diag` means none), `NAME.test` for `sisu test`, `NAME.ws` for a
 worksheet, and `NAME.unformatted` for a file kept unformatted on purpose,
-with the reason. Every example is therefore a conformance case too, and
+with the reason. A package is a directory `NAME.pkg/` with its
+`sisu.toml` and `src/`, and the same files beside it, `NAME.args` for
+`sisu run -- ARGS` and `NAME.build` for `sisu build` among them. Every example is therefore a conformance case too, and
 one that runs is also run under the ownership monitor, recorded and
 replayed.
 
@@ -658,12 +661,14 @@ human form of diagnostics, `sisu fmt --check`, `sisu test` output and
 anything else a reader types; they run in a fresh directory with the
 example's files and an empty environment. A session under `solutions/`
 runs against the exercise in its start state, which is how a chapter
-shows the first run of an exercise.
+shows the first run of an exercise, and a session beside a package,
+`NAME.console` beside `NAME.pkg/`, runs in a copy of the package, where
+a reader types the commands.
 
 A page shows a file with a marker on the line before the fenced block:
 `<!-- file: examples/01-hello/hello.sisu -->` for a source file,
 `<!-- output: examples/01-hello/hello.out -->` for an expectation or a
-session (for `.ws`, the standard-output part), and `<!-- unchecked:
+session (for `.ws` and `.build`, the standard-output part), and `<!-- unchecked:
 REASON -->` for the rare block that cannot be checked, such as an
 installation command. A fenced block without a marker fails the check,
 so no code reaches a reader unchecked by accident.
@@ -822,8 +827,8 @@ solutions and passing checks.
 | 1 | Chapter 1, this plan, [STYLE.md](STYLE.md), `tools/check.py` | done |
 | 2 | Chapters 2, 3 and 4 | done |
 | 3 | R16 the `sisu` command (2), R17 diagnostics, first codes (2), R1 lexical structure (2) | 6 |
-| 4 | Chapters 5 (2.5), 6 (2), 7 (2.5), 8 (3) | 10 |
-| 5 | Chapter 9 with challenge I (3); G2 Coming from Python (1); R19 false friends (1) | 5 |
+| 4 | Chapters 5 (2.5), 6 (2), 7 (2.5), 8 (3) | done |
+| 5 | Chapter 9 with challenge I (3, done); G2 Coming from Python (1); R19 false friends (1) | 2 |
 | 6 | Chapters 10 (3), 11 (4), 12 (3), 13 with challenge II (3); R7 ownership (3); G13 borrow errors (1); X3 (1) | 18 |
 | 7 | Reader test of Parts I and II: five readers who know Python, their stuck points, the rewrites | 4 |
 | 8 | Chapters 14 (3), 15 (3), 16 (3), 17 with challenge III (2.5); R2 (3), R3 (2), R6 (1), R13 (2.5) | 20 |
@@ -908,6 +913,42 @@ Writing the rest of Part I turned up more, by chapter:
   `.byte_slice(a, b)`. Python's `letter in "aeiou"` with `letter` a
   `char` gets E0369 (`type.comparison-types`) with no fix; a list of
   `char` values, or `"aeiou".contains("{letter}")`, is what works.
+- Chapter 7. A `str` field gets E0411, whose fix makes the struct a
+  `view struct`, where a beginner wants `String`. A field changed
+  through a plain `self` gets E0341 ("not declared with `var`") with a
+  note about `ref mut`, and no fix that adds `mut self`. A missing
+  `Eq`, `Ord` or `Hash` on a type of the same file gets E0347 or E0368
+  with no `@derive` fix, and `sorted([...])` names the type `ref
+  Version`. `sorted(hand)` on a borrowed list of items that are not
+  `Copy` gets E0300 ("expected `Iterable[Card]`, found `ref
+  list[Card]`") without a word about `Copy`. E0314 names one missing
+  case at a time, though [03](../proposal/03-types-and-generics.md)
+  says it lists them. A variant named like a prelude trait (`Add`,
+  `Mul`, `Neg`, `Num`) called where no type is expected gets E0309
+  ("a value of type `Add` cannot be called"); `Expr.Add(...)` works.
+  `struct point:` compiles without a word, though 02 enforces
+  `CamelCase`; `case _` on an enum of the same package does not warn
+  (D-043); a `pub` type has a `Debug` form without asking, though
+  [10](../proposal/10-tooling.md) makes it opt-in; and a `todo(...)`
+  statement in a method that returns nothing is a hole "of type `_`".
+- Chapter 8. `{u.team?.name}` moves `name` out of `u.team` when it is
+  not `Copy`, so the next use gets E0400 and E0401, where `{u.name}`
+  only reads. An error that `main` returns is printed in its `Debug`
+  form, so a `.context` error prints as `Context(message="...",
+  cause="NotANumber(text=\"kolme\")")` rather than as its `Display`
+  form, `reading line 2: NotANumber(text="kolme")`. `?` in a `main`
+  that returns nothing gets E0320 with no fix that adds `-> ! E`. An
+  error set named like one of the prelude's (`TimeError`) shadows it
+  without a word, and diagnostics then name it `main.TimeError`. An
+  assignment on the line of a `case`, `case None: label = "x"`, gets
+  E0117; it needs a block. `.or_else` gets E0304, as planned.
+- Chapter 9. Python's `open(path)` gets E0200 with no word about
+  `Fs`. An argument from `sys.env.args()` passed where a `Path` is
+  expected gets E0300 ("expected `Path`, found `ref str`") with no fix
+  offering `Path.new(arg)`. A transcript line for a run that fails
+  holds the error's trace (`at counter.sisu:34:19`), so a transcript
+  of a failing run breaks whenever the program's lines move; Challenge
+  I's transcript keeps to runs that succeed.
 
 Planning the later chapters turned up the parts of the proposal that
 they teach and stage 0 does not run yet, each named in its chapter's

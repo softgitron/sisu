@@ -1,0 +1,1020 @@
+##! Drops and calls of one function (stage 0's `sisu-codegen/src/func.rs`,
+##! "drops" and "calls"): a drop tests its flag, then frees a text's or a
+##! plain list's buffer inline or calls the runtime with the type's number;
+##! a call puts each argument in memory of its own, calls the instance, the
+##! dispatcher, the value's code or the runtime's intrinsic with its
+##! descriptor, and tests the status; the commonest intrinsics run inline
+##! (decisions 253, 260, 264 and 265).
+
+import stage1.sir.write
+import stage2.abi
+from stage1.sir import Callee, LocalId, Operand, Place, Program, Type
+from stage2.abi import WORD
+from stage2.gen import Cg, Target
+from stage2.lir import LirError, internal, unsupported
+from stage2.rvalue import is_text
+from stage2.scan import element_type, sized_op, target_type, wide_op
+
+## What `inline_intrinsic` did with a call: nothing (the runtime runs it),
+## all of it, or the common case, ending at the block given, the builder
+## at the block where the runtime runs the rest.
+pub enum Fast:
+    No
+    Done
+    Slow(int)
+
+pure def named_in(t: Type, names: list[str]) -> bool:
+    if let Type.Named(n, _) = t:
+        for x in names:
+            if n == x:
+                return True
+    return False
+
+impl Cg:
+    # -------------------------------------------------------------- drops
+    pub pure def drop_stmt(mut self, p: Program, place: Place, flag: LocalId?) -> () ! LirError:
+        # An iterator in the frame holds nothing to free.
+        if place.proj.is_empty() and self.frame_of(place.local).is_some():
+            return Ok(())
+        let ty0 = self.place_type(place)?
+        if not self.types.needs_drop(ty0)?:
+            return Ok(())
+        let done = self.b.create_block()
+        if let Some(fl) = flag:
+            let var_ = self.var_of(fl)
+            var a: int? = None
+            if var_.is_none():
+                a = Some(self.local_addr(fl)?)
+            var set = 0
+            match var_:
+                case Some(v):
+                    set = self.b.use_var(v)
+                case None:
+                    set = self.load(a ?? 0, 0)
+            let go = self.b.create_block()
+            self.b.brif(set, go, [], done, [])
+            self.b.switch_to_block(go)
+            let zero = self.iconst(0)
+            match var_:
+                case Some(v):
+                    self.b.def_var(v, zero)
+                case None:
+                    self.store_word(zero, a ?? 0, 0)
+        let (addr, ty) = self.place(p, place, Some(done))?
+        # A function value drops what its environment holds, when its last
+        # word names the environment's type (decision 248).
+        if let Some((tw, skip)) = self.fn_env(addr, ty)?:
+            let at = self.b.imm("iadd_imm", addr, WORD)
+            let t = self.b.imm("iadd_imm", tw, -1)
+            let t32 = self.b.convert("ireduce", "i32", t)
+            let st = self.rt_status(abi.SYM_DROP, [at, t32])?
+            self.check(st)
+            self.b.jump(skip, [])
+            self.b.switch_to_block(skip)
+            self.b.jump(done, [])
+            self.b.switch_to_block(done)
+            return Ok(())
+        # A text, or a list of values with nothing to drop, frees its
+        # buffer, if it has one, and is left empty (decision 253).
+        var plain_list = False
+        if let Type.Named(n, a) = ty:
+            if n == "list" and not a.is_empty():
+                plain_list = not self.types.needs_drop(a[0])?
+        if plain_list or named_in(ty, ["String", "Path", "bytes"]):
+            let ptr = self.load(addr, 0)
+            let free = self.b.create_block()
+            self.b.brif(ptr, free, [], done, [])
+            self.b.switch_to_block(free)
+            _ = self.rt(abi.SYM_FREE, [ptr])?
+            let zero = self.iconst(0)
+            for off in [0, 8, 16]:
+                self.store_word(zero, addr, off)
+            self.b.jump(done, [])
+            self.b.switch_to_block(done)
+            return Ok(())
+        let id = self.type_id(ty)?
+        let idv = self.i32const(id)
+        let st = self.rt_status(abi.SYM_DROP, [addr, idv])?
+        self.check(st)
+        self.b.jump(done, [])
+        self.b.switch_to_block(done)
+        return Ok(())
+
+    # -------------------------------------------------------------- calls
+
+    pub pure def call(
+        mut self, p: Program, dest: Place, callee: Callee, args: list[Operand]
+    ) -> () ! LirError:
+        match callee:
+            case Callee.Fn(name, tys):
+                var targs: list[Type] = []
+                for t in tys:
+                    targs.push(self.concrete_here(p, t)?)
+                return self.call_fn(p, dest, name, targs, args, 0, False)
+            case Callee.Trait(name, tys):
+                var ctys: list[Type] = []
+                for t in tys:
+                    ctys.push(self.concrete_here(p, t)?)
+                let (target, derefs) = self.resolve_trait(p, name, ctys)?
+                match target:
+                    case Target.Fn(f, targs):
+                        return self.call_fn(p, dest, f, targs, args, derefs, True)
+                    case Target.Intrinsic(i, targs):
+                        return self.call_intrinsic(p, dest, i, targs, args, derefs)
+                    case Target.Dyn(m, mtys):
+                        return self.call_dyn(p, dest, m, mtys, args, derefs)
+            case Callee.Intrinsic(name, tys):
+                var targs: list[Type] = []
+                for t in tys:
+                    targs.push(self.concrete_here(p, t)?)
+                return self.call_intrinsic(p, dest, name, targs, args, 0)
+            case Callee.Value(f):
+                return self.call_value(p, dest, f, args)
+
+    ## The arguments of a call, each in a slot of its own: the first through
+    ## `derefs` references, and, with `params`, each that the callee takes
+    ## by value read through its reference (decision 59).
+    pub pure def arguments(
+        mut self, p: Program, args: list[Operand], derefs: int, params: list[Type]?
+    ) -> list[(int, Type)] ! LirError:
+        var out: list[(int, Type)] = []
+        for i in range(len(args)):
+            let (v, t) = self.operand(p, args[i])?
+            var ty = t
+            let size = self.size(ty)?
+            var addr = self.in_memory(v, size)
+            if i == 0:
+                for _ in range(derefs):
+                    let Type.Ref(inner, _) = ty.copy() else:
+                        break
+                    let it = inner[0].copy()
+                    let ptr = self.load(addr, 0)
+                    let s = self.size(it)?
+                    let tmp = self.slot(s)
+                    self.copy_bytes(tmp, ptr, s)
+                    addr = tmp
+                    ty = it
+            if let Some(ps) = params:
+                if i < len(ps):
+                    let pt = ps[i].copy()
+                    var by_value = True
+                    if let Type.Ref(_, _) = pt:
+                        by_value = False
+                    if by_value:
+                        if let Type.Ref(inner, _) = ty.copy():
+                            if inner[0] == pt:
+                                let ptr = self.load(addr, 0)
+                                let s = self.size(pt)?
+                                let tmp = self.slot(s)
+                                self.copy_bytes(tmp, ptr, s)
+                                addr = tmp
+                                ty = pt
+            out.push((addr, ty))
+        return Ok(out)
+
+    ## A call of a trait's method on a `dyn`: its dispatcher, given the
+    ## address of the `dyn`'s two words and the other arguments.
+    pub pure def call_dyn(
+        mut self,
+        p: Program,
+        dest: Place,
+        name: str,
+        tys: list[Type],
+        args: list[Operand],
+        derefs: int,
+    ) -> () ! LirError:
+        if args.is_empty():
+            return internal("`{name}` without `self`")
+        let (v, ty) = self.operand(p, args[0])?
+        var addr = 0
+        var handle = False
+        if not tys.is_empty():
+            if let Type.Named(_, _) = tys[0]:
+                handle = True
+        if handle:
+            # `self` is a reference to the handle, behind `derefs` more.
+            var w = self.first_word(v)?
+            for _ in range(derefs + 1):
+                w = self.load(w, 0)
+            addr = w
+        else:
+            let size = self.size(ty)?
+            addr = self.in_memory(v, size)
+            # `ref ... ref dyn`: the innermost reference is the `dyn`'s words.
+            for _ in range(1, derefs):
+                addr = self.load(addr, 0)
+        var rest_args: list[Operand] = []
+        for k in range(1, len(args)):
+            rest_args.push(args[k].copy())
+        let rest = self.arguments(p, rest_args, 0, None)?
+        # The method owns its arguments: copies of handles are counted here,
+        # and a by-value `self` by the dispatcher (decision 237).
+        for k in range(len(rest)):
+            var moved = False
+            if let Operand.Move(_) = rest_args[k]:
+                moved = True
+            var by_ref = False
+            if let Type.Ref(_, _) = rest[k].1:
+                by_ref = True
+            if not moved and not by_ref:
+                self.count_at(rest[k].0, rest[k].1)?
+        let ret_ty = self.place_type(dest)?
+        var arg_tys: list[Type] = []
+        for (_, t) in rest:
+            arg_tys.push(t.copy())
+        let id = self.dispatcher(name, tys, arg_tys, ret_ty)?
+        let rsize = self.size(ret_ty)?
+        let ret = self.slot(rsize)
+        var call_args = [ret, addr]
+        for (a, _) in rest:
+            call_args.push(a)
+        let st = self.b.call(id, call_args, 1)[0]
+        # A `dyn` moved into the call gave its value to the method: its
+        # cell is empty (decision 216).
+        if let Type.Dyn(_, _) = ty:
+            let cell = self.load(addr, 8)
+            _ = self.rt(abi.SYM_FREE, [cell])?
+        self.check(st)
+        let (daddr, _) = self.place(p, dest, None)?
+        self.copy_bytes(daddr, ret, rsize)
+        return Ok(())
+
+    pub pure def call_fn(
+        mut self,
+        p: Program,
+        dest: Place,
+        name: str,
+        targs: list[Type],
+        args: list[Operand],
+        derefs: int,
+        adapt: bool,
+    ) -> () ! LirError:
+        let fi = self.function(name) else:
+            return internal("the program has no function `{name}`")
+        let f = ref p.functions[fi]
+        var params: list[Type] = []
+        for i in range(f.param_count):
+            params.push(self.concrete(p, f.locals[i + 1].ty, targs)?)
+        let ret_ty = self.concrete(p, f.locals[0].ty, targs)?
+        let id = self.instance(p, name, targs)?
+        var argv = self.arguments(p, args, derefs, if adapt: Some(params.copy()) else: None)?
+        # The callee owns its arguments: copies of handles, and a value read
+        # through a reference for a parameter that takes it, are counted
+        # (decision 237).
+        for i in range(len(argv)):
+            if i < len(args):
+                if let Operand.Move(_) = args[i]:
+                    continue
+            var pt = argv[i].1.copy()
+            if i < len(params):
+                pt = params[i].copy()
+            if let Type.Ref(_, _) = pt:
+                continue
+            self.count_at(argv[i].0, pt)?
+        # An `Iterable[T]` parameter takes a reference to what the caller
+        # passed, with its type (decision 210); a value moved in is the
+        # callee's to read, and dropped when the call returns.
+        var lent: list[(int, Type)] = []
+        for i in range(min(len(argv), len(params))):
+            let pt = params[i].copy()
+            let Type.Ref(want, _) = pt.copy() else:
+                continue
+            if not named_in(want[0], ["Iterable"]) or argv[i].1 == pt:
+                continue
+            var have = argv[i].1.copy()
+            var ptr = argv[i].0
+            if let Type.Ref(h, _) = argv[i].1:
+                have = h[0].copy()
+                ptr = self.load(argv[i].0, 0)
+            else:
+                lent.push((argv[i].0, argv[i].1.copy()))
+            let tid = self.type_id(have)?
+            let fat = self.slot(16)
+            let idv = self.iconst(tid)
+            self.store_word(idv, fat, 0)
+            self.store_word(ptr, fat, 8)
+            argv[i] = (fat, pt)
+        let rsize = self.size(ret_ty)?
+        let ret = self.slot(rsize)
+        var call_args = [ret]
+        for (a, _) in argv:
+            call_args.push(a)
+        let st = self.b.call(id, call_args, 1)[0]
+        var dropped: list[(int, int)] = []
+        for (addr, ty) in lent:
+            if self.types.needs_drop(ty)?:
+                dropped.push((addr, self.type_id(ty)?))
+        if dropped.is_empty() or p.functions[self.fx.fi].blocks[self.fx.cur].cleanup:
+            self.check(st)
+        else:
+            # A panic leaving the callee drops what it was lent too, as its
+            # unwinding goes on (decision 235).
+            let failed = self.b.create_block()
+            let cont = self.b.create_block()
+            self.b.brif(st, failed, [], cont, [])
+            self.b.switch_to_block(failed)
+            for (addr, t) in dropped:
+                let idv = self.i32const(t)
+                let dst = self.rt_status(abi.SYM_DROP, [addr, idv])?
+                let abort = self.b.create_block()
+                let next = self.b.create_block()
+                self.b.brif(dst, abort, [], next, [])
+                self.b.switch_to_block(abort)
+                _ = self.rt(abi.SYM_ABORT_UNWIND, [])?
+                self.b.trap(1)
+                self.b.switch_to_block(next)
+            let fail = self.fail_block()
+            self.b.jump(fail, [])
+            self.b.switch_to_block(cont)
+        for (addr, t) in dropped:
+            let idv = self.i32const(t)
+            let dst = self.rt_status(abi.SYM_DROP, [addr, idv])?
+            self.check(dst)
+        let (daddr, dty) = self.place(p, dest, None)?
+        let dsize = min(self.size(dty)?, rsize)
+        self.copy_bytes(daddr, ret, dsize)
+        return Ok(())
+
+    pub pure def call_intrinsic(
+        mut self,
+        p: Program,
+        dest: Place,
+        name: str,
+        targs: list[Type],
+        args: list[Operand],
+        derefs: int,
+    ) -> () ! LirError:
+        if let Some((kind, op)) = sized_op(name):
+            return self.call_sized(p, dest, kind, op, args)
+        if let Some((kind, op)) = wide_op(name):
+            return self.call_wide(p, dest, kind, op, args)
+        let i = self.intrinsic(name) else:
+            return unsupported("the intrinsic `{name}`")
+        self.note_intrinsic(name, targs)?
+        let dest_ty = self.place_type(dest)?
+        let argv = self.arguments(p, args, derefs, None)?
+        # What the intrinsic keeps (its `own` arguments) holds counted
+        # copies of capability handles (decision 237).
+        if let Some(decl) = p.intrinsic(name):
+            for k in decl.owns:
+                if k < len(args) and k < len(argv):
+                    if let Operand.Copy(_) = args[k]:
+                        self.count_at(argv[k].0, argv[k].1)?
+        # The commonest intrinsics run inline (decision 253).
+        var fast = self.frame_iterator(p, i, dest, argv)?
+        if let Fast.No = fast:
+            fast = self.inline_intrinsic(p, i, dest, argv)?
+        var done: int? = None
+        match fast:
+            case Fast.Done:
+                return Ok(())
+            case Fast.Slow(d):
+                done = Some(d)
+            case Fast.No:
+                pass
+        if abi.may_wait(i):
+            self.record_site(p)
+        let n = len(argv)
+        var desc = [i, n, len(targs), self.type_id(dest_ty)?]
+        for (_, t) in argv:
+            desc.push(self.type_id(t)?)
+        for t in targs:
+            desc.push(self.type_id(t)?)
+        let did = self.desc(desc)
+        let daddr = self.data_addr(did)
+        let arr = self.slot(8 * n)
+        for k in range(n):
+            self.store_word(argv[k].0, arr, k * 8)
+        let rsize = self.size(dest_ty)?
+        let ret = self.slot(rsize)
+        let st = self.rt_status(abi.SYM_INTRINSIC, [daddr, ret, arr])?
+        # A value moved into a parameter the intrinsic neither owns nor lets
+        # its result hold was only read: it is dropped now, when nothing
+        # observes its drop (decision 218).
+        if let Some(decl) = p.intrinsic(name):
+            var held: list[int] = []
+            for x in decl.owns:
+                held.push(x)
+            for x in decl.from_:
+                held.push(x)
+            for x in decl.inner:
+                held.push(x)
+            for x in decl.keeps:
+                held.push(x)
+            for k in range(min(len(args), len(argv))):
+                let Operand.Move(mp) = args[k].copy() else:
+                    continue
+                let t = argv[k].1.copy()
+                if held.contains(k) or abi.takes_iterable(i, k):
+                    continue
+                if self.place_type(mp)? != t:
+                    continue
+                if not self.types.needs_drop(t)? or self.types.observable_drop(t):
+                    continue
+                let tid = self.type_id(t)?
+                let idv = self.i32const(tid)
+                _ = self.rt_status(abi.SYM_DROP, [argv[k].0, idv])?
+        self.check(st)
+        let (addr, _) = self.place(p, dest, None)?
+        self.copy_bytes(addr, ret, rsize)
+        if let Some(d) = done:
+            self.b.jump(d, [])
+            self.b.switch_to_block(d)
+        return Ok(())
+
+    ## The slot of a local whose iterator lives in the frame.
+    pub pure def frame_of(self, l: LocalId) -> int?:
+        if l.index < len(self.fx.frames):
+            return self.fx.frames[l.index]
+        return None
+
+    ## A range, or an iterator over a borrowed list's elements, made into a
+    ## local whose object lives in the frame (decision 253).
+    pub pure def frame_iterator(
+        mut self, p: Program, i: int, dest: Place, argv: list[(int, Type)]
+    ) -> Fast ! LirError:
+        if not dest.proj.is_empty():
+            return Ok(Fast.No)
+        let slot = self.frame_of(dest.local) else:
+            return Ok(Fast.No)
+        if i == abi.I_RANGE:
+            if len(argv) < 3:
+                return internal("a range without its bounds")
+            let start = self.word_of_arg(argv[0])
+            let stop = self.word_of_arg(argv[1])
+            let step = self.word_of_arg(argv[2])
+            let fast = self.b.create_block()
+            let slow = self.b.create_block()
+            let done = self.b.create_block()
+            self.b.brif(step, fast, [], slow, [])
+            self.b.switch_to_block(fast)
+            let obj = self.b.stack_addr(slot)
+            let kind = self.iconst(abi.ITER_RANGE)
+            self.store_word(kind, obj, abi.ITER_KIND)
+            self.store_word(start, obj, abi.ITER_A)
+            self.store_word(stop, obj, abi.ITER_B)
+            self.store_word(step, obj, abi.ITER_C)
+            let (d, _) = self.place(p, dest, None)?
+            self.store_word(obj, d, 0)
+            self.b.jump(done, [])
+            self.b.switch_to_block(slow)
+            return Ok(Fast.Slow(done))
+        if i == abi.I_ITER_REF
+                or i == abi.I_ITER_MUT
+                or i == abi.I_LIST_ITER
+                or i == abi.I_SLICE_ITER:
+            if argv.is_empty():
+                return Ok(Fast.No)
+            let (list, lt) = self.base_of(argv[0].0, argv[0].1)
+            let elem = element_type(lt)?
+            let size = self.size(elem)?
+            let obj = self.b.stack_addr(slot)
+            let kind = self.iconst(abi.ITER_LIST_REF)
+            let zero = self.iconst(0)
+            let sv = self.iconst(size)
+            self.store_word(kind, obj, abi.ITER_KIND)
+            self.store_word(list, obj, abi.ITER_A)
+            self.store_word(zero, obj, abi.ITER_B)
+            self.store_word(sv, obj, abi.ITER_C)
+            let (d, _) = self.place(p, dest, None)?
+            self.store_word(obj, d, 0)
+            return Ok(Fast.Done)
+        return internal("an iterator in the frame made by `{abi.intrinsic_names()[i]}`")
+
+    pub pure def word_of_arg(mut self, a: (int, Type)) -> int:
+        let (b, _) = self.base_of(a.0, a.1)
+        return self.load(b, 0)
+
+    ## What a reference argument refers to, through every reference, and
+    ## its type.
+    pub pure def base_of(mut self, addr: int, ty: Type) -> (int, Type):
+        var a = addr
+        var t = ty.copy()
+        while True:
+            match t.copy():
+                case Type.Ref(inner, _):
+                    a = self.load(a, 0)
+                    t = inner[0].copy()
+                case _:
+                    break
+        return (a, t)
+
+    ## The commonest intrinsics compiled inline (decisions 253, 260, 264
+    ## and 265), as the runtime runs them on the values' layouts.
+    pub pure def inline_intrinsic(
+        mut self, p: Program, i: int, dest: Place, argv: list[(int, Type)]
+    ) -> Fast ! LirError:
+        # A formatter is the `String` it builds, empty at first (decision
+        # 265).
+        if i == abi.I_FMT_NEW and named_in(self.place_type(dest)?, ["String"]):
+            let (d, _) = self.place(p, dest, None)?
+            let zero = self.iconst(0)
+            for k in range(3):
+                self.store_word(zero, d, 8 * k)
+            return Ok(Fast.Done)
+        if argv.is_empty():
+            return Ok(Fast.No)
+        let (a0, t0) = argv[0].copy()
+        # Only arguments read in place, or holding nothing to drop.
+        var borrowed = t0 == Type.Str
+        if let Type.Ref(_, _) = t0:
+            borrowed = True
+        if not borrowed:
+            borrowed = not self.types.needs_drop(t0)?
+        if not borrowed:
+            return Ok(Fast.No)
+        let (b, bt) = self.base_of(a0, t0)
+        if i == abi.I_LEN and named_in(bt, ["list", "bytes"]):
+            let len = self.load(b, 8)
+            let (d, _) = self.place(p, dest, None)?
+            self.store_word(len, d, 0)
+            return Ok(Fast.Done)
+        if i == abi.I_SHARED_GET and named_in(bt, ["Shared"]):
+            let v = self.load(b, 0)
+            _ = self.rt(abi.SYM_SHARED_TOUCH, [v])?
+            let (d, _) = self.place(p, dest, None)?
+            self.store_word(v, d, 0)
+            return Ok(Fast.Done)
+        if (i == abi.I_FMT_TEXT or i == abi.I_FMT_DISPLAY or i == abi.I_STRING_PUSH)
+                and named_in(bt, ["String"]):
+            if len(argv) < 2:
+                return Ok(Fast.No)
+            let (a1, t1) = argv[1].copy()
+            if not self.read_in_place(t1)?:
+                return Ok(Fast.No)
+            let (v, vt) = self.base_of(a1, t1)
+            if is_text(vt):
+                let ptr = self.load(v, 0)
+                let len = self.load(v, 8)
+                _ = self.rt(abi.SYM_TEXT_PUSH, [b, ptr, len])?
+                return Ok(Fast.Done)
+            if vt == Type.Int and i == abi.I_FMT_DISPLAY:
+                let n = self.load(v, 0)
+                _ = self.rt(abi.SYM_TEXT_PUSH_INT, [b, n])?
+                return Ok(Fast.Done)
+            return Ok(Fast.No)
+        if (i == abi.I_STR_TO_STRING or i == abi.I_STRING_NEW) and is_text(bt):
+            if named_in(self.place_type(dest)?, ["String"]):
+                let ptr = self.load(b, 0)
+                let len = self.load(b, 8)
+                let (d, _) = self.place(p, dest, None)?
+                _ = self.rt(abi.SYM_TEXT_FROM, [d, ptr, len])?
+                return Ok(Fast.Done)
+            return Ok(Fast.No)
+        if (i == abi.I_DICT_GET or i == abi.I_DICT_CONTAINS or i == abi.I_SET_CONTAINS)
+                and named_in(bt, ["dict", "set"]):
+            if len(argv) < 2:
+                return Ok(Fast.No)
+            let (a1, t1) = argv[1].copy()
+            if not self.read_in_place(t1)?:
+                return Ok(Fast.No)
+            let kt = self.type_id(t1)?
+            let ktv = self.i32const(kt)
+            let value = self.i32const(if i == abi.I_DICT_GET: 1 else: 0)
+            let found = self.rt_status(abi.SYM_TABLE_FIND, [b, a1, ktv, value])?
+            let (d, _) = self.place(p, dest, None)?
+            if i == abi.I_DICT_GET:
+                # `Some` (tag 0) of the value's address, or `None` (1).
+                let none = self.b.icmp_imm("eq", found, 0)
+                let tag = self.b.convert("uextend", "i64", none)
+                self.store_word(tag, d, 0)
+                self.store_word(found, d, 8)
+            else:
+                self.store_word(found, d, 0)
+            return Ok(Fast.Done)
+        if i == abi.I_LIST_IS_EMPTY and named_in(bt, ["list"]):
+            let len = self.load(b, 8)
+            let empty = self.b.icmp_imm("eq", len, 0)
+            let w = self.b.convert("uextend", "i64", empty)
+            let (d, _) = self.place(p, dest, None)?
+            self.store_word(w, d, 0)
+            return Ok(Fast.Done)
+        if i == abi.I_STR_BYTE_LEN and is_text(bt):
+            let len = self.load(b, 8)
+            let (d, _) = self.place(p, dest, None)?
+            self.store_word(len, d, 0)
+            return Ok(Fast.Done)
+        if i == abi.I_CHAR_CODE and bt == Type.Char:
+            let c = self.load(b, 0)
+            let (d, _) = self.place(p, dest, None)?
+            self.store_word(c, d, 0)
+            return Ok(Fast.Done)
+        if (i == abi.I_OPTION_IS_SOME or i == abi.I_OPTION_IS_NONE) and named_in(bt, ["Option"]):
+            let tag = self.load(b, 0)
+            let cc = if i == abi.I_OPTION_IS_SOME: "eq" else: "ne"
+            let is = self.b.icmp_imm(cc, tag, 0)
+            let w = self.b.convert("uextend", "i64", is)
+            let (d, _) = self.place(p, dest, None)?
+            self.store_word(w, d, 0)
+            return Ok(Fast.Done)
+        if (i == abi.I_LIST_FIRST or i == abi.I_LIST_LAST) and named_in(bt, ["list"]):
+            let elem = element_type(bt)?
+            let size = self.size(elem)?
+            let len = self.load(b, 8)
+            let data = self.load(b, 0)
+            let (d, _) = self.place(p, dest, None)?
+            let some = self.b.create_block()
+            let none = self.b.create_block()
+            let done = self.b.create_block()
+            self.b.brif(len, some, [], none, [])
+            self.b.switch_to_block(some)
+            var at = 0
+            if i == abi.I_LIST_FIRST:
+                at = self.iconst(0)
+            else:
+                at = self.b.imm("iadd_imm", len, -1)
+            let off = self.b.imm("imul_imm", at, size)
+            let item = self.b.bin("iadd", data, off)
+            let zero = self.iconst(0)
+            self.store_word(zero, d, 0)
+            self.store_word(item, d, 8)
+            self.b.jump(done, [])
+            self.b.switch_to_block(none)
+            let one = self.iconst(1)
+            self.store_word(one, d, 0)
+            self.b.jump(done, [])
+            self.b.switch_to_block(done)
+            return Ok(Fast.Done)
+        if i == abi.I_LIST_POP and named_in(bt, ["list"]):
+            let elem = element_type(bt)?
+            let size = self.size(elem)?
+            let len = self.load(b, 8)
+            let (d, _) = self.place(p, dest, None)?
+            let some = self.b.create_block()
+            let none = self.b.create_block()
+            let done = self.b.create_block()
+            self.b.brif(len, some, [], none, [])
+            self.b.switch_to_block(some)
+            let last = self.b.imm("iadd_imm", len, -1)
+            self.store_word(last, b, 8)
+            let data = self.load(b, 0)
+            let off = self.b.imm("imul_imm", last, size)
+            let src = self.b.bin("iadd", data, off)
+            let zero = self.iconst(0)
+            self.store_word(zero, d, 0)
+            let payload = self.b.imm("iadd_imm", d, 8)
+            self.copy_bytes(payload, src, size)
+            self.b.jump(done, [])
+            self.b.switch_to_block(none)
+            let one = self.iconst(1)
+            self.store_word(one, d, 0)
+            self.b.jump(done, [])
+            self.b.switch_to_block(done)
+            return Ok(Fast.Done)
+        if i == abi.I_STR_BYTE_AT and is_text(bt):
+            if len(argv) < 2:
+                return Ok(Fast.No)
+            let (ia, _) = self.base_of(argv[1].0, argv[1].1)
+            let idx = self.load(ia, 0)
+            let len = self.load(b, 8)
+            let inside = self.b.icmp("ult", idx, len)
+            let (d, _) = self.place(p, dest, None)?
+            let fast = self.b.create_block()
+            let slow = self.b.create_block()
+            let done = self.b.create_block()
+            self.b.brif(inside, fast, [], slow, [])
+            self.b.switch_to_block(fast)
+            let data = self.load(b, 0)
+            let at = self.b.bin("iadd", data, idx)
+            let byte = self.b.uload8(at, 0)
+            self.store_word(byte, d, 0)
+            self.b.jump(done, [])
+            self.b.switch_to_block(slow)
+            return Ok(Fast.Slow(done))
+        if i == abi.I_STR_BYTE_SLICE and is_text(bt):
+            if len(argv) < 3:
+                return Ok(Fast.No)
+            let (p1, _) = self.base_of(argv[1].0, argv[1].1)
+            let (p2, _) = self.base_of(argv[2].0, argv[2].1)
+            let start = self.load(p1, 0)
+            let end = self.load(p2, 0)
+            let data = self.load(b, 0)
+            let len = self.load(b, 8)
+            # `0 <= start <= end <= len`, as unsigned comparisons.
+            let x = self.b.icmp("ule", start, end)
+            let y = self.b.icmp("ule", end, len)
+            let inside = self.b.bin("band", x, y)
+            let bounds = self.b.create_block()
+            let fast = self.b.create_block()
+            let slow = self.b.create_block()
+            let done = self.b.create_block()
+            self.b.brif(inside, bounds, [], slow, [])
+            self.b.switch_to_block(bounds)
+            # Each end at a character's first byte, or at either end.
+            let xs = self.at_char(start, len, data, b)
+            let ys = self.at_char(end, len, data, b)
+            let both = self.b.bin("band", xs, ys)
+            self.b.brif(both, fast, [], slow, [])
+            self.b.switch_to_block(fast)
+            let from_at = self.b.bin("iadd", data, start)
+            let n = self.b.bin("isub", end, start)
+            let (d, _) = self.place(p, dest, None)?
+            self.store_word(from_at, d, 0)
+            self.store_word(n, d, 8)
+            self.b.jump(done, [])
+            self.b.switch_to_block(slow)
+            return Ok(Fast.Slow(done))
+        if i == abi.I_CHAR_FROM_CODE and bt == Type.Int:
+            # A scalar value: at most U+10FFFF, not a surrogate.
+            let v = self.load(b, 0)
+            let below = self.b.icmp_imm("ule", v, 1114111)
+            let off = self.b.imm("iadd_imm", v, -55296)
+            let surrogate = self.b.icmp_imm("ult", off, 2048)
+            let valid = self.b.bin("band_not", below, surrogate)
+            let some = self.iconst(0)
+            let none = self.iconst(1)
+            let tag = self.b.select(valid, some, none)
+            let (d, _) = self.place(p, dest, None)?
+            self.store_word(tag, d, 0)
+            self.store_word(v, d, 8)
+            return Ok(Fast.Done)
+        if (i == abi.I_CHAR_IS_WHITESPACE or i == abi.I_CHAR_IS_ALPHABETIC) and bt == Type.Char:
+            # An ASCII character inline, any other the runtime's.
+            let c = self.load(b, 0)
+            let ascii = self.b.icmp_imm("ult", c, 128)
+            let fast = self.b.create_block()
+            let slow = self.b.create_block()
+            let done = self.b.create_block()
+            self.b.brif(ascii, fast, [], slow, [])
+            self.b.switch_to_block(fast)
+            var is = 0
+            if i == abi.I_CHAR_IS_WHITESPACE:
+                # A space, or `\t`, `\n`, `\v`, `\f` and `\r`.
+                let space = self.b.icmp_imm("eq", c, 32)
+                let k = self.b.imm("iadd_imm", c, -9)
+                let control = self.b.icmp_imm("ule", k, 4)
+                is = self.b.bin("bor", space, control)
+            else:
+                let lower = self.b.imm("bor_imm", c, 32)
+                let k = self.b.imm("iadd_imm", lower, -97)
+                is = self.b.icmp_imm("ule", k, 25)
+            let w = self.b.convert("uextend", "i64", is)
+            let (d, _) = self.place(p, dest, None)?
+            self.store_word(w, d, 0)
+            self.b.jump(done, [])
+            self.b.switch_to_block(slow)
+            return Ok(Fast.Slow(done))
+        if (i == abi.I_MAX or i == abi.I_MIN) and bt == Type.Int and len(argv) >= 2:
+            # Two `int`s, or references to them: the result is the value
+            # either way (decision 264).
+            if target_type(argv[1].1) == Type.Int and self.place_type(dest)? == Type.Int:
+                let (b1, _) = self.base_of(argv[1].0, argv[1].1)
+                let x = self.load(b, 0)
+                let y = self.load(b1, 0)
+                # The first unless the second is the greater (`max`) or the
+                # less (`min`).
+                let cc = if i == abi.I_MAX: "slt" else: "sgt"
+                let second = self.b.icmp(cc, x, y)
+                let r = self.b.select(second, y, x)
+                let (d, _) = self.place(p, dest, None)?
+                self.store_word(r, d, 0)
+                return Ok(Fast.Done)
+            return Ok(Fast.No)
+        if i == abi.I_LIST_PUSH and named_in(bt, ["list"]):
+            if len(argv) < 2:
+                return Ok(Fast.No)
+            let a1 = argv[1].0
+            let elem = element_type(bt)?
+            let size = self.size(elem)?
+            let len = self.load(b, 8)
+            let cap = self.load(b, 16)
+            let room = self.b.icmp("ult", len, cap)
+            let fast = self.b.create_block()
+            let grow = self.b.create_block()
+            self.b.brif(room, fast, [], grow, [])
+            # Without room, the runtime grows the buffer as its push would.
+            self.b.switch_to_block(grow)
+            let bytes = self.iconst(size)
+            _ = self.rt(abi.SYM_LIST_RESERVE, [b, bytes])?
+            self.b.jump(fast, [])
+            self.b.switch_to_block(fast)
+            let data = self.load(b, 0)
+            let off = self.b.imm("imul_imm", len, size)
+            let at = self.b.bin("iadd", data, off)
+            self.copy_bytes(at, a1, size)
+            let more = self.b.imm("iadd_imm", len, 1)
+            self.store_word(more, b, 8)
+            return Ok(Fast.Done)
+        if i == abi.I_ITER_NEXT and named_in(bt, ["Iter"]):
+            return self.inline_next(p, dest, b)
+        return Ok(Fast.No)
+
+    ## Whether an argument of type `t` is read in place, or holds nothing to
+    ## drop.
+    pub pure def read_in_place(mut self, t: Type) -> bool ! LirError:
+        if t == Type.Str:
+            return Ok(True)
+        if let Type.Ref(_, _) = t:
+            return Ok(True)
+        return Ok(not self.types.needs_drop(t)?)
+
+    ## Whether `k` is at a character's first byte of the text, or at either
+    ## end.
+    pub pure def at_char(mut self, k: int, len: int, data: int, b: int) -> int:
+        let before = self.b.icmp("ult", k, len)
+        let byte = self.b.bin("iadd", data, k)
+        # A byte past the text is never read: the text's header stands in.
+        let at = self.b.select(before, byte, b)
+        let first = self.b.sload8(at, 0)
+        let lead = self.b.icmp_imm("sge", first, -64)
+        let edge = self.b.icmp_imm("eq", k, 0)
+        let end = self.b.icmp("eq", k, len)
+        let either = self.b.bin("bor", edge, end)
+        return self.b.bin("bor", lead, either)
+
+    ## `Iter.next` of a range or of a borrowed list's elements, stepped in
+    ## the iterator's header; any other kind is the runtime's.
+    pub pure def inline_next(mut self, p: Program, dest: Place, b: int) -> Fast ! LirError:
+        let obj = self.load(b, 0)
+        let (d, _) = self.place(p, dest, None)?
+        var blocks: list[int] = []
+        for _ in range(8):
+            blocks.push(self.b.create_block())
+        let null_ok = blocks[0]
+        let range = blocks[1]
+        let not_range = blocks[2]
+        let more = blocks[3]
+        let list = blocks[4]
+        let list_some = blocks[5]
+        let none = blocks[6]
+        let slow = blocks[7]
+        let done = self.b.create_block()
+        # A null iterator (one moved out) is the runtime's.
+        self.b.brif(obj, null_ok, [], slow, [])
+        self.b.switch_to_block(null_ok)
+        let kind = self.load(obj, abi.ITER_KIND)
+        let is_range = self.b.icmp_imm("eq", kind, abi.ITER_RANGE)
+        self.b.brif(is_range, range, [], not_range, [])
+        # A range: the current value, unless the step past it overflows,
+        # which the runtime turns into its end.
+        self.b.switch_to_block(range)
+        let cur = self.load(obj, abi.ITER_A)
+        let stop = self.load(obj, abi.ITER_B)
+        let step = self.load(obj, abi.ITER_C)
+        let up = self.b.icmp_imm("sgt", step, 0)
+        let below = self.b.icmp("slt", cur, stop)
+        let above = self.b.icmp("sgt", cur, stop)
+        let left = self.b.select(up, below, above)
+        self.b.brif(left, more, [], none, [])
+        self.b.switch_to_block(more)
+        let next = self.b.bin("iadd", cur, step)
+        # Overflow: the sum's sign differs from both operands'.
+        let x = self.b.bin("bxor", cur, next)
+        let y = self.b.bin("bxor", step, next)
+        let both = self.b.bin("band", x, y)
+        let over = self.b.icmp_imm("slt", both, 0)
+        let next2 = self.b.select(over, stop, next)
+        self.store_word(next2, obj, abi.ITER_A)
+        let zero = self.iconst(0)
+        self.store_word(zero, d, 0)
+        self.store_word(cur, d, 8)
+        self.b.jump(done, [])
+        # A borrowed list's elements: the address of the next one.
+        self.b.switch_to_block(not_range)
+        let is_list = self.b.icmp_imm("eq", kind, abi.ITER_LIST_REF)
+        self.b.brif(is_list, list, [], slow, [])
+        self.b.switch_to_block(list)
+        let l = self.load(obj, abi.ITER_A)
+        let idx = self.load(obj, abi.ITER_B)
+        let len = self.load(l, 8)
+        let has = self.b.icmp("ult", idx, len)
+        self.b.brif(has, list_some, [], none, [])
+        self.b.switch_to_block(list_some)
+        let data = self.load(l, 0)
+        let size = self.load(obj, abi.ITER_C)
+        let off = self.b.bin("imul", idx, size)
+        let item = self.b.bin("iadd", data, off)
+        let next_idx = self.b.imm("iadd_imm", idx, 1)
+        self.store_word(next_idx, obj, abi.ITER_B)
+        let zero2 = self.iconst(0)
+        self.store_word(zero2, d, 0)
+        self.store_word(item, d, 8)
+        self.b.jump(done, [])
+        self.b.switch_to_block(none)
+        let one = self.iconst(1)
+        self.store_word(one, d, 0)
+        self.b.jump(done, [])
+        self.b.switch_to_block(slow)
+        return Ok(Fast.Slow(done))
+
+    pub pure def call_value(
+        mut self, p: Program, dest: Place, f: Operand, args: list[Operand]
+    ) -> () ! LirError:
+        let (v, t) = self.operand(p, f)?
+        var ty = t
+        let size = self.size(ty)?
+        var addr = self.in_memory(v, size)
+        while True:
+            match ty.copy():
+                case Type.Ref(inner, _):
+                    ty = inner[0].copy()
+                    addr = self.load(addr, 0)
+                case _:
+                    break
+        let Type.Fn(_, ret, _) = ty.copy() else:
+            return internal("calling a `{write.ty(ty)}`")
+        let ret_ty = ret[0].copy()
+        let code = self.load(addr, 0)
+        # The address of the environment the value holds (decision 224).
+        let env = self.b.imm("iadd_imm", addr, WORD)
+        let argv = self.arguments(p, args, 0, None)?
+        # The callee owns its arguments: copies of handles are counted.
+        for k in range(min(len(args), len(argv))):
+            if let Operand.Move(_) = args[k]:
+                continue
+            self.count_at(argv[k].0, argv[k].1)?
+        let rsize = self.size(ret_ty)?
+        let retp = self.slot(rsize)
+        var call_args = [retp, env]
+        for (a, _) in argv:
+            call_args.push(a)
+        let st = self.b.call_indirect(len(argv) + 1, code, call_args)
+        self.check(st)
+        let (daddr, dty) = self.place(p, dest, None)?
+        let dsize = min(self.size(dty)?, rsize)
+        self.copy_bytes(daddr, retp, dsize)
+        return Ok(())
+
+    ## An operation of a sized integer type (`sisu_rt_sized`).
+    pub pure def call_sized(
+        mut self, p: Program, dest: Place, kind: int, op: int, args: list[Operand]
+    ) -> () ! LirError:
+        var words: list[int] = []
+        var flags = 0
+        for k in range(min(len(args), 2)):
+            let (w, t) = self.scalar(p, args[k])?
+            if let Type.Named(n, _) = t:
+                if n == "u64":
+                    flags = flags | (if k == 0: 1 else: 2)
+            words.push(w)
+        while len(words) < 2:
+            words.push(self.iconst(0))
+        # The operations that can neither fail nor leave the type's range,
+        # inline (decision 253).
+        let x = words[0]
+        let y = words[1]
+        let unsigned = kind < len(abi.sized_types()) and abi.sized_types()[kind].starts_with("u")
+        var fast: int? = None
+        if op == abi.SIZED_TO_INT and flags == 0:
+            fast = Some(x)
+        elif op == abi.SIZED_WIDEN:
+            fast = Some(x)
+        elif op == abi.SIZED_AND:
+            fast = Some(self.b.bin("band", x, y))
+        elif op == abi.SIZED_OR:
+            fast = Some(self.b.bin("bor", x, y))
+        elif op == abi.SIZED_XOR:
+            fast = Some(self.b.bin("bxor", x, y))
+        elif op == abi.SIZED_CMP:
+            # 0, 1 or 2: less, equal or greater.
+            let lcc = if flags != 0: "ult" else: "slt"
+            let gcc = if flags != 0: "ugt" else: "sgt"
+            let lt = self.b.icmp(lcc, x, y)
+            let gt = self.b.icmp(gcc, x, y)
+            let lt64 = self.b.convert("uextend", "i64", lt)
+            let gt64 = self.b.convert("uextend", "i64", gt)
+            let dv = self.b.bin("isub", gt64, lt64)
+            fast = Some(self.b.imm("iadd_imm", dv, 1))
+        elif op == abi.SIZED_NOT and not unsigned:
+            fast = Some(self.b.un("bnot", x))
+        if let Some(r) = fast:
+            let (addr, _) = self.place(p, dest, None)?
+            self.store_word(r, addr, 0)
+            return Ok(())
+        let out = self.slot(16)
+        let kv = self.i32const(kind)
+        let ov = self.i32const(op)
+        let fv = self.i32const(flags)
+        let st = self.rt_status(abi.SYM_SIZED, [kv, ov, fv, x, y, out])?
+        self.check(st)
+        let (addr, ty) = self.place(p, dest, None)?
+        let size = self.size(ty)?
+        self.copy_bytes(addr, out, size)
+        return Ok(())
+
+    ## An operation of `i128` or `u128` (`sisu_rt_wide`): the operands in
+    ## memory, with their types.
+    pub pure def call_wide(
+        mut self, p: Program, dest: Place, kind: int, op: int, args: list[Operand]
+    ) -> () ! LirError:
+        var operands: list[(int, int)] = []
+        for k in range(min(len(args), 2)):
+            let (a, t) = self.operand_in_memory(p, args[k])?
+            let id = self.type_id(t)?
+            operands.push((a, self.i32const(id)))
+        while len(operands) < 2:
+            let z = self.iconst(0)
+            let z32 = self.i32const(0)
+            operands.push((z, z32))
+        # At most an option of a 128-bit integer: a tag and two words.
+        let out = self.slot(24)
+        let kv = self.i32const(kind)
+        let ov = self.i32const(op)
+        let (x, xt) = operands[0]
+        let (y, yt) = operands[1]
+        let st = self.rt_status(abi.SYM_WIDE, [kv, ov, x, xt, y, yt, out])?
+        self.check(st)
+        let (addr, ty) = self.place(p, dest, None)?
+        let size = self.size(ty)?
+        self.copy_bytes(addr, out, size)
+        return Ok(())

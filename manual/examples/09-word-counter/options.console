@@ -1,0 +1,8 @@
+$ sisu run -- --min-count 2 poem.txt
+   6  the
+   5  is
+   2  lake
+   2  warm
+$ sisu run -- --min-count many poem.txt
+error: InvalidValue(name="--min-count", value="many")
+  at src/main.sisu:20:19

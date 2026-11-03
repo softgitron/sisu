@@ -1,0 +1,21 @@
+# `?` passes an error on to the caller.
+error ClockError:
+    NoColon(text: String)
+    NotANumber(text: String)
+    OutOfRange(value: int)
+
+def number(text: str, limit: int) -> int ! ClockError:
+    let n = text.parse_int() else:
+        return Err(NotANumber(text.to_string()))
+    if not (0 <= n < limit):
+        return Err(OutOfRange(n))
+    return Ok(n)
+
+def minutes_since_midnight(text: str) -> int ! ClockError:
+    let hours, minutes = text.split_once(":") else:
+        return Err(NoColon(text.to_string()))
+    return Ok(number(hours, 24)? * 60 + number(minutes, 60)?)
+
+def main():
+    for text in ["7:45", "12.30", "25:00", "8:x"]:
+        print("{text}: {minutes_since_midnight(text)}")

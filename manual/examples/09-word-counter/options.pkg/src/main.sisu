@@ -1,0 +1,26 @@
+##! wordcount: how often each word appears in text files.
+
+import cli
+
+## What the command line can say.
+struct Options:
+    min_count: int = 1
+    paths: list[Path]
+
+## How often each word appears in the files at `paths`, in lower case.
+def count_words(fs: Fs, paths: list[Path]) -> dict[String, int] ! IoError:
+    var counts: dict[String, int] = {}
+    for path in paths:
+        let text = fs.read_to_string(path)?
+        for word in text.split_whitespace():
+            counts.entry(word.to_lowercase()).or_insert(0) += 1
+    return Ok(counts)
+
+def main(sys: System) -> ! {IoError, cli.Error}:
+    let options = cli.parse[Options](sys.env.args())?
+    let counts = count_words(sys.fs, options.paths)?
+    let by_count = sorted([(-n, word) for word, n in counts])
+    for minus_n, word in by_count:
+        if -minus_n >= options.min_count:
+            print("{-minus_n:>4}  {word}")
+    return Ok(())

@@ -1,0 +1,9 @@
+$ sisu run unused.sisu
+error[E0318]: this `int ! BankError` is not used; handle it, or discard it with `_ = ...`
+  --> unused.sisu:11:5
+   |
+11 |     withdraw(100, 500)
+   |     ^^^^^^^^^^^^^^^^^^
+  = fix: discard it explicitly: `_ = `
+
+error[D0006]: the program was not run: errors found (1)

@@ -1,0 +1,15 @@
+# `main` can return an error, which ends the program with status 1.
+error BankError:
+    TooLittle(balance: int, wanted: int)
+
+def withdraw(balance: int, wanted: int) -> int ! BankError:
+    if wanted > balance:
+        return Err(TooLittle(balance, wanted))
+    return Ok(balance - wanted)
+
+def main() -> ! BankError:
+    let left = withdraw(100, 30)?
+    print("{left} left after the first")
+    let last = withdraw(left, 80)?
+    print("{last} left after the second")
+    return Ok(())

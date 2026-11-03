@@ -1,0 +1,9 @@
+$ sisu run forgotten_case.sisu
+error[E0314]: this `match` does not cover `Fog(_)`
+  --> forgotten_case.sisu:9:12
+  |
+9 |     return match weather:
+  |            ^^^^^^^^^^^^^
+  = note: add an arm for `Fog(_)`, or a `case _` arm
+
+error[D0006]: the program was not run: errors found (1)

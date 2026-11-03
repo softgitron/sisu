@@ -1,0 +1,17 @@
+# An enum's value is one of a fixed set of variants.
+enum Suit:
+    Clubs
+    Diamonds
+    Hearts
+    Spades
+
+    def is_red(self) -> bool:
+        return match self:
+            case Diamonds | Hearts: True
+            case Clubs | Spades: False
+
+def main():
+    let trump = Suit.Hearts
+    print("{trump:?} is red: {trump.is_red()}")
+    for suit in [Clubs, Spades]:
+        print("{suit:?} is red: {suit.is_red()}")

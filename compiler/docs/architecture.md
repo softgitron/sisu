@@ -1027,6 +1027,8 @@ source 0 "wordcount.sisu"
 source 1 "<std>/prelude.sisu"
 entry main system result          -- `system`: main takes System; `result`: it returns T ! E
 test "counts case-insensitively" test#0
+test "parse/rejects empty input" test#1 tags "slow" "io"   -- its `@tag`s, when it has any
+bench "wordcount" bench#0          -- a benchmark: its name and the function that runs it
 
 struct Options { top: int = Options#top, paths: list[Path] }
 struct Res drop Res.drop { id: int }
@@ -1073,6 +1075,18 @@ _1 = call trait Shape.area[$0](copy _2) | call copy _3(copy _4)
 drop _1 | drop _1 if _5 | dead _1
 goto bb2 | switch copy _1 [0: bb3, 1: bb4, else: bb5] | return | resume | unreachable
 ```
+
+The program `sisu run`, `build` and `sir` see is built without its tests:
+it has no `test` and no `bench` lines. `sisu sir --tests` prints the
+program `sisu test` and `sisu bench` run, built with them (`@cfg(test)`
+holds): a `test` line for each test, in the order the program declares
+them, its name the test's own after its suites' (`"suite/test"`), the
+function `test#K` (a parametrised test is a test for each case, its name
+the case's), and, after the function, `tags` and each `@tag("...")` of the
+test as a quoted text, in the order written, when it has any; then a
+`bench` line for each benchmark, its name after its suites' too and the
+function `bench#K`, which the program's functions include. `sisu test
+--from-sir FILE` and `sisu bench --from-sir FILE` run them (decision 285).
 
 Types: `int f64 bool char str () Never`, a named type with arguments
 (`list[int]`, `Option[str]`, `cli.Error`), tuples `(int, str)` and
@@ -3131,7 +3145,9 @@ resolved 133.0 ms`), of generating its code, and the link.
 --native --from-sir FILE [ARGS...]` compile a file of serialised SIR
 instead, without the front end (section "From serialised SIR" below), and
 `sisu run --from-sir FILE [ARGS...]` runs one in the interpreter
-(decision 254).
+(decision 254). `--from-lir FILE` compiles a file of LIR, the low IR that
+stage 2, the backend written in Sisu, lowers SIR to (section "LIR" below;
+decisions 281 to 284).
 
 ### Values
 
@@ -3609,6 +3625,182 @@ it beside the native mode. The mode `--interpreted-from-sir` runs the same
 SIR in the interpreter (`sisu run --from-sir`), so that what a front end
 serialised is checked against both of stage 0's ways of running it.
 
+### LIR
+
+LIR is the backend-neutral low IR of D-087's first step: the program as
+the backend's single pass sees it, which stage 2, the backend written in
+Sisu (`compiler/stage2`), lowers SIR to, and which every backend of
+D-087 and D-088 starts from (decisions 281 to 284). It holds what
+`sisu-codegen` decides between SIR and Cranelift IR: the layouts of the
+values and the type table, every SIR local in a slot of its function's
+frame (or, in the release profile, a variable, decision 246), the calls
+by address that return the status byte (decision 189), the entry probe,
+the count of nested calls and the yield points (decisions 190, 203, 204
+and 234), the overflow and bounds checks as branches to cold blocks
+(decision 270), drop glue, dispatchers and thunks as ordinary functions,
+the runtime's entry points by their symbols, the read-only data with the
+words that hold functions' addresses, a source location for every
+instruction, and what the debug information needs beyond the code (each
+function's name, file and line, its named locals with their slots, and a
+description of each local's Sisu type). What it leaves to the backend is
+what only machine code knows: where each slot lies in the frame, which
+register holds a value, the encoding, the line table's addresses and the
+call frame information, which the backend makes from the code it writes,
+and the probe reserve of a task's stack, which it measures from the
+frames it laid out (decision 234).
+
+A function's body is the calls `sisu-codegen` makes of Cranelift's
+function builder, one per line, in their order: an instruction defines its
+values (numbered in the order defined, the entry's parameters first), a
+variable is used and defined as the builder's are (`use`, `def`), a block
+is made, marked cold and switched to as the builder's is, and a `switch`
+says how many blocks the function had made when it was written, so that
+a backend that numbers its blocks as it makes them makes the switch's
+own after them. So the translation of LIR into Cranelift IR inside the
+Rust backend (`sisu-codegen/src/lir.rs` reads it, `translate.rs` makes
+the calls) gives each function the IR the backend gives it from SIR,
+value for value and block for block, and the object file and the
+executable are the same bytes; the conformance runner holds every case of
+`native.list` to that (decision 284). A debug backend that compiles LIR
+in one pass reads the same lines as a sequence of typed operations on
+virtual registers with explicit control flow; the variables are SSA
+construction's, the only state it carries across blocks.
+
+`sisu2 lir FILE.sir [--release] [--output FILE.lir]` (the script
+`compiler/stage2/sisu2`, which builds stage 2 natively on first use, as
+`sisu1` builds stage 1) prints a program's LIR; `sisu build --native
+--from-lir FILE.lir [--output PATH]` and `sisu run --native --from-lir
+FILE.lir [ARGS...]` compile it, the executable named by the file's stem
+(`--from-lir` goes with `--native`, `D0119`). Stage 2 reads the SIR
+itself (`stage2/src/read.sisu`, a transcription of `sisu-sir/src/read.rs`,
+since stage 1 writes SIR but has no reader of it) into stage 1's SIR types
+(`stage1.sir`, a path dependency), and lowers it rule for rule as
+`sisu-codegen` does (`stage2/src/gen.sisu` is `lib.rs`, `func.sisu`,
+`rvalue.sisu`, `call.sisu` and `scan.sisu` are `func.rs`, `facts.sisu`
+is `facts.rs`, `layout.sisu` is `layout.rs`, `debug.sisu` is the part of
+`debug.rs` that describes types, `abi.sisu` is the part of
+`sisu-rt/src/abi.rs` the code generator shares), in both profiles. It lowers the SIR of `examples/wordcount` (5 065 lines) to 39 108
+lines of LIR in 0.07 s.
+
+#### The text form
+
+One construct per line; blank lines and lines starting with `#` are
+ignored, and leading spaces are not significant. The lowering writes it
+deterministically, and the same SIR gives the same bytes.
+
+```text
+lir 1
+profile debug                                   -- or `release`
+source 0 "hello.sisu"                           -- the program's files, as SIR numbers them
+source 1 "<std>/prelude.sisu"
+data d0 import SISU_RT_DEPTH                    -- a data symbol of the runtime
+data d4 bytes "main\x00"                        -- read-only bytes
+data d7 align 8 u32 0 1 0 0 1                   -- 32-bit words, little-endian
+data d40 align 8 zeros 16 func 0 sisu$P#drop$7 func 8 sisu$L#drop$9   -- words holding function addresses
+declare sisu$main$1 local sisu 0                -- a function of Sisu's convention with 0 arguments
+declare sisu_rt_alloc import (i64) -> (i64)     -- a runtime entry point
+declare main export (i32, i64) -> (i32)
+function sisu$main$1 probed name "main" source 0 line 2
+    slot s0 8                                   -- the frame, in the order the slots were made
+    vars 2                                      -- variables x0 and x1, each 64 bits
+    local "x" t0 s0 line 3                      -- a named local, for the debugger
+block b0
+    v1 = iconst.i64 2
+    def x0, v1
+    v3 = get_stack_pointer
+    ...
+    brif v6, b1, b2
+block b1 cold
+    ...
+end
+types
+type t0 base "int" signed 8
+stats 1 33 0 0 0 0 0
+```
+
+The items between the sources and `types` come in the order the lowering
+made them, which is the order of the object file: a symbol is declared
+before anything refers to it, and the functions are defined in this
+order.
+
+- `data dN import NAME` declares the runtime's data symbol `NAME`; `data
+  dN [align A] bytes "..."` defines read-only bytes (printable ASCII as
+  itself, `\\`, `\"` and `\xHH` for any other byte); `u32 W...` defines
+  32-bit words; `zeros N` defines `N` zero bytes, in which each `func
+  OFFSET SYMBOL` is a word holding a function's address. Data is numbered
+  in the order it is declared, imports included.
+- `declare SYMBOL LINKAGE SIGNATURE` declares a function: `local` (the
+  program's), `import` (the runtime's) or `export` (C's `main`). The
+  signature `sisu N` is Sisu's convention: `N + 1` 64-bit addresses (the
+  result's, then each argument's) and the 8-bit status (decision 189);
+  otherwise `(T, ...) -> (T, ...)`.
+- `function SYMBOL FRAME name "SHOWN" [source S line L]` defines a
+  declared function, up to `end`. `FRAME` says how its frame counts
+  toward the probe reserve of a task's stack (decisions 203 and 234):
+  `probed` (its entry probes the stack), `unprobed` (a dispatcher or a
+  thunk) or `outside` (C's `main`). `SHOWN` is the name the debugger
+  shows, `source` and `line` where it is declared. Its first lines are the
+  frame: `slot sN SIZE` for each slot in the order made (`SIZE` bytes, at
+  least 8, aligned to a word), `vars N`, and `local "NAME" tK sN
+  [indirect] [param] [line L]` for each named local (its type's
+  description, its slot, `indirect` when the slot holds the value's
+  address, as a parameter's does, `param` for a parameter). Then its
+  blocks.
+- `block bN [cold]` switches to block `N`, made earlier, numbered in the
+  order made; `cold` marks a block only a panic, a failed check or
+  unwinding reaches, which the backend places after the rest (decision
+  270). The first is the entry, whose parameters are the function's.
+- `types` starts the descriptions of the debug information's types (below);
+  `stats` ends the file with the counts `SISU_NATIVE_TIMES` reports: the
+  function instances lowered, the SIR statements and terminators, the
+  index checks, those proven, the overflow checks, those proven, and the
+  tests decided (decision 270).
+
+Values are `vN`, each defined once; types are `i8`, `i32`, `i64`, `f32`
+and `f64`. An operation that defines values starts with them (`v7 =
+...`, `v8, v9 = ...`):
+
+| Operation | Meaning |
+|---|---|
+| `iconst.T N` | the constant `N` (a float's is its bits) |
+| `iadd`, `isub`, `imul`, `sdiv`, `srem`, `ishl`, `sshr`, `band`, `bor`, `bxor`, `band_not`, `fadd`, `fsub`, `fmul`, `fdiv` `a, b` | arithmetic, the integer kinds wrapping |
+| `iadd_imm`, `imul_imm`, `bxor_imm`, `bor_imm` `a, N`; `ineg`, `bnot`, `fneg` `a` | the same with a constant; negation and complement |
+| `icmp.CC a, b`, `icmp_imm.CC a, N`, `fcmp.CC a, b` | a comparison giving an `i8`, 1 or 0 (`eq ne slt sle sgt sge ult ule ugt uge`; `eq ne lt le gt ge`) |
+| `sadd_overflow`, `ssub_overflow`, `smul_overflow` `a, b` | the wrapped result and the overflow flag |
+| `select c, a, b` | `a` when `c` is not 0, else `b` |
+| `uextend.T`, `ireduce.T`, `bitcast.T`, `fpromote.T`, `fdemote.T` `a` | conversions |
+| `load.T a, OFF`, `uload8 a, OFF`, `sload8 a, OFF`; `store v, a, OFF` | memory at `a + OFF`, aligned, never faulting |
+| `stack_addr sN`, `stack_load sN`, `stack_store v, sN` | a slot's address, its first word |
+| `symbol_value dN`, `func_addr SYMBOL`, `get_stack_pointer` | addresses |
+| `call SYMBOL(a, ...)`, `call_indirect N, f(a, ...)`, `memcpy d, s, n` | calls; `call_indirect` of Sisu's convention with `N` arguments |
+| `use xN`, `def xN, v`, `param bN` | a variable's value, a new one; a parameter of a block |
+| `loc LINE COL` | the source location of the operations that follow |
+| `probe_reserve` | the probe reserve of a task's stack, which the backend computes (decision 234) |
+| `jump bN(a, ...)`, `brif c, bA(...), bB(...)`, `switch v, bD, [K bA, ...] made M`, `return a, ...`, `trap N` | the terminators |
+
+#### Debug types
+
+A named local's type is described once, `type tN KIND ...`, in the order
+the debug information first needs it: the functions in the order defined,
+their locals in order, each type numbered before the types it holds, as
+the DWARF writer of decision 227 walks them, so that the translation,
+walking the descriptions, makes the same entries in the same order:
+
+```text
+type t0 base "int" signed 8              -- a base type, shared by its name
+type t1 str                              -- `&str`
+type t2 struct "Point" 16 { "x" t0 @0, "y" t0 @8 }
+type t3 tuple "(int, str)" 24 { 0 t0 @0, 1 t1 @8 }
+type t4 pointer "ref Point" t2           -- a reference or a box
+type t5 text "String" 24                 -- `String`, `Path`, `bytes`
+type t6 list "list[int]" 24 "&[int]" t0
+type t7 enum "Option[int]" 16 @0 { } { "Some" { "__0" t0 @8 }, "None" { } }
+type t8 errset "{A, B}" 48 { 17 "A" t9, 18 "B" t10 }
+type t11 alias t8                        -- the description of another
+type t12 opaque "dyn Shape" 16           -- words shown as words
+type t13 word "Scope"                    -- one word of the runtime's
+```
+
 ### Coverage
 
 `conformance/native.list` names the cases the backend builds and runs:
@@ -3631,8 +3823,10 @@ compares its standard output, exit status and standard error with the
 files the interpreter meets, and requires the runtime's report to say
 that nothing it allocated is live at exit (decision 226); `cargo test`
 does the same (`crates/sisu-driver/tests/native.rs`), from source, from
-serialised SIR and with the release profile (every contract checked,
-decision 232), and CI runs all three on every push. `--native-survey LIST` tries every
+serialised SIR, with the release profile (every contract checked,
+decision 232) and from the LIR stage 2 lowers the SIR to (each
+executable byte for byte the one from the SIR, decision 284), and CI runs
+all four on every push. `--native-survey LIST` tries every
 runnable case the list leaves out and says which would pass, or the first
 construct that stops each.
 
@@ -6154,3 +6348,100 @@ library", "Tasks and the scheduler", "Capabilities", "Stage 2")
      2.7 to 2.9 s. `run/proven_checks` pins what the facts prove and the
      check they keep, natively in the three modes, and the driver's tests
      hold the counts of its release build. This changes no front-end rule.
+
+**Stage 2 in Sisu, step 1: LIR** (section "Stage 2", "LIR"; D-087)
+
+281. LIR, the low IR of D-087, is the code generator's own calls of
+     Cranelift's function builder, one per line and in their order, over
+     values, blocks, slots and variables numbered as the builder numbers
+     them, with the module's declarations and data in the order of the
+     object file, and with what the debug information needs beyond the
+     code said outright: each function's name, file and line, its named
+     locals with their slots, and a description of each local's type, in
+     the order the DWARF writer of decision 227 walks them. The other
+     shapes were an SSA IR after the variables are resolved, which a
+     lowering in Sisu would have had to build exactly as
+     cranelift-frontend's SSA builder does (its block parameters and its
+     value numbers) to give the same machine code, and a typed IR of its
+     own, whose translation could not be checked byte for byte. Holding
+     the builder's calls, LIR keeps every decision of `sisu-codegen` (the
+     layouts and the type table, the frames, calls by address with the
+     status byte, probes and yield points, checks as branches to cold
+     blocks, glue, dispatchers and thunks), and a one-pass backend reads
+     the same lines as typed operations on virtual registers in explicit
+     blocks, the variables being SSA construction's. What LIR leaves out
+     is what only machine code knows (where slots lie in the frame,
+     registers, encodings, the line table's addresses, call frame
+     information) and the probe reserve, which the backend measures from
+     the frames it lays out. A `switch` says how many blocks were made
+     before it, so that a backend numbering its blocks as it makes them
+     puts the switch's own after them, without LIR describing how
+     Cranelift's `Switch` splits its cases. The form is versioned (`lir
+     1`).
+282. Stage 2 (`compiler/stage2`) is a Sisu package with stage 1 as a path
+     dependency for the SIR types, and lowers serialised SIR to LIR as a
+     transcription of `sisu-codegen`, rule for rule: its modules mirror the
+     Rust ones, and the program's state and one function's are one struct
+     whose methods span the modules, as `lib.rs` and `func.rs` share
+     theirs. It reads the SIR itself (`read.sisu`, a transcription of
+     `sisu-sir/src/read.rs`), since stage 1 writes the form but has no
+     reader of it. Both profiles are lowered, the release one with the
+     facts of decision 270 (`facts.sisu`), whose states keep their facts in
+     the order Rust derives for them, each fact coded as a list of integers
+     ordered as that, since a lookup takes the first fact that fits. A
+     type is known by its text (stage 1's `sir.write.ty`)
+     where the Rust keys its maps by `Type`, which stage 1's SIR types
+     cannot hash, and a float constant's bits are found by scaling by
+     powers of two, which is exact, since Sisu has no `f64.to_bits`.
+     `compiler/stage2/sisu2 lir FILE.sir [--release] [--output FILE.lir]`
+     builds stage 2 natively on first use, through stage 1, in about 21 s,
+     and lowers the SIR of `examples/wordcount` (5 065 lines) to 39 108
+     lines of LIR in 0.07 s. A construct it does not lower stops it with
+     `lir: not lowered: WHAT (in FUNCTION)` and status 1, as `D0103`
+     stops the Rust backend.
+283. The translation of LIR into Cranelift IR (`sisu-codegen/src/lir.rs`
+     reads it, `translate.rs` replays it) makes each function's builder
+     calls in the order given, declares a function's references to other
+     functions and data at their first use, which `sisu-codegen` now does
+     everywhere (its dispatchers and C's `main` declared some earlier, which
+     changed only their numbering in the IR), compiles the functions on
+     threads and places them in order as decision 219 does, C's `main`,
+     which reads the probe reserve, once the others are placed, and writes
+     the debug information from LIR's descriptions with the writer that
+     describes SIR's types, walking them as it walks those. So the IR, the
+     object file and the executable are the ones the program's SIR gives,
+     byte for byte; `SISU_NATIVE_CLIF=DIR` writes each function's IR as
+     it is compiled, to compare the two paths where they differ.
+284. `sisu build --native --from-lir FILE` and `sisu run --native
+     --from-lir FILE` compile LIR (without `--native`, `D0119`), and the
+     conformance runner's mode `--native-from-lir LIST` lowers every case
+     of `native.list` with stage 2 (`--sisu2 PATH`, else built with the
+     `sisu` under test) and requires each run to meet the interpreter's
+     expectations and each executable to be byte for byte the one
+     `--from-sir` builds from the same SIR, and each case's release LIR
+     (`sisu2 lir --release`) to the executable `--release --from-sir`
+     builds; `cargo test` and CI's `native` job run it. All 200 cases pass,
+     their executables identical in both profiles. This changes no
+     front-end rule.
+285. SIR carries what `sisu test` and `sisu bench` need, so that they run
+     from a front end's SIR as `sisu run` does (decision 254) and stage 1
+     can serve them: `sisu sir --tests` prints the program built with its
+     tests (`@cfg(test)` holding, as `sisu test` builds it), each test's
+     `@tag`s after its function (`test "edges/zero" test#1 tags "slow"`)
+     and a line for each benchmark (`bench "doubling" bench#0`), whose
+     functions lowering keeps as roots after the rest, where a program of
+     one module's already reached them as its root module's functions, so
+     no function moves (section "SIR", "The text form"). A suite is the
+     prefix of its tests' names, `suite/test`, which the resolver already
+     writes. `sisu test --from-sir FILE` selects the tests by name and tag
+     (`--filter`, `--tag`, `--skip-tag`) and runs them as `sisu test` runs
+     a program's, under the monitor unless `--no-monitor`, with the seed,
+     `--explore`, `--sim`, `--jobs` and the snapshots beside the file
+     (`--update`); what only the source gives is left out (the ownership
+     checker's deferral, `--std`, transcripts, the cache, replay tokens).
+     `sisu bench --from-sir FILE` runs the benchmarks. A program built
+     without its tests prints as before, so no `.sir` expectation changes.
+     `sisu sir --tests` runs on the Rust front end until stage 1's `sir`
+     takes `--tests` and writes these lines, and stage 2 reads them and
+     leaves them out, since stage 1's SIR types do not hold them yet. This
+     changes no rule of the language.

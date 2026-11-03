@@ -11,6 +11,14 @@
 //! where it has one, else what `sisu sir` prints for it. It checks the
 //! path a self-hosted front end takes, whose SIR the backend compiles.
 //!
+//! The mode from LIR (decision 284) lowers each case's SIR with stage 2,
+//! the backend written in Sisu (`compiler/stage2`, `sisu2 lir`), builds the
+//! LIR with `sisu build --native --from-lir`, runs the executable, and
+//! requires it to be byte for byte the one `--from-sir` builds from the
+//! same SIR, and so the release profile's (`sisu2 lir --release`, against
+//! `--release --from-sir`): LIR holds every decision of the Rust backend,
+//! and its translation into Cranelift IR is one to one.
+//!
 //! The interpreter's mode from SIR (decision 254) runs the same SIR with
 //! `sisu run --from-sir` instead of compiling it: the interpreter, given
 //! what a front end (stage 0's or stage 1's) serialised, must meet the
@@ -38,6 +46,9 @@ pub struct NativeReport {
     pub release: bool,
     /// Interpreted from serialised SIR rather than built.
     pub interpreted: bool,
+    /// In the mode from LIR: the cases whose executable is byte for byte
+    /// the one built from their SIR.
+    pub identical: Option<usize>,
     pub failures: Vec<Failure>,
     /// Time spent building (the front end, the backend and the linker)
     /// and running the executables, over every case.
@@ -54,6 +65,11 @@ impl NativeReport {
             out.push_str(&format!("FAIL {} [{}]\n{}\n", f.case, f.check, f.detail));
         }
         let what = match self.from_sir {
+            Some(own) if self.identical.is_some() => format!(
+                "native from LIR: {} cases ({own} from their own `.sir`), {} identical to their SIR's executables in both profiles",
+                self.cases,
+                self.identical.unwrap_or(0)
+            ),
             Some(own) if self.interpreted => {
                 format!("interpreter from SIR: {} cases ({own} from their own `.sir`)", self.cases)
             }
@@ -90,17 +106,20 @@ enum Mode {
     Release,
     /// Interpreted from serialised SIR (decision 254).
     Interpreted,
+    /// Lowered from serialised SIR by stage 2 and built from its LIR
+    /// (decision 284).
+    FromLir,
 }
 
 /// Builds and runs every case of `list` natively, on as many threads as
 /// the machine has (at most eight).
 pub fn run_native(sisu: &Sisu, root: &Path, list: &[String]) -> NativeReport {
-    run_list(sisu, root, list, Mode::Native)
+    run_list(sisu, root, list, Mode::Native, None)
 }
 
 /// [`run_native`], each case built from serialised SIR (decision 212).
 pub fn run_native_from_sir(sisu: &Sisu, root: &Path, list: &[String]) -> NativeReport {
-    run_list(sisu, root, list, Mode::FromSir)
+    run_list(sisu, root, list, Mode::FromSir, None)
 }
 
 /// [`run_native`], each case built with the release profile and every
@@ -108,16 +127,51 @@ pub fn run_native_from_sir(sisu: &Sisu, root: &Path, list: &[String]) -> NativeR
 /// decision 232): Cranelift's optimisations must not change what a program
 /// does.
 pub fn run_native_release(sisu: &Sisu, root: &Path, list: &[String]) -> NativeReport {
-    run_list(sisu, root, list, Mode::Release)
+    run_list(sisu, root, list, Mode::Release, None)
 }
 
 /// Every case of `list` interpreted from serialised SIR (`sisu run
 /// --from-sir`, decision 254): the case's own `.sir`, else `sisu sir`'s.
 pub fn run_interpreted_from_sir(sisu: &Sisu, root: &Path, list: &[String]) -> NativeReport {
-    run_list(sisu, root, list, Mode::Interpreted)
+    run_list(sisu, root, list, Mode::Interpreted, None)
 }
 
-fn run_list(sisu: &Sisu, root: &Path, list: &[String], mode: Mode) -> NativeReport {
+/// [`run_native`], each case's SIR (its own `.sir`, else `sisu sir`'s)
+/// lowered to LIR by stage 2's executable `stage2` (`sisu2 lir`) and built
+/// with `sisu build --native --from-lir` (decision 284); the executable
+/// must also be byte for byte the one `--from-sir` builds from that SIR.
+pub fn run_native_from_lir(sisu: &Sisu, root: &Path, list: &[String], stage2: &Path) -> NativeReport {
+    run_list(sisu, root, list, Mode::FromLir, Some(stage2))
+}
+
+/// Builds stage 2, the backend written in Sisu (the package in `dir`,
+/// `compiler/stage2`), with `sisu build --native`, into a directory of the
+/// system's temporary one: its executable, or what the build printed.
+pub fn build_stage2(sisu: &Sisu, dir: &Path) -> Result<std::path::PathBuf, String> {
+    let out = std::env::temp_dir().join(format!("sisu-stage2-{}", std::process::id()));
+    std::fs::create_dir_all(&out).map_err(|e| format!("cannot make `{}`: {e}", out.display()))?;
+    let exe = out.join("sisu2");
+    // Not a case's command: no time limit, since a loaded machine may take
+    // minutes over it.
+    let built = sisu
+        .command()
+        .args(["build", "--native", "--output"])
+        .arg(&exe)
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| format!("cannot run {}: {e}", sisu.path.display()))?;
+    if !built.status.success() || !exe.is_file() {
+        return Err(format!(
+            "{}{}",
+            String::from_utf8_lossy(&built.stdout),
+            String::from_utf8_lossy(&built.stderr)
+        ));
+    }
+    Ok(exe)
+}
+
+fn run_list(sisu: &Sisu, root: &Path, list: &[String], mode: Mode, stage2: Option<&Path>) -> NativeReport {
     let all = discover(root);
     let mut report = NativeReport {
         release: mode == Mode::Release,
@@ -135,9 +189,12 @@ fn run_list(sisu: &Sisu, root: &Path, list: &[String], mode: Mode) -> NativeRepo
             }),
         }
     }
-    let results = parallel(&cases, |case, n| native_case(sisu, case, n, mode));
-    if matches!(mode, Mode::FromSir | Mode::Interpreted) {
+    let results = parallel(&cases, |case, n| native_case(sisu, case, n, mode, stage2));
+    if matches!(mode, Mode::FromSir | Mode::Interpreted | Mode::FromLir) {
         report.from_sir = Some(results.iter().filter(|r| r.own_sir).count());
+    }
+    if mode == Mode::FromLir {
+        report.identical = Some(results.iter().filter(|r| r.identical).count());
     }
     for r in results {
         report.cases += 1;
@@ -156,7 +213,7 @@ pub fn survey(sisu: &Sisu, root: &Path, list: &[String]) -> Vec<(String, String)
         .into_iter()
         .filter(|c| !list.contains(&c.name) && ["out", "err", "status"].iter().any(|e| c.path(e).exists()))
         .collect();
-    let results = parallel(&cases, |case, n| native_case(sisu, case, n, Mode::Native));
+    let results = parallel(&cases, |case, n| native_case(sisu, case, n, Mode::Native, None));
     cases
         .iter()
         .zip(results)
@@ -200,16 +257,20 @@ struct CaseResult {
     lines: usize,
     /// Built from the case's own `.sir` expectation.
     own_sir: bool,
+    /// Built from LIR to the executable the case's SIR gives.
+    identical: bool,
 }
 
-fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode) -> CaseResult {
-    let (from_sir, release) = (matches!(mode, Mode::FromSir | Mode::Interpreted), mode == Mode::Release);
+fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&Path>) -> CaseResult {
+    let from_sir = matches!(mode, Mode::FromSir | Mode::Interpreted | Mode::FromLir);
+    let release = mode == Mode::Release;
     let mut r = CaseResult {
         failures: Vec::new(),
         build: Duration::ZERO,
         run: Duration::ZERO,
         lines: 0,
         own_sir: false,
+        identical: false,
     };
     let fail = |r: &mut CaseResult, check: &str, detail: String| {
         r.failures.push(Failure { case: case.name.clone(), check: check.to_string(), detail });
@@ -220,6 +281,7 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode) -> CaseResult {
         Mode::FromSir => 2_000_000,
         Mode::Release => 3_000_000,
         Mode::Interpreted => 4_000_000,
+        Mode::FromLir => 5_000_000,
     };
     let sandbox = match Sandbox::new(case, offset + n) {
         Ok(s) => s,
@@ -282,6 +344,87 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode) -> CaseResult {
             interpreted(sisu, case, &cwd, &file, warned_by_sir, &mut r);
             return r;
         }
+        if mode == Mode::FromLir {
+            // Stage 2 lowers the SIR; a construct it does not lower yet is
+            // its message, this case's failure.
+            let lir = sandbox.dir.join("native-program.lir");
+            let Some(stage2) = stage2 else {
+                fail(&mut r, "sisu2 lir", "no stage 2 to lower with".into());
+                return r;
+            };
+            // Both profiles: the debug one's executable is run below, the
+            // release one's (decision 270's facts) compared only.
+            let mut identical = true;
+            for release in [true, false] {
+                let lowered = run_stage2(stage2, &cwd, &file, &lir, release);
+                let what = if release { "sisu2 lir --release" } else { "sisu2 lir" };
+                if lowered.status != 0 || !lir.is_file() {
+                    fail(&mut r, what, format!("{}{}", lowered.stdout, lowered.stderr));
+                    return r;
+                }
+                // The executable the SIR gives, which the LIR's must equal.
+                let from_sir_exe = sandbox.dir.join("native-program-from-sir");
+                let mut sir_build =
+                    s(&["build", "--native", "--output", &from_sir_exe.display().to_string()]);
+                if release {
+                    sir_build.push("--release".to_string());
+                }
+                sir_build.push("--from-sir".to_string());
+                sir_build.push(file.display().to_string());
+                let by_sir = invoke_with_input(sisu, &cwd, &sir_build, None);
+                if by_sir.status != 0 {
+                    fail(
+                        &mut r,
+                        "sisu build --native --from-sir",
+                        format!("{}{}", by_sir.stdout, by_sir.stderr),
+                    );
+                    return r;
+                }
+                build_args = s(&["build", "--native", "--output", &exe.display().to_string(), "--from-lir"]);
+                build_args.push(lir.display().to_string());
+                let built = invoke_with_input(sisu, &cwd, &build_args, None);
+                if built.status != 0 || !exe.is_file() {
+                    r.build = start.elapsed();
+                    fail(
+                        &mut r,
+                        "sisu build --native --from-lir",
+                        format!("{}{}", built.stdout, built.stderr),
+                    );
+                    return r;
+                }
+                let profile = if release { "release" } else { "debug" };
+                match (std::fs::read(&exe), std::fs::read(&from_sir_exe)) {
+                    (Ok(a), Ok(b)) if a == b => {}
+                    (Ok(a), Ok(b)) => {
+                        identical = false;
+                        fail(
+                            &mut r,
+                            "identical executables",
+                            format!(
+                                "{profile}: the executable from LIR ({} bytes) differs from the one from SIR ({} bytes)",
+                                a.len(),
+                                b.len()
+                            ),
+                        );
+                    }
+                    (a, b) => {
+                        identical = false;
+                        fail(
+                            &mut r,
+                            "identical executables",
+                            format!("{profile}: {:?} {:?}", a.err(), b.err()),
+                        );
+                    }
+                }
+                let _ = std::fs::remove_file(&from_sir_exe);
+            }
+            r.identical = identical;
+        }
+    }
+    if mode == Mode::FromLir {
+        r.build = start.elapsed();
+        run_and_compare(case, &exe, &cwd, warned_by_sir, false, &mut r);
+        return r;
     }
     let built = invoke_with_input(sisu, &cwd, &build_args, None);
     r.build = start.elapsed();
@@ -289,36 +432,73 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode) -> CaseResult {
         fail(&mut r, "sisu build --native", format!("{}{}", built.stdout, built.stderr));
         return r;
     }
+    run_and_compare(case, &exe, &cwd, warned_by_sir, !built.stderr.is_empty(), &mut r);
+    r
+}
+
+/// Runs a case's executable and compares the run with its expectations:
+/// `built_warned` says whether the build printed warnings, which a `sisu
+/// run` prints before the program's own standard error.
+fn run_and_compare(
+    case: &Case,
+    exe: &Path,
+    cwd: &Path,
+    warned_by_sir: bool,
+    built_warned: bool,
+    r: &mut CaseResult,
+) {
+    let mut fail = |check: &str, detail: String| {
+        r.failures.push(Failure { case: case.name.clone(), check: check.to_string(), detail });
+    };
     let args: Vec<String> =
         case.expected("args").map(|a| a.lines().map(str::to_string).collect()).unwrap_or_default();
     let input = case.expected("stdin");
     let start = Instant::now();
-    let mut ran = run_exe(&exe, &cwd, &args, input.as_deref());
-    r.run = start.elapsed();
+    let mut ran = run_exe(exe, cwd, &args, input.as_deref());
+    let run = start.elapsed();
     // What the runtime left allocated: nothing.
     match take_allocations(&mut ran.stderr) {
         Some(0) => {}
-        Some(n) => fail(&mut r, "allocations", format!("{n} of the runtime's allocations live at exit")),
+        Some(n) => fail("allocations", format!("{n} of the runtime's allocations live at exit")),
         None if ran.status == ABORTED => {}
-        None => fail(&mut r, "allocations", "the run did not report its live allocations".into()),
+        None => fail("allocations", "the run did not report its live allocations".into()),
     }
     let expected = case.expected("out").unwrap_or_default();
     if expected != ran.stdout {
-        fail(&mut r, "stdout", diff::diff(&expected, &ran.stdout));
+        fail("stdout", diff::diff(&expected, &ran.stdout));
     }
     let status = case.expected("status").map(|s| s.trim().to_string()).unwrap_or_else(|| "0".into());
     if status != ran.status.to_string() {
-        fail(&mut r, "exit status", format!("expected {status}, found {}\n{}", ran.status, ran.stderr));
+        fail("exit status", format!("expected {status}, found {}\n{}", ran.status, ran.stderr));
     }
     // The build printed the compiler's warnings; the program's own
     // standard error is what follows them in a `sisu run`.
     let err = case.expected("err").unwrap_or_default();
-    let warned = !built.stderr.is_empty() || warned_by_sir;
+    let warned = built_warned || warned_by_sir;
     let same = if warned { err.ends_with(&ran.stderr) } else { err == ran.stderr };
     if !same {
-        fail(&mut r, "stderr", diff::diff(&err, &ran.stderr));
+        fail("stderr", diff::diff(&err, &ran.stderr));
     }
-    r
+    r.run = run;
+}
+
+/// Stage 2's lowering of the SIR in `sir` to LIR in `lir` (`sisu2 lir`,
+/// with `--release` for that profile), run as the runner runs `sisu`: in
+/// `cwd`, with an empty environment.
+fn run_stage2(stage2: &Path, cwd: &Path, sir: &Path, lir: &Path, release: bool) -> Output {
+    let spawned = Command::new(stage2)
+        .arg("lir")
+        .arg(sir)
+        .arg("--output")
+        .arg(lir)
+        .args(if release { &["--release"][..] } else { &[][..] })
+        .current_dir(cwd)
+        .env_clear()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+    crate::wait_output(spawned, None, stage2)
 }
 
 /// The interpreter's run of the SIR in `file` (`sisu run --from-sir`),

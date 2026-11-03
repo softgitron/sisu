@@ -1,0 +1,9 @@
+$ sisu run plus_one.sisu
+error[E0310]: `+` cannot be applied to `int?` and `int`
+  --> plus_one.sisu:10:11
+   |
+10 |     print(find_index(names, "Eero") + 1)
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = note: the value may be missing: give a default with `??`, or take it apart with `if let` or `match`
+
+error[D0006]: the program was not run: errors found (1)

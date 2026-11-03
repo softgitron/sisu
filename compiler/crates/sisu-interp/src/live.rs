@@ -243,6 +243,8 @@ impl<'p> Interp<'p, '_> {
             intrinsics: old.intrinsics.clone(),
             functions: Vec::new(),
             tests: old.tests.clone(),
+            test_tags: old.test_tags.clone(),
+            benches: old.benches.clone(),
             trait_methods: old.trait_methods.clone(),
             impls: old.impls.clone(),
         };

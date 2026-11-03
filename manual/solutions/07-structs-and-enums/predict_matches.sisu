@@ -1,0 +1,49 @@
+##! Exercise 7.1, predict the matches: the solution.
+##!
+##! The arms are tried in order. A small parcel matches the first arm
+##! whatever it weighs, so it costs 3. A medium parcel of 15 kilos meets
+##! the guard of the second arm before the third arm is tried. A large
+##! parcel built without `kilos` weighs the default 1, so only `_`
+##! matches it. A derived order follows the order of the variants, and
+##! for a struct the order of its fields: `size` is compared first, and
+##! a medium parcel comes after a small one whatever their weights.
+
+@derive(Copy, Eq, Ord)
+enum Size:
+    Small
+    Medium
+    Large
+
+@derive(Copy, Eq, Ord)
+struct Parcel:
+    size: Size
+    kilos: int = 1
+
+## The postage of `parcel`, in euros.
+def postage(parcel: Parcel) -> int:
+    return match parcel:
+        case Parcel(size=Small, ..): 3
+        case Parcel(kilos=k, ..) if k > 10: 20
+        case Parcel(Medium, _): 7
+        case _: 12
+
+const SMALL_AND_HEAVY: int = 3
+const MEDIUM_AND_HEAVY: int = 20
+const LARGE: int = 12
+const SIZES: bool = True
+const PARCELS: bool = False
+
+test "a heavy small parcel":
+    assert postage(Parcel(Small, 30)) == SMALL_AND_HEAVY
+
+test "a heavy medium parcel":
+    assert postage(Parcel(Medium, 15)) == MEDIUM_AND_HEAVY
+
+test "a large parcel of the default weight":
+    assert postage(Parcel(Large)) == LARGE
+
+test "two sizes compared":
+    assert (Large > Small) == SIZES
+
+test "two parcels compared":
+    assert (Parcel(Medium, 2) < Parcel(Small, 9)) == PARCELS

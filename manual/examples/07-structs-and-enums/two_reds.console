@@ -1,0 +1,8 @@
+$ sisu run two_reds.sisu
+error[E0211]: `Red` is a variant of more than one type (Light, Wine); qualify it, as in `Light.Red`
+  --> two_reds.sisu:12:17
+   |
+12 |     let order = Red
+   |                 ^^^
+
+error[D0006]: the program was not run: errors found (1)

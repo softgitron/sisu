@@ -1,0 +1,40 @@
+##! Exercise 8.3, a setting with fallbacks. Kind: complete. Level: 2.
+##!
+##! A chat program writes its messages in the language a user chose,
+##! or else in the one the user's team chose, or else in English, "en".
+##! A choice must be a language the program has messages in. Replace the
+##! two holes so that every test passes. Run the tests with
+##! `sisu test language.sisu`. The hints are in chapter 8 of the
+##! tutorial, under "Exercise 8.3: a setting with fallbacks".
+
+error SettingError:
+    UnknownLanguage(code: String)
+
+type Settings = dict[str, str]
+
+## Whether the program has messages in the language `code`.
+def known(code: str) -> bool:
+    return code in ["en", "fi", "sv"]
+
+## The language for a user whose settings are `user` and whose team's
+## settings are `team`; each may have the key "language".
+def language(user: Settings, team: Settings) -> String ! SettingError:
+    let code: str = todo("the code chosen, or a fallback")
+    if not known(code):
+        return todo("the error for an unknown code")
+    return Ok(code.to_string())
+
+test "the user's own choice":
+    assert language({"language": "fi"}, {"language": "sv"}) == Ok("fi")
+    assert language({"language": "sv"}, {}) == Ok("sv")
+
+test "the team's choice":
+    assert language({}, {"language": "sv"}) == Ok("sv")
+    assert language({"theme": "dark"}, {"language": "fi"}) == Ok("fi")
+
+test "no choice at all":
+    assert language({}, {}) == Ok("en")
+
+test "a language without messages":
+    assert language({"language": "de"}, {}) == Err(UnknownLanguage("de"))
+    assert language({}, {"language": "xx"}) == Err(UnknownLanguage("xx"))

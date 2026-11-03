@@ -1,0 +1,742 @@
+##! One SIR function instance lowered to LIR (stage 0's
+##! `sisu-codegen/src/func.rs`): every local has a slot of the frame, but
+##! the result and the parameters, whose memory the caller provides; a
+##! place is an address computed from its local by its projections; an
+##! operand is the words at an address. Each statement that can panic is
+##! followed by a test of its status, which leads to the failure path of its
+##! block: a line of the stack trace, then the block's cleanup, or the
+##! return of `UNWINDING`; in a cleanup block, the abort of a panic during
+##! unwinding. The methods are `Cg`'s: the builder (`self.b`) and the
+##! function's state (`self.fx`) are its fields.
+
+import stage1.sir.write
+import stage2.abi
+from stage1.sir import (
+    Callee,
+    ClosureRole,
+    Const,
+    FnKind,
+    Loc,
+    LocalId,
+    Operand,
+    Place,
+    Program,
+    Rvalue,
+    StatementKind,
+    Terminator,
+    Type,
+)
+from stage2.abi import WORD
+from stage2.facts import Facts
+from stage2.gen import (
+    Arg,
+    Cg,
+    DebugLocal,
+    Fx,
+    LocalSt,
+    Storage,
+    Val,
+    display_fn_name,
+    returned_constant,
+    runtime_results,
+)
+from stage2.layout import fat
+from stage2.lir import Fb, LirError, internal
+from stage2.scan import cold_blocks, drop_flag, frame_iterators, register_locals
+
+## Values larger than this many words are copied through memory rather
+## than as words.
+pub const MAX_WORDS: int = 16
+
+impl Cg:
+    ## Lowers `f`'s instance for `targs` into `self.b`: the named locals
+    ## the debug information describes.
+    pub pure def translate(
+        mut self, p: Program, fi: int, targs: list[Type]
+    ) -> list[DebugLocal] ! LirError:
+        self.begin(p, fi, targs)?
+        self.body(p)?
+        let vars = self.fx.vars.copy()
+        self.emit_fails(p)?
+        return Ok(vars)
+
+    ## The function's entry: its frame laid out, then the prologue.
+    pub pure def begin(mut self, p: Program, fi: int, targs: list[Type]) -> () ! LirError:
+        let f = ref p.functions[fi]
+        self.b = Fb.new(f.param_count + 1)
+        self.fx = Fx.empty()
+        self.fx.fi = fi
+        self.fx.targs = targs.copy()
+        let entry = self.b.create_block()
+        self.b.switch_to_block(entry)
+        var closure = False
+        if let FnKind.Closure(role) = f.kind:
+            closure = role != ClosureRole.Task
+        var tys: list[Type] = []
+        for l in f.locals:
+            tys.push(self.concrete(p, l.ty, targs)?)
+        var in_registers: list[bool] = []
+        if self.release:
+            in_registers = register_locals(f, tys, closure)
+        else:
+            for _ in tys:
+                in_registers.push(False)
+        let framed = frame_iterators(self, f, tys)
+        if self.release:
+            # The integers' facts (decision 270), with the values of the
+            # functions that only return an integer that it calls.
+            var constants: list[(String, int)] = []
+            for b in f.blocks:
+                for s in b.stmts:
+                    if let StatementKind.Call(_, Callee.Fn(name, fargs), args) = s.kind:
+                        if fargs.is_empty() and args.is_empty():
+                            var known = False
+                            for (n, _) in constants:
+                                if n == name:
+                                    known = True
+                            if not known:
+                                if let Some(gi) = self.function(name):
+                                    if let Some(Const.Int(c)) = returned_constant(p.functions[gi]):
+                                        constants.push((name.copy(), c))
+            self.fx.facts = Some(Facts.of(f, tys, in_registers, framed, constants))
+        for fr in framed:
+            if fr:
+                self.fx.frames.push(Some(self.b.create_slot(abi.ITER_FRAME)))
+            else:
+                self.fx.frames.push(None)
+        for i in range(len(f.locals)):
+            let l = ref f.locals[i]
+            let ty = tys[i].copy()
+            var storage = Storage.Slot(0)
+            if in_registers[i]:
+                let var_ = self.b.declare_var()
+                var first = 0
+                if i <= f.param_count:
+                    first = self.b.load("i64", i, 0)
+                else:
+                    first = self.b.iconst("i64", 0)
+                self.b.def_var(var_, first)
+                storage = Storage.Var(var_, None)
+            elif i == 1 and closure and self.types.size(ty)? > self.types.env_words * WORD:
+                # A closure's environment larger than a function value holds
+                # is a slot of the frame that made it (decision 224).
+                storage = Storage.Param(self.b.load("i64", 1, 0))
+            elif i <= f.param_count:
+                storage = Storage.Param(i)
+            else:
+                let size = max(self.types.size(ty)?, 8)
+                storage = Storage.Slot(self.b.create_slot(size))
+            # A named local is described by its slot; a parameter's address
+            # is kept in a slot of its own. A variable has neither.
+            if let Some(full) = l.name:
+                if not drop_flag(l):
+                    var name = full.copy()
+                    if let Some(at) = full.find("("):
+                        name = full.byte_slice(0, at).to_string()
+                    var slot = 0
+                    var indirect = False
+                    var described = True
+                    match storage:
+                        case Storage.Slot(ss):
+                            slot = ss
+                        case Storage.Param(v):
+                            let ss = self.b.create_slot(8)
+                            self.fx.kept.push((v, ss))
+                            slot = ss
+                            indirect = True
+                        case Storage.Var(_, _):
+                            described = False
+                    if described:
+                        var line: int? = None
+                        if let Some(lc) = l.loc:
+                            line = Some(lc.line)
+                        self.fx.vars.push(
+                            DebugLocal(
+                                name=name,
+                                ty=ty.copy(),
+                                slot=slot,
+                                indirect=indirect,
+                                param=i >= 1 and i <= f.param_count,
+                                line=line,
+                            )
+                        )
+            self.fx.locals.push(LocalSt(ty=ty, storage=storage))
+        self.fx.line = self.b.declare_var()
+        self.fx.col = self.b.declare_var()
+        var start = (0, 0)
+        if let Some(lc) = f.loc:
+            start = (lc.line, lc.col)
+        let lv = self.b.iconst("i64", start.0)
+        self.b.def_var(self.fx.line, lv)
+        let cv = self.b.iconst("i64", start.1)
+        self.b.def_var(self.fx.col, cv)
+        for _ in f.blocks:
+            self.fx.blocks.push(self.b.create_block())
+            self.fx.fails.push(None)
+        self.fx.glue = f.kind == FnKind.Glue
+        var file = String.new()
+        if f.source < len(p.sources):
+            file = p.sources[f.source].copy()
+        let std = file.starts_with("<std>/") or file.starts_with("<shims>/")
+        self.fx.file = (self.text_of(file), file.byte_len())
+        let shown = display_fn_name(f.name, p)
+        self.fx.name = (self.text_of(shown), shown.byte_len())
+        if not (self.fx.glue or std):
+            self.fx.trace = Some((self.fx.name.0, self.fx.name.1, self.fx.file.0, file.byte_len()))
+        self.fx.cold = cold_blocks(f)
+        return self.prologue(p)
+
+    # ------------------------------------------------------------ helpers
+
+    pub pure def data_addr(mut self, d: int) -> int:
+        return self.b.symbol_value(d)
+
+    ## A call of the runtime's `name`: its first result, if it has one.
+    pub pure def rt(mut self, name: str, args: list[int]) -> int? ! LirError:
+        self.runtime(name)?
+        let rs = self.b.call(name, args, runtime_results(name))
+        if rs.is_empty():
+            return Ok(None)
+        return Ok(Some(rs[0]))
+
+    pub pure def rt_status(mut self, name: str, args: list[int]) -> int ! LirError:
+        let r = self.rt(name, args)?
+        let Some(v) = r else:
+            return internal("`{name}` returns nothing")
+        return Ok(v)
+
+    pub pure def iconst(mut self, v: int) -> int:
+        return self.b.iconst("i64", v)
+
+    pub pure def i32const(mut self, v: int) -> int:
+        return self.b.iconst("i32", v)
+
+    pub pure def slot(mut self, size: int) -> int:
+        let ss = self.b.create_slot(max(size, 8))
+        return self.b.stack_addr(ss)
+
+    pub pure def local_addr(mut self, l: LocalId) -> int ! LirError:
+        if l.index >= len(self.fx.locals):
+            return internal("no local _{l.index}")
+        match self.fx.locals[l.index].storage:
+            case Storage.Param(v):
+                return Ok(v)
+            case Storage.Slot(ss):
+                return Ok(self.b.stack_addr(ss))
+            case Storage.Var(var_, slot):
+                # A variable's value, copied to its slot.
+                var ss = 0
+                match slot:
+                    case Some(s):
+                        ss = s
+                    case None:
+                        ss = self.b.create_slot(8)
+                        self.fx.locals[l.index].storage = Storage.Var(var_, Some(ss))
+                let v = self.b.use_var(var_)
+                self.b.stack_store(v, ss)
+                return Ok(self.b.stack_addr(ss))
+
+    ## The variable a local is kept in, if it is one.
+    pub pure def var_of(self, l: LocalId) -> int?:
+        if l.index < len(self.fx.locals):
+            if let Storage.Var(v, _) = self.fx.locals[l.index].storage:
+                return Some(v)
+        return None
+
+    ## The variables whose slots the statement wrote, read back.
+    pub pure def reload_vars(mut self):
+        let reload = self.fx.reload.copy()
+        self.fx.reload = []
+        for l in reload:
+            if let Storage.Var(var_, Some(ss)) = self.fx.locals[l].storage:
+                let v = self.b.stack_load(ss)
+                self.b.def_var(var_, v)
+
+    pub pure def load(mut self, addr: int, off: int) -> int:
+        return self.b.load("i64", addr, off)
+
+    pub pure def store_word(mut self, v: int, addr: int, off: int):
+        self.b.store(v, addr, off)
+
+    ## The address of what the reference of type `ty` at `addr` refers to:
+    ## the address it holds, except that a reference to a `dyn` is the
+    ## `dyn`'s own two words, in place.
+    pub pure def through(mut self, addr: int, ty: Type) -> int:
+        if let Type.Ref(inner, _) = ty:
+            if fat(inner[0]):
+                return addr
+        return self.load(addr, 0)
+
+    pub pure def concrete_here(self, p: Program, t: Type) -> Type ! LirError:
+        return self.concrete(p, t, self.fx.targs)
+
+    ## Counts a copy of the value of type `ty` at `addr` when it holds
+    ## capability handles (decision 237).
+    pub pure def count_at(mut self, addr: int, ty: Type) -> () ! LirError:
+        if not self.types.counted(ty)?:
+            return Ok(())
+        # A function value counts only what its environment holds, when its
+        # last word names the environment's type (decision 248).
+        if let Some((tw, done)) = self.fn_env(addr, ty)?:
+            let at = self.b.imm("iadd_imm", addr, WORD)
+            let t = self.b.imm("iadd_imm", tw, -1)
+            let t32 = self.b.convert("ireduce", "i32", t)
+            _ = self.rt(abi.SYM_RETAIN, [at, t32])?
+            self.b.jump(done, [])
+            self.b.switch_to_block(done)
+            return Ok(())
+        let id = self.types.id(ty)?
+        let idv = self.i32const(id)
+        _ = self.rt(abi.SYM_RETAIN, [addr, idv])?
+        return Ok(())
+
+    ## For a function value at `addr`: its last word, the type of what its
+    ## environment holds plus one (decision 248), with the code from here on
+    ## reached only when it is not 0, and the block that follows.
+    pub pure def fn_env(mut self, addr: int, ty: Type) -> (int, int)? ! LirError:
+        if let Type.Fn(_, _, _) = ty:
+            let size = self.types.size(ty)?
+            let tw = self.load(addr, size - WORD)
+            let go = self.b.create_block()
+            let done = self.b.create_block()
+            self.b.brif(tw, go, [], done, [])
+            self.b.switch_to_block(go)
+            return Ok(Some((tw, done)))
+        return Ok(None)
+
+    pub pure def size(mut self, t: Type) -> int ! LirError:
+        return self.types.size(t)
+
+    pub pure def type_id(mut self, t: Type) -> int ! LirError:
+        return self.types.id(t)
+
+    ## The words of the value at `addr`.
+    pub pure def read(mut self, addr: int, size: int) -> Val:
+        if size // 8 > MAX_WORDS:
+            let tmp = self.slot(size)
+            self.copy_bytes(tmp, addr, size)
+            return Val.Mem(tmp)
+        var ws: list[int] = []
+        for i in range(size // 8):
+            ws.push(self.load(addr, i * 8))
+        return Val.Words(ws)
+
+    ## Writes a value of `size` bytes at `addr`.
+    pub pure def write(mut self, addr: int, v: Val, size: int):
+        match v:
+            case Val.Words(ws):
+                for i in range(min(len(ws), size // 8)):
+                    self.store_word(ws[i], addr, i * 8)
+            case Val.Mem(src):
+                self.copy_bytes(addr, src, size)
+
+    pub pure def copy_bytes(mut self, dst: int, src: int, size: int):
+        if size // 8 <= MAX_WORDS:
+            for i in range(size // 8):
+                let w = self.load(src, i * 8)
+                self.store_word(w, dst, i * 8)
+            return
+        let n = self.iconst(size)
+        self.b.memcpy(dst, src, n)
+
+    ## The value in memory: its own address, or a new slot holding it.
+    pub pure def in_memory(mut self, v: Val, size: int) -> int:
+        match v:
+            case Val.Mem(a):
+                return a
+            case Val.Words(_):
+                let a = self.slot(size)
+                self.write(a, v, size)
+                return a
+
+    pub pure def first_word(mut self, v: Val) -> int ! LirError:
+        match v:
+            case Val.Words(ws):
+                if ws.is_empty():
+                    return internal("a value without words")
+                return Ok(ws[0])
+            case Val.Mem(a):
+                return Ok(self.load(a, 0))
+
+    ## A value's first word, or 0 for a value without words.
+    pub pure def word0(mut self, v: Val) -> int ! LirError:
+        if let Val.Words(ws) = v:
+            if ws.is_empty():
+                return Ok(self.iconst(0))
+        return self.first_word(v)
+
+    pub pure def set_loc(mut self, loc: Loc):
+        self.b.set_srcloc(loc.line, loc.col)
+        let l = self.iconst(loc.line)
+        self.b.def_var(self.fx.line, l)
+        let c = self.iconst(loc.col)
+        self.b.def_var(self.fx.col, c)
+
+    # -------------------------------------------------------- frame depth
+
+    pub pure def depth_addr(mut self) -> int:
+        return self.data_addr(self.depth)
+
+    ## The entry of the function: the stack probe; then, but for drop glue,
+    ## the count of the frame, which panics past the limit of nested calls,
+    ## and the yield point of a call.
+    pub pure def prologue(mut self, p: Program) -> () ! LirError:
+        self.probe()
+        # The parameters' addresses, for a debugger, once the probe passed.
+        let kept = self.fx.kept.copy()
+        self.fx.kept = []
+        for (v, ss) in kept:
+            self.b.stack_store(v, ss)
+        let f = ref p.functions[self.fx.fi]
+        if let Some(l) = f.loc:
+            self.b.set_srcloc(l.line, l.col)
+        if self.fx.glue:
+            self.b.jump(self.fx.blocks[0], [])
+            return Ok(())
+        let a = self.depth_addr()
+        let d = self.load(a, 0)
+        let d1 = self.b.imm("iadd_imm", d, 1)
+        self.store_word(d1, a, 0)
+        let over = self.b.icmp_imm("sgt", d1, abi.MAX_DEPTH)
+        let overflow = self.b.create_block()
+        let refused = self.b.create_block()
+        let counted = self.b.create_block()
+        self.b.brif(over, overflow, [], counted, [])
+        self.b.set_cold_block(overflow)
+        self.b.switch_to_block(overflow)
+        # Past the limit, the runtime raises the overflow, unless a panic's
+        # unwinding has room left beyond it (decision 234).
+        let name = self.data_addr(self.fx.name.0)
+        let len = self.iconst(self.fx.name.1)
+        let st = self.rt_status(abi.SYM_PANIC_STACK, [name, len])?
+        self.b.brif(st, refused, [], counted, [])
+        self.b.set_cold_block(refused)
+        self.b.switch_to_block(refused)
+        let a2 = self.depth_addr()
+        self.store_word(d, a2, 0)
+        self.b.return_([st])
+        self.b.switch_to_block(counted)
+        self.yield_check()?
+        self.b.jump(self.fx.blocks[0], [])
+        return Ok(())
+
+    ## The stack probe (decisions 203 and 234).
+    pub pure def probe(mut self):
+        let sp = self.b.get_stack_pointer()
+        let stack = self.data_addr(self.stack)
+        let limit = self.load(stack, abi.STACK_PROBE)
+        let below = self.b.icmp("ult", sp, limit)
+        let slow = self.b.create_block()
+        let cont = self.b.create_block()
+        self.b.brif(below, slow, [], cont, [])
+        self.b.set_cold_block(slow)
+        self.b.switch_to_block(slow)
+        let real = self.load(stack, abi.STACK_REAL)
+        let under = self.b.icmp("ult", sp, real)
+        let watermark = self.b.create_block()
+        let fail = self.b.create_block()
+        self.b.brif(under, fail, [], watermark, [])
+        self.b.switch_to_block(watermark)
+        let one = self.iconst(1)
+        self.store_word(one, stack, abi.STACK_DIRTY)
+        self.store_word(real, stack, abi.STACK_PROBE)
+        self.b.jump(cont, [])
+        self.b.set_cold_block(fail)
+        self.b.switch_to_block(fail)
+        let name = self.data_addr(self.fx.name.0)
+        self.store_word(name, stack, abi.STACK_FAILED)
+        let len = self.iconst(self.fx.name.1)
+        self.store_word(len, stack, abi.STACK_FAILED_LEN)
+        let floor = self.load(stack, abi.STACK_FLOOR)
+        self.store_word(floor, stack, abi.STACK_PROBE)
+        let st = self.b.iconst("i8", abi.UNWINDING)
+        self.b.return_([st])
+        self.b.switch_to_block(cont)
+
+    ## A call of a constant's function that only returns a literal, read
+    ## without the call (decision 260).
+    pub pure def constant_read(
+        mut self, p: Program, dest: Place, name: str, c: Const
+    ) -> () ! LirError:
+        let a = self.depth_addr()
+        let d = self.load(a, 0)
+        let d1 = self.b.imm("iadd_imm", d, 1)
+        let over = self.b.icmp_imm("sgt", d1, abi.MAX_DEPTH)
+        let overflow = self.b.create_block()
+        let counted = self.b.create_block()
+        self.b.brif(over, overflow, [], counted, [])
+        self.b.set_cold_block(overflow)
+        self.b.switch_to_block(overflow)
+        self.store_word(d1, a, 0)
+        let shown = display_fn_name(name, p)
+        let text = self.text_of(shown)
+        let tv = self.data_addr(text)
+        let len = self.iconst(shown.byte_len())
+        let st = self.rt_status(abi.SYM_PANIC_STACK, [tv, len])?
+        let a2 = self.depth_addr()
+        self.store_word(d, a2, 0)
+        self.check(st)
+        self.b.jump(counted, [])
+        self.b.switch_to_block(counted)
+        self.yield_check()?
+        return self.statement(
+            p, StatementKind.Assign(place=dest.copy(), value=Rvalue.Use(Operand.Const(c.copy())))
+        )
+
+    ## A yield point: one less of the budget, and the scheduler when it is
+    ## spent.
+    pub pure def yield_check(mut self) -> () ! LirError:
+        let a = self.data_addr(self.budget)
+        let n = self.load(a, 0)
+        let n1 = self.b.imm("iadd_imm", n, -1)
+        self.store_word(n1, a, 0)
+        let spent = self.b.icmp_imm("sle", n1, 0)
+        let slow = self.b.create_block()
+        let cont = self.b.create_block()
+        self.b.brif(spent, slow, [], cont, [])
+        self.b.set_cold_block(slow)
+        self.b.switch_to_block(slow)
+        _ = self.rt(abi.SYM_YIELD, [])?
+        self.b.jump(cont, [])
+        self.b.switch_to_block(cont)
+        return Ok(())
+
+    ## Records where the running code is before a call that may wait.
+    pub pure def record_site(mut self, p: Program):
+        let site = self.data_addr(self.site)
+        let (file, len) = self.fx.file
+        let fv = self.data_addr(file)
+        self.store_word(fv, site, abi.SITE_FILE)
+        let lv = self.iconst(len)
+        self.store_word(lv, site, abi.SITE_FILE_LEN)
+        let line = self.b.use_var(self.fx.line)
+        self.store_word(line, site, abi.SITE_LINE)
+        let col = self.b.use_var(self.fx.col)
+        self.store_word(col, site, abi.SITE_COL)
+        let pure = p.functions[self.fx.fi].pure
+        let flags = self.iconst(if pure: abi.SITE_PURE else: 0)
+        self.store_word(flags, site, abi.SITE_FLAGS)
+
+    pub pure def leave(mut self, status: int):
+        if not self.fx.glue:
+            let a = self.depth_addr()
+            let d = self.load(a, 0)
+            let d1 = self.b.imm("iadd_imm", d, -1)
+            self.store_word(d1, a, 0)
+        let s = self.b.iconst("i8", status)
+        self.b.return_([s])
+
+    # ------------------------------------------------------ failure paths
+
+    pub pure def fail_block(mut self) -> int:
+        if let Some(b) = self.fx.fails[self.fx.cur]:
+            return b
+        let b = self.b.create_block()
+        self.fx.fails[self.fx.cur] = Some(b)
+        return b
+
+    ## Continues when `status` is `OK`; else takes the failure path.
+    pub pure def check(mut self, status: int):
+        let fail = self.fail_block()
+        let cont = self.b.create_block()
+        self.b.brif(status, fail, [], cont, [])
+        self.b.switch_to_block(cont)
+
+    ## Continues unless `bad` holds; else calls the runtime entry point that
+    ## raises the panic and takes the failure path, in a block written after
+    ## the SIR block's terminator (decision 270).
+    pub pure def guard_if(mut self, bad: int, raise: str, args: list[Arg]):
+        let cont = self.b.create_block()
+        let failed = self.b.create_block()
+        self.b.brif(bad, failed, [], cont, [])
+        self.fx.deferred.push((failed, raise.to_string(), args.copy()))
+        self.b.switch_to_block(cont)
+
+    ## A failed check's block: the runtime raises the panic, then the
+    ## failure path of the SIR block.
+    pub pure def raise(mut self, raise: str, args: list[Arg]) -> () ! LirError:
+        var vs: list[int] = []
+        for a in args:
+            match a:
+                case Arg.V(v):
+                    vs.push(v)
+                case Arg.I32(n):
+                    vs.push(self.i32const(n))
+                case Arg.I64(n):
+                    vs.push(self.iconst(n))
+        _ = self.rt(raise, vs)?
+        let fail = self.fail_block()
+        self.b.jump(fail, [])
+        return Ok(())
+
+    pub pure def emit_fails(mut self, p: Program) -> () ! LirError:
+        let f = ref p.functions[self.fx.fi]
+        for i in range(len(self.fx.fails)):
+            let fb = self.fx.fails[i] else:
+                continue
+            self.b.set_cold_block(fb)
+            self.b.switch_to_block(fb)
+            let block = ref f.blocks[i]
+            var loc = block.loc
+            if loc.is_none():
+                loc = f.loc
+            if let Some(l) = loc:
+                self.b.set_srcloc(l.line, l.col)
+            if block.cleanup:
+                _ = self.rt(abi.SYM_ABORT_UNWIND, [])?
+                self.b.trap(1)
+                continue
+            if let Some((n, nl, fl, fll)) = self.fx.trace:
+                let name = self.data_addr(n)
+                let file = self.data_addr(fl)
+                let nlv = self.iconst(nl)
+                let fllv = self.iconst(fll)
+                let line = self.b.use_var(self.fx.line)
+                let col = self.b.use_var(self.fx.col)
+                _ = self.rt(abi.SYM_FRAME, [name, nlv, file, fllv, line, col])?
+            match block.unwind:
+                case Some(u):
+                    self.b.jump(self.fx.blocks[u.index], [])
+                case None:
+                    self.leave(abi.UNWINDING)
+        return Ok(())
+
+    # --------------------------------------------------------------- body
+
+    pub pure def body(mut self, p: Program) -> () ! LirError:
+        let f = ref p.functions[self.fx.fi]
+        for i in range(len(f.blocks)):
+            self.fx.cur = i
+            let block = ref f.blocks[i]
+            let cb = self.fx.blocks[i]
+            if self.fx.cold[i]:
+                self.b.set_cold_block(cb)
+            self.b.switch_to_block(cb)
+            self.fx.known = None
+            if let Some(fa) = self.fx.facts:
+                self.fx.known = fa.entry_of(i)
+            for s in block.stmts:
+                self.statements += 1
+                if let Some(loc) = s.loc:
+                    self.set_loc(loc)
+                self.statement(p, s.kind)?
+                self.reload_vars()
+                self.step_facts(s.kind)
+            self.statements += 1
+            if let Some(loc) = block.loc:
+                self.set_loc(loc)
+            self.terminator(p, block.term)?
+            let deferred = self.fx.deferred.copy()
+            self.fx.deferred = []
+            for (failed, raise, args) in deferred:
+                self.b.switch_to_block(failed)
+                self.raise(raise, args)?
+        return Ok(())
+
+    ## The state after the statement, in the release profile.
+    pub pure def step_facts(mut self, s: StatementKind):
+        let Some(st0) = self.fx.known.copy() else:
+            return
+        let Some(fa) = self.fx.facts.copy() else:
+            return
+        var st = st0
+        fa.step(mut st, s)
+        self.fx.known = Some(st)
+
+    ## What the facts decide of a `switch` on a `bool`, if anything.
+    pure def decided_by_facts(self, value: Operand) -> bool?:
+        if let Some(fa) = self.fx.facts:
+            if let Some(st) = self.fx.known:
+                return fa.decided(st, value)
+        return None
+
+    pub pure def terminator(mut self, p: Program, t: Terminator) -> () ! LirError:
+        if let Terminator.Switch(value, cases, default) = t:
+            if let Some(v) = self.decided_by_facts(value):
+                # A test the facts decide (decision 270): a jump to where
+                # its value goes.
+                self.tests_decided += 1
+                let k = if v: 1 else: 0
+                var to = default.index
+                for (c, bb) in cases:
+                    if c == k:
+                        to = bb.index
+                        break
+                if to <= self.fx.cur:
+                    self.yield_check()?
+                self.b.jump(self.fx.blocks[to], [])
+                return Ok(())
+        match t:
+            case Terminator.Goto(bb):
+                # A jump to a block at or before this one is a loop's back
+                # edge: a yield point.
+                if bb.index <= self.fx.cur:
+                    self.yield_check()?
+                self.b.jump(self.fx.blocks[bb.index], [])
+            case Terminator.Switch(value, cases, default):
+                let (v, _) = self.scalar(p, value)?
+                # A back edge goes through a block of its own, which yields.
+                var back: list[(int, int)] = []
+                var entries: list[(int, int)] = []
+                for (k, bb) in cases:
+                    entries.push((k, self.switch_target(bb.index, mut back)))
+                let d = self.switch_target(default.index, mut back)
+                self.b.switch(v, d, entries)
+                for (to, blk) in back:
+                    self.b.switch_to_block(blk)
+                    self.yield_check()?
+                    self.b.jump(self.fx.blocks[to], [])
+            case Terminator.Return:
+                self.leave(abi.OK)
+            case Terminator.Resume:
+                self.leave(abi.UNWINDING)
+            case Terminator.Unreachable:
+                _ = self.rt(abi.SYM_PANIC_UNREACHABLE, [])?
+                let fail = self.fail_block()
+                self.b.jump(fail, [])
+        return Ok(())
+
+    pub pure def switch_target(mut self, t: int, mut back: list[(int, int)]) -> int:
+        if t > self.fx.cur:
+            return self.fx.blocks[t]
+        for (u, b) in back:
+            if u == t:
+                return b
+        let b = self.b.create_block()
+        back.push((t, b))
+        return b
+
+    pub pure def statement(mut self, p: Program, s: StatementKind) -> () ! LirError:
+        match s:
+            case StatementKind.Assign(place, value):
+                if place.proj.is_empty():
+                    if let Some(var_) = self.var_of(place.local):
+                        let dest = self.place_type(place)?
+                        let v = self.rvalue(p, value, dest)?
+                        let w = self.word0(v)?
+                        self.b.def_var(var_, w)
+                        return Ok(())
+                let dest = self.place_type(place)?
+                let size = self.size(dest)?
+                let v = self.rvalue(p, value, dest)?
+                let (addr, _) = self.dest_place(p, place)?
+                self.write(addr, v, size)
+                # A copy of a capability handle is counted (decision 237).
+                if let Rvalue.Use(Operand.Copy(_)) = value:
+                    self.count_at(addr, dest)?
+                return Ok(())
+            case StatementKind.Call(dest, callee, args):
+                if let Callee.Fn(name, tys) = callee:
+                    if tys.is_empty() and args.is_empty():
+                        if let Some(fi) = self.function(name):
+                            if let Some(c) = returned_constant(p.functions[fi]):
+                                return self.constant_read(p, dest, name, c)
+                # A call's result goes to its destination's memory: a
+                # variable's slot, read back after the call.
+                if dest.proj.is_empty() and self.var_of(dest.local).is_some():
+                    self.fx.reload.push(dest.local.index)
+                return self.call(p, dest, callee, args)
+            case StatementKind.Drop(place, flag):
+                return self.drop_stmt(p, place, flag)
+            case StatementKind.StorageDead(_):
+                return Ok(())

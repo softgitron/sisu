@@ -1,0 +1,2 @@
+$ sisu new wordcount
+created the package `wordcount`, with its manifest `sisu.toml` and its root module `src/main.sisu`

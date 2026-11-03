@@ -1,0 +1,6 @@
+test "a heavy small parcel" ... ok
+test "a heavy medium parcel" ... ok
+test "a large parcel of the default weight" ... ok
+test "two sizes compared" ... ok
+test "two parcels compared" ... ok
+5 passed, 0 failed, 0 blocked

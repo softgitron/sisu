@@ -1,0 +1,8 @@
+test "part 1, a minimum length/short words are left out" ... ok
+test "part 1, a minimum length/every word counts in lower case" ... ok
+test "part 2, punctuation/punctuation around a word" ... ok
+test "part 2, punctuation/punctuation inside a word" ... ok
+test "part 3, the top words/the most common first" ... ok
+test "part 3, the top words/equal counts in alphabetical order" ... ok
+transcript "tests/counter.transcript" ... ok
+7 passed, 0 failed, 0 blocked

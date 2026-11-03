@@ -57,6 +57,28 @@ fn native_conformance_release() {
     assert!(report.failures.is_empty(), "{}", report.render());
 }
 
+/// The same cases lowered by stage 2, the backend written in Sisu
+/// (`compiler/stage2`, built here with the `sisu` under test), from their
+/// SIR to LIR, and built from the LIR with `sisu build --native --from-lir`
+/// (decision 284): each run meets the interpreter's expectations, and each
+/// executable is byte for byte the one `--from-sir` builds from that SIR,
+/// in the debug profile and in the release one.
+#[test]
+fn native_conformance_from_lir() {
+    let sisu = sisu_conformance::Sisu::new(env!("CARGO_BIN_EXE_sisu"));
+    let root = compiler_dir().join("conformance/cases");
+    let stage2 = sisu_conformance::native::build_stage2(&sisu, &compiler_dir().join("stage2"))
+        .unwrap_or_else(|e| panic!("stage 2 does not build:\n{e}"));
+    let text =
+        std::fs::read_to_string(compiler_dir().join("conformance/native.list")).expect("the coverage list");
+    let list = sisu_conformance::native::read_list(&text);
+    let report = sisu_conformance::native::run_native_from_lir(&sisu, &root, &list, &stage2);
+    println!("{}", report.render());
+    assert!(report.cases > 0, "no cases in the coverage list");
+    assert!(report.failures.is_empty(), "{}", report.render());
+    assert_eq!(report.identical, Some(report.cases), "{}", report.render());
+}
+
 /// The same cases' SIR run in the interpreter (decision 254), `sisu run
 /// --from-sir` of each case's own `.sir` or of what `sisu sir` prints for
 /// it: what a front end serialised meets the expectations the source does.

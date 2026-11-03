@@ -10,8 +10,8 @@ manual is checked"). This script checks the rest:
 1. Pages. Every fenced block in a page under tutorial/, guides/,
    reference/ or explanations/ has a marker on the line before it:
    <!-- file: PATH --> shows a source file whole, <!-- output: PATH -->
-   an expectation file (for .ws, .repl, .watch and .defer files, the
-   standard output, before the line "--- stderr"), and
+   an expectation file (for .ws, .repl, .watch, .defer and .build files,
+   the standard output, before the line "--- stderr"), and
    <!-- unchecked: REASON --> says why a block is not checked. PATH is
    relative to manual/. The block must equal the file; --bless copies
    the file into the block, after rewriting the sessions.
@@ -19,8 +19,10 @@ manual is checked"). This script checks the rest:
    "$ sisu " is a command and the lines after it are what it printed,
    standard output and standard error together. Each runs in a fresh
    directory holding the files beside the session (for a session under
-   solutions/, the exercise's start state instead) and the contents of
-   NAME.files/, with an empty environment. --bless rewrites the output.
+   solutions/, the exercise's start state instead; for a session beside
+   a package case NAME.pkg/, the package's files instead) and the
+   contents of NAME.files/, with an empty environment. --bless rewrites
+   the output.
 3. Exercises. The first line of exercises/CHAPTER/NAME.sisu reads
    "##! Exercise N.M, TITLE. Kind: KIND. Level: L."; the solution
    solutions/CHAPTER/NAME.sisu has the same `test` and `suite` blocks
@@ -47,7 +49,7 @@ MANUAL = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROOT = os.path.dirname(MANUAL)
 PAGE_DIRS = ("tutorial", "guides", "reference", "explanations")
 KINDS = ("predict", "fix", "complete", "write", "challenge")
-SECTIONED = (".ws", ".repl", ".watch", ".defer")
+SECTIONED = (".ws", ".repl", ".watch", ".defer", ".build")
 MAX_COLUMNS = 80
 MARKER = re.compile(r"^<!-- (file|output|unchecked): (.+?) -->$")
 HEADER = re.compile(
@@ -86,13 +88,17 @@ def run(sisu, args, cwd):
     return p.returncode, p.stdout.decode("utf-8", "replace")
 
 
-def sandbox(sources, extra):
-    """A temporary directory holding the regular files of SOURCES and the
-    contents of the directory EXTRA, if it exists."""
+def sandbox(sources, extra, package=None):
+    """A temporary directory holding the regular files of SOURCES, or the
+    whole tree of the directory PACKAGE if it exists, and the contents of
+    the directory EXTRA, if it exists."""
     tmp = tempfile.mkdtemp(prefix="sisu-manual-")
-    for f in sorted(os.listdir(sources)):
-        if os.path.isfile(os.path.join(sources, f)):
-            shutil.copy(os.path.join(sources, f), tmp)
+    if package and os.path.isdir(package):
+        shutil.copytree(package, tmp, dirs_exist_ok=True)
+    else:
+        for f in sorted(os.listdir(sources)):
+            if os.path.isfile(os.path.join(sources, f)):
+                shutil.copy(os.path.join(sources, f), tmp)
     if extra and os.path.isdir(extra):
         shutil.copytree(extra, tmp, dirs_exist_ok=True)
     return tmp
@@ -180,7 +186,8 @@ def check_sessions(sisu, bless):
         sources = here
         if rel(here).startswith("solutions" + os.sep):
             sources = os.path.join(MANUAL, "exercises", rel(here)[len("solutions") + 1:])
-        tmp = sandbox(sources, os.path.join(here, stem + ".files"))
+        tmp = sandbox(sources, os.path.join(here, stem + ".files"),
+                      os.path.join(here, stem + ".pkg"))
         try:
             text = ""
             for command, want in steps:
@@ -210,7 +217,9 @@ def diff(want, got):
 
 
 def test_blocks(text):
-    """The top-level `test` and `suite` blocks of a file, as text."""
+    """The top-level `test` and `suite` blocks of a file, as text, each
+    with the attributes on the lines before it. Attributes before any
+    other item, such as `@derive` before a struct, are not part of one."""
     blocks, current = [], None
     for line in text.split("\n"):
         if re.match(r"^(@\w|test |suite )", line):
@@ -222,7 +231,8 @@ def test_blocks(text):
             current.append(line)
         else:
             current = None
-    return ["\n".join(b).rstrip("\n") for b in blocks]
+    return ["\n".join(b).rstrip("\n") for b in blocks
+            if any(x.startswith(("test ", "suite ")) for x in b)]
 
 
 def summary(output):

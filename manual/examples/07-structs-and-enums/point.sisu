@@ -1,0 +1,12 @@
+# A struct groups named fields into one value.
+struct Point:
+    x: f64
+    y: f64
+
+def main():
+    let home = Point(x=3.0, y=4.0)
+    var boat = Point(1.0, 1.0)
+    boat.x = 2.5
+    print("home is at {home.x}, {home.y}")
+    print("the boat is at {boat.x}, {boat.y}")
+    print("{boat:?}")

@@ -1,0 +1,9 @@
+$ sisu test shape_area.sisu
+error[E0314]: this `match` does not cover `Triangle(_, _)`
+  --> shape_area.sisu:17:12
+   |
+17 |     return match shape:
+   |            ^^^^^^^^^^^
+  = note: add an arm for `Triangle(_, _)`, or a `case _` arm
+
+error[D0006]: the program was not run: errors found (1)

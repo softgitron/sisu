@@ -1,0 +1,11 @@
+# A function whose answer may be missing returns an optional value.
+def find_index(names: list[str], wanted: str) -> int?:
+    for i, name in enumerate(names):
+        if name == wanted:
+            return Some(i)
+    return None
+
+def main():
+    let names = ["Aino", "Eero", "Roni"]
+    print(find_index(names, "Eero"))
+    print(find_index(names, "Liisa"))

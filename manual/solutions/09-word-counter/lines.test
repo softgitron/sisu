@@ -1,0 +1,4 @@
+test "a file of three lines" ... ok
+test "an empty file" ... ok
+test "a file that is not there" ... ok
+3 passed, 0 failed, 0 blocked

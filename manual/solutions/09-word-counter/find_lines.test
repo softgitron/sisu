@@ -1,0 +1,4 @@
+test "lines that hold the word" ... ok
+test "no line holds it" ... ok
+test "a file that is not there" ... ok
+3 passed, 0 failed, 0 blocked

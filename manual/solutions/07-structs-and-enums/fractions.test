@@ -1,0 +1,6 @@
+test "lowest terms" ... ok
+test "a negative bottom" ... ok
+test "adding" ... ok
+test "upside down" ... ok
+test "as text" ... ok
+5 passed, 0 failed, 0 blocked

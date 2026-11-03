@@ -1,0 +1,13 @@
+# A field with a default can be left out when the struct is built.
+struct Order:
+    item: String
+    quantity: int = 1
+    express: bool = False
+
+def main():
+    let bread = Order("rye bread")
+    let coffee = Order("coffee", 3)
+    let berries = Order(item="cloudberries", express=True)
+    print("{bread:?}")
+    print("{coffee:?}")
+    print("{berries:?}")

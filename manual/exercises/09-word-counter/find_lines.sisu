@@ -1,0 +1,34 @@
+##! Exercise 9.2, finding lines. Kind: complete. Level: 2.
+##!
+##! `find_lines` lists the lines of a file that hold a word, each with
+##! its number, as the command `grep -n` does. Replace the two holes so
+##! that every test passes. Run the tests with
+##! `sisu test find_lines.sisu`. The hints are in chapter 9 of the
+##! tutorial, under "Exercise 9.2: finding lines".
+
+## Each line of the file at `path` that holds `word`, as "N: line",
+## where N counts the lines from 1.
+def find_lines(fs: Fs, path: Path, word: str) -> list[String] ! IoError:
+    let text: String = todo("the text of the file")
+    var found: list[String] = []
+    for i, line in enumerate(text.lines()):
+        if todo("whether the line holds the word"):
+            found.push("{i + 1}: {line}")
+    return Ok(found)
+
+## A file system that holds one short poem, for the tests.
+def poem() -> Fs:
+    let text = "the sauna is warm\nthe lake is cold\nwarm is the sauna\n"
+    return Fs.in_memory({"poem.txt": text})
+
+test "lines that hold the word":
+    let found = find_lines(poem(), "poem.txt", "warm")
+    assert found == Ok(["1: the sauna is warm", "3: warm is the sauna"])
+    assert find_lines(poem(), "poem.txt", "lake") == Ok(["2: the lake is cold"])
+
+test "no line holds it":
+    assert find_lines(poem(), "poem.txt", "snow") == Ok([])
+
+test "a file that is not there":
+    let found = find_lines(poem(), "song.txt", "warm")
+    assert found == Err(NotFound("song.txt"))

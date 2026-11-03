@@ -1,0 +1,12 @@
+# A result that nothing looks at does not compile.
+error BankError:
+    TooLittle(balance: int, wanted: int)
+
+def withdraw(balance: int, wanted: int) -> int ! BankError:
+    if wanted > balance:
+        return Err(TooLittle(balance, wanted))
+    return Ok(balance - wanted)
+
+def main():
+    withdraw(100, 500)
+    print("done")

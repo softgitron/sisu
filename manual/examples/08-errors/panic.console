@@ -1,0 +1,4 @@
+$ sisu run panic.sisu
+size 42
+panic: the count is a number
+  at main (panic.sisu:5:17)

@@ -1,0 +1,10 @@
+# `?` on an optional value returns `None` from the function at once.
+def initials(full_name: str) -> String?:
+    let first, last = full_name.split_once(" ")?
+    let a = first.chars().next()?
+    let b = last.chars().next()?
+    return Some("{a}{b}")
+
+def main():
+    print(initials("Aino Virtanen"))
+    print(initials("Eero"))

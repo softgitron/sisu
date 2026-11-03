@@ -1,0 +1,5 @@
+test "the user's own choice" ... ok
+test "the team's choice" ... ok
+test "no choice at all" ... ok
+test "a language without messages" ... ok
+4 passed, 0 failed, 0 blocked

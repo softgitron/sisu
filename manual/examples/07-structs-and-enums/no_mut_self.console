@@ -1,0 +1,16 @@
+$ sisu run no_mut_self.sisu
+error[E0341]: cannot modify `self.x`; it is not declared with `var`
+  --> no_mut_self.sisu:12:9
+   |
+12 |         self.x += dx
+   |         ^^^^^^
+  = note: borrow it with `ref mut` to change what the borrow refers to
+
+error[E0341]: cannot modify `self.y`; it is not declared with `var`
+  --> no_mut_self.sisu:13:9
+   |
+13 |         self.y += dy
+   |         ^^^^^^
+  = note: borrow it with `ref mut` to change what the borrow refers to
+
+error[D0006]: the program was not run: errors found (2)

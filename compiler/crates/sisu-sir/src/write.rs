@@ -20,8 +20,19 @@ pub fn write(p: &Program) -> String {
         }
         out.push('\n');
     }
-    for (name, f) in &p.tests {
-        let _ = writeln!(out, "test {} {f}", quote(name));
+    for (k, (name, f)) in p.tests.iter().enumerate() {
+        let _ = write!(out, "test {} {f}", quote(name));
+        // The test's `@tag`s, when it has any (decision 285).
+        if let Some(tags) = p.test_tags.get(k).filter(|t| !t.is_empty()) {
+            out.push_str(" tags");
+            for t in tags {
+                let _ = write!(out, " {}", quote(t));
+            }
+        }
+        out.push('\n');
+    }
+    for (name, f) in &p.benches {
+        let _ = writeln!(out, "bench {} {f}", quote(name));
     }
     for t in &p.types {
         out.push('\n');

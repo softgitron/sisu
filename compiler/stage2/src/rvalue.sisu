@@ -1,0 +1,1226 @@
+##! Places, operands and rvalues of one function (stage 0's
+##! `sisu-codegen/src/func.rs`, "places", "operands" and "rvalues"): a
+##! place is an address computed from its local by its projections, with
+##! the bounds test of an index; an operand is the words at an address or a
+##! constant; arithmetic on `int` tests the processor's overflow flag; the
+##! operators on values that are not numbers are the runtime's, but `==` of
+##! texts and of enums, which compare inline (decision 253).
+
+import stage1.sir.write
+import stage2.abi
+from stage1.sir import (
+    Aggregate,
+    BinOp,
+    ClosureRole,
+    Const,
+    FnKind,
+    LocalId,
+    Operand,
+    Place,
+    Program,
+    Proj,
+    Rvalue,
+    Type,
+    TypeDecl,
+    UnOp,
+)
+from stage2.abi import WORD
+from stage2.gen import Arg, Cg, Val, float_bits
+from stage2.layout import arg, fat, named0
+from stage2.lir import LirError, internal, unsupported
+from stage2.scan import deref_type, element_type, target_type
+
+## A scalar's kind: a number, `bool`, `char` or `()`.
+@derive(Eq, Copy)
+pub enum Scalar:
+    Int
+    U64
+    Float
+    F32
+    Bool
+    Char
+    Unit
+
+## Whether a type is a number, `bool`, `char` or `()`: one word or none,
+## compared and computed by instructions.
+pub pure def scalar_kind(t: Type) -> Scalar?:
+    match t:
+        case Type.Int:
+            return Some(Scalar.Int)
+        case Type.Float:
+            return Some(Scalar.Float)
+        case Type.Bool:
+            return Some(Scalar.Bool)
+        case Type.Char:
+            return Some(Scalar.Char)
+        case Type.Unit:
+            return Some(Scalar.Unit)
+        case Type.Named(n, a):
+            if not a.is_empty():
+                return None
+            return match n.to_string():
+                case "u8" | "u16" | "u32" | "i8" | "i16" | "i32" | "DateTime": Some(Scalar.Int)
+                case "u64": Some(Scalar.U64)
+                case "f32": Some(Scalar.F32)
+                case _: None
+        case _:
+            return None
+
+## How `==` compares each variant of an enum compiled inline: by the tags
+## alone, by the words at these offsets, or by the runtime.
+pub enum Same:
+    Tag
+    Words(list[int])
+    Runtime
+
+pure def is_named(t: Type, names: list[str]) -> bool:
+    if let Type.Named(n, _) = t:
+        for x in names:
+            if n == x:
+                return True
+    return False
+
+## A text: `str`, `String` or `Path`.
+pub pure def is_text(t: Type) -> bool:
+    if t == Type.Str:
+        return True
+    return is_named(t, ["String", "Path"])
+
+impl Cg:
+    # ------------------------------------------------------------- places
+
+    ## The type of a place, without computing its address.
+    pub pure def place_type(mut self, p: Place) -> Type ! LirError:
+        if p.local.index >= len(self.fx.locals):
+            return internal("no local _{p.local.index}")
+        var ty = self.fx.locals[p.local.index].ty.copy()
+        var variant: int? = None
+        for proj in p.proj:
+            match proj:
+                case Proj.Deref:
+                    ty = deref_type(ty)?
+                case Proj.Downcast(v):
+                    variant = Some(v)
+                    continue
+                case Proj.Field(i):
+                    var boxed = False
+                    if let Type.Named(n, a) = ty:
+                        if n == "Box" and variant.is_none():
+                            boxed = True
+                            ty = arg(a, 0)
+                    if not boxed:
+                        let (_, ft) = self.field_of(ty, variant, i)?
+                        ty = ft
+                case Proj.Index(_) | Proj.IndexFromEnd(_):
+                    ty = element_type(ty)?
+                case Proj.Key(_):
+                    var found = False
+                    if let Type.Named(n, a) = ty:
+                        if n == "dict":
+                            ty = arg(a, 1)
+                            found = True
+                        elif n == "Arena":
+                            ty = arg(a, 0)
+                            found = True
+                    if not found:
+                        return unsupported("a key of a `{write.ty(ty)}`")
+            variant = None
+        return Ok(ty)
+
+    ## Field `i` of a value of type `ty` (of `variant`): its offset and
+    ## type. In a union of error sets, the members whose variant has the
+    ## field must agree on where it is and on its layout (decision 211).
+    pub pure def field_of(mut self, ty: Type, variant: int?, i: int) -> (int, Type) ! LirError:
+        if let Type.ErrSet(names) = ty:
+            var found: (int, Type)? = None
+            for n in names:
+                let r = self.types.field(named0(n), variant, i)
+                if let Ok(fr) = r:
+                    let f = fr.copy()
+                    if let Some(g) = found:
+                        let differ = g.1 != f.1 and not (text_word(g.1) and text_word(f.1))
+                        if g.0 != f.0 or differ:
+                            return unsupported(
+                                "a field of a union of error sets whose members differ"
+                            )
+                    else:
+                        found = Some(f)
+            let Some(f) = found else:
+                return internal("no member of an error union has the field")
+            return Ok(f)
+        return self.types.field(ty, variant, i)
+
+    ## The address of a place, and its type. With `skip`, a downcast to a
+    ## variant the value does not hold jumps there, as does a dict entry
+    ## that is not there.
+    pub pure def place(mut self, p: Program, pl: Place, skip: int?) -> (int, Type) ! LirError:
+        return self.place_in(p, pl, skip, False)
+
+    ## The destination of an assignment: a dict entry it names is made when
+    ## it is not there.
+    pub pure def dest_place(mut self, p: Program, pl: Place) -> (int, Type) ! LirError:
+        return self.place_in(p, pl, None, True)
+
+    pub pure def place_in(
+        mut self, p: Program, pl: Place, skip: int?, writing: bool
+    ) -> (int, Type) ! LirError:
+        var ty = self.fx.locals[pl.local.index].ty.copy()
+        var first = 0
+        var addr = 0
+        let var_ = self.var_of(pl.local)
+        var through_var = False
+        if let Some(x) = var_:
+            if not pl.proj.is_empty() and pl.proj[0] == Proj.Deref:
+                if let Type.Ref(_, _) = ty:
+                    through_var = True
+                    first = 1
+                    ty = deref_type(ty)?
+                    addr = self.b.use_var(x)
+        if not through_var:
+            if var_.is_some():
+                # A variable written through its slot is read back after the
+                # statement.
+                if writing and not self.fx.reload.contains(pl.local.index):
+                    self.fx.reload.push(pl.local.index)
+            addr = self.local_addr(pl.local)?
+        var variant: int? = None
+        for n in range(first, len(pl.proj)):
+            match pl.proj[n]:
+                case Proj.Deref:
+                    let shared = is_named(ty, ["Shared"])
+                    addr = self.through(addr, ty)
+                    if shared:
+                        # A task reaching a `Shared` cell counts for `--stats`.
+                        _ = self.rt(abi.SYM_SHARED_TOUCH, [addr])?
+                    ty = deref_type(ty)?
+                case Proj.Downcast(v):
+                    if let Some(sk) = skip:
+                        let off = if self.types.is_error(ty): abi.ERROR_TAG else: 0
+                        let tag = self.load(addr, off)
+                        let is = self.b.icmp_imm("eq", tag, v)
+                        let cont = self.b.create_block()
+                        self.b.brif(is, cont, [], sk, [])
+                        self.b.switch_to_block(cont)
+                    variant = Some(v)
+                    continue
+                case Proj.Field(i):
+                    var boxed: Type? = None
+                    if let Type.Named(bn, ba) = ty:
+                        if bn == "Box" and variant.is_none():
+                            boxed = Some(arg(ba, 0))
+                    match boxed:
+                        case Some(inner):
+                            ty = inner.copy()
+                            if writing:
+                                # A box whose value was moved out gets a new
+                                # cell (decision 216).
+                                let cell = self.load(addr, 0)
+                                let make = self.b.create_block()
+                                let have = self.b.create_block()
+                                self.b.brif(cell, have, [], make, [])
+                                self.b.switch_to_block(make)
+                                let size = max(self.size(ty)?, 8)
+                                let bytes = self.iconst(size)
+                                let new = self.rt_status(abi.SYM_ALLOC, [bytes])?
+                                self.store_word(new, addr, 0)
+                                self.b.jump(have, [])
+                                self.b.switch_to_block(have)
+                            addr = self.load(addr, 0)
+                        case None:
+                            let (off, ft) = self.field_of(ty, variant, i)?
+                            if off != 0:
+                                addr = self.b.imm("iadd_imm", addr, off)
+                            ty = ft
+                case Proj.Index(l):
+                    let (a, t) = self.index_place(p, pl, n, addr, ty, l, False)?
+                    addr = a
+                    ty = t
+                case Proj.IndexFromEnd(l):
+                    let (a, t) = self.index_place(p, pl, n, addr, ty, l, True)?
+                    addr = a
+                    ty = t
+                case Proj.Key(l):
+                    if is_named(ty, ["Arena"]):
+                        # An arena's slot, by a key of the right generation.
+                        var val = Type.Unit
+                        if let Type.Named(_, a) = ty:
+                            val = arg(a, 0)
+                        let mode = if skip.is_some(): abi.SLOT_DROP else: abi.SLOT_READ
+                        let key = self.local_addr(l)?
+                        let mv = self.i32const(mode)
+                        let out = self.slot(8)
+                        let st = self.rt_status(abi.SYM_ARENA_SLOT, [addr, key, mv, out])?
+                        self.check(st)
+                        addr = self.load(out, 0)
+                        if let Some(sk) = skip:
+                            let cont = self.b.create_block()
+                            self.b.brif(addr, cont, [], sk, [])
+                            self.b.switch_to_block(cont)
+                        ty = val
+                    else:
+                        var val = Type.Unit
+                        if let Type.Named(dn, a) = ty:
+                            if dn == "dict":
+                                val = arg(a, 1)
+                            else:
+                                return unsupported("a key of a `{write.ty(ty)}`")
+                        else:
+                            return unsupported("a key of a `{write.ty(ty)}`")
+                        let last = n == len(pl.proj) - 1
+                        var mode = abi.SLOT_READ
+                        if skip.is_some():
+                            mode = abi.SLOT_DROP
+                        elif writing and last:
+                            mode = abi.SLOT_WRITE
+                        let key = self.local_addr(l)?
+                        let kt = self.fx.locals[l.index].ty.copy()
+                        let kid = self.type_id(kt)?
+                        let kv = self.i32const(kid)
+                        let mv = self.i32const(mode)
+                        let out = self.slot(8)
+                        let st = self.rt_status(abi.SYM_DICT_SLOT, [addr, key, kv, mv, out])?
+                        self.check(st)
+                        addr = self.load(out, 0)
+                        if let Some(sk) = skip:
+                            let cont = self.b.create_block()
+                            self.b.brif(addr, cont, [], sk, [])
+                            self.b.switch_to_block(cont)
+                        ty = val
+            variant = None
+        return Ok((addr, ty))
+
+    ## An element of the list at `addr` by the index `l` holds (from the
+    ## end with `from_end`), after the bounds test.
+    pub pure def index_place(
+        mut self, p: Program, pl: Place, n: int, addr: int, ty: Type, l: LocalId, from_end: bool
+    ) -> (int, Type) ! LirError:
+        let elem = element_type(ty)?
+        let size = self.size(elem)?
+        let (idx, _) = self.scalar(p, Operand.Copy(Place(local=l, proj=[])))?
+        let data = self.load(addr, 0)
+        # In the release profile, an index the facts prove in bounds is not
+        # tested again (decision 270).
+        var proven = False
+        if not from_end:
+            if let Some(fa) = self.fx.facts:
+                if let Some(st) = self.fx.known:
+                    var before: list[Proj] = []
+                    for k in range(n):
+                        before.push(pl.proj[k])
+                    proven = fa.in_bounds(st, Place(local=pl.local, proj=before), l.index)
+            self.index_checks += 1
+            if proven:
+                self.index_proven += 1
+        var at = idx
+        if from_end:
+            let len = self.load(addr, 8)
+            at = self.b.bin("isub", len, idx)
+        if not proven:
+            # In bounds: `0 <= i < len`, or `0 < i <= len` from the end.
+            let len = self.load(addr, 8)
+            var probe = idx
+            if from_end:
+                probe = self.b.imm("iadd_imm", idx, -1)
+            let bad = self.b.icmp("uge", probe, len)
+            self.guard_if(
+                bad, abi.SYM_PANIC_INDEX, [Arg.V(idx), Arg.V(len), Arg.I64(if from_end: 1 else: 0)]
+            )
+        let off = self.b.imm("imul_imm", at, size)
+        let a = self.b.bin("iadd", data, off)
+        return Ok((a, elem))
+
+    # ----------------------------------------------------------- operands
+
+    pub pure def operand(mut self, p: Program, o: Operand) -> (Val, Type) ! LirError:
+        match o:
+            case Operand.Const(c):
+                return self.constant(p, c)
+            case Operand.Copy(pl) | Operand.Move(pl):
+                if pl.proj.is_empty():
+                    if let Some(var_) = self.var_of(pl.local):
+                        let ty = self.fx.locals[pl.local.index].ty.copy()
+                        return Ok((Val.Words([self.b.use_var(var_)]), ty))
+                let (addr, ty) = self.place(p, pl, None)?
+                let size = self.size(ty)?
+                let v = self.read(addr, size)
+                if let Operand.Move(_) = o:
+                    self.moved_out_of_box(p, pl)?
+                    self.moved_out_of_error(p, pl)?
+                return Ok((v, ty))
+
+    ## A value moved out of a `Box` leaves the box without a value: its
+    ## cell is freed and the box holds none (decision 216).
+    pub pure def moved_out_of_box(mut self, p: Program, pl: Place) -> () ! LirError:
+        let n = len(pl.proj)
+        if n == 0 or pl.proj[n - 1] != Proj.Field(0):
+            return Ok(())
+        var base: list[Proj] = []
+        for k in range(n - 1):
+            if let Proj.Field(_) = pl.proj[k]:
+                base.push(pl.proj[k])
+            else:
+                return Ok(())
+        let bp = Place(local=pl.local, proj=base)
+        if not is_named(self.place_type(bp)?, ["Box"]):
+            return Ok(())
+        let (at, _) = self.place(p, bp, None)?
+        let cell = self.load(at, 0)
+        _ = self.rt(abi.SYM_FREE, [cell])?
+        let zero = self.iconst(0)
+        self.store_word(zero, at, 0)
+        return Ok(())
+
+    ## A field moved out of an error value leaves the value never dropped
+    ## whole: it lets go of its return trace now (decision 215).
+    pub pure def moved_out_of_error(mut self, p: Program, pl: Place) -> () ! LirError:
+        for i in range(len(pl.proj)):
+            var down = False
+            if let Proj.Downcast(_) = pl.proj[i]:
+                down = True
+            if not down or i + 1 >= len(pl.proj):
+                continue
+            if let Proj.Field(_) = pl.proj[i + 1]:
+                pass
+            else:
+                continue
+            var base: list[Proj] = []
+            var plain = True
+            for k in range(i):
+                match pl.proj[k]:
+                    case Proj.Field(_) | Proj.Downcast(_):
+                        base.push(pl.proj[k])
+                    case _:
+                        plain = False
+            if not plain:
+                continue
+            let bp = Place(local=pl.local, proj=base)
+            let ty = self.place_type(bp)?
+            if self.types.is_error(ty):
+                let (at, _) = self.place(p, bp, None)?
+                _ = self.rt(abi.SYM_TRACE_RELEASE, [at])?
+        return Ok(())
+
+    pub pure def constant(mut self, p: Program, c: Const) -> (Val, Type) ! LirError:
+        match c:
+            case Const.Int(n):
+                return Ok((Val.Words([self.iconst(n)]), Type.Int))
+            case Const.Float(f):
+                return Ok((Val.Words([self.iconst(float_bits(f))]), Type.Float))
+            case Const.Bool(b):
+                return Ok((Val.Words([self.iconst(if b: 1 else: 0)]), Type.Bool))
+            case Const.Char(ch):
+                return Ok((Val.Words([self.iconst(ch.code())]), Type.Char))
+            case Const.Unit:
+                return Ok((Val.Words([]), Type.Unit))
+            case Const.Str(s):
+                let id = self.text_of(s)
+                let a = self.data_addr(id)
+                let n = self.iconst(s.byte_len())
+                return Ok((Val.Words([a, n]), Type.Str))
+            case Const.Fn(n):
+                let (thunk, ty) = self.fn_value(p, n)?
+                let code = self.b.func_addr(thunk)
+                var words = [code]
+                # An empty environment, which holds nothing to count.
+                for _ in range(self.types.env_words + 1):
+                    words.push(self.iconst(0))
+                return Ok((Val.Words(words), ty))
+
+    ## A one-word operand through any references: its word and type.
+    pub pure def scalar(mut self, p: Program, o: Operand) -> (int, Type) ! LirError:
+        let (v, t) = self.operand(p, o)?
+        var ty = t
+        var w = self.word0(v)?
+        while True:
+            match ty.copy():
+                case Type.Ref(inner, _):
+                    ty = inner[0].copy()
+                    if self.size(ty)? == 0:
+                        w = self.iconst(0)
+                    else:
+                        w = self.load(w, 0)
+                case _:
+                    break
+        return Ok((w, ty))
+
+    ## An operand in memory, for the runtime: its address and type.
+    pub pure def operand_in_memory(mut self, p: Program, o: Operand) -> (int, Type) ! LirError:
+        let (v, ty) = self.operand(p, o)?
+        let size = self.size(ty)?
+        return Ok((self.in_memory(v, size), ty))
+
+    # ------------------------------------------------------------ rvalues
+
+    pub pure def rvalue(mut self, p: Program, r: Rvalue, dest: Type) -> Val ! LirError:
+        match r:
+            case Rvalue.Use(o):
+                let (v, _) = self.operand(p, o)?
+                return Ok(v)
+            case Rvalue.Ref(pl, _):
+                let (addr, ty) = self.place(p, pl, None)?
+                if fat(ty):
+                    # A reference to a `dyn` is the `dyn`'s two words.
+                    let w0 = self.load(addr, 0)
+                    let w1 = self.load(addr, 8)
+                    return Ok(Val.Words([w0, w1]))
+                return Ok(Val.Words([addr]))
+            case Rvalue.Binary(op, a, b):
+                return self.binary(p, op, a, b, dest)
+            case Rvalue.Unary(op, a):
+                return self.unary(p, op, a)
+            case Rvalue.Aggregate(kind, ops):
+                return self.aggregate(p, kind, ops, dest)
+            case Rvalue.Discriminant(pl):
+                let (a, t) = self.place(p, pl, None)?
+                var addr = a
+                var ty = t
+                while True:
+                    match ty.copy():
+                        case Type.Ref(inner, _):
+                            addr = self.through(addr, ty)
+                            ty = inner[0].copy()
+                        case _:
+                            break
+                let off = if self.types.is_error(ty): abi.ERROR_TAG else: 0
+                return Ok(Val.Words([self.load(addr, off)]))
+            case Rvalue.Closure(name, tys, ops):
+                return self.closure(p, name, tys, ops)
+            case Rvalue.CopyOf(pl):
+                let (a, t) = self.place(p, pl, None)?
+                var addr = a
+                var ty = t
+                while True:
+                    match ty.copy():
+                        case Type.Ref(inner, _):
+                            if let Type.Ref(_, _) = dest:
+                                break
+                            addr = self.through(addr, ty)
+                            ty = inner[0].copy()
+                        case _:
+                            break
+                let size = self.size(ty)?
+                let tmp = self.slot(size)
+                let id = self.type_id(ty)?
+                let idv = self.i32const(id)
+                _ = self.rt(abi.SYM_COPY, [tmp, addr, idv])?
+                return Ok(Val.Mem(tmp))
+            case Rvalue.StrView(pl):
+                let (a, t) = self.place(p, pl, None)?
+                var addr = a
+                var ty = t
+                while True:
+                    match ty.copy():
+                        case Type.Ref(inner, _):
+                            addr = self.through(addr, ty)
+                            ty = inner[0].copy()
+                        case _:
+                            break
+                let ptr = self.load(addr, 0)
+                let len = self.load(addr, 8)
+                return Ok(Val.Words([ptr, len]))
+
+    ## A closure value: its function's code, then its environment, the
+    ## tuple of its captures, in the value's other words (decisions 224 and
+    ## 248); a task's closure keeps a cell the runtime frees.
+    pub pure def closure(
+        mut self, p: Program, name: str, tys: list[Type], ops: list[Operand]
+    ) -> Val ! LirError:
+        var targs: list[Type] = []
+        for t in tys:
+            targs.push(self.concrete_here(p, t)?)
+        let fi = self.function(name) else:
+            return internal("the program has no function `{name}`")
+        let f = ref p.functions[fi]
+        var env_ty = Type.Tuple([])
+        if len(f.locals) > 1:
+            env_ty = self.concrete(p, f.locals[1].ty, targs)?
+        let id = self.instance(p, name, targs)?
+        let code = self.b.func_addr(id)
+        let size = self.size(env_ty)?
+        let held = self.types.env_words * WORD
+        let value = self.slot(2 * WORD + held)
+        self.store_word(code, value, 0)
+        for k in range(self.types.env_words + 1):
+            let zero = self.iconst(0)
+            self.store_word(zero, value, WORD * (k + 1))
+        let task = f.kind == FnKind.Closure(ClosureRole.Task)
+        var all_refs = False
+        if let Type.Tuple(items) = env_ty:
+            all_refs = True
+            for t in items:
+                if let Type.Ref(_, _) = t:
+                    pass
+                else:
+                    all_refs = False
+        var env = 0
+        if size == 0:
+            return Ok(Val.Mem(value))
+        elif task:
+            # The runtime frees it when the closure returns (decision 236).
+            let bytes = self.iconst(size)
+            let tid = self.type_id(env_ty)?
+            let idv = self.i32const(tid)
+            let cell = self.rt_status(abi.SYM_TASK_ENV, [bytes, idv])?
+            self.store_word(cell, value, WORD)
+            env = cell
+        elif size <= held:
+            # A drop or a copy of the value reaches the copies an `own`
+            # closure holds by the environment's type (decision 248).
+            if not all_refs and self.types.counted(env_ty)?:
+                let tid = self.type_id(env_ty)?
+                let tw = self.iconst(tid + 1)
+                self.store_word(tw, value, WORD + held)
+            env = self.b.imm("iadd_imm", value, WORD)
+        elif all_refs:
+            env = self.slot(size)
+            self.store_word(env, value, WORD)
+        else:
+            # An `own` environment larger than a function value holds: the
+            # program is lowered again with wider ones.
+            self.env_needed = max(self.env_needed, (size + WORD - 1) // WORD)
+            return Ok(Val.Mem(value))
+        for i in range(len(ops)):
+            let (off, ft) = self.field_of(env_ty, None, i)?
+            let (v, vt) = self.operand(p, ops[i])?
+            let fsize = min(self.size(vt)?, self.size(ft)?)
+            let at = self.b.imm("iadd_imm", env, off)
+            self.write(at, v, fsize)
+            # A capture of a capability handle is a counted copy.
+            if let Operand.Copy(_) = ops[i]:
+                self.count_at(at, vt)?
+        return Ok(Val.Mem(value))
+
+    pub pure def unary(mut self, p: Program, op: UnOp, a: Operand) -> Val ! LirError:
+        let (x, ty) = self.scalar(p, a)?
+        let k = scalar_kind(ty)
+        if op == UnOp.Neg and k == Some(Scalar.Int):
+            let min = self.b.icmp_imm("eq", x, -9223372036854775807 - 1)
+            self.guard_if(min, abi.SYM_PANIC_OVERFLOW, [Arg.I32(abi.INT_NEG), Arg.V(x), Arg.I64(0)])
+            return Ok(Val.Words([self.b.un("ineg", x)]))
+        if op == UnOp.Neg and k == Some(Scalar.Float):
+            let f = self.b.convert("bitcast", "f64", x)
+            let n = self.b.un("fneg", f)
+            return Ok(Val.Words([self.b.convert("bitcast", "i64", n)]))
+        if op == UnOp.Neg and k == Some(Scalar.F32):
+            let f = self.f32_of(x)
+            let n = self.b.un("fneg", f)
+            return Ok(Val.Words([self.word_of_f32(n)]))
+        if op == UnOp.Not:
+            return Ok(Val.Words([self.b.imm("bxor_imm", x, 1)]))
+        if op == UnOp.BitNot:
+            return Ok(Val.Words([self.b.un("bnot", x)]))
+        return unsupported("`{op.name()}` on `{write.ty(ty)}`")
+
+    pub pure def f32_of(mut self, w: int) -> int:
+        let low = self.b.convert("ireduce", "i32", w)
+        return self.b.convert("bitcast", "f32", low)
+
+    pub pure def word_of_f32(mut self, f: int) -> int:
+        let bits = self.b.convert("bitcast", "i32", f)
+        return self.b.convert("uextend", "i64", bits)
+
+    pub pure def binary(
+        mut self, p: Program, op: BinOp, a: Operand, b: Operand, dest: Type
+    ) -> Val ! LirError:
+        let ta = self.operand_type(p, a)?
+        let tb = self.operand_type(p, b)?
+        let ka = scalar_kind(target_type(ta))
+        let kb = scalar_kind(target_type(tb))
+        let vop = value_op(op)
+        # `==` and `!=` on two texts: their lengths, then their bytes
+        # (decision 253).
+        let eq_ne = op == BinOp.Eq or op == BinOp.Ne
+        if eq_ne and is_text(target_type(ta)) and is_text(target_type(tb)):
+            let (pa, ta2) = self.operand_in_memory(p, a)?
+            let (pb, tb2) = self.operand_in_memory(p, b)?
+            let (xa, _) = self.base_of(pa, ta2)
+            let (xb, _) = self.base_of(pb, tb2)
+            let la = self.load(xa, 8)
+            let lb = self.load(xb, 8)
+            let same = self.b.icmp("eq", la, lb)
+            let bytes = self.b.create_block()
+            let join = self.b.create_block()
+            let r0 = self.b.append_block_param(join)
+            let zero = self.iconst(0)
+            self.b.brif(same, bytes, [], join, [zero])
+            self.b.switch_to_block(bytes)
+            let da = self.load(xa, 0)
+            let db = self.load(xb, 0)
+            let eq = self.rt_status(abi.SYM_BYTES_EQ, [da, db, la])?
+            let eq64 = self.b.convert("uextend", "i64", eq)
+            self.b.jump(join, [eq64])
+            self.b.switch_to_block(join)
+            var r = r0
+            if op == BinOp.Ne:
+                r = self.b.imm("bxor_imm", r, 1)
+            return Ok(Val.Words([r]))
+        # `==` and `!=` on two values of one enum: their tags, then the
+        # variant's fields (decision 253).
+        if eq_ne:
+            let xt = target_type(ta)
+            if xt == target_type(tb):
+                if let Some(shape) = self.eq_shape(xt)?:
+                    var r = self.enum_eq(p, a, b, shape)?
+                    if op == BinOp.Ne:
+                        r = self.b.imm("bxor_imm", r, 1)
+                    return Ok(Val.Words([r]))
+        # Operators on values that are not numbers: the runtime's.
+        let scalars = ka.is_some() and kb.is_some()
+        if let Some(v) = vop:
+            if not scalars or v == abi.VALUE_IN or v == abi.VALUE_CONCAT:
+                let (pa, ta2) = self.operand_in_memory(p, a)?
+                let (pb, tb2) = self.operand_in_memory(p, b)?
+                let size = self.size(dest)?
+                let out = self.slot(size)
+                let ia = self.type_id(ta2)?
+                let ib = self.type_id(tb2)?
+                let code = self.i32const(v)
+                let iav = self.i32const(ia)
+                let ibv = self.i32const(ib)
+                let st = self.rt_status(abi.SYM_BINARY, [code, out, pa, iav, pb, ibv])?
+                self.check(st)
+                return Ok(self.read(out, size))
+        let (x, tx) = self.scalar(p, a)?
+        let (y, _) = self.scalar(p, b)?
+        let k = scalar_kind(tx) else:
+            return internal("a scalar operator on a value")
+        if let Some(v) = vop:
+            let r = self.compare(v, k, x, y)
+            return Ok(Val.Words([self.b.convert("uextend", "i64", r)]))
+        match k:
+            case Scalar.Int:
+                # In the release profile, an operation whose operands'
+                # bounds rule out an overflow is the plain instruction
+                # (decision 270).
+                var checked = True
+                if let Some(fa) = self.fx.facts:
+                    if let Some(st) = self.fx.known:
+                        checked = not fa.cannot_overflow(st, op, a, b)
+                if op == BinOp.Add or op == BinOp.Sub or op == BinOp.Mul:
+                    self.overflow_checks += 1
+                    if not checked:
+                        self.overflow_proven += 1
+                return Ok(Val.Words([self.int_op(op, x, y, checked)?]))
+            case Scalar.Float:
+                let fx = self.b.convert("bitcast", "f64", x)
+                let fy = self.b.convert("bitcast", "f64", y)
+                let r = self.float_op(op, fx, fy)?
+                return Ok(Val.Words([self.b.convert("bitcast", "i64", r)]))
+            case Scalar.F32:
+                # Computed in `f64` and rounded once (decision 169).
+                let fx = self.f32_of(x)
+                let fy = self.f32_of(y)
+                let dx = self.b.convert("fpromote", "f64", fx)
+                let dy = self.b.convert("fpromote", "f64", fy)
+                let r = self.float_op(op, dx, dy)?
+                let rf = self.b.convert("fdemote", "f32", r)
+                return Ok(Val.Words([self.word_of_f32(rf)]))
+            case _:
+                return unsupported("`{op.name()}` on `{write.ty(tx)}`")
+
+    ## How `==` compares each variant of `t`, when `t` is an `Option` or a
+    ## declared enum other than an error set's.
+    pub pure def eq_shape(mut self, t: Type) -> list[Same]? ! LirError:
+        let Type.Named(n, args) = t else:
+            return Ok(None)
+        var variants: list[list[Type]] = []
+        if n == "Option":
+            var some: list[Type] = []
+            if not args.is_empty():
+                some.push(args[0].copy())
+            variants.push(some)
+            variants.push([])
+        else:
+            let d = self.types.decl(n) else:
+                return Ok(None)
+            let decl = d.copy()
+            if let TypeDecl.Enum(_, _, vs, _, error_, _, _) = decl:
+                if error_:
+                    return Ok(None)
+                for v in vs:
+                    var fs: list[Type] = []
+                    for (_, ft) in v.fields:
+                        fs.push(ft.subst(args))
+                    variants.push(fs)
+            else:
+                return Ok(None)
+        var shape: list[Same] = []
+        for fields in variants:
+            var off = WORD
+            var words: list[int] = []
+            var runtime = False
+            for ft in fields:
+                let size = self.size(ft)?
+                if self.word_compared(ft):
+                    words.push(off)
+                elif size > 0:
+                    runtime = True
+                off += size
+            if runtime:
+                shape.push(Same.Runtime)
+            elif words.is_empty():
+                shape.push(Same.Tag)
+            else:
+                shape.push(Same.Words(words))
+        return Ok(Some(shape))
+
+    ## Whether the runtime compares two values of type `t` by their one
+    ## word: an integer, a `bool`, a `char`, or an enum without fields.
+    pub pure def word_compared(self, t: Type) -> bool:
+        match t:
+            case Type.Int | Type.Bool | Type.Char:
+                return True
+            case Type.Named(n, _):
+                match n.to_string():
+                    case "u8" | "u16" | "u32" | "u64" | "i8" | "i16" | "i32":
+                        return True
+                    case _:
+                        pass
+                let d = self.types.decl(n) else:
+                    return False
+                if let TypeDecl.Enum(_, _, variants, _, error_, _, _) = d:
+                    if error_:
+                        return False
+                    for v in variants:
+                        if not v.fields.is_empty():
+                            return False
+                    return True
+                return False
+            case _:
+                return False
+
+    ## `==` on two values of one enum, whose variants compare as `shape`
+    ## says: a word, 1 when they are equal.
+    pub pure def enum_eq(
+        mut self, p: Program, a: Operand, b: Operand, shape: list[Same]
+    ) -> int ! LirError:
+        let (pa, ta) = self.operand_in_memory(p, a)?
+        let (pb, tb) = self.operand_in_memory(p, b)?
+        let (xa, _) = self.base_of(pa, ta)
+        let (xb, _) = self.base_of(pb, tb)
+        let ga = self.load(xa, 0)
+        let gb = self.load(xb, 0)
+        let same = self.b.icmp("eq", ga, gb)
+        var only_tags = True
+        for s in shape:
+            match s:
+                case Same.Tag:
+                    pass
+                case _:
+                    only_tags = False
+        if only_tags:
+            return Ok(self.b.convert("uextend", "i64", same))
+        let fields = self.b.create_block()
+        let yes = self.b.create_block()
+        let join = self.b.create_block()
+        let r = self.b.append_block_param(join)
+        let zero = self.iconst(0)
+        self.b.brif(same, fields, [], join, [zero])
+        self.b.switch_to_block(fields)
+        var entries: list[(int, int)] = []
+        var by_words: list[(int, list[int])] = []
+        var runtime: int? = None
+        for v in range(len(shape)):
+            match shape[v]:
+                case Same.Tag:
+                    pass
+                case Same.Words(offs):
+                    let blk = self.b.create_block()
+                    entries.push((v, blk))
+                    by_words.push((blk, offs.copy()))
+                case Same.Runtime:
+                    if runtime.is_none():
+                        runtime = Some(self.b.create_block())
+                    entries.push((v, runtime ?? 0))
+        self.b.switch(ga, yes, entries)
+        self.b.switch_to_block(yes)
+        let one = self.iconst(1)
+        self.b.jump(join, [one])
+        for (blk, offs) in by_words:
+            self.b.switch_to_block(blk)
+            var all: int? = None
+            for off in offs:
+                let wa = self.load(xa, off)
+                let wb = self.load(xb, off)
+                let e = self.b.icmp("eq", wa, wb)
+                match all:
+                    case Some(x):
+                        all = Some(self.b.bin("band", x, e))
+                    case None:
+                        all = Some(e)
+            var rv = 0
+            match all:
+                case Some(x):
+                    rv = self.b.convert("uextend", "i64", x)
+                case None:
+                    rv = self.iconst(1)
+            self.b.jump(join, [rv])
+        if let Some(blk) = runtime:
+            self.b.switch_to_block(blk)
+            let out = self.slot(WORD)
+            let ia = self.type_id(ta)?
+            let ib = self.type_id(tb)?
+            let code = self.i32const(abi.VALUE_EQ)
+            let iav = self.i32const(ia)
+            let ibv = self.i32const(ib)
+            let st = self.rt_status(abi.SYM_BINARY, [code, out, pa, iav, pb, ibv])?
+            self.check(st)
+            let rv = self.load(out, 0)
+            self.b.jump(join, [rv])
+        self.b.switch_to_block(join)
+        return Ok(r)
+
+    pub pure def operand_type(mut self, p: Program, o: Operand) -> Type ! LirError:
+        match o:
+            case Operand.Const(c):
+                match c:
+                    case Const.Int(_):
+                        return Ok(Type.Int)
+                    case Const.Float(_):
+                        return Ok(Type.Float)
+                    case Const.Bool(_):
+                        return Ok(Type.Bool)
+                    case Const.Char(_):
+                        return Ok(Type.Char)
+                    case Const.Unit:
+                        return Ok(Type.Unit)
+                    case Const.Str(_):
+                        return Ok(Type.Str)
+                    case Const.Fn(n):
+                        let (_, ty) = self.fn_value(p, n)?
+                        return Ok(ty)
+            case Operand.Copy(pl) | Operand.Move(pl):
+                return self.place_type(pl)
+
+    ## A comparison of two scalars of kind `k`, as a `bool` byte.
+    pub pure def compare(mut self, op: int, k: Scalar, x: int, y: int) -> int:
+        if k == Scalar.Float or k == Scalar.F32:
+            var fx = 0
+            var fy = 0
+            if k == Scalar.Float:
+                fx = self.b.convert("bitcast", "f64", x)
+                fy = self.b.convert("bitcast", "f64", y)
+            else:
+                fx = self.f32_of(x)
+                fy = self.f32_of(y)
+            let cc = match op:
+                case 0: "eq"
+                case 1: "ne"
+                case 2: "lt"
+                case 3: "le"
+                case 4: "gt"
+                case _: "ge"
+            return self.b.fcmp(cc, fx, fy)
+        if k == Scalar.Unit:
+            let v = op == abi.VALUE_EQ or op == abi.VALUE_LE or op == abi.VALUE_GE
+            return self.b.iconst("i8", if v: 1 else: 0)
+        let signed = k == Scalar.Int
+        var cc = "eq"
+        if op == abi.VALUE_EQ:
+            cc = "eq"
+        elif op == abi.VALUE_NE:
+            cc = "ne"
+        elif op == abi.VALUE_LT:
+            cc = if signed: "slt" else: "ult"
+        elif op == abi.VALUE_LE:
+            cc = if signed: "sle" else: "ule"
+        elif op == abi.VALUE_GT:
+            cc = if signed: "sgt" else: "ugt"
+        else:
+            cc = if signed: "sge" else: "uge"
+        return self.b.icmp(cc, x, y)
+
+    ## An operation on two `int`s; `+`, `-` and `*` test the processor's
+    ## overflow flag and branch to a cold block that raises the panic,
+    ## unless `checked` is false (decision 270).
+    pub pure def int_op(mut self, op: BinOp, x: int, y: int, checked: bool) -> int ! LirError:
+        var iop: int? = None
+        if op == BinOp.Add:
+            iop = Some(abi.INT_ADD)
+        elif op == BinOp.Sub:
+            iop = Some(abi.INT_SUB)
+        elif op == BinOp.Mul:
+            iop = Some(abi.INT_MUL)
+        if let Some(io) = iop:
+            if not checked:
+                if io == abi.INT_ADD:
+                    return Ok(self.b.bin("iadd", x, y))
+                if io == abi.INT_SUB:
+                    return Ok(self.b.bin("isub", x, y))
+                return Ok(self.b.bin("imul", x, y))
+            let name = if io == abi.INT_ADD: "sadd_overflow" elif io
+                == abi.INT_SUB: "ssub_overflow" else: "smul_overflow"
+            let (r, of) = self.b.overflow(name, x, y)
+            self.guard_if(of, abi.SYM_PANIC_OVERFLOW, [Arg.I32(io), Arg.V(x), Arg.V(y)])
+            return Ok(r)
+        var runtime: int? = None
+        if op == BinOp.Div or op == BinOp.FloorDiv:
+            runtime = Some(abi.INT_FLOOR_DIV)
+        elif op == BinOp.Mod:
+            runtime = Some(abi.INT_MOD)
+        elif op == BinOp.Pow:
+            runtime = Some(abi.INT_POW)
+        elif op == BinOp.Shl:
+            runtime = Some(abi.INT_SHL)
+        elif op == BinOp.Shr:
+            runtime = Some(abi.INT_SHR)
+        if let Some(io) = runtime:
+            if io != abi.INT_POW:
+                return self.inline_int_op(io, x, y)
+            return self.runtime_int_op(io, x, y)
+        if op == BinOp.WrapAdd:
+            return Ok(self.b.bin("iadd", x, y))
+        if op == BinOp.WrapSub:
+            return Ok(self.b.bin("isub", x, y))
+        if op == BinOp.WrapMul:
+            return Ok(self.b.bin("imul", x, y))
+        if op == BinOp.SatAdd or op == BinOp.SatSub or op == BinOp.SatMul:
+            let name = if op == BinOp.SatAdd: "sadd_overflow" elif op
+                == BinOp.SatSub: "ssub_overflow" else: "smul_overflow"
+            let (r, of) = self.b.overflow(name, x, y)
+            # The bound the true result passed: by `y`'s sign for `+` and
+            # `-`, by whether the signs differ for `*`.
+            var neg = 0
+            if op == BinOp.SatAdd:
+                neg = self.b.icmp_imm("slt", y, 0)
+            elif op == BinOp.SatSub:
+                neg = self.b.icmp_imm("sgt", y, 0)
+            else:
+                let s = self.b.bin("bxor", x, y)
+                neg = self.b.icmp_imm("slt", s, 0)
+            let minv = self.iconst(-9223372036854775807 - 1)
+            let maxv = self.iconst(9223372036854775807)
+            let bound = self.b.select(neg, minv, maxv)
+            return Ok(self.b.select(of, bound, r))
+        if op == BinOp.BitAnd:
+            return Ok(self.b.bin("band", x, y))
+        if op == BinOp.BitOr:
+            return Ok(self.b.bin("bor", x, y))
+        if op == BinOp.BitXor:
+            return Ok(self.b.bin("bxor", x, y))
+        return unsupported("`{op.name()}` on integers")
+
+    ## The runtime's integer operation: its result, or its panic.
+    pub pure def runtime_int_op(mut self, iop: int, x: int, y: int) -> int ! LirError:
+        let out = self.slot(8)
+        let code = self.i32const(iop)
+        let st = self.rt_status(abi.SYM_INT_OP, [code, x, y, out])?
+        self.check(st)
+        return Ok(self.load(out, 0))
+
+    ## `//`, `%`, `<<` and `>>` as instructions (decision 246), and, on a
+    ## cold path, the runtime's call for the operands it raises a panic for.
+    pub pure def inline_int_op(mut self, iop: int, x: int, y: int) -> int ! LirError:
+        var slow_case = 0
+        if iop == abi.INT_SHL or iop == abi.INT_SHR:
+            slow_case = self.b.icmp_imm("uge", y, 64)
+        else:
+            let zero = self.b.icmp_imm("eq", y, 0)
+            let minus_one = self.b.icmp_imm("eq", y, -1)
+            let min = self.b.icmp_imm("eq", x, -9223372036854775807 - 1)
+            let overflow = self.b.bin("band", minus_one, min)
+            slow_case = self.b.bin("bor", zero, overflow)
+        let fast = self.b.create_block()
+        let slow = self.b.create_block()
+        let join = self.b.create_block()
+        let r = self.b.append_block_param(join)
+        self.b.brif(slow_case, slow, [], fast, [])
+        self.b.switch_to_block(fast)
+        var v = 0
+        if iop == abi.INT_SHL:
+            v = self.b.bin("ishl", x, y)
+        elif iop == abi.INT_SHR:
+            v = self.b.bin("sshr", x, y)
+        elif iop == abi.INT_MOD:
+            let rem = self.b.bin("srem", x, y)
+            let signs = self.b.bin("bxor", rem, y)
+            let differ = self.b.icmp_imm("slt", signs, 0)
+            let nonzero = self.b.icmp_imm("ne", rem, 0)
+            let adjust = self.b.bin("band", differ, nonzero)
+            let up = self.b.bin("iadd", rem, y)
+            v = self.b.select(adjust, up, rem)
+        else:
+            let q = self.b.bin("sdiv", x, y)
+            let qy = self.b.bin("imul", q, y)
+            let rem = self.b.bin("isub", x, qy)
+            let signs = self.b.bin("bxor", rem, y)
+            let differ = self.b.icmp_imm("slt", signs, 0)
+            let nonzero = self.b.icmp_imm("ne", rem, 0)
+            let adjust = self.b.bin("band", differ, nonzero)
+            let one = self.b.convert("uextend", "i64", adjust)
+            v = self.b.bin("isub", q, one)
+        self.b.jump(join, [v])
+        self.b.set_cold_block(slow)
+        self.b.switch_to_block(slow)
+        let sv = self.runtime_int_op(iop, x, y)?
+        self.b.jump(join, [sv])
+        self.b.switch_to_block(join)
+        return Ok(r)
+
+    pub pure def float_op(mut self, op: BinOp, x: int, y: int) -> int ! LirError:
+        if op == BinOp.Add:
+            return Ok(self.b.bin("fadd", x, y))
+        if op == BinOp.Sub:
+            return Ok(self.b.bin("fsub", x, y))
+        if op == BinOp.Mul:
+            return Ok(self.b.bin("fmul", x, y))
+        if op == BinOp.Div:
+            return Ok(self.b.bin("fdiv", x, y))
+        if op == BinOp.FloorDiv or op == BinOp.Mod or op == BinOp.Pow:
+            var code = abi.FLOAT_FLOORDIV
+            if op == BinOp.Mod:
+                code = abi.FLOAT_MOD
+            elif op == BinOp.Pow:
+                code = abi.FLOAT_POW
+            let cv = self.i32const(code)
+            return self.rt_status(abi.SYM_FLOAT_OP, [cv, x, y])
+        return unsupported("`{op.name()}` on floats")
+
+    pub pure def aggregate(
+        mut self, p: Program, kind: Aggregate, ops: list[Operand], dest: Type
+    ) -> Val ! LirError:
+        let size = self.size(dest)?
+        let out = self.slot(size)
+        match kind:
+            case Aggregate.Tuple | Aggregate.Struct(_):
+                if let Type.Named(n, a) = dest:
+                    if n == "Box":
+                        let inner = arg(a, 0)
+                        let isize = self.size(inner)?
+                        let bytes = self.iconst(isize)
+                        let cell = self.rt_status(abi.SYM_ALLOC, [bytes])?
+                        if not ops.is_empty():
+                            let (v, _) = self.operand(p, ops[0])?
+                            self.write(cell, v, isize)
+                        self.store_word(cell, out, 0)
+                        return Ok(Val.Mem(out))
+                for i in range(len(ops)):
+                    let (off, ft) = self.field_of(dest, None, i)?
+                    let (v, vt) = self.operand(p, ops[i])?
+                    let fsize = min(self.size(vt)?, self.size(ft)?)
+                    let at = self.b.imm("iadd_imm", out, off)
+                    self.write(at, v, fsize)
+                    if let Operand.Copy(_) = ops[i]:
+                        self.count_at(at, vt)?
+            case Aggregate.Variant(t, v):
+                let index = self.types.variant_index(t, v) else:
+                    return internal("no variant {t}::{v}")
+                # The enum's own type: an error set's value is its
+                # declaration's.
+                var ety = dest.copy()
+                if let Type.ErrSet(_) = dest:
+                    ety = named0(t)
+                let error_ = self.types.is_error(ety)
+                if error_:
+                    let id = self.type_id(ety)?
+                    let idv = self.iconst(id)
+                    self.store_word(idv, out, abi.ERROR_DECL)
+                    let zero = self.iconst(0)
+                    self.store_word(zero, out, abi.ERROR_TRACE)
+                let tag = self.iconst(index)
+                self.store_word(tag, out, if error_: abi.ERROR_TAG else: 0)
+                for i in range(len(ops)):
+                    let (off, ft) = self.types.field(ety, Some(index), i)?
+                    let (val, vt) = self.operand(p, ops[i])?
+                    let fsize = min(self.size(vt)?, self.size(ft)?)
+                    let at = self.b.imm("iadd_imm", out, off)
+                    self.write(at, val, fsize)
+                    if let Operand.Copy(_) = ops[i]:
+                        self.count_at(at, vt)?
+            case Aggregate.List:
+                let elem = element_type(dest)?
+                let esize = self.size(elem)?
+                let n = len(ops)
+                let bytes = self.iconst(n * esize)
+                let data = self.rt_status(abi.SYM_ALLOC, [bytes])?
+                for i in range(n):
+                    let (v, vt) = self.operand(p, ops[i])?
+                    let at = self.b.imm("iadd_imm", data, i * esize)
+                    self.write(at, v, esize)
+                    if let Operand.Copy(_) = ops[i]:
+                        self.count_at(at, vt)?
+                let len = self.iconst(n)
+                self.store_word(data, out, 0)
+                self.store_word(len, out, 8)
+                self.store_word(len, out, 16)
+            case Aggregate.Set | Aggregate.Dict:
+                # The entries in a buffer, then a table made of them.
+                var key = Type.Unit
+                var val = Type.Unit
+                match dest:
+                    case Type.Named(n, a):
+                        key = arg(a, 0)
+                        if n == "dict":
+                            val = arg(a, 1)
+                    case _:
+                        return internal("a table literal of type `{write.ty(dest)}`")
+                let ks = self.size(key)?
+                let vs = self.size(val)?
+                let per = if kind == Aggregate.Dict: 2 else: 1
+                let n = len(ops) // per
+                let buf = self.slot((ks + vs) * n)
+                for i in range(len(ops)):
+                    let entry = (i // per) * (ks + vs)
+                    var off = entry
+                    var sz = ks
+                    if i % per != 0:
+                        off = entry + ks
+                        sz = vs
+                    let (v, vt) = self.operand(p, ops[i])?
+                    let fsz = min(sz, self.size(vt)?)
+                    let at = self.b.imm("iadd_imm", buf, off)
+                    self.write(at, v, fsz)
+                let id = self.type_id(dest)?
+                let idv = self.i32const(id)
+                let nv = self.iconst(n)
+                let st = self.rt_status(abi.SYM_TABLE, [idv, buf, nv, out])?
+                self.check(st)
+            case Aggregate.Dyn(t):
+                # The type of the value and its address: a heap cell the
+                # `dyn` owns, or for `dyn ref T(r)` the address `r` holds.
+                let carried = self.concrete_here(p, t)?
+                if ops.is_empty():
+                    return internal("a `dyn` without its value")
+                let (v, _) = self.operand(p, ops[0])?
+                var value_ty = carried.copy()
+                var at = 0
+                match carried:
+                    case Type.Ref(inner, _):
+                        value_ty = inner[0].copy()
+                        at = self.first_word(v)?
+                    case _:
+                        let csize = self.size(carried)?
+                        let bytes = self.iconst(csize)
+                        let cell = self.rt_status(abi.SYM_ALLOC, [bytes])?
+                        self.write(cell, v, csize)
+                        at = cell
+                if let Type.Dyn(_, _) = value_ty:
+                    return unsupported("a `dyn` of a `dyn`")
+                var dyn_ty = dest.copy()
+                if let Type.Ref(inner, _) = dest:
+                    dyn_ty = inner[0].copy()
+                let id = self.type_id(value_ty)?
+                self.carry(dyn_ty, value_ty)?
+                let idv = self.iconst(id)
+                self.store_word(idv, out, 0)
+                self.store_word(at, out, 8)
+        return Ok(Val.Mem(out))
+
+## A `String` or a `Path`, whose words are the same.
+pure def text_word(t: Type) -> bool:
+    if let Type.Named(n, a) = t:
+        return a.is_empty() and (n == "String" or n == "Path")
+    return False
+
+## The runtime's operator for a binary operator on values, if it has one.
+pub pure def value_op(op: BinOp) -> int?:
+    return match op:
+        case Eq: Some(abi.VALUE_EQ)
+        case Ne: Some(abi.VALUE_NE)
+        case Lt: Some(abi.VALUE_LT)
+        case Le: Some(abi.VALUE_LE)
+        case Gt: Some(abi.VALUE_GT)
+        case Ge: Some(abi.VALUE_GE)
+        case In: Some(abi.VALUE_IN)
+        case Concat: Some(abi.VALUE_CONCAT)
+        case _: None

@@ -1,0 +1,28 @@
+# A function can fail in the ways of every function it calls.
+error ParseError:
+    NotANumber(text: String)
+
+error BankError:
+    TooLittle(balance: int, wanted: int)
+
+def amount(text: str) -> int ! ParseError:
+    let n = text.trim().parse_int() else:
+        return Err(NotANumber(text.to_string()))
+    return Ok(n)
+
+def withdraw(balance: int, wanted: int) -> int ! BankError:
+    if wanted > balance:
+        return Err(TooLittle(balance, wanted))
+    return Ok(balance - wanted)
+
+def withdraw_text(balance: int, text: str) -> int ! {ParseError, BankError}:
+    return withdraw(balance, amount(text)?)
+
+def withdraw_twice(balance: int, first: str, second: str) -> int !:
+    let left = withdraw_text(balance, first)?
+    return withdraw_text(left, second)
+
+def main():
+    print(withdraw_text(100, "30"))
+    print(withdraw_text(100, "lots"))
+    print(withdraw_twice(100, "30", "80"))

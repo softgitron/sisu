@@ -10,7 +10,9 @@
 
 use crate::lir::{self, Bin, Conv, Imm, Item, Load, Op, Ovf, Sig, Un};
 use crate::{Checks, Compiled, Error, FRAME_EXTRA, Frame, debug, workers};
-use cranelift_codegen::ir::{self, AbiParam, Block, FuncRef, GlobalValue, InstBuilder, MemFlags, Value, types};
+use cranelift_codegen::ir::{
+    self, AbiParam, Block, FuncRef, GlobalValue, InstBuilder, MemFlags, Value, types,
+};
 use cranelift_codegen::isa::CallConv;
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_codegen::{Context, ir::Signature};
@@ -27,11 +29,8 @@ pub fn compile_lir(text: &str, sources: &debug::Sources) -> Result<Compiled, Err
     // The functions before the first that needs the probe reserve (C's
     // `main`) are compiled on threads; that one is written once they are
     // placed, as `sisu-codegen` writes it (decision 234).
-    let split = lir
-        .items
-        .iter()
-        .position(|i| matches!(i, Item::Function(f) if f.reserve))
-        .unwrap_or(lir.items.len());
+    let split =
+        lir.items.iter().position(|i| matches!(i, Item::Function(f) if f.reserve)).unwrap_or(lir.items.len());
     let (first, rest) = lir.items.split_at(split);
     let threads = workers::count();
     if threads > 1 {
@@ -275,7 +274,9 @@ impl Tr {
         let slots: Vec<ir::StackSlot> = f
             .slots
             .iter()
-            .map(|s| b.create_sized_stack_slot(ir::StackSlotData::new(ir::StackSlotKind::ExplicitSlot, *s, 3)))
+            .map(|s| {
+                b.create_sized_stack_slot(ir::StackSlotData::new(ir::StackSlotKind::ExplicitSlot, *s, 3))
+            })
             .collect();
         let vars: Vec<Variable> = (0..f.vars).map(|_| b.declare_var(types::I64)).collect();
         let mut blocks: Vec<Block> = Vec::new();
@@ -284,7 +285,7 @@ impl Tr {
         let mut gvs: HashMap<DataId, GlobalValue> = HashMap::new();
         let flags = MemFlags::trusted();
         // Block `k` and every block before it, made as the lowering made
-        // them (decision 273).
+        // them (decision 283).
         let ensure = |b: &mut FunctionBuilder<'_>, blocks: &mut Vec<Block>, k: u32| -> Block {
             while blocks.len() <= k as usize {
                 blocks.push(b.create_block());
@@ -343,10 +344,10 @@ impl Tr {
                 Op::BinaryImm(k, x, n) => {
                     let x = val(&vals, *x)?;
                     let r = match k {
-                        Imm::IaddImm => b.ins().iadd_imm(x, *n),
-                        Imm::ImulImm => b.ins().imul_imm(x, *n),
-                        Imm::BxorImm => b.ins().bxor_imm(x, *n),
-                        Imm::BorImm => b.ins().bor_imm(x, *n),
+                        Imm::Iadd => b.ins().iadd_imm(x, *n),
+                        Imm::Imul => b.ins().imul_imm(x, *n),
+                        Imm::Bxor => b.ins().bxor_imm(x, *n),
+                        Imm::Bor => b.ins().bor_imm(x, *n),
                     };
                     vals.push(r);
                 }

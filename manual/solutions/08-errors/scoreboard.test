@@ -1,0 +1,3 @@
+test "numbers only" ... ok
+test "a line that is not a number" ... ok
+2 passed, 0 failed, 0 blocked

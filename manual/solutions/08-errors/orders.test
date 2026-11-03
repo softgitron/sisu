@@ -1,0 +1,6 @@
+test "one line" ... ok
+test "lines without a quantity" ... ok
+test "an order of several lines" ... ok
+test "the total of an order" ... ok
+test "errors from every layer" ... ok
+5 passed, 0 failed, 0 blocked

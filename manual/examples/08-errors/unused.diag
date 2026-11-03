@@ -1,0 +1,2 @@
+11:5-11:23 E0318 type.unused-result ty="int ! BankError"
+  fix type.discard 11:5-11:5 "_ = "

@@ -1,0 +1,22 @@
+# `.context` says what the program was doing when an error happened.
+error ParseError:
+    NotANumber(text: String)
+
+def number(text: str) -> int ! ParseError:
+    let n = text.trim().parse_int() else:
+        return Err(NotANumber(text.to_string()))
+    return Ok(n)
+
+def total(lines: list[str]) -> int ! Contextual:
+    var sum_so_far = 0
+    for i, line in enumerate(lines):
+        sum_so_far += number(line).context("reading line {i + 1}")?
+    return Ok(sum_so_far)
+
+def main():
+    match total(["12", "kolme", "30"]):
+        case Ok(n):
+            print("the total is {n}")
+        case Err(e):
+            print("error: {e}")
+            print(e.trace())

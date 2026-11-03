@@ -1,0 +1,23 @@
+##! Exercise 9.1, reading a file: the solution.
+##!
+##! Sisu has no `open` that any function can call. A function reads
+##! files through the file system it is given, so `line_count` takes an
+##! `Fs`, as its doc comment and its tests say, and `read_to_string`
+##! gives the text or an `IoError` that `?` passes on.
+
+## The number of lines in the file at `path`, read from `fs`.
+def line_count(fs: Fs, path: Path) -> int ! IoError:
+    let text = fs.read_to_string(path)?
+    return Ok(text.lines().count())
+
+test "a file of three lines":
+    let fs = Fs.in_memory({"notes.txt": "one\ntwo\nthree\n"})
+    assert line_count(fs, "notes.txt") == Ok(3)
+
+test "an empty file":
+    let fs = Fs.in_memory({"empty.txt": ""})
+    assert line_count(fs, "empty.txt") == Ok(0)
+
+test "a file that is not there":
+    let fs = Fs.in_memory({})
+    assert line_count(fs, "missing.txt") == Err(NotFound("missing.txt"))

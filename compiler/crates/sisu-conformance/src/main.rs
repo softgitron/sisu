@@ -13,7 +13,11 @@
 //! `--native-survey LIST` tries every runnable case the list leaves out,
 //! printing which would pass. `--interpreted-from-sir LIST` runs the
 //! list's cases in the interpreter from serialised SIR (`sisu run
-//! --from-sir`).
+//! --from-sir`). `--native-from-lir LIST` lowers each case's SIR with stage
+//! 2 (`sisu2 lir`) and builds it from LIR (`sisu build --native
+//! --from-lir`), whose executable must be the one its SIR gives, byte for
+//! byte; stage 2 is `--sisu2 PATH`, else built from `ROOT/../../stage2`
+//! with the `sisu` under test.
 
 use std::path::PathBuf;
 
@@ -26,6 +30,8 @@ fn main() {
     let mut from_sir = false;
     let mut release = false;
     let mut interpreted = false;
+    let mut from_lir = false;
+    let mut sisu2: Option<PathBuf> = None;
     let mut front_end: Option<String> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -41,15 +47,18 @@ fn main() {
                     sisu = PathBuf::from(p);
                 }
             }
+            "--sisu2" => sisu2 = args.next().map(PathBuf::from),
             "--native"
             | "--native-survey"
             | "--native-from-sir"
             | "--native-release"
+            | "--native-from-lir"
             | "--interpreted-from-sir" => {
                 survey = a == "--native-survey";
                 from_sir = a == "--native-from-sir";
                 release = a == "--native-release";
                 interpreted = a == "--interpreted-from-sir";
+                from_lir = a == "--native-from-lir";
                 if let Some(p) = args.next() {
                     native = Some(PathBuf::from(p));
                 }
@@ -74,7 +83,22 @@ fn main() {
             }
             return;
         }
-        let report = if interpreted {
+        let report = if from_lir {
+            let stage2 = match sisu2 {
+                Some(p) => std::fs::canonicalize(&p).unwrap_or(p),
+                None => {
+                    let dir = root.join("../../stage2");
+                    match sisu_conformance::native::build_stage2(&sisu, &dir) {
+                        Ok(exe) => exe,
+                        Err(e) => {
+                            eprintln!("stage 2 does not build in `{}`:\n{e}", dir.display());
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            };
+            sisu_conformance::native::run_native_from_lir(&sisu, &root, &names, &stage2)
+        } else if interpreted {
             sisu_conformance::native::run_interpreted_from_sir(&sisu, &root, &names)
         } else if from_sir {
             sisu_conformance::native::run_native_from_sir(&sisu, &root, &names)

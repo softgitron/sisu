@@ -1,0 +1,4 @@
+9:13-9:32 E0347 type.bound-not-satisfied ty="Version" bound="Eq"
+9:35-9:60 E0368 type.not-ordered ty="Version" op="<"
+10:13-10:67 E0347 type.bound-not-satisfied ty="ref Version" bound="Ord"
+11:17-11:36 E0347 type.bound-not-satisfied ty="Version" bound="Hash"

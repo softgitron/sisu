@@ -1,0 +1,58 @@
+##! Exercise 7.5, an expression evaluator: the solution.
+##!
+##! Both functions follow the shape of the enum: one arm per variant,
+##! and a call on each part that is itself an expression. Where a part
+##! goes decides whether it needs parentheses, so `show` writes the
+##! parts of a product or a negation through `operand`, which puts a
+##! sum in parentheses and leaves everything else as `show` writes it.
+
+enum Expr:
+    Number(int)
+    Negate(Expr)
+    Plus(Expr, Expr)
+    Times(Expr, Expr)
+
+## The value of `e`.
+def evaluate(e: Expr) -> int:
+    return match e:
+        case Number(n): n
+        case Negate(a): -evaluate(a)
+        case Plus(a, b): evaluate(a) + evaluate(b)
+        case Times(a, b): evaluate(a) * evaluate(b)
+
+## `e` as text, written as a person would write it: a sum inside a
+## product or a negation is in parentheses, and nothing else is.
+def show(e: Expr) -> String:
+    return match e:
+        case Number(n): "{n}"
+        case Negate(a): "-{operand(a)}"
+        case Plus(a, b): "{show(a)} + {show(b)}"
+        case Times(a, b): "{operand(a)} * {operand(b)}"
+
+## `e` as `show` writes it, in parentheses when it is a sum.
+def operand(e: Expr) -> String:
+    return match e:
+        case Plus(_, _): "({show(e)})"
+        case _: show(e)
+
+test "a number":
+    assert evaluate(Number(7)) == 7
+    assert show(Number(7)) == "7"
+
+test "sums and products":
+    let e = Plus(Number(2), Times(Number(3), Number(4)))
+    assert evaluate(e) == 14
+    assert show(e) == "2 + 3 * 4"
+
+test "a sum inside a product":
+    let e = Times(Plus(Number(1), Number(2)), Number(3))
+    assert evaluate(e) == 9
+    assert show(e) == "(1 + 2) * 3"
+
+test "negations":
+    let e = Times(Number(2), Negate(Number(3)))
+    assert evaluate(e) == -6
+    assert show(e) == "2 * -3"
+    let f = Negate(Plus(Number(1), Negate(Number(4))))
+    assert evaluate(f) == 3
+    assert show(f) == "-(1 + -4)"

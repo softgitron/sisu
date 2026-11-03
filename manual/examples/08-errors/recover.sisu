@@ -1,0 +1,24 @@
+# `else`, `else as e` and `.or` handle an error where it happens.
+error ClockError:
+    NoColon(text: String)
+    NotANumber(text: String)
+
+def hour(text: str) -> int ! ClockError:
+    let before, _ = text.split_once(":") else:
+        return Err(NoColon(text.to_string()))
+    let h = before.parse_int() else:
+        return Err(NotANumber(before.to_string()))
+    return Ok(h)
+
+def describe(text: str) -> String:
+    let h = hour(text) else as e:
+        return "no hour in {text:?}: {e}"
+    return "hour {h}"
+
+def main():
+    let a = hour("7:45") else: 0
+    let b = hour("noon") else: 12
+    let c = hour("x:15").or(-1)
+    print("{a} {b} {c}")
+    print(describe("18:20"))
+    print(describe("evening"))

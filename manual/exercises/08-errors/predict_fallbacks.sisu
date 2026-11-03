@@ -1,0 +1,45 @@
+##! Exercise 8.1, predict the fallbacks. Kind: predict. Level: 1.
+##!
+##! Each constant is your prediction of the value of the expression in
+##! its test. Write each as a literal, then run
+##! `sisu test predict_fallbacks.sisu`. The hints are in chapter 8 of
+##! the tutorial, under "Exercise 8.1: predict the fallbacks".
+
+error OddError:
+    Odd(value: int)
+
+## Half of `n`, which must be even.
+def halve(n: int) -> int ! OddError:
+    if n % 2 != 0:
+        return Err(Odd(n))
+    return Ok(n // 2)
+
+## A quarter of `n`, which must be even, and so must its half.
+def quarter(n: int) -> int ! OddError:
+    let half = halve(n)?
+    return halve(half)
+
+const PARSED: int = todo("a number read from text, or 0")
+const NOT_PARSED: int = todo("a word read as a number, or 0")
+const PAST_THE_END: int = todo("the item at index 5, or -1")
+const QUARTER: int = todo("a quarter of 12, or 0")
+const NO_QUARTER: int = todo("a quarter of 6, or 0")
+const SHOWN: str = todo("a result as text")
+
+test "a number read from text":
+    assert ("17".parse_int() ?? 0) == PARSED
+
+test "a word read as a number":
+    assert ("seventeen".parse_int() ?? 0) == NOT_PARSED
+
+test "an index past the end":
+    assert ([10, 20, 30].get(5) ?? -1) == PAST_THE_END
+
+test "two halvings":
+    assert quarter(12).or(0) == QUARTER
+
+test "a halving that fails":
+    assert quarter(6).or(0) == NO_QUARTER
+
+test "a result as text":
+    assert "{halve(5)}" == SHOWN

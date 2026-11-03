@@ -1,0 +1,18 @@
+# An enum can hold a value of its own type.
+enum Route:
+    Arrived
+    Via(stop: String, rest: Route)
+
+def stops(route: Route) -> int:
+    return match route:
+        case Arrived: 0
+        case Via(rest=rest, ..): 1 + stops(rest)
+
+def itinerary(route: Route) -> String:
+    return match route:
+        case Arrived: "arrived"
+        case Via(stop, rest): "{stop}, then {itinerary(rest)}"
+
+def main():
+    let route = Via("Oulu", Via("Tampere", Via("Helsinki", Arrived)))
+    print("{stops(route)} stops: {itinerary(route)}")

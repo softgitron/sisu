@@ -1,0 +1,13 @@
+# Two enums with a variant of the same name.
+enum Light:
+    Red
+    Amber
+    Green
+
+enum Wine:
+    Red
+    White
+
+def main():
+    let order = Red
+    print("{order:?}")

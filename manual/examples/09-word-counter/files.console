@@ -1,0 +1,6 @@
+$ sisu run -- poem.txt
+24 words in poem.txt
+$ sisu run -- poem.txt missing.txt
+24 words in poem.txt
+error: NotFound(path="missing.txt")
+  at src/main.sisu:6:20

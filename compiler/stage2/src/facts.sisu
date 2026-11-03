@@ -1,0 +1,1461 @@
+##! What the release profile knows about a function's integers at each
+##! point (stage 0's `sisu-codegen/src/facts.rs`; decision 270): the bounds
+##! of the integers kept in variables, the comparisons that hold between
+##! them, which local holds the length of a list that cannot change
+##! meanwhile, and what a range iterator of the frame yields. The lowering
+##! asks it whether an index is in bounds, whether an addition, subtraction
+##! or multiplication cannot overflow, and whether a test is decided. Every
+##! answer is a proof: where it knows nothing, the check stays.
+##!
+##! A state keeps its facts in the order the Rust derives for them, since a
+##! lookup takes the first that fits: each fact has a code, a list of
+##! integers whose lexicographic order is that order (`code`).
+
+from stage1.sir import (
+    BinOp,
+    Callee,
+    Const,
+    Function,
+    LocalId,
+    Operand,
+    Place,
+    Proj,
+    Rvalue,
+    StatementKind,
+    Terminator,
+    Type,
+    UnOp,
+)
+
+pub const MIN: int = -9223372036854775807 - 1
+pub const MAX: int = 9223372036854775807
+
+## How often a block's entry may grow before its bounds are widened, and
+## change at all before the analysis gives up on it.
+const WIDEN_AFTER: int = 3
+const GIVE_UP_AFTER: int = 64
+
+@derive(Eq, Copy)
+pub enum Step:
+    Deref
+    Field(int)
+    Index(int)
+
+## A list whose length a fact speaks of: a local, then the referent of a
+## shared reference, fields, and elements at indices tracked locals hold.
+@derive(Eq)
+pub struct Key:
+    pub root: int
+    pub steps: list[Step]
+
+impl Key:
+    pub pure def mentions(self, l: int) -> bool:
+        if self.root == l:
+            return True
+        for s in self.steps:
+            if s == Step.Index(l):
+                return True
+        return False
+
+    ## Whether a change of `self` may change the length of the list
+    ## `other` names.
+    pub pure def contains(self, other: Key) -> bool:
+        if self.root != other.root or len(self.steps) > len(other.steps):
+            return False
+        for i in range(len(self.steps)):
+            let a = self.steps[i]
+            let b = other.steps[i]
+            if a == b:
+                continue
+            if let Step.Index(_) = a:
+                if let Step.Index(_) = b:
+                    continue
+            return False
+        return True
+
+@derive(Eq, Copy)
+pub enum Atom:
+    Local(int)
+    Const(int)
+
+@derive(Eq, Copy)
+pub enum Rel:
+    Lt
+    Le
+    Eq
+    Ne
+
+@derive(Eq)
+pub enum End:
+    Const(int)
+    Local(int)
+    Len(Key)
+
+@derive(Eq)
+pub enum Fact:
+    Holds(Atom, Rel, Atom)
+    Len(int, Key)
+    Below(int, Key)
+    Cond(int, Atom, Rel, Atom)
+    Range(int, int, End)
+    Next(int, int)
+    Disc(int, int)
+    IsSome(int)
+    RefTo(int, Key)
+    MutTo(int, Key)
+
+pure def atom_code(a: Atom, mut out: list[int]):
+    match a:
+        case Atom.Local(l):
+            out.push(0)
+            out.push(l)
+        case Atom.Const(c):
+            out.push(1)
+            out.push(c)
+
+pure def rel_code(r: Rel) -> int:
+    return match r:
+        case Lt: 0
+        case Le: 1
+        case Eq: 2
+        case Ne: 3
+
+pure def key_code(k: Key, mut out: list[int]):
+    out.push(k.root)
+    for s in k.steps:
+        match s:
+            case Step.Deref:
+                out.push(0)
+                out.push(0)
+            case Step.Field(i):
+                out.push(1)
+                out.push(i)
+            case Step.Index(i):
+                out.push(2)
+                out.push(i)
+
+## The fact's code: its variant, then its fields, in the order the Rust
+## derives (a key is always last, so its steps may run to the end).
+pub pure def code(f: Fact) -> list[int]:
+    var out: list[int] = []
+    match f:
+        case Fact.Holds(a, r, b):
+            out.push(0)
+            atom_code(a, mut out)
+            out.push(rel_code(r))
+            atom_code(b, mut out)
+        case Fact.Len(x, k):
+            out.push(1)
+            out.push(x)
+            key_code(k, mut out)
+        case Fact.Below(x, k):
+            out.push(2)
+            out.push(x)
+            key_code(k, mut out)
+        case Fact.Cond(c, a, r, b):
+            out.push(3)
+            out.push(c)
+            atom_code(a, mut out)
+            out.push(rel_code(r))
+            atom_code(b, mut out)
+        case Fact.Range(r, lo, end):
+            out.push(4)
+            out.push(r)
+            out.push(lo)
+            match end:
+                case End.Const(c):
+                    out.push(0)
+                    out.push(c)
+                case End.Local(l):
+                    out.push(1)
+                    out.push(l)
+                case End.Len(k):
+                    out.push(2)
+                    key_code(k, mut out)
+        case Fact.Next(o, r):
+            out.push(5)
+            out.push(o)
+            out.push(r)
+        case Fact.Disc(d, o):
+            out.push(6)
+            out.push(d)
+            out.push(o)
+        case Fact.IsSome(o):
+            out.push(7)
+            out.push(o)
+        case Fact.RefTo(x, k):
+            out.push(8)
+            out.push(x)
+            key_code(k, mut out)
+        case Fact.MutTo(x, k):
+            out.push(9)
+            out.push(x)
+            key_code(k, mut out)
+    return out
+
+## -1, 0 or 1 as `a` is before, the same as or after `b`, lexicographically.
+pure def compare(a: list[int], b: list[int]) -> int:
+    let n = min(len(a), len(b))
+    for i in range(n):
+        if a[i] < b[i]:
+            return -1
+        if a[i] > b[i]:
+            return 1
+    if len(a) < len(b):
+        return -1
+    if len(a) > len(b):
+        return 1
+    return 0
+
+impl Fact:
+    pub pure def mentions(self, l: int) -> bool:
+        match self:
+            case Holds(a, _, b):
+                return a == Atom.Local(l) or b == Atom.Local(l)
+            case Cond(c, a, _, b):
+                return c == l or a == Atom.Local(l) or b == Atom.Local(l)
+            case Len(x, k) | Below(x, k) | RefTo(x, k) | MutTo(x, k):
+                return x == l or k.mentions(l)
+            case Range(r, _, end):
+                if r == l:
+                    return True
+                match end:
+                    case End.Const(_):
+                        return False
+                    case End.Local(e):
+                        return e == l
+                    case End.Len(k):
+                        return k.mentions(l)
+            case Next(o, r) | Disc(o, r):
+                return o == l or r == l
+            case IsSome(o):
+                return o == l
+
+    ## The list a change of which ends the fact: one about its length.
+    pub pure def key(self) -> Key?:
+        match self:
+            case Len(_, k) | Below(_, k):
+                return Some(k.copy())
+            case Range(_, _, end):
+                if let End.Len(k) = end:
+                    return Some(k.copy())
+                return None
+            case _:
+                return None
+
+    ## The fact with `to` in the place of `from`, for a copy of an integer
+    ## local.
+    pub pure def renamed(self, from_: int, to: int) -> Fact?:
+        let f = Atom.Local(from_)
+        match self:
+            case Holds(a, r, b):
+                if a == f or b == f:
+                    let na = if a == f: Atom.Local(to) else: a
+                    let nb = if b == f: Atom.Local(to) else: b
+                    return Some(Fact.Holds(na, r, nb))
+                return None
+            case Len(x, k):
+                if x == from_:
+                    return Some(Fact.Len(to, k.copy()))
+                return None
+            case Below(x, k):
+                if x == from_:
+                    return Some(Fact.Below(to, k.copy()))
+                return None
+            case Cond(c, a, r, b):
+                if c == from_:
+                    return Some(Fact.Cond(to, a, r, b))
+                return None
+            case _:
+                return None
+
+## What holds at a point: the bounds of the tracked locals that are
+## narrower than their types' (sorted by local), and the facts (sorted, with
+## their codes).
+@derive(Eq)
+pub struct State:
+    bounds: list[(int, int, int)]
+    facts: list[Fact]
+    codes: list[list[int]]
+
+impl State:
+    pub pure def empty() -> State:
+        return State(bounds=[], facts=[], codes=[])
+
+    ## Where the fact's code is, or would go: its place and whether it is
+    ## there.
+    pure def search(self, c: list[int]) -> (int, bool):
+        var lo = 0
+        var hi = len(self.codes)
+        while lo < hi:
+            let mid = (lo + hi) // 2
+            let k = compare(self.codes[mid], c)
+            if k == 0:
+                return (mid, True)
+            if k < 0:
+                lo = mid + 1
+            else:
+                hi = mid
+        return (lo, False)
+
+    pub pure def add(mut self, f: Fact):
+        let c = code(f)
+        let (at, found) = self.search(c)
+        if not found:
+            self.facts.insert(at, f.copy())
+            self.codes.insert(at, c)
+
+    pub pure def has(self, f: Fact) -> bool:
+        let (_, found) = self.search(code(f))
+        return found
+
+    ## Keeps the facts `keep` says to keep, by place.
+    pure def keep(mut self, keep: list[bool]):
+        var facts: list[Fact] = []
+        var codes: list[list[int]] = []
+        for i in range(len(self.facts)):
+            if keep[i]:
+                facts.push(self.facts[i].copy())
+                codes.push(self.codes[i].copy())
+        self.facts = facts
+        self.codes = codes
+
+    pure def bound_at(self, l: int) -> (int, bool):
+        var lo = 0
+        var hi = len(self.bounds)
+        while lo < hi:
+            let mid = (lo + hi) // 2
+            let k = self.bounds[mid].0
+            if k == l:
+                return (mid, True)
+            if k < l:
+                lo = mid + 1
+            else:
+                hi = mid
+        return (lo, False)
+
+    pub pure def narrowed(self, l: int) -> (int, int)?:
+        let (at, found) = self.bound_at(l)
+        if found:
+            return Some((self.bounds[at].1, self.bounds[at].2))
+        return None
+
+    pure def remove_bound(mut self, l: int):
+        let (at, found) = self.bound_at(l)
+        if found:
+            _ = self.bounds.remove(at)
+
+## Which way a terminator leaves: a `switch`'s case or default, or a jump.
+@derive(Eq, Copy)
+pub enum Edge:
+    Case(int)
+    Default
+    Jump
+
+## The analysis of one function instance.
+pub struct Facts:
+    ## Each block's state at its entry; none where no path reaches it.
+    entry: list[State?]
+    ## Each local's bounds by its type, for the tracked locals.
+    tracked: list[(int, int)?]
+    ## The locals some mutable borrow of which goes where the analysis
+    ## cannot follow.
+    wild: list[bool]
+    tys: list[Type]
+    frames: list[bool]
+    ## The functions the program calls that only return an integer.
+    constants: list[(String, int)]
+
+## The bounds a tracked local's type gives it.
+pub pure def type_bounds(t: Type) -> (int, int)?:
+    match t:
+        case Type.Int:
+            return Some((MIN, MAX))
+        case Type.Bool:
+            return Some((0, 1))
+        case Type.Named(n, a):
+            if not a.is_empty():
+                return None
+            return match n.to_string():
+                case "u8": Some((0, 255))
+                case "i8": Some((-128, 127))
+                case "u16": Some((0, 65535))
+                case "i16": Some((-32768, 32767))
+                case "u32": Some((0, 4294967295))
+                case "i32": Some((-2147483648, 2147483647))
+                case _: None
+        case _:
+            return None
+
+## Whether a value of the type holds no reference.
+pure def holds_no_reference(t: Type) -> bool:
+    match t:
+        case Type.Int | Type.Float | Type.Bool | Type.Char | Type.Unit | Type.Never:
+            return True
+        case Type.Named(n, a):
+            if n == "Option":
+                for x in a:
+                    if not holds_no_reference(x):
+                        return False
+                return True
+            if a.is_empty():
+                return type_bounds(t).is_some()
+            return False
+        case _:
+            return False
+
+pure def wide(x: int) -> i128:
+    return x
+
+pure def sat_add(a: int, b: int) -> int:
+    return clamp(wide(a) + wide(b))
+
+pure def sat_sub(a: int, b: int) -> int:
+    return clamp(wide(a) - wide(b))
+
+pure def operand_place(o: Operand) -> Place?:
+    match o:
+        case Operand.Copy(p) | Operand.Move(p):
+            return Some(p.copy())
+        case _:
+            return None
+
+impl Facts:
+    ## The analysis of `f`, whose locals have the concrete types `tys`;
+    ## `regs` are the locals in variables, `frames` the frame iterators,
+    ## and `constants` the values of the functions that only return an
+    ## integer.
+    pub pure def of(
+        f: Function,
+        tys: list[Type],
+        regs: list[bool],
+        frames: list[bool],
+        constants: list[(String, int)],
+    ) -> Facts:
+        # The result too, when the function only assigns it whole.
+        let result = whole_only(f, 0)
+        var tracked: list[(int, int)?] = []
+        for i in range(len(tys)):
+            if (i < len(regs) and regs[i]) or (i == 0 and result):
+                tracked.push(type_bounds(tys[i]))
+            else:
+                tracked.push(None)
+        var entry: list[State?] = []
+        for _ in f.blocks:
+            entry.push(None)
+        var facts = Facts(
+            entry=entry,
+            tracked=tracked,
+            wild=wild_locals(f, tys),
+            tys=tys.copy(),
+            frames=frames.copy(),
+            constants=constants.copy(),
+        )
+        facts.solve(f)
+        return facts
+
+    ## The state at the entry of block `i`.
+    pub pure def entry_of(self, i: int) -> State?:
+        if i < len(self.entry):
+            return self.entry[i].copy()
+        return None
+
+    pure def solve(mut self, f: Function):
+        let n = len(f.blocks)
+        var visits: list[int] = []
+        var queued: list[bool] = []
+        for _ in range(n):
+            visits.push(0)
+            queued.push(False)
+        var work: list[int] = []
+        # The entry, and each cleanup block, which unwinding enters from any
+        # statement of its blocks: knowing nothing.
+        for i in range(n):
+            if i == 0 or f.blocks[i].cleanup:
+                self.entry[i] = Some(State.empty())
+                queued[i] = True
+                work.push(i)
+        while not work.is_empty():
+            let i = work.pop() ?? 0
+            queued[i] = False
+            let start = self.entry[i].copy() else:
+                continue
+            var st = start
+            let block = ref f.blocks[i]
+            for s in block.stmts:
+                self.step(mut st, s.kind)
+            for (t, edge) in successors(block.term):
+                if t >= n or f.blocks[t].cleanup:
+                    continue
+                var out = st.copy()
+                if not self.edge(mut out, block.term, edge):
+                    continue
+                var next = out.copy()
+                if let Some(old) = self.entry[t].copy():
+                    var joined = self.join(old, out)
+                    visits[t] += 1
+                    if visits[t] > WIDEN_AFTER:
+                        self.widen(old, mut joined)
+                        self.narrow(mut joined)
+                    if joined == old:
+                        continue
+                    if visits[t] > GIVE_UP_AFTER:
+                        next = State.empty()
+                    else:
+                        next = joined
+                self.entry[t] = Some(next)
+                if not queued[t]:
+                    queued[t] = True
+                    work.push(t)
+
+    pure def type_of(self, l: int) -> (int, int)?:
+        if l < len(self.tracked):
+            return self.tracked[l]
+        return None
+
+    pub pure def bound(self, st: State, a: Atom) -> (int, int):
+        match a:
+            case Atom.Const(c):
+                return (c, c)
+            case Atom.Local(l):
+                if let Some(b) = st.narrowed(l):
+                    return b
+                return self.type_of(l) ?? (MIN, MAX)
+
+    pure def set_bound(self, mut st: State, l: int, b: (int, int)):
+        let Some((tlo, thi)) = self.type_of(l) else:
+            return
+        let lo = max(b.0, tlo)
+        let hi = min(b.1, thi)
+        let (at, found) = st.bound_at(l)
+        # Bounds outside the type say nothing the type does not.
+        if (lo == tlo and hi == thi) or lo > hi:
+            if found:
+                _ = st.bounds.remove(at)
+            return
+        if found:
+            st.bounds[at] = (l, lo, hi)
+        else:
+            st.bounds.insert(at, (l, lo, hi))
+
+    ## Where two paths meet: the hull of the bounds, the facts both have.
+    pure def join(self, old: State, new: State) -> State:
+        var st = State.empty()
+        for (l, lo, hi) in old.bounds:
+            if let Some((nlo, nhi)) = new.narrowed(l):
+                self.set_bound(mut st, l, (min(lo, nlo), max(hi, nhi)))
+        for i in range(len(old.facts)):
+            if new.has(old.facts[i]):
+                st.facts.push(old.facts[i].copy())
+                st.codes.push(old.codes[i].copy())
+        return st
+
+    ## The bounds that keep growing at a block go to their type's ends.
+    pure def widen(self, old: State, mut joined: State):
+        let grown = joined.bounds.copy()
+        for (l, lo, hi) in grown:
+            let (olo, ohi) = self.bound(old, Atom.Local(l))
+            let (tlo, thi) = self.type_of(l) ?? (MIN, MAX)
+            let nlo = if lo < olo: tlo else: lo
+            let nhi = if hi > ohi: thi else: hi
+            self.set_bound(mut joined, l, (nlo, nhi))
+
+    ## Narrows the bounds by the comparisons the state holds.
+    pure def narrow(self, mut st: State):
+        for _ in range(2):
+            var held: list[(Atom, Rel, Atom)] = []
+            for f in st.facts:
+                if let Fact.Holds(a, r, b) = f:
+                    held.push((a, r, b))
+            for (a, r, b) in held:
+                let (alo, ahi) = self.bound(st, a)
+                let (blo, bhi) = self.bound(st, b)
+                var na = (alo, ahi)
+                var nb = (blo, bhi)
+                match r:
+                    case Rel.Lt:
+                        na = (alo, min(ahi, sat_sub(bhi, 1)))
+                        nb = (max(blo, sat_add(alo, 1)), bhi)
+                    case Rel.Le:
+                        na = (alo, min(ahi, bhi))
+                        nb = (max(blo, alo), bhi)
+                    case Rel.Eq:
+                        na = (max(alo, blo), min(ahi, bhi))
+                        nb = (max(alo, blo), min(ahi, bhi))
+                    case Rel.Ne:
+                        continue
+                if na.0 > na.1 or nb.0 > nb.1:
+                    continue
+                if let Atom.Local(l) = a:
+                    self.set_bound(mut st, l, na)
+                if let Atom.Local(l) = b:
+                    self.set_bound(mut st, l, nb)
+
+    pure def is_tracked(self, l: int) -> bool:
+        return self.type_of(l).is_some()
+
+    pure def atom(self, o: Operand) -> Atom?:
+        match o:
+            case Operand.Const(c):
+                if let Const.Int(n) = c:
+                    return Some(Atom.Const(n))
+                return None
+            case Operand.Copy(p) | Operand.Move(p):
+                if p.proj.is_empty() and self.is_tracked(p.local.index):
+                    return Some(Atom.Local(p.local.index))
+                return None
+
+    ## The list a place names, as a key.
+    pure def key_of(self, st: State, p: Place) -> Key?:
+        let root = p.local.index
+        if root >= len(self.tys):
+            return None
+        var steps: list[Step] = []
+        var first = 0
+        match self.tys[root]:
+            case Type.Ref(_, m):
+                if m:
+                    return None
+                if p.proj.is_empty() or p.proj[0] != Proj.Deref:
+                    return None
+                steps.push(Step.Deref)
+                first = 1
+            case _:
+                if root >= len(self.wild) or self.wild[root]:
+                    return None
+        for k in range(first, len(p.proj)):
+            match p.proj[k]:
+                case Proj.Field(i):
+                    steps.push(Step.Field(i))
+                case Proj.Index(l):
+                    if not self.is_tracked(l.index):
+                        return None
+                    steps.push(Step.Index(canonical(st, l.index)))
+                case _:
+                    return None
+        return Some(Key(root=root, steps=steps))
+
+    ## The list `len` of the operand measures.
+    pure def list_of(self, st: State, o: Operand) -> Key?:
+        let p = operand_place(o) else:
+            return None
+        if p.proj.is_empty():
+            let l = p.local.index
+            for f in st.facts:
+                if let Fact.RefTo(x, k) = f:
+                    if x == l:
+                        return Some(k.copy())
+            if l < len(self.tys):
+                if let Type.Ref(_, m) = self.tys[l]:
+                    if not m:
+                        let deref = Place(local=p.local, proj=[Proj.Deref])
+                        return self.key_of(st, deref)
+        return self.key_of(st, p)
+
+    ## Forgets what a new value of `l` makes untrue.
+    pure def kill(self, mut st: State, l: int):
+        var keep: list[bool] = []
+        for f in st.facts:
+            keep.push(not f.mentions(l))
+        st.keep(keep)
+        st.remove_bound(l)
+
+    ## The part of a list a write to the place, or a mutable borrow of it,
+    ## may change.
+    pure def written(self, st: State, p: Place) -> Key:
+        let l = p.local.index
+        var via: Key? = None
+        if not p.proj.is_empty() and p.proj[0] == Proj.Deref:
+            for f in st.facts:
+                if via.is_none():
+                    if let Fact.MutTo(x, k) = f:
+                        if x == l:
+                            via = Some(k.copy())
+        var key = Key(root=l, steps=[])
+        var first = 0
+        match via:
+            case Some(k):
+                key = k.copy()
+                first = 1
+            case None:
+                if l < len(self.tys) and not p.proj.is_empty() and p.proj[0] == Proj.Deref:
+                    if let Type.Ref(_, _) = self.tys[l]:
+                        key.steps.push(Step.Deref)
+                        first = 1
+        for k in range(first, len(p.proj)):
+            match p.proj[k]:
+                case Proj.Field(i):
+                    key.steps.push(Step.Field(i))
+                case Proj.Index(i):
+                    key.steps.push(Step.Index(i.index))
+                case _:
+                    break
+        return key
+
+    ## Forgets the lengths a write into, or a mutable borrow of, the place
+    ## may change, and what is known about the option it is.
+    pure def kill_writes(self, mut st: State, p: Place):
+        let w = self.written(st, p)
+        let l = p.local.index
+        var keep: list[bool] = []
+        for f in st.facts:
+            var k = True
+            if let Some(fk) = f.key():
+                if w.contains(fk):
+                    k = False
+            match f:
+                case Fact.Next(o, _) | Fact.IsSome(o) | Fact.Disc(_, o):
+                    if o == l:
+                        k = False
+                case _:
+                    pass
+            keep.push(k)
+        st.keep(keep)
+
+    ## A use of the local: when it holds a mutable reference, what it
+    ## refers to may change.
+    pure def use_local(self, mut st: State, l: int):
+        var targets: list[Key] = []
+        for f in st.facts:
+            if let Fact.MutTo(x, k) = f:
+                if x == l:
+                    targets.push(k.copy())
+        for k in targets:
+            var keep: list[bool] = []
+            for f in st.facts:
+                var kept = True
+                if let Some(g) = f.key():
+                    if k.contains(g):
+                        kept = False
+                keep.push(kept)
+            st.keep(keep)
+
+    pure def use_operand(self, mut st: State, o: Operand):
+        let p = operand_place(o) else:
+            return
+        self.use_local(mut st, p.local.index)
+        for q in p.proj:
+            match q:
+                case Proj.Index(i) | Proj.IndexFromEnd(i) | Proj.Key(i):
+                    self.use_local(mut st, i.index)
+                case _:
+                    pass
+
+    ## Sets what an assignment to the local `x` makes known.
+    pure def assign(self, mut st: State, x: int, b: (int, int)?, new: list[Fact]):
+        let whole = Place(local=LocalId(index=x), proj=[])
+        self.kill(mut st, x)
+        self.kill_writes(mut st, whole)
+        if let Some(bb) = b:
+            self.set_bound(mut st, x, bb)
+        for f in new:
+            st.add(f)
+
+    ## The state after a statement.
+    pub pure def step(self, mut st: State, s: StatementKind):
+        match s:
+            case StatementKind.Assign(dest, rv):
+                match rv:
+                    case Rvalue.Use(o) | Rvalue.Unary(_, o):
+                        self.use_operand(mut st, o)
+                    case Rvalue.Binary(_, a, b):
+                        self.use_operand(mut st, a)
+                        self.use_operand(mut st, b)
+                    case Rvalue.Aggregate(_, os) | Rvalue.Closure(_, _, os):
+                        for o in os:
+                            self.use_operand(mut st, o)
+                    case Rvalue.Ref(q, m):
+                        if m:
+                            self.kill_writes(mut st, q)
+                    case _:
+                        pass
+                if dest.proj.is_empty():
+                    let (b, new) = self.value_of(st, dest.local.index, rv)
+                    self.assign(mut st, dest.local.index, b, new)
+                else:
+                    self.kill_writes(mut st, dest)
+            case StatementKind.Call(dest, callee, args):
+                for o in args:
+                    self.use_operand(mut st, o)
+                if let Callee.Value(o) = callee:
+                    self.use_operand(mut st, o)
+                # A list given away is gone.
+                for o in args:
+                    if let Operand.Move(p) = o:
+                        self.kill_writes(mut st, p)
+                if dest.proj.is_empty():
+                    let (b, new) = self.call_value(st, dest.local.index, callee, args)
+                    self.assign(mut st, dest.local.index, b, new)
+                else:
+                    self.kill_writes(mut st, dest)
+            case StatementKind.Drop(place, _):
+                self.kill_writes(mut st, place)
+            case StatementKind.StorageDead(l):
+                self.assign(mut st, l.index, None, [])
+
+    ## What an assignment of the rvalue to `x` makes known: `x`'s bounds,
+    ## and facts.
+    pure def value_of(self, st: State, x: int, rv: Rvalue) -> ((int, int)?, list[Fact]):
+        var facts: list[Fact] = []
+        match rv:
+            case Rvalue.Use(o):
+                if let Some(a) = self.atom(o):
+                    if let Atom.Local(y) = a:
+                        if y != x:
+                            for f in st.facts:
+                                if not f.mentions(x):
+                                    if let Some(g) = f.renamed(y, x):
+                                        facts.push(g)
+                            # Equal locals, the smaller first.
+                            facts.push(
+                                Fact.Holds(Atom.Local(min(x, y)), Rel.Eq, Atom.Local(max(x, y)))
+                            )
+                    return (Some(self.bound(st, a)), facts)
+                # The payload of `Some` from a range iterator.
+                if let Some(p) = operand_place(o):
+                    let payload = len(p.proj) == 2
+                        and p.proj[0] == Proj.Downcast(0)
+                        and p.proj[1] == Proj.Field(0)
+                    if payload and self.is_tracked(x):
+                        let opt = p.local.index
+                        var range: int? = None
+                        for f in st.facts:
+                            if range.is_none():
+                                if let Fact.Next(q, r) = f:
+                                    if q == opt:
+                                        range = Some(r)
+                        if not st.has(Fact.IsSome(opt)):
+                            range = None
+                        var found: (int, End)? = None
+                        if let Some(r) = range:
+                            for f in st.facts:
+                                if found.is_none():
+                                    if let Fact.Range(q, lo, end) = f:
+                                        if q == r:
+                                            found = Some((lo, end.copy()))
+                        if let Some((lo, end)) = found:
+                            var hi = MAX - 1
+                            match end:
+                                case End.Const(c):
+                                    hi = sat_sub(c, 1)
+                                case End.Local(e):
+                                    if e != x:
+                                        facts.push(Fact.Holds(Atom.Local(x), Rel.Lt, Atom.Local(e)))
+                                    hi = sat_sub(self.bound(st, Atom.Local(e)).1, 1)
+                                case End.Len(k):
+                                    if not k.mentions(x):
+                                        facts.push(Fact.Below(x, k.copy()))
+                                    hi = MAX - 1
+                            return (Some((lo, hi)), facts)
+                return (None, facts)
+            case Rvalue.Binary(op, ao, bo):
+                let Some(a) = self.atom(ao) else:
+                    return (None, facts)
+                let Some(b) = self.atom(bo) else:
+                    return (None, facts)
+                var cmp: (Atom, Rel, Atom)? = None
+                match op:
+                    case BinOp.Lt:
+                        cmp = Some((a, Rel.Lt, b))
+                    case BinOp.Le:
+                        cmp = Some((a, Rel.Le, b))
+                    case BinOp.Gt:
+                        cmp = Some((b, Rel.Lt, a))
+                    case BinOp.Ge:
+                        cmp = Some((b, Rel.Le, a))
+                    case BinOp.Eq:
+                        cmp = Some((a, Rel.Eq, b))
+                    case BinOp.Ne:
+                        cmp = Some((a, Rel.Ne, b))
+                    case _:
+                        pass
+                if let Some((p, r, q)) = cmp:
+                    if p != Atom.Local(x) and q != Atom.Local(x):
+                        facts.push(Fact.Cond(x, p, r, q))
+                    var known: (int, int)? = None
+                    if let Some(v) = self.decide(st, p, r, q):
+                        let n = if v: 1 else: 0
+                        known = Some((n, n))
+                    return (known, facts)
+                let ba = self.bound(st, a)
+                let bb = self.bound(st, b)
+                var bound: (int, int)? = None
+                if op == BinOp.Add or op == BinOp.Sub or op == BinOp.Mul:
+                    bound = arith(op, ba, bb)
+                elif (op == BinOp.FloorDiv or op == BinOp.Div) and bb.0 >= 1:
+                    let lo = quotient(ba.0, if ba.0 >= 0: bb.1 else: bb.0)
+                    let hi = quotient(ba.1, if ba.1 >= 0: bb.0 else: bb.1)
+                    bound = Some((lo, hi))
+                elif op == BinOp.Mod and bb.0 >= 1 and bb.0 == bb.1:
+                    bound = Some((0, bb.0 - 1))
+                elif op == BinOp.BitAnd and bb.0 >= 0 and bb.0 == bb.1:
+                    bound = Some((0, bb.0))
+                # `x = y + 1` with `y < e`: `x <= e`.
+                if op == BinOp.Add and b == Atom.Const(1):
+                    if let Atom.Local(y) = a:
+                        if y != x:
+                            for f in st.facts:
+                                if let Fact.Holds(qa, rel, e) = f:
+                                    if qa == Atom.Local(y) and rel == Rel.Lt and e != Atom.Local(x):
+                                        facts.push(Fact.Holds(Atom.Local(x), Rel.Le, e))
+                return (bound, facts)
+            case Rvalue.Unary(op, o):
+                if op != UnOp.Neg:
+                    return (None, facts)
+                let Some(a) = self.atom(o) else:
+                    return (None, facts)
+                let (lo, hi) = self.bound(st, a)
+                if lo == MIN:
+                    return (None, facts)
+                return (Some((-hi, -lo)), facts)
+            case Rvalue.Discriminant(q):
+                if q.proj.is_empty() and q.local.index != x:
+                    facts.push(Fact.Disc(x, q.local.index))
+                return (None, facts)
+            case Rvalue.Ref(q, mutable):
+                if let Some(k) = self.key_of(st, q):
+                    if not k.mentions(x):
+                        if mutable:
+                            facts.push(Fact.MutTo(x, k))
+                        else:
+                            facts.push(Fact.RefTo(x, k))
+                return (None, facts)
+            case _:
+                return (None, facts)
+
+    ## What a call's result in `x` makes known.
+    pure def call_value(
+        self, st: State, x: int, callee: Callee, args: list[Operand]
+    ) -> ((int, int)?, list[Fact]):
+        var facts: list[Fact] = []
+        match callee:
+            case Callee.Intrinsic(name, _):
+                if name == "len":
+                    if not args.is_empty():
+                        if let Some(k) = self.list_of(st, args[0]):
+                            if not k.mentions(x):
+                                facts.push(Fact.Len(x, k))
+                    return (Some((0, MAX)), facts)
+                if name == "Iter.next":
+                    if len(args) == 1:
+                        if let Some(p) = operand_place(args[0]):
+                            if p.proj.is_empty():
+                                var r: int? = None
+                                for f in st.facts:
+                                    if r.is_none():
+                                        if let Fact.MutTo(t, k) = f:
+                                            if t == p.local.index and k.steps.is_empty():
+                                                r = Some(k.root)
+                                if let Some(rr) = r:
+                                    if rr != x and rr < len(self.frames) and self.frames[rr]:
+                                        facts.push(Fact.Next(x, rr))
+                    return (None, facts)
+                if name == "range" and x < len(self.frames) and self.frames[x]:
+                    if len(args) == 3:
+                        let s = self.atom(args[0])
+                        let t = self.atom(args[2])
+                        if let Some(sa) = s:
+                            if let Some(ta) = t:
+                                if self.bound(st, ta).0 >= 1:
+                                    let lo = self.bound(st, sa).0
+                                    var end: End? = None
+                                    match args[1]:
+                                        case Operand.Const(c):
+                                            if let Const.Int(n) = c:
+                                                end = Some(End.Const(n))
+                                        case Operand.Copy(p) | Operand.Move(p):
+                                            if p.proj.is_empty() and p.local.index != x:
+                                                let e = p.local.index
+                                                for f in st.facts:
+                                                    if end.is_none():
+                                                        if let Fact.Len(q, k) = f:
+                                                            if q == e and not k.mentions(x):
+                                                                end = Some(End.Len(k.copy()))
+                                                if end.is_none() and self.is_tracked(e):
+                                                    end = Some(End.Local(e))
+                                    if let Some(en) = end:
+                                        facts.push(Fact.Range(x, lo, en.copy()))
+                    return (None, facts)
+                return (None, facts)
+            case Callee.Fn(name, targs):
+                if targs.is_empty() and args.is_empty():
+                    for (n, c) in self.constants:
+                        if n == name:
+                            return (Some((c, c)), facts)
+                return (None, facts)
+            case _:
+                return (None, facts)
+
+    ## What an edge of the terminator adds; false when it cannot be taken.
+    pure def edge(self, mut st: State, term: Terminator, edge: Edge) -> bool:
+        let Terminator.Switch(value, cases, _) = term else:
+            return True
+        let p = operand_place(value) else:
+            return True
+        if not p.proj.is_empty():
+            return True
+        let c = p.local.index
+        # `switch c [0: false, else: true]` on a comparison.
+        var cond: (Atom, Rel, Atom)? = None
+        for f in st.facts:
+            if cond.is_none():
+                if let Fact.Cond(x, a, r, b) = f:
+                    if x == c:
+                        cond = Some((a, r, b))
+        if let Some((a, r, b)) = cond:
+            if len(cases) == 1 and cases[0].0 == 0:
+                match edge:
+                    case Edge.Default:
+                        return self.assume(mut st, a, r, b)
+                    case Edge.Case(k):
+                        if k == 0:
+                            let (na, nr, nb) = negate(a, r, b)
+                            return self.assume(mut st, na, nr, nb)
+                        return True
+                    case _:
+                        return True
+        # `switch discriminant o [0: some, ...]`.
+        if edge == Edge.Case(0):
+            var o: int? = None
+            for f in st.facts:
+                if o.is_none():
+                    if let Fact.Disc(d, oo) = f:
+                        if d == c:
+                            o = Some(oo)
+            if let Some(oo) = o:
+                st.add(Fact.IsSome(oo))
+        return True
+
+    ## Adds `a REL b` and narrows the bounds by it; false when the bounds
+    ## say it cannot hold.
+    pure def assume(self, mut st: State, a: Atom, r: Rel, b: Atom) -> bool:
+        if self.decide(st, a, r, b) == Some(False):
+            return False
+        let (alo, ahi) = self.bound(st, a)
+        let (blo, bhi) = self.bound(st, b)
+        var na = (alo, ahi)
+        var nb = (blo, bhi)
+        match r:
+            case Rel.Lt:
+                na = (alo, min(ahi, sat_sub(bhi, 1)))
+                nb = (max(blo, sat_add(alo, 1)), bhi)
+            case Rel.Le:
+                na = (alo, min(ahi, bhi))
+                nb = (max(blo, alo), bhi)
+            case Rel.Eq:
+                na = (max(alo, blo), min(ahi, bhi))
+                nb = na
+            case Rel.Ne:
+                na = narrow_ne((alo, ahi), (blo, bhi))
+                nb = narrow_ne((blo, bhi), (alo, ahi))
+        if na.0 > na.1 or nb.0 > nb.1:
+            return False
+        if let Atom.Local(l) = a:
+            self.set_bound(mut st, l, na)
+        if let Atom.Local(l) = b:
+            self.set_bound(mut st, l, nb)
+        var any_local = False
+        if let Atom.Local(_) = a:
+            any_local = True
+        if let Atom.Local(_) = b:
+            any_local = True
+        if any_local:
+            st.add(Fact.Holds(a, r, b))
+        # `i < e` with `e` a list's length: `i` is below it.
+        if r == Rel.Lt:
+            if let Atom.Local(i) = a:
+                if let Atom.Local(e) = b:
+                    var below: list[Fact] = []
+                    for f in st.facts:
+                        if let Fact.Len(x, k) = f:
+                            if x == e and not k.mentions(i):
+                                below.push(Fact.Below(i, k.copy()))
+                    for f in below:
+                        st.add(f)
+        return True
+
+    ## Whether the state decides `a REL b`.
+    pub pure def decide(self, st: State, a: Atom, r: Rel, b: Atom) -> bool?:
+        let (alo, ahi) = self.bound(st, a)
+        let (blo, bhi) = self.bound(st, b)
+        match r:
+            case Rel.Lt:
+                if ahi < blo:
+                    return Some(True)
+                if alo >= bhi:
+                    return Some(False)
+            case Rel.Le:
+                if ahi <= blo:
+                    return Some(True)
+                if alo > bhi:
+                    return Some(False)
+            case Rel.Eq:
+                if alo == ahi and blo == bhi and alo == blo:
+                    return Some(True)
+                if ahi < blo or bhi < alo:
+                    return Some(False)
+            case Rel.Ne:
+                if ahi < blo or bhi < alo:
+                    return Some(True)
+                if alo == ahi and blo == bhi and alo == blo:
+                    return Some(False)
+        # A comparison of the same atoms that holds.
+        let eq = st.has(Fact.Holds(a, Rel.Eq, b)) or st.has(Fact.Holds(b, Rel.Eq, a))
+        let ne = st.has(Fact.Holds(a, Rel.Ne, b)) or st.has(Fact.Holds(b, Rel.Ne, a))
+        let lt = st.has(Fact.Holds(a, Rel.Lt, b))
+        let gt = st.has(Fact.Holds(b, Rel.Lt, a))
+        let le = st.has(Fact.Holds(a, Rel.Le, b))
+        let ge = st.has(Fact.Holds(b, Rel.Le, a))
+        match r:
+            case Rel.Lt:
+                if lt:
+                    return Some(True)
+                if gt or ge or eq:
+                    return Some(False)
+            case Rel.Le:
+                if le or lt or eq:
+                    return Some(True)
+                if gt:
+                    return Some(False)
+            case Rel.Eq:
+                if eq:
+                    return Some(True)
+                if lt or gt or ne:
+                    return Some(False)
+            case Rel.Ne:
+                if ne or lt or gt:
+                    return Some(True)
+                if eq:
+                    return Some(False)
+        return None
+
+    ## Whether the state proves `0 <= i < len(list)`, `list` being the
+    ## place before an `Index` projection.
+    pub pure def in_bounds(self, st: State, list: Place, i: int) -> bool:
+        if not self.is_tracked(i) or self.bound(st, Atom.Local(i)).0 < 0:
+            return False
+        let k = self.key_of(st, list) else:
+            return False
+        if st.has(Fact.Below(i, k.copy())):
+            return True
+        # Below another list's length, which a test found equal to this
+        # one's.
+        let mine = lens_of(st, k)
+        for f in st.facts:
+            if let Fact.Below(x, other) = f:
+                if x == i and other != k:
+                    for a in lens_of(st, other):
+                        for b in mine:
+                            if st.has(Fact.Holds(Atom.Local(a), Rel.Eq, Atom.Local(b)))
+                                    or st.has(Fact.Holds(Atom.Local(b), Rel.Eq, Atom.Local(a))):
+                                return True
+        for f in st.facts:
+            if let Fact.Holds(fa, rel, e) = f:
+                if fa == Atom.Local(i):
+                    if rel == Rel.Lt and is_len(st, e, k):
+                        return True
+                    if rel == Rel.Le:
+                        for g in st.facts:
+                            if let Fact.Holds(m2, r2, e2) = g:
+                                if m2 == e and r2 == Rel.Lt and is_len(st, e2, k):
+                                    return True
+        return False
+
+    ## The value of a `switch` on a `bool` local when the state decides it.
+    pub pure def decided(self, st: State, value: Operand) -> bool?:
+        let p = operand_place(value) else:
+            return None
+        if not p.proj.is_empty():
+            return None
+        let c = p.local.index
+        for f in st.facts:
+            if let Fact.Cond(x, a, r, b) = f:
+                if x == c:
+                    let d = self.decide(st, a, r, b)
+                    if d.is_some():
+                        return d
+        return None
+
+    ## Whether `a OP b` on two `int`s cannot overflow.
+    pub pure def cannot_overflow(self, st: State, op: BinOp, ao: Operand, bo: Operand) -> bool:
+        let Some(a) = self.atom(ao) else:
+            return False
+        let Some(b) = self.atom(bo) else:
+            return False
+        if not self.int_atom(a) or not self.int_atom(b):
+            return False
+        return fits(op, self.bound(st, a), self.bound(st, b))
+
+    pure def int_atom(self, x: Atom) -> bool:
+        match x:
+            case Atom.Const(_):
+                return True
+            case Atom.Local(l):
+                return l < len(self.tys) and self.tys[l] == Type.Int
+
+## The locals holding the list's length.
+pure def lens_of(st: State, key: Key) -> list[int]:
+    var out: list[int] = []
+    for f in st.facts:
+        if let Fact.Len(e, g) = f:
+            if g == key:
+                out.push(e)
+    return out
+
+## Whether the atom is a local holding the list's length.
+pure def is_len(st: State, e: Atom, k: Key) -> bool:
+    if let Atom.Local(l) = e:
+        return st.has(Fact.Len(l, k.copy()))
+    return False
+
+pure def narrow_ne(x: (int, int), c: (int, int)) -> (int, int):
+    let (lo, hi) = x
+    let (clo, chi) = c
+    if clo != chi:
+        return (lo, hi)
+    if lo == clo:
+        return (sat_add(lo, 1), hi)
+    if hi == clo:
+        return (lo, sat_sub(hi, 1))
+    return (lo, hi)
+
+## Each successor of a terminator, once, and the edge to it.
+pub pure def successors(t: Terminator) -> list[(int, Edge)]:
+    match t:
+        case Terminator.Goto(b):
+            return [(b.index, Edge.Jump)]
+        case Terminator.Switch(_, cases, default):
+            let d = default.index
+            var out: list[(int, Edge)] = []
+            for (k, b) in cases:
+                let tb = b.index
+                var count = 0
+                for (_, c) in cases:
+                    if c.index == tb:
+                        count += 1
+                let many = tb == d or count > 1
+                var seen = False
+                for (u, _) in out:
+                    if u == tb:
+                        seen = True
+                if not seen:
+                    out.push((tb, if many: Edge.Jump else: Edge.Case(k)))
+            var seen_d = False
+            for (u, _) in out:
+                if u == d:
+                    seen_d = True
+            if not seen_d:
+                out.push((d, Edge.Default))
+            return out
+        case _:
+            return []
+
+pure def place_whole(p: Place, l: int) -> bool:
+    return p.local.index != l or p.proj.is_empty()
+
+pure def keyless(p: Place, l: int) -> bool:
+    for q in p.proj:
+        match q:
+            case Proj.Index(k) | Proj.IndexFromEnd(k) | Proj.Key(k):
+                if k.index == l:
+                    return False
+            case _:
+                pass
+    return True
+
+pure def operand_ok(o: Operand, l: int) -> bool:
+    match o:
+        case Operand.Copy(p) | Operand.Move(p):
+            return place_whole(p, l) and keyless(p, l)
+        case Operand.Const(_):
+            return True
+
+## Whether the function only reads and writes the local whole.
+pub pure def whole_only(f: Function, l: int) -> bool:
+    for b in f.blocks:
+        for s in b.stmts:
+            match s.kind:
+                case StatementKind.Assign(d, rv):
+                    if not (place_whole(d, l) and keyless(d, l)):
+                        return False
+                    match rv:
+                        case Rvalue.Use(o) | Rvalue.Unary(_, o):
+                            if not operand_ok(o, l):
+                                return False
+                        case Rvalue.Binary(_, a, c):
+                            if not (operand_ok(a, l) and operand_ok(c, l)):
+                                return False
+                        case Rvalue.Aggregate(_, os) | Rvalue.Closure(_, _, os):
+                            for o in os:
+                                if not operand_ok(o, l):
+                                    return False
+                        case Rvalue.Ref(q, _) | Rvalue.Discriminant(q) | Rvalue.CopyOf(
+                            q
+                        ) | Rvalue.StrView(q):
+                            if q.local.index == l or not keyless(q, l):
+                                return False
+                case StatementKind.Call(dest, callee, args):
+                    if not (place_whole(dest, l) and keyless(dest, l)):
+                        return False
+                    for o in args:
+                        if not operand_ok(o, l):
+                            return False
+                    if let Callee.Value(o) = callee:
+                        if let Some(p) = operand_place(o):
+                            if not place_whole(p, l):
+                                return False
+                case StatementKind.Drop(p, _):
+                    if not (place_whole(p, l) and keyless(p, l)):
+                        return False
+                case StatementKind.StorageDead(_):
+                    pass
+        if let Terminator.Switch(value, _, _) = b.term:
+            if let Some(p) = operand_place(value):
+                if not place_whole(p, l):
+                    return False
+    return True
+
+## The locals some mutable borrow of which goes where the analysis cannot
+## follow it, and the parameters.
+pub pure def wild_locals(f: Function, tys: list[Type]) -> list[bool]:
+    let n = len(tys)
+    var wild: list[bool] = []
+    for i in range(n):
+        wild.push(i <= f.param_count)
+    # Each mutable borrow: the local holding it, and the local borrowed.
+    var borrows: list[(int, int)] = []
+    for b in f.blocks:
+        for s in b.stmts:
+            if let StatementKind.Assign(d, Rvalue.Ref(q, m)) = s.kind:
+                if m:
+                    if d.proj.is_empty():
+                        borrows.push((d.local.index, q.local.index))
+                    elif q.local.index < n:
+                        wild[q.local.index] = True
+    # The locals used otherwise than whole as such a call's argument.
+    var loose: list[bool] = []
+    for _ in range(n):
+        loose.push(False)
+    for b in f.blocks:
+        for s in b.stmts:
+            match s.kind:
+                case StatementKind.Assign(d, rv):
+                    if not d.proj.is_empty():
+                        mark(mut loose, d.local.index)
+                    match rv:
+                        case Rvalue.Use(o) | Rvalue.Unary(_, o):
+                            mark_operand(mut loose, o)
+                        case Rvalue.Binary(_, x, y):
+                            mark_operand(mut loose, x)
+                            mark_operand(mut loose, y)
+                        case Rvalue.Aggregate(_, os) | Rvalue.Closure(_, _, os):
+                            for o in os:
+                                mark_operand(mut loose, o)
+                        case Rvalue.Ref(q, _) | Rvalue.Discriminant(q) | Rvalue.CopyOf(
+                            q
+                        ) | Rvalue.StrView(q):
+                            mark(mut loose, q.local.index)
+                case StatementKind.Call(dest, callee, args):
+                    let result_free = dest.proj.is_empty()
+                        and dest.local.index < n
+                        and holds_no_reference(tys[dest.local.index])
+                    for o in args:
+                        var whole = False
+                        if let Some(p) = operand_place(o):
+                            whole = p.proj.is_empty() and result_free
+                        if not whole:
+                            mark_operand(mut loose, o)
+                    if let Callee.Value(o) = callee:
+                        mark_operand(mut loose, o)
+                    if not dest.proj.is_empty():
+                        mark(mut loose, dest.local.index)
+                case StatementKind.Drop(place, _):
+                    if not place.proj.is_empty():
+                        mark(mut loose, place.local.index)
+                case _:
+                    pass
+        if let Terminator.Switch(value, _, _) = b.term:
+            mark_operand(mut loose, value)
+    for (t, x) in borrows:
+        let is_loose = if t < n: loose[t] else: True
+        if is_loose and x < n:
+            wild[x] = True
+    return wild
+
+pure def mark(mut loose: list[bool], l: int):
+    if l < len(loose):
+        loose[l] = True
+
+pure def mark_operand(mut loose: list[bool], o: Operand):
+    if let Some(p) = operand_place(o):
+        mark(mut loose, p.local.index)
+
+## The smallest local the state knows equal to `l`, through copies.
+pub pure def canonical(st: State, l: int) -> int:
+    var c = l
+    while True:
+        var smaller: int? = None
+        for f in st.facts:
+            if smaller.is_none():
+                if let Fact.Holds(Atom.Local(a), Rel.Eq, Atom.Local(b)) = f:
+                    if b == c and a < c:
+                        smaller = Some(a)
+        match smaller:
+            case Some(a):
+                c = a
+            case None:
+                return c
+
+pure def negate(a: Atom, r: Rel, b: Atom) -> (Atom, Rel, Atom):
+    return match r:
+        case Lt: (b, Rel.Le, a)
+        case Le: (b, Rel.Lt, a)
+        case Eq: (a, Rel.Ne, b)
+        case Ne: (a, Rel.Eq, b)
+
+## The values of `a OP b` over the operands' bounds, at the corners.
+pure def corners(op: BinOp, a: (int, int), b: (int, int)) -> list[i128]?:
+    let a0 = wide(a.0)
+    let a1 = wide(a.1)
+    let b0 = wide(b.0)
+    let b1 = wide(b.1)
+    if op == BinOp.Add:
+        return Some([a0 + b0, a1 + b1])
+    if op == BinOp.Sub:
+        return Some([a0 - b1, a1 - b0])
+    if op == BinOp.Mul:
+        return Some([a0 * b0, a0 * b1, a1 * b0, a1 * b1])
+    return None
+
+## The bounds of `a OP b` within `int`.
+pure def arith(op: BinOp, a: (int, int), b: (int, int)) -> (int, int)?:
+    let c = corners(op, a, b) else:
+        return None
+    var lo = c[0]
+    var hi = c[0]
+    for i in range(len(c)):
+        if c[i] < lo:
+            lo = c[i]
+        if c[i] > hi:
+            hi = c[i]
+    return Some((clamp(lo), clamp(hi)))
+
+pure def clamp(v: i128) -> int:
+    if v < wide(MIN):
+        return MIN
+    if v > wide(MAX):
+        return MAX
+    return v.to_int() ?? 0
+
+## Whether every `a OP b` over the operands' bounds fits an `int`.
+pure def fits(op: BinOp, a: (int, int), b: (int, int)) -> bool:
+    let c = corners(op, a, b) else:
+        return False
+    for i in range(len(c)):
+        if c[i] < wide(MIN) or c[i] > wide(MAX):
+            return False
+    return True
+
+## `x // d` rounded down, for a divisor of at least 1.
+pure def quotient(x: int, d: int) -> int:
+    return x // max(d, 1)

@@ -50,6 +50,11 @@ pub struct Program {
     pub functions: Vec<Function>,
     /// Test name and the function that runs it.
     pub tests: Vec<(String, String)>,
+    /// Each test's `@tag`s, in the order written, by the test's place in
+    /// `tests` (a test past its end has none; decision 285).
+    pub test_tags: Vec<Vec<String>>,
+    /// Benchmark name and the function that runs it (decision 285).
+    pub benches: Vec<(String, String)>,
     /// The trait methods called through `call trait`, with the facts the
     /// checkers need about them (as for intrinsics).
     pub trait_methods: Vec<IntrinsicDecl>,

@@ -1,0 +1,25 @@
+$ sisu test orders.sisu
+warning[W0001]: typed hole `parse_line` of type `(String, int) ! LineError`
+  --> orders.sisu:24:12
+   |
+24 |     return todo("parse_line")
+   |            ^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `parse_order` of type `list[(String, int)] ! LineError`
+  --> orders.sisu:28:12
+   |
+28 |     return todo("parse_order")
+   |            ^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `order_total` of type `int ! {LineError, PriceError}`
+  --> orders.sisu:32:12
+   |
+32 |     return todo("order_total")
+   |            ^^^^^^^^^^^^^^^^^^^
+
+test "one line" ... blocked by todo("parse_line")
+test "lines without a quantity" ... blocked by todo("parse_line")
+test "an order of several lines" ... blocked by todo("parse_order")
+test "the total of an order" ... blocked by todo("order_total")
+test "errors from every layer" ... blocked by todo("order_total")
+0 passed, 0 failed, 5 blocked

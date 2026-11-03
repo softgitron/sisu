@@ -1,0 +1,27 @@
+# Handle the errors you can, and pass on the rest.
+error ConfigError:
+    Missing(key: String)
+    NotANumber(key: String, text: String)
+
+def setting(config: dict[str, str], key: str) -> int ! ConfigError:
+    let text = config.get(key) else:
+        return Err(Missing(key.to_string()))
+    let n = text.parse_int() else:
+        return Err(NotANumber(key.to_string(), text.to_string()))
+    return Ok(n)
+
+def port(config: dict[str, str]) -> int ! ConfigError:
+    let port: int
+    match setting(config, "port"):
+        case Ok(n):
+            port = n
+        case Err(Missing(_)):
+            port = 8080
+        case Err(e):
+            return Err(e)
+    return Ok(port)
+
+def main():
+    print(port({"port": "9000"}))
+    print(port({}))
+    print(port({"port": "eighty"}))

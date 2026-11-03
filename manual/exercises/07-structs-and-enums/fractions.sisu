@@ -1,0 +1,61 @@
+##! Exercise 7.4, fractions. Kind: write. Level: 2.
+##!
+##! A `Fraction` is kept in lowest terms with a bottom above 0, so that
+##! two equal fractions have equal fields. Write the bodies of `new`,
+##! `plus`, `flip` and `show` so that every test passes. Run the tests
+##! with `sisu test fractions.sisu`. The hints are in chapter 7 of the
+##! tutorial, under "Exercise 7.4: fractions".
+
+## A fraction `top / bottom` in lowest terms, with `bottom` above 0.
+@derive(Copy, Eq)
+struct Fraction:
+    top: int
+    bottom: int
+
+    ## The fraction `top / bottom` in lowest terms; `bottom` is not 0.
+    def new(top: int, bottom: int) -> Fraction:
+        return todo("new")
+
+    ## The sum of this fraction and `other`.
+    def plus(self, other: Fraction) -> Fraction:
+        return todo("plus")
+
+    ## Turns the fraction upside down; its `top` is not 0.
+    def flip(mut self):
+        self = todo("flip")
+
+    ## The fraction as text, such as "3/4", or "2" for a whole number.
+    def show(self) -> String:
+        return todo("show")
+
+## The greatest common divisor of `a` and `b`, which are not both 0.
+def gcd(a: int, b: int) -> int:
+    if b == 0:
+        return abs(a)
+    return gcd(b, a % b)
+
+test "lowest terms":
+    assert Fraction.new(2, 4) == Fraction(1, 2)
+    assert Fraction.new(6, 3) == Fraction(2, 1)
+
+test "a negative bottom":
+    assert Fraction.new(1, -2) == Fraction(-1, 2)
+    assert Fraction.new(-3, -9) == Fraction(1, 3)
+
+test "adding":
+    let half = Fraction.new(1, 2)
+    assert half.plus(Fraction.new(1, 3)) == Fraction(5, 6)
+    assert Fraction.new(1, 4).plus(Fraction.new(3, 4)) == Fraction(1, 1)
+
+test "upside down":
+    var f = Fraction.new(2, 3)
+    f.flip()
+    assert f == Fraction(3, 2)
+    var g = Fraction.new(-1, 4)
+    g.flip()
+    assert g == Fraction(-4, 1)
+
+test "as text":
+    assert Fraction.new(3, 4).show() == "3/4"
+    assert Fraction.new(4, 2).show() == "2"
+    assert Fraction.new(1, -5).show() == "-1/5"

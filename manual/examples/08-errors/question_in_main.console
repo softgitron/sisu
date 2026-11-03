@@ -1,0 +1,8 @@
+$ sisu run question_in_main.sisu
+error[E0320]: `?` on `int ! ClockError` needs a function that returns `T ! E`, but this one returns `()`
+  --> question_in_main.sisu:21:23
+   |
+21 |         let minutes = minutes_since_midnight(text)?
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

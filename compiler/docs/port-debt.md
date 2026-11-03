@@ -565,6 +565,13 @@ What the driver does around stage 1, because of what its commands are:
   as long through stage 1 (decision 268).
   *Pay*: what the memo is for the Rust front end ("The memo is not kept
   between commands" above), for stage 1: its base kept between commands.
+- **Tests and benchmarks from stage 1's SIR**: `sisu sir --tests` prints
+  a program built with its tests, each test's tags and the benchmarks
+  (decision 285), and `sisu test --from-sir` and `sisu bench --from-sir`
+  run it, but only the Rust front end writes it. *Pay*: stage 1's `sir`
+  takes `--tests` and writes the `test ... tags ...` and `bench` lines
+  (architecture.md, "SIR", "The text form"), stage 1's SIR types hold
+  them, and `sisu test` and `sisu bench` route through stage 1's SIR.
 
 ## Stage 2: what the native backend leaves out
 
@@ -709,6 +716,30 @@ What round 1 does, and a later round must not copy:
 - **The runtime trusts the generated code**: an address or a type number
   that breaks the runtime's rules is not checked everywhere, and where it
   is, it is `R0122` and status 134, not a diagnostic of the program.
+
+### The backend in Sisu (D-087)
+
+Step 1 of D-087 is done: stage 2 (`compiler/stage2`, Sisu) lowers SIR to
+LIR, and the Rust backend translates LIR one to one into Cranelift IR,
+every case of `native.list` to the same executable in both profiles
+(architecture.md, "LIR"; decisions 281 to 284). What it leaves:
+
+- **The decisions live twice**: `sisu-codegen` lowers SIR itself, and
+  stage 2 transcribes it; a change to one is a change to the other, which
+  the runner's `--native-from-lir` mode catches. *Pay*: `sisu build
+  --native` through stage 2 (SIR, `sisu2 lir`, the translation), and
+  `sisu-codegen`'s own lowering (`lib.rs`, `func.rs`, `layout.rs`,
+  `facts.rs`, the type walk of `debug.rs`) deleted, the Rust left with the
+  translation, the DWARF writer and the link until step 2 replaces them.
+- **The machine code is Cranelift's**: step 2, the x86-64 Linux debug
+  backend in Sisu (one analysis pass, single-pass code generation, its own
+  encoders, ELF objects, DWARF, the system linker), is not begun, and
+  neither are the textual-IR prototype of the LLVM release backend (D-088)
+  nor the runtime in Sisu (step 3). *Pay*: D-087's order of work.
+- **Stage 2 reads SIR itself**: stage 1 writes SIR but has no reader, so
+  `stage2/src/read.sisu` transcribes `sisu-sir/src/read.rs`. *Pay*: the
+  reader moves to stage 1's `sir` module when stage 1 needs one (`sisu
+  run --from-sir` through stage 1), and stage 2 uses it.
 
 ## Not yet done from Phases 0, 2, 3, 4, 6 and 8
 

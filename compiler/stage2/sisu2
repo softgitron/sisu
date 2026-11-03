@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Stage 2, the backend written in Sisu (D-087, step 1): it lowers a
+# serialised SIR program to LIR, the backend-neutral low IR, which the Rust
+# backend translates one to one into Cranelift IR (`sisu build --native
+# --from-lir`, decision 281).
+#
+#   sisu2 lir FILE.sir [--release] [--output FILE.lir]   the program's LIR, on standard
+#                                                        output or into FILE.lir
+#   sisu2 sir FILE.sir                                   the program read and written again,
+#                                                        as `sisu sir` wrote it
+#
+# The first use builds stage 2 natively (`sisu build --native`, through
+# stage 1, the front end of `sisu`) into compiler/target/stage2/, and so
+# does a use after a source of stage 2, or of the `sir` module of stage 1
+# it depends on, changed.
+set -uo pipefail
+
+here=$(cd "$(dirname "$0")" && pwd)
+compiler=$(dirname "$here")
+sisu="$compiler/target/release/sisu"
+exe="$compiler/target/stage2/sisu2"
+if [ ! -x "$sisu" ]; then
+    echo "sisu2: stage 0 is not built (cargo build --release in $compiler)" >&2
+    exit 1
+fi
+stale() {
+    [ ! -x "$exe" ] && return 0
+    [ -n "$(find "$here/src" "$compiler/stage1/src/sir" "$compiler/stage1/src/sir.sisu" \
+        -name '*.sisu' -newer "$exe" -print -quit 2> /dev/null)" ]
+}
+if stale; then
+    mkdir -p "$(dirname "$exe")"
+    # Built beside the old one and renamed over it, so that a use that
+    # starts meanwhile runs a whole executable.
+    if ! (cd "$here" && "$sisu" build --native --output "$exe.new" > /dev/null); then
+        echo "sisu2: stage 2 does not build" >&2
+        rm -f "$exe.new"
+        exit 1
+    fi
+    mv -f "$exe.new" "$exe"
+fi
+exec "$exe" "$@"

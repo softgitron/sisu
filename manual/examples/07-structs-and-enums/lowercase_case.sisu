@@ -1,0 +1,14 @@
+# A lowercase name in a pattern binds whatever value is there.
+enum Light:
+    Red
+    Amber
+    Green
+
+def advice(light: Light) -> str:
+    return match light:
+        case green: "go"
+        case Amber: "wait"
+        case Red: "stop"
+
+def main():
+    print(advice(Red))

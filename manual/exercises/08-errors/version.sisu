@@ -1,0 +1,43 @@
+##! Exercise 8.4, a version number. Kind: write. Level: 2.
+##!
+##! A version number such as "2.10.1" has three parts, the major, minor
+##! and patch numbers, with a dot between each two. Write the body of
+##! `parse_version` so that every test passes. Run the tests with
+##! `sisu test version.sisu`. The hints are in chapter 8 of the
+##! tutorial, under "Exercise 8.4: a version number".
+
+error VersionError:
+    Empty
+    WrongCount(found: int)
+    NotANumber(part: String)
+
+@derive(Copy, Eq, Ord)
+struct Version:
+    major: int
+    minor: int
+    patch: int
+
+## The version that `text` spells; spaces around it do not count.
+def parse_version(text: str) -> Version ! VersionError:
+    return todo("parse_version")
+
+test "versions":
+    assert parse_version("2.10.1") == Ok(Version(2, 10, 1))
+    assert parse_version(" 0.9.0 ") == Ok(Version(0, 9, 0))
+
+test "an empty text":
+    assert parse_version("") == Err(Empty)
+    assert parse_version("   ") == Err(Empty)
+
+test "the wrong number of parts":
+    assert parse_version("1.2") == Err(WrongCount(2))
+    assert parse_version("1.2.3.4") == Err(WrongCount(4))
+
+test "a part that is not a number":
+    assert parse_version("1.x.3") == Err(NotANumber("x"))
+    assert parse_version("1..3") == Err(NotANumber(""))
+
+test "versions in order":
+    let older = parse_version("1.9.0").or(Version(0, 0, 0))
+    let newer = parse_version("1.10.0").or(Version(0, 0, 0))
+    assert older < newer

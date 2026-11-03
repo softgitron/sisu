@@ -1,0 +1,74 @@
+##! Exercise 9.3, Challenge I: a better word counter. Kind: challenge. Level: 3.
+##!
+##! Chapter 9's counter counts "sauna," and "sauna" as two words, counts
+##! the shortest words too, and prints every word. This challenge
+##! improves it in three parts, with a suite of tests for each. Solve
+##! them in order: each part's tests fail or are blocked until it is
+##! done. Run the tests with `sisu test counter.sisu`.
+##!
+##! Part 1. `count_words` counts the words of `text` that have at least
+##! `min_length` characters, in lower case. A word is what
+##! `split_whitespace` gives.
+##!
+##! Part 2. Punctuation is not part of a word: a word is a run of
+##! letters and digits, so "Sauna," and "sauna." both count as "sauna",
+##! and "well-known" is two words. Change `count_words` to count such
+##! words; the tests of part 1 still pass.
+##!
+##! Part 3. `top_words` gives the `n` most common words with their
+##! counts, the most common first, and words with the same count in
+##! alphabetical order. `main` takes the options `--top N` (10 if it is
+##! not given) and `--min-length N` (1 if it is not given) and the paths
+##! of the files, and prints the top words of all the files together,
+##! in the layout of chapter 9's counter. The transcript
+##! `tests/counter.transcript` runs it on `tests/counter/poem.txt`.
+##!
+##! The hints are in chapter 9 of the tutorial, under "Challenge I: a
+##! better word counter".
+
+import cli
+
+## What the command line can say.
+struct Options:
+    top: int = 10
+    min_length: int = 1
+    paths: list[Path]
+
+## How often each word of `text` with at least `min_length` characters
+## appears in it, in lower case.
+def count_words(text: str, min_length: int) -> dict[String, int]:
+    return todo("count_words")
+
+## The `n` most common words of `counts`, with their counts.
+def top_words(counts: dict[String, int], n: int) -> list[(String, int)]:
+    return todo("top_words")
+
+def main(sys: System) -> ! {IoError, cli.Error}:
+    return todo("main")
+
+suite "part 1, a minimum length":
+    test "short words are left out":
+        assert count_words("a bb ccc bb", 2) == {"bb": 2, "ccc": 1}
+        assert count_words("I saw a cat", 3) == {"saw": 1, "cat": 1}
+
+    test "every word counts in lower case":
+        assert count_words("Hei hei HEI", 1) == {"hei": 3}
+
+suite "part 2, punctuation":
+    test "punctuation around a word":
+        let counts = count_words("Sauna, sauna. (SAUNA!)", 1)
+        assert counts == {"sauna": 3}
+
+    test "punctuation inside a word":
+        let counts = count_words("a well-known 2-minute walk", 2)
+        assert counts == {"well": 1, "known": 1, "minute": 1, "walk": 1}
+
+suite "part 3, the top words":
+    test "the most common first":
+        let counts: dict[String, int] = {"kissa": 1, "koira": 3, "kala": 2}
+        assert top_words(counts, 2) == [("koira", 3), ("kala", 2)]
+
+    test "equal counts in alphabetical order":
+        let counts: dict[String, int] = {"tuli": 1, "meni": 1, "kevät": 1}
+        let top = top_words(counts, 5)
+        assert top == [("kevät", 1), ("meni", 1), ("tuli", 1)]

@@ -168,6 +168,8 @@ pub fn key(prog: &Program, index: usize, salt: &str) -> Option<u64> {
         intrinsics: prog.intrinsics.clone(),
         functions: Vec::new(),
         tests: Vec::new(),
+        test_tags: Vec::new(),
+        benches: Vec::new(),
         trait_methods: prog.trait_methods.clone(),
         impls: prog.impls.clone(),
     };

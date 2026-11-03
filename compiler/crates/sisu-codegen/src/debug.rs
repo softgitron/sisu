@@ -39,7 +39,7 @@ use sisu_sir::Type;
 use std::collections::HashMap;
 
 /// The type of a named local: a SIR type, or the number of a LIR type's
-/// description (`type tN`, decision 271).
+/// description (`type tN`, decision 281).
 pub(crate) enum DebugTy {
     Sir(Type),
     Lir(u32),
@@ -370,6 +370,10 @@ fn add_sections(
 /// name, type and offset in the value.
 type Fields = Vec<(String, Type, u32)>;
 
+/// An enum's variants, each its name and its fields, the fields' types
+/// SIR's or LIR's descriptions.
+type Variants = Vec<(String, Vec<(String, DebugTy, u32)>)>;
+
 /// The DWARF types of the program's types, made once each.
 struct TypeBuilder<'t, 'p> {
     /// The layouts of SIR's types, or LIR's descriptions of them.
@@ -532,7 +536,9 @@ impl TypeBuilder<'_, '_> {
                 for n in names {
                     let member = Type::Named(n.clone(), Vec::new());
                     // A member no value was made of is never the value's.
-                    let Some(number) = self.types.as_ref().and_then(|ty| ty.known_id(&member)) else { continue };
+                    let Some(number) = self.types.as_ref().and_then(|ty| ty.known_id(&member)) else {
+                        continue;
+                    };
                     let variant = dwarf.unit.add(part, constants::DW_TAG_variant);
                     dwarf
                         .unit
@@ -686,7 +692,9 @@ impl TypeBuilder<'_, '_> {
         self.ids.insert(t.clone(), id);
         let variants = variants
             .into_iter()
-            .map(|(v, fields)| (v, fields.into_iter().map(|(f, ft, off)| (f, DebugTy::Sir(ft), off)).collect()))
+            .map(|(v, fields)| {
+                (v, fields.into_iter().map(|(f, ft, off)| (f, DebugTy::Sir(ft), off)).collect())
+            })
             .collect();
         self.variant_part(dwarf, id, size, tag, head, variants);
         id
@@ -701,7 +709,7 @@ impl TypeBuilder<'_, '_> {
         size: u32,
         tag: u32,
         head: &[(&str, u32)],
-        variants: Vec<(String, Vec<(String, DebugTy, u32)>)>,
+        variants: Variants,
     ) {
         let w = self.word(dwarf);
         // Artificial, as the tag is: a debugger takes the first member that
@@ -809,7 +817,9 @@ impl TypeBuilder<'_, '_> {
                 let head: Vec<(&str, u32)> = head.iter().map(|(h, off)| (h.as_str(), *off)).collect();
                 let variants = variants
                     .into_iter()
-                    .map(|(v, fields)| (v, fields.into_iter().map(|(f, t, off)| (f, DebugTy::Lir(t), off)).collect()))
+                    .map(|(v, fields)| {
+                        (v, fields.into_iter().map(|(f, t, off)| (f, DebugTy::Lir(t), off)).collect())
+                    })
                     .collect();
                 self.variant_part(dwarf, id, size, tag, &head, variants);
                 id

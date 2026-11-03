@@ -1,0 +1,10 @@
+# `if let` and `match` take the value out of an optional value.
+def main():
+    let ages = {"Aino": 34, "Eero": 29}
+    if let Some(age) = ages.get("Aino"):
+        print("Aino is {age}")
+    match ages.get("Roni"):
+        case Some(age): print("Roni is {age}")
+        case None: print("Roni's age is not known")
+    if let Some(a) = ages.get("Aino"), let Some(e) = ages.get("Eero"), a > e:
+        print("Aino is {a - e} years older than Eero")

@@ -1,0 +1,13 @@
+$ sisu test version.sisu
+warning[W0001]: typed hole `parse_version` of type `Version ! VersionError`
+  --> version.sisu:22:12
+   |
+22 |     return todo("parse_version")
+   |            ^^^^^^^^^^^^^^^^^^^^^
+
+test "versions" ... blocked by todo("parse_version")
+test "an empty text" ... blocked by todo("parse_version")
+test "the wrong number of parts" ... blocked by todo("parse_version")
+test "a part that is not a number" ... blocked by todo("parse_version")
+test "versions in order" ... blocked by todo("parse_version")
+0 passed, 0 failed, 5 blocked

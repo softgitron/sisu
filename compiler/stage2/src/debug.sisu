@@ -1,0 +1,247 @@
+##! The types of the debug information (stage 0's
+##! `sisu-codegen/src/debug.rs`, its `TypeBuilder`; decision 227), as LIR
+##! describes them (README.md, "Debug types"): each named local's Sisu type
+##! is described once, `type tN ...`, in the order the DWARF writer first
+##! needs it (the functions in the order they are defined, their locals in
+##! order, each type numbered before the types it holds), so that the
+##! translation, walking the descriptions as the writer walks the types,
+##! makes the same entries in the same order. The descriptions follow the
+##! conventions of gdb's Rust support: a text is `&str`, a list's items a
+##! slice, an enum a struct with a variant part.
+
+import stage1.sir.write
+import stage2.abi
+from stage1.sir import Type, TypeDecl
+from stage2.abi import WORD
+from stage2.gen import Cg
+from stage2.layout import arg, fat, named0
+from stage2.lir import quote_text
+
+impl Cg:
+    ## The description number of each named local's type, the functions'
+    ## locals in order.
+    pub pure def describe_locals(mut self) -> list[int]:
+        var out: list[int] = []
+        for fi in range(len(self.funcs)):
+            for li in range(len(self.funcs[fi].locals)):
+                let t = self.funcs[fi].locals[li].ty.copy()
+                out.push(self.describe(t))
+        return out
+
+    ## The descriptions, one line each.
+    pub pure def debug_types(self) -> String:
+        var out = String.new()
+        for k in range(len(self.dtypes)):
+            out.push("type t{k} {self.dtypes[k]}\n")
+        return out
+
+    ## A new description's number, its text to come.
+    pure def new_dtype(mut self) -> int:
+        let k = len(self.dtypes)
+        self.dtypes.push(String.new())
+        return k
+
+    ## A description of its own number, made at once.
+    pure def dtype(mut self, text: str) -> int:
+        let k = self.new_dtype()
+        self.dtypes[k] = text.to_string()
+        return k
+
+    pure def dsize(mut self, t: Type) -> int:
+        let r = self.types.size(t)
+        if let Ok(s) = r:
+            return s
+        return 0
+
+    pure def dfield(mut self, t: Type, variant: int?, i: int) -> (int, Type)?:
+        let r = self.types.field(t, variant, i)
+        if let Ok(f) = r:
+            return Some(f.copy())
+        return None
+
+    ## The description of a (concrete) SIR type: its number.
+    pub pure def describe(mut self, t: Type) -> int:
+        let name = write.ty(t)
+        if let Some(k) = self.dtype_ids.get(name.copy()):
+            return k
+        let size = self.dsize(t)
+        var k = 0
+        match t:
+            case Type.Int:
+                k = self.dtype("base \"int\" signed 8")
+            case Type.Float:
+                k = self.dtype("base \"f64\" float 8")
+            case Type.Bool:
+                k = self.dtype("base \"bool\" boolean 1")
+            case Type.Char:
+                k = self.dtype("base \"char\" utf 4")
+            case Type.Unit | Type.Never | Type.Const(_) | Type.ConstOp(_, _):
+                k = self.dtype("struct \"()\" 0 {{ }}")
+            case Type.Str:
+                k = self.dtype("str")
+            case Type.Ref(inner, _):
+                if fat(inner[0]):
+                    k = self.dtype("opaque {quote_text(name)} {size}")
+                else:
+                    # Numbered first: a type may reach itself through a
+                    # reference.
+                    k = self.new_dtype()
+                    _ = self.dtype_ids.insert(name.copy(), k)
+                    let to = self.describe(inner[0])
+                    self.dtypes[k] = "pointer {quote_text(name)} t{to}"
+                    return k
+            case Type.Tuple(items):
+                k = self.new_dtype()
+                _ = self.dtype_ids.insert(name.copy(), k)
+                var parts = String.new()
+                for i in range(len(items)):
+                    if let Some((off, _)) = self.dfield(t, None, i):
+                        let it = self.describe(items[i])
+                        if not parts.is_empty():
+                            parts.push(", ")
+                        parts.push("{i} t{it} @{off}")
+                self.dtypes[k] = "tuple {quote_text(name)} {size} {{ {parts} }}"
+                return k
+            case Type.Named(n, args):
+                return self.describe_named(t, n, args, name, size)
+            case Type.ErrSet(names):
+                if len(names) == 1:
+                    # An error set of one error is its value.
+                    let m = self.describe(named0(names[0]))
+                    k = self.dtype("alias t{m}")
+                else:
+                    # Of more, a variant part chooses by the number of the
+                    # error's own type.
+                    k = self.new_dtype()
+                    _ = self.dtype_ids.insert(name.copy(), k)
+                    var parts = String.new()
+                    for n in names:
+                        let member = named0(n)
+                        # A member no value was made of is never the value's.
+                        let number = self.types.known_id(member) else:
+                            continue
+                        let mk = self.describe(member)
+                        if not parts.is_empty():
+                            parts.push(", ")
+                        parts.push("{number} {quote_text(n)} t{mk}")
+                    self.dtypes[k] = "errset {quote_text(name)} {size} {{ {parts} }}"
+                    return k
+            case _:
+                k = self.dtype("opaque {quote_text(name)} {size}")
+        _ = self.dtype_ids.insert(name, k)
+        return k
+
+    pure def describe_named(
+        mut self, t: Type, n: str, args: list[Type], name: str, size: int
+    ) -> int:
+        var simple = String.new()
+        match n:
+            case "u8" | "u16" | "u32" | "u64":
+                simple = "base \"u64\" unsigned 8".to_string()
+            case "i8" | "i16" | "i32" | "DateTime":
+                simple = "base \"i64\" signed 8".to_string()
+            case "u128":
+                simple = "base \"u128\" unsigned 16".to_string()
+            case "i128":
+                simple = "base \"i128\" signed 16".to_string()
+            case "f32":
+                simple = "base \"f32\" float 4".to_string()
+            case _:
+                pass
+        if not simple.is_empty():
+            let k = self.dtype(simple)
+            _ = self.dtype_ids.insert(name.to_string(), k)
+            return k
+        if n == "String" or n == "Path" or n == "bytes":
+            # A text: its bytes as `&str`, and the capacity.
+            let k = self.dtype("text {quote_text(name)} {size}")
+            _ = self.dtype_ids.insert(name.to_string(), k)
+            return k
+        if n == "list" or n == "Array" or n == "Slice":
+            # A list: its elements as a slice, and the capacity.
+            let k = self.new_dtype()
+            _ = self.dtype_ids.insert(name.to_string(), k)
+            let a0 = arg(args, 0)
+            let elem = self.describe(a0)
+            let slice = "&[{write.ty(a0)}]"
+            self.dtypes[k] = "list {quote_text(name)} {size} {quote_text(slice)} t{elem}"
+            return k
+        if n == "Box":
+            let k = self.new_dtype()
+            _ = self.dtype_ids.insert(name.to_string(), k)
+            let to = self.describe(arg(args, 0))
+            self.dtypes[k] = "pointer {quote_text(name)} t{to}"
+            return k
+        if n == "Option" or n == "Result":
+            var variants: list[(String, list[(String, Type, int)])] = []
+            if n == "Option":
+                variants.push(("Some".to_string(), [("__0".to_string(), arg(args, 0), WORD)]))
+                variants.push(("None".to_string(), []))
+            else:
+                variants.push(("Ok".to_string(), [("__0".to_string(), arg(args, 0), WORD)]))
+                variants.push(("Err".to_string(), [("__0".to_string(), arg(args, 1), WORD)]))
+            return self.enumeration(name, size, 0, "", variants)
+        let d = self.types.decl(n) else:
+            if size == WORD:
+                let k = self.dtype("word {quote_text(name)}")
+                _ = self.dtype_ids.insert(name.to_string(), k)
+                return k
+            let k = self.dtype("opaque {quote_text(name)} {size}")
+            _ = self.dtype_ids.insert(name.to_string(), k)
+            return k
+        let decl = d.copy()
+        match decl:
+            case TypeDecl.Struct(_, _, fields, _, _, _):
+                let k = self.new_dtype()
+                _ = self.dtype_ids.insert(name.to_string(), k)
+                var parts = String.new()
+                for i in range(len(fields)):
+                    if let Some((off, ft)) = self.dfield(t, None, i):
+                        let fk = self.describe(ft)
+                        if not parts.is_empty():
+                            parts.push(", ")
+                        parts.push("{quote_text(fields[i].name)} t{fk} @{off}")
+                self.dtypes[k] = "struct {quote_text(name)} {size} {{ {parts} }}"
+                return k
+            case TypeDecl.Enum(_, _, vs, _, error_, _, _):
+                var variants: list[(String, list[(String, Type, int)])] = []
+                for v in range(len(vs)):
+                    var fields: list[(String, Type, int)] = []
+                    for i in range(len(vs[v].fields)):
+                        if let Some((off, ft)) = self.dfield(t, Some(v), i):
+                            var fname = "__{i}"
+                            if let Some(given) = vs[v].fields[i].0:
+                                fname = given.copy()
+                            fields.push((fname, ft, off))
+                    variants.push((vs[v].name.copy(), fields))
+                # An error value's own type and its return trace come first.
+                if error_:
+                    let head = "{quote_text("set")} @{abi.ERROR_DECL}, {quote_text("trace")} @{abi.ERROR_TRACE}"
+                    return self.enumeration(name, size, abi.ERROR_TAG, head, variants)
+                return self.enumeration(name, size, 0, "", variants)
+
+    ## An enum: a struct whose variant part chooses by the tag word at `tag`
+    ## which variant's fields it holds, after the words `head`.
+    pure def enumeration(
+        mut self,
+        name: str,
+        size: int,
+        tag: int,
+        head: str,
+        variants: list[(String, list[(String, Type, int)])],
+    ) -> int:
+        let k = self.new_dtype()
+        _ = self.dtype_ids.insert(name.to_string(), k)
+        var vtext = String.new()
+        for (vname, fields) in variants:
+            var parts = String.new()
+            for (fname, ft, off) in fields:
+                let fk = self.describe(ft)
+                if not parts.is_empty():
+                    parts.push(", ")
+                parts.push("{quote_text(fname)} t{fk} @{off}")
+            if not vtext.is_empty():
+                vtext.push(", ")
+            vtext.push("{quote_text(vname)} {{ {parts} }}")
+        self.dtypes[k] = "enum {quote_text(name)} {size} @{tag} {{ {head} }} {{ {vtext} }}"
+        return k

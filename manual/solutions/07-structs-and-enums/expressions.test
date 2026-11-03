@@ -1,0 +1,5 @@
+test "a number" ... ok
+test "sums and products" ... ok
+test "a sum inside a product" ... ok
+test "negations" ... ok
+4 passed, 0 failed, 0 blocked

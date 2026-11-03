@@ -523,6 +523,8 @@ pub fn read(text: &str) -> Result<Program, ReadError> {
         intrinsics: Vec::new(),
         functions: Vec::new(),
         tests: Vec::new(),
+        test_tags: Vec::new(),
+        benches: Vec::new(),
         trait_methods: Vec::new(),
         impls: Vec::new(),
     };
@@ -566,7 +568,22 @@ pub fn read(text: &str) -> Result<Program, ReadError> {
             } else if c.eat("test ") {
                 let name = c.string()?;
                 let f = c.name()?;
+                let mut tags = Vec::new();
+                if c.eat("tags") {
+                    while !c.at_end() {
+                        tags.push(c.string()?);
+                    }
+                }
+                if !tags.is_empty() {
+                    // Each test before this one has none.
+                    p.test_tags.resize(p.tests.len(), Vec::new());
+                    p.test_tags.push(tags);
+                }
                 p.tests.push((name, f));
+            } else if c.eat("bench ") {
+                let name = c.string()?;
+                let f = c.name()?;
+                p.benches.push((name, f));
             } else if c.eat("intrinsic ") || c.eat("method ") {
                 let method = line.trim_start().starts_with("method ");
                 let name = c.type_name()?;
