@@ -1,0 +1,8 @@
+# RULES.md, R24: `from wordcount import words` of a name the dependency's
+# root module re-exports with `pub from`, which `import wordcount` and
+# `wordcount.words` reached and a `from` import did not (E0204).
+
+from wordcount import words
+
+def main():
+    print(words("yksi kaksi kolme"))

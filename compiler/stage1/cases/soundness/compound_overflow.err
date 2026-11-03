@@ -1,0 +1,2 @@
+panic: integer overflow: 255 + 10 as u8
+  at main (compound_overflow.sisu:9:5)

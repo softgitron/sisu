@@ -1,0 +1,23 @@
+# RULES.md, R26: a generic struct's construction. A field's default is as
+# generic as its struct, so `Shelf[int]()` fills `items` with a
+# `list[int]` (stage 0's SIR named the struct's type parameter in `main`,
+# E0501), and the type expected gives the type arguments before the fields
+# are checked, so the text of `Reading(21.5, "°C")` is a `String` where a
+# `Reading[f64, String]` is expected.
+
+struct Shelf[T]:
+    items: list[T] = []
+    label: String = "shelf".to_string()
+
+struct Reading[T, U]:
+    value: T
+    unit: U
+
+def main():
+    var s = Shelf[int]()
+    s.items.push(3)
+    print("{s.label}: {s.items}")
+    let words = Shelf[str](label="words".to_string())
+    print("{words.label}: {len(words.items)}")
+    let r: Reading[f64, String] = Reading(21.5, "°C")
+    print("{r.value} {r.unit}")

@@ -1,0 +1,7 @@
+# RULES.md, R25: Python's `from m import *` is E0128, which says that Sisu
+# has no glob imports, where E0100 said "expected a name, found `*`".
+
+from std.collections import *
+
+def main():
+    print(1)

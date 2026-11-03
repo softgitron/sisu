@@ -653,7 +653,7 @@ impl Analysis:
                         Finding.new(Msg.BorrowUseAfterMove, f, loc).with_arg(
                             "name", used.copy()
                         ).with("line", "{line}").label(mloc, label, [param("name", used)]).note(
-                            Msg.BorrowCopyBeforeMove, []
+                            Msg.BorrowMoveRemedies, []
                         ).at(b, si)
                     )
                 case None:
@@ -690,7 +690,7 @@ impl Analysis:
                         "name", whole_name
                     ).with_arg("part", part.copy()).with("line", "{line}").label(
                         mloc, Msg.BorrowMovedHere, [param("name", part)]
-                    ).note(Msg.BorrowCopyBeforeMove, []).at(b, si)
+                    ).note(Msg.BorrowMoveRemedies, []).at(b, si)
                 )
         return None
 
@@ -744,7 +744,7 @@ impl Analysis:
                 Finding.new(Msg.BorrowUseAfterMove, f, loc).with_arg("name", used.copy()).with(
                     "line", "{line}"
                 ).label(loc, Msg.BorrowMovedHere, [param("name", used)]).note(
-                    Msg.BorrowCopyBeforeMove, []
+                    Msg.BorrowMoveRemedies, []
                 ).at(b, si)
             )
         let moved_part = place_name(types, f, self.paths.paths[d].place)
@@ -753,7 +753,7 @@ impl Analysis:
                 "part", moved_part.copy()
             ).with("line", "{line}").label(
                 loc, Msg.BorrowMovedHere, [param("name", moved_part)]
-            ).note(Msg.BorrowCopyBeforeMove, []).at(b, si)
+            ).note(Msg.BorrowMoveRemedies, []).at(b, si)
         )
 
     ## The paths whose move makes `id` uninitialised: itself, its ancestors

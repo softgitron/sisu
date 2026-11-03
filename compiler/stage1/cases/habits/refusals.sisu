@@ -1,0 +1,20 @@
+# RULES.md, R25: what the checker says of three more habits. Python's
+# `sorted(xs, key=len)` names `sort_by`, `max_by` and `min_by`; a closure
+# kept in a `let` without its parameters' types is E0324, the types being
+# what is missing; and a trait method's type arguments are checked, so
+# `collect[set[int]]()`, which `collect` does not take, is E0349 where they
+# were dropped and a list made.
+
+def by_length(xs: list[str]) -> list[str]:
+    return sorted(xs, key=len)
+
+def adder() -> int:
+    let add = (a, b) -> a + b
+    return add(1, 2)
+
+def distinct(xs: list[int]) -> int:
+    let s = xs.iter().map(it * 1).collect[set[int]]()
+    return len(s)
+
+def main():
+    print(adder())

@@ -1,0 +1,5 @@
+14:9-14:14 E0234 resolve.method-signature name="price" trait="Priced" expected="def price(self) -> int" found="def price(self) -> f64"
+20:1-20:20 E0270 resolve.copy-by-hand ty="Token"
+  fix resolve.derive-copy 17:1-17:1 "@derive(Copy)\n" 20:1-23:1 ""
+38:23-38:32 E0241 resolve.not-object-safe trait="Shape" method="grown" reason="its signature mentions `Self` besides `self`"
+43:14-43:22 E0324 type.cannot-infer name="a.into()"

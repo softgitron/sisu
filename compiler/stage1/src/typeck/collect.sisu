@@ -67,6 +67,7 @@ from stage1.syntax.ast import (
 from stage1.syntax.ast import build
 from stage1.syntax.ast import visit
 from stage1.typeck.borrows import ResultShape
+from stage1.typeck.check import derive_edit
 from stage1.typeck.consts import ConstScope
 from stage1.typeck.folding import Term
 from stage1.typeck.instances import DeriveCheck
@@ -93,6 +94,7 @@ from stage1.typeck.program import (
     TraitInfo,
     VariantInfo,
     WellKnown,
+    is_ref_item,
 )
 from stage1.typeck.safety import doc_above, missing_comment, safety_list
 from stage1.typeck.std_sources import ambient, builtin_impls, importable, module_for, module_paths, reexports, target
@@ -608,7 +610,29 @@ impl Resolver:
         self.deferring = False
         let deferred = self.deferred.copy()
         self.deferred = []
+        # A `from` import of a name its module re-exports (`pub from`, 09)
+        # waits for that module's own imports, which may come later: each
+        # pass declares the imports whose names are there, until a pass
+        # declares none, and the rest are declared as they are, each name
+        # missing reported (RULES.md, R24).
+        var waiting: list[(ModuleId, ItemId)] = []
         for (m, id) in deferred:
+            if self.import_waits(m, id):
+                waiting.push((m, id))
+            else:
+                self.declare_import(m, id)
+        var progress = True
+        while progress and not waiting.is_empty():
+            progress = False
+            var still: list[(ModuleId, ItemId)] = []
+            for (m, id) in waiting:
+                if self.import_waits(m, id):
+                    still.push((m, id))
+                else:
+                    self.declare_import(m, id)
+                    progress = True
+            waiting = still
+        for (m, id) in waiting:
             self.declare_import(m, id)
         self.sites_known = False
         for i in range(len(modules)):
@@ -812,6 +836,13 @@ impl Resolver:
                             at = p.span
                             break
                     d = d.label_with(Msg.BorrowBorrowedParam, at.start, at.end, "name", n)
+                # A result of text owns it first (RULES.md, R24): a `str`
+                # read from a file, or made in the function, borrows no
+                # parameter, and a `from` clause would lead to E0407.
+                if let Some(owned) = self.owned_text_type(module, ret_span):
+                    let own_edit = Edit(start=ret_span.start, end=ret_span.end, text=owned.copy())
+                    let ty = MsgParam(name="ty".to_string(), value=owned.copy())
+                    d = d.fix_params(Msg.BorrowOwnResult, [ty], [own_edit])
                 # The fix names them all, which is always allowed; the author
                 # may then drop the ones the result never borrows.
                 let edit = Edit(start=ret_span.end, end=ret_span.end, text=" from {names}")
@@ -1447,6 +1478,101 @@ impl Resolver:
         var d = Diagnostic.new(Msg.ResolveMethodSignature, at.start, at.end).with("name", name)
         d = d.with("trait", trait_name).with("expected", expected_text)
         self.report_other(module, d.with("found", found_text))
+
+    ## `E0234` for a method of an impl whose types are not the trait's, with
+    ## `Self` and the trait's parameters substituted and its associated
+    ## types bound (stage 0's `check_method_signature`; RULES.md, R22): a
+    ## call through the trait would take the trait's types for the impl's.
+    ## A method whose shape differs (its receiver, the number of its
+    ## parameters, their modes, its own generic parameters) the name pass
+    ## reports.
+    pure def check_method_types(
+        mut self,
+        module: ModuleId,
+        tm: DefId,
+        m: DefId,
+        trait_ref: TraitRef,
+        self_ty: Ty,
+        env: list[Predicate],
+    ):
+        let expected_info = self.prog.fn_info(tm) else:
+            return
+        let expected = expected_info.copy()
+        let found_info = self.prog.fn_info(m) else:
+            return
+        let found = found_info.copy()
+        if expected.header_broken or found.header_broken:
+            return
+        let own_t = len(expected.generics) - expected.impl_generics
+        let own_f = len(found.generics) - found.impl_generics
+        if own_t != own_f or expected.self_mode != found.self_mode:
+            return
+        if len(expected.params) != len(found.params):
+            return
+        var args = [self_ty]
+        for a in trait_ref.args:
+            args.push(a)
+        for k in range(own_t):
+            args.push(self.types.param(found.impl_generics + k))
+        var same = True
+        for i in range(len(expected.params)):
+            if expected.params[i].mode != found.params[i].mode:
+                return
+            let s = self.types.subst(expected.params[i].ty, args)
+            let a = self.prog.normalize(mut self.types, s, env)
+            let b = self.prog.normalize(mut self.types, found.params[i].ty, env)
+            if a != b:
+                same = False
+        let sr = self.types.subst(expected.ret, args)
+        let ra = self.prog.normalize(mut self.types, sr, env)
+        let rb = self.prog.normalize(mut self.types, found.ret, env)
+        if ra != rb:
+            same = False
+        if same:
+            return
+        var names: list[String] = []
+        for g in found.generics:
+            names.push(g.name.copy())
+        let name = self.prog.defs[m.index].name.copy()
+        let trait_name = self.prog.display_trait_in(self.types, trait_ref, [])
+        let expected_text = self.signature_text(name, expected, Some(args), env, names)
+        let found_text = self.signature_text(name, found, None, env, names)
+        let at = self.prog.defs[m.index].span
+        var d = Diagnostic.new(Msg.ResolveMethodSignature, at.start, at.end).with("name", name)
+        d = d.with("trait", trait_name).with("expected", expected_text)
+        self.report_other(module, d.with("found", found_text))
+
+    ## `impl Copy for T` written by hand (RULES.md, R22): `Copy` is opt-in
+    ## through `@derive(Copy)` (03, "Auto traits"), which checks that every
+    ## field is `Copy`; an impl the program writes would leave the type
+    ## moved. `E0270`, with the fix that derives it instead, on the type's
+    ## line when the module declares it.
+    pure def check_copy_by_hand(
+        mut self,
+        module: ModuleId,
+        trait_ref: TraitRef,
+        self_ty: Ty,
+        header: TextRange,
+        item: TextRange,
+    ):
+        if Some(trait_ref.def_) != self.prog.wk.copy or not self.is_root(module):
+            return
+        let mname = self.prog.modules[module.index].name.copy()
+        if mname.starts_with("<"):
+            return
+        let shown = self.prog.display(self.types, self_ty)
+        var d = Diagnostic.new(Msg.ResolveCopyByHand, header.start, header.end).with("ty", shown)
+        if let TyData.Adt(def_, _) = self.types.data(self_ty):
+            if self.prog.defs[def_.index].module == module:
+                if let Some(text) = self.module_texts.get(module):
+                    let at = self.prog.defs[def_.index].span.start
+                    if let Some(add) = derive_edit(text, at, ["Copy".to_string()]):
+                        var end = item.end
+                        while end < text.byte_len() and text.byte_at(end) == 10:
+                            end += 1
+                        let remove = Edit(start=item.start, end=end, text=String.new())
+                        d = d.fix_edits(Msg.ResolveDeriveCopy, [add, remove])
+        self.report_other(module, d)
 
     ## The rules of `unsafe impl` (22, D-080): an `unsafe trait`, `Send` and
     ## `Sync` are implemented with `unsafe impl` (`E0984`), and no other
@@ -2665,6 +2791,9 @@ impl Resolver:
         if self_ty == Ty.error():
             return
         self.check_unsafe_impl(module, imp, range_in, trait_ref, predicates, names)
+        # An `unsafe impl Copy` is E0986's: `Copy` is never asserted.
+        if not imp.is_unsafe:
+            self.check_copy_by_hand(module, trait_ref, self_ty, range, range_in)
         # A refinement has its base's reading impls and no others (07).
         if let TyData.Adt(d, args) = self.types.data(self_ty).copy():
             if let Some(base) = self.prog.refinement_base(mut self.types, d, args):
@@ -2816,6 +2945,46 @@ impl Resolver:
             )
 
     # ---------------------------------------------------------------- imports
+
+    ## Whether a `from` import names a module of the program's packages that
+    ## does not have each name yet (RULES.md, R24): one its own imports bind.
+    pure def import_waits(self, module: ModuleId, id: ItemId) -> bool:
+        let item = self.sources[module.index].ast.item(id).copy()
+        let ItemKind.FromImport(imp) = item.kind else:
+            return False
+        let target = self.package_module(module, imp.path) else:
+            return False
+        for (n, _) in imp.names:
+            if self.prog.member(target, n.text, module).is_none():
+                return True
+        return False
+
+    ## The module of a package of the program an import path names, or
+    ## `None` (without reporting anything) for any other path.
+    pure def package_module(self, module: ModuleId, path: list[Name]) -> ModuleId?:
+        let first = path.first() else:
+            return None
+        let package = self.prog.package_of(module)
+        if package >= len(self.prog.packages):
+            return None
+        let this = ref self.prog.packages[package]
+        var root: ModuleId? = None
+        if not this.name.is_empty() and this.name == first.text:
+            root = this.root
+        else:
+            for (n, d) in this.deps:
+                if n == first.text and root.is_none() and d < len(self.prog.packages):
+                    root = self.prog.packages[d].root
+        let found = root else:
+            return None
+        var m = found
+        for i in range(1, len(path)):
+            let d = self.prog.lookup_in(m, path[i].text) else:
+                return None
+            let DefKind.Module(c) = self.prog.defs[d.index].kind() else:
+                return None
+            m = c
+        return Some(m)
 
     ## An `import` or `from ... import` item of `module` (09, "Modules").
     pure def declare_import(mut self, module: ModuleId, id: ItemId):
@@ -3736,6 +3905,18 @@ impl Resolver:
                 if trait_pkg != package and type_pkg != package:
                     var d = Diagnostic.new(Msg.ResolveOrphanImpl, span.start, span.end)
                     self.report_other(module, d.with("trait", trait_name).with("ty", ty_name))
+            # An associated type the impl does not bind is reported below;
+            # the signatures that name it would only repeat that.
+            var assoc_missing = False
+            for a in declared_assoc:
+                if a.default.is_none():
+                    var bound = False
+                    for (n, _) in bound_assoc:
+                        if n == a.name:
+                            bound = True
+                    if not bound:
+                        assoc_missing = True
+            let method_env = self.prog.elaborate_env(mut self.types, predicates)
             for (mname, mdef) in methods:
                 let tm = self.prog.trait_method(tr, mname) else:
                     let s = self.prog.defs[mdef.index].span
@@ -3749,6 +3930,8 @@ impl Resolver:
                 # is (22): its callers take the trait's obligations.
                 let tref = TraitRef(def_=tr, args=trait_args.copy())
                 self.check_unsafe_method(module, tm, mdef, tref, self_ty, names)
+                if not assoc_missing and not derived and self.is_root(module):
+                    self.check_method_types(module, tm, mdef, tref, self_ty, method_env)
                 if tpure:
                     var kind_now = self.prog.defs[mdef.index].kind().copy()
                     if let DefKind.Fn(f) = ref mut kind_now:
@@ -4015,28 +4198,7 @@ impl Resolver:
     ## Why a trait cannot be `dyn`, if it cannot: the method, and the
     ## reason.
     pure def object_safety_problem(mut self, t: DefId) -> (String, String)?:
-        let p0 = self.types.param(0)
-        for tr in self.prog.elaborate(mut self.types, p0, TraitRef(def_=t, args=[])):
-            let info = self.prog.trait_info(tr.def_) else:
-                continue
-            for m in info.methods.copy():
-                let f = self.prog.fn_info(m) else:
-                    continue
-                let name = self.prog.defs[m.index].name.copy()
-                match f.self_mode:
-                    case Some(Mode.Borrow) | Some(Mode.Mut):
-                        pass
-                    case _:
-                        return Some((name, "it does not take `self` or `mut self`".to_string()))
-                if len(f.generics) > f.impl_generics:
-                    return Some((name, "it has type parameters of its own".to_string()))
-                var mentions = False
-                for p in f.params:
-                    if self.types.walk(p.ty).contains(p0):
-                        mentions = True
-                if mentions or self.types.walk(f.ret).contains(p0):
-                    return Some((name, "its signature mentions `Self` besides `self`".to_string()))
-        return None
+        return self.prog.object_safety_problem(mut self.types, t)
 
     ## `@derive(Copy)` only for a type whose fields are all `Copy` (03); a
     ## field of a type parameter's type is, since the type is `Copy` only
@@ -4280,7 +4442,9 @@ impl Resolver:
                 var targs: list[Ty] = []
                 for a in args:
                     targs.push(self.resolve_ty(a, ctx))
-                return self.resolve_path_ty(segments, targs, ctx, range)
+                let t = self.resolve_path_ty(segments, targs, ctx, range)
+                self.written_ref_items(t, args, ctx)
+                return t
             case TypeKind.Option(inner):
                 let t = self.resolve_ty(inner, ctx)
                 let o = self.prog.wk.option else:
@@ -4375,6 +4539,36 @@ impl Resolver:
                 let at = self.ast(ctx.module).type_expr(te).range
                 self.unsupported_in(ctx.module, at, what, phase)
                 return Ty.error()
+
+    ## A collection a declaration writes with references as its items
+    ## (RULES.md, R21; 04, rule 3): `E0438` at the item's type, with the fix
+    ## that holds the values themselves.
+    pure def written_ref_items(mut self, t: Ty, args: list[TypeExprId], ctx: TyCtx):
+        let TyData.Adt(d, targs) = self.types.data(t).copy() else:
+            return
+        if self.prog.collection_name(d).is_none() or len(targs) < len(args):
+            return
+        for i in range(len(args)):
+            let written = self.ast(ctx.module).type_expr(args[i]).copy()
+            let TypeKind.Ref(_, inner) = written.kind else:
+                continue
+            if not is_ref_item(self.types, targs[i]):
+                continue
+            let inner_start = self.ast(ctx.module).type_expr(inner).range.start
+            var owned: list[Ty] = []
+            for x in targs:
+                owned.push(self.types.strip_ref(x))
+            let owned_ty = self.types.adt(d, owned)
+            let shown_owned = self.prog.display_in(self.types, owned_ty, ctx.generics)
+            let shown = self.prog.display_in(self.types, t, ctx.generics)
+            let at = written.range
+            let edit = Edit(start=at.start, end=inner_start, text=String.new())
+            let params = [MsgParam(name="ty".to_string(), value=shown_owned)]
+            let found = Diagnostic.new(Msg.BorrowRefInCollection, at.start, at.end).with(
+                "ty", shown
+            )
+            self.report_other(ctx.module, found.fix_params(Msg.BorrowOwnItems, params, [edit]))
+            return
 
     ## `cap.Fake[Trait]`, written at `range`: the fake the compiler wrote
     ## for the trait (17); a trait without one is `comptime.no-fake`.

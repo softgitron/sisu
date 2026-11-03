@@ -31,6 +31,7 @@ from stage1.diag import (
     Catalog,
     Diagnostic,
     Edit,
+    Fix,
     Lines,
     Msg,
     Param,
@@ -1145,6 +1146,7 @@ pure def finish_file(
     for d in bodies.diags:
         if not broken.contains(lines.index(d.start)):
             kept.push(d.copy())
+    agree_mut_fixes(mut kept)
     sort_unique(mut kept, catalog)
     # The generators and contract tests the compiler writes repeat the
     # program's own contracts and types: when the program has an error,
@@ -1678,6 +1680,35 @@ pure def is_system(prog: Program, types: Types, t: Ty) -> bool:
     return False
 
 ## The type checker's messages that are warnings.
+## `E0340` at a call that passes `mut` for a parameter its function changes,
+## whose body has the error with the fix that takes the parameter with `mut`
+## (`E0341`): the call's `mut` is right, and its fix is that one too, where
+## it removed the call's `mut`, the two fixes undoing each other. Where the
+## function does not change it, the call's `mut` goes (RULES.md, R24).
+pure def agree_mut_fixes(mut ds: list[Diagnostic]):
+    var taken: list[int] = []
+    for d in ds:
+        if d.msg != Msg.TypeMutArgumentUnexpected:
+            for f in d.fixes:
+                if f.msg == Msg.TypeTakeMut and not f.edits.is_empty():
+                    taken.push(f.edits[0].start)
+    for i in range(len(ds)):
+        if ds[i].msg != Msg.TypeMutArgumentUnexpected:
+            continue
+        var agrees = False
+        for f in ds[i].fixes:
+            if f.msg == Msg.TypeTakeMut and not f.edits.is_empty():
+                if taken.contains(f.edits[0].start):
+                    agrees = True
+        var keep: list[Fix] = []
+        for f in ds[i].fixes:
+            if agrees and f.msg == Msg.TypeRemoveMut:
+                continue
+            if not agrees and f.msg == Msg.TypeTakeMut:
+                continue
+            keep.push(f.copy())
+        ds[i].fixes = keep
+
 pure def is_warning(m: Msg) -> bool:
     return m == Msg.TypeHole or m == Msg.TypeUnreachableCode or m == Msg.TypeUnreachableArm
 
@@ -1820,6 +1851,7 @@ impl Checker:
         self.decide_captures(cx)
         self.check_own_closures(cx)
         self.check_bounds(cx)
+        self.check_ref_items(cx)
         self.check_comptime_types(cx)
         self.report_uninferred(cx)
         # A pure body's calls and drops are checked on SIR, by stage 0's
@@ -1846,6 +1878,7 @@ impl Checker:
         self.decide_captures(cx)
         self.check_own_closures(cx)
         self.check_bounds(cx)
+        self.check_ref_items(cx)
         self.check_comptime_types(cx)
 
     ## What the body asks of the next resolution (stage 0's
@@ -1985,7 +2018,16 @@ impl Checker:
                 args.push(n)
             let b = TraitRef(def_=bound.def_, args=args)
             if self.infer.has_vars(mut self.types, t) or self.types.contains_error(t) or arg_error:
+                # The impl a method call needs, which nothing decided: the
+                # call's types are open (RULES.md, R22).
+                if not strict and not self.types.contains_error(t) and not arg_error:
+                    if self.undecided_call.is_none():
+                        self.undecided_call = Some(span)
                 continue
+            if not strict and self.undecided_call.is_none():
+                for a in b.args:
+                    if self.infer.has_vars(mut self.types, a):
+                        self.undecided_call = Some(span)
             var dup = False
             for (st, sb) in seen:
                 if st == t and sb == b:
@@ -2085,7 +2127,13 @@ impl Checker:
                 let d = Diagnostic.new(Msg.TypeCannotInfer, span.start, span.end).with("name", name)
                 self.report(d)
                 return
-        _ = cx
+        # A call of a trait's method whose impl nothing decided would run an
+        # impl of a type the program never names (RULES.md, R22): its type
+        # is what to annotate.
+        if let Some(span) = self.undecided_call:
+            let name = self.source_text(cx, span)
+            let d = Diagnostic.new(Msg.TypeCannotInfer, span.start, span.end).with("name", name)
+            self.report(d)
 
     ## What a `comptime` expression computes cannot depend on the
     ## function's type arguments, which are known only when it is called

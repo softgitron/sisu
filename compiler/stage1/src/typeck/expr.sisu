@@ -376,6 +376,17 @@ impl Checker:
                 Edit(start=r.end, end=r.end, text=")".to_string()),
             ]
             return d.fix_edits(Msg.TypeMakePath, edits)
+        # A reference where what it refers to is expected, as an item of a
+        # collection of owned values (RULES.md, R21): a copy of the value,
+        # `aino.copy()` for `ref aino`.
+        if let TyData.Ref(inner, _) = self.data(actual):
+            if self.resolved(inner) == self.resolved(exp) and not self.types.contains_error(exp):
+                if let TExprKind.Borrow(place, _) = self.exprs[x.index].kind:
+                    let pr = self.span_of(place)
+                    if pr.start >= r.start and pr.end <= r.end and pr.start < pr.end:
+                        let place_text = cx.source.byte_slice(pr.start, pr.end)
+                        return d.fix_at(Msg.TypeAddCopy, r.start, r.end, "{place_text}.copy()")
+                return d.fix_at(Msg.TypeAddCopy, r.end, r.end, ".copy()")
         let text = cx.source.byte_slice(r.start, r.end)
         var literal = False
         match self.exprs[x.index].kind:
@@ -433,6 +444,11 @@ impl Checker:
                 for w in wanted:
                     found.push(w.copy())
         found.sort()
+        # The conversion that keeps the value comes first: `to_string` for
+        # text where a `String` is expected, not `to_lowercase` (RULES.md,
+        # R24).
+        if self.is_string(cx, exp) and found.contains("to_string".to_string()):
+            found = ["to_string".to_string()]
         let m = found.first() else:
             return d
         var simple = not text.is_empty()
@@ -717,7 +733,11 @@ impl Checker:
                 return self.unary_expr(cx, op, inner, span, expected)
             case ExprKind.Ref(mutable, inner):
                 let x = self.infer_expr(cx, inner, None)
-                if not self.is_place(x) and self.ty_of(x) != Ty.error():
+                # A shared borrow of a value that is no place borrows the
+                # temporary that holds it to the end of its statement, as an
+                # argument a parameter borrows is (`show(ref Coffee(1))`,
+                # RULES.md, R25; 04, rule 3: a reference may be passed).
+                if not self.is_place(x) and self.ty_of(x) != Ty.error() and mutable:
                     let d = self.error(cx, Msg.TypeNotAPlace, cx.ast.expr(inner).range)
                     self.report(d)
                 if mutable:
@@ -1636,6 +1656,16 @@ impl Checker:
                 return (Ty.error(), False)
         if let Some(t) = result:
             return (t, True)
+        # Operands whose types nothing has told yet, the parameters of a
+        # closure kept in a `let` (`(a, b) -> a + b`): what is missing is
+        # their types, not an impl (RULES.md, R25).
+        if let TyData.Var(_) = self.data(lt):
+            if let TyData.Var(_) = self.data(rt):
+                let lr = self.span_of(l)
+                let name = self.source_text(cx, lr)
+                var d = Diagnostic.new(Msg.TypeCannotInfer, lr.start, lr.end).with("name", name)
+                self.report(d.note(Msg.TypeAnnotateParams))
+                return (Ty.error(), False)
         let shown_l = self.show(cx, lt)
         let shown_r = self.show(cx, rt)
         var d = self.error(cx, Msg.TypeBinaryOperator, range)
@@ -1654,7 +1684,7 @@ impl Checker:
         self.report(d)
         return (Ty.error(), False)
 
-    pure def is_text(self, cx: Cx, t: Ty) -> bool:
+    pub pure def is_text(self, cx: Cx, t: Ty) -> bool:
         return t == Ty.str() or self.is_string(cx, t)
 
     pure def is_shown(self, cx: Cx, t: Ty) -> bool:

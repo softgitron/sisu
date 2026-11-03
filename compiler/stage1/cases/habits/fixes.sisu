@@ -1,0 +1,43 @@
+# RULES.md, R24: the fixes the manual's later chapters found missing or
+# misleading. Python's `", ".join(names)` is `names.join(", ")`; `append`
+# and `clone` have Sisu's names; an iterator's method on a list iterates
+# it first; a trait's method on a type parameter bounds the parameter; a
+# `String` key looked up with text calls `.to_string()`, not
+# `.to_lowercase()`; a function returning text it does not borrow from
+# its parameters owns it; and a call that says `mut` for a parameter its
+# function changes gets the function's `mut`, which E0341 gives too, where
+# it was told to drop its own.
+
+trait Priced:
+    def price(self) -> int
+
+def joined(names: list[String]) -> String:
+    return ", ".join(names)
+
+def pushed() -> list[int]:
+    var xs = [1, 2]
+    xs.append(3)
+    return xs
+
+def doubled(xs: list[int]) -> list[int]:
+    return xs.map(it * 2).collect()
+
+def copied(s: String) -> String:
+    return s.clone()
+
+def priced[T](x: T) -> int:
+    return x.price()
+
+def known(recipes: dict[String, int], dish: str) -> bool:
+    return recipes.contains(dish)
+
+def read(fs: Fs, path: Path) -> str:
+    return ""
+
+def add_one(xs: list[int]):
+    xs.push(1)
+
+def main():
+    var xs = [1]
+    add_one(mut xs)
+    print(xs)

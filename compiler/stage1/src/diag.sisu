@@ -477,6 +477,22 @@ pub enum Msg:
     ResolveShadowPreludeSet
     UnsafeExportSignature
     UnsafeBlockingNotForeign
+    # Stage 1's rules of the manual's second round (RULES.md, R21 on).
+    BorrowRefInCollection
+    BorrowOwnItems
+    BorrowCopyItems
+    BorrowItemsOwned
+    ResolveCopyByHand
+    ResolveDeriveCopy
+    TypeJoinItems
+    TypeSisuSpelling
+    TypeIterateFirst
+    BorrowOwnResult
+    BorrowReturnText
+    BorrowMoveRemedies
+    TypeSortByKey
+    ParseGlobImport
+    TypeAnnotateParams
 
 impl Msg:
     ## The catalog identifier.
@@ -938,6 +954,21 @@ impl Msg:
             case ResolveShadowPreludeSet: "resolve.shadow-prelude-set"
             case UnsafeExportSignature: "unsafe.export-signature"
             case UnsafeBlockingNotForeign: "unsafe.blocking-not-foreign"
+            case BorrowRefInCollection: "borrow.ref-in-collection"
+            case BorrowOwnItems: "borrow.own-items"
+            case BorrowCopyItems: "borrow.copy-items"
+            case BorrowItemsOwned: "borrow.items-owned"
+            case ResolveCopyByHand: "resolve.copy-by-hand"
+            case ResolveDeriveCopy: "resolve.derive-copy"
+            case TypeJoinItems: "type.join-items"
+            case TypeSisuSpelling: "type.sisu-spelling"
+            case TypeIterateFirst: "type.iterate-first"
+            case BorrowOwnResult: "borrow.own-result"
+            case BorrowReturnText: "borrow.return-text"
+            case BorrowMoveRemedies: "borrow.move-remedies"
+            case TypeSortByKey: "type.sort-by-key"
+            case ParseGlobImport: "parse.glob-import"
+            case TypeAnnotateParams: "type.annotate-params"
 
 ## A byte range of a text: from `start` up to, not including, `end`.
 @derive(Eq, Hash, Debug, Copy)

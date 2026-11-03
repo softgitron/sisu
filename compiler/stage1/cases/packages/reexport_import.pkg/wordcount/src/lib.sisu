@@ -1,0 +1,4 @@
+##! Counts words. The root module re-exports `words` from its module
+##! `count` (09, "Modules"), so `from wordcount import words` names it.
+
+pub from wordcount.count import words

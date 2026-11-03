@@ -1,0 +1,18 @@
+# RULES.md, R24: what the ownership checker's notes say. A `str` made in
+# the function and returned is a view of what is gone, and its copy is the
+# same view, so the note names a `String` result; and a use after a move
+# names each remedy with what it costs, and the third one, a borrowed
+# parameter where the function only reads.
+
+def greeting(name: str) -> str:
+    let s = "Hei, {name}"
+    return s
+
+def total(own items: list[int]) -> int:
+    return len(items)
+
+def main():
+    print(greeting("Aino"))
+    let items = [1, 2]
+    print(total(items))
+    print(total(items))

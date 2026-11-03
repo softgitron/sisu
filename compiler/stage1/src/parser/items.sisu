@@ -569,6 +569,10 @@ impl Parser:
         var more = True
         while more:
             self.start(SyntaxKind.ImportName)
+            # `from m import *` (RULES.md, R25): Sisu names what it imports,
+            # which says so where "expected a name" did not.
+            if self.at(SyntaxKind.Star):
+                self.error(Msg.ParseGlobImport)
             _ = self.expect_name()
             if self.eat(SyntaxKind.AsKw):
                 _ = self.expect_name()

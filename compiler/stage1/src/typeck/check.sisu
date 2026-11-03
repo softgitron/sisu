@@ -44,7 +44,16 @@ from stage1.typeck.consts import ConstScope
 from stage1.typeck.generic_asserts import Assert, ConstCall, Fold, const_calls, fold_tree
 from stage1.typeck.infer import InferTable
 from stage1.typeck.pat import OrAlt
-from stage1.typeck.program import Answer, DefKind, FnKind, ModuleId, Predicate, Program, Request
+from stage1.typeck.program import (
+    Answer,
+    DefKind,
+    FnKind,
+    ModuleId,
+    Predicate,
+    Program,
+    Request,
+    is_ref_item,
+)
 from stage1.typeck.thir import (
     BindMode,
     BlockId,
@@ -271,6 +280,15 @@ pub struct Checker:
     ## While an interpolation's optional chain is checked: the chain only
     ## reads what it reaches through a place (RULES.md, R14).
     pub reading_chain: bool
+    ## The collections of references reported in the body (RULES.md, R21),
+    ## each once.
+    pub ref_items_seen: list[Ty]
+    ## A call of a trait's method whose impl the body's types never decide
+    ## (`a.into()` where nothing asks for a type): where (RULES.md, R22).
+    pub undecided_call: TextRange?
+    ## While an argument is checked: the function called and the
+    ## parameter's index (RULES.md, R24).
+    pub arg_callee: (DefId, int)?
 
 impl Checker:
     pub pure def new(cx: Cx, own types: Types, def_: DefId) -> Checker:
@@ -331,6 +349,9 @@ impl Checker:
             stmt_start=0,
             foreign_calls=[],
             reading_chain=False,
+            ref_items_seen=[],
+            undecided_call=None,
+            arg_callee=None,
         )
 
     pub pure def finish(own self) -> Finished:
@@ -848,6 +869,108 @@ impl Checker:
             return self.locals[l].ty
         return Ty.error()
 
+    # ---------------------------------------------------------------- references in collections
+
+    ## A collection written in the body with references as its items
+    ## (RULES.md, R21; 04, rule 3): `E0438` at the item's type, with the fix
+    ## that holds the values themselves.
+    pub pure def written_ref_items(mut self, cx: Cx, d: DefId, args: list[TypeExprId], t: Ty):
+        if cx.prog.collection_name(d).is_none() or self.ref_items_seen.contains(t):
+            return
+        if not cx.prog.user_modules.contains(self.module):
+            return
+        let TyData.Adt(_, targs) = self.types.data(t).copy() else:
+            return
+        if len(targs) < len(args):
+            return
+        for i in range(len(args)):
+            let written = cx.ast.type_expr(args[i])
+            let TypeKind.Ref(_, inner) = written.kind else:
+                continue
+            if not is_ref_item(self.types, targs[i]):
+                continue
+            let inner_start = cx.ast.type_expr(inner).range.start
+            let owned_ty = self.owned_items(cx, t)
+            let owned = self.show(cx, owned_ty)
+            self.ref_items_seen.push(t)
+            let shown = self.show(cx, t)
+            let at = written.range
+            let edit = Edit(start=at.start, end=inner_start, text=String.new())
+            let params = [Param(name="ty".to_string(), value=owned)]
+            let found = self.error(cx, Msg.BorrowRefInCollection, at).with("ty", shown)
+            self.report_other(found.fix_params(Msg.BorrowOwnItems, params, [edit]))
+            return
+
+    ## The collection `t` with the referents of its references as its items.
+    pure def owned_items(mut self, cx: Cx, t: Ty) -> Ty:
+        let TyData.Adt(d, args) = self.types.data(t).copy() else:
+            return t
+        var out: list[Ty] = []
+        for a in args:
+            out.push(self.types.strip_ref(a))
+        return self.types.adt(d, out)
+
+    ## The collections the body makes whose items are references (RULES.md,
+    ## R21; 04, rule 3), once the types are known: each such collection
+    ## type at its first place, the local it is inferred for or the
+    ## expression that makes it, `E0438`. A type the function's signature
+    ## writes is reported there, and one an annotation writes where it is
+    ## written; code the compiler writes and the standard library's are
+    ## not checked here.
+    pub pure def check_ref_items(mut self, cx: Cx):
+        if not cx.prog.user_modules.contains(self.module):
+            return
+        for l in self.params.copy():
+            let z = self.infer.zonk(mut self.types, self.local_ty(l))
+            if let Some((c, _)) = cx.prog.ref_items(self.types, z):
+                self.ref_items_seen.push(c)
+        let zr = self.infer.zonk(mut self.types, self.body_ret)
+        if let Some((c, _)) = cx.prog.ref_items(self.types, zr):
+            self.ref_items_seen.push(c)
+        # The places: (start, end, index), a local's index or, past the
+        # locals, an expression's.
+        var sites: list[(int, int, int)] = []
+        var found: list[Ty] = []
+        for l in range(len(self.locals)):
+            if self.params.contains(l):
+                continue
+            let z = self.infer.zonk(mut self.types, self.locals[l].ty)
+            if let Some((c, _)) = cx.prog.ref_items(self.types, z):
+                let span = self.locals[l].span
+                sites.push((span.start, span.end, len(found)))
+                found.push(c)
+        var exprs: list[int] = []
+        for i in range(len(self.exprs)):
+            let z = self.infer.zonk(mut self.types, self.exprs[i].ty)
+            if let Some((c, _)) = cx.prog.ref_items(self.types, z):
+                let span = self.exprs[i].span
+                sites.push((span.start, span.end, len(found)))
+                found.push(c)
+                exprs.push(i)
+        sites.sort()
+        let first_expr = len(found) - len(exprs)
+        for (start, end, k) in sites:
+            let c = found[k]
+            if self.ref_items_seen.contains(c):
+                continue
+            self.ref_items_seen.push(c)
+            let shown = self.show(cx, c)
+            var d = Diagnostic.new(Msg.BorrowRefInCollection, start, end).with("ty", shown)
+            # A `collect()` that makes it collects copies instead.
+            var fix: int? = None
+            for (s2, e2, k2) in sites:
+                if k2 >= first_expr and found[k2] == c and fix.is_none():
+                    let text = self.source_text(cx, TextRange(start=s2, end=e2))
+                    let collect = ".collect()"
+                    if text.ends_with(collect) and e2 - len(collect) > s2:
+                        fix = Some(e2 - len(collect))
+            match fix:
+                case Some(at):
+                    d = d.fix_at(Msg.BorrowCopyItems, at, at, ".map(it.copy())")
+                case None:
+                    d = d.note(Msg.BorrowItemsOwned)
+            self.report_other(d)
+
     # ---------------------------------------------------------------- annotations
 
     ## Resolves a type written inside a body (`let x: T`).
@@ -925,7 +1048,9 @@ impl Checker:
                         return cx.prog.normalize(mut self.types, t, self.env)
                 match found:
                     case Some(d):
-                        return self.def_type(cx, d, targs, rng)
+                        let t = self.def_type(cx, d, targs, rng)
+                        self.written_ref_items(cx, d, args, t)
+                        return t
                     case None:
                         self.undefined_path_type(cx, names, rng)
                         return Ty.error()
@@ -973,6 +1098,15 @@ impl Checker:
                     targs.push(self.resolve_ty(cx, a))
                 if let Some(d) = self.lookup_type_path(cx, names):
                     if cx.prog.trait_info(d).is_some():
+                        # A trait that cannot be `dyn` is refused here as in a
+                        # signature (RULES.md, R22).
+                        if let Some((method, reason)) = cx.prog.object_safety_problem(
+                            mut self.types, d
+                        ):
+                            var e = self.error(cx, Msg.ResolveNotObjectSafe, rng)
+                            e = e.with("trait", cx.prog.defs[d.index].name).with("method", method)
+                            self.report_other(e.with("reason", reason))
+                            return Ty.error()
                         return self.types.intern(TyData.Dyn(TraitRef(def_=d, args=targs)))
                 let d = self.error(cx, Msg.ResolveNotATrait, inner_range)
                 self.report_other(d.with("name", names.join(".")))
@@ -1394,7 +1528,9 @@ impl Checker:
                 let v = self.decay(cx, v0)
                 let ty = self.ty_of(v)
                 let l = self.new_local(name.text, ty, False, name.range)
-                self.declare(cx, name.text, l, False, name.range)
+                # `with e:` binds no name: the value is kept to the end.
+                if not name.text.is_empty():
+                    self.declare(cx, name.text, l, False, name.range)
                 let pat = self.add_pat(TPatKind.Bind(local=l, mode=BindMode.Value), ty, name.range)
                 var stmts = [TStmt.Let(pat=pat, init=Some(v), unwrap=None, else_=None, span=span)]
                 let b = self.check_block(cx, body)
@@ -2175,7 +2311,7 @@ pub pure def first_of(ts: list[Ty]) -> Ty?:
 ## The edit that derives `names` for the type whose name is at `at`: the
 ## attribute `@derive(...)` on the lines above its declaration with them
 ## added, or a line of its own above it.
-pure def derive_edit(text: str, at: int, names: list[String]) -> Edit?:
+pub pure def derive_edit(text: str, at: int, names: list[String]) -> Edit?:
     if at > text.byte_len():
         return None
     var line = at

@@ -999,6 +999,70 @@ impl Program:
             case _:
                 return False
 
+    ## The collection `d` is, by the name a message gives it: `list`, `set`,
+    ## `dict` and `Array` of the prelude, and `Deque`, `Heap`, `SortedDict`
+    ## and `SortedSet` of `std.collections` (11). Its items are values it
+    ## owns, or views, and never references (04, rule 3; RULES.md, R21).
+    pub pure def collection_name(self, d: DefId) -> String?:
+        if d.index < 0 or d.index >= len(self.defs):
+            return None
+        if let Some(b) = self.builtin(d):
+            if b == "list" or b == "set" or b == "dict" or b == "Array":
+                return Some(b)
+            return None
+        let item = ref self.defs[d.index]
+        if item.module.index < 0 or item.module.index >= len(self.modules):
+            return None
+        let m = ref self.modules[item.module.index]
+        if not m.is_std or m.name != "collections":
+            return None
+        let n: str = item.name
+        if n == "Deque" or n == "Heap" or n == "SortedDict" or n == "SortedSet":
+            return Some(n.to_string())
+        return None
+
+    ## Why a trait cannot be `dyn`, if it cannot (03, "Dispatch": "the
+    ## compiler says why when it is not"): the method, and the reason. A
+    ## method without `self` by reference, with type parameters of its own,
+    ## or mentioning `Self` besides its receiver cannot be called through a
+    ## `dyn`, which does not know the type behind it.
+    pub pure def object_safety_problem(self, mut types: Types, t: DefId) -> (String, String)?:
+        let p0 = types.param(0)
+        for tr in self.elaborate(mut types, p0, TraitRef(def_=t, args=[])):
+            let info = self.trait_info(tr.def_) else:
+                continue
+            for m in info.methods.copy():
+                let f = self.fn_info(m) else:
+                    continue
+                let name = self.defs[m.index].name.copy()
+                match f.self_mode:
+                    case Some(Mode.Borrow) | Some(Mode.Mut):
+                        pass
+                    case _:
+                        return Some((name, "it does not take `self` or `mut self`".to_string()))
+                if len(f.generics) > f.impl_generics:
+                    return Some((name, "it has type parameters of its own".to_string()))
+                var mentions = False
+                for p in f.params:
+                    if types.walk(p.ty).contains(p0):
+                        mentions = True
+                if mentions or types.walk(f.ret).contains(p0):
+                    return Some((name, "its signature mentions `Self` besides `self`".to_string()))
+        return None
+
+    ## The first collection in `ty` (`ty` itself, or a type inside it) whose
+    ## items are references (RULES.md, R21), with the reference. A shared
+    ## borrow of a `str` is the `str`, a view, as a declaration's type reads
+    ## it.
+    pub pure def ref_items(self, types: Types, ty: Ty) -> (Ty, Ty)?:
+        for t in types.walk(ty):
+            if let TyData.Adt(d, args) = types.data(t):
+                if self.collection_name(d).is_some():
+                    for a in args:
+                        if is_ref_item(types, a):
+                            return Some((t, a))
+        return None
+
     ## `@must_consume` (D-054), through containers, options and tuples
     ## (D-064): a type is must-consume when it is declared so or holds one,
     ## in a field or a type argument.
@@ -1401,12 +1465,13 @@ impl Program:
                                     fields.push(types.subst(t, args))
                         case _:
                             pass
+                    # What the derived impl reads is its fields, the type's
+                    # arguments only where a field holds them: `Key[T]`'s `T`
+                    # is in none (RULES.md, R25).
                     for f in fields:
                         if not self.structural_depth(mut types, f, tr, depth + 1):
                             return False
-                    for a in iargs:
-                        if not self.structural_depth(mut types, a, tr, depth + 1):
-                            return False
+                    _ = iargs
                     return True
                 let name: str = self.defs[d.index].name
                 let core = name == "Option"
@@ -2360,16 +2425,13 @@ pub pure def param_local_ty(
             # passes the reference, not a borrow of it (decision 255). A
             # generic parameter bounded by `Copy` is passed by value, as
             # every type it stands for is.
-            var opaque = False
-            match types.data(ty):
-                case TyData.Ref(_, _):
-                    return ty
-                case TyData.Param(_) | TyData.Assoc(_, _, _):
-                    opaque = True
-                case _:
-                    pass
+            # A type holding the function's type parameters is `Copy` by
+            # their bounds (`(T, T)` with `T: Copy`, RULES.md, R23), as one
+            # of them is.
+            if let TyData.Ref(_, _) = types.data(ty):
+                return ty
             var copy = False
-            if opaque:
+            if types.has_params(ty):
                 copy = prog.is_copy_in(mut types, ty, env)
             else:
                 copy = prog.is_copy(mut types, ty)
@@ -2388,6 +2450,13 @@ pure def holds_var(types: Types, ty: Ty) -> bool:
 ## Whether the type arguments of a channel half are those of a channel of
 ## closures, whose closures are checked where they are sent (RULES.md,
 ## R1): its element is a function type.
+## Whether a collection's item of type `a` would be a reference (RULES.md,
+## R21): a `ref T`, but a shared borrow of a `str`, which is the view.
+pub pure def is_ref_item(types: Types, a: Ty) -> bool:
+    if let TyData.Ref(inner, mutable) = types.data(a):
+        return mutable or inner != Ty.str()
+    return False
+
 pub pure def carries_closures(types: Types, args: list[Ty]) -> bool:
     if args.is_empty():
         return False
