@@ -1,0 +1,27 @@
+# `.copy()` of values that hold sets and dicts (decision 350): a set, a
+# dict of sets, a struct holding both, and lists of such structs, each copy
+# deep and independent of what it was copied from.
+
+struct Index:
+    name: String
+    words: set[String]
+    counts: dict[String, set[int]]
+
+def main():
+    var words: set[String] = {"kuusi", "koivu"}
+    let copy = words.copy()
+    words.add("mänty")
+    print("{len(words)} {len(copy)}")
+    var counts: dict[String, set[int]] = {}
+    counts["a"] = {1, 2}
+    counts["b"] = {3}
+    let index = Index(name="metsä", words=words, counts=counts)
+    var other = index.copy()
+    other.words.add("haapa")
+    other.counts["a"].add(9)
+    print("{len(index.words)} {len(other.words)}")
+    print("{len(index.counts["a"])} {len(other.counts["a"])}")
+    let all = [index.copy(), other.copy()]
+    let again = all.copy()
+    print("{len(again)} {again[1].name} {len(again[1].words)}")
+    print(again[0].words == index.words)

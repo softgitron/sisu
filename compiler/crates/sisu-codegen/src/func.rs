@@ -1470,6 +1470,10 @@ impl<'a, 'p> Cx<'a, 'p> {
             let env = self.slot(size);
             self.store_word(env, value, abi::WORD);
             env
+        } else if self.cg.types.holds_fn(&env_ty)? {
+            // It keeps a function value, which a wider function value only
+            // widens: no width holds it (decision 360).
+            return Err(Error::unsupported("an `own` closure that keeps a function value"));
         } else {
             // An `own` environment larger than a function value holds: the
             // program is compiled again with wider ones.

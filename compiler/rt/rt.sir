@@ -1,9 +1,10 @@
 sir 0
 source 0 "src/lib.sisu"
-source 1 "src/search.sisu"
-source 2 "src/text.sisu"
-source 3 "src/value.sisu"
-source 4 "src/types.sisu"
+source 1 "src/floats.sisu"
+source 2 "src/search.sisu"
+source 3 "src/text.sisu"
+source 4 "src/value.sisu"
+source 5 "src/types.sisu"
 
 struct u8 {  }
 
@@ -41,138 +42,138 @@ intrinsic min pure inner 0 1
 intrinsic u8.to_int pure
 intrinsic u8.wrapping_from pure
 
-fn export_bytes_eq(3) source 0 @28:5-28:20 {
+fn export_bytes_eq(3) source 0 @29:5-29:20 {
     let _0: bool
-    let _1: ptr[u8] "a" @28:21-28:31
-    let _2: ptr[u8] "b" @28:33-28:43
-    let _3: int "n" @28:45-28:51
+    let _1: ptr[u8] "a" @29:21-29:31
+    let _2: ptr[u8] "b" @29:33-29:43
+    let _3: int "n" @29:45-29:51
     let _4: bool
     let _5: i32
   bb0:
-    _4 = eq copy _3, const 0 @29:8-29:14
-    switch copy _4 [0: bb1, else: bb2] @29:8-29:14
+    _4 = eq copy _3, const 0 @30:8-30:14
+    switch copy _4 [0: bb1, else: bb2] @30:8-30:14
   bb1:
-    _5 = call intrinsic extern.c.memcmp(copy _1, copy _2, copy _3) @33:19-33:34
-    _0 = eq copy _5, const 0 @33:12-33:39
-    return @33:5-33:39
+    _5 = call intrinsic extern.c.memcmp(copy _1, copy _2, copy _3) @34:19-34:34
+    _0 = eq copy _5, const 0 @34:12-34:39
+    return @34:5-34:39
   bb2:
-    _0 = const true @30:16-30:20
-    return @30:9-30:20
+    _0 = const true @31:16-31:20
+    return @31:9-31:20
 }
 
-fn export_value_eq(5) source 0 @41:5-41:20 {
+fn export_value_eq(5) source 0 @42:5-42:20 {
     let _0: bool
-    let _1: ptr[int] "types" @41:21-41:36
-    let _2: ptr_mut[u8] "a" @41:38-41:51
-    let _3: int "ta" @41:53-41:60
-    let _4: ptr_mut[u8] "b" @41:62-41:75
-    let _5: int "tb" @41:77-41:84
+    let _1: ptr[int] "types" @42:21-42:36
+    let _2: ptr_mut[u8] "a" @42:38-42:51
+    let _3: int "ta" @42:53-42:60
+    let _4: ptr_mut[u8] "b" @42:62-42:75
+    let _5: int "tb" @42:77-42:84
     let _6: rt.types.Types
   bb0:
-    _6 = struct rt.types.Types(copy _1) @42:24-42:42
-    _0 = call fn rt.value.equal(copy _6, copy _2, copy _3, copy _4, copy _5) @42:12-42:57
-    return @42:5-42:57
+    _6 = struct rt.types.Types(copy _1) @43:24-43:42
+    _0 = call fn rt.value.equal(copy _6, copy _2, copy _3, copy _4, copy _5) @43:12-43:57
+    return @43:5-43:57
 }
 
-fn export_value_cmp(5) source 0 @50:5-50:21 {
+fn export_value_cmp(5) source 0 @51:5-51:21 {
     let _0: int
-    let _1: ptr[int] "types" @50:22-50:37
-    let _2: ptr_mut[u8] "a" @50:39-50:52
-    let _3: int "ta" @50:54-50:61
-    let _4: ptr_mut[u8] "b" @50:63-50:76
-    let _5: int "tb" @50:78-50:85
+    let _1: ptr[int] "types" @51:22-51:37
+    let _2: ptr_mut[u8] "a" @51:39-51:52
+    let _3: int "ta" @51:54-51:61
+    let _4: ptr_mut[u8] "b" @51:63-51:76
+    let _5: int "tb" @51:78-51:85
     let _6: rt.types.Types
   bb0:
-    _6 = struct rt.types.Types(copy _1) @51:24-51:42
-    _0 = call fn rt.value.order(copy _6, copy _2, copy _3, copy _4, copy _5) @51:12-51:57
-    return @51:5-51:57
+    _6 = struct rt.types.Types(copy _1) @52:24-52:42
+    _0 = call fn rt.value.order(copy _6, copy _2, copy _3, copy _4, copy _5) @52:12-52:57
+    return @52:5-52:57
 }
 
-fn export_value_hash(4) source 0 @59:5-59:22 {
+fn export_value_hash(4) source 0 @60:5-60:22 {
     let _0: int
-    let _1: ptr[int] "types" @59:23-59:38
-    let _2: int "state" @59:40-59:50
-    let _3: ptr_mut[u8] "p" @59:52-59:65
-    let _4: int "t" @59:67-59:73
+    let _1: ptr[int] "types" @60:23-60:38
+    let _2: int "state" @60:40-60:50
+    let _3: ptr_mut[u8] "p" @60:52-60:65
+    let _4: int "t" @60:67-60:73
     let _5: rt.types.Types
   bb0:
-    _5 = struct rt.types.Types(copy _1) @60:23-60:41
-    _0 = call fn rt.value.hash(copy _5, copy _2, copy _3, copy _4) @60:12-60:55
-    return @60:5-60:55
+    _5 = struct rt.types.Types(copy _1) @61:23-61:41
+    _0 = call fn rt.value.hash(copy _5, copy _2, copy _3, copy _4) @61:12-61:55
+    return @61:5-61:55
 }
 
-fn export_value_copy(4) source 0 @68:5-68:22 {
+fn export_value_copy(4) source 0 @69:5-69:22 {
     let _0: ()
-    let _1: ptr[int] "types" @68:23-68:38
-    let _2: ptr_mut[u8] "dst" @68:40-68:55
-    let _3: ptr_mut[u8] "src" @68:57-68:72
-    let _4: int "t" @68:74-68:80
+    let _1: ptr[int] "types" @69:23-69:38
+    let _2: ptr_mut[u8] "dst" @69:40-69:55
+    let _3: ptr_mut[u8] "src" @69:57-69:72
+    let _4: int "t" @69:74-69:80
     let _5: ()
     let _6: rt.types.Types
   bb0:
-    _6 = struct rt.types.Types(copy _1) @69:16-69:34
-    _5 = call fn rt.value.copy(copy _6, copy _2, copy _3, copy _4) @69:5-69:48
+    _6 = struct rt.types.Types(copy _1) @70:16-70:34
+    _5 = call fn rt.value.copy(copy _6, copy _2, copy _3, copy _4) @70:5-70:48
     _0 = const ()
     return
 }
 
-fn export_value_drop(4) source 0 @77:5-77:22 {
+fn export_value_drop(4) source 0 @78:5-78:22 {
     let _0: int
-    let _1: ptr[int] "types" @77:23-77:38
-    let _2: ptr_mut[u8] "p" @77:40-77:53
-    let _3: int "t" @77:55-77:61
-    let _4: int "mode" @77:63-77:72
+    let _1: ptr[int] "types" @78:23-78:38
+    let _2: ptr_mut[u8] "p" @78:40-78:53
+    let _3: int "t" @78:55-78:61
+    let _4: int "mode" @78:63-78:72
     let _5: rt.types.Types
   bb0:
-    _5 = struct rt.types.Types(copy _1) @78:23-78:41
-    _0 = call fn rt.value.drop(copy _5, copy _2, copy _3, copy _4) @78:12-78:54
-    return @78:5-78:54
+    _5 = struct rt.types.Types(copy _1) @79:23-79:41
+    _0 = call fn rt.value.drop(copy _5, copy _2, copy _3, copy _4) @79:12-79:54
+    return @79:5-79:54
 }
 
-fn export_value_drop_rest(4) source 0 @86:5-86:27 {
+fn export_value_drop_rest(4) source 0 @87:5-87:27 {
     let _0: int
-    let _1: ptr[int] "types" @86:28-86:43
-    let _2: ptr_mut[u8] "p" @86:45-86:58
-    let _3: int "t" @86:60-86:66
-    let _4: int "mode" @86:68-86:77
+    let _1: ptr[int] "types" @87:28-87:43
+    let _2: ptr_mut[u8] "p" @87:45-87:58
+    let _3: int "t" @87:60-87:66
+    let _4: int "mode" @87:68-87:77
     let _5: rt.types.Types
   bb0:
-    _5 = struct rt.types.Types(copy _1) @87:28-87:46
-    _0 = call fn rt.value.drop_rest(copy _5, copy _2, copy _3, copy _4) @87:12-87:59
-    return @87:5-87:59
+    _5 = struct rt.types.Types(copy _1) @88:28-88:46
+    _0 = call fn rt.value.drop_rest(copy _5, copy _2, copy _3, copy _4) @88:12-88:59
+    return @88:5-88:59
 }
 
-fn export_value_retain(3) source 0 @95:5-95:24 {
+fn export_value_retain(3) source 0 @96:5-96:24 {
     let _0: ()
-    let _1: ptr[int] "types" @95:25-95:40
-    let _2: ptr_mut[u8] "p" @95:42-95:55
-    let _3: int "t" @95:57-95:63
+    let _1: ptr[int] "types" @96:25-96:40
+    let _2: ptr_mut[u8] "p" @96:42-96:55
+    let _3: int "t" @96:57-96:63
     let _4: ()
     let _5: rt.types.Types
   bb0:
-    _5 = struct rt.types.Types(copy _1) @96:18-96:36
-    _4 = call fn rt.value.retain(copy _5, copy _2, copy _3) @96:5-96:43
+    _5 = struct rt.types.Types(copy _1) @97:18-97:36
+    _4 = call fn rt.value.retain(copy _5, copy _2, copy _3) @97:5-97:43
     _0 = const ()
     return
 }
 
-fn export_text_push(3) source 0 @103:5-103:21 {
+fn export_text_push(3) source 0 @104:5-104:21 {
     let _0: ()
-    let _1: ptr_mut[u8] "t" @103:22-103:35
-    let _2: ptr_mut[u8] "b" @103:37-103:50
-    let _3: int "n" @103:52-103:58
+    let _1: ptr_mut[u8] "t" @104:22-104:35
+    let _2: ptr_mut[u8] "b" @104:37-104:50
+    let _3: int "n" @104:52-104:58
     let _4: bool
-    let _5: ptr_mut[int] "words" @110:13-110:18
-    let _6: int "len" @111:13-111:16
+    let _5: ptr_mut[int] "words" @111:13-111:18
+    let _6: int "len" @112:13-112:16
     let _7: ptr_mut[int]
-    let _8: ptr_mut[u8] "source" @112:13-112:19
+    let _8: ptr_mut[u8] "source" @113:13-113:19
     let _9: bool
     let _10: int
     let _11: int
     let _12: ptr_mut[int]
     let _13: ptr_mut[u8]
     let _14: int
-    let _15: ptr_mut[u8] "bytes" @115:13-115:18
+    let _15: ptr_mut[u8] "bytes" @116:13-116:18
     let _16: ptr[u8]
     let _17: ptr_mut[ptr[u8]]
     let _18: ptr_mut[u8]
@@ -182,57 +183,57 @@ fn export_text_push(3) source 0 @103:5-103:21 {
     let _22: ptr_mut[int]
     let _23: int
   bb0:
-    _4 = le copy _3, const 0 @104:8-104:14
-    switch copy _4 [0: bb1, else: bb2] @104:8-104:14
+    _4 = le copy _3, const 0 @105:8-105:14
+    switch copy _4 [0: bb1, else: bb2] @105:8-105:14
   bb1:
-    _5 = call intrinsic mem.ptr.cast[u8, int](copy _1) @110:21-110:34
-    _7 = call intrinsic mem.ptr.offset(copy _5, const 1) @111:19-111:34
-    _6 = call intrinsic mem.ptr.read(copy _7) @111:19-111:41
-    _8 = copy _2 @112:22-112:23
-    _10 = add copy _6, copy _3 @113:12-113:19
-    _12 = call intrinsic mem.ptr.offset(copy _5, const 2) @113:22-113:37
-    _11 = call intrinsic mem.ptr.read(copy _12) @113:22-113:44
-    _9 = gt copy _10, copy _11 @113:12-113:44
-    switch copy _9 [0: bb3, else: bb4] @113:12-113:44
+    _5 = call intrinsic mem.ptr.cast[u8, int](copy _1) @111:21-111:34
+    _7 = call intrinsic mem.ptr.offset(copy _5, const 1) @112:19-112:34
+    _6 = call intrinsic mem.ptr.read(copy _7) @112:19-112:41
+    _8 = copy _2 @113:22-113:23
+    _10 = add copy _6, copy _3 @114:12-114:19
+    _12 = call intrinsic mem.ptr.offset(copy _5, const 2) @114:22-114:37
+    _11 = call intrinsic mem.ptr.read(copy _12) @114:22-114:44
+    _9 = gt copy _10, copy _11 @114:12-114:44
+    switch copy _9 [0: bb3, else: bb4] @114:12-114:44
   bb2:
-    _0 = const () @105:9-105:15
-    return @105:9-105:15
+    _0 = const () @106:9-106:15
+    return @106:9-106:15
   bb3:
-    _17 = call intrinsic mem.ptr.cast[int, ptr[u8]](copy _5) @115:21-115:42
-    _16 = call intrinsic mem.ptr.read(copy _17) @115:21-115:49
-    _15 = call intrinsic mem.ptr.cast_mut(copy _16) @115:21-115:60
-    _19 = call intrinsic mem.ptr.offset(copy _15, copy _6) @116:21-116:38
-    _20 = call intrinsic mem.ptr.as_const(copy _8) @116:40-116:57
-    _18 = call intrinsic extern.c.memmove(copy _19, copy _20, copy _3) @116:13-116:61
-    _22 = call intrinsic mem.ptr.offset(copy _5, const 1) @117:9-117:24
-    _23 = add copy _6, copy _3 @117:31-117:38
-    _21 = call intrinsic mem.ptr.write(copy _22, copy _23) @117:9-117:39
+    _17 = call intrinsic mem.ptr.cast[int, ptr[u8]](copy _5) @116:21-116:42
+    _16 = call intrinsic mem.ptr.read(copy _17) @116:21-116:49
+    _15 = call intrinsic mem.ptr.cast_mut(copy _16) @116:21-116:60
+    _19 = call intrinsic mem.ptr.offset(copy _15, copy _6) @117:21-117:38
+    _20 = call intrinsic mem.ptr.as_const(copy _8) @117:40-117:57
+    _18 = call intrinsic extern.c.memmove(copy _19, copy _20, copy _3) @117:13-117:61
+    _22 = call intrinsic mem.ptr.offset(copy _5, const 1) @118:9-118:24
+    _23 = add copy _6, copy _3 @118:31-118:38
+    _21 = call intrinsic mem.ptr.write(copy _22, copy _23) @118:9-118:39
     _0 = const ()
     return
   bb4:
-    _14 = add copy _6, copy _3 @114:35-114:42
-    _13 = call fn rt.text.grow(copy _1, copy _14, copy _2) @114:22-114:46
-    _8 = copy _13 @114:13-114:46
+    _14 = add copy _6, copy _3 @115:35-115:42
+    _13 = call fn rt.text.grow(copy _1, copy _14, copy _2) @115:22-115:46
+    _8 = copy _13 @115:13-115:46
     goto bb3
 }
 
-fn export_text_push_int(2) source 0 @127:5-127:25 {
+fn export_text_push_int(2) source 0 @128:5-128:25 {
     let _0: ()
-    let _1: ptr_mut[u8] "t" @127:26-127:39
-    let _2: int "n" @127:41-127:47
-    let _3: int "m" @128:9-128:10
+    let _1: ptr_mut[u8] "t" @128:26-128:39
+    let _2: int "n" @128:41-128:47
+    let _3: int "m" @129:9-129:10
     let _4: bool
-    let _5: int "digits" @129:9-129:15
-    let _6: int "x" @130:9-130:10
+    let _5: int "digits" @130:9-130:15
+    let _6: int "x" @131:9-131:10
     let _7: bool
     let _8: int
     let _9: int
     let _10: int
-    let _11: int "total" @134:9-134:14
+    let _11: int "total" @135:9-135:14
     let _12: int
     let _13: bool
-    let _14: ptr_mut[int] "words" @139:13-139:18
-    let _15: int "len" @140:13-140:16
+    let _14: ptr_mut[int] "words" @140:13-140:18
+    let _15: int "len" @141:13-141:16
     let _16: ptr_mut[int]
     let _17: bool
     let _18: int
@@ -240,15 +241,15 @@ fn export_text_push_int(2) source 0 @127:5-127:25 {
     let _20: ptr_mut[int]
     let _21: ptr_mut[u8]
     let _22: int
-    let _23: ptr_mut[u8] "bytes" @143:13-143:18
+    let _23: ptr_mut[u8] "bytes" @144:13-144:18
     let _24: ptr_mut[u8]
     let _25: ptr[u8]
     let _26: ptr_mut[ptr[u8]]
     let _27: bool
     let _28: ()
     let _29: u8
-    let _30: int "pos" @146:13-146:16
-    let _31: int "q" @149:17-149:18
+    let _30: int "pos" @147:13-147:16
+    let _31: int "q" @150:17-150:18
     let _32: int
     let _33: ()
     let _34: ptr_mut[u8]
@@ -262,140 +263,2792 @@ fn export_text_push_int(2) source 0 @127:5-127:25 {
     let _42: ptr_mut[int]
     let _43: int
   bb0:
-    _4 = lt copy _2, const 0 @128:16-128:21
-    switch copy _4 [0: bb2, else: bb1] @128:13-128:33
+    _4 = lt copy _2, const 0 @129:16-129:21
+    switch copy _4 [0: bb2, else: bb1] @129:13-129:33
   bb1:
-    _3 = copy _2 @128:23-128:24
+    _3 = copy _2 @129:23-129:24
     goto bb3
   bb2:
-    _3 = neg copy _2 @128:31-128:33
+    _3 = neg copy _2 @129:31-129:33
     goto bb3
   bb3:
-    _5 = const 1 @129:18-129:19
-    _6 = copy _3 @130:13-130:14
+    _5 = const 1 @130:18-130:19
+    _6 = copy _3 @131:13-131:14
     goto bb4
   bb4:
-    _7 = le copy _6, const -10 @131:11-131:19
-    switch copy _7 [0: bb5, else: bb6] @131:11-131:19
+    _7 = le copy _6, const -10 @132:11-132:19
+    switch copy _7 [0: bb5, else: bb6] @132:11-132:19
   bb5:
-    _13 = lt copy _2, const 0 @134:30-134:35
-    switch copy _13 [0: bb8, else: bb7] @134:26-134:47
+    _13 = lt copy _2, const 0 @135:30-135:35
+    switch copy _13 [0: bb8, else: bb7] @135:26-135:47
   bb6:
-    _9 = add copy _6, const 9 @132:13-132:20
-    _8 = floordiv copy _9, const 10 @132:13-132:26
-    _6 = copy _8 @132:9-132:26
-    _10 = add copy _5, const 1 @133:9-133:20
-    _5 = move _10 @133:9-133:20
+    _9 = add copy _6, const 9 @133:13-133:20
+    _8 = floordiv copy _9, const 10 @133:13-133:26
+    _6 = copy _8 @133:9-133:26
+    _10 = add copy _5, const 1 @134:9-134:20
+    _5 = move _10 @134:9-134:20
     goto bb4
   bb7:
-    _12 = const 1 @134:37-134:38
+    _12 = const 1 @135:37-135:38
     goto bb9
   bb8:
-    _12 = const 0 @134:45-134:46
+    _12 = const 0 @135:45-135:46
     goto bb9
   bb9:
-    _11 = add copy _5, copy _12 @134:17-134:47
-    _14 = call intrinsic mem.ptr.cast[u8, int](copy _1) @139:21-139:34
-    _16 = call intrinsic mem.ptr.offset(copy _14, const 1) @140:19-140:34
-    _15 = call intrinsic mem.ptr.read(copy _16) @140:19-140:41
-    _18 = add copy _15, copy _11 @141:12-141:23
-    _20 = call intrinsic mem.ptr.offset(copy _14, const 2) @141:26-141:41
-    _19 = call intrinsic mem.ptr.read(copy _20) @141:26-141:48
-    _17 = gt copy _18, copy _19 @141:12-141:48
-    switch copy _17 [0: bb10, else: bb11] @141:12-141:48
+    _11 = add copy _5, copy _12 @135:17-135:47
+    _14 = call intrinsic mem.ptr.cast[u8, int](copy _1) @140:21-140:34
+    _16 = call intrinsic mem.ptr.offset(copy _14, const 1) @141:19-141:34
+    _15 = call intrinsic mem.ptr.read(copy _16) @141:19-141:41
+    _18 = add copy _15, copy _11 @142:12-142:23
+    _20 = call intrinsic mem.ptr.offset(copy _14, const 2) @142:26-142:41
+    _19 = call intrinsic mem.ptr.read(copy _20) @142:26-142:48
+    _17 = gt copy _18, copy _19 @142:12-142:48
+    switch copy _17 [0: bb10, else: bb11] @142:12-142:48
   bb10:
-    _26 = call intrinsic mem.ptr.cast[int, ptr[u8]](copy _14) @143:21-143:42
-    _25 = call intrinsic mem.ptr.read(copy _26) @143:21-143:49
-    _24 = call intrinsic mem.ptr.cast_mut(copy _25) @143:21-143:60
-    _23 = call intrinsic mem.ptr.offset(copy _24, copy _15) @143:21-143:72
-    _27 = lt copy _2, const 0 @144:12-144:17
-    switch copy _27 [0: bb12, else: bb13] @144:12-144:17
+    _26 = call intrinsic mem.ptr.cast[int, ptr[u8]](copy _14) @144:21-144:42
+    _25 = call intrinsic mem.ptr.read(copy _26) @144:21-144:49
+    _24 = call intrinsic mem.ptr.cast_mut(copy _25) @144:21-144:60
+    _23 = call intrinsic mem.ptr.offset(copy _24, copy _15) @144:21-144:72
+    _27 = lt copy _2, const 0 @145:12-145:17
+    switch copy _27 [0: bb12, else: bb13] @145:12-145:17
   bb11:
-    _22 = add copy _15, copy _11 @142:30-142:41
-    _21 = call fn rt.text.grow(copy _1, copy _22, copy _1) @142:17-142:45
+    _22 = add copy _15, copy _11 @143:30-143:41
+    _21 = call fn rt.text.grow(copy _1, copy _22, copy _1) @143:17-143:45
     goto bb10
   bb12:
-    _30 = sub copy _11, const 1 @146:19-146:28
-    _6 = copy _3 @147:9-147:14
-    switch const true [0: bb15, else: bb16] @148:15-148:19
+    _30 = sub copy _11, const 1 @147:19-147:28
+    _6 = copy _3 @148:9-148:14
+    switch const true [0: bb15, else: bb16] @149:15-149:19
   bb13:
-    _29 = call intrinsic u8.wrapping_from(const 45) @145:25-145:45
-    _28 = call intrinsic mem.ptr.write(copy _23, copy _29) @145:13-145:46
+    _29 = call intrinsic u8.wrapping_from(const 45) @146:25-146:45
+    _28 = call intrinsic mem.ptr.write(copy _23, copy _29) @146:13-146:46
     goto bb12
   bb14:
-    switch const true [0: bb15, else: bb16] @148:15-148:19
+    switch const true [0: bb15, else: bb16] @149:15-149:19
   bb15:
-    _42 = call intrinsic mem.ptr.offset(copy _14, const 1) @155:9-155:24
-    _43 = add copy _15, copy _11 @155:31-155:42
-    _41 = call intrinsic mem.ptr.write(copy _42, copy _43) @155:9-155:43
+    _42 = call intrinsic mem.ptr.offset(copy _14, const 1) @156:9-156:24
+    _43 = add copy _15, copy _11 @156:31-156:42
+    _41 = call intrinsic mem.ptr.write(copy _42, copy _43) @156:9-156:43
     _0 = const ()
     return
   bb16:
-    _32 = add copy _6, const 9 @149:21-149:28
-    _31 = floordiv copy _32, const 10 @149:21-149:34
-    _34 = call intrinsic mem.ptr.offset(copy _23, copy _30) @150:13-150:30
-    _38 = mul copy _31, const 10 @150:59-150:65
-    _37 = add const 48, copy _38 @150:54-150:65
-    _36 = sub copy _37, copy _6 @150:54-150:69
-    _35 = call intrinsic u8.wrapping_from(copy _36) @150:37-150:70
-    _33 = call intrinsic mem.ptr.write(copy _34, copy _35) @150:13-150:71
-    _39 = sub copy _30, const 1 @151:13-151:21
-    _30 = move _39 @151:13-151:21
-    _6 = copy _31 @152:13-152:18
-    _40 = eq copy _6, const 0 @153:16-153:22
-    switch copy _40 [0: bb14, else: bb15] @153:16-153:22
+    _32 = add copy _6, const 9 @150:21-150:28
+    _31 = floordiv copy _32, const 10 @150:21-150:34
+    _34 = call intrinsic mem.ptr.offset(copy _23, copy _30) @151:13-151:30
+    _38 = mul copy _31, const 10 @151:59-151:65
+    _37 = add const 48, copy _38 @151:54-151:65
+    _36 = sub copy _37, copy _6 @151:54-151:69
+    _35 = call intrinsic u8.wrapping_from(copy _36) @151:37-151:70
+    _33 = call intrinsic mem.ptr.write(copy _34, copy _35) @151:13-151:71
+    _39 = sub copy _30, const 1 @152:13-152:21
+    _30 = move _39 @152:13-152:21
+    _6 = copy _31 @153:13-153:18
+    _40 = eq copy _6, const 0 @154:16-154:22
+    switch copy _40 [0: bb14, else: bb15] @154:16-154:22
 }
 
-fn export_text_from(3) source 0 @163:5-163:21 {
+fn export_text_from(3) source 0 @164:5-164:21 {
     let _0: ()
-    let _1: ptr_mut[u8] "dst" @163:22-163:37
-    let _2: ptr_mut[u8] "b" @163:39-163:52
-    let _3: int "n" @163:54-163:60
+    let _1: ptr_mut[u8] "dst" @164:22-164:37
+    let _2: ptr_mut[u8] "b" @164:39-164:52
+    let _3: int "n" @164:54-164:60
     let _4: ()
   bb0:
-    _4 = call fn rt.text.from_bytes(copy _1, copy _2, copy _3) @164:5-164:31
+    _4 = call fn rt.text.from_bytes(copy _1, copy _2, copy _3) @165:5-165:31
     _0 = const ()
     return
 }
 
-fn export_int_digits(5) source 0 @172:5-172:22 {
+fn export_int_digits(5) source 0 @173:5-173:22 {
     let _0: ()
-    let _1: ptr_mut[u8] "dst" @172:23-172:38
-    let _2: int "low" @172:40-172:48
-    let _3: int "high" @172:50-172:59
-    let _4: int "base" @172:61-172:70
-    let _5: bool "upper" @172:72-172:83
+    let _1: ptr_mut[u8] "dst" @173:23-173:38
+    let _2: int "low" @173:40-173:48
+    let _3: int "high" @173:50-173:59
+    let _4: int "base" @173:61-173:70
+    let _5: bool "upper" @173:72-173:83
     let _6: ()
   bb0:
-    _6 = call fn rt.text.digits(copy _1, copy _2, copy _3, copy _4, copy _5) @173:5-173:45
+    _6 = call fn rt.text.digits(copy _1, copy _2, copy _3, copy _4, copy _5) @174:5-174:45
     _0 = const ()
     return
 }
 
-fn export_find(4) source 0 @181:5-181:16 {
+fn export_float_digits(4) source 0 @183:5-183:24 {
+    let _0: ()
+    let _1: ptr_mut[u8] "dst" @183:25-183:40
+    let _2: int "bits" @183:42-183:51
+    let _3: int "mode" @183:53-183:62
+    let _4: int "precision" @183:64-183:78
+    let _5: ()
+  bb0:
+    _5 = call fn rt.floats.write(copy _1, copy _2, copy _3, copy _4) @184:5-184:45
+    _0 = const ()
+    return
+}
+
+fn export_find(4) source 0 @192:5-192:16 {
     let _0: int
-    let _1: ptr[u8] "text" @181:17-181:30
-    let _2: int "n" @181:32-181:38
-    let _3: ptr[u8] "part" @181:40-181:53
-    let _4: int "m" @181:55-181:61
+    let _1: ptr[u8] "text" @192:17-192:30
+    let _2: int "n" @192:32-192:38
+    let _3: ptr[u8] "part" @192:40-192:53
+    let _4: int "m" @192:55-192:61
   bb0:
-    _0 = call fn rt.search.find(copy _1, copy _2, copy _3, copy _4) @182:12-182:41
-    return @182:5-182:41
+    _0 = call fn rt.search.find(copy _1, copy _2, copy _3, copy _4) @193:12-193:41
+    return @193:5-193:41
 }
 
-fn export_has_edge(5) source 0 @189:5-189:20 {
+fn export_has_edge(5) source 0 @200:5-200:20 {
     let _0: bool
-    let _1: ptr[u8] "text" @189:21-189:34
-    let _2: int "n" @189:36-189:42
-    let _3: ptr[u8] "part" @189:44-189:57
-    let _4: int "m" @189:59-189:65
-    let _5: bool "at_end" @189:67-189:79
+    let _1: ptr[u8] "text" @200:21-200:34
+    let _2: int "n" @200:36-200:42
+    let _3: ptr[u8] "part" @200:44-200:57
+    let _4: int "m" @200:59-200:65
+    let _5: bool "at_end" @200:67-200:79
   bb0:
-    _0 = call fn rt.search.has_edge(copy _1, copy _2, copy _3, copy _4, copy _5) @190:12-190:53
-    return @190:5-190:53
+    _0 = call fn rt.search.has_edge(copy _1, copy _2, copy _3, copy _4, copy _5) @201:12-201:53
+    return @201:5-201:53
 }
 
-fn rt.search.maximal_suffix(3) source 1 @16:5-16:19 {
+fn rt.floats.set(2) source 1 @48:5-48:8 {
+    let _0: ()
+    let _1: ptr_mut[int] "a" @48:9-48:23
+    let _2: int "x" @48:25-48:31
+    let _3: ()
+    let _4: ptr_mut[int]
+    let _5: int
+    let _6: int
+    let _7: ()
+    let _8: ptr_mut[int]
+    let _9: int
+    let _10: bool
+    let _11: int
+    let _12: ()
+    let _13: bool
+    let _14: ()
+    let _15: ()
+  bb0:
+    _4 = call intrinsic mem.ptr.offset(copy _1, const 1) @52:9-52:20
+    _6 = call fn rt.floats.MASK() @52:31-52:35
+    _5 = bitand copy _2, copy _6 @52:27-52:35
+    _3 = call intrinsic mem.ptr.write(copy _4, copy _5) @52:9-52:36
+    _8 = call intrinsic mem.ptr.offset(copy _1, const 2) @53:9-53:20
+    _9 = shr copy _2, const 32 @53:27-53:34
+    _7 = call intrinsic mem.ptr.write(copy _8, copy _9) @53:9-53:35
+    _11 = shr copy _2, const 32 @54:12-54:21
+    _10 = ne copy _11, const 0 @54:12-54:26
+    switch copy _10 [0: bb2, else: bb3] @54:12-54:26
+  bb1:
+    _0 = const ()
+    return
+  bb2:
+    _13 = ne copy _2, const 0 @56:14-56:20
+    switch copy _13 [0: bb4, else: bb5] @56:14-56:20
+  bb3:
+    _12 = call intrinsic mem.ptr.write(copy _1, const 2) @55:13-55:23
+    goto bb1
+  bb4:
+    _15 = call intrinsic mem.ptr.write(copy _1, const 0) @59:13-59:23
+    goto bb1
+  bb5:
+    _14 = call intrinsic mem.ptr.write(copy _1, const 1) @57:13-57:23
+    goto bb1
+}
+
+fn rt.floats.mul_small(2) source 1 @65:5-65:14 {
+    let _0: ()
+    let _1: ptr_mut[int] "a" @65:15-65:29
+    let _2: int "m" @65:31-65:37
+    let _3: int "n" @69:13-69:14
+    let _4: int "carry" @70:13-70:18
+    let _5: int "i" @71:13-71:14
+    let _6: bool
+    let _7: int "x" @73:17-73:18
+    let _8: int
+    let _9: int
+    let _10: ptr_mut[int]
+    let _11: ()
+    let _12: ptr_mut[int]
+    let _13: int
+    let _14: int
+    let _15: int
+    let _16: int
+    let _17: bool
+    let _18: ()
+    let _19: ptr_mut[int]
+    let _20: int
+    let _21: ()
+    let _22: int
+  bb0:
+    _3 = call intrinsic mem.ptr.read(copy _1) @69:17-69:25
+    _4 = const 0 @70:21-70:22
+    _5 = const 1 @71:17-71:18
+    goto bb1
+  bb1:
+    _6 = le copy _5, copy _3 @72:15-72:21
+    switch copy _6 [0: bb2, else: bb3] @72:15-72:21
+  bb2:
+    _17 = ne copy _4, const 0 @77:12-77:22
+    switch copy _17 [0: bb4, else: bb5] @77:12-77:22
+  bb3:
+    _10 = call intrinsic mem.ptr.offset(copy _1, copy _5) @73:21-73:32
+    _9 = call intrinsic mem.ptr.read(copy _10) @73:21-73:39
+    _8 = mul copy _9, copy _2 @73:21-73:43
+    _7 = add copy _8, copy _4 @73:21-73:51
+    _12 = call intrinsic mem.ptr.offset(copy _1, copy _5) @74:13-74:24
+    _14 = call fn rt.floats.MASK() @74:35-74:39
+    _13 = bitand copy _7, copy _14 @74:31-74:39
+    _11 = call intrinsic mem.ptr.write(copy _12, copy _13) @74:13-74:40
+    _15 = shr copy _7, const 32 @75:21-75:28
+    _4 = copy _15 @75:13-75:28
+    _16 = add copy _5, const 1 @76:13-76:19
+    _5 = move _16 @76:13-76:19
+    goto bb1
+  bb4:
+    _0 = const ()
+    return
+  bb5:
+    _20 = add copy _3, const 1 @78:22-78:27
+    _19 = call intrinsic mem.ptr.offset(copy _1, copy _20) @78:13-78:28
+    _18 = call intrinsic mem.ptr.write(copy _19, copy _4) @78:13-78:41
+    _22 = add copy _3, const 1 @79:21-79:26
+    _21 = call intrinsic mem.ptr.write(copy _1, copy _22) @79:13-79:27
+    goto bb4
+}
+
+fn rt.floats.mul_pow10(2) source 1 @85:5-85:14 {
+    let _0: ()
+    let _1: ptr_mut[int] "a" @85:15-85:29
+    let _2: int "n" @85:31-85:37
+    let _3: int "left" @86:9-86:13
+    let _4: bool
+    let _5: ()
+    let _6: int
+    let _7: int "m" @90:9-90:10
+    let _8: bool
+    let _9: int
+    let _10: int
+    let _11: bool
+    let _12: ()
+  bb0:
+    _3 = copy _2 @86:16-86:17
+    goto bb1
+  bb1:
+    _4 = ge copy _3, const 9 @87:11-87:20
+    switch copy _4 [0: bb2, else: bb3] @87:11-87:20
+  bb2:
+    _7 = const 1 @90:13-90:14
+    goto bb4
+  bb3:
+    _5 = call fn rt.floats.mul_small(copy _1, const 1000000000) @88:9-88:33
+    _6 = sub copy _3, const 9 @89:9-89:18
+    _3 = move _6 @89:9-89:18
+    goto bb1
+  bb4:
+    _8 = gt copy _3, const 0 @91:11-91:19
+    switch copy _8 [0: bb5, else: bb6] @91:11-91:19
+  bb5:
+    _11 = gt copy _7, const 1 @94:8-94:13
+    switch copy _11 [0: bb7, else: bb8] @94:8-94:13
+  bb6:
+    _9 = mul copy _7, const 10 @92:9-92:16
+    _7 = move _9 @92:9-92:16
+    _10 = sub copy _3, const 1 @93:9-93:18
+    _3 = move _10 @93:9-93:18
+    goto bb4
+  bb7:
+    _0 = const ()
+    return
+  bb8:
+    _12 = call fn rt.floats.mul_small(copy _1, copy _7) @95:9-95:24
+    goto bb7
+}
+
+fn rt.floats.shift(2) source 1 @101:5-101:10 {
+    let _0: ()
+    let _1: ptr_mut[int] "a" @101:11-101:25
+    let _2: int "n" @101:27-101:33
+    let _3: int "len" @107:13-107:16
+    let _4: bool
+    let _5: int "words" @110:13-110:18
+    let _6: int "bits" @111:13-111:17
+    let _7: int "top" @112:13-112:16
+    let _8: bool
+    let _9: int "i" @114:17-114:18
+    let _10: bool
+    let _11: ()
+    let _12: ptr_mut[int]
+    let _13: int
+    let _14: int
+    let _15: ptr_mut[int]
+    let _16: int
+    let _17: int
+    let _18: ()
+    let _19: ptr_mut[int]
+    let _20: int
+    let _21: int
+    let _22: ptr_mut[int]
+    let _23: int
+    let _24: int "i" @121:17-121:18
+    let _25: bool
+    let _26: int "high" @123:21-123:25
+    let _27: int
+    let _28: int
+    let _29: ptr_mut[int]
+    let _30: int
+    let _31: ()
+    let _32: ptr_mut[int]
+    let _33: int
+    let _34: int
+    let _35: int
+    let _36: int
+    let _37: ptr_mut[int]
+    let _38: int
+    let _39: int
+    let _40: int
+    let _41: ()
+    let _42: ptr_mut[int]
+    let _43: int
+    let _44: int
+    let _45: int
+    let _46: int
+    let _47: ptr_mut[int]
+    let _48: int
+    let _49: int "j" @127:13-127:14
+    let _50: bool
+    let _51: ()
+    let _52: ptr_mut[int]
+    let _53: int
+    let _54: bool
+    let _55: int
+    let _56: ptr_mut[int]
+    let _57: int
+    let _58: ()
+  bb0:
+    _3 = call intrinsic mem.ptr.read(copy _1) @107:19-107:27
+    _4 = eq copy _3, const 0 @108:12-108:20
+    switch copy _4 [0: bb1, else: bb2] @108:12-108:20
+  bb1:
+    _5 = floordiv copy _2, const 32 @110:21-110:28
+    _6 = mod copy _2, const 32 @111:20-111:26
+    _7 = add copy _3, copy _5 @112:19-112:30
+    _8 = eq copy _6, const 0 @113:12-113:21
+    switch copy _8 [0: bb4, else: bb5] @113:12-113:21
+  bb2:
+    _0 = const () @109:13-109:19
+    return @109:13-109:19
+  bb3:
+    _49 = const 1 @127:17-127:18
+    goto bb11
+  bb4:
+    _17 = add copy _7, const 1 @119:13-119:21
+    _7 = move _17 @119:13-119:21
+    _19 = call intrinsic mem.ptr.offset(copy _1, copy _7) @120:13-120:26
+    _22 = call intrinsic mem.ptr.offset(copy _1, copy _3) @120:33-120:46
+    _21 = call intrinsic mem.ptr.read(copy _22) @120:33-120:53
+    _23 = sub const 32, copy _6 @120:57-120:68
+    _20 = shr copy _21, copy _23 @120:33-120:68
+    _18 = call intrinsic mem.ptr.write(copy _19, copy _20) @120:13-120:69
+    _24 = copy _3 @121:21-121:24
+    goto bb8
+  bb5:
+    _9 = copy _3 @114:21-114:24
+    goto bb6
+  bb6:
+    _10 = ge copy _9, const 1 @115:19-115:25
+    switch copy _10 [0: bb3, else: bb7] @115:19-115:25
+  bb7:
+    _13 = add copy _9, copy _5 @116:26-116:35
+    _12 = call intrinsic mem.ptr.offset(copy _1, copy _13) @116:17-116:36
+    _15 = call intrinsic mem.ptr.offset(copy _1, copy _9) @116:43-116:54
+    _14 = call intrinsic mem.ptr.read(copy _15) @116:43-116:61
+    _11 = call intrinsic mem.ptr.write(copy _12, copy _14) @116:17-116:62
+    _16 = sub copy _9, const 1 @117:17-117:23
+    _9 = move _16 @117:17-117:23
+    goto bb6
+  bb8:
+    _25 = ge copy _24, const 2 @122:19-122:25
+    switch copy _25 [0: bb9, else: bb10] @122:19-122:25
+  bb9:
+    _43 = add const 1, copy _5 @126:22-126:31
+    _42 = call intrinsic mem.ptr.offset(copy _1, copy _43) @126:13-126:32
+    _47 = call intrinsic mem.ptr.offset(copy _1, const 1) @126:40-126:51
+    _46 = call intrinsic mem.ptr.read(copy _47) @126:40-126:58
+    _45 = shl copy _46, copy _6 @126:39-126:67
+    _48 = call fn rt.floats.MASK() @126:70-126:74
+    _44 = bitand copy _45, copy _48 @126:39-126:74
+    _41 = call intrinsic mem.ptr.write(copy _42, copy _44) @126:13-126:75
+    goto bb3
+  bb10:
+    _29 = call intrinsic mem.ptr.offset(copy _1, copy _24) @123:29-123:40
+    _28 = call intrinsic mem.ptr.read(copy _29) @123:29-123:47
+    _27 = shl copy _28, copy _6 @123:28-123:56
+    _30 = call fn rt.floats.MASK() @123:59-123:63
+    _26 = bitand copy _27, copy _30 @123:28-123:63
+    _33 = add copy _24, copy _5 @124:26-124:35
+    _32 = call intrinsic mem.ptr.offset(copy _1, copy _33) @124:17-124:36
+    _38 = sub copy _24, const 1 @124:60-124:65
+    _37 = call intrinsic mem.ptr.offset(copy _1, copy _38) @124:51-124:66
+    _36 = call intrinsic mem.ptr.read(copy _37) @124:51-124:73
+    _39 = sub const 32, copy _6 @124:77-124:88
+    _35 = shr copy _36, copy _39 @124:50-124:89
+    _34 = bitor copy _26, copy _35 @124:43-124:89
+    _31 = call intrinsic mem.ptr.write(copy _32, copy _34) @124:17-124:90
+    _40 = sub copy _24, const 1 @125:17-125:23
+    _24 = move _40 @125:17-125:23
+    goto bb8
+  bb11:
+    _50 = le copy _49, copy _5 @128:15-128:25
+    switch copy _50 [0: bb13, else: bb12] @128:15-128:25
+  bb12:
+    _52 = call intrinsic mem.ptr.offset(copy _1, copy _49) @129:13-129:24
+    _51 = call intrinsic mem.ptr.write(copy _52, const 0) @129:13-129:33
+    _53 = add copy _49, const 1 @130:13-130:19
+    _49 = move _53 @130:13-130:19
+    goto bb11
+  bb13:
+    _54 = gt copy _7, const 0 @131:15-131:22
+    switch copy _54 [0: bb16, else: bb15] @131:15-131:52
+  bb14:
+    _58 = call intrinsic mem.ptr.write(copy _1, copy _7) @133:9-133:21
+    _0 = const ()
+    return
+  bb15:
+    _56 = call intrinsic mem.ptr.offset(copy _1, copy _7) @131:27-131:40
+    _55 = call intrinsic mem.ptr.read(copy _56) @131:27-131:47
+    _54 = eq copy _55, const 0 @131:27-131:52
+    switch copy _54 [0: bb14, else: bb17] @131:15-131:52
+  bb16:
+    switch copy _54 [0: bb14, else: bb17] @131:15-131:52
+  bb17:
+    _57 = sub copy _7, const 1 @132:13-132:21
+    _7 = move _57 @132:13-132:21
+    goto bb13
+}
+
+fn rt.floats.order(2) source 1 @139:5-139:10 {
+    let _0: int
+    let _1: ptr_mut[int] "a" @139:11-139:25
+    let _2: ptr_mut[int] "b" @139:27-139:41
+    let _3: int "n" @143:13-143:14
+    let _4: int "m" @144:13-144:14
+    let _5: bool
+    let _6: bool
+    let _7: int "i" @147:13-147:14
+    let _8: bool
+    let _9: int "x" @149:17-149:18
+    let _10: ptr_mut[int]
+    let _11: int "y" @150:17-150:18
+    let _12: ptr_mut[int]
+    let _13: bool
+    let _14: bool
+    let _15: int
+  bb0:
+    _3 = call intrinsic mem.ptr.read(copy _1) @143:17-143:25
+    _4 = call intrinsic mem.ptr.read(copy _2) @144:17-144:25
+    _5 = ne copy _3, copy _4 @145:12-145:18
+    switch copy _5 [0: bb1, else: bb2] @145:12-145:18
+  bb1:
+    _7 = copy _3 @147:17-147:18
+    goto bb5
+  bb2:
+    _6 = lt copy _3, copy _4 @146:23-146:28
+    switch copy _6 [0: bb4, else: bb3] @146:20-146:40
+  bb3:
+    _0 = const -1 @146:30-146:32
+    return @146:13-146:40
+  bb4:
+    _0 = const 1 @146:39-146:40
+    return @146:13-146:40
+  bb5:
+    _8 = ge copy _7, const 1 @148:15-148:21
+    switch copy _8 [0: bb6, else: bb7] @148:15-148:21
+  bb6:
+    _0 = const 0 @154:12-154:13
+    return @154:5-154:13
+  bb7:
+    _10 = call intrinsic mem.ptr.offset(copy _1, copy _7) @149:21-149:32
+    _9 = call intrinsic mem.ptr.read(copy _10) @149:21-149:39
+    _12 = call intrinsic mem.ptr.offset(copy _2, copy _7) @150:21-150:32
+    _11 = call intrinsic mem.ptr.read(copy _12) @150:21-150:39
+    _13 = ne copy _9, copy _11 @151:16-151:22
+    switch copy _13 [0: bb8, else: bb9] @151:16-151:22
+  bb8:
+    _15 = sub copy _7, const 1 @153:13-153:19
+    _7 = move _15 @153:13-153:19
+    goto bb5
+  bb9:
+    _14 = lt copy _9, copy _11 @152:27-152:32
+    switch copy _14 [0: bb11, else: bb10] @152:24-152:44
+  bb10:
+    _0 = const -1 @152:34-152:36
+    return @152:17-152:44
+  bb11:
+    _0 = const 1 @152:43-152:44
+    return @152:17-152:44
+}
+
+fn rt.floats.subtract(2) source 1 @161:5-161:13 {
+    let _0: ()
+    let _1: ptr_mut[int] "a" @161:14-161:28
+    let _2: ptr_mut[int] "b" @161:30-161:44
+    let _3: int "n" @165:13-165:14
+    let _4: int "m" @166:13-166:14
+    let _5: int "borrow" @167:13-167:19
+    let _6: int "i" @168:13-168:14
+    let _7: bool
+    let _8: int "x" @170:17-170:18
+    let _9: int
+    let _10: ptr_mut[int]
+    let _11: bool
+    let _12: int
+    let _13: ptr_mut[int]
+    let _14: int
+    let _15: bool
+    let _16: int
+    let _17: ()
+    let _18: ptr_mut[int]
+    let _19: int
+    let _20: int "top" @180:13-180:16
+    let _21: bool
+    let _22: int
+    let _23: ptr_mut[int]
+    let _24: int
+    let _25: ()
+  bb0:
+    _3 = call intrinsic mem.ptr.read(copy _1) @165:17-165:25
+    _4 = call intrinsic mem.ptr.read(copy _2) @166:17-166:25
+    _5 = const 0 @167:22-167:23
+    _6 = const 1 @168:17-168:18
+    goto bb1
+  bb1:
+    _7 = le copy _6, copy _3 @169:15-169:21
+    switch copy _7 [0: bb2, else: bb3] @169:15-169:21
+  bb2:
+    _20 = copy _3 @180:19-180:20
+    goto bb9
+  bb3:
+    _10 = call intrinsic mem.ptr.offset(copy _1, copy _6) @170:21-170:32
+    _9 = call intrinsic mem.ptr.read(copy _10) @170:21-170:39
+    _8 = sub copy _9, copy _5 @170:21-170:48
+    _11 = le copy _6, copy _4 @171:16-171:22
+    switch copy _11 [0: bb4, else: bb5] @171:16-171:22
+  bb4:
+    _15 = lt copy _8, const 0 @173:16-173:21
+    switch copy _15 [0: bb7, else: bb8] @173:16-173:21
+  bb5:
+    _13 = call intrinsic mem.ptr.offset(copy _2, copy _6) @172:22-172:33
+    _12 = call intrinsic mem.ptr.read(copy _13) @172:22-172:40
+    _14 = sub copy _8, copy _12 @172:17-172:40
+    _8 = move _14 @172:17-172:40
+    goto bb4
+  bb6:
+    _18 = call intrinsic mem.ptr.offset(copy _1, copy _6) @178:13-178:24
+    _17 = call intrinsic mem.ptr.write(copy _18, copy _8) @178:13-178:33
+    _19 = add copy _6, const 1 @179:13-179:19
+    _6 = move _19 @179:13-179:19
+    goto bb1
+  bb7:
+    _5 = const 0 @177:17-177:27
+    goto bb6
+  bb8:
+    _16 = add copy _8, const 4294967296 @174:17-174:32
+    _8 = move _16 @174:17-174:32
+    _5 = const 1 @175:17-175:27
+    goto bb6
+  bb9:
+    _21 = gt copy _20, const 0 @181:15-181:22
+    switch copy _21 [0: bb12, else: bb11] @181:15-181:52
+  bb10:
+    _25 = call intrinsic mem.ptr.write(copy _1, copy _20) @183:9-183:21
+    _0 = const ()
+    return
+  bb11:
+    _23 = call intrinsic mem.ptr.offset(copy _1, copy _20) @181:27-181:40
+    _22 = call intrinsic mem.ptr.read(copy _23) @181:27-181:47
+    _21 = eq copy _22, const 0 @181:27-181:52
+    switch copy _21 [0: bb10, else: bb13] @181:15-181:52
+  bb12:
+    switch copy _21 [0: bb10, else: bb13] @181:15-181:52
+  bb13:
+    _24 = sub copy _20, const 1 @182:13-182:21
+    _20 = move _24 @182:13-182:21
+    goto bb9
+}
+
+fn rt.floats.add(3) source 1 @190:5-190:8 {
+    let _0: ()
+    let _1: ptr_mut[int] "dst" @190:9-190:25
+    let _2: ptr_mut[int] "a" @190:27-190:41
+    let _3: ptr_mut[int] "b" @190:43-190:57
+    let _4: int "n" @194:13-194:14
+    let _5: int "m" @195:13-195:14
+    let _6: int "most" @196:13-196:17
+    let _7: bool
+    let _8: int "carry" @197:13-197:18
+    let _9: int "i" @198:13-198:14
+    let _10: bool
+    let _11: int "x" @200:17-200:18
+    let _12: bool
+    let _13: int
+    let _14: ptr_mut[int]
+    let _15: int
+    let _16: bool
+    let _17: int
+    let _18: ptr_mut[int]
+    let _19: int
+    let _20: ()
+    let _21: ptr_mut[int]
+    let _22: int
+    let _23: int
+    let _24: int
+    let _25: int
+    let _26: bool
+    let _27: ()
+    let _28: ptr_mut[int]
+    let _29: int
+    let _30: ()
+    let _31: int
+    let _32: ()
+  bb0:
+    _4 = call intrinsic mem.ptr.read(copy _2) @194:17-194:25
+    _5 = call intrinsic mem.ptr.read(copy _3) @195:17-195:25
+    _7 = gt copy _4, copy _5 @196:23-196:28
+    switch copy _7 [0: bb2, else: bb1] @196:20-196:39
+  bb1:
+    _6 = copy _4 @196:30-196:31
+    goto bb3
+  bb2:
+    _6 = copy _5 @196:38-196:39
+    goto bb3
+  bb3:
+    _8 = const 0 @197:21-197:22
+    _9 = const 1 @198:17-198:18
+    goto bb4
+  bb4:
+    _10 = le copy _9, copy _6 @199:15-199:24
+    switch copy _10 [0: bb5, else: bb6] @199:15-199:24
+  bb5:
+    _26 = ne copy _8, const 0 @208:12-208:22
+    switch copy _26 [0: bb12, else: bb13] @208:12-208:22
+  bb6:
+    _11 = copy _8 @200:21-200:26
+    _12 = le copy _9, copy _4 @201:16-201:22
+    switch copy _12 [0: bb7, else: bb8] @201:16-201:22
+  bb7:
+    _16 = le copy _9, copy _5 @203:16-203:22
+    switch copy _16 [0: bb9, else: bb10] @203:16-203:22
+  bb8:
+    _14 = call intrinsic mem.ptr.offset(copy _2, copy _9) @202:22-202:33
+    _13 = call intrinsic mem.ptr.read(copy _14) @202:22-202:40
+    _15 = add copy _11, copy _13 @202:17-202:40
+    _11 = move _15 @202:17-202:40
+    goto bb7
+  bb9:
+    _21 = call intrinsic mem.ptr.offset(copy _1, copy _9) @205:13-205:26
+    _23 = call fn rt.floats.MASK() @205:37-205:41
+    _22 = bitand copy _11, copy _23 @205:33-205:41
+    _20 = call intrinsic mem.ptr.write(copy _21, copy _22) @205:13-205:42
+    _24 = shr copy _11, const 32 @206:21-206:28
+    _8 = copy _24 @206:13-206:28
+    _25 = add copy _9, const 1 @207:13-207:19
+    _9 = move _25 @207:13-207:19
+    goto bb4
+  bb10:
+    _18 = call intrinsic mem.ptr.offset(copy _3, copy _9) @204:22-204:33
+    _17 = call intrinsic mem.ptr.read(copy _18) @204:22-204:40
+    _19 = add copy _11, copy _17 @204:17-204:40
+    _11 = move _19 @204:17-204:40
+    goto bb9
+  bb11:
+    _0 = const ()
+    return
+  bb12:
+    _32 = call intrinsic mem.ptr.write(copy _1, copy _6) @212:13-212:28
+    goto bb11
+  bb13:
+    _29 = add copy _6, const 1 @209:24-209:32
+    _28 = call intrinsic mem.ptr.offset(copy _1, copy _29) @209:13-209:33
+    _27 = call intrinsic mem.ptr.write(copy _28, copy _8) @209:13-209:46
+    _31 = add copy _6, const 1 @210:23-210:31
+    _30 = call intrinsic mem.ptr.write(copy _1, copy _31) @210:13-210:32
+    goto bb11
+}
+
+fn rt.floats.div_small(2) source 1 @218:5-218:14 {
+    let _0: int
+    let _1: ptr_mut[int] "a" @218:15-218:29
+    let _2: int "m" @218:31-218:37
+    let _3: int "n" @222:13-222:14
+    let _4: int "rest" @223:13-223:17
+    let _5: int "i" @224:13-224:14
+    let _6: bool
+    let _7: int "x" @226:17-226:18
+    let _8: int
+    let _9: int
+    let _10: ptr_mut[int]
+    let _11: ()
+    let _12: ptr_mut[int]
+    let _13: int
+    let _14: int
+    let _15: int
+    let _16: int "top" @230:13-230:16
+    let _17: bool
+    let _18: int
+    let _19: ptr_mut[int]
+    let _20: int
+    let _21: ()
+  bb0:
+    _3 = call intrinsic mem.ptr.read(copy _1) @222:17-222:25
+    _4 = const 0 @223:20-223:21
+    _5 = copy _3 @224:17-224:18
+    goto bb1
+  bb1:
+    _6 = ge copy _5, const 1 @225:15-225:21
+    switch copy _6 [0: bb2, else: bb3] @225:15-225:21
+  bb2:
+    _16 = copy _3 @230:19-230:20
+    goto bb4
+  bb3:
+    _8 = shl copy _4, const 32 @226:21-226:33
+    _10 = call intrinsic mem.ptr.offset(copy _1, copy _5) @226:36-226:47
+    _9 = call intrinsic mem.ptr.read(copy _10) @226:36-226:54
+    _7 = bitor copy _8, copy _9 @226:21-226:54
+    _12 = call intrinsic mem.ptr.offset(copy _1, copy _5) @227:13-227:24
+    _13 = floordiv copy _7, copy _2 @227:31-227:37
+    _11 = call intrinsic mem.ptr.write(copy _12, copy _13) @227:13-227:38
+    _14 = mod copy _7, copy _2 @228:20-228:25
+    _4 = copy _14 @228:13-228:25
+    _15 = sub copy _5, const 1 @229:13-229:19
+    _5 = move _15 @229:13-229:19
+    goto bb1
+  bb4:
+    _17 = gt copy _16, const 0 @231:15-231:22
+    switch copy _17 [0: bb7, else: bb6] @231:15-231:52
+  bb5:
+    _21 = call intrinsic mem.ptr.write(copy _1, copy _16) @233:9-233:21
+    _0 = copy _4 @234:16-234:20
+    return @234:9-234:20
+  bb6:
+    _19 = call intrinsic mem.ptr.offset(copy _1, copy _16) @231:27-231:40
+    _18 = call intrinsic mem.ptr.read(copy _19) @231:27-231:47
+    _17 = eq copy _18, const 0 @231:27-231:52
+    switch copy _17 [0: bb5, else: bb8] @231:15-231:52
+  bb7:
+    switch copy _17 [0: bb5, else: bb8] @231:15-231:52
+  bb8:
+    _20 = sub copy _16, const 1 @232:13-232:21
+    _16 = move _20 @232:13-232:21
+    goto bb4
+}
+
+fn rt.floats.next_digit(2) source 1 @241:5-241:15 {
+    let _0: int
+    let _1: ptr_mut[int] "r" @241:16-241:30
+    let _2: ptr_mut[int] "s" @241:32-241:46
+    let _3: ()
+    let _4: int "d" @243:9-243:10
+    let _5: bool
+    let _6: int
+    let _7: ()
+    let _8: int
+  bb0:
+    _3 = call fn rt.floats.mul_small(copy _1, const 10) @242:5-242:21
+    _4 = const 0 @243:13-243:14
+    goto bb1
+  bb1:
+    _6 = call fn rt.floats.order(copy _1, copy _2) @244:11-244:22
+    _5 = ge copy _6, const 0 @244:11-244:27
+    switch copy _5 [0: bb2, else: bb3] @244:11-244:27
+  bb2:
+    _0 = copy _4 @247:12-247:13
+    return @247:5-247:13
+  bb3:
+    _7 = call fn rt.floats.subtract(copy _1, copy _2) @245:9-245:23
+    _8 = add copy _4, const 1 @246:9-246:15
+    _4 = move _8 @246:9-246:15
+    goto bb1
+}
+
+fn rt.floats.put_digit(3) source 1 @253:5-253:14 {
+    let _0: ()
+    let _1: ptr_mut[u8] "b" @253:15-253:28
+    let _2: int "i" @253:30-253:36
+    let _3: int "d" @253:38-253:44
+    let _4: ()
+    let _5: ptr_mut[u8]
+    let _6: u8
+    let _7: int
+  bb0:
+    _5 = call intrinsic mem.ptr.offset(copy _1, copy _2) @256:12-256:23
+    _7 = add const 48, copy _3 @256:47-256:53
+    _6 = call intrinsic u8.wrapping_from(copy _7) @256:30-256:54
+    _4 = call intrinsic mem.ptr.write(copy _5, copy _6) @256:12-256:55
+    _0 = const ()
+    return
+}
+
+fn rt.floats.shortest_small(6) source 1 @265:5-265:19 {
+    let _0: (int, int)
+    let _1: int "f" @265:20-265:26
+    let _2: int "e" @265:28-265:34
+    let _3: int "wide" @265:36-265:45
+    let _4: bool "even" @265:47-265:57
+    let _5: int "k0" @265:59-265:66
+    let _6: ptr_mut[u8] "b" @265:68-265:81
+    let _7: bool
+    let _8: int
+    let _9: int
+    let _10: int "r" @268:9-268:10
+    let _11: int
+    let _12: int "s" @269:9-269:10
+    let _13: int
+    let _14: int
+    let _15: int "up" @270:9-270:11
+    let _16: int "down" @271:9-271:13
+    let _17: int "k" @272:9-272:10
+    let _18: int "j" @273:9-273:10
+    let _19: bool
+    let _20: int
+    let _21: bool
+    let _22: int
+    let _23: int
+    let _24: bool
+    let _25: int
+    let _26: int
+    let _27: int
+    let _28: bool
+    let _29: int
+    let _30: int
+    let _31: int "c" @287:13-287:14
+    let _32: int
+    let _33: bool
+    let _34: int
+    let _35: bool
+    let _36: int
+    let _37: int
+    let _38: int "n" @295:9-295:10
+    let _39: int
+    let _40: int
+    let _41: int
+    let _42: int "d" @300:13-300:14
+    let _43: int
+    let _44: bool "low" @302:13-302:16
+    let _45: int "c" @303:13-303:14
+    let _46: int
+    let _47: bool "high" @304:13-304:17
+    let _48: bool
+    let _49: bool
+    let _50: int
+    let _51: int
+    let _52: int
+    let _53: ()
+    let _54: int
+    let _55: bool
+  bb0:
+    _7 = ge copy _2, const 0 @266:8-266:14
+    switch copy _7 [0: bb2, else: bb3] @266:8-266:35
+  bb1:
+    _11 = add const 1, copy _3 @268:18-268:28
+    _10 = shl copy _1, copy _11 @268:13-268:28
+    _14 = add const 1, copy _3 @269:19-269:27
+    _13 = sub copy _14, copy _2 @269:18-269:32
+    _12 = shl const 1, copy _13 @269:13-269:32
+    _15 = shl const 1, copy _3 @270:14-270:23
+    _16 = const 1 @271:16-271:17
+    _17 = copy _5 @272:13-272:15
+    _18 = const 0 @273:13-273:14
+    goto bb5
+  bb2:
+    _9 = add const 1, copy _3 @266:18-266:26
+    _8 = sub copy _9, copy _2 @266:18-266:30
+    _7 = gt copy _8, const 57 @266:18-266:35
+    switch copy _7 [0: bb1, else: bb4] @266:8-266:35
+  bb3:
+    switch copy _7 [0: bb1, else: bb4] @266:8-266:35
+  bb4:
+    _0 = tuple(const 0, const 0) @267:16-267:22
+    return @267:9-267:22
+  bb5:
+    _19 = lt copy _18, copy _17 @274:11-274:16
+    switch copy _19 [0: bb9, else: bb6] @274:11-274:16
+  bb6:
+    _20 = mul copy _12, const 10 @275:9-275:16
+    _12 = move _20 @275:9-275:16
+    _22 = call fn rt.floats.LIMIT() @276:16-276:21
+    _21 = gt copy _12, copy _22 @276:12-276:21
+    switch copy _21 [0: bb7, else: bb8] @276:12-276:21
+  bb7:
+    _23 = add copy _18, const 1 @278:9-278:15
+    _18 = move _23 @278:9-278:15
+    goto bb5
+  bb8:
+    _0 = tuple(const 0, const 0) @277:20-277:26
+    return @277:13-277:26
+  bb9:
+    _24 = gt copy _18, copy _17 @279:11-279:16
+    switch copy _24 [0: bb13, else: bb10] @279:11-279:16
+  bb10:
+    _25 = mul copy _10, const 10 @280:9-280:16
+    _10 = move _25 @280:9-280:16
+    _26 = mul copy _15, const 10 @281:9-281:17
+    _15 = move _26 @281:9-281:17
+    _27 = mul copy _16, const 10 @282:9-282:19
+    _16 = move _27 @282:9-282:19
+    _29 = call fn rt.floats.LIMIT() @283:16-283:21
+    _28 = gt copy _10, copy _29 @283:12-283:21
+    switch copy _28 [0: bb11, else: bb12] @283:12-283:21
+  bb11:
+    _30 = sub copy _18, const 1 @285:9-285:15
+    _18 = move _30 @285:9-285:15
+    goto bb9
+  bb12:
+    _0 = tuple(const 0, const 0) @284:20-284:26
+    return @284:13-284:26
+  bb13:
+    switch const true [0: bb14, else: bb15] @286:11-286:15
+  bb14:
+    _38 = const 0 @295:13-295:14
+    switch const true [0: bb23, else: bb24] @296:11-296:15
+  bb15:
+    _32 = add copy _10, copy _15 @287:17-287:23
+    _31 = sub copy _32, copy _12 @287:17-287:27
+    _33 = gt copy _31, const 0 @288:12-288:17
+    switch copy _33 [0: bb16, else: bb17] @288:12-288:38
+  bb16:
+    _33 = copy _4 @288:22-288:26
+    switch copy _33 [0: bb17, else: bb18] @288:21-288:38
+  bb17:
+    switch copy _33 [0: bb14, else: bb19] @288:12-288:38
+  bb18:
+    _33 = eq copy _31, const 0 @288:31-288:37
+    switch copy _33 [0: bb14, else: bb19] @288:12-288:38
+  bb19:
+    _34 = mul copy _12, const 10 @289:13-289:20
+    _12 = move _34 @289:13-289:20
+    _36 = call fn rt.floats.LIMIT() @290:20-290:25
+    _35 = gt copy _12, copy _36 @290:16-290:25
+    switch copy _35 [0: bb20, else: bb21] @290:16-290:25
+  bb20:
+    _37 = add copy _17, const 1 @292:13-292:19
+    _17 = move _37 @292:13-292:19
+    switch const true [0: bb14, else: bb15] @286:11-286:15
+  bb21:
+    _0 = tuple(const 0, const 0) @291:24-291:30
+    return @291:17-291:30
+  bb22:
+    switch const true [0: bb23, else: bb24] @296:11-296:15
+  bb23:
+    _0 = const ()
+    return
+  bb24:
+    _39 = mul copy _10, const 10 @297:9-297:16
+    _10 = move _39 @297:9-297:16
+    _40 = mul copy _15, const 10 @298:9-298:17
+    _15 = move _40 @298:9-298:17
+    _41 = mul copy _16, const 10 @299:9-299:19
+    _16 = move _41 @299:9-299:19
+    _42 = floordiv copy _10, copy _12 @300:17-300:23
+    _43 = mod copy _10, copy _12 @301:13-301:18
+    _10 = copy _43 @301:9-301:18
+    _44 = lt copy _10, copy _16 @302:19-302:27
+    switch copy _44 [0: bb25, else: bb26] @302:19-302:51
+  bb25:
+    _44 = copy _4 @302:32-302:36
+    switch copy _44 [0: bb26, else: bb27] @302:31-302:51
+  bb26:
+    _46 = add copy _10, copy _15 @303:17-303:23
+    _45 = sub copy _46, copy _12 @303:17-303:27
+    _47 = gt copy _45, const 0 @304:20-304:25
+    switch copy _47 [0: bb28, else: bb29] @304:20-304:46
+  bb27:
+    _44 = eq copy _10, copy _16 @302:41-302:50
+    goto bb26
+  bb28:
+    _47 = copy _4 @304:30-304:34
+    switch copy _47 [0: bb29, else: bb30] @304:29-304:46
+  bb29:
+    _48 = copy _44 @305:12-305:15
+    switch copy _48 [0: bb34, else: bb33] @305:12-305:24
+  bb30:
+    _47 = eq copy _45, const 0 @304:39-304:45
+    goto bb29
+  bb31:
+    _53 = call fn rt.floats.put_digit(copy _6, copy _38, copy _42) @310:9-310:27
+    _54 = add copy _38, const 1 @311:9-311:15
+    _38 = move _54 @311:9-311:15
+    _55 = copy _44 @312:12-312:15
+    switch copy _55 [0: bb38, else: bb39] @312:12-312:23
+  bb32:
+    switch copy _47 [0: bb31, else: bb37] @308:14-308:18
+  bb33:
+    _48 = copy _47 @305:20-305:24
+    switch copy _48 [0: bb32, else: bb35] @305:12-305:24
+  bb34:
+    switch copy _48 [0: bb32, else: bb35] @305:12-305:24
+  bb35:
+    _50 = mul const 2, copy _10 @306:16-306:21
+    _49 = ge copy _50, copy _12 @306:16-306:26
+    switch copy _49 [0: bb31, else: bb36] @306:16-306:26
+  bb36:
+    _51 = add copy _42, const 1 @307:17-307:23
+    _42 = move _51 @307:17-307:23
+    goto bb31
+  bb37:
+    _52 = add copy _42, const 1 @309:13-309:19
+    _42 = move _52 @309:13-309:19
+    goto bb31
+  bb38:
+    _55 = copy _47 @312:19-312:23
+    switch copy _55 [0: bb22, else: bb40] @312:12-312:23
+  bb39:
+    switch copy _55 [0: bb22, else: bb40] @312:12-312:23
+  bb40:
+    _0 = tuple(copy _38, copy _17) @313:20-313:26
+    return @313:13-313:26
+}
+
+fn rt.floats.shortest(6) source 1 @325:5-325:13 {
+    let _0: (int, int)
+    let _1: int "f" @325:14-325:20
+    let _2: int "e" @325:22-325:28
+    let _3: int "prec" @325:30-325:39
+    let _4: int "min_e" @325:41-325:51
+    let _5: int "k0" @325:53-325:60
+    let _6: ptr_mut[u8] "b" @325:62-325:75
+    let _7: bool "even" @326:9-326:13
+    let _8: int
+    let _9: int "wide" @330:9-330:13
+    let _10: bool
+    let _11: int
+    let _12: int
+    let _13: (int, int)
+    let _14: int "small" @331:10-331:15
+    let _15: int "small_k" @331:17-331:24
+    let _16: bool
+    let _17: int "n" @334:9-334:10
+    let _18: int "k" @335:9-335:10
+    let _19: ptr_mut[u8] "block" @339:13-339:18
+    let _20: int
+    let _21: int
+    let _22: int
+    let _23: ptr_mut[int] "r" @340:13-340:14
+    let _24: ptr_mut[int] "s" @341:13-341:14
+    let _25: int
+    let _26: ptr_mut[int] "up" @342:13-342:15
+    let _27: int
+    let _28: int
+    let _29: ptr_mut[int] "down" @343:13-343:17
+    let _30: int
+    let _31: int
+    let _32: ptr_mut[int] "t" @344:13-344:14
+    let _33: int
+    let _34: int
+    let _35: ()
+    let _36: ()
+    let _37: bool
+    let _38: ()
+    let _39: int
+    let _40: int
+    let _41: ()
+    let _42: int
+    let _43: ()
+    let _44: ()
+    let _45: int
+    let _46: ()
+    let _47: ()
+    let _48: int
+    let _49: ()
+    let _50: ()
+    let _51: int
+    let _52: int
+    let _53: ()
+    let _54: int
+    let _55: bool
+    let _56: ()
+    let _57: ()
+    let _58: int
+    let _59: ()
+    let _60: int
+    let _61: ()
+    let _62: int
+    let _63: ()
+    let _64: int "c" @368:17-368:18
+    let _65: bool
+    let _66: ()
+    let _67: int
+    let _68: int "d" @375:17-375:18
+    let _69: ()
+    let _70: ()
+    let _71: int "c_low" @378:17-378:22
+    let _72: bool "low" @379:17-379:20
+    let _73: ()
+    let _74: int "c_high" @381:17-381:23
+    let _75: bool "high" @382:17-382:21
+    let _76: bool
+    let _77: ()
+    let _78: bool
+    let _79: int
+    let _80: int
+    let _81: int
+    let _82: ()
+    let _83: int
+    let _84: bool
+    let _85: ()
+  bb0:
+    _8 = mod copy _1, const 2 @326:16-326:21
+    _7 = eq copy _8, const 0 @326:16-326:26
+    _12 = sub copy _3, const 1 @330:30-330:40
+    _11 = shl const 1, copy _12 @330:24-330:41
+    _10 = eq copy _1, copy _11 @330:19-330:41
+    switch copy _10 [0: bb2, else: bb1] @330:19-330:55
+  bb1:
+    _10 = gt copy _2, copy _4 @330:46-330:55
+    switch copy _10 [0: bb4, else: bb3] @330:16-330:66
+  bb2:
+    switch copy _10 [0: bb4, else: bb3] @330:16-330:66
+  bb3:
+    _9 = const 1 @330:57-330:58
+    goto bb5
+  bb4:
+    _9 = const 0 @330:65-330:66
+    goto bb5
+  bb5:
+    _13 = call fn rt.floats.shortest_small(copy _1, copy _2, copy _9, copy _7, copy _5, copy _6) @331:28-331:67
+    _14 = copy _13.0 @331:10-331:15
+    _15 = copy _13.1 @331:17-331:24
+    _16 = gt copy _14, const 0 @332:8-332:17
+    switch copy _16 [0: bb6, else: bb7] @332:8-332:17
+  bb6:
+    _17 = const 0 @334:13-334:14
+    _18 = copy _5 @335:13-335:15
+    _22 = call fn rt.floats.BIG() @339:39-339:42
+    _21 = mul const 5, copy _22 @339:35-339:42
+    _20 = mul copy _21, const 8 @339:35-339:46
+    _19 = call intrinsic extern.c.sisu_rt_alloc(copy _20) @339:21-339:47
+    _23 = call intrinsic mem.ptr.cast[u8, int](copy _19) @340:17-340:34
+    _25 = call fn rt.floats.BIG() @341:26-341:29
+    _24 = call intrinsic mem.ptr.offset(copy _23, copy _25) @341:17-341:30
+    _28 = call fn rt.floats.BIG() @342:31-342:34
+    _27 = mul const 2, copy _28 @342:27-342:34
+    _26 = call intrinsic mem.ptr.offset(copy _23, copy _27) @342:18-342:35
+    _31 = call fn rt.floats.BIG() @343:33-343:36
+    _30 = mul const 3, copy _31 @343:29-343:36
+    _29 = call intrinsic mem.ptr.offset(copy _23, copy _30) @343:20-343:37
+    _34 = call fn rt.floats.BIG() @344:30-344:33
+    _33 = mul const 4, copy _34 @344:26-344:33
+    _32 = call intrinsic mem.ptr.offset(copy _23, copy _33) @344:17-344:34
+    _35 = call fn rt.floats.set(copy _23, copy _1) @345:9-345:18
+    _36 = call fn rt.floats.set(copy _29, const 1) @346:9-346:21
+    _37 = ge copy _2, const 0 @347:12-347:18
+    switch copy _37 [0: bb9, else: bb10] @347:12-347:18
+  bb7:
+    _0 = tuple(copy _14, copy _15) @333:16-333:32
+    return @333:9-333:32
+  bb8:
+    _55 = ge copy _18, const 0 @358:12-358:18
+    switch copy _55 [0: bb11, else: bb12] @358:12-358:18
+  bb9:
+    _48 = add const 1, copy _9 @354:22-354:30
+    _47 = call fn rt.floats.shift(copy _23, copy _48) @354:13-354:31
+    _49 = call fn rt.floats.set(copy _24, const 1) @355:13-355:22
+    _52 = add const 1, copy _9 @356:22-356:30
+    _51 = sub copy _52, copy _2 @356:22-356:34
+    _50 = call fn rt.floats.shift(copy _24, copy _51) @356:13-356:35
+    _54 = shl const 1, copy _9 @357:21-357:30
+    _53 = call fn rt.floats.set(copy _26, copy _54) @357:13-357:31
+    goto bb8
+  bb10:
+    _40 = add copy _2, const 1 @348:22-348:27
+    _39 = add copy _40, copy _9 @348:22-348:34
+    _38 = call fn rt.floats.shift(copy _23, copy _39) @348:13-348:35
+    _42 = shl const 2, copy _9 @349:20-349:29
+    _41 = call fn rt.floats.set(copy _24, copy _42) @349:13-349:30
+    _43 = call fn rt.floats.set(copy _26, const 1) @350:13-350:23
+    _45 = add copy _2, copy _9 @351:23-351:31
+    _44 = call fn rt.floats.shift(copy _26, copy _45) @351:13-351:32
+    _46 = call fn rt.floats.shift(copy _29, copy _2) @352:13-352:27
+    goto bb8
+  bb11:
+    _58 = neg copy _18 @361:26-361:28
+    _57 = call fn rt.floats.mul_pow10(copy _23, copy _58) @361:13-361:29
+    _60 = neg copy _18 @362:27-362:29
+    _59 = call fn rt.floats.mul_pow10(copy _26, copy _60) @362:13-362:30
+    _62 = neg copy _18 @363:29-363:31
+    _61 = call fn rt.floats.mul_pow10(copy _29, copy _62) @363:13-363:32
+    switch const true [0: bb18, else: bb13] @366:15-366:19
+  bb12:
+    _56 = call fn rt.floats.mul_pow10(copy _24, copy _18) @359:13-359:28
+    switch const true [0: bb18, else: bb13] @366:15-366:19
+  bb13:
+    _63 = call fn rt.floats.add(copy _32, copy _23, copy _26) @367:13-367:26
+    _64 = call fn rt.floats.order(copy _32, copy _24) @368:21-368:32
+    _65 = gt copy _64, const 0 @369:16-369:21
+    switch copy _65 [0: bb14, else: bb15] @369:16-369:42
+  bb14:
+    _65 = copy _7 @369:26-369:30
+    switch copy _65 [0: bb15, else: bb16] @369:25-369:42
+  bb15:
+    switch copy _65 [0: bb18, else: bb17] @369:16-369:42
+  bb16:
+    _65 = eq copy _64, const 0 @369:35-369:41
+    switch copy _65 [0: bb18, else: bb17] @369:16-369:42
+  bb17:
+    _66 = call fn rt.floats.mul_small(copy _24, const 10) @370:17-370:33
+    _67 = add copy _18, const 1 @371:17-371:23
+    _18 = move _67 @371:17-371:23
+    switch const true [0: bb18, else: bb13] @366:15-366:19
+  bb18:
+    switch const true [0: bb19, else: bb20] @374:15-374:19
+  bb19:
+    _85 = call intrinsic extern.c.sisu_rt_free(copy _19) @393:9-393:28
+    _0 = tuple(copy _17, copy _18) @394:12-394:18
+    return @394:5-394:18
+  bb20:
+    _68 = call fn rt.floats.next_digit(copy _23, copy _24) @375:21-375:37
+    _69 = call fn rt.floats.mul_small(copy _26, const 10) @376:13-376:30
+    _70 = call fn rt.floats.mul_small(copy _29, const 10) @377:13-377:32
+    _71 = call fn rt.floats.order(copy _23, copy _29) @378:25-378:39
+    _72 = lt copy _71, const 0 @379:23-379:32
+    switch copy _72 [0: bb21, else: bb22] @379:23-379:57
+  bb21:
+    _72 = copy _7 @379:37-379:41
+    switch copy _72 [0: bb22, else: bb23] @379:36-379:57
+  bb22:
+    _73 = call fn rt.floats.add(copy _32, copy _23, copy _26) @380:13-380:26
+    _74 = call fn rt.floats.order(copy _32, copy _24) @381:26-381:37
+    _75 = gt copy _74, const 0 @382:24-382:34
+    switch copy _75 [0: bb24, else: bb25] @382:24-382:60
+  bb23:
+    _72 = eq copy _71, const 0 @379:46-379:56
+    goto bb22
+  bb24:
+    _75 = copy _7 @382:39-382:43
+    switch copy _75 [0: bb25, else: bb26] @382:38-382:60
+  bb25:
+    _76 = copy _72 @383:16-383:19
+    switch copy _76 [0: bb30, else: bb29] @383:16-383:28
+  bb26:
+    _75 = eq copy _74, const 0 @382:48-382:59
+    goto bb25
+  bb27:
+    _82 = call fn rt.floats.put_digit(copy _6, copy _17, copy _68) @389:13-389:31
+    _83 = add copy _17, const 1 @390:13-390:19
+    _17 = move _83 @390:13-390:19
+    _84 = copy _72 @391:16-391:19
+    switch copy _84 [0: bb34, else: bb35] @391:16-391:27
+  bb28:
+    switch copy _75 [0: bb27, else: bb33] @387:18-387:22
+  bb29:
+    _76 = copy _75 @383:24-383:28
+    switch copy _76 [0: bb28, else: bb31] @383:16-383:28
+  bb30:
+    switch copy _76 [0: bb28, else: bb31] @383:16-383:28
+  bb31:
+    _77 = call fn rt.floats.add(copy _32, copy _23, copy _23) @384:17-384:29
+    _79 = call fn rt.floats.order(copy _32, copy _24) @385:20-385:31
+    _78 = ge copy _79, const 0 @385:20-385:36
+    switch copy _78 [0: bb27, else: bb32] @385:20-385:36
+  bb32:
+    _80 = add copy _68, const 1 @386:21-386:27
+    _68 = move _80 @386:21-386:27
+    goto bb27
+  bb33:
+    _81 = add copy _68, const 1 @388:17-388:23
+    _68 = move _81 @388:17-388:23
+    goto bb27
+  bb34:
+    _84 = copy _75 @391:23-391:27
+    switch copy _84 [0: bb18, else: bb19] @391:16-391:27
+  bb35:
+    switch copy _84 [0: bb18, else: bb19] @391:16-391:27
+}
+
+fn rt.floats.scaled_small(3) pure source 1 @399:10-399:22 {
+    let _0: (bool, int, int, int)
+    let _1: int "f" @399:23-399:29
+    let _2: int "e" @399:31-399:37
+    let _3: int "k0" @399:39-399:46
+    let _4: int "r" @400:9-400:10
+    let _5: int "s" @401:9-401:10
+    let _6: bool
+    let _7: bool
+    let _8: int
+    let _9: bool
+    let _10: int
+    let _11: int
+    let _12: int
+    let _13: int "k" @410:9-410:10
+    let _14: bool
+    let _15: int
+    let _16: bool
+    let _17: int
+    let _18: int
+    let _19: bool
+    let _20: int
+    let _21: bool
+    let _22: int
+    let _23: int
+    let _24: bool
+    let _25: int
+    let _26: bool
+    let _27: int
+    let _28: int
+  bb0:
+    _4 = copy _1 @400:13-400:14
+    _5 = const 1 @401:13-401:14
+    _6 = ge copy _2, const 0 @402:8-402:14
+    switch copy _6 [0: bb2, else: bb3] @402:8-402:14
+  bb1:
+    _13 = const 0 @410:13-410:14
+    goto bb8
+  bb2:
+    _10 = neg copy _2 @407:12-407:14
+    _9 = gt copy _10, const 57 @407:12-407:19
+    switch copy _9 [0: bb6, else: bb7] @407:12-407:19
+  bb3:
+    _7 = gt copy _2, const 4 @403:12-403:17
+    switch copy _7 [0: bb4, else: bb5] @403:12-403:17
+  bb4:
+    _8 = shl copy _1, copy _2 @405:13-405:19
+    _4 = copy _8 @405:9-405:19
+    goto bb1
+  bb5:
+    _0 = tuple(const false, const 0, const 0, const 0) @404:20-404:36
+    return @404:13-404:36
+  bb6:
+    _12 = neg copy _2 @409:18-409:20
+    _11 = shl const 1, copy _12 @409:13-409:20
+    _5 = copy _11 @409:9-409:20
+    goto bb1
+  bb7:
+    _0 = tuple(const false, const 0, const 0, const 0) @408:20-408:36
+    return @408:13-408:36
+  bb8:
+    _14 = lt copy _13, copy _3 @411:11-411:17
+    switch copy _14 [0: bb12, else: bb9] @411:11-411:17
+  bb9:
+    _15 = mul copy _5, const 10 @412:9-412:16
+    _5 = move _15 @412:9-412:16
+    _17 = call fn rt.floats.LIMIT() @413:16-413:21
+    _16 = gt copy _5, copy _17 @413:12-413:21
+    switch copy _16 [0: bb10, else: bb11] @413:12-413:21
+  bb10:
+    _18 = add copy _13, const 1 @415:9-415:15
+    _13 = move _18 @415:9-415:15
+    goto bb8
+  bb11:
+    _0 = tuple(const false, const 0, const 0, const 0) @414:20-414:36
+    return @414:13-414:36
+  bb12:
+    _19 = gt copy _13, copy _3 @416:11-416:17
+    switch copy _19 [0: bb16, else: bb13] @416:11-416:17
+  bb13:
+    _20 = mul copy _4, const 10 @417:9-417:16
+    _4 = move _20 @417:9-417:16
+    _22 = call fn rt.floats.LIMIT() @418:16-418:21
+    _21 = gt copy _4, copy _22 @418:12-418:21
+    switch copy _21 [0: bb14, else: bb15] @418:12-418:21
+  bb14:
+    _23 = sub copy _13, const 1 @420:9-420:15
+    _13 = move _23 @420:9-420:15
+    goto bb12
+  bb15:
+    _0 = tuple(const false, const 0, const 0, const 0) @419:20-419:36
+    return @419:13-419:36
+  bb16:
+    _24 = ge copy _4, copy _5 @421:11-421:17
+    switch copy _24 [0: bb17, else: bb18] @421:11-421:17
+  bb17:
+    _0 = tuple(const true, copy _4, copy _5, copy _13) @426:12-426:27
+    return @426:5-426:27
+  bb18:
+    _25 = mul copy _5, const 10 @422:9-422:16
+    _5 = move _25 @422:9-422:16
+    _27 = call fn rt.floats.LIMIT() @423:16-423:21
+    _26 = gt copy _5, copy _27 @423:12-423:21
+    switch copy _26 [0: bb19, else: bb20] @423:12-423:21
+  bb19:
+    _28 = add copy _13, const 1 @425:9-425:15
+    _13 = move _28 @425:9-425:15
+    goto bb16
+  bb20:
+    _0 = tuple(const false, const 0, const 0, const 0) @424:20-424:36
+    return @424:13-424:36
+}
+
+fn rt.floats.scaled(5) source 1 @433:5-433:11 {
+    let _0: int
+    let _1: ptr_mut[int] "r" @433:12-433:26
+    let _2: ptr_mut[int] "s" @433:28-433:42
+    let _3: int "f" @433:44-433:50
+    let _4: int "e" @433:52-433:58
+    let _5: int "k0" @433:60-433:67
+    let _6: ()
+    let _7: ()
+    let _8: bool
+    let _9: ()
+    let _10: ()
+    let _11: int
+    let _12: int "k" @440:9-440:10
+    let _13: bool
+    let _14: ()
+    let _15: ()
+    let _16: int
+    let _17: bool
+    let _18: int
+    let _19: ()
+    let _20: int
+  bb0:
+    _6 = call fn rt.floats.set(copy _1, copy _3) @434:5-434:14
+    _7 = call fn rt.floats.set(copy _2, const 1) @435:5-435:14
+    _8 = ge copy _4, const 0 @436:8-436:14
+    switch copy _8 [0: bb2, else: bb3] @436:8-436:14
+  bb1:
+    _12 = copy _5 @440:13-440:15
+    _13 = ge copy _12, const 0 @441:8-441:14
+    switch copy _13 [0: bb4, else: bb5] @441:8-441:14
+  bb2:
+    _11 = neg copy _4 @439:18-439:20
+    _10 = call fn rt.floats.shift(copy _2, copy _11) @439:9-439:21
+    goto bb1
+  bb3:
+    _9 = call fn rt.floats.shift(copy _1, copy _4) @437:9-437:20
+    goto bb1
+  bb4:
+    _16 = neg copy _12 @444:22-444:24
+    _15 = call fn rt.floats.mul_pow10(copy _1, copy _16) @444:9-444:25
+    goto bb6
+  bb5:
+    _14 = call fn rt.floats.mul_pow10(copy _2, copy _12) @442:9-442:24
+    goto bb6
+  bb6:
+    _18 = call fn rt.floats.order(copy _1, copy _2) @445:11-445:22
+    _17 = ge copy _18, const 0 @445:11-445:27
+    switch copy _17 [0: bb7, else: bb8] @445:11-445:27
+  bb7:
+    _0 = copy _12 @448:12-448:13
+    return @448:5-448:13
+  bb8:
+    _19 = call fn rt.floats.mul_small(copy _2, const 10) @446:9-446:25
+    _20 = add copy _12, const 1 @447:9-447:15
+    _12 = move _20 @447:9-447:15
+    goto bb6
+}
+
+fn rt.floats.round_up(2) source 1 @455:5-455:13 {
+    let _0: bool
+    let _1: ptr_mut[u8] "b" @455:14-455:27
+    let _2: int "n" @455:29-455:35
+    let _3: int "i" @456:9-456:10
+    let _4: bool
+    let _5: int "c" @461:17-461:18
+    let _6: u8
+    let _7: ptr_mut[u8]
+    let _8: bool
+    let _9: ()
+    let _10: ptr_mut[u8]
+    let _11: u8
+    let _12: int
+    let _13: ()
+    let _14: ptr_mut[u8]
+    let _15: u8
+    let _16: int
+    let _17: ()
+    let _18: u8
+  bb0:
+    _3 = sub copy _2, const 1 @456:13-456:18
+    goto bb1
+  bb1:
+    _4 = ge copy _3, const 0 @460:15-460:21
+    switch copy _4 [0: bb2, else: bb3] @460:15-460:21
+  bb2:
+    _18 = call intrinsic u8.wrapping_from(const 49) @467:17-467:37
+    _17 = call intrinsic mem.ptr.write(copy _1, copy _18) @467:9-467:38
+    _0 = const true @468:12-468:16
+    return @468:5-468:16
+  bb3:
+    _7 = call intrinsic mem.ptr.offset(copy _1, copy _3) @461:21-461:32
+    _6 = call intrinsic mem.ptr.read(copy _7) @461:21-461:39
+    _5 = call intrinsic u8.to_int(copy _6) @461:21-461:48
+    _8 = lt copy _5, const 57 @462:16-462:22
+    switch copy _8 [0: bb4, else: bb5] @462:16-462:22
+  bb4:
+    _14 = call intrinsic mem.ptr.offset(copy _1, copy _3) @465:13-465:24
+    _15 = call intrinsic u8.wrapping_from(const 48) @465:31-465:51
+    _13 = call intrinsic mem.ptr.write(copy _14, copy _15) @465:13-465:52
+    _16 = sub copy _3, const 1 @466:13-466:19
+    _3 = move _16 @466:13-466:19
+    goto bb1
+  bb5:
+    _10 = call intrinsic mem.ptr.offset(copy _1, copy _3) @463:17-463:28
+    _12 = add copy _5, const 1 @463:52-463:57
+    _11 = call intrinsic u8.wrapping_from(copy _12) @463:35-463:58
+    _9 = call intrinsic mem.ptr.write(copy _10, copy _11) @463:17-463:59
+    _0 = const false @464:24-464:29
+    return @464:17-464:29
+}
+
+fn rt.floats.odd_last(2) source 1 @474:5-474:13 {
+    let _0: bool
+    let _1: ptr_mut[u8] "b" @474:14-474:27
+    let _2: int "n" @474:29-474:35
+    let _3: int
+    let _4: int
+    let _5: u8
+    let _6: ptr_mut[u8]
+    let _7: int
+  bb0:
+    _7 = sub copy _2, const 1 @477:28-477:33
+    _6 = call intrinsic mem.ptr.offset(copy _1, copy _7) @477:19-477:34
+    _5 = call intrinsic mem.ptr.read(copy _6) @477:19-477:41
+    _4 = call intrinsic u8.to_int(copy _5) @477:19-477:50
+    _3 = mod copy _4, const 2 @477:12-477:54
+    _0 = eq copy _3, const 1 @477:12-477:59
+    return @477:5-477:59
+}
+
+fn rt.floats.is_zero(1) source 1 @483:5-483:12 {
+    let _0: bool
+    let _1: ptr_mut[int] "a" @483:13-483:27
+    let _2: int
+  bb0:
+    _2 = call intrinsic mem.ptr.read(copy _1) @485:19-485:27
+    _0 = eq copy _2, const 0 @485:12-485:32
+    return @485:5-485:32
+}
+
+fn rt.floats.half_order(4) source 1 @493:5-493:15 {
+    let _0: int
+    let _1: bool "small" @493:16-493:27
+    let _2: int "r" @493:29-493:35
+    let _3: int "s" @493:37-493:43
+    let _4: ptr_mut[int] "big" @493:45-493:61
+    let _5: bool
+    let _6: int
+    let _7: bool
+    let _8: int
+    let _9: (ptr_mut[int], ptr_mut[int])
+    let _10: ptr_mut[int]
+    let _11: int
+    let _12: ptr_mut[int]
+    let _13: int
+    let _14: int
+    let _15: ptr_mut[int] "big_s" @501:10-501:15
+    let _16: ptr_mut[int] "big_t" @501:17-501:22
+    let _17: ()
+  bb0:
+    switch copy _1 [0: bb1, else: bb2] @494:8-494:13
+  bb1:
+    _11 = call fn rt.floats.BIG() @501:45-501:48
+    _10 = call intrinsic mem.ptr.offset(copy _4, copy _11) @501:34-501:49
+    _14 = call fn rt.floats.BIG() @501:66-501:69
+    _13 = mul const 2, copy _14 @501:62-501:69
+    _12 = call intrinsic mem.ptr.offset(copy _4, copy _13) @501:51-501:70
+    _9 = tuple(copy _10, copy _12) @501:33-501:71
+    _15 = copy _9.0 @501:10-501:15
+    _16 = copy _9.1 @501:17-501:22
+    _17 = call fn rt.floats.add(copy _16, copy _4, copy _4) @502:5-502:25
+    _0 = call fn rt.floats.order(copy _16, copy _15) @503:12-503:31
+    return @503:5-503:31
+  bb2:
+    _6 = mul const 2, copy _2 @495:12-495:17
+    _5 = gt copy _6, copy _3 @495:12-495:21
+    switch copy _5 [0: bb3, else: bb4] @495:12-495:21
+  bb3:
+    _8 = mul const 2, copy _2 @497:12-497:17
+    _7 = eq copy _8, copy _3 @497:12-497:22
+    switch copy _7 [0: bb5, else: bb6] @497:12-497:22
+  bb4:
+    _0 = const 1 @496:20-496:21
+    return @496:13-496:21
+  bb5:
+    _0 = const -1 @499:16-499:18
+    return @499:9-499:18
+  bb6:
+    _0 = const 0 @498:20-498:21
+    return @498:13-498:21
+}
+
+fn rt.floats.exact_digits(6) source 1 @515:5-515:17 {
+    let _0: bool
+    let _1: bool "small" @515:18-515:29
+    let _2: int "r0" @515:31-515:38
+    let _3: int "s" @515:40-515:46
+    let _4: ptr_mut[int] "big" @515:48-515:64
+    let _5: ptr_mut[u8] "b" @515:66-515:79
+    let _6: int "count" @515:81-515:91
+    let _7: int "r" @516:9-516:10
+    let _8: int "i" @517:9-517:10
+    let _9: bool
+    let _10: bool
+    let _11: bool
+    let _12: ()
+    let _13: int
+    let _14: int
+    let _15: ()
+    let _16: int
+    let _17: int
+    let _18: ()
+    let _19: int
+    let _20: ptr_mut[int]
+    let _21: int
+    let _22: int
+    let _23: int "half" @535:9-535:13
+    let _24: bool
+  bb0:
+    _7 = copy _2 @516:13-516:15
+    _8 = const 0 @517:13-517:14
+    goto bb1
+  bb1:
+    _9 = lt copy _8, copy _6 @518:11-518:20
+    switch copy _9 [0: bb2, else: bb3] @518:11-518:20
+  bb2:
+    _23 = call fn rt.floats.half_order(copy _1, copy _7, copy _3, copy _4) @535:16-535:44
+    _24 = gt copy _23, const 0 @536:8-536:16
+    switch copy _24 [0: bb17, else: bb18] @536:8-536:54
+  bb3:
+    _10 = copy _1 @519:13-519:18
+    switch copy _10 [0: bb6, else: bb5] @519:12-519:30
+  bb4:
+    switch copy _1 [0: bb14, else: bb15] @526:12-526:17
+  bb5:
+    _10 = eq copy _7, const 0 @519:23-519:29
+    switch copy _10 [0: bb7, else: bb8] @519:12-519:62
+  bb6:
+    switch copy _10 [0: bb7, else: bb8] @519:12-519:62
+  bb7:
+    _10 = not copy _1 @519:35-519:44
+    switch copy _10 [0: bb8, else: bb9] @519:34-519:62
+  bb8:
+    switch copy _10 [0: bb4, else: bb10] @519:12-519:62
+  bb9:
+    _10 = call fn rt.floats.is_zero(copy _4) @519:49-519:61
+    switch copy _10 [0: bb4, else: bb10] @519:12-519:62
+  bb10:
+    _11 = lt copy _8, copy _6 @522:19-522:28
+    switch copy _11 [0: bb11, else: bb12] @522:19-522:28
+  bb11:
+    _0 = const false @525:20-525:25
+    return @525:13-525:25
+  bb12:
+    _12 = call fn rt.floats.put_digit(copy _5, copy _8, const 0) @523:17-523:35
+    _13 = add copy _8, const 1 @524:17-524:23
+    _8 = move _13 @524:17-524:23
+    goto bb10
+  bb13:
+    _22 = add copy _8, const 1 @534:9-534:15
+    _8 = move _22 @534:9-534:15
+    goto bb1
+  bb14:
+    _21 = call fn rt.floats.BIG() @533:63-533:66
+    _20 = call intrinsic mem.ptr.offset(copy _4, copy _21) @533:52-533:67
+    _19 = call fn rt.floats.next_digit(copy _4, copy _20) @533:29-533:68
+    _18 = call fn rt.floats.put_digit(copy _5, copy _8, copy _19) @533:13-533:69
+    goto bb13
+  bb15:
+    _14 = mul copy _7, const 10 @527:13-527:20
+    _7 = move _14 @527:13-527:20
+    _16 = floordiv copy _7, copy _3 @528:29-528:35
+    _15 = call fn rt.floats.put_digit(copy _5, copy _8, copy _16) @528:13-528:36
+    _17 = mod copy _7, copy _3 @529:17-529:22
+    _7 = copy _17 @529:13-529:22
+    goto bb13
+  bb16:
+    _0 = const false @538:12-538:17
+    return @538:5-538:17
+  bb17:
+    _24 = eq copy _23, const 0 @536:21-536:30
+    switch copy _24 [0: bb18, else: bb19] @536:20-536:54
+  bb18:
+    switch copy _24 [0: bb16, else: bb20] @536:8-536:54
+  bb19:
+    _24 = call fn rt.floats.odd_last(copy _5, copy _6) @536:35-536:53
+    switch copy _24 [0: bb16, else: bb20] @536:8-536:54
+  bb20:
+    _0 = call fn rt.floats.round_up(copy _5, copy _6) @537:16-537:34
+    return @537:9-537:34
+}
+
+fn rt.floats.char_at(2) source 1 @544:5-544:12 {
+    let _0: int
+    let _1: ptr_mut[u8] "b" @544:13-544:26
+    let _2: int "i" @544:28-544:34
+    let _3: u8
+    let _4: ptr_mut[u8]
+  bb0:
+    _4 = call intrinsic mem.ptr.offset(copy _1, copy _2) @547:19-547:30
+    _3 = call intrinsic mem.ptr.read(copy _4) @547:19-547:37
+    _0 = call intrinsic u8.to_int(copy _3) @547:19-547:46
+    return @547:5-547:46
+}
+
+fn rt.floats.integer_digits(4) source 1 @557:5-557:19 {
+    let _0: int
+    let _1: ptr_mut[int] "a" @557:20-557:34
+    let _2: int "f" @557:36-557:42
+    let _3: int "e" @557:44-557:50
+    let _4: ptr_mut[u8] "b" @557:52-557:65
+    let _5: ()
+    let _6: ()
+    let _7: int "first" @560:9-560:14
+    let _8: bool
+    let _9: bool
+    let _10: int "part" @562:13-562:17
+    let _11: int "j" @563:13-563:14
+    let _12: bool
+    let _13: int
+    let _14: ()
+    let _15: int
+    let _16: int
+    let _17: int
+    let _18: bool
+    let _19: int
+    let _20: int
+    let _21: int
+    let _22: int
+  bb0:
+    _5 = call fn rt.floats.set(copy _1, copy _2) @558:5-558:14
+    _6 = call fn rt.floats.shift(copy _1, copy _3) @559:5-559:16
+    _7 = const 315 @560:17-560:20
+    goto bb1
+  bb1:
+    _9 = call fn rt.floats.is_zero(copy _1) @561:15-561:25
+    _8 = not copy _9 @561:11-561:25
+    switch copy _8 [0: bb5, else: bb2] @561:11-561:25
+  bb2:
+    _10 = call fn rt.floats.div_small(copy _1, const 1000000000) @562:20-562:44
+    _11 = const 0 @563:17-563:18
+    goto bb3
+  bb3:
+    _12 = lt copy _11, const 9 @564:15-564:20
+    switch copy _12 [0: bb1, else: bb4] @564:15-564:20
+  bb4:
+    _13 = sub copy _7, const 1 @565:13-565:23
+    _7 = move _13 @565:13-565:23
+    _15 = mod copy _10, const 10 @566:33-566:42
+    _14 = call fn rt.floats.put_digit(copy _4, copy _7, copy _15) @566:13-566:43
+    _16 = floordiv copy _10, const 10 @567:20-567:30
+    _10 = copy _16 @567:13-567:30
+    _17 = add copy _11, const 1 @568:13-568:19
+    _11 = move _17 @568:13-568:19
+    goto bb3
+  bb5:
+    _19 = call fn rt.floats.char_at(copy _4, copy _7) @569:11-569:28
+    _18 = eq copy _19, const 48 @569:11-569:34
+    switch copy _18 [0: bb6, else: bb7] @569:11-569:34
+  bb6:
+    _22 = sub const 315, copy _7 @571:37-571:48
+    _21 = call fn rt.floats.move_digits(copy _4, const 0, copy _7, const 0, copy _22) @571:9-571:49
+    _0 = sub const 315, copy _7 @572:12-572:23
+    return @572:5-572:23
+  bb7:
+    _20 = add copy _7, const 1 @570:9-570:19
+    _7 = move _20 @570:9-570:19
+    goto bb5
+}
+
+fn rt.floats.write_integer(6) source 1 @581:5-581:18 {
+    let _0: ()
+    let _1: ptr_mut[u8] "dst" @581:19-581:34
+    let _2: int "sign" @581:36-581:45
+    let _3: int "f" @581:47-581:53
+    let _4: int "e" @581:55-581:61
+    let _5: bool "fixed" @581:63-581:74
+    let _6: int "precision" @581:76-581:90
+    let _7: ptr_mut[u8] "b" @584:9-584:10
+    let _8: int
+    let _9: int "n" @585:9-585:10
+    let _10: ptr_mut[u8] "block" @590:13-590:18
+    let _11: int
+    let _12: int
+    let _13: int
+    let _14: ptr_mut[int]
+    let _15: ptr_mut[u8]
+    let _16: ()
+    let _17: int "i" @593:9-593:10
+    let _18: int
+    let _19: bool
+    let _20: int
+    let _21: int
+    let _22: ()
+    let _23: int "k" @601:9-601:10
+    let _24: int "count" @602:9-602:14
+    let _25: bool
+    let _26: int "next" @605:13-605:17
+    let _27: int
+    let _28: bool "rest" @606:13-606:17
+    let _29: int "j" @607:13-607:14
+    let _30: bool
+    let _31: bool
+    let _32: int
+    let _33: int
+    let _34: int
+    let _35: ptr_mut[u8] "digits" @613:13-613:19
+    let _36: bool
+    let _37: bool
+    let _38: int
+    let _39: int "kept" @617:9-617:13
+    let _40: bool
+    let _41: int
+    let _42: bool
+    let _43: int
+    let _44: int
+    let _45: int
+    let _46: int
+    let _47: int
+    let _48: int
+    let _49: int
+    let _50: int
+    let _51: ()
+  bb0:
+    _8 = add copy _6, const 330 @584:23-584:38
+    _7 = call fn rt.floats.room(copy _1, copy _8) @584:13-584:39
+    _9 = const 0 @585:13-585:14
+    _12 = call fn rt.floats.BIG() @590:35-590:38
+    _11 = mul copy _12, const 8 @590:35-590:42
+    _10 = call intrinsic extern.c.sisu_rt_alloc(copy _11) @590:21-590:43
+    _14 = call intrinsic mem.ptr.cast[u8, int](copy _10) @591:28-591:45
+    _15 = call intrinsic mem.ptr.offset(copy _7, const 2) @591:53-591:64
+    _13 = call fn rt.floats.integer_digits(copy _14, copy _3, copy _4, copy _15) @591:13-591:65
+    _9 = copy _13 @591:9-591:65
+    _16 = call intrinsic extern.c.sisu_rt_free(copy _10) @592:9-592:28
+    _17 = copy _2 @593:13-593:17
+    switch copy _5 [0: bb1, else: bb2] @594:8-594:13
+  bb1:
+    _23 = copy _9 @601:13-601:14
+    _24 = add copy _6, const 1 @602:17-602:30
+    _25 = lt copy _24, copy _9 @603:8-603:17
+    switch copy _25 [0: bb5, else: bb6] @603:8-603:17
+  bb2:
+    _18 = call fn rt.floats.move_digits(copy _7, copy _17, const 2, const 0, copy _9) @595:13-595:39
+    _17 = copy _18 @595:9-595:39
+    _19 = gt copy _6, const 0 @596:12-596:25
+    switch copy _19 [0: bb3, else: bb4] @596:12-596:25
+  bb3:
+    _22 = call fn rt.floats.set_len(copy _1, copy _17) @599:9-599:24
+    _0 = const () @600:9-600:15
+    return @600:9-600:15
+  bb4:
+    _20 = call fn rt.floats.at(copy _7, copy _17, const 46) @597:17-597:29
+    _17 = copy _20 @597:13-597:29
+    _21 = call fn rt.floats.zeros(copy _7, copy _17, copy _6) @598:17-598:39
+    _17 = copy _21 @598:13-598:39
+    goto bb3
+  bb5:
+    _40 = lt copy _24, copy _9 @617:19-617:28
+    switch copy _40 [0: bb19, else: bb18] @617:16-617:43
+  bb6:
+    _27 = add const 2, copy _24 @605:31-605:40
+    _26 = call fn rt.floats.char_at(copy _7, copy _27) @605:20-605:41
+    _28 = const false @606:20-606:25
+    _29 = add copy _24, const 1 @607:17-607:26
+    goto bb7
+  bb7:
+    _30 = lt copy _29, copy _9 @608:15-608:20
+    switch copy _30 [0: bb8, else: bb9] @608:15-608:20
+  bb8:
+    _35 = call intrinsic mem.ptr.offset(copy _7, const 2) @613:29-613:40
+    _36 = gt copy _26, const 53 @614:12-614:21
+    switch copy _36 [0: bb12, else: bb13] @614:12-614:75
+  bb9:
+    _33 = add const 2, copy _29 @609:27-609:32
+    _32 = call fn rt.floats.char_at(copy _7, copy _33) @609:16-609:33
+    _31 = ne copy _32, const 48 @609:16-609:39
+    switch copy _31 [0: bb10, else: bb11] @609:16-609:39
+  bb10:
+    _34 = add copy _29, const 1 @611:13-611:19
+    _29 = move _34 @611:13-611:19
+    goto bb7
+  bb11:
+    _28 = const true @610:17-610:28
+    goto bb10
+  bb12:
+    _36 = eq copy _26, const 53 @614:26-614:36
+    switch copy _36 [0: bb13, else: bb14] @614:25-614:75
+  bb13:
+    switch copy _36 [0: bb5, else: bb16] @614:12-614:75
+  bb14:
+    _36 = copy _28 @614:42-614:46
+    switch copy _36 [0: bb15, else: bb13] @614:41-614:74
+  bb15:
+    _36 = call fn rt.floats.odd_last(copy _35, copy _24) @614:50-614:73
+    switch copy _36 [0: bb5, else: bb16] @614:12-614:75
+  bb16:
+    _37 = call fn rt.floats.round_up(copy _35, copy _24) @615:16-615:39
+    switch copy _37 [0: bb5, else: bb17] @615:16-615:39
+  bb17:
+    _38 = add copy _23, const 1 @616:17-616:23
+    _23 = move _38 @616:17-616:23
+    goto bb5
+  bb18:
+    _39 = copy _24 @617:30-617:35
+    goto bb20
+  bb19:
+    _39 = copy _9 @617:42-617:43
+    goto bb20
+  bb20:
+    _41 = call fn rt.floats.move_digits(copy _7, copy _17, const 2, const 0, const 1) @618:9-618:35
+    _17 = copy _41 @618:5-618:35
+    _42 = gt copy _6, const 0 @619:8-619:21
+    switch copy _42 [0: bb21, else: bb22] @619:8-619:21
+  bb21:
+    _47 = call fn rt.floats.at(copy _7, copy _17, const 101) @623:9-623:22
+    _17 = copy _47 @623:5-623:22
+    _48 = call fn rt.floats.at(copy _7, copy _17, const 43) @624:9-624:21
+    _17 = copy _48 @624:5-624:21
+    _50 = sub copy _23, const 1 @625:28-625:33
+    _49 = call fn rt.floats.small_number(copy _7, copy _17, copy _50, const 2) @625:9-625:37
+    _17 = copy _49 @625:5-625:37
+    _51 = call fn rt.floats.set_len(copy _1, copy _17) @626:5-626:20
+    _0 = const ()
+    return
+  bb22:
+    _43 = call fn rt.floats.at(copy _7, copy _17, const 46) @620:13-620:25
+    _17 = copy _43 @620:9-620:25
+    _44 = call fn rt.floats.move_digits(copy _7, copy _17, const 2, const 1, copy _39) @621:13-621:42
+    _17 = copy _44 @621:9-621:42
+    _46 = sub copy _24, copy _39 @622:25-622:37
+    _45 = call fn rt.floats.zeros(copy _7, copy _17, copy _46) @622:13-622:38
+    _17 = copy _45 @622:9-622:38
+    goto bb21
+}
+
+fn rt.floats.put(2) source 1 @632:5-632:8 {
+    let _0: ()
+    let _1: ptr_mut[u8] "t" @632:9-632:22
+    let _2: int "c" @632:24-632:30
+    let _3: ptr_mut[int] "words" @637:13-637:18
+    let _4: int "len" @638:13-638:16
+    let _5: ptr_mut[int]
+    let _6: bool
+    let _7: int
+    let _8: ptr_mut[int]
+    let _9: ptr_mut[u8]
+    let _10: int
+    let _11: ()
+    let _12: ptr_mut[u8]
+    let _13: ptr_mut[u8]
+    let _14: ptr[u8]
+    let _15: ptr_mut[ptr[u8]]
+    let _16: u8
+    let _17: ()
+    let _18: ptr_mut[int]
+    let _19: int
+  bb0:
+    _3 = call intrinsic mem.ptr.cast[u8, int](copy _1) @637:21-637:34
+    _5 = call intrinsic mem.ptr.offset(copy _3, const 1) @638:19-638:34
+    _4 = call intrinsic mem.ptr.read(copy _5) @638:19-638:41
+    _8 = call intrinsic mem.ptr.offset(copy _3, const 2) @639:19-639:34
+    _7 = call intrinsic mem.ptr.read(copy _8) @639:19-639:41
+    _6 = ge copy _4, copy _7 @639:12-639:41
+    switch copy _6 [0: bb1, else: bb2] @639:12-639:41
+  bb1:
+    _15 = call intrinsic mem.ptr.cast[int, ptr[u8]](copy _3) @641:9-641:30
+    _14 = call intrinsic mem.ptr.read(copy _15) @641:9-641:37
+    _13 = call intrinsic mem.ptr.cast_mut(copy _14) @641:9-641:48
+    _12 = call intrinsic mem.ptr.offset(copy _13, copy _4) @641:9-641:60
+    _16 = call intrinsic u8.wrapping_from(copy _2) @641:67-641:86
+    _11 = call intrinsic mem.ptr.write(copy _12, copy _16) @641:9-641:87
+    _18 = call intrinsic mem.ptr.offset(copy _3, const 1) @642:9-642:24
+    _19 = add copy _4, const 1 @642:31-642:38
+    _17 = call intrinsic mem.ptr.write(copy _18, copy _19) @642:9-642:39
+    _0 = const ()
+    return
+  bb2:
+    _10 = add copy _4, const 1 @640:30-640:37
+    _9 = call fn rt.text.grow(copy _1, copy _10, copy _1) @640:17-640:41
+    goto bb1
+}
+
+fn rt.floats.at(3) source 1 @648:5-648:7 {
+    let _0: int
+    let _1: ptr_mut[u8] "b" @648:8-648:21
+    let _2: int "i" @648:23-648:29
+    let _3: int "c" @648:31-648:37
+    let _4: ()
+    let _5: ptr_mut[u8]
+    let _6: u8
+  bb0:
+    _5 = call intrinsic mem.ptr.offset(copy _1, copy _2) @651:12-651:23
+    _6 = call intrinsic u8.wrapping_from(copy _3) @651:30-651:49
+    _4 = call intrinsic mem.ptr.write(copy _5, copy _6) @651:12-651:50
+    _0 = add copy _2, const 1 @652:12-652:17
+    return @652:5-652:17
+}
+
+fn rt.floats.move_digits(5) source 1 @660:5-660:16 {
+    let _0: int
+    let _1: ptr_mut[u8] "b" @660:17-660:30
+    let _2: int "i" @660:32-660:38
+    let _3: int "from_at" @660:40-660:52
+    let _4: int "first" @660:54-660:64
+    let _5: int "last" @660:66-660:75
+    let _6: int "j" @661:9-661:10
+    let _7: int "k" @662:9-662:10
+    let _8: bool
+    let _9: ()
+    let _10: ptr_mut[u8]
+    let _11: u8
+    let _12: ptr_mut[u8]
+    let _13: int
+    let _14: int
+    let _15: int
+  bb0:
+    _6 = copy _2 @661:13-661:14
+    _7 = copy _4 @662:13-662:18
+    goto bb1
+  bb1:
+    _8 = lt copy _7, copy _5 @667:15-667:23
+    switch copy _8 [0: bb2, else: bb3] @667:15-667:23
+  bb2:
+    _0 = copy _6 @671:12-671:13
+    return @671:5-671:13
+  bb3:
+    _10 = call intrinsic mem.ptr.offset(copy _1, copy _6) @668:13-668:24
+    _13 = add copy _3, copy _7 @668:40-668:51
+    _12 = call intrinsic mem.ptr.offset(copy _1, copy _13) @668:31-668:52
+    _11 = call intrinsic mem.ptr.read(copy _12) @668:31-668:59
+    _9 = call intrinsic mem.ptr.write(copy _10, copy _11) @668:13-668:60
+    _14 = add copy _6, const 1 @669:13-669:19
+    _6 = move _14 @669:13-669:19
+    _15 = add copy _7, const 1 @670:13-670:19
+    _7 = move _15 @670:13-670:19
+    goto bb1
+}
+
+fn rt.floats.zeros(3) source 1 @677:5-677:10 {
+    let _0: int
+    let _1: ptr_mut[u8] "b" @677:11-677:24
+    let _2: int "i" @677:26-677:32
+    let _3: int "n" @677:34-677:40
+    let _4: int "j" @678:9-678:10
+    let _5: bool
+    let _6: int
+    let _7: int
+  bb0:
+    _4 = copy _2 @678:13-678:14
+    goto bb1
+  bb1:
+    _6 = add copy _2, copy _3 @679:15-679:20
+    _5 = lt copy _4, copy _6 @679:11-679:20
+    switch copy _5 [0: bb2, else: bb3] @679:11-679:20
+  bb2:
+    _0 = copy _4 @681:12-681:13
+    return @681:5-681:13
+  bb3:
+    _7 = call fn rt.floats.at(copy _1, copy _4, const 48) @680:13-680:25
+    _4 = copy _7 @680:9-680:25
+    goto bb1
+}
+
+fn rt.floats.small_number(4) source 1 @688:5-688:17 {
+    let _0: int
+    let _1: ptr_mut[u8] "b" @688:18-688:31
+    let _2: int "i" @688:33-688:39
+    let _3: int "n" @688:41-688:47
+    let _4: int "least" @688:49-688:59
+    let _5: int "j" @689:9-689:10
+    let _6: bool
+    let _7: int
+    let _8: int
+    let _9: int
+    let _10: bool
+    let _11: int
+    let _12: int
+    let _13: int
+    let _14: int
+    let _15: int
+    let _16: int
+  bb0:
+    _5 = copy _2 @689:13-689:14
+    _6 = ge copy _3, const 100 @690:8-690:16
+    switch copy _6 [0: bb2, else: bb3] @690:8-690:30
+  bb1:
+    _10 = ge copy _3, const 10 @692:8-692:15
+    switch copy _10 [0: bb6, else: bb7] @692:8-692:29
+  bb2:
+    _6 = ge copy _4, const 3 @690:20-690:30
+    switch copy _6 [0: bb1, else: bb4] @690:8-690:30
+  bb3:
+    switch copy _6 [0: bb1, else: bb4] @690:8-690:30
+  bb4:
+    _9 = floordiv copy _3, const 100 @691:27-691:35
+    _8 = add const 48, copy _9 @691:22-691:35
+    _7 = call fn rt.floats.at(copy _1, copy _5, copy _8) @691:13-691:36
+    _5 = copy _7 @691:9-691:36
+    goto bb1
+  bb5:
+    _16 = mod copy _3, const 10 @694:26-694:32
+    _15 = add const 48, copy _16 @694:21-694:32
+    _0 = call fn rt.floats.at(copy _1, copy _5, copy _15) @694:12-694:33
+    return @694:5-694:33
+  bb6:
+    _10 = ge copy _4, const 2 @692:19-692:29
+    switch copy _10 [0: bb5, else: bb8] @692:8-692:29
+  bb7:
+    switch copy _10 [0: bb5, else: bb8] @692:8-692:29
+  bb8:
+    _14 = floordiv copy _3, const 10 @693:27-693:36
+    _13 = mod copy _14, const 10 @693:27-693:41
+    _12 = add const 48, copy _13 @693:22-693:41
+    _11 = call fn rt.floats.at(copy _1, copy _5, copy _12) @693:13-693:42
+    _5 = copy _11 @693:9-693:42
+    goto bb5
+}
+
+fn rt.floats.room(2) source 1 @701:5-701:9 {
+    let _0: ptr_mut[u8]
+    let _1: ptr_mut[u8] "t" @701:10-701:23
+    let _2: int "bytes" @701:25-701:35
+    let _3: ptr_mut[u8]
+    let _4: ptr[u8]
+    let _5: ptr_mut[ptr[u8]]
+  bb0:
+    _3 = call fn rt.text.grow(copy _1, copy _2, copy _1) @702:9-702:31
+    _5 = call intrinsic mem.ptr.cast[u8, ptr[u8]](copy _1) @705:19-705:36
+    _4 = call intrinsic mem.ptr.read(copy _5) @705:19-705:43
+    _0 = call intrinsic mem.ptr.cast_mut(copy _4) @705:19-705:54
+    return @705:5-705:54
+}
+
+fn rt.floats.set_len(2) source 1 @711:5-711:12 {
+    let _0: ()
+    let _1: ptr_mut[u8] "t" @711:13-711:26
+    let _2: int "len" @711:28-711:36
+    let _3: ()
+    let _4: ptr_mut[int]
+    let _5: ptr_mut[int]
+  bb0:
+    _5 = call intrinsic mem.ptr.cast[u8, int](copy _1) @714:12-714:25
+    _4 = call intrinsic mem.ptr.offset(copy _5, const 1) @714:12-714:35
+    _3 = call intrinsic mem.ptr.write(copy _4, copy _2) @714:12-714:46
+    _0 = const ()
+    return
+}
+
+fn rt.floats.write(4) source 1 @727:18-727:23 {
+    let _0: ()
+    let _1: ptr_mut[u8] "dst" @727:24-727:39
+    let _2: int "bits" @727:41-727:50
+    let _3: int "mode" @727:52-727:61
+    let _4: int "precision" @727:63-727:77
+    let _5: ()
+    let _6: bool "shortest_form" @729:9-729:22
+    let _7: int
+    let _8: int
+    let _9: bool "single" @730:9-730:15
+    let _10: int
+    let _11: int "fraction" @731:9-731:17
+    let _12: int "top" @732:9-732:12
+    let _13: bool "negative" @733:9-733:17
+    let _14: int
+    let _15: int
+    let _16: int "biased" @734:9-734:15
+    let _17: int
+    let _18: int "low" @735:9-735:12
+    let _19: int
+    let _20: int
+    let _21: bool
+    let _22: ()
+    let _23: ()
+    let _24: ()
+    let _25: ()
+    let _26: bool
+    let _27: ()
+    let _28: ()
+    let _29: ()
+    let _30: bool
+    let _31: ()
+    let _32: ()
+    let _33: ()
+    let _34: bool
+    let _35: ()
+    let _36: int "i" @756:17-756:18
+    let _37: bool
+    let _38: ()
+    let _39: int
+    let _40: bool
+    let _41: int
+    let _42: ()
+    let _43: ()
+    let _44: ()
+    let _45: ()
+    let _46: int "min_e" @766:9-766:14
+    let _47: int "f" @767:9-767:10
+    let _48: int "e" @768:9-768:10
+    let _49: int "bit_length" @769:9-769:19
+    let _50: bool
+    let _51: int
+    let _52: int
+    let _53: int
+    let _54: int
+    let _55: int "x" @775:13-775:14
+    let _56: bool
+    let _57: int
+    let _58: int
+    let _59: int "k0" @784:9-784:11
+    let _60: int
+    let _61: int
+    let _62: int
+    let _63: int
+    let _64: int "sign" @785:9-785:13
+    let _65: ptr_mut[u8] "b" @788:13-788:14
+    let _66: (int, int)
+    let _67: int
+    let _68: ptr_mut[u8]
+    let _69: int "n" @790:14-790:15
+    let _70: int "k" @790:17-790:18
+    let _71: int "i" @791:13-791:14
+    let _72: bool
+    let _73: int
+    let _74: bool
+    let _75: int
+    let _76: int
+    let _77: int
+    let _78: bool
+    let _79: int
+    let _80: int
+    let _81: int
+    let _82: int
+    let _83: bool
+    let _84: int
+    let _85: bool
+    let _86: int
+    let _87: int
+    let _88: int
+    let _89: int
+    let _90: int
+    let _91: bool
+    let _92: int
+    let _93: int
+    let _94: int
+    let _95: int
+    let _96: int
+    let _97: int
+    let _98: int
+    let _99: int
+    let _100: ()
+    let _101: bool
+    let _102: ()
+    let _103: bool
+    let _104: int
+    let _105: (bool, int, int, int)
+    let _106: bool "small" @820:10-820:15
+    let _107: int "r" @820:17-820:18
+    let _108: int "s" @820:20-820:21
+    let _109: int "small_k" @820:23-820:30
+    let _110: int "k" @821:9-821:10
+    let _111: ptr_mut[int] "big" @823:9-823:12
+    let _112: bool
+    let _113: ptr_mut[int]
+    let _114: ptr_mut[u8]
+    let _115: int
+    let _116: int
+    let _117: int
+    let _118: int
+    let _119: ptr_mut[int]
+    let _120: int
+    let _121: int "count" @836:9-836:14
+    let _122: bool
+    let _123: int
+    let _124: int "digits" @837:9-837:15
+    let _125: bool
+    let _126: int "from_at" @838:9-838:16
+    let _127: int
+    let _128: ref int
+    let _129: int
+    let _130: ref int
+    let _131: ptr_mut[u8] "b" @839:9-839:10
+    let _132: int
+    let _133: int "n" @840:9-840:10
+    let _134: bool
+    let _135: bool
+    let _136: ptr_mut[u8]
+    let _137: int
+    let _138: bool
+    let _139: int
+    let _140: ()
+    let _141: int
+    let _142: int
+    let _143: bool
+    let _144: int
+    let _145: ()
+    let _146: bool
+    let _147: ()
+    let _148: ptr_mut[u8]
+    let _149: int "i" @855:9-855:10
+    let _150: bool
+    let _151: int
+    let _152: bool
+    let _153: int
+    let _154: bool
+    let _155: int
+    let _156: int
+    let _157: bool
+    let _158: int
+    let _159: int
+    let _160: int
+    let _161: int
+    let _162: int
+    let _163: int
+    let _164: int
+    let _165: bool
+    let _166: int
+    let _167: int
+    let _168: int
+    let _169: int
+    let _170: bool
+    let _171: int
+    let _172: int
+    let _173: int
+    let _174: int
+    let _175: int
+    let _176: bool
+    let _177: int
+    let _178: int
+    let _179: int
+    let _180: bool
+    let _181: int
+    let _182: ()
+  bb0:
+    _5 = call fn rt.text.from_bytes(copy _1, copy _1, const 0) @728:5-728:33
+    _7 = call fn rt.floats.SHORTEST() @729:33-729:41
+    _6 = eq copy _3, copy _7 @729:25-729:41
+    switch copy _6 [0: bb1, else: bb2] @729:25-729:63
+  bb1:
+    _8 = call fn rt.floats.SHORTEST32() @729:53-729:63
+    _6 = eq copy _3, copy _8 @729:45-729:63
+    goto bb2
+  bb2:
+    _10 = call fn rt.floats.SHORTEST32() @730:26-730:36
+    _9 = eq copy _3, copy _10 @730:18-730:36
+    switch copy _9 [0: bb4, else: bb3] @731:20-731:42
+  bb3:
+    _11 = const 23 @731:31-731:33
+    switch copy _9 [0: bb6, else: bb5] @732:15-732:40
+  bb4:
+    _11 = const 52 @731:40-731:42
+    switch copy _9 [0: bb6, else: bb5] @732:15-732:40
+  bb5:
+    _12 = const 255 @732:26-732:29
+    switch copy _9 [0: bb8, else: bb7] @733:20-733:69
+  bb6:
+    _12 = const 2047 @732:36-732:40
+    switch copy _9 [0: bb8, else: bb7] @733:20-733:69
+  bb7:
+    _15 = shr copy _2, const 31 @733:32-733:44
+    _14 = bitand copy _15, const 1 @733:31-733:49
+    _13 = eq copy _14, const 1 @733:31-733:54
+    goto bb9
+  bb8:
+    _13 = lt copy _2, const 0 @733:61-733:69
+    goto bb9
+  bb9:
+    _17 = shr copy _2, copy _11 @734:18-734:36
+    _16 = bitand copy _17, copy _12 @734:18-734:42
+    _20 = shl const 1, copy _11 @735:23-735:38
+    _19 = sub copy _20, const 1 @735:22-735:43
+    _18 = bitand copy _2, copy _19 @735:15-735:43
+    _21 = eq copy _16, copy _12 @736:8-736:21
+    switch copy _21 [0: bb12, else: bb11] @736:8-736:34
+  bb10:
+    switch copy _13 [0: bb14, else: bb15] @741:8-741:16
+  bb11:
+    _21 = ne copy _18, const 0 @736:26-736:34
+    switch copy _21 [0: bb10, else: bb13] @736:8-736:34
+  bb12:
+    switch copy _21 [0: bb10, else: bb13] @736:8-736:34
+  bb13:
+    _22 = call fn rt.floats.put(copy _1, const 78) @737:9-737:21
+    _23 = call fn rt.floats.put(copy _1, const 97) @738:9-738:21
+    _24 = call fn rt.floats.put(copy _1, const 78) @739:9-739:21
+    _0 = const () @740:9-740:15
+    return @740:9-740:15
+  bb14:
+    _26 = eq copy _16, copy _12 @743:8-743:21
+    switch copy _26 [0: bb16, else: bb17] @743:8-743:21
+  bb15:
+    _25 = call fn rt.floats.put(copy _1, const 45) @742:9-742:21
+    goto bb14
+  bb16:
+    _30 = eq copy _16, const 0 @748:8-748:19
+    switch copy _30 [0: bb20, else: bb19] @748:8-748:32
+  bb17:
+    _27 = call fn rt.floats.put(copy _1, const 105) @744:9-744:22
+    _28 = call fn rt.floats.put(copy _1, const 110) @745:9-745:22
+    _29 = call fn rt.floats.put(copy _1, const 102) @746:9-746:22
+    _0 = const () @747:9-747:15
+    return @747:9-747:15
+  bb18:
+    switch copy _9 [0: bb31, else: bb30] @766:17-766:44
+  bb19:
+    _30 = eq copy _18, const 0 @748:24-748:32
+    switch copy _30 [0: bb18, else: bb21] @748:8-748:32
+  bb20:
+    switch copy _30 [0: bb18, else: bb21] @748:8-748:32
+  bb21:
+    _31 = call fn rt.floats.put(copy _1, const 48) @749:9-749:21
+    switch copy _6 [0: bb22, else: bb23] @750:12-750:25
+  bb22:
+    _34 = gt copy _4, const 0 @754:12-754:25
+    switch copy _34 [0: bb24, else: bb25] @754:12-754:25
+  bb23:
+    _32 = call fn rt.floats.put(copy _1, const 46) @751:13-751:25
+    _33 = call fn rt.floats.put(copy _1, const 48) @752:13-752:25
+    _0 = const () @753:13-753:19
+    return @753:13-753:19
+  bb24:
+    _41 = call fn rt.floats.FIXED() @760:20-760:25
+    _40 = ne copy _3, copy _41 @760:12-760:25
+    switch copy _40 [0: bb28, else: bb29] @760:12-760:25
+  bb25:
+    _35 = call fn rt.floats.put(copy _1, const 46) @755:13-755:25
+    _36 = const 0 @756:21-756:22
+    goto bb26
+  bb26:
+    _37 = lt copy _36, copy _4 @757:19-757:32
+    switch copy _37 [0: bb24, else: bb27] @757:19-757:32
+  bb27:
+    _38 = call fn rt.floats.put(copy _1, const 48) @758:17-758:29
+    _39 = add copy _36, const 1 @759:17-759:23
+    _36 = move _39 @759:17-759:23
+    goto bb26
+  bb28:
+    _0 = const () @765:9-765:15
+    return @765:9-765:15
+  bb29:
+    _42 = call fn rt.floats.put(copy _1, const 101) @761:13-761:26
+    _43 = call fn rt.floats.put(copy _1, const 43) @762:13-762:25
+    _44 = call fn rt.floats.put(copy _1, const 48) @763:13-763:25
+    _45 = call fn rt.floats.put(copy _1, const 48) @764:13-764:25
+    goto bb28
+  bb30:
+    _46 = const -149 @766:28-766:32
+    goto bb32
+  bb31:
+    _46 = const -1074 @766:39-766:44
+    goto bb32
+  bb32:
+    _47 = copy _18 @767:13-767:16
+    _48 = copy _46 @768:13-768:18
+    _49 = add copy _11, const 1 @769:22-769:34
+    _50 = ne copy _16, const 0 @770:8-770:19
+    switch copy _50 [0: bb34, else: bb35] @770:8-770:19
+  bb33:
+    _63 = add copy _48, copy _49 @784:15-784:29
+    _62 = sub copy _63, const 1 @784:14-784:34
+    _61 = mul copy _62, const 78913 @784:14-784:42
+    _60 = floordiv copy _61, const 262144 @784:14-784:52
+    _59 = add copy _60, const 1 @784:14-784:56
+    switch copy _13 [0: bb39, else: bb38] @785:16-785:38
+  bb34:
+    _49 = const 0 @774:9-774:23
+    _55 = copy _47 @775:17-775:18
+    goto bb36
+  bb35:
+    _52 = shl const 1, copy _11 @771:19-771:34
+    _51 = add copy _18, copy _52 @771:13-771:34
+    _47 = copy _51 @771:9-771:34
+    _54 = add copy _16, copy _46 @772:13-772:27
+    _53 = sub copy _54, const 1 @772:13-772:31
+    _48 = copy _53 @772:9-772:31
+    goto bb33
+  bb36:
+    _56 = gt copy _55, const 0 @776:15-776:20
+    switch copy _56 [0: bb33, else: bb37] @776:15-776:20
+  bb37:
+    _57 = add copy _49, const 1 @777:13-777:28
+    _49 = move _57 @777:13-777:28
+    _58 = shr copy _55, const 1 @778:17-778:23
+    _55 = copy _58 @778:13-778:23
+    goto bb36
+  bb38:
+    _64 = const 1 @785:29-785:30
+    switch copy _6 [0: bb40, else: bb41] @786:8-786:21
+  bb39:
+    _64 = const 0 @785:37-785:38
+    switch copy _6 [0: bb40, else: bb41] @786:8-786:21
+  bb40:
+    _101 = gt copy _48, const 4 @817:8-817:13
+    switch copy _101 [0: bb58, else: bb59] @817:8-817:13
+  bb41:
+    _65 = call fn rt.floats.room(copy _1, const 48) @788:17-788:30
+    _67 = add copy _11, const 1 @790:37-790:49
+    _68 = call intrinsic mem.ptr.offset(copy _65, const 24) @790:69-790:81
+    _66 = call fn rt.floats.shortest(copy _47, copy _48, copy _67, copy _46, copy _59, copy _68) @790:22-790:82
+    _69 = copy _66.0 @790:14-790:15
+    _70 = copy _66.1 @790:17-790:18
+    _71 = copy _64 @791:17-791:21
+    _72 = le copy _70, const -4 @792:12-792:19
+    switch copy _72 [0: bb44, else: bb45] @792:12-792:30
+  bb42:
+    _100 = call fn rt.floats.set_len(copy _1, copy _71) @815:9-815:24
+    _0 = const () @816:9-816:15
+    return @816:9-816:15
+  bb43:
+    _85 = le copy _70, const 0 @801:14-801:20
+    switch copy _85 [0: bb54, else: bb55] @801:14-801:20
+  bb44:
+    _72 = ge copy _70, const 17 @792:23-792:30
+    switch copy _72 [0: bb43, else: bb46] @792:12-792:30
+  bb45:
+    switch copy _72 [0: bb43, else: bb46] @792:12-792:30
+  bb46:
+    _73 = call fn rt.floats.move_digits(copy _65, copy _71, const 24, const 0, const 1) @793:17-793:44
+    _71 = copy _73 @793:13-793:44
+    _74 = gt copy _69, const 1 @794:16-794:21
+    switch copy _74 [0: bb47, else: bb48] @794:16-794:21
+  bb47:
+    _77 = call fn rt.floats.at(copy _65, copy _71, const 101) @797:17-797:30
+    _71 = copy _77 @797:13-797:30
+    _79 = sub copy _70, const 1 @798:16-798:21
+    _78 = lt copy _79, const 0 @798:16-798:25
+    switch copy _78 [0: bb49, else: bb50] @798:16-798:25
+  bb48:
+    _75 = call fn rt.floats.at(copy _65, copy _71, const 46) @795:21-795:33
+    _71 = copy _75 @795:17-795:33
+    _76 = call fn rt.floats.move_digits(copy _65, copy _71, const 24, const 1, copy _69) @796:21-796:48
+    _71 = copy _76 @796:17-796:48
+    goto bb47
+  bb49:
+    _84 = sub copy _70, const 1 @800:39-800:44
+    _83 = lt copy _84, const 0 @800:39-800:48
+    switch copy _83 [0: bb52, else: bb51] @800:36-800:67
+  bb50:
+    _80 = call fn rt.floats.at(copy _65, copy _71, const 45) @799:21-799:33
+    _71 = copy _80 @799:17-799:33
+    goto bb49
+  bb51:
+    _82 = sub const 1, copy _70 @800:50-800:55
+    goto bb53
+  bb52:
+    _82 = sub copy _70, const 1 @800:62-800:67
+    goto bb53
+  bb53:
+    _81 = call fn rt.floats.small_number(copy _65, copy _71, copy _82, const 1) @800:17-800:71
+    _71 = copy _81 @800:13-800:71
+    goto bb42
+  bb54:
+    _91 = ge copy _70, copy _69 @806:14-806:20
+    switch copy _91 [0: bb56, else: bb57] @806:14-806:20
+  bb55:
+    _86 = call fn rt.floats.at(copy _65, copy _71, const 48) @802:17-802:29
+    _71 = copy _86 @802:13-802:29
+    _87 = call fn rt.floats.at(copy _65, copy _71, const 46) @803:17-803:29
+    _71 = copy _87 @803:13-803:29
+    _89 = neg copy _70 @804:29-804:31
+    _88 = call fn rt.floats.zeros(copy _65, copy _71, copy _89) @804:17-804:32
+    _71 = copy _88 @804:13-804:32
+    _90 = call fn rt.floats.move_digits(copy _65, copy _71, const 24, const 0, copy _69) @805:17-805:44
+    _71 = copy _90 @805:13-805:44
+    goto bb42
+  bb56:
+    _97 = call fn rt.floats.move_digits(copy _65, copy _71, const 24, const 0, copy _70) @812:17-812:44
+    _71 = copy _97 @812:13-812:44
+    _98 = call fn rt.floats.at(copy _65, copy _71, const 46) @813:17-813:29
+    _71 = copy _98 @813:13-813:29
+    _99 = call fn rt.floats.move_digits(copy _65, copy _71, const 24, copy _70, copy _69) @814:17-814:44
+    _71 = copy _99 @814:13-814:44
+    goto bb42
+  bb57:
+    _92 = call fn rt.floats.move_digits(copy _65, copy _71, const 24, const 0, copy _69) @807:17-807:44
+    _71 = copy _92 @807:13-807:44
+    _94 = sub copy _70, copy _69 @808:29-808:34
+    _93 = call fn rt.floats.zeros(copy _65, copy _71, copy _94) @808:17-808:35
+    _71 = copy _93 @808:13-808:35
+    _95 = call fn rt.floats.at(copy _65, copy _71, const 46) @809:17-809:29
+    _71 = copy _95 @809:13-809:29
+    _96 = call fn rt.floats.at(copy _65, copy _71, const 48) @810:17-810:29
+    _71 = copy _96 @810:13-810:29
+    goto bb42
+  bb58:
+    _105 = call fn rt.floats.scaled_small(copy _47, copy _48, copy _59) @820:34-820:56
+    _106 = copy _105.0 @820:10-820:15
+    _107 = copy _105.1 @820:17-820:18
+    _108 = copy _105.2 @820:20-820:21
+    _109 = copy _105.3 @820:23-820:30
+    _110 = copy _109 @821:13-821:20
+    _111 = call intrinsic mem.ptr.cast[u8, int](copy _1) @823:15-823:30
+    _112 = not copy _106 @824:8-824:17
+    switch copy _112 [0: bb60, else: bb61] @824:8-824:17
+  bb59:
+    _104 = call fn rt.floats.FIXED() @818:48-818:53
+    _103 = eq copy _3, copy _104 @818:40-818:53
+    _102 = call fn rt.floats.write_integer(copy _1, copy _64, copy _47, copy _48, copy _103, copy _4) @818:9-818:65
+    _0 = const () @819:9-819:15
+    return @819:9-819:15
+  bb60:
+    _123 = call fn rt.floats.FIXED() @836:28-836:33
+    _122 = eq copy _3, copy _123 @836:20-836:33
+    switch copy _122 [0: bb63, else: bb62] @836:17-836:68
+  bb61:
+    _117 = call fn rt.floats.BIG() @828:37-828:40
+    _116 = mul const 3, copy _117 @828:33-828:40
+    _115 = mul copy _116, const 8 @828:33-828:44
+    _114 = call intrinsic extern.c.sisu_rt_alloc(copy _115) @828:19-828:45
+    _113 = call intrinsic mem.ptr.cast[u8, int](copy _114) @828:19-828:57
+    _111 = copy _113 @828:13-828:57
+    _120 = call fn rt.floats.BIG() @829:40-829:43
+    _119 = call intrinsic mem.ptr.offset(copy _111, copy _120) @829:29-829:44
+    _118 = call fn rt.floats.scaled(copy _111, copy _119, copy _47, copy _48, copy _59) @829:17-829:55
+    _110 = copy _118 @829:13-829:55
+    goto bb60
+  bb62:
+    _121 = add copy _110, copy _4 @836:35-836:48
+    goto bb64
+  bb63:
+    _121 = add copy _4, const 1 @836:55-836:68
+    goto bb64
+  bb64:
+    _125 = gt copy _121, const 0 @837:21-837:30
+    switch copy _125 [0: bb66, else: bb65] @837:18-837:49
+  bb65:
+    _124 = add copy _121, const 1 @837:32-837:41
+    goto bb67
+  bb66:
+    _124 = const 1 @837:48-837:49
+    goto bb67
+  bb67:
+    _128 = ref _124 @838:23-838:29
+    _129 = add copy _4, const 1 @838:31-838:44
+    _130 = ref _129 @838:31-838:44
+    _127 = call intrinsic max(copy _128, copy _130) @838:19-838:45
+    _126 = add copy _127, const 8 @838:19-838:49
+    dead _129 @838:49-838:49
+    _132 = add copy _126, copy _124 @839:23-839:39
+    _131 = call fn rt.floats.room(copy _1, copy _132) @839:13-839:40
+    _133 = const 0 @840:13-840:14
+    _134 = gt copy _121, const 0 @841:8-841:17
+    switch copy _134 [0: bb69, else: bb70] @841:8-841:17
+  bb68:
+    _146 = not copy _106 @852:8-852:17
+    switch copy _146 [0: bb76, else: bb77] @852:8-852:17
+  bb69:
+    _143 = eq copy _121, const 0 @849:10-849:20
+    switch copy _143 [0: bb74, else: bb73] @849:10-849:57
+  bb70:
+    _133 = copy _121 @842:9-842:18
+    _136 = call intrinsic mem.ptr.offset(copy _131, copy _126) @844:50-844:67
+    _135 = call fn rt.floats.exact_digits(copy _106, copy _107, copy _108, copy _111, copy _136, copy _121) @844:12-844:75
+    switch copy _135 [0: bb68, else: bb71] @844:12-844:75
+  bb71:
+    _137 = add copy _110, const 1 @845:13-845:19
+    _110 = move _137 @845:13-845:19
+    _139 = call fn rt.floats.FIXED() @846:24-846:29
+    _138 = eq copy _3, copy _139 @846:16-846:29
+    switch copy _138 [0: bb68, else: bb72] @846:16-846:29
+  bb72:
+    _141 = add copy _126, copy _133 @847:30-847:41
+    _140 = call fn rt.floats.put_digit(copy _131, copy _141, const 0) @847:17-847:45
+    _142 = add copy _133, const 1 @848:17-848:23
+    _133 = move _142 @848:17-848:23
+    goto bb68
+  bb73:
+    _144 = call fn rt.floats.half_order(copy _106, copy _107, copy _108, copy _111) @849:25-849:53
+    _143 = gt copy _144, const 0 @849:25-849:57
+    switch copy _143 [0: bb68, else: bb75] @849:10-849:57
+  bb74:
+    switch copy _143 [0: bb68, else: bb75] @849:10-849:57
+  bb75:
+    _145 = call fn rt.floats.put_digit(copy _131, copy _126, const 1) @850:9-850:33
+    _133 = const 1 @851:9-851:14
+    goto bb68
+  bb76:
+    _149 = copy _64 @855:13-855:17
+    _151 = call fn rt.floats.FIXED() @856:16-856:21
+    _150 = eq copy _3, copy _151 @856:8-856:21
+    switch copy _150 [0: bb79, else: bb80] @856:8-856:21
+  bb77:
+    _148 = call intrinsic mem.ptr.cast[int, u8](copy _111) @854:29-854:43
+    _147 = call intrinsic extern.c.sisu_rt_free(copy _148) @854:16-854:44
+    goto bb76
+  bb78:
+    _182 = call fn rt.floats.set_len(copy _1, copy _149) @880:5-880:20
+    _0 = const ()
+    return
+  bb79:
+    _169 = call fn rt.floats.move_digits(copy _131, copy _149, copy _126, const 0, const 1) @873:13-873:45
+    _149 = copy _169 @873:9-873:45
+    _170 = gt copy _4, const 0 @874:12-874:25
+    switch copy _170 [0: bb87, else: bb88] @874:12-874:25
+  bb80:
+    _152 = eq copy _133, const 0 @857:12-857:18
+    switch copy _152 [0: bb81, else: bb82] @857:12-857:18
+  bb81:
+    _157 = le copy _133, copy _4 @862:14-862:28
+    switch copy _157 [0: bb84, else: bb85] @862:14-862:28
+  bb82:
+    _153 = call fn rt.floats.at(copy _131, copy _149, const 48) @858:17-858:29
+    _149 = copy _153 @858:13-858:29
+    _154 = gt copy _4, const 0 @859:16-859:29
+    switch copy _154 [0: bb78, else: bb83] @859:16-859:29
+  bb83:
+    _155 = call fn rt.floats.at(copy _131, copy _149, const 46) @860:21-860:33
+    _149 = copy _155 @860:17-860:33
+    _156 = call fn rt.floats.zeros(copy _131, copy _149, copy _4) @861:21-861:43
+    _149 = copy _156 @861:17-861:43
+    goto bb78
+  bb84:
+    _164 = sub copy _133, copy _4 @868:47-868:60
+    _163 = call fn rt.floats.move_digits(copy _131, copy _149, copy _126, const 0, copy _164) @868:17-868:61
+    _149 = copy _163 @868:13-868:61
+    _165 = gt copy _4, const 0 @869:16-869:29
+    switch copy _165 [0: bb78, else: bb86] @869:16-869:29
+  bb85:
+    _158 = call fn rt.floats.at(copy _131, copy _149, const 48) @863:17-863:29
+    _149 = copy _158 @863:13-863:29
+    _159 = call fn rt.floats.at(copy _131, copy _149, const 46) @864:17-864:29
+    _149 = copy _159 @864:13-864:29
+    _161 = sub copy _4, copy _133 @865:29-865:42
+    _160 = call fn rt.floats.zeros(copy _131, copy _149, copy _161) @865:17-865:43
+    _149 = copy _160 @865:13-865:43
+    _162 = call fn rt.floats.move_digits(copy _131, copy _149, copy _126, const 0, copy _133) @866:17-866:49
+    _149 = copy _162 @866:13-866:49
+    goto bb78
+  bb86:
+    _166 = call fn rt.floats.at(copy _131, copy _149, const 46) @870:21-870:33
+    _149 = copy _166 @870:17-870:33
+    _168 = sub copy _133, copy _4 @871:48-871:61
+    _167 = call fn rt.floats.move_digits(copy _131, copy _149, copy _126, copy _168, copy _133) @871:21-871:65
+    _149 = copy _167 @871:17-871:65
+    goto bb78
+  bb87:
+    _173 = call fn rt.floats.at(copy _131, copy _149, const 101) @877:13-877:26
+    _149 = copy _173 @877:9-877:26
+    _177 = sub copy _110, const 1 @878:25-878:30
+    _176 = lt copy _177, const 0 @878:25-878:34
+    switch copy _176 [0: bb90, else: bb89] @878:22-878:47
+  bb88:
+    _171 = call fn rt.floats.at(copy _131, copy _149, const 46) @875:17-875:29
+    _149 = copy _171 @875:13-875:29
+    _172 = call fn rt.floats.move_digits(copy _131, copy _149, copy _126, const 1, copy _133) @876:17-876:49
+    _149 = copy _172 @876:13-876:49
+    goto bb87
+  bb89:
+    _175 = const 45 @878:36-878:38
+    goto bb91
+  bb90:
+    _175 = const 43 @878:45-878:47
+    goto bb91
+  bb91:
+    _174 = call fn rt.floats.at(copy _131, copy _149, copy _175) @878:13-878:48
+    _149 = copy _174 @878:9-878:48
+    _181 = sub copy _110, const 1 @879:35-879:40
+    _180 = lt copy _181, const 0 @879:35-879:44
+    switch copy _180 [0: bb93, else: bb92] @879:32-879:63
+  bb92:
+    _179 = sub const 1, copy _110 @879:46-879:51
+    goto bb94
+  bb93:
+    _179 = sub copy _110, const 1 @879:58-879:63
+    goto bb94
+  bb94:
+    _178 = call fn rt.floats.small_number(copy _131, copy _149, copy _179, const 2) @879:13-879:67
+    _149 = copy _178 @879:9-879:67
+    goto bb78
+}
+
+fn rt.search.maximal_suffix(3) source 2 @16:5-16:19 {
     let _0: (int, int)
     let _1: ptr[u8] "part" @16:20-16:33
     let _2: int "m" @16:35-16:41
@@ -481,7 +3134,7 @@ fn rt.search.maximal_suffix(3) source 1 @16:5-16:19 {
     goto bb1
 }
 
-fn rt.search.same_run(4) source 1 @47:5-47:13 {
+fn rt.search.same_run(4) source 2 @47:5-47:13 {
     let _0: bool
     let _1: ptr[u8] "part" @47:14-47:27
     let _2: int "a" @47:29-47:35
@@ -524,7 +3177,7 @@ fn rt.search.same_run(4) source 1 @47:5-47:13 {
     return @54:17-54:29
 }
 
-fn rt.search.find(4) source 1 @63:18-63:22 {
+fn rt.search.find(4) source 2 @63:18-63:22 {
     let _0: int
     let _1: ptr[u8] "text" @63:23-63:36
     let _2: int "n" @63:38-63:44
@@ -820,7 +3473,7 @@ fn rt.search.find(4) source 1 @63:18-63:22 {
     return @121:21-121:29
 }
 
-fn rt.search.has_edge(5) source 1 @132:18-132:26 {
+fn rt.search.has_edge(5) source 2 @132:18-132:26 {
     let _0: bool
     let _1: ptr[u8] "text" @132:27-132:40
     let _2: int "n" @132:42-132:48
@@ -878,7 +3531,7 @@ fn rt.search.has_edge(5) source 1 @132:18-132:26 {
     return @142:17-142:29
 }
 
-fn rt.text.grow(3) source 2 @22:18-22:22 {
+fn rt.text.grow(3) source 3 @22:18-22:22 {
     let _0: ptr_mut[u8]
     let _1: ptr_mut[u8] "t" @22:23-22:36
     let _2: int "need" @22:38-22:47
@@ -951,7 +3604,7 @@ fn rt.text.grow(3) source 2 @22:18-22:22 {
     return @40:13-40:47
 }
 
-fn rt.text.from_bytes(3) source 2 @48:18-48:28 {
+fn rt.text.from_bytes(3) source 3 @48:18-48:28 {
     let _0: ()
     let _1: ptr_mut[u8] "dst" @48:29-48:44
     let _2: ptr_mut[u8] "b" @48:46-48:59
@@ -1009,7 +3662,7 @@ fn rt.text.from_bytes(3) source 2 @48:18-48:28 {
     return
 }
 
-fn rt.text.digit_code(2) pure source 2 @68:10-68:20 {
+fn rt.text.digit_code(2) pure source 3 @68:10-68:20 {
     let _0: int
     let _1: int "d" @68:21-68:27
     let _2: bool "upper" @68:29-68:40
@@ -1034,7 +3687,7 @@ fn rt.text.digit_code(2) pure source 2 @68:10-68:20 {
     return @71:5-71:39
 }
 
-fn rt.text.digits(5) source 2 @80:18-80:24 {
+fn rt.text.digits(5) source 3 @80:18-80:24 {
     let _0: ()
     let _1: ptr_mut[u8] "dst" @80:25-80:40
     let _2: int "low" @80:42-80:50
@@ -1157,7 +3810,7 @@ fn rt.text.digits(5) source 2 @80:18-80:24 {
     switch copy _38 [0: bb1, else: bb2] @110:16-110:59
 }
 
-fn rt.value.target(3) source 3 @117:18-117:24 {
+fn rt.value.target(3) source 4 @117:18-117:24 {
     let _0: (ptr_mut[u8], int)
     let _1: rt.types.Types "ts" @117:25-117:34
     let _2: ptr_mut[u8] "p" @117:36-117:49
@@ -1265,7 +3918,7 @@ fn rt.value.target(3) source 3 @117:18-117:24 {
     goto bb9
 }
 
-fn rt.value.concrete(3) source 3 @143:5-143:13 {
+fn rt.value.concrete(3) source 4 @143:5-143:13 {
     let _0: int
     let _1: rt.types.Types "ts" @143:14-143:23
     let _2: ptr_mut[u8] "p" @143:25-143:38
@@ -1300,7 +3953,7 @@ fn rt.value.concrete(3) source 3 @143:5-143:13 {
     return @148:13-148:40
 }
 
-fn rt.value.variant(3) source 3 @156:5-156:12 {
+fn rt.value.variant(3) source 4 @156:5-156:12 {
     let _0: int
     let _1: rt.types.Types "ts" @156:13-156:22
     let _2: ptr_mut[u8] "p" @156:24-156:37
@@ -1350,7 +4003,7 @@ fn rt.value.variant(3) source 3 @156:5-156:12 {
     return @163:13-163:21
 }
 
-fn rt.value.fn_env(2) source 3 @172:5-172:11 {
+fn rt.value.fn_env(2) source 4 @172:5-172:11 {
     let _0: int
     let _1: ptr_mut[u8] "p" @172:12-172:25
     let _2: ptr[int] "h" @172:27-172:38
@@ -1373,7 +4026,7 @@ fn rt.value.fn_env(2) source 3 @172:5-172:11 {
     return @176:9-176:74
 }
 
-fn rt.value.is_text(1) pure source 3 @180:10-180:17 {
+fn rt.value.is_text(1) pure source 4 @180:10-180:17 {
     let _0: bool
     let _1: int "k" @180:18-180:24
     let _2: int
@@ -1397,7 +4050,7 @@ fn rt.value.is_text(1) pure source 3 @180:10-180:17 {
     return @181:5-181:48
 }
 
-fn rt.value.same_bytes(4) source 3 @189:18-189:28 {
+fn rt.value.same_bytes(4) source 4 @189:18-189:28 {
     let _0: bool
     let _1: ptr[u8] "a" @189:29-189:39
     let _2: int "na" @189:41-189:48
@@ -1424,7 +4077,7 @@ fn rt.value.same_bytes(4) source 3 @189:18-189:28 {
     return @193:9-193:20
 }
 
-fn rt.value.f32_equal(2) pure source 3 @200:10-200:19 {
+fn rt.value.f32_equal(2) pure source 4 @200:10-200:19 {
     let _0: bool
     let _1: int "x" @200:20-200:26
     let _2: int "y" @200:28-200:34
@@ -1458,7 +4111,7 @@ fn rt.value.f32_equal(2) pure source 3 @200:10-200:19 {
     return @205:5-205:49
 }
 
-fn rt.value.f32_nan(1) pure source 3 @208:10-208:17 {
+fn rt.value.f32_nan(1) pure source 4 @208:10-208:17 {
     let _0: bool
     let _1: int "bits" @208:18-208:27
     let _2: int
@@ -1475,7 +4128,7 @@ fn rt.value.f32_nan(1) pure source 3 @208:10-208:17 {
     return @209:5-209:71
 }
 
-fn rt.value.equal(5) source 3 @217:18-217:23 {
+fn rt.value.equal(5) source 4 @217:18-217:23 {
     let _0: bool
     let _1: rt.types.Types "ts" @217:24-217:33
     let _2: ptr_mut[u8] "a0" @217:35-217:49
@@ -2183,7 +4836,7 @@ fn rt.value.equal(5) source 3 @217:18-217:23 {
     return @313:13-317:14
 }
 
-fn rt.value.enum_equal(5) source 3 @325:5-325:15 {
+fn rt.value.enum_equal(5) source 4 @325:5-325:15 {
     let _0: bool
     let _1: rt.types.Types "ts" @325:16-325:25
     let _2: ptr_mut[u8] "a" @325:27-325:40
@@ -2303,7 +4956,7 @@ fn rt.value.enum_equal(5) source 3 @325:5-325:15 {
     return @337:13-337:25
 }
 
-fn rt.value.fields_equal(5) source 3 @345:5-345:17 {
+fn rt.value.fields_equal(5) source 4 @345:5-345:17 {
     let _0: bool
     let _1: rt.types.Types "ts" @345:18-345:27
     let _2: ptr_mut[u8] "a" @345:29-345:42
@@ -2393,7 +5046,7 @@ fn rt.value.fields_equal(5) source 3 @345:5-345:17 {
     return @362:17-362:29
 }
 
-fn rt.value.signed_order(2) pure source 3 @375:10-375:22 {
+fn rt.value.signed_order(2) pure source 4 @375:10-375:22 {
     let _0: int
     let _1: int "x" @375:23-375:29
     let _2: int "y" @375:31-375:37
@@ -2416,7 +5069,7 @@ fn rt.value.signed_order(2) pure source 3 @375:10-375:22 {
     return @379:9-379:23
 }
 
-fn rt.value.unsigned_order(2) pure source 3 @384:10-384:24 {
+fn rt.value.unsigned_order(2) pure source 4 @384:10-384:24 {
     let _0: int
     let _1: int "x" @384:25-384:31
     let _2: int "y" @384:33-384:39
@@ -2443,7 +5096,7 @@ fn rt.value.unsigned_order(2) pure source 3 @384:10-384:24 {
     return @387:5-387:40
 }
 
-fn rt.value.bytes_order(4) source 3 @394:5-394:16 {
+fn rt.value.bytes_order(4) source 4 @394:5-394:16 {
     let _0: int
     let _1: ptr[u8] "a" @394:17-394:27
     let _2: int "na" @394:29-394:36
@@ -2480,7 +5133,7 @@ fn rt.value.bytes_order(4) source 3 @394:5-394:16 {
     return @403:13-403:27
 }
 
-fn rt.value.f32_order(2) pure source 3 @409:10-409:19 {
+fn rt.value.f32_order(2) pure source 4 @409:10-409:19 {
     let _0: int
     let _1: int "x" @409:20-409:26
     let _2: int "y" @409:28-409:34
@@ -2558,7 +5211,7 @@ fn rt.value.f32_order(2) pure source 3 @409:10-409:19 {
     return @420:5-420:45
 }
 
-fn rt.value.float_order(2) pure source 3 @423:10-423:21 {
+fn rt.value.float_order(2) pure source 4 @423:10-423:21 {
     let _0: int
     let _1: f64 "x" @423:22-423:28
     let _2: f64 "y" @423:30-423:36
@@ -2588,7 +5241,7 @@ fn rt.value.float_order(2) pure source 3 @423:10-423:21 {
     return @429:9-429:21
 }
 
-fn rt.value.order(5) source 3 @441:18-441:23 {
+fn rt.value.order(5) source 4 @441:18-441:23 {
     let _0: int
     let _1: rt.types.Types "ts" @441:24-441:33
     let _2: ptr_mut[u8] "a0" @441:35-441:49
@@ -3210,7 +5863,7 @@ fn rt.value.order(5) source 3 @441:18-441:23 {
     return @519:13-525:14
 }
 
-fn rt.value.enum_order(5) source 3 @532:5-532:15 {
+fn rt.value.enum_order(5) source 4 @532:5-532:15 {
     let _0: int
     let _1: rt.types.Types "ts" @532:16-532:25
     let _2: ptr_mut[u8] "a" @532:27-532:40
@@ -3332,7 +5985,7 @@ fn rt.value.enum_order(5) source 3 @532:5-532:15 {
     return @548:13-548:21
 }
 
-fn rt.value.fields_order(5) source 3 @556:5-556:17 {
+fn rt.value.fields_order(5) source 4 @556:5-556:17 {
     let _0: int
     let _1: rt.types.Types "ts" @556:18-556:27
     let _2: ptr_mut[u8] "a" @556:29-556:42
@@ -3424,7 +6077,7 @@ fn rt.value.fields_order(5) source 3 @556:5-556:17 {
     return @574:17-574:25
 }
 
-fn rt.value.hash_bytes(3) source 3 @585:5-585:15 {
+fn rt.value.hash_bytes(3) source 4 @585:5-585:15 {
     let _0: int
     let _1: int "state" @585:16-585:26
     let _2: ptr[u8] "p" @585:28-585:38
@@ -3466,7 +6119,7 @@ fn rt.value.hash_bytes(3) source 3 @585:5-585:15 {
     goto bb1
 }
 
-fn rt.value.hash(4) source 3 @607:18-607:22 {
+fn rt.value.hash(4) source 4 @607:18-607:22 {
     let _0: int
     let _1: rt.types.Types "ts" @607:23-607:32
     let _2: int "state" @607:34-607:44
@@ -3886,7 +6539,7 @@ fn rt.value.hash(4) source 3 @607:18-607:22 {
     return @670:17-670:25
 }
 
-fn rt.value.hash_fields(4) source 3 @678:5-678:16 {
+fn rt.value.hash_fields(4) source 4 @678:5-678:16 {
     let _0: int
     let _1: rt.types.Types "ts" @678:17-678:26
     let _2: int "state" @678:28-678:38
@@ -3933,7 +6586,7 @@ fn rt.value.hash_fields(4) source 3 @678:5-678:16 {
     goto bb1
 }
 
-fn rt.value.move_bytes(3) source 3 @699:5-699:15 {
+fn rt.value.move_bytes(3) source 4 @699:5-699:15 {
     let _0: ()
     let _1: ptr_mut[u8] "dst" @699:16-699:31
     let _2: ptr_mut[u8] "src" @699:33-699:48
@@ -3967,7 +6620,7 @@ fn rt.value.move_bytes(3) source 3 @699:5-699:15 {
     goto bb1
 }
 
-fn rt.value.copy_parts(4) source 3 @714:5-714:15 {
+fn rt.value.copy_parts(4) source 4 @714:5-714:15 {
     let _0: ()
     let _1: rt.types.Types "ts" @714:16-714:25
     let _2: ptr_mut[u8] "dst" @714:27-714:42
@@ -4017,7 +6670,7 @@ fn rt.value.copy_parts(4) source 3 @714:5-714:15 {
     goto bb1
 }
 
-fn rt.value.copy_fields(4) source 3 @731:5-731:16 {
+fn rt.value.copy_fields(4) source 4 @731:5-731:16 {
     let _0: ()
     let _1: rt.types.Types "ts" @731:17-731:26
     let _2: ptr_mut[u8] "dst" @731:28-731:43
@@ -4063,7 +6716,7 @@ fn rt.value.copy_fields(4) source 3 @731:5-731:16 {
     goto bb1
 }
 
-fn rt.value.new_buffer(6) source 3 @752:5-752:15 {
+fn rt.value.new_buffer(6) source 4 @752:5-752:15 {
     let _0: ()
     let _1: ptr_mut[u8] "dst" @752:16-752:31
     let _2: ptr[u8] "src" @752:33-752:45
@@ -4117,7 +6770,7 @@ fn rt.value.new_buffer(6) source 3 @752:5-752:15 {
     goto bb3
 }
 
-fn rt.value.copy_list(4) source 3 @775:5-775:14 {
+fn rt.value.copy_list(4) source 4 @775:5-775:14 {
     let _0: ()
     let _1: rt.types.Types "ts" @775:15-775:24
     let _2: ptr_mut[u8] "dst" @775:26-775:41
@@ -4283,7 +6936,7 @@ fn rt.value.copy_list(4) source 3 @775:5-775:14 {
     goto bb21
 }
 
-fn rt.value.copy(4) source 3 @813:18-813:22 {
+fn rt.value.copy(4) source 4 @813:18-813:22 {
     let _0: ()
     let _1: rt.types.Types "ts" @813:23-813:32
     let _2: ptr_mut[u8] "dst" @813:34-813:49
@@ -4854,7 +7507,7 @@ fn rt.value.copy(4) source 3 @813:18-813:22 {
     goto bb14
 }
 
-fn rt.value.retain(3) source 3 @919:18-919:24 {
+fn rt.value.retain(3) source 4 @919:18-919:24 {
     let _0: ()
     let _1: rt.types.Types "ts" @919:25-919:34
     let _2: ptr_mut[u8] "p" @919:36-919:49
@@ -5053,7 +7706,7 @@ fn rt.value.retain(3) source 3 @919:18-919:24 {
     goto bb3
 }
 
-fn rt.value.after_part(2) source 3 @956:5-956:15 {
+fn rt.value.after_part(2) source 4 @956:5-956:15 {
     let _0: int
     let _1: int "before" @956:16-956:27
     let _2: int "now" @956:29-956:37
@@ -5082,7 +7735,7 @@ fn rt.value.after_part(2) source 3 @956:5-956:15 {
     return @960:9-960:22
 }
 
-fn rt.value.run_glue(2) source 3 @971:5-971:13 {
+fn rt.value.run_glue(2) source 4 @971:5-971:13 {
     let _0: int
     let _1: int "glue" @971:14-971:23
     let _2: ptr_mut[u8] "p" @971:25-971:38
@@ -5102,7 +7755,7 @@ fn rt.value.run_glue(2) source 3 @971:5-971:13 {
     return @973:9-973:18
 }
 
-fn rt.value.drop_parts(4) source 3 @982:5-982:15 {
+fn rt.value.drop_parts(4) source 4 @982:5-982:15 {
     let _0: int
     let _1: rt.types.Types "ts" @982:16-982:25
     let _2: ptr_mut[u8] "p" @982:27-982:40
@@ -5170,7 +7823,7 @@ fn rt.value.drop_parts(4) source 3 @982:5-982:15 {
     goto bb4
 }
 
-fn rt.value.drop_fields(5) source 3 @1005:5-1005:16 {
+fn rt.value.drop_fields(5) source 4 @1005:5-1005:16 {
     let _0: int
     let _1: rt.types.Types "ts" @1005:17-1005:26
     let _2: ptr_mut[u8] "p" @1005:28-1005:41
@@ -5250,7 +7903,7 @@ fn rt.value.drop_fields(5) source 3 @1005:5-1005:16 {
     goto bb4
 }
 
-fn rt.value.free_buffer(1) source 3 @1027:5-1027:16 {
+fn rt.value.free_buffer(1) source 4 @1027:5-1027:16 {
     let _0: ()
     let _1: ptr_mut[u8] "p" @1027:17-1027:30
     let _2: ptr_mut[int] "w" @1032:13-1032:14
@@ -5286,7 +7939,7 @@ fn rt.value.free_buffer(1) source 3 @1027:5-1027:16 {
     goto bb1
 }
 
-fn rt.value.drop_rest(4) source 3 @1046:18-1046:27 {
+fn rt.value.drop_rest(4) source 4 @1046:18-1046:27 {
     let _0: int
     let _1: rt.types.Types "ts" @1046:28-1046:37
     let _2: ptr_mut[u8] "p" @1046:39-1046:52
@@ -5335,7 +7988,7 @@ fn rt.value.drop_rest(4) source 3 @1046:18-1046:27 {
     return @1057:17-1057:62
 }
 
-fn rt.value.drop(4) source 3 @1070:18-1070:22 {
+fn rt.value.drop(4) source 4 @1070:18-1070:22 {
     let _0: int
     let _1: rt.types.Types "ts" @1070:23-1070:32
     let _2: ptr_mut[u8] "p" @1070:34-1070:47
@@ -5979,462 +8632,504 @@ fn rt.value.drop(4) source 3 @1070:18-1070:22 {
     return @1189:13-1189:54
 }
 
-fn rt.types.UNIT(0) value pure source 4 {
+fn rt.floats.SHORTEST(0) value pure source 1 {
+    let _0: int
+  bb0:
+    _0 = const 0 @32:23-32:24
+    return @32:23-32:24
+}
+
+fn rt.floats.SHORTEST32(0) value pure source 1 {
+    let _0: int
+  bb0:
+    _0 = const 1 @33:25-33:26
+    return @33:25-33:26
+}
+
+fn rt.floats.FIXED(0) value pure source 1 {
+    let _0: int
+  bb0:
+    _0 = const 2 @34:20-34:21
+    return @34:20-34:21
+}
+
+fn rt.floats.BIG(0) value pure source 1 {
+    let _0: int
+  bb0:
+    _0 = const 41 @37:18-37:20
+    return @37:18-37:20
+}
+
+fn rt.floats.MASK(0) value pure source 1 {
+    let _0: int
+  bb0:
+    _0 = const 4294967295 @38:19-38:29
+    return @38:19-38:29
+}
+
+fn rt.floats.LIMIT(0) value pure source 1 {
+    let _0: int
+  bb0:
+    _0 = const 200000000000000000 @42:20-42:38
+    return @42:20-42:38
+}
+
+fn rt.types.UNIT(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 0 @10:23-10:24
     return @10:23-10:24
 }
 
-fn rt.types.INT(0) value pure source 4 {
+fn rt.types.INT(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 1 @11:22-11:23
     return @11:22-11:23
 }
 
-fn rt.types.SIZED(0) value pure source 4 {
+fn rt.types.SIZED(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 2 @12:24-12:25
     return @12:24-12:25
 }
 
-fn rt.types.U64(0) value pure source 4 {
+fn rt.types.U64(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 3 @13:22-13:23
     return @13:22-13:23
 }
 
-fn rt.types.FLOAT(0) value pure source 4 {
+fn rt.types.FLOAT(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 4 @14:24-14:25
     return @14:24-14:25
 }
 
-fn rt.types.F32(0) value pure source 4 {
+fn rt.types.F32(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 5 @15:22-15:23
     return @15:22-15:23
 }
 
-fn rt.types.BOOL(0) value pure source 4 {
+fn rt.types.BOOL(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 6 @16:23-16:24
     return @16:23-16:24
 }
 
-fn rt.types.CHAR(0) value pure source 4 {
+fn rt.types.CHAR(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 7 @17:23-17:24
     return @17:23-17:24
 }
 
-fn rt.types.STR(0) value pure source 4 {
+fn rt.types.STR(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 8 @18:22-18:23
     return @18:22-18:23
 }
 
-fn rt.types.STRING(0) value pure source 4 {
+fn rt.types.STRING(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 9 @19:25-19:26
     return @19:25-19:26
 }
 
-fn rt.types.PATH(0) value pure source 4 {
+fn rt.types.PATH(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 10 @20:23-20:25
     return @20:23-20:25
 }
 
-fn rt.types.REF(0) value pure source 4 {
+fn rt.types.REF(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 11 @21:22-21:24
     return @21:22-21:24
 }
 
-fn rt.types.LIST(0) value pure source 4 {
+fn rt.types.LIST(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 12 @22:23-22:25
     return @22:23-22:25
 }
 
-fn rt.types.ITER(0) value pure source 4 {
+fn rt.types.ITER(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 13 @23:23-23:25
     return @23:23-23:25
 }
 
-fn rt.types.OPTION(0) value pure source 4 {
+fn rt.types.OPTION(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 14 @24:25-24:27
     return @24:25-24:27
 }
 
-fn rt.types.RESULT(0) value pure source 4 {
+fn rt.types.RESULT(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 15 @25:25-25:27
     return @25:25-25:27
 }
 
-fn rt.types.TUPLE(0) value pure source 4 {
+fn rt.types.TUPLE(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 16 @26:24-26:26
     return @26:24-26:26
 }
 
-fn rt.types.BOX(0) value pure source 4 {
+fn rt.types.BOX(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 17 @27:22-27:24
     return @27:22-27:24
 }
 
-fn rt.types.STRUCT(0) value pure source 4 {
+fn rt.types.STRUCT(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 18 @28:25-28:27
     return @28:25-28:27
 }
 
-fn rt.types.ENUM(0) value pure source 4 {
+fn rt.types.ENUM(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 19 @29:23-29:25
     return @29:23-29:25
 }
 
-fn rt.types.ERRSET(0) value pure source 4 {
+fn rt.types.ERRSET(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 20 @30:25-30:27
     return @30:25-30:27
 }
 
-fn rt.types.FN(0) value pure source 4 {
+fn rt.types.FN(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 21 @31:21-31:23
     return @31:21-31:23
 }
 
-fn rt.types.DICT(0) value pure source 4 {
+fn rt.types.DICT(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 24 @34:23-34:25
     return @34:23-34:25
 }
 
-fn rt.types.SET(0) value pure source 4 {
+fn rt.types.SET(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 25 @35:22-35:24
     return @35:22-35:24
 }
 
-fn rt.types.ENTRY(0) value pure source 4 {
+fn rt.types.ENTRY(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 26 @36:24-36:26
     return @36:24-36:26
 }
 
-fn rt.types.I128(0) value pure source 4 {
+fn rt.types.I128(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 27 @37:23-37:25
     return @37:23-37:25
 }
 
-fn rt.types.U128(0) value pure source 4 {
+fn rt.types.U128(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 28 @38:23-38:25
     return @38:23-38:25
 }
 
-fn rt.types.DYN(0) value pure source 4 {
+fn rt.types.DYN(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 29 @39:22-39:24
     return @39:22-39:24
 }
 
-fn rt.types.SENDER(0) value pure source 4 {
+fn rt.types.SENDER(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 33 @43:25-43:27
     return @43:25-43:27
 }
 
-fn rt.types.RECEIVER(0) value pure source 4 {
+fn rt.types.RECEIVER(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 34 @44:27-44:29
     return @44:27-44:29
 }
 
-fn rt.types.MUTEX(0) value pure source 4 {
+fn rt.types.MUTEX(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 36 @46:24-46:26
     return @46:24-46:26
 }
 
-fn rt.types.GUARD(0) value pure source 4 {
+fn rt.types.GUARD(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 37 @47:24-47:26
     return @47:24-47:26
 }
 
-fn rt.types.SHARED(0) value pure source 4 {
+fn rt.types.SHARED(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 38 @48:25-48:27
     return @48:25-48:27
 }
 
-fn rt.types.WEAK(0) value pure source 4 {
+fn rt.types.WEAK(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 39 @49:23-49:25
     return @49:23-49:25
 }
 
-fn rt.types.CELL(0) value pure source 4 {
+fn rt.types.CELL(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 40 @50:23-50:25
     return @50:23-50:25
 }
 
-fn rt.types.ARENA(0) value pure source 4 {
+fn rt.types.ARENA(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 41 @51:24-51:26
     return @51:24-51:26
 }
 
-fn rt.types.BYTES(0) value pure source 4 {
+fn rt.types.BYTES(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 42 @52:24-52:26
     return @52:24-52:26
 }
 
-fn rt.types.DATETIME(0) value pure source 4 {
+fn rt.types.DATETIME(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 43 @53:27-53:29
     return @53:27-53:29
 }
 
-fn rt.types.RW_LOCK(0) value pure source 4 {
+fn rt.types.RW_LOCK(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 44 @54:26-54:28
     return @54:26-54:28
 }
 
-fn rt.types.READ_GUARD(0) value pure source 4 {
+fn rt.types.READ_GUARD(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 45 @55:29-55:31
     return @55:29-55:31
 }
 
-fn rt.types.NEEDS_DROP(0) value pure source 4 {
+fn rt.types.NEEDS_DROP(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 1 @63:29-63:30
     return @63:29-63:30
 }
 
-fn rt.types.PLAIN(0) value pure source 4 {
+fn rt.types.PLAIN(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 2 @64:24-64:25
     return @64:24-64:25
 }
 
-fn rt.types.ERROR(0) value pure source 4 {
+fn rt.types.ERROR(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 4 @65:24-65:25
     return @65:24-65:25
 }
 
-fn rt.types.COUNTED(0) value pure source 4 {
+fn rt.types.COUNTED(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 8 @66:26-66:27
     return @66:26-66:27
 }
 
-fn rt.types.DROPS_BY_VARIANT(0) value pure source 4 {
+fn rt.types.DROPS_BY_VARIANT(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 16 @67:35-67:37
     return @67:35-67:37
 }
 
-fn rt.types.COPIES_BY_VARIANT(0) value pure source 4 {
+fn rt.types.COPIES_BY_VARIANT(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 32 @68:36-68:38
     return @68:36-68:38
 }
 
-fn rt.types.WORDS(0) value pure source 4 {
+fn rt.types.WORDS(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 10 @71:24-71:26
     return @71:24-71:26
 }
 
-fn rt.types.SIZE(0) value pure source 4 {
+fn rt.types.SIZE(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 1 @73:23-73:24
     return @73:23-73:24
 }
 
-fn rt.types.FLAGS(0) value pure source 4 {
+fn rt.types.FLAGS(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 2 @74:24-74:25
     return @74:24-74:25
 }
 
-fn rt.types.A(0) value pure source 4 {
+fn rt.types.A(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 3 @75:20-75:21
     return @75:20-75:21
 }
 
-fn rt.types.B(0) value pure source 4 {
+fn rt.types.B(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 4 @76:20-76:21
     return @76:20-76:21
 }
 
-fn rt.types.NAME(0) value pure source 4 {
+fn rt.types.NAME(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 5 @77:23-77:24
     return @77:23-77:24
 }
 
-fn rt.types.PARTS(0) value pure source 4 {
+fn rt.types.PARTS(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 6 @78:24-78:25
     return @78:24-78:25
 }
 
-fn rt.types.DROPS(0) value pure source 4 {
+fn rt.types.DROPS(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 7 @79:24-79:25
     return @79:24-79:25
 }
 
-fn rt.types.COPIES(0) value pure source 4 {
+fn rt.types.COPIES(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 8 @80:25-80:26
     return @80:25-80:26
 }
 
-fn rt.types.TAG(0) value pure source 4 {
+fn rt.types.TAG(0) value pure source 5 {
     let _0: int
   bb0:
     _0 = const 9 @81:22-81:23
     return @81:22-81:23
 }
 
-fn rt.value.OK(0) value pure source 3 {
+fn rt.value.OK(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 0 @92:21-92:22
     return @92:21-92:22
 }
 
-fn rt.value.FORGETTING(0) value pure source 3 {
+fn rt.value.FORGETTING(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 1 @99:29-99:30
     return @99:29-99:30
 }
 
-fn rt.value.DEFERRING(0) value pure source 3 {
+fn rt.value.DEFERRING(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 2 @100:28-100:29
     return @100:28-100:29
 }
 
-fn rt.value.MUTEX_HEADER(0) value pure source 3 {
+fn rt.value.MUTEX_HEADER(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 32 @104:27-104:29
     return @104:27-104:29
 }
 
-fn rt.value.MUTEX_POISONED(0) value pure source 3 {
+fn rt.value.MUTEX_POISONED(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 16 @105:29-105:31
     return @105:29-105:31
 }
 
-fn rt.value.PRIME(0) value pure source 3 {
+fn rt.value.PRIME(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 1099511628211 @108:20-108:33
     return @108:20-108:33
 }
 
-fn rt.value.LESS(0) value pure source 3 {
+fn rt.value.LESS(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const -1 @369:23-369:25
     return @369:23-369:25
 }
 
-fn rt.value.EQUAL(0) value pure source 3 {
+fn rt.value.EQUAL(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 0 @370:24-370:25
     return @370:24-370:25
 }
 
-fn rt.value.GREATER(0) value pure source 3 {
+fn rt.value.GREATER(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 1 @371:26-371:27
     return @371:26-371:27
 }
 
-fn rt.value.UNORDERED(0) value pure source 3 {
+fn rt.value.UNORDERED(0) value pure source 4 {
     let _0: int
   bb0:
     _0 = const 2 @372:28-372:29

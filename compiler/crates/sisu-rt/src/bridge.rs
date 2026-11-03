@@ -85,6 +85,13 @@ unsafe extern "C" {
         base: *const i64,
         upper: *const u64,
     ) -> u8;
+    fn sisu_rt_float_digits(
+        ret: *mut u64,
+        dst: *const *mut u8,
+        bits: *const i64,
+        mode: *const i64,
+        precision: *const i64,
+    ) -> u8;
 }
 
 /// `mode` of a drop: it forgets (decision 223), or it defers what would run
@@ -98,11 +105,22 @@ fn failed(what: &str) -> ! {
     rt::internal(&format!("the runtime in Sisu failed in its {what}"))
 }
 
+/// Whether the type table has type `t`. A number outside it is `()`, as
+/// `rt::ty` reads it: the values of a set's table, which has none
+/// (`u32::MAX`), and only a broken program's otherwise; the runtime in Sisu,
+/// which reads the table's words, is not given one.
+fn known(t: u32) -> bool {
+    rt::ty_checked(t).is_some()
+}
+
 /// Structural equality, through references.
 ///
 /// # Safety
 /// `a` and `b` must hold values of types `ta` and `tb`.
 pub(crate) unsafe fn equal(a: *mut u8, ta: u32, b: *mut u8, tb: u32) -> bool {
+    if !known(ta) || !known(tb) {
+        return !known(ta) && !known(tb);
+    }
     let types = crate::desc::base();
     let (ta, tb) = (i64::from(ta), i64::from(tb));
     let mut ret = 0u64;
@@ -120,6 +138,9 @@ pub(crate) unsafe fn equal(a: *mut u8, ta: u32, b: *mut u8, tb: u32) -> bool {
 /// # Safety
 /// `a` and `b` must hold values of types `ta` and `tb`.
 pub(crate) unsafe fn compare(a: *mut u8, ta: u32, b: *mut u8, tb: u32) -> Option<std::cmp::Ordering> {
+    if !known(ta) || !known(tb) {
+        return (!known(ta) && !known(tb)).then_some(std::cmp::Ordering::Equal);
+    }
     let types = crate::desc::base();
     let (ta, tb) = (i64::from(ta), i64::from(tb));
     let mut ret = 0i64;
@@ -141,6 +162,9 @@ pub(crate) unsafe fn compare(a: *mut u8, ta: u32, b: *mut u8, tb: u32) -> Option
 /// # Safety
 /// `p` must hold a value of type `t`.
 pub(crate) unsafe fn hash(state: u64, p: *mut u8, t: u32) -> u64 {
+    if !known(t) {
+        return state;
+    }
     let types = crate::desc::base();
     let (state, t) = (state as i64, i64::from(t));
     let mut ret = 0i64;
@@ -156,6 +180,9 @@ pub(crate) unsafe fn hash(state: u64, p: *mut u8, t: u32) -> u64 {
 /// # Safety
 /// `src` must hold a value of type `t`, and `dst` have room for one.
 pub(crate) unsafe fn copy(dst: *mut u8, src: *mut u8, t: u32) {
+    if !known(t) {
+        return;
+    }
     let types = crate::desc::base();
     let t = i64::from(t);
     let mut ret = 0u64;
@@ -177,6 +204,9 @@ fn mode() -> i64 {
 /// # Safety
 /// `p` must hold a value of type `t`, which is dead afterwards.
 pub(crate) unsafe fn drop(p: *mut u8, t: u32) -> u8 {
+    if !known(t) {
+        return abi::OK;
+    }
     let types = crate::desc::base();
     let (t, mode) = (i64::from(t), mode());
     let mut ret = 0i64;
@@ -193,6 +223,9 @@ pub(crate) unsafe fn drop(p: *mut u8, t: u32) -> u8 {
 /// # Safety
 /// `p` must hold a value of type `t` whose glue has run, dead afterwards.
 pub(crate) unsafe fn drop_rest(p: *mut u8, t: u32) -> u8 {
+    if !known(t) {
+        return abi::OK;
+    }
     let types = crate::desc::base();
     let (t, mode) = (i64::from(t), mode());
     let mut ret = 0i64;
@@ -208,6 +241,9 @@ pub(crate) unsafe fn drop_rest(p: *mut u8, t: u32) -> u8 {
 /// # Safety
 /// `p` must hold a value of type `t`.
 pub(crate) unsafe fn retain(p: *mut u8, t: u32) {
+    if !known(t) {
+        return;
+    }
     let types = crate::desc::base();
     let t = i64::from(t);
     let mut ret = 0u64;
@@ -230,6 +266,32 @@ pub(crate) unsafe fn digits(dst: *mut u8, mag: u128, base: i64, upper: bool) {
     if unsafe { sisu_rt_int_digits(&mut ret, &dst, &low, &high, &base, &upper) } != abi::OK {
         failed("digits");
     }
+}
+
+/// The forms of a float's text (`floats.sisu`): the shortest of an `f64`
+/// and of an `f32`'s bits, as `Debug` writes them, and of an `f64` the fixed
+/// form and the form with an exponent, `precision` digits after the point.
+pub(crate) const SHORTEST: i64 = 0;
+pub(crate) const SHORTEST32: i64 = 1;
+pub(crate) const FIXED: i64 = 2;
+pub(crate) const EXPONENT: i64 = 3;
+
+/// The text of the float whose bits are `bits` in the form `mode` (the
+/// runtime in Sisu's `floats.write`, decision 358).
+pub(crate) fn float_text(bits: u64, mode: i64, precision: usize) -> String {
+    let mut text = mem::Text::empty();
+    let dst = (&raw mut text).cast::<u8>();
+    let bits = bits as i64;
+    let precision = i64::try_from(precision).unwrap_or(i64::MAX);
+    let mut ret = 0u64;
+    // SAFETY: as for [`equal`]; `dst` has room for a `String`.
+    if unsafe { sisu_rt_float_digits(&mut ret, &dst, &bits, &mode, &precision) } != abi::OK {
+        failed("float digits");
+    }
+    // SAFETY: the export wrote a `String` there, which nothing else holds.
+    let shown = String::from_utf8_lossy(unsafe { text.bytes() }).into_owned();
+    mem::release(text.ptr);
+    shown
 }
 
 /// Where `part` first occurs in `text`, by Two-Way (the runtime in Sisu's

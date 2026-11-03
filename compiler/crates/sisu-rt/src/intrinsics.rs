@@ -550,7 +550,7 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                         float_digits(f64::from(x), kind, precision)
                     }
                     _ if x.is_infinite() => "inf".into(),
-                    _ => format!("{x:?}"),
+                    _ => value::float32_repr(x),
                 };
                 c.set_string(s.as_bytes());
             }
@@ -982,7 +982,7 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 if t.is_nan() || !(-9.223_372_036_854_776e18..9.223_372_036_854_776e18).contains(&t) {
                     return rt::raise_msg(
                         msg::PANIC_CONVERSION,
-                        &[("value", format!("{:?}", f as f32)), ("ty", "int".into())],
+                        &[("value", value::float32_repr(f as f32)), ("ty", "int".into())],
                     );
                 }
                 c.set_word(t as i64 as u64);
@@ -1832,36 +1832,23 @@ fn parts_diagram(text: &str, parts: &[(usize, String)]) -> String {
     out
 }
 
-/// `fmt.float_digits`.
+/// `fmt.float_digits`: the digits are the runtime in Sisu's (decision 358).
 fn float_digits(x: f64, kind: Option<char>, precision: Option<usize>) -> String {
+    use crate::bridge::{EXPONENT, FIXED, float_text};
     if x.is_infinite() {
         return "inf".into();
     }
     match kind {
-        Some('f' | 'F') => format!("{x:.*}", precision.unwrap_or(6)),
+        Some('f' | 'F') => float_text(x.to_bits(), FIXED, precision.unwrap_or(6)),
         Some('e' | 'E') => {
-            let s = exponent_form(x, precision.unwrap_or(6));
+            let s = float_text(x.to_bits(), EXPONENT, precision.unwrap_or(6));
             if kind == Some('E') { s.to_uppercase() } else { s }
         }
-        Some('%') => format!("{:.*}%", precision.unwrap_or(6), x * 100.0),
+        Some('%') => float_text((x * 100.0).to_bits(), FIXED, precision.unwrap_or(6)) + "%",
         _ => match precision {
-            Some(p) => format!("{x:.p$}"),
+            Some(p) => float_text(x.to_bits(), FIXED, p),
             None => value::float_repr(x),
         },
-    }
-}
-
-fn exponent_form(x: f64, precision: usize) -> String {
-    let s = format!("{x:.precision$e}");
-    match s.split_once('e') {
-        Some((m, e)) => {
-            let (sign, digits) = match e.strip_prefix('-') {
-                Some(d) => ('-', d),
-                None => ('+', e),
-            };
-            format!("{m}e{sign}{digits:0>2}")
-        }
-        None => s,
     }
 }
 

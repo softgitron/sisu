@@ -4,7 +4,7 @@ The runtime of natively compiled Sisu is being written in Sisu, piece by
 piece, as D-086 orders ([15](../../proposal/15-decision-log.md)); this
 package holds what is written so far, and `crates/sisu-rt`, the runtime
 in Rust, the rest. `docs/architecture.md` ("Stage 2", "The runtime in
-Sisu"; decisions 335, 336 and 350 to 353) describes it, and
+Sisu"; decisions 335, 336, 350 to 353 and 358) describes it, and
 `docs/port-debt.md` ("The runtime in Sisu") lists what is left.
 
 ## What it is
@@ -22,13 +22,22 @@ and C's `memmove` and `memcmp` through foreign calls (`unsafe =
 
 | Module | What |
 |---|---|
-| `lib.sisu` | the exports, and `==` of two texts' bytes |
+| `lib.sisu` | the exports, `==` of two texts' bytes, and the text entries interpolation calls most (their bodies here, a call fewer) |
 | `types.sisu` | the program's type table, as the runtime in Rust lays it out in memory when the program starts (`crates/sisu-rt/src/desc.rs`) |
-| `words.sisu` | the reads and writes of words and bytes of values |
 | `host.sisu` | the runtime in Rust's functions this code calls, and C's |
 | `value.sisu` | equality, order, the structural hash, `.copy()`, the drop and the count of a copy's handles, each a walk of a value by its type's parts |
-| `text.sisu` | text appended to a `String`, an integer's digits, a `String` made from a text |
+| `text.sisu` | a `String`'s growth, a `String` made from a text, an integer's digits in a base |
 | `search.sisu` | text search by Two-Way, and a prefix or a suffix |
+| `floats.sisu` | a float's text: the shortest that reads back as the same number, the fixed form and the form with an exponent, on plain integers or big numbers |
+
+The functions are safe `def`s that say what they require of their
+arguments (`Requires:`), and their `unsafe` blocks name the obligations of
+std.mem's operations and of the foreign functions they discharge: the
+frozen Rust front end, whose formatter checks this package, reads no
+`unsafe def`. The exports are private, as the runtime's own; the other
+modules' functions are `pub(package)`. The walks read the type table's
+words and the values' own in place rather than through helpers, since a
+call of Sisu's convention costs a probe and its arguments' memory.
 
 ## How it is built
 

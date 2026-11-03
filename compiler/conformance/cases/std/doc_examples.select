@@ -10,6 +10,7 @@ test "std.core/str.split (doc example)" ... ok
 test "std.core/str.find (doc example)" ... ok
 test "std.core/str.parse_int (doc example)" ... ok
 test "std.core/Array.filled (doc example)" ... ok
+test "std.core/Shared.same (doc example)" ... ok
 test "std.core/Duration.seconds (doc example)" ... ok
 test "std.core/DateTime.parse (doc example)" ... ok
 test "std.core/Option.copied (doc example)" ... ok
@@ -154,4 +155,4 @@ test "std.task/Once (doc example)" ... ok
 test "std.test/Bench (doc example)" ... ok
 test "std.time/Ticker (doc example)" ... ok
 test "std.time/Timeline (doc example)" ... ok
-156 passed, 0 failed, 0 blocked
+157 passed, 0 failed, 0 blocked

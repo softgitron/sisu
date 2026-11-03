@@ -12,6 +12,7 @@
 ##! (`types.sisu`, decision 350). Each function replaces its counterpart in
 ##! the runtime in Rust (`crates/sisu-rt`), which is deleted.
 
+import rt.floats
 import rt.search
 import rt.text
 import rt.value
@@ -171,6 +172,16 @@ def export_text_from(dst: ptr mut u8, b: ptr mut u8, n: int):
 ## - `text`: `dst` has room for a `String`
 def export_int_digits(dst: ptr mut u8, low: int, high: int, base: int, upper: bool):
     text.digits(dst, low, high, base, upper)
+
+## Writes at `dst` a new `String` of the float whose bits are `bits`, in
+## the form `mode` with `precision` digits after the point
+## (`floats.write`): `fmt.float_digits`, `fmt.float32_digits` and a float's
+## `Debug`.
+##
+## Requires:
+## - `text`: `dst` has room for a `String`
+def export_float_digits(dst: ptr mut u8, bits: int, mode: int, precision: int):
+    floats.write(dst, bits, mode, precision)
 
 ## The position of the first occurrence of the `m` bytes at `part` in the
 ## `n` bytes at `text`, or -1 (`search.find`): `in` on texts and

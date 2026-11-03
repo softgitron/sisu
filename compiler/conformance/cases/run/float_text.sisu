@@ -1,0 +1,53 @@
+# A float's text (03, "Strings"; decision 358): `Display` and `Debug` give
+# the shortest decimal that reads back as the same `f64` or `f32`, with an
+# exponent from 10^16 up and below 10^-4; a precision gives the exact
+# value's digits rounded half to even, and `e` a digit, the precision's
+# digits and an exponent of at least two digits.
+
+def scaled(m: int, k: int) -> f64:
+    var x = m.to_f64()
+    var left = k
+    while left > 0:
+        x = x * 2.0
+        left -= 1
+    while left < 0:
+        x = x * 0.5
+        left += 1
+    return x
+
+def show(x: f64):
+    print("{x} | {x:.0} | {x:.2} | {x:.20} | {x:.0e} | {x:.3e} | {x:.17e} | {x:%}")
+
+def show32(y: f32):
+    print("{y} | {y:?} | {y:.3} | {y:e}")
+
+def main():
+    # Ties at the last place round to even; a value off the tie does not.
+    for x in [0.5, 1.5, 2.5, 0.125, 0.375, 0.05, 0.15, 0.35, 9.995, 5.0, 15.0, 25.0]:
+        show(x)
+    # Where the exponent starts, both ways.
+    for x in [1e-4, 9.999999999999999e-5, 1e15, 1e16, 9999999999999998.0, 123e18]:
+        show(x)
+    # The extremes: the least subnormal, the least normal and the subnormal
+    # below it, the greatest float, and powers of two, whose gap below is
+    # half the gap above.
+    for x in [5e-324, 2.2250738585072014e-308, 2.225073858507201e-308, 1.7976931348623157e308]:
+        show(x)
+    for k in [-1074, -1022, -600, -64, -1, 0, 1, 52, 53, 60, 200, 1023]:
+        show(scaled(1, k))
+    # Values from every range, and their negatives.
+    var state = 88172645463325252
+    for _ in range(24):
+        state = state *% 6364136223846793005 +% 1442695040888963407
+        let m = (state >> 11) & 9007199254740991
+        state = state *% 6364136223846793005 +% 1442695040888963407
+        let x = scaled(m, ((state >> 20) & 2047) - 1100)
+        show(x)
+        show(-x)
+    # `f32`: its own shortest text, and an `f64`'s digits of its value with
+    # a precision.
+    for y in [0.1f32, 1e-4f32, 1e16f32, 16777216.0f32, 3.4028235e38f32, 1e-45f32, -2.5f32]:
+        show32(y)
+    for bits in [1, 8388607, 8388608, 2139095039, 1065353217, 3212836864]:
+        show32(f32.from_bits(u32.wrapping_from(bits)))
+    print("{0.0} {-0.0} {0.0:.3e} {-0.0:.2}")

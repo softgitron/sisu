@@ -1,0 +1,23 @@
+# A typed hole blocks the test that reaches it (17, D-061), in a task as in
+# the test's own code: the test is blocked by the hole though it then waits
+# for what the task would have sent, rather than failing with a deadlock.
+
+def answer() -> int:
+    return todo("answer")
+
+test "a hole in a task the test waits on":
+    let (tx, rx) = channel[int](1)
+    task.scope do s:
+        s.spawn do:
+            _ = tx.send(answer())
+        assert rx.recv() == Ok(42)
+
+test "a hole in a task nothing joins":
+    task.scope do s:
+        s.spawn(() -> answer())
+
+test "a hole in the test itself":
+    assert answer() == 42
+
+test "a test without a hole":
+    assert 6 * 7 == 42

@@ -313,7 +313,7 @@ pub(crate) unsafe fn debug(out: &mut Vec<u8>, p: *mut u8, t: u32) {
             Kind::I128 => out.extend_from_slice((crate::wide::bits(p) as i128).to_string().as_bytes()),
             Kind::U128 => out.extend_from_slice(crate::wide::bits(p).to_string().as_bytes()),
             Kind::Float => out.extend_from_slice(float_repr(f64::from_bits(mem::word(p, 0))).as_bytes()),
-            Kind::F32 => out.extend_from_slice(format!("{:?}", f32_at(p)).as_bytes()),
+            Kind::F32 => out.extend_from_slice(float32_repr(f32_at(p)).as_bytes()),
             Kind::Bool => out.extend_from_slice(if mem::word(p, 0) != 0 { b"True" } else { b"False" }),
             Kind::Char => {
                 let c = char::from_u32(mem::word(p, 0) as u32).unwrap_or('\u{fffd}');
@@ -514,9 +514,15 @@ unsafe fn fields_debug(out: &mut Vec<u8>, p: *mut u8, fields: &[abi::Field]) {
 }
 
 /// The shortest text that reads back as the same `f64`, always with a
-/// point or an exponent.
+/// point or an exponent (the runtime in Sisu's, decision 358).
 pub(crate) fn float_repr(f: f64) -> String {
-    format!("{f:?}")
+    crate::bridge::float_text(f.to_bits(), crate::bridge::SHORTEST, 0)
+}
+
+/// The shortest text that reads back as the same `f32`, as [`float_repr`]
+/// writes an `f64`.
+pub(crate) fn float32_repr(f: f32) -> String {
+    crate::bridge::float_text(u64::from(f.to_bits()), crate::bridge::SHORTEST32, 0)
 }
 
 pub(crate) fn quote_str(s: &str) -> String {

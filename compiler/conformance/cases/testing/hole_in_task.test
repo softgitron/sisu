@@ -1,0 +1,5 @@
+test "a hole in a task the test waits on" ... blocked by todo("answer")
+test "a hole in a task nothing joins" ... blocked by todo("answer")
+test "a hole in the test itself" ... blocked by todo("answer")
+test "a test without a hole" ... ok
+1 passed, 0 failed, 3 blocked

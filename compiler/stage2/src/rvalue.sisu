@@ -574,6 +574,10 @@ impl Cg:
         elif all_refs:
             env = self.slot(size)
             self.store_word(env, value, WORD)
+        elif self.types.holds_fn(env_ty)?:
+            # It keeps a function value, which a wider function value only
+            # widens: no width holds it (decision 360).
+            return unsupported("an `own` closure that keeps a function value")
         else:
             # An `own` environment larger than a function value holds: the
             # program is lowered again with wider ones.

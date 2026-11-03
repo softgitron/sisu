@@ -558,7 +558,14 @@ impl<'p, 'h> Interp<'p, 'h> {
         } else {
             vec![self.system()]
         };
-        match self.call_fn(fi, args) {
+        let result = self.call_fn(fi, args);
+        // A hole a task reached blocks the test, though the test went on to
+        // wait for what the task would have done, or to fail without it
+        // (17: the run stops at a hole).
+        if let Some(h) = self.sched.hole.take() {
+            return TestResult::Blocked(h);
+        }
+        match result {
             Ok(_) => TestResult::Passed,
             Err(Unwind::Panic(p)) => match &p.hole {
                 Some(h) => TestResult::Blocked(h.clone()),

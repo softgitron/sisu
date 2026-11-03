@@ -671,8 +671,8 @@ impl Spec:
     ## The text of `x >= 0` by the type letter `kind` (`f`, `F`, `e`, `E`,
     ## `%`, or anything else for the shortest form) with `precision` digits
     ## after the point (-1 for the default: six with a letter, the shortest
-    ## round trip without); `inf` for infinity. The digits are the host's
-    ## correctly rounded ones (port-debt.md, "Float to text").
+    ## round trip without); `inf` for infinity. The digits are correctly
+    ## rounded, half to even (port-debt.md, "Float to text").
     @intrinsic("fmt.float_digits")
     pure def float_digits(x: f64, kind: str, precision: int) -> String
 

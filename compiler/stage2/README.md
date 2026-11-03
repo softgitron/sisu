@@ -158,18 +158,22 @@ rt-B.o (decision 353). It holds: each B is its A byte for byte, and
 stage1-A prints the SIR `sisu sir` prints, the runtime's seed among it.
 
 ```text
-  sisu2-C       11372688 bytes  sha256 36daa1f91ad04d3f...  built through the Cranelift path (30.4 s)
-  A.stage2.sir   4109955 bytes  sha256 1222cc29405bbfbb...  printed by sisu sir
-  A.stage1.sir  17182632 bytes  sha256 c7174fed048f205d...  printed by sisu sir (both 51.6 s)
-  sisu2-A       14979976 bytes  sha256 e4bf40b4445cccf0...  built by sisu2-C (4.2 s)
-  stage1-A      39824256 bytes  sha256 8a7973dc57453a7b...  built by sisu2-C (16.4 s)
-  B.stage2.sir   4109955 bytes  sha256 1222cc29405bbfbb...  printed by stage1-A
-  B.stage1.sir  17182632 bytes  sha256 c7174fed048f205d...  printed by stage1-A (both 79.7 s)
-  sisu2-B       14979976 bytes  sha256 e4bf40b4445cccf0...  built by sisu2-A (6.3 s)
-  stage1-B      39824256 bytes  sha256 8a7973dc57453a7b...  built by sisu2-A (28.3 s)
+  sisu2-C       23430184 bytes  sha256 5c9c7db73cd91fb4...  built through the Cranelift path (39.3 s)
+  A.stage2.sir   4146988 bytes  sha256 a52b09ff9c90c460...  printed by sisu sir
+  A.stage1.sir  17400595 bytes  sha256 43d60d4d210482e6...  printed by sisu sir
+  A.rt.sir        308916 bytes  sha256 82a711bab54c6695...  printed by sisu sir (all three 60.3 s)
+  rt-A.o          582664 bytes  sha256 b6d236430bb4332b...  built by sisu2-C
+  sisu2-A       27391840 bytes  sha256 e3636c7e02b0233f...  built by sisu2-C, with rt-A.o (6.0 s)
+  stage1-A      53156784 bytes  sha256 bcf0f8e759ec3a57...  built by sisu2-C, with rt-A.o (21.7 s)
+  B.stage2.sir   4146988 bytes  sha256 a52b09ff9c90c460...  printed by stage1-A
+  B.stage1.sir  17400595 bytes  sha256 43d60d4d210482e6...  printed by stage1-A
+  B.rt.sir        308916 bytes  sha256 82a711bab54c6695...  printed by stage1-A (all three 224.7 s)
+  rt-B.o          582664 bytes  sha256 b6d236430bb4332b...  built by sisu2-A
+  sisu2-B       27391840 bytes  sha256 e3636c7e02b0233f...  built by sisu2-A, with rt-B.o (12.4 s)
+  stage1-B      53156784 bytes  sha256 bcf0f8e759ec3a57...  built by sisu2-A, with rt-B.o (46.1 s)
 ```
 
-It takes three to five minutes on four cores; `--keep DIR` leaves the files
+It takes six to eight minutes on four cores; `--keep DIR` leaves the files
 in `DIR`, `--sisu PATH` drives the builds with another `sisu` (CI's
 `bootstrap` job uses the debug one).
 
@@ -207,7 +211,7 @@ What is done, and what is not, is kept here as the work goes.
   --tests`, decision 285), its tests' tags and its benchmarks included.
 - The Sisu backend (decisions 306 to 312): every operation of LIR but a
   jump with more than nine arguments and a return of more than one value;
-  all 208 cases of `native.list` run from its objects with the
+  all 212 cases of `native.list` run from its objects with the
   interpreter's output (`--native`), as they do from Cranelift's
   (`--native-cranelift`); stage 1 compiled by it checks the conformance
   suite's files as the Cranelift build does. What it leaves is in

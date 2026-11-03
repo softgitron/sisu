@@ -3134,15 +3134,17 @@ workspace, `check`, `build` and `test` work on every member, and `run`,
 `sir` and `bench` on the one application among them (`D0067`
 otherwise).
 
-**The front end** of `check`, `sir`, `build`, `run`, `fmt`, `doc`,
-`tokens` and `parse` is stage 1, the front end written in Sisu, compiled
-natively (`compiler/target/stage1/sisu1`, built from `compiler/stage1` when
-a source of it is newer): they run its commands and print what it prints,
-and a program runs from the SIR it serialised, in the interpreter or
-natively (decision 268). `--front-end=rust`, among a command's options, or
+**The front end** of `check`, `sir`, `build`, `run`, `test`, `bench`,
+`fmt`, `doc`, `tokens` and `parse` is stage 1, the front end written in
+Sisu, compiled natively (`compiler/target/stage1/sisu1`, built from
+`compiler/stage1` when a source of it is newer): they run its commands and
+print what it prints, and a program runs from the SIR it serialised, in
+the interpreter or natively, as its tests and benchmarks do (decisions 268
+and 357). `--front-end=rust`, among a command's options, or
 `SISU_FRONT_END=rust` for a whole process, keeps the Rust front end this
-document describes, the oracle; the other commands (`test`, `bench`,
-`repl`, `ws`, `lsp`, `replay`, `explain-borrow`, `audit`, and `run
+document describes, the oracle; the other commands (`repl`, `ws`, `lsp`,
+`replay`, `explain-borrow`, `audit`, `test --std`, `test
+--defer-borrow`, the tests of a program with transcripts, and `run
 --watch`, `--record` and `--defer-borrow`, `check --diary` and `parse
 --shape`) run on it whichever is chosen (port-debt.md, "The Rust front
 end's roles still to replace").
@@ -3566,7 +3568,7 @@ when the program ends, so the two interleave as the interpreter's do.
 ### The runtime in Sisu
 
 The runtime is being written in Sisu, piece by piece, as D-086 orders
-(decisions 335, 336 and 350 to 352). `compiler/rt` is a Sisu package
+(decisions 335, 336, 350 to 352 and 358). `compiler/rt` is a Sisu package
 (`unsafe = "extern"`) whose root module's `export_NAME` functions are the
 runtime's symbols `sisu_rt_NAME`, of Sisu's convention (decision 189),
 which the generated code and the runtime in Rust call as any function is
@@ -3594,6 +3596,7 @@ What is in Sisu (port-debt.md, "The runtime in Sisu", has what is not):
 | equality, order, the structural hash, `.copy()`, the drop and the count of a copy's handles, by a value's parts (`sisu_rt_value_*`) | `value.sisu` over `types.sisu` | the runtime in Rust (`bridge.rs`), for `sisu_rt_drop`, `sisu_rt_copy`, `sisu_rt_binary`, dicts and sets, sorting and the intrinsics (decision 350) |
 | text appended to a `String`, an `int`'s digits appended, a `String` from a text (`sisu_rt_text_push`, `_push_int`, `_from`), and the digits of an integer of up to 128 bits in a base (`sisu_rt_int_digits`) | `text.sisu` | the generated code (decision 265), and the runtime in Rust for `fmt.digits` and `fmt.wide_digits` (decision 351) |
 | text search by Two-Way, and a prefix or suffix (`sisu_rt_find`, `sisu_rt_has_edge`) | `search.sisu` | the runtime in Rust, for `in` on texts and `bytes.find`, `starts_with` and `ends_with` (decision 352) |
+| a float's text: the shortest that reads back as the same `f64` or `f32`, the fixed form and the form with an exponent (`sisu_rt_float_digits`) | `floats.sisu` | the runtime in Rust, for `Display` and `Debug` of floats, `fmt.float_digits` and `fmt.float32_digits` (decision 358) |
 
 The structural operations walk a value by the program's type table, which
 the runtime in Rust lays out in memory when the program starts
@@ -3809,7 +3812,8 @@ does. LIR gained two words for them: the conversion `sextend` and the type
 
 `sisu-codegen` writes the object beside the output (`NAME.o`, removed
 afterwards unless `SISU_NATIVE_KEEP=1`), and `cc` links it with the
-runtime in Sisu's object (decision 336), the runtime and the system
+runtime in Sisu's object (decision 336; `SISU_RT=PATH` names another, used
+as it is, decision 353), the runtime and the system
 libraries a Rust static library needs, using LLVM's
 `lld` when `ld.lld` is on the search path: it links in a third of the time
 of the system's `ld` (87 against 224 ms for a small program). The search
@@ -4199,28 +4203,30 @@ byte for byte, and each SIR stage1-A prints is the one `sisu sir` prints,
 the runtime's the committed seed:
 
 ```text
-  sisu2-A       14979976 bytes  sha256 e4bf40b4445cccf0...  built by sisu2-C (4.2 s)
-  stage1-A      39824256 bytes  sha256 8a7973dc57453a7b...  built by sisu2-C (16.4 s)
-  sisu2-B       14979976 bytes  sha256 e4bf40b4445cccf0...  built by sisu2-A (6.3 s)
-  stage1-B      39824256 bytes  sha256 8a7973dc57453a7b...  built by sisu2-A (28.3 s)
+  rt-A.o          582664 bytes  sha256 b6d236430bb4332b...  built by sisu2-C
+  sisu2-A       27391840 bytes  sha256 e3636c7e02b0233f...  built by sisu2-C, with rt-A.o (6.0 s)
+  stage1-A      53156784 bytes  sha256 bcf0f8e759ec3a57...  built by sisu2-C, with rt-A.o (21.7 s)
+  rt-B.o          582664 bytes  sha256 b6d236430bb4332b...  built by sisu2-A
+  sisu2-B       27391840 bytes  sha256 e3636c7e02b0233f...  built by sisu2-A, with rt-B.o (12.4 s)
+  stage1-B      53156784 bytes  sha256 bcf0f8e759ec3a57...  built by sisu2-A, with rt-B.o (46.1 s)
 ```
 
-The script takes three to five minutes on four cores, most of it stage 1
-printing the SIR of the two packages; the driver builds with the stage 2
+The script takes six to eight minutes on four cores, most of it stage 1
+printing the SIR of the three packages; the driver builds with the stage 2
 that `SISU_STAGE2` names, as it is, instead of `target/stage2/sisu2`. CI
 runs it on every push.
 
 ### Coverage
 
 `conformance/native.list` names the cases the backend builds and runs:
-208 of them, every case of the suite that runs a program but the
+212 of them, every case of the suite that runs a program but the
 refusals of the checked memory model, which are the interpreter's (the
 others are diagnostics, `sisu test` files, and the tools' cases:
 `--watch`, the REPL, worksheets, tokens, SIR and documentation). Among them are every
 case of `concurrency/` that runs (tasks, scopes, cancellation, channels,
 `select`, races, generators and their closing, `log`, mutexes across
-tasks, the deadlock report, a task's stack overflow), all 48 of `run/`
-that have a `main` (`run/testing` is a test file without one), the 37 of
+tasks, the deadlock report, a task's stack overflow), all 50 of `run/`
+that have a `main` (`run/testing` is a test file without one), the 38 of
 `ownership/` that run (with `Mutex`, `Shared`, `Weak`, `Cell` and
 `Arena`), and the 11 of `capabilities/` (fakes, attenuations, caretakers,
 interceptors, `cap.lend`, the test clock, the host's processes, an
@@ -7663,7 +7669,14 @@ Sisu"; D-086, D-087 step 3)
      code runs on the system stack for a task, the task's probe limit is 0,
      since the runtime's Sisu code probes the stack as any function does
      and that stack is not the task's. The object is compiled in the
-     release profile. What the runtime in Rust no longer has: the walks of
+     release profile, and the walks read the table's words and the values'
+     in place rather than through helper functions: what Sisu code pays is
+     its calls, each argument in memory and each operation's result written
+     to memory and read back (decision 246), where rustc inlined. Stage 2
+     lowering its own SIR (4.1 MB) takes 2.3 to 2.7 s against 1.6 to 1.8 s
+     with the walks in Rust, 1.43 times the instructions on
+     `examples/wordcount`'s SIR (callgrind), most of the difference in text
+     building, which interpolation calls most. What the runtime in Rust no longer has: the walks of
      `value.rs` (`drop_value`, `copy_value`, `retain_value`, `equal`,
      `compare` and their helpers) and of `dict.rs` (`structural_hash` and
      the key hasher), which are calls of the exports now. The other ways
@@ -7748,4 +7761,115 @@ driver"; 17, 10)
      working directory stays absolute. `sisu run --native` finds the
      executable by the same line, from the same directory. This changes no
      rule of the language.
+355. The interpreter's and the runtime's correctness items the manual
+     found (manual/README.md, "What the plan found in stage 0"):
+     `Shared.same(a, b)`, 02's identity of shared values, is an intrinsic
+     of the prelude's `Shared` (`Shared.same`, numbered after the others in
+     `sisu_rt::abi` and stage 2's table), true when the two own one cell,
+     where `==` compares the values (`cases/ownership/shared_same`). A
+     call through a trait whose `Self` is a reference reads each argument
+     through the references it has beyond what the impl's parameter takes,
+     `other: Self` as `self` already was, so `sorted` of a list of a type
+     with a hand-written `Ord` no longer stops the interpreter at `Field(1)
+     does not apply to Ref` (a program stage 1 now refuses with `E0438`,
+     since `sorted` of a borrowed list holds references, and the Rust front
+     end still runs). A scope whose body returns `Cancelled` because a
+     task's failure that nobody joined cancelled it returns that failure,
+     the first in time (06: "the scope returns the first error, after
+     joining all"), where the body's `Cancelled` hid it; an error of the
+     body's own is still the result, and a `Cancelled` with no failure
+     behind it stays one; the interpreter and the native runtime decide it
+     alike (`cases/concurrency/first_failure`). This changes no rule of the
+     language: it implements 02's and 06's.
+356. `sisu run --explore N`, in the interpreter and natively, reports the
+     first seed whose run prints other standard output than the first
+     seed's, though it exits with the same status (`D0127`, status 1), as
+     this document's "Tasks and the scheduler" says a run is compared in
+     output or status, where only a failing status stopped it; its
+     standard error, which holds the scheduler's numbers under `--stats`,
+     is not compared. This changes no rule of the language.
+357. `sisu test` and `sisu bench` run a program's tests and benchmarks
+     from the SIR stage 1 prints of it built with them (`sisu1 sir
+     --tests`, decision 285), as `sisu run` runs a program from stage 1's
+     SIR (decision 268): for a file, a package and each member of a
+     workspace, the driver asks stage 1 for the SIR, runs stage 1's `check`
+     to report the program's errors when it prints none, and runs the tests
+     as `sisu test --from-sir` does, with the program's own files for what
+     names it again: a replay token's hash and the file its line names, the
+     snapshots beside it, the test cache (decision 242) and the check that a
+     `sim` build escapes nothing (`E0971`); `sisu sir --tests` is stage 1's
+     too. So the tests of unsafe code, of `std.mem`, `std.ffi` and `extern`
+     blocks run, on the checked memory model, which 22 makes the place where
+     unsafe code is checked. The Rust front end keeps what only it gives:
+     `--std`, the standard library's examples; `--defer-borrow`; and a
+     program's transcripts, which run against a world of transcripts
+     (`transcript_world`) that only it writes into the SIR, so a program
+     with transcripts is tested by it whole. Every expectation of the suite
+     that runs `sisu test` holds unchanged. This changes no rule of the
+     language.
 
+**The runtime in Sisu: a float's text** (section "Stage 2", "The runtime
+in Sisu"; D-086)
+
+358. A float's text is the runtime in Sisu's
+     (`compiler/rt/src/floats.sisu`, `sisu_rt_float_digits`), where the
+     runtime in Rust formatted it with Rust's: `Display` and `Debug` of an
+     `f64` and an `f32`, which is the shortest decimal that reads back as
+     the same number, the closest to it of those, with an exponent from
+     10^16 up and below 10^-4 (`1e16`, `1.5e-7`) and a point otherwise
+     (`100.0`); and the format specs' fixed form and form with an exponent
+     (`fmt.float_digits`, `fmt.float32_digits`), the exact value's digits
+     rounded half to even (`{0.125:.2}` is `0.12`, `{2.5:.0}` is `2`). The
+     shortest digits are Steele and White's free format as Burger and
+     Dybvig give it, its rounding boundaries in it when the significand is
+     even (as reading back rounds half to even) and the gap below a power
+     of two half the gap above; the exact ones come from the value as a
+     fraction `r / s`, one digit at a time. The fraction's numbers are
+     plain integers while they stay below 2 × 10^17, as they do for values
+     from about 0.03 to 10^17, big numbers of up to 40 limbs of 32 bits
+     otherwise, and an integer above 2^57 has its digits by division by
+     10^9. The text is made in the result's own buffer. The interpreter
+     keeps Rust's (`sisu-interp/src/format.rs`), which the native text
+     matches on every case of the suite (`cases/run/float_text` among them)
+     and on about 30,000 floats a test drew from every range (both widths,
+     every exponent, the precisions from 0 to 25, and the subnormals, the
+     powers of two and the halfway cases). `{x}` of an `f64` costs 1.3 µs
+     where Rust's cost 0.46 µs, and 5 to 50 µs on big numbers, below 0.03
+     and above 10^17 (port-debt.md, "Float to text"). What the runtime in
+     Rust no longer has: `float_repr`'s and `exponent_form`'s formatting
+     and the fixed forms of `float_digits`, which are calls of the export
+     now. The other way was Ryu, whose tables of 128-bit powers the runtime
+     in Sisu would compute or carry, and whose 128-bit products the
+     backends compile as calls. This changes no rule of the language.
+
+**The test runner: a hole in a task** (section "Testing"; 17)
+
+359. A typed hole a task reaches blocks the test, as one the test's own
+     code reaches does (17: the interpreter stops at a hole, and the test
+     is blocked by it; D-061): the interpreter keeps the first hole a task
+     other than the root reached, and the runner reports the test blocked
+     by it whatever the test did after, where a test that went on to wait
+     for what the task would have sent failed with the deadlock report
+     (manual, chapter 22: a handler's hole inside `http.serve`'s connection
+     task). A hole in a task nothing joins was blocked already, through the
+     scope's end (`cases/testing/hole_in_task`). This changes no rule of
+     the language: it implements 17's.
+
+**The native backend: a closure that keeps a function value** (section
+"Stage 2"; decision 224)
+
+360. An `own` closure that keeps a function value, directly or in a tuple,
+     an option, a result, a struct or an enum it captures, is refused
+     natively (`D0103`, "the native backend does not compile an `own`
+     closure that keeps a function value yet"), by stage 2's lowering and
+     by the Rust one alike, where each compiled the program again and
+     again: a function value holds as many words of environment as the
+     widest `own` closure's (decision 224), and an environment that keeps a
+     function value is wider than one by two words whatever that width is,
+     so no width holds it (`own () -> f() + 1`, with `f` an `own` closure
+     of its own). The interpreter runs such a program, and a closure of
+     references or a task's closure that keeps one is unchanged
+     (`an_own_closure_that_keeps_a_function_value_is_refused_natively`).
+     The other way was an environment on the heap for such a closure,
+     copied and freed with the value, which is port-debt.md's pay. This
+     changes no rule of the language.

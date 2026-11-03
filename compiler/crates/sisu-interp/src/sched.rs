@@ -370,6 +370,9 @@ pub(crate) struct Sched<'p> {
     pub checking: bool,
     /// A predicate met a lock its own task holds; the check is skipped.
     pub check_skipped: bool,
+    /// The first typed hole a task other than the root reached: the test
+    /// is blocked by it, whatever became of the task (17, D-061).
+    pub hole: Option<String>,
     /// A generator dropped before its end is cleaning up, outside the
     /// schedule: no yield point switches (decision 236).
     pub abandoning: u32,
@@ -441,6 +444,7 @@ impl<'p> Sched<'p> {
             abandoning: 0,
             driving: 0,
             check_skipped: false,
+            hole: None,
         }
     }
 
@@ -949,6 +953,11 @@ impl<'p> Interp<'p, '_> {
         let t = self.sched.cur;
         let ti = t as usize;
         let cancelled = self.node_cancelled(Some(Node::Task(t)));
+        if let Outcome::Panic(p) = &outcome
+            && self.sched.hole.is_none()
+        {
+            self.sched.hole.clone_from(&p.hole);
+        }
         let failure = match &outcome {
             Outcome::Panic(_) => true,
             Outcome::Value(v) => {
@@ -1070,9 +1079,7 @@ impl<'p> Interp<'p, '_> {
         // An error the body returns is the result, but `Cancelled` when a
         // failure nobody joined cancelled the scope: the scope returns the
         // failure that started the cancelling (06, "Tasks and scopes").
-        if is_result_ty(&result_ty)
-            && is_err(&body)
-            && (failed.is_none() || !Self::is_cancelled_error(&body))
+        if is_result_ty(&result_ty) && is_err(&body) && (failed.is_none() || !Self::is_cancelled_error(&body))
         {
             self.drop_unjoined(&children);
             return Ok(Event::Returned(body, fr.ret));

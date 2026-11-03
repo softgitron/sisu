@@ -18,11 +18,13 @@ cargo run -p sisu-conformance -- --sisu path/to/sisu --front-end=rust conformanc
 **The front end.** The `sisu` of `compiler/` runs stage 1, the front end
 written in Sisu, compiled natively (`compiler/target/stage1/sisu1`, built
 from `compiler/stage1` by the Rust front end when a source of it is newer),
-for `check`, `sir`, `build`, `run`, `fmt`, `doc`, `tokens` and `parse`:
-their diagnostics, SIR and pages are stage 1's, and a program runs from
-the SIR stage 1 serialised, in the interpreter or natively
-([architecture.md](../docs/architecture.md), decision 268). The commands
-stage 1 does not serve yet run on the Rust front end: `test`, `bench`,
+for `check`, `sir`, `build`, `run`, `test`, `bench`, `fmt`, `doc`,
+`tokens` and `parse`: their diagnostics, SIR and pages are stage 1's, and
+a program runs from the SIR stage 1 serialised, in the interpreter or
+natively, as its tests and benchmarks do
+([architecture.md](../docs/architecture.md), decisions 268 and 357). The
+commands stage 1 does not serve yet run on the Rust front end: `test
+--std`, `test --defer-borrow`, the tests of a program with transcripts,
 `repl`, `ws`, `run --watch`, `run --record`, `replay`, `run
 --defer-borrow`, `explain-borrow` and `parse --shape`
 ([port-debt.md](../docs/port-debt.md), "The Rust front end's roles").

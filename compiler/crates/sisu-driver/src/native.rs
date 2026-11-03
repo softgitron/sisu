@@ -609,7 +609,8 @@ fn report(e: sisu_codegen::Error, output: &Path, host: &mut dyn Host) -> i32 {
 pub(crate) fn build_command(code: Code<'_>, output: &Path, profile: Profile, host: &mut dyn Host) -> i32 {
     match build(code, output, profile, host) {
         Ok(()) => {
-            let shown = std::env::current_dir().map_or_else(|_| output.to_path_buf(), |cwd| relative(output, &cwd));
+            let shown =
+                std::env::current_dir().map_or_else(|_| output.to_path_buf(), |cwd| relative(output, &cwd));
             host.stdout(&text(msg::NATIVE_BUILT, &[("output", shown.display().to_string())]));
             0
         }
@@ -747,8 +748,25 @@ fn explore(exe: &Path, args: &[String], how: &Run, n: u64, host: &mut dyn Host) 
             ));
             return status;
         }
-        if first.is_none() {
-            first = Some((stdout, stderr));
+        match &first {
+            None => first = Some((stdout, stderr)),
+            // A run that prints other output than the first seed's differs
+            // from it too (decision 356).
+            Some((out0, _)) if *out0 != stdout => {
+                host.stdout(&stdout);
+                host.stderr(&stderr);
+                host.stderr(&text(
+                    msg::CLI_EXPLORE_DIFFERS,
+                    &[
+                        ("seed", seed.to_string()),
+                        ("count", n.to_string()),
+                        ("first", how.seed.to_string()),
+                        ("status", status.to_string()),
+                    ],
+                ));
+                return EXIT_ERROR;
+            }
+            Some(_) => {}
         }
     }
     if let Some((out, err)) = first {

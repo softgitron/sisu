@@ -1,0 +1,50 @@
+# A task's failure cancels its siblings, and a body joining one of them
+# gets `Cancelled`: when the body passes that on, the scope's result is the
+# failure that started the cancelling, the first in time, not the
+# cancellation (06, "Tasks and scopes": the scope returns the first error;
+# decision 355). An error of the body's own is still the result, and a
+# `Cancelled` with no failure behind it stays one.
+# explore 20
+
+error Down:
+    Closed(town: String)
+
+def waits(rx: Receiver[int]) -> int ! {ChannelError, TaskError}:
+    return rx.recv()
+
+def fails(town: str) -> int ! Down:
+    return Err(Closed(town=town.to_string()))
+
+def joining_the_other() -> int ! {Down, ChannelError, TaskError}:
+    let tx, rx = channel[int](capacity=1)
+    let r: int ! {Down, ChannelError, TaskError} = task.scope do s:
+        let slow = s.spawn(() -> waits(rx))
+        let quick = s.spawn(() -> fails("Kemi"))
+        let a = slow.join()?
+        let b = quick.join()?
+        return Ok(a + b)
+    _ = tx
+    return r
+
+def own_error() -> int ! {Down, ChannelError, TaskError}:
+    let tx, rx = channel[int](capacity=1)
+    let r = task.scope do s:
+        let slow = s.spawn(() -> waits(rx))
+        _ = slow
+        return Err(Closed(town="Oulu"))
+    _ = tx
+    return r
+
+def cancelled_by_hand() -> int ! {Down, ChannelError, TaskError}:
+    let tx, rx = channel[int](capacity=1)
+    let r = task.scope do s:
+        let slow = s.spawn(() -> waits(rx))
+        s.cancel()
+        return slow.join()
+    _ = tx
+    return r
+
+def main():
+    print(joining_the_other())
+    print(own_error())
+    print(cancelled_by_hand())

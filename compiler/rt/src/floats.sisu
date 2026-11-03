@@ -1,0 +1,880 @@
+##! Floats as text (decision 358): the digits of an `f64` or an `f32` that
+##! `Display`, `Debug` and the format specs write, which the runtime in Rust
+##! calls for `fmt.float_digits`, `fmt.float32_digits` and a float's
+##! `Debug`. The shortest form is the shortest decimal that reads back as
+##! the same float, the closest to it of those (Steele and White's free
+##! format, as Burger and Dybvig give it); the fixed form and the form with
+##! an exponent are the exact value's digits, rounded half to even. Each
+##! works on the exact value as a fraction `r / s`, whose digits come one at
+##! a time, as the runtime in Rust's host formatting gave them.
+##!
+##! The numbers of that fraction are plain integers when they stay below
+##! `LIMIT`, as they do for a value from about 0.03 to 10^17, and big numbers
+##! otherwise. A big number is 41 words: the count of its limbs, then the
+##! limbs, 32 bits in each word, the lowest first. 40 limbs hold every number
+##! the digits of a float need, which stay under 2^1090: the exact value
+##! times a power of ten, and that power, within the float's range. Every
+##! function taking one requires (`big`) that it points to a big number's 41
+##! words, the limbs past the count free to be written.
+##!
+##! The text is made in the buffer of the `String` it is written to: the
+##! digits come after as many bytes as the text can take, and the text is
+##! written from the start, never past the digit it reads next (`room`).
+
+import rt.text
+from rt.host import sisu_rt_alloc
+from rt.host import sisu_rt_free
+from std.mem import ptr
+
+# The forms (`mode` of `write`): the shortest of an `f64` and of an `f32`,
+# as `Debug` writes them; and of an `f64`, the fixed form and the form with
+# an exponent, each with `precision` digits after the point.
+const SHORTEST: int = 0
+const SHORTEST32: int = 1
+const FIXED: int = 2
+
+# A big number's words, and a limb's bits.
+const BIG: int = 41
+const MASK: int = 4294967295
+
+# The bound of the plain integers' numbers: every sum and product of ten
+# the digits take of numbers below it stays below 2^63.
+const LIMIT: int = 200000000000000000
+
+## Sets the big number at `a` to `x`, at least 0.
+##
+## Requires:
+## - `big`: `a` points to a big number's words
+def set(a: ptr mut int, x: int):
+    # safety: in_bounds, writable, aligned: the count and the first two
+    #   limbs are within the number's words, by `big`.
+    unsafe:
+        a.offset(1).write(x & MASK)
+        a.offset(2).write(x >> 32)
+        if (x >> 32) != 0:
+            a.write(2)
+        elif x != 0:
+            a.write(1)
+        else:
+            a.write(0)
+
+## Multiplies the big number at `a` by `m`, at most 10^9.
+##
+## Requires:
+## - `big`: `a` points to a big number's words, with room for the product
+def mul_small(a: ptr mut int, m: int):
+    # safety: in_bounds, valid, writable, aligned: each limb up to the one
+    #   past the count is within the number's words, by `big`.
+    unsafe:
+        let n = a.read()
+        var carry = 0
+        var i = 1
+        while i <= n:
+            let x = a.offset(i).read() * m + carry
+            a.offset(i).write(x & MASK)
+            carry = x >> 32
+            i += 1
+        if carry != 0:
+            a.offset(n + 1).write(carry)
+            a.write(n + 1)
+
+## Multiplies the big number at `a` by 10^n.
+##
+## Requires:
+## - `big`: `a` points to a big number's words, with room for the product
+def mul_pow10(a: ptr mut int, n: int):
+    var left = n
+    while left >= 9:
+        mul_small(a, 1000000000)
+        left -= 9
+    var m = 1
+    while left > 0:
+        m *= 10
+        left -= 1
+    if m > 1:
+        mul_small(a, m)
+
+## Multiplies the big number at `a` by 2^n.
+##
+## Requires:
+## - `big`: `a` points to a big number's words, with room for the product
+def shift(a: ptr mut int, n: int):
+    # safety: in_bounds, valid, writable, aligned: each limb read is below
+    #   the count, and each written within the product's, by `big`; the
+    #   limbs move up from the highest, so each is read before it is
+    #   written over.
+    unsafe:
+        let len = a.read()
+        if len == 0:
+            return
+        let words = n // 32
+        let bits = n % 32
+        var top = len + words
+        if bits == 0:
+            var i = len
+            while i >= 1:
+                a.offset(i + words).write(a.offset(i).read())
+                i -= 1
+        else:
+            top += 1
+            a.offset(top).write(a.offset(len).read() >> (32 - bits))
+            var i = len
+            while i >= 2:
+                let high = (a.offset(i).read() << bits) & MASK
+                a.offset(i + words).write(high | (a.offset(i - 1).read() >> (32 - bits)))
+                i -= 1
+            a.offset(1 + words).write((a.offset(1).read() << bits) & MASK)
+        var j = 1
+        while j <= words:
+            a.offset(j).write(0)
+            j += 1
+        while top > 0 and a.offset(top).read() == 0:
+            top -= 1
+        a.write(top)
+
+## The order of the big numbers at `a` and `b`: -1, 0 or 1.
+##
+## Requires:
+## - `big`: `a` and `b` point to big numbers' words
+def order(a: ptr mut int, b: ptr mut int) -> int:
+    # safety: in_bounds, valid, aligned: each limb read is below its
+    #   number's count, by `big`.
+    unsafe:
+        let n = a.read()
+        let m = b.read()
+        if n != m:
+            return if n < m: -1 else: 1
+        var i = n
+        while i >= 1:
+            let x = a.offset(i).read()
+            let y = b.offset(i).read()
+            if x != y:
+                return if x < y: -1 else: 1
+            i -= 1
+    return 0
+
+## Subtracts the big number at `b` from the one at `a`, which is no
+## smaller.
+##
+## Requires:
+## - `big`: `a` and `b` point to big numbers' words, `a`'s no smaller
+def subtract(a: ptr mut int, b: ptr mut int):
+    # safety: in_bounds, valid, writable, aligned: each limb is below its
+    #   number's count, by `big`.
+    unsafe:
+        let n = a.read()
+        let m = b.read()
+        var borrow = 0
+        var i = 1
+        while i <= n:
+            var x = a.offset(i).read() - borrow
+            if i <= m:
+                x -= b.offset(i).read()
+            if x < 0:
+                x += 4294967296
+                borrow = 1
+            else:
+                borrow = 0
+            a.offset(i).write(x)
+            i += 1
+        var top = n
+        while top > 0 and a.offset(top).read() == 0:
+            top -= 1
+        a.write(top)
+
+## Writes at `dst` the sum of the big numbers at `a` and `b`.
+##
+## Requires:
+## - `big`: `dst`, `a` and `b` point to big numbers' words, `dst` neither
+##   of the others and with room for the sum
+def add(dst: ptr mut int, a: ptr mut int, b: ptr mut int):
+    # safety: in_bounds, valid, writable, aligned: each limb read is below
+    #   its number's count, and each written within the sum's, by `big`.
+    unsafe:
+        let n = a.read()
+        let m = b.read()
+        let most = if n > m: n else: m
+        var carry = 0
+        var i = 1
+        while i <= most:
+            var x = carry
+            if i <= n:
+                x += a.offset(i).read()
+            if i <= m:
+                x += b.offset(i).read()
+            dst.offset(i).write(x & MASK)
+            carry = x >> 32
+            i += 1
+        if carry != 0:
+            dst.offset(most + 1).write(carry)
+            dst.write(most + 1)
+        else:
+            dst.write(most)
+
+## Divides the big number at `a` by `m`, at most 10^9; the remainder.
+##
+## Requires:
+## - `big`: `a` points to a big number's words
+def div_small(a: ptr mut int, m: int) -> int:
+    # safety: in_bounds, valid, writable, aligned: each limb is below the
+    #   count, by `big`.
+    unsafe:
+        let n = a.read()
+        var rest = 0
+        var i = n
+        while i >= 1:
+            let x = (rest << 32) | a.offset(i).read()
+            a.offset(i).write(x // m)
+            rest = x % m
+            i -= 1
+        var top = n
+        while top > 0 and a.offset(top).read() == 0:
+            top -= 1
+        a.write(top)
+        return rest
+
+## The next digit of `r / s`, at most 9: `r` times 10, divided by `s`,
+## leaves its remainder in `r`.
+##
+## Requires:
+## - `big`: `r` and `s` point to big numbers' words, `r`'s below `s`'s
+def next_digit(r: ptr mut int, s: ptr mut int) -> int:
+    mul_small(r, 10)
+    var d = 0
+    while order(r, s) >= 0:
+        subtract(r, s)
+        d += 1
+    return d
+
+## Writes the digit `d` as its character at position `i` of `b`.
+##
+## Requires:
+## - `room`: position `i` of `b` may be written
+def put_digit(b: ptr mut u8, i: int, d: int):
+    # safety: in_bounds, writable: by `room`; aligned: a byte needs no
+    #   alignment.
+    unsafe b.offset(i).write(u8.wrapping_from(48 + d))
+
+## The shortest digits by the free format in plain integers, written at
+## `b` as characters, when its numbers stay below `LIMIT` (`shortest`
+## gives the arguments): their count, 0 when the numbers do not stay below
+## it, and the exponent `k`.
+##
+## Requires:
+## - `room`: `b` has room for 17 digits
+def shortest_small(f: int, e: int, wide: int, even: bool, k0: int, b: ptr mut u8) -> (int, int):
+    if e >= 0 or 1 + wide - e > 57:
+        return (0, 0)
+    var r = f << (1 + wide)
+    var s = 1 << (1 + wide - e)
+    var up = 1 << wide
+    var down = 1
+    var k = k0
+    var j = 0
+    while j < k:
+        s *= 10
+        if s > LIMIT:
+            return (0, 0)
+        j += 1
+    while j > k:
+        r *= 10
+        up *= 10
+        down *= 10
+        if r > LIMIT:
+            return (0, 0)
+        j -= 1
+    while True:
+        let c = r + up - s
+        if c > 0 or (even and c == 0):
+            s *= 10
+            if s > LIMIT:
+                return (0, 0)
+            k += 1
+        else:
+            break
+    var n = 0
+    while True:
+        r *= 10
+        up *= 10
+        down *= 10
+        var d = r // s
+        r = r % s
+        let low = r < down or (even and r == down)
+        let c = r + up - s
+        let high = c > 0 or (even and c == 0)
+        if low and high:
+            if 2 * r >= s:
+                d += 1
+        elif high:
+            d += 1
+        put_digit(b, n, d)
+        n += 1
+        if low or high:
+            return (n, k)
+
+## Writes at `b`, as characters, the digits of the shortest decimal that
+## reads back as `f × 2^e`, above 0, the closest to it of those (Burger and
+## Dybvig's free format, its boundaries in it when `f` is even, as round
+## half to even reads them): `prec` is the bits of the type's significand,
+## `min_e` its least exponent, and `k0` the estimate of the exponent. The
+## count of digits and the exponent `k`, as the value is `0.d1d2... ×
+## 10^k`.
+##
+## Requires:
+## - `room`: `b` has room for 17 digits
+def shortest(f: int, e: int, prec: int, min_e: int, k0: int, b: ptr mut u8) -> (int, int):
+    let even = f % 2 == 0
+    # The value is `r / s`, and the gaps to its neighbours `2 up / s` and
+    # `2 down / s`; at the lowest significand of an exponent but the least,
+    # the gap below is half the gap above.
+    let wide = if f == (1 << (prec - 1)) and e > min_e: 1 else: 0
+    let (small, small_k) = shortest_small(f, e, wide, even, k0, b)
+    if small > 0:
+        return (small, small_k)
+    var n = 0
+    var k = k0
+    # safety: returns_promptly: the runtime in Rust gives and frees the
+    #   block; in_bounds: it holds five big numbers.
+    unsafe:
+        let block = sisu_rt_alloc(5 * BIG * 8)
+        let r = block.cast[int]()
+        let s = r.offset(BIG)
+        let up = r.offset(2 * BIG)
+        let down = r.offset(3 * BIG)
+        let t = r.offset(4 * BIG)
+        set(r, f)
+        set(down, 1)
+        if e >= 0:
+            shift(r, e + 1 + wide)
+            set(s, 2 << wide)
+            set(up, 1)
+            shift(up, e + wide)
+            shift(down, e)
+        else:
+            shift(r, 1 + wide)
+            set(s, 1)
+            shift(s, 1 + wide - e)
+            set(up, 1 << wide)
+        if k >= 0:
+            mul_pow10(s, k)
+        else:
+            mul_pow10(r, -k)
+            mul_pow10(up, -k)
+            mul_pow10(down, -k)
+        # The least `k` with the upper boundary below 10^k (or at it, when
+        # the boundary itself reads back as the value).
+        while True:
+            add(t, r, up)
+            let c = order(t, s)
+            if c > 0 or (even and c == 0):
+                mul_small(s, 10)
+                k += 1
+            else:
+                break
+        while True:
+            var d = next_digit(r, s)
+            mul_small(up, 10)
+            mul_small(down, 10)
+            let c_low = order(r, down)
+            let low = c_low < 0 or (even and c_low == 0)
+            add(t, r, up)
+            let c_high = order(t, s)
+            let high = c_high > 0 or (even and c_high == 0)
+            if low and high:
+                add(t, r, r)
+                if order(t, s) >= 0:
+                    d += 1
+            elif high:
+                d += 1
+            put_digit(b, n, d)
+            n += 1
+            if low or high:
+                break
+        sisu_rt_free(block)
+    return (n, k)
+
+## The exact value `f × 2^e`, above 0, as `r / s` in [0.1, 1) times `10^k`,
+## in plain integers when they stay below `LIMIT`, from the estimate `k0`:
+## whether they do, `r`, `s` and `k`.
+pure def scaled_small(f: int, e: int, k0: int) -> (bool, int, int, int):
+    var r = f
+    var s = 1
+    if e >= 0:
+        if e > 4:
+            return (False, 0, 0, 0)
+        r = f << e
+    else:
+        if -e > 57:
+            return (False, 0, 0, 0)
+        s = 1 << -e
+    var k = 0
+    while k < k0:
+        s *= 10
+        if s > LIMIT:
+            return (False, 0, 0, 0)
+        k += 1
+    while k > k0:
+        r *= 10
+        if r > LIMIT:
+            return (False, 0, 0, 0)
+        k -= 1
+    while r >= s:
+        s *= 10
+        if s > LIMIT:
+            return (False, 0, 0, 0)
+        k += 1
+    return (True, r, s, k)
+
+## Puts the exact value `f × 2^e`, above 0, in the big numbers `r` and `s`
+## as `r / s` in [0.1, 1) times `10^k`, from the estimate `k0`; `k`.
+##
+## Requires:
+## - `big`: `r` and `s` point to big numbers' words
+def scaled(r: ptr mut int, s: ptr mut int, f: int, e: int, k0: int) -> int:
+    set(r, f)
+    set(s, 1)
+    if e >= 0:
+        shift(r, e)
+    else:
+        shift(s, -e)
+    var k = k0
+    if k >= 0:
+        mul_pow10(s, k)
+    else:
+        mul_pow10(r, -k)
+    while order(r, s) >= 0:
+        mul_small(s, 10)
+        k += 1
+    return k
+
+## Rounds the `n` digits, as characters, at `b` up by one in the last,
+## carrying; whether the carry left the first, which leaves a 1 and zeros.
+##
+## Requires:
+## - `digits`: `b` points to `n` digits, `n` above 0
+def round_up(b: ptr mut u8, n: int) -> bool:
+    var i = n - 1
+    # safety: in_bounds, valid, writable, aligned: each position is below
+    #   `n`, by `digits`, and a byte needs no alignment.
+    unsafe:
+        while i >= 0:
+            let c = b.offset(i).read().to_int()
+            if c < 57:
+                b.offset(i).write(u8.wrapping_from(c + 1))
+                return False
+            b.offset(i).write(u8.wrapping_from(48))
+            i -= 1
+        b.write(u8.wrapping_from(49))
+    return True
+
+## Whether the last digit at `b`, of `n`, is odd.
+##
+## Requires:
+## - `digits`: `b` points to `n` digits, `n` above 0
+def odd_last(b: ptr mut u8, n: int) -> bool:
+    # safety: in_bounds, valid, aligned: the position is below `n`, by
+    #   `digits`, and a byte needs no alignment.
+    return unsafe b.offset(n - 1).read().to_int() % 2 == 1
+
+## Whether the big number at `a` is 0.
+##
+## Requires:
+## - `big`: `a` points to a big number's words
+def is_zero(a: ptr mut int) -> bool:
+    # safety: valid, aligned: the first word is the count, by `big`.
+    return unsafe a.read() == 0
+
+## The order of twice what is left of the exact value, `r / s` in plain
+## integers (`small`) or in the first two big numbers at `big` (the third
+## to work in), and a unit of the last digit: -1, 0 or 1.
+##
+## Requires:
+## - `big`: unless `small`, `big` points to three big numbers' words
+def half_order(small: bool, r: int, s: int, big: ptr mut int) -> int:
+    if small:
+        if 2 * r > s:
+            return 1
+        if 2 * r == s:
+            return 0
+        return -1
+    # safety: in_bounds: the three numbers are within the words, by `big`.
+    let (big_s, big_t) = unsafe (big.offset(BIG), big.offset(2 * BIG))
+    add(big_t, big, big)
+    return order(big_t, big_s)
+
+## Writes the `count` next digits of the exact value at `b`, as characters,
+## rounded half to even by what is left: the value is `r / s` in plain
+## integers (`small`), or in the first two big numbers at `big`, the third
+## to work in. Whether the rounding carried past the first digit, which
+## leaves a 1 and zeros.
+##
+## Requires:
+## - `big`: unless `small`, `big` points to three big numbers' words, the
+##   first below the second
+## - `room`: `b` has room for `count` digits, `count` above 0
+def exact_digits(small: bool, r0: int, s: int, big: ptr mut int, b: ptr mut u8, count: int) -> bool:
+    var r = r0
+    var i = 0
+    while i < count:
+        if (small and r == 0) or (not small and is_zero(big)):
+            # The value has no more digits: the rest are zeros, and nothing
+            # is left to round by.
+            while i < count:
+                put_digit(b, i, 0)
+                i += 1
+            return False
+        if small:
+            r *= 10
+            put_digit(b, i, r // s)
+            r = r % s
+        else:
+            # safety: in_bounds: the second number is within the words, by
+            #   `big`.
+            put_digit(b, i, next_digit(big, unsafe big.offset(BIG)))
+        i += 1
+    let half = half_order(small, r, s, big)
+    if half > 0 or (half == 0 and odd_last(b, count)):
+        return round_up(b, count)
+    return False
+
+## The character at position `i` of `b`.
+##
+## Requires:
+## - `room`: position `i` of `b` holds a byte
+def char_at(b: ptr mut u8, i: int) -> int:
+    # safety: in_bounds, valid: by `room`; aligned: a byte needs no
+    #   alignment.
+    return unsafe b.offset(i).read().to_int()
+
+## Writes at `b`, as characters, the decimal digits of `f × 2^e`, an
+## integer above 0, made in the big number at `a`; their count. They come
+## nine at a time from the lowest, at the end of 315 positions, and move to
+## the start.
+##
+## Requires:
+## - `big`: `a` points to a big number's words
+## - `room`: `b` has room for 315 digits
+def integer_digits(a: ptr mut int, f: int, e: int, b: ptr mut u8) -> int:
+    set(a, f)
+    shift(a, e)
+    var first = 315
+    while not is_zero(a):
+        var part = div_small(a, 1000000000)
+        var j = 0
+        while j < 9:
+            first -= 1
+            put_digit(b, first, part % 10)
+            part = part // 10
+            j += 1
+    while char_at(b, first) == 48:
+        first += 1
+    _ = move_digits(b, 0, first, 0, 315 - first)
+    return 315 - first
+
+## Writes at `dst`, a `String` holding the sign when there is one, the
+## integer `f × 2^e` above 2^57 in the fixed form (`fixed`) or with an
+## exponent, `precision` digits after the point: the digits of an integer
+## come by division by 10^9 rather than one at a time.
+##
+## Requires:
+## - `text`: `dst` holds a live `String`
+def write_integer(dst: ptr mut u8, sign: int, f: int, e: int, fixed: bool, precision: int):
+    # The digits come at 2, which the text writes behind: a digit at most
+    # one place further on, past the point.
+    let b = room(dst, precision + 330)
+    var n = 0
+    # safety: returns_promptly: the runtime in Rust gives and frees the
+    #   block, which holds a big number; in_bounds: the digits come within
+    #   the buffer's room.
+    unsafe:
+        let block = sisu_rt_alloc(BIG * 8)
+        n = integer_digits(block.cast[int](), f, e, b.offset(2))
+        sisu_rt_free(block)
+    var i = sign
+    if fixed:
+        i = move_digits(b, i, 2, 0, n)
+        if precision > 0:
+            i = at(b, i, 46)
+            i = zeros(b, i, precision)
+        set_len(dst, i)
+        return
+    var k = n
+    let count = precision + 1
+    if count < n:
+        # Rounded half to even by the digits left out.
+        let next = char_at(b, 2 + count)
+        var rest = False
+        var j = count + 1
+        while j < n:
+            if char_at(b, 2 + j) != 48:
+                rest = True
+            j += 1
+        # safety: in_bounds: the digits are within the buffer's room.
+        let digits = unsafe b.offset(2)
+        if next > 53 or (next == 53 and (rest or odd_last(digits, count))):
+            if round_up(digits, count):
+                k += 1
+    let kept = if count < n: count else: n
+    i = move_digits(b, i, 2, 0, 1)
+    if precision > 0:
+        i = at(b, i, 46)
+        i = move_digits(b, i, 2, 1, kept)
+        i = zeros(b, i, count - kept)
+    i = at(b, i, 101)
+    i = at(b, i, 43)
+    i = small_number(b, i, k - 1, 2)
+    set_len(dst, i)
+
+## Appends the byte `c` to the `String` at `t`.
+##
+## Requires:
+## - `text`: `t` holds a live `String`
+def put(t: ptr mut u8, c: int):
+    # safety: valid, aligned, writable, in_bounds: a `String` is its
+    #   buffer's address, its length and its size, by `text`, and the buffer
+    #   has room for the byte once grown.
+    unsafe:
+        let words = t.cast[int]()
+        let len = words.offset(1).read()
+        if len >= words.offset(2).read():
+            _ = text.grow(t, len + 1, t)
+        words.cast[ptr[u8]]().read().cast_mut().offset(len).write(u8.wrapping_from(c))
+        words.offset(1).write(len + 1)
+
+## Writes the byte `c` at position `i` of `b`; `i + 1`.
+##
+## Requires:
+## - `room`: position `i` of `b` may be written
+def at(b: ptr mut u8, i: int, c: int) -> int:
+    # safety: in_bounds, writable: by `room`; aligned: a byte needs no
+    #   alignment.
+    unsafe b.offset(i).write(u8.wrapping_from(c))
+    return i + 1
+
+## Moves the digits from position `first` to `last` (not included) after
+## `from_at` in `b` to position `i`; the position after them.
+##
+## Requires:
+## - `room`: the digits are at `from_at` in `b`, and `i` is no later than
+##   `from_at + first`
+def move_digits(b: ptr mut u8, i: int, from_at: int, first: int, last: int) -> int:
+    var j = i
+    var k = first
+    # safety: in_bounds, valid, writable: each position is within the
+    #   digits or before them, by `room`; aligned: a byte needs no
+    #   alignment.
+    unsafe:
+        while k < last:
+            b.offset(j).write(b.offset(from_at + k).read())
+            j += 1
+            k += 1
+    return j
+
+## Writes `n` zeros at position `i` of `b`; the position after them.
+##
+## Requires:
+## - `room`: the `n` positions may be written
+def zeros(b: ptr mut u8, i: int, n: int) -> int:
+    var j = i
+    while j < i + n:
+        j = at(b, j, 48)
+    return j
+
+## Writes the decimal digits of `n`, from 0 to 999, at position `i` of `b`,
+## at least `least` of them; the position after them.
+##
+## Requires:
+## - `room`: three positions may be written
+def small_number(b: ptr mut u8, i: int, n: int, least: int) -> int:
+    var j = i
+    if n >= 100 or least >= 3:
+        j = at(b, j, 48 + n // 100)
+    if n >= 10 or least >= 2:
+        j = at(b, j, 48 + (n // 10) % 10)
+    return at(b, j, 48 + n % 10)
+
+## Gives the `String` at `t` room for `bytes` bytes; the address of its
+## buffer.
+##
+## Requires:
+## - `text`: `t` holds a live `String`
+def room(t: ptr mut u8, bytes: int) -> ptr mut u8:
+    _ = text.grow(t, bytes, t)
+    # safety: valid, aligned: a `String`'s first word is its buffer's
+    #   address, by `text`; writable: the buffer is the `String`'s own.
+    return unsafe t.cast[ptr[u8]]().read().cast_mut()
+
+## Sets the length of the `String` at `t`.
+##
+## Requires:
+## - `text`: `t` holds a live `String`, with room for `len` bytes
+def set_len(t: ptr mut u8, len: int):
+    # safety: in_bounds, writable, aligned: a `String`'s second word is its
+    #   length, by `text`.
+    unsafe t.cast[int]().offset(1).write(len)
+
+## Writes at `dst` a new `String` of the float whose bits are `bits` in the
+## form `mode`: the shortest (`SHORTEST`, or `SHORTEST32` of an `f32`'s 32
+## bits) as `Debug` writes it, `1.5`, `100.0`, `1e16` or `1.5e-7`, with an
+## exponent from 10^16 up and below 10^-4; the fixed form (`FIXED`) with
+## `precision` digits after the point, `0.25`; or (the others) a digit,
+## `precision` more after the point and the exponent with a sign and at
+## least two digits, `2.50e-01`. A negative value has a `-`, a negative
+## zero too, and the others are `NaN`, `inf` and `-inf`.
+##
+## Requires:
+## - `text`: `dst` has room for a `String`
+pub(package) def write(dst: ptr mut u8, bits: int, mode: int, precision: int):
+    text.from_bytes(dst, dst, 0)
+    let shortest_form = mode == SHORTEST or mode == SHORTEST32
+    let single = mode == SHORTEST32
+    let fraction = if single: 23 else: 52
+    let top = if single: 255 else: 2047
+    let negative = if single: ((bits >> 31) & 1) == 1 else: bits < 0
+    let biased = (bits >> fraction) & top
+    let low = bits & ((1 << fraction) - 1)
+    if biased == top and low != 0:
+        put(dst, 78)
+        put(dst, 97)
+        put(dst, 78)
+        return
+    if negative:
+        put(dst, 45)
+    if biased == top:
+        put(dst, 105)
+        put(dst, 110)
+        put(dst, 102)
+        return
+    if biased == 0 and low == 0:
+        put(dst, 48)
+        if shortest_form:
+            put(dst, 46)
+            put(dst, 48)
+            return
+        if precision > 0:
+            put(dst, 46)
+            var i = 0
+            while i < precision:
+                put(dst, 48)
+                i += 1
+        if mode != FIXED:
+            put(dst, 101)
+            put(dst, 43)
+            put(dst, 48)
+            put(dst, 48)
+        return
+    let min_e = if single: -149 else: -1074
+    var f = low
+    var e = min_e
+    var bit_length = fraction + 1
+    if biased != 0:
+        f = low + (1 << fraction)
+        e = biased + min_e - 1
+    else:
+        bit_length = 0
+        var x = f
+        while x > 0:
+            bit_length += 1
+            x = x >> 1
+    # The decimal exponent of the value is above `n × log10(2)`, `n` the
+    # exponent of its highest bit, whose floor `n × 78913 // 2^18` is for
+    # every exponent of a float: the least `k` with the value (or its upper
+    # rounding boundary) below `10^k` is this estimate or at most two above
+    # it.
+    let k0 = (e + bit_length - 1) * 78913 // 262144 + 1
+    let sign = if negative: 1 else: 0
+    if shortest_form:
+        # The digits come at 24, after the 23 bytes the text has at most.
+        let b = room(dst, 48)
+        # safety: in_bounds: the buffer has 48 bytes.
+        let (n, k) = shortest(f, e, fraction + 1, min_e, k0, unsafe b.offset(24))
+        var i = sign
+        if k <= -4 or k >= 17:
+            i = move_digits(b, i, 24, 0, 1)
+            if n > 1:
+                i = at(b, i, 46)
+                i = move_digits(b, i, 24, 1, n)
+            i = at(b, i, 101)
+            if k - 1 < 0:
+                i = at(b, i, 45)
+            i = small_number(b, i, if k - 1 < 0: 1 - k else: k - 1, 1)
+        elif k <= 0:
+            i = at(b, i, 48)
+            i = at(b, i, 46)
+            i = zeros(b, i, -k)
+            i = move_digits(b, i, 24, 0, n)
+        elif k >= n:
+            i = move_digits(b, i, 24, 0, n)
+            i = zeros(b, i, k - n)
+            i = at(b, i, 46)
+            i = at(b, i, 48)
+        else:
+            i = move_digits(b, i, 24, 0, k)
+            i = at(b, i, 46)
+            i = move_digits(b, i, 24, k, n)
+        set_len(dst, i)
+        return
+    if e > 4:
+        write_integer(dst, sign, f, e, mode == FIXED, precision)
+        return
+    let (small, r, s, small_k) = scaled_small(f, e, k0)
+    var k = small_k
+    # The plain integers need no block: `big` is then unused.
+    var big = dst.cast[int]()
+    if not small:
+        # safety: returns_promptly: the runtime in Rust gives the block;
+        #   in_bounds: it holds three big numbers.
+        unsafe:
+            big = sisu_rt_alloc(3 * BIG * 8).cast[int]()
+            k = scaled(big, big.offset(BIG), f, e, k0)
+    # The fixed form's digits are the value times 10^precision, rounded to
+    # an integer: `k + precision` of them, one more when the rounding
+    # carries, and none or a 1 when the value is below a unit of the last
+    # place. The text has at most the digits, or the precision and a digit,
+    # and a sign, a point, a zero and the exponent's five bytes: the digits
+    # come after that.
+    let count = if mode == FIXED: k + precision else: precision + 1
+    let digits = if count > 0: count + 1 else: 1
+    let from_at = max(digits, precision + 1) + 8
+    let b = room(dst, from_at + digits)
+    var n = 0
+    if count > 0:
+        n = count
+        # safety: in_bounds: the digits come within the buffer's room.
+        if exact_digits(small, r, s, big, unsafe b.offset(from_at), count):
+            k += 1
+            if mode == FIXED:
+                put_digit(b, from_at + n, 0)
+                n += 1
+    elif count == 0 and half_order(small, r, s, big) > 0:
+        put_digit(b, from_at, 1)
+        n = 1
+    if not small:
+        # safety: returns_promptly: the runtime in Rust frees the block.
+        unsafe sisu_rt_free(big.cast[u8]())
+    var i = sign
+    if mode == FIXED:
+        if n == 0:
+            i = at(b, i, 48)
+            if precision > 0:
+                i = at(b, i, 46)
+                i = zeros(b, i, precision)
+        elif n <= precision:
+            i = at(b, i, 48)
+            i = at(b, i, 46)
+            i = zeros(b, i, precision - n)
+            i = move_digits(b, i, from_at, 0, n)
+        else:
+            i = move_digits(b, i, from_at, 0, n - precision)
+            if precision > 0:
+                i = at(b, i, 46)
+                i = move_digits(b, i, from_at, n - precision, n)
+    else:
+        i = move_digits(b, i, from_at, 0, 1)
+        if precision > 0:
+            i = at(b, i, 46)
+            i = move_digits(b, i, from_at, 1, n)
+        i = at(b, i, 101)
+        i = at(b, i, if k - 1 < 0: 45 else: 43)
+        i = small_number(b, i, if k - 1 < 0: 1 - k else: k - 1, 2)
+    set_len(dst, i)

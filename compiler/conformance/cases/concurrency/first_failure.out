@@ -1,0 +1,3 @@
+Err(Closed(town="Kemi"))
+Err(Closed(town="Oulu"))
+Err(Cancelled)

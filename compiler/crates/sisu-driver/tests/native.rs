@@ -737,6 +737,40 @@ fn run_native_runs_the_program() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// An `own` closure that keeps a function value is refused natively
+/// (`D0103`), by stage 2's lowering and by the Rust one: a function value is
+/// as wide as the widest `own` environment, which one that keeps a function
+/// value only widens, so each compiled the program again with wider function
+/// values without end (decision 360). The interpreter runs it.
+#[test]
+fn an_own_closure_that_keeps_a_function_value_is_refused_natively() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let dir = scratch("keeps-fn");
+    std::fs::write(
+        dir.join("keeps.sisu"),
+        "def main():\n    let n = 2\n    let f = own () -> n\n    let g = own () -> f() + 1\n    print(g())\n",
+    )
+    .expect("the program");
+    let run = |args: &[&str]| {
+        let out = std::process::Command::new(&sisu).args(args).current_dir(&dir).output().expect("sisu runs");
+        outcome(out)
+    };
+    let (out, err, status) = run(&["run", "keeps.sisu"]);
+    assert_eq!((out.as_str(), status), ("3\n", Some(0)), "{err}");
+    for lowering in [
+        &["build", "--native", "keeps.sisu"][..],
+        &["build", "--native", "--backend=cranelift", "--lower=rust", "keeps.sisu"][..],
+    ] {
+        let (_, err, status) = run(lowering);
+        assert_eq!(status, Some(1), "{lowering:?}: {err}");
+        assert!(
+            err.contains("does not compile an `own` closure that keeps a function value"),
+            "{lowering:?}: {err}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The machine intrinsics of std.rt (22, "Machine intrinsics"; decision
 /// 302), which no program can call (std.rt is internal to std), from SIR
 /// written for them (`tests/machine/machine.sir`): natively the stack
@@ -995,6 +1029,31 @@ fn native_runs_take_seeds_and_report_the_schedulers_numbers() {
     let (_, err, status) = run(&["run", "--native", "--stats", "stack-depth", "join.sisu"]);
     assert_eq!(status, Some(2));
     assert!(err.contains("`--stats stack-depth`"), "{err}");
+}
+
+/// `--explore N` reports the first seed whose run prints other output than
+/// the first seed's, though it exits with the same status (decision 356),
+/// in the interpreter and natively: a program whose tasks print as they go
+/// prints its schedule.
+#[test]
+fn explore_reports_a_seed_whose_output_differs() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let dir = compiler_dir().join("crates/sisu-driver/tests/schedules");
+    for native in [false, true] {
+        let mut args = vec!["run"];
+        if native {
+            args.push("--native");
+        }
+        args.extend(["--explore", "16", "interleave.sisu"]);
+        let ran =
+            std::process::Command::new(&sisu).args(&args).current_dir(&dir).output().expect("sisu runs");
+        let (_, err, status) = outcome(ran);
+        assert_eq!(status, Some(1), "{args:?}: {err}");
+        assert!(
+            err.contains("printed other output than seed 0, with the same exit status 0"),
+            "{args:?}: {err}"
+        );
+    }
 }
 
 /// The release profile leaves out the checks its facts prove and keeps the

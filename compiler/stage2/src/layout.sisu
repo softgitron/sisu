@@ -686,6 +686,49 @@ impl Types:
                 return True
         return False
 
+    ## Whether a value of the type holds a function value in place, through
+    ## options, results, tuples, structs and enums: an `own` closure's
+    ## environment that does is wider than any function value, whose width
+    ## is the widest environment's (decision 360).
+    pub pure def holds_fn(mut self, t: Type) -> bool ! LirError:
+        var seen: list[int] = []
+        let id = self.id(t)?
+        return Ok(self.holds_fn_in(id, mut seen))
+
+    pure def holds_fn_in(self, id: int, mut seen: list[int]) -> bool:
+        if seen.contains(id):
+            return False
+        seen.push(id)
+        if id >= len(self.entries):
+            return False
+        let e = self.entries[id].copy() else:
+            return False
+        var parts: list[int] = []
+        match e.kind:
+            case Kind.Fn:
+                return True
+            case Kind.Option(p):
+                parts.push(p)
+            case Kind.Result(a, b):
+                parts.push(a)
+                parts.push(b)
+            case Kind.Tuple(slots):
+                for s in slots:
+                    parts.push(s.ty)
+            case Kind.Struct(_, fields, _):
+                for f in fields:
+                    parts.push(f.ty)
+            case Kind.Enum(_, variants, _, _):
+                for v in variants:
+                    for f in v.fields:
+                        parts.push(f.ty)
+            case _:
+                return False
+        for p in parts:
+            if self.holds_fn_in(p, mut seen):
+                return True
+        return False
+
     ## The type a number stands for.
     pub pure def type_of_id(self, id: int) -> Type?:
         if id < len(self.by_id):

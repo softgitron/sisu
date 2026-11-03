@@ -663,6 +663,36 @@ impl<'p> Types<'p> {
         parts.into_iter().any(|p| self.counted_in(p, seen))
     }
 
+    /// Whether a value of the type holds a function value in place,
+    /// through options, results, tuples, structs and enums: an `own`
+    /// closure's environment that does is wider than any function value,
+    /// whose width is the widest environment's (decision 360).
+    pub(crate) fn holds_fn(&mut self, t: &Type) -> Result<bool, Error> {
+        let mut seen = Vec::new();
+        let id = self.id(t)?;
+        Ok(self.holds_fn_in(id, &mut seen))
+    }
+
+    fn holds_fn_in(&self, id: u32, seen: &mut Vec<u32>) -> bool {
+        if seen.contains(&id) {
+            return false;
+        }
+        seen.push(id);
+        let Some(Some(e)) = self.entries.get(id as usize) else { return false };
+        let parts: Vec<u32> = match &e.kind {
+            Kind::Fn => return true,
+            Kind::Option(p) => vec![*p],
+            Kind::Result(a, b) => vec![*a, *b],
+            Kind::Tuple(slots) => slots.iter().map(|s| s.ty).collect(),
+            Kind::Struct { fields, .. } => fields.iter().map(|f| f.ty).collect(),
+            Kind::Enum { variants, .. } => {
+                variants.iter().flat_map(|v| v.fields.iter().map(|f| f.ty)).collect()
+            }
+            _ => return false,
+        };
+        parts.into_iter().any(|p| self.holds_fn_in(p, seen))
+    }
+
     /// The type a number stands for.
     pub(crate) fn type_of_id(&self, id: u32) -> Option<Type> {
         self.by_id.get(id as usize).cloned()

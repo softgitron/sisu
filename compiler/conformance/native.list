@@ -30,6 +30,7 @@ concurrency/cancellation
 concurrency/channels
 concurrency/deadlock
 concurrency/failures
+concurrency/first_failure
 concurrency/generator_close
 concurrency/generator_close_panic
 concurrency/generator_driven
@@ -131,6 +132,7 @@ run/closures
 run/collections
 run/constant_reads
 run/control_flow
+run/copy_tables
 run/declarations
 run/divide_by_zero
 run/double_panic
@@ -143,6 +145,7 @@ run/drop_torture
 run/errors
 run/expect
 run/f32
+run/float_text
 run/format_specs
 run/inline_operations
 run/integer_division
