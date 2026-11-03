@@ -1,0 +1,4 @@
+test "a total" ... ok
+test "a sale" ... ok
+test "restocking" ... ok
+3 passed, 0 failed, 0 blocked

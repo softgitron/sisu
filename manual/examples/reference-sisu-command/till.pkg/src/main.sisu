@@ -1,0 +1,13 @@
+##! A till that adds up the prices it is given.
+
+def total(prices: list[int]) -> int:
+    return sum(prices)
+
+def main(sys: System):
+    var prices: list[int] = []
+    for arg in sys.env.args():
+        prices.push(arg.parse_int().or(0))
+    print("total {total(prices)}")
+
+test "an empty basket costs nothing":
+    assert total([]) == 0

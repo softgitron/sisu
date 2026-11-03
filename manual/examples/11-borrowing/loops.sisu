@@ -1,0 +1,19 @@
+# A `for` loop borrows the list, borrows it with `mut`, or takes it.
+def main():
+    var prices = [300, 280, 350]
+    var total = 0
+    for price in prices:
+        total += price
+    print("{prices} add up to {total}")
+    for price in mut prices:
+        price = price * 9 // 10
+    print("on sale: {prices}")
+    let words: list[String] = ["sauna", "sisu", "lake", "birch"]
+    var short: list[String] = []
+    var long: list[String] = []
+    for word in own words:
+        if len(word) <= 4:
+            short.push(word)
+        else:
+            long.push(word)
+    print("short: {short}, long: {long}")

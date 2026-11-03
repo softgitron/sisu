@@ -1,0 +1,6 @@
+$ sisu explain-borrow borrows.sisu:5
+borrows live on line 5 of borrows.sisu, in `main`:
+  a shared borrow of `text` from 4:29, held by `words`, used until 5:11
+  a shared borrow of `words` from 5:11, held by a temporary, used until 5:5
+$ sisu explain-borrow borrows.sisu:3
+no borrow is live on line 3 of borrows.sisu

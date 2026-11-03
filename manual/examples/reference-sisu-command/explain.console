@@ -1,0 +1,12 @@
+$ sisu explain E0200
+E0200 (error) resolve.undefined-name: cannot find `{name}` in this scope
+$ sisu explain resolve.undefined-name
+E0200 (error) resolve.undefined-name: cannot find `{name}` in this scope
+$ sisu explain W0002
+W0002 (warning) resolve.shadow-outer: `{name}` shadows a binding of an enclosing scope
+$ sisu explain R0003
+R0003 (runtime) panic.overflow: integer overflow: {expr}
+$ sisu explain D0006
+D0006 (cli) cli.errors-found: the program was not run: errors found ({count})
+$ sisu explain E9999
+error[D0010]: there is no diagnostic `E9999`

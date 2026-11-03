@@ -1,0 +1,7 @@
+# The words borrow the text they come from.
+def main():
+    var text = String.new("hei maailma")
+    let words = [w for w in text.split_whitespace()]
+    print(words)
+    text.push("!")
+    print(text)

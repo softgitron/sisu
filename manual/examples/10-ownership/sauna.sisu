@@ -1,0 +1,16 @@
+# A value is dropped when the scope of its owner ends.
+struct Guest:
+    name: String
+
+impl Drop for Guest:
+    def drop(mut self):
+        print("{self.name} goes home")
+
+def main():
+    let aino = Guest("Aino")
+    let eero = Guest("Eero")
+    print("the sauna is warm")
+    for round in range(1, 3):
+        let roni = Guest("Roni")
+        print("{roni.name} joins for round {round}")
+    print("the evening ends")

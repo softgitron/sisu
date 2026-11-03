@@ -1,0 +1,7 @@
+# `remove` and `pop` move an element out of a list.
+def main():
+    var queue: list[String] = ["Aino", "Eero", "Roni"]
+    let first = queue.remove(0)
+    let last = queue.pop() ?? "nobody"
+    print("{first} goes first and {last} last")
+    print("still waiting: {queue}")

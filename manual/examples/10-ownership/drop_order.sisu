@@ -1,0 +1,23 @@
+# A moved value is dropped by its new owner, a replaced one at once.
+struct Guest:
+    name: String
+
+impl Drop for Guest:
+    def drop(mut self):
+        print("{self.name} goes home")
+
+struct Couple:
+    first: Guest
+    second: Guest
+
+def stay(own guest: Guest):
+    print("{guest.name} stays for tea")
+
+def main():
+    let aino = Guest("Aino")
+    stay(aino)
+    var host = Guest("Eero")
+    host = Guest("Roni")
+    let couple = Couple(Guest("Liisa"), Guest("Pekka"))
+    let family = [Guest("Ella"), Guest("Mikko")]
+    print("the evening ends")

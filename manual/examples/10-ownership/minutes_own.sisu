@@ -1,0 +1,13 @@
+# A function that takes a list it only reads.
+struct Song:
+    title: String
+    seconds: int
+
+def minutes(own songs: list[Song]) -> int:
+    return sum([song.seconds for song in songs]) // 60
+
+def main():
+    let songs = [Song("Northern Lights", 245), Song("Lake Song", 187)]
+    print("{minutes(songs)} minutes:")
+    for song in songs:
+        print("  {song.title}")

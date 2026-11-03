@@ -1,0 +1,8 @@
+$ sisu build --native hello.sisu
+built `hello`
+$ sisu run --native hello.sisu
+Hei, maailma!
+$ sisu build --native --release --output hei hello.sisu
+built `hei`
+$ sisu run --release hello.sisu
+error[D0111]: `--release` builds with the native backend's release profile (09); it goes with `--native`

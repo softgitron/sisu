@@ -1,0 +1,2 @@
+Order(customer="Aino", items=["coffee", "bun"])
+Order(customer="Eero", items=["coffee", "bun", "juice"])

@@ -1,0 +1,4 @@
+#!/usr/bin/env sisu
+# A script: its top-level statements run in order, with `sys` in scope.
+for name in sys.env.args():
+    print("Hei, {name}!")

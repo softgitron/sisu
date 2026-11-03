@@ -1,0 +1,32 @@
+$ sisu test shop.sisu
+error[E0400]: `stock` was moved on line 23 and cannot be used afterwards
+  --> shop.sisu:24:17
+   |
+24 |     var after = stock
+   |                 ^^^^^
+   |
+23 |     let before = stock
+   |                  ----- `stock` is moved here
+  = note: copy it with `.copy()` before it is moved, or move it later
+
+error[E0400]: `item` was moved on line 34 and cannot be used afterwards
+  --> shop.sisu:35:24
+   |
+35 |         return "added {item.name} at {item.price}"
+   |                        ^^^^^^^^^
+   |
+34 |         self.stock.push(item)
+   |         --------------------- `item` is moved here
+  = note: copy it with `.copy()` before it is moved, or move it later
+
+error[E0400]: `items` was moved on line 39 and cannot be used afterwards
+  --> shop.sisu:40:16
+   |
+40 |     assert len(items) == 2
+   |                ^^^^^
+   |
+39 |     assert total(items) == 580
+   |            ------------ `items` is moved here
+  = note: copy it with `.copy()` before it is moved, or move it later
+
+error[D0021]: the program was not run: the ownership checker found errors (3); `--defer-borrow` runs it under the monitor

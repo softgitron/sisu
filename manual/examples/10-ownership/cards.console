@@ -1,0 +1,10 @@
+$ sisu run cards.sisu
+error[E0400]: `text` was moved on line 10 and cannot be used afterwards
+  --> cards.sisu:10:20
+   |
+10 |         cards.push(Card(name.to_string(), text))
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |                    ---------------------------- `text` is moved here, in an earlier iteration of the loop
+  = note: copy it with `.copy()` before it is moved, or move it later
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

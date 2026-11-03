@@ -1,0 +1,14 @@
+# A value of a `Copy` type is copied, so both names keep a value.
+@derive(Copy)
+struct Point:
+    x: int
+    y: int
+
+def main():
+    let start = Point(0, 0)
+    var here = start
+    here.x += 3
+    print("{start:?} {here:?}")
+    let pair = (7, "Aino")
+    let other = pair
+    print("{pair} {other}")

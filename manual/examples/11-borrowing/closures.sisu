@@ -1,0 +1,15 @@
+# A closure borrows the variables it uses, while it is used.
+def apply_all(xs: list[int], f: (int) -> int) -> list[int]:
+    return [f(x) for x in xs]
+
+def multiplier(factor: int) -> (int) -> int:
+    return own x -> x * factor
+
+def main():
+    var rate = 2
+    let scale = x -> x * rate
+    print(apply_all([1, 2, 3], scale))
+    rate = 10
+    print(apply_all([1, 2, 3], x -> x * rate))
+    let triple = multiplier(3)
+    print(triple(5))

@@ -1,0 +1,6 @@
+frame 0: a circle
+frame 1: a square
+frame 2: a square
+--- stderr
+watch: epoch 1 replaces `frame`
+--- status 0

@@ -1,0 +1,3 @@
+# The session's first input: a function to call from the prompt.
+def area(width: int, height: int) -> int:
+    return width * height

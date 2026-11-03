@@ -1,0 +1,75 @@
+##! Exercise 10.4, a cloakroom. Kind: write. Level: 3.
+##!
+##! A cloakroom keeps coats and gives a ticket for each, and the ticket
+##! gets the coat back. Write the bodies of `leave`, `collect` and `close`
+##! so that every test passes, without copying a coat. Run the tests with
+##! `sisu test cloakroom.sisu`. The hints are in chapter 10 of the
+##! tutorial, under "Exercise 10.4: a cloakroom".
+
+@derive(Eq)
+struct Coat:
+    owner: String
+    colour: String
+
+error CloakroomError:
+    UnknownTicket(ticket: int)
+
+## A cloakroom keeps coats and gives a ticket for each. A coat moves in
+## and moves out again: it is never copied.
+struct Cloakroom:
+    coats: dict[int, Coat] = {}
+    next_ticket: int = 1
+
+    ## Keeps `coat` and gives its ticket: 1 for the first coat, then 2,
+    ## and so on. No number is given twice.
+    def leave(mut self, own coat: Coat) -> int:
+        let ticket = self.next_ticket
+        self.next_ticket += 1
+        self.coats[ticket] = coat
+        return ticket
+
+    ## Gives back the coat of `ticket`, which cannot be used again.
+    def collect(mut self, ticket: int) -> Coat ! CloakroomError:
+        let coat = self.coats.remove(ticket) else:
+            return Err(UnknownTicket(ticket))
+        return Ok(coat)
+
+    ## Gives back every coat still here, in the order they were left,
+    ## and leaves the cloakroom empty.
+    def close(mut self) -> list[Coat]:
+        var coats: list[Coat] = []
+        for ticket in range(1, self.next_ticket):
+            if let Some(coat) = self.coats.remove(ticket):
+                coats.push(coat)
+        return coats
+
+test "tickets count up":
+    var room = Cloakroom()
+    assert room.leave(Coat("Aino", "red")) == 1
+    assert room.leave(Coat("Eero", "grey")) == 2
+
+test "a ticket gives its coat back":
+    var room = Cloakroom()
+    let aino = room.leave(Coat("Aino", "red"))
+    let eero = room.leave(Coat("Eero", "grey"))
+    assert room.collect(eero) == Ok(Coat("Eero", "grey"))
+    assert room.collect(aino) == Ok(Coat("Aino", "red"))
+    assert len(room.coats) == 0
+
+test "a ticket works once":
+    var room = Cloakroom()
+    let ticket = room.leave(Coat("Roni", "blue"))
+    _ = room.collect(ticket)
+    assert room.collect(ticket) == Err(UnknownTicket(ticket))
+    assert room.collect(7) == Err(UnknownTicket(7))
+    assert room.leave(Coat("Aino", "red")) == 2
+
+test "closing time":
+    var room = Cloakroom()
+    let aino = room.leave(Coat("Aino", "red"))
+    room.leave(Coat("Eero", "grey"))
+    room.leave(Coat("Roni", "blue"))
+    _ = room.collect(aino)
+    assert room.close() == [Coat("Eero", "grey"), Coat("Roni", "blue")]
+    assert len(room.coats) == 0
+    assert room.close() == []

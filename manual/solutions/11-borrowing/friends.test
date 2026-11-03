@@ -1,0 +1,3 @@
+test "two guests bring two friends" ... ok
+test "nobody brings nobody" ... ok
+2 passed, 0 failed, 0 blocked

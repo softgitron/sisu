@@ -641,6 +641,9 @@ pub pure def read(text: str) -> Program ! ReadError:
         tests=[],
         trait_methods=[],
         impls=[],
+        # Not in the text form (stage 1's `sir.Program`, D-085): what the
+        # purity check knows, which the backend does not need.
+        asserted=[],
     )
     var seen_header = False
     var pos = 0

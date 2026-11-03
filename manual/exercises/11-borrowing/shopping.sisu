@@ -1,0 +1,21 @@
+##! Exercise 11.1, a shopping list. Kind: fix. Level: 1.
+##!
+##! `add_item` adds an item to a shopping list that belongs to its
+##! caller. The file does not compile. Run `sisu test shopping.sisu`,
+##! read the diagnostics, and fix `add_item`, not the test, so that the
+##! test passes. The hints are in chapter 11 of the tutorial, under
+##! "Exercise 11.1: a shopping list".
+
+## Adds `item` to `items`, unless it is there already.
+def add_item(items: list[String], item: str):
+    for existing in items:
+        if existing == item:
+            return
+    items.push(item.to_string())
+
+test "each item once":
+    var items: list[String] = []
+    add_item(mut items, "milk")
+    add_item(mut items, "bread")
+    add_item(mut items, "milk")
+    assert items == ["milk", "bread"]

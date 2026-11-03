@@ -1,0 +1,10 @@
+# A program for the audits: what it shares, copies and reaches.
+def save(fs: Fs, name: str, text: str) -> ! IoError:
+    fs.write_text(Path.new(name), text)?
+    return Ok(())
+
+def main(sys: System) -> ! IoError:
+    let team = Shared(["Aino".to_string(), "Eero".to_string()])
+    let names = team.copy()
+    save(sys.fs, "team.txt", "{names:?}")?
+    return Ok(())

@@ -1,0 +1,21 @@
+# A parameter borrows, borrows with `mut`, or takes with `own`.
+struct Account:
+    owner: String
+    balance: int
+
+def show(account: Account) -> String:
+    return "{account.owner}: {account.balance}"
+
+def deposit(mut account: Account, amount: int):
+    account.balance += amount
+
+def close(own account: Account, mut closed: list[Account]):
+    closed.push(account)
+
+def main():
+    var aino = Account("Aino", 100)
+    deposit(aino, 50)
+    print(show(aino))
+    var closed: list[Account] = []
+    close(aino, mut closed)
+    print("closed: {show(closed[0])}")

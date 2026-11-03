@@ -1,0 +1,75 @@
+$ sisu run moved.sisu
+error[E0400]: `names` was moved on line 4 and cannot be used afterwards
+  --> moved.sisu:5:42
+  |
+5 |     print("{len(team)} in the team, {len(names)} names")
+  |                                          ^^^^^
+  |
+4 |     let team = names
+  |                ----- `names` is moved here
+  = note: copy it with `.copy()` before it is moved, or move it later
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
+$ sisu run --defer-borrow moved.sisu
+counterexample run: the ownership checker rejected this program; its errors are deferred to the monitor
+ownership violation: `names` was used while it holds no value: it was moved out, or never assigned
+  used at: moved.sisu:5:42 (`_10 = ref _1`)
+  at main (moved.sisu:5:42)
+SIR of `main`:
+fn main(0) source 0 @2:5-2:9 {
+    let _0: ()
+    let _1: list[str] "names" @3:9-3:14
+    let _2: list[str] "team" @4:9-4:13
+    let _3: ()
+    let _4: String
+    let _5: ref mut String
+    let _6: int
+    let _7: ref list[str]
+    let _8: ()
+    let _9: int
+    let _10: ref list[str]
+    let _11: ref String
+  bb0:
+    _1 = list(const "Aino", const "Eero") @3:17-3:33
+    goto bb1
+  bb1 (unwind bb2):
+    _2 = move _1 @4:16-4:21
+    goto bb3
+  bb2 (cleanup):
+    resume
+  bb3 (unwind bb4):
+    _4 = call intrinsic fmt.new() @5:11-5:56
+    _5 = ref mut _4 @5:11-5:56
+    _7 = ref _2 @5:17-5:21
+    _6 = call intrinsic len(copy _7) @5:13-5:22
+    _8 = call intrinsic fmt.display(copy _5, copy _6, const "") @5:13-5:22
+    _8 = call intrinsic fmt.text(copy _5, const " in the team, ") @5:11-5:56
+    _10 = ref _1 @5:42-5:47
+    _9 = call intrinsic len(copy _10) @5:38-5:48
+    _8 = call intrinsic fmt.display(copy _5, copy _9, const "") @5:38-5:48
+    _8 = call intrinsic fmt.text(copy _5, const " names") @5:11-5:56
+    goto bb5
+  bb4 (cleanup):
+    drop _2
+    resume
+  bb5 (unwind bb6):
+    _11 = ref _4 @5:11-5:56
+    _3 = call intrinsic print(copy _11) @5:5-5:57
+    goto bb7
+  bb6 (cleanup):
+    drop _4
+    goto bb4
+  bb7 (unwind bb4):
+    drop _4 @5:57-5:57
+    goto bb8
+  bb8 (unwind bb4):
+    dead _4 @5:57-5:57
+    _0 = const ()
+    goto bb9
+  bb9 (unwind bb2):
+    drop _2 @5:57-5:57
+    goto bb10
+  bb10:
+    return
+}
+outcome: conflict reached; the run stopped at a concrete ownership conflict

@@ -1,0 +1,24 @@
+# An `own` parameter keeps what it is given; a plain one borrows it.
+struct Song:
+    title: String
+    seconds: int
+
+struct Playlist:
+    songs: list[Song]
+
+    def add(mut self, own song: Song):
+        self.songs.push(song)
+
+    def length(self) -> int:
+        return sum([song.seconds for song in self.songs])
+
+def describe(song: Song) -> String:
+    return "{song.title}, {song.seconds} s"
+
+def main():
+    var evening = Playlist([])
+    let song = Song("Northern Lights", 245)
+    print(describe(song))
+    evening.add(song)
+    evening.add(Song("Lake Song", 187))
+    print("{len(evening.songs)} songs, {evening.length()} s")

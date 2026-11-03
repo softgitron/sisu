@@ -1,0 +1,20 @@
+$ sisu check hello.sisu
+$ sisu check broken.sisu
+error[E0200]: cannot find `totl` in this scope
+  --> broken.sisu:4:13
+  |
+4 |     print("{totl} items")
+  |             ^^^^
+  = fix: a similar name is in scope: `total`
+
+$ sisu check --format=ids broken.sisu
+4:13-4:17 E0200 resolve.undefined-name name="totl"
+  fix resolve.similar-name 4:13-4:17 "total"
+$ sisu check --diary friction.jsonl broken.sisu
+error[E0200]: cannot find `totl` in this scope
+  --> broken.sisu:4:13
+  |
+4 |     print("{totl} items")
+  |             ^^^^
+  = fix: a similar name is in scope: `total`
+

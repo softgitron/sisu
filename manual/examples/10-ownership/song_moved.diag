@@ -1,0 +1,2 @@
+25:20-25:24 E0400 borrow.use-after-move name="song" line="22"
+  label 22:5-22:22 borrow.moved-here name="song"

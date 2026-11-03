@@ -147,6 +147,7 @@ pub fn run_native_from_lir(sisu: &Sisu, root: &Path, list: &[String], stage2: &P
 /// Builds stage 2, the backend written in Sisu (the package in `dir`,
 /// `compiler/stage2`), with `sisu build --native`, into a directory of the
 /// system's temporary one: its executable, or what the build printed.
+/// The caller removes that directory once it is done with it.
 pub fn build_stage2(sisu: &Sisu, dir: &Path) -> Result<std::path::PathBuf, String> {
     let out = std::env::temp_dir().join(format!("sisu-stage2-{}", std::process::id()));
     std::fs::create_dir_all(&out).map_err(|e| format!("cannot make `{}`: {e}", out.display()))?;

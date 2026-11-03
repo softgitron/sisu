@@ -1,0 +1,11 @@
+# An error that `main` returns ends the program with exit status 1.
+error ConfigError:
+    Missing(key: String)
+
+def port(key: str) -> int ! ConfigError:
+    return Err(Missing(key.to_string()))
+
+def main() -> ! ConfigError:
+    print("starting")
+    print("port {port("port")?}")
+    return Ok(())

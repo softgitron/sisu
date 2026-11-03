@@ -1,0 +1,5 @@
+test "tickets count up" ... ok
+test "a ticket gives its coat back" ... ok
+test "a ticket works once" ... ok
+test "closing time" ... ok
+4 passed, 0 failed, 0 blocked

@@ -1,0 +1,9 @@
+let side = 4
+area(side, 3)
+let wrong: int = "text"
+var sizes = [side]
+sizes.push(area(2, 5))
+sizes
+:why sizes
+:back 1
+sizes

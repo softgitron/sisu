@@ -1,0 +1,26 @@
+##! Exercise 11.5, sold out. Kind: fix. Level: 3.
+##!
+##! A café clears the items it has none left of from its stock. The file
+##! does not compile. Run `sisu test stock.sisu`, read the diagnostic,
+##! and fix `remove_sold_out` so that every test passes. The hints are in
+##! chapter 11 of the tutorial, under "Exercise 11.5: sold out".
+
+## Removes every item that has none left from `stock`, and gives their
+## names in the order of the stock.
+def remove_sold_out(mut stock: dict[String, int]) -> list[String]:
+    var gone: list[String] = []
+    for name, count in stock.items():
+        if count == 0:
+            _ = stock.remove(name)
+            gone.push(name.copy())
+    return gone
+
+test "two items sold out":
+    var stock: dict[String, int] = {"tea": 0, "bun": 4, "jam": 0}
+    assert remove_sold_out(mut stock) == ["tea", "jam"]
+    assert stock == {"bun": 4}
+
+test "nothing sold out":
+    var stock: dict[String, int] = {"tea": 2}
+    assert remove_sold_out(mut stock) == []
+    assert stock == {"tea": 2}

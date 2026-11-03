@@ -1,0 +1,14 @@
+sir 0
+source 0 "hello.sisu"
+entry main
+
+intrinsic print
+
+fn main(0) source 0 @2:5-2:9 {
+    let _0: ()
+    let _1: ()
+  bb0:
+    _1 = call intrinsic print(const "Hei, maailma!") @3:5-3:27
+    _0 = const ()
+    return
+}

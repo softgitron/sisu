@@ -1,0 +1,18 @@
+sisu> sisu> 12
+sisu> sisu> sisu> sisu> [4, 10]
+sisu> sizes = [4, 10]  <- [side]  (input 4)
+  side = 4  <- 4  (input 2)
+  then sizes.push(area(2, 5))  (input 5)
+sisu> forgot the last inputs (1); the session keeps 5
+sisu> [4, 10]
+sisu> 
+--- stderr
+sisu repl: each input runs as the next line of a script; `:back N` forgets the last N inputs, `:why NAME` shows where a value came from, `:quit` ends
+error[E0300]: expected `int`, found `str`
+  --> <input>:1:18
+  |
+1 | let wrong: int = "text"
+  |                  ^^^^^^
+  |            --- expected because of this
+
+--- status 0

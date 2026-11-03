@@ -1,0 +1,54 @@
+##! Exercise 10.3, three moves. Kind: fix. Level: 2.
+##!
+##! A small shop keeps its stock as a list of items. The file has three
+##! move errors, and each needs a different fix: move later, borrow
+##! instead, or copy. Run `sisu test shop.sisu`, read the diagnostics,
+##! and fix each error with the fix that costs least and keeps what the
+##! doc comments promise. Change the functions, not `Item` or the tests.
+##! The hints are in chapter 10 of the tutorial, under "Exercise 10.3:
+##! three moves".
+
+@derive(Eq)
+struct Item:
+    name: String
+    price: int
+
+## The total price of `items`, in cents.
+def total(items: list[Item]) -> int:
+    return sum([item.price for item in items])
+
+## The stock before a sale, and the stock with each price lowered by
+## `percent`, rounded down to a cent.
+def sale(own stock: list[Item], percent: int) -> (list[Item], list[Item]):
+    let before = stock.copy()
+    var after = stock
+    for i in range(len(after)):
+        after[i].price -= after[i].price * percent // 100
+    return (before, after)
+
+struct Shop:
+    stock: list[Item]
+
+    ## Adds `item` to the stock and says so, such as "added tea at 300".
+    def restock(mut self, own item: Item) -> String:
+        let line = "added {item.name} at {item.price}"
+        self.stock.push(item)
+        return line
+
+test "a total":
+    let items = [Item("tea", 300), Item("bun", 280)]
+    assert total(items) == 580
+    assert len(items) == 2
+    assert total([]) == 0
+
+test "a sale":
+    let stock = [Item("tea", 300), Item("bun", 280)]
+    let before, after = sale(stock, 10)
+    assert before == [Item("tea", 300), Item("bun", 280)]
+    assert after == [Item("tea", 270), Item("bun", 252)]
+
+test "restocking":
+    var shop = Shop([])
+    assert shop.restock(Item("coffee", 350)) == "added coffee at 350"
+    assert shop.restock(Item("tea", 300)) == "added tea at 300"
+    assert len(shop.stock) == 2

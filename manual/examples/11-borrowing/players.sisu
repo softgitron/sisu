@@ -1,0 +1,14 @@
+# `ref mut` names a place inside a value, to change it there.
+struct Player:
+    name: String
+    points: int
+    wins: int
+
+def main():
+    var players = [Player("Aino", 6, 2), Player("Eero", 2, 0)]
+    let winner = ref mut players[1]
+    winner.points += 3
+    winner.wins += 1
+    let leader = ref players[0]
+    print("{leader.name} leads with {leader.points} points")
+    print("{players[1].name}: {players[1].points} points")

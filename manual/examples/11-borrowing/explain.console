@@ -1,0 +1,4 @@
+$ sisu explain-borrow grow_while_reading.sisu:5
+borrows live on line 5 of grow_while_reading.sisu, in `main`:
+  a shared borrow of `scores[...]` from 4:17, held by `first`, used until 6:19
+  a `mut` borrow of `scores` from 5:5, held by a temporary, used until 5:5

@@ -1,0 +1,10 @@
+# Moving a field out leaves the struct with a hole in it.
+struct Order:
+    customer: String
+    items: list[String]
+
+def main():
+    let order = Order("Aino", ["coffee", "bun"])
+    let items = order.items
+    print("{len(items)} items for {order.customer}")
+    print("{order:?}")

@@ -1,0 +1,20 @@
+$ sisu run contracts.sisu
+panic: postcondition of `rounded_up` failed: result >= amount
+    result >= amount
+    │         │
+    5         7
+  at rounded_up (contracts.sisu:4:13)
+  at main (contracts.sisu:8:11)
+$ sisu run --contracts=preconditions contracts.sisu
+5
+panic: precondition of `rounded_up` failed: step > 0
+    step > 0
+    │
+    0
+  at rounded_up (contracts.sisu:3:14)
+  at main (contracts.sisu:9:11)
+$ sisu run --contracts=off contracts.sisu
+5
+panic: division by zero
+  at rounded_up (contracts.sisu:5:12)
+  at main (contracts.sisu:9:11)

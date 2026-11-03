@@ -1,0 +1,34 @@
+$ sisu check --holes hello.sisu
+error[D0009]: unknown option `--holes` for `sisu check`
+$ sisu lint hello.sisu
+error[D0003]: unknown command `lint`; run `sisu help`
+$ sisu add json
+error[D0003]: unknown command `add`; run `sisu help`
+$ sisu remove json
+error[D0003]: unknown command `remove`; run `sisu help`
+$ sisu update
+error[D0003]: unknown command `update`; run `sisu help`
+$ sisu publish
+error[D0003]: unknown command `publish`; run `sisu help`
+$ sisu audit --unsafe hello.sisu
+error[D0009]: unknown option `--unsafe` for `sisu audit`
+$ sisu review main..HEAD
+error[D0003]: unknown command `review`; run `sisu help`
+$ sisu fix --edition 2030
+error[D0003]: unknown command `fix`; run `sisu help`
+$ sisu why send hello.sisu:3
+error[D0003]: unknown command `why`; run `sisu help`
+$ sisu eval hello.sisu
+error[D0003]: unknown command `eval`; run `sisu help`
+$ sisu fill hello.sisu
+error[D0003]: unknown command `fill`; run `sisu help`
+$ sisu doc --digest hello.sisu
+error[D0009]: unknown option `--digest` for `sisu doc`
+$ sisu run --profile hello.sisu
+error[D0009]: unknown option `--profile` for `sisu run`
+$ sisu test --cover hello.sisu
+error[D0009]: unknown option `--cover` for `sisu test`
+$ sisu build --target wasm32-wasi hello.sisu
+error[D0009]: unknown option `--target` for `sisu build`
+$ sisu learn
+error[D0003]: unknown command `learn`; run `sisu help`

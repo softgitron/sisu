@@ -1,0 +1,14 @@
+# Drops and `defer`s run in one order: the reverse of the code's.
+struct Guest:
+    name: String
+
+impl Drop for Guest:
+    def drop(mut self):
+        print("{self.name} goes home")
+
+def main():
+    defer print("the lights go out")
+    let aino = Guest("Aino")
+    defer print("the door is locked")
+    let eero = Guest("Eero")
+    print("the evening ends")

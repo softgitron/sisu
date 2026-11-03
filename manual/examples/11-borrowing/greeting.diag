@@ -1,0 +1,2 @@
+4:5-4:16 E0407 borrow.return-local name="text" function="greeting"
+  label 4:12-4:16 borrow.borrowed-here

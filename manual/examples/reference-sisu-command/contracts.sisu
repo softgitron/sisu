@@ -1,0 +1,9 @@
+# A postcondition that a bug breaks, and a precondition that a call breaks.
+def rounded_up(amount: int, step: int) -> int:
+    requires step > 0
+    ensures result >= amount
+    return amount // step * step
+
+def main():
+    print(rounded_up(7, 5))
+    print(rounded_up(7, 0))

@@ -1,0 +1,12 @@
+$ sisu run minutes_own.sisu
+error[E0400]: `songs` was moved on line 11 and cannot be used afterwards
+  --> minutes_own.sisu:12:17
+   |
+12 |     for song in songs:
+   |                 ^^^^^
+   |
+11 |     print("{minutes(songs)} minutes:")
+   |             -------------- `songs` is moved here
+  = note: copy it with `.copy()` before it is moved, or move it later
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

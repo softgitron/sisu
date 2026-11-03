@@ -1,0 +1,11 @@
+$ sisu test greet.sisu
+test "greeting (doc example)" ... ok
+1 passed, 0 failed, 0 blocked
+$ sisu doc --output pages greet.sisu
+$ sisu doc --std std.nothing
+error[D0113]: `std.nothing` is not a module of the standard library; `sisu doc --std` takes the paths an import names them by, as `std.time`
+$ sisu test --std --filter std.time greet.sisu
+test "std.time/Ticker (doc example)" ... ok
+test "std.time/Timeline (doc example)" ... ok
+2 passed, 0 failed, 0 blocked
+155 not selected

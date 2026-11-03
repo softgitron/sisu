@@ -1,0 +1,8 @@
+# Many borrows can read a value at once, and each ends at its last use.
+def main():
+    var scores = [7, 9, 4]
+    let first = ref scores[0]
+    let last = ref scores[^1]
+    print("first {first}, last {last}, of {len(scores)}")
+    scores.push(10)
+    print(scores)

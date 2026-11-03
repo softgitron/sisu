@@ -1,0 +1,12 @@
+##! Greetings in Finnish.
+
+## The greeting for `name`.
+##
+## ```
+## assert greeting("Aino") == "Hei, Aino!"
+## ```
+pub def greeting(name: str) -> String:
+    return "Hei, {name}!"
+
+def main():
+    print(greeting("Aino"))

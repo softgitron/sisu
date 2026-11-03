@@ -1,5 +1,9 @@
 ../rawio/src/lib.sisu:1:1-1:7 E0703 cap.untrusted package="rawio" what="`extern`"
-../rawio/src/lib.sisu:1:1-3:1 E0900 stage0.unsupported construct="`extern`" phase="foreign functions (Phase 8)"
+../rawio/src/lib.sisu:1:1-1:7 E1019 package.unsafe-undeclared package="rawio" what="foreign code (an `extern` block or a header import)" level="extern"
+../rawio/src/lib.sisu:1:1-1:11 W0007 unsafe.no-safety-comment what="`extern` block"
 ../rawio/src/lib.sisu:5:5-5:11 E0703 cap.untrusted package="rawio" what="`unsafe`"
-../rawio/src/lib.sisu:5:5-6:17 E0900 stage0.unsupported construct="an `unsafe` block" phase="foreign functions (Phase 8)"
-../fastmath/src/lib.sisu:2:5-3:17 E0900 stage0.unsupported construct="an `unsafe` block" phase="foreign functions (Phase 8)"
+../rawio/src/lib.sisu:5:5-5:11 W0009 unsafe.unused what="`unsafe:` block"
+../rawio/src/lib.sisu:7:5-7:13 W0004 type.unreachable-code
+../fastmath/src/lib.sisu:2:5-2:11 E1019 package.unsafe-undeclared package="fastmath" what="unsafe code" level="memory"
+../fastmath/src/lib.sisu:2:5-2:11 W0009 unsafe.unused what="`unsafe:` block"
+../fastmath/src/lib.sisu:4:5-4:13 W0004 type.unreachable-code

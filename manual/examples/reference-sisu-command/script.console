@@ -1,0 +1,5 @@
+$ sisu script.sisu Aino Eero
+Hei, Aino!
+Hei, Eero!
+$ sisu run script.sisu Roni
+Hei, Roni!

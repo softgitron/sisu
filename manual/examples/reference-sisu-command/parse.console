@@ -1,0 +1,55 @@
+$ sisu parse --print hello.sisu
+# The program most examples on this page run.
+def main():
+    print("Hei, maailma!")
+$ sisu parse --tree hello.sisu
+SOURCE_FILE 0..85
+  FN_DEF 46..85
+    DEF_KW 46..49 "def"
+    IDENT 50..54 "main"
+    PARAM_LIST 54..56
+      L_PAREN 54..55 "("
+      R_PAREN 55..56 ")"
+    COLON 56..57 ":"
+    BLOCK 57..85
+      NEWLINE 57..58 "\n"
+      INDENT 62..62 ""
+      EXPR_STMT 62..85
+        CALL_EXPR 62..84
+          NAME_REF 62..67
+            IDENT 62..67 "print"
+          ARG_LIST 67..84
+            L_PAREN 67..68 "("
+            ARG 68..83
+              STRING_EXPR 68..83
+                STRING_START 68..69 "\""
+                STRING_TEXT 69..82 "Hei, maailma!"
+                STRING_END 82..83 "\""
+            R_PAREN 83..84 ")"
+        NEWLINE 84..85 "\n"
+      DEDENT 85..85 ""
+  EOF 85..85 ""
+$ sisu parse --shape hello.sisu
+SOURCE_FILE
+  FN_DEF
+    DEF_KW
+    IDENT "main"
+    PARAM_LIST
+      L_PAREN
+      R_PAREN
+    COLON
+    BLOCK
+      NEWLINE
+      INDENT
+      EXPR_STMT
+        CALL_EXPR
+          NAME_REF
+            IDENT "print"
+          ARG_LIST
+            L_PAREN
+            ARG
+              STRING "\"Hei, maailma!\""
+            R_PAREN
+        NEWLINE
+      DEDENT
+  EOF

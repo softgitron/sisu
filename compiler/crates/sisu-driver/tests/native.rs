@@ -73,6 +73,9 @@ fn native_conformance_from_lir() {
         std::fs::read_to_string(compiler_dir().join("conformance/native.list")).expect("the coverage list");
     let list = sisu_conformance::native::read_list(&text);
     let report = sisu_conformance::native::run_native_from_lir(&sisu, &root, &list, &stage2);
+    if let Some(dir) = stage2.parent() {
+        let _ = std::fs::remove_dir_all(dir);
+    }
     println!("{}", report.render());
     assert!(report.cases > 0, "no cases in the coverage list");
     assert!(report.failures.is_empty(), "{}", report.render());

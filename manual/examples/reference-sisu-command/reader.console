@@ -1,0 +1,11 @@
+$ sisu run --record run.log reader.sisu
+1: Hei
+2: maailma
+$ sisu replay run.log
+1: Hei
+2: maailma
+$ sisu run --record quiet.log --redact fs reader.sisu
+1: Hei
+2: maailma
+$ sisu replay quiet.log
+error[D0037]: the replay diverged from the log: record 2 of the log is a call to `fs` whose result was redacted, but the program made the call read_file "poem.txt"

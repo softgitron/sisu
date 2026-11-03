@@ -1,0 +1,3 @@
+test "a walk around a block" ... ok
+test "a walk from elsewhere" ... ok
+2 passed, 0 failed, 0 blocked

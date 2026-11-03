@@ -1,0 +1,30 @@
+$ sisu test predict_endings.sisu
+warning[W0001]: typed hole `the log of sauna()` of type `list[String]`
+  --> predict_endings.sisu:40:29
+   |
+40 | const SAUNA: list[String] = todo("the log of sauna()")
+   |                             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the log of rounds()` of type `list[String]`
+  --> predict_endings.sisu:41:30
+   |
+41 | const ROUNDS: list[String] = todo("the log of rounds()")
+   |                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the log of walk(True)` of type `list[String]`
+  --> predict_endings.sisu:42:31
+   |
+42 | const RAINING: list[String] = todo("the log of walk(True)")
+   |                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the log of night()` of type `list[String]`
+  --> predict_endings.sisu:43:29
+   |
+43 | const NIGHT: list[String] = todo("the log of night()")
+   |                             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test "a sauna" ... blocked by todo("the log of sauna()")
+test "two rounds" ... blocked by todo("the log of rounds()")
+test "a walk in the rain" ... blocked by todo("the log of walk(True)")
+test "a whole night" ... blocked by todo("the log of night()")
+0 passed, 0 failed, 4 blocked

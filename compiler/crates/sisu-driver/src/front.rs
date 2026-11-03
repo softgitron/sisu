@@ -350,7 +350,8 @@ fn build(exe: &Path, package: &Path, src: &Path, host: &mut dyn Host) -> Result<
 
 /// A home directory for stage 1 whose `target/release/sisu`, the backend
 /// stage 1 calls, is this executable, with the compiler's `catalog/` and
-/// `std/` beside it; removed when dropped.
+/// `std/` beside it, and `stage1/std/`, the standard library's modules only
+/// stage 1 reads (its RULES.md, R4); removed when dropped.
 struct Home {
     dir: PathBuf,
 }
@@ -377,6 +378,8 @@ impl Home {
         std::fs::create_dir_all(&release)?;
         std::os::unix::fs::symlink(compiler.join("catalog"), dir.join("catalog"))?;
         std::os::unix::fs::symlink(compiler.join("std"), dir.join("std"))?;
+        std::fs::create_dir_all(dir.join("stage1"))?;
+        std::os::unix::fs::symlink(compiler.join("stage1").join("std"), dir.join("stage1").join("std"))?;
         std::os::unix::fs::symlink(std::env::current_exe()?, release.join("sisu"))
     }
 

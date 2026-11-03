@@ -1,0 +1,4 @@
+# A misspelt name stops the program before it runs.
+def main():
+    let total = 3
+    print("{totl} items")

@@ -1,0 +1,8 @@
+# Under `--sim`, a test that takes a `System` gets a simulated one.
+def save_notes(fs: Fs, count: int) -> int ! IoError:
+    for i in range(count):
+        fs.write_text(Path.new("note{i}.txt"), "note {i}")?
+    return Ok(count)
+
+test "every note is saved"(sys: System):
+    assert save_notes(sys.fs, 10) == Ok(10)

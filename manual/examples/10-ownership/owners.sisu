@@ -1,0 +1,16 @@
+# Every value has one owner: a binding, a field or a collection.
+struct Guest:
+    name: String
+    nights: int
+
+def guest_list(names: list[str]) -> list[Guest]:
+    var guests: list[Guest] = []
+    for name in names:
+        let guest = Guest(name.to_string(), 2)
+        guests.push(guest)
+    return guests
+
+def main():
+    let guests = guest_list(["Aino", "Eero", "Roni"])
+    for guest in guests:
+        print("{guest.name} stays {guest.nights} nights")

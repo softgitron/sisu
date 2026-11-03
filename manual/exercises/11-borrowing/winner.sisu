@@ -1,0 +1,23 @@
+##! Exercise 11.4, the winner. Kind: fix. Level: 2.
+##!
+##! `winner` returns a borrow of the winner's name, without copying it.
+##! The file does not compile. Run `sisu test winner.sisu`, read the
+##! diagnostic, and fix `winner` so that the test passes. The hints are
+##! in chapter 11 of the tutorial, under "Exercise 11.4: the winner".
+
+struct Player:
+    name: String
+    points: int
+
+## The name of whichever of `a` and `b` has more points; `a` on a tie.
+def winner(a: Player, b: Player) -> ref String from a:
+    if b.points > a.points:
+        return ref b.name
+    return ref a.name
+
+test "the winner":
+    let aino = Player("Aino", 7)
+    let eero = Player("Eero", 9)
+    assert winner(aino, eero) == "Eero"
+    assert winner(eero, aino) == "Eero"
+    assert winner(aino, Player("Roni", 7)) == "Aino"

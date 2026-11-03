@@ -6174,8 +6174,9 @@ library", "Tasks and the scheduler", "Capabilities", "Stage 2")
      ownership as `sisu build` does and hands the SIR to the backend (`sisu
      build --native --from-sir`, decision 212): stage 1 calls
      `{home}/target/release/sisu`, so the driver gives it a home of links
-     whose `target/release/sisu` is the running `sisu`, and whose `catalog/`
-     and `std/` are the compiler's, and the executable links the runtime
+     whose `target/release/sisu` is the running `sisu`, and whose `catalog/`,
+     `std/` and `stage1/std/` (the modules only stage 1 reads) are the
+     compiler's, and the executable links the runtime
      beside it, byte for byte the one the Rust front end's build makes.
      `sisu run` runs the same build with `SISU_KEEP_SIR` in stage 1's
      environment, which makes that backend keep the SIR it is given rather
@@ -6354,6 +6355,114 @@ library", "Tasks and the scheduler", "Capabilities", "Stage 2")
      check they keep, natively in the three modes, and the driver's tests
      hold the counts of its release build. This changes no front-end rule.
 
+**Unsafe code in stage 1** (22; stage 1's RULES.md, R2 to R9)
+
+271. Unsafe code (22; D-080) is implemented in stage 1, the front end:
+     an unsafe operation, which is a call of an `unsafe def` (a function,
+     a method or a trait's method), a call of a foreign function, or an
+     `unsafe impl`, is permitted only inside an `unsafe:` block or an
+     `unsafe e` expression. A call outside one is `E0981` (`E0982` for a
+     foreign function), labelled with the obligations of the callee's
+     `Safety:` list; neither kind of function may be a function value
+     (`E0983`). `Send`, `Sync` and the traits declared `unsafe trait` are
+     implemented with `unsafe impl` (`E0984`, with the fix that writes
+     it); `unsafe impl` of another trait or of none is `E0985`, of `Copy`
+     or `Escapable` `E0986`; an impl's method is `unsafe def` exactly when
+     the trait's is (`E0234`). An `unsafe def`'s body is no unsafe
+     context. An `extern` block declares foreign functions, whose calls
+     lower to the intrinsic `extern.LIBRARY.NAME` (`extern.c.NAME` for
+     `extern "C"`), which marks them in SIR as `sim.rs` reads them; the
+     blocks and expressions lower as the blocks and expressions they mark,
+     so SIR is unchanged by `unsafe` and the interpreter and the backend
+     run unsafe code whose callees' bodies they know. `@intrinsic` and the
+     other attributes only the standard library writes are `E0225` on a
+     program's methods as on its items, since a function with an
+     intrinsic body would be an unsafe operation that needs no `unsafe`.
+     Stage 1 decides it (its RULES.md, R2, with `cases/unsafe/`); the
+     frozen Rust front end parses `unsafe:` and `unsafe e` and reports
+     them as `E0900`.
+272. The `# safety:` comment of unsafe code (22, D-083) is the run of
+     comment lines immediately above the line where the statement holding
+     an `unsafe:` block or an `unsafe e` expression starts, or the
+     `unsafe impl` or the `extern` block (its attributes included), from
+     its line that starts with `# safety:`; its parts name the obligations
+     they discharge, names and a `:` at its start or after a `;` or a
+     sentence's `.`. An `unsafe def`'s and an `unsafe trait`'s obligations
+     are the ``- `name`:`` items of the `Safety:` paragraph of their `##`
+     comment, and a trait impl's `unsafe def` without one has the trait
+     method's. Stage 1 reports, as warnings of the program's own modules: a
+     block or expression with no unsafe operation (`W0009`, with the fix
+     that removes an expression's `unsafe`); a block, an expression, an
+     `unsafe impl` or an `extern` block without its comment (`W0007`); an
+     `unsafe def` or `unsafe trait` without its list (`W0008`); a comment
+     naming no obligation of a callee (`W0010`); an `unsafe impl Send` or
+     `Sync` whose parameter lacks the bound (`W0013`, with `type.add-bound`);
+     and a public safe function, not `pure`, that calls a foreign function
+     and takes no capability (`W0014`). Stage 1 decides it (RULES.md, R3).
+273. Raw pointers are `std.mem`'s (22, D-081): `ptr[T]` and `ptr mut T`,
+     builtins `ptr` and `ptr_mut` that a module imports (`from std.mem
+     import ptr`; `ptr mut T` is the mutable form of the `ptr` in scope,
+     `E0987` when that is another type), `Copy`, `Escapable` when `T` is,
+     never `Send` or `Sync`, printed without their address. An `unsafe
+     impl Send` or `Sync` asserts the trait for the arguments its bounds
+     admit. `std.mem` declares the pointers' `unsafe def`s (intrinsics
+     `mem.*`), `Layout`, `size_of`, `align_of`, `align_up`, `Allocator`,
+     `Global`, `Region`, `RawBuf[T, A]` (whose `grow` is safe, and whose
+     making, growing and dropping are `pure`, as `Region`'s are) and
+     `Plain`, whose derive asks `@repr(c)` (or one field) of a struct and
+     `Plain` of each field; `std.ffi` the C types, `CString` and `CStr`.
+     The modules whose syntax only stage 1 reads
+     (`std.mem`, `std.ffi`, `std.rt`) are in `compiler/stage1/std/` until
+     the frozen Rust front end, which reads and formats `compiler/std/`,
+     is retired; a derive template may come from one, and a derive's
+     target shows reflection its attributes. Stage 1 decides it (RULES.md,
+     R4).
+274. An `unsafe` block does not make a function impure (22, D-085):
+     inside a `pure` function, a call of a function that is not `pure`
+     made in an `unsafe` block or expression is its author's assertion
+     that the function stays observationally pure, which the block's
+     comment explains under a `pure:` part (`W0011` otherwise); the
+     ranges of such blocks go from the typed body (`TBody.asserted`)
+     through lowering into `sir.Program.asserted`, which SIR's text does
+     not write, and the purity check reports no call inside one. A
+     foreign call and a machine intrinsic stop compile-time evaluation
+     (`E0601`); code that compile-time evaluation writes holds no
+     `unsafe` (`E0615`); a contract holds none (`E0988`). Stage 1 decides
+     it (RULES.md, R5).
+275. A package declares its unsafe code in its manifest, `unsafe =
+     "memory"` or `"extern"` (22, D-082), which stage 1 compares with the
+     package's code (its `unsafe` and `extern` tokens and C header
+     imports): code without a declaration is `E1019`, foreign code under
+     `memory` `E1020`, a declaration above the code `W0012`; a dependency
+     that declares a level needs the root's `[trust] unsafe` (`E1021`). The
+     lockfile records each package's level, and a rewrite that would
+     raise one stops with `E1022` unless the command has
+     `--accept-unsafe`. Stage 1 decides it (RULES.md, R6).
+276. `sisu audit --unsafe` (22, D-083) is stage 1's: per package, its
+     declared level and the program's consent; per module with unsafe
+     code, its counts and the FNV-1a hash of its text; per block,
+     expression, `unsafe def`, `unsafe trait`, `unsafe impl` and `extern`
+     block, its line, its function and its comment or `Safety:` list; the
+     package's foreign functions with what their callers hold; and the
+     lints, as `check --format=ids` prints them. `--std` lists the
+     standard library's. Stage 1 decides it (RULES.md, R7).
+277. `std.rt` (22, D-086), internal to `std` (`E0701` for a program's
+     import), declares the machine intrinsics `rt.switch`,
+     `rt.stack_pointer` and `rt.thread_slot` as `unsafe def`s with their
+     `Safety:` lists, and `Context`; compile-time evaluation stops at each.
+     Stage 1 decides it (RULES.md, R8).
+278. The first slice of the runtime in Sisu (22, D-086) is `std.mem`'s
+     structural operations, generic code that compile-time reflection
+     takes apart per type in place of `sisu-rt`'s walk over a type table:
+     `structural_hash` mixes a value's parts in the order of decision 256
+     (a float's bits worked out from its value, `f64_bits`),
+     `structural_eq` compares them, `structural_copy` copies them anew,
+     and `drop` drops a value at once through the compiler's drop glue,
+     which already is the structural drop; tuples and arrays wait for
+     reflection to take them apart. They are in `std.mem` rather than in
+     the internal `std.rt`, since none reaches the machine. Stage 1's case
+     `cases/runtime/structural.sisu` checks them against the interpreter's
+     and the native runtime's answers. Stage 1 decides it (RULES.md, R9).
 **Stage 2 in Sisu, step 1: LIR** (section "Stage 2", "LIR"; D-087)
 
 281. LIR, the low IR of D-087, is the code generator's own calls of

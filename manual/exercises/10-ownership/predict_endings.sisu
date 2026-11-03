@@ -1,0 +1,63 @@
+##! Exercise 10.1, predict the endings. Kind: predict. Level: 1.
+##!
+##! Each constant is your prediction of the log that a method of
+##! `Evening` writes, as a list of its lines in order. Write each as a
+##! literal, then run `sisu test predict_endings.sisu`. The hints are in
+##! chapter 10 of the tutorial, under "Exercise 10.1: predict the
+##! endings".
+
+## The log of an evening at a summer cottage.
+struct Evening:
+    log: list[String] = []
+
+    ## Adds `line` to the log.
+    def note(mut self, line: str):
+        self.log.push(line.to_string())
+
+    def sauna(mut self):
+        self.note("stove lit")
+        defer self.note("stove out")
+        self.note("Aino bathes")
+
+    def rounds(mut self):
+        for name in ["Aino", "Eero"]:
+            defer self.note("{name} swims")
+            self.note("{name} bathes")
+
+    def walk(mut self, raining: bool):
+        self.note("boots on")
+        defer self.note("boots off")
+        if raining:
+            self.note("tea on the porch")
+            return
+        self.note("a walk to the lake")
+
+    def night(mut self):
+        defer self.note("goodnight")
+        self.sauna()
+        self.note("tea")
+
+const SAUNA: list[String] = todo("the log of sauna()")
+const ROUNDS: list[String] = todo("the log of rounds()")
+const RAINING: list[String] = todo("the log of walk(True)")
+const NIGHT: list[String] = todo("the log of night()")
+
+test "a sauna":
+    var evening = Evening()
+    evening.sauna()
+    assert evening.log == SAUNA
+
+test "two rounds":
+    var evening = Evening()
+    evening.rounds()
+    assert evening.log == ROUNDS
+
+test "a walk in the rain":
+    var evening = Evening()
+    evening.walk(True)
+    assert evening.log == RAINING
+
+test "a whole night":
+    var evening = Evening()
+    evening.night()
+    assert evening.log == NIGHT

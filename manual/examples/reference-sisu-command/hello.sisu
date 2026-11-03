@@ -1,0 +1,3 @@
+# The program most examples on this page run.
+def main():
+    print("Hei, maailma!")

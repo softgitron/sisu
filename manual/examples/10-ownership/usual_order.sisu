@@ -1,0 +1,12 @@
+# `.copy()` makes a second value, which changes on its own.
+struct Order:
+    customer: String
+    items: list[String]
+
+def main():
+    let usual = Order("Aino", ["coffee", "bun"])
+    var today = usual.copy()
+    today.customer = "Eero"
+    today.items.push("juice")
+    print("{usual:?}")
+    print("{today:?}")

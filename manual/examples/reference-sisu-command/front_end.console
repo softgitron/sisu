@@ -1,0 +1,4 @@
+$ sisu run --front-end=rust hello.sisu
+Hei, maailma!
+$ sisu run --front-end=fast hello.sisu
+error[D0115]: `--front-end` takes `stage1` (the front end written in Sisu, the default) or `rust` (the Rust front end, the oracle), not `fast`

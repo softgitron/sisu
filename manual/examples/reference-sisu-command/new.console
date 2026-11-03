@@ -1,0 +1,8 @@
+$ sisu new kala
+created the package `kala`, with its manifest `sisu.toml` and its root module `src/main.sisu`
+$ sisu new --lib kirja
+created the package `kirja`, with its manifest `sisu.toml` and its root module `src/lib.sisu`
+$ sisu new Kala
+error[D0072]: `Kala` cannot name a package: a package is named in lowercase letters, digits and `_`, starting with a letter, and not as a standard-library module
+$ sisu new kala
+error[D0073]: `kala` exists already

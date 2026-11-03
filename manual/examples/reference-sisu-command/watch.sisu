@@ -1,0 +1,20 @@
+# Under `sisu run --watch`, a save swaps in the bodies that changed.
+from std.time import Ticker
+
+def frame(n: int) -> String:
+    return "frame {n}: a circle"
+
+def save_next_version(sys: System) -> ! IoError:
+    let text = sys.fs.read_to_string("next.sisu")?
+    sys.fs.write_text("watch.sisu", text)?
+    return Ok(())
+
+def main(sys: System) -> !:
+    let start = DateTime.parse("2026-01-01T00:00:00Z")?
+    var ticker = Ticker.every(Clock.frozen_at(start), Duration.millis(16))
+    for n in range(3):
+        ticker.wait()?
+        print(frame(n))
+        if n == 0:
+            save_next_version(sys)?
+    return Ok(())

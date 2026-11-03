@@ -1,0 +1,9 @@
+$ sisu run no_mut_at_call.sisu
+error[E0339]: `account` is a `mut` parameter, so the call must say `mut` before the argument
+  --> no_mut_at_call.sisu:17:13
+   |
+17 |     deposit(aino, 50)
+   |             ^^^^
+  = fix: write `mut` before the argument: `mut `
+
+error[D0006]: the program was not run: errors found (1)

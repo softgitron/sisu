@@ -1,0 +1,2 @@
+$ sisu run --monitor hello.sisu
+Hei, maailma!

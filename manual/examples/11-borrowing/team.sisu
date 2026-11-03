@@ -1,0 +1,23 @@
+# A function can return a borrow of what it was given.
+struct Team:
+    name: String
+    players: list[String]
+
+    def captain(self) -> ref String:
+        return ref self.players[0]
+
+def longest(words: list[String]) -> ref String:
+    var best = 0
+    for i, word in enumerate(words):
+        if len(word) > len(words[best]):
+            best = i
+    return ref words[best]
+
+def longer(a: str, b: str) -> str from a, b:
+    return if len(a) >= len(b): a else: b
+
+def main():
+    let owls = Team("Owls", ["Aino", "Eero", "Pekka", "Ella"])
+    print("{owls.name} are led by {owls.captain()}")
+    print("the longest name: {longest(owls.players)}")
+    print(longer("sauna", "sisu"))

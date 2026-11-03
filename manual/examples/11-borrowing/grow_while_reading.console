@@ -1,0 +1,15 @@
+$ sisu run grow_while_reading.sisu
+error[E0405]: `scores` is already borrowed on line 4, so it cannot be borrowed with `mut` until that borrow ends on line 6
+  --> grow_while_reading.sisu:5:5
+  |
+5 |     scores.push(10)
+  |     ^^^^^^^^^^^^^^^
+  |
+4 |     let first = ref scores[0]
+  |                 ------------- borrowed here by `first`
+  |
+6 |     print("first {first}, of {len(scores)}")
+  |                   ----- the borrow is still used here
+  = note: move this after line 6, where the borrow ends, or work on a copy made with `.copy()`
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

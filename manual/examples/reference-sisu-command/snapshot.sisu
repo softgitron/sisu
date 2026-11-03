@@ -1,0 +1,11 @@
+# A snapshot test compares a value with the snapshot stored for it.
+from std.test import assert_snapshot
+
+def greeting(names: list[str]) -> String:
+    var text = String.new()
+    for name in names:
+        text += "Hei, {name}! "
+    return text.trim().to_string()
+
+test "greets everyone":
+    assert_snapshot(greeting(["Aino", "Eero", "Roni"]))

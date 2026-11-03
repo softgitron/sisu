@@ -1,0 +1,8 @@
+$ sisu frob
+error[D0003]: unknown command `frob`; run `sisu help`
+$ sisu run --fast hello.sisu
+error[D0009]: unknown option `--fast` for `sisu run`
+$ sisu run --explore=many hello.sisu
+error[D0023]: `--explore` needs a number, not `many`
+$ sisu explain
+error[D0004]: `sisu explain` needs a file

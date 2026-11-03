@@ -1,0 +1,4 @@
+16:31-16:34 E0413 borrow.from-required name="longer" ret="str" params="a, b"
+  label 16:12-16:18 borrow.borrowed-param name="a"
+  label 16:20-16:26 borrow.borrowed-param name="b"
+  fix borrow.add-from 16:34-16:34 " from a, b"

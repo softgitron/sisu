@@ -84,12 +84,12 @@ fn main() {
             return;
         }
         let report = if from_lir {
-            let stage2 = match sisu2 {
-                Some(p) => std::fs::canonicalize(&p).unwrap_or(p),
+            let (stage2, built) = match sisu2 {
+                Some(p) => (std::fs::canonicalize(&p).unwrap_or(p), false),
                 None => {
                     let dir = root.join("../../stage2");
                     match sisu_conformance::native::build_stage2(&sisu, &dir) {
-                        Ok(exe) => exe,
+                        Ok(exe) => (exe, true),
                         Err(e) => {
                             eprintln!("stage 2 does not build in `{}`:\n{e}", dir.display());
                             std::process::exit(1);
@@ -97,7 +97,12 @@ fn main() {
                     }
                 }
             };
-            sisu_conformance::native::run_native_from_lir(&sisu, &root, &names, &stage2)
+            let report = sisu_conformance::native::run_native_from_lir(&sisu, &root, &names, &stage2);
+            // The stage 2 built for the run goes with it.
+            if built && let Some(dir) = stage2.parent() {
+                let _ = std::fs::remove_dir_all(dir);
+            }
+            report
         } else if interpreted {
             sisu_conformance::native::run_interpreted_from_sir(&sisu, &root, &names)
         } else if from_sir {

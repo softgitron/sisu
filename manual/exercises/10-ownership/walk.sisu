@@ -1,0 +1,40 @@
+##! Exercise 10.2, a walk on a grid. Kind: fix. Level: 1.
+##!
+##! `walk` follows a list of steps and keeps every position it passes.
+##! The file does not compile. Run `sisu test walk.sisu`, read the
+##! diagnostic, and change the type `Position`, not `walk` or the tests,
+##! so that every test passes. The hints are in chapter 10 of the
+##! tutorial, under "Exercise 10.2: a walk on a grid".
+
+## A position on a grid: `x` grows to the east and `y` to the north.
+@derive(Eq)
+struct Position:
+    x: int
+    y: int
+
+## The positions of a walk that starts at `x`, `y` and takes one step
+## for each letter of `steps`: "n", "s", "e" or "w".
+def walk(x: int, y: int, steps: str) -> list[Position]:
+    var here = Position(x, y)
+    var visited = [here]
+    for step in steps.chars():
+        if step == 'n':
+            here.y += 1
+        elif step == 's':
+            here.y -= 1
+        elif step == 'e':
+            here.x += 1
+        elif step == 'w':
+            here.x -= 1
+        visited.push(here)
+    return visited
+
+test "a walk around a block":
+    let path = walk(0, 0, "nesw")
+    assert len(path) == 5
+    assert path[2] == Position(1, 1)
+    assert path[^1] == Position(0, 0)
+
+test "a walk from elsewhere":
+    let path = walk(5, -2, "ww")
+    assert path == [Position(5, -2), Position(4, -2), Position(3, -2)]

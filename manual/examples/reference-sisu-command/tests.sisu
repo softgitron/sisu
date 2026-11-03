@@ -1,0 +1,20 @@
+# Tests that pass, fail and wait for a hole.
+def double(x: int) -> int:
+    return x * 2
+
+def halve(x: int) -> int:
+    return todo("halve")
+
+test "doubles a number":
+    assert double(21) == 42
+
+test "doubles" for x, y in [(-1, -2), (-3, -5)]:
+    assert double(x) == y
+
+test "halves a number":
+    assert halve(42) == 21
+
+suite "large numbers":
+    @tag("slow")
+    test "doubles a large number":
+        assert double(1 << 40) == 1 << 41

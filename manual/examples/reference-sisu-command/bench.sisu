@@ -1,0 +1,11 @@
+# A benchmark runs its loop many times and reports the time of one.
+from std.test import Bench, black_box
+
+def fib(n: int) -> int:
+    if n < 2:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+bench "fib of 15"(b: Bench):
+    for _ in b.loop():
+        black_box(fib(15))

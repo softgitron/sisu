@@ -1,0 +1,12 @@
+$ sisu run --stats hello.sisu
+Hei, maailma!
+stats: 1 tasks, at most 1 at once, 0 switches
+stats: scheduling latency p50 0 p99 0 max 0 statements; p50 0 p99 0 microseconds
+stats shared: 0 cells from task-local sites, 0 from may-cross sites, 0 reached by another task
+$ sisu run --stats stack-depth hello.sisu
+Hei, maailma!
+stats stack-depth: 1 calls, the deepest stack 1 frames, about 96 bytes of native stack there (16 per SIR local and 64 per frame)
+stats stack-depth: 1 calls at a depth of 1 to 1 frames
+$ sisu run --stats shared hello.sisu
+Hei, maailma!
+stats shared: 0 of 0 `Shared` construction sites tagged task-local, 0 may-cross

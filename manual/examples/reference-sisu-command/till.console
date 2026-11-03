@@ -1,0 +1,14 @@
+$ sisu check
+$ sisu run -- 12 5 30
+total 47
+$ sisu test
+test "an empty basket costs nothing" ... ok
+1 passed, 0 failed, 0 blocked
+$ sisu build
+built the package `till` 0.1.0 (modules: 1)
+$ sisu doc
+<!-- till.md -->
+# `till`
+
+A till that adds up the prices it is given.
+$ sisu fmt --check

@@ -1,0 +1,7 @@
+#!/usr/bin/env sisu
+# A worksheet: `sisu ws` writes each statement's value after it.
+let prices = [12, 5, 30]
+let total = sum(prices)
+print("total {total}")
+total // len(prices)
+total.to_f64() / 3.0

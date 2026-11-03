@@ -1,0 +1,3 @@
+test "two items sold out" ... ok
+test "nothing sold out" ... ok
+2 passed, 0 failed, 0 blocked

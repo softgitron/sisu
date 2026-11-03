@@ -1,0 +1,7 @@
+# A function returns a borrow of text that it made itself.
+def greeting(name: str) -> str:
+    let text = "Hei, {name}!"
+    return text
+
+def main():
+    print(greeting("Aino"))

@@ -1,0 +1,10 @@
+$ sisu run greeting.sisu
+error[E0407]: this returns a borrow of `text`, which belongs to `greeting` and is gone when it returns
+  --> greeting.sisu:4:5
+  |
+4 |     return text
+  |     ^^^^^^^^^^^
+  |            ---- borrowed here
+  = note: return an owned value instead, such as a copy made with `.copy()`
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

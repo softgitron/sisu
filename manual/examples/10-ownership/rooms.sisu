@@ -1,0 +1,12 @@
+# `defer` runs a statement at the end of its block, however it ends.
+def room_of(guest: str, rooms: dict[str, int]) -> String:
+    print("looking up {guest}")
+    defer print("done with {guest}")
+    let room = rooms.get(guest) else:
+        return "no booking for {guest}"
+    return "{guest} sleeps in room {room}"
+
+def main():
+    let rooms = {"Aino": 12, "Eero": 7}
+    print(room_of("Aino", rooms))
+    print(room_of("Roni", rooms))

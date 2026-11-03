@@ -1,0 +1,20 @@
+# `with` keeps a value for one block and drops it where the block ends.
+struct Booking:
+    room: String
+
+    def start(room: str) -> Booking:
+        print("{room} is booked")
+        return Booking(room.to_string())
+
+impl Drop for Booking:
+    def drop(mut self):
+        print("{self.room} is free again")
+
+def main():
+    with Booking.start("the sauna") as sauna:
+        print("an hour in {sauna.room}")
+    print("dinner")
+    with Booking.start("the boat") as boat:
+        with Booking.start("the fishing rod") as rod:
+            print("out with {boat.room} and {rod.room}")
+    print("goodnight")

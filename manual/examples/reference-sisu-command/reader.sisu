@@ -1,0 +1,6 @@
+# Reads a file through the file system it is given.
+def main(sys: System) -> ! IoError:
+    let text = sys.fs.read_to_string("poem.txt")?
+    for (i, line) in enumerate(text.lines()):
+        print("{i + 1}: {line}")
+    return Ok(())

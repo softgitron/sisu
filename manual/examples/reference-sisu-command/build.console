@@ -1,0 +1,11 @@
+$ sisu build hello.sisu
+built `hello.sisu`
+$ sisu build broken.sisu
+error[E0200]: cannot find `totl` in this scope
+  --> broken.sisu:4:13
+  |
+4 |     print("{totl} items")
+  |             ^^^^
+  = fix: a similar name is in scope: `total`
+
+error[D0006]: the program was not run: errors found (1)

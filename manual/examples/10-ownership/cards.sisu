@@ -1,0 +1,11 @@
+# A value moved in a loop is gone when the loop comes round again.
+struct Card:
+    to: String
+    text: String
+
+def main():
+    let text: String = "Happy new year"
+    var cards: list[Card] = []
+    for name in ["Aino", "Eero"]:
+        cards.push(Card(name.to_string(), text))
+    print("{len(cards)} cards")

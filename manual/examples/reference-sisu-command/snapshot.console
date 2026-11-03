@@ -1,0 +1,18 @@
+$ sisu test snapshot.sisu
+test "greets everyone" ... FAILED
+
+test "greets everyone" ... FAILED
+panic: there is no snapshot `greets everyone` yet (`sisu test --update` stores this one):
+Hei, Aino! Hei, Eero! Hei, Roni!
+  at test "greets everyone" (snapshot.sisu:11:5)
+replay: sisu test --replay 1-d80205220117e448-0.0.1-t0-s0-r0 snapshot.sisu
+
+0 passed, 1 failed, 0 blocked
+$ sisu test --update snapshot.sisu
+test "greets everyone" ... ok
+1 passed, 0 failed, 0 blocked
+stored the new snapshot `greets everyone`:
+Hei, Aino! Hei, Eero! Hei, Roni!
+$ sisu test snapshot.sisu
+test "greets everyone" ... ok
+1 passed, 0 failed, 0 blocked

@@ -1,0 +1,5 @@
+# An element cannot move out of a list through its index.
+def main():
+    let queue: list[String] = ["Aino", "Eero"]
+    let first = queue[0]
+    print("{first} is first of {len(queue)}")

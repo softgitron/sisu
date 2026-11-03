@@ -1,0 +1,24 @@
+##! Exercise 11.3, the leader. Kind: fix. Level: 2.
+##!
+##! `sort_and_check` sorts a list of names and tells whether the name
+##! that was first is still first. The file does not compile. Run
+##! `sisu test leader.sisu`, read the diagnostic, and fix
+##! `sort_and_check` so that every test passes. The hints are in chapter
+##! 11 of the tutorial, under "Exercise 11.3: the leader".
+
+## Sorts `names` in alphabetical order, and says whether the name that
+## was first before the sort is first after it. `names` is not empty.
+def sort_and_check(mut names: list[String]) -> bool:
+    let first = ref names[0]
+    names.sort()
+    return names[0] == first
+
+test "a leader who stays first":
+    var names: list[String] = ["Aino", "Roni", "Eero"]
+    assert sort_and_check(mut names)
+    assert names == ["Aino", "Eero", "Roni"]
+
+test "a leader who does not":
+    var names: list[String] = ["Roni", "Aino"]
+    assert not sort_and_check(mut names)
+    assert names == ["Aino", "Roni"]

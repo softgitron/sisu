@@ -1,0 +1,24 @@
+$ sisu test cloakroom.sisu
+warning[W0001]: typed hole `leave` of type `int`
+  --> cloakroom.sisu:26:16
+   |
+26 |         return todo("leave")
+   |                ^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `collect` of type `Coat ! CloakroomError`
+  --> cloakroom.sisu:30:16
+   |
+30 |         return todo("collect")
+   |                ^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `close` of type `list[Coat]`
+  --> cloakroom.sisu:35:16
+   |
+35 |         return todo("close")
+   |                ^^^^^^^^^^^^^
+
+test "tickets count up" ... blocked by todo("leave")
+test "a ticket gives its coat back" ... blocked by todo("leave")
+test "a ticket works once" ... blocked by todo("leave")
+test "closing time" ... blocked by todo("leave")
+0 passed, 0 failed, 4 blocked

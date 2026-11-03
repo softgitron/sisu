@@ -1,0 +1,5 @@
+panic: assertion failed: arrived[0] == "Aino"
+    arrived[0] == "Aino"
+    │
+    "Eero"
+  at main (race.sisu:13:5)
