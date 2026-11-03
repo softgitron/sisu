@@ -7509,3 +7509,68 @@ D-086, D-087 step 3)
      parts, formatting, text search, lists over `RawBuf`, stage 2's own
      library mode) is in port-debt.md ("The runtime in Sisu"). This
      changes no rule of the language.
+
+**Stage 1's soundness round** (stage 1's RULES.md, R21 to R26; the manual's later findings)
+
+320. A collection's items are values it owns or views, never references
+     (04, rule 3): a `ref T` as the item type of `list`, `set`, `dict`,
+     `Array` or a collection of `std.collections` is `E0438`, where a
+     type writes it (with the fix that takes the `ref` away) and where a
+     body's local or expression has it (with the fix that collects
+     copies, `.map(it.copy())`, or the note naming copies and views),
+     once a body for each collection type; a shared borrow of a `str` is
+     the view. Generic bodies and the code the compiler writes are
+     checked with their type parameters opaque, which may stand for a
+     reference. Stage 1 decides it (RULES.md, R21); the frozen Rust front
+     end treats such a collection as a view.
+321. The checker refuses what it let through: an impl's method whose
+     parameter or result types are not its trait's (`E0234`, as stage 0's
+     resolver has it, where stage 1 compared the shape only); `impl Copy`
+     written by hand (`E0270`, with the fix that derives it, since `Copy`
+     is opt-in through `@derive(Copy)`, 03); a `dyn` of a trait that
+     cannot be one in a body's types (`E0241`, as in a signature); a call
+     of a trait's method whose impl nothing decides (`E0324`, the call
+     named as the expression to annotate). An `assert` whose condition
+     moves a value shows its comparison's sides, computed once, rather
+     than its parts, which it would evaluate again. Stage 1 decides it
+     (RULES.md, R22).
+322. A sized integer's compound assignment (`+=`, `+%=`, `+|=` and the
+     others) lowers to its operator's intrinsic at its width
+     (`u8.wrap_add`), as the binary operator does, where it lowered to
+     the `int` operation; and a borrowed parameter whose type holds the
+     function's type parameters is taken by value exactly when their
+     bounds make it `Copy`, every call passing it so: a call with a
+     `Copy` instance of a type the function takes by reference (a tuple,
+     an option, a type that derives `Copy`) borrows its argument. Stage 1
+     decides it (RULES.md, R23).
+323. The fixes and notes the manual's later chapters found missing: `E0304`
+     writes Sisu's spelling of Python's and Rust's methods (`names.join(",
+     ")`, `push`, `copy`, `trim`), iterates a collection before an
+     iterator's method, and bounds a type parameter by the trait whose
+     method it lacks; `E0300` converts text with `.to_string()`; `E0340`
+     at a call whose function changes the parameter offers the
+     function's `mut`, as `E0341` does, where the two undid each other;
+     `E0413` and `E0407` on text name a `String` result; `E0400`'s note
+     names what each remedy costs and the borrowed parameter; `E0243`
+     lists `Default`; and `from pkg import x` binds a name `pkg`
+     re-exports, the import waiting for the module's own. Stage 1 decides
+     it (RULES.md, R24).
+324. `with e:` without `as` keeps the value without a name to the end of
+     the block (02); `ref` of a value that is no place borrows a temporary
+     to the end of its statement; a `Box` has its value's `Len` and a
+     `Slice` a `Display`; a derived `Hash` or `Eq` is structural when the
+     fields are, whatever the type arguments no field holds (`Key[T]` as a
+     key); a trait method's type arguments are its own, and one that takes
+     none is `E0349` (`collect[set[int]]()`, which made a list). Python's
+     `sorted(xs, key=len)` names `sort_by`, `max_by` and `min_by`, a
+     closure kept in a `let` without its parameters' types is `E0324`,
+     and `import *` is `E0128`. Stage 1 decides it (RULES.md, R25).
+325. A generic struct's construction takes its type arguments from the
+     type expected, when that type is the struct's and holds no `dyn` and
+     nothing untold, before its fields are checked (`Reading(21.5, "°C")`
+     as a `Reading[f64, String]`); and a field's default in a generic
+     struct is a value function generic as the struct is, which each
+     construction calls with the struct's type arguments, where lowering
+     named the struct's parameter in the caller (`E0501`). Stage 1 decides
+     it (RULES.md, R26).
+
