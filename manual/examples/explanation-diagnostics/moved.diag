@@ -1,0 +1,2 @@
+5:11-5:17 E0400 borrow.use-after-move name="guests" line="4"
+  label 4:17-4:23 borrow.moved-here name="guests"

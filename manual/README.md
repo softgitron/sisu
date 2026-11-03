@@ -319,7 +319,7 @@ table built at compile time, a derive that prints a struct's fields.
 Stage 0 runs all of it except `@diagnostic_name`, `sisu eval` and the
 checked string literals.
 
-**26. Purity and data parallelism.** What `pure` promises and the rules
+**26. Purity and data parallelism** ([written](tutorial/26-purity.md)). What `pure` promises and the rules
 behind it (insertion-ordered `dict`, strict floats, no operation that
 observes the schedule), `pure` function types in higher-order code,
 `std.par` (`par_iter`, `par_iter_mut`, `par.join`, reducers, `grain`),
@@ -362,12 +362,12 @@ instead of teaching.
 | G3 | Coming from Rust | Maps lifetimes to views and `from`, `Rc` to `Shared`, `Result` to `T ! E`, macros to `comptime`, `async` to tasks. |
 | G4 | Coming from Go | Maps goroutines to scopes, `context` to cancellation, interfaces to traits, `if err != nil` to `?`. |
 | G5 | Read and write files ([written](guides/read-files.md)) | `Fs` operations, missing files as `IoError`, walking a directory, testing with `Fs.in_memory`. |
-| G6 | Parse command-line arguments | `std.x.cli` derived from a struct, help text, errors, a transcript test. |
-| G7 | Read and write JSON | `@derive(Encode, Decode)`, `json.encode`, `json.decode` validating refinements at the boundary, `json.parse`. |
-| G8 | Match text with regular expressions | `std.regex`, groups, the linear-time guarantee and what it rules out. |
-| G9 | Test code that uses the clock | `Clock.frozen_at`, `advance`, the test clock, `Ticker` under test. |
-| G10 | Test code that uses the network | `Net.fake`, `http.FakeNet().respond_to`, request counts. |
-| G11 | Write a property test | `check`, `arbitrary[T]`, `@derive(Arbitrary)`, reading a shrunk counterexample, the failure database. |
+| G6 | Parse command-line arguments ([written](guides/command-line.md)) | `std.x.cli` derived from a struct, help text, errors, a transcript test. |
+| G7 | Read and write JSON ([written](guides/json.md)) | `@derive(Encode, Decode)`, `json.encode`, `json.decode` validating refinements at the boundary, `json.parse`. |
+| G8 | Match text with regular expressions ([written](guides/regex.md)) | `std.regex`, groups, the linear-time guarantee and what it rules out. |
+| G9 | Test code that uses the clock ([written](guides/clock.md)) | `Clock.frozen_at`, `advance`, the test clock, `Ticker` under test. |
+| G10 | Test code that uses the network ([written](guides/network.md)) | `Net.fake`, `http.FakeNet().respond_to`, request counts. |
+| G11 | Write a property test ([written](guides/property-test.md)) | `check`, `arbitrary[T]`, `@derive(Arbitrary)`, reading a shrunk counterexample, the failure database. |
 | G12 | Test a command-line tool | Snapshots and transcripts, `--update` and reviewing the diff. |
 | G13 | Find and fix a borrow error ([written](guides/borrow-errors.md)) | Reading E04xx diagnostics, `sisu explain-borrow`, `--defer-borrow` and the counterexample. |
 | G14 | Find a concurrency bug | `--explore`, `--schedule-seed`, PCT and the exhaustive scheduler, `sisu test --sim` with faults. |
@@ -409,13 +409,13 @@ prototype in the experiment ([STYLE.md](STYLE.md)).
 | R6 | Patterns ([written](reference/patterns.md)) | Every pattern form, binding by case, exhaustiveness, guards, alternatives that bind. |
 | R7 | Ownership and borrowing ([written](reference/ownership.md)) | Moves, copies, drops and their order, conventions, references, elision and `from`, views, captures, iteration modes, must-consume, guaranteed drop, the library pointer types, allocators. |
 | R8 | Errors and panics | Error sets, propagation, traces, context, panics, unwinding, abort, exit statuses. |
-| R9 | Concurrency | Tasks, scopes, handles, failures and their order, cancellation, shields, deadlines, races, channels, `select`, the sync types, `Send` and `Sync`, atomics and orderings, `std.par`, the scheduler and its yield points. |
-| R10 | Capabilities | `System`, each capability's operations, attenuations, lending, revocation, interceptors, fakes, what is ambient, how it is enforced. |
+| R9 | Concurrency ([written](reference/concurrency.md)) | Tasks, scopes, handles, failures and their order, cancellation, shields, deadlines, races, channels, `select`, the sync types, `Send` and `Sync`, atomics and orderings, `std.par`, the scheduler and its yield points. |
+| R10 | Capabilities ([written](reference/capabilities.md)) | `System`, each capability's operations, attenuations, lending, revocation, interceptors, fakes, what is ambient, how it is enforced. |
 | R11 | Contracts | `requires`, `ensures`, `invariant`, refinements, check levels, violations. |
 | R12 | Compile-time evaluation and reflection | The rules of `comptime`, fuel and budgets, the `reflect` API, `target`, `embed`, the derive protocol, `@cfg` and features. |
 | R13 | Modules, packages and the manifest ([written](reference/modules.md)) | The module tree, imports and visibility, the prelude's fixed list, every key of `sisu.toml`, the lockfile, workspaces, scripts and inline metadata, editions. |
 | R14 | Attributes | Every attribute, with where it may stand and what it does. |
-| R15 | Testing | `test` and its forms, outcomes, selection, a test's capabilities, the property-testing API, snapshots, the transcript format, replay tokens, simulation, benchmarks, output and caching. |
+| R15 | Testing ([written](reference/testing.md)) | `test` and its forms, outcomes, selection, a test's capabilities, the property-testing API, snapshots, the transcript format, replay tokens, simulation, benchmarks, output and caching. |
 | R16 | The `sisu` command ([written](reference/sisu-command.md)) | Every subcommand and option, each with an example and its exit statuses. |
 | R17 | Diagnostics ([written](reference/diagnostics.md)) | Every code by range (E00xx lexer to D0xxx driver), with its catalog identifier, message, a checked wrong program and its fix. Generated: the scripts in [tools/diagnostics/](tools/diagnostics/) (`diag_entries.py`, `mk_diag_examples.py`, `mk_diag_page.py`, `expand.py`, the templates in `tmpl/`; `bless_sessions.py` blesses one directory's sessions) rebuild it after a catalog change. |
 | R18 | The standard library | Generated by `sisu doc --std`; a page per module. |
@@ -435,13 +435,13 @@ chose otherwise, and links to the decision log for the evidence.
 | X1 | The design in one page ([written](explanations/design.md)) | The priority order, the principles, and what Sisu leaves out on purpose ([00](../proposal/00-vision-and-principles.md), [14](../proposal/14-non-goals.md)). |
 | X2 | Errors without exceptions, absence without null ([written](explanations/errors.md)) | Error sets, panics as bugs, `T?`. |
 | X3 | Ownership without lifetimes ([written](explanations/ownership.md)) | Second-class references, views, what is given up, compared with Rust, Swift and Python. |
-| X4 | Capabilities and the supply chain | No ambient authority, testability, portability, the cost of one more parameter. |
-| X5 | Concurrency without colours | No `async`, scopes as supervisors, cancellation without tokens. |
+| X4 | Capabilities and the supply chain ([written](explanations/capabilities.md)) | No ambient authority, testability, portability, the cost of one more parameter. |
+| X5 | Concurrency without colours ([written](explanations/concurrency.md)) | No `async`, scopes as supervisors, cancellation without tokens. |
 | X6 | Determinism | `pure`, insertion-ordered `dict`, strict floats, and what replay, simulation and `comptime` get from them. |
 | X7 | Compile-time code instead of macros | What `comptime` and reflection cover and what they leave out. |
-| X8 | Loud divergence | Why a familiar spelling means the same as in Python or Rust or fails to compile. |
+| X8 | Loud divergence ([written](explanations/loud-divergence.md)) | Why a familiar spelling means the same as in Python or Rust or fails to compile. |
 | X9 | How the compiler works | Stages 0 to 3, the interpreter, SIR, the native backend, the queries. |
-| X10 | Diagnostics as a product | The catalog, identifiers, fixes with consequences, the wrong-program corpus. |
+| X10 | Diagnostics as a product ([written](explanations/diagnostics.md)) | The catalog, identifiers, fixes with consequences, the wrong-program corpus. |
 | X11 | How Sisu evolves | Editions, migrations that travel with libraries, governance. |
 | X12 | Testing without mocks | Fakes, the test clock, simulation, replay. |
 | X13 | Working with unfinished code | Typed holes, blocked tests, the fill engine to come. |
@@ -832,9 +832,9 @@ solutions and passing checks.
 | 6 | Chapters 10 (3, done), 11 (4, done), 12 (3, done), 13 with challenge II (3, done); R7 ownership (3, done); G13 borrow errors (1, done); X3 (1, done) | done |
 | 7 | Reader test of Parts I and II: five readers who know Python, their stuck points, the rewrites | 4 |
 | 8 | Chapters 14 (3, done), 15 (3, done), 16 (3, done), 17 with challenge III (2.5, done); R2 (3, done), R3 (2, done), R6 (1, done), R13 (2.5, done) | 20 |
-| 9 | Chapters 18 (3, done), 19 (3, done), 20 (4, done), 21 (3, done), 22 with challenge IV (4, done); R9 (2.5), R10 (2), R15 (2); G5 to G16 (9; G5 done) | 32.5 |
-| 10 | R4 (2), R5 (1.5), R8 (1.5), R14 (1.5), R20 (2), R21 (1), R22 (1); X1 (done), X2 (done), X4, X5, X8, X10, X12 (7) | 17.5 |
-| 11 | Chapters 23 (2, done), 24 (2, done), 25 (3, done), 26 (2); R11 (1), R12 (2); G17, G20, G21, G26, G27, G28, G29, G30, G31, G32 (7.5); X6, X7, X9, X13, X14 (5) | 26.5 |
+| 9 | Chapters 18 (3, done), 19 (3, done), 20 (4, done), 21 (3, done), 22 with challenge IV (4, done); R9 (2.5, done), R10 (2, done), R15 (2, done); G5 to G16 (9; G5 to G11 done) | 32.5 |
+| 10 | R4 (2), R5 (1.5), R8 (1.5), R14 (1.5), R20 (2), R21 (1), R22 (1); X1 (done), X2 (done), X4 (done), X5 (done), X8 (done), X10 (done), X12 (7) | 17.5 |
+| 11 | Chapters 23 (2, done), 24 (2, done), 25 (3, done), 26 (2, done); R11 (1), R12 (2); G17, G20, G21, G26, G27, G28, G29, G30, G31, G32 (7.5); X6, X7, X9, X13, X14 (5) | 26.5 |
 | 12 | When their features exist: chapters 27 (3) and 28 with challenge V (2); G18, G19, G22, G23, G24, G25 (4.5); X11 (1); the site (3) | 13.5 |
 | | Total | about 159 |
 
@@ -1235,6 +1235,20 @@ Writing the rest of Part I turned up more, by chapter:
   `target.runtime` is `interpreter` in a native build too (`sisu run
   --native`). `@diagnostic_name(f)` compiles without a word and does
   nothing, and `sisu eval` gets D0003, as planned.
+- Chapter 26. `for x in par.iter(xs):` is a plain loop, whose body can
+  change a variable outside it, `total += x`, without a word, where
+  [06](../proposal/06-concurrency-and-capabilities.md#data-parallelism)
+  makes a `par` body pure; the chapter teaches `par.map` and `reduce`.
+  `a.load()` of an `Atomic` compiles in a `pure` function, though 06
+  lists `Atomic` among the operations that observe the schedule; `lock`,
+  `recv`, `try_recv` and `select` get E0333. `sorted(xs)` with `xs` a
+  `Slice[int]` gets E0300 ("expected `Iterable[int]`, found `ref
+  Slice[int]`"), though `for x in xs` works; `sorted(xs.iter())` is the
+  spelling. `it` in a list literal of functions, `[heat, it - 15]` typed
+  `list[pure (int) -> int]`, gets E0342, where an explicit closure
+  works. E0335 names the function passed, not the `print` inside it, as
+  chapter 16 found. `xs.par_iter()` gets E0304 and `SoaList` E0201, as
+  planned.
 
 Planning the later chapters turned up the parts of the proposal that
 they teach and stage 0 does not run yet, each named in its chapter's
@@ -1358,6 +1372,15 @@ Writing the reference turned up more, by page:
   fmt` removes it. An import inside a function gets E0900. The prelude
   is wider than 09's fixed list: helpers such as `days_in_month` and
   `Formatter` are visible to every program.
+- R9, concurrency. `sisu run --explore N` stops only at a run that
+  fails; a seed whose output differs from seed 0's, with status 0, is
+  not reported, though the architecture notes say a run is compared in
+  output or status. The unbounded channel of 06 is missing (stage 0's
+  channels are bounded only), and `std.par` is still spelled
+  `par.iter(xs)` and `par.map`.
+- R15, testing. `debug_assert`, which 02 gives as the assertion a
+  release build strips, is not a statement: `debug_assert x == y` gets
+  E0117 ("unexpected ... after the end of the statement").
 
 Writing the guides turned up more, by guide:
 
@@ -1374,6 +1397,48 @@ Writing the guides turned up more, by guide:
   comprehension is what works. A counterexample run of `--defer-borrow`
   prints the whole SIR of the function, 40 lines for a loop of three,
   between the account of the conflict and its `outcome:` line.
+- G6, command-line arguments. `cli.help_text[T]()` leaves out the
+  fields' `##` comments, so a tool's help says what kind of value an
+  option takes and not what it is for, and a `cli.Error` reaches the
+  user in its `Debug` form, `InvalidValue(name="--total",
+  value="lots")`. A `main` that passes the error on with `?` adds the
+  line of the `?` under it, also in a transcript; returning it from an
+  `else as e:` block keeps the line out.
+- G7, JSON. `@derive(Encode, Decode)`, which
+  [11](../proposal/11-stdlib.md) gives `std.json`, gets E0243; `encode`
+  and `decode` read any struct by reflection without it. `Decode` does
+  not validate refinements at the boundary, as 11 plans: a struct with a
+  field `hour: Hour`, a refinement of `int`, gets E0811 at
+  `<std>/<from_json[Hour]>/json.sisu:3:19`, a line of the decoder that
+  `std.json` generates and the reader cannot see, and text that breaks a
+  struct's `invariant` makes `decode` panic (status 101) rather than
+  return an error, so untrusted text can stop the program. `{b.note ??
+  "-"}`, with `b` the variable of a loop over a list of structs and
+  `note` a `String?`, gets E0419 ("cannot move out of `b.note` through
+  a reference"), as chapter 8 found for `?.`; `if let Some(note) =
+  b.note` reads it.
+- G8, regular expressions. A back-reference, `(\w+) \1`, is
+  ``Syntax(at=6, message="the escape `\1`")``, and a flag or a named
+  group, `(?i)` or `(?P<h>...)`, is ``Syntax(at=2, message="`(?:`, the
+  only group flag")``: the messages name what the parser met or wanted,
+  and neither says that back-references are left out for linear time or
+  that flags and named groups, which RE2 has, are not in stage 0, nor
+  are classes such as `\p{L}`.
+- G9, the clock. `DateTime` has no parts: `t.hour` gets E0303, and
+  there is no `Instant` and no time zone, which
+  [11](../proposal/11-stdlib.md) lists for `std.time`, so a test of
+  code that depends on the time of day works in seconds since the
+  epoch; the guide's examples measure durations instead.
+- G10, the network. `HttpError.Network(message)` holds the `NetError`
+  as text, `Network(message="Refused(address=\"localhost:80\")")`, so a
+  client cannot match a refused connection apart from a closed one, and
+  `http.FakeNet` answers only `GET`, only with `200` or `404`, so a
+  test cannot script a `503` or a slow answer.
+- G11, a property test. `@derive(Arbitrary)`, which
+  [17](../proposal/17-testing.md#property-based-testing-and-fuzzing)
+  gives for generators of custom shapes, gets E0243; `arbitrary[T]`
+  needs no derive for a type's own shape, and `Gen.of(make)` takes a
+  function of the draws.
 
 Writing the explanations turned up more, by page:
 
@@ -1388,6 +1453,18 @@ Writing the explanations turned up more, by page:
   [02](../proposal/02-syntax.md#declarations) gives `*xs: T`, which
   collects variadic arguments into a `Slice[T]`, and chapter 3 of this
   plan teaches it as coming. The page follows the README and 02.
+- X8, loud divergence. D-062 calls a silent difference from Python's
+  meaning a design bug, and D-055 keeps two on purpose, which R19 lists:
+  a default argument is computed at each call, so Python's cache in a
+  mutable default (`mut cache: dict[int, int] = {}`) compiles and
+  silently loses its cache, and each loop iteration binds its own
+  variable. Neither is a row of the false-friend table that the model
+  arm measures ([20](../proposal/20-pre-registration.md), section 6.9,
+  FF-1 to FF-6), so the experiment cannot see them. FF-3 there says that
+  `7 / 2` gets "a fix-it offering `//` or a float conversion"; stage 0's
+  E0301 offers `//` only, with the conversion in its message, so for
+  Python's mean, `sum(xs) / len(xs)`, the fix truncates without a
+  consequence line (D-065) that says so.
 
 ## Open questions
 

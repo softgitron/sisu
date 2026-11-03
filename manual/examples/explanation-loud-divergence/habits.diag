@@ -1,0 +1,4 @@
+5:16-5:41 E0301 type.integer-division
+  fix type.use-floor-division 5:28-5:29 "//"
+6:38-6:40 E0344 type.constant-negative-index fix="scores[^1]"
+  fix type.from-end-index 6:38-6:40 "^1"

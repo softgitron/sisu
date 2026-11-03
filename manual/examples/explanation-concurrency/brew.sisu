@@ -1,0 +1,19 @@
+# One function with no `async`: called directly, it blocks its caller;
+# spawned twice in a scope, the two calls wait at the same time.
+def brew(clock: Clock, minutes: int) -> int ! TaskError:
+    clock.sleep(Duration.minutes(minutes))?
+    return Ok(minutes)
+
+test "a direct call waits the whole time"(clock: TestClock):
+    let start = clock.now()
+    assert brew(clock, 10) == Ok(10)
+    assert clock.now() - start == Duration.minutes(10)
+
+test "two tasks wait side by side"(clock: TestClock):
+    let start = clock.now()
+    let total = task.scope do s:
+        let first = s.spawn(() -> brew(clock, 10))
+        let second = s.spawn(() -> brew(clock, 10))
+        return Ok(first.join()? + second.join()?)
+    assert total == Ok(20)
+    assert clock.now() - start == Duration.minutes(10)

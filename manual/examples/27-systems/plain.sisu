@@ -1,0 +1,24 @@
+# `@repr(c)` lays a struct out as C does; plain data comes from bytes.
+from std.mem import Plain, align_of, read_plain, size_of
+
+## A reading as a sensor writes it: the minute, the temperature in tenths
+## of a degree, the sensor's number and its flags, with no padding.
+@repr(c)
+@derive(Plain, Copy, Debug)
+struct Reading:
+    minute: u32
+    tenths: i16
+    sensor: u8
+    flags: u8
+
+## A byte and a word, which C pads to sixteen bytes.
+@repr(c)
+struct Padded:
+    flag: u8
+    count: int
+
+def main():
+    print("{size_of[Reading]()} bytes, aligned to {align_of[Reading]()}")
+    print("{size_of[Padded]()} bytes, aligned to {align_of[Padded]()}")
+    let data = b"\x2d\x00\x00\x00\x1e\x03\x02\x00"
+    print("{read_plain[Reading](data, 0):?}")

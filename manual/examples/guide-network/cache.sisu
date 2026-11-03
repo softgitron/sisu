@@ -1,0 +1,26 @@
+# A cache in front of the weather service asks once for each town.
+import http
+from std.net import Url, UrlError
+
+## The weather service's answers so far, by town.
+struct Cache:
+    net: Net
+    answers: dict[String, String] = {}
+
+    ## The service's answer for `town`, which it is asked for once.
+    def weather(mut self, town: str) -> String ! {UrlError, HttpError}:
+        if town in self.answers:
+            return Ok(self.answers[town.to_string()].copy())
+        let url = Url.parse("http://weather.example/{town}")?
+        let body = http.get(self.net, url)?
+        let text = body.decode().or(String())
+        _ = self.answers.insert(town.to_string(), text.copy())
+        return Ok(text)
+
+test "each town is asked for once":
+    let oulu = http.FakeNet().respond_to("http://weather.example/Oulu", b"-4")
+    let net = oulu.respond_to("http://weather.example/Turku", b"2")
+    var cache = Cache(net)
+    for town in ["Oulu", "Turku", "Oulu", "Oulu"]:
+        _ = cache.weather(town)
+    assert net.request_count() == 2

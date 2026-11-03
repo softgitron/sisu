@@ -673,7 +673,7 @@ the standard library's types, each visible in the program's types:
 | `Shared[T]` | several owners of one value, which is dropped with the last; `.copy()` adds an owner, `Shared.count(s)` counts them | a count, atomic when the value can reach another task |
 | `Weak[T]` | a reference that does not keep a `Shared` value alive, to break cycles; `upgrade` gives `Shared[T]?` | a second count |
 | `Cell[T]` | a value that changes behind shared owners, in one task: `get`, `set` | none |
-| `Mutex[T]`, `RwLock[T]`, `Atomic` | a value that changes behind owners in several tasks ([R9](../README.md#the-reference), when it is written) | a lock or an atomic operation |
+| `Mutex[T]`, `RwLock[T]`, `Atomic` | a value that changes behind owners in several tasks ([R9](concurrency.md#sharing-a-value-that-changes)) | a lock or an atomic operation |
 | `Arena[T]` and `Key[T]` | the nodes of a graph, named by keys that are checked at use: a removed node's key finds nothing | a check of the key's generation |
 
 A `Shared` value is read through, and changed only through a `Cell`, a
@@ -800,4 +800,4 @@ stage 0 yet.
 | E0423, E0424 | `type.own-closure-capture`, `type.own-closure-changes` | [Closures and their captures](#closures-and-their-captures) |
 
 The codes of tasks, E0425 to E0437, belong to
-[R9](../README.md#the-reference), Concurrency.
+[R9](concurrency.md#diagnostics-of-this-page), Concurrency.

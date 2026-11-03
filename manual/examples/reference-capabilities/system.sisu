@@ -1,0 +1,15 @@
+# `main` receives the root capabilities in its `System`.
+def price(fs: Fs, item: str) -> int ! IoError:
+    let text = fs.read_to_string("menu.txt")?
+    for line in text.lines():
+        let name, cents = line.split_once(" ") else:
+            continue
+        if name == item:
+            return Ok(cents.parse_int() ?? 0)
+    return Ok(0)
+
+def main(sys: System) -> ! IoError:
+    for item in sys.env.args():
+        print("{item}: {price(sys.fs, item)?} cents")
+    print("the sauna: {sys.env.get("SAUNA_NAME") ?? "no name"}")
+    return Ok(())

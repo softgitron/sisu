@@ -1,0 +1,5 @@
+1 booking: Aino
+Mismatch(path="$[0].hour", expected="an integer")
+Mismatch(path="$[1].hour", expected="a member")
+Mismatch(path="$", expected="an array")
+Syntax(at=28, expected="`,` or `}`")

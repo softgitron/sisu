@@ -1,0 +1,2 @@
+13:15-13:23 E0981 unsafe.call name="ptr_mut.read"
+  label 13:15-13:23 unsafe.its-obligations obligations="`valid`, `aligned`"

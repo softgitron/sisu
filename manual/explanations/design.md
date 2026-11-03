@@ -102,7 +102,7 @@ without exceptions, absence without null](errors.md) explains.
 the clock and the environment only through capability values that its
 caller hands it. Of the known defences against a malicious dependency,
 it is the only one that the compiler enforces rather than a policy that
-people follow ([X4](../README.md#the-explanations)).
+people follow ([Capabilities and the supply chain](capabilities.md)).
 
 **Values by default, sharing by declaration** (P5, D-004). A variable
 owns its value, a parameter borrows it, and sharing is a type you

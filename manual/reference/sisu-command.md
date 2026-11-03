@@ -746,7 +746,7 @@ the recorded run did (D0040).
 
 Tasks run on a cooperative scheduler that is seeded, so that a run with
 the same seed takes the same schedule
-([R9](../README.md#the-reference), when it is written;
+([R9](concurrency.md#the-scheduler);
 [06](../../proposal/06-concurrency-and-capabilities.md)).
 
 - `--schedule-seed N` runs with seed `N`; the default is 0.
@@ -1182,7 +1182,7 @@ $ sisu test --faults 0.2 sim.sisu
 error[D0052]: `--faults` sets the fault rate of the `sim` profile; add `--sim`
 ```
 
-[R15](../README.md#the-reference), when it is written, describes the tests themselves;
+[R15](testing.md) describes the tests themselves;
 [17](../../proposal/17-testing.md) is their design.
 
 **Stage 0 differs.** [17](../../proposal/17-testing.md) has `sisu test`

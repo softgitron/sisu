@@ -1,0 +1,11 @@
+test "the last score" ... FAILED
+
+test "the last score" ... FAILED
+panic: assertion failed: last(scores) == 4
+  message: scores [7, 9, 4]
+  left:  9
+  right: 4
+  at test "the last score" (failing.sisu:7:5)
+replay: sisu test --replay 1-c12c6afda705cec9-0.0.1-t0-s0-r0 failing.sisu
+
+0 passed, 1 failed, 0 blocked

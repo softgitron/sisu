@@ -1,0 +1,17 @@
+# Reads JSON of a shape not known in advance into a `Json` value.
+import std.json
+
+def main() -> ! json.JsonError:
+    let text = r"""{"sauna": "Kota", "open": [17, 18], "lake": 14.5}"""
+    let doc = json.parse(text)?
+    for key in ["sauna", "open", "lake", "towels"]:
+        match doc.get(key):
+            case Some(Str(value)):
+                print("{key}: the text {value}")
+            case Some(Array(items)):
+                print("{key}: {len(items)} items, {items[0]} first")
+            case Some(other):
+                print("{key}: {other}")
+            case None:
+                print("{key}: missing")
+    return Ok(())

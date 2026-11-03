@@ -1,0 +1,9 @@
+test "the shares add up to the bill" ... FAILED
+
+test "the shares add up to the bill" ... FAILED
+panic: the property failed for Bill(total=1, people=2) (case 2, shrunk 16 times)
+  the property returned False
+  at test "the shares add up to the bill" (split.sisu:19:5)
+replay: sisu test --replay 1-30b0f46550161bee-0.0.1-t0-s0-r0-c1.1 split.sisu
+
+0 passed, 1 failed, 0 blocked

@@ -1,0 +1,25 @@
+##! Exercise 27.2, the order of the bytes. Kind: fix. Level: 1.
+##!
+##! A sensor writes each number of its records as four bytes, the least
+##! significant byte first, and `u32_at` reads one back. Two tests fail.
+##! Run `sisu test byte_order.sisu`, read the values in the reports, and
+##! fix `u32_at`, not the tests, so that every test passes. The hints are
+##! in chapter 27 of the tutorial, under "Exercise 27.2: the order of the
+##! bytes".
+
+## The number in the four bytes of `data` from `at`, least significant
+## byte first.
+def u32_at(data: bytes, at: int) -> u32:
+    var n: u32 = 0
+    for i in range(4):
+        n = (n << 8) | data[at + i]
+    return n
+
+test "zero":
+    assert u32_at(b"\x00\x00\x00\x00", 0) == 0
+
+test "a minute count":
+    assert u32_at(b"\x2d\x00\x00\x00", 0) == 45
+
+test "four different bytes, not at the start":
+    assert u32_at(b"\xff\x01\x02\x03\x04", 1) == 0x04030201

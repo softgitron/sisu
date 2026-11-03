@@ -1,0 +1,9 @@
+# Rewrites each time in a text, and splits a list at its commas.
+from std.regex import Regex, RegexError
+
+def main() -> ! RegexError:
+    let time = Regex.new(r"(\d{1,2}):(\d\d)")?
+    print(time.replace_all("sauna 17:30, swim 18:05", "$1.$2"))
+    let comma = Regex.new(r"\s*,\s*")?
+    print(comma.split("Aino , Eero,Roni ,  Ella"))
+    return Ok(())

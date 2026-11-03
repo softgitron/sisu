@@ -1,0 +1,17 @@
+# A `pure` function can call only the functions whose type says `pure`.
+
+## The temperature after each step of a sauna evening is applied in
+## turn to `start`.
+pure def evening(start: int, steps: list[(int) -> int]) -> int:
+    var celsius = start
+    for step in steps:
+        celsius = step(celsius)
+    return celsius
+
+## Heats by ten degrees, to 110 at most.
+pure def heat(celsius: int) -> int:
+    return min(celsius + 10, 110)
+
+def main():
+    let steps: list[(int) -> int] = [heat, heat, c -> c - 15, heat]
+    print(evening(70, steps))

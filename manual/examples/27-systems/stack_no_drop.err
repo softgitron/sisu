@@ -1,0 +1,2 @@
+panic: `Global.release` of memory that still holds a value of type `String` at offset 0, which was never dropped: every value is dropped once (22, the soundness contract, clause 3)
+  at main (stack_no_drop.sisu:33:32)

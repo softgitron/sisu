@@ -1,0 +1,51 @@
+##! Exercise 27.3, an audio callback without allocation. Kind: write. Level: 2.
+##!
+##! A sound card asks for the next samples of audio many times a second,
+##! and a callback that allocates may miss its deadline. `mix` adds a
+##! voice into the samples of `out`, in place, each scaled by `gain` and
+##! kept between -1.0 and 1.0, and `fade` lowers the samples of `out`
+##! steadily from their full level at the first to silence after the last.
+##! Write both bodies without making any list, string or other value that
+##! allocates, so that every test passes. Run the tests with
+##! `sisu test mixer.sisu`. The hints are in chapter 27 of the tutorial,
+##! under "Exercise 27.3: an audio callback without allocation".
+
+## Adds `voice`, scaled by `gain`, into `out`, sample by sample, keeping
+## each sample between -1.0 and 1.0.
+@no_alloc
+def mix[const N: int](mut out: Array[f32, N], voice: Array[f32, N], gain: f32):
+    for i in range(N):
+        let sample = out[i] + voice[i] * gain
+        out[i] = if sample > 1.0: 1.0 elif sample < -1.0: -1.0 else: sample
+
+## Scales the sample at `i` of `out` by `(N - i) / N`.
+@no_alloc
+def fade[const N: int](mut out: Array[f32, N]):
+    let length = N
+    for i in range(length):
+        out[i] = out[i] * (length - i).to_f32() / length.to_f32()
+
+## Four samples, for the tests.
+def frames(xs: list[f32]) -> Array[f32, 4]:
+    var out: Array[f32, 4] = Array.filled(0.0f32)
+    for i in range(4):
+        out[i] = xs[i]
+    return out
+
+test "mixing a voice in":
+    var out = frames([0.5, 0.25, -0.5, 0.0])
+    mix(mut out, frames([0.5, 0.5, -0.5, 0.25]), 0.5)
+    assert out[0] == 0.75 and out[1] == 0.5
+    assert out[2] == -0.75 and out[3] == 0.125
+
+test "mixing keeps the samples in range":
+    var out = frames([0.75, -0.75, 0.5, -0.5])
+    mix(mut out, frames([1.0, -1.0, 1.0, -1.0]), 1.0)
+    assert out[0] == 1.0 and out[1] == -1.0
+    assert out[2] == 1.0 and out[3] == -1.0
+
+test "a fade to silence":
+    var out = frames([1.0, 1.0, -1.0, 0.5])
+    fade(mut out)
+    assert out[0] == 1.0 and out[1] == 0.75
+    assert out[2] == -0.5 and out[3] == 0.125

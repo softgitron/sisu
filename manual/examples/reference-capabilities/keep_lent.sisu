@@ -1,0 +1,10 @@
+# A lent capability is a view, so nothing can keep it.
+struct Report:
+    fs: Fs
+
+def make(fs: Lent[Fs]) -> Report:
+    return Report(fs)
+
+def main(sys: System):
+    let report = make(sys.fs.lend())
+    print(report.fs.exists("a.txt"))

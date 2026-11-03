@@ -1,0 +1,4 @@
+Ok("Buy birch whisks.\n")
+Err(PermissionDenied(path="../secret.txt"))
+Err(PermissionDenied(path="notes.txt"))
+refused: NotAllowed(address="tracker.example.org:443")

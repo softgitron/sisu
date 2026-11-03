@@ -1,0 +1,64 @@
+##! Exercise 27.4, records from a device's bytes. Kind: write. Level: 3.
+##!
+##! A sauna's sensor writes its log as records of eight bytes: the minute
+##! as four bytes and the temperature in tenths of a degree as two, both
+##! least significant byte first, then the sensor's number and a byte of
+##! flags. Write `parse_log`, which reads every record of a log, so that
+##! every test passes. A log that ends inside a record gives `Truncated`
+##! with the place where that record starts. Run the tests with
+##! `sisu test records.sisu`. The hints are in chapter 27 of the tutorial,
+##! under "Exercise 27.4: records from a device's bytes".
+
+error LogError:
+    Truncated(at: int)
+
+## One record of the log.
+@derive(Eq, Debug)
+struct Reading:
+    minute: u32
+    tenths: i16
+    sensor: u8
+    flags: u8
+
+## The number in the `width` bytes of `data` from `at`, least
+## significant byte first.
+def little_endian(data: bytes, at: int, width: int) -> int:
+    var n = 0
+    for i in range(width):
+        n = n * 256 + data[at + width - 1 - i].to_int()
+    return n
+
+## The records of `data`, in order.
+def parse_log(data: bytes) -> list[Reading] ! LogError:
+    var readings: list[Reading] = []
+    var at = 0
+    while at < len(data):
+        if at + 8 > len(data):
+            return Err(Truncated(at=at))
+        let reading = Reading(
+            minute=little_endian(data, at, 4).truncate_to[u32](),
+            tenths=little_endian(data, at + 4, 2).truncate_to[i16](),
+            sensor=data[at + 6],
+            flags=data[at + 7],
+        )
+        readings.push(reading)
+        at += 8
+    return Ok(readings)
+
+test "two records":
+    let log = b"\x2d\x00\x00\x00\x1e\x03\x02\x00\x2e\x00\x00\x00\x24\x03\x02\x01"
+    let first = Reading(minute=45, tenths=798, sensor=2, flags=0)
+    let second = Reading(minute=46, tenths=804, sensor=2, flags=1)
+    assert parse_log(log) == Ok([first, second])
+
+test "a temperature below zero":
+    let log = b"\x00\x01\x00\x00\xe7\xff\x01\x00"
+    let cold = Reading(minute=256, tenths=-25, sensor=1, flags=0)
+    assert parse_log(log) == Ok([cold])
+
+test "an empty log":
+    assert parse_log(b"") == Ok([])
+
+test "a log cut short":
+    let log = b"\x2d\x00\x00\x00\x1e\x03\x02\x00\x2e\x00"
+    assert parse_log(log) == Err(Truncated(at=8))

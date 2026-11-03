@@ -1,0 +1,6 @@
+# A list used after it was moved: one mistake, one diagnostic.
+def main():
+    let guests = ["Aino", "Eero"]
+    let sauna = guests
+    print(guests)
+    print(sauna)

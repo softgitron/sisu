@@ -1,0 +1,15 @@
+# A safe function that reaches the world through C takes a capability.
+from std.ffi import CString, c_char
+from std.mem import ptr
+
+# safety: the signature as <stdlib.h> declares it; it returns promptly.
+extern "C":
+    def getenv(name: ptr[c_char]) -> ptr[c_char]?
+
+## Whether the environment variable `name` is set.
+pub def is_set(name: str) -> bool:
+    let c = CString.new(name) else:
+        return False
+    # safety: valid: `c` lives across the call and ends with its NUL, and
+    #   getenv keeps no pointer to it.
+    return unsafe getenv(c.as_ptr()).is_some()

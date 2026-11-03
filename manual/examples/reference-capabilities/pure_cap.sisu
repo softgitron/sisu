@@ -1,0 +1,7 @@
+# A `pure` function cannot take a capability.
+pure def note_count(fs: Fs) -> int:
+    let notes = fs.list_dir("notes") else: []
+    return len(notes)
+
+def main(sys: System):
+    print(note_count(sys.fs))

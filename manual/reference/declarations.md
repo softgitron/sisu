@@ -899,8 +899,7 @@ test "double/of each case (-3, -6)" ... ok
 4 passed, 0 failed, 0 blocked
 ```
 
-What a test may do, its outcomes and its tools are
-[R15](../README.md#the-reference), when it is written.
+What a test may do, its outcomes and its tools are [R15](testing.md).
 
 **Status.** In stage 0.
 

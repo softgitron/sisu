@@ -1,0 +1,11 @@
+$ sisu run steps_any.sisu
+error[E0392]: `evening` is pure, so it cannot call a function value whose type is not `pure`
+  --> steps_any.sisu:8:19
+  |
+8 |         celsius = step(celsius)
+  |                   ^^^^^^^^^^^^^
+  |
+5 | pure def evening(start: int, steps: list[(int) -> int]) -> int:
+  |          ------- `evening` is declared `pure` here
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

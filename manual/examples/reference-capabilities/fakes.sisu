@@ -1,0 +1,25 @@
+# A test hands its code fakes of the capabilities the code takes.
+def greeting(env: Env, rand: Rand) -> String:
+    let name = env.get("SAUNA_NAME") ?? "the sauna"
+    return "{name}, bench {rand.bits() % 3 + 1}"
+
+def first_line(fs: Fs) -> String ! IoError:
+    let text = fs.read_to_string("menu.txt")?
+    let line = text.lines().next() ?? ""
+    return Ok(line.to_string())
+
+test "a fake environment and seeded randomness":
+    let env = Env.fake(vars={"SAUNA_NAME": "Kotiharju"})
+    let a = greeting(env, Rand.seeded(7))
+    assert a == greeting(env, Rand.seeded(7))
+    assert a.starts_with("Kotiharju, bench ")
+
+test "a file system in memory":
+    let fs = Fs.in_memory({"menu.txt": "coffee\nbun\n"})
+    assert first_line(fs) == Ok("coffee".to_string())
+    assert first_line(Fs.in_memory()).is_err()
+
+test "a clock that moves when told"(clock: TestClock):
+    let start = clock.now()
+    clock.advance(Duration.minutes(90))
+    assert clock.now() - start == Duration.minutes(90)

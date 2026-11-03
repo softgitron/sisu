@@ -1,0 +1,31 @@
+# The shares add up to the bill, and differ by a cent at most.
+
+## A sum in cents, of at most a thousand euros.
+type Cents = int where 0 <= self and self <= 100_000
+
+## How many people share a bill.
+type People = int where 1 <= self and self <= 12
+
+## A bill and the people who share it.
+struct Bill:
+    total: Cents
+    people: People
+
+## Each person's share of `bill`, in cents: the cents left over go one
+## each to the first people.
+def split(bill: Bill) -> list[int]:
+    let share = bill.total // bill.people
+    let left = bill.total % bill.people
+    return [share + (if i < left: 1 else: 0) for i in range(bill.people)]
+
+test "the shares add up to the bill":
+    check(arbitrary[Bill]) do bill:
+        return sum(split(bill)) == bill.total
+
+test "no share is more than a cent above another":
+    check(arbitrary[Bill]) do bill:
+        let shares = sorted(split(bill))
+        return shares[^1] - shares[0] <= 1
+
+test "a cent between two":
+    assert split(Bill(total=1, people=2)) == [1, 0]

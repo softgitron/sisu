@@ -1,0 +1,4 @@
+\d+:\d\d: 0 groups
+(\d+:\d\d: at 0, an unclosed group
+(\w+) \1: at 6, the escape `\1`
+(?i)sauna: at 2, `(?:`, the only group flag

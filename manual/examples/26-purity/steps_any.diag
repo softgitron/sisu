@@ -1,0 +1,2 @@
+8:19-8:32 E0392 type.impure-value-call name="evening"
+  label 5:10-5:17 type.declared-pure-here name="evening"

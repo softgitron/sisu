@@ -1,0 +1,3 @@
+test "one turn a minute" ... ok
+test "a tick missed while the loop was busy is skipped" ... ok
+2 passed, 0 failed, 0 blocked

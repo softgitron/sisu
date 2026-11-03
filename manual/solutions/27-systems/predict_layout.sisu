@@ -1,0 +1,47 @@
+##! Exercise 27.1, predict the layouts. Kind: predict. Level: 1.
+##!
+##! `c_layout` works out the size of a struct laid out as C lays it out,
+##! from the size and the alignment of each of its fields, as `@repr(c)`
+##! does. Each constant is your prediction of the size it gives. Write
+##! each as a literal, then run `sisu test predict_layout.sisu`. The hints
+##! are in chapter 27 of the tutorial, under "Exercise 27.1: predict the
+##! layouts".
+
+## The size and the alignment of a C struct whose fields have the sizes
+## and alignments of `fields`, in order: each field starts at the next
+## multiple of its alignment, and the size is rounded up to a multiple of
+## the largest alignment.
+def c_layout(fields: list[(int, int)]) -> (size: int, align: int):
+    var offset = 0
+    var align = 1
+    for size, field_align in fields:
+        offset = (offset + field_align - 1) // field_align * field_align
+        offset += size
+        align = max(align, field_align)
+    return ((offset + align - 1) // align * align, align)
+
+# The int starts at 8, after seven bytes of padding.
+const BYTE_WORD: int = 16
+# Nine bytes, rounded up to a multiple of 8, the int's alignment.
+const WORD_BYTE: int = 16
+# Each field starts where the last ended, already aligned.
+const SMALL_FIRST: int = 8
+# Three bytes of padding before the u32, and three after the last u8.
+const BYTE_AROUND: int = 12
+# Three bytes, rounded up to a multiple of 2.
+const SHORT_BYTE: int = 4
+
+test "a byte before a word":
+    assert c_layout([(1, 1), (8, 8)]).size == BYTE_WORD
+
+test "a byte after a word":
+    assert c_layout([(8, 8), (1, 1)]).size == WORD_BYTE
+
+test "the small fields first":
+    assert c_layout([(1, 1), (1, 1), (2, 2), (4, 4)]).size == SMALL_FIRST
+
+test "a word between two bytes":
+    assert c_layout([(1, 1), (4, 4), (1, 1)]).size == BYTE_AROUND
+
+test "a short and a byte":
+    assert c_layout([(2, 2), (1, 1)]).size == SHORT_BYTE

@@ -1,0 +1,4 @@
+test "the shares add up to the bill" ... ok
+test "no share is more than a cent above another" ... ok
+test "a cent between two" ... ok
+3 passed, 0 failed, 0 blocked

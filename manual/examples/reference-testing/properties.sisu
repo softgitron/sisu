@@ -1,0 +1,17 @@
+# A property must hold for every case that its generator makes.
+type Percent = int where 0 <= self <= 100
+
+def share(total: int, p: int) -> int:
+    return total * p // 100
+
+test "a share is never more than the whole":
+    check(arbitrary[Percent]) do p:
+        return share(1000, p) <= 1000
+
+test "a share of a share is the share of the product":
+    let pairs = Gen.of(
+        d -> (Draws.gen_in(d, 0, 100), Draws.gen_in(d, 0, 100)),
+    )
+    check(pairs) do pair:
+        let a, b = pair
+        return share(share(1000, a), b) == share(1000, a * b // 100)

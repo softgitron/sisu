@@ -848,11 +848,12 @@ D0119 cli     native.from-lir             `--from-lir FILE` builds a LIR program
 D0120 cli     cli.bad-lower               `--lower` takes `stage2` (the lowering written in Sisu, the default) or `rust` (the Rust lowering, the oracle), not `{value}`
 D0121 cli     native.stage2-build         building stage 2 in `{dir}` failed; `--lower=rust` lowers with the Rust backend:\n{detail}
 D0122 cli     native.stage2-failed        internal compiler error: stage 2 failed to lower the program (status {status}); `--lower=rust` lowers with the Rust backend:\n{detail}
-# Which backend compiles LIR to machine code (decision 306):
-# Cranelift through the Rust translation, the default, or `--backend=sisu`
-# (`SISU_BACKEND=sisu`), the x86-64 backend written in Sisu (`sisu2 x86`),
-# which compiles stage 2's LIR and so not the Rust lowering's; and the Sisu
-# backend stopping other than on a construct it does not compile yet.
-D0123 cli     cli.bad-backend             `--backend` takes `cranelift` (the Rust backend, the default) or `sisu` (the x86-64 backend written in Sisu), not `{value}`
+# Which backend compiles LIR to machine code (decisions 306 and 331): the
+# x86-64 backend written in Sisu (`sisu2 x86`), the debug profile's default,
+# which compiles stage 2's LIR and so not the Rust lowering's, or Cranelift
+# through the Rust translation, the release profile's default and the
+# oracle (`--backend=NAME`, `SISU_BACKEND=NAME`); and the Sisu backend
+# stopping other than on a construct it does not compile yet.
+D0123 cli     cli.bad-backend             `--backend` takes `sisu` (the x86-64 backend written in Sisu, the debug profile's default) or `cranelift` (the Rust backend, the release profile's default and the oracle), not `{value}`
 D0124 cli     native.backend-lowering     `--backend=sisu` compiles the LIR stage 2 lowers, so it does not go with `--lower=rust`
 D0125 cli     native.sisu-failed          internal compiler error: the Sisu backend failed to compile the program (status {status}); `--backend=cranelift` compiles it with the Rust backend:\n{detail}

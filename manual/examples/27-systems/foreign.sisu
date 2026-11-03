@@ -1,0 +1,28 @@
+# Calling C: an `extern "C"` block declares its functions.
+from std.ffi import c_char, c_int, c_size, c_ssize
+from std.mem import Global, Layout, ptr
+
+# safety: the signatures as <string.h> and <unistd.h> declare them for
+#   64-bit Linux; each returns promptly.
+extern "C":
+    def strlen(s: ptr[c_char]) -> c_size
+    def write(fd: c_int, buf: ptr[u8], n: c_size) -> c_ssize
+
+def main():
+    let layout = Layout(size=16, align=1)
+    let block = Global().acquire(layout) else:
+        print("out of memory")
+        return
+    # safety: writable, in_bounds, aligned: the block has room for the
+    #   eight bytes and the NUL; valid: strlen and write read only bytes
+    #   written first; from_here, once: the block is released once.
+    unsafe:
+        var at = 0
+        for b in "kiitos!\n".bytes():
+            block.offset(at).write(b)
+            at += 1
+        block.offset(at).write(0u8)
+        let n = strlen(block.cast[c_char]().as_const())
+        let written = write(1, block.as_const(), n)
+        print("{n} bytes, {written} written")
+        Global().release(block, layout)

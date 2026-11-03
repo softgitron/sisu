@@ -1,0 +1,4 @@
+test "the temperature in a town" ... ok
+test "a town that the service does not know" ... ok
+test "an answer that is not a number" ... ok
+3 passed, 0 failed, 0 blocked

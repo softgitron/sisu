@@ -1,0 +1,9 @@
+$ sisu run pure_cap.sisu
+error[E0334]: the pure function `note_count` cannot use the capability `Fs`
+  --> pure_cap.sisu:2:21
+  |
+2 | pure def note_count(fs: Fs) -> int:
+  |                     ^^^^^^
+  = fix: remove `pure`
+
+error[D0006]: the program was not run: errors found (1)

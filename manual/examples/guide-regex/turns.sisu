@@ -1,0 +1,13 @@
+# Finds every turn in a text, and takes each match apart by its groups.
+from std.regex import Regex, RegexError
+
+def main() -> ! RegexError:
+    let turn = Regex.new(r"(\d{1,2}):(\d\d) (\w+)")?
+    let text = "17:30 Aino, 18:05 Eero and 9:15 Roni"
+    for m in turn.find_all(text):
+        let hour = m.group(1) ?? ""
+        let name = m.group(3) ?? ""
+        print("{name} at {hour}, bytes {m.start} to {m.end}")
+    if let Some(first) = turn.find(text):
+        print("the first: {first.text}")
+    return Ok(())

@@ -1,0 +1,14 @@
+# A raw pointer is safe to make; reading and writing through one is not.
+from std.mem import ptr
+
+def main():
+    var celsius = 80
+    let p = ptr.of_mut(mut celsius)
+    # safety: valid, aligned, writable: p points to the live local
+    #   celsius, which nothing else uses until the block ends.
+    unsafe:
+        p.write(p.read() + 5)
+    print(celsius)
+    # safety: valid, aligned: celsius is still alive and unchanged.
+    let now = unsafe p.read()
+    print(now)

@@ -1,0 +1,3 @@
+test "a reminder a quarter of an hour before" ... ok
+test "a reminder that is late goes at once" ... ok
+2 passed, 0 failed, 0 blocked

@@ -1,0 +1,12 @@
+# Any form of a capability works where its operations trait is asked.
+def total_words[F: FsOps](fs: F, paths: list[Path]) -> int:
+    var total = 0
+    for path in paths:
+        let text = fs.read_to_string(path) else: String()
+        total += text.split_whitespace().count()
+    return total
+
+def main(sys: System):
+    print(total_words(sys.fs.lend(), ["a.txt", "b.txt"]))
+    print(total_words(sys.fs.read_only(), ["a.txt"]))
+    print(total_words(sys.fs, ["missing.txt"]))

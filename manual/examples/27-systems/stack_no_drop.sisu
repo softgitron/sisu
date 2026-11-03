@@ -1,0 +1,33 @@
+# A safe stack on `RawBuf`: unsafe code inside, a safe type outside.
+from std.mem import RawBuf
+
+## A last-in, first-out stack. Invariant, kept by every method: slots 0
+## to count-1 hold values, and the others none.
+struct Stack[T]:
+    buf: RawBuf[T]
+    count: int
+
+impl[T] Stack[T]:
+    def new() -> Stack[T]:
+        return Stack(buf=RawBuf.with_capacity(2), count=0)
+
+    def push(mut self, own value: T):
+        if self.count == self.buf.capacity():
+            self.buf.grow(2 * self.buf.capacity())
+        # safety: uninitialised: slot count holds no value, by the invariant.
+        unsafe self.buf.write(self.count, value)
+        self.count += 1
+
+    def pop(mut self) -> T?:
+        if self.count == 0:
+            return None
+        self.count -= 1
+        # safety: initialised: slot count held a value, which moves out.
+        return Some(unsafe self.buf.read(self.count))
+
+def main():
+    var words: Stack[String] = Stack.new()
+    for w in ["kiuas", "löyly", "vihta"]:
+        words.push(w.to_string())
+    print(words.pop())
+    print("{words.count} left")

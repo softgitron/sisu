@@ -1,0 +1,7 @@
+# A failing assertion shows the value of each part of its condition.
+def last(scores: list[int]) -> int:
+    return scores[len(scores) - 2]
+
+test "the last score":
+    let scores = [7, 9, 4]
+    assert last(scores) == 4, "scores {scores}"

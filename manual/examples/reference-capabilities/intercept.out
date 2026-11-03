@@ -1,0 +1,3 @@
+> Fs.exists("settings.txt")
+< True
+True

@@ -1,0 +1,17 @@
+# Raw memory from `Global`, holding values of a type the program chooses.
+from std.mem import Global, Layout
+
+def main():
+    let layout = Layout.array[int](3) ?? Layout(size=0, align=8)
+    let block = Global().acquire(layout) else:
+        print("out of memory")
+        return
+    let temps = block.cast[int]()
+    # safety: writable, aligned, in_bounds: the block holds three ints and
+    #   nothing yet; valid: each is written before it is read; from_here,
+    #   once: the block came from Global with this layout, released once.
+    unsafe:
+        for i in range(4):
+            temps.offset(i).write(70 + 10 * i)
+        print(temps.offset(2).read())
+        Global().release(block, layout)

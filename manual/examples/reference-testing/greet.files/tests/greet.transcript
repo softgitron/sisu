@@ -1,0 +1,5 @@
+$ greet Aino Eero
+Hei, Aino!
+Hei, Eero!
+$ greet
+error: NoNames (exit 1)

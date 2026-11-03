@@ -1,0 +1,8 @@
+$ sisu check refined.sisu
+error[E0811]: expected `Hour`, found `int`; a value becomes a `Hour` where its predicate is checked, with `Hour.try_from(...)`
+  --> <std>/<from_json[Hour]>/json.sisu:3:19
+  |
+3 |         return Ok(value)
+  |                   ^^^^^
+  = note: check it where it runs: `Hour.try_from(...)`
+

@@ -1,0 +1,3 @@
+test "two words" ... ok
+test "word_count refines word_count_ref" ... ok
+2 passed, 0 failed, 0 blocked

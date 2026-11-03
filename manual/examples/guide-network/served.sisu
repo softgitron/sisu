@@ -1,0 +1,37 @@
+# A server and its client, tested over a network in the test's process.
+import http
+from std.net import Url, UrlError
+
+## A weather service that knows one town.
+struct Service:
+    pass
+
+impl http.Handler for Service:
+    def handle(self, request: http.Request) -> http.Response:
+        if request.target == "/Oulu":
+            return http.Response.ok(b"-4")
+        return http.Response.text(404, "Not Found", "no such town\n")
+
+## The answer of the weather service at `localhost` for `town`.
+def weather(net: Net, town: str) -> String ! {UrlError, HttpError}:
+    let url = Url.parse("http://localhost/{town}")?
+    let body = http.get(net, url)?
+    return Ok(body.decode().or(String()))
+
+test "the client and the server agree"(net: Net):
+    let listener = net.listen(80).expect("a free port")
+    let answers = task.scope do s:
+        s.spawn(() -> http.serve(listener, Service()))
+        let oulu = weather(net, "Oulu")
+        let atlantis = weather(net, "Atlantis")
+        s.cancel()
+        return Ok((oulu, atlantis))
+    let (oulu, atlantis) = answers.expect("the server stopped cleanly")
+    assert oulu == Ok("-4")
+    assert atlantis == Err(Status(404))
+
+test "a client with no server to ask"(net: Net):
+    let refused = match weather(net, "Oulu"):
+        case Err(Network(_)): True
+        case _: False
+    assert refused

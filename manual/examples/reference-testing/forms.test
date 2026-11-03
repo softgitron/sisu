@@ -1,0 +1,6 @@
+test "doubles" ... ok
+test "doubles each case (1, 2)" ... ok
+test "doubles each case (-3, -6)" ... ok
+test "waits on a test clock" ... ok
+test "large numbers/doubles a large number" ... ok
+5 passed, 0 failed, 0 blocked

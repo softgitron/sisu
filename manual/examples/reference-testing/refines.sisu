@@ -1,0 +1,18 @@
+# `@refines` tests a fast function against a clear one on many cases.
+def word_count_ref(text: str) -> int:
+    return text.split_whitespace().count()
+
+@refines(word_count_ref)
+def word_count(text: str) -> int:
+    var count = 0
+    var in_word = False
+    for c in text.chars():
+        if c.is_whitespace():
+            in_word = False
+        elif not in_word:
+            in_word = True
+            count += 1
+    return count
+
+test "two words":
+    assert word_count("hei maailma") == 2

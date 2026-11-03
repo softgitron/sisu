@@ -1,0 +1,16 @@
+$ sisu check moved.sisu
+error[E0400]: `guests` was moved on line 4 and cannot be used afterwards
+  --> moved.sisu:5:11
+  |
+5 |     print(guests)
+  |           ^^^^^^
+  |
+4 |     let sauna = guests
+  |                 ------ `guests` is moved here
+  = note: copy it with `.copy()` before it is moved, or move it later
+
+$ sisu check --format=ids moved.sisu
+5:11-5:17 E0400 borrow.use-after-move name="guests" line="4"
+  label 4:17-4:23 borrow.moved-here name="guests"
+$ sisu explain E0400
+E0400 (error) borrow.use-after-move: `{name}` was moved on line {line} and cannot be used afterwards

@@ -1,0 +1,3 @@
+$ sisu test greet.sisu
+transcript "tests/greet.transcript" ... ok
+1 passed, 0 failed, 0 blocked

@@ -1,0 +1,21 @@
+# Code that sleeps runs at once under the test clock, which moves to the
+# timer when every task waits.
+
+## Waits until `minutes` before `turn`, and gives the time it woke.
+def remind(clock: Clock, turn: DateTime, minutes: int) -> DateTime ! TaskError:
+    let at = turn - Duration.minutes(minutes)
+    if clock.now() < at:
+        clock.sleep(at - clock.now())?
+    return Ok(clock.now())
+
+test "a reminder a quarter of an hour before"(clock: TestClock):
+    clock.set(DateTime.parse("2026-11-03T16:00:00Z").expect("a time"))
+    let turn = DateTime.parse("2026-11-03T18:00:00Z").expect("a time")
+    let woke = remind(clock, turn, 15).expect("not cancelled")
+    assert "{woke}" == "2026-11-03T17:45:00Z"
+
+test "a reminder that is late goes at once"(clock: TestClock):
+    clock.set(DateTime.parse("2026-11-03T17:50:00Z").expect("a time"))
+    let turn = DateTime.parse("2026-11-03T18:00:00Z").expect("a time")
+    let woke = remind(clock, turn, 15).expect("not cancelled")
+    assert "{woke}" == "2026-11-03T17:50:00Z"

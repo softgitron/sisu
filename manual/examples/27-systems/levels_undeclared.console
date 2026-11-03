@@ -1,0 +1,8 @@
+$ sisu run
+error[E1019]: the package `sauna` contains unsafe code, and its `sisu.toml` declares no `unsafe`: add `unsafe = "memory"` to its `[package]`
+  --> src/main.sisu:9:5
+  |
+9 |     unsafe:
+  |     ^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

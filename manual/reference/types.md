@@ -124,7 +124,7 @@ are the prelude's, not keywords ([R1](lexical-structure.md#keywords)).
 | References and views | `ref T`, `ref mut T`, `str`, `Slice[T]`, a `view struct` | [References and views](#references-and-views) |
 | Pointers of the library | `Box[T]`, `Shared[T]`, `Weak[T]`, `Cell[T]`, `Mutex[T]`, `Atomic[T]`, `Arena[T]`, `Key[T]` | [The library's pointer types](#the-librarys-pointer-types) |
 | Trait objects | `dyn Trait` | [Trait objects](#trait-objects) |
-| Capabilities | `System`, `Fs`, `Net`, `Clock`, `Rand`, `Env`, `Proc`, `Stdin` | [R10](../README.md#the-reference), when it is written |
+| Capabilities | `System`, `Fs`, `Net`, `Clock`, `Rand`, `Env`, `Proc`, `Stdin` | [R10](capabilities.md#the-root-capabilities) |
 
 The prelude has more types, such as `Path`, `Duration` and
 `DateTime`, and the modules of the standard library more again, such as
@@ -1440,7 +1440,7 @@ does not implement them with a plain `impl`.
   and `Sync` when `T` is `Sync`; a function value is neither.
 - A bound such as `[T: Send]` asks for them, and a task's captures are
   checked against them where it is spawned
-  ([R9](../README.md#the-reference), when it is written).
+  ([R9](concurrency.md#values-that-cross-to-a-task)).
 - `unsafe impl Send` and `unsafe impl Sync` assert them for a type
   whose parts do not ([R7](ownership.md#unsafe-code-and-raw-pointers));
   an `impl` without `unsafe` is E0984, and `Escapable` is never asserted
@@ -1650,7 +1650,7 @@ converted without a word. There are no others:
 | a `pure` function type | the same function type without `pure` |
 | `Never` | any type |
 | `ref T`, `Box[T]` | `ref dyn Trait`, `Box[dyn Trait]`, when `T` implements `Trait` |
-| a type that implements a capability's operations | the capability ([R10](../README.md#the-reference)) |
+| a type that implements a capability's operations | the capability ([R10](capabilities.md#capabilities-in-generic-code)) |
 
 A literal that takes the type expected is typing, not a coercion
 ([Literals that take the type expected](#literals-that-take-the-type-expected)).

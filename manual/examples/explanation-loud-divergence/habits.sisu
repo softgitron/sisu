@@ -1,0 +1,6 @@
+# Two of Python's spellings, each read with Python's meaning: Sisu
+# refuses both and says what to write.
+def main():
+    let scores = [7, 9, 4]
+    let mean = sum(scores) / len(scores)
+    print("the last score is {scores[-1]}, the mean {mean}")

@@ -1,0 +1,5 @@
+$ sisu run ambient.sisu
+to standard output
+to standard error
+info: a record, with its level
+42

@@ -1,0 +1,9 @@
+# What needs no capability: the standard streams, `log`, and `task`.
+def main():
+    print("to standard output")
+    print_err("to standard error")
+    log.info("a record, with its level")
+    let n = task.scope do s:
+        let answer = s.spawn(() -> 6 * 7).join() else: 0
+        return answer
+    print(n)

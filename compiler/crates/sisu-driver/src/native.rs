@@ -119,9 +119,11 @@ pub(crate) fn set_lowering(l: Lowering) {
     LOWERING.store(u8::from(l == Lowering::Rust), std::sync::atomic::Ordering::Relaxed);
 }
 
-/// Which backend compiles LIR to machine code (decision 306): Cranelift,
-/// through the Rust translation, by default, or the x86-64 backend written
-/// in Sisu (`--backend=sisu`, `SISU_BACKEND=sisu`; `sisu2 x86`).
+/// Which backend compiles LIR to machine code (decisions 306 and 331): the
+/// x86-64 backend written in Sisu (`sisu2 x86`), the debug profile's by
+/// default, or Cranelift, through the Rust translation, the release
+/// profile's by default and the oracle (`--backend=NAME`,
+/// `SISU_BACKEND=NAME`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Backend {
     Cranelift,
@@ -145,20 +147,42 @@ impl Backend {
     }
 }
 
-/// The backend this process's command chose ([`set_backend`]).
+/// The backend this process's command named ([`set_backend`]): 0 when it
+/// named none, which leaves it to the build's profile ([`backend_for`]), 1
+/// Cranelift, 2 the Sisu backend.
 static BACKEND: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
-/// The backend the running command chose.
-pub(crate) fn backend() -> Backend {
+/// The backend the running command named, if it named one.
+pub(crate) fn chosen_backend() -> Option<Backend> {
     match BACKEND.load(std::sync::atomic::Ordering::Relaxed) {
-        1 => Backend::Sisu,
-        _ => Backend::Cranelift,
+        1 => Some(Backend::Cranelift),
+        2 => Some(Backend::Sisu),
+        _ => None,
     }
 }
 
-/// Chooses the backend for the command this process runs.
-pub(crate) fn set_backend(b: Backend) {
-    BACKEND.store(u8::from(b == Backend::Sisu), std::sync::atomic::Ordering::Relaxed);
+/// Chooses the backend for the command this process runs, or leaves it to
+/// the default (`None`).
+pub(crate) fn set_backend(b: Option<Backend>) {
+    let code = match b {
+        None => 0,
+        Some(Backend::Cranelift) => 1,
+        Some(Backend::Sisu) => 2,
+    };
+    BACKEND.store(code, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The backend that compiles a build of `profile` (decision 331): the one
+/// the command named; else the Sisu backend for the debug profile, the
+/// debug builds D-087 gives it, and Cranelift for the release profile,
+/// whose optimisations stand in for D-088's release backend, and for the
+/// Rust lowering, the oracle, which writes no LIR.
+pub(crate) fn backend_for(profile: Profile) -> Backend {
+    match chosen_backend() {
+        Some(b) => b,
+        None if profile == Profile::Debug && lowering() == Lowering::Stage2 => Backend::Sisu,
+        None => Backend::Cranelift,
+    }
 }
 
 /// What the backend compiles: a SIR program, or the text of a LIR program
@@ -182,7 +206,7 @@ pub(crate) fn build(code: Code<'_>, output: &Path, profile: Profile, host: &mut 
         Code::Lir(text) => {
             // A LIR program says its own profile.
             let profile = Profile::of(sisu_codegen::lir_is_release(text));
-            if backend() == Backend::Sisu {
+            if backend_for(profile) == Backend::Sisu {
                 return build_with_sisu(text, &runtime, output, host);
             }
             let start = std::time::Instant::now();
@@ -192,7 +216,7 @@ pub(crate) fn build(code: Code<'_>, output: &Path, profile: Profile, host: &mut 
         }
     };
     // The Sisu backend compiles what stage 2 lowers (decision 306).
-    if backend() == Backend::Sisu && lowering() == Lowering::Rust {
+    if chosen_backend() == Some(Backend::Sisu) && lowering() == Lowering::Rust {
         host.stderr(&text(msg::NATIVE_BACKEND_LOWERING, &[]));
         return Err(EXIT_ERROR);
     }
@@ -217,7 +241,7 @@ pub(crate) fn build(code: Code<'_>, output: &Path, profile: Profile, host: &mut 
     // back to the Rust lowering, which lowers only when it is asked for.
     if lowering() == Lowering::Stage2 {
         let lir = lower_with_stage2(prog, profile, output, host)?;
-        if backend() == Backend::Sisu {
+        if backend_for(profile) == Backend::Sisu {
             return build_with_sisu(&lir, &runtime, output, host);
         }
         let start = std::time::Instant::now();

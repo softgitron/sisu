@@ -17,9 +17,10 @@
 //! 2 (`sisu2 lir`) and builds it from LIR (`sisu build --native
 //! --from-lir`), whose executable must be the one its SIR gives, byte for
 //! byte; stage 2 is `--sisu2 PATH`, else built from `ROOT/../../stage2`
-//! with the `sisu` under test. `--native-sisu LIST` builds each case with
-//! the x86-64 backend written in Sisu (`sisu build --native
-//! --backend=sisu`) and compares its runs.
+//! with the `sisu` under test. A debug build's backend is the x86-64
+//! backend written in Sisu (decision 331); `--native-cranelift LIST` builds
+//! each case with Cranelift, the oracle (`sisu build --native
+//! --backend=cranelift`), and compares its runs.
 
 use std::path::PathBuf;
 
@@ -33,7 +34,7 @@ fn main() {
     let mut release = false;
     let mut interpreted = false;
     let mut from_lir = false;
-    let mut sisu_backend = false;
+    let mut cranelift = false;
     let mut sisu2: Option<PathBuf> = None;
     let mut front_end: Option<String> = None;
     let mut args = std::env::args().skip(1);
@@ -56,14 +57,14 @@ fn main() {
             | "--native-from-sir"
             | "--native-release"
             | "--native-from-lir"
-            | "--native-sisu"
+            | "--native-cranelift"
             | "--interpreted-from-sir" => {
                 survey = a == "--native-survey";
                 from_sir = a == "--native-from-sir";
                 release = a == "--native-release";
                 interpreted = a == "--interpreted-from-sir";
                 from_lir = a == "--native-from-lir";
-                sisu_backend = a == "--native-sisu";
+                cranelift = a == "--native-cranelift";
                 if let Some(p) = args.next() {
                     native = Some(PathBuf::from(p));
                 }
@@ -108,8 +109,8 @@ fn main() {
                 let _ = std::fs::remove_dir_all(dir);
             }
             report
-        } else if sisu_backend {
-            sisu_conformance::native::run_native_sisu(&sisu, &root, &names)
+        } else if cranelift {
+            sisu_conformance::native::run_native_cranelift(&sisu, &root, &names)
         } else if interpreted {
             sisu_conformance::native::run_interpreted_from_sir(&sisu, &root, &names)
         } else if from_sir {

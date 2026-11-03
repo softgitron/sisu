@@ -1,0 +1,18 @@
+# Writes a list of bookings to a file as JSON.
+import std.json
+
+## A turn in the sauna, as the JSON has it.
+struct Booking:
+    name: String
+    hour: int
+    towels: int = 1
+    note: String? = None
+
+def main(sys: System) -> ! IoError:
+    let bookings = [
+        Booking(name="Aino", hour=18),
+        Booking(name="Eero", hour=19, towels=2, note=Some("late")),
+    ]
+    sys.fs.write_text("bookings.json", json.encode(bookings))?
+    print(sys.fs.read_to_string("bookings.json")?)
+    return Ok(())

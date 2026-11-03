@@ -1,0 +1,31 @@
+# A client of a weather service, tested over a scripted network.
+import http
+from std.net import Url, UrlError
+
+## Why an answer is not a temperature.
+error WeatherError:
+    NotANumber(text: String)
+
+## The temperature in `town` now, from the weather service.
+def temperature(
+    net: Net,
+    town: str,
+) -> int ! {UrlError, HttpError, WeatherError}:
+    let url = Url.parse("http://weather.example/{town}")?
+    let body = http.get(net, url)?
+    let text = body.decode().or(String())
+    let degrees = text.trim().parse_int() else:
+        return Err(NotANumber(text))
+    return Ok(degrees)
+
+test "the temperature in a town":
+    let net = http.FakeNet().respond_to("http://weather.example/Oulu", b"-4")
+    assert temperature(net, "Oulu") == Ok(-4)
+
+test "a town that the service does not know":
+    let net = http.FakeNet().respond_to("http://weather.example/Oulu", b"-4")
+    assert temperature(net, "Atlantis") == Err(Status(404))
+
+test "an answer that is not a number":
+    let net = http.FakeNet().respond_to("http://weather.example/Oulu", b"cold")
+    assert temperature(net, "Oulu") == Err(NotANumber("cold"))

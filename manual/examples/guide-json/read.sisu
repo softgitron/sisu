@@ -1,0 +1,16 @@
+# Reads a file of JSON into a list of bookings.
+import std.json
+
+## A turn in the sauna, as the JSON has it.
+struct Booking:
+    name: String
+    hour: int
+    towels: int = 1
+    note: String? = None
+
+def main(sys: System) -> ! {IoError, json.JsonError}:
+    let text = sys.fs.read_to_string("bookings.json")?
+    let bookings = json.decode[list[Booking]](text)?
+    for b in bookings:
+        print("{b.hour}:00 {b.name}, towels {b.towels}, note {b.note:?}")
+    return Ok(())

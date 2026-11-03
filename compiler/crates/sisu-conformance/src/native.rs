@@ -24,19 +24,23 @@
 //! what a front end (stage 0's or stage 1's) serialised, must meet the
 //! expectations the source meets.
 //!
-//! The mode of the Sisu backend (decision 306) builds each case with
-//! `sisu build --native --backend=sisu`, the x86-64 backend written in Sisu
-//! compiling stage 2's LIR, and compares the runs only: its executables are
-//! its own, not Cranelift's.
+//! A debug build's backend is the x86-64 backend written in Sisu, compiling
+//! stage 2's LIR (decisions 306 and 331), so the native mode and the mode
+//! from SIR build with it; the release profile's is Cranelift. The mode of
+//! the oracle (`--native-cranelift`) builds each case with `sisu build
+//! --native --backend=cranelift` and compares its runs with the same
+//! expectations, so that every case's behaviour is held under both
+//! backends; the mode from LIR names Cranelift too, whose executables it
+//! compares with the Rust lowering's.
 //!
 //! The modes that build with the default lowering (natively, from SIR,
-//! with the release profile, and with the Sisu backend) ask the build to
-//! report its steps
-//! (`SISU_NATIVE_TIMES=1`) and require it to say that stage 2 lowered the
-//! program (`native: lowered by stage 2 in T ms`), so that no case is
-//! built through the Rust lowering, which lowers only when asked for
-//! (`--lower=rust`, decision 305); the report counts those cases and the
-//! time stage 2 took over them.
+//! with the release profile, and with Cranelift) ask the build to report
+//! its steps (`SISU_NATIVE_TIMES=1`) and require it to say that stage 2
+//! lowered the program (`native: lowered by stage 2 in T ms`), so that no
+//! case is built through the Rust lowering, which lowers only when asked
+//! for (`--lower=rust`, decision 305), and the debug ones that the Sisu
+//! backend compiled it (`native: compiled by the Sisu backend in T ms`);
+//! the report counts those cases and the time each took over them.
 //!
 //! Either way, the executable runs with `SISU_RT_ALLOCS=1`, which makes
 //! the runtime report how many of its allocations are live when the
@@ -69,6 +73,8 @@ pub struct NativeReport {
     /// With the Sisu backend: the cases its build said it compiled, and the
     /// time it took.
     pub sisu: Option<(usize, Duration)>,
+    /// Built with Cranelift, the oracle (`--backend=cranelift`).
+    pub cranelift: bool,
     pub failures: Vec<Failure>,
     /// Time spent building (the front end, the backend and the linker)
     /// and running the executables, over every case.
@@ -95,8 +101,8 @@ impl NativeReport {
             }
             Some(own) => format!("native from SIR: {} cases ({own} from their own `.sir`)", self.cases),
             None if self.release => format!("native, release: {} cases ({} lines)", self.cases, self.lines),
-            None if self.sisu.is_some() => {
-                format!("native, Sisu backend: {} cases ({} lines)", self.cases, self.lines)
+            None if self.cranelift => {
+                format!("native, Cranelift: {} cases ({} lines)", self.cases, self.lines)
             }
             None => format!("native: {} cases ({} lines)", self.cases, self.lines),
         };
@@ -177,20 +183,28 @@ enum Mode {
     /// Lowered from serialised SIR by stage 2 and built from its LIR
     /// (decision 284).
     FromLir,
-    /// Built with the backend written in Sisu (decision 306).
-    Sisu,
+    /// Built with Cranelift, the oracle of the backend written in Sisu
+    /// (decision 331).
+    Cranelift,
 }
 
 impl Mode {
     /// Whether the mode builds with the default lowering, whose build must
     /// say that stage 2 lowered the program.
     fn lowers(self) -> bool {
-        matches!(self, Mode::Native | Mode::FromSir | Mode::Release | Mode::Sisu)
+        matches!(self, Mode::Native | Mode::FromSir | Mode::Release | Mode::Cranelift)
+    }
+
+    /// Whether the mode builds with the Sisu backend, the debug profile's
+    /// default (decision 331), whose build must say it compiled the program.
+    fn sisu_backend(self) -> bool {
+        matches!(self, Mode::Native | Mode::FromSir)
     }
 }
 
 /// Builds and runs every case of `list` natively, on as many threads as
-/// the machine has (at most eight).
+/// the machine has (at most eight), with the debug profile's backend, the
+/// one written in Sisu (decision 331).
 pub fn run_native(sisu: &Sisu, root: &Path, list: &[String]) -> NativeReport {
     run_list(sisu, root, list, Mode::Native, None)
 }
@@ -208,11 +222,11 @@ pub fn run_native_release(sisu: &Sisu, root: &Path, list: &[String]) -> NativeRe
     run_list(sisu, root, list, Mode::Release, None)
 }
 
-/// [`run_native`], each case built with the x86-64 backend written in Sisu
-/// (`sisu build --native --backend=sisu`, decision 306), and run against
-/// the same expectations: the executables are the Sisu backend's own.
-pub fn run_native_sisu(sisu: &Sisu, root: &Path, list: &[String]) -> NativeReport {
-    run_list(sisu, root, list, Mode::Sisu, None)
+/// [`run_native`], each case built with Cranelift, the oracle of the
+/// backend written in Sisu (`sisu build --native --backend=cranelift`,
+/// decision 331), and run against the same expectations.
+pub fn run_native_cranelift(sisu: &Sisu, root: &Path, list: &[String]) -> NativeReport {
+    run_list(sisu, root, list, Mode::Cranelift, None)
 }
 
 /// Every case of `list` interpreted from serialised SIR (`sisu run
@@ -262,6 +276,7 @@ fn run_list(sisu: &Sisu, root: &Path, list: &[String], mode: Mode, stage2: Optio
     let mut report = NativeReport {
         release: mode == Mode::Release,
         interpreted: mode == Mode::Interpreted,
+        cranelift: mode == Mode::Cranelift,
         ..NativeReport::default()
     };
     let mut cases = Vec::new();
@@ -286,7 +301,7 @@ fn run_list(sisu: &Sisu, root: &Path, list: &[String], mode: Mode, stage2: Optio
         let lowered: Vec<Duration> = results.iter().filter_map(|r| r.stage2).collect();
         report.stage2 = Some((lowered.len(), lowered.iter().sum()));
     }
-    if mode == Mode::Sisu {
+    if mode.sisu_backend() {
         let compiled: Vec<Duration> = results.iter().filter_map(|r| r.sisu).collect();
         report.sisu = Some((compiled.len(), compiled.iter().sum()));
     }
@@ -382,7 +397,7 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&P
         Mode::Release => 3_000_000,
         Mode::Interpreted => 4_000_000,
         Mode::FromLir => 5_000_000,
-        Mode::Sisu => 6_000_000,
+        Mode::Cranelift => 6_000_000,
     };
     let sandbox = match Sandbox::new(case, offset + n) {
         Ok(s) => s,
@@ -401,8 +416,8 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&P
         build_args.push("--release".to_string());
         build_args.push("--contracts=all".to_string());
     }
-    if mode == Mode::Sisu {
-        build_args.push("--backend=sisu".to_string());
+    if mode == Mode::Cranelift {
+        build_args.push("--backend=cranelift".to_string());
     }
     if !case.package {
         build_args.push(format!("{}.sisu", case.stem));
@@ -490,7 +505,16 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&P
                     );
                     return r;
                 }
-                build_args = s(&["build", "--native", "--output", &exe.display().to_string(), "--from-lir"]);
+                // Translated by Cranelift, whose executable is the Rust
+                // lowering's (decision 284), not the debug profile's default.
+                build_args = s(&[
+                    "build",
+                    "--native",
+                    "--backend=cranelift",
+                    "--output",
+                    &exe.display().to_string(),
+                    "--from-lir",
+                ]);
                 build_args.push(lir.display().to_string());
                 let built = invoke_with_input(sisu, &cwd, &build_args, None);
                 if built.status != 0 || !exe.is_file() {
@@ -555,7 +579,7 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&P
             "the build did not say that stage 2 lowered the program (`native: lowered by stage 2`)".into(),
         );
     }
-    if mode == Mode::Sisu && report.sisu.is_none() {
+    if mode.sisu_backend() && report.sisu.is_none() {
         fail(
             &mut r,
             "compiled by the Sisu backend",

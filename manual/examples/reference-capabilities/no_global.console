@@ -1,0 +1,9 @@
+$ sisu run no_global.sisu
+error[E0200]: cannot find `open` in this scope
+  --> no_global.sisu:3:11
+  |
+3 |     print(open("menu.txt"))
+  |           ^^^^
+  = note: a program reaches files through the capability `Fs`, which `def main(sys: System)` holds as `sys.fs`: `sys.fs.read_to_string("data.txt")`
+
+error[D0006]: the program was not run: errors found (1)

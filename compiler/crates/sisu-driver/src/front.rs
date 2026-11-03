@@ -48,8 +48,16 @@ pub const LOWER_VAR: &str = "SISU_LOWER";
 /// The environment variable that chooses the backend that compiles LIR to
 /// machine code (`cranelift` or `sisu`) for a whole process, and that the
 /// driver gives stage 1 so that its backend compiles as the command chose;
-/// `--backend=NAME` wins (decision 306).
+/// `--backend=NAME` wins (decision 306), and without either a build takes
+/// its profile's (decision 331).
 pub const BACKEND_VAR: &str = "SISU_BACKEND";
+
+/// The environment variable naming a stage-2 executable that native builds
+/// lower and compile with, as it is, instead of the `sisu2` the driver
+/// builds into `compiler/target/stage2` (decision 330): how the Sisu
+/// backend's fixed point (`stage2/bootstrap.sh`) builds with the stage 2
+/// it built. Stage 1 passes it on to the backend it calls.
+pub const STAGE2_VAR: &str = "SISU_STAGE2";
 
 /// Which front end checks, lowers and serialises a program.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -161,20 +169,21 @@ pub(crate) fn take_lowering(
 }
 
 /// The command line without its `--backend=NAME` (or `--backend NAME`),
-/// and the backend it and `SISU_BACKEND` choose (decision 306): Cranelift
-/// unless `sisu` is named. A name that is no backend is a usage error.
+/// and the backend it and `SISU_BACKEND` name (decision 306), if any: a
+/// build without one takes its profile's (decision 331). A name that is no
+/// backend is a usage error.
 pub(crate) fn take_backend(
     args: &[String],
     env: Option<&str>,
     value_flags: &[&str],
     host: &mut dyn Host,
-) -> Result<(Vec<String>, crate::native::Backend), i32> {
+) -> Result<(Vec<String>, Option<crate::native::Backend>), i32> {
     let (out, chosen) = take_option(args, "--backend", value_flags);
     let name = chosen.or_else(|| env.map(str::to_string)).filter(|n| !n.is_empty());
     let backend = match name {
-        None => crate::native::Backend::Cranelift,
+        None => None,
         Some(n) => match crate::native::Backend::parse(&n) {
-            Some(b) => b,
+            Some(b) => Some(b),
             None => {
                 host.stderr(&crate::cli::plain_error(msg::CLI_BAD_BACKEND, &[("value", n)]));
                 return Err(crate::cli::EXIT_USAGE);
@@ -339,7 +348,10 @@ impl Stage1 {
         // The backend stage 1 hands the SIR to lowers as the command chose
         // (decision 304).
         cmd.env(LOWER_VAR, crate::native::lowering().name());
-        cmd.env(BACKEND_VAR, crate::native::backend().name());
+        match crate::native::chosen_backend() {
+            Some(b) => cmd.env(BACKEND_VAR, b.name()),
+            None => cmd.env_remove(BACKEND_VAR),
+        };
         // Stage 1 knows the working directory by the shell's `PWD`.
         if let Ok(cwd) = std::env::current_dir() {
             cmd.env("PWD", cwd);
@@ -473,6 +485,12 @@ impl Stage2 {
     /// when it is missing or older than a source of stage 2 or of the `sir`
     /// module of stage 1 it depends on, as `stage2/sisu2` builds it.
     pub fn ready(host: &mut dyn Host) -> Result<Stage2, i32> {
+        // A stage 2 the caller built (decision 330), neither built nor
+        // checked here.
+        if let Some(given) = std::env::var_os(STAGE2_VAR).filter(|p| !p.is_empty()) {
+            let given = PathBuf::from(given);
+            return Ok(Stage2 { exe: std::fs::canonicalize(&given).unwrap_or(given) });
+        }
         let compiler = compiler_dir();
         let exe = compiler.join("target").join("stage2").join("sisu2");
         let package = compiler.join("stage2");

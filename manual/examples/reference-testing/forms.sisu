@@ -1,0 +1,23 @@
+# The forms of a test: plain, parametrised, with fakes, in a suite.
+def double(n: int) -> int:
+    return n * 2
+
+def wait_and_double(clock: Clock, n: int) -> int ! TaskError:
+    clock.sleep(Duration.minutes(5))?
+    return Ok(double(n))
+
+test "doubles":
+    assert double(21) == 42
+
+test "doubles each case" for n, want in [(1, 2), (-3, -6)]:
+    assert double(n) == want
+
+test "waits on a test clock"(clock: TestClock):
+    let start = clock.now()
+    assert wait_and_double(clock, 4) == Ok(8)
+    assert clock.now() - start == Duration.minutes(5)
+
+suite "large numbers":
+    @tag("slow")
+    test "doubles a large number":
+        assert double(1 << 40) == 1 << 41

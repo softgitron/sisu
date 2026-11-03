@@ -1,0 +1,3 @@
+test "the client and the server agree" ... ok
+test "a client with no server to ask" ... ok
+2 passed, 0 failed, 0 blocked

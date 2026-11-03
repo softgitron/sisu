@@ -1,0 +1,17 @@
+# The same property, over cases that no bill can be.
+
+## A bill and the people who share it.
+struct Bill:
+    total: int
+    people: int
+
+## Each person's share of `bill`, in cents: the cents left over go one
+## each to the first people.
+def split(bill: Bill) -> list[int]:
+    let share = bill.total // bill.people
+    let left = bill.total % bill.people
+    return [share + (if i < left: 1 else: 0) for i in range(bill.people)]
+
+test "the shares add up to the bill":
+    check(arbitrary[Bill]) do bill:
+        return sum(split(bill)) == bill.total

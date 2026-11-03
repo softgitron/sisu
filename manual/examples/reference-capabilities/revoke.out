@@ -1,0 +1,3 @@
+Ok("colour = \"green\"\n")
+Err(Revoked)
+Ok("colour = \"green\"\n")

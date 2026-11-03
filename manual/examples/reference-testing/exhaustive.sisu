@@ -1,0 +1,24 @@
+# `exhaustive` makes every small case; `arbitrary` draws at random.
+enum Press:
+    On
+    Off
+    Toggle
+
+def light(presses: list[Press]) -> bool:
+    var on = False
+    for p in presses:
+        on = match p:
+            case On: True
+            case Off: False
+            case Toggle: not on
+    return on
+
+test "two toggles change nothing":
+    var cases = 0
+    check(exhaustive[list[Press]](max_len=3)) do presses:
+        cases += 1
+        var twice = presses.copy()
+        twice.push(Toggle)
+        twice.push(Toggle)
+        return light(twice) == light(presses)
+    assert cases == 40

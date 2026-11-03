@@ -1,0 +1,14 @@
+# The examples in a doc comment are tests that `sisu test` runs.
+
+## The initials of `name`, each followed by a dot.
+##
+## ```
+## assert initials("aino maria") == "A.M."
+## ```
+def initials(name: str) -> String:
+    var out = String.new()
+    for word in name.split_whitespace():
+        let first = word.chars().next() ?? ' '
+        out.push("{first}".to_uppercase())
+        out.push(".")
+    return out

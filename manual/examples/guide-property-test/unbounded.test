@@ -1,0 +1,9 @@
+test "the shares add up to the bill" ... FAILED
+
+test "the shares add up to the bill" ... FAILED
+panic: the property failed for Bill(total=0, people=0) (case 1, shrunk once)
+  it panicked: division by zero
+  at test "the shares add up to the bill" (unbounded.sisu:16:5)
+replay: sisu test --replay 1-5cfe5c74ed0aadb4-0.0.1-t0-s0-r0-c0.0.0.0 unbounded.sisu
+
+0 passed, 1 failed, 0 blocked

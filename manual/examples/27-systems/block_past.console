@@ -1,0 +1,3 @@
+$ sisu run block_past.sisu
+panic: `ptr.write` of 8 bytes at offset 24 of a block of 24 bytes reaches outside it (`writable`)
+  at main (block_past.sisu:15:13)

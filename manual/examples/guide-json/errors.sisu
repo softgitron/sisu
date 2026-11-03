@@ -1,0 +1,22 @@
+# What `json.decode` says about text that does not fit the type.
+import std.json
+
+## A turn in the sauna, as the JSON has it.
+struct Booking:
+    name: String
+    hour: int
+
+def main():
+    let texts = [
+        r"""[{"name": "Aino", "hour": 18, "sauna": "Kota"}]""",
+        r"""[{"name": "Aino", "hour": "six"}]""",
+        r"""[{"name": "Aino", "hour": 18}, {"name": "Eero"}]""",
+        r"""{"name": "Aino", "hour": 18}""",
+        r"""[{"name": "Aino", "hour": 18]""",
+    ]
+    for text in texts:
+        match json.decode[list[Booking]](text):
+            case Ok(bookings):
+                print("{len(bookings)} booking: {bookings[0].name}")
+            case Err(e):
+                print(e)

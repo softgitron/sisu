@@ -1,0 +1,10 @@
+# A pattern that does not compile is an error that says where.
+from std.regex import Regex
+
+def main():
+    for pattern in [r"\d+:\d\d", r"(\d+:\d\d", r"(\w+) \1", r"(?i)sauna"]:
+        match Regex.new(pattern):
+            case Ok(re):
+                print("{pattern}: {re.groups()} groups")
+            case Err(Syntax(at, message)):
+                print("{pattern}: at {at}, {message}")

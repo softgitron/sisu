@@ -1,0 +1,24 @@
+# A loop on a `Ticker` runs at once under the test clock, tick by tick.
+from std.time import Ticker
+
+## The minutes after the start at which a loop that ticks once a minute
+## takes each of its first `count` turns.
+def turns(clock: Clock, count: int) -> list[int] ! TaskError:
+    let start = clock.now()
+    var ticker = Ticker.every(clock, Duration.minutes(1))
+    var at: list[int] = []
+    for _ in range(count):
+        ticker.wait()?
+        at.push((clock.now() - start).as_seconds() // 60)
+    return Ok(at)
+
+test "one turn a minute"(clock: TestClock):
+    assert turns(clock, 3) == Ok([1, 2, 3])
+
+test "a tick missed while the loop was busy is skipped"(clock: TestClock):
+    let start = clock.now()
+    var ticker = Ticker.every(clock, Duration.minutes(1))
+    clock.advance(Duration.seconds(150))
+    ticker.wait().expect("not cancelled")
+    assert ticker.missed == 2
+    assert clock.now() - start == Duration.minutes(3)

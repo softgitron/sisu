@@ -1,0 +1,15 @@
+$ sisu check habits.sisu
+error[E0301]: `/` divides floats; for integers use `//`, or convert to `f64` first
+  --> habits.sisu:5:16
+  |
+5 |     let mean = sum(scores) / len(scores)
+  |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: use `//` for integer division: `//`
+
+error[E0344]: a constant negative index does not compile; count from the end with `^`: `scores[^1]`
+  --> habits.sisu:6:38
+  |
+6 |     print("the last score is {scores[-1]}, the mean {mean}")
+  |                                      ^^
+  = fix: count from the end with `^`: `^1`
+

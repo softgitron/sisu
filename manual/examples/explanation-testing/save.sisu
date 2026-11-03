@@ -1,0 +1,11 @@
+# A note saved through the test's own file system, which the simulator
+# may fail in any way that the error sets of its methods allow.
+def save(fs: Fs, note: str) -> int:
+    var tries = 1
+    while fs.write_text("note.txt", note).is_err():
+        tries += 1
+    return tries
+
+test "a saved note can be read back"(fs: Fs):
+    assert save(fs, "sisu") >= 1
+    assert fs.read_to_string("note.txt") == Ok("sisu")

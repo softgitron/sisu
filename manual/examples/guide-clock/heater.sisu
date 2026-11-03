@@ -1,0 +1,33 @@
+# Code that reads the time takes a `Clock`, so a test can freeze it.
+
+## A sauna's heater, which turns itself off two hours after it starts.
+struct Heater:
+    started: DateTime? = None
+
+    ## Turns the heater on at the clock's time.
+    def start(mut self, clock: Clock):
+        self.started = Some(clock.now())
+
+    ## Whether the heater is on at the clock's time.
+    def is_on(self, clock: Clock) -> bool:
+        if let Some(t) = self.started:
+            return clock.now() - t < Duration.hours(2)
+        return False
+
+def main(sys: System):
+    var heater = Heater()
+    heater.start(sys.clock)
+    print("on: {heater.is_on(sys.clock)}")
+
+test "the heater is on for two hours":
+    let start = DateTime.parse("2026-11-03T17:00:00Z").expect("a time")
+    let clock = Clock.frozen_at(start)
+    var heater = Heater()
+    heater.start(clock)
+    clock.advance(Duration.minutes(119))
+    assert heater.is_on(clock)
+    clock.advance(Duration.minutes(1))
+    assert not heater.is_on(clock)
+
+test "a heater that never started is off"(clock: TestClock):
+    assert not Heater().is_on(clock)

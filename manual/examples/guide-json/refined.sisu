@@ -1,0 +1,13 @@
+# A field of a refinement type, which `json.decode` cannot read yet.
+import std.json
+
+## An hour of the evening, when the sauna is warm.
+type Hour = int where 17 <= self and self <= 21
+
+## A turn in the sauna, with the hour checked.
+struct Booking:
+    name: String
+    hour: Hour
+
+def main():
+    print(json.decode[Booking](r"""{"name": "Eero", "hour": 25}"""))

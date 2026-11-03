@@ -1,0 +1,2 @@
+test "a refused message is counted" ... ok
+1 passed, 0 failed, 0 blocked

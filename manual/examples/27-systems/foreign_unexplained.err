@@ -1,0 +1,6 @@
+warning[W0007]: this `extern` block has no `# safety:` comment above it saying why each obligation it takes on holds
+  --> foreign_unexplained.sisu:5:1
+  |
+5 | extern "C":
+  | ^^^^^^^^^^
+

@@ -1,0 +1,10 @@
+test "a share is never more than the whole" ... ok
+test "a share of a share is the share of the product" ... FAILED
+
+test "a share of a share is the share of the product" ... FAILED
+panic: the property failed for (1, 10) (case 2, shrunk 14 times)
+  the property returned False
+  at test "a share of a share is the share of the product" (properties.sisu:15:5)
+replay: sisu test --replay 1-4c84ac09fd75be02-0.0.1-t1-s0-r0-c1.10 properties.sisu
+
+1 passed, 1 failed, 0 blocked

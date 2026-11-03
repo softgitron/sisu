@@ -1,0 +1,4 @@
+test "a fake environment and seeded randomness" ... ok
+test "a file system in memory" ... ok
+test "a clock that moves when told" ... ok
+3 passed, 0 failed, 0 blocked

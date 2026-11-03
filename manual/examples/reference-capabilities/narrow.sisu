@@ -1,0 +1,13 @@
+# An attenuated capability refuses what the wider one allowed.
+def main(sys: System):
+    let data = sys.fs.restrict_to("data")
+    print(data.read_to_string("notes.txt"))
+    print(data.read_to_string("../secret.txt"))
+    let notes = data.read_only()
+    print(notes.write_text("notes.txt", "Forget the whisks."))
+    let net = sys.net.only_hosts(["weather.example.com"])
+    match net.connect("tracker.example.org", 443):
+        case Ok(_):
+            print("connected")
+        case Err(e):
+            print("refused: {e}")

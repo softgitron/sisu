@@ -1,0 +1,11 @@
+# A program whose transcript in `tests/` is one of its tests.
+error UsageError:
+    NoNames
+
+def main(sys: System) -> ! UsageError:
+    let names = sys.env.args()
+    if names.is_empty():
+        return Err(NoNames)
+    for name in names:
+        print("Hei, {name}!")
+    return Ok(())

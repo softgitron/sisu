@@ -1,0 +1,10 @@
+# A nested repetition, which makes a backtracking engine take time that
+# doubles with each character, matches here in time linear in the text.
+from std.regex import Regex, RegexError
+
+def main() -> ! RegexError:
+    let nested = Regex.new(r"^(a+)+$")?
+    for n in [10, 100, 1000]:
+        let text = "{"a".repeat(n)}!"
+        print("{n} a's and a !: {nested.is_match(text)}")
+    return Ok(())
