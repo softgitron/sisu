@@ -388,8 +388,8 @@ replay: sisu test --replay 1-9c5428daab4aad00-0.0.1-t1-s0-r0-c1.0.0.1.0.0.0 sort
 
 `arbitrary` makes cases of the program's own types too, structs and
 enums included: the compiler writes the generator from the type's
-fields and variants. Saving each failing case to try it first on the next run, as
-Python's Hypothesis does, is designed in
+fields and variants. Saving each failing case to try it first on the
+next run, as Python's Hypothesis does, is designed in
 [17](../../proposal/17-testing.md#property-based-testing-and-fuzzing)
 and not in the compiler.
 
@@ -422,7 +422,6 @@ ones are a strong test:
 <!-- file: examples/19-testing/switches.sisu -->
 ```sisu
 # `exhaustive` makes every small case, rather than random ones.
-@derive(Copy, Eq, Debug)
 enum Press:
     On
     Off
@@ -458,11 +457,11 @@ test "two toggles at the end change nothing" ... ok
 1 passed, 0 failed, 0 blocked
 ```
 
-`@derive(Copy, Eq, Debug)` gives `Press` what a generator's cases need.
 Each of the 121 cases is a list of up to four presses: one empty list,
 3 lists of one press, 9 of two, 27 of three and 81 of four. The test
 counts them to show it, since the closure can change `cases` as the
-closures of chapter 16 change what they borrow.
+closures of chapter 16 change what they borrow. The compiler writes the
+generator of `Press` from its variants, as it does for any enum.
 
 ## A clear function as the specification
 
@@ -597,8 +596,9 @@ test "a refused reminder is counted" ... ok
 
 A fake can be made for a trait whose methods all take `self` or `mut
 self`, have no type parameters of their own, and have no borrow or
-`Self` in their signatures; other traits get E0614 (`comptime.no-fake`). The same machinery gives `cap.Wrap` of chapter 18
-for your traits: an interceptor around a real implementation.
+`Self` in their signatures; other traits get E0614
+(`comptime.no-fake`). The same machinery gives `cap.Wrap` of chapter
+18 for your traits: an interceptor around a real implementation.
 
 > **From Python.** There is no `unittest.mock`. A mock replaces what a
 > function reached for by itself; a Sisu function is handed what it

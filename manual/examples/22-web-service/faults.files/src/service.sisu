@@ -1,0 +1,37 @@
+##! The bookings service: a sauna's evening turns over HTTP.
+import http
+import std.json
+from bookings.store import Booking, LoadError, load, save
+
+## The bookings, and the file system that keeps them.
+pub struct Service:
+    fs: Fs
+    bookings: Mutex[list[Booking]]
+
+    ## A service over the bookings that `fs` keeps.
+    pub def open(fs: Fs) -> Service ! LoadError:
+        return Ok(Service(fs=fs, bookings=Mutex(load(fs)?)))
+
+    ## Books the turn that the JSON `text` asks for.
+    def book(self, text: str) -> http.Response:
+        let wanted = json.decode[Booking](text) else as e:
+            return http.Response.text(400, "Bad Request", "{e}\n")
+        var guard = self.bookings.lock()
+        for b in guard.value:
+            if b.hour == wanted.hour:
+                return http.Response.text(409, "Conflict", "taken\n")
+        log.info("{wanted.name} books {wanted.hour}:00")
+        guard.value.push(wanted)
+        if let Err(e) = save(self.fs, guard.value):
+            _ = guard.value.pop()
+            return http.Response.text(503, "Service Unavailable", "{e}\n")
+        return http.Response.text(201, "Created", "booked\n")
+
+impl http.Handler for Service:
+    def handle(self, request: http.Request) -> http.Response:
+        if request.target != "/bookings":
+            return http.Response.text(404, "Not Found", "no such page\n")
+        if request.method == "POST":
+            return self.book(request.body.decode().or(String()))
+        let all = json.encode(self.bookings.lock().value)
+        return http.Response.ok(all.encode())

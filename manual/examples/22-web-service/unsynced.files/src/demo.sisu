@@ -1,0 +1,23 @@
+##! A short session with the service, for trying it without a client.
+import http
+from bookings.service import Service
+from std.net import Url, UrlError
+
+## Serves on `listener`, sends the server two bookings and a request for
+## the list through `net`, prints the answers, and stops the server.
+pub def session(
+    net: Net,
+    listener: Listener,
+    service: Service,
+) -> ! {UrlError, HttpError, NetError, TaskError}:
+    let url = Url.parse("http://localhost:{listener.port}/bookings")?
+    return task.scope do s:
+        s.spawn(() -> http.serve(listener, service))
+        for who in ["Aino", "Eero"]:
+            let body = "{{\"name\": \"{who}\", \"hour\": 18}}"
+            let answer = http.request(net, "POST", url, body.encode())?
+            print("{who}: {answer.status} {answer.reason}")
+        let all = http.get(net, url)?
+        print("bookings: {all.decode().or(String())}")
+        s.cancel()
+        return Ok(())

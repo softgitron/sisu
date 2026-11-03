@@ -119,6 +119,48 @@ pub(crate) fn set_lowering(l: Lowering) {
     LOWERING.store(u8::from(l == Lowering::Rust), std::sync::atomic::Ordering::Relaxed);
 }
 
+/// Which backend compiles LIR to machine code (decision 306): Cranelift,
+/// through the Rust translation, by default, or the x86-64 backend written
+/// in Sisu (`--backend=sisu`, `SISU_BACKEND=sisu`; `sisu2 x86`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Backend {
+    Cranelift,
+    Sisu,
+}
+
+impl Backend {
+    pub fn parse(name: &str) -> Option<Backend> {
+        match name {
+            "cranelift" => Some(Backend::Cranelift),
+            "sisu" => Some(Backend::Sisu),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Backend::Cranelift => "cranelift",
+            Backend::Sisu => "sisu",
+        }
+    }
+}
+
+/// The backend this process's command chose ([`set_backend`]).
+static BACKEND: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// The backend the running command chose.
+pub(crate) fn backend() -> Backend {
+    match BACKEND.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => Backend::Sisu,
+        _ => Backend::Cranelift,
+    }
+}
+
+/// Chooses the backend for the command this process runs.
+pub(crate) fn set_backend(b: Backend) {
+    BACKEND.store(u8::from(b == Backend::Sisu), std::sync::atomic::Ordering::Relaxed);
+}
+
 /// What the backend compiles: a SIR program, or the text of a LIR program
 /// (stage 2's lowering of one, decision 284).
 #[derive(Clone, Copy)]
@@ -140,12 +182,20 @@ pub(crate) fn build(code: Code<'_>, output: &Path, profile: Profile, host: &mut 
         Code::Lir(text) => {
             // A LIR program says its own profile.
             let profile = Profile::of(sisu_codegen::lir_is_release(text));
+            if backend() == Backend::Sisu {
+                return build_with_sisu(text, &runtime, output, host);
+            }
             let start = std::time::Instant::now();
             let compiled =
                 sisu_codegen::compile_lir(text, &sources()).map_err(|e| report(e, output, host))?;
             return link(&compiled, start.elapsed(), &runtime, output, profile, host);
         }
     };
+    // The Sisu backend compiles what stage 2 lowers (decision 306).
+    if backend() == Backend::Sisu && lowering() == Lowering::Rust {
+        host.stderr(&text(msg::NATIVE_BACKEND_LOWERING, &[]));
+        return Err(EXIT_ERROR);
+    }
     // `SISU_NATIVE_SURVEY=1`: every construct the backend does not compile
     // yet, rather than the first, as the Rust lowering, which lowers what
     // stage 2 lowers, finds them.
@@ -167,6 +217,9 @@ pub(crate) fn build(code: Code<'_>, output: &Path, profile: Profile, host: &mut 
     // back to the Rust lowering, which lowers only when it is asked for.
     if lowering() == Lowering::Stage2 {
         let lir = lower_with_stage2(prog, profile, output, host)?;
+        if backend() == Backend::Sisu {
+            return build_with_sisu(&lir, &runtime, output, host);
+        }
         let start = std::time::Instant::now();
         let compiled = sisu_codegen::compile_lir(&lir, &sources()).map_err(|e| report(e, output, host))?;
         return link(&compiled, start.elapsed(), &runtime, output, profile, host);
@@ -247,8 +300,73 @@ fn lower_with_stage2(
     lowered
 }
 
-/// Stage 2's `lir: not lowered: WHAT (in FUNCTION)`, reported as the
-/// backend's `D0103`: its exit status.
+/// A LIR program compiled by the x86-64 backend written in Sisu (`sisu2
+/// x86`, decision 306) into an object, which is linked at `output` with the
+/// runtime as Cranelift's objects are. A construct the backend does not
+/// compile is the program's `D0103`; another failure an internal error.
+fn build_with_sisu(lir: &str, runtime: &Path, output: &Path, host: &mut dyn Host) -> Result<(), i32> {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static N: AtomicU32 = AtomicU32::new(0);
+    let stage2 = crate::front::Stage2::ready(host)?;
+    let dir = std::env::temp_dir().join(format!(
+        "sisu-x86-{}-{}",
+        std::process::id(),
+        N.fetch_add(1, Ordering::Relaxed)
+    ));
+    let failed = |host: &mut dyn Host, status: i32, detail: String| {
+        host.stderr(&text(msg::NATIVE_SISU_FAILED, &[("status", status.to_string()), ("detail", detail)]));
+        EXIT_ICE
+    };
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        return Err(failed(host, 0, e.to_string()));
+    }
+    let (file, obj) = (dir.join("program.lir"), dir.join("program.o"));
+    let start = std::time::Instant::now();
+    let result = std::fs::write(&file, lir).map_err(|e| e.to_string()).and_then(|()| {
+        let mut cmd = std::process::Command::new(&stage2.exe);
+        cmd.arg("x86").arg(&file).arg("--output").arg(&obj).stdin(std::process::Stdio::null());
+        for v in crate::front::RUNTIME_VARS {
+            cmd.env_remove(v);
+        }
+        cmd.output().map_err(|e| e.to_string())
+    });
+    let compiled = match result {
+        Ok(out) if out.status.success() => std::fs::read(&obj).map_err(|e| failed(host, 0, e.to_string())),
+        Ok(out) => {
+            let err = String::from_utf8_lossy(&out.stderr).into_owned();
+            match err.lines().find_map(|l| l.strip_prefix("x86: not compiled: ")) {
+                Some(what) => Err(not_lowered(what, output, host)),
+                None => {
+                    let status = out.status.code().unwrap_or(-1);
+                    Err(failed(host, status, format!("{}{err}", String::from_utf8_lossy(&out.stdout))))
+                }
+            }
+        }
+        Err(e) => Err(failed(host, 0, e)),
+    };
+    let _ = std::fs::remove_dir_all(&dir);
+    let object = compiled?;
+    let generated = start.elapsed();
+    if let Some(dir) = output.parent()
+        && !dir.as_os_str().is_empty()
+    {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let start = std::time::Instant::now();
+    let linked = sisu_codegen::link(&object, runtime, output).map_err(|e| report(e, output, host));
+    if std::env::var_os("SISU_NATIVE_TIMES").is_some() {
+        host.stderr(&format!(
+            "native: compiled by the Sisu backend in {:.1} ms, linked in {:.1} ms\n",
+            generated.as_secs_f64() * 1e3,
+            start.elapsed().as_secs_f64() * 1e3
+        ));
+    }
+    linked
+}
+
+/// Stage 2's `lir: not lowered: WHAT (in FUNCTION)`, or its backend's `x86:
+/// not compiled: WHAT (in FUNCTION)`, reported as the backend's `D0103`:
+/// its exit status.
 fn not_lowered(what: &str, output: &Path, host: &mut dyn Host) -> i32 {
     let (what, function) = match what.rsplit_once(" (in ") {
         Some((w, f)) => (w, f.strip_suffix(')').unwrap_or(f)),

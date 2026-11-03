@@ -1,0 +1,845 @@
+##! LIR read back, for the backends that start from it (D-087, step 2):
+##! the text form of `docs/architecture.md` ("LIR", "The text form"), as
+##! `sisu-codegen/src/lir.rs` reads it, item by item, so that a backend
+##! compiles each function as it is read and keeps one function's
+##! operations at a time. Values are numbered as the text numbers them
+##! (the entry's parameters first), and each is given its type, which an
+##! operation's text says or implies.
+
+## Why the text is not LIR: the line (from 1) and what was wrong there.
+pub error LirReadError:
+    Bad(line: int, message: String)
+
+## The types of LIR's values.
+pub const T_I8: int = 0
+pub const T_I16: int = 1
+pub const T_I32: int = 2
+pub const T_I64: int = 3
+pub const T_F32: int = 4
+pub const T_F64: int = 5
+
+## The bytes of a value of the type.
+pub pure def type_bytes(t: int) -> int:
+    match t:
+        case 0:
+            return 1
+        case 1:
+            return 2
+        case 2 | 4:
+            return 4
+        case _:
+            return 8
+
+## Whether the type is a float's.
+pub pure def is_float(t: int) -> bool:
+    return t == T_F32 or t == T_F64
+
+## The binary operations (`iadd` and the others), the ones with a
+## constant, the unary ones, the overflow checks and the conversions.
+pub const B_IADD: int = 0
+pub const B_ISUB: int = 1
+pub const B_IMUL: int = 2
+pub const B_SDIV: int = 3
+pub const B_SREM: int = 4
+pub const B_ISHL: int = 5
+pub const B_SSHR: int = 6
+pub const B_BAND: int = 7
+pub const B_BOR: int = 8
+pub const B_BXOR: int = 9
+pub const B_BAND_NOT: int = 10
+pub const B_FADD: int = 11
+pub const B_FSUB: int = 12
+pub const B_FMUL: int = 13
+pub const B_FDIV: int = 14
+
+pub const U_INEG: int = 0
+pub const U_BNOT: int = 1
+pub const U_FNEG: int = 2
+
+pub const O_SADD: int = 0
+pub const O_SSUB: int = 1
+pub const O_SMUL: int = 2
+
+pub const C_UEXTEND: int = 0
+pub const C_SEXTEND: int = 1
+pub const C_IREDUCE: int = 2
+pub const C_BITCAST: int = 3
+pub const C_FPROMOTE: int = 4
+pub const C_FDEMOTE: int = 5
+
+## A load's kind past the types: `uload8` and `sload8`, to 64 bits.
+pub const L_U8: int = 6
+pub const L_S8: int = 7
+
+## The integer comparisons, by their names' order: `eq ne slt sle sgt sge
+## ult ule ugt uge`; the float ones: `eq ne lt le gt ge`.
+pub const CC_EQ: int = 0
+pub const CC_NE: int = 1
+pub const CC_SLT: int = 2
+pub const CC_SLE: int = 3
+pub const CC_SGT: int = 4
+pub const CC_SGE: int = 5
+pub const CC_ULT: int = 6
+pub const CC_ULE: int = 7
+pub const CC_UGT: int = 8
+pub const CC_UGE: int = 9
+
+## How a function's frame counts toward the probe reserve (decision 234).
+pub const F_PROBED: int = 0
+pub const F_UNPROBED: int = 1
+pub const F_OUTSIDE: int = 2
+
+## A function's linkage: the program's, the runtime's (or C's), or C's
+## `main`.
+pub const K_LOCAL: int = 0
+pub const K_IMPORT: int = 1
+pub const K_EXPORT: int = 2
+
+## One operation of a function, in the order written; `v` numbers are the
+## values it uses, the values it defines being the next numbers.
+pub enum Op:
+    Block(int, bool)
+    Loc(int, int)
+    Iconst(int, int)
+    Bin(int, int, int)
+    BinImm(int, int, int)
+    Un(int, int)
+    Icmp(int, int, int)
+    IcmpImm(int, int, int)
+    Fcmp(int, int, int)
+    Ovf(int, int, int)
+    Select(int, int, int)
+    Conv(int, int, int)
+    Load(int, int, int)
+    Store(int, int, int)
+    StackAddr(int)
+    StackLoad(int)
+    StackStore(int, int)
+    SymbolValue(int)
+    FuncAddr(String)
+    GetSp
+    Call(String, list[int], int)
+    CallIndirect(int, int, list[int], int)
+    Memcpy(int, int, int)
+    Use(int)
+    Def(int, int)
+    Param(int)
+    ProbeReserve
+    Jump(int, list[int])
+    Brif(int, int, list[int], int, list[int])
+    Switch(int, int, list[(int, int)])
+    Return(list[int])
+    Trap(int)
+
+## A signature: Sisu's convention with `n` arguments (`n + 1` addresses
+## and the status), or the types of the parameters and of the results.
+pub struct Sig:
+    pub params: list[int]
+    pub results: list[int]
+
+pub pure def sisu_sig(n: int) -> Sig:
+    var params: list[int] = []
+    for _ in range(n + 1):
+        params.push(T_I64)
+    return Sig(params=params, results=[T_I8])
+
+## A named local, for the debug information.
+pub struct LirLocal:
+    pub name: String
+    pub ty: int
+    pub slot: int
+    pub indirect: bool
+    pub param: bool
+    pub line: int?
+
+## A function as LIR defines it: its frame, then its operations with the
+## type of every value they define.
+pub struct LirFunc:
+    pub symbol: String
+    pub frame: int
+    pub name: String
+    pub source: int?
+    pub line: int
+    pub slots: list[int]
+    pub vars: int
+    pub locals: list[LirLocal]
+    pub ops: list[Op]
+    ## The type of each value, by number.
+    pub types: list[int]
+
+## An item of the file, in the order of the object.
+pub enum Item:
+    ## `data dN import NAME`.
+    Import(String)
+    ## `data dN [align A] ...`: the bytes, the alignment, and the words
+    ## holding functions' addresses (offset, symbol).
+    Data(list[int], int, list[(int, String)])
+    Declare(String, int, Sig)
+    Function(LirFunc)
+    ## `source N "PATH"`.
+    Source(String)
+    ## The end of the items (`types`, `stats`, or the file's end).
+    End
+
+## A cursor over one line: the bytes from `pos` up to `end`.
+view struct Cur:
+    s: str
+    pos: int
+    end: int
+
+## Why a line could not be read.
+error LineError:
+    Wrong(message: String)
+
+pure def wrong[T](message: str) -> T ! LineError:
+    return Err(Wrong(message=message.to_string()))
+
+pure def is_digit(b: int) -> bool:
+    return b >= 48 and b <= 57
+
+## A byte of a word: letters, digits and `_ $ . # -`.
+pure def is_word(b: int) -> bool:
+    return (
+        is_digit(b)
+            or (b >= 97 and b <= 122)
+            or (b >= 65 and b <= 90)
+            or b == 95
+            or b == 36
+            or b == 46
+            or b == 35
+            or b == 45
+    )
+
+impl Cur:
+    pure def byte(self, i: int) -> int:
+        return self.s.byte_at(i).to_int()
+
+    pure def rest(self) -> str from self:
+        return self.s.byte_slice(self.pos, self.end)
+
+    pure def ws(mut self):
+        while self.pos < self.end and self.byte(self.pos) == 32:
+            self.pos += 1
+
+    pure def at_end(mut self) -> bool:
+        self.ws()
+        return self.pos >= self.end
+
+    pure def starts(self, t: str) -> bool:
+        let n = t.byte_len()
+        if self.pos + n > self.end:
+            return False
+        for i in range(n):
+            if self.byte(self.pos + i) != t.byte_at(i).to_int():
+                return False
+        return True
+
+    pure def eat(mut self, t: str) -> bool:
+        self.ws()
+        if self.starts(t):
+            self.pos += t.byte_len()
+            return True
+        return False
+
+    ## A keyword followed by a space or the end of the line.
+    pure def keyword(mut self, t: str) -> bool:
+        self.ws()
+        if not self.starts(t):
+            return False
+        let after = self.pos + t.byte_len()
+        if after < self.end and self.byte(after) != 32:
+            return False
+        self.pos = after
+        return True
+
+    pure def expect(mut self, t: str) -> () ! LineError:
+        if self.eat(t):
+            return Ok(())
+        return wrong("expected `{t}` at `{self.rest()}`")
+
+    pure def word(mut self) -> String ! LineError:
+        self.ws()
+        let start = self.pos
+        while self.pos < self.end and is_word(self.byte(self.pos)):
+            self.pos += 1
+        if start == self.pos:
+            return wrong("expected a word at `{self.rest()}`")
+        return Ok(self.s.byte_slice(start, self.pos).to_string())
+
+    pure def int(mut self) -> int ! LineError:
+        self.ws()
+        let start = self.pos
+        var negative = False
+        if self.pos < self.end and self.byte(self.pos) == 45:
+            negative = True
+            self.pos += 1
+        let digits = self.pos
+        # Accumulated negatively, so that the least `int` fits.
+        var n = 0
+        while self.pos < self.end and is_digit(self.byte(self.pos)):
+            let d = self.byte(self.pos) - 48
+            if n < (-9223372036854775807 - 1 + d) // 10:
+                return wrong("expected an integer at `{self.s.byte_slice(start, self.end)}`")
+            n = n * 10 - d
+            self.pos += 1
+        if self.pos == digits:
+            return wrong("expected an integer at `{self.s.byte_slice(start, self.end)}`")
+        if negative:
+            return Ok(n)
+        if n == -9223372036854775807 - 1:
+            return wrong("expected an integer at `{self.s.byte_slice(start, self.end)}`")
+        return Ok(-n)
+
+    ## `PREFIX` and a number: `v12`, `b3`, `s0`.
+    pure def numbered(mut self, prefix: int) -> int ! LineError:
+        self.ws()
+        if self.pos >= self.end or self.byte(self.pos) != prefix:
+            return wrong("expected a numbered name at `{self.rest()}`")
+        self.pos += 1
+        return self.int()
+
+    pure def value(mut self) -> int ! LineError:
+        return self.numbered(118)
+
+    ## Quoted bytes: `\\`, `\"` and `\xHH` escapes.
+    pure def bytes(mut self) -> list[int] ! LineError:
+        self.expect("\"")?
+        var out: list[int] = []
+        while True:
+            if self.pos >= self.end:
+                return wrong("unterminated text")
+            let b = self.byte(self.pos)
+            self.pos += 1
+            if b == 34:
+                return Ok(out)
+            if b != 92:
+                out.push(b)
+                continue
+            if self.pos >= self.end:
+                return wrong("bad escape")
+            let e = self.byte(self.pos)
+            self.pos += 1
+            if e == 92 or e == 34:
+                out.push(e)
+            elif e == 120 and self.pos + 2 <= self.end:
+                out.push(hex(self.byte(self.pos)) * 16 + hex(self.byte(self.pos + 1)))
+                self.pos += 2
+            else:
+                return wrong("bad escape")
+
+    pure def text(mut self) -> String ! LineError:
+        let bs = self.bytes()?
+        var out = String.new()
+        for b in bs:
+            out.push_char(char.from_code(b) ?? '?')
+        return Ok(out)
+
+    ## `(v1, v2)` after a block or a callee, if next.
+    pure def args(mut self) -> list[int] ! LineError:
+        var out: list[int] = []
+        if self.pos >= self.end or self.byte(self.pos) != 40:
+            return Ok(out)
+        self.pos += 1
+        if self.eat(")"):
+            return Ok(out)
+        while True:
+            out.push(self.value()?)
+            if self.eat(")"):
+                return Ok(out)
+            self.expect(",")?
+
+    ## A block and the values it is given: `b4` or `b4(v1, v2)`.
+    pure def target(mut self) -> (int, list[int]) ! LineError:
+        let b = self.numbered(98)?
+        return Ok((b, self.args()?))
+
+    pure def ty(mut self) -> int ! LineError:
+        let w = self.word()?
+        let t = type_named(w) else:
+            return wrong("unknown type `{w}`")
+        return Ok(t)
+
+    ## `(T, ...)`: types.
+    pure def type_list(mut self) -> list[int] ! LineError:
+        self.expect("(")?
+        var out: list[int] = []
+        if self.eat(")"):
+            return Ok(out)
+        while True:
+            out.push(self.ty()?)
+            if self.eat(")"):
+                return Ok(out)
+            self.expect(",")?
+
+pure def hex(b: int) -> int:
+    if b >= 97:
+        return b - 87
+    if b >= 65:
+        return b - 55
+    return b - 48
+
+pub pure def type_named(w: str) -> int?:
+    return match w:
+        case "i8": Some(T_I8)
+        case "i16": Some(T_I16)
+        case "i32": Some(T_I32)
+        case "i64": Some(T_I64)
+        case "f32": Some(T_F32)
+        case "f64": Some(T_F64)
+        case _: None
+
+pure def int_cc(w: str) -> int?:
+    return match w:
+        case "eq": Some(CC_EQ)
+        case "ne": Some(CC_NE)
+        case "slt": Some(CC_SLT)
+        case "sle": Some(CC_SLE)
+        case "sgt": Some(CC_SGT)
+        case "sge": Some(CC_SGE)
+        case "ult": Some(CC_ULT)
+        case "ule": Some(CC_ULE)
+        case "ugt": Some(CC_UGT)
+        case "uge": Some(CC_UGE)
+        case _: None
+
+pure def float_cc(w: str) -> int?:
+    return match w:
+        case "eq": Some(CC_EQ)
+        case "ne": Some(CC_NE)
+        case "lt": Some(CC_SLT)
+        case "le": Some(CC_SLE)
+        case "gt": Some(CC_SGT)
+        case "ge": Some(CC_SGE)
+        case _: None
+
+pure def binary_named(w: str) -> int?:
+    return match w:
+        case "iadd": Some(B_IADD)
+        case "isub": Some(B_ISUB)
+        case "imul": Some(B_IMUL)
+        case "sdiv": Some(B_SDIV)
+        case "srem": Some(B_SREM)
+        case "ishl": Some(B_ISHL)
+        case "sshr": Some(B_SSHR)
+        case "band": Some(B_BAND)
+        case "bor": Some(B_BOR)
+        case "bxor": Some(B_BXOR)
+        case "band_not": Some(B_BAND_NOT)
+        case "fadd": Some(B_FADD)
+        case "fsub": Some(B_FSUB)
+        case "fmul": Some(B_FMUL)
+        case "fdiv": Some(B_FDIV)
+        case _: None
+
+## The reader: where it is in the text, and what it knows of the program
+## so far (the signatures declared, the number of the next data).
+pub struct LirReader:
+    pos: int
+    line_no: int
+    data: int
+    pub release: bool
+    pub sigs: dict[String, Sig]
+
+impl LirReader:
+    pub pure def new() -> LirReader:
+        return LirReader(pos=0, line_no=0, data=0, release=False, sigs={})
+
+    ## The next line of `text`, trimmed, or `None` at the end: its start
+    ## and end.
+    pure def next_line(mut self, text: str) -> (int, int)?:
+        let n = text.byte_len()
+        while self.pos < n:
+            let start = self.pos
+            var i = start
+            while i < n and text.byte_at(i).to_int() != 10:
+                i += 1
+            self.pos = if i < n: i + 1 else: n
+            self.line_no += 1
+            var s = start
+            var e = i
+            while s < e and is_blank(text.byte_at(s).to_int()):
+                s += 1
+            while e > s and is_blank(text.byte_at(e - 1).to_int()):
+                e -= 1
+            if s == e or text.byte_at(s).to_int() == 35:
+                continue
+            return Some((s, e))
+        return None
+
+    ## The next item of `text`.
+    pub pure def next_item(mut self, text: str) -> Item ! LirReadError:
+        while True:
+            let (s, e) = self.next_line(text) else:
+                return Ok(Item.End)
+            var c = Cur(s=text, pos=s, end=e)
+            match self.header_line(text, mut c):
+                case Ok(Some(item)):
+                    return Ok(item)
+                case Ok(None):
+                    continue
+                case Err(Wrong(message)):
+                    return Err(Bad(line=self.line_no, message=message))
+
+    pure def header_line(mut self, text: str, mut c: Cur) -> Item? ! LineError:
+        if c.keyword("lir"):
+            if c.int()? != 1:
+                return wrong("LIR version is not 1")
+            return Ok(None)
+        if c.keyword("profile"):
+            self.release = c.word()? == "release"
+            return Ok(None)
+        if c.keyword("source"):
+            _ = c.int()?
+            return Ok(Some(Item.Source(c.text()?)))
+        if c.keyword("data"):
+            let d = c.numbered(100)?
+            if d != self.data:
+                return wrong("data must be numbered in order: `d{d}`, expected `d{self.data}`")
+            self.data += 1
+            if c.keyword("import"):
+                return Ok(Some(Item.Import(c.word()?)))
+            var align = 1
+            if c.keyword("align"):
+                align = c.int()?
+            var funcs: list[(int, String)] = []
+            var bytes: list[int] = []
+            if c.keyword("bytes"):
+                bytes = c.bytes()?
+            elif c.keyword("u32"):
+                while not c.at_end():
+                    let w = c.int()?
+                    bytes.push(w & 255)
+                    bytes.push((w >> 8) & 255)
+                    bytes.push((w >> 16) & 255)
+                    bytes.push((w >> 24) & 255)
+            elif c.keyword("zeros"):
+                let n = c.int()?
+                for _ in range(n):
+                    bytes.push(0)
+                while c.keyword("func"):
+                    let off = c.int()?
+                    funcs.push((off, c.word()?))
+            else:
+                return wrong("unknown data `{c.rest()}`")
+            return Ok(Some(Item.Data(bytes, align, funcs)))
+        if c.keyword("declare"):
+            let symbol = c.word()?
+            let w = c.word()?
+            var linkage = -1
+            if w == "local":
+                linkage = K_LOCAL
+            elif w == "import":
+                linkage = K_IMPORT
+            elif w == "export":
+                linkage = K_EXPORT
+            else:
+                return wrong("unknown linkage `{w}`")
+            var sig = Sig(params=[], results=[])
+            if c.keyword("sisu"):
+                sig = sisu_sig(c.int()?)
+            else:
+                let params = c.type_list()?
+                c.expect("->")?
+                let results = c.type_list()?
+                sig = Sig(params=params, results=results)
+            _ = self.sigs.insert(symbol.copy(), sig.copy())
+            return Ok(Some(Item.Declare(symbol, linkage, sig)))
+        if c.keyword("function"):
+            return Ok(Some(Item.Function(self.function(text, mut c)?)))
+        if c.keyword("types") or c.keyword("stats") or c.keyword("type"):
+            return Ok(Some(Item.End))
+        return wrong("unknown line `{c.rest()}`")
+
+    ## A function: its head is read, then its lines up to `end`.
+    pure def function(mut self, text: str, mut c: Cur) -> LirFunc ! LineError:
+        let symbol = c.word()?
+        let fw = c.word()?
+        var frame = -1
+        if fw == "probed":
+            frame = F_PROBED
+        elif fw == "unprobed":
+            frame = F_UNPROBED
+        elif fw == "outside":
+            frame = F_OUTSIDE
+        else:
+            return wrong("unknown frame `{fw}`")
+        c.expect("name")?
+        let name = c.text()?
+        var source: int? = None
+        var line = 0
+        if c.keyword("source"):
+            source = Some(c.int()?)
+            c.expect("line")?
+            line = c.int()?
+        let sig = self.sigs.get(symbol.copy()) else:
+            return wrong("`{symbol}` is not declared")
+        var f = LirFunc(
+            symbol=symbol,
+            frame=frame,
+            name=name,
+            source=source,
+            line=line,
+            slots=[],
+            vars=0,
+            locals=[],
+            ops=[],
+            types=sig.params.copy(),
+        )
+        while True:
+            let (s, e) = self.next_line(text) else:
+                return wrong("a function without its `end`")
+            var lc = Cur(s=text, pos=s, end=e)
+            if lc.keyword("end"):
+                return Ok(f)
+            self.function_line(mut lc, mut f)?
+
+    pure def function_line(mut self, mut c: Cur, mut f: LirFunc) -> () ! LineError:
+        if c.keyword("slot"):
+            _ = c.numbered(115)?
+            f.slots.push(c.int()?)
+            return Ok(())
+        if c.keyword("vars"):
+            f.vars = c.int()?
+            return Ok(())
+        if c.keyword("local"):
+            let name = c.text()?
+            let ty = c.numbered(116)?
+            let slot = c.numbered(115)?
+            var l = LirLocal(name=name, ty=ty, slot=slot, indirect=False, param=False, line=None)
+            while not c.at_end():
+                if c.keyword("indirect"):
+                    l.indirect = True
+                elif c.keyword("param"):
+                    l.param = True
+                elif c.keyword("line"):
+                    l.line = Some(c.int()?)
+                else:
+                    return wrong("unknown local `{c.rest()}`")
+            f.locals.push(l)
+            return Ok(())
+        if c.keyword("block"):
+            let b = c.numbered(98)?
+            let cold = c.keyword("cold")
+            f.ops.push(Op.Block(b, cold))
+            return Ok(())
+        # The values the line defines, if it starts with them.
+        var defined = 0
+        if c.starts("v"):
+            while True:
+                let v = c.value()?
+                if v != len(f.types) + defined:
+                    return wrong("values must be numbered in order: `v{v}`")
+                defined += 1
+                if c.eat("="):
+                    break
+                c.expect(",")?
+        let w = c.word()?
+        let (op, ts) = self.operation(mut c, w, f.types)?
+        if len(ts) != defined:
+            return wrong("`{w}` defines {len(ts)} values, not {defined}")
+        for t in ts:
+            f.types.push(t)
+        f.ops.push(op)
+        if not c.at_end():
+            return wrong("unexpected `{c.rest()}`")
+        return Ok(())
+
+    ## One operation and the types of the values it defines.
+    pure def operation(
+        mut self, mut c: Cur, w: str, types: list[int]
+    ) -> (Op, list[int]) ! LineError:
+        let (name, suffix) = split_suffix(w)
+        if let Some(k) = binary_named(name):
+            let a = c.value()?
+            c.expect(",")?
+            let b = c.value()?
+            return Ok((Op.Bin(k, a, b), [type_at(types, a)]))
+        match name:
+            case "loc":
+                let l = c.int()?
+                return Ok((Op.Loc(l, c.int()?), []))
+            case "iconst":
+                let t = type_named(suffix) else:
+                    return wrong("bad type `{suffix}`")
+                return Ok((Op.Iconst(t, c.int()?), [t]))
+            case "iadd_imm" | "imul_imm" | "bxor_imm" | "bor_imm":
+                let k = match name:
+                    case "iadd_imm": B_IADD
+                    case "imul_imm": B_IMUL
+                    case "bxor_imm": B_BXOR
+                    case _: B_BOR
+                let a = c.value()?
+                c.expect(",")?
+                return Ok((Op.BinImm(k, a, c.int()?), [type_at(types, a)]))
+            case "ineg" | "bnot" | "fneg":
+                let k = match name:
+                    case "ineg": U_INEG
+                    case "bnot": U_BNOT
+                    case _: U_FNEG
+                let a = c.value()?
+                return Ok((Op.Un(k, a), [type_at(types, a)]))
+            case "icmp":
+                let cc = int_cc(suffix) else:
+                    return wrong("bad condition `{suffix}`")
+                let a = c.value()?
+                c.expect(",")?
+                return Ok((Op.Icmp(cc, a, c.value()?), [T_I8]))
+            case "icmp_imm":
+                let cc = int_cc(suffix) else:
+                    return wrong("bad condition `{suffix}`")
+                let a = c.value()?
+                c.expect(",")?
+                return Ok((Op.IcmpImm(cc, a, c.int()?), [T_I8]))
+            case "fcmp":
+                let cc = float_cc(suffix) else:
+                    return wrong("bad condition `{suffix}`")
+                let a = c.value()?
+                c.expect(",")?
+                return Ok((Op.Fcmp(cc, a, c.value()?), [T_I8]))
+            case "sadd_overflow" | "ssub_overflow" | "smul_overflow":
+                let k = match name:
+                    case "sadd_overflow": O_SADD
+                    case "ssub_overflow": O_SSUB
+                    case _: O_SMUL
+                let a = c.value()?
+                c.expect(",")?
+                let b = c.value()?
+                return Ok((Op.Ovf(k, a, b), [type_at(types, a), T_I8]))
+            case "select":
+                let cv = c.value()?
+                c.expect(",")?
+                let a = c.value()?
+                c.expect(",")?
+                let b = c.value()?
+                return Ok((Op.Select(cv, a, b), [type_at(types, a)]))
+            case "uextend" | "sextend" | "ireduce" | "bitcast" | "fpromote" | "fdemote":
+                let k = match name:
+                    case "uextend": C_UEXTEND
+                    case "sextend": C_SEXTEND
+                    case "ireduce": C_IREDUCE
+                    case "bitcast": C_BITCAST
+                    case "fpromote": C_FPROMOTE
+                    case _: C_FDEMOTE
+                let t = type_named(suffix) else:
+                    return wrong("bad type `{suffix}`")
+                return Ok((Op.Conv(k, t, c.value()?), [t]))
+            case "load" | "uload8" | "sload8":
+                var k = L_U8
+                var t = T_I64
+                if name == "sload8":
+                    k = L_S8
+                elif name == "load":
+                    let lt = type_named(suffix) else:
+                        return wrong("bad type `{suffix}`")
+                    k = lt
+                    t = lt
+                let a = c.value()?
+                c.expect(",")?
+                return Ok((Op.Load(k, a, c.int()?), [t]))
+            case "store":
+                let v = c.value()?
+                c.expect(",")?
+                let a = c.value()?
+                c.expect(",")?
+                return Ok((Op.Store(v, a, c.int()?), []))
+            case "stack_addr":
+                return Ok((Op.StackAddr(c.numbered(115)?), [T_I64]))
+            case "stack_load":
+                return Ok((Op.StackLoad(c.numbered(115)?), [T_I64]))
+            case "stack_store":
+                let v = c.value()?
+                c.expect(",")?
+                return Ok((Op.StackStore(v, c.numbered(115)?), []))
+            case "symbol_value":
+                return Ok((Op.SymbolValue(c.numbered(100)?), [T_I64]))
+            case "func_addr":
+                return Ok((Op.FuncAddr(c.word()?), [T_I64]))
+            case "get_stack_pointer":
+                return Ok((Op.GetSp, [T_I64]))
+            case "call":
+                let symbol = c.word()?
+                let args = c.args()?
+                let sig = self.sigs.get(symbol.copy()) else:
+                    return wrong("`{symbol}` is not declared")
+                let n = len(sig.results)
+                return Ok((Op.Call(symbol, args, n), sig.results.copy()))
+            case "call_indirect":
+                let n = c.int()?
+                c.expect(",")?
+                let f = c.value()?
+                let args = c.args()?
+                return Ok((Op.CallIndirect(n, f, args, 1), [T_I8]))
+            case "memcpy":
+                let d = c.value()?
+                c.expect(",")?
+                let s = c.value()?
+                c.expect(",")?
+                return Ok((Op.Memcpy(d, s, c.value()?), []))
+            case "use":
+                return Ok((Op.Use(c.numbered(120)?), [T_I64]))
+            case "def":
+                let x = c.numbered(120)?
+                c.expect(",")?
+                return Ok((Op.Def(x, c.value()?), []))
+            case "param":
+                return Ok((Op.Param(c.numbered(98)?), [T_I64]))
+            case "probe_reserve":
+                return Ok((Op.ProbeReserve, [T_I64]))
+            case "jump":
+                let (b, args) = c.target()?
+                return Ok((Op.Jump(b, args), []))
+            case "brif":
+                let cv = c.value()?
+                c.expect(",")?
+                let (a, aargs) = c.target()?
+                c.expect(",")?
+                let (b, bargs) = c.target()?
+                return Ok((Op.Brif(cv, a, aargs, b, bargs), []))
+            case "switch":
+                let v = c.value()?
+                c.expect(",")?
+                let d = c.numbered(98)?
+                c.expect(",")?
+                c.expect("[")?
+                var cases: list[(int, int)] = []
+                if not c.eat("]"):
+                    while True:
+                        let k = c.int()?
+                        let b = c.numbered(98)?
+                        cases.push((k, b))
+                        if c.eat("]"):
+                            break
+                        c.expect(",")?
+                c.expect("made")?
+                _ = c.int()?
+                return Ok((Op.Switch(v, d, cases), []))
+            case "return":
+                var vs: list[int] = []
+                if not c.at_end():
+                    while True:
+                        vs.push(c.value()?)
+                        if not c.eat(","):
+                            break
+                return Ok((Op.Return(vs), []))
+            case "trap":
+                return Ok((Op.Trap(c.int()?), []))
+            case _:
+                return wrong("unknown operation `{w}`")
+
+## The type of value `v`, as far as `types` says.
+pure def type_at(types: list[int], v: int) -> int:
+    if v >= 0 and v < len(types):
+        return types[v]
+    return T_I64
+
+pure def is_blank(b: int) -> bool:
+    return b == 32 or b == 9 or b == 13
+
+## `name.SUFFIX` split at its last dot.
+pure def split_suffix(w: str) -> (str, str) from w:
+    var i = w.byte_len() - 1
+    while i >= 0:
+        if w.byte_at(i).to_int() == 46:
+            return (w.byte_slice(0, i), w.byte_slice(i + 1, w.byte_len()))
+        i -= 1
+    return (w, "")

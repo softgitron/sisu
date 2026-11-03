@@ -1,0 +1,19 @@
+$ sisu test notes.sisu
+test "a note outlives a crash" ... FAILED
+test "every note outlives it" ... FAILED
+
+test "a note outlives a crash" ... FAILED
+panic: assertion failed: fs.read_to_string("notes/sauna") == Ok("heat it at six")
+  left:  Err(NotFound(path="notes/sauna"))
+  right: Ok("heat it at six")
+  at test "a note outlives a crash" (notes.sisu:26:5)
+replay: sisu test --replay 1-ed1d9d8a570fb83d-0.0.1-t0-s0-r0 notes.sisu
+
+test "every note outlives it" ... FAILED
+panic: assertion failed: fs.list_dir("notes").map((paths) -> len(paths)) == Ok(2)
+  left:  Err(NotFound(path="notes"))
+  right: Ok(2)
+  at test "every note outlives it" (notes.sisu:35:5)
+replay: sisu test --replay 1-ed1d9d8a570fb83d-0.0.1-t1-s0-r0 notes.sisu
+
+0 passed, 2 failed, 0 blocked

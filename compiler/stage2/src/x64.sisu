@@ -1,0 +1,384 @@
+##! x86-64 machine code as the Sisu backend writes it (D-087, step 2): a
+##! buffer of bytes and the encodings of the instructions it uses, each
+##! with its REX prefix, ModRM byte, SIB byte and displacement as the
+##! architecture lays them out. Registers are numbered as the encoding
+##! numbers them (`rax` 0 to `r15` 15, `xmm0` 0 to `xmm15` 15); a memory
+##! operand is a base register and a displacement, or the instruction
+##! pointer and a 32-bit displacement a relocation fills.
+
+pub const RAX: int = 0
+pub const RCX: int = 1
+pub const RDX: int = 2
+pub const RBX: int = 3
+pub const RSP: int = 4
+pub const RBP: int = 5
+pub const RSI: int = 6
+pub const RDI: int = 7
+pub const R8: int = 8
+pub const R9: int = 9
+pub const R10: int = 10
+pub const R11: int = 11
+pub const R12: int = 12
+pub const R13: int = 13
+pub const R14: int = 14
+pub const R15: int = 15
+
+## The conditions of `jcc`, `setcc` and `cmovcc`, by their encoding.
+pub const X_O: int = 0
+pub const X_B: int = 2
+pub const X_AE: int = 3
+pub const X_E: int = 4
+pub const X_NE: int = 5
+pub const X_BE: int = 6
+pub const X_A: int = 7
+pub const X_P: int = 10
+pub const X_NP: int = 11
+pub const X_L: int = 12
+pub const X_GE: int = 13
+pub const X_LE: int = 14
+pub const X_G: int = 15
+
+## The arithmetic of opcodes `01` to `39` and of `81`/`83`: the first's
+## opcode (`op r/m, r`) and the second's extension.
+pub const A_ADD: int = 0
+pub const A_OR: int = 1
+pub const A_AND: int = 4
+pub const A_SUB: int = 5
+pub const A_XOR: int = 6
+pub const A_CMP: int = 7
+
+## The unary group of opcode `F7` and the shifts of `D3`, by extension.
+pub const U_NOT: int = 2
+pub const U_NEG: int = 3
+pub const U_IDIV: int = 7
+pub const S_SHL: int = 4
+pub const S_SAR: int = 7
+
+## Whether `x` fits a sign-extended byte, or a sign-extended 32-bit word.
+pub pure def fits8(x: int) -> bool:
+    return x >= -128 and x <= 127
+
+pub pure def fits32(x: int) -> bool:
+    return x >= -2147483648 and x <= 2147483647
+
+## A function's or a section's bytes as they are written.
+pub struct Code:
+    pub bytes: list[int]
+
+impl Code:
+    pub pure def new() -> Code:
+        return Code(bytes=[])
+
+    pub pure def pos(self) -> int:
+        return len(self.bytes)
+
+    pub pure def byte(mut self, b: int):
+        self.bytes.push(b & 255)
+
+    pub pure def u16(mut self, x: int):
+        self.bytes.push(x & 255)
+        self.bytes.push((x >> 8) & 255)
+
+    pub pure def u32(mut self, x: int):
+        self.bytes.push(x & 255)
+        self.bytes.push((x >> 8) & 255)
+        self.bytes.push((x >> 16) & 255)
+        self.bytes.push((x >> 24) & 255)
+
+    pub pure def u64(mut self, x: int):
+        self.u32(x & 4294967295)
+        self.u32((x >> 32) & 4294967295)
+
+    ## The 32-bit word at `at` replaced by `x`.
+    pub pure def patch32(mut self, at: int, x: int):
+        self.bytes[at] = x & 255
+        self.bytes[at + 1] = (x >> 8) & 255
+        self.bytes[at + 2] = (x >> 16) & 255
+        self.bytes[at + 3] = (x >> 24) & 255
+
+    ## Zero bytes up to a multiple of `align`.
+    pub pure def align(mut self, align: int, fill: int):
+        while len(self.bytes) % align != 0:
+            self.bytes.push(fill)
+
+    pub pure def append(mut self, other: list[int]):
+        for b in other:
+            self.bytes.push(b)
+
+    # ----------------------------------------------------------- encoding
+
+    ## A mandatory prefix (`66`, `F2`, `F3`, or 0 for none), then REX when
+    ## the operands need one: `w` for 64 bits, the high bits of `reg`,
+    ## `index` and `base`, and, for a byte operand (`byte`), any of `spl`,
+    ## `bpl`, `sil` and `dil`, which only a REX names.
+    pure def prefix_rex(mut self, prefix: int, w: bool, reg: int, base: int, byte: bool):
+        if prefix != 0:
+            self.byte(prefix)
+        var rex = 0
+        if w:
+            rex = rex | 8
+        if reg >= 8:
+            rex = rex | 4
+        if base >= 8:
+            rex = rex | 1
+        let low_byte = byte and ((reg >= 4 and reg < 8) or (base >= 4 and base < 8))
+        if rex != 0 or low_byte:
+            self.byte(64 | rex)
+
+    pure def opcode(mut self, op: int):
+        if op >= 65536:
+            self.byte(op >> 16)
+        if op >= 256:
+            self.byte(op >> 8)
+        self.byte(op)
+
+    ## `op reg, rm` with both registers.
+    pub pure def rr(mut self, prefix: int, w: bool, op: int, reg: int, rm: int, byte: bool):
+        self.prefix_rex(prefix, w, reg, rm, byte)
+        self.opcode(op)
+        self.byte(192 | ((reg & 7) << 3) | (rm & 7))
+
+    ## `op reg, [base + disp]`.
+    pub pure def rm(
+        mut self, prefix: int, w: bool, op: int, reg: int, base: int, disp: int, byte: bool
+    ):
+        self.prefix_rex(prefix, w, reg, base, byte)
+        self.opcode(op)
+        let low = base & 7
+        var mode = 2
+        if disp == 0 and low != 5:
+            mode = 0
+        elif fits8(disp):
+            mode = 1
+        self.byte((mode << 6) | ((reg & 7) << 3) | low)
+        if low == 4:
+            self.byte(36)
+        if mode == 1:
+            self.byte(disp)
+        elif mode == 2:
+            self.u32(disp)
+
+    ## `op reg, [rip + disp32]`: where the displacement is, which the
+    ## caller fills or relocates.
+    pub pure def rip(mut self, prefix: int, w: bool, op: int, reg: int) -> int:
+        self.prefix_rex(prefix, w, reg, 0, False)
+        self.opcode(op)
+        self.byte(((reg & 7) << 3) | 5)
+        let at = self.pos()
+        self.u32(0)
+        return at
+
+    # -------------------------------------------------------- instructions
+
+    ## `mov dst, src`, 64 bits.
+    pub pure def mov(mut self, dst: int, src: int):
+        if dst != src:
+            self.rr(0, True, 137, src, dst, False)
+
+    ## `mov dst32, src32`: the low half, the high one cleared.
+    pub pure def mov32(mut self, dst: int, src: int):
+        self.rr(0, False, 137, src, dst, False)
+
+    ## `mov dst, imm`, the shortest of the three forms; flags unchanged.
+    pub pure def mov_imm(mut self, dst: int, imm: int):
+        if imm >= 0 and imm <= 4294967295:
+            self.prefix_rex(0, False, 0, dst, False)
+            self.byte(184 + (dst & 7))
+            self.u32(imm)
+        elif fits32(imm):
+            self.rr(0, True, 199, 0, dst, False)
+            self.u32(imm)
+        else:
+            self.prefix_rex(0, True, 0, dst, False)
+            self.byte(184 + (dst & 7))
+            self.u64(imm)
+
+    ## A load of `bytes` (1, 2, 4 or 8) from `[base + disp]` into `dst`,
+    ## the narrower ones zero-extended.
+    pub pure def load(mut self, bytes: int, dst: int, base: int, disp: int):
+        match bytes:
+            case 1:
+                self.rm(0, False, 4022, dst, base, disp, False)
+            case 2:
+                self.rm(0, False, 4023, dst, base, disp, False)
+            case 4:
+                self.rm(0, False, 139, dst, base, disp, False)
+            case _:
+                self.rm(0, True, 139, dst, base, disp, False)
+
+    ## `movsx dst, byte [base + disp]`, to 64 bits.
+    pub pure def load_s8(mut self, dst: int, base: int, disp: int):
+        self.rm(0, True, 4030, dst, base, disp, False)
+
+    ## A store of the low `bytes` of `src` at `[base + disp]`.
+    pub pure def store(mut self, bytes: int, src: int, base: int, disp: int):
+        match bytes:
+            case 1:
+                self.rm(0, False, 136, src, base, disp, True)
+            case 2:
+                self.rm(102, False, 137, src, base, disp, False)
+            case 4:
+                self.rm(0, False, 137, src, base, disp, False)
+            case _:
+                self.rm(0, True, 137, src, base, disp, False)
+
+    ## `lea dst, [base + disp]`.
+    pub pure def lea(mut self, dst: int, base: int, disp: int):
+        self.rm(0, True, 141, dst, base, disp, False)
+
+    ## `lea dst, [rip + disp32]`: where the displacement is.
+    pub pure def lea_rip(mut self, dst: int) -> int:
+        return self.rip(0, True, 141, dst)
+
+    ## `mov dst, [rip + disp32]`: where the displacement is.
+    pub pure def load_rip(mut self, dst: int) -> int:
+        return self.rip(0, True, 139, dst)
+
+    ## `OP dst, src` of the arithmetic group (`A_ADD` and the others).
+    pub pure def alu(mut self, w: bool, kind: int, dst: int, src: int):
+        self.rr(0, w, kind * 8 + 1, src, dst, False)
+
+    ## `OP dst, imm` of the arithmetic group, the immediate one that fits
+    ## 32 bits.
+    pub pure def alu_imm(mut self, w: bool, kind: int, dst: int, imm: int):
+        if fits8(imm):
+            self.rr(0, w, 131, kind, dst, False)
+            self.byte(imm)
+        else:
+            self.rr(0, w, 129, kind, dst, False)
+            self.u32(imm)
+
+    ## `imul dst, src`.
+    pub pure def imul(mut self, w: bool, dst: int, src: int):
+        self.rr(0, w, 4015, dst, src, False)
+
+    ## `imul dst, src, imm` with an immediate that fits 32 bits.
+    pub pure def imul_imm(mut self, w: bool, dst: int, src: int, imm: int):
+        if fits8(imm):
+            self.rr(0, w, 107, dst, src, False)
+            self.byte(imm)
+        else:
+            self.rr(0, w, 105, dst, src, False)
+            self.u32(imm)
+
+    ## The unary group of `F7` (`U_NOT`, `U_NEG`, `U_IDIV`).
+    pub pure def unary(mut self, w: bool, ext: int, r: int):
+        self.rr(0, w, 247, ext, r, False)
+
+    ## `SHIFT r, cl`.
+    pub pure def shift_cl(mut self, w: bool, ext: int, r: int):
+        self.rr(0, w, 211, ext, r, False)
+
+    ## `cqo` (64 bits) or `cdq` (32): the sign of `rax` into `rdx`.
+    pub pure def sign_rdx(mut self, w: bool):
+        if w:
+            self.byte(72)
+        self.byte(153)
+
+    ## `test a, b` of `bytes` (1, 2, 4 or 8).
+    pub pure def test(mut self, bytes: int, a: int, b: int):
+        match bytes:
+            case 1:
+                self.rr(0, False, 132, b, a, True)
+            case 2:
+                self.rr(102, False, 133, b, a, False)
+            case 4:
+                self.rr(0, False, 133, b, a, False)
+            case _:
+                self.rr(0, True, 133, b, a, False)
+
+    ## `setCC r8`.
+    pub pure def setcc(mut self, cc: int, r: int):
+        self.rr(0, False, 3984 + cc, 0, r, True)
+
+    ## `cmovCC dst, src`, 64 bits.
+    pub pure def cmov(mut self, cc: int, dst: int, src: int):
+        self.rr(0, True, 3904 + cc, dst, src, False)
+
+    ## `movzx dst32, src8` and `movzx dst32, src16`.
+    pub pure def movzx8(mut self, dst: int, src: int):
+        self.rr(0, False, 4022, dst, src, True)
+
+    pub pure def movzx16(mut self, dst: int, src: int):
+        self.rr(0, False, 4023, dst, src, False)
+
+    ## `movsx dst64, src8`, `movsx dst64, src16`, `movsxd dst64, src32`.
+    pub pure def movsx8(mut self, dst: int, src: int):
+        self.rr(0, True, 4030, dst, src, True)
+
+    pub pure def movsx16(mut self, dst: int, src: int):
+        self.rr(0, True, 4031, dst, src, False)
+
+    pub pure def movsxd(mut self, dst: int, src: int):
+        self.rr(0, True, 99, dst, src, False)
+
+    ## `btc r, bit`, 64 bits: a float's sign flipped.
+    pub pure def btc(mut self, r: int, bit: int):
+        self.rr(0, True, 4026, 7, r, False)
+        self.byte(bit)
+
+    ## `jmp rel32`, `jcc rel32` and `call rel32`: where the displacement
+    ## is, relative to the end of the instruction.
+    pub pure def jmp(mut self) -> int:
+        self.byte(233)
+        let at = self.pos()
+        self.u32(0)
+        return at
+
+    pub pure def jcc(mut self, cc: int) -> int:
+        self.byte(15)
+        self.byte(128 + cc)
+        let at = self.pos()
+        self.u32(0)
+        return at
+
+    pub pure def call(mut self) -> int:
+        self.byte(232)
+        let at = self.pos()
+        self.u32(0)
+        return at
+
+    ## `call r`.
+    pub pure def call_reg(mut self, r: int):
+        self.rr(0, False, 255, 2, r, False)
+
+    pub pure def push(mut self, r: int):
+        if r >= 8:
+            self.byte(65)
+        self.byte(80 + (r & 7))
+
+    pub pure def ret(mut self):
+        self.byte(195)
+
+    ## `leave`: the frame pointer back into `rsp`, the caller's popped.
+    pub pure def leave(mut self):
+        self.byte(201)
+
+    pub pure def ud2(mut self):
+        self.byte(15)
+        self.byte(11)
+
+    # ---------------------------------------------------------------- SSE
+
+    ## `movq xmm, r64` and `movq r64, xmm`; `movd` of 32 bits.
+    pub pure def movq_to_x(mut self, x: int, r: int):
+        self.rr(102, True, 3950, x, r, False)
+
+    pub pure def movq_from_x(mut self, r: int, x: int):
+        self.rr(102, True, 3966, x, r, False)
+
+    pub pure def movd_to_x(mut self, x: int, r: int):
+        self.rr(102, False, 3950, x, r, False)
+
+    pub pure def movd_from_x(mut self, r: int, x: int):
+        self.rr(102, False, 3966, x, r, False)
+
+    ## A scalar float operation `OP dst, src` (`0F 58` add, `59` mul, `5C`
+    ## sub, `5E` div, `5A` conversion), of an `f64` (`F2`) or an `f32`
+    ## (`F3`).
+    pub pure def sse(mut self, double: bool, op: int, dst: int, src: int):
+        self.rr(if double: 242 else: 243, False, 3840 + op, dst, src, False)
+
+    ## `ucomisd a, b` or `ucomiss a, b`.
+    pub pure def ucomis(mut self, double: bool, a: int, b: int):
+        self.rr(if double: 102 else: 0, False, 3886, a, b, False)

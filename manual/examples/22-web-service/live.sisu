@@ -1,0 +1,33 @@
+# A handler changed while its server runs: each connection's task takes
+# the newest code when it starts. Between two requests, the program saves
+# its own next version, `v2.sisu`, as an editor would.
+import http
+from std.net import Url, UrlError
+
+struct Greeter:
+    pass
+
+impl http.Handler for Greeter:
+    def handle(self, request: http.Request) -> http.Response:
+        return http.Response.text(200, "OK", greeting())
+
+def greeting() -> str:
+    return "Hei!"
+
+## The server's answer to a request through `net`.
+def ask(net: Net) -> String ! {UrlError, HttpError}:
+    let body = http.get(net, Url.parse("http://localhost/")?)?
+    return Ok(body.decode().or(String()))
+
+def main(
+    sys: System,
+) -> ! {IoError, NetError, TaskError, UrlError, HttpError}:
+    let net = Net.fake()
+    let listener = net.listen(80)?
+    return task.scope do s:
+        s.spawn(() -> http.serve(listener, Greeter()))
+        print("first: {ask(net)?}, epoch {live.epoch()}")
+        sys.fs.write_text("live.sisu", sys.fs.read_to_string("v2.sisu")?)?
+        print("second: {ask(net)?}, epoch {live.epoch()}")
+        s.cancel()
+        return Ok(())

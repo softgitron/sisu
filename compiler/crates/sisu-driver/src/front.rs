@@ -45,6 +45,12 @@ pub(crate) const RUNTIME_VARS: &[&str] =
 /// wins (decision 304).
 pub const LOWER_VAR: &str = "SISU_LOWER";
 
+/// The environment variable that chooses the backend that compiles LIR to
+/// machine code (`cranelift` or `sisu`) for a whole process, and that the
+/// driver gives stage 1 so that its backend compiles as the command chose;
+/// `--backend=NAME` wins (decision 306).
+pub const BACKEND_VAR: &str = "SISU_BACKEND";
+
 /// Which front end checks, lowers and serialises a program.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FrontEnd {
@@ -139,9 +145,53 @@ pub(crate) fn take_lowering(
     value_flags: &[&str],
     host: &mut dyn Host,
 ) -> Result<(Vec<String>, crate::native::Lowering), i32> {
+    let (out, chosen) = take_option(args, "--lower", value_flags);
+    let name = chosen.or_else(|| env.map(str::to_string)).filter(|n| !n.is_empty());
+    let lowering = match name {
+        None => crate::native::Lowering::Stage2,
+        Some(n) => match crate::native::Lowering::parse(&n) {
+            Some(l) => l,
+            None => {
+                host.stderr(&crate::cli::plain_error(msg::CLI_BAD_LOWER, &[("value", n)]));
+                return Err(crate::cli::EXIT_USAGE);
+            }
+        },
+    };
+    Ok((out, lowering))
+}
+
+/// The command line without its `--backend=NAME` (or `--backend NAME`),
+/// and the backend it and `SISU_BACKEND` choose (decision 306): Cranelift
+/// unless `sisu` is named. A name that is no backend is a usage error.
+pub(crate) fn take_backend(
+    args: &[String],
+    env: Option<&str>,
+    value_flags: &[&str],
+    host: &mut dyn Host,
+) -> Result<(Vec<String>, crate::native::Backend), i32> {
+    let (out, chosen) = take_option(args, "--backend", value_flags);
+    let name = chosen.or_else(|| env.map(str::to_string)).filter(|n| !n.is_empty());
+    let backend = match name {
+        None => crate::native::Backend::Cranelift,
+        Some(n) => match crate::native::Backend::parse(&n) {
+            Some(b) => b,
+            None => {
+                host.stderr(&crate::cli::plain_error(msg::CLI_BAD_BACKEND, &[("value", n)]));
+                return Err(crate::cli::EXIT_USAGE);
+            }
+        },
+    };
+    Ok((out, backend))
+}
+
+/// The command line without the option `name` (`--name=VALUE` or `--name
+/// VALUE`), taken among a command's options as [`take_choice`] takes
+/// `--front-end`, and its value, the last given.
+fn take_option(args: &[String], name: &str, value_flags: &[&str]) -> (Vec<String>, Option<String>) {
     let mut chosen: Option<String> = None;
     let mut out = Vec::with_capacity(args.len());
     let mut command: Option<&str> = None;
+    let prefix = format!("{name}=");
     let mut i = 0;
     while i < args.len() {
         let a = args[i].as_str();
@@ -149,12 +199,12 @@ pub(crate) fn take_lowering(
             out.extend(args[i..].iter().cloned());
             break;
         }
-        if let Some(v) = a.strip_prefix("--lower=") {
+        if let Some(v) = a.strip_prefix(prefix.as_str()) {
             chosen = Some(v.to_string());
             i += 1;
             continue;
         }
-        if a == "--lower" {
+        if a == name {
             chosen = Some(args.get(i + 1).cloned().unwrap_or_default());
             i += 2;
             continue;
@@ -176,18 +226,7 @@ pub(crate) fn take_lowering(
             break;
         }
     }
-    let name = chosen.or_else(|| env.map(str::to_string)).filter(|n| !n.is_empty());
-    let lowering = match name {
-        None => crate::native::Lowering::Stage2,
-        Some(n) => match crate::native::Lowering::parse(&n) {
-            Some(l) => l,
-            None => {
-                host.stderr(&crate::cli::plain_error(msg::CLI_BAD_LOWER, &[("value", n)]));
-                return Err(crate::cli::EXIT_USAGE);
-            }
-        },
-    };
-    Ok((out, lowering))
+    (out, chosen)
 }
 
 /// The compiler's directory, which holds `stage1/`, `std/`, `catalog/` and
@@ -300,6 +339,7 @@ impl Stage1 {
         // The backend stage 1 hands the SIR to lowers as the command chose
         // (decision 304).
         cmd.env(LOWER_VAR, crate::native::lowering().name());
+        cmd.env(BACKEND_VAR, crate::native::backend().name());
         // Stage 1 knows the working directory by the shell's `PWD`.
         if let Ok(cwd) = std::env::current_dir() {
             cmd.env("PWD", cwd);
@@ -398,7 +438,7 @@ fn build(exe: &Path, package: &Path, src: &Path, host: &mut dyn Host) -> Result<
     cmd.args(["build", "--native", "--output"]).arg(&part).current_dir(package);
     // Stage 1 is built with the Rust lowering, since stage 2 is built with
     // stage 1 (decision 304).
-    cmd.env(FRONT_END_VAR, "rust").env(LOWER_VAR, "rust").env_remove(KEEP_SIR);
+    cmd.env(FRONT_END_VAR, "rust").env(LOWER_VAR, "rust").env(BACKEND_VAR, "cranelift").env_remove(KEEP_SIR);
     for v in RUNTIME_VARS {
         cmd.env_remove(v);
     }
@@ -478,7 +518,7 @@ impl Stage2 {
         cmd.args(["build", "--native", "--output"]).arg(&part).current_dir(&package);
         // Built through stage 1, with the Rust lowering: stage 2 does not
         // lower itself until it is built.
-        cmd.env(LOWER_VAR, "rust").env_remove(FRONT_END_VAR).env_remove(KEEP_SIR);
+        cmd.env(LOWER_VAR, "rust").env(BACKEND_VAR, "cranelift").env_remove(FRONT_END_VAR).env_remove(KEEP_SIR);
         for v in RUNTIME_VARS {
             cmd.env_remove(v);
         }

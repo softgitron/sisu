@@ -1,0 +1,3 @@
+test "names in the book" ... ok
+test "an empty name is not a guest" ... ok
+2 passed, 0 failed, 0 blocked

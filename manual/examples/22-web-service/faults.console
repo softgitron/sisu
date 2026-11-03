@@ -1,0 +1,32 @@
+$ sisu test --sim --faults 0.1
+info [task 1.1]: Aino books 18:00
+info [task 1.2]: Aino books 18:00
+info [task 1.1]: Aino books 18:00
+info [task 1.2]: Eero books 18:00
+test "sim_tests/a booking outlives a crash of the server" ... ok
+test "tests/a turn is booked once" ... FAILED
+test "tests/a request that is not a booking" ... ok
+
+test "tests/a turn is booked once" ... FAILED
+panic: assertion failed: got[0] == (201, "booked\n")
+    got[0] == (201, "booked\n")
+    │
+    (503, "Interrupted\n")
+  at test "tests/a turn is booked once" (src/tests.sisu:24:5)
+replay: sisu test --replay 1-0dcd89d9ab9c2483-0.0.1-t1-s0-r0-m100000 .
+
+2 passed, 1 failed, 0 blocked
+$ sisu test --replay 1-0dcd89d9ab9c2483-0.0.1-t1-s0-r0-m100000 .
+info [task 1.1]: Aino books 18:00
+info [task 1.2]: Eero books 18:00
+test "tests/a turn is booked once" ... FAILED
+
+test "tests/a turn is booked once" ... FAILED
+panic: assertion failed: got[0] == (201, "booked\n")
+    got[0] == (201, "booked\n")
+    │
+    (503, "Interrupted\n")
+  at test "tests/a turn is booked once" (src/tests.sisu:24:5)
+replay: sisu test --replay 1-0dcd89d9ab9c2483-0.0.1-t1-s0-r0-m100000 .
+
+0 passed, 1 failed, 0 blocked

@@ -1,0 +1,15 @@
+$ sisu run -- --demo
+info [task 1.1]: Aino books 18:00
+Aino: 201 Created
+Eero: 409 Conflict
+bookings: [{"name":"Aino","hour":18}]
+$ sisu run --record demo.log -- --demo
+info [task 1.1]: Aino books 18:00
+Aino: 201 Created
+Eero: 409 Conflict
+bookings: [{"name":"Aino","hour":18}]
+$ sisu replay demo.log
+info [task 1.1]: Aino books 18:00
+Aino: 201 Created
+Eero: 409 Conflict
+bookings: [{"name":"Aino","hour":18}]

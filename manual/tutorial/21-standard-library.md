@@ -507,9 +507,9 @@ and [`compiler/std/search.sisu`](../../compiler/std/search.sisu).
 
 ## Logging
 
-`log`, from `std.log`, is the one module that every module sees without
-an import, as chapter 18 said. It writes records to standard error,
-each with its level:
+`log`, from `std.log`, is one of the few modules that every module sees
+without an import, with `task` and `cap`, as chapter 18 said. It writes
+records to standard error, each with its level:
 
 <!-- file: examples/21-standard-library/logging.sisu -->
 ```sisu

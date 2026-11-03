@@ -1,0 +1,3 @@
+test "a note outlives a crash" ... ok
+test "every note outlives it" ... ok
+2 passed, 0 failed, 0 blocked

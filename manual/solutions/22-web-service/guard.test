@@ -1,0 +1,10 @@
+test "part 1, a limit for each client/two requests in a window" ... ok
+test "part 1, a limit for each client/a new window" ... ok
+test "part 1, a limit for each client/tasks share one limit" ... ok
+test "part 2, a cache/a fresh answer is kept" ... ok
+test "part 2, a cache/a stale answer is asked for again" ... ok
+test "part 2, a cache/an error is not kept" ... ok
+test "part 2, a cache/tasks asking at once ask the service once" ... ok
+test "part 3, towns side by side/two towns at once take as long as one" ... ok
+test "part 3, towns side by side/one request for a town at a time, at every switch" ... ok
+9 passed, 0 failed, 0 blocked

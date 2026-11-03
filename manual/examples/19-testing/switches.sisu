@@ -1,5 +1,4 @@
 # `exhaustive` makes every small case, rather than random ones.
-@derive(Copy, Eq, Debug)
 enum Press:
     On
     Off

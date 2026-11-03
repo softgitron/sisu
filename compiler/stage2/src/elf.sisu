@@ -1,0 +1,250 @@
+##! The ELF relocatable object the Sisu backend writes (D-087, step 2;
+##! the System V gABI and its x86-64 supplement): a header, the sections
+##! (`.text`, `.rodata`, `.data.rel.ro`, their relocations, the symbol
+##! table and its strings, and the debug information's sections), and the
+##! section headers, which the system linker links with the runtime as it
+##! links the Cranelift backend's objects.
+
+import stage2.x86
+from stage2.x64 import Code
+from stage2.x86 import Obj, Reloc
+
+## A section of the object: its name, type, flags, bytes, link, info,
+## alignment and entry size.
+struct Section:
+    name: String
+    kind: int
+    flags: int
+    data: list[int]
+    link: int
+    info: int
+    align: int
+    entsize: int
+
+const SHT_PROGBITS: int = 1
+const SHT_SYMTAB: int = 2
+const SHT_STRTAB: int = 3
+const SHT_RELA: int = 4
+const SHF_WRITE: int = 1
+const SHF_ALLOC: int = 2
+const SHF_EXECINSTR: int = 4
+const SHF_INFO_LINK: int = 64
+
+## A string table: its bytes, and where each string starts.
+struct Strings:
+    out: Code
+    at: dict[String, int]
+
+impl Strings:
+    pure def new() -> Strings:
+        var c = Code.new()
+        c.byte(0)
+        return Strings(out=c, at={})
+
+    pure def add(mut self, s: str) -> int:
+        if s.is_empty():
+            return 0
+        if let Some(i) = self.at.get(s.to_string()):
+            return i
+        let i = self.out.pos()
+        for k in range(s.byte_len()):
+            self.out.byte(s.byte_at(k).to_int())
+        self.out.byte(0)
+        _ = self.at.insert(s.to_string(), i)
+        return i
+
+## The debug information's sections, made by `stage2.dwarf`: each one's
+## name, bytes and relocations (against `.text`, or another of them).
+pub struct DebugSection:
+    pub name: String
+    pub data: list[int]
+    pub relocs: list[Reloc]
+
+## The object file's bytes.
+pub pure def write(o: Obj, debug: list[DebugSection]) -> list[int]:
+    var strtab = Strings.new()
+    var symtab = Code.new()
+    var index: dict[String, int] = {}
+    # The null symbol, then a symbol for each section a relocation names.
+    symbol(mut symtab, 0, 0, 0, 0, 0, 0)
+    let named = [".text", ".rodata", ".data.rel.ro"]
+    for k in range(len(named)):
+        symbol(mut symtab, 0, 3, 0, k + 1, 0, 0)
+        _ = index.insert(named[k].to_string(), k + 1)
+    var count = 1 + len(named)
+    var debug_base = count
+    for d in debug:
+        symbol(mut symtab, 0, 3, 0, 0, 0, 0)
+        _ = index.insert(d.name.copy(), count)
+        count += 1
+    # The functions the object defines, the program's first (local).
+    for d in o.defined:
+        if not d.global_:
+            symbol(mut symtab, strtab.add(d.symbol), 2, 0, 1, d.offset, d.size)
+            _ = index.insert(d.symbol.copy(), count)
+            count += 1
+    let first_global = count
+    for d in o.defined:
+        if d.global_:
+            symbol(mut symtab, strtab.add(d.symbol), 16 + 2, 0, 1, d.offset, d.size)
+            _ = index.insert(d.symbol.copy(), count)
+            count += 1
+    for name in o.imports:
+        if not index.contains(name.copy()):
+            symbol(mut symtab, strtab.add(name), 16, 0, 0, 0, 0)
+            _ = index.insert(name.copy(), count)
+            count += 1
+    var sections: list[Section] = []
+    sections.push(progbits(".text", SHF_ALLOC | SHF_EXECINSTR, o.text.bytes.copy(), 16))
+    sections.push(progbits(".rodata", SHF_ALLOC, o.rodata.bytes.copy(), 8))
+    sections.push(progbits(".data.rel.ro", SHF_ALLOC | SHF_WRITE, o.relro.bytes.copy(), 8))
+    # The debug sections' section numbers follow those three; their
+    # symbols were made with section 0 and are fixed below.
+    let first_debug = len(sections) + 1
+    for d in debug:
+        sections.push(progbits(d.name, 0, d.data.copy(), 1))
+    sections.push(progbits(".note.GNU-stack", 0, [], 1))
+    let symtab_index = len(sections) + 1 + 2 + len(debug)
+    sections.push(rela(".rela.text", relocations(o.text_relocs, index), symtab_index, 1))
+    sections.push(rela(".rela.data.rel.ro", relocations(o.relro_relocs, index), symtab_index, 3))
+    for k in range(len(debug)):
+        let d = ref debug[k]
+        sections.push(
+            rela(".rela{d.name}", relocations(d.relocs, index), symtab_index, first_debug + k)
+        )
+    # The debug sections' symbols name their sections.
+    for k in range(len(debug)):
+        let at = (debug_base + k) * 24 + 6
+        symtab.bytes[at] = (first_debug + k) & 255
+        symtab.bytes[at + 1] = ((first_debug + k) >> 8) & 255
+    sections.push(
+        Section(
+            name=".symtab".to_string(),
+            kind=SHT_SYMTAB,
+            flags=0,
+            data=symtab.bytes.copy(),
+            link=symtab_index + 1,
+            info=first_global,
+            align=8,
+            entsize=24,
+        )
+    )
+    sections.push(
+        Section(
+            name=".strtab".to_string(),
+            kind=SHT_STRTAB,
+            flags=0,
+            data=strtab.out.bytes.copy(),
+            link=0,
+            info=0,
+            align=1,
+            entsize=0,
+        )
+    )
+    var shstrtab = Strings.new()
+    var names: list[int] = []
+    for s in sections:
+        names.push(shstrtab.add(s.name))
+    let shstr_name = shstrtab.add(".shstrtab")
+    sections.push(
+        Section(
+            name=".shstrtab".to_string(),
+            kind=SHT_STRTAB,
+            flags=0,
+            data=shstrtab.out.bytes.copy(),
+            link=0,
+            info=0,
+            align=1,
+            entsize=0,
+        )
+    )
+    names.push(shstr_name)
+    # The file: the header, each section's bytes, then the headers.
+    var out = Code.new()
+    for _ in range(64):
+        out.byte(0)
+    var offsets: list[int] = []
+    for s in sections:
+        out.align(max(s.align, 1), 0)
+        offsets.push(out.pos())
+        out.append(s.data)
+    out.align(8, 0)
+    let shoff = out.pos()
+    for _ in range(64):
+        out.byte(0)
+    for k in range(len(sections)):
+        let s = ref sections[k]
+        out.u32(names[k])
+        out.u32(s.kind)
+        out.u64(s.flags)
+        out.u64(0)
+        out.u64(offsets[k])
+        out.u64(len(s.data))
+        out.u32(s.link)
+        out.u32(s.info)
+        out.u64(s.align)
+        out.u64(s.entsize)
+    var head = Code.new()
+    head.append([127, 69, 76, 70, 2, 1, 1, 0])
+    head.u64(0)
+    head.u16(1)
+    head.u16(62)
+    head.u32(1)
+    head.u64(0)
+    head.u64(0)
+    head.u64(shoff)
+    head.u32(0)
+    head.u16(64)
+    head.u16(0)
+    head.u16(0)
+    head.u16(64)
+    head.u16(len(sections) + 1)
+    head.u16(len(sections))
+    for k in range(64):
+        out.bytes[k] = head.bytes[k]
+    return out.bytes
+
+pure def progbits(name: str, flags: int, own data: list[int], align: int) -> Section:
+    return Section(
+        name=name.to_string(),
+        kind=SHT_PROGBITS,
+        flags=flags,
+        data=data,
+        link=0,
+        info=0,
+        align=align,
+        entsize=0,
+    )
+
+pure def rela(name: str, own data: list[int], symtab: int, section: int) -> Section:
+    return Section(
+        name=name.to_string(),
+        kind=SHT_RELA,
+        flags=SHF_INFO_LINK,
+        data=data,
+        link=symtab,
+        info=section,
+        align=8,
+        entsize=24,
+    )
+
+## A symbol table entry: its name, `st_info`, `st_other`, section, value
+## and size.
+pure def symbol(mut t: Code, name: int, info: int, other: int, section: int, value: int, size: int):
+    t.u32(name)
+    t.byte(info)
+    t.byte(other)
+    t.u16(section)
+    t.u64(value)
+    t.u64(size)
+
+## Relocation entries (`Elf64_Rela`) for `relocs`, by the symbols' numbers.
+pure def relocations(relocs: list[Reloc], index: dict[String, int]) -> list[int]:
+    var c = Code.new()
+    for r in relocs:
+        let sym = index.get(r.symbol.copy()) ?? 0
+        c.u64(r.offset)
+        c.u32(r.kind)
+        c.u32(sym)
+        c.u64(r.addend)
+    return c.bytes

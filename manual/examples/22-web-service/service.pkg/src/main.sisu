@@ -1,0 +1,23 @@
+##! bookings: a JSON service for a sauna's evening turns.
+import bookings.demo
+import cli
+import http
+from bookings.service import Service
+
+## What the command line can say.
+struct Options:
+    port: int = 8080
+    ## Serves a short session of its own, kept in memory, and stops.
+    demo: bool
+
+def main(sys: System) -> !:
+    let options = cli.parse[Options](sys.env.args())?
+    let net = sys.net.only_hosts(["localhost"])
+    if options.demo:
+        let service = Service.open(Fs.in_memory())?
+        return demo.session(net, net.listen(0)?, service)
+    sys.fs.create_dir("data")?
+    let service = Service.open(sys.fs.restrict_to("data"))?
+    let listener = net.listen(options.port)?
+    log.info("listening at port {listener.port}")
+    return http.serve(listener, service)

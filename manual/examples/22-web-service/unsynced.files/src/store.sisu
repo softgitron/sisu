@@ -1,0 +1,23 @@
+##! Bookings kept in a file, as JSON.
+import std.json
+
+## A turn in the sauna: who, and at which hour.
+pub struct Booking:
+    pub name: String
+    pub hour: int
+
+## Why the bookings could not be read.
+pub type LoadError = {IoError, json.JsonError}
+
+## The bookings kept in `bookings.json`, none when there is no file.
+pub def load(fs: Fs) -> list[Booking] ! LoadError:
+    if not fs.exists("bookings.json"):
+        return Ok([])
+    let text = fs.read_to_string("bookings.json")?
+    return json.decode[list[Booking]](text)
+
+## Keeps `bookings` in `bookings.json`, durably: once `save` returns, a
+## crash cannot lose them.
+pub def save(fs: Fs, bookings: list[Booking]) -> ! IoError:
+    fs.write_text("bookings.json", json.encode(bookings))?
+    return Ok(())

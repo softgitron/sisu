@@ -1,0 +1,4 @@
+test "sim_tests/a booking outlives a crash of the server" ... ok
+test "tests/a turn is booked once" ... ok
+test "tests/a request that is not a booking" ... ok
+3 passed, 0 failed, 0 blocked

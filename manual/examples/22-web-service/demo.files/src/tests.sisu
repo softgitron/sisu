@@ -1,0 +1,37 @@
+##! The service's tests, over a network in the test's own process.
+import http
+from bookings.service import Service
+from std.net import Url
+
+## What a server on `net` answers to `method` for `/bookings`.
+@cfg(test)
+def ask(net: Net, method: str, body: str) -> (int, String) ! HttpError:
+    let url = Url.parse("http://localhost/bookings").expect("a URL")
+    let answer = http.request(net, method, url, body.encode())?
+    return Ok((answer.status, answer.body.decode().or(String())))
+
+test "a turn is booked once"(fs: Fs, net: Net):
+    let listener = net.listen(80).expect("a free port")
+    let service = Service.open(fs).expect("an empty file system")
+    let answers = task.scope do s:
+        s.spawn(() -> http.serve(listener, service))
+        let aino = ask(net, "POST", r"""{"name": "Aino", "hour": 18}""")?
+        let eero = ask(net, "POST", r"""{"name": "Eero", "hour": 18}""")?
+        let all = ask(net, "GET", "")?
+        s.cancel()
+        return Ok([aino, eero, all])
+    let got = answers.expect("every request answered")
+    assert got[0] == (201, "booked\n")
+    assert got[1] == (409, "taken\n")
+    assert got[2] == (200, r"""[{"name":"Aino","hour":18}]""")
+    assert fs.exists("bookings.json")
+
+test "a request that is not a booking"(fs: Fs, net: Net):
+    let listener = net.listen(80).expect("a free port")
+    let service = Service.open(fs).expect("an empty file system")
+    let answer = task.scope do s:
+        s.spawn(() -> http.serve(listener, service))
+        let bad = ask(net, "POST", "Aino at six")?
+        s.cancel()
+        return Ok(bad.0)
+    assert answer == Ok(400)

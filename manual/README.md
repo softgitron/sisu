@@ -278,7 +278,7 @@ reaches for first: `std.fs` and `std.io`, `std.time` (with `Ticker` and
 `std.log`, each with one example and a link to its generated page.
 Exercises: one small task per module. Stage 0 runs all of it.
 
-**22. Project: a small web service.** A JSON service on `std.x.http`:
+**22. Project: a small web service** ([written](tutorial/22-web-service.md)). A JSON service on `std.x.http`:
 attenuated capabilities in `main`, a task per connection, logging,
 `std.json` with derived encoding, tests over `http.FakeNet`, the
 simulation profile with faults (`sisu test --sim`), a failure kept as a
@@ -832,7 +832,7 @@ solutions and passing checks.
 | 6 | Chapters 10 (3, done), 11 (4, done), 12 (3, done), 13 with challenge II (3, done); R7 ownership (3, done); G13 borrow errors (1); X3 (1) | 5 |
 | 7 | Reader test of Parts I and II: five readers who know Python, their stuck points, the rewrites | 4 |
 | 8 | Chapters 14 (3, done), 15 (3, done), 16 (3, done), 17 with challenge III (2.5, done); R2 (3, done), R3 (2), R6 (1, done), R13 (2.5) | 20 |
-| 9 | Chapters 18 (3, done), 19 (3, done), 20 (4, done), 21 (3, done), 22 with challenge IV (4); R9 (2.5), R10 (2), R15 (2); G5 to G16 (9) | 32.5 |
+| 9 | Chapters 18 (3, done), 19 (3, done), 20 (4, done), 21 (3, done), 22 with challenge IV (4, done); R9 (2.5), R10 (2), R15 (2); G5 to G16 (9) | 32.5 |
 | 10 | R4 (2), R5 (1.5), R8 (1.5), R14 (1.5), R20 (2), R21 (1), R22 (1); X1, X2, X4, X5, X8, X10, X12 (7) | 17.5 |
 | 11 | Chapters 23 (2), 24 (2), 25 (3), 26 (2); R11 (1), R12 (2); G17, G20, G21, G26, G27, G28, G29, G30, G31, G32 (7.5); X6, X7, X9, X13, X14 (5) | 26.5 |
 | 12 | When their features exist: chapters 27 (3) and 28 with challenge V (2); G18, G19, G22, G23, G24, G25 (4.5); X11 (1); the site (3) | 13.5 |
@@ -1175,6 +1175,26 @@ Writing the rest of Part I turned up more, by chapter:
   link to each module's generated page, which is not in the repository
   until the site exists, so the chapter links each module's source,
   which holds the documentation that `sisu doc --std` writes.
+- Chapter 22. An inferred error set, `-> !`, leaves out what a `?`
+  passes on inside a `task.scope` body: each such `?` gets E0321
+  ("`HttpError` errors cannot leave this function, whose error set is
+  `net.UrlError`"), so the demo writes its set out. `self.save(x) else
+  as e:` as a statement gets E0117 ("unexpected `else` after the end of
+  the statement") with no word that `else` belongs to a `let`, nor the
+  fix `if let Err(e) = ...`. `request.body.decode() ?? ""` gets E0371
+  ("`??` needs an optional value on its left, found `String !
+  Utf8Error`") with no fix offering `.or(...)`. A function named like
+  its module, `from bookings.demo import demo`, gets E0202, as chapter
+  17 found. A hole reached in a task that nothing in the test joins,
+  such as a handler's hole inside `http.serve`'s connection task, fails
+  the test with a deadlock report instead of reporting it blocked by the
+  hole, so exercise 22.2 hands its handler requests directly. A
+  `sim.always` condition that locks a `Mutex` that a task holds at the
+  switch hangs `sisu test`, with no deadlock report and memory growing
+  past 2 GB; the challenge's fake keeps its note in an `Atomic`. `sisu
+  build --native` prints the executable's absolute path, so no session
+  can show it (`--output PATH` prints the path given), and the chapter
+  shows `sisu build` instead.
 
 Planning the later chapters turned up the parts of the proposal that
 they teach and stage 0 does not run yet, each named in its chapter's

@@ -1,0 +1,44 @@
+##! Exercise 22.2, a guest book's handler. Kind: complete. Level: 2.
+##!
+##! A sauna's guest book answers two requests: `POST /guests`, whose body
+##! is a name, adds the name, and `GET /guests` gives the names as a
+##! JSON list. Replace the two holes so that every test passes; the
+##! second needs `std.json`. The tests hand the handler its requests
+##! directly, as `http.serve` would. Run them with
+##! `sisu test guests.sisu`. The hints are in chapter 22 of the tutorial,
+##! under "Exercise 22.2: a guest book's handler".
+
+import http
+
+## The names written in the guest book so far.
+struct GuestBook:
+    names: Mutex[list[String]]
+
+impl http.Handler for GuestBook:
+    def handle(self, request: http.Request) -> http.Response:
+        if request.target != "/guests":
+            return http.Response.text(404, "Not Found", "no such page\n")
+        if request.method == "POST":
+            let name = request.body.decode().or(String())
+            if name.trim().is_empty():
+                return http.Response.text(400, "Bad Request", "a name?\n")
+            return todo("add the name, and answer 201 Created")
+        return todo("answer 200 with the names as JSON")
+
+## A request of `method` for `/guests`, with `body`.
+def request(method: str, body: str) -> http.Request:
+    let target = "/guests".to_string()
+    return http.Request(method.to_string(), target, [], body.encode())
+
+test "names in the book":
+    let book = GuestBook(names=Mutex([]))
+    assert book.handle(request("POST", "Aino")).status == 201
+    assert book.handle(request("POST", " Eero\n")).status == 201
+    let all = book.handle(request("GET", ""))
+    assert all.status == 200
+    assert all.body == b"[\"Aino\",\"Eero\"]"
+
+test "an empty name is not a guest":
+    let book = GuestBook(names=Mutex([]))
+    assert book.handle(request("POST", "  ")).status == 400
+    assert book.handle(request("GET", "")).body == b"[]"

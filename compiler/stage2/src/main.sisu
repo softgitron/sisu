@@ -3,18 +3,23 @@
 ##! ```text
 ##! sisu2 lir FILE.sir [--release] [--output FILE.lir]   # the LIR of a serialised SIR program
 ##! sisu2 sir FILE.sir                                   # the program read and written again
+##! sisu2 x86 FILE.lir --output FILE.o                   # the program compiled to an x86-64 object
 ##! ```
 ##!
 ##! `lir` lowers the program (`stage2.lower`) and prints its LIR, or writes
 ##! it to `--output`. `sir` reads the program (`stage2.read`) and prints it
 ##! with stage 1's writer, which gives the same bytes back: the reader's
-##! check.
+##! check. `x86` compiles a LIR program with the Sisu backend
+##! (`stage2.object`) into an ELF object, which the system linker links with
+##! the runtime.
 
 import stage1.sir.write
 import stage2.gen
 import stage2.lir
+import stage2.object
 import stage2.read
 from stage2.lir import LirError
+from stage2.object import ObjectError
 from stage2.read import ReadError
 
 error UsageError:
@@ -34,7 +39,14 @@ def emit(text: str):
         print(text)
 
 def usage() -> String:
-    return "usage: sisu2 lir FILE.sir [--release] [--output FILE.lir]\n       sisu2 sir FILE.sir".to_string()
+    return "usage: sisu2 lir FILE.sir [--release] [--output FILE.lir]\n       sisu2 sir FILE.sir\n       sisu2 x86 FILE.lir --output FILE.o".to_string()
+
+## The bytes as `bytes`.
+pure def as_bytes(xs: list[int]) -> bytes:
+    var out: list[u8] = []
+    for x in xs:
+        out.push((x & 255).to_u8() ?? 0u8)
+    return bytes.from_list(out)
 
 def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     let args = sys.env.args()
@@ -54,9 +66,22 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         else:
             return Err(Usage(text=usage()))
         i += 1
-    if command != "sir" and command != "lir":
+    if command != "sir" and command != "lir" and command != "x86":
         return Err(Usage(text=usage()))
     let text = sys.fs.read_to_string(Path.new(path))?
+    if command == "x86":
+        let o = output else:
+            return Err(Usage(text=usage()))
+        let compiled = object.compile(text)
+        match compiled:
+            case Ok(code):
+                sys.fs.write(Path.new(o), as_bytes(code))?
+                return Ok(())
+            case Err(ObjectError.BadLir(line, message)):
+                print_err("{path}:{line}: {message}")
+            case Err(ObjectError.Unsupported(what, function)):
+                print_err("x86: not compiled: {what} (in {function})")
+        return Err(Failed)
     let r = read.read(text)
     if let Err(ReadError.Bad(line, message)) = r:
         print_err("{path}:{line}: {message}")

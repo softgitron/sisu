@@ -1,0 +1,48 @@
+##! The Sisu backend's pass over a program (D-087, step 2): its LIR read
+##! item by item, each datum placed and each function compiled to x86-64 as
+##! it is read, then the ELF object written (`sisu2 x86 FILE.lir --output
+##! FILE.o`).
+
+import stage2.elf
+from stage2.elf import DebugSection
+from stage2.lirread import Item, K_LOCAL, LirReadError, LirReader
+from stage2.x86 import Obj, X86Error
+
+## Why a program was not compiled.
+pub error ObjectError:
+    ## The text is not LIR: the line and what was wrong.
+    BadLir(line: int, message: String)
+    ## A construct the backend does not compile yet, and its function.
+    Unsupported(what: String, function: String)
+
+## The object file the backend makes of a LIR program's text.
+pub pure def compile(text: str) -> list[int] ! ObjectError:
+    var r = LirReader.new()
+    var o = Obj.new()
+    var locals: set[String] = set()
+    var sources: list[String] = []
+    while True:
+        let next = r.next_item(text)
+        if let Err(LirReadError.Bad(line, message)) = next:
+            return Err(BadLir(line=line, message=message.copy()))
+        let Ok(item) = next else:
+            break
+        match item:
+            case Item.End:
+                break
+            case Item.Source(s):
+                sources.push(s.copy())
+            case Item.Import(name):
+                o.import_data(name)
+            case Item.Data(bytes, align, funcs):
+                o.local_data(bytes, align, funcs)
+            case Item.Declare(symbol, linkage, _):
+                if linkage == K_LOCAL:
+                    _ = locals.add(symbol.copy())
+            case Item.Function(f):
+                let done = o.function(f, r.sigs, locals)
+                if let Err(X86Error.Unsupported(what, function)) = done:
+                    return Err(Unsupported(what=what.copy(), function=function.copy()))
+    o.finish()
+    let debug: list[DebugSection] = []
+    return Ok(elf.write(o, debug))

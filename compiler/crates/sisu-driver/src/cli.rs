@@ -505,11 +505,18 @@ pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
         Ok(chosen) => chosen,
         Err(code) => return code,
     };
-    // How a native build lowers SIR (decision 304).
+    // How a native build lowers SIR (decision 304), and which backend
+    // compiles the LIR (decision 306).
     let lower = std::env::var(crate::front::LOWER_VAR).ok();
-    match crate::front::take_lowering(&args, lower.as_deref(), VALUE_FLAGS, host) {
-        Ok((args, lowering)) => {
+    let (args, lowering) = match crate::front::take_lowering(&args, lower.as_deref(), VALUE_FLAGS, host) {
+        Ok(chosen) => chosen,
+        Err(code) => return code,
+    };
+    let backend = std::env::var(crate::front::BACKEND_VAR).ok();
+    match crate::front::take_backend(&args, backend.as_deref(), VALUE_FLAGS, host) {
+        Ok((args, backend)) => {
             crate::native::set_lowering(lowering);
+            crate::native::set_backend(backend);
             execute_with(&args, front, host)
         }
         Err(code) => code,

@@ -1,0 +1,37 @@
+##! The service on two nodes of a simulated system.
+import http
+from bookings.service import Service
+from bookings.store import load
+from std.net import Url
+from std.sim import Sim
+
+## Books `hour` for `name` on the node `server`, trying again after a
+## fault, ten times at most; the status of the last try.
+@cfg(test)
+def book(net: Net, name: str, hour: int) -> int:
+    let url = Url.parse("http://server/bookings").expect("a URL")
+    let body = "{{\"name\": \"{name}\", \"hour\": {hour}}}".encode()
+    var status = 0
+    for _ in range(10):
+        let answer = http.request(net, "POST", url, body)
+        status = answer.map((r) -> r.status).or(0)
+        if status != 0 and status != 503:
+            return status
+    return status
+
+test "a booking outlives a crash of the server":
+    let sim = Sim.new(seed=1)
+    let server = sim.node("server")
+    let client = sim.node("client")
+    let listener = sim.system(server).net.listen(80).expect("listening")
+    let service = Service.open(sim.system(server).fs).expect("a new disk")
+    let status = task.scope do s:
+        s.spawn(() -> http.serve(listener, service))
+        let status = book(sim.system(client).net, "Aino", 18)
+        s.cancel()
+        return status
+    assert status == 201
+    sim.crash(server)
+    sim.restart(server)
+    let kept = load(sim.system(server).fs).expect("the disk after the crash")
+    assert len(kept) == 1

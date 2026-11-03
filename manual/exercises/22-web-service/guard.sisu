@@ -1,0 +1,181 @@
+##! Exercise 22.3, Challenge IV: a guarded service. Kind: challenge. Level: 3.
+##!
+##! A weather service answers in two seconds and must not be asked too
+##! often. This challenge puts a limit and a cache in front of it, in
+##! three parts with a suite of tests each. Solve the parts in order. The
+##! tests run on the test clock, and `sisu test --explore 50 guard.sisu`
+##! runs them under fifty orders of their tasks, which a solution must
+##! pass as well as the default order. Run the tests with
+##! `sisu test guard.sisu`.
+##!
+##! Part 1. `Limiter.allow(client)` says whether a request from `client`
+##! may go on: each client may make `limit` requests in each window of
+##! `window`, and a window starts at the client's first request after the
+##! last window ended. Tasks share a limiter.
+##!
+##! Part 2. `Cache.forecast(service, town)` gives the forecast for
+##! `town`, and asks `service` only when it keeps no answer for the town
+##! younger than `fresh`; an error is not kept. Tasks that ask about one
+##! town at the same time must make one request to the service between
+##! them, not one each.
+##!
+##! Part 3. Tasks that ask about different towns at the same time must
+##! not wait for each other: two towns at once take as long as one. The
+##! last test checks, at every switch between tasks, that no two requests
+##! for one town are in flight together.
+##!
+##! Add to the structs what they need. The hints are in chapter 22 of the
+##! tutorial, under "Challenge IV: a guarded service".
+
+import std.sim
+
+error WeatherError:
+    UnknownTown(name: String)
+
+trait Weather:
+    def forecast(self, town: str) -> String ! {WeatherError, TaskError}
+
+## How many requests each client may make in each window of time.
+struct Limiter:
+    clock: Clock
+    limit: int
+    window: Duration
+
+impl Limiter:
+    ## A limiter of `limit` requests for each client in each `window`.
+    def new(clock: Clock, limit: int, window: Duration) -> Limiter:
+        return todo("Limiter.new")
+
+    ## Whether a request from `client` may go on, counting it if it may.
+    def allow(self, client: str) -> bool:
+        return todo("allow")
+
+## Forecasts kept for `fresh` after the service gave them.
+struct Cache:
+    clock: Clock
+    fresh: Duration
+
+impl Cache:
+    ## A cache whose answers stay fresh for `fresh`.
+    def new(clock: Clock, fresh: Duration) -> Cache:
+        return todo("Cache.new")
+
+    ## The forecast for `town`, asked of `service` only when no fresh
+    ## answer is kept.
+    def forecast[W: Weather + Sync](
+        self, service: W, town: str
+    ) -> String ! {WeatherError, TaskError}:
+        return todo("forecast")
+
+## A fake weather service that answers after two seconds on `clock`. It
+## counts the requests for each town, and notes when a request for a
+## town came while another for the same town was still in flight.
+struct SlowWeather:
+    clock: Clock
+    asked: Mutex[dict[String, int]]
+    flying: Mutex[set[String]]
+    overlapped: Atomic[bool]
+
+impl SlowWeather:
+    def new(clock: Clock) -> SlowWeather:
+        let asked = Mutex({})
+        return SlowWeather(clock, asked, Mutex(set()), Atomic(False))
+
+    ## How many requests for `town` the service got.
+    def requests(self, town: str) -> int:
+        return self.asked.lock().value.get(town.to_string()) ?? 0
+
+impl Weather for SlowWeather:
+    def forecast(self, town: str) -> String ! {WeatherError, TaskError}:
+        self.asked.lock().value.entry(town.to_string()).or_insert(0) += 1
+        if not self.flying.lock().value.add(town.to_string()):
+            self.overlapped.store(True)
+        let slept = self.clock.sleep(Duration.seconds(2))
+        _ = self.flying.lock().value.remove(town.to_string())
+        slept?
+        match town:
+            case "Oulu":
+                return Ok("snow")
+            case "Kemi":
+                return Ok("sun")
+            case _:
+                return Err(UnknownTown(town.to_string()))
+
+suite "part 1, a limit for each client":
+    test "two requests in a window"(clock: TestClock):
+        let limiter = Limiter.new(clock, 2, Duration.seconds(10))
+        assert limiter.allow("aino") and limiter.allow("aino")
+        assert not limiter.allow("aino")
+        assert limiter.allow("eero")
+
+    test "a new window"(clock: TestClock):
+        let limiter = Limiter.new(clock, 1, Duration.seconds(10))
+        assert limiter.allow("aino")
+        clock.advance(Duration.seconds(9))
+        assert not limiter.allow("aino")
+        clock.advance(Duration.seconds(1))
+        assert limiter.allow("aino")
+
+    test "tasks share one limit"(clock: TestClock):
+        let limiter = Limiter.new(clock, 2, Duration.seconds(10))
+        let allowed = Atomic(0)
+        task.scope do s:
+            for _ in range(5):
+                s.spawn do:
+                    if limiter.allow("roni"):
+                        _ = allowed.fetch_add(1)
+        assert allowed.load() == 2
+
+suite "part 2, a cache":
+    test "a fresh answer is kept"(clock: TestClock):
+        let service = SlowWeather.new(clock)
+        let cache = Cache.new(clock, Duration.minutes(5))
+        assert cache.forecast(service, "Oulu") == Ok("snow")
+        clock.advance(Duration.minutes(4))
+        assert cache.forecast(service, "Oulu") == Ok("snow")
+        assert service.requests("Oulu") == 1
+
+    test "a stale answer is asked for again"(clock: TestClock):
+        let service = SlowWeather.new(clock)
+        let cache = Cache.new(clock, Duration.minutes(5))
+        assert cache.forecast(service, "Kemi") == Ok("sun")
+        clock.advance(Duration.minutes(6))
+        assert cache.forecast(service, "Kemi") == Ok("sun")
+        assert service.requests("Kemi") == 2
+
+    test "an error is not kept"(clock: TestClock):
+        let service = SlowWeather.new(clock)
+        let cache = Cache.new(clock, Duration.minutes(5))
+        let first = cache.forecast(service, "Atlantis")
+        assert first == Err(UnknownTown("Atlantis"))
+        assert cache.forecast(service, "Atlantis").is_err()
+        assert service.requests("Atlantis") == 2
+
+    test "tasks asking at once ask the service once"(clock: TestClock):
+        let service = SlowWeather.new(clock)
+        let cache = Cache.new(clock, Duration.minutes(5))
+        task.scope do s:
+            for _ in range(3):
+                s.spawn(() -> cache.forecast(service, "Oulu"))
+        assert service.requests("Oulu") == 1
+
+suite "part 3, towns side by side":
+    test "two towns at once take as long as one"(clock: TestClock):
+        let service = SlowWeather.new(clock)
+        let cache = Cache.new(clock, Duration.minutes(5))
+        let start = clock.now()
+        task.scope do s:
+            s.spawn(() -> cache.forecast(service, "Oulu"))
+            s.spawn(() -> cache.forecast(service, "Kemi"))
+        assert clock.now() - start == Duration.seconds(2)
+
+    test "one request for a town at a time, at every switch"(clock: TestClock):
+        let service = SlowWeather.new(clock)
+        let cache = Cache.new(clock, Duration.seconds(1))
+        let towns = ["Oulu", "Kemi", "Oulu", "Kemi", "Oulu"]
+        let one_at_a_time = () -> not service.overlapped.load()
+        sim.always("one request for a town at a time", one_at_a_time) do:
+            task.scope do s:
+                for town in towns:
+                    s.spawn(() -> cache.forecast(service, town))
+        assert service.requests("Oulu") >= 1

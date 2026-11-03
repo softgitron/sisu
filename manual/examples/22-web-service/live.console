@@ -1,0 +1,4 @@
+$ sisu run --watch live.sisu
+first: Hei!, epoch 0
+watch: epoch 1 replaces `greeting`
+second: Hei taas!, epoch 0

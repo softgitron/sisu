@@ -1,0 +1,37 @@
+##! Exercise 22.1, a note that outlives a crash. Kind: fix. Level: 2.
+##!
+##! `keep` writes a note to a file of its own under `notes/`, and must
+##! make it durable: once `keep` returns, a crash must not lose the note.
+##! Its tests crash a node of a simulated system, and fail. Run
+##! `sisu test notes.sisu`, read the reports, and fix `keep`, not the
+##! tests, so that every test passes. The hints are in chapter 22 of the
+##! tutorial, under "Exercise 22.1: a note that outlives a crash".
+
+from std.sim import Sim
+
+## Writes `text` to the file `notes/NAME`, durably.
+def keep(fs: Fs, name: str, text: str) -> ! IoError:
+    fs.create_dir("notes")?
+    let path = Path.new("notes/{name}")
+    fs.write_text(path, text)?
+    fs.sync(path)?
+    fs.sync("notes")?
+    fs.sync(".")?
+    return Ok(())
+
+test "a note outlives a crash":
+    let sim = Sim.new()
+    let laptop = sim.node("laptop")
+    let fs = sim.system(laptop).fs
+    keep(fs, "sauna", "heat it at six").expect("written")
+    sim.crash(laptop)
+    assert fs.read_to_string("notes/sauna") == Ok("heat it at six")
+
+test "every note outlives it":
+    let sim = Sim.new()
+    let laptop = sim.node("laptop")
+    let fs = sim.system(laptop).fs
+    keep(fs, "lake", "too cold").expect("written")
+    keep(fs, "stove", "more wood").expect("written")
+    sim.crash(laptop)
+    assert fs.list_dir("notes").map((paths) -> len(paths)) == Ok(2)

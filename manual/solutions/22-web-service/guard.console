@@ -1,0 +1,35 @@
+$ sisu test guard.sisu
+warning[W0001]: typed hole `Limiter.new` of type `Limiter`
+  --> guard.sisu:47:16
+   |
+47 |         return todo("Limiter.new")
+   |                ^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `allow` of type `bool`
+  --> guard.sisu:51:16
+   |
+51 |         return todo("allow")
+   |                ^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `Cache.new` of type `Cache`
+  --> guard.sisu:61:16
+   |
+61 |         return todo("Cache.new")
+   |                ^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `forecast` of type `String ! {TaskError, WeatherError}`
+  --> guard.sisu:68:16
+   |
+68 |         return todo("forecast")
+   |                ^^^^^^^^^^^^^^^^
+
+test "part 1, a limit for each client/two requests in a window" ... blocked by todo("Limiter.new")
+test "part 1, a limit for each client/a new window" ... blocked by todo("Limiter.new")
+test "part 1, a limit for each client/tasks share one limit" ... blocked by todo("Limiter.new")
+test "part 2, a cache/a fresh answer is kept" ... blocked by todo("Cache.new")
+test "part 2, a cache/a stale answer is asked for again" ... blocked by todo("Cache.new")
+test "part 2, a cache/an error is not kept" ... blocked by todo("Cache.new")
+test "part 2, a cache/tasks asking at once ask the service once" ... blocked by todo("Cache.new")
+test "part 3, towns side by side/two towns at once take as long as one" ... blocked by todo("Cache.new")
+test "part 3, towns side by side/one request for a town at a time, at every switch" ... blocked by todo("Cache.new")
+0 passed, 0 failed, 9 blocked

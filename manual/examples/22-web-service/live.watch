@@ -1,0 +1,5 @@
+first: Hei!, epoch 0
+second: Hei taas!, epoch 0
+--- stderr
+watch: epoch 1 replaces `greeting`
+--- status 0

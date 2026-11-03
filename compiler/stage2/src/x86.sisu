@@ -1,0 +1,1266 @@
+##! The x86-64 Linux debug backend in Sisu (D-087, step 2): LIR compiled to
+##! machine code in one pass over each function, after one analysis pass,
+##! as TPDE compiles LLVM IR (docs/architecture.md, "Stage 2", "The Sisu
+##! backend"; decisions 306 to 311).
+##!
+##! Every function has a frame pointer, and every frame slot a fixed offset
+##! from it: the callee-saved registers the function uses, LIR's slots, its
+##! variables, and a home for each value that lives past its block or is
+##! spilled. Temporaries live in registers that a call keeps (`rbx`, `r12`
+##! to `r15`), allocated block by block: a value used only in the block
+##! that defines it stays in its register until its last use, and is
+##! spilled to its home only when the registers run out; a value used in
+##! another block, a block's parameter and a function's parameter are
+##! written to their homes when they are defined, and read from there in
+##! the other blocks. The registers a call clobbers are the scratch of each
+##! instruction. Calls follow the System V convention, which Sisu's own
+##! (decision 189) is an instance of.
+
+from stage2.lirread import (
+    B_BAND_NOT,
+    B_FADD,
+    B_FDIV,
+    B_FMUL,
+    B_FSUB,
+    B_IMUL,
+    B_ISHL,
+    B_SDIV,
+    B_SREM,
+    B_SSHR,
+    CC_SGE,
+    CC_SGT,
+    CC_SLE,
+    CC_SLT,
+    F_PROBED,
+    F_UNPROBED,
+    L_S8,
+    L_U8,
+    LirFunc,
+    O_SADD,
+    O_SSUB,
+    Op,
+    Sig,
+    T_F32,
+    T_F64,
+    T_I64,
+    T_I8,
+    U_BNOT,
+    U_INEG,
+    is_float,
+    type_bytes,
+)
+from stage2.x64 import (
+    A_ADD,
+    A_AND,
+    A_CMP,
+    A_OR,
+    A_SUB,
+    A_XOR,
+    Code,
+    R10,
+    R11,
+    R12,
+    R13,
+    R14,
+    R15,
+    R8,
+    R9,
+    RAX,
+    RBP,
+    RBX,
+    RCX,
+    RDI,
+    RDX,
+    RSI,
+    RSP,
+    S_SAR,
+    S_SHL,
+    U_IDIV,
+    U_NEG,
+    U_NOT,
+    X_A,
+    X_AE,
+    X_B,
+    X_BE,
+    X_E,
+    X_G,
+    X_GE,
+    X_L,
+    X_LE,
+    X_NE,
+    X_NP,
+    X_O,
+    X_P,
+    fits32,
+)
+
+## Why a function was not compiled: what, and the function.
+pub error X86Error:
+    Unsupported(what: String, function: String)
+
+pure def unsupported[T](what: str) -> T ! X86Error:
+    return Err(Unsupported(what=what.to_string(), function=String.new()))
+
+## The relocations the backend writes (the System V x86-64 ABI's numbers).
+pub const R_64: int = 1
+pub const R_PC32: int = 2
+pub const R_PLT32: int = 4
+pub const R_REX_GOTPCRELX: int = 42
+
+## A relocation of a section: where, against which symbol (a name, or a
+## section's: `.text`, `.rodata`, `.data.rel.ro`), how, and the addend.
+pub struct Reloc:
+    pub offset: int
+    pub symbol: String
+    pub kind: int
+    pub addend: int
+
+## A function the object defines: its symbol, where its code is and how
+## long, and whether it is C's `main` (global) or the program's (local).
+pub struct Defined:
+    pub symbol: String
+    pub offset: int
+    pub size: int
+    pub global_: bool
+
+## Where a LIR datum is: a symbol of the runtime's, or bytes of the object
+## (in `.rodata`, or in `.data.rel.ro` when they hold functions' addresses).
+pub enum Datum:
+    Import(String)
+    Local(bool, int)
+
+## Where the code of a source line starts: the offset in `.text`, the file,
+## the line and the column (for the line table, decision 227).
+pub struct Row:
+    pub offset: int
+    pub file: int
+    pub line: int
+    pub col: int
+
+## The object being built: its sections, symbols and relocations.
+pub struct Obj:
+    pub text: Code
+    pub rodata: Code
+    pub relro: Code
+    pub text_relocs: list[Reloc]
+    pub relro_relocs: list[Reloc]
+    pub defined: list[Defined]
+    pub imports: list[String]
+    imported: set[String]
+    pub data: list[Datum]
+    ## The text offset of each function defined so far, by symbol.
+    placed: dict[String, int]
+    ## Displacements in `.text` to a function of the object defined later:
+    ## where, and the symbol (`call rel32` or `lea [rip + rel32]`).
+    pending: list[(int, String)]
+    ## The largest top of a probed function's frame, and the largest frame
+    ## of an unprobed one (decision 234).
+    max_top: int
+    max_unprobed: int
+    pub rows: list[Row]
+    ## Each function's start and end in `.text`, its name, file and line,
+    ## for the debug information.
+    pub ranges: list[(int, int, String, int?, int)]
+
+## What a call adds to the callee's frame beyond what the frames say (the
+## return address, the saved frame pointer, the arguments on the stack), as
+## the Rust backend counts it.
+const FRAME_EXTRA: int = 256
+
+## The bytes below the frame pointer where the callee-saved registers the
+## allocator uses are kept: `rbx`, `r12`, `r13`, `r14` and `r15`.
+const SAVED: int = 40
+
+impl Obj:
+    pub pure def new() -> Obj:
+        return Obj(
+            text=Code.new(),
+            rodata=Code.new(),
+            relro=Code.new(),
+            text_relocs=[],
+            relro_relocs=[],
+            defined=[],
+            imports=[],
+            imported=set(),
+            data=[],
+            placed={},
+            pending=[],
+            max_top=0,
+            max_unprobed=0,
+            rows=[],
+            ranges=[],
+        )
+
+    ## The symbol `name` named by a relocation and not defined here: an
+    ## import, once.
+    pub pure def import_symbol(mut self, name: str):
+        if not self.imported.contains(name.to_string()):
+            _ = self.imported.add(name.to_string())
+            self.imports.push(name.to_string())
+
+    ## `data dN import NAME`.
+    pub pure def import_data(mut self, name: str):
+        self.data.push(Datum.Import(name.to_string()))
+
+    ## Read-only data, with the words that hold functions' addresses.
+    pub pure def local_data(mut self, bytes: list[int], align: int, funcs: list[(int, String)]):
+        if funcs.is_empty():
+            self.rodata.align(max(align, 1), 0)
+            self.data.push(Datum.Local(False, self.rodata.pos()))
+            self.rodata.append(bytes)
+            return
+        self.relro.align(max(align, 8), 0)
+        let at = self.relro.pos()
+        self.data.push(Datum.Local(True, at))
+        self.relro.append(bytes)
+        for (off, symbol) in funcs:
+            self.relro_relocs.push(
+                Reloc(offset=at + off, symbol=symbol.copy(), kind=R_64, addend=0)
+            )
+
+    ## The probe reserve of a task's stack, from the frames compiled so far
+    ## (decision 234).
+    pure def reserve(self) -> int:
+        return self.max_unprobed + self.max_top + 2 * FRAME_EXTRA
+
+    ## The displacements to functions defined after the code that named
+    ## them, filled in now that every function is placed; one not defined
+    ## here is an import, relocated.
+    pub pure def finish(mut self):
+        let pending = self.pending.copy()
+        for (at, symbol) in pending:
+            if let Some(target) = self.placed.get(symbol.copy()):
+                self.text.patch32(at, target - (at + 4))
+            else:
+                self.text_relocs.push(
+                    Reloc(offset=at, symbol=symbol.copy(), kind=R_PLT32, addend=-4)
+                )
+                self.import_symbol(symbol)
+        self.pending = []
+
+    ## Compiles one function into `.text`.
+    pub pure def function(
+        mut self, f: LirFunc, sigs: dict[String, Sig], locals: set[String]
+    ) -> () ! X86Error:
+        var g = Gen.new(f)
+        let r = g.compile(f, sigs, self.data, self.reserve())
+        if let Err(Unsupported(what, _)) = r:
+            return Err(Unsupported(what=what.copy(), function=f.symbol.copy()))
+        self.place(f, g, locals)
+        return Ok(())
+
+    ## A compiled function's prologue, body and epilogue at the end of
+    ## `.text`, its references resolved or relocated.
+    pure def place(mut self, f: LirFunc, own g: Gen, locals: set[String]):
+        self.text.align(16, 204)
+        let start = self.text.pos()
+        let pro = g.prologue(f)
+        self.text.append(pro.bytes)
+        let base = self.text.pos()
+        self.text.append(g.body.bytes)
+        self.text.append(g.epilogue().bytes)
+        let end = self.text.pos()
+        for r in g.relocs:
+            if r.kind == R_PLT32 or r.kind == R_REX_GOTPCRELX:
+                self.import_symbol(r.symbol)
+            self.text_relocs.push(
+                Reloc(offset=base + r.offset, symbol=r.symbol.copy(), kind=r.kind, addend=r.addend)
+            )
+        for (at, symbol) in g.calls:
+            if let Some(target) = self.placed.get(symbol.copy()):
+                self.text.patch32(base + at, target - (base + at + 4))
+            elif locals.contains(symbol.copy()) or symbol == f.symbol:
+                self.pending.push((base + at, symbol.copy()))
+            else:
+                self.text_relocs.push(
+                    Reloc(offset=base + at, symbol=symbol.copy(), kind=R_PLT32, addend=-4)
+                )
+                self.import_symbol(symbol)
+        if not self.placed.contains(f.symbol.copy()):
+            _ = self.placed.insert(f.symbol.copy(), start)
+        # A call of the function itself, made before it was placed.
+        var still: list[(int, String)] = []
+        for (at, symbol) in self.pending:
+            if symbol == f.symbol:
+                self.text.patch32(at, start - (at + 4))
+            else:
+                still.push((at, symbol.copy()))
+        self.pending = still
+        self.defined.push(
+            Defined(
+                symbol=f.symbol.copy(), offset=start, size=end - start, global_=f.symbol == "main"
+            )
+        )
+        for row in g.rows:
+            self.rows.push(Row(offset=base + row.offset, file=row.file, line=row.line, col=row.col))
+        self.ranges.push((start, end, f.name.copy(), f.source, f.line))
+        if f.frame == F_PROBED:
+            self.max_top = max(self.max_top, 16 + SAVED)
+        elif f.frame == F_UNPROBED:
+            self.max_unprobed = max(self.max_unprobed, 16 + g.frame_size())
+
+## The registers the allocator hands out, which a call keeps.
+pure def pool() -> list[int]:
+    return [RBX, R12, R13, R14, R15]
+
+## Where integer arguments go, in order.
+pure def arg_regs() -> list[int]:
+    return [RDI, RSI, RDX, RCX, R8, R9]
+
+## The condition of `setcc` and `jcc` for an integer comparison.
+pure def int_cond(cc: int) -> int:
+    return match cc:
+        case 0: X_E
+        case 1: X_NE
+        case 2: X_L
+        case 3: X_LE
+        case 4: X_G
+        case 5: X_GE
+        case 6: X_B
+        case 7: X_BE
+        case 8: X_A
+        case _: X_AE
+
+## Whether an integer comparison is a signed one.
+pure def signed_cc(cc: int) -> bool:
+    return cc == CC_SLT or cc == CC_SLE or cc == CC_SGT or cc == CC_SGE
+
+pure def align_up(x: int, a: int) -> int:
+    return (x + a - 1) // a * a
+
+## One function as it is compiled: its body's code, its frame, and where
+## each value is.
+pub struct Gen:
+    pub body: Code
+    ## The offset from the frame pointer of each LIR slot and variable.
+    slot_off: list[int]
+    var_off: list[int]
+    ## The bytes below the frame pointer the frame has so far.
+    frame: int
+    ## The offset of each value's home (0: none yet).
+    home: list[int]
+    ## The register each value is in (-1: none), and the value each
+    ## register holds.
+    reg_of: list[int]
+    holder: list[int]
+    ## The analysis: the block that defines each value, whether a block
+    ## other than that one uses it, the last operation of that block that
+    ## uses it, and each block's parameters.
+    def_block: list[int]
+    global_: list[bool]
+    last_use: list[int]
+    params: list[list[int]]
+    types: list[int]
+    ## The operation being compiled, and the block it is in.
+    at: int
+    ## The code offset of each block (-1 until placed), and the jumps to
+    ## each block placed later.
+    block_pos: list[int]
+    fixups: list[(int, int)]
+    ## The jumps to the epilogue.
+    returns: list[int]
+    ## The callee-saved registers used.
+    saved: list[bool]
+    ## The bytes of arguments the calls pass on the stack, at most.
+    out_args: int
+    pub relocs: list[Reloc]
+    ## Calls and addresses of functions, resolved when they are placed.
+    pub calls: list[(int, String)]
+    pub rows: list[Row]
+    file: int
+    ## Whether the code since the last terminator can be reached.
+    live: bool
+
+impl Gen:
+    pub pure def new(f: LirFunc) -> Gen:
+        let n = len(f.types)
+        var minus: list[int] = []
+        var zeros: list[int] = []
+        var falses: list[bool] = []
+        for _ in range(n):
+            minus.push(-1)
+            zeros.push(0)
+            falses.push(False)
+        var holder: list[int] = []
+        var saved: list[bool] = []
+        for _ in range(16):
+            holder.push(-1)
+            saved.push(False)
+        return Gen(
+            body=Code.new(),
+            slot_off=[],
+            var_off=[],
+            frame=SAVED,
+            home=zeros.copy(),
+            reg_of=minus.copy(),
+            holder=holder,
+            def_block=minus.copy(),
+            global_=falses,
+            last_use=minus,
+            params=[],
+            types=f.types.copy(),
+            at=0,
+            block_pos=[],
+            fixups=[],
+            returns=[],
+            saved=saved,
+            out_args=0,
+            relocs=[],
+            calls=[],
+            rows=[],
+            file=f.source ?? 0,
+            live=True,
+        )
+
+    ## The frame's bytes below the frame pointer, a multiple of 16, so
+    ## that `rsp` is aligned at every call.
+    pub pure def frame_size(self) -> int:
+        return align_up(self.frame + self.out_args, 16)
+
+    # ----------------------------------------------------------- analysis
+
+    ## The one pass before the code: where each value is defined and used,
+    ## and each block's parameters.
+    pure def analyse(mut self, f: LirFunc):
+        var nblocks = 0
+        for op in f.ops:
+            match op:
+                case Op.Block(b, _):
+                    nblocks = max(nblocks, b + 1)
+                case Op.Param(b):
+                    nblocks = max(nblocks, b + 1)
+                case Op.Jump(b, _):
+                    nblocks = max(nblocks, b + 1)
+                case Op.Brif(_, a, _, b, _):
+                    nblocks = max(nblocks, max(a, b) + 1)
+                case Op.Switch(_, d, cases):
+                    nblocks = max(nblocks, d + 1)
+                    for (_, b) in cases:
+                        nblocks = max(nblocks, b + 1)
+                case _:
+                    pass
+        for _ in range(nblocks):
+            self.params.push([])
+            self.block_pos.push(-1)
+        let nparams = len(self.types) - count_defined(f)
+        for v in range(nparams):
+            self.def_block[v] = 0
+            self.global_[v] = True
+        var cur = 0
+        var next = nparams
+        for i in range(len(f.ops)):
+            let op = ref f.ops[i]
+            if let Op.Block(b, _) = op:
+                cur = b
+                continue
+            if let Op.Param(b) = op:
+                self.def_block[next] = b
+                self.global_[next] = True
+                self.params[b].push(next)
+                next += 1
+                continue
+            for u in uses(op):
+                self.use_in(u, cur, i)
+            for _ in range(defines(op)):
+                self.def_block[next] = cur
+                next += 1
+
+    pure def use_in(mut self, v: int, block: int, i: int):
+        if v < 0 or v >= len(self.def_block):
+            return
+        if self.def_block[v] != block:
+            self.global_[v] = True
+        else:
+            self.last_use[v] = i
+
+    # ------------------------------------------------------------- frames
+
+    ## A new home of 8 bytes in the frame: its offset.
+    pure def new_home(mut self) -> int:
+        self.frame += 8
+        return -self.frame
+
+    pure def home_of(mut self, v: int) -> int:
+        if self.home[v] == 0:
+            self.home[v] = self.new_home()
+        return self.home[v]
+
+    # ----------------------------------------------------------- registers
+
+    ## The register holding `v` for reading: its own, or `scratch` loaded
+    ## from its home.
+    pure def get(mut self, v: int, scratch: int) -> int:
+        let r = self.reg_of[v]
+        if r >= 0:
+            return r
+        let h = self.home_of(v)
+        self.body.load(8, scratch, RBP, h)
+        return scratch
+
+    ## `v` into exactly `dst`.
+    pure def get_into(mut self, v: int, dst: int):
+        let r = self.reg_of[v]
+        if r >= 0:
+            self.body.mov(dst, r)
+        else:
+            let h = self.home_of(v)
+            self.body.load(8, dst, RBP, h)
+
+    ## The operation `self.at` used `v`: its register is free after its
+    ## last use.
+    pure def done(mut self, v: int):
+        let r = self.reg_of[v]
+        if r >= 0 and self.last_use[v] <= self.at:
+            self.reg_of[v] = -1
+            self.holder[r] = -1
+
+    ## `v`, just computed in `src`, put where its uses find it: its home
+    ## when another block uses it, and a register of the pool while this
+    ## block still does.
+    pure def define(mut self, v: int, src: int):
+        if self.global_[v]:
+            let h = self.home_of(v)
+            self.body.store(8, src, RBP, h)
+        if self.last_use[v] <= self.at:
+            return
+        let r = self.free_reg()
+        self.body.mov(r, src)
+        self.reg_of[v] = r
+        self.holder[r] = v
+
+    ## A register of the pool for a new value: a free one, else the one
+    ## whose value's last use is furthest, spilled to its home.
+    pure def free_reg(mut self) -> int:
+        var victim = -1
+        var furthest = -1
+        for r in pool():
+            let v = self.holder[r]
+            if v < 0:
+                self.saved[r] = True
+                return r
+            if self.last_use[v] > furthest:
+                furthest = self.last_use[v]
+                victim = r
+        let v = self.holder[victim]
+        if not self.global_[v]:
+            let h = self.home_of(v)
+            self.body.store(8, victim, RBP, h)
+        self.reg_of[v] = -1
+        self.holder[victim] = -1
+        return victim
+
+    ## Every register freed: a new block starts with its values in their
+    ## homes.
+    pure def clear(mut self):
+        for r in pool():
+            let v = self.holder[r]
+            if v >= 0:
+                self.reg_of[v] = -1
+                self.holder[r] = -1
+
+    # ------------------------------------------------------------ helpers
+
+    pure def ty(self, v: int) -> int:
+        if v >= 0 and v < len(self.types):
+            return self.types[v]
+        return T_I64
+
+    ## `src` (a value of type `t`) extended to 64 bits in `dst`, signed or
+    ## not.
+    pure def widen(mut self, dst: int, src: int, t: int, signed: bool):
+        match t:
+            case 0:
+                if signed:
+                    self.body.movsx8(dst, src)
+                else:
+                    self.body.movzx8(dst, src)
+            case 1:
+                if signed:
+                    self.body.movsx16(dst, src)
+                else:
+                    self.body.movzx16(dst, src)
+            case 2 | 4:
+                if signed:
+                    self.body.movsxd(dst, src)
+                else:
+                    self.body.mov32(dst, src)
+            case _:
+                self.body.mov(dst, src)
+
+    ## `imm`, a constant of type `t`, as the 64-bit number `widen` makes of
+    ## the same bits.
+    pure def widen_imm(self, imm: int, t: int, signed: bool) -> int:
+        let bits = type_bytes(t) * 8
+        if bits >= 64:
+            return imm
+        let m = (1 << bits) - 1
+        let low = imm & m
+        if signed and low >= (1 << (bits - 1)):
+            return low - (1 << bits)
+        return low
+
+    ## A jump to block `b`: placed, or fixed up when it is.
+    pure def jump_to(mut self, b: int):
+        let at = self.body.jmp()
+        self.target(at, b)
+
+    pure def jcc_to(mut self, cc: int, b: int):
+        let at = self.body.jcc(cc)
+        self.target(at, b)
+
+    pure def target(mut self, at: int, b: int):
+        if b < len(self.block_pos) and self.block_pos[b] >= 0:
+            self.body.patch32(at, self.block_pos[b] - (at + 4))
+        else:
+            self.fixups.push((at, b))
+
+    ## The arguments of an edge into block `b` written to its parameters'
+    ## homes: all read first, then all written, as the edge's values move at
+    ## once.
+    pure def edge(mut self, b: int, args: list[int]) -> () ! X86Error:
+        if args.is_empty():
+            return Ok(())
+        if b >= len(self.params) or len(self.params[b]) != len(args):
+            return unsupported("a jump to `b{b}` with other arguments than its parameters")
+        let scratch = [RAX, RCX, RDX, RSI, RDI, R8, R9, R10, R11]
+        if len(args) > len(scratch):
+            return unsupported("a jump with more than {len(scratch)} arguments")
+        var regs: list[int] = []
+        for k in range(len(args)):
+            regs.push(self.get(args[k], scratch[k]))
+        let ps = self.params[b].copy()
+        for k in range(len(args)):
+            let h = self.home_of(ps[k])
+            self.body.store(8, regs[k], RBP, h)
+        return Ok(())
+
+    # --------------------------------------------------------------- code
+
+    pub pure def compile(
+        mut self, f: LirFunc, sigs: dict[String, Sig], data: list[Datum], reserve: int
+    ) -> () ! X86Error:
+        self.analyse(f)
+        # The frame: LIR's slots, then the variables.
+        for s in f.slots:
+            self.frame = align_up(self.frame + max(s, 8), 8)
+            self.slot_off.push(-self.frame)
+        for _ in range(f.vars):
+            let h = self.new_home()
+            self.var_off.push(h)
+        # The parameters' homes: the registers' are written by the
+        # prologue, the stack's are the caller's.
+        let sig = sigs.get(f.symbol.copy()) else:
+            return unsupported("a function that is not declared")
+        var ints = 0
+        var floats = 0
+        var stack = 0
+        for k in range(len(sig.params)):
+            let t = sig.params[k]
+            if is_float(t):
+                if floats < 8:
+                    floats += 1
+                    continue
+            elif ints < 6:
+                ints += 1
+                continue
+            self.home[k] = 16 + 8 * stack
+            stack += 1
+        var next = len(sig.params)
+        for i in range(len(f.ops)):
+            self.at = i
+            let op = ref f.ops[i]
+            self.op(op, next, sigs, data, reserve)?
+            if not is_block(op):
+                next += defines(op)
+        for (at, b) in self.fixups:
+            if b >= len(self.block_pos) or self.block_pos[b] < 0:
+                return unsupported("a jump to a block that is never placed")
+            self.body.patch32(at, self.block_pos[b] - (at + 4))
+        let epi = self.body.pos()
+        for at in self.returns:
+            self.body.patch32(at, epi - (at + 4))
+        return Ok(())
+
+    ## The prologue, made once the body says how large the frame is and
+    ## which registers it uses: the frame pointer, the frame, the
+    ## callee-saved registers kept, and the parameters that come in
+    ## registers written to their homes.
+    pub pure def prologue(self, f: LirFunc) -> Code:
+        var c = Code.new()
+        c.push(RBP)
+        c.mov(RBP, RSP)
+        let size = self.frame_size()
+        if size > 0:
+            c.alu_imm(True, A_SUB, RSP, size)
+        let regs = pool()
+        for k in range(len(regs)):
+            if self.saved[regs[k]]:
+                c.store(8, regs[k], RBP, -8 * (k + 1))
+        var ints = 0
+        var floats = 0
+        let ars = arg_regs()
+        let np = len(self.types) - count_defined(f)
+        for v in range(np):
+            let t = self.types[v]
+            if is_float(t):
+                if floats < 8:
+                    if self.home[v] != 0:
+                        if t == T_F64:
+                            c.movq_from_x(RAX, floats)
+                        else:
+                            c.movd_from_x(RAX, floats)
+                        c.store(8, RAX, RBP, self.home[v])
+                    floats += 1
+            elif ints < 6:
+                if self.home[v] != 0:
+                    c.store(8, ars[ints], RBP, self.home[v])
+                ints += 1
+        return c
+
+    ## The epilogue every return jumps to: the callee-saved registers back,
+    ## the frame left.
+    pub pure def epilogue(self) -> Code:
+        var c = Code.new()
+        let regs = pool()
+        for k in range(len(regs)):
+            if self.saved[regs[k]]:
+                c.load(8, regs[k], RBP, -8 * (k + 1))
+        c.leave()
+        c.ret()
+        return c
+
+    ## One operation; `v` is the number of the first value it defines.
+    pure def op(
+        mut self, op: Op, v: int, sigs: dict[String, Sig], data: list[Datum], reserve: int
+    ) -> () ! X86Error:
+        match op:
+            case Op.Block(b, _):
+                self.clear()
+                if b < len(self.block_pos):
+                    self.block_pos[b] = self.body.pos()
+                self.live = True
+            case Op.Loc(line, col):
+                self.rows.push(Row(offset=self.body.pos(), file=self.file, line=line, col=col))
+            case Op.Iconst(_, n):
+                self.body.mov_imm(RAX, n)
+                self.define(v, RAX)
+            case Op.Bin(k, a, b):
+                self.binary(v, k, a, b)
+            case Op.BinImm(k, a, n):
+                self.binary_imm(v, k, a, n)
+            case Op.Un(k, a):
+                let t = self.ty(a)
+                self.get_into(a, RAX)
+                self.done(a)
+                if k == U_INEG:
+                    self.body.unary(True, U_NEG, RAX)
+                elif k == U_BNOT:
+                    self.body.unary(True, U_NOT, RAX)
+                elif t == T_F64:
+                    self.body.btc(RAX, 63)
+                else:
+                    self.body.alu_imm(False, A_XOR, RAX, -2147483648)
+                self.define(v, RAX)
+            case Op.Icmp(cc, a, b):
+                let t = self.ty(a)
+                let s = signed_cc(cc)
+                let ra = self.get(a, RAX)
+                let rb = self.get(b, RCX)
+                if type_bytes(t) < 8:
+                    self.widen(RAX, ra, t, s)
+                    self.widen(RCX, rb, t, s)
+                    self.body.alu(True, A_CMP, RAX, RCX)
+                else:
+                    self.body.alu(True, A_CMP, ra, rb)
+                self.done(a)
+                self.done(b)
+                self.flag(v, int_cond(cc))
+            case Op.IcmpImm(cc, a, n):
+                let t = self.ty(a)
+                let s = signed_cc(cc)
+                var ra = self.get(a, RAX)
+                if type_bytes(t) < 8:
+                    self.widen(RAX, ra, t, s)
+                    ra = RAX
+                let imm = self.widen_imm(n, t, s)
+                if fits32(imm):
+                    self.body.alu_imm(True, A_CMP, ra, imm)
+                else:
+                    self.body.mov_imm(RCX, imm)
+                    self.body.alu(True, A_CMP, ra, RCX)
+                self.done(a)
+                self.flag(v, int_cond(cc))
+            case Op.Fcmp(cc, a, b):
+                self.fcmp(v, cc, a, b)
+            case Op.Ovf(k, a, b):
+                let w = type_bytes(self.ty(a)) == 8
+                self.get_into(a, RAX)
+                let rb = self.get(b, RCX)
+                if k == O_SADD:
+                    self.body.alu(w, A_ADD, RAX, rb)
+                elif k == O_SSUB:
+                    self.body.alu(w, A_SUB, RAX, rb)
+                else:
+                    self.body.imul(w, RAX, rb)
+                self.body.setcc(X_O, RCX)
+                self.body.movzx8(RCX, RCX)
+                self.done(a)
+                self.done(b)
+                self.define(v, RAX)
+                self.define(v + 1, RCX)
+            case Op.Select(c, a, b):
+                let tc = self.ty(c)
+                let rc = self.get(c, RDX)
+                self.body.test(type_bytes(tc), rc, rc)
+                self.get_into(b, RAX)
+                let ra = self.get(a, RCX)
+                self.body.cmov(X_NE, RAX, ra)
+                self.done(c)
+                self.done(a)
+                self.done(b)
+                self.define(v, RAX)
+            case Op.Conv(k, t, a):
+                self.convert(v, k, t, a)
+            case Op.Load(k, a, off):
+                let ra = self.get(a, RCX)
+                if k == L_U8:
+                    self.body.load(1, RAX, ra, off)
+                elif k == L_S8:
+                    self.body.load_s8(RAX, ra, off)
+                else:
+                    self.body.load(type_bytes(k), RAX, ra, off)
+                self.done(a)
+                self.define(v, RAX)
+            case Op.Store(x, a, off):
+                let rx = self.get(x, RAX)
+                let ra = self.get(a, RCX)
+                self.body.store(type_bytes(self.ty(x)), rx, ra, off)
+                self.done(x)
+                self.done(a)
+            case Op.StackAddr(s):
+                self.body.lea(RAX, RBP, self.slot_off[s])
+                self.define(v, RAX)
+            case Op.StackLoad(s):
+                self.body.load(8, RAX, RBP, self.slot_off[s])
+                self.define(v, RAX)
+            case Op.StackStore(x, s):
+                let rx = self.get(x, RAX)
+                self.body.store(8, rx, RBP, self.slot_off[s])
+                self.done(x)
+            case Op.SymbolValue(d):
+                if d >= len(data):
+                    return unsupported("the data `d{d}`, which is not declared")
+                match data[d]:
+                    case Datum.Import(name):
+                        let at = self.body.load_rip(RAX)
+                        self.relocs.push(
+                            Reloc(offset=at, symbol=name.copy(), kind=R_REX_GOTPCRELX, addend=-4)
+                        )
+                    case Datum.Local(relro, off):
+                        let at = self.body.lea_rip(RAX)
+                        let section = if relro: ".data.rel.ro" else: ".rodata"
+                        self.relocs.push(
+                            Reloc(
+                                offset=at, symbol=section.to_string(), kind=R_PC32, addend=off - 4
+                            )
+                        )
+                self.define(v, RAX)
+            case Op.FuncAddr(symbol):
+                let at = self.body.lea_rip(RAX)
+                self.calls.push((at, symbol.copy()))
+                self.define(v, RAX)
+            case Op.GetSp:
+                self.body.mov(RAX, RSP)
+                self.define(v, RAX)
+            case Op.Call(symbol, args, _):
+                let sig = sigs.get(symbol.copy()) else:
+                    return unsupported("a call of `{symbol}`, which is not declared")
+                self.call(v, sig.params, sig.results, args, -1)?
+                let at = self.body.call()
+                self.calls.push((at, symbol.copy()))
+                self.results(v, sig.results)
+            case Op.CallIndirect(n, fv, args, _):
+                var params: list[int] = []
+                for _ in range(n + 1):
+                    params.push(T_I64)
+                self.call(v, params, [T_I8], args, fv)?
+                self.body.call_reg(R11)
+                self.results(v, [T_I8])
+            case Op.Memcpy(d, s, n):
+                self.get_into(d, RDI)
+                self.get_into(s, RSI)
+                self.get_into(n, RDX)
+                self.done(d)
+                self.done(s)
+                self.done(n)
+                let at = self.body.call()
+                self.calls.push((at, "memcpy".to_string()))
+            case Op.Use(x):
+                self.body.load(8, RAX, RBP, self.var_off[x])
+                self.define(v, RAX)
+            case Op.Def(x, a):
+                let ra = self.get(a, RAX)
+                self.body.store(8, ra, RBP, self.var_off[x])
+                self.done(a)
+            case Op.Param(_):
+                pass
+            case Op.ProbeReserve:
+                self.body.mov_imm(RAX, reserve)
+                self.define(v, RAX)
+            case Op.Jump(b, args):
+                self.edge(b, args)?
+                for a in args:
+                    self.done(a)
+                self.jump_to(b)
+                self.live = False
+            case Op.Brif(c, a, aargs, b, bargs):
+                let tc = self.ty(c)
+                let rc = self.get(c, RAX)
+                self.body.test(type_bytes(tc), rc, rc)
+                self.done(c)
+                if aargs.is_empty() and bargs.is_empty():
+                    self.jcc_to(X_NE, a)
+                    self.jump_to(b)
+                else:
+                    let skip = self.body.jcc(X_E)
+                    self.edge(a, aargs)?
+                    self.jump_to(a)
+                    self.body.patch32(skip, self.body.pos() - (skip + 4))
+                    self.edge(b, bargs)?
+                    self.jump_to(b)
+                for x in aargs:
+                    self.done(x)
+                for x in bargs:
+                    self.done(x)
+                self.live = False
+            case Op.Switch(x, d, cases):
+                let t = self.ty(x)
+                let rx = self.get(x, RAX)
+                self.widen(RAX, rx, t, False)
+                self.done(x)
+                for (k, b) in cases:
+                    if fits32(k):
+                        self.body.alu_imm(True, A_CMP, RAX, k)
+                    else:
+                        self.body.mov_imm(RCX, k)
+                        self.body.alu(True, A_CMP, RAX, RCX)
+                    self.jcc_to(X_E, b)
+                self.jump_to(d)
+                self.live = False
+            case Op.Return(vs):
+                if len(vs) > 1:
+                    return unsupported("a return of {len(vs)} values")
+                if len(vs) == 1:
+                    let t = self.ty(vs[0])
+                    if is_float(t):
+                        self.get_into(vs[0], RAX)
+                        if t == T_F64:
+                            self.body.movq_to_x(0, RAX)
+                        else:
+                            self.body.movd_to_x(0, RAX)
+                    else:
+                        self.get_into(vs[0], RAX)
+                    self.done(vs[0])
+                self.returns.push(self.body.jmp())
+                self.live = False
+            case Op.Trap(_):
+                self.body.ud2()
+                self.live = False
+        return Ok(())
+
+    ## A comparison's flags as the `i8` value `v`, 1 or 0.
+    pure def flag(mut self, v: int, cond: int):
+        self.body.setcc(cond, RAX)
+        self.body.movzx8(RAX, RAX)
+        self.define(v, RAX)
+
+    pure def binary(mut self, v: int, k: int, a: int, b: int):
+        let t = self.ty(a)
+        let w = type_bytes(t) == 8
+        if k == B_FADD or k == B_FSUB or k == B_FMUL or k == B_FDIV:
+            let double = t == T_F64
+            let ra = self.get(a, RAX)
+            let rb = self.get(b, RCX)
+            if double:
+                self.body.movq_to_x(0, ra)
+                self.body.movq_to_x(1, rb)
+            else:
+                self.body.movd_to_x(0, ra)
+                self.body.movd_to_x(1, rb)
+            let op = match k:
+                case 11: 88
+                case 12: 92
+                case 13: 89
+                case _: 94
+            self.body.sse(double, op, 0, 1)
+            if double:
+                self.body.movq_from_x(RAX, 0)
+            else:
+                self.body.movd_from_x(RAX, 0)
+            self.done(a)
+            self.done(b)
+            self.define(v, RAX)
+            return
+        if k == B_SDIV or k == B_SREM:
+            self.get_into(a, RAX)
+            var rb = self.get(b, RCX)
+            if rb == RAX or rb == RDX:
+                self.body.mov(RCX, rb)
+                rb = RCX
+            self.body.sign_rdx(w)
+            self.body.unary(w, U_IDIV, rb)
+            self.done(a)
+            self.done(b)
+            self.define(v, if k == B_SDIV: RAX else: RDX)
+            return
+        if k == B_ISHL or k == B_SSHR:
+            self.get_into(b, RCX)
+            self.get_into(a, RAX)
+            let bits = type_bytes(t) * 8
+            if bits < 32:
+                self.body.alu_imm(False, A_AND, RCX, bits - 1)
+                if k == B_SSHR:
+                    self.widen(RAX, RAX, t, True)
+            self.body.shift_cl(w, if k == B_ISHL: S_SHL else: S_SAR, RAX)
+            self.done(a)
+            self.done(b)
+            self.define(v, RAX)
+            return
+        if k == B_BAND_NOT:
+            self.get_into(b, RCX)
+            self.body.unary(True, U_NOT, RCX)
+            self.get_into(a, RAX)
+            self.body.alu(True, A_AND, RAX, RCX)
+            self.done(a)
+            self.done(b)
+            self.define(v, RAX)
+            return
+        self.get_into(a, RAX)
+        let rb = self.get(b, RCX)
+        match k:
+            case 0:
+                self.body.alu(True, A_ADD, RAX, rb)
+            case 1:
+                self.body.alu(True, A_SUB, RAX, rb)
+            case 2:
+                self.body.imul(True, RAX, rb)
+            case 7:
+                self.body.alu(True, A_AND, RAX, rb)
+            case 8:
+                self.body.alu(True, A_OR, RAX, rb)
+            case _:
+                self.body.alu(True, A_XOR, RAX, rb)
+        self.done(a)
+        self.done(b)
+        self.define(v, RAX)
+
+    pure def binary_imm(mut self, v: int, k: int, a: int, n: int):
+        let ra = self.get(a, RAX)
+        if not fits32(n):
+            self.body.mov_imm(RCX, n)
+            self.body.mov(RAX, ra)
+            match k:
+                case 0:
+                    self.body.alu(True, A_ADD, RAX, RCX)
+                case 2:
+                    self.body.imul(True, RAX, RCX)
+                case 9:
+                    self.body.alu(True, A_XOR, RAX, RCX)
+                case _:
+                    self.body.alu(True, A_OR, RAX, RCX)
+        elif k == B_IMUL:
+            self.body.imul_imm(True, RAX, ra, n)
+        else:
+            self.body.mov(RAX, ra)
+            match k:
+                case 0:
+                    self.body.alu_imm(True, A_ADD, RAX, n)
+                case 9:
+                    self.body.alu_imm(True, A_XOR, RAX, n)
+                case _:
+                    self.body.alu_imm(True, A_OR, RAX, n)
+        self.done(a)
+        self.define(v, RAX)
+
+    pure def fcmp(mut self, v: int, cc: int, a: int, b: int):
+        let double = self.ty(a) == T_F64
+        let ra = self.get(a, RAX)
+        let rb = self.get(b, RCX)
+        if double:
+            self.body.movq_to_x(0, ra)
+            self.body.movq_to_x(1, rb)
+        else:
+            self.body.movd_to_x(0, ra)
+            self.body.movd_to_x(1, rb)
+        self.done(a)
+        self.done(b)
+        match cc:
+            case 0:
+                self.body.ucomis(double, 0, 1)
+                self.body.setcc(X_E, RAX)
+                self.body.setcc(X_NP, RCX)
+                self.body.alu(False, A_AND, RAX, RCX)
+            case 1:
+                self.body.ucomis(double, 0, 1)
+                self.body.setcc(X_NE, RAX)
+                self.body.setcc(X_P, RCX)
+                self.body.alu(False, A_OR, RAX, RCX)
+            case 2:
+                self.body.ucomis(double, 1, 0)
+                self.body.setcc(X_A, RAX)
+            case 3:
+                self.body.ucomis(double, 1, 0)
+                self.body.setcc(X_AE, RAX)
+            case 4:
+                self.body.ucomis(double, 0, 1)
+                self.body.setcc(X_A, RAX)
+            case _:
+                self.body.ucomis(double, 0, 1)
+                self.body.setcc(X_AE, RAX)
+        self.body.movzx8(RAX, RAX)
+        self.define(v, RAX)
+
+    pure def convert(mut self, v: int, k: int, t: int, a: int):
+        let ta = self.ty(a)
+        let ra = self.get(a, RAX)
+        match k:
+            case 0:
+                self.widen(RAX, ra, ta, False)
+            case 1:
+                self.widen(RAX, ra, ta, True)
+            case 4:
+                self.body.movd_to_x(0, ra)
+                self.body.sse(False, 90, 0, 0)
+                self.body.movq_from_x(RAX, 0)
+            case 5:
+                self.body.movq_to_x(0, ra)
+                self.body.sse(True, 90, 0, 0)
+                self.body.movd_from_x(RAX, 0)
+            case _:
+                self.body.mov(RAX, ra)
+        self.done(a)
+        self.define(v, RAX)
+
+    ## A call's arguments where the System V convention puts them: the
+    ## first six integers and eight floats in registers, the rest on the
+    ## stack at the bottom of the frame; the code of an indirect call
+    ## (`code`, else -1) in `r11`.
+    pure def call(
+        mut self, v: int, params: list[int], results: list[int], args: list[int], code: int
+    ) -> () ! X86Error:
+        if len(args) != len(params):
+            return unsupported("a call with {len(args)} arguments of a function of {len(params)}")
+        let ars = arg_regs()
+        var ints = 0
+        var floats = 0
+        var stack = 0
+        var in_regs: list[(int, int, bool)] = []
+        for k in range(len(args)):
+            let t = params[k]
+            if is_float(t) and floats < 8:
+                in_regs.push((args[k], floats, True))
+                floats += 1
+            elif not is_float(t) and ints < 6:
+                in_regs.push((args[k], ars[ints], False))
+                ints += 1
+            else:
+                let r = self.get(args[k], RAX)
+                self.body.store(8, r, RSP, 8 * stack)
+                stack += 1
+        self.out_args = max(self.out_args, 8 * stack)
+        for (a, r, float_) in in_regs:
+            if float_:
+                let ra = self.get(a, RAX)
+                if self.ty(a) == T_F64:
+                    self.body.movq_to_x(r, ra)
+                else:
+                    self.body.movd_to_x(r, ra)
+            else:
+                self.get_into(a, r)
+        if code >= 0:
+            self.get_into(code, R11)
+            self.done(code)
+        for a in args:
+            self.done(a)
+        return Ok(())
+
+    ## A call's results, from `rax` or `xmm0`.
+    pure def results(mut self, v: int, results: list[int]):
+        if results.is_empty():
+            return
+        let t = results[0]
+        if t == T_F64:
+            self.body.movq_from_x(RAX, 0)
+        elif t == T_F32:
+            self.body.movd_from_x(RAX, 0)
+        self.define(v, RAX)
+
+## Whether the operation is a block's start.
+pure def is_block(op: Op) -> bool:
+    if let Op.Block(_, _) = op:
+        return True
+    return False
+
+## How many values an operation defines.
+pub pure def defines(op: Op) -> int:
+    match op:
+        case Op.Block(_, _) | Op.Loc(_, _) | Op.Store(_, _, _) | Op.StackStore(_, _):
+            return 0
+        case Op.Memcpy(_, _, _) | Op.Def(_, _) | Op.Jump(_, _) | Op.Brif(_, _, _, _, _):
+            return 0
+        case Op.Switch(_, _, _) | Op.Return(_) | Op.Trap(_):
+            return 0
+        case Op.Ovf(_, _, _):
+            return 2
+        case Op.Call(_, _, n):
+            return n
+        case Op.CallIndirect(_, _, _, n):
+            return n
+        case _:
+            return 1
+
+## The values defined in a function's body (all but its parameters).
+pure def count_defined(f: LirFunc) -> int:
+    var n = 0
+    for op in f.ops:
+        n += defines(op)
+    return n
+
+## The values an operation uses, in order.
+pub pure def uses(op: Op) -> list[int]:
+    match op:
+        case Op.Bin(_, a, b) | Op.Icmp(_, a, b) | Op.Fcmp(_, a, b) | Op.Ovf(_, a, b):
+            return [a, b]
+        case Op.BinImm(_, a, _) | Op.Un(_, a) | Op.IcmpImm(_, a, _) | Op.Conv(_, _, a):
+            return [a]
+        case Op.Load(_, a, _):
+            return [a]
+        case Op.Select(c, a, b):
+            return [c, a, b]
+        case Op.Store(x, a, _):
+            return [x, a]
+        case Op.StackStore(x, _) | Op.Def(_, x):
+            return [x]
+        case Op.Call(_, args, _):
+            return args.copy()
+        case Op.CallIndirect(_, f, args, _):
+            var out = args.copy()
+            out.push(f)
+            return out
+        case Op.Memcpy(d, s, n):
+            return [d, s, n]
+        case Op.Jump(_, args):
+            return args.copy()
+        case Op.Brif(c, _, aargs, _, bargs):
+            var out = [c]
+            for a in aargs:
+                out.push(a)
+            for b in bargs:
+                out.push(b)
+            return out
+        case Op.Switch(x, _, _):
+            return [x]
+        case Op.Return(vs):
+            return vs.copy()
+        case _:
+            return []

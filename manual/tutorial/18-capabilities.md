@@ -497,7 +497,7 @@ With a `poem.txt` of eight words, it prints:
 *Hei kaunis maailma* is Finnish for "hello, beautiful world".
 `word_count` does the work, and `file_word_count` only reads the file
 and hands the text over. That split keeps most of a program in
-functions that are easy to test and to reuse, with the capabilities at
+functions that are quick to test and to reuse, with the capabilities at
 its edges.
 
 The same holds for a whole package. A library whose `pub` functions
@@ -568,9 +568,9 @@ compute.sisu summary functions=2 median=1 max=1 uses=1 deepest=1 structs=0
 
 `word_count` is in no line: it does no I/O. The audit is data rather
 than advice, and its use is to watch a program over time: a function
-whose `caps` grows is gathering authority, and one deep in the program
-with `io=direct` may be a capability that should have been narrowed
-first.
+whose `caps` grows is gathering authority, and a function deep in the
+program with `io=direct` may be using a capability that `main` should
+have narrowed first.
 
 ## Exercise 18.1: predict the narrowed file systems
 
