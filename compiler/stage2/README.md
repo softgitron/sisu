@@ -101,3 +101,7 @@ What is done, and what is not, is kept here as the work goes.
 - The translation and the check: all 200 cases of `native.list` pass
   `--native-from-lir`, their executables byte for byte the ones from SIR
   in both profiles.
+- The reader takes the SIR of a program built with its tests (`sisu sir
+  --tests`, decision 285) and leaves its tests' tags and its benchmarks
+  out, since stage 1's SIR types do not hold them yet. When they do, the
+  reader fills them: it makes a `stage1.sir.Program` naming every field.
