@@ -1,0 +1,6 @@
+rep,benchmark,start_utc,seconds
+1,idle-memory,2026-11-02T23:52:06Z,247
+2,idle-memory,2026-11-02T23:56:13Z,246
+3,idle-memory,2026-11-03T00:00:19Z,247
+4,idle-memory,2026-11-03T00:04:26Z,247
+5,idle-memory,2026-11-03T00:08:33Z,247

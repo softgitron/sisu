@@ -1,0 +1,12 @@
+=== run_all.sh --scale full --reps 5 --only idle-memory
+date_utc: 2026-11-02T23:51:50Z
+scale: full reps: 5 threads: 4 machine_id: github-runner-16g
+rustc: rustc 1.99.1 (58cf8f9c3 2026-10-13)
+cargo: cargo 1.99.1 (5f94df478 2026-08-27)
+uname: Linux runnervmnwato 7.0.0-1017-azure #17-Ubuntu SMP PREEMPT Thu Sep 24 15:54:51 UTC 2026 x86_64 GNU/Linux
+taskbench: taskbench: the bet-3 stack harness (stackful tasks on stacks that cannot move) version 0.2.0
+source_sha256: 6a1fedf5e4b611ff8413dfc0e29073d9c69580690bf997ea610a131ba9ac3482
+binary_sha256: a5942b2a877389a1b6c61eaae97e6a66fcb14a706d0909859252e45eccfc93ce
+commit: 0333a08b70db23b3e8ccccb483f60fc5c7048f2e
+rlimit_nofile_hard: 65536; idle connections: 32700; echo connections: 10000 1000
+quiet_below: off (CPUs used by other processes; load.sh)

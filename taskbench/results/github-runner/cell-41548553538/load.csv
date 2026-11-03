@@ -1,0 +1,196 @@
+start_utc,benchmark,implementation,args,attempt,kept,wall_s,own_cpu_s,others_cpu_s,others_cpus,steal_s,quiet_below,gate,gate_wait_s
+2026-11-02T23:52:06Z,idle-memory,taskbench,"--strategy A --reservation 128K --tasks 100000 --settle-ms 1000",1,yes,3.20,2.42,-0.03,-0.009,0.00,off,off,0
+2026-11-02T23:52:09Z,idle-memory,taskbench,"--strategy B --reservation 128K --tasks 100000 --settle-ms 1000",1,yes,3.14,3.23,0.03,0.010,0.00,off,off,0
+2026-11-02T23:52:12Z,idle-memory,taskbench,"--strategy D --reservation 128K --tasks 100000 --settle-ms 1000",1,yes,3.20,2.94,0.28,0.089,0.00,off,off,0
+2026-11-02T23:52:16Z,idle-memory,taskbench,"--strategy D --base B --reservation 128K --tasks 100000 --settle-ms 1000",1,yes,3.26,4.48,0.04,0.013,0.00,off,off,0
+2026-11-02T23:52:19Z,idle-memory,taskbench,"--strategy A --reservation 1M --tasks 100000 --settle-ms 1000",1,yes,3.40,2.62,-0.00,-0.001,0.00,off,off,0
+2026-11-02T23:52:22Z,idle-memory,taskbench,"--strategy B --reservation 1M --tasks 100000 --settle-ms 1000",1,yes,3.91,4.00,0.94,0.241,0.00,off,off,0
+2026-11-02T23:52:26Z,idle-memory,taskbench,"--strategy D --reservation 1M --tasks 100000 --settle-ms 1000",1,yes,3.41,3.11,-0.06,-0.017,0.00,off,off,0
+2026-11-02T23:52:30Z,idle-memory,taskbench,"--strategy D --base B --reservation 1M --tasks 100000 --settle-ms 1000",1,yes,3.92,5.20,0.10,0.025,0.00,off,off,0
+2026-11-02T23:52:34Z,idle-memory,taskbench,"--strategy A --reservation 8M --tasks 100000 --settle-ms 1000",1,yes,3.64,2.88,-0.01,-0.002,0.00,off,off,0
+2026-11-02T23:52:37Z,idle-memory,taskbench,"--strategy B --reservation 8M --tasks 100000 --settle-ms 1000",1,yes,4.61,4.91,0.08,0.018,0.00,off,off,0
+2026-11-02T23:52:42Z,idle-memory,taskbench,"--strategy D --reservation 8M --tasks 100000 --settle-ms 1000",1,yes,3.69,3.46,-0.05,-0.014,0.00,off,off,0
+2026-11-02T23:52:46Z,idle-memory,taskbench,"--strategy D --base B --reservation 8M --tasks 100000 --settle-ms 1000",1,yes,4.71,6.07,0.09,0.018,0.00,off,off,0
+2026-11-02T23:52:50Z,idle-memory,taskbench,"--strategy C --stack-size 4K --tasks 100000 --settle-ms 1000",1,yes,3.15,3.39,0.05,0.017,0.00,off,off,0
+2026-11-02T23:52:54Z,idle-memory,taskbench,"--strategy C --stack-size 8K --tasks 100000 --settle-ms 1000",1,yes,3.15,3.39,0.04,0.011,0.00,off,off,0
+2026-11-02T23:52:57Z,idle-memory,taskbench,"--strategy C --stack-size 16K --tasks 100000 --settle-ms 1000",1,yes,3.16,3.39,0.03,0.010,0.00,off,off,0
+2026-11-02T23:53:00Z,idle-memory,taskbench,"--strategy E --tasks 100000 --settle-ms 1000",1,yes,2.21,0.72,-0.02,-0.010,0.00,off,off,0
+2026-11-02T23:53:02Z,idle-memory,taskbench,"--strategy tokio --tasks 100000 --settle-ms 1000",1,yes,2.15,0.35,-0.00,-0.000,0.00,off,off,0
+2026-11-02T23:53:04Z,idle-memory,taskbench,"--strategy A --reservation 128K --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,1.87,1.88,-0.05,-0.025,0.00,off,off,0
+2026-11-02T23:53:06Z,idle-memory,taskbench,"--strategy B --reservation 128K --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,5.21,13.41,-0.04,-0.008,0.00,off,off,0
+2026-11-02T23:53:11Z,idle-memory,taskbench,"--strategy D --reservation 128K --tasks 1000000 --settle-ms 1000",1,yes,3.20,2.98,-0.03,-0.008,0.00,off,off,0
+2026-11-02T23:53:15Z,idle-memory,taskbench,"--strategy D --base B --reservation 128K --tasks 1000000 --settle-ms 1000",1,yes,14.83,44.31,1.78,0.120,0.00,off,off,0
+2026-11-02T23:53:29Z,idle-memory,taskbench,"--strategy A --reservation 1M --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,1.98,1.96,-0.05,-0.025,0.00,off,off,0
+2026-11-02T23:53:31Z,idle-memory,taskbench,"--strategy B --reservation 1M --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,8.92,18.22,0.03,0.004,0.00,off,off,0
+2026-11-02T23:53:40Z,idle-memory,taskbench,"--strategy D --reservation 1M --tasks 1000000 --settle-ms 1000",1,yes,3.41,3.11,-0.06,-0.019,0.00,off,off,0
+2026-11-02T23:53:44Z,idle-memory,taskbench,"--strategy D --base B --reservation 1M --tasks 1000000 --settle-ms 1000",1,yes,20.95,51.68,0.19,0.009,0.00,off,off,0
+2026-11-02T23:54:05Z,idle-memory,taskbench,"--strategy A --reservation 8M --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,2.12,2.11,-0.03,-0.015,0.00,off,off,0
+2026-11-02T23:54:07Z,idle-memory,taskbench,"--strategy B --reservation 8M --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,13.08,23.07,0.43,0.033,0.00,off,off,0
+2026-11-02T23:54:20Z,idle-memory,taskbench,"--strategy D --reservation 8M --tasks 1000000 --settle-ms 1000",1,yes,3.71,3.48,0.07,0.020,0.00,off,off,0
+2026-11-02T23:54:24Z,idle-memory,taskbench,"--strategy D --base B --reservation 8M --tasks 1000000 --settle-ms 1000",1,yes,28.70,59.60,1.52,0.053,0.00,off,off,0
+2026-11-02T23:54:53Z,idle-memory,taskbench,"--strategy C --stack-size 4K --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,4.93,13.35,-0.00,-0.000,0.00,off,off,0
+2026-11-02T23:54:57Z,idle-memory,taskbench,"--strategy C --stack-size 8K --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,5.16,13.90,-0.02,-0.004,0.00,off,off,0
+2026-11-02T23:55:03Z,idle-memory,taskbench,"--strategy C --stack-size 16K --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,5.16,13.73,0.15,0.029,0.00,off,off,0
+2026-11-02T23:55:08Z,idle-memory,taskbench,"--strategy E --tasks 1000000 --settle-ms 1000",1,yes,4.07,7.32,0.07,0.018,0.00,off,off,0
+2026-11-02T23:55:12Z,idle-memory,taskbench,"--strategy tokio --tasks 1000000 --settle-ms 1000",1,yes,3.46,3.44,0.05,0.014,0.00,off,off,0
+2026-11-02T23:55:15Z,idle-memory,taskbench,"--strategy os-threads --tasks 10000 --settle-ms 1000",1,yes,2.85,1.97,0.08,0.028,0.00,off,off,0
+2026-11-02T23:55:18Z,idle-memory,go,"--tasks 100000 --settle-ms 1000",1,yes,5.48,6.76,0.08,0.015,0.00,off,off,0
+2026-11-02T23:55:24Z,idle-memory,go,"--tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,4.76,6.52,-0.16,-0.034,0.00,off,off,0
+2026-11-02T23:55:29Z,idle-memory,java,"--tasks 100000 --settle-ms 1000",1,yes,6.39,11.60,-0.11,-0.017,0.00,off,off,0
+2026-11-02T23:55:35Z,idle-memory,java,"--tasks 1000000 --settle-ms 1000",1,yes,38.35,88.75,-2.29,-0.060,0.00,off,off,0
+2026-11-02T23:56:13Z,idle-memory,taskbench,"--strategy A --reservation 128K --tasks 100000 --settle-ms 1000",1,yes,3.16,2.37,-0.04,-0.011,0.00,off,off,0
+2026-11-02T23:56:17Z,idle-memory,taskbench,"--strategy B --reservation 128K --tasks 100000 --settle-ms 1000",1,yes,3.14,3.25,0.04,0.011,0.00,off,off,0
+2026-11-02T23:56:20Z,idle-memory,taskbench,"--strategy D --reservation 128K --tasks 100000 --settle-ms 1000",1,yes,3.21,2.97,-0.04,-0.012,0.00,off,off,0
+2026-11-02T23:56:23Z,idle-memory,taskbench,"--strategy D --base B --reservation 128K --tasks 100000 --settle-ms 1000",1,yes,3.36,4.40,1.04,0.309,0.00,off,off,0
+2026-11-02T23:56:26Z,idle-memory,taskbench,"--strategy A --reservation 1M --tasks 100000 --settle-ms 1000",1,yes,3.40,2.62,-0.08,-0.022,0.00,off,off,0
+2026-11-02T23:56:30Z,idle-memory,taskbench,"--strategy B --reservation 1M --tasks 100000 --settle-ms 1000",1,yes,3.82,4.00,0.04,0.011,0.00,off,off,0
+2026-11-02T23:56:34Z,idle-memory,taskbench,"--strategy D --reservation 1M --tasks 100000 --settle-ms 1000",1,yes,3.43,3.14,-0.08,-0.022,0.00,off,off,0
+2026-11-02T23:56:37Z,idle-memory,taskbench,"--strategy D --base B --reservation 1M --tasks 100000 --settle-ms 1000",1,yes,3.92,5.22,0.04,0.009,0.00,off,off,0
+2026-11-02T23:56:41Z,idle-memory,taskbench,"--strategy A --reservation 8M --tasks 100000 --settle-ms 1000",1,yes,3.64,2.88,-0.03,-0.009,0.00,off,off,0
+2026-11-02T23:56:45Z,idle-memory,taskbench,"--strategy B --reservation 8M --tasks 100000 --settle-ms 1000",1,yes,4.61,4.88,0.08,0.018,0.00,off,off,0
+2026-11-02T23:56:49Z,idle-memory,taskbench,"--strategy D --reservation 8M --tasks 100000 --settle-ms 1000",1,yes,3.69,3.42,-0.07,-0.018,0.00,off,off,0
+2026-11-02T23:56:53Z,idle-memory,taskbench,"--strategy D --base B --reservation 8M --tasks 100000 --settle-ms 1000",1,yes,4.71,6.06,0.08,0.016,0.00,off,off,0
+2026-11-02T23:56:58Z,idle-memory,taskbench,"--strategy C --stack-size 4K --tasks 100000 --settle-ms 1000",1,yes,3.16,3.43,0.03,0.011,0.00,off,off,0
+2026-11-02T23:57:01Z,idle-memory,taskbench,"--strategy C --stack-size 8K --tasks 100000 --settle-ms 1000",1,yes,3.16,3.41,0.04,0.014,0.00,off,off,0
+2026-11-02T23:57:04Z,idle-memory,taskbench,"--strategy C --stack-size 16K --tasks 100000 --settle-ms 1000",1,yes,3.16,3.42,0.05,0.016,0.00,off,off,0
+2026-11-02T23:57:07Z,idle-memory,taskbench,"--strategy E --tasks 100000 --settle-ms 1000",1,yes,2.21,0.74,0.01,0.005,0.00,off,off,0
+2026-11-02T23:57:10Z,idle-memory,taskbench,"--strategy tokio --tasks 100000 --settle-ms 1000",1,yes,2.16,0.36,-0.01,-0.005,0.00,off,off,0
+2026-11-02T23:57:12Z,idle-memory,taskbench,"--strategy A --reservation 128K --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,1.87,1.87,-0.02,-0.012,0.00,off,off,0
+2026-11-02T23:57:14Z,idle-memory,taskbench,"--strategy B --reservation 128K --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,5.20,13.44,-0.00,-0.000,0.00,off,off,0
+2026-11-02T23:57:19Z,idle-memory,taskbench,"--strategy D --reservation 128K --tasks 1000000 --settle-ms 1000",1,yes,3.20,2.98,-0.03,-0.008,0.00,off,off,0
+2026-11-02T23:57:22Z,idle-memory,taskbench,"--strategy D --base B --reservation 128K --tasks 1000000 --settle-ms 1000",1,yes,14.65,43.61,1.13,0.077,0.00,off,off,0
+2026-11-02T23:57:37Z,idle-memory,taskbench,"--strategy A --reservation 1M --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,2.02,2.00,-0.05,-0.023,0.00,off,off,0
+2026-11-02T23:57:39Z,idle-memory,taskbench,"--strategy B --reservation 1M --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,8.83,18.03,0.09,0.010,0.00,off,off,0
+2026-11-02T23:57:48Z,idle-memory,taskbench,"--strategy D --reservation 1M --tasks 1000000 --settle-ms 1000",1,yes,3.42,3.11,-0.07,-0.020,0.00,off,off,0
+2026-11-02T23:57:51Z,idle-memory,taskbench,"--strategy D --base B --reservation 1M --tasks 1000000 --settle-ms 1000",1,yes,20.95,51.71,0.20,0.010,0.00,off,off,0
+2026-11-02T23:58:12Z,idle-memory,taskbench,"--strategy A --reservation 8M --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,2.12,2.09,-0.04,-0.019,0.00,off,off,0
+2026-11-02T23:58:14Z,idle-memory,taskbench,"--strategy B --reservation 8M --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,13.05,23.14,1.09,0.083,0.00,off,off,0
+2026-11-02T23:58:27Z,idle-memory,taskbench,"--strategy D --reservation 8M --tasks 1000000 --settle-ms 1000",1,yes,3.69,3.44,-0.07,-0.018,0.00,off,off,0
+2026-11-02T23:58:31Z,idle-memory,taskbench,"--strategy D --base B --reservation 8M --tasks 1000000 --settle-ms 1000",1,yes,28.59,60.41,0.52,0.018,0.00,off,off,0
+2026-11-02T23:59:00Z,idle-memory,taskbench,"--strategy C --stack-size 4K --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,4.90,13.29,-0.00,-0.000,0.00,off,off,0
+2026-11-02T23:59:05Z,idle-memory,taskbench,"--strategy C --stack-size 8K --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,5.10,13.72,-0.05,-0.010,0.00,off,off,0
+2026-11-02T23:59:10Z,idle-memory,taskbench,"--strategy C --stack-size 16K --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,5.12,13.72,-0.01,-0.003,0.00,off,off,0
+2026-11-02T23:59:15Z,idle-memory,taskbench,"--strategy E --tasks 1000000 --settle-ms 1000",1,yes,4.09,7.48,-0.09,-0.021,0.00,off,off,0
+2026-11-02T23:59:19Z,idle-memory,taskbench,"--strategy tokio --tasks 1000000 --settle-ms 1000",1,yes,3.44,3.44,-0.14,-0.040,0.00,off,off,0
+2026-11-02T23:59:22Z,idle-memory,taskbench,"--strategy os-threads --tasks 10000 --settle-ms 1000",1,yes,2.90,1.94,0.78,0.271,0.00,off,off,0
+2026-11-02T23:59:25Z,idle-memory,go,"--tasks 100000 --settle-ms 1000",1,yes,5.57,7.38,-0.27,-0.049,0.00,off,off,0
+2026-11-02T23:59:31Z,idle-memory,go,"--tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,4.68,6.72,-1.17,-0.250,0.00,off,off,0
+2026-11-02T23:59:36Z,idle-memory,java,"--tasks 100000 --settle-ms 1000",1,yes,6.09,10.62,-0.15,-0.025,0.00,off,off,0
+2026-11-02T23:59:42Z,idle-memory,java,"--tasks 1000000 --settle-ms 1000",1,yes,37.63,86.78,-1.99,-0.053,0.00,off,off,0
+2026-11-03T00:00:19Z,idle-memory,taskbench,"--strategy A --reservation 128K --tasks 100000 --settle-ms 1000",1,yes,3.18,2.38,-0.04,-0.014,0.00,off,off,0
+2026-11-03T00:00:23Z,idle-memory,taskbench,"--strategy B --reservation 128K --tasks 100000 --settle-ms 1000",1,yes,3.25,3.27,0.95,0.292,0.00,off,off,0
+2026-11-03T00:00:26Z,idle-memory,taskbench,"--strategy D --reservation 128K --tasks 100000 --settle-ms 1000",1,yes,3.21,2.97,-0.05,-0.016,0.00,off,off,0
+2026-11-03T00:00:29Z,idle-memory,taskbench,"--strategy D --base B --reservation 128K --tasks 100000 --settle-ms 1000",1,yes,3.26,4.46,0.03,0.010,0.00,off,off,0
+2026-11-03T00:00:32Z,idle-memory,taskbench,"--strategy A --reservation 1M --tasks 100000 --settle-ms 1000",1,yes,3.38,2.61,-0.04,-0.013,0.00,off,off,0
+2026-11-03T00:00:36Z,idle-memory,taskbench,"--strategy B --reservation 1M --tasks 100000 --settle-ms 1000",1,yes,3.83,4.00,0.03,0.009,0.00,off,off,0
+2026-11-03T00:00:40Z,idle-memory,taskbench,"--strategy D --reservation 1M --tasks 100000 --settle-ms 1000",1,yes,3.42,3.13,-0.07,-0.020,0.00,off,off,0
+2026-11-03T00:00:43Z,idle-memory,taskbench,"--strategy D --base B --reservation 1M --tasks 100000 --settle-ms 1000",1,yes,3.92,5.23,0.05,0.013,0.00,off,off,0
+2026-11-03T00:00:47Z,idle-memory,taskbench,"--strategy A --reservation 8M --tasks 100000 --settle-ms 1000",1,yes,3.65,2.90,-0.05,-0.013,0.00,off,off,0
+2026-11-03T00:00:51Z,idle-memory,taskbench,"--strategy B --reservation 8M --tasks 100000 --settle-ms 1000",1,yes,4.63,4.94,0.06,0.014,0.00,off,off,0
+2026-11-03T00:00:55Z,idle-memory,taskbench,"--strategy D --reservation 8M --tasks 100000 --settle-ms 1000",1,yes,3.71,3.46,-0.08,-0.021,0.00,off,off,0
+2026-11-03T00:00:59Z,idle-memory,taskbench,"--strategy D --base B --reservation 8M --tasks 100000 --settle-ms 1000",1,yes,4.70,6.08,0.08,0.018,0.00,off,off,0
+2026-11-03T00:01:04Z,idle-memory,taskbench,"--strategy C --stack-size 4K --tasks 100000 --settle-ms 1000",1,yes,3.17,3.45,0.03,0.010,0.00,off,off,0
+2026-11-03T00:01:07Z,idle-memory,taskbench,"--strategy C --stack-size 8K --tasks 100000 --settle-ms 1000",1,yes,3.17,3.42,0.04,0.011,0.00,off,off,0
+2026-11-03T00:01:10Z,idle-memory,taskbench,"--strategy C --stack-size 16K --tasks 100000 --settle-ms 1000",1,yes,3.17,3.41,0.03,0.009,0.00,off,off,0
+2026-11-03T00:01:13Z,idle-memory,taskbench,"--strategy E --tasks 100000 --settle-ms 1000",1,yes,2.21,0.73,-0.00,-0.002,0.00,off,off,0
+2026-11-03T00:01:16Z,idle-memory,taskbench,"--strategy tokio --tasks 100000 --settle-ms 1000",1,yes,2.15,0.35,-0.01,-0.006,0.00,off,off,0
+2026-11-03T00:01:18Z,idle-memory,taskbench,"--strategy A --reservation 128K --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,1.88,1.90,-0.06,-0.033,0.00,off,off,0
+2026-11-03T00:01:20Z,idle-memory,taskbench,"--strategy B --reservation 128K --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,5.24,13.05,1.05,0.201,0.00,off,off,0
+2026-11-03T00:01:25Z,idle-memory,taskbench,"--strategy D --reservation 128K --tasks 1000000 --settle-ms 1000",1,yes,3.21,2.99,-0.07,-0.022,0.00,off,off,0
+2026-11-03T00:01:28Z,idle-memory,taskbench,"--strategy D --base B --reservation 128K --tasks 1000000 --settle-ms 1000",1,yes,14.41,44.47,0.08,0.006,0.00,off,off,0
+2026-11-03T00:01:43Z,idle-memory,taskbench,"--strategy A --reservation 1M --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,2.00,1.95,-0.04,-0.022,0.00,off,off,0
+2026-11-03T00:01:45Z,idle-memory,taskbench,"--strategy B --reservation 1M --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,8.88,18.15,0.13,0.015,0.00,off,off,0
+2026-11-03T00:01:54Z,idle-memory,taskbench,"--strategy D --reservation 1M --tasks 1000000 --settle-ms 1000",1,yes,3.42,3.09,-0.05,-0.016,0.00,off,off,0
+2026-11-03T00:01:57Z,idle-memory,taskbench,"--strategy D --base B --reservation 1M --tasks 1000000 --settle-ms 1000",1,yes,20.96,51.84,0.21,0.010,0.00,off,off,0
+2026-11-03T00:02:18Z,idle-memory,taskbench,"--strategy A --reservation 8M --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,2.12,2.10,-0.04,-0.020,0.00,off,off,0
+2026-11-03T00:02:20Z,idle-memory,taskbench,"--strategy B --reservation 8M --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,13.06,23.00,1.13,0.087,0.00,off,off,0
+2026-11-03T00:02:33Z,idle-memory,taskbench,"--strategy D --reservation 8M --tasks 1000000 --settle-ms 1000",1,yes,3.72,3.48,-0.02,-0.005,0.00,off,off,0
+2026-11-03T00:02:37Z,idle-memory,taskbench,"--strategy D --base B --reservation 8M --tasks 1000000 --settle-ms 1000",1,yes,28.57,60.31,0.47,0.016,0.00,off,off,0
+2026-11-03T00:03:06Z,idle-memory,taskbench,"--strategy C --stack-size 4K --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,4.95,13.41,-0.03,-0.007,0.00,off,off,0
+2026-11-03T00:03:11Z,idle-memory,taskbench,"--strategy C --stack-size 8K --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,5.15,13.57,0.14,0.028,0.00,off,off,0
+2026-11-03T00:03:16Z,idle-memory,taskbench,"--strategy C --stack-size 16K --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,5.16,13.82,-0.02,-0.004,0.00,off,off,0
+2026-11-03T00:03:21Z,idle-memory,taskbench,"--strategy E --tasks 1000000 --settle-ms 1000",1,yes,4.03,7.02,0.87,0.217,0.00,off,off,0
+2026-11-03T00:03:25Z,idle-memory,taskbench,"--strategy tokio --tasks 1000000 --settle-ms 1000",1,yes,3.47,3.48,-0.18,-0.052,0.00,off,off,0
+2026-11-03T00:03:28Z,idle-memory,taskbench,"--strategy os-threads --tasks 10000 --settle-ms 1000",1,yes,2.91,2.12,-0.04,-0.012,0.00,off,off,0
+2026-11-03T00:03:31Z,idle-memory,go,"--tasks 100000 --settle-ms 1000",1,yes,5.62,7.44,-0.22,-0.039,0.00,off,off,0
+2026-11-03T00:03:37Z,idle-memory,go,"--tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,4.65,6.63,-1.15,-0.247,0.00,off,off,0
+2026-11-03T00:03:42Z,idle-memory,java,"--tasks 100000 --settle-ms 1000",1,yes,6.32,11.16,-0.19,-0.030,0.00,off,off,0
+2026-11-03T00:03:48Z,idle-memory,java,"--tasks 1000000 --settle-ms 1000",1,yes,38.20,87.06,-0.91,-0.024,0.00,off,off,0
+2026-11-03T00:04:26Z,idle-memory,taskbench,"--strategy A --reservation 128K --tasks 100000 --settle-ms 1000",1,yes,3.17,2.39,-0.06,-0.020,0.00,off,off,0
+2026-11-03T00:04:30Z,idle-memory,taskbench,"--strategy B --reservation 128K --tasks 100000 --settle-ms 1000",1,yes,3.14,3.24,0.03,0.011,0.00,off,off,0
+2026-11-03T00:04:33Z,idle-memory,taskbench,"--strategy D --reservation 128K --tasks 100000 --settle-ms 1000",1,yes,3.20,2.94,-0.05,-0.017,0.00,off,off,0
+2026-11-03T00:04:36Z,idle-memory,taskbench,"--strategy D --base B --reservation 128K --tasks 100000 --settle-ms 1000",1,yes,3.27,4.48,0.04,0.013,0.00,off,off,0
+2026-11-03T00:04:39Z,idle-memory,taskbench,"--strategy A --reservation 1M --tasks 100000 --settle-ms 1000",1,yes,3.40,2.63,-0.07,-0.021,0.00,off,off,0
+2026-11-03T00:04:43Z,idle-memory,taskbench,"--strategy B --reservation 1M --tasks 100000 --settle-ms 1000",1,yes,3.82,4.04,0.06,0.015,0.00,off,off,0
+2026-11-03T00:04:46Z,idle-memory,taskbench,"--strategy D --reservation 1M --tasks 100000 --settle-ms 1000",1,yes,3.43,3.13,-0.08,-0.023,0.00,off,off,0
+2026-11-03T00:04:50Z,idle-memory,taskbench,"--strategy D --base B --reservation 1M --tasks 100000 --settle-ms 1000",1,yes,3.93,5.23,0.05,0.011,0.00,off,off,0
+2026-11-03T00:04:54Z,idle-memory,taskbench,"--strategy A --reservation 8M --tasks 100000 --settle-ms 1000",1,yes,3.63,2.87,0.02,0.005,0.00,off,off,0
+2026-11-03T00:04:57Z,idle-memory,taskbench,"--strategy B --reservation 8M --tasks 100000 --settle-ms 1000",1,yes,4.61,4.92,0.05,0.011,0.00,off,off,0
+2026-11-03T00:05:02Z,idle-memory,taskbench,"--strategy D --reservation 8M --tasks 100000 --settle-ms 1000",1,yes,3.69,3.47,-0.06,-0.015,0.00,off,off,0
+2026-11-03T00:05:06Z,idle-memory,taskbench,"--strategy D --base B --reservation 8M --tasks 100000 --settle-ms 1000",1,yes,4.70,6.11,0.11,0.023,0.00,off,off,0
+2026-11-03T00:05:11Z,idle-memory,taskbench,"--strategy C --stack-size 4K --tasks 100000 --settle-ms 1000",1,yes,3.16,3.43,0.04,0.011,0.00,off,off,0
+2026-11-03T00:05:14Z,idle-memory,taskbench,"--strategy C --stack-size 8K --tasks 100000 --settle-ms 1000",1,yes,3.15,3.39,0.04,0.011,0.00,off,off,0
+2026-11-03T00:05:17Z,idle-memory,taskbench,"--strategy C --stack-size 16K --tasks 100000 --settle-ms 1000",1,yes,3.14,3.37,0.03,0.009,0.00,off,off,0
+2026-11-03T00:05:20Z,idle-memory,taskbench,"--strategy E --tasks 100000 --settle-ms 1000",1,yes,2.21,0.73,0.01,0.003,0.00,off,off,0
+2026-11-03T00:05:22Z,idle-memory,taskbench,"--strategy tokio --tasks 100000 --settle-ms 1000",1,yes,2.15,0.35,0.70,0.327,0.00,off,off,0
+2026-11-03T00:05:24Z,idle-memory,taskbench,"--strategy A --reservation 128K --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,1.88,1.89,0.06,0.032,0.00,off,off,0
+2026-11-03T00:05:26Z,idle-memory,taskbench,"--strategy B --reservation 128K --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,5.23,13.57,-0.04,-0.007,0.00,off,off,0
+2026-11-03T00:05:32Z,idle-memory,taskbench,"--strategy D --reservation 128K --tasks 1000000 --settle-ms 1000",1,yes,3.20,2.96,-0.05,-0.016,0.00,off,off,0
+2026-11-03T00:05:35Z,idle-memory,taskbench,"--strategy D --base B --reservation 128K --tasks 1000000 --settle-ms 1000",1,yes,14.52,44.74,0.07,0.005,0.00,off,off,0
+2026-11-03T00:05:49Z,idle-memory,taskbench,"--strategy A --reservation 1M --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,2.00,1.99,-0.05,-0.028,0.00,off,off,0
+2026-11-03T00:05:51Z,idle-memory,taskbench,"--strategy B --reservation 1M --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,8.84,18.01,0.10,0.011,0.00,off,off,0
+2026-11-03T00:06:00Z,idle-memory,taskbench,"--strategy D --reservation 1M --tasks 1000000 --settle-ms 1000",1,yes,3.42,3.15,-0.07,-0.020,0.00,off,off,0
+2026-11-03T00:06:04Z,idle-memory,taskbench,"--strategy D --base B --reservation 1M --tasks 1000000 --settle-ms 1000",1,yes,20.93,51.46,1.31,0.063,0.00,off,off,0
+2026-11-03T00:06:25Z,idle-memory,taskbench,"--strategy A --reservation 8M --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,2.12,2.11,-0.03,-0.012,0.00,off,off,0
+2026-11-03T00:06:27Z,idle-memory,taskbench,"--strategy B --reservation 8M --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,13.08,23.15,0.28,0.022,0.00,off,off,0
+2026-11-03T00:06:40Z,idle-memory,taskbench,"--strategy D --reservation 8M --tasks 1000000 --settle-ms 1000",1,yes,3.69,3.47,-0.08,-0.022,0.00,off,off,0
+2026-11-03T00:06:44Z,idle-memory,taskbench,"--strategy D --base B --reservation 8M --tasks 1000000 --settle-ms 1000",1,yes,28.65,60.54,0.47,0.016,0.00,off,off,0
+2026-11-03T00:07:12Z,idle-memory,taskbench,"--strategy C --stack-size 4K --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,4.93,13.38,-0.01,-0.003,0.00,off,off,0
+2026-11-03T00:07:17Z,idle-memory,taskbench,"--strategy C --stack-size 8K --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,5.08,13.68,-0.05,-0.009,0.00,off,off,0
+2026-11-03T00:07:22Z,idle-memory,taskbench,"--strategy C --stack-size 16K --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,5.33,12.70,1.12,0.210,0.00,off,off,0
+2026-11-03T00:07:28Z,idle-memory,taskbench,"--strategy E --tasks 1000000 --settle-ms 1000",1,yes,3.95,7.06,-0.10,-0.025,0.00,off,off,0
+2026-11-03T00:07:32Z,idle-memory,taskbench,"--strategy tokio --tasks 1000000 --settle-ms 1000",1,yes,3.48,3.49,-0.16,-0.046,0.00,off,off,0
+2026-11-03T00:07:35Z,idle-memory,taskbench,"--strategy os-threads --tasks 10000 --settle-ms 1000",1,yes,2.85,1.91,-0.01,-0.002,0.00,off,off,0
+2026-11-03T00:07:38Z,idle-memory,go,"--tasks 100000 --settle-ms 1000",1,yes,5.58,7.46,-0.22,-0.039,0.00,off,off,0
+2026-11-03T00:07:44Z,idle-memory,go,"--tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,4.66,6.65,-1.17,-0.251,0.00,off,off,0
+2026-11-03T00:07:48Z,idle-memory,java,"--tasks 100000 --settle-ms 1000",1,yes,6.29,10.97,-0.19,-0.031,0.00,off,off,0
+2026-11-03T00:07:55Z,idle-memory,java,"--tasks 1000000 --settle-ms 1000",1,yes,38.24,89.39,-0.94,-0.025,0.00,off,off,0
+2026-11-03T00:08:33Z,idle-memory,taskbench,"--strategy A --reservation 128K --tasks 100000 --settle-ms 1000",1,yes,3.18,2.40,-0.04,-0.013,0.00,off,off,0
+2026-11-03T00:08:36Z,idle-memory,taskbench,"--strategy B --reservation 128K --tasks 100000 --settle-ms 1000",1,yes,3.15,3.24,0.04,0.014,0.00,off,off,0
+2026-11-03T00:08:39Z,idle-memory,taskbench,"--strategy D --reservation 128K --tasks 100000 --settle-ms 1000",1,yes,3.20,2.96,-0.07,-0.023,0.00,off,off,0
+2026-11-03T00:08:43Z,idle-memory,taskbench,"--strategy D --base B --reservation 128K --tasks 100000 --settle-ms 1000",1,yes,3.27,4.48,0.06,0.019,0.00,off,off,0
+2026-11-03T00:08:46Z,idle-memory,taskbench,"--strategy A --reservation 1M --tasks 100000 --settle-ms 1000",1,yes,3.39,2.62,-0.06,-0.019,0.00,off,off,0
+2026-11-03T00:08:49Z,idle-memory,taskbench,"--strategy B --reservation 1M --tasks 100000 --settle-ms 1000",1,yes,3.82,4.01,0.05,0.012,0.00,off,off,0
+2026-11-03T00:08:53Z,idle-memory,taskbench,"--strategy D --reservation 1M --tasks 100000 --settle-ms 1000",1,yes,3.41,3.14,-0.04,-0.012,0.00,off,off,0
+2026-11-03T00:08:57Z,idle-memory,taskbench,"--strategy D --base B --reservation 1M --tasks 100000 --settle-ms 1000",1,yes,3.93,5.22,0.05,0.012,0.00,off,off,0
+2026-11-03T00:09:01Z,idle-memory,taskbench,"--strategy A --reservation 8M --tasks 100000 --settle-ms 1000",1,yes,3.65,2.92,-0.05,-0.015,0.00,off,off,0
+2026-11-03T00:09:04Z,idle-memory,taskbench,"--strategy B --reservation 8M --tasks 100000 --settle-ms 1000",1,yes,4.70,4.91,0.38,0.080,0.00,off,off,0
+2026-11-03T00:09:09Z,idle-memory,taskbench,"--strategy D --reservation 8M --tasks 100000 --settle-ms 1000",1,yes,3.69,3.49,-0.06,-0.016,0.00,off,off,0
+2026-11-03T00:09:13Z,idle-memory,taskbench,"--strategy D --base B --reservation 8M --tasks 100000 --settle-ms 1000",1,yes,4.71,6.08,0.09,0.020,0.00,off,off,0
+2026-11-03T00:09:17Z,idle-memory,taskbench,"--strategy C --stack-size 4K --tasks 100000 --settle-ms 1000",1,yes,3.16,3.43,0.01,0.004,0.00,off,off,0
+2026-11-03T00:09:21Z,idle-memory,taskbench,"--strategy C --stack-size 8K --tasks 100000 --settle-ms 1000",1,yes,3.16,3.41,0.21,0.067,0.00,off,off,0
+2026-11-03T00:09:24Z,idle-memory,taskbench,"--strategy C --stack-size 16K --tasks 100000 --settle-ms 1000",1,yes,3.20,3.19,0.69,0.217,0.00,off,off,0
+2026-11-03T00:09:27Z,idle-memory,taskbench,"--strategy E --tasks 100000 --settle-ms 1000",1,yes,2.21,0.74,-0.02,-0.007,0.00,off,off,0
+2026-11-03T00:09:29Z,idle-memory,taskbench,"--strategy tokio --tasks 100000 --settle-ms 1000",1,yes,2.16,0.36,-0.02,-0.010,0.00,off,off,0
+2026-11-03T00:09:31Z,idle-memory,taskbench,"--strategy A --reservation 128K --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,1.87,1.86,-0.06,-0.032,0.00,off,off,0
+2026-11-03T00:09:33Z,idle-memory,taskbench,"--strategy B --reservation 128K --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,5.25,13.44,-0.02,-0.004,0.00,off,off,0
+2026-11-03T00:09:39Z,idle-memory,taskbench,"--strategy D --reservation 128K --tasks 1000000 --settle-ms 1000",1,yes,3.21,2.96,-0.05,-0.017,0.00,off,off,0
+2026-11-03T00:09:42Z,idle-memory,taskbench,"--strategy D --base B --reservation 128K --tasks 1000000 --settle-ms 1000",1,yes,14.46,44.61,0.06,0.004,0.00,off,off,0
+2026-11-03T00:09:56Z,idle-memory,taskbench,"--strategy A --reservation 1M --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,1.99,1.97,-0.06,-0.031,0.00,off,off,0
+2026-11-03T00:09:58Z,idle-memory,taskbench,"--strategy B --reservation 1M --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,8.86,18.07,0.17,0.019,0.00,off,off,0
+2026-11-03T00:10:07Z,idle-memory,taskbench,"--strategy D --reservation 1M --tasks 1000000 --settle-ms 1000",1,yes,3.43,3.10,-0.05,-0.015,0.00,off,off,0
+2026-11-03T00:10:11Z,idle-memory,taskbench,"--strategy D --base B --reservation 1M --tasks 1000000 --settle-ms 1000",1,yes,21.29,51.43,1.83,0.086,0.00,off,off,0
+2026-11-03T00:10:32Z,idle-memory,taskbench,"--strategy A --reservation 8M --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,2.12,2.10,-0.05,-0.025,0.00,off,off,0
+2026-11-03T00:10:34Z,idle-memory,taskbench,"--strategy B --reservation 8M --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,13.06,23.02,0.37,0.028,0.00,off,off,0
+2026-11-03T00:10:47Z,idle-memory,taskbench,"--strategy D --reservation 8M --tasks 1000000 --settle-ms 1000",1,yes,3.68,3.42,-0.06,-0.017,0.00,off,off,0
+2026-11-03T00:10:51Z,idle-memory,taskbench,"--strategy D --base B --reservation 8M --tasks 1000000 --settle-ms 1000",1,yes,28.61,60.48,0.50,0.017,0.00,off,off,0
+2026-11-03T00:11:20Z,idle-memory,taskbench,"--strategy C --stack-size 4K --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,4.93,13.06,0.86,0.174,0.00,off,off,0
+2026-11-03T00:11:24Z,idle-memory,taskbench,"--strategy C --stack-size 8K --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,5.12,13.55,0.21,0.041,0.00,off,off,0
+2026-11-03T00:11:30Z,idle-memory,taskbench,"--strategy C --stack-size 16K --tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,5.13,13.76,-0.01,-0.002,0.00,off,off,0
+2026-11-03T00:11:35Z,idle-memory,taskbench,"--strategy E --tasks 1000000 --settle-ms 1000",1,yes,3.98,7.12,-0.11,-0.027,0.00,off,off,0
+2026-11-03T00:11:39Z,idle-memory,taskbench,"--strategy tokio --tasks 1000000 --settle-ms 1000",1,yes,3.36,3.34,-0.14,-0.042,0.00,off,off,0
+2026-11-03T00:11:42Z,idle-memory,taskbench,"--strategy os-threads --tasks 10000 --settle-ms 1000",1,yes,2.87,1.93,-0.00,-0.001,0.00,off,off,0
+2026-11-03T00:11:45Z,idle-memory,go,"--tasks 100000 --settle-ms 1000",1,yes,5.57,7.36,-0.28,-0.051,0.00,off,off,0
+2026-11-03T00:11:51Z,idle-memory,go,"--tasks 1000000 --settle-ms 1000 --skip-excursion",1,yes,4.70,6.73,-1.23,-0.262,0.00,off,off,0
+2026-11-03T00:11:55Z,idle-memory,java,"--tasks 100000 --settle-ms 1000",1,yes,6.12,10.67,-0.17,-0.027,0.00,off,off,0
+2026-11-03T00:12:02Z,idle-memory,java,"--tasks 1000000 --settle-ms 1000",1,yes,38.06,91.92,-1.15,-0.030,0.00,off,off,0

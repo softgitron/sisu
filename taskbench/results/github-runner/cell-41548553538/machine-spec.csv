@@ -1,0 +1,36 @@
+schema,run_id,timestamp_utc,machine_id,implementation,benchmark,strategy,reservation_bytes,stack_bytes,threads,tasks,params,metric,value,unit,status,note
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,uname,,,ok,Linux 7.0.0-1017-azure #17-Ubuntu SMP PREEMPT Thu Sep 24 15:54:51 UTC 2026
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,hostname,,,ok,runnervmnwato
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,os,,,ok,Ubuntu 26.04.1 LTS
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,cpu_model,,,ok,AMD EPYC 7763 64-Core Processor
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,threads_per_core,,,ok,2
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,smt,,,ok,active=1 control=on
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,hypervisor,,,ok,Microsoft Hv
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,cpus_available,,,ok,4
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,cpus_online,,,ok,0-3
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,cpu_governor,,,ok,unreadable: No such file or directory (os error 2)
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,mem_total_bytes,,,ok,16759443456
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,swap,,,ok,0 kB
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,page_size,,,ok,4096
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,sysctl.vm.max_map_count,,,ok,65530
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,sysctl.vm.overcommit_memory,,,ok,0
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,sysctl.vm.overcommit_ratio,,,ok,50
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,sysctl.kernel.threads-max,,,ok,116242
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,sysctl.kernel.pid_max,,,ok,4194304
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,sysctl.kernel.io_uring_disabled,,,ok,0
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,sysctl.fs.nr_open,,,ok,2147483584
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,sysctl.fs.file-max,,,ok,9223372036854775807
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,sysctl.net.core.somaxconn,,,ok,4096
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,sysctl.net.ipv4.ip_local_port_range,,,ok,32768	60999
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,sysctl.net.ipv4.tcp_max_syn_backlog,,,ok,1024
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,thp_enabled,,,ok,always [madvise] never
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,thp_defrag,,,ok,always defer defer+madvise [madvise] never
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,cpu_mitigations,,,ok,Mitigation: Retpolines; STIBP: disabled; RSB filling; PBRSB-eIBRS: Not affected; BHI: Not affected
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,rlimit_nofile,,,ok,65536/65536
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,rlimit_nproc,,,ok,58121/58121
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,rlimit_stack,,,ok,8388608/unlimited
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,rlimit_as,,,ok,unlimited/unlimited
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,rlimit_memlock,,,ok,8388608/8388608
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,cgroup_memory_max,,,ok,15032385536
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,cgroup_pids_max,,,ok,17436
+1,20261102T235150Z-3214,2026-11-02T23:51:50Z,github-runner-16g,machine,machine-spec,,,,,,,harness_version,,,ok,0.2.0
