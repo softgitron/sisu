@@ -29,6 +29,8 @@ const SHF_WRITE: int = 1
 const SHF_ALLOC: int = 2
 const SHF_EXECINSTR: int = 4
 const SHF_INFO_LINK: int = 64
+## The section number of a symbol with no section: a file symbol's.
+const SHN_ABS: int = 65521
 
 ## A string table: its bytes, and where each string starts.
 struct Strings:
@@ -65,13 +67,18 @@ pub pure def write(o: Obj, debug: list[DebugSection]) -> list[int]:
     var strtab = Strings.new()
     var symtab = Code.new()
     var index: dict[String, int] = {}
-    # The null symbol, then a symbol for each section a relocation names.
+    # The null symbol; the file symbol, named as Cranelift's objects name
+    # theirs, so that the executable does not depend on the object's file
+    # name (GNU ld gives the local symbols of an object without one a file
+    # symbol made from its name, which `sisu build` takes from the output's;
+    # lld adds none); then a symbol for each section a relocation names.
     symbol(mut symtab, 0, 0, 0, 0, 0, 0)
+    symbol(mut symtab, strtab.add("sisu_program"), 4, 0, SHN_ABS, 0, 0)
     let named = [".text", ".rodata", ".data.rel.ro"]
     for k in range(len(named)):
         symbol(mut symtab, 0, 3, 0, k + 1, 0, 0)
-        _ = index.insert(named[k].to_string(), k + 1)
-    var count = 1 + len(named)
+        _ = index.insert(named[k].to_string(), k + 2)
+    var count = 2 + len(named)
     var debug_base = count
     for d in debug:
         symbol(mut symtab, 0, 3, 0, 0, 0, 0)

@@ -7510,6 +7510,22 @@ D-086, D-087 step 3)
      library mode) is in port-debt.md ("The runtime in Sisu"). This
      changes no rule of the language.
 
+337. The Sisu backend's objects carry a file symbol, `sisu_program`
+     (`STT_FILE`, the first symbol after the null one), the name
+     Cranelift's objects carry. Without one, GNU ld gives an object's
+     local symbols a file symbol made from the object's file name, which
+     `sisu build` takes from the output's (`NAME.o` beside it), so an
+     executable's bytes depended on its name: CI run 41622372606, on a
+     runner whose `cc` links with GNU ld, found the fixed point of
+     decision 330 failing by one byte of `.strtab` (`sisu2-A.o` against
+     `sisu2-B.o`), and the driver's tests of one executable built from
+     source and from SIR, and on one and three workers, failing the same
+     way, where lld, which the development machine's `cc` uses, adds no
+     such symbol. The byte-for-byte comparisons now say where two ELF
+     files differ, by section (`sisu-conformance --elf-diff A B`, used by
+     the tests and by stage2/bootstrap.sh), and CI keeps a failed fixed
+     point's files as an artifact. This changes no rule of the language.
+
 **Stage 1's soundness round** (stage 1's RULES.md, R21 to R26; the manual's later findings)
 
 320. A collection's items are values it owns or views, never references

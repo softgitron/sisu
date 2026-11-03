@@ -797,6 +797,13 @@ impl WorkerCtx {
             }
             Body::Quarantined(_) => {
                 CURRENT.with(|c| c.set(ptr::null()));
+                // The wake-up that scheduled this run is consumed before the
+                // scopes are asked again: `park_task` reschedules a task whose
+                // `notified` is still set, and a stackful task clears it in
+                // `park`, which a quarantined task never reaches. A wake-up that
+                // arrives after this (a child finishing) sets it again and is
+                // honoured by `park_task`.
+                task.notified.store(false, SeqCst);
                 if self.open_scopes_busy(&task) {
                     self.park_task(task, false);
                 } else {

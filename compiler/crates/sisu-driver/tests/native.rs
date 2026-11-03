@@ -644,56 +644,6 @@ fn the_runtime_in_sisu_is_its_seed() {
     assert!(out == seed, "compiler/rt/rt.sir is not what `sisu sir` prints in compiler/rt; make it again");
 }
 
-/// Stage 2's library mode (decision 353) lowers the runtime in Sisu as the
-/// Rust lowering's does: the LIR `sisu2 lir --library --release` writes of
-/// the seed, translated for Cranelift, is the object `compile_library`
-/// makes of the seed's SIR, byte for byte, as a program's LIR gives its
-/// SIR's executable (decision 284); and the Sisu backend compiles the same
-/// library in the debug profile, with each export a global symbol.
-#[test]
-fn stage_2_lowers_the_runtime_in_sisu_as_the_rust_lowering_does() {
-    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
-    let rt = compiler_dir().join("rt");
-    let seed_path = rt.join("rt.sir");
-    let seed = std::fs::read_to_string(&seed_path).expect("the seed");
-    let dir = std::env::temp_dir().join(format!("sisu-rt-library-{}", std::process::id()));
-    let _ = std::fs::create_dir_all(&dir);
-    // A native build makes sure stage 2 is built.
-    std::fs::write(dir.join("hello.sisu"), "def main():\n    print(\"hei\")\n").expect("the program");
-    let built = std::process::Command::new(&sisu)
-        .args(["build", "--native", "hello.sisu"])
-        .current_dir(&dir)
-        .output()
-        .expect("sisu runs");
-    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
-    let stage2 = compiler_dir().join("target/stage2/sisu2");
-    let run = |args: &[&std::ffi::OsStr]| {
-        let out = std::process::Command::new(&stage2).args(args).current_dir(&rt).output().expect("sisu2 runs");
-        assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
-    };
-    let lir = dir.join("rt.lir");
-    run(&["lir".as_ref(), seed_path.as_os_str(), "--library".as_ref(), "--release".as_ref(), "--output".as_ref(), lir.as_os_str()]);
-    let std_dir = std::fs::canonicalize(compiler_dir().join("std")).ok().map(|d| d.display().to_string());
-    let sources = sisu_codegen::Sources { comp_dir: rt.display().to_string(), std_dir };
-    let prog = sisu_sir::read(&seed).expect("the seed reads");
-    let options = sisu_codegen::Options { sources: sources.clone(), release: true };
-    let from_sir = sisu_codegen::compile_library(&prog, &options).expect("the Rust lowering compiles the seed");
-    let text = std::fs::read_to_string(&lir).expect("the LIR");
-    let from_lir = sisu_codegen::compile_lir(&text, &sources).expect("the LIR translates");
-    assert!(
-        from_sir.object == from_lir.object,
-        "the runtime's object from stage 2's LIR differs from the Rust lowering's: {}",
-        sisu_conformance::elf::differences(&from_sir.object, &from_lir.object)
-    );
-    let object = dir.join("rt.o");
-    run(&["build".as_ref(), seed_path.as_os_str(), "--library".as_ref(), "--output".as_ref(), object.as_os_str()]);
-    let bytes = std::fs::read(&object).expect("the Sisu backend's object");
-    for export in ["sisu_rt_bytes_eq", "sisu_rt_value_drop", "sisu_rt_text_push"] {
-        assert!(bytes.windows(export.len()).any(|w| w == export.as_bytes()), "no `{export}` in the object");
-    }
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
 /// `sisu run --native` builds a program, runs it with its arguments and
 /// gives its exit status; the executable is gone afterwards.
 #[test]

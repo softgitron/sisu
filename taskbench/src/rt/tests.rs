@@ -374,12 +374,28 @@ fn trapped_task_with_open_scope_is_quarantined() {
     let rt = Runtime::new(2, &cfg(StrategyId::A)).unwrap();
     let outcome = rt.block_on(|| {
         let gate = Gate::new();
+        // The trap cancels the child's scope and then asks whether it is
+        // still busy; on the other worker the child could finish in between,
+        // so it stays in the scope (shielded) until the trapped task has been
+        // seen quarantined, or for ten seconds when it never is.
+        let release = Gate::new();
         let child_done = AtomicBool::new(false);
         let r = scope(|outer| {
+            outer.spawn(|| {
+                // Cancelled when the trapped task fails (a failing child cancels
+                // its siblings), so its yields may return `Cancelled`: it keeps
+                // going until it has released the child.
+                let start = Instant::now();
+                while rt.stats().quarantined == 0 && start.elapsed() < Duration::from_secs(10) {
+                    let _ = yield_now();
+                }
+                release.open();
+            });
             let h = outer.spawn(|| {
                 scope(|s| {
                     s.spawn(|| {
                         let _ = gate.wait(0);
+                        release.wait_shielded(0);
                         child_done.store(true, SeqCst);
                     });
                     while gate.waiting() == 0 {
@@ -390,7 +406,8 @@ fn trapped_task_with_open_scope_is_quarantined() {
                 })
             });
             // The trap cancels the inner scope; its child wakes with Cancelled and
-            // finishes, after which the trapped task completes.
+            // finishes once the quarantine is seen, after which the trapped task
+            // completes.
             h.join()
         })
         .unwrap();
