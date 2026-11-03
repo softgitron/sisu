@@ -1138,8 +1138,7 @@ What a trait and an impl may declare is [R3](declarations.md#traits);
 the traits of the prelude (`Display`, `Debug`, `Eq`,
 `PartialOrd`, `Ord`, `Hash`, `Default`, `Len`, `Iterator`, the operator
 traits, `FromLiteral`) are in the library's reference, and which of
-them `@derive` writes is [R14](../README.md#the-reference), when it is
-written.
+them `@derive` writes is [R14](attributes.md#deriving-traits).
 
 **Status.** In stage 0 (D-013).
 

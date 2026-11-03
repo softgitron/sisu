@@ -967,8 +967,7 @@ module imported is visible through it only when the import is `pub`
 An attribute, `@NAME` or `@NAME(ARGUMENTS)`, stands on the line before
 an item or a field and is compile-time data, never a call (D-046):
 `@derive(Debug, Eq)`, `@must_consume`, `@cfg(test)`. Every attribute
-and where it may stand is [R14](../README.md#the-reference), when it is
-written.
+and where it may stand is [R14](attributes.md).
 
 A `##` comment on the lines before an item or a field documents it, and
 `##!` documents the module; `sisu doc` renders them and `sisu test` runs

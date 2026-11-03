@@ -11,7 +11,7 @@ enum Stove:
     @since("2026")
     Electric
 
-@deprecated("use `heat_of`")
+@deprecated("read the field `heat`")
 def heat(sauna: Sauna) -> int:
     return sauna.heat
 

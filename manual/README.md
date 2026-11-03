@@ -414,7 +414,7 @@ prototype in the experiment ([STYLE.md](STYLE.md)).
 | R11 | Contracts | `requires`, `ensures`, `invariant`, refinements, check levels, violations. |
 | R12 | Compile-time evaluation and reflection | The rules of `comptime`, fuel and budgets, the `reflect` API, `target`, `embed`, the derive protocol, `@cfg` and features. |
 | R13 | Modules, packages and the manifest ([written](reference/modules.md)) | The module tree, imports and visibility, the prelude's fixed list, every key of `sisu.toml`, the lockfile, workspaces, scripts and inline metadata, editions. |
-| R14 | Attributes | Every attribute, with where it may stand and what it does. |
+| R14 | Attributes ([written](reference/attributes.md)) | Every attribute, with where it may stand and what it does. |
 | R15 | Testing ([written](reference/testing.md)) | `test` and its forms, outcomes, selection, a test's capabilities, the property-testing API, snapshots, the transcript format, replay tokens, simulation, benchmarks, output and caching. |
 | R16 | The `sisu` command ([written](reference/sisu-command.md)) | Every subcommand and option, each with an example and its exit statuses. |
 | R17 | Diagnostics ([written](reference/diagnostics.md)) | Every code by range (E00xx lexer to D0xxx driver), with its catalog identifier, message, a checked wrong program and its fix. Generated: the scripts in [tools/diagnostics/](tools/diagnostics/) (`diag_entries.py`, `mk_diag_examples.py`, `mk_diag_page.py`, `expand.py`, the templates in `tmpl/`; `bless_sessions.py` blesses one directory's sessions) rebuild it after a catalog change. |
@@ -833,7 +833,7 @@ solutions and passing checks.
 | 7 | Reader test of Parts I and II: five readers who know Python, their stuck points, the rewrites | 4 |
 | 8 | Chapters 14 (3, done), 15 (3, done), 16 (3, done), 17 with challenge III (2.5, done); R2 (3, done), R3 (2, done), R6 (1, done), R13 (2.5, done) | 20 |
 | 9 | Chapters 18 (3, done), 19 (3, done), 20 (4, done), 21 (3, done), 22 with challenge IV (4, done); R9 (2.5, done), R10 (2, done), R15 (2, done); G5 to G16 (9, done) | done |
-| 10 | R4 (2, done), R5 (1.5, done), R8 (1.5, done), R14 (1.5), R20 (2), R21 (1), R22 (1); X1, X2, X4, X5, X8, X10, X12 (7, done) | 17.5 |
+| 10 | R4 (2, done), R5 (1.5, done), R8 (1.5, done), R14 (1.5, done), R20 (2), R21 (1), R22 (1); X1, X2, X4, X5, X8, X10, X12 (7, done) | 17.5 |
 | 11 | Chapters 23 (2, done), 24 (2, done), 25 (3, done), 26 (2, done); R11 (1), R12 (2); G17, G20, G21, G26, G27, G28, G29, G30, G31, G32 (7.5, done); X6, X7, X9, X13, X14 (5, done) | 26.5 |
 | 12 | When their features exist: chapters 27 (3, done) and 28 with challenge V (2, done); G18, G19, G22, G23, G24, G25 (4.5; G19 and G24 done); X11 (1, done); the site (3) | 13.5 |
 | | Total | about 159 |
@@ -1412,6 +1412,42 @@ Writing the reference turned up more, by page:
 - R15, testing. `debug_assert`, which 02 gives as the assertion a
   release build strips, is not a statement: `debug_assert x == y` gets
   E0117 ("unexpected ... after the end of the statement").
+- R14, attributes. An attribute on the line of its declaration,
+  `@derive(Eq) struct Point:`, gets E0117 ("unexpected `struct` after
+  the end of the statement") and E0106 for the body, neither of which
+  says that an attribute stands on a line of its own. An attribute that
+  Sisu reads, standing where it means nothing, is accepted without a
+  word: `@derive(Debug)` or `@must_consume` on a function,
+  `@comptime_budget` or `@export` on a struct, and `@tag("slow")` on a
+  suite, which tags none of its tests. `@cfg(test)` on a field, a
+  variant, or a method in a struct's or an enum's own body is kept in
+  every build, where a method of an impl is left out.
+  `reflect.attributes_of` reaches the attributes of a struct, an enum or
+  an error set only; those of functions, fields, methods and variants
+  reach no compile-time code, and nothing lists a package's functions,
+  so the framework of [08](../proposal/08-metaprogramming.md) that
+  collects its routed functions at compile time cannot be written.
+  `Plain`'s derive asks only that a struct has an attribute named
+  `repr`, so `@repr(python)` passes (stage 0 lays out every struct as C
+  does anyway). `@export("sauna_heat")` checks the signature (E0989) and
+  nothing more: a native build keeps the function a local symbol
+  (`sisu$heat$2`) with no `sauna_heat`, and the `@repr(c)` types that
+  [12](../proposal/12-interop-and-targets.md#c-interop) asks for at the
+  boundary are not checked, so a struct holding a `String`, or a
+  `list[int]` result, passes. E0235 for an impl written beside
+  `@derive(Eq)` is placed at `<derive>/main.sisu:2:1`, with no label at
+  the `@derive`. E0347 for `Pair(Plain(1), Plain(2)) == ...`, where
+  `Pair[T]` derives `Eq` and `Plain` has none, offers "derive it:
+  `@derive(Eq)`", which rewrites `Pair`'s own `@derive(Eq)` with
+  itself; the type without `Eq` is `Plain`. E0266 for
+  `@cfg(target.os == "linux")` does not name `if comptime target.os ==
+  "linux":`, which is how a body tests the target. E0417 writes "a
+  `Order`", as chapter 23 found for E0806 and E0810. In a template, an
+  interpolated literal made only of compile-time values,
+  `var out = "{reflect.name_of(T)}"`, becomes a plain literal in the
+  instance, a `str`, so `return out` from a function returning a
+  `String` gets E0300 at `<describe[Booking]>/main.sisu:3:12` with the
+  fix `.to_lowercase()`, in both front ends; `String.new(...)` works.
 
 Writing the guides turned up more, by guide:
 

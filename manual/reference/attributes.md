@@ -37,7 +37,7 @@ before the declaration it belongs to.
   between an attribute and its declaration is allowed, and the
   formatter removes it.
 - `NAME` is a name. The parser also takes names joined by dots, as
-  `@orm.table`, which nothing reads yet.
+  `@orm.table`, which the proposal does not describe.
 - `ARGUMENTS` are written as a call's: expressions separated by commas,
   and keyword arguments `NAME=VALUE`. They are never evaluated
   ([Attributes are data](#attributes-are-data)), so an argument may
@@ -58,7 +58,7 @@ enum Stove:
     @since("2026")
     Electric
 
-@deprecated("use `heat_of`")
+@deprecated("read the field `heat`")
 def heat(sauna: Sauna) -> int:
     return sauna.heat
 
@@ -73,7 +73,8 @@ Kotiharju 80 Electric True
 ```
 
 `@derive` and `@deprecated` are Sisu's; `@table`, `@unit` and `@since`
-are data for a library or a tool to read.
+are data for a library or a tool to read
+([Attributes are data](#attributes-are-data)).
 
 An attribute on the line of its declaration is E0117
 ([R17](diagnostics.md#e0117)), followed by E0106
@@ -117,7 +118,9 @@ error[E0106]: expected a declaration, found `let`
 error[D0006]: the program was not run: errors found (3)
 ```
 
-An attribute on a parameter is E0100 ([R17](diagnostics.md#e0100)).
+Neither message says that an attribute stands on a line of its own:
+E0117 takes the attribute for a statement, after whose end `struct` is
+unexpected. An attribute on a parameter is E0100 ([R17](diagnostics.md#e0100)).
 
 **Status.** In stage 0 (D-046).
 
@@ -186,11 +189,10 @@ Booking @table ["bookings"] @index [hour] [unique=True]
 
 **Stage 0 differs.** `reflect.attributes_of` takes a struct, an enum or
 an error set, and gives an empty list for a type of the standard
-library. The
-attributes of a function, a field, a method or a variant reach no
-compile-time code, and no query lists the functions of a package, so the
-framework of 08 that collects its routed functions at compile time
-cannot be written yet.
+library. The attributes of a function, a field, a method or a variant
+reach no compile-time code, and no query lists the functions of a
+package, so the framework of 08 that collects its routed functions at
+compile time cannot be written yet.
 
 **Status.** In stage 0 (D-046, D-018), with the differences noted.
 
@@ -201,7 +203,7 @@ cannot be written yet.
 | `@derive(TRAIT, ...)` | a struct, an enum, an error set | writes the traits' impls from the fields ([Deriving traits](#deriving-traits)) | in stage 0 |
 | `@delegate(TRAIT, ..., to="FIELD")` | a struct | forwards the traits to a field ([Delegating traits to a field](#delegating-traits-to-a-field)) | in stage 0 |
 | `@must_consume` | a struct, an enum | makes each value end in an `own` parameter ([Values that must be consumed](#values-that-must-be-consumed)) | in stage 0 |
-| `@cfg(CONDITION)` | an item, an item of a suite, a method of an impl or a trait | keeps the declaration only where the condition holds ([Conditional compilation](#conditional-compilation)) | in stage 0 |
+| `@cfg(CONDITION)` | an item, an item of a suite, an `extern` block, a method of an impl or a trait | keeps the declaration only where the condition holds ([Conditional compilation](#conditional-compilation)) | in stage 0 |
 | `@comptime_budget(steps=N)` | a function, a constant | raises its compile-time budget ([Compile-time budgets](#compile-time-budgets)) | in stage 0 |
 | `@tag("NAME", ...)` | a test | names it for `--tag` and `--skip-tag` ([Tags on tests](#tags-on-tests)) | in stage 0 |
 | `@refines(REFERENCE)` | a function | tests it against a reference ([Refinement tests](#refinement-tests)) | in stage 0; leaning |
@@ -263,14 +265,16 @@ error Problem:
 def main():
     let old = Version(1, 2)
     let new = Version(major=2)
-    print("{old < new} {sorted([new, old])} {Version.default():?}")
+    print("{old < new} {sorted([new, old])}")
+    print("{Version.default():?}")
     print({Light.Red: "stop", Light.Amber(3): "wait"}[Light.Amber(3)])
     print(Missing("hat".to_string()) == Missing("hat".to_string()))
 ```
 
 <!-- output: examples/reference-attributes/derive.out -->
 ```text
-True [Version(major=1, minor=2), Version(major=2, minor=0)] Version(major=0, minor=0)
+True [Version(major=1, minor=2), Version(major=2, minor=0)]
+Version(major=0, minor=0)
 wait
 True
 ```
@@ -400,8 +404,9 @@ in an `own` parameter, usually a method that takes `own self`, before it
 goes out of scope: a value that goes out of scope unconsumed is E0417
 ([R17](diagnostics.md#e0417)), and one that an early `return`, `break`
 or `?` leaves behind is E0418 (`borrow.must-consume-exit`). A
-collection of such values is must-consume too. The rules are [R7](ownership.md#values-that-must-be-consumed),
-and cleanup that can fail is [R8](errors.md#cleanup-that-can-fail).
+collection of such values is must-consume too. The rules are
+[R7](ownership.md#values-that-must-be-consumed), and cleanup that can
+fail is [R8](errors.md#cleanup-that-can-fail).
 
 **Status.** In stage 0 (D-054; containers lean, D-064).
 
@@ -562,9 +567,10 @@ functions of the module with the same parameters and result (E0821,
 
 ## Fixtures
 
-`@fixture(scope="module")` on a function makes a value that each test
-naming the function's name as a parameter receives, made once for the
-scope ([17](../../proposal/17-testing.md#fixtures)).
+`@fixture(scope="module")` on a function offers its value to the tests:
+a test with a parameter of the function's name receives the value, made
+once for the scope, here once for the module
+([17](../../proposal/17-testing.md#fixtures)).
 
 **Stage 0 differs.** `@fixture` is accepted and does nothing, and a test
 with a parameter that is not a capability is E0702
@@ -661,10 +667,10 @@ error[E0989]: `name_length` is `@export`ed, and foreign code that calls it canno
 error[D0006]: the program was not run: errors found (1)
 ```
 
-**Stage 0 differs.** The check of the signature is all: a native build
-gives the function no symbol named `NAME`, and the rule of 12 that the
-types at the boundary are `@repr(c)` is not checked, so a parameter of a
-struct with a `String` in it passes.
+**Stage 0 differs.** Stage 0 checks the signature and does nothing
+more: a native build gives the function no symbol named `NAME`, and the
+rule of 12 that the types at the boundary are `@repr(c)` is not
+checked, so a parameter of a struct with a `String` in it passes.
 
 **Status.** Designed ([12](../../proposal/12-interop-and-targets.md),
 [22](../../proposal/22-unsafe.md); D-080), with its check in stage 0.
@@ -743,7 +749,7 @@ driver needs ([04](../../proposal/04-memory-and-ownership.md#resource-attributes
   can panic ([R16](sisu-command.md#sisu-audits-other-reports)).
 
 **Stage 0 differs.** Stage 0 accepts the three attributes and checks
-nothing, as it does the attributes of the next sections:
+nothing, as it does `@float(fast)`, `@deprecated` and `@fix_inline`:
 
 <!-- file: examples/reference-attributes/designed.sisu -->
 ```sisu
@@ -804,7 +810,8 @@ that depend on it with that body, moving borrows, `own` arguments and
 deprecated function gets no warning ([Resource limits](#resource-limits)
 shows it), and `sisu fix` is designed ([R16](sisu-command.md#sisu-fix)).
 
-**Status.** Designed ([13](../../proposal/13-evolution-and-governance.md)); `@fix_inline` leans (D-067).
+**Status.** Designed ([13](../../proposal/13-evolution-and-governance.md));
+`@fix_inline` leans (D-067).
 
 ## Preview features
 
