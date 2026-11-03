@@ -1,6 +1,8 @@
 test "std.core/zip (doc example)" ... ok
 test "std.core/sorted (doc example)" ... ok
 test "std.core/max (doc example)" ... ok
+test "std.core/max_of (doc example)" ... ok
+test "std.core/min_of (doc example)" ... ok
 test "std.core/char.len_utf8 (doc example)" ... ok
 test "std.core/str.byte_slice (doc example)" ... ok
 test "std.core/str.byte_find (doc example)" ... ok
@@ -155,4 +157,4 @@ test "std.task/Once (doc example)" ... ok
 test "std.test/Bench (doc example)" ... ok
 test "std.time/Ticker (doc example)" ... ok
 test "std.time/Timeline (doc example)" ... ok
-157 passed, 0 failed, 0 blocked
+159 passed, 0 failed, 0 blocked

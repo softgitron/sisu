@@ -931,6 +931,7 @@ pure def read_function(
         blocks=[],
         loc=fn_loc,
         source=source,
+        shown=[],
     )
     var pos = after_header
     var line_no = header_line_no

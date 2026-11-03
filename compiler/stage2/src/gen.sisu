@@ -1090,6 +1090,7 @@ pure def par_map(f: Function) -> Function:
         blocks=[entry, out, unwinding],
         loc=f.loc,
         source=f.source,
+        shown=[],
     )
 
 ## The signature of the runtime's entry point `name` as LIR declares it.
