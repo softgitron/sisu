@@ -1,0 +1,23 @@
+# RULES.md, R15: an error set named as one of the prelude's hides it in
+# its module, and the two are different sets with one name (D-024:
+# shadowing an outer scope warns); a set of another name does not warn.
+
+error TimeError:
+    TooLate(minutes: int)
+
+error ClockError:
+    Stopped
+
+def check(minutes: int) -> ! TimeError:
+    if minutes > 10:
+        return Err(TooLate(minutes=minutes))
+    return Ok(())
+
+def main():
+    match check(15):
+        case Ok(_):
+            print("on time")
+        case Err(e):
+            print("{e:?}")
+    let stopped: ClockError = Stopped
+    print("{stopped:?}")

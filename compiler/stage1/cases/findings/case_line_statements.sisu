@@ -1,0 +1,19 @@
+# RULES.md, R16: a `case` arm on one line holds a single expression (02,
+# "Expressions and statements"), so an assignment written there is a
+# statement on the arm's line, as `return` is: the error says so, and its
+# fix puts the statement in the indented block it needs.
+
+def label(x: int?) -> str:
+    var label = "some"
+    match x:
+        case None: label = "none"
+        case Some(_): label += "!"
+    return label
+
+def code(x: int?) -> int:
+    match x:
+        case None: return 0
+        case Some(n): return n
+
+def main():
+    print("{label(None)} {code(Some(2))}")

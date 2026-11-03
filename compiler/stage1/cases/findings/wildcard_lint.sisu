@@ -1,0 +1,52 @@
+# RULES.md, R11: `sisu lint` warns about a `case _` over an enum of the
+# program's own package (D-043; 03, "Algebraic data types"), naming the
+# variants it matches and listing them as the fix; `sisu check` does not.
+# A wildcard over the prelude's enums, a nested one, a binding and an arm
+# that is unreachable are not linted.
+
+enum Shape:
+    Circle(r: int)
+    Square(side: int)
+    Line
+    Dot
+
+def name(s: Shape) -> str:
+    match s:
+        case Circle(_):
+            return "circle"
+        case _:
+            return "other"
+
+def corners(s: Shape) -> int:
+    return match s:
+        case Square(_): 4
+        case Circle(0): 0
+        case _: 0
+
+def maybe(x: int?) -> int:
+    match x:
+        case Some(n):
+            return n
+        case _:
+            return 0
+
+def nested(s: Shape?) -> int:
+    match s:
+        case Some(Dot):
+            return 1
+        case Some(_):
+            return 2
+        case None:
+            return 0
+
+def bound(s: Shape) -> str:
+    match s:
+        case Line:
+            return "line"
+        case other:
+            return name(other)
+
+def main():
+    print(name(Shape.Dot))
+    print("{corners(Shape.Square(2))} {maybe(None)} {nested(Some(Shape.Line))}")
+    print(bound(Shape.Circle(1)))

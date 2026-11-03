@@ -1,0 +1,48 @@
+# RULES.md, R12: naming follows PEP 8 and is enforced (02, "Lexical
+# structure"): `CamelCase` for types, traits, variants and type
+# parameters, `snake_case` for functions, methods, fields, parameters and
+# variables, `SCREAMING_CASE` for constants. Each name written otherwise is
+# an error at its declaration, with the name written so as the fix; a
+# foreign function keeps its library's names, and a capitalised name in a
+# pattern is a constant, not a binding.
+
+struct point:
+    X: int
+    y_pos: int
+
+enum color:
+    red
+    Green
+
+error parse_error:
+    TooLong
+
+trait shape:
+    type item_kind
+    def Area(self) -> int
+
+const max_size: int = 10
+
+type meters = int
+
+struct Grid[t, const w: int]:
+    cells: Array[t, w]
+
+def firstValue[T](xs: list[T], countAll: int) -> int:
+    let myTotal = 0
+    for eachOne in xs:
+        pass
+    let Some(found) = xs.first() else:
+        return countAll
+    return myTotal
+
+# safety: nothing calls it; a foreign function keeps its library's names.
+extern "C":
+    def GetTickCount(milliSeconds: int) -> int
+
+def apply(f: (int) -> int) -> int:
+    return f(1)
+
+def main():
+    let p = point(X=1, y_pos=2)
+    print("{p.y_pos} {firstValue([1], 2)} {apply((someValue) -> someValue)}")

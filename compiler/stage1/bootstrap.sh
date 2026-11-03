@@ -23,6 +23,10 @@
 #                a temporary directory
 set -uo pipefail
 
+# Stage 0 builds stage1-A and prints its SIR with its own front end, the
+# Rust one, unless `SISU_FRONT_END` names another (decision 268).
+export SISU_FRONT_END="${SISU_FRONT_END:-rust}"
+
 here=$(cd "$(dirname "$0")" && pwd)
 compiler=$(dirname "$here")
 sisu="$compiler/target/release/sisu"

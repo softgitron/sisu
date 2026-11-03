@@ -1,0 +1,6 @@
+warning[W0016]: the error set `TimeError` hides the prelude's in this module, and the two are different sets: what the prelude's functions return is not this one
+  --> shadowed_error_set.sisu:5:7
+  |
+5 | error TimeError:
+  |       ^^^^^^^^^
+

@@ -1,0 +1,12 @@
+# RULES.md, R18: `std.mem`'s `Layout.of[T]()` and `Layout.array[T](n)` are
+# associated functions called with their type arguments, which `RawBuf`
+# calls with its own: their SIR calls them with the type, where the call
+# was an error of the standard library's that lowered to `unreachable`.
+
+from std.mem import Layout
+
+pure def layouts() -> (Layout, Layout?):
+    return (Layout.of[u8](), Layout.array[int](3))
+
+def main():
+    _ = layouts()

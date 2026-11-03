@@ -1,0 +1,44 @@
+# RULES.md, R16: the fixes the manual's writers found missing, for the
+# type checker's errors: a text field owned as a `String`; `mut self` for
+# a method that changes its value; `@derive` for a missing trait of the
+# language's on a type of the module, with the supertraits it lacks, in
+# its `@derive(...)` or on a line above it; a copy of a borrowed list whose
+# items are not `Copy`, given where owned items are expected; and
+# `Path.new` for text where a `Path` is expected.
+
+struct Person:
+    name: str
+    nickname: str?
+    age: int
+
+struct Counter:
+    count: int
+
+impl Counter:
+    def bump(self):
+        self.count += 1
+
+struct Version:
+    major: int
+    minor: int
+
+@derive(Eq)
+struct Tag:
+    label: String
+
+def newest(vs: list[Version]) -> list[Version]:
+    return sorted(vs)
+
+def bigger(a: Version, b: Version) -> bool:
+    return a < b
+
+def tags(t: Tag) -> int:
+    let s = {t.copy()}
+    return len(s)
+
+def show(p: Path):
+    print("{p}")
+
+def main(sys: System):
+    let args = sys.env.args()
+    show(args[0])

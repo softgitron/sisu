@@ -1,0 +1,32 @@
+# RULES.md, R18: an associated function takes the type arguments of its
+# own generic parameters as a free function does, `Type.function[T](...)`
+# as `f[T](...)`: those of a generic type's impl come from the type, as
+# written (`Pair[int]`) or inferred, and the function's own from the
+# brackets after its name.
+
+struct Shelf:
+    size: int
+
+impl Shelf:
+    def empty_of[T]() -> list[T]:
+        return []
+
+    def repeat[T: Copy](x: T, n: int) -> list[T]:
+        var out: list[T] = []
+        for _ in range(n):
+            out.push(x)
+        return out
+
+struct Pair[A]:
+    a: A
+
+impl[A: Copy] Pair[A]:
+    def with_other[B](own a: A, own b: B) -> (A, B):
+        return (a, b)
+
+def main():
+    let xs = Shelf.empty_of[int]()
+    let ys = Shelf.repeat[str]("ab", 2)
+    let p = Pair[int].with_other[bool](1, True)
+    let q = Pair.with_other[str](2.5, "x")
+    print("{len(xs)} {ys} {p} {q}")

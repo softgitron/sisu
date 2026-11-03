@@ -1,0 +1,2 @@
+16:14-16:40 E0208 resolve.type-argument-count name="empty_of" expected="1" found="2"
+17:13-17:31 E0349 type.not-generic name="count"

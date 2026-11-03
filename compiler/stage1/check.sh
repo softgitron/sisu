@@ -62,8 +62,15 @@
 #   contracts-off           `sisu sir --contracts=off FILE`, standard output
 #   contracts-preconditions `sisu sir --contracts=preconditions FILE`
 #
-# each of which must be within the slice and match. Then what the
-# programs do:
+# each of which must be within the slice and match. Then the SIR of the
+# programs of `sir.list` with tests or benchmarks, built with them as
+# `sisu test` and `sisu bench` run them (decision 285):
+#
+#   sir-tests    `sisu sir --tests FILE`, standard output: each test's
+#                line with its tags and each benchmark's line, and the
+#                functions they reach
+#
+# each of which must match. Then what the programs do:
 #
 #   behaviour    every runnable program of the corpus and of stage 1's own
 #                cases (one with an `.out`, `.err` or `.status`), lowered
@@ -95,7 +102,10 @@
 #                own cases that has a `NAME.diag` beside it (a rule of
 #                RULES.md's, whose diagnostics the frozen Rust front end does
 #                not give), against that file, as the conformance suite
-#                holds its cases to theirs (a package case's with --check)
+#                holds its cases to theirs (a package case's with --check),
+#                and of each with a `NAME.audit`, a `NAME.lint` or a
+#                `NAME.sir`, what `audit --unsafe`, `lint --format=ids` or
+#                `sir` prints of it
 # Then the formatter, from one run of stage 1:
 #
 #   fmt          the text `sisu fmt FILE` leaves (stage 0 formats a copy),
@@ -175,6 +185,11 @@
 #                conformance/cases/wrong/ (--native implies it)
 #   --keep DIR   leave every output in DIR instead of a temporary directory
 set -uo pipefail
+
+# Stage 0 is the oracle of what has not changed only through its own front
+# end: `sisu` runs stage 1's unless `SISU_FRONT_END=rust` says otherwise
+# (decision 268), so the run asks for the Rust one unless told which.
+export SISU_FRONT_END="${SISU_FRONT_END:-rust}"
 
 here=$(cd "$(dirname "$0")" && pwd)
 compiler=$(dirname "$here")
@@ -363,7 +378,16 @@ stage0_doc() {
     (cd "$dir" && "$sisu" doc "${what[@]}" --output "$3/$1.pages" > "$3/$1.pages.out" 2> "$3/$1.pages.err"
      echo "$?" > "$3/$1.pages.status")
 }
-export -f stage0_syntax check0 in_package stage0_check stage0_sir stage0_human stage0_sir_level stage0_fmt stage0_doc
+# What `sisu sir --tests` prints: the program built with its tests
+# (decision 285).
+stage0_sir_tests() {
+    if [ -d "$2" ]; then
+        in_package "$2" "$sisu" sir --tests 2> /dev/null > "$3/$1.sir"
+    else
+        "$sisu" sir --tests "$2" > "$3/$1.sir" 2> /dev/null
+    fi
+}
+export -f stage0_syntax check0 in_package stage0_check stage0_sir stage0_human stage0_sir_level stage0_fmt stage0_doc stage0_sir_tests
 
 # The differences DISCREPANCIES.md lists (stage 0's accidents) and those
 # RULES.md lists (the rules stage 1 decides where the frozen Rust front end
@@ -745,6 +769,49 @@ for level in off preconditions; do
         "$class" "$n" "$same" "$class_listed" "$class_unlisted" "$seconds")"
 done
 
+# The SIR of the programs of `sir.list` that have tests or benchmarks,
+# built with them as `sisu test` and `sisu bench` run them (decision 285:
+# each test's tags and the benchmarks written), against `sisu sir --tests`.
+while read -r f; do
+    if grep -rqE '^ *(test|bench|suite) "' "$f" 2> /dev/null; then echo "$f"; fi
+done < "$work/sir.list" > "$work/sir-tests.list"
+class=sir-tests
+list="$work/$class.list"
+n=$(wc -l < "$list" | tr -d ' ')
+ref="$work/$class.stage0"; out="$work/$class.stage1"
+mkdir -p "$ref" "$out"
+parallel stage0_sir_tests "$list" "$ref"
+start=$(date +%s.%N)
+if ! stage1 sir-batch "$out" "$list" --tests > "$work/$class.log" 2> "$work/$class.stderr"; then
+    cat "$work/$class.stderr" >&2
+    echo "check.sh: stage 1 failed lowering the $class files" >&2
+    exit 1
+fi
+end=$(date +%s.%N)
+seconds=$(awk "BEGIN { printf \"%.1f\", $end - $start }")
+same=0; class_listed=0; class_unlisted=0
+i=0
+while read -r f; do
+    i=$((i + 1))
+    rel="${f#"$repo"/}"
+    if [ -s "$out/$i.beyond" ]; then
+        class_unlisted=$((class_unlisted + 1))
+        report="$report\n  UNLISTED: $rel: $class (beyond the slice: $(head -1 "$out/$i.beyond"))"
+    elif cmp -s "$ref/$i.sir" "$out/$i.sir"; then
+        same=$((same + 1))
+    elif grep -qxF -e "$rel $class" "$allowed"; then
+        class_listed=$((class_listed + 1))
+        report="$report\n  listed:   $rel: $class"
+    else
+        class_unlisted=$((class_unlisted + 1))
+        report="$report\n  UNLISTED: $rel: $class (stage 0 in $ref/$i.sir, stage 1 in $out/$i.sir)"
+    fi
+done < "$list"
+total=$((total + n)); identical=$((identical + same))
+listed=$((listed + class_listed)); unlisted=$((unlisted + class_unlisted))
+tests_summary="$(printf '  %-24s %4d files, %4d identical, %3d differing as listed, %3d otherwise; stage 1 %6ss' \
+    "$class" "$n" "$same" "$class_listed" "$class_unlisted" "$seconds")"
+
 # The behaviour of stage 1's SIR, the primary oracle since the Rust front
 # end was frozen (RULES.md): every runnable program of the corpus and of
 # stage 1's own cases (one with an `.out`, `.err` or `.status`, as the
@@ -1023,8 +1090,43 @@ while read -r f; do
         report="$report\n  UNLISTED: ${f#"$repo"/}: expected audit (the case's ${base##*/}.audit against stage 1 in $work/audit/$k.out)"
     fi
 done < <(grep -F "$here/cases/" "$work/cases-check.list"; grep -F "$here/cases/" "$work/packages.list")
+# And what `lint --format=ids` prints of each case with a `NAME.lint`
+# (RULES.md, R11: `sisu lint`'s warnings), against that file.
+mkdir -p "$work/lint"
+k=0
+while read -r f; do
+    base="${f%.sisu}"
+    case "$base" in *.pkg/*) base="${base%%.pkg/*}" ;; *.pkg) base="${base%.pkg}" ;; esac
+    [ -f "$base.lint" ] || continue
+    k=$((k + 1)); n=$((n + 1))
+    stage1 lint --format=ids "$f" > "$work/lint/$k.out" 2> /dev/null
+    if cmp -s "$base.lint" "$work/lint/$k.out"; then
+        same=$((same + 1))
+    else
+        class_unlisted=$((class_unlisted + 1))
+        report="$report\n  UNLISTED: ${f#"$repo"/}: expected lint (the case's ${base##*/}.lint against stage 1 in $work/lint/$k.out)"
+    fi
+done < <(grep -F "$here/cases/" "$work/cases-check.list"; grep -F "$here/cases/" "$work/packages.list")
+# And what `sir` prints of each case with a `NAME.sir` (RULES.md, R17:
+# the form of a call), its directory taken off the paths it names, as
+# `sisu sir NAME.sisu` names them run there, against that file.
+mkdir -p "$work/sir-expected"
+k=0
+while read -r f; do
+    base="${f%.sisu}"
+    [ -f "$base.sir" ] || continue
+    k=$((k + 1)); n=$((n + 1))
+    dir=$(dirname "$f" | sed 's/[.[\*^$|]/\\&/g')
+    stage1 sir "$f" 2> /dev/null | sed "s|$dir/||g" > "$work/sir-expected/$k.out"
+    if cmp -s "$base.sir" "$work/sir-expected/$k.out"; then
+        same=$((same + 1))
+    else
+        class_unlisted=$((class_unlisted + 1))
+        report="$report\n  UNLISTED: ${f#"$repo"/}: expected sir (the case's ${base##*/}.sir against stage 1 in $work/sir-expected/$k.out)"
+    fi
+done < <(grep -F "$here/cases/" "$work/cases-check.list")
 total=$((total + n)); identical=$((identical + same)); unlisted=$((unlisted + class_unlisted))
-check_summary="$check_summary\n$(printf '  %-12s %4d files, %4d as their .diag or .audit expects, %3d otherwise' expected "$n" "$same" "$class_unlisted")"
+check_summary="$check_summary\n$(printf '  %-12s %4d files, %4d as their .diag, .audit, .lint or .sir expects, %3d otherwise' expected "$n" "$same" "$class_unlisted")"
 
 # The formatter: the text `sisu fmt` leaves of each file, what `sisu fmt
 # --check` prints of it and its status, against stage 1's `fmt-batch`; and
@@ -1487,6 +1589,8 @@ echo "stage 1's ownership checker against stage 0's (ownership):"
 printf "%b\n" "${own_summary#\\n}"
 echo "stage 1's lowering at the contract levels of a build against stage 0's (contracts):"
 printf "%b\n" "${contracts_summary#\\n}"
+echo "stage 1's lowering of the programs built with their tests against stage 0's (sir-tests):"
+printf "%b\n" "$tests_summary"
 echo "stage 1's SIR run against the cases' expectations (behaviour: interpreted and native, from \`sisu sir\` as stage 1 prints it):"
 printf "%b\n" "$behaviour_summary"
 echo "stage 1's check against stage 0's (every diagnostic, in the human and the conformance form):"

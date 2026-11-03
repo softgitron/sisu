@@ -82,9 +82,9 @@ unsafe impl Escapable for View:
 
 # safety: getpid takes nothing and cannot fail.
 extern "C":
-    def getpid() -> c_int
+    def getpid() -> CInt
 
-type c_int = i32
+type CInt = i32
 
 def needs_positive(n: int) -> int:
     # safety: nonzero, exact: 1 is not zero and divides every number.

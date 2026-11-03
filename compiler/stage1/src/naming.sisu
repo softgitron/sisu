@@ -1,0 +1,107 @@
+##! The names 02 enforces ("Lexical structure": naming follows PEP 8 and is
+##! enforced; RULES.md, R12): `snake_case` for values, functions, methods,
+##! modules, fields and parameters, `CamelCase` for types, traits, enum
+##! variants and type parameters, and `SCREAMING_CASE` for constants. A
+##! name breaks its style by its letters' case alone, so a name in a script
+##! without case (`日本`) breaks none; the name pass reports each
+##! declaration whose name breaks its style, with the name written in it as
+##! the fix.
+
+from stage1.text import char_at
+
+## The case a kind of name is written in.
+@derive(Eq, Copy)
+pub enum Style:
+    ## `CamelCase`: no `_`, and a first letter that is not lowercase.
+    Camel
+    ## `snake_case`: no uppercase letter.
+    Snake
+    ## `SCREAMING_CASE`: no lowercase letter.
+    Screaming
+
+## The name written in its style, when it is not written so already.
+pub pure def problem(name: str, style: Style) -> String?:
+    if name.is_empty() or name == "_":
+        return None
+    let fixed = match style:
+        case Camel: to_camel(name)
+        case Snake: to_snake(name)
+        case Screaming: to_snake(name).to_uppercase()
+    if not breaks(name, style) or fixed == name or fixed.is_empty():
+        return None
+    return Some(fixed)
+
+## Whether `name` breaks `style`.
+pub pure def breaks(name: str, style: Style) -> bool:
+    match style:
+        case Camel:
+            if name.contains("_"):
+                return True
+            return char_at(name, 0).is_lowercase()
+        case Snake:
+            for c in name.chars():
+                if c.is_uppercase():
+                    return True
+            return False
+        case Screaming:
+            for c in name.chars():
+                if c.is_lowercase():
+                    return True
+            return False
+
+## `point` as `Point`, `http_server` as `HttpServer`: each part between
+## underscores starts with its first letter in uppercase, and a leading
+## underscore goes.
+pub pure def to_camel(name: str) -> String:
+    var out = String.new()
+    for part in name.split("_"):
+        var first = True
+        for c in part.chars():
+            if first:
+                out.push("{c}".to_uppercase())
+                first = False
+            else:
+                out.push("{c}")
+    return out
+
+## `myValue` as `my_value`, `HTTPServer` as `http_server`: an underscore
+## before an uppercase letter that follows a lowercase one or a digit, or
+## that starts a word after an acronym, and every letter in lowercase.
+pub pure def to_snake(name: str) -> String:
+    var cs: list[char] = []
+    for c in name.chars():
+        cs.push(c)
+    var out = String.new()
+    for i in range(len(cs)):
+        let c = cs[i]
+        if c.is_uppercase() and i > 0:
+            let before = cs[i - 1]
+            let after_lower = i + 1 < len(cs) and cs[i + 1].is_lowercase()
+            if before.is_lowercase()
+                    or before.is_digit()
+                    or (before.is_uppercase() and after_lower):
+                out.push("_")
+        out.push("{c}".to_lowercase())
+    return out
+
+test "a name breaks its style by its letters' case":
+    assert breaks("point", Style.Camel)
+    assert breaks("My_Type", Style.Camel)
+    assert not breaks("Point", Style.Camel)
+    assert not breaks("HTTPServer", Style.Camel)
+    assert breaks("myValue", Style.Snake)
+    assert not breaks("my_value2", Style.Snake)
+    assert not breaks("_unused", Style.Snake)
+    assert breaks("Max_size", Style.Screaming)
+    assert not breaks("MAX_SIZE", Style.Screaming)
+    assert not breaks("日本", Style.Camel)
+
+test "a name is written in its style":
+    assert problem("point", Style.Camel) == Some("Point".to_string())
+    assert problem("http_server", Style.Camel) == Some("HttpServer".to_string())
+    assert problem("myValue", Style.Snake) == Some("my_value".to_string())
+    assert problem("parseHTTPRequest", Style.Snake) == Some("parse_http_request".to_string())
+    assert problem("MyValue", Style.Snake) == Some("my_value".to_string())
+    assert problem("maxSize", Style.Screaming) == Some("MAX_SIZE".to_string())
+    assert problem("Point", Style.Camel) == None
+    assert problem("_", Style.Snake) == None

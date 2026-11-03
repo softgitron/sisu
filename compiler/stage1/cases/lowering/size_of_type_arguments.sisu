@@ -1,0 +1,14 @@
+# RULES.md, R17: an intrinsic's call writes its type arguments when one of
+# its own generic parameters is in no parameter, in its result or nowhere:
+# `std.mem`'s `size_of[T]() -> int` and `align_of[T]() -> int` say nothing
+# of `T` but by it, so their calls are `mem.size_of[int]()` and
+# `mem.align_of[(int, bool)]()`, by which the interpreter and the runtime
+# know the type (type argument 0 is `T`).
+
+from std.mem import align_of, size_of
+
+pure def words() -> int:
+    return size_of[int]() + align_of[(int, bool)]()
+
+def main():
+    _ = words()

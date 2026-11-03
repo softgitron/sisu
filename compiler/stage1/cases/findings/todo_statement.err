@@ -1,0 +1,12 @@
+warning[W0001]: typed hole `later` of type `()`
+  --> todo_statement.sisu:11:9
+   |
+11 |         todo("later")
+   |         ^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `size` of type `int`
+  --> todo_statement.sisu:14:16
+   |
+14 |         return todo("size")
+   |                ^^^^^^^^^^^^
+

@@ -1,0 +1,11 @@
+29:12-29:19 E0314 type.non-exhaustive missing="`Spades`, `Clubs`, `Diamonds`"
+33:5-33:12 E0314 type.non-exhaustive missing="`Some(Spades)`, `Some(Clubs)`, `Some(Diamonds)`, `None`"
+36:5-36:13 W0004 type.unreachable-code
+39:5-39:17 E0314 type.non-exhaustive missing="`(Hearts, Amber)`, `(Hearts, Green)`, `(Clubs, _)`, `(Diamonds, _)`"
+44:5-44:13 W0004 type.unreachable-code
+47:5-47:13 E0314 type.non-exhaustive missing="`[False, _, *_]`"
+54:5-54:13 W0004 type.unreachable-code
+57:5-57:12 E0314 type.non-exhaustive missing="`One`, `Two`, `Three`, `Four`, `Five`, `Six`, `Seven`, `Eight`"
+60:5-60:13 W0004 type.unreachable-code
+63:5-63:12 E0314 type.non-exhaustive missing="`Amber`"
+66:5-66:13 W0004 type.unreachable-code

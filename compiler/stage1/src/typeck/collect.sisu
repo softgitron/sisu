@@ -23,7 +23,7 @@ import stage1.typeck.folding
 from stage1.diag import Catalog, Diagnostic, Edit, Label, Msg, TextRange, quote
 from stage1.diag import Param as MsgParam
 from stage1.parser import parse
-from stage1.resolve import closest
+from stage1.resolve import Environment, ModuleNames, closest
 from stage1.syntax.ast import (
     Arg,
     ArmBody,
@@ -178,6 +178,12 @@ pub struct Resolver:
     ## The std modules a program may import, parsed once by the base and
     ## shared by each copy of it (a program's resolver is one).
     std_parsed: Shared[dict[String, Module]]
+    ## Their texts, for a base that did not parse them (one made with the
+    ## cache of `main.base_of`): an import parses its module then.
+    std_sources: Shared[dict[String, String]]
+    ## What the name pass knows of the prelude and the ambient modules,
+    ## from the base's own parse of them (`resolve.Environment`).
+    pub environment: Environment?
     ## The std modules loaded, by name.
     std_loaded: dict[String, ModuleId]
     ## While the root module's items are declared: its imports, declared
@@ -305,6 +311,7 @@ pub struct Resolver:
 impl Resolver:
     pub pure def new() -> Resolver:
         let parsed: dict[String, Module] = {}
+        let sources: dict[String, String] = {}
         let safety_texts: dict[String, String] = {}
         return Resolver(
             prog=Program.new(),
@@ -319,6 +326,8 @@ impl Resolver:
             headers_done=set(),
             type_preds={},
             std_parsed=Shared(parsed),
+            std_sources=Shared(sources),
+            environment=None,
             std_loaded={},
             deferring=False,
             deferred=[],
@@ -370,43 +379,7 @@ impl Resolver:
     ## `base`, and a copy of it that loads every std module a program may
     ## import besides, which the base makes their derived impls on.
     pub pure def base_with_all(texts: dict[String, String]) -> (Resolver, Resolver):
-        var r = Resolver.new()
-        # The prelude's derive templates, with its syntax and text, which
-        # unfold the derived impls of every std module and stay for the
-        # program's.
-        let prelude_text = text_of(texts, "prelude")
-        let prelude_module = build.module(parse(prelude_text, Catalog.parse("")).tree)
-        let templates = derive_templates(prelude_module.copy(), prelude_text)
-        let prelude = r.load_std_module("prelude", prelude_module, prelude_text, templates)
-        r.prog.prelude = prelude
-        r.fill_well_known()
-        for name in ambient():
-            let m = r.load_std(name, text_of(texts, name), templates)
-            let d = r.new_def(prelude, name, TextRange.empty(0), Vis.Pub, DefKind.Module(m))
-            _ = r.prog.modules[prelude.index].items.insert(name.to_string(), d)
-        let t = r.load_std("target", target(), templates)
-        let td = r.new_def(prelude, "target", TextRange.empty(0), Vis.Pub, DefKind.Module(t))
-        _ = r.prog.modules[prelude.index].items.insert("target".to_string(), td)
-        _ = r.load_std("builtin_impls", builtin_impls(), templates)
-        r.resolve_pending()
-        r.build_variant_index(0)
-        r.check_traits(0)
-        # The type checker never checks the std modules' bodies: their syntax
-        # goes from the program, which each file copies, and stays for
-        # lowering.
-        r.std_kept = r.sources.copy()
-        for i in range(len(r.sources)):
-            r.sources[i] = Module(ast=Ast.new(), items=[], docs=[], broken_names=[])
-        # The text of each std module a program may import that has
-        # templates, for their instances.
-        var safety_texts: dict[String, String] = {}
-        for name in importable():
-            let text = text_of(texts, name)
-            if text.contains("reflect."):
-                _ = r.std_texts.insert(name.to_string(), text.to_string())
-            if text.contains("unsafe "):
-                _ = safety_texts.insert(name.to_string(), text.to_string())
-        r.std_safety_texts = Shared(safety_texts)
+        var (r, templates) = Resolver.base_core(texts, {})
         # The std modules a program may import, parsed once.
         var parsed: dict[String, Module] = {}
         for name in importable():
@@ -432,6 +405,84 @@ impl Resolver:
         all.resolve_pending()
         r.mark_base()
         return (r, all)
+
+    ## `base` made from what `base_with_all`'s copy made before, the derived
+    ## impls of every std module by name (`main.base_of`'s cache): the
+    ## modules a program may import are parsed when one imports them.
+    pub pure def base_cached(
+        texts: dict[String, String], derived: dict[String, String]
+    ) -> Resolver:
+        var (r, templates) = Resolver.base_core(texts, derived)
+        var sources: dict[String, String] = {}
+        for name in importable():
+            let text = text_of(texts, name)
+            if not text.is_empty():
+                _ = sources.insert(name.to_string(), text.to_string())
+        r.std_sources = Shared(sources)
+        r.std_derived = derived.copy()
+        r.module_texts = {}
+        r.std_derives = templates
+        r.mark_base()
+        return r
+
+    ## The prelude, the ambient std modules, `target` and `builtin_impls`,
+    ## loaded and resolved, with the prelude's derive templates; a module
+    ## whose derived impls `derived` holds declares that text rather than
+    ## unfolding it again, as a module a program imports does.
+    pure def base_core(
+        texts: dict[String, String], derived: dict[String, String]
+    ) -> (Resolver, Templates):
+        var r = Resolver.new()
+        r.std_derived = derived.copy()
+        # The prelude's derive templates, with its syntax and text, which
+        # unfold the derived impls of every std module and stay for the
+        # program's.
+        let prelude_text = text_of(texts, "prelude")
+        let prelude_parsed = parse(prelude_text, Catalog.parse(""))
+        var names = ModuleNames.of(prelude_text, prelude_parsed.tree)
+        var ambient_names: dict[String, ModuleNames] = {}
+        let prelude_module = build.module(prelude_parsed.tree)
+        let templates = derive_templates(prelude_module.copy(), prelude_text)
+        let prelude = r.load_std_module("prelude", prelude_module, prelude_text, templates)
+        r.prog.prelude = prelude
+        r.fill_well_known()
+        for name in ambient():
+            let text = text_of(texts, name)
+            let parsed = parse(text, Catalog.parse(""))
+            let these = ModuleNames.of(text, parsed.tree)
+            for v in these.variants:
+                _ = names.variants.add(v.copy())
+            _ = names.items.add(name.to_string())
+            _ = ambient_names.insert(name.to_string(), these)
+            let m = r.load_std_module(name, build.module(parsed.tree), text, templates)
+            let d = r.new_def(prelude, name, TextRange.empty(0), Vis.Pub, DefKind.Module(m))
+            _ = r.prog.modules[prelude.index].items.insert(name.to_string(), d)
+        _ = names.items.add("target".to_string())
+        r.environment = Some(Environment(prelude=names, std=ambient_names))
+        let t = r.load_std("target", target(), templates)
+        let td = r.new_def(prelude, "target", TextRange.empty(0), Vis.Pub, DefKind.Module(t))
+        _ = r.prog.modules[prelude.index].items.insert("target".to_string(), td)
+        _ = r.load_std("builtin_impls", builtin_impls(), templates)
+        r.resolve_pending()
+        r.build_variant_index(0)
+        r.check_traits(0)
+        # The type checker never checks the std modules' bodies: their syntax
+        # goes from the program, which each file copies, and stays for
+        # lowering.
+        r.std_kept = r.sources.copy()
+        for i in range(len(r.sources)):
+            r.sources[i] = Module(ast=Ast.new(), items=[], docs=[], broken_names=[])
+        # The text of each std module a program may import that has
+        # templates, for their instances.
+        var safety_texts: dict[String, String] = {}
+        for name in importable():
+            let text = text_of(texts, name)
+            if text.contains("reflect."):
+                _ = r.std_texts.insert(name.to_string(), text.to_string())
+            if text.contains("unsafe "):
+                _ = safety_texts.insert(name.to_string(), text.to_string())
+        r.std_safety_texts = Shared(safety_texts)
+        return (r, templates)
 
     ## Records where the base's definitions end, and which of its functions
     ## each program makes an instance of whatever calls it (`base_eager`).
@@ -1017,6 +1068,60 @@ impl Resolver:
 
     ## Where `keyword` is written last before byte `start` on its line, as an
     ## empty range for a fix to write before it (stage 0's `keyword_before`).
+    ## Records the `@tag("...")`s on a test (stage 0's `test_tags`): each
+    ## argument's text without its quotes.
+    pure def test_tags(mut self, def_: DefId, attrs: list[Attr], module: ModuleId):
+        var tags: list[String] = []
+        for a in attrs:
+            if a.name != "tag":
+                continue
+            for x in a.args:
+                let written = self.text_in(module, x.range)
+                var text: str = written
+                while text.starts_with("\""):
+                    text = text.strip_prefix("\"")
+                while text.ends_with("\""):
+                    text = text.strip_suffix("\"")
+                tags.push(text.to_string())
+        if not tags.is_empty():
+            _ = self.prog.test_tags.insert(def_, tags)
+
+    ## A field's type written at `at` with each `str` in it a `String`, when
+    ## `str` is what it borrows by (no `ref` in it): the fix of a struct
+    ## that holds text (R16).
+    pure def owned_text_type(self, module: ModuleId, at: TextRange) -> String?:
+        let owned = self.text_of_module(module)
+        let text: str = owned
+        if at.end > text.byte_len() or at.start >= at.end:
+            return None
+        let written = text.byte_slice(at.start, at.end)
+        var out = String.new()
+        var word = String.new()
+        var changed = False
+        for c in written.chars():
+            if c.is_alphabetic() or c.is_digit() or c == '_':
+                word.push("{c}")
+                continue
+            if word == "ref" or word == "view":
+                return None
+            if word == "str":
+                out.push("String")
+                changed = True
+            else:
+                out.push(word)
+            word = String.new()
+            out.push("{c}")
+        if word == "ref":
+            return None
+        if word == "str":
+            out.push("String")
+            changed = True
+        else:
+            out.push(word)
+        if not changed:
+            return None
+        return Some(out)
+
     pure def keyword_before(self, module: ModuleId, start: int, keyword: str) -> int?:
         let owned = self.text_of_module(module)
         let text: str = owned
@@ -1214,6 +1319,7 @@ impl Resolver:
                             module, case_name, t.name_range, Vis.Private, DefKind.Fn(info)
                         )
                         self.prog.tests.push(def_)
+                        self.test_tags(def_, item.attrs, module)
                         self.pending.push(
                             Pending.Test(def_=def_, module=module, ast=case_def.copy())
                         )
@@ -1803,6 +1909,10 @@ impl Resolver:
                 d = d.label_with(
                     Msg.BorrowTypeDeclaredHere, named.start, named.end, "ty", s.name.text
                 )
+                # A field that holds text owns it as a `String` (R16): the
+                # fix a struct of owned data wants.
+                if let Some(owned) = self.owned_text_type(module, at):
+                    d = d.fix_at(Msg.BorrowOwnString, at.start, at.end, owned)
                 # The fix writes `view ` before the `struct` keyword.
                 var edits: list[Edit] = []
                 if let Some(k) = self.keyword_before(module, named.start, "struct"):
@@ -2291,7 +2401,58 @@ impl Resolver:
             if let Some(t) = self.prog.fn_info(template):
                 if let FnKind.Test(_) = t.kind:
                     info.kind = t.kind.copy()
+        if not self.is_std(module):
+            self.check_export_blocking(module, f, info)
         self.prog.defs[def_.index].set_kind(DefKind.Fn(info))
+
+    ## `@export` and `@blocking` (22, "Foreign calls"; RULES.md, R19): an
+    ## exported function's signature holds no reference, view, `Shared`,
+    ## closure or capability, which foreign code that calls it could not
+    ## keep alive (`E0989`, at each parameter or result that does); and
+    ## `@blocking` marks a foreign function, whose call may block its
+    ## thread (`E0990` elsewhere).
+    pure def check_export_blocking(mut self, module: ModuleId, f: FnDef, info: FnInfo):
+        for a in f.attrs:
+            if a.name == "blocking" and not info.foreign:
+                # The attribute as written, without the line break after it.
+                let owned = self.text_of_module(module)
+                let text: str = owned
+                var end = min(a.range.end, text.byte_len())
+                while end > a.range.start and is_blank_byte(text.byte_at(end - 1)):
+                    end -= 1
+                let d = Diagnostic.new(Msg.UnsafeBlockingNotForeign, a.range.start, end)
+                self.report_other(module, d.with("name", f.name.text))
+        if not has_attr(f.attrs, "export"):
+            return
+        var parts: list[(Ty, TextRange)] = []
+        for p in info.params:
+            parts.push((p.ty, p.span))
+        if let Some(r) = info.ret_span:
+            parts.push((info.ret, r))
+        for (ty, at) in parts:
+            if self.unexportable(ty):
+                let shown = self.prog.display(self.types, ty)
+                var d = Diagnostic.new(Msg.UnsafeExportSignature, at.start, at.end)
+                self.report_other(module, d.with("name", f.name.text).with("ty", shown))
+
+    ## Whether a type holds a reference, a view, a `Shared`, a closure or a
+    ## capability.
+    pure def unexportable(mut self, ty: Ty) -> bool:
+        if self.prog.is_view_type(mut self.types, ty):
+            return True
+        if self.prog.holds_capability(mut self.types, ty):
+            return True
+        for t in self.types.walk(ty):
+            match self.types.data(t).copy():
+                case TyData.Ref(_, _) | TyData.Fn(_, _, _):
+                    return True
+                case TyData.Adt(d, _):
+                    let b = self.prog.builtin(d)
+                    if b == Some("Shared".to_string()) or b == Some("Weak".to_string()):
+                        return True
+                case _:
+                    pass
+        return False
 
     ## Whether an impl is of `Drop`.
     pure def is_drop_impl(self, impl_def: DefId?) -> bool:
@@ -2743,7 +2904,14 @@ impl Resolver:
             return (None, None)
         if let Some(m) = self.std_loaded.get(name.copy()):
             return (Some(m), None)
-        let parsed = self.std_parsed.get(name.copy()) else:
+        var found: Module? = None
+        if let Some(m) = self.std_parsed.get(name.copy()):
+            found = Some(m.copy())
+        # A base made from the cache parses a module when one imports it.
+        if found.is_none():
+            if let Some(text) = self.std_sources.get(name.copy()):
+                found = Some(build.module(parse(text, Catalog.parse("")).tree))
+        let parsed = found else:
             # Stage 1 reads every std module it may import; one missing is
             # not one it can check against.
             self.beyond_in(module, "an import of a std module stage 1 has not read")
@@ -5043,3 +5211,7 @@ pure def mode_text(m: Mode) -> str:
         case Mode.Borrow: ""
         case Mode.Mut: "mut "
         case Mode.Own: "own "
+
+## Whether a byte is a space or a line break.
+pure def is_blank_byte(b: u8) -> bool:
+    return b == 32 or b == 10 or b == 13 or b == 9

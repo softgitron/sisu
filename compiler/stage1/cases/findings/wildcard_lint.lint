@@ -1,0 +1,4 @@
+17:14-17:15 W0015 lint.wildcard-own-enum variants="`Square`, `Line`, `Dot`" ty="Shape"
+  fix lint.list-variants 17:14-17:15 "Square(_) | Line | Dot"
+24:14-24:15 W0015 lint.wildcard-own-enum variants="`Circle`, `Line`, `Dot`" ty="Shape"
+  fix lint.list-variants 24:14-24:15 "Circle(_) | Line | Dot"

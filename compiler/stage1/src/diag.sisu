@@ -452,6 +452,31 @@ pub enum Msg:
     UnsafeLevel
     UnsafeAutoTraitBound
     UnsafeAmbientAuthority
+    # The findings of the manual's writers (RULES.md, R10 to R16), stage
+    # 1's own.
+    ParseLoopElse
+    ParseArmBlock
+    ResolveNotCamelCase
+    ResolveNotSnakeCase
+    ResolveNotScreamingCase
+    ResolveRename
+    ResolveDeclareWith
+    ResolveOpenFile
+    TypeMissingPatternsEach
+    TypeMoreMissing
+    TypeDeriveTrait
+    TypeBorrowedItems
+    TypeMakePath
+    TypeReturnErrors
+    TypeIterateChars
+    TypeIterateBytes
+    TypeCharAsText
+    BorrowOwnString
+    LintWildcardOwnEnum
+    LintListVariants
+    ResolveShadowPreludeSet
+    UnsafeExportSignature
+    UnsafeBlockingNotForeign
 
 impl Msg:
     ## The catalog identifier.
@@ -890,6 +915,29 @@ impl Msg:
             case UnsafeLevel: "unsafe.level"
             case UnsafeAutoTraitBound: "unsafe.auto-trait-bound"
             case UnsafeAmbientAuthority: "unsafe.ambient-authority"
+            case ParseLoopElse: "parse.loop-else"
+            case ParseArmBlock: "parse.arm-block"
+            case ResolveNotCamelCase: "resolve.not-camel-case"
+            case ResolveNotSnakeCase: "resolve.not-snake-case"
+            case ResolveNotScreamingCase: "resolve.not-screaming-case"
+            case ResolveRename: "resolve.rename"
+            case ResolveDeclareWith: "resolve.declare-with"
+            case ResolveOpenFile: "resolve.open-file"
+            case TypeMissingPatternsEach: "type.missing-patterns-each"
+            case TypeMoreMissing: "type.more-missing"
+            case TypeDeriveTrait: "type.derive-trait"
+            case TypeBorrowedItems: "type.borrowed-items"
+            case TypeMakePath: "type.make-path"
+            case TypeReturnErrors: "type.return-errors"
+            case TypeIterateChars: "type.iterate-chars"
+            case TypeIterateBytes: "type.iterate-bytes"
+            case TypeCharAsText: "type.char-as-text"
+            case BorrowOwnString: "borrow.own-string"
+            case LintWildcardOwnEnum: "lint.wildcard-own-enum"
+            case LintListVariants: "lint.list-variants"
+            case ResolveShadowPreludeSet: "resolve.shadow-prelude-set"
+            case UnsafeExportSignature: "unsafe.export-signature"
+            case UnsafeBlockingNotForeign: "unsafe.blocking-not-foreign"
 
 ## A byte range of a text: from `start` up to, not including, `end`.
 @derive(Eq, Hash, Debug, Copy)
@@ -1583,11 +1631,20 @@ pure def excerpt(
 
 ## A fix as a person reads it (stage 0's `fix_text`): its message, then
 ## the text it writes, each edit's in backquotes (a deletion has none to
-## show; its message says what goes).
+## show; its message says what goes). An edit whose text after its first
+## line break is only the layout of the lines it starts shows its text up
+## to that break (RULES.md, R16: the attribute line of
+## `type.derive-trait`, the block of `parse.arm-block`); stage 0 has no
+## such edit.
 pub pure def fix_text(f: Fix, catalog: Catalog) -> String:
     var out = catalog.render(f.msg.id(), f.params)
     var first = True
-    for e in f.edits:
+    for edit in f.edits:
+        var e = edit.copy()
+        if let Some(i) = e.text.find("\n"):
+            let rest = e.text.byte_slice(i, e.text.byte_len())
+            if rest.trim().is_empty():
+                e.text = e.text.byte_slice(0, i).to_string()
         if e.text.is_empty():
             continue
         if first:

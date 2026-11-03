@@ -1,0 +1,8 @@
+9:20-9:34 E0118 parse.arm-statement
+  fix parse.arm-block 9:19-9:20 "\n            "
+10:23-10:35 E0118 parse.arm-statement
+  fix parse.arm-block 10:22-10:23 "\n            "
+15:20-15:26 E0118 parse.arm-statement
+  fix parse.arm-block 15:19-15:20 "\n            "
+16:23-16:29 E0118 parse.arm-statement
+  fix parse.arm-block 16:22-16:23 "\n            "

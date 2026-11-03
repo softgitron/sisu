@@ -1,0 +1,29 @@
+# RULES.md, R19: an `@export`ed function's signature holds no reference,
+# view, `Shared`, closure or capability, which foreign code that calls it
+# could not keep alive (`E0989`); `@blocking` marks a foreign function,
+# whose call may block its thread (`E0990` elsewhere).
+
+# safety: `sleep` is POSIX's, which takes and returns an unsigned int; it
+# blocks its thread for that many seconds.
+extern "C":
+    @blocking
+    def sleep(seconds: u32) -> u32
+
+@export("sisu_add")
+def add(a: int, b: int) -> int:
+    return a + b
+
+@export("sisu_length")
+def length(s: str, xs: ref list[int]) -> int:
+    return len(s) + len(xs)
+
+@export("sisu_shared")
+def shared(own counter: Shared[int], own fs: Fs) -> (int) -> int:
+    return (x) -> x
+
+@blocking
+def local() -> int:
+    return 1
+
+def main():
+    print("{add(1, 2)} {local()}")

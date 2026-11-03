@@ -1,0 +1,21 @@
+# RULES.md, R20: a float's `Debug` text is its `Display` text, so a format
+# spec after `=` applies to it whole (02: `{x=:.2f}` rounds): the
+# precision, the type letter and the alignment of a number, as `Display`
+# applies them; `?` still asks for the `Debug` text.
+
+struct Reading:
+    celsius: f64
+
+def main():
+    let pi = 3.14159
+    let small: f32 = 2.5
+    print("{pi=:.1f}")
+    print("{pi=:.2f}")
+    print("{pi=}")
+    print("{pi=:8.3f}|")
+    print("{small=:.3f}")
+    print("{pi:?}")
+    print("{pi:>8?}|")
+    let r = Reading(celsius=21.456)
+    print("{r.celsius=:.1f}")
+    print("{r:?}")

@@ -1,0 +1,26 @@
+sir 0
+source 0 "size_of_type_arguments.sisu"
+entry main
+
+intrinsic mem.align_of pure
+intrinsic mem.size_of pure
+
+fn words(0) pure source 0 @10:10-10:15 {
+    let _0: int
+    let _1: int
+    let _2: int
+  bb0:
+    _1 = call intrinsic mem.size_of[int]() @11:12-11:26
+    _2 = call intrinsic mem.align_of[(int, bool)]() @11:29-11:52
+    _0 = add copy _1, copy _2 @11:12-11:52
+    return @11:5-11:52
+}
+
+fn main(0) source 0 @13:5-13:9 {
+    let _0: ()
+    let _1: int
+  bb0:
+    _1 = call fn words() @14:9-14:16
+    _0 = const ()
+    return
+}

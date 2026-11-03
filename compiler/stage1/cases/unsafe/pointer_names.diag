@@ -1,1 +1,3 @@
+6:8-6:11 E0267 resolve.not-camel-case kind="a struct" name="ptr"
+  fix resolve.rename 6:8-6:11 "Ptr"
 9:14-9:17 E0987 unsafe.not-ptr name="ptr" found="`ptr[int]`"

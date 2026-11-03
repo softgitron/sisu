@@ -83,7 +83,7 @@ import stage1.sir
 import stage1.sir.simplify
 import stage1.sir.write
 import stage1.typeck
-from stage1.audit import AuditModule, AuditPackage, unsafe_report
+from stage1.audit import AuditModule, AuditPackage, module_hash, unsafe_report
 from stage1.borrowck.finding import span_of
 from stage1.cfg import Features
 from stage1.diag import (
@@ -271,9 +271,9 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             sys.fs.write_text(Path.new("{out_dir}/{n}.ast"), lines)?
         return Ok(())
     if command == "types" and len(rest) == 2:
-        let base = typeck.base(std_texts(sys, home)?, catalog)
+        let base = base_of(sys, home, std_texts(sys, home)?, catalog)
         var kept = Kept.new()
-        var env = environment(sys, home)?
+        var env = base.environment()
         var out = String.new()
         var why = String.new()
         let request = FeatureRequest.none()
@@ -287,7 +287,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     if command == "types-batch" and len(rest) == 3:
         let base = typeck.base(std_texts(sys, home)?, catalog)
         var kept = Kept.new()
-        var env = environment(sys, home)?
+        var env = base.environment()
         let out_dir = rest[1].copy()
         let list = sys.fs.read_to_string(Path.new(rest[2].copy()))?
         var n = 0
@@ -324,9 +324,9 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         # The program's path, or the package of the working directory or
         # the nearest one above it, as `sisu sir` reads it when it names
         # none; its lockfile written as stage 0 writes it (09).
-        var path = path_of(words, ["--partial", "--accept-unsafe"]) else:
+        var path = path_of(words, ["--partial", "--accept-unsafe", "--tests"]) else:
             return Err(Usage(text=usage()))
-        if not names_path(words, ["--partial", "--accept-unsafe"]):
+        if not names_path(words, ["--partial", "--accept-unsafe", "--tests"]):
             let found = nearest_package(sys, "sir", catalog) else:
                 return Err(Failed)
             path = found
@@ -335,13 +335,17 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             return Err(Failed)
         if not write_lockfile(sys, path, True, False, words.contains("--accept-unsafe"), catalog)?:
             return Err(Failed)
-        let base = typeck.base(std_texts(sys, home)?, catalog)
+        let base = base_of(sys, home, std_texts(sys, home)?, catalog)
         var kept = Kept.new()
-        var env = environment(sys, home)?
+        var env = base.environment()
         var times = SirTimes(check=0, lower=0, ownership=0)
         # `--partial`: the SIR of what lowering reached, also of a program
         # beyond its slice (for comparing a package's modules one by one).
         let partial = words.contains("--partial")
+        # `--tests`: the program built with its tests, as `sisu test` and
+        # `sisu bench` run it, its tests' tags and its benchmarks written
+        # (decision 285).
+        let tests = words.contains("--tests")
         let done = lowering_of(
             sys,
             home,
@@ -353,6 +357,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             partial,
             Some(level),
             False,
+            tests,
             mut kept,
         )?
         var errs = String.new()
@@ -361,12 +366,23 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         emit(done.sir, errs)
         return Ok(())
     if command == "ownership" and len(rest) == 2:
-        let base = typeck.base(std_texts(sys, home)?, catalog)
+        let base = base_of(sys, home, std_texts(sys, home)?, catalog)
         var kept = Kept.new()
-        var env = environment(sys, home)?
+        var env = base.environment()
         var times = SirTimes(check=0, lower=0, ownership=0)
         let done = lowering_of(
-            sys, home, rest[1], base, mut env, catalog, mut times, False, None, True, mut kept
+            sys,
+            home,
+            rest[1],
+            base,
+            mut env,
+            catalog,
+            mut times,
+            False,
+            None,
+            True,
+            False,
+            mut kept,
         )?
         var errs = String.new()
         for b in done.beyond:
@@ -378,14 +394,15 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         # contracts that level checks, as `sisu sir --contracts=LEVEL`
         # prints it.
         var level: int? = None
-        if len(rest) == 4:
+        let tests = len(rest) == 4 and rest[3] == "--tests"
+        if len(rest) == 4 and not tests:
             if rest[3].starts_with("--contracts="):
                 level = contract_level(rest[3].byte_slice(12, rest[3].byte_len()))
             if level.is_none():
                 return Err(Usage(text=usage()))
         let base = typeck.base(std_texts(sys, home)?, catalog)
         var kept = Kept.new()
-        var env = environment(sys, home)?
+        var env = base.environment()
         let out_dir = rest[1].copy()
         let list = sys.fs.read_to_string(Path.new(rest[2].copy()))?
         var times = SirTimes(check=0, lower=0, ownership=0)
@@ -404,7 +421,8 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
                 mut times,
                 False,
                 Some(level ?? CONTRACTS_ALL),
-                level.is_none(),
+                level.is_none() and not tests,
+                tests,
                 mut kept,
             )?
             var reasons = String.new()
@@ -442,9 +460,9 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         let accept = words.contains("--accept-unsafe")
         if not write_lockfile(sys, path, False, words.contains("--locked"), accept, catalog)?:
             return Err(Failed)
-        let base = typeck.base(std_texts(sys, home)?, catalog)
+        let base = base_of(sys, home, std_texts(sys, home)?, catalog)
         var kept = Kept.new()
-        var env = environment(sys, home)?
+        var env = base.environment()
         let reports = reports_of(
             sys, home, path, path, True, request, base, mut env, catalog, mut kept
         )?
@@ -468,10 +486,56 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         if failed:
             return Err(Failed)
         return Ok(())
+    if command == "lint":
+        # `sisu lint` (10: "lints beyond the compiler's warnings, with
+        # fix-its"; RULES.md, R11): the lints of a program the front end
+        # checks, in either form; a program with errors has them reported
+        # as `check` reports them, and fails.
+        let ids = rest.contains("--format=ids")
+        let (request, words) = feature_request(rest)
+        let flags = [
+            "--format=ids", "--format=human", "--locked", "--no-default-features", "--accept-unsafe"
+        ]
+        var path = path_of(words, flags) else:
+            return Err(Usage(text=usage()))
+        if not names_path(words, flags):
+            let found = nearest_package(sys, "lint", catalog) else:
+                return Err(Failed)
+            path = found
+        if let Some(e) = unknown_feature(sys, path, request):
+            emit("", catalog.plain_error("cli.unknown-feature", e))
+            return Err(Failed)
+        let base = base_of(sys, home, std_texts(sys, home)?, catalog)
+        var kept = Kept.new()
+        var env = base.environment()
+        let reports = reports_of(
+            sys, home, path, path, True, request, base, mut env, catalog, mut kept
+        )?
+        var out = String.new()
+        var failed = False
+        for r in reports:
+            var shown = r.copy()
+            if r.has_error:
+                failed = True
+                shown = r.front(catalog, Some(True))
+            for x in r.lints:
+                shown.diags.push(x.copy())
+            sort_filed(mut shown.diags, catalog, True)
+            if ids:
+                out.push(shown.ids(catalog))
+            else:
+                out.push(shown.human(catalog))
+        if ids:
+            emit(out, "")
+        else:
+            emit("", out)
+        if failed:
+            return Err(Failed)
+        return Ok(())
     if command == "check-batch" and len(rest) == 3:
         let base = typeck.base(std_texts(sys, home)?, catalog)
         var kept = Kept.new()
-        var env = environment(sys, home)?
+        var env = base.environment()
         let out_dir = rest[1].copy()
         let list = sys.fs.read_to_string(Path.new(rest[2].copy()))?
         var n = 0
@@ -584,7 +648,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         # and its status, and the pages `--output` writes, into OUT.
         let texts = std_texts(sys, home)?
         let base = typeck.base(texts, catalog)
-        var env = environment(sys, home)?
+        var env = base.environment()
         let out_dir = rest[1].copy()
         let list = sys.fs.read_to_string(Path.new(rest[2].copy()))?
         var n = 0
@@ -1157,9 +1221,9 @@ def audit_command(
             modules.push(AuditModule(package=0, path=file.copy(), file=file, text=text))
     # The lints and the rules of unsafe code, as `check --format=ids` prints
     # them.
-    let base = typeck.base(std_texts(sys, home)?, catalog)
+    let base = base_of(sys, home, std_texts(sys, home)?, catalog)
     var kept = Kept.new()
-    var env = environment(sys, home)?
+    var env = base.environment()
     let reports = reports_of(
         sys, home, path, path, True, FeatureRequest.none(), base, mut env, catalog, mut kept
     )?
@@ -1334,6 +1398,7 @@ def lowering_of(
     partial: bool,
     sir: int?,
     ownership: bool,
+    tests: bool,
     mut kept: Kept,
 ) -> Lowering ! IoError:
     var done = Lowering(sir=String.new(), ownership=String.new(), beyond=[], entry=False)
@@ -1347,7 +1412,7 @@ def lowering_of(
         done.ownership.push(one.ownership)
         for b in one.beyond:
             done.beyond.push(b.copy())
-        let same = not differs_without_tests(input) and level == CONTRACTS_ALL
+        let same = (tests or not differs_without_tests(input)) and level == CONTRACTS_ALL
         if not sir_done and len(checks) == 1 and same:
             done.sir = one.sir.copy()
             done.entry = one.entry
@@ -1359,10 +1424,10 @@ def lowering_of(
     var app: Input? = None
     if let Some(layouts) = layouts_of(sys, arg, True, FeatureRequest.none()):
         if len(layouts) == 1 and not layouts[0].modules.is_empty():
-            app = Some(layout_input(sys, home, layouts[0], False, mut env, catalog)?)
+            app = Some(layout_input(sys, home, layouts[0], tests, mut env, catalog)?)
     else:
         let none = FeatureRequest.none()
-        let built = inputs_of(sys, home, arg, False, False, none, mut env, catalog)?
+        let built = inputs_of(sys, home, arg, False, tests, none, mut env, catalog)?
         if let Some(x) = built.first():
             app = Some(x.copy())
     if let Some(input) = app:
@@ -1538,6 +1603,9 @@ struct Report:
     ## Whether the program has an error, as far as stage 1 knows: one it
     ## renders, or one of stage 0's that it only notes.
     has_error: bool
+    ## The lints of `sisu lint` (RULES.md, R11), which `check` does not
+    ## print.
+    lints: list[Filed]
 
 impl Report:
     ## The number of errors among the diagnostics.
@@ -1631,6 +1699,7 @@ pure def problems_report(layout: Layout, catalog: Catalog) -> Report:
         owned=[],
         failed=[],
         has_error=has_error,
+        lints=[],
     )
 
 ## What `check` makes of one program (stage 0's `Db::checked` and
@@ -1765,6 +1834,11 @@ pure def front_report(input: Input, checked: typeck.Checked, name: str, catalog:
             noted.push(rule.copy())
     for rule in noted:
         beyond.push("stage 0 reports {rule}, which stage 1 notes without rendering it")
+    var lints: list[Filed] = []
+    for (k, d) in checked.lints:
+        let file = report_file(k, n, written)
+        lints.push(Filed(file=file, diag=d.copy(), label_files=label_files(d, file, n, written)))
+    sort_filed(mut lints, catalog, True)
     var report = Report(
         files=files,
         diags=diags,
@@ -1773,6 +1847,7 @@ pure def front_report(input: Input, checked: typeck.Checked, name: str, catalog:
         owned=[],
         failed=[],
         has_error=checked.has_error,
+        lints=lints,
     )
     let errors = report.errors(catalog)
     if errors > 0:
@@ -1917,9 +1992,9 @@ def build_command(
     let (locked, accept) = lock
     if not write_lockfile(sys, path, False, locked, accept, catalog)?:
         return Err(Failed)
-    let base = typeck.base(std_texts(sys, home)?, catalog)
+    let base = base_of(sys, home, std_texts(sys, home)?, catalog)
     var kept = Kept.new()
-    var env = environment(sys, home)?
+    var env = base.environment()
     var programs: list[Input] = []
     var failed = False
     match layouts_of(sys, path, False, request):
@@ -2298,6 +2373,175 @@ def environment(sys: System, home: str) -> Environment ! IoError:
         _ = std.insert(module.to_string(), names)
     _ = prelude.items.add("target".to_string())
     return Ok(Environment(prelude=prelude, std=std))
+
+## The base of a command that checks a program, made with the cache
+## beside the native stage-1 executable when it holds what the base made
+## of these std sources with this executable (`typeck.BaseCache`), and
+## made whole, then kept there, otherwise: a base made from the cache
+## leaves the std modules a program may import unparsed until one imports
+## them, and is the same base (README, "Where the time goes"). A batch
+## makes its base whole, once for every program it checks.
+def base_of(sys: System, home: str, texts: dict[String, String], catalog: Catalog) -> typeck.Base:
+    let place = base_cache_place(sys, home) else:
+        return typeck.base(texts, catalog)
+    let (path, exe) = place
+    let key = base_cache_key(sys, home, texts, exe) else:
+        return typeck.base(texts, catalog)
+    if let Ok(text) = sys.fs.read_to_string(Path.new(path)):
+        if let Some(cache) = read_base_cache(text, key):
+            return typeck.base_cached(texts, catalog, cache)
+    let base = typeck.base(texts, catalog)
+    write_base_cache(sys, path, key, typeck.cache_of(base))
+    return base
+
+## The version of the base cache's form.
+const BASE_CACHE_FORM: int = 1
+
+## Where the cache of the base goes, and what tells the executable: in the
+## directory of the native stage-1 executable, `target/stage1/` under the
+## compiler's directory (reached through `std/`, as `std_file` reaches
+## stage 1's own std modules), named by the running executable's size and
+## time, which a build changes. Stage 1 run on the interpreter, whose
+## executable is stage 0's `sisu`, keeps none: its own code is not what
+## the executable says.
+def base_cache_place(sys: System, home: str) -> (String, String)?:
+    let exe = sys.fs.metadata(Path.new("/proc/self/exe")) else:
+        return None
+    let stage0 = Path.new("{home}/std/../target/release/sisu")
+    if let Ok(s) = sys.fs.metadata(stage0):
+        if s.len == exe.len and "{s.modified}" == "{exe.modified}":
+            return None
+    let dir = "{home}/std/../target/stage1"
+    if not sys.fs.exists(Path.new(dir)):
+        return None
+    let id = module_hash("{exe.len} {exe.modified}")
+    return Some(("{dir}/base-{id}.cache", id))
+
+## The key of a base made of `texts` with the executable `exe`: the hash of
+## the cache's form, the executable, and each std source's name, size and
+## time, which a change of the file changes (its bytes are not read again).
+def base_cache_key(sys: System, home: str, texts: dict[String, String], exe: str) -> String?:
+    var names: list[String] = []
+    for (name, _) in texts.items():
+        names.push(name.copy())
+    names.sort()
+    var all = String.new()
+    all.push("{BASE_CACHE_FORM} {exe}\n")
+    for name in names:
+        let m = sys.fs.metadata(Path.new(std_file(home, name))) else:
+            return None
+        all.push("{name} {m.len} {m.modified}\n")
+    return Some(module_hash(all))
+
+## The cache's text: its form and key, each std module's derived impls
+## with their length in bytes, the promotions of each module, and the key
+## again, which a reader finds last only in a file written whole.
+pure def base_cache_text(key: str, cache: typeck.BaseCache) -> String:
+    var out = String.new()
+    out.push("sisu1 base cache {BASE_CACHE_FORM}\nkey {key}\n")
+    var names: list[String] = []
+    for (name, _) in cache.derived.items():
+        names.push(name.copy())
+    names.sort()
+    out.push("derived {len(names)}\n")
+    for name in names:
+        var text = String.new()
+        if let Some(t) = cache.derived.get(name.copy()):
+            text = t.copy()
+        out.push("{name} {text.byte_len()}\n")
+        out.push(text)
+        out.push("\n")
+    var modules: list[String] = []
+    for (name, _) in cache.promoted.items():
+        modules.push(name.copy())
+    modules.sort()
+    out.push("promoted {len(modules)}\n")
+    for name in modules:
+        var fs: list[String] = []
+        if let Some(found) = cache.promoted.get(name.copy()):
+            fs = found.copy()
+        out.push("{name} {len(fs)}\n")
+        for f in fs:
+            out.push("{f}\n")
+    out.push("end {key}\n")
+    return out
+
+## A cache's text read back, when it is whole and its key is `key`.
+pure def read_base_cache(text: str, key: str) -> typeck.BaseCache?:
+    var r = CacheReader(text=text, at=0)
+    if r.line()? != "sisu1 base cache {BASE_CACHE_FORM}":
+        return None
+    if r.line()? != "key {key}":
+        return None
+    let (word, count) = r.counted()?
+    if word != "derived":
+        return None
+    var derived: dict[String, String] = {}
+    for _ in range(count):
+        let (name, n) = r.counted()?
+        let body = r.bytes(n)?
+        if r.line()? != "":
+            return None
+        _ = derived.insert(name.to_string(), body.to_string())
+    let (word2, modules) = r.counted()?
+    if word2 != "promoted":
+        return None
+    var promoted: dict[String, list[String]] = {}
+    for _ in range(modules):
+        let (name, n) = r.counted()?
+        var fs: list[String] = []
+        for _ in range(n):
+            let f = r.line()?
+            fs.push(f.to_string())
+        _ = promoted.insert(name.to_string(), fs)
+    if r.line()? != "end {key}" or r.at != text.byte_len():
+        return None
+    return Some(typeck.BaseCache(derived=derived, promoted=promoted))
+
+## Writes the cache, and removes the caches of other executables; a cache
+## that cannot be written is none, and a reader of one half written finds
+## it not whole.
+def write_base_cache(sys: System, path: str, key: str, cache: typeck.BaseCache):
+    if sys.fs.write_text(Path.new(path), base_cache_text(key, cache)).is_err():
+        return
+    let dir = parent(path)
+    let mine = file_stem(path)
+    let entries = sys.fs.list_dir(Path.new(dir)) else:
+        return
+    for p in entries:
+        let name = file_stem("{p}")
+        if name.starts_with("base-") and name != mine and "{p}".ends_with(".cache"):
+            _ = sys.fs.remove(p)
+
+## A reader of the cache's text, line by line.
+view struct CacheReader:
+    text: str
+    at: int
+
+impl CacheReader:
+    ## The next line, without its line break.
+    pure def line(mut self) -> str?:
+        if self.at >= self.text.byte_len():
+            return None
+        let rest = self.text.byte_slice(self.at, self.text.byte_len())
+        let i = rest.find("\n") else:
+            return None
+        self.at += i + 1
+        return Some(rest.byte_slice(0, i))
+
+    ## A line `WORD COUNT`.
+    pure def counted(mut self) -> (str, int)?:
+        let l = self.line()?
+        let (word, n) = l.split_once(" ")?
+        return Some((word, n.parse_int()?))
+
+    ## The next `n` bytes.
+    pure def bytes(mut self, n: int) -> str?:
+        if n < 0 or self.at + n > self.text.byte_len():
+            return None
+        let out = self.text.byte_slice(self.at, self.at + n)
+        self.at += n
+        return Some(out)
 
 ## The sources of the std modules, by name: the prelude, the ambient
 ## modules and those a program may import.
@@ -2709,8 +2953,8 @@ def doc_command(sys: System, home: str, rest: list[String], catalog: Catalog) ->
         emit("", wrong)
         return Ok(2)
     let texts = std_texts(sys, home)?
-    let base = typeck.base(texts, catalog)
-    var env = environment(sys, home)?
+    let base = base_of(sys, home, texts, catalog)
+    var env = base.environment()
     let report = doc_report(sys, home, args, None, base, texts, mut env, catalog)?
     if report.status != 0:
         emit(report.out, report.err)
@@ -3068,7 +3312,7 @@ def fmt_file(
 ) -> FmtReport ! IoError:
     let written = format.to_resolve(text, catalog)
     if not written.is_empty() and base.is_none():
-        base = Some(typeck.base(std_texts(sys, home)?, catalog))
+        base = Some(base_of(sys, home, std_texts(sys, home)?, catalog))
     return Ok(fmt_report(base, path, text, written, check, catalog))
 
 pure def fmt_report(

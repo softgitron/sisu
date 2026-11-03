@@ -1,0 +1,18 @@
+# RULES.md, R16: a typed hole whose value nothing uses stands for the
+# statements still to write, so it is a hole of type `()` (D-061), as one
+# in a method that returns nothing is; one whose value is used is of the
+# type expected there.
+
+struct Box2:
+    n: int
+
+impl Box2:
+    def later(self):
+        todo("later")
+
+    def size(self) -> int:
+        return todo("size")
+
+def main():
+    let b = Box2(n=1)
+    print("{b.n}")

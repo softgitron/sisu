@@ -1,0 +1,34 @@
+# RULES.md, R14: an optional chain written in an interpolation reads what
+# it reaches through a place, as `{u.name}` reads the field, rather than
+# moving it out of the place: link after link, `{u.team?.lead?.name}`
+# reads the lead's name in place, and the value it reaches, when it is not
+# `Copy`, is read too (a `String` as a `str`). Elsewhere a chain still
+# moves what it reaches, as before.
+
+struct Lead:
+    name: String
+
+struct Team:
+    name: String
+    lead: Lead?
+    size: int
+
+struct User:
+    name: String
+    team: Team?
+
+def describe(u: User) -> String:
+    return "{u.name} in {u.team?.name}, led by {u.team?.lead?.name}"
+
+def main():
+    let lead = Lead(name="Eero")
+    let u = User(name="Aino", team=Some(Team(name="Core", lead=Some(lead), size=3)))
+    print("{u.team?.name}")
+    print("{u.team?.lead?.name}")
+    print("{u.team?.lead}")
+    print("{u.team?.size} {u.team?.name}")
+    print(describe(u))
+    let alone = User(name="Eila", team=None)
+    print("{alone.team?.name} {alone.team?.lead?.name}")
+    let moved = u.team?.name
+    print("{moved}")
