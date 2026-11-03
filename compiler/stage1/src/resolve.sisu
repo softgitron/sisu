@@ -70,7 +70,8 @@ impl ModuleNames:
             for m in child_nodes(tree, n):
                 self.add_item(text, tree, m)
             return
-        if kind == SyntaxKind.SuiteDef:
+        # A suite's items, and an `extern` block's foreign functions (22).
+        if kind == SyntaxKind.SuiteDef or kind == SyntaxKind.ExternBlock:
             for b in child_nodes(tree, n):
                 if tree.nodes[b].kind == SyntaxKind.Block:
                     for m in child_nodes(tree, b):
@@ -132,6 +133,9 @@ pub pure def std_module(path: str) -> String?:
         case "std.process": "process"
         case "std.env": "env"
         case "std.regex": "regex"
+        case "std.mem": "mem"
+        case "std.ffi": "ffi"
+        case "std.rt": "rt"
         case _: ""
     if name.is_empty():
         return None
@@ -855,6 +859,13 @@ impl Resolver:
                 if let Some(b) = first_child(self.tree, n, SyntaxKind.Block):
                     for m in child_nodes(self.tree, b):
                         self.declare(m)
+            # An `extern` block declares its foreign functions in the module
+            # (22, "Foreign calls").
+            case ExternBlock:
+                if let Some(b) = first_child(self.tree, n, SyntaxKind.Block):
+                    for m in child_nodes(self.tree, b):
+                        if self.kind(m) == SyntaxKind.FnDef:
+                            self.bind_item(m)
             case ImportItem | FromImport:
                 self.deferred.push(n)
             case EnumDef | ErrorDef:
@@ -1531,6 +1542,12 @@ impl Resolver:
                     for m in child_nodes(self.tree, b):
                         if is_item(self.kind(m)):
                             self.item(m)
+            # The signatures of an `extern` block's foreign functions.
+            case ExternBlock:
+                if let Some(b) = first_child(self.tree, n, SyntaxKind.Block):
+                    for m in child_nodes(self.tree, b):
+                        if self.kind(m) == SyntaxKind.FnDef:
+                            self.function(m, False)
             case _:
                 pass
         while len(self.generics) > saved_generics:
@@ -1825,8 +1842,9 @@ impl Resolver:
                     else:
                         self.statement(c)
             case UnsafeBlock:
-                # Foreign code is a later phase's (`E0900`), not resolved.
-                pass
+                # `unsafe:` (22): a block like any other.
+                if let Some(b) = first_child(self.tree, n, SyntaxKind.Block):
+                    self.block(b)
             case DeferStmt:
                 for c in child_nodes(self.tree, n):
                     if self.kind(c) == SyntaxKind.Block:
@@ -2052,9 +2070,6 @@ impl Resolver:
             case IfExpr:
                 for c in child_nodes(self.tree, n):
                     self.expr(c)
-            case PrefixExpr if first_token(self.tree, n, SyntaxKind.UnsafeKw) != None:
-                # `unsafe e` is a later phase's (`E0900`), not resolved.
-                pass
             case CallExpr:
                 self.call(n)
             case LiteralPat | Literal | Error:
@@ -2374,9 +2389,21 @@ impl Resolver:
         return words.join(".")
 
     pure def type_(mut self, n: int):
-        if self.kind(n) == SyntaxKind.PtrType or self.kind(n) == SyntaxKind.ImplType:
-            # A raw pointer and `impl Trait for T` are later phases' (`E0900`),
-            # not resolved.
+        if self.kind(n) == SyntaxKind.ImplType:
+            # `impl Trait for T` is a later phase's (`E0900`), not resolved.
+            return
+        if self.kind(n) == SyntaxKind.PtrType:
+            # `ptr mut T` (22): the mutable form of the `ptr` in scope,
+            # `std.mem`'s, which a module imports as any other name.
+            if let Some(t) = first_token(self.tree, n, SyntaxKind.Ident):
+                let name = self.text_of(t)
+                if not self.knows_type(name) and not self.module.poisoned.contains(name.copy()):
+                    let at = ref self.tree.tokens[t]
+                    let d = Diagnostic.new(Msg.ResolveUndefinedType, at.start, at.end)
+                    self.report(d.with("name", name).note(Msg.UnsafeImportPtr))
+            for c in child_nodes(self.tree, n):
+                if is_type_kind(self.kind(c)):
+                    self.type_(c)
             return
         if self.kind(n) == SyntaxKind.PathType:
             var first: int? = None

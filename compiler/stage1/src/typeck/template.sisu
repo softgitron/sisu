@@ -189,6 +189,7 @@ impl TypeShape:
     ## The shape of a derive's target, from its declaration's names.
     pure def of_target(t: Target) -> TypeShape:
         var s = TypeShape.named(t.name, t.written, Kind.Other)
+        s.attrs = t.attrs.copy()
         match t.body:
             case Body.Struct(fields):
                 s.kind = Kind.Struct
@@ -357,6 +358,10 @@ pub struct Target:
     ## The type as the impl names it (`Pair[A, B]`).
     pub written: String
     pub body: Body
+    ## The attributes on the declaration, each name and its arguments' text,
+    ## which `reflect.attributes_of` gives the derive (stage 1's: the
+    ## derive of `std.mem`'s `Plain` asks for `@repr(c)`, 22).
+    pub attrs: list[(String, list[String])]
 
 struct Unfold:
     ## The type parameters (`T`) and their arguments.
@@ -2286,7 +2291,7 @@ test "a derive template unfolds into the impl's source":
     let src = Src(ast=ref m.ast, source=source)
     let fields = [("x".to_string(), False), ("y".to_string(), False)]
     let target = Target(
-        name="Point".to_string(), written="Point".to_string(), body=Body.Struct(fields)
+        name="Point".to_string(), written="Point".to_string(), body=Body.Struct(fields), attrs=[]
     )
     var expected = String.new("\nimpl Named for Point:\n    def name(self) -> String:\n")
     expected.push("        var parts: list[String] = []\n")

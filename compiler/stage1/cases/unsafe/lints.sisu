@@ -1,0 +1,59 @@
+# The lints of 22 ("The audit and the lints"; RULES.md, R2), each a
+# warning: an `unsafe` block or expression without unsafe operation (with
+# the fix that removes `unsafe` from the expression), one without its
+# `# safety:` comment, a comment that names none of a callee's obligations,
+# a `pure` function's block that asserts purity without a `pure:` part, an
+# `unsafe def` and an `unsafe trait` without a `Safety:` list, an `unsafe
+# impl` and an `extern` block without their comment, an `unsafe impl Send`
+# for every `T`, and a public safe function that reaches a foreign call
+# without taking a capability. A program with only warnings runs.
+
+## The first of `xs`, without the check that there is one.
+##
+## Safety:
+## - `nonempty`: `xs` has an element
+unsafe def first(xs: list[int]) -> int:
+    return xs[0]
+
+unsafe def bare(n: int) -> int:
+    return n
+
+unsafe trait Unlisted:
+    def f(self)
+
+struct Slot[T]:
+    value: T
+
+unsafe impl[T] Send for Slot[T]:
+    pass
+
+extern "C":
+    def getpid() -> int
+
+struct Memo:
+    hits: Cell[int]
+
+pure def counted(memo: Memo, x: int) -> int:
+    # safety: the count is private to this module.
+    unsafe:
+        memo.hits.set(memo.hits.get() + 1)
+    return x
+
+## The process's identifier.
+pub def pid() -> int:
+    # safety: getpid takes nothing and cannot fail.
+    return unsafe getpid()
+
+def main():
+    let xs = [3, 4]
+    # safety: nothing to discharge.
+    unsafe:
+        print(len(xs))
+    let n = unsafe len(xs)
+    print(n)
+    print(unsafe first(xs))
+    # safety: the list was made two lines above.
+    print(unsafe first(xs))
+    # safety: nonempty: xs has two elements.
+    print(unsafe first(xs) + unsafe bare(1))
+    print(counted(Memo(hits=Cell(0)), 5))

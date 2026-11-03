@@ -85,18 +85,48 @@ enum DeriveSource:
     Own
     ## In the prelude.
     Prelude
+    ## In the module of the standard library, other than the prelude, that
+    ## the module imports the trait from (`std.mem`'s `Plain`, 22).
+    Std(ModuleId)
 
 impl Resolver:
     ## The `comptime def derive` of the trait `name` as `module` sees it: its
-    ## own trait of that name, or the prelude's.
+    ## own trait of that name, one it imports from a std module, or the
+    ## prelude's.
     pure def derive_template(
         self, module: ModuleId, name: str, templates: Templates
     ) -> DeriveSource?:
         if not self.is_std(module)
                 and self.derive_templates.contains((module.index, name.to_string())):
             return Some(DeriveSource.Own)
+        if let Some(d) = self.prog.lookup(module, name):
+            let dm = self.prog.defs[d.index].module
+            if dm != self.prog.prelude
+                    and self.is_std(dm)
+                    and self.std_derive_fn(dm, name).is_some():
+                return Some(DeriveSource.Std(dm))
         if templates.derives.contains(name.to_string()):
             return Some(DeriveSource.Prelude)
+        return None
+
+    ## Whether `d` is `std.mem`'s `Plain` (22).
+    pure def is_plain_trait(self, d: DefId) -> bool:
+        let def_ = ref self.prog.defs[d.index]
+        let module = ref self.prog.modules[def_.module.index]
+        return def_.name == "Plain" and module.is_std and module.name == "mem"
+
+    ## The `comptime def derive` of the trait `name` that the std module
+    ## `m` declares, from its syntax.
+    pure def std_derive_fn(self, m: ModuleId, name: str) -> FnDef?:
+        if m.index >= len(self.sources):
+            return None
+        let source = ref self.sources[m.index]
+        for id in source.items:
+            if let ItemKind.Trait(t) = source.ast.item(id).kind:
+                if t.name.text == name:
+                    for f in t.methods:
+                        if f.is_comptime and f.name.text == "derive":
+                            return Some(f.copy())
         return None
 
     ## The derived impls of the structs and enums among `items` (stage 0's
@@ -246,7 +276,15 @@ impl Resolver:
                 let source = self.derive_template(module, t, templates) else:
                     continue
                 let (head, written) = header(name, generics, used, t)
-                let target = Target(name=name.copy(), written=written, body=body.copy())
+                var attrs: list[(String, list[String])] = []
+                for a in item.attrs:
+                    var args: list[String] = []
+                    for x in a.args:
+                        args.push(self.text_in(module, x.range))
+                    attrs.push((a.name.copy(), args))
+                let target = Target(
+                    name=name.copy(), written=written, body=body.copy(), attrs=attrs
+                )
                 var unfolded: String? = None
                 # Where the template stopped, in its module, and why.
                 var failed: (ModuleId, TextRange, String)? = None
@@ -270,6 +308,16 @@ impl Resolver:
                                     unfolded = Some(x)
                                 case Err(Unfolding.Failed(at, why)):
                                     failed = Some((self.prog.prelude, at, why.copy()))
+                    case DeriveSource.Std(dm):
+                        let f = self.std_derive_fn(dm, t) else:
+                            continue
+                        let template_text = self.safety_text(dm) ?? String.new()
+                        let src = Src(ast=ref self.sources[dm.index].ast, source=template_text)
+                        match unfold(src, f, head, target):
+                            case Ok(x):
+                                unfolded = Some(x)
+                            case Err(Unfolding.Failed(at, why)):
+                                failed = Some((dm, at, why.copy()))
                 match unfolded:
                     case Some(x):
                         text.push(x)
@@ -349,7 +397,10 @@ impl Resolver:
             # of its own; another trait's derive needs what its code uses,
             # which checking the derived impl finds.
             let default = self.prog.lookup(self.prog.prelude, "Default") == Some(td)
-            let structural = derivable(c.trait_name) or c.field.is_some() or default
+            # `std.mem`'s `Plain` needs it of every field (22): a field that
+            # is not plain has bit patterns that are no value.
+            let plain = self.is_plain_trait(td)
+            let structural = derivable(c.trait_name) or c.field.is_some() or default or plain
             var found: DefId? = None
             for i in self.prog.impls:
                 if found.is_some():

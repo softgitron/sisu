@@ -1,0 +1,85 @@
+# The forms of unsafe code that run today (22; RULES.md, R2): an `unsafe
+# def` whose body is Sisu, called in an `unsafe:` block and an `unsafe`
+# expression whose `# safety:` comments name its obligations; an `unsafe
+# trait` implemented with `unsafe impl` and called through a bound; an
+# `unsafe impl Send` that makes a value `Send`; and a `pure`
+# function whose `unsafe` block asserts that the impure call inside keeps
+# it observationally pure. Lowering passes the calls through unchanged, so
+# the interpreter and the native backend run them as stage 1 writes them.
+
+## The digit `d` of `n`, counted from the right, without checking `d`.
+##
+## Safety:
+## - `in_range`: `d` is at least 0 and less than the number of digits of `n`
+unsafe def digit(n: int, d: int) -> int:
+    var x = n
+    for _ in range(d):
+        x = x // 10
+    return x % 10
+
+## A source of numbers that promises never to repeat one.
+##
+## Safety (for implementors):
+## - `distinct`: no two calls of `next` give the same number
+unsafe trait Distinct:
+    def next(mut self) -> int
+
+struct Counter:
+    n: int
+
+# safety: distinct: n only grows, by one each call.
+unsafe impl Distinct for Counter:
+    def next(mut self) -> int:
+        self.n += 1
+        return self.n
+
+## Two numbers from a source that the trait promises are distinct.
+def two[D: Distinct](own source: D) -> (int, int):
+    var s = source
+    let a = s.next()
+    let b = s.next()
+    return (a, b)
+
+## A value whose `Send` the type checker does not infer: the cell is never
+## shared after it crosses.
+struct Mailbox:
+    cell: Cell[int]
+
+# safety: a Mailbox is moved to one task at a time, and its Cell is reached
+#   only through the Mailbox, so no two tasks touch the cell at once.
+unsafe impl Send for Mailbox:
+    pass
+
+## What a task may be handed: a value that is `Send`.
+def handed[T: Send](own x: T) -> T:
+    return x
+
+struct Memo:
+    hits: Cell[int]
+
+## Doubles `x`, counting the calls in a cell that `pure` callers never read.
+pure def doubled(memo: Memo, x: int) -> int:
+    # safety: pure: the count is read only by `hits_of`, which is not pure, so
+    #   no pure code can tell how often this ran.
+    unsafe:
+        memo.hits.set(memo.hits.get() + 1)
+    return x * 2
+
+def hits_of(memo: Memo) -> int:
+    return memo.hits.get()
+
+def main():
+    # safety: in_range: 4096 has four digits, and 0 to 3 are less than four.
+    unsafe:
+        for d in range(4):
+            print(digit(4096, d))
+    # safety: in_range: 7 has one digit.
+    let seven = unsafe digit(7, 0)
+    print(seven)
+    let (a, b) = two(Counter(n=0))
+    print(a != b)
+    let box = handed(Mailbox(cell=Cell(41)))
+    print(box.cell.get())
+    let memo = Memo(hits=Cell(0))
+    print(doubled(memo, 3) + doubled(memo, 4))
+    print(hits_of(memo))

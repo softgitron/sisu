@@ -52,6 +52,9 @@ pub struct Package:
     ## Its manifest's `[profile.release] contracts`: what a release build
     ## checks (07).
     pub release_contracts: String?
+    ## Its manifest's `[package] unsafe` (22, D-082): `memory` or `extern`,
+    ## and where the value is written in the manifest.
+    pub unsafe_level: (String, TextRange)?
 
 ## What a dependency entry asks of the package it names (09).
 pub struct Want:
@@ -391,6 +394,7 @@ impl Loader:
                 wants=[],
                 locked_deps=locked_deps(m.dependencies),
                 release_contracts=m.release_contracts.copy(),
+                unsafe_level=info.unsafe_level.copy(),
             )
         )
         self.dirs.push(canon.copy())
@@ -563,6 +567,7 @@ pub def load_file_with(fs: Fs, name: str, disk: str, text: str, request: Feature
             wants=[],
             locked_deps=[],
             release_contracts=None,
+            unsafe_level=None,
         )
     )
     layout.modules.push(
@@ -630,27 +635,72 @@ pub pure def lockfile_of(layouts: list[Layout], dir: str) -> String:
     var out = String.new()
     out.push("# Written by `sisu` from the manifests: the packages this build resolved.\n")
     out.push("# It is data; `sisu` rewrites it when a manifest changes.\nversion = 1\n")
-    var entries: list[(String, String, String, list[String])] = []
+    var entries: list[(String, String, String, list[String], String)] = []
     for l in layouts:
         for p in l.packages:
             let source = "path+{relative(dir, p.dir)}"
             var deps = p.locked_deps.copy()
             deps.sort()
-            let entry = (p.name.copy(), p.version.copy(), source, deps)
+            # The level a package declares (22, D-082), which `sisu` refuses
+            # to raise without `--accept-unsafe`.
+            var level = String.new()
+            if let Some((l_, _)) = p.unsafe_level:
+                level = l_.copy()
+            let entry = (p.name.copy(), p.version.copy(), source, deps, level)
             entries.push(entry)
     entries.sort()
-    var last: (String, String, String, list[String])? = None
+    var last: (String, String, String, list[String], String)? = None
     for e in entries:
         if last == Some(e.copy()):
             continue
         last = Some(e.copy())
-        let (name, version, source, deps) = e.copy()
+        let (name, version, source, deps, level) = e.copy()
         var quoted: list[String] = []
         for d in deps:
             quoted.push(toml.quote(d))
         out.push("\n[[package]]\nname = {toml.quote(name)}\nversion = {toml.quote(version)}\n")
         out.push("source = {toml.quote(source)}\ndependencies = [{quoted.join(", ")}]\n")
+        if not level.is_empty():
+            out.push("unsafe = {toml.quote(level)}\n")
     return out
+
+## The `unsafe` level a lockfile records for each package, by name: the
+## lines `name = "..."` and `unsafe = "..."` of each `[[package]]` (the
+## lockfile is `sisu`'s own data, written by `lockfile_of`).
+pub pure def locked_levels(text: str) -> list[(String, String)]:
+    var out: list[(String, String)] = []
+    var name = String.new()
+    var level = String.new()
+    var started = False
+    for raw in text.lines():
+        let line = raw.trim()
+        if line == "[[package]]":
+            if started:
+                out.push((name.copy(), level.copy()))
+            started = True
+            name = String.new()
+            level = String.new()
+        elif line.starts_with("name = \""):
+            name = unquoted(line.strip_prefix("name = "))
+        elif line.starts_with("unsafe = \""):
+            level = unquoted(line.strip_prefix("unsafe = "))
+    if started:
+        out.push((name, level))
+    return out
+
+## A TOML basic string's text, as `toml.quote` writes simple ones.
+pure def unquoted(s: str) -> String:
+    let t = s.trim()
+    if t.byte_len() >= 2 and t.starts_with("\"") and t.ends_with("\""):
+        return t.byte_slice(1, t.byte_len() - 1).to_string()
+    return t.to_string()
+
+## How much an `unsafe` level allows: none 0, `memory` 1, `extern` 2.
+pub pure def level_rank(level: str) -> int:
+    return match level:
+        case "memory": 1
+        case "extern": 2
+        case _: 0
 
 ## Whether package `p` of the layout declares the feature `f`.
 pure def has_feature(layout: Layout, p: int, f: str) -> bool:
@@ -902,3 +952,21 @@ test "the command line's features are turned on, and a name that is none is kept
     let l = load_package_with(fs, "/p", "/p", named)
     assert l.packages[0].on == ["a".to_string(), "b".to_string()]
     assert l.unknown_requested == [("c".to_string(), "p".to_string())]
+
+test "the lockfile records each package's `unsafe` level, and a level can be read back":
+    let fs = Fs.in_memory(
+        {
+            "/p/sisu.toml": "[package]\nname = \"p\"\nversion = \"0.1.0\"\nunsafe = \"memory\"\n\n[dependencies]\nq = {{ path = \"q\" }}\n",
+            "/p/src/main.sisu": "def main():\n    pass\n",
+            "/p/q/sisu.toml": "[package]\nname = \"q\"\nversion = \"0.2.0\"\n",
+            "/p/q/src/lib.sisu": "pub def f():\n    pass\n",
+        }
+    )
+    let layout = load_package(fs, "/p", "/p")
+    let text = lockfile_of([layout], "/p")
+    assert text.contains(
+        "name = \"p\"\nversion = \"0.1.0\"\nsource = \"path+.\"\ndependencies = [\"q\"]\nunsafe = \"memory\"\n"
+    )
+    assert locked_levels(text)
+        == [("p".to_string(), "memory".to_string()), ("q".to_string(), String.new())]
+    assert level_rank("extern") > level_rank("memory") and level_rank("memory") > level_rank("")

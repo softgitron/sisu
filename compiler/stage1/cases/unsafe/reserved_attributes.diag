@@ -1,0 +1,5 @@
+9:1-10:1 E0225 resolve.std-only-attribute name="intrinsic"
+12:1-13:1 E0225 resolve.std-only-attribute name="builtin"
+20:5-21:1 E0225 resolve.std-only-attribute name="intrinsic"
+23:5-24:1 E0225 resolve.std-only-attribute name="internal"
+28:11-28:32 E0701 cap.internal name="Cursor.hidden"

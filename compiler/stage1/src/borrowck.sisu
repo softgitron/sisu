@@ -150,6 +150,7 @@ pub pure def check_with(p: Program, findings_too: bool, mut placed: Placed) -> C
         tests=p.tests.copy(),
         trait_methods=p.trait_methods.copy(),
         impls=p.impls.copy(),
+        asserted=p.asserted.copy(),
     )
     if not findings_too:
         _ = shared.tag_sites(mut program)

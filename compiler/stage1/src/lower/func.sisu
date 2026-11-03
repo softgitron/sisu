@@ -181,6 +181,9 @@ pub pure def lower_body(
     # unfolding made (decision 251).
     let module = body_module(prog, body.def_, body.kind)
     let source = ctx.source_index(prog, module)
+    for r in body.asserted:
+        if let Some(loc) = ctx.loc(module, r):
+            ctx.asserted.push((source, loc))
     var out: list[Function] = []
     var kind = FnKind.Value
     var pure = True

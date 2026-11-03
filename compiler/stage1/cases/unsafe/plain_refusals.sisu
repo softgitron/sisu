@@ -1,0 +1,30 @@
+# What `@derive(Plain)` refuses (22, "Plain data and reinterpretation";
+# RULES.md, R4): a struct of several fields without `@repr(c)`, whose bytes
+# are the compiler's to lay out; a field that is not plain (a `bool` has
+# bit patterns that are no value); an enum; and a type that is not `Copy`.
+
+from std.mem import Plain
+
+@derive(Plain, Copy)
+struct Loose:
+    a: u8
+    b: u32
+
+@repr(c)
+@derive(Plain, Copy)
+struct Flagged:
+    a: u8
+    ok: bool
+
+@derive(Plain, Copy)
+enum Kind:
+    A
+    B
+
+@repr(c)
+@derive(Plain)
+struct Moved:
+    n: int
+
+def main():
+    print(1)

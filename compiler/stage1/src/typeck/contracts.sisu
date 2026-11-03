@@ -25,6 +25,7 @@ from stage1.syntax.ast import (
     UnOp,
 )
 from stage1.syntax.ast import build
+from stage1.syntax.ast import visit
 from stage1.typeck.check import Checker, Cx, EnsuresCtx
 from stage1.typeck.program import DefKind, Embedded, FnKind
 from stage1.typeck.thir import (
@@ -141,7 +142,16 @@ impl Checker:
     pub pure def contract_clause(
         mut self, cx: Cx, kind: TContractKind, expr: ExprId
     ) -> ContractCheck:
+        # A contract holds no `unsafe` (22): contracts can be compiled out,
+        # and unsafe code relies on none.
+        for e in visit.exprs_of(cx.ast, expr):
+            if let ExprKind.Unsafe(_) = cx.ast.expr(e).kind:
+                self.report_other(self.error(cx, Msg.UnsafeInContract, cx.ast.expr(e).range))
+        # The clause is its own statement, for a `# safety:` comment above it.
+        let outer_start = self.stmt_start
+        self.stmt_start = cx.ast.expr(expr).range.start
         let cond = self.check_condition_expr(cx, expr)
+        self.stmt_start = outer_start
         let text = self.source_text(cx, cx.ast.expr(expr).range).trim_end().to_string()
         let replay = self.only_reads(cx, cond, True)
         return ContractCheck(

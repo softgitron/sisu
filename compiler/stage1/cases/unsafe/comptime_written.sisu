@@ -1,0 +1,22 @@
+# Code that compile-time evaluation writes holds no `unsafe` (22, D-085;
+# RULES.md, R2): every unsafe block stays in a source file, where the
+# audit shows it, so a derive that writes one is refused.
+
+## A value with a derived name, whose derive writes an `unsafe` block.
+trait Named:
+    pure def name(self) -> String
+
+    comptime def derive(T: type) -> impl Named for T:
+        return impl Named for T:
+            pure def name(self) -> String:
+                # safety: nothing.
+                unsafe:
+                    pass
+                return reflect.name_of(T)
+
+@derive(Named)
+struct Point:
+    x: int
+
+def main():
+    print(Point(x=1).name())

@@ -1,0 +1,7 @@
+# `ptr mut T` without `from std.mem import ptr` (RULES.md, R2).
+
+def first(p: ptr mut int) -> int:
+    return 0
+
+def main():
+    print(1)

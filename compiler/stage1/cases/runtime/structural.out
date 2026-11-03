@@ -1,0 +1,59 @@
+hash int: -4953207337118415761 same
+hash big int: 4270207580689860276 same
+hash bool: 4953162257141659110 same
+hash char: 4953267810257967366 same
+hash char beyond ASCII: 4953132570327697413 same
+hash str: 294966947029150165 same
+hash String: 6297951865130444937 same
+hash bytes: -7498215962521253854 same
+hash u8: 4953155660071889844 same
+hash u16: 5023242929300571828 same
+hash u32: -7069195539550834791 same
+hash i8: -4953297497071929063 same
+hash i16: -4952923663118337323 same
+hash i32: -4885444435471771831 same
+hash u64 past int: -4953164456164915532 same
+hash unit: 1469598103934665603 same
+hash list: 7736427178592966590 same
+hash empty list: 4953163356653287321 same
+hash nested list: -524355256727118128 same
+hash some: -7320293327725084294 same
+hash none: 4953162257141659110 same
+hash Dot: 4953163356653287321 same
+hash Circle(r=5): -7321258698934464327 same
+hash Rect(w=2, h=3): -7500041151823705664 same
+hash Pair(1, "x"): 6487980103600268874 same
+hash tile: 6356711305234496276 same
+hash pixel: -9218697359441740666 same
+eq tile and itself: True same
+eq tiles: False same
+eq shapes: False same
+eq variants: False same
+eq lists: False same
+eq floats: True same
+eq pixels: True same
+copy equal: True
+copy changed: ["red", "edge", "new"] corner!
+original kept: ["red", "edge"] corner
+plain copy: Pixel(r=9, g=8, b=7, a=6)
+bits 0.0: 0
+bits -0.0: -9223372036854775808
+bits 1.0: 4607182418800017408
+bits -2.5: -4610560118520545280
+bits 3.141592653589793: 4614256656552045848
+bits 1e-310: 20240225330731
+bits 5e-324: 1
+bits 1.7976931348623157e308: 9218868437227405311
+bits inf: 9218868437227405312 -4503599627370496
+drop at the end of a scope:
+  (the scope ends)
+  drop rest 1
+  drop rest 2
+  drop second
+  drop first
+drop now:
+  drop rest 1
+  drop rest 2
+  drop second
+  drop first
+after

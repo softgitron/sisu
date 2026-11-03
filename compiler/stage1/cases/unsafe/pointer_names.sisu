@@ -1,0 +1,13 @@
+# `ptr mut T` is the mutable form of the `ptr` in scope, `std.mem`'s, which
+# a module imports as any other name (RULES.md, R2): without the import the
+# name pass reports `ptr` with the import to write, and a `ptr` of the
+# module's own is not a raw pointer.
+
+struct ptr[T]:
+    value: T
+
+def first(p: ptr mut int) -> int:
+    return 0
+
+def main():
+    print(first(ptr(value=1)))

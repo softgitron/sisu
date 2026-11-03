@@ -492,6 +492,7 @@ impl B:
                         pass
         let generics = self.generics(n)
         return TraitDef(
+            is_unsafe=self.has(n, SyntaxKind.UnsafeKw),
             name=self.ident_after(n, SyntaxKind.TraitKw) ?? self.missing_name(n),
             generics=generics,
             supertraits=supertraits,
@@ -540,6 +541,7 @@ impl B:
             name=name,
             is_pure=is_pure,
             is_comptime=self.has(n, SyntaxKind.ComptimeKw),
+            is_unsafe=self.has(n, SyntaxKind.UnsafeKw),
             generics=generics,
             params=params,
             ret=ret,
@@ -762,6 +764,7 @@ impl B:
                         pass
         let generics = self.generics(n)
         return ImplDef(
+            is_unsafe=self.has(n, SyntaxKind.UnsafeKw),
             generics=generics,
             trait_ty=trait_ty,
             self_ty=self_id,
@@ -894,7 +897,7 @@ impl B:
             case ExpectStmt: StmtKind.Expect(self.first_expr(n))
             case DeferStmt: self.defer_stmt(n, range)
             case WithStmt: self.with_stmt(n)
-            case UnsafeBlock: StmtKind.Unsupported("an `unsafe` block".to_string())
+            case UnsafeBlock: StmtKind.Unsafe(self.block_or_empty(n))
             case SelectStmt: StmtKind.Select(self.select_arms(n))
             case YieldStmt: self.yield_stmt(n)
             case ContractStmt: StmtKind.Contract(self.contract(n))
@@ -1253,7 +1256,7 @@ impl B:
             case RefKw: ExprKind.Ref(mutable=self.has(n, SyntaxKind.MutKw), expr=inner)
             case Caret: ExprKind.FromEnd(inner)
             case ComptimeKw: ExprKind.Comptime(inner)
-            case UnsafeKw: ExprKind.Unsupported("`unsafe`".to_string())
+            case UnsafeKw: ExprKind.Unsafe(inner)
             case _: ExprKind.Error
 
     pure def call_expr(mut self, n: int) -> ExprKind:
@@ -1669,13 +1672,21 @@ impl B:
             case ConstArg: self.const_arg(n)
             case DynType: self.dyn_type(types)
             case ImplType: TypeKind.Unsupported("`impl Trait for T` types".to_string())
-            case PtrType: TypeKind.Unsupported("raw pointers".to_string())
+            case PtrType: self.ptr_type(n, types)
             case _: TypeKind.Error
         return self.add_type(TypeExpr(node=n, range=range, kind=kind))
 
     pure def ref_type(mut self, n: int, types: list[int]) -> TypeKind:
         let inner = self.first_type(n, types)
         return TypeKind.Ref(mutable=self.has(n, SyntaxKind.MutKw), inner=inner)
+
+    ## `ptr mut T`: the `ptr` it names and the type pointed to.
+    pure def ptr_type(mut self, n: int, types: list[int]) -> TypeKind:
+        let inner = self.first_type(n, types)
+        for t in self.tokens(n):
+            if self.token_kind(t) == SyntaxKind.Ident:
+                return TypeKind.PtrMut(name=self.name(t), inner=inner)
+        return TypeKind.PtrMut(name=self.missing_name(n), inner=inner)
 
     pure def dyn_type(mut self, types: list[int]) -> TypeKind:
         if types.is_empty():

@@ -1,0 +1,22 @@
+## The digit `d` of `n`, counted from the right, without checking `d`.
+##
+## Safety:
+## - `in_range`: `d` is at least 0 and less than the number of digits of `n`
+pub pure unsafe def digit(n: int, d: int) -> int:
+    var x = n
+    for _ in range(d):
+        x = x // 10
+    return x % 10
+
+## The number of digits of `n`, at least 1.
+pub pure def count(n: int) -> int:
+    var c = 1
+    var x = n // 10
+    while x > 0:
+        c += 1
+        x = x // 10
+    var sum = 0
+    for d in range(c):
+        # safety: in_range: d < c, the number of digits counted above.
+        sum += unsafe digit(n, d)
+    return c

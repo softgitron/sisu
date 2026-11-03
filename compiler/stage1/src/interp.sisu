@@ -792,6 +792,17 @@ impl Interp:
     pure def intrinsic(
         mut self, prog: Program, name: str, tys: list[Type], args: list[Value]
     ) -> Value ! Stop:
+        # A foreign call and a machine intrinsic stop compile-time
+        # evaluation (22, "Interaction with the rest of the language";
+        # D-085): what they reach is outside the program.
+        if name.starts_with("extern."):
+            var cut = name.byte_len()
+            while cut > 0 and name.byte_at(cut - 1) != 46:
+                cut -= 1
+            let callee = name.byte_slice(cut, name.byte_len())
+            return Err(Stop.World("the foreign function `{callee}`"))
+        if name.starts_with("rt."):
+            return Err(Stop.World("the machine intrinsic `{name}`"))
         match name:
             case "assert.fail" | "assert.fail_parts" | "assert.fail_compare":
                 return self.assert_fail(prog, name, args)

@@ -16,7 +16,8 @@
 #                whose tree differs as listed may differ here too
 #
 # for every `.sisu` file under compiler/conformance/cases/, compiler/std/
-# and proposal/examples/, and stage 1's own cases (compiler/stage1/cases/).
+# (with the std modules only stage 1 reads, compiler/stage1/std/) and
+# proposal/examples/, and stage 1's own cases (compiler/stage1/cases/).
 # Then stage 1's name resolution against stage 0's:
 #
 #   names        `sisu check --format=ids FILE`, its name diagnostics only
@@ -90,6 +91,11 @@
 #                other is beyond it (it has an error of stage 0's front end
 #                that stage 1 notes without rendering it, which stage 1
 #                names) and may only report fewer of stage 0's diagnostics
+#   expected     the whole of stage 1's `check --format=ids` of each of its
+#                own cases that has a `NAME.diag` beside it (a rule of
+#                RULES.md's, whose diagnostics the frozen Rust front end does
+#                not give), against that file, as the conformance suite
+#                holds its cases to theirs (a package case's with --check)
 # Then the formatter, from one run of stage 1:
 #
 #   fmt          the text `sisu fmt FILE` leaves (stage 0 formats a copy),
@@ -266,12 +272,34 @@ stage0_syntax() {
 check0() {
     echo "$work/check0/$(printf '%s' "$1" | tr '/' '%')"
 }
+# `in_package DIR COMMAND...`: COMMAND run in the package directory DIR,
+# whose lockfile is left as it was. Stage 0 rewrites a lockfile without the
+# `unsafe` levels that stage 1 records (RULES.md, R6), and stage 1, which
+# refuses a level that rises past what the lockfile records, would then
+# refuse the case's own; stage 1's batches write no lockfile.
+in_package() {
+    local dir="$1" saved="" status
+    shift
+    if [ -f "$dir/sisu.lock" ]; then
+        saved=$(mktemp)
+        cp "$dir/sisu.lock" "$saved"
+    fi
+    (cd "$dir" && "$@")
+    status=$?
+    if [ -n "$saved" ]; then
+        cp "$saved" "$dir/sisu.lock"
+        rm -f "$saved"
+    else
+        rm -f "$dir/sisu.lock"
+    fi
+    return "$status"
+}
 stage0_check() {
     local kept
     kept=$(check0 "$2")
     [ -e "$kept" ] && return 0
     if [ -d "$2" ]; then
-        (cd "$2" && "$sisu" check --format=ids 2> /dev/null) > "$kept.part"
+        in_package "$2" "$sisu" check --format=ids 2> /dev/null > "$kept.part"
     else
         (cd "$(dirname "$2")" && "$sisu" check --format=ids "$(basename "$2")" 2> /dev/null) > "$kept.part"
     fi
@@ -279,7 +307,7 @@ stage0_check() {
 }
 stage0_sir() {
     if [ -d "$2" ]; then
-        (cd "$2" && "$sisu" sir 2> /dev/null) > "$3/$1.sir"
+        in_package "$2" "$sisu" sir 2> /dev/null > "$3/$1.sir"
     else
         "$sisu" sir "$2" > "$3/$1.sir" 2> /dev/null
     fi
@@ -289,7 +317,7 @@ stage0_sir() {
 # stage0_check runs it.
 stage0_human() {
     if [ -d "$2" ]; then
-        (cd "$2" && "$sisu" check > /dev/null 2> "$3/$1.human")
+        in_package "$2" "$sisu" check > /dev/null 2> "$3/$1.human"
     else
         (cd "$(dirname "$2")" && "$sisu" check "$(basename "$2")" > /dev/null 2> "$3/$1.human")
     fi
@@ -298,7 +326,7 @@ stage0_human() {
 # What `sisu sir --contracts=LEVEL` prints, the level in `$level`.
 stage0_sir_level() {
     if [ -d "$2" ]; then
-        (cd "$2" && "$sisu" sir --contracts="$level" 2> /dev/null) > "$3/$1.sir"
+        in_package "$2" "$sisu" sir --contracts="$level" 2> /dev/null > "$3/$1.sir"
     else
         "$sisu" sir --contracts="$level" "$2" > "$3/$1.sir" 2> /dev/null
     fi
@@ -324,11 +352,18 @@ stage0_doc() {
         dir=$(dirname "$2")
         what=("$(basename "$2")")
     fi
+    if [ -d "$2" ]; then
+        in_package "$dir" "$sisu" doc > "$3/$1.doc.out" 2> "$3/$1.doc.err"
+        echo "$?" > "$3/$1.doc.status"
+        in_package "$dir" "$sisu" doc --output "$3/$1.pages" > "$3/$1.pages.out" 2> "$3/$1.pages.err"
+        echo "$?" > "$3/$1.pages.status"
+        return
+    fi
     (cd "$dir" && "$sisu" doc "${what[@]}" > "$3/$1.doc.out" 2> "$3/$1.doc.err"; echo "$?" > "$3/$1.doc.status")
     (cd "$dir" && "$sisu" doc "${what[@]}" --output "$3/$1.pages" > "$3/$1.pages.out" 2> "$3/$1.pages.err"
      echo "$?" > "$3/$1.pages.status")
 }
-export -f stage0_syntax check0 stage0_check stage0_sir stage0_human stage0_sir_level stage0_fmt stage0_doc
+export -f stage0_syntax check0 in_package stage0_check stage0_sir stage0_human stage0_sir_level stage0_fmt stage0_doc
 
 # The differences DISCREPANCIES.md lists (stage 0's accidents) and those
 # RULES.md lists (the rules stage 1 decides where the frozen Rust front end
@@ -341,7 +376,7 @@ cat "$here/DISCREPANCIES.md" "$here/RULES.md" | sed -n 's/^- Differs: `\([^`]*\)
 
 # The file classes, as lists of absolute paths.
 find "$compiler/conformance/cases" -name '*.sisu' | sort > "$work/conformance.list"
-find "$compiler/std" -name '*.sisu' | sort > "$work/std.list"
+{ find "$compiler/std" -name '*.sisu'; find "$here/std" -name '*.sisu'; } | sort > "$work/std.list"
 find "$repo/proposal/examples" -name '*.sisu' | sort > "$work/examples.list"
 find "$here/cases" -name '*.sisu' | sort > "$work/cases.list"
 # The programs of several modules and packages (09): each package case of
@@ -358,7 +393,10 @@ find "$compiler/conformance/cases/packages" -maxdepth 1 -name '*.sisu' | sort >>
 classes="conformance std examples cases"
 if [ "$mutants" -gt 0 ]; then
     mkdir -p "$work/mutants.src"
-    cat "$work/conformance.list" "$work/std.list" "$work/examples.list" > "$work/corpus.list"
+    # Not the std modules only stage 1 reads: stage 0 parses none of their
+    # mutants as stage 1 does.
+    { cat "$work/conformance.list"; grep -vF "$here/std/" "$work/std.list"; cat "$work/examples.list"; } \
+        > "$work/corpus.list"
     if ! stage1 mutate "$seed" "$mutants" "$work/mutants.src" "$work/corpus.list" \
             > "$work/mutate.log" 2>&1; then
         cat "$work/mutate.log" >&2
@@ -426,7 +464,7 @@ for class in $classes; do
         else
             for o in $differs; do
                 [ "$o" = ast ] && [ "$ast_follows" = 1 ] && continue
-                grep -qxF "$rel $o" "$allowed" || expected=0
+                grep -qxF -e "$rel $o" "$allowed" || expected=0
             done
         fi
         if [ "$expected" = 1 ]; then
@@ -490,7 +528,7 @@ for class in $name_classes; do
             continue
         fi
         rel="${f#"$repo"/}"
-        if grep -qxF "$rel names" "$allowed"; then
+        if grep -qxF -e "$rel names" "$allowed"; then
             class_listed=$((class_listed + 1))
             report="$report\n  listed:   $rel: names"
         else
@@ -564,7 +602,7 @@ for class in $type_classes; do
             same=$((same + 1))
             continue
         fi
-        if grep -qxF "$rel types" "$allowed"; then
+        if grep -qxF -e "$rel types" "$allowed"; then
             class_listed=$((class_listed + 1))
             report="$report\n  listed:   $rel: types"
         else
@@ -634,7 +672,7 @@ for class in $sir_classes; do
                 same=$((same + 1))
                 continue
             fi
-            if grep -qxF "$rel $output" "$allowed"; then
+            if grep -qxF -e "$rel $output" "$allowed"; then
                 class_listed=$((class_listed + 1))
                 report="$report\n  listed:   $rel: $output"
             else
@@ -693,7 +731,7 @@ for level in off preconditions; do
             report="$report\n  UNLISTED: $rel: $class (beyond the slice: $(head -1 "$out/$i.beyond"))"
         elif cmp -s "$ref/$i.sir" "$out/$i.sir"; then
             same=$((same + 1))
-        elif grep -qxF "$rel $class" "$allowed"; then
+        elif grep -qxF -e "$rel $class" "$allowed"; then
             class_listed=$((class_listed + 1))
             report="$report\n  listed:   $rel: $class"
         else
@@ -920,7 +958,7 @@ for class in $check_classes; do
                 same=$((same + 1))
                 continue
             fi
-            if grep -qxF "$rel $output" "$allowed"; then
+            if grep -qxF -e "$rel $output" "$allowed"; then
                 class_listed=$((class_listed + 1))
                 report="$report\n  listed:   $rel: $output"
             else
@@ -942,6 +980,51 @@ for class in $check_classes; do
         fi
     done
 done
+
+# Stage 1's own cases against what they expect: each with a `NAME.diag`
+# beside it (or, for a package case `NAME.pkg`, beside the directory), the
+# whole of what stage 1's `check --format=ids` printed of it above.
+n=0; same=0; class_unlisted=0
+for class in cases-check corpus-check; do
+    list="$work/$class.list"
+    [ -f "$list" ] || continue
+    i=0
+    while read -r f; do
+        i=$((i + 1))
+        case "$f" in "$here/cases/"*) ;; *) continue ;; esac
+        base="${f%.sisu}"
+        case "$base" in *.pkg/*) base="${base%%.pkg/*}" ;; *.pkg) base="${base%.pkg}" ;; esac
+        [ -f "$base.diag" ] || continue
+        n=$((n + 1))
+        rel="${f#"$repo"/}"
+        if cmp -s "$base.diag" "$work/$class.stage1/$i.ids"; then
+            same=$((same + 1))
+        else
+            class_unlisted=$((class_unlisted + 1))
+            report="$report\n  UNLISTED: $rel: expected (the case's ${base##*/}.diag against stage 1 in $work/$class.stage1/$i.ids)"
+        fi
+    done < "$list"
+done
+# And what `audit --unsafe` prints of each case with a `NAME.audit` (its
+# names are relative to the program, so it runs from here), against that
+# file.
+mkdir -p "$work/audit"
+k=0
+while read -r f; do
+    base="${f%.sisu}"
+    case "$base" in *.pkg/*) base="${base%%.pkg/*}" ;; *.pkg) base="${base%.pkg}" ;; esac
+    [ -f "$base.audit" ] || continue
+    k=$((k + 1)); n=$((n + 1))
+    stage1 audit --unsafe "$f" > "$work/audit/$k.out" 2> /dev/null
+    if cmp -s "$base.audit" "$work/audit/$k.out"; then
+        same=$((same + 1))
+    else
+        class_unlisted=$((class_unlisted + 1))
+        report="$report\n  UNLISTED: ${f#"$repo"/}: expected audit (the case's ${base##*/}.audit against stage 1 in $work/audit/$k.out)"
+    fi
+done < <(grep -F "$here/cases/" "$work/cases-check.list"; grep -F "$here/cases/" "$work/packages.list")
+total=$((total + n)); identical=$((identical + same)); unlisted=$((unlisted + class_unlisted))
+check_summary="$check_summary\n$(printf '  %-12s %4d files, %4d as their .diag or .audit expects, %3d otherwise' expected "$n" "$same" "$class_unlisted")"
 
 # The formatter: the text `sisu fmt` leaves of each file, what `sisu fmt
 # --check` prints of it and its status, against stage 1's `fmt-batch`; and
@@ -978,7 +1061,7 @@ for output in fmt fmt-check; do
                 cmp -s "$ref/$i.check.status" "$out/$i.check.status" && { same=$((same + 1)); continue; }
             where="stage 0 in $ref/$i.check.*, stage 1 in $out/$i.check.*"
         fi
-        if grep -qxF "$rel $output" "$allowed"; then
+        if grep -qxF -e "$rel $output" "$allowed"; then
             class_listed=$((class_listed + 1))
             report="$report\n  listed:   $rel: $output"
         else
@@ -1015,10 +1098,13 @@ fmt_summary="$fmt_summary\n$(printf '  %-12s %4d files, %4d unchanged, %3d other
 # join again: a file's text, its verdict and stage 1's fixed point at once.
 # A difference is a listed discrepancy's when it has its mark (a test of
 # the outputs that only that discrepancy makes). None is listed now (D6
-# and D7, the formatter's, were decided by decision 267), so every file
-# must give identical outputs.
+# and D7, the formatter's, were decided by decision 267). A deformed copy
+# of a file whose `fmt-check` differs as RULES.md lists (one that stage
+# 0's parser refuses, written in a rule's new syntax) differs as listed.
 fmt_explained() {
-    return 1
+    local orig
+    orig=$(sed -n "${4}p" "$work/fmt.list")
+    grep -qxF -e "${orig#"$repo"/} fmt-check" "$allowed"
 }
 others=""
 if [ "$native" = 1 ]; then
@@ -1058,7 +1144,7 @@ for class in $others; do
             cmp -s "$ref/$i.check.err" "$out/$i.check.err" &&
             cmp -s "$ref/$i.check.status" "$out/$i.check.status" && [ ! -s "$out/$i.again" ]; then
             same=$((same + 1))
-        elif [ ! -s "$out/$i.again" ] && fmt_explained "$ref/$i" "$out/$i" "$f"; then
+        elif [ ! -s "$out/$i.again" ] && fmt_explained "$ref/$i" "$out/$i" "$f" "$i"; then
             class_listed=$((class_listed + 1))
             report="$report\n  listed:   $class: $f"
         else
@@ -1138,7 +1224,7 @@ for output in doc doc-output; do
             fi
             where="stage 0 in $ref/$i.pages*, stage 1 in $out/$i.pages*"
         fi
-        if grep -qxF "$rel $output" "$allowed"; then
+        if grep -qxF -e "$rel $output" "$allowed"; then
             class_listed=$((class_listed + 1))
             report="$report\n  listed:   $rel: $output"
             continue

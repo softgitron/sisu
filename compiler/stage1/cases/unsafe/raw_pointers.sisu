@@ -1,0 +1,62 @@
+# Raw pointers and the raw buffer of `std.mem` (22, "Raw pointers", "Auto
+# traits"; RULES.md, R2): making, copying and moving a pointer is safe and
+# using one is not; a pointer is `Copy` and neither `Send` nor `Sync`, so a
+# type holding one is neither until an `unsafe impl` says so, and a type
+# built on `RawBuf` is both when its values are. The raw memory operations
+# are intrinsics the interpreter does not run yet, so this program is
+# checked, not run.
+
+from std.mem import RawBuf, ptr
+
+## A cursor over a buffer it does not own.
+struct Cursor:
+    at: ptr mut int
+    left: int
+
+    ## The next value, or `None` at the end.
+    def next(mut self) -> int?:
+        if self.left == 0:
+            return None
+        # safety: valid, aligned: `at` points into the buffer's initialised
+        #   slots while `left` > 0; in_bounds: the offset is one past it at
+        #   most.
+        unsafe:
+            let v = self.at.read()
+            self.at = self.at.offset(1)
+            self.left -= 1
+            return Some(v)
+
+## A cursor that moves to another task with its buffer.
+struct Owned:
+    buf: RawBuf[int]
+    at: ptr mut int
+
+# safety: `at` points into `buf`, which moves with it, and nothing else
+#   points into `buf`.
+unsafe impl Send for Owned:
+    pass
+
+## A queue of values stored in place, `Send` through `RawBuf`.
+struct Queue[T]:
+    buf: RawBuf[T]
+    count: int
+
+def to_task[T: Send](own x: T) -> T:
+    return x
+
+def main():
+    var x = 1
+    let p = ptr.of(ref x)
+    let q = p
+    print(q.addr() == p.addr())
+    var buf: RawBuf[int] = RawBuf.with_capacity(2)
+    let slot = buf.slot(0)
+    var c = Cursor(at=slot, left=0)
+    print(c.next())
+    _ = to_task(c)
+    _ = to_task(p)
+    _ = to_task(Owned(buf=RawBuf.with_capacity(1), at=buf.slot(1)))
+    let pointers: Queue[ptr[int]] = Queue(buf=RawBuf.with_capacity(1), count=0)
+    _ = to_task(pointers)
+    let numbers: Queue[int] = Queue(buf=RawBuf.with_capacity(1), count=0)
+    _ = to_task(numbers)

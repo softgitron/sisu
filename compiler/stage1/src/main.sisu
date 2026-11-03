@@ -83,6 +83,7 @@ import stage1.sir
 import stage1.sir.simplify
 import stage1.sir.write
 import stage1.typeck
+from stage1.audit import AuditModule, AuditPackage, unsafe_report
 from stage1.borrowck.finding import span_of
 from stage1.cfg import Features
 from stage1.diag import (
@@ -92,6 +93,7 @@ from stage1.diag import (
     Lines,
     Msg,
     Param,
+    TextRange,
     quote,
     render_human,
     render_human_files,
@@ -104,6 +106,7 @@ from stage1.diag import (
 from stage1.fmt import Refusal
 from stage1.lexer import Lexed, lex
 from stage1.lower.names import CONTRACTS_ALL, CONTRACTS_OFF, CONTRACTS_PRECONDITIONS
+from stage1.manifest import read as manifest_read
 from stage1.mutants import Rng, joined, mutate, spread
 from stage1.package import FeatureRequest, Layout, Problem, Target
 from stage1.parser import parse, parse_lexed
@@ -117,7 +120,7 @@ from stage1.syntax.kinds import SyntaxKind
 from stage1.syntax.tree import Tree
 from stage1.typeck.collect import SourcePackage
 from stage1.typeck.program import DefKind, Embedded, ModuleId, Program
-from stage1.typeck.std_sources import display_path, documented, importable
+from stage1.typeck.std_sources import display_path, documented, importable, std_file
 from stage1.typeck.ty import TyKey
 
 error UsageError:
@@ -321,16 +324,17 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         # The program's path, or the package of the working directory or
         # the nearest one above it, as `sisu sir` reads it when it names
         # none; its lockfile written as stage 0 writes it (09).
-        var path = path_of(words, ["--partial"]) else:
+        var path = path_of(words, ["--partial", "--accept-unsafe"]) else:
             return Err(Usage(text=usage()))
-        if not names_path(words, ["--partial"]):
+        if not names_path(words, ["--partial", "--accept-unsafe"]):
             let found = nearest_package(sys, "sir", catalog) else:
                 return Err(Failed)
             path = found
         if let Some(e) = workspace_run_error(sys, path, catalog):
             emit("", e)
             return Err(Failed)
-        _ = write_lockfile(sys, path, True, False, catalog)?
+        if not write_lockfile(sys, path, True, False, words.contains("--accept-unsafe"), catalog)?:
+            return Err(Failed)
         let base = typeck.base(std_texts(sys, home)?, catalog)
         var kept = Kept.new()
         var env = environment(sys, home)?
@@ -421,7 +425,9 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         # package's features (decision 250).
         let ids = rest.contains("--format=ids")
         let (request, words) = feature_request(rest)
-        let flags = ["--format=ids", "--format=human", "--locked", "--no-default-features"]
+        let flags = [
+            "--format=ids", "--format=human", "--locked", "--no-default-features", "--accept-unsafe"
+        ]
         var path = path_of(words, flags) else:
             return Err(Usage(text=usage()))
         if not names_path(words, flags):
@@ -431,8 +437,10 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         if let Some(e) = unknown_feature(sys, path, request):
             emit("", catalog.plain_error("cli.unknown-feature", e))
             return Err(Failed)
-        # `--locked` keeps the lockfile as it is, or stops the command.
-        if not write_lockfile(sys, path, False, words.contains("--locked"), catalog)?:
+        # `--locked` keeps the lockfile as it is, or stops the command;
+        # `--accept-unsafe` lets a package's `unsafe` level rise (22).
+        let accept = words.contains("--accept-unsafe")
+        if not write_lockfile(sys, path, False, words.contains("--locked"), accept, catalog)?:
             return Err(Failed)
         let base = typeck.base(std_texts(sys, home)?, catalog)
         var kept = Kept.new()
@@ -517,7 +525,9 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             k += 1
         let native = words.contains("--native")
         let release = words.contains("--release")
-        let flags = ["--native", "--release", "--locked", "--no-default-features"]
+        let flags = [
+            "--native", "--release", "--locked", "--no-default-features", "--accept-unsafe"
+        ]
         var path = path_of(words, flags) else:
             return Err(Usage(text=usage()))
         if not names_path(words, flags):
@@ -554,9 +564,13 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             emit("", catalog.plain_error("cli.unknown-feature", e))
             return Err(Failed)
         let locked = words.contains("--locked")
+        let accept = words.contains("--accept-unsafe")
         return build_command(
-            sys, home, path, native, release, locked, level, output, request, catalog
+            sys, home, path, native, release, (locked, accept), level, output, request, catalog
         )
+    if command == "audit":
+        # `audit --unsafe [--std] [PATH]` (22, "The audit and the lints").
+        return audit_command(sys, home, rest, catalog)
     if command == "doc":
         # `doc [PATH] [--output DIR]` and `doc --std [MODULE...]`: what
         # `sisu doc` does, its exit status given as `Exit(status=N)`.
@@ -905,6 +919,18 @@ def layout_input(
             other = True
             let d = Diagnostic.new(Msg.CapUntrusted, t.start, t.end)
             untrusted.push((i, d.with("package", layout.packages[k].name).with("what", what)))
+    # The level each package declares against the unsafe code it has (22,
+    # D-082): code with no declaration, or above it, is an error; a
+    # declaration above the code a warning; a dependency that declares one
+    # needs the root's consent.
+    var problems = layout.problems.copy()
+    for (i, d) in unsafe_levels(layout, named):
+        if catalog.is_error(d.diag.msg):
+            other = True
+        if i >= 0:
+            untrusted.push((i, d.diag.copy()))
+        else:
+            problems.push(d.copy())
     var syntax: list[list[Diagnostic]] = []
     for m in named:
         syntax.push(m.syntax.copy())
@@ -939,7 +965,7 @@ def layout_input(
             syntax=syntax,
             names=found,
             manifests=layout.files.copy(),
-            problems=layout.problems.copy(),
+            problems=problems,
             untrusted=untrusted,
             disk=disk,
             package_name=package_name,
@@ -950,6 +976,245 @@ def layout_input(
             contracts=CONTRACTS_ALL,
         )
     )
+
+## What `E1019` and `E1020` call the code that needs `unsafe = "extern"`.
+const FOREIGN_CODE: str = "foreign code (an `extern` block or a header import)"
+
+## The diagnostics of the `unsafe` levels of a layout's packages (22,
+## "Packages: the manifest field"; D-082), each with the module it is in
+## (an index of `named`), or -1 and a problem of a manifest: `E1019` for a
+## package with unsafe code and no `unsafe` in its manifest, `E1020` for
+## an `extern` block or a header import in a package that declares
+## `memory`, at its first such code; `W0012` for a declaration above what
+## the package's code uses, and `E1021` for a dependency that declares a
+## level the root's `[trust] unsafe` does not list, at the declaration. A
+## program of one file has no manifest to declare one in.
+pure def unsafe_levels(layout: Layout, named: list[NamedModule]) -> list[(int, package.Problem)]:
+    var out: list[(int, package.Problem)] = []
+    let n = len(layout.packages)
+    var used: list[int] = []
+    var first_unsafe: list[(int, int, int)?] = []
+    var first_extern: list[(int, int, int)?] = []
+    for _ in range(n):
+        used.push(0)
+        first_unsafe.push(None)
+        first_extern.push(None)
+    for i in range(min(len(layout.modules), len(named))):
+        let k = layout.modules[i].package
+        let text: str = named[i].text
+        let mentioned = text.contains("unsafe")
+            or text.contains("extern")
+            or text.contains("import c")
+        if k >= n or not mentioned:
+            continue
+        let tokens = lex(text).tokens
+        # The two significant tokens before this one, for `import c "...h"`.
+        var before: SyntaxKind? = None
+        var previous: SyntaxKind? = None
+        var previous_c = False
+        for t in tokens:
+            if t.kind.is_trivia():
+                continue
+            if t.kind == SyntaxKind.UnsafeKw:
+                used[k] = max(used[k], 1)
+                if first_unsafe[k].is_none():
+                    first_unsafe[k] = Some((i, t.start, t.end))
+            # An `extern` block, or a C header import (`import c "zlib.h"`,
+            # not `import c`, a package named `c`).
+            let header = before == Some(SyntaxKind.ImportKw)
+                and previous_c
+                and t.kind == SyntaxKind.StringStart
+            if t.kind == SyntaxKind.ExternKw or header:
+                used[k] = 2
+                if first_extern[k].is_none():
+                    first_extern[k] = Some((i, t.start, t.end))
+            before = previous
+            previous = Some(t.kind)
+            previous_c = t.kind == SyntaxKind.Ident and text.byte_slice(t.start, t.end) == "c"
+    for k in range(n):
+        let p = ref layout.packages[k]
+        let file = p.manifest else:
+            continue
+        var declared = 0
+        var at = TextRange.empty(0)
+        var level = String.new()
+        if let Some((l, r)) = p.unsafe_level:
+            declared = package.level_rank(l)
+            at = r
+            level = l.copy()
+        if used[k] > 0 and declared == 0:
+            var site = first_unsafe[k]
+            if used[k] == 2:
+                site = first_extern[k]
+            let (i, s, e) = site ?? (0, 0, 0)
+            var what = "unsafe code"
+            if used[k] == 2:
+                what = FOREIGN_CODE
+            let wanted = if used[k] == 2: "extern" else: "memory"
+            var d = Diagnostic.new(Msg.PackageUnsafeUndeclared, s, e).with("package", p.name)
+            d = d.with("what", what).with("level", wanted)
+            out.push((i, package.Problem(file=file, diag=d, label_files=[])))
+        elif declared == 1 and used[k] == 2:
+            let (i, s, e) = first_extern[k] ?? (0, 0, 0)
+            var d = Diagnostic.new(Msg.PackageUnsafeLevel, s, e).with("package", p.name)
+            d = d.with("what", FOREIGN_CODE)
+            out.push((i, package.Problem(file=file, diag=d, label_files=[])))
+        if declared > used[k]:
+            var why = "and has no foreign code: `unsafe = \"memory\"` says what it uses"
+            if used[k] == 0:
+                why = "and contains no unsafe code: remove it"
+            var d = Diagnostic.new(Msg.UnsafeLevel, at.start, at.end).with("level", level)
+            out.push((-1, package.Problem(file=file, diag=d.with("why", why), label_files=[])))
+        if k != 0 and not p.trusted and declared > 0:
+            var d = Diagnostic.new(Msg.PackageUnsafeUntrusted, at.start, at.end)
+            d = d.with("name", p.name).with("level", level)
+            d = d.note_with(Msg.PackageTrustToConsent, "name", p.name)
+            out.push((-1, package.Problem(file=file, diag=d, label_files=[])))
+    return out
+
+## `audit --unsafe [PATH]` (22, "The audit and the lints"; D-083): the
+## unsafe code of the program PATH names (a file, a package, a workspace's
+## members, by default the package of the working directory), per package
+## with its declared level and the program's consent, per module with its
+## hash, then the lints and the rules of unsafe code that `check` reports;
+## `audit --unsafe --std` the standard library's own unsafe code.
+def audit_command(
+    sys: System, home: str, rest: list[String], catalog: Catalog
+) -> ! {IoError, UsageError, CommandError}:
+    let flags = ["--unsafe", "--std"]
+    if not rest.contains("--unsafe"):
+        return Err(Usage(text="usage: sisu1 audit --unsafe [--std] [PATH]".to_string()))
+    var packages: list[AuditPackage] = []
+    var modules: list[AuditModule] = []
+    if rest.contains("--std"):
+        let std_package = AuditPackage(
+            name="std".to_string(),
+            version="(toolchain)".to_string(),
+            level="extern".to_string(),
+            consent="trusted by every program".to_string(),
+        )
+        packages.push(std_package)
+        var names = ["prelude".to_string()]
+        for n in documented():
+            names.push(n.to_string())
+        names.push("rt".to_string())
+        for n in names:
+            let text = sys.fs.read_to_string(Path.new(std_file(home, n)))?
+            let module = AuditModule(
+                package=0, path=display_path(n), file="<std>/{n}.sisu", text=text
+            )
+            modules.push(module)
+        emit(unsafe_report(packages, modules, []), "")
+        return Ok(())
+    var path = path_of(rest, flags) else:
+        return Err(Usage(text=usage()))
+    if not names_path(rest, flags):
+        let found = nearest_package(sys, "audit", catalog) else:
+            return Err(Failed)
+        path = found
+    match layouts_of(sys, path, False, FeatureRequest.none()):
+        case Some(layouts):
+            for layout in layouts:
+                let first = len(packages)
+                let root_manifest = audit_root_manifest(layout)
+                for k in range(len(layout.packages)):
+                    let p = ref layout.packages[k]
+                    var level = String.new()
+                    if let Some((l, _)) = p.unsafe_level:
+                        level = l.copy()
+                    var consent = "not trusted: `[trust] unsafe` does not list it".to_string()
+                    if k == 0:
+                        consent = "the root package".to_string()
+                    elif p.trusted:
+                        consent = "trusted in {trust_line(root_manifest, p.name)}"
+                    packages.push(
+                        AuditPackage(
+                            name=p.name.copy(),
+                            version=p.version.copy(),
+                            level=level,
+                            consent=consent,
+                        )
+                    )
+                for m in layout.modules:
+                    let text = sys.fs.read_to_string(Path.new(m.disk))?
+                    let module = AuditModule(
+                        package=first + m.package,
+                        path=m.path.join("."),
+                        file=m.name.copy(),
+                        text=text,
+                    )
+                    modules.push(module)
+        case None:
+            let text = sys.fs.read_to_string(Path.new(path))?
+            let file = package.file_name(path)
+            let one = AuditPackage(
+                name=file.copy(),
+                version=String.new(),
+                level=String.new(),
+                consent="a program of one file, which declares no level".to_string(),
+            )
+            packages.push(one)
+            modules.push(AuditModule(package=0, path=file.copy(), file=file, text=text))
+    # The lints and the rules of unsafe code, as `check --format=ids` prints
+    # them.
+    let base = typeck.base(std_texts(sys, home)?, catalog)
+    var kept = Kept.new()
+    var env = environment(sys, home)?
+    let reports = reports_of(
+        sys, home, path, path, True, FeatureRequest.none(), base, mut env, catalog, mut kept
+    )?
+    var lints: list[String] = []
+    for r in reports:
+        var keep = False
+        for line in r.ids(catalog).lines():
+            if line.starts_with("  "):
+                if keep:
+                    lints.push("  {line.trim()}")
+                continue
+            keep = is_unsafe_rule(line)
+            if keep:
+                lints.push(line.to_string())
+    var out = unsafe_report(packages, modules, lints)
+    out.push("std (toolchain)   unsafe = \"extern\"   see `sisu1 audit --unsafe --std`\n")
+    emit(out, "")
+    return Ok(())
+
+## Whether a line of `check --format=ids` is one of the rules of unsafe
+## code (22): an `unsafe.` lint or error, a package's level, the root's
+## consent, unsafe code that compile-time evaluation wrote.
+pure def is_unsafe_rule(line: str) -> bool:
+    return line.contains(" unsafe.")
+        or line.contains(" package.unsafe-")
+        or line.contains(" cap.untrusted ")
+        or line.contains(" comptime.unsafe-written")
+
+## The root manifest of a layout, its name and text, for the lines of its
+## `[trust]`.
+pure def audit_root_manifest(layout: Layout) -> (String, String)?:
+    let p = layout.packages.first() else:
+        return None
+    let k = p.manifest else:
+        return None
+    if k < len(layout.files):
+        return Some(layout.files[k].copy())
+    return None
+
+## Where the root manifest's `[trust] unsafe` names the package `name`:
+## `sisu.toml:14`.
+pure def trust_line(manifest: (String, String)?, name: str) -> String:
+    let (file, text) = manifest.copy() else:
+        return "`[trust] unsafe`".to_string()
+    let (read, _) = manifest_read(text)
+    let m = read else:
+        return file
+    for (n, at) in m.trust_unsafe:
+        if n == name:
+            var line = 1
+            for i in range(min(at.start, text.byte_len())):
+                if text.byte_at(i) == 10:
+                    line += 1
+            return "{file}:{line}"
+    return file
 
 ## The type checker's verdict on a program.
 pure def check_input(
@@ -1642,13 +1907,15 @@ def build_command(
     path: str,
     native: bool,
     release: bool,
-    locked: bool,
+    lock: (bool, bool),
     level: int?,
     output: String?,
     request: FeatureRequest,
     catalog: Catalog,
 ) -> ! {IoError, CommandError}:
-    if not write_lockfile(sys, path, False, locked, catalog)?:
+    # `--locked`, and `--accept-unsafe` (22).
+    let (locked, accept) = lock
+    if not write_lockfile(sys, path, False, locked, accept, catalog)?:
         return Err(Failed)
     let base = typeck.base(std_texts(sys, home)?, catalog)
     var kept = Kept.new()
@@ -1821,7 +2088,7 @@ pure def output_for(disk: str, package_name: str, root: String?, release: bool) 
 ## `locked` (`--locked`), a lockfile that would change is reported instead
 ## (`cli.locked`, with what changes), and the command stops: `False`.
 def write_lockfile(
-    sys: System, arg: str, sir: bool, locked: bool, catalog: Catalog
+    sys: System, arg: str, sir: bool, locked: bool, accept_unsafe: bool, catalog: Catalog
 ) -> bool ! IoError:
     let abs = absolute(sys, arg)
     let target = package.locate(sys.fs, abs) else:
@@ -1862,6 +2129,14 @@ def write_lockfile(
         old = Some(t)
     if old == Some(text.copy()):
         return Ok(True)
+    # A package whose `unsafe` level rises past what the lockfile records
+    # waits for `--accept-unsafe` (22, D-082), which unattended runs never
+    # pass.
+    if let Some(o) = old:
+        if not accept_unsafe:
+            if let Some(err) = raised_level(o, text, catalog):
+                emit("", err)
+                return Ok(False)
     if locked:
         var what = "there is none".to_string()
         if let Some(o) = old:
@@ -1871,6 +2146,25 @@ def write_lockfile(
         return Ok(False)
     sys.fs.write_text(Path.new(at), text)?
     return Ok(True)
+
+## `package.unsafe-raised` for the first package whose `unsafe` level the
+## new lockfile `text` records above what the old one, `old`, does (none to
+## `memory`, `memory` to `extern`); a package the old one does not record
+## is new, which admission reviews (09).
+pure def raised_level(old: str, text: str, catalog: Catalog) -> String?:
+    let before = package.locked_levels(old)
+    for (name, level) in package.locked_levels(text):
+        for (n, was) in before:
+            if n != name or package.level_rank(level) <= package.level_rank(was):
+                continue
+            let shown = if was.is_empty(): "no `unsafe`".to_string() else: "`unsafe = \"{was}\"`"
+            let params = [
+                Param(name="name".to_string(), value=name.copy()),
+                Param(name="old".to_string(), value=shown),
+                Param(name="level".to_string(), value=level.copy()),
+            ]
+            return Some(catalog.plain_error("package.unsafe-raised", params))
+    return None
 
 ## The members of a workspace with an application (`src/main.sisu`), the
 ## ones `sir` and `run` choose among.
@@ -2013,9 +2307,7 @@ def std_texts(sys: System, home: str) -> dict[String, String] ! IoError:
     for name in importable():
         names.push(name)
     for name in names:
-        _ = texts.insert(
-            name.to_string(), sys.fs.read_to_string(Path.new("{home}/std/{name}.sisu"))?
-        )
+        _ = texts.insert(name.to_string(), sys.fs.read_to_string(Path.new(std_file(home, name)))?)
     return Ok(texts)
 
 ## The files the `embed("path")` calls of `text` name, read relative to
@@ -2092,7 +2384,7 @@ def name_diagnostics(
     let (tree, cfg_diags) = built_tree(text, parsed.tree, tests, features)
     for module in imported_std_modules(text, tree):
         if not env.std.contains(module.copy()):
-            let source = sys.fs.read_to_string(Path.new("{home}/std/{module}.sisu"))?
+            let source = sys.fs.read_to_string(Path.new(std_file(home, module)))?
             let names = ModuleNames.of(source, parse(source, catalog).tree)
             _ = env.std.insert(module.copy(), names)
     let found = resolve.resolve(text, tree, parsed.diagnostics, env, catalog)
@@ -2235,7 +2527,7 @@ def named_modules(
         problems.push(cfg_diags)
         for module in imported_std_modules(text, tree):
             if not env.std.contains(module.copy()):
-                let source = sys.fs.read_to_string(Path.new("{home}/std/{module}.sisu"))?
+                let source = sys.fs.read_to_string(Path.new(std_file(home, module)))?
                 let names = ModuleNames.of(source, parse(source, catalog).tree)
                 _ = env.std.insert(module.copy(), names)
         out.push(
@@ -2308,6 +2600,7 @@ struct DocArgs:
     output: String?
     std_lib: bool
     locked: bool
+    accept_unsafe: bool
     request: FeatureRequest
 
 ## What `sisu doc` printed of a program, its exit status, and the pages it
@@ -2331,7 +2624,12 @@ impl DocReport:
 ## for a path that is no module of the standard library).
 pure def doc_args(rest: list[String], catalog: Catalog) -> (DocArgs, String):
     var args = DocArgs(
-        targets=[], output=None, std_lib=False, locked=False, request=FeatureRequest.none()
+        targets=[],
+        output=None,
+        std_lib=False,
+        locked=False,
+        accept_unsafe=False,
+        request=FeatureRequest.none(),
     )
     var i = 1
     while i < len(rest):
@@ -2340,6 +2638,8 @@ pure def doc_args(rest: list[String], catalog: Catalog) -> (DocArgs, String):
             args.std_lib = True
         elif a == "--locked":
             args.locked = True
+        elif a == "--accept-unsafe":
+            args.accept_unsafe = True
         elif a == "--no-default-features":
             args.request.no_default = True
         elif a == "--output" or a.starts_with("--output="):
@@ -2466,7 +2766,7 @@ def doc_report(
     if let Some(e) = unknown_feature(sys, path, args.request):
         return Ok(DocReport.failed(catalog.plain_error("cli.unknown-feature", e), 2))
     # `--locked` keeps the lockfile as it is, or stops the command.
-    if not write_lockfile(sys, path, False, args.locked, catalog)?:
+    if not write_lockfile(sys, path, False, args.locked, args.accept_unsafe, catalog)?:
         return Ok(DocReport.failed(String.new(), 1))
     var inputs: list[Input] = []
     match layouts_of(sys, path, False, args.request):
@@ -2871,3 +3171,21 @@ pure def dump_tokens(text: str, lexed: Lexed, trivia: bool, catalog: Catalog) ->
             continue
         out.push("{names.of(t.kind)} {t.start}..{t.end} {quote(text.byte_slice(t.start, t.end))}\n")
     return (out, render_ids(text, lexed.diagnostics, catalog))
+
+test "a lockfile's `unsafe` level that rises waits for `--accept-unsafe`":
+    let catalog = Catalog.parse(
+        "E1022 error   package.unsafe-raised       `sisu.lock` records `{{name}}` with {{old}}, and it now declares `unsafe = \"{{level}}\"`\n"
+    )
+    let memory = "version = 1\n\n[[package]]\nname = \"z\"\nversion = \"1.0.0\"\nsource = \"path+.\"\ndependencies = []\nunsafe = \"memory\"\n"
+    let foreign = memory.replace("unsafe = \"memory\"", "unsafe = \"extern\"")
+    let none = memory.replace("unsafe = \"memory\"\n", "")
+    let raised = raised_level(memory, foreign, catalog).expect("memory to extern rises")
+    assert raised
+        == "error[E1022]: `sisu.lock` records `z` with `unsafe = \"memory\"`, and it now declares `unsafe = \"extern\"`\n"
+    let from_none = raised_level(none, memory, catalog).expect("none to memory rises")
+    assert from_none.contains("with no `unsafe`")
+    assert raised_level(foreign, memory, catalog).is_none()
+    assert raised_level(memory, none, catalog).is_none()
+    # A package the old lockfile does not record is new, which admission
+    # reviews.
+    assert raised_level(memory.replace("\"z\"", "\"y\""), foreign, catalog).is_none()

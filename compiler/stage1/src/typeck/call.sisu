@@ -538,6 +538,7 @@ impl Checker:
                     if not self.quiet_unknown_names
                             and not cx.prog.poisoned.contains(n.to_string()):
                         self.undefined_name(cx, n, callee_range)
+                    self.unresolved_call()
                     self.check_args_loosely(cx, args)
                     return self.error_expr(at)
             case _:
@@ -889,9 +890,14 @@ impl Checker:
             let name = cx.prog.defs[d.index].name.copy()
             self.report_other(self.error(cx, Msg.ComptimeOnly, at).with("name", name))
         self.check_internal(cx, d, at)
+        # Calling an `unsafe def` or a foreign function is an unsafe
+        # operation (22).
+        self.unsafe_call(cx, d, f, at)
         # A pure body's calls are checked on SIR, by stage 0's ownership
-        # checker (E0333).
+        # checker (E0333); inside an `unsafe` block, one asserts it keeps
+        # the body pure (D-085).
         if not f.pure and self.body_is_pure(cx):
+            self.impure_call(cx, d, at)
             self.owner_go_beyond("a call of an impure function from a pure one")
         if f.header_broken:
             # Its signature is unknown: check the arguments on their own.

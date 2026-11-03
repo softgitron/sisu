@@ -421,6 +421,37 @@ pub enum Msg:
     TypeBorrowWithMut
     TypeAssignEveryPath
     TypeDynOwned
+    # Unsafe code (22; RULES.md, R2), stage 1's own.
+    UnsafeCall
+    UnsafeForeignCall
+    UnsafeFnValue
+    UnsafeImplNeeded
+    UnsafeImplPromisesNothing
+    UnsafeNeverAsserted
+    UnsafeNotPtr
+    UnsafeInContract
+    UnsafeItsObligation
+    UnsafeItsObligations
+    UnsafeWriteReason
+    UnsafeCallInClosure
+    UnsafeWriteUnsafeImpl
+    UnsafeRemoveUnsafe
+    UnsafeImportPtr
+    UnsafeTakeCapability
+    ComptimeUnsafeWritten
+    PackageUnsafeUndeclared
+    PackageUnsafeLevel
+    PackageUnsafeUntrusted
+    PackageUnsafeRaised
+    PackageTrustToConsent
+    UnsafeNoSafetyComment
+    UnsafeNoSafetyList
+    UnsafeUnused
+    UnsafeUnnamedObligation
+    UnsafeUnexplainedPurity
+    UnsafeLevel
+    UnsafeAutoTraitBound
+    UnsafeAmbientAuthority
 
 impl Msg:
     ## The catalog identifier.
@@ -829,6 +860,36 @@ impl Msg:
             case TypeBorrowWithMut: "type.borrow-with-mut"
             case TypeAssignEveryPath: "type.assign-every-path"
             case TypeDynOwned: "type.dyn-owned"
+            case UnsafeCall: "unsafe.call"
+            case UnsafeForeignCall: "unsafe.foreign-call"
+            case UnsafeFnValue: "unsafe.fn-value"
+            case UnsafeImplNeeded: "unsafe.impl-needed"
+            case UnsafeImplPromisesNothing: "unsafe.impl-promises-nothing"
+            case UnsafeNeverAsserted: "unsafe.never-asserted"
+            case UnsafeNotPtr: "unsafe.not-ptr"
+            case UnsafeInContract: "unsafe.in-contract"
+            case UnsafeItsObligation: "unsafe.its-obligation"
+            case UnsafeItsObligations: "unsafe.its-obligations"
+            case UnsafeWriteReason: "unsafe.write-reason"
+            case UnsafeCallInClosure: "unsafe.call-in-closure"
+            case UnsafeWriteUnsafeImpl: "unsafe.write-unsafe-impl"
+            case UnsafeRemoveUnsafe: "unsafe.remove-unsafe"
+            case UnsafeImportPtr: "unsafe.import-ptr"
+            case UnsafeTakeCapability: "unsafe.take-capability"
+            case ComptimeUnsafeWritten: "comptime.unsafe-written"
+            case PackageUnsafeUndeclared: "package.unsafe-undeclared"
+            case PackageUnsafeLevel: "package.unsafe-level"
+            case PackageUnsafeUntrusted: "package.unsafe-untrusted"
+            case PackageUnsafeRaised: "package.unsafe-raised"
+            case PackageTrustToConsent: "package.trust-to-consent"
+            case UnsafeNoSafetyComment: "unsafe.no-safety-comment"
+            case UnsafeNoSafetyList: "unsafe.no-safety-list"
+            case UnsafeUnused: "unsafe.unused"
+            case UnsafeUnnamedObligation: "unsafe.unnamed-obligation"
+            case UnsafeUnexplainedPurity: "unsafe.unexplained-purity"
+            case UnsafeLevel: "unsafe.level"
+            case UnsafeAutoTraitBound: "unsafe.auto-trait-bound"
+            case UnsafeAmbientAuthority: "unsafe.ambient-authority"
 
 ## A byte range of a text: from `start` up to, not including, `end`.
 @derive(Eq, Hash, Debug, Copy)

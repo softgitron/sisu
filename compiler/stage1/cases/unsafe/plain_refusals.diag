@@ -1,0 +1,6 @@
+8:9-8:14 E0608 comptime.derive-failed trait="Plain" ty="Loose" reason="`Loose` has no `@repr(c)`: the order of its fields, and so its bytes, are the compiler's to choose"
+  label 557:34-559:26 comptime.derive-here
+14:9-14:14 E0244 resolve.derive-field ty="Flagged" trait="Plain" field="ok" fty="bool"
+19:9-19:14 E0608 comptime.derive-failed trait="Plain" ty="Kind" reason="`Kind` is an enum: a tag that names no variant is a bit pattern no value has"
+  label 565:30-567:22 comptime.derive-here
+25:9-25:14 E0242 resolve.supertrait-missing ty="Moved" trait="Plain" super="Copy"

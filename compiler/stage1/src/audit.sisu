@@ -1,0 +1,420 @@
+##! `sisu audit --unsafe` (proposal/22-unsafe.md, "The audit and the
+##! lints"; D-083; RULES.md, R7): a `pure` function of the program's
+##! packages and modules. Per package, with the level its manifest declares
+##! and how the program consents to it, every module that contains unsafe
+##! code (the module, not the block, is the unit of review), with a hash of
+##! its text, the key of the review ledger (N-43), and in each module every
+##! `unsafe:` block and `unsafe` expression with the function it is in,
+##! every `unsafe def` and `unsafe trait` with the obligations its `Safety:`
+##! list names, every `unsafe impl` and `extern` block, each with its
+##! location and its safety comment; then the package's foreign functions,
+##! each with the functions that call it and what each holds: a capability
+##! (a parameter of a capability type, or the impl of a capability trait it
+##! is a method of), the purity it asserts, or nothing. The lints follow, as
+##! `sisu check --format=ids` prints them.
+
+from stage1.diag import Catalog
+from stage1.parser import parse
+from stage1.syntax.ast import (
+    Ast,
+    Block,
+    ExprId,
+    ExprKind,
+    FnDef,
+    ItemId,
+    ItemKind,
+    Module,
+    ParamKind,
+    StmtId,
+    StmtKind,
+    TypeExprId,
+    TypeKind,
+)
+from stage1.syntax.ast import build
+from stage1.syntax.ast import visit
+from stage1.typeck.safety import doc_above, safety_comment, safety_list
+
+## A package as the audit shows it.
+pub struct AuditPackage:
+    pub name: String
+    pub version: String
+    ## `memory`, `extern`, or empty when its manifest declares none.
+    pub level: String
+    ## How the program consents to its unsafe code: `the root package`,
+    ## `trusted in sisu.toml:14`, `not trusted`.
+    pub consent: String
+
+## A module as the audit shows it: its package (an index of the
+## packages), its path (`fasthash.table`), its file and its text.
+pub struct AuditModule:
+    pub package: int
+    pub path: String
+    pub file: String
+    pub text: String
+
+## One line of a module's listing: where, what, and the safety comment or
+## the `Safety:` list.
+struct Entry:
+    line: int
+    what: String
+    note: String
+
+## A foreign function a module declares, and the calls of it the module
+## makes: each caller and what it holds.
+struct Foreign:
+    name: String
+    callers: list[String]
+
+## What a module holds of unsafe code.
+struct Listing:
+    entries: list[Entry]
+    blocks: int
+    defs: int
+    impls: int
+    traits: int
+    externs: int
+    foreign: list[Foreign]
+
+## The capability types and traits a caller may hold (06).
+pure def is_capability(name: str) -> bool:
+    return match name:
+        case "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin" | "System": True
+        case "Cap" | "Lent": True
+        case _: False
+
+## The 1-based line of byte `at`.
+pure def line_of(text: str, at: int) -> int:
+    var line = 1
+    var i = 0
+    let end = min(at, text.byte_len())
+    while i < end:
+        if text.byte_at(i) == 10:
+            line += 1
+        i += 1
+    return line
+
+## A text's 64-bit FNV-1a hash, in 16 hex digits: a module's key in the
+## review ledger, which changes with any byte of it.
+pub pure def module_hash(text: str) -> String:
+    var h = -3750763034362895579
+    for i in range(text.byte_len()):
+        h = h ^ text.byte_at(i)
+        h = h *% 1099511628211
+    let digits = "0123456789abcdef"
+    var out = String.new()
+    var k = 15
+    while k >= 0:
+        let nibble = (h >> (4 * k)) & 15
+        out.push(digits.byte_slice(nibble, nibble + 1))
+        k -= 1
+    return out
+
+## A comment for the listing: on one line, at most 100 characters.
+pure def shown(text: str) -> String:
+    var out = String.new()
+    var n = 0
+    for c in text.chars():
+        if n >= 100:
+            out.push("...")
+            break
+        out.push_char(c)
+        n += 1
+    return out
+
+## The `# safety:` comment above the line of `at`, or the word that it has
+## none.
+pure def comment_at(text: str, at: int) -> String:
+    match safety_comment(text, at):
+        case Some(c):
+            return "# safety: {shown(c.text)}"
+        case None:
+            return "(no `# safety:` comment)"
+
+## The obligations of the `Safety:` list above `at`, or the word that it
+## has none.
+pure def obligations_at(text: str, at: int) -> String:
+    match safety_list(doc_above(text, at)):
+        case Some(os):
+            if os.is_empty():
+                return "Safety: (no obligation named)"
+            var named: list[String] = []
+            for o in os:
+                named.push("`{o}`")
+            return "Safety: {named.join(", ")}"
+        case None:
+            return "(no `Safety:` list)"
+
+## The name of a type as written, its first segment's (`HostClock`,
+## `Allocator`).
+pure def type_name(ast: Ast, t: TypeExprId) -> String:
+    match ast.type_expr(t).kind:
+        case TypeKind.Path(segments, _):
+            if let Some(s) = segments.last():
+                return s.text.copy()
+        case TypeKind.Ref(_, inner):
+            return type_name(ast, inner)
+        case _:
+            pass
+    return String.new()
+
+## What a function holds that a foreign call it makes may use: the purity
+## it asserts, a capability parameter, or the capability trait whose impl
+## it is a method of.
+pure def holds(ast: Ast, f: FnDef, capability_impl: String?) -> String:
+    if f.is_pure:
+        return "asserted pure"
+    for p in f.params:
+        if let ParamKind.Named(_, ty, _) = p.kind:
+            let n = type_name(ast, ty)
+            if is_capability(n):
+                return "takes `{n}`"
+    if let Some(c) = capability_impl:
+        return "in an impl of `{c}`"
+    return "no capability"
+
+struct Walker:
+    text: String
+    module: Module
+    out: Listing
+    ## The foreign functions of the module, by name.
+    foreign_names: list[String]
+
+impl Walker:
+    pure def entry(mut self, at: int, own what: String, own note: String):
+        self.out.entries.push(Entry(line=line_of(self.text, at), what=what, note=note))
+
+    ## The items of the module, `extern` blocks first so that the foreign
+    ## functions are known to the bodies.
+    pure def items(mut self, items: list[ItemId]):
+        for id in items:
+            let item = self.module.ast.item(id).copy()
+            if let ItemKind.Extern(members) = item.kind:
+                self.out.externs += 1
+                let note = comment_at(self.text, item.range.start)
+                self.entry(item.range.start, "extern block".to_string(), note)
+                for mid in members:
+                    if let ItemKind.Fn(f) = self.module.ast.item(mid).kind:
+                        self.foreign_names.push(f.name.text.copy())
+                        self.out.foreign.push(Foreign(name=f.name.text.copy(), callers=[]))
+        for id in items:
+            let item = self.module.ast.item(id).copy()
+            match item.kind:
+                case ItemKind.Fn(f):
+                    self.function(f, String.new(), None, None)
+                case ItemKind.Struct(s):
+                    for m in s.methods:
+                        self.function(m, "{s.name.text}.", None, None)
+                case ItemKind.Enum(e) | ItemKind.ErrorSet(e):
+                    for m in e.methods:
+                        self.function(m, "{e.name.text}.", None, None)
+                case ItemKind.Trait(t):
+                    if t.is_unsafe:
+                        self.out.traits += 1
+                        let note = obligations_at(self.text, t.name.range.start)
+                        self.entry(t.name.range.start, "unsafe trait {t.name.text}", note)
+                    for m in t.methods:
+                        self.function(m, "{t.name.text}.", None, None)
+                case ItemKind.Impl(i):
+                    let self_name = type_name(self.module.ast, i.self_ty)
+                    var trait_name: String? = None
+                    if let Some(tt) = i.trait_ty:
+                        trait_name = Some(type_name(self.module.ast, tt))
+                    if i.is_unsafe:
+                        self.out.impls += 1
+                        let note = comment_at(self.text, item.range.start)
+                        let header = match trait_name:
+                            case Some(t): "unsafe impl {t} for {self_name}"
+                            case None: "unsafe impl {self_name}"
+                        self.entry(item.range.start, header, note)
+                    var capability: String? = None
+                    if let Some(t) = trait_name:
+                        if is_capability(t):
+                            capability = Some(t.copy())
+                    for m in i.methods:
+                        self.function(m, "{self_name}.", capability.copy(), trait_name.copy())
+                case _:
+                    pass
+
+    ## A function, a method of `owner` (`Type.`), in an impl of the trait
+    ## `of_trait` when it is one, whose `unsafe def`s have that trait's
+    ## obligations unless they list their own.
+    pure def function(mut self, f: FnDef, owner: str, capability: String?, of_trait: String?):
+        let name = "{owner}{f.name.text}"
+        if f.is_unsafe:
+            self.out.defs += 1
+            var note = obligations_at(self.text, f.range.start)
+            if let Some(t) = of_trait:
+                if safety_list(doc_above(self.text, f.range.start)).is_none():
+                    note = "Safety: `{t}.{f.name.text}`'s"
+            self.entry(f.name.range.start, "unsafe def {name}", note)
+        let body = f.body.copy() else:
+            return
+        let held = holds(self.module.ast, f, capability)
+        self.block(body, name, held)
+
+    pure def block(mut self, b: Block, function: str, held: str):
+        for s in b.stmts:
+            self.stmt(s, function, held)
+
+    ## A statement: an `unsafe:` block is an entry, and so is each `unsafe`
+    ## expression in it, whose comment is above the statement.
+    pure def stmt(mut self, s: StmtId, function: str, held: str):
+        let st = self.module.ast.stmt(s).copy()
+        if let StmtKind.Unsafe(b) = st.kind:
+            self.out.blocks += 1
+            let note = comment_at(self.text, st.range.start)
+            self.entry(st.range.start, "unsafe block in {function}", note)
+            self.calls_in(visit.exprs_in_block(self.module.ast, b), function, held)
+            self.block(b, function, held)
+            return
+        # The blocks inside this statement, each a statement of its own; the
+        # `unsafe` expressions of the statement itself.
+        var nested: list[Block] = []
+        match st.kind:
+            case StmtKind.If(branches, else_block):
+                for (_, b) in branches:
+                    nested.push(b.copy())
+                if let Some(b) = else_block:
+                    nested.push(b.copy())
+            case StmtKind.While(_, b):
+                nested.push(b.copy())
+            case StmtKind.For(_, _, _, b):
+                nested.push(b.copy())
+            case StmtKind.Defer(b):
+                nested.push(b.copy())
+            case StmtKind.With(_, _, b):
+                nested.push(b.copy())
+            case _:
+                pass
+        if nested.is_empty():
+            for e in visit.exprs_in_block(
+                self.module.ast, Block(node=0, range=st.range, stmts=[s])
+            ):
+                if let ExprKind.Unsafe(inner) = self.module.ast.expr(e).kind:
+                    self.out.blocks += 1
+                    let note = comment_at(self.text, st.range.start)
+                    self.entry(st.range.start, "unsafe expression in {function}", note)
+                    self.calls_in(visit.exprs_of(self.module.ast, inner), function, held)
+            return
+        for b in nested:
+            self.block(b, function, held)
+
+    ## The foreign functions the expressions call, each with its caller.
+    pure def calls_in(mut self, exprs: list[ExprId], function: str, held: str):
+        for e in exprs:
+            if let ExprKind.Call(callee, _, _) = self.module.ast.expr(e).kind:
+                if let ExprKind.Name(n) = self.module.ast.expr(callee).kind:
+                    for k in range(len(self.out.foreign)):
+                        if self.out.foreign[k].name == n:
+                            let caller = "{function} ({held})"
+                            if not self.out.foreign[k].callers.contains(caller.copy()):
+                                self.out.foreign[k].callers.push(caller)
+
+## What a module holds of unsafe code.
+pure def listing(text: str) -> Listing:
+    let module = build.module(parse(text, Catalog.parse("")).tree)
+    let items = module.items.copy()
+    var w = Walker(
+        text=text.to_string(),
+        module=module,
+        out=Listing(entries=[], blocks=0, defs=0, impls=0, traits=0, externs=0, foreign=[]),
+        foreign_names=[],
+    )
+    w.items(items)
+    w.out.entries.sort_by((a, b) -> a.line.cmp(b.line))
+    return w.out
+
+## The counts of a listing: `2 blocks, 1 unsafe def`.
+pure def counted(l: Listing) -> String:
+    var parts: list[String] = []
+    for (n, one, many) in [
+        (l.blocks, "block", "blocks"),
+        (l.defs, "unsafe def", "unsafe defs"),
+        (l.traits, "unsafe trait", "unsafe traits"),
+        (l.impls, "unsafe impl", "unsafe impls"),
+        (l.externs, "extern block", "extern blocks"),
+    ]:
+        if n == 1:
+            parts.push("1 {one}")
+        elif n > 1:
+            parts.push("{n} {many}")
+    return parts.join(", ")
+
+## The audit: each package, its modules with unsafe code and their
+## entries, its foreign functions; then `lints`, the lines of `sisu check
+## --format=ids` that the lints and the rules of unsafe code gave.
+pub pure def unsafe_report(
+    packages: list[AuditPackage], modules: list[AuditModule], lints: list[String]
+) -> String:
+    var out = String.new()
+    for k in range(len(packages)):
+        let p = ref packages[k]
+        let level = if p.level.is_empty(): "no `unsafe`".to_string() else: "unsafe = \"{p.level}\""
+        var title = p.name.copy()
+        if not p.version.is_empty():
+            title.push(" {p.version}")
+        out.push("{title}   {level}   {p.consent}\n")
+        var foreign: list[Foreign] = []
+        var any = False
+        for m in modules:
+            if m.package != k:
+                continue
+            let l = listing(m.text)
+            if l.entries.is_empty():
+                continue
+            any = True
+            out.push("  {m.path} ({m.file})   {counted(l)}, module hash {module_hash(m.text)}\n")
+            for e in l.entries:
+                out.push("    {m.file}:{e.line}   {e.what}   {e.note}\n")
+            for f in l.foreign:
+                foreign.push(f.copy())
+        if not any:
+            out.push("  no unsafe code\n")
+        if not foreign.is_empty():
+            var shown_calls: list[String] = []
+            for f in foreign:
+                if f.callers.is_empty():
+                    shown_calls.push("{f.name} (not called)")
+                else:
+                    shown_calls.push("{f.name} (called by {f.callers.join(", ")})")
+            out.push("  foreign functions: {shown_calls.join("; ")}\n")
+    if not lints.is_empty():
+        out.push("lints:\n")
+        for l in lints:
+            out.push("  {l}\n")
+    return out
+
+test "a module's hash is its text's":
+    assert module_hash("") == "cbf29ce484222325"
+    assert module_hash("a") == "af63dc4c8601ec8c"
+    assert module_hash("a") != module_hash("b")
+
+test "the audit lists blocks, declarations and foreign calls by module":
+    let text = "# safety: getpid takes nothing.\nextern \"C\":\n    def getpid() -> int\n\n## Halves.\n##\n## Safety:\n## - `even`: n is even\nunsafe def half(n: int) -> int:\n    return n // 2\n\npub pure def pid() -> int:\n    # safety: pure: the id is the same all along.\n    return unsafe getpid()\n\ndef main():\n    # safety: even: 4 is even.\n    unsafe:\n        print(half(4))\n"
+    let packages = [
+        AuditPackage(
+            name="p".to_string(),
+            version="0.1.0".to_string(),
+            level="extern".to_string(),
+            consent="the root package".to_string(),
+        )
+    ]
+    let modules = [
+        AuditModule(
+            package=0, path="p".to_string(), file="src/main.sisu".to_string(), text=text.to_string()
+        )
+    ]
+    let report = unsafe_report(packages, modules, [])
+    var lines: list[str] = []
+    for l in report.lines():
+        lines.push(l)
+    assert lines[0] == "p 0.1.0   unsafe = \"extern\"   the root package"
+    assert lines[1].starts_with(
+        "  p (src/main.sisu)   2 blocks, 1 unsafe def, 1 extern block, module hash "
+    )
+    assert lines[2] == "    src/main.sisu:2   extern block   # safety: getpid takes nothing."
+    assert lines[3] == "    src/main.sisu:9   unsafe def half   Safety: `even`"
+    assert lines[4]
+        == "    src/main.sisu:14   unsafe expression in pid   # safety: pure: the id is the same all along."
+    assert lines[5] == "    src/main.sisu:18   unsafe block in main   # safety: even: 4 is even."
+    assert lines[6] == "  foreign functions: getpid (called by pid (asserted pure))"

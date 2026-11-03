@@ -1,0 +1,6 @@
+import digits
+
+def main():
+    print(digits.count(4096))
+    # safety: in_range: 4096 has four digits, so 3 is one of them.
+    print(unsafe digits.digit(4096, 3))

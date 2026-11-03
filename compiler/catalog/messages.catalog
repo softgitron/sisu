@@ -392,6 +392,9 @@ E0611 error   comptime.template-value     `{name}` reflects on its type paramete
 E0612 error   comptime.embed-failed       cannot embed `{path}`: {reason}
 E0613 error   comptime.embed-path         `embed` takes the path of a file as a string literal
 E0614 error   comptime.no-fake            `cap.Fake[{name}]` needs a trait of the program whose methods can all be forwarded: a `self` or `mut self` receiver, no type parameters, and no borrow or `Self` in a signature
+# Stage 1's (proposal/22-unsafe.md, D-085): code that compile-time
+# evaluation writes holds no `unsafe`.
+E0615 error   comptime.unsafe-written     code that compile-time evaluation writes holds no `unsafe`, so that every unsafe block stays in a source file, where `sisu audit --unsafe` shows it
 
 # ---------------------------------------------------------------- capabilities
 E0700 error   cap.not-shareable          `{ty}` cannot become `{cap}`: a capability may reach every task, and `{ty}` is not `{auto}`
@@ -421,6 +424,27 @@ E0900 error   stage0.unsupported          {construct} is not implemented in stag
 E0901 error   stage0.internal             internal compiler error in {stage}: {detail}
 E0971 error   sim.unmodelled-extern       this `sim` build reaches `{callee}`, an `extern` call with no simulation model, in `{function}` at {at}
 
+# ---------------------------------------------------------------- unsafe code
+# Stage 1's (proposal/22-unsafe.md; D-080 to D-085): the three unsafe
+# operations outside an `unsafe:` block or an `unsafe` expression, the
+# markers that oblige, and raw pointers.
+E0981 error   unsafe.call                 `{name}` is an `unsafe def`: call it inside an `unsafe:` block or an `unsafe` expression
+E0982 error   unsafe.foreign-call         `{name}` is a foreign function, whose signature is a claim the compiler cannot check: call it inside an `unsafe:` block or an `unsafe` expression
+E0983 error   unsafe.fn-value             `{name}` is {what}, which cannot be a function value: a call through the value would need no `unsafe`
+E0984 error   unsafe.impl-needed          `{trait}` is an `unsafe trait`, whose implementors keep a promise the compiler cannot check: its impl is written `unsafe impl`
+E0985 error   unsafe.impl-promises-nothing  {what}, so `unsafe impl` promises nothing: write `impl`
+E0986 error   unsafe.never-asserted       `{trait}` is never asserted: the compiler decides it from a type's parts, and nothing may claim it otherwise
+E0987 error   unsafe.not-ptr              `ptr mut T` is the raw pointer of `std.mem`, and `{name}` here names {found}
+E0988 error   unsafe.in-contract          a contract holds no `unsafe`: it may call safe functions built on unsafe code, and unsafe code relies on no contract
+-     label   unsafe.its-obligation       its obligation: {obligations}
+-     label   unsafe.its-obligations      its obligations: {obligations}
+-     help    unsafe.write-reason         write why they hold in a `# safety:` comment above the block, naming each obligation it discharges
+-     help    unsafe.call-in-closure      call it from a closure, whose `unsafe` expression says why its obligations hold: `(...) -> unsafe {name}(...)`
+-     fix     unsafe.write-unsafe-impl    write `unsafe impl`
+-     fix     unsafe.remove-unsafe        remove `unsafe`
+-     help    unsafe.import-ptr           `ptr[T]` and `ptr mut T` are the raw pointers of `std.mem`: `from std.mem import ptr`
+-     help    unsafe.take-capability      take the capability whose authority the call exercises (22, clause 5), as `std.rt.os` does behind `System`
+
 # ---------------------------------------------------------------- packages and manifests
 E1000 error   package.toml-syntax         this is not TOML that `sisu.toml` reads: expected {expected}, found {found}
 E1001 error   package.toml-duplicate      `{key}` is given more than once in `{table}`
@@ -442,6 +466,13 @@ E1016 error   package.no-package          `{path}` has `[workspace]` but no `[pa
 E1017 error   package.reserved-name       `{name}` is the name of a standard-library module, which `import {name}` names; a package of the program needs another name
 -     label   package.depends-here        `{name}` depends on `{dep}` here
 E1018 error   package.unknown-feature     `{name}` is not a feature of `{package}`; a package's features are the keys of its `[features]`
+# Stage 1's (proposal/22-unsafe.md, D-082): the level a package declares,
+# the root's consent, and the level the lockfile records.
+E1019 error   package.unsafe-undeclared   the package `{package}` contains {what}, and its `sisu.toml` declares no `unsafe`: add `unsafe = "{level}"` to its `[package]`
+E1020 error   package.unsafe-level        the package `{package}` declares `unsafe = "memory"`, which allows no {what}: declare `unsafe = "extern"`
+E1021 error   package.unsafe-untrusted    the dependency `{name}` declares `unsafe = "{level}"`, and `[trust] unsafe` in the root package's `sisu.toml` does not list it
+E1022 error   package.unsafe-raised       `sisu.lock` records `{name}` with {old}, and it now declares `unsafe = "{level}"`: accept the change with `--accept-unsafe`
+-     help    package.trust-to-consent    the root package consents by listing it: `[trust] unsafe = ["{name}"]`
 
 # ---------------------------------------------------------------- warnings
 W0001 warning type.hole                   typed hole `{name}` of type `{ty}`
@@ -450,6 +481,15 @@ W0003 warning type.unreachable-arm        this `case` arm is unreachable; the ar
 W0004 warning type.unreachable-code       this code is unreachable
 W0005 warning package.unknown-key         `{key}` is not a key of `{table}` that stage 0 knows; it is ignored
 W0006 warning resolve.unknown-feature     no `[features]` of this package declares `{name}`, so `feature="{name}"` never holds
+# Stage 1's (proposal/22-unsafe.md, "The audit and the lints"; D-083).
+W0007 warning unsafe.no-safety-comment    this {what} has no `# safety:` comment above it saying why each obligation it takes on holds
+W0008 warning unsafe.no-safety-list       `{name}` is an `unsafe {kind}` without a `Safety:` list in its `##` comment naming the obligations its {who} take
+W0009 warning unsafe.unused               this {what} holds no unsafe operation
+W0010 warning unsafe.unnamed-obligation   the `# safety:` comment names no obligation of `{callee}`, which are {obligations}
+W0011 warning unsafe.unexplained-purity   this {what} calls `{callee}`, which is not `pure`, in the `pure` function `{name}`: its `# safety:` comment says why the function stays observationally pure, under a `pure:` part
+W0012 warning unsafe.level                the package declares `unsafe = "{level}"`, {why}
+W0013 warning unsafe.auto-trait-bound     `unsafe impl {trait}` claims `{trait}` for every `{param}`, which is not bounded by `{trait}`
+W0014 warning unsafe.ambient-authority    `{name}` is public and safe and reaches the foreign function `{callee}` without taking a capability, so its callers need no authority for what the call does
 
 # ---------------------------------------------------------------- run time
 R0001 runtime panic.explicit              {message}

@@ -34,7 +34,25 @@ pub pure def importable() -> list[str]:
         "process",
         "env",
         "regex",
+        "mem",
+        "ffi",
+        "rt",
     ]
+
+## Whether the std module `name` is one only stage 1 reads (22): `std.mem`,
+## `std.ffi` and `std.rt` declare `unsafe def`s, `unsafe trait`s and
+## `unsafe impl`s, which the frozen Rust front end does not parse, so they
+## live in `stage1/std/` beside stage 1, not in `std/`, which the Rust front
+## end formats and reads, until it is retired.
+pub pure def stage1_only(name: str) -> bool:
+    return name == "mem" or name == "ffi" or name == "rt"
+
+## The file of the std module `name` under the compiler's directory
+## `home`.
+pub pure def std_file(home: str, name: str) -> String:
+    if stage1_only(name):
+        return "{home}/stage1/std/{name}.sisu"
+    return "{home}/std/{name}.sisu"
 
 ## The paths an import may name a std module by, for the fix of one that
 ## names none.
@@ -108,6 +126,11 @@ pub pure def module_for(words: list[String]) -> String?:
         case "std.process": Some("process".to_string())
         case "std.env": Some("env".to_string())
         case "std.regex": Some("regex".to_string())
+        # Stage 1's (22): raw memory, the C types, and the runtime's layer,
+        # internal to `std`.
+        case "std.mem": Some("mem".to_string())
+        case "std.ffi": Some("ffi".to_string())
+        case "std.rt": Some("rt".to_string())
         case _: None
 
 ## The std modules whose doc examples `sisu test --std` runs and whose
@@ -142,6 +165,9 @@ pub pure def documented() -> list[str]:
         "task",
         "test",
         "time",
+        # Stage 1's (22): raw memory and the C types. `std.rt` is internal.
+        "ffi",
+        "mem",
     ]
 
 ## A std module's path as an import names it: `std.x.http` for `http`,

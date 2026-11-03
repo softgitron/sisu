@@ -148,6 +148,31 @@ pub struct Finished:
     pub asserts: list[Assert]
     pub const_calls: list[ConstCall]
 
+## An unsafe operation of a body (22, "The unsafe operations"): a call of
+## an `unsafe def` or of a foreign function, with the callee's name and
+## the obligations its `Safety:` list names (`None` without one).
+pub struct UnsafeOp:
+    pub callee: String
+    pub foreign: bool
+    pub obligations: list[String]?
+    pub range: TextRange
+
+## An `unsafe:` block or an `unsafe` expression of a body (22), with what
+## happens inside it: the unsafe operations it permits, and the calls of
+## functions that are not `pure` it asserts, in a `pure` function, keep the
+## function observationally pure (D-085).
+pub struct UnsafeRegion:
+    ## The block or the expression, its `unsafe` first.
+    pub range: TextRange
+    pub block: bool
+    ## Where the statement that holds it starts: its comment is above.
+    pub stmt_start: int
+    pub ops: list[UnsafeOp]
+    pub impure: list[(String, TextRange)]
+    ## It calls a name that did not resolve, which might have been an
+    ## unsafe operation.
+    pub unresolved: bool
+
 pub struct Checker:
     pub types: Types
     pub module: ModuleId
@@ -233,6 +258,16 @@ pub struct Checker:
     ## While an alternative of `|` after the first is checked: the names
     ## the first bound, which this one must bind to the same locals.
     pub or_alt: OrAlt?
+    ## The body's `unsafe:` blocks and `unsafe` expressions (22), and those
+    ## around what is being checked, innermost last.
+    pub unsafe_regions: list[UnsafeRegion]
+    pub unsafe_stack: list[int]
+    ## Where the statement being checked starts: an `unsafe` expression's
+    ## `# safety:` comment is above it.
+    pub stmt_start: int
+    ## The foreign functions the body calls, for the package's level and
+    ## the lint of ambient authority.
+    pub foreign_calls: list[(String, TextRange)]
 
 impl Checker:
     pub pure def new(cx: Cx, own types: Types, def_: DefId) -> Checker:
@@ -288,6 +323,10 @@ impl Checker:
             contracts=None,
             generic_asserts=[],
             or_alt=None,
+            unsafe_regions=[],
+            unsafe_stack=[],
+            stmt_start=0,
+            foreign_calls=[],
         )
 
     pub pure def finish(own self) -> Finished:
@@ -409,6 +448,7 @@ impl Checker:
             exprs=self.exprs.copy(),
             blocks=self.blocks.copy(),
             pats=self.pats.copy(),
+            asserted=self.asserted_regions(),
         )
 
     pure def finalize_all(mut self, cx: Cx, ts: list[Ty]) -> list[Ty]:
@@ -886,6 +926,20 @@ impl Checker:
                 return self.types.intern(TyData.Const(n))
             case TypeKind.ConstExpr(e):
                 return self.const_arg(cx, e)
+            # `ptr mut T` (22): the mutable form of the `ptr` in scope, which
+            # is `std.mem`'s.
+            case TypeKind.PtrMut(ptr_name, inner):
+                let t = self.resolve_ty(cx, inner)
+                let words = [ptr_name.text.copy()]
+                let found = self.lookup_type_path(cx, words) else:
+                    self.undefined_path_type(cx, words, ptr_name.range)
+                    return Ty.error()
+                if let Some(m) = cx.prog.ptr_mut_of(found):
+                    return self.types.adt(m, [t])
+                let shown = "`{cx.prog.qualified_name(found)}`"
+                var d = self.error(cx, Msg.UnsafeNotPtr, ptr_name.range).with("name", ptr_name.text)
+                self.report_other(d.with("found", shown).note(Msg.UnsafeImportPtr))
+                return Ty.error()
             case TypeKind.Unsupported(_):
                 self.unsupported(cx, rng, "this type", "a later phase")
                 return Ty.error()
@@ -1183,7 +1237,10 @@ impl Checker:
                 self.report(d)
                 warned = True
             let before = len(stmts)
+            let outer_start = self.stmt_start
+            self.stmt_start = stmt.range.start
             self.check_stmt(cx, s, mut stmts)
+            self.stmt_start = outer_start
             for i in range(before, len(stmts)):
                 if self.stmt_diverges(stmts[i]):
                     diverged = True
@@ -1264,6 +1321,13 @@ impl Checker:
             case StmtKind.Defer(block):
                 let b = self.check_block(cx, block)
                 out.push(TStmt.Defer(body=b, span=span))
+            # `unsafe:` (22): a block in which the unsafe operations are
+            # permitted; it lowers as the block it is.
+            case StmtKind.Unsafe(block):
+                self.enter_unsafe(cx, span, True)
+                let b = self.check_block(cx, block)
+                self.exit_unsafe()
+                out.push(TStmt.Block(b))
             case StmtKind.With(value, name, body):
                 # `with e as x:` is a scoped binding dropped at the end of
                 # the block.
