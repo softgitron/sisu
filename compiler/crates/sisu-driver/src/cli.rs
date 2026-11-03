@@ -807,10 +807,16 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                 host.stderr(&plain_error(msg::NATIVE_RELEASE, &[]));
                 return EXIT_USAGE;
             }
-            let (target, program_args) = match from_sir.or(from_lir) {
+            let (target, mut program_args): (Option<&str>, Vec<String>) = match from_sir.or(from_lir) {
                 Some(f) => (Some(f), p.file.map(str::to_string).into_iter().chain(p.rest.clone()).collect()),
                 None => (p.file, p.rest.clone()),
             };
+            // A `--` right after the file (or `--from-sir FILE`) ends the
+            // command's words, as it does before a package's arguments
+            // (`sisu run -- ARGS`); it is not the program's.
+            if target.is_some() && program_args.first().is_some_and(|a| a == "--") {
+                program_args.remove(0);
+            }
             // Stage 1 reads the program itself; the driver only finds what
             // the command works on, as it does for its own front end.
             let stage1 = front == FrontEnd::Stage1 && stage1_serves(cmd, &p);

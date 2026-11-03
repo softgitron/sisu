@@ -3235,7 +3235,8 @@ dependencies (decisions 186 and 203):
 run` does, compiles the SIR that `sisu sir` prints (after the ownership
 checker, jump threading and compile-time evaluation, so the backend
 compiles exactly what the interpreter runs), links it, and prints `built
-PATH`. The executable goes beside a file's source, named by its stem
+PATH`, the path relative to the working directory (decision 354). The
+executable goes beside a file's source, named by its stem
 (`hello.sisu` makes `hello`), or, for a package, to `build/PROFILE/NAME`
 in the directory of its lockfile, its workspace's or its own
 (`stage1/build/debug/stage1`; decision 231); `--output PATH` puts it
@@ -4190,10 +4191,12 @@ backend, built by itself, rebuilds itself to the same bytes.
 `compiler/stage2/bootstrap.sh` builds sisu2-C, stage 2 as the Cranelift
 path builds it (the seed: stage 1's front end, the Rust lowering,
 Cranelift); sisu2-C lowers and compiles the SIR of stage 2's package and
-of stage 1's with the Sisu backend into sisu2-A and stage1-A; stage1-A
-prints both packages' SIR again, and sisu2-A lowers and compiles it into
-sisu2-B and stage1-B. Each B is its A byte for byte, and each SIR stage1-A
-prints is the one `sisu sir` prints:
+of stage 1's with the Sisu backend into sisu2-A and stage1-A, and the
+runtime in Sisu's as a library into rt-A.o, which they are linked with
+(decision 353); stage1-A prints the three packages' SIR again, and sisu2-A
+lowers and compiles it into rt-B.o, sisu2-B and stage1-B. Each B is its A
+byte for byte, and each SIR stage1-A prints is the one `sisu sir` prints,
+the runtime's the committed seed:
 
 ```text
   sisu2-A       14979976 bytes  sha256 e4bf40b4445cccf0...  built by sisu2-C (4.2 s)
@@ -7695,4 +7698,54 @@ Sisu"; D-086, D-087 step 3)
      (quadratic at worst); `bytes.starts_with` and `ends_with` compare the
      edge (`sisu_rt_find`, `sisu_rt_has_edge`). An empty part occurs at 0.
      This changes no rule of the language.
+353. Stage 2 has a library mode, so that the backend written in Sisu
+     compiles the runtime in Sisu too and the fixed point of decision 330
+     covers it: `sisu2 lir FILE.sir --library` and `sisu2 build FILE.sir
+     --library --output FILE.o` lower the SIR as `compile_library` does
+     (`gen.lower_library_spanned`): each `export_NAME` function of the
+     root module is declared `export` under `sisu_rt_NAME` and what it
+     calls `local`, the code is the runtime's own (`library`: glue's frame,
+     no yield point, a type number refused, no output written before a
+     foreign call), and there is no C `main` and no type table; the Sisu
+     backend makes every function declared `export` a global symbol, which
+     was C's `main` alone. The seed is still compiled by the Rust lowering
+     and Cranelift for every build (`compiler/target/rt/rt.o`, decision
+     336), since stage 2 links with it; `SISU_RT=PATH` makes a native build
+     link with another object as it is. `stage2/bootstrap.sh` prints the
+     runtime's SIR with `sisu sir` (A.rt.sir, which must be the committed
+     seed) and with stage1-A (B.rt.sir), compiles it as a library with
+     sisu2-C (rt-A.o) and with sisu2-A (rt-B.o), links sisu2-A and
+     stage1-A with rt-A.o and sisu2-B and stage1-B with rt-B.o, and
+     requires each pair to be the same bytes, so the runtime in Sisu,
+     compiled by the backend in Sisu and run by every executable the script
+     compares, is in the fixed point. A test holds the library's LIR to the
+     Rust lowering (`stage_2_lowers_the_runtime_in_sisu_as_the_rust_lowering_does`):
+     `sisu2 lir --library --release` of the seed, translated for Cranelift,
+     is the object `compile_library` makes of it, byte for byte, as a
+     program's LIR gives its SIR's executable (decision 284). Along the way
+     both lowerings keep a raw pointer, one word, in a variable in the
+     release profile as they keep a number (decision 246), and compile a
+     sized integer's `wrapping_from` inline, a mask or a sign extension,
+     where it called the runtime; the runtime's package has no `unsafe def`
+     (its functions say what they require in a `Requires:` list, and their
+     `unsafe` blocks the obligations they discharge) and its exports are
+     private, so that the frozen Rust front end's formatter reads it and
+     `W0014` does not apply. The other way was a second seed compiled by
+     stage 2 and committed, which the fixed point would not have rebuilt.
+     This changes no rule of the language.
+
+**The driver and the test runner** (section "The query layer and the
+driver"; 17, 10)
+
+354. A `--` right after a run's file, `sisu run FILE -- ARGS` (or after
+     `--from-sir FILE`), ends the command's words as it does before a
+     package's arguments (`sisu run -- ARGS`), and is not the program's
+     first argument, where it was; a second `--` is the program's. `sisu
+     build --native` prints the executable's path relative to the working
+     directory (`build/debug/app`, or `../build/debug/app` from
+     `src/`), where a package's build printed it absolute, so that a session
+     can show it; a path with nothing but the root in common with the
+     working directory stays absolute. `sisu run --native` finds the
+     executable by the same line, from the same directory. This changes no
+     rule of the language.
 

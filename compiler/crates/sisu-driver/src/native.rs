@@ -604,15 +604,39 @@ fn report(e: sisu_codegen::Error, output: &Path, host: &mut dyn Host) -> i32 {
     }
 }
 
-/// `sisu build --native`: the executable, and a line saying where it is.
+/// `sisu build --native`: the executable, and a line saying where it is,
+/// relative to the working directory.
 pub(crate) fn build_command(code: Code<'_>, output: &Path, profile: Profile, host: &mut dyn Host) -> i32 {
     match build(code, output, profile, host) {
         Ok(()) => {
-            host.stdout(&text(msg::NATIVE_BUILT, &[("output", output.display().to_string())]));
+            let shown = std::env::current_dir().map_or_else(|_| output.to_path_buf(), |cwd| relative(output, &cwd));
+            host.stdout(&text(msg::NATIVE_BUILT, &[("output", shown.display().to_string())]));
             0
         }
         Err(code) => code,
     }
+}
+
+/// `path` as seen from the directory `from`: an absolute path relative to
+/// it, through `..` where they part; any other as it is.
+pub(crate) fn relative(path: &Path, from: &Path) -> std::path::PathBuf {
+    if !path.is_absolute() || !from.is_absolute() {
+        return path.to_path_buf();
+    }
+    let (a, b): (Vec<_>, Vec<_>) = (path.components().collect(), from.components().collect());
+    let common = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+    // Only the root in common: the absolute path reads better.
+    if common <= 1 {
+        return path.to_path_buf();
+    }
+    let mut out = std::path::PathBuf::new();
+    for _ in common..b.len() {
+        out.push("..");
+    }
+    for c in &a[common..] {
+        out.push(c.as_os_str());
+    }
+    if out.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { out }
 }
 
 /// How `sisu run --native` runs the executable: the seed of its schedule

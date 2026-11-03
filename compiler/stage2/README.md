@@ -18,12 +18,19 @@ lowers it to LLVM IR.
 ./sisu2 sir FILE.sir                                   # the SIR read and written again
 ./sisu2 x86 FILE.lir --output FILE.o                   # the LIR compiled by the Sisu backend
 ./sisu2 build FILE.sir --output FILE.o [--release]     # lowered and compiled in one process
+./sisu2 build rt.sir --library --output rt.o           # the runtime in Sisu, compiled as a library
 sisu build --native [FILE]                             # lowered by stage 2, compiled by the Sisu backend
 sisu build --native --backend=cranelift [FILE]         # lowered by stage 2, translated for Cranelift
 sisu build --native --from-lir FILE.lir [--output EXE] # the executable of a LIR program
 sisu run --native --from-lir FILE.lir [ARGS...]        # built and run
 ./bootstrap.sh [--keep DIR] [--sisu PATH]              # the Sisu backend's fixed point
 ```
+
+`--library` (with `lir` and `build`) lowers the runtime in Sisu
+(`compiler/rt`) as a library rather than a program (decision 353): each
+`export_NAME` function of its root module the global symbol
+`sisu_rt_NAME`, what they call local, and no C `main` or type table, as
+`sisu_codegen::compile_library` does.
 
 `sisu2` builds the package natively on first use, and after a source
 under `src/` (or stage 1's `sir` module) changed, into
@@ -143,9 +150,12 @@ Cranelift, its oracle, and compares the same way.
 `./bootstrap.sh` checks D-087's criterion for this backend (decision
 330): sisu2-C, stage 2 as the Cranelift path builds it, lowers and
 compiles the SIR of stage 2 and of stage 1 with the Sisu backend into
-sisu2-A and stage1-A; stage1-A prints both packages' SIR again, and
-sisu2-A lowers and compiles it into sisu2-B and stage1-B. It holds: each
-B is its A byte for byte, and stage1-A prints the SIR `sisu sir` prints.
+sisu2-A and stage1-A, and the runtime in Sisu's (`compiler/rt`, its seed)
+as a library into rt-A.o, which sisu2-A and stage1-A are linked with;
+stage1-A prints the three packages' SIR again, and sisu2-A lowers and
+compiles it into rt-B.o, sisu2-B and stage1-B, the executables linked with
+rt-B.o (decision 353). It holds: each B is its A byte for byte, and
+stage1-A prints the SIR `sisu sir` prints, the runtime's seed among it.
 
 ```text
   sisu2-C       11372688 bytes  sha256 36daa1f91ad04d3f...  built through the Cranelift path (30.4 s)
@@ -205,10 +215,13 @@ What is done, and what is not, is kept here as the work goes.
 - Its fixed point holds (decision 330, `./bootstrap.sh`), and it is the
   debug profile's backend, Cranelift the release profile's and the
   oracle (decision 331).
-- The runtime in Sisu, begun (decisions 335 and 336): raw memory of a word
-  or a byte compiled inline, and `compiler/rt`, compiled once into the
-  object every native program is linked with, holding `sisu_rt_bytes_eq`,
-  whose Rust counterpart is gone.
+- The runtime in Sisu (decisions 335, 336 and 350 to 353): raw memory of
+  a word or a byte compiled inline, and `compiler/rt`, compiled once into
+  the object every native program is linked with, holding `==` of texts'
+  bytes, the structural operations by a value's parts, text building and
+  integers' digits, and text search, whose Rust counterparts are gone;
+  stage 2's library mode compiles it with the Sisu backend, and the fixed
+  point links its builds with the objects so made.
 - On threads (decisions 332 to 334): the runtime's words the code reaches
   are thread-local (`tls_value`), std.par's `map` runs its bodies on the
   runtime's workers, the backend compiles each batch of functions through
