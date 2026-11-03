@@ -1,0 +1,22 @@
+$ sisu test todo.sisu
+test "the listing of three items" ... FAILED
+
+test "the listing of three items" ... FAILED
+panic: there is no snapshot `the listing of three items` yet (`sisu test --update` stores this one):
+1. logs
+2. towels
+3. water
+  at test "the listing of three items" (todo.sisu:39:5)
+replay: sisu test --replay 1-e85d306a0afd07ed-0.0.1-t0-s0-r0 todo.sisu
+
+0 passed, 1 failed, 0 blocked
+$ sisu test --update todo.sisu
+test "the listing of three items" ... ok
+1 passed, 0 failed, 0 blocked
+stored the new snapshot `the listing of three items`:
+1. logs
+2. towels
+3. water
+$ sisu test todo.sisu
+test "the listing of three items" ... ok
+1 passed, 0 failed, 0 blocked

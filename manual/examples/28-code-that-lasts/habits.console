@@ -1,0 +1,22 @@
+$ sisu run habits.sisu
+error[E0344]: a constant negative index does not compile; count from the end with `^`: `temps[^1]`
+  --> habits.sisu:5:19
+  |
+5 |     let t = temps[-1]
+  |                   ^^
+  = fix: count from the end with `^`: `^1`
+
+error[E0115]: `a if c else b` is not Sisu; write `if c: a else: b`
+  --> habits.sisu:6:16
+  |
+6 |     let feel = "hot" if t > 80 else "warm"
+  |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: write it as `if c: a else: b`: `if t > 80: "hot" else: "warm"`
+
+error[E0127]: a loop has no `else` in Sisu; keep what the loop finds in a variable and test it after the loop, as in `if let Some(i) = found:`
+  --> habits.sisu:14:5
+   |
+14 |     else:
+   |     ^^^^
+
+error[D0006]: the program was not run: errors found (3)

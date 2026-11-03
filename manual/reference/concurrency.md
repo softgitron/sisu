@@ -711,7 +711,7 @@ has `par_iter_mut()`; stage 0 has `par.iter(xs)` and `par.map` and no
 asks, with no worker pool (Q-6 is open), which a `pure` body cannot
 tell apart.
 
-**Status.** In stage 0, with the differences above (D-069).
+**Status.** In stage 0, with the differences noted (D-069).
 
 ## Diagnostics of this page
 

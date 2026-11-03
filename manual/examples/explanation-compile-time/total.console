@@ -1,0 +1,7 @@
+$ sisu check total.sisu
+error[E0310]: `+` cannot be applied to `int` and `String`
+  --> <total[Team]>/main.sisu:3:5
+  |
+3 |     sum_so_far += value.name
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+

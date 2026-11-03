@@ -1,0 +1,15 @@
+# A parameter with a default keeps every call written before it working.
+
+## The greeting for `name`, in `language`, which version 2 added.
+pub def greeting(name: str, language: str = "fi") -> String:
+    match language:
+        case "en":
+            return "Hello, {name}!"
+        case "sv":
+            return "Hej, {name}!"
+        case _:
+            return "Hei, {name}!"
+
+def main():
+    print(greeting("Aino"))
+    print(greeting("Eero", language="sv"))

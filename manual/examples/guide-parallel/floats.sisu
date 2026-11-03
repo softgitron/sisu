@@ -1,0 +1,13 @@
+# A parallel sum of floats equals `sum`, and both can differ from a loop.
+import std.par
+from std.par import Sum
+
+def main():
+    let xs = [1.0e16, 1.0, -1.0e16, 1.0]
+    var total = 0.0
+    for x in xs:
+        total += x
+    print("a loop: {total}")
+    print("sum: {sum(xs)}")
+    for grain in [1, 2, 1024]:
+        print("grain {grain}: {par.reduce[Sum[f64]](xs.copy(), grain=grain)}")

@@ -1,0 +1,8 @@
+$ sisu run keywords_positional.sisu
+error[E0305]: wrong number of arguments to `price`: expected 1, found 3
+  --> keywords_positional.sisu:13:11
+   |
+13 |     print(price(90, 300, True))
+   |           ^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

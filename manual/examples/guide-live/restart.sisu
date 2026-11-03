@@ -1,0 +1,15 @@
+# A save that changes a signature restarts the program from `main`.
+
+## What each turn prints.
+def greeting(turn: int) -> String:
+    return "turn {turn}: the sauna is warming"
+
+def main(sys: System) -> ! IoError:
+    for turn in range(3):
+        live.boundary()
+        print("{greeting(turn)}, epoch {live.epoch()}")
+        if turn == 0 and sys.fs.exists("v2.sisu"):
+            let next = sys.fs.read_to_string("v2.sisu")?
+            sys.fs.remove("v2.sisu")?
+            sys.fs.write_text("restart.sisu", next)?
+    return Ok(())

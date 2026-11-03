@@ -1,0 +1,21 @@
+$ sisu test orders.sisu
+test "two orders of coffee" ... ok
+test "an order without a count is one" ... FAILED
+
+test "an order without a count is one" ... FAILED
+panic: index out of bounds: the length is 1 but the index is 1
+  at totals (orders.sisu:8:17)
+  at test "an order without a count is one" (orders.sisu:22:12)
+replay: sisu test --replay 1-f7555e679cbec94d-0.0.1-t1-s0-r0 orders.sisu
+
+1 passed, 1 failed, 0 blocked
+$ sisu test --replay 1-f7555e679cbec94d-0.0.1-t1-s0-r0 orders.sisu
+test "an order without a count is one" ... FAILED
+
+test "an order without a count is one" ... FAILED
+panic: index out of bounds: the length is 1 but the index is 1
+  at totals (orders.sisu:8:17)
+  at test "an order without a count is one" (orders.sisu:22:12)
+replay: sisu test --replay 1-f7555e679cbec94d-0.0.1-t1-s0-r0 orders.sisu
+
+0 passed, 1 failed, 0 blocked

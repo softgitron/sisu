@@ -1,0 +1,20 @@
+$ sisu test byte_order.sisu
+test "zero" ... ok
+test "a minute count" ... FAILED
+test "four different bytes, not at the start" ... FAILED
+
+test "a minute count" ... FAILED
+panic: assertion failed: u32_at(b"\x2d\x00\x00\x00", 0) == 45
+  left:  754974720
+  right: 45
+  at test "a minute count" (byte_order.sisu:22:5)
+replay: sisu test --replay 1-bdb5ec1159a21bd8-0.0.1-t1-s0-r0 byte_order.sisu
+
+test "four different bytes, not at the start" ... FAILED
+panic: assertion failed: u32_at(b"\xff\x01\x02\x03\x04", 1) == 0x04030201
+  left:  16909060
+  right: 67305985
+  at test "four different bytes, not at the start" (byte_order.sisu:25:5)
+replay: sisu test --replay 1-bdb5ec1159a21bd8-0.0.1-t2-s0-r0 byte_order.sisu
+
+1 passed, 2 failed, 0 blocked

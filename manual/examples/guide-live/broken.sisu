@@ -1,0 +1,14 @@
+# A save that does not check changes nothing, and the run goes on.
+
+## What each turn prints.
+def greeting(turn: int) -> String:
+    return "turn {turn}: the sauna is warming"
+
+def main(sys: System) -> ! IoError:
+    for turn in range(3):
+        live.boundary()
+        print("{greeting(turn)}, epoch {live.epoch()}")
+        if turn == 0:
+            let next = sys.fs.read_to_string("v2.sisu")?
+            sys.fs.write_text("broken.sisu", next)?
+    return Ok(())

@@ -1,0 +1,3 @@
+test "two orders of coffee" ... ok
+test "an order without a count is one" ... ok
+2 passed, 0 failed, 0 blocked

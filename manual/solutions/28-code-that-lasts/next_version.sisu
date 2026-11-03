@@ -1,0 +1,166 @@
+##! Exercise 28.3, Challenge V: the next version. Kind: challenge. Level: 3.
+##!
+##! Programs that you cannot change use a sauna's booking library. Its
+##! version 1 reads lines such as "Aino 18": a name and a whole hour.
+##! Version 2 must read slots such as "Aino 18:30 90": a name, a start and
+##! a length in minutes. Solve the parts in order, and do not break the
+##! programs written for version 1: part 2's tests hold their code, which
+##! must keep compiling and working. Run the tests with
+##! `sisu test next_version.sisu`.
+##!
+##! Part 1. Write `parse_slot`, version 2's reader of "NAME HH:MM MINUTES".
+##! A line of fewer than three parts gives `MissingField`, a time that is
+##! not on the clock `BadTime`, and a length that is not a number above 0
+##! `BadLength`.
+##!
+##! Part 2. Files of version 1 must still be read, and programs of version
+##! 1 must read lines of version 2. `parse_slot` takes a line of version 1,
+##! two parts with no `:` in the second, as a slot of 60 minutes from the
+##! hour. `parse_booking` takes a line of version 2 whose slot is a whole
+##! hour, from HH:00 for 60 minutes, and gives `BadHour` for any other
+##! line of three parts. `BookingError` and `Booking` must not change.
+##!
+##! Part 3. `migrate` rewrites a file of lines of either version as lines
+##! of version 2, in order, each written "NAME HH:MM MINUTES" with two
+##! digits for the hour and two for the minute. The first line it cannot
+##! read stops it with that line's error.
+##!
+##! The hints are in chapter 28 of the tutorial, under "Challenge V: the
+##! next version".
+
+# Version 1, which programs use.
+
+error BookingError:
+    NoHour(line: String)
+    BadHour(line: String)
+
+## A booking of version 1: a name and a whole hour.
+@derive(Eq, Debug)
+struct Booking:
+    name: String
+    hour: int
+
+## The booking that `line` writes as "NAME HOUR", or as a slot of version
+## 2 that is a whole hour.
+pub def parse_booking(line: str) -> Booking ! BookingError:
+    if len(line.split(" ").collect()) == 3:
+        let slot = parse_slot(line) else:
+            return Err(BadHour(line.to_string()))
+        if slot.start % 60 != 0 or slot.minutes != 60:
+            return Err(BadHour(line.to_string()))
+        return Ok(Booking(name=slot.name, hour=slot.start // 60))
+    let name, hour = line.split_once(" ") else:
+        return Err(NoHour(line.to_string()))
+    let h = hour.parse_int() else:
+        return Err(BadHour(line.to_string()))
+    if h < 0 or h > 23:
+        return Err(BadHour(line.to_string()))
+    return Ok(Booking(name=name.to_string(), hour=h))
+
+# Version 2.
+
+error SlotError:
+    MissingField(line: String)
+    BadTime(line: String)
+    BadLength(line: String)
+
+## A slot of version 2: a name, a start in minutes after midnight and a
+## length in minutes.
+@derive(Eq, Debug)
+struct Slot:
+    name: String
+    start: int
+    minutes: int
+
+## The minutes after midnight that `time` writes as "HH:MM", or `None`.
+def minutes_of(time: str) -> int?:
+    let h, m = time.split_once(":") else:
+        return None
+    let hour = h.parse_int() else:
+        return None
+    let minute = m.parse_int() else:
+        return None
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        return None
+    return Some(hour * 60 + minute)
+
+## The slot that `line` writes as "NAME HH:MM MINUTES", or as a booking of
+## version 1, "NAME HOUR", which is a slot of 60 minutes.
+pub def parse_slot(line: str) -> Slot ! SlotError:
+    let parts = line.split(" ").collect()
+    if len(parts) == 2 and not parts[1].contains(":"):
+        let hour = parts[1].parse_int() ?? -1
+        if hour < 0 or hour > 23:
+            return Err(BadTime(line.to_string()))
+        return Ok(Slot(name=parts[0].to_string(), start=hour * 60, minutes=60))
+    if len(parts) < 3:
+        return Err(MissingField(line.to_string()))
+    let start = minutes_of(parts[1]) else:
+        return Err(BadTime(line.to_string()))
+    let minutes = parts[2].parse_int() ?? 0
+    if minutes <= 0:
+        return Err(BadLength(line.to_string()))
+    return Ok(Slot(name=parts[0].to_string(), start=start, minutes=minutes))
+
+## The lines of `text`, of either version, as lines of version 2.
+pub def migrate(text: str) -> String ! SlotError:
+    var lines: list[String] = []
+    for line in text.lines():
+        let slot = parse_slot(line)?
+        let hour = slot.start // 60
+        let minute = slot.start % 60
+        lines.push("{slot.name} {hour:02}:{minute:02} {slot.minutes}")
+    return Ok(lines.join("\n"))
+
+suite "part 1":
+    test "a slot":
+        let aino = Slot(name="Aino", start=18 * 60 + 30, minutes=90)
+        assert parse_slot("Aino 18:30 90") == Ok(aino)
+        let roni = Slot(name="Roni", start=7 * 60 + 5, minutes=30)
+        assert parse_slot("Roni 07:05 30") == Ok(roni)
+
+    test "a line with a part missing":
+        assert parse_slot("Aino") == Err(MissingField("Aino"))
+        assert parse_slot("Aino 18:30") == Err(MissingField("Aino 18:30"))
+
+    test "a time that is not on the clock":
+        assert parse_slot("Aino 25:00 60") == Err(BadTime("Aino 25:00 60"))
+        assert parse_slot("Aino 18:75 60") == Err(BadTime("Aino 18:75 60"))
+        assert parse_slot("Aino noon 60") == Err(BadTime("Aino noon 60"))
+
+    test "a length that is not a length":
+        assert parse_slot("Aino 18:00 0") == Err(BadLength("Aino 18:00 0"))
+        assert parse_slot("Aino 18:00 x") == Err(BadLength("Aino 18:00 x"))
+
+suite "part 2":
+    test "a line of version 1 is a slot of an hour":
+        let eero = Slot(name="Eero", start=19 * 60, minutes=60)
+        assert parse_slot("Eero 19") == Ok(eero)
+        assert parse_slot("Eero 24") == Err(BadTime("Eero 24"))
+
+    test "a program of version 1 reads lines of version 2":
+        let shown = match parse_booking("Eero 19:00 60"):
+            case Ok(b): "{b.name} at {b.hour}"
+            case Err(NoHour(line)): "no hour in {line}"
+            case Err(BadHour(line)): "a bad hour in {line}"
+        assert shown == "Eero at 19"
+        assert parse_booking("Eero 19") == Ok(Booking(name="Eero", hour=19))
+
+    test "a slot that is not a whole hour":
+        assert parse_booking("Eero 19:00 60").is_ok()
+        assert parse_booking("Eero 19:30 60") == Err(BadHour("Eero 19:30 60"))
+        assert parse_booking("Eero 19:00 90") == Err(BadHour("Eero 19:00 90"))
+        assert parse_booking("Eero") == Err(NoHour("Eero"))
+
+suite "part 3":
+    test "a file of both versions":
+        let text = "Aino 17\nEero 18:30 45\nRoni 9"
+        let want = "Aino 17:00 60\nEero 18:30 45\nRoni 09:00 60".to_string()
+        assert migrate(text) == Ok(want)
+
+    test "a line that cannot be read stops it":
+        let text = "Aino 17\nEero 25:00 45\nRoni 9"
+        assert migrate(text) == Err(BadTime("Eero 25:00 45"))
+
+    test "an empty file":
+        assert migrate("") == Ok("")

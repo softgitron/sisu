@@ -1,0 +1,21 @@
+# `if` with `elif`, `if let`, chained conditions and `let ... else`.
+def describe(ages: dict[str, int], name: str) -> String:
+    if let Some(age) = ages.get(name), age >= 18:
+        return "{name} is an adult"
+    elif name in ages:
+        return "{name} is a child"
+    else:
+        return "who is {name}?"
+
+def first_word(text: str) -> String:
+    let Some(word) = text.split_whitespace().next() else:
+        return "nothing"
+    return word.to_string()
+
+def main():
+    let ages = {"Aino": 7, "Eero": 30}
+    print("{describe(ages, "Eero")}; {describe(ages, "Aino")}")
+    print("{describe(ages, "Roni")}; {first_word("hei maailma")}")
+    var stack = [1, 2]
+    while let Some(top) = stack.pop():
+        print("popped {top}")

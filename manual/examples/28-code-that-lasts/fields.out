@@ -1,0 +1,2 @@
+Turn(name="Aino", hour=18, towel=False)
+Turn(name="Eero", hour=19, towel=True)

@@ -1,0 +1,4 @@
+test "mixing a voice in" ... ok
+test "mixing keeps the samples in range" ... ok
+test "a fade to silence" ... ok
+3 passed, 0 failed, 0 blocked

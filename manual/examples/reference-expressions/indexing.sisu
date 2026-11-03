@@ -1,0 +1,10 @@
+# An index counts from the start, `^` from the end; a slice is a copy.
+def main():
+    let xs = [10, 20, 30, 40]
+    print("{xs[0]} {xs[^1]} {xs[^2]}")
+    print("{xs[1:3]} {xs[2:]} {xs[:2]} {xs[:]}")
+    let ages = {"Aino": 7}
+    print("{ages["Aino"]} {ages.get("Eero")}")
+    var grid = [[0, 0], [0, 0]]
+    grid[1][0] = 5
+    print(grid)

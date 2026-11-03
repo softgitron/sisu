@@ -1,0 +1,14 @@
+# A renamed function keeps its old name, which calls the new one.
+
+## Degrees Celsius of `fahrenheit` degrees.
+pub def celsius_of(fahrenheit: f64) -> f64:
+    return (fahrenheit - 32.0) * 5.0 / 9.0
+
+## The old name of `celsius_of`, kept so that callers keep working.
+@deprecated("use `celsius_of`, which this calls")
+pub def to_celsius(fahrenheit: f64) -> f64:
+    return celsius_of(fahrenheit)
+
+def main():
+    print(to_celsius(212.0))
+    print(celsius_of(176.0))

@@ -1,0 +1,8 @@
+$ sisu run bad_spec.sisu
+error[E0399]: `>8.2z` is not a format spec; it is `[[fill]align][sign][#][0][width][,|_][.precision][type]`, as in `>8.2f`, with the type one of `d x X o b e E f F % s ?`
+  --> bad_spec.sisu:4:13
+  |
+4 |     print("{t:>8.2z}")
+  |             ^
+
+error[D0006]: the program was not run: errors found (1)

@@ -156,7 +156,7 @@ a comparison (`left`, `right`) and nothing for a condition joined with
 failure and lets the test go on, stops the test as `assert` does; and
 `debug_assert` is not a statement yet (E0117).
 
-**Status.** In stage 0, with the differences above.
+**Status.** In stage 0, with the differences noted.
 
 ## Fixtures
 

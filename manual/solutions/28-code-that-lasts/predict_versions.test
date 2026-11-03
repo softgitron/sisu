@@ -1,0 +1,5 @@
+test "an hour, as version 1 users ask for it" ... ok
+test "an hour and a half" ... ok
+test "version 1's price, asked for in version 2" ... ok
+test "half an hour without a towel" ... ok
+4 passed, 0 failed, 0 blocked

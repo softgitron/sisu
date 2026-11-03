@@ -1,0 +1,2 @@
+Booking(name="Aino", hour=18)
+Stove(heat=82.5, lit=True)

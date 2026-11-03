@@ -1,0 +1,17 @@
+# An assignment changes a place: a `var`, a field, an element or a key.
+struct Tally:
+    total: int
+
+def main():
+    var count = 0
+    count += 2
+    var a, b = 1, 2
+    a, b = b, a
+    var t = Tally(0)
+    t.total += 5
+    var xs = [1, 2, 3]
+    xs[^1] = 30
+    var words: dict[String, int] = {}
+    for w in ["sauna", "kiuas", "sauna"]:
+        words.entry(w.to_string()).or_insert(0) += 1
+    print("{count} {a} {b} {t.total} {xs} {words}")

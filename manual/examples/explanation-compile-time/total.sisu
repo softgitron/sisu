@@ -1,0 +1,19 @@
+# Code unrolled over a struct's fields is checked for each struct it is
+# unrolled for, so a field that does not fit is found at the call.
+def total[T](value: T) -> int:
+    var sum_so_far = 0
+    comptime for f in reflect.fields_of(T):
+        sum_so_far += value.[f]
+    return sum_so_far
+
+struct Scores:
+    aino: int
+    eero: int
+
+struct Team:
+    name: String
+    points: int
+
+def main():
+    print(total(Scores(aino=3, eero=4)))
+    print(total(Team(name="Owls", points=7)))

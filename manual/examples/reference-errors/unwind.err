@@ -1,0 +1,3 @@
+panic: too many guests: 5
+  at serve (unwind.sisu:12:9)
+  at main (unwind.sisu:18:11)

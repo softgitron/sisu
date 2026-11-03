@@ -1,0 +1,5 @@
+5:19-5:21 E0344 type.constant-negative-index fix="temps[^1]"
+  fix type.from-end-index 5:19-5:21 "^1"
+6:16-6:43 E0115 parse.python-conditional
+  fix parse.use-if-expression 6:16-6:43 "if t > 80: \"hot\" else: \"warm\""
+14:5-14:9 E0127 parse.loop-else

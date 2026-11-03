@@ -1,0 +1,6 @@
+$ sisu run --watch restart.sisu
+turn 0: the sauna is warming, epoch 0
+watch: the signature of `greeting` changed, so the program starts again
+turn 0: the sauna is hot, epoch 0
+turn 1: the sauna is hot, epoch 0
+turn 2: the sauna is hot, epoch 0

@@ -1,0 +1,24 @@
+# Two guests book the same hour at once, and the lock is held from the
+# check to the booking.
+
+## The sauna's bookings: who has each hour.
+struct Sauna:
+    booked: Mutex[dict[int, String]]
+
+    ## Books `hour` for `name` if it is free, and says whether it did.
+    def book(self, hour: int, name: str) -> bool:
+        var guard = self.booked.lock()
+        if hour in guard.value:
+            return False
+        log.info("{name} finds {hour}:00 free")
+        task.yield_now()  # as a write to a file would
+        _ = guard.value.insert(hour, name.to_string())
+        return True
+
+test "an hour is booked once":
+    let sauna = Sauna(Mutex({}))
+    let booked = task.scope do s:
+        let aino = s.spawn(() -> sauna.book(18, "Aino"))
+        let eero = s.spawn(() -> sauna.book(18, "Eero"))
+        return Ok([aino.join()?, eero.join()?])
+    assert booked == Ok([True, False]) or booked == Ok([False, True])

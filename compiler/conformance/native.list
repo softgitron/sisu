@@ -1,10 +1,11 @@
 # The cases the native backend (stage 2) builds and runs: `sisu-conformance
-# --native conformance/native.list` builds each with `sisu build --native`,
-# runs the executable, and compares its standard output, standard error and
-# exit status with the expectations the interpreter meets
-# (conformance/README.md, "The native mode"). One case per line; the list
-# grows as the backend does (`--native-survey` names the cases outside it
-# that would pass).
+# --native conformance/native.list` builds each with `sisu build --native`
+# (the x86-64 backend written in Sisu, decision 331), runs the executable,
+# and compares its standard output, standard error and exit status with the
+# expectations the interpreter meets (conformance/README.md, "The native
+# mode"), as `--native-cranelift` does with Cranelift's executables. One
+# case per line; the list grows as the backend does (`--native-survey`
+# names the cases outside it that would pass).
 capabilities/attenuation
 capabilities/closure_drops
 capabilities/datetime

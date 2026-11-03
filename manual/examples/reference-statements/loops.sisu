@@ -1,0 +1,16 @@
+# `while` and `for`, with `range`, `enumerate`, `break` and `continue`.
+def main():
+    var n = 27
+    var steps = 0
+    while n != 1:
+        n = if n % 2 == 0: n // 2 else: 3 * n + 1
+        steps += 1
+    print("{steps} steps")
+    for i in range(10, 0, -3):
+        print(i)
+    for i, word in enumerate(["sauna", "", "kiuas", "stop", "x"]):
+        if word == "":
+            continue
+        if word == "stop":
+            break
+        print("{i}: {word}")

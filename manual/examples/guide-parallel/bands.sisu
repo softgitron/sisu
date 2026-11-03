@@ -1,0 +1,39 @@
+# The histogram as a reducer over chunks, which can run in parallel.
+import std.par
+from std.par import Reducer
+
+## The bands of the readings of one chunk, or of several chunks merged.
+struct Bands:
+    counts: dict[int, int] = {}
+
+impl Reducer for Bands:
+    type Item = int
+    type Output = dict[int, int]
+
+    pure def empty() -> Bands:
+        return Bands()
+
+    pure def add(mut self, own x: int):
+        self.counts.entry(x // 100 * 10).or_insert(0) += 1
+
+    pure def merge(own self, own later: Bands) -> Bands:
+        var counts = self.counts
+        for band, n in later.counts.items():
+            counts.entry(band).or_insert(0) += n
+        return Bands(counts)
+
+    pure def finish(own self) -> dict[int, int]:
+        return self.counts
+
+## The bands of `readings`, in chunks of at most `grain` readings.
+def bands(readings: list[int], grain: int) -> dict[int, int]:
+    return par.reduce[Bands](readings.copy(), grain=grain)
+
+test "every grain gives the answer of one chunk":
+    let readings = [600 + (i * 37) % 400 for i in range(2_000)]
+    for grain in [1, 7, 100]:
+        assert bands(readings, grain) == bands(readings, len(readings))
+
+test "so do random readings":
+    check(arbitrary[list[int]]) do readings:
+        return bands(readings, 2) == bands(readings, len(readings) + 1)

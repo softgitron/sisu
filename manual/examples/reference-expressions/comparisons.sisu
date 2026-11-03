@@ -1,0 +1,8 @@
+# Comparisons chain in one direction; `in` asks a collection.
+def main():
+    let n = 5
+    let xs = [1, 2, 3]
+    print("{1 < n <= 5} {10 > n >= 5} {n == 5}")
+    let ages = {"Aino": 7}
+    print("{2 in xs} {4 not in xs} {"au" in "sauna"} {"Aino" in ages}")
+    print("{[1, 2] == [1, 2]} {(1, "a") < (1, "b")} {"aino" < "eero"}")

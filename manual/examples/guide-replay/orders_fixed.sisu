@@ -1,0 +1,22 @@
+# Totals the orders in `orders.txt`, one `ITEM COUNT` on each line.
+
+## The total of each item over the lines of `text`; a line without a
+## count is one of its item.
+def totals(text: str) -> dict[String, int]:
+    var out: dict[String, int] = {}
+    for line in text.lines():
+        let (item, count) = line.split_once(" ") ?? (line, "1")
+        out.entry(item.to_string()).or_insert(0) += count.parse_int() ?? 1
+    return out
+
+def main(sys: System) -> ! IoError:
+    let text = sys.fs.read_to_string("orders.txt")?
+    for item, n in totals(text).items():
+        print("{item}: {n}")
+    return Ok(())
+
+test "two orders of coffee":
+    assert totals("coffee 2\ntea 1\ncoffee 3") == {"coffee": 5, "tea": 1}
+
+test "an order without a count is one":
+    assert totals("coffee 2\nbun") == {"coffee": 2, "bun": 1}

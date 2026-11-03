@@ -3267,7 +3267,10 @@ The SIR is lowered through stage 2, the lowering written in Sisu, to LIR,
 which the backend translates one to one (section "LIR" below); a construct
 stage 2 does not lower is `D0103`, and only `--lower=rust` (or
 `SISU_LOWER=rust`) lowers with the Rust lowering, the oracle (decisions 304
-and 305).
+and 305). A debug build's LIR is compiled by the x86-64 backend written in
+Sisu (section "The Sisu backend" below), a release build's by Cranelift,
+the oracle of the Sisu backend, which `--backend=cranelift` names for a
+debug build too (decision 331).
 `sisu build --native --from-sir FILE [--output PATH]` and `sisu run
 --native --from-sir FILE [ARGS...]` compile a file of serialised SIR
 instead, without the front end (section "From serialised SIR" below), and
@@ -4006,19 +4009,22 @@ type t13 word "Scope"                    -- one word of the runtime's
 
 ### The Sisu backend
 
-Step 2 of D-087 has begun: an x86-64 Linux debug backend written in Sisu,
-in stage 2 (`compiler/stage2`), compiles LIR to machine code in one pass
-over each function, after one analysis pass, as TPDE compiles LLVM IR, and
-writes an ELF relocatable object that the system linker links with the
-same runtime library Cranelift's objects are linked with (decisions 306 to
-312). `sisu2 x86 FILE.lir --output FILE.o` compiles a LIR program, and
-`sisu build --native --backend=sisu` (or `SISU_BACKEND=sisu`; with `sisu
-run --native`, `--from-sir` and `--from-lir` too) lowers the program
-through stage 2 and compiles its LIR so, then links the object with `cc`
-as decision 199 does; `--backend=cranelift` names the default, any other
-name is `D0123`, the Sisu backend with the Rust lowering is `D0124` (it
-compiles LIR), a construct it does not compile is the program's `D0103`
-(`x86: not compiled: WHAT (in FUNCTION)`), and any other failure `D0125`.
+Step 2 of D-087: an x86-64 Linux debug backend written in Sisu, in stage 2
+(`compiler/stage2`), compiles LIR to machine code in one pass over each
+function, after one analysis pass, as TPDE compiles LLVM IR, and writes an
+ELF relocatable object that the system linker links with the same runtime
+library Cranelift's objects are linked with (decisions 306 to 312). It is
+the debug profile's backend (decision 331): `sisu build --native` and
+`sisu run --native` (with `--from-sir` and `--from-lir` too) lower the
+program through stage 2, compile its LIR so and link the object with `cc`
+as decision 199 does, unless `--backend=cranelift` (or
+`SISU_BACKEND=cranelift`) asks for Cranelift, the oracle, which a release
+build and the Rust lowering use unasked; `--backend=sisu` names it for a
+release build, any other name is `D0123`, the Sisu backend with the Rust
+lowering is `D0124` (it compiles LIR), a construct it does not compile is
+the program's `D0103` (`x86: not compiled: WHAT (in FUNCTION)`), and any
+other failure `D0125`. `sisu2 x86 FILE.lir --output FILE.o` compiles a LIR
+program on its own.
 Its modules are `lirread.sisu` (LIR read item by item, as
 `sisu-codegen/src/lir.rs` reads it, each value given its type),
 `x64.sisu` (the instructions' encodings), `x86.sisu` (the analysis, the
@@ -4080,13 +4086,35 @@ function compiled as it is read).
 It compiles every operation of LIR but a jump with more than nine
 arguments and a return of more than one value, which no lowering makes,
 and every case of `native.list` runs from its objects with the
-interpreter's output (`conformance/native-sisu.list`, the runner's
-`--native-sisu` mode, which compares the runs: the executables are its
-own). Stage 1, compiled by it from its 4 263 811 lines of LIR in 15 to 19
-s on one thread of a loaded machine (about 4 ms for each thousand lines,
-against Cranelift's 6 s on four cores), prints on the 400 conformance
-files tried what stage 1 compiled by Cranelift prints, in 1.5 times the
-time. port-debt.md ("The backend in Sisu") lists what it leaves.
+interpreter's output (the runner's `--native` mode; `--native-cranelift`
+builds the same cases with Cranelift, so both backends meet the same
+expectations). Stage 1, compiled by it from its 4 263 811 lines of LIR in
+15 to 19 s on one thread of a loaded machine (about 4 ms for each thousand
+lines, against Cranelift's 6 s on four cores), prints on the 400
+conformance files tried what stage 1 compiled by Cranelift prints, in 1.5
+times the time. port-debt.md ("The backend in Sisu") lists what it leaves.
+
+**The fixed point** (decision 330; D-087's criterion for step 2): the
+backend, built by itself, rebuilds itself to the same bytes.
+`compiler/stage2/bootstrap.sh` builds sisu2-C, stage 2 as the Cranelift
+path builds it (the seed: stage 1's front end, the Rust lowering,
+Cranelift); sisu2-C lowers and compiles the SIR of stage 2's package and
+of stage 1's with the Sisu backend into sisu2-A and stage1-A; stage1-A
+prints both packages' SIR again, and sisu2-A lowers and compiles it into
+sisu2-B and stage1-B. Each B is its A byte for byte, and each SIR stage1-A
+prints is the one `sisu sir` prints:
+
+```text
+  sisu2-A       14459112 bytes  sha256 2acc04a32f95c0fb...  built by sisu2-C (7.7 s)
+  stage1-A      38966672 bytes  sha256 a3ef32a31e41464e...  built by sisu2-C (27.5 s)
+  sisu2-B       14459112 bytes  sha256 2acc04a32f95c0fb...  built by sisu2-A (11.5 s)
+  stage1-B      38966672 bytes  sha256 a3ef32a31e41464e...  built by sisu2-A (46.2 s)
+```
+
+The script takes about five minutes on four cores, most of it stage 1
+printing the SIR of the two packages; the driver builds with the stage 2
+that `SISU_STAGE2` names, as it is, instead of `target/stage2/sisu2`. CI
+runs it on every push.
 
 ### Coverage
 
@@ -4113,9 +4141,9 @@ that nothing it allocated is live at exit (decision 226); `cargo test`
 does the same (`crates/sisu-driver/tests/native.rs`), from source, from
 serialised SIR, with the release profile (every contract checked,
 decision 232), from the LIR stage 2 lowers the SIR to (each executable
-byte for byte the one from the SIR, decision 284), and with the Sisu
-backend (`--native-sisu conformance/native-sisu.list`, decision 306), and
-CI runs them on every push. `--native-survey LIST` tries every
+byte for byte the one from the SIR, decision 284), and with Cranelift,
+the oracle of the Sisu backend that a debug build uses (`--native-cranelift`,
+decision 331), and CI runs them on every push. `--native-survey LIST` tries every
 runnable case the list leaves out and says which would pass, or the first
 construct that stops each.
 
@@ -7224,3 +7252,61 @@ memory, foreign calls and the machine intrinsics" and "LIR"; D-087)
      precision was dropped and the `Debug` text padded; a spec of type `?`
      still pads the `Debug` text. Stage 1 decides it (RULES.md, R20).
 
+
+**The Sisu backend's fixed point and its default** (section "Stage 2",
+"The Sisu backend"; D-087, step 2)
+
+330. The Sisu backend's fixed point, D-087's criterion for step 2, holds,
+     and `compiler/stage2/bootstrap.sh` checks it: sisu2-C, stage 2 as the
+     Cranelift path builds it (stage 1's front end, the Rust lowering and
+     Cranelift, the seed of decision 305), lowers and compiles the SIR of
+     stage 2's package and of stage 1's with the Sisu backend into sisu2-A
+     and stage1-A; stage1-A, the front end compiled by the Sisu backend,
+     prints both packages' SIR again, and sisu2-A, the backend compiled by
+     itself, lowers and compiles that SIR into sisu2-B and stage1-B. Each B
+     is its A byte for byte (stage 2 14 459 112 bytes, stage 1 38 966 672),
+     and stage1-A prints the SIR `sisu sir` prints, so building once more
+     changes nothing: the lowering and the backend are deterministic
+     (Sisu's dicts and sets iterate in the order of insertion, and nothing
+     they write reads an address, the time or the environment), and
+     nothing the Sisu backend miscompiles changes what stage 2 and stage 1
+     write. The script prints each file's size and SHA-256, as stage 1's
+     `bootstrap.sh` does, and exits non-zero when a pair differs; CI's
+     `bootstrap` job runs it on every push. Native builds take
+     `SISU_STAGE2=PATH`, a stage-2 executable they lower and compile with
+     as it is (neither built nor checked against the sources), which stage
+     1 passes on to the backend it calls: the script builds sisu2-B with
+     sisu2-A so. The other ways were the comparison of LIR and objects
+     alone, which leaves out the link and the front end compiled by the
+     backend, and a fixed point of stage 2 only, which leaves out the
+     larger program. This changes no rule of the language.
+331. A debug build's backend is the one written in Sisu: `sisu build
+     --native` and `sisu run --native`, from source, `--from-sir` or
+     `--from-lir` of a debug LIR, compile stage 2's LIR with the x86-64
+     backend in Sisu, and `--backend=cranelift` (or `SISU_BACKEND=cranelift`)
+     asks for Cranelift, which stays as its oracle. A release build's
+     backend stays Cranelift, whose `speed` optimisations stand in for the
+     LLVM release backend of D-088, since D-087 gives release builds to
+     that backend and not to the debug one, whose code is unoptimised
+     (`--backend=sisu --release` compiles a release LIR with it); the Rust
+     lowering, the oracle, which writes no LIR, keeps Cranelift too, so it
+     needs no backend named. A command that names no backend leaves the
+     choice to each build's profile, and the driver gives stage 1
+     `SISU_BACKEND` only when the command named one. The runner's
+     `--native` and `--native-from-sir` modes build with the Sisu backend
+     and require each build to say so (`native: compiled by the Sisu
+     backend in T ms`); `--native-cranelift` builds every case of
+     `native.list` with Cranelift and compares its runs with the same
+     expectations, so that each case behaves the interpreter's way under
+     both backends; the mode from LIR names Cranelift, whose executables it
+     compares with the Rust lowering's (decision 284); and `--native-sisu`
+     and `native-sisu.list`, which held the cases of `native.list`, are
+     gone. What a debug build gives up for now: the Sisu backend's debug
+     information is the line table and a subprogram for each function
+     (decision 312), so a debugger stops at Sisu lines and names the
+     functions of a backtrace but shows no parameters, locals or types,
+     which `--backend=cranelift` still describes (the test of decision
+     227's DWARF builds so), and its code is naive (port-debt.md, "The
+     backend in Sisu"). Stage 1 and stage 2 themselves are still built
+     with the Rust lowering and Cranelift, the seed. `D0123` names the two
+     defaults. This changes no rule of the language.

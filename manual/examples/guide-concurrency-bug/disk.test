@@ -1,0 +1,2 @@
+test "every booking is on the disk" ... ok
+1 passed, 0 failed, 0 blocked

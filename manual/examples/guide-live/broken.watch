@@ -1,0 +1,12 @@
+turn 0: the sauna is warming, epoch 0
+turn 1: the sauna is warming, epoch 0
+turn 2: the sauna is warming, epoch 0
+--- stderr
+watch: the save of `broken.sisu` does not check, so the program keeps running epoch 0:
+error[E0310]: `+` cannot be applied to `int` and `str`
+  --> broken.sisu:5:12
+  |
+5 |     return turn + ": the sauna is hot"
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: write the value into the text: `"{turn}: the sauna is hot"`
+--- status 0

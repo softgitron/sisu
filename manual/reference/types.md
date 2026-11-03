@@ -505,7 +505,7 @@ with `BigInt.parse`. A `Decimal` has no `/` (E0310), where 03 makes the
 quotient a `Ratio`; `div` with a number of places and a `Rounding` is
 the division stage 0 has.
 
-**Status.** In stage 0 (D-076), with the differences above.
+**Status.** In stage 0 (D-076), with the differences noted.
 
 ## Truth values and characters
 
@@ -698,7 +698,7 @@ than a derived one, is E0398 in stage 0, which hashes keys by their
 structure. The allocator parameter of D-060, `list[T, A: Allocator =
 Global]`, waits for allocators ([R7](ownership.md#allocators)).
 
-**Status.** In stage 0, with the differences above.
+**Status.** In stage 0, with the differences noted.
 
 ## Literals that take the type expected
 
@@ -743,7 +743,7 @@ the types a string literal can be; stage 0's `std.net.Url` has no
 `FromLiteral` impl (E0300), so a URL is made with `Url.parse`. A list
 literal is not an `Array` ([Collections](#collections)).
 
-**Status.** In stage 0, with the differences above.
+**Status.** In stage 0, with the differences noted.
 
 ## Tuples
 
@@ -800,7 +800,7 @@ call of a function that returns `Never`, and `while True:` with no
 may be absent, since no type has a `null`. A value becomes an optional
 one only in `Some`: `let n: int? = 5` is E0300. `?.`, `??`, `if let` and
 `let ... else` take an optional value apart
-([R4](../README.md#the-reference), when it is written).
+([R4](expressions.md#optional-values-and-results)).
 
 <!-- file: examples/reference-types/optional.sisu -->
 ```sisu
@@ -884,7 +884,7 @@ Err(TooLarge(value=500))
 
 `check(...)` gives an `int ! RangeError`, and `read` returns it as an
 `int ! {ParseError, RangeError}`. How errors propagate, are handled and
-reach `main` is [R8](../README.md#the-reference), when it is written.
+reach `main` is [R8](errors.md).
 
 **Status.** In stage 0.
 
@@ -940,7 +940,7 @@ nothing, and has no syntax for discriminants (`Red = 1` is E0117).
 and a `B` and returns a `C`; a fallible one returns `C ! E`, and one
 that returns nothing has the type `(A) -> ()`. A function named without
 a call is a value of its function type, and so is a closure
-([R4](../README.md#the-reference), when it is written).
+([R4](expressions.md#closures)).
 
 - How a closure captures, by borrowing or by copy, is not part of its
   type; the checker infers it for each closure ([R7](ownership.md#closures-and-their-captures)).

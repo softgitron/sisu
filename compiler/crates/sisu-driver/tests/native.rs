@@ -1,6 +1,8 @@
 //! The native backend (stage 2) against the conformance suite: every case
 //! of `conformance/native.list` built with `sisu build --native` and run,
-//! with the expectations the interpreter meets.
+//! with the expectations the interpreter meets, by the debug profile's
+//! backend, the one written in Sisu, and by Cranelift, its oracle
+//! (decision 331).
 
 // A test's helpers may fail loudly, as its body may (the panic policy is
 // for the crates, not their tests).
@@ -24,8 +26,10 @@ fn native_conformance() {
     assert!(report.cases > 0, "no cases in the coverage list");
     assert!(report.failures.is_empty(), "{}", report.render());
     // Stage 2 lowered every case: none was built through the Rust lowering
-    // (decision 305).
+    // (decision 305); and the Sisu backend, the debug profile's, compiled
+    // every one (decision 331).
     assert_eq!(report.stage2.map(|(n, _)| n), Some(report.cases), "{}", report.render());
+    assert_eq!(report.sisu.map(|(n, _)| n), Some(report.cases), "{}", report.render());
 }
 
 /// The same cases built from serialised SIR (decision 212): each from its
@@ -43,13 +47,15 @@ fn native_conformance_from_sir() {
     assert!(report.cases > 0, "no cases in the coverage list");
     assert!(report.failures.is_empty(), "{}", report.render());
     // Stage 2 lowered every case: none was built through the Rust lowering
-    // (decision 305).
+    // (decision 305); the Sisu backend compiled every one (decision 331).
     assert_eq!(report.stage2.map(|(n, _)| n), Some(report.cases), "{}", report.render());
+    assert_eq!(report.sisu.map(|(n, _)| n), Some(report.cases), "{}", report.render());
 }
 
 /// The same cases built with the release profile, every contract checked
-/// as the interpreter's runs check them (decision 232): Cranelift's
-/// optimisations change nothing a program does.
+/// as the interpreter's runs check them (decision 232), by its backend,
+/// Cranelift (decision 331): Cranelift's optimisations change nothing a
+/// program does.
 #[test]
 fn native_conformance_release() {
     let sisu = sisu_conformance::Sisu::new(env!("CARGO_BIN_EXE_sisu"));
@@ -91,23 +97,24 @@ fn native_conformance_from_lir() {
     assert_eq!(report.identical, Some(report.cases), "{}", report.render());
 }
 
-/// The cases of `conformance/native-sisu.list` built with the x86-64
-/// backend written in Sisu (`sisu build --native --backend=sisu`, decision
-/// 306), its objects linked with the runtime Cranelift's are linked with:
-/// each run meets the interpreter's expectations, and each build says that
-/// stage 2 lowered the program and the Sisu backend compiled it.
+/// The same cases built with Cranelift, the oracle of the backend written
+/// in Sisu (`sisu build --native --backend=cranelift`, decision 331), its
+/// objects linked with the same runtime: each run meets the interpreter's
+/// expectations, as each run of the Sisu backend's does, so every case
+/// behaves the same under both backends.
 #[test]
-fn native_conformance_sisu_backend() {
+fn native_conformance_cranelift() {
     let sisu = sisu_conformance::Sisu::new(env!("CARGO_BIN_EXE_sisu"));
     let root = compiler_dir().join("conformance/cases");
-    let text = std::fs::read_to_string(compiler_dir().join("conformance/native-sisu.list"))
-        .expect("the Sisu backend's coverage list");
+    let text =
+        std::fs::read_to_string(compiler_dir().join("conformance/native.list")).expect("the coverage list");
     let list = sisu_conformance::native::read_list(&text);
-    let report = sisu_conformance::native::run_native_sisu(&sisu, &root, &list);
+    let report = sisu_conformance::native::run_native_cranelift(&sisu, &root, &list);
     println!("{}", report.render());
     assert!(report.cases > 0, "no cases in the coverage list");
     assert!(report.failures.is_empty(), "{}", report.render());
-    assert_eq!(report.sisu.map(|(n, _)| n), Some(report.cases), "{}", report.render());
+    assert_eq!(report.stage2.map(|(n, _)| n), Some(report.cases), "{}", report.render());
+    assert_eq!(report.sisu, None, "{}", report.render());
 }
 
 /// The same cases' SIR run in the interpreter (decision 254), `sisu run
@@ -367,18 +374,19 @@ fn aggregates_dropped_in_a_loop_run_in_bounded_memory() {
 /// with parameters and locals, and `main` calling it.
 const SHAPES: &str = "struct Point:\n    x: int\n    y: int\n\nerror Problem:\n    TooBig(limit: int)\n\ndef check(n: int) -> int ! Problem:\n    if n > 2:\n        return Err(TooBig(limit=2))\n    return Ok(n)\n\ndef area(p: Point, scale: int) -> int:\n    let w = p.x * scale\n    let h = p.y * scale\n    return w * h\n\ndef main():\n    let name = \"corner\".to_string()\n    let p = Point(x=3, y=4)\n    let xs = [1, 2, 3]\n    let r = check(5)\n    let a = area(p, 2)\n    print(\"{name} {a} {xs} {r:?}\")\n";
 
-/// The executable carries DWARF for the Sisu source (decision 227): a
-/// debugger stops at a line of a Sisu file, names the Sisu functions and
-/// lines of the frames it unwinds, and shows the locals and parameters
-/// with their Sisu types. Under `gdb --batch` where there is one, else
-/// `lldb`, else the line table as `readelf` decodes it.
+/// The executable Cranelift builds carries DWARF for the Sisu source
+/// (decision 227): a debugger stops at a line of a Sisu file, names the
+/// Sisu functions and lines of the frames it unwinds, and shows the locals
+/// and parameters with their Sisu types, which the Sisu backend does not
+/// describe yet (decision 312). Under `gdb --batch` where there is one,
+/// else `lldb`, else the line table as `readelf` decodes it.
 #[test]
 fn a_debugger_names_sisu_lines_and_locals() {
     let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
     let dir = scratch("debug-info");
     std::fs::write(dir.join("shapes.sisu"), SHAPES).expect("the program");
     let built = std::process::Command::new(&sisu)
-        .args(["build", "--native", "shapes.sisu"])
+        .args(["build", "--native", "--backend=cranelift", "shapes.sisu"])
         .current_dir(&dir)
         .output()
         .expect("sisu builds");
@@ -448,11 +456,13 @@ fn a_debugger_names_sisu_lines_and_locals() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// The backend is chosen by name (decision 306): `--backend=sisu` and
-/// `SISU_BACKEND=sisu` build with the backend written in Sisu, the build
-/// saying so, `--backend=cranelift` with the default; another name is
-/// `D0123`, and the Sisu backend with the Rust lowering, whose output is
-/// not LIR, is `D0124`.
+/// The backend is chosen by name (decision 306), or by the profile
+/// (decision 331): a debug build is the Sisu backend's, the build saying
+/// so, and so are `--backend=sisu` and `SISU_BACKEND=sisu`; a release
+/// build, a build with the Rust lowering and `--backend=cranelift` (which
+/// wins over the variable) are Cranelift's; another name is `D0123`, and
+/// the Sisu backend with the Rust lowering, whose output is not LIR, is
+/// `D0124`.
 #[test]
 fn the_backend_is_chosen_by_name() {
     let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
@@ -471,16 +481,28 @@ fn the_backend_is_chosen_by_name() {
         }
         outcome(cmd.output().expect("sisu runs"))
     };
-    for (args, env) in [(&["--backend=sisu"][..], None), (&[][..], Some("sisu"))] {
+    for (args, env) in [(&["--backend=sisu"][..], None), (&[][..], Some("sisu")), (&[][..], None)] {
         let (_, err, status) = build(args, env);
         assert_eq!(status, Some(0), "{err}");
         assert!(err.contains("native: compiled by the Sisu backend in "), "{err}");
         let ran = std::process::Command::new(dir.join("count")).output().expect("it runs");
         assert_eq!(String::from_utf8_lossy(&ran.stdout), "10\n");
     }
-    let (_, err, status) = build(&["--backend=cranelift"], Some("sisu"));
+    for (args, env) in [
+        (&["--backend=cranelift"][..], Some("sisu")),
+        (&[][..], Some("cranelift")),
+        (&["--release"][..], None),
+        (&["--lower=rust"][..], None),
+    ] {
+        let (_, err, status) = build(args, env);
+        assert_eq!(status, Some(0), "{err}");
+        assert!(!err.contains("Sisu backend") && err.contains(" functions, "), "{args:?}: {err}");
+        let ran = std::process::Command::new(dir.join("count")).output().expect("it runs");
+        assert_eq!(String::from_utf8_lossy(&ran.stdout), "10\n");
+    }
+    let (_, err, status) = build(&["--release", "--backend=sisu"], None);
     assert_eq!(status, Some(0), "{err}");
-    assert!(!err.contains("Sisu backend"), "{err}");
+    assert!(err.contains("native: compiled by the Sisu backend in "), "{err}");
     let (_, err, status) = build(&["--backend=llvm"], None);
     assert_eq!(status, Some(2), "{err}");
     assert!(err.contains("D0123") && err.contains("not `llvm`"), "{err}");
@@ -619,8 +641,9 @@ fn machine_intrinsics_run_natively_and_the_interpreter_refuses_them() {
 /// `int` sign-extended back, a `uint16_t`) or floats (decision 302),
 /// lowered by stage 2, the only lowering a build uses unless the Rust one
 /// is asked for (decision 305): the build says stage 2 lowered it, its
-/// executable is byte for byte the one `--lower=rust` builds, and it prints
-/// what C computes. The interpreter emulates none of these functions, so no
+/// executable through Cranelift is byte for byte the one `--lower=rust`
+/// builds, and it prints what C computes, as the Sisu backend's does
+/// (decision 331). The interpreter emulates none of these functions, so no
 /// conformance case holds them.
 #[test]
 fn foreign_calls_of_every_width_lower_through_stage_2() {
@@ -642,16 +665,21 @@ fn foreign_calls_of_every_width_lower_through_stage_2() {
         assert_eq!(status, Some(0), "{err}");
         (std::fs::read(dir.join(exe)).expect("the executable"), err)
     };
-    let (by_stage2, err) = build(&[], "by-stage2");
+    let (by_stage2, err) = build(&["--backend=cranelift"], "by-stage2");
     assert!(err.contains("native: lowered by stage 2 in "), "{err}");
     let (by_rust, err) = build(&["--lower=rust"], "by-rust");
     assert!(!err.contains("lowered by stage 2"), "{err}");
     assert!(by_stage2 == by_rust, "the executables differ");
-    let ran = std::process::Command::new(dir.join("by-stage2")).current_dir(&dir).output().expect("it runs");
-    assert_eq!(
-        outcome(ran),
-        ("7\n2147483647\n65\n513\n4660\n1.4142135623730951\n0.1875\n".to_string(), String::new(), Some(0))
-    );
+    let (_, err) = build(&[], "by-sisu");
+    assert!(err.contains("native: compiled by the Sisu backend in "), "{err}");
+    for exe in ["by-stage2", "by-sisu"] {
+        let ran = std::process::Command::new(dir.join(exe)).current_dir(&dir).output().expect("it runs");
+        assert_eq!(
+            outcome(ran),
+            ("7\n2147483647\n65\n513\n4660\n1.4142135623730951\n0.1875\n".to_string(), String::new(), Some(0)),
+            "{exe}"
+        );
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -803,13 +803,17 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   with a literal and one with a variable, give it two C signatures, which
   is `D0103`. Both lowerings agree. *Pay*: the constant's type in SIR's
   text form, or the C signature taken from the declaration.
-- **The machine code is Cranelift's by default**: step 2, the x86-64
-  Linux debug backend in Sisu, has begun (`--backend=sisu`, decisions 306
-  to 312) and compiles every case of `native.list` and stage 1 itself, but
-  it is not the default, and the textual-IR prototype of the LLVM release
-  backend (D-088) and the runtime in Sisu (step 3) are not begun. *Pay*:
-  what the Sisu backend leaves (below), then it as the default and
-  Cranelift as the oracle; D-087's order of work.
+- **The release profile's machine code is Cranelift's**: the x86-64 Linux
+  debug backend in Sisu is the debug profile's (decisions 306 to 312 and
+  331) and has reached its fixed point (decision 330), but a release build
+  is still compiled by Cranelift, since D-087 gives release builds to the
+  LLVM backend of D-088, whose textual-IR prototype is not begun, and
+  Cranelift is the Sisu backend's oracle (`--backend=cranelift`,
+  `--native-cranelift`). Stage 1 and stage 2 are themselves built with
+  the Rust lowering and Cranelift, the seed. *Pay*: the LLVM release
+  backend; the seed's role taken by a stage 2 kept from the previous build
+  (`SISU_STAGE2` already names one), then Cranelift retired as D-087's
+  step 5 says.
 - **The Sisu backend's code is naive**: every value is computed in `rax`
   and moved to its register, a jump is always 32-bit and never falls
   through, cold blocks stay where LIR has them, constants are not folded
@@ -830,13 +834,14 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
 - **The Sisu backend's debug information** is the line table and a
   subprogram for each function (decision 312): no parameters, locals or
   types, and no `.debug_frame` (a debugger unwinds through the frame
-  pointers). *Pay*: the rest of decision 227's DWARF, from LIR's
-  descriptions of the locals and their types.
-- **The Sisu backend is the debug profile's**: a release LIR is compiled
-  the same way, without Cranelift's optimisations; there is no AArch64,
-  Mach-O or COFF; and the backend has not yet compiled stage 2 (itself)
-  to an executable that compiles itself to the same bytes, D-087's fixed
-  point. *Pay*: D-087's steps.
+  pointers). Since it is the debug profile's backend (decision 331), a
+  debugger shows a default build's locals only with `--backend=cranelift`.
+  *Pay*: the rest of decision 227's DWARF, from LIR's descriptions of the
+  locals and their types.
+- **The Sisu backend is the debug profile's**: a release LIR it is asked
+  to compile (`--backend=sisu --release`) is compiled the same way,
+  without optimisations, and there is no AArch64, Mach-O or COFF. *Pay*:
+  D-087's steps.
 - **Stage 2 reads SIR itself**: stage 1 writes SIR but has no reader, so
   `stage2/src/read.sisu` transcribes `sisu-sir/src/read.rs`. *Pay*: the
   reader moves to stage 1's `sir` module when stage 1 needs one (`sisu

@@ -1,0 +1,20 @@
+# `?` returns early; `?.`, `??` and `else` give a value instead.
+error ParseError:
+    Bad(text: String)
+
+def parse(text: str) -> int ! ParseError:
+    let n = text.parse_int() else:
+        return Err(Bad(text.to_string()))
+    return Ok(n)
+
+def doubled(text: str) -> int ! ParseError:
+    return Ok(parse(text)? * 2)
+
+def main():
+    let a = parse("x") else: 0
+    let b = parse("x") else as e: if e == Bad("x"): -1 else: -2
+    let c = parse("7").or(0)
+    let d = "5".parse_int() ?? 0
+    let name: String? = None
+    let shout = name?.to_uppercase() ?? "nobody"
+    print("{a} {b} {c} {d} {shout} {doubled("21")} {doubled("x")}")

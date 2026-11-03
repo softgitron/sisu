@@ -1,0 +1,33 @@
+# A change planned with typed holes: the signatures first, then bodies.
+
+## A turn in the sauna: who, from which minute after midnight, how long.
+@derive(Eq, Debug)
+struct Slot:
+    name: String
+    start: int
+    minutes: int
+
+## Whether `a` and `b` share a minute.
+pub def overlap(a: Slot, b: Slot) -> bool:
+    return a.start < b.start + b.minutes and b.start < a.start + a.minutes
+
+## The slot that `line` writes as "NAME HH:MM MINUTES".
+pub def parse_slot(line: str) -> Slot?:
+    return todo("parse a slot")
+
+## The slots of `text`, a line each, that overlap none before them.
+pub def free_slots(text: str) -> list[Slot]:
+    return todo("keep the slots that fit")
+
+test "slots that overlap":
+    let aino = Slot(name="Aino", start=17 * 60, minutes=90)
+    let eero = Slot(name="Eero", start=18 * 60, minutes=60)
+    assert overlap(aino, eero)
+
+test "a slot from text":
+    let want = Slot(name="Aino", start=17 * 60 + 30, minutes=90)
+    assert parse_slot("Aino 17:30 90") == Some(want)
+
+test "the slots that fit":
+    let slots = free_slots("Aino 17:00 90\nEero 18:00 60\nRoni 18:30 30")
+    assert len(slots) == 2 and slots[1].name == "Roni"

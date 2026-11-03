@@ -1,0 +1,4 @@
+# A format spec that is not one.
+def main():
+    let t = 7.5
+    print("{t:>8.2z}")

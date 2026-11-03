@@ -1,0 +1,10 @@
+# Counts down from the number it is given, or from 3.
+def main(sys: System):
+    let args = sys.env.args()
+    var n = 3
+    if len(args) > 0:
+        n = args[0].parse_int() ?? 3
+    while n > 0:
+        print("{n}...")
+        n -= 1
+    print("löyly!")

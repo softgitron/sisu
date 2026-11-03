@@ -1,0 +1,11 @@
+# A panic while unwinding aborts the program.
+struct Fragile:
+    name: String
+
+impl Drop for Fragile:
+    def drop(mut self):
+        panic("{self.name} broke while being put away")
+
+def main():
+    let cup = Fragile("the cup")
+    panic("the shelf fell")

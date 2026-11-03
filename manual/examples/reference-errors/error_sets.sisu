@@ -1,0 +1,27 @@
+# Matching some errors of a set and passing the rest on.
+error ConfigError:
+    Missing(key: String)
+    Invalid(key: String, value: String)
+
+def setting(text: str, key: str) -> String ! ConfigError:
+    for line in text.lines():
+        let k, v = line.split_once("=") else:
+            continue
+        if k.trim() == key:
+            return Ok(v.trim().to_string())
+    return Err(Missing(key.to_string()))
+
+def port(text: str) -> int !:
+    let raw = setting(text, "port")?
+    let n = raw.parse_int() else:
+        return Err(Invalid("port".to_string(), raw))
+    return Ok(n)
+
+def port_or_default(text: str) -> int ! ConfigError:
+    return match port(text):
+        case Err(Missing(_)): Ok(8080)
+        case other: other
+
+def main():
+    for text in ["port = 443", "host = a", "port = x"]:
+        print(port_or_default(text))

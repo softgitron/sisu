@@ -1,0 +1,14 @@
+$ sisu test disk.sisu
+test "every booking is on the disk" ... ok
+1 passed, 0 failed, 0 blocked
+$ sisu test --sim --faults 0.2 disk.sisu
+test "every booking is on the disk" ... FAILED
+
+test "every booking is on the disk" ... FAILED
+panic: assertion failed: kept == files.exists(Path.new("{hour}.txt"))
+  left:  True
+  right: False
+  at test "every booking is on the disk" (disk.sisu:25:9)
+replay: sisu test --replay 1-0df33217e863cf48-0.0.1-t0-s0-r0-m200000 disk.sisu
+
+0 passed, 1 failed, 0 blocked

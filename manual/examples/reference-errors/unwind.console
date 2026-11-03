@@ -1,0 +1,8 @@
+$ sisu run unwind.sisu
+Eero goes home
+1
+Eero goes home
+Aino goes home
+panic: too many guests: 5
+  at serve (unwind.sisu:12:9)
+  at main (unwind.sisu:18:11)

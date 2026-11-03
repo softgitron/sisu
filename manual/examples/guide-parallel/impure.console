@@ -1,0 +1,7 @@
+$ sisu check impure.sisu
+error[E0335]: this function is passed where a pure function is required, but it calls `print`, which is not pure
+  --> impure.sisu:8:35
+  |
+8 |     let shown = par.map(readings, (t) -> print("reading {t}"))
+  |                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+

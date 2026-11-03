@@ -1,0 +1,50 @@
+##! Exercise 28.2, a new error in a library. Kind: fix. Level: 1.
+##!
+##! Version 2 of a sauna's booking library added `Cleaning` to its error
+##! set, for the hour the stove is cleaned, and `describe`, written for
+##! version 1, no longer compiles. Run `sisu test new_error.sisu`, read
+##! the diagnostic, and fix `describe`, not the library or the tests, so
+##! that every test passes. The hints are in chapter 28 of the tutorial,
+##! under "Exercise 28.2: a new error in a library".
+
+# The library, version 2.
+
+error BookingError:
+    Taken(hour: int)
+    Closed
+    Cleaning(until: int)
+
+## Books `hour`. The sauna is open from 16 to 21; 18 is taken, and the
+## stove is cleaned at 16.
+pub def book(hour: int) -> ! BookingError:
+    if hour < 16 or hour > 21:
+        return Err(Closed)
+    if hour == 18:
+        return Err(Taken(hour))
+    if hour == 16:
+        return Err(Cleaning(until=17))
+    return Ok(())
+
+# The program that uses it, written for version 1.
+
+## What booking `hour` gave, as a line for the screen.
+def describe(hour: int) -> String:
+    match book(hour):
+        case Ok(()):
+            return "{hour}:00 is yours"
+        case Err(Taken(h)):
+            return "{h}:00 is taken"
+        case Err(Closed):
+            return "the sauna is closed at {hour}:00"
+        case Err(Cleaning(until)):
+            return "the stove is being cleaned until {until}:00"
+
+test "a free hour":
+    assert describe(19) == "19:00 is yours"
+
+test "a taken hour and a closed one":
+    assert describe(18) == "18:00 is taken"
+    assert describe(23) == "the sauna is closed at 23:00"
+
+test "the hour of cleaning":
+    assert describe(16) == "the stove is being cleaned until 17:00"

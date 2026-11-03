@@ -1,0 +1,18 @@
+# Closures: `x -> e`, `it`, and a trailing `do` block for statements.
+def twice(f: (int) -> int, x: int) -> int:
+    return f(f(x))
+
+def each(xs: list[int], f: (int) -> ()):
+    for x in xs:
+        f(x)
+
+def main():
+    let step = 3
+    print("{twice(x -> x + step, 1)} {twice(it * 10, 2)}")
+    print(twice((n) -> n - 1, 0))
+    each([1, 2]) do x:
+        let doubled = x * 2
+        print("{x} doubled is {doubled}")
+    let total = [1, 2, 3].iter().fold(0) do acc, x:
+        return acc + x
+    print(total)

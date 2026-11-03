@@ -1,0 +1,5 @@
+$ sisu run --watch loop.sisu
+turn 0: the sauna is warming, epoch 0
+watch: epoch 1 replaces `greeting`
+turn 1: the sauna is hot, epoch 1
+turn 2: the sauna is hot, epoch 1

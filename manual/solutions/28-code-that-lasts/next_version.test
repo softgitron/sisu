@@ -1,0 +1,11 @@
+test "part 1/a slot" ... ok
+test "part 1/a line with a part missing" ... ok
+test "part 1/a time that is not on the clock" ... ok
+test "part 1/a length that is not a length" ... ok
+test "part 2/a line of version 1 is a slot of an hour" ... ok
+test "part 2/a program of version 1 reads lines of version 2" ... ok
+test "part 2/a slot that is not a whole hour" ... ok
+test "part 3/a file of both versions" ... ok
+test "part 3/a line that cannot be read stops it" ... ok
+test "part 3/an empty file" ... ok
+10 passed, 0 failed, 0 blocked

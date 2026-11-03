@@ -1,0 +1,12 @@
+# A result that nobody looks at does not compile.
+error Closed:
+    Shop
+
+def open_at(hour: int) -> ! Closed:
+    if hour < 8:
+        return Err(Shop)
+    return Ok(())
+
+def main():
+    open_at(6)
+    _ = open_at(7)

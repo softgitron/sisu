@@ -330,7 +330,7 @@ and the parallel map `par.map`, runs the chunks on one task, and lacks
 `par_iter_mut` and `SoaList`; the chapter teaches the proposal's
 spelling once it runs.
 
-**27. Systems programming.** `unsafe` blocks and expressions, raw
+**27. Systems programming** ([written](tutorial/27-systems.md)). `unsafe` blocks and expressions, raw
 pointers, C interop (header import, `extern "C"`, `std.ffi`,
 `@repr(c)`, `@export`, `@blocking`), `[trust]` and `sisu audit`,
 allocators (`list.with_allocator`, `Region`) and `try_push`, the
@@ -340,7 +340,7 @@ compilation, `panic = abort`, and binary size. Exercises: a safe wrapper
 over a C function, an allocation-free audio callback. Waits for foreign
 functions, allocators and the resource attributes.
 
-**28. Code that lasts.** Editions and the compatibility promise, `sisu
+**28. Code that lasts** ([written](tutorial/28-code-that-lasts.md)). Editions and the compatibility promise, `sisu
 fix --edition`, deprecation with `@fix_inline` and `sisu fix --deps`,
 `@preview` features (D-072), the false-friend table, the API diff and
 behavioural semver of `sisu publish`, `sisu review` and weakened
@@ -368,12 +368,12 @@ instead of teaching.
 | G9 | Test code that uses the clock ([written](guides/clock.md)) | `Clock.frozen_at`, `advance`, the test clock, `Ticker` under test. |
 | G10 | Test code that uses the network ([written](guides/network.md)) | `Net.fake`, `http.FakeNet().respond_to`, request counts. |
 | G11 | Write a property test ([written](guides/property-test.md)) | `check`, `arbitrary[T]`, `@derive(Arbitrary)`, reading a shrunk counterexample, the failure database. |
-| G12 | Test a command-line tool | Snapshots and transcripts, `--update` and reviewing the diff. |
+| G12 | Test a command-line tool ([written](guides/test-tool.md)) | Snapshots and transcripts, `--update` and reviewing the diff. |
 | G13 | Find and fix a borrow error ([written](guides/borrow-errors.md)) | Reading E04xx diagnostics, `sisu explain-borrow`, `--defer-borrow` and the counterexample. |
-| G14 | Find a concurrency bug | `--explore`, `--schedule-seed`, PCT and the exhaustive scheduler, `sisu test --sim` with faults. |
-| G15 | Reproduce a failure | Replay tokens, `sisu run --record`, `sisu replay`. |
-| G16 | Change a running program | `sisu run --watch`, epochs, `live.boundary()`, what restarts the program. |
-| G17 | Make a loop parallel | `std.par`, reducers, `grain`, checking that the result is unchanged. |
+| G14 | Find a concurrency bug ([written](guides/concurrency-bug.md)) | `--explore`, `--schedule-seed`, PCT and the exhaustive scheduler, `sisu test --sim` with faults. |
+| G15 | Reproduce a failure ([written](guides/replay.md)) | Replay tokens, `sisu run --record`, `sisu replay`. |
+| G16 | Change a running program ([written](guides/live.md)) | `sisu run --watch`, epochs, `live.boundary()`, what restarts the program. |
+| G17 | Make a loop parallel ([written](guides/parallel.md)) | `std.par`, reducers, `grain`, checking that the result is unchanged. |
 | G18 | Use a region for per-request memory | `Region.bump`, `list.with_allocator`, why the list cannot escape (waits for allocators). |
 | G19 | Call a C library | A trusted wrapper package with a capability-taking safe API (waits for foreign functions). |
 | G20 | Build a native executable | `sisu build --native`, `--release`, targets and cross compilation. |
@@ -404,11 +404,11 @@ prototype in the experiment ([STYLE.md](STYLE.md)).
 | R1 | Lexical structure ([written](reference/lexical-structure.md)) | Source text, identifiers and the naming rules, the 47 keywords and the contextual ones, comments and doc comments, every literal, line continuation, indentation, the formatter's layout. |
 | R2 | Types ([written](reference/types.md)) | Every builtin type, numeric conversions, text types, collections and literal typing (`FromLiteral`), tuples, unit and `Never`, `T?` and `T ! E`, error-set subtyping, function types and `pure`, references, views, the library pointer types, `dyn`, refinements, aliases, the auto traits, what the type system leaves out. |
 | R3 | Declarations ([written](reference/declarations.md)) | `let`, `var`, `const`, `def` and its parameters, `pure def`, `comptime def`, `struct`, `view struct`, `enum`, `error`, `trait`, `impl`, `type`, `test`, `suite`, `bench`, `import`, `extern`, visibility. |
-| R4 | Expressions and operators | The precedence table and each operator, calls and keyword arguments, indexing, slicing and `^`, comprehensions, closures and `it`, `if` and `match` expressions, `else` fallbacks, `?`, `?.`, `??`, interpolation and format specs, `comptime e`, `unsafe e`. |
-| R5 | Statements and control flow | Assignment and places, `if`, chained conditions, `if let`, `while let`, `let ... else`, `while`, the three `for` modes, `break`, `continue`, `return`, `match`, `select`, `with`, `defer`, `assert`, `debug_assert`, `expect`, `pass`, `unsafe` blocks. |
+| R4 | Expressions and operators ([written](reference/expressions.md)) | The precedence table and each operator, calls and keyword arguments, indexing, slicing and `^`, comprehensions, closures and `it`, `if` and `match` expressions, `else` fallbacks, `?`, `?.`, `??`, interpolation and format specs, `comptime e`, `unsafe e`. |
+| R5 | Statements and control flow ([written](reference/statements.md)) | Assignment and places, `if`, chained conditions, `if let`, `while let`, `let ... else`, `while`, the three `for` modes, `break`, `continue`, `return`, `match`, `select`, `with`, `defer`, `assert`, `debug_assert`, `expect`, `pass`, `unsafe` blocks. |
 | R6 | Patterns ([written](reference/patterns.md)) | Every pattern form, binding by case, exhaustiveness, guards, alternatives that bind. |
 | R7 | Ownership and borrowing ([written](reference/ownership.md)) | Moves, copies, drops and their order, conventions, references, elision and `from`, views, captures, iteration modes, must-consume, guaranteed drop, the library pointer types, allocators. |
-| R8 | Errors and panics | Error sets, propagation, traces, context, panics, unwinding, abort, exit statuses. |
+| R8 | Errors and panics ([written](reference/errors.md)) | Error sets, propagation, traces, context, panics, unwinding, abort, exit statuses. |
 | R9 | Concurrency ([written](reference/concurrency.md)) | Tasks, scopes, handles, failures and their order, cancellation, shields, deadlines, races, channels, `select`, the sync types, `Send` and `Sync`, atomics and orderings, `std.par`, the scheduler and its yield points. |
 | R10 | Capabilities ([written](reference/capabilities.md)) | `System`, each capability's operations, attenuations, lending, revocation, interceptors, fakes, what is ambient, how it is enforced. |
 | R11 | Contracts | `requires`, `ensures`, `invariant`, refinements, check levels, violations. |
@@ -437,13 +437,13 @@ chose otherwise, and links to the decision log for the evidence.
 | X3 | Ownership without lifetimes ([written](explanations/ownership.md)) | Second-class references, views, what is given up, compared with Rust, Swift and Python. |
 | X4 | Capabilities and the supply chain ([written](explanations/capabilities.md)) | No ambient authority, testability, portability, the cost of one more parameter. |
 | X5 | Concurrency without colours ([written](explanations/concurrency.md)) | No `async`, scopes as supervisors, cancellation without tokens. |
-| X6 | Determinism | `pure`, insertion-ordered `dict`, strict floats, and what replay, simulation and `comptime` get from them. |
-| X7 | Compile-time code instead of macros | What `comptime` and reflection cover and what they leave out. |
+| X6 | Determinism ([written](explanations/determinism.md)) | `pure`, insertion-ordered `dict`, strict floats, and what replay, simulation and `comptime` get from them. |
+| X7 | Compile-time code instead of macros ([written](explanations/compile-time.md)) | What `comptime` and reflection cover and what they leave out. |
 | X8 | Loud divergence ([written](explanations/loud-divergence.md)) | Why a familiar spelling means the same as in Python or Rust or fails to compile. |
-| X9 | How the compiler works | Stages 0 to 3, the interpreter, SIR, the native backend, the queries. |
+| X9 | How the compiler works ([written](explanations/compiler.md)) | Stages 0 to 3, the interpreter, SIR, the native backend, the queries. |
 | X10 | Diagnostics as a product ([written](explanations/diagnostics.md)) | The catalog, identifiers, fixes with consequences, the wrong-program corpus. |
 | X11 | How Sisu evolves | Editions, migrations that travel with libraries, governance. |
-| X12 | Testing without mocks | Fakes, the test clock, simulation, replay. |
+| X12 | Testing without mocks ([written](explanations/testing.md)) | Fakes, the test clock, simulation, replay. |
 | X13 | Working with unfinished code | Typed holes, blocked tests, the fill engine to come. |
 | X14 | Costs you can see | No hidden allocation, monomorphisation, compile speed. |
 
@@ -832,10 +832,10 @@ solutions and passing checks.
 | 6 | Chapters 10 (3, done), 11 (4, done), 12 (3, done), 13 with challenge II (3, done); R7 ownership (3, done); G13 borrow errors (1, done); X3 (1, done) | done |
 | 7 | Reader test of Parts I and II: five readers who know Python, their stuck points, the rewrites | 4 |
 | 8 | Chapters 14 (3, done), 15 (3, done), 16 (3, done), 17 with challenge III (2.5, done); R2 (3, done), R3 (2, done), R6 (1, done), R13 (2.5, done) | 20 |
-| 9 | Chapters 18 (3, done), 19 (3, done), 20 (4, done), 21 (3, done), 22 with challenge IV (4, done); R9 (2.5, done), R10 (2, done), R15 (2, done); G5 to G16 (9; G5 to G11 done) | 32.5 |
-| 10 | R4 (2), R5 (1.5), R8 (1.5), R14 (1.5), R20 (2), R21 (1), R22 (1); X1 (done), X2 (done), X4 (done), X5 (done), X8 (done), X10 (done), X12 (7) | 17.5 |
-| 11 | Chapters 23 (2, done), 24 (2, done), 25 (3, done), 26 (2, done); R11 (1), R12 (2); G17, G20, G21, G26, G27, G28, G29, G30, G31, G32 (7.5); X6, X7, X9, X13, X14 (5) | 26.5 |
-| 12 | When their features exist: chapters 27 (3) and 28 with challenge V (2); G18, G19, G22, G23, G24, G25 (4.5); X11 (1); the site (3) | 13.5 |
+| 9 | Chapters 18 (3, done), 19 (3, done), 20 (4, done), 21 (3, done), 22 with challenge IV (4, done); R9 (2.5, done), R10 (2, done), R15 (2, done); G5 to G16 (9, done) | done |
+| 10 | R4 (2, done), R5 (1.5, done), R8 (1.5, done), R14 (1.5), R20 (2), R21 (1), R22 (1); X1, X2, X4, X5, X8, X10, X12 (7, done) | 17.5 |
+| 11 | Chapters 23 (2, done), 24 (2, done), 25 (3, done), 26 (2, done); R11 (1), R12 (2); G17, G20, G21, G26, G27, G28, G29, G30, G31, G32 (7.5; G17 done); X6 (done), X7 (done), X9 (done), X13, X14 (5) | 26.5 |
+| 12 | When their features exist: chapters 27 (3, done) and 28 with challenge V (2, done); G18, G19, G22, G23, G24, G25 (4.5); X11 (1); the site (3) | 13.5 |
 | | Total | about 159 |
 
 The setup of R18, the generated library reference, belongs to step 12's
@@ -845,12 +845,9 @@ chapter: each diagnostic a page shows gets its entry.
 ## What the plan found in stage 0
 
 Writing the first chapter, and trying the habits chapter 4 will meet,
-against stage 0 turned up three things for the compiler's maintainers,
+against stage 0 turned up two things for the compiler's maintainers,
 recorded here so that later chapters do not rediscover them:
 
-- `{x=:.1f}` ignores the precision for a float and prints every digit,
-  though [02](../proposal/02-syntax.md) says a format spec may follow the
-  `=`; `{n=:>5}` works.
 - `sisu explain CODE` prints the catalog line only; the long form with
   an example that [10](../proposal/10-tooling.md) describes is Q-66.
 - The conformance runner cannot pin the human form of a compile error
@@ -1249,6 +1246,40 @@ Writing the rest of Part I turned up more, by chapter:
   works. E0335 names the function passed, not the `print` inside it, as
   chapter 16 found. `xs.par_iter()` gets E0304 and `SoaList` E0201, as
   planned.
+- Chapter 27. `sisu test`, and `sisu sir --tests`, use the Rust front
+  end, which reads neither `std.mem`, `std.ffi`, `extern` nor `unsafe`
+  (E0220, E0900), so no test of unsafe code runs, though
+  [22](../proposal/22-unsafe.md#interaction-with-the-rest-of-the-language)
+  makes `sisu test` the place where the checked memory model checks
+  unsafe code on every run; the chapter's exercises practise the safe
+  side (layouts, bytes, code that does not allocate), and its unsafe
+  examples run under `sisu run`. A `CString`'s `as_ptr()` passed to a
+  foreign function stops the interpreter with "`ptr.strlen` through a
+  pointer to a value that no longer exists (`valid`)" and the native
+  backend with "does not compile `mem.slice.as_ptr` of a `u8`", so the
+  chapter builds its C string in raw memory and only checks the
+  `CString` example. `sisu audit --unsafe` gets D0009: the audit of
+  stage 1's RULES.md, R7, is `sisu1`'s command, which `sisu` does not
+  pass on. `@derive(Plain)` accepts a `@repr(c)` struct with padding (a
+  `u32`, an `i16` and a `u8`, one byte of padding at its end), though 22
+  allows no padding in a plain type, whose `as_bytes` would then read
+  it. E0981 names `ptr_mut.read`, the builtin's internal name, where the
+  program writes `ptr mut T`. `@no_alloc`, `@no_block` and `@stack(...)`
+  compile without a word and check nothing; `--target` gets D0009,
+  `panic = "abort"` in a profile W0005, `import c "..."` E0900,
+  `list.with_allocator` E0351 and `try_push` E0304. A hello program
+  built with `sisu build --native --release` is 17.5 MB. `N.to_f32()` on
+  a constant parameter `N` is read as an associated function of a type
+  `N` (E0351); binding `N` with `let` first works.
+- Chapter 28. `sisu fix`, `why`, `review`, `publish` and `lint` get
+  D0003 and `sisu check --holes` D0009, as planned, so the chapter
+  teaches compatibility through what the language already checks
+  (defaults, keyword-only parameters, exhaustive matches on error sets,
+  doc examples) and gives the tools one sentence each.
+  `@deprecated("...")`, `@fix_inline` and `@preview("...")` compile
+  without a word, and a call of a deprecated function gets no warning.
+  The manifest's `edition` takes any text, `edition = "1999"` included,
+  without a word.
 
 Planning the later chapters turned up the parts of the proposal that
 they teach and stage 0 does not run yet, each named in its chapter's
@@ -1439,6 +1470,21 @@ Writing the guides turned up more, by guide:
   gives for generators of custom shapes, gets E0243; `arbitrary[T]`
   needs no derive for a type's own shape, and `Gen.of(make)` takes a
   function of the draws.
+- G14, a concurrency bug. Under `sisu test --explore N`, the log lines
+  printed are those of the first schedule, seed 0, and not of the one
+  that fails; `--schedule-seed N` shows the failing order's. An
+  interpolated literal where a `Path` is expected,
+  `write_text("{hour}.txt", name)`, gets E0300 ("expected `Path`, found
+  `String`") with no fix, though a plain literal becomes a `Path`;
+  `Path.new(...)` is the spelling. Under `--sim`, a task of a scope
+  whose body returns nothing fails the test with "a task failed with
+  InvalidData(path=...) and nobody joined it, and the scope's result
+  cannot carry it", where the test meant to look at the state the tasks
+  left; the body has to join them and return a result.
+- G17, a parallel loop. `for x in par.iter(xs):` runs a body that
+  prints, where [06](../proposal/06-concurrency-and-capabilities.md#data-parallelism)
+  makes every `par` body `pure`; `par.map` and the reducers' methods are
+  checked (E0335).
 
 Writing the explanations turned up more, by page:
 
@@ -1465,6 +1511,32 @@ Writing the explanations turned up more, by page:
   E0301 offers `//` only, with the conversion in its message, so for
   Python's mean, `sum(xs) / len(xs)`, the fix truncates without a
   consequence line (D-065) that says so.
+- X12, testing without mocks. `Revoked` is in every I/O error set
+  (Q-51), so `sisu test --sim --faults` injects it into calls on a file
+  system that was never made revocable: the page's example meets
+  `Err(Revoked)` from `read_to_string` on a test's own `Fs`, a failure
+  that cannot happen there. [17](../proposal/17-testing.md#simulation-and-replay)'s
+  rule that faults come from declared error sets is only as exact as
+  the sets. 17 also says that a test taking the real `System` "can be
+  neither simulated nor replayed, and its token says so"; stage 0 runs
+  such a test under `--sim` against a simulated `System`, and outside it
+  prints no token (D0031).
+- X6, determinism. Stage 1's evaluator, now the front end of `sisu`
+  (D-089), cannot run much of what a `pure` function uses: a `comptime`
+  call that builds a `dict` or a `set`, calls `sum`, loops `for x in
+  xs` over a list or calls `int.to_f64` stops `sisu run` with "beyond
+  the slice: a `comptime` expression that needs ...", a message with no
+  code, where the Rust front end runs them (`--front-end=rust`). D-074
+  made `dict` iterate in insertion order so that compile time and run
+  time would agree, and compile time cannot build a `dict` yet; the
+  page's example counts with an index and a float.
+- X7, compile-time code instead of macros. An error in code that
+  `comptime for` unrolls is reported in a module the compiler writes,
+  `<total[Team]>/main.sisu:3:5`, with the unrolled line (`sum_so_far +=
+  value.name`), and `--format=ids` gives that module's place; nothing
+  points at the loop's line in the source or at the call that
+  instantiated it, as chapter 19 found for `@refines`. E0310 there says
+  "`+` cannot be applied" for a `+=`.
 
 ## Open questions
 

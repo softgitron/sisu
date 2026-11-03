@@ -1,0 +1,19 @@
+# Habits from Python that mean something else in Sisu do not compile.
+
+## The last of `temps`, and whether it is hot.
+def last(temps: list[int]) -> (int, str):
+    let t = temps[-1]
+    let feel = "hot" if t > 80 else "warm"
+    return (t, feel)
+
+## The first reading above 90, or -1.
+def first_hot(temps: list[int]) -> int:
+    for t in temps:
+        if t > 90:
+            return t
+    else:
+        return -1
+
+def main():
+    print(last([70, 85]))
+    print(first_hot([70, 95]))

@@ -25,7 +25,8 @@ def parse_log(data: bytes) -> list[Reading] ! LogError:
     return todo("parse_log")
 
 test "two records":
-    let log = b"\x2d\x00\x00\x00\x1e\x03\x02\x00\x2e\x00\x00\x00\x24\x03\x02\x01"
+    let start = b"\x2d\x00\x00\x00\x1e\x03\x02\x00"
+    let log = start + b"\x2e\x00\x00\x00\x24\x03\x02\x01"
     let first = Reading(minute=45, tenths=798, sensor=2, flags=0)
     let second = Reading(minute=46, tenths=804, sensor=2, flags=1)
     assert parse_log(log) == Ok([first, second])

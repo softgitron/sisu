@@ -1,0 +1,5 @@
+test "two records" ... ok
+test "a temperature below zero" ... ok
+test "an empty log" ... ok
+test "a log cut short" ... ok
+4 passed, 0 failed, 0 blocked

@@ -1,0 +1,11 @@
+$ sisu test promise_changed.sisu
+test "price (doc example)" ... FAILED
+
+test "price (doc example)" ... FAILED
+panic: assertion failed: price(60) == 450
+  left:  500
+  right: 450
+  at test "price (doc example)" (promise_changed.sisu:6:4)
+replay: sisu test --replay 1-f475ea55ed62d394-0.0.1-t0-s0-r0 promise_changed.sisu
+
+0 passed, 1 failed, 0 blocked

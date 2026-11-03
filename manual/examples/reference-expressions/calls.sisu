@@ -1,0 +1,18 @@
+# Calls by position and keyword; methods and associated functions.
+struct Booking:
+    name: String
+    hour: int = 18
+
+    def at(name: str, hour: int) -> Booking:
+        return Booking(name.to_string(), hour)
+
+    def label(self, prefix: str = "") -> String:
+        return "{prefix}{self.name} at {self.hour}"
+
+def main():
+    let a = Booking("Aino")
+    let b = Booking(hour=17, name="Eero")
+    let c = Booking.at("Roni", 19)
+    print("{a.label()}, {b.label(prefix="sauna: ")}, {c.label()}")
+    let labels = [a, b].iter().map(x -> x.label()).collect()
+    print(labels)

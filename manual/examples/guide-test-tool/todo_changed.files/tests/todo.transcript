@@ -1,0 +1,12 @@
+$ todo list
+1. logs
+2. towels
+$ todo add water
+added water
+$ todo done 1
+done: logs
+$ todo list
+1. towels
+2. water
+$ todo done 7
+error: NoSuchItem(number=7) (exit 1)

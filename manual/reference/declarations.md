@@ -397,7 +397,7 @@ error[D0006]: the program was not run: errors found (1)
 
 A function that contains `yield` is a generator and returns `Iter[T]`
 (E0436 otherwise); it ends when its body ends
-([R4](../README.md#the-reference), when it is written).
+([R5](statements.md#generators)).
 
 **Status.** In stage 0 (D-050, D-056).
 
@@ -573,7 +573,7 @@ its body ([Impls](#impls)).
 not report a field declared twice (E0205) and keep one of the two;
 `sisu test`, on the Rust front end, reports it.
 
-**Status.** In stage 0, with the difference above.
+**Status.** In stage 0, with the difference noted.
 
 ## View structs
 
@@ -632,7 +632,7 @@ Rect(w=2.0, h=3.0) 6.0
 `const` in an enum's body compiles, and reading it as `Light.COUNT` is
 E0351.
 
-**Status.** In stage 0 (D-043), with the difference above.
+**Status.** In stage 0 (D-043), with the difference noted.
 
 ## Error sets
 
@@ -641,8 +641,7 @@ enum whose variants are errors, which a function's result names after
 `!` ([R2](types.md#results-and-error-sets)). A line `..` at the end of
 the body makes the set open, so that other packages may add variants to
 it; a `match` on an open set needs a `case _` arm (E0356). Errors, their
-propagation and their traces are [R8](../README.md#the-reference), when
-it is written.
+propagation and their traces are [R8](errors.md).
 
 <!-- file: examples/reference-declarations/error_sets.sisu -->
 ```sisu
@@ -842,7 +841,7 @@ accept an impl method whose signature differs from the trait's, such as
 `-> f64` for the trait's `-> int`, and run it; `sisu test`, on the Rust
 front end, reports E0234.
 
-**Status.** In stage 0 (D-013, Q-12), with the difference above.
+**Status.** In stage 0 (D-013, Q-12), with the difference noted.
 
 ## Type declarations
 

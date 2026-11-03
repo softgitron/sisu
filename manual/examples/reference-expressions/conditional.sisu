@@ -1,0 +1,10 @@
+# `if` and `match` are expressions when each branch is one expression.
+def describe(n: int) -> str:
+    return if n > 9: "many" elif n > 0: "a few" else: "none"
+
+def main():
+    let size = match len("sisu"):
+        case 0: "empty"
+        case 1 | 2 | 3: "short"
+        case _: "long"
+    print("{describe(12)} {describe(2)} {describe(0)} {size}")

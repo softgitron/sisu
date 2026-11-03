@@ -1,0 +1,9 @@
+$ sisu test new_error.sisu
+error[E0314]: this `match` does not cover `Err(Cleaning(_))`
+  --> new_error.sisu:32:5
+   |
+32 |     match book(hour):
+   |     ^^^^^^^^^^^^^^^^
+  = note: add an arm for `Err(Cleaning(_))`, or a `case _` arm
+
+error[D0006]: the program was not run: errors found (1)

@@ -208,7 +208,7 @@ also holds the library's helpers and types that its own code uses, such
 as `Formatter`, `Hasher` and `days_in_month`, which a program can name
 too, while those marked internal to the library are E0701.
 
-**Status.** In stage 0, with the difference above.
+**Status.** In stage 0, with the difference noted.
 
 ## Visibility
 
@@ -284,7 +284,7 @@ and re-exports.
 item in a `from` import, is E0204 in both front ends; `import sauna`
 with `sauna.feel(...)` works.
 
-**Status.** In stage 0, with the difference above.
+**Status.** In stage 0, with the difference noted.
 
 ## The manifest
 
@@ -429,7 +429,7 @@ and `build` reject as an option they do not take (D0009), so a raised
 level is accepted by deleting `sisu.lock`. The `[review]` table of
 [10](../../proposal/10-tooling.md) is accepted and ignored.
 
-**Status.** In stage 0 (D-063), with the differences above.
+**Status.** In stage 0 (D-063), with the differences noted.
 
 ## Target conditions
 
@@ -445,7 +445,7 @@ in the lockfile, which is the same on every target.
 hold on this target is E0260, whose message asks to add the dependency
 to `[dependencies]`, where it already is.
 
-**Status.** In stage 0 (D-063), with the difference above.
+**Status.** In stage 0 (D-063), with the difference noted.
 
 ## Features
 

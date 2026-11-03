@@ -1,0 +1,16 @@
+# A `pure` function gives the same bits wherever it runs: at compile
+# time, at run time, in any process and on any machine.
+pure def mean(readings: list[f64]) -> f64:
+    var total = 0.0
+    var count = 0.0
+    for i in range(len(readings)):
+        total += readings[i]
+        count += 1.0
+    return total / count
+
+const AT_COMPILE_TIME: f64 = comptime mean([82.5, 79.0, 91.25, 0.1])
+
+def main():
+    let at_run_time = mean([82.5, 79.0, 91.25, 0.1])
+    print("{AT_COMPILE_TIME} {at_run_time}")
+    print(at_run_time == AT_COMPILE_TIME)

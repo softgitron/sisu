@@ -1,0 +1,34 @@
+test "the listing of three items" ... FAILED
+transcript "tests/todo.transcript" ... FAILED
+
+test "the listing of three items" ... FAILED
+panic: the snapshot `the listing of three items` changed (`sisu test --update` accepts the new one):
+- 1. logs
+- 2. towels
+- 3. water
++ 1) logs
++ 2) towels
++ 3) water
+  at test "the listing of three items" (todo_changed.sisu:39:5)
+replay: sisu test --replay 1-106b62ee9ca69bd4-0.0.1-t0-s0-r0 todo_changed.sisu
+
+transcript "tests/todo.transcript" ... FAILED
+what the program printed differs from the transcript (`sisu test --update` accepts it):
+  $ todo list
+- 1. logs
+- 2. towels
++ 1) logs
++ 2) towels
+  $ todo add water
+  added water
+  $ todo done 1
+  done: logs
+  $ todo list
+- 1. towels
+- 2. water
++ 1) towels
++ 2) water
+  $ todo done 7
+  error: NoSuchItem(number=7) (exit 1)
+
+0 passed, 2 failed, 0 blocked

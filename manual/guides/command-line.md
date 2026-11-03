@@ -10,8 +10,9 @@ tutorial.
 (a first use of `cli`) and
 [chapter 19](../tutorial/19-testing.md#transcripts) (transcripts); the
 source of `std.x.cli`, [`compiler/std/cli.sisu`](../../compiler/std/cli.sisu),
-which documents what each kind of field reads; G12 for testing a tool
-in more depth.
+which documents what each kind of field reads;
+[Test a command-line tool](test-tool.md), for snapshots and transcripts
+in depth.
 
 ## 1. Describe the command line as a struct
 
@@ -159,7 +160,8 @@ transcript "tests/bill.transcript" ... ok
 
 You need not write the expected lines by hand. Write the `$` lines,
 run `sisu test --update`, and read what it stored before you keep it;
-G12 shows the review.
+[Test a command-line tool](test-tool.md#4-review-a-change) shows the
+review.
 
 **Status.** In stage 0, as `std.x.cli`, which reads the struct by
 reflection where [11](../../proposal/11-stdlib.md) plans a derive. The

@@ -148,7 +148,8 @@ jobs:
         run: cargo build
       - name: Native conformance (conformance/native.list)
         # Each case built by `sisu build --native`, its front end stage 1's
-        # (decision 268), and run.
+        # (decision 268), its LIR compiled by the x86-64 backend written in
+        # Sisu, the debug profile's (decision 331), and run.
         run: ./target/debug/sisu-conformance --sisu target/debug/sisu --native conformance/native.list
       - name: Native conformance from serialised SIR (`--from-sir`)
         # The path a self-hosted front end takes (decision 212): each case
@@ -168,12 +169,12 @@ jobs:
         # --from-lir`, run, and its executable compared byte for byte with
         # the one the SIR gives, in both profiles (decision 284).
         run: ./target/debug/sisu-conformance --sisu target/debug/sisu --native-from-lir conformance/native.list
-      - name: Native conformance with the Sisu backend (`--backend=sisu`)
-        # The x86-64 backend written in Sisu (D-087, step 2; decision 306)
-        # compiles stage 2's LIR of each case of conformance/native-sisu.list
-        # to an object linked with the same runtime; the runs are compared
-        # with the interpreter's expectations.
-        run: ./target/debug/sisu-conformance --sisu target/debug/sisu --native-sisu conformance/native-sisu.list
+      - name: Native conformance with Cranelift, the oracle (`--backend=cranelift`)
+        # Cranelift, the oracle of the backend written in Sisu (decision
+        # 331), compiles stage 2's LIR of each case to an object linked with
+        # the same runtime; the runs are compared with the interpreter's
+        # expectations, as the Sisu backend's are above.
+        run: ./target/debug/sisu-conformance --sisu target/debug/sisu --native-cranelift conformance/native.list
       - name: Stage 1 compiled natively (informational, never fails)
         # The bootstrap path: stage 1 built by the backend with stage 1 as
         # its front end, its token stream and tree of the prelude against
@@ -188,3 +189,43 @@ jobs:
           "$RUNNER_TEMP/stage1" parse --tree ../std/prelude.sisu > "$RUNNER_TEMP/tree.native"
           ../target/debug/sisu --front-end=rust parse --tree ../std/prelude.sisu > "$RUNNER_TEMP/tree.stage0"
           cmp "$RUNNER_TEMP/tree.native" "$RUNNER_TEMP/tree.stage0"
+
+  bootstrap:
+    # The Sisu backend's fixed point (D-087, step 2; decision 330): stage 2
+    # built through the Cranelift path compiles stage 2 and stage 1 with
+    # the backend written in Sisu; those executables compile both again;
+    # the two builds must be byte for byte the same. On pushes only, like
+    # the rest of CI, never on a schedule.
+    name: stage-2 Sisu backend's fixed point
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: compiler
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          rustup toolchain install 1.97.0 --profile minimal
+          rustup override set 1.97.0
+          rustc --version
+          cc --version
+      - name: Cache the cargo registry and the build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            compiler/target
+          key: native-${{ runner.os }}-rust-1.97.0-${{ hashFiles('compiler/Cargo.lock') }}
+          restore-keys: |
+            native-${{ runner.os }}-rust-1.97.0-
+      - name: Build the compiler and the runtime
+        run: cargo build
+      - name: The fixed point (stage2/bootstrap.sh)
+        # Prints each executable's and each SIR's size and SHA-256, and
+        # fails when an executable built by stage 2 compiled by itself
+        # differs from the one stage 2 compiled by Cranelift built.
+        run: ./stage2/bootstrap.sh --sisu target/debug/sisu

@@ -1,0 +1,21 @@
+# Cleanup that can fail is a method that consumes the value.
+error SaveError:
+    Full(pending: int)
+
+@must_consume
+struct Batch:
+    lines: list[String]
+
+    def add(mut self, line: str):
+        self.lines.push(line.to_string())
+
+    def close(own self, room: int) -> int ! SaveError:
+        if len(self.lines) > room:
+            return Err(Full(len(self.lines)))
+        return Ok(len(self.lines))
+
+def main():
+    var batch = Batch([])
+    batch.add("löyly")
+    batch.add("vihta")
+    print(batch.close(1))

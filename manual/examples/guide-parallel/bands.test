@@ -1,0 +1,3 @@
+test "every grain gives the answer of one chunk" ... ok
+test "so do random readings" ... ok
+2 passed, 0 failed, 0 blocked

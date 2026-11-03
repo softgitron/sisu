@@ -1,0 +1,33 @@
+##! Exercise 28.1, predict what the old calls give. Kind: predict. Level: 1.
+##!
+##! Version 1 of `price` took the minutes of a turn and charged 300 cents
+##! an hour. Version 2 added two parameters with defaults. Each constant
+##! is your prediction of what a call gives in version 2. Write each as a
+##! literal, then run `sisu test predict_versions.sisu`. The hints are in
+##! chapter 28 of the tutorial, under "Exercise 28.1: predict what the old
+##! calls give".
+
+## The price in cents of a turn of `minutes` at `per_hour` cents an
+## hour, and of a towel, 150 cents, when `towel` is true.
+pub def price(minutes: int, per_hour: int = 350, towel: bool = True) -> int:
+    var cents = minutes * per_hour // 60
+    if towel:
+        cents += 150
+    return cents
+
+const AN_HOUR: int = todo("price(60), written for version 1")
+const LONGER: int = todo("price(90), written for version 1")
+const AS_BEFORE: int = todo("price(60, per_hour=300, towel=False)")
+const SHORT: int = todo("price(30, towel=False)")
+
+test "an hour, as version 1 users ask for it":
+    assert price(60) == AN_HOUR
+
+test "an hour and a half":
+    assert price(90) == LONGER
+
+test "version 1's price, asked for in version 2":
+    assert price(60, per_hour=300, towel=False) == AS_BEFORE
+
+test "half an hour without a towel":
+    assert price(30, towel=False) == SHORT

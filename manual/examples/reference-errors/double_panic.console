@@ -1,0 +1,4 @@
+$ sisu run double_panic.sisu
+panic while unwinding: the cup broke while being put away
+  the first panic: the shelf fell
+  a panic during unwinding aborts the program

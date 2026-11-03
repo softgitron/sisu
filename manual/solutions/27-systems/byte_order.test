@@ -1,0 +1,4 @@
+test "zero" ... ok
+test "a minute count" ... ok
+test "four different bytes, not at the start" ... ok
+3 passed, 0 failed, 0 blocked

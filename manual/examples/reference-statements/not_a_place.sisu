@@ -1,0 +1,7 @@
+# A value that is not a place cannot be assigned to.
+def total() -> int:
+    return 3
+
+def main():
+    total() = 4
+    print(total())

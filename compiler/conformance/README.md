@@ -203,12 +203,16 @@ environment holding only `SISU_RT_ALLOCS=1`), and compares:
 The expectations are the interpreter's: the native mode reads no file of
 its own and does not bless. A native build lowers SIR through stage 2, the
 lowering written in Sisu, and through nothing else unless `--lower=rust`
-asks for the Rust lowering, the oracle (decisions 304 and 305): the modes
-below that build with the default lowering (`--native`, `--native-from-sir`
-and `--native-release`) run each build with `SISU_NATIVE_TIMES=1` and fail
-a case whose build does not say that stage 2 lowered it (`native: lowered
-by stage 2 in T ms`); their summary counts the cases stage 2 lowered and
-the time it took over them. With `--native-from-sir LIST` the runner
+asks for the Rust lowering, the oracle (decisions 304 and 305), and a debug
+build's LIR is compiled by the x86-64 backend written in Sisu, a release
+build's by Cranelift (decision 331): the modes below that build with the
+default lowering (`--native`, `--native-from-sir`, `--native-release` and
+`--native-cranelift`) run each build with `SISU_NATIVE_TIMES=1` and fail a
+case whose build does not say that stage 2 lowered it (`native: lowered by
+stage 2 in T ms`), and the two debug ones (`--native`, `--native-from-sir`)
+one whose build does not say that the Sisu backend compiled it (`native:
+compiled by the Sisu backend in T ms`); their summary counts those cases
+and the time each took over them. With `--native-from-sir LIST` the runner
 builds each case from serialised SIR instead, `sisu build --native
 --from-sir NAME.sir`, with the case's own `NAME.sir` where it has one and
 what `sisu sir` prints for it otherwise, and compares the same way (a
@@ -237,15 +241,14 @@ message. Stage 2 is the
 executable `--sisu2 PATH` names, else the runner builds
 `ROOT/../../stage2` with the `sisu` it tests (`sisu build --native`)
 before the cases.
-With `--native-sisu LIST` it builds each case with the x86-64 backend
-written in Sisu (`sisu build --native --backend=sisu`, decision 306),
-whose build must also say that it compiled the program (`native: compiled
-by the Sisu backend in T ms`), and compares the runs as `--native` does;
-its executables are its own, so nothing is compared byte for byte. Its
-list is `native-sisu.list`, the cases of `native.list` the Sisu backend
-builds, which grows as that backend does.
-`cargo test -p sisu-driver --test native` runs `native.list` all five ways
-and `native-sisu.list` with the Sisu backend,
+The LIR is translated by Cranelift there (`--backend=cranelift`), whose
+executable is the Rust lowering's. With `--native-cranelift LIST` it
+builds each case with Cranelift, the oracle of the Sisu backend (`sisu
+build --native --backend=cranelift`, decision 331), and compares the runs
+as `--native` does, so that every case is held to the interpreter's
+behaviour under both backends; the executables of the two are their own,
+so nothing is compared byte for byte between them.
+`cargo test -p sisu-driver --test native` runs `native.list` all six ways,
 and CI runs them on every push, each through the front end the executable
 uses (stage 1 by default, so a case built from source or from `sisu sir`
 is built from stage 1's SIR). `--native-survey
@@ -259,7 +262,7 @@ cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-from-sir conf
 cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-release conformance/native.list
 cargo run -p sisu-conformance -- --sisu target/debug/sisu --interpreted-from-sir conformance/native.list
 cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-from-lir conformance/native.list
-cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-sisu conformance/native-sisu.list
+cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-cranelift conformance/native.list
 cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-survey conformance/native.list
 ```
 

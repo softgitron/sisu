@@ -1,0 +1,14 @@
+# Keyword-only parameters, after `*`, leave room for the next version.
+
+## The price in cents of a turn of `minutes`; version 2 added `towel`,
+## and either version may add more after the `*`.
+pub def price(minutes: int, *, per_hour: int = 300, towel: bool = False) -> int:
+    var cents = minutes * per_hour // 60
+    if towel:
+        cents += 150
+    return cents
+
+def main():
+    print(price(60))
+    print(price(90, towel=True))
+    print(price(30, per_hour=400))

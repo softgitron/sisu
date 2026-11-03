@@ -9,6 +9,3 @@ def main():
     unsafe:
         p.write(p.read() + 5)
     print(celsius)
-    # safety: valid, aligned: celsius is still alive and unchanged.
-    let now = unsafe p.read()
-    print(now)

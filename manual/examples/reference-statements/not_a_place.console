@@ -1,0 +1,8 @@
+$ sisu run not_a_place.sisu
+error[E0313]: this expression cannot be assigned to
+  --> not_a_place.sisu:6:5
+  |
+6 |     total() = 4
+  |     ^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

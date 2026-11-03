@@ -1,0 +1,3 @@
+test "the mean of three" ... ok
+test "the median of three" ... blocked by todo("the middle element of sorted_xs")
+1 passed, 0 failed, 1 blocked

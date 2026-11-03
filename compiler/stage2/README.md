@@ -7,8 +7,9 @@ backend-neutral low IR that holds every decision the Rust backend
 translating LIR one to one into Cranelift IR inside the Rust backend, so
 that an executable built from LIR is byte for byte the one built from the
 program's SIR. Step 2, the x86-64 debug backend in Sisu, compiles the same
-LIR to machine code in one pass (begun: `sisu2 x86`, below); the LLVM
-release backend of D-088 lowers it to LLVM IR.
+LIR to machine code in one pass (`sisu2 x86`, below), the debug profile's
+backend since its fixed point holds; the LLVM release backend of D-088
+lowers it to LLVM IR.
 
 ## Running it
 
@@ -16,9 +17,11 @@ release backend of D-088 lowers it to LLVM IR.
 ./sisu2 lir FILE.sir [--release] [--output FILE.lir]   # the LIR of a serialised SIR program
 ./sisu2 sir FILE.sir                                   # the SIR read and written again
 ./sisu2 x86 FILE.lir --output FILE.o                   # the LIR compiled by the Sisu backend
-sisu build --native --from-lir FILE.lir [--output EXE] # the executable, through Cranelift
+sisu build --native [FILE]                             # lowered by stage 2, compiled by the Sisu backend
+sisu build --native --backend=cranelift [FILE]         # lowered by stage 2, translated for Cranelift
+sisu build --native --from-lir FILE.lir [--output EXE] # the executable of a LIR program
 sisu run --native --from-lir FILE.lir [ARGS...]        # built and run
-sisu build --native --backend=sisu [FILE]              # lowered by stage 2, compiled by the Sisu backend
+./bootstrap.sh [--keep DIR] [--sisu PATH]              # the Sisu backend's fixed point
 ```
 
 `sisu2` builds the package natively on first use, and after a source
@@ -101,28 +104,58 @@ lines) takes 15 to 30 ms, the process and the files included.
 
 `sisu build --native` (and `sisu run --native`) lowers every program
 through stage 2 (decisions 304 and 305): the driver writes the SIR to a
-file, `compiler/target/stage2/sisu2 lir` lowers it, and the Rust backend
-translates the LIR. A construct stage 2 does not lower is the program's
-`D0103`; nothing falls back to the Rust lowering, which lowers only when
-`--lower=rust` asks for it (the oracle the check below compares with, and
-the seed that builds stage 1 and stage 2 themselves).
+file and `compiler/target/stage2/sisu2 lir` lowers it; a debug build's LIR
+is then compiled by the Sisu backend (`sisu2 x86`), a release build's
+translated for Cranelift by the Rust backend (decision 331). A construct
+stage 2 does not lower is the program's `D0103`; nothing falls back to the
+Rust lowering, which lowers only when `--lower=rust` asks for it (the
+oracle the check below compares with, and the seed that builds stage 1
+and stage 2 themselves). `SISU_STAGE2=PATH` makes native builds use that
+stage-2 executable as it is instead of `compiler/target/stage2/sisu2`
+(decision 330).
 
 ## The Sisu backend
 
 `sisu2 x86 FILE.lir --output FILE.o` writes an ELF object that `cc` links
 with the runtime Cranelift's objects are linked with, and `sisu build
---native --backend=sisu` (or `SISU_BACKEND=sisu`) does both after stage
-2's lowering. Every function has a frame pointer and every frame slot a
+--native` does both after stage 2's lowering, unless `--backend=cranelift`
+(or `SISU_BACKEND=cranelift`) or `--release` asks for Cranelift (decision
+331). Every function has a frame pointer and every frame slot a
 fixed offset: the callee-saved registers the allocator uses, LIR's slots,
 its variables, and a home for each value that lives past its block or is
 spilled. A value used only in the block that defines it stays in one of
 `rbx`, `r12` to `r15` (which a call preserves) until its last use, the
 furthest one spilled when they run out; one used elsewhere, and every
 block's parameter, lives in its home. Calls are System V's, of which
-Sisu's convention is an instance. The conformance runner's mode
-`--native-sisu conformance/native-sisu.list` builds every case so and
-compares its runs with the interpreter's expectations; the list holds
-every case of `native.list`.
+Sisu's convention is an instance. The conformance runner's mode `--native
+conformance/native.list` builds every case so and compares its runs with
+the interpreter's expectations, and `--native-cranelift` builds them with
+Cranelift, its oracle, and compares the same way.
+
+## The fixed point
+
+`./bootstrap.sh` checks D-087's criterion for this backend (decision
+330): sisu2-C, stage 2 as the Cranelift path builds it, lowers and
+compiles the SIR of stage 2 and of stage 1 with the Sisu backend into
+sisu2-A and stage1-A; stage1-A prints both packages' SIR again, and
+sisu2-A lowers and compiles it into sisu2-B and stage1-B. It holds: each
+B is its A byte for byte, and stage1-A prints the SIR `sisu sir` prints.
+
+```text
+  sisu2-C       10944360 bytes  sha256 5f9e20ebc11e9419...  built through the Cranelift path (33.8 s)
+  A.stage2.sir   4000896 bytes  sha256 06645affac211932...  printed by sisu sir
+  A.stage1.sir  17182632 bytes  sha256 c7174fed048f205d...  printed by sisu sir (both 61.2 s)
+  sisu2-A       14459112 bytes  sha256 2acc04a32f95c0fb...  built by sisu2-C (7.7 s)
+  stage1-A      38966672 bytes  sha256 a3ef32a31e41464e...  built by sisu2-C (27.5 s)
+  B.stage2.sir   4000896 bytes  sha256 06645affac211932...  printed by stage1-A
+  B.stage1.sir  17182632 bytes  sha256 c7174fed048f205d...  printed by stage1-A (both 91.0 s)
+  sisu2-B       14459112 bytes  sha256 2acc04a32f95c0fb...  built by sisu2-A (11.5 s)
+  stage1-B      38966672 bytes  sha256 a3ef32a31e41464e...  built by sisu2-A (46.2 s)
+```
+
+It takes about five minutes on four cores; `--keep DIR` leaves the files
+in `DIR`, `--sisu PATH` drives the builds with another `sisu` (CI's
+`bootstrap` job uses the debug one).
 
 ## The check
 
@@ -159,6 +192,10 @@ What is done, and what is not, is kept here as the work goes.
 - The Sisu backend (decisions 306 to 312): every operation of LIR but a
   jump with more than nine arguments and a return of more than one value;
   all 207 cases of `native.list` run from its objects with the
-  interpreter's output (`--native-sisu`); stage 1 compiled by it checks
-  the conformance suite's files as the Cranelift build does. What it
-  leaves is in `docs/port-debt.md` ("The backend in Sisu").
+  interpreter's output (`--native`), as they do from Cranelift's
+  (`--native-cranelift`); stage 1 compiled by it checks the conformance
+  suite's files as the Cranelift build does. What it leaves is in
+  `docs/port-debt.md` ("The backend in Sisu").
+- Its fixed point holds (decision 330, `./bootstrap.sh`), and it is the
+  debug profile's backend, Cranelift the release profile's and the
+  oracle (decision 331).

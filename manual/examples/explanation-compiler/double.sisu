@@ -1,0 +1,6 @@
+# A small function, to see what the front end hands to the back ends.
+def double(n: int) -> int:
+    return n * 2
+
+def main():
+    print(double(21))

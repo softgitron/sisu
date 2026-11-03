@@ -1,0 +1,9 @@
+warning[W0001]: typed hole `middle` of type `int`
+  --> holes.sisu:6:12
+  |
+6 |     return todo("middle")
+  |            ^^^^^^^^^^^^^^
+
+panic: reached the typed hole `todo("middle")`
+  at median (holes.sisu:6:12)
+  at main (holes.sisu:10:11)

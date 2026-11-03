@@ -1,0 +1,25 @@
+# A caller's `match` names every error of a library's error set.
+error BookingError:
+    Taken(hour: int)
+    Closed
+    Cleaning(until: int)
+
+## Books `hour`, which the sauna has free from 16 to 21, but not 18.
+pub def book(hour: int) -> ! BookingError:
+    if hour < 16 or hour > 21:
+        return Err(Closed)
+    if hour == 18:
+        return Err(Taken(hour))
+    if hour == 16:
+        return Err(Cleaning(until=17))
+    return Ok(())
+
+def main():
+    for hour in [17, 18, 23]:
+        match book(hour):
+            case Ok(()):
+                print("{hour}: booked")
+            case Err(Taken(h)):
+                print("{hour}: {h}:00 is taken")
+            case Err(Closed):
+                print("{hour}: the sauna is closed")

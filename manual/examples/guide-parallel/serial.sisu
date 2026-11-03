@@ -1,0 +1,13 @@
+# The loop to make parallel: a histogram, one reading at a time.
+
+## How many `readings`, in tenths of a degree, fall in each band of ten
+## degrees, by the band's lowest degree.
+def bands(readings: list[int]) -> dict[int, int]:
+    var counts: dict[int, int] = {}
+    for x in readings:
+        counts.entry(x // 100 * 10).or_insert(0) += 1
+    return counts
+
+def main():
+    let readings = [600 + (i * 37) % 400 for i in range(10_000)]
+    print(bands(readings))

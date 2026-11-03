@@ -4,8 +4,7 @@ This page describes how Sisu reads the text of a program: the source
 text, names and the rules for spelling them, keywords, comments, lines
 and indentation, every form of literal, the operators and punctuation,
 and the layout that `sisu fmt` writes. What the expressions built from
-these tokens mean is [R4](../README.md#the-reference), when it is
-written.
+these tokens mean is [R4](expressions.md).
 
 **See also:** the tutorial's [chapter 1](../tutorial/01-hello.md)
 (comments, indentation), [chapter 2](../tutorial/02-values.md) (number
@@ -509,7 +508,7 @@ A string literal is text between double quotes. Its forms are these:
   `Debug` value, and `{{` and `}}` are literal braces. There is no `f`
   prefix: every literal can interpolate, and one that does is a
   `String`. What the format specs mean is
-  [R4](../README.md#the-reference), when it is written.
+  [R4](expressions.md#interpolation-and-format-specs).
 - A multi-line literal keeps every character between its quotes,
   including the first line break and the indentation of each line.
 - A one-line literal ends on its line. One that is not closed there is
@@ -594,7 +593,7 @@ def main():
 The lexer takes the longest token that matches, so `//=` is one token
 and not `//` and `=`.
 
-| Tokens | Meaning ([R4](../README.md#the-reference)) |
+| Tokens | Meaning ([R4](expressions.md#precedence)) |
 |---|---|
 | `+` `-` `*` `/` `//` `%` `**` | arithmetic: `/` divides floats, `//` integers; `-x` negates |
 | `+%` `-%` `*%` | arithmetic that wraps around |

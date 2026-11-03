@@ -1,0 +1,10 @@
+$ sisu test --replay 1-f7555e679cbec94d-0.0.1-t1-s0-r0 orders_fixed.sisu
+error[D0033]: the token is for other code (content hash f7555e679cbec94d); `orders_fixed.sisu` has content hash 968a397df8661a6f
+$ sisu test orders_fixed.sisu
+test "two orders of coffee" ... ok
+test "an order without a count is one" ... ok
+2 passed, 0 failed, 0 blocked
+$ sisu run orders_fixed.sisu
+coffee: 5
+tea: 1
+bun: 1

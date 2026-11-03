@@ -1,0 +1,2 @@
+4:14-4:16 E0344 type.constant-negative-index fix="xs[^1]"
+  fix type.from-end-index 4:14-4:16 "^1"

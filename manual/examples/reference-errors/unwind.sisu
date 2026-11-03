@@ -1,0 +1,18 @@
+# A panic unwinds the task, dropping each value on the way, and stops.
+struct Guest:
+    name: String
+
+impl Drop for Guest:
+    def drop(mut self):
+        print("{self.name} goes home")
+
+def serve(count: int) -> int:
+    let late = Guest("Eero")
+    if count > 2:
+        panic("too many guests: {count}")
+    return count
+
+def main():
+    let early = Guest("Aino")
+    print(serve(1))
+    print(serve(5))

@@ -1,0 +1,15 @@
+# A loop that takes the newest code at the top of each turn. After its
+# first turn it saves its own next version, as an editor would.
+
+## What each turn prints.
+def greeting(turn: int) -> String:
+    return "turn {turn}: the sauna is warming"
+
+def main(sys: System) -> ! IoError:
+    for turn in range(3):
+        live.boundary()
+        print("{greeting(turn)}, epoch {live.epoch()}")
+        if turn == 0:
+            let next = sys.fs.read_to_string("v2.sisu")?
+            sys.fs.write_text("loop.sisu", next)?
+    return Ok(())

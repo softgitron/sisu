@@ -1,0 +1,3 @@
+panic: index out of bounds: the length is 1 but the index is 1
+  at totals (orders.sisu:8:17)
+  at main (orders.sisu:14:20)

@@ -1,0 +1,25 @@
+# Each booking is kept in memory and in a file, which must agree.
+
+## The sauna's bookings: who has each hour, in memory and on disk.
+struct Sauna:
+    files: Fs
+    booked: Mutex[dict[int, String]]
+
+    ## Books `hour` for `name` if it is free, and says whether it did.
+    def book(self, hour: int, name: str) -> bool ! IoError:
+        var guard = self.booked.lock()
+        if hour in guard.value:
+            return Ok(False)
+        _ = guard.value.insert(hour, name.to_string())
+        self.files.write_text(Path.new("{hour}.txt"), name)?
+        return Ok(True)
+
+test "every booking is on the disk"(files: Fs):
+    let sauna = Sauna(files, Mutex({}))
+    _ = task.scope do s:
+        let aino = s.spawn(() -> sauna.book(18, "Aino"))
+        let eero = s.spawn(() -> sauna.book(19, "Eero"))
+        return Ok([aino.join(), eero.join()])
+    for hour in [18, 19]:
+        let kept = hour in sauna.booked.lock().value
+        assert kept == files.exists(Path.new("{hour}.txt"))

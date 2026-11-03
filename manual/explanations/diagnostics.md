@@ -174,8 +174,13 @@ message shows it as it is and adds it to the plan's list of findings.
 That list has grown with every chapter: a fix that leads to the same
 error again, a note that names a remedy for text where the value is a
 capability, a habit from Python that gets a generic parse error. The
-corpus that decides which messages matter most will come later from
-readers, through the playground's logs, with their consent (Q-68).
+list is read: seven of stage 1's rules (R10 to R16 in its
+[RULES.md](../../compiler/stage1/RULES.md)) answer findings from it,
+from naming every pattern that a `match` misses to the note that sends
+Python's `open` to `Fs`, which [Capabilities and the supply
+chain](capabilities.md) shows. The corpus that decides which messages
+matter most will come later from readers, through the playground's logs,
+with their consent (Q-68).
 
 ## Explaining what the compiler worked out
 

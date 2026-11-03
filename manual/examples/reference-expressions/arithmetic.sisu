@@ -1,0 +1,7 @@
+# The arithmetic and bitwise operators on integers and floats.
+def main():
+    print("{7 // 2} {-7 // 2} {-7 % 3} {7 % -3} {2 ** 10}")
+    print("{7.0 / 2.0} {2.0 ** 0.5} {-(2 ** 2)} {(-2) ** 2}")
+    print("{6 & 3} {6 | 3} {6 ^ 3} {~6} {1 << 4} {-16 >> 2}")
+    let level: u8 = 250
+    print("{level +% 10} {level +| 10} {level -| 251}")

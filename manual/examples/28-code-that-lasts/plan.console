@@ -1,0 +1,17 @@
+$ sisu test plan.sisu
+warning[W0001]: typed hole `parse a slot` of type `Slot?`
+  --> plan.sisu:16:12
+   |
+16 |     return todo("parse a slot")
+   |            ^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `keep the slots that fit` of type `list[Slot]`
+  --> plan.sisu:20:12
+   |
+20 |     return todo("keep the slots that fit")
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test "slots that overlap" ... ok
+test "a slot from text" ... blocked by todo("parse a slot")
+test "the slots that fit" ... blocked by todo("keep the slots that fit")
+1 passed, 0 failed, 2 blocked

@@ -1,0 +1,10 @@
+# A documented example is a promise that `sisu test` keeps.
+
+## The price in cents of a turn of `minutes`, towel included.
+##
+## ```
+## assert price(60) == 450
+## assert price(90) == 600
+## ```
+pub def price(minutes: int, per_hour: int = 350) -> int:
+    return minutes * per_hour // 60 + 150

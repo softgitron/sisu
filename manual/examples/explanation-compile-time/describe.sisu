@@ -1,0 +1,19 @@
+# One ordinary generic function, unrolled at compile time over the
+# fields of whatever struct it is given: no macro, no second language.
+def describe[T: Debug](value: T) -> String:
+    var parts: list[String] = []
+    comptime for f in reflect.fields_of(T):
+        parts.push("{f.name}={value.[f]:?}")
+    return "{reflect.name_of(T)}({parts.join(", ")})"
+
+struct Booking:
+    name: String
+    hour: int
+
+struct Stove:
+    heat: f64
+    lit: bool
+
+def main():
+    print(describe(Booking(name="Aino", hour=18)))
+    print(describe(Stove(heat=82.5, lit=True)))

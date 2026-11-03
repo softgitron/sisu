@@ -1,0 +1,16 @@
+# `with` drops its value when its block ends; `defer` runs at the end.
+struct Door:
+    name: String
+
+impl Drop for Door:
+    def drop(mut self):
+        print("{self.name} closes")
+
+def main():
+    defer print("the evening ends")
+    with Door("sauna") as door:
+        print("in through the {door.name} door")
+        defer:
+            print("the towel is hung")
+        print("on the bench")
+    print("out again")

@@ -1,0 +1,4 @@
+test "a free hour" ... ok
+test "a taken hour and a closed one" ... ok
+test "the hour of cleaning" ... ok
+3 passed, 0 failed, 0 blocked

@@ -1,0 +1,5 @@
+$ sisu run traces.sisu
+40
+error: TooLittle(balance=40, wanted=60)
+  at traces.sisu:12:15
+  at traces.sisu:16:11

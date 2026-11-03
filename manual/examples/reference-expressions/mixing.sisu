@@ -1,0 +1,9 @@
+# Mixtures that need parentheses.
+def main():
+    let ready = True
+    let warm = False
+    let n = 5
+    print(ready and warm or ready)
+    print(n & 1 + 2)
+    print(-n ** 2)
+    print(1 < n > 3)

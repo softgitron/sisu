@@ -1,0 +1,4 @@
+test "slots that overlap" ... ok
+test "a slot from text" ... blocked by todo("parse a slot")
+test "the slots that fit" ... blocked by todo("keep the slots that fit")
+1 passed, 0 failed, 2 blocked

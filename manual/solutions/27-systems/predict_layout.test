@@ -1,0 +1,6 @@
+test "a byte before a word" ... ok
+test "a byte after a word" ... ok
+test "the small fields first" ... ok
+test "a word between two bytes" ... ok
+test "a short and a byte" ... ok
+5 passed, 0 failed, 0 blocked

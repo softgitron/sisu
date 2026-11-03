@@ -1,0 +1,4 @@
+$ sisu test todo.sisu
+test "the listing of three items" ... ok
+transcript "tests/todo.transcript" ... ok
+2 passed, 0 failed, 0 blocked

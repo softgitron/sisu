@@ -1,0 +1,9 @@
+# A parallel map whose body prints, which a `par` body may not do.
+import std.par
+
+def main():
+    let readings = [612, 745, 803]
+    let celsius = par.map(readings, (t) -> t.to_f64() / 10.0)
+    print(celsius)
+    let shown = par.map(readings, (t) -> print("reading {t}"))
+    print(len(shown))

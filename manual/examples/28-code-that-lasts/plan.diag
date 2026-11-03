@@ -1,0 +1,2 @@
+16:12-16:32 W0001 type.hole name="parse a slot" ty="Slot?"
+20:12-20:43 W0001 type.hole name="keep the slots that fit" ty="list[Slot]"

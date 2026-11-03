@@ -1,0 +1,11 @@
+# A function that yields is a generator, which runs as items are asked.
+def countdown(n: int) -> Iter[int]:
+    var i = n
+    while i > 0:
+        yield i
+        i -= 1
+
+def main():
+    for x in countdown(3):
+        print(x)
+    print(countdown(10).take(2).collect())

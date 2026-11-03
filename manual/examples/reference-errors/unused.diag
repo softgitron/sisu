@@ -1,0 +1,2 @@
+11:5-11:15 E0318 type.unused-result ty="! Closed"
+  fix type.discard 11:5-11:5 "_ = "

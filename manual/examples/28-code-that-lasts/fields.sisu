@@ -1,0 +1,14 @@
+# A field with a default keeps construction by keyword working.
+
+## A turn in the sauna. Version 2 added `towel`.
+@derive(Debug)
+struct Turn:
+    name: String
+    hour: int
+    towel: bool = False
+
+def main():
+    let aino = Turn(name="Aino", hour=18)
+    let eero = Turn(name="Eero", hour=19, towel=True)
+    print("{aino:?}")
+    print("{eero:?}")

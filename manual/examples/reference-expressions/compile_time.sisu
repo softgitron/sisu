@@ -1,0 +1,8 @@
+# `comptime e` computes `e` while the program is compiled.
+pure def fib(n: int) -> int:
+    return if n < 2: n else: fib(n - 1) + fib(n - 2)
+
+def main():
+    let answer = comptime 6 * 7
+    let big = comptime fib(20)
+    print("{answer} {big}")

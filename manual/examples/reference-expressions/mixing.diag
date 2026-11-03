@@ -1,0 +1,6 @@
+6:26-6:28 E0108 parse.mixed-and-or
+7:20-7:21 E0110 parse.bitwise-arithmetic op="&"
+  fix parse.parenthesize 7:15-7:15 "(" 7:20-7:20 ")"
+8:18-8:19 E0112 parse.negative-power
+  fix parse.parenthesize 8:12-8:12 "(" 8:18-8:18 ")"
+9:17-9:18 E0113 parse.mixed-chain first="<" second=">"

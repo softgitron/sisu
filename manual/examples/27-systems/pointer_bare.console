@@ -1,10 +1,18 @@
 $ sisu run pointer_bare.sisu
-error[E0981]: `ptr_mut.read` is an `unsafe def`: call it inside an `unsafe:` block or an `unsafe` expression
-  --> pointer_bare.sisu:13:15
-   |
-13 |     let now = p.read()
-   |               ^^^^^^^^
-   |               -------- its obligations: `valid`, `aligned`
+error[E0981]: `ptr_mut.write` is an `unsafe def`: call it inside an `unsafe:` block or an `unsafe` expression
+  --> pointer_bare.sisu:9:5
+  |
+9 |     p.write(p.read() + 5)
+  |     ^^^^^^^^^^^^^^^^^^^^^
+  |     --------------------- its obligations: `writable`, `aligned`
   = note: write why they hold in a `# safety:` comment above the block, naming each obligation it discharges
 
-error[D0006]: the program was not run: errors found (1)
+error[E0981]: `ptr_mut.read` is an `unsafe def`: call it inside an `unsafe:` block or an `unsafe` expression
+  --> pointer_bare.sisu:9:13
+  |
+9 |     p.write(p.read() + 5)
+  |             ^^^^^^^^
+  |             -------- its obligations: `valid`, `aligned`
+  = note: write why they hold in a `# safety:` comment above the block, naming each obligation it discharges
+
+error[D0006]: the program was not run: errors found (2)

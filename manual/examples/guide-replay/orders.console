@@ -1,0 +1,8 @@
+$ sisu run --record bug.log orders.sisu
+panic: index out of bounds: the length is 1 but the index is 1
+  at totals (orders.sisu:8:17)
+  at main (orders.sisu:14:20)
+$ sisu replay bug.log
+panic: index out of bounds: the length is 1 but the index is 1
+  at totals (orders.sisu:8:17)
+  at main (orders.sisu:14:20)

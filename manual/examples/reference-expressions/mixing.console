@@ -1,0 +1,27 @@
+$ sisu check mixing.sisu
+error[E0108]: `and` and `or` cannot be mixed without parentheses
+  --> mixing.sisu:6:26
+  |
+6 |     print(ready and warm or ready)
+  |                          ^^
+
+error[E0110]: `&` cannot be mixed with arithmetic or shifts without parentheses
+  --> mixing.sisu:7:20
+  |
+7 |     print(n & 1 + 2)
+  |                    ^
+  = fix: add parentheses: `(`, `)`
+
+error[E0112]: `-x ** y` is ambiguous; write `-(x ** y)` or `(-x) ** y`
+  --> mixing.sisu:8:18
+  |
+8 |     print(-n ** 2)
+  |                  ^
+  = fix: add parentheses: `(`, `)`
+
+error[E0113]: a chained comparison must point one way; `<` and `>` do not
+  --> mixing.sisu:9:17
+  |
+9 |     print(1 < n > 3)
+  |                 ^
+

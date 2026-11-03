@@ -1,0 +1,12 @@
+# Interpolation, with format specs, `Debug` forms and literal braces.
+struct Point:
+    x: int
+    y: int
+
+def main():
+    let t = 7.5
+    let n = 255
+    let p = Point(1, 2)
+    print("[{t:>8.2f}] [{t:<6}] [{"x":^5}] [{n:08}]")
+    print("{n:x} {n:#b} {1234567:,} {0.25:%} {1e6:e}")
+    print("{p:?} {t=} {n + 1=} {{literal braces}}")

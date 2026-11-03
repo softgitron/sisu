@@ -1,0 +1,14 @@
+# A program with a hole: it type-checks, its tests that reach the hole
+# are blocked rather than failed, and the rest of it runs.
+def median(xs: list[int]) -> int:
+    let sorted_xs = sorted(xs)
+    return todo("the middle element of sorted_xs")
+
+def mean(xs: list[int]) -> int:
+    return sum(xs) // len(xs)
+
+test "the mean of three":
+    assert mean([3, 1, 2]) == 2
+
+test "the median of three":
+    assert median([3, 1, 2]) == 2

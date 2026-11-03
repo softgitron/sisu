@@ -1,0 +1,8 @@
+# List, dict and set comprehensions build a collection from a loop.
+def main():
+    let xs = [3, 1, 2, 4]
+    let squares = [x * x for x in xs if x > 1]
+    let lengths = {name: len(name) for name in ["Aino", "Eero"]}
+    let parities = {x % 2 for x in xs}
+    let pairs = [(i, x) for i, x in enumerate(xs) if i < 2]
+    print("{squares} {lengths} {parities} {pairs}")

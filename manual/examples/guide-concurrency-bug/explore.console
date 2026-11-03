@@ -1,0 +1,20 @@
+$ sisu test double.sisu
+info [task 2]: Eero finds 18:00 free
+test "an hour is booked once" ... ok
+1 passed, 0 failed, 0 blocked
+$ sisu test --explore 20 double.sisu
+info [task 2]: Eero finds 18:00 free
+test "an hour is booked once" ... FAILED
+
+test "an hour is booked once" ... FAILED
+with schedule seed 2; `--schedule-seed 2` runs it again
+panic: assertion failed: booked == Ok([True, False]) or booked == Ok([False, True])
+    booked == Ok([True, False]) or booked == Ok([False, True])
+    │         │
+    │         Ok([True, False])
+    Ok([True, True])
+  at test "an hour is booked once" (double.sisu:22:5)
+replay: sisu test --replay 1-3edcff83e8219252-0.0.1-t0-s2-r0 double.sisu
+
+0 passed, 1 failed, 0 blocked
+explored 20 schedules per test (seeds 0 to 19)

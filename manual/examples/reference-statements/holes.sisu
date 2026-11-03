@@ -1,0 +1,10 @@
+# A typed hole checks as the type expected and stops the run if reached.
+def median(xs: list[int]) -> int:
+    let s = sorted(xs)
+    if len(s) == 1:
+        return s[0]
+    return todo("middle")
+
+def main():
+    print(median([4]))
+    print(median([4, 1, 3]))

@@ -1,0 +1,17 @@
+# An error that reaches `main` ends the run with its trace and status 1.
+error BankError:
+    TooLittle(balance: int, wanted: int)
+
+def withdraw(balance: int, wanted: int) -> int ! BankError:
+    if wanted > balance:
+        return Err(TooLittle(balance, wanted))
+    return Ok(balance - wanted)
+
+def pay_twice(balance: int, price: int) -> int ! BankError:
+    let once = withdraw(balance, price)?
+    return Ok(withdraw(once, price)?)
+
+def main() -> ! BankError:
+    print(pay_twice(100, 30)?)
+    print(pay_twice(100, 60)?)
+    return Ok(())
