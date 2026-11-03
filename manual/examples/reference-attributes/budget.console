@@ -1,0 +1,8 @@
+$ sisu run budget.sisu
+error[E0606]: `@comptime_budget` takes `steps=N`, a positive number of steps
+  --> budget.sisu:8:1
+  |
+8 | @comptime_budget(2_000_000)
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

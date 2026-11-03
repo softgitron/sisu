@@ -1,0 +1,8 @@
+$ sisu run cfg_condition.sisu
+error[E0266]: `@cfg` takes a condition: `test`, `feature="NAME"`, `not` and a condition, or `all(...)` or `any(...)` of conditions; this is none of them
+  --> cfg_condition.sisu:2:6
+  |
+2 | @cfg(target.os == "linux")
+  |      ^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

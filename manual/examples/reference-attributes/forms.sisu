@@ -1,0 +1,20 @@
+# Attributes stand on their own lines before a declaration or a member.
+@derive(Eq, Hash)
+@table("saunas", key="name")
+struct Sauna:
+    name: String
+    @unit("celsius")
+    heat: int = 80
+
+enum Stove:
+    Wood
+    @since("2026")
+    Electric
+
+@deprecated("use `heat_of`")
+def heat(sauna: Sauna) -> int:
+    return sauna.heat
+
+def main():
+    let home = Sauna("Kotiharju")
+    print("{home.name} {heat(home)} {Stove.Electric:?} {home == home}")

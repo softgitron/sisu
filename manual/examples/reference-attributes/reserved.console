@@ -1,0 +1,14 @@
+$ sisu run reserved.sisu
+error[E0225]: `@sealed` is reserved for the standard library
+  --> reserved.sisu:2:1
+  |
+2 | @sealed
+  | ^^^^^^^
+
+error[E0225]: `@intrinsic` is reserved for the standard library
+  --> reserved.sisu:6:1
+  |
+6 | @intrinsic("math.sqrt")
+  | ^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (2)

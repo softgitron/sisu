@@ -1,0 +1,5 @@
+$ sisu run cfg.sisu
+built for a run
+$ sisu test cfg.sisu
+test "sorts the sample" ... ok
+1 passed, 0 failed, 0 blocked

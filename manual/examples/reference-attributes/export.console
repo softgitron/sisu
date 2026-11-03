@@ -1,0 +1,8 @@
+$ sisu run export.sisu
+error[E0989]: `name_length` is `@export`ed, and foreign code that calls it cannot keep `str` alive: an exported function's signature holds no reference, view, `Shared`, closure or capability
+  --> export.sisu:7:17
+  |
+7 | def name_length(name: str) -> int:
+  |                 ^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

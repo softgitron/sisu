@@ -1,0 +1,8 @@
+# An operator returns `Self`, so only a one-field struct delegates it.
+@delegate(Add, Display, to="items")
+struct Basket:
+    items: list[String]
+    owner: String
+
+def main():
+    print(Basket(["leipä"], "Aino") + Basket(["maito"], "Eero"))

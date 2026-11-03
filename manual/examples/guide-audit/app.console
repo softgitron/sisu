@@ -1,0 +1,6 @@
+$ sisu audit --caps forecast/src/lib.sisu
+forecast/src/lib.sisu function logged caps=2 io=direct depth=-
+forecast/src/lib.sisu function tomorrow caps=1 io=direct depth=-
+forecast/src/lib.sisu use logged ClockOps.now depth=-
+forecast/src/lib.sisu use tomorrow http.get depth=-
+forecast/src/lib.sisu summary functions=2 median=1.5 max=2 uses=2 deepest=- structs=0

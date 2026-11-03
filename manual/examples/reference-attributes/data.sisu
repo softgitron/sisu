@@ -1,0 +1,17 @@
+# Attributes are data that compile-time code reads.
+@table("bookings")
+@index(hour, unique=True)
+struct Booking:
+    name: String
+    hour: int
+
+comptime def describe(T: type) -> String:
+    var out = String.new(reflect.name_of(T))
+    comptime for a in reflect.attributes_of(T):
+        out = "{out} @{a.name}"
+        comptime for arg in a.args:
+            out = "{out} [{arg}]"
+    return out
+
+def main():
+    print(comptime describe(Booking))

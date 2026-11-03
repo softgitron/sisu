@@ -1,0 +1,6 @@
+$ sisu explain-borrow borrow.sisu:5
+borrows live on line 5 of borrow.sisu, in `main`:
+  a shared borrow of `turns[...]` from 4:17, held by `first`, used until 5:20
+$ sisu explain-borrow borrow.sisu:6
+borrows live on line 6 of borrow.sisu, in `main`:
+  a `mut` borrow of `turns` from 6:5, held by a temporary, used until 6:16

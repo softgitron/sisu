@@ -1,0 +1,2 @@
+2:11-2:14 E0252 resolve.delegate-self trait="Add" ty="Basket" field="items"
+8:11-8:64 E0310 type.binary-operator op="+" lhs="Basket" rhs="Basket"

@@ -1,0 +1,8 @@
+$ sisu run blocking.sisu
+error[E0990]: `@blocking` marks a foreign function whose call may block its thread, and `wait_for_heat` is not a foreign function
+  --> blocking.sisu:9:1
+  |
+9 | @blocking
+  | ^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

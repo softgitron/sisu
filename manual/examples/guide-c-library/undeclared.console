@@ -1,1 +1,8 @@
 $ sisu run
+error[E1019]: the package `cenv` contains foreign code (an `extern` block or a header import), and its `sisu.toml` declares no `unsafe`: add `unsafe = "extern"` to its `[package]`
+  --> cenv/src/lib.sisu:6:1
+  |
+6 | extern "C":
+  | ^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

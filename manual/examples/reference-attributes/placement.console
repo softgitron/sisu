@@ -1,0 +1,20 @@
+$ sisu run placement.sisu
+error[E0117]: unexpected `struct` after the end of the statement
+  --> placement.sisu:2:13
+  |
+2 | @derive(Eq) struct Point:
+  |             ^^^^^^
+
+error[E0106]: expected a declaration, found an indented block
+  --> placement.sisu:3:1
+  |
+3 |     x: int
+  | ^
+
+error[E0106]: expected a declaration, found `let`
+  --> placement.sisu:7:5
+  |
+7 |     let origin = Point(0)
+  |     ^^^
+
+error[D0006]: the program was not run: errors found (3)

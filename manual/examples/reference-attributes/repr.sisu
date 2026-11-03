@@ -1,0 +1,15 @@
+# `@repr(c)` fixes a struct's layout, which `Plain` asks for.
+from std.mem import Plain, read_plain, size_of
+
+@repr(c)
+@derive(Copy, Plain)
+struct Pixel:
+    red: u8
+    green: u8
+    blue: u8
+    alpha: u8
+
+def main():
+    let pixel = read_plain[Pixel](b"\xff\x80\x00\xff", 0)
+    print("{size_of[Pixel]()} bytes")
+    print("{pixel.red} {pixel.green} {pixel.blue} {pixel.alpha}")

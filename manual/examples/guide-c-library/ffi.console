@@ -1,2 +1,6 @@
 $ sisu run
+Hei, stranger!
+the path: /usr/bin:/bin
 $ sisu run --native
+Hei, stranger!
+the path: /usr/bin:/bin

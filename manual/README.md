@@ -357,7 +357,7 @@ instead of teaching.
 
 | | Guide | What it does, and what it covers |
 |---|---|---|
-| G1 | Set up your editor | Connects an editor to `sisu lsp`: diagnostics, hover with error sets and capabilities, inlay hints, fixes, explain-borrow, worksheet values inline. |
+| G1 | Set up your editor ([written](guides/editor.md)) | Connects an editor to `sisu lsp`: diagnostics, hover with error sets and capabilities, inlay hints, fixes, explain-borrow, worksheet values inline. |
 | G2 | Coming from Python ([written](guides/from-python.md)) | Ports a Python script and walks through every false friend (D-062, [R19](#the-reference)) and the idioms that replace `class`, `None`, exceptions and truthiness. |
 | G3 | Coming from Rust ([written](guides/from-rust.md)) | Maps lifetimes to views and `from`, `Rc` to `Shared`, `Result` to `T ! E`, macros to `comptime`, `async` to tasks. |
 | G4 | Coming from Go ([written](guides/from-go.md)) | Maps goroutines to scopes, `context` to cancellation, interfaces to traits, `if err != nil` to `?`. |
@@ -375,12 +375,12 @@ instead of teaching.
 | G16 | Change a running program ([written](guides/live.md)) | `sisu run --watch`, epochs, `live.boundary()`, what restarts the program. |
 | G17 | Make a loop parallel ([written](guides/parallel.md)) | `std.par`, reducers, `grain`, checking that the result is unchanged. |
 | G18 | Use a region for per-request memory | `Region.bump`, `list.with_allocator`, why the list cannot escape (waits for allocators). |
-| G19 | Call a C library | A trusted wrapper package with a capability-taking safe API (waits for foreign functions). |
+| G19 | Call a C library ([written](guides/c-library.md)) | A trusted wrapper package with a capability-taking safe API (waits for foreign functions). |
 | G20 | Build a native executable ([written](guides/native.md)) | `sisu build --native`, `--release`, targets and cross compilation. |
 | G21 | Write a derive ([written](guides/derive.md)) | A trait's `comptime def derive` over `reflect.fields_of`. |
 | G22 | Generate configuration | A module of `const` items rendered by `sisu eval` (waits for `sisu eval`). |
 | G23 | Publish a package | Documentation coverage, the API diff, semver, provenance (waits for the registry). |
-| G24 | Check what a dependency can do | `sisu audit`, the capability summary, admission and its authority delta. |
+| G24 | Check what a dependency can do ([written](guides/audit.md)) | `sisu audit`, the capability summary, admission and its authority delta. |
 | G25 | Move to a new edition | `sisu fix --edition` and `sisu fix --deps` (waits for `sisu fix`). |
 | G26 | Plan with typed holes ([written](guides/holes.md)) | `todo`, blocked tests, `sisu check --holes`. |
 | G27 | Benchmark and profile ([written](guides/bench.md)) | `bench` blocks, `black_box`, `sisu bench`, `sisu run --profile`. |
@@ -828,14 +828,14 @@ solutions and passing checks.
 | 2 | Chapters 2, 3 and 4 | done |
 | 3 | R16 the `sisu` command (2, done), R17 diagnostics, first codes (2, done), R1 lexical structure (2, done) | done |
 | 4 | Chapters 5 (2.5), 6 (2), 7 (2.5), 8 (3) | done |
-| 5 | Chapter 9 with challenge I (3, done); G2 Coming from Python (1, done); R19 false friends (1, done); G3 Coming from Rust and G4 Coming from Go, which no step named (2, done) | done |
+| 5 | Chapter 9 with challenge I (3, done); G2 Coming from Python (1, done); R19 false friends (1, done); G3 Coming from Rust and G4 Coming from Go, which no step named (2, done); G1 Set up your editor, which no step named either (0.5, done) | done |
 | 6 | Chapters 10 (3, done), 11 (4, done), 12 (3, done), 13 with challenge II (3, done); R7 ownership (3, done); G13 borrow errors (1, done); X3 (1, done) | done |
 | 7 | Reader test of Parts I and II: five readers who know Python, their stuck points, the rewrites | 4 |
 | 8 | Chapters 14 (3, done), 15 (3, done), 16 (3, done), 17 with challenge III (2.5, done); R2 (3, done), R3 (2, done), R6 (1, done), R13 (2.5, done) | 20 |
 | 9 | Chapters 18 (3, done), 19 (3, done), 20 (4, done), 21 (3, done), 22 with challenge IV (4, done); R9 (2.5, done), R10 (2, done), R15 (2, done); G5 to G16 (9, done) | done |
 | 10 | R4 (2, done), R5 (1.5, done), R8 (1.5, done), R14 (1.5), R20 (2), R21 (1), R22 (1); X1, X2, X4, X5, X8, X10, X12 (7, done) | 17.5 |
 | 11 | Chapters 23 (2, done), 24 (2, done), 25 (3, done), 26 (2, done); R11 (1), R12 (2); G17, G20, G21, G26, G27, G28, G29, G30, G31, G32 (7.5, done); X6, X7, X9, X13, X14 (5, done) | 26.5 |
-| 12 | When their features exist: chapters 27 (3, done) and 28 with challenge V (2, done); G18, G19, G22, G23, G24, G25 (4.5); X11 (1, done); the site (3) | 13.5 |
+| 12 | When their features exist: chapters 27 (3, done) and 28 with challenge V (2, done); G18, G19, G22, G23, G24, G25 (4.5; G19 and G24 done); X11 (1, done); the site (3) | 13.5 |
 | | Total | about 159 |
 
 The setup of R18, the generated library reference, belongs to step 12's
@@ -1567,6 +1567,15 @@ Writing the guides turned up more, by guide:
   writes `None`; `count := 3` gets E0123, which names `let`. A file with
   a parse error reports nothing of its names, so the `nil` of a file
   that also holds `go f()` goes unreported until the parse is fixed.
+- G19, a C library. `CString.new(name)` and its `as_ptr()` passed to a
+  foreign function stop the interpreter with "panic: `ptr.getenv`
+  through a pointer to a value that no longer exists (`valid`)", though
+  the `CString` lives across the call, and `--native` does not compile
+  `CString.as_ptr` yet, so a wrapper builds its C strings in a block of
+  raw memory (chapter 27's `authority.sisu`, which uses `CString`, is
+  only checked). With `[trust]` left out, the build reports E0703 at
+  each `extern` block and `unsafe` block of the dependency before the
+  E1021 that names the fix.
 
 Writing the explanations turned up more, by page:
 

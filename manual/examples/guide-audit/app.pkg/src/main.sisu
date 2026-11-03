@@ -1,0 +1,10 @@
+##! Says whether to heat the sauna by the lake tomorrow.
+import forecast
+from std.net import UrlError
+
+def main(sys: System) -> ! {UrlError, HttpError}:
+    let net = sys.net.only_hosts(["weather.example"])
+    let text = forecast.tomorrow(net, "weather.example", "Oulu")?
+    let rain = forecast.rain(text)
+    print(if rain: "heat the sauna indoors" else: "go to the lake")
+    return Ok(())

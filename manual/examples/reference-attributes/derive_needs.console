@@ -1,0 +1,8 @@
+$ sisu run derive_needs.sisu
+error[E0242]: `Version` implements `Ord`, which requires `Eq`, but `Version` does not implement `Eq`
+  --> derive_needs.sisu:2:9
+  |
+2 | @derive(Ord)
+  |         ^^^
+
+error[D0006]: the program was not run: errors found (1)

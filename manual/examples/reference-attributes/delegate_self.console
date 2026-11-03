@@ -1,0 +1,14 @@
+$ sisu run delegate_self.sisu
+error[E0252]: `Add` returns a `Basket`, so `Basket` can delegate it only when `items` is its one field
+  --> delegate_self.sisu:2:11
+  |
+2 | @delegate(Add, Display, to="items")
+  |           ^^^
+
+error[E0310]: `+` cannot be applied to `Basket` and `Basket`
+  --> delegate_self.sisu:8:11
+  |
+8 |     print(Basket(["leipä"], "Aino") + Basket(["maito"], "Eero"))
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (2)

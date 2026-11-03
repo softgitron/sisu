@@ -1,0 +1,21 @@
+# `@derive` writes impls from a type's fields.
+@derive(Copy, Eq, PartialOrd, Ord, Hash, Default)
+struct Version:
+    major: int
+    minor: int = 0
+
+@derive(Eq, Hash)
+enum Light:
+    Red
+    Amber(seconds: int)
+
+@derive(Eq)
+error Problem:
+    Missing(name: String)
+
+def main():
+    let old = Version(1, 2)
+    let new = Version(major=2)
+    print("{old < new} {sorted([new, old])} {Version.default():?}")
+    print({Light.Red: "stop", Light.Amber(3): "wait"}[Light.Amber(3)])
+    print(Missing("hat".to_string()) == Missing("hat".to_string()))

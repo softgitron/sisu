@@ -1,0 +1,7 @@
+# The borrows that the editor's command shows for a line.
+def main():
+    var turns: list[String] = ["Aino 18", "Eero 19"]
+    let first = ref turns[0]
+    print("first: {first}")
+    turns.push("Roni 20")
+    print("{len(turns)} turns")

@@ -1,0 +1,19 @@
+# `@cfg` keeps a declaration only in the builds where it holds.
+@cfg(test)
+def sample() -> list[int]:
+    return [3, 1, 2]
+
+@cfg(not test)
+def mode() -> str:
+    return "a run"
+
+@cfg(test)
+def mode() -> str:
+    return "the tests"
+
+def main():
+    print("built for {mode()}")
+
+test "sorts the sample":
+    assert sorted(sample()) == [1, 2, 3]
+    assert mode() == "the tests"

@@ -1,0 +1,10 @@
+# Attributes that only the standard library may write.
+@sealed
+trait Shape:
+    def area(self) -> f64
+
+@intrinsic("math.sqrt")
+def root(x: f64) -> f64
+
+def main():
+    print(root(2.0))

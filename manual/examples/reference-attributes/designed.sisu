@@ -1,0 +1,18 @@
+# Designed attributes that stage 0 accepts and does not check.
+@no_alloc
+@no_block
+@stack(max=256)
+def levels(gain: int) -> list[int]:
+    return [gain, gain * 2]
+
+@deprecated("use `levels`")
+@fix_inline
+def old_levels(gain: int) -> list[int]:
+    return levels(gain)
+
+@float(fast)
+def blend(a: f64, b: f64) -> f64:
+    return a * 0.5 + b * 0.5
+
+def main():
+    print("{old_levels(3)} {blend(1.0, 2.0)}")

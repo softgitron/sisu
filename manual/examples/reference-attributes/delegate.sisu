@@ -1,0 +1,15 @@
+# `@delegate` forwards traits to a field.
+@delegate(Add, Sub, PartialOrd, Display, to="value")
+struct Celsius:
+    value: f64
+
+@delegate(Len, Display, to="items")
+struct Basket:
+    items: list[String]
+    owner: String
+
+def main():
+    let warm = Celsius(20.5) + Celsius(1.5) - Celsius(2.0)
+    print("{warm} {warm > Celsius(19.0)}")
+    let basket = Basket(["leipä", "maito"], "Aino")
+    print("{len(basket)} {basket} for {basket.owner}")

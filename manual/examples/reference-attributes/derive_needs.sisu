@@ -1,0 +1,8 @@
+# `Ord` needs `Eq` and `PartialOrd`, which the type does not derive.
+@derive(Ord)
+struct Version:
+    major: int
+    minor: int
+
+def main():
+    print(sorted([Version(2, 0), Version(1, 4)]))

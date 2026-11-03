@@ -1,0 +1,8 @@
+# An attribute on the line of its item, and one before a statement.
+@derive(Eq) struct Point:
+    x: int
+
+def main():
+    @unused
+    let origin = Point(0)
+    print(origin == Point(0))

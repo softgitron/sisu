@@ -1,0 +1,14 @@
+# `@blocking` marks a foreign function, whose call may block its thread.
+from std.ffi import c_uint
+
+# safety: `sleep` is POSIX's: it takes seconds and returns those left.
+extern "C":
+    @blocking
+    def sleep(seconds: c_uint) -> c_uint
+
+@blocking
+def wait_for_heat() -> int:
+    return 80
+
+def main():
+    print(wait_for_heat())

@@ -1,0 +1,6 @@
+#!/usr/bin/env sisu
+# A script that the editor shows with each line's value beside it.
+let kilowatts = 9
+let minutes = 60 * 10 // kilowatts
+"{minutes} minutes to heat"
+print("Kota is warm")

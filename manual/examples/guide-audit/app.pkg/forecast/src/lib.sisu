@@ -1,0 +1,27 @@
+##! Tomorrow's weather, from a service on the network.
+import http
+from std.net import Url, UrlError
+
+## The forecast for `town`, as the service at `host` gives it.
+pub def tomorrow(
+    net: Net,
+    host: str,
+    town: str,
+) -> String ! {UrlError, HttpError}:
+    let url = Url.parse("http://{host}/{town}")?
+    let body = http.get(net, url)?
+    return Ok(body.decode().or(String()))
+
+## Whether `text` says that it will rain.
+pub def rain(text: str) -> bool:
+    return text.contains("rain")
+
+## Tomorrow's forecast for `town`, and the time it was asked, as a line
+## of a log.
+pub def logged(
+    net: Net,
+    clock: Clock,
+    town: str,
+) -> String ! {UrlError, HttpError}:
+    let text = tomorrow(net, "weather.example", town)?
+    return Ok("{clock.now()} {town}: {text}")

@@ -1,1 +1,21 @@
 $ sisu run
+error[E0703]: the package `cenv` is not trusted with `extern`; a dependency may contain `unsafe` and `extern` only when `[trust] unsafe` in the root package's `sisu.toml` lists it
+  --> cenv/src/lib.sisu:6:1
+  |
+6 | extern "C":
+  | ^^^^^^
+
+error[E0703]: the package `cenv` is not trusted with `unsafe`; a dependency may contain `unsafe` and `extern` only when `[trust] unsafe` in the root package's `sisu.toml` lists it
+  --> cenv/src/lib.sisu:20:5
+   |
+20 |     unsafe:
+   |     ^^^^^^
+
+error[E1021]: the dependency `cenv` declares `unsafe = "extern"`, and `[trust] unsafe` in the root package's `sisu.toml` does not list it
+  --> cenv/sisu.toml:5:10
+  |
+5 | unsafe = "extern"
+  |          ^^^^^^^^
+  = note: the root package consents by listing it: `[trust] unsafe = ["cenv"]`
+
+error[D0006]: the program was not run: errors found (3)

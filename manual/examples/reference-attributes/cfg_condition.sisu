@@ -1,0 +1,7 @@
+# `@cfg` takes conditions on the build, not expressions.
+@cfg(target.os == "linux")
+def separator() -> str:
+    return "/"
+
+def main():
+    print("usr{separator()}bin")

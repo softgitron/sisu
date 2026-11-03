@@ -1,0 +1,11 @@
+# An exported function takes nothing that foreign code cannot keep.
+@export("sauna_heat")
+def heat(celsius: i32, minutes: i32) -> i32:
+    return celsius * minutes
+
+@export("sauna_name_length")
+def name_length(name: str) -> int:
+    return len(name)
+
+def main():
+    print(heat(80, 10))

@@ -1,0 +1,1 @@
+Booking @table ["bookings"] @index [hour] [unique=True]
