@@ -1,0 +1,8 @@
+$ sisu run keyword_parameter.sisu
+error[E0124]: `match` is a keyword and cannot be used as a name here
+  --> keyword_parameter.sisu:2:11
+  |
+2 | def score(match: str) -> int:
+  |           ^^^^^
+
+error[D0006]: the program was not run: errors found (1)

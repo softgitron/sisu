@@ -1,0 +1,16 @@
+##! A module of points. This comment documents the module.
+
+# A plain comment, which the documentation leaves out.
+
+## A point on a grid.
+struct Point:
+    ## How far right the point is.
+    x: int
+    y: int  ## How far up the point is.
+
+## The point `n` steps right of `p`.
+def right(p: Point, n: int) -> Point:
+    return Point(p.x + n, p.y)  # a comment at the end of a line
+
+def main():
+    print("{right(Point(1, 2), 3):?}")

@@ -1,0 +1,7 @@
+# Names are Unicode letters, digits and `_`, not starting with a digit.
+def main():
+    let päivä = "maanantai"
+    let _unused = 0
+    let room2 = "sauna"
+    let maybe: int? = None
+    print("{päivä} {room2} {maybe.or(7)}")

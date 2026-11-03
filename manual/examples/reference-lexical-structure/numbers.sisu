@@ -1,0 +1,8 @@
+# Integer and floating-point literals.
+def main():
+    print("{1_000_000} {0xFF} {0b1010} {0o17} {0x_ff}")
+    let small = 42u8
+    let wide = 7i128
+    let unsigned = 3uint
+    print("{small} {wide} {unsigned}")
+    print("{2.5e-3} {1e3} {1.5f32} {3f64} {1_000.5}")

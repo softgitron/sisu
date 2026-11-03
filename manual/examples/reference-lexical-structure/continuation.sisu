@@ -1,0 +1,16 @@
+# A logical line continues inside brackets and before an operator.
+def main():
+    let prices = [
+        12,
+        5,
+        30,
+    ]
+    let total = prices[0]
+        + prices[1]
+        + prices[2]
+    let words = "hei maailma hei"
+        .split_whitespace()
+        .count()
+    let ready = total > 40
+        and words == 3
+    print("{total} {words} {ready}")

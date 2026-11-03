@@ -1,0 +1,11 @@
+# List, dict, set and tuple literals, and comprehensions.
+def main():
+    let scores = [3, 1, 4]
+    let ages = {"Aino": 7, "Eero": 9}
+    let nothing: dict[str, int] = {}
+    let vowels = {'a', 'e', 'i'}
+    let pair = (1, "one")
+    let squares = [n * n for n in scores if n > 1]
+    let by_name = {name: age + 1 for name, age in ages.items()}
+    print("{scores} {ages} {nothing} {len(vowels)} {pair}")
+    print("{squares} {by_name} {set[int]()} {()}")

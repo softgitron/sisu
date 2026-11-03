@@ -1,1 +1,9 @@
 $ sisu run change_shared.sisu
+error[E0341]: cannot modify `web.config.retries`; it is not declared with `var`
+  --> change_shared.sisu:14:5
+   |
+14 |     web.config.retries = 5
+   |     ^^^^^^^^^^^^^^^^^^
+  = note: borrow it with `ref mut` to change what the borrow refers to
+
+error[D0006]: the program was not run: errors found (1)

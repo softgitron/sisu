@@ -1,1 +1,44 @@
 $ sisu test predict_owners.sisu
+warning[W0001]: typed hole `owners after two copies` of type `int`
+  --> predict_owners.sisu:44:21
+   |
+44 | const COPIES: int = todo("owners after two copies")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `owners after a loop` of type `int`
+  --> predict_owners.sisu:45:19
+   |
+45 | const LOOP: int = todo("owners after a loop")
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `owners with a list of copies` of type `int`
+  --> predict_owners.sisu:46:19
+   |
+46 | const LIST: int = todo("owners with a list of copies")
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `owners with a weak handle` of type `int`
+  --> predict_owners.sisu:47:19
+   |
+47 | const WEAK: int = todo("owners with a weak handle")
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `whether the dropped song is still there` of type `bool`
+  --> predict_owners.sisu:48:27
+   |
+48 | const STILL_THERE: bool = todo("whether the dropped song is still there")
+   |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `plays counted through two owners` of type `int`
+  --> predict_owners.sisu:49:20
+   |
+49 | const PLAYS: int = todo("plays counted through two owners")
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test "copies" ... blocked by todo("owners after two copies")
+test "a loop" ... blocked by todo("owners after a loop")
+test "a list" ... blocked by todo("owners with a list of copies")
+test "a weak handle" ... blocked by todo("owners with a weak handle")
+test "a dropped song" ... blocked by todo("whether the dropped song is still there")
+test "a shared cell" ... blocked by todo("plays counted through two owners")
+0 passed, 0 failed, 6 blocked

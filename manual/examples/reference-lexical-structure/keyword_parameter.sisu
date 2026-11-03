@@ -1,0 +1,6 @@
+# A keyword used as a parameter's name.
+def score(match: str) -> int:
+    return 0
+
+def main():
+    print(score("final"))

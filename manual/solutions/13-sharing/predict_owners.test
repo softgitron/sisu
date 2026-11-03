@@ -1,0 +1,7 @@
+test "copies" ... ok
+test "a loop" ... ok
+test "a list" ... ok
+test "a weak handle" ... ok
+test "a dropped song" ... ok
+test "a shared cell" ... ok
+6 passed, 0 failed, 0 blocked

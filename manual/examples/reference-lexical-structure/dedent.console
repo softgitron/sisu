@@ -1,0 +1,8 @@
+$ sisu run dedent.sisu
+error[E0002]: this line's indentation matches no enclosing block; the enclosing blocks start at column 1 or 5
+  --> dedent.sisu:6:1
+  |
+6 |       print("done")
+  | ^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

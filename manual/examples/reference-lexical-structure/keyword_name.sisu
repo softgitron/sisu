@@ -1,0 +1,4 @@
+# A keyword used as a binding's name.
+def main():
+    let type = "csv"
+    print(type)

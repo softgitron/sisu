@@ -1,0 +1,9 @@
+# The forms of a string literal.
+def main():
+    let name = "Aino"
+    print("Hei, {name}! {{braces}} \"quotes\"\ttab")
+    print(r"raw: \n {name}")
+    print("""two
+lines, {name}""")
+    let data = b"bytes\x00\xff"
+    print("{data:?} has {len(data)} bytes")

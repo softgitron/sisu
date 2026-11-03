@@ -1,1 +1,40 @@
 $ sisu test dependencies.sisu
+warning[W0001]: typed hole `dependents` of type `list[String]`
+  --> dependencies.sisu:47:16
+   |
+47 |         return todo("dependents")
+   |                ^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `key` of type `Key[Package]`
+  --> dependencies.sisu:56:16
+   |
+56 |         return todo("key")
+   |                ^^^^^^^^^^^
+
+warning[W0001]: typed hole `add` of type `_`
+  --> dependencies.sisu:61:9
+   |
+61 |         todo("add")
+   |         ^^^^^^^^^^^
+
+warning[W0001]: typed hole `install_order` of type `list[String] ! CycleError`
+  --> dependencies.sisu:66:16
+   |
+66 |         return todo("install_order")
+   |                ^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `to_shared` of type `dict[String, Shared[Item]] ! CycleError`
+  --> dependencies.sisu:70:16
+   |
+70 |         return todo("to_shared")
+   |                ^^^^^^^^^^^^^^^^^
+
+test "part 1, the install order/a chain" ... blocked by todo("add")
+test "part 1, the install order/needs that are shared" ... blocked by todo("add")
+test "part 2, cycles/a cycle of three" ... blocked by todo("add")
+test "part 2, cycles/a package that needs itself" ... blocked by todo("add")
+test "part 2, cycles/a cycle further on" ... blocked by todo("add")
+test "part 3, shared and weak/items own what they need" ... blocked by todo("add")
+test "part 3, shared and weak/a weak handle keeps nothing" ... blocked by todo("add")
+test "part 3, shared and weak/a cycle has no items" ... blocked by todo("add")
+0 passed, 0 failed, 8 blocked

@@ -1,0 +1,8 @@
+$ sisu run semicolon.sisu
+error[E0011]: Sisu has no semicolons; put each statement on its own line
+  --> semicolon.sisu:3:14
+  |
+3 |     let a = 1; let b = 2
+  |              ^
+
+error[D0006]: the program was not run: errors found (1)

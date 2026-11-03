@@ -278,9 +278,9 @@ offers to make `Program` a `view struct`, which would make every
 `Program` a view in its turn, tied to the source of its tokens. An enum
 has no view form, so a variant cannot hold a view at all (E0412,
 `borrow.view-in-enum`). A view deep inside a structure makes every
-level above it a view, so before you accept the fix, decide whether the
-structure should borrow at all, or own its data, as the next section
-shows.
+level that holds it a view, so before you accept the fix, decide
+whether the structure should borrow at all, or own its data, as the
+next section shows.
 
 ## Two ways out
 

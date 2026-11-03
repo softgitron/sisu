@@ -1,0 +1,5 @@
+# Character literals and their escapes.
+def main():
+    let letters = ['a', 'ä', '\n', '\t', '\\', '\'', '"', '\0']
+    print("{letters:?}")
+    print('\u{1F600}')

@@ -1,0 +1,7 @@
+# Any consistent width of indentation opens a block.
+def main():
+  let n = 2
+  if n > 1:
+     print("a block indented by three more spaces")
+  else:
+     pass

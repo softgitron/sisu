@@ -1,0 +1,13 @@
+# Code as `sisu fmt` finds it.
+from std.time import Duration
+from std.math import clamp
+from std.collections import Deque
+def first_word(text: str) -> Option[String]:
+  for word in text.split_whitespace():
+    return Some(word.to_string())
+  return None
+def main():
+  var queue = Deque[str].new()
+  queue.push_back("Aino",)
+  print(first_word("hei maailma") ?? "nothing")
+  print("{queue.pop_front() ?? "empty"} {clamp(1.5, 0.0, 1.0)}")

@@ -1,0 +1,8 @@
+$ sisu run one_line_block.sisu
+error[E0102]: a block starts on the next line, indented; nothing may follow `:` on the line that opens it
+  --> one_line_block.sisu:3:22
+  |
+3 |     for n in [1, 2]: print(n)
+  |                      ^^^^^
+
+error[D0006]: the program was not run: errors found (1)

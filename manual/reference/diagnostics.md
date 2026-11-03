@@ -161,7 +161,7 @@ def main():
 Hei, maailma!
 ```
 
-Taught in [chapter 1](../tutorial/01-hello.md).
+Shown in [chapter 1](../tutorial/01-hello.md).
 
 ### E0003
 
@@ -206,7 +206,7 @@ def main():
 Hei, maailma!
 ```
 
-Taught in [chapter 1](../tutorial/01-hello.md).
+Shown in [chapter 1](../tutorial/01-hello.md).
 
 ### E0016
 
@@ -251,7 +251,7 @@ def main():
 Aino
 ```
 
-Taught in [chapter 2](../tutorial/02-values.md).
+Shown in [chapter 2](../tutorial/02-values.md).
 
 ## Parsing
 
@@ -301,7 +301,7 @@ def main():
 Hei, maailma!
 ```
 
-Taught in [chapter 1](../tutorial/01-hello.md).
+Shown in [chapter 1](../tutorial/01-hello.md).
 
 ### E0103
 
@@ -347,7 +347,7 @@ def main():
 7
 ```
 
-Taught in [chapter 2](../tutorial/02-values.md).
+Shown in [chapter 2](../tutorial/02-values.md).
 
 ### E0105
 
@@ -401,7 +401,7 @@ def main():
 zero
 ```
 
-Taught in [chapter 2](../tutorial/02-values.md).
+Shown in [chapter 2](../tutorial/02-values.md).
 
 ### E0108
 
@@ -452,7 +452,7 @@ def main():
 stay in
 ```
 
-Taught in [chapter 2](../tutorial/02-values.md).
+Shown in [chapter 2](../tutorial/02-values.md).
 
 ### E0113
 
@@ -497,7 +497,7 @@ def main():
 True
 ```
 
-Taught in [chapter 2](../tutorial/02-values.md).
+Shown in [chapter 2](../tutorial/02-values.md).
 
 ### E0115
 
@@ -546,7 +546,7 @@ def main():
 big
 ```
 
-Taught in [chapter 3](../tutorial/03-functions.md).
+Shown in [chapter 3](../tutorial/03-functions.md).
 
 ### E0116
 
@@ -593,7 +593,7 @@ def main():
 big
 ```
 
-Taught in [chapter 3](../tutorial/03-functions.md).
+Shown in [chapter 3](../tutorial/03-functions.md).
 
 ## Names and declarations
 
@@ -644,7 +644,7 @@ def main():
 Hei, maailma!
 ```
 
-Taught in [chapter 1](../tutorial/01-hello.md).
+Shown in [chapter 1](../tutorial/01-hello.md).
 
 ### E0202
 
@@ -705,7 +705,7 @@ def main():
 9
 ```
 
-Taught in [chapter 3](../tutorial/03-functions.md).
+Shown in [chapter 3](../tutorial/03-functions.md).
 
 ### E0211
 
@@ -767,7 +767,7 @@ def main():
 Red
 ```
 
-Taught in [chapter 7](../tutorial/07-structs-and-enums.md).
+Shown in [chapter 7](../tutorial/07-structs-and-enums.md).
 
 ### E0244
 
@@ -821,7 +821,7 @@ def main():
 Aino
 ```
 
-Taught in [chapter 7](../tutorial/07-structs-and-enums.md).
+Shown in [chapter 7](../tutorial/07-structs-and-enums.md).
 
 ## Types
 
@@ -875,7 +875,7 @@ def main():
 3
 ```
 
-Taught in [chapter 2](../tutorial/02-values.md).
+Shown in [chapter 2](../tutorial/02-values.md).
 
 ### E0301
 
@@ -922,7 +922,7 @@ def main():
 3
 ```
 
-Taught in [chapter 2](../tutorial/02-values.md).
+Shown in [chapter 2](../tutorial/02-values.md).
 
 ### E0302
 
@@ -970,7 +970,7 @@ def main():
 some
 ```
 
-Taught in [chapter 2](../tutorial/02-values.md).
+Shown in [chapter 2](../tutorial/02-values.md).
 
 ### E0305
 
@@ -1015,7 +1015,7 @@ def main():
 Hei, maailma!
 ```
 
-Taught in [chapter 1](../tutorial/01-hello.md).
+Shown in [chapter 1](../tutorial/01-hello.md).
 
 ### E0308
 
@@ -1064,7 +1064,7 @@ def main():
 12
 ```
 
-Taught in [chapter 5](../tutorial/05-collections.md).
+Shown in [chapter 5](../tutorial/05-collections.md).
 
 ### E0310
 
@@ -1110,7 +1110,7 @@ def main():
 age 3
 ```
 
-Taught in [chapter 8](../tutorial/08-errors.md).
+Shown in [chapter 8](../tutorial/08-errors.md).
 
 ### E0312
 
@@ -1163,7 +1163,7 @@ def main():
 2
 ```
 
-Taught in [chapter 2](../tutorial/02-values.md).
+Shown in [chapter 2](../tutorial/02-values.md).
 
 ### E0314
 
@@ -1228,7 +1228,7 @@ def main():
 wait
 ```
 
-Taught in [chapter 4](../tutorial/04-control-flow.md).
+Shown in [chapter 4](../tutorial/04-control-flow.md).
 
 ### E0315
 
@@ -1286,7 +1286,7 @@ def main():
 1
 ```
 
-Taught in [chapter 3](../tutorial/03-functions.md).
+Shown in [chapter 3](../tutorial/03-functions.md).
 
 ### E0318
 
@@ -1333,7 +1333,7 @@ def main():
 done with 42
 ```
 
-Taught in [chapter 8](../tutorial/08-errors.md).
+Shown in [chapter 8](../tutorial/08-errors.md).
 
 ### E0320
 
@@ -1380,7 +1380,7 @@ def main():
 42
 ```
 
-Taught in [chapter 8](../tutorial/08-errors.md).
+Shown in [chapter 8](../tutorial/08-errors.md).
 
 ### E0325
 
@@ -1427,7 +1427,7 @@ e
 i
 ```
 
-Taught in [chapter 6](../tutorial/06-text.md).
+Shown in [chapter 6](../tutorial/06-text.md).
 
 ### E0327
 
@@ -1489,7 +1489,7 @@ def main():
 stop
 ```
 
-Taught in [chapter 2](../tutorial/02-values.md).
+Shown in [chapter 2](../tutorial/02-values.md).
 
 ### E0329
 
@@ -1538,7 +1538,7 @@ def main():
 3
 ```
 
-Taught in [chapter 2](../tutorial/02-values.md).
+Shown in [chapter 2](../tutorial/02-values.md).
 
 ### E0337
 
@@ -1591,7 +1591,7 @@ def main():
 1
 ```
 
-Taught in [chapter 7](../tutorial/07-structs-and-enums.md).
+Shown in [chapter 7](../tutorial/07-structs-and-enums.md).
 
 ### E0341
 
@@ -1644,7 +1644,7 @@ def main():
 ["Aino", "Eero"]
 ```
 
-Taught in [chapter 7](../tutorial/07-structs-and-enums.md).
+Shown in [chapter 7](../tutorial/07-structs-and-enums.md).
 
 ### E0344
 
@@ -1692,7 +1692,7 @@ def main():
 Eero
 ```
 
-Taught in [chapter 5](../tutorial/05-collections.md).
+Shown in [chapter 5](../tutorial/05-collections.md).
 
 ### E0345
 
@@ -1739,7 +1739,7 @@ def main():
 h
 ```
 
-Taught in [chapter 6](../tutorial/06-text.md).
+Shown in [chapter 6](../tutorial/06-text.md).
 
 ### E0347
 
@@ -1791,7 +1791,7 @@ def main():
 True
 ```
 
-Taught in [chapter 7](../tutorial/07-structs-and-enums.md).
+Shown in [chapter 7](../tutorial/07-structs-and-enums.md).
 
 ### E0368
 
@@ -1844,7 +1844,7 @@ def main():
 True
 ```
 
-Taught in [chapter 7](../tutorial/07-structs-and-enums.md).
+Shown in [chapter 7](../tutorial/07-structs-and-enums.md).
 
 ### E0373
 
@@ -1891,7 +1891,7 @@ def main():
 4.5
 ```
 
-Taught in [chapter 2](../tutorial/02-values.md).
+Shown in [chapter 2](../tutorial/02-values.md).
 
 ### E0374
 
@@ -1936,7 +1936,7 @@ def main():
 250
 ```
 
-Taught in [chapter 2](../tutorial/02-values.md).
+Shown in [chapter 2](../tutorial/02-values.md).
 
 ## Ownership
 
@@ -1998,7 +1998,7 @@ def main():
 ["Aino"]
 ```
 
-Taught in [chapter 5](../tutorial/05-collections.md).
+Shown in [chapter 5](../tutorial/05-collections.md).
 
 ### E0411
 
@@ -2054,7 +2054,7 @@ def main():
 bread
 ```
 
-Taught in [chapter 7](../tutorial/07-structs-and-enums.md).
+Shown in [chapter 7](../tutorial/07-structs-and-enums.md).
 
 ## Warnings
 
@@ -2108,7 +2108,7 @@ def main():
 ready, 42
 ```
 
-Taught in [chapter 1](../tutorial/01-hello.md).
+Shown in [chapter 1](../tutorial/01-hello.md).
 
 ### W0002
 
@@ -2163,7 +2163,7 @@ def main():
 1
 ```
 
-Taught in [chapter 2](../tutorial/02-values.md).
+Shown in [chapter 2](../tutorial/02-values.md).
 
 ### W0003
 
@@ -2216,7 +2216,7 @@ def main():
 zero
 ```
 
-Taught in [chapter 7](../tutorial/07-structs-and-enums.md).
+Shown in [chapter 7](../tutorial/07-structs-and-enums.md).
 
 ## Run time
 
@@ -2229,9 +2229,10 @@ the trace.
 
 `panic.explicit`: {message}.
 
-`panic(message)` stops the task with the message. A panic is for a bug,
-a state the program should never reach; an input that can be wrong is an
-error or an absent value instead.
+`panic(message)` stops the task with the message, and so does
+`expect(message)` on an absent value. A panic is for a bug, a state the
+program should never reach; an input that can be wrong is an error or an
+absent value instead.
 
 <!-- file: examples/reference-diagnostics/r0001_panic.sisu -->
 ```sisu
@@ -2721,6 +2722,19 @@ def main():
 ```text
 10
 ```
+
+### R0108
+
+`test.snapshot-missing`: there is no snapshot `{name}` yet (`sisu test
+--update` stores this one): {value}.
+
+A snapshot test ran `assert_snapshot` for a value that has no stored
+snapshot yet. The test fails and shows the value it would store.
+
+Read the value, and if it is right, run `sisu test --update`, which
+stores it in `NAME.snap` beside the program `NAME.sisu`.
+
+Example: [R16](sisu-command.md#sisu-test).
 
 ### R0115
 
@@ -3424,7 +3438,7 @@ it. `sisu explain CODE` prints the same line.
 | R0105 | `sim.always-failed` | `sim.always` does not hold: {what} |
 | R0106 | `sim.choose-none` | `sim.choose` needs at least one option |
 | R0107 | `test.snapshot-changed` | the snapshot `{name}` changed (`sisu test --update` accepts the new one): {diff} |
-| R0108 | `test.snapshot-missing` | there is no snapshot `{name}` yet (`sisu test --update` stores this one): {value} |
+| [R0108](#r0108) | `test.snapshot-missing` | there is no snapshot `{name}` yet (`sisu test --update` stores this one): {value} |
 | R0109 | `run.live-epoch` | watch: epoch {epoch} replaces {functions} |
 | R0110 | `run.live-rejected` | watch: the save of {files} does not check, so the program keeps running epoch {epoch}: {diagnostics} |
 | R0111 | `run.live-restart-signature` | watch: the signature of `{function}` changed, so the program starts again |

@@ -1,1 +1,4 @@
 $ sisu audit --ownership towns.sisu cycle.sisu weak.sisu
+towns.sisu lines=19 Shared=0 Weak=0 Cell=0 Arena=1 Key=1 copy=0 unsafe=0
+cycle.sisu lines=13 Shared=4 Weak=0 Cell=3 Arena=0 Key=0 copy=2 unsafe=0
+weak.sisu lines=13 Shared=5 Weak=1 Cell=3 Arena=0 Key=0 copy=0 unsafe=0

@@ -9,7 +9,8 @@ compiler does not have yet come last, each with its status.
 **See also:** [chapter 1](../tutorial/01-hello.md) of the tutorial
 (running, checking and formatting a file, and the parts of a
 diagnostic) and [chapter 9](../tutorial/09-word-counter.md) (a
-package); the proposal's [10, Tooling](../../proposal/10-tooling.md);
+package); [R17, Diagnostics](diagnostics.md), for every code a command
+prints; the proposal's [10, Tooling](../../proposal/10-tooling.md);
 the compiler's [architecture notes](../../compiler/docs/architecture.md),
 "The query layer and the driver".
 
@@ -1933,4 +1934,5 @@ a command line can produce, by what they report:
 | D0113 | `sisu doc --std`. |
 | D0115 to D0118 | The front end. |
 
-`sisu explain CODE` prints any of them.
+`sisu explain CODE` prints any of them, and [R17, Diagnostics](diagnostics.md#the-driver)
+has an entry for each one that the manual shows, with the fix.

@@ -1,0 +1,3 @@
+test "every draft is saved" ... ok
+test "an empty draft does not stop the others" ... ok
+2 passed, 0 failed, 0 blocked

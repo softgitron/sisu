@@ -1,0 +1,9 @@
+test "part 1, the install order/a chain" ... ok
+test "part 1, the install order/needs that are shared" ... ok
+test "part 2, cycles/a cycle of three" ... ok
+test "part 2, cycles/a package that needs itself" ... ok
+test "part 2, cycles/a cycle further on" ... ok
+test "part 3, shared and weak/items own what they need" ... ok
+test "part 3, shared and weak/a weak handle keeps nothing" ... ok
+test "part 3, shared and weak/a cycle has no items" ... ok
+8 passed, 0 failed, 0 blocked

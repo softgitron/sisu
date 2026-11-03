@@ -1,0 +1,8 @@
+$ sisu run backslash.sisu
+error[E0015]: Sisu has no backslash continuation; break the line inside brackets, after a comma or before an operator
+  --> backslash.sisu:3:21
+  |
+3 |     let total = 1 + \
+  |                     ^
+
+error[D0006]: the program was not run: errors found (1)

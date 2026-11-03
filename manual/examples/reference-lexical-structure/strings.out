@@ -1,0 +1,5 @@
+Hei, Aino! {braces} "quotes"	tab
+raw: \n {name}
+two
+lines, Aino
+b"bytes\x00\xff" has 7 bytes

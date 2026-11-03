@@ -159,8 +159,8 @@ first 7, last 4, of 3
 `first` and `last` both borrow from `scores`, and `len(scores)` reads
 it too. `scores.push(10)` then changes the list, and that is allowed
 because neither borrow is used after it: a borrow ends at its last use,
-not at the end of its block. Move the push up, before the first
-`print`, and the program no longer compiles:
+not at the end of its block. Change the list while a borrow of it is
+still to be used, and the program no longer compiles:
 
 <!-- file: examples/11-borrowing/grow_while_reading.sisu -->
 ```sisu

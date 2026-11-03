@@ -1,0 +1,3 @@
+# A block on the line that opens it.
+def main():
+    for n in [1, 2]: print(n)
