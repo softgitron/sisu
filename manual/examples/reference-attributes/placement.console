@@ -11,6 +11,12 @@ error[E0106]: expected a declaration, found an indented block
 3 |     x: int
   | ^
 
+warning[W0022]: `@unused` is not an attribute Sisu reads, and no compile-time code of the program reads attributes (`reflect.attributes_of`), so it means nothing here
+  --> placement.sisu:6:6
+  |
+6 |     @unused
+  |      ^^^^^^
+
 error[E0106]: expected a declaration, found `let`
   --> placement.sisu:7:5
   |

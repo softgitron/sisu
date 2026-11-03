@@ -1,0 +1,8 @@
+$ sisu run e0448_float_attribute.sisu
+error[E0448]: `@float` takes `fast`, which allows contraction and reassociation in the function (03); floating point is strict elsewhere
+  --> e0448_float_attribute.sisu:2:1
+  |
+2 | @float(precise)
+  | ^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

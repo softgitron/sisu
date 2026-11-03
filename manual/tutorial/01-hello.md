@@ -490,27 +490,37 @@ test "a tag for Eero from Turku":
 ```
 
 Lines that start `##` are documentation comments, which chapter 3
-returns to. In the file's directory, run the tests before you change
-anything:
+returns to. In the file's directory, check the file and run the tests
+before you change anything. `sisu check` reads the program and reports
+its diagnostics without running anything:
 
 <!-- output: solutions/01-hello/name_tag.console -->
 ```console
-$ sisu test name_tag.sisu
+$ sisu check name_tag.sisu
 warning[W0001]: typed hole `name tag` of type `String`
   --> name_tag.sisu:13:12
    |
 13 |     return todo("name tag")
    |            ^^^^^^^^^^^^^^^^
 
+$ sisu test name_tag.sisu
+in scope at the typed hole `todo("name tag")`:
+  name = "Aino"
+  town = "Oulu"
+in scope at the typed hole `todo("name tag")`:
+  name = "Eero"
+  town = "Turku"
 test "a tag for Aino from Oulu" ... blocked by todo("name tag")
 test "a tag for Eero from Turku" ... blocked by todo("name tag")
 0 passed, 0 failed, 2 blocked
 ```
 
 The warning says that the hole is still there and that whatever replaces
-it must be a `String`. Both tests are blocked. Replace the hole and run
-the tests again until the last line reads `2 passed, 0 failed, 0
-blocked`.
+it must be a `String`. Both tests are blocked. Each stopped at the hole,
+and before the report Sisu shows what was in scope there: the `name`
+and the `town` that the test passed, which your code turns into the
+tag. Replace the hole and run the tests again until the last line reads
+`2 passed, 0 failed, 0 blocked`.
 
 <details>
 <summary>Hint 1</summary>
@@ -540,8 +550,9 @@ When both tests pass, compare your answer with
   `sisu explain CODE` describes a code.
 - `let` names a value. Braces in a string put values into the text.
 - `sisu ws FILE` runs a worksheet and shows each line's value, `sisu fmt`
-  writes the one layout, and `sisu test FILE` runs a file's tests, each
-  of which is blocked, failed or ok.
+  writes the one layout, `sisu check FILE` reports a file's diagnostics
+  without running it, and `sisu test FILE` runs a file's tests, each of
+  which is blocked, failed or ok.
 
 Chapter 2 introduces numbers, truth values and the other basic types,
 and `var` for names that change. The chapters to come are listed in

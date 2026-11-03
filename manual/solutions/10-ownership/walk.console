@@ -1,10 +1,9 @@
-$ sisu test walk.sisu
-error[E0400]: `here` was moved on line 29 and cannot be used afterwards
-  --> walk.sisu:29:9
+$ sisu check walk.sisu
+error[E0400]: `here` was moved on line 30 and cannot be used afterwards
+  --> walk.sisu:30:9
    |
-29 |         visited.push(here)
+30 |         visited.push(here)
    |         ^^^^^^^^^^^^^^^^^^
    |         ------------------ `here` is moved here, in an earlier iteration of the loop
-  = note: copy it with `.copy()` before it is moved, or move it later
+  = note: copy it with `.copy()` before the move, which makes a second value (for a list or a `String`, an allocation); move it later, after its last use, which costs nothing; or, where what it moves into only reads it, take it there without `own`, and the call lends it
 
-error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

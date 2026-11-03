@@ -447,15 +447,18 @@ error[E0347]: `f64` does not implement `Hash`
 error[D0006]: the program was not run: errors found (1)
 ```
 
+`@float(fast)` on a function permits contraction and reassociation
+inside it, which strict floating point satisfies, so it may be no
+faster ([R14](attributes.md#fast-floating-point)).
+
 **Stage 0 differs.** [03](../../proposal/03-types-and-generics.md#numbers)
 has `x.total_order()`, a wrapper with a total order for keys and
-sorting, which stage 0 lacks (E0304), and `@float(fast)`, which allows
-contraction and reassociation inside one function, which stage 0 does
-not have either. 03 lets `max_by` and `min_by` take a key with a
+sorting, which stage 0 lacks (E0304); and stage 0 keeps a `@float(fast)`
+function strict. 03 lets `max_by` and `min_by` take a key with a
 partial order and panic on an unordered comparison; stage 0's take an
 `Ord` key only, so floats need `sort_by`.
 
-**Status.** In stage 0 (D-074), except `total_order` and `@float(fast)`.
+**Status.** In stage 0 (D-074), except `total_order`.
 
 ## Exact numbers
 
@@ -469,7 +472,8 @@ partial order and panic on an unordered comparison; stage 0's take an
 
 They take ordinary literals with no suffix, through `FromLiteral`
 ([Literals that take the type expected](#literals-that-take-the-type-expected)):
-a literal reaches a `Decimal` as written, so `0.1` is exactly one tenth.
+a literal reaches a `Decimal` as written, so `0.1` is exactly one tenth
+and `3.50` keeps its two places.
 Nothing rounds without being told how: `Rounding` names seven modes,
 `HalfEven`, `HalfUp`, `HalfDown`, `Down`, `Up`, `Floor` and `Ceiling`,
 and there is no hidden precision (Q-53). `int` stays 64 bits wide and
@@ -501,9 +505,9 @@ def main():
 **Stage 0 differs.** A `BigInt` literal must fit in an `int` (E0374);
 [03](../../proposal/03-types-and-generics.md#numbers) takes a literal of
 any length and checks it at compile time, and stage 0 reads a longer one
-with `BigInt.parse`. A `Decimal` has no `/` (E0310), where 03 makes the
-quotient a `Ratio`; `div` with a number of places and a `Rounding` is
-the division stage 0 has.
+with `BigInt.parse`. A `Decimal` has no `/` (E0310, whose note names
+`div` and `to_ratio`), where 03 makes the quotient a `Ratio`; `div` with
+a number of places and a `Rounding` is the division stage 0 has.
 
 **Status.** In stage 0 (D-076), with the differences noted.
 

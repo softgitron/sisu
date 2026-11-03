@@ -1,0 +1,10 @@
+# The parallel part computes; the loop that prints is an ordinary one.
+import std.par
+
+pure def describe(heat: ref int) -> String:
+    return "{heat} degrees"
+
+def main():
+    let heats = [70, 80, 90]
+    for line in par.map(heats, describe):
+        print(line)

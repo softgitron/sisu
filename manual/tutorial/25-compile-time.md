@@ -323,13 +323,14 @@ error[E0609]: making `columns[Booking]` stopped at compile time: a list is a com
    |
 16 |     for f in reflect.fields_of(T):
    |              -------------------- the template, where it stopped
+  = fix: unroll the loop at compile time with `comptime for`: `comptime `
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
 E0609 (`comptime.instance-failed`) says that a list made by `reflect`
 has no form at run time, and its label points at the loop, where the
-compiler stopped. It does not name the fix, which is `comptime for`.
+compiler stopped. Its fix writes `comptime` before the `for` again.
 
 </details>
 
@@ -638,7 +639,8 @@ Three parts of compile-time code are designed in
 `sisu eval` will render a module of `const` items as JSON, TOML or YAML
 for configuration files, checking their refinement types and
 invariants on the way (D-063). `@diagnostic_name` will let a library
-say how its types are written in diagnostics. And a `comptime` function
+say how its types are written in diagnostics, once compile-time code
+can make types; until then it is E0900. And a `comptime` function
 that parses a string literal, a route or a query, will report a mistake
 at its place inside the literal; today a failed `comptime` call points
 at the call.
@@ -721,36 +723,6 @@ test "ordinary code at compile time":
 <!-- output: solutions/25-compile-time/predict_comptime.console -->
 ```console
 $ sisu test predict_comptime.sisu
-warning[W0001]: typed hole `field_count(Stove)` of type `str`
-  --> predict_comptime.sisu:47:21
-   |
-47 | const FIELDS: str = todo("field_count(Stove)")
-   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `defaults(Stove)` of type `str`
-  --> predict_comptime.sisu:48:23
-   |
-48 | const DEFAULTS: str = todo("defaults(Stove)")
-   |                       ^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `variant_sizes(Fuel)` of type `str`
-  --> predict_comptime.sisu:49:20
-   |
-49 | const SIZES: str = todo("variant_sizes(Fuel)")
-   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `reflect.name_of(Fuel)` of type `str`
-  --> predict_comptime.sisu:50:19
-   |
-50 | const NAME: str = todo("reflect.name_of(Fuel)")
-   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `triangle(100)` of type `str`
-  --> predict_comptime.sisu:51:23
-   |
-51 | const TRIANGLE: str = todo("triangle(100)")
-   |                       ^^^^^^^^^^^^^^^^^^^^^
-
 test "the fields of a struct" ... blocked by todo("field_count(Stove)")
 test "the fields with defaults" ... blocked by todo("defaults(Stove)")
 test "the fields of each variant" ... blocked by todo("variant_sizes(Fuel)")
@@ -791,10 +763,11 @@ Open
 ##!
 ##! `LONGEST` is worked out while the program compiles: the number below
 ##! a thousand whose journey to 1, by the steps of chapter 4's Collatz
-##! exercise, is the longest. The file does not compile. Run
-##! `sisu test journeys.sisu`, read the diagnostic, and fix the program,
-##! not the tests, so that every test passes. The hints are in chapter 25
-##! of the tutorial, under "Exercise 25.2: a constant over its budget".
+##! exercise, is the longest. The file does not compile. Check it with
+##! `sisu check journeys.sisu`, read the diagnostic, and fix the
+##! program, not the tests, so that `sisu test journeys.sisu` passes
+##! every test. The hints are in chapter 25 of the tutorial, under
+##! "Exercise 25.2: a constant over its budget".
 
 ## The number of steps from `n` to 1, halving an even number and taking
 ## an odd one to three times itself plus one.
@@ -825,16 +798,17 @@ test "the longest journey below a thousand":
     assert steps(LONGEST) == 178
 ```
 
+Check it before you change anything:
+
 <!-- output: solutions/25-compile-time/journeys.console -->
 ```console
-$ sisu test journeys.sisu
+$ sisu check journeys.sisu
 error[E0603]: the compile-time evaluation in `LONGEST` used up its budget of 1000000 steps; raise it with `@comptime_budget(steps=N)` on `LONGEST`
-  --> journeys.sisu:28:22
+  --> journeys.sisu:29:22
    |
-28 | const LONGEST: int = comptime longest_below(1000)
+29 | const LONGEST: int = comptime longest_below(1000)
    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-error[D0006]: the program was not run: errors found (1)
 ```
 
 <details>
@@ -916,6 +890,7 @@ error[E0609]: making `to_csv[Booking]` stopped at compile time: a list is a comp
    |
 19 |     for f in reflect.fields_of(T):
    |              -------------------- the template, where it stopped
+  = fix: unroll the loop at compile time with `comptime for`: `comptime `
 
 error[E0324]: the type of `f` cannot be inferred here; add a type annotation
   --> <to_csv[int]>/main.sisu:4:20
@@ -923,15 +898,15 @@ error[E0324]: the type of `f` cannot be inferred here; add a type annotation
 4 |         names.push(f.name.to_string())
   |                    ^
 
-error[D0006]: the program was not run: errors found (2)
 ```
 
 <details>
 <summary>Hint 1</summary>
 
 The first diagnostic points at a loop over `reflect.fields_of(T)`,
-which exists only while compiling. The loop over the rows is the other
-kind: it runs over the values, when the program runs.
+which exists only while compiling, and its fix makes the loop one that
+the compiler unrolls. The loop over the rows is the other kind: it runs
+over the values, when the program runs.
 
 </details>
 
@@ -995,24 +970,10 @@ test "counting the bits of data":
 <!-- output: solutions/25-compile-time/ones.console -->
 ```console
 $ sisu test ones.sisu
-warning[W0001]: typed hole `ones_in` of type `int`
-  --> ones.sisu:13:12
-   |
-13 |     return todo("ones_in")
-   |            ^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `a table worked out with `comptime`` of type `list[int]`
-  --> ones.sisu:16:25
-   |
-16 | const ONES: list[int] = todo("a table worked out with `comptime`")
-   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `count_ones` of type `int`
-  --> ones.sisu:20:12
-   |
-20 |     return todo("count_ones")
-   |            ^^^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("ones_in")`:
+  byte = 0
+in scope at the typed hole `todo("count_ones")`:
+  data = b""
 test "the bits of a byte" ... blocked by todo("ones_in")
 test "the table" ... blocked by todo("a table worked out with `comptime`")
 test "counting the bits of data" ... blocked by todo("count_ones")
@@ -1099,7 +1060,7 @@ test "a stove":
 
 <!-- output: solutions/25-compile-time/form.console -->
 ```console
-$ sisu test form.sisu
+$ sisu check form.sisu
 warning[W0001]: typed hole `form` of type `String`
   --> <derive>/main.sisu:4:16
   |
@@ -1112,6 +1073,11 @@ warning[W0001]: typed hole `form` of type `String`
 23 |         return todo("form")
    |                ^^^^^^^^^^^^
 
+$ sisu test form.sisu
+in scope at the typed hole `todo("form")`:
+  self = Booking(name="Aino", hour=18, minutes=90)
+in scope at the typed hole `todo("form")`:
+  self = Stove(celsius=78.5, lit=True)
 test "a booking" ... blocked by todo("form")
 test "a stove" ... blocked by todo("form")
 0 passed, 0 failed, 2 blocked
@@ -1119,7 +1085,8 @@ test "a stove" ... blocked by todo("form")
 
 The warnings name `<derive>/main.sisu`, where the compiler writes the
 impls that `derive` makes, once for each struct: the hole is in the
-template, so each derived impl has one.
+template, so each derived impl has one. Each test stops at the hole
+with `self` in scope, the value whose form it makes.
 
 <details>
 <summary>Hint 1</summary>

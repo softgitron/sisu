@@ -259,10 +259,11 @@ def main():
 
 An `f32`, a float of 32 bits for graphics and audio, follows the same
 rules: each operation rounds once to `f32`, and an `f32` widens to an
-`f64` where one is expected. `@float(fast)` on a function, which would
-allow reordering and fusing inside it and give up the guarantee there,
-is designed in [03](../../proposal/03-types-and-generics.md#numbers);
-the compiler accepts it and changes nothing.
+`f64` where one is expected. `@float(fast)` on a function allows
+reordering and fusing inside it, giving up the guarantee there
+([03](../../proposal/03-types-and-generics.md#numbers)); stage 0
+accepts it and keeps the arithmetic strict, which the permission
+allows, and `@float` with any other argument is E0448.
 
 ## NaN and the order of floats
 
@@ -452,9 +453,10 @@ Down: 2.34
   zero), `Up`, `Floor` and `Ceiling`.
 
 `/` between two decimals, which 03 designs to give a `Ratio`, is not
-in the compiler yet; `div` says where to round instead. A literal
-written with zeros at its end, such as `3.50`, keeps only the places it
-needs, `3.5`, while `Decimal.parse("3.50")` keeps all of them.
+in the compiler yet: it is E0310, whose note names `div`, which says
+where to round, and `to_ratio`, which gives the exact fraction. A
+literal keeps the places it is written with, so `3.50` prints as
+`3.50`, as `Decimal.parse("3.50")` does.
 
 > **From Python.** Python's `decimal` rounds every result to the
 > precision of a context, 28 digits unless changed, and the context is
@@ -513,48 +515,6 @@ test "an exact fraction":
 <!-- output: solutions/24-numbers/predict_numbers.console -->
 ```console
 $ sisu test predict_numbers.sisu
-warning[W0001]: typed hole `200u8 +% 100` of type `str`
-  --> predict_numbers.sisu:10:22
-   |
-10 | const WRAPPED: str = todo("200u8 +% 100")
-   |                      ^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `-100i8 -| 100` of type `str`
-  --> predict_numbers.sisu:11:24
-   |
-11 | const SATURATED: str = todo("-100i8 -| 100")
-   |                        ^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `(-1).truncate_to[u16]()` of type `str`
-  --> predict_numbers.sisu:12:24
-   |
-12 | const TRUNCATED: str = todo("(-1).truncate_to[u16]()")
-   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `(-1).to_u16()` of type `str`
-  --> predict_numbers.sisu:13:24
-   |
-13 | const CONVERTED: str = todo("(-1).to_u16()")
-   |                        ^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `0.5 + 0.25 == 0.75` of type `str`
-  --> predict_numbers.sisu:14:21
-   |
-14 | const HALVES: str = todo("0.5 + 0.25 == 0.75")
-   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `0.1 + 0.2 == 0.3` of type `str`
-  --> predict_numbers.sisu:15:21
-   |
-15 | const TENTHS: str = todo("0.1 + 0.2 == 0.3")
-   |                     ^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `Ratio.of(6, -4)` of type `str`
-  --> predict_numbers.sisu:16:20
-   |
-16 | const RATIO: str = todo("Ratio.of(6, -4)")
-   |                    ^^^^^^^^^^^^^^^^^^^^^^^
-
 test "wrapping" ... blocked by todo("200u8 +% 100")
 test "saturating" ... blocked by todo("-100i8 -| 100")
 test "truncating" ... blocked by todo("(-1).truncate_to[u16]()")
@@ -723,24 +683,15 @@ test "brightening stops at 255":
 <!-- output: solutions/24-numbers/colour.console -->
 ```console
 $ sisu test colour.sisu
-warning[W0001]: typed hole `pack` of type `u32`
-  --> colour.sisu:19:12
-   |
-19 |     return todo("pack")
-   |            ^^^^^^^^^^^^
-
-warning[W0001]: typed hole `unpack` of type `Colour`
-  --> colour.sisu:23:12
-   |
-23 |     return todo("unpack")
-   |            ^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `brighten` of type `Colour`
-  --> colour.sisu:28:12
-   |
-28 |     return todo("brighten")
-   |            ^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("pack")`:
+  colour = Colour(red=255, green=136, blue=0)
+in scope at the typed hole `todo("unpack")`:
+  packed = 16746496
+in scope at the typed hole `todo("pack")`:
+  colour = Colour(red=175, green=244, blue=79)
+in scope at the typed hole `todo("brighten")`:
+  colour = Colour(red=250, green=100, blue=0)
+  amount = 10
 test "packing" ... blocked by todo("pack")
 test "unpacking" ... blocked by todo("unpack")
 test "unpacking undoes packing" ... blocked by todo("pack")
@@ -932,12 +883,6 @@ test "a long loan loses no cent":
 <!-- output: solutions/24-numbers/mortgage.console -->
 ```console
 $ sisu test mortgage.sisu
-warning[W0001]: typed hole `schedule` of type `list[Month]`
-  --> mortgage.sisu:27:12
-   |
-27 |     return todo("schedule")
-   |            ^^^^^^^^^^^^^^^^
-
 test "the first month" ... blocked by todo("schedule")
 test "a tie goes to the even cent" ... blocked by todo("schedule")
 test "the last payment pays off what is left" ... blocked by todo("schedule")

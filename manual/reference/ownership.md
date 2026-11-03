@@ -670,7 +670,7 @@ the standard library's types, each visible in the program's types:
 | Type | For | Cost |
 |---|---|---|
 | `Box[T]` | a value of its own allocation; a recursive enum is boxed for you (D-043) | one allocation |
-| `Shared[T]` | several owners of one value, which is dropped with the last; `.copy()` adds an owner, `Shared.count(s)` counts them | a count, atomic when the value can reach another task |
+| `Shared[T]` | several owners of one value, which is dropped with the last; `.copy()` adds an owner, `Shared.count(s)` counts them, and `Shared.same(a, b)` asks whether two owners hold the very same value | a count, atomic when the value can reach another task |
 | `Weak[T]` | a reference that does not keep a `Shared` value alive, to break cycles; `upgrade` gives `Shared[T]?` | a second count |
 | `Cell[T]` | a value that changes behind shared owners, in one task: `get`, `set` | none |
 | `Mutex[T]`, `RwLock[T]`, `Atomic` | a value that changes behind owners in several tasks ([R9](concurrency.md#sharing-a-value-that-changes)) | a lock or an atomic operation |
@@ -728,9 +728,11 @@ Kemi is gone
 `sisu audit --ownership` counts the uses of these types and of
 `.copy()` in each file ([R16](sisu-command.md#sisu-audit)).
 
-**Stage 0 differs.** `Shared.same(a, b)`, which asks whether two owners
-hold the very same value, is designed in
-[02](../../proposal/02-syntax.md) and stage 0 does not have it.
+**Stage 0 differs.** `==` between two `Shared` values, which compares
+the values they hold through the prelude's `Eq` for `Shared[T]`, gives
+`False` in stage 0 whatever they hold, two owners of one value
+included, though `a.eq(b)` compares the values; compare through the
+values themselves.
 
 **Status.** In stage 0 (D-005, D-043).
 

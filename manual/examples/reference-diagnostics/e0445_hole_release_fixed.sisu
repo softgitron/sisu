@@ -1,0 +1,6 @@
+# The hole filled, so that the release build goes ahead.
+def area(width: f64, height: f64) -> f64:
+    return width * height
+
+def main():
+    print(area(2.0, 3.0))

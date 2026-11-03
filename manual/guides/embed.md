@@ -11,15 +11,16 @@ first `embed`); [R16](../reference/sisu-command.md) for the commands;
 the proposal's [08, Metaprogramming](../../proposal/08-metaprogramming.md),
 whose rule is that compile-time code does no I/O but `embed`.
 
-## 1. Put the file beside the module, and embed it
+## 1. Put the file in the package, and embed it
 
 `embed("path")` is the text of a file, read when the program is
-compiled, and a `const` keeps it under a name. The path is relative to
-the directory of the module that embeds it, so in a package the file
-lives under `src/`. This package keeps a sauna's rules in
-`src/rules.txt`, one on each line:
+compiled, and a `const` keeps it under a name. In a package the path is
+relative to the package's root, the directory of its `sisu.toml`,
+whichever module embeds it; a single file's is relative to the file's
+directory. This package keeps a sauna's rules in `data/rules.txt`, one
+on each line:
 
-<!-- file: examples/guide-embed/rules.pkg/src/rules.txt -->
+<!-- file: examples/guide-embed/rules.pkg/data/rules.txt -->
 ```text
 Shower before the sauna.
 Sit on a towel.
@@ -32,8 +33,8 @@ Cool off in the lake.
 ##! The sauna's rules, kept in a file of their own and made part of the
 ##! program while it compiles.
 
-## The rules, one on each line, from the file beside this module.
-const RULES: str = embed("rules.txt")
+## The rules, one on each line, from the package's `data` directory.
+const RULES: str = embed("data/rules.txt")
 
 ## Rule number `n`, counting from 1, if there is one.
 def rule(n: int) -> str?:
@@ -80,7 +81,8 @@ built again.
 
 The path is a string literal, so that the compiler knows it without
 running anything, and it must name a UTF-8 text file inside the
-program's directory. Anything else is refused while compiling:
+program's directory: the package's root, or a single file's directory.
+Anything else is refused while compiling:
 
 <!-- file: examples/guide-embed/paths.sisu -->
 ```sisu
@@ -133,12 +135,7 @@ the file where it runs.
 Keep embedded files under version control with the source: they are
 source.
 
-**Status.** In stage 0, with three differences from
-[08](../../proposal/08-metaprogramming.md): the path is relative to the
-module's directory and must stay inside it, where 08 resolves it from
-the package's root; a replay token's content hash covers the source and
-not the files it embeds, so a token made before a file changed is still
-accepted after; and stage 1's compile-time evaluator cannot yet run the
-string methods or the `dict` that would parse the text into a table
-while compiling, so a program reads the text when it runs, as `rule`
-does.
+**Status.** In stage 0, with one difference from
+[08](../../proposal/08-metaprogramming.md): a replay token's content
+hash covers the source and not the files it embeds, so a token made
+before a file changed is still accepted after.

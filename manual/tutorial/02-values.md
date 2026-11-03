@@ -985,12 +985,13 @@ test "wrapping a byte":
     assert 200u8 +% 100 == WRAPPED
 ```
 
-Run the tests before you change anything. Each hole is reported with
-its type, which is the kind of value to write:
+Check the file and run the tests before you change anything. `sisu
+check` reports each hole with its type, which is the kind of value to
+write, and every test is blocked by its hole:
 
 <!-- output: solutions/02-values/predict_values.console -->
 ```console
-$ sisu test predict_values.sisu
+$ sisu check predict_values.sisu
 warning[W0001]: typed hole `(-17) // 5` of type `int`
   --> predict_values.sisu:11:23
    |
@@ -1033,6 +1034,7 @@ warning[W0001]: typed hole `200u8 +% 100` of type `u8`
 17 | const WRAPPED: u8 = todo("200u8 +% 100")
    |                     ^^^^^^^^^^^^^^^^^^^^
 
+$ sisu test predict_values.sisu
 test "floor division of a negative number" ... blocked by todo("(-17) // 5")
 test "the remainder of a negative number" ... blocked by todo("(-17) % 5")
 test "a power of a power" ... blocked by todo("2 ** 3 ** 2")
@@ -1134,7 +1136,6 @@ error[E0301]: `/` divides floats; for integers use `//`, or convert to `f64` fir
    |            ^^^^^^^^^^^^^
   = fix: use `//` for integer division: `//`
 
-error[D0006]: the program was not run: errors found (3)
 ```
 
 `mean_rating` has two diagnostics on one line. Read both fixes before
@@ -1205,18 +1206,14 @@ test "the two scales meet":
 <!-- output: solutions/02-values/weather_report.console -->
 ```console
 $ sisu test weather_report.sisu
-warning[W0001]: typed hole `celsius in Fahrenheit` of type `f64`
-  --> weather_report.sisu:15:27
-   |
-15 |     let fahrenheit: f64 = todo("celsius in Fahrenheit")
-   |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `fahrenheit rounded, as an int` of type `int`
-  --> weather_report.sisu:16:22
-   |
-16 |     let whole: int = todo("fahrenheit rounded, as an int")
-   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("celsius in Fahrenheit")`:
+  celsius = 21.5
+in scope at the typed hole `todo("celsius in Fahrenheit")`:
+  celsius = -12.0
+in scope at the typed hole `todo("celsius in Fahrenheit")`:
+  celsius = 100.0
+in scope at the typed hole `todo("celsius in Fahrenheit")`:
+  celsius = -40.0
 test "a summer day" ... blocked by todo("celsius in Fahrenheit")
 test "a winter day" ... blocked by todo("celsius in Fahrenheit")
 test "water boils" ... blocked by todo("celsius in Fahrenheit")

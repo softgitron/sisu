@@ -1,5 +1,5 @@
 $ sisu test sauna.sisu
-error[E0100]: expected a name, found `*`
+error[E0128]: Sisu has no glob imports: name what the module gives, as in `from std.collections import Deque, Heap`, or import the module and write `collections.Deque`
   --> sauna.sisu:11:29
    |
 11 | from std.collections import *
@@ -35,4 +35,3 @@ error[E0200]: cannot find `SortedDict` in this scope
 20 |     var visits: SortedDict[str, int] = SortedDict.new()
    |                                        ^^^^^^^^^^
 
-error[D0006]: the program was not run: errors found (6)

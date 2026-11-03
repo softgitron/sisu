@@ -1,10 +1,12 @@
 $ sisu test second_largest.sisu
-warning[W0001]: typed hole `second_largest` of type `int`
-  --> second_largest.sisu:11:12
-   |
-11 |     return todo("second_largest")
-   |            ^^^^^^^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("second_largest")`:
+  values = [1, 2]
+in scope at the typed hole `todo("second_largest")`:
+  values = [5, 9, 9, 3]
+in scope at the typed hole `todo("second_largest")`:
+  values = [-4, -8, -4]
+in scope at the typed hole `todo("second_largest")`:
+  values = [7, 3, 7, 7, 1, 3]
 test "two values" ... blocked by todo("second_largest")
 test "the largest value twice" ... blocked by todo("second_largest")
 test "negative values" ... blocked by todo("second_largest")

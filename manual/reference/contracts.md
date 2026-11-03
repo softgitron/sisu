@@ -554,13 +554,17 @@ follow from the trait's, which a static verifier would prove and which,
 until there is one, the run checks against both clauses
 ([07](../../proposal/07-contracts.md#interaction-with-the-rest-of-the-language)).
 
-**Stage 0 differs.** A trait method's contract is accepted and never
-checked, through a generic call or a direct one:
+The trait's clauses are checked in each impl's method, the trait's
+`requires` on entry before the impl's own and its `ensures` on exit
+after them, with the trait's names for the parameters, and a failure
+names the trait's method, whether the call is direct, through a
+generic bound or through `dyn`. A method whose body is its contract
+alone is required, as one without a body is; a provided method's
+contract binds the impls that write their own, as `Dial`'s does:
 
 <!-- file: examples/reference-contracts/trait_contract.sisu -->
 ```sisu
-# A contract on a trait's method binds every impl, which stage 0 does
-# not check.
+# A contract on a trait's method binds every impl of it.
 trait Meter:
     def read(self, at: int) -> int:
         requires at >= 0
@@ -577,12 +581,24 @@ def main():
     print(Dial(2).read(-5))
 ```
 
-<!-- output: examples/reference-contracts/trait_contract.out -->
-```text
--10
+<!-- output: examples/reference-contracts/trait_contract.console -->
+```console
+$ sisu run trait_contract.sisu
+panic: precondition of `Meter.read` failed: at >= 0
+    at >= 0
+    │
+    -5
+  at Dial.Meter.read (trait_contract.sisu:4:18)
+  at main (trait_contract.sisu:15:11)
 ```
 
-**Status.** Designed.
+**Stage 0 differs.** Stage 0 checks a trait's contract only in the
+impls of the module that declares the trait, and warns at an impl in
+another module that it does not check it yet (W0021,
+[R17](diagnostics.md#w0021)). The verifier that would prove an impl's
+clauses against the trait's is after version 1.
+
+**Status.** In stage 0 (07), with the difference noted.
 
 ## What waits for the verifier
 

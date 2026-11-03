@@ -151,8 +151,8 @@ and it keeps working whatever the next version does to their order.
 
 > **From Python.** This is Python's `*` in a signature, with the same
 > purpose. A Python library warns about a deprecated call when the call
-> runs, with `warnings.warn`; Sisu's design moves the warning, and the
-> fix, to the compiler.
+> runs, with `warnings.warn`; Sisu moves the warning to the compiler,
+> and its design moves the fix there too.
 
 ## What a change can break
 
@@ -305,19 +305,27 @@ def main():
     print(celsius_of(176.0))
 ```
 
-<!-- output: examples/28-code-that-lasts/renamed.out -->
-```text
+<!-- output: examples/28-code-that-lasts/renamed.console -->
+```console
+$ sisu run renamed.sisu
+warning[W0023]: `to_celsius` is deprecated: use `celsius_of`, which this calls
+  --> renamed.sisu:13:11
+   |
+13 |     print(to_celsius(212.0))
+   |           ^^^^^^^^^^^^^^^^^
+
 100.0
 80.0
 ```
 
 `@deprecated("...")` marks the old name, with a message saying what to
 use instead. Attributes are data, as chapter 25 showed, and the
-compiler reads this one without acting on it yet: a call of a
-deprecated function will get a warning with its message, and a library
-will mark such a wrapper `@fix_inline` so that `sisu fix --deps`
-rewrites each caller to call the new function itself (D-067). Until
-then, the wrapper and its comment carry the message.
+compiler reads this one: each call of a deprecated function gets W0023
+(`type.deprecated`), a warning with the attribute's message, and the
+program still runs. A library will also mark such a wrapper
+`@fix_inline`, so that `sisu fix --deps` rewrites each caller to call
+the new function itself (D-067); until `sisu fix` exists, the warning
+tells each caller what to change.
 
 ## Habits the compiler stops
 
@@ -435,7 +443,7 @@ test "the slots that fit":
 
 <!-- output: examples/28-code-that-lasts/plan.console -->
 ```console
-$ sisu test plan.sisu
+$ sisu check plan.sisu
 warning[W0001]: typed hole `parse a slot` of type `Slot?`
   --> plan.sisu:16:12
    |
@@ -448,6 +456,11 @@ warning[W0001]: typed hole `keep the slots that fit` of type `list[Slot]`
 20 |     return todo("keep the slots that fit")
    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+$ sisu test plan.sisu
+in scope at the typed hole `todo("parse a slot")`:
+  line = "Aino 17:30 90"
+in scope at the typed hole `todo("keep the slots that fit")`:
+  text = "Aino 17:00 90\nEero 18:00 60\nRoni 18:30 30"
 test "slots that overlap" ... ok
 test "a slot from text" ... blocked by todo("parse a slot")
 test "the slots that fit" ... blocked by todo("keep the slots that fit")
@@ -458,7 +471,8 @@ test "the slots that fit" ... blocked by todo("keep the slots that fit")
   type its body must give: the list of what remains.
 - `overlap` is done, and its test passes. The tests of `parse_slot` and
   `free_slots` are blocked, not failed: they reach a hole, so they say
-  nothing yet about the code that will fill it.
+  nothing yet about the code that will fill it. Each shows what was in
+  scope at its hole, the text the code will work on.
 - You can fill the holes in any order, and each one you fill turns its
   tests from blocked to passed or failed.
 
@@ -530,30 +544,6 @@ test "half an hour without a towel":
 <!-- output: solutions/28-code-that-lasts/predict_versions.console -->
 ```console
 $ sisu test predict_versions.sisu
-warning[W0001]: typed hole `price(60), written for version 1` of type `int`
-  --> predict_versions.sisu:18:22
-   |
-18 | const AN_HOUR: int = todo("price(60), written for version 1")
-   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `price(90), written for version 1` of type `int`
-  --> predict_versions.sisu:19:21
-   |
-19 | const LONGER: int = todo("price(90), written for version 1")
-   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `price(60, per_hour=300, towel=False)` of type `int`
-  --> predict_versions.sisu:20:24
-   |
-20 | const AS_BEFORE: int = todo("price(60, per_hour=300, towel=False)")
-   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `price(30, towel=False)` of type `int`
-  --> predict_versions.sisu:21:20
-   |
-21 | const SHORT: int = todo("price(30, towel=False)")
-   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
 test "an hour, as version 1 users ask for it" ... blocked by todo("price(60), written for version 1")
 test "an hour and a half" ... blocked by todo("price(90), written for version 1")
 test "version 1's price, asked for in version 2" ... blocked by todo("price(60, per_hour=300, towel=False)")
@@ -649,7 +639,6 @@ error[E0314]: this `match` does not cover `Err(Cleaning(_))`
    |     ^^^^^^^^^^^^^^^^
   = note: add an arm for `Err(Cleaning(_))`, or a `case _` arm
 
-error[D0006]: the program was not run: errors found (1)
 ```
 
 <details>
@@ -812,18 +801,22 @@ suite "part 3":
 <!-- output: solutions/28-code-that-lasts/next_version.console -->
 ```console
 $ sisu test next_version.sisu
-warning[W0001]: typed hole `parse_slot` of type `Slot ! SlotError`
-  --> next_version.sisu:70:12
-   |
-70 |     return todo("parse_slot")
-   |            ^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `migrate` of type `String ! SlotError`
-  --> next_version.sisu:74:12
-   |
-74 |     return todo("migrate")
-   |            ^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("parse_slot")`:
+  line = "Aino 18:30 90"
+in scope at the typed hole `todo("parse_slot")`:
+  line = "Aino"
+in scope at the typed hole `todo("parse_slot")`:
+  line = "Aino 25:00 60"
+in scope at the typed hole `todo("parse_slot")`:
+  line = "Aino 18:00 0"
+in scope at the typed hole `todo("parse_slot")`:
+  line = "Eero 19"
+in scope at the typed hole `todo("migrate")`:
+  text = "Aino 17\nEero 18:30 45\nRoni 9"
+in scope at the typed hole `todo("migrate")`:
+  text = "Aino 17\nEero 25:00 45\nRoni 9"
+in scope at the typed hole `todo("migrate")`:
+  text = ""
 test "part 1/a slot" ... blocked by todo("parse_slot")
 test "part 1/a line with a part missing" ... blocked by todo("parse_slot")
 test "part 1/a time that is not on the clock" ... blocked by todo("parse_slot")
@@ -896,8 +889,9 @@ When every test passes, compare your answer with
   compiling and change what they get.
 - A new error in an error set breaks each caller's `match` (E0314),
   which is how the compiler makes sure that no caller misses it.
-- An old name can stay as a wrapper over the new one; `@deprecated` and
-  `@fix_inline` will let tools warn and rewrite callers.
+- An old name can stay as a wrapper over the new one; `@deprecated`
+  makes each call warn with its message (W0023), and `@fix_inline` will
+  let `sisu fix` rewrite the callers.
 - Habits from Python that would mean something else do not compile, and
   the diagnostics name the Sisu spelling (E0344, E0115, E0127).
 - Typed holes plan a change: the program compiles, W0001 lists what is

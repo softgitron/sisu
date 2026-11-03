@@ -148,8 +148,8 @@ Sisu's version is harder than Go's, because the inliner must respect
 ownership: borrows, `own` moves and `defer` move into the caller's scope
 with the body. A major release's API diff then marks the removals that
 came with such a function as ones that migrate themselves. In stage 0
-the attributes are accepted as data and nothing reads them yet, so the
-call in `main` gets no warning.
+the call in `main` gets a warning that quotes the attribute, W0023,
+and nothing reads `@fix_inline` yet, since `sisu fix` is designed.
 
 The standard library holds itself to a stricter rule. Nothing in `std`
 is ever removed: a deprecated item warns with its replacement named, and

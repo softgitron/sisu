@@ -5,19 +5,7 @@ error[E0304]: `list[Guest]` has no method `filter`
 15 |     let old_enough = guests.filter(it.age >= age)
    |                             ^^^^^^
   = note: `filter` is a method of `Iterator`
-  = fix: the type has a member with a similar name: `iter`
-
-error[E0342]: `it` is the parameter of an implicit closure and exists only where a one-parameter function is expected
-  --> adults.sisu:15:36
-   |
-15 |     let old_enough = guests.filter(it.age >= age)
-   |                                    ^^
-
-error[E0342]: `it` is the parameter of an implicit closure and exists only where a one-parameter function is expected
-  --> adults.sisu:16:27
-   |
-16 |     return old_enough.map(it.name.to_uppercase()).collect()
-   |                           ^^
+  = fix: iterate it first: `.iter()`
 
 error[E0304]: `list[Guest]` has no method `map`
   --> adults.sisu:20:19
@@ -25,17 +13,12 @@ error[E0304]: `list[Guest]` has no method `map`
 20 |     return guests.map(it.age).fold(0, (total, n) -> total + n)
    |                   ^^^
   = note: `map` is a method of `Iterator`
+  = fix: iterate it first: `.iter()`
 
-error[E0342]: `it` is the parameter of an implicit closure and exists only where a one-parameter function is expected
-  --> adults.sisu:20:23
-   |
-20 |     return guests.map(it.age).fold(0, (total, n) -> total + n)
-   |                       ^^
-
-error[E0310]: `+` cannot be applied to `_` and `_`
+error[E0324]: the type of `total` cannot be inferred here; add a type annotation
   --> adults.sisu:20:53
    |
 20 |     return guests.map(it.age).fold(0, (total, n) -> total + n)
-   |                                                     ^^^^^^^^^
+   |                                                     ^^^^^
+  = note: a closure's parameters take their types from where the closure is passed; one kept in a `let` names them, as in `(a: int, b: int) -> a + b`
 
-error[D0006]: the program was not run: errors found (6)

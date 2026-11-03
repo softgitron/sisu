@@ -1,0 +1,15 @@
+# A test of unsafe code runs on the checked memory model.
+from std.mem import ptr
+
+## `celsius` raised by `by` degrees, through a raw pointer.
+def raised(celsius: int, by: int) -> int:
+    var value = celsius
+    let p = ptr.of_mut(mut value)
+    # safety: valid, aligned, writable: p points to the live local
+    #   value, which nothing else uses until the block ends.
+    unsafe:
+        p.write(p.read() + by)
+    return value
+
+test "five degrees more":
+    assert raised(80, 5) == 85

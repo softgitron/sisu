@@ -7,6 +7,7 @@ error[E0411]: `Contact` holds `name: str`, which borrows; only a `view struct` m
    |
 10 | struct Contact:
    |        ------- `Contact` is declared here
+  = fix: own the text instead: `String`
   = fix: declare it `view struct Contact`: `view `
 
 error[E0411]: `Contact` holds `email: str`, which borrows; only a `view struct` may hold a borrow
@@ -17,6 +18,6 @@ error[E0411]: `Contact` holds `email: str`, which borrows; only a `view struct` 
    |
 10 | struct Contact:
    |        ------- `Contact` is declared here
+  = fix: own the text instead: `String`
   = fix: declare it `view struct Contact`: `view `
 
-error[D0006]: the program was not run: errors found (2)

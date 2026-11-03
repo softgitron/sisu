@@ -1,0 +1,9 @@
+$ sisu build --native --release e0445_hole_release.sisu
+error[E0445]: a release build rejects the typed hole `todo("area")` of type `f64`: blocked is never a shipped state
+  --> e0445_hole_release.sisu:3:12
+  |
+3 |     return todo("area")
+  |            ^^^^^^^^^^^^
+  = note: fill the hole before the release build; a placeholder meant to ship is `panic("...")`
+
+error[D0006]: the program was not run: errors found (1)

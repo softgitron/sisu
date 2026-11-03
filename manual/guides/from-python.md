@@ -122,7 +122,7 @@ struct Player:
     def best(self) -> int?:
         if self.points.is_empty():
             return None
-        return Some(sorted(self.points)[^1])
+        return Some(max(self.points))
 
 def main():
     let aino = Player("Aino", [12, 9])
@@ -145,9 +145,8 @@ Roni has not played
 - `if self.points:` would be E0302, which step 5 shows: a condition is
   a `bool`, since Sisu has no truthiness. Test the list with
   `is_empty()`.
-- Python's `max(self.points)` is `sorted(self.points)[^1]`, the last of
-  the sorted points: stage 0's `max` compares two values, and `[^1]` is
-  Python's `[-1]`.
+- `max(self.points)` is Python's, and as Python's raises on an empty
+  list, Sisu's panics, so `best` tests the list first.
 - The caller gives a default with `??`, or runs a block for a value with
   `if let`.
 
@@ -218,7 +217,7 @@ struct Player:
     def best(self) -> int?:
         if self.points.is_empty():
             return None
-        return Some(sorted(self.points)[^1])
+        return Some(max(self.points))
 
 error LineError:
     NotTwoWords
@@ -343,7 +342,6 @@ diagnostic that each one gets:
 | `append`, `strip`, `upper` | `push`, `trim`, `to_uppercase` |
 | `d.get(k, default)` | `d.get(k) ?? default` |
 | `x or default`, `x is None` | `x ?? default`, `x == None` or `if let` |
-| `max(xs)` | `sorted(xs)[^1]` in stage 0 |
 | `enumerate(xs, start=1)` | `enumerate(xs)`, adding 1 where the number is used |
 | `lambda x: e` | `x -> e`, or `it` |
 | `:=`, `else` on a loop | `if let`, or a chained condition |
@@ -356,7 +354,6 @@ binds its own variable, a closure cannot outlive a borrowed loop
 variable, and an `int` has 64 bits and panics past them. R19's section
 "Python habits whose meaning Sisu changes" shows each.
 
-**Status.** In stage 0, with two of Python's builtins narrower than
-[02](../../proposal/02-syntax.md)'s prelude suggests: `max` and `min`
-compare two values, not the items of a collection, and `enumerate` has
+**Status.** In stage 0, with one of Python's builtins narrower than
+[02](../../proposal/02-syntax.md)'s prelude suggests: `enumerate` has
 no `start`.

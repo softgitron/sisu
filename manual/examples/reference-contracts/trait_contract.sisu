@@ -1,5 +1,4 @@
-# A contract on a trait's method binds every impl, which stage 0 does
-# not check.
+# A contract on a trait's method binds every impl of it.
 trait Meter:
     def read(self, at: int) -> int:
         requires at >= 0

@@ -12,4 +12,3 @@ error[E0116]: an `if` expression needs an `else` branch, because it must have a 
 26 |     return if grade(points) >= 1: "passed"
    |                                           ^
 
-error[D0006]: the program was not run: errors found (2)

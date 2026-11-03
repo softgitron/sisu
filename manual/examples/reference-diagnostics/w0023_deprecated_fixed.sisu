@@ -1,0 +1,13 @@
+# The call names the function that replaces the deprecated one.
+
+## Degrees Celsius of `fahrenheit` degrees.
+def celsius_of(fahrenheit: f64) -> f64:
+    return (fahrenheit - 32.0) * 5.0 / 9.0
+
+## The old name of `celsius_of`.
+@deprecated("use `celsius_of`, which this calls")
+def to_celsius(fahrenheit: f64) -> f64:
+    return celsius_of(fahrenheit)
+
+def main():
+    print(celsius_of(212.0))

@@ -73,7 +73,9 @@ Kotiharju 80 Electric True
 
 `@derive` and `@deprecated` are Sisu's; `@table`, `@unit` and `@since`
 are data for a library or a tool to read
-([Attributes are data](#attributes-are-data)).
+([Attributes are data](#attributes-are-data)). Since nothing in this
+program reads them, the run warns about each, W0022, and about the call
+of the deprecated `heat`, W0023, on standard error.
 
 An attribute on the line of its declaration is E0117
 ([R17](diagnostics.md#e0117)), followed by E0106
@@ -108,6 +110,12 @@ error[E0106]: expected a declaration, found an indented block
 3 |     x: int
   | ^
 
+warning[W0022]: `@unused` is not an attribute Sisu reads, and no compile-time code of the program reads attributes (`reflect.attributes_of`), so it means nothing here
+  --> placement.sisu:6:6
+  |
+6 |     @unused
+  |      ^^^^^^
+
 error[E0106]: expected a declaration, found `let`
   --> placement.sisu:7:5
   |
@@ -119,7 +127,9 @@ error[D0006]: the program was not run: errors found (3)
 
 Neither message says that an attribute stands on a line of its own:
 E0117 takes the attribute for a statement, after whose end `struct` is
-unexpected. An attribute on a parameter is E0100 ([R17](diagnostics.md#e0100)).
+unexpected. `@unused`, a name that Sisu does not read, also gets W0022
+([Where an attribute may stand](#where-an-attribute-may-stand)). An
+attribute on a parameter is E0100 ([R17](diagnostics.md#e0100)).
 
 **Status.** In stage 0 (D-046).
 
@@ -134,11 +144,19 @@ Nothing else takes an attribute: not a statement, an expression, a
 parameter, a `case` arm or a closure. Each attribute that Sisu reads has
 a meaning on some of these declarations only, which its section names.
 
-**Stage 0 differs.** Stage 0 accepts any attribute on any declaration of
-the table without a word: a name that nothing reads, a misspelt one such
-as `@deprecatd`, and one that Sisu reads where it has no meaning, such as
-`@derive(Debug)` on a function or `@tag("slow")` on a suite, which tags
-none of the suite's tests.
+An attribute whose name Sisu does not read is data for compile-time
+code ([Attributes are data](#attributes-are-data)). One whose name is
+close to an attribute Sisu reads, such as `@deprecatd`, is W0024
+(`resolve.misspelt-attribute`), with the fix that writes the one it
+misspells; any other is W0022 (`resolve.unknown-attribute`) when no
+compile-time code of the program reads attributes, since nothing can
+read it then. A program whose compile-time code calls
+`reflect.attributes_of` keeps its own attributes without a word.
+
+**Stage 0 differs.** An attribute that Sisu reads, standing where it
+has no meaning, is accepted without a word, such as `@derive(Debug)` on
+a function or `@tag("slow")` on a suite, which tags none of the suite's
+tests.
 
 **Status.** In stage 0, with the difference noted.
 
@@ -154,7 +172,8 @@ compile time
 ([08](../../proposal/08-metaprogramming.md#what-you-cannot-do-and-the-intended-workaround)).
 
 A library may define attributes of its own, since a name that Sisu
-does not read is accepted. `reflect.attributes_of(T)` gives the
+does not read is accepted, and kept without a word in a program whose
+compile-time code reads attributes. `reflect.attributes_of(T)` gives the
 attributes on the declaration of the type `T`, in the order written,
 each with its `name` and its `args`, the text of each argument as
 written: a string's quotes are part of its text, and a keyword argument
@@ -211,8 +230,8 @@ compile time cannot be written yet.
 | `@export("NAME")` | a function | makes it callable from C ([Exported functions](#exported-functions)) | designed; checked in stage 0 |
 | `@blocking` | a function of an `extern` block | says that a call may block ([Foreign functions that block](#foreign-functions-that-block)) | designed; checked in stage 0 |
 | `@no_alloc`, `@no_block`, `@stack(max=N)` | a function | limit what it may do ([Resource limits](#resource-limits)) | leaning |
-| `@float(fast)` | a function | allows fast floating point inside it ([Fast floating point](#fast-floating-point)) | designed |
-| `@deprecated("MESSAGE")`, `@fix_inline` | an item; a function | warn at each use, and migrate the uses ([Deprecation and migrations](#deprecation-and-migrations)) | designed |
+| `@float(fast)` | a function | allows fast floating point inside it ([Fast floating point](#fast-floating-point)) | in stage 0, as a permission it does not use |
+| `@deprecated("MESSAGE")`, `@fix_inline` | an item; a function | warn at each use, and migrate the uses ([Deprecation and migrations](#deprecation-and-migrations)) | `@deprecated` in stage 0; `@fix_inline` designed |
 | `@preview("NAME")` | not designed yet | asks for a feature that is not stable ([Preview features](#preview-features)) | leaning |
 | `@diagnostic_name(f)` | a type made at compile time | says how diagnostics print it ([Names of types in diagnostics](#names-of-types-in-diagnostics)) | leaning |
 | `@intrinsic`, `@builtin`, `@structural`, `@keeps`, `@sealed`, `@marker`, `@internal` | the standard library's declarations | ([Attributes of the standard library](#attributes-of-the-standard-library)) | in stage 0 |
@@ -311,17 +330,19 @@ error[E0242]: `Version` implements `Ord`, which requires `Eq`, but `Version` doe
 error[D0006]: the program was not run: errors found (1)
 ```
 
+`@derive(Encode, Decode)` takes the traits of `std.json`, which the
+file imports, `from std.json import Decode, Encode`; it gives a type
+the JSON form of its shape ([Read and write JSON](../guides/json.md)).
+
 **Stage 0 differs.** `@derive(Into, From)`, which
 [03](../../proposal/03-types-and-generics.md#type-aliases-and-newtypes)
-gives newtypes, `@derive(Encode, Decode)` of `std.json` and
-`@derive(Arbitrary)` of `std.test` are E0243. A diagnostic in a derived
-impl is placed
-in `<derive>/main.sisu`, a module that the compiler writes, so E0235 for
-an impl beside a derived one points there and at the written impl, not
-at the `@derive`.
+gives newtypes, and `@derive(Arbitrary)` of `std.test` are E0243, and so
+is `@derive(Encode, Decode)` without the import, with no word about it.
+A diagnostic in a derived impl is placed in `<derive>/main.sisu`, a
+module that the compiler writes, so E0235 for an impl beside a derived
+one points there and at the written impl, not at the `@derive`.
 
-**Status.** In stage 0 (D-018), except `Into`, `From`, `Encode`,
-`Decode` and `Arbitrary`.
+**Status.** In stage 0 (D-018), except `Into`, `From` and `Arbitrary`.
 
 ## Delegating traits to a field
 
@@ -747,7 +768,9 @@ driver needs ([04](../../proposal/04-memory-and-ownership.md#resource-attributes
   can panic ([R16](sisu-command.md#sisu-audits-other-reports)).
 
 **Stage 0 differs.** Stage 0 accepts the three attributes and checks
-nothing, as it does `@float(fast)`, `@deprecated` and `@fix_inline`:
+nothing, as it does `@fix_inline`; the call of the deprecated
+`old_levels` warns (W0023), and `@float(fast)` keeps the arithmetic
+strict, which the permission allows:
 
 <!-- file: examples/reference-attributes/designed.sisu -->
 ```sisu
@@ -788,10 +811,15 @@ point is strict, one rounding for each operation, so a `pure` function
 gives the same bits on every target; inside the function that guarantee
 is given up, visibly ([R2](types.md#floating-point), D-074).
 
-**Stage 0 differs.** `@float(fast)` is accepted and changes nothing
-([Resource limits](#resource-limits) shows it).
+`@float` takes `fast` only; any other argument is E0448
+(`resolve.float-attribute`, [R17](diagnostics.md#e0448)), since without
+the attribute floating point is strict already.
 
-**Status.** Designed (D-074).
+**Stage 0 differs.** Stage 0 uses none of the permission: it keeps the
+arithmetic of a `@float(fast)` function strict, which the permission
+allows ([Resource limits](#resource-limits) shows one).
+
+**Status.** In stage 0 (D-074), with the difference noted.
 
 ## Deprecation and migrations
 
@@ -804,12 +832,19 @@ that depend on it with that body, moving borrows, `own` arguments and
 `defer` into the caller, so their behaviour is kept by construction
 (D-067).
 
-**Stage 0 differs.** Both are accepted and do nothing: a call of a
-deprecated function gets no warning ([Resource limits](#resource-limits)
-shows it), and `sisu fix` is designed ([R16](sisu-command.md#sisu-fix)).
+A call of a deprecated function or method, or a use of one as a value,
+is W0023 (`type.deprecated`) with the attribute's message, or W0025
+(`type.deprecated-plain`) for an attribute without one, everywhere but
+in the deprecated item's own body
+([R17](diagnostics.md#w0023)).
 
-**Status.** Designed ([13](../../proposal/13-evolution-and-governance.md));
-`@fix_inline` leans (D-067).
+**Stage 0 differs.** A deprecated type, constant or variant gets no
+warning yet, and `@fix_inline` does nothing, since `sisu fix` is
+designed ([R16](sisu-command.md#sisu-fix)).
+
+**Status.** `@deprecated` in stage 0
+([13](../../proposal/13-evolution-and-governance.md)), with the
+difference noted; `@fix_inline` leans (D-067).
 
 ## Preview features
 
@@ -833,7 +868,8 @@ diagnostic, so that a mistake with units shows `m/s` rather than a
 vector of exponents; `sisu explain --raw-types` shows the type itself
 ([10](../../proposal/10-tooling.md), Q-27).
 
-**Stage 0 differs.** The attribute is accepted and nothing calls `f`.
+**Stage 0 differs.** The attribute is E0900 until compile-time code
+can make types (Q-27).
 
 **Status.** Leaning (D-065), with the types made at compile time of
 Q-27.
@@ -887,10 +923,6 @@ error[E0225]: `@intrinsic` is reserved for the standard library
 error[D0006]: the program was not run: errors found (2)
 ```
 
-**Stage 0 differs.** `sisu test`, whose front end is the Rust one,
-reports E0225 on an item and not on a method; `sisu check` and `sisu
-run` report both ([R16](sisu-command.md#choosing-the-front-end)).
-
 **Status.** In stage 0.
 
 ## What attributes leave out
@@ -920,6 +952,7 @@ idea for later, and `@inline` has no design.
 | Code | Identifier | Section |
 |---|---|---|
 | [E0117](diagnostics.md#e0117), [E0106](diagnostics.md#e0106), [E0100](diagnostics.md#e0100) | `parse.trailing-tokens`, `parse.expected-declaration`, `parse.expected` | [Writing an attribute](#writing-an-attribute) |
+| [W0022](diagnostics.md#w0022), [W0024](diagnostics.md#w0024) | `resolve.unknown-attribute`, `resolve.misspelt-attribute` | [Where an attribute may stand](#where-an-attribute-may-stand) |
 | [E0243](diagnostics.md#e0243), [E0244](diagnostics.md#e0244), [E0242](diagnostics.md#e0242), [E0235](diagnostics.md#e0235) | `resolve.not-derivable`, `resolve.derive-field`, `resolve.supertrait-missing`, `resolve.overlapping-impl` | [Deriving traits](#deriving-traits) |
 | [E0608](diagnostics.md#e0608) | `comptime.derive-failed` | [Deriving traits](#deriving-traits), [The layout of a type](#the-layout-of-a-type) |
 | E0250, E0251, [E0252](diagnostics.md#e0252), E0253 | `resolve.not-delegable`, `resolve.delegate-to`, `resolve.delegate-self`, `resolve.delegate-field` | [Delegating traits to a field](#delegating-traits-to-a-field) |
@@ -930,4 +963,7 @@ idea for later, and `@inline` has no design.
 | E0702 | `type.test-signature` | [Fixtures](#fixtures) |
 | [E0989](diagnostics.md#e0989) | `unsafe.export-signature` | [Exported functions](#exported-functions) |
 | [E0990](diagnostics.md#e0990) | `unsafe.blocking-not-foreign` | [Foreign functions that block](#foreign-functions-that-block) |
+| [E0448](diagnostics.md#e0448) | `resolve.float-attribute` | [Fast floating point](#fast-floating-point) |
+| [W0023](diagnostics.md#w0023), [W0025](diagnostics.md#w0025) | `type.deprecated`, `type.deprecated-plain` | [Deprecation and migrations](#deprecation-and-migrations) |
+| [E0900](diagnostics.md#e0900) | `stage0.unsupported` | [Names of types in diagnostics](#names-of-types-in-diagnostics) |
 | [E0225](diagnostics.md#e0225), E0240, E0701 | `resolve.std-only-attribute`, `resolve.sealed-trait`, `cap.internal` | [Attributes of the standard library](#attributes-of-the-standard-library) |

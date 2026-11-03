@@ -653,6 +653,43 @@ a closer look.
 
 </details>
 
+## Testing unsafe code
+
+Tests of unsafe code run as any tests do, on the same checked memory
+model as `sisu run`, which stops a test at the first obligation it
+breaks:
+
+<!-- file: examples/27-systems/tested.sisu -->
+```sisu
+# A test of unsafe code runs on the checked memory model.
+from std.mem import ptr
+
+## `celsius` raised by `by` degrees, through a raw pointer.
+def raised(celsius: int, by: int) -> int:
+    var value = celsius
+    let p = ptr.of_mut(mut value)
+    # safety: valid, aligned, writable: p points to the live local
+    #   value, which nothing else uses until the block ends.
+    unsafe:
+        p.write(p.read() + by)
+    return value
+
+test "five degrees more":
+    assert raised(80, 5) == 85
+```
+
+<!-- output: examples/27-systems/tested.console -->
+```console
+$ sisu test tested.sisu
+test "five degrees more" ... ok
+1 passed, 0 failed, 0 blocked
+```
+
+The interpreter emulates a few C functions, `strlen`, `memcpy`,
+`malloc`, `free`, `getenv` and `write`, so a test reaches those through
+`extern "C"` too; a test that calls another C function stops at the
+call with a panic, since only a native build makes it.
+
 ## What is still to come
 
 Much of systems programming in Sisu is designed and not in the
@@ -667,11 +704,9 @@ E0304 today); `Region` exists, under `RawBuf`. The resource attributes
 The runtime profiles `full`, `single` and `freestanding`, targets and
 cross compilation (`--target`), and `panic = "abort"` in a profile,
 which the compiler ignores with W0005, wait for the runtime of
-[12](../../proposal/12-interop-and-targets.md). And `sisu test` does not
-run unsafe code yet, since the front end it uses reads neither
-`std.mem` nor `unsafe`, so the exercises of this chapter practise the
-safe side of systems work: layouts, bytes and code that does not
-allocate.
+[12](../../proposal/12-interop-and-targets.md). The exercises of this
+chapter practise the safe side of systems work: layouts, bytes and
+code that does not allocate.
 
 ## Exercise 27.1: predict the layouts
 
@@ -727,36 +762,6 @@ test "a short and a byte":
 <!-- output: solutions/27-systems/predict_layout.console -->
 ```console
 $ sisu test predict_layout.sisu
-warning[W0001]: typed hole `a u8, then an int` of type `int`
-  --> predict_layout.sisu:23:24
-   |
-23 | const BYTE_WORD: int = todo("a u8, then an int")
-   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `an int, then a u8` of type `int`
-  --> predict_layout.sisu:24:24
-   |
-24 | const WORD_BYTE: int = todo("an int, then a u8")
-   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `u8, u8, u16, u32` of type `int`
-  --> predict_layout.sisu:25:26
-   |
-25 | const SMALL_FIRST: int = todo("u8, u8, u16, u32")
-   |                          ^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `u8, u32, u8` of type `int`
-  --> predict_layout.sisu:26:26
-   |
-26 | const BYTE_AROUND: int = todo("u8, u32, u8")
-   |                          ^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `i16, u8` of type `int`
-  --> predict_layout.sisu:27:25
-   |
-27 | const SHORT_BYTE: int = todo("i16, u8")
-   |                         ^^^^^^^^^^^^^^^
-
 test "a byte before a word" ... blocked by todo("a u8, then an int")
 test "a byte after a word" ... blocked by todo("an int, then a u8")
 test "the small fields first" ... blocked by todo("u8, u8, u16, u32")
@@ -922,18 +927,10 @@ test "a fade to silence":
 <!-- output: solutions/27-systems/mixer.console -->
 ```console
 $ sisu test mixer.sisu
-warning[W0001]: typed hole `mix` of type `_`
-  --> mixer.sisu:17:5
-   |
-17 |     todo("mix")
-   |     ^^^^^^^^^^^
-
-warning[W0001]: typed hole `fade` of type `_`
-  --> mixer.sisu:22:5
-   |
-22 |     todo("fade")
-   |     ^^^^^^^^^^^^
-
+in scope at the typed hole `todo("mix")`:
+  gain = 0.5
+in scope at the typed hole `todo("mix")`:
+  gain = 1.0
 test "mixing a voice in" ... blocked by todo("mix")
 test "mixing keeps the samples in range" ... blocked by todo("mix")
 test "a fade to silence" ... blocked by todo("fade")
@@ -1022,12 +1019,14 @@ test "a log cut short":
 <!-- output: solutions/27-systems/records.console -->
 ```console
 $ sisu test records.sisu
-warning[W0001]: typed hole `parse_log` of type `list[Reading] ! LogError`
-  --> records.sisu:25:12
-   |
-25 |     return todo("parse_log")
-   |            ^^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("parse_log")`:
+  data = b"-\x00\x00\x00\x1e\x03\x02\x00.\x00\x00\x00$\x03\x02\x01"
+in scope at the typed hole `todo("parse_log")`:
+  data = b"\x00\x01\x00\x00\xe7\xff\x01\x00"
+in scope at the typed hole `todo("parse_log")`:
+  data = b""
+in scope at the typed hole `todo("parse_log")`:
+  data = b"-\x00\x00\x00\x1e\x03\x02\x00.\x00"
 test "two records" ... blocked by todo("parse_log")
 test "a temperature below zero" ... blocked by todo("parse_log")
 test "an empty log" ... blocked by todo("parse_log")

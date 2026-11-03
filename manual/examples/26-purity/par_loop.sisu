@@ -1,0 +1,9 @@
+# The body of a parallel loop changes nothing declared before the loop.
+import std.par
+
+def main():
+    let heats = [70, 80, 90]
+    var total = 0
+    for heat in par.iter(heats):
+        total += heat
+    print(total)

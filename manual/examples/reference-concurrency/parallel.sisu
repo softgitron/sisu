@@ -10,7 +10,6 @@ def main():
     let (low, high) = par.join(() -> sum([1, 2]), () -> sum([3, 4]))
     print("{low} {high}")
     print(par.reduce[par.Sum[f64]]([0.1, 0.2, 0.3], grain=1))
-    var total = 0
     for x in par.iter(xs):
-        total += x
-    print(total)
+        assert square(x) >= x
+    print("every square checked")

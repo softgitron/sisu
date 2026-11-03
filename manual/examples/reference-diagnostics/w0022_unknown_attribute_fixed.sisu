@@ -1,0 +1,15 @@
+# Compile-time code that reads the attribute gives it a meaning.
+@table("saunas")
+struct Sauna:
+    name: String
+    heat: int
+
+comptime def stored_in(T: type) -> String:
+    var out = String.new(reflect.name_of(T))
+    comptime for a in reflect.attributes_of(T):
+        out = "{out} @{a.name} {a.args[0]}"
+    return out
+
+def main():
+    let home = Sauna("Kotiharju", 80)
+    print("{home.name} {home.heat}, {comptime stored_in(Sauna)}")

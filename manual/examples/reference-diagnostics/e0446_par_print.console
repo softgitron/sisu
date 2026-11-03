@@ -1,0 +1,8 @@
+$ sisu run e0446_par_print.sisu
+error[E0446]: `print` is not `pure`, so the body of a `par` loop cannot call it: a `par` body runs on a worker and is `pure` (06)
+  --> e0446_par_print.sisu:7:9
+  |
+7 |         print("{heat} degrees")
+  |         ^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

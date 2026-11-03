@@ -1,0 +1,8 @@
+$ sisu run e0106_attribute_alone_fixed.sisu
+warning[W0023]: `seven` is deprecated: use `total`
+  --> e0106_attribute_alone_fixed.sisu:7:11
+  |
+7 |     print(seven())
+  |           ^^^^^^^
+
+7

@@ -1,0 +1,29 @@
+# `@derive(Encode, Decode)`, and an `Encode` written by hand.
+import std.json
+from std.json import Decode, Encode
+
+## A sum in cents, which the JSON writes as text with two decimals.
+struct Money:
+    cents: int
+
+impl Encode for Money:
+    def encode_json(self) -> String:
+        return "\"{self.cents // 100}.{self.cents % 100:02}\""
+
+## A turn in the sauna, as the JSON has it.
+@derive(Encode, Decode, Debug)
+struct Booking:
+    name: String
+    hour: int
+
+## What a booking costs.
+@derive(Encode)
+struct Receipt:
+    booking: Booking
+    price: Money
+
+def main() -> ! json.JsonError:
+    let b = json.decode[Booking](r"""{"name": "Aino", "hour": 18}""")?
+    print("{b:?}")
+    print(json.encode(Receipt(booking=b, price=Money(cents=1250))))
+    return Ok(())

@@ -1,0 +1,7 @@
+# The total made by a reducer, which merges the chunks' sums in a fixed
+# order.
+import std.par
+
+def main():
+    let heats = [70, 80, 90]
+    print(par.reduce[par.Sum[int]](heats))

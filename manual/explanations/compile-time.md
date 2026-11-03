@@ -208,10 +208,7 @@ HTML templating library and an embedded query language as the first
 candidates that compile-time code, reflection and trailing blocks may
 not serve well (Q-15). Ergonomics that Rust users take for granted, such
 as field attributes that tune a derived serialiser, are possible with
-attributes read as data, but less proven. And stage 1's evaluator does
-not yet run everything the interpreter runs: a compile-time call that
-builds a `dict` or loops over a list stops with a message beyond its
-slice, which [Determinism](determinism.md) describes.
+attributes read as data, but less proven.
 
 ## What would change it
 

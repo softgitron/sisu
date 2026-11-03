@@ -1,0 +1,16 @@
+$ sisu build --native --release schedule.sisu
+error[E0445]: a release build rejects the typed hole `todo("read the turns")` of type `list[Turn]`: blocked is never a shipped state
+  --> schedule.sisu:11:12
+   |
+11 |     return todo("read the turns")
+   |            ^^^^^^^^^^^^^^^^^^^^^^
+  = note: fill the hole before the release build; a placeholder meant to ship is `panic("...")`
+
+error[E0445]: a release build rejects the typed hole `todo("lay out the evening")` of type `list[String]`: blocked is never a shipped state
+  --> schedule.sisu:15:12
+   |
+15 |     return todo("lay out the evening")
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = note: fill the hole before the release build; a placeholder meant to ship is `panic("...")`
+
+error[D0006]: the program was not run: errors found (2)

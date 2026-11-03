@@ -1,4 +1,4 @@
-$ sisu test predict_values.sisu
+$ sisu check predict_values.sisu
 warning[W0001]: typed hole `(-17) // 5` of type `int`
   --> predict_values.sisu:11:23
    |
@@ -41,6 +41,7 @@ warning[W0001]: typed hole `200u8 +% 100` of type `u8`
 17 | const WRAPPED: u8 = todo("200u8 +% 100")
    |                     ^^^^^^^^^^^^^^^^^^^^
 
+$ sisu test predict_values.sisu
 test "floor division of a negative number" ... blocked by todo("(-17) // 5")
 test "the remainder of a negative number" ... blocked by todo("(-17) % 5")
 test "a power of a power" ... blocked by todo("2 ** 3 ** 2")

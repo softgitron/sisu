@@ -1,10 +1,11 @@
 ##! Exercise 13.2, every draft. Kind: fix. Level: 2.
 ##!
 ##! A `Draft` must be saved or discarded, and `save_all` saves a list of
-##! them. The file does not compile. Run `sisu test drafts.sisu`, read
-##! the diagnostic, and fix `save_all`, not `Draft` or the tests, so that
-##! every test passes. The hints are in chapter 13 of the tutorial, under
-##! "Exercise 13.2: every draft".
+##! them. The file does not compile. Check it with `sisu check
+##! drafts.sisu`, read the diagnostic, and fix `save_all`, not `Draft`
+##! or the tests, so that `sisu test drafts.sisu` passes every test. The
+##! hints are in chapter 13 of the tutorial, under "Exercise 13.2: every
+##! draft".
 
 error SaveError:
     Empty(position: int)

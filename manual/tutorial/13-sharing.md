@@ -93,11 +93,33 @@ mail runs in the north
   dropped with its last owner.
 
 A `Shared` owns its value, so a plain struct can hold one, as `Service`
-does, where it could not hold a view. Two `Shared` values compare with
-`==` by what they hold. Asking whether two owners hold the very same
-value, `Shared.same(a, b)`, is designed in
-[02](../../proposal/02-syntax.md#expressions-and-statements) and is not
-in the compiler yet.
+does, where it could not hold a view. `Shared.same(a, b)` asks whether
+two owners hold the very same value, which a copy does and a second
+`Shared` of an equal value does not:
+
+<!-- file: examples/13-sharing/same.sisu -->
+```sisu
+# `Shared.same` asks whether two owners hold the very same value.
+struct Config:
+    retries: int
+
+def main():
+    let config = Shared(Config(retries=3))
+    let copy = config.copy()
+    let other = Shared(Config(retries=3))
+    print("{Shared.same(config, copy)} {Shared.same(config, other)}")
+    print(config.retries == other.retries)
+```
+
+<!-- output: examples/13-sharing/same.out -->
+```text
+True False
+True
+```
+
+Compare what two owners hold through the values themselves, as the
+last line does: in stage 0, `==` between two `Shared` values gives
+`False`, even for two owners of one value.
 
 **Try it.** Add `web.config.retries = 5` before the first `print`, and
 run the program.
@@ -522,42 +544,6 @@ test "a shared cell":
 <!-- output: solutions/13-sharing/predict_owners.console -->
 ```console
 $ sisu test predict_owners.sisu
-warning[W0001]: typed hole `owners after two copies` of type `int`
-  --> predict_owners.sisu:44:21
-   |
-44 | const COPIES: int = todo("owners after two copies")
-   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `owners after a loop` of type `int`
-  --> predict_owners.sisu:45:19
-   |
-45 | const LOOP: int = todo("owners after a loop")
-   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `owners with a list of copies` of type `int`
-  --> predict_owners.sisu:46:19
-   |
-46 | const LIST: int = todo("owners with a list of copies")
-   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `owners with a weak handle` of type `int`
-  --> predict_owners.sisu:47:19
-   |
-47 | const WEAK: int = todo("owners with a weak handle")
-   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `whether the dropped song is still there` of type `bool`
-  --> predict_owners.sisu:48:27
-   |
-48 | const STILL_THERE: bool = todo("whether the dropped song is still there")
-   |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `plays counted through two owners` of type `int`
-  --> predict_owners.sisu:49:20
-   |
-49 | const PLAYS: int = todo("plays counted through two owners")
-   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
 test "copies" ... blocked by todo("owners after two copies")
 test "a loop" ... blocked by todo("owners after a loop")
 test "a list" ... blocked by todo("owners with a list of copies")
@@ -598,10 +584,11 @@ Open
 ##! Exercise 13.2, every draft. Kind: fix. Level: 2.
 ##!
 ##! A `Draft` must be saved or discarded, and `save_all` saves a list of
-##! them. The file does not compile. Run `sisu test drafts.sisu`, read
-##! the diagnostic, and fix `save_all`, not `Draft` or the tests, so that
-##! every test passes. The hints are in chapter 13 of the tutorial, under
-##! "Exercise 13.2: every draft".
+##! them. The file does not compile. Check it with `sisu check
+##! drafts.sisu`, read the diagnostic, and fix `save_all`, not `Draft`
+##! or the tests, so that `sisu test drafts.sisu` passes every test. The
+##! hints are in chapter 13 of the tutorial, under "Exercise 13.2: every
+##! draft".
 
 error SaveError:
     Empty(position: int)
@@ -642,20 +629,21 @@ test "an empty draft does not stop the others":
     assert saved == ["a", "c"]
 ```
 
+Check it before you change anything:
+
 <!-- output: solutions/13-sharing/drafts.console -->
 ```console
-$ sisu test drafts.sisu
+$ sisu check drafts.sisu
 error[E0418]: this leaves the scope with `drafts` unconsumed: a `list[Draft]` must be passed to an `own` parameter first
-  --> drafts.sisu:32:13
+  --> drafts.sisu:33:13
    |
-32 |             return Err(Empty(position))
+33 |             return Err(Empty(position))
    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
    |
-28 | def save_all(own drafts: list[Draft], mut saved: list[String]) -> ! SaveError:
+29 | def save_all(own drafts: list[Draft], mut saved: list[String]) -> ! SaveError:
    |              ----------------------- `drafts` is declared here
   = note: the loop that consumes `drafts` has not visited every element yet; finish the loop first, or return what is left
 
-error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```
 
 <details>
@@ -825,36 +813,38 @@ the tests call `add`, which is still a hole:
 <!-- output: solutions/13-sharing/dependencies.console -->
 ```console
 $ sisu test dependencies.sisu
-warning[W0001]: typed hole `dependents` of type `list[String]`
-  --> dependencies.sisu:47:16
-   |
-47 |         return todo("dependents")
-   |                ^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `key` of type `Key[Package]`
-  --> dependencies.sisu:56:16
-   |
-56 |         return todo("key")
-   |                ^^^^^^^^^^^
-
-warning[W0001]: typed hole `add` of type `_`
-  --> dependencies.sisu:61:9
-   |
-61 |         todo("add")
-   |         ^^^^^^^^^^^
-
-warning[W0001]: typed hole `install_order` of type `list[String] ! CycleError`
-  --> dependencies.sisu:66:16
-   |
-66 |         return todo("install_order")
-   |                ^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `to_shared` of type `dict[String, Shared[Item]] ! CycleError`
-  --> dependencies.sisu:70:16
-   |
-70 |         return todo("to_shared")
-   |                ^^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("add")`:
+  self = Graph(packages=Arena([]), keys={})
+  name = "c"
+  needs = ["b"]
+in scope at the typed hole `todo("add")`:
+  self = Graph(packages=Arena([]), keys={})
+  name = "app"
+  needs = ["web", "log"]
+in scope at the typed hole `todo("add")`:
+  self = Graph(packages=Arena([]), keys={})
+  name = "a"
+  needs = ["b"]
+in scope at the typed hole `todo("add")`:
+  self = Graph(packages=Arena([]), keys={})
+  name = "a"
+  needs = ["a"]
+in scope at the typed hole `todo("add")`:
+  self = Graph(packages=Arena([]), keys={})
+  name = "app"
+  needs = ["web"]
+in scope at the typed hole `todo("add")`:
+  self = Graph(packages=Arena([]), keys={})
+  name = "app"
+  needs = ["web", "log"]
+in scope at the typed hole `todo("add")`:
+  self = Graph(packages=Arena([]), keys={})
+  name = "app"
+  needs = ["web", "log"]
+in scope at the typed hole `todo("add")`:
+  self = Graph(packages=Arena([]), keys={})
+  name = "a"
+  needs = ["a"]
 test "part 1, the install order/a chain" ... blocked by todo("add")
 test "part 1, the install order/needs that are shared" ... blocked by todo("add")
 test "part 2, cycles/a cycle of three" ... blocked by todo("add")

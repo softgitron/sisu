@@ -797,30 +797,6 @@ test "a whole night":
 <!-- output: solutions/10-ownership/predict_endings.console -->
 ```console
 $ sisu test predict_endings.sisu
-warning[W0001]: typed hole `the log of sauna()` of type `list[String]`
-  --> predict_endings.sisu:40:29
-   |
-40 | const SAUNA: list[String] = todo("the log of sauna()")
-   |                             ^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `the log of rounds()` of type `list[String]`
-  --> predict_endings.sisu:41:30
-   |
-41 | const ROUNDS: list[String] = todo("the log of rounds()")
-   |                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `the log of walk(True)` of type `list[String]`
-  --> predict_endings.sisu:42:31
-   |
-42 | const RAINING: list[String] = todo("the log of walk(True)")
-   |                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `the log of night()` of type `list[String]`
-  --> predict_endings.sisu:43:29
-   |
-43 | const NIGHT: list[String] = todo("the log of night()")
-   |                             ^^^^^^^^^^^^^^^^^^^^^^^^^^
-
 test "a sauna" ... blocked by todo("the log of sauna()")
 test "two rounds" ... blocked by todo("the log of rounds()")
 test "a walk in the rain" ... blocked by todo("the log of walk(True)")
@@ -862,10 +838,11 @@ Open
 ##! Exercise 10.2, a walk on a grid. Kind: fix. Level: 1.
 ##!
 ##! `walk` follows a list of steps and keeps every position it passes.
-##! The file does not compile. Run `sisu test walk.sisu`, read the
-##! diagnostic, and change the type `Position`, not `walk` or the tests,
-##! so that every test passes. The hints are in chapter 10 of the
-##! tutorial, under "Exercise 10.2: a walk on a grid".
+##! The file does not compile. Check it with `sisu check walk.sisu`,
+##! read the diagnostic, and change the type `Position`, not `walk` or
+##! the tests, so that `sisu test walk.sisu` passes every test. The
+##! hints are in chapter 10 of the tutorial, under "Exercise 10.2: a
+##! walk on a grid".
 
 ## A position on a grid: `x` grows to the east and `y` to the north.
 @derive(Eq)
@@ -901,18 +878,19 @@ test "a walk from elsewhere":
     assert path == [Position(5, -2), Position(4, -2), Position(3, -2)]
 ```
 
+Check it before you change anything:
+
 <!-- output: solutions/10-ownership/walk.console -->
 ```console
-$ sisu test walk.sisu
-error[E0400]: `here` was moved on line 29 and cannot be used afterwards
-  --> walk.sisu:29:9
+$ sisu check walk.sisu
+error[E0400]: `here` was moved on line 30 and cannot be used afterwards
+  --> walk.sisu:30:9
    |
-29 |         visited.push(here)
+30 |         visited.push(here)
    |         ^^^^^^^^^^^^^^^^^^
    |         ------------------ `here` is moved here, in an earlier iteration of the loop
-  = note: copy it with `.copy()` before it is moved, or move it later
+  = note: copy it with `.copy()` before the move, which makes a second value (for a list or a `String`, an allocation); move it later, after its last use, which costs nothing; or, where what it moves into only reads it, take it there without `own`, and the call lends it
 
-error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```
 
 <details>
@@ -946,9 +924,10 @@ Open
 ##!
 ##! A small shop keeps its stock as a list of items. The file has three
 ##! move errors, and each needs a different fix: move later, borrow
-##! instead, or copy. Run `sisu test shop.sisu`, read the diagnostics,
-##! and fix each error with the fix that costs least and keeps what the
-##! doc comments promise. Change the functions, not `Item` or the tests.
+##! instead, or copy. Check the file with `sisu check shop.sisu`, read
+##! the diagnostics, and fix each error with the fix that costs least
+##! and keeps what the doc comments promise, until `sisu test shop.sisu`
+##! passes every test. Change the functions, not `Item` or the tests.
 ##! The hints are in chapter 10 of the tutorial, under "Exercise 10.3:
 ##! three moves".
 
@@ -997,40 +976,41 @@ test "restocking":
     assert len(shop.stock) == 2
 ```
 
+Check it before you change anything:
+
 <!-- output: solutions/10-ownership/shop.console -->
 ```console
-$ sisu test shop.sisu
-error[E0400]: `stock` was moved on line 23 and cannot be used afterwards
-  --> shop.sisu:24:17
+$ sisu check shop.sisu
+error[E0400]: `stock` was moved on line 24 and cannot be used afterwards
+  --> shop.sisu:25:17
    |
-24 |     var after = stock
+25 |     var after = stock
    |                 ^^^^^
    |
-23 |     let before = stock
+24 |     let before = stock
    |                  ----- `stock` is moved here
-  = note: copy it with `.copy()` before it is moved, or move it later
+  = note: copy it with `.copy()` before the move, which makes a second value (for a list or a `String`, an allocation); move it later, after its last use, which costs nothing; or, where what it moves into only reads it, take it there without `own`, and the call lends it
 
-error[E0400]: `item` was moved on line 34 and cannot be used afterwards
-  --> shop.sisu:35:24
+error[E0400]: `item` was moved on line 35 and cannot be used afterwards
+  --> shop.sisu:36:24
    |
-35 |         return "added {item.name} at {item.price}"
+36 |         return "added {item.name} at {item.price}"
    |                        ^^^^^^^^^
    |
-34 |         self.stock.push(item)
+35 |         self.stock.push(item)
    |         --------------------- `item` is moved here
-  = note: copy it with `.copy()` before it is moved, or move it later
+  = note: copy it with `.copy()` before the move, which makes a second value (for a list or a `String`, an allocation); move it later, after its last use, which costs nothing; or, where what it moves into only reads it, take it there without `own`, and the call lends it
 
-error[E0400]: `items` was moved on line 39 and cannot be used afterwards
-  --> shop.sisu:40:16
+error[E0400]: `items` was moved on line 40 and cannot be used afterwards
+  --> shop.sisu:41:16
    |
-40 |     assert len(items) == 2
+41 |     assert len(items) == 2
    |                ^^^^^
    |
-39 |     assert total(items) == 580
+40 |     assert total(items) == 580
    |            ------------ `items` is moved here
-  = note: copy it with `.copy()` before it is moved, or move it later
+  = note: copy it with `.copy()` before the move, which makes a second value (for a list or a `String`, an allocation); move it later, after its last use, which costs nothing; or, where what it moves into only reads it, take it there without `own`, and the call lends it
 
-error[D0021]: the program was not run: the ownership checker found errors (3); `--defer-borrow` runs it under the monitor
 ```
 
 <details>
@@ -1140,24 +1120,18 @@ test "closing time":
 <!-- output: solutions/10-ownership/cloakroom.console -->
 ```console
 $ sisu test cloakroom.sisu
-warning[W0001]: typed hole `leave` of type `int`
-  --> cloakroom.sisu:26:16
-   |
-26 |         return todo("leave")
-   |                ^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `collect` of type `Coat ! CloakroomError`
-  --> cloakroom.sisu:30:16
-   |
-30 |         return todo("collect")
-   |                ^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `close` of type `list[Coat]`
-  --> cloakroom.sisu:35:16
-   |
-35 |         return todo("close")
-   |                ^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("leave")`:
+  self = Cloakroom(coats={}, next_ticket=1)
+  coat = Coat(owner="Aino", colour="red")
+in scope at the typed hole `todo("leave")`:
+  self = Cloakroom(coats={}, next_ticket=1)
+  coat = Coat(owner="Aino", colour="red")
+in scope at the typed hole `todo("leave")`:
+  self = Cloakroom(coats={}, next_ticket=1)
+  coat = Coat(owner="Roni", colour="blue")
+in scope at the typed hole `todo("leave")`:
+  self = Cloakroom(coats={}, next_ticket=1)
+  coat = Coat(owner="Aino", colour="red")
 test "tickets count up" ... blocked by todo("leave")
 test "a ticket gives its coat back" ... blocked by todo("leave")
 test "a ticket works once" ... blocked by todo("leave")

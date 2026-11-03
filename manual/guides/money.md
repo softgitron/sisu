@@ -40,15 +40,14 @@ def main():
 0.30000000000000004
 0.3
 3.50
-3.5
+3.50
 ```
 
-A literal becomes a `Decimal` where one is expected. Stage 0 reads it
-from the shortest digits of its `f64`, so `3.50` keeps one place, while
-`Decimal.parse("3.50")` keeps the places it is written with; the value
-is the same, and the places matter only for how it prints. Amounts that
-come from text, such as a file or a form, go through `Decimal.parse`,
-which gives `None` for text that is not a number.
+A literal becomes a `Decimal` where one is expected, from its text, so
+`3.50` keeps the two places it is written with, as `Decimal.parse("3.50")`
+does; the places matter only for how it prints. Amounts that come from
+text, such as a file or a form, go through `Decimal.parse`, which gives
+`None` for text that is not a number.
 
 ## 2. Round once, by a named rule
 
@@ -189,7 +188,8 @@ here the three amounts add up to the bill.
 
 **Status.** `Decimal`, `Ratio` and the named roundings are in stage 0
 (D-076). D-076 makes `/` between two decimals a `Ratio`; stage 0 does
-not have it, and its E0310 does not point at `div` or `to_ratio`:
+not have it, and its E0310 says in a note what to write instead, `div`
+or `to_ratio`:
 
 <!-- file: examples/guide-money/divide.sisu -->
 ```sisu
@@ -209,5 +209,6 @@ error[E0310]: `/` cannot be applied to `num.Decimal` and `num.Decimal`
   |
 6 |     print(bill / Decimal.of(3))
   |           ^^^^^^^^^^^^^^^^^^^^
+  = note: a quotient of `Decimal`s has as many digits as it is given: `a.div(b, places, mode)` rounds it to `places` digits after the point by `mode` (`Rounding.HalfEven`, ...), and `a.to_ratio()` makes the exact fraction
 
 ```

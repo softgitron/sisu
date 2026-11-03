@@ -1,0 +1,7 @@
+# A trait whose method has a contract.
+
+## Something that reads a heat at a moment of the evening.
+pub trait Meter:
+    ## The heat at minute `at`, which is not negative.
+    def read(self, at: int) -> int:
+        requires at >= 0

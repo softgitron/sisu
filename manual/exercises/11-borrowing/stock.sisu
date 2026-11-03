@@ -1,9 +1,10 @@
 ##! Exercise 11.5, sold out. Kind: fix. Level: 3.
 ##!
 ##! A café clears the items it has none left of from its stock. The file
-##! does not compile. Run `sisu test stock.sisu`, read the diagnostic,
-##! and fix `remove_sold_out` so that every test passes. The hints are in
-##! chapter 11 of the tutorial, under "Exercise 11.5: sold out".
+##! does not compile. Check it with `sisu check stock.sisu`, read the
+##! diagnostic, and fix `remove_sold_out` so that `sisu test stock.sisu`
+##! passes every test. The hints are in chapter 11 of the tutorial,
+##! under "Exercise 11.5: sold out".
 
 ## Removes every item that has none left from `stock`, and gives their
 ## names in the order of the stock.

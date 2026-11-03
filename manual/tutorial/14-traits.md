@@ -967,36 +967,6 @@ test "a padded room":
 <!-- output: solutions/14-traits/predict_methods.console -->
 ```console
 $ sisu test predict_methods.sisu
-warning[W0001]: typed hole `what a guest says` of type `str`
-  --> predict_methods.sisu:38:20
-   |
-38 | const GUEST: str = todo("what a guest says")
-   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `what a host says` of type `str`
-  --> predict_methods.sisu:39:19
-   |
-39 | const HOST: str = todo("what a host says")
-   |                   ^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `a room written for users` of type `str`
-  --> predict_methods.sisu:40:20
-   |
-40 | const SHOWN: str = todo("a room written for users")
-   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `a room written for programmers` of type `str`
-  --> predict_methods.sisu:41:23
-   |
-41 | const DEBUGGED: str = todo("a room written for programmers")
-   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `a room padded on the left` of type `str`
-  --> predict_methods.sisu:42:21
-   |
-42 | const PADDED: str = todo("a room padded on the left")
-   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
 test "a guest" ... blocked by todo("what a guest says")
 test "a host" ... blocked by todo("what a host says")
 test "a room for users" ... blocked by todo("a room written for users")
@@ -1097,7 +1067,6 @@ error[E0233]: `cost` is not a method of `Item`
 33 |     def cost(self) -> int:
    |         ^^^^
 
-error[D0006]: the program was not run: errors found (3)
 ```
 
 <details>
@@ -1185,30 +1154,17 @@ test "a walk":
 <!-- output: solutions/14-traits/grid_vectors.console -->
 ```console
 $ sisu test grid_vectors.sisu
-warning[W0001]: typed hole `the sum` of type `Vector`
-  --> grid_vectors.sisu:17:16
-   |
-17 |         return todo("the sum")
-   |                ^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `the difference` of type `Vector`
-  --> grid_vectors.sisu:21:16
-   |
-21 |         return todo("the difference")
-   |                ^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `the opposite move` of type `Vector`
-  --> grid_vectors.sisu:25:16
-   |
-25 |         return todo("the opposite move")
-   |                ^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `the move made `times` times` of type `Vector`
-  --> grid_vectors.sisu:29:16
-   |
-29 |         return todo("the move made `times` times")
-   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("the sum")`:
+  self = Vector(x=1, y=2)
+  other = Vector(x=3, y=-4)
+in scope at the typed hole `todo("the opposite move")`:
+  self = Vector(x=2, y=-3)
+in scope at the typed hole `todo("the move made `times` times")`:
+  self = Vector(x=1, y=-2)
+  times = 3
+in scope at the typed hole `todo("the move made `times` times")`:
+  self = Vector(x=1, y=0)
+  times = 2
 test "adding and taking away" ... blocked by todo("the sum")
 test "the opposite move" ... blocked by todo("the opposite move")
 test "a move made several times" ... blocked by todo("the move made `times` times")
@@ -1280,12 +1236,18 @@ test "a column of amounts":
 <!-- output: solutions/14-traits/money.console -->
 ```console
 $ sisu test money.sisu
-warning[W0001]: typed hole `fmt` of type `_`
-  --> money.sisu:17:9
-   |
-17 |         todo("fmt")
-   |         ^^^^^^^^^^^
-
+in scope at the typed hole `todo("fmt")`:
+  self = Money(cents=1200)
+  f = Formatter(out="", spec="", depth=0)
+in scope at the typed hole `todo("fmt")`:
+  self = Money(cents=1250)
+  f = Formatter(out="", spec="", depth=0)
+in scope at the typed hole `todo("fmt")`:
+  self = Money(cents=-1250)
+  f = Formatter(out="", spec="", depth=0)
+in scope at the typed hole `todo("fmt")`:
+  self = Money(cents=250)
+  f = Formatter(out="", spec=">9", depth=0)
 test "whole euros" ... blocked by todo("fmt")
 test "euros and cents" ... blocked by todo("fmt")
 test "amounts below zero" ... blocked by todo("fmt")
@@ -1419,6 +1381,7 @@ error[E0368]: `Metres` has no order, so it cannot be compared with `>` or sorted
    |
 42 |         if run.distance > best:
    |            ^^^^^^^^^^^^^^^^^^^
+  = fix: derive it: `@derive(PartialOrd)`
 
 error[E0338]: cannot move `run.distance` out of a borrowed value; copy it with `.copy()`
   --> training.sisu:43:20
@@ -1446,20 +1409,22 @@ error[E0347]: `Metres` does not implement `Eq`
    |
 60 |     assert total_distance(week()) == Metres(12000.0)
    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: derive it: `@derive(Eq)`
 
 error[E0347]: `Seconds` does not implement `Eq`
   --> training.sisu:61:12
    |
 61 |     assert total_time(week()) == Seconds(3600.0)
    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: derive it: `@derive(Eq)`
 
 error[E0347]: `Metres` does not implement `Eq`
   --> training.sisu:65:12
    |
 65 |     assert longest(week()) == Metres(5000.0)
    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: derive it: `@derive(Eq)`
 
-error[D0006]: the program was not run: errors found (9)
 ```
 
 <details>

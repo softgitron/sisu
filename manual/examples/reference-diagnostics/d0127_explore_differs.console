@@ -1,0 +1,3 @@
+$ sisu run --explore 5 d0127_explore_differs.sisu
+["Aino", "Eero"]
+schedule seed 1 of 5 printed other output than seed 0, with the same exit status 0; `--schedule-seed 1` runs it again

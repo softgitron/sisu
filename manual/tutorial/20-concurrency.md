@@ -851,36 +851,6 @@ test "a cancelled task"(clock: TestClock):
 <!-- output: solutions/20-concurrency/predict_scopes.console -->
 ```console
 $ sisu test predict_scopes.sisu
-warning[W0001]: typed hole `halves(10, 4)` of type `str`
-  --> predict_scopes.sisu:38:24
-   |
-38 | const BOTH_EVEN: str = todo("halves(10, 4)")
-   |                        ^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `halves(10, 3)` of type `str`
-  --> predict_scopes.sisu:39:22
-   |
-39 | const ONE_ODD: str = todo("halves(10, 3)")
-   |                      ^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `started([2, 4, 6])` of type `str`
-  --> predict_scopes.sisu:40:26
-   |
-40 | const ALL_STARTED: str = todo("started([2, 4, 6])")
-   |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `started([2, 5, 6])` of type `str`
-  --> predict_scopes.sisu:41:24
-   |
-41 | const ONE_FAILS: str = todo("started([2, 5, 6])")
-   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `cancelled(clock)` of type `str`
-  --> predict_scopes.sisu:42:24
-   |
-42 | const CANCELLED: str = todo("cancelled(clock)")
-   |                        ^^^^^^^^^^^^^^^^^^^^^^^^
-
 test "two even numbers" ... blocked by todo("halves(10, 4)")
 test "an odd number" ... blocked by todo("halves(10, 3)")
 test "tasks that nobody joins" ... blocked by todo("started([2, 4, 6])")
@@ -952,7 +922,6 @@ error[E0427]: `count` is shared with the task by reference, but `Cell[int]` is n
    |             ^^^^^^^^^^^
   = note: wrap it: `Mutex[int]` shares mutation between tasks; or move the value with an `own` task
 
-error[D0006]: the program was not run: errors found (1)
 ```
 
 <details>
@@ -1028,12 +997,18 @@ test "a worker for each booking"(clock: TestClock):
 <!-- output: solutions/20-concurrency/pool.console -->
 ```console
 $ sisu test pool.sisu
-warning[W0001]: typed hole `check_all` of type `list[String]`
-  --> pool.sisu:19:12
-   |
-19 |     return todo("check_all")
-   |            ^^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("check_all")`:
+  bookings = ["mon 18 Aino", "tue ? Eero", "wed 19 Roni", "thu 17 Liisa"]
+  workers = 2
+in scope at the typed hole `todo("check_all")`:
+  bookings = ["mon 18 Aino", "tue ? Eero", "wed 19 Roni", "thu 17 Liisa"]
+  workers = 2
+in scope at the typed hole `todo("check_all")`:
+  bookings = ["mon 18 Aino", "tue ? Eero", "wed 19 Roni", "thu 17 Liisa"]
+  workers = 1
+in scope at the typed hole `todo("check_all")`:
+  bookings = ["mon 18 Aino", "tue ? Eero", "wed 19 Roni", "thu 17 Liisa"]
+  workers = 4
 test "the bookings that pass" ... blocked by todo("check_all")
 test "two workers take half the time of one" ... blocked by todo("check_all")
 test "one worker checks one booking at a time" ... blocked by todo("check_all")
@@ -1135,12 +1110,14 @@ test "no towns"(clock: TestClock):
 <!-- output: solutions/20-concurrency/fan_out.console -->
 ```console
 $ sisu test fan_out.sisu
-warning[W0001]: typed hole `forecasts` of type `list[String] ! {TaskError, WeatherError}`
-  --> fan_out.sisu:36:12
-   |
-36 |     return todo("forecasts")
-   |            ^^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("forecasts")`:
+  towns = ["Turku", "Oulu", "Kemi"]
+in scope at the typed hole `todo("forecasts")`:
+  towns = ["Turku", "Oulu", "Kemi"]
+in scope at the typed hole `todo("forecasts")`:
+  towns = ["Atlantis", "Oulu"]
+in scope at the typed hole `todo("forecasts")`:
+  towns = []
 test "the answers in the order of the towns" ... blocked by todo("forecasts")
 test "every town at once" ... blocked by todo("forecasts")
 test "an unknown town" ... blocked by todo("forecasts")
@@ -1250,12 +1227,18 @@ test "an error is an answer too"(clock: TestClock):
 <!-- output: solutions/20-concurrency/first_price.console -->
 ```console
 $ sisu test first_price.sisu
-warning[W0001]: typed hole `first_price` of type `int ! {TaskError, PriceError}`
-  --> first_price.sisu:40:12
-   |
-40 |     return todo("first_price")
-   |            ^^^^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("first_price")`:
+  item = "coffee"
+  limit = Duration(nanos=5000000000)
+in scope at the typed hole `todo("first_price")`:
+  item = "coffee"
+  limit = Duration(nanos=5000000000)
+in scope at the typed hole `todo("first_price")`:
+  item = "coffee"
+  limit = Duration(nanos=5000000000)
+in scope at the typed hole `todo("first_price")`:
+  item = "tea"
+  limit = Duration(nanos=5000000000)
 test "the primary answers first" ... blocked by todo("first_price")
 test "the replica answers first" ... blocked by todo("first_price")
 test "neither answers in time" ... blocked by todo("first_price")

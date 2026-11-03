@@ -1,0 +1,6 @@
+panic: precondition of `Meter.read` failed: at >= 0
+    at >= 0
+    │
+    -5
+  at Dial.Meter.read (trait_contract.sisu:4:18)
+  at main (trait_contract.sisu:15:11)

@@ -200,8 +200,7 @@ cycles, `Arena[T]` with `Key[T]` for graphs, a table for choosing among
 them, `@must_consume` with `close(own self)` and its rule for
 containers, and `sisu audit --ownership`. Challenge II: a dependency
 graph with cycle detection, first with an arena, then with `Shared` and
-`Weak`. Stage 0 runs all of it except `Shared.same` (E0351), which the
-chapter calls designed.
+`Weak`. Stage 0 runs all of it.
 
 ### Part III. Abstraction
 
@@ -303,8 +302,7 @@ replay token, `sisu run --record` and `sisu replay`, changing a handler
 while the server runs (`sisu run --watch`, epochs, `live.boundary()`),
 and a native build (`sisu build --native`). Challenge IV: rate limiting
 and a cache, proved under fifty orders of its tasks. Stage 0 runs all of
-it except TLS; a native build prints the executable's absolute path,
-which no session can show, so the chapter shows `sisu build`.
+it except TLS.
 
 ### Part V. Further
 
@@ -315,8 +313,8 @@ assign its fields, refinement types (`type Port = int where ...`) and
 documentation and as property tests, contracts on trait methods, and
 what waits for the verifier (`decreases`, ghost code). Exercises: a
 bank account with an invariant, a binary search with its contract.
-Stage 0 runs all of it except the contracts of a trait's methods, which
-it accepts and does not check.
+Stage 0 runs all of it, and checks the contracts of a trait's methods
+in the impls of the trait's own module only (W0021 elsewhere).
 
 **24. Numbers in depth** ([written](tutorial/24-numbers.md)). The sized integers and `uint`, the operator
 families for wrapping, saturating and checked arithmetic, conversions
@@ -325,9 +323,10 @@ operation, `mul_add`, pairwise `sum`, `@float(fast)`; D-074), NaN and
 ordering, and the exact types `BigInt`, `Ratio` and `Decimal` with their
 suffix-free literals and named rounding (D-076). Exercises: a checksum
 over `u32`, a mortgage table in `Decimal`. Stage 0 runs all of it
-except `@float(fast)`, which it accepts and ignores, `total_order`, and
-literals that take an exact type beside an operator (`f * 2` with `f` a
-`BigInt`), so the chapter types its literals with `let`.
+except `total_order` and literals that take an exact type beside an
+operator (`f * 2` with `f` a `BigInt`), so the chapter types its
+literals with `let`; it accepts `@float(fast)` and keeps the arithmetic
+strict.
 
 **25. Compile-time code** ([written](tutorial/25-compile-time.md)). `comptime` expressions, `const`, `comptime
 def` and `comptime assert`, fuel and `@comptime_budget`, reflection
@@ -360,8 +359,9 @@ profiles (`full`, `single`, `freestanding`), targets and cross
 compilation, `panic = abort`, and binary size. Exercises: the layouts of
 `@repr(c)` structs, the order of bytes, an allocation-free audio
 callback, records from a device's bytes. Stage 0 runs the unsafe code,
-the raw pointers and C interop under `sisu run`; `sisu test` does not
-read unsafe code yet, so the exercises practise the safe side. The
+the raw pointers and C interop, under `sisu run` and in the tests of a
+file (a package's tests of unsafe code stop at E1022), and the
+exercises practise the safe side. The
 allocators (`list.with_allocator`, `Region`, `try_push`), header import,
 `--target` and the profiles other than `full` are designed, and the
 resource attributes compile without checking anything.
@@ -374,7 +374,8 @@ specifications, `sisu why`, and planning with holes (`sisu check
 --holes`). Challenge V: migrate a small library across a breaking change
 without breaking its users. Stage 0 has none of `sisu fix`, `why`,
 `review`, `publish`, `sisu check --holes` or the registry, and accepts
-`@deprecated`, `@fix_inline` and `@preview` without effect, so the
+`@fix_inline` and `@preview` without effect (a call of a deprecated
+function warns, W0023), so the
 chapter teaches compatibility through what the language already checks
 (defaults, keyword-only parameters, exhaustive matches over error sets,
 doc examples) and gives each tool a sentence.
@@ -393,7 +394,7 @@ instead of teaching.
 | G4 | Coming from Go ([written](guides/from-go.md)) | Maps goroutines to scopes, `context` to cancellation, interfaces to traits, `if err != nil` to `?`. |
 | G5 | Read and write files ([written](guides/read-files.md)) | `Fs` operations, missing files as `IoError`, walking a directory, testing with `Fs.in_memory`. |
 | G6 | Parse command-line arguments ([written](guides/command-line.md)) | `std.x.cli` derived from a struct, help text, errors, a transcript test. |
-| G7 | Read and write JSON ([written](guides/json.md)) | `@derive(Encode, Decode)`, `json.encode`, `json.decode` validating refinements at the boundary, `json.parse` (stage 0 reads any struct by reflection, so the derive is not needed and gets E0243, and `decode` does not check refinements yet). |
+| G7 | Read and write JSON ([written](guides/json.md)) | `@derive(Encode, Decode)`, `json.encode`, `json.decode` validating refinements and invariants at the boundary, a form of a type's own, `json.parse` (stage 0 encodes an enum and does not decode one). |
 | G8 | Match text with regular expressions ([written](guides/regex.md)) | `std.regex`, groups, the linear-time guarantee and what it rules out. |
 | G9 | Test code that uses the clock ([written](guides/clock.md)) | `Clock.frozen_at`, `advance`, the test clock, `Ticker` under test. |
 | G10 | Test code that uses the network ([written](guides/network.md)) | `Net.fake`, `http.FakeNet().respond_to`, request counts. |
@@ -404,19 +405,19 @@ instead of teaching.
 | G15 | Reproduce a failure ([written](guides/replay.md)) | Replay tokens, `sisu run --record`, `sisu replay`. |
 | G16 | Change a running program ([written](guides/live.md)) | `sisu run --watch`, epochs, `live.boundary()`, what restarts the program. |
 | G17 | Make a loop parallel ([written](guides/parallel.md)) | `std.par`, reducers, `grain`, checking that the result is unchanged. |
-| G18 | Use a region for per-request memory | `Region.bump`, `list.with_allocator`, why the list cannot escape (waits for allocators). |
-| G19 | Call a C library ([written](guides/c-library.md)) | A trusted wrapper package with a capability-taking safe API (stage 0 runs it in the interpreter and natively; header import and tests of unsafe code wait). |
+| G18 | Use a region for per-request memory | `Region.bump`, `list.with_allocator`, why the list cannot escape (waits for the allocators of collections: `std.mem` has `Region` and the unsafe `RawBuf`, which takes it by value, and `list.with_allocator` is E0351). |
+| G19 | Call a C library ([written](guides/c-library.md)) | A trusted wrapper package with a capability-taking safe API (stage 0 runs it in the interpreter and natively, and the tests of unsafe code in a file; header import and a package's tests of unsafe code wait). |
 | G20 | Build a native executable ([written](guides/native.md)) | `sisu build --native`, `--release`, targets and cross compilation (stage 0 lacks `--target`, D0009). |
 | G21 | Write a derive ([written](guides/derive.md)) | A trait's `comptime def derive` over `reflect.fields_of`. |
-| G22 | Generate configuration | A module of `const` items rendered by `sisu eval` (waits for `sisu eval`). |
-| G23 | Publish a package | Documentation coverage, the API diff, semver, provenance (waits for the registry). |
+| G22 | Generate configuration | A module of `const` items rendered by `sisu eval` (waits for `sisu eval`, D0003 in stage 0). |
+| G23 | Publish a package | Documentation coverage, the API diff, semver, provenance (waits for the registry: `sisu publish` is D0003). |
 | G24 | Check what a dependency can do ([written](guides/audit.md)) | `sisu audit`, the capability summary, admission and its authority delta (stage 0 audits one file at a time; the summary and admission wait for the registry). |
-| G25 | Move to a new edition | `sisu fix --edition` and `sisu fix --deps` (waits for `sisu fix`). |
-| G26 | Plan with typed holes ([written](guides/holes.md)) | `todo`, blocked tests, `sisu check --holes` (D0009 in stage 0). |
+| G25 | Move to a new edition | `sisu fix --edition` and `sisu fix --deps` (waits for `sisu fix`, D0003 in stage 0). |
+| G26 | Plan with typed holes ([written](guides/holes.md)) | `todo`, blocked tests and the closure of each hole, the release build's E0445, `sisu check --holes` (D0009 in stage 0). |
 | G27 | Benchmark and profile ([written](guides/bench.md)) | `bench` blocks, `black_box`, `sisu bench`, `sisu run --profile` (D0009 in stage 0). |
 | G28 | Log and trace ([written](guides/log.md)) | `std.log`, levels, the trace context of scopes, `trace.wrap` over a capability (stage 0 writes every level and has no `trace.wrap`, so the guide writes its own interceptor). |
 | G29 | Write a script with dependencies ([written](guides/script.md)) | A shebang file with inline metadata. |
-| G30 | Embed a file at compile time ([written](guides/embed.md)) | `embed` and what it records for reproducible builds. |
+| G30 | Embed a file at compile time ([written](guides/embed.md)) | `embed` from the package's root, and what it records for reproducible builds. |
 | G31 | Do exact arithmetic with money ([written](guides/money.md)) | `Decimal`, rounding modes, `Ratio` from division. |
 | G32 | Design a library's API ([written](guides/library-api.md)) | The std rules: capabilities in, values out; specific error sets; no hidden allocation; `Debug` everywhere; iterators over views; Python's names. |
 
@@ -950,6 +951,7 @@ solutions and passing checks.
 | 11 | Chapters 23 (2, done), 24 (2, done), 25 (3, done), 26 (2, done); R11 (1, done), R12 (2, done); G17, G20, G21, G26, G27, G28, G29, G30, G31, G32 (7.5, done); X6, X7, X9, X13, X14 (5, done) | done |
 | 12 | When their features exist: chapters 27 (3, done) and 28 with challenge V (2, done); G18, G19, G22, G23, G24, G25 (4.5; G19 and G24 done); X11 (1, done); the site (3) | 6 to go: G18, G22, G23, G25 and the site |
 | 13 | The maintenance round: the writers' corrections to this plan and [STYLE.md](STYLE.md), links and anchors (`tools/check_links.py`), the diagnostics entries the pages lacked, the generator of R17 retired, the check of "Every code" against the catalog, `SUMMARY.md`, and the findings in one list by area | done (1.5): corrections applied, links and anchors checked (0 broken), 43 entries added to R17, the generator retired, `SUMMARY.md`, the findings in ten groups (209), 27 changed sessions reviewed and blessed, every check passing |
+| 14 | Stage 1's third round (R27 to R36) and the decisions 354 to 360 in the manual: the codes they added to R17, the pages whose rules changed, every changed session reviewed, the waiting guides and R18 read against their features, the findings checked again | done (1.5): 11 codes in R17's tables, each with an entry, 145 sessions blessed (124 changed, 21 new, 3 retired), the start sessions of nine `fix` exercises moved to `sisu check`, G18, G22, G23, G25 and R18 still waiting (allocators, `sisu eval`, the registry, `sisu fix`, the site), the findings at 199 (22 settled, 12 new), every check passing |
 | | Total | about 160 |
 
 The setup of R18, the generated library reference, belongs to step 12's
@@ -964,16 +966,21 @@ and later pages do not rediscover them. Each item is one finding: what
 stage 0 does, and in parentheses the page whose writing found it (a
 chapter by its number, a reference page, guide or explanation by its
 letter and number, "the maintenance round" for step 13). A finding that
-the rounds R10 to R26 of [stage 1's rules](../compiler/stage1/RULES.md)
+the rounds R10 to R36 of [stage 1's rules](../compiler/stage1/RULES.md),
+or the decisions 354 to 360 of the driver, the runtime and the test
+runner in the [architecture notes](../compiler/docs/architecture.md),
 settled is no longer listed; each was checked against the compiler
 before it went. The last group holds the diagnostics that lack a fix or
 mislead, whatever their area.
 
-The list holds 209 findings in ten groups. The rounds R11 to R26
-settled 41 that the writers recorded (R24 alone 14, R25 9, R16 5), 12
-were corrections to this plan, its conventions or its tools, now made
-where they belong, and a finding that several pages recorded is one item
-that names each page; 4 come from the maintenance round.
+The list holds 199 findings in ten groups. The rounds R11 to R26
+settled 41 that the writers recorded (R24 alone 14, R25 9, R16 5), and
+stage 1's third round, R27 to R36, with the decisions 354 to 360,
+settled 22 more (R33 alone 4, decision 357 3); 12 were corrections to
+this plan, its conventions or its tools, now made where they belong,
+and a finding that several pages recorded is one item that names each
+page; 4 come from the maintenance round, and 12 from step 14, which
+checked the manual against that round.
 
 ### Syntax and names
 
@@ -1001,12 +1008,11 @@ that names each page; 4 come from the maintenance round.
 - A parameter named like an imported module, `fs: F` beside `import std.fs`, hides the module, and each call such as `fs.walk(...)` is E0304 with no word about the module (chapter 21).
 - `N.to_f32()` on a constant parameter `N` is read as an associated function of a type `N` (E0351); binding `N` with `let` first works (chapter 27).
 - `collections.Deque[int].new()`, a type argument after a module's name, is E0200 for `int`, with the fix `uint`; `let q: collections.Deque[int] = collections.Deque.new()` works (the maintenance round).
-- `sisu check` and `sisu run` report neither a field declared twice (E0205) nor a variant declared twice (E0206), and keep one of the two; the Rust front end of `sisu test` reports both (R3).
+- No command reports a field declared twice (E0205) or a variant declared twice (E0206), and each keeps one of the two: `sisu test` builds from stage 1 as `check` and `run` do since decision 357, and only `--front-end=rust` reports them (R3).
 - D-055 keeps two silent differences from Python, a default argument computed at each call and a loop variable bound anew in each iteration, and neither is a row of the false-friend table that the model arm of [20](../proposal/20-pre-registration.md) measures (section 6.9, FF-1 to FF-6), so the experiment cannot see them (X8).
 
 ### Types and traits
 
-- `Shared.same(a, b)`, which [02](../proposal/02-syntax.md#expressions-and-statements) gives for the identity of shared values, is E0351 (chapter 13).
 - A trait's associated constant, which [03](../proposal/03-types-and-generics.md#traits) gives, is E0100 without a value, and with one it cannot be read as `Self.SIDES` or `Square.SIDES` (E0351) (chapter 14).
 - A `const` in an enum's body compiles, and reading it as `Light.COUNT` is E0351 (R3).
 - A supertrait cycle through another trait, `trait A(B)` with `trait B(A)`, compiles in both front ends; E0247 comes only for `trait A(A)` (R3).
@@ -1016,18 +1022,17 @@ that names each page; 4 come from the maintenance round.
 - `map(f)` over the `iter()` of a `list[int]`, with `def f(n: int)`, is E0300 ("expected `(ref int) -> _`, found `(int) -> int`"), since the items are references; `map(x -> f(x))` works (chapter 16).
 - `sorted(xs)` with `xs` a `Slice[int]` is E0300 ("expected `Iterable[int]`, found `ref Slice[int]`"), though `for x in xs` works; `sorted(xs.iter())` is the spelling (chapter 26).
 - A literal beside a `BigInt` or a `Decimal` does not take its type: `f * 2` and `d + 0.25` are E0310, though D-076 gives the exact types literals through `FromLiteral` and the ordinary operators (chapter 24).
-- A `Decimal` literal is read from the shortest digits of its `f64`, so `3.50` is `3.5`, where [03](../proposal/03-types-and-generics.md#numbers) says a literal reaches it as written; `Decimal.parse("3.50")` keeps the places (chapter 24).
 - A `u32` shifted by an `int`, `s << k`, widens to `int`, so `1u32 << 32` with the amount in an `int` is 4294967296, where a `u32` amount panics (chapter 24).
 - `a < b` with a `u8` and an `i32` is E0369, though `a + b` widens (R2).
-- `@float(fast)` is accepted without a word and changes nothing (chapter 24).
 - `@repr(u8)` on an enum is accepted and changes nothing, an explicit discriminant `Red = 1` is E0117, and `F[_]`, the syntax 03 reserves for higher-kinded types, is E0100 with no word that it is reserved (R2).
 - `@derive(Plain)` accepts a `@repr(c)` struct with padding, whose `as_bytes` would read it, though 22 allows no padding in a plain type, and it asks only that a struct has an attribute named `repr`, so `@repr(python)` passes (chapter 27, R14).
 - Missing beside 03: `ptrsize` and `uptrsize`, `Sized`, the method form of checked arithmetic (`a.checked_add(b)`), `f64.total_order()`, `round_to`, `max_by` and `min_by` over a partially ordered key, `Decimal`'s `/` giving a `Ratio`, `graphemes` and the normalisation forms, `@derive(Into, From)`, a list literal typed as an `Array`, `FromLiteral` for `Url`, and the sharing of instances with `--explain-size` (R2, chapters 2, 5, 6, 14 and 24).
 - [14](../proposal/14-non-goals.md) lists "implicit conversions" among what Sisu does not have, where D-016 keeps implicit lossless widening and the proposal's README says "implicit lossy conversions" (X1).
-- Contracts on a trait's methods, which [07](../proposal/07-contracts.md#interaction-with-the-rest-of-the-language) makes binding on every implementation, are accepted and never checked, in either front end and through a generic call: a trait's `requires x >= 0` lets `push(-1)` through (chapter 23).
+- A trait's contract binds only the impls of the trait's own module: an impl in another module gets W0021 (`contract.trait-elsewhere`) and is not held to the contract, since a checker of stage 1 holds the syntax of its own module only (chapter 23, R11, R17).
 - A method that takes `own self`, changes a copy of its value and returns it, is no exit that checks the invariant, so `Gauge(level=4).filled(20)` gives a level of 24 under `invariant 0 <= self.level <= 10`; 07 checks construction and `mut self` methods only, so the gap is the design's as well (R11).
 - In a function that returns `T ! E`, `result` is the whole result, so `ensures result > 0` is E0369 with no word that `result.is_ok()` or `result == Ok(...)` is what compares (R11).
 - A `Decimal` is not `Copy`, so a loop that pushes the same share needs `.copy()` (E0400), which a reader who thinks of it as a number does not expect (G31).
+- `a == b` between two `Shared` values is `False` whatever they hold, two owners of one value included (`x == x.copy()`), in the interpreter and natively, though `a.eq(b)` calls the prelude's `Eq` for `Shared[T]` and compares the values (chapter 13, R7).
 
 ### Ownership
 
@@ -1052,14 +1057,12 @@ that names each page; 4 come from the maintenance round.
 - A `main` that passes an error on with `?` adds the line of the `?` under it, also in a transcript; returning it from an `else as e:` block keeps the line out (G6).
 - A run-time message is printed without its code (`panic: ...`), so a reader has nothing to give `sisu explain`; the R codes are visible only in the catalog (R17).
 - R0103 (`contract.refinement-failed`) is in the catalog and nothing raises it (R11).
+- A failure of a trait's contract in a package names the impl's method with the module's path twice, `at kiuas.meter.Dial.kiuas.meter.Meter.read` (R17).
 
 ### Concurrency and capabilities
 
-- When a task fails while the scope's block is joining an earlier sibling, the failure cancels the sibling, the block's `join()?` returns `Err(Cancelled)`, and that becomes the scope's result, hiding the failure that [06](../proposal/06-concurrency-and-capabilities.md#tasks-and-scopes) says the scope returns (chapter 20).
 - Tasks spawned in a loop that change a captured `var`, `s.spawn do: count += 1`, get E0402, whose message names the closure's whole text as the value borrowed, says that it "cannot be modified", and says nothing about a `Mutex` (chapter 20).
 - E0428's note offers `own () -> ...`, which moves the list into the first task and leaves none for the next; making the value outside the scope's block, which works, is not offered (chapter 20).
-- `for x in par.iter(xs):` is a plain loop, whose body can change a variable outside it or print without a word, where [06](../proposal/06-concurrency-and-capabilities.md#data-parallelism) makes a `par` body pure; `par.map` and the reducers' methods are checked (chapter 26, G17).
-- `a.load()` of an `Atomic` compiles in a `pure` function, though 06 lists `Atomic` among the operations that observe the schedule; `lock`, `recv`, `try_recv` and `select` are E0333 (chapter 26).
 - `xs.par_iter()` is E0304, `par_iter_mut` is missing and `SoaList` is E0201, as planned, so stage 0 spells the parallel loop `par.iter(xs)` and the parallel map `par.map` (chapter 26, R9).
 - The unbounded channel of 06 is missing: stage 0's channels are bounded only (R9).
 - `System` has no `stdout` and `stderr` fields, which [06](../proposal/06-concurrency-and-capabilities.md#the-rule) lists among the root capabilities; `print` and `print_err` are ambient instead (chapter 18).
@@ -1074,53 +1077,48 @@ that names each page; 4 come from the maintenance round.
 - The failure database of property tests, `@derive(Arbitrary)` (E0243), `@fixture`, `Expectation`, `--fuzz`, `--cover`, `--mutate` and the JSON output of `sisu test` are missing, as planned (chapter 19, G11).
 - A test captures no output, so a test cannot see a `Drop`, and chapter 10's drop-order exercise predicts the order of `defer`s instead (chapter 10).
 - A transcript line of a run that fails holds the error's trace (`at counter.sisu:34:19`), so the transcript breaks whenever the program's lines move (chapter 9).
-- An `assert` whose expression moves a value, `assert visits.into_inner() == 2`, is E0400 twice ("moved ... in an earlier iteration of the loop") under `sisu test`, whose Rust front end keeps what R22 fixed in stage 1 (chapter 20).
-- A hole reached in a task that nothing in the test joins, such as a handler's hole inside `http.serve`'s connection task, fails the test with a deadlock report instead of reporting it blocked by the hole (chapter 22).
 - A `sim.always` condition that locks a `Mutex` that a task holds at the switch hangs `sisu test`, with no deadlock report and memory growing past 2 GB (chapter 22).
 - A typed hole reached at compile time is E0602, so a test that uses a constant computed from a hole does not compile instead of being blocked (chapter 25).
-- `sisu test` and `sisu sir --tests` use the Rust front end, which reads neither `std.mem`, `std.ffi`, `extern` nor `unsafe` (E0220, E0900), so no test of unsafe code runs, though [22](../proposal/22-unsafe.md#interaction-with-the-rest-of-the-language) makes `sisu test` where the checked memory model checks it (chapter 27).
-- E0971, the check that a `sim` build cannot escape the simulation, is not reached: `sisu test --sim` uses the Rust front end, which rejects `extern` with E0900 (R22).
 - Under `sisu test --explore N`, the log lines printed are those of the first schedule, seed 0, and not of the one that fails (G14).
 - Under `--sim`, a task of a scope whose body returns nothing fails the test with "a task failed ... and nobody joined it", where the test meant to look at the state the tasks left (G14).
-- `sisu run --explore N` stops only at a run that fails; a seed whose output differs from seed 0's, with status 0, is not reported (R9).
 - A replay token's content hash covers the source and not the files it embeds, so after an embedded file changes the old token is accepted and runs the new program (G30).
 - `Revoked` is in every I/O error set (Q-51), so `sisu test --sim --faults` injects it into calls on a file system that was never made revocable (X12).
 - A test that takes the real `System` runs under `--sim` against a simulated `System`, and outside it prints no token (D0031), where 17 says such a test can be neither simulated nor replayed and its token says so (X12).
-- A blocked test and a run that reaches a hole print the hole's name only, not its closure ("the `Debug` rendering of every binding in scope") that 17 and 10 describe (X13).
+- `sisu test` asks stage 1 for the SIR of the program built with its tests (decision 357), and reports the program's errors only when stage 1 prints none; stage 1's `sir` prints the SIR of a program that the ownership checker refuses or whose compile-time code spends its budget, so `sisu test` runs such a program, under the monitor, which stops each test at the error with the function's whole SIR (60 to 230 lines), or passes it, as it passes `winner` (E0408) and `journeys` (E0603): the start sessions of those `fix` exercises show `sisu check` instead (chapters 5, 10, 11, 13 and 25).
+- `sisu test` prints no warnings, W0001 for each hole among them, since it reports stage 1's diagnostics only for a program with an error, and it ends a program's errors without the D0006 line that `sisu run` prints (chapters 1, 2, 25 and 28, R15).
+- `sisu test` exits with status 0 when no test failed and one is blocked, where decision 340 makes it 3 (G26, X13, R15, R16).
+- `sisu test` in a package that declares `unsafe`, or that depends on one, writes `sisu.lock` without the level, and stage 1, which then builds the tests, refuses that lockfile with E1022, twice; the lockfile it leaves stops `sisu run` and `sisu check` too until it is deleted, so a package's tests of unsafe code cannot run (chapter 27, G19).
+- A hole's closure in a function with `ensures` lists the `old(...)` values the contract keeps, one line for each place an `old` is written, so `withdraw`'s shows `old(self.balance) = 1000` twice (chapter 23).
+- `sisu run --explore N` prints the first seed's output, and for a seed whose output differs (D0127) only its number, so what that seed printed is seen by running it again (R16, R17).
 
 ### Metaprogramming
 
-- Stage 1's compile-time evaluator stops at `String.push`, `list.join`, `str.byte_at`, `sum`, a `for` over a list (`iter.ref`), a comprehension (`list.new`), a `set`, a `dict`, `int.to_f64` and `todo` with "beyond the slice: a `comptime` expression that needs the intrinsic ...", a message with no code, after which `sisu check` exits 0; the Rust front end runs them all (chapter 25, R3, R12, G30, X6).
-- The same evaluator is slow on lists: a sieve of 20,000 numbers takes 90 seconds, within the budget, and one of 4,000 takes 3.7 seconds where the Rust front end takes 0.3 (chapter 25).
-- `reflect.fields_of(int)` is an empty list, so a template that forgets `if comptime reflect.is_struct(T)` compiles and gives empty output (chapter 25).
+- Stage 1's compile-time evaluator is slow on lists: a sieve of 20,000 numbers takes 90 seconds, within the budget, and one of 4,000 takes 3.7 seconds where the Rust front end takes 0.3 (chapter 25).
 - A diagnostic in a derived impl, such as E0347 for a field without `Eq` or E0235 for an impl written beside `@derive(Eq)`, is placed in `<derive>/main.sisu` with no label at the `@derive`, and a hole in a derive's template is reported once for each type (chapter 25, R14).
 - An error in code that `comptime for` unrolls is reported in a module the compiler writes, `<total[Team]>/main.sisu:3:5`, with the unrolled line, and nothing points at the loop's line or the call that instantiated it (X7).
 - In a template, an interpolated literal made only of compile-time values, `var out = "{reflect.name_of(T)}"`, becomes a `str` in the instance, so `return out` from a function returning a `String` is E0300 in the instance's module (R14).
-- A builtin type given to a `comptime def` that takes `T: type`, as `comptime name(bool)`, is E0200 in `sisu run` and `sisu check`, with the fix `uint` for `int`, though `String`, `uint` and the program's own types work and the Rust front end takes every one (R12).
+- A builtin type given to a `comptime def` that takes `T: type`, as `comptime name(bool)`, is E0200 in `sisu run`, `sisu check` and `sisu test`, with the fix `uint` for `int`, though `String`, `uint` and the program's own types work and the Rust front end takes every one (R12).
 - `reflect.construct(T, {"name": name})` in a template whose `name` is a plain `String` parameter is E0300 ("found `ref String`") in the instance's module; an `own` parameter works, and nothing says so (R12).
 - Inside a derive's template a field has no `ty` (E0608, "a field has no `ty`"), though a generic function that reflects reads it, so a derive cannot choose `Display` or `Debug` field by field (G21).
 - A derive's body must be the `return impl` alone (E0607), so a check of the type's shape goes inside a method (G21).
 - `target.runtime` is `interpreter` in a native build too (`sisu run --native`) (chapter 25).
-- `@diagnostic_name(f)` compiles without a word and does nothing, and `sisu eval` is D0003, as planned (chapter 25).
-- `@deprecated("...")`, `@fix_inline` and `@preview("...")` compile without a word, and a call of a deprecated function gets no warning, where [13](../proposal/13-evolution-and-governance.md#deprecation) says it warns with the replacement named (chapter 28, X11).
-- An attribute that Sisu reads, standing where it means nothing, is accepted without a word: `@derive(Debug)` or `@must_consume` on a function, `@comptime_budget` or `@export` on a struct, and `@tag("slow")` on a suite, which tags none of its tests; any other attribute is too, a misspelt `@deprecatd` among them, and nothing lists the ones the toolchain reads (R14, X11).
+- `@diagnostic_name(f)` is E0900 until compile-time code can make types, and `sisu eval` is D0003, as planned (chapter 25).
+- `@fix_inline` and `@preview("...")` compile without a word and do nothing, and a deprecated type, constant or variant gets no warning, where [13](../proposal/13-evolution-and-governance.md#deprecation) says that every use of a deprecated item warns (chapter 28, X11, R14).
+- An attribute that Sisu reads, standing where it means nothing, is accepted without a word: `@derive(Debug)` or `@must_consume` on a function, `@comptime_budget` or `@export` on a struct, and `@tag("slow")` on a suite, which tags none of its tests (R14, X11).
 - `@cfg(test)` on a field, a variant, or a method in a struct's or an enum's own body is kept in every build, where a method of an impl is left out (R14).
 - `reflect.attributes_of` reaches the attributes of a struct, an enum or an error set only, and nothing lists a package's functions, so the framework of [08](../proposal/08-metaprogramming.md) that collects its routed functions at compile time cannot be written (R14).
 - `@export("sauna_heat")` checks the signature (E0989) and nothing more: a native build keeps the function a local symbol (`sisu$heat$2`), and the `@repr(c)` types that [12](../proposal/12-interop-and-targets.md#c-interop) asks for at the boundary are not checked (R14).
-- In a package, `embed("data/words.txt")` reads `src/data/words.txt`, relative to the module's directory, and a path from the package's root, `../data/words.txt`, is E0612, where [08](../proposal/08-metaprogramming.md) resolves the path from the package's root (G30).
+- `@derive(Decode)` on an enum is accepted, though R36 gives `Decode` to structs only, and `json.decode` of the enum then stops the run at E0501 ("calls missing function `Lake.json.Decode.decode_json`"), an error of the compiler's own that `sisu check` does not report (G7).
 
 ### The standard library
 
-- `max(xs)` and `min(xs)` compare two values, so `max(scores)` is E0308 with a fix that adds a hole, and Python's form over a collection, which 02's prelude suggests, is missing (chapter 5, G2).
 - A `dict[String, V]` is looked up with a `String`, so a `str` key, `recipes.get(dish)`, is E0300 whose fix is `.to_string()`, an allocation for each lookup (chapters 10 and 20, G2).
 - `prices.get("bun") == Some(280)`, with `prices` a `dict[String, int]`, is E0300 ("expected `ref int`, found `int`"), since `get` gives an optional reference, with no fix; `prices["bun"] == 280` works (chapter 19).
 - The iterator methods (`count`, `collect`, `map`, `sum`, `join`) are not `pure`, so `pure def word_count(text: str) -> int` returning `text.split_whitespace().count()` is E0333 (chapter 18).
-- `items.is_sorted()` on a `list[int]` is E0304; only `Slice[T]` has it (chapter 23).
 - The sized integers have no `truncate_to` and no narrowing methods of their own (E0304), no `MAX` or `MIN` (E0351), and no `count_ones`, `leading_zeros` or `rotate_left` (E0304), which a checksum reaches for (chapter 24).
 - The comment of `std.num`'s `Rounding` says that Python's `decimal` names the same seven modes; it has an eighth, `ROUND_05UP` (chapter 24).
 - A `Shared[String]` in an interpolation prints its value's `Debug` form, `"Aino"` with its quotes (the maintenance round).
 - `cli.help_text[T]()` leaves out the fields' `##` comments, so a tool's help says what kind of value an option takes and not what it is for (G6).
-- `@derive(Encode, Decode)`, which [11](../proposal/11-stdlib.md) gives `std.json`, is E0243, and `decode` does not validate refinements at the boundary: a field `hour: Hour` is E0811 at `<std>/<from_json[Hour]>/json.sisu:3:19`, which the reader cannot see, and text that breaks a struct's `invariant` makes `decode` panic (status 101), so untrusted text can stop the program (G7).
 - A back-reference in a regular expression, `(\w+) \1`, and a flag or a named group, `(?i)` or `(?P<h>...)`, are `Syntax` errors that name what the parser met or wanted, with no word that back-references are left out for linear time or that flags, named groups and classes such as `\p{L}` are not in stage 0 (G8).
 - `DateTime` has no parts (`t.hour` is E0303), and there is no `Instant` and no time zone, which 11 lists for `std.time` (G9).
 - `HttpError.Network(message)` holds the `NetError` as text, so a client cannot tell a refused connection from a closed one, and `http.FakeNet` answers only `GET`, only with `200` or `404`, so a test cannot script a `503` or a slow answer (G10).
@@ -1136,12 +1134,9 @@ that names each page; 4 come from the maintenance round.
 - `sisu test --std` without a file needs a package (D0064), whose message names the absolute directory, though the standard library's examples need none, and with a file it runs the file's tests too (R16).
 - `--stats` followed by a word it does not know takes the word as the file (`sisu run --stats bogus hello.sisu` is D0001 for `bogus`); only `--stats=bogus` gets D0094 (R16).
 - The architecture notes put a package's test cache in `build/test-cache`; it is `build/debug/test-cache` (R16).
-- `sisu run FILE -- ARGS` passes the `--` to the program as its first argument, where a package's `sisu run -- ARGS` does not (chapter 18).
-- `sisu build --native` prints the executable's absolute path, so no session can show it; `--output PATH` prints the path given (chapter 22).
 - A single file cannot import the module beside it (E0220), and `sisu test FILE` compiles the file alone even in a package's directory, so an exercise, which `tools/check.py` runs as `sisu test NAME.sisu`, cannot be a workspace (chapter 17).
 - `sisu fmt` removes an import that a file does not use yet, so an exercise cannot hand the learner the import its solution needs, and an unused import gets no warning, though 09 says it warns (chapter 21, R13).
 - `sisu build --explain-size`, `sisu run --profile`, `sisu check --holes`, `sisu audit --unsafe` and `--target` are D0009, and `sisu fix`, `why`, `review`, `publish`, `add`, `update`, `eval` and `lint` are D0003, as planned, with the registry of D-031 they wait for; stage 1 has `lint` (R11) and `audit --unsafe` (R7), which the driver does not pass on (chapters 15, 25, 27 and 28, G20, G26, G27).
-- `sisu build --native --release` builds a program with a typed hole, printing W0001 and `built`, with status 0, though D-061 and 17 say that release builds reject holes "so blocked is never a shipped state" (G26, X13).
 - The native executable of a ten-line program is 17.5 MB in both profiles, links dynamically to the C library, `libm` and `libgcc_s`, and keeps its debug information, where [12](../proposal/12-interop-and-targets.md#binary-size-and-startup) links statically and plans dead-code elimination and a `release-size` profile (chapter 27, G20, R22).
 - 12 chooses a runtime profile "in the manifest" without naming the key, and stage 0 has none, so `runtime = "single"` in `[package]` is W0005, and no fact of `target` names the profile (R22).
 - E1022 asks for `--accept-unsafe`, which `sisu check`, `run` and `build` reject (D0009), though stage 1 reads it; the only way to accept a raised `unsafe` level is to delete `sisu.lock` (R13).
@@ -1151,6 +1146,7 @@ that names each page; 4 come from the maintenance round.
 - `sisu audit --caps src/store.sisu` reads the module alone, so its import of the package's root is E0220, followed by an E0321 that calls the error set `{}`, and with no file `sisu audit` is D0004: a package's capabilities cannot be audited (G32).
 - The grammar of the architecture notes, "Parsing and the syntax tree", which stage 1's parser repeats in its `##!` comments, is a sketch without `trait_def`, `suite_def`, `bench_def`, `extern_block`, parameters, generic parameters, `where` clauses, visibility, `select`, `yield`, `unsafe:`, `comptime` statements, contracts or `expect`; R20 is written from the parser itself, and nothing checks either text against it (R20).
 - [00](../proposal/00-vision-and-principles.md#who-sisu-is-not-for-yet) ("Anyone who needs it today. There is no compiler.") and [14](../proposal/14-non-goals.md#not-finished) ("There is no compiler.") predate stage 0 (X1).
+- `sisu ws` and `sisu repl` run on the frozen Rust front end, so a worksheet lacks every rule stage 1 has gained since: `max(scores)` of a list is E0308 in a worksheet, where `sisu run` takes it (chapter 5).
 
 ### Diagnostics without fixes
 
@@ -1184,7 +1180,7 @@ that names each page; 4 come from the maintenance round.
 - E0801 names the function that is not `pure` with no fix that writes `pure def`, and E0806 offers no fix, where the fix is a method of the type (chapter 23).
 - A `ref int`, such as the variable of a loop over a `list[int]`, passed where a refinement of `int` is expected is E0300 ("expected `Percent`, found `ref int`") without E0811's note about `try_from`, which an `int` gets (chapter 23).
 - E0310 for an `i16` plus a `u32` offers no conversion (chapter 24).
-- E0609 for a plain `for` over `reflect.fields_of(T)` says "a list is a compile-time value with no run-time form" with no fix offering `comptime for`, and the template's copy for `int` is E0324 in `<to_csv[int]>/main.sisu` (chapter 25).
+- The copy that a template makes for `int` of a plain `for` over `reflect.fields_of(T)`, beside E0609 for the struct's copy, is E0324 ("the type of `f` cannot be inferred here") in `<to_csv[int]>/main.sisu`, a module the reader cannot open (chapter 25).
 - E0981 names a builtin by its internal name, `ptr_mut.read`, where the program writes `ptr mut T` (chapter 27).
 - `enumerate(lines, start=1)`, Python's form, is E0306 ("`enumerate` has no parameter named `start`") with no fix (R16, G2).
 - `Light.Blue`, for a variant that `Light` does not have, is E0351 ("`Light` has no associated function `Blue`") where E0327 ("`Light` has no variant `Blue`") would say what is wrong; E0327 comes only from a pattern (R17).
@@ -1207,12 +1203,13 @@ that names each page; 4 come from the maintenance round.
 - A `str` variable given a field of the loop variable inside a nested loop, `who = turn.name`, is E0402 pointing at `for turn in turns:`, with no word that the loop binds `turn` anew while `who` still borrows it; `turn.name.copy()` and a `String` are the fix, which the note's `.copy()` only half names (G26).
 - `Ledger()` from another module, for a struct whose private field has a default, is E0258, whose only fix makes the field public; an associated function such as `Ledger.new()` is not named (G32).
 - `from ledger import Taken`, a variant of a `pub` error set, is E0204 ("module `ledger` has no item `Taken`") with no word that a variant is reached as `BookingError.Taken` (G32).
-- E0310 for `/` between two `Decimal`s, which D-076 makes a `Ratio`, offers no fix, where `div(other, places, mode)` and `to_ratio()` are what stage 0 has (G31).
 - E0347 for a field type without `Display`, at `<derive>/main.sisu`, offers the fix `:?`, an edit of code that the user of `@derive` cannot reach (G21).
 - E0347 for `Pair(Plain(1), Plain(2)) == ...`, where `Pair[T]` derives `Eq` and `Plain` has none, offers "derive it: `@derive(Eq)`" for `Pair`, which has it; the type without `Eq` is `Plain` (R14).
 - E0266 for `@cfg(target.os == "linux")` does not name `if comptime target.os == "linux":`, which is how a body tests the target (R14).
 - With `[trust]` left out, the build reports E0703 at each `extern` and `unsafe` block of the dependency before the E1021 that names the fix (G19).
 - E0310 in code that `comptime for` unrolls says "`+` cannot be applied" for a `+=` (X7).
+- `@derive(Encode, Decode)` without `from std.json import Decode, Encode` is E0243, whose list of the traits that derive leaves both out, with no word about the import (G7).
+- E0333 is the ownership checker's, so a run ends with D0021, which offers `--defer-borrow`; under it the Rust front end refuses `print` in a `pure` function with D0006, and runs `Atomic.load` as if it were pure (chapter 26).
 
 ## Open questions
 

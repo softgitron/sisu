@@ -1,16 +1,12 @@
 $ sisu test store.sisu
-warning[W0001]: typed hole `put` of type `String ! IoError`
-  --> store.sisu:19:12
-   |
-19 |     return todo("put")
-   |            ^^^^^^^^^^^
-
-warning[W0001]: typed hole `get` of type `bytes ! {IoError, StoreError}`
-  --> store.sisu:24:12
-   |
-24 |     return todo("get")
-   |            ^^^^^^^^^^^
-
+in scope at the typed hole `todo("put")`:
+  data = b"rye bread"
+in scope at the typed hole `todo("put")`:
+  data = b"blueberry pie"
+in scope at the typed hole `todo("put")`:
+  data = b"salt"
+in scope at the typed hole `todo("get")`:
+  name = "0000000000000000000000000000000000000000000000000000000000000000"
 test "data comes back" ... blocked by todo("put")
 test "the same data is kept once" ... blocked by todo("put")
 test "a file that changed is corrupt" ... blocked by todo("put")

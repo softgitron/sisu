@@ -1,10 +1,13 @@
 $ sisu test dedupe.sisu
-warning[W0001]: typed hole `dedupe_ok` of type `bool`
-  --> dedupe.sisu:26:12
-   |
-26 |     return todo("dedupe_ok")
-   |            ^^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("dedupe_ok")`:
+  xs = [5]
+  out = [5]
+in scope at the typed hole `todo("dedupe_ok")`:
+  xs = [3, 1, 2]
+  out = [3, 1, 2]
+in scope at the typed hole `todo("dedupe_ok")`:
+  xs = [1, 2, 1]
+  out = [1, 2, 1]
 test "the property holds of dedupe" ... blocked by todo("dedupe_ok")
 test "the property accepts the three examples" ... blocked by todo("dedupe_ok")
 test "the property rejects wrong answers" ... blocked by todo("dedupe_ok")

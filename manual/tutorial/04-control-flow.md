@@ -386,11 +386,11 @@ error[E0127]: a loop has no `else` in Sisu; keep what the loop finds in a variab
 error[D0006]: the program was not run: errors found (1)
 ```
 
-E0103 (`parse.expected-expression`) says only that `else` is not
-something the parser expected there. In Sisu, put the search in a
-function and return as soon as it finds what it looks for. The lines
-after the loop then run only when the search found nothing, which is
-what the `else` meant:
+E0127 (`parse.loop-else`) says that a loop has no `else`, and names one
+way out: keep what the loop finds in a variable and test it after the
+loop. The other is to put the search in a function and return as soon
+as it finds what it looks for. The lines after the loop then run only
+when the search found nothing, which is what the `else` meant:
 
 <!-- file: examples/04-control-flow/first_frost.sisu -->
 ```sisu
@@ -487,36 +487,6 @@ test "four of something":
 <!-- output: solutions/04-control-flow/predict_loops.console -->
 ```console
 $ sisu test predict_loops.sisu
-warning[W0001]: typed hole `range_sum(1, 10, 3)` of type `int`
-  --> predict_loops.sisu:40:17
-   |
-40 | const UP: int = todo("range_sum(1, 10, 3)")
-   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `range_sum(10, 0, -4)` of type `int`
-  --> predict_loops.sisu:41:19
-   |
-41 | const DOWN: int = todo("range_sum(10, 0, -4)")
-   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `odd_count(7)` of type `int`
-  --> predict_loops.sisu:42:18
-   |
-42 | const ODD: int = todo("odd_count(7)")
-   |                  ^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `amount(-2)` of type `str`
-  --> predict_loops.sisu:43:23
-   |
-43 | const NEGATIVE: str = todo("amount(-2)")
-   |                       ^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `amount(4)` of type `str`
-  --> predict_loops.sisu:44:21
-   |
-44 | const PLENTY: str = todo("amount(4)")
-   |                     ^^^^^^^^^^^^^^^^^
-
 test "counting up in threes" ... blocked by todo("range_sum(1, 10, 3)")
 test "counting down in fours" ... blocked by todo("range_sum(10, 0, -4)")
 test "skipping even numbers" ... blocked by todo("odd_count(7)")
@@ -589,13 +559,12 @@ test "numbers with factors":
 <!-- output: solutions/04-control-flow/prime_or_not.console -->
 ```console
 $ sisu test prime_or_not.sisu
-error[E0103]: expected an expression, found `else`
+error[E0127]: a loop has no `else` in Sisu; keep what the loop finds in a variable and test it after the loop, as in `if let Some(i) = found:`
   --> prime_or_not.sisu:18:5
    |
 18 |     else:
    |     ^^^^
 
-error[D0006]: the program was not run: errors found (1)
 ```
 
 <details>
@@ -666,12 +635,14 @@ test "a line of words":
 <!-- output: solutions/04-control-flow/fizzbuzz.console -->
 ```console
 $ sisu test fizzbuzz.sisu
-warning[W0001]: typed hole `fizzbuzz` of type `String`
-  --> fizzbuzz.sisu:12:12
-   |
-12 |     return todo("fizzbuzz")
-   |            ^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("fizzbuzz")`:
+  n = 1
+in scope at the typed hole `todo("fizzbuzz")`:
+  n = 9
+in scope at the typed hole `todo("fizzbuzz")`:
+  n = 30
+in scope at the typed hole `todo("fizzbuzz")`:
+  n = 1
 test "plain numbers" ... blocked by todo("fizzbuzz")
 test "multiples of three or five" ... blocked by todo("fizzbuzz")
 test "multiples of fifteen" ... blocked by todo("fizzbuzz")
@@ -735,12 +706,14 @@ test "twenty-seven takes a long way":
 <!-- output: solutions/04-control-flow/collatz.console -->
 ```console
 $ sisu test collatz.sisu
-warning[W0001]: typed hole `collatz_steps` of type `int`
-  --> collatz.sisu:12:12
-   |
-12 |     return todo("collatz_steps")
-   |            ^^^^^^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("collatz_steps")`:
+  n = 1
+in scope at the typed hole `todo("collatz_steps")`:
+  n = 16
+in scope at the typed hole `todo("collatz_steps")`:
+  n = 6
+in scope at the typed hole `todo("collatz_steps")`:
+  n = 27
 test "one is already there" ... blocked by todo("collatz_steps")
 test "a power of two only halves" ... blocked by todo("collatz_steps")
 test "small numbers" ... blocked by todo("collatz_steps")

@@ -1,0 +1,9 @@
+# The hole filled with what its closure showed was there.
+def plan(own names: list[String], hour: int) -> String:
+    let turns = names
+    let last = hour + len(turns) - 1
+    let greeting = "Hei"
+    return "{greeting}: {len(turns)} turns, from {hour} to {last}"
+
+def main():
+    print(plan(["Aino", "Eero"], 18))

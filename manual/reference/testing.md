@@ -92,10 +92,19 @@ Each test ends in one of three outcomes:
 
 `sisu test` lists the tests in the order they are declared, shows each
 failure again after the list with its replay token, and ends with the
-counts. Its status is 1 when a test failed and 0 otherwise, also when a
-test is blocked ([R16](sisu-command.md#sisu-test)).
+counts. Before the list, each test that reached a hole shows the hole's
+closure: a line naming the hole, then a line `NAME = VALUE` for each
+binding in scope there ([R17](diagnostics.md#r0160)). Its status is 0
+when every test passed, 1 when a test failed or the program has an
+error, and 3 when no test failed and one is blocked, so a pipeline can
+tell a suite that waits for code from one that is done (D-061;
+[R16](sisu-command.md#sisu-test)).
 
-**Status.** In stage 0 (D-061).
+**Stage 0 differs.** `sisu test` exits with status 0 when no test
+failed, also when one is blocked; and it prints no warnings, so the
+W0001 that names each hole and its type comes from `sisu check`.
+
+**Status.** In stage 0 (D-061), with the differences noted.
 
 ## Isolation and the test clock
 

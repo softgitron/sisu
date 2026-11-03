@@ -1,0 +1,7 @@
+# `@float` with an argument it does not take.
+@float(precise)
+def blend(a: f64, b: f64) -> f64:
+    return a * 0.5 + b * 0.5
+
+def main():
+    print(blend(1.0, 2.0))

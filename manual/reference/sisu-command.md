@@ -47,7 +47,9 @@ The parts of a command line follow these rules:
 - Options come after the command and before the file. An option that
   takes a value is written `--option VALUE` or `--option=VALUE`.
 - `ARGS` are the program's own arguments, for `sisu run`; `--` ends the
-  options when there is no file, as in `sisu run -- ARGS`.
+  options when there is no file, as in `sisu run -- ARGS`, and a `--`
+  right after the file, `sisu run FILE -- ARGS`, does the same: the
+  program does not receive it, and a second `--` is the program's.
 - An option that the command does not take is D0009, a command that
   does not exist is D0003, and an option given a word where it needs a
   number is D0023. Each is a usage error, with exit status 2.
@@ -103,7 +105,7 @@ commands:
 
 `run`, `check`, `build`, `doc`, `test` and `bench` take `--locked`, which keeps `sisu.lock` as it is, and `--features NAMES` (the package's features to turn on, separated by commas, `DEP/FEATURE` for a dependency's) and `--no-default-features`. `run` and `test` take `--schedule-seed N`, `--explore N` (N seeds), `--scheduler random|pct|exhaustive` and `--depth N`.
 
-The front end is stage 1's, the one written in Sisu, for `check`, `sir`, `build`, `run`, `fmt`, `doc`, `tokens` and `parse`; `--front-end=rust` before a command's file, or `SISU_FRONT_END=rust` for a whole process, runs the Rust front end, the oracle, instead.
+The front end is stage 1's, the one written in Sisu, for `check`, `sir`, `build`, `run`, `test`, `bench`, `fmt`, `doc`, `tokens` and `parse`; `--front-end=rust` before a command's file, or `SISU_FRONT_END=rust` for a whole process, runs the Rust front end, the oracle, instead.
 ```
 
 </details>
@@ -229,6 +231,7 @@ Every command ends with one of these statuses:
 | 0 | The command did what it was asked: the program ran and ended normally, every test passed, the file is formatted. |
 | 1 | The program has errors (and did not run), a test failed, `main` returned an error, a replay diverged, or a file could not be read or written. |
 | 2 | A usage error: an unknown command or option, a missing argument, a value of the wrong form, or no package where one is needed. |
+| 3 | `sisu test` found no failure, and a test is blocked by a typed hole (D-061). |
 | 70 | An internal compiler error (D0012, D0076, D0118): a bug in `sisu`, never in your program. |
 | 101 | The program panicked. |
 | 134 | The program aborted: a panic while unwinding from a panic, or the ownership monitor stopping a run at a conflict. |
@@ -277,7 +280,10 @@ error: Missing(key="port")
 
 The error is printed in its `Debug` form, `Missing(key="port")`.
 
-**Status.** In stage 0.
+**Stage 0 differs.** `sisu test` exits with 0, not 3, when no test
+failed and one is blocked ([sisu test](#sisu-test)).
+
+**Status.** In stage 0, with the difference noted.
 
 ### Choosing the front end
 
@@ -287,12 +293,14 @@ The error is printed in its `Debug` form, `Missing(key="port")`.
 The front end reads, checks and lowers a program; the rest of `sisu`
 runs, tests and compiles what it produces. Stage 0 has two: stage 1,
 written in Sisu and compiled natively, which is the default for
-`check`, `sir`, `build`, `run`, `fmt`, `doc`, `tokens` and `parse`, and
-the Rust front end, the oracle that stage 1 is checked against.
-`--front-end=rust` among a command's options, or `SISU_FRONT_END=rust`
-in the environment, chooses the Rust one. The other commands, and
-`run --watch`, `--record` and `--defer-borrow`, `check --diary` and
-`parse --shape`, use the Rust front end whichever you choose.
+`check`, `sir`, `build`, `run`, `test`, `bench`, `fmt`, `doc`, `tokens`
+and `parse`, and the Rust front end, the oracle that stage 1 is checked
+against. `--front-end=rust` among a command's options, or
+`SISU_FRONT_END=rust` in the environment, chooses the Rust one. The
+other commands, and `run --watch` and `--defer-borrow`, `test --std`
+and `--defer-borrow`, the tests of a program that has transcripts,
+`check --diary` and `parse --shape`, use the Rust front end whichever
+you choose.
 
 <!-- output: examples/reference-sisu-command/front_end.console -->
 ```console
@@ -753,9 +761,11 @@ the same seed takes the same schedule
 
 - `--schedule-seed N` runs with seed `N`; the default is 0.
 - `--explore N` runs `N` schedules, from the first seed on, and stops at
-  the first run that fails, naming its seed (D0025); when all succeed
-  it says so (D0024). Under `sisu test` every test runs under each
-  schedule (D0026, D0027).
+  the first run that fails, naming its seed (D0025); a run of `sisu
+  run` that exits as the first seed's did but prints other standard
+  output stops it too (D0127, [R17](diagnostics.md#d0127)), since its
+  output depends on the schedule. When all succeed it says so (D0024).
+  Under `sisu test` every test runs under each schedule (D0026, D0027).
 - `--scheduler random` is the default, a random choice at each yield
   point. `--scheduler pct` is probabilistic concurrency testing, which
   finds bugs of a small depth with a known probability; `--depth N` is
@@ -913,8 +923,13 @@ file); with an error it prints the diagnostics and D0006. With
 `--native` it also compiles the program to an executable: a package's
 to `build/debug/NAME` beside its lockfile, or `build/release/NAME` with
 `--release`; a file's beside it, named by its stem; or to `--output
-PATH`. The [native example](#compiling-and-running-natively---native-and---release)
-builds one.
+PATH`. The line it prints names the executable's path relative to the
+working directory, as `build/debug/NAME`. A release build refuses a
+program with a typed hole, E0445 at each hole
+([R17](diagnostics.md#e0445)), where `sisu check` and a debug build
+warn with W0001, so that a hole never ships. The [native
+example](#compiling-and-running-natively---native-and---release) builds
+one.
 
 <!-- output: examples/reference-sisu-command/build.console -->
 ```console
@@ -963,11 +978,13 @@ shows the SIR of `hello.sisu`.
 its doc comments, the properties its contracts imply, and the
 transcripts in the `tests/` directory beside the program. Each runs under the ownership
 monitor, with fresh fakes for the capabilities it names, and ends `ok`,
-`FAILED`, or `blocked by` a typed hole that it reached. Tests run in
-parallel and are reported in the order they are declared. Each failure
-is shown again after the list, with a replay token; the last line counts
-the outcomes. The status is 1 if a test failed, 0 otherwise, even when
-a test is blocked.
+`FAILED`, or `blocked by` a typed hole that it reached, whose closure,
+the bindings in scope there, is printed before the list (R0160). Tests
+run in parallel and are reported in the order they are declared. Each
+failure is shown again after the list, with a replay token; the last
+line counts the outcomes. The status is 0 when every test passed, 1
+when a test failed or the program has an error, and 3 when no test
+failed and one is blocked.
 
 <!-- file: examples/reference-sisu-command/tests.sisu -->
 ```sisu
@@ -996,12 +1013,8 @@ suite "large numbers":
 <!-- output: examples/reference-sisu-command/tests.console -->
 ```console
 $ sisu test tests.sisu
-warning[W0001]: typed hole `halve` of type `int`
-  --> tests.sisu:6:12
-  |
-6 |     return todo("halve")
-  |            ^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("halve")`:
+  x = 42
 test "doubles a number" ... ok
 test "doubles (-1, -2)" ... ok
 test "doubles (-3, -5)" ... FAILED
@@ -1017,32 +1030,16 @@ replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
 
 3 passed, 1 failed, 1 blocked
 $ sisu test --filter large tests.sisu
-warning[W0001]: typed hole `halve` of type `int`
-  --> tests.sisu:6:12
-  |
-6 |     return todo("halve")
-  |            ^^^^^^^^^^^^^
-
 test "large numbers/doubles a large number" ... ok
 1 passed, 0 failed, 0 blocked
 4 not selected
 $ sisu test --tag slow tests.sisu
-warning[W0001]: typed hole `halve` of type `int`
-  --> tests.sisu:6:12
-  |
-6 |     return todo("halve")
-  |            ^^^^^^^^^^^^^
-
 test "large numbers/doubles a large number" ... ok
 1 passed, 0 failed, 0 blocked
 4 not selected
 $ sisu test --skip-tag slow --jobs 1 --no-monitor --no-cache tests.sisu
-warning[W0001]: typed hole `halve` of type `int`
-  --> tests.sisu:6:12
-  |
-6 |     return todo("halve")
-  |            ^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("halve")`:
+  x = 42
 test "doubles a number" ... ok
 test "doubles (-1, -2)" ... ok
 test "doubles (-3, -5)" ... FAILED
@@ -1058,12 +1055,6 @@ replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
 2 passed, 1 failed, 1 blocked
 1 not selected
 $ sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
-warning[W0001]: typed hole `halve` of type `int`
-  --> tests.sisu:6:12
-  |
-6 |     return todo("halve")
-  |            ^^^^^^^^^^^^^
-
 test "doubles (-3, -5)" ... FAILED
 
 test "doubles (-3, -5)" ... FAILED
@@ -1191,6 +1182,13 @@ error[D0052]: `--faults` sets the fault rate of the `sim` profile; add `--sim`
 write a JSON event stream, with TAP and JUnit XML as `--format` options;
 stage 0 prints the human form only, and has none of `--fuzz`, `--cover`
 and `--mutate` ([Commands that are designed](#commands-that-are-designed)).
+Stage 0's `sisu test` exits with 0 when no test failed, a blocked one
+included, and it prints no warnings, so the W0001 that names each hole
+comes from `sisu check`. It reports a program's errors without the
+D0006 line that `sisu run` ends with, and it runs the tests of a
+program that the ownership checker refuses (E0400 to E0438) or whose
+compile-time code spends its budget (E0603), which `sisu check`
+reports: check such a program first.
 
 **Status.** In stage 0. `--sim`, `--faults` and replay tokens are
 prototypes of the experiment (Q-49, D-070).
@@ -1286,7 +1284,7 @@ $ sisu test --std --filter std.time greet.sisu
 test "std.time/Ticker (doc example)" ... ok
 test "std.time/Timeline (doc example)" ... ok
 2 passed, 0 failed, 0 blocked
-155 not selected
+158 not selected
 ```
 
 The [package example](#what-a-command-works-on) shows the page of a
@@ -1919,7 +1917,7 @@ a command line can produce, by what they report:
 | D0012, D0076, D0118 | Internal errors (status 70). |
 | D0014 to D0020 | `sisu explain-borrow`. |
 | D0022 | `sisu audit` without an audit. |
-| D0024 to D0027, D0041 to D0050 | Schedules explored, and the schedulers. |
+| D0024 to D0027, D0041 to D0050, D0127 | Schedules explored, and the schedulers. |
 | [D0028](diagnostics.md#d0028), [D0029](diagnostics.md#d0029) | `--contracts`. |
 | D0030 to D0040 | Replay tokens, capability logs and replays. |
 | D0051, [D0052](diagnostics.md#d0052) | `--faults`. |

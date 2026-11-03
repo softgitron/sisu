@@ -365,6 +365,7 @@ error[E0200]: cannot find `open` in this scope
    |
 11 |     let text = open(path).read()
    |                ^^^^
+  = note: a program reaches files through the capability `Fs`, which `def main(sys: System)` holds as `sys.fs`: `sys.fs.read_to_string("data.txt")`
 
 error[E0305]: wrong number of arguments to `line_count`: expected 1, found 2
   --> lines.sisu:16:12
@@ -402,11 +403,11 @@ error[E0300]: expected `Path`, found `Fs`
 24 |     assert line_count(fs, "missing.txt") == Err(NotFound("missing.txt"))
    |                       ^^
 
-error[D0006]: the program was not run: errors found (7)
 ```
 
-The first diagnostic is the one to read first. The others come from
-the tests, which call `line_count` with a file system.
+The first diagnostic is the one to read first, and its note says how a
+program reaches files. The others come from the tests, which call
+`line_count` with a file system.
 
 <details>
 <summary>Hint 1</summary>
@@ -474,18 +475,15 @@ test "a file that is not there":
 <!-- output: solutions/09-word-counter/find_lines.console -->
 ```console
 $ sisu test find_lines.sisu
-warning[W0001]: typed hole `the text of the file` of type `String`
-  --> find_lines.sisu:12:24
-   |
-12 |     let text: String = todo("the text of the file")
-   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `whether the line holds the word` of type `bool`
-  --> find_lines.sisu:15:12
-   |
-15 |         if todo("whether the line holds the word"):
-   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("the text of the file")`:
+  path = "poem.txt"
+  word = "warm"
+in scope at the typed hole `todo("the text of the file")`:
+  path = "poem.txt"
+  word = "snow"
+in scope at the typed hole `todo("the text of the file")`:
+  path = "song.txt"
+  word = "warm"
 test "lines that hold the word" ... blocked by todo("the text of the file")
 test "no line holds it" ... blocked by todo("the text of the file")
 test "a file that is not there" ... blocked by todo("the text of the file")

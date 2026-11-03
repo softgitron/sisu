@@ -1,0 +1,1 @@
+13:11-13:28 W0023 type.deprecated name="to_celsius" reason="use `celsius_of`, which this calls"

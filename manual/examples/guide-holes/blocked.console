@@ -1,16 +1,8 @@
 $ sisu test schedule.sisu
-warning[W0001]: typed hole `read the turns` of type `list[Turn]`
-  --> schedule.sisu:11:12
-   |
-11 |     return todo("read the turns")
-   |            ^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `lay out the evening` of type `list[String]`
-  --> schedule.sisu:15:12
-   |
-15 |     return todo("lay out the evening")
-   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("read the turns")`:
+  text = "18 Aino\n20 Eero"
+in scope at the typed hole `todo("lay out the evening")`:
+  turns = [Turn(name="Aino", hour=18)]
 test "turns from text" ... blocked by todo("read the turns")
 test "a free hour says so" ... blocked by todo("lay out the evening")
 0 passed, 0 failed, 2 blocked

@@ -1,0 +1,7 @@
+# A deprecated function whose attribute names no replacement.
+@deprecated
+def heat_of(name: str) -> int:
+    return 80
+
+def main():
+    print(heat_of("Kotiharju"))

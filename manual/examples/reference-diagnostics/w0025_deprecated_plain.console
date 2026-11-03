@@ -1,0 +1,8 @@
+$ sisu run w0025_deprecated_plain.sisu
+warning[W0025]: `heat_of` is deprecated
+  --> w0025_deprecated_plain.sisu:7:11
+  |
+7 |     print(heat_of("Kotiharju"))
+  |           ^^^^^^^^^^^^^^^^^^^^
+
+80

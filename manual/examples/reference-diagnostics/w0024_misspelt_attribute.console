@@ -1,0 +1,9 @@
+$ sisu run w0024_misspelt_attribute.sisu
+warning[W0024]: `@deprecatd` is not an attribute Sisu reads
+  --> w0024_misspelt_attribute.sisu:4:2
+  |
+4 | @deprecatd("use `celsius_of`")
+  |  ^^^^^^^^^
+  = fix: write `@deprecated`: `deprecated`
+
+100.0

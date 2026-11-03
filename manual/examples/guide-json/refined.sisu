@@ -1,13 +1,21 @@
-# A field of a refinement type, which `json.decode` cannot read yet.
+# `decode` checks refinements and invariants where the text comes in.
 import std.json
 
 ## An hour of the evening, when the sauna is warm.
 type Hour = int where 17 <= self and self <= 21
 
-## A turn in the sauna, with the hour checked.
-struct Booking:
+## A turn in the sauna, from its first hour to its last.
+struct Turn:
     name: String
-    hour: Hour
+    first: Hour
+    last: Hour
+    invariant self.first <= self.last
 
 def main():
-    print(json.decode[Booking](r"""{"name": "Eero", "hour": 25}"""))
+    let texts = [
+        r"""{"name": "Aino", "first": 18, "last": 19}""",
+        r"""{"name": "Eero", "first": 18, "last": 25}""",
+        r"""{"name": "Roni", "first": 20, "last": 18}""",
+    ]
+    for text in texts:
+        print(json.decode[Turn](text))

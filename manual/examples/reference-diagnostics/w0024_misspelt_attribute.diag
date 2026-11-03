@@ -1,0 +1,2 @@
+4:2-4:11 W0024 resolve.misspelt-attribute name="deprecatd"
+  fix resolve.similar-attribute 4:2-4:11 "deprecated"

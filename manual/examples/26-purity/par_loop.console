@@ -1,0 +1,8 @@
+$ sisu run par_loop.sisu
+error[E0447]: the body of a `par` loop changes nothing but its own values, and `total` is declared before the loop: compute each value with `par.map` and combine them with `sum` or a reducer (06)
+  --> par_loop.sisu:8:9
+  |
+8 |         total += heat
+  |         ^^^^^
+
+error[D0006]: the program was not run: errors found (1)

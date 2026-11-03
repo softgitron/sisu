@@ -1,34 +1,4 @@
 $ sisu test predict_refinements.sisu
-warning[W0001]: typed hole `failed(0)` of type `str`
-  --> predict_refinements.sisu:24:19
-   |
-24 | const ZERO: str = todo("failed(0)")
-   |                   ^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `failed(7)` of type `str`
-  --> predict_refinements.sisu:25:20
-   |
-25 | const SEVEN: str = todo("failed(7)")
-   |                    ^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `failed(50)` of type `str`
-  --> predict_refinements.sisu:26:20
-   |
-26 | const FIFTY: str = todo("failed(50)")
-   |                    ^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `failed(-1)` of type `str`
-  --> predict_refinements.sisu:27:24
-   |
-27 | const MINUS_ONE: str = todo("failed(-1)")
-   |                        ^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `steam from 10 with 7 ladles` of type `int`
-  --> predict_refinements.sisu:28:20
-   |
-28 | const STEAM: int = todo("steam from 10 with 7 ladles")
-   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
 test "nothing fails" ... blocked by todo("failed(0)")
 test "a little too wet" ... blocked by todo("failed(7)")
 test "wet" ... blocked by todo("failed(50)")

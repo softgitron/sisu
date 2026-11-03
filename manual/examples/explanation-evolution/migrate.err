@@ -1,0 +1,6 @@
+warning[W0023]: `to_fahrenheit` is deprecated: use Temperature(celsius).fahrenheit()
+  --> migrate.sisu:15:11
+   |
+15 |     print(to_fahrenheit(80.0))
+   |           ^^^^^^^^^^^^^^^^^^^
+

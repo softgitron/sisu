@@ -1,0 +1,11 @@
+# The attribute names the replacement, and the call uses it.
+@deprecated("use `heat`")
+def heat_of(name: str) -> int:
+    return heat(name)
+
+## The heat of the sauna `name`.
+def heat(name: str) -> int:
+    return 80
+
+def main():
+    print(heat("Kotiharju"))

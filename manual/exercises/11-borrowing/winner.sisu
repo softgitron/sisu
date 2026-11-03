@@ -1,9 +1,10 @@
 ##! Exercise 11.4, the winner. Kind: fix. Level: 2.
 ##!
 ##! `winner` returns a borrow of the winner's name, without copying it.
-##! The file does not compile. Run `sisu test winner.sisu`, read the
-##! diagnostic, and fix `winner` so that the test passes. The hints are
-##! in chapter 11 of the tutorial, under "Exercise 11.4: the winner".
+##! The file does not compile. Check it with `sisu check winner.sisu`,
+##! read the diagnostic, and fix `winner` so that
+##! `sisu test winner.sisu` passes the test. The hints are in chapter 11
+##! of the tutorial, under "Exercise 11.4: the winner".
 
 struct Player:
     name: String

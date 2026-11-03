@@ -151,8 +151,7 @@ simulation, which only an `extern` call with no simulation model can
 for it, so `runtime = "single"` is W0005 (`package.unknown-key`), and
 the interpreter and the native runtime both run every task on one
 thread, one at a time, under the seeded scheduler. `sim` is the profile
-of `sisu test --sim` only, and since `sisu test` reads no `extern` block
-(E0900), E0971 is not reached yet:
+of `sisu test --sim` only:
 
 <!-- file: examples/reference-targets/profiles.pkg/sisu.toml -->
 ```toml

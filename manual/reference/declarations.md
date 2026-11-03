@@ -569,9 +569,10 @@ def main():
 `impl Type:` adds methods and associated functions to a type outside
 its body ([Impls](#impls)).
 
-**Stage 0 differs.** `sisu check` and `sisu run`, which use stage 1, do
-not report a field declared twice (E0205) and keep one of the two;
-`sisu test`, on the Rust front end, reports it.
+**Stage 0 differs.** Stage 1, the front end of `sisu check`, `sisu run`
+and `sisu test`, does not report a field declared twice (E0205) and
+keeps one of the two; the Rust front end (`--front-end=rust`) reports
+it.
 
 **Status.** In stage 0, with the difference noted.
 
@@ -628,7 +629,7 @@ Rect(w=2.0, h=3.0) 6.0
 
 **Stage 0 differs.** Stage 1 does not report a variant declared twice
 (E0206), as it does not report a field declared twice
-([Structs](#structs)); the Rust front end of `sisu test` does. A
+([Structs](#structs)); the Rust front end (`--front-end=rust`) does. A
 `const` in an enum's body compiles, and reading it as `Light.COUNT` is
 E0351.
 

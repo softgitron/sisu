@@ -1,0 +1,6 @@
+warning[W0022]: `@table` is not an attribute Sisu reads, and no compile-time code of the program reads attributes (`reflect.attributes_of`), so it means nothing here
+  --> w0022_unknown_attribute.sisu:2:2
+  |
+2 | @table("saunas")
+  |  ^^^^^
+

@@ -1,0 +1,7 @@
+# A parallel loop whose body prints.
+import std.par
+
+def main():
+    let heats = [70, 80, 90]
+    for heat in par.iter(heats):
+        print("{heat} degrees")

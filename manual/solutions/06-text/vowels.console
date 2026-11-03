@@ -4,5 +4,6 @@ error[E0325]: a `for` loop cannot iterate over `String`
    |
 14 |     for letter in word.to_lowercase():
    |                   ^^^^^^^^^^^^^^^^^^^
+  = fix: iterate over its characters: `.chars()`
+  = fix: iterate over its bytes: `.bytes()`
 
-error[D0006]: the program was not run: errors found (1)

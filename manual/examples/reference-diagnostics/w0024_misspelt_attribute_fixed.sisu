@@ -1,0 +1,9 @@
+# The attribute spelt as Sisu reads it, which makes the call warn.
+
+## The old name of `celsius_of`.
+@deprecated("use `celsius_of`")
+def to_celsius(fahrenheit: f64) -> f64:
+    return (fahrenheit - 32.0) * 5.0 / 9.0
+
+def main():
+    print(to_celsius(212.0))

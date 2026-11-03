@@ -1,0 +1,4 @@
+3:2-3:7 W0022 resolve.unknown-attribute name="table"
+6:6-6:10 W0022 resolve.unknown-attribute name="unit"
+11:6-11:11 W0022 resolve.unknown-attribute name="since"
+20:25-20:35 W0023 type.deprecated name="heat" reason="read the field `heat`"

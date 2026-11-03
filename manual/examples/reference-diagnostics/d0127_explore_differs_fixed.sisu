@@ -1,0 +1,13 @@
+# Sorted, the names print the same under every schedule.
+def arrive(order: Mutex[list[String]], name: str):
+    task.yield_now()
+    order.lock().push(name.to_string())
+
+def main():
+    let order = Mutex(list[String]())
+    task.scope do s:
+        s.spawn(() -> arrive(order, "Aino"))
+        s.spawn(() -> arrive(order, "Eero"))
+    var arrived = order.into_inner()
+    arrived.sort()
+    print(arrived)

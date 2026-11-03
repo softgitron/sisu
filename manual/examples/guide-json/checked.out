@@ -1,3 +1,0 @@
-Ok(("Aino", 18))
-Err(Unsatisfied(ty="Hour", predicate="17 <= self and self <= 21"))
-Err(Mismatch(path="$.hour", expected="an integer"))

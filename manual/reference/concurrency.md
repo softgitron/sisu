@@ -127,7 +127,10 @@ A task fails when it panics, or when it returns `Err` other than the
 - a failure that the result type cannot carry is a panic in the
   scope's task (R0079), so no failure is lost;
 - a body that returns `Err` or panics cancels the tasks still running,
-  and its error or panic is the scope's outcome once they end;
+  and its error or panic is the scope's outcome once they end; but a
+  body that passes on the `Cancelled` of a task that a sibling's
+  failure cancelled, as `slow.join()?` would, gives the scope that
+  failure, the first in time, and not the `Cancelled`;
 - the results nobody joined are dropped when the scope ends.
 
 In a scope opened by `pure` code, a failure cancels only the tasks
@@ -468,6 +471,11 @@ the stove is lit, once
 5 bathers
 ```
 
+What a read of an `Atomic` gives depends on the schedule, so every
+method of one but its construction is impure: `pure` code cannot call
+`load`, `store`, `swap` or `compare_exchange` (E0333, whose note says
+so), where it may make an `Atomic`.
+
 **Stage 0 differs.** Stage 0 runs one task at a time, so no ordering
 can be told apart from `SeqCst` there.
 
@@ -643,8 +651,10 @@ deadlock: every task is waiting, and no timer can wake any of them
 ```
 
 `--explore N` runs a program or its tests under many seeds and stops at
-the first that fails; `--scheduler pct` and `exhaustive` search
-schedules on purpose ([R16](sisu-command.md#choosing-the-schedule)).
+the first that fails, or, for a run, at the first whose standard output
+differs from the first seed's (D0127); `--scheduler pct` and
+`exhaustive` search schedules on purpose
+([R16](sisu-command.md#choosing-the-schedule)).
 
 Whether a task may also be preempted between these points is open
 (Q-34).
@@ -674,7 +684,11 @@ gives the same result, bit for bit, on any number of workers.
   or `par.Collect[T]` or one of your own, over chunks fixed by index and
   merged pairwise up a fixed tree, so a sum is `sum`'s whatever the
   grain.
-- `par.iter(xs)` iterates a list for a parallel loop.
+- `par.iter(xs)` iterates a list for a parallel loop, `for x in
+  par.iter(xs):`, whose body is `pure`: it calls only `pure` functions
+  (E0446) and changes nothing declared before the loop (E0447), so what
+  it computes leaves the loop through an assertion, or through
+  `par.map` and a reducer instead.
 - A failing parallel loop reports the lowest-index failure.
 
 <!-- file: examples/reference-concurrency/parallel.sisu -->
@@ -691,10 +705,9 @@ def main():
     let (low, high) = par.join(() -> sum([1, 2]), () -> sum([3, 4]))
     print("{low} {high}")
     print(par.reduce[par.Sum[f64]]([0.1, 0.2, 0.3], grain=1))
-    var total = 0
     for x in par.iter(xs):
-        total += x
-    print(total)
+        assert square(x) >= x
+    print("every square checked")
 ```
 
 <!-- output: examples/reference-concurrency/parallel.out -->
@@ -702,7 +715,7 @@ def main():
 [1, 4, 9, 16, 25]
 3 7
 0.6
-15
+every square checked
 ```
 
 **Stage 0 differs.** D-069 spells the parallel loop `xs.par_iter()` and
@@ -726,4 +739,6 @@ tell apart.
 | R0073, R0074, R0090, [E0421](diagnostics.md#e0421), E0422 | `panic.mutex-held`, `panic.mutex-poisoned`, `panic.into-inner-poisoned`, `borrow.view-in-owner`, `borrow.must-consume-in-owner` | [Sharing a value that changes](#sharing-a-value-that-changes) |
 | R0083, R0091 | `panic.channel-capacity`, `panic.nested-recv` | [Channels](#channels) |
 | E0434 | `task.select-arm` | [Waiting for the first of several](#waiting-for-the-first-of-several) |
-| [R0080](diagnostics.md#r0080), R0081 | `run.deadlock`, `run.deadlock-task` | [The scheduler](#the-scheduler) |
+| [R0080](diagnostics.md#r0080), R0081, [D0127](diagnostics.md#d0127) | `run.deadlock`, `run.deadlock-task`, `cli.explore-differs` | [The scheduler](#the-scheduler) |
+| [E0333](diagnostics.md#e0333) | `type.impure-call` | [Atomics and orderings](#atomics-and-orderings) |
+| [E0446](diagnostics.md#e0446), [E0447](diagnostics.md#e0447) | `type.par-body-impure`, `type.par-body-changes` | [Parallel computation over data](#parallel-computation-over-data) |

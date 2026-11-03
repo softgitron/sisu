@@ -1,8 +1,0 @@
-$ sisu check max_list.sisu
-error[E0308]: missing the argument `b` of `max`
-  --> max_list.sisu:4:11
-  |
-4 |     print(max(scores))
-  |           ^^^^^^^^^^^
-  = fix: pass `b` as a hole to fill: `, todo("b")`
-

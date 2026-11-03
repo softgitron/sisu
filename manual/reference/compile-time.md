@@ -141,39 +141,7 @@ error[E0604]: a function made at compile time cannot be kept for run time; numbe
 error[D0006]: the program was not run: errors found (2)
 ```
 
-**Stage 0 differs.** The evaluator of `sisu run` and `sisu check`, stage
-1's, does not run every intrinsic yet: `sum`, a `for` over a list, a
-comprehension, a `set`, a `dict`, `String.push`, `list.join`,
-`str.byte_at`, `int.to_f64` and `todo` stop it with "beyond the slice:
-a `comptime` expression that needs ...", a message with no code, after
-which `sisu check` exits with status 0. `sisu test`, whose front end is
-the Rust one, runs them:
-
-<!-- file: examples/reference-compile-time/slice.sisu -->
-```sisu
-# A constant that the evaluator of `sisu run` cannot compute yet.
-const PRICES: list[int] = [350, 280, 120]
-const TOTAL: int = comptime sum(PRICES)
-
-def main():
-    print(TOTAL)
-
-test "the total":
-    assert TOTAL == 750
-```
-
-<!-- output: examples/reference-compile-time/slice.console -->
-```console
-$ sisu run slice.sisu
-beyond the slice: a `comptime` expression that needs the intrinsic `sum`, which stage 1's evaluator does not run
-$ sisu check slice.sisu
-beyond the slice: a `comptime` expression that needs the intrinsic `sum`, which stage 1's evaluator does not run
-$ sisu test slice.sisu
-test "the total" ... ok
-1 passed, 0 failed, 0 blocked
-```
-
-**Status.** In stage 0 (D-018, D-074), with the difference noted.
+**Status.** In stage 0 (D-018, D-074).
 
 ## Budgets
 
@@ -206,7 +174,7 @@ function asks about its type parameters ([Templates](#templates)).
 |---|---|
 | `reflect.name_of(T)` | the type's name |
 | `reflect.is_struct(T)`, `is_enum`, `is_trait`, `is_int`, `is_float`, `is_bool`, `is_char`, `is_str` (`str` or `String`), `is_list`, `is_option`, `is_tuple` | whether the type is of that kind |
-| `reflect.fields_of(T)` | a struct's fields, each with `name`, `index`, `named`, `ty` and `default`, whether it has a default |
+| `reflect.fields_of(T)` | a struct's fields, each with `name`, `index`, `named`, `ty` and `default`, whether it has a default; an empty list for a type declared without fields, such as `int` |
 | `reflect.variants_of(T)` | an enum's variants, each with `name`, `index` and `fields` |
 | `reflect.elem_of(T)` | the element type of a list or an optional value |
 | `reflect.methods_of(T)` | a trait's methods or a type's own, each with `name`, `index`, `receiver`, `params` (each with `name`, `index`, `mode` and `ty`), `ret` and `provided` |
@@ -279,10 +247,9 @@ True
 
 **Stage 0 differs.** A builtin type given to a `T: type` parameter,
 such as `bool` or `int`, is E0200 (`resolve.undefined-name`) in `sisu
-run` and `sisu check`, whose fix offers `uint` for `int`, though a type
-of the program, `String` and `uint` work and the Rust front end takes
-them all. `reflect.fields_of` of a type that is not a struct is an empty
-list. The documentation of items, which
+run`, `sisu check` and `sisu test`, whose fix offers `uint` for `int`,
+though a type of the program, `String` and `uint` work and the Rust
+front end takes them all. The documentation of items, which
 [08](../../proposal/08-metaprogramming.md#reflection) lists among what
 reflection exposes, has no query, and the attributes of a function or a
 field none either ([R14](attributes.md#attributes-are-data)).
@@ -473,7 +440,9 @@ so a derive cannot choose code by the type of each field (E0608).
 
 `embed("PATH")` is the text of a file, read while the program compiles,
 as a `str`; the path is a string literal (E0613, `comptime.embed-path`)
-that names a file inside the program's directory. A file that cannot be
+that names a file inside the program's directory, relative to the
+package's root, the directory of its `sisu.toml`, in a package, and to
+the file's directory for a single file. A file that cannot be
 read, or a path outside the directory, is E0612
 (`comptime.embed-failed`), with a reason that is the same on every
 machine. The file is one of the build's inputs, so a build that embeds
@@ -495,12 +464,8 @@ def main():
 3 words, the first kiuas
 ```
 
-**Stage 0 differs.** In a package the path is relative to the module's
-directory under `src/`, and a path up to the package's root,
-`../data/words.txt`, is E0612, where
-[08](../../proposal/08-metaprogramming.md#compile-time-evaluation)
-resolves it from the root. A replay token's hash covers the source and
-not the files it embeds ([guide](../guides/embed.md)).
+**Stage 0 differs.** A replay token's hash covers the source and not
+the files it embeds ([guide](../guides/embed.md)).
 
 **Status.** In stage 0 (D-018), with the differences noted.
 
@@ -549,9 +514,7 @@ the program compiles, and a mistake is reported at its place inside the
 literal ([08](../../proposal/08-metaprogramming.md#what-you-cannot-do-and-the-intended-workaround)).
 
 **Stage 0 differs.** A failed `comptime` call points at the call, not
-inside the literal, and stage 1's evaluator cannot run `str.byte_at`,
-which parsing needs, so such a function runs under `sisu test` only
-([What compile-time code may do](#what-compile-time-code-may-do)).
+inside the literal.
 
 **Status.** Designed (D-018).
 

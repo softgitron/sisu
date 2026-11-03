@@ -1,0 +1,24 @@
+warning[W0022]: `@table` is not an attribute Sisu reads, and no compile-time code of the program reads attributes (`reflect.attributes_of`), so it means nothing here
+  --> forms.sisu:3:2
+  |
+3 | @table("saunas", key="name")
+  |  ^^^^^
+
+warning[W0022]: `@unit` is not an attribute Sisu reads, and no compile-time code of the program reads attributes (`reflect.attributes_of`), so it means nothing here
+  --> forms.sisu:6:6
+  |
+6 |     @unit("celsius")
+  |      ^^^^
+
+warning[W0022]: `@since` is not an attribute Sisu reads, and no compile-time code of the program reads attributes (`reflect.attributes_of`), so it means nothing here
+  --> forms.sisu:11:6
+   |
+11 |     @since("2026")
+   |      ^^^^^
+
+warning[W0023]: `heat` is deprecated: read the field `heat`
+  --> forms.sisu:20:25
+   |
+20 |     print("{home.name} {heat(home)} {Stove.Electric:?} {home == home}")
+   |                         ^^^^^^^^^^
+

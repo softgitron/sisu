@@ -229,9 +229,9 @@ notes](../../compiler/docs/architecture.md#compile-time-and-run-time)).
 
 - **Two front ends, for a while.** Every rule existed twice until the
   Rust front end was frozen, and the oracle stays until nothing checks
-  against it. Stage 1's evaluator of compile-time code does not yet run
-  everything stage 0's did, and those gaps stop a program with a message
-  that has no code, as [Determinism](determinism.md) records.
+  against it. Meanwhile the commands that stage 1 does not serve yet,
+  such as `sisu test --std` and `sisu run --defer-borrow`, run the Rust
+  front end, which knows none of the rules added since it was frozen.
 - **The interpreter is slow.** It is fine for development, tests and an
   oracle, and not for users, which is why the native backend was built
   beside stage 1 rather than after it.

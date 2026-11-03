@@ -4,6 +4,9 @@ warning[W0001]: typed hole `middle` of type `int`
 6 |     return todo("middle")
   |            ^^^^^^^^^^^^^^
 
+in scope at the typed hole `todo("middle")`:
+  xs = [4, 1, 3]
+  s = [1, 3, 4]
 panic: reached the typed hole `todo("middle")`
   at median (holes.sisu:6:12)
   at main (holes.sisu:10:11)

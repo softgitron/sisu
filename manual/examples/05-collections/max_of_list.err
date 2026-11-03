@@ -1,0 +1,2 @@
+panic: `max` of no items
+  at main (max_of_list.sisu:6:28)

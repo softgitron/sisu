@@ -1,28 +1,25 @@
 $ sisu test guard.sisu
-warning[W0001]: typed hole `Limiter.new` of type `Limiter`
-  --> guard.sisu:47:16
-   |
-47 |         return todo("Limiter.new")
-   |                ^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `allow` of type `bool`
-  --> guard.sisu:51:16
-   |
-51 |         return todo("allow")
-   |                ^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `Cache.new` of type `Cache`
-  --> guard.sisu:61:16
-   |
-61 |         return todo("Cache.new")
-   |                ^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `forecast` of type `String ! {TaskError, WeatherError}`
-  --> guard.sisu:68:16
-   |
-68 |         return todo("forecast")
-   |                ^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("Limiter.new")`:
+  limit = 2
+  window = Duration(nanos=10000000000)
+in scope at the typed hole `todo("Limiter.new")`:
+  limit = 1
+  window = Duration(nanos=10000000000)
+in scope at the typed hole `todo("Limiter.new")`:
+  limit = 2
+  window = Duration(nanos=10000000000)
+in scope at the typed hole `todo("Cache.new")`:
+  fresh = Duration(nanos=300000000000)
+in scope at the typed hole `todo("Cache.new")`:
+  fresh = Duration(nanos=300000000000)
+in scope at the typed hole `todo("Cache.new")`:
+  fresh = Duration(nanos=300000000000)
+in scope at the typed hole `todo("Cache.new")`:
+  fresh = Duration(nanos=300000000000)
+in scope at the typed hole `todo("Cache.new")`:
+  fresh = Duration(nanos=300000000000)
+in scope at the typed hole `todo("Cache.new")`:
+  fresh = Duration(nanos=1000000000)
 test "part 1, a limit for each client/two requests in a window" ... blocked by todo("Limiter.new")
 test "part 1, a limit for each client/a new window" ... blocked by todo("Limiter.new")
 test "part 1, a limit for each client/tasks share one limit" ... blocked by todo("Limiter.new")

@@ -695,18 +695,13 @@ test "an empty name is not a guest":
 <!-- output: solutions/22-web-service/guests.console -->
 ```console
 $ sisu test guests.sisu
-warning[W0001]: typed hole `add the name, and answer 201 Created` of type `http.Response`
-  --> guests.sisu:25:20
-   |
-25 |             return todo("add the name, and answer 201 Created")
-   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `answer 200 with the names as JSON` of type `http.Response`
-  --> guests.sisu:26:16
-   |
-26 |         return todo("answer 200 with the names as JSON")
-   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("add the name, and answer 201 Created")`:
+  self = GuestBook(names=Mutex([]))
+  request = Request(method="POST", target="/guests", headers=[], body=b"Aino")
+  name = "Aino"
+in scope at the typed hole `todo("answer 200 with the names as JSON")`:
+  self = GuestBook(names=Mutex([]))
+  request = Request(method="GET", target="/guests", headers=[], body=b"")
 test "names in the book" ... blocked by todo("add the name, and answer 201 Created")
 test "an empty name is not a guest" ... blocked by todo("answer 200 with the names as JSON")
 0 passed, 0 failed, 2 blocked
@@ -930,30 +925,27 @@ Before you change anything, every test is blocked:
 <!-- output: solutions/22-web-service/guard.console -->
 ```console
 $ sisu test guard.sisu
-warning[W0001]: typed hole `Limiter.new` of type `Limiter`
-  --> guard.sisu:47:16
-   |
-47 |         return todo("Limiter.new")
-   |                ^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `allow` of type `bool`
-  --> guard.sisu:51:16
-   |
-51 |         return todo("allow")
-   |                ^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `Cache.new` of type `Cache`
-  --> guard.sisu:61:16
-   |
-61 |         return todo("Cache.new")
-   |                ^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `forecast` of type `String ! {TaskError, WeatherError}`
-  --> guard.sisu:68:16
-   |
-68 |         return todo("forecast")
-   |                ^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("Limiter.new")`:
+  limit = 2
+  window = Duration(nanos=10000000000)
+in scope at the typed hole `todo("Limiter.new")`:
+  limit = 1
+  window = Duration(nanos=10000000000)
+in scope at the typed hole `todo("Limiter.new")`:
+  limit = 2
+  window = Duration(nanos=10000000000)
+in scope at the typed hole `todo("Cache.new")`:
+  fresh = Duration(nanos=300000000000)
+in scope at the typed hole `todo("Cache.new")`:
+  fresh = Duration(nanos=300000000000)
+in scope at the typed hole `todo("Cache.new")`:
+  fresh = Duration(nanos=300000000000)
+in scope at the typed hole `todo("Cache.new")`:
+  fresh = Duration(nanos=300000000000)
+in scope at the typed hole `todo("Cache.new")`:
+  fresh = Duration(nanos=300000000000)
+in scope at the typed hole `todo("Cache.new")`:
+  fresh = Duration(nanos=1000000000)
 test "part 1, a limit for each client/two requests in a window" ... blocked by todo("Limiter.new")
 test "part 1, a limit for each client/a new window" ... blocked by todo("Limiter.new")
 test "part 1, a limit for each client/tasks share one limit" ... blocked by todo("Limiter.new")

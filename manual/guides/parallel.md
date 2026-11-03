@@ -190,5 +190,6 @@ a parallel reduction gives the right answer and no speed-up.
 [06](../../proposal/06-concurrency-and-capabilities.md#data-parallelism)
 spells the parallel loop `xs.par_iter()`, which is E0304 in stage 0,
 and `par_iter_mut()`, which is missing; stage 0's `par.iter(xs)` gives
-the values for a `for` loop and does not yet check that its body is
-pure.
+the values for a `for` loop, whose body is checked as `pure` code
+(E0446 for an impure call, E0447 for a change of what was declared
+before the loop).

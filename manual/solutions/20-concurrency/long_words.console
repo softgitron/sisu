@@ -6,4 +6,3 @@ error[E0427]: `count` is shared with the task by reference, but `Cell[int]` is n
    |             ^^^^^^^^^^^
   = note: wrap it: `Mutex[int]` shares mutation between tasks; or move the value with an `own` task
 
-error[D0006]: the program was not run: errors found (1)

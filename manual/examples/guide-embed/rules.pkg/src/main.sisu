@@ -1,8 +1,8 @@
 ##! The sauna's rules, kept in a file of their own and made part of the
 ##! program while it compiles.
 
-## The rules, one on each line, from the file beside this module.
-const RULES: str = embed("rules.txt")
+## The rules, one on each line, from the package's `data` directory.
+const RULES: str = embed("data/rules.txt")
 
 ## Rule number `n`, counting from 1, if there is one.
 def rule(n: int) -> str?:

@@ -1,0 +1,8 @@
+$ sisu run w0023_deprecated.sisu
+warning[W0023]: `to_celsius` is deprecated: use `celsius_of`, which this calls
+  --> w0023_deprecated.sisu:13:11
+   |
+13 |     print(to_celsius(212.0))
+   |           ^^^^^^^^^^^^^^^^^
+
+100.0

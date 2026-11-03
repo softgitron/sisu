@@ -81,15 +81,19 @@ warning[W0001]: typed hole `lay out the evening` of type `list[String]`
 15 |     return todo("lay out the evening")
    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+in scope at the typed hole `todo("read the turns")`:
+  text = "18 Aino\n20 Eero\n"
 panic: reached the typed hole `todo("read the turns")`
   at parse_turns (schedule.sisu:11:12)
   at main (schedule.sisu:19:26)
 ```
 
-The program runs until it reaches a hole, and stops there with a panic
-that names it, so the parts that are written can be tried at once.
-Name each hole by what it must do: the names are the list of what is
-left.
+The program runs until it reaches a hole, so the parts that are written
+can be tried at once. There it prints the hole's closure, each binding
+in scope with its value, here the `text` that the file held, and stops
+with a panic that names the hole: the closure is what the code that
+fills the hole will have to work with. Name each hole by what it must
+do: the names are the list of what is left.
 
 ## 2. Write the tests, and see them wait
 
@@ -100,25 +104,20 @@ code that does not exist:
 <!-- output: examples/guide-holes/blocked.console -->
 ```console
 $ sisu test schedule.sisu
-warning[W0001]: typed hole `read the turns` of type `list[Turn]`
-  --> schedule.sisu:11:12
-   |
-11 |     return todo("read the turns")
-   |            ^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `lay out the evening` of type `list[String]`
-  --> schedule.sisu:15:12
-   |
-15 |     return todo("lay out the evening")
-   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("read the turns")`:
+  text = "18 Aino\n20 Eero"
+in scope at the typed hole `todo("lay out the evening")`:
+  turns = [Turn(name="Aino", hour=18)]
 test "turns from text" ... blocked by todo("read the turns")
 test "a free hour says so" ... blocked by todo("lay out the evening")
 0 passed, 0 failed, 2 blocked
 ```
 
-The last line counts the tests that pass, fail and wait, which is the
-state of the plan.
+Each blocked test shows the closure of its hole too, what the test
+handed the function, and the last line counts the tests that pass, fail
+and wait, which is the state of the plan. While a test is blocked and
+none fails, `sisu test` exits with status 3, so a job that runs the
+tests can tell a plan that waits from one that is done.
 
 ## 3. Fill the holes one at a time
 
@@ -165,12 +164,8 @@ test "a free hour says so":
 <!-- output: examples/guide-holes/schedule_read.console -->
 ```console
 $ sisu test schedule_read.sisu
-warning[W0001]: typed hole `lay out the evening` of type `list[String]`
-  --> schedule_read.sisu:19:12
-   |
-19 |     return todo("lay out the evening")
-   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("lay out the evening")`:
+  turns = [Turn(name="Aino", hour=18)]
 test "turns from text" ... ok
 test "a free hour says so" ... blocked by todo("lay out the evening")
 1 passed, 0 failed, 1 blocked
@@ -200,13 +195,35 @@ $ sisu run schedule_done.sisu
 20:00 Eero
 ```
 
-Read the warnings before you ship: in stage 0, a program with a hole
-still builds, with `sisu build --native --release` too, and reaching
-the hole is a panic.
+A hole never ships: a release build refuses the sketch of step 1, with
+E0445 (`type.hole-in-release`) at each hole, whose note says what may
+ship where a part is meant to stop, `panic("...")`:
 
-**Status.** Holes, W0001 and blocked tests are in stage 0 (D-061).
-`sisu check --holes`, which lists each hole with the bindings in scope,
-the `requires` around it and the tests that reach it, is designed in
+<!-- output: examples/guide-holes/release.console -->
+```console
+$ sisu build --native --release schedule.sisu
+error[E0445]: a release build rejects the typed hole `todo("read the turns")` of type `list[Turn]`: blocked is never a shipped state
+  --> schedule.sisu:11:12
+   |
+11 |     return todo("read the turns")
+   |            ^^^^^^^^^^^^^^^^^^^^^^
+  = note: fill the hole before the release build; a placeholder meant to ship is `panic("...")`
+
+error[E0445]: a release build rejects the typed hole `todo("lay out the evening")` of type `list[String]`: blocked is never a shipped state
+  --> schedule.sisu:15:12
+   |
+15 |     return todo("lay out the evening")
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = note: fill the hole before the release build; a placeholder meant to ship is `panic("...")`
+
+error[D0006]: the program was not run: errors found (2)
+```
+
+**Status.** Holes, W0001, blocked tests with their closures, and the
+release build's E0445 are in stage 0 (D-061). Stage 0's `sisu test`
+exits with status 0, not 3, when a test is blocked and none fails, and
+prints no W0001, which `sisu check` prints. `sisu check --holes`, which
+lists each hole with the bindings in scope, the `requires` around it and
+the tests that reach it, is designed in
 [10](../../proposal/10-tooling.md), and stage 0 answers it with D0009;
-so are a release build and a `sisu publish` that refuse a program with
-a hole.
+so is a `sisu publish` that refuses a program with a hole.

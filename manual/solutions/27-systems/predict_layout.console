@@ -1,34 +1,4 @@
 $ sisu test predict_layout.sisu
-warning[W0001]: typed hole `a u8, then an int` of type `int`
-  --> predict_layout.sisu:23:24
-   |
-23 | const BYTE_WORD: int = todo("a u8, then an int")
-   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `an int, then a u8` of type `int`
-  --> predict_layout.sisu:24:24
-   |
-24 | const WORD_BYTE: int = todo("an int, then a u8")
-   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `u8, u8, u16, u32` of type `int`
-  --> predict_layout.sisu:25:26
-   |
-25 | const SMALL_FIRST: int = todo("u8, u8, u16, u32")
-   |                          ^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `u8, u32, u8` of type `int`
-  --> predict_layout.sisu:26:26
-   |
-26 | const BYTE_AROUND: int = todo("u8, u32, u8")
-   |                          ^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `i16, u8` of type `int`
-  --> predict_layout.sisu:27:25
-   |
-27 | const SHORT_BYTE: int = todo("i16, u8")
-   |                         ^^^^^^^^^^^^^^^
-
 test "a byte before a word" ... blocked by todo("a u8, then an int")
 test "a byte after a word" ... blocked by todo("an int, then a u8")
 test "the small fields first" ... blocked by todo("u8, u8, u16, u32")

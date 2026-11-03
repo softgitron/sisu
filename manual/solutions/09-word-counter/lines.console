@@ -4,6 +4,7 @@ error[E0200]: cannot find `open` in this scope
    |
 11 |     let text = open(path).read()
    |                ^^^^
+  = note: a program reaches files through the capability `Fs`, which `def main(sys: System)` holds as `sys.fs`: `sys.fs.read_to_string("data.txt")`
 
 error[E0305]: wrong number of arguments to `line_count`: expected 1, found 2
   --> lines.sisu:16:12
@@ -41,4 +42,3 @@ error[E0300]: expected `Path`, found `Fs`
 24 |     assert line_count(fs, "missing.txt") == Err(NotFound("missing.txt"))
    |                       ^^
 
-error[D0006]: the program was not run: errors found (7)

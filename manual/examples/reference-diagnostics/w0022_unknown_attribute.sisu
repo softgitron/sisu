@@ -1,0 +1,9 @@
+# An attribute that nothing in the program reads.
+@table("saunas")
+struct Sauna:
+    name: String
+    heat: int
+
+def main():
+    let home = Sauna("Kotiharju", 80)
+    print("{home.name} {home.heat}")

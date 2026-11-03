@@ -178,14 +178,20 @@ Hei, stranger!
 the path: /usr/bin:/bin
 ```
 
-A C function that the interpreter does not know runs only natively.
-`sisu test` does not run unsafe code yet, since its front end reads
-neither `std.mem` nor `unsafe`, so keep the logic that needs no C
-outside the wrapper, where tests reach it, and keep the wrapper thin.
+A C function that the interpreter does not know runs only natively,
+and so does a test that reaches one. `getenv` is one of the few that it
+emulates, so a test of `lookup` runs on the checked memory model, as a
+run does. Keep the logic that needs no C outside the wrapper anyway,
+where every test reaches it, and keep the wrapper thin.
 
-**Status.** In stage 0 (22), except tests of unsafe code. Importing a
-C header, `import c "stdlib.h"`, which would write the `extern` block,
-is designed (E0900), and so is `sisu audit --unsafe` (D0009). `CString.new(name).as_ptr()`, the
-shorter way to pass text to C, stops the interpreter with a panic that
-the pointer's value no longer exists and does not compile natively yet,
-so the wrapper builds the C string in raw memory.
+**Status.** In stage 0 (22), except the tests of a package with unsafe
+code: `sisu test` writes the package's `sisu.lock` without its `unsafe`
+level and then stops at E1022, and the lockfile it leaves stops `sisu
+run` too until it is deleted, so test such code in a file of its own,
+as [chapter 27](../tutorial/27-systems.md#testing-unsafe-code) does.
+Importing a C header, `import c "stdlib.h"`, which would write the
+`extern` block, is designed (E0900), and so is `sisu audit --unsafe`
+(D0009). `CString.new(name).as_ptr()`, the shorter way to pass text to
+C, stops the interpreter with a panic that the pointer's value no
+longer exists and does not compile natively yet, so the wrapper builds
+the C string in raw memory.

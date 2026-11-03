@@ -1,0 +1,9 @@
+# A run that reaches a hole prints the bindings in scope there.
+def plan(own names: list[String], hour: int) -> String:
+    let turns = names
+    let last = hour + len(turns) - 1
+    let greeting = "Hei"
+    return todo("the evening's plan")
+
+def main():
+    print(plan(["Aino", "Eero"], 18))

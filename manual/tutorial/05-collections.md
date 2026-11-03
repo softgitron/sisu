@@ -402,37 +402,39 @@ all([s > 5 for s in scores])  # => False
 - `any` is `True` when at least one item is `True`, and `all` when every
   item is. Each is given a list of `bool` values, here built by a
   comprehension.
-- `max` and `min` compare two values and give the larger or the
-  smaller.
+- `max` and `min` give the larger or the smaller of two values, and,
+  given one collection, its largest or smallest item, the first of
+  equal ones.
 
-That last point differs from Python, where `max(scores)` gives the
-largest item of a list:
+A list with no items has no largest item, so `max` of an empty list
+stops the program:
 
 <!-- file: examples/05-collections/max_of_list.sisu -->
 ```sisu
-# `max` compares two values; it does not search a list.
+# `max` and `min` of a list, and of a list with no items.
 def main():
     let scores = [7, 9, 4]
-    print("best: {max(scores)}")
+    print("best {max(scores)}, worst {min(scores)}")
+    let nobody: list[int] = []
+    print("best of nobody {max(nobody)}")
 ```
 
 <!-- output: examples/05-collections/max_of_list.console -->
 ```console
 $ sisu run max_of_list.sisu
-error[E0308]: missing the argument `b` of `max`
-  --> max_of_list.sisu:4:19
-  |
-4 |     print("best: {max(scores)}")
-  |                   ^^^^^^^^^^^
-  = fix: pass `b` as a hole to fill: `, todo("b")`
-
-error[D0006]: the program was not run: errors found (1)
+best 9, worst 4
+panic: `max` of no items
+  at main (max_of_list.sisu:6:28)
 ```
 
-E0308 (`type.missing-argument`) reads the call as `max` with its second
-value missing, and its fix adds a hole for that value. The fix is not
-what you want here. For the largest item, take the last of the sorted
-list, `sorted(scores)[^1]`, or keep the largest seen so far in a loop.
+The panic names the call, and the program ends there. Where a list may
+be empty, test it first, with `if not nobody.is_empty():`.
+
+> **From Python.** `max` and `min` work as Python's do, on two values or
+> on a collection, and an empty collection is an error in both: Python
+> raises `ValueError`, and Sisu panics, since a program that asks for
+> the largest of nothing has a bug. Python's `key=` and `default=` are
+> not parameters: `max_by` and `min_by` of chapter 16 take a key.
 
 Three more functions go through collections for a `for` loop:
 
@@ -646,36 +648,6 @@ test "a name in lowercase among the keys of a dict":
 <!-- output: solutions/05-collections/predict_collections.console -->
 ```console
 $ sisu test predict_collections.sisu
-warning[W0001]: typed hole `the size of a set` of type `int`
-  --> predict_collections.sisu:8:23
-  |
-8 | const DISTINCT: int = todo("the size of a set")
-  |                       ^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `the last of a sorted list` of type `int`
-  --> predict_collections.sisu:9:22
-  |
-9 | const LARGEST: int = todo("the last of a sorted list")
-  |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `the sum of a slice` of type `int`
-  --> predict_collections.sisu:10:24
-   |
-10 | const SLICE_SUM: int = todo("the sum of a slice")
-   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `the length of a comprehension` of type `int`
-  --> predict_collections.sisu:11:20
-   |
-11 | const EVENS: int = todo("the length of a comprehension")
-   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `a key in a dict` of type `bool`
-  --> predict_collections.sisu:12:21
-   |
-12 | const FOUND: bool = todo("a key in a dict")
-   |                     ^^^^^^^^^^^^^^^^^^^^^^^
-
 test "a set of repeated numbers" ... blocked by todo("the size of a set")
 test "the last of a sorted list" ... blocked by todo("the last of a sorted list")
 test "the sum of a slice" ... blocked by todo("the sum of a slice")
@@ -714,10 +686,11 @@ Open
 ##!
 ##! `roster` shows a team's members in the order they joined and in
 ##! the order of their names. `join(" ")` puts a list's items into one
-##! text with spaces between them. The file does not compile. Run
-##! `sisu test roster.sisu`, read the diagnostic, and fix the function
-##! so that every test passes. The hints are in chapter 5 of the
-##! tutorial, under "Exercise 5.2: the team roster".
+##! text with spaces between them. The file does not compile. Check it
+##! with `sisu check roster.sisu`, read the diagnostic, and fix the
+##! function so that `sisu test roster.sisu` passes every test. The
+##! hints are in chapter 5 of the tutorial, under "Exercise 5.2: the
+##! team roster".
 
 ## The three members in the order they joined, then sorted by name.
 def roster(first: str, second: str, third: str) -> String:
@@ -735,20 +708,21 @@ test "a team that joined in the order of their names":
     assert text == "Aino Eero Liisa / Aino Eero Liisa"
 ```
 
+Check it before you change anything:
+
 <!-- output: solutions/05-collections/roster.console -->
 ```console
-$ sisu test roster.sisu
-error[E0400]: `joined` was moved on line 13 and cannot be used afterwards
-  --> roster.sisu:15:14
+$ sisu check roster.sisu
+error[E0400]: `joined` was moved on line 14 and cannot be used afterwards
+  --> roster.sisu:16:14
    |
-15 |     return "{joined.join(" ")} / {by_name.join(" ")}"
+16 |     return "{joined.join(" ")} / {by_name.join(" ")}"
    |              ^^^^^^
    |
-13 |     var by_name = joined
+14 |     var by_name = joined
    |                   ------ `joined` is moved here
-  = note: copy it with `.copy()` before it is moved, or move it later
+  = note: copy it with `.copy()` before the move, which makes a second value (for a list or a `String`, an allocation); move it later, after its last use, which costs nothing; or, where what it moves into only reads it, take it there without `own`, and the call lends it
 
-error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```
 
 <details>
@@ -762,8 +736,8 @@ and one sorted. Count how many lists it has.
 <details>
 <summary>Hint 2</summary>
 
-The diagnostic's note names the fix: a second list that `by_name` owns,
-made before anything is sorted.
+The first of the ways that the note names is the fix here: a second
+list that `by_name` owns, made before anything is sorted.
 
 </details>
 
@@ -803,12 +777,12 @@ test "no words":
 <!-- output: solutions/05-collections/word_frequencies.console -->
 ```console
 $ sisu test word_frequencies.sisu
-warning[W0001]: typed hole `word_frequencies` of type `dict[str, int]`
-  --> word_frequencies.sisu:10:12
-   |
-10 |     return todo("word_frequencies")
-   |            ^^^^^^^^^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("word_frequencies")`:
+  words = ["kuu", "kissa", "kala"]
+in scope at the typed hole `todo("word_frequencies")`:
+  words = ["a", "b", "a", "c", "a", "b"]
+in scope at the typed hole `todo("word_frequencies")`:
+  words = []
 test "every word once" ... blocked by todo("word_frequencies")
 test "repeated words" ... blocked by todo("word_frequencies")
 test "no words" ... blocked by todo("word_frequencies")
@@ -869,12 +843,14 @@ test "many repeats":
 <!-- output: solutions/05-collections/second_largest.console -->
 ```console
 $ sisu test second_largest.sisu
-warning[W0001]: typed hole `second_largest` of type `int`
-  --> second_largest.sisu:11:12
-   |
-11 |     return todo("second_largest")
-   |            ^^^^^^^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("second_largest")`:
+  values = [1, 2]
+in scope at the typed hole `todo("second_largest")`:
+  values = [5, 9, 9, 3]
+in scope at the typed hole `todo("second_largest")`:
+  values = [-4, -8, -4]
+in scope at the typed hole `todo("second_largest")`:
+  values = [7, 3, 7, 7, 1, 3]
 test "two values" ... blocked by todo("second_largest")
 test "the largest value twice" ... blocked by todo("second_largest")
 test "negative values" ... blocked by todo("second_largest")
@@ -911,8 +887,8 @@ When every test passes, compare your answer with
   tuple groups a fixed number of values, read by position or unpacked.
 - `in` asks whether a collection holds a value. Comprehensions build
   lists, sets and dicts. `len`, `sorted`, `sum`, `any`, `all`, `zip`,
-  `zip_shortest` and `reversed` work on collections, and `max` and
-  `min` compare two values.
+  `zip_shortest`, `reversed`, `max` and `min` work on collections;
+  `max` and `min` also compare two values.
 - An `Array` has a fixed length that is part of its type.
 - A list has one owner. Assigning it moves it, `.copy()` makes a second
   one, and passing it to a function lends it.

@@ -313,9 +313,11 @@ def main():
 `todo("NAME")` is a typed hole: an expression that checks as whatever
 type is expected where it stands, so the code around it compiles
 (D-061). `sisu check` and `sisu run` report each as W0001 with its type
-([R17](diagnostics.md#w0001)); a run that reaches one stops there
-(R0013), and a test that reaches one is blocked rather than failed. A
-release build and `sisu publish` reject a program with a hole.
+([R17](diagnostics.md#w0001)); a run that reaches one prints its closure,
+each binding in scope with its value (R0160), and stops there (R0013),
+and a test that reaches one is blocked rather than failed, after the
+same closure. A release build rejects a program with a hole (E0445), and
+`sisu publish` will.
 
 <!-- file: examples/reference-statements/holes.sisu -->
 ```sisu
@@ -341,13 +343,16 @@ warning[W0001]: typed hole `middle` of type `int`
   |            ^^^^^^^^^^^^^^
 
 4
+in scope at the typed hole `todo("middle")`:
+  xs = [4, 1, 3]
+  s = [1, 3, 4]
 panic: reached the typed hole `todo("middle")`
   at median (holes.sisu:6:12)
   at main (holes.sisu:10:11)
 ```
 
-**Stage 0 differs.** `sisu check --holes`, which reports each hole's
-type, bindings and tests in full, is designed
+**Stage 0 differs.** `sisu check --holes`, which reports every hole's
+type, bindings and tests at once, is designed
 ([R16](sisu-command.md#sisu-check---holes)).
 
 **Status.** In stage 0 (D-061).

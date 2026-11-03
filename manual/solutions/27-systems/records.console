@@ -1,10 +1,12 @@
 $ sisu test records.sisu
-warning[W0001]: typed hole `parse_log` of type `list[Reading] ! LogError`
-  --> records.sisu:25:12
-   |
-25 |     return todo("parse_log")
-   |            ^^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("parse_log")`:
+  data = b"-\x00\x00\x00\x1e\x03\x02\x00.\x00\x00\x00$\x03\x02\x01"
+in scope at the typed hole `todo("parse_log")`:
+  data = b"\x00\x01\x00\x00\xe7\xff\x01\x00"
+in scope at the typed hole `todo("parse_log")`:
+  data = b""
+in scope at the typed hole `todo("parse_log")`:
+  data = b"-\x00\x00\x00\x1e\x03\x02\x00.\x00"
 test "two records" ... blocked by todo("parse_log")
 test "a temperature below zero" ... blocked by todo("parse_log")
 test "an empty log" ... blocked by todo("parse_log")

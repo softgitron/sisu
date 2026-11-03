@@ -1,0 +1,11 @@
+# The order of the names depends on the schedule.
+def arrive(order: Mutex[list[String]], name: str):
+    task.yield_now()
+    order.lock().push(name.to_string())
+
+def main():
+    let order = Mutex(list[String]())
+    task.scope do s:
+        s.spawn(() -> arrive(order, "Aino"))
+        s.spawn(() -> arrive(order, "Eero"))
+    print(order.into_inner())

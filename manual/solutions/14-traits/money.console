@@ -1,10 +1,16 @@
 $ sisu test money.sisu
-warning[W0001]: typed hole `fmt` of type `_`
-  --> money.sisu:17:9
-   |
-17 |         todo("fmt")
-   |         ^^^^^^^^^^^
-
+in scope at the typed hole `todo("fmt")`:
+  self = Money(cents=1200)
+  f = Formatter(out="", spec="", depth=0)
+in scope at the typed hole `todo("fmt")`:
+  self = Money(cents=1250)
+  f = Formatter(out="", spec="", depth=0)
+in scope at the typed hole `todo("fmt")`:
+  self = Money(cents=-1250)
+  f = Formatter(out="", spec="", depth=0)
+in scope at the typed hole `todo("fmt")`:
+  self = Money(cents=250)
+  f = Formatter(out="", spec=">9", depth=0)
 test "whole euros" ... blocked by todo("fmt")
 test "euros and cents" ... blocked by todo("fmt")
 test "amounts below zero" ... blocked by todo("fmt")

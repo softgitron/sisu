@@ -647,9 +647,12 @@ invariant, that the method checks it again. Because they are part of a
 function's promise, strengthening a precondition or weakening a
 postcondition breaks the function's callers, and the API diff of `sisu
 publish`, which chapter 28 is about, counts it as a breaking change.
-Contracts on a trait's methods, which every implementation would keep,
-are designed in [07](../../proposal/07-contracts.md) and not checked
-yet.
+A trait's method can have a contract too, which binds every impl of it
+([07](../../proposal/07-contracts.md)): an impl's method checks the
+trait's `requires` on entry and its `ensures` on exit, and a failure
+names the trait's method. Stage 0 checks it in the impls of the trait's
+own module, and warns with W0021 at an impl elsewhere, which it does
+not check yet.
 
 ## What waits for the verifier
 
@@ -751,36 +754,6 @@ test "steam from a dry start":
 <!-- output: solutions/23-contracts/predict_refinements.console -->
 ```console
 $ sisu test predict_refinements.sisu
-warning[W0001]: typed hole `failed(0)` of type `str`
-  --> predict_refinements.sisu:24:19
-   |
-24 | const ZERO: str = todo("failed(0)")
-   |                   ^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `failed(7)` of type `str`
-  --> predict_refinements.sisu:25:20
-   |
-25 | const SEVEN: str = todo("failed(7)")
-   |                    ^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `failed(50)` of type `str`
-  --> predict_refinements.sisu:26:20
-   |
-26 | const FIFTY: str = todo("failed(50)")
-   |                    ^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `failed(-1)` of type `str`
-  --> predict_refinements.sisu:27:24
-   |
-27 | const MINUS_ONE: str = todo("failed(-1)")
-   |                        ^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `steam from 10 with 7 ladles` of type `int`
-  --> predict_refinements.sisu:28:20
-   |
-28 | const STEAM: int = todo("steam from 10 with 7 ladles")
-   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
 test "nothing fails" ... blocked by todo("failed(0)")
 test "a little too wet" ... blocked by todo("failed(7)")
 test "wet" ... blocked by todo("failed(50)")
@@ -870,7 +843,6 @@ error[E0806]: `stove.celsius` is part of a `Stove`, whose invariant only its own
 24 |     stove.celsius = max(stove.celsius - 15, 0)
    |     ^^^^^^^^^^^^^
 
-error[D0006]: the program was not run: errors found (1)
 ```
 
 <details>
@@ -1044,18 +1016,18 @@ test "later, past midnight":
 <!-- output: solutions/23-contracts/clock_time.console -->
 ```console
 $ sisu test clock_time.sisu
-warning[W0001]: typed hole `parse_time` of type `Time ! FormError`
-  --> clock_time.sisu:28:12
-   |
-28 |     return todo("parse_time")
-   |            ^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `later` of type `Time`
-  --> clock_time.sisu:34:12
-   |
-34 |     return todo("later")
-   |            ^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("parse_time")`:
+  text = "18:30"
+in scope at the typed hole `todo("parse_time")`:
+  text = "24:00"
+in scope at the typed hole `todo("parse_time")`:
+  text = "noon"
+in scope at the typed hole `todo("later")`:
+  minutes = 30
+in scope at the typed hole `todo("later")`:
+  minutes = 20
+in scope at the typed hole `todo("later")`:
+  minutes = 1
 test "a time of day" ... blocked by todo("parse_time")
 test "numbers that are not on the clock" ... blocked by todo("parse_time")
 test "text that is not a time" ... blocked by todo("parse_time")
@@ -1181,24 +1153,47 @@ test "a transfer that cannot be paid changes nothing":
 <!-- output: solutions/23-contracts/account.console -->
 ```console
 $ sisu test account.sisu
-warning[W0001]: typed hole `deposit` of type `_`
-  --> account.sisu:30:9
-   |
-30 |         todo("deposit")
-   |         ^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `withdraw` of type `! AccountError`
-  --> account.sisu:39:16
-   |
-39 |         return todo("withdraw")
-   |                ^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `transfer` of type `! AccountError`
-  --> account.sisu:52:12
-   |
-52 |     return todo("transfer")
-   |            ^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("deposit")`:
+  self = Account(balance=1000, limit=500)
+  cents = 250
+  old(self.balance) = 1000
+in scope at the typed hole `todo("withdraw")`:
+  self = Account(balance=1000, limit=500)
+  cents = 1100
+  old(self.balance) = 1000
+  old(self.balance) = 1000
+in scope at the typed hole `todo("withdraw")`:
+  self = Account(balance=1000, limit=500)
+  cents = 1600
+  old(self.balance) = 1000
+  old(self.balance) = 1000
+in scope at the typed hole `todo("transfer")`:
+  source = Account(balance=2000, limit=0)
+  target = Account(balance=100, limit=1000)
+  cents = 1500
+  old(target.balance) = 100
+  old(source.balance) = 2000
+in scope at the typed hole `todo("transfer")`:
+  source = Account(balance=100, limit=1000)
+  target = Account(balance=2000, limit=0)
+  cents = 1200
+  old(target.balance) = 2000
+  old(source.balance) = 100
+in scope at the typed hole `todo("deposit")`:
+  self = Account(balance=0, limit=7)
+  cents = 7
+  old(self.balance) = 0
+in scope at the typed hole `todo("withdraw")`:
+  self = Account(balance=0, limit=7)
+  cents = 7
+  old(self.balance) = 0
+  old(self.balance) = 0
+in scope at the typed hole `todo("transfer")`:
+  source = Account(balance=2870197286250646421, limit=3)
+  target = Account(balance=5, limit=8)
+  cents = 2
+  old(target.balance) = 5
+  old(source.balance) = 2870197286250646421
 test "money in and out" ... blocked by todo("deposit")
 test "below zero costs the fee" ... blocked by todo("withdraw")
 test "past the limit is refused" ... blocked by todo("withdraw")

@@ -1,0 +1,8 @@
+$ sisu run
+warning[W0021]: the contract of `Meter.read` binds this impl, and stage 1 checks a trait's contract only in the impls of the module that declares the trait
+  --> src/main.sisu:8:9
+  |
+8 |     def read(self, at: int) -> int:
+  |         ^^^^
+
+-10

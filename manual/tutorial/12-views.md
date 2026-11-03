@@ -402,30 +402,6 @@ test "an empty line":
 <!-- output: solutions/12-views/predict_views.console -->
 ```console
 $ sisu test predict_views.sisu
-warning[W0001]: typed hole `how many settings` of type `int`
-  --> predict_views.sisu:24:20
-   |
-24 | const COUNT: int = todo("how many settings")
-   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `the name of the second setting` of type `str`
-  --> predict_views.sisu:25:26
-   |
-25 | const SECOND_NAME: str = todo("the name of the second setting")
-   |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `the value of the last setting` of type `str`
-  --> predict_views.sisu:26:25
-   |
-26 | const LAST_VALUE: str = todo("the value of the last setting")
-   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `how many settings an empty line has` of type `int`
-  --> predict_views.sisu:27:26
-   |
-27 | const NONE_AT_ALL: int = todo("how many settings an empty line has")
-   |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
 test "how many" ... blocked by todo("how many settings")
 test "the second name" ... blocked by todo("the name of the second setting")
 test "the last value" ... blocked by todo("the value of the last setting")
@@ -494,17 +470,17 @@ error[E0413]: `longest_line` returns `str ! IoError`, which borrows, and has mor
    |                                         ^^^^^^^^^^^^^
    |                  ------ `fs` is a borrowed parameter
    |                          ---------- `path` is a borrowed parameter
+  = fix: return owned text instead: `String ! IoError`
   = fix: name `fs, path` in the `from` clause: ` from fs, path`
 
-error[D0006]: the program was not run: errors found (1)
 ```
 
 <details>
 <summary>Hint 1</summary>
 
 The diagnostic asks which of the two parameters the `str` result
-borrows from. Read the body: does the line it returns view `fs`,
-`path`, or something else?
+borrows from, and offers two fixes. Before you choose, read the body:
+does the line it returns view `fs`, `path`, or something else?
 
 </details>
 
@@ -577,6 +553,7 @@ error[E0411]: `Contact` holds `name: str`, which borrows; only a `view struct` m
    |
 10 | struct Contact:
    |        ------- `Contact` is declared here
+  = fix: own the text instead: `String`
   = fix: declare it `view struct Contact`: `view `
 
 error[E0411]: `Contact` holds `email: str`, which borrows; only a `view struct` may hold a borrow
@@ -587,17 +564,17 @@ error[E0411]: `Contact` holds `email: str`, which borrows; only a `view struct` 
    |
 10 | struct Contact:
    |        ------- `Contact` is declared here
+  = fix: own the text instead: `String`
   = fix: declare it `view struct Contact`: `view `
 
-error[D0006]: the program was not run: errors found (2)
 ```
 
 <details>
 <summary>Hint 1</summary>
 
-Each fix that E0411 offers makes one more type a view, and the next
-diagnostic shows where that leads: the book would hold views of lines
-that its caller makes and drops.
+E0411 offers two fixes. The second makes `Contact` a view, and then the
+book that holds contacts is one too: it would hold views of lines that
+its caller makes and drops.
 
 </details>
 
@@ -669,12 +646,12 @@ test "comments give no tokens":
 <!-- output: solutions/12-views/tokenizer.console -->
 ```console
 $ sisu test tokenizer.sisu
-warning[W0001]: typed hole `tokenize` of type `list[Token]`
-  --> tokenizer.sisu:26:12
-   |
-26 |     return todo("tokenize")
-   |            ^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("tokenize")`:
+  source = "total = 12 + x"
+in scope at the typed hole `todo("tokenize")`:
+  source = "a = 1\n\nprint a"
+in scope at the typed hole `todo("tokenize")`:
+  source = "x = 2  # the start\n# a whole line\nx2"
 test "one line" ... blocked by todo("tokenize")
 test "lines are counted" ... blocked by todo("tokenize")
 test "comments give no tokens" ... blocked by todo("tokenize")

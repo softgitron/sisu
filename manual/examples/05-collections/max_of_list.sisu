@@ -1,4 +1,6 @@
-# `max` compares two values; it does not search a list.
+# `max` and `min` of a list, and of a list with no items.
 def main():
     let scores = [7, 9, 4]
-    print("best: {max(scores)}")
+    print("best {max(scores)}, worst {min(scores)}")
+    let nobody: list[int] = []
+    print("best of nobody {max(nobody)}")

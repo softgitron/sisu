@@ -959,42 +959,6 @@ test "every short list of booleans":
 <!-- output: solutions/19-testing/predict_clock.console -->
 ```console
 $ sisu test predict_clock.sisu
-warning[W0001]: typed hole `seconds for two waits in a row` of type `int`
-  --> predict_clock.sisu:14:34
-   |
-14 | const ONE_AFTER_THE_OTHER: int = todo("seconds for two waits in a row")
-   |                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `seconds for two waits in two tasks` of type `int`
-  --> predict_clock.sisu:15:27
-   |
-15 | const SIDE_BY_SIDE: int = todo("seconds for two waits in two tasks")
-   |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `seconds for two steps beside one step` of type `int`
-  --> predict_clock.sisu:16:23
-   |
-16 | const IN_STEPS: int = todo("seconds for two steps beside one step")
-   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `seconds that the test moved the clock` of type `int`
-  --> predict_clock.sisu:17:23
-   |
-17 | const ADVANCED: int = todo("seconds that the test moved the clock")
-   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `seconds that a busy loop takes` of type `int`
-  --> predict_clock.sisu:18:19
-   |
-18 | const BUSY: int = todo("seconds that a busy loop takes")
-   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `lists of at most two booleans` of type `int`
-  --> predict_clock.sisu:19:20
-   |
-19 | const CASES: int = todo("lists of at most two booleans")
-   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
 test "one wait after the other" ... blocked by todo("seconds for two waits in a row")
 test "two waits in two tasks" ... blocked by todo("seconds for two waits in two tasks")
 test "a task of two steps beside a task of one" ... blocked by todo("seconds for two steps beside one step")
@@ -1164,12 +1128,15 @@ test "the property rejects wrong answers":
 <!-- output: solutions/19-testing/dedupe.console -->
 ```console
 $ sisu test dedupe.sisu
-warning[W0001]: typed hole `dedupe_ok` of type `bool`
-  --> dedupe.sisu:26:12
-   |
-26 |     return todo("dedupe_ok")
-   |            ^^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("dedupe_ok")`:
+  xs = [5]
+  out = [5]
+in scope at the typed hole `todo("dedupe_ok")`:
+  xs = [3, 1, 2]
+  out = [3, 1, 2]
+in scope at the typed hole `todo("dedupe_ok")`:
+  xs = [1, 2, 1]
+  out = [1, 2, 1]
 test "the property holds of dedupe" ... blocked by todo("dedupe_ok")
 test "the property accepts the three examples" ... blocked by todo("dedupe_ok")
 test "the property rejects wrong answers" ... blocked by todo("dedupe_ok")
@@ -1394,12 +1361,18 @@ test "an unknown town is asked once"(clock: TestClock):
 <!-- output: solutions/19-testing/retry.console -->
 ```console
 $ sisu test retry.sisu
-warning[W0001]: typed hole `ask` of type `String ! {TaskError, ServiceError}`
-  --> retry.sisu:29:12
-   |
-29 |     return todo("ask")
-   |            ^^^^^^^^^^^
-
+in scope at the typed hole `todo("ask")`:
+  town = "Oulu"
+  tries = 3
+in scope at the typed hole `todo("ask")`:
+  town = "Turku"
+  tries = 5
+in scope at the typed hole `todo("ask")`:
+  town = "Oulu"
+  tries = 4
+in scope at the typed hole `todo("ask")`:
+  town = "Atlantis"
+  tries = 3
 test "an answer at once" ... blocked by todo("ask")
 test "busy twice, then an answer" ... blocked by todo("ask")
 test "busy every time" ... blocked by todo("ask")

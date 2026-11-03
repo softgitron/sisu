@@ -95,7 +95,7 @@ first digits the stage that reports it:
 | E01xx | parsing: the syntax of statements and expressions |
 | E02xx | names and declarations: scopes, imports, visibility, derives, traits and impls |
 | E03xx | types: expressions, calls, operators, `match`, mutability, traits and generics |
-| E04xx | ownership: moves, borrows, views, tasks, must-consume values |
+| E04xx | ownership: moves, borrows, views, tasks, must-consume values; and, from E0445, types again: holes in a release build, parallel loops, `@float` |
 | E05xx | lowering to SIR |
 | E06xx | compile-time evaluation |
 | E07xx | capabilities and `[trust]` |
@@ -673,10 +673,20 @@ def main():
     print(seven())
 ```
 
-<!-- output: examples/reference-diagnostics/e0106_attribute_alone_fixed.out -->
-```text
+<!-- output: examples/reference-diagnostics/e0106_attribute_alone_fixed.console -->
+```console
+$ sisu run e0106_attribute_alone_fixed.sisu
+warning[W0023]: `seven` is deprecated: use `total`
+  --> e0106_attribute_alone_fixed.sisu:7:11
+  |
+7 |     print(seven())
+  |           ^^^^^^^
+
 7
 ```
+
+The call of `seven` now warns (W0023), which is what the attribute is
+for.
 
 Shown in [R14](attributes.md#writing-an-attribute).
 
@@ -3269,8 +3279,6 @@ def main():
 12
 ```
 
-Shown in [chapter 5](../tutorial/05-collections.md).
-
 ### E0310
 
 `type.binary-operator`: `{op}` cannot be applied to `{lhs}` and `{rhs}`.
@@ -3906,8 +3914,10 @@ Shown in [chapter 2](../tutorial/02-values.md).
 
 A `pure` function gives the same result for the same arguments and does
 nothing else, so it calls only `pure` functions. `print` writes to
-standard output, which is not `pure`. The ownership checker reports it,
-so the run ends with D0021.
+standard output, which is not `pure`, and every method of an `Atomic`
+but its construction observes the schedule, which a note then says
+([R9](concurrency.md#atomics-and-orderings)). The ownership checker
+reports it, so the run ends with D0021.
 
 <!-- file: examples/reference-diagnostics/e0333_impure_call.sisu -->
 ```sisu
@@ -5084,9 +5094,11 @@ Shown in [R4](expressions.md#interpolation-and-format-specs).
 
 ## Ownership
 
-Codes E0400 to E0438. The ownership checker checks moves, borrows,
+Codes E0400 to E0448. The ownership checker checks moves, borrows,
 views, tasks and must-consume values
-([R7](ownership.md)).
+([R7](ownership.md)). E0445 to E0448, numbered after its codes, are the
+type checker's: a typed hole in a release build, the body of a parallel
+loop, and the argument of `@float`.
 
 ### E0400
 
@@ -6205,6 +6217,233 @@ def main():
 
 Shown in [chapter 7](../tutorial/07-structs-and-enums.md).
 
+### E0445
+
+`type.hole-in-release`: a release build rejects the typed hole {hole}
+of type `{ty}`: blocked is never a shipped state.
+
+A typed hole is a warning, W0001, in `sisu check`, `sisu run` and a
+debug build, so that a program can run while it is being written. A
+release build, `sisu build --native --release` or `sisu run --native
+--release`, refuses each hole instead, so that no hole ships (D-061;
+[17](../../proposal/17-testing.md#assertions)). Nothing is built.
+
+<!-- file: examples/reference-diagnostics/e0445_hole_release.sisu -->
+```sisu
+# A release build of a program that still has a typed hole.
+def area(width: f64, height: f64) -> f64:
+    return todo("area")
+
+def main():
+    print(area(2.0, 3.0))
+```
+
+<!-- output: examples/reference-diagnostics/e0445_hole_release.console -->
+```console
+$ sisu build --native --release e0445_hole_release.sisu
+error[E0445]: a release build rejects the typed hole `todo("area")` of type `f64`: blocked is never a shipped state
+  --> e0445_hole_release.sisu:3:12
+  |
+3 |     return todo("area")
+  |            ^^^^^^^^^^^^
+  = note: fill the hole before the release build; a placeholder meant to ship is `panic("...")`
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+The note says what to do: fill the hole, or, for a part of the program
+that is meant to stop when it is reached, write `panic("...")`, which a
+release build accepts and which says that the stop is on purpose.
+
+<!-- file: examples/reference-diagnostics/e0445_hole_release_fixed.sisu -->
+```sisu
+# The hole filled, so that the release build goes ahead.
+def area(width: f64, height: f64) -> f64:
+    return width * height
+
+def main():
+    print(area(2.0, 3.0))
+```
+
+<!-- output: examples/reference-diagnostics/e0445_hole_release_fixed.console -->
+```console
+$ sisu build --native --release e0445_hole_release_fixed.sisu
+built `e0445_hole_release_fixed`
+```
+
+Shown in [Plan with typed holes](../guides/holes.md#4-check-that-no-hole-is-left).
+
+### E0446
+
+`type.par-body-impure`: `{callee}` is not `pure`, so the body of a `par`
+loop cannot call it: a `par` body runs on a worker and is `pure` (06).
+
+The body of a parallel loop, `for x in par.iter(xs):`, runs for each
+element on a worker, in no order the program can see, so it is `pure`
+and calls only `pure` functions: what it does cannot depend on the
+schedule, and removing the parallelism changes nothing
+([06](../../proposal/06-concurrency-and-capabilities.md#data-parallelism)).
+`print` is not `pure`.
+
+<!-- file: examples/reference-diagnostics/e0446_par_print.sisu -->
+```sisu
+# A parallel loop whose body prints.
+import std.par
+
+def main():
+    let heats = [70, 80, 90]
+    for heat in par.iter(heats):
+        print("{heat} degrees")
+```
+
+<!-- output: examples/reference-diagnostics/e0446_par_print.console -->
+```console
+$ sisu run e0446_par_print.sisu
+error[E0446]: `print` is not `pure`, so the body of a `par` loop cannot call it: a `par` body runs on a worker and is `pure` (06)
+  --> e0446_par_print.sisu:7:9
+  |
+7 |         print("{heat} degrees")
+  |         ^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Compute in parallel and print afterwards: `par.map` gives the values in
+the order of the list, and an ordinary loop prints them.
+
+<!-- file: examples/reference-diagnostics/e0446_par_print_fixed.sisu -->
+```sisu
+# The parallel part computes; the loop that prints is an ordinary one.
+import std.par
+
+pure def describe(heat: ref int) -> String:
+    return "{heat} degrees"
+
+def main():
+    let heats = [70, 80, 90]
+    for line in par.map(heats, describe):
+        print(line)
+```
+
+<!-- output: examples/reference-diagnostics/e0446_par_print_fixed.out -->
+```text
+70 degrees
+80 degrees
+90 degrees
+```
+
+[Chapter 26](../tutorial/26-purity.md#a-parallel-loop) describes it.
+
+### E0447
+
+`type.par-body-changes`: the body of a `par` loop changes nothing but
+its own values, and `{name}` is declared before the loop: compute each
+value with `par.map` and combine them with `sum` or a reducer (06).
+
+A parallel loop's body may change its own element and its own
+bindings, and nothing declared before the loop: two bodies that ran at
+once would race on it, and the result would depend on the schedule.
+An assignment, a `mut` argument such as a `push`, and a `ref mut` are
+changes.
+
+<!-- file: examples/reference-diagnostics/e0447_par_total.sisu -->
+```sisu
+# A parallel loop whose body adds to a total declared before it.
+import std.par
+
+def main():
+    let heats = [70, 80, 90]
+    var total = 0
+    for heat in par.iter(heats):
+        total += heat
+    print(total)
+```
+
+<!-- output: examples/reference-diagnostics/e0447_par_total.console -->
+```console
+$ sisu run e0447_par_total.sisu
+error[E0447]: the body of a `par` loop changes nothing but its own values, and `total` is declared before the loop: compute each value with `par.map` and combine them with `sum` or a reducer (06)
+  --> e0447_par_total.sisu:8:9
+  |
+8 |         total += heat
+  |         ^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+A reducer combines what each chunk computes, in a fixed order, so the
+total is the same on any number of workers.
+
+<!-- file: examples/reference-diagnostics/e0447_par_total_fixed.sisu -->
+```sisu
+# The total made by a reducer, which merges the chunks' sums in a fixed
+# order.
+import std.par
+
+def main():
+    let heats = [70, 80, 90]
+    print(par.reduce[par.Sum[int]](heats))
+```
+
+<!-- output: examples/reference-diagnostics/e0447_par_total_fixed.out -->
+```text
+240
+```
+
+Shown in [chapter 26](../tutorial/26-purity.md#a-parallel-loop).
+
+### E0448
+
+`resolve.float-attribute`: `@float` takes `fast`, which allows
+contraction and reassociation in the function (03); floating point is
+strict elsewhere.
+
+`@float(fast)` is the one form of the attribute
+([R14](attributes.md#fast-floating-point)). Without it, floating point
+is strict, so there is nothing else for the attribute to ask for.
+
+<!-- file: examples/reference-diagnostics/e0448_float_attribute.sisu -->
+```sisu
+# `@float` with an argument it does not take.
+@float(precise)
+def blend(a: f64, b: f64) -> f64:
+    return a * 0.5 + b * 0.5
+
+def main():
+    print(blend(1.0, 2.0))
+```
+
+<!-- output: examples/reference-diagnostics/e0448_float_attribute.console -->
+```console
+$ sisu run e0448_float_attribute.sisu
+error[E0448]: `@float` takes `fast`, which allows contraction and reassociation in the function (03); floating point is strict elsewhere
+  --> e0448_float_attribute.sisu:2:1
+  |
+2 | @float(precise)
+  | ^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Remove the attribute: strict floating point is the default.
+
+<!-- file: examples/reference-diagnostics/e0448_float_attribute_fixed.sisu -->
+```sisu
+# Floating point is strict without an attribute.
+def blend(a: f64, b: f64) -> f64:
+    return a * 0.5 + b * 0.5
+
+def main():
+    print(blend(1.0, 2.0))
+```
+
+<!-- output: examples/reference-diagnostics/e0448_float_attribute_fixed.out -->
+```text
+1.5
+```
+
+[R14](attributes.md#fast-floating-point) describes it.
+
 ## Compile-time evaluation
 
 Codes E0600 to E0615. The compiler runs `comptime` code, templates and
@@ -6661,6 +6900,9 @@ Shown in the guide [Write a derive](../guides/derive.md).
 A template is made for each list of types it is called with; one that
 stops, by `comptime panic` or a query that does not apply, is reported
 at the call that needed it, with a label where the template stopped.
+When it stopped at a plain `for` over a list that only compile time
+has, such as `reflect.fields_of(T)`, the fix writes `comptime` before
+the `for`, which unrolls it ([chapter 25](../tutorial/25-compile-time.md)).
 
 <!-- file: examples/reference-diagnostics/e0609_instance_failed.sisu -->
 ```sisu
@@ -6723,7 +6965,8 @@ Shown in [chapter 25](../tutorial/25-compile-time.md).
 
 `embed("PATH")` makes a file's text part of the program while it
 compiles, so the file must be there and readable, and its path must stay
-inside the program's directory
+inside the program's directory: the package's root in a package, where
+the path starts, or a single file's directory
 ([R12](compile-time.md#embedding-a-file)). The reason after the colon
 says which.
 
@@ -8360,7 +8603,7 @@ Shown in the guide [Call a C library](../guides/c-library.md).
 
 ## Warnings
 
-Codes W0001 to W0016. A warning does not stop a program: `sisu run`
+Codes W0001 to W0025. A warning does not stop a program: `sisu run`
 prints it and runs.
 
 ### W0001
@@ -8369,7 +8612,9 @@ prints it and runs.
 
 A typed hole, `todo("name")`, stands for code still to be written
 (D-061). The program compiles and runs until it reaches the hole, which
-panics; `sisu test` reports a test that reaches one as blocked.
+panics ([R0013](#r0013)); `sisu test` reports a test that reaches one as
+blocked. `sisu check`, `sisu run` and a debug build warn; a release
+build refuses the hole instead ([E0445](#e0445)).
 
 <!-- file: examples/reference-diagnostics/w0001_hole.sisu -->
 ```sisu
@@ -8780,9 +9025,353 @@ $ sisu check w0014_ambient_authority_fixed.sisu
 
 Shown in [chapter 27](../tutorial/27-systems.md).
 
+### W0021
+
+`contract.trait-elsewhere`: the contract of `{method}` binds this impl,
+and stage 1 checks a trait's contract only in the impls of the module
+that declares the trait.
+
+A trait's method may declare `requires` and `ensures`, which bind every
+impl of the method ([R11](contracts.md#contracts-on-trait-methods)).
+Stage 1 checks them in each impl of the trait's own module, and an impl
+in another module is not held to them yet: the warning says so at the
+impl's method, so that the contract is not taken for checked.
+
+<!-- file: examples/reference-diagnostics/w0021_trait_elsewhere.files/src/meter.sisu -->
+```sisu
+# A trait whose method has a contract.
+
+## Something that reads a heat at a moment of the evening.
+pub trait Meter:
+    ## The heat at minute `at`, which is not negative.
+    def read(self, at: int) -> int:
+        requires at >= 0
+```
+
+<!-- file: examples/reference-diagnostics/w0021_trait_elsewhere.files/src/main.sisu -->
+```sisu
+# An impl of a trait in another module than the trait's.
+from kiuas.meter import Meter
+
+struct Dial:
+    scale: int
+
+impl Meter for Dial:
+    def read(self, at: int) -> int:
+        return at * self.scale
+
+def main():
+    print(Dial(2).read(-5))
+```
+
+<!-- output: examples/reference-diagnostics/w0021_trait_elsewhere.console -->
+```console
+$ sisu run
+warning[W0021]: the contract of `Meter.read` binds this impl, and stage 1 checks a trait's contract only in the impls of the module that declares the trait
+  --> src/main.sisu:8:9
+  |
+8 |     def read(self, at: int) -> int:
+  |         ^^^^
+
+-10
+```
+
+The run reads a heat at minute -5, which the contract forbids. Put the
+impl in the trait's module, where the contract is checked:
+
+<!-- file: examples/reference-diagnostics/w0021_trait_elsewhere_fixed.files/src/meter.sisu -->
+```sisu
+# A trait whose method has a contract, and an impl beside it.
+
+## Something that reads a heat at a moment of the evening.
+pub trait Meter:
+    ## The heat at minute `at`, which is not negative.
+    def read(self, at: int) -> int:
+        requires at >= 0
+
+## A meter that scales the minute.
+pub struct Dial:
+    pub scale: int
+
+impl Meter for Dial:
+    def read(self, at: int) -> int:
+        return at * self.scale
+```
+
+<!-- file: examples/reference-diagnostics/w0021_trait_elsewhere_fixed.files/src/main.sisu -->
+```sisu
+# The impl in the trait's module, where the contract is checked.
+from kiuas.meter import Dial
+
+def main():
+    print(Dial(2).read(-5))
+```
+
+<!-- output: examples/reference-diagnostics/w0021_trait_elsewhere_fixed.console -->
+```console
+$ sisu run
+panic: precondition of `Meter.read` failed: at >= 0
+    at >= 0
+    │
+    -5
+  at kiuas.meter.Dial.kiuas.meter.Meter.read (src/meter.sisu:7:18)
+  at main (src/main.sisu:5:11)
+```
+
+The impl's `read` now checks the trait's precondition on entry, and the
+failure names the trait's method.
+
+[R11](contracts.md#contracts-on-trait-methods) describes it.
+
+### W0022
+
+`resolve.unknown-attribute`: `@{name}` is not an attribute Sisu reads,
+and no compile-time code of the program reads attributes
+(`reflect.attributes_of`), so it means nothing here.
+
+An attribute is data ([R14](attributes.md#attributes-are-data)). One
+whose name Sisu does not read means something only to compile-time code
+that reads it, and a program with no such code cannot read it at all.
+
+<!-- file: examples/reference-diagnostics/w0022_unknown_attribute.sisu -->
+```sisu
+# An attribute that nothing in the program reads.
+@table("saunas")
+struct Sauna:
+    name: String
+    heat: int
+
+def main():
+    let home = Sauna("Kotiharju", 80)
+    print("{home.name} {home.heat}")
+```
+
+<!-- output: examples/reference-diagnostics/w0022_unknown_attribute.console -->
+```console
+$ sisu run w0022_unknown_attribute.sisu
+warning[W0022]: `@table` is not an attribute Sisu reads, and no compile-time code of the program reads attributes (`reflect.attributes_of`), so it means nothing here
+  --> w0022_unknown_attribute.sisu:2:2
+  |
+2 | @table("saunas")
+  |  ^^^^^
+
+Kotiharju 80
+```
+
+Remove the attribute, or read it: a program whose compile-time code
+calls `reflect.attributes_of` keeps its own attributes as data, without
+a word.
+
+<!-- file: examples/reference-diagnostics/w0022_unknown_attribute_fixed.sisu -->
+```sisu
+# Compile-time code that reads the attribute gives it a meaning.
+@table("saunas")
+struct Sauna:
+    name: String
+    heat: int
+
+comptime def stored_in(T: type) -> String:
+    var out = String.new(reflect.name_of(T))
+    comptime for a in reflect.attributes_of(T):
+        out = "{out} @{a.name} {a.args[0]}"
+    return out
+
+def main():
+    let home = Sauna("Kotiharju", 80)
+    print("{home.name} {home.heat}, {comptime stored_in(Sauna)}")
+```
+
+<!-- output: examples/reference-diagnostics/w0022_unknown_attribute_fixed.out -->
+```text
+Kotiharju 80, Sauna @table "saunas"
+```
+
+Shown in [R14](attributes.md#where-an-attribute-may-stand).
+
+### W0023
+
+`type.deprecated`: `{name}` is deprecated: {reason}.
+
+A call of a function or a method marked `@deprecated("...")`, or a use
+of one as a value, warns with the attribute's text, which names what to
+use instead ([13](../../proposal/13-evolution-and-governance.md#deprecation)).
+The item's own body may use it without a word.
+
+<!-- file: examples/reference-diagnostics/w0023_deprecated.sisu -->
+```sisu
+# A call of a function that is deprecated.
+
+## Degrees Celsius of `fahrenheit` degrees.
+def celsius_of(fahrenheit: f64) -> f64:
+    return (fahrenheit - 32.0) * 5.0 / 9.0
+
+## The old name of `celsius_of`.
+@deprecated("use `celsius_of`, which this calls")
+def to_celsius(fahrenheit: f64) -> f64:
+    return celsius_of(fahrenheit)
+
+def main():
+    print(to_celsius(212.0))
+```
+
+<!-- output: examples/reference-diagnostics/w0023_deprecated.console -->
+```console
+$ sisu run w0023_deprecated.sisu
+warning[W0023]: `to_celsius` is deprecated: use `celsius_of`, which this calls
+  --> w0023_deprecated.sisu:13:11
+   |
+13 |     print(to_celsius(212.0))
+   |           ^^^^^^^^^^^^^^^^^
+
+100.0
+```
+
+Call what the message names.
+
+<!-- file: examples/reference-diagnostics/w0023_deprecated_fixed.sisu -->
+```sisu
+# The call names the function that replaces the deprecated one.
+
+## Degrees Celsius of `fahrenheit` degrees.
+def celsius_of(fahrenheit: f64) -> f64:
+    return (fahrenheit - 32.0) * 5.0 / 9.0
+
+## The old name of `celsius_of`.
+@deprecated("use `celsius_of`, which this calls")
+def to_celsius(fahrenheit: f64) -> f64:
+    return celsius_of(fahrenheit)
+
+def main():
+    print(celsius_of(212.0))
+```
+
+<!-- output: examples/reference-diagnostics/w0023_deprecated_fixed.out -->
+```text
+100.0
+```
+
+Shown in [chapter 28](../tutorial/28-code-that-lasts.md#keeping-an-old-name).
+
+### W0024
+
+`resolve.misspelt-attribute`: `@{name}` is not an attribute Sisu reads.
+
+An attribute whose name is close to one that Sisu reads is taken for a
+misspelling of it, and the fix writes that one.
+
+<!-- file: examples/reference-diagnostics/w0024_misspelt_attribute.sisu -->
+```sisu
+# A misspelt attribute.
+
+## The old name of `celsius_of`.
+@deprecatd("use `celsius_of`")
+def to_celsius(fahrenheit: f64) -> f64:
+    return (fahrenheit - 32.0) * 5.0 / 9.0
+
+def main():
+    print(to_celsius(212.0))
+```
+
+<!-- output: examples/reference-diagnostics/w0024_misspelt_attribute.console -->
+```console
+$ sisu run w0024_misspelt_attribute.sisu
+warning[W0024]: `@deprecatd` is not an attribute Sisu reads
+  --> w0024_misspelt_attribute.sisu:4:2
+  |
+4 | @deprecatd("use `celsius_of`")
+  |  ^^^^^^^^^
+  = fix: write `@deprecated`: `deprecated`
+
+100.0
+```
+
+With the attribute spelt as Sisu reads it, the function is deprecated,
+and its call warns with W0023.
+
+<!-- file: examples/reference-diagnostics/w0024_misspelt_attribute_fixed.sisu -->
+```sisu
+# The attribute spelt as Sisu reads it, which makes the call warn.
+
+## The old name of `celsius_of`.
+@deprecated("use `celsius_of`")
+def to_celsius(fahrenheit: f64) -> f64:
+    return (fahrenheit - 32.0) * 5.0 / 9.0
+
+def main():
+    print(to_celsius(212.0))
+```
+
+<!-- output: examples/reference-diagnostics/w0024_misspelt_attribute_fixed.console -->
+```console
+$ sisu run w0024_misspelt_attribute_fixed.sisu
+warning[W0023]: `to_celsius` is deprecated: use `celsius_of`
+  --> w0024_misspelt_attribute_fixed.sisu:9:11
+  |
+9 |     print(to_celsius(212.0))
+  |           ^^^^^^^^^^^^^^^^^
+
+100.0
+```
+
+[R14](attributes.md#where-an-attribute-may-stand) describes it.
+
+### W0025
+
+`type.deprecated-plain`: `{name}` is deprecated.
+
+A use of an item marked `@deprecated` without a message warns without
+naming a replacement, so the reader has to find one.
+
+<!-- file: examples/reference-diagnostics/w0025_deprecated_plain.sisu -->
+```sisu
+# A deprecated function whose attribute names no replacement.
+@deprecated
+def heat_of(name: str) -> int:
+    return 80
+
+def main():
+    print(heat_of("Kotiharju"))
+```
+
+<!-- output: examples/reference-diagnostics/w0025_deprecated_plain.console -->
+```console
+$ sisu run w0025_deprecated_plain.sisu
+warning[W0025]: `heat_of` is deprecated
+  --> w0025_deprecated_plain.sisu:7:11
+  |
+7 |     print(heat_of("Kotiharju"))
+  |           ^^^^^^^^^^^^^^^^^^^^
+
+80
+```
+
+Give the attribute a message that names the replacement, and call that.
+
+<!-- file: examples/reference-diagnostics/w0025_deprecated_plain_fixed.sisu -->
+```sisu
+# The attribute names the replacement, and the call uses it.
+@deprecated("use `heat`")
+def heat_of(name: str) -> int:
+    return heat(name)
+
+## The heat of the sauna `name`.
+def heat(name: str) -> int:
+    return 80
+
+def main():
+    print(heat("Kotiharju"))
+```
+
+<!-- output: examples/reference-diagnostics/w0025_deprecated_plain_fixed.out -->
+```text
+80
+```
+
+[R14](attributes.md#deprecation-and-migrations) describes it.
+
 ## Run time
 
-Codes R0001 to R0153. Messages of a running program: panics, errors that
+Codes R0001 to R0160. Messages of a running program: panics, errors that
 `main` returns, and the failures that `sisu test` reports. They are
 printed without their code, as `panic: ...` or `error: ...`, followed by
 the trace.
@@ -9084,7 +9673,8 @@ Aino 7
 
 `panic.hole`: reached the typed hole {hole}.
 
-A run that reaches a typed hole panics with the hole's name; the
+A run that reaches a typed hole prints the hole's closure, the bindings
+in scope there ([R0160](#r0160)), and panics with the hole's name; the
 compiler warned about it with W0001.
 
 <!-- file: examples/reference-diagnostics/r0013_hole.sisu -->
@@ -9106,6 +9696,8 @@ warning[W0001]: typed hole `double` of type `int`
 3 |     return todo("double")
   |            ^^^^^^^^^^^^^^
 
+in scope at the typed hole `todo("double")`:
+  x = 21
 panic: reached the typed hole `todo("double")`
   at double (r0013_hole.sisu:3:12)
   at main (r0013_hole.sisu:6:11)
@@ -9448,9 +10040,77 @@ def main():
 ä
 ```
 
+### R0160
+
+`panic.hole-closure`: in scope at the typed hole {hole}:
+
+A run that reaches a typed hole prints the hole's closure before it
+stops ([R0013](#r0013)): this line, then a line `NAME = VALUE` for each
+binding in scope there, in the order the function declares them, each
+value in its `Debug` form ([17](../../proposal/17-testing.md#assertions)).
+A test blocked by a hole prints the same. A binding is left out when it
+does not hold its whole value at the hole (it was moved away, as
+`names` is here), when it is a local that holds a borrow or a view (as
+`greeting`, a `str`, does), when its type writes its own `Debug` or is a
+type parameter, and when it holds a capability.
+
+<!-- file: examples/reference-diagnostics/r0160_closure.sisu -->
+```sisu
+# A run that reaches a hole prints the bindings in scope there.
+def plan(own names: list[String], hour: int) -> String:
+    let turns = names
+    let last = hour + len(turns) - 1
+    let greeting = "Hei"
+    return todo("the evening's plan")
+
+def main():
+    print(plan(["Aino", "Eero"], 18))
+```
+
+<!-- output: examples/reference-diagnostics/r0160_closure.console -->
+```console
+$ sisu run r0160_closure.sisu
+warning[W0001]: typed hole `the evening's plan` of type `String`
+  --> r0160_closure.sisu:6:12
+  |
+6 |     return todo("the evening's plan")
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+in scope at the typed hole `todo("the evening's plan")`:
+  hour = 18
+  turns = ["Aino", "Eero"]
+  last = 19
+panic: reached the typed hole `todo("the evening's plan")`
+  at plan (r0160_closure.sisu:6:12)
+  at main (r0160_closure.sisu:9:11)
+```
+
+The closure is what the code that fills the hole has to work with: here
+two turns, from 18 to 19.
+
+<!-- file: examples/reference-diagnostics/r0160_closure_fixed.sisu -->
+```sisu
+# The hole filled with what its closure showed was there.
+def plan(own names: list[String], hour: int) -> String:
+    let turns = names
+    let last = hour + len(turns) - 1
+    let greeting = "Hei"
+    return "{greeting}: {len(turns)} turns, from {hour} to {last}"
+
+def main():
+    print(plan(["Aino", "Eero"], 18))
+```
+
+<!-- output: examples/reference-diagnostics/r0160_closure_fixed.out -->
+```text
+Hei: 2 turns, from 18 to 19
+```
+
+Shown in [chapter 3](../tutorial/03-functions.md#leaving-a-hole).
+
 ## The driver
 
-Codes D0001 to D0126. The messages of the `sisu` command itself
+Codes D0001 to D0127. The messages of the `sisu` command itself
 ([R16](sisu-command.md)): usage errors, the lines of `sisu test` and
 `sisu bench`, replays, packages and the native backend.
 
@@ -9778,6 +10438,71 @@ Use one of the two, or leave the option out for stage 1.
 
 Example: [R16](sisu-command.md#choosing-the-front-end).
 
+### D0127
+
+`cli.explore-differs`: schedule seed {seed} of {count} printed other
+output than seed {first}, with the same exit status {status};
+`--schedule-seed {seed}` runs it again.
+
+`sisu run --explore N` runs the program under `N` schedule seeds and
+compares each run with the first, in its standard output and its exit
+status ([R16](sisu-command.md#choosing-the-schedule)). A run that exits
+as the first did but prints something else is reported too, since its
+output depends on the order in which the tasks ran. Standard error is
+not compared. The status is 1.
+
+<!-- file: examples/reference-diagnostics/d0127_explore_differs.sisu -->
+```sisu
+# The order of the names depends on the schedule.
+def arrive(order: Mutex[list[String]], name: str):
+    task.yield_now()
+    order.lock().push(name.to_string())
+
+def main():
+    let order = Mutex(list[String]())
+    task.scope do s:
+        s.spawn(() -> arrive(order, "Aino"))
+        s.spawn(() -> arrive(order, "Eero"))
+    print(order.into_inner())
+```
+
+<!-- output: examples/reference-diagnostics/d0127_explore_differs.console -->
+```console
+$ sisu run --explore 5 d0127_explore_differs.sisu
+["Aino", "Eero"]
+schedule seed 1 of 5 printed other output than seed 0, with the same exit status 0; `--schedule-seed 1` runs it again
+```
+
+The output is the first seed's; `--schedule-seed 1` shows the other.
+Make the output independent of the schedule, here by sorting the names,
+or make the order part of the program, by joining the tasks in turn:
+
+<!-- file: examples/reference-diagnostics/d0127_explore_differs_fixed.sisu -->
+```sisu
+# Sorted, the names print the same under every schedule.
+def arrive(order: Mutex[list[String]], name: str):
+    task.yield_now()
+    order.lock().push(name.to_string())
+
+def main():
+    let order = Mutex(list[String]())
+    task.scope do s:
+        s.spawn(() -> arrive(order, "Aino"))
+        s.spawn(() -> arrive(order, "Eero"))
+    var arrived = order.into_inner()
+    arrived.sort()
+    print(arrived)
+```
+
+<!-- output: examples/reference-diagnostics/d0127_explore_differs_fixed.console -->
+```console
+$ sisu run --explore 5 d0127_explore_differs_fixed.sisu
+["Aino", "Eero"]
+explored 5 schedules (seeds 0 to 4): every run exited with status 0
+```
+
+[R16](sisu-command.md#choosing-the-schedule) describes it.
+
 ## Every code
 
 The tables list every code of the catalog in this version, by range, with
@@ -10054,6 +10779,10 @@ it. `sisu explain CODE` prints the same line.
 | E0436 | `type.generator-result` | `{name}` yields, so it must return `Iter[T]`, not `{ty}` |
 | E0437 | `task.not-send-mut` | `{name}` is changed by the task through a reference, but `{ty}` is not `Send` |
 | [E0438](#e0438) | `borrow.ref-in-collection` | `{ty}` would hold references, and a collection holds values it owns or views, never references (04, rule 3) |
+| [E0445](#e0445) | `type.hole-in-release` | a release build rejects the typed hole {hole} of type `{ty}`: blocked is never a shipped state |
+| [E0446](#e0446) | `type.par-body-impure` | `{callee}` is not `pure`, so the body of a `par` loop cannot call it: a `par` body runs on a worker and is `pure` (06) |
+| [E0447](#e0447) | `type.par-body-changes` | the body of a `par` loop changes nothing but its own values, and `{name}` is declared before the loop: compute each value with `par.map` and combine them with `sum` or a reducer (06) |
+| [E0448](#e0448) | `resolve.float-attribute` | `@float` takes `fast`, which allows contraction and reassociation in the function (03); floating point is strict elsewhere |
 
 ### Lowering, every code
 
@@ -10178,6 +10907,11 @@ it. `sisu explain CODE` prints the same line.
 | [W0014](#w0014) | `unsafe.ambient-authority` | `{name}` is public and safe and reaches the foreign function `{callee}` without taking a capability, so its callers need no authority for what the call does |
 | W0015 | `lint.wildcard-own-enum` | `case _` matches {variants} of `{ty}`, an enum of this package, so a variant added to `{ty}` later is not an error here |
 | W0016 | `resolve.shadow-prelude-set` | the error set `{name}` hides the prelude's in this module, and the two are different sets: what the prelude's functions return is not this one |
+| [W0021](#w0021) | `contract.trait-elsewhere` | the contract of `{method}` binds this impl, and stage 1 checks a trait's contract only in the impls of the module that declares the trait |
+| [W0022](#w0022) | `resolve.unknown-attribute` | `@{name}` is not an attribute Sisu reads, and no compile-time code of the program reads attributes (`reflect.attributes_of`), so it means nothing here |
+| [W0023](#w0023) | `type.deprecated` | `{name}` is deprecated: {reason} |
+| [W0024](#w0024) | `resolve.misspelt-attribute` | `@{name}` is not an attribute Sisu reads |
+| [W0025](#w0025) | `type.deprecated-plain` | `{name}` is deprecated |
 
 ### Run time, every code
 
@@ -10323,6 +11057,7 @@ it. `sisu explain CODE` prints the same line.
 | R0151 | `panic.foreign-overlap` | `memcpy` of {bytes} bytes from a range that overlaps the one it writes, which C's `memcpy` does not allow |
 | R0152 | `panic.foreign-fd` | `write` to the file descriptor {fd}, which the interpreter does not emulate; it emulates 1 and 2, the standard streams |
 | R0153 | `panic.machine-intrinsic` | `{name}` is a machine intrinsic of native code; the interpreter runs its tasks on a scheduler of its own |
+| [R0160](#r0160) | `panic.hole-closure` | in scope at the typed hole {hole}: |
 
 ### The driver, every code
 
@@ -10453,4 +11188,5 @@ it. `sisu explain CODE` prints the same line.
 | D0124 | `native.backend-lowering` | `--backend=sisu` compiles the LIR stage 2 lowers, so it does not go with `--lower=rust` |
 | D0125 | `native.sisu-failed` | internal compiler error: the Sisu backend failed to compile the program (status {status}); `--backend=cranelift` compiles it with the Rust backend: {detail} |
 | D0126 | `native.rt-build` | building the runtime in Sisu from `{seed}` failed: {detail} |
+| [D0127](#d0127) | `cli.explore-differs` | schedule seed {seed} of {count} printed other output than seed {first}, with the same exit status {status}; `--schedule-seed {seed}` runs it again |
 

@@ -1,10 +1,12 @@
 $ sisu test fan_out.sisu
-warning[W0001]: typed hole `forecasts` of type `list[String] ! {TaskError, WeatherError}`
-  --> fan_out.sisu:36:12
-   |
-36 |     return todo("forecasts")
-   |            ^^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("forecasts")`:
+  towns = ["Turku", "Oulu", "Kemi"]
+in scope at the typed hole `todo("forecasts")`:
+  towns = ["Turku", "Oulu", "Kemi"]
+in scope at the typed hole `todo("forecasts")`:
+  towns = ["Atlantis", "Oulu"]
+in scope at the typed hole `todo("forecasts")`:
+  towns = []
 test "the answers in the order of the towns" ... blocked by todo("forecasts")
 test "every town at once" ... blocked by todo("forecasts")
 test "an unknown town" ... blocked by todo("forecasts")

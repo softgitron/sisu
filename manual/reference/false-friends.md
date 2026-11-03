@@ -208,7 +208,6 @@ maintainers.
 | `append`, `strip`, `upper` | `push`, `trim`, `to_uppercase` | [E0304](diagnostics.md#e0304) | yes, as a fix |
 | `d.get(k, default)` | `d.get(k) ?? default` | [E0305](diagnostics.md#e0305) | no |
 | `enumerate(xs, start=1)` | `enumerate(xs)` and `i + 1` | [E0306](diagnostics.md#e0306) | no |
-| `max(xs)` | `max(a, b)`, `sorted(xs)[^1]` | [E0308](diagnostics.md#e0308) | no |
 
 ### Assignment declares a name
 
@@ -725,34 +724,6 @@ error[E0306]: `enumerate` has no parameter named `start`
   |
 3 |     for i, name in enumerate(["Aino", "Eero"], start=1):
   |                                                ^^^^^
-
-```
-
-### `max(xs)` over a list
-
-Stage 0's `max` and `min` compare two values, and E0308's fix adds a
-hole for the second. `sorted(xs)[^1]`, or a loop, gives the largest.
-Python's form over a collection is what the prelude list of
-[02](../../proposal/02-syntax.md) suggests, and stage 0 does not have
-it.
-
-<!-- file: examples/reference-false-friends/max_list.sisu -->
-```sisu
-# Python's `max` over a list.
-def main():
-    let scores = [3, 9, 4]
-    print(max(scores))
-```
-
-<!-- output: examples/reference-false-friends/max_list.console -->
-```console
-$ sisu check max_list.sisu
-error[E0308]: missing the argument `b` of `max`
-  --> max_list.sisu:4:11
-  |
-4 |     print(max(scores))
-  |           ^^^^^^^^^^^
-  = fix: pass `b` as a hole to fill: `, todo("b")`
 
 ```
 

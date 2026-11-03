@@ -1,9 +1,0 @@
-# A constant that the evaluator of `sisu run` cannot compute yet.
-const PRICES: list[int] = [350, 280, 120]
-const TOTAL: int = comptime sum(PRICES)
-
-def main():
-    print(TOTAL)
-
-test "the total":
-    assert TOTAL == 750

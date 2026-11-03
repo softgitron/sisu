@@ -1,0 +1,8 @@
+$ sisu run w0024_misspelt_attribute_fixed.sisu
+warning[W0023]: `to_celsius` is deprecated: use `celsius_of`
+  --> w0024_misspelt_attribute_fixed.sisu:9:11
+  |
+9 |     print(to_celsius(212.0))
+  |           ^^^^^^^^^^^^^^^^^
+
+100.0

@@ -21,4 +21,3 @@ error[E0301]: `/` divides floats; for integers use `//`, or convert to `f64` fir
    |            ^^^^^^^^^^^^^
   = fix: use `//` for integer division: `//`
 
-error[D0006]: the program was not run: errors found (3)

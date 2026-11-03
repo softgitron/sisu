@@ -1,0 +1,13 @@
+warning[W0001]: typed hole `the evening's plan` of type `String`
+  --> r0160_closure.sisu:6:12
+  |
+6 |     return todo("the evening's plan")
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+in scope at the typed hole `todo("the evening's plan")`:
+  hour = 18
+  turns = ["Aino", "Eero"]
+  last = 19
+panic: reached the typed hole `todo("the evening's plan")`
+  at plan (r0160_closure.sisu:6:12)
+  at main (r0160_closure.sisu:9:11)

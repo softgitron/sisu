@@ -1,16 +1,4 @@
 $ sisu test expressions.sisu
-warning[W0001]: typed hole `evaluate` of type `int`
-  --> expressions.sisu:17:12
-   |
-17 |     return todo("evaluate")
-   |            ^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `show` of type `String`
-  --> expressions.sisu:22:12
-   |
-22 |     return todo("show")
-   |            ^^^^^^^^^^^^
-
 test "a number" ... blocked by todo("evaluate")
 test "sums and products" ... blocked by todo("evaluate")
 test "a sum inside a product" ... blocked by todo("evaluate")

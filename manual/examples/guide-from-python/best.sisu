@@ -7,7 +7,7 @@ struct Player:
     def best(self) -> int?:
         if self.points.is_empty():
             return None
-        return Some(sorted(self.points)[^1])
+        return Some(max(self.points))
 
 def main():
     let aino = Player("Aino", [12, 9])

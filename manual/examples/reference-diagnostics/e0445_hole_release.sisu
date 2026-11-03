@@ -1,0 +1,6 @@
+# A release build of a program that still has a typed hole.
+def area(width: f64, height: f64) -> f64:
+    return todo("area")
+
+def main():
+    print(area(2.0, 3.0))

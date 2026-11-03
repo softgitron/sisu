@@ -1,0 +1,6 @@
+warning[W0023]: `to_celsius` is deprecated: use `celsius_of`, which this calls
+  --> renamed.sisu:13:11
+   |
+13 |     print(to_celsius(212.0))
+   |           ^^^^^^^^^^^^^^^^^
+

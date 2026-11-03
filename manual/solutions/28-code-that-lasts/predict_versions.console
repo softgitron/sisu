@@ -1,28 +1,4 @@
 $ sisu test predict_versions.sisu
-warning[W0001]: typed hole `price(60), written for version 1` of type `int`
-  --> predict_versions.sisu:18:22
-   |
-18 | const AN_HOUR: int = todo("price(60), written for version 1")
-   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `price(90), written for version 1` of type `int`
-  --> predict_versions.sisu:19:21
-   |
-19 | const LONGER: int = todo("price(90), written for version 1")
-   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `price(60, per_hour=300, towel=False)` of type `int`
-  --> predict_versions.sisu:20:24
-   |
-20 | const AS_BEFORE: int = todo("price(60, per_hour=300, towel=False)")
-   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `price(30, towel=False)` of type `int`
-  --> predict_versions.sisu:21:20
-   |
-21 | const SHORT: int = todo("price(30, towel=False)")
-   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
 test "an hour, as version 1 users ask for it" ... blocked by todo("price(60), written for version 1")
 test "an hour and a half" ... blocked by todo("price(90), written for version 1")
 test "version 1's price, asked for in version 2" ... blocked by todo("price(60, per_hour=300, towel=False)")

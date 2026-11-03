@@ -576,36 +576,6 @@ test "laziness":
 <!-- output: solutions/16-closures-and-iterators/predict_pipelines.console -->
 ```console
 $ sisu test predict_pipelines.sisu
-warning[W0001]: typed hole `multiples of 3 below 10, times 10` of type `list[int]`
-  --> predict_pipelines.sisu:24:30
-   |
-24 | const MULTIPLES: list[int] = todo("multiples of 3 below 10, times 10")
-   |                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `10 minus each number in turn` of type `int`
-  --> predict_pipelines.sisu:25:21
-   |
-25 | const FOLDED: int = todo("10 minus each number in turn")
-   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `a slice of the counting` of type `list[int]`
-  --> predict_pipelines.sisu:26:26
-   |
-26 | const TAKEN: list[int] = todo("a slice of the counting")
-   |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `letters in capitals, joined` of type `str`
-  --> predict_pipelines.sisu:27:21
-   |
-27 | const JOINED: str = todo("letters in capitals, joined")
-   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `squares worked out` of type `int`
-  --> predict_pipelines.sisu:28:20
-   |
-28 | const CALLS: int = todo("squares worked out")
-   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
-
 test "multiples" ... blocked by todo("multiples of 3 below 10, times 10")
 test "a fold" ... blocked by todo("10 minus each number in turn")
 test "counting without end" ... blocked by todo("a slice of the counting")
@@ -685,19 +655,7 @@ error[E0304]: `list[Guest]` has no method `filter`
 15 |     let old_enough = guests.filter(it.age >= age)
    |                             ^^^^^^
   = note: `filter` is a method of `Iterator`
-  = fix: the type has a member with a similar name: `iter`
-
-error[E0342]: `it` is the parameter of an implicit closure and exists only where a one-parameter function is expected
-  --> adults.sisu:15:36
-   |
-15 |     let old_enough = guests.filter(it.age >= age)
-   |                                    ^^
-
-error[E0342]: `it` is the parameter of an implicit closure and exists only where a one-parameter function is expected
-  --> adults.sisu:16:27
-   |
-16 |     return old_enough.map(it.name.to_uppercase()).collect()
-   |                           ^^
+  = fix: iterate it first: `.iter()`
 
 error[E0304]: `list[Guest]` has no method `map`
   --> adults.sisu:20:19
@@ -705,28 +663,23 @@ error[E0304]: `list[Guest]` has no method `map`
 20 |     return guests.map(it.age).fold(0, (total, n) -> total + n)
    |                   ^^^
   = note: `map` is a method of `Iterator`
+  = fix: iterate it first: `.iter()`
 
-error[E0342]: `it` is the parameter of an implicit closure and exists only where a one-parameter function is expected
-  --> adults.sisu:20:23
-   |
-20 |     return guests.map(it.age).fold(0, (total, n) -> total + n)
-   |                       ^^
-
-error[E0310]: `+` cannot be applied to `_` and `_`
+error[E0324]: the type of `total` cannot be inferred here; add a type annotation
   --> adults.sisu:20:53
    |
 20 |     return guests.map(it.age).fold(0, (total, n) -> total + n)
-   |                                                     ^^^^^^^^^
+   |                                                     ^^^^^
+  = note: a closure's parameters take their types from where the closure is passed; one kept in a `let` names them, as in `(a: int, b: int) -> a + b`
 
-error[D0006]: the program was not run: errors found (6)
 ```
 
 <details>
 <summary>Hint 1</summary>
 
 Read the first error of each function: the others follow from it.
-E0342 (`type.it-outside-closure`) appears because there is no closure
-for `it` to belong to once the method is missing.
+E0324 (`type.cannot-infer`) appears because the closure given to `fold`
+has nothing to take the type of `total` from once `map` is missing.
 
 </details>
 
@@ -801,24 +754,14 @@ test "the best seller":
 <!-- output: solutions/16-closures-and-iterators/sales.console -->
 ```console
 $ sisu test sales.sisu
-warning[W0001]: typed hole `total_in` of type `int`
-  --> sales.sisu:17:12
-   |
-17 |     return todo("total_in")
-   |            ^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `dear` of type `list[String]`
-  --> sales.sisu:22:12
-   |
-22 |     return todo("dear")
-   |            ^^^^^^^^^^^^
-
-warning[W0001]: typed hole `best_seller` of type `String?`
-  --> sales.sisu:26:12
-   |
-26 |     return todo("best_seller")
-   |            ^^^^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("total_in")`:
+  sales = [Sale(product="pulla", town="Turku", cents=280), Sale(product="kakku", town="Tampere", cents=2400), Sale(product="leipä", town="Turku", cents=590), Sale(product="pulla", town="Tampere", cents=280), Sale(product="piirakka", town="Turku", cents=2400)]
+  town = "Turku"
+in scope at the typed hole `todo("dear")`:
+  sales = [Sale(product="pulla", town="Turku", cents=280), Sale(product="kakku", town="Tampere", cents=2400), Sale(product="leipä", town="Turku", cents=590), Sale(product="pulla", town="Tampere", cents=280), Sale(product="piirakka", town="Turku", cents=2400)]
+  cents = 500
+in scope at the typed hole `todo("best_seller")`:
+  sales = [Sale(product="pulla", town="Turku", cents=280), Sale(product="kakku", town="Tampere", cents=2400), Sale(product="leipä", town="Turku", cents=590), Sale(product="pulla", town="Tampere", cents=280), Sale(product="piirakka", town="Turku", cents=2400)]
 test "a town's total" ... blocked by todo("total_in")
 test "the dear products" ... blocked by todo("dear")
 test "the best seller" ... blocked by todo("best_seller")
@@ -887,12 +830,6 @@ test "primes that end in 3":
 <!-- output: solutions/16-closures-and-iterators/primes.console -->
 ```console
 $ sisu test primes.sisu
-warning[W0001]: typed hole `primes` of type `Iter[int]`
-  --> primes.sisu:12:12
-   |
-12 |     return todo("primes")
-   |            ^^^^^^^^^^^^^^
-
 test "the first primes" ... blocked by todo("primes")
 test "the first prime above a thousand" ... blocked by todo("primes")
 test "the hundredth prime" ... blocked by todo("primes")
@@ -983,18 +920,12 @@ test "a ranking":
 <!-- output: solutions/16-closures-and-iterators/scoreboard.console -->
 ```console
 $ sisu test scoreboard.sisu
-warning[W0001]: typed hole `parse_board` of type `list[Score] ! BoardError`
-  --> scoreboard.sisu:24:12
-   |
-24 |     return todo("parse_board")
-   |            ^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `ranking` of type `list[String]`
-  --> scoreboard.sisu:29:12
-   |
-29 |     return todo("ranking")
-   |            ^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("parse_board")`:
+  text = "# round 3\nKettu: 12\nKarhu: 15\n\nIlves:  12\n"
+in scope at the typed hole `todo("parse_board")`:
+  text = "Kettu: 12\nKarhu 15\nIlves: x"
+in scope at the typed hole `todo("parse_board")`:
+  text = "# round 3\nKettu: 12\nKarhu: 15\n\nIlves:  12\n"
 test "a board" ... blocked by todo("parse_board")
 test "the first bad line" ... blocked by todo("parse_board")
 test "a ranking" ... blocked by todo("parse_board")

@@ -1,34 +1,4 @@
 $ sisu test predict_pipelines.sisu
-warning[W0001]: typed hole `multiples of 3 below 10, times 10` of type `list[int]`
-  --> predict_pipelines.sisu:24:30
-   |
-24 | const MULTIPLES: list[int] = todo("multiples of 3 below 10, times 10")
-   |                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `10 minus each number in turn` of type `int`
-  --> predict_pipelines.sisu:25:21
-   |
-25 | const FOLDED: int = todo("10 minus each number in turn")
-   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `a slice of the counting` of type `list[int]`
-  --> predict_pipelines.sisu:26:26
-   |
-26 | const TAKEN: list[int] = todo("a slice of the counting")
-   |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `letters in capitals, joined` of type `str`
-  --> predict_pipelines.sisu:27:21
-   |
-27 | const JOINED: str = todo("letters in capitals, joined")
-   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `squares worked out` of type `int`
-  --> predict_pipelines.sisu:28:20
-   |
-28 | const CALLS: int = todo("squares worked out")
-   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
-
 test "multiples" ... blocked by todo("multiples of 3 below 10, times 10")
 test "a fold" ... blocked by todo("10 minus each number in turn")
 test "counting without end" ... blocked by todo("a slice of the counting")

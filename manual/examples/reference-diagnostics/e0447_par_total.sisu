@@ -1,0 +1,9 @@
+# A parallel loop whose body adds to a total declared before it.
+import std.par
+
+def main():
+    let heats = [70, 80, 90]
+    var total = 0
+    for heat in par.iter(heats):
+        total += heat
+    print(total)

@@ -1,0 +1,2 @@
+Booking(name="Aino", hour=18)
+{"booking":{"name":"Aino","hour":18},"price":"12.50"}

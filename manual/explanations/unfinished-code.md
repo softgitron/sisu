@@ -84,12 +84,9 @@ warning[W0001]: typed hole `the middle element of sorted_xs` of type `int`
   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 $ sisu test median.sisu
-warning[W0001]: typed hole `the middle element of sorted_xs` of type `int`
-  --> median.sisu:5:12
-  |
-5 |     return todo("the middle element of sorted_xs")
-  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("the middle element of sorted_xs")`:
+  xs = [3, 1, 2]
+  sorted_xs = [1, 2, 3]
 test "the mean of three" ... ok
 test "the median of three" ... blocked by todo("the middle element of sorted_xs")
 1 passed, 0 failed, 1 blocked
@@ -97,15 +94,18 @@ test "the median of three" ... blocked by todo("the middle element of sorted_xs"
 
 W0001 (`type.hole`) is a warning, not an error, so the program still
 runs: the finished function's test passes, and the test that reaches the
-hole is reported as blocked by it. Blocked is the third outcome of a
-test (D-057), and it is what separates "not written yet" from "wrong". A
-suite written before its code says which hole each test is waiting on,
-and its last line says how far the work has come. A program that reaches
-a hole while it runs stops there, as a panic does. A placeholder that is
-meant to ship is spelled `panic("...")` instead, so that the two never
-look alike, and the design closes the loop: release builds and
-`sisu publish` reject a program with a hole, so blocked is never a state
-that ships ([17](../../proposal/17-testing.md#assertions)).
+hole is reported as blocked by it. Before the report comes the hole's
+closure, the bindings in scope where the test reached it, here `xs` and
+`sorted_xs`: what the missing code has to work with. Blocked is the
+third outcome of a test (D-057), and it is what separates "not written
+yet" from "wrong". A suite written before its code says which hole each
+test is waiting on, and its last line says how far the work has come. A
+program that reaches a hole while it runs prints the same closure and
+stops there, as a panic does. A placeholder that is meant to ship is
+spelled `panic("...")` instead, so that the two never look alike, and
+the design closes the loop: a release build rejects each hole (E0445),
+and `sisu publish` is designed to, so blocked is never a state that
+ships ([17](../../proposal/17-testing.md#assertions)).
 
 The spelling was a choice. The research proposed `?name` in an operand's
 place, as Idris, Agda and Lean write it, and retiring `todo`. The owner
@@ -134,13 +134,14 @@ are asked to work.
 ## The report and the fill engine to come
 
 Two tools build on holes, and neither is in stage 0 yet. The first is a
-report. `sisu check --holes` is designed to print, for each hole, the
+report. A run and a blocked test already print a hole's closure, the
+values in scope each time it is reached, which is Hazel's idea; `sisu
+check --holes` is designed to print, for every hole at once, the
 expected type and the definitions of the types it mentions, the bindings
 in scope with their conventions and capabilities, the enclosing
 `requires` as facts and `ensures` as obligations, the tests that reach
-it with the values they reached it with (Hazel's idea of a hole's
-closure), and the expressions in scope that fit, to a depth of two, as
-GHC lists them. It is meant for people, as a language-server query, and
+it with the closures they reached it with, and the expressions in scope
+that fit, to a depth of two, as GHC lists them. It is meant for people, as a language-server query, and
 for programs that write code, in JSON. The last audience is not an
 afterthought: in a study of filling holes in Hazel, giving a
 code-writing model what the checker knew about a hole helped it far more
@@ -184,16 +185,18 @@ answer.
 
 - **A hole is a warning, so it runs until it is reached.** A hole in a
   branch that tests never take survives until that branch runs. The
-  release gate is what catches it, and stage 0 does not have the gate
-  yet: `sisu build --native --release` builds a program with a hole,
-  warning about it, which the plan's findings record.
-- **Blocked is not passed.** `sisu test` exits with status 0 when a test
-  is blocked, so a pipeline that reads only the status takes a suite
-  full of holes for a finished one. The design relies on the release
-  gate for that; the summary line is the place to look.
-- **The report is not built yet.** Stage 0 prints a hole's name and
-  type, and a blocked test names its hole, but neither prints the values
-  in scope that 17 describes, and `sisu check --holes` waits.
+  release gate is what catches it: `sisu build --native --release`
+  refuses a program with a hole (E0445), which a debug build only warns
+  about.
+- **Blocked is not passed.** `sisu test` exits with status 3 when a test
+  is blocked and none fails, 1 when one fails and 0 when all pass, so a
+  pipeline that reads only the status can tell a suite full of holes
+  from a finished one. Stage 0's runner still exits with 0 for a blocked
+  suite, so until it changes the summary line is the place to look.
+- **The report is partial.** A closure leaves out a local that holds a
+  borrow or a view, a value whose type writes its own `Debug`, and one
+  that holds a capability, so it can miss the value that matters, and
+  `sisu check --holes`, the report of every hole at once, waits.
 - **`todo` looks like a call.** It is less visible in a page of code
   than Idris's `?name`, which is the price of not adding a lexical form.
 - **A fill engine can make overfitting cheap.** The safeguards in "The

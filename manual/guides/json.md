@@ -1,15 +1,17 @@
 # Read and write JSON
 
 This guide writes values as JSON, reads JSON back into a type, reports
-text that does not fit, checks what a field's type cannot say, and
-reads JSON whose shape is not known in advance. It assumes structs and
-errors as values, from chapters 7 and 8 of the tutorial.
+text that does not fit, lets refinement types and invariants check the
+text where it comes in, gives a type a JSON form of its own, and reads
+JSON whose shape is not known in advance. It assumes structs and errors
+as values, from chapters 7 and 8 of the tutorial.
 
 **See also:** the tutorial's
 [chapter 21](../tutorial/21-standard-library.md#json) (`std.json`) and
 [chapter 23](../tutorial/23-contracts.md) (refinement types and
 `try_from`); the source of `std.json`,
-[`compiler/std/json.sisu`](../../compiler/std/json.sisu), which holds
+[`compiler/stage1/std/json.sisu`](../../compiler/stage1/std/json.sisu),
+stage 1's copy, which declares `Encode` and `Decode` and holds
 its documentation; the proposal's
 [11, Standard library](../../proposal/11-stdlib.md).
 
@@ -142,84 +144,105 @@ Syntax(at=28, expected="`,` or `}`")
 Report the path with the error: it is what someone needs to fix the
 text.
 
-## 4. Check what a field's type cannot say
+## 4. Let the types check the text
 
 A type says that `hour` is an integer, and a refinement type says
 more: `type Hour = int where 17 <= self and self <= 21` holds only the
-hours when the sauna is warm. Decode the plain shape, then check each
-such field with `try_from`, which gives a `RefinementError` rather
-than a panic:
+hours when the sauna is warm. `decode` checks a field of such a type
+where the text comes in, and a struct's `invariant` once its fields are
+read, so text that breaks either is a `Mismatch` with the path and the
+type, as any text that does not fit is:
 
-<!-- file: examples/guide-json/checked.sisu -->
+<!-- file: examples/guide-json/refined.sisu -->
 ```sisu
-# Checks what a field's type cannot say, once the JSON is decoded.
+# `decode` checks refinements and invariants where the text comes in.
 import std.json
 
 ## An hour of the evening, when the sauna is warm.
 type Hour = int where 17 <= self and self <= 21
 
+## A turn in the sauna, from its first hour to its last.
+struct Turn:
+    name: String
+    first: Hour
+    last: Hour
+    invariant self.first <= self.last
+
+def main():
+    let texts = [
+        r"""{"name": "Aino", "first": 18, "last": 19}""",
+        r"""{"name": "Eero", "first": 18, "last": 25}""",
+        r"""{"name": "Roni", "first": 20, "last": 18}""",
+    ]
+    for text in texts:
+        print(json.decode[Turn](text))
+```
+
+<!-- output: examples/guide-json/refined.out -->
+```text
+Ok(Turn(name="Aino", first=18, last=19))
+Err(Mismatch(path="$.last", expected="a `Hour`"))
+Err(Mismatch(path="$", expected="a `Turn` whose invariant holds"))
+```
+
+The rest of the program then receives a `Turn` whose hours are hours of
+the evening and in order, and never needs to check them again: untrusted
+text is malformed input, which `decode` reports as an error, never a
+panic. Write the rules into the types, and decode into them.
+
+## 5. Give a type a JSON form of its own
+
+`@derive(Encode, Decode)` gives a type the form that `encode` and
+`decode` give any type of its shape, and says in the declaration that
+JSON is one of the type's forms. The traits are `std.json`'s, so the
+file imports them. An impl written by hand gives a type a form of its
+own, which `encode` uses wherever the type is, inside other values too:
+
+<!-- file: examples/guide-json/derive.sisu -->
+```sisu
+# `@derive(Encode, Decode)`, and an `Encode` written by hand.
+import std.json
+from std.json import Decode, Encode
+
+## A sum in cents, which the JSON writes as text with two decimals.
+struct Money:
+    cents: int
+
+impl Encode for Money:
+    def encode_json(self) -> String:
+        return "\"{self.cents // 100}.{self.cents % 100:02}\""
+
 ## A turn in the sauna, as the JSON has it.
+@derive(Encode, Decode, Debug)
 struct Booking:
     name: String
     hour: int
 
-## The name and the evening hour of the booking that `text` holds.
-def turn(text: str) -> (String, Hour) ! {json.JsonError, RefinementError}:
-    let booking = json.decode[Booking](text)?
-    let hour = Hour.try_from(booking.hour)?
-    return Ok((booking.name, hour))
+## What a booking costs.
+@derive(Encode)
+struct Receipt:
+    booking: Booking
+    price: Money
 
-def main():
-    print(turn(r"""{"name": "Aino", "hour": 18}"""))
-    print(turn(r"""{"name": "Eero", "hour": 25}"""))
-    print(turn(r"""{"name": "Roni", "hour": "six"}"""))
+def main() -> ! json.JsonError:
+    let b = json.decode[Booking](r"""{"name": "Aino", "hour": 18}""")?
+    print("{b:?}")
+    print(json.encode(Receipt(booking=b, price=Money(cents=1250))))
+    return Ok(())
 ```
 
-<!-- output: examples/guide-json/checked.out -->
+<!-- output: examples/guide-json/derive.out -->
 ```text
-Ok(("Aino", 18))
-Err(Unsatisfied(ty="Hour", predicate="17 <= self and self <= 21"))
-Err(Mismatch(path="$.hour", expected="an integer"))
+Booking(name="Aino", hour=18)
+{"booking":{"name":"Aino","hour":18},"price":"12.50"}
 ```
 
-Do the check where the text comes in, so that the rest of the program
-receives a `Hour` and never needs to check it again.
+`Money` is written as text with two decimals, `"12.50"`, inside the
+`Receipt` that holds it, where its shape would be `{"cents":1250}`. A
+`Decode` written by hand, `decode_json(j: Json, path: str) -> Self !
+JsonError`, reads such a form back.
 
-A field of the refinement type itself, `hour: Hour`, does not compile
-with `json.decode` yet. E0811 (`refine.needs-try-from`) reports it
-inside the decoder that `std.json` makes for the type, at a line of its
-own:
-
-<!-- file: examples/guide-json/refined.sisu -->
-```sisu
-# A field of a refinement type, which `json.decode` cannot read yet.
-import std.json
-
-## An hour of the evening, when the sauna is warm.
-type Hour = int where 17 <= self and self <= 21
-
-## A turn in the sauna, with the hour checked.
-struct Booking:
-    name: String
-    hour: Hour
-
-def main():
-    print(json.decode[Booking](r"""{"name": "Eero", "hour": 25}"""))
-```
-
-<!-- output: examples/guide-json/refined.console -->
-```console
-$ sisu check refined.sisu
-error[E0811]: expected `Hour`, found `int`; a value becomes a `Hour` where its predicate is checked, with `Hour.try_from(...)`
-  --> <std>/<from_json[Hour]>/json.sisu:3:19
-  |
-3 |         return Ok(value)
-  |                   ^^^^^
-  = note: check it where it runs: `Hour.try_from(...)`
-
-```
-
-## 5. Read JSON of an unknown shape
+## 6. Read JSON of an unknown shape
 
 `json.parse(text)` reads any JSON into a `Json` value, whose variants
 are `Null`, `Bool`, `Int`, `Float`, `Str`, `Array` and `Object`, and
@@ -259,11 +282,9 @@ towels: missing
 Prefer a struct and `decode` wherever the shape is known: the type then
 does the checking that a `match` on `Json` does by hand.
 
-**Status.** In stage 0, with two differences from
-[11](../../proposal/11-stdlib.md): `@derive(Encode, Decode)` is not
-needed and not accepted (E0243), since `encode` and `decode` read any
-struct by reflection; and `decode` does not check refinements at the
-boundary, as 11 plans. A field of a refinement type is E0811, as step 4
-shows, and text that breaks a struct's `invariant` makes `decode`
-panic, so decode such a struct's plain shape and check it with
-`try_from`. An enum is encoded and not decoded.
+**Status.** In stage 0 (11), with two differences: an enum is encoded
+and not decoded, since `decode` makes no enum's variants yet (E0609),
+and `@derive(Decode)`, which 11 gives a struct, is accepted on an enum
+too, whose `decode` then stops the run at E0501, an error of the
+compiler's own. Without `from std.json import Decode, Encode`, the
+derive is E0243, which does not name the import.

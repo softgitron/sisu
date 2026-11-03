@@ -1,0 +1,2 @@
+$ sisu build --native --release e0445_hole_release_fixed.sisu
+built `e0445_hole_release_fixed`

@@ -472,36 +472,6 @@ test "codes of characters":
 <!-- output: solutions/06-text/predict_text.console -->
 ```console
 $ sisu test predict_text.sisu
-warning[W0001]: typed hole `the length of a word` of type `int`
-  --> predict_text.sisu:8:22
-  |
-8 | const LETTERS: int = todo("the length of a word")
-  |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `the bytes of a word` of type `int`
-  --> predict_text.sisu:9:20
-  |
-9 | const BYTES: int = todo("the bytes of a word")
-  |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `the pieces of a split` of type `int`
-  --> predict_text.sisu:10:21
-   |
-10 | const PIECES: int = todo("the pieces of a split")
-   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `a number with a format spec` of type `str`
-  --> predict_text.sisu:11:21
-   |
-11 | const PADDED: str = todo("a number with a format spec")
-   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `the distance between two letters` of type `int`
-  --> predict_text.sisu:12:23
-   |
-12 | const DISTANCE: int = todo("the distance between two letters")
-   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
 test "len of a Finnish word" ... blocked by todo("the length of a word")
 test "the bytes of the same word" ... blocked by todo("the bytes of a word")
 test "splitting at every comma" ... blocked by todo("the pieces of a split")
@@ -575,23 +545,27 @@ error[E0325]: a `for` loop cannot iterate over `String`
    |
 14 |     for letter in word.to_lowercase():
    |                   ^^^^^^^^^^^^^^^^^^^
+  = fix: iterate over its characters: `.chars()`
+  = fix: iterate over its bytes: `.bytes()`
 
-error[D0006]: the program was not run: errors found (1)
 ```
 
 <details>
 <summary>Hint 1</summary>
 
-The first diagnostic is about what a `for` loop can go through. The
-section "Why text has no index" ends with the fix.
+The first diagnostic is about what a `for` loop can go through, and it
+offers two fixes. A vowel is a character: the section "Why text has no
+index" says which of the two goes through characters.
 
 </details>
 
 <details>
 <summary>Hint 2</summary>
 
-The second diagnostic says that a `char` cannot be compared with a
-`str`. `in` needs a collection of characters to look in.
+The next diagnostic, once the loop goes through characters, says that a
+`char` cannot be compared with a `str`, and its fix makes text of the
+character. The other way is a collection of characters for `in` to look
+in.
 
 </details>
 
@@ -632,12 +606,14 @@ test "no words":
 <!-- output: solutions/06-text/title_case.console -->
 ```console
 $ sisu test title_case.sisu
-warning[W0001]: typed hole `title_case` of type `String`
-  --> title_case.sisu:10:12
-   |
-10 |     return todo("title_case")
-   |            ^^^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("title_case")`:
+  text = "hei maailma"
+in scope at the typed hole `todo("title_case")`:
+  text = "tAMPERE AND turku"
+in scope at the typed hole `todo("title_case")`:
+  text = "  äiti   ja isä "
+in scope at the typed hole `todo("title_case")`:
+  text = ""
 test "two words" ... blocked by todo("title_case")
 test "capitals in the middle" ... blocked by todo("title_case")
 test "letters with dots and extra spaces" ... blocked by todo("title_case")
@@ -698,12 +674,12 @@ test "a comma inside quotes":
 <!-- output: solutions/06-text/csv_fields.console -->
 ```console
 $ sisu test csv_fields.sisu
-warning[W0001]: typed hole `csv_fields` of type `list[String]`
-  --> csv_fields.sisu:11:12
-   |
-11 |     return todo("csv_fields")
-   |            ^^^^^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("csv_fields")`:
+  line = "a,b,c"
+in scope at the typed hole `todo("csv_fields")`:
+  line = "a,,b"
+in scope at the typed hole `todo("csv_fields")`:
+  line = "\"Oulu, Finland\",214000"
 test "plain fields" ... blocked by todo("csv_fields")
 test "an empty field" ... blocked by todo("csv_fields")
 test "a comma inside quotes" ... blocked by todo("csv_fields")
@@ -770,12 +746,18 @@ test "there and back":
 <!-- output: solutions/06-text/caesar.console -->
 ```console
 $ sisu test caesar.sisu
-warning[W0001]: typed hole `caesar` of type `String`
-  --> caesar.sisu:13:12
-   |
-13 |     return todo("caesar")
-   |            ^^^^^^^^^^^^^^
-
+in scope at the typed hole `todo("caesar")`:
+  text = "abc"
+  shift = 1
+in scope at the typed hole `todo("caesar")`:
+  text = "xyz"
+  shift = 3
+in scope at the typed hole `todo("caesar")`:
+  text = "Hei, Aino!"
+  shift = 13
+in scope at the typed hole `todo("caesar")`:
+  text = "Kissa"
+  shift = 5
 test "one place along" ... blocked by todo("caesar")
 test "past the end of the alphabet" ... blocked by todo("caesar")
 test "capitals and punctuation" ... blocked by todo("caesar")

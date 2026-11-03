@@ -1,0 +1,1 @@
+9:11-9:28 W0023 type.deprecated name="to_celsius" reason="use `celsius_of`"

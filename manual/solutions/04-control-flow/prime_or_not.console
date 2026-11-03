@@ -1,8 +1,7 @@
 $ sisu test prime_or_not.sisu
-error[E0103]: expected an expression, found `else`
+error[E0127]: a loop has no `else` in Sisu; keep what the loop finds in a variable and test it after the loop, as in `if let Some(i) = found:`
   --> prime_or_not.sisu:18:5
    |
 18 |     else:
    |     ^^^^
 
-error[D0006]: the program was not run: errors found (1)

@@ -1,0 +1,6 @@
+warning[W0023]: `old_levels` is deprecated: use `levels`
+  --> designed.sisu:18:13
+   |
+18 |     print("{old_levels(3)} {blend(1.0, 2.0)}")
+   |             ^^^^^^^^^^^^^
+

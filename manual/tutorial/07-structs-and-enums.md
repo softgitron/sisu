@@ -782,36 +782,6 @@ test "two parcels compared":
 <!-- output: solutions/07-structs-and-enums/predict_matches.console -->
 ```console
 $ sisu test predict_matches.sisu
-warning[W0001]: typed hole `a heavy small parcel` of type `int`
-  --> predict_matches.sisu:27:30
-   |
-27 | const SMALL_AND_HEAVY: int = todo("a heavy small parcel")
-   |                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `a heavy medium parcel` of type `int`
-  --> predict_matches.sisu:28:31
-   |
-28 | const MEDIUM_AND_HEAVY: int = todo("a heavy medium parcel")
-   |                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `a large parcel of the default weight` of type `int`
-  --> predict_matches.sisu:29:20
-   |
-29 | const LARGE: int = todo("a large parcel of the default weight")
-   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `two sizes compared` of type `bool`
-  --> predict_matches.sisu:30:21
-   |
-30 | const SIZES: bool = todo("two sizes compared")
-   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `two parcels compared` of type `bool`
-  --> predict_matches.sisu:31:23
-   |
-31 | const PARCELS: bool = todo("two parcels compared")
-   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
 test "a heavy small parcel" ... blocked by todo("a heavy small parcel")
 test "a heavy medium parcel" ... blocked by todo("a heavy medium parcel")
 test "a large parcel of the default weight" ... blocked by todo("a large parcel of the default weight")
@@ -892,7 +862,6 @@ error[E0314]: this `match` does not cover `Triangle(_, _)`
    |            ^^^^^^^^^^^
   = note: add an arm for `Triangle(_, _)`, or a `case _` arm
 
-error[D0006]: the program was not run: errors found (1)
 ```
 
 <details>
@@ -992,7 +961,6 @@ error[E0347]: `list[Card]` does not implement `Eq`
 47 |     assert sort_hand(hand) == expected
    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-error[D0006]: the program was not run: errors found (3)
 ```
 
 <details>
@@ -1096,30 +1064,21 @@ test "as text":
 <!-- output: solutions/07-structs-and-enums/fractions.console -->
 ```console
 $ sisu test fractions.sisu
-warning[W0001]: typed hole `new` of type `Fraction`
-  --> fractions.sisu:17:16
-   |
-17 |         return todo("new")
-   |                ^^^^^^^^^^^
-
-warning[W0001]: typed hole `plus` of type `Fraction`
-  --> fractions.sisu:21:16
-   |
-21 |         return todo("plus")
-   |                ^^^^^^^^^^^^
-
-warning[W0001]: typed hole `flip` of type `Fraction`
-  --> fractions.sisu:25:16
-   |
-25 |         self = todo("flip")
-   |                ^^^^^^^^^^^^
-
-warning[W0001]: typed hole `show` of type `String`
-  --> fractions.sisu:29:16
-   |
-29 |         return todo("show")
-   |                ^^^^^^^^^^^^
-
+in scope at the typed hole `todo("new")`:
+  top = 2
+  bottom = 4
+in scope at the typed hole `todo("new")`:
+  top = 1
+  bottom = -2
+in scope at the typed hole `todo("new")`:
+  top = 1
+  bottom = 2
+in scope at the typed hole `todo("new")`:
+  top = 2
+  bottom = 3
+in scope at the typed hole `todo("new")`:
+  top = 3
+  bottom = 4
 test "lowest terms" ... blocked by todo("new")
 test "a negative bottom" ... blocked by todo("new")
 test "adding" ... blocked by todo("new")
@@ -1214,18 +1173,6 @@ test "negations":
 <!-- output: solutions/07-structs-and-enums/expressions.console -->
 ```console
 $ sisu test expressions.sisu
-warning[W0001]: typed hole `evaluate` of type `int`
-  --> expressions.sisu:17:12
-   |
-17 |     return todo("evaluate")
-   |            ^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `show` of type `String`
-  --> expressions.sisu:22:12
-   |
-22 |     return todo("show")
-   |            ^^^^^^^^^^^^
-
 test "a number" ... blocked by todo("evaluate")
 test "sums and products" ... blocked by todo("evaluate")
 test "a sum inside a product" ... blocked by todo("evaluate")

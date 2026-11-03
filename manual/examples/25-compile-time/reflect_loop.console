@@ -7,5 +7,6 @@ error[E0609]: making `columns[Booking]` stopped at compile time: a list is a com
    |
 16 |     for f in reflect.fields_of(T):
    |              -------------------- the template, where it stopped
+  = fix: unroll the loop at compile time with `comptime for`: `comptime `
 
 error[D0006]: the program was not run: errors found (1)

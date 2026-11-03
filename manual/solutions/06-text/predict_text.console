@@ -1,34 +1,4 @@
 $ sisu test predict_text.sisu
-warning[W0001]: typed hole `the length of a word` of type `int`
-  --> predict_text.sisu:8:22
-  |
-8 | const LETTERS: int = todo("the length of a word")
-  |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `the bytes of a word` of type `int`
-  --> predict_text.sisu:9:20
-  |
-9 | const BYTES: int = todo("the bytes of a word")
-  |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `the pieces of a split` of type `int`
-  --> predict_text.sisu:10:21
-   |
-10 | const PIECES: int = todo("the pieces of a split")
-   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `a number with a format spec` of type `str`
-  --> predict_text.sisu:11:21
-   |
-11 | const PADDED: str = todo("a number with a format spec")
-   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning[W0001]: typed hole `the distance between two letters` of type `int`
-  --> predict_text.sisu:12:23
-   |
-12 | const DISTANCE: int = todo("the distance between two letters")
-   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
 test "len of a Finnish word" ... blocked by todo("the length of a word")
 test "the bytes of the same word" ... blocked by todo("the bytes of a word")
 test "splitting at every comma" ... blocked by todo("the pieces of a split")
