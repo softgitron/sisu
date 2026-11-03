@@ -1501,3 +1501,17 @@ lists once they run natively.
 **What would settle it.** The first compiler change that breaks a manual
 example: whether its author saw the failure in the same review as the
 conformance diff.
+
+### Q-73. May the manual teach the counterexample mode that the experiment keeps from its participants?
+
+**Question.** Chapter 11 of the tutorial ([`manual/tutorial/11-borrowing.md`](manual/tutorial/11-borrowing.md)) teaches `sisu run --defer-borrow`, the counterexample mode that runs a program the ownership checker rejected under the dynamic monitor so that the reader sees the rejected program fail or pass at run time. [18](proposal/18-next-steps.md)'s Phase 3 says the corpus authors never see the counterexample mode, and the pre-registration's amendment A2 ([20](proposal/20-pre-registration.md)) keeps it team-only, so that the measurement of the ownership checker's rejections is not changed by a tool that explains them. A manual every reader can open contradicts that, as soon as a corpus author reads it.
+
+**Options.**
+- *Keep Part II from the corpus authors during Phase 3* (lean): the manual is public, the experiment's participants are told which chapters are out of bounds until their part of the study ends, and the pre-registration records the exclusion.
+- *Move the section to a guide or reference page the participants are not pointed to* (G13 or R7 in the plan), leaving chapter 11 with the diagnostics alone.
+- *Drop the restriction from 18 and 20*, accepting that the counterexample mode is part of the language's offer and measuring the checker with it.
+- *Teach it after the experiment*, writing the section when Phase 3 has run.
+
+**Current lean.** Keep Part II from the corpus authors during Phase 3, since the section is the clearest teaching of what the checker protects against and the exclusion costs the experiment nothing it does not already assume of the referee's programs.
+
+**What would settle it.** The owner's decision, and the pre-registration's wording for the exclusion before Phase 3 starts.
