@@ -891,11 +891,15 @@ impl Gen:
                 # the linker relaxes to a constant in an executable.
                 if d >= len(data):
                     return unsupported("the data `d{d}`, which is not declared")
-                let Datum.Tls(name) = data[d] else:
-                    return unsupported("`tls_value` of the data `d{d}`, which is not thread-local")
-                self.body.load_thread_pointer(RAX)
-                let at = self.body.add_rip(RAX)
-                self.relocs.push(Reloc(offset=at, symbol=name.copy(), kind=R_GOTTPOFF, addend=-4))
+                match data[d]:
+                    case Datum.Tls(name):
+                        self.body.load_thread_pointer(RAX)
+                        let at = self.body.add_rip(RAX)
+                        self.relocs.push(
+                            Reloc(offset=at, symbol=name.copy(), kind=R_GOTTPOFF, addend=-4)
+                        )
+                    case _:
+                        return unsupported("`tls_value` of the data `d{d}`, which is not thread-local")
                 self.define(v, RAX)
             case Op.FuncAddr(symbol):
                 let at = self.body.lea_rip(RAX)

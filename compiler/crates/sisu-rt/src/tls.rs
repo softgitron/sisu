@@ -123,29 +123,33 @@ macro_rules! tls_address {
 
 /// The running thread's count of nested calls.
 pub(crate) fn depth() -> &'static AtomicI64 {
+    let a = tls_address!("SISU_RT_DEPTH");
     // SAFETY: the address is this thread's copy of an 8-byte word aligned
     // to 8, which lives as long as the thread; the runtime uses it on the
     // thread that asked, and only through atomics, as the generated code
     // reads and writes it with plain loads and stores of the same thread.
-    unsafe { &*(tls_address!("SISU_RT_DEPTH") as *const AtomicI64) }
+    unsafe { &*(a as *const AtomicI64) }
 }
 
 /// The yield points the running thread's task may pass before it asks the
 /// scheduler.
 pub(crate) fn budget() -> &'static AtomicI64 {
+    let a = tls_address!("SISU_RT_BUDGET");
     // SAFETY: as for [`depth`].
-    unsafe { &*(tls_address!("SISU_RT_BUDGET") as *const AtomicI64) }
+    unsafe { &*(a as *const AtomicI64) }
 }
 
 /// The running task's stack limits, by [`abi::STACK_PROBE`] and the others.
 pub(crate) fn stack() -> &'static [AtomicU64; abi::STACK_WORDS] {
+    let a = tls_address!("SISU_RT_STACK");
     // SAFETY: as for [`depth`]: `STACK_WORDS` words of this thread.
-    unsafe { &*(tls_address!("SISU_RT_STACK") as *const [AtomicU64; abi::STACK_WORDS]) }
+    unsafe { &*(a as *const [AtomicU64; abi::STACK_WORDS]) }
 }
 
 /// Where the running code last called an intrinsic that may wait, by
 /// [`abi::SITE_FILE`] and the others.
 pub(crate) fn site() -> &'static [AtomicU64; abi::SITE_WORDS] {
+    let a = tls_address!("SISU_RT_SITE");
     // SAFETY: as for [`depth`]: `SITE_WORDS` words of this thread.
-    unsafe { &*(tls_address!("SISU_RT_SITE") as *const [AtomicU64; abi::SITE_WORDS]) }
+    unsafe { &*(a as *const [AtomicU64; abi::SITE_WORDS]) }
 }

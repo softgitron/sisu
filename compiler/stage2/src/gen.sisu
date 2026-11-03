@@ -953,9 +953,15 @@ pub pure def lower(p: Program, release: bool) -> String ! LirError:
 ## names), whose bodies the runtime's workers run, and the drop of the
 ## function `map` owns. The interpreter runs the SIR as written.
 pub pure def native_bodies(mut p: Program):
+    var source = -1
+    for k in range(len(p.sources)):
+        if p.sources[k] == "<std>/par.sisu":
+            source = k
+    if source < 0:
+        return
     var at = -1
     for i in range(len(p.functions)):
-        if is_par_map(p, p.functions[i]):
+        if is_par_map(p.functions[i], source):
             at = i
             break
     if at < 0:
@@ -963,15 +969,14 @@ pub pure def native_bodies(mut p: Program):
     let body = par_map(p.functions[at])
     p.functions[at] = body
 
-## Whether `f` is std.par's `map[T, U](xs, f)`.
-pure def is_par_map(p: Program, f: Function) -> bool:
+## Whether `f`, of the source `source`, is std.par's `map[T, U](xs, f)`.
+pure def is_par_map(f: Function, source: int) -> bool:
     return (
         f.name == "par.map"
             and f.param_count == 2
             and len(f.type_params) == 2
             and len(f.locals) >= 3
-            and f.source < len(p.sources)
-            and p.sources[f.source] == "<std>/par.sisu"
+            and f.source == source
     )
 
 ## `_0 = call intrinsic par.map[$0, $1](copy _1, copy _2)`, then the drop of
