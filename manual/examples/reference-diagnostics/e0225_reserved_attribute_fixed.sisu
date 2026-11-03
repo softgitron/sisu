@@ -1,0 +1,6 @@
+# The trait without the standard library's attribute.
+trait Shape:
+    def area(self) -> f64
+
+def main():
+    print("no shapes yet")

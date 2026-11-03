@@ -1,0 +1,23 @@
+# `requires` on entry, `ensures` at every exit, `old` for entry values.
+struct Account:
+    cents: int
+
+    ## Takes `amount` out, and gives what is left.
+    def withdraw(mut self, amount: int) -> int:
+        requires 0 < amount <= self.cents
+        ensures self.cents == old(self.cents) - amount
+        ensures result == self.cents
+        self.cents -= amount
+        return self.cents
+
+## `total` split into `parts` shares, and what is left over.
+def share(total: int, parts: int) -> (each: int, rest: int):
+    requires parts > 0
+    ensures each * parts + rest == total
+    return (total // parts, total % parts)
+
+def main():
+    var account = Account(cents=5000)
+    print(account.withdraw(1250))
+    let each, rest = share(1000, 3)
+    print("{each} each, {rest} over")

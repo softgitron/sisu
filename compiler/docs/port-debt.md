@@ -641,13 +641,15 @@ leaves out:
 
 What the unsafe round (decisions 301 and 302) leaves natively:
 
-- **Raw memory goes through the runtime**: every intrinsic of std.mem is
-  a call of `sisu_rt_intrinsic` with a descriptor, a read or a write of a
-  word included, and a value whose layout in raw memory is not its value's
-  is converted part by part at each access. *Pay*: loads, stores and
-  pointer arithmetic inline, as decision 253 made the commonest intrinsics,
-  and one layout for values and raw memory in the backend in Sisu (each
-  part at its own width), when it replaces decision 188's.
+- **Raw memory goes through the runtime** but for a word or a byte: a raw
+  pointer's address, made, cast or offset, and a read or a write of a type
+  whose raw memory is its value's word, or of a `u8` or an `i8`, are
+  compiled inline (decision 335); every other intrinsic of std.mem is a
+  call of `sisu_rt_intrinsic` with a descriptor, and a value whose layout
+  in raw memory is not its value's is converted part by part at each
+  access. *Pay*: the other widths and structs inline, and one layout for
+  values and raw memory in the backend in Sisu (each part at its own
+  width), when it replaces decision 188's.
 - **A pointer to a place, and a reference from a pointer, of a type whose
   two layouts differ** (a sized integer narrower than 64 bits, an `f32`, a
   C struct of them) are `D0103`, since a place holds a value's layout: a
@@ -787,9 +789,10 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   compares with) and as the seed that builds stage 1 and stage 2 (stage 2
   cannot lower itself before it is built); a change to one is a change to
   the other, which the runner's `--native-from-lir` mode catches. A native
-  build also pays for stage 2 as a separate process: the SIR written out,
-  `sisu2` started, the LIR read back (about 10 ms for a conformance case,
-  6 s for stage 1). *Pay*: `sisu-codegen`'s own lowering (`lib.rs`,
+  build also pays for stage 2 as a separate process: the SIR written out
+  and `sisu2` started, and with Cranelift the LIR read back (about 10 ms
+  for a conformance case, 6 s for stage 1); a debug build's `sisu2 build`
+  hands back only the object (decision 334). *Pay*: `sisu-codegen`'s own lowering (`lib.rs`,
   `func.rs`, `layout.rs`, `facts.rs`, the type walk of `debug.rs`)
   deleted once nothing compares with it, stage 2 built by a stage 2 kept
   from the previous build (or a seed of its LIR), the Rust left with the
@@ -824,13 +827,28 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   where they are, short jumps and fallthrough, the cold blocks last, and
   values kept in registers across an edge to a block with one
   predecessor.
-- **The Sisu backend runs on one thread**, about 4 ms for each thousand
-  lines of LIR (stage 1 in 15 to 19 s, against Cranelift's 6 s on four
-  cores), most of it spent reading the text, which it holds whole in
-  memory, and it keeps the object's bytes as a list of words until it
-  writes them. *Pay*: functions compiled in parallel through `std.par`
-  (D-069) in a fixed order, as D-087 asks; stage 2's lowering and the
-  backend in one process, without the LIR text between them.
+- **The Sisu backend is slower than Cranelift**: its functions are
+  compiled on `std.par`'s workers and lowered in the same process (decisions
+  332 to 334), but on four cores it compiles stage 1's LIR in 6.0 s inside
+  `sisu2 build` and 9.4 s from a LIR file, against Cranelift's 3.7 s: the
+  lowering runs on one thread (6.7 s for stage 1), the text of LIR is
+  written whole and read again by the workers, a batch's functions are
+  placed while the workers wait, and the object's bytes are a list of words
+  until they are written. *Pay*: the lowering handing the backend each
+  function's operations rather than text, placement overlapping the next
+  batch, and the code's bytes kept as bytes.
+- **`std.par` natively** (decision 333): only `map` runs on the workers;
+  `join`, `join_all` and `reduce` run their bodies one after another on the
+  asking task, as stage 0 has them. A worker's body spends no yield point of
+  the asking task's budget, where the interpreter's elision spends them, so
+  a program whose tasks run while one of them maps may switch at other
+  points natively (no case does). The front end does not check that a
+  body's captures are `Send` (Q-52), so a body that copies a `Shared` or a
+  closure holding counted handles through a capture races on its count
+  natively; and the bodies past a failed one still run. *Pay*: the
+  interpreter's bodies outside the budget too, as D-069's pool runs them;
+  the `Send` check of a body's captures; workers that skip what follows
+  the lowest failure; `join` and `reduce` on the pool.
 - **The Sisu backend's debug information** is the line table and a
   subprogram for each function (decision 312): no parameters, locals or
   types, and no `.debug_frame` (a debugger unwinds through the frame
@@ -842,6 +860,22 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   to compile (`--backend=sisu --release`) is compiled the same way,
   without optimisations, and there is no AArch64, Mach-O or COFF. *Pay*:
   D-087's steps.
+- **The runtime in Sisu has one piece** (decisions 335 and 336):
+  `compiler/rt` holds `sisu_rt_bytes_eq`, a byte at a time where the Rust
+  one compared slices; the structural hash, equality, copy and drop of
+  values by their parts, the formatting of numbers and the building of
+  text, text search and lists over `RawBuf` are still `sisu-rt`'s. Each
+  needs more than a word or a byte of raw memory inline (the type table's
+  entries read from Sisu, the runtime's allocation, calls from the Rust
+  runtime into Sisu code, which runs on the system stack without yield
+  points, as the library's code does), and the structural operations are
+  meant per type in the end (22's table, R9's std.mem), not walked. The
+  object is built by the Rust lowering from a seed of the package's SIR
+  kept in the tree (`compiler/rt/rt.sir`, which a test holds to what
+  stage 1 prints): stage 2 has no library mode, so the fixed point of
+  decision 330 does not rebuild the runtime in Sisu with itself. *Pay*:
+  the pieces in D-086's order, each deleting its Rust counterpart; stage
+  2's library mode, and the object in the fixed point.
 - **Stage 2 reads SIR itself**: stage 1 writes SIR but has no reader, so
   `stage2/src/read.sisu` transcribes `sisu-sir/src/read.rs`. *Pay*: the
   reader moves to stage 1's `sir` module when stage 1 needs one (`sisu
@@ -954,7 +988,8 @@ From Phase 4 (18, "Phase 4: traits, generics, std in Sisu"):
   float literal from its shortest digits, so one with more significant
   digits than an `f64` holds is rounded; a `str` literal through
   `Decimal.parse` is exact. The modules run their work on the asking
-  task, `std.par`'s chunks one after another, and `std.io` has no
+  task, `std.par`'s chunks one after another (natively, `map`'s bodies run
+  on the runtime's workers, decision 333), and `std.io` has no
   stream over a file, since the file capability reads and writes whole
   files.
 - **Reflection beyond templates** (Phase 8 in 18): `reflect`, `comptime

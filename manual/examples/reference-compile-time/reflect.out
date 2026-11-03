@@ -1,0 +1,3 @@
+Booking, field 0 name default=False, field 1 hour default=True, method label
+Heater, variant Wood of 0 fields, variant Electric of 1 fields
+True

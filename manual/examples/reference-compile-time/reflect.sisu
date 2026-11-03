@@ -1,0 +1,26 @@
+# `reflect` answers questions about a type while the program compiles.
+struct Booking:
+    name: String
+    hour: int = 18
+
+    def label(self) -> String:
+        return "{self.name} at {self.hour}"
+
+enum Heater:
+    Wood
+    Electric(kilowatts: int)
+
+comptime def shape(T: type) -> String:
+    var out = String.new(reflect.name_of(T))
+    comptime for f in reflect.fields_of(T):
+        out = "{out}, field {f.index} {f.name} default={f.default}"
+    comptime for m in reflect.methods_of(T):
+        out = "{out}, method {m.name}"
+    comptime for v in reflect.variants_of(T):
+        out = "{out}, variant {v.name} of {len(v.fields)} fields"
+    return out
+
+def main():
+    print(comptime shape(Booking))
+    print(comptime shape(Heater))
+    print(comptime reflect.is_enum(Heater))

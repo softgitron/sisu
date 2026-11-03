@@ -485,7 +485,7 @@ it may run at compile time as well (D-074;
 [R2](types.md#pure-function-types)). `comptime def` declares a function
 that runs only at compile time, inside `comptime`, and may take and give
 types (`T: type`); a call of one at run time is E0605. What compile-time
-code may do is [R12](../README.md#the-reference), when it is written.
+code may do is [R12](compile-time.md#what-compile-time-code-may-do).
 
 <!-- file: examples/reference-declarations/compile_time.sisu -->
 ```sisu
@@ -987,14 +987,14 @@ their examples ([R1](lexical-structure.md#comments-and-doc-comments)).
 | [E0315](diagnostics.md#e0315), E0316, E0317, E0378, E0436 | `type.missing-return`, `type.return-value-in-unit`, `type.return-needs-value`, `type.main-signature`, `type.generator-result` | [Functions](#functions) |
 | E0222, E0376, [E0306](diagnostics.md#e0306), E0307, [E0308](diagnostics.md#e0308), E0218, [E0215](diagnostics.md#e0215) | `resolve.parameter-default-order`, `type.positional-after-keyword`, `type.unknown-keyword`, `type.duplicate-argument`, `type.missing-argument`, `resolve.self-not-first`, `resolve.self-outside-method` | [Parameters](#parameters) |
 | E0605 | `comptime.only` | [Compile-time and pure functions](#compile-time-and-pure-functions) |
-| E0221, [E0337](diagnostics.md#e0337), E0205, E0217, E0361, E0362 | `resolve.field-default-order`, `type.missing-field`, `resolve.duplicate-field`, `resolve.duplicate-method`, `type.method-needs-receiver`, `type.assoc-not-method` | [Structs](#structs) |
+| E0221, [E0337](diagnostics.md#e0337), E0205, [E0217](diagnostics.md#e0217), E0361, E0362 | `resolve.field-default-order`, `type.missing-field`, `resolve.duplicate-field`, `resolve.duplicate-method`, `type.method-needs-receiver`, `type.assoc-not-method` | [Structs](#structs) |
 | [E0411](diagnostics.md#e0411) | `borrow.view-field-in-plain-struct` | [View structs](#view-structs) |
 | E0206, E0386 | `resolve.duplicate-variant`, `type.variant-needs-fields` | [Enums](#enums) |
 | E0356 | `type.open-set-needs-wildcard` | [Error sets](#error-sets) |
 | E0230, E0247 | `resolve.not-a-trait`, `resolve.trait-cycle` | [Traits](#traits) |
-| [E0232](diagnostics.md#e0232), E0233, E0234, E0237, E0238, E0248, [E0242](diagnostics.md#e0242), E0213, E0216 | `resolve.missing-trait-method`, `resolve.not-a-trait-method`, `resolve.method-signature`, `resolve.missing-assoc-type`, `resolve.unknown-assoc-type`, `resolve.assoc-outside-trait-impl`, `resolve.supertrait-missing`, `resolve.drop-target`, `resolve.drop-signature` | [Impls](#impls) |
+| [E0232](diagnostics.md#e0232), [E0233](diagnostics.md#e0233), E0234, [E0237](diagnostics.md#e0237), E0238, E0248, [E0242](diagnostics.md#e0242), E0213, E0216 | `resolve.missing-trait-method`, `resolve.not-a-trait-method`, `resolve.method-signature`, `resolve.missing-assoc-type`, `resolve.unknown-assoc-type`, `resolve.assoc-outside-trait-impl`, `resolve.supertrait-missing`, `resolve.drop-target`, `resolve.drop-signature` | [Impls](#impls) |
 | E0228 | `resolve.alias-cycle` | [Type declarations](#type-declarations) |
-| E0702, E0381, E0807 | `type.test-signature`, `type.return-in-test`, `contract.not-in-test` | [Tests, suites and benchmarks](#tests-suites-and-benchmarks) |
+| E0702, E0381, [E0807](diagnostics.md#e0807) | `type.test-signature`, `type.return-in-test`, `contract.not-in-test` | [Tests, suites and benchmarks](#tests-suites-and-benchmarks) |
 | E0220 | `resolve.import-unknown` | [Imports](#imports) |
 | E0982, E0703, W0007 | `unsafe.foreign-call`, `cap.untrusted`, `unsafe.no-safety-comment` | [Foreign functions](#foreign-functions) |
-| E0255, E0256, E0257, E0258, E0259 | `resolve.private-item`, `resolve.package-item`, `resolve.not-reexported`, `resolve.private-field`, `resolve.private-method` | [Visibility](#visibility) |
+| E0255, [E0256](diagnostics.md#e0256), E0257, [E0258](diagnostics.md#e0258), E0259 | `resolve.private-item`, `resolve.package-item`, `resolve.not-reexported`, `resolve.private-field`, `resolve.private-method` | [Visibility](#visibility) |

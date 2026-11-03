@@ -1,0 +1,18 @@
+# Clauses that stand where no contract belongs, or say too much.
+def half(n: int) -> int:
+    let h = n // 2
+    requires n >= 0
+    return h
+
+def twice(n: int) -> int:
+    ensures result == old(n, n)
+    return n * 2
+
+def evens(limit: int) -> Iter[int]:
+    ensures limit > 0
+    for i in range(limit):
+        yield i * 2
+
+test "halves":
+    requires True
+    assert half(4) == 2

@@ -1,0 +1,15 @@
+$ sisu run e0404_move_while_borrowed.sisu
+error[E0404]: `names` is borrowed on line 4 and cannot be moved until that borrow ends on line 6
+  --> e0404_move_while_borrowed.sisu:5:16
+  |
+5 |     let team = names
+  |                ^^^^^
+  |
+4 |     let first = ref names[0]
+  |                 ------------ borrowed here by `first`
+  |
+6 |     print("{first} {len(team)}")
+  |             ----- the borrow is still used here
+  = note: move this after line 6, where the borrow ends, or work on a copy made with `.copy()`
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

@@ -71,8 +71,8 @@ def main():
 **Stage 0 differs.** Tasks run on one interpreter loop, one at a time,
 under the seeded scheduler of [The scheduler](#the-scheduler); 06's
 M:N scheduler over operating-system threads is the `full` runtime
-profile, which waits for the native runtime ([R22](../README.md#the-reference),
-when it is written).
+profile, which waits for the native runtime
+([R22](targets.md#runtime-profiles)).
 
 **Status.** In stage 0 (D-014).
 
@@ -720,10 +720,10 @@ tell apart.
 | E0425, E0430 | `task.closure-literal`, `task.scope-escapes` | [Tasks and scopes](#tasks-and-scopes) |
 | E0432, R0077 | `task.result-unknown`, `panic.joined-twice` | [Joining a task](#joining-a-task) |
 | R0079, R0076 | `panic.unobserved-error`, `panic.scope-ended` | [A scope's result and its failures](#a-scopes-result-and-its-failures) |
-| E0428, E0429 | `task.borrows-body-local`, `task.borrows-elsewhere` | [What a task may borrow](#what-a-task-may-borrow) |
-| E0426, E0427, E0437, E0433 | `task.not-send`, `task.not-sync`, `task.not-send-mut`, `task.result-not-send` | [Values that cross to a task](#values-that-cross-to-a-task) |
+| [E0428](diagnostics.md#e0428), E0429 | `task.borrows-body-local`, `task.borrows-elsewhere` | [What a task may borrow](#what-a-task-may-borrow) |
+| E0426, [E0427](diagnostics.md#e0427), E0437, E0433 | `task.not-send`, `task.not-sync`, `task.not-send-mut`, `task.result-not-send` | [Values that cross to a task](#values-that-cross-to-a-task) |
 | E0431, R0078 | `task.race-types`, `panic.empty-race` | [Deadlines and races](#deadlines-and-races) |
 | R0073, R0074, R0090, E0421, E0422 | `panic.mutex-held`, `panic.mutex-poisoned`, `panic.into-inner-poisoned`, `borrow.view-in-owner`, `borrow.must-consume-in-owner` | [Sharing a value that changes](#sharing-a-value-that-changes) |
 | R0083, R0091 | `panic.channel-capacity`, `panic.nested-recv` | [Channels](#channels) |
 | E0434 | `task.select-arm` | [Waiting for the first of several](#waiting-for-the-first-of-several) |
-| R0080, R0081 | `run.deadlock`, `run.deadlock-task` | [The scheduler](#the-scheduler) |
+| [R0080](diagnostics.md#r0080), R0081 | `run.deadlock`, `run.deadlock-task` | [The scheduler](#the-scheduler) |

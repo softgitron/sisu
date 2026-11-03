@@ -468,7 +468,7 @@ three things could:
   through foreign calls exposes that only to holders of the matching
   capability (D-084);
 - compile-time code: it runs with no I/O at all (E0601,
-  [R12](../README.md#the-reference), when it is written);
+  [R12](compile-time.md#what-compile-time-code-may-do));
 - build scripts: there are none (D-032).
 
 The standard library's own internals are closed to programs (E0701), and
@@ -498,4 +498,4 @@ fakes do.
 | E0378, E0701 | `type.main-signature`, `cap.internal` | [The root capabilities](#the-root-capabilities) |
 | E0421, E0422, E0700 | `borrow.view-in-owner`, `borrow.must-consume-in-owner`, `cap.not-shareable` | [Capabilities in generic code](#capabilities-in-generic-code) |
 | E0334 | `type.impure-capability` | [Pure functions take no capability](#pure-functions-take-no-capability) |
-| E0703, E0601, E0971 | `cap.untrusted`, `comptime.io`, `sim.unmodelled-extern` | [How the rule is enforced](#how-the-rule-is-enforced) |
+| E0703, [E0601](diagnostics.md#e0601), E0971 | `cap.untrusted`, `comptime.io`, `sim.unmodelled-extern` | [How the rule is enforced](#how-the-rule-is-enforced) |

@@ -1,0 +1,7 @@
+# A condition of `@cfg` that is an expression.
+@cfg(target.os == "linux")
+def separator() -> str:
+    return "/"
+
+def main():
+    print("usr{separator()}bin")

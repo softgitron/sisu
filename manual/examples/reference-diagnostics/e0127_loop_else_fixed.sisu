@@ -1,0 +1,12 @@
+# What the loop finds is kept, and tested after it.
+def main():
+    let temps = [62, 75, 81]
+    var found: int? = None
+    for t in temps:
+        if t > 90:
+            found = Some(t)
+            break
+    if let Some(t) = found:
+        print("too hot: {t}")
+    else:
+        print("no reading above 90")

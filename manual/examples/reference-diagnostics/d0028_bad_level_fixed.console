@@ -1,0 +1,2 @@
+$ sisu run --contracts=preconditions d0028_bad_level.sisu
+4

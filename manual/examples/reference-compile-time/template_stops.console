@@ -1,0 +1,11 @@
+$ sisu run template_stops.sisu
+error[E0609]: making `blank[int]` stopped at compile time: `int` is not a struct
+  --> template_stops.sisu:15:22
+   |
+15 |     let count: int = blank("count".to_string())
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+10 |         comptime panic("`{reflect.name_of(T)}` is not a struct")
+   |                  ----------------------------------------------- the template, where it stopped
+
+error[D0006]: the program was not run: errors found (1)

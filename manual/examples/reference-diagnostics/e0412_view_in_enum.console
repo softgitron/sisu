@@ -1,0 +1,12 @@
+$ sisu run e0412_view_in_enum.sisu
+error[E0412]: `Reading` cannot hold `str`, which borrows; an enum has no view form, so store an owned value such as `String`
+  --> e0412_view_in_enum.sisu:3:19
+  |
+3 |     Missing(name: str)
+  |                   ^^^
+  |
+2 | enum Reading:
+  |      ------- `Reading` is declared here
+  = note: declare the field with an owned type, such as `String` for `str`
+
+error[D0006]: the program was not run: errors found (1)

@@ -1,0 +1,25 @@
+$ sisu check mistakes.sisu
+error[E0800]: `requires` is a function's contract and belongs at the start of its body, before its first statement
+  --> mistakes.sisu:4:5
+  |
+4 |     requires n >= 0
+  |     ^^^^^^^^^^^^^^^
+
+error[E0804]: `old` takes one expression, as in `old(self.balance)`
+  --> mistakes.sisu:8:23
+  |
+8 |     ensures result == old(n, n)
+  |                       ^^^^^^^^^
+
+error[E0805]: a generator has no `ensures`: what it returns is its iterator
+  --> mistakes.sisu:12:5
+   |
+12 |     ensures limit > 0
+   |     ^^^^^^^^^^^^^^^^^
+
+error[E0807]: a test has no contract; check what it needs with `assert`
+  --> mistakes.sisu:17:5
+   |
+17 |     requires True
+   |     ^^^^^^^^^^^^^
+

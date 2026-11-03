@@ -1,0 +1,5 @@
+# A method changes the list, which is a place.
+def main():
+    var temps = [62, 75, 81]
+    temps.clear()
+    print(temps)

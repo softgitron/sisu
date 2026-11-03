@@ -1,0 +1,10 @@
+# A function that prints, passed where a pure function is required.
+def apply_twice(f: pure (int) -> int, x: int) -> int:
+    return f(f(x))
+
+def noisy_double(n: int) -> int:
+    print("doubling {n}")
+    return n * 2
+
+def main():
+    print(apply_twice(noisy_double, 3))

@@ -1,0 +1,2 @@
+12:9-12:33 E0418 borrow.must-consume-exit name="draft" ty="Draft"
+  label 10:9-10:14 borrow.declared-here name="draft"

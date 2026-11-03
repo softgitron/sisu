@@ -1,0 +1,13 @@
+# Compile-time code sees no run-time value and reaches no world.
+def greet(name: str) -> String:
+    print("greeting {name}")
+    return "Hei, {name}!"
+
+def adder(n: int) -> (int) -> int:
+    return own x -> x + n
+
+const GREETING: String = comptime greet("Aino")
+const ADD_TWO: (int) -> int = comptime adder(2)
+
+def main():
+    print(GREETING)

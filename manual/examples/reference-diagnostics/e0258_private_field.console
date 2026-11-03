@@ -1,0 +1,8 @@
+$ sisu run
+error[E0258]: the field `lon` of `Point` is private to the module `atlas.geo.point`; declare it `pub` to use it from another module
+  --> src/main.sisu:5:16
+  |
+5 |     let oulu = Point(65.0, 25.5)
+  |                ^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

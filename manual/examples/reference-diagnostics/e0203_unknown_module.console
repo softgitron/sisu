@@ -1,0 +1,8 @@
+$ sisu run
+error[E0203]: there is no module `atlas.geo.points`
+  --> src/main.sisu:2:6
+  |
+2 | from atlas.geo.points import Point
+  |      ^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

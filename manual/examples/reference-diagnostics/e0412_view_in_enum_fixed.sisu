@@ -1,0 +1,7 @@
+# The field owns its text.
+enum Reading:
+    Missing(name: String)
+    Celsius(value: int)
+
+def main():
+    print("{Reading.Missing("kiuas".to_string()):?}")

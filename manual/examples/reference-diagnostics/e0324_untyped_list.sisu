@@ -1,0 +1,4 @@
+# Nothing says what the list holds.
+def main():
+    let names = []
+    print(len(names))

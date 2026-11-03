@@ -1,0 +1,7 @@
+# A test with a precondition.
+def half(n: int) -> int:
+    return n // 2
+
+test "halves":
+    requires half(4) > 0
+    assert half(4) == 2

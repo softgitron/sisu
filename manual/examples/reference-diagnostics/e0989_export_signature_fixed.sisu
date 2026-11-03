@@ -1,0 +1,7 @@
+# The exported function takes plain numbers.
+@export("sauna_heat")
+def heat(celsius: i32, minutes: i32) -> i32:
+    return celsius * minutes
+
+def main():
+    print(heat(80, 10))

@@ -787,16 +787,16 @@ stage 0 yet.
 |---|---|---|
 | [E0244](diagnostics.md#e0244) | `resolve.derive-field` | [Copy types and explicit copies](#copy-types-and-explicit-copies) |
 | [E0338](diagnostics.md#e0338) | `type.move-out-of-borrow` | [Moving out of part of a value](#moving-out-of-part-of-a-value) |
-| [E0339](diagnostics.md#e0339), E0340 | `type.mut-argument-missing`, `type.mut-argument-unexpected` | [Parameter conventions](#parameter-conventions) |
+| [E0339](diagnostics.md#e0339), [E0340](diagnostics.md#e0340) | `type.mut-argument-missing`, `type.mut-argument-unexpected` | [Parameter conventions](#parameter-conventions) |
 | [E0341](diagnostics.md#e0341), [E0312](diagnostics.md#e0312) | `type.not-mutable`, `type.assign-immutable` | [Parameter conventions](#parameter-conventions) |
 | [E0400](diagnostics.md#e0400) | `borrow.use-after-move` | [Every value has one owner](#every-value-has-one-owner) |
 | [E0401](diagnostics.md#e0401) | `borrow.use-after-partial-move` | [Moving out of part of a value](#moving-out-of-part-of-a-value) |
-| [E0402](diagnostics.md#e0402), E0403, E0404, [E0405](diagnostics.md#e0405) | `borrow.modify-while-borrowed`, `borrow.use-while-mut-borrowed`, `borrow.move-while-borrowed`, `borrow.mut-while-borrowed` | [One mutable borrow or many shared ones](#one-mutable-borrow-or-many-shared-ones) |
+| [E0402](diagnostics.md#e0402), [E0403](diagnostics.md#e0403), [E0404](diagnostics.md#e0404), [E0405](diagnostics.md#e0405) | `borrow.modify-while-borrowed`, `borrow.use-while-mut-borrowed`, `borrow.move-while-borrowed`, `borrow.mut-while-borrowed` | [One mutable borrow or many shared ones](#one-mutable-borrow-or-many-shared-ones) |
 | [E0406](diagnostics.md#e0406) | `borrow.does-not-live-long-enough` | [One mutable borrow or many shared ones](#one-mutable-borrow-or-many-shared-ones) |
-| [E0407](diagnostics.md#e0407), E0408, [E0413](diagnostics.md#e0413), E0414, E0415 | `borrow.return-local`, `borrow.return-not-from`, `borrow.from-required`, `borrow.from-not-a-parameter`, `borrow.from-without-borrow` | [Returning a borrow](#returning-a-borrow) |
-| E0409, E0410, [E0411](diagnostics.md#e0411), E0412, E0421 | `borrow.store-in-plain-type`, `borrow.store-into-caller`, `borrow.view-field-in-plain-struct`, `borrow.view-in-enum`, `borrow.view-in-owner` | [Views](#views) |
+| [E0407](diagnostics.md#e0407), [E0408](diagnostics.md#e0408), [E0413](diagnostics.md#e0413), E0414, E0415 | `borrow.return-local`, `borrow.return-not-from`, `borrow.from-required`, `borrow.from-not-a-parameter`, `borrow.from-without-borrow` | [Returning a borrow](#returning-a-borrow) |
+| E0409, E0410, [E0411](diagnostics.md#e0411), [E0412](diagnostics.md#e0412), E0421 | `borrow.store-in-plain-type`, `borrow.store-into-caller`, `borrow.view-field-in-plain-struct`, `borrow.view-in-enum`, `borrow.view-in-owner` | [Views](#views) |
 | E0416, E0419 | `borrow.move-out-of-drop`, `borrow.move-out-of-place` | [Moving out of part of a value](#moving-out-of-part-of-a-value) |
-| [E0417](diagnostics.md#e0417), E0418, E0420, E0422 | `borrow.must-consume`, `borrow.must-consume-exit`, `borrow.must-consume-intrinsic`, `borrow.must-consume-in-owner` | [Values that must be consumed](#values-that-must-be-consumed) |
+| [E0417](diagnostics.md#e0417), [E0418](diagnostics.md#e0418), E0420, E0422 | `borrow.must-consume`, `borrow.must-consume-exit`, `borrow.must-consume-intrinsic`, `borrow.must-consume-in-owner` | [Values that must be consumed](#values-that-must-be-consumed) |
 | E0423, E0424 | `type.own-closure-capture`, `type.own-closure-changes` | [Closures and their captures](#closures-and-their-captures) |
 
 The codes of tasks, E0425 to E0437, belong to

@@ -373,10 +373,10 @@ it on purpose ([R17](diagnostics.md#e0318)).
 
 | Code | Identifier | Section |
 |---|---|---|
-| E0313, [E0312](diagnostics.md#e0312), [E0341](diagnostics.md#e0341), E0114 | `type.not-a-place`, `type.assign-immutable`, `type.not-mutable`, `parse.assignment-in-expression` | [Assignment](#assignment) |
+| [E0313](diagnostics.md#e0313), [E0312](diagnostics.md#e0312), [E0341](diagnostics.md#e0341), E0114 | `type.not-a-place`, `type.assign-immutable`, `type.not-mutable`, `parse.assignment-in-expression` | [Assignment](#assignment) |
 | [E0302](diagnostics.md#e0302), E0330, E0331 | `type.not-bool`, `type.else-not-fallible`, `type.else-must-diverge` | [Conditions](#conditions) |
 | [E0325](diagnostics.md#e0325), E0322, E0323, R0021 | `type.not-iterable`, `type.break-outside-loop`, `type.continue-outside-loop`, `panic.range-step` | [Loops](#loops) |
-| E0127 | `parse.loop-else` | [What control flow leaves out](#what-control-flow-leaves-out) |
+| [E0127](diagnostics.md#e0127) | `parse.loop-else` | [What control flow leaves out](#what-control-flow-leaves-out) |
 | [E0315](diagnostics.md#e0315), E0316, E0317 | `type.missing-return`, `type.return-value-in-unit`, `type.return-needs-value` | [Return](#return) |
 | E0435, E0436 | `type.yield-outside-generator`, `type.generator-result` | [Generators](#generators) |
 | [W0001](diagnostics.md#w0001), [R0013](diagnostics.md#r0013) | `type.hole`, `panic.hole` | [Typed holes](#typed-holes) |

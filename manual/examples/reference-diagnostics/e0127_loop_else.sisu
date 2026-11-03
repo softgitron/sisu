@@ -1,0 +1,9 @@
+# Python's `else` after a loop, for when no item was found.
+def main():
+    let temps = [62, 75, 81]
+    for t in temps:
+        if t > 90:
+            print("too hot: {t}")
+            break
+    else:
+        print("no reading above 90")

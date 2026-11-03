@@ -1,0 +1,7 @@
+# A builtin type given to a `comptime def` that takes a type.
+comptime def name(T: type) -> String:
+    return String.new(reflect.name_of(T))
+
+def main():
+    print(comptime name(String))
+    print(comptime name(bool))

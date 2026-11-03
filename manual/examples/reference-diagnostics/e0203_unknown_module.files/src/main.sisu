@@ -1,0 +1,5 @@
+# An import of a module that the package does not have.
+from atlas.geo.points import Point
+
+def main():
+    print(Point(65.0, 25.5).lat)

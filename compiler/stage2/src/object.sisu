@@ -6,9 +6,9 @@
 ##! is the one compiling them one after another gives; then the ELF object
 ##! written (`sisu2 x86 FILE.lir --output FILE.o`, and `sisu2 build`).
 
-import std.par
 import stage2.dwarf
 import stage2.elf
+import std.par
 from stage2.lirread import (
     F_OUTSIDE,
     FuncText,

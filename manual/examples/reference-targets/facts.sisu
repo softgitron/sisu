@@ -1,0 +1,7 @@
+# The facts of the build target, known while the program compiles.
+def separator() -> str:
+    return if comptime target.os == "windows": "\\" else: "/"
+
+def main():
+    print("{target.os} {target.arch} {target.runtime}")
+    print("home{separator()}aino")

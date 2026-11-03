@@ -1,0 +1,6 @@
+##! The digits of numbers.
+
+## The number of decimal digits of an `int`, as `len` gives it.
+impl Len for int:
+    def len(self) -> int:
+        return len("{self}")

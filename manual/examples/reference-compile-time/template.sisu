@@ -1,0 +1,25 @@
+# A template asks what kind of type it was given.
+struct Booking:
+    name: String
+
+def kind[T](value: T) -> String:
+    if comptime reflect.is_int(T):
+        return "an int"
+    elif comptime reflect.is_str(T):
+        return "text"
+    elif comptime reflect.is_list(T):
+        return "a list of {len(value)}"
+    elif comptime reflect.is_option(T):
+        return "an optional value"
+    elif comptime reflect.implements(T, "Display"):
+        return "something that prints"
+    else:
+        return "a {reflect.name_of(T)}"
+
+def main():
+    print(kind(3))
+    print(kind("hei"))
+    print(kind([1, 2]))
+    print(kind(Some(1)))
+    print(kind(2.5))
+    print(kind(Booking("Aino")))

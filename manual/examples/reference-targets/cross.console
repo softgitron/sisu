@@ -1,0 +1,2 @@
+$ sisu build --native --target aarch64-linux facts.sisu
+error[D0009]: unknown option `--target` for `sisu build`

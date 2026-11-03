@@ -1,0 +1,16 @@
+# The impl says what its associated type is.
+trait Source:
+    type Item
+    def first(self) -> Self.Item
+
+struct Bench:
+    sitters: list[String]
+
+impl Source for Bench:
+    type Item = String
+
+    def first(self) -> String:
+        return self.sitters[0].copy()
+
+def main():
+    print(Bench(["Aino"]).first())

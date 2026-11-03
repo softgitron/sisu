@@ -1,0 +1,27 @@
+##! The runtime of native code in Sisu (D-086; D-087, step 3): the functions
+##! the generated code calls by symbol, with Sisu's own convention (decision
+##! 189: the result's address, then each argument's, and the status byte),
+##! compiled once into an object that every native program is linked with.
+##! Each `export_NAME` function of this module is the symbol `sisu_rt_NAME`;
+##! what they call is compiled with them. The code is the runtime's own:
+##! it counts no frame and passes no yield point, as drop glue does not, and
+##! it reaches raw memory only through the operations of std.mem the
+##! backend compiles inline, so it needs nothing of the program's type
+##! table. Each function replaces its counterpart in the runtime in Rust
+##! (`crates/sisu-rt`), which is deleted.
+
+from std.mem import ptr
+
+## Whether the `n` bytes at `a` and `b` are the same: `==` of two texts of
+## one length (decision 253), whose lengths the code compares first.
+pub pure def export_bytes_eq(a: ptr[u8], b: ptr[u8], n: int) -> bool:
+    var i = 0
+    while i < n:
+        # safety: valid, aligned, in_bounds: the code passes the bytes of two
+        #   texts, `n` of each, so byte `i`, below `n`, lies within both, and
+        #   a byte needs no alignment.
+        unsafe:
+            if a.offset(i).read() != b.offset(i).read():
+                return False
+        i += 1
+    return True

@@ -1,0 +1,5 @@
+# An application that uses the library's `pub` function.
+import sauna
+
+def main():
+    print(sauna.feel(84))

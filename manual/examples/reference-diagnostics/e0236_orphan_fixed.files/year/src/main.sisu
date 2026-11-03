@@ -1,0 +1,5 @@
+# A program that uses the library's own type.
+from digits import Number
+
+def main():
+    print(len(Number(2026)))

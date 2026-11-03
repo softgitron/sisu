@@ -1,0 +1,16 @@
+# A contract on a trait's method binds every impl, which stage 0 does
+# not check.
+trait Meter:
+    def read(self, at: int) -> int:
+        requires at >= 0
+        return at
+
+struct Dial:
+    scale: int
+
+impl Meter for Dial:
+    def read(self, at: int) -> int:
+        return at * self.scale
+
+def main():
+    print(Dial(2).read(-5))

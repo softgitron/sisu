@@ -1,0 +1,4 @@
+# A point whose longitude is private to its module.
+pub struct Point:
+    pub lat: f64
+    lon: f64

@@ -1,0 +1,7 @@
+panic: invariant of `Gauge` failed: 0 <= self.level <= 10
+    0 <= self.level <= 10
+         │
+         13
+  at the invariant of Gauge (r0102_invariant_failed.sisu:4:15)
+  at Gauge.fill (r0102_invariant_failed.sisu:7:29)
+  at main (r0102_invariant_failed.sisu:11:5)

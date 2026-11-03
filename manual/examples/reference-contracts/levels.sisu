@@ -1,0 +1,9 @@
+# The level of a run decides which clauses are checked.
+def per_hour(minutes: int, hours: int) -> int:
+    requires hours > 0
+    ensures result * hours <= minutes
+    return minutes // hours + 1
+
+def main():
+    print(per_hour(90, 2))
+    print(per_hour(90, 0))

@@ -1,0 +1,8 @@
+$ sisu run e0313_not_a_place.sisu
+error[E0313]: this expression cannot be assigned to
+  --> e0313_not_a_place.sisu:4:5
+  |
+4 |     len(temps) = 0
+  |     ^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

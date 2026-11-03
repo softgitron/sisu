@@ -1,0 +1,8 @@
+$ sisu run e0324_untyped_list.sisu
+error[E0324]: the type of `names` cannot be inferred here; add a type annotation
+  --> e0324_untyped_list.sisu:3:9
+  |
+3 |     let names = []
+  |         ^^^^^
+
+error[D0006]: the program was not run: errors found (1)

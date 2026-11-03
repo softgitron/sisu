@@ -1,0 +1,6 @@
+# A list read while a `mut` borrow of it is still in use.
+def main():
+    var queue = ["Aino", "Eero"]
+    let back = ref mut queue
+    print(len(queue))
+    back.push("Roni")

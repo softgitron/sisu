@@ -1,0 +1,7 @@
+# An exported function that takes a view, which C cannot keep alive.
+@export("sauna_name_length")
+def name_length(name: str) -> int:
+    return len(name)
+
+def main():
+    print(name_length("Kotiharju"))

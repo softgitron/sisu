@@ -1,0 +1,3 @@
+3:23-3:32 E0814 refine.predicate-type ty="Half" found="int"
+6:1-6:23 E0813 refine.own-impl ty="Small" base="int" trait="Display"
+12:5-12:7 E0812 refine.change-through-base what="xs" ty="Short" predicate="len(self) <= 3"

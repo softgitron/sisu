@@ -1,0 +1,23 @@
+$ sisu run levels.sisu
+panic: postcondition of `per_hour` failed: result * hours <= minutes
+    result * hours <= minutes
+    │      │ │        │
+    46     │ 2        90
+           92
+  at per_hour (levels.sisu:4:13)
+  at main (levels.sisu:8:11)
+$ sisu run --contracts=preconditions levels.sisu
+46
+panic: precondition of `per_hour` failed: hours > 0
+    hours > 0
+    │
+    0
+  at per_hour (levels.sisu:3:14)
+  at main (levels.sisu:9:11)
+$ sisu run --contracts=off levels.sisu
+46
+panic: division by zero
+  at per_hour (levels.sisu:5:12)
+  at main (levels.sisu:9:11)
+$ sisu run --contracts=some levels.sisu
+error[D0028]: `--contracts` takes `off`, `preconditions` or `all`, not `some`

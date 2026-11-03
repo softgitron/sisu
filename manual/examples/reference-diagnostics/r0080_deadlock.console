@@ -1,0 +1,4 @@
+$ sisu run r0080_deadlock.sisu
+deadlock: every task is waiting, and no timer can wake any of them
+  the root task waits for the end of a scope at r0080_deadlock.sisu:4:5
+  task 1 waits for recv at r0080_deadlock.sisu:6:19

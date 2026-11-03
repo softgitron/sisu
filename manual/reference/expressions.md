@@ -534,9 +534,10 @@ error[D0006]: the program was not run: errors found (1)
 `comptime e` computes `e` while the program is compiled and puts the
 value in its place; `e` may use constants and call `pure` and
 `comptime` functions, and nothing in it reaches the world (E0600 for a
-value known only at run time; [R12](../README.md#the-reference), when
-it is written). `unsafe e` marks one expression whose unsafe operation
-the compiler cannot check ([R7](ownership.md#unsafe-code-and-raw-pointers));
+value known only at run time;
+[R12](compile-time.md#what-compile-time-code-may-do)). `unsafe e` marks
+one expression whose unsafe operation the compiler cannot check
+([R7](ownership.md#unsafe-code-and-raw-pointers));
 one that holds no such operation is W0009.
 
 <!-- file: examples/reference-expressions/compile_time.sisu -->

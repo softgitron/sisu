@@ -1,0 +1,10 @@
+# An associated function builds the empty shelf.
+struct Shelf[T]:
+    items: list[T]
+
+    def empty() -> Shelf[T]:
+        return Shelf(items=[])
+
+def main():
+    let shelf = Shelf[int].empty()
+    print(len(shelf.items))

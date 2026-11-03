@@ -857,3 +857,7 @@ D0122 cli     native.stage2-failed        internal compiler error: stage 2 faile
 D0123 cli     cli.bad-backend             `--backend` takes `sisu` (the x86-64 backend written in Sisu, the debug profile's default) or `cranelift` (the Rust backend, the release profile's default and the oracle), not `{value}`
 D0124 cli     native.backend-lowering     `--backend=sisu` compiles the LIR stage 2 lowers, so it does not go with `--lower=rust`
 D0125 cli     native.sisu-failed          internal compiler error: the Sisu backend failed to compile the program (status {status}); `--backend=cranelift` compiles it with the Rust backend:\n{detail}
+# The runtime in Sisu (decision 336): compiled once from its seed, the SIR
+# stage 1 printed of `compiler/rt`, into the object every native program is
+# linked with.
+D0126 cli     native.rt-build             building the runtime in Sisu from `{seed}` failed:\n{detail}

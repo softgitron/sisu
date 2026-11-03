@@ -74,9 +74,10 @@ pub mod sym {
     /// `sisu_rt_binary(op, dst, a, a_ty, b, b_ty) -> u8`: an operator on
     /// values that are not numbers (equality, order, `in`, `+` on text).
     pub const BINARY: &str = "sisu_rt_binary";
-    /// `sisu_rt_bytes_eq(a, b, n) -> u8`: whether the `n` bytes at `a` and
-    /// at `b` are the same, for `==` on two texts of one length, compiled
-    /// inline otherwise (decision 253); it runs on the caller's stack.
+    /// `sisu_rt_bytes_eq(ret, a, b, n) -> u8`, of Sisu's convention, the
+    /// runtime in Sisu's (`compiler/rt`, decision 336): whether the `n`
+    /// bytes at `a` and at `b` are the same, for `==` on two texts of one
+    /// length, compiled inline otherwise (decision 253).
     pub const BYTES_EQ: &str = "sisu_rt_bytes_eq";
     /// `sisu_rt_text_push(text, bytes, n)`: appends `n` bytes to the
     /// `String` at `text` (decision 265).

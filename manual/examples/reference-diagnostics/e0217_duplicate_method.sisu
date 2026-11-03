@@ -1,0 +1,14 @@
+# Two methods with one name.
+struct Stove:
+    celsius: int
+
+    def heat(mut self):
+        self.celsius += 10
+
+    def heat(mut self, degrees: int):
+        self.celsius += degrees
+
+def main():
+    var stove = Stove(60)
+    stove.heat()
+    print(stove.celsius)

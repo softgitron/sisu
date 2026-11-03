@@ -1,0 +1,8 @@
+# A returned borrow of a parameter that the `from` clause leaves out.
+def longer(a: str, b: str) -> str from a:
+    if len(b) > len(a):
+        return b
+    return a
+
+def main():
+    print(longer("sauna", "lauteet"))

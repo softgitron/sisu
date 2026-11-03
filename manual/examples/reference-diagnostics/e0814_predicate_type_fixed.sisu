@@ -1,0 +1,6 @@
+# The predicate says when the value is even.
+type Even = int where self % 2 == 0
+
+def main():
+    let n: Even = 4
+    print(n)

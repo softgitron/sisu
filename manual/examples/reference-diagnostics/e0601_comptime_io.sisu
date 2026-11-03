@@ -1,0 +1,9 @@
+# Compile-time code that prints.
+def greet(name: str) -> String:
+    print("greeting {name}")
+    return "Hei, {name}!"
+
+const GREETING: String = comptime greet("Aino")
+
+def main():
+    print(GREETING)

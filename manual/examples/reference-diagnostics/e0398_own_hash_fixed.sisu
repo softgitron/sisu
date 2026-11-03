@@ -1,0 +1,8 @@
+# Derived `Eq` and `Hash`, which the host compares structurally.
+@derive(Eq, Hash)
+struct Room:
+    number: int
+
+def main():
+    let guests = {Room(1): "Aino", Room(2): "Eero"}
+    print(guests[Room(2)])

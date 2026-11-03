@@ -1,0 +1,12 @@
+# The runtime of native code in Sisu (D-086; D-087, step 3): the functions
+# the generated code calls by symbol, with Sisu's own convention, compiled
+# once into an object that every native program is linked with
+# (`compiler/target/rt/rt.o`; docs/architecture.md, "The runtime in Sisu").
+[package]
+name = "rt"
+version = "0.1.0"
+edition = "2027"
+description = "The runtime of native code, written in Sisu"
+license = "Apache-2.0 OR Unlicense"
+# Raw memory, through std.mem's operations the backend compiles inline.
+unsafe = "memory"

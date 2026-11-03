@@ -1,0 +1,8 @@
+$ sisu run e0800_misplaced_clause.sisu
+error[E0800]: `requires` is a function's contract and belongs at the start of its body, before its first statement
+  --> e0800_misplaced_clause.sisu:4:5
+  |
+4 |     requires n >= 0
+  |     ^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

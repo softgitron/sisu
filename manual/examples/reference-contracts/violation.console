@@ -1,0 +1,8 @@
+$ sisu run violation.sisu
+3750
+panic: precondition of `Account.withdraw` failed: 0 < amount <= self.cents
+    0 < amount <= self.cents
+        │         │
+        9000      3750
+  at Account.withdraw (violation.sisu:6:18)
+  at main (violation.sisu:13:11)

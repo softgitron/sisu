@@ -1,0 +1,14 @@
+# An invariant holds after construction and each `mut self` method.
+struct Gauge:
+    level: int
+    invariant 0 <= self.level <= 10
+
+    def fill(mut self, amount: int):
+        self.level += amount
+
+def main():
+    var gauge = Gauge(level=4)
+    gauge.fill(5)
+    print(gauge.level)
+    gauge.fill(5)
+    print(gauge.level)

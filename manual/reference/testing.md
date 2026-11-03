@@ -512,7 +512,7 @@ and the reports of coverage and mutation testing are designed
 
 | Code | Identifier | Section |
 |---|---|---|
-| E0381, E0702, E0807 | `type.return-in-test`, `type.test-signature`, `contract.not-in-test` | [The forms of a test](#the-forms-of-a-test) |
+| E0381, E0702, [E0807](diagnostics.md#e0807) | `type.return-in-test`, `type.test-signature`, `contract.not-in-test` | [The forms of a test](#the-forms-of-a-test) |
 | [R0006](diagnostics.md#r0006), E0379 | `panic.assert`, `type.assert-message` | [Assertions](#assertions) |
 | E0820 | `test.no-generator` | [Property tests](#property-tests) |
 | E0821 | `test.refines-mismatch` | [Refinement tests](#refinement-tests) |

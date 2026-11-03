@@ -1,0 +1,18 @@
+# In a function that can fail, `result` is the whole result, and an
+# exit by `?` is checked too.
+error Reading:
+    Missing(name: String)
+
+def find(name: str) -> int ! Reading:
+    if name == "kiuas":
+        return Ok(80)
+    return Err(Missing(name.to_string()))
+
+def doubled(name: str) -> int ! Reading:
+    ensures result.is_ok()
+    let celsius = find(name)?
+    return Ok(celsius * 2)
+
+def main():
+    print(doubled("kiuas"))
+    print(doubled("lauteet"))

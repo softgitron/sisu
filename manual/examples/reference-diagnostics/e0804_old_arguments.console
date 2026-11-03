@@ -1,0 +1,8 @@
+$ sisu run e0804_old_arguments.sisu
+error[E0804]: `old` takes one expression, as in `old(self.balance)`
+  --> e0804_old_arguments.sisu:6:33
+  |
+6 |         ensures self.celsius == old(self.celsius, degrees) + degrees
+  |                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

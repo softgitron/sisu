@@ -1,0 +1,6 @@
+# `embed` makes a file's text part of the program while it compiles.
+const WORDS: str = embed("words.txt")
+
+def main():
+    let words = WORDS.split_whitespace().collect()
+    print("{len(words)} words, the first {words[0]}")

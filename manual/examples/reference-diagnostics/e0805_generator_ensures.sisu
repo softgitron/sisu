@@ -1,0 +1,9 @@
+# A generator with a postcondition.
+def evens(limit: int) -> Iter[int]:
+    requires limit >= 0
+    ensures limit >= 0
+    for i in range(limit):
+        yield i * 2
+
+def main():
+    print(evens(4).collect())

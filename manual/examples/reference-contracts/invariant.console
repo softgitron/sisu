@@ -1,0 +1,9 @@
+$ sisu run invariant.sisu
+9
+panic: invariant of `Gauge` failed: 0 <= self.level <= 10
+    0 <= self.level <= 10
+         │
+         14
+  at the invariant of Gauge (invariant.sisu:4:15)
+  at Gauge.fill (invariant.sisu:7:29)
+  at main (invariant.sisu:13:5)

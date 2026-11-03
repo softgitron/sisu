@@ -1,0 +1,7 @@
+# The borrow's last use comes before the move.
+def main():
+    let names = ["Aino", "Eero"]
+    let first = ref names[0]
+    print(first)
+    let team = names
+    print(len(team))

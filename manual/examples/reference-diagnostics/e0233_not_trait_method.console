@@ -1,0 +1,8 @@
+$ sisu run e0233_not_trait_method.sisu
+error[E0233]: `discount` is not a method of `Priced`
+  --> e0233_not_trait_method.sisu:12:9
+   |
+12 |     def discount(self) -> int:
+   |         ^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

@@ -1,0 +1,8 @@
+$ sisu run e0237_missing_assoc_type.sisu
+error[E0237]: the impl of `Source` for `Bench` does not say what `Item` is; add `type Item = ...`
+  --> e0237_missing_assoc_type.sisu:9:1
+  |
+9 | impl Source for Bench:
+  | ^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

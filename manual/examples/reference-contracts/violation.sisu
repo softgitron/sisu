@@ -1,0 +1,13 @@
+# A broken precondition panics, naming the function and the clause.
+struct Account:
+    cents: int
+
+    def withdraw(mut self, amount: int) -> int:
+        requires 0 < amount <= self.cents
+        self.cents -= amount
+        return self.cents
+
+def main():
+    var account = Account(cents=5000)
+    print(account.withdraw(1250))
+    print(account.withdraw(9000))

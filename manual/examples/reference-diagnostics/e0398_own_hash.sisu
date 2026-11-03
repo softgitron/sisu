@@ -1,0 +1,15 @@
+# A dict key whose type has an `Eq` and a `Hash` of its own.
+struct Room:
+    number: int
+
+impl Eq for Room:
+    def eq(self, other: Room) -> bool:
+        return self.number == other.number
+
+impl Hash for Room:
+    def hash(self, mut h: Hasher):
+        self.number.hash(mut h)
+
+def main():
+    let guests = {Room(1): "Aino", Room(2): "Eero"}
+    print(guests[Room(2)])

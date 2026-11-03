@@ -1,0 +1,12 @@
+# The operator is delegated by a one-field struct, held as a field.
+@delegate(Add, to="value")
+struct Metres:
+    value: f64
+
+struct Run:
+    distance: Metres
+    runner: String
+
+def main():
+    let total = Run(Metres(400.0), "Aino").distance + Metres(800.0)
+    print(total.value)

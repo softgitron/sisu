@@ -3505,7 +3505,7 @@ The runtime's entry points (`abi::sym`) are the boundary:
 | `sisu_rt_drop(value, ty) -> u8`, `sisu_rt_copy(dst, src, ty)` | the drop and `.copy()` of a value by its type |
 | `sisu_rt_retain(value, ty)` | a copy of a value of type `ty` that holds capability handles was made: each handle's cell counts one more (decision 237) |
 | `sisu_rt_binary(op, out, a, a_ty, b, b_ty) -> u8` | equality, order, `in` and concatenation of values that are not numbers |
-| `sisu_rt_bytes_eq(a, b, n) -> u8` | whether the `n` bytes at `a` and `b` are the same: `==` of two texts of one length (decision 253) |
+| `sisu_rt_bytes_eq(ret, a, b, n) -> u8` | whether the `n` bytes at `a` and `b` are the same: `==` of two texts of one length (decision 253); of Sisu's convention, the runtime in Sisu's (decision 336) |
 | `sisu_rt_intrinsic(desc, ret, args) -> u8` | a call of an intrinsic |
 | `sisu_rt_sized(kind, op, flags, x, y, out) -> u8`, `sisu_rt_wide(kind, op, x, x_ty, y, y_ty, out) -> u8` | an operation of a sized integer type, of one word or of 128 bits |
 | `sisu_rt_table(ty, items, n, out) -> u8`, `sisu_rt_dict_slot(dict, key, key_ty, mode, out) -> u8` | a dict or set literal; a dict's value for a key |
@@ -3516,7 +3516,7 @@ The runtime's entry points (`abi::sym`) are the boundary:
 | `sisu_rt_free(ptr)` | frees a box's or a `dyn`'s cell whose value was moved out (decision 216) |
 | `sisu_rt_trace_release(error)` | a field was moved out of an error value, which is never dropped whole: it lets go of its return trace (decision 215) |
 | `sisu_rt_yield()` | a yield point found the budget spent: the scheduler may switch tasks |
-| `SISU_RT_DEPTH` | the counter of nested calls |
+| `SISU_RT_DEPTH` | the counter of nested calls; this and the next three are thread-local, each thread's own (decision 332) |
 | `SISU_RT_BUDGET` | the yield points left before the scheduler is asked |
 | `SISU_RT_STACK` | the running task's stack limits: the probe's, the real one, the unwinding floor, and the watermark's and the failure's flags; and whether it is a generator being closed (decision 236) |
 | `SISU_RT_SITE` | where the running code last called an intrinsic that may wait, and whether its function is `pure` |
@@ -3557,6 +3557,28 @@ the code steps a range or a borrowed list's elements in (decision 253).
 Standard
 output is buffered and written before anything goes to standard error and
 when the program ends, so the two interleave as the interpreter's do.
+
+### The runtime in Sisu
+
+The runtime is being written in Sisu, piece by piece, as D-086 orders
+(decisions 335 and 336). `compiler/rt` is a Sisu package (`unsafe =
+"memory"`) whose root module's `export_NAME` functions are the runtime's
+symbols `sisu_rt_NAME`, of Sisu's convention (decision 189), which the
+generated code calls as it calls any function: the result's address,
+each argument's, the status byte. It is compiled once into
+`compiler/target/rt/rt.o`, which every native program is linked with
+before the runtime in Rust, from its seed, `compiler/rt/rt.sir`, the SIR
+stage 1 prints of the package (a test holds it to that), by the Rust
+lowering and Cranelift (`sisu_codegen::compile_library`), since it must
+exist before stage 1, a native program itself, can compile it. Its code
+is the runtime's own: it counts no frame, passes no yield point and adds
+no line to a stack trace, as drop glue does not, and it reaches raw memory
+only through the operations of std.mem the backend compiles inline
+(decision 335), so it needs nothing of the program's type table; a
+construct that would is refused when the object is built. The first piece
+ported is `sisu_rt_bytes_eq`, the comparison of two texts' bytes that `==`
+of two texts of one length calls (decision 253), whose Rust counterpart is
+deleted. port-debt.md ("The runtime in Sisu") lists the pieces left.
 
 ### Tasks
 
@@ -3666,6 +3688,19 @@ cancellation does not wake one.
 stops with the interpreter's report (`R0080`, `R0081`) and status 134; a
 call that may wait records where it is (`SISU_RT_SITE`) for it.
 
+**Data parallelism.** `std.par.map` runs its bodies on a pool of worker
+threads apart from the scheduler, as 06 and D-069 have it (decision 333;
+`sisu-rt/src/par.rs`): the backend compiles `map`'s body as a call of the
+runtime's parallel map, which hands the elements to the workers (as many
+as the machine has processors, or `SISU_PAR_THREADS`) and writes each
+result at its element's place, so the list is the one the elision gives.
+Each worker has a 1 GiB stack, its own count of nested calls, stack
+limits and budget (decision 332), the latter never spent, and a scheduler
+of its own for the generators a body drives. The lowest index's panic is
+the call's, after the results before it are dropped; a call on a worker
+runs its bodies there in order. The interpreter runs `map` as written, on
+the asking task, whose budget its bodies spend (port-debt.md).
+
 ### Raw memory, foreign calls and the machine intrinsics
 
 Unsafe code runs natively without the interpreter's checks (decision 302):
@@ -3737,7 +3772,8 @@ does. LIR gained two words for them: the conversion `sextend` and the type
 
 `sisu-codegen` writes the object beside the output (`NAME.o`, removed
 afterwards unless `SISU_NATIVE_KEEP=1`), and `cc` links it with the
-runtime and the system libraries a Rust static library needs, using LLVM's
+runtime in Sisu's object (decision 336), the runtime and the system
+libraries a Rust static library needs, using LLVM's
 `lld` when `ld.lld` is on the search path: it links in a third of the time
 of the system's `ld` (87 against 224 ms for a small program). The search
 path is given to `cc` explicitly, since the conformance runner runs `sisu`
@@ -3898,7 +3934,7 @@ lir 1
 profile debug                                   -- or `release`
 source 0 "hello.sisu"                           -- the program's files, as SIR numbers them
 source 1 "<std>/prelude.sisu"
-data d0 import SISU_RT_DEPTH                    -- a data symbol of the runtime
+data d0 import tls SISU_RT_DEPTH                -- a thread-local data symbol of the runtime
 data d4 bytes "main\x00"                        -- read-only bytes
 data d7 align 8 u32 0 1 0 0 1                   -- 32-bit words, little-endian
 data d40 align 8 zeros 16 func 0 sisu$P#drop$7 func 8 sisu$L#drop$9   -- words holding function addresses
@@ -3928,7 +3964,8 @@ made them, which is the order of the object file: a symbol is declared
 before anything refers to it, and the functions are defined in this
 order.
 
-- `data dN import NAME` declares the runtime's data symbol `NAME`; `data
+- `data dN import [tls] NAME` declares the runtime's data symbol `NAME`,
+  thread-local with `tls` (decision 332); `data
   dN [align A] bytes "..."` defines read-only bytes (printable ASCII as
   itself, `\\`, `\"` and `\xHH` for any other byte); `u32 W...` defines
   32-bit words; `zeros N` defines `N` zero bytes, in which each `func
@@ -3977,7 +4014,7 @@ Values are `vN`, each defined once; types are `i8`, `i16`, `i32`, `i64`,
 | `uextend.T`, `sextend.T`, `ireduce.T`, `bitcast.T`, `fpromote.T`, `fdemote.T` `a` | conversions |
 | `load.T a, OFF`, `uload8 a, OFF`, `sload8 a, OFF`; `store v, a, OFF` | memory at `a + OFF`, aligned, never faulting |
 | `stack_addr sN`, `stack_load sN`, `stack_store v, sN` | a slot's address, its first word |
-| `symbol_value dN`, `func_addr SYMBOL`, `get_stack_pointer` | addresses |
+| `symbol_value dN`, `tls_value dN`, `func_addr SYMBOL`, `get_stack_pointer` | addresses; `tls_value` the running thread's copy of thread-local data |
 | `call SYMBOL(a, ...)`, `call_indirect N, f(a, ...)`, `memcpy d, s, n` | calls; `call_indirect` of Sisu's convention with `N` arguments |
 | `use xN`, `def xN, v`, `param bN` | a variable's value, a new one; a parameter of a block |
 | `loc LINE COL` | the source location of the operations that follow |
@@ -4023,8 +4060,13 @@ build and the Rust lowering use unasked; `--backend=sisu` names it for a
 release build, any other name is `D0123`, the Sisu backend with the Rust
 lowering is `D0124` (it compiles LIR), a construct it does not compile is
 the program's `D0103` (`x86: not compiled: WHAT (in FUNCTION)`), and any
-other failure `D0125`. `sisu2 x86 FILE.lir --output FILE.o` compiles a LIR
-program on its own.
+other failure `D0125`. A debug build runs `sisu2 build FILE.sir --output
+FILE.o`, which lowers the program and compiles its LIR in one process,
+without the LIR's text between two (decision 334); `sisu2 x86 FILE.lir
+--output FILE.o` compiles a LIR program on its own. Either compiles the
+functions on the workers of `std.par` (decision 333), in batches whose
+functions are placed in the file's order, so the object is the one a
+single thread gives, byte for byte.
 Its modules are `lirread.sisu` (LIR read item by item, as
 `sisu-codegen/src/lir.rs` reads it, each value given its type),
 `x64.sisu` (the instructions' encodings), `x86.sisu` (the analysis, the
@@ -4094,6 +4136,19 @@ lines, against Cranelift's 6 s on four cores), prints on the 400
 conformance files tried what stage 1 compiled by Cranelift prints, in 1.5
 times the time. port-debt.md ("The backend in Sisu") lists what it leaves.
 
+**On threads** (decisions 332 to 334): the words the generated code
+reaches by symbol (the count of nested calls, the budget, the stack
+limits and the site) are thread-local, LIR's `data dN import tls NAME` and
+`tls_value dN`, so that Sisu code runs on several threads at once; the
+native backend compiles std.par's `map` as a call of the runtime's
+parallel map, whose bodies run on a pool of workers apart from the task
+scheduler, each result written at its element's place; and the backend's
+pass hands each batch of functions to that map, each function's lines
+read and compiled on a worker. On stage 1 on four cores, the backend
+compiles its LIR file in 9.4 s (18.3 s on one worker), and `sisu2 build`
+lowers it in 6.7 s and compiles it in 6.0 s, where Cranelift compiles the
+LIR in 3.7 s.
+
 **The fixed point** (decision 330; D-087's criterion for step 2): the
 backend, built by itself, rebuilds itself to the same bytes.
 `compiler/stage2/bootstrap.sh` builds sisu2-C, stage 2 as the Cranelift
@@ -4105,13 +4160,13 @@ sisu2-B and stage1-B. Each B is its A byte for byte, and each SIR stage1-A
 prints is the one `sisu sir` prints:
 
 ```text
-  sisu2-A       14459112 bytes  sha256 2acc04a32f95c0fb...  built by sisu2-C (7.7 s)
-  stage1-A      38966672 bytes  sha256 a3ef32a31e41464e...  built by sisu2-C (27.5 s)
-  sisu2-B       14459112 bytes  sha256 2acc04a32f95c0fb...  built by sisu2-A (11.5 s)
-  stage1-B      38966672 bytes  sha256 a3ef32a31e41464e...  built by sisu2-A (46.2 s)
+  sisu2-A       14979976 bytes  sha256 e4bf40b4445cccf0...  built by sisu2-C (4.2 s)
+  stage1-A      39824256 bytes  sha256 8a7973dc57453a7b...  built by sisu2-C (16.4 s)
+  sisu2-B       14979976 bytes  sha256 e4bf40b4445cccf0...  built by sisu2-A (6.3 s)
+  stage1-B      39824256 bytes  sha256 8a7973dc57453a7b...  built by sisu2-A (28.3 s)
 ```
 
-The script takes about five minutes on four cores, most of it stage 1
+The script takes three to five minutes on four cores, most of it stage 1
 printing the SIR of the two packages; the driver builds with the stage 2
 that `SISU_STAGE2` names, as it is, instead of `target/stage2/sisu2`. CI
 runs it on every push.
@@ -4119,7 +4174,7 @@ runs it on every push.
 ### Coverage
 
 `conformance/native.list` names the cases the backend builds and runs:
-207 of them, every case of the suite that runs a program but the
+208 of them, every case of the suite that runs a program but the
 refusals of the checked memory model, which are the interpreter's (the
 others are diagnostics, `sisu test` files, and the tools' cases:
 `--watch`, the REPL, worksheets, tokens, SIR and documentation). Among them are every
@@ -7264,7 +7319,8 @@ memory, foreign calls and the machine intrinsics" and "LIR"; D-087)
      and stage1-A; stage1-A, the front end compiled by the Sisu backend,
      prints both packages' SIR again, and sisu2-A, the backend compiled by
      itself, lowers and compiles that SIR into sisu2-B and stage1-B. Each B
-     is its A byte for byte (stage 2 14 459 112 bytes, stage 1 38 966 672),
+     is its A byte for byte (stage 2 14 979 976 bytes, stage 1 39 824 256,
+     with the pipeline of decisions 334 to 336),
      and stage1-A prints the SIR `sisu sir` prints, so building once more
      changes nothing: the lowering and the backend are deterministic
      (Sisu's dicts and sets iterate in the order of insertion, and nothing
@@ -7310,3 +7366,146 @@ memory, foreign calls and the machine intrinsics" and "LIR"; D-087)
      backend in Sisu"). Stage 1 and stage 2 themselves are still built
      with the Rust lowering and Cranelift, the seed. `D0123` names the two
      defaults. This changes no rule of the language.
+
+**The pipeline in one process and on threads** (section "Stage 2", "The
+Sisu backend" and "Tasks"; D-069, D-087)
+
+332. The words the generated code reaches by symbol, the count of nested
+     calls (`SISU_RT_DEPTH`), the budget (`SISU_RT_BUDGET`), the running
+     task's stack limits (`SISU_RT_STACK`) and the site of the last call
+     that may wait (`SISU_RT_SITE`), are thread-local, each thread's own,
+     so that Sisu code runs on several threads at once (decision 333). The
+     runtime defines them in the executable's thread-local data (`.tbss`)
+     in assembly, since stable Rust gives no thread-local variable a symbol,
+     and reaches them as the generated code does, through the initial-exec
+     model: the thread pointer plus the variable's offset, which the GOT
+     holds and the linker relaxes to a constant in an executable (x86-64
+     and AArch64 Linux; elsewhere they stay ordinary data). LIR says so:
+     `data dN import tls NAME` declares one, and `vN = tls_value dN` is its
+     address in the running thread, which the translation makes
+     Cranelift's `tls_value` (with `tls_model=elf_gd`, whose sequence the
+     linker relaxes too) and the Sisu backend `mov rax, fs:[0]; add rax,
+     [rip + NAME@GOTTPOFF]` (`R_X86_64_GOTTPOFF`, the import an `STT_TLS`
+     symbol). Both lowerings write `tls_value` where they reached those
+     words with `symbol_value`, so every executable changed and LIR still
+     gives the Rust lowering's executable byte for byte. The runtime's
+     other state that Sisu code on two threads could reach is made safe
+     for it: a drop's forgetting (decision 223) is per thread, and the
+     table of views (decision 214) is shared under a lock. The other ways
+     were the words left global with Sisu code on one thread only, which
+     is no parallelism, and the words reached through a call of the
+     runtime, which would put a call at every function's entry. This
+     changes no rule of the language.
+333. Natively, `std.par.map` runs its bodies on a pool of worker threads
+     apart from the task scheduler, as 06 and D-069 describe std.par: the
+     native backend compiles the body of std's `par.map` (`<std>/par.sisu`)
+     as a call of the runtime's parallel map (`par.map`, an intrinsic
+     numbered after the others that no SIR names) and the drop of the
+     function `map` owns, the same body in both lowerings
+     (`sisu-codegen/src/bodies.rs`, stage 2's `gen.native_bodies`), while
+     the interpreter runs the SIR as written, the serial elision. The
+     runtime starts its workers at the first call, as many as the machine
+     has processors (`SISU_PAR_THREADS=N` sets another number), each on a
+     1 GiB stack with its own words (decision 332), the asking task's count
+     of nested calls, a budget that never runs out and a scheduler of its
+     own for the generators a body drives; the workers take the elements
+     by index and write each result at its element's place, so the list is
+     the elision's whatever the number of workers. When bodies panic, the
+     lowest index's panic is the call's, as the elision raises the first:
+     the results before it are dropped while it is in flight, as the
+     elision's unwinding drops them, those after it freed without running
+     Sisu code, and the other panics forgotten. A call made on a worker
+     runs its bodies there, one after another. A body spends no yield
+     point of the asking task's budget, so a program whose tasks run while
+     one of them maps may switch at other points natively than in the
+     interpreter, which runs the bodies on the asking task (port-debt.md).
+     `conformance/cases/std/par_map` holds the elision's results and panic
+     natively and from LIR. The other ways were an intrinsic that std.par
+     calls and the interpreter implements, which would change the shared
+     standard library and the interpreter for what only native code needs,
+     and a pool shared with the scheduler, which Q-6 leaves open. This
+     changes no rule of the language: it implements D-069's pool.
+334. `sisu2 build FILE.sir --output FILE.o [--release] [--times]` lowers a
+     program and compiles its LIR in one process: the LIR's text stays in
+     memory with where each function is in it (`gen.lower_spanned`: the
+     start of its head's line, the end of its `end` line and its lines), so
+     the backend's pass skips a function's lines without reading them. The
+     backend compiles the functions in batches of 256 through
+     `std.par.map` (decision 333), each function's lines read
+     (`lirread.read_function`) and compiled on a worker, and places each
+     batch's functions in the file's order, C's `main` once every function
+     before it is placed, since their frames give the probe reserve it
+     reads (decision 310); the object's bytes are made `bytes` on the
+     workers too. The object is byte for byte the one `sisu2 lir` and
+     `sisu2 x86` give, and the same on one worker as on four. A debug
+     build of the driver runs `sisu2 build`, whose `--times` report gives
+     `SISU_NATIVE_TIMES` the lowering's and the backend's times, and
+     `sisu2 x86` compiles a LIR file (`--from-lir`) on the workers as well,
+     finding the functions' ends by their lines. On stage 1 (4 263 811
+     lines of LIR, four cores, a quiet machine): the backend took 15.5 s
+     on one thread; it now takes 9.4 s from the LIR file (18.3 s on one
+     worker, the functions' lines read twice), and `sisu2 build` lowers in
+     6.7 s and compiles in 6.0 s, 13.9 s in all where `sisu2 lir` and
+     `sisu2 x86` took 7.9 and 15.5; Cranelift compiles the same LIR in
+     3.7 s. A whole native build of stage 1 takes 82.5 s with the Sisu
+     backend and 77.6 s with Cranelift, its front end most of both. Under
+     callgrind, `sisu2 x86` over stage 2's LIR runs 21 % of its
+     instructions on the main thread, most of them finding the functions'
+     ends, which `sisu2 build` does not, and the rest on the workers. The
+     other ways were the
+     lowering handing the backend operations rather than text (a larger
+     change, for the reading that is now on the workers), and placement
+     overlapping the compiling of the next batch, which `std.par`'s
+     fork-join does not give. The `sisu2` script builds stage 2 with the
+     Rust lowering and Cranelift, the seed, as the driver does. This
+     changes no rule of the language.
+
+**The runtime in Sisu, begun** (section "Stage 2", "The runtime in Sisu";
+D-086, D-087 step 3)
+
+335. Both lowerings compile the raw memory of a word or a byte inline,
+     without the runtime: `mem.ptr.addr`, `mem.ptr.cast`,
+     `mem.ptr.cast_mut`, `mem.ptr.as_const` and `mem.ptr.from_address` are
+     the pointer's word, and `mem.ptr.offset`, `mem.ptr.read` and
+     `mem.ptr.write` of a pointer to a type whose raw memory is its value's
+     word (`int`, `f64`, `bool`, `char`, `u64`, a raw pointer) or to a `u8`
+     or an `i8` are the address plus the offset times 8 or 1, a load (of the
+     byte, extended with its sign for an `i8`) and a store (of the byte,
+     `ireduce.i8`), as `sisu-rt/src/rawmem.rs` reads and writes them; the
+     other types still go through `sisu_rt_intrinsic`, which converts them
+     part by part (decision 302). So code over raw memory needs no type
+     table and no call, which the runtime in Sisu needs (decision 336), and
+     the unsafe cases build from LIR to the Rust lowering's executables in
+     both profiles. This changes no rule of the language.
+336. The runtime in Sisu is a package, `compiler/rt`, compiled once into
+     an object (`compiler/target/rt/rt.o`) that every native program is
+     linked with, whichever backend compiles it, before the runtime in
+     Rust. Each `export_NAME` function of its root module (no type
+     parameters) is the global symbol `sisu_rt_NAME`, of Sisu's
+     convention, and what it calls is compiled with it under local
+     symbols; the generated code calls it as it calls any function. Its
+     code is the runtime's own, as drop glue is: no count of nested calls,
+     no yield point, no line of a stack trace, and no value walked by a
+     type table, which the object has none of (a construct that needs one
+     is `Unsupported` when it is built), so it reaches raw memory through
+     the operations decision 335 compiles inline. The object is built from
+     the package's seed, `compiler/rt/rt.sir`, the SIR stage 1 prints of
+     it (a test holds the seed to that), by the Rust lowering in its
+     library mode (`sisu_codegen::compile_library`) and Cranelift, when it
+     is missing or older than the seed (`D0126` when that fails): the
+     runtime must exist before stage 1, which a native program is too and
+     which alone reads std.mem, can compile it, as the Rust lowering seeds
+     stage 1 and stage 2. The first piece is `sisu_rt_bytes_eq(ret, a, b,
+     n)`, the comparison of two texts' bytes that `==` of two texts of one
+     length calls (decision 253), now `export_bytes_eq` in Sisu, a byte at
+     a time; its Rust counterpart is deleted, and both lowerings call it
+     with the result's and the arguments' addresses and test its status,
+     so LIR still gives the Rust lowering's executables byte for byte. The
+     other ways were the runtime in Sisu compiled with each program, as
+     its own functions (which is D-086's end for the structural operations,
+     per type, but compiles them again for every program and changes every
+     program's SIR), and a C convention for the exports, which Sisu code
+     cannot define. What is left (the structural operations by their
+     parts, formatting, text search, lists over `RawBuf`, stage 2's own
+     library mode) is in port-debt.md ("The runtime in Sisu"). This
+     changes no rule of the language.

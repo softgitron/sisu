@@ -1,0 +1,5 @@
+# An attribute before a statement, where no declaration follows.
+def main():
+    @deprecated("use `total`")
+    let total = 3 + 4
+    print(total)

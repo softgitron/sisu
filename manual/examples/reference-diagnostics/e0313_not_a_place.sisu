@@ -1,0 +1,5 @@
+# An assignment to a value that is not a place.
+def main():
+    var temps = [62, 75, 81]
+    len(temps) = 0
+    print(temps)

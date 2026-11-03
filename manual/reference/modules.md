@@ -346,8 +346,8 @@ handed (D-032, D-082).
 ### `[profile.release]`
 
 `contracts = "off"`, `"preconditions"` or `"all"` sets which contracts a
-release build checks ([R11](../README.md#the-reference), when it is
-written); `[profile.debug]` takes the key too.
+release build checks ([R11](contracts.md#check-levels));
+`[profile.debug]` takes the key too.
 
 ### Mistakes in the manifest
 
@@ -758,15 +758,15 @@ C++ interop (Q-24).
 | Code | Identifier | Section |
 |---|---|---|
 | E1008, E1009, E1012 | `package.no-root-module`, `package.two-root-modules`, `package.module-name` | [The module tree](#the-module-tree) |
-| [E0100](diagnostics.md#e0100), E0203, E0204, E0220, E0260 | `parse.expected`, `resolve.unknown-module`, `resolve.not-in-module`, `resolve.import-unknown`, `resolve.not-a-dependency` | [Imports](#imports) |
+| [E0100](diagnostics.md#e0100), [E0203](diagnostics.md#e0203), E0204, E0220, E0260 | `parse.expected`, `resolve.unknown-module`, `resolve.not-in-module`, `resolve.import-unknown`, `resolve.not-a-dependency` | [Imports](#imports) |
 | W0016, E0701 | `resolve.shadow-prelude-set`, `cap.internal` | [Names every module sees](#names-every-module-sees) |
-| E0255, E0256, E0258, E0259 | `resolve.private-item`, `resolve.package-item`, `resolve.private-field`, `resolve.private-method` | [Visibility](#visibility) |
+| E0255, [E0256](diagnostics.md#e0256), [E0258](diagnostics.md#e0258), E0259 | `resolve.private-item`, `resolve.package-item`, `resolve.private-field`, `resolve.private-method` | [Visibility](#visibility) |
 | E0257 | `resolve.not-reexported` | [Re-exports](#re-exports) |
-| E1000, E1001, E1002, E1003, E1004, E1005, E1006, E1010, E1017, W0005 | `package.toml-syntax`, `package.toml-duplicate`, `package.missing-key`, `package.bad-value`, `package.bad-name`, `package.no-manifest`, `package.renamed-dependency`, `package.not-a-path`, `package.reserved-name`, `package.unknown-key` | [The manifest](#the-manifest) |
+| E1000, E1001, E1002, [E1003](diagnostics.md#e1003), E1004, E1005, E1006, E1010, E1017, [W0005](diagnostics.md#w0005) | `package.toml-syntax`, `package.toml-duplicate`, `package.missing-key`, `package.bad-value`, `package.bad-name`, `package.no-manifest`, `package.renamed-dependency`, `package.not-a-path`, `package.reserved-name`, `package.unknown-key` | [The manifest](#the-manifest) |
 | E1015, E0703, E1019, E1020, E1021, E1022 | `package.trust-unknown`, `cap.untrusted`, `package.unsafe-undeclared`, `package.unsafe-level`, `package.unsafe-untrusted`, `package.unsafe-raised` | [`[trust]`](#trust) |
 | E1011 | `package.bad-when` | [Target conditions](#target-conditions) |
 | W0006, E1018 | `resolve.unknown-feature`, `package.unknown-feature` | [Features](#features) |
-| E1007 | `package.cycle` | [Dependencies](#dependencies) |
+| [E1007](diagnostics.md#e1007) | `package.cycle` | [Dependencies](#dependencies) |
 | E1013, E1016 | `package.no-member`, `package.no-package` | [Workspaces](#workspaces) |
 | E0261, E1014 | `resolve.script-main`, `package.script-metadata` | [Scripts and inline metadata](#scripts-and-inline-metadata) |
 | D0065 | `cli.locked` | [The lockfile](#the-lockfile) |

@@ -1541,7 +1541,7 @@ Unsatisfied(ty="Port", predicate="1 <= self <= 65535")
 ```
 
 The predicate, its checks and its place in contracts are
-[R11](../README.md#the-reference), when it is written.
+[R11](contracts.md#refinement-types).
 
 **Status.** In stage 0
 ([07](../../proposal/07-contracts.md)).
@@ -1704,8 +1704,7 @@ These are left out on purpose ([03](../../proposal/03-types-and-generics.md#what
 - dependent types: refinements and contracts cover the common cases,
   and a verifier comes after 1.0 (Q-16);
 - computation on types beyond constant parameters and `comptime`
-  functions that make types ([R12](../README.md#the-reference), when it
-  is written).
+  functions that make types ([R12](compile-time.md#reflection)).
 
 **Status.** Decided (D-002, D-017).
 
@@ -1714,7 +1713,7 @@ These are left out on purpose ([03](../../proposal/03-types-and-generics.md#what
 | Code | Identifier | Section |
 |---|---|---|
 | [E0300](diagnostics.md#e0300) | `type.mismatch` | [Static types and local inference](#static-types-and-local-inference) |
-| E0324, E0358 | `type.cannot-infer`, `type.let-needs-type` | [Static types and local inference](#static-types-and-local-inference) |
+| [E0324](diagnostics.md#e0324), E0358 | `type.cannot-infer`, `type.let-needs-type` | [Static types and local inference](#static-types-and-local-inference) |
 | [E0374](diagnostics.md#e0374) | `type.literal-out-of-range` | [Integers](#integers) |
 | [R0003](diagnostics.md#r0003), [R0004](diagnostics.md#r0004), R0005, R0011, R0093 | `panic.overflow`, `panic.divide-by-zero`, `panic.shift-out-of-range`, `panic.negative-exponent`, `panic.shift-out-of-range-sized` | [Overflow traps](#overflow-traps) |
 | [E0373](diagnostics.md#e0373), R0023 | `type.mixed-numbers`, `panic.conversion` | [Widening and conversions](#widening-and-conversions) |
@@ -1722,17 +1721,17 @@ These are left out on purpose ([03](../../proposal/03-types-and-generics.md#what
 | [E0347](diagnostics.md#e0347) | `type.bound-not-satisfied` | [Floating point](#floating-point), [Collections](#collections), [Traits are implemented by name](#traits-are-implemented-by-name), [Generic types and functions](#generic-types-and-functions), [The auto traits](#the-auto-traits) |
 | [E0302](diagnostics.md#e0302), [E0016](diagnostics.md#e0016) | `type.not-bool`, `lex.bad-char-literal` | [Truth values and characters](#truth-values-and-characters) |
 | [E0345](diagnostics.md#e0345), [R0115](diagnostics.md#r0115) | `type.str-not-indexable`, `panic.char-boundary` | [Text](#text) |
-| E0398 | `type.structural-only` | [Collections](#collections) |
+| [E0398](diagnostics.md#e0398) | `type.structural-only` | [Collections](#collections) |
 | E0363, E0364 | `type.tuple-index`, `type.unpack-count` | [Tuples](#tuples) |
 | E0212, E0226, E0227 | `resolve.not-an-error-set`, `resolve.inferred-set-position`, `resolve.union-outside-result` | [Results and error sets](#results-and-error-sets) |
 | [E0211](diagnostics.md#e0211) | `resolve.ambiguous-variant` | [Structs and enums](#structs-and-enums) |
 | E0309, E0352, E0353 | `type.not-callable`, `type.value-returns-borrow`, `type.closure-parameter-count` | [Function types](#function-types) |
-| E0333, E0334, E0335, E0392 | `type.impure-call`, `type.impure-capability`, `type.impure-argument`, `type.impure-value-call` | [Pure function types](#pure-function-types) |
-| [E0235](diagnostics.md#e0235), E0236, E0240 | `resolve.overlapping-impl`, `resolve.orphan-impl`, `resolve.sealed-trait` | [One impl for each type and trait](#one-impl-for-each-type-and-trait) |
+| E0333, E0334, [E0335](diagnostics.md#e0335), E0392 | `type.impure-call`, `type.impure-capability`, `type.impure-argument`, `type.impure-value-call` | [Pure function types](#pure-function-types) |
+| [E0235](diagnostics.md#e0235), [E0236](diagnostics.md#e0236), E0240 | `resolve.overlapping-impl`, `resolve.orphan-impl`, `resolve.sealed-trait` | [One impl for each type and trait](#one-impl-for-each-type-and-trait) |
 | [E0368](diagnostics.md#e0368), E0208, E0349, E0375 | `type.not-ordered`, `resolve.type-argument-count`, `type.not-generic`, `type.type-arguments-needed` | [Generic types and functions](#generic-types-and-functions) |
-| E0245, E0246 | `resolve.generic-default-order`, `resolve.impl-default` | [Defaulted type parameters](#defaulted-type-parameters) |
+| [E0245](diagnostics.md#e0245), E0246 | `resolve.generic-default-order`, `resolve.impl-default` | [Defaulted type parameters](#defaulted-type-parameters) |
 | E0262, E0263, E0264, E0265, E0602 | `resolve.const-argument`, `resolve.type-argument`, `resolve.const-expression`, `resolve.const-not-int`, `comptime.panicked` | [Constant parameters](#constant-parameters) |
 | [E0395](diagnostics.md#e0395), [E0241](diagnostics.md#e0241), E0396, [E0231](diagnostics.md#e0231) | `type.unsized-dyn`, `resolve.not-object-safe`, `type.view-to-dyn`, `resolve.trait-as-type` | [Trait objects](#trait-objects) |
 | [E0244](diagnostics.md#e0244), E0984, E0986 | `resolve.derive-field`, `unsafe.impl-needed`, `unsafe.never-asserted` | [The auto traits](#the-auto-traits) |
-| E0810, E0811, E0812 | `refine.not-satisfied`, `refine.needs-try-from`, `refine.change-through-base` | [Refinement types](#refinement-types) |
+| E0810, E0811, [E0812](diagnostics.md#e0812) | `refine.not-satisfied`, `refine.needs-try-from`, `refine.change-through-base` | [Refinement types](#refinement-types) |
 | E0228, [E0310](diagnostics.md#e0310) | `resolve.alias-cycle`, `type.binary-operator` | [Type aliases and newtypes](#type-aliases-and-newtypes) |

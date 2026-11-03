@@ -1,0 +1,8 @@
+$ sisu run e0601_comptime_io.sisu
+error[E0601]: the compile-time evaluation of this expression used the standard output; nothing reaches the world at compile time
+  --> e0601_comptime_io.sisu:6:26
+  |
+6 | const GREETING: String = comptime greet("Aino")
+  |                          ^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

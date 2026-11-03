@@ -1,0 +1,8 @@
+$ sisu run e0217_duplicate_method.sisu
+error[E0217]: `Stove` has more than one method named `heat`
+  --> e0217_duplicate_method.sisu:8:9
+  |
+8 |     def heat(mut self, degrees: int):
+  |         ^^^^
+
+error[D0006]: the program was not run: errors found (1)

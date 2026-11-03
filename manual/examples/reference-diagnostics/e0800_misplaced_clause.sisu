@@ -1,0 +1,8 @@
+# A precondition after the body's first statement.
+def half(n: int) -> int:
+    let h = n // 2
+    requires n >= 0
+    return h
+
+def main():
+    print(half(8))

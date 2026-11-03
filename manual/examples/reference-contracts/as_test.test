@@ -1,0 +1,3 @@
+test "clamps from above" ... ok
+test "contract of clamp" ... ok
+2 passed, 0 failed, 0 blocked

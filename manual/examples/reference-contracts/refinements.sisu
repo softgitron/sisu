@@ -1,0 +1,15 @@
+# A refinement is its base with a predicate, checked where a value
+# comes in.
+type Hour = int where 0 <= self < 24
+type Evening = Hour where self >= 17
+
+def label(hour: Hour) -> String:
+    return "{hour}:00, {24 - hour} hours left"
+
+def main():
+    let opens: Evening = 18
+    print(label(opens))
+    for n in [20, 9, 30]:
+        match Evening.try_from(n):
+            case Ok(hour): print(label(hour))
+            case Err(e): print("{n}: {e:?}")

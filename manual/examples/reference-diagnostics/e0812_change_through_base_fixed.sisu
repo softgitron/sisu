@@ -1,0 +1,8 @@
+# A copy typed as the base is changed, and checked again.
+type Short = list[int] where len(self) <= 3
+
+def main():
+    let picks: Short = [1, 2]
+    var more: list[int] = picks.copy()
+    more.push(3)
+    print(Short.try_from(more))

@@ -1,0 +1,7 @@
+# A task waits for a message that is sent only after the scope ends.
+def main():
+    let tx, rx = channel[String](capacity=1)
+    task.scope do s:
+        s.spawn do:
+            print(rx.recv())
+    _ = tx.send("löyly".to_string())

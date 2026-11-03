@@ -1,0 +1,9 @@
+# A pure function, which prints nothing.
+def apply_twice(f: pure (int) -> int, x: int) -> int:
+    return f(f(x))
+
+pure def double(n: int) -> int:
+    return n * 2
+
+def main():
+    print(apply_twice(double, 3))

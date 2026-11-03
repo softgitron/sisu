@@ -689,6 +689,71 @@ impl Cg:
 
     ## The commonest intrinsics compiled inline (decisions 253, 260, 264
     ## and 265), as the runtime runs them on the values' layouts.
+    ## Raw memory of a word or a byte without the runtime (decision 335), as
+    ## `raw_inline` in `func.rs` does it: a raw pointer's address, made,
+    ## cast or offset, and the value at it read or written at its width.
+    pub pure def raw_inline(
+        mut self, p: Program, i: int, dest: Place, b: int, bt: Type, argv: list[(int, Type)]
+    ) -> Fast? ! LirError:
+        let pointer = named_in(bt, ["ptr", "ptr_mut"])
+        let words = [
+            abi.I_MEM_PTR_ADDR, abi.I_MEM_PTR_CAST, abi.I_MEM_PTR_CAST_MUT, abi.I_MEM_PTR_AS_CONST
+        ]
+        var word = pointer and words.contains(i)
+        if i == abi.I_MEM_PTR_FROM_ADDRESS and bt == Type.Int:
+            word = True
+        if word:
+            let w = self.load(b, 0)
+            let (d, _) = self.place(p, dest, None)?
+            self.store_word(w, d, 0)
+            return Ok(Some(Fast.Done))
+        if not pointer:
+            return Ok(None)
+        let Type.Named(_, args) = bt else:
+            return Ok(None)
+        if args.is_empty():
+            return Ok(None)
+        let (width, signed) = raw_scalar(args[0]) else:
+            return Ok(None)
+        if i == abi.I_MEM_PTR_OFFSET:
+            if len(argv) < 2:
+                return Ok(None)
+            let (a1, t1) = argv[1].copy()
+            let (na, _) = self.base_of(a1, t1)
+            let n = self.load(na, 0)
+            let q0 = self.load(b, 0)
+            let off = self.b.imm("imul_imm", n, width)
+            let q = self.b.bin("iadd", q0, off)
+            let (d, _) = self.place(p, dest, None)?
+            self.store_word(q, d, 0)
+            return Ok(Some(Fast.Done))
+        if i == abi.I_MEM_PTR_READ:
+            let q = self.load(b, 0)
+            var v = 0
+            if width == 1 and not signed:
+                v = self.b.uload8(q, 0)
+            elif width == 1:
+                v = self.b.sload8(q, 0)
+            else:
+                v = self.load(q, 0)
+            let (d, _) = self.place(p, dest, None)?
+            self.store_word(v, d, 0)
+            return Ok(Some(Fast.Done))
+        if i == abi.I_MEM_PTR_WRITE:
+            if len(argv) < 2:
+                return Ok(None)
+            let (a1, t1) = argv[1].copy()
+            let (va, _) = self.base_of(a1, t1)
+            let v = self.load(va, 0)
+            let q = self.load(b, 0)
+            if width == 1:
+                let byte = self.b.convert("ireduce", "i8", v)
+                self.store_word(byte, q, 0)
+            else:
+                self.store_word(v, q, 0)
+            return Ok(Some(Fast.Done))
+        return Ok(None)
+
     pub pure def inline_intrinsic(
         mut self, p: Program, i: int, dest: Place, argv: list[(int, Type)]
     ) -> Fast ! LirError:
@@ -712,6 +777,8 @@ impl Cg:
         if not borrowed:
             return Ok(Fast.No)
         let (b, bt) = self.base_of(a0, t0)
+        if let Some(done) = self.raw_inline(p, i, dest, b, bt, argv)?:
+            return Ok(done)
         if i == abi.I_LEN and named_in(bt, ["list", "bytes"]):
             let len = self.load(b, 8)
             let (d, _) = self.place(p, dest, None)?
@@ -1206,3 +1273,22 @@ impl Cg:
         let size = self.size(ty)?
         self.copy_bytes(addr, out, size)
         return Ok(())
+
+## The bytes a value of `t` takes in raw memory and whether a byte of it is
+## signed, for the types whose raw memory the code reads and writes inline
+## (decision 335), as `raw_scalar` in `func.rs`: a word for those whose raw
+## memory is their value's word, a byte for `u8` and `i8`.
+pure def raw_scalar(t: Type) -> (int, bool)?:
+    match t:
+        case Type.Int | Type.Float | Type.Bool | Type.Char:
+            return Some((8, False))
+        case Type.Named(n, _):
+            if n == "u64" or n == "ptr" or n == "ptr_mut":
+                return Some((8, False))
+            if n == "u8":
+                return Some((1, False))
+            if n == "i8":
+                return Some((1, True))
+            return None
+        case _:
+            return None

@@ -1,0 +1,12 @@
+[package]
+name = "stove"
+version = "0.1.0"
+edition = "2027"
+runtime = "single"
+
+[profile.release]
+contracts = "preconditions"
+panic = "abort"
+
+[profile.release-size]
+contracts = "off"

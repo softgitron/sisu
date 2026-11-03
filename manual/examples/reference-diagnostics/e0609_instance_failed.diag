@@ -1,0 +1,2 @@
+9:11-9:22 E0609 comptime.instance-failed name="columns[int]" reason="`int` has no columns"
+  label 6:18-6:64 comptime.instance-here

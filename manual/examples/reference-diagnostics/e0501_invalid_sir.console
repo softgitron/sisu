@@ -1,0 +1,2 @@
+$ sisu run e0501_invalid_sir.sisu
+error[E0501]: invalid SIR in `main`: the type of _2 names a type parameter the function does not have

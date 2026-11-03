@@ -1,0 +1,12 @@
+# A method that leaves the invariant broken.
+struct Gauge:
+    level: int
+    invariant 0 <= self.level <= 10
+
+    def fill(mut self, amount: int):
+        self.level += amount
+
+def main():
+    var gauge = Gauge(level=4)
+    gauge.fill(9)
+    print(gauge.level)

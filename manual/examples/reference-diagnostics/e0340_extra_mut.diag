@@ -1,0 +1,2 @@
+7:17-7:27 E0340 type.mut-argument-unexpected param="prices"
+  fix type.remove-mut

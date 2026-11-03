@@ -1,0 +1,5 @@
+# The stove, which reads how many sit on the benches.
+import benches
+
+def main():
+    print("{benches.SEATS} seats")

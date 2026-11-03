@@ -1,0 +1,12 @@
+# `old` takes the one expression whose entry value it is.
+struct Stove:
+    celsius: int
+
+    def heat(mut self, degrees: int):
+        ensures self.celsius == old(self.celsius) + degrees
+        self.celsius += degrees
+
+def main():
+    var stove = Stove(60)
+    stove.heat(20)
+    print(stove.celsius)

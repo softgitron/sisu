@@ -1,0 +1,12 @@
+# The value is made outside the scope, which outlives its tasks.
+def longest(words: list[str]) -> int:
+    var best = 0
+    for w in words:
+        best = max(best, len(w))
+    return best
+
+def main():
+    let words = ["sauna", "löyly", "vihta"]
+    task.scope do s:
+        let handle = s.spawn(() -> longest(words))
+        print(handle.join())

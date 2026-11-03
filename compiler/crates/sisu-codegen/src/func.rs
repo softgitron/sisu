@@ -267,7 +267,9 @@ impl<'a, 'p> Cx<'a, 'p> {
         let v = b.ins().iconst(types::I64, start.1);
         b.def_var(col, v);
         let blocks: Vec<Block> = f.blocks.iter().map(|_| b.create_block()).collect();
-        let glue = f.kind == sir::FnKind::Glue;
+        // The runtime in Sisu is the runtime's own code, as drop glue is
+        // (decision 336).
+        let glue = f.kind == sir::FnKind::Glue || cg.library;
         let file = cg.prog.sources.get(f.source as usize).cloned().unwrap_or_default();
         let std = file.starts_with("<std>/") || file.starts_with("<shims>/");
         let file_text = (cg.text(file.as_bytes())?, file.len());
@@ -475,6 +477,13 @@ impl<'a, 'p> Cx<'a, 'p> {
     }
 
     fn type_id(&mut self, t: &Type) -> Result<u32, Error> {
+        // The runtime in Sisu has no type table of its own (decision 336).
+        if self.cg.library {
+            return Err(Error::unsupported(format!(
+                "a value the runtime walks by its type (`{}`), in the runtime's own code",
+                sir::write::ty(t)
+            )));
+        }
         self.cg.types.id(t)
     }
 
@@ -679,6 +688,10 @@ impl<'a, 'p> Cx<'a, 'p> {
     /// A yield point (decision 85): one less of the budget, and the
     /// scheduler when it is spent.
     fn yield_check(&mut self) -> Result<(), Error> {
+        // The runtime's own code passes none (decision 336).
+        if self.cg.library {
+            return Ok(());
+        }
         let a = self.data_addr(self.cg.budget);
         let n = self.load(a, 0);
         let n1 = self.b.ins().iadd_imm(n, -1);
@@ -1535,8 +1548,16 @@ impl<'a, 'p> Cx<'a, 'p> {
             self.b.ins().brif(same, bytes, &[], join, &[zero.into()]);
             self.b.switch_to_block(bytes);
             let (da, db) = (self.load(xa, 0), self.load(xb, 0));
-            let eq = self.rt_status(sym::BYTES_EQ, &[da, db, la])?;
-            let eq = self.b.ins().uextend(types::I64, eq);
+            // The runtime in Sisu's, of Sisu's convention (decision 336):
+            // the result's address, then each argument's.
+            let ret = self.slot(8);
+            let (sa, sb, sn) = (self.slot(8), self.slot(8), self.slot(8));
+            self.store_word(da, sa, 0);
+            self.store_word(db, sb, 0);
+            self.store_word(la, sn, 0);
+            let st = self.rt_status(sym::BYTES_EQ, &[ret, sa, sb, sn])?;
+            self.check(st);
+            let eq = self.load(ret, 0);
             self.b.ins().jump(join, &[eq.into()]);
             self.b.switch_to_block(join);
             let r = self.b.block_params(join)[0];
@@ -2754,6 +2775,77 @@ impl<'a, 'p> Cx<'a, 'p> {
     /// after all; where it grows a list, builds a text or looks a key up,
     /// the code calls an entry of its own, without the descriptor
     /// (decision 265).
+    /// Raw memory of a word or a byte without the runtime (decision 335): a
+    /// raw pointer's address, made, cast or offset, and the value at it read
+    /// or written at its width, for the types whose raw memory is their
+    /// value's word and for `u8` and `i8`, a byte; `None` for the others,
+    /// which the runtime converts part by part (decision 302).
+    fn raw_inline(
+        &mut self,
+        i: Intrinsic,
+        dest: &Place,
+        b: Value,
+        bt: &Type,
+        argv: &[(Value, Type)],
+    ) -> Result<Option<Fast>, Error> {
+        use Intrinsic as I;
+        let pointer = matches!(bt, Type::Named(n, _) if n == "ptr" || n == "ptr_mut");
+        let word = match i {
+            I::MemPtrAddr | I::MemPtrCast | I::MemPtrCastMut | I::MemPtrAsConst if pointer => true,
+            I::MemPtrFromAddress => *bt == Type::Int,
+            _ => false,
+        };
+        if word {
+            let w = self.load(b, 0);
+            let (d, _) = self.place(dest, None)?;
+            self.store_word(w, d, 0);
+            return Ok(Some(Fast::Done));
+        }
+        let scalar = match bt {
+            Type::Named(_, args) if pointer => args.first().and_then(raw_scalar),
+            _ => None,
+        };
+        let Some((width, signed)) = scalar else { return Ok(None) };
+        match i {
+            I::MemPtrOffset => {
+                let Some((a1, t1)) = argv.get(1).cloned() else { return Ok(None) };
+                let (na, _) = self.base_of(a1, &t1);
+                let n = self.load(na, 0);
+                let p = self.load(b, 0);
+                let off = self.b.ins().imul_imm(n, i64::from(width));
+                let q = self.b.ins().iadd(p, off);
+                let (d, _) = self.place(dest, None)?;
+                self.store_word(q, d, 0);
+                Ok(Some(Fast::Done))
+            }
+            I::MemPtrRead => {
+                let p = self.load(b, 0);
+                let v = match (width, signed) {
+                    (1, false) => self.b.ins().uload8(types::I64, MemFlags::trusted(), p, 0),
+                    (1, true) => self.b.ins().sload8(types::I64, MemFlags::trusted(), p, 0),
+                    _ => self.load(p, 0),
+                };
+                let (d, _) = self.place(dest, None)?;
+                self.store_word(v, d, 0);
+                Ok(Some(Fast::Done))
+            }
+            I::MemPtrWrite => {
+                let Some((a1, t1)) = argv.get(1).cloned() else { return Ok(None) };
+                let (va, _) = self.base_of(a1, &t1);
+                let v = self.load(va, 0);
+                let p = self.load(b, 0);
+                if width == 1 {
+                    let byte = self.b.ins().ireduce(types::I8, v);
+                    self.store_word(byte, p, 0);
+                } else {
+                    self.store_word(v, p, 0);
+                }
+                Ok(Some(Fast::Done))
+            }
+            _ => Ok(None),
+        }
+    }
+
     fn inline_intrinsic(
         &mut self,
         i: Intrinsic,
@@ -2782,6 +2874,9 @@ impl<'a, 'p> Cx<'a, 'p> {
             return Ok(Fast::No);
         }
         let (b, bt) = self.base_of(a0, &t0);
+        if let Some(done) = self.raw_inline(i, dest, b, &bt, argv)? {
+            return Ok(done);
+        }
         match i {
             I::Len if named(&bt, &["list", "bytes"]) => {
                 let len = self.load(b, 8);
@@ -3606,6 +3701,23 @@ fn target_type(t: &Type) -> Type {
 }
 
 /// The element type of a list or an array.
+/// The bytes a value of `t` takes in raw memory and whether a byte of it is
+/// signed, for the types whose raw memory the code reads and writes inline
+/// (decision 335): a word for those whose raw memory is their value's word,
+/// a byte for `u8` and `i8`.
+fn raw_scalar(t: &Type) -> Option<(u32, bool)> {
+    match t {
+        Type::Int | Type::Float | Type::Bool | Type::Char => Some((8, false)),
+        Type::Named(n, _) => match n.as_str() {
+            "u64" | "ptr" | "ptr_mut" => Some((8, false)),
+            "u8" => Some((1, false)),
+            "i8" => Some((1, true)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 fn element_type(t: &Type) -> Result<Type, Error> {
     match t {
         Type::Named(n, a) if n == "list" || n == "Array" || n == "Slice" => {

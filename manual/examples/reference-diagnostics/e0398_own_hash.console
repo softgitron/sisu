@@ -1,0 +1,8 @@
+$ sisu run e0398_own_hash.sisu
+error[E0398]: a `dict` or `set` key is hashed and compared structurally in stage 0, and `Room` has an impl of `Hash` of its own; derive `Hash` and `Eq` for it, or key by a field
+  --> e0398_own_hash.sisu:14:18
+   |
+14 |     let guests = {Room(1): "Aino", Room(2): "Eero"}
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

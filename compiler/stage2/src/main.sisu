@@ -20,12 +20,12 @@
 ##! text between two (decision 334), the functions compiled on the workers
 ##! of `std.par`; `--times` prints on standard error how long each took.
 
-import std.par
 import stage1.sir.write
 import stage2.gen
 import stage2.lir
 import stage2.object
 import stage2.read
+import std.par
 from stage2.lir import LirError
 from stage2.object import ObjectError
 from stage2.read import ReadError
@@ -160,7 +160,9 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         let compiled = object.compile_spanned(lir_text, spans, comp_dir, std_dir)
         let compiled_at = sys.clock.now().unix_nanos()
         if times:
-            print_err("sisu2: lowered in {millis(lowered_at - start)} ms, compiled in {millis(compiled_at - lowered_at)} ms")
+            print_err(
+                "sisu2: lowered in {millis(lowered_at - start)} ms, compiled in {millis(compiled_at - lowered_at)} ms"
+            )
         return write_object(sys, path, compiled, output ?? "")
     match output:
         case Some(o):

@@ -1,0 +1,6 @@
+# A list moved while a borrow of it is still in use.
+def main():
+    let names = ["Aino", "Eero"]
+    let first = ref names[0]
+    let team = names
+    print("{first} {len(team)}")

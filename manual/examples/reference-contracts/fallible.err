@@ -1,0 +1,6 @@
+panic: postcondition of `doubled` failed: result.is_ok()
+    result.is_ok()
+    │
+    Err(Missing(name="lauteet"))
+  at doubled (fallible.sisu:12:13)
+  at main (fallible.sisu:18:11)

@@ -1,0 +1,16 @@
+# An impl with a method that its trait does not declare.
+trait Priced:
+    def price(self) -> int
+
+struct Coffee:
+    cups: int
+
+impl Priced for Coffee:
+    def price(self) -> int:
+        return 350 * self.cups
+
+    def discount(self) -> int:
+        return 50
+
+def main():
+    print(Coffee(2).price())

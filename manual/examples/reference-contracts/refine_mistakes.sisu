@@ -1,0 +1,13 @@
+# Refinements whose predicate, impls or changes do not hold together.
+type Short = list[int] where len(self) <= 3
+type Half = int where self // 2
+type Small = int where self < 10
+
+impl Display for Small:
+    def fmt(self, mut f: Formatter):
+        f.write("small")
+
+def main():
+    var xs: Short = [1, 2]
+    xs.push(3)
+    print(xs)

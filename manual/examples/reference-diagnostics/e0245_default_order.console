@@ -1,0 +1,8 @@
+$ sisu run e0245_default_order.sisu
+error[E0245]: a type parameter without a default cannot follow one with a default
+  --> e0245_default_order.sisu:2:28
+  |
+2 | struct Reading[U = String, T]:
+  |                            ^
+
+error[D0006]: the program was not run: errors found (1)

@@ -1,0 +1,7 @@
+# `mut` at a call whose parameter only reads.
+def total(prices: list[int]) -> int:
+    return sum(prices)
+
+def main():
+    var prices = [350, 280]
+    print(total(mut prices))

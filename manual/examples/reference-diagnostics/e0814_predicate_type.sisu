@@ -1,0 +1,6 @@
+# A predicate that is not a `bool`.
+type Even = int where self % 2
+
+def main():
+    let n: Even = 4
+    print(n)

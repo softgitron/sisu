@@ -33,7 +33,9 @@ fn is_par_map(prog: &sir::Program, f: &sir::Function) -> bool {
 /// of `_2`, the function `map` owns, on the way out and on the way
 /// unwinding.
 fn par_map(f: &sir::Function) -> sir::Function {
-    use sir::{BasicBlock, BlockId, Callee, LocalId, Operand, Place, Statement, StatementKind, Terminator, Type};
+    use sir::{
+        BasicBlock, BlockId, Callee, LocalId, Operand, Place, Statement, StatementKind, Terminator, Type,
+    };
     let at = |kind: StatementKind| Statement { kind, loc: f.loc };
     let call = at(StatementKind::Call {
         dest: Place::local(LocalId(0)),
@@ -41,17 +43,13 @@ fn par_map(f: &sir::Function) -> sir::Function {
         args: vec![Operand::Copy(Place::local(LocalId(1))), Operand::Copy(Place::local(LocalId(2)))],
     });
     let drop_f = || at(StatementKind::Drop { place: Place::local(LocalId(2)), flag: None });
-    let block = |stmts: Vec<Statement>, term: Terminator, unwind: Option<BlockId>, cleanup: bool| BasicBlock {
-        stmts,
-        term,
-        unwind,
-        cleanup,
-        loc: None,
+    let block = |stmts: Vec<Statement>, term: Terminator, unwind: Option<BlockId>, cleanup: bool| {
+        BasicBlock { stmts, term, unwind, cleanup, loc: None }
     };
     sir::Function {
         name: f.name.clone(),
         type_params: f.type_params.clone(),
-        kind: f.kind.clone(),
+        kind: f.kind,
         param_count: f.param_count,
         pure: f.pure,
         from: f.from.clone(),

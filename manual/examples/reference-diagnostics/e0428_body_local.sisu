@@ -1,0 +1,12 @@
+# A task borrows a value that the scope's body makes.
+def longest(words: list[str]) -> int:
+    var best = 0
+    for w in words:
+        best = max(best, len(w))
+    return best
+
+def main():
+    task.scope do s:
+        let words = ["sauna", "löyly", "vihta"]
+        let handle = s.spawn(() -> longest(words))
+        print(handle.join())

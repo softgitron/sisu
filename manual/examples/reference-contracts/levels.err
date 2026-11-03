@@ -1,0 +1,7 @@
+panic: postcondition of `per_hour` failed: result * hours <= minutes
+    result * hours <= minutes
+    │      │ │        │
+    46     │ 2        90
+           92
+  at per_hour (levels.sisu:4:13)
+  at main (levels.sisu:8:11)

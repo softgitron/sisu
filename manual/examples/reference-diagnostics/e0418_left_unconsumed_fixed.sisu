@@ -1,0 +1,16 @@
+# The value is made only on the path that consumes it.
+@must_consume
+struct Draft:
+    text: String
+
+    def publish(own self) -> String:
+        return self.text
+
+def post(text: str) -> String:
+    if text == "":
+        return "nothing to post"
+    let draft = Draft(text.to_string())
+    return draft.publish()
+
+def main():
+    print(post("Hei Aino"))

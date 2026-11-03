@@ -1,0 +1,6 @@
+# A function of the program needs no `@blocking`.
+def wait_for_heat() -> int:
+    return 80
+
+def main():
+    print(wait_for_heat())

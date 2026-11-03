@@ -1,0 +1,10 @@
+# Written by `sisu` from the manifests: the packages this build resolved.
+# It is data; `sisu` rewrites it when a manifest changes.
+version = 1
+
+[[package]]
+name = "rt"
+version = "0.1.0"
+source = "path+."
+dependencies = []
+unsafe = "memory"

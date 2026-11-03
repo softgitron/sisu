@@ -11,7 +11,7 @@ bring macros back.
 **See also:** the tutorial's [chapter
 25](../tutorial/25-compile-time.md) (compile-time code); the reference's
 [R12, Compile-time evaluation and
-reflection](../README.md#the-reference); the proposal's [08,
+reflection](../reference/compile-time.md); the proposal's [08,
 Metaprogramming](../../proposal/08-metaprogramming.md) and decisions
 D-018, D-046 and D-063 in its [decision
 log](../../proposal/15-decision-log.md); the research in

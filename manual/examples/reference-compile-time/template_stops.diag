@@ -1,0 +1,2 @@
+15:22-15:48 E0609 comptime.instance-failed name="blank[int]" reason="`int` is not a struct"
+  label 10:18-10:65 comptime.instance-here

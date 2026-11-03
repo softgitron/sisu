@@ -525,7 +525,7 @@ way.
 ### What a run checks: --contracts
 
 `--contracts=all|preconditions|off` sets the contracts a run checks
-([R11](../README.md#the-reference), when it is written; [07](../../proposal/07-contracts.md)):
+([R11](contracts.md#check-levels); [07](../../proposal/07-contracts.md)):
 `all`, the default, checks `requires`, `ensures` and invariants;
 `preconditions` checks `requires` only; `off` checks none. Another
 value is D0028. `sisu test` always checks every contract, so `sisu test

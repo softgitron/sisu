@@ -1,0 +1,7 @@
+# The attribute stands before a declaration.
+@deprecated("use `total`")
+def seven() -> int:
+    return 3 + 4
+
+def main():
+    print(seven())

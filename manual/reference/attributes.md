@@ -5,8 +5,7 @@ it may stand, how compile-time code reads attributes as data, and, for
 each attribute that the compiler or the toolchain reads, where it has a
 meaning, what it does and the diagnostics that guard it. The
 declarations that attributes stand on are [R3](declarations.md); the
-compile-time code that reads them is [R12](../README.md#the-reference),
-when it is written.
+compile-time code that reads them is [R12](compile-time.md#reflection).
 
 **See also:** the tutorial's [chapter 7](../tutorial/07-structs-and-enums.md#comparing-and-copying-with-derive)
 (`@derive`), [chapter 13](../tutorial/13-sharing.md#values-that-must-be-used-up)
@@ -240,7 +239,7 @@ derive at compile time (D-018). It takes:
 - `Plain` of `std.mem`, for a `@repr(c)` struct whose fields are plain
   ([The layout of a type](#the-layout-of-a-type));
 - any trait that declares a `comptime def derive`, the program's own
-  included ([R12](../README.md#the-reference), when it is written).
+  included ([R12](compile-time.md#the-derive-protocol)).
 
 The impl of a generic type bounds each type parameter by the trait, as
 `impl[T: Eq] Eq for Pair[T]`.
@@ -466,7 +465,7 @@ Anything else is E0266 (`resolve.bad-cfg`), and its declaration is kept;
 a feature that the package does not declare is W0006
 (`resolve.unknown-feature`). A condition on the target is written in a
 body with `if comptime target.os == "linux":`, whose branches are both
-checked ([R12](../README.md#the-reference), when it is written):
+checked ([R12](compile-time.md#the-facts-of-the-target)):
 
 <!-- file: examples/reference-attributes/cfg_condition.sisu -->
 ```sisu
@@ -536,8 +535,7 @@ error[E0606]: `@comptime_budget` takes `steps=N`, a positive number of steps
 error[D0006]: the program was not run: errors found (1)
 ```
 
-The evaluation and its budget are [R12](../README.md#the-reference),
-when it is written.
+The evaluation and its budget are [R12](compile-time.md#budgets).
 
 **Status.** In stage 0 (D-063 leans).
 
@@ -921,15 +919,15 @@ idea for later, and `@inline` has no design.
 
 | Code | Identifier | Section |
 |---|---|---|
-| [E0117](diagnostics.md#e0117), E0106, [E0100](diagnostics.md#e0100) | `parse.trailing-tokens`, `parse.expected-declaration`, `parse.expected` | [Writing an attribute](#writing-an-attribute) |
+| [E0117](diagnostics.md#e0117), [E0106](diagnostics.md#e0106), [E0100](diagnostics.md#e0100) | `parse.trailing-tokens`, `parse.expected-declaration`, `parse.expected` | [Writing an attribute](#writing-an-attribute) |
 | [E0243](diagnostics.md#e0243), [E0244](diagnostics.md#e0244), [E0242](diagnostics.md#e0242), [E0235](diagnostics.md#e0235) | `resolve.not-derivable`, `resolve.derive-field`, `resolve.supertrait-missing`, `resolve.overlapping-impl` | [Deriving traits](#deriving-traits) |
 | E0608 | `comptime.derive-failed` | [Deriving traits](#deriving-traits), [The layout of a type](#the-layout-of-a-type) |
-| E0250, E0251, E0252, E0253 | `resolve.not-delegable`, `resolve.delegate-to`, `resolve.delegate-self`, `resolve.delegate-field` | [Delegating traits to a field](#delegating-traits-to-a-field) |
-| [E0417](diagnostics.md#e0417), E0418 | `borrow.must-consume`, `borrow.must-consume-exit` | [Values that must be consumed](#values-that-must-be-consumed) |
-| E0266, W0006 | `resolve.bad-cfg`, `resolve.unknown-feature` | [Conditional compilation](#conditional-compilation) |
-| E0603, E0606 | `comptime.budget`, `comptime.budget-attribute` | [Compile-time budgets](#compile-time-budgets) |
+| E0250, E0251, [E0252](diagnostics.md#e0252), E0253 | `resolve.not-delegable`, `resolve.delegate-to`, `resolve.delegate-self`, `resolve.delegate-field` | [Delegating traits to a field](#delegating-traits-to-a-field) |
+| [E0417](diagnostics.md#e0417), [E0418](diagnostics.md#e0418) | `borrow.must-consume`, `borrow.must-consume-exit` | [Values that must be consumed](#values-that-must-be-consumed) |
+| [E0266](diagnostics.md#e0266), W0006 | `resolve.bad-cfg`, `resolve.unknown-feature` | [Conditional compilation](#conditional-compilation) |
+| E0603, [E0606](diagnostics.md#e0606) | `comptime.budget`, `comptime.budget-attribute` | [Compile-time budgets](#compile-time-budgets) |
 | E0821 | `test.refines-mismatch` | [Refinement tests](#refinement-tests) |
 | E0702 | `type.test-signature` | [Fixtures](#fixtures) |
-| E0989 | `unsafe.export-signature` | [Exported functions](#exported-functions) |
-| E0990 | `unsafe.blocking-not-foreign` | [Foreign functions that block](#foreign-functions-that-block) |
-| E0225, E0240, E0701 | `resolve.std-only-attribute`, `resolve.sealed-trait`, `cap.internal` | [Attributes of the standard library](#attributes-of-the-standard-library) |
+| [E0989](diagnostics.md#e0989) | `unsafe.export-signature` | [Exported functions](#exported-functions) |
+| [E0990](diagnostics.md#e0990) | `unsafe.blocking-not-foreign` | [Foreign functions that block](#foreign-functions-that-block) |
+| [E0225](diagnostics.md#e0225), E0240, E0701 | `resolve.std-only-attribute`, `resolve.sealed-trait`, `cap.internal` | [Attributes of the standard library](#attributes-of-the-standard-library) |

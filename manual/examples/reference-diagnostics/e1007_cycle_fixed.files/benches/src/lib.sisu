@@ -1,0 +1,4 @@
+##! The benches of a sauna.
+
+## How many sit on the benches.
+pub const SEATS: int = 6

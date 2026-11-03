@@ -1,0 +1,18 @@
+# The extra method goes in the type's own impl.
+trait Priced:
+    def price(self) -> int
+
+struct Coffee:
+    cups: int
+
+impl Priced for Coffee:
+    def price(self) -> int:
+        return 350 * self.cups
+
+impl Coffee:
+    def discount(self) -> int:
+        return 50
+
+def main():
+    let order = Coffee(2)
+    print(order.price() - order.discount())

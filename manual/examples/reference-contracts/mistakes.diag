@@ -1,0 +1,4 @@
+4:5-4:20 E0800 contract.misplaced keyword="requires"
+8:23-8:32 E0804 contract.old-arguments
+12:5-12:22 E0805 contract.generator-ensures
+17:5-17:18 E0807 contract.not-in-test

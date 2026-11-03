@@ -577,6 +577,68 @@ fn the_sisu_backends_line_table_names_sisu_lines() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The Sisu backend compiles a program's functions on `std.par`'s workers
+/// (decisions 333 and 334): the executable is the same on one worker as on
+/// three, and `sisu2 build`, which lowers and compiles in one process,
+/// gives the object that `sisu2 lir` and then `sisu2 x86` give.
+#[test]
+fn the_sisu_backend_gives_the_same_bytes_on_any_number_of_workers() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let dir = scratch("workers");
+    let case = compiler_dir().join("conformance/cases/examples/concurrency.sisu");
+    std::fs::copy(&case, dir.join("concurrency.sisu")).expect("the case");
+    let build = |threads: &str, exe: &str| {
+        let out = std::process::Command::new(&sisu)
+            .args(["build", "--native", "--output", exe, "concurrency.sisu"])
+            .env("SISU_PAR_THREADS", threads)
+            .env("SISU_NATIVE_TIMES", "1")
+            .current_dir(&dir)
+            .output()
+            .expect("sisu builds");
+        let (_, err, status) = outcome(out);
+        assert_eq!(status, Some(0), "{err}");
+        assert!(err.contains("native: compiled by the Sisu backend in "), "{err}");
+        std::fs::read(dir.join(exe)).expect("the executable")
+    };
+    assert!(build("1", "one") == build("3", "three"), "the executables differ");
+    let sir = std::process::Command::new(&sisu)
+        .args(["sir", "concurrency.sisu"])
+        .current_dir(&dir)
+        .output()
+        .expect("sisu sir");
+    std::fs::write(dir.join("program.sir"), &sir.stdout).expect("the SIR");
+    let stage2 = compiler_dir().join("target/stage2/sisu2");
+    let run = |args: &[&str]| {
+        let out =
+            std::process::Command::new(&stage2).args(args).current_dir(&dir).output().expect("sisu2 runs");
+        let (_, err, status) = outcome(out);
+        assert_eq!(status, Some(0), "{args:?}: {err}");
+    };
+    run(&["build", "program.sir", "--output", "built.o"]);
+    run(&["lir", "program.sir", "--output", "program.lir"]);
+    run(&["x86", "program.lir", "--output", "compiled.o"]);
+    let a = std::fs::read(dir.join("built.o")).expect("the first object");
+    let b = std::fs::read(dir.join("compiled.o")).expect("the second object");
+    assert!(a == b, "`sisu2 build` and `sisu2 x86` give different objects");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The runtime in Sisu's seed (decision 336), `compiler/rt/rt.sir`, is the
+/// SIR stage 1 prints of `compiler/rt`: the object every native program is
+/// linked with is compiled from it, since it must exist before stage 1, a
+/// native program itself, can compile the package. After a change to
+/// `compiler/rt/src`, `sisu sir > rt.sir` in `compiler/rt` makes it again.
+#[test]
+fn the_runtime_in_sisu_is_its_seed() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let rt = compiler_dir().join("rt");
+    let printed = std::process::Command::new(&sisu).arg("sir").current_dir(&rt).output().expect("sisu sir");
+    let (out, err, status) = outcome(printed);
+    assert_eq!(status, Some(0), "{err}");
+    let seed = std::fs::read_to_string(rt.join("rt.sir")).expect("the seed");
+    assert!(out == seed, "compiler/rt/rt.sir is not what `sisu sir` prints in compiler/rt; make it again");
+}
+
 /// `sisu run --native` builds a program, runs it with its arguments and
 /// gives its exit status; the executable is gone afterwards.
 #[test]
@@ -676,7 +738,11 @@ fn foreign_calls_of_every_width_lower_through_stage_2() {
         let ran = std::process::Command::new(dir.join(exe)).current_dir(&dir).output().expect("it runs");
         assert_eq!(
             outcome(ran),
-            ("7\n2147483647\n65\n513\n4660\n1.4142135623730951\n0.1875\n".to_string(), String::new(), Some(0)),
+            (
+                "7\n2147483647\n65\n513\n4660\n1.4142135623730951\n0.1875\n".to_string(),
+                String::new(),
+                Some(0)
+            ),
             "{exe}"
         );
     }

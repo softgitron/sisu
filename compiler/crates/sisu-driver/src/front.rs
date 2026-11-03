@@ -563,6 +563,83 @@ impl Stage2 {
     }
 }
 
+/// The runtime in Sisu (`compiler/rt`, decision 336), compiled once into
+/// `compiler/target/rt/rt.o`, which every native program is linked with.
+/// It is compiled from its seed, the SIR stage 1 printed of it
+/// (`compiler/rt/rt.sir`), by the Rust lowering and Cranelift, as stage 1
+/// and stage 2 are seeded: it must exist before stage 1, which reads
+/// std.mem, can compile it, since stage 1 is a native program too.
+pub struct Rt {
+    pub object: PathBuf,
+}
+
+impl Rt {
+    /// The object, built first when it is missing or older than the seed.
+    pub fn ready(host: &mut dyn Host) -> Result<Rt, i32> {
+        let compiler = compiler_dir();
+        let seed = compiler.join("rt").join("rt.sir");
+        let object = compiler.join("target").join("rt").join("rt.o");
+        let fail = |host: &mut dyn Host, detail: String| {
+            host.stderr(&crate::cli::plain_error(
+                msg::NATIVE_RT_BUILD,
+                &[("seed", seed.display().to_string()), ("detail", detail)],
+            ));
+            sisu_interp::exit::ERROR
+        };
+        let fresh = |object: &Path| {
+            let built = std::fs::metadata(object).and_then(|m| m.modified());
+            let made = std::fs::metadata(&seed).and_then(|m| m.modified());
+            matches!((built, made), (Ok(b), Ok(m)) if b >= m)
+        };
+        if fresh(&object) {
+            return Ok(Rt { object });
+        }
+        let dir = object.parent().map(Path::to_path_buf).unwrap_or_default();
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            return Err(fail(host, e.to_string()));
+        }
+        // Under a lock, so that the builds that start at once build it once.
+        let lock = match std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(dir.join(".build-lock"))
+        {
+            Ok(f) => f,
+            Err(e) => return Err(fail(host, e.to_string())),
+        };
+        if let Err(e) = lock.lock() {
+            return Err(fail(host, e.to_string()));
+        }
+        if fresh(&object) {
+            return Ok(Rt { object });
+        }
+        let text = match std::fs::read_to_string(&seed) {
+            Ok(t) => t,
+            Err(e) => return Err(fail(host, e.to_string())),
+        };
+        let prog = match sisu_sir::read(&text) {
+            Ok(p) => p,
+            Err(e) => return Err(fail(host, format!("line {}: {}", e.line, e.message))),
+        };
+        let std_dir = std::fs::canonicalize(compiler.join("std")).ok().map(|d| d.display().to_string());
+        let sources = sisu_codegen::Sources { comp_dir: compiler.join("rt").display().to_string(), std_dir };
+        let options = sisu_codegen::Options { sources, release: false };
+        let compiled = match sisu_codegen::compile_library(&prog, &options) {
+            Ok(c) => c,
+            Err(e) => return Err(fail(host, format!("{e:?}"))),
+        };
+        let part = dir.join(format!("rt.o.part-{}", std::process::id()));
+        if let Err(e) = std::fs::write(&part, &compiled.object).and_then(|()| std::fs::rename(&part, &object))
+        {
+            let _ = std::fs::remove_file(&part);
+            return Err(fail(host, e.to_string()));
+        }
+        drop(lock);
+        Ok(Rt { object })
+    }
+}
+
 /// Whether stage 2's executable is missing or older than a source of stage
 /// 2 or of stage 1's `sir` module.
 fn stage2_stale(exe: &Path, compiler: &Path) -> bool {

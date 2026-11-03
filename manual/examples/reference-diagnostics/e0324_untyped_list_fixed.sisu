@@ -1,0 +1,4 @@
+# A type annotation says what the list holds.
+def main():
+    let names: list[str] = []
+    print(len(names))

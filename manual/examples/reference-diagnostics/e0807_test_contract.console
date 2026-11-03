@@ -1,0 +1,7 @@
+$ sisu check e0807_test_contract.sisu
+error[E0807]: a test has no contract; check what it needs with `assert`
+  --> e0807_test_contract.sisu:6:5
+  |
+6 |     requires half(4) > 0
+  |     ^^^^^^^^^^^^^^^^^^^^
+

@@ -1,0 +1,2 @@
+$ sisu run --contracts=most d0028_bad_level.sisu
+error[D0028]: `--contracts` takes `off`, `preconditions` or `all`, not `most`

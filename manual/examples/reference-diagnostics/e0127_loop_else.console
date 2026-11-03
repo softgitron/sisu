@@ -1,0 +1,8 @@
+$ sisu run e0127_loop_else.sisu
+error[E0127]: a loop has no `else` in Sisu; keep what the loop finds in a variable and test it after the loop, as in `if let Some(i) = found:`
+  --> e0127_loop_else.sisu:8:5
+  |
+8 |     else:
+  |     ^^^^
+
+error[D0006]: the program was not run: errors found (1)

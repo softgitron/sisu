@@ -1,0 +1,14 @@
+$ sisu run limits.sisu
+error[E0601]: the compile-time evaluation of this expression used the standard output; nothing reaches the world at compile time
+  --> limits.sisu:9:26
+  |
+9 | const GREETING: String = comptime greet("Aino")
+  |                          ^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0604]: a function made at compile time cannot be kept for run time; numbers, text, booleans, characters, and lists, sets, dicts, tuples, options, results, structs and enums of them can
+  --> limits.sisu:10:31
+   |
+10 | const ADD_TWO: (int) -> int = comptime adder(2)
+   |                               ^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (2)

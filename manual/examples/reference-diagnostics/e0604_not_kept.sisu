@@ -1,0 +1,8 @@
+# A closure made at compile time, which a program cannot keep.
+def adder(n: int) -> (int) -> int:
+    return own x -> x + n
+
+const ADD_TWO: (int) -> int = comptime adder(2)
+
+def main():
+    print(ADD_TWO(5))

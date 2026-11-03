@@ -1,0 +1,19 @@
+$ sisu check
+warning[W0005]: `runtime` is not a key of `[package]` that stage 0 knows; it is ignored
+  --> sisu.toml:5:1
+  |
+5 | runtime = "single"
+  | ^^^^^^^
+
+warning[W0005]: `panic` is not a key of `[profile.release]` that stage 0 knows; it is ignored
+  --> sisu.toml:9:1
+  |
+9 | panic = "abort"
+  | ^^^^^
+
+warning[W0005]: `contracts` is not a key of `[profile.release-size]` that stage 0 knows; it is ignored
+  --> sisu.toml:12:1
+   |
+12 | contracts = "off"
+   | ^^^^^^^^^
+

@@ -1,0 +1,8 @@
+# The `from` clause names both parameters the result may borrow.
+def longer(a: str, b: str) -> str from a, b:
+    if len(b) > len(a):
+        return b
+    return a
+
+def main():
+    print(longer("sauna", "lauteet"))

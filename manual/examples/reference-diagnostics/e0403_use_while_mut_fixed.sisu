@@ -1,0 +1,6 @@
+# The read comes after the last use of the `mut` borrow.
+def main():
+    var queue = ["Aino", "Eero"]
+    let back = ref mut queue
+    back.push("Roni")
+    print(len(queue))

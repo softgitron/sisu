@@ -1,0 +1,8 @@
+$ sisu run year
+error[E0236]: `Len` for `int` can be implemented only in the package of the trait or of the type, or in the root package
+  --> ../digits/src/lib.sisu:4:1
+  |
+4 | impl Len for int:
+  | ^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

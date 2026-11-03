@@ -1033,8 +1033,7 @@ error[E0100]: expected `:`, found `=`
 ### `&x` to borrow
 
 A plain parameter already borrows; an argument is written as it is, and
-`ref` and `mut` say the rest ([R7](../README.md#the-reference), when it
-is written). E0103.
+`ref` and `mut` say the rest ([R7](ownership.md)). E0103.
 
 <!-- file: examples/reference-false-friends/borrow_sign.sisu -->
 ```sisu

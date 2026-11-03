@@ -1,0 +1,8 @@
+$ sisu run
+warning[W0005]: `author` is not a key of `[package]` that stage 0 knows; it is ignored
+  --> sisu.toml:5:1
+  |
+5 | author = "Aino"
+  | ^^^^^^
+
+kiuas

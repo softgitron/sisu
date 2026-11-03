@@ -1,0 +1,10 @@
+# A refinement with an impl of a trait of its own.
+type Hour = int where 0 <= self < 24
+
+impl Display for Hour:
+    def fmt(self, mut f: Formatter):
+        f.write("{self}:00")
+
+def main():
+    let opens: Hour = 17
+    print(opens)

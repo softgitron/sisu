@@ -1,0 +1,9 @@
+# The number is computed while compiling, the closure while running.
+def adder(n: int) -> (int) -> int:
+    return own x -> x + n
+
+const STEP: int = comptime 1 + 1
+
+def main():
+    let add_two = adder(STEP)
+    print(add_two(5))

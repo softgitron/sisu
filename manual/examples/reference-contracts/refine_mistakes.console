@@ -1,0 +1,20 @@
+$ sisu run refine_mistakes.sisu
+error[E0814]: the predicate of `Half` must be a `bool`, found `int`
+  --> refine_mistakes.sisu:3:23
+  |
+3 | type Half = int where self // 2
+  |                       ^^^^^^^^^
+
+error[E0813]: `Small` refines `int` and has its reading impls; it cannot have an impl of `Display` of its own
+  --> refine_mistakes.sisu:6:1
+  |
+6 | impl Display for Small:
+  | ^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0812]: `xs` is a `Short`, which a change through its base could take outside `len(self) <= 3`; change a copy of the base and check it again with `try_from`
+  --> refine_mistakes.sisu:12:5
+   |
+12 |     xs.push(3)
+   |     ^^
+
+error[D0006]: the program was not run: errors found (3)

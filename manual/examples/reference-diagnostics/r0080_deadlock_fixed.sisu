@@ -1,0 +1,8 @@
+# The message is sent inside the scope, by a task of its own.
+def main():
+    let tx, rx = channel[String](capacity=1)
+    task.scope do s:
+        s.spawn do:
+            print(rx.recv())
+        s.spawn do:
+            _ = tx.send("löyly".to_string())

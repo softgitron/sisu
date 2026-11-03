@@ -1,0 +1,8 @@
+$ sisu run e0813_refinement_impl.sisu
+error[E0813]: `Hour` refines `int` and has its reading impls; it cannot have an impl of `Display` of its own
+  --> e0813_refinement_impl.sisu:4:1
+  |
+4 | impl Display for Hour:
+  | ^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

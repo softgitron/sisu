@@ -1,0 +1,12 @@
+$ sisu run e0408_not_from.sisu
+error[E0408]: this returns a borrow of the parameter `b`, which is not in the `from` clause of `longer`
+  --> e0408_not_from.sisu:4:9
+  |
+4 |         return b
+  |         ^^^^^^^^
+  |
+2 | def longer(a: str, b: str) -> str from a:
+  |                    ------ `b` is declared here
+  = fix: name `b` in the `from` clause
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

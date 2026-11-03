@@ -1,0 +1,6 @@
+# A struct built from another module, which cannot see one of its fields.
+from atlas.geo.point import Point
+
+def main():
+    let oulu = Point(65.0, 25.5)
+    print(oulu.lat)

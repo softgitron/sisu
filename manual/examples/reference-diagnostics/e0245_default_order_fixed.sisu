@@ -1,0 +1,7 @@
+# The parameter with a default comes last.
+struct Reading[T, U = String]:
+    value: T
+    unit: U
+
+def main():
+    print(Reading(80, "°C").value)

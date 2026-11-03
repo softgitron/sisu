@@ -17,6 +17,7 @@ lowers it to LLVM IR.
 ./sisu2 lir FILE.sir [--release] [--output FILE.lir]   # the LIR of a serialised SIR program
 ./sisu2 sir FILE.sir                                   # the SIR read and written again
 ./sisu2 x86 FILE.lir --output FILE.o                   # the LIR compiled by the Sisu backend
+./sisu2 build FILE.sir --output FILE.o [--release]     # lowered and compiled in one process
 sisu build --native [FILE]                             # lowered by stage 2, compiled by the Sisu backend
 sisu build --native --backend=cranelift [FILE]         # lowered by stage 2, translated for Cranelift
 sisu build --native --from-lir FILE.lir [--output EXE] # the executable of a LIR program
@@ -70,7 +71,7 @@ after one analysis pass, as TPDE does:
 | `x86.sisu` | the analysis, the frame, the register allocator, and the code of each operation |
 | `dwarf.sisu` | the line table (`.debug_line`, with the unit that names it) |
 | `elf.sisu` | the ELF relocatable object: sections, symbols, relocations |
-| `object.sisu` | the pass over a program: each datum placed and each function compiled as it is read |
+| `object.sisu` | the pass over a program: each datum placed as it is read, the functions compiled in batches on `std.par`'s workers and placed in order |
 
 The program's state and one function's are one struct, `gen.Cg`, whose
 methods are spread over the modules, as `lib.rs` and `func.rs` share
@@ -95,18 +96,23 @@ LIR in 0.07 s; the SIR of stage 1's own package (521 266 lines, after its
 diagnostics round) to 4 263 811 lines in 7.1 to 8.5 s on a loaded
 machine, and in 17.8 to 21.1 s in the release profile, whose facts about
 integers it computes. Built from that LIR, stage 1 is the same executable
-its SIR gives, in both profiles. The Sisu backend compiles that LIR in
-15 to 19 s on one thread, about 4 ms for each thousand lines, to a 39 MB
-object with its line table; a conformance case's LIR (1 000 to 6 000
-lines) takes 15 to 30 ms, the process and the files included.
+its SIR gives, in both profiles. The Sisu backend compiled that LIR in
+15 to 19 s on one thread; on `std.par`'s workers (decisions 332 to 334)
+it takes 9.4 s from the LIR file on four cores of a quiet machine (18.3 s
+on one worker), to a 39 MB object with its line table, the same bytes
+either way, and `sisu2 build` lowers stage 1 in 6.7 s and compiles it in
+6.0 s, where Cranelift compiles the LIR in 3.7 s. A whole native build of
+stage 1 takes 82.5 s with the Sisu backend and 77.6 s with Cranelift,
+stage 1's front end most of both.
 
 ## The default
 
 `sisu build --native` (and `sisu run --native`) lowers every program
 through stage 2 (decisions 304 and 305): the driver writes the SIR to a
-file and `compiler/target/stage2/sisu2 lir` lowers it; a debug build's LIR
-is then compiled by the Sisu backend (`sisu2 x86`), a release build's
-translated for Cranelift by the Rust backend (decision 331). A construct
+file; a debug build's is lowered and compiled by the Sisu backend in one
+process (`compiler/target/stage2/sisu2 build`, decisions 331 and 334), a
+release build's lowered by `sisu2 lir` and its LIR translated for
+Cranelift by the Rust backend. A construct
 stage 2 does not lower is the program's `D0103`; nothing falls back to the
 Rust lowering, which lowers only when `--lower=rust` asks for it (the
 oracle the check below compares with, and the seed that builds stage 1
@@ -142,18 +148,18 @@ sisu2-A lowers and compiles it into sisu2-B and stage1-B. It holds: each
 B is its A byte for byte, and stage1-A prints the SIR `sisu sir` prints.
 
 ```text
-  sisu2-C       10944360 bytes  sha256 5f9e20ebc11e9419...  built through the Cranelift path (33.8 s)
-  A.stage2.sir   4000896 bytes  sha256 06645affac211932...  printed by sisu sir
-  A.stage1.sir  17182632 bytes  sha256 c7174fed048f205d...  printed by sisu sir (both 61.2 s)
-  sisu2-A       14459112 bytes  sha256 2acc04a32f95c0fb...  built by sisu2-C (7.7 s)
-  stage1-A      38966672 bytes  sha256 a3ef32a31e41464e...  built by sisu2-C (27.5 s)
-  B.stage2.sir   4000896 bytes  sha256 06645affac211932...  printed by stage1-A
-  B.stage1.sir  17182632 bytes  sha256 c7174fed048f205d...  printed by stage1-A (both 91.0 s)
-  sisu2-B       14459112 bytes  sha256 2acc04a32f95c0fb...  built by sisu2-A (11.5 s)
-  stage1-B      38966672 bytes  sha256 a3ef32a31e41464e...  built by sisu2-A (46.2 s)
+  sisu2-C       11372688 bytes  sha256 36daa1f91ad04d3f...  built through the Cranelift path (30.4 s)
+  A.stage2.sir   4109955 bytes  sha256 1222cc29405bbfbb...  printed by sisu sir
+  A.stage1.sir  17182632 bytes  sha256 c7174fed048f205d...  printed by sisu sir (both 51.6 s)
+  sisu2-A       14979976 bytes  sha256 e4bf40b4445cccf0...  built by sisu2-C (4.2 s)
+  stage1-A      39824256 bytes  sha256 8a7973dc57453a7b...  built by sisu2-C (16.4 s)
+  B.stage2.sir   4109955 bytes  sha256 1222cc29405bbfbb...  printed by stage1-A
+  B.stage1.sir  17182632 bytes  sha256 c7174fed048f205d...  printed by stage1-A (both 79.7 s)
+  sisu2-B       14979976 bytes  sha256 e4bf40b4445cccf0...  built by sisu2-A (6.3 s)
+  stage1-B      39824256 bytes  sha256 8a7973dc57453a7b...  built by sisu2-A (28.3 s)
 ```
 
-It takes about five minutes on four cores; `--keep DIR` leaves the files
+It takes three to five minutes on four cores; `--keep DIR` leaves the files
 in `DIR`, `--sisu PATH` drives the builds with another `sisu` (CI's
 `bootstrap` job uses the debug one).
 
@@ -191,7 +197,7 @@ What is done, and what is not, is kept here as the work goes.
   --tests`, decision 285), its tests' tags and its benchmarks included.
 - The Sisu backend (decisions 306 to 312): every operation of LIR but a
   jump with more than nine arguments and a return of more than one value;
-  all 207 cases of `native.list` run from its objects with the
+  all 208 cases of `native.list` run from its objects with the
   interpreter's output (`--native`), as they do from Cranelift's
   (`--native-cranelift`); stage 1 compiled by it checks the conformance
   suite's files as the Cranelift build does. What it leaves is in
@@ -199,3 +205,12 @@ What is done, and what is not, is kept here as the work goes.
 - Its fixed point holds (decision 330, `./bootstrap.sh`), and it is the
   debug profile's backend, Cranelift the release profile's and the
   oracle (decision 331).
+- The runtime in Sisu, begun (decisions 335 and 336): raw memory of a word
+  or a byte compiled inline, and `compiler/rt`, compiled once into the
+  object every native program is linked with, holding `sisu_rt_bytes_eq`,
+  whose Rust counterpart is gone.
+- On threads (decisions 332 to 334): the runtime's words the code reaches
+  are thread-local (`tls_value`), std.par's `map` runs its bodies on the
+  runtime's workers, the backend compiles each batch of functions through
+  it, and `sisu2 build` lowers and compiles in one process, each giving
+  the bytes one thread gives.

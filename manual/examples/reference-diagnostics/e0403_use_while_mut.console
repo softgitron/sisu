@@ -1,0 +1,15 @@
+$ sisu run e0403_use_while_mut.sisu
+error[E0403]: `queue` is borrowed with `mut` on line 4 and cannot be used until that borrow ends on line 6
+  --> e0403_use_while_mut.sisu:5:15
+  |
+5 |     print(len(queue))
+  |               ^^^^^
+  |
+4 |     let back = ref mut queue
+  |                ------------- borrowed here by `back`
+  |
+6 |     back.push("Roni")
+  |     ---- the borrow is still used here
+  = note: move this after line 6, where the borrow ends, or work on a copy made with `.copy()`
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

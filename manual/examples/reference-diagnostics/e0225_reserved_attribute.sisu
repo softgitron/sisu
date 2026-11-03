@@ -1,0 +1,7 @@
+# An attribute that only the standard library may write.
+@sealed
+trait Shape:
+    def area(self) -> f64
+
+def main():
+    print("no shapes yet")

@@ -578,6 +578,16 @@ pub const I_CHAR_IS_WHITESPACE: int = 64
 pub const I_CHAR_IS_UPPERCASE: int = 65
 pub const I_CHAR_IS_LOWERCASE: int = 66
 pub const I_CHAR_CODE: int = 67
+## The raw memory of std.mem the code reads and writes inline (decision
+## 335).
+pub const I_MEM_PTR_FROM_ADDRESS: int = 280
+pub const I_MEM_PTR_CAST: int = 281
+pub const I_MEM_PTR_AS_CONST: int = 283
+pub const I_MEM_PTR_ADDR: int = 284
+pub const I_MEM_PTR_OFFSET: int = 285
+pub const I_MEM_PTR_CAST_MUT: int = 286
+pub const I_MEM_PTR_READ: int = 287
+pub const I_MEM_PTR_WRITE: int = 288
 pub const I_STR_BYTE_LEN: int = 68
 pub const I_STR_BYTE_AT: int = 69
 pub const I_STR_BYTE_SLICE: int = 70

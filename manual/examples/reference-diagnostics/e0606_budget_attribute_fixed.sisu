@@ -1,0 +1,12 @@
+# A budget named by `steps=`.
+def triangle(n: int) -> int:
+    var total = 0
+    for i in range(n + 1):
+        total += i
+    return total
+
+@comptime_budget(steps=2_000_000)
+const BIG: int = comptime triangle(100)
+
+def main():
+    print(BIG)

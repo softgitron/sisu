@@ -1,0 +1,9 @@
+# An operator delegated to one of two fields.
+@delegate(Add, to="metres")
+struct Run:
+    metres: f64
+    runner: String
+
+def main():
+    let total = Run(400.0, "Aino") + Run(800.0, "Aino")
+    print(total.metres)

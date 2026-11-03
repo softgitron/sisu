@@ -139,6 +139,50 @@ pub fn compile_with_options(prog: &sir::Program, options: &Options) -> Result<Co
     compile_with(prog, false, options).map(|(c, _)| c)
 }
 
+/// The runtime in Sisu (`compiler/rt`, decision 336) compiled to an object:
+/// each `export_NAME` function of its root module (a name without a dot,
+/// without type parameters) is the global symbol `sisu_rt_NAME` of Sisu's
+/// convention, and what it calls is compiled with it under local symbols.
+/// Every function is the runtime's own code: it counts no frame, passes no
+/// yield point and adds no line to a stack trace, and none may walk a value
+/// by the program's type table, which the library has none of (a construct
+/// that would is `Unsupported`). There is no C `main` and no type table.
+pub fn compile_library(prog: &sir::Program, options: &Options) -> Result<Compiled, Error> {
+    let mut cg = Codegen::new(prog, 1, options.release)?;
+    cg.library = true;
+    let mut exports: Vec<(&str, String)> = Vec::new();
+    for f in &prog.functions {
+        if let Some(rest) = f.name.strip_prefix("export_")
+            && !f.name.contains('.')
+            && f.type_params.is_empty()
+            && f.kind == sir::FnKind::Normal
+        {
+            exports.push((f.name.as_str(), format!("sisu_rt_{rest}")));
+        }
+    }
+    if exports.is_empty() {
+        return Err(Error::unsupported("a runtime library without an `export_` function"));
+    }
+    for (name, symbol) in &exports {
+        cg.export_instance(name, symbol)?;
+    }
+    cg.complete()?;
+    let functions = cg.compiled;
+    let statements = cg.statements;
+    let checks = cg.checks;
+    let mut product = cg.module.finish();
+    debug::write(
+        &mut product,
+        &prog.sources,
+        &cg.debug,
+        debug::Describe::Sir(&mut cg.types),
+        &options.sources,
+        &*cg.isa,
+    )?;
+    let object = product.emit().map_err(|e| Error::internal(format!("writing the object file: {e}")))?;
+    Ok(Compiled { object, functions, statements, checks })
+}
+
 /// Every construct of the program that the backend does not compile yet,
 /// with the function it is in and how many functions have it, rather than
 /// the first: how far a program is from compiling (a function is left at
@@ -311,7 +355,7 @@ fn find_program(name: &str) -> Option<PathBuf> {
 }
 
 /// Links an object file with the runtime library into an executable.
-pub fn link(object: &[u8], runtime: &Path, output: &Path) -> Result<(), Error> {
+pub fn link(object: &[u8], runtime: &Path, rt: &Path, output: &Path) -> Result<(), Error> {
     let obj = output.with_extension("o");
     std::fs::write(&obj, object)
         .map_err(|e| Error::Link(format!("cannot write `{}`: {e}", obj.display())))?;
@@ -324,7 +368,8 @@ pub fn link(object: &[u8], runtime: &Path, output: &Path) -> Result<(), Error> {
     if find_program("ld.lld").is_some() {
         cmd.arg("-fuse-ld=lld");
     }
-    let out = cmd.arg("-o").arg(output).arg(&obj).arg(runtime).args(native_libs()).output();
+    // The runtime in Sisu's object, then the runtime in Rust (decision 336).
+    let out = cmd.arg("-o").arg(output).arg(&obj).arg(rt).arg(runtime).args(native_libs()).output();
     // `SISU_NATIVE_KEEP=1` keeps the object file beside the executable.
     if std::env::var_os("SISU_NATIVE_KEEP").is_none() {
         let _ = std::fs::remove_file(&obj);
@@ -427,6 +472,9 @@ pub(crate) struct Codegen<'p> {
     /// not compile is recorded in `missing` and given a body that stops.
     survey: bool,
     missing: Vec<(String, String)>,
+    /// Compiling the runtime in Sisu (decision 336): no frame counted, no
+    /// yield point, no trace line, and no value walked by a type table.
+    pub library: bool,
     /// The types of the values each `dyn` type holds, as the compiled
     /// code makes them (`dyn T(...)`).
     carried: fx::FxMap<Type, Vec<Type>>,
@@ -522,9 +570,7 @@ impl<'p> Codegen<'p> {
         // Each thread keeps its own count of nested calls, budget, stack
         // limits and site (decision 332).
         let mut import = |name: &str| {
-            module
-                .declare_data(name, Linkage::Import, true, true)
-                .map_err(|e| Error::internal(e.to_string()))
+            module.declare_data(name, Linkage::Import, true, true).map_err(|e| Error::internal(e.to_string()))
         };
         let depth = import(sym::DEPTH)?;
         let budget = import(sym::BUDGET)?;
@@ -563,6 +609,7 @@ impl<'p> Codegen<'p> {
             handed: Vec::new(),
             debug: Vec::new(),
             survey: false,
+            library: false,
             missing: Vec::new(),
             carried: fx::FxMap::default(),
             dispatchers: Vec::new(),
@@ -592,6 +639,22 @@ impl<'p> Codegen<'p> {
     /// The program's function named `name`.
     pub(crate) fn function(&self, name: &str) -> Option<&'p sir::Function> {
         self.fns.get(name).copied()
+    }
+
+    /// The function `name`, without type arguments, under the global symbol
+    /// `symbol` of a runtime library (decision 336).
+    fn export_instance(&mut self, name: &str, symbol: &str) -> Result<FuncId, Error> {
+        let f = self
+            .function(name)
+            .ok_or_else(|| Error::internal(format!("the library has no function `{name}`")))?;
+        let sig = sisu_signature(self.call_conv, f.param_count);
+        let id = self
+            .module
+            .declare_function(symbol, Linkage::Export, &sig)
+            .map_err(|e| Error::internal(e.to_string()))?;
+        self.instances.insert((name.to_string(), Vec::new()), id);
+        self.queue.push_back((name.to_string(), Vec::new(), id));
+        Ok(id)
     }
 
     pub(crate) fn instance(&mut self, name: &str, targs: Vec<Type>) -> Result<FuncId, Error> {
@@ -1135,7 +1198,7 @@ impl<'p> Codegen<'p> {
             sym::DROP => (&[i64_, i32_], &[i8_]),
             sym::COPY => (&[i64_, i64_, i32_], &[]),
             sym::BINARY => (&[i32_, i64_, i64_, i32_, i64_, i32_], &[i8_]),
-            sym::BYTES_EQ => (&[i64_, i64_, i64_], &[i8_]),
+            sym::BYTES_EQ => (&[i64_, i64_, i64_, i64_], &[i8_]),
             sym::TEXT_PUSH | sym::TEXT_FROM => (&[i64_, i64_, i64_], &[]),
             sym::TEXT_PUSH_INT | sym::LIST_RESERVE => (&[i64_, i64_], &[]),
             sym::TABLE_FIND => (&[i64_, i64_, i32_, i32_], &[i64_]),

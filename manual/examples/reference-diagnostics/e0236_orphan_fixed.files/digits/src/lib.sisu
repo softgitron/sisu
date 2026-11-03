@@ -1,0 +1,9 @@
+##! The digits of numbers.
+
+## A number whose `len` is its count of decimal digits.
+pub struct Number:
+    pub value: int
+
+impl Len for Number:
+    def len(self) -> int:
+        return len("{self.value}")

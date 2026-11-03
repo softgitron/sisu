@@ -1,0 +1,8 @@
+$ sisu run e0814_predicate_type.sisu
+error[E0814]: the predicate of `Even` must be a `bool`, found `int`
+  --> e0814_predicate_type.sisu:2:23
+  |
+2 | type Even = int where self % 2
+  |                       ^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

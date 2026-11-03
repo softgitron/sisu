@@ -1,0 +1,7 @@
+# A refined list changed through its base.
+type Short = list[int] where len(self) <= 3
+
+def main():
+    var picks: Short = [1, 2]
+    picks.push(3)
+    print(picks)

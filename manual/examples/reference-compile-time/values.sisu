@@ -1,0 +1,18 @@
+# `comptime` computes a value while compiling; the program keeps it.
+def squares(n: int) -> list[int]:
+    var out: list[int] = []
+    for i in range(n):
+        out.push(i * i)
+    return out
+
+const SQUARES: list[int] = comptime squares(6)
+const SLOTS: int = 16
+
+def slot(n: int) -> int:
+    comptime assert SLOTS & (SLOTS - 1) == 0, "SLOTS is a power of two"
+    return n & (SLOTS - 1)
+
+def main():
+    print(SQUARES)
+    print(comptime len(squares(4)) + 1)
+    print("{slot(3)} {slot(21)}")

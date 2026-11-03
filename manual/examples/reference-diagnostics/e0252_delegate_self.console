@@ -1,0 +1,14 @@
+$ sisu run e0252_delegate_self.sisu
+error[E0252]: `Add` returns a `Run`, so `Run` can delegate it only when `metres` is its one field
+  --> e0252_delegate_self.sisu:2:11
+  |
+2 | @delegate(Add, to="metres")
+  |           ^^^
+
+error[E0310]: `+` cannot be applied to `Run` and `Run`
+  --> e0252_delegate_self.sisu:8:17
+  |
+8 |     let total = Run(400.0, "Aino") + Run(800.0, "Aino")
+  |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (2)

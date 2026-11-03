@@ -1,0 +1,11 @@
+$ sisu run e0609_instance_failed.sisu
+error[E0609]: making `columns[int]` stopped at compile time: `int` has no columns
+  --> e0609_instance_failed.sisu:9:11
+  |
+9 |     print(columns(42))
+  |           ^^^^^^^^^^^
+  |
+6 |         comptime panic("`{reflect.name_of(T)}` has no columns")
+  |                  ---------------------------------------------- the template, where it stopped
+
+error[D0006]: the program was not run: errors found (1)

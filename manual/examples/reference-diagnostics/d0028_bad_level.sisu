@@ -1,0 +1,7 @@
+# A contract, checked at the level a run names.
+def half(n: int) -> int:
+    requires n >= 0
+    return n // 2
+
+def main():
+    print(half(8))

@@ -6,8 +6,8 @@
 
 use crate::mem::{self, List};
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+use std::sync::{Mutex, OnceLock};
 
 /// The headers registered, so that a release looks at the table only when
 /// there are any.

@@ -1,0 +1,8 @@
+# A `Cell` shared with tasks by reference.
+def main():
+    let visits = Cell(0)
+    task.scope do s:
+        for _ in range(3):
+            s.spawn do:
+                visits.set(visits.get() + 1)
+    print(visits.get())

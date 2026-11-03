@@ -1,0 +1,12 @@
+# One method, with a default for the degrees.
+struct Stove:
+    celsius: int
+
+    def heat(mut self, degrees: int = 10):
+        self.celsius += degrees
+
+def main():
+    var stove = Stove(60)
+    stove.heat()
+    stove.heat(20)
+    print(stove.celsius)

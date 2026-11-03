@@ -1,0 +1,6 @@
+# The target is tested with `if comptime`, in a body.
+def separator() -> str:
+    return if comptime target.os == "windows": "\\" else: "/"
+
+def main():
+    print("usr{separator()}bin")

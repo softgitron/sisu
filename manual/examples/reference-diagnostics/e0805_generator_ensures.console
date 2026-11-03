@@ -1,0 +1,8 @@
+$ sisu run e0805_generator_ensures.sisu
+error[E0805]: a generator has no `ensures`: what it returns is its iterator
+  --> e0805_generator_ensures.sisu:4:5
+  |
+4 |     ensures limit >= 0
+  |     ^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

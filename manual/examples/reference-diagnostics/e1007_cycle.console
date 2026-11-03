@@ -1,0 +1,11 @@
+$ sisu check stove
+error[E1007]: the packages depend on each other in a cycle: `stove` -> `benches` -> `stove`; packages build in dependency order, so their graph has no cycle
+  --> ../benches/sisu.toml:7:1
+  |
+7 | stove = { path = "../stove" }
+  | ^^^^^
+  ::: sisu.toml:7:1
+  |
+7 | benches = { path = "../benches" }
+  | ------- `stove` depends on `benches` here
+

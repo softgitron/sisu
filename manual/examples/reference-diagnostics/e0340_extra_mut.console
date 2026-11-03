@@ -1,0 +1,9 @@
+$ sisu run e0340_extra_mut.sisu
+error[E0340]: `prices` is not a `mut` parameter, so the argument takes no `mut`
+  --> e0340_extra_mut.sisu:7:17
+  |
+7 |     print(total(mut prices))
+  |                 ^^^^^^^^^^
+  = fix: remove `mut`
+
+error[D0006]: the program was not run: errors found (1)

@@ -1,0 +1,8 @@
+$ sisu run e0106_attribute_alone.sisu
+error[E0106]: expected a declaration, found `let`
+  --> e0106_attribute_alone.sisu:4:5
+  |
+4 |     let total = 3 + 4
+  |     ^^^
+
+error[D0006]: the program was not run: errors found (1)

@@ -1,0 +1,7 @@
+# A type parameter without a default after one with a default.
+struct Reading[U = String, T]:
+    value: T
+    unit: U
+
+def main():
+    print(Reading("°C", 80).value)

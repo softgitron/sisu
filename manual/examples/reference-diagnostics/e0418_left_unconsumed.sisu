@@ -1,0 +1,16 @@
+# An early return that leaves a must-consume value behind.
+@must_consume
+struct Draft:
+    text: String
+
+    def publish(own self) -> String:
+        return self.text
+
+def post(text: str) -> String:
+    let draft = Draft(text.to_string())
+    if text == "":
+        return "nothing to post"
+    return draft.publish()
+
+def main():
+    print(post("Hei Aino"))

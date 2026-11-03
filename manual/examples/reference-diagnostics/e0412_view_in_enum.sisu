@@ -1,0 +1,7 @@
+# An enum with a field that borrows.
+enum Reading:
+    Missing(name: str)
+    Celsius(value: int)
+
+def main():
+    print("{Reading.Missing("kiuas"):?}")

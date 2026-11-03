@@ -1,0 +1,14 @@
+# A method that takes `own self` and returns a changed value is not
+# checked against the invariant.
+struct Gauge:
+    level: int
+    invariant 0 <= self.level <= 10
+
+    def filled(own self, amount: int) -> Gauge:
+        var changed = self
+        changed.level += amount
+        return changed
+
+def main():
+    let gauge = Gauge(level=4).filled(20)
+    print(gauge.level)

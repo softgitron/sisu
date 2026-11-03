@@ -553,23 +553,6 @@ unsafe fn binary(op: u32, dst: *mut u8, a: *mut u8, ta: u32, b: *mut u8, tb: u32
     abi::OK
 }
 
-/// Whether the `n` bytes at `a` and at `b` are the same: `==` on two
-/// texts whose lengths are equal (decision 253). It needs no more stack
-/// than a comparison of bytes, so it runs on the caller's.
-///
-/// # Safety
-/// Unless `n` is 0, `a` and `b` must each hold `n` bytes.
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sisu_rt_bytes_eq(a: *const u8, b: *const u8, n: u64) -> u8 {
-    if n == 0 || a == b {
-        return 1;
-    }
-    // SAFETY: as the caller guarantees.
-    let (x, y) =
-        unsafe { (std::slice::from_raw_parts(a, n as usize), std::slice::from_raw_parts(b, n as usize)) };
-    u8::from(x == y)
-}
-
 /// The `n` bytes at `b`, or none.
 ///
 /// # Safety

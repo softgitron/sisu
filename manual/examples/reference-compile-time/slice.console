@@ -1,0 +1,7 @@
+$ sisu run slice.sisu
+beyond the slice: a `comptime` expression that needs the intrinsic `sum`, which stage 1's evaluator does not run
+$ sisu check slice.sisu
+beyond the slice: a `comptime` expression that needs the intrinsic `sum`, which stage 1's evaluator does not run
+$ sisu test slice.sisu
+test "the total" ... ok
+1 passed, 0 failed, 0 blocked

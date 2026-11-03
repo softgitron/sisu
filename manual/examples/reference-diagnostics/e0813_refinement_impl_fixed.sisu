@@ -1,0 +1,9 @@
+# A function formats the hour; the refinement keeps the base's impls.
+type Hour = int where 0 <= self < 24
+
+def clock(hour: Hour) -> String:
+    return "{hour}:00"
+
+def main():
+    let opens: Hour = 17
+    print(clock(opens))

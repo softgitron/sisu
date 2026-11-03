@@ -1,0 +1,4 @@
+# A point on the map.
+pub struct Point:
+    pub lat: f64
+    pub lon: f64

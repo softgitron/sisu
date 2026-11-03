@@ -1,0 +1,8 @@
+$ sisu run e0225_reserved_attribute.sisu
+error[E0225]: `@sealed` is reserved for the standard library
+  --> e0225_reserved_attribute.sisu:2:1
+  |
+2 | @sealed
+  | ^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

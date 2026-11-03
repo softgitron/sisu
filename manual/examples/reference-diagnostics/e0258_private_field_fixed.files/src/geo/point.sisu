@@ -1,0 +1,4 @@
+# A point whose fields are both public.
+pub struct Point:
+    pub lat: f64
+    pub lon: f64

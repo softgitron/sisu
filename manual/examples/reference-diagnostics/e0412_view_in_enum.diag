@@ -1,0 +1,2 @@
+3:19-3:22 E0412 borrow.view-in-enum ty="Reading" fty="str"
+  label 2:6-2:13 borrow.type-declared-here ty="Reading"

@@ -1004,7 +1004,9 @@ pure def par_map(f: Function) -> Function:
     let call = Statement(
         kind=StatementKind.Call(
             dest=Place.local(LocalId(index=0)),
-            callee=Callee.Intrinsic(name="par.map".to_string(), args=[Type.Param(0), Type.Param(1)]),
+            callee=Callee.Intrinsic(
+                name="par.map".to_string(), args=[Type.Param(0), Type.Param(1)]
+            ),
             args=[
                 Operand.Copy(Place.local(LocalId(index=1))),
                 Operand.Copy(Place.local(LocalId(index=2))),
@@ -1068,7 +1070,7 @@ pub pure def runtime_signature(name: str) -> str?:
         case "sisu_rt_drop": Some("(i64, i32) -> (i8)")
         case "sisu_rt_copy": Some("(i64, i64, i32) -> ()")
         case "sisu_rt_binary": Some("(i32, i64, i64, i32, i64, i32) -> (i8)")
-        case "sisu_rt_bytes_eq": Some("(i64, i64, i64) -> (i8)")
+        case "sisu_rt_bytes_eq": Some("(i64, i64, i64, i64) -> (i8)")
         case "sisu_rt_text_push" | "sisu_rt_text_from": Some("(i64, i64, i64) -> ()")
         case "sisu_rt_text_push_int" | "sisu_rt_list_reserve": Some("(i64, i64) -> ()")
         case "sisu_rt_table_find": Some("(i64, i64, i32, i32) -> (i64)")

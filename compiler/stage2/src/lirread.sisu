@@ -465,9 +465,7 @@ pub struct LirReader:
 
 impl LirReader:
     pub pure def new() -> LirReader:
-        return LirReader(
-            pos=0, line_no=0, data=0, release=False, sigs={}, spans=[], next_span=0
-        )
+        return LirReader(pos=0, line_no=0, data=0, release=False, sigs={}, spans=[], next_span=0)
 
     ## A reader of a text whose functions are where `spans` says.
     pub pure def spanned(spans: list[(int, int, int)]) -> LirReader:
@@ -663,7 +661,9 @@ impl LirReader:
 ## The lines of the function `ft` left unread (`next_item_lazy`), read with
 ## the signatures the program declares: on any thread, since it reads only
 ## its own lines.
-pub pure def read_function(text: str, ft: FuncText, sigs: dict[String, Sig]) -> LirFunc ! LirReadError:
+pub pure def read_function(
+    text: str, ft: FuncText, sigs: dict[String, Sig]
+) -> LirFunc ! LirReadError:
     var r = LirReader(
         pos=ft.start, line_no=ft.line, data=0, release=False, sigs={}, spans=[], next_span=0
     )

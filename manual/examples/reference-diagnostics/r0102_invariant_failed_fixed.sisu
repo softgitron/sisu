@@ -1,0 +1,12 @@
+# The method keeps the invariant: it fills to the top at most.
+struct Gauge:
+    level: int
+    invariant 0 <= self.level <= 10
+
+    def fill(mut self, amount: int):
+        self.level = min(self.level + amount, 10)
+
+def main():
+    var gauge = Gauge(level=4)
+    gauge.fill(9)
+    print(gauge.level)

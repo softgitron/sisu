@@ -1,0 +1,13 @@
+$ sisu check
+error[E1002]: `[package]` needs `version`
+  --> sisu.toml:1:2
+  |
+1 | [package]
+  |  ^^^^^^^
+
+error[E1003]: `version` takes a version `MAJOR.MINOR.PATCH`, as in `"0.3.1"`, found `"1.0"`
+  --> sisu.toml:3:11
+  |
+3 | version = "1.0"
+  |           ^^^^^
+

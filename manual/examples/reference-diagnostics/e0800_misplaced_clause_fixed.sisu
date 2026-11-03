@@ -1,0 +1,8 @@
+# The precondition is the body's first line.
+def half(n: int) -> int:
+    requires n >= 0
+    let h = n // 2
+    return h
+
+def main():
+    print(half(8))

@@ -1,0 +1,5 @@
+# An application that uses a `pub(package)` function of a library.
+import sauna
+
+def main():
+    print(sauna.round_to_ten(84))

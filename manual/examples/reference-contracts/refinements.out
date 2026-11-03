@@ -1,0 +1,4 @@
+18:00, 6 hours left
+20:00, 4 hours left
+9: Unsatisfied(ty="Evening", predicate="self >= 17")
+30: Unsatisfied(ty="Hour", predicate="0 <= self < 24")

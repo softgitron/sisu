@@ -438,7 +438,7 @@ Shown in [chapter 2](../tutorial/02-values.md).
 
 ## Parsing
 
-Codes E0100 to E0126. The parser builds the syntax tree. Its errors name
+Codes E0100 to E0127. The parser builds the syntax tree. Its errors name
 what it expected and what it found, and several name a habit from
 another language and the Sisu way to write it.
 
@@ -628,6 +628,57 @@ zero
 ```
 
 Shown in [chapter 2](../tutorial/02-values.md).
+
+### E0106
+
+`parse.expected-declaration`: expected a declaration, found {found}.
+
+Attributes and a visibility, `@NAME` and `pub`, stand before a
+declaration; with none after them, the parser has nothing to attach
+them to. An attribute before a statement is the common case
+([R14](attributes.md#writing-an-attribute)).
+
+<!-- file: examples/reference-diagnostics/e0106_attribute_alone.sisu -->
+```sisu
+# An attribute before a statement, where no declaration follows.
+def main():
+    @deprecated("use `total`")
+    let total = 3 + 4
+    print(total)
+```
+
+<!-- output: examples/reference-diagnostics/e0106_attribute_alone.console -->
+```console
+$ sisu run e0106_attribute_alone.sisu
+error[E0106]: expected a declaration, found `let`
+  --> e0106_attribute_alone.sisu:4:5
+  |
+4 |     let total = 3 + 4
+  |     ^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Put the attribute before a declaration, or leave it out: a statement
+takes none.
+
+<!-- file: examples/reference-diagnostics/e0106_attribute_alone_fixed.sisu -->
+```sisu
+# The attribute stands before a declaration.
+@deprecated("use `total`")
+def seven() -> int:
+    return 3 + 4
+
+def main():
+    print(seven())
+```
+
+<!-- output: examples/reference-diagnostics/e0106_attribute_alone_fixed.out -->
+```text
+7
+```
+
+Shown in [R14](attributes.md#writing-an-attribute).
 
 ### E0107
 
@@ -961,9 +1012,69 @@ def main():
 5
 ```
 
+### E0127
+
+`parse.loop-else`: a loop has no `else` in Sisu; keep what the loop
+finds in a variable and test it after the loop, as in `if let Some(i) =
+found:`.
+
+Python runs a loop's `else` when the loop ends without `break`. Sisu
+has no `else` on a loop (D-021), and says so where one starts.
+
+<!-- file: examples/reference-diagnostics/e0127_loop_else.sisu -->
+```sisu
+# Python's `else` after a loop, for when no item was found.
+def main():
+    let temps = [62, 75, 81]
+    for t in temps:
+        if t > 90:
+            print("too hot: {t}")
+            break
+    else:
+        print("no reading above 90")
+```
+
+<!-- output: examples/reference-diagnostics/e0127_loop_else.console -->
+```console
+$ sisu run e0127_loop_else.sisu
+error[E0127]: a loop has no `else` in Sisu; keep what the loop finds in a variable and test it after the loop, as in `if let Some(i) = found:`
+  --> e0127_loop_else.sisu:8:5
+  |
+8 |     else:
+  |     ^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Keep what the loop finds in an optional value, and test it after the
+loop.
+
+<!-- file: examples/reference-diagnostics/e0127_loop_else_fixed.sisu -->
+```sisu
+# What the loop finds is kept, and tested after it.
+def main():
+    let temps = [62, 75, 81]
+    var found: int? = None
+    for t in temps:
+        if t > 90:
+            found = Some(t)
+            break
+    if let Some(t) = found:
+        print("too hot: {t}")
+    else:
+        print("no reading above 90")
+```
+
+<!-- output: examples/reference-diagnostics/e0127_loop_else_fixed.out -->
+```text
+no reading above 90
+```
+
+Shown in [chapter 4](../tutorial/04-control-flow.md).
+
 ## Names and declarations
 
-Codes E0200 to E0266. Name resolution finds what each name means and
+Codes E0200 to E0269. Name resolution finds what each name means and
 checks declarations: undefined and duplicate names, imports and
 visibility, derives, traits and impls.
 
@@ -1072,6 +1183,57 @@ def main():
 ```
 
 Shown in [chapter 3](../tutorial/03-functions.md).
+
+### E0203
+
+`resolve.unknown-module`: there is no module `{name}`.
+
+A path of an import names modules of a package by its files: the
+module `atlas.geo.point` is the file `src/geo/point.sisu` of the
+package `atlas`. A path whose first name is the package but whose rest
+names no file is E0203.
+
+<!-- file: examples/reference-diagnostics/e0203_unknown_module.files/src/main.sisu -->
+```sisu
+# An import of a module that the package does not have.
+from atlas.geo.points import Point
+
+def main():
+    print(Point(65.0, 25.5).lat)
+```
+
+<!-- output: examples/reference-diagnostics/e0203_unknown_module.console -->
+```console
+$ sisu run
+error[E0203]: there is no module `atlas.geo.points`
+  --> src/main.sisu:2:6
+  |
+2 | from atlas.geo.points import Point
+  |      ^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Name the module by its file's path, here `src/geo/point.sisu`. The
+diagnostic has no fix that names the similar module, which E0220 has
+for a package's own name.
+
+<!-- file: examples/reference-diagnostics/e0203_unknown_module_fixed.files/src/main.sisu -->
+```sisu
+# An import of the module `src/geo/point.sisu`.
+from atlas.geo.point import Point
+
+def main():
+    print(Point(65.0, 25.5).lat)
+```
+
+<!-- output: examples/reference-diagnostics/e0203_unknown_module_fixed.console -->
+```console
+$ sisu run
+65.0
+```
+
+Shown in [R13](modules.md#imports).
 
 ### E0211
 
@@ -1182,6 +1344,122 @@ def main():
 ```text
 a thing
 ```
+
+### E0217
+
+`resolve.duplicate-method`: `{owner}` has more than one method named
+`{name}`.
+
+A name is one function: Sisu has no overloading by parameters (D-050),
+so a type's methods have names of their own.
+
+<!-- file: examples/reference-diagnostics/e0217_duplicate_method.sisu -->
+```sisu
+# Two methods with one name.
+struct Stove:
+    celsius: int
+
+    def heat(mut self):
+        self.celsius += 10
+
+    def heat(mut self, degrees: int):
+        self.celsius += degrees
+
+def main():
+    var stove = Stove(60)
+    stove.heat()
+    print(stove.celsius)
+```
+
+<!-- output: examples/reference-diagnostics/e0217_duplicate_method.console -->
+```console
+$ sisu run e0217_duplicate_method.sisu
+error[E0217]: `Stove` has more than one method named `heat`
+  --> e0217_duplicate_method.sisu:8:9
+  |
+8 |     def heat(mut self, degrees: int):
+  |         ^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Give the parameter that varies a default, or give the second method
+another name.
+
+<!-- file: examples/reference-diagnostics/e0217_duplicate_method_fixed.sisu -->
+```sisu
+# One method, with a default for the degrees.
+struct Stove:
+    celsius: int
+
+    def heat(mut self, degrees: int = 10):
+        self.celsius += degrees
+
+def main():
+    var stove = Stove(60)
+    stove.heat()
+    stove.heat(20)
+    print(stove.celsius)
+```
+
+<!-- output: examples/reference-diagnostics/e0217_duplicate_method_fixed.out -->
+```text
+90
+```
+
+Shown in [chapter 14](../tutorial/14-traits.md).
+
+### E0225
+
+`resolve.std-only-attribute`: `@{name}` is reserved for the standard
+library.
+
+Seven attributes, `@intrinsic`, `@builtin`, `@structural`, `@keeps`,
+`@sealed`, `@marker` and `@internal`, describe the standard library's
+own source; in a program's module they would make an unsafe operation a
+safe call, or close a trait to the program that declares it.
+
+<!-- file: examples/reference-diagnostics/e0225_reserved_attribute.sisu -->
+```sisu
+# An attribute that only the standard library may write.
+@sealed
+trait Shape:
+    def area(self) -> f64
+
+def main():
+    print("no shapes yet")
+```
+
+<!-- output: examples/reference-diagnostics/e0225_reserved_attribute.console -->
+```console
+$ sisu run e0225_reserved_attribute.sisu
+error[E0225]: `@sealed` is reserved for the standard library
+  --> e0225_reserved_attribute.sisu:2:1
+  |
+2 | @sealed
+  | ^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Leave the attribute out.
+
+<!-- file: examples/reference-diagnostics/e0225_reserved_attribute_fixed.sisu -->
+```sisu
+# The trait without the standard library's attribute.
+trait Shape:
+    def area(self) -> f64
+
+def main():
+    print("no shapes yet")
+```
+
+<!-- output: examples/reference-diagnostics/e0225_reserved_attribute_fixed.out -->
+```text
+no shapes yet
+```
+
+Shown in [R14](attributes.md#attributes-of-the-standard-library).
 
 ### E0231
 
@@ -1324,6 +1602,77 @@ def main():
 
 Shown in [chapter 14](../tutorial/14-traits.md).
 
+### E0233
+
+`resolve.not-a-trait-method`: `{name}` is not a method of `{trait}`.
+
+An `impl Trait for Type` holds the trait's methods and nothing else, so
+that every method in it keeps a promise of the trait.
+
+<!-- file: examples/reference-diagnostics/e0233_not_trait_method.sisu -->
+```sisu
+# An impl with a method that its trait does not declare.
+trait Priced:
+    def price(self) -> int
+
+struct Coffee:
+    cups: int
+
+impl Priced for Coffee:
+    def price(self) -> int:
+        return 350 * self.cups
+
+    def discount(self) -> int:
+        return 50
+
+def main():
+    print(Coffee(2).price())
+```
+
+<!-- output: examples/reference-diagnostics/e0233_not_trait_method.console -->
+```console
+$ sisu run e0233_not_trait_method.sisu
+error[E0233]: `discount` is not a method of `Priced`
+  --> e0233_not_trait_method.sisu:12:9
+   |
+12 |     def discount(self) -> int:
+   |         ^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+A method of the type's own goes in an `impl Type:` of its own, or in the
+type's body.
+
+<!-- file: examples/reference-diagnostics/e0233_not_trait_method_fixed.sisu -->
+```sisu
+# The extra method goes in the type's own impl.
+trait Priced:
+    def price(self) -> int
+
+struct Coffee:
+    cups: int
+
+impl Priced for Coffee:
+    def price(self) -> int:
+        return 350 * self.cups
+
+impl Coffee:
+    def discount(self) -> int:
+        return 50
+
+def main():
+    let order = Coffee(2)
+    print(order.price() - order.discount())
+```
+
+<!-- output: examples/reference-diagnostics/e0233_not_trait_method_fixed.out -->
+```text
+650
+```
+
+Shown in [chapter 14](../tutorial/14-traits.md).
+
 ### E0235
 
 `resolve.overlapping-impl`: `{trait}` is implemented for `{ty}` more
@@ -1385,6 +1734,140 @@ def main():
 <!-- output: examples/reference-diagnostics/e0235_overlap_fixed.out -->
 ```text
 12 €
+```
+
+Shown in [chapter 14](../tutorial/14-traits.md).
+
+### E0236
+
+`resolve.orphan-impl`: `{trait}` for `{ty}` can be implemented only
+in the package of the trait or of the type, or in the root package.
+
+A type implements a trait at most once in a program, so an impl stands
+in the package that declares the trait or the type (D-013); the root
+package of a build, which nothing depends on, may implement any trait
+for any type. Here the library `digits` implements the prelude's
+`Len` for `int`, and the program `year` depends on it:
+
+<!-- file: examples/reference-diagnostics/e0236_orphan.files/digits/src/lib.sisu -->
+```sisu
+##! The digits of numbers.
+
+## The number of decimal digits of an `int`, as `len` gives it.
+impl Len for int:
+    def len(self) -> int:
+        return len("{self}")
+```
+
+<!-- output: examples/reference-diagnostics/e0236_orphan.console -->
+```console
+$ sisu run year
+error[E0236]: `Len` for `int` can be implemented only in the package of the trait or of the type, or in the root package
+  --> ../digits/src/lib.sisu:4:1
+  |
+4 | impl Len for int:
+  | ^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Wrap the value in a type of the library's own, and implement the trait
+for that.
+
+<!-- file: examples/reference-diagnostics/e0236_orphan_fixed.files/digits/src/lib.sisu -->
+```sisu
+##! The digits of numbers.
+
+## A number whose `len` is its count of decimal digits.
+pub struct Number:
+    pub value: int
+
+impl Len for Number:
+    def len(self) -> int:
+        return len("{self.value}")
+```
+
+<!-- file: examples/reference-diagnostics/e0236_orphan_fixed.files/year/src/main.sisu -->
+```sisu
+# A program that uses the library's own type.
+from digits import Number
+
+def main():
+    print(len(Number(2026)))
+```
+
+<!-- output: examples/reference-diagnostics/e0236_orphan_fixed.console -->
+```console
+$ sisu run year
+4
+```
+
+Shown in [chapter 14](../tutorial/14-traits.md).
+
+### E0237
+
+`resolve.missing-assoc-type`: the impl of `{trait}` for `{ty}` does
+not say what `{name}` is; add `type {name} = ...`.
+
+A trait's associated type is chosen by each impl, which says what it is
+with `type NAME = T`.
+
+<!-- file: examples/reference-diagnostics/e0237_missing_assoc_type.sisu -->
+```sisu
+# An impl that does not say what its associated type is.
+trait Source:
+    type Item
+    def first(self) -> Self.Item
+
+struct Bench:
+    sitters: list[String]
+
+impl Source for Bench:
+    def first(self) -> String:
+        return self.sitters[0].copy()
+
+def main():
+    let bench = Bench(["Aino"])
+    print(len(bench.sitters))
+```
+
+<!-- output: examples/reference-diagnostics/e0237_missing_assoc_type.console -->
+```console
+$ sisu run e0237_missing_assoc_type.sisu
+error[E0237]: the impl of `Source` for `Bench` does not say what `Item` is; add `type Item = ...`
+  --> e0237_missing_assoc_type.sisu:9:1
+  |
+9 | impl Source for Bench:
+  | ^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Add the line the message gives.
+
+<!-- file: examples/reference-diagnostics/e0237_missing_assoc_type_fixed.sisu -->
+```sisu
+# The impl says what its associated type is.
+trait Source:
+    type Item
+    def first(self) -> Self.Item
+
+struct Bench:
+    sitters: list[String]
+
+impl Source for Bench:
+    type Item = String
+
+    def first(self) -> String:
+        return self.sitters[0].copy()
+
+def main():
+    print(Bench(["Aino"]).first())
+```
+
+<!-- output: examples/reference-diagnostics/e0237_missing_assoc_type_fixed.out -->
+```text
+Aino
 ```
 
 Shown in [chapter 14](../tutorial/14-traits.md).
@@ -1644,6 +2127,296 @@ Aino
 ```
 
 Shown in [chapter 7](../tutorial/07-structs-and-enums.md).
+
+### E0245
+
+`resolve.generic-default-order`: a type parameter without a default
+cannot follow one with a default.
+
+A use that leaves out a defaulted type parameter leaves out the last
+ones, so the parameters with defaults come after the others (D-060).
+
+<!-- file: examples/reference-diagnostics/e0245_default_order.sisu -->
+```sisu
+# A type parameter without a default after one with a default.
+struct Reading[U = String, T]:
+    value: T
+    unit: U
+
+def main():
+    print(Reading("°C", 80).value)
+```
+
+<!-- output: examples/reference-diagnostics/e0245_default_order.console -->
+```console
+$ sisu run e0245_default_order.sisu
+error[E0245]: a type parameter without a default cannot follow one with a default
+  --> e0245_default_order.sisu:2:28
+  |
+2 | struct Reading[U = String, T]:
+  |                            ^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Put the parameter with a default last.
+
+<!-- file: examples/reference-diagnostics/e0245_default_order_fixed.sisu -->
+```sisu
+# The parameter with a default comes last.
+struct Reading[T, U = String]:
+    value: T
+    unit: U
+
+def main():
+    print(Reading(80, "°C").value)
+```
+
+<!-- output: examples/reference-diagnostics/e0245_default_order_fixed.out -->
+```text
+80
+```
+
+Shown in [chapter 15](../tutorial/15-generics.md).
+
+### E0252
+
+`resolve.delegate-self`: `{trait}` returns a `{ty}`, so `{ty}` can
+delegate it only when `{field}` is its one field.
+
+An operator trait's method returns `Self`, which `@delegate` builds
+from the field's result, so a struct with other fields could not be
+made. The follow-on E0310 says that the operator then has no impl.
+
+<!-- file: examples/reference-diagnostics/e0252_delegate_self.sisu -->
+```sisu
+# An operator delegated to one of two fields.
+@delegate(Add, to="metres")
+struct Run:
+    metres: f64
+    runner: String
+
+def main():
+    let total = Run(400.0, "Aino") + Run(800.0, "Aino")
+    print(total.metres)
+```
+
+<!-- output: examples/reference-diagnostics/e0252_delegate_self.console -->
+```console
+$ sisu run e0252_delegate_self.sisu
+error[E0252]: `Add` returns a `Run`, so `Run` can delegate it only when `metres` is its one field
+  --> e0252_delegate_self.sisu:2:11
+  |
+2 | @delegate(Add, to="metres")
+  |           ^^^
+
+error[E0310]: `+` cannot be applied to `Run` and `Run`
+  --> e0252_delegate_self.sisu:8:17
+  |
+8 |     let total = Run(400.0, "Aino") + Run(800.0, "Aino")
+  |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (2)
+```
+
+Give the value a one-field type of its own that delegates the operator,
+and keep that type as the field.
+
+<!-- file: examples/reference-diagnostics/e0252_delegate_self_fixed.sisu -->
+```sisu
+# The operator is delegated by a one-field struct, held as a field.
+@delegate(Add, to="value")
+struct Metres:
+    value: f64
+
+struct Run:
+    distance: Metres
+    runner: String
+
+def main():
+    let total = Run(Metres(400.0), "Aino").distance + Metres(800.0)
+    print(total.value)
+```
+
+<!-- output: examples/reference-diagnostics/e0252_delegate_self_fixed.out -->
+```text
+1200.0
+```
+
+Shown in [R14](attributes.md#delegating-traits-to-a-field).
+
+### E0256
+
+`resolve.package-item`: `{name}` is `pub(package)` in `{module}`, so
+only the modules of the package `{package}` can use it.
+
+`pub(package)` exports an item to the modules of its own package only
+(D-045). Here the application `booking` calls a function of the library
+`sauna` that the library keeps for itself:
+
+<!-- file: examples/reference-diagnostics/e0256_package_item.files/sauna/src/lib.sisu -->
+```sisu
+##! How hot a sauna is.
+
+## `celsius` rounded down to tens, for this package's own modules.
+pub(package) def round_to_ten(celsius: int) -> int:
+    return celsius // 10 * 10
+
+## How a sauna at `celsius` degrees feels.
+pub def feel(celsius: int) -> str:
+    return if round_to_ten(celsius) >= 70: "hot" else: "warm"
+```
+
+<!-- file: examples/reference-diagnostics/e0256_package_item.files/booking/src/main.sisu -->
+```sisu
+# An application that uses a `pub(package)` function of a library.
+import sauna
+
+def main():
+    print(sauna.round_to_ten(84))
+```
+
+<!-- output: examples/reference-diagnostics/e0256_package_item.console -->
+```console
+$ sisu run booking
+error[E0256]: `round_to_ten` is `pub(package)` in `sauna`, so only the modules of the package `sauna` can use it
+  --> src/main.sisu:5:17
+  |
+5 |     print(sauna.round_to_ten(84))
+  |                 ^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Use the library's `pub` API, or, in the library, declare the item
+`pub` if other packages are to use it.
+
+<!-- file: examples/reference-diagnostics/e0256_package_item_fixed.files/booking/src/main.sisu -->
+```sisu
+# An application that uses the library's `pub` function.
+import sauna
+
+def main():
+    print(sauna.feel(84))
+```
+
+<!-- output: examples/reference-diagnostics/e0256_package_item_fixed.console -->
+```console
+$ sisu run booking
+hot
+```
+
+Shown in [chapter 17](../tutorial/17-modules-and-packages.md).
+
+### E0258
+
+`resolve.private-field`: the field `{field}` of `{ty}` is private to
+the module `{module}`; declare it `pub` to use it from another module.
+
+A field is private to its type's module unless it is `pub`. A
+construction names every field, so a struct with a private field is
+built only where that field is seen.
+
+<!-- file: examples/reference-diagnostics/e0258_private_field.files/src/geo/point.sisu -->
+```sisu
+# A point whose longitude is private to its module.
+pub struct Point:
+    pub lat: f64
+    lon: f64
+```
+
+<!-- file: examples/reference-diagnostics/e0258_private_field.files/src/main.sisu -->
+```sisu
+# A struct built from another module, which cannot see one of its fields.
+from atlas.geo.point import Point
+
+def main():
+    let oulu = Point(65.0, 25.5)
+    print(oulu.lat)
+```
+
+<!-- output: examples/reference-diagnostics/e0258_private_field.console -->
+```console
+$ sisu run
+error[E0258]: the field `lon` of `Point` is private to the module `atlas.geo.point`; declare it `pub` to use it from another module
+  --> src/main.sisu:5:16
+  |
+5 |     let oulu = Point(65.0, 25.5)
+  |                ^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+The fix declares the field `pub`, which makes it part of the module's
+API. Where the field should stay private, an associated function of
+the type, such as `Point.new(lat, lon)`, builds the value instead.
+
+<!-- file: examples/reference-diagnostics/e0258_private_field_fixed.files/src/geo/point.sisu -->
+```sisu
+# A point whose fields are both public.
+pub struct Point:
+    pub lat: f64
+    pub lon: f64
+```
+
+<!-- output: examples/reference-diagnostics/e0258_private_field_fixed.console -->
+```console
+$ sisu run
+65.0
+```
+
+Shown in [chapter 17](../tutorial/17-modules-and-packages.md).
+
+### E0266
+
+`resolve.bad-cfg`: `@cfg` takes a condition: `test`, `feature="NAME"`,
+`not` and a condition, or `all(...)` or `any(...)` of conditions; this
+is none of them.
+
+`@cfg` reads conditions on the build, not expressions, and keeps its
+declaration when the condition is none of those. A test of the target
+is written in a body, with `if comptime`, whose branches are both
+checked; the message does not say so.
+
+<!-- file: examples/reference-diagnostics/e0266_bad_cfg.sisu -->
+```sisu
+# A condition of `@cfg` that is an expression.
+@cfg(target.os == "linux")
+def separator() -> str:
+    return "/"
+
+def main():
+    print("usr{separator()}bin")
+```
+
+<!-- output: examples/reference-diagnostics/e0266_bad_cfg.console -->
+```console
+$ sisu run e0266_bad_cfg.sisu
+error[E0266]: `@cfg` takes a condition: `test`, `feature="NAME"`, `not` and a condition, or `all(...)` or `any(...)` of conditions; this is none of them
+  --> e0266_bad_cfg.sisu:2:6
+  |
+2 | @cfg(target.os == "linux")
+  |      ^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+<!-- file: examples/reference-diagnostics/e0266_bad_cfg_fixed.sisu -->
+```sisu
+# The target is tested with `if comptime`, in a body.
+def separator() -> str:
+    return if comptime target.os == "windows": "\\" else: "/"
+
+def main():
+    print("usr{separator()}bin")
+```
+
+<!-- output: examples/reference-diagnostics/e0266_bad_cfg_fixed.out -->
+```text
+usr/bin
+```
+
+Shown in [R14](attributes.md#conditional-compilation).
 
 ## Types
 
@@ -2077,6 +2850,52 @@ def main():
 
 Shown in [chapter 2](../tutorial/02-values.md).
 
+### E0313
+
+`type.not-a-place`: this expression cannot be assigned to.
+
+An assignment changes a place: a `var`, a field, an index or a key. A
+call's result, such as `len(temps)`, is a value with no place to change.
+
+<!-- file: examples/reference-diagnostics/e0313_not_a_place.sisu -->
+```sisu
+# An assignment to a value that is not a place.
+def main():
+    var temps = [62, 75, 81]
+    len(temps) = 0
+    print(temps)
+```
+
+<!-- output: examples/reference-diagnostics/e0313_not_a_place.console -->
+```console
+$ sisu run e0313_not_a_place.sisu
+error[E0313]: this expression cannot be assigned to
+  --> e0313_not_a_place.sisu:4:5
+  |
+4 |     len(temps) = 0
+  |     ^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Change the value through a method that changes it, here `clear`.
+
+<!-- file: examples/reference-diagnostics/e0313_not_a_place_fixed.sisu -->
+```sisu
+# A method changes the list, which is a place.
+def main():
+    var temps = [62, 75, 81]
+    temps.clear()
+    print(temps)
+```
+
+<!-- output: examples/reference-diagnostics/e0313_not_a_place_fixed.out -->
+```text
+[]
+```
+
+Shown in [R5](statements.md#assignment).
+
 ### E0314
 
 `type.non-exhaustive`: this `match` does not cover {missing}.
@@ -2293,6 +3112,51 @@ def main():
 ```
 
 Shown in [chapter 8](../tutorial/08-errors.md).
+
+### E0324
+
+`type.cannot-infer`: the type of `{name}` cannot be inferred here; add a
+type annotation.
+
+Inside a body a binding's type comes from its value and its uses (D-003).
+An empty list that nothing fills has no element type.
+
+<!-- file: examples/reference-diagnostics/e0324_untyped_list.sisu -->
+```sisu
+# Nothing says what the list holds.
+def main():
+    let names = []
+    print(len(names))
+```
+
+<!-- output: examples/reference-diagnostics/e0324_untyped_list.console -->
+```console
+$ sisu run e0324_untyped_list.sisu
+error[E0324]: the type of `names` cannot be inferred here; add a type annotation
+  --> e0324_untyped_list.sisu:3:9
+  |
+3 |     let names = []
+  |         ^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Write the type, as the message says.
+
+<!-- file: examples/reference-diagnostics/e0324_untyped_list_fixed.sisu -->
+```sisu
+# A type annotation says what the list holds.
+def main():
+    let names: list[str] = []
+    print(len(names))
+```
+
+<!-- output: examples/reference-diagnostics/e0324_untyped_list_fixed.out -->
+```text
+0
+```
+
+Shown in [R2](types.md#static-types-and-local-inference).
 
 ### E0325
 
@@ -2515,6 +3379,64 @@ def main():
 
 Shown in [chapter 2](../tutorial/02-values.md).
 
+### E0335
+
+`type.impure-argument`: this function is passed where a pure function
+is required, but it calls `{callee}`, which is not pure.
+
+A parameter of a `pure` function type accepts only functions that are
+`pure` (D-074), so the code that receives it can rely on the same
+result for the same arguments.
+
+<!-- file: examples/reference-diagnostics/e0335_impure_argument.sisu -->
+```sisu
+# A function that prints, passed where a pure function is required.
+def apply_twice(f: pure (int) -> int, x: int) -> int:
+    return f(f(x))
+
+def noisy_double(n: int) -> int:
+    print("doubling {n}")
+    return n * 2
+
+def main():
+    print(apply_twice(noisy_double, 3))
+```
+
+<!-- output: examples/reference-diagnostics/e0335_impure_argument.console -->
+```console
+$ sisu run e0335_impure_argument.sisu
+error[E0335]: this function is passed where a pure function is required, but it calls `noisy_double`, which is not pure
+  --> e0335_impure_argument.sisu:10:23
+   |
+10 |     print(apply_twice(noisy_double, 3))
+   |                       ^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Pass a `pure` function. The message names the function passed,
+`noisy_double`, rather than the `print` inside it that makes it impure.
+
+<!-- file: examples/reference-diagnostics/e0335_impure_argument_fixed.sisu -->
+```sisu
+# A pure function, which prints nothing.
+def apply_twice(f: pure (int) -> int, x: int) -> int:
+    return f(f(x))
+
+pure def double(n: int) -> int:
+    return n * 2
+
+def main():
+    print(apply_twice(double, 3))
+```
+
+<!-- output: examples/reference-diagnostics/e0335_impure_argument_fixed.out -->
+```text
+12
+```
+
+Shown in [chapter 16](../tutorial/16-closures-and-iterators.md).
+
 ### E0337
 
 `type.missing-field`: missing the field `{field}` of `{ty}`.
@@ -2669,6 +3591,60 @@ def main():
 <!-- output: examples/reference-diagnostics/e0339_mut_at_call_fixed.out -->
 ```text
 150
+```
+
+Shown in [chapter 11](../tutorial/11-borrowing.md).
+
+### E0340
+
+`type.mut-argument-unexpected`: `{param}` is not a `mut` parameter, so
+the argument takes no `mut`.
+
+`mut` at a call says that the callee changes the argument, and it is
+written exactly where the parameter is `mut` (D-006), so a reader of the
+call knows what may change.
+
+<!-- file: examples/reference-diagnostics/e0340_extra_mut.sisu -->
+```sisu
+# `mut` at a call whose parameter only reads.
+def total(prices: list[int]) -> int:
+    return sum(prices)
+
+def main():
+    var prices = [350, 280]
+    print(total(mut prices))
+```
+
+<!-- output: examples/reference-diagnostics/e0340_extra_mut.console -->
+```console
+$ sisu run e0340_extra_mut.sisu
+error[E0340]: `prices` is not a `mut` parameter, so the argument takes no `mut`
+  --> e0340_extra_mut.sisu:7:17
+  |
+7 |     print(total(mut prices))
+  |                 ^^^^^^^^^^
+  = fix: remove `mut`
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+The fix removes `mut`: the call lends the list to read. When the
+function is meant to change it, make the parameter `mut` instead.
+
+<!-- file: examples/reference-diagnostics/e0340_extra_mut_fixed.sisu -->
+```sisu
+# The call lends the list to read, without `mut`.
+def total(prices: list[int]) -> int:
+    return sum(prices)
+
+def main():
+    var prices = [350, 280]
+    print(total(prices))
+```
+
+<!-- output: examples/reference-diagnostics/e0340_extra_mut_fixed.out -->
+```text
+630
 ```
 
 Shown in [chapter 11](../tutorial/11-borrowing.md).
@@ -3196,11 +4172,75 @@ def main():
 
 Shown in [chapter 15](../tutorial/15-generics.md).
 
+### E0398
+
+`type.structural-only`: {callee} is hashed and compared structurally in
+stage 0, and `{ty}` has an impl of `{trait}` of its own; derive `Hash`
+and `Eq` for it, or key by a field.
+
+Stage 0 hashes and compares a `dict`'s keys and a `set`'s elements
+structurally, field by field, so a key type whose `Hash` or `Eq` is
+written by hand would be treated otherwise than its impl says; it is
+refused instead.
+
+<!-- file: examples/reference-diagnostics/e0398_own_hash.sisu -->
+```sisu
+# A dict key whose type has an `Eq` and a `Hash` of its own.
+struct Room:
+    number: int
+
+impl Eq for Room:
+    def eq(self, other: Room) -> bool:
+        return self.number == other.number
+
+impl Hash for Room:
+    def hash(self, mut h: Hasher):
+        self.number.hash(mut h)
+
+def main():
+    let guests = {Room(1): "Aino", Room(2): "Eero"}
+    print(guests[Room(2)])
+```
+
+<!-- output: examples/reference-diagnostics/e0398_own_hash.console -->
+```console
+$ sisu run e0398_own_hash.sisu
+error[E0398]: a `dict` or `set` key is hashed and compared structurally in stage 0, and `Room` has an impl of `Hash` of its own; derive `Hash` and `Eq` for it, or key by a field
+  --> e0398_own_hash.sisu:14:18
+   |
+14 |     let guests = {Room(1): "Aino", Room(2): "Eero"}
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Derive `Eq` and `Hash`, which compare field by field, or key the
+`dict` by a field such as `number`.
+
+<!-- file: examples/reference-diagnostics/e0398_own_hash_fixed.sisu -->
+```sisu
+# Derived `Eq` and `Hash`, which the host compares structurally.
+@derive(Eq, Hash)
+struct Room:
+    number: int
+
+def main():
+    let guests = {Room(1): "Aino", Room(2): "Eero"}
+    print(guests[Room(2)])
+```
+
+<!-- output: examples/reference-diagnostics/e0398_own_hash_fixed.out -->
+```text
+Eero
+```
+
+Shown in [chapter 13](../tutorial/13-sharing.md).
+
 ## Ownership
 
 Codes E0400 to E0437. The ownership checker checks moves, borrows,
-views, tasks and must-consume values ([R7](../README.md#the-reference),
-when it is written).
+views, tasks and must-consume values
+([R7](ownership.md)).
 
 ### E0400
 
@@ -3377,6 +4417,121 @@ Aino is first
 
 Shown in [chapter 11](../tutorial/11-borrowing.md).
 
+### E0403
+
+`borrow.use-while-mut-borrowed`: `{name}` is borrowed with `mut` on line
+{line} and cannot be used until that borrow ends on line {end}.
+
+A borrow with `mut` excludes every other use of the value until its last
+use, so nothing reads the value while it is being changed.
+
+<!-- file: examples/reference-diagnostics/e0403_use_while_mut.sisu -->
+```sisu
+# A list read while a `mut` borrow of it is still in use.
+def main():
+    var queue = ["Aino", "Eero"]
+    let back = ref mut queue
+    print(len(queue))
+    back.push("Roni")
+```
+
+<!-- output: examples/reference-diagnostics/e0403_use_while_mut.console -->
+```console
+$ sisu run e0403_use_while_mut.sisu
+error[E0403]: `queue` is borrowed with `mut` on line 4 and cannot be used until that borrow ends on line 6
+  --> e0403_use_while_mut.sisu:5:15
+  |
+5 |     print(len(queue))
+  |               ^^^^^
+  |
+4 |     let back = ref mut queue
+  |                ------------- borrowed here by `back`
+  |
+6 |     back.push("Roni")
+  |     ---- the borrow is still used here
+  = note: move this after line 6, where the borrow ends, or work on a copy made with `.copy()`
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
+```
+
+Move the read after the last use of the borrow, as the note says, or
+read a copy.
+
+<!-- file: examples/reference-diagnostics/e0403_use_while_mut_fixed.sisu -->
+```sisu
+# The read comes after the last use of the `mut` borrow.
+def main():
+    var queue = ["Aino", "Eero"]
+    let back = ref mut queue
+    back.push("Roni")
+    print(len(queue))
+```
+
+<!-- output: examples/reference-diagnostics/e0403_use_while_mut_fixed.out -->
+```text
+3
+```
+
+Shown in [chapter 11](../tutorial/11-borrowing.md).
+
+### E0404
+
+`borrow.move-while-borrowed`: `{name}` is borrowed on line {line} and
+cannot be moved until that borrow ends on line {end}.
+
+A value that is borrowed stays where it is until the borrow's last use,
+since the borrow points at it.
+
+<!-- file: examples/reference-diagnostics/e0404_move_while_borrowed.sisu -->
+```sisu
+# A list moved while a borrow of it is still in use.
+def main():
+    let names = ["Aino", "Eero"]
+    let first = ref names[0]
+    let team = names
+    print("{first} {len(team)}")
+```
+
+<!-- output: examples/reference-diagnostics/e0404_move_while_borrowed.console -->
+```console
+$ sisu run e0404_move_while_borrowed.sisu
+error[E0404]: `names` is borrowed on line 4 and cannot be moved until that borrow ends on line 6
+  --> e0404_move_while_borrowed.sisu:5:16
+  |
+5 |     let team = names
+  |                ^^^^^
+  |
+4 |     let first = ref names[0]
+  |                 ------------ borrowed here by `first`
+  |
+6 |     print("{first} {len(team)}")
+  |             ----- the borrow is still used here
+  = note: move this after line 6, where the borrow ends, or work on a copy made with `.copy()`
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
+```
+
+Use the borrow before the move, as here, or move a copy.
+
+<!-- file: examples/reference-diagnostics/e0404_move_while_borrowed_fixed.sisu -->
+```sisu
+# The borrow's last use comes before the move.
+def main():
+    let names = ["Aino", "Eero"]
+    let first = ref names[0]
+    print(first)
+    let team = names
+    print(len(team))
+```
+
+<!-- output: examples/reference-diagnostics/e0404_move_while_borrowed_fixed.out -->
+```text
+Aino
+2
+```
+
+Shown in [chapter 11](../tutorial/11-borrowing.md).
+
 ### E0405
 
 `borrow.mut-while-borrowed`: `{name}` is already borrowed on line
@@ -3543,6 +4698,65 @@ Hei, Aino!
 
 Shown in [chapter 11](../tutorial/11-borrowing.md).
 
+### E0408
+
+`borrow.return-not-from`: this returns a borrow of the parameter
+`{param}`, which is not in the `from` clause of `{function}`.
+
+A `from` clause names the parameters that a returned borrow may borrow
+from, and callers rely on it: they keep only those alive while they use
+the result.
+
+<!-- file: examples/reference-diagnostics/e0408_not_from.sisu -->
+```sisu
+# A returned borrow of a parameter that the `from` clause leaves out.
+def longer(a: str, b: str) -> str from a:
+    if len(b) > len(a):
+        return b
+    return a
+
+def main():
+    print(longer("sauna", "lauteet"))
+```
+
+<!-- output: examples/reference-diagnostics/e0408_not_from.console -->
+```console
+$ sisu run e0408_not_from.sisu
+error[E0408]: this returns a borrow of the parameter `b`, which is not in the `from` clause of `longer`
+  --> e0408_not_from.sisu:4:9
+  |
+4 |         return b
+  |         ^^^^^^^^
+  |
+2 | def longer(a: str, b: str) -> str from a:
+  |                    ------ `b` is declared here
+  = fix: name `b` in the `from` clause
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
+```
+
+The fix names the parameter in the clause, which tells callers that the
+result may borrow from either argument.
+
+<!-- file: examples/reference-diagnostics/e0408_not_from_fixed.sisu -->
+```sisu
+# The `from` clause names both parameters the result may borrow.
+def longer(a: str, b: str) -> str from a, b:
+    if len(b) > len(a):
+        return b
+    return a
+
+def main():
+    print(longer("sauna", "lauteet"))
+```
+
+<!-- output: examples/reference-diagnostics/e0408_not_from_fixed.out -->
+```text
+lauteet
+```
+
+Shown in [chapter 11](../tutorial/11-borrowing.md).
+
 ### E0411
 
 `borrow.view-field-in-plain-struct`: `{ty}` holds `{field}: {fty}`,
@@ -3599,6 +4813,61 @@ bread
 ```
 
 Shown in [chapter 7](../tutorial/07-structs-and-enums.md).
+
+### E0412
+
+`borrow.view-in-enum`: `{ty}` cannot hold `{fty}`, which borrows; an
+enum has no view form, so store an owned value such as `String`.
+
+A struct that holds a view can be a `view struct`, but an enum or an
+error set has no view form, so each of its fields owns its value.
+
+<!-- file: examples/reference-diagnostics/e0412_view_in_enum.sisu -->
+```sisu
+# An enum with a field that borrows.
+enum Reading:
+    Missing(name: str)
+    Celsius(value: int)
+
+def main():
+    print("{Reading.Missing("kiuas"):?}")
+```
+
+<!-- output: examples/reference-diagnostics/e0412_view_in_enum.console -->
+```console
+$ sisu run e0412_view_in_enum.sisu
+error[E0412]: `Reading` cannot hold `str`, which borrows; an enum has no view form, so store an owned value such as `String`
+  --> e0412_view_in_enum.sisu:3:19
+  |
+3 |     Missing(name: str)
+  |                   ^^^
+  |
+2 | enum Reading:
+  |      ------- `Reading` is declared here
+  = note: declare the field with an owned type, such as `String` for `str`
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Give the field an owned type, `String` for `str`.
+
+<!-- file: examples/reference-diagnostics/e0412_view_in_enum_fixed.sisu -->
+```sisu
+# The field owns its text.
+enum Reading:
+    Missing(name: String)
+    Celsius(value: int)
+
+def main():
+    print("{Reading.Missing("kiuas".to_string()):?}")
+```
+
+<!-- output: examples/reference-diagnostics/e0412_view_in_enum_fixed.out -->
+```text
+Missing(name="kiuas")
+```
+
+Shown in [chapter 12](../tutorial/12-views.md).
 
 ### E0413
 
@@ -3720,9 +4989,1116 @@ drafted a first try
 
 Shown in [chapter 13](../tutorial/13-sharing.md).
 
+### E0418
+
+`borrow.must-consume-exit`: this leaves the scope with `{name}`
+unconsumed: a `{ty}` must be passed to an `own` parameter first.
+
+A value of a `@must_consume` type ends in an `own` parameter on every
+path (D-054), so a `return`, `break` or `?` that leaves it behind is
+refused.
+
+<!-- file: examples/reference-diagnostics/e0418_left_unconsumed.sisu -->
+```sisu
+# An early return that leaves a must-consume value behind.
+@must_consume
+struct Draft:
+    text: String
+
+    def publish(own self) -> String:
+        return self.text
+
+def post(text: str) -> String:
+    let draft = Draft(text.to_string())
+    if text == "":
+        return "nothing to post"
+    return draft.publish()
+
+def main():
+    print(post("Hei Aino"))
+```
+
+<!-- output: examples/reference-diagnostics/e0418_left_unconsumed.console -->
+```console
+$ sisu run e0418_left_unconsumed.sisu
+error[E0418]: this leaves the scope with `draft` unconsumed: a `Draft` must be passed to an `own` parameter first
+  --> e0418_left_unconsumed.sisu:12:9
+   |
+12 |         return "nothing to post"
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+10 |     let draft = Draft(text.to_string())
+   |         ----- `draft` is declared here
+  = note: consume it with one of its methods that take `own self`: `publish`
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
+```
+
+Consume the value before the early exit, or make it only on the path
+that consumes it.
+
+<!-- file: examples/reference-diagnostics/e0418_left_unconsumed_fixed.sisu -->
+```sisu
+# The value is made only on the path that consumes it.
+@must_consume
+struct Draft:
+    text: String
+
+    def publish(own self) -> String:
+        return self.text
+
+def post(text: str) -> String:
+    if text == "":
+        return "nothing to post"
+    let draft = Draft(text.to_string())
+    return draft.publish()
+
+def main():
+    print(post("Hei Aino"))
+```
+
+<!-- output: examples/reference-diagnostics/e0418_left_unconsumed_fixed.out -->
+```text
+Hei Aino
+```
+
+Shown in [chapter 13](../tutorial/13-sharing.md).
+
+### E0427
+
+`task.not-sync`: `{name}` is shared with the task by reference, but
+`{ty}` is not `Sync`.
+
+A task that borrows a value shares it with the code around it, so the
+value's type must be `Sync`; a `Cell` changes without a lock and is
+not.
+
+<!-- file: examples/reference-diagnostics/e0427_cell_shared.sisu -->
+```sisu
+# A `Cell` shared with tasks by reference.
+def main():
+    let visits = Cell(0)
+    task.scope do s:
+        for _ in range(3):
+            s.spawn do:
+                visits.set(visits.get() + 1)
+    print(visits.get())
+```
+
+<!-- output: examples/reference-diagnostics/e0427_cell_shared.console -->
+```console
+$ sisu run e0427_cell_shared.sisu
+error[E0427]: `visits` is shared with the task by reference, but `Cell[int]` is not `Sync`
+  --> e0427_cell_shared.sisu:6:13
+  |
+6 |             s.spawn do:
+  |             ^^^^^^^^^^^
+  = note: wrap it: `Mutex[int]` shares mutation between tasks; or move the value with an `own` task
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Use a type made for sharing between tasks: an `Atomic` for a number, a
+`Mutex` for anything else.
+
+<!-- file: examples/reference-diagnostics/e0427_cell_shared_fixed.sisu -->
+```sisu
+# An `Atomic` is shared between tasks.
+def main():
+    let visits = Atomic(0)
+    task.scope do s:
+        for _ in range(3):
+            s.spawn do:
+                _ = visits.fetch_add(1)
+    print(visits.load())
+```
+
+<!-- output: examples/reference-diagnostics/e0427_cell_shared_fixed.out -->
+```text
+3
+```
+
+Shown in [chapter 20](../tutorial/20-concurrency.md).
+
+### E0428
+
+`task.borrows-body-local`: the task borrows `{name}`, which belongs to
+the scope's body: the body ends before the scope joins its tasks.
+
+A task may borrow what the frame around its scope owns, which outlives
+the scope, but not a value of the scope's own body.
+
+<!-- file: examples/reference-diagnostics/e0428_body_local.sisu -->
+```sisu
+# A task borrows a value that the scope's body makes.
+def longest(words: list[str]) -> int:
+    var best = 0
+    for w in words:
+        best = max(best, len(w))
+    return best
+
+def main():
+    task.scope do s:
+        let words = ["sauna", "löyly", "vihta"]
+        let handle = s.spawn(() -> longest(words))
+        print(handle.join())
+```
+
+<!-- output: examples/reference-diagnostics/e0428_body_local.console -->
+```console
+$ sisu run e0428_body_local.sisu
+error[E0428]: the task borrows `words`, which belongs to the scope's body: the body ends before the scope joins its tasks
+  --> e0428_body_local.sisu:11:22
+   |
+11 |         let handle = s.spawn(() -> longest(words))
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |                              -------------------- borrowed here
+  = note: move it into the task instead: write `own () -> ...` (or `do own:`), or copy what the task needs into a local before the `spawn`
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
+```
+
+Make the value outside the scope. The note's `own` task moves the value
+into one task, which leaves none for a second.
+
+<!-- file: examples/reference-diagnostics/e0428_body_local_fixed.sisu -->
+```sisu
+# The value is made outside the scope, which outlives its tasks.
+def longest(words: list[str]) -> int:
+    var best = 0
+    for w in words:
+        best = max(best, len(w))
+    return best
+
+def main():
+    let words = ["sauna", "löyly", "vihta"]
+    task.scope do s:
+        let handle = s.spawn(() -> longest(words))
+        print(handle.join())
+```
+
+<!-- output: examples/reference-diagnostics/e0428_body_local_fixed.out -->
+```text
+Ok(5)
+```
+
+Shown in [chapter 20](../tutorial/20-concurrency.md).
+
+## Lowering
+
+Codes E0500 and E0501. Lowering writes the checked program as SIR,
+the form that the interpreter and the native backend run, and checks
+what it wrote; an error here is the compiler's mistake, which the
+message reports without a place in the source.
+
+### E0501
+
+`sir.invalid`: invalid SIR in `{function}`: {detail}.
+
+Lowering checks the SIR it writes before anything runs it; an invalid
+program is the compiler's mistake, not the program's, and the message
+has no place in the source. In stage 0 a default for a field of a
+generic struct is one such case.
+
+<!-- file: examples/reference-diagnostics/e0501_invalid_sir.sisu -->
+```sisu
+# A default for a field of a generic struct.
+struct Shelf[T]:
+    items: list[T] = []
+
+def main():
+    let shelf = Shelf[int]()
+    print(len(shelf.items))
+```
+
+<!-- output: examples/reference-diagnostics/e0501_invalid_sir.console -->
+```console
+$ sisu run e0501_invalid_sir.sisu
+error[E0501]: invalid SIR in `main`: the type of _2 names a type parameter the function does not have
+```
+
+Until it is fixed, build the value in an associated function.
+
+<!-- file: examples/reference-diagnostics/e0501_invalid_sir_fixed.sisu -->
+```sisu
+# An associated function builds the empty shelf.
+struct Shelf[T]:
+    items: list[T]
+
+    def empty() -> Shelf[T]:
+        return Shelf(items=[])
+
+def main():
+    let shelf = Shelf[int].empty()
+    print(len(shelf.items))
+```
+
+<!-- output: examples/reference-diagnostics/e0501_invalid_sir_fixed.out -->
+```text
+0
+```
+
+Shown in [chapter 15](../tutorial/15-generics.md).
+
+## Compile-time evaluation
+
+Codes E0600 to E0615. The compiler runs `comptime` code, templates and
+derives in its interpreter, with a budget of steps and no way to the
+world ([R12](compile-time.md)).
+
+### E0601
+
+`comptime.io`: the compile-time evaluation of this expression used
+{what}; nothing reaches the world at compile time.
+
+A build gives the same program every time, so compile-time code reads
+no file, clock or environment and writes nothing; the evaluation stops
+where it tried.
+
+<!-- file: examples/reference-diagnostics/e0601_comptime_io.sisu -->
+```sisu
+# Compile-time code that prints.
+def greet(name: str) -> String:
+    print("greeting {name}")
+    return "Hei, {name}!"
+
+const GREETING: String = comptime greet("Aino")
+
+def main():
+    print(GREETING)
+```
+
+<!-- output: examples/reference-diagnostics/e0601_comptime_io.console -->
+```console
+$ sisu run e0601_comptime_io.sisu
+error[E0601]: the compile-time evaluation of this expression used the standard output; nothing reaches the world at compile time
+  --> e0601_comptime_io.sisu:6:26
+  |
+6 | const GREETING: String = comptime greet("Aino")
+  |                          ^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Keep the compile-time part to computing, and print when the program
+runs.
+
+<!-- file: examples/reference-diagnostics/e0601_comptime_io_fixed.sisu -->
+```sisu
+# The compile-time code only computes; the program prints.
+def greeting(name: str) -> String:
+    return "Hei, {name}!"
+
+const GREETING: String = comptime greeting("Aino")
+
+def main():
+    print(GREETING)
+```
+
+<!-- output: examples/reference-diagnostics/e0601_comptime_io_fixed.out -->
+```text
+Hei, Aino!
+```
+
+Shown in [chapter 25](../tutorial/25-compile-time.md).
+
+### E0604
+
+`comptime.not-kept`: {what} made at compile time cannot be kept for run
+time; numbers, text, booleans, characters, and lists, sets, dicts,
+tuples, options, results, structs and enums of them can.
+
+The program keeps a compile-time value as a literal, so the value needs
+a literal form; a function, a reference or a handle has none.
+
+<!-- file: examples/reference-diagnostics/e0604_not_kept.sisu -->
+```sisu
+# A closure made at compile time, which a program cannot keep.
+def adder(n: int) -> (int) -> int:
+    return own x -> x + n
+
+const ADD_TWO: (int) -> int = comptime adder(2)
+
+def main():
+    print(ADD_TWO(5))
+```
+
+<!-- output: examples/reference-diagnostics/e0604_not_kept.console -->
+```console
+$ sisu run e0604_not_kept.sisu
+error[E0604]: a function made at compile time cannot be kept for run time; numbers, text, booleans, characters, and lists, sets, dicts, tuples, options, results, structs and enums of them can
+  --> e0604_not_kept.sisu:5:31
+  |
+5 | const ADD_TWO: (int) -> int = comptime adder(2)
+  |                               ^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Compute the data at compile time, and make the function when the
+program runs.
+
+<!-- file: examples/reference-diagnostics/e0604_not_kept_fixed.sisu -->
+```sisu
+# The number is computed while compiling, the closure while running.
+def adder(n: int) -> (int) -> int:
+    return own x -> x + n
+
+const STEP: int = comptime 1 + 1
+
+def main():
+    let add_two = adder(STEP)
+    print(add_two(5))
+```
+
+<!-- output: examples/reference-diagnostics/e0604_not_kept_fixed.out -->
+```text
+7
+```
+
+Shown in [R12](compile-time.md#what-compile-time-code-may-do).
+
+### E0606
+
+`comptime.budget-attribute`: `@comptime_budget` takes `steps=N`, a
+positive number of steps.
+
+The budget is named, so that the attribute says what its number counts.
+
+<!-- file: examples/reference-diagnostics/e0606_budget_attribute.sisu -->
+```sisu
+# A budget without `steps=`.
+def triangle(n: int) -> int:
+    var total = 0
+    for i in range(n + 1):
+        total += i
+    return total
+
+@comptime_budget(2_000_000)
+const BIG: int = comptime triangle(100)
+
+def main():
+    print(BIG)
+```
+
+<!-- output: examples/reference-diagnostics/e0606_budget_attribute.console -->
+```console
+$ sisu run e0606_budget_attribute.sisu
+error[E0606]: `@comptime_budget` takes `steps=N`, a positive number of steps
+  --> e0606_budget_attribute.sisu:8:1
+  |
+8 | @comptime_budget(2_000_000)
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+<!-- file: examples/reference-diagnostics/e0606_budget_attribute_fixed.sisu -->
+```sisu
+# A budget named by `steps=`.
+def triangle(n: int) -> int:
+    var total = 0
+    for i in range(n + 1):
+        total += i
+    return total
+
+@comptime_budget(steps=2_000_000)
+const BIG: int = comptime triangle(100)
+
+def main():
+    print(BIG)
+```
+
+<!-- output: examples/reference-diagnostics/e0606_budget_attribute_fixed.out -->
+```text
+5050
+```
+
+Shown in [R14](attributes.md#compile-time-budgets).
+
+### E0609
+
+`comptime.instance-failed`: making `{name}` stopped at compile time:
+{reason}.
+
+A template is made for each list of types it is called with; one that
+stops, by `comptime panic` or a query that does not apply, is reported
+at the call that needed it, with a label where the template stopped.
+
+<!-- file: examples/reference-diagnostics/e0609_instance_failed.sisu -->
+```sisu
+# A template that a type cannot be made into.
+def columns[T](value: T) -> int:
+    if comptime reflect.is_struct(T):
+        return len(reflect.fields_of(T))
+    else:
+        comptime panic("`{reflect.name_of(T)}` has no columns")
+
+def main():
+    print(columns(42))
+```
+
+<!-- output: examples/reference-diagnostics/e0609_instance_failed.console -->
+```console
+$ sisu run e0609_instance_failed.sisu
+error[E0609]: making `columns[int]` stopped at compile time: `int` has no columns
+  --> e0609_instance_failed.sisu:9:11
+  |
+9 |     print(columns(42))
+  |           ^^^^^^^^^^^
+  |
+6 |         comptime panic("`{reflect.name_of(T)}` has no columns")
+  |                  ---------------------------------------------- the template, where it stopped
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Call the template with a type it takes, or give it a branch for the
+other types.
+
+<!-- file: examples/reference-diagnostics/e0609_instance_failed_fixed.sisu -->
+```sisu
+# The template is called with a struct.
+struct Booking:
+    name: String
+    hour: int
+
+def columns[T](value: T) -> int:
+    if comptime reflect.is_struct(T):
+        return len(reflect.fields_of(T))
+    else:
+        comptime panic("`{reflect.name_of(T)}` has no columns")
+
+def main():
+    print(columns(Booking("Aino", 18)))
+```
+
+<!-- output: examples/reference-diagnostics/e0609_instance_failed_fixed.out -->
+```text
+2
+```
+
+Shown in [chapter 25](../tutorial/25-compile-time.md).
+
+## Contracts
+
+Codes E0800 to E0821. The checker checks where contract clauses stand
+and that they only read, and the predicates and changes of refinement
+types ([R11](contracts.md)).
+
+### E0800
+
+`contract.misplaced`: `{keyword}` is a function's contract and belongs
+at the start of its body, before its first statement.
+
+A function's `requires` and `ensures` are the first lines of its body,
+so that they describe the call as a whole.
+
+<!-- file: examples/reference-diagnostics/e0800_misplaced_clause.sisu -->
+```sisu
+# A precondition after the body's first statement.
+def half(n: int) -> int:
+    let h = n // 2
+    requires n >= 0
+    return h
+
+def main():
+    print(half(8))
+```
+
+<!-- output: examples/reference-diagnostics/e0800_misplaced_clause.console -->
+```console
+$ sisu run e0800_misplaced_clause.sisu
+error[E0800]: `requires` is a function's contract and belongs at the start of its body, before its first statement
+  --> e0800_misplaced_clause.sisu:4:5
+  |
+4 |     requires n >= 0
+  |     ^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Move the clause to the top of the body.
+
+<!-- file: examples/reference-diagnostics/e0800_misplaced_clause_fixed.sisu -->
+```sisu
+# The precondition is the body's first line.
+def half(n: int) -> int:
+    requires n >= 0
+    let h = n // 2
+    return h
+
+def main():
+    print(half(8))
+```
+
+<!-- output: examples/reference-diagnostics/e0800_misplaced_clause_fixed.out -->
+```text
+4
+```
+
+Shown in [chapter 23](../tutorial/23-contracts.md).
+
+### E0804
+
+`contract.old-arguments`: `old` takes one expression, as in
+`old(self.balance)`.
+
+`old(e)` is the value of one expression on entry, which the compiler
+copies then.
+
+<!-- file: examples/reference-diagnostics/e0804_old_arguments.sisu -->
+```sisu
+# `old` given two expressions.
+struct Stove:
+    celsius: int
+
+    def heat(mut self, degrees: int):
+        ensures self.celsius == old(self.celsius, degrees) + degrees
+        self.celsius += degrees
+
+def main():
+    var stove = Stove(60)
+    stove.heat(20)
+    print(stove.celsius)
+```
+
+<!-- output: examples/reference-diagnostics/e0804_old_arguments.console -->
+```console
+$ sisu run e0804_old_arguments.sisu
+error[E0804]: `old` takes one expression, as in `old(self.balance)`
+  --> e0804_old_arguments.sisu:6:33
+  |
+6 |         ensures self.celsius == old(self.celsius, degrees) + degrees
+  |                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Give `old` the one expression whose entry value the clause needs.
+
+<!-- file: examples/reference-diagnostics/e0804_old_arguments_fixed.sisu -->
+```sisu
+# `old` takes the one expression whose entry value it is.
+struct Stove:
+    celsius: int
+
+    def heat(mut self, degrees: int):
+        ensures self.celsius == old(self.celsius) + degrees
+        self.celsius += degrees
+
+def main():
+    var stove = Stove(60)
+    stove.heat(20)
+    print(stove.celsius)
+```
+
+<!-- output: examples/reference-diagnostics/e0804_old_arguments_fixed.out -->
+```text
+80
+```
+
+Shown in [R11](contracts.md#postconditions).
+
+### E0805
+
+`contract.generator-ensures`: a generator has no `ensures`: what it
+returns is its iterator.
+
+A generator returns at once with an iterator, before its body has run,
+so there is no result for a postcondition to check.
+
+<!-- file: examples/reference-diagnostics/e0805_generator_ensures.sisu -->
+```sisu
+# A generator with a postcondition.
+def evens(limit: int) -> Iter[int]:
+    requires limit >= 0
+    ensures limit >= 0
+    for i in range(limit):
+        yield i * 2
+
+def main():
+    print(evens(4).collect())
+```
+
+<!-- output: examples/reference-diagnostics/e0805_generator_ensures.console -->
+```console
+$ sisu run e0805_generator_ensures.sisu
+error[E0805]: a generator has no `ensures`: what it returns is its iterator
+  --> e0805_generator_ensures.sisu:4:5
+  |
+4 |     ensures limit >= 0
+  |     ^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Leave the `ensures` out; a `requires` is checked when the generator is
+called.
+
+<!-- file: examples/reference-diagnostics/e0805_generator_ensures_fixed.sisu -->
+```sisu
+# A generator keeps its precondition and has no postcondition.
+def evens(limit: int) -> Iter[int]:
+    requires limit >= 0
+    for i in range(limit):
+        yield i * 2
+
+def main():
+    print(evens(4).collect())
+```
+
+<!-- output: examples/reference-diagnostics/e0805_generator_ensures_fixed.out -->
+```text
+[0, 2, 4, 6]
+```
+
+Shown in [R11](contracts.md#where-clauses-stand).
+
+### E0807
+
+`contract.not-in-test`: a test has no contract; check what it needs
+with `assert`.
+
+A test is called by `sisu test`, not by code whose arguments a contract
+could judge. `sisu run` leaves tests out, so `sisu check`, which builds
+the program with its tests, is where this is reported.
+
+<!-- file: examples/reference-diagnostics/e0807_test_contract.sisu -->
+```sisu
+# A test with a precondition.
+def half(n: int) -> int:
+    return n // 2
+
+test "halves":
+    requires half(4) > 0
+    assert half(4) == 2
+```
+
+<!-- output: examples/reference-diagnostics/e0807_test_contract.console -->
+```console
+$ sisu check e0807_test_contract.sisu
+error[E0807]: a test has no contract; check what it needs with `assert`
+  --> e0807_test_contract.sisu:6:5
+  |
+6 |     requires half(4) > 0
+  |     ^^^^^^^^^^^^^^^^^^^^
+
+```
+
+Write the check as an `assert`.
+
+<!-- file: examples/reference-diagnostics/e0807_test_contract_fixed.sisu -->
+```sisu
+# A test says what it needs with `assert`.
+def half(n: int) -> int:
+    return n // 2
+
+test "halves":
+    assert half(4) > 0
+    assert half(4) == 2
+```
+
+<!-- output: examples/reference-diagnostics/e0807_test_contract_fixed.test -->
+```text
+test "halves" ... ok
+1 passed, 0 failed, 0 blocked
+```
+
+Shown in [R11](contracts.md#where-clauses-stand).
+
+### E0812
+
+`refine.change-through-base`: `{what}` is a `{ty}`, which a change
+through its base could take outside `{predicate}`; change a copy of the
+base and check it again with `try_from`.
+
+A refinement's predicate is checked where a value comes in, so a method
+of the base that changes the value, such as `push`, could break it
+unseen.
+
+<!-- file: examples/reference-diagnostics/e0812_change_through_base.sisu -->
+```sisu
+# A refined list changed through its base.
+type Short = list[int] where len(self) <= 3
+
+def main():
+    var picks: Short = [1, 2]
+    picks.push(3)
+    print(picks)
+```
+
+<!-- output: examples/reference-diagnostics/e0812_change_through_base.console -->
+```console
+$ sisu run e0812_change_through_base.sisu
+error[E0812]: `picks` is a `Short`, which a change through its base could take outside `len(self) <= 3`; change a copy of the base and check it again with `try_from`
+  --> e0812_change_through_base.sisu:6:5
+  |
+6 |     picks.push(3)
+  |     ^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Change a copy typed as the base, and check it again. A copy made with
+`.copy()` alone is still a `Short`, and gets E0812 too.
+
+<!-- file: examples/reference-diagnostics/e0812_change_through_base_fixed.sisu -->
+```sisu
+# A copy typed as the base is changed, and checked again.
+type Short = list[int] where len(self) <= 3
+
+def main():
+    let picks: Short = [1, 2]
+    var more: list[int] = picks.copy()
+    more.push(3)
+    print(Short.try_from(more))
+```
+
+<!-- output: examples/reference-diagnostics/e0812_change_through_base_fixed.out -->
+```text
+Ok([1, 2, 3])
+```
+
+Shown in [R11](contracts.md#refinement-types).
+
+### E0813
+
+`refine.own-impl`: `{ty}` refines `{base}` and has its reading impls;
+it cannot have an impl of `{trait}` of its own.
+
+A refinement is its base wherever the base is expected, with the base's
+impls of the traits that read it, so an impl of its own would make the
+same value behave two ways.
+
+<!-- file: examples/reference-diagnostics/e0813_refinement_impl.sisu -->
+```sisu
+# A refinement with an impl of a trait of its own.
+type Hour = int where 0 <= self < 24
+
+impl Display for Hour:
+    def fmt(self, mut f: Formatter):
+        f.write("{self}:00")
+
+def main():
+    let opens: Hour = 17
+    print(opens)
+```
+
+<!-- output: examples/reference-diagnostics/e0813_refinement_impl.console -->
+```console
+$ sisu run e0813_refinement_impl.sisu
+error[E0813]: `Hour` refines `int` and has its reading impls; it cannot have an impl of `Display` of its own
+  --> e0813_refinement_impl.sisu:4:1
+  |
+4 | impl Display for Hour:
+  | ^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Write a function, or a struct of one field, for the behaviour of its
+own.
+
+<!-- file: examples/reference-diagnostics/e0813_refinement_impl_fixed.sisu -->
+```sisu
+# A function formats the hour; the refinement keeps the base's impls.
+type Hour = int where 0 <= self < 24
+
+def clock(hour: Hour) -> String:
+    return "{hour}:00"
+
+def main():
+    let opens: Hour = 17
+    print(clock(opens))
+```
+
+<!-- output: examples/reference-diagnostics/e0813_refinement_impl_fixed.out -->
+```text
+17:00
+```
+
+Shown in [R11](contracts.md#refinement-types).
+
+### E0814
+
+`refine.predicate-type`: the predicate of `{ty}` must be a `bool`,
+found `{found}`.
+
+Sisu has no truthiness, so a predicate is a `bool` that says when a
+value belongs to the type.
+
+<!-- file: examples/reference-diagnostics/e0814_predicate_type.sisu -->
+```sisu
+# A predicate that is not a `bool`.
+type Even = int where self % 2
+
+def main():
+    let n: Even = 4
+    print(n)
+```
+
+<!-- output: examples/reference-diagnostics/e0814_predicate_type.console -->
+```console
+$ sisu run e0814_predicate_type.sisu
+error[E0814]: the predicate of `Even` must be a `bool`, found `int`
+  --> e0814_predicate_type.sisu:2:23
+  |
+2 | type Even = int where self % 2
+  |                       ^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+<!-- file: examples/reference-diagnostics/e0814_predicate_type_fixed.sisu -->
+```sisu
+# The predicate says when the value is even.
+type Even = int where self % 2 == 0
+
+def main():
+    let n: Even = 4
+    print(n)
+```
+
+<!-- output: examples/reference-diagnostics/e0814_predicate_type_fixed.out -->
+```text
+4
+```
+
+Shown in [R11](contracts.md#refinement-types).
+
+## Stage 0's limits
+
+Codes E0900 to E0990. What stage 0 does not implement yet, its internal
+errors, the check that a `sim` build cannot escape, and the rules of
+unsafe code and foreign functions
+([R7](ownership.md#unsafe-code-and-raw-pointers)).
+
+### E0989
+
+`unsafe.export-signature`: `{name}` is `@export`ed, and foreign code
+that calls it cannot keep `{ty}` alive: an exported function's signature
+holds no reference, view, `Shared`, closure or capability.
+
+Foreign code knows nothing of Sisu's borrows, so an exported function
+takes and gives only what it can hold without them.
+
+<!-- file: examples/reference-diagnostics/e0989_export_signature.sisu -->
+```sisu
+# An exported function that takes a view, which C cannot keep alive.
+@export("sauna_name_length")
+def name_length(name: str) -> int:
+    return len(name)
+
+def main():
+    print(name_length("Kotiharju"))
+```
+
+<!-- output: examples/reference-diagnostics/e0989_export_signature.console -->
+```console
+$ sisu run e0989_export_signature.sisu
+error[E0989]: `name_length` is `@export`ed, and foreign code that calls it cannot keep `str` alive: an exported function's signature holds no reference, view, `Shared`, closure or capability
+  --> e0989_export_signature.sisu:3:17
+  |
+3 | def name_length(name: str) -> int:
+  |                 ^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Take plain values, such as numbers, or a pointer and a length.
+
+<!-- file: examples/reference-diagnostics/e0989_export_signature_fixed.sisu -->
+```sisu
+# The exported function takes plain numbers.
+@export("sauna_heat")
+def heat(celsius: i32, minutes: i32) -> i32:
+    return celsius * minutes
+
+def main():
+    print(heat(80, 10))
+```
+
+<!-- output: examples/reference-diagnostics/e0989_export_signature_fixed.out -->
+```text
+800
+```
+
+Shown in [R14](attributes.md#exported-functions).
+
+### E0990
+
+`unsafe.blocking-not-foreign`: `@blocking` marks a foreign function
+whose call may block its thread, and `{name}` is not a foreign function.
+
+The scheduler sees every blocking point of Sisu code, so only a foreign
+function, whose code it cannot see, says that its call may block.
+
+<!-- file: examples/reference-diagnostics/e0990_blocking_not_foreign.sisu -->
+```sisu
+# `@blocking` on a function of the program.
+@blocking
+def wait_for_heat() -> int:
+    return 80
+
+def main():
+    print(wait_for_heat())
+```
+
+<!-- output: examples/reference-diagnostics/e0990_blocking_not_foreign.console -->
+```console
+$ sisu run e0990_blocking_not_foreign.sisu
+error[E0990]: `@blocking` marks a foreign function whose call may block its thread, and `wait_for_heat` is not a foreign function
+  --> e0990_blocking_not_foreign.sisu:2:1
+  |
+2 | @blocking
+  | ^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+<!-- file: examples/reference-diagnostics/e0990_blocking_not_foreign_fixed.sisu -->
+```sisu
+# A function of the program needs no `@blocking`.
+def wait_for_heat() -> int:
+    return 80
+
+def main():
+    print(wait_for_heat())
+```
+
+<!-- output: examples/reference-diagnostics/e0990_blocking_not_foreign_fixed.out -->
+```text
+80
+```
+
+Shown in [R14](attributes.md#foreign-functions-that-block).
+
+## Packages and manifests
+
+Codes E1000 to E1022. The driver reads `sisu.toml`, `sisu.lock` and
+the module tree of a package before anything is parsed, and reports a
+mistake at its place in the manifest ([R13](modules.md#the-manifest)).
+
+### E1003
+
+`package.bad-value`: `{key}` takes {expected}, found {found}.
+
+Each key of `sisu.toml` takes a value of one kind, and the message says
+which.
+
+<!-- file: examples/reference-diagnostics/e1003_bad_value.files/sisu.toml -->
+```toml
+[package]
+name = "stove"
+version = "1.0"
+edition = "2027"
+```
+
+<!-- output: examples/reference-diagnostics/e1003_bad_value.console -->
+```console
+$ sisu check
+error[E1002]: `[package]` needs `version`
+  --> sisu.toml:1:2
+  |
+1 | [package]
+  |  ^^^^^^^
+
+error[E1003]: `version` takes a version `MAJOR.MINOR.PATCH`, as in `"0.3.1"`, found `"1.0"`
+  --> sisu.toml:3:11
+  |
+3 | version = "1.0"
+  |           ^^^^^
+
+```
+
+Stage 0 also reports E1002 (`package.missing-key`), though the key is
+there. Write the version in three parts.
+
+<!-- file: examples/reference-diagnostics/e1003_bad_value_fixed.files/sisu.toml -->
+```toml
+[package]
+name = "stove"
+version = "1.0.0"
+edition = "2027"
+```
+
+<!-- output: examples/reference-diagnostics/e1003_bad_value_fixed.console -->
+```console
+$ sisu run
+kiuas
+```
+
+Shown in [R13](modules.md#mistakes-in-the-manifest).
+
+### E1007
+
+`package.cycle`: the packages depend on each other in a cycle: {cycle};
+packages build in dependency order, so their graph has no cycle.
+
+Packages build in dependency order, so a package cannot depend on
+itself through others, while the modules of one package may import each
+other freely (D-019).
+
+<!-- file: examples/reference-diagnostics/e1007_cycle.files/stove/sisu.toml -->
+```toml
+[package]
+name = "stove"
+version = "0.1.0"
+edition = "2027"
+
+[dependencies]
+benches = { path = "../benches" }
+```
+
+<!-- file: examples/reference-diagnostics/e1007_cycle.files/benches/sisu.toml -->
+```toml
+[package]
+name = "benches"
+version = "0.1.0"
+edition = "2027"
+
+[dependencies]
+stove = { path = "../stove" }
+```
+
+<!-- output: examples/reference-diagnostics/e1007_cycle.console -->
+```console
+$ sisu check stove
+error[E1007]: the packages depend on each other in a cycle: `stove` -> `benches` -> `stove`; packages build in dependency order, so their graph has no cycle
+  --> ../benches/sisu.toml:7:1
+  |
+7 | stove = { path = "../stove" }
+  | ^^^^^
+  ::: sisu.toml:7:1
+  |
+7 | benches = { path = "../benches" }
+  | ------- `stove` depends on `benches` here
+
+```
+
+Remove the dependency that closes the cycle, here the library's on the
+application, or move what both need into a third package.
+
+<!-- file: examples/reference-diagnostics/e1007_cycle_fixed.files/benches/sisu.toml -->
+```toml
+[package]
+name = "benches"
+version = "0.1.0"
+edition = "2027"
+```
+
+<!-- output: examples/reference-diagnostics/e1007_cycle_fixed.console -->
+```console
+$ sisu run stove
+6 seats
+```
+
+Shown in [chapter 17](../tutorial/17-modules-and-packages.md).
+
 ## Warnings
 
-Codes W0001 to W0014. A warning does not stop a program: `sisu run`
+Codes W0001 to W0016. A warning does not stop a program: `sisu run`
 prints it and runs.
 
 ### W0001
@@ -3881,6 +6257,55 @@ zero
 ```
 
 Shown in [chapter 7](../tutorial/07-structs-and-enums.md).
+
+### W0005
+
+`package.unknown-key`: `{key}` is not a key of `{table}` that stage 0
+knows; it is ignored.
+
+A key of `sisu.toml` that stage 0 does not read is a warning, so that a
+manifest written for a later version still builds, and a misspelt key
+is still seen.
+
+<!-- file: examples/reference-diagnostics/w0005_unknown_key.files/sisu.toml -->
+```toml
+[package]
+name = "stove"
+version = "0.1.0"
+edition = "2027"
+author = "Aino"
+```
+
+<!-- output: examples/reference-diagnostics/w0005_unknown_key.console -->
+```console
+$ sisu run
+warning[W0005]: `author` is not a key of `[package]` that stage 0 knows; it is ignored
+  --> sisu.toml:5:1
+  |
+5 | author = "Aino"
+  | ^^^^^^
+
+kiuas
+```
+
+Here the key is `authors`, a list.
+
+<!-- file: examples/reference-diagnostics/w0005_unknown_key_fixed.files/sisu.toml -->
+```toml
+[package]
+name = "stove"
+version = "0.1.0"
+edition = "2027"
+authors = ["Aino"]
+```
+
+<!-- output: examples/reference-diagnostics/w0005_unknown_key_fixed.console -->
+```console
+$ sisu run
+kiuas
+```
+
+Shown in [R22](targets.md#runtime-profiles).
 
 ## Run time
 
@@ -4285,6 +6710,57 @@ def main():
 not a number: NotANumber(text="kolme")
 ```
 
+### R0080
+
+`run.deadlock`: deadlock: every task is waiting, and no timer can wake
+any of them.
+
+When no task can run and no timer is set, the program can never go on,
+so it stops with this message, a line for each task saying what it
+waits for and where, and status 134.
+
+<!-- file: examples/reference-diagnostics/r0080_deadlock.sisu -->
+```sisu
+# A task waits for a message that is sent only after the scope ends.
+def main():
+    let tx, rx = channel[String](capacity=1)
+    task.scope do s:
+        s.spawn do:
+            print(rx.recv())
+    _ = tx.send("löyly".to_string())
+```
+
+<!-- output: examples/reference-diagnostics/r0080_deadlock.console -->
+```console
+$ sisu run r0080_deadlock.sisu
+deadlock: every task is waiting, and no timer can wake any of them
+  the root task waits for the end of a scope at r0080_deadlock.sisu:4:5
+  task 1 waits for recv at r0080_deadlock.sisu:6:19
+```
+
+Here the root task waits for the scope, and the task in it waits for a
+message that the root sends only after the scope. Send it from a task
+inside the scope.
+
+<!-- file: examples/reference-diagnostics/r0080_deadlock_fixed.sisu -->
+```sisu
+# The message is sent inside the scope, by a task of its own.
+def main():
+    let tx, rx = channel[String](capacity=1)
+    task.scope do s:
+        s.spawn do:
+            print(rx.recv())
+        s.spawn do:
+            _ = tx.send("löyly".to_string())
+```
+
+<!-- output: examples/reference-diagnostics/r0080_deadlock_fixed.out -->
+```text
+Ok("löyly")
+```
+
+Shown in [R9](concurrency.md#the-scheduler).
+
 ### R0100
 
 `contract.requires-failed`: precondition of `{function}` failed:
@@ -4387,6 +6863,67 @@ def main():
 10
 ```
 
+### R0102
+
+`contract.invariant-failed`: invariant of `{ty}` failed: {clause}.
+
+A struct's invariant is checked after its construction and after each
+`mut self` method returns; the panic names the type and the clause,
+shows its values, and traces from the clause through the method.
+
+<!-- file: examples/reference-diagnostics/r0102_invariant_failed.sisu -->
+```sisu
+# A method that leaves the invariant broken.
+struct Gauge:
+    level: int
+    invariant 0 <= self.level <= 10
+
+    def fill(mut self, amount: int):
+        self.level += amount
+
+def main():
+    var gauge = Gauge(level=4)
+    gauge.fill(9)
+    print(gauge.level)
+```
+
+<!-- output: examples/reference-diagnostics/r0102_invariant_failed.console -->
+```console
+$ sisu run r0102_invariant_failed.sisu
+panic: invariant of `Gauge` failed: 0 <= self.level <= 10
+    0 <= self.level <= 10
+         │
+         13
+  at the invariant of Gauge (r0102_invariant_failed.sisu:4:15)
+  at Gauge.fill (r0102_invariant_failed.sisu:7:29)
+  at main (r0102_invariant_failed.sisu:11:5)
+```
+
+Make the method keep the invariant, here by filling to the top at most.
+
+<!-- file: examples/reference-diagnostics/r0102_invariant_failed_fixed.sisu -->
+```sisu
+# The method keeps the invariant: it fills to the top at most.
+struct Gauge:
+    level: int
+    invariant 0 <= self.level <= 10
+
+    def fill(mut self, amount: int):
+        self.level = min(self.level + amount, 10)
+
+def main():
+    var gauge = Gauge(level=4)
+    gauge.fill(9)
+    print(gauge.level)
+```
+
+<!-- output: examples/reference-diagnostics/r0102_invariant_failed_fixed.out -->
+```text
+10
+```
+
+Shown in [chapter 23](../tutorial/23-contracts.md).
+
 ### R0108
 
 `test.snapshot-missing`: there is no snapshot `{name}` yet (`sisu test
@@ -4440,7 +6977,7 @@ def main():
 
 ## The driver
 
-Codes D0001 to D0122. The messages of the `sisu` command itself
+Codes D0001 to D0126. The messages of the `sisu` command itself
 ([R16](sisu-command.md)): usage errors, the lines of `sisu test` and
 `sisu bench`, replays, packages and the native backend.
 
@@ -4528,6 +7065,39 @@ An option that takes a number was given something else.
 Give a whole number, as in `--explore 20`.
 
 Example: [R16](sisu-command.md#commands-options-and-arguments).
+
+### D0028
+
+`cli.bad-contract-level`: `--contracts` takes `off`, `preconditions` or
+`all`, not `{value}`.
+
+The level of a run names which clauses it checks
+([R11](contracts.md#check-levels)).
+
+<!-- file: examples/reference-diagnostics/d0028_bad_level.sisu -->
+```sisu
+# A contract, checked at the level a run names.
+def half(n: int) -> int:
+    requires n >= 0
+    return n // 2
+
+def main():
+    print(half(8))
+```
+
+<!-- output: examples/reference-diagnostics/d0028_bad_level.console -->
+```console
+$ sisu run --contracts=most d0028_bad_level.sisu
+error[D0028]: `--contracts` takes `off`, `preconditions` or `all`, not `most`
+```
+
+<!-- output: examples/reference-diagnostics/d0028_bad_level_fixed.console -->
+```console
+$ sisu run --contracts=preconditions d0028_bad_level.sisu
+4
+```
+
+Shown in [R11](contracts.md#check-levels).
 
 ### D0037
 
@@ -4651,7 +7221,7 @@ it. `sisu explain CODE` prints the same line.
 | [E0103](#e0103) | `parse.expected-expression` | expected an expression, found {found} |
 | E0104 | `parse.expected-type` | expected a type, found {found} |
 | [E0105](#e0105) | `parse.expected-pattern` | expected a pattern, found {found} |
-| E0106 | `parse.expected-declaration` | expected a declaration, found {found} |
+| [E0106](#e0106) | `parse.expected-declaration` | expected a declaration, found {found} |
 | [E0107](#e0107) | `parse.top-level-statement` | statements cannot appear at the top level of a module; put them in a function such as `main` |
 | [E0108](#e0108) | `parse.mixed-and-or` | `and` and `or` cannot be mixed without parentheses |
 | E0109 | `parse.mixed-bitwise` | `{first}` and `{second}` cannot be mixed without parentheses |
@@ -4671,6 +7241,7 @@ it. `sisu explain CODE` prints the same line.
 | [E0124](#e0124) | `parse.keyword-as-name` | `{keyword}` is a keyword and cannot be used as a name here |
 | E0125 | `parse.unexpected-indent` | this line is indented more than the line before it, which does not open a block |
 | E0126 | `parse.expected-member` | a struct body holds fields, methods and `pass`; this line is none of them |
+| [E0127](#e0127) | `parse.loop-else` | a loop has no `else` in Sisu; keep what the loop finds in a variable and test it after the loop, as in `if let Some(i) = found:` |
 
 ### Names and declarations, every code
 
@@ -4679,7 +7250,7 @@ it. `sisu explain CODE` prints the same line.
 | [E0200](#e0200) | `resolve.undefined-name` | cannot find `{name}` in this scope |
 | E0201 | `resolve.undefined-type` | cannot find a type named `{name}` |
 | [E0202](#e0202) | `resolve.duplicate-definition` | `{name}` is defined more than once in this module |
-| E0203 | `resolve.unknown-module` | there is no module `{name}` |
+| [E0203](#e0203) | `resolve.unknown-module` | there is no module `{name}` |
 | E0204 | `resolve.not-in-module` | module `{module}` has no item `{name}` |
 | E0205 | `resolve.duplicate-field` | `{name}` is declared more than once in `{owner}` |
 | E0206 | `resolve.duplicate-variant` | `{owner}` has more than one variant named `{name}` |
@@ -4691,7 +7262,7 @@ it. `sisu explain CODE` prints the same line.
 | E0213 | `resolve.drop-target` | `Drop` can be implemented only for a struct or enum declared in this module |
 | [E0215](#e0215) | `resolve.self-outside-method` | `self` exists only inside a method |
 | E0216 | `resolve.drop-signature` | `Drop` has one method, `def drop(mut self)` |
-| E0217 | `resolve.duplicate-method` | `{owner}` has more than one method named `{name}` |
+| [E0217](#e0217) | `resolve.duplicate-method` | `{owner}` has more than one method named `{name}` |
 | E0218 | `resolve.self-not-first` | `self` must be the first parameter |
 | E0219 | `resolve.const-type-required` | a `const` needs a type: `const {name}: T = ...` |
 | E0220 | `resolve.import-unknown` | cannot import `{name}`: it names no module of this package, of a dependency in `sisu.toml`, or of the standard library |
@@ -4699,7 +7270,7 @@ it. `sisu explain CODE` prints the same line.
 | E0222 | `resolve.parameter-default-order` | a parameter without a default cannot follow one with a default |
 | E0223 | `resolve.not-a-module` | `{name}` is not a module |
 | E0224 | `resolve.missing-body` | `{name}` has no body; only standard-library intrinsics are declared without one |
-| E0225 | `resolve.std-only-attribute` | `@{name}` is reserved for the standard library |
+| [E0225](#e0225) | `resolve.std-only-attribute` | `@{name}` is reserved for the standard library |
 | E0226 | `resolve.inferred-set-position` | an inferred error set (`T !`) can only be the result type of a function |
 | E0227 | `resolve.union-outside-result` | `{A, B}` is a union of error sets and can only follow `!` |
 | E0228 | `resolve.alias-cycle` | the type alias `{name}` refers to itself |
@@ -4707,11 +7278,11 @@ it. `sisu explain CODE` prints the same line.
 | E0230 | `resolve.not-a-trait` | `{name}` is not a trait |
 | [E0231](#e0231) | `resolve.trait-as-type` | `{name}` is a trait, not a type; a value of a type that implements it is `dyn {name}` |
 | [E0232](#e0232) | `resolve.missing-trait-method` | the impl of `{trait}` for `{ty}` is missing {methods} |
-| E0233 | `resolve.not-a-trait-method` | `{name}` is not a method of `{trait}` |
+| [E0233](#e0233) | `resolve.not-a-trait-method` | `{name}` is not a method of `{trait}` |
 | E0234 | `resolve.method-signature` | `{name}` does not have the signature `{trait}` gives it: expected `{expected}`, found `{found}` |
 | [E0235](#e0235) | `resolve.overlapping-impl` | `{trait}` is implemented for `{ty}` more than once; a type implements a trait at most once |
-| E0236 | `resolve.orphan-impl` | `{trait}` for `{ty}` can be implemented only in the package of the trait or of the type, or in the root package |
-| E0237 | `resolve.missing-assoc-type` | the impl of `{trait}` for `{ty}` does not say what `{name}` is; add `type {name} = ...` |
+| [E0236](#e0236) | `resolve.orphan-impl` | `{trait}` for `{ty}` can be implemented only in the package of the trait or of the type, or in the root package |
+| [E0237](#e0237) | `resolve.missing-assoc-type` | the impl of `{trait}` for `{ty}` does not say what `{name}` is; add `type {name} = ...` |
 | E0238 | `resolve.unknown-assoc-type` | `{trait}` has no associated type `{name}` |
 | E0239 | `resolve.no-assoc-type` | `{ty}` has no associated type `{name}` among its bounds |
 | E0240 | `resolve.sealed-trait` | `{trait}` is implemented only by the standard library, so `{ty}` cannot implement it |
@@ -4719,20 +7290,20 @@ it. `sisu explain CODE` prints the same line.
 | [E0242](#e0242) | `resolve.supertrait-missing` | `{ty}` implements `{trait}`, which requires `{super}`, but `{ty}` does not implement `{super}` |
 | [E0243](#e0243) | `resolve.not-derivable` | `{name}` cannot be derived; `@derive` takes `Copy` and the traits that have a `comptime def derive`: `Debug`, `Eq`, `PartialOrd`, `Ord`, `Hash`, and any trait that declares one |
 | [E0244](#e0244) | `resolve.derive-field` | `{ty}` cannot derive `{trait}`: its field `{field}` has type `{fty}`, which does not implement `{trait}` |
-| E0245 | `resolve.generic-default-order` | a type parameter without a default cannot follow one with a default |
+| [E0245](#e0245) | `resolve.generic-default-order` | a type parameter without a default cannot follow one with a default |
 | E0246 | `resolve.impl-default` | the type parameters of an `impl` or a function take no defaults; a default belongs to a type's or a trait's parameter |
 | E0247 | `resolve.trait-cycle` | `{name}` cannot be its own supertrait |
 | E0248 | `resolve.assoc-outside-trait-impl` | an associated type belongs in an impl of a trait |
 | E0249 | `resolve.assoc-needs-type` | `type {name}` in an impl needs a type: `type {name} = ...` |
 | E0250 | `resolve.not-delegable` | `{name}` cannot be delegated; `@delegate` takes `Add`, `Sub`, `Mul`, `Div`, `Rem`, `Neg`, `Eq`, `PartialOrd`, `Ord`, `Hash`, `Display`, `Debug` and `Len` |
 | E0251 | `resolve.delegate-to` | `@delegate` needs `to="field"`, naming a field of `{ty}` |
-| E0252 | `resolve.delegate-self` | `{trait}` returns a `{ty}`, so `{ty}` can delegate it only when `{field}` is its one field |
+| [E0252](#e0252) | `resolve.delegate-self` | `{trait}` returns a `{ty}`, so `{ty}` can delegate it only when `{field}` is its one field |
 | E0253 | `resolve.delegate-field` | `{ty}` cannot delegate `{trait}` to `{field}`: its type `{fty}` does not implement `{trait}` |
 | E0254 | `resolve.drop-generic` | a `Drop` for `{ty}` must apply to every `{name}`: write `{expected}`, with the type's parameters in order and only the bounds the type declares |
 | E0255 | `resolve.private-item` | `{name}` is private to the module `{module}`; declare it `pub` to use it from another module |
-| E0256 | `resolve.package-item` | `{name}` is `pub(package)` in `{module}`, so only the modules of the package `{package}` can use it |
+| [E0256](#e0256) | `resolve.package-item` | `{name}` is `pub(package)` in `{module}`, so only the modules of the package `{package}` can use it |
 | E0257 | `resolve.not-reexported` | `{name}` is imported into `{module}`, not declared there; import it from `{origin}`, or re-export it with `pub from {origin} import {name}` |
-| E0258 | `resolve.private-field` | the field `{field}` of `{ty}` is private to the module `{module}`; declare it `pub` to use it from another module |
+| [E0258](#e0258) | `resolve.private-field` | the field `{field}` of `{ty}` is private to the module `{module}`; declare it `pub` to use it from another module |
 | E0259 | `resolve.private-method` | the method `{name}` of `{ty}` is private to the module `{module}`; declare it `pub` to call it from another module |
 | E0260 | `resolve.not-a-dependency` | cannot import `{name}`: `{package}` is not a dependency of `{this}`; add it to `[dependencies]` in that package's `sisu.toml` |
 | E0261 | `resolve.script-main` | a script's statements at the top level are its `main`, so it cannot also declare `main` |
@@ -4740,7 +7311,10 @@ it. `sisu explain CODE` prints the same line.
 | E0263 | `resolve.type-argument` | `{param}` is a type parameter of `{name}`, so it takes a type, not a constant |
 | E0264 | `resolve.const-expression` | a type's constant argument is computed where the type is written, from integers, `const` parameters, constants written that way and the operators `+ - * // % ** << >> & \| ^`; this is none of them |
 | E0265 | `resolve.const-not-int` | a type's constant argument is an `int`, and this is a `{ty}` |
-| E0266 | `resolve.bad-cfg` | `@cfg` takes a condition: `test`, `feature="NAME"`, `not` and a condition, or `all(...)` or `any(...)` of conditions; this is none of them |
+| [E0266](#e0266) | `resolve.bad-cfg` | `@cfg` takes a condition: `test`, `feature="NAME"`, `not` and a condition, or `all(...)` or `any(...)` of conditions; this is none of them |
+| E0267 | `resolve.not-camel-case` | the name of {kind} is written in CamelCase, and `{name}` is not |
+| E0268 | `resolve.not-snake-case` | the name of {kind} is written in snake_case, and `{name}` is not |
+| E0269 | `resolve.not-screaming-case` | the name of {kind} is written in SCREAMING_CASE, and `{name}` is not |
 
 ### Types, every code
 
@@ -4759,7 +7333,7 @@ it. `sisu explain CODE` prints the same line.
 | [E0310](#e0310) | `type.binary-operator` | `{op}` cannot be applied to `{lhs}` and `{rhs}` |
 | E0311 | `type.unary-operator` | `{op}` cannot be applied to `{ty}` |
 | [E0312](#e0312) | `type.assign-immutable` | `{name}` is immutable; declare it with `var` to assign to it |
-| E0313 | `type.not-a-place` | this expression cannot be assigned to |
+| [E0313](#e0313) | `type.not-a-place` | this expression cannot be assigned to |
 | [E0314](#e0314) | `type.non-exhaustive` | this `match` does not cover {missing} |
 | [E0315](#e0315) | `type.missing-return` | `{name}` returns `{ty}`, but control can reach the end of its body without a `return` |
 | E0316 | `type.return-value-in-unit` | `{name}` returns nothing, so its `return` takes no value |
@@ -4770,7 +7344,7 @@ it. `sisu explain CODE` prints the same line.
 | E0321 | `type.error-not-in-set` | `{from}` errors cannot leave this function, whose error set is `{to}` |
 | E0322 | `type.break-outside-loop` | `break` is only valid inside a loop |
 | E0323 | `type.continue-outside-loop` | `continue` is only valid inside a loop |
-| E0324 | `type.cannot-infer` | the type of `{name}` cannot be inferred here; add a type annotation |
+| [E0324](#e0324) | `type.cannot-infer` | the type of `{name}` cannot be inferred here; add a type annotation |
 | [E0325](#e0325) | `type.not-iterable` | a `for` loop cannot iterate over `{ty}` |
 | E0326 | `type.pattern-mismatch` | this pattern cannot match a value of type `{ty}` |
 | [E0327](#e0327) | `type.unknown-variant` | `{ty}` has no variant `{name}` |
@@ -4781,11 +7355,11 @@ it. `sisu explain CODE` prints the same line.
 | E0332 | `type.float-suffix` | a float literal takes the suffix `f32` or `f64`, not `{suffix}` |
 | E0333 | `type.impure-call` | `{callee}` is not pure, so the pure function `{name}` cannot call it |
 | E0334 | `type.impure-capability` | the pure function `{name}` cannot use the capability `{ty}` |
-| E0335 | `type.impure-argument` | this function is passed where a pure function is required, but it calls `{callee}`, which is not pure |
+| [E0335](#e0335) | `type.impure-argument` | this function is passed where a pure function is required, but it calls `{callee}`, which is not pure |
 | [E0337](#e0337) | `type.missing-field` | missing the field `{field}` of `{ty}` |
 | [E0338](#e0338) | `type.move-out-of-borrow` | cannot move `{what}` out of a borrowed value; copy it with `.copy()` |
 | [E0339](#e0339) | `type.mut-argument-missing` | `{param}` is a `mut` parameter, so the call must say `mut` before the argument |
-| E0340 | `type.mut-argument-unexpected` | `{param}` is not a `mut` parameter, so the argument takes no `mut` |
+| [E0340](#e0340) | `type.mut-argument-unexpected` | `{param}` is not a `mut` parameter, so the argument takes no `mut` |
 | [E0341](#e0341) | `type.not-mutable` | cannot modify `{what}`; it is not declared with `var` |
 | E0342 | `type.it-outside-closure` | `it` is the parameter of an implicit closure and exists only where a one-parameter function is expected |
 | [E0344](#e0344) | `type.constant-negative-index` | a constant negative index does not compile; count from the end with `^`: `{fix}` |
@@ -4836,7 +7410,7 @@ it. `sisu explain CODE` prints the same line.
 | [E0395](#e0395) | `type.unsized-dyn` | `{ty}` has no size of its own; hold it behind `ref` or in a `Box` |
 | E0396 | `type.view-to-dyn` | `{ty}` borrows, so it cannot become `{dyn}`, which owns its value |
 | E0397 | `type.must-consume-argument` | `{ty}` is must-consume, so it cannot be the argument of the generic parameter `{param}`, whose values the body may drop |
-| E0398 | `type.structural-only` | {callee} is hashed and compared structurally in stage 0, and `{ty}` has an impl of `{trait}` of its own; derive `Hash` and `Eq` for it, or key by a field |
+| [E0398](#e0398) | `type.structural-only` | {callee} is hashed and compared structurally in stage 0, and `{ty}` has an impl of `{trait}` of its own; derive `Hash` and `Eq` for it, or key by a field |
 | E0399 | `type.bad-format-spec` | `{spec}` is not a format spec; it is `[[fill]align][sign][#][0][width][,\|_][.precision][type]`, as in `>8.2f`, with the type one of `d x X o b e E f F % s ?` |
 
 ### Ownership, every code
@@ -4846,22 +7420,22 @@ it. `sisu explain CODE` prints the same line.
 | [E0400](#e0400) | `borrow.use-after-move` | `{name}` was moved on line {line} and cannot be used afterwards |
 | [E0401](#e0401) | `borrow.use-after-partial-move` | `{name}` cannot be used as a whole, because `{part}` was moved out of it on line {line} |
 | [E0402](#e0402) | `borrow.modify-while-borrowed` | `{name}` is borrowed on line {line} and cannot be modified until that borrow ends on line {end} |
-| E0403 | `borrow.use-while-mut-borrowed` | `{name}` is borrowed with `mut` on line {line} and cannot be used until that borrow ends on line {end} |
-| E0404 | `borrow.move-while-borrowed` | `{name}` is borrowed on line {line} and cannot be moved until that borrow ends on line {end} |
+| [E0403](#e0403) | `borrow.use-while-mut-borrowed` | `{name}` is borrowed with `mut` on line {line} and cannot be used until that borrow ends on line {end} |
+| [E0404](#e0404) | `borrow.move-while-borrowed` | `{name}` is borrowed on line {line} and cannot be moved until that borrow ends on line {end} |
 | [E0405](#e0405) | `borrow.mut-while-borrowed` | `{name}` is already borrowed on line {line}, so it cannot be borrowed with `mut` until that borrow ends on line {end} |
 | [E0406](#e0406) | `borrow.does-not-live-long-enough` | `{name}` does not live long enough: it is borrowed on line {line}, and the borrow is still used on line {end}, after `{name}` is gone |
 | [E0407](#e0407) | `borrow.return-local` | this returns a borrow of `{name}`, which belongs to `{function}` and is gone when it returns |
-| E0408 | `borrow.return-not-from` | this returns a borrow of the parameter `{param}`, which is not in the `from` clause of `{function}` |
+| [E0408](#e0408) | `borrow.return-not-from` | this returns a borrow of the parameter `{param}`, which is not in the `from` clause of `{function}` |
 | E0409 | `borrow.store-in-plain-type` | `{ty}` cannot hold this value, because it borrows `{name}`; only a `view struct` holds borrows |
 | E0410 | `borrow.store-into-caller` | this value borrows `{name}`, so it cannot be stored in `{param}`, which belongs to the caller of `{function}` |
 | [E0411](#e0411) | `borrow.view-field-in-plain-struct` | `{ty}` holds `{field}: {fty}`, which borrows; only a `view struct` may hold a borrow |
-| E0412 | `borrow.view-in-enum` | `{ty}` cannot hold `{fty}`, which borrows; an enum has no view form, so store an owned value such as `String` |
+| [E0412](#e0412) | `borrow.view-in-enum` | `{ty}` cannot hold `{fty}`, which borrows; an enum has no view form, so store an owned value such as `String` |
 | [E0413](#e0413) | `borrow.from-required` | `{name}` returns `{ret}`, which borrows, and has more than one borrowed parameter ({params}); name the ones it borrows from with `from` |
 | E0414 | `borrow.from-not-a-parameter` | `{name}` in the `from` clause is not a borrowed parameter of `{function}` |
 | E0415 | `borrow.from-without-borrow` | `{function}` returns `{ty}`, which does not borrow, so it takes no `from` clause |
 | E0416 | `borrow.move-out-of-drop` | cannot move `{part}` out of `{name}`, because `{ty}` implements `Drop`, which needs the whole value |
 | [E0417](#e0417) | `borrow.must-consume` | `{name}` is never consumed: a `{ty}` must be passed to an `own` parameter before it goes out of scope |
-| E0418 | `borrow.must-consume-exit` | this leaves the scope with `{name}` unconsumed: a `{ty}` must be passed to an `own` parameter first |
+| [E0418](#e0418) | `borrow.must-consume-exit` | this leaves the scope with `{name}` unconsumed: a `{ty}` must be passed to an `own` parameter first |
 | E0419 | `borrow.move-out-of-place` | cannot move out of `{name}` through a reference or an index; copy it with `.copy()` |
 | E0420 | `borrow.must-consume-intrinsic` | `{callee}` may drop values that `{name}` holds, and a `{ty}` is must-consume: its values must be passed to an `own` parameter |
 | E0421 | `borrow.view-in-owner` | `{ty}` borrows, so it cannot be put in `{owner}`, which can outlive what it borrows (04, rule 3) |
@@ -4870,8 +7444,8 @@ it. `sisu explain CODE` prints the same line.
 | E0424 | `type.own-closure-changes` | an `own` closure keeps a copy of `{name}` and cannot change it; borrow it with a plain closure instead |
 | E0425 | `task.closure-literal` | `{function}` takes a closure written at the call (or a `do` block), so that what it captures can be checked; a function value is not one |
 | E0426 | `task.not-send` | `{name}` moves into the task, but `{ty}` is not `Send` |
-| E0427 | `task.not-sync` | `{name}` is shared with the task by reference, but `{ty}` is not `Sync` |
-| E0428 | `task.borrows-body-local` | the task borrows `{name}`, which belongs to the scope's body: the body ends before the scope joins its tasks |
+| [E0427](#e0427) | `task.not-sync` | `{name}` is shared with the task by reference, but `{ty}` is not `Sync` |
+| [E0428](#e0428) | `task.borrows-body-local` | the task borrows `{name}`, which belongs to the scope's body: the body ends before the scope joins its tasks |
 | E0429 | `task.borrows-elsewhere` | the task borrows `{name}`, but only a task spawned on a scope in that scope's body may borrow, and only what the body's environment borrows |
 | E0430 | `task.scope-escapes` | a scope's body cannot return `{ty}`: a scope and the handles of its tasks end with the scope |
 | E0431 | `task.race-types` | the tasks of a race return one type: this one returns `{found}`, an earlier one `{expected}` |
@@ -4887,22 +7461,22 @@ it. `sisu explain CODE` prints the same line.
 | Code | Identifier | Message |
 |---|---|---|
 | E0500 | `sir.parse` | SIR: {detail} |
-| E0501 | `sir.invalid` | invalid SIR in `{function}`: {detail} |
+| [E0501](#e0501) | `sir.invalid` | invalid SIR in `{function}`: {detail} |
 
 ### Compile-time evaluation, every code
 
 | Code | Identifier | Message |
 |---|---|---|
 | E0600 | `comptime.not-constant` | `comptime` evaluates what is known at compile time, and `{name}` is known only at run time |
-| E0601 | `comptime.io` | the compile-time evaluation of this expression used {what}; nothing reaches the world at compile time |
+| [E0601](#e0601) | `comptime.io` | the compile-time evaluation of this expression used {what}; nothing reaches the world at compile time |
 | E0602 | `comptime.panicked` | the compile-time evaluation of this expression panicked: {message} |
 | E0603 | `comptime.budget` | the compile-time evaluation in `{item}` used up its budget of {steps} steps; raise it with `@comptime_budget(steps=N)` on `{item}` |
-| E0604 | `comptime.not-kept` | {what} made at compile time cannot be kept for run time; numbers, text, booleans, characters, and lists, sets, dicts, tuples, options, results, structs and enums of them can |
+| [E0604](#e0604) | `comptime.not-kept` | {what} made at compile time cannot be kept for run time; numbers, text, booleans, characters, and lists, sets, dicts, tuples, options, results, structs and enums of them can |
 | E0605 | `comptime.only` | `{name}` is a `comptime def`: it can be called only at compile time, inside `comptime` |
-| E0606 | `comptime.budget-attribute` | `@comptime_budget` takes `steps=N`, a positive number of steps |
+| [E0606](#e0606) | `comptime.budget-attribute` | `@comptime_budget` takes `steps=N`, a positive number of steps |
 | E0607 | `comptime.derive-template` | a trait's derive is `comptime def derive(T: type) -> impl {trait} for T`, whose body is `return impl {trait} for T:` with the impl's methods |
 | E0608 | `comptime.derive-failed` | deriving `{trait}` for `{ty}` stopped at compile time: {reason} |
-| E0609 | `comptime.instance-failed` | making `{name}` stopped at compile time: {reason} |
+| [E0609](#e0609) | `comptime.instance-failed` | making `{name}` stopped at compile time: {reason} |
 | E0610 | `comptime.instances-unbounded` | `{name}` needs more than {count} instances: its instances call it with ever more types |
 | E0611 | `comptime.template-value` | `{name}` reflects on its type parameters, so it is made for each call's types and cannot be used as a value |
 | E0612 | `comptime.embed-failed` | cannot embed `{path}`: {reason} |
@@ -4923,19 +7497,19 @@ it. `sisu explain CODE` prints the same line.
 
 | Code | Identifier | Message |
 |---|---|---|
-| E0800 | `contract.misplaced` | `{keyword}` is a function's contract and belongs at the start of its body, before its first statement |
+| [E0800](#e0800) | `contract.misplaced` | `{keyword}` is a function's contract and belongs at the start of its body, before its first statement |
 | E0801 | `contract.not-pure` | a contract only reads what it is given, and `{callee}` is not `pure` |
 | E0802 | `contract.changes` | a contract only reads what it is given, and this changes it |
 | E0803 | `contract.old-outside` | `old(...)` is a value as it was on entry, which only an `ensures` clause can ask for |
-| E0804 | `contract.old-arguments` | `old` takes one expression, as in `old(self.balance)` |
-| E0805 | `contract.generator-ensures` | a generator has no `ensures`: what it returns is its iterator |
+| [E0804](#e0804) | `contract.old-arguments` | `old` takes one expression, as in `old(self.balance)` |
+| [E0805](#e0805) | `contract.generator-ensures` | a generator has no `ensures`: what it returns is its iterator |
 | E0806 | `contract.invariant-field` | `{what}` is part of a `{ty}`, whose invariant only its own methods may change and check again; change it through one of them |
-| E0807 | `contract.not-in-test` | a test has no contract; check what it needs with `assert` |
+| [E0807](#e0807) | `contract.not-in-test` | a test has no contract; check what it needs with `assert` |
 | E0810 | `refine.not-satisfied` | `{value}` is not a `{ty}`: `{predicate}` is false for it |
 | E0811 | `refine.needs-try-from` | expected `{expected}`, found `{found}`; a value becomes a `{expected}` where its predicate is checked, with `{name}.try_from(...)` |
-| E0812 | `refine.change-through-base` | `{what}` is a `{ty}`, which a change through its base could take outside `{predicate}`; change a copy of the base and check it again with `try_from` |
-| E0813 | `refine.own-impl` | `{ty}` refines `{base}` and has its reading impls; it cannot have an impl of `{trait}` of its own |
-| E0814 | `refine.predicate-type` | the predicate of `{ty}` must be a `bool`, found `{found}` |
+| [E0812](#e0812) | `refine.change-through-base` | `{what}` is a `{ty}`, which a change through its base could take outside `{predicate}`; change a copy of the base and check it again with `try_from` |
+| [E0813](#e0813) | `refine.own-impl` | `{ty}` refines `{base}` and has its reading impls; it cannot have an impl of `{trait}` of its own |
+| [E0814](#e0814) | `refine.predicate-type` | the predicate of `{ty}` must be a `bool`, found `{found}` |
 | E0820 | `test.no-generator` | `{ty}` has no generator for property tests: {why} |
 | E0821 | `test.refines-mismatch` | `@refines({reference})` on `{name}` cannot be checked: {why} |
 
@@ -4954,6 +7528,8 @@ it. `sisu explain CODE` prints the same line.
 | E0986 | `unsafe.never-asserted` | `{trait}` is never asserted: the compiler decides it from a type's parts, and nothing may claim it otherwise |
 | E0987 | `unsafe.not-ptr` | `ptr mut T` is the raw pointer of `std.mem`, and `{name}` here names {found} |
 | E0988 | `unsafe.in-contract` | a contract holds no `unsafe`: it may call safe functions built on unsafe code, and unsafe code relies on no contract |
+| [E0989](#e0989) | `unsafe.export-signature` | `{name}` is `@export`ed, and foreign code that calls it cannot keep `{ty}` alive: an exported function's signature holds no reference, view, `Shared`, closure or capability |
+| [E0990](#e0990) | `unsafe.blocking-not-foreign` | `@blocking` marks a foreign function whose call may block its thread, and `{name}` is not a foreign function |
 
 ### Packages and manifests, every code
 
@@ -4962,11 +7538,11 @@ it. `sisu explain CODE` prints the same line.
 | E1000 | `package.toml-syntax` | this is not TOML that `sisu.toml` reads: expected {expected}, found {found} |
 | E1001 | `package.toml-duplicate` | `{key}` is given more than once in `{table}` |
 | E1002 | `package.missing-key` | `{table}` needs `{key}` |
-| E1003 | `package.bad-value` | `{key}` takes {expected}, found {found} |
+| [E1003](#e1003) | `package.bad-value` | `{key}` takes {expected}, found {found} |
 | E1004 | `package.bad-name` | `{name}` cannot name a package: {why} |
 | E1005 | `package.no-manifest` | the dependency `{name}` has no `sisu.toml` at `{path}` |
 | E1006 | `package.renamed-dependency` | the dependency `{name}` is the package `{found}`; a path dependency is named by its own `[package] name` |
-| E1007 | `package.cycle` | the packages depend on each other in a cycle: {cycle}; packages build in dependency order, so their graph has no cycle |
+| [E1007](#e1007) | `package.cycle` | the packages depend on each other in a cycle: {cycle}; packages build in dependency order, so their graph has no cycle |
 | E1008 | `package.no-root-module` | the package `{name}` has no root module; add `src/main.sisu` (an application) or `src/lib.sisu` (a library) |
 | E1009 | `package.two-root-modules` | the package `{name}` has both `src/main.sisu` and `src/lib.sisu`; a package has one root module |
 | E1010 | `package.not-a-path` | the dependency `{name}` is not a `path` dependency; stage 0 has no registry, so a dependency is `{name} = { path = "../{name}" }` |
@@ -4991,7 +7567,7 @@ it. `sisu explain CODE` prints the same line.
 | [W0002](#w0002) | `resolve.shadow-outer` | `{name}` shadows a binding of an enclosing scope |
 | [W0003](#w0003) | `type.unreachable-arm` | this `case` arm is unreachable; the arms above it cover every value it matches |
 | W0004 | `type.unreachable-code` | this code is unreachable |
-| W0005 | `package.unknown-key` | `{key}` is not a key of `{table}` that stage 0 knows; it is ignored |
+| [W0005](#w0005) | `package.unknown-key` | `{key}` is not a key of `{table}` that stage 0 knows; it is ignored |
 | W0006 | `resolve.unknown-feature` | no `[features]` of this package declares `{name}`, so `feature="{name}"` never holds |
 | W0007 | `unsafe.no-safety-comment` | this {what} has no `# safety:` comment above it saying why each obligation it takes on holds |
 | W0008 | `unsafe.no-safety-list` | `{name}` is an `unsafe {kind}` without a `Safety:` list in its `##` comment naming the obligations its {who} take |
@@ -5001,6 +7577,8 @@ it. `sisu explain CODE` prints the same line.
 | W0012 | `unsafe.level` | the package declares `unsafe = "{level}"`, {why} |
 | W0013 | `unsafe.auto-trait-bound` | `unsafe impl {trait}` claims `{trait}` for every `{param}`, which is not bounded by `{trait}` |
 | W0014 | `unsafe.ambient-authority` | `{name}` is public and safe and reaches the foreign function `{callee}` without taking a capability, so its callers need no authority for what the call does |
+| W0015 | `lint.wildcard-own-enum` | `case _` matches {variants} of `{ty}`, an enum of this package, so a variant added to `{ty}` later is not an error here |
+| W0016 | `resolve.shadow-prelude-set` | the error set `{name}` hides the prelude's in this module, and the two are different sets: what the prelude's functions return is not this one |
 
 ### Run time, every code
 
@@ -5079,7 +7657,7 @@ it. `sisu explain CODE` prints the same line.
 | R0077 | `panic.joined-twice` | the task was joined already: its result was taken by an earlier `join` |
 | R0078 | `panic.empty-race` | a race whose body spawned no task has no winner |
 | R0079 | `panic.unobserved-error` | a task failed with {error} and nobody joined it, and the scope's result cannot carry it |
-| R0080 | `run.deadlock` | deadlock: every task is waiting, and no timer can wake any of them |
+| [R0080](#r0080) | `run.deadlock` | deadlock: every task is waiting, and no timer can wake any of them |
 | R0081 | `run.deadlock-task` | {task} waits for {wait} at {location} |
 | R0082 | `run.task-root` | the root task |
 | R0083 | `panic.channel-capacity` | a channel's capacity must be at least 1, not {capacity} |
@@ -5096,7 +7674,7 @@ it. `sisu explain CODE` prints the same line.
 | R0094 | `panic.bad-port` | {port} is not a port; ports are 0 to 65535 |
 | [R0100](#r0100) | `contract.requires-failed` | precondition of `{function}` failed: {clause} |
 | [R0101](#r0101) | `contract.ensures-failed` | postcondition of `{function}` failed: {clause} |
-| R0102 | `contract.invariant-failed` | invariant of `{ty}` failed: {clause} |
+| [R0102](#r0102) | `contract.invariant-failed` | invariant of `{ty}` failed: {clause} |
 | R0103 | `contract.refinement-failed` | `{value}` is not a `{ty}`: `{clause}` is false for it |
 | R0104 | `run.case-too-long` | the case ran past its budget of {steps} statements |
 | R0105 | `sim.always-failed` | `sim.always` does not hold: {what} |
@@ -5178,7 +7756,7 @@ it. `sisu explain CODE` prints the same line.
 | D0025 | `cli.explore-failed` | schedule seed {seed} of {count} failed with exit status {status}; `--schedule-seed {seed}` runs it again |
 | D0026 | `cli.explore-test-failed` | with schedule seed {seed}; `--schedule-seed {seed}` runs it again |
 | D0027 | `cli.explore-summary` | explored {count} schedules per test (seeds {first} to {last}) |
-| D0028 | `cli.bad-contract-level` | `--contracts` takes `off`, `preconditions` or `all`, not `{value}` |
+| [D0028](#d0028) | `cli.bad-contract-level` | `--contracts` takes `off`, `preconditions` or `all`, not `{value}` |
 | D0029 | `cli.test-checks-contracts` | `sisu test` checks every contract; `--contracts` sets what `sisu run` and `sisu sir` check |
 | D0030 | `cli.replay-token` | replay: sisu test --replay {token} {file} |
 | D0031 | `cli.replay-no-token` | no replay token: the test takes the real `System`, which a replay cannot stand in for |
@@ -5272,4 +7850,8 @@ it. `sisu explain CODE` prints the same line.
 | D0120 | `cli.bad-lower` | `--lower` takes `stage2` (the lowering written in Sisu, the default) or `rust` (the Rust lowering, the oracle), not `{value}` |
 | D0121 | `native.stage2-build` | building stage 2 in `{dir}` failed; `--lower=rust` lowers with the Rust backend: {detail} |
 | D0122 | `native.stage2-failed` | internal compiler error: stage 2 failed to lower the program (status {status}); `--lower=rust` lowers with the Rust backend: {detail} |
+| D0123 | `cli.bad-backend` | `--backend` takes `sisu` (the x86-64 backend written in Sisu, the debug profile's default) or `cranelift` (the Rust backend, the release profile's default and the oracle), not `{value}` |
+| D0124 | `native.backend-lowering` | `--backend=sisu` compiles the LIR stage 2 lowers, so it does not go with `--lower=rust` |
+| D0125 | `native.sisu-failed` | internal compiler error: the Sisu backend failed to compile the program (status {status}); `--backend=cranelift` compiles it with the Rust backend: {detail} |
+| D0126 | `native.rt-build` | building the runtime in Sisu from `{seed}` failed: {detail} |
 

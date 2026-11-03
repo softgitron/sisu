@@ -1,0 +1,2 @@
+2:11-2:14 E0252 resolve.delegate-self trait="Add" ty="Run" field="metres"
+8:17-8:56 E0310 type.binary-operator op="+" lhs="Run" rhs="Run"

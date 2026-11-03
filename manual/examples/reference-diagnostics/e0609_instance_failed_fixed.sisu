@@ -1,0 +1,13 @@
+# The template is called with a struct.
+struct Booking:
+    name: String
+    hour: int
+
+def columns[T](value: T) -> int:
+    if comptime reflect.is_struct(T):
+        return len(reflect.fields_of(T))
+    else:
+        comptime panic("`{reflect.name_of(T)}` has no columns")
+
+def main():
+    print(columns(Booking("Aino", 18)))

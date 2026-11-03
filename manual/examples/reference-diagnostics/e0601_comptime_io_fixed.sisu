@@ -1,0 +1,8 @@
+# The compile-time code only computes; the program prints.
+def greeting(name: str) -> String:
+    return "Hei, {name}!"
+
+const GREETING: String = comptime greeting("Aino")
+
+def main():
+    print(GREETING)

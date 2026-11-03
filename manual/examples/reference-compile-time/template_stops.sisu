@@ -1,0 +1,16 @@
+# A template that stops for a type it cannot be made for.
+struct Settings:
+    heat: int = 80
+    name: String
+
+def blank[T](own name: String) -> T:
+    if comptime reflect.is_struct(T):
+        return reflect.construct(T, {"name": name})
+    else:
+        comptime panic("`{reflect.name_of(T)}` is not a struct")
+
+def main():
+    let settings: Settings = blank("sauna".to_string())
+    print("{settings.name} {settings.heat}")
+    let count: int = blank("count".to_string())
+    print(count)

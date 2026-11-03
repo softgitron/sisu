@@ -193,6 +193,13 @@ pub(crate) enum Code<'a> {
     Lir(&'a str),
 }
 
+/// What a native program is linked with: the runtime in Rust's library and
+/// the runtime in Sisu's object (decision 336).
+pub(crate) struct Runtime {
+    rust: std::path::PathBuf,
+    sisu: std::path::PathBuf,
+}
+
 /// Compiles the program and links it at `output`. On failure the message
 /// is reported to `host` and the exit status returned.
 pub(crate) fn build(code: Code<'_>, output: &Path, profile: Profile, host: &mut dyn Host) -> Result<(), i32> {
@@ -201,6 +208,9 @@ pub(crate) fn build(code: Code<'_>, output: &Path, profile: Profile, host: &mut 
         Ok(r) => r,
         Err(e) => return Err(report(e, output, host)),
     };
+    // The runtime in Sisu, linked with every program (decision 336).
+    let rt = crate::front::Rt::ready(host)?;
+    let runtime = Runtime { rust: runtime, sisu: rt.object };
     let prog = match code {
         Code::Sir(prog) => prog,
         Code::Lir(text) => {
@@ -330,7 +340,7 @@ fn lower_with_stage2(
 /// x86`, decision 306) into an object, which is linked at `output` with the
 /// runtime as Cranelift's objects are. A construct the backend does not
 /// compile is the program's `D0103`; another failure an internal error.
-fn build_with_sisu(lir: &str, runtime: &Path, output: &Path, host: &mut dyn Host) -> Result<(), i32> {
+fn build_with_sisu(lir: &str, runtime: &Runtime, output: &Path, host: &mut dyn Host) -> Result<(), i32> {
     use std::sync::atomic::{AtomicU32, Ordering};
     static N: AtomicU32 = AtomicU32::new(0);
     let stage2 = crate::front::Stage2::ready(host)?;
@@ -385,7 +395,8 @@ fn build_with_sisu(lir: &str, runtime: &Path, output: &Path, host: &mut dyn Host
         let _ = std::fs::create_dir_all(dir);
     }
     let start = std::time::Instant::now();
-    let linked = sisu_codegen::link(&object, runtime, output).map_err(|e| report(e, output, host));
+    let linked = sisu_codegen::link(&object, &runtime.rust, &runtime.sisu, output)
+        .map_err(|e| report(e, output, host));
     if std::env::var_os("SISU_NATIVE_TIMES").is_some() {
         host.stderr(&format!(
             "native: compiled by the Sisu backend in {:.1} ms, linked in {:.1} ms\n",
@@ -404,7 +415,7 @@ fn build_with_sisu(lir: &str, runtime: &Path, output: &Path, host: &mut dyn Host
 fn build_sir_with_sisu(
     prog: &sisu_sir::Program,
     profile: Profile,
-    runtime: &Path,
+    runtime: &Runtime,
     output: &Path,
     host: &mut dyn Host,
 ) -> Result<(), i32> {
@@ -455,9 +466,9 @@ fn build_sir_with_sisu(
         }
         Ok(out) => {
             let err = String::from_utf8_lossy(&out.stderr).into_owned();
-            let missing = err
-                .lines()
-                .find_map(|l| l.strip_prefix("lir: not lowered: ").or_else(|| l.strip_prefix("x86: not compiled: ")));
+            let missing = err.lines().find_map(|l| {
+                l.strip_prefix("lir: not lowered: ").or_else(|| l.strip_prefix("x86: not compiled: "))
+            });
             match missing {
                 Some(what) => Err(not_lowered(what, output, host)),
                 None => {
@@ -482,7 +493,8 @@ fn build_sir_with_sisu(
         let _ = std::fs::create_dir_all(dir);
     }
     let start = std::time::Instant::now();
-    let linked = sisu_codegen::link(&object, runtime, output).map_err(|e| report(e, output, host));
+    let linked = sisu_codegen::link(&object, &runtime.rust, &runtime.sisu, output)
+        .map_err(|e| report(e, output, host));
     if std::env::var_os("SISU_NATIVE_TIMES").is_some() {
         // The process's time, the SIR written and the object read, is the
         // two steps' as stage 2 measured them.
@@ -533,7 +545,7 @@ fn not_lowered(what: &str, output: &Path, host: &mut dyn Host) -> i32 {
 fn link(
     compiled: &sisu_codegen::Compiled,
     generated: std::time::Duration,
-    runtime: &Path,
+    runtime: &Runtime,
     output: &Path,
     profile: Profile,
     host: &mut dyn Host,
@@ -544,7 +556,8 @@ fn link(
         let _ = std::fs::create_dir_all(dir);
     }
     let start = std::time::Instant::now();
-    let linked = sisu_codegen::link(&compiled.object, runtime, output).map_err(|e| report(e, output, host));
+    let linked = sisu_codegen::link(&compiled.object, &runtime.rust, &runtime.sisu, output)
+        .map_err(|e| report(e, output, host));
     // `SISU_NATIVE_TIMES=1`: where a build's time went, for measuring the
     // backend against 10's targets (docs/architecture.md, "Stage 2").
     if std::env::var_os("SISU_NATIVE_TIMES").is_some() {

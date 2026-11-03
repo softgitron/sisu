@@ -899,7 +899,9 @@ impl Gen:
                             Reloc(offset=at, symbol=name.copy(), kind=R_GOTTPOFF, addend=-4)
                         )
                     case _:
-                        return unsupported("`tls_value` of the data `d{d}`, which is not thread-local")
+                        return unsupported(
+                            "`tls_value` of the data `d{d}`, which is not thread-local"
+                        )
                 self.define(v, RAX)
             case Op.FuncAddr(symbol):
                 let at = self.body.lea_rip(RAX)

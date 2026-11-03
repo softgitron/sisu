@@ -1,0 +1,20 @@
+# A trait's `derive` writes its impl for a type, with reflection.
+trait Columns:
+    ## The names of the fields, as the columns of a table.
+    def columns(self) -> list[String]
+
+    comptime def derive(T: type) -> impl Columns for T:
+        return impl Columns for T:
+            def columns(self) -> list[String]:
+                var names: list[String] = []
+                comptime for f in reflect.fields_of(T):
+                    names.push(f.name.to_uppercase())
+                return names
+
+@derive(Columns)
+struct Booking:
+    name: String
+    hour: int
+
+def main():
+    print(Booking("Aino", 18).columns())

@@ -1,0 +1,15 @@
+# An impl that does not say what its associated type is.
+trait Source:
+    type Item
+    def first(self) -> Self.Item
+
+struct Bench:
+    sitters: list[String]
+
+impl Source for Bench:
+    def first(self) -> String:
+        return self.sitters[0].copy()
+
+def main():
+    let bench = Bench(["Aino"])
+    print(len(bench.sitters))
