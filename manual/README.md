@@ -36,7 +36,8 @@ with the files they show beside them.
 | `examples/PAGE/` | every program a page shows, with its expected output | the checks |
 | `exercises/CHAPTER/` | the tutorial's exercises, as the learner starts them | practice |
 | `solutions/CHAPTER/` | a solution for each exercise, and its start-state session | comparison |
-| `tools/` | `check.py`, the manual's own checker | the checks |
+| `tools/` | `check.py` and `check_links.py`, the manual's own checkers | the checks |
+| `SUMMARY.md` | every written page in reading order, in mdBook's form | the site |
 
 `PAGE` is a tutorial chapter's file name without `.md` (`01-hello`), or
 the kind and the name of any other page (`guide-read-files`,
@@ -46,7 +47,9 @@ reference is not written by hand: `sisu doc --std` generates it from the
 runs its examples.
 
 The manual has 96 pages: 28 tutorial chapters, 32 guides, 22 reference
-pages and 14 explanations, besides the generated library reference.
+pages (one of them, R18, the generated library reference) and 14
+explanations. Every page is written except four guides that wait for
+their features (G18, G22, G23 and G25).
 
 ## The tutorial
 
@@ -169,16 +172,19 @@ and `own` parameters move; `Copy` types and `@derive(Copy)`; `.copy()`;
 values are dropped at the end of their scope in reverse order; `Drop`;
 `with` blocks; `defer`; reading move diagnostics and their fixes, which
 say what each fix costs. Exercises: fix three move errors three different
-ways, predict a drop order. Stage 0 runs all of it.
+ways, predict the order in which values end (the order of `defer`s,
+which is the order of drops, since a test cannot see a drop). Stage 0
+runs all of it.
 
 **11. Borrowing** ([written](tutorial/11-borrowing.md)). The three parameter conventions (borrow, `mut`, `own`)
 and `mut` at the call site; `ref` and `ref mut`; the rule of one mutable
 or many shared borrows; borrows that end at their last use; returning a
 borrow and the `from` clause; `for x in mut xs` and `for x in own xs`;
 closures that borrow what they capture; `sisu explain-borrow` and the
-monitor's counterexample run (`--defer-borrow`). Exercises: from the
-wrong-ownership corpus, each a fix with the diagnostic as the guide.
-Stage 0 runs all of it.
+monitor's counterexample run (`--defer-borrow`), which the experiment
+keeps from its participants, so whether the manual may teach it is
+Q-73. Exercises: from the wrong-ownership corpus, each a fix with the
+diagnostic as the guide. Stage 0 runs all of it.
 
 **12. Views** ([written](tutorial/12-views.md)). `view struct`, `str` and `Slice[T]` as views, tokens that
 point into a source buffer, why a view cannot leave the frame that owns
@@ -194,7 +200,8 @@ cycles, `Arena[T]` with `Key[T]` for graphs, a table for choosing among
 them, `@must_consume` with `close(own self)` and its rule for
 containers, and `sisu audit --ownership`. Challenge II: a dependency
 graph with cycle detection, first with an arena, then with `Shared` and
-`Weak`. Stage 0 runs all of it.
+`Weak`. Stage 0 runs all of it except `Shared.same` (E0351), which the
+chapter calls designed.
 
 ### Part III. Abstraction
 
@@ -205,7 +212,8 @@ coherence and the orphan rule (with the root package's exception,
 D-013), newtypes with `@delegate` and `@derive(Into, From)`, and `impl
 Type` in another module (Q-12). Exercises: `Display` for a money type, an
 `Add` for vectors, a newtype that stops metres being added to seconds.
-Stage 0 runs all of it except `@derive(Into, From)`.
+Stage 0 runs all of it except `@derive(Into, From)` and a trait's
+associated constants, which the chapter calls designed.
 
 **15. Generics** ([written](tutorial/15-generics.md)). Generic functions and types with bounds, `where`
 clauses, defaulted type parameters (D-060), bounds checked at the
@@ -214,7 +222,9 @@ monomorphisation and its size cost, `dyn Trait` behind `Box` or `ref`,
 the rules for object safety, choosing between an enum and a trait
 object, and const generics with `Array[T, N]` and expressions as
 arguments. Exercises: a generic `largest`, a `Stack[T]`, a ring buffer
-over `Array[T, N]`. Stage 0 runs all of it.
+over `Array[T, N]`. Stage 0 runs all of it except D-060's allocator
+parameter (`list[T, A]`), so the chapter shows a defaulted parameter on
+a type of its own, and `sisu build --explain-size`.
 
 **16. Closures and iterators** ([written](tutorial/16-closures-and-iterators.md)). `x -> expr`, `it`, trailing `do` blocks,
 captures and `own` closures, function types and `pure` function types,
@@ -231,10 +241,11 @@ prelude's fixed list, no glob imports and no package cycles, `sisu.toml`
 and its sections, path dependencies, features, the lockfile, workspaces,
 `[trust]`, documentation with `##` and `##!` and `sisu doc`, and a first
 look at publishing (the API diff and its semver rule, the capability
-summary, admission; D-066). Challenge III: split the word counter into a
-library and an application in one workspace, with documented `pub` items.
-Stage 0 runs all of it except the registry commands (`sisu add`,
-`publish`), whose sections wait.
+summary, admission; D-066). Challenge III: the word counter as a library
+with documented `pub` items, in one file, since an exercise is a file
+that `sisu test` runs alone; the chapter's workspace example then splits
+it into a library and an application. Stage 0 runs all of it except the
+registry commands (`sisu add`, `publish`), whose sections wait.
 
 ### Part IV. The world outside the program
 
@@ -255,9 +266,11 @@ clock that advances only when every task waits, property tests (`check`,
 snapshots and transcripts with `--update`, doc examples, replay tokens,
 `@refines`, fakes of your own traits (`Fake[T]`), benchmarks, and the
 JSON output and cache. Exercises: turn three example-based tests into
-one property, write a transcript test for the word counter. Stage 0 runs
-all of it except `@fixture`, `Expectation`, `--fuzz`, `--cover` and
-`--mutate`.
+one property, fix a program against its transcript (a transcript the
+learner wrote would be its own judge). Stage 0 runs all of it except
+`@fixture`, `Expectation`, an `expect` that lets the test go on (it
+stops the test, as `assert` does), the failure database, the JSON
+output, `--fuzz`, `--cover` and `--mutate`.
 
 **20. Concurrency** ([written](tutorial/20-concurrency.md)). `task.scope` and `spawn`, `join` and how error sets
 flatten, the scope's result, tasks that borrow from the frame, `Send`
@@ -267,16 +280,20 @@ and `Sync` in the messages that mention them, `Mutex`, `RwLock`,
 deadlines, `task.race`, panics in tasks and supervision, a mutex's
 invariant re-checked when a panic drops its guard (D-077), `log` and the
 trace context, and testing all of it under the seeded scheduler
-(`--explore`, `--scheduler pct`). Exercises: a fan-out fetch over a fake
-network, a worker pool, a race with a timeout. Stage 0 runs all of it.
+(`--explore`, `--scheduler pct`). Exercises: a fan-out to a slow fake
+service on the test clock (a fake network answers at once, so a test
+could not tell a fan-out from a loop), a worker pool, a race with a
+timeout. Stage 0 runs all of it.
 
 **21. A tour of the standard library** ([written](tutorial/21-standard-library.md)). One section per module a program
 reaches for first: `std.fs` and `std.io`, `std.time` (with `Ticker` and
 `Timeline`), `std.rand`, `std.env` and `std.process`, `std.json`,
 `std.regex`, `std.collections` (`SortedDict`, `Deque`, `Heap`,
 `BitSet`), `std.hash`, `std.encoding`, `std.sort` and `std.search`, and
-`std.log`, each with one example and a link to its generated page.
-Exercises: one small task per module. Stage 0 runs all of it.
+`std.log`, each with one example and a link to its source, which holds
+the documentation that `sisu doc --std` writes, until the site publishes
+the generated pages. Exercises: one small task per module. Stage 0 runs
+all of it.
 
 **22. Project: a small web service** ([written](tutorial/22-web-service.md)). A JSON service on `std.x.http`:
 attenuated capabilities in `main`, a task per connection, logging,
@@ -285,8 +302,9 @@ simulation profile with faults (`sisu test --sim`), a failure kept as a
 replay token, `sisu run --record` and `sisu replay`, changing a handler
 while the server runs (`sisu run --watch`, epochs, `live.boundary()`),
 and a native build (`sisu build --native`). Challenge IV: rate limiting
-and a cache, proved under the simulator. Stage 0 runs all of it except
-TLS.
+and a cache, proved under fifty orders of its tasks. Stage 0 runs all of
+it except TLS; a native build prints the executable's absolute path,
+which no session can show, so the chapter shows `sisu build`.
 
 ### Part V. Further
 
@@ -297,7 +315,8 @@ assign its fields, refinement types (`type Port = int where ...`) and
 documentation and as property tests, contracts on trait methods, and
 what waits for the verifier (`decreases`, ghost code). Exercises: a
 bank account with an invariant, a binary search with its contract.
-Stage 0 runs all of it.
+Stage 0 runs all of it except the contracts of a trait's methods, which
+it accepts and does not check.
 
 **24. Numbers in depth** ([written](tutorial/24-numbers.md)). The sized integers and `uint`, the operator
 families for wrapping, saturating and checked arithmetic, conversions
@@ -306,7 +325,9 @@ operation, `mul_add`, pairwise `sum`, `@float(fast)`; D-074), NaN and
 ordering, and the exact types `BigInt`, `Ratio` and `Decimal` with their
 suffix-free literals and named rounding (D-076). Exercises: a checksum
 over `u32`, a mortgage table in `Decimal`. Stage 0 runs all of it
-except `@float(fast)` and `total_order`.
+except `@float(fast)`, which it accepts and ignores, `total_order`, and
+literals that take an exact type beside an operator (`f * 2` with `f` a
+`BigInt`), so the chapter types its literals with `let`.
 
 **25. Compile-time code** ([written](tutorial/25-compile-time.md)). `comptime` expressions, `const`, `comptime
 def` and `comptime assert`, fuel and `@comptime_budget`, reflection
@@ -336,9 +357,14 @@ pointers, C interop (header import, `extern "C"`, `std.ffi`,
 allocators (`list.with_allocator`, `Region`) and `try_push`, the
 resource attributes `@no_alloc`, `@no_block` and `@stack`, the runtime
 profiles (`full`, `single`, `freestanding`), targets and cross
-compilation, `panic = abort`, and binary size. Exercises: a safe wrapper
-over a C function, an allocation-free audio callback. Waits for foreign
-functions, allocators and the resource attributes.
+compilation, `panic = abort`, and binary size. Exercises: the layouts of
+`@repr(c)` structs, the order of bytes, an allocation-free audio
+callback, records from a device's bytes. Stage 0 runs the unsafe code,
+the raw pointers and C interop under `sisu run`; `sisu test` does not
+read unsafe code yet, so the exercises practise the safe side. The
+allocators (`list.with_allocator`, `Region`, `try_push`), header import,
+`--target` and the profiles other than `full` are designed, and the
+resource attributes compile without checking anything.
 
 **28. Code that lasts** ([written](tutorial/28-code-that-lasts.md)). Editions and the compatibility promise, `sisu
 fix --edition`, deprecation with `@fix_inline` and `sisu fix --deps`,
@@ -346,8 +372,12 @@ fix --edition`, deprecation with `@fix_inline` and `sisu fix --deps`,
 behavioural semver of `sisu publish`, `sisu review` and weakened
 specifications, `sisu why`, and planning with holes (`sisu check
 --holes`). Challenge V: migrate a small library across a breaking change
-without breaking its users. Waits for `sisu fix`, `why`, `review` and
-the registry.
+without breaking its users. Stage 0 has none of `sisu fix`, `why`,
+`review`, `publish`, `sisu check --holes` or the registry, and accepts
+`@deprecated`, `@fix_inline` and `@preview` without effect, so the
+chapter teaches compatibility through what the language already checks
+(defaults, keyword-only parameters, exhaustive matches over error sets,
+doc examples) and gives each tool a sentence.
 
 ## The guides
 
@@ -836,6 +866,7 @@ solutions and passing checks.
 | 10 | R4 (2, done), R5 (1.5, done), R8 (1.5, done), R14 (1.5, done), R20 (2, done), R21 (1, done), R22 (1, done); X1, X2, X4, X5, X8, X10, X12 (7, done) | done |
 | 11 | Chapters 23 (2, done), 24 (2, done), 25 (3, done), 26 (2, done); R11 (1, done), R12 (2, done); G17, G20, G21, G26, G27, G28, G29, G30, G31, G32 (7.5, done); X6, X7, X9, X13, X14 (5, done) | done |
 | 12 | When their features exist: chapters 27 (3, done) and 28 with challenge V (2, done); G18, G19, G22, G23, G24, G25 (4.5; G19 and G24 done); X11 (1, done); the site (3) | 13.5 |
+| 13 | The maintenance round: the writers' corrections to this plan and [STYLE.md](STYLE.md), links and anchors (`tools/check_links.py`), the diagnostics entries the pages lacked, the generator of R17 retired, the check of "Every code" against the catalog, `SUMMARY.md`, and the findings in one list by area | in progress: the corrections |
 | | Total | about 159 |
 
 The setup of R18, the generated library reference, belongs to step 12's
