@@ -43,7 +43,15 @@ enum Compiled:
 ## information naming the program's files relative to `comp_dir` and the
 ## standard library's in `std_dir` (when not empty).
 pub pure def compile(text: str, comp_dir: str, std_dir: str) -> list[int] ! ObjectError:
-    var r = LirReader.new()
+    return compile_spanned(text, [], comp_dir, std_dir)
+
+## `compile` of a text whose writer said where its functions are
+## (`gen.lower_spanned`): the pass skips their lines without reading them,
+## and each is read where it is compiled.
+pub pure def compile_spanned(
+    text: str, spans: list[(int, int, int)], comp_dir: str, std_dir: str
+) -> list[int] ! ObjectError:
+    var r = LirReader.spanned(spans)
     var o = Obj.new()
     var locals: set[String] = set()
     var sources: list[String] = []

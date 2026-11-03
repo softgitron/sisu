@@ -20,6 +20,7 @@
 ##! text between two (decision 334), the functions compiled on the workers
 ##! of `std.par`; `--times` prints on standard error how long each took.
 
+import std.par
 import stage1.sir.write
 import stage2.gen
 import stage2.lir
@@ -48,15 +49,30 @@ def emit(text: str):
 def usage() -> String:
     return "usage: sisu2 lir FILE.sir [--release] [--output FILE.lir]\n       sisu2 sir FILE.sir\n       sisu2 x86 FILE.lir --output FILE.o [--comp-dir DIR] [--std DIR]\n       sisu2 build FILE.sir --output FILE.o [--release] [--comp-dir DIR] [--std DIR] [--times]".to_string()
 
-## The bytes as `bytes`, each converted by a table of the 256 values.
+## The bytes as `bytes`, each converted by a table of the 256 values, in
+## pieces on the workers of `std.par`.
 pure def as_bytes(xs: list[int]) -> bytes:
     var table: list[u8] = []
     for k in range(256):
         table.push(k.to_u8() ?? 0u8)
+    var pieces: list[(int, int)] = []
+    var at = 0
+    while at < len(xs):
+        let end = min(at + 1048576, len(xs))
+        pieces.push((at, end))
+        at = end
+    let parts = par.map(pieces, (piece) -> narrow(xs, piece.0, piece.1, table))
     var out: list[u8] = []
-    for x in xs:
-        out.push(table[x & 255])
+    for part in own parts:
+        out.extend(part)
     return bytes.from_list(out)
+
+## The bytes of `xs` from `start` to `end`, narrowed by `table`.
+pure def narrow(xs: list[int], start: int, end: int, table: list[u8]) -> list[u8]:
+    var out: list[u8] = []
+    for i in range(start, end):
+        out.push(table[xs[i] & 255])
+    return out
 
 ## Nanoseconds as milliseconds, to a tenth.
 pure def millis(ns: int) -> String:
@@ -125,7 +141,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         return Ok(())
     var prog = read_prog
     gen.native_bodies(mut prog)
-    let lowered = gen.lower(prog, release)
+    let lowered = gen.lower_spanned(prog, release)
     let lowered_at = sys.clock.now().unix_nanos()
     if let Err(e) = lowered:
         match e:
@@ -137,11 +153,11 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             case LirError.Internal(what):
                 print_err("lir: internal error: {what}")
         return Err(Failed)
-    let Ok(lir_text) = lowered else:
+    let Ok((lir_text, spans)) = lowered else:
         return Err(Failed)
     if command == "build":
         # The LIR is compiled where it was lowered (decision 334).
-        let compiled = object.compile(lir_text, comp_dir, std_dir)
+        let compiled = object.compile_spanned(lir_text, spans, comp_dir, std_dir)
         let compiled_at = sys.clock.now().unix_nanos()
         if times:
             print_err("sisu2: lowered in {millis(lowered_at - start)} ms, compiled in {millis(compiled_at - lowered_at)} ms")

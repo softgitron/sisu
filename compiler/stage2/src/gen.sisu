@@ -90,6 +90,8 @@ pub struct FnOut:
     pub vars: int
     pub locals: list[DebugLocal]
     pub body: String
+    ## The body's lines.
+    pub lines: int
 
 ## An item of the LIR file: a line, or a function by its place in `funcs`.
 pub enum Item:
@@ -564,7 +566,14 @@ impl Cg:
             head.push(" source {s} line {l}")
         self.items.push(Item.Func(len(self.funcs)))
         self.funcs.push(
-            FnOut(head=head, slots=b.slots.copy(), vars=b.vars, locals=locals, body=b.out.copy())
+            FnOut(
+                head=head,
+                slots=b.slots.copy(),
+                vars=b.vars,
+                locals=locals,
+                body=b.out.copy(),
+                lines=b.lines,
+            )
         )
 
     ## Everything but `main`: the instances the entry reaches, the
@@ -893,8 +902,10 @@ impl Cg:
         self.define("main", "outside", "main", None, b, [])
         return Ok(())
 
-    ## The LIR file: the header, the items, the debug types and the counts.
-    pub pure def write_lir(mut self, p: Program) -> String:
+    ## The LIR file: the header, the items, the debug types and the counts;
+    ## and where each function is in it (`object.Span`, decision 334).
+    pub pure def write_lir(mut self, p: Program) -> (String, list[(int, int, int)]):
+        var spans: list[(int, int, int)] = []
         var out = String.new("lir 1\n")
         out.push(if self.release: "profile release\n" else: "profile debug\n")
         for i in range(len(p.sources)):
@@ -908,6 +919,7 @@ impl Cg:
                     out.push("\n")
                 case Item.Func(fi):
                     let f = ref self.funcs[fi]
+                    let start = out.byte_len()
                     out.push("function {f.head}\n")
                     for s in range(len(f.slots)):
                         out.push("    slot s{s} {f.slots[s]}\n")
@@ -924,17 +936,24 @@ impl Cg:
                         out.push("\n")
                     out.push(f.body)
                     out.push("end\n")
+                    spans.push((start, out.byte_len(), 3 + len(f.slots) + len(f.locals) + f.lines))
         out.push("types\n")
         out.push(self.debug_types())
         out.push(
             "stats {self.compiled} {self.statements} {self.index_checks} {self.index_proven} {self.overflow_checks} {self.overflow_proven} {self.tests_decided}\n"
         )
-        return out
+        return (out, spans)
 
 ## The LIR of a program: lowered with function values of one word of
 ## environment, and again with more when an `own` closure needs them
 ## (decision 224).
 pub pure def lower(p: Program, release: bool) -> String ! LirError:
+    let (text, _) = lower_spanned(p, release)?
+    return Ok(text)
+
+## The LIR of a program, and where each function is in it: the start of
+## its head's line, the end of its `end` line, and its lines.
+pub pure def lower_spanned(p: Program, release: bool) -> (String, list[(int, int, int)]) ! LirError:
     let entry = p.entry.copy() else:
         return unsupported("a program without `main`")
     var env_words = 1

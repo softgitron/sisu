@@ -240,10 +240,12 @@ pub(crate) fn build(code: Code<'_>, output: &Path, profile: Profile, host: &mut 
     // construct it does not lower is the program's `D0103`; nothing falls
     // back to the Rust lowering, which lowers only when it is asked for.
     if lowering() == Lowering::Stage2 {
-        let lir = lower_with_stage2(prog, profile, output, host)?;
+        // With the Sisu backend, lowered and compiled in one process
+        // (`sisu2 build`, decision 334).
         if backend_for(profile) == Backend::Sisu {
-            return build_with_sisu(&lir, &runtime, output, host);
+            return build_sir_with_sisu(prog, profile, &runtime, output, host);
         }
+        let lir = lower_with_stage2(prog, profile, output, host)?;
         let start = std::time::Instant::now();
         let compiled = sisu_codegen::compile_lir(&lir, &sources()).map_err(|e| report(e, output, host))?;
         return link(&compiled, start.elapsed(), &runtime, output, profile, host);
@@ -392,6 +394,123 @@ fn build_with_sisu(lir: &str, runtime: &Path, output: &Path, host: &mut dyn Host
         ));
     }
     linked
+}
+
+/// A SIR program lowered by stage 2 and compiled by its backend in one
+/// process (`sisu2 build`, decision 334), the object linked at `output`
+/// with the runtime. A construct stage 2 does not lower, or its backend
+/// does not compile, is the program's `D0103`; another failure an internal
+/// error, of the lowering (`D0122`) or of the backend (`D0125`).
+fn build_sir_with_sisu(
+    prog: &sisu_sir::Program,
+    profile: Profile,
+    runtime: &Path,
+    output: &Path,
+    host: &mut dyn Host,
+) -> Result<(), i32> {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static N: AtomicU32 = AtomicU32::new(0);
+    let stage2 = crate::front::Stage2::ready(host)?;
+    let dir = std::env::temp_dir().join(format!(
+        "sisu-build-{}-{}",
+        std::process::id(),
+        N.fetch_add(1, Ordering::Relaxed)
+    ));
+    let failed = |host: &mut dyn Host, id: msg::MsgId, status: i32, detail: String| {
+        host.stderr(&text(id, &[("status", status.to_string()), ("detail", detail)]));
+        EXIT_ICE
+    };
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        return Err(failed(host, msg::NATIVE_SISU_FAILED, 0, e.to_string()));
+    }
+    let (sir, obj) = (dir.join("program.sir"), dir.join("program.o"));
+    let start = std::time::Instant::now();
+    let result =
+        std::fs::write(&sir, sisu_sir::write::write(prog)).map_err(|e| e.to_string()).and_then(|()| {
+            let mut cmd = std::process::Command::new(&stage2.exe);
+            cmd.arg("build").arg(&sir).arg("--output").arg(&obj).arg("--times");
+            if profile == Profile::Release {
+                cmd.arg("--release");
+            }
+            // Where the line table says the sources are (decision 312).
+            let src = sources();
+            cmd.arg("--comp-dir").arg(&src.comp_dir);
+            if let Some(d) = &src.std_dir {
+                cmd.arg("--std").arg(d);
+            }
+            cmd.stdin(std::process::Stdio::null());
+            // Stage 2 is a native program: the runtime's variables are the
+            // program's being built, not its.
+            for v in crate::front::RUNTIME_VARS {
+                cmd.env_remove(v);
+            }
+            cmd.output().map_err(|e| e.to_string())
+        });
+    let mut times = (None, None);
+    let compiled = match result {
+        Ok(out) if out.status.success() => {
+            let err = String::from_utf8_lossy(&out.stderr);
+            times = stage2_times(&err);
+            std::fs::read(&obj).map_err(|e| failed(host, msg::NATIVE_SISU_FAILED, 0, e.to_string()))
+        }
+        Ok(out) => {
+            let err = String::from_utf8_lossy(&out.stderr).into_owned();
+            let missing = err
+                .lines()
+                .find_map(|l| l.strip_prefix("lir: not lowered: ").or_else(|| l.strip_prefix("x86: not compiled: ")));
+            match missing {
+                Some(what) => Err(not_lowered(what, output, host)),
+                None => {
+                    let status = out.status.code().unwrap_or(-1);
+                    let id = if err.contains("lir: internal error") {
+                        msg::NATIVE_STAGE2_FAILED
+                    } else {
+                        msg::NATIVE_SISU_FAILED
+                    };
+                    Err(failed(host, id, status, format!("{}{err}", String::from_utf8_lossy(&out.stdout))))
+                }
+            }
+        }
+        Err(e) => Err(failed(host, msg::NATIVE_SISU_FAILED, 0, e)),
+    };
+    let _ = std::fs::remove_dir_all(&dir);
+    let object = compiled?;
+    let generated = start.elapsed();
+    if let Some(dir) = output.parent()
+        && !dir.as_os_str().is_empty()
+    {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let start = std::time::Instant::now();
+    let linked = sisu_codegen::link(&object, runtime, output).map_err(|e| report(e, output, host));
+    if std::env::var_os("SISU_NATIVE_TIMES").is_some() {
+        // The process's time, the SIR written and the object read, is the
+        // two steps' as stage 2 measured them.
+        let (lowered, compiled) = match times {
+            (Some(l), Some(c)) => (l, c),
+            _ => (generated.as_secs_f64() * 1e3, 0.0),
+        };
+        host.stderr(&format!("native: lowered by stage 2 in {lowered:.1} ms\n"));
+        host.stderr(&format!(
+            "native: compiled by the Sisu backend in {compiled:.1} ms, linked in {:.1} ms\n",
+            start.elapsed().as_secs_f64() * 1e3
+        ));
+    }
+    linked
+}
+
+/// The times `sisu2 build --times` printed: `sisu2: lowered in L ms,
+/// compiled in C ms`.
+fn stage2_times(err: &str) -> (Option<f64>, Option<f64>) {
+    for line in err.lines() {
+        if let Some(rest) = line.strip_prefix("sisu2: lowered in ")
+            && let Some((l, c)) = rest.split_once(" ms, compiled in ")
+        {
+            let c = c.strip_suffix(" ms").unwrap_or(c);
+            return (l.trim().parse().ok(), c.trim().parse().ok());
+        }
+    }
+    (None, None)
 }
 
 /// Stage 2's `lir: not lowered: WHAT (in FUNCTION)`, or its backend's `x86:

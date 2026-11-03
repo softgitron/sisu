@@ -198,6 +198,7 @@ view struct Cur:
     s: str
     pos: int
     end: int
+    line_start: int
 
 ## Why a line could not be read.
 error LineError:
@@ -223,6 +224,10 @@ pure def is_word(b: int) -> bool:
     )
 
 impl Cur:
+    ## Where the line starts in the text.
+    pure def start(self) -> int:
+        return self.line_start
+
     pure def byte(self, i: int) -> int:
         return self.s.byte_at(i).to_int()
 
@@ -451,10 +456,24 @@ pub struct LirReader:
     data: int
     pub release: bool
     pub sigs: dict[String, Sig]
+    ## Where each function is in the text, when the text's writer said
+    ## (`gen.write_lir`): the start of its head's line, the end of its
+    ## `end` line and its lines, so that a lazy read skips the lines
+    ## without looking at them; and the next function's.
+    spans: list[(int, int, int)]
+    next_span: int
 
 impl LirReader:
     pub pure def new() -> LirReader:
-        return LirReader(pos=0, line_no=0, data=0, release=False, sigs={})
+        return LirReader(
+            pos=0, line_no=0, data=0, release=False, sigs={}, spans=[], next_span=0
+        )
+
+    ## A reader of a text whose functions are where `spans` says.
+    pub pure def spanned(spans: list[(int, int, int)]) -> LirReader:
+        var r = LirReader.new()
+        r.spans = spans.copy()
+        return r
 
     ## The next line of `text`, trimmed, or `None` at the end: its start
     ## and end.
@@ -491,7 +510,7 @@ impl LirReader:
         while True:
             let (s, e) = self.next_line(text) else:
                 return Ok(Item.End)
-            var c = Cur(s=text, pos=s, end=e)
+            var c = Cur(s=text, pos=s, end=e, line_start=s)
             match self.header_line(text, mut c, lazy):
                 case Ok(Some(item)):
                     return Ok(item)
@@ -570,7 +589,13 @@ impl LirReader:
             if lazy:
                 let start = self.pos
                 let line = self.line_no
-                self.skip_function(text)?
+                if self.next_span < len(self.spans) and self.spans[self.next_span].0 == c.start():
+                    let (_, end, lines) = self.spans[self.next_span]
+                    self.next_span += 1
+                    self.pos = end
+                    self.line_no += lines - 1
+                else:
+                    self.skip_function(text)?
                 return Ok(Some(Item.Lazy(FuncText(f=f, start=start, line=line))))
             return Ok(Some(Item.Function(self.function_lines(text, f)?)))
         if c.keyword("types") or c.keyword("stats") or c.keyword("type"):
@@ -621,7 +646,7 @@ impl LirReader:
         while True:
             let (s, e) = self.next_line(text) else:
                 return wrong("a function without its `end`")
-            var lc = Cur(s=text, pos=s, end=e)
+            var lc = Cur(s=text, pos=s, end=e, line_start=s)
             if lc.keyword("end"):
                 return Ok(g)
             function_line(self.sigs, mut lc, mut g)?
@@ -631,7 +656,7 @@ impl LirReader:
         while True:
             let (s, e) = self.next_line(text) else:
                 return wrong("a function without its `end`")
-            var lc = Cur(s=text, pos=s, end=e)
+            var lc = Cur(s=text, pos=s, end=e, line_start=s)
             if lc.keyword("end"):
                 return Ok(())
 
@@ -639,12 +664,14 @@ impl LirReader:
 ## the signatures the program declares: on any thread, since it reads only
 ## its own lines.
 pub pure def read_function(text: str, ft: FuncText, sigs: dict[String, Sig]) -> LirFunc ! LirReadError:
-    var r = LirReader(pos=ft.start, line_no=ft.line, data=0, release=False, sigs={})
+    var r = LirReader(
+        pos=ft.start, line_no=ft.line, data=0, release=False, sigs={}, spans=[], next_span=0
+    )
     var f = ft.f.copy()
     while True:
         let (s, e) = r.next_line(text) else:
             return Err(Bad(line=r.line_no, message="a function without its `end`".to_string()))
-        var lc = Cur(s=text, pos=s, end=e)
+        var lc = Cur(s=text, pos=s, end=e, line_start=s)
         if lc.keyword("end"):
             return Ok(f)
         if let Err(Wrong(message)) = function_line(sigs, mut lc, mut f):
