@@ -1,0 +1,122 @@
+##! `std.ffi` (proposal/22-unsafe.md, "The standard library's layer";
+##! 12, "Interop"): the C types a foreign declaration's signature is
+##! written in. The raw pointers it takes are `std.mem`'s (`ptr[T]`, `ptr
+##! mut T`, and their optional forms, C's nullable pointers).
+##!
+##! An `extern "C":` block declares foreign functions, each a function
+##! without a body whose call is an unsafe operation and lowers to the
+##! intrinsic `extern.c.NAME`: its signature is a claim the compiler cannot
+##! check, which the block's `# safety:` comment answers for. A declaration
+##! that can block for an unbounded time is `@blocking`.
+##!
+##! A C string crosses the boundary as a `CString`, which Sisu owns and
+##! foreign code reads, or a `CStr`, a view of one that foreign code owns.
+##!
+##! This module is stage 1's (`compiler/stage1/std/`), as `std.mem` is.
+
+from std.mem import as_ptr, bit_cast, ptr
+
+## C's `int` on the targets Sisu supports: 32 bits.
+pub type c_int = i32
+
+## C's `unsigned int`.
+pub type c_uint = u32
+
+## C's `long` on 64-bit Linux and macOS (LP64).
+pub type c_long = int
+
+## C's `unsigned long` on LP64 targets.
+pub type c_ulong = u64
+
+## C's `char`, which these targets sign.
+pub type c_char = i8
+
+## C's `unsigned char`.
+pub type c_uchar = u8
+
+## C's `size_t`.
+pub type c_size = u64
+
+## C's `ssize_t`.
+pub type c_ssize = int
+
+## C's `double`.
+pub type c_double = f64
+
+## C's `float`.
+pub type c_float = f32
+
+## Text that Sisu owns, kept with a NUL after it, for a foreign function
+## that reads a `const char *`: it holds no other NUL, which C would read as
+## its end.
+pub struct CString:
+    data: bytes
+
+impl CString:
+    ## `text` and a NUL; `None` when `text` holds a NUL itself.
+    pub pure def new(text: str) -> CString?:
+        var out: list[u8] = []
+        for b in text.bytes():
+            if b == 0u8:
+                return None
+            out.push(b)
+        out.push(0u8)
+        return Some(CString(data=bytes.from_list(out)))
+
+    ## The text's length in bytes, the NUL not counted.
+    pub pure def byte_len(self) -> int:
+        return len(self.data) - 1
+
+    ## The bytes, the NUL last.
+    pub pure def with_nul(self) -> Slice[u8]:
+        return self.data.as_slice()
+
+    ## The pointer a foreign function takes: valid while the `CString`
+    ## lives, which the caller's `# safety:` comment answers for.
+    pub pure def as_ptr(self) -> ptr[c_char]:
+        return as_ptr(self.data.as_slice()).cast[c_char]()
+
+## A C string that foreign code owns: the bytes at a pointer it gave out, up
+## to the first NUL, viewed in place. A view, so that it cannot outlive the
+## call that it came from.
+pub view struct CStr:
+    data: ptr[c_char]
+    len: int
+
+impl CStr:
+    ## The string at `p`, up to its first NUL.
+    ##
+    ## Safety:
+    ## - `terminated`: `p` points to bytes that a NUL ends, all of one
+    ##   allocation
+    ## - `stable`: they stay there, unchanged, while the view lives
+    pub pure unsafe def from_ptr(p: ptr[c_char]) -> CStr:
+        var n = 0
+        # safety: in_bounds, valid, aligned: this function's `terminated`: every
+        #   byte up to the NUL is in the string, and a c_char is aligned anywhere.
+        unsafe:
+            while p.offset(n).read() != 0i8:
+                n += 1
+        return CStr(data=p, len=n)
+
+    ## Its length in bytes, the NUL not counted.
+    pub pure def byte_len(self) -> int:
+        return self.len
+
+    ## A copy of its bytes, without the NUL.
+    pub pure def to_bytes(self) -> bytes:
+        var out: list[u8] = []
+        for i in range(self.len):
+            # safety: in_bounds, valid, aligned: `from_ptr`'s `terminated` and
+            #   `stable`: the len bytes from data are the string's, unchanged.
+            let c = unsafe self.data.offset(i).read()
+            out.push(bit_cast[u8, c_char](c))
+        return bytes.from_list(out)
+
+    ## Its text, when its bytes are UTF-8.
+    pub pure def to_text(self) -> String ! Utf8Error:
+        return self.to_bytes().decode()
+
+    ## The pointer, for a foreign call.
+    pub pure def as_ptr(self) -> ptr[c_char]:
+        return self.data

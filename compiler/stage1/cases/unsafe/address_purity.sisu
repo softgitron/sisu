@@ -1,0 +1,24 @@
+# Observing an address is not `pure` (22, "Raw pointers"; D-074): a `pure`
+# function that calls `addr` is refused, unless an `unsafe` block asserts,
+# under a `pure:` part of its comment, that nothing observable depends on
+# the address (RULES.md, R2).
+
+from std.mem import align_up, ptr
+
+pure def address_of(p: ptr[int]) -> int:
+    return p.addr()
+
+## The padding before the next 8-byte boundary: alignment arithmetic on an
+## aligned base, the one use of an address that `pure` code may make.
+pure def padding(p: ptr[int]) -> int:
+    # safety: pure: `p` points to an `int`, aligned to 8, so the result is 0 in
+    #   every run, whatever the address.
+    unsafe:
+        let a = p.addr()
+        return align_up(a, 8) - a
+
+def main():
+    var x = 1
+    let p = ptr.of(ref x)
+    print(address_of(p) > 0)
+    print(padding(p))

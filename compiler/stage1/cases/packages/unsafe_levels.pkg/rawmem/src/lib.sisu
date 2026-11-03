@@ -1,0 +1,6 @@
+## 1000 divided by `n`.
+##
+## Safety:
+## - `nonzero`: `n` is not zero
+pub pure unsafe def reciprocal_scaled(n: int) -> int:
+    return 1000 // n

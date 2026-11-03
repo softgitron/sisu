@@ -1,0 +1,842 @@
+##! `std.mem` (proposal/22-unsafe.md, "The standard library's layer";
+##! D-081): raw memory. Raw pointers (`ptr[T]`, `ptr mut T`), layouts,
+##! allocation and the `Allocator` trait with `Global` and the bump
+##! `Region`, the typed raw buffer `RawBuf[T, A]` that collections store
+##! their values in, and plain data with its safe reinterpretation.
+##!
+##! Making, copying and moving a raw pointer is safe; reading, writing and
+##! offsetting one are `unsafe def`s, whose callers discharge the
+##! obligations each one's `Safety:` list names in the `# safety:` comment
+##! of their `unsafe` block (22, "The audit and the lints"). The raw memory
+##! operations are `pure` (22, "Interaction with the rest of the
+##! language": in a `pure` function they write only memory it allocated or
+##! holds through `own` or `mut`); those that observe an address
+##! (`ptr.addr`) or make a pointer out of nothing (`ptr.from_address`) are
+##! not.
+##!
+##! Their bodies are intrinsics (`mem.*`), which the stage-0 interpreter
+##! and native backend do not implement yet: a program that calls one is
+##! checked and lowered by stage 1, and runs once the stage-0 round adds
+##! them (stage 1's README, "Unsafe code"). What runs today is the Sisu
+##! here: `Layout`, `align_up`, the bookkeeping of `Region` and `RawBuf`,
+##! and the checks of `@derive(Plain)`.
+##!
+##! This module is stage 1's: it lives in `compiler/stage1/std/`, since the
+##! frozen Rust front end parses neither `unsafe def` nor `unsafe trait` nor
+##! `unsafe impl`, and moves to `compiler/std/` when that front end is
+##! retired.
+
+# ------------------------------------------------------------------ raw pointers
+
+## A raw pointer to a `T`, through which the `T` may be read (22, "Raw
+## pointers"): never null (`ptr[T]?` is the nullable C pointer, with its
+## layout), with strict provenance (no integer becomes a pointer), `Copy`,
+## `Escapable` exactly when `T` is, and neither `Send` nor `Sync`, so that a
+## type holding one is not made thread-safe by inference. `ptr mut T` is
+## the pointer through which it may be written too, which becomes a
+## `ptr[T]` where one is expected.
+##
+## Making, copying, comparing and moving one is safe; using one is not.
+@builtin("ptr")
+pub struct ptr[T]:
+    pass
+
+## `ptr mut T`: the raw pointer through which a `T` may be read and
+## written. It is written `ptr mut T`, as `ref mut T` is.
+@builtin("ptr_mut")
+pub struct ptr_mut[T]:
+    pass
+
+impl[T] ptr[T]:
+    ## A pointer to `x`. The borrow ends at once, and the pointer may
+    ## outlive it: the ownership checker does not track raw pointers.
+    @intrinsic("mem.ptr.of")
+    pub pure def of(x: ref T) -> ptr[T]
+
+    ## A pointer through which `x` may be written.
+    @intrinsic("mem.ptr.of_mut")
+    pub pure def of_mut(mut x: T) -> ptr mut T
+
+    ## A pointer that is never read or written, aligned for `T`: the
+    ## pointer of an empty buffer.
+    @intrinsic("mem.ptr.dangling")
+    pub pure def dangling() -> ptr[T]
+
+    ## The pointer to the memory or the device at address `a`, which foreign
+    ## code or the hardware gave out: the one way from an address to a
+    ## pointer.
+    ##
+    ## Safety:
+    ## - `exposed`: `a` names memory or a device that foreign code or the
+    ##   hardware gave out, valid for what the pointer is used for
+    @intrinsic("mem.ptr.from_address")
+    pub unsafe def from_address(a: int) -> ptr[T]
+
+    ## The same address, as a pointer to a `U`.
+    @intrinsic("mem.ptr.cast")
+    pub pure def cast[U](self) -> ptr[U]
+
+    ## A pointer with the address `a` and this pointer's provenance: alignment
+    ## arithmetic without an integer-to-pointer cast.
+    @intrinsic("mem.ptr.with_addr")
+    pub pure def with_addr(self, a: int) -> ptr[T]
+
+    ## The address. Not `pure`: an address is different from run to run,
+    ## and `pure` code may not observe one (D-074).
+    @intrinsic("mem.ptr.addr")
+    pub def addr(self) -> int
+
+    ## The pointer `n` values of `T` further on.
+    ##
+    ## Safety:
+    ## - `in_bounds`: the result stays within the allocation this pointer
+    ##   points into, or one past its end
+    @intrinsic("mem.ptr.offset")
+    pub pure unsafe def offset(self, n: int) -> ptr[T]
+
+    ## The pointer, through which `T` may be written.
+    ##
+    ## Safety:
+    ## - `writable`: the pointer came from a `ptr mut T`, not from a shared
+    ##   borrow
+    @intrinsic("mem.ptr.cast_mut")
+    pub pure unsafe def cast_mut(self) -> ptr mut T
+
+    ## The `T` it points to, moved out when `T` is not `Copy`: the memory then
+    ## holds no value.
+    ##
+    ## Safety:
+    ## - `valid`: it points to a live, initialised `T`
+    ## - `aligned`: it is aligned for `T`
+    @intrinsic("mem.ptr.read")
+    pub pure unsafe def read(self) -> T
+
+    ## A reference to the `T` it points to, for the origin its use asks for.
+    ##
+    ## Safety:
+    ## - `valid`: it points to a live, initialised `T`
+    ## - `aligned`: it is aligned for `T`
+    ## - `valid_for_origin`: the memory stays valid, and nothing writes to it
+    ##   but through a `Cell`, for as long as the reference lives
+    @intrinsic("mem.ptr.as_ref")
+    pub pure unsafe def as_ref(self) -> ref T
+
+    ## A volatile read, which is never removed or merged: for the registers
+    ## of a device, on `freestanding` targets.
+    ##
+    ## Safety:
+    ## - `valid`: it points to a live, initialised `T`, or a device register
+    ## - `aligned`: it is aligned for `T`
+    @intrinsic("mem.ptr.read_volatile")
+    pub unsafe def read_volatile(self) -> T where T: Copy
+
+## The pointer to the first value `xs` views (an aligned pointer that is
+## never read for an empty one): safe, as making any pointer is. It stays
+## valid while the memory `xs` views lives and nothing moves it, which is
+## the obligation of whoever uses it.
+@intrinsic("mem.slice.as_ptr")
+pub pure def as_ptr[T](xs: Slice[T]) -> ptr[T]
+
+## A raw pointer prints as `ptr`, without its address: nothing observable
+## depends on an address (22, clause 6), and `Debug` is `pure`.
+impl[T] Debug for ptr[T]:
+    pure def fmt_debug(self, mut f: Formatter):
+        f.write("ptr")
+
+impl[T] Debug for ptr_mut[T]:
+    pure def fmt_debug(self, mut f: Formatter):
+        f.write("ptr mut")
+
+impl[T] ptr_mut[T]:
+    ## A pointer that is never read or written, aligned for `T`.
+    @intrinsic("mem.ptr.dangling")
+    pub pure def dangling() -> ptr mut T
+
+    ## The same pointer, through which `T` may only be read.
+    @intrinsic("mem.ptr.as_const")
+    pub pure def as_const(self) -> ptr[T]
+
+    ## The same address, as a pointer to a `U`.
+    @intrinsic("mem.ptr.cast")
+    pub pure def cast[U](self) -> ptr mut U
+
+    ## A pointer with the address `a` and this pointer's provenance.
+    @intrinsic("mem.ptr.with_addr")
+    pub pure def with_addr(self, a: int) -> ptr mut T
+
+    ## The address; not `pure` (D-074).
+    @intrinsic("mem.ptr.addr")
+    pub def addr(self) -> int
+
+    ## The pointer `n` values of `T` further on.
+    ##
+    ## Safety:
+    ## - `in_bounds`: the result stays within the allocation this pointer
+    ##   points into, or one past its end
+    @intrinsic("mem.ptr.offset")
+    pub pure unsafe def offset(self, n: int) -> ptr mut T
+
+    ## The `T` it points to, moved out when `T` is not `Copy`.
+    ##
+    ## Safety:
+    ## - `valid`: it points to a live, initialised `T`
+    ## - `aligned`: it is aligned for `T`
+    @intrinsic("mem.ptr.read")
+    pub pure unsafe def read(self) -> T
+
+    ## Puts `value` where it points, without dropping what was there: the
+    ## memory then holds `value`.
+    ##
+    ## Safety:
+    ## - `writable`: it points to memory this program may write, which holds
+    ##   no value that must be dropped first
+    ## - `aligned`: it is aligned for `T`
+    @intrinsic("mem.ptr.write")
+    pub pure unsafe def write(self, own value: T)
+
+    ## Runs the drop of the `T` it points to; the memory then holds no value.
+    ##
+    ## Safety:
+    ## - `valid`: it points to a live, initialised `T`, which nothing reads
+    ##   again
+    ## - `aligned`: it is aligned for `T`
+    @intrinsic("mem.ptr.drop_in_place")
+    pub unsafe def drop_in_place(self)
+
+    ## Copies `n` slots from `source` to here, as bits: each slot then holds
+    ## what the one it was copied from held, a value or none. Overlapping
+    ## ranges are copied as if through a buffer.
+    ##
+    ## Safety:
+    ## - `readable`: `source` points to `n` slots of `T` inside one live
+    ##   allocation
+    ## - `writable`: this points to `n` slots this program may write, which
+    ##   hold no value that must be dropped first
+    ## - `aligned`: both are aligned for `T`
+    ## - `moved`: unless `T` is `Copy`, a value copied is the copy's alone,
+    ##   and the slot it came from is not read or dropped again
+    @intrinsic("mem.ptr.copy_from")
+    pub pure unsafe def copy_from(self, source: ptr[T], n: int)
+
+    ## A reference to the `T` it points to.
+    ##
+    ## Safety:
+    ## - `valid`: it points to a live, initialised `T`
+    ## - `aligned`: it is aligned for `T`
+    ## - `valid_for_origin`: the memory stays valid, and nothing writes to it
+    ##   but through a `Cell`, for as long as the reference lives
+    @intrinsic("mem.ptr.as_ref")
+    pub pure unsafe def as_ref(self) -> ref T
+
+    ## A reference through which the `T` it points to may be changed.
+    ##
+    ## Safety:
+    ## - `valid`: it points to a live, initialised `T`
+    ## - `aligned`: it is aligned for `T`
+    ## - `valid_for_origin`: the memory stays valid, and nothing touches it
+    ##   but through this reference, for as long as the reference lives
+    @intrinsic("mem.ptr.as_mut")
+    pub pure unsafe def as_mut(self) -> ref mut T
+
+    ## A volatile write, which is never removed or merged.
+    ##
+    ## Safety:
+    ## - `writable`: it points to memory or a device register this program
+    ##   may write
+    ## - `aligned`: it is aligned for `T`
+    @intrinsic("mem.ptr.write_volatile")
+    pub unsafe def write_volatile(self, value: T) where T: Copy
+
+# ------------------------------------------------------------------ layouts
+
+## The size and alignment of a block of memory (22): what an allocator is
+## asked for.
+@derive(Eq, Copy, Debug)
+pub struct Layout:
+    ## Bytes.
+    pub size: int
+    ## A power of two.
+    pub align: int
+
+impl Layout:
+    ## The layout of one `T`.
+    pub pure def of[T]() -> Layout:
+        return Layout(size=size_of[T](), align=align_of[T]())
+
+    ## The layout of `n` values of `T` in a row; `None` when its size
+    ## overflows.
+    pub pure def array[T](n: int) -> Layout?:
+        if n < 0:
+            return None
+        let size = size_of[T]()
+        if size > 0 and n > 9223372036854775807 // size:
+            return None
+        return Some(Layout(size=size * n, align=align_of[T]()))
+
+    ## Whether the alignment is a power of two and the size not negative:
+    ## what every allocator may assume of a layout it is given.
+    pub pure def is_valid(self) -> bool:
+        return self.size >= 0 and self.align > 0 and self.align & (self.align - 1) == 0
+
+## The number of bytes a `T` takes, padding included.
+@intrinsic("mem.size_of")
+pub pure def size_of[T]() -> int
+
+## The alignment of a `T`, a power of two.
+@intrinsic("mem.align_of")
+pub pure def align_of[T]() -> int
+
+## `n` rounded up to a multiple of `align`, a power of two: the start of the
+## first block of that alignment at or after offset `n`.
+pub pure def align_up(n: int, align: int) -> int:
+    requires align > 0 and align & (align - 1) == 0
+    return (n + align - 1) & ~(align - 1)
+
+# ------------------------------------------------------------------ allocation
+
+## What a collection allocates from (D-060).
+##
+## Safety (for implementors):
+## - `valid_block`: `acquire` returns memory valid for reads and writes of
+##   `layout.size` bytes, aligned to `layout.align`, overlapping no live
+##   block
+## - `stable`: a block stays valid until it is released or the allocator
+##   ends
+## - `pure`: neither method has an effect that `pure` code can observe,
+##   other than the memory it hands out and takes back
+pub unsafe trait Allocator:
+    ## A block for `layout`, or `None` when there is no memory for it.
+    pure def acquire(self, layout: Layout) -> ptr mut u8?
+
+    ## Takes back a block.
+    ##
+    ## Safety:
+    ## - `from_here`: `block` came from `acquire` on this allocator with
+    ##   `layout`
+    ## - `once`: it is released once and not used after
+    pure unsafe def release(self, block: ptr mut u8, layout: Layout)
+
+## The allocator of the process: the C allocator in native code, the
+## interpreter's checked model when the interpreter runs the program.
+@derive(Copy)
+pub struct Global:
+    pass
+
+# safety: valid_block, stable: the C allocator's `malloc` and `free` give out
+#   disjoint blocks, aligned as `aligned_alloc` aligns them, which stay valid
+#   until freed; pure: a block's address is the one thing the program could
+#   observe, and `ptr.addr` is not `pure`.
+unsafe impl Allocator for Global:
+    @intrinsic("mem.global.acquire")
+    pure def acquire(self, layout: Layout) -> ptr mut u8?
+
+    @intrinsic("mem.global.release")
+    pure unsafe def release(self, block: ptr mut u8, layout: Layout)
+
+## A block of `layout` from the process's allocator, or `None` when there
+## is no memory for it. Safe: memory that nothing reads cannot hurt; it is
+## released through `Global.release`, which is not.
+pub pure def alloc_raw(layout: Layout) -> ptr mut u8?:
+    return Global().acquire(layout)
+
+## The alignment of a `Region`'s base.
+pub const REGION_ALIGN: int = 64
+
+## Memory handed out in order and released all at once (04, "Allocators";
+## D-060): a collection that allocates from a region is a view of it, so the
+## region outlives it.
+pub struct Region:
+    base: ptr mut u8
+    size: int
+    used: Cell[int]
+
+    ## A region of `capacity` bytes.
+    pub pure def bump(capacity: int) -> Region:
+        let layout = Layout(size=capacity, align=REGION_ALIGN)
+        let base = Global().acquire(layout) else:
+            panic("out of memory")
+        return Region(base=base, size=capacity, used=Cell(0))
+
+    ## The bytes handed out so far, padding included.
+    pub pure def in_use(self) -> int:
+        return self.used.get()
+
+    ## Empties the region. Needs `mut`, which the checker grants only when no
+    ## collection still uses the region.
+    pub def reset(mut self):
+        self.used.set(0)
+
+# safety: valid_block: blocks are disjoint, since `used` only grows until
+#   `reset`, which needs `mut self`; they are aligned, since `base` is aligned
+#   to REGION_ALIGN and every offset is rounded up to `layout.align`, at most
+#   REGION_ALIGN, so the padding depends on `used` and never on an address.
+#   stable: blocks stay valid until the region ends or is reset, which cannot
+#   happen while a collection allocated in it is alive.
+unsafe impl Allocator for Region:
+    pure def acquire(self, layout: Layout) -> ptr mut u8?:
+        if layout.align > REGION_ALIGN or not layout.is_valid():
+            return None
+        let start = align_up(self.used.get(), layout.align)
+        if start + layout.size > self.size:
+            return None
+        # safety: in_bounds: start + layout.size <= size, so the block lies
+        #   inside the region; pure: the counter changes only what later calls
+        #   return, and that depends on the sizes asked for, never on an
+        #   address, so the same calls give the same results.
+        unsafe:
+            self.used.set(start + layout.size)
+            return Some(self.base.offset(start))
+
+    pure unsafe def release(self, block: ptr mut u8, layout: Layout):
+        pass
+
+impl Drop for Region:
+    pure def drop(mut self):
+        # safety: from_here, once: base came from Global.acquire with this
+        #   layout, and the region ends here, after every collection that
+        #   borrowed it.
+        unsafe Global().release(self.base, Layout(size=self.size, align=REGION_ALIGN))
+
+# ------------------------------------------------------------------ the raw buffer
+
+## Room for `capacity()` values of `T` in a row, from the allocator `A`:
+## the building block of every collection that stores values in place (22,
+## "The standard library's layer"). Which slots hold values is its owner's
+## to know: a slot is safe to reach (`slot`, bounds-checked against the
+## capacity), and only reading, writing, referring to and dropping values
+## are `unsafe`, whose obligations say which slots hold one. Dropping a
+## `RawBuf` releases its memory without touching any slot.
+##
+## A `RawBuf[T, A]` is `Send` when `T` and `A` are and `Sync` when they are,
+## so a collection built on one gets the right auto traits from it.
+pub struct RawBuf[T, A: Allocator = Global]:
+    data: ptr mut T
+    cap: int
+    alloc: A
+
+    ## Room for `capacity` values, from `alloc`.
+    pub pure def with_capacity_in(capacity: int, own alloc: A) -> RawBuf[T, A]:
+        if capacity == 0 or size_of[T]() == 0:
+            return RawBuf(data=ptr_mut.dangling(), cap=capacity, alloc=alloc)
+        let layout = Layout.array[T](capacity) else:
+            panic("a buffer of {capacity} values is too large")
+        let block = alloc.acquire(layout) else:
+            panic("out of memory for a buffer of {capacity} values")
+        return RawBuf(data=block.cast[T](), cap=capacity, alloc=alloc)
+
+    ## How many values it has room for.
+    pub pure def capacity(self) -> int:
+        return self.cap
+
+    ## Room for `capacity` values, which panics when that is less than
+    ## `capacity()`. Each slot keeps what it holds, a value or none: the
+    ## slots move to new memory as bits, so what the owner knows of which
+    ## slots hold values stays true, and the old memory is released.
+    pub pure def grow(mut self, capacity: int):
+        if capacity < self.cap:
+            panic("a buffer of {self.cap} values cannot grow to {capacity}")
+        if capacity == self.cap or size_of[T]() == 0:
+            self.cap = capacity
+            return
+        let layout = Layout.array[T](capacity) else:
+            panic("a buffer of {capacity} values is too large")
+        let block = self.alloc.acquire(layout) else:
+            panic("out of memory for a buffer of {capacity} values")
+        let data = block.cast[T]()
+        if self.cap > 0:
+            let old = Layout.array[T](self.cap) ?? Layout(size=0, align=1)
+            # safety: readable, writable, aligned: the old block has cap slots
+            #   and the new one more, both this buffer's and aligned for T;
+            #   moved: the old block is released next and never read again.
+            #   from_here, once: it came from acquire on alloc with its layout,
+            #   and the buffer points to the new block from here on.
+            unsafe:
+                data.copy_from(self.data.as_const(), self.cap)
+                self.alloc.release(self.data.cast[u8](), old)
+        self.data = data
+        self.cap = capacity
+
+    ## A pointer to slot `i`, which panics outside the buffer: safe, since
+    ## nothing is read or written.
+    pub pure def slot(self, i: int) -> ptr mut T:
+        if i < 0 or i >= self.cap:
+            panic("slot {i} of a buffer of {self.cap}")
+        # safety: in_bounds: 0 <= i < cap, and the buffer has cap slots.
+        return unsafe self.data.offset(i)
+
+    ## The value in slot `i`, moved out: the slot then holds none.
+    ##
+    ## Safety:
+    ## - `initialised`: slot `i` holds a value
+    pub pure unsafe def read(self, i: int) -> T:
+        # safety: valid, aligned: the caller's `initialised`; the slot is the
+        #   buffer's, aligned as its allocation.
+        return unsafe self.slot(i).read()
+
+    ## Puts `value` in slot `i`.
+    ##
+    ## Safety:
+    ## - `uninitialised`: slot `i` holds no value, so none is left undropped
+    pub pure unsafe def write(mut self, i: int, own value: T):
+        # safety: writable, aligned: the buffer's own memory, and the caller's
+        #   `uninitialised`.
+        unsafe self.slot(i).write(value)
+
+    ## A reference to the value in slot `i`, tied to the buffer.
+    ##
+    ## Safety:
+    ## - `initialised`: slot `i` holds a value, which stays there while the
+    ##   reference lives
+    pub pure unsafe def get(self, i: int) -> ref T:
+        # safety: valid, aligned, valid_for_origin: the caller's `initialised`;
+        #   the buffer's memory lives as long as the borrow of the buffer.
+        return unsafe self.slot(i).as_ref()
+
+    ## Drops the values in slots `lo` to `hi`, not including `hi`.
+    ##
+    ## Safety:
+    ## - `initialised`: each of those slots holds a value, which nothing reads
+    ##   again
+    pub unsafe def drop_range(mut self, lo: int, hi: int):
+        var i = lo
+        while i < hi:
+            # safety: valid, aligned: the caller's `initialised`.
+            unsafe self.slot(i).drop_in_place()
+            i += 1
+
+impl[T] RawBuf[T, Global]:
+    ## Room for `capacity` values, from the process's allocator.
+    pub pure def with_capacity(capacity: int) -> RawBuf[T, Global]:
+        return RawBuf.with_capacity_in(capacity, Global())
+
+## Releases the memory without touching a slot: dropping the values is the
+## owner's (`drop_range`). `pure`, so that `pure` code can drop a collection
+## built on a `RawBuf`, since releasing is.
+impl[T, A: Allocator] Drop for RawBuf[T, A]:
+    pure def drop(mut self):
+        if self.cap == 0 or size_of[T]() == 0:
+            return
+        let layout = Layout.array[T](self.cap) ?? Layout(size=0, align=1)
+        # safety: from_here, once: data came from acquire on alloc with this
+        #   layout, in with_capacity_in, and the buffer ends here.
+        unsafe self.alloc.release(self.data.cast[u8](), layout)
+
+# safety: a RawBuf owns the values in its slots, so moving it to another task
+#   moves them, which is sound exactly when T is Send; the allocator moves
+#   with it.
+unsafe impl[T: Send, A: Allocator + Send] Send for RawBuf[T, A]:
+    pass
+
+# safety: a shared RawBuf gives out only shared references to its values,
+#   which is sound exactly when T is Sync; the allocator is shared with it.
+unsafe impl[T: Sync, A: Allocator + Sync] Sync for RawBuf[T, A]:
+    pass
+
+# ------------------------------------------------------------------ plain data
+
+## A type whose every bit pattern is a valid value (22, "Plain data and
+## reinterpretation"), so that its bytes can be read and written safely:
+## the integers, the floats, and the `Copy` structs whose fields are plain,
+## which `@derive(Plain)` checks. `bool`, `char`, enums, references and raw
+## pointers are not: a byte of 2 is no `bool`, and a pointer rebuilt from
+## bytes has no provenance.
+pub trait Plain(Copy):
+    ## The bytes of the value's representation: its fields' together, since
+    ## a plain type has no padding.
+    pure def plain_size(self) -> int
+
+    ## The derived impl: a struct, `@repr(c)` or of a single field, whose
+    ## fields are plain (each one's `plain_size` is asked for, so a field
+    ## that is not plain stops the derive).
+    comptime def derive(T: type) -> impl Plain for T:
+        return impl Plain for T:
+            pure def plain_size(self) -> int:
+                if comptime reflect.is_struct(T):
+                    if comptime len(reflect.fields_of(T)) != 1
+                            and len([a for a in reflect.attributes_of(T) if a.name == "repr"]) == 0:
+                        comptime panic(
+                            "`{reflect.name_of(T)}` has no `@repr(c)`: the order of its fields, and so its bytes, are the compiler's to choose"
+                        )
+                    var n = 0
+                    comptime for field in reflect.fields_of(T):
+                        n += self.[field].plain_size()
+                    return n
+                else:
+                    comptime panic(
+                        "`{reflect.name_of(T)}` is an enum: a tag that names no variant is a bit pattern no value has"
+                    )
+
+impl Plain for int:
+    pure def plain_size(self) -> int:
+        return 8
+
+impl Plain for f64:
+    pure def plain_size(self) -> int:
+        return 8
+
+impl Plain for f32:
+    pure def plain_size(self) -> int:
+        return 4
+
+impl Plain for u8:
+    pure def plain_size(self) -> int:
+        return 1
+
+impl Plain for u16:
+    pure def plain_size(self) -> int:
+        return 2
+
+impl Plain for u32:
+    pure def plain_size(self) -> int:
+        return 4
+
+impl Plain for u64:
+    pure def plain_size(self) -> int:
+        return 8
+
+impl Plain for u128:
+    pure def plain_size(self) -> int:
+        return 16
+
+impl Plain for i8:
+    pure def plain_size(self) -> int:
+        return 1
+
+impl Plain for i16:
+    pure def plain_size(self) -> int:
+        return 2
+
+impl Plain for i32:
+    pure def plain_size(self) -> int:
+        return 4
+
+impl Plain for i128:
+    pure def plain_size(self) -> int:
+        return 16
+
+impl[T: Plain, const N: int] Plain for Array[T, N]:
+    pure def plain_size(self) -> int:
+        if N == 0:
+            return 0
+        return N * self[0].plain_size()
+
+## `x`'s bits as a `U` of the same size: safe between plain types, since
+## every bit pattern of `U` is a `U`.
+@intrinsic("mem.bit_cast")
+pub pure def bit_cast[U: Plain, T: Plain](x: T) -> U
+
+## The bytes of a plain value, in the target's byte order.
+@intrinsic("mem.as_bytes")
+pub pure def as_bytes[T: Plain](x: T) -> bytes
+
+## The plain value whose bytes start at `at` of `data`, at any alignment;
+## panics when `data` is too short.
+@intrinsic("mem.read_plain")
+pub pure def read_plain[T: Plain](data: bytes, at: int) -> T
+
+## The plain value that the first bytes of `data` are, in place, without a
+## copy: `None` when `data` is shorter than a `T` or its start is not
+## aligned for one. The view is tied to `data`.
+@intrinsic("mem.view_plain")
+pub pure def view_plain[T: Plain](data: bytes) -> ref T?
+
+## `x`'s bits as a `U` of the same size, for types that are not plain: a
+## `U` rebuilt from bits.
+##
+## Safety:
+## - `valid_bits`: the bits of `x` are a valid `U`: a `bool` of 0 or 1, a
+##   `char` that is a scalar value, an enum's tag that names a variant, a
+##   pointer with the provenance it needs
+@intrinsic("mem.transmute")
+pub pure unsafe def transmute[U, T](own x: T) -> U
+
+## A view of `len` values starting at `data`, tied to the parameter whose
+## memory it is (22, "Raw pointers": its origin is the one its use asks
+## for).
+##
+## Safety:
+## - `valid`: `data` points to `len` initialised values of `T`
+## - `valid_for_origin`: they stay there, and nothing changes them, for as
+##   long as the view lives
+@intrinsic("mem.slice_from_raw")
+pub pure unsafe def slice_from_raw[T](data: ptr[T], len: int) -> Slice[T]
+
+# ------------------------------------------------------------------ values by their parts
+
+# The runtime's work by type, as generic code (22, "How the runtime in Sisu
+# uses it"; D-086): what `sisu-rt` does by walking a type table, a value's
+# structural hash, equality and copy, done by compile-time reflection, which
+# writes one function per type as the compiler writes drop glue per type.
+# They are the first slice of the runtime in Sisu, and need no machine:
+# stage 1's cases check them against the interpreter's answers. Reflection
+# takes no tuple or array apart, so neither is handled yet.
+
+## Mixes the parts of `value` into `h` in the order of the structural hash
+## (stage 1's docs/architecture.md, decision 256), each as `Hasher.write_int`
+## mixes an `int`: an integer of up to 64 bits as itself, a `char` as its
+## code, a `bool` as 0 or 1, a float as its bits; a text's or `bytes`' length
+## in bytes, then each byte; a list's length, then its values; a struct's
+## fields in order; an enum's variant index, then its fields; `()` as
+## nothing. So a value hashes as its derived or the prelude's `Hash` hashes
+## it, and as `dict` and `set` hash their keys.
+pub pure def structural_hash[T](value: T, mut h: Hasher):
+    if comptime reflect.is_int(T):
+        h.write_int(value)
+    elif comptime reflect.is_bool(T):
+        h.write_int(if value: 1 else: 0)
+    elif comptime reflect.is_char(T):
+        h.write_int(value.code())
+    elif comptime reflect.is_float(T):
+        h.write_int(f64_bits(value))
+    elif comptime reflect.is_str(T):
+        h.write_int(value.byte_len())
+        for b in value.bytes():
+            h.write_int(b.to_int())
+    elif comptime reflect.is_list(T):
+        h.write_int(len(value))
+        for x in value:
+            structural_hash(x, mut h)
+    elif comptime reflect.is_option(T):
+        match value:
+            case Some(x):
+                h.write_int(0)
+                structural_hash(x, mut h)
+            case None:
+                h.write_int(1)
+    elif comptime reflect.is_struct(T):
+        comptime for f in reflect.fields_of(T):
+            structural_hash(value.[f], mut h)
+    elif comptime reflect.is_enum(T):
+        match value:
+            comptime for V in reflect.variants_of(T):
+                case V(..):
+                    h.write_int(V.index)
+                    comptime for f in V.fields:
+                        structural_hash(value.[f], mut h)
+    elif comptime reflect.name_of(T) == "u8"
+            or reflect.name_of(T) == "u16"
+            or reflect.name_of(T) == "u32":
+        h.write_int(value.to_int())
+    elif comptime reflect.name_of(T) == "i8"
+            or reflect.name_of(T) == "i16"
+            or reflect.name_of(T) == "i32":
+        h.write_int(value.to_int())
+    elif comptime reflect.name_of(T) == "u64":
+        h.write_int(u64_word(value))
+    elif comptime reflect.name_of(T) == "f32":
+        h.write_int(value.to_bits().to_int())
+    elif comptime reflect.name_of(T) == "bytes":
+        h.write_int(len(value))
+        for b in value.iter():
+            h.write_int(b.to_int())
+    elif comptime reflect.name_of(T) == "()":
+        pass
+    else:
+        comptime panic(
+            "`{reflect.name_of(T)}` has no structural hash that reflection can take apart"
+        )
+
+## Whether `a` and `b` are equal part by part: the same variant, and each
+## field, value or byte equal, as the derived and the prelude's `Eq` compare
+## them; the parts that have no parts compare as `==` does.
+pub pure def structural_eq[T](a: T, b: T) -> bool:
+    if comptime reflect.is_list(T):
+        if len(a) != len(b):
+            return False
+        for i in range(len(a)):
+            if not structural_eq(a[i], b[i]):
+                return False
+        return True
+    elif comptime reflect.is_option(T):
+        match a:
+            case Some(x):
+                if let Some(y) = b:
+                    return structural_eq(x, y)
+                return False
+            case None:
+                return b.is_none()
+    elif comptime reflect.is_struct(T):
+        comptime for f in reflect.fields_of(T):
+            if not structural_eq(a.[f], b.[f]):
+                return False
+        return True
+    elif comptime reflect.is_enum(T):
+        match a:
+            comptime for V in reflect.variants_of(T):
+                case V(..):
+                    match b:
+                        case V(..):
+                            comptime for f in V.fields:
+                                if not structural_eq(a.[f], b.[f]):
+                                    return False
+                            return True
+                        comptime if len(reflect.variants_of(T)) > 1:
+                            case _:
+                                return False
+    else:
+        return a == b
+
+## A copy of `value` that owns its parts anew: a struct built again from
+## copies of its fields, a list of copies of its values, an option of a copy
+## of its value; a part that has no parts is copied as `.copy()` copies it
+## (an enum, which reflection does not build, as a whole). A plain value is
+## its bits again.
+pub pure def structural_copy[T](value: T) -> T:
+    if comptime reflect.is_list(T):
+        return [structural_copy(x) for x in value]
+    elif comptime reflect.is_option(T):
+        return match value:
+            case Some(x): Some(structural_copy(x))
+            case None: None
+    elif comptime reflect.is_struct(T):
+        return reflect.construct(
+            T, {f.name: structural_copy(value.[f]) for f in reflect.fields_of(T)}
+        )
+    else:
+        return value.copy()
+
+## Drops `value` here rather than where its owner's scope ends: its own
+## `Drop` first, then its parts in order. The compiler writes that order per
+## type as drop glue in SIR (22: "drop glue is SIR already"), so the runtime
+## needs no code of its own for it, and a plain value has nothing to drop.
+pub def drop[T](own value: T):
+    pass
+
+## The 64 bits of `x` as IEEE 754 lays them out, as an `int` in two's
+## complement, worked out from its value: the sign, then the exponent and
+## the fraction by scaling with two, which is exact. A NaN gives the quiet
+## NaN `0x7ff8000000000000`, whatever its sign and payload.
+pub pure def f64_bits(x: f64) -> int:
+    if x.is_nan():
+        return 9221120237041090560
+    var a = x
+    var negative = False
+    if x < 0.0 or (x == 0.0 and 1.0 / x < 0.0):
+        negative = True
+        a = -x
+    var bits = 0
+    if a > 1.7976931348623157e308:
+        bits = 2047 << 52
+    elif a > 0.0:
+        var e = 0
+        var m = a
+        while m >= 2.0:
+            m = m / 2.0
+            e += 1
+        while m < 1.0 and e > -1022:
+            m = m * 2.0
+            e -= 1
+        if m < 1.0:
+            bits = (m * 4503599627370496.0).truncate_to_int()
+        else:
+            bits = ((e + 1023) << 52) + ((m - 1.0) * 4503599627370496.0).truncate_to_int()
+    if negative:
+        return bits + (-9223372036854775807 - 1)
+    return bits
+
+## A `u64` as the `int` with the same 64 bits.
+pure def u64_word(n: u64) -> int:
+    if let Some(i) = n.to_int():
+        return i
+    let low = (n - 9223372036854775808u64).to_int() ?? 0
+    return low + (-9223372036854775807 - 1)

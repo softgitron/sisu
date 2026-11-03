@@ -460,6 +460,10 @@ pub struct TBody:
     pub exprs: list[TExpr]
     pub blocks: list[TBlock]
     pub pats: list[TPat]
+    ## The `unsafe` blocks of a `pure` function that assert the impure calls
+    ## inside keep it pure (D-085), which lowering hands the ownership
+    ## checker's purity check.
+    pub asserted: list[TextRange]
 
 impl TBody:
     pub pure def expr(self, e: TExprId) -> ref TExpr:

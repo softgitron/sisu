@@ -1,0 +1,107 @@
+# What 22 refuses (RULES.md, R2): an unsafe operation outside an `unsafe:`
+# block or an `unsafe` expression (a call of an `unsafe def`, of a method
+# that is one, of a trait's, of a foreign function), an `unsafe def` or a
+# foreign function as a value, an `unsafe trait` implemented without
+# `unsafe impl`, an `unsafe impl` that promises nothing or asserts what is
+# never asserted, an impl's method whose `unsafe` differs from the trait's,
+# and `unsafe` in a contract. The body of an `unsafe def` is no unsafe
+# context.
+
+## The quotient, without the check of the divisor.
+##
+## Safety:
+## - `nonzero`: `b` is not zero
+## - `exact`: `b` divides `a`
+pure unsafe def divide(a: int, b: int) -> int:
+    return a // b
+
+## Halves an even number.
+##
+## Safety:
+## - `even`: `n` is even
+unsafe def halve(n: int) -> int:
+    return divide(n, 2)
+
+struct Meter:
+    reading: int
+
+    ## The reading, without the check that it was taken.
+    ##
+    ## Safety:
+    ## - `taken`: the meter was read
+    unsafe def value(self) -> int:
+        return self.reading
+
+## A token whose implementors promise to give out each one once.
+##
+## Safety (for implementors):
+## - `once`: no token is given out twice
+unsafe trait Tokens:
+    ## The next token.
+    ##
+    ## Safety:
+    ## - `started`: `start` was called
+    unsafe def take(mut self) -> int
+
+    def start(mut self)
+
+struct Ticket:
+    n: int
+
+impl Tokens for Ticket:
+    def take(mut self) -> int:
+        self.n += 1
+        return self.n
+
+    def start(mut self):
+        self.n = 0
+
+struct Plain:
+    x: int
+
+# safety: Display promises nothing.
+unsafe impl Display for Plain:
+    pure def fmt(self, mut f: Formatter):
+        f.write("plain")
+
+# safety: nothing to promise.
+unsafe impl Plain:
+    def get(self) -> int:
+        return self.x
+
+# safety: a Plain is a number.
+unsafe impl Copy for Plain:
+    pass
+
+struct View:
+    x: int
+
+# safety: a View holds no reference.
+unsafe impl Escapable for View:
+    pass
+
+# safety: getpid takes nothing and cannot fail.
+extern "C":
+    def getpid() -> c_int
+
+type c_int = i32
+
+def needs_positive(n: int) -> int:
+    # safety: nonzero, exact: 1 is not zero and divides every number.
+    requires unsafe divide(n, 1) > 0
+    return n
+
+def use[T: Tokens](mut t: T) -> int:
+    t.start()
+    return t.take()
+
+def main():
+    print(divide(6, 3))
+    let m = Meter(reading=3)
+    print(m.value())
+    print(getpid())
+    let f = divide
+    let g = getpid
+    print(f(4, 2) + g())
+    var t = Ticket(n=0)
+    print(use(mut t))

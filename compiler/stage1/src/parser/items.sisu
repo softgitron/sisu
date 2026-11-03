@@ -6,14 +6,16 @@
 ##!              | impl_def | trait_def | import | from_import | test_def | suite_def
 ##!              | bench_def | const_def | type_alias | extern_block)
 ##! attribute := '@' name ('(' args ')')? NEWLINE
-##! fn_def    := ('pure' | 'comptime')? 'def' name generic_params? params ('->' type)?
-##!              where_clause? (':' block | NEWLINE)
+##! fn_def    := ('pure' | 'comptime')? 'unsafe'? 'def' name generic_params? params
+##!              ('->' type)? where_clause? (':' block | NEWLINE)
 ##! struct_def:= 'view'? 'struct' name generic_params? ':' INDENT (field | fn_def | 'pass')+ DEDENT
 ##! field     := visibility? name ':' type ('=' expr)? NEWLINE
 ##! enum_def  := 'enum' name generic_params? ':' INDENT (variant | fn_def)+ DEDENT
 ##! error_def := 'error' name ':' INDENT (variant | '..' NEWLINE)+ DEDENT
 ##! variant   := name ('(' (name ':')? type (',' (name ':')? type)* ')')? NEWLINE
-##! impl_def  := 'impl' generic_params? type ('for' type)? ':' INDENT fn_def+ DEDENT
+##! impl_def  := 'unsafe'? 'impl' generic_params? type ('for' type)? ':' INDENT fn_def+ DEDENT
+##! trait_def := 'unsafe'? 'trait' name generic_params? ('(' type (',' type)* ')')? ':'
+##!              INDENT fn_def+ DEDENT
 ##! import    := 'import' path ('as' name)? NEWLINE
 ##! from_import := 'from' path 'import' name ('as' name)? (',' name ('as' name)?)* NEWLINE
 ##! test_def  := 'test' string ('for' patterns 'in' expr)? params? ':' block
@@ -88,10 +90,16 @@ impl Parser:
                 return True
             case ComptimeKw:
                 return self.nth(1) == SyntaxKind.DefKw
+            # `unsafe def`, `unsafe trait` and `unsafe impl` (22); `unsafe:`
+            # and `unsafe e` are statements.
+            case UnsafeKw:
+                return match self.nth(1):
+                    case DefKw | TraitKw | ImplKw: True
+                    case _: False
             case Ident:
                 let word = self.current_text()
                 if word == "pure":
-                    return self.nth(1) == SyntaxKind.DefKw
+                    return self.nth(1) == SyntaxKind.DefKw or self.at_pure_unsafe_def()
                 return (word == "suite" or word == "bench")
                     and self.nth(1) == SyntaxKind.StringStart
             case _:
@@ -129,6 +137,14 @@ impl Parser:
                 self.fn_def(cp)
             case Ident if self.current_text() == "pure" and self.nth(1) == SyntaxKind.DefKw:
                 self.fn_def(cp)
+            case Ident if self.current_text() == "pure" and self.at_pure_unsafe_def():
+                self.fn_def(cp)
+            case UnsafeKw if self.nth(1) == SyntaxKind.DefKw:
+                self.fn_def(cp)
+            case UnsafeKw if self.nth(1) == SyntaxKind.TraitKw:
+                self.trait_def(cp)
+            case UnsafeKw if self.nth(1) == SyntaxKind.ImplKw:
+                self.impl_def(cp)
             case StructKw | ViewKw:
                 self.struct_def(cp)
             case EnumKw:
@@ -159,6 +175,10 @@ impl Parser:
                 return False
         return True
 
+    ## `pure unsafe def` (22: `unsafe` combines with `pure`).
+    pure def at_pure_unsafe_def(self) -> bool:
+        return self.nth(1) == SyntaxKind.UnsafeKw and self.nth(2) == SyntaxKind.DefKw
+
     pure def attribute(mut self):
         self.start(SyntaxKind.Attribute)
         self.bump()
@@ -188,6 +208,9 @@ impl Parser:
         let attempts = self.attempts
         let (header_start, _) = self.current_range()
         if self.at_contextual("pure") or self.at(SyntaxKind.ComptimeKw):
+            self.bump()
+        # `unsafe def`: callers take an obligation (22).
+        if self.at(SyntaxKind.UnsafeKw):
             self.bump()
         _ = self.expect(SyntaxKind.DefKw)
         _ = self.expect_name()
@@ -461,6 +484,8 @@ impl Parser:
     pub(package) pure def impl_def(mut self, cp: int):
         self.start_at(cp, SyntaxKind.ImplDef)
         let line = self.current_line()
+        # `unsafe impl`: the implementor keeps an `unsafe trait`'s promise (22).
+        _ = self.eat(SyntaxKind.UnsafeKw)
         self.bump()
         if self.at(SyntaxKind.LBracket):
             self.generic_params()
@@ -488,6 +513,8 @@ impl Parser:
     pure def trait_def(mut self, cp: int):
         self.start_at(cp, SyntaxKind.TraitDef)
         let line = self.current_line()
+        # `unsafe trait`: its implementors take an obligation (22).
+        _ = self.eat(SyntaxKind.UnsafeKw)
         self.bump()
         _ = self.expect_name()
         if self.at(SyntaxKind.LBracket):

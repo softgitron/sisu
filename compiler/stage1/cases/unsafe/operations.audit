@@ -1,0 +1,10 @@
+operations.sisu   no `unsafe`   a program of one file, which declares no level
+  operations.sisu (operations.sisu)   3 blocks, 1 unsafe def, 1 unsafe trait, 2 unsafe impls, module hash 59af4e7e44a8ebd1
+    operations.sisu:14   unsafe def digit   Safety: `in_range`
+    operations.sisu:24   unsafe trait Distinct   Safety: `distinct`
+    operations.sisu:31   unsafe impl Distinct for Counter   # safety: distinct: n only grows, by one each call.
+    operations.sisu:50   unsafe impl Send for Mailbox   # safety: a Mailbox is moved to one task at a time, and its Cell is reached only through the Mailbox, so no tw...
+    operations.sisu:64   unsafe block in doubled   # safety: pure: the count is read only by `hits_of`, which is not pure, so no pure code can tell how often thi...
+    operations.sisu:73   unsafe block in main   # safety: in_range: 4096 has four digits, and 0 to 3 are less than four.
+    operations.sisu:77   unsafe expression in main   # safety: in_range: 7 has one digit.
+std (toolchain)   unsafe = "extern"   see `sisu1 audit --unsafe --std`

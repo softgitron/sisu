@@ -1216,6 +1216,7 @@ pure def check_one(
     let cx = Cx(prog=ref prog, ast=ref ast, source=text, inferred=ref inferred, catalog=ref catalog)
     var c = Checker.new(cx, types, d)
     c.check_fn(cx)
+    c.unsafe_lints(cx)
     c.requests = c.template_requests(cx)
     var typed: TBody? = None
     if keep:
@@ -1243,6 +1244,7 @@ pure def check_value(
     let cx = Cx(prog=ref prog, ast=ref ast, source=text, inferred=ref inferred, catalog=ref catalog)
     var c = Checker.new(cx, types, d)
     c.check_value(cx, e, ty, field_of)
+    c.unsafe_lints(cx)
     c.requests = c.template_requests(cx)
     var typed: TBody? = None
     if keep:

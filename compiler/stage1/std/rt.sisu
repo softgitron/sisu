@@ -1,0 +1,59 @@
+##! `std.rt` (proposal/22-unsafe.md, "Machine intrinsics"; D-086): the
+##! runtime's machine layer, internal to `std`. Three operations of the
+##! runtime have no expression in Sisu or in C, so they are `unsafe def`s
+##! with intrinsic bodies that the backend lowers: the switch between two
+##! stacks, the stack pointer, and the one word of thread-local storage the
+##! runtime hangs its per-thread state from. There is no inline assembly
+##! (Q-54). Compile-time evaluation stops at each of them (D-085).
+##!
+##! None runs today: the interpreter has its own scheduler, and the native
+##! backend lowers none of them yet (the stage-0 round implements them, and
+##! the backend written in Sisu, D-087, emits their instructions).
+##!
+##! This module is stage 1's (`compiler/stage1/std/`), as `std.mem` is.
+
+from std.mem import ptr
+
+## The registers a suspended stack resumes from: its stack pointer, frame
+## pointer and the address it resumes at. Only `switch` and the stack pool
+## write one.
+@repr(c)
+pub struct Context:
+    pub sp: int
+    pub fp: int
+    pub ip: int
+
+## Saves the running stack's registers in `save` and continues from those in
+## `load`. Returns when a later `switch` loads `save` again.
+##
+## Safety:
+## - `valid_context`: `load` was saved by an earlier `switch`, or made by the
+##   stack pool for a live stack
+## - `stable`: neither context moves while its stack is suspended
+## - `no_yield`: the caller is `@no_block`, so no other switch happens in
+##   between
+## - `no_live_borrow`: no reference that the other stack could invalidate is
+##   live across it
+@intrinsic("rt.switch")
+pub unsafe def switch(save: ptr mut Context, load: ptr[Context])
+
+## The running stack's pointer, for the watermark below which the stack
+## pool may decommit a parked stack's pages.
+##
+## Safety:
+## - `observed`: the address is used only to compare with the bounds of
+##   the running stack, and depends on nothing a `pure` function computes
+@intrinsic("rt.stack_pointer")
+pub unsafe def stack_pointer() -> int
+
+## The thread's slot: one word of thread-local storage, which holds a
+## pointer to the thread's runtime value (its scheduler, panics in flight,
+## output buffer), the runtime's one piece of per-thread state.
+##
+## Safety:
+## - `one_writer`: only the runtime's start of a thread writes the slot,
+##   before anything reads it
+## - `thread_bound`: the pointer is used on the thread that read it, never
+##   sent to another
+@intrinsic("rt.thread_slot")
+pub unsafe def thread_slot() -> ptr mut int

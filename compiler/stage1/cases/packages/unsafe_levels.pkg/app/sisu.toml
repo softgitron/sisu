@@ -1,0 +1,19 @@
+# The levels of unsafe code a package declares (22, "Packages: the
+# manifest field"; RULES.md, R2), against the code each has and the
+# root's consent: `rawmem` declares what it uses and is trusted; `cbind`
+# declares `memory` and has an `extern` block; `quiet` declares `extern`
+# and has no unsafe code; `sneaky` declares nothing and has an `unsafe`
+# block; the root declares its own level. Only `rawmem` is trusted.
+[package]
+name = "app"
+version = "0.1.0"
+unsafe = "memory"
+
+[dependencies]
+rawmem = { path = "../rawmem" }
+cbind = { path = "../cbind" }
+quiet = { path = "../quiet" }
+sneaky = { path = "../sneaky" }
+
+[trust]
+unsafe = ["rawmem"]

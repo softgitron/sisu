@@ -100,6 +100,9 @@ pub struct TraitInfo:
     ## Its `comptime def`s but `derive`: compile-time functions a program
     ## names through the trait, `Trait.name(...)` (decision 251).
     pub comptime_fns: list[(String, DefId)]
+    ## `unsafe trait` (22): an impl is written `unsafe impl`, its author
+    ## keeping the promise the `Safety:` list of its doc comment names.
+    pub unsafe_: bool
 
 impl TraitInfo:
     pub pure def new() -> TraitInfo:
@@ -111,6 +114,7 @@ impl TraitInfo:
             sealed=False,
             marker=False,
             comptime_fns=[],
+            unsafe_=False,
         )
 
 ## `impl[...] Trait[...] for Type`.
@@ -125,6 +129,9 @@ pub struct ImplInfo:
     ## Written by the compiler for `@derive` (or a struct's or enum's own
     ## `Debug`): it compares, hashes or prints the fields.
     pub derived: bool
+    ## `unsafe impl` (22): of an `unsafe trait`, `Send` or `Sync`, whose
+    ## promise its author keeps.
+    pub unsafe_: bool
 
 pub struct StructInfo:
     pub generics: list[Generic]
@@ -241,6 +248,16 @@ pub struct FnInfo:
     pub pure: bool
     ## Rust's `comptime` (a keyword here).
     pub comptime_: bool
+    ## `unsafe def` (22): a call is an unsafe operation, permitted only in
+    ## an `unsafe:` block or an `unsafe` expression.
+    pub unsafe_: bool
+    ## Declared in an `extern` block (22, "Foreign calls"): a call is an
+    ## unsafe operation too, and lowers to the intrinsic
+    ## `extern.LIBRARY.NAME` (`intrinsic`).
+    pub foreign: bool
+    ## The obligations the `Safety:` list of its doc comment names, which a
+    ## caller's `# safety:` comment discharges; `None` without the list.
+    pub obligations: list[String]?
     pub intrinsic: String?
     ## `@structural("name")`: the intrinsic that computes the function
     ## when every bound is met by a structural impl.
@@ -672,6 +689,24 @@ impl Program:
             if let Some(b) = s.builtin:
                 return b == name
         return False
+
+    ## Whether `d` is `std.mem`'s raw pointer `name` (`ptr` or `ptr_mut`),
+    ## by name, which is known before the type's `@builtin` is read.
+    pub pure def is_raw_pointer(self, d: DefId, name: str) -> bool:
+        let def_ = ref self.defs[d.index]
+        let module = ref self.modules[def_.module.index]
+        return def_.name == name and module.is_std and module.name == "mem"
+
+    ## The type `ptr mut T` names, when `ptr` names `d` (22): the raw
+    ## pointer through which `T` may be written, `ptr_mut`, which `std.mem`
+    ## declares beside its `ptr`. (By name: a module's types are known
+    ## before their `@builtin` is read.)
+    pub pure def ptr_mut_of(self, d: DefId) -> DefId?:
+        let def_ = ref self.defs[d.index]
+        let module = ref self.modules[def_.module.index]
+        if def_.name != "ptr" or not module.is_std or module.name != "mem":
+            return None
+        return module.items.get("ptr_mut".to_string()).copied()
 
     ## The generic parameters of a struct, enum or refinement type.
     pub pure def type_generics(self, d: DefId) -> list[Generic]:
@@ -1106,6 +1141,11 @@ impl Program:
                 let bs: str = b
                 var found: Obstacle? = None
                 match bs:
+                    # A raw pointer is neither (22, "Auto traits"), so that
+                    # a type holding one is not made thread-safe by
+                    # inference; `unsafe impl` asserts them.
+                    case "ptr" | "ptr_mut":
+                        return no
                     case "Cell":
                         if auto == Auto.Sync:
                             return no
@@ -1157,6 +1197,54 @@ impl Program:
                     return None
                 return Some(o.under("[]"))
 
+    ## What an `unsafe impl` of `Send` or `Sync` for `d` says of `d[args]`:
+    ## `Some(None)` when an impl's header matches and its bounds hold,
+    ## `Some(obstacle)` when one matches and a bound does not (the type it
+    ## bounds), `None` when no impl asserts the trait for the type.
+    pure def asserted_auto(
+        self,
+        mut types: Types,
+        d: DefId,
+        args: list[Ty],
+        auto: Auto,
+        env: list[Predicate],
+        mut seen: list[(DefId, list[Ty], Auto)],
+        depth: int,
+    ) -> Option[Obstacle?]:
+        let want = self.auto_bound(auto) else:
+            return None
+        let candidates = self.impls_of.get(want) else:
+            return None
+        let ty = types.adt(d, args.copy())
+        for i in candidates:
+            let info = self.impl_info(i) else:
+                continue
+            if not info.unsafe_:
+                continue
+            var binds: list[Ty?] = []
+            for _ in range(len(info.generics)):
+                binds.push(None)
+            if match_ty(types, info.self_ty, ty, mut binds) != Match.Yes:
+                continue
+            var bound_args: list[Ty] = []
+            for b in binds:
+                bound_args.push(b.copy() ?? Ty.error())
+            for p in info.predicates:
+                let pt = types.subst(p.ty, bound_args)
+                let pb = types.subst_trait(p.bound, bound_args)
+                if Some(pb.def_) == self.wk.send or Some(pb.def_) == self.wk.sync:
+                    let pa = if Some(pb.def_) == self.wk.send: Auto.Send else: Auto.Sync
+                    if let Some(o) = self.auto_depth(mut types, pt, pa, env, mut seen, depth + 1):
+                        return Some(Some(o))
+                else:
+                    match self.implements(mut types, pt, pb, env):
+                        case Yes(_):
+                            pass
+                        case _:
+                            return Some(Some(Obstacle(path=[], ty=pt)))
+            return Some(None)
+        return None
+
     ## A declared struct, enum or error set: every field, with the type's
     ## arguments in it. A type met again on the way is assumed to hold
     ## (coinduction, as for Rust's auto traits).
@@ -1176,6 +1264,11 @@ impl Program:
             if sd == d and sargs == args and sa == auto:
                 return None
         seen.push((d, args.copy(), auto))
+        # An `unsafe impl Send` or `Sync` of the type asserts it, for the
+        # arguments its bounds admit (22, "Auto traits"): what is in the way
+        # is then an argument that does not meet them.
+        if let Some(asserted) = self.asserted_auto(mut types, d, args, auto, env, mut seen, depth):
+            return asserted
         var fields: list[(String, Ty)] = []
         match self.defs[d.index].kind():
             case Struct(s):
@@ -1490,6 +1583,11 @@ impl Program:
             if ok == Ty.unit():
                 return "! {err}"
             return "{self.display_in(types, ok, names)} ! {err}"
+        # The raw pointers of `std.mem`, as they are written (22).
+        if self.is_raw_pointer(d, "ptr_mut") and len(args) == 1:
+            return "ptr mut {self.display_in(types, args[0], names)}"
+        if self.is_raw_pointer(d, "ptr") and len(args) == 1:
+            return "ptr[{self.display_in(types, args[0], names)}]"
         let name = self.qualified_name(d)
         if args.is_empty():
             return name
@@ -2237,6 +2335,8 @@ pure def is_copy_builtin(b: str) -> bool:
         case "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin" | "System": True
         case "HostFs" | "HostNet" | "HostClock" | "HostRand" | "HostEnv" | "HostProc" | "HostStdin": True
         case "TestClock" | "Cap" | "Lent" | "DateTime" | "Scope" | "Cancellation" | "Timer": True
+        # A raw pointer is copied (22, "Auto traits"); what it points to is not.
+        case "ptr" | "ptr_mut": True
         case "f32" | "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i128": True
         case _: False
 

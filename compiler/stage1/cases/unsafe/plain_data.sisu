@@ -1,0 +1,39 @@
+# The parts of `std.mem` that run today (22, "Plain data and
+# reinterpretation"; RULES.md, R4): `@derive(Plain)` of a `@repr(c)` struct
+# of plain fields, and of a one-field wrapper, with the size of their
+# representation; and the layouts and alignment arithmetic allocators use.
+
+from std.mem import Layout, Plain, align_up
+
+## A pixel as a graphics card reads it.
+@repr(c)
+@derive(Plain, Copy)
+struct Pixel:
+    r: u8
+    g: u8
+    b: u8
+    a: u8
+
+## A sample of a sensor, read from a device's bytes.
+@repr(c)
+@derive(Plain, Copy)
+struct Sample:
+    at: u64
+    value: f64
+    channel: u32
+    pad: u32
+
+## A port number, plain because its one field is.
+@derive(Plain, Copy)
+struct Port:
+    n: u16
+
+def main():
+    print(Pixel(r=1, g=2, b=3, a=4).plain_size())
+    print(Sample(at=0u64, value=1.5, channel=2u32, pad=0u32).plain_size())
+    print(Port(n=8080u16).plain_size())
+    let block = Layout(size=24, align=8)
+    print(block.is_valid())
+    print(Layout(size=8, align=6).is_valid())
+    for n in [0, 1, 7, 8, 9, 63, 64, 65]:
+        print(align_up(n, 8) + align_up(n, 64))

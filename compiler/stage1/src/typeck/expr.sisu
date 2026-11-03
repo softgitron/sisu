@@ -748,6 +748,13 @@ impl Checker:
             case ExprKind.FieldOf(_, _):
                 self.no_unfolding(cx, span, "a field named by a compile-time value (`x.[f]`)")
                 return self.error_expr(span)
+            # `unsafe e` (22): the unsafe operations of the one expression
+            # are permitted; it is the expression it marks.
+            case ExprKind.Unsafe(inner):
+                self.enter_unsafe(cx, span, False)
+                let x = self.infer_expr(cx, inner, expected)
+                self.exit_unsafe()
+                return x
             case ExprKind.Unsupported(what):
                 self.unsupported(cx, span, what, "foreign functions (Phase 8)")
                 return self.error_expr(span)
@@ -1205,6 +1212,11 @@ impl Checker:
                 if f.comptime_ and not self.in_comptime:
                     self.report_other(self.error(cx, Msg.ComptimeOnly, range).with("name", n))
                 self.check_internal(cx, d, range)
+                # A call through a function value is no unsafe operation, so
+                # an `unsafe def` or a foreign function is never one (22).
+                if f.unsafe_ or f.foreign:
+                    self.unsafe_fn_value(cx, d, f, range)
+                    return self.error_expr(range)
                 # A function value takes its arguments by value, so a
                 # function that returns a borrow of a parameter it borrows
                 # cannot be one (decision 225).

@@ -1,0 +1,63 @@
+# The layer above raw pointers that unsafe code mostly uses (22, "The
+# standard library's layer"; RULES.md, R4): a `CString` a foreign function
+# reads, a `CStr` viewing what foreign code owns, a `RawBuf` that `pure`
+# code makes, grows and drops, an allocator of the program's own whose
+# `release` takes the trait's obligations, and a slice's pointer. The raw
+# memory operations and the foreign call are intrinsics that the
+# interpreter does not run yet, so this program is checked, not run.
+
+from std.ffi import CStr, CString, c_char, c_size
+from std.mem import Allocator, Layout, RawBuf, as_ptr, ptr
+
+# safety: the signature as C's <string.h> declares it, for 64-bit targets.
+extern "C":
+    def strlen(s: ptr[c_char]) -> c_size
+
+## The length C sees of `text`, which holds no NUL.
+pub pure def c_length(text: str) -> int:
+    let c = CString.new(text).expect("no NUL")
+    # safety: valid: `c` lives across the call and ends with its NUL, and
+    #   strlen keeps no pointer; pure: strlen reads only those bytes.
+    let n = unsafe strlen(c.as_ptr())
+    return n.to_int() ?? 0
+
+## The text of a C string that `c` owns, read through a view of it.
+pure def round_trip(c: CString) -> String:
+    # safety: terminated, stable: `c` ends with its NUL and outlives the view.
+    let seen = unsafe CStr.from_ptr(c.as_ptr())
+    match seen.to_text():
+        case Ok(t):
+            return t
+        case Err(_):
+            return String.new()
+
+## A buffer of `n` slots that `pure` code makes, grows and drops.
+pure def grown(n: int) -> int:
+    var buf: RawBuf[String] = RawBuf.with_capacity(n)
+    buf.grow(2 * n)
+    return buf.capacity()
+
+## An allocator that gives out no memory.
+struct Empty:
+    pass
+
+# safety: valid_block, stable, pure: it gives out no block, so none overlaps
+#   another or changes, and it has no effect at all.
+unsafe impl Allocator for Empty:
+    pure def acquire(self, layout: Layout) -> ptr mut u8?:
+        return None
+
+    pure unsafe def release(self, block: ptr mut u8, layout: Layout):
+        pass
+
+def main():
+    print(c_length("sisu"))
+    print(round_trip(CString.new("kiitos").expect("no NUL")))
+    print(grown(4))
+    let xs = [1, 2, 3]
+    let first = as_ptr(xs.as_slice())
+    # safety: valid, aligned: xs has three values, and nothing changes it while
+    #   the pointer is read.
+    print(unsafe first.read())
+    let e = Empty()
+    print(e.acquire(Layout(size=8, align=8)).is_none())

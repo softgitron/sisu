@@ -1,0 +1,14 @@
+# A foreign call stops compile-time evaluation, as any use of the world
+# does (22, D-085; RULES.md, R2).
+
+# safety: time takes a null pointer, written 0, and returns the seconds
+#   since 1970.
+extern "C":
+    def time(at: int) -> int
+
+## The seconds at compile time, which no build may depend on.
+# safety: the pointer is null, which time accepts.
+const BUILT: int = comptime unsafe time(0)
+
+def main():
+    print(BUILT)

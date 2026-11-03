@@ -1,0 +1,8 @@
+# safety: getpid takes nothing and cannot fail.
+extern "C":
+    def getpid() -> int
+
+## Whether the process's identifier is even, 0 or 1.
+pub def pid_parity() -> int:
+    # safety: getpid has no obligation.
+    return unsafe getpid() % 2

@@ -77,6 +77,10 @@ pub struct PackageInfo:
     pub edition: String?
     pub description: String?
     pub license: String?
+    ## `unsafe = "memory"` or `unsafe = "extern"` (22, D-082): the unsafe
+    ## code the package may contain, raw memory only or foreign calls too,
+    ## and where the value is written.
+    pub unsafe_level: (String, TextRange)?
 
 pub struct Manifest:
     ## `[package]`; a workspace's own manifest may have none.
@@ -193,6 +197,7 @@ impl Reader:
             edition=None,
             description=None,
             license=None,
+            unsafe_level=None,
         )
         var name = False
         var version = False
@@ -222,6 +227,12 @@ impl Reader:
                     info.description = self.string("description", v)
                 case "license":
                     info.license = self.string("license", v)
+                case "unsafe":
+                    if let Some(s) = self.string("unsafe", v):
+                        if s == "memory" or s == "extern":
+                            info.unsafe_level = Some((s, v.range))
+                        else:
+                            self.bad("unsafe", v, "`\"memory\"` or `\"extern\"`")
                 # Recorded by `sisu publish` in a later stage.
                 case "authors" | "repository" | "readme" | "keywords" | "profile":
                     pass
@@ -591,3 +602,12 @@ test "script metadata keeps positions":
     assert none.is_none() and e2.is_none()
     let (_, e3) = script_metadata("# /// script\n# [package]\n")
     assert e3.is_some()
+
+test "reads the `unsafe` level a package declares":
+    let (m, d) = read("[package]\nname = \"z\"\nversion = \"1.0.0\"\nunsafe = \"extern\"\n")
+    assert d.is_empty()
+    let p = m.expect("read").package.expect("a package")
+    let (level, _) = p.unsafe_level.expect("a level")
+    assert level == "extern"
+    let (_, bad) = read("[package]\nname = \"z\"\nversion = \"1.0.0\"\nunsafe = \"all\"\n")
+    assert ids(bad) == ["package.bad-value".to_string()]

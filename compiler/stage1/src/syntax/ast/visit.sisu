@@ -186,6 +186,8 @@ pure def stmt(ast: Ast, s: StmtId, mut out: list[ExprId]):
                 block(ast, a.body, mut out)
         case StmtKind.Contract(c):
             expr(ast, c.expr, mut out)
+        case StmtKind.Unsafe(b):
+            block(ast, b, mut out)
         case _:
             pass
 
@@ -203,6 +205,8 @@ pure def expr(ast: Ast, e: ExprId, mut out: list[ExprId]):
         case ExprKind.Try(x):
             expr(ast, x, mut out)
         case ExprKind.Comptime(x):
+            expr(ast, x, mut out)
+        case ExprKind.Unsafe(x):
             expr(ast, x, mut out)
         case ExprKind.Unary(_, x):
             expr(ast, x, mut out)

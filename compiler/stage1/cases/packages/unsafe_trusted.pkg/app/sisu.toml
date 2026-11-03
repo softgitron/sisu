@@ -1,0 +1,14 @@
+# A package with unsafe code that its manifest declares and the root
+# trusts (22, "Packages: the manifest field"; RULES.md, R2), used through
+# its safe function and its `unsafe def`; the root declares the level of
+# its own unsafe code too. The lockfile records each level.
+[package]
+name = "app"
+version = "0.1.0"
+unsafe = "memory"
+
+[dependencies]
+digits = { path = "../digits" }
+
+[trust]
+unsafe = ["digits"]

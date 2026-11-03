@@ -94,6 +94,7 @@ from stage1.typeck.program import (
     VariantInfo,
     WellKnown,
 )
+from stage1.typeck.safety import doc_above, missing_comment, safety_list
 from stage1.typeck.std_sources import ambient, builtin_impls, importable, module_for, module_paths, reexports, target
 from stage1.typeck.template import Src, Templates, template_parts, type_params
 from stage1.typeck.ty import DefId, TraitRef, Ty, TyData, TyKey, Types
@@ -275,6 +276,12 @@ pub struct Resolver:
     pub derive_checks: list[DeriveCheck]
     ## The text of each std module that has templates, by name.
     pub std_texts: dict[String, String]
+    ## The text of each std module with unsafe code, by name, for the
+    ## `Safety:` lists of its `unsafe def`s and `unsafe trait`s (22).
+    pub std_safety_texts: Shared[dict[String, String]]
+    ## The functions declared in `extern` blocks (22, "Foreign calls"), with
+    ## the library their calls lower to (`extern.c.NAME` for `extern "C"`).
+    pub foreign_fns: dict[DefId, String]
     ## The syntax of the modules the base resolves, by module, which
     ## `typeck.base` takes so that lowering can check a std body it reaches.
     pub std_kept: list[Module]
@@ -298,6 +305,7 @@ pub struct Resolver:
 impl Resolver:
     pub pure def new() -> Resolver:
         let parsed: dict[String, Module] = {}
+        let safety_texts: dict[String, String] = {}
         return Resolver(
             prog=Program.new(),
             types=Types.new(),
@@ -344,6 +352,8 @@ impl Resolver:
             shims=[],
             derive_checks=[],
             std_texts={},
+            std_safety_texts=Shared(safety_texts),
+            foreign_fns={},
             std_kept=[],
             dyn_uses=[],
             phase=0,
@@ -389,10 +399,14 @@ impl Resolver:
             r.sources[i] = Module(ast=Ast.new(), items=[], docs=[], broken_names=[])
         # The text of each std module a program may import that has
         # templates, for their instances.
+        var safety_texts: dict[String, String] = {}
         for name in importable():
             let text = text_of(texts, name)
             if text.contains("reflect."):
                 _ = r.std_texts.insert(name.to_string(), text.to_string())
+            if text.contains("unsafe "):
+                _ = safety_texts.insert(name.to_string(), text.to_string())
+        r.std_safety_texts = Shared(safety_texts)
         # The std modules a program may import, parsed once.
         var parsed: dict[String, Module] = {}
         for name in importable():
@@ -607,6 +621,36 @@ impl Resolver:
         if let Some(t) = self.module_texts.get(module):
             return t.copy()
         return self.root_text.copy()
+
+    ## The text of a module whose `Safety:` lists are read (22): a module of
+    ## the program, or a std module with unsafe code.
+    pub pure def safety_text(self, module: ModuleId) -> String?:
+        if let Some(t) = self.module_texts.get(module):
+            return Some(t.copy())
+        if self.is_std(module):
+            let name = self.prog.modules[module.index].name.copy()
+            if let Some(t) = Shared.get(self.std_safety_texts).get(name):
+                return Some(t.copy())
+            return None
+        return Some(self.root_text.copy())
+
+    ## Whether the lints of unsafe code are reported in `module`: a module
+    ## of the program, not the standard library's nor one the compiler
+    ## wrote.
+    pure def lints_in(self, module: ModuleId) -> bool:
+        return self.is_root(module) and not self.prog.modules[module.index].name.starts_with("<")
+
+    ## Reports a warning in `module`, which leaves the program without an
+    ## error.
+    pure def warn_in(mut self, module: ModuleId, own d: Diagnostic):
+        self.diags.push((module, d))
+
+    ## Whether compile-time evaluation wrote `module` (a derive's impls, a
+    ## template's instance, a value unfolded): code there holds no `unsafe`
+    ## (`E0615`, D-085). Doc examples are in their source file.
+    pure def written_by_comptime(self, module: ModuleId) -> bool:
+        let name = ref self.prog.modules[module.index].name
+        return name.starts_with("<") and not name.starts_with("<doc>/")
 
     ## The text at `range` of a module's text.
     pub pure def text_in(self, module: ModuleId, range: TextRange) -> String:
@@ -1007,7 +1051,8 @@ impl Resolver:
         if f.ret != Ty.unit():
             ret = " -> {self.signature_ty(f.ret, args, env, names)}"
         let prefix = if f.pure: "pure " else: ""
-        return "{prefix}def {name}({parts}){ret}"
+        let marker = if f.unsafe_: "unsafe " else: ""
+        return "{prefix}{marker}def {name}({parts}){ret}"
 
     pure def signature_ty(
         mut self, t: Ty, args: list[Ty]?, env: list[Predicate], names: list[String]
@@ -1035,6 +1080,9 @@ impl Resolver:
             err_inferred=False,
             pure=False,
             comptime_=False,
+            unsafe_=False,
+            foreign=False,
+            obligations=None,
             intrinsic=None,
             structural=None,
             keeps=[],
@@ -1059,6 +1107,7 @@ impl Resolver:
         var attributed: list[(String, list[(String, list[String])])] = []
         for id in items:
             let item = self.sources[module.index].ast.item(id).copy()
+            self.check_std_only_attrs(module, item.attrs)
             # The attributes of a type of the program, as data for
             # `reflect.attributes_of`.
             if not self.is_std(module) and not item.attrs.is_empty():
@@ -1226,16 +1275,211 @@ impl Resolver:
                         )
                         self.bind(module, a.name.text, def_)
                         _ = self.aliases.insert(def_, (module, a.copy()))
-                case ItemKind.Extern(_):
-                    # Nothing is declared.
-                    self.unsupported_in(
-                        module, item.range, "`extern`", "foreign functions (Phase 8)"
-                    )
+                # An `extern` block declares foreign functions (22, "Foreign
+                # calls"), each a function of the module without a body
+                # whose call is an unsafe operation.
+                case ItemKind.Extern(members):
+                    let library = self.extern_library(module, item.range)
+                    for mid in members:
+                        let member = self.sources[module.index].ast.item(mid).copy()
+                        if let ItemKind.Fn(f) = member.kind:
+                            let info = self.placeholder_fn(FnKind.Free)
+                            let def_ = self.new_def(
+                                module, f.name.text, f.name.range, member.vis, DefKind.Fn(info)
+                            )
+                            self.bind(module, f.name.text, def_)
+                            _ = self.foreign_fns.insert(def_, library.copy())
+                            self.pending.push(
+                                Pending.Fn(def_=def_, module=module, ast=f.copy(), owner=None)
+                            )
+                    if self.lints_in(module):
+                        if let Some(text) = self.safety_text(module):
+                            if let Some(d) = missing_comment(text, item.range, "`extern` block"):
+                                self.warn_in(module, d)
                 case _:
                     pass
         for (n, attrs) in attributed:
             if let Some(d) = self.prog.modules[module.index].items.get(n):
                 _ = self.attrs_of.insert(d, attrs.copy())
+
+    ## `E0234` for a method of an impl that is `unsafe def` where the
+    ## trait's is not, or the other way round.
+    pure def check_unsafe_method(
+        mut self,
+        module: ModuleId,
+        tm: DefId,
+        m: DefId,
+        trait_ref: TraitRef,
+        self_ty: Ty,
+        names: list[String],
+    ):
+        let expected_info = self.prog.fn_info(tm) else:
+            return
+        let expected = expected_info.copy()
+        let found_info = self.prog.fn_info(m) else:
+            return
+        let found = found_info.copy()
+        # The impl's method without a `Safety:` list of its own has the
+        # trait's obligations, which its callers discharge.
+        if expected.unsafe_ and found.unsafe_ and found.obligations.is_none():
+            var kind_now = self.prog.defs[m.index].kind().copy()
+            if let DefKind.Fn(fi) = ref mut kind_now:
+                fi.obligations = expected.obligations.copy()
+            self.prog.defs[m.index].set_kind(kind_now)
+        if not self.lints_in(module):
+            return
+        if expected.unsafe_ == found.unsafe_:
+            return
+        var args = [self_ty]
+        for a in trait_ref.args:
+            args.push(a)
+        let name = self.prog.defs[m.index].name.copy()
+        let trait_name = self.prog.display_trait_in(self.types, trait_ref, names)
+        let expected_text = self.signature_text(name, expected, Some(args), [], names)
+        let found_text = self.signature_text(name, found, None, [], names)
+        let at = self.prog.defs[m.index].span
+        var d = Diagnostic.new(Msg.ResolveMethodSignature, at.start, at.end).with("name", name)
+        d = d.with("trait", trait_name).with("expected", expected_text)
+        self.report_other(module, d.with("found", found_text))
+
+    ## The rules of `unsafe impl` (22, D-080): an `unsafe trait`, `Send` and
+    ## `Sync` are implemented with `unsafe impl` (`E0984`), and no other
+    ## trait is (`E0985`); `Copy` and `Escapable` are never asserted
+    ## (`E0986`). An `unsafe impl` has its `# safety:` comment (`W0007`),
+    ## and one of `Send` or `Sync` bounds each parameter by the trait it
+    ## asserts (`W0013`, Rudra's check).
+    pure def check_unsafe_impl(
+        mut self,
+        module: ModuleId,
+        imp: ImplDef,
+        span: TextRange,
+        trait_ref: TraitRef,
+        predicates: list[Predicate],
+        names: list[String],
+    ):
+        let t = trait_ref.def_
+        let auto = Some(t) == self.prog.wk.send or Some(t) == self.prog.wk.sync
+        var unsafe_trait = auto
+        if let Some(info) = self.prog.trait_info(t):
+            unsafe_trait = unsafe_trait or info.unsafe_
+        let never = Some(t) == self.prog.wk.copy or Some(t) == self.prog.wk.escapable
+        let trait_name = self.prog.display_trait_in(self.types, trait_ref, names)
+        if imp.is_unsafe and never:
+            let at = self.impl_keyword(module, span, "unsafe")
+            var d = Diagnostic.new(
+                Msg.UnsafeNeverAsserted, at.start, self.impl_header_end(module, span)
+            )
+            self.report_other(module, d.with("trait", trait_name))
+            return
+        if imp.is_unsafe and not unsafe_trait:
+            let what = "`{trait_name}` is not an `unsafe trait`"
+            self.unsafe_promises_nothing(module, span, what)
+            return
+        if not imp.is_unsafe and unsafe_trait:
+            if self.prog.modules[module.index].name.starts_with("<"):
+                return
+            let at = self.impl_keyword(module, span, "impl")
+            var d = Diagnostic.new(
+                Msg.UnsafeImplNeeded, at.start, self.impl_header_end(module, span)
+            )
+            d = d.with("trait", trait_name)
+            self.report_other(
+                module, d.fix_at(Msg.UnsafeWriteUnsafeImpl, at.start, at.start, "unsafe ")
+            )
+            return
+        if not imp.is_unsafe or not self.lints_in(module):
+            return
+        if let Some(text) = self.safety_text(module):
+            if let Some(d) = missing_comment(text, span, "`unsafe impl`"):
+                self.warn_in(module, d)
+        if not auto:
+            return
+        let auto_name = self.prog.defs[t.index].name.copy()
+        for i in range(len(imp.generics)):
+            let g = ref imp.generics[i]
+            if g.is_const:
+                continue
+            var bounded = False
+            for p in predicates:
+                if p.ty == self.types.param(i) and p.bound.def_ == t:
+                    bounded = True
+            if bounded:
+                continue
+            let at = g.name.range
+            var insert_at = at.end
+            var text = ": {auto_name}"
+            if let Some(last) = g.bounds.last():
+                insert_at = self.ast(module).type_expr(last).range.end
+                text = " + {auto_name}"
+            var d = Diagnostic.new(Msg.UnsafeAutoTraitBound, at.start, at.end)
+            d = d.with("trait", auto_name).with("param", g.name.text)
+            let param = MsgParam(name="param".to_string(), value=g.name.text.copy())
+            let bound = MsgParam(name="bound".to_string(), value=auto_name.copy())
+            let edit = Edit(start=insert_at, end=insert_at, text=text)
+            self.warn_in(module, d.fix_params(Msg.TypeAddBound, [param, bound], [edit]))
+
+    ## `E0985` for the `unsafe impl` at `range`: `what` says why it promises
+    ## nothing.
+    pure def unsafe_promises_nothing(mut self, module: ModuleId, range: TextRange, what: str):
+        let at = self.impl_keyword(module, range, "unsafe")
+        var end = at.end
+        let owned = self.text_of_module(module)
+        let text: str = owned
+        while end < text.byte_len() and text.byte_at(end) == 32:
+            end += 1
+        var d = Diagnostic.new(
+            Msg.UnsafeImplPromisesNothing, at.start, self.impl_header_end(module, range)
+        )
+        d = d.with("what", what)
+        self.report_other(module, d.fix_at(Msg.UnsafeRemoveUnsafe, at.start, end, ""))
+
+    ## Where the header line of the impl at `range` ends, before its `:`.
+    pure def impl_header_end(self, module: ModuleId, range: TextRange) -> int:
+        let at = self.impl_keyword(module, range, "impl")
+        let owned = self.text_of_module(module)
+        let text: str = owned
+        var e = at.start
+        while e < text.byte_len() and text.byte_at(e) != 10:
+            e += 1
+        while e > at.start and is_header_tail(text.byte_at(e - 1)):
+            e -= 1
+        return e
+
+    ## The first `word` (`unsafe`, `impl`) of an impl's header at `range`,
+    ## past its attributes and comments.
+    pure def impl_keyword(self, module: ModuleId, range: TextRange, word: str) -> TextRange:
+        let owned = self.text_of_module(module)
+        let text: str = owned
+        var i = range.start
+        let n = min(range.end, text.byte_len())
+        while i < n:
+            var e = i
+            while e < n and text.byte_at(e) != 10:
+                e += 1
+            let line = text.byte_slice(i, e)
+            let trimmed = line.trim_start()
+            if not trimmed.starts_with("@")
+                    and not trimmed.starts_with("#")
+                    and not trimmed.is_empty():
+                if let Some(k) = line.find(word):
+                    return TextRange(start=i + k, end=i + k + word.byte_len())
+                return TextRange(start=i, end=i)
+            i = e + 1
+        return TextRange(start=range.start, end=range.start)
+
+    ## The library an `extern` block's calls name in SIR: its ABI string,
+    ## in lowercase (`extern "C":` is `c`), `c` when it has none.
+    pure def extern_library(self, module: ModuleId, range: TextRange) -> String:
+        let header = self.text_in(module, range)
+        let all: str = header
+        let line = all.byte_slice(0, all.find("\n") ?? all.byte_len())
+        if let Some(open) = line.find("\""):
+            let rest = line.byte_slice(open + 1, line.byte_len())
+            if let Some(close) = rest.find("\""):
+                let abi = rest.byte_slice(0, close).to_lowercase()
+                if not abi.is_empty():
+                    return abi
+        return "c".to_string()
 
     pure def declare_enum(
         mut self, module: ModuleId, e: EnumDef, vis: Vis, attrs: list[Attr], error_set: bool
@@ -1255,6 +1499,29 @@ impl Resolver:
         _ = self.type_params.insert(def_, e.generics.copy())
         self.declare_methods(module, def_, e.methods)
         self.pending.push(Pending.Enum(def_=def_, module=module, ast=e.copy(), attrs=attrs.copy()))
+
+    ## `E0225` for each attribute of `attrs` that only the standard library
+    ## may write (stage 0's `check_attrs`), in a module of the program:
+    ## `@intrinsic` above all, since a function with an intrinsic body
+    ## reaches the machine, which a program does only through `unsafe` and
+    ## `std.mem`'s `unsafe def`s (22).
+    pure def check_std_only_attrs(mut self, module: ModuleId, attrs: list[Attr]):
+        if self.is_std(module) or attrs.is_empty():
+            return
+        let owned = self.text_of_module(module)
+        let text: str = owned
+        for a in attrs:
+            # One the compiler wrote (the `@internal` of an invariant's
+            # check) is not in the text.
+            if a.range.start >= text.byte_len() or text.byte_at(a.range.start) != 64:
+                continue
+            let name: str = a.name
+            match name:
+                case "builtin" | "intrinsic" | "structural" | "keeps" | "sealed" | "marker" | "internal":
+                    let d = Diagnostic.new(Msg.ResolveStdOnlyAttribute, a.range.start, a.range.end)
+                    self.report_other(module, d.with("name", a.name))
+                case _:
+                    pass
 
     pure def declare_methods(mut self, module: ModuleId, owner: DefId, methods: list[FnDef]):
         for m in methods:
@@ -1782,9 +2049,39 @@ impl Resolver:
         info.owner = self_ty
         info.pure = f.is_pure
         info.comptime_ = f.is_comptime
+        info.unsafe_ = f.is_unsafe
+        # A method's attributes, which stage 0 does not check (it checks an
+        # item's): `@intrinsic` on a program's method would be an unsafe
+        # operation without `unsafe` (22).
+        if owner.is_some():
+            self.check_std_only_attrs(module, f.attrs)
+        if f.is_unsafe:
+            # Its obligations, from the `Safety:` list of its `##` comment.
+            if let Some(text) = self.safety_text(module):
+                info.obligations = safety_list(doc_above(text, f.range.start))
+            # A trait impl's method takes the trait's list, which the impl's
+            # methods check and copy (`check_unsafe_method`).
+            var of_trait_impl = False
+            if let Some(Owner.Impl(_)) = owner:
+                of_trait_impl = True
+            if info.obligations.is_none() and self.lints_in(module) and not of_trait_impl:
+                let at = f.name.range
+                var d = Diagnostic.new(Msg.UnsafeNoSafetyList, at.start, at.end)
+                d = d.with("name", f.name.text).with("kind", "def").with("who", "callers")
+                self.warn_in(module, d)
+            if self.written_by_comptime(module):
+                let at = f.name.range
+                self.report_other(
+                    module, Diagnostic.new(Msg.ComptimeUnsafeWritten, at.start, at.end)
+                )
         info.type_params = type_param_info
         info.body = f.body.copy()
         info.intrinsic = self.builtin_attr(module, f.attrs, "intrinsic")
+        # A foreign function's call lowers to the intrinsic
+        # `extern.LIBRARY.NAME`, which marks it in SIR (stage 0's `sim.rs`).
+        if let Some(library) = self.foreign_fns.get(def_):
+            info.foreign = True
+            info.intrinsic = Some("extern.{library}.{f.name.text}")
         info.structural = self.builtin_attr(module, f.attrs, "structural")
         info.internal = has_attr(f.attrs, "internal")
         if self.is_root(module):
@@ -2046,7 +2343,19 @@ impl Resolver:
             info.assoc = assoc
             info.sealed = sealed
             info.marker = marker
+            info.unsafe_ = t.is_unsafe
         self.prog.defs[def_.index].set_kind(kind_now)
+        # An `unsafe trait` names its implementors' obligations in a
+        # `Safety:` list (22).
+        if t.is_unsafe and self.lints_in(module):
+            var listed_ = False
+            if let Some(text) = self.safety_text(module):
+                listed_ = safety_list(doc_above(text, t.name.range.start)).is_some()
+            if not listed_:
+                let at = t.name.range
+                var d = Diagnostic.new(Msg.UnsafeNoSafetyList, at.start, at.end)
+                d = d.with("name", t.name.text).with("kind", "trait").with("who", "implementors")
+                self.warn_in(module, d)
         var supers: list[TraitRef] = []
         for s in t.supertraits:
             var ctx = TyCtx.plain(module, names, True)
@@ -2145,7 +2454,15 @@ impl Resolver:
         var ctx = TyCtx.plain(module, names, True)
         ctx.predicates = predicates.copy()
         let self_ty = self.resolve_ty(imp.self_ty, ctx)
+        if imp.is_unsafe and self.written_by_comptime(module):
+            let at = TextRange.new(range_in.start, self_range.end)
+            self.report_other(module, Diagnostic.new(Msg.ComptimeUnsafeWritten, at.start, at.end))
         let trait_ty = imp.trait_ty else:
+            # `unsafe impl Type:` promises nothing (22).
+            if imp.is_unsafe:
+                self.unsafe_promises_nothing(
+                    module, range_in, "an inherent impl implements no trait"
+                )
             # An inherent impl adds methods to a type.
             let key = self.types.key(self_ty) else:
                 if self_ty != Ty.error():
@@ -2186,6 +2503,7 @@ impl Resolver:
             return
         if self_ty == Ty.error():
             return
+        self.check_unsafe_impl(module, imp, range_in, trait_ref, predicates, names)
         # A refinement has its base's reading impls and no others (07).
         if let TyData.Adt(d, args) = self.types.data(self_ty).copy():
             if let Some(base) = self.prog.refinement_base(mut self.types, d, args):
@@ -2282,6 +2600,7 @@ impl Resolver:
             methods=[],
             assoc=assoc,
             derived=self.prog.modules[module.index].name.starts_with("<derive>/"),
+            unsafe_=imp.is_unsafe,
         )
         let def_ = self.new_def(
             module, "impl {shown_trait} for {shown_ty}", range, Vis.Pub, DefKind.Impl(info)
@@ -2416,6 +2735,12 @@ impl Resolver:
             if let Some(c) = closest(words.join("."), candidates):
                 similar = Some(last_word(c))
             return (None, similar)
+        # `std.rt` is internal to the standard library (22, "Machine
+        # intrinsics"; Q-57): only `std` reaches the machine.
+        if name == "rt" and not self.is_std(module):
+            var d = Diagnostic.new(Msg.CapInternal, at.start, at.end)
+            self.report_other(module, d.with("name", "std.rt"))
+            return (None, None)
         if let Some(m) = self.std_loaded.get(name.copy()):
             return (Some(m), None)
         let parsed = self.std_parsed.get(name.copy()) else:
@@ -2600,6 +2925,7 @@ impl Resolver:
             name=Name(text="main".to_string(), range=at),
             is_pure=False,
             is_comptime=False,
+            is_unsafe=False,
             generics=[],
             params=[param],
             ret=Some(ret),
@@ -2834,6 +3160,8 @@ impl Resolver:
                 return self.borrows(module, ret)
             case TypeKind.ConstArg(_) | TypeKind.ConstExpr(_):
                 return False
+            case TypeKind.PtrMut(_, x):
+                return self.borrows(module, x)
             case TypeKind.Unsupported(_):
                 return True
             case TypeKind.Error:
@@ -3026,6 +3354,7 @@ impl Resolver:
             name=Name(text=name.to_string(), range=range),
             is_pure=True,
             is_comptime=False,
+            is_unsafe=False,
             generics=[],
             params=[Param(node=node, range=range, mode=Mode.Borrow, kind=ParamKind.SelfParam)],
             ret=ret,
@@ -3248,6 +3577,10 @@ impl Resolver:
                 var tpure = False
                 if let Some(f) = self.prog.fn_info(tm):
                     tpure = f.pure
+                # An impl's method is `unsafe def` exactly when the trait's
+                # is (22): its callers take the trait's obligations.
+                let tref = TraitRef(def_=tr, args=trait_args.copy())
+                self.check_unsafe_method(module, tm, mdef, tref, self_ty, names)
                 if tpure:
                     var kind_now = self.prog.defs[mdef.index].kind().copy()
                     if let DefKind.Fn(f) = ref mut kind_now:
@@ -3853,6 +4186,20 @@ impl Resolver:
                 if let Some(x) = err:
                     self.report_const(ctx.module, consts.diagnostic(x, Shared.get(self.catalog)))
                 return t
+            # `ptr mut T` (22): the mutable form of the `ptr` in scope, which
+            # is `std.mem`'s.
+            case TypeKind.PtrMut(ptr_name, inner):
+                let t = self.resolve_ty(inner, ctx)
+                let p = self.resolve_path_ty([ptr_name.copy()], [t], ctx, ptr_name.range)
+                if let TyData.Adt(d, _) = self.types.data(p):
+                    if let Some(m) = self.prog.ptr_mut_of(d):
+                        return self.types.adt(m, [t])
+                    let at = ptr_name.range
+                    let found = "`{self.prog.display(self.types, p)}`"
+                    var diag = Diagnostic.new(Msg.UnsafeNotPtr, at.start, at.end)
+                    diag = diag.with("name", ptr_name.text).with("found", found)
+                    self.report_other(ctx.module, diag.note(Msg.UnsafeImportPtr))
+                return Ty.error()
             case TypeKind.Unsupported(what):
                 var phase = "reflection beyond derive (Phase 8)"
                 if what.contains("pointer"):
@@ -4239,6 +4586,11 @@ pure def primitive(name: str) -> Ty?:
 ## A std module's text, from the texts read by name.
 ## The `comptime def derive` of each trait of a module (the prelude's),
 ## with the module's syntax and text: what `@derive` unfolds.
+## Whether a byte ends a header line without being part of it: its `:`, a
+## carriage return or a space.
+pure def is_header_tail(b: int) -> bool:
+    return b == 58 or b == 13 or b == 32
+
 pure def derive_templates(own syntax: Module, text: str) -> Templates:
     var derives: dict[String, FnDef] = {}
     for it in syntax.items:
@@ -4327,6 +4679,7 @@ pure def test_fn(name: str, t: TestDef) -> FnDef:
         name=Name(text=name.to_string(), range=t.name_range),
         is_pure=False,
         is_comptime=False,
+        is_unsafe=False,
         generics=[],
         params=t.params.copy(),
         ret=None,

@@ -37,6 +37,7 @@ from stage1.sir import (
     ImplDecl,
     ImplTarget,
     IntrinsicDecl,
+    Loc,
     Operand,
     Program,
     Rvalue,
@@ -271,6 +272,7 @@ pub pure def lower(
         benches={},
         instances={},
         traits=traits_by_name(prog),
+        asserted=[],
     )
     ctx.index_names(prog)
     for (m, t) in typed.texts.items():
@@ -405,6 +407,11 @@ pub pure def lower(
             if i < len(source_modules) and source_modules[i] == prog.root:
                 source_modules[i] = m
     source_modules[0] = prog.root
+    # The `unsafe` blocks that assert purity, in the sources' numbering.
+    var asserted: list[(int, Loc)] = []
+    for (old, loc) in ctx.asserted:
+        if let Some(i) = renumbered.get(old):
+            asserted.push((i, loc))
     let program = Program(
         sources=sources,
         entry=entry,
@@ -414,6 +421,7 @@ pub pure def lower(
         tests=tests,
         trait_methods=trait_methods,
         impls=impls,
+        asserted=asserted,
     )
     return Lowered(program=program, beyond=beyond, source_modules=source_modules)
 

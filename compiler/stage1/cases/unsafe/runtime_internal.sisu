@@ -1,0 +1,9 @@
+# `std.rt`, the runtime's machine layer, is internal to the standard
+# library (22, "Machine intrinsics"; RULES.md, R8): a program reaches the
+# machine only through the standard library above it.
+
+from std.rt import stack_pointer
+
+def main():
+    # safety: observed: printed only.
+    print(unsafe stack_pointer())

@@ -1,0 +1,142 @@
+# The first slice of the runtime in Sisu (22, "How the runtime in Sisu uses
+# it"; D-086; RULES.md, R9): `std.mem`'s structural hash, equality and copy,
+# generic code that compile-time reflection writes per type, against the
+# interpreter's answers (and the native runtime's, run from the same SIR): a
+# value's hash as its derived or the prelude's `Hash` mixes it, whose leaves
+# are the interpreter's structural hash (decision 256); equality as `==`;
+# a copy as `.copy()` makes one, owning its parts anew; a float's bits as
+# IEEE 754 lays them out; and `mem.drop`, whose order is the drop glue's.
+
+from std.mem import Plain, drop, f64_bits, structural_copy, structural_eq, structural_hash
+
+@derive(Eq, Hash, Debug)
+enum Shape:
+    Dot
+    Circle(r: int)
+    Rect(w: int, h: int)
+    Pair(int, String)
+
+@derive(Eq, Hash, Debug)
+struct Tile:
+    name: String
+    shape: Shape
+    tags: list[String]
+    weight: int?
+
+## A plain aggregate (22, "Plain data and reinterpretation").
+@repr(c)
+@derive(Plain, Copy, Eq, Hash, Debug)
+struct Pixel:
+    r: u8
+    g: u8
+    b: u8
+    a: u8
+
+## The structural hash of `x`, from the seed every case uses.
+pure def ours[T](x: T) -> int:
+    var h = Hasher(state=1469598103934665603)
+    structural_hash(x, mut h)
+    return h.state
+
+## What the interpreter's hash of `x` is, through its `Hash`.
+pure def theirs[T: Hash](x: T) -> int:
+    var h = Hasher(state=1469598103934665603)
+    x.hash(mut h)
+    return h.state
+
+def check_hash[T: Hash](name: str, x: T):
+    let want = theirs(x)
+    let same = if ours(x) == want: "same" else: "DIFFERENT"
+    print("hash {name}: {want} {same}")
+
+def check_eq[T: Eq](name: str, a: T, b: T):
+    let same = if structural_eq(a, b) == (a == b): "same" else: "DIFFERENT"
+    print("eq {name}: {a == b} {same}")
+
+struct Loud:
+    name: String
+
+impl Drop for Loud:
+    def drop(mut self):
+        print("  drop {self.name}")
+
+struct Holder:
+    first: Loud
+    second: Loud
+    rest: list[Loud]
+
+def main():
+    let tile = Tile(
+        name="corner".to_string(),
+        shape=Shape.Rect(w=2, h=3),
+        tags=["red".to_string(), "edge".to_string()],
+        weight=Some(4),
+    )
+    let other = Tile(
+        name="corner".to_string(),
+        shape=Shape.Rect(w=2, h=4),
+        tags=["red".to_string(), "edge".to_string()],
+        weight=None,
+    )
+    check_hash("int", -42)
+    check_hash("big int", 9223372036854775807)
+    check_hash("bool", True)
+    check_hash("char", 'a')
+    check_hash("char beyond ASCII", 'ä')
+    check_hash("str", "hyvää päivää")
+    check_hash("String", "sisu".to_string())
+    check_hash("bytes", b"\x00\xff")
+    check_hash("u8", 255u8)
+    check_hash("u16", 65535u16)
+    check_hash("u32", 4000000000u32)
+    check_hash("i8", -128i8)
+    check_hash("i16", -300i16)
+    check_hash("i32", -70000i32)
+    check_hash("u64 past int", 18446744073709551615u64)
+    check_hash("unit", ())
+    check_hash("list", [3, 1, 2])
+    check_hash("empty list", list[int]())
+    check_hash("nested list", [["a"], [], ["b", "c"]])
+    check_hash("some", Some(7))
+    let none: int? = None
+    check_hash("none", none)
+    for s in [Shape.Dot, Shape.Circle(r=5), Shape.Rect(w=2, h=3), Shape.Pair(1, "x".to_string())]:
+        check_hash("{s:?}", s)
+    check_hash("tile", tile)
+    check_hash("pixel", Pixel(r=1, g=2, b=3, a=255))
+    check_eq("tile and itself", tile, tile.copy())
+    check_eq("tiles", tile, other)
+    check_eq("shapes", Shape.Pair(1, "x".to_string()), Shape.Pair(1, "y".to_string()))
+    check_eq("variants", Shape.Dot, Shape.Circle(r=0))
+    check_eq("lists", [1, 2], [1, 2, 3])
+    check_eq("floats", 0.0, -0.0)
+    check_eq("pixels", Pixel(r=1, g=2, b=3, a=4), Pixel(r=1, g=2, b=3, a=4))
+    var copy = structural_copy(tile)
+    print("copy equal: {copy == tile}")
+    copy.tags.push("new".to_string())
+    copy.name.push("!")
+    print("copy changed: {copy.tags} {copy.name}")
+    print("original kept: {tile.tags} {tile.name}")
+    print("plain copy: {structural_copy(Pixel(r=9, g=8, b=7, a=6)):?}")
+    for f in [0.0, -0.0, 1.0, -2.5, 3.141592653589793, 1e-310, 5e-324, 1.7976931348623157e308]:
+        print("bits {f}: {f64_bits(f)}")
+    let inf = 1.7976931348623157e308 * 2.0
+    print("bits inf: {f64_bits(inf)} {f64_bits(-inf)}")
+    print("drop at the end of a scope:")
+    scope_end()
+    print("drop now:")
+    let h = Holder(
+        first=Loud(name="first".to_string()),
+        second=Loud(name="second".to_string()),
+        rest=[Loud(name="rest 1".to_string()), Loud(name="rest 2".to_string())],
+    )
+    drop(h)
+    print("after")
+
+def scope_end():
+    let h = Holder(
+        first=Loud(name="first".to_string()),
+        second=Loud(name="second".to_string()),
+        rest=[Loud(name="rest 1".to_string()), Loud(name="rest 2".to_string())],
+    )
+    print("  (the scope ends)")

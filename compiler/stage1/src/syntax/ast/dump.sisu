@@ -304,7 +304,11 @@ impl D:
                 self.impl_def(mut out, i)
                 out.push(")")
             case Trait(t):
-                out.push("Trait(TraitDef {{ name: ")
+                out.push("Trait(TraitDef {{ ")
+                # Stage 1's own field (22), written only when set.
+                if t.is_unsafe:
+                    out.push("is_unsafe: true, ")
+                out.push("name: ")
                 name(mut out, t.name)
                 out.push(", generics: ")
                 self.generics(mut out, t.generics)
@@ -388,6 +392,11 @@ impl D:
         bool_(mut out, f.is_pure)
         out.push(", is_comptime: ")
         bool_(mut out, f.is_comptime)
+        # Stage 1's own field (22), which the frozen Rust front end's AST
+        # does not have: written only when set, so that the dump of every
+        # other function stays the Rust one.
+        if f.is_unsafe:
+            out.push(", is_unsafe: true")
         out.push(", generics: ")
         self.generics(mut out, f.generics)
         out.push(", params: ")
@@ -561,7 +570,11 @@ impl D:
         out.push("] }}")
 
     pure def impl_def(self, mut out: String, i: ImplDef):
-        out.push("ImplDef {{ generics: ")
+        out.push("ImplDef {{ ")
+        # Stage 1's own field (22), written only when set.
+        if i.is_unsafe:
+            out.push("is_unsafe: true, ")
+        out.push("generics: ")
         self.generics(mut out, i.generics)
         out.push(", trait_ty: ")
         self.opt_type(mut out, i.trait_ty)
@@ -766,6 +779,10 @@ impl D:
             case StmtKind.Contract(c):
                 out.push("Contract(")
                 self.contract(mut out, c)
+                out.push(")")
+            case StmtKind.Unsafe(b):
+                out.push("Unsafe(")
+                self.block(mut out, b)
                 out.push(")")
             case Unsupported(what):
                 out.push("Unsupported(")
@@ -1094,6 +1111,10 @@ impl D:
                 out.push(", field: ")
                 self.expr(mut out, field)
                 out.push(" }}")
+            case ExprKind.Unsafe(inner):
+                out.push("Unsafe(")
+                self.expr(mut out, inner)
+                out.push(")")
             case ExprKind.Unsupported(what):
                 out.push("Unsupported(")
                 out.push(debug_str(what))
@@ -1286,6 +1307,12 @@ impl D:
                 out.push("Dyn(")
                 self.type_expr(mut out, inner)
                 out.push(")")
+            case TypeKind.PtrMut(ptr_name, inner):
+                out.push("PtrMut {{ name: ")
+                name(mut out, ptr_name)
+                out.push(", inner: ")
+                self.type_expr(mut out, inner)
+                out.push(" }}")
             case TypeKind.Unsupported(what):
                 out.push("Unsupported(")
                 out.push(debug_str(what))

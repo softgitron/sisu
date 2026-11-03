@@ -1,0 +1,9 @@
+import cbind
+import quiet
+import rawmem
+import sneaky
+
+def main():
+    # safety: nonzero: 4 is not zero.
+    print(unsafe rawmem.reciprocal_scaled(4))
+    print(cbind.pid_parity() + quiet.answer() + sneaky.twice(1))

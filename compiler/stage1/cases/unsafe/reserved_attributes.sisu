@@ -1,0 +1,28 @@
+# The attributes only the standard library writes (RULES.md, R2): a
+# function of the program with an intrinsic body would reach the machine
+# without `unsafe`, as `std.mem`'s `unsafe def`s do inside a block, so
+# `@intrinsic` is refused on a program's function, as stage 0 refuses it,
+# and on a method too, which stage 0 does not check; `@builtin` and
+# `@internal` are refused as well.
+
+## Reads the `int` at an address, without a block.
+@intrinsic("mem.ptr.read")
+pure def peek(at: int) -> int
+
+@builtin("int")
+struct Word:
+    n: int
+
+struct Cursor:
+    at: int
+
+    ## Writes through the cursor, without a block.
+    @intrinsic("mem.ptr.write")
+    def poke(self, value: int)
+
+    @internal
+    def hidden(self) -> int:
+        return self.at
+
+def main():
+    print(Cursor(at=1).hidden())

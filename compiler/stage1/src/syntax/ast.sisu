@@ -166,6 +166,9 @@ pub struct FnDef:
     pub name: Name
     pub is_pure: bool
     pub is_comptime: bool
+    ## `unsafe def` (22): calling it is an unsafe operation, since its
+    ## callers take an obligation; its body is ordinary code.
+    pub is_unsafe: bool
     pub generics: list[GenericParam]
     pub params: list[Param]
     pub ret: TypeExprId?
@@ -283,6 +286,8 @@ pub struct VariantField:
 
 @derive(Debug)
 pub struct ImplDef:
+    ## `unsafe impl` (22): the implementor keeps an `unsafe trait`'s promise.
+    pub is_unsafe: bool
     pub generics: list[GenericParam]
     pub trait_ty: TypeExprId?
     pub self_ty: TypeExprId
@@ -294,6 +299,8 @@ pub struct ImplDef:
 
 @derive(Debug)
 pub struct TraitDef:
+    ## `unsafe trait` (22): its implementors take an obligation.
+    pub is_unsafe: bool
     pub name: Name
     pub generics: list[GenericParam]
     ## `trait Container(Len)`: traits every implementer must implement too.
@@ -387,6 +394,10 @@ pub enum StmtKind:
     Yield(ExprId?)
     ## `requires e`, `ensures e`, `invariant e` or `decreases e` (07).
     Contract(Contract)
+    ## `unsafe:` and its block (22): the unsafe operations inside are
+    ## permitted, and the block's author promises they keep the soundness
+    ## contract.
+    Unsafe(Block)
     ## A construct this stage parses but does not implement.
     Unsupported(String)
     Error
@@ -527,6 +538,9 @@ pub enum ExprKind:
     ## `x.[f]`: the field that the compile-time value `f` names (08,
     ## "Reflection").
     FieldOf(base: ExprId, field: ExprId)
+    ## `unsafe e` (22): the unsafe operations of the one expression are
+    ## permitted.
+    Unsafe(ExprId)
     Unsupported(String)
     Error
 
@@ -717,6 +731,9 @@ pub enum TypeKind:
     ConstExpr(ExprId)
     ## `dyn Trait`: the inner type is the trait's path.
     Dyn(TypeExprId)
+    ## `ptr mut T` (22): the raw pointer through which `T` may be written,
+    ## the mutable form of the `ptr` that `name` names (`std.mem.ptr`).
+    PtrMut(name: Name, inner: TypeExprId)
     Unsupported(String)
     Error
 

@@ -1,0 +1,437 @@
+##! Unsafe code (proposal/22-unsafe.md; D-080, D-083 and D-085; RULES.md,
+##! R2): the unsafe operations a body makes and the `unsafe:` blocks and
+##! `unsafe` expressions that permit them, the `# safety:` comments above
+##! those and the `Safety:` lists of the `unsafe def`s and `unsafe trait`s
+##! whose obligations the comments discharge, and the lints that keep the
+##! declarations honest.
+##!
+##! The comments are read from the module's text. A `# safety:` comment is
+##! a line comment that starts with `# safety:`, continued on the comment
+##! lines under it, immediately above the line where the statement that
+##! holds the block or the expression starts (or the `unsafe impl`, the
+##! `extern` block, their attributes included); its parts are named after
+##! the obligations they discharge, a name or names and a `:` at the start
+##! of the comment or after a `;` or a sentence's `.` (`valid, aligned:
+##! ...; pure: ...`). A `Safety:` list is the paragraph of an item's `##`
+##! comment that starts with `Safety` (`Safety (for implementors):` too),
+##! one obligation a line, ``- `name`: what it asks``.
+
+from stage1.diag import Diagnostic, Msg, TextRange
+from stage1.syntax.ast import Vis
+from stage1.typeck.check import Checker, Cx, UnsafeOp, UnsafeRegion
+from stage1.typeck.program import FnInfo
+from stage1.typeck.ty import DefId, Ty, TyData
+
+## A `# safety:` comment: its text after `# safety:`, its lines joined by
+## spaces, and the range of its lines.
+pub struct SafetyComment:
+    pub text: String
+    pub range: TextRange
+
+## The start of the line that holds byte `at`.
+pub pure def line_start(text: str, at: int) -> int:
+    var i = min(at, text.byte_len())
+    while i > 0 and text.byte_at(i - 1) != 10:
+        i -= 1
+    return i
+
+## The `# safety:` comment immediately above the line that holds byte
+## `at`: of the run of comment lines (not `##` or `#!`) right above it, the
+## lines from the first that starts with `# safety:` down.
+pub pure def safety_comment(text: str, at: int) -> SafetyComment?:
+    var lines: list[(int, int)] = []
+    var end = line_start(text, at)
+    while end > 0:
+        let start = line_start(text, end - 1)
+        let line = text.byte_slice(start, end - 1).trim()
+        if not line.starts_with("#") or line.starts_with("##") or line.starts_with("#!"):
+            break
+        lines.push((start, end - 1))
+        end = start
+    lines.reverse()
+    var first: int? = None
+    for i in range(len(lines)):
+        let (s, e) = lines[i]
+        if first.is_none() and text.byte_slice(s, e).trim().starts_with("# safety:"):
+            first = Some(i)
+    let k = first else:
+        return None
+    var out = String.new()
+    for i in range(k, len(lines)):
+        let (s, e) = lines[i]
+        var body = text.byte_slice(s, e).trim().strip_prefix("#").trim()
+        if i == k:
+            body = body.strip_prefix("safety:").trim()
+        if not body.is_empty():
+            if not out.is_empty():
+                out.push(" ")
+            out.push(body)
+    var start = lines[k].0
+    while start < lines[k].1 and text.byte_at(start) == 32:
+        start += 1
+    let range = TextRange(start=start, end=lines[len(lines) - 1].1)
+    return Some(SafetyComment(text=out, range=range))
+
+pure def is_name_byte(b: int) -> bool:
+    return (b >= 97 and b <= 122) or (b >= 48 and b <= 57) or b == 95
+
+## The names a `# safety:` comment's parts begin with: at the start of the
+## comment and after each `;` or `. `, the names before a `:` (`valid,
+## aligned: ...`).
+pub pure def named_parts(comment: str) -> list[String]:
+    var out: list[String] = []
+    let n = comment.byte_len()
+    var i = 0
+    var at_part = True
+    while i < n:
+        if at_part:
+            at_part = False
+            while i < n and comment.byte_at(i) == 32:
+                i += 1
+            var j = i
+            var names: list[String] = []
+            var named = False
+            var more = True
+            while more:
+                more = False
+                let s = j
+                while j < n and is_name_byte(comment.byte_at(j)):
+                    j += 1
+                if j > s:
+                    names.push(comment.byte_slice(s, j).to_string())
+                    if j < n and comment.byte_at(j) == 58:
+                        named = True
+                    elif j + 1 < n and comment.byte_at(j) == 44 and comment.byte_at(j + 1) == 32:
+                        j += 2
+                        more = True
+            if named:
+                for x in names:
+                    out.push(x.copy())
+            if i >= n:
+                break
+        let c = comment.byte_at(i)
+        if c == 59 or (c == 46 and i + 1 < n and comment.byte_at(i + 1) == 32):
+            at_part = True
+        i += 1
+    return out
+
+## The `##` lines right above the line that holds byte `at`, attribute
+## lines skipped, each without `##` and the one space after it.
+pub pure def doc_above(text: str, at: int) -> list[String]:
+    var out: list[String] = []
+    var end = line_start(text, at)
+    while end > 0:
+        let start = line_start(text, end - 1)
+        let line = text.byte_slice(start, end - 1).trim()
+        if line.starts_with("##") and not line.starts_with("##!"):
+            out.push(line.strip_prefix("##").strip_prefix(" ").to_string())
+        elif not line.starts_with("@"):
+            break
+        end = start
+    out.reverse()
+    return out
+
+## The obligations the `Safety:` list of doc lines names; `None` without
+## one.
+pub pure def safety_list(docs: list[String]) -> list[String]?:
+    var i = 0
+    while i < len(docs):
+        let line = docs[i].trim()
+        if line.starts_with("Safety") or line.starts_with("# Safety"):
+            break
+        i += 1
+    if i >= len(docs):
+        return None
+    var out: list[String] = []
+    i += 1
+    while i < len(docs):
+        let raw: str = docs[i]
+        let line = raw.trim()
+        if line.is_empty():
+            break
+        if line.starts_with("- `"):
+            let rest = line.strip_prefix("- `")
+            if let Some(k) = rest.find("`"):
+                out.push(rest.byte_slice(0, k).to_string())
+        elif not raw.starts_with(" "):
+            break
+        i += 1
+    return Some(out)
+
+## Names written as a list in a message: `` `a` ``, `` `a`, `b` ``.
+pub pure def listed(names: list[String]) -> String:
+    var out = String.new()
+    for n in names:
+        if not out.is_empty():
+            out.push(", ")
+        out.push("`{n}`")
+    return out
+
+## Whether `comment` names one of `obligations`.
+pure def names_one(named: list[String], obligations: list[String]) -> bool:
+    for o in obligations:
+        if named.contains(o.copy()):
+            return True
+    return False
+
+## A `# safety:` comment's diagnostics for a declaration at `at` (an
+## `unsafe impl`, an `extern` block) that has none: `W0007` naming `what`.
+pub pure def missing_comment(text: str, at: TextRange, what: str) -> Diagnostic?:
+    if safety_comment(text, at.start).is_some():
+        return None
+    let d = Diagnostic.new(Msg.UnsafeNoSafetyComment, at.start, header_end(text, at))
+    return Some(d.with("what", what))
+
+## The end of the first line of a declaration at `at` (its header), for a
+## diagnostic that should not cover its body.
+pub pure def header_end(text: str, at: TextRange) -> int:
+    var i = at.start
+    let n = min(at.end, text.byte_len())
+    while i < n and text.byte_at(i) != 10:
+        i += 1
+    while i > at.start and (text.byte_at(i - 1) == 58 or text.byte_at(i - 1) == 13):
+        i -= 1
+    return i
+
+impl Checker:
+    ## Enters an `unsafe:` block (`block`) or an `unsafe` expression at
+    ## `range`.
+    pub pure def enter_unsafe(mut self, cx: Cx, range: TextRange, block: bool):
+        # Code that compile-time evaluation wrote holds none (D-085).
+        let module_name = ref cx.prog.modules[self.module.index].name
+        if module_name.starts_with("<") and not module_name.starts_with("<doc>/"):
+            self.report_other(self.error(cx, Msg.ComptimeUnsafeWritten, range))
+        # Outside a statement (a constant's value, a default), the comment is
+        # above the line it is on.
+        var start = self.stmt_start
+        if start == 0:
+            start = range.start
+        let region = UnsafeRegion(
+            range=range, block=block, stmt_start=start, ops=[], impure=[], unresolved=False
+        )
+        self.unsafe_regions.push(region)
+        self.unsafe_stack.push(len(self.unsafe_regions) - 1)
+
+    pub pure def exit_unsafe(mut self):
+        _ = self.unsafe_stack.pop()
+
+    ## A call of a name that did not resolve, inside an `unsafe` block or
+    ## expression: it may have been an unsafe operation.
+    pub pure def unresolved_call(mut self):
+        if let Some(k) = self.unsafe_stack.last():
+            self.unsafe_regions[k].unresolved = True
+
+    ## The name a diagnostic gives the function `d`: `Type.name` for a
+    ## method, `Trait.name` for a trait's, the bare name otherwise.
+    pub pure def callee_name(self, cx: Cx, d: DefId, f: FnInfo) -> String:
+        let name = cx.prog.defs[d.index].name.copy()
+        if let Some(t) = f.trait_:
+            return "{cx.prog.defs[t.index].name}.{name}"
+        if let Some(o) = f.owner:
+            if let TyData.Adt(od, _) = self.types.data(o):
+                return "{cx.prog.defs[od.index].name}.{name}"
+        return name
+
+    ## A call of `d` at `at`: an unsafe operation when `d` is an `unsafe
+    ## def` or a foreign function, permitted only inside an `unsafe:` block
+    ## or an `unsafe` expression (22, D-080), where it is recorded for the
+    ## block's comment; outside one it is `E0981` or `E0982`, naming the
+    ## obligations of the callee's `Safety:` list.
+    pub pure def unsafe_call(mut self, cx: Cx, d: DefId, f: FnInfo, at: TextRange):
+        if not f.unsafe_ and not f.foreign:
+            return
+        let name = self.callee_name(cx, d, f)
+        if f.foreign:
+            self.foreign_calls.push((name.copy(), at))
+        if let Some(k) = self.unsafe_stack.last():
+            let op = UnsafeOp(
+                callee=name, foreign=f.foreign, obligations=f.obligations.copy(), range=at
+            )
+            self.unsafe_regions[k].ops.push(op)
+            return
+        let m = if f.foreign: Msg.UnsafeForeignCall else: Msg.UnsafeCall
+        var diag = self.error(cx, m, at).with("name", name)
+        let end = diag.end
+        if let Some(os) = f.obligations:
+            if len(os) == 1:
+                diag = diag.label_with(
+                    Msg.UnsafeItsObligation, at.start, end, "obligations", listed(os)
+                )
+            elif len(os) > 1:
+                diag = diag.label_with(
+                    Msg.UnsafeItsObligations, at.start, end, "obligations", listed(os)
+                )
+        self.report_other(diag.note(Msg.UnsafeWriteReason))
+
+    ## A call of `d`, which is not `pure`, from a `pure` body: inside an
+    ## `unsafe` block, its author's assertion that the body stays
+    ## observationally pure (D-085), which the block's comment explains.
+    pub pure def impure_call(mut self, cx: Cx, d: DefId, at: TextRange):
+        let k = self.unsafe_stack.last() else:
+            return
+        let f = cx.prog.fn_info(d) else:
+            return
+        let name = self.callee_name(cx, d, f)
+        self.unsafe_regions[k].impure.push((name, at))
+
+    ## `E0983`: an `unsafe def` or a foreign function used as a value.
+    pub pure def unsafe_fn_value(mut self, cx: Cx, d: DefId, f: FnInfo, at: TextRange):
+        let name = self.callee_name(cx, d, f)
+        let what = if f.foreign: "a foreign function" else: "an `unsafe def`"
+        let diag = self.error(cx, Msg.UnsafeFnValue, at).with("name", name).with("what", what)
+        self.report_other(diag.note_with(Msg.UnsafeCallInClosure, "name", name))
+
+    ## The ranges of the body's `unsafe` blocks that assert purity: calls
+    ## inside them of functions that are not `pure` are not the ownership
+    ## checker's to report (D-085).
+    pub pure def asserted_regions(self) -> list[TextRange]:
+        var out: list[TextRange] = []
+        for r in self.unsafe_regions:
+            if not r.impure.is_empty():
+                out.push(r.range)
+        return out
+
+    ## The lints of the body's unsafe code, once it is checked (22, "The
+    ## audit and the lints"): a block or expression with no unsafe
+    ## operation (`W0009`), one without its `# safety:` comment (`W0007`),
+    ## a comment that names no obligation of a callee (`W0010`) or, in a
+    ## `pure` function, no `pure:` part for what it asserts (`W0011`).
+    pub pure def unsafe_lints(mut self, cx: Cx):
+        if not self.reports_lints(cx):
+            return
+        let regions = self.unsafe_regions.copy()
+        for r in regions:
+            let what = if r.block: "`unsafe:` block" else: "`unsafe` expression"
+            let first_line = header_end(cx.source, r.range)
+            if r.ops.is_empty() and r.impure.is_empty():
+                # A callee that did not resolve may have been one.
+                if r.unresolved:
+                    continue
+                var d = Diagnostic.new(Msg.UnsafeUnused, r.range.start, first_line)
+                d = d.with("what", what)
+                if not r.block:
+                    # `unsafe e`: the word and the space after it go.
+                    var end = r.range.start + 6
+                    while end < r.range.end and cx.source.byte_at(end) == 32:
+                        end += 1
+                    d = d.fix_at(Msg.UnsafeRemoveUnsafe, r.range.start, end, "")
+                self.report(d)
+                continue
+            let comment = safety_comment(cx.source, r.stmt_start) else:
+                let d = Diagnostic.new(Msg.UnsafeNoSafetyComment, r.range.start, first_line)
+                self.report(d.with("what", what))
+                continue
+            let named = named_parts(comment.text)
+            var reported: list[String] = []
+            for op in r.ops:
+                let os = op.obligations.copy() ?? []
+                if os.is_empty() or reported.contains(op.callee.copy()):
+                    continue
+                if not names_one(named, os):
+                    reported.push(op.callee.copy())
+                    var d = Diagnostic.new(
+                        Msg.UnsafeUnnamedObligation, comment.range.start, comment.range.end
+                    )
+                    self.report(d.with("callee", op.callee).with("obligations", listed(os)))
+            if not r.impure.is_empty() and not named.contains("pure".to_string()):
+                let (callee, _) = r.impure[0].copy()
+                let fname = cx.prog.defs[self.def_.index].name.copy()
+                var d = Diagnostic.new(Msg.UnsafeUnexplainedPurity, r.range.start, first_line)
+                self.report(d.with("what", what).with("callee", callee).with("name", fname))
+        self.ambient_authority(cx)
+
+    ## `W0014`: a public safe function that calls a foreign function and
+    ## takes no capability (22, clause 5; D-084). A `pure` one asserts that
+    ## the call has no effect on the world, which its block's comment says.
+    pure def ambient_authority(mut self, cx: Cx):
+        if self.foreign_calls.is_empty():
+            return
+        let callee = self.foreign_calls[0].0.copy()
+        let def_ = ref cx.prog.defs[self.def_.index]
+        if def_.vis != Vis.Pub:
+            return
+        let f = cx.prog.fn_info(self.def_) else:
+            return
+        if f.unsafe_ or f.pure:
+            return
+        for p in f.params:
+            if self.takes_capability(cx, p.ty, 0):
+                return
+        let at = def_.span
+        let d = Diagnostic.new(Msg.UnsafeAmbientAuthority, at.start, at.end)
+        self.report(d.with("name", def_.name).with("callee", callee).note(Msg.UnsafeTakeCapability))
+
+    ## Whether a parameter of this type gives its function a capability: a
+    ## capability object, a `Cap` or a `Lent`, or what holds one.
+    pure def takes_capability(self, cx: Cx, ty: Ty, depth: int) -> bool:
+        if depth > 16:
+            return False
+        match self.types.data(ty):
+            case TyData.Ref(inner, _):
+                return self.takes_capability(cx, inner, depth + 1)
+            case TyData.Tuple(es, _):
+                for e in es:
+                    if self.takes_capability(cx, e, depth + 1):
+                        return True
+                return False
+            case TyData.Adt(d, args):
+                if let Some(b) = cx.prog.builtin(d):
+                    let bs: str = b
+                    match bs:
+                        case "Fs" | "Net" | "Clock" | "Rand" | "Env" | "Proc" | "Stdin" | "System":
+                            return True
+                        case "Cap" | "Lent":
+                            return True
+                        case _:
+                            pass
+                for a in args:
+                    if self.takes_capability(cx, a, depth + 1):
+                        return True
+                if let Some(s) = cx.prog.struct_info(d):
+                    for fi in s.fields:
+                        if self.takes_capability(cx, fi.ty, depth + 1):
+                            return True
+                return False
+            case TyData.Dyn(_):
+                return True
+            case _:
+                return False
+
+    ## Whether this body's lints are reported: the program's own code, not
+    ## the standard library's (trusted, `sisu audit --unsafe --std` shows
+    ## it) nor code the compiler wrote.
+    pure def reports_lints(self, cx: Cx) -> bool:
+        return cx.prog.user_modules.contains(self.module)
+
+test "a `# safety:` comment is the comment right above the statement, from its `# safety:` line":
+    let text = "def f():\n    # an aside\n    # safety: valid, aligned: p is live;\n    #   pure: nothing depends on it.\n    unsafe:\n        pass\n"
+    let at = text.find("unsafe").expect("the block")
+    let c = safety_comment(text, at).expect("a comment")
+    assert c.text == "valid, aligned: p is live; pure: nothing depends on it."
+    assert text.byte_slice(c.range.start, c.range.start + 9) == "# safety:"
+    let spaced = "def f():\n    # safety: valid: p is live.\n\n    unsafe:\n        pass\n"
+    assert safety_comment(spaced, spaced.find("unsafe").expect("the block")).is_none()
+
+test "a comment's parts are named after the obligations they discharge":
+    let named = named_parts("valid, aligned: p is live, so it is fine; pure: x. stable: y")
+    assert named
+        == ["valid".to_string(), "aligned".to_string(), "pure".to_string(), "stable".to_string()]
+    assert named_parts("the list was made: above").is_empty()
+    assert named_parts("in_bounds: start + n <= size").contains("in_bounds".to_string())
+
+test "a `Safety:` list names one obligation a line":
+    let docs = [
+        "Reads a value.".to_string(),
+        "".to_string(),
+        "Safety:".to_string(),
+        "- `valid`: it points to a live value".to_string(),
+        "  that is initialised".to_string(),
+        "- `aligned`: it is aligned".to_string(),
+        "".to_string(),
+        "More.".to_string(),
+    ]
+    assert safety_list(docs) == Some(["valid".to_string(), "aligned".to_string()])
+    assert safety_list(["Reads a value.".to_string()]).is_none()
+    let text = "## Reads.\n##\n## Safety:\n## - `once`: once\n@inline\nunsafe def f():\n    pass\n"
+    let lines = doc_above(text, text.find("@inline").expect("the attribute"))
+    assert safety_list(lines) == Some(["once".to_string()])

@@ -48,6 +48,9 @@ pub struct Ctx:
     ## definitions (`lower.traits_by_name`): where a `Trait.method` name is
     ## looked up.
     pub traits: dict[String, list[DefId]]
+    ## The `unsafe` blocks of `pure` functions that assert purity (D-085),
+    ## each a source and its range, as the bodies are lowered.
+    pub asserted: list[(int, Loc)]
 
 impl Ctx:
     ## A context that names nothing of a program's own: what the names of
@@ -67,6 +70,7 @@ impl Ctx:
             benches={},
             instances={},
             traits={},
+            asserted=[],
         )
 
     ## Finds the program's tests, benchmarks and instances by definition,
