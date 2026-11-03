@@ -352,16 +352,16 @@ EPYC 7763 Hyper-V guest with 4 vCPUs on two cores, 15.6 GiB
 five runs; KiB per task is resident memory plus page tables. The verdicts are
 provisional until the pre-registration is frozen.
 
-| Bet-3 row | Machine 1 | Machine 2 | Verdict (provisional) |
-|---|---|---|---|
-| Memory per idle task within 4x Go (after the excursion: Go after GC), on both machines | D(B) passes at every reservation: worst ratio 1.75 / 2.41 / 3.16 at 128 KiB / 1 MiB / 8 MiB (D(B)/1 MiB: 6.43 KiB shallow and 6.44 KiB after the excursion at 1M tasks, against Go's 2.67 [2.65-2.70] and 5.02 [5.01-5.02] after GC at 100k). B and C fail after the excursion (6.86x, 7.08x); A and D(A) stop at 32,730 tasks | D(B) passes at 128 KiB (worst ratio 1.75); at 1 MiB and 8 MiB the 100k conditions pass (worst 2.41, 3.16) but the memory guard stopped the 1M cells at 950,272-962,560 and 712,704-733,184 tasks, so they are inconclusive. B and C fail after the excursion (6.94x, 7.15x); A and D(A) stop at 32,738 tasks | holds, through D(B): at 128 KiB on all three machines, and at every reservation on machines 1 and 3. Machine 3 (`idle-memory` only): worst ratio 1.76 / 2.42 / 3.17, the 1M cells included; D(B)/1 MiB holds 6.44 KiB per task at 1M tasks, 2.41x Go shallow and, after the excursion, 1.28x Go after GC. B and C fail there too (6.87x, 7.08x after the excursion), though their 1M cells are within 4x |
-| Spawn plus join within 3x Go (pooled stacks) | B 0.64 [0.64-0.80] us, 1.40x Go | B 0.73 [0.52-0.73] us, 1.84x Go | holds |
-| 1M idle tasks, default sysctls | B, C, D(B), E, tokio, Go, Java: 1M, still parked after 60 s; A and D(A): 32,730 (`vm.max_map_count`) | the same; A and D(A): 32,738 | fails for guard pages per task, holds for pooled stacks |
-| Echo p99 at 10k connections within 2x Go | not run (descriptor limit); at 1000 connections D(B) 0.85x Go | D(B) 0.91x and B 0.91x Go, every stackful strategy at most 1.07x; at 1000 connections D(B) 0.87x | not shown (one machine) |
-| Clean "stack exhausted", never a segfault | every case clean, 0 crashes; at most 2,088 bytes of the 5 KiB reserve used | the same | holds (harness part) |
-| Starvation: no worse than Go, under 10 ms | B 25.7 [25.0-30.0] us with yield points every 10k iterations; Go 39.3 [39.3-39.4] ms | B 23.6 [23.3-23.7] us; Go 39.2 ms | holds |
-| Probe overhead at most 3 % | `split`: fib 13.3 %, calls 0.0 %, tree 4.5 %, back-edge yield check -0.1 % | fib 8.6 %, calls 0.2 %, tree 2.2 %, back-edge yield check 3.5 % | not decided (no PMU; policy 1); at face value `fib` exceeds 3 % on both, `tree` on machine 1 and the back-edge check on machine 2 |
-| A1: no buffer written after its cancelled read returned | 0 bytes over 1M cancelled reads per run, 25 runs in all on the five stackful strategies | the same, 25 runs | holds |
+| Bet-3 row | Machine 1 | Machine 2 | Machine 3 (`idle-memory` only) | Verdict (provisional) |
+|---|---|---|---|---|
+| Memory per idle task within 4x Go (after the excursion: Go after GC), on both machines | D(B) passes at every reservation: worst ratio 1.75 / 2.41 / 3.16 at 128 KiB / 1 MiB / 8 MiB (D(B)/1 MiB: 6.43 KiB shallow and 6.44 KiB after the excursion at 1M tasks, against Go's 2.67 [2.65-2.70] and 5.02 [5.01-5.02] after GC at 100k). B and C fail after the excursion (6.86x, 7.08x); A and D(A) stop at 32,730 tasks | D(B) passes at 128 KiB (worst ratio 1.75); at 1 MiB and 8 MiB the 100k conditions pass (worst 2.41, 3.16) but the memory guard stopped the 1M cells at 950,272-962,560 and 712,704-733,184 tasks, so they are inconclusive. B and C fail after the excursion (6.94x, 7.15x); A and D(A) stop at 32,738 tasks | D(B) passes at every reservation, the 1M cells included: worst ratio 1.76 / 2.42 / 3.17 (D(B)/1 MiB at 1M tasks: 6.44 KiB shallow and after the excursion, 2.41x Go shallow and, after the excursion, 1.28x Go after GC at 100k and 2.42x Go shallow at 1M). B and C fail after the excursion (6.87x, 7.08x), though their 1M cells, shallow only (policy 7), are within 4x (1.76x-3.17x); A and D(A) stop at 32,732-32,733 tasks | holds, through D(B): at 128 KiB on all three machines, and at every reservation, the 1 MiB default included, on machines 1 and 3 |
+| Spawn plus join within 3x Go (pooled stacks) | B 0.64 [0.64-0.80] us, 1.40x Go | B 0.73 [0.52-0.73] us, 1.84x Go | not run | holds |
+| 1M idle tasks, default sysctls | B, C, D(B), E, tokio, Go, Java: 1M, still parked after 60 s; A and D(A): 32,730 (`vm.max_map_count`) | the same; A and D(A): 32,738 | not run | fails for guard pages per task, holds for pooled stacks |
+| Echo p99 at 10k connections within 2x Go | not run (descriptor limit); at 1000 connections D(B) 0.85x Go | D(B) 0.91x and B 0.91x Go, every stackful strategy at most 1.07x; at 1000 connections D(B) 0.87x | not run | not shown (one machine) |
+| Clean "stack exhausted", never a segfault | every case clean, 0 crashes; at most 2,088 bytes of the 5 KiB reserve used | the same | not run | holds (harness part) |
+| Starvation: no worse than Go, under 10 ms | B 25.7 [25.0-30.0] us with yield points every 10k iterations; Go 39.3 [39.3-39.4] ms | B 23.6 [23.3-23.7] us; Go 39.2 ms | not run | holds |
+| Probe overhead at most 3 % | `split`: fib 13.3 %, calls 0.0 %, tree 4.5 %, back-edge yield check -0.1 % | fib 8.6 %, calls 0.2 %, tree 2.2 %, back-edge yield check 3.5 % | not run | not decided (no PMU; policy 1); at face value `fib` exceeds 3 % on both, `tree` on machine 1 and the back-edge check on machine 2 |
+| A1: no buffer written after its cancelled read returned | 0 bytes over 1M cancelled reads per run, 25 runs in all on the five stackful strategies | the same, 25 runs | not run | holds |
 
 Q-6, provisionally: D(B) with a 1 MiB default reservation, software probes
 rather than guard pages, the 5 KiB reserve, `spawn` ambient, and no stackless
@@ -492,8 +492,9 @@ CSVs in `results/vm/2026-10-12-large/`. This VM has the 16 GiB of the scale row.
   `src/bench/probe_overhead.rs`). Policy 1 defers the decision to the native era
   on a machine with pinned frequency and `perf_event` hardware counters.
 * **Go "latest stable".** The machines have Go 1.24 (1.24.7 on machine 1,
-  1.24.13 on machine 2); the plan asks for the latest stable release. JDK is
-  21.0.12 on both (virtual threads final; JEP 491 unpinning is 24+).
+  1.24.13 on machines 2 and 3); the plan asks for the latest stable release.
+  JDK is 21.0.12 on machines 1 and 2 and 21.0.13 on machine 3 (virtual threads
+  final; JEP 491 unpinning is 24+).
 
 ## Not implemented
 

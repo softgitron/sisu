@@ -16,11 +16,11 @@ runtime.Gosched). Ratio intervals are 95% percentile bootstrap intervals from
 followed by the conservative range [min/max, max/min] that section 2.4 uses to
 call a cell inconclusive when it crosses a threshold; with two or more machines,
 section 2.4's two-machine rule is also applied to each pair (a configuration
-passes or fails only if it does so on both machines of the pair). The last table is the
-machine's load during the runs (load.csv, written by load.sh): how many
-processes were measured again because other processes were busy, and how many
-CPUs the other processes used during the processes that were kept. Standard
-library only.
+passes or fails only if it does so on both machines of the pair). The last
+table is the machine's load during the runs (load.csv, written by load.sh): how
+many processes were measured again because other processes were busy, and how
+many CPUs the other processes used during the processes that were kept.
+Standard library only.
 """
 import csv
 import glob

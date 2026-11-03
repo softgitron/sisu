@@ -10,11 +10,12 @@ cell. M3_DIR is machine 3, the 16 GiB runner, which ran `idle-memory` alone
 (five runs per cell) to measure the million-task cells machine 2 could not
 hold: the idle-memory tables show the three machines, and section 2.4's rule
 is applied to M1 with each runner. SMOKE_DIR is machine 2's earlier CI smoke
-run (harness 0.1.0, one run per cell). It is loaded on its own, so that its cells never mix with M2_DIR's
-(both have the machine id github-runner), and the report cites it only for what
-the full run cannot show: the runner image's own settings (before the workflow
-changes them), Go's memory under transparent huge pages "always", the first
-unwind before the unwinder fix, and C under the old 8 KiB reserve.
+run (harness 0.1.0, one run per cell). It is loaded on its own, so that its
+cells never mix with M2_DIR's (both have the machine id github-runner), and the
+report cites it only for what the full run cannot show: the runner image's own
+settings (before the workflow changes them), Go's memory under transparent huge
+pages "always", the first unwind before the unwinder fix, and C under the old
+8 KiB reserve.
 """
 import csv
 import importlib.util

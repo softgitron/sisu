@@ -883,7 +883,14 @@ secondary triggers its own action.
 **Bet 3 at week 8: holds, provisionally.** Through its primary: D(B), the
 default strategy, passes section 2.4 at 128 KiB on all three machines (w = 1.75
 on M1 and M2 and 1.76 on M3), and at every reservation on M1 and M3, the two
-machines with 16 GiB, the 1 MiB default included (w = 2.41 and 2.42); the
+machines with 16 GiB. At the 1 MiB default, D(B) holds within the pre-registered
+bound of 4x Go at a million tasks on the 16 GiB runner: 2.41x Go shallow, and
+after the excursion 1.28x Go after its GC at 100k and 2.42x Go shallow at 1M, so
+w = 2.42 (conservative range 2.38-2.44) against 2.41 on M1, and w = 3.17 at 8
+MiB. B and C fail on every machine: their million-task cells, which policy 7
+requires in the shallow phase only, are within the bound on M3 (B 2.41x at 1 MiB
+and 3.17x at 8 MiB, C 2.06x to 2.07x), but after the excursion at 100k they
+exceed it there as on M1 and M2 (B/1 MiB 6.87x and C 7.08x Go after its GC). The
 machines agree wherever they measured, and only M2 could not hold D(B)'s 1M
 cells at 1 MiB and 8 MiB. No guard has tripped: the exhaustion guard is decided
 at week 40, against the default reservation chosen here, and can still stop the
@@ -1076,11 +1083,13 @@ decisions") changed that, and this report follows them:
   in the smoke run, and the lost run 38495423545, outside any scope, ran idle
   connections at 32,700, the most (in whole hundreds) that a hard limit of
   65,536 allows. The run does not record why the scope's limit was higher; it is
-  most likely inherited through `sudo`, which starts the scope. The workflow did
-  not raise the limit, but its benchmarks did not run under the runner's default
-  either. Under that default the 10k echo would still have run (it needs
-  20,064), and the 100k idle connections would have run at 32,700. Neither cell
-  decides a verdict: the echo row is not shown, and idle RSS is reported only.
+  most likely inherited through `sudo`, which starts the scope. M3's scope,
+  started by the same command on a later runner image (Ubuntu 26.04.1 LTS), had
+  65536/65536, so the command alone does not set it. The workflow did not raise
+  the limit, but its benchmarks did not run under the runner's default either.
+  Under that default the 10k echo would still have run (it needs 20,064), and
+  the 100k idle connections would have run at 32,700. Neither cell decides a
+  verdict: the echo row is not shown, and idle RSS is reported only.
 * **M2's kernel and other limits.** M2 runs Linux 6.17.0-1022-azure with
   io_uring enabled, which meets section 4.4's "6.1 or later"; the workflow
   restores `vm.max_map_count` to 65530 (the image's is 262144), so A and D(A)
@@ -1145,7 +1154,14 @@ decisions") changed that, and this report follows them:
   the same on them. The harness reads its baseline after runtime start-up
   without the 1,000-task warm-up of section 6.5; at most the first 1,000 tasks
   could find warm memory, so the effect is at most 1 % at 100k and conservative
-  (it raises the per-task figure) for every implementation.
+  (it raises the per-task figure) for every implementation. Section 6.5 also has
+  the controls run a full collection before every reading; the Go control
+  collects before its baseline and, for its after-excursion figure of record,
+  four times after the excursion (policy 4), but reads its shallow figure
+  without one. Its goroutines' stacks are then at Go's minimum size, which a
+  collection does not shrink: 2,048-2,053 bytes of stack in use per goroutine in
+  every run on every machine, at 100k and at 1M
+  (`go_stack_inuse_per_task_shallow`).
 * **Echo** is a closed loop with the clients in the same process and on the same
   vCPUs, measured for 30 s after 5 s of warm-up; section 6.5 asks for an
   open-loop load generator on disjoint cores at a fixed rate, 60 s after 10 s of
@@ -1268,7 +1284,7 @@ decisions") changed that, and this report follows them:
 | Idle connections at 100k for A and D(A) | M2 | failed rows: the client's `connect` timed out in every run; a guarded mapping per server task meets the VMA limit near 32,738 tasks (section 4) |
 | OS threads beyond 9,489 (`idle-memory` at 10k, `max-tasks`) | M2 | the scope's pids cgroup of 9491 tasks: thread creation fails with `EAGAIN`, a failed row |
 | Instruction counts for probe overhead | M1, M2 | no PMU on either machine |
-| The semantics rows, the `sim` study, the corpus stack-depth histogram, interpreter starvation | both | interpreter era (Phases 6-9), not Phase 1 |
+| The semantics rows, the `sim` study, the corpus stack-depth histogram, interpreter starvation | every machine | interpreter era (Phases 6-9), not Phase 1 |
 
 ### 10.5 Measured on one machine only
 

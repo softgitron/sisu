@@ -1,5 +1,8 @@
 # The cells of the Phase 1 harness (taskbench) that machine 2 could not
-# settle, run again on a runner large enough for them.
+# settle, run again on a runner large enough for them. Run 41548553538
+# (commit 0333a08) did so: its results are taskbench/results/github-runner/
+# cell-41548553538, machine 3 of the report, where D(B) at the 1 MiB default
+# holds at a million tasks. The workflow stays for repeat runs.
 #
 # taskbench/docs/report-phase1.md (sections 1, 9.3, 10.4 and 10.5): on the 7.75 GiB
 # runner of run 38518035636 the memory guard stopped the `idle-memory` cells

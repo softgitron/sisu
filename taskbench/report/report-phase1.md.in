@@ -818,13 +818,25 @@ secondary triggers its own action.
 **Bet 3 at week 8: holds, provisionally.** Through its primary: D(B), the
 default strategy, passes section 2.4 at 128 KiB on all three machines (w =
 {{ trio(w(M1, "D(B)/128K"), w(M2, "D(B)/128K"), w(M3, "D(B)/128K")) }}), and at every
-reservation on M1 and M3, the two machines with 16 GiB, the 1 MiB default
-included (w = {{ w(M1, "D(B)/1M") }} and {{ w(M3, "D(B)/1M") }}); the machines agree
-wherever they measured, and only M2 could not hold D(B)'s 1M cells at 1 MiB and
-8 MiB. No guard has tripped: the exhaustion guard is decided at
-week 40, against the default reservation chosen here, and can still stop the
-bet. The verdict, like every verdict in this report, stays provisional until
-the pre-registration is frozen.
+reservation on M1 and M3, the two machines with 16 GiB. At the 1 MiB default,
+D(B) holds within the pre-registered bound of 4x Go at a million tasks on the
+16 GiB runner: {{ imr(M3, "D(B)/1M", 1000000) }}x Go shallow, and after the
+excursion {{ imr(M3, "D(B)/1M", 1000000, "excursion", 100000, "excursion_after_gc") }}x Go
+after its GC at 100k and {{ imr(M3, "D(B)/1M", 1000000, "excursion", 1000000, "shallow") }}x
+Go shallow at 1M, so w = {{ w(M3, "D(B)/1M") }} (conservative range
+{{ lohi(M3, IM, "D(B)/1M N=1000000", "total_per_task_excursion", "go N=1000000", "total_per_task_shallow") }})
+against {{ w(M1, "D(B)/1M") }} on M1, and w = {{ w(M3, "D(B)/8M") }} at 8 MiB. B and C fail
+on every machine: their million-task cells, which policy 7 requires in the
+shallow phase only, are within the bound on M3 (B {{ imr(M3, "B/1M", 1000000) }}x at
+1 MiB and {{ imr(M3, "B/8M", 1000000) }}x at 8 MiB, C {{ imr(M3, "C/36K", 1000000) }}x to
+{{ imr(M3, "C/48K", 1000000) }}x), but after the excursion at 100k they exceed it
+there as on M1 and M2 (B/1 MiB {{ imr(M3, "B/1M", 100000, "excursion") }}x and C
+{{ imr(M3, "C/36K", 100000, "excursion") }}x Go after its GC). The machines agree wherever they
+measured, and only M2 could not hold D(B)'s 1M cells at 1 MiB and 8 MiB. No
+guard has tripped: the exhaustion guard is decided at week 40, against the
+default reservation chosen here, and can still stop the bet. The verdict, like
+every verdict in this report, stays provisional until the pre-registration is
+frozen.
 
 ### 9.2 Q-6 recommendation (provisional, harness era)
 
@@ -1066,7 +1078,9 @@ decisions") changed that, and this report follows them:
   the most (in whole hundreds) that a hard limit of
   {{ num(spec("smoke", "rlimit_nofile").split("/")[1]) }} allows. The run does not
   record why the scope's limit was higher; it is most likely inherited through
-  `sudo`, which starts the scope. The workflow did not raise the limit, but its
+  `sudo`, which starts the scope. M3's scope, started by the same command on a
+  later runner image ({{ spec(M3, "os") }}), had {{ spec(M3, "rlimit_nofile") }}, so
+  the command alone does not set it. The workflow did not raise the limit, but its
   benchmarks did not run under the runner's default either. Under that default
   the 10k echo would still have run (it needs 20,064), and the 100k idle
   connections would have run at
@@ -1159,7 +1173,14 @@ decisions") changed that, and this report follows them:
   runtime start-up without the 1,000-task warm-up of section 6.5; at most
   the first 1,000 tasks could find warm memory, so the effect is at most
   1 % at 100k and conservative (it raises the per-task figure) for every
-  implementation.
+  implementation. Section 6.5 also has the controls run a full collection
+  before every reading; the Go control collects before its baseline and, for
+  its after-excursion figure of record, four times after the excursion
+  (policy 4), but reads its shallow figure without one. Its goroutines' stacks
+  are then at Go's minimum size, which a collection does not shrink:
+  {{ num(min(cell(m, IM, f"go N={n}").rng("go_stack_inuse_per_task_shallow")[0] for m in (M1, M2, M3) for n in (100000, 1000000))) }}-{{ num(max(cell(m, IM, f"go N={n}").rng("go_stack_inuse_per_task_shallow")[1] for m in (M1, M2, M3) for n in (100000, 1000000))) }}
+  bytes of stack in use per goroutine in every run on every machine, at 100k
+  and at 1M (`go_stack_inuse_per_task_shallow`).
 * **Echo** is a closed loop with the clients in the same process and on the
   same vCPUs, measured for 30 s after 5 s of warm-up; section 6.5 asks for an
   open-loop load generator on disjoint cores at a fixed rate, 60 s after 10 s
@@ -1284,7 +1305,7 @@ decisions") changed that, and this report follows them:
 | Idle connections at 100k for A and D(A) | M2 | failed rows: the client's `connect` timed out in every run; a guarded mapping per server task meets the VMA limit near {{ med(M2, MT, "A/1M N=1000000", "max_tasks", "", 0) }} tasks (section 4) |
 | OS threads beyond {{ med(M2, MT, "os-threads N=30000", "max_tasks", "", 0) }} (`idle-memory` at 10k, `max-tasks`) | M2 | the scope's pids cgroup of {{ spec(M2, "cgroup_pids_max") }} tasks: thread creation fails with `EAGAIN`, a failed row |
 | Instruction counts for probe overhead | M1, M2 | no PMU on either machine |
-| The semantics rows, the `sim` study, the corpus stack-depth histogram, interpreter starvation | both | interpreter era (Phases 6-9), not Phase 1 |
+| The semantics rows, the `sim` study, the corpus stack-depth histogram, interpreter starvation | every machine | interpreter era (Phases 6-9), not Phase 1 |
 
 ### 10.5 Measured on one machine only
 
