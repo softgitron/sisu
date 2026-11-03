@@ -107,6 +107,21 @@ jobs:
         # `bench`, `repl`, `ws`, `run --watch`, `replay`, ...) run on the
         # Rust front end (docs/port-debt.md).
         run: cargo test
+      - name: What the failed native tests left (their scratch directories)
+        # A test of crates/sisu-driver/tests/native.rs removes its scratch
+        # directory, /tmp/sisu-native-NAME-PID, only when it passes: what a
+        # failed one built is uploaded for inspection.
+        if: failure()
+        run: |
+          mkdir -p "$RUNNER_TEMP/native-scratch"
+          cp -r /tmp/sisu-native-* "$RUNNER_TEMP/native-scratch/" 2>/dev/null || true
+          du -sh "$RUNNER_TEMP/native-scratch" || true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: native-scratch-${{ github.sha }}
+          path: ${{ runner.temp }}/native-scratch/
+          if-no-files-found: ignore
       - name: Speed (informational, never fails)
         # Front-end milliseconds per kLOC and interpreter nanoseconds per
         # step for std and the conformance corpus (docs/port-debt.md, Phase 0).
@@ -227,5 +242,13 @@ jobs:
       - name: The fixed point (stage2/bootstrap.sh)
         # Prints each executable's and each SIR's size and SHA-256, and
         # fails when an executable built by stage 2 compiled by itself
-        # differs from the one stage 2 compiled by Cranelift built.
-        run: ./stage2/bootstrap.sh --sisu target/debug/sisu
+        # differs from the one stage 2 compiled by Cranelift built; the
+        # files are kept for the upload below when it fails.
+        run: ./stage2/bootstrap.sh --sisu target/debug/sisu --keep "$RUNNER_TEMP/fixed-point"
+      - name: The executables and the SIR of a failed fixed point
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fixed-point-${{ github.sha }}
+          path: ${{ runner.temp }}/fixed-point/
+          if-no-files-found: ignore

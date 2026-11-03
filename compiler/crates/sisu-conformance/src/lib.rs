@@ -9,6 +9,7 @@
 //! `compiler/conformance/README.md`.
 
 pub mod diff;
+pub mod elf;
 pub mod native;
 
 use std::path::{Path, PathBuf};

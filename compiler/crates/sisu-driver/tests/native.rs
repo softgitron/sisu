@@ -276,7 +276,7 @@ fn building_from_sir_gives_the_same_executable() {
         run(&["build", "--native", "--from-sir", &format!("{name}.sir"), "--output", "from-sir"]);
         let a = std::fs::read(dir.join("from-source")).expect("the first executable");
         let b = std::fs::read(dir.join("from-sir")).expect("the second executable");
-        assert!(a == b, "{case}: the executables differ");
+        assert!(a == b, "{case}: the executables differ: {}", sisu_conformance::elf::differences(&a, &b));
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -298,8 +298,8 @@ fn nothing_the_program_allocates_is_live_at_exit() {
         .current_dir(&dir)
         .output()
         .expect("sisu runs");
-    let (expected, _, status) = outcome(interpreted);
-    assert_eq!(status, Some(0));
+    let (expected, err, status) = outcome(interpreted);
+    assert_eq!(status, Some(0), "sisu run leaks.sisu: {err}");
     let built = std::process::Command::new(&sisu)
         .args(["build", "--native", "--output", "leaks", "leaks.sisu"])
         .current_dir(&dir)
@@ -312,7 +312,7 @@ fn nothing_the_program_allocates_is_live_at_exit() {
         .output()
         .expect("the program runs");
     let (out, err, status) = outcome(ran);
-    assert_eq!(status, Some(0));
+    assert_eq!(status, Some(0), "the native leaks: {err}");
     assert_eq!(out, expected);
     assert_eq!(err, "allocations: 0 of the runtime's live at exit\n");
     let _ = std::fs::remove_dir_all(&dir);
@@ -600,7 +600,8 @@ fn the_sisu_backend_gives_the_same_bytes_on_any_number_of_workers() {
         assert!(err.contains("native: compiled by the Sisu backend in "), "{err}");
         std::fs::read(dir.join(exe)).expect("the executable")
     };
-    assert!(build("1", "one") == build("3", "three"), "the executables differ");
+    let (one, three) = (build("1", "one"), build("3", "three"));
+    assert!(one == three, "the executables differ: {}", sisu_conformance::elf::differences(&one, &three));
     let sir = std::process::Command::new(&sisu)
         .args(["sir", "concurrency.sisu"])
         .current_dir(&dir)
@@ -619,7 +620,11 @@ fn the_sisu_backend_gives_the_same_bytes_on_any_number_of_workers() {
     run(&["x86", "program.lir", "--output", "compiled.o"]);
     let a = std::fs::read(dir.join("built.o")).expect("the first object");
     let b = std::fs::read(dir.join("compiled.o")).expect("the second object");
-    assert!(a == b, "`sisu2 build` and `sisu2 x86` give different objects");
+    assert!(
+        a == b,
+        "`sisu2 build` and `sisu2 x86` give different objects: {}",
+        sisu_conformance::elf::differences(&a, &b)
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -637,6 +642,56 @@ fn the_runtime_in_sisu_is_its_seed() {
     assert_eq!(status, Some(0), "{err}");
     let seed = std::fs::read_to_string(rt.join("rt.sir")).expect("the seed");
     assert!(out == seed, "compiler/rt/rt.sir is not what `sisu sir` prints in compiler/rt; make it again");
+}
+
+/// Stage 2's library mode (decision 353) lowers the runtime in Sisu as the
+/// Rust lowering's does: the LIR `sisu2 lir --library --release` writes of
+/// the seed, translated for Cranelift, is the object `compile_library`
+/// makes of the seed's SIR, byte for byte, as a program's LIR gives its
+/// SIR's executable (decision 284); and the Sisu backend compiles the same
+/// library in the debug profile, with each export a global symbol.
+#[test]
+fn stage_2_lowers_the_runtime_in_sisu_as_the_rust_lowering_does() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let rt = compiler_dir().join("rt");
+    let seed_path = rt.join("rt.sir");
+    let seed = std::fs::read_to_string(&seed_path).expect("the seed");
+    let dir = std::env::temp_dir().join(format!("sisu-rt-library-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    // A native build makes sure stage 2 is built.
+    std::fs::write(dir.join("hello.sisu"), "def main():\n    print(\"hei\")\n").expect("the program");
+    let built = std::process::Command::new(&sisu)
+        .args(["build", "--native", "hello.sisu"])
+        .current_dir(&dir)
+        .output()
+        .expect("sisu runs");
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    let stage2 = compiler_dir().join("target/stage2/sisu2");
+    let run = |args: &[&std::ffi::OsStr]| {
+        let out = std::process::Command::new(&stage2).args(args).current_dir(&rt).output().expect("sisu2 runs");
+        assert!(out.status.success(), "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    };
+    let lir = dir.join("rt.lir");
+    run(&["lir".as_ref(), seed_path.as_os_str(), "--library".as_ref(), "--release".as_ref(), "--output".as_ref(), lir.as_os_str()]);
+    let std_dir = std::fs::canonicalize(compiler_dir().join("std")).ok().map(|d| d.display().to_string());
+    let sources = sisu_codegen::Sources { comp_dir: rt.display().to_string(), std_dir };
+    let prog = sisu_sir::read(&seed).expect("the seed reads");
+    let options = sisu_codegen::Options { sources: sources.clone(), release: true };
+    let from_sir = sisu_codegen::compile_library(&prog, &options).expect("the Rust lowering compiles the seed");
+    let text = std::fs::read_to_string(&lir).expect("the LIR");
+    let from_lir = sisu_codegen::compile_lir(&text, &sources).expect("the LIR translates");
+    assert!(
+        from_sir.object == from_lir.object,
+        "the runtime's object from stage 2's LIR differs from the Rust lowering's: {}",
+        sisu_conformance::elf::differences(&from_sir.object, &from_lir.object)
+    );
+    let object = dir.join("rt.o");
+    run(&["build".as_ref(), seed_path.as_os_str(), "--library".as_ref(), "--output".as_ref(), object.as_os_str()]);
+    let bytes = std::fs::read(&object).expect("the Sisu backend's object");
+    for export in ["sisu_rt_bytes_eq", "sisu_rt_value_drop", "sisu_rt_text_push"] {
+        assert!(bytes.windows(export.len()).any(|w| w == export.as_bytes()), "no `{export}` in the object");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// `sisu run --native` builds a program, runs it with its arguments and

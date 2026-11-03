@@ -5,7 +5,8 @@
 //! the executable for that front end (`SISU_FRONT_END`, decision 268);
 //! without it, the executable's default, stage 1.
 //!
-//! `--native LIST` builds and runs natively the cases the coverage list
+//! `--elf-diff A B` says where two executables or objects differ, by
+//! section (for `stage2/bootstrap.sh`). `--native LIST` builds and runs natively the cases the coverage list
 //! names instead (`sisu build --native`), `--native-from-sir LIST` builds
 //! them from serialised SIR (`sisu build --native --from-sir`: each case's
 //! own `.sir`, else what `sisu sir` prints), `--native-release LIST` with
@@ -39,6 +40,28 @@ fn main() {
     let mut front_end: Option<String> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
+        if a == "--elf-diff" {
+            // `--elf-diff A B`: where two executables or objects differ, by
+            // section (for the fixed point of stage2/bootstrap.sh).
+            let (Some(a), Some(b)) = (args.next(), args.next()) else {
+                eprintln!("--elf-diff takes two files");
+                std::process::exit(2);
+            };
+            let read = |p: &str| match std::fs::read(p) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    eprintln!("cannot read `{p}`: {e}");
+                    std::process::exit(2);
+                }
+            };
+            let text = sisu_conformance::elf::differences(&read(&a), &read(&b));
+            if text.is_empty() {
+                println!("{a} and {b} are the same");
+                return;
+            }
+            print!("{a} and {b} differ: {text}");
+            std::process::exit(1);
+        }
         if let Some(name) = a.strip_prefix("--front-end=") {
             front_end = Some(name.to_string());
             continue;

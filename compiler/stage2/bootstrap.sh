@@ -151,11 +151,21 @@ verdict() {
         echo "$1: identical"
     else
         echo "$1: DIFFERENT"
+        # Where they differ, by section, when the conformance runner is
+        # built beside `sisu` (`sisu-conformance --elf-diff`).
+        local runner
+        runner="$(dirname "$sisu")/sisu-conformance"
+        if [ -x "$runner" ]; then
+            "$runner" --elf-diff "$2" "$3" | sed 's/^/    /'
+        fi
         failed=1
     fi
 }
 verdict "stage 2's SIR, A.stage2.sir and B.stage2.sir" "$work/A.stage2.sir" "$work/B.stage2.sir"
 verdict "stage 1's SIR, A.stage1.sir and B.stage1.sir" "$work/A.stage1.sir" "$work/B.stage1.sir"
+verdict "the runtime's SIR, A.rt.sir and B.rt.sir" "$work/A.rt.sir" "$work/B.rt.sir"
+verdict "the runtime's seed, compiler/rt/rt.sir and A.rt.sir" "$rt_dir/rt.sir" "$work/A.rt.sir"
+verdict "the runtime in Sisu, rt-A.o and rt-B.o" "$work/rt-A.o" "$work/rt-B.o"
 verdict "stage 2, sisu2-A and sisu2-B" "$work/sisu2-A" "$work/sisu2-B"
 verdict "stage 1, stage1-A and stage1-B" "$work/stage1-A" "$work/stage1-B"
 if [ "$failed" = 0 ]; then
