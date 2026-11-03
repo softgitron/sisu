@@ -386,9 +386,9 @@ instead of teaching.
 | G27 | Benchmark and profile ([written](guides/bench.md)) | `bench` blocks, `black_box`, `sisu bench`, `sisu run --profile`. |
 | G28 | Log and trace ([written](guides/log.md)) | `std.log`, levels, the trace context of scopes, `trace.wrap` over a capability. |
 | G29 | Write a script with dependencies ([written](guides/script.md)) | A shebang file with inline metadata. |
-| G30 | Embed a file at compile time | `embed` and what it records for reproducible builds. |
-| G31 | Do exact arithmetic with money | `Decimal`, rounding modes, `Ratio` from division. |
-| G32 | Design a library's API | The std rules: capabilities in, values out; specific error sets; no hidden allocation; `Debug` everywhere; iterators over views; Python's names. |
+| G30 | Embed a file at compile time ([written](guides/embed.md)) | `embed` and what it records for reproducible builds. |
+| G31 | Do exact arithmetic with money ([written](guides/money.md)) | `Decimal`, rounding modes, `Ratio` from division. |
+| G32 | Design a library's API ([written](guides/library-api.md)) | The std rules: capabilities in, values out; specific error sets; no hidden allocation; `Debug` everywhere; iterators over views; Python's names. |
 
 ## The reference
 
@@ -834,7 +834,7 @@ solutions and passing checks.
 | 8 | Chapters 14 (3, done), 15 (3, done), 16 (3, done), 17 with challenge III (2.5, done); R2 (3, done), R3 (2, done), R6 (1, done), R13 (2.5, done) | 20 |
 | 9 | Chapters 18 (3, done), 19 (3, done), 20 (4, done), 21 (3, done), 22 with challenge IV (4, done); R9 (2.5, done), R10 (2, done), R15 (2, done); G5 to G16 (9, done) | done |
 | 10 | R4 (2, done), R5 (1.5, done), R8 (1.5, done), R14 (1.5), R20 (2), R21 (1), R22 (1); X1, X2, X4, X5, X8, X10, X12 (7, done) | 17.5 |
-| 11 | Chapters 23 (2, done), 24 (2, done), 25 (3, done), 26 (2, done); R11 (1), R12 (2); G17, G20, G21, G26, G27, G28, G29, G30, G31, G32 (7.5; G17, G20, G21 and G26 to G29 done); X6, X7, X9, X13, X14 (5, done) | 26.5 |
+| 11 | Chapters 23 (2, done), 24 (2, done), 25 (3, done), 26 (2, done); R11 (1), R12 (2); G17, G20, G21, G26, G27, G28, G29, G30, G31, G32 (7.5, done); X6, X7, X9, X13, X14 (5, done) | 26.5 |
 | 12 | When their features exist: chapters 27 (3, done) and 28 with challenge V (2, done); G18, G19, G22, G23, G24, G25 (4.5); X11 (1, done); the site (3) | 13.5 |
 | | Total | about 159 |
 
@@ -1528,6 +1528,36 @@ Writing the guides turned up more, by guide:
   package, of a dependency in `sisu.toml`, or of the standard
   library"), which names a `sisu.toml` that a script does not have, and
   then E1010, which says what to write.
+- G30, `embed`. In a package, `embed("data/words.txt")` reads
+  `src/data/words.txt`, relative to the module's directory, and a path
+  to the package's root, `../data/words.txt`, is E0612 ("must stay
+  inside the program's directory"), where
+  [08](../proposal/08-metaprogramming.md) resolves the path from the
+  package's root. A replay token's content hash covers the source and
+  not the files it embeds, so after an embedded file changes the old
+  token is accepted and runs the new program, where D0033 refuses a
+  token for other code (the test cache and a recorded log do see the
+  change). Parsing the embedded text while compiling, 08's
+  `comptime build_tables(embed(...))`, stops stage 1 with "beyond the
+  slice: a `comptime` expression that needs the intrinsic
+  `str.byte_at`" and "needs a set, a dict or a `dyn` value", messages
+  with no code.
+- G31, money. E0310 for `/` between two `Decimal`s, which D-076 makes a
+  `Ratio`, offers no fix, where `div(other, places, mode)` and
+  `to_ratio()` are what stage 0 has; and a `Decimal` is not `Copy`, so a
+  loop that pushes the same share needs `.copy()` (E0400), which a
+  reader who thinks of it as a number does not expect.
+- G32, a library's API. `Ledger()` from another module, for a struct
+  whose private field has a default, gets E0258 ("declare it `pub` to
+  use it from another module"), whose only fix is to make the field
+  public; an associated function such as `Ledger.new()` is not named.
+  `from ledger import Taken`, a variant of a `pub` error set, gets E0204
+  ("module `ledger` has no item `Taken`") with no word that a variant is
+  reached as `BookingError.Taken`. `sisu audit --caps src/store.sisu`
+  reads the module alone, so its import of the package's root gets
+  E0220, followed by an E0321 that calls the error set `{}`, and with no
+  file `sisu audit` is D0004: a package's capabilities cannot be
+  audited.
 
 Writing the explanations turned up more, by page:
 

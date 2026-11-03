@@ -1,0 +1,3 @@
+test "a hundred among three" ... ok
+test "every split adds up" ... ok
+2 passed, 0 failed, 0 blocked

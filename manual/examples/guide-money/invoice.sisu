@@ -1,0 +1,21 @@
+# An invoice: exact products and sums, rounded once, by a named rule.
+from std.num import Decimal, Rounding
+
+## A line of an invoice: what, how many, and the price of one.
+struct Line:
+    what: String
+    count: int
+    price: Decimal
+
+def main():
+    let lines = [Line("sauna", 2, 12.50), Line("towel", 3, 1.95)]
+    var total = Decimal.of(0)
+    for line in lines:
+        let amount = line.price * Decimal.of(line.count)
+        print("{line.what:<12}{amount.round(2, Rounding.HalfEven):>8}")
+        total = total + amount
+    let rate: Decimal = 0.14
+    let tax = (total * rate).round(2, Rounding.HalfUp)
+    let to_pay = (total + tax).round(2, Rounding.HalfEven)
+    print("{"tax at 14%":<12}{tax:>8}")
+    print("{"to pay":<12}{to_pay:>8}")

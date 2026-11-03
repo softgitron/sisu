@@ -1,0 +1,30 @@
+# A bill split to the cent, with shares that add up to the bill.
+from std.num import Decimal, Rounding
+
+## `total` split among `people`, to the cent: the cents left over go one
+## each to the first shares.
+def split(total: Decimal, people: int) -> list[Decimal]:
+    let share = total.div(Decimal.of(people), 2, Rounding.Down)
+    let cent: Decimal = 0.01
+    var left = total - share * Decimal.of(people)
+    var shares: list[Decimal] = []
+    for _ in range(people):
+        if left > Decimal.of(0):
+            shares.push(share + cent)
+            left = left - cent
+        else:
+            shares.push(share.copy())
+    return shares
+
+test "a hundred among three":
+    let shares = split(Decimal.of(100), 3)
+    assert "{shares}" == "[33.34, 33.33, 33.33]"
+    assert shares[0] + shares[1] + shares[2] == Decimal.of(100)
+
+test "every split adds up":
+    for people in range(1, 13):
+        let total: Decimal = 84.95
+        var sum = Decimal.of(0)
+        for share in split(total, people):
+            sum = sum + share
+        assert sum == total

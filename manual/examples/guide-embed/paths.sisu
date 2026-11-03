@@ -1,0 +1,7 @@
+# The paths that `embed` refuses: outside the program, missing, computed.
+
+def main():
+    print(embed("../notes.txt"))
+    print(embed("missing.txt"))
+    let path = "rules.txt"
+    print(embed(path))

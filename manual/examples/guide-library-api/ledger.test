@@ -1,0 +1,4 @@
+test "tests/a turn is booked once" ... ok
+test "tests/a ledger comes back from its file" ... ok
+test "tests/a line that is not a booking" ... ok
+3 passed, 0 failed, 0 blocked

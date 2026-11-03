@@ -1,0 +1,17 @@
+# Shares kept exact as `Ratio`s, and money rounded once, at the end.
+from std.num import Decimal, Ratio, Rounding
+
+## The amount that `r` stands for, to the cent, rounded by `mode`.
+def to_cents(r: Ratio, mode: Rounding) -> Decimal:
+    return Decimal.of(r.num).div(Decimal.of(r.den), 2, mode)
+
+def main():
+    let aino = Ratio.of(1, 2)
+    let eero = Ratio.of(1, 3)
+    let roni = Ratio.of(1, 6)
+    print(aino + eero + roni == Ratio.whole(1))
+    let bill: Decimal = 249.99
+    let exact = bill.to_ratio() ?? Ratio.whole(0)
+    for name, share in [("Aino", aino), ("Eero", eero), ("Roni", roni)]:
+        let amount = to_cents(exact * share, Rounding.HalfEven)
+        print("{name}: {share} of the bill, {amount}")

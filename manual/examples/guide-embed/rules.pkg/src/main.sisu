@@ -1,0 +1,23 @@
+##! The sauna's rules, kept in a file of their own and made part of the
+##! program while it compiles.
+
+## The rules, one on each line, from the file beside this module.
+const RULES: str = embed("rules.txt")
+
+## Rule number `n`, counting from 1, if there is one.
+def rule(n: int) -> str?:
+    var i = 0
+    for line in RULES.lines():
+        i += 1
+        if i == n:
+            return Some(line)
+    return None
+
+def main(sys: System):
+    for arg in sys.env.args():
+        let n = arg.parse_int() ?? 0
+        print("{n}: {rule(n) ?? "there is no such rule"}")
+
+test "the first rule, and one past the last":
+    assert rule(1) == Some("Shower before the sauna.")
+    assert rule(5) == None

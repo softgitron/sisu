@@ -1,0 +1,23 @@
+##! The library's tests, of its `pub` items.
+from ledger import BookingError, Ledger
+from ledger.store import LoadError, load, save
+
+test "a turn is booked once":
+    var ledger = Ledger.new()
+    assert ledger.book("Aino", 18) == Ok(())
+    assert ledger.book("Eero", 18) == Err(BookingError.Taken(18))
+    assert ledger.book("Roni", 23) == Err(BookingError.Closed(23))
+    assert len(ledger) == 1
+    assert ["{b}" for b in ledger.iter()] == ["18:00 Aino"]
+
+test "a ledger comes back from its file"(fs: Fs):
+    var ledger = Ledger.new()
+    _ = ledger.book("Aino", 18)
+    _ = ledger.book("Eero", 20)
+    assert save(fs, "ledger.txt", ledger) == Ok(())
+    let back = load(fs, "ledger.txt").expect("the file just written")
+    assert ["{b}" for b in back.iter()] == ["18:00 Aino", "20:00 Eero"]
+
+test "a line that is not a booking"(fs: Fs):
+    _ = fs.write_text("ledger.txt", "18 Aino\nsoon Eero")
+    assert load(fs, "ledger.txt") == Err(LoadError.BadLine(2, "soon Eero"))

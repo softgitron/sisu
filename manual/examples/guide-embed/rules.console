@@ -1,0 +1,7 @@
+$ sisu run -- 1 3 9
+1: Shower before the sauna.
+3: Ask before you throw water on the stones.
+9: there is no such rule
+$ sisu test
+test "the first rule, and one past the last" ... ok
+1 passed, 0 failed, 0 blocked

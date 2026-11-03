@@ -1,0 +1,40 @@
+##! A sauna's ledger of bookings, written to the rules of `std`'s API.
+## Why a booking could not be made.
+pub error BookingError:
+    Taken(hour: int)
+    Closed(hour: int)
+
+## A turn in the sauna: who, and at which hour.
+@derive(Debug, Eq)
+pub struct Booking:
+    pub name: String
+    pub hour: int
+
+impl Display for Booking:
+    def fmt(self, mut f: Formatter):
+        f.write("{self.hour}:00 {self.name}")
+
+## The bookings of one evening, from 17:00 to 21:00.
+@derive(Debug, Eq)
+pub struct Ledger:
+    bookings: list[Booking]
+
+    pub def new() -> Ledger:
+        return Ledger([])
+
+    ## Books `hour` for `name`, unless it is taken or the sauna is closed.
+    pub def book(mut self, name: str, hour: int) -> ! BookingError:
+        if hour < 17 or hour > 21:
+            return Err(Closed(hour))
+        if any([b.hour == hour for b in self.bookings]):
+            return Err(Taken(hour))
+        self.bookings.push(Booking(name.to_string(), hour))
+        return Ok(())
+
+    ## The bookings, as views, in the order they were made.
+    pub def iter(self) -> Iter[ref Booking]:
+        return self.bookings.iter()
+
+impl Len for Ledger:
+    def len(self) -> int:
+        return len(self.bookings)

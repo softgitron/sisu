@@ -1,0 +1,11 @@
+# Money in `Decimal`: sums that are exact, unlike those of `f64`.
+from std.num import Decimal
+
+def main():
+    print(0.1 + 0.2)
+    let dime: Decimal = 0.1
+    let fifth: Decimal = 0.2
+    print(dime + fifth)
+    print(Decimal.parse("3.50") ?? Decimal.of(0))
+    let written: Decimal = 3.50
+    print(written)

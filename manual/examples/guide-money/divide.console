@@ -1,0 +1,7 @@
+$ sisu check divide.sisu
+error[E0310]: `/` cannot be applied to `num.Decimal` and `num.Decimal`
+  --> divide.sisu:6:11
+  |
+6 |     print(bill / Decimal.of(3))
+  |           ^^^^^^^^^^^^^^^^^^^^
+

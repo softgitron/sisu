@@ -1,0 +1,26 @@
+##! The ledger kept in a file, through the file system it is given.
+from ledger import BookingError, Ledger
+
+## Why a file is not a ledger.
+pub error LoadError:
+    BadLine(number: int, text: String)
+
+## Writes `ledger` to `path` on `fs`, a line `HOUR NAME` for each booking.
+pub def save(fs: Fs, path: Path, ledger: Ledger) -> ! IoError:
+    let lines = ["{b.hour} {b.name}" for b in ledger.iter()]
+    return fs.write_text(path, lines.join("\n"))
+
+## The ledger that `save` wrote to `path` on `fs`.
+pub def load(
+    fs: Fs,
+    path: Path,
+) -> Ledger ! {IoError, LoadError, BookingError}:
+    var ledger = Ledger.new()
+    let text = fs.read_to_string(path)?
+    for i, line in enumerate(text.lines()):
+        let (hour, name) = line.split_once(" ") else:
+            return Err(BadLine(i + 1, line.to_string()))
+        let h = hour.parse_int() else:
+            return Err(BadLine(i + 1, line.to_string()))
+        ledger.book(name, h)?
+    return Ok(ledger)

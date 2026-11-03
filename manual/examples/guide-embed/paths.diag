@@ -1,0 +1,3 @@
+4:11-4:32 E0612 comptime.embed-failed path="../notes.txt" reason="the path must stay inside the program's directory"
+5:11-5:31 E0612 comptime.embed-failed path="missing.txt" reason="there is no such file"
+7:11-7:22 E0613 comptime.embed-path

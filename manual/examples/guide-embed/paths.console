@@ -1,0 +1,19 @@
+$ sisu check paths.sisu
+error[E0612]: cannot embed `../notes.txt`: the path must stay inside the program's directory
+  --> paths.sisu:4:11
+  |
+4 |     print(embed("../notes.txt"))
+  |           ^^^^^^^^^^^^^^^^^^^^^
+
+error[E0612]: cannot embed `missing.txt`: there is no such file
+  --> paths.sisu:5:11
+  |
+5 |     print(embed("missing.txt"))
+  |           ^^^^^^^^^^^^^^^^^^^^
+
+error[E0613]: `embed` takes the path of a file as a string literal
+  --> paths.sisu:7:11
+  |
+7 |     print(embed(path))
+  |           ^^^^^^^^^^^
+

@@ -1,0 +1,6 @@
+# `/` between two decimals, which D-076 makes a `Ratio`.
+from std.num import Decimal
+
+def main():
+    let bill: Decimal = 249.99
+    print(bill / Decimal.of(3))
