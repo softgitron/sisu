@@ -1348,6 +1348,9 @@ intrinsics! {
     // 333): no SIR names it; the native backend compiles `par.map`'s body
     // as a call of it.
     ParMap = "par.map",
+    // The identity of shared values (02; decision 355), after the others
+    // so that their numbers stay what they were.
+    SharedSame = "Shared.same",
 }
 
 impl Intrinsic {

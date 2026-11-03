@@ -164,13 +164,34 @@ impl Interp<'_, '_> {
         let f = self.func(fi).ok_or_else(|| ice("no such function"))?;
         for (i, a) in args.iter_mut().enumerate() {
             let Some(l) = f.locals.get(i + 1) else { continue };
-            let by_value = !matches!(l.ty.subst(tys), Type::Ref(..));
-            if by_value && let Value::Ref(p) = a {
+            // The references the parameter takes; an argument through more
+            // (a `Self` that is a reference, reaching the impl for what it
+            // points to, for `other: Self` as for `self`) is read through
+            // the others.
+            let mut wanted = 0;
+            let mut t = l.ty.subst(tys);
+            while let Type::Ref(inner, _) = t {
+                wanted += 1;
+                t = *inner;
+            }
+            while self.ref_depth(a)? > wanted {
+                let Value::Ref(p) = a else { break };
                 let v = self.read(p)?.clone();
                 *a = v;
             }
         }
         Ok(())
+    }
+
+    /// How many references a value is through: 0 for one that is none.
+    fn ref_depth(&self, v: &Value) -> Result<usize, Unwind> {
+        let mut n = 0;
+        let mut cur = v;
+        while let Value::Ref(p) = cur {
+            n += 1;
+            cur = self.read(p)?;
+        }
+        Ok(n)
     }
 }
 

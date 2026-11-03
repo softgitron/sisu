@@ -1114,4 +1114,6 @@ pub pure def intrinsic_names() -> list[str]:
         # (decision 333): no SIR names it, `native_bodies` gives `par.map`
         # a call of it.
         "par.map",
+        # The identity of shared values (02; decision 355).
+        "Shared.same",
     ]

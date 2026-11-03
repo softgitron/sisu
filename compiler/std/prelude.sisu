@@ -2104,6 +2104,17 @@ impl[T] Shared[T]:
     ## The number of owners.
     @intrinsic("Shared.count")
     pure def count(s: Shared[T]) -> int
+    ## Whether `a` and `b` own the same value: the identity of shared
+    ## values (02), where `==` compares the values.
+    ##
+    ## ```
+    ## let a = Shared.new([1, 2])
+    ## let b = a.copy()
+    ## assert Shared.same(a, b)
+    ## assert not Shared.same(a, Shared.new([1, 2]))
+    ## ```
+    @intrinsic("Shared.same")
+    pure def same(a: Shared[T], b: Shared[T]) -> bool
 
 impl[T] Weak[T]:
     ## Another owner of the value, if it has one still.

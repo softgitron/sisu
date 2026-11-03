@@ -377,6 +377,11 @@ pub(crate) unsafe fn call(i: abi::Intrinsic, c: &Call<'_>) -> Option<u8> {
                 c.set_word(mem::word(header(v), abi::SHARED_STRONG));
                 abi::OK
             }
+            // The identity of shared values (02): the same cell.
+            I::SharedSame => {
+                c.set_bool(c.word(0) == c.word(1));
+                abi::OK
+            }
             I::WeakUpgrade => {
                 let v = c.word(0) as *mut u8;
                 touch(v);

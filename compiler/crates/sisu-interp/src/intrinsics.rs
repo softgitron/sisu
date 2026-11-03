@@ -1338,6 +1338,11 @@ impl Interp<'_, '_> {
                 self.note_shared_access(id)?;
                 Ok(Value::Int(self.heap.get(id as usize).map(|c| c.strong).unwrap_or(0) as i64))
             }
+            // The identity of shared values (02): the same cell.
+            ("Shared", "same") => {
+                let (x, y) = (self.shared_id(a.get(0)?)?, self.shared_id(a.get(1)?)?);
+                Ok(Value::Bool(x == y))
+            }
             ("Weak", "upgrade") => {
                 let id = match self.target(a.get(0)?)? {
                     Value::Weak(id) => *id,
