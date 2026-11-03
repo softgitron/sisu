@@ -1,0 +1,8 @@
+# A package that declares its unsafe code (22, decision 275): `sisu test`
+# leaves its lockfile to stage 1, which records the level, where the
+# driver wrote one without it and stage 1 then refused it with `E1022`
+# (decision 380; the manual's chapter 27 and guide G19).
+[package]
+name = "sauna"
+version = "0.1.0"
+unsafe = "memory"

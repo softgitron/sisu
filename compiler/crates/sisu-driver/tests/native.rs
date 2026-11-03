@@ -27,9 +27,11 @@ fn native_conformance() {
     assert!(report.failures.is_empty(), "{}", report.render());
     // Stage 2 lowered every case: none was built through the Rust lowering
     // (decision 305); and the Sisu backend, the debug profile's, compiled
-    // every one (decision 331).
-    assert_eq!(report.stage2.map(|(n, _)| n), Some(report.cases), "{}", report.render());
-    assert_eq!(report.sisu.map(|(n, _)| n), Some(report.cases), "{}", report.render());
+    // every one (decision 331), but those a build refuses as their
+    // expectation says (none in the debug profile).
+    let built = Some(report.cases - report.refused);
+    assert_eq!(report.stage2.map(|(n, _)| n), built, "{}", report.render());
+    assert_eq!(report.sisu.map(|(n, _)| n), built, "{}", report.render());
 }
 
 /// The same cases built from serialised SIR (decision 212): each from its
@@ -47,9 +49,11 @@ fn native_conformance_from_sir() {
     assert!(report.cases > 0, "no cases in the coverage list");
     assert!(report.failures.is_empty(), "{}", report.render());
     // Stage 2 lowered every case: none was built through the Rust lowering
-    // (decision 305); the Sisu backend compiled every one (decision 331).
-    assert_eq!(report.stage2.map(|(n, _)| n), Some(report.cases), "{}", report.render());
-    assert_eq!(report.sisu.map(|(n, _)| n), Some(report.cases), "{}", report.render());
+    // (decision 305); the Sisu backend compiled every one (decision 331),
+    // but those a build refuses as their expectation says.
+    let built = Some(report.cases - report.refused);
+    assert_eq!(report.stage2.map(|(n, _)| n), built, "{}", report.render());
+    assert_eq!(report.sisu.map(|(n, _)| n), built, "{}", report.render());
 }
 
 /// The same cases built with the release profile, every contract checked
@@ -114,7 +118,7 @@ fn native_conformance_cranelift() {
     println!("{}", report.render());
     assert!(report.cases > 0, "no cases in the coverage list");
     assert!(report.failures.is_empty(), "{}", report.render());
-    assert_eq!(report.stage2.map(|(n, _)| n), Some(report.cases), "{}", report.render());
+    assert_eq!(report.stage2.map(|(n, _)| n), Some(report.cases - report.refused), "{}", report.render());
     assert_eq!(report.sisu, None, "{}", report.render());
 }
 

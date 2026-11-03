@@ -1,0 +1,18 @@
+# Unsafe code in a package that declares it, run and tested.
+from std.mem import ptr
+
+## The temperature `celsius` raised by five degrees through a pointer.
+def raised(celsius: int) -> int:
+    var c = celsius
+    let p = ptr.of_mut(mut c)
+    # safety: valid, aligned, writable: p points to the live local c,
+    #   which nothing else uses until the block ends.
+    unsafe:
+        p.write(p.read() + 5)
+    return c
+
+def main():
+    print(raised(80))
+
+test "a pointer raises the temperature":
+    assert raised(80) == 85

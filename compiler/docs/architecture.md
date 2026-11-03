@@ -7968,15 +7968,30 @@ in Sisu"; D-086)
      worst status, a 3 yielding to any other failure. The conformance
      runner holds every run of `sisu test` it compares (`.test`,
      `.explore`, `.sim`, `.schedule`, `.select`, a package's `.test`) to
-     the status its report gives, summed over its summary lines. A program
-     the ownership checker rejects no longer has its tests run: stage 1's
-     `sir --tests` prints the SIR of such a program, as `sisu sir` does, so
-     the driver asks stage 1's `check` first and runs nothing when it finds
-     an error, as the Rust front end's runner refused (`E0428` for a task
-     that borrows what a scope's body owns had reached the monitor, which
-     stopped it as a violation; `sisu bench` alike). A program's
-     transcripts no longer keep its tests on the Rust front end (decision
-     357): the tests run from stage 1's `sir --tests`, and only
+     the status its report gives, summed over its summary lines. Three
+     regressions of decision 357's routing, which the manual's round found,
+     are mended: a program the front end rejects no longer has its tests
+     run, since stage 1's `sir --tests` prints the SIR of a program its
+     ownership checker rejects or whose `comptime` fails (the exercises
+     `winner`, `E0408`, and `journeys`, `E0603`, ran under the monitor,
+     which stopped them with 60 to 230 lines of SIR), so the driver asks
+     stage 1's `check` of the program with its tests first and, when it
+     finds an error, prints its diagnostics and the line `sisu run` ends
+     with (`D0021` after the ownership checker's errors, `D0006` after the
+     others) and exits with 1 (`sisu bench` alike); the program's warnings,
+     `W0001` among them, come before the report, as `sisu run` prints them;
+     and the driver no longer writes the lockfile of what stage 1 tests,
+     leaving it to stage 1, which records each package's `unsafe` level
+     (decision 275), where the driver's lockfile without it made stage 1
+     refuse it with `E1022` and broke `sisu run` until it was deleted
+     (chapter 27's `levels.pkg`, guide G19's `cenv`); `--locked` and a
+     package's features go to stage 1's `check`, which takes them, and not
+     to its `sir`, which refused them as a usage error, and a run that asks
+     for features stays the Rust front end's, since stage 1's `sir` builds
+     without them. The cases `testing/refused_program`, `refused_comptime`
+     and `unsafe_level` hold them. A program's transcripts no longer keep its tests on the Rust
+     front end (decision 357): the tests run from stage 1's `sir --tests`,
+     and only
      the transcripts from the Rust front end's build of the program, with
      the world of transcripts that only it writes (`transcript_world`,
      `transcript_system`), so a program with transcripts and tests of
@@ -7987,8 +8002,8 @@ in Sisu"; D-086)
      (`--std`), where it was `D0064`; and a run with them takes nothing
      from the test cache, since the program's hash leaves their code out.
      What stays on the Rust front end is what stage 1's `sir` cannot give:
-     the standard library's examples as tests, the world of transcripts and
-     `--defer-borrow`'s deferral (port-debt.md). This changes no rule of
+     the standard library's examples as tests, the world of transcripts,
+     `--defer-borrow`'s deferral and a package's features (port-debt.md). This changes no rule of
      the language: it implements decision 340 in the runner.
 381. A text an interpolation is building is freed natively when a panic or
      a `?` in one of its values leaves the function before the statement

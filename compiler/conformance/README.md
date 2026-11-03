@@ -386,7 +386,10 @@ and the time spent building and running them.
   program's traits, tests in parallel with their output in declaration
   order, holes that block a test (`hole_in_task`, whose run exits with 3),
   the output of the schedule that failed under `--explore`
-  (`explore_output`), and `proposal_testing`, which starts with
+  (`explore_output`), programs whose errors stop `sisu test` before any
+  test runs (`refused_program`, `refused_comptime`), a package that
+  declares its unsafe code, whose lockfile keeps the level
+  (`unsafe_level`), and `proposal_testing`, which starts with
   `proposal/examples/testing.sisu`.
 - `sir/` pins the serialised SIR of small programs.
 - `live/` is 10's tools that run programs: hot replacement under `sisu

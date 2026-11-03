@@ -114,7 +114,7 @@ impl NativeReport {
             None => String::new(),
         };
         if self.refused > 0 {
-            lowered.push_str(&format!(", {} refused as their `.release` says", self.refused));
+            lowered.push_str(&format!(", {} refused by the release build as expected", self.refused));
         }
         if let Some((n, t)) = self.sisu {
             lowered.push_str(&format!(", {n} compiled by the Sisu backend in {:.2} s", t.as_secs_f64()));

@@ -233,3 +233,49 @@ fn testing_example_starts_with_the_proposal() {
         "testing/proposal_testing.sisu no longer starts with proposal/examples/testing.sisu"
     );
 }
+
+/// `sisu test` of a program with an error runs none of its tests: it prints
+/// the diagnostics and the line `sisu run` ends with, `D0021` after the
+/// ownership checker's errors and `D0006` after a `comptime` expression's,
+/// and exits with 1; a program with warnings has them printed before its
+/// report, as `sisu run` prints them; a test blocked by a hole exits with 3
+/// (decisions 340 and 380; the manual's exercises `winner` and `journeys`).
+#[test]
+fn sisu_test_reports_a_program_as_sisu_run_does() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let cases = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../conformance/cases/testing");
+    let dir = std::env::temp_dir().join(format!("sisu-test-reports-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let test = |file: &std::path::Path| {
+        let out = std::process::Command::new(&sisu)
+            .args(["test", "--no-cache"])
+            .arg(file)
+            .current_dir(&dir)
+            .output()
+            .expect("sisu runs");
+        (
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+            out.status.code(),
+        )
+    };
+    let (out, err, status) = test(&cases.join("refused_program.sisu"));
+    assert_eq!((out.as_str(), status), ("", Some(1)), "{err}");
+    assert!(err.starts_with("error[E0408]"), "{err}");
+    assert!(err.ends_with("error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor\n"), "{err}");
+    let (out, err, status) = test(&cases.join("refused_comptime.sisu"));
+    assert_eq!((out.as_str(), status), ("", Some(1)), "{err}");
+    assert!(err.starts_with("error[E0603]"), "{err}");
+    assert!(err.ends_with("error[D0006]: the program was not run: errors found (1)\n"), "{err}");
+    let warned = dir.join("warned.sisu");
+    std::fs::write(
+        &warned,
+        "def later() -> int:\n    return todo(\"later\")\n\ntest \"waits\":\n    assert later() == 1\n",
+    )
+    .expect("the program");
+    let (out, err, status) = test(&warned);
+    assert_eq!(status, Some(3), "{out}{err}");
+    assert!(err.starts_with("warning[W0001]: typed hole `later` of type `int`"), "{err}");
+    assert!(out.ends_with("0 passed, 0 failed, 1 blocked\n"), "{out}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

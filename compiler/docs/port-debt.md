@@ -558,9 +558,12 @@ branches of `cli.rs` go with it:
   as a library of the tools, or a server of its queries the tools ask;
   the REPL and worksheets need only a program checked and lowered per
   input, which stage 1's `build` gives.
-- **A program's transcripts, `sisu test --std` and `sisu test
-  --defer-borrow`**: a program's tests and benchmarks run from stage 1's
-  SIR (decision 357), and so do those of a program with transcripts, but
+- **A program's transcripts, `sisu test --std`, `sisu test
+  --defer-borrow` and `--features`**: a program's tests and benchmarks run
+  from stage 1's SIR (decision 357), and so do those of a program with
+  transcripts, but those of a run that asks for a package's features run on
+  the Rust front end, since stage 1's `sir` takes no `--features` (nor
+  `--locked`, which its `check` takes; decision 380), and
   the transcripts themselves run against a world of transcripts
   (`transcript_world`, `transcript_system`) that only the Rust front end's
   `sir_with` adds to the SIR, so they run on its build of the program,
@@ -569,8 +572,9 @@ branches of `cli.rs` go with it:
   and the deferral is the Rust ownership checker's. Stage 1's own tests
   run on the Rust front end too. *Pay*: stage 1's `sir --tests` writing
   the world of transcripts (`--transcripts`, rooting the two functions)
-  and the standard library's examples (`--std`); the deferral as a
-  command of stage 1 (below).
+  and the standard library's examples (`--std`), and taking `--features`,
+  `--no-default-features` and `--locked`; the deferral as a command of
+  stage 1 (below).
 - **`sisu run --defer-borrow`** (the counterexample mode: the ownership
   checker's findings beside the monitored run), **`sisu check --diary`**
   (the diagnostics as data, with their bytes), **`sisu explain-borrow`**

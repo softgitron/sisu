@@ -892,7 +892,15 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                 vec![Input::std_examples()]
             } else {
                 let file_level = from_sir.is_some() || from_lir.is_some();
-                match inputs_for(cmd, target, locked, has_ids(&p.flags), file_level, &features, host) {
+                match inputs_for(
+                    cmd,
+                    target,
+                    Lock::of(locked),
+                    has_ids(&p.flags),
+                    file_level,
+                    &features,
+                    host,
+                ) {
                     Ok(i) => i,
                     Err(code) => return code,
                 }
@@ -1392,9 +1400,12 @@ fn stage1_serves(cmd: &str, p: &Parsed<'_>) -> bool {
         // A program's tests and benchmarks run from the SIR stage 1 prints
         // of it built with them (decision 357), but for what only the Rust
         // front end gives: the standard library's examples, the ownership
-        // checker's deferral, and a file of serialised SIR.
+        // checker's deferral, a file of serialised SIR, and a package's
+        // features, which stage 1's `sir` does not take (decision 380).
         "test" | "bench" => {
-            !p.flags.iter().any(|f| matches!(*f, "--std" | "--defer-borrow")) && !value("--from-sir")
+            !p.flags.iter().any(|f| matches!(*f, "--std" | "--defer-borrow" | "--no-default-features"))
+                && !value("--from-sir")
+                && !value("--features")
         }
         "tokens" => true,
         "build" => !value("--from-sir") && !value("--from-lir"),
@@ -1595,51 +1606,75 @@ fn stage1_command(
         "test" | "bench" => {
             // Each member of a workspace in turn (09), as the Rust front end
             // runs them; the worst status wins.
-            let inputs = match inputs_for(cmd, target.path.as_deref(), locked, false, false, features, host) {
-                Ok(i) => i,
-                Err(code) => return code,
-            };
+            // The programs, as the Rust front end finds them, for their
+            // files; stage 1's `check` writes the lockfile (decision 380).
+            let inputs =
+                match inputs_for(cmd, target.path.as_deref(), Lock::Stage1, false, false, features, host) {
+                    Ok(i) => i,
+                    Err(code) => return code,
+                };
             let mut status = exit::OK;
             for input in &inputs {
                 let code = {
+                    // Stage 1's `sir` takes `--accept-unsafe` and the path;
+                    // its `check` the lockfile's and the features' options too,
+                    // and writes the lockfile first (a run with features
+                    // stays the Rust front end's, `stage1_serves`).
                     let mut common: Vec<String> = Vec::new();
-                    if locked {
-                        common.push("--locked".into());
-                    }
                     if accept {
                         common.push("--accept-unsafe".into());
                     }
-                    if !features.names.is_empty() {
-                        common.push("--features".into());
-                        common.push(features.names.join(","));
-                    }
-                    if features.no_default {
-                        common.push("--no-default-features".into());
-                    }
                     common.push(input.shown.clone());
-                    // The program's errors, the ownership checker's among
-                    // them, stop it before its tests run, as they stop `sisu
-                    // run`: stage 1's `sir` prints nothing for a program with
-                    // an error of the front end, and the SIR of one the
-                    // ownership checker rejects, as `sisu sir` does
-                    // (decision 380); its `check` says which.
+                    let mut lock_words: Vec<String> = Vec::new();
+                    if locked {
+                        lock_words.push("--locked".into());
+                    }
+                    // The program's errors, the ownership checker's and a
+                    // `comptime` expression's among them, stop it before its
+                    // tests run, as they stop `sisu run`, and its warnings
+                    // come first (decision 380): stage 1's `sir` prints the
+                    // SIR of a program its ownership checker rejects or whose
+                    // `comptime` fails, and nothing for one with an error of
+                    // the front end; its `check`, of the program with its
+                    // tests, says which, and writes the lockfile.
                     let mut check = vec!["check".to_string()];
                     if has_ids(&p.flags) {
                         check.push("--format=ids".into());
                     }
+                    check.extend(lock_words);
                     check.extend(common.iter().cloned());
                     let c = match run(host, &check, Backend::Unused) {
                         Ok(c) => c,
                         Err(code) => return code,
                     };
+                    host.stderr(&c.stdout);
+                    host.stderr(&c.stderr);
+                    let mut words = vec!["sir".to_string(), "--tests".to_string()];
+                    words.extend(contracts.clone());
+                    words.extend(common);
+                    let r = if c.status == exit::OK || !c.stdout.is_empty() {
+                        None
+                    } else {
+                        match run(host, &words, Backend::Unused) {
+                            Ok(r) => Some(r),
+                            Err(code) => return code,
+                        }
+                    };
                     if c.status != exit::OK {
-                        host.stderr(&c.stdout);
-                        host.stderr(&c.stderr);
+                        // The line `sisu run` ends with: the ownership checker's
+                        // errors when the front end let the program through
+                        // to its SIR, else errors (`D0021`, `D0006`).
+                        let errors: Vec<&str> =
+                            c.stderr.lines().filter_map(|l| l.strip_prefix("error[")).collect();
+                        if !errors.is_empty() {
+                            let lowered =
+                                r.as_ref().is_some_and(|r| r.status == exit::OK && !r.stdout.is_empty());
+                            let owned = lowered && errors.iter().all(|e| e.starts_with("E04"));
+                            let id = if owned { msg::CLI_OWNERSHIP_ERRORS } else { msg::CLI_ERRORS_FOUND };
+                            host.stderr(&plain_error(id, &[("count", errors.len().to_string())]));
+                        }
                         c.status.max(exit::ERROR)
                     } else {
-                        let mut words = vec!["sir".to_string(), "--tests".to_string()];
-                        words.extend(contracts.clone());
-                        words.extend(common);
                         let r = match run(host, &words, Backend::Unused) {
                             Ok(r) => r,
                             Err(code) => return code,
@@ -1861,14 +1896,32 @@ fn guarded(
     }
 }
 
+/// What a command does with the lockfile of the program it works on (09).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Lock {
+    /// Rewritten when the manifests resolve otherwise.
+    Write,
+    /// Never changed: a change is refused (`--locked`).
+    Locked,
+    /// Left to stage 1, which writes it with each package's `unsafe` level
+    /// (decision 275) when it builds what the command runs (decision 380).
+    Stage1,
+}
+
+impl Lock {
+    fn of(locked: bool) -> Lock {
+        if locked { Lock::Locked } else { Lock::Write }
+    }
+}
+
 /// What a command works on (09): the file it names; else the package or
 /// workspace in the directory it names, or in the working directory or the
 /// nearest one above it. A package's files are read and its lockfile
-/// written (unless `--locked`, which refuses to change it).
+/// written as `lock` says.
 fn inputs_for(
     cmd: &str,
     target: Option<&str>,
-    locked: bool,
+    lock: Lock,
     ids: bool,
     from_sir: bool,
     features: &crate::package::FeatureRequest,
@@ -1996,7 +2049,7 @@ fn inputs_for(
         unknown(host, layout)?;
     }
     // One lockfile for a workspace's members (09): what all of them resolved.
-    let lock = match &found_workspace {
+    let resolved = match &found_workspace {
         Some((root, members)) => {
             let all: Vec<crate::package::Layout> =
                 members.iter().map(|m| crate::package::load_package(m, m)).collect();
@@ -2007,13 +2060,16 @@ fn inputs_for(
     };
     let mut out = Vec::new();
     for (k, layout) in layouts.into_iter().enumerate() {
+        // Stage 1 writes the lockfile of what it builds, each package's
+        // `unsafe` level in it (decision 275), which this one leaves out.
         if k == 0
-            && let Some((path, text)) = &lock
+            && lock != Lock::Stage1
+            && let Some((path, text)) = &resolved
             && !layout.has_errors()
         {
             let old = std::fs::read_to_string(path).ok();
             if old.as_deref() != Some(text.as_str()) {
-                if locked {
+                if lock == Lock::Locked {
                     let what = match old {
                         None => "there is none".to_string(),
                         Some(o) => sisu_interp::diff::lines(&o, text),
@@ -3613,7 +3669,7 @@ fn doc(args: &[String], host: &mut dyn Host) -> i32 {
     let inputs = if std_lib {
         vec![Input::single("std.sisu", std_root())]
     } else {
-        match inputs_for("doc", targets.first().copied(), locked, false, false, &features, host) {
+        match inputs_for("doc", targets.first().copied(), Lock::of(locked), false, false, &features, host) {
             Ok(i) => i,
             Err(code) => return code,
         }

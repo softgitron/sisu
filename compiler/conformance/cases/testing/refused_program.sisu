@@ -1,0 +1,19 @@
+# `sisu test` runs no test of a program the ownership checker rejects: it
+# prints the diagnostics and the line `sisu run` ends with (`D0021`) and
+# exits with 1, where it ran the tests of the SIR stage 1 prints of such a
+# program (decision 380; the manual's exercise `winner`). Nothing reaches
+# standard output.
+
+struct Player:
+    name: String
+    score: int
+
+def winner(a: Player, b: Player) -> ref String from a:
+    if a.score >= b.score:
+        return ref a.name
+    return ref b.name
+
+test "the higher score wins":
+    let a = Player(name="Aino".to_string(), score=3)
+    let b = Player(name="Eino".to_string(), score=5)
+    assert winner(a, b) == "Eino"

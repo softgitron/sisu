@@ -1,0 +1,17 @@
+# `sisu test` runs no test of a program whose `comptime` expression spends
+# its budget: it prints the diagnostic and `D0006` and exits with 1 (decision
+# 380; the manual's exercise `journeys`). Nothing reaches standard output.
+
+def steps(n: int) -> int:
+    var count = 0
+    var x = n
+    while x != 1:
+        x = if x % 2 == 0: x // 2 else: 3 * x + 1
+        count += 1
+    return count
+
+@comptime_budget(steps=100)
+const LONG: int = comptime steps(27)
+
+test "the constant is the count of steps":
+    assert LONG == 111

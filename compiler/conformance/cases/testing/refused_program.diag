@@ -1,0 +1,3 @@
+14:5-14:22 E0408 borrow.return-not-from param="b" function="winner"
+  label 11:23-11:32 borrow.declared-here name="b"
+  fix borrow.add-from
