@@ -7956,6 +7956,98 @@ in Sisu"; D-086)
      copied and freed with the value, which is port-debt.md's pay, and
      which decision 382 takes. This changes no rule of the language.
 
+**Stage 1's fourth round** (stage 1's RULES.md, R37 to R46; associated constants, `expect`, contracts across modules, attributes, `Arbitrary`, generator expressions)
+
+361. A trait declares associated constants (03): `const NAME: T`, which
+     every impl gives, or with a value an impl may replace; each is read
+     through a type, `T.NAME` under a bound, `Self.NAME`, or `Type.NAME`,
+     and is the trait's `pure` function without `self` that gives it, made
+     for the type at the read. An impl gives each constant the trait
+     leaves without a value, no other, with the trait's type and as a
+     constant (`E0232`, `E0271` to `E0273`); a read through the trait is
+     `E0449`, and a trait with a constant is no `dyn` type. Stage 1
+     decides it (RULES.md, R37).
+
+362. `expect cond` in a program built with its tests (`sisu test`) lowers
+     as `assert cond` does but for the failure, which calls
+     `expect.fail`, `expect.fail_compare` or `expect.fail_parts` with
+     `assert`'s arguments: the run records the failure in the running
+     test's report and goes on, and the runner fails the test at its end
+     with every failure recorded (17). `assert` stops the test as before;
+     outside a build with its tests, and at compile time, `expect` stops
+     as `assert` does. Stage 1 decides it (RULES.md, R38); the interpreter
+     and the runner implement the three intrinsics.
+
+363. A trait's contract binds an impl of any module (07): the impl's
+     method checks the trait's clauses as R29's rule says, checked in the
+     syntax of the trait's module with the impl's parameters under the
+     trait's names, its failure naming the trait's method and showing the
+     clause's parts, its statements standing at the impl's method's name.
+     `W0021` remains only for a trait whose module's syntax the check
+     does not have. Stage 1 decides it (RULES.md, R39).
+
+364. A type, a constant or a variant marked `@deprecated("...")` warns
+     where it is used, as a deprecated function does (`W0023`, `W0025`):
+     a type named or built, a constant read, a variant built or matched,
+     but in the type's own declaration and impls (13). An attribute Sisu
+     reads that stands on a declaration it means nothing on warns
+     (`W0026`, naming where it means something); and a suite's `@tag`s
+     tag each of its tests. Stage 1 decides it (RULES.md, R40).
+
+365. The prelude's `Arbitrary` (`def arbitrary(d: Draws) -> Self`) draws a
+     type for property tests (17): an impl written by hand draws it its
+     own way, which `arbitrary[T]` and the generators of the types that
+     hold one use; `@derive(Arbitrary)` gives a struct or an enum without
+     type parameters the impl that draws its shape, the generator
+     `arbitrary[T]` writes for any type, and is `E0820` for one with a
+     part that has no generator. Stage 1 decides it (RULES.md, R41).
+
+366. A comprehension in parentheses, `(f(x) for x in xs if c(x))`, is a
+     lazy `Iter[T]` (02): a generator whose body runs the clauses as loops
+     and tests around a `yield` of the element, task-like as a generator
+     function's body is, borrowing what it reads of the function's own
+     while it lives and copying what is `Copy`; its clauses run when it is
+     first advanced. Stage 1 decides it (RULES.md, R42).
+
+367. A list's slice takes a bound counted from the end (`xs[1:^1]`, 02);
+     an enum's body declares constants as a struct's does (`Light.COUNT`);
+     a `const` parameter's value has the methods of its number
+     (`N.to_f32()`); two sized integers compare as they add, the narrower
+     widened when that loses nothing (D-016); a number or text on an
+     operator's left reaches an impl of the operator for it when the right
+     is a type of the program's (`2.0 * v`); a supertrait cycle through
+     other traits is `E0247`; and a field or a variant declared twice is
+     `E0205` or `E0206`, as in stage 0, the second variant left out of the
+     derived impls. Stage 1 decides it (RULES.md, R43).
+
+368. `@cfg` on a field, a variant or a method in a struct's or an enum's
+     own body leaves it out of a build its condition does not hold in, as
+     it leaves out an item and a method of an impl (08). Stage 1 decides
+     it (RULES.md, R44).
+
+369. The fixes and notes the manual's fourth round found missing: double
+     quotes for text in single quotes (`E0016`); `E0327` with the closest
+     variant for `Type.Name` an enum lacks; a note on Python's conversion
+     functions (`E0200`); `Some(...)` for a value where its option is
+     expected and `.to_f64()` for an `int` where a float is (`E0300`);
+     `repeat` for text times a number and the operator's trait for a
+     type's own (`E0310`); the closest parameter for a misspelt keyword
+     (`E0306`); keyword-only parameters (`E0305`); `.or(...)` for `??` on a
+     result (`E0371`); `?.` as one token after a result (`E0370`); a copy
+     of a parameter the body changes (`E0312`); `remove` for an item moved
+     out of a list (`E0338`); `Cell` or `Mutex` for a `Shared`'s field
+     (`E0341`); and a plain closure for an `own` closure's capture
+     (`E0423`). Stage 1 decides it (RULES.md, R45).
+
+370. A program built with its tests (`sir --tests`, from which `sisu
+     test` and `sisu bench` run, decision 357) has no SIR when it has an
+     error of any phase: the front end's, the ownership checker's, or a
+     failed `comptime` expression's. `sir --tests` prints the diagnostics
+     and `D0006`, or `D0021` at the ownership checker's errors, as `sisu
+     test` prints them, and fails. `sir`, the program without its tests,
+     keeps printing the SIR of a program the ownership checker rejects,
+     as stage 0's `sisu sir` does. Stage 1 decides it (RULES.md, R46).
+
 **The test runner's status, and what native code leaked or refused**
 (sections "Testing", "The query layer and the driver" and "Stage 2"; 17,
 10; decisions 224, 340 and 360)
