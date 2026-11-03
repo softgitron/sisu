@@ -1515,3 +1515,16 @@ conformance diff.
 **Current lean.** Keep Part II from the corpus authors during Phase 3, since the section is the clearest teaching of what the checker protects against and the exclusion costs the experiment nothing it does not already assume of the referee's programs.
 
 **What would settle it.** The owner's decision, and the pre-registration's wording for the exclusion before Phase 3 starts.
+
+### Q-74. How does a program report an error that `main` returns?
+
+**Question.** A `main` that returns `! E` and fails prints the error's `Debug` form today, for example `Context(message="...", cause="NotANumber(text=\"kolme\")")`, with the exit status 1. The manual's writers found that readers expect the message a person would write ([05](proposal/05-errors.md) gives every error a message and a trace; [10](proposal/10-tooling.md) says nothing about what a failing `main` prints), and the suite's and the manual's expectations pin the current form in many places.
+
+**Options.**
+- *The `Display` form with the trace* (lean): `error: <message>` on standard error, then the return trace's lines as `sisu run` prints a panic's, so that a program's failure reads as its author wrote the message, and the `Debug` form stays for `{e:?}`.
+- *The `Debug` form*, as now: every field visible, no message to write.
+- *Both*: the message first, the `Debug` form after it under `--verbose`.
+
+**Current lean.** The `Display` form with the trace, decided before version 0.1 since every expectation that pins the form must change at once.
+
+**What would settle it.** The owner's decision; the change is one rule of the runtime and the interpreter plus the re-blessing of the suite's and the manual's expectations.
