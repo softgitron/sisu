@@ -1528,3 +1528,17 @@ conformance diff.
 **Current lean.** The `Display` form with the trace, decided before version 0.1 since every expectation that pins the form must change at once.
 
 **What would settle it.** The owner's decision; the change is one rule of the runtime and the interpreter plus the re-blessing of the suite's and the manual's expectations.
+
+### Q-75. What does `sorted` give for items that are not `Copy`?
+
+**Question.** The prelude's `sorted(xs)` ([02](proposal/02-syntax.md), Python's builtin kept as a generic function) makes a new list of the items of `xs` in order. Since a collection holds values or views and never references (decision 320, `E0438`), `sorted` of a view of a `list[String]`, whose items come out as `ref String`, is refused with the fix `.map(it.copy())`, and so is `sorted` of a list literal of `String`s: the manual's maintenance round found both ([`manual/README.md`](manual/README.md), the findings; R14's example now derives `Copy` to keep `sorted`). Python's `sorted` leaves its argument as it was and gives a new list, which in Sisu means copies.
+
+**Options.**
+- *`sorted` copies* (lean): `sorted(xs)` gives copies of the items (`it.copy()` of each, which every value type has), as the fix writes by hand, so that the call reads as Python's and the argument stays whole; `xs.sort()` sorts in place with no copy, as today, and is what a program that does not need the original writes.
+- *`sorted` takes ownership*: `sorted(own xs)` moves the items into the result, no copy, and the original is gone, which reads oddly beside Python's and needs `sorted(xs.copy())` for the common case.
+- *Both*, by the argument's form: `sorted(xs)` copies, `sorted(own xs)` moves, one function with the two conventions (03, "Conventions").
+
+**Current lean.** `sorted` copies, as the one-line change to the prelude (`iterable_list` giving copies of referenced items when the item type has `copy`), with a note in 02; the third option if the copy's cost shows in the harness.
+
+**What would settle it.** The owner's decision; then the prelude's change and the manual's finding closed.
+
