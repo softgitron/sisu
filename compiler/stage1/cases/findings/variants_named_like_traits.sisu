@@ -1,0 +1,35 @@
+# RULES.md, R13: a trait is no value, so where no type is expected a name
+# that is both a prelude trait and a variant of the program's (`Add`,
+# `Mul`, `Neg`, `Num`) is the variant: a call makes it, and the bare name
+# is it when it holds nothing.
+
+enum Step:
+    Num(int)
+    Add(int)
+    Mul(factor: int)
+    Neg
+
+enum Op:
+    Sub
+    Div
+
+def run(steps: list[Step]) -> int:
+    var total = 0
+    for s in steps:
+        match s:
+            case Num(n):
+                total = n
+            case Add(n):
+                total += n
+            case Mul(f):
+                total *= f
+            case Neg:
+                total = -total
+    return total
+
+def main():
+    let first = Num(2)
+    let steps = [first, Add(3), Mul(factor=4), Neg]
+    print("{run(steps)}")
+    let op = Sub
+    print("{op:?} {Div:?} {Neg:?}")

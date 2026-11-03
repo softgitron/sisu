@@ -48,10 +48,13 @@ pub pure def stage1_only(name: str) -> bool:
     return name == "mem" or name == "ffi" or name == "rt"
 
 ## The file of the std module `name` under the compiler's directory
-## `home`.
+## `home`. Stage 1's own modules are reached through `std/`, the directory
+## beside them: the home the `sisu` driver gives stage 1 is a directory of
+## links to the compiler's `catalog/` and `std/` (decision 268), in which
+## `std/../stage1` is the compiler's `stage1/`.
 pub pure def std_file(home: str, name: str) -> String:
     if stage1_only(name):
-        return "{home}/stage1/std/{name}.sisu"
+        return "{home}/std/../stage1/std/{name}.sisu"
     return "{home}/std/{name}.sisu"
 
 ## The paths an import may name a std module by, for the fix of one that
@@ -444,6 +447,17 @@ pure def leaf_format(t: str, ty: str) -> String?:
         sig = "fmt"
         plain = "\"{{self}}\""
         with_spec = "if s.kind == Some('?'):\n                    f.write(s.pad(\"{{self:?}}\"))\n                else:\n                    f.write(s.text(\"{{self}}\"))".to_string()
+    elif t == "Debug" and ty == "f64":
+        # A float's `Debug` text is its `Display` text, so a spec applies to
+        # it as to `Display` (RULES.md, R20: `{x=:.2f}` rounds); `?` still
+        # pads the `Debug` text.
+        sig = "fmt_debug"
+        plain = "\"{{self:?}}\""
+        with_spec = "f.write(s.float(self))".to_string()
+    elif t == "Debug" and ty == "f32":
+        sig = "fmt_debug"
+        plain = "\"{{self:?}}\""
+        with_spec = "f.write(s.float32(self))".to_string()
     elif t == "Debug":
         sig = "fmt_debug"
         plain = "\"{{self:?}}\""

@@ -1,0 +1,18 @@
+# RULES.md, R18: the type arguments of an associated function are its own
+# generic parameters', so their count is theirs (`E0208`), and one without
+# any takes none (`E0349`).
+
+struct Shelf:
+    size: int
+
+impl Shelf:
+    def empty_of[T]() -> list[T]:
+        return []
+
+    def count() -> int:
+        return 0
+
+def main():
+    let xs = Shelf.empty_of[int, str]()
+    let n = Shelf.count[int]()
+    print("{len(xs)} {n}")

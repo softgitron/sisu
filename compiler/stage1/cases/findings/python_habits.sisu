@@ -1,0 +1,34 @@
+# RULES.md, R16: Python's habits that Sisu spells otherwise (02, "Departures
+# from Python"), each with the fix that teaches Sisu's spelling: text walked
+# by its characters, a character looked for in text, `print` of several
+# values, `?` in a function that returns nothing, a name declared by
+# assigning it, and Python's `open`.
+
+error Bad:
+    Negative
+
+def risky(n: int) -> int ! Bad:
+    if n < 0:
+        return Err(Negative)
+    return Ok(n)
+
+def count_letters(word: str) -> int:
+    var n = 0
+    for letter in word:
+        n += 1
+    return n
+
+def is_vowel(c: char) -> bool:
+    return c in "aeiou"
+
+def a_is_vowel() -> bool:
+    return 'a' in "aeiou"
+
+def main():
+    greeting = "Hei"
+    print(greeting, "maailma")
+    total = 0
+    total = total + count_letters(greeting)
+    let n = risky(total)?
+    let f = open("data.txt")
+    print("{n} {is_vowel('e')} {a_is_vowel()}")

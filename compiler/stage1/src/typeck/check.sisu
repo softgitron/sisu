@@ -44,7 +44,7 @@ from stage1.typeck.consts import ConstScope
 from stage1.typeck.generic_asserts import Assert, ConstCall, Fold, const_calls, fold_tree
 from stage1.typeck.infer import InferTable
 from stage1.typeck.pat import OrAlt
-from stage1.typeck.program import DefKind, FnKind, ModuleId, Predicate, Program, Request
+from stage1.typeck.program import Answer, DefKind, FnKind, ModuleId, Predicate, Program, Request
 from stage1.typeck.thir import (
     BindMode,
     BlockId,
@@ -268,6 +268,9 @@ pub struct Checker:
     ## The foreign functions the body calls, for the package's level and
     ## the lint of ambient authority.
     pub foreign_calls: list[(String, TextRange)]
+    ## While an interpolation's optional chain is checked: the chain only
+    ## reads what it reaches through a place (RULES.md, R14).
+    pub reading_chain: bool
 
 impl Checker:
     pub pure def new(cx: Cx, own types: Types, def_: DefId) -> Checker:
@@ -327,6 +330,7 @@ impl Checker:
             unsafe_stack=[],
             stmt_start=0,
             foreign_calls=[],
+            reading_chain=False,
         )
 
     pub pure def finish(own self) -> Finished:
@@ -632,6 +636,60 @@ impl Checker:
             Param(name="ty".to_string(), value=self.show(cx, ty)),
         ]
         return d.fix_params(Msg.TypeAddImpl, params, [])
+
+    ## The fix that derives a missing trait of the language's for a struct
+    ## or enum of the module being checked (10: "Missing-trait errors list
+    ## the candidates"; R16): `@derive` with the trait and the supertraits
+    ## the type lacks, written into its `@derive(...)` or on a line of its
+    ## own above it, when every field has them.
+    pub pure def derive_fix(mut self, cx: Cx, own d: Diagnostic, ty: Ty, tr: DefId) -> Diagnostic:
+        let t = self.types.strip_ref(ty)
+        let TyData.Adt(def_, _) = self.types.data(t).copy() else:
+            return d
+        if cx.prog.defs[def_.index].module != self.module:
+            return d
+        var fields: list[Ty] = []
+        match cx.prog.defs[def_.index].kind():
+            case DefKind.Struct(info):
+                if info.builtin.is_some():
+                    return d
+                for f in info.fields:
+                    fields.push(f.ty)
+            case DefKind.Enum(info):
+                for v in info.variants:
+                    for (_, f) in v.fields:
+                        fields.push(f)
+            case _:
+                return d
+        let wk = ref cx.prog.wk
+        var wanted: list[DefId?] = []
+        if Some(tr) == wk.ord:
+            wanted = [wk.eq, wk.partial_ord, wk.ord]
+        elif Some(tr) == wk.hash:
+            wanted = [wk.eq, wk.hash]
+        elif Some(tr) == wk.eq or Some(tr) == wk.partial_ord or Some(tr) == wk.copy:
+            wanted = [Some(tr)]
+        else:
+            return d
+        var names: list[String] = []
+        for w in wanted:
+            let found = w.copy()
+            let x = found else:
+                return d
+            let r = TraitRef(def_=x, args=[])
+            if cx.prog.implements(mut self.types, t, r, self.env) != Answer.No:
+                continue
+            for f in fields:
+                if self.types.has_params(f) or f == t:
+                    continue
+                if cx.prog.implements(mut self.types, f, r, self.env) == Answer.No:
+                    return d
+            names.push(cx.prog.defs[x.index].name.copy())
+        if names.is_empty():
+            return d
+        let edit = derive_edit(cx.source, cx.prog.defs[def_.index].span.start, names) else:
+            return d
+        return d.fix_edits(Msg.TypeDeriveTrait, [edit])
 
     pub pure def source_text(self, cx: Cx, range: TextRange) -> String:
         if range.start < 0 or range.end > cx.source.byte_len() or range.start > range.end:
@@ -1725,6 +1783,16 @@ impl Checker:
                             let edit = Edit(start=s.start, end=s.start, text="mut ".to_string())
                             let named = Param(name="name".to_string(), value=pname.copy())
                             d = d.fix_params(Msg.TypeTakeMut, [named], [edit])
+                        # A method that changes what `self` holds takes it
+                        # with `mut` (R16).
+                        if at.is_none() and self.locals[root].name == "self":
+                            if f.self_mode == Some(Mode.Borrow):
+                                if let Some(k) = self.self_param_at(cx):
+                                    let edit = Edit(start=k, end=k, text="mut ".to_string())
+                                    let named = Param(
+                                        name="name".to_string(), value="self".to_string()
+                                    )
+                                    d = d.fix_params(Msg.TypeTakeMut, [named], [edit])
                 # Otherwise it is a borrow that only reads.
                 if not read_guard and d.fixes.is_empty():
                     d = d.note(Msg.TypeBorrowWithMut)
@@ -1734,6 +1802,35 @@ impl Checker:
         self.check_protected_place(cx, e, range)
         if let Some(root) = self.place_root(e):
             self.note_use(root, True)
+
+    ## Where the method being checked writes its `self` parameter: after
+    ## its name, its generic parameters and `(`.
+    pure def self_param_at(self, cx: Cx) -> int?:
+        let name = cx.prog.defs[self.def_.index].span
+        let text = cx.source
+        var i = name.end
+        let n = text.byte_len()
+        if i < n and text.byte_at(i) == 91:
+            var depth = 0
+            while i < n:
+                let b = text.byte_at(i)
+                if b == 91:
+                    depth += 1
+                elif b == 93:
+                    depth -= 1
+                    if depth == 0:
+                        i += 1
+                        break
+                i += 1
+        if i >= n or text.byte_at(i) != 40:
+            return None
+        i += 1
+        while i < n and is_space(text.byte_at(i)):
+            i += 1
+        if i + 4 <= n and text.byte_slice(i, i + 4) == "self":
+            if i + 4 == n or not is_word_byte(text.byte_at(i + 4)):
+                return Some(i)
+        return None
 
     ## Why a place cannot be written, if it cannot.
     pub pure def mutable_root_problem(self, cx: Cx, e: TExprId) -> Problem?:
@@ -1791,7 +1888,17 @@ impl Checker:
                 return TStmt.If(branches=bs, else_=el, span=range)
             case _:
                 pass
-        let x = self.infer_expr(cx, e, None)
+        # A typed hole whose value nothing uses stands for statements still
+        # to write: a hole of type `()` (D-061; RULES.md, R16).
+        var expected: Ty? = None
+        if let ExprKind.Call(callee, _, _) = cx.ast.expr(e).kind:
+            if let ExprKind.Name(n) = cx.ast.expr(callee).kind:
+                if n == "todo" and self.lookup_local(n).is_none():
+                    if let Some(d) = cx.prog.lookup(self.module, n):
+                        if let Some(f) = cx.prog.fn_info(d):
+                            if f.intrinsic == Some("todo".to_string()):
+                                expected = Some(Ty.unit())
+        let x = self.infer_expr(cx, e, expected)
         let ty = self.resolved(self.ty_of(x))
         var unused = False
         if let TyData.Adt(d, _) = self.types.data(ty):
@@ -2065,9 +2172,52 @@ pub pure def first_of(ts: list[Ty]) -> Ty?:
         return None
     return Some(ts[0])
 
+## The edit that derives `names` for the type whose name is at `at`: the
+## attribute `@derive(...)` on the lines above its declaration with them
+## added, or a line of its own above it.
+pure def derive_edit(text: str, at: int, names: list[String]) -> Edit?:
+    if at > text.byte_len():
+        return None
+    var line = at
+    while line > 0 and text.byte_at(line - 1) != 10:
+        line -= 1
+    var first = line
+    while first < at and text.byte_at(first) == 32:
+        first += 1
+    # The attributes directly above, one a line.
+    var above = line
+    while above > 0:
+        var prev = above - 1
+        while prev > 0 and text.byte_at(prev - 1) != 10:
+            prev -= 1
+        let written = text.byte_slice(prev, above - 1).trim()
+        if not written.starts_with("@"):
+            break
+        if written.starts_with("@derive(") and written.ends_with(")"):
+            let inside = written.byte_slice(8, written.byte_len() - 1)
+            var all: list[String] = []
+            for part in inside.split(","):
+                if not part.trim().is_empty():
+                    all.push(part.trim().to_string())
+            for n in names:
+                if not all.contains(n.copy()):
+                    all.push(n.copy())
+            var start = prev
+            while text.byte_at(start) == 32:
+                start += 1
+            let end = start + written.byte_len()
+            return Some(Edit(start=start, end=end, text="@derive({all.join(", ")})"))
+        above = prev
+    let indent = text.byte_slice(line, first)
+    return Some(Edit(start=first, end=first, text="@derive({names.join(", ")})\n{indent}"))
+
 ## Whether a byte is ASCII white space.
 pure def is_space(b: u8) -> bool:
     return b == 32 or b == 10 or b == 9 or b == 13 or b == 12
+
+## Whether a byte is an ASCII letter, a digit or `_`.
+pure def is_word_byte(b: u8) -> bool:
+    return (b >= 97 and b <= 122) or (b >= 65 and b <= 90) or (b >= 48 and b <= 57) or b == 95
 
 ## The type a primitive name stands for.
 pub pure def primitive(name: str) -> Ty?:

@@ -1,0 +1,79 @@
+sir 0
+source 0 "layout_type_arguments.sisu"
+source 1 "<std>/mem.sisu"
+entry main
+
+struct u8 {  }
+
+struct mem.Layout { size: int, align: int }
+
+intrinsic mem.align_of pure
+intrinsic mem.size_of pure
+
+fn layouts(0) pure source 0 @8:10-8:17 {
+    let _0: (mem.Layout, Option[mem.Layout])
+    let _1: mem.Layout
+    let _2: Option[mem.Layout]
+  bb0:
+    _1 = call fn mem.Layout.of[u8]() @9:13-9:28
+    _2 = call fn mem.Layout.array[int](const 3) @9:30-9:50
+    _0 = tuple(copy _1, copy _2) @9:12-9:51
+    return @9:5-9:51
+}
+
+fn main(0) source 0 @11:5-11:9 {
+    let _0: ()
+    let _1: (mem.Layout, Option[mem.Layout])
+  bb0:
+    _1 = call fn layouts() @12:9-12:18
+    _0 = const ()
+    return
+}
+
+fn mem.Layout.of[T](0) pure source 1 @263:18-263:20 {
+    let _0: mem.Layout
+    let _1: int
+    let _2: int
+  bb0:
+    _1 = call intrinsic mem.size_of[$0]() @264:28-264:40
+    _2 = call intrinsic mem.align_of[$0]() @264:48-264:61
+    _0 = struct mem.Layout(copy _1, copy _2) @264:16-264:62
+    return @264:9-264:62
+}
+
+fn mem.Layout.array[T](1) pure source 1 @268:18-268:23 {
+    let _0: Option[mem.Layout]
+    let _1: int "n" @268:27-268:33
+    let _2: bool
+    let _3: int "size" @271:13-271:17
+    let _4: bool
+    let _5: int
+    let _6: mem.Layout
+    let _7: int
+    let _8: int
+  bb0:
+    _2 = lt copy _1, const 0 @269:12-269:17
+    switch copy _2 [0: bb1, else: bb2] @269:12-269:17
+  bb1:
+    _3 = call intrinsic mem.size_of[$0]() @271:20-271:32
+    _4 = gt copy _3, const 0 @272:12-272:20
+    switch copy _4 [0: bb5, else: bb4] @272:12-272:56
+  bb2:
+    _0 = variant Option::None() @270:20-270:24
+    return @270:13-270:24
+  bb3:
+    _7 = mul copy _3, copy _1 @274:33-274:41
+    _8 = call intrinsic mem.align_of[$0]() @274:49-274:62
+    _6 = struct mem.Layout(copy _7, copy _8) @274:21-274:63
+    _0 = variant Option::Some(copy _6) @274:16-274:64
+    return @274:9-274:64
+  bb4:
+    _5 = floordiv const 9223372036854775807, copy _3 @272:29-272:56
+    _4 = gt copy _1, copy _5 @272:25-272:56
+    switch copy _4 [0: bb3, else: bb6] @272:12-272:56
+  bb5:
+    switch copy _4 [0: bb3, else: bb6] @272:12-272:56
+  bb6:
+    _0 = variant Option::None() @273:20-273:24
+    return @273:13-273:24
+}

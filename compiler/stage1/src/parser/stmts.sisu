@@ -19,7 +19,7 @@ from stage1.parser.state import Parser
 from stage1.syntax.kinds import SyntaxKind
 
 ## The augmented assignment operators.
-pure def is_aug_assign(kind: SyntaxKind) -> bool:
+pub(package) pure def is_aug_assign(kind: SyntaxKind) -> bool:
     return match kind:
         case PlusEq | MinusEq | StarEq | SlashEq | SlashSlashEq | PercentEq | StarStarEq: True
         case AmpEq | PipeEq | CaretEq | ShlEq | ShrEq: True
@@ -61,13 +61,30 @@ impl Parser:
 
     ## The statements of a block after its INDENT, and its DEDENT.
     pure def statements(mut self):
+        var after_loop = False
         while not self.at_block_end():
             let before = self.pos_marker()
+            let loop_starts = self.at(SyntaxKind.ForKw) or self.at(SyntaxKind.WhileKw)
+            let loop_else = after_loop and self.at(SyntaxKind.ElseKw)
+            let reported = self.diags_len()
             self.statement()
+            if loop_else:
+                self.loop_else_reported(reported)
             if self.pos_marker() == before:
                 self.bump_error()
+            after_loop = loop_starts
         _ = self.eat(SyntaxKind.Dedent)
         self.ended_with_block = True
+
+    ## Python's `else` on a loop (02's departures from Python; RULES.md,
+    ## R16): the statement that starts with it does not parse, as any
+    ## other, and its first error, that an expression was expected at the
+    ## `else`, says instead what Sisu writes.
+    pure def loop_else_reported(mut self, from_: int):
+        if from_ < len(self.diags):
+            if self.diags[from_].msg == Msg.ParseExpectedExpression:
+                let d = self.diags[from_].copy()
+                self.diags[from_] = Diagnostic.new(Msg.ParseLoopElse, d.start, d.end)
 
     ## A block whose NEWLINE recovery already consumed.
     pub(package) pure def block_after_newline(mut self, keyword: str, line: int):

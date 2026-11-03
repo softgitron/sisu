@@ -1538,7 +1538,9 @@ impl FnLower:
         return False
 
     ## Whether an intrinsic needs its type arguments at run time: one of its
-    ## generic parameters appears in its result but in no parameter, or a
+    ## generic parameters appears in its result but in no parameter, one of
+    ## its own appears in no parameter, in its result or nowhere (RULES.md,
+    ## R17: `mem.size_of[T]() -> int` is `mem.size_of[int]()`), or a
     ## parameter is an `Iterable[T]`.
     pure def needs_type_args(self, cx: Cx, def_: DefId) -> bool:
         let f = cx.prog.fn_info(def_) else:
@@ -1557,6 +1559,9 @@ impl FnLower:
         var in_ret: list[int] = []
         params_of(self.types, f.ret, mut in_ret)
         for i in in_ret:
+            if not in_params.contains(i):
+                return True
+        for i in range(f.impl_generics, len(f.generics)):
             if not in_params.contains(i):
                 return True
         return False

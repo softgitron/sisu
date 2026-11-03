@@ -1,0 +1,69 @@
+# RULES.md, R10: a `match` that is not exhaustive names every pattern
+# its arms miss (03, "Algebraic data types"), up to eight; where no arm
+# names any constructor of a part, that part is `_`.
+
+enum Suit:
+    Hearts
+    Spades
+    Clubs
+    Diamonds
+
+enum Light:
+    Red
+    Amber
+    Green
+
+enum Digit:
+    Zero
+    One
+    Two
+    Three
+    Four
+    Five
+    Six
+    Seven
+    Eight
+    Nine
+
+def suit_name(s: Suit) -> str:
+    return match s:
+        case Hearts: "hearts"
+
+def maybe(x: Suit?) -> int:
+    match x:
+        case Some(Hearts):
+            return 1
+    return 0
+
+def pair(a: Suit, b: Light) -> int:
+    match (a, b):
+        case (Hearts, Red):
+            return 1
+        case (Spades, _):
+            return 2
+    return 0
+
+def lists(xs: list[bool]) -> int:
+    match xs:
+        case []:
+            return 0
+        case [True, *rest]:
+            return 1
+        case [False]:
+            return 2
+    return 3
+
+def digit(d: Digit) -> int:
+    match d:
+        case Zero:
+            return 0
+    return 1
+
+def one_missing(l: Light) -> int:
+    match l:
+        case Red | Green:
+            return 1
+    return 0
+
+def main():
+    print(suit_name(Suit.Hearts))

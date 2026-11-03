@@ -148,6 +148,8 @@ pub pure def check_with(p: Program, findings_too: bool, mut placed: Placed) -> C
         intrinsics=p.intrinsics.copy(),
         functions=functions,
         tests=p.tests.copy(),
+        test_tags=p.test_tags.copy(),
+        benches=p.benches.copy(),
         trait_methods=p.trait_methods.copy(),
         impls=p.impls.copy(),
         asserted=p.asserted.copy(),

@@ -557,6 +557,8 @@ pub struct Program:
     pub variants: dict[String, list[(DefId, int)]]
     ## Tests in declaration order.
     pub tests: list[DefId]
+    ## Each test's `@tag("...")`s, in the order written (decision 285).
+    pub test_tags: dict[DefId, list[String]]
     ## Benchmarks in declaration order.
     pub benches: list[DefId]
     ## Every trait impl, in declaration order.
@@ -615,6 +617,7 @@ impl Program:
             methods={},
             variants={},
             tests=[],
+            test_tags={},
             benches=[],
             impls=[],
             impls_of={},

@@ -67,6 +67,10 @@ E0123 error   parse.walrus                Sisu has no `:=`; bind with `let` or u
 E0124 error   parse.keyword-as-name       `{keyword}` is a keyword and cannot be used as a name here
 E0125 error   parse.unexpected-indent     this line is indented more than the line before it, which does not open a block
 E0126 error   parse.expected-member       a struct body holds fields, methods and `pass`; this line is none of them
+# Stage 1's (RULES.md, R16; 02's departures from Python): `else` on a
+# loop, and the block a statement on a `case` line needs.
+E0127 error   parse.loop-else             a loop has no `else` in Sisu; keep what the loop finds in a variable and test it after the loop, as in `if let Some(i) = found:`
+-     fix     parse.arm-block             put it in an indented block under the `case`
 -     label   parse.opened-here           this `{keyword}` opens the block
 -     fix     parse.use-if-expression     write it as `if c: a else: b`
 -     fix     parse.parenthesize          add parentheses
@@ -149,6 +153,14 @@ E0265 error   resolve.const-not-int       a type's constant argument is an `int`
 -     note    resolve.write-trait-method  write `{signature}` in the impl
 -     note    borrow.consume-with         consume it with one of its methods that take `own self`: {methods}
 E0266 error   resolve.bad-cfg             `@cfg` takes a condition: `test`, `feature="NAME"`, `not` and a condition, or `all(...)` or `any(...)` of conditions; this is none of them
+# Stage 1's (RULES.md, R12; 02, "Lexical structure": naming follows PEP 8
+# and is enforced), and the fixes of R16 that the name pass gives.
+E0267 error   resolve.not-camel-case      the name of {kind} is written in CamelCase, and `{name}` is not
+E0268 error   resolve.not-snake-case      the name of {kind} is written in snake_case, and `{name}` is not
+E0269 error   resolve.not-screaming-case  the name of {kind} is written in SCREAMING_CASE, and `{name}` is not
+-     fix     resolve.rename              rename it
+-     fix     resolve.declare-with        declare it with `{keyword}`
+-     note    resolve.open-file           a program reaches files through the capability `Fs`, which `def main(sys: System)` holds as `sys.fs`: `sys.fs.read_to_string("data.txt")`
 
 # ---------------------------------------------------------------- types
 E0300 error   type.mismatch               expected `{expected}`, found `{found}`
@@ -280,6 +292,17 @@ E0399 error   type.bad-format-spec        `{spec}` is not a format spec; it is `
 -     fix     type.remove-mut             remove `mut`
 -     fix     type.add-impl               `{ty}` has every method of `{trait}`; add `impl {trait} for {ty}`
 -     help    type.truthiness             write the test explicitly, as in `not xs.is_empty()` or `x != 0`
+# Stage 1's (RULES.md, R10 and R16): every missing pattern, and the fixes
+# the manual's writers found missing.
+-     note    type.missing-patterns-each  add an arm for each of {missing}, or a `case _` arm
+-     note    type.more-missing           these are the first {count} patterns no arm covers, and there are more
+-     fix     type.derive-trait           derive it
+-     note    type.borrowed-items         the items of a borrowed `{ty}` are references, which are `{item}` values only when `{item}` is `Copy`
+-     fix     type.make-path              make a `Path` of the text
+-     fix     type.return-errors          let `{name}` return its errors
+-     fix     type.iterate-chars          iterate over its characters
+-     fix     type.iterate-bytes          iterate over its bytes
+-     fix     type.char-as-text           write the character as text
 
 # ---------------------------------------------------------------- ownership
 # The signature rules (E0411-E0415) are the resolver's; the rest are the
@@ -298,6 +321,8 @@ E0410 error   borrow.store-into-caller    this value borrows `{name}`, so it can
 E0411 error   borrow.view-field-in-plain-struct  `{ty}` holds `{field}: {fty}`, which borrows; only a `view struct` may hold a borrow
 E0412 error   borrow.view-in-enum         `{ty}` cannot hold `{fty}`, which borrows; an enum has no view form, so store an owned value such as `String`
 E0413 error   borrow.from-required        `{name}` returns `{ret}`, which borrows, and has more than one borrowed parameter ({params}); name the ones it borrows from with `from`
+# Stage 1's (RULES.md, R16): a text field owns its text.
+-     fix     borrow.own-string           own the text instead
 E0414 error   borrow.from-not-a-parameter  `{name}` in the `from` clause is not a borrowed parameter of `{function}`
 E0415 error   borrow.from-without-borrow  `{function}` returns `{ty}`, which does not borrow, so it takes no `from` clause
 E0416 error   borrow.move-out-of-drop     cannot move `{part}` out of `{name}`, because `{ty}` implements `Drop`, which needs the whole value
@@ -444,6 +469,10 @@ E0988 error   unsafe.in-contract          a contract holds no `unsafe`: it may c
 -     fix     unsafe.remove-unsafe        remove `unsafe`
 -     help    unsafe.import-ptr           `ptr[T]` and `ptr mut T` are the raw pointers of `std.mem`: `from std.mem import ptr`
 -     help    unsafe.take-capability      take the capability whose authority the call exercises (22, clause 5), as `std.rt.os` does behind `System`
+# Stage 1's (RULES.md, R19; 22, "Foreign calls"): exported functions and
+# blocking foreign calls.
+E0989 error   unsafe.export-signature     `{name}` is `@export`ed, and foreign code that calls it cannot keep `{ty}` alive: an exported function's signature holds no reference, view, `Shared`, closure or capability
+E0990 error   unsafe.blocking-not-foreign  `@blocking` marks a foreign function whose call may block its thread, and `{name}` is not a foreign function
 
 # ---------------------------------------------------------------- packages and manifests
 E1000 error   package.toml-syntax         this is not TOML that `sisu.toml` reads: expected {expected}, found {found}
@@ -490,6 +519,12 @@ W0011 warning unsafe.unexplained-purity   this {what} calls `{callee}`, which is
 W0012 warning unsafe.level                the package declares `unsafe = "{level}"`, {why}
 W0013 warning unsafe.auto-trait-bound     `unsafe impl {trait}` claims `{trait}` for every `{param}`, which is not bounded by `{trait}`
 W0014 warning unsafe.ambient-authority    `{name}` is public and safe and reaches the foreign function `{callee}` without taking a capability, so its callers need no authority for what the call does
+# Stage 1's (RULES.md, R11; D-043, and 10's `sisu lint`, "lints beyond
+# the compiler's warnings, with fix-its").
+W0015 warning lint.wildcard-own-enum     `case _` matches {variants} of `{ty}`, an enum of this package, so a variant added to `{ty}` later is not an error here
+-     fix     lint.list-variants          list them
+# Stage 1's (RULES.md, R15; D-024): an error set that hides the prelude's.
+W0016 warning resolve.shadow-prelude-set  the error set `{name}` hides the prelude's in this module, and the two are different sets: what the prelude's functions return is not this one
 
 # ---------------------------------------------------------------- run time
 R0001 runtime panic.explicit              {message}

@@ -22,6 +22,7 @@
 
 from stage1.diag import Diagnostic, Edit, Msg
 from stage1.parser.state import Parser
+from stage1.parser.stmts import is_aug_assign
 from stage1.syntax.kinds import SyntaxKind
 
 ## The outermost operator of an expression without parentheses, for the
@@ -784,6 +785,7 @@ impl Parser:
             return
         self.start(SyntaxKind.MatchArm)
         let line = self.current_line()
+        let (case_at, _) = self.current_range()
         self.bump()
         self.pattern()
         if self.at(SyntaxKind.IfKw):
@@ -792,19 +794,63 @@ impl Parser:
             _ = self.expr()
             self.finish_node()
         if self.expect(SyntaxKind.Colon):
+            let colon_end = self.previous_end() ?? case_at
+            let (body_at, _) = self.current_range()
             if self.at(SyntaxKind.Newline):
                 self.block("case", line)
             elif self.at_arm_statement():
+                let at = self.diags_len()
                 self.error(Msg.ParseArmStatement)
+                if self.diags_len() > at:
+                    self.arm_block_fix(case_at, colon_end, body_at)
                 self.start(SyntaxKind.Block)
                 self.statement()
                 self.finish_node()
             else:
                 _ = self.expr()
-                self.end_stmt()
+                # An assignment on the arm's line (`case None: label = "x"`)
+                # is a statement too (RULES.md, R16): the same error as a
+                # statement keyword's, with the block it needs, and the line
+                # recovered as `end_stmt` recovers it.
+                if self.at(SyntaxKind.Eq) or is_aug_assign(self.current()):
+                    let at = self.diags_len()
+                    let end = self.line_end()
+                    self.report(Diagnostic.new(Msg.ParseArmStatement, body_at, end))
+                    if self.diags_len() > at:
+                        self.arm_block_fix(case_at, colon_end, body_at)
+                    self.recover_line()
+                else:
+                    self.end_stmt()
         else:
             self.recover_line()
         self.finish_node()
+
+    ## The fix of a statement on a `case` line (R16): the line broken after
+    ## the `:`, the statement indented under the `case`.
+    pure def arm_block_fix(mut self, case_at: int, colon_end: int, body_at: int):
+        let n = len(self.diags)
+        if n == 0 or self.diags[n - 1].msg != Msg.ParseArmStatement:
+            return
+        var line_start = case_at
+        while line_start > 0 and self.text.byte_at(line_start - 1) != 10:
+            line_start -= 1
+        let indent = self.text.byte_slice(line_start, case_at)
+        let text = "\n{indent}    "
+        let d = self.diags[n - 1].copy()
+        self.diags[n - 1] = d.fix_at(Msg.ParseArmBlock, colon_end, body_at, text)
+
+    ## Where the current line's last significant token ends.
+    pure def line_end(self) -> int:
+        var k = self.pos
+        while k < len(self.sig):
+            match self.sig[k].kind:
+                case Newline | Eof | Dedent:
+                    break
+                case _:
+                    k += 1
+        if k > 0 and k - 1 < len(self.sig):
+            return self.sig[k - 1].end
+        return self.text.byte_len()
 
     ## Where the tokens of a broken interpolation stop.
     pure def at_interpolation_end(self) -> bool:

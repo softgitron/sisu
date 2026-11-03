@@ -330,8 +330,10 @@ impl Checker:
                                 self.check_args_loosely(cx, a)
                                 return self.error_expr(at)
                             self.check_method_vis(cx, d, name.range)
+                            let explicit = self.explicit_method_args.copy()
+                            self.explicit_method_args = None
                             return self.call_fn(
-                                cx, d, None, Some(ty), None, a, trailing, at, expected
+                                cx, d, explicit, Some(ty), None, a, trailing, at, expected
                             )
                         case None:
                             self.check_method_vis(cx, d, name.range)
@@ -351,8 +353,19 @@ impl Checker:
                         var outer = [norm]
                         for t in tr.args:
                             outer.push(t)
+                        let explicit = self.explicit_method_args.copy()
+                        self.explicit_method_args = None
                         return self.call_fn_with(
-                            cx, m, None, Some(outer), Some(norm), None, a, trailing, at, expected
+                            cx,
+                            m,
+                            explicit,
+                            Some(outer),
+                            Some(norm),
+                            None,
+                            a,
+                            trailing,
+                            at,
+                            expected,
                         )
                 let shown = self.show(cx, ty)
                 let diag = self.error(cx, Msg.TypeUnknownAssociated, name.range).with("ty", shown)
@@ -495,6 +508,30 @@ impl Checker:
                     case Some(StaticPath.Type(ty)):
                         return self.construct(cx, ty, args, trailing, at, expected)
                     case _:
+                        # `Type.function[T](...)`: an associated function with
+                        # the type arguments of its own generic parameters, as
+                        # `f[T](...)` gives a free function's (RULES.md, R18).
+                        if let ExprKind.Field(base, name) = cx.ast.expr(inner).kind:
+                            if let Some(StaticPath.Type(ty)) = self.static_path(cx, base):
+                                var tys: list[Ty] = []
+                                for a in targs:
+                                    match a:
+                                        case IndexArg.Expr(x):
+                                            tys.push(self.expr_as_type(cx, x))
+                                        case _:
+                                            tys.push(Ty.error())
+                                self.explicit_method_args = Some(tys)
+                                let x = self.static_member(
+                                    cx,
+                                    StaticPath.Type(ty),
+                                    name,
+                                    at,
+                                    Some(args.copy()),
+                                    trailing,
+                                    expected,
+                                )
+                                self.explicit_method_args = None
+                                return x
                         # `x.method[T](...)`: a method with its type arguments.
                         if let ExprKind.Field(base, name) = cx.ast.expr(inner).kind:
                             if self.static_path(cx, base).is_none():
@@ -524,7 +561,13 @@ impl Checker:
                     if let Some(exp) = expected:
                         if let Some((def_, vi)) = self.variant_in(cx, exp, n):
                             return self.variant_call(cx, def_, vi, args, trailing, at, Some(exp))
+                    let callee_range = cx.ast.expr(callee).range
                     if let Some(d) = cx.prog.lookup(self.module, n):
+                        # A trait is no value: a variant of that name is
+                        # what a call means (RULES.md, R13).
+                        if let DefKind.Trait(_) = cx.prog.defs[d.index].kind():
+                            if let Some((def_, vi)) = self.global_variant(cx, n, callee_range):
+                                return self.variant_call(cx, def_, vi, args, trailing, at, expected)
                         var embed = False
                         if let Some(f) = cx.prog.fn_info(d):
                             if let Some(i) = f.intrinsic:
@@ -532,7 +575,6 @@ impl Checker:
                         if embed:
                             return self.embed_call(cx, args, trailing, at)
                         return self.call_def(cx, d, None, args, trailing, at, expected)
-                    let callee_range = cx.ast.expr(callee).range
                     if let Some((def_, vi)) = self.global_variant(cx, n, callee_range):
                         return self.variant_call(cx, def_, vi, args, trailing, at, expected)
                     if not self.quiet_unknown_names
@@ -1221,6 +1263,18 @@ impl Checker:
                         found += 1
             var d = self.error(cx, Msg.TypeArgumentCount, at)
             d = d.with("name", sig.name).with("expected", "{expected}").with("found", "{found}")
+            # Python's `print(a, b)`: one text with the values in it (02,
+            # "Prelude functions"; R16).
+            if (sig.name == "print" or sig.name == "print_err") and trailing.is_none():
+                var ranges: list[TextRange] = []
+                var plain = True
+                for a in args:
+                    if a.name.is_some() or a.mutable:
+                        plain = False
+                    ranges.push(cx.ast.expr(a.value).range)
+                if plain:
+                    if let Some((start, end, text)) = printed_together(cx.source, ranges):
+                        d = d.fix_at(Msg.TypeInterpolate, start, end, text)
             self.report(d)
         var out: list[TArg] = []
         for i in range(n):
@@ -1367,8 +1421,10 @@ impl Checker:
                 if not self.infer.try_unify(mut self.types, it, item_ty):
                     let shown_p = self.show(cx, pty)
                     let shown_x = self.show(cx, self.ty_of(x))
-                    let d = self.error(cx, Msg.TypeMismatch, a.value_range)
-                    self.report(d.with("expected", shown_p).with("found", shown_x))
+                    var d = self.error(cx, Msg.TypeMismatch, a.value_range)
+                    d = d.with("expected", shown_p).with("found", shown_x)
+                    d = self.borrowed_items_help(cx, d, x, it, item_ty, a.value_range)
+                    self.report(d)
                 match mode:
                     case ForMode.Iter:
                         return TArg(expr=self.check_movable(cx, x), mode=ArgMode.Value)
@@ -1391,6 +1447,32 @@ impl Checker:
                     let d = self.error(cx, Msg.TypeMismatch, a.value_range)
                     self.report(d.with("expected", shown_p).with("found", shown_x))
                 return TArg(expr=x, mode=ArgMode.Value)
+
+    ## A borrowed collection given where an `Iterable[T]` of owned items is
+    ## expected (`sorted(hand)`, R16): its items are references, which are
+    ## values only of a `Copy` type, so the note says so and the fix gives
+    ## a copy of the collection.
+    pure def borrowed_items_help(
+        mut self, cx: Cx, own d: Diagnostic, x: TExprId, it: Ty, want: Ty, at: TextRange
+    ) -> Diagnostic:
+        let TyData.Ref(referent, _) = self.data(it) else:
+            return d
+        if self.is_copy(cx, referent) or self.types.contains_error(referent):
+            return d
+        let w = self.resolved(want)
+        if self.resolved(referent) != w:
+            return d
+        let TyData.Ref(whole, _) = self.data(self.ty_of(x)) else:
+            return d
+        let shown = self.show(cx, whole)
+        let item = self.show(cx, referent)
+        let params = [
+            Param(name="ty".to_string(), value=shown),
+            Param(name="item".to_string(), value=item),
+        ]
+        return d.note_params(Msg.TypeBorrowedItems, params).fix_at(
+            Msg.TypeAddCopy, at.end, at.end, ".copy()"
+        )
 
     ## `recv.name(args)`: a method of the receiver's type, then of a trait
     ## it implements (or, for a generic parameter, a trait it is bounded
@@ -1777,3 +1859,23 @@ pure def unknown_method_note(cx: Cx, own d: Diagnostic, name: str) -> Diagnostic
         Param(name="traits".to_string(), value=traits),
     ]
     return d.note_params(Msg.TypeMethodOfTraits, params)
+
+## The arguments of `print(a, b)` written as the one text `print` takes:
+## each literal's text, each other value interpolated, with a space
+## between, as Python's `print` joins them.
+pure def printed_together(text: str, args: list[TextRange]) -> (int, int, String)?:
+    if len(args) < 2:
+        return None
+    var parts: list[String] = []
+    for r in args:
+        if r.start < 0 or r.end > text.byte_len() or r.start >= r.end:
+            return None
+        let written = text.byte_slice(r.start, r.end)
+        let quoted = written.starts_with("\"") and written.ends_with("\"")
+        if quoted and written.byte_len() >= 2 and not written.starts_with("\"\"\""):
+            parts.push(written.byte_slice(1, written.byte_len() - 1).to_string())
+        else:
+            parts.push("{{{written}}}")
+    let start = args[0].start
+    let end = args[len(args) - 1].end
+    return Some((start, end, "\"{parts.join(" ")}\""))

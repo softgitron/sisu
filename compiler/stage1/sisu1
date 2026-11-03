@@ -5,7 +5,8 @@
 # --native --from-sir`, decision 212).
 #
 #   sisu1 check [--format=ids] [PATH]            every diagnostic, as `sisu check` prints them
-#   sisu1 sir [PATH]                             the whole program's SIR, as `sisu sir` prints it
+#   sisu1 sir [--tests] [PATH]                   the whole program's SIR, as `sisu sir` prints it
+#                                                (with its tests, `--tests`, decision 285)
 #   sisu1 build [--release] [--contracts=LEVEL] [PATH] [--output OUT]
 #                                                an executable, where `sisu build --native` puts
 #                                                it (`--native` is implied), in the release
@@ -17,6 +18,8 @@
 #                                                with `sisu fmt`'s exit status
 #   sisu1 doc [PATH] [--output DIR]              the documentation, a Markdown page per module,
 #   sisu1 doc --std [MODULE...]                  as `sisu doc` writes it, with its exit status
+#   sisu1 lint [--format=ids] [PATH]             the program's lints, which `check` does not
+#                                                print (RULES.md, R11)
 #
 # `check`, `build`, `run` and `doc` take `--features NAMES` (the root
 # package's features to turn on, separated by commas or spaces,
@@ -42,7 +45,9 @@ if [ ! -x "$sisu" ]; then
 fi
 if [ ! -x "$exe" ] || [ -n "$(find "$here/src" -name '*.sisu' -newer "$exe" -print -quit)" ]; then
     mkdir -p "$(dirname "$exe")"
-    if ! (cd "$here" && "$sisu" build --native --output "$exe" > /dev/null); then
+    # Built by the Rust front end, as the `sisu` driver builds it: stage 1
+    # is not built by itself before it exists.
+    if ! (cd "$here" && SISU_FRONT_END=rust "$sisu" build --native --output "$exe" > /dev/null); then
         echo "sisu1: stage 1 does not build" >&2
         exit 1
     fi

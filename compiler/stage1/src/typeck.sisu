@@ -39,6 +39,7 @@ from stage1.diag import (
     sort_unique,
 )
 from stage1.parser import parse
+from stage1.resolve import Environment, ModuleNames
 from stage1.syntax.ast import Ast, Block, ExprId, ExprKind, Mode, Module
 from stage1.syntax.ast import build
 from stage1.syntax.ast import visit
@@ -130,6 +131,60 @@ pub pure def base(texts: dict[String, String], catalog: Catalog) -> Base:
         texts=all,
         lines=lines_of(all),
         std_promoted=promoted,
+    )
+
+impl Base:
+    ## What the name pass knows of the prelude and the ambient modules, from
+    ## the base's parse of them (`resolve.Environment`, which `main.
+    ## environment` makes for the commands without a base).
+    pub pure def environment(self) -> Environment:
+        if let Some(e) = self.resolver.environment:
+            return e.copy()
+        return Environment(prelude=ModuleNames.empty(), std={})
+
+## What making a base computes once for the std modules a program may
+## import, which a base made again from it does not (`main.base_of`'s
+## cache): each std module's derived impls, and the generic functions
+## each importable module's programs promote.
+pub struct BaseCache:
+    pub derived: dict[String, String]
+    pub promoted: dict[String, list[String]]
+
+## The cache of a base made whole: its derived impls are its texts named
+## `<derive>/NAME.sisu`.
+pub pure def cache_of(base: Base) -> BaseCache:
+    var derived: dict[String, String] = {}
+    for (name, text) in base.texts.items():
+        if name.starts_with("<derive>/") and name.ends_with(".sisu"):
+            let module = name.byte_slice(9, name.byte_len() - 5)
+            _ = derived.insert(module.to_string(), text.copy())
+    return BaseCache(derived=derived, promoted=base.std_promoted.copy())
+
+## `base` from a cache of one made whole: the same base, with the modules
+## a program may import parsed when one imports them.
+pub pure def base_cached(texts: dict[String, String], catalog: Catalog, cache: BaseCache) -> Base:
+    var r = Resolver.base_cached(texts, cache.derived)
+    r.catalog = Shared(catalog.copy())
+    let templates = r.std_derives.copy()
+    r.std_derives = Templates.none()
+    let std_syntax = r.std_kept.copy()
+    r.std_kept = []
+    var all = texts.copy()
+    var imported: dict[String, String] = {}
+    for (name, text) in r.std_derived.items():
+        _ = all.insert("<derive>/{name}.sisu", text.copy())
+        if not r.is_loaded(name):
+            _ = imported.insert(name.copy(), text.copy())
+    r.std_derived = imported
+    _ = all.insert("target".to_string(), target())
+    _ = all.insert("builtin_impls".to_string(), builtin_impls())
+    return Base(
+        resolver=r,
+        templates=templates,
+        std_syntax=std_syntax,
+        texts=all,
+        lines=lines_of(all),
+        std_promoted=cache.promoted.copy(),
     )
 
 ## The generic functions of the std modules a program may import whose
@@ -259,6 +314,11 @@ pub struct Checked:
     pub template_bodies: list[(int, TextRange)]
     ## What lowering reads, when it asked for it.
     pub typed: Typed?
+    ## The lints of `sisu lint` (10, "lints beyond the compiler's
+    ## warnings"; RULES.md, R11), which the checker reports with its
+    ## diagnostics and which are taken out of them here: each with its
+    ## file, 0 the root module's and `k + 1` the `k`th of `files`.
+    pub lints: list[(int, Diagnostic)]
 
 ## What lowering reads of a checked file (stage 0's `Program` and
 ## `Typed`): the resolved program, the table of types, and the typed bodies
@@ -533,6 +593,7 @@ pub pure def check_program(
                 unrendered=[],
                 template_bodies=[],
                 typed=None,
+                lints=[],
             )
         if let Some(old) = named_in:
             var carried: list[Request] = []
@@ -1124,6 +1185,24 @@ pure def finish_file(
     var file_names: list[String] = []
     for m in file_modules:
         file_names.push(file_name_of(r, m))
+    # The lints are `sisu lint`'s, not `check`'s (R11).
+    var lints: list[(int, Diagnostic)] = []
+    let all_kept = kept.copy()
+    kept = []
+    for d in all_kept:
+        if is_lint(d.msg):
+            lints.push((0, d.copy()))
+        else:
+            kept.push(d.copy())
+    for k in range(len(files)):
+        let all_ds = files[k].1.copy()
+        var ds: list[Diagnostic] = []
+        for d in all_ds:
+            if is_lint(d.msg):
+                lints.push((k + 1, d.copy()))
+            else:
+                ds.push(d.copy())
+        files[k].1 = ds
     return Checked(
         diagnostics=kept,
         files=files,
@@ -1135,7 +1214,12 @@ pure def finish_file(
         unrendered=unrendered,
         template_bodies=[],
         typed=None,
+        lints=lints,
     )
+
+## Whether a message is one of `sisu lint`'s (R11).
+pub pure def is_lint(m: Msg) -> bool:
+    return m == Msg.LintWildcardOwnEnum
 
 ## The bodies of the templates of the program's own modules, each with the
 ## index of its module among them (`Checked.template_bodies`).
@@ -1478,6 +1562,7 @@ pure def check_std_in(
         let done = check_one(prog, ast, text, inferred, types, d, catalog, True)
         if done.beyond.is_some():
             return (None, done.types)
+        std_errors(prog, d, text, done.diags, catalog)
         return (done.typed, done.types)
     var e: ExprId? = None
     var ty = Ty.error()
@@ -1504,7 +1589,33 @@ pure def check_std_in(
     )
     if done.beyond.is_some():
         return (None, done.types)
+    std_errors(prog, d, text, done.diags, catalog)
     return (done.typed, done.types)
+
+## A body of the standard library that does not type-check is a bug of the
+## compiler, never a program's: what lowering would make of it is
+## `unreachable` where the error is, so checking stops with an internal
+## error that names the module and the diagnostic (`stage0.internal`).
+pure def std_errors(prog: Program, d: DefId, text: str, diags: list[Diagnostic], catalog: Catalog):
+    for x in diags:
+        if not catalog.is_error(x.msg):
+            continue
+        let m = prog.defs[d.index].module
+        let name = prog.modules[m.index].name.copy()
+        let (line, col) = Lines.of(text).line_col(text, x.start)
+        let code = catalog.code(x.msg)
+        let message = catalog.render(x.msg.id(), x.params)
+        var stage = "the standard library's `std.{name}`"
+        if name == "prelude":
+            stage = "the standard library's prelude"
+        let params = [
+            Param(name="stage".to_string(), value=stage),
+            Param(
+                name="detail".to_string(),
+                value="<std>/{name}.sisu:{line}:{col}: {code} {message}".to_string(),
+            ),
+        ]
+        panic(catalog.render("stage0.internal", params))
 
 ## Where the lines of a std module's text start.
 pub pure def std_lines(base: Base, prog: Program, m: ModuleId) -> Lines:
@@ -1907,7 +2018,13 @@ impl Checker:
                     self.report(d)
 
     pure def bound_not_satisfied(mut self, cx: Cx, t: Ty, b: TraitRef, span: TextRange):
-        let shown = self.show(cx, t)
+        # A reference has what its referent has of the reading traits, so
+        # the referent is what lacks it (R16: `sorted([a, b])` of borrowed
+        # values names their type, not `ref` of it).
+        var lacking = t
+        if cx.prog.passes_through_refs(b.def_):
+            lacking = self.types.strip_ref(t)
+        let shown = self.show(cx, lacking)
         let bound = cx.prog.display_trait_in(self.types, b, self.generic_names)
         var d = Diagnostic.new(Msg.TypeBoundNotSatisfied, span.start, span.end)
         d = d.with("ty", shown).with("bound", bound)
@@ -1948,7 +2065,8 @@ impl Checker:
                 ]
                 d = d.fix_params(Msg.TypeAddBound, params, [edit])
         let fixed = self.missing_impl_fix(cx, d, t, b)
-        self.report(fixed)
+        let derived = self.derive_fix(cx, fixed, t, b.def_)
+        self.report(derived)
 
     ## Reports the first local whose type inference left open, when the
     ## body has no error.

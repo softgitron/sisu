@@ -17,23 +17,24 @@ the other kind of difference, stage 0's accidents where stage 1 follows
 the documents (none now).
 
 Where a rule differs, the classes of `check.sh` that compare stage 1 with
-stage 0 (`types`, `sir`, `ownership`, `contracts-off`,
+stage 0 (`types`, `sir`, `ownership`, `sir-tests`, `contracts-off`,
 `contracts-preconditions`, `human`, `cases-check`, `cases-human`, the
 `corpus-` classes, `fmt`, `fmt-check`, `doc`, `doc-output`) differ too,
 for the programs the rule touches. `check.sh` accepts those differences
 as it accepts DISCREPANCIES.md's: under each rule, a line ``- Differs:
 `path`: outputs`` per case it changes, the path from the repository root
-and the outputs among `tokens`, `tree`, `trivia-tree`, `names`, `types`,
-`sir`, `ownership`, `contracts-off`, `contracts-preconditions`, `ids` (all
-of what `sisu check --format=ids` prints), `human` (what `sisu check`
-prints), `fmt`, `fmt-check`, `doc` and `doc-output`. Any other difference
-fails the check. What a program does is checked against the conformance
-suite's expectations instead, by the class `behaviour`, the primary
-oracle: every runnable program of the corpus and of stage 1's cases, a
-rule's own among them, lowered by stage 1 and run from its SIR by the
-interpreter and natively, must print its `.out` and `.err` and exit with
-its `.status`. Where no rule changed, stage 0's SIR stays an oracle too,
-through the classes `sir` and `corpus-sir`.
+and the outputs among `tokens`, `tree`, `trivia-tree`, `ast`, `names`,
+`types`, `sir`, `ownership`, `sir-tests`, `contracts-off`,
+`contracts-preconditions`, `ids` (all of what `sisu check --format=ids`
+prints), `human` (what `sisu check` prints), `fmt`, `fmt-check`, `doc`
+and `doc-output`. Any other difference fails the check. What a program
+does is checked against the conformance suite's expectations instead, by
+the class `behaviour`, the primary oracle: every runnable program of the
+corpus and of stage 1's cases, a rule's own among them, lowered by stage
+1 and run from its SIR by the interpreter and natively, must print its
+`.out` and `.err` and exit with its `.status`. Where no rule changed,
+stage 0's SIR stays an oracle too, through the classes `sir` and
+`corpus-sir`.
 
 ## R1. What a channel carries is `Send` (decision 269)
 
@@ -504,6 +505,37 @@ slice's pointer; checked, not run).
 - Differs: `compiler/stage1/cases/unsafe/plain_refusals.sisu`: names, ids, human, doc, doc-output
 - Differs: `compiler/stage1/cases/unsafe/foreign_strings.sisu`: tree, trivia-tree, ast, names, ids, human, doc, doc-output, fmt-check
 
+The conformance suite's `cases/unsafe/` (stage 0's checked memory model,
+decisions 301 to 304) imports `std.mem` or `std.ffi` in every program,
+which stage 0's front end does not read, so each output that needs their
+names differs from it; `foreign.sisu` and `pointers.sisu` also declare an
+`unsafe def`, which stage 0 does not parse (R2). What they print is stage
+1's SIR, run by stage 0 (`behaviour`).
+
+- Differs: `compiler/conformance/cases/unsafe/bit_cast_sizes.sisu`: names, types, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/foreign.sisu`: tree, trivia-tree, ast, names, sir, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/foreign_unknown.sisu`: ast, names, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/gone.sisu`: ast, names, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/invalid_bits.sisu`: ast, names, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/leaked.sisu`: ast, names, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/misaligned.sisu`: ast, names, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/mistyped.sisu`: ast, names, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/no_memory.sisu`: ast, names, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/out_of_bounds.sisu`: ast, names, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/overwrite.sisu`: ast, names, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/plain_casts.sisu`: ast, names, types, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/pointers.sisu`: tree, trivia-tree, ast, names, sir, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/read_plain_short.sisu`: names, types, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/reference_behind.sisu`: ast, names, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/release_layout.sisu`: ast, names, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/release_other.sisu`: ast, names, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/released.sisu`: ast, names, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/released_twice.sisu`: ast, names, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/shared_write.sisu`: ast, names, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/stale_pointer.sisu`: ast, names, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/uninitialised.sisu`: ast, names, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/unsafe/vector.sisu`: ast, names, sir, ids, human, doc, doc-output
+
 **Documents to bring along:** 11's `std.mem` and `std.ffi` rows and 12's
 C types, which D-081 amends; when the Rust front end is retired,
 `compiler/stage1/std/` moves into `compiler/std/` and `std_file` goes.
@@ -782,3 +814,630 @@ executable from the same SIR prints the same (the class `behaviour`).
      the internal `std.rt`, since none reaches the machine. Stage 1's case
      `cases/runtime/structural.sisu` checks them against the interpreter's
      and the native runtime's answers. Stage 1 decides it (RULES.md, R9).
+
+## R10. A non-exhaustive `match` names every pattern it misses (decision 291)
+
+**The rule** (03, "Algebraic data types": "Missing-case errors list the
+missing patterns"). `E0314` (`type.non-exhaustive`) lists the patterns no
+arm covers, each in backquotes, separated by commas, in the order of the
+constructors their types declare, up to eight; past eight the note
+`type.more-missing` says the eight are the first of more. In a part of the
+value where some arm names a constructor, each constructor no arm names is
+a pattern of its own, with `_` for its fields (`Some(Spades)`, `None`); in
+a part where no arm names any constructor, the part is `_` (`(Clubs, _)`,
+`[False, _, *_]`). One missing pattern keeps the note
+`type.missing-patterns` ("add an arm for `Amber`, or a `case _` arm");
+several have `type.missing-patterns-each` ("add an arm for each of ...").
+
+**Why.** 03 says the error lists the missing patterns; the manual's writers
+found that it named one at a time (chapter 7), so a beginner fixed a
+`match` by one arm per compile. The usefulness algorithm of Maranget's
+paper gives every witness, not only the first; reporting `_` for a part no
+arm names keeps the list to what the arms actually miss, as rustc reports
+it (`[false, _, ..]`), where listing every constructor of such a part would
+repeat the whole type.
+
+**In stage 1.** `typeck.exhaustive`: `Checker.witnesses` (every witness,
+up to a limit, in place of the first one `witness` found),
+`check_exhaustive`, `MISSING_SHOWN`.
+
+**What it changes.** A `match` that misses one pattern is reported as
+before, but where no arm names any constructor of a part: the conformance
+suite's `types/list_exhaustiveness` names `[False, _, *_]` where stage 0
+names `[False, True, *_]`, one of the two patterns `[False, _, *_]` covers.
+A `match` that misses several names them all. The case
+`cases/findings/missing_patterns.sisu` shows each form, and its `.diag`.
+
+- Differs: `compiler/conformance/cases/types/list_exhaustiveness.sisu`: types, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings/missing_patterns.sisu`: ids, human, doc, doc-output
+
+**Documents to bring along:** the conformance suite's
+`types/list_exhaustiveness.diag`, whose second line becomes stage 1's
+(`missing="`[False, _, *_]`"`).
+
+**Decision 291**, for docs/architecture.md:
+
+291. A non-exhaustive `match` (`E0314`) names every pattern no arm covers
+     (03), up to eight, in the order of the constructors their types
+     declare, with the note `type.more-missing` past eight: where some arm
+     names a constructor of a part of the value, each constructor no arm
+     names is a pattern of its own with `_` for its fields; where none
+     does, the part is `_`. Stage 1 decides it (RULES.md, R10); the frozen
+     Rust front end names the first missing pattern only.
+
+## R11. `sisu lint`, and `case _` over an enum of the program's own package (decision 292)
+
+**The rule** (D-043; 03, "Algebraic data types": "A `_` wildcard is
+allowed but the linter warns when matching on an enum from the same
+package, since a new variant should be a compile error there"; 10, "One
+binary": `sisu lint`, "lints beyond the compiler's warnings, with
+fix-its"). `lint [--format=ids] [FEATURES] [PATH]` checks the program as
+`check` does and prints its lints, the warnings `check` does not print, in
+the human form or the conformance form; a program with errors has its
+errors printed as `check` prints them, and fails. Its one lint today is
+`W0015` (`lint.wildcard-own-enum`): a reachable `case _` arm of a `match`
+whose value is an enum declared in a module of the same package as the
+`match` (not the standard library's, and not code the compiler writes),
+naming the variants the wildcard matches (those the arms above it leave),
+with the fix `lint.list-variants` that writes them in its place
+(`Square(_) | Line | Dot`). A wildcard nested in a pattern, a binding
+(`case other:`), and an arm the arms above make unreachable (`W0003`) are
+not linted.
+
+**Why.** D-043 and 03 give the warning to the linter, and 10 makes the
+linter `sisu lint`, beyond the compiler's warnings: as a warning of `sisu
+check` it would fire on every such wildcard of every program, stage 1's
+own 700 among them, which the documents did not ask for. The fix is the
+change the warning asks for, so that a variant added later is an error at
+the `match`.
+
+**In stage 1.** `typeck.exhaustive`: `Checker.lint_wildcard`, from
+`check_exhaustive`; `typeck`: `Checked.lints`, the lints taken out of the
+checked diagnostics (`is_lint`), so that nothing but `lint` sees them;
+`main`: `Report.lints` and the command `lint`. `check.sh`'s class
+`expected` holds `lint --format=ids` of a case with a `NAME.lint` to that
+file.
+
+**What it changes.** Nothing that `check`, `sir`, `build` or `doc`
+print. The case `cases/findings/wildcard_lint.sisu` (its `.lint`, its empty
+`.diag`, and its `.out`: it runs).
+
+**Documents to bring along:** 10's `sisu lint` row (its first lint);
+port-debt.md's list of the driver's commands, where `sisu lint` is stage
+1's `lint` (the driver may route it as it routes `check`).
+
+**Decision 292**, for docs/architecture.md:
+
+292. `sisu lint` (10) is stage 1's `lint`: the program checked as `sisu
+     check` checks it, and its lints printed in either form, the warnings
+     the compiler's own do not include; a program with errors has them
+     reported and fails. Its first lint is D-043's (03): `W0015`, a
+     reachable `case _` over an enum declared in the same package as the
+     `match`, naming the variants it matches, with the fix that lists them
+     in its place. The checker reports a lint with its diagnostics, and
+     `Checked.lints` takes it out of them. Stage 1 decides it (RULES.md,
+     R11).
+
+## R12. Naming is enforced (decision 293)
+
+**The rule** (02, "Lexical structure": "Naming follows PEP 8 and is
+enforced"). A declaration whose name is not written in its kind's case is
+an error at the name, with the name written so as the fix
+(`resolve.rename`):
+
+- `E0267` (`resolve.not-camel-case`): a struct, an enum, an error set, a
+  trait, a type alias, an associated type, a variant, or a type
+  parameter (a `comptime def`'s `T: type` ones too) whose name holds `_`
+  or begins with a lowercase letter (`point` is `Point`, `http_server`
+  is `HttpServer`);
+- `E0268` (`resolve.not-snake-case`): a function, a method, a field, a
+  parameter (a closure's too) or a variable (a `let`'s, a loop's, a
+  pattern's, a `with`'s, an `else as`'s) whose name holds an uppercase
+  letter (`firstValue` is `first_value`, `parseHTTPRequest` is
+  `parse_http_request`);
+- `E0269` (`resolve.not-screaming-case`): a constant, or a `const`
+  generic parameter, whose name holds a lowercase letter (`max_size` is
+  `MAX_SIZE`).
+
+A name's case is its letters' (a name in a script without case breaks
+none); a capitalised name in a pattern is a constant, not a binding, and
+`_` is no name. The foreign functions of an `extern` block keep the names
+their library gives them, and so do their parameters. Modules were
+already named so (`E1012`), and the standard library's builtin types
+(`int`, `str`, `list`) and C types (`c_int`) are its own.
+
+**Why.** 02 says the convention is enforced, and gives the reason that
+makes it a rule rather than a style: since variants are always
+capitalised, a lowercase name in a pattern is always a binding and a
+capitalised one a constant. The manual's writers found `struct point:`
+accepted without a word (chapter 7). The check is the name pass's, over
+the syntax tree, as `E0202` is.
+
+**In stage 1.** `naming` (`Style`, `problem`, `breaks`, `to_camel`,
+`to_snake`); `resolve`: `check_style` and `check_item_style`, called for
+items, members, variants, generic parameters, parameters and every local
+(`declare_local`, with `naming_kind`), but in an `extern` block
+(`foreign`).
+
+**What it changes.** No program of the corpus but two of stage 1's own
+unsafe cases: `cases/unsafe/pointer_names.sisu` declares `struct ptr[T]`
+(a type of the module named `ptr`, whose point is that it is no raw
+pointer), which is now also `E0267`, and `cases/unsafe/refusals.sisu`'s
+alias `type c_int = i32` is written `CInt`. The case
+`cases/findings/naming.sisu` has each kind of name.
+
+- Differs: `compiler/stage1/cases/findings/naming.sisu`: names, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/unsafe/pointer_names.sisu`: names
+
+**Decision 293**, for docs/architecture.md:
+
+293. Naming is enforced (02): the name pass reports a declaration whose
+     name is not in its kind's case, with the name written so as the fix:
+     `E0267` for a type, a trait, an associated type, a variant or a type
+     parameter not in `CamelCase` (a `_` in it, or a lowercase first
+     letter), `E0268` for a function, a method, a field, a parameter or a
+     variable not in `snake_case` (an uppercase letter in it), `E0269` for
+     a constant or a `const` generic parameter not in `SCREAMING_CASE` (a
+     lowercase letter in it). A capitalised name in a pattern is a
+     constant and not checked; an `extern` block's names are its
+     library's. Stage 1 decides it (RULES.md, R12).
+
+## R13. A trait is no value: a variant of its name is (decision 294)
+
+**The rule** (03, "Algebraic data types": a variant is used unqualified
+"wherever the expected type is known"; docs/architecture.md, "Names and
+the standard library"). In an expression, a name that names a trait, the
+prelude's (`Add`, `Mul`, `Neg`, `Num`, `Eq`) or the module's, is not its
+value: where a variant of that name is visible (the module's own first),
+the name is the variant, called (`Add(left, right)`) or bare (`Neg`). Where
+none is, the name is the trait, as before (`E0309`, `E0350`). A trait
+qualifying a member (`Add.add(a, b)`) is unchanged.
+
+**Why.** docs/architecture.md resolves a name in an expression as "a
+variant of the expected type first, then a declaration of that name, then
+a variant declared in the current module", so a variant named like a
+prelude trait, called where no type is expected (`let e = Add(Num(1),
+Num(2))`), resolved to the trait and was "a value of type `Add` cannot be
+called" (the manual's chapter 7). A trait can be neither called nor used
+as a value, so passing it by loses nothing.
+
+**In stage 1.** `typeck.call.call_expr` and `typeck.expr.name_expr`: a
+trait found by `lookup` yields to `global_variant`.
+
+**What it changes.** No program of the corpus. The case
+`cases/findings/variants_named_like_traits.sisu` (its `.out`: it runs).
+
+- Differs: `compiler/stage1/cases/findings/variants_named_like_traits.sisu`: ids, human, doc, doc-output
+
+**Decision 294**, for docs/architecture.md:
+
+294. A trait is not a value: in an expression, a name that names a trait
+     and a visible variant is the variant (the module's own first), called
+     or bare, so `Add(left, right)` makes a variant named like the
+     prelude's `Add` where no type is expected; with no such variant the
+     name is the trait, `E0309` called and `E0350` bare. Stage 1 decides
+     it (RULES.md, R13).
+
+## R14. An optional chain in an interpolation reads (decision 295)
+
+**The rule.** An interpolation only reads its value, as `{u.name}` reads
+the field, so an optional chain of fields written there,
+`{u.team?.name}`, reads what it reaches through a place rather than
+moving it out of the place: over a place of an optional type, each link
+reads its field in place (`{u.team?.lead?.name}` is `u.team?.(lead?.name)`
+over `u.team`), and the last field's value, when it is not `Copy`, is read
+too, a `String` as a `str` view and another type through a reference (an
+optional field as an optional reference, `Option[ref T]`); what it prints
+is what the moved value printed. A chain whose base is no place, and a
+chain anywhere else (`let n = u.team?.name`), moves what it reaches as
+before.
+
+**Why.** The manual's writers found `{u.team?.name}` moving `name` out of
+`u.team`, so that the next use of `u` was `E0400` or `E0401`, where
+`{u.name}` only reads (chapter 8): the interpolation formats the value
+and drops it, so the move bought nothing. A chain over a reference
+already reads, as `x?.f` through a `ref` borrows `f`; the rule extends
+that to a place an interpolation names.
+
+**In stage 1.** `typeck.expr`: `string_literal` sets `reading_chain` for a
+part that is an optional chain; `opt_chain` hands it to
+`reading_chain_of`, which builds the links over the place
+(`reading_link`, `read_option`, `read_place`); `opt_chain_on` and
+`chain_of` are the plain chain's parts. Lowering is unchanged: the chain
+nests, and its value holds borrows that end with the statement.
+
+**What it changes.** Programs whose interpolations hold optional chains
+over places, whose SIR now borrows where it moved. The case
+`cases/findings/interpolated_chains.sisu` (its `.out`: it runs; stage 0
+refuses it, `E0400`, `E0401` and `E0419`).
+
+- Differs: `compiler/stage1/cases/findings/interpolated_chains.sisu`: ids, human
+
+**Decision 295**, for docs/architecture.md:
+
+295. An interpolation reads its values: an optional chain of fields
+     written in one (`{u.team?.name}`) reads what it reaches through a
+     place, each link's field in place and the last one's value read
+     when it is not `Copy` (a `String` as a `str`, an optional field as an
+     optional reference), as `x?.f` through a reference borrows `f`; a
+     chain over a value, or outside an interpolation, moves as before.
+     Stage 1 decides it (RULES.md, R14).
+
+## R15. An error set that hides the prelude's warns (decision 296)
+
+**The rule** (D-024: shadowing an outer scope warns). An error set
+declared with the name of one of the prelude's (`TimeError`, `IoError`,
+`NetError`, ...) is `W0016` (`resolve.shadow-prelude-set`) at its name:
+it hides the prelude's in its module, and the two are different sets with
+one name, so what the prelude's functions return is not the program's
+set.
+
+**Why.** The manual's writers found `error TimeError` hiding the
+prelude's without a word, after which `?` on a prelude function's result
+failed with messages that named `main.TimeError` (chapter 8). D-024 warns
+when a binding shadows an outer scope; the prelude is a module's
+outermost scope, and an error set is where the shadow misleads, since
+sets compose by their variants and read alike by their names. Other
+declarations that hide the prelude's names (a program's `Path`, `check`,
+`sum`) are left alone: the corpus has two dozen, stage 1 among them, and
+none is a set.
+
+**In stage 1.** `resolve`: `ModuleNames.error_sets`, `shadowed_set`.
+
+**What it changes.** No program of the corpus. The case
+`cases/findings/shadowed_error_set.sisu` (its `.diag`, `.out` and `.err`,
+whose warning `sisu run` prints).
+
+- Differs: `compiler/stage1/cases/findings/shadowed_error_set.sisu`: names, ids, human
+
+**Decision 296**, for docs/architecture.md:
+
+296. An error set named as one of the prelude's hides it in its module
+     and warns (`W0016`, D-024), since the two are different sets with one
+     name. Stage 1 decides it (RULES.md, R15).
+
+## R16. The fixes and messages the manual's writers found missing (decision 297)
+
+**The rule** (10, "Diagnostics": "Where possible, a suggested fix as a
+diff the LSP can apply", "Missing-trait errors list the candidates", and
+"Nothing after the first error in a dependency chain"; 02, "Departures
+from Python"). Each of these diagnostics gains the fix or the message
+that teaches what Sisu writes:
+
+- `E0411` on a field whose type borrows only by `str` (`name: str`,
+  `nickname: str?`, `list[str]`) gets the fix `borrow.own-string`, the
+  type with `String` for each `str`, before `view struct`'s;
+- `E0341` on a field changed through a method's plain `self` gets
+  `type.take-mut` for `self`, which writes `mut ` before it;
+- `E0347` and `E0368` for a missing `Eq`, `PartialOrd`, `Ord`, `Hash` or
+  `Copy` of a struct or enum of the module being checked get
+  `type.derive-trait`, which adds the trait with the supertraits the type
+  lacks (`Ord` with `Eq` and `PartialOrd`, `Hash` with `Eq`) to its
+  `@derive(...)`, or writes `@derive(...)` on a line above it, when every
+  field has them;
+- `E0300` for a borrowed collection whose items are not `Copy`, given
+  where an `Iterable[T]` of owned items is expected (`sorted(hand)`), gets
+  the note `type.borrowed-items` (the items are references, values only of
+  a `Copy` type) and the fix `type.add-copy`;
+- `E0300` for text where a `Path` is expected gets `type.make-path`,
+  `Path.new(...)` around it;
+- `E0320` for `?` on a result in a function that returns nothing and
+  writes no result type gets `type.return-errors`: ` -> ! E` (the
+  operand's set, or `!` when it is not known) in the header and `return
+  Ok(())` at the body's end;
+- `E0200` for Python's `open` gets the note `resolve.open-file`, which
+  names `Fs` and `sys.fs.read_to_string`;
+- `E0325` for a `for` over text gets `type.iterate-chars` and
+  `type.iterate-bytes`;
+- `E0369` for a character looked for in text (`c in "aeiou"`) gets
+  `type.char-as-text` (`"{c}"` interpolated, a literal's own text);
+- `E0305` for `print` or `print_err` given several values gets
+  `type.interpolate`, the one text `print` takes (`print("{a} {b}")`, a
+  literal's own text inline);
+- an assignment to a name nothing declares (`greeting = "Hei"`), in a
+  body, is `E0200` at it with `resolve.declare-with`, which writes `let `
+  (`var ` when the body assigns the name again), and the name is then the
+  local the fix makes, so its uses are not reported again;
+- Python's `else` after a `for` or `while` is `E0127`
+  (`parse.loop-else`), which says Sisu has none and shows `if let` on
+  the search's result, where it was `E0103`, "expected an expression";
+- an assignment on a `case` line (`case None: label = "x"`) is `E0118`,
+  as a statement keyword there is, where it was `E0117`; both get
+  `parse.arm-block`, which breaks the line after the `:` and indents the
+  statement under the `case`;
+- a typed hole whose value nothing uses (`todo("later")` as a statement)
+  is a hole of type `()`, the statements still to write, where it was of
+  type `_`.
+
+A fix whose edit writes a line break shows its text up to the break in
+the human form (`diag.fix_text`): the attribute line of
+`type.derive-trait`, nothing of `parse.arm-block`'s.
+
+**Why.** The manual's writers list each (manual/README.md, "What the
+plan found in stage 0", chapters 1 and 4 to 9): diagnostics with no fix,
+or with a fix a beginner does not want (`view struct` for a struct of
+owned data), or that name the parser's expectation rather than the
+mistake. 10 asks for fixes as diffs and for missing-trait errors that
+list the candidates, 02 gives the Sisu spelling of each Python habit
+(`print(x, y)` takes one argument, a declaration is `let`, no `else` on
+loops, `if let` on the search's result), 03 makes `Copy` opt-in, and
+D-061 makes a hole check against the type its position expects, which
+for a statement whose value nothing uses is `()`.
+
+**In stage 1.** `typeck.collect.owned_text_type` (`E0411`);
+`typeck.check`: `self_param_at` (`E0341`), `derive_fix` and `derive_edit`
+(`E0347` through `bound_not_satisfied`, `E0368` through
+`check_comparison`), `check_expr_stmt` (the hole); `typeck.call`:
+`borrowed_items_help`, `printed_together`; `typeck.expr`: `mismatch_fix`
+(`Path`), `return_errors_fix` and `params_end`, `char_as_text_fix`, the
+`for` over text; `resolve`: `use_name` (`open`), `declares_by_assignment`
+and `assigned_later`; `parser.stmts.loop_else_reported`;
+`parser.exprs.match_arm` and `arm_block_fix`; `diag.fix_text`.
+
+**What it changes.** The conformance suite's programs with these
+diagnostics, whose `ids` and `human` outputs gain the fixes and notes
+(and whose `doc` outputs, which print `check`'s errors, with them), as
+listed below. The cases `cases/findings/missing_fixes.sisu`,
+`python_habits.sisu`, `loop_else.sisu`, `case_line_statements.sisu` and
+`todo_statement.sisu` (each with its `.diag`; the last runs, its `.out`
+and `.err`).
+
+- Differs: `compiler/conformance/cases/generics/function_value_errors.sisu`: types, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/ownership/view_field.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/types/try_context.sisu`: types, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/wrong/view_in_struct.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings/missing_fixes.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings/python_habits.sisu`: names, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings/loop_else.sisu`: tree, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/findings/case_line_statements.sisu`: tree, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/findings/todo_statement.sisu`: ids, human
+- Differs: `compiler/stage1/cases/later_phases.sisu`: tree, fmt-check
+- Differs: `compiler/stage1/cases/statement_mistakes.sisu`: tree, fmt-check
+
+**Documents to bring along:** the conformance suite's `.diag` files of
+`generics/function_value_errors`, `ownership/view_field`,
+`types/try_context` and `wrong/view_in_struct`, which gain the lines of
+the fixes stage 1's `check --format=ids` now gives.
+
+**Decision 297**, for docs/architecture.md:
+
+297. The diagnostics the manual's writers found without a fix get one
+     (10): `E0411` on a field that borrows by `str` owns a `String`;
+     `E0341` through a method's `self` takes `mut self`; `E0347` and
+     `E0368` for a missing `Eq`, `PartialOrd`, `Ord`, `Hash` or `Copy` of
+     the module's struct or enum derive it with the supertraits it lacks;
+     `E0300` for a borrowed collection of non-`Copy` items given as an
+     `Iterable[T]` notes why and copies it, and for text where a `Path` is
+     expected calls `Path.new`; `E0320` in a function that returns nothing
+     returns `! E` and `Ok(())`; `E0325` over text iterates its characters
+     or bytes; `E0369` for a character in text writes it as text; `E0305`
+     for `print(a, b)` interpolates; `E0200` for `open` names `Fs`, and
+     for an assignment that declares a name writes `let` (or `var`), the
+     name declared from then on. Python's `else` on a loop is `E0127`, an
+     assignment on a `case` line `E0118` with the block it needs, and a
+     hole whose value nothing uses is of type `()`. Stage 1 decides it
+     (RULES.md, R16).
+
+## R17. An intrinsic's type arguments are written when a parameter cannot tell them (decision 298)
+
+**The rule.** A call of an intrinsic writes its type arguments in SIR
+(`call intrinsic NAME[T, ...](...)`) when one of its generic parameters
+appears in its result and in no parameter, when a parameter is an
+`Iterable[T]` (both as before, stage 0's `needs_type_args`), and now also
+when one of the function's own generic parameters appears in no
+parameter, in its result or nowhere: `std.mem`'s `size_of[T]() -> int`
+and `align_of[T]() -> int` say nothing of `T` but by it, so `size_of[int]()`
+lowers to `call intrinsic mem.size_of[int]()`, type argument 0 being `T`,
+where it lowered to `call intrinsic mem.size_of()` and nothing after the
+front end could know the type.
+
+**Why.** The intrinsics of `std.mem` (R4) are the stage-0 round's to run,
+in the interpreter and the native backend, and `RawBuf`, `Layout.of` and
+`Layout.array` stand on `size_of` and `align_of`: an intrinsic whose type
+argument is in neither its parameters nor its result is one whose meaning
+is the type alone. The interpreter and the runtime treat an empty list
+where a type argument is needed as an internal error naming the missing
+argument.
+
+**In stage 1.** `lower.exprs.needs_type_args`.
+
+**What it changes.** No program of the corpus: of the standard library's
+intrinsics, only `std.mem`'s `size_of` and `align_of` have a parameter
+that appears nowhere but in the call (every other such parameter is in
+its result, which wrote the arguments already), and no program of the
+corpus calls either, nor reaches a function that does. The case
+`cases/lowering/size_of_type_arguments.sisu` and its `.sir`, which
+`check.sh`'s class `expected` holds stage 1's `sir` to.
+
+- Differs: `compiler/stage1/cases/lowering/size_of_type_arguments.sisu`: names, ids, human, doc, doc-output
+
+**Decision 298**, for docs/architecture.md:
+
+298. An intrinsic's call writes its type arguments in SIR also when one
+     of its own generic parameters appears in no parameter, in its result
+     or nowhere (`mem.size_of[int]()`, `mem.align_of[(int, bool)]()`),
+     besides when one appears in its result and in no parameter or a
+     parameter is an `Iterable[T]`; type argument `k` is the `k`th
+     generic parameter, the impl's first. Stage 1 decides it (RULES.md,
+     R17).
+
+## R18. An associated function takes explicit type arguments (decision 299)
+
+**The rule.** A call of an associated function, a function of a type's
+impl without `self`, may write the type arguments of the function's own
+generic parameters after its name, `Type.function[Args](...)`, as a call of
+a free function writes them, `f[Args](...)`: `Layout.of[u8]()`,
+`Layout.array[int](3)`, `Shelf.empty_of[int]()`. The impl's generic
+parameters come from the type as before, written
+(`Pair[int].with_other[bool](1, True)`) or inferred from the arguments
+(`Pair.with_other[str](2.5, "x")`); the brackets give the function's own,
+in their order, as many as it has (`E0208` otherwise, and `E0349` for a
+function that has none); the same holds for a trait's function called on
+a type (`T.make[U]()`). A
+body of the standard library that does not type-check is an internal
+error, which names the module and the diagnostic, where its errors were
+dropped and what they stood for lowered to `unreachable`.
+
+**Why.** The resolution order is the one a call keeps already: a name's
+static path first (a module, a type, a type parameter), then its member,
+then the call's arguments, the brackets after a function's name being its
+own type arguments (`x.method[T](...)` takes them so, and `f[T](...)`).
+`Type.function[T]` was read as an index of the function value
+(`E0360`, "a value of type `pure (int) -> mem.Layout?` cannot be
+indexed") by both front ends, so `std.mem`'s `RawBuf`, which sizes its
+buffer by `Layout.array[T](n)`, lowered that call to `unreachable`, and a
+`RawBuf` of any capacity panicked: the standard library's diagnostics are
+not a program's, and nothing reported them. A std body with an error is a
+bug of the toolchain, never of the program that reaches it.
+
+**In stage 1.** `typeck.call.call_expr`: `Type.function[Args](...)` calls
+`static_member` with the brackets' types as `explicit_method_args`, which
+its associated function and trait function paths pass to `call_fn` and
+`call_fn_with` (`instantiate` puts them on the function's own generic
+parameters, as for a method); `typeck.std_errors`, from `check_std_in`,
+panics with `stage0.internal` naming the module and the diagnostic.
+
+**What it changes.** No program of the corpus. The cases
+`cases/calls/static_type_arguments.sisu` (it runs, its `.out`),
+`static_type_argument_counts.sisu` (its `.diag`) and
+`cases/unsafe/layout_type_arguments.sisu`, whose `.sir` shows
+`mem.Layout.of[u8]()` and `mem.Layout.array[int](3)` called and
+`mem.size_of[$0]()` inside them.
+
+- Differs: `compiler/stage1/cases/calls/static_type_arguments.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/calls/static_type_argument_counts.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/unsafe/layout_type_arguments.sisu`: names, ids, human, doc, doc-output
+
+**Decision 299**, for docs/architecture.md:
+
+299. An associated function takes the type arguments of its own generic
+     parameters after its name, `Type.function[Args](...)`, as a free
+     function does: the type gives its impl's parameters, written or
+     inferred, and the brackets the function's own (`E0208`, `E0349` for
+     a function without them); a trait's function called on a type takes
+     them the same way. A body of the standard library that does not
+     type-check stops the compiler with an internal error naming the
+     module and the diagnostic, where it lowered to `unreachable`. Stage 1
+     decides it (RULES.md, R18).
+
+## R19. Exported functions and blocking foreign calls (decision 300)
+
+**The rule** (22, "Foreign calls"). An `@export`ed function is safe to
+write because foreign code that calls it cannot hand it what Sisu keeps
+alive: its signature holds no reference, view, `Shared` (or `Weak`),
+closure or capability, and each parameter or result that does is `E0989`
+(`unsafe.export-signature`). `@blocking` marks a declaration of an
+`extern` block whose call may block its thread for an unbounded time, so
+that the scheduler moves the call off the task threads; on anything but a
+foreign function it is `E0990` (`unsafe.blocking-not-foreign`). Both
+attributes were accepted without a word wherever they were written.
+
+**Why.** 22 gives both: the export boundary's soundness argument is the
+signature rule, and `@blocking` is a promise about a foreign call, which a
+Sisu function's callers do not need (the scheduler sees its blocking
+points). What the backend does with them (the export's C symbol and its
+abort at the boundary, a blocking call's thread) is stage 2's, which SIR
+does not carry yet; the front end checks what it can.
+
+**In stage 1.** `typeck.collect`: `check_export_blocking` and
+`unexportable`, from `resolve_fn`, for the program's own functions.
+
+**What it changes.** No program of the corpus. The case
+`cases/unsafe/exports.sisu` (its `.diag`).
+
+- Differs: `compiler/stage1/cases/unsafe/exports.sisu`: ids, human, doc, doc-output
+
+**Decision 300**, for docs/architecture.md:
+
+300. An `@export`ed function's parameters and result hold no reference,
+     view, `Shared`, `Weak`, closure or capability (22, "Foreign calls";
+     `E0989` at each that does), since foreign code that calls it cannot
+     keep them alive; `@blocking` marks a foreign function only (`E0990`
+     elsewhere). Stage 1 decides it (RULES.md, R19); what the backend makes
+     of either is stage 2's.
+
+## R20. A float's `Debug` takes the whole format spec (decision 305)
+
+**The rule** (02, "Literals": "`{expr=}` ... the value takes its `Debug`
+rendering, as Python uses `repr`, and a format spec may follow, as in
+`{x=:.2f}`"). The `Debug` impls of `f64` and `f32` that the front end
+writes among `builtin_impls` (`std_sources.leaf_format`) apply a spec as
+their `Display` impls do, through `Spec.float` and `Spec.float32`: the
+precision, the type letter, the sign and grouping and a number's
+alignment, where they padded the `Debug` text and dropped the rest. So
+`{pi=:.1f}` prints `pi=3.1` and `{pi=:.2f}` `pi=3.14`, where both printed
+`pi=3.14159`; a spec whose type is `?` (`{x:>8?}`) still writes the
+`Debug` text padded, and so does a float without a spec. A float's `Debug`
+text is the value as it is written, which is its `Display` text, the
+shortest that reads back, and a leaf written with a spec applies the
+whole spec itself (docs/architecture.md, "Formatting": "Forms" and "The
+protocol"), so one spec means the same for both.
+
+**Why.** The manual's writers found `{x=:.1f}` printing every digit
+(chapter 1), which 02 rules out; the stage-0 round traced it to the
+generated `Debug` text, which is the front end's, not the run time's.
+The line the impl takes in `builtin_impls` is one, as before, so no other
+function of that text moves.
+
+**In stage 1.** `typeck.std_sources.leaf_format`.
+
+**What it changes.** What a program prints that formats a float's
+`Debug` with a spec other than `?`, which no program of the corpus does,
+and the SIR of each program that reaches a float's `Debug` impl (42 of
+the corpus, stage 1's cases and the proposal's examples), whose body
+calls `Spec.float` where it padded the `Debug` text; the frozen Rust
+front end keeps its own body, so their `sir` (the classes `sir` and
+`corpus-sir`), `sir-tests` and `contracts-*` outputs differ from it, and
+what they print does not (the class `behaviour`). The case
+`cases/run/float_debug_precision.sisu` (its `.out`: it runs).
+
+- Differs: `compiler/conformance/cases/capabilities/fakes.sisu`: sir
+- Differs: `compiler/conformance/cases/concurrency/mutex.sisu`: sir, contracts-off, contracts-preconditions
+- Differs: `compiler/conformance/cases/concurrency/sync_types.sisu`: sir
+- Differs: `compiler/conformance/cases/contracts/checks.sisu`: sir, sir-tests, contracts-off, contracts-preconditions
+- Differs: `compiler/conformance/cases/contracts/explain.sisu`: sir, sir-tests, contracts-off, contracts-preconditions
+- Differs: `compiler/conformance/cases/contracts/invariants.sisu`: sir, sir-tests, contracts-off, contracts-preconditions
+- Differs: `compiler/conformance/cases/contracts/properties.sisu`: sir-tests
+- Differs: `compiler/conformance/cases/contracts/proposal_contracts.sisu`: sir, sir-tests, contracts-off, contracts-preconditions
+- Differs: `compiler/conformance/cases/contracts/refinements.sisu`: sir-tests
+- Differs: `compiler/conformance/cases/contracts/result_references.sisu`: sir, contracts-off, contracts-preconditions
+- Differs: `compiler/conformance/cases/doc/items.sisu`: sir, sir-tests, contracts-off, contracts-preconditions
+- Differs: `compiler/conformance/cases/examples/errors.sisu`: sir
+- Differs: `compiler/conformance/cases/examples/traits.sisu`: sir
+- Differs: `compiler/conformance/cases/generics/drop_generic.sisu`: sir
+- Differs: `compiler/conformance/cases/generics/functions.sisu`: sir
+- Differs: `compiler/conformance/cases/generics/types.sisu`: sir
+- Differs: `compiler/conformance/cases/ownership/mutex_poison.sisu`: sir, contracts-off, contracts-preconditions
+- Differs: `compiler/conformance/cases/ownership/mutex_unpoisoned.sisu`: sir, contracts-off, contracts-preconditions
+- Differs: `compiler/conformance/cases/ownership/proposal_graph.sisu`: sir
+- Differs: `compiler/conformance/cases/packages/failing_test.pkg`: sir-tests
+- Differs: `compiler/conformance/cases/reflect/promotion.sisu`: sir
+- Differs: `compiler/conformance/cases/reflect/proposal_comptime.sisu`: sir, sir-tests
+- Differs: `compiler/conformance/cases/reflect/trait_methods.sisu`: sir
+- Differs: `compiler/conformance/cases/replay/tokens.sisu`: sir-tests
+- Differs: `compiler/conformance/cases/run/format_specs.sisu`: sir
+- Differs: `compiler/conformance/cases/run/proven_checks.sisu`: sir
+- Differs: `compiler/conformance/cases/run/sized_integers.sisu`: sir
+- Differs: `compiler/conformance/cases/std/json_decode.sisu`: sir
+- Differs: `compiler/conformance/cases/std/search.sisu`: sir
+- Differs: `compiler/conformance/cases/testing/proposal_testing.sisu`: sir-tests
+- Differs: `compiler/conformance/cases/testing/refines.sisu`: sir, sir-tests
+- Differs: `compiler/conformance/cases/traits/assoc_types.sisu`: sir
+- Differs: `compiler/conformance/cases/traits/delegate.sisu`: sir
+- Differs: `compiler/conformance/cases/traits/dyn_values.sisu`: sir
+- Differs: `compiler/conformance/cases/traits/operators.sisu`: sir
+- Differs: `compiler/conformance/cases/traits/own_eq_ord.sisu`: sir
+- Differs: `compiler/stage1/cases/channels/generic_pipeline.sisu`: sir
+- Differs: `compiler/stage1/cases/doc/layout.sisu`: sir, contracts-off, contracts-preconditions
+- Differs: `compiler/stage1/cases/doc_example_generator.sisu`: sir-tests
+- Differs: `compiler/stage1/cases/generator_in_template.sisu`: sir-tests
+- Differs: `proposal/examples/ownership.sisu`: sir
+- Differs: `proposal/examples/traits.sisu`: sir
+
+**Decision 305**, for docs/architecture.md:
+
+305. The `Debug` impls of `f64` and `f32` that the front end writes apply a
+     format spec as their `Display` impls do (`Spec.float`, `Spec.float32`),
+     since the two texts are the same: `{x=:.2f}` rounds (02), where the
+     precision was dropped and the `Debug` text padded; a spec of type `?`
+     still pads the `Debug` text. Stage 1 decides it (RULES.md, R20).

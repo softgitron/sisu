@@ -37,8 +37,17 @@ pub pure def write(p: Program) -> String:
         if e.returns_result:
             out.push(" result")
         out.push("\n")
-    for (name, f) in p.tests:
-        out.push("test {quote(name)} {f}\n")
+    for k in range(len(p.tests)):
+        let (name, f) = p.tests[k].copy()
+        out.push("test {quote(name)} {f}")
+        # The test's `@tag`s, when it has any (decision 285).
+        if k < len(p.test_tags) and not p.test_tags[k].is_empty():
+            out.push(" tags")
+            for t in p.test_tags[k]:
+                out.push(" {quote(t)}")
+        out.push("\n")
+    for (name, f) in p.benches:
+        out.push("bench {quote(name)} {f}\n")
     for t in p.types:
         out.push("\n")
         write_type_decl(mut out, t)

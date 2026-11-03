@@ -20,18 +20,23 @@
 ##! - `E0234` a method of a trait's impl whose signature differs from the
 ##!   trait's in its shape: the receiver, the number of parameters, their
 ##!   modes or the number of its own generic parameters (a difference of
-##!   types needs the type checker).
+##!   types needs the type checker);
+##! - `E0267`, `E0268` and `E0269`, a declaration whose name is not written
+##!   in the case 02 enforces for its kind (`naming`; RULES.md, R12), with
+##!   the name written so as the fix.
 ##!
 ##! The error-tolerance rules of names hold: a function whose header or
 ##! body has a syntax error reports no unknown names, names written in
 ##! top-level code that did not parse as a declaration are never reported,
 ##! and no diagnostic is kept on a line that has a syntax error.
 
-from stage1.diag import Catalog, Diagnostic, Lines, Msg, TextRange, sort_unique
+from stage1.diag import Catalog, Diagnostic, Edit, Lines, Msg, Param, TextRange, sort_unique
+from stage1.naming import Style, problem
 from stage1.sir import Folded
 from stage1.syntax.ast import ItemKind, Module, TypeKind, build
 from stage1.syntax.kinds import SyntaxKind
 from stage1.syntax.tree import Element, Tree, is_item
+from stage1.text import char_at
 from stage1.typeck.folding import Term, TermKind, terms
 
 ## A method's signature as written: what `E0234` compares and prints.
@@ -54,11 +59,19 @@ pub struct ModuleNames:
     pub types: set[String]
     pub variants: set[String]
     pub traits: dict[String, dict[String, Signature]]
+    ## The declarations that are error sets (R15).
+    pub error_sets: set[String]
 
 impl ModuleNames:
+    ## The names of a module that declares nothing.
+    pub pure def empty() -> ModuleNames:
+        return ModuleNames(items=set(), types=set(), variants=set(), traits={}, error_sets=set())
+
     ## The names `tree`, the tree of `text`, declares at its top level.
     pub pure def of(text: str, tree: Tree) -> ModuleNames:
-        var names = ModuleNames(items=set(), types=set(), variants=set(), traits={})
+        var names = ModuleNames(
+            items=set(), types=set(), variants=set(), traits={}, error_sets=set()
+        )
         for n in child_nodes(tree, tree.root):
             names.add_item(text, tree, n)
         return names
@@ -85,6 +98,8 @@ impl ModuleNames:
                 _ = self.types.add(name.copy())
             if kind == SyntaxKind.TraitDef:
                 _ = self.traits.insert(name.copy(), trait_methods(text, tree, n))
+            if kind == SyntaxKind.ErrorDef:
+                _ = self.error_sets.add(name.copy())
             _ = self.items.add(name)
         if kind == SyntaxKind.EnumDef or kind == SyntaxKind.ErrorDef:
             for b in child_nodes(tree, n):
@@ -311,6 +326,14 @@ view struct Resolver:
     ## is declared (09: the modules of a package may name each other
     ## freely).
     deferred: list[int]
+    ## What a local declared now is, for the naming rule (R12): "a
+    ## variable" or "a parameter".
+    naming_kind: String
+    ## Inside an `extern` block, whose foreign functions keep the names
+    ## their library gives them.
+    foreign: bool
+    ## The body of the function being resolved.
+    body_node: int?
 
 ## The name diagnostics of the module whose tree is `tree`, sorted, without
 ## those on a line that has one of the syntax diagnostics `syntax`.
@@ -794,6 +817,9 @@ impl Resolver:
             index=index,
             dependency=dependency,
             deferred=[],
+            naming_kind="a variable".to_string(),
+            foreign=False,
+            body_node=None,
         )
 
     ## Declares every item of the module, as stage 0's `declare_items`,
@@ -1139,6 +1165,11 @@ impl Resolver:
         let name = self.text_of(t)
         if name.is_empty() or name == "_" or self.locals.is_empty():
             return
+        # A capitalised name in a pattern is a constant, not a binding.
+        if not char_at(name, 0).is_uppercase():
+            let token = self.tree.tokens[t]
+            let kind = self.naming_kind.copy()
+            self.check_style(token.start, token.end, Style.Snake, kind)
         let depth = len(self.locals)
         if warn:
             var outer = False
@@ -1150,6 +1181,38 @@ impl Resolver:
                 let d = Diagnostic.new(Msg.ResolveShadowOuter, token.start, token.end)
                 self.report(d.with("name", name))
         self.locals[depth - 1].push(name.to_string())
+
+    ## A declared name not written in its kind's style (02; R12): `E0267`,
+    ## `E0268` or `E0269`, with the name written so as the fix. A foreign
+    ## function's names are its library's, and a name in a body or header
+    ## with a syntax error is not reliable.
+    pure def check_style(mut self, start: int, end: int, style: Style, kind: str):
+        if self.foreign or self.quiet or start >= end:
+            return
+        let name = self.text.byte_slice(start, end)
+        let fixed = problem(name, style) else:
+            return
+        let m = match style:
+            case Camel: Msg.ResolveNotCamelCase
+            case Snake: Msg.ResolveNotSnakeCase
+            case Screaming: Msg.ResolveNotScreamingCase
+        var d = Diagnostic.new(m, start, end).with("kind", kind).with("name", name)
+        self.report(d.fix_at(Msg.ResolveRename, start, end, fixed))
+
+    ## An error set named as one of the prelude's (R15; D-024): the two are
+    ## different sets with one name, which the module's code and messages
+    ## no longer tell apart, so the declaration warns (`W0016`).
+    pure def shadowed_set(mut self, n: int):
+        let (start, end) = item_name(self.tree, n) else:
+            return
+        let name = self.text.byte_slice(start, end).to_string()
+        if self.env.prelude.error_sets.contains(name.copy()):
+            self.report(Diagnostic.new(Msg.ResolveShadowPreludeSet, start, end).with("name", name))
+
+    ## The name of item `n` against its kind's style.
+    pure def check_item_style(mut self, n: int, style: Style, kind: str):
+        if let Some((start, end)) = item_name(self.tree, n):
+            self.check_style(start, end, style, kind)
 
     ## Whether a value name is known: a local, a generic parameter, a
     ## declaration of the module or of the prelude, or a variant.
@@ -1187,6 +1250,9 @@ impl Resolver:
         var d = Diagnostic.new(Msg.ResolveUndefinedName, token.start, token.end).with("name", name)
         if let Some(similar) = self.similar_name(name):
             d = d.fix(Msg.ResolveSimilarName, "name", similar, token.start, token.end, similar)
+        # Python's `open(path)`: files are the capability `Fs`'s (R16).
+        if name == "open":
+            d = d.note(Msg.ResolveOpenFile)
         self.report(d)
 
     ## The local or declared name closest to a misspelt one, if one is close
@@ -1396,9 +1462,15 @@ impl Resolver:
             for p in child_nodes(self.tree, g):
                 if self.kind(p) == SyntaxKind.GenericParam:
                     if let Some(t) = first_token(self.tree, p, SyntaxKind.Ident):
+                        let token = self.tree.tokens[t]
                         self.generics.push(self.text_of(t))
                         if first_token(self.tree, p, SyntaxKind.ConstKw) != None:
                             self.const_generics.push(self.text_of(t))
+                            let kind = "a constant parameter"
+                            self.check_style(token.start, token.end, Style.Screaming, kind)
+                        else:
+                            let kind = "a type parameter"
+                            self.check_style(token.start, token.end, Style.Camel, kind)
             for p in child_nodes(self.tree, g):
                 if self.kind(p) == SyntaxKind.GenericParam:
                     self.bounds(p)
@@ -1468,14 +1540,25 @@ impl Resolver:
             case FnDef:
                 self.function(n, False)
             case StructDef:
+                self.check_item_style(n, Style.Camel, "a struct")
                 self.add_generics(n)
                 self.members(n)
             case EnumDef | ErrorDef:
+                if self.kind(n) == SyntaxKind.EnumDef:
+                    self.check_item_style(n, Style.Camel, "an enum")
+                else:
+                    self.check_item_style(n, Style.Camel, "an error set")
+                    self.shadowed_set(n)
                 self.add_generics(n)
                 if let Some(b) = first_child(self.tree, n, SyntaxKind.Block):
                     for v in child_nodes(self.tree, b):
                         match self.kind(v):
                             case VariantDef:
+                                if let Some(t) = first_token(self.tree, v, SyntaxKind.Ident):
+                                    let token = self.tree.tokens[t]
+                                    self.check_style(
+                                        token.start, token.end, Style.Camel, "a variant"
+                                    )
                                 for f in child_nodes(self.tree, v):
                                     if self.kind(f) == SyntaxKind.VariantField:
                                         self.types_in(f)
@@ -1504,6 +1587,7 @@ impl Resolver:
                         if self.kind(m) == SyntaxKind.FnDef:
                             self.function(m, True)
             case TraitDef:
+                self.check_item_style(n, Style.Camel, "a trait")
                 self.add_generics(n)
                 # The supertraits, `trait Container(Len):`.
                 for c in child_nodes(self.tree, n):
@@ -1512,6 +1596,7 @@ impl Resolver:
                 if let Some(b) = first_child(self.tree, n, SyntaxKind.Block):
                     for m in child_nodes(self.tree, b):
                         if self.kind(m) == SyntaxKind.TypeAlias:
+                            self.check_item_style(m, Style.Camel, "an associated type")
                             if let Some((start, end)) = item_name(self.tree, m):
                                 self.assoc.push(self.text.byte_slice(start, end).to_string())
                     for m in child_nodes(self.tree, b):
@@ -1519,11 +1604,13 @@ impl Resolver:
                             self.function(m, True)
                 self.assoc.clear()
             case ConstDef:
+                self.check_item_style(n, Style.Screaming, "a constant")
                 self.types_in(n)
                 self.push_scope()
                 self.exprs_in(n)
                 self.pop_scope()
             case TypeAlias:
+                self.check_item_style(n, Style.Camel, "a type")
                 self.add_generics(n)
                 self.types_in(n)
                 # A refinement's predicate names the value as `self`.
@@ -1544,10 +1631,13 @@ impl Resolver:
                             self.item(m)
             # The signatures of an `extern` block's foreign functions.
             case ExternBlock:
+                let saved_foreign = self.foreign
+                self.foreign = True
                 if let Some(b) = first_child(self.tree, n, SyntaxKind.Block):
                     for m in child_nodes(self.tree, b):
                         if self.kind(m) == SyntaxKind.FnDef:
                             self.function(m, False)
+                self.foreign = saved_foreign
             case _:
                 pass
         while len(self.generics) > saved_generics:
@@ -1634,6 +1724,9 @@ impl Resolver:
         for m in child_nodes(self.tree, b):
             match self.kind(m):
                 case FieldDef:
+                    if let Some(t) = first_token(self.tree, m, SyntaxKind.Ident):
+                        let token = self.tree.tokens[t]
+                        self.check_style(token.start, token.end, Style.Snake, "a field")
                     self.types_in(m)
                     self.push_scope()
                     self.exprs_in(m)
@@ -1659,10 +1752,13 @@ impl Resolver:
         let saved_consts = len(self.const_generics)
         let saved_self = self.has_self
         let saved_quiet = self.quiet
+        let header_broken = error_outside_block(self.tree, n)
+        if not header_broken:
+            let kind = if method: "a method" else: "a function"
+            self.check_item_style(n, Style.Snake, kind)
         self.add_generics(n)
         self.push_scope()
         self.has_self = False
-        let header_broken = error_outside_block(self.tree, n)
         # A `comptime def`'s `T: type` parameters are type parameters, not
         # parameters (decision 251).
         var typed: list[String] = []
@@ -1688,9 +1784,12 @@ impl Resolver:
             # The body shares the parameters' scope: a `let` there that
             # rebinds a parameter does not shadow it.
             let saved_body = self.in_body
+            let saved_node = self.body_node
             self.in_body = True
+            self.body_node = Some(body)
             self.statements_of(body)
             self.in_body = saved_body
+            self.body_node = saved_node
         self.pop_scope()
         self.result_labels = saved_labels
         self.quiet = saved_quiet
@@ -1721,6 +1820,8 @@ impl Resolver:
             if first_token(self.tree, t, SyntaxKind.TypeKw) == None:
                 continue
             if let Some(name) = first_token(self.tree, p, SyntaxKind.Ident):
+                let token = self.tree.tokens[name]
+                self.check_style(token.start, token.end, Style.Camel, "a type parameter")
                 self.generics.push(self.text_of(name))
                 names.push(self.text_of(name))
         return names
@@ -1747,7 +1848,9 @@ impl Resolver:
                 if method and index == 0:
                     self.has_self = True
             elif let Some(t) = first_token(self.tree, p, SyntaxKind.Ident):
+                self.naming_kind = "a parameter".to_string()
                 self.declare_local(t, False)
+                self.naming_kind = "a variable".to_string()
             index += 1
 
     ## `test "name" [for patterns in cases] [(params)]: body`.
@@ -1853,6 +1956,8 @@ impl Resolver:
                         self.statement(c)
             case SelectStmt:
                 self.select(n)
+            case AssignStmt if self.declares_by_assignment(n):
+                pass
             case ContractStmt:
                 self.contract(n)
             case Block:
@@ -1864,6 +1969,53 @@ impl Resolver:
                 pass
             case _:
                 self.expr(n)
+
+    ## Python's declaration by assignment, `greeting = "Hei"`, of a name
+    ## nothing declares (02's departures from Python; R16): `E0200` with the
+    ## fix that writes `let` (`var` when the body assigns the name again),
+    ## after which the name is the local the fix makes, so that its uses
+    ## are not reported again (10: nothing after the first error of a
+    ## chain). Whether it took the statement.
+    pure def declares_by_assignment(mut self, n: int) -> bool:
+        let kids = child_nodes(self.tree, n)
+        if len(kids) != 2 or self.kind(kids[0]) != SyntaxKind.NameRef:
+            return False
+        if first_token(self.tree, n, SyntaxKind.Eq) == None:
+            return False
+        let t = first_token(self.tree, kids[0], SyntaxKind.Ident) else:
+            return False
+        let name = self.text_of(t)
+        if self.knows_value(name) or self.quiet or self.module.poisoned.contains(name.to_string()):
+            return False
+        if self.locals.is_empty() or not self.in_body:
+            return False
+        self.expr(kids[1])
+        let token = self.tree.tokens[t]
+        var d = Diagnostic.new(Msg.ResolveUndefinedName, token.start, token.end).with("name", name)
+        let keyword = if self.assigned_later(name, token.end): "var" else: "let"
+        let param = Param(name="keyword".to_string(), value=keyword.to_string())
+        let edit = Edit(start=token.start, end=token.start, text="{keyword} ")
+        self.report(d.fix_params(Msg.ResolveDeclareWith, [param], [edit]))
+        self.locals[len(self.locals) - 1].push(name.to_string())
+        return True
+
+    ## Whether the body being resolved assigns `name` after `from_`.
+    pure def assigned_later(self, name: str, from_: int) -> bool:
+        let body = self.body_node else:
+            return False
+        var nodes = [body]
+        while let Some(m) = nodes.pop():
+            for c in child_nodes(self.tree, m):
+                nodes.push(c)
+            if self.kind(m) != SyntaxKind.AssignStmt:
+                continue
+            let kids = child_nodes(self.tree, m)
+            if kids.is_empty() or self.kind(kids[0]) != SyntaxKind.NameRef:
+                continue
+            if let Some(t) = first_token(self.tree, kids[0], SyntaxKind.Ident):
+                if self.text_of(t) == name and self.tree.tokens[t].start >= from_:
+                    return True
+        return False
 
     ## `let pattern [: type] [= value [else ...]]`: the type and the value
     ## first, then the `else`, then the pattern's bindings, which warn when
@@ -2269,7 +2421,9 @@ impl Resolver:
                     if is_type_kind(self.kind(c)):
                         self.annotation_type(c)
                 if let Some(t) = first_token(self.tree, p, SyntaxKind.Ident):
+                    self.naming_kind = "a parameter".to_string()
                     self.declare_local(t, False)
+                    self.naming_kind = "a variable".to_string()
 
     ## `[element for pattern in iterable if test ...]`: the clauses in order,
     ## then the element, which sees every binding.

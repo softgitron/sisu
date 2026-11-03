@@ -1,0 +1,7 @@
+Some("Core")
+Some("Eero")
+Some(Lead(name="Eero"))
+Some(3) Some("Core")
+Aino in Some("Core"), led by Some("Eero")
+None None
+Some("Core")

@@ -344,6 +344,7 @@ pub pure def lower(
                 )
             )
     var tests: list[(String, String)] = []
+    var test_tags: list[list[String]] = []
     var any_system = False
     for d in prog.tests:
         let f = prog.fn_info(d) else:
@@ -352,6 +353,20 @@ pub pure def lower(
             any_system = True
         if f.body.is_some():
             tests.push((prog.defs[d.index].name.copy(), ctx.fn_name(prog, types, d)))
+            var tags: list[String] = []
+            if let Some(found) = prog.test_tags.get(d):
+                tags = found.copy()
+            test_tags.push(tags)
+    # Each test's `@tag`s and the benchmarks, which `sisu test --from-sir`
+    # and `sisu bench --from-sir` select and run (decision 285); the tags
+    # end at the last tagged test.
+    while not test_tags.is_empty() and test_tags[len(test_tags) - 1].is_empty():
+        _ = test_tags.pop()
+    var benches: list[(String, String)] = []
+    for d in prog.benches:
+        if let Some(f) = prog.fn_info(d):
+            if f.body.is_some():
+                benches.push((prog.defs[d.index].name.copy(), ctx.fn_name(prog, types, d)))
     # Keep what the entry, the tests and the root module's functions reach.
     var roots: list[String] = []
     if let Some(e) = entry:
@@ -372,6 +387,10 @@ pub pure def lower(
         if prog.defs[b.def_.index].module == prog.root:
             if b.kind == BodyKind.Fn or b.kind == BodyKind.Const:
                 roots.push(ctx.body_name(prog, types, b))
+    # The benchmarks, after the rest, which a program of one module's
+    # already reached as the root module's functions.
+    for (_, f) in benches:
+        roots.push(f.copy())
     var beyond: list[String] = []
     var all = typed.bodies.copy()
     let (reached, t) = lower_reached(
@@ -419,6 +438,8 @@ pub pure def lower(
         intrinsics=intrinsics,
         functions=functions,
         tests=tests,
+        test_tags=test_tags,
+        benches=benches,
         trait_methods=trait_methods,
         impls=impls,
         asserted=asserted,

@@ -1,8 +1,8 @@
 ##! Exhaustiveness and reachability of `match` (stage 0's
 ##! `sisu-typeck/src/exhaustive.rs`; 03, "`match` is exhaustive"), by the
 ##! usefulness algorithm over constructor spaces (Maranget, "Warnings for
-##! pattern matching", 2007). A witness of the first missing case names it
-##! in the diagnostic.
+##! pattern matching", 2007). The witnesses of the missing cases name them
+##! in the diagnostic, every one up to eight (RULES.md, R10).
 ##!
 ##! Types with infinitely many values (integers, strings) need a `case _` or
 ##! a binding; an open error set needs a wildcard (05). Lists are split by
@@ -13,11 +13,14 @@
 ##! A space is a node of an arena (`Spaces`), referred to by index, rather
 ##! than the recursive value of the Rust (`syntax.ast` says why).
 
-from stage1.diag import Msg, TextRange
+from stage1.diag import Diagnostic, Msg, TextRange
 from stage1.typeck.check import Checker, Cx
 from stage1.typeck.program import DefKind
 from stage1.typeck.thir import Lit, PatId, TArm, TPatKind
 from stage1.typeck.ty import DefId, Ty, TyData
+
+## How many missing patterns a non-exhaustive `match` names (R10).
+const MISSING_SHOWN: int = 8
 
 @derive(Eq)
 enum Ctor:
@@ -323,67 +326,91 @@ impl Checker:
             case Ctor.Other(s):
                 return s.copy()
 
-    ## A witness of a value no row matches, one rendered pattern per column.
-    pure def witness(
-        mut self, cx: Cx, mut sp: Spaces, rows: list[list[int]], tys: list[Ty]
-    ) -> list[String]?:
+    ## The values no row matches, each a rendered pattern per column, in
+    ## the order of the constructors their columns' types declare, at most
+    ## `limit` of them (RULES.md, R10: 03's missing-case error lists the
+    ## missing patterns). In a column some row matches a constructor of,
+    ## each constructor no row matches is a pattern of its own, with
+    ## wildcards for its fields; in one no row matches any constructor of,
+    ## the column is `_`.
+    pure def witnesses(
+        mut self, cx: Cx, mut sp: Spaces, rows: list[list[int]], tys: list[Ty], limit: int
+    ) -> list[list[String]]:
+        var out: list[list[String]] = []
+        if limit <= 0:
+            return out
         if tys.is_empty():
             if rows.is_empty():
-                return Some([])
-            return None
+                out.push([])
+            return out
         let head = tys[0]
         var heads: list[int] = []
         for r in rows:
             if let Some(h) = r.first():
                 heads.push(h)
         let rest_tys = rest_tys_of(tys, 1)
-        match self.ctors_in(cx, sp, head, heads):
-            case Some(cs):
-                var all_used = not cs.is_empty()
-                for (c, _) in cs:
-                    if not used(sp, rows, c):
-                        all_used = False
-                if all_used:
-                    for (c, ftys) in cs:
-                        let spec = sp.specialize(rows, c, len(ftys))
-                        var sub_tys = ftys.copy()
-                        for t in rest_tys:
-                            sub_tys.push(t)
-                        if let Some(w) = self.witness(cx, mut sp, spec, sub_tys):
-                            var fw: list[String] = []
-                            var rest: list[String] = []
-                            for i in range(len(w)):
-                                if i < len(ftys):
-                                    fw.push(w[i].copy())
-                                else:
-                                    rest.push(w[i].copy())
-                            var out = [self.render(cx, c, fw)]
-                            for x in rest:
-                                out.push(x.copy())
-                            return Some(out)
-                    return None
-                let defaults = sp.default_rows(rows)
-                let rest = self.witness(cx, mut sp, defaults, rest_tys) else:
-                    return None
-                var missing: String? = None
-                for (c, ftys) in cs:
-                    if missing.is_none() and not used(sp, rows, c):
-                        var wilds: list[String] = []
-                        for _ in ftys:
-                            wilds.push("_".to_string())
-                        missing = Some(self.render(cx, c, wilds))
-                var out = [missing ?? "_".to_string()]
-                for x in rest:
-                    out.push(x.copy())
-                return Some(out)
-            case None:
-                let defaults = sp.default_rows(rows)
-                let rest = self.witness(cx, mut sp, defaults, rest_tys) else:
-                    return None
-                var out = ["_".to_string()]
-                for x in rest:
-                    out.push(x.copy())
-                return Some(out)
+        let found = self.ctors_in(cx, sp, head, heads) else:
+            # Infinitely many values: what the wildcard rows leave.
+            let defaults = sp.default_rows(rows)
+            for w in self.witnesses(cx, mut sp, defaults, rest_tys, limit):
+                var row = ["_".to_string()]
+                for x in w:
+                    row.push(x.copy())
+                out.push(row)
+            return out
+        let cs = found.copy()
+        var any_used = False
+        var all_used = not cs.is_empty()
+        for (c, _) in cs:
+            if used(sp, rows, c):
+                any_used = True
+            else:
+                all_used = False
+        # What the wildcard rows leave of the other columns, for the
+        # constructors no row names.
+        var rest: list[list[String]] = []
+        if not all_used:
+            let defaults = sp.default_rows(rows)
+            rest = self.witnesses(cx, mut sp, defaults, rest_tys, limit)
+        if not any_used:
+            for w in rest:
+                var row = ["_".to_string()]
+                for x in w:
+                    row.push(x.copy())
+                out.push(row)
+            return out
+        for (c, ftys) in cs:
+            if len(out) >= limit:
+                return out
+            if used(sp, rows, c):
+                let spec = sp.specialize(rows, c, len(ftys))
+                var sub_tys = ftys.copy()
+                for t in rest_tys:
+                    sub_tys.push(t)
+                for w in self.witnesses(cx, mut sp, spec, sub_tys, limit - len(out)):
+                    var fw: list[String] = []
+                    var tail: list[String] = []
+                    for i in range(len(w)):
+                        if i < len(ftys):
+                            fw.push(w[i].copy())
+                        else:
+                            tail.push(w[i].copy())
+                    var row = [self.render(cx, c, fw)]
+                    for x in tail:
+                        row.push(x.copy())
+                    out.push(row)
+            else:
+                var wilds: list[String] = []
+                for _ in ftys:
+                    wilds.push("_".to_string())
+                let shown = self.render(cx, c, wilds)
+                for w in rest:
+                    if len(out) < limit:
+                        var row = [shown.copy()]
+                        for x in w:
+                            row.push(x.copy())
+                        out.push(row)
+        return out
 
     ## Reports a non-exhaustive `match` and unreachable arms.
     pub pure def check_exhaustive(mut self, cx: Cx, ty: Ty, arms: list[TArm], range: TextRange):
@@ -406,10 +433,19 @@ impl Checker:
                     let at = self.pats[a.pat.index].span
                     let d = self.error(cx, Msg.TypeUnreachableArm, at)
                     self.report(d)
+                elif reachable:
+                    self.lint_wildcard(cx, mut sp, rows, a.pat, z)
                 for s in alts:
                     rows.push([s])
-        if let Some(w) = self.witness(cx, mut sp, rows, [ty]):
-            let missing = "`{w.join(", ")}`"
+        # Every missing pattern, up to `MISSING_SHOWN`; one more tells that
+        # there are more than are shown.
+        let found = self.witnesses(cx, mut sp, rows, [ty], MISSING_SHOWN + 1)
+        if not found.is_empty():
+            var listed: list[String] = []
+            for w in found:
+                if len(listed) < MISSING_SHOWN:
+                    listed.push("`{w.join(", ")}`")
+            let missing = listed.join(", ")
             var open = False
             let zz = self.infer.zonk(mut self.types, ty)
             if let TyData.ErrSet(m) = self.types.data(zz):
@@ -422,8 +458,62 @@ impl Checker:
                 let d = self.error(cx, Msg.TypeOpenSetNeedsWildcard, range).with("ty", shown)
                 self.report(d)
             else:
-                let d = self.error(cx, Msg.TypeNonExhaustive, range).with("missing", missing)
-                self.report(d.note_with(Msg.TypeMissingPatterns, "missing", missing))
+                var d = self.error(cx, Msg.TypeNonExhaustive, range).with("missing", missing)
+                if len(found) == 1:
+                    d = d.note_with(Msg.TypeMissingPatterns, "missing", missing)
+                else:
+                    d = d.note_with(Msg.TypeMissingPatternsEach, "missing", missing)
+                if len(found) > MISSING_SHOWN:
+                    d = d.note_with(Msg.TypeMoreMissing, "count", "{MISSING_SHOWN}")
+                self.report(d)
+
+    ## A reachable `case _` arm over an enum of the checked module's own
+    ## package (D-043; RULES.md, R11): `sisu lint`'s warning, which names
+    ## the variants the wildcard matches and lists them as the fix. The
+    ## lint goes with the type checker's diagnostics and leaves them in
+    ## `Checked.lints`, which only `lint` prints.
+    pure def lint_wildcard(
+        mut self, cx: Cx, mut sp: Spaces, rows: list[list[int]], pat: PatId, ty: Ty
+    ):
+        var p = pat
+        while True:
+            if let TPatKind.Deref(inner) = self.pats[p.index].kind:
+                p = inner
+            else:
+                break
+        let TPatKind.Wild = self.pats[p.index].kind else:
+            return
+        if not cx.prog.user_modules.contains(self.module):
+            return
+        let t = self.types.strip_ref(ty)
+        let TyData.Adt(d, _) = self.types.data(t).copy() else:
+            return
+        let DefKind.Enum(e) = cx.prog.defs[d.index].kind().copy() else:
+            return
+        let owner = cx.prog.defs[d.index].module
+        if owner.index < len(cx.prog.modules) and cx.prog.modules[owner.index].is_std:
+            return
+        if cx.prog.package_of(owner) != cx.prog.package_of(self.module):
+            return
+        var named: list[String] = []
+        var written: list[String] = []
+        for i in range(len(e.variants)):
+            var args: list[int] = []
+            var wilds: list[String] = []
+            for _ in e.variants[i].fields:
+                args.push(sp.wild())
+                wilds.push("_".to_string())
+            let v = sp.add(Sp.C(ctor=Ctor.Variant(def_=d, index=i), args=args))
+            if self.useful(cx, mut sp, rows, [v], [ty]):
+                named.push("`{e.variants[i].name}`")
+                written.push(with_args(e.variants[i].name.copy(), wilds))
+        if named.is_empty():
+            return
+        let at = self.pats[pat.index].span
+        let shown = self.show(cx, t)
+        var d = Diagnostic.new(Msg.LintWildcardOwnEnum, at.start, at.end)
+        d = d.with("variants", named.join(", ")).with("ty", shown)
+        self.report(d.fix_at(Msg.LintListVariants, at.start, at.end, written.join(" | ")))
 
     pure def useful(
         mut self, cx: Cx, mut sp: Spaces, rows: list[list[int]], v: list[int], tys: list[Ty]

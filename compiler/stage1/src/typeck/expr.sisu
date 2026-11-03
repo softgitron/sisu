@@ -369,6 +369,13 @@ impl Checker:
         let r = self.span_of(x)
         if r.start < 0 or r.end > cx.source.byte_len() or r.start > r.end:
             return d
+        # Text where a `Path` is expected: `Path.new` makes one (R16).
+        if self.is_builtin(cx, exp, "Path") and self.is_text(cx, self.types.strip_ref(actual)):
+            let edits = [
+                Edit(start=r.start, end=r.start, text="Path.new(".to_string()),
+                Edit(start=r.end, end=r.end, text=")".to_string()),
+            ]
+            return d.fix_edits(Msg.TypeMakePath, edits)
         let text = cx.source.byte_slice(r.start, r.end)
         var literal = False
         match self.exprs[x.index].kind:
@@ -1061,7 +1068,10 @@ impl Checker:
                 case StrPart.Text(t):
                     out.push(InterpPart.Text(t.copy()))
                 case StrPart.Interp(expr, debug, spec_in, _):
+                    if let ExprKind.OptField(_, _) = cx.ast.expr(expr).kind:
+                        self.reading_chain = True
                     let x = self.infer_expr(cx, expr, None)
+                    self.reading_chain = False
                     let spec = spec_in.copy() ?? String.new()
                     # A spec ending in `?` asks for `Debug` (`{x:>8?}`).
                     var wanted = cx.prog.wk.debug
@@ -1169,6 +1179,11 @@ impl Checker:
             if let Some((def_, vi)) = self.variant_in(cx, exp, n):
                 return self.unit_variant(cx, def_, vi, Some(exp), at)
         if let Some(d) = cx.prog.lookup(self.module, n):
+            # A trait is no value: a variant of that name is what the name
+            # means (RULES.md, R13).
+            if let DefKind.Trait(_) = cx.prog.defs[d.index].kind():
+                if let Some((def_, vi)) = self.global_variant(cx, n, at):
+                    return self.unit_variant(cx, def_, vi, expected, at)
             return self.def_value(cx, d, n, at)
         if let Some((def_, vi)) = self.global_variant(cx, n, at):
             return self.unit_variant(cx, def_, vi, expected, at)
@@ -1879,6 +1894,10 @@ impl Checker:
                         let shown_e = self.show(cx, el)
                         var d = self.error(cx, Msg.TypeComparisonTypes, range)
                         d = d.with("lhs", shown_l).with("rhs", shown_e)
+                        # A character looked for in text, as Python's
+                        # `c in "aeiou"`: text is looked for in text (R16).
+                        if self.resolved(a) == Ty.char() and self.resolved(b) == Ty.str():
+                            d = self.char_as_text_fix(cx, d, l)
                         self.report(d)
                 case None:
                     let shown_l = self.show(cx, lt)
@@ -1914,6 +1933,8 @@ impl Checker:
                             Param(name="bound".to_string(), value="PartialOrd".to_string()),
                         ]
                         d = d.fix_params(Msg.TypeAddBound, params, [edit])
+                if let Some(po) = cx.prog.wk.partial_ord:
+                    d = self.derive_fix(cx, d, t, po)
                 self.report(d)
         elif let TyData.Fn(_, _, _) = self.data(a):
             let shown_l = self.show(cx, lt)
@@ -2062,7 +2083,11 @@ impl Checker:
                 let range = cx.ast.expr(iter).range
                 if not is_var_data(self.data(self.ty_of(x))):
                     let shown = self.show(cx, self.ty_of(x))
-                    let d = self.error(cx, Msg.TypeNotIterable, range).with("ty", shown)
+                    var d = self.error(cx, Msg.TypeNotIterable, range).with("ty", shown)
+                    # Text is walked by its characters or its bytes (R16).
+                    if self.is_text(cx, self.resolved(self.types.strip_ref(self.ty_of(x)))):
+                        d = d.fix_at(Msg.TypeIterateChars, range.end, range.end, ".chars()")
+                        d = d.fix_at(Msg.TypeIterateBytes, range.end, range.end, ".bytes()")
                     self.report(d)
                 else:
                     let text = self.source_text(cx, range)
@@ -2501,6 +2526,7 @@ impl Checker:
                     let shown_ret = self.show(cx, ret)
                     var d = self.error(cx, Msg.TypeTryContext, range)
                     d = d.with("ty", shown).with("needed", "T ! E").with("found", shown_ret)
+                    d = self.return_errors_fix(cx, d, e)
                     self.report(d)
                 return self.add(
                     TExprKind.Try(expr=x, kind=TryKind.Result(from_=[], to=[])), t, range
@@ -2535,6 +2561,60 @@ impl Checker:
         self.report(d)
         return self.error_expr(range)
 
+    ## A character written as text: a literal's own text in double quotes,
+    ## anything else interpolated.
+    pure def char_as_text_fix(self, cx: Cx, own d: Diagnostic, x: TExprId) -> Diagnostic:
+        let r = self.span_of(x)
+        if r.start < 0 or r.end > cx.source.byte_len() or r.start >= r.end:
+            return d
+        let written = cx.source.byte_slice(r.start, r.end)
+        var text = "\"{{{written}}}\""
+        if written.starts_with("'") and written.ends_with("'") and written.byte_len() >= 3:
+            let inner = written.byte_slice(1, written.byte_len() - 1)
+            if inner != "\"" and inner != "{{" and inner != "}}":
+                text = "\"{inner}\""
+        return d.fix_at(Msg.TypeCharAsText, r.start, r.end, text)
+
+    ## The fix of `?` on a result in a function that returns nothing,
+    ## written without a result type (R16): it returns `! E`, the operand's
+    ## error set (`!` when that is not known), and `Ok(())` at its end.
+    pure def return_errors_fix(mut self, cx: Cx, own d: Diagnostic, e: Ty) -> Diagnostic:
+        if len(self.ret) != 1 or self.resolved(self.ret_ty()) != Ty.unit():
+            return d
+        let f = cx.prog.fn_info(self.def_) else:
+            return d
+        if f.ret_span.is_some() or f.header_broken:
+            return d
+        let body = f.body.copy() else:
+            return d
+        let last = body.stmts.last() else:
+            return d
+        let text = cx.source
+        let name = cx.prog.defs[self.def_.index].span
+        let header = params_end(text, name.end) else:
+            return d
+        var set = "!".to_string()
+        let shown = self.show(cx, e)
+        if not shown.contains("unknown") and not shown.contains("?"):
+            set = "! {shown}"
+        # The body's last line, and the indentation of its first.
+        let first_stmt = cx.ast.stmt(body.stmts[0]).range.start
+        var indent_at = first_stmt
+        while indent_at > 0 and text.byte_at(indent_at - 1) == 32:
+            indent_at -= 1
+        let indent = text.byte_slice(indent_at, first_stmt)
+        var end = cx.ast.stmt(last).range.end
+        while end > 0 and is_blank(text.byte_at(end - 1)):
+            end -= 1
+        while end < text.byte_len() and text.byte_at(end) != 10:
+            end += 1
+        var returned = Edit(start=end, end=end, text="\n{indent}return Ok(())".to_string())
+        if end < text.byte_len():
+            returned = Edit(start=end + 1, end=end + 1, text="{indent}return Ok(())\n".to_string())
+        let written = Edit(start=header, end=header, text=" -> {set}".to_string())
+        let n = Param(name="name".to_string(), value=cx.prog.defs[self.def_.index].name.copy())
+        return d.fix_params(Msg.TypeReturnErrors, [n], [written, returned])
+
     ## `base?.name` and `base?.name(args)`.
     pub pure def opt_chain(
         mut self,
@@ -2545,13 +2625,31 @@ impl Checker:
         trailing: Closure?,
         range: TextRange,
     ) -> TExprId:
+        # In an interpolation the chain only reads what it reaches through
+        # a place, as `{u.name}` reads the field (RULES.md, R14).
+        let reading = self.reading_chain and args.is_none()
+        self.reading_chain = False
+        if reading:
+            return self.reading_chain_of(cx, base, name, range)
         let b = self.infer_expr(cx, base, None)
+        return self.opt_chain_on(cx, b, cx.ast.expr(base).range, name, args, trailing, range)
+
+    ## `b?.name` and `b?.name(args)` for a typed base `b`, written at
+    ## `base_range`.
+    pure def opt_chain_on(
+        mut self,
+        cx: Cx,
+        b: TExprId,
+        base_range: TextRange,
+        name: Name,
+        args: list[Arg]?,
+        trailing: Closure?,
+        range: TextRange,
+    ) -> TExprId:
         let inner = self.as_option(cx, self.ty_of(b)) else:
             if self.ty_of(b) != Ty.error():
                 let shown = self.show(cx, self.ty_of(b))
-                let d = self.error(cx, Msg.TypeOptionalChain, cx.ast.expr(base).range).with(
-                    "ty", shown
-                )
+                let d = self.error(cx, Msg.TypeOptionalChain, base_range).with("ty", shown)
                 self.report(d)
             return self.error_expr(range)
         self.push_scope()
@@ -2570,19 +2668,110 @@ impl Checker:
         if self.is_place(then)
                 and self.is_behind_ref(then)
                 and not self.is_copy(cx, self.ty_of(then)):
-            let ty = self.resolved(self.ty_of(then))
-            if self.is_string(cx, ty):
-                then = self.wrap(then, Coercion.StrView, Ty.str())
-            elif ty != Ty.error():
-                let span = self.span_of(then)
-                let rt = self.types.ref_(ty, False)
-                then = self.add(TExprKind.Borrow(place=then, mutable=False), rt, span)
+            then = self.read_place(cx, then)
+        return self.chain_of(cx, b, binder, then, range)
+
+    ## The chain over `b` that binds `binder` and gives `then`: `Some` of
+    ## it, or `then` itself when it is optional.
+    pure def chain_of(
+        mut self, cx: Cx, b: TExprId, binder: int, then: TExprId, range: TextRange
+    ) -> TExprId:
         let flatten = self.as_option(cx, self.ty_of(then)).is_some()
         var ty = self.ty_of(then)
         if not flatten:
             ty = self.option_of(cx, self.ty_of(then))
         let k = TExprKind.OptChain(base=b, binder=binder, then=then, flatten=flatten)
         return self.add(k, ty, range)
+
+    ## A place read rather than moved: a `String` as a `str` view, another
+    ## type borrowed.
+    pure def read_place(mut self, cx: Cx, then: TExprId) -> TExprId:
+        let ty = self.resolved(self.ty_of(then))
+        if self.is_string(cx, ty):
+            return self.wrap(then, Coercion.StrView, Ty.str())
+        if ty == Ty.error():
+            return then
+        let span = self.span_of(then)
+        let rt = self.types.ref_(ty, False)
+        return self.add(TExprKind.Borrow(place=then, mutable=False), rt, span)
+
+    ## An interpolation's chain of fields, `x?.a?.b` (R14): over a place
+    ## `x`, each link reads the field in place (`x?.(a?.b)`), and the last
+    ## one's value, when it is not `Copy`, is read too; an optional last
+    ## field gives its value read, `Option[ref T]`. Over a value, the links
+    ## are the plain chain's.
+    pure def reading_chain_of(
+        mut self, cx: Cx, base: ExprId, name: Name, whole: TextRange
+    ) -> TExprId:
+        var names = [name.copy()]
+        var ranges = [whole]
+        var root = base
+        while True:
+            if let ExprKind.OptField(inner, n) = cx.ast.expr(root).kind:
+                names.push(n.copy())
+                ranges.push(cx.ast.expr(root).range)
+                root = inner
+            else:
+                break
+        names.reverse()
+        ranges.reverse()
+        let b = self.infer_expr(cx, root, None)
+        let root_range = cx.ast.expr(root).range
+        if self.is_place(b) and self.as_option(cx, self.ty_of(b)).is_some():
+            return self.reading_link(cx, b, root_range, names, ranges, 0)
+        var cur = b
+        var at = root_range
+        for i in range(len(names)):
+            cur = self.opt_chain_on(cx, cur, at, names[i], None, None, ranges[i])
+            at = ranges[i]
+        return cur
+
+    ## The links of a reading chain from the `i`th, over the optional place
+    ## `p`.
+    pure def reading_link(
+        mut self,
+        cx: Cx,
+        p: TExprId,
+        p_range: TextRange,
+        names: list[Name],
+        ranges: list[TextRange],
+        i: int,
+    ) -> TExprId:
+        let inner = self.as_option(cx, self.ty_of(p)) else:
+            return self.opt_chain_on(cx, p, p_range, names[i], None, None, ranges[i])
+        self.push_scope()
+        let binder = self.new_local("?", inner, False, self.span_of(p))
+        let recv = self.add(TExprKind.Local(binder), inner, self.span_of(p))
+        let field = self.field_of(cx, recv, names[i], ranges[i])
+        var then = self.decay(cx, field)
+        let optional = self.as_option(cx, self.ty_of(then)).is_some()
+        if i + 1 < len(names):
+            if self.is_place(then) and optional:
+                then = self.reading_link(cx, then, ranges[i], names, ranges, i + 1)
+            else:
+                for k in range(i + 1, len(names)):
+                    then = self.opt_chain_on(
+                        cx, then, ranges[k - 1], names[k], None, None, ranges[k]
+                    )
+        elif self.is_place(then) and not self.is_copy(cx, self.ty_of(then)):
+            if optional:
+                then = self.read_option(cx, then, ranges[i])
+            else:
+                then = self.read_place(cx, then)
+        self.pop_scope()
+        return self.chain_of(cx, p, binder, then, ranges[i])
+
+    ## An optional place read as an optional reference to its value.
+    pure def read_option(mut self, cx: Cx, p: TExprId, range: TextRange) -> TExprId:
+        let inner = self.as_option(cx, self.ty_of(p)) else:
+            return p
+        self.push_scope()
+        let binder = self.new_local("?", inner, False, self.span_of(p))
+        var then = self.add(TExprKind.Local(binder), inner, self.span_of(p))
+        if not self.is_copy(cx, inner):
+            then = self.read_place(cx, then)
+        self.pop_scope()
+        return self.chain_of(cx, p, binder, then, range)
 
     # ---------------------------------------------------------------- fields and indexing
 
@@ -3046,3 +3235,37 @@ test "format specs as `Spec.parse` reads them":
     assert is_format_spec("?")
     assert not is_format_spec("8.2q")
     assert not is_format_spec("abc")
+
+## Where a function's parameter list ends, after its `)`: the name ends at
+## `from_`, and generic parameters may come between.
+pure def params_end(text: str, from_: int) -> int?:
+    var i = from_
+    let n = text.byte_len()
+    var depth = 0
+    var opened = False
+    while i < n:
+        let b = text.byte_at(i)
+        if b == 91 and not opened:
+            depth += 1
+        elif b == 93 and not opened:
+            depth -= 1
+        elif b == 40 and depth == 0:
+            opened = True
+            depth = 1
+            i += 1
+            while i < n and depth > 0:
+                let c = text.byte_at(i)
+                if c == 40:
+                    depth += 1
+                elif c == 41:
+                    depth -= 1
+                i += 1
+            return Some(i)
+        elif (b == 58 or b == 10) and depth == 0:
+            return None
+        i += 1
+    return None
+
+## Whether a byte is a space or a line break.
+pure def is_blank(b: u8) -> bool:
+    return b == 32 or b == 10 or b == 13 or b == 9

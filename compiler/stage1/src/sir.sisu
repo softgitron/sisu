@@ -219,6 +219,11 @@ pub struct Program:
     pub functions: list[Function]
     ## Test name and the function that runs it.
     pub tests: list[(String, String)]
+    ## Each test's `@tag`s, in the order written, by the test's place in
+    ## `tests` (a test past its end has none; decision 285).
+    pub test_tags: list[list[String]]
+    ## Benchmark name and the function that runs it (decision 285).
+    pub benches: list[(String, String)]
     ## The trait methods called through `call trait`, with their facts.
     pub trait_methods: list[IntrinsicDecl]
     ## The impls a `call trait` may dispatch to at run time.
