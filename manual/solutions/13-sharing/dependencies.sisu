@@ -1,0 +1,187 @@
+##! Exercise 13.3, Challenge II: a dependency graph. Kind: challenge. Level: 3.
+##!
+##! A package manager installs each package after the packages it needs.
+##! This challenge builds its graph in three parts, with a suite of tests
+##! for each. Solve them in order: each part's tests are blocked until it
+##! is done. Run the tests with `sisu test dependencies.sisu`.
+##!
+##! Part 1. A `Graph` keeps its packages in an `Arena`, and the needs of
+##! a package are the `Key`s of other packages. Write `key`, `add` and
+##! `install_order`, which gives the names of the packages in an order in
+##! which each comes after every package it needs: take the packages in
+##! the order they were added, and put the needs of each first, in the
+##! order they were given.
+##!
+##! Part 2. A graph can have a cycle, such as "a needs b, b needs a", and
+##! then no order exists. `install_order` then gives `Err(Cycle(names))`,
+##! with the packages of the first cycle it meets, starting from the one
+##! it meets twice, in the order of their needs. The tests of part 1
+##! still pass.
+##!
+##! Part 3. `to_shared` gives the same packages as `Shared` items, by
+##! name. An item owns the items it needs, and reaches the items that
+##! need it through `Weak` handles, so that no two items own each other.
+##! Write `to_shared` and `Item.dependents`.
+##!
+##! The hints are in chapter 13 of the tutorial, under "Challenge II: a
+##! dependency graph".
+
+error CycleError:
+    Cycle(names: list[String])
+
+## A package and the keys of the packages it needs.
+struct Package:
+    name: String
+    needs: list[Key[Package]]
+
+## A package that owns the items of the packages it needs, and reaches
+## the items that need it through `Weak` handles.
+struct Item:
+    name: String
+    needs: list[Shared[Item]]
+    needed_by: Cell[list[Weak[Item]]]
+
+    ## The names of the items that need this one and still exist, in the
+    ## order in which they were made.
+    def dependents(self) -> list[String]:
+        let handles = self.needed_by.replace([])
+        var names: list[String] = []
+        for handle in handles:
+            if let Some(item) = handle.upgrade():
+                names.push(item.name.copy())
+        self.needed_by.set(handles)
+        return names
+
+## Packages in an arena, and the key of each by its name.
+struct Graph:
+    packages: Arena[Package] = Arena[Package]()
+    keys: dict[String, Key[Package]] = {}
+
+    ## The key of the package `name`, added with no needs if it is new.
+    def key(mut self, name: str) -> Key[Package]:
+        if let Some(key) = self.keys.get(name.to_string()):
+            return key
+        let key = self.packages.insert(Package(name.to_string(), []))
+        self.keys[name.to_string()] = key
+        return key
+
+    ## Records that `name` needs each of `needs`, in order; adds every
+    ## package that is new.
+    def add(mut self, name: str, needs: list[str]):
+        let key = self.key(name)
+        for need in needs:
+            let other = self.key(need)
+            self.packages[key].needs.push(other)
+
+    ## The names of the packages in an order in which each comes after
+    ## every package it needs.
+    def install_order(self) -> list[String] ! CycleError:
+        var done: set[int] = set()
+        var path: list[Key[Package]] = []
+        var order: list[String] = []
+        for key in self.packages.keys():
+            self.visit(key, mut done, mut path, mut order)?
+        return Ok(order)
+
+    ## Puts `key` into `order` after its needs, unless `done` has it;
+    ## `path` holds the packages whose needs are being visited.
+    def visit(
+        self,
+        key: Key[Package],
+        mut done: set[int],
+        mut path: list[Key[Package]],
+        mut order: list[String],
+    ) -> ! CycleError:
+        if key.index in done:
+            return Ok(())
+        for i in range(len(path)):
+            if path[i] == key:
+                let names = [self.packages[k].name.copy() for k in path[i:]]
+                return Err(Cycle(names))
+        path.push(key)
+        for need in self.packages[key].needs:
+            self.visit(need, mut done, mut path, mut order)?
+        _ = path.pop()
+        _ = done.add(key.index)
+        order.push(self.packages[key].name.copy())
+        return Ok(())
+
+    ## The packages as `Shared` items, by name.
+    def to_shared(self) -> dict[String, Shared[Item]] ! CycleError:
+        var items: dict[String, Shared[Item]] = {}
+        let order = self.install_order()?
+        for name in order:
+            let key = self.keys.get(name) else:
+                continue
+            var needs: list[Shared[Item]] = []
+            for need in self.packages[key].needs:
+                if let Some(item) = items.get(self.packages[need].name):
+                    needs.push(item.copy())
+            let item = Shared(Item(name.copy(), needs, Cell([])))
+            for need in item.needs:
+                var back = need.needed_by.replace([])
+                back.push(Shared.downgrade(item))
+                need.needed_by.set(back)
+            items[name.copy()] = item
+        return Ok(items)
+
+## The graph of a small program: "app" needs "web" and "log", and "web"
+## needs "log" and "json".
+def example() -> Graph:
+    var graph = Graph()
+    graph.add("app", ["web", "log"])
+    graph.add("web", ["log", "json"])
+    graph.add("json", [])
+    return graph
+
+## The item "log" of the example, once every other item is gone.
+def log_alone() -> Shared[Item]:
+    let items = example().to_shared().expect("the example has no cycle")
+    return items["log"].copy()
+
+suite "part 1, the install order":
+    test "a chain":
+        var graph = Graph()
+        graph.add("c", ["b"])
+        graph.add("b", ["a"])
+        assert graph.install_order() == Ok(["a", "b", "c"])
+
+    test "needs that are shared":
+        assert example().install_order() == Ok(["log", "json", "web", "app"])
+
+suite "part 2, cycles":
+    test "a cycle of three":
+        var graph = Graph()
+        graph.add("a", ["b"])
+        graph.add("b", ["c"])
+        graph.add("c", ["a"])
+        assert graph.install_order() == Err(Cycle(["a", "b", "c"]))
+
+    test "a package that needs itself":
+        var graph = Graph()
+        graph.add("a", ["a"])
+        assert graph.install_order() == Err(Cycle(["a"]))
+
+    test "a cycle further on":
+        var graph = Graph()
+        graph.add("app", ["web"])
+        graph.add("web", ["json"])
+        graph.add("json", ["web"])
+        assert graph.install_order() == Err(Cycle(["web", "json"]))
+
+suite "part 3, shared and weak":
+    test "items own what they need":
+        let items = example().to_shared().expect("no cycle")
+        let needs = [need.name.copy() for need in items["app"].needs]
+        assert needs == ["web", "log"]
+        assert items["log"].dependents() == ["web", "app"]
+
+    test "a weak handle keeps nothing":
+        let log = log_alone()
+        assert log.dependents() == []
+        assert Shared.count(log) == 1
+
+    test "a cycle has no items":
+        var graph = Graph()
+        graph.add("a", ["a"])
+        assert graph.to_shared().is_err()

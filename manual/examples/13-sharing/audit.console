@@ -1,0 +1,1 @@
+$ sisu audit --ownership towns.sisu cycle.sisu weak.sisu

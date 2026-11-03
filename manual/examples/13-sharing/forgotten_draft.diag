@@ -1,0 +1,2 @@
+28:17-28:17 E0417 borrow.must-consume name="scrap" ty="Draft"
+  label 24:9-24:14 borrow.declared-here name="scrap"
