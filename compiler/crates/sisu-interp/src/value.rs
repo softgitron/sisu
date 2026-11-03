@@ -15,6 +15,11 @@ use std::rc::Rc;
 /// `Interp::heap` (the value a `Shared` owns), its `serial` the cell's.
 pub const HEAP: u32 = u32::MAX;
 
+/// The `frame` of a pointer into raw memory (`rawmem.rs`): its `local` is a
+/// block of the checked memory model, its `serial` the block's, and its
+/// path starts with [`Step::Raw`], the offset of the value in the block.
+pub const RAW: u32 = u32::MAX - 1;
+
 /// A place reached from a frame's local, or from a heap cell.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Pointer {
@@ -40,7 +45,7 @@ impl Pointer {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Step {
     /// A struct field or tuple element.
     Field(u32),
@@ -60,6 +65,29 @@ pub enum Step {
     MutexValue,
     /// The value in an `Arena` slot.
     Slot(usize),
+    /// The value at this byte offset of a block of raw memory: the first
+    /// step of a pointer whose frame is [`RAW`].
+    Raw(u64),
+}
+
+/// A raw pointer (`ptr[T]`, `ptr mut T`; 22, "Raw pointers") in the checked
+/// memory model (D-085): the block it points into, its offset there, and
+/// what it may do. Its type, and so the size and alignment of what it
+/// points to, is the static type of the operand that holds it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RawPtr {
+    /// The block of `rawmem.rs` it points into; `None` for a pointer with
+    /// no memory behind it (`ptr.dangling`, or `ptr.from_address` of an
+    /// address no foreign code gave out), whose `off` is its address.
+    pub block: Option<u32>,
+    /// Bytes from the start of the block.
+    pub off: i64,
+    /// Made from a shared borrow (`ptr.of`): nothing may be written through
+    /// it, whatever `cast_mut` says of its type.
+    pub shared: bool,
+    /// Under the ownership monitor, the loan of the borrow that made it
+    /// (0: none, as for memory of `Global`).
+    pub tag: u32,
 }
 
 /// A `Mutex`: the value, and whether a guard holds it (and which task's)
@@ -356,6 +384,8 @@ pub enum Value {
         clock: u32,
         at: i128,
     },
+    /// A raw pointer, `ptr[T]` or `ptr mut T`.
+    RawPtr(Box<RawPtr>),
 }
 
 thread_local! {

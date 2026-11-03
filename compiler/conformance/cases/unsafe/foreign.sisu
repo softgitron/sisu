@@ -1,0 +1,61 @@
+# Foreign calls (22, "Foreign calls"; 12, "Interop"): a C string built in
+# raw memory and measured by C's `strlen`, copied by `memcpy` into memory
+# that `malloc` gave out and `free` takes back, an environment variable
+# that is not set, and bytes written to standard output by `write`. The
+# interpreter emulates these functions of the C library on its checked
+# memory model (Q-55); native code calls C's.
+
+from std.ffi import c_char, c_int, c_size, c_ssize
+from std.mem import Global, Layout, ptr
+
+# safety: the signatures as <string.h>, <stdlib.h> and <unistd.h> declare
+#   them for 64-bit Linux; each returns promptly.
+extern "C":
+    def strlen(s: ptr[c_char]) -> c_size
+    def memcpy(dst: ptr mut u8, src: ptr[u8], n: c_size) -> ptr mut u8
+    def malloc(n: c_size) -> ptr mut u8?
+    def free(p: ptr mut u8?)
+    def getenv(name: ptr[c_char]) -> ptr[c_char]?
+    def write(fd: c_int, buf: ptr[u8], n: c_size) -> c_ssize
+
+## Writes the bytes of `text` and a NUL at `block`.
+##
+## Safety:
+## - `room`: `block` points to at least `text.byte_len() + 1` bytes this
+##   program may write, which hold no value that must be dropped first
+unsafe def put_c_string(block: ptr mut u8, text: str):
+    var i = 0
+    for b in text.bytes():
+        # safety: writable, in_bounds: this function's `room`; aligned: a
+        #   byte is aligned anywhere.
+        unsafe block.offset(i).write(b)
+        i += 1
+    # safety: writable, in_bounds, aligned: the last byte of the room.
+    unsafe block.offset(i).write(0u8)
+
+def main():
+    let layout = Layout(size=32, align=1)
+    let block = Global().acquire(layout) else:
+        panic("out of memory")
+    # safety: room: 32 bytes hold either text and its NUL; valid: strlen,
+    #   memcpy and write read bytes the block or the copy holds; from_here,
+    #   once: the copy came from malloc and the block from Global with this
+    #   layout, each given back once.
+    unsafe:
+        put_c_string(block, "kiitos")
+        print(strlen(block.cast[c_char]().as_const()))
+        let copy = malloc(7) else:
+            panic("out of memory")
+        _ = memcpy(copy, block.as_const(), 7)
+        print(strlen(copy.cast[c_char]().as_const()))
+        let n = write(1, copy.as_const(), 6)
+        print("")
+        print(n)
+        free(Some(copy))
+        put_c_string(block, "SISU_NO_SUCH_VARIABLE")
+        match getenv(block.cast[c_char]().as_const()):
+            case Some(_):
+                print("set")
+            case None:
+                print("not set")
+        Global().release(block, layout)

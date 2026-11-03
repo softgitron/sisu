@@ -1,0 +1,54 @@
+# Plain data and its reinterpretation (22, "Plain data and
+# reinterpretation"): a `@derive(Plain)` struct's bits as an integer, its
+# bytes in the target's order and back, a view of bytes as a plain value in
+# place, and `transmute` of bits that are a valid value of the other type.
+
+from std.mem import Plain, as_bytes, bit_cast, read_plain, transmute, view_plain
+
+## A pixel as a graphics card reads it.
+@repr(c)
+@derive(Plain, Copy, Debug)
+struct Pixel:
+    r: u8
+    g: u8
+    b: u8
+    a: u8
+
+## A sample of a sensor, read from a device's bytes.
+@repr(c)
+@derive(Plain, Copy, Debug)
+struct Sample:
+    at: u64
+    value: f64
+    channel: u32
+    pad: u32
+
+def main():
+    let px = Pixel(r=1u8, g=2u8, b=3u8, a=4u8)
+    let word = bit_cast[u32, Pixel](px)
+    print(word)
+    print("{bit_cast[Pixel, u32](0xff00ff00u32):?}")
+    let bytes = as_bytes(px)
+    print(bytes)
+    print("{read_plain[Pixel](bytes, 0):?}")
+
+    let s = Sample(at=7u64, value=1.5, channel=2u32, pad=0u32)
+    let raw = as_bytes(s)
+    print(len(raw))
+    let again = read_plain[Sample](raw, 0)
+    print("{again:?}")
+    print(read_plain[u32](raw, 16))
+    match view_plain[Sample](raw):
+        case Some(v):
+            print(v.value)
+        case None:
+            print("too short")
+    print("{view_plain[Sample](b"\x00\x01"):?}")
+
+    # safety: valid_bits: every pattern of 64 bits is an `f64`.
+    let pi = unsafe transmute[f64, int](4614253070214989087)
+    print(pi)
+    # safety: valid_bits: 1 is the bits of `True`.
+    print(unsafe transmute[bool, int](1))
+    # safety: valid_bits: 0x48 is the scalar value of `H`.
+    print(unsafe transmute[char, int](72))

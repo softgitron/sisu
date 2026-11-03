@@ -1,0 +1,110 @@
+# A vector stored in raw memory (22, "The standard library's layer"; D-085):
+# its slots in a block of `Global`, grown by copying the slots into a larger
+# block and releasing the old one, its values moved out, referred to and
+# dropped in place, and a bump `Region` handing out blocks through the
+# `Allocator` trait. A slot is one word, the width of an `Item`.
+
+from std.mem import Allocator, Global, Layout, Region, ptr
+
+## A value whose drop says so.
+struct Item:
+    id: int
+
+impl Drop for Item:
+    def drop(mut self):
+        print("drop {self.id}")
+
+## The layout of `n` slots of one word.
+def slots(n: int) -> Layout:
+    return Layout(size=8 * n, align=8)
+
+## A vector of `Item`s in raw memory. Invariant (kept by every method
+## below): slots 0 to count-1 hold values, the others none.
+struct Items:
+    data: ptr mut Item
+    cap: int
+    count: int
+
+impl Items:
+    def with_capacity(cap: int) -> Items:
+        let block = Global().acquire(slots(cap)) else:
+            panic("out of memory")
+        return Items(data=block.cast[Item](), cap=cap, count=0)
+
+    def push(mut self, own item: Item):
+        if self.count == self.cap:
+            self.grow(2 * self.cap)
+        # safety: writable, aligned, in_bounds: slot count is inside the
+        #   block and holds no value, by the invariant.
+        unsafe self.data.offset(self.count).write(item)
+        self.count += 1
+
+    def pop(mut self) -> Item?:
+        if self.count == 0:
+            return None
+        self.count -= 1
+        # safety: valid, aligned, in_bounds: slot count held a value, which
+        #   moves out, so the invariant holds again.
+        return Some(unsafe self.data.offset(self.count).read())
+
+    def get(self, i: int) -> ref Item:
+        if i < 0 or i >= self.count:
+            panic("index {i} of {self.count} items")
+        # safety: valid, aligned, in_bounds, valid_for_origin: slot i holds
+        #   a value while the vector, which the reference borrows, lives.
+        return unsafe self.data.offset(i).as_ref()
+
+    def grow(mut self, cap: int):
+        let block = Global().acquire(slots(cap)) else:
+            panic("out of memory")
+        let data = block.cast[Item]()
+        # safety: readable, writable, aligned: both blocks have at least
+        #   count slots; moved: the old block is released next and never
+        #   read again. from_here, once: it came from Global with its
+        #   layout.
+        unsafe:
+            data.copy_from(self.data.as_const(), self.count)
+            Global().release(self.data.cast[u8](), slots(self.cap))
+        print("grew from {self.cap} to {cap}")
+        self.data = data
+        self.cap = cap
+
+impl Drop for Items:
+    def drop(mut self):
+        var i = 0
+        # safety: valid, aligned, in_bounds: slots 0 to count-1 hold
+        #   values, each dropped once; from_here, once: the block came from
+        #   Global with its layout, released once.
+        unsafe:
+            while i < self.count:
+                self.data.offset(i).drop_in_place()
+                i += 1
+            Global().release(self.data.cast[u8](), slots(self.cap))
+
+def main():
+    var items = Items.with_capacity(2)
+    for id in range(1, 6):
+        items.push(Item(id=id))
+    print("item 3 is {items.get(3).id}")
+    match items.pop():
+        case Some(last):
+            print("popped {last.id}")
+        case None:
+            print("empty")
+    print("{items.count} left")
+
+    let region = Region.bump(64)
+    let a = region.acquire(Layout(size=8, align=8)) else:
+        panic("region full")
+    let b = region.acquire(Layout(size=3, align=1)) else:
+        panic("region full")
+    let c = region.acquire(Layout(size=8, align=8)) else:
+        panic("region full")
+    # safety: writable, valid, aligned: each block is the region's, aligned
+    #   for an int, and holds what was written.
+    unsafe:
+        a.cast[int]().write(40)
+        c.cast[int]().write(2)
+        print(a.cast[int]().read() + c.cast[int]().read())
+    print(region.in_use())
+    print(region.acquire(Layout(size=100, align=8)).is_none())

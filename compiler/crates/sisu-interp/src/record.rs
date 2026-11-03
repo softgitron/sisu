@@ -119,6 +119,9 @@ pub struct Header {
     pub layout: Option<String>,
     /// The run was under `--watch`: its saves are `edit` records.
     pub watch: bool,
+    /// `source` is the program's serialised SIR, which a replay runs
+    /// without a front end: the run's front end was stage 1 (decision 301).
+    pub sir: bool,
 }
 
 impl Header {
@@ -141,6 +144,9 @@ impl Header {
         }
         if self.watch {
             out.push_str("watch\n");
+        }
+        if self.sir {
+            out.push_str("sir\n");
         }
         out
     }
@@ -525,6 +531,7 @@ impl Log {
             files: Vec::new(),
             layout: None,
             watch: false,
+            sir: false,
         };
         let mut header = header;
         let mut records = Vec::new();
@@ -544,6 +551,10 @@ impl Log {
                 }
                 "watch" if records.is_empty() => {
                     header.watch = true;
+                    continue;
+                }
+                "sir" if records.is_empty() => {
+                    header.sir = true;
                     continue;
                 }
                 _ => {}
@@ -1094,6 +1105,7 @@ mod tests {
             files: Vec::new(),
             layout: None,
             watch: false,
+            sir: false,
             toolchain: "0.0.1".into(),
             file: "a.sisu".into(),
             hash: 0xabc,

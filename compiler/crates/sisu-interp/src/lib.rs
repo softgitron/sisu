@@ -38,6 +38,7 @@ mod monitor;
 mod ops;
 pub mod parallel;
 mod place;
+mod rawmem;
 pub mod record;
 mod sched;
 mod sized;
@@ -307,6 +308,8 @@ pub struct Interp<'p, 'h> {
     pub(crate) monitor: Option<monitor::Monitor>,
     /// The values `Shared` owns, by cell (a cell is never reused).
     pub(crate) heap: Vec<value::HeapCell>,
+    /// Raw memory: the checked memory model of unsafe code (D-085).
+    pub(crate) raw: rawmem::RawMem,
     /// Tasks, scopes, channels and clocks.
     pub(crate) sched: sched::Sched<'p>,
     /// The seed of a property's random cases, and the case a replay token
@@ -394,6 +397,7 @@ impl<'p, 'h> Interp<'p, 'h> {
                 ..Default::default()
             }),
             heap: Vec::new(),
+            raw: rawmem::RawMem::default(),
             sched: sched::Sched::new(options.seed, options.stats, host_clock, options.strategy.clone()),
             case_seed: options.case_seed,
             snapshots: options.snapshots.clone(),

@@ -728,16 +728,28 @@ impl Runner<'_> {
         monitored_args.extend(args.iter().cloned());
         let monitored = invoke_with_input(self.sisu, &sandbox.dir, &monitored_args, input);
         self.report.monitored += 1;
-        self.compare(
-            case,
-            "the monitor agrees with the checker (a difference is a soundness hole)",
-            None,
-            &format!("{}\n--- stderr\n{}\n--- status {}\n", run.stdout, run.stderr, run.status),
-            &format!(
-                "{}\n--- stderr\n{}\n--- status {}\n",
-                monitored.stdout, monitored.stderr, monitored.status
+        match case.expected("monitor") {
+            // Unsafe code the static checker does not check, whose aliasing
+            // the monitor's checked memory model stops (D-085): the run
+            // under the monitor has an expectation of its own.
+            Some(expected) => self.compare(
+                case,
+                "sisu run --monitor",
+                Some("monitor"),
+                &expected,
+                &format!("{}--- stderr\n{}--- status {}\n", monitored.stdout, monitored.stderr, monitored.status),
             ),
-        );
+            None => self.compare(
+                case,
+                "the monitor agrees with the checker (a difference is a soundness hole)",
+                None,
+                &format!("{}\n--- stderr\n{}\n--- status {}\n", run.stdout, run.stderr, run.status),
+                &format!(
+                    "{}\n--- stderr\n{}\n--- status {}\n",
+                    monitored.stdout, monitored.stderr, monitored.status
+                ),
+            ),
+        }
         // Record and replay (N-04): the run again with every capability
         // result logged, then the log replayed with nothing of the world;
         // both print what the run printed and exit the same way. (The run

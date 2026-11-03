@@ -1,7 +1,7 @@
 //! Places: resolving a SIR place to a [`Pointer`], and reading and writing
 //! through pointers.
 
-use crate::value::{HEAP, Pointer, Step, Value};
+use crate::value::{HEAP, Pointer, RAW, Step, Value};
 use crate::{Interp, Unwind, ice, msg, panic};
 use sisu_sir::{Place, Proj};
 
@@ -192,7 +192,14 @@ impl Interp<'_, '_> {
 
     /// The value at a pointer.
     pub(crate) fn read(&self, p: &Pointer) -> Result<&Value, Unwind> {
-        let mut v = if p.frame == HEAP {
+        let mut path: &[Step] = &p.path;
+        let mut v = if p.frame == RAW {
+            // A value in raw memory (`rawmem.rs`): the first step is its
+            // offset in the block.
+            let (root, rest) = self.raw_root(p)?;
+            path = rest;
+            root
+        } else if p.frame == HEAP {
             match self.heap.get(p.local as usize).filter(|c| c.serial == p.serial && c.strong > 0) {
                 Some(c) => &c.value,
                 None if self.monitoring() => return Err(self.mon_dangling(p)),
@@ -207,13 +214,29 @@ impl Interp<'_, '_> {
             };
             frame.locals.get(p.local as usize).ok_or_else(|| ice("pointer to a missing local"))?
         };
-        for s in &p.path {
+        for s in path {
             if v.is_moved() {
                 return Err(self.moved_at(p));
             }
             v = step(v, *s)?;
         }
         Ok(v)
+    }
+
+    /// The value a pointer into raw memory starts at, and the rest of its
+    /// path.
+    fn raw_root<'a>(&self, p: &'a Pointer) -> Result<(&Value, &'a [Step]), Unwind> {
+        let Some((Step::Raw(off), rest)) = p.path.split_first() else {
+            return Err(ice("a pointer into raw memory without its offset"));
+        };
+        let block = self.raw.blocks.get(p.local as usize).filter(|b| b.serial == p.serial && b.live);
+        let Some(block) = block else {
+            return Err(if self.monitoring() { self.mon_dangling(p) } else { dangling() });
+        };
+        match block.items.get(off) {
+            Some(crate::rawmem::Item::Value(_, v)) => Ok((v, rest)),
+            _ => Err(self.moved_at(p)),
+        }
     }
 
     /// A read of a place that holds no value (moved out, or never
@@ -223,6 +246,33 @@ impl Interp<'_, '_> {
     }
 
     pub(crate) fn write(&mut self, p: &Pointer) -> Result<&mut Value, Unwind> {
+        if p.frame == RAW {
+            if let Some((_, init)) = p.path.split_last()
+                && !init.is_empty()
+                && self.read(&Pointer { path: init.to_vec(), ..p.clone() })?.is_moved()
+            {
+                return Err(self.moved_at(p));
+            }
+            let Some((Step::Raw(off), rest)) = p.path.split_first() else {
+                return Err(ice("a pointer into raw memory without its offset"));
+            };
+            let live = self.raw.blocks.get(p.local as usize).is_some_and(|b| b.serial == p.serial && b.live);
+            if !live {
+                return Err(if self.monitoring() { self.mon_dangling(p) } else { dangling() });
+            }
+            let moved = !matches!(
+                self.raw.blocks.get(p.local as usize).and_then(|b| b.items.get(off)),
+                Some(crate::rawmem::Item::Value(..))
+            );
+            if moved {
+                return Err(self.moved_at(p));
+            }
+            let block = self.raw.blocks.get_mut(p.local as usize).ok_or_else(dangling)?;
+            return match block.items.get_mut(off) {
+                Some(crate::rawmem::Item::Value(_, v)) => walk_mut(v, rest),
+                _ => Err(ice("a value in raw memory that went")),
+            };
+        }
         if p.frame == HEAP {
             if !self.heap.get(p.local as usize).is_some_and(|c| c.serial == p.serial && c.strong > 0) {
                 return Err(if self.monitoring() { self.mon_dangling(p) } else { dangling() });

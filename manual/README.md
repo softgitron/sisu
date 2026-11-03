@@ -401,7 +401,7 @@ prototype in the experiment ([STYLE.md](STYLE.md)).
 
 | | Page | Contents |
 |---|---|---|
-| R1 | Lexical structure | Source text, identifiers and the naming rules, the 47 keywords and the contextual ones, comments and doc comments, every literal, line continuation, indentation, the formatter's layout. |
+| R1 | Lexical structure ([written](reference/lexical-structure.md)) | Source text, identifiers and the naming rules, the 47 keywords and the contextual ones, comments and doc comments, every literal, line continuation, indentation, the formatter's layout. |
 | R2 | Types | Every builtin type, numeric conversions, text types, collections and literal typing (`FromLiteral`), tuples, unit and `Never`, `T?` and `T ! E`, error-set subtyping, function types and `pure`, references, views, the library pointer types, `dyn`, refinements, aliases, the auto traits, what the type system leaves out. |
 | R3 | Declarations | `let`, `var`, `const`, `def` and its parameters, `pure def`, `comptime def`, `struct`, `view struct`, `enum`, `error`, `trait`, `impl`, `type`, `test`, `suite`, `bench`, `import`, `extern`, visibility. |
 | R4 | Expressions and operators | The precedence table and each operator, calls and keyword arguments, indexing, slicing and `^`, comprehensions, closures and `it`, `if` and `match` expressions, `else` fallbacks, `?`, `?.`, `??`, interpolation and format specs, `comptime e`, `unsafe e`. |
@@ -826,7 +826,7 @@ solutions and passing checks.
 |---|---|---|
 | 1 | Chapter 1, this plan, [STYLE.md](STYLE.md), `tools/check.py` | done |
 | 2 | Chapters 2, 3 and 4 | done |
-| 3 | R16 the `sisu` command (2, done), R17 diagnostics, first codes (2, done), R1 lexical structure (2) | 6 |
+| 3 | R16 the `sisu` command (2, done), R17 diagnostics, first codes (2, done), R1 lexical structure (2, done) | 6 |
 | 4 | Chapters 5 (2.5), 6 (2), 7 (2.5), 8 (3) | done |
 | 5 | Chapter 9 with challenge I (3, done); G2 Coming from Python (1); R19 false friends (1) | 2 |
 | 6 | Chapters 10 (3, done), 11 (4, done), 12 (3, done), 13 with challenge II (3, done); R7 ownership (3); G13 borrow errors (1); X3 (1) | 5 |
@@ -1059,6 +1059,20 @@ Writing the reference turned up more, by page:
   so a reader has nothing to give `sisu explain`; the R codes are
   visible only in the catalog. The tables of R17's "Every code" are
   written from the catalog and nothing checks them against it.
+- R1, lexical structure. Names are not normalised to NFC, so a letter
+  written as a base and a combining mark gets E0005 for the mark, and
+  the confusable and mixed-script lints of D-048 are missing: a name
+  that mixes Latin and Cyrillic letters compiles without a word. E0005
+  shows an invisible character as it is, so the message for a no-break
+  space reads "`` ` ` `` cannot appear", and a byte-order mark at the
+  start of a file is E0005 too. A keyword as a field's name gets E0100
+  ("expected a name, found `:`"), and a function declared `def type()`
+  cannot be called (E0103); only a parameter gets E0124. `def Main()`
+  and `const pi` compile without a word, like `struct point`. A one-line
+  `if c: print(x)` gets E0116 (an `if` expression without `else`) where
+  E0102 says that a block starts on the next line, as it does for
+  `for`. `1.` and `.5`, Python's floats, get E0100 and E0103 with no word
+  about the digits a point needs.
 
 ## Open questions
 

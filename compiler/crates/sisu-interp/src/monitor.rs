@@ -305,7 +305,7 @@ impl Interp<'_, '_> {
         if self.monitor.is_none() {
             return;
         }
-        let task = if frame == crate::value::HEAP { 0 } else { self.sched.cur };
+        let task = if frame == crate::value::HEAP || frame == crate::value::RAW { 0 } else { self.sched.cur };
         let ptr = Pointer { task, frame, serial, local, path: Vec::new(), tag: 0 };
         self.end_conflicting(&ptr, op, &[]);
     }
@@ -318,6 +318,18 @@ impl Interp<'_, '_> {
         self.mon_end_local(serial, id, crate::value::HEAP, Op::Drop);
         if let Some(m) = &mut self.monitor {
             m.active.remove(&(serial, id));
+        }
+    }
+
+    /// A block of raw memory that was released ends every loan of it
+    /// (`rawmem.rs`).
+    pub(crate) fn mon_raw_released(&mut self, serial: u64, block: u32) {
+        if self.monitor.is_none() {
+            return;
+        }
+        self.mon_end_local(serial, block, crate::value::RAW, Op::Drop);
+        if let Some(m) = &mut self.monitor {
+            m.active.remove(&(serial, block));
         }
     }
 
@@ -592,6 +604,9 @@ impl Interp<'_, '_> {
         let f = frame.and_then(|fr| fr.func).or(owner);
         let decl = f.and_then(|i| self.func(i)).and_then(|f| f.locals.get(p.local as usize));
         let mut s = decl.and_then(|l| l.name.clone()).unwrap_or_else(|| format!("_{}", p.local));
+        if p.frame == crate::value::RAW {
+            s = "raw memory".to_string();
+        }
         let mut ty = decl.map(|l| l.ty.clone());
         let mut variant: Option<u32> = None;
         let arg = |t: &Option<sir::Type>, k: usize| match t {
@@ -649,6 +664,10 @@ impl Interp<'_, '_> {
                 Step::Slot(i) => {
                     s.push_str(&format!("[slot {i}]"));
                     ty = arg(&ty, 0);
+                }
+                Step::Raw(o) => {
+                    s.push_str(&format!("[byte {o}]"));
+                    ty = None;
                 }
             }
         }

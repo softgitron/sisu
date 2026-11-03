@@ -191,8 +191,9 @@ error[E0003]: this string literal is not closed before the end of the line
 error[D0006]: the program was not run: errors found (1)
 ```
 
-The fix closes the literal at the end of the line, which is right when
-the text ends there; here the quote belongs before the `)`.
+The fix closes the literal on its line, before the brackets that the
+line opened ahead of the literal: here before the `)`, where the quote
+belongs.
 
 <!-- file: examples/reference-diagnostics/e0003_open_string_fixed.sisu -->
 ```sisu
@@ -2220,7 +2221,7 @@ Shown in [chapter 7](../tutorial/07-structs-and-enums.md).
 
 ## Run time
 
-Codes R0001 to R0130. Messages of a running program: panics, errors that
+Codes R0001 to R0153. Messages of a running program: panics, errors that
 `main` returns, and the failures that `sisu test` reports. They are
 printed without their code, as `panic: ...` or `error: ...`, followed by
 the trace.
@@ -3459,6 +3460,29 @@ it. `sisu explain CODE` prints the same line.
 | R0128 | `panic.during-abandon` | panic while a generator dropped before its end cleans up: {message} a panic there aborts the program |
 | R0129 | `panic.abandoned-wait` | a generator dropped before its end cannot wait while it cleans up |
 | R0130 | `panic.driven-wait` | a generator inside another iterator, or given to `sum`, `zip` and the other functions of an `Iterable[T]`, cannot wait; iterate it with `for` |
+| R0131 | `panic.raw-bounds` | `{op}` of {bytes} bytes at offset {offset} of a block of {size} bytes reaches outside it (`{obligation}`) |
+| R0132 | `panic.raw-offset` | `ptr.offset` by {count} from offset {offset} of a block of {size} bytes leaves it (`in_bounds`) |
+| R0133 | `panic.raw-misaligned` | `{op}` of `{ty}` at offset {offset} of its block, which is not aligned to {align} (`aligned`) |
+| R0134 | `panic.raw-released` | `{op}` of memory that was released (`{obligation}`) |
+| R0135 | `panic.raw-gone` | `{op}` through a pointer to a value that no longer exists (`{obligation}`) |
+| R0136 | `panic.raw-uninitialised` | `{op}` of `{ty}` at offset {offset} of a block of {size} bytes, which holds no value there (`{obligation}`) |
+| R0137 | `panic.raw-mistyped` | `{op}` of `{ty}` at offset {offset}, where the memory holds a value of type `{held}` (`{obligation}`) |
+| R0138 | `panic.raw-invalid-bits` | `{op}` gives the bits {bits}, which are not a valid value of type `{ty}` (`{obligation}`) |
+| R0139 | `panic.raw-shared-write` | `{op}` through a pointer made from a shared borrow (`{obligation}`) |
+| R0140 | `panic.raw-overwrite` | `{op}` over a value of type `{ty}` at offset {offset} that was never dropped (`writable`) |
+| R0141 | `panic.raw-no-memory` | `{op}` through a pointer with no memory behind it (`{obligation}`) |
+| R0142 | `panic.raw-release-other` | `{op}` of memory that `{allocator}` did not give out, or not at its start (`from_here`) |
+| R0143 | `panic.raw-release-twice` | `{op}` of memory that was released already (`once`) |
+| R0144 | `panic.raw-release-layout` | `Global.release` with a layout of {size} bytes aligned to {align} of a block acquired with {block_size} bytes aligned to {block_align} (`from_here`) |
+| R0145 | `panic.raw-release-live` | `{op}` of memory that still holds a value of type `{ty}` at offset {offset}, which was never dropped: every value is dropped once (22, the soundness contract, clause 3) |
+| R0146 | `panic.raw-sizes` | `{op}` from `{from}` of {from_size} bytes to `{to}` of {to_size} bytes: the sizes differ |
+| R0147 | `panic.raw-plain-short` | `read_plain` of `{ty}` of {size} bytes at {at} of {len} bytes reaches past their end |
+| R0148 | `panic.raw-read-only` | `{op}` of memory that foreign code gave out to be read only (`writable`) |
+| R0149 | `panic.foreign-unknown` | the interpreter makes no foreign call: `{name}` is not one of the C functions it emulates ({known}); `sisu run --native` calls it |
+| R0150 | `panic.foreign-null` | `{name}` returned a null pointer, which its declared result `{ty}` cannot hold |
+| R0151 | `panic.foreign-overlap` | `memcpy` of {bytes} bytes from a range that overlaps the one it writes, which C's `memcpy` does not allow |
+| R0152 | `panic.foreign-fd` | `write` to the file descriptor {fd}, which the interpreter does not emulate; it emulates 1 and 2, the standard streams |
+| R0153 | `panic.machine-intrinsic` | `{name}` is a machine intrinsic of native code; the interpreter runs its tasks on a scheduler of its own |
 
 ### The driver, every code
 

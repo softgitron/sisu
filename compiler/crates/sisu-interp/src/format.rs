@@ -128,6 +128,9 @@ impl Interp<'_, '_> {
                 out.push('>');
             }
             Value::Closure(..) => out.push_str("<closure>"),
+            // As std's `Debug` for raw pointers writes one: without its
+            // address (22, clause 6).
+            Value::RawPtr(_) => out.push_str("ptr"),
             Value::Dyn(d) => self.debug_into(&d.value, out),
             Value::Iter(it) => {
                 out.push_str(if matches!(**it, IterState::Done) { "<iter (done)>" } else { "<iter>" })

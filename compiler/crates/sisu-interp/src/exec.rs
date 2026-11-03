@@ -776,6 +776,17 @@ impl<'p> Interp<'p, '_> {
                         let at = self.pointer_of(v)?;
                         self.mon_drop_unconsumed(&at, self.read(&at)?)?;
                     }
+                    // Raw memory, foreign calls and the machine intrinsics
+                    // (`rawmem.rs`) read the static types of their operands
+                    // and of the result, as native code does.
+                    if crate::rawmem::is_raw(name) {
+                        let arg_tys: Vec<Option<sir::Type>> = args.iter().map(|o| self.operand_type(o)).collect();
+                        let dest_ty = self.dest_type(dest).or_else(|| self.place_type(dest));
+                        let r = self
+                            .raw_intrinsic(name, tys, vals, &arg_tys, dest_ty.as_ref())
+                            .unwrap_or_else(|| Err(ice(format!("unknown intrinsic `{name}`"))));
+                        return self.finish_call(name, tys, dest, None, r);
+                    }
                     let ret =
                         if crate::intrinsics::needs_return_type(name) { self.dest_type(dest) } else { None };
                     // A scope's body runs as a frame above the scope's
@@ -916,6 +927,23 @@ impl<'p> Interp<'p, '_> {
             })
             .collect();
         Some(Value::variant(decl, k as u32, fields))
+    }
+
+    /// The type of an operand of the running function, its type arguments
+    /// filled in.
+    fn operand_type(&self, o: &Operand) -> Option<sir::Type> {
+        match o {
+            Operand::Copy(p) | Operand::Move(p) => self.place_type(p),
+            Operand::Const(c) => Some(match c {
+                sir::Const::Int(_) => sir::Type::Int,
+                sir::Const::Float(_) => sir::Type::Float,
+                sir::Const::Bool(_) => sir::Type::Bool,
+                sir::Const::Char(_) => sir::Type::Char,
+                sir::Const::Str(_) => sir::Type::Str,
+                sir::Const::Unit => sir::Type::Unit,
+                sir::Const::Fn(_) => return None,
+            }),
+        }
     }
 
     fn dest_type(&self, dest: &Place) -> Option<sir::Type> {

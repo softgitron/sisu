@@ -634,6 +634,39 @@ R0129 runtime panic.abandoned-wait        a generator dropped before its end can
 # next `yield` there and then; a wait there aborts the program (decision
 # 247).
 R0130 runtime panic.driven-wait           a generator inside another iterator, or given to `sum`, `zip` and the other functions of an `Iterable[T]`, cannot wait; iterate it with `for`
+# The checked memory model (D-085; 22, "Interaction with the rest of the
+# language"; docs/architecture.md, "The checked memory model"): the
+# interpreter's checks of raw memory, each naming the obligation of the
+# `Safety:` list in std.mem that the operation broke. `{op}` is the
+# operation (`ptr.read`, `RawBuf`'s `ptr.write`, a foreign function), and
+# offsets and sizes are in bytes of the block the pointer points into.
+R0131 runtime panic.raw-bounds            `{op}` of {bytes} bytes at offset {offset} of a block of {size} bytes reaches outside it (`{obligation}`)
+R0132 runtime panic.raw-offset            `ptr.offset` by {count} from offset {offset} of a block of {size} bytes leaves it (`in_bounds`)
+R0133 runtime panic.raw-misaligned        `{op}` of `{ty}` at offset {offset} of its block, which is not aligned to {align} (`aligned`)
+R0134 runtime panic.raw-released          `{op}` of memory that was released (`{obligation}`)
+R0135 runtime panic.raw-gone              `{op}` through a pointer to a value that no longer exists (`{obligation}`)
+R0136 runtime panic.raw-uninitialised     `{op}` of `{ty}` at offset {offset} of a block of {size} bytes, which holds no value there (`{obligation}`)
+R0137 runtime panic.raw-mistyped          `{op}` of `{ty}` at offset {offset}, where the memory holds a value of type `{held}` (`{obligation}`)
+R0138 runtime panic.raw-invalid-bits      `{op}` gives the bits {bits}, which are not a valid value of type `{ty}` (`{obligation}`)
+R0139 runtime panic.raw-shared-write      `{op}` through a pointer made from a shared borrow (`{obligation}`)
+R0140 runtime panic.raw-overwrite         `{op}` over a value of type `{ty}` at offset {offset} that was never dropped (`writable`)
+R0141 runtime panic.raw-no-memory         `{op}` through a pointer with no memory behind it (`{obligation}`)
+R0142 runtime panic.raw-release-other     `{op}` of memory that `{allocator}` did not give out, or not at its start (`from_here`)
+R0143 runtime panic.raw-release-twice     `{op}` of memory that was released already (`once`)
+R0144 runtime panic.raw-release-layout    `Global.release` with a layout of {size} bytes aligned to {align} of a block acquired with {block_size} bytes aligned to {block_align} (`from_here`)
+R0145 runtime panic.raw-release-live      `{op}` of memory that still holds a value of type `{ty}` at offset {offset}, which was never dropped: every value is dropped once (22, the soundness contract, clause 3)
+R0146 runtime panic.raw-sizes             `{op}` from `{from}` of {from_size} bytes to `{to}` of {to_size} bytes: the sizes differ
+R0147 runtime panic.raw-plain-short       `read_plain` of `{ty}` of {size} bytes at {at} of {len} bytes reaches past their end
+R0148 runtime panic.raw-read-only         `{op}` of memory that foreign code gave out to be read only (`writable`)
+# A foreign call the interpreter does not make (Q-55): it emulates a few
+# functions of the C library, and runs no other foreign code.
+R0149 runtime panic.foreign-unknown       the interpreter makes no foreign call: `{name}` is not one of the C functions it emulates ({known}); `sisu run --native` calls it
+R0150 runtime panic.foreign-null          `{name}` returned a null pointer, which its declared result `{ty}` cannot hold
+R0151 runtime panic.foreign-overlap       `memcpy` of {bytes} bytes from a range that overlaps the one it writes, which C's `memcpy` does not allow
+R0152 runtime panic.foreign-fd            `write` to the file descriptor {fd}, which the interpreter does not emulate; it emulates 1 and 2, the standard streams
+# A machine intrinsic of `std.rt` (22, "Machine intrinsics"; D-086): native
+# code only, since the interpreter runs its tasks on its own scheduler.
+R0153 runtime panic.machine-intrinsic     `{name}` is a machine intrinsic of native code; the interpreter runs its tasks on a scheduler of its own
 
 # ---------------------------------------------------------------- driver
 

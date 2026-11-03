@@ -103,6 +103,13 @@ impl<'p> Interp<'p, '_> {
         args: Vec<Value>,
         ret: Option<&sir::Type>,
     ) -> Result<Value, Unwind> {
+        // Raw memory, reached through a trait (`Allocator.acquire` of
+        // `Global`): without the operands' types, which those do not need.
+        if crate::rawmem::is_raw(name)
+            && let Some(r) = self.raw_intrinsic(name, tys, args.clone(), &[], ret)
+        {
+            return r;
+        }
         let mut args = args;
         let known = self.routes.get(name).copied();
         let learn = |me: &mut Self, r: Route| {

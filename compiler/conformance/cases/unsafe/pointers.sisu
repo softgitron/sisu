@@ -1,0 +1,73 @@
+# Raw pointers to the program's own places (22, "Raw pointers"; D-085, the
+# checked memory model): made from a borrow, read and written through,
+# turned into a reference, offset over a slice's values, cast to a type of
+# the same bytes, and moved with their provenance.
+
+from std.mem import as_ptr, ptr, slice_from_raw
+
+## Two halves of a word, laid out as C lays them out.
+@repr(c)
+@derive(Copy, Debug)
+struct Halves:
+    low: i32
+    high: i32
+
+## A tally a pointer is handed to.
+struct Tally:
+    hits: int
+    name: String
+
+## Counts one more hit on the tally `t` points to.
+##
+## Safety:
+## - `live`: `t` points to a live `Tally` that nothing else uses meanwhile
+unsafe def hit(t: ptr mut Tally):
+    # safety: valid, aligned, valid_for_origin: this function's `live`.
+    let r = unsafe t.as_mut()
+    r.hits += 1
+
+def main():
+    var x = 20
+    let p = ptr.of_mut(mut x)
+    # safety: valid, aligned, writable: p points to the live local x, which
+    #   nothing else uses until the block ends.
+    unsafe:
+        p.write(p.read() + 1)
+        p.write_volatile(p.as_const().read_volatile() * 2)
+    print(x)
+
+    var t = Tally(hits=0, name="door".to_string())
+    let tp = ptr.of_mut(mut t)
+    # safety: live: tp points to the live local t, used through nothing else
+    #   until the calls end.
+    unsafe:
+        hit(tp)
+        hit(tp)
+    print("{t.name}: {t.hits}")
+
+    var h = Halves(low=1i32, high=-2i32)
+    let hp = ptr.of_mut(mut h)
+    # safety: valid, aligned, in_bounds: an i32 at offset 4 of the eight
+    #   bytes of h is its `high`; writable: hp came from a `mut` borrow.
+    unsafe:
+        let high = hp.cast[i32]().offset(1)
+        print(high.read())
+        high.write(7i32)
+    print("{h:?}")
+
+    let xs = [3, 5, 8, 13]
+    let seen = xs.as_slice()
+    let first = as_ptr(seen)
+    # safety: valid, aligned, in_bounds, valid_for_origin: `seen` holds four
+    #   values and lives, unchanged, past the last read.
+    unsafe:
+        print(first.offset(3).read())
+        let rest = slice_from_raw(first.offset(1), 3)
+        print(rest.to_list())
+        let r = first.offset(2).as_ref()
+        print(r)
+
+    # The same address through another pointer of the same provenance.
+    let q = first.with_addr(first.addr() + 8)
+    # safety: valid, aligned: q is first's second value.
+    print(unsafe q.read())

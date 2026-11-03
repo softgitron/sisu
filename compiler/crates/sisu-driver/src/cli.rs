@@ -985,6 +985,7 @@ fn from_sir(
         stage.set("the interpreter");
         let mut h = WithArgs { inner: host, args, watch: Vec::new() };
         let options = Options {
+            monitor: flags.contains(&"--monitor"),
             seed: opts.seeds.first,
             stats: flags.contains(&"--stats"),
             stats_kind: opts.stats,
@@ -1148,10 +1149,11 @@ fn from_lir(
 /// It has no SIR of a program built with its tests, so `sisu test` and
 /// `sisu bench` keep the Rust front end, and so do the modes that need
 /// more of the front end than its output: `run --watch` (the front end
-/// again at each save), `run --record` (whose log `sisu replay` compiles
-/// again), `run --defer-borrow` (the ownership checker's findings beside
-/// the run), `check --diary` (the diagnostics as data) and `parse --shape`.
-/// A file of SIR needs no front end at all.
+/// again at each save), `run --defer-borrow` (the ownership checker's
+/// findings beside the run), `check --diary` (the diagnostics as data) and
+/// `parse --shape`. `run --record` is stage 1's, its log holding the SIR
+/// that `sisu replay` runs (decision 301). A file of SIR needs no front end
+/// at all.
 fn stage1_serves(cmd: &str, p: &Parsed<'_>) -> bool {
     let value = |k: &str| p.values.iter().any(|(v, _)| *v == k);
     match cmd {
@@ -1165,7 +1167,6 @@ fn stage1_serves(cmd: &str, p: &Parsed<'_>) -> bool {
             !p.flags.iter().any(|f| matches!(*f, "--sir" | "--watch" | "--defer-borrow"))
                 && !value("--from-sir")
                 && !value("--from-lir")
-                && !value("--record")
         }
         "parse" => !p.flags.contains(&"--shape"),
         _ => false,
@@ -1456,6 +1457,35 @@ fn stage1_command(
                 strategy: opts.strategy.clone(),
                 ..Options::default()
             };
+            // `--record FILE`: the run with every host call logged, and the
+            // SIR it ran, which `sisu replay` runs again (decision 301).
+            if let Some(path) = &opts.record {
+                let header = sisu_interp::record::Header {
+                    toolchain: crate::replay::TOOLCHAIN.into(),
+                    file: target.path.clone().unwrap_or_else(|| ".".to_string()),
+                    hash: sisu_interp::record::content_hash(text.as_bytes()),
+                    source: text.clone(),
+                    seed: opts.seeds.first,
+                    hash_key: 0,
+                    contracts: opts.level.name().into(),
+                    files: Vec::new(),
+                    layout: None,
+                    watch: false,
+                    sir: true,
+                };
+                let mut rec = sisu_interp::record::Recorder::new(&mut h, opts.redact.clone());
+                let report = sisu_interp::run_main_report(&prog, &mut rec, &options);
+                let log = rec.finish(&header, report.status);
+                drop(rec);
+                if let Err(e) = std::fs::write(path, log) {
+                    h.stderr(&plain_error(
+                        msg::CLI_CANNOT_WRITE,
+                        &[("path", path.clone()), ("reason", e.to_string())],
+                    ));
+                    return exit::ERROR;
+                }
+                return report.status;
+            }
             run_main_seeds(&prog, &mut h, &options, opts.seeds, opts.bound)
         }
     }
@@ -2472,6 +2502,7 @@ fn command(
                             files: input.program.as_ref().map(|(_, f)| f.clone()).unwrap_or_default(),
                             layout: input.program.as_ref().map(|(p, _)| p.write()),
                             watch,
+                            sir: false,
                         };
                         let mut rec = sisu_interp::record::Recorder::new(&mut h, opts.redact.clone());
                         let report = if watch {
@@ -3614,6 +3645,37 @@ fn replay(args: &[String], host: &mut dyn Host) -> i32 {
     };
     if hashed != log.header.hash {
         return bad_log(host, "its source does not match its content hash".into());
+    }
+    // A run whose front end was stage 1 logged the SIR it ran, which runs
+    // again without a front end (decision 301).
+    if log.header.sir {
+        let prog = match read_sir(&log.header.source, host) {
+            Ok(prog) => prog,
+            Err(code) => return code,
+        };
+        let options = Options {
+            monitor: p.flags.contains(&"--monitor"),
+            seed: log.header.seed,
+            ..Options::default()
+        };
+        let mut rep = sisu_interp::record::Replayer::new(&log, host);
+        let report = sisu_interp::run_main_report(&prog, &mut rep, &options);
+        let diverged = rep.divergence();
+        drop(rep);
+        if let Some(detail) = diverged {
+            host.stderr(&plain_error(msg::CLI_REPLAY_DIVERGED, &[("detail", detail)]));
+            return exit::ERROR;
+        }
+        if let Some(expected) = log.status()
+            && expected != report.status
+        {
+            host.stderr(&plain_error(
+                msg::CLI_REPLAY_STATUS,
+                &[("found", report.status.to_string()), ("expected", expected.to_string())],
+            ));
+            return exit::ERROR;
+        }
+        return report.status;
     }
     let Some(level) = sisu_lower::ContractLevel::parse(&log.header.contracts) else {
         return bad_log(host, format!("`{}` is not a level of contract checking", log.header.contracts));
