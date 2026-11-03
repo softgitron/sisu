@@ -7635,6 +7635,80 @@ D-086, D-087 step 3)
      named the struct's parameter in the caller (`E0501`). Stage 1 decides
      it (RULES.md, R26).
 
+**Stage 1's third round** (stage 1's RULES.md, R27 to R36; typed holes, trait contracts, attributes, exact numbers and JSON derives)
+
+340. Typed holes (D-061): a release build rejects each with `E0445`, which
+     names the hole and its type and the `panic("...")` that may ship,
+     where `check` and a debug build warn (`W0001`); a run that reaches a
+     hole prints its closure first, `in scope at the typed hole
+     `todo("name")`:` and a line `NAME = VALUE` (`Debug`) for each binding
+     that holds its whole value there and holds no loan or is a parameter,
+     whose `Debug` the host writes and which holds no capability, a
+     closure's captures after its own; and `sisu test` exits with 3 when
+     no test failed and one is blocked, 1 when one failed, 0 when all
+     passed. The closure is written into the SIR after the ownership
+     checker and compile-time evaluation, which it changes in nothing.
+     Stage 1 decides it (RULES.md, R27).
+
+341. Every method of an `Atomic` but its construction is impure in `pure`
+     code (`E0333`, named as the program calls it, with a note that it
+     observes the schedule), as 06 lists `Atomic` among the operations
+     that observe the schedule; and the body of a `par` loop (`for x in
+     par.iter(xs):`) is `pure`: it calls only `pure` functions (`E0446`)
+     and changes nothing declared before the loop (`E0447`). Stage 1
+     decides it (RULES.md, R28).
+
+342. A trait's method's `requires` and `ensures` bind every impl (07):
+     an impl's method checks the trait's preconditions on entry before its
+     own and the trait's postconditions on exit after its own, with the
+     trait's names of the parameters, and a failure names the trait's
+     method; a trait's method whose body is its contract alone is
+     required, not a default. An impl in another module than the trait's
+     is warned that stage 1 does not check it yet (`W0021`). Stage 1
+     decides it (RULES.md, R29).
+
+343. A call of a function or method marked `@deprecated("...")`, or a
+     use of one as a value, warns with the attribute's text (`W0023`, or
+     `W0025` without one), but in its own body (13); an attribute whose
+     name Sisu does not read warns: with the fix to the attribute it
+     misspells (`W0024`), or, when no compile-time code of the program
+     reads attributes, because nothing can read it (`W0022`). Stage 1
+     decides it (RULES.md, R30).
+
+344. `embed("path")` in a module of a package resolves the path from the
+     package's root, the directory of its `sisu.toml` (08), whatever
+     directory the module is in; a single file's from its directory.
+     Stage 1 decides it (RULES.md, R31).
+
+345. `json.decode[T]` validates the text at the boundary (11): a
+     refinement's predicate and a struct's invariant that the text breaks
+     are a `Mismatch` naming the path and the type, not a type error in
+     the decoder or a panic (05: malformed input is an expected failure).
+     Reflection gains `is_refinement`, `base_of` and `has_invariant`.
+     Stage 1 decides it, in its own copy of `std.json` (RULES.md, R32).
+
+346. A float literal reaches a `Decimal` from its text, its places kept
+     (`3.50` stays `3.50`, 03); `/` between `Decimal`s names `div` and
+     `to_ratio` in a note (D-076); `@float(fast)` is accepted, strict
+     floating point satisfying the permission it gives, and `@float` with
+     any other argument is `E0448`; `@diagnostic_name` is `E0900` until
+     compile-time type construction (Q-27); and a `list` of an `Ord` type
+     has `is_sorted`. Stage 1 decides it (RULES.md, R33).
+
+347. `E0609` for a plain `for` over a compile-time list offers the fix
+     that writes `comptime for` (08). Stage 1 decides it (RULES.md, R34).
+
+348. `max(xs)` and `min(xs)` with one argument are the largest and the
+     smallest item of a collection, the first of equals, and panic for
+     none, as Python's raise (02): the prelude's `max_of` and `min_of`.
+     Stage 1 decides it (RULES.md, R35).
+
+349. `std.json` declares `Encode` and `Decode`, which `encode` and
+     `decode` use for a type that implements them, inside other values
+     too; `@derive(Encode, Decode)` gives a type the form of its shape and
+     an impl written by hand a form of its own (11). Stage 1 decides it
+     (RULES.md, R36).
+
 **The runtime in Sisu, continued** (section "Stage 2", "The runtime in
 Sisu"; D-086, D-087 step 3)
 
