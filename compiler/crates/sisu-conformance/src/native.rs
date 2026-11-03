@@ -568,6 +568,16 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&P
     built.stderr = report.rest;
     r.stage2 = report.lowered;
     r.sisu = report.sisu;
+    // A case with a `.release` expectation is one a release build refuses
+    // (a typed hole, decision 340): the build must fail and print it.
+    if release && let Some(expected) = case.expected("release") {
+        if built.status == 0 {
+            fail(&mut r, "sisu build --native --release", "the release build succeeded".into());
+        } else if built.stderr != expected {
+            fail(&mut r, "release", diff::diff(&expected, &built.stderr));
+        }
+        return r;
+    }
     if built.status != 0 || !exe.is_file() {
         fail(&mut r, "sisu build --native", format!("{}{}", built.stdout, built.stderr));
         return r;

@@ -203,7 +203,7 @@ environment holding only `SISU_RT_ALLOCS=1`), and compares:
   program that aborts (status 134) ends without one.
 
 The expectations are the interpreter's: the native mode reads no file of
-its own and does not bless. A native build lowers SIR through stage 2, the
+its own and does not bless, except `NAME.release` (below). A native build lowers SIR through stage 2, the
 lowering written in Sisu, and through nothing else unless `--lower=rust`
 asks for the Rust lowering, the oracle (decisions 304 and 305), and a debug
 build's LIR is compiled by the x86-64 backend written in Sisu, a release
@@ -224,7 +224,10 @@ has the front end's warnings before the program's standard error, as a
 SIR takes to native code. With `--native-release LIST` it builds each case
 with the release profile, `sisu build --native --release
 --contracts=all`: every contract checked, as the interpreter checks them,
-so that what is compared is what Cranelift's optimisations do. With
+so that what is compared is what Cranelift's optimisations do; a case with
+a `NAME.release` file is one a release build refuses (a typed hole,
+decision 340), and the runner compares the build's standard error with it
+instead of running the program. With
 `--interpreted-from-sir LIST` it runs each case's SIR, the file
 `--native-from-sir` builds, in the interpreter instead (`sisu run
 --from-sir NAME.sir ARGS...`), and compares standard output, the status
