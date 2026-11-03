@@ -803,11 +803,38 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   with a literal and one with a variable, give it two C signatures, which
   is `D0103`. Both lowerings agree. *Pay*: the constant's type in SIR's
   text form, or the C signature taken from the declaration.
-- **The machine code is Cranelift's**: step 2, the x86-64 Linux debug
-  backend in Sisu (one analysis pass, single-pass code generation, its own
-  encoders, ELF objects, DWARF, the system linker), is not begun, and
-  neither are the textual-IR prototype of the LLVM release backend (D-088)
-  nor the runtime in Sisu (step 3). *Pay*: D-087's order of work.
+- **The machine code is Cranelift's by default**: step 2, the x86-64
+  Linux debug backend in Sisu, has begun (`--backend=sisu`, decisions 306
+  to 311) and compiles every case of `native.list` and stage 1 itself, but
+  it is not the default, and the textual-IR prototype of the LLVM release
+  backend (D-088) and the runtime in Sisu (step 3) are not begun. *Pay*:
+  what the Sisu backend leaves (below), then it as the default and
+  Cranelift as the oracle; D-087's order of work.
+- **The Sisu backend's code is naive**: every value is computed in `rax`
+  and moved to its register, a jump is always 32-bit and never falls
+  through, cold blocks stay where LIR has them, constants are not folded
+  into the instructions that use them, and each block starts with its
+  values in memory. Stage 1's object is 38 MB against Cranelift's 23 MB
+  executable (debug information included), and stage 1 so compiled runs
+  1.5 times as long. *Pay*: operands taken from where they are, short
+  jumps and fallthrough, the cold blocks last, and values kept in
+  registers across an edge to a block with one predecessor.
+- **The Sisu backend runs on one thread**, about 4.7 ms for each thousand
+  lines of LIR (stage 1 in 20 s, against Cranelift's 6 s on four cores),
+  reads the whole LIR text into memory, and keeps the object's bytes as a
+  list of words until it writes them. *Pay*: functions compiled in
+  parallel through `std.par` (D-069) in a fixed order, as D-087 asks;
+  stage 2's lowering and the backend in one process, without the LIR text
+  between them.
+- **The Sisu backend's debug information** is the line table alone
+  (decision 312): no subprograms, locals or types, and no `.debug_frame`
+  (a debugger unwinds through the frame pointers). *Pay*: the rest of
+  decision 227's DWARF, from LIR's descriptions of the locals' types.
+- **The Sisu backend is the debug profile's**: a release LIR is compiled
+  the same way, without Cranelift's optimisations; there is no AArch64,
+  Mach-O or COFF; and the backend has not yet compiled stage 2 (itself)
+  to an executable that compiles itself to the same bytes, D-087's fixed
+  point. *Pay*: D-087's steps.
 - **Stage 2 reads SIR itself**: stage 1 writes SIR but has no reader, so
   `stage2/src/read.sisu` transcribes `sisu-sir/src/read.rs`. *Pay*: the
   reader moves to stage 1's `sir` module when stage 1 needs one (`sisu

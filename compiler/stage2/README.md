@@ -7,16 +7,18 @@ backend-neutral low IR that holds every decision the Rust backend
 translating LIR one to one into Cranelift IR inside the Rust backend, so
 that an executable built from LIR is byte for byte the one built from the
 program's SIR. Step 2, the x86-64 debug backend in Sisu, compiles the same
-LIR to machine code in one pass; the LLVM release backend of D-088 lowers
-it to LLVM IR.
+LIR to machine code in one pass (begun: `sisu2 x86`, below); the LLVM
+release backend of D-088 lowers it to LLVM IR.
 
 ## Running it
 
 ```text
 ./sisu2 lir FILE.sir [--release] [--output FILE.lir]   # the LIR of a serialised SIR program
 ./sisu2 sir FILE.sir                                   # the SIR read and written again
+./sisu2 x86 FILE.lir --output FILE.o                   # the LIR compiled by the Sisu backend
 sisu build --native --from-lir FILE.lir [--output EXE] # the executable, through Cranelift
 sisu run --native --from-lir FILE.lir [ARGS...]        # built and run
+sisu build --native --backend=sisu [FILE]              # lowered by stage 2, compiled by the Sisu backend
 ```
 
 `sisu2` builds the package natively on first use, and after a source
@@ -54,6 +56,19 @@ form but has no reader of it, so `read.sisu` here is a transcription of
 | `facts.sisu` | `facts.rs`: what the release profile knows about a function's integers (decision 270) |
 | `debug.sisu` | the part of `debug.rs` that describes types |
 
+The backend written in Sisu (D-087, step 2; decisions 306 to 312) is not
+a transcription; it compiles LIR to x86-64 in one pass over each function
+after one analysis pass, as TPDE does:
+
+| Module | What it is |
+|---|---|
+| `lirread.sisu` | LIR read back item by item (as `sisu-codegen/src/lir.rs` reads it), each value given its type |
+| `x64.sisu` | the encodings of the instructions the backend uses |
+| `x86.sisu` | the analysis, the frame, the register allocator, and the code of each operation |
+| `dwarf.sisu` | the line table (`.debug_line`, with the unit that names it) |
+| `elf.sisu` | the ELF relocatable object: sections, symbols, relocations |
+| `object.sisu` | the pass over a program: each datum placed and each function compiled as it is read |
+
 The program's state and one function's are one struct, `gen.Cg`, whose
 methods are spread over the modules, as `lib.rs` and `func.rs` share
 `Codegen` and `Cx`; where the Rust calls Cranelift's function builder, this
@@ -73,11 +88,12 @@ and its blocks, each line one call of the function builder.
 ## How fast
 
 The SIR of `examples/wordcount` (5 065 lines) lowers to 39 108 lines of
-LIR in 0.07 s; the SIR of stage 1's own package (493 018 lines, 2 616
-function instances) to 4 026 377 lines in 6.0 s, and in 15 s in the
-release profile, whose facts about integers it computes. Built from that
-LIR, stage 1 is the same 23 MB executable its SIR gives, in both
-profiles.
+LIR in 0.07 s; the SIR of stage 1's own package (521 266 lines, after its
+diagnostics round) to 4 263 811 lines in 7.1 to 8.5 s on a loaded
+machine, and in 17.8 to 21.1 s in the release profile, whose facts about
+integers it computes. Built from that LIR, stage 1 is the same executable
+its SIR gives, in both profiles. The Sisu backend compiles that LIR in
+20 s on one thread, 4.7 ms for each thousand lines, to a 38 MB object.
 
 ## The default
 
@@ -88,6 +104,23 @@ translates the LIR. A construct stage 2 does not lower is the program's
 `D0103`; nothing falls back to the Rust lowering, which lowers only when
 `--lower=rust` asks for it (the oracle the check below compares with, and
 the seed that builds stage 1 and stage 2 themselves).
+
+## The Sisu backend
+
+`sisu2 x86 FILE.lir --output FILE.o` writes an ELF object that `cc` links
+with the runtime Cranelift's objects are linked with, and `sisu build
+--native --backend=sisu` (or `SISU_BACKEND=sisu`) does both after stage
+2's lowering. Every function has a frame pointer and every frame slot a
+fixed offset: the callee-saved registers the allocator uses, LIR's slots,
+its variables, and a home for each value that lives past its block or is
+spilled. A value used only in the block that defines it stays in one of
+`rbx`, `r12` to `r15` (which a call preserves) until its last use, the
+furthest one spilled when they run out; one used elsewhere, and every
+block's parameter, lives in its home. Calls are System V's, of which
+Sisu's convention is an instance. The conformance runner's mode
+`--native-sisu conformance/native-sisu.list` builds every case so and
+compares its runs with the interpreter's expectations; the list holds
+every case of `native.list`.
 
 ## The check
 
@@ -120,6 +153,10 @@ What is done, and what is not, is kept here as the work goes.
   runner's `--native`, `--native-from-sir` and `--native-release` modes
   fail a case whose build does not say stage 2 lowered it.
 - The reader takes the SIR of a program built with its tests (`sisu sir
-  --tests`, decision 285) and leaves its tests' tags and its benchmarks
-  out, since stage 1's SIR types do not hold them yet. When they do, the
-  reader fills them: it makes a `stage1.sir.Program` naming every field.
+  --tests`, decision 285), its tests' tags and its benchmarks included.
+- The Sisu backend (decisions 306 to 312): every operation of LIR but a
+  jump with more than nine arguments and a return of more than one value;
+  all 207 cases of `native.list` run from its objects with the
+  interpreter's output (`--native-sisu`); stage 1 compiled by it checks
+  the conformance suite's files as the Cranelift build does. What it
+  leaves is in `docs/port-debt.md` ("The backend in Sisu").

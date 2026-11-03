@@ -4004,10 +4004,84 @@ type t12 opaque "dyn Shape" 16           -- words shown as words
 type t13 word "Scope"                    -- one word of the runtime's
 ```
 
+### The Sisu backend
+
+Step 2 of D-087 has begun: an x86-64 Linux debug backend written in Sisu,
+in stage 2 (`compiler/stage2`), compiles LIR to machine code in one pass
+over each function, after one analysis pass, as TPDE compiles LLVM IR, and
+writes an ELF relocatable object that the system linker links with the
+same runtime library Cranelift's objects are linked with (decisions 306 to
+311). `sisu2 x86 FILE.lir --output FILE.o` compiles a LIR program, and
+`sisu build --native --backend=sisu` (or `SISU_BACKEND=sisu`; with `sisu
+run --native`, `--from-sir` and `--from-lir` too) lowers the program
+through stage 2 and compiles its LIR so, then links the object with `cc`
+as decision 199 does; `--backend=cranelift` names the default, any other
+name is `D0123`, the Sisu backend with the Rust lowering is `D0124` (it
+compiles LIR), a construct it does not compile is the program's `D0103`
+(`x86: not compiled: WHAT (in FUNCTION)`), and any other failure `D0125`.
+Its modules are `lirread.sisu` (LIR read item by item, as
+`sisu-codegen/src/lir.rs` reads it, each value given its type),
+`x64.sisu` (the instructions' encodings), `x86.sisu` (the analysis, the
+frame, the register allocator and the code of each operation),
+`elf.sisu` (the object file) and `object.sisu` (the pass over the
+program: each datum placed and each function compiled as it is read).
+
+- **The frame** (decision 307): every function has a frame pointer
+  (`push rbp; mov rbp, rsp; sub rsp, F`, `F` a multiple of 16), and every
+  frame slot a fixed offset below it: 40 bytes for the callee-saved
+  registers the allocator uses (each saved by the prologue only if it is
+  used), LIR's slots in order, its variables, a home of 8 bytes for each
+  value that needs one, and at the bottom the arguments that calls pass on
+  the stack. The prologue and the one epilogue every `return` jumps to are
+  written after the body, once the frame's size and the registers used
+  are known.
+- **Calls** follow the System V convention, of which Sisu's (decision 189:
+  the result's and the arguments' addresses, the status byte returned) is
+  an instance: integers in `rdi`, `rsi`, `rdx`, `rcx`, `r8` and `r9`,
+  floats in `xmm0` to `xmm7`, the rest on the stack, the result in `rax`
+  or `xmm0`.
+- **Registers** (decision 308): the analysis finds the block that defines
+  each value, whether another block uses it, and its last use in its own
+  block. A value is computed in the scratch registers a call clobbers,
+  then written to its home if another block uses it (a block's parameter
+  is written by every edge into the block, a function's by the prologue),
+  and kept in one of `rbx`, `r12` to `r15`, which a call preserves, while
+  its block still uses it; when all five are taken, the value whose last
+  use is furthest is spilled to its home. A block starts with every value
+  in its home.
+- **Checks and the status byte** (decision 309): the overflow and bounds
+  checks are LIR's branches to cold blocks that call the runtime's panic
+  entries (decision 270), compiled as any branch, an overflow flag from
+  `seto`; a status byte is `al`, and a value narrower than 64 bits is
+  tested and compared at its width, since its register's upper bits are
+  unspecified; `trap` is `ud2`.
+- **Probes and yield points** (decision 310) are LIR's own code, compiled
+  as written; the probe reads `rsp` after the prologue, and the probe
+  reserve C's `main` passes to the runtime is computed from the frames
+  this backend lays out.
+- **The object** (decision 311): `.text`, `.rodata`, `.data.rel.ro` (the
+  data holding functions' addresses), their relocations, the symbol table
+  (each function a symbol of its size, local but C's `main`) and
+  `.note.GNU-stack`. Calls and addresses of the program's own functions
+  are resolved by the backend; a call of the runtime or of C is
+  `R_X86_64_PLT32`, the runtime's data is reached through the GOT
+  (`R_X86_64_REX_GOTPCRELX`), the object's own through `R_X86_64_PC32`.
+
+It compiles every operation of LIR but a jump with more than nine
+arguments and a return of more than one value, which no lowering makes,
+and every case of `native.list` runs from its objects with the
+interpreter's output (`conformance/native-sisu.list`, the runner's
+`--native-sisu` mode, which compares the runs: the executables are its
+own). Stage 1, compiled by it from its 4 263 811 lines of LIR in 20 s on
+one thread (4.7 ms for each thousand lines, against Cranelift's 6 s on
+four), checks the conformance suite's files with the output of the stage
+1 Cranelift builds. port-debt.md ("The backend in Sisu") lists what it
+leaves.
+
 ### Coverage
 
 `conformance/native.list` names the cases the backend builds and runs:
-205 of them, every case of the suite that runs a program but the
+207 of them, every case of the suite that runs a program but the
 refusals of the checked memory model, which are the interpreter's (the
 others are diagnostics, `sisu test` files, and the tools' cases:
 `--watch`, the REPL, worksheets, tokens, SIR and documentation). Among them are every
@@ -4028,9 +4102,10 @@ files the interpreter meets, and requires the runtime's report to say
 that nothing it allocated is live at exit (decision 226); `cargo test`
 does the same (`crates/sisu-driver/tests/native.rs`), from source, from
 serialised SIR, with the release profile (every contract checked,
-decision 232) and from the LIR stage 2 lowers the SIR to (each
-executable byte for byte the one from the SIR, decision 284), and CI runs
-all four on every push. `--native-survey LIST` tries every
+decision 232), from the LIR stage 2 lowers the SIR to (each executable
+byte for byte the one from the SIR, decision 284), and with the Sisu
+backend (`--native-sisu conformance/native-sisu.list`, decision 306), and
+CI runs them on every push. `--native-survey LIST` tries every
 runnable case the list leaves out and says which would pass, or the first
 construct that stops each.
 
@@ -6915,3 +6990,117 @@ memory, foreign calls and the machine intrinsics" and "LIR"; D-087)
      lowered so. All 205 cases are, and all 205 build from LIR to
      identical executables in both profiles. This changes no rule of the
      language.
+
+**Stage 2 in Sisu, step 2 begun: the x86-64 debug backend** (section
+"Stage 2", "The Sisu backend"; D-087)
+
+306. The x86-64 Linux debug backend written in Sisu is part of stage 2
+     (`lirread.sisu`, `x64.sisu`, `x86.sisu`, `elf.sisu`, `object.sisu`):
+     `sisu2 x86 FILE.lir --output FILE.o` compiles a LIR program to an
+     ELF relocatable object, and `sisu build --native --backend=sisu`
+     (`SISU_BACKEND=sisu`, which the driver gives stage 1 as it gives
+     `SISU_LOWER`) lowers the program through stage 2, compiles the LIR so
+     and links the object with `cc` against the runtime library
+     Cranelift's objects are linked with, so that both backends' programs
+     run on one runtime and their behaviour is compared on it. The default
+     stays Cranelift (`--backend=cranelift`); another name is `D0123`, the
+     Sisu backend with `--lower=rust` `D0124` (it compiles LIR, which the
+     Rust lowering does not write), a construct it does not compile is the
+     program's `D0103`, and any other failure of it `D0125`. The round's
+     scope was the operations the `run/` cases of integers, booleans,
+     control flow, calls, structs and runtime calls need; LIR's thirty-two
+     operations are few enough that the backend compiles all of them but
+     a jump with more than nine arguments and a return of more than one
+     value, which no lowering makes, so its coverage list,
+     `conformance/native-sisu.list`, holds every case of `native.list`.
+     The runner's `--native-sisu LIST` builds each case so and compares
+     its runs with the interpreter's expectations, and requires the build
+     to say that stage 2 lowered the program and the Sisu backend compiled
+     it (`native: compiled by the Sisu backend in T ms`); `cargo test`
+     runs it. Stage 1 compiled by it (4 263 811 lines of LIR in 20 s on one
+     thread) prints, on the 400 conformance files tried, what stage 1
+     compiled by Cranelift prints, in 1.5 times the time. The other ways
+     were an assembly text for the system's assembler (a process and two
+     passes over text where the encoder is a few hundred lines, and the
+     assembler's choices of encoding rather than the backend's), and a
+     pass without the analysis, every value in its home (twice the memory
+     traffic for the same simplicity). What the backend leaves is in
+     port-debt.md ("The backend in Sisu"). This changes no rule of the
+     language.
+307. The Sisu backend's frame has a frame pointer, and every slot of it a
+     fixed offset below the pointer, so that the body is written in one
+     pass: 40 bytes for the callee-saved registers the allocator uses
+     (`rbx`, `r12` to `r15`, each saved by the prologue only when used),
+     then LIR's slots in order (each a multiple of 8 bytes, aligned to 8),
+     the variables, the homes of the values that need one (8 bytes each,
+     made as they are needed), and at the bottom the arguments calls pass
+     on the stack; `rsp` is the frame pointer less a multiple of 16, so it
+     is aligned at every call. The prologue (`push rbp; mov rbp, rsp; sub
+     rsp, F`, the registers saved, the parameters that come in registers
+     written to their homes) and the one epilogue every `return` jumps to
+     are written after the body, which goes between them; a parameter
+     passed on the stack has its home in the caller's frame. Calls follow
+     the System V convention, of which Sisu's (decision 189) is the
+     instance with `N + 1` addresses and a status byte: integers in `rdi`,
+     `rsi`, `rdx`, `rcx`, `r8`, `r9`, floats in `xmm0` to `xmm7`, the rest
+     on the stack, results in `rax` or `xmm0`. A value narrower than 64
+     bits leaves its register's upper bits unspecified, as Cranelift's do,
+     so a comparison, a shift, an extension or a test of a condition reads
+     it at its width; a float is kept as its bits in a general register
+     and moved to `xmm0` and `xmm1` for an operation. This changes no rule
+     of the language.
+308. The Sisu backend allocates registers block by block, after one
+     analysis pass over the function that finds the block defining each
+     value, whether another block uses it, the last use in its own block,
+     and each block's parameters. A value is computed in the scratch
+     registers (`rax`, `rcx`, `rdx` and the argument registers, which no
+     value outlives an instruction in); written to its home when another
+     block uses it, a block parameter's home by every edge into its block
+     (all the edge's arguments read before any is written, a parallel
+     copy) and an entry parameter's by the prologue; and kept in one of
+     `rbx`, `r12` to `r15` while its block still uses it, a register that a
+     call preserves, so that nothing is spilled around a call. When the
+     five hold live values, the one whose last use is furthest is spilled
+     to its home (Belady's rule, as cheap here as TPDE's round robin). A
+     block starts with every value in its home, so nothing is reconciled
+     at an edge. This changes no rule of the language.
+309. The Sisu backend compiles LIR's checks as any other code: the
+     overflow and bounds checks are branches to cold blocks that call the
+     runtime's `sisu_rt_panic_overflow` and `sisu_rt_panic_index` and take
+     the failure path (decision 270), `sadd_overflow`, `ssub_overflow` and
+     `smul_overflow` are `add`, `sub` and `imul` with `seto` making the
+     flag the branch tests, and `trap` is `ud2`. The status byte a function
+     returns is `al`, put there by `return`; a caller tests it as an `i8`,
+     at its width (`test al, al`), since the runtime's Rust functions do
+     not define the rest of `rax`. Cold blocks stay where LIR has them,
+     where Cranelift moves them after the others (decision 270): placement
+     is a matter of speed, and this backend's is the debug profile's. This
+     changes no rule of the language.
+310. The Sisu backend emits the stack probe at a function's entry, the
+     count of nested calls and the yield points as LIR writes them
+     (decisions 203, 204 and 234): `get_stack_pointer` reads `rsp` after
+     the prologue, so the probe compares the bottom of the whole frame
+     with the task's limit, and the budget's decrement and the call of
+     `sisu_rt_yield` are ordinary operations. The probe reserve that C's
+     `main` hands the runtime (`probe_reserve`) is the largest frame of an
+     unprobed function plus the largest top of a probed one, what it
+     writes before its probe (the return address, the saved frame pointer
+     and the 40 bytes of saved registers), plus twice the 256 bytes the
+     Rust backend allows a call, so that the runtime keeps below a task's
+     probe limit what this backend's frames can write there. This changes
+     no rule of the language.
+311. The Sisu backend's object is ELF64 for x86-64: `.text` (each
+     function aligned to 16 bytes, the gaps filled with `int3`),
+     `.rodata` (LIR's read-only bytes), `.data.rel.ro` (the data holding
+     functions' addresses, with `R_X86_64_64` relocations, writable only
+     while the loader relocates it), `.note.GNU-stack`, the relocations of
+     the first and the third, and a symbol table holding the sections, each
+     function as a symbol of its size (local, but C's `main`), and the
+     runtime's and C's symbols the code names. The backend resolves the
+     calls and addresses of the program's own functions itself; a call of
+     the runtime or of C is `R_X86_64_PLT32`, the runtime's data is loaded
+     through the GOT (`R_X86_64_REX_GOTPCRELX`, which the linker relaxes
+     to an address), and the object's own data is reached with `lea` and
+     `R_X86_64_PC32`, so the object links into a position-independent
+     executable as Cranelift's (`is_pic`) does. This changes no rule of
+     the language.

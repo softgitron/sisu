@@ -91,6 +91,25 @@ fn native_conformance_from_lir() {
     assert_eq!(report.identical, Some(report.cases), "{}", report.render());
 }
 
+/// The cases of `conformance/native-sisu.list` built with the x86-64
+/// backend written in Sisu (`sisu build --native --backend=sisu`, decision
+/// 306), its objects linked with the runtime Cranelift's are linked with:
+/// each run meets the interpreter's expectations, and each build says that
+/// stage 2 lowered the program and the Sisu backend compiled it.
+#[test]
+fn native_conformance_sisu_backend() {
+    let sisu = sisu_conformance::Sisu::new(env!("CARGO_BIN_EXE_sisu"));
+    let root = compiler_dir().join("conformance/cases");
+    let text = std::fs::read_to_string(compiler_dir().join("conformance/native-sisu.list"))
+        .expect("the Sisu backend's coverage list");
+    let list = sisu_conformance::native::read_list(&text);
+    let report = sisu_conformance::native::run_native_sisu(&sisu, &root, &list);
+    println!("{}", report.render());
+    assert!(report.cases > 0, "no cases in the coverage list");
+    assert!(report.failures.is_empty(), "{}", report.render());
+    assert_eq!(report.sisu.map(|(n, _)| n), Some(report.cases), "{}", report.render());
+}
+
 /// The same cases' SIR run in the interpreter (decision 254), `sisu run
 /// --from-sir` of each case's own `.sir` or of what `sisu sir` prints for
 /// it: what a front end serialised meets the expectations the source does.
