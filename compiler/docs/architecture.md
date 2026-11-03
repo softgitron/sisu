@@ -4011,7 +4011,7 @@ in stage 2 (`compiler/stage2`), compiles LIR to machine code in one pass
 over each function, after one analysis pass, as TPDE compiles LLVM IR, and
 writes an ELF relocatable object that the system linker links with the
 same runtime library Cranelift's objects are linked with (decisions 306 to
-311). `sisu2 x86 FILE.lir --output FILE.o` compiles a LIR program, and
+312). `sisu2 x86 FILE.lir --output FILE.o` compiles a LIR program, and
 `sisu build --native --backend=sisu` (or `SISU_BACKEND=sisu`; with `sisu
 run --native`, `--from-sir` and `--from-lir` too) lowers the program
 through stage 2 and compiles its LIR so, then links the object with `cc`
@@ -4023,8 +4023,9 @@ Its modules are `lirread.sisu` (LIR read item by item, as
 `sisu-codegen/src/lir.rs` reads it, each value given its type),
 `x64.sisu` (the instructions' encodings), `x86.sisu` (the analysis, the
 frame, the register allocator and the code of each operation),
-`elf.sisu` (the object file) and `object.sisu` (the pass over the
-program: each datum placed and each function compiled as it is read).
+`dwarf.sisu` (the debug information), `elf.sisu` (the object file) and
+`object.sisu` (the pass over the program: each datum placed and each
+function compiled as it is read).
 
 - **The frame** (decision 307): every function has a frame pointer
   (`push rbp; mov rbp, rsp; sub rsp, F`, `F` a multiple of 16), and every
@@ -4066,17 +4067,26 @@ program: each datum placed and each function compiled as it is read).
   are resolved by the backend; a call of the runtime or of C is
   `R_X86_64_PLT32`, the runtime's data is reached through the GOT
   (`R_X86_64_REX_GOTPCRELX`), the object's own through `R_X86_64_PC32`.
+- **Debug information** (decision 312): DWARF 4 as decision 227 writes
+  it, so far the line table (`dwarf.sisu`) from LIR's `loc` lines, the
+  code before a function's first row being its declaration's line and the
+  first row the prologue's end, and a unit with a subprogram for each
+  function's code, so that gdb stops at `break area` and at
+  `shapes.sisu:15` and names the Sisu functions and lines of a backtrace,
+  unwinding through the frame pointers; the driver gives the backend the
+  build's directory and the standard library's (`--comp-dir`, `--std`), as
+  it gives the Cranelift path.
 
 It compiles every operation of LIR but a jump with more than nine
 arguments and a return of more than one value, which no lowering makes,
 and every case of `native.list` runs from its objects with the
 interpreter's output (`conformance/native-sisu.list`, the runner's
 `--native-sisu` mode, which compares the runs: the executables are its
-own). Stage 1, compiled by it from its 4 263 811 lines of LIR in 20 s on
-one thread (4.7 ms for each thousand lines, against Cranelift's 6 s on
-four), checks the conformance suite's files with the output of the stage
-1 Cranelift builds. port-debt.md ("The backend in Sisu") lists what it
-leaves.
+own). Stage 1, compiled by it from its 4 263 811 lines of LIR in 15 to 19
+s on one thread of a loaded machine (about 4 ms for each thousand lines,
+against Cranelift's 6 s on four cores), prints on the 400 conformance
+files tried what stage 1 compiled by Cranelift prints, in 1.5 times the
+time. port-debt.md ("The backend in Sisu") lists what it leaves.
 
 ### Coverage
 
@@ -6952,6 +6962,89 @@ library", "Tasks and the scheduler", "Capabilities", "Stage 2")
      lowering's time, and `SISU_NATIVE_SURVEY` the Rust lowering's survey.
      This changes no rule of the language.
 
+**Stage 1's diagnostics round** (stage 1's RULES.md, R10 to R19; the manual's findings)
+
+291. A non-exhaustive `match` (`E0314`) names every pattern no arm covers
+     (03), up to eight, in the order of the constructors their types
+     declare, with the note `type.more-missing` past eight: where some arm
+     names a constructor of a part of the value, each constructor no arm
+     names is a pattern of its own with `_` for its fields; where none
+     does, the part is `_`. Stage 1 decides it (RULES.md, R10); the frozen
+     Rust front end names the first missing pattern only.
+292. `sisu lint` (10) is stage 1's `lint`: the program checked as `sisu
+     check` checks it, and its lints printed in either form, the warnings
+     the compiler's own do not include; a program with errors has them
+     reported and fails. Its first lint is D-043's (03): `W0015`, a
+     reachable `case _` over an enum declared in the same package as the
+     `match`, naming the variants it matches, with the fix that lists them
+     in its place. The checker reports a lint with its diagnostics, and
+     `Checked.lints` takes it out of them. Stage 1 decides it (RULES.md,
+     R11).
+293. Naming is enforced (02): the name pass reports a declaration whose
+     name is not in its kind's case, with the name written so as the fix:
+     `E0267` for a type, a trait, an associated type, a variant or a type
+     parameter not in `CamelCase` (a `_` in it, or a lowercase first
+     letter), `E0268` for a function, a method, a field, a parameter or a
+     variable not in `snake_case` (an uppercase letter in it), `E0269` for
+     a constant or a `const` generic parameter not in `SCREAMING_CASE` (a
+     lowercase letter in it). A capitalised name in a pattern is a
+     constant and not checked; an `extern` block's names are its
+     library's. Stage 1 decides it (RULES.md, R12).
+294. A trait is not a value: in an expression, a name that names a trait
+     and a visible variant is the variant (the module's own first), called
+     or bare, so `Add(left, right)` makes a variant named like the
+     prelude's `Add` where no type is expected; with no such variant the
+     name is the trait, `E0309` called and `E0350` bare. Stage 1 decides
+     it (RULES.md, R13).
+295. An interpolation reads its values: an optional chain of fields
+     written in one (`{u.team?.name}`) reads what it reaches through a
+     place, each link's field in place and the last one's value read
+     when it is not `Copy` (a `String` as a `str`, an optional field as an
+     optional reference), as `x?.f` through a reference borrows `f`; a
+     chain over a value, or outside an interpolation, moves as before.
+     Stage 1 decides it (RULES.md, R14).
+296. An error set named as one of the prelude's hides it in its module
+     and warns (`W0016`, D-024), since the two are different sets with one
+     name. Stage 1 decides it (RULES.md, R15).
+297. The diagnostics the manual's writers found without a fix get one
+     (10): `E0411` on a field that borrows by `str` owns a `String`;
+     `E0341` through a method's `self` takes `mut self`; `E0347` and
+     `E0368` for a missing `Eq`, `PartialOrd`, `Ord`, `Hash` or `Copy` of
+     the module's struct or enum derive it with the supertraits it lacks;
+     `E0300` for a borrowed collection of non-`Copy` items given as an
+     `Iterable[T]` notes why and copies it, and for text where a `Path` is
+     expected calls `Path.new`; `E0320` in a function that returns nothing
+     returns `! E` and `Ok(())`; `E0325` over text iterates its characters
+     or bytes; `E0369` for a character in text writes it as text; `E0305`
+     for `print(a, b)` interpolates; `E0200` for `open` names `Fs`, and
+     for an assignment that declares a name writes `let` (or `var`), the
+     name declared from then on. Python's `else` on a loop is `E0127`, an
+     assignment on a `case` line `E0118` with the block it needs, and a
+     hole whose value nothing uses is of type `()`. Stage 1 decides it
+     (RULES.md, R16).
+298. An intrinsic's call writes its type arguments in SIR also when one
+     of its own generic parameters appears in no parameter, in its result
+     or nowhere (`mem.size_of[int]()`, `mem.align_of[(int, bool)]()`),
+     besides when one appears in its result and in no parameter or a
+     parameter is an `Iterable[T]`; type argument `k` is the `k`th
+     generic parameter, the impl's first. Stage 1 decides it (RULES.md,
+     R17).
+299. An associated function takes the type arguments of its own generic
+     parameters after its name, `Type.function[Args](...)`, as a free
+     function does: the type gives its impl's parameters, written or
+     inferred, and the brackets the function's own (`E0208`, `E0349` for
+     a function without them); a trait's function called on a type takes
+     them the same way. A body of the standard library that does not
+     type-check stops the compiler with an internal error naming the
+     module and the diagnostic, where it lowered to `unreachable`. Stage 1
+     decides it (RULES.md, R18).
+300. An `@export`ed function's parameters and result hold no reference,
+     view, `Shared`, `Weak`, closure or capability (22, "Foreign calls";
+     `E0989` at each that does), since foreign code that calls it cannot
+     keep them alive; `@blocking` marks a foreign function only (`E0990`
+     elsewhere). Stage 1 decides it (RULES.md, R19); what the backend makes
+     of either is stage 2's.
+
 **Stage 2 in Sisu: the unsafe code, and stage 2 alone** (sections "Raw
 memory, foreign calls and the machine intrinsics" and "LIR"; D-087)
 
@@ -7017,9 +7110,9 @@ memory, foreign calls and the machine intrinsics" and "LIR"; D-087)
      its runs with the interpreter's expectations, and requires the build
      to say that stage 2 lowered the program and the Sisu backend compiled
      it (`native: compiled by the Sisu backend in T ms`); `cargo test`
-     runs it. Stage 1 compiled by it (4 263 811 lines of LIR in 20 s on one
-     thread) prints, on the 400 conformance files tried, what stage 1
-     compiled by Cranelift prints, in 1.5 times the time. The other ways
+     runs it. Stage 1 compiled by it (4 263 811 lines of LIR in 15 to 19 s
+     on one thread) prints, on the 400 conformance files tried, what stage
+     1 compiled by Cranelift prints, in 1.5 times the time. The other ways
      were an assembly text for the system's assembler (a process and two
      passes over text where the encoder is a few hundred lines, and the
      assembler's choices of encoding rather than the backend's), and a
@@ -7104,3 +7197,30 @@ memory, foreign calls and the machine intrinsics" and "LIR"; D-087)
      `R_X86_64_PC32`, so the object links into a position-independent
      executable as Cranelift's (`is_pic`) does. This changes no rule of
      the language.
+312. The Sisu backend writes DWARF 4 (`dwarf.sisu`), as the Cranelift path
+     does (decision 227), beginning with what a debugger needs to stop at
+     Sisu code and name it: a line table (`.debug_line`) with a sequence for
+     each function that has a source, its first row the declaration's line
+     at the function's start and each later row the `loc` before the code it
+     starts (repeats of a line and column left out, the first marked as the
+     prologue's end, so a breakpoint on a function stops past its prologue
+     and probe), and a unit (`.debug_info`, `.debug_abbrev`) holding a
+     subprogram for each function, with its name, its declaration's file and
+     line, its code's range and the frame pointer as its frame base. The
+     files are LIR's sources, the program's relative to the build's
+     directory and the standard library's in its directory, which the driver
+     passes as it passes them to the Cranelift path (`sisu2 x86 ...
+     --comp-dir DIR --std DIR`). Without `.debug_frame` a debugger unwinds
+     through the frame pointers every function has (decision 307). The
+     parameters, locals and their types, which LIR describes (`local`,
+     `type`), are not written yet (port-debt.md, "The backend in Sisu").
+     `cargo test` runs gdb on a program built with `--backend=sisu` (a
+     breakpoint on a function and on a line, and the backtrace's Sisu
+     functions and lines), else lldb, else the line table as `readelf`
+     decodes it. This changes no rule of the language.
+313. The `Debug` impls of `f64` and `f32` that the front end writes apply a
+     format spec as their `Display` impls do (`Spec.float`, `Spec.float32`),
+     since the two texts are the same: `{x=:.2f}` rounds (02), where the
+     precision was dropped and the `Debug` text padded; a spec of type `?`
+     still pads the `Debug` text. Stage 1 decides it (RULES.md, R20).
+
