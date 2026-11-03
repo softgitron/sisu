@@ -1,0 +1,19 @@
+# Go's `context.WithTimeout`: a deadline on a task, and no context.
+
+## Heats for `minutes`, a minute at a time, and gives the minutes.
+def heat(clock: Clock, minutes: int) -> int ! TaskError:
+    for _ in range(minutes):
+        clock.sleep(Duration.minutes(1))?
+    return Ok(minutes)
+
+def main():
+    let clock = Clock.fake()
+    let start = clock.now()
+    let heated = task.scope do s:
+        let half_an_hour = clock.after(Duration.minutes(30))
+        let heater = s.spawn_with(deadline=half_an_hour) do:
+            return heat(clock, 60)
+        return heater.join()
+    print(heated)
+    let minutes = (clock.now() - start).as_seconds() // 60
+    print("stopped after {minutes} minutes")

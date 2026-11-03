@@ -1,0 +1,18 @@
+# Rust's `async` and `.await`: tasks in a scope, with no colour.
+
+## The temperature of `sauna` after `minutes` on `clock`.
+def heat(clock: Clock, sauna: str, minutes: int) -> String ! TaskError:
+    clock.sleep(Duration.minutes(minutes))?
+    return Ok("{sauna} is warm after {minutes} minutes")
+
+def main() -> ! TaskError:
+    let clock = Clock.fake()
+    let start = clock.now()
+    let both = task.scope do s:
+        let kota = s.spawn(() -> heat(clock, "Kota", 40))
+        let ranta = s.spawn(() -> heat(clock, "Ranta", 25))
+        return Ok([kota.join()?, ranta.join()?])
+    for line in both?:
+        print(line)
+    print("{(clock.now() - start).as_seconds() // 60} minutes in all")
+    return Ok(())

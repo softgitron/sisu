@@ -5,6 +5,8 @@
 ##! sisu2 sir FILE.sir                                   # the program read and written again
 ##! sisu2 x86 FILE.lir --output FILE.o [--comp-dir DIR] [--std DIR]
 ##!                                                      # the program compiled to an x86-64 object
+##! sisu2 build FILE.sir --output FILE.o [--release] [--comp-dir DIR] [--std DIR] [--times]
+##!                                                      # lowered and compiled in one process
 ##! ```
 ##!
 ##! `lir` lowers the program (`stage2.lower`) and prints its LIR, or writes
@@ -13,7 +15,10 @@
 ##! check. `x86` compiles a LIR program with the Sisu backend
 ##! (`stage2.object`) into an ELF object, which the system linker links with
 ##! the runtime, its line table naming the program's files relative to
-##! `--comp-dir` and the standard library's in `--std`.
+##! `--comp-dir` and the standard library's in `--std`. `build` lowers a
+##! SIR program and compiles its LIR in this process, without the LIR's
+##! text between two (decision 334), the functions compiled on the workers
+##! of `std.par`; `--times` prints on standard error how long each took.
 
 import stage1.sir.write
 import stage2.gen
@@ -41,7 +46,7 @@ def emit(text: str):
         print(text)
 
 def usage() -> String:
-    return "usage: sisu2 lir FILE.sir [--release] [--output FILE.lir]\n       sisu2 sir FILE.sir\n       sisu2 x86 FILE.lir --output FILE.o [--comp-dir DIR] [--std DIR]".to_string()
+    return "usage: sisu2 lir FILE.sir [--release] [--output FILE.lir]\n       sisu2 sir FILE.sir\n       sisu2 x86 FILE.lir --output FILE.o [--comp-dir DIR] [--std DIR]\n       sisu2 build FILE.sir --output FILE.o [--release] [--comp-dir DIR] [--std DIR] [--times]".to_string()
 
 ## The bytes as `bytes`, each converted by a table of the 256 values.
 pure def as_bytes(xs: list[int]) -> bytes:
@@ -53,6 +58,25 @@ pure def as_bytes(xs: list[int]) -> bytes:
         out.push(table[x & 255])
     return bytes.from_list(out)
 
+## Nanoseconds as milliseconds, to a tenth.
+pure def millis(ns: int) -> String:
+    let tenths = ns // 100000
+    return "{tenths // 10}.{tenths % 10}"
+
+## The object the backend compiled, written at `o`, or why it was not.
+def write_object(
+    sys: System, path: str, compiled: list[int] ! ObjectError, o: str
+) -> () ! {IoError, CommandError}:
+    match compiled:
+        case Ok(code):
+            sys.fs.write(Path.new(o), as_bytes(code))?
+            return Ok(())
+        case Err(ObjectError.BadLir(line, message)):
+            print_err("{path}:{line}: {message}")
+        case Err(ObjectError.Unsupported(what, function)):
+            print_err("x86: not compiled: {what} (in {function})")
+    return Err(Failed)
+
 def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     let args = sys.env.args()
     if len(args) < 2:
@@ -63,10 +87,13 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     var output: String? = None
     var comp_dir = String.new()
     var std_dir = String.new()
+    var times = False
     var i = 2
     while i < len(args):
         if args[i] == "--release":
             release = True
+        elif args[i] == "--times":
+            times = True
         elif args[i] == "--output" and i + 1 < len(args):
             output = Some(args[i + 1].to_string())
             i += 1
@@ -79,22 +106,14 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         else:
             return Err(Usage(text=usage()))
         i += 1
-    if command != "sir" and command != "lir" and command != "x86":
+    if command != "sir" and command != "lir" and command != "x86" and command != "build":
         return Err(Usage(text=usage()))
+    if (command == "x86" or command == "build") and output == None:
+        return Err(Usage(text=usage()))
+    let start = sys.clock.now().unix_nanos()
     let text = sys.fs.read_to_string(Path.new(path))?
     if command == "x86":
-        let o = output else:
-            return Err(Usage(text=usage()))
-        let compiled = object.compile(text, comp_dir, std_dir)
-        match compiled:
-            case Ok(code):
-                sys.fs.write(Path.new(o), as_bytes(code))?
-                return Ok(())
-            case Err(ObjectError.BadLir(line, message)):
-                print_err("{path}:{line}: {message}")
-            case Err(ObjectError.Unsupported(what, function)):
-                print_err("x86: not compiled: {what} (in {function})")
-        return Err(Failed)
+        return write_object(sys, path, object.compile(text, comp_dir, std_dir), output ?? "")
     let r = read.read(text)
     if let Err(ReadError.Bad(line, message)) = r:
         print_err("{path}:{line}: {message}")
@@ -107,6 +126,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     var prog = read_prog
     gen.native_bodies(mut prog)
     let lowered = gen.lower(prog, release)
+    let lowered_at = sys.clock.now().unix_nanos()
     if let Err(e) = lowered:
         match e:
             case LirError.Unsupported(what, function):
@@ -119,6 +139,13 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         return Err(Failed)
     let Ok(lir_text) = lowered else:
         return Err(Failed)
+    if command == "build":
+        # The LIR is compiled where it was lowered (decision 334).
+        let compiled = object.compile(lir_text, comp_dir, std_dir)
+        let compiled_at = sys.clock.now().unix_nanos()
+        if times:
+            print_err("sisu2: lowered in {millis(lowered_at - start)} ms, compiled in {millis(compiled_at - lowered_at)} ms")
+        return write_object(sys, path, compiled, output ?? "")
     match output:
         case Some(o):
             sys.fs.write_text(Path.new(o), lir_text)?

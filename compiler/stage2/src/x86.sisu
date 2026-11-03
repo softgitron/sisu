@@ -238,7 +238,7 @@ impl Obj:
 
     ## The probe reserve of a task's stack, from the frames compiled so far
     ## (decision 234).
-    pure def reserve(self) -> int:
+    pub pure def reserve(self) -> int:
         return self.max_unprobed + self.max_top + 2 * FRAME_EXTRA
 
     ## The displacements to functions defined after the code that named
@@ -269,7 +269,7 @@ impl Obj:
 
     ## A compiled function's prologue, body and epilogue at the end of
     ## `.text`, its references resolved or relocated.
-    pure def place(mut self, f: LirFunc, own g: Gen, locals: set[String]):
+    pub pure def place(mut self, f: LirFunc, own g: Gen, locals: set[String]):
         self.text.align(16, 204)
         let start = self.text.pos()
         let pro = g.prologue(f)

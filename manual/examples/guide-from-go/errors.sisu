@@ -1,0 +1,22 @@
+# Go's `if err != nil { return err }` is `?`, and `%w` is `.context`.
+
+## Why a line is not a reading.
+error ReadingError:
+    NotANumber(text: String)
+
+## The temperature that `line` holds.
+def reading(line: str) -> int ! ReadingError:
+    let n = line.trim().parse_int() else:
+        return Err(NotANumber(line.to_string()))
+    return Ok(n)
+
+## The sum of the readings of `text`, one on each line.
+def total(text: str) -> int ! Contextual:
+    var sum = 0
+    for i, line in enumerate(text.lines()):
+        sum += reading(line).context("line {i + 1}")?
+    return Ok(sum)
+
+def main():
+    print(total("82\n79\n85"))
+    print(total("82\nhot\n85"))

@@ -1,0 +1,6 @@
+# Three Rust habits, which `sisu check` refuses.
+def main():
+    let names = ["Aino", "Eero"]
+    let copied = names.clone()
+    let ratio = len(copied) as f64
+    print(ratio)

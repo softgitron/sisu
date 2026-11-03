@@ -1,12 +1,26 @@
 ##! The Sisu backend's pass over a program (D-087, step 2): its LIR read
-##! item by item, each datum placed and each function compiled to x86-64 as
-##! it is read, then the ELF object written (`sisu2 x86 FILE.lir --output
-##! FILE.o`).
+##! item by item, each datum placed as it is read, and the functions
+##! compiled to x86-64 in batches on the workers of `std.par` (decision
+##! 334), each function's lines read and compiled on its own and the
+##! batch's functions placed in the order of the file, so that the object
+##! is the one compiling them one after another gives; then the ELF object
+##! written (`sisu2 x86 FILE.lir --output FILE.o`, and `sisu2 build`).
 
+import std.par
 import stage2.dwarf
 import stage2.elf
-from stage2.lirread import Item, K_LOCAL, LirReadError, LirReader
-from stage2.x86 import Obj, X86Error
+from stage2.lirread import (
+    F_OUTSIDE,
+    FuncText,
+    Item,
+    K_LOCAL,
+    LirFunc,
+    LirReadError,
+    LirReader,
+    Sig,
+    read_function,
+)
+from stage2.x86 import Datum, Gen, Obj, X86Error
 
 ## Why a program was not compiled.
 pub error ObjectError:
@@ -14,6 +28,16 @@ pub error ObjectError:
     BadLir(line: int, message: String)
     ## A construct the backend does not compile yet, and its function.
     Unsupported(what: String, function: String)
+
+## The most functions compiled at once: their operations and their code
+## are held until the batch is placed.
+const BATCH: int = 256
+
+## A function compiled on a worker, or why it was not.
+enum Compiled:
+    Done(LirFunc, Gen)
+    Bad(int, String)
+    NotCompiled(String, String)
 
 ## The object file the backend makes of a LIR program's text, its debug
 ## information naming the program's files relative to `comp_dir` and the
@@ -23,8 +47,9 @@ pub pure def compile(text: str, comp_dir: str, std_dir: str) -> list[int] ! Obje
     var o = Obj.new()
     var locals: set[String] = set()
     var sources: list[String] = []
+    var batch: list[FuncText] = []
     while True:
-        let next = r.next_item(text)
+        let next = r.next_item_lazy(text)
         if let Err(LirReadError.Bad(line, message)) = next:
             return Err(BadLir(line=line, message=message.copy()))
         let Ok(item) = next else:
@@ -42,9 +67,85 @@ pub pure def compile(text: str, comp_dir: str, std_dir: str) -> list[int] ! Obje
                 if linkage == K_LOCAL:
                     _ = locals.add(symbol.copy())
             case Item.Function(f):
-                let done = o.function(f, r.sigs, locals)
-                if let Err(X86Error.Unsupported(what, function)) = done:
-                    return Err(Unsupported(what=what.copy(), function=function.copy()))
+                # The lazy reader gives none; a function read whole is
+                # compiled here.
+                flush(text, mut batch, r.sigs, mut o, locals)?
+                let one = compile_one(text, f.copy(), r.sigs, o.data, o.reserve())
+                place(one, mut o, locals)?
+            case Item.Lazy(ft):
+                batch.push(ft.copy())
+                # C's `main` reads the probe reserve, which the frames of
+                # every function before it give (decision 234): it is
+                # compiled once they are placed.
+                if ft.f.frame == F_OUTSIDE or len(batch) >= BATCH:
+                    flush(text, mut batch, r.sigs, mut o, locals)?
+    flush(text, mut batch, r.sigs, mut o, locals)?
     o.finish()
     let debug = dwarf.sections(o, sources, comp_dir, std_dir)
     return Ok(elf.write(o, debug))
+
+## Compiles the functions of `batch` on the workers, then places them in
+## the batch's order, which empties it. The last of a batch may be C's
+## `main`: the batch holds only it then, or it comes after the others are
+## placed.
+pure def flush(
+    text: str, mut batch: list[FuncText], sigs: dict[String, Sig], mut o: Obj, locals: set[String]
+) -> () ! ObjectError:
+    if batch.is_empty():
+        return Ok(())
+    var main: FuncText? = None
+    if batch[len(batch) - 1].f.frame == F_OUTSIDE:
+        main = batch.pop()
+    if not batch.is_empty():
+        let done = compile_batch(text, batch, sigs, o.data, o.reserve())
+        batch = []
+        for c in own done:
+            place(c, mut o, locals)?
+    if let Some(ft) = main:
+        let read = read_function(text, ft, sigs)
+        if let Err(LirReadError.Bad(line, message)) = read:
+            return Err(BadLir(line=line, message=message.copy()))
+        let Ok(f) = read else:
+            return Ok(())
+        let one = compile_one(text, f, sigs, o.data, o.reserve())
+        place(one, mut o, locals)?
+    return Ok(())
+
+## The functions of `batch` compiled on the workers of `std.par`, in the
+## batch's order.
+pure def compile_batch(
+    text: str, batch: list[FuncText], sigs: dict[String, Sig], data: list[Datum], reserve: int
+) -> list[Compiled]:
+    return par.map(batch, (ft) -> compile_lazy(text, ft, sigs, data, reserve))
+
+## A function whose lines `ft` left unread, read and compiled.
+pure def compile_lazy(
+    text: str, ft: FuncText, sigs: dict[String, Sig], data: list[Datum], reserve: int
+) -> Compiled:
+    let read = read_function(text, ft, sigs)
+    if let Err(LirReadError.Bad(line, message)) = read:
+        return Compiled.Bad(line, message.copy())
+    let Ok(f) = read else:
+        return Compiled.Bad(0, "not read".to_string())
+    return compile_one(text, f, sigs, data, reserve)
+
+## A function compiled.
+pure def compile_one(
+    text: str, own f: LirFunc, sigs: dict[String, Sig], data: list[Datum], reserve: int
+) -> Compiled:
+    var g = Gen.new(f)
+    let r = g.compile(f, sigs, data, reserve)
+    if let Err(X86Error.Unsupported(what, _)) = r:
+        return Compiled.NotCompiled(what.copy(), f.symbol.copy())
+    return Compiled.Done(f, g)
+
+## A compiled function placed in the object, or why it was not compiled.
+pure def place(own c: Compiled, mut o: Obj, locals: set[String]) -> () ! ObjectError:
+    if let Compiled.Bad(line, message) = c:
+        return Err(BadLir(line=line, message=message.copy()))
+    if let Compiled.NotCompiled(what, function) = c:
+        return Err(Unsupported(what=what.copy(), function=function.copy()))
+    let Compiled.Done(f, g) = c else:
+        return Ok(())
+    o.place(f, g, locals)
+    return Ok(())

@@ -1,0 +1,20 @@
+$ sisu check habits.sisu
+error[E0123]: Sisu has no `:=`; bind with `let` or use `if let`
+  --> habits.sisu:3:11
+  |
+3 |     count := 3
+  |           ^^
+
+error[E0117]: unexpected `print` after the end of the statement
+  --> habits.sisu:4:8
+  |
+4 |     go print("hello {count}")
+  |        ^^^^^
+
+$ sisu check nil.sisu
+error[E0200]: cannot find `nil` in this scope
+  --> nil.sisu:3:22
+  |
+3 |     let best: str? = nil
+  |                      ^^^
+

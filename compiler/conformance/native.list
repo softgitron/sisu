@@ -183,6 +183,7 @@ std/modules
 std/num_exact
 std/ord_impls
 std/par
+std/par_map
 std/process_env
 std/rand
 std/regex

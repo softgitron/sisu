@@ -1,0 +1,55 @@
+# `std.par.map` (06, "Data parallelism"; D-069): natively its bodies run on
+# the runtime's workers (decision 333), and the list is the one the elision
+# gives, in the elements' order: closures and named functions, results that
+# own memory, a body that maps, an empty list, and a body that panics,
+# whose lowest-index panic is the call's after the results before it are
+# dropped.
+import std.par
+
+struct Noisy:
+    n: int
+
+impl Drop for Noisy:
+    def drop(mut self):
+        print("dropped {self.n}")
+
+pure def square(x: ref int) -> int:
+    return x * x
+
+pure def words(n: ref int) -> String:
+    var out = String.new()
+    for _ in range(n):
+        out.push("ab")
+    return out
+
+pure def checked(x: ref int) -> Noisy:
+    if x == 3:
+        panic("three is not allowed")
+    return Noisy(n=x)
+
+pure def collatz(n: ref int) -> int:
+    var steps = 0
+    var k = n
+    while k != 1:
+        k = if k % 2 == 0: k // 2 else: 3 * k + 1
+        steps += 1
+    return steps
+
+def main():
+    let xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    let k = 7
+    print(par.map(xs, (x) -> x * k))
+    print(par.map(xs, square))
+    print(par.map([0, 1, 2, 3], words))
+    let empty: list[int] = []
+    print(par.map(empty, square))
+    var starts: list[int] = []
+    for i in range(1, 200):
+        starts.push(i)
+    print(sum(par.map(starts, collatz)))
+    let rows = [[1, 2], [3], [4, 5, 6]]
+    print(par.map(rows, (row) -> sum(par.map(row, square))))
+    let ns = par.map([1, 2], (x) -> Noisy(n=x))
+    print(len(ns))
+    let bad = par.map([1, 2, 3, 4, 5], checked)
+    print(len(bad))

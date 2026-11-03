@@ -1,0 +1,21 @@
+# Rust's `Rc<RefCell<T>>` is a `Shared` value with a `Cell` in it.
+
+## A sauna that several bookings point to, and how many use it.
+struct Sauna:
+    name: String
+    guests: Cell[int]
+
+## A booking, which shares the sauna with the others.
+struct Booking:
+    who: String
+    sauna: Shared[Sauna]
+
+def main():
+    let kota = Shared(Sauna("Kota", Cell(0)))
+    let aino = Booking("Aino", kota.copy())
+    let eero = Booking("Eero", kota.copy())
+    for b in [aino, eero]:
+        b.sauna.guests.set(b.sauna.guests.get() + 1)
+    print("{kota.name}: {kota.guests.get()} guests")
+    let note = Shared.downgrade(kota)
+    print(note.upgrade().is_some())

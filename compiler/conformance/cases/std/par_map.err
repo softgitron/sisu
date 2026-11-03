@@ -1,0 +1,3 @@
+panic: three is not allowed
+  at checked (par_map.sisu:27:9)
+  at main (par_map.sisu:54:15)

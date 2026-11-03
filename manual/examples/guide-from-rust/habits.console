@@ -1,0 +1,13 @@
+$ sisu check habits.sisu
+error[E0304]: `list[str]` has no method `clone`
+  --> habits.sisu:4:24
+  |
+4 |     let copied = names.clone()
+  |                        ^^^^^
+
+error[E0117]: unexpected `as` after the end of the statement
+  --> habits.sisu:5:29
+  |
+5 |     let ratio = len(copied) as f64
+  |                             ^^
+

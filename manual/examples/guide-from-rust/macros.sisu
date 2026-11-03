@@ -1,0 +1,22 @@
+# Rust's macros: derives, compile-time functions, and `print`.
+
+## A booking, with `Debug` and `Eq` written by their derives.
+@derive(Debug, Eq)
+struct Booking:
+    name: String
+    hour: int
+
+## The squares of 0 to `n - 1`, computed while compiling.
+comptime def squares(n: int) -> list[int]:
+    var out: list[int] = []
+    for i in range(n):
+        out.push(i * i)
+    return out
+
+const SQUARES: list[int] = comptime squares(6)
+
+def main():
+    let b = Booking("Aino", 18)
+    print("{b:?}")
+    print(b == Booking("Aino", 18))
+    print(SQUARES)

@@ -177,10 +177,21 @@ pub enum Item:
     Data(list[int], int, list[(int, String)])
     Declare(String, int, Sig)
     Function(LirFunc)
+    ## A function whose lines are left for `read_function`, which a
+    ## backend calls on any thread (`next_item_lazy`).
+    Lazy(FuncText)
     ## `source N "PATH"`.
     Source(String)
     ## The end of the items (`types`, `stats`, or the file's end).
     End
+
+## A function whose head is read and whose lines are not: the function
+## with its frame's parameters typed and nothing else, the start of its
+## first line in the text, and the number of its head's line.
+pub struct FuncText:
+    pub f: LirFunc
+    pub start: int
+    pub line: int
 
 ## A cursor over one line: the bytes from `pos` up to `end`.
 view struct Cur:
@@ -469,11 +480,19 @@ impl LirReader:
 
     ## The next item of `text`.
     pub pure def next_item(mut self, text: str) -> Item ! LirReadError:
+        return self.item(text, False)
+
+    ## The next item of `text`, a function as `Item.Lazy`: its head is read,
+    ## its lines only skipped up to its `end`, for `read_function`.
+    pub pure def next_item_lazy(mut self, text: str) -> Item ! LirReadError:
+        return self.item(text, True)
+
+    pure def item(mut self, text: str, lazy: bool) -> Item ! LirReadError:
         while True:
             let (s, e) = self.next_line(text) else:
                 return Ok(Item.End)
             var c = Cur(s=text, pos=s, end=e)
-            match self.header_line(text, mut c):
+            match self.header_line(text, mut c, lazy):
                 case Ok(Some(item)):
                     return Ok(item)
                 case Ok(None):
@@ -481,7 +500,7 @@ impl LirReader:
                 case Err(Wrong(message)):
                     return Err(Bad(line=self.line_no, message=message))
 
-    pure def header_line(mut self, text: str, mut c: Cur) -> Item? ! LineError:
+    pure def header_line(mut self, text: str, mut c: Cur, lazy: bool) -> Item? ! LineError:
         if c.keyword("lir"):
             if c.int()? != 1:
                 return wrong("LIR version is not 1")
@@ -547,13 +566,19 @@ impl LirReader:
             _ = self.sigs.insert(symbol.copy(), sig.copy())
             return Ok(Some(Item.Declare(symbol, linkage, sig)))
         if c.keyword("function"):
-            return Ok(Some(Item.Function(self.function(text, mut c)?)))
+            let f = self.function_head(mut c)?
+            if lazy:
+                let start = self.pos
+                let line = self.line_no
+                self.skip_function(text)?
+                return Ok(Some(Item.Lazy(FuncText(f=f, start=start, line=line))))
+            return Ok(Some(Item.Function(self.function_lines(text, f)?)))
         if c.keyword("types") or c.keyword("stats") or c.keyword("type"):
             return Ok(Some(Item.End))
         return wrong("unknown line `{c.rest()}`")
 
-    ## A function: its head is read, then its lines up to `end`.
-    pure def function(mut self, text: str, mut c: Cur) -> LirFunc ! LineError:
+    ## A function's head: the function with its parameters typed.
+    pure def function_head(mut self, mut c: Cur) -> LirFunc ! LineError:
         let symbol = c.word()?
         let fw = c.word()?
         var frame = -1
@@ -575,260 +600,291 @@ impl LirReader:
             line = c.int()?
         let sig = self.sigs.get(symbol.copy()) else:
             return wrong("`{symbol}` is not declared")
-        var f = LirFunc(
-            symbol=symbol,
-            frame=frame,
-            name=name,
-            source=source,
-            line=line,
-            slots=[],
-            vars=0,
-            locals=[],
-            ops=[],
-            types=sig.params.copy(),
+        return Ok(
+            LirFunc(
+                symbol=symbol,
+                frame=frame,
+                name=name,
+                source=source,
+                line=line,
+                slots=[],
+                vars=0,
+                locals=[],
+                ops=[],
+                types=sig.params.copy(),
+            )
         )
+
+    ## A function's lines up to its `end`, after its head.
+    pure def function_lines(mut self, text: str, own f: LirFunc) -> LirFunc ! LineError:
+        var g = f
         while True:
             let (s, e) = self.next_line(text) else:
                 return wrong("a function without its `end`")
             var lc = Cur(s=text, pos=s, end=e)
             if lc.keyword("end"):
-                return Ok(f)
-            self.function_line(mut lc, mut f)?
+                return Ok(g)
+            function_line(self.sigs, mut lc, mut g)?
 
-    pure def function_line(mut self, mut c: Cur, mut f: LirFunc) -> () ! LineError:
-        if c.keyword("slot"):
-            _ = c.numbered(115)?
-            f.slots.push(c.int()?)
-            return Ok(())
-        if c.keyword("vars"):
-            f.vars = c.int()?
-            return Ok(())
-        if c.keyword("local"):
-            let name = c.text()?
-            let ty = c.numbered(116)?
-            let slot = c.numbered(115)?
-            var l = LirLocal(name=name, ty=ty, slot=slot, indirect=False, param=False, line=None)
-            while not c.at_end():
-                if c.keyword("indirect"):
-                    l.indirect = True
-                elif c.keyword("param"):
-                    l.param = True
-                elif c.keyword("line"):
-                    l.line = Some(c.int()?)
-                else:
-                    return wrong("unknown local `{c.rest()}`")
-            f.locals.push(l)
-            return Ok(())
-        if c.keyword("block"):
-            let b = c.numbered(98)?
-            let cold = c.keyword("cold")
-            f.ops.push(Op.Block(b, cold))
-            return Ok(())
-        # The values the line defines, if it starts with them.
-        var defined = 0
-        if c.starts("v"):
-            while True:
-                let v = c.value()?
-                if v != len(f.types) + defined:
-                    return wrong("values must be numbered in order: `v{v}`")
-                defined += 1
-                if c.eat("="):
-                    break
-                c.expect(",")?
-        let w = c.word()?
-        let (op, ts) = self.operation(mut c, w, f.types)?
-        if len(ts) != defined:
-            return wrong("`{w}` defines {len(ts)} values, not {defined}")
-        for t in ts:
-            f.types.push(t)
-        f.ops.push(op)
-        if not c.at_end():
-            return wrong("unexpected `{c.rest()}`")
+    ## The lines of a function, unread, up to its `end`.
+    pure def skip_function(mut self, text: str) -> () ! LineError:
+        while True:
+            let (s, e) = self.next_line(text) else:
+                return wrong("a function without its `end`")
+            var lc = Cur(s=text, pos=s, end=e)
+            if lc.keyword("end"):
+                return Ok(())
+
+## The lines of the function `ft` left unread (`next_item_lazy`), read with
+## the signatures the program declares: on any thread, since it reads only
+## its own lines.
+pub pure def read_function(text: str, ft: FuncText, sigs: dict[String, Sig]) -> LirFunc ! LirReadError:
+    var r = LirReader(pos=ft.start, line_no=ft.line, data=0, release=False, sigs={})
+    var f = ft.f.copy()
+    while True:
+        let (s, e) = r.next_line(text) else:
+            return Err(Bad(line=r.line_no, message="a function without its `end`".to_string()))
+        var lc = Cur(s=text, pos=s, end=e)
+        if lc.keyword("end"):
+            return Ok(f)
+        if let Err(Wrong(message)) = function_line(sigs, mut lc, mut f):
+            return Err(Bad(line=r.line_no, message=message))
+
+## One line of a function's frame or body.
+pure def function_line(sigs: dict[String, Sig], mut c: Cur, mut f: LirFunc) -> () ! LineError:
+    if c.keyword("slot"):
+        _ = c.numbered(115)?
+        f.slots.push(c.int()?)
         return Ok(())
+    if c.keyword("vars"):
+        f.vars = c.int()?
+        return Ok(())
+    if c.keyword("local"):
+        let name = c.text()?
+        let ty = c.numbered(116)?
+        let slot = c.numbered(115)?
+        var l = LirLocal(name=name, ty=ty, slot=slot, indirect=False, param=False, line=None)
+        while not c.at_end():
+            if c.keyword("indirect"):
+                l.indirect = True
+            elif c.keyword("param"):
+                l.param = True
+            elif c.keyword("line"):
+                l.line = Some(c.int()?)
+            else:
+                return wrong("unknown local `{c.rest()}`")
+        f.locals.push(l)
+        return Ok(())
+    if c.keyword("block"):
+        let b = c.numbered(98)?
+        let cold = c.keyword("cold")
+        f.ops.push(Op.Block(b, cold))
+        return Ok(())
+    # The values the line defines, if it starts with them.
+    var defined = 0
+    if c.starts("v"):
+        while True:
+            let v = c.value()?
+            if v != len(f.types) + defined:
+                return wrong("values must be numbered in order: `v{v}`")
+            defined += 1
+            if c.eat("="):
+                break
+            c.expect(",")?
+    let w = c.word()?
+    let (op, ts) = operation(sigs, mut c, w, f.types)?
+    if len(ts) != defined:
+        return wrong("`{w}` defines {len(ts)} values, not {defined}")
+    for t in ts:
+        f.types.push(t)
+    f.ops.push(op)
+    if not c.at_end():
+        return wrong("unexpected `{c.rest()}`")
+    return Ok(())
 
-    ## One operation and the types of the values it defines.
-    pure def operation(
-        mut self, mut c: Cur, w: str, types: list[int]
-    ) -> (Op, list[int]) ! LineError:
-        let (name, suffix) = split_suffix(w)
-        if let Some(k) = binary_named(name):
+## One operation and the types of the values it defines.
+pure def operation(
+    sigs: dict[String, Sig], mut c: Cur, w: str, types: list[int]
+) -> (Op, list[int]) ! LineError:
+    let (name, suffix) = split_suffix(w)
+    if let Some(k) = binary_named(name):
+        let a = c.value()?
+        c.expect(",")?
+        let b = c.value()?
+        return Ok((Op.Bin(k, a, b), [type_at(types, a)]))
+    match name:
+        case "loc":
+            let l = c.int()?
+            return Ok((Op.Loc(l, c.int()?), []))
+        case "iconst":
+            let t = type_named(suffix) else:
+                return wrong("bad type `{suffix}`")
+            return Ok((Op.Iconst(t, c.int()?), [t]))
+        case "iadd_imm" | "imul_imm" | "bxor_imm" | "bor_imm":
+            let k = match name:
+                case "iadd_imm": B_IADD
+                case "imul_imm": B_IMUL
+                case "bxor_imm": B_BXOR
+                case _: B_BOR
+            let a = c.value()?
+            c.expect(",")?
+            return Ok((Op.BinImm(k, a, c.int()?), [type_at(types, a)]))
+        case "ineg" | "bnot" | "fneg":
+            let k = match name:
+                case "ineg": U_INEG
+                case "bnot": U_BNOT
+                case _: U_FNEG
+            let a = c.value()?
+            return Ok((Op.Un(k, a), [type_at(types, a)]))
+        case "icmp":
+            let cc = int_cc(suffix) else:
+                return wrong("bad condition `{suffix}`")
+            let a = c.value()?
+            c.expect(",")?
+            return Ok((Op.Icmp(cc, a, c.value()?), [T_I8]))
+        case "icmp_imm":
+            let cc = int_cc(suffix) else:
+                return wrong("bad condition `{suffix}`")
+            let a = c.value()?
+            c.expect(",")?
+            return Ok((Op.IcmpImm(cc, a, c.int()?), [T_I8]))
+        case "fcmp":
+            let cc = float_cc(suffix) else:
+                return wrong("bad condition `{suffix}`")
+            let a = c.value()?
+            c.expect(",")?
+            return Ok((Op.Fcmp(cc, a, c.value()?), [T_I8]))
+        case "sadd_overflow" | "ssub_overflow" | "smul_overflow":
+            let k = match name:
+                case "sadd_overflow": O_SADD
+                case "ssub_overflow": O_SSUB
+                case _: O_SMUL
             let a = c.value()?
             c.expect(",")?
             let b = c.value()?
-            return Ok((Op.Bin(k, a, b), [type_at(types, a)]))
-        match name:
-            case "loc":
-                let l = c.int()?
-                return Ok((Op.Loc(l, c.int()?), []))
-            case "iconst":
-                let t = type_named(suffix) else:
+            return Ok((Op.Ovf(k, a, b), [type_at(types, a), T_I8]))
+        case "select":
+            let cv = c.value()?
+            c.expect(",")?
+            let a = c.value()?
+            c.expect(",")?
+            let b = c.value()?
+            return Ok((Op.Select(cv, a, b), [type_at(types, a)]))
+        case "uextend" | "sextend" | "ireduce" | "bitcast" | "fpromote" | "fdemote":
+            let k = match name:
+                case "uextend": C_UEXTEND
+                case "sextend": C_SEXTEND
+                case "ireduce": C_IREDUCE
+                case "bitcast": C_BITCAST
+                case "fpromote": C_FPROMOTE
+                case _: C_FDEMOTE
+            let t = type_named(suffix) else:
+                return wrong("bad type `{suffix}`")
+            return Ok((Op.Conv(k, t, c.value()?), [t]))
+        case "load" | "uload8" | "sload8":
+            var k = L_U8
+            var t = T_I64
+            if name == "sload8":
+                k = L_S8
+            elif name == "load":
+                let lt = type_named(suffix) else:
                     return wrong("bad type `{suffix}`")
-                return Ok((Op.Iconst(t, c.int()?), [t]))
-            case "iadd_imm" | "imul_imm" | "bxor_imm" | "bor_imm":
-                let k = match name:
-                    case "iadd_imm": B_IADD
-                    case "imul_imm": B_IMUL
-                    case "bxor_imm": B_BXOR
-                    case _: B_BOR
-                let a = c.value()?
-                c.expect(",")?
-                return Ok((Op.BinImm(k, a, c.int()?), [type_at(types, a)]))
-            case "ineg" | "bnot" | "fneg":
-                let k = match name:
-                    case "ineg": U_INEG
-                    case "bnot": U_BNOT
-                    case _: U_FNEG
-                let a = c.value()?
-                return Ok((Op.Un(k, a), [type_at(types, a)]))
-            case "icmp":
-                let cc = int_cc(suffix) else:
-                    return wrong("bad condition `{suffix}`")
-                let a = c.value()?
-                c.expect(",")?
-                return Ok((Op.Icmp(cc, a, c.value()?), [T_I8]))
-            case "icmp_imm":
-                let cc = int_cc(suffix) else:
-                    return wrong("bad condition `{suffix}`")
-                let a = c.value()?
-                c.expect(",")?
-                return Ok((Op.IcmpImm(cc, a, c.int()?), [T_I8]))
-            case "fcmp":
-                let cc = float_cc(suffix) else:
-                    return wrong("bad condition `{suffix}`")
-                let a = c.value()?
-                c.expect(",")?
-                return Ok((Op.Fcmp(cc, a, c.value()?), [T_I8]))
-            case "sadd_overflow" | "ssub_overflow" | "smul_overflow":
-                let k = match name:
-                    case "sadd_overflow": O_SADD
-                    case "ssub_overflow": O_SSUB
-                    case _: O_SMUL
-                let a = c.value()?
-                c.expect(",")?
-                let b = c.value()?
-                return Ok((Op.Ovf(k, a, b), [type_at(types, a), T_I8]))
-            case "select":
-                let cv = c.value()?
-                c.expect(",")?
-                let a = c.value()?
-                c.expect(",")?
-                let b = c.value()?
-                return Ok((Op.Select(cv, a, b), [type_at(types, a)]))
-            case "uextend" | "sextend" | "ireduce" | "bitcast" | "fpromote" | "fdemote":
-                let k = match name:
-                    case "uextend": C_UEXTEND
-                    case "sextend": C_SEXTEND
-                    case "ireduce": C_IREDUCE
-                    case "bitcast": C_BITCAST
-                    case "fpromote": C_FPROMOTE
-                    case _: C_FDEMOTE
-                let t = type_named(suffix) else:
-                    return wrong("bad type `{suffix}`")
-                return Ok((Op.Conv(k, t, c.value()?), [t]))
-            case "load" | "uload8" | "sload8":
-                var k = L_U8
-                var t = T_I64
-                if name == "sload8":
-                    k = L_S8
-                elif name == "load":
-                    let lt = type_named(suffix) else:
-                        return wrong("bad type `{suffix}`")
-                    k = lt
-                    t = lt
-                let a = c.value()?
-                c.expect(",")?
-                return Ok((Op.Load(k, a, c.int()?), [t]))
-            case "store":
-                let v = c.value()?
-                c.expect(",")?
-                let a = c.value()?
-                c.expect(",")?
-                return Ok((Op.Store(v, a, c.int()?), []))
-            case "stack_addr":
-                return Ok((Op.StackAddr(c.numbered(115)?), [T_I64]))
-            case "stack_load":
-                return Ok((Op.StackLoad(c.numbered(115)?), [T_I64]))
-            case "stack_store":
-                let v = c.value()?
-                c.expect(",")?
-                return Ok((Op.StackStore(v, c.numbered(115)?), []))
-            case "symbol_value":
-                return Ok((Op.SymbolValue(c.numbered(100)?), [T_I64]))
-            case "tls_value":
-                return Ok((Op.TlsValue(c.numbered(100)?), [T_I64]))
-            case "func_addr":
-                return Ok((Op.FuncAddr(c.word()?), [T_I64]))
-            case "get_stack_pointer":
-                return Ok((Op.GetSp, [T_I64]))
-            case "call":
-                let symbol = c.word()?
-                let args = c.args()?
-                let sig = self.sigs.get(symbol.copy()) else:
-                    return wrong("`{symbol}` is not declared")
-                let n = len(sig.results)
-                return Ok((Op.Call(symbol, args, n), sig.results.copy()))
-            case "call_indirect":
-                let n = c.int()?
-                c.expect(",")?
-                let f = c.value()?
-                let args = c.args()?
-                return Ok((Op.CallIndirect(n, f, args, 1), [T_I8]))
-            case "memcpy":
-                let d = c.value()?
-                c.expect(",")?
-                let s = c.value()?
-                c.expect(",")?
-                return Ok((Op.Memcpy(d, s, c.value()?), []))
-            case "use":
-                return Ok((Op.Use(c.numbered(120)?), [T_I64]))
-            case "def":
-                let x = c.numbered(120)?
-                c.expect(",")?
-                return Ok((Op.Def(x, c.value()?), []))
-            case "param":
-                return Ok((Op.Param(c.numbered(98)?), [T_I64]))
-            case "probe_reserve":
-                return Ok((Op.ProbeReserve, [T_I64]))
-            case "jump":
-                let (b, args) = c.target()?
-                return Ok((Op.Jump(b, args), []))
-            case "brif":
-                let cv = c.value()?
-                c.expect(",")?
-                let (a, aargs) = c.target()?
-                c.expect(",")?
-                let (b, bargs) = c.target()?
-                return Ok((Op.Brif(cv, a, aargs, b, bargs), []))
-            case "switch":
-                let v = c.value()?
-                c.expect(",")?
-                let d = c.numbered(98)?
-                c.expect(",")?
-                c.expect("[")?
-                var cases: list[(int, int)] = []
-                if not c.eat("]"):
-                    while True:
-                        let k = c.int()?
-                        let b = c.numbered(98)?
-                        cases.push((k, b))
-                        if c.eat("]"):
-                            break
-                        c.expect(",")?
-                c.expect("made")?
-                _ = c.int()?
-                return Ok((Op.Switch(v, d, cases), []))
-            case "return":
-                var vs: list[int] = []
-                if not c.at_end():
-                    while True:
-                        vs.push(c.value()?)
-                        if not c.eat(","):
-                            break
-                return Ok((Op.Return(vs), []))
-            case "trap":
-                return Ok((Op.Trap(c.int()?), []))
-            case _:
-                return wrong("unknown operation `{w}`")
+                k = lt
+                t = lt
+            let a = c.value()?
+            c.expect(",")?
+            return Ok((Op.Load(k, a, c.int()?), [t]))
+        case "store":
+            let v = c.value()?
+            c.expect(",")?
+            let a = c.value()?
+            c.expect(",")?
+            return Ok((Op.Store(v, a, c.int()?), []))
+        case "stack_addr":
+            return Ok((Op.StackAddr(c.numbered(115)?), [T_I64]))
+        case "stack_load":
+            return Ok((Op.StackLoad(c.numbered(115)?), [T_I64]))
+        case "stack_store":
+            let v = c.value()?
+            c.expect(",")?
+            return Ok((Op.StackStore(v, c.numbered(115)?), []))
+        case "symbol_value":
+            return Ok((Op.SymbolValue(c.numbered(100)?), [T_I64]))
+        case "tls_value":
+            return Ok((Op.TlsValue(c.numbered(100)?), [T_I64]))
+        case "func_addr":
+            return Ok((Op.FuncAddr(c.word()?), [T_I64]))
+        case "get_stack_pointer":
+            return Ok((Op.GetSp, [T_I64]))
+        case "call":
+            let symbol = c.word()?
+            let args = c.args()?
+            let sig = sigs.get(symbol.copy()) else:
+                return wrong("`{symbol}` is not declared")
+            let n = len(sig.results)
+            return Ok((Op.Call(symbol, args, n), sig.results.copy()))
+        case "call_indirect":
+            let n = c.int()?
+            c.expect(",")?
+            let f = c.value()?
+            let args = c.args()?
+            return Ok((Op.CallIndirect(n, f, args, 1), [T_I8]))
+        case "memcpy":
+            let d = c.value()?
+            c.expect(",")?
+            let s = c.value()?
+            c.expect(",")?
+            return Ok((Op.Memcpy(d, s, c.value()?), []))
+        case "use":
+            return Ok((Op.Use(c.numbered(120)?), [T_I64]))
+        case "def":
+            let x = c.numbered(120)?
+            c.expect(",")?
+            return Ok((Op.Def(x, c.value()?), []))
+        case "param":
+            return Ok((Op.Param(c.numbered(98)?), [T_I64]))
+        case "probe_reserve":
+            return Ok((Op.ProbeReserve, [T_I64]))
+        case "jump":
+            let (b, args) = c.target()?
+            return Ok((Op.Jump(b, args), []))
+        case "brif":
+            let cv = c.value()?
+            c.expect(",")?
+            let (a, aargs) = c.target()?
+            c.expect(",")?
+            let (b, bargs) = c.target()?
+            return Ok((Op.Brif(cv, a, aargs, b, bargs), []))
+        case "switch":
+            let v = c.value()?
+            c.expect(",")?
+            let d = c.numbered(98)?
+            c.expect(",")?
+            c.expect("[")?
+            var cases: list[(int, int)] = []
+            if not c.eat("]"):
+                while True:
+                    let k = c.int()?
+                    let b = c.numbered(98)?
+                    cases.push((k, b))
+                    if c.eat("]"):
+                        break
+                    c.expect(",")?
+            c.expect("made")?
+            _ = c.int()?
+            return Ok((Op.Switch(v, d, cases), []))
+        case "return":
+            var vs: list[int] = []
+            if not c.at_end():
+                while True:
+                    vs.push(c.value()?)
+                    if not c.eat(","):
+                        break
+            return Ok((Op.Return(vs), []))
+        case "trap":
+            return Ok((Op.Trap(c.int()?), []))
+        case _:
+            return wrong("unknown operation `{w}`")
 
 ## The type of value `v`, as far as `types` says.
 pure def type_at(types: list[int], v: int) -> int:

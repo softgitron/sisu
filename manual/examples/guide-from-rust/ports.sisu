@@ -1,0 +1,25 @@
+# Rust's `Result<u16, PortError>` and `?`: an error set and `T ! E`.
+
+## Why a text is not a port.
+error PortError:
+    NotANumber(text: String)
+    OutOfRange(value: int)
+
+## The port that `text` names.
+def port(text: str) -> int ! PortError:
+    let n = text.parse_int() else:
+        return Err(NotANumber(text.to_string()))
+    if n < 1 or n > 65535:
+        return Err(OutOfRange(n))
+    return Ok(n)
+
+## The ports that `texts` name, or the first error.
+def ports(texts: list[str]) -> list[int] ! PortError:
+    var out: list[int] = []
+    for text in texts:
+        out.push(port(text)?)
+    return Ok(out)
+
+def main():
+    print(ports(["80", "443"]))
+    print(ports(["80", "http", "99999"]))

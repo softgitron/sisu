@@ -359,8 +359,8 @@ instead of teaching.
 |---|---|---|
 | G1 | Set up your editor | Connects an editor to `sisu lsp`: diagnostics, hover with error sets and capabilities, inlay hints, fixes, explain-borrow, worksheet values inline. |
 | G2 | Coming from Python ([written](guides/from-python.md)) | Ports a Python script and walks through every false friend (D-062, [R19](#the-reference)) and the idioms that replace `class`, `None`, exceptions and truthiness. |
-| G3 | Coming from Rust | Maps lifetimes to views and `from`, `Rc` to `Shared`, `Result` to `T ! E`, macros to `comptime`, `async` to tasks. |
-| G4 | Coming from Go | Maps goroutines to scopes, `context` to cancellation, interfaces to traits, `if err != nil` to `?`. |
+| G3 | Coming from Rust ([written](guides/from-rust.md)) | Maps lifetimes to views and `from`, `Rc` to `Shared`, `Result` to `T ! E`, macros to `comptime`, `async` to tasks. |
+| G4 | Coming from Go ([written](guides/from-go.md)) | Maps goroutines to scopes, `context` to cancellation, interfaces to traits, `if err != nil` to `?`. |
 | G5 | Read and write files ([written](guides/read-files.md)) | `Fs` operations, missing files as `IoError`, walking a directory, testing with `Fs.in_memory`. |
 | G6 | Parse command-line arguments ([written](guides/command-line.md)) | `std.x.cli` derived from a struct, help text, errors, a transcript test. |
 | G7 | Read and write JSON ([written](guides/json.md)) | `@derive(Encode, Decode)`, `json.encode`, `json.decode` validating refinements at the boundary, `json.parse`. |
@@ -828,7 +828,7 @@ solutions and passing checks.
 | 2 | Chapters 2, 3 and 4 | done |
 | 3 | R16 the `sisu` command (2, done), R17 diagnostics, first codes (2, done), R1 lexical structure (2, done) | done |
 | 4 | Chapters 5 (2.5), 6 (2), 7 (2.5), 8 (3) | done |
-| 5 | Chapter 9 with challenge I (3, done); G2 Coming from Python (1, done); R19 false friends (1, done) | done |
+| 5 | Chapter 9 with challenge I (3, done); G2 Coming from Python (1, done); R19 false friends (1, done); G3 Coming from Rust and G4 Coming from Go, which no step named (2, done) | done |
 | 6 | Chapters 10 (3, done), 11 (4, done), 12 (3, done), 13 with challenge II (3, done); R7 ownership (3, done); G13 borrow errors (1, done); X3 (1, done) | done |
 | 7 | Reader test of Parts I and II: five readers who know Python, their stuck points, the rewrites | 4 |
 | 8 | Chapters 14 (3, done), 15 (3, done), 16 (3, done), 17 with challenge III (2.5, done); R2 (3, done), R3 (2, done), R6 (1, done), R13 (2.5, done) | 20 |
@@ -1558,6 +1558,15 @@ Writing the guides turned up more, by guide:
   E0220, followed by an E0321 that calls the error set `{}`, and with no
   file `sisu audit` is D0004: a package's capabilities cannot be
   audited.
+- G3, coming from Rust. `.clone()` gets E0304 with no fix that writes
+  `.copy()`, and `len(xs) as f64` E0117 ("unexpected `as` after the end
+  of the statement"), as R19 found for the other Rust spellings.
+- G4, coming from Go. `go print(...)` gets E0117 ("unexpected `print`
+  after the end of the statement") with no word about `task.scope` and
+  `spawn`, and `nil` gets E0200 ("cannot find `nil`") with no fix that
+  writes `None`; `count := 3` gets E0123, which names `let`. A file with
+  a parse error reports nothing of its names, so the `nil` of a file
+  that also holds `go f()` goes unreported until the parse is fixed.
 
 Writing the explanations turned up more, by page:
 

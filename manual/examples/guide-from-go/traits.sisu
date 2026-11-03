@@ -1,0 +1,30 @@
+# Go's interfaces are traits, which a type implements by saying so.
+
+## Anything that can say how warm it is.
+trait Heater:
+    def celsius(self) -> int
+
+struct Stove:
+    kilowatts: int
+
+struct Fire:
+    logs: int
+
+impl Heater for Stove:
+    def celsius(self) -> int:
+        return 20 + 6 * self.kilowatts
+
+impl Heater for Fire:
+    def celsius(self) -> int:
+        return 20 + 15 * self.logs
+
+## Whether `h` makes a sauna hot enough.
+def hot_enough[H: Heater](h: H) -> bool:
+    return h.celsius() >= 70
+
+def main():
+    print(hot_enough(Stove(9)))
+    print(hot_enough(Fire(3)))
+    let heaters: list[Box[dyn Heater]] = [Box(Stove(6)), Box(Fire(4))]
+    for h in heaters:
+        print(h.celsius())

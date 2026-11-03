@@ -1,0 +1,32 @@
+# Borrows without lifetimes: a parameter borrows, and a result that
+# borrows says from what.
+
+## The longer of `a` and `b`, which it borrows from.
+def longer(a: str, b: str) -> str from a, b:
+    return if len(a) >= len(b): a else: b
+
+## A word of a text, and where it starts: a view into the text.
+view struct Word:
+    text: str
+    start: int
+
+## The words of `text`, each viewing the text.
+def words(text: str) -> list[Word]:
+    var out: list[Word] = []
+    var start = 0
+    for part in text.split(" "):
+        out.push(Word(part, start))
+        start += len(part) + 1
+    return out
+
+## Adds `name` to `names`, which belong to the caller.
+def add(mut names: list[String], name: str):
+    names.push(name.to_string())
+
+def main():
+    print(longer("sauna", "sisu"))
+    for w in words("hot and dry"):
+        print("{w.text} at {w.start}")
+    var names: list[String] = []
+    add(mut names, "Aino")
+    print(names)

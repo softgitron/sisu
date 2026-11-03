@@ -1,0 +1,4 @@
+# Two Go habits, which `sisu check` refuses.
+def main():
+    count := 3
+    go print("hello {count}")

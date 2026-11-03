@@ -1,0 +1,2 @@
+4:24-4:29 E0304 type.unknown-method ty="list[str]" name="clone"
+5:29-5:31 E0117 parse.trailing-tokens found="`as`"

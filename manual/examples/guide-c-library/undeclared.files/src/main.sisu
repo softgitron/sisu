@@ -1,0 +1,7 @@
+##! Greets whoever the environment says is logged in.
+import cenv
+
+def main(sys: System):
+    let who = cenv.lookup(sys.env, "USER") ?? "stranger"
+    print("Hei, {who}!")
+    print("the path: {cenv.lookup(sys.env, "PATH") ?? "not set"}")

@@ -1,0 +1,22 @@
+# Go's goroutines, channel and `WaitGroup`: tasks in a scope that waits.
+
+## Heats `sauna` for `minutes` on `clock`, then says so on `done`.
+def heat(
+    clock: Clock,
+    done: Sender[String],
+    sauna: str,
+    minutes: int,
+) -> ! {ChannelError, TaskError}:
+    clock.sleep(Duration.minutes(minutes))?
+    return done.send("{sauna} after {minutes} minutes")
+
+def main():
+    let clock = Clock.fake()
+    let tx, rx = channel[String](capacity=3)
+    task.scope do s:
+        s.spawn(() -> heat(clock, tx, "Kota", 40))
+        s.spawn(() -> heat(clock, tx, "Ranta", 25))
+        s.spawn(() -> heat(clock, tx, "Savu", 60))
+    tx.close()
+    for line in rx:
+        print(line)
