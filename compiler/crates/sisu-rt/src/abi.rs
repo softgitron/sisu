@@ -1360,6 +1360,10 @@ intrinsics! {
     MemViewPlain = "mem.view_plain",
     MemTransmute = "mem.transmute",
     MemSliceFromRaw = "mem.slice_from_raw",
+    // std.par's `map`, whose bodies run on the runtime's workers (decision
+    // 333): no SIR names it; the native backend compiles `par.map`'s body
+    // as a call of it.
+    ParMap = "par.map",
 }
 
 impl Intrinsic {

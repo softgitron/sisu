@@ -1,0 +1,3 @@
+test "turns from text" ... blocked by todo("read the turns")
+test "a free hour says so" ... blocked by todo("lay out the evening")
+0 passed, 0 failed, 2 blocked

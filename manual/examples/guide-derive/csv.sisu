@@ -1,0 +1,40 @@
+# A derive that writes a struct's lines of comma-separated values.
+## A value written as a line of comma-separated values.
+trait Csv:
+    ## The names of the columns, separated by commas.
+    def header() -> String
+    ## The values of the fields, separated by commas.
+    def row(self) -> String
+
+    comptime def derive(T: type) -> impl Csv for T:
+        return impl Csv for T:
+            def header() -> String:
+                comptime if not reflect.is_struct(T):
+                    comptime panic("`{reflect.name_of(T)}` is not a struct")
+                var names: list[String] = []
+                comptime for f in reflect.fields_of(T):
+                    names.push(f.name.to_string())
+                return names.join(",")
+
+            def row(self) -> String:
+                var cells: list[String] = []
+                comptime for f in reflect.fields_of(T):
+                    cells.push("{self.[f]}")
+                return cells.join(",")
+
+## A turn in the sauna.
+@derive(Csv)
+struct Booking:
+    name: String
+    hour: int
+    paid: bool = False
+
+@derive(Csv)
+struct Reading:
+    minute: int
+    celsius: f64
+
+test "a booking and a reading as lines":
+    assert Booking.header() == "name,hour,paid"
+    assert Booking(name="Aino", hour=18).row() == "Aino,18,False"
+    assert Reading(minute=5, celsius=78.5).row() == "5,78.5"

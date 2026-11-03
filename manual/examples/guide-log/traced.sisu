@@ -1,0 +1,23 @@
+# An interceptor, put around the file system in `main`, logs each call.
+
+## Logs each call it is shown, and what the call gave.
+struct Tracer:
+    pass
+
+impl cap.Interceptor for Tracer:
+    def before(self, call: cap.Call):
+        log.debug("{call.capability}.{call.method}({call.args})")
+
+    def after(self, call: cap.Call, outcome: str):
+        log.debug("{call.method} gave {outcome}")
+
+## The stove's setting from `stove.txt`, or 80 without one.
+def setting(fs: Fs) -> int:
+    let text = fs.read_to_string("stove.txt") else:
+        return 80
+    return text.trim().parse_int() ?? 80
+
+def main(sys: System):
+    let fs: Fs = cap.Wrap(inner=sys.fs, hook=Tracer())
+    print(setting(fs))
+    print(setting(fs.restrict_to("old")))

@@ -116,18 +116,27 @@ speed has numeric targets; every diagnostic has a stable code and, where
 it can, a fix. Go, Rust, Zig and Elixir show that integrated tooling
 decides a language's first day more than anything else, Elm shows that
 messages can be designed like any interface, and Rust, Swift, Scala and
-C++ show the cost of leaving compile speed for later.
+C++ show the cost of leaving compile speed for later ([How the compiler
+works](compiler.md), [Diagnostics as a product](diagnostics.md)).
 
 **Evolve without breaking** (P9, D-036). A specification, a
 compatibility promise, editions and a migration tool, because Python 3,
-Swift's first three versions and Scala 3 show what breaking costs.
+Swift's first three versions and Scala 3 show what breaking costs ([How
+Sisu evolves](evolution.md)).
 
 **Steal, do not invent** (P10). Every feature has a predecessor in a
 shipped language, and the decision log names it; where none exists, the
 feature is an open question rather than a decision. A borrowed spelling
 carries its borrowed meaning: where Sisu writes something as Python or
 Rust does, it means the same or fails to compile (D-062), so a reader's
-habits never mislead silently.
+habits never mislead silently ([Loud divergence](loud-divergence.md)).
+
+Four more explanations follow the principles into particular corners:
+[Costs you can see](costs.md) takes the third priority in detail,
+[Compile-time code instead of macros](compile-time.md) applies P1 and P7
+to code that writes code, [Determinism](determinism.md) says what `pure`
+promises and why, and [Working with unfinished code](unfinished-code.md)
+shows how a program with a typed hole still compiles and runs.
 
 ## The principles in one function
 
@@ -169,9 +178,9 @@ can fail and how, and the `?` in the body passes a failure on, visibly
 its path (P5). Inside the body nothing is annotated: `text`, `longest`
 and `line` get their types from what they are given (P2). The tests need
 no mocking library: an in-memory file system is a value like any other,
-passed where the real one would be. And everything here, from the test
-runner to the formatter that laid out the file, is the one `sisu`
-command (P6).
+passed where the real one would be ([Testing without
+mocks](testing.md)). And everything here, from the test runner to the
+formatter that laid out the file, is the one `sisu` command (P6).
 
 ## What Sisu leaves out on purpose
 
@@ -244,7 +253,9 @@ them its bets ([README](../../proposal/README.md#the-three-bets)):
   stacks.** Go and Erlang move stacks because their collectors can; Sisu
   cannot. If a task needs more than four times Go's memory, or stacks
   overflow in ordinary code, task bodies are compiled to state machines
-  behind the same `scope` and `spawn` (bet 3, Q-6, which is still open).
+  behind the same `scope` and `spawn` (bet 3, Q-6, which is still open;
+  [Concurrency without colours](concurrency.md#what-would-change-it) has
+  the harness's first numbers).
 
 The experiment of [20](../../proposal/20-pre-registration.md) fixes in
 advance what counts as each result, so that the answer is not bent to

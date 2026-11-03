@@ -507,16 +507,16 @@ fn drop_queued(queue: Vec<(Box<[u64]>, u32)>) -> u8 {
 /// interpreter's anchors are frames); false past it, with the panic raised,
 /// which names the intrinsic that opened the anchor (decision 234).
 fn enter_anchor(name: &str) -> bool {
-    let d = crate::entry::SISU_RT_DEPTH.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    let d = crate::tls::depth().fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
     if d > abi::MAX_DEPTH && system(|| crate::entry::over_depth(name)) != abi::OK {
-        crate::entry::SISU_RT_DEPTH.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+        crate::tls::depth().fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
         return false;
     }
     true
 }
 
 fn leave_anchor() {
-    crate::entry::SISU_RT_DEPTH.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    crate::tls::depth().fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// The code and environment of the task's closure (or a generator's) an
@@ -1266,7 +1266,7 @@ unsafe fn iter_next(c: &Call<'_>) -> u8 {
                 }
                 // The generator's calls count on top of the consumer's
                 // (decision 234).
-                let depth = crate::entry::SISU_RT_DEPTH.load(std::sync::atomic::Ordering::Relaxed);
+                let depth = crate::tls::depth().load(std::sync::atomic::Ordering::Relaxed);
                 let g = s.task(t);
                 g.ctx.depth += depth - g.depth_base;
                 g.depth_base = depth;

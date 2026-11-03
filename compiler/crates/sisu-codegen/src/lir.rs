@@ -38,8 +38,9 @@ pub(crate) struct Stats {
 }
 
 pub(crate) enum Item {
-    /// `data dN import NAME`: one of the runtime's (writable) data symbols.
-    Import(String),
+    /// `data dN import [tls] NAME`: one of the runtime's (writable) data
+    /// symbols, thread-local with `tls` (decision 332).
+    Import(String, bool),
     /// `data dN [align A] (bytes|u32|zeros) ...`: read-only data, with the
     /// words that hold functions' addresses.
     Data {
@@ -177,6 +178,8 @@ pub(crate) enum Op {
     StackLoad(u32),
     StackStore(V, u32),
     SymbolValue(u32),
+    /// The address of the running thread's copy of thread-local data.
+    TlsValue(u32),
     FuncAddr(String),
     GetStackPointer,
     /// A call, and how many values its line defines.
@@ -532,7 +535,8 @@ impl Reader {
             }
             self.data += 1;
             let item = if c.keyword("import") {
-                Item::Import(c.word()?)
+                let tls = c.keyword("tls");
+                Item::Import(c.word()?, tls)
             } else {
                 let align = if c.keyword("align") { Some(c.int()? as u64) } else { None };
                 let mut funcs = Vec::new();
@@ -822,6 +826,7 @@ impl Reader {
                 Op::StackStore(v, c.numbered(b's')?)
             }
             ("symbol_value", None) => Op::SymbolValue(c.numbered(b'd')?),
+            ("tls_value", None) => Op::TlsValue(c.numbered(b'd')?),
             ("func_addr", None) => Op::FuncAddr(c.word()?),
             ("get_stack_pointer", None) => Op::GetStackPointer,
             ("call", None) => {

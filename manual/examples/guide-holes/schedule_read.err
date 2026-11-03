@@ -1,0 +1,9 @@
+warning[W0001]: typed hole `lay out the evening` of type `list[String]`
+  --> schedule_read.sisu:19:12
+   |
+19 |     return todo("lay out the evening")
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+panic: reached the typed hole `todo("lay out the evening")`
+  at schedule (schedule_read.sisu:19:12)
+  at main (schedule_read.sisu:23:17)

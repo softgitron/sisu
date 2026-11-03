@@ -1,0 +1,4 @@
+debug: Fs.read_to_string("stove.txt")
+debug: read_to_string gave Ok("90\n")
+debug: Fs.read_to_string("old/stove.txt")
+debug: read_to_string gave Err(NotFound(path="old/stove.txt"))

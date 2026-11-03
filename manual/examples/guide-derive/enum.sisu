@@ -1,0 +1,29 @@
+# The derive asked for an enum, which it refuses while compiling.
+## A value written as a line of comma-separated values.
+trait Csv:
+    ## The names of the columns, separated by commas.
+    def header() -> String
+    ## The values of the fields, separated by commas.
+    def row(self) -> String
+
+    comptime def derive(T: type) -> impl Csv for T:
+        return impl Csv for T:
+            def header() -> String:
+                comptime if not reflect.is_struct(T):
+                    comptime panic("`{reflect.name_of(T)}` is not a struct")
+                var names: list[String] = []
+                comptime for f in reflect.fields_of(T):
+                    names.push(f.name.to_string())
+                return names.join(",")
+
+            def row(self) -> String:
+                var cells: list[String] = []
+                comptime for f in reflect.fields_of(T):
+                    cells.push("{self.[f]}")
+                return cells.join(",")
+
+## How a sauna is heated.
+@derive(Csv)
+enum Heater:
+    Wood
+    Electric

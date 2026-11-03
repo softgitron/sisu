@@ -1,0 +1,15 @@
+# A log record has a level, and goes to standard error.
+
+## The stove's temperature after `minutes`, from 20 degrees.
+def heat(minutes: int) -> int:
+    log.debug("heating for {minutes} minutes")
+    let celsius = 20 + 3 * minutes
+    if celsius > 100:
+        log.warn("{celsius} degrees is too hot")
+    return celsius
+
+def main():
+    log.info("the stove is on")
+    print(heat(20))
+    print(heat(30))
+    log.error("the stove switched itself off")

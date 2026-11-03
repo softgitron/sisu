@@ -1,0 +1,8 @@
+$ sisu check stove.sisu
+error[E0347]: `Stove` does not implement `Display`
+  --> <derive>/main.sisu:20:22
+   |
+20 |         cells.push("{self.stove}")
+   |                      ^^^^^^^^^^
+  = fix: show its `Debug` form: `:?`
+

@@ -376,16 +376,16 @@ instead of teaching.
 | G17 | Make a loop parallel ([written](guides/parallel.md)) | `std.par`, reducers, `grain`, checking that the result is unchanged. |
 | G18 | Use a region for per-request memory | `Region.bump`, `list.with_allocator`, why the list cannot escape (waits for allocators). |
 | G19 | Call a C library | A trusted wrapper package with a capability-taking safe API (waits for foreign functions). |
-| G20 | Build a native executable | `sisu build --native`, `--release`, targets and cross compilation. |
-| G21 | Write a derive | A trait's `comptime def derive` over `reflect.fields_of`. |
+| G20 | Build a native executable ([written](guides/native.md)) | `sisu build --native`, `--release`, targets and cross compilation. |
+| G21 | Write a derive ([written](guides/derive.md)) | A trait's `comptime def derive` over `reflect.fields_of`. |
 | G22 | Generate configuration | A module of `const` items rendered by `sisu eval` (waits for `sisu eval`). |
 | G23 | Publish a package | Documentation coverage, the API diff, semver, provenance (waits for the registry). |
 | G24 | Check what a dependency can do | `sisu audit`, the capability summary, admission and its authority delta. |
 | G25 | Move to a new edition | `sisu fix --edition` and `sisu fix --deps` (waits for `sisu fix`). |
-| G26 | Plan with typed holes | `todo`, blocked tests, `sisu check --holes`. |
-| G27 | Benchmark and profile | `bench` blocks, `black_box`, `sisu bench`, `sisu run --profile`. |
-| G28 | Log and trace | `std.log`, levels, the trace context of scopes, `trace.wrap` over a capability. |
-| G29 | Write a script with dependencies | A shebang file with inline metadata. |
+| G26 | Plan with typed holes ([written](guides/holes.md)) | `todo`, blocked tests, `sisu check --holes`. |
+| G27 | Benchmark and profile ([written](guides/bench.md)) | `bench` blocks, `black_box`, `sisu bench`, `sisu run --profile`. |
+| G28 | Log and trace ([written](guides/log.md)) | `std.log`, levels, the trace context of scopes, `trace.wrap` over a capability. |
+| G29 | Write a script with dependencies ([written](guides/script.md)) | A shebang file with inline metadata. |
 | G30 | Embed a file at compile time | `embed` and what it records for reproducible builds. |
 | G31 | Do exact arithmetic with money | `Decimal`, rounding modes, `Ratio` from division. |
 | G32 | Design a library's API | The std rules: capabilities in, values out; specific error sets; no hidden allocation; `Debug` everywhere; iterators over views; Python's names. |
@@ -442,10 +442,10 @@ chose otherwise, and links to the decision log for the evidence.
 | X8 | Loud divergence ([written](explanations/loud-divergence.md)) | Why a familiar spelling means the same as in Python or Rust or fails to compile. |
 | X9 | How the compiler works ([written](explanations/compiler.md)) | Stages 0 to 3, the interpreter, SIR, the native backend, the queries. |
 | X10 | Diagnostics as a product ([written](explanations/diagnostics.md)) | The catalog, identifiers, fixes with consequences, the wrong-program corpus. |
-| X11 | How Sisu evolves | Editions, migrations that travel with libraries, governance. |
+| X11 | How Sisu evolves ([written](explanations/evolution.md)) | Editions, migrations that travel with libraries, governance. |
 | X12 | Testing without mocks ([written](explanations/testing.md)) | Fakes, the test clock, simulation, replay. |
-| X13 | Working with unfinished code | Typed holes, blocked tests, the fill engine to come. |
-| X14 | Costs you can see | No hidden allocation, monomorphisation, compile speed. |
+| X13 | Working with unfinished code ([written](explanations/unfinished-code.md)) | Typed holes, blocked tests, the fill engine to come. |
+| X14 | Costs you can see ([written](explanations/costs.md)) | No hidden allocation, monomorphisation, compile speed. |
 
 ## Every feature has a place
 
@@ -834,8 +834,8 @@ solutions and passing checks.
 | 8 | Chapters 14 (3, done), 15 (3, done), 16 (3, done), 17 with challenge III (2.5, done); R2 (3, done), R3 (2, done), R6 (1, done), R13 (2.5, done) | 20 |
 | 9 | Chapters 18 (3, done), 19 (3, done), 20 (4, done), 21 (3, done), 22 with challenge IV (4, done); R9 (2.5, done), R10 (2, done), R15 (2, done); G5 to G16 (9, done) | done |
 | 10 | R4 (2, done), R5 (1.5, done), R8 (1.5, done), R14 (1.5), R20 (2), R21 (1), R22 (1); X1, X2, X4, X5, X8, X10, X12 (7, done) | 17.5 |
-| 11 | Chapters 23 (2, done), 24 (2, done), 25 (3, done), 26 (2, done); R11 (1), R12 (2); G17, G20, G21, G26, G27, G28, G29, G30, G31, G32 (7.5; G17 done); X6 (done), X7 (done), X9 (done), X13, X14 (5) | 26.5 |
-| 12 | When their features exist: chapters 27 (3, done) and 28 with challenge V (2, done); G18, G19, G22, G23, G24, G25 (4.5); X11 (1); the site (3) | 13.5 |
+| 11 | Chapters 23 (2, done), 24 (2, done), 25 (3, done), 26 (2, done); R11 (1), R12 (2); G17, G20, G21, G26, G27, G28, G29, G30, G31, G32 (7.5; G17, G20, G21 and G26 to G29 done); X6, X7, X9, X13, X14 (5, done) | 26.5 |
+| 12 | When their features exist: chapters 27 (3, done) and 28 with challenge V (2, done); G18, G19, G22, G23, G24, G25 (4.5); X11 (1, done); the site (3) | 13.5 |
 | | Total | about 159 |
 
 The setup of R18, the generated library reference, belongs to step 12's
@@ -1485,6 +1485,49 @@ Writing the guides turned up more, by guide:
   prints, where [06](../proposal/06-concurrency-and-capabilities.md#data-parallelism)
   makes every `par` body `pure`; `par.map` and the reducers' methods are
   checked (E0335).
+- G20, a native executable. `sisu build --native --target TARGET` is
+  D0009, though [12](../proposal/12-interop-and-targets.md) builds cross
+  compilation in; and the executable of a ten-line program is 17.5 MB in
+  both profiles, where 12 plans dead-code elimination and a
+  `release-size` profile.
+- G21, a derive. Inside a derive's template a field has no `ty`:
+  `reflect.implements(f.ty, "Display")` there stops with E0608 ("a field
+  has no `ty`"), though chapter 25 gives fields a `ty` and a generic
+  function that reflects reads it, so a derive cannot choose `Display`
+  or `Debug` field by field. A derive's body must be the `return impl`
+  alone (E0607), so a check of the type's shape goes inside a method.
+  E0347 for a field type without `Display`, at `<derive>/main.sisu`,
+  offers the fix `:?`, an edit of code that the user of `@derive`
+  cannot reach.
+- G26, typed holes. `sisu build --native --release` builds a program
+  with a hole, with W0001 and status 0, where
+  [10](../proposal/10-tooling.md) has a release build reject holes. A
+  `str` variable given a field of the loop variable inside a nested
+  loop, `who = turn.name`, gets E0402 ("`turn` is borrowed on line 24
+  and cannot be modified until that borrow ends on line 25") pointing
+  at `for turn in turns:`, with no word that the loop binds `turn` anew
+  while `who` still borrows it; `turn.name.copy()` and a `String` are
+  the fix, which the note's `.copy()` only half names.
+- G27, benchmarks. `sisu run --profile`, which
+  [10](../proposal/10-tooling.md#debugging-and-profiling) gives a
+  sampling profiler, is D0009; `--stats` prints scheduling latencies in
+  microseconds that differ between runs, so only `--stats stack-depth`
+  can be shown in a session; and `sisu bench` reports a mean of one
+  run, with times of one benchmark that differ between runs by more
+  than two ways of writing it do (153 and 369 µs).
+- G28, logging. `std.log` writes every level, with no setting that
+  leaves out `debug`, and a record is a message without fields, where
+  [11](../proposal/11-stdlib.md) makes it a structured facade; the trace
+  context is the path of spawn indices, `[task 2.1]`, rather than the
+  trace and span identifiers of
+  [06](../proposal/06-concurrency-and-capabilities.md#interceptors-and-trace-context);
+  and `trace.wrap` with a `Tracer` is missing, so a program writes its
+  own `cap.Interceptor` and wraps the capability with `cap.Wrap`.
+- G29, a script. A script whose inline metadata names a dependency by
+  version, `stove = "1.2"`, gets E0220 first ("names no module of this
+  package, of a dependency in `sisu.toml`, or of the standard
+  library"), which names a `sisu.toml` that a script does not have, and
+  then E1010, which says what to write.
 
 Writing the explanations turned up more, by page:
 
@@ -1537,6 +1580,22 @@ Writing the explanations turned up more, by page:
   points at the loop's line in the source or at the call that
   instantiated it, as chapter 19 found for `@refines`. E0310 there says
   "`+` cannot be applied" for a `+=`.
+- X13, working with unfinished code. `sisu build --native --release`
+  builds a program with a typed hole, printing W0001 and `built`, with
+  status 0, though D-061 and [17](../proposal/17-testing.md#assertions)
+  say that release builds reject holes "so blocked is never a shipped
+  state"; with `sisu test` exiting 0 on blocked tests, nothing in stage
+  0 stops a hole from shipping. A blocked test and a run that reaches a
+  hole print the hole's name only, not its closure ("the `Debug`
+  rendering of every binding in scope") that 17 and
+  [10](../proposal/10-tooling.md) describe.
+- X11, how Sisu evolves. `@deprecated("...")` is accepted and a call
+  to the deprecated function gets no warning, where
+  [13](../proposal/13-evolution-and-governance.md#deprecation) says that
+  deprecated items warn with the replacement named; `@fix_inline` is
+  accepted and read by nothing. Any attribute is accepted silently, so a
+  misspelt one (`@deprecatd`) is too; attributes are data (D-046), and
+  nothing lists the ones the toolchain reads (R14 waits).
 
 ## Open questions
 

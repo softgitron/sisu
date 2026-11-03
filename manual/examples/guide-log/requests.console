@@ -1,0 +1,7 @@
+$ sisu run requests.sisu
+info [task 2]: Eero asks for 19:00
+info [task 2.1]: 19:00 is free
+info [task 2.2]: a towel for Eero
+info [task 1]: Aino asks for 18:00
+info [task 1.2]: a towel for Aino
+info [task 1.1]: 18:00 is free

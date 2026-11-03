@@ -1,0 +1,29 @@
+$ sisu check schedule.sisu
+warning[W0001]: typed hole `read the turns` of type `list[Turn]`
+  --> schedule.sisu:11:12
+   |
+11 |     return todo("read the turns")
+   |            ^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `lay out the evening` of type `list[String]`
+  --> schedule.sisu:15:12
+   |
+15 |     return todo("lay out the evening")
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+$ sisu run schedule.sisu
+warning[W0001]: typed hole `read the turns` of type `list[Turn]`
+  --> schedule.sisu:11:12
+   |
+11 |     return todo("read the turns")
+   |            ^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `lay out the evening` of type `list[String]`
+  --> schedule.sisu:15:12
+   |
+15 |     return todo("lay out the evening")
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+panic: reached the typed hole `todo("read the turns")`
+  at parse_turns (schedule.sisu:11:12)
+  at main (schedule.sisu:19:26)

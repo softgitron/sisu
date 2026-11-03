@@ -5,9 +5,8 @@
 //! ownership checker keeps the binding from outliving the list it views.
 
 use crate::mem::{self, List};
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 
 /// The headers registered, so that a release looks at the table only when
@@ -17,9 +16,15 @@ static REGISTERED: AtomicUsize = AtomicUsize::new(0);
 /// The header of every empty view, kept for the run.
 static EMPTY: OnceLock<usize> = OnceLock::new();
 
-thread_local! {
-    /// The headers of the views of each buffer, by its address.
-    static VIEWS: RefCell<HashMap<usize, Vec<usize>>> = RefCell::new(HashMap::new());
+/// The headers of the views of each buffer, by its address: shared by the
+/// threads, since a view a worker of `std.par` makes of the asking task's
+/// list goes with that list (decision 333).
+static VIEWS: Mutex<Option<HashMap<usize, Vec<usize>>>> = Mutex::new(None);
+
+/// Runs `f` on the table of views.
+fn with_views<R>(f: impl FnOnce(&mut HashMap<usize, Vec<usize>>) -> R) -> Option<R> {
+    let mut g = VIEWS.lock().ok()?;
+    Some(f(g.get_or_insert_with(HashMap::new)))
 }
 
 /// The words of a view's header: a list's three, then the buffer it views.
@@ -46,7 +51,7 @@ pub(crate) unsafe fn view(l: *mut u8, size: u32, lo: u64, hi: u64) -> *mut u8 {
         let h = mem::alloc(HEADER);
         (h as *mut List).write(List { ptr: list.at(lo, size), len: hi - lo, cap: 0 });
         mem::set_word(h, ROOT, root);
-        let _ = VIEWS.try_with(|v| v.borrow_mut().entry(root as usize).or_default().push(h as usize));
+        let _ = with_views(|v| v.entry(root as usize).or_default().push(h as usize));
         REGISTERED.fetch_add(1, Relaxed);
         h
     }
@@ -56,7 +61,7 @@ pub(crate) unsafe fn view(l: *mut u8, size: u32, lo: u64, hi: u64) -> *mut u8 {
 /// `root` is released: a copy of a plain value that `view_plain` made of
 /// bytes laid out otherwise in a value (decision 302).
 pub(crate) fn hold(root: *mut u8, block: *mut u8) {
-    let _ = VIEWS.try_with(|v| v.borrow_mut().entry(root as usize).or_default().push(block as usize));
+    let _ = with_views(|v| v.entry(root as usize).or_default().push(block as usize));
     REGISTERED.fetch_add(1, Relaxed);
 }
 
@@ -66,7 +71,7 @@ pub(crate) fn released(p: *mut u8) {
     if REGISTERED.load(Relaxed) == 0 {
         return;
     }
-    let headers = VIEWS.try_with(|v| v.borrow_mut().remove(&(p as usize))).ok().flatten();
+    let headers = with_views(|v| v.remove(&(p as usize))).flatten();
     for h in headers.unwrap_or_default() {
         REGISTERED.fetch_sub(1, Relaxed);
         mem::release(h as *mut u8);

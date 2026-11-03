@@ -85,13 +85,16 @@ pub(crate) unsafe fn concrete(p: *const u8, t: u32) -> u32 {
 
 // --------------------------------------------------------------------- drop
 
-/// Whether drops only free memory: no drop glue, no `Drop`, no check of a
-/// guard's invariant ([`forget_value`]).
-static FORGETTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+thread_local! {
+    /// Whether drops only free memory: no drop glue, no `Drop`, no check
+    /// of a guard's invariant ([`forget_value`]); each thread's own, so
+    /// that a worker of `std.par` forgets only what it frees (decision 333).
+    static FORGETTING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 
 /// Whether the values being dropped are forgotten rather than dropped.
 pub(crate) fn forgetting() -> bool {
-    FORGETTING.load(std::sync::atomic::Ordering::Relaxed)
+    FORGETTING.with(std::cell::Cell::get)
 }
 
 /// Runs `f` with drops forgetting: what they free is freed, and no Sisu
@@ -100,9 +103,9 @@ pub(crate) fn forgetting() -> bool {
 /// error `main` returned, the objects of capabilities when the run ends,
 /// and the frames of an abandoned generator (decisions 95 and 223).
 pub(crate) fn forget<R>(f: impl FnOnce() -> R) -> R {
-    let was = FORGETTING.swap(true, std::sync::atomic::Ordering::Relaxed);
+    let was = FORGETTING.with(|c| c.replace(true));
     let r = f();
-    FORGETTING.store(was, std::sync::atomic::Ordering::Relaxed);
+    FORGETTING.with(|c| c.set(was));
     r
 }
 

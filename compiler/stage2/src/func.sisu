@@ -189,6 +189,9 @@ impl Cg:
     # ------------------------------------------------------------ helpers
 
     pub pure def data_addr(mut self, d: int) -> int:
+        # The runtime's words of the running thread (decision 332).
+        if d == self.depth or d == self.budget or d == self.stack or d == self.site:
+            return self.b.tls_value(d)
         return self.b.symbol_value(d)
 
     ## A call of the runtime's `name`: its first result, if it has one.

@@ -1,0 +1,8 @@
+$ sisu run visible.sisu
+2 16.0 13.0
+$ sisu audit --ownership visible.sisu
+visible.sisu lines=19 Shared=1 Weak=0 Cell=0 Arena=0 Key=0 copy=2 unsafe=0
+$ sisu run --stats shared visible.sisu
+2 16.0 13.0
+stats shared: 1 of 1 `Shared` construction sites tagged task-local, 0 may-cross
+stats shared: visible.sisu:22:18 in `main`, task-local: 1 cells made, 0 reached by another task

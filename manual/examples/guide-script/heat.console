@@ -1,0 +1,6 @@
+$ sisu heat.sisu 9
+Kota 10: 66 minutes
+Ranta 14: 93 minutes
+$ sisu run heat.sisu 12
+Kota 10: 50 minutes
+Ranta 14: 70 minutes

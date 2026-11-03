@@ -1,0 +1,10 @@
+$ sisu check schedule_done.sisu
+$ sisu test schedule_done.sisu
+test "turns from text" ... ok
+test "a free hour says so" ... ok
+2 passed, 0 failed, 0 blocked
+$ sisu run schedule_done.sisu
+17:00 free
+18:00 Aino
+19:00 free
+20:00 Eero

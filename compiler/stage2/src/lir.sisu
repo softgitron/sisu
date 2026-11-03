@@ -164,6 +164,11 @@ impl Fb:
     pub pure def symbol_value(mut self, d: int) -> int:
         return self.def1("symbol_value d{d}")
 
+    ## The address of the running thread's copy of thread-local data
+    ## (decision 332).
+    pub pure def tls_value(mut self, d: int) -> int:
+        return self.def1("tls_value d{d}")
+
     pub pure def func_addr(mut self, symbol: str) -> int:
         return self.def1("func_addr {symbol}")
 

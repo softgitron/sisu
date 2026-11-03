@@ -1,0 +1,7 @@
+$ sisu run --profile tasks.sisu
+error[D0009]: unknown option `--profile` for `sisu run`
+$ sisu run --stats stack-depth tasks.sisu
+[3, 3, 2]
+stats stack-depth: 6 calls, the deepest stack 3 frames, about 928 bytes of native stack there (16 per SIR local and 64 per frame)
+stats stack-depth: 1 calls at a depth of 1 to 1 frames
+stats stack-depth: 5 calls at a depth of 2 to 3 frames

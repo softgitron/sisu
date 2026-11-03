@@ -14,6 +14,7 @@
 //! of SIR run as ordinary control flow. docs/architecture.md, "Stage 2",
 //! has the mapping of each construct.
 
+mod bodies;
 mod debug;
 mod facts;
 mod func;
@@ -160,6 +161,9 @@ fn compile_with(
     survey: bool,
     options: &Options,
 ) -> Result<(Compiled, Vec<(String, String)>), Error> {
+    // std.par's `map` runs its bodies on the runtime's workers (decision
+    // 333).
+    let prog = &*bodies::native_bodies(prog);
     // A function value holds its closure's environment, as many words as
     // the largest `own` closure's (decision 224), which only compiling
     // finds: a program that needs more is compiled again with them.
@@ -502,6 +506,9 @@ impl<'p> Codegen<'p> {
         // The release profile is Cranelift's optimisations (decision 232).
         set(&mut flags, "opt_level", if release { "speed" } else { "none" })?;
         set(&mut flags, "is_pic", "true")?;
+        // The runtime's words the code reaches by symbol are thread-local
+        // (decision 332).
+        set(&mut flags, "tls_model", "elf_gd")?;
         set(&mut flags, "enable_verifier", if cfg!(debug_assertions) { "true" } else { "false" })?;
         let isa = cranelift_native::builder()
             .map_err(|e| Error::internal(format!("this machine: {e}")))?
@@ -512,9 +519,11 @@ impl<'p> Codegen<'p> {
         let builder = ObjectBuilder::new(isa, "sisu_program", cranelift_module::default_libcall_names())
             .map_err(|e| Error::internal(format!("the object file: {e}")))?;
         let mut module = ObjectModule::new(builder);
+        // Each thread keeps its own count of nested calls, budget, stack
+        // limits and site (decision 332).
         let mut import = |name: &str| {
             module
-                .declare_data(name, Linkage::Import, true, false)
+                .declare_data(name, Linkage::Import, true, true)
                 .map_err(|e| Error::internal(e.to_string()))
         };
         let depth = import(sym::DEPTH)?;

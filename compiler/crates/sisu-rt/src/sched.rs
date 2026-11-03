@@ -16,7 +16,7 @@
 //! entry of every function the interpreter enters by a call statement,
 //! the back edges of loops (a jump to a block at or before the current
 //! one), spawns, and `task.yield_now`. Generated code counts them down in
-//! [`SISU_RT_BUDGET`] and calls [`sisu_rt_yield`] when it reaches zero; the
+//! [`crate::tls::budget`] and calls [`sisu_rt_yield`] when it reaches zero; the
 //! budgets, the choice of the next task and every other draw come from the
 //! interpreter's SplitMix64 generator in the interpreter's order, so a run
 //! under a seed is the interpreter's run under it. A function the runtime
@@ -45,7 +45,7 @@ use corosensei::{Coroutine, CoroutineResult, Yielder};
 use sisu_diag::msg;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicI64, AtomicU32, AtomicU64, Ordering::Relaxed};
+use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
 
 /// The root task's number.
 pub(crate) const ROOT: u32 = 0;
@@ -54,19 +54,6 @@ const BUDGET_MAX: u64 = 8;
 /// The counter's value while the budget is spent and no other task is
 /// ready: no yield point reaches the scheduler until one is.
 const STARVED: i64 = i64::MAX / 4;
-
-/// The yield points left before the scheduler is asked (decision 85).
-#[unsafe(no_mangle)]
-pub static SISU_RT_BUDGET: AtomicI64 = AtomicI64::new(0);
-
-/// The running task's stack limits ([`abi::STACK_PROBE`] and the others).
-#[unsafe(no_mangle)]
-pub static SISU_RT_STACK: [AtomicU64; abi::STACK_WORDS] = [const { AtomicU64::new(0) }; abi::STACK_WORDS];
-
-/// Where the running code last called an intrinsic that may wait
-/// ([`abi::SITE_FILE`] and the others).
-#[unsafe(no_mangle)]
-pub static SISU_RT_SITE: [AtomicU64; abi::SITE_WORDS] = [const { AtomicU64::new(0) }; abi::SITE_WORDS];
 
 /// The seeded generator behind every scheduling choice: the interpreter's
 /// SplitMix64, with its seeding, so the same seed draws the same numbers.
@@ -171,7 +158,7 @@ impl Site {
     /// The site the generated code recorded before its last call of an
     /// intrinsic that may wait.
     pub(crate) fn current() -> Site {
-        let w = |i: u32| SISU_RT_SITE[(i / 8) as usize].load(Relaxed);
+        let w = |i: u32| crate::tls::site()[(i / 8) as usize].load(Relaxed);
         Site {
             file: w(abi::SITE_FILE) as usize,
             file_len: w(abi::SITE_FILE_LEN) as usize,
@@ -375,8 +362,8 @@ fn error_type(name: &str) -> Option<u32> {
 pub(crate) fn start(seed: u64, keep_stats: bool, pool: Pool, root_limits: [u64; abi::STACK_WORDS]) {
     let mut rng = Rng::new(seed);
     let budget = 1 + rng.next() % BUDGET_MAX;
-    SISU_RT_BUDGET.store(budget as i64, Relaxed);
-    for (w, v) in SISU_RT_STACK.iter().zip(root_limits) {
+    crate::tls::budget().store(budget as i64, Relaxed);
+    for (w, v) in crate::tls::stack().iter().zip(root_limits) {
         w.store(v, Relaxed);
     }
     let root = Task {
@@ -428,6 +415,16 @@ pub(crate) fn start(seed: u64, keep_stats: bool, pool: Pool, root_limits: [u64; 
     SCHED.with(|s| *s.borrow_mut() = Some(sched));
 }
 
+/// Starts the scheduler of a worker of `std.par` (decision 333): its root
+/// task runs the bodies, and the generators they drive are its other
+/// tasks; its budget never runs out, so no yield point reaches it, as a
+/// body runs apart from the task scheduler.
+pub(crate) fn start_worker(pool: Pool, limits: [u64; abi::STACK_WORDS]) {
+    start(0, false, pool, limits);
+    with(|s| s.starved = true);
+    crate::tls::budget().store(STARVED, Relaxed);
+}
+
 /// Ends the run: the coroutines of generators nobody finished stay
 /// suspended, and are forgotten rather than unwound (their frames are
 /// Sisu code, which has no unwinder), as the interpreter drops an
@@ -445,13 +442,13 @@ pub(crate) fn finish() -> Option<Stats> {
 /// The message of a failed probe of the running task, once: the probe
 /// left it pending ([`abi::STACK_FAILED`]).
 pub(crate) fn take_stack_failure() -> Option<String> {
-    let w = &SISU_RT_STACK[(abi::STACK_FAILED / 8) as usize];
+    let w = &crate::tls::stack()[(abi::STACK_FAILED / 8) as usize];
     let name = w.load(Relaxed);
     if name == 0 {
         return None;
     }
     w.store(0, Relaxed);
-    let len = SISU_RT_STACK[(abi::STACK_FAILED_LEN / 8) as usize].load(Relaxed);
+    let len = crate::tls::stack()[(abi::STACK_FAILED_LEN / 8) as usize].load(Relaxed);
     // SAFETY: the probe that failed stored the address and length of its
     // function's name, a text of the program's read-only data.
     let function = unsafe {
@@ -461,16 +458,16 @@ pub(crate) fn take_stack_failure() -> Option<String> {
 }
 
 fn load_ctx(ctx: &mut Ctx) {
-    crate::entry::SISU_RT_DEPTH.store(ctx.depth, Relaxed);
-    for (w, v) in SISU_RT_STACK.iter().zip(ctx.stack) {
+    crate::tls::depth().store(ctx.depth, Relaxed);
+    for (w, v) in crate::tls::stack().iter().zip(ctx.stack) {
         w.store(v, Relaxed);
     }
     rt::swap_panics(&mut ctx.panics);
 }
 
 fn save_ctx(ctx: &mut Ctx) {
-    ctx.depth = crate::entry::SISU_RT_DEPTH.load(Relaxed);
-    for (v, w) in ctx.stack.iter_mut().zip(SISU_RT_STACK.iter()) {
+    ctx.depth = crate::tls::depth().load(Relaxed);
+    for (v, w) in ctx.stack.iter_mut().zip(crate::tls::stack().iter()) {
         *v = w.load(Relaxed);
     }
     rt::swap_panics(&mut ctx.panics);
@@ -603,10 +600,10 @@ pub(crate) fn blocking(mut attempt: impl FnMut() -> Attempt) -> u8 {
 /// point, so its count is given back first.
 pub(crate) fn neutral<R>(f: impl FnOnce() -> R) -> R {
     let armed = with(|s| {
-        let c = SISU_RT_BUDGET.load(Relaxed);
+        let c = crate::tls::budget().load(Relaxed);
         let armed = !s.starved && c <= 0;
         s.neutral_armed |= armed;
-        SISU_RT_BUDGET.store(c + 1, Relaxed);
+        crate::tls::budget().store(c + 1, Relaxed);
         armed
     });
     let r = f();
@@ -616,7 +613,7 @@ pub(crate) fn neutral<R>(f: impl FnOnce() -> R) -> R {
         with(|s| {
             if s.neutral_armed {
                 s.neutral_armed = false;
-                SISU_RT_BUDGET.fetch_sub(1, Relaxed);
+                crate::tls::budget().fetch_sub(1, Relaxed);
             }
         });
     }
@@ -738,7 +735,7 @@ pub(crate) fn drive(t: u32) {
         task.co.take().map(|co| (co, std::mem::replace(&mut task.ctx, empty_ctx()), task.yielder))
     });
     let Some((mut co, mut ctx, yielder)) = taken else { return };
-    let depth = crate::entry::SISU_RT_DEPTH.load(Relaxed);
+    let depth = crate::tls::depth().load(Relaxed);
     let (asking, was_starved) = with(|s| {
         let g = s.task(t);
         ctx.depth += depth - g.depth_base;
@@ -749,8 +746,8 @@ pub(crate) fn drive(t: u32) {
         s.cur = t;
         (asking, s.starved)
     });
-    let budget = SISU_RT_BUDGET.load(Relaxed);
-    SISU_RT_BUDGET.store(STARVED, Relaxed);
+    let budget = crate::tls::budget().load(Relaxed);
+    crate::tls::budget().store(STARVED, Relaxed);
     let mut mine = empty_ctx();
     save_ctx(&mut mine);
     let (my_yielder, on_system) = (YIELDER.with(Cell::get), ON_SYSTEM.with(Cell::get));
@@ -772,7 +769,7 @@ pub(crate) fn drive(t: u32) {
     with(|s| {
         s.cur = asking;
         let ended = was_starved && !s.starved;
-        SISU_RT_BUDGET.store(if ended { 0 } else { budget }, Relaxed);
+        crate::tls::budget().store(if ended { 0 } else { budget }, Relaxed);
     });
     suspended(t, r, co, ctx);
 }
@@ -826,7 +823,7 @@ pub(crate) fn unwind_abandoned(t: u32) -> bool {
 
 /// Whether the running task is a generator being abandoned.
 pub(crate) fn abandoning() -> bool {
-    SISU_RT_STACK[(abi::STACK_ABANDONED / 8) as usize].load(Relaxed) == 1
+    crate::tls::stack()[(abi::STACK_ABANDONED / 8) as usize].load(Relaxed) == 1
 }
 
 fn empty_ctx() -> Ctx {
@@ -838,7 +835,7 @@ fn empty_ctx() -> Ctx {
 extern "C" fn sisu_rt_yield() {
     // A generator being driven runs to its `yield` without switching.
     if driving() {
-        SISU_RT_BUDGET.store(STARVED, Relaxed);
+        crate::tls::budget().store(STARVED, Relaxed);
         return;
     }
     if with(|s| s.yield_point(false)) {
@@ -854,7 +851,7 @@ pub(crate) fn yield_now() {
     }
     let go = with(|s| {
         if !s.starved {
-            SISU_RT_BUDGET.fetch_sub(1, Relaxed);
+            crate::tls::budget().fetch_sub(1, Relaxed);
         }
         s.yield_point(true)
     });
@@ -912,14 +909,14 @@ impl Sched {
         }
         if self.starved {
             self.starved = false;
-            SISU_RT_BUDGET.store(0, Relaxed);
+            crate::tls::budget().store(0, Relaxed);
         }
     }
 
     /// A spawn counts as a yield point without switching.
     pub(crate) fn spend_one(&mut self) {
         if !self.starved {
-            SISU_RT_BUDGET.fetch_sub(1, Relaxed);
+            crate::tls::budget().fetch_sub(1, Relaxed);
         }
     }
 
@@ -930,12 +927,12 @@ impl Sched {
         if !asked && self.neutral_armed {
             // The entry of a function entered by `neutral`.
             self.neutral_armed = false;
-            SISU_RT_BUDGET.store(0, Relaxed);
+            crate::tls::budget().store(0, Relaxed);
             return false;
         }
-        let spent = SISU_RT_BUDGET.load(Relaxed) <= 0 || self.starved;
+        let spent = crate::tls::budget().load(Relaxed) <= 0 || self.starved;
         if spent && !self.starved {
-            SISU_RT_BUDGET.store(0, Relaxed);
+            crate::tls::budget().store(0, Relaxed);
         }
         if (spent || asked) && !self.ready.is_empty() {
             let cur = self.cur;
@@ -945,7 +942,7 @@ impl Sched {
         }
         if spent && !self.starved {
             self.starved = true;
-            SISU_RT_BUDGET.store(STARVED, Relaxed);
+            crate::tls::budget().store(STARVED, Relaxed);
         }
         false
     }
@@ -974,7 +971,7 @@ impl Sched {
             self.stats.latency_micros.push(us);
         }
         let budget = 1 + self.rng.next() % BUDGET_MAX;
-        SISU_RT_BUDGET.store(budget as i64, Relaxed);
+        crate::tls::budget().store(budget as i64, Relaxed);
         self.starved = false;
         next
     }

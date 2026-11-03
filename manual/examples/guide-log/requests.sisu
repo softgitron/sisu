@@ -1,0 +1,16 @@
+# The records of a task name it by its path from the root task, so the
+# records of one piece of work stay together.
+
+## Books a turn for `name`, checking the hour and the towels side by side.
+def book(name: str, hour: int) -> ! TaskError:
+    log.info("{name} asks for {hour}:00")
+    return task.scope do s:
+        s.spawn(() -> log.info("{hour}:00 is free"))
+        s.spawn(() -> log.info("a towel for {name}"))
+        return Ok(())
+
+def main() -> ! TaskError:
+    return task.scope do s:
+        s.spawn(() -> book("Aino", 18))
+        s.spawn(() -> book("Eero", 19))
+        return Ok(())

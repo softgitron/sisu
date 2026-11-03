@@ -233,6 +233,20 @@ impl Code:
     pub pure def load_rip(mut self, dst: int) -> int:
         return self.rip(0, True, 139, dst)
 
+    ## `add dst, [rip + disp32]`: where the displacement is.
+    pub pure def add_rip(mut self, dst: int) -> int:
+        return self.rip(0, True, 3, dst)
+
+    ## `mov dst, fs:[0]`: the thread pointer, which the first word of the
+    ## thread's control block holds.
+    pub pure def load_thread_pointer(mut self, dst: int):
+        self.byte(100)
+        self.prefix_rex(0, True, dst, 0, False)
+        self.opcode(139)
+        self.byte(((dst & 7) << 3) | 4)
+        self.byte(37)
+        self.u32(0)
+
     ## `OP dst, src` of the arithmetic group (`A_ADD` and the others).
     pub pure def alu(mut self, w: bool, kind: int, dst: int, src: int):
         self.rr(0, w, kind * 8 + 1, src, dst, False)

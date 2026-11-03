@@ -325,6 +325,10 @@ impl<'a, 'p> Cx<'a, 'p> {
                 gv
             }
         };
+        // The runtime's words of the running thread (decision 332).
+        if [self.cg.depth, self.cg.budget, self.cg.stack, self.cg.site].contains(&id) {
+            return self.b.ins().tls_value(types::I64, gv);
+        }
         self.b.ins().symbol_value(types::I64, gv)
     }
 

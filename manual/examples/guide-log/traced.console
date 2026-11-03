@@ -1,0 +1,7 @@
+$ sisu run traced.sisu
+debug: Fs.read_to_string("stove.txt")
+debug: read_to_string gave Ok("90\n")
+90
+debug: Fs.read_to_string("old/stove.txt")
+debug: read_to_string gave Err(NotFound(path="old/stove.txt"))
+80

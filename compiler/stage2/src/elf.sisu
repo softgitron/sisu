@@ -91,7 +91,9 @@ pub pure def write(o: Obj, debug: list[DebugSection]) -> list[int]:
             count += 1
     for name in o.imports:
         if not index.contains(name.copy()):
-            symbol(mut symtab, strtab.add(name), 16, 0, 0, 0, 0)
+            # A thread-local variable's symbol says so (`STT_TLS`).
+            let kind = if o.tls.contains(name.copy()): 6 else: 0
+            symbol(mut symtab, strtab.add(name), 16 + kind, 0, 0, 0, 0)
             _ = index.insert(name.copy(), count)
             count += 1
     var sections: list[Section] = []

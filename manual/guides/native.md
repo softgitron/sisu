@@ -52,8 +52,9 @@ löyly!
   arguments after its name.
 - `sisu run --native FILE ARGS` builds the executable and runs it, as
   the second command does; the third runs the same program in the
-  interpreter. They must print the same, and the manual's checks and the
-  conformance suite compare the two.
+  interpreter. They must print the same: `sisu-conformance --native`
+  builds the compiler's conformance cases natively and compares each
+  executable with what the interpreter prints.
 - In a package, `sisu build --native` writes `build/debug/NAME` beside
   the lockfile, `NAME` being the package's, and `--output PATH` writes
   the executable at `PATH` instead.

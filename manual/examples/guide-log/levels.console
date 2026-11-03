@@ -1,0 +1,8 @@
+$ sisu run levels.sisu
+info: the stove is on
+debug: heating for 20 minutes
+80
+debug: heating for 30 minutes
+warn: 110 degrees is too hot
+110
+error: the stove switched itself off

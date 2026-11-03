@@ -1099,4 +1099,8 @@ pub pure def intrinsic_names() -> list[str]:
         "mem.view_plain",
         "mem.transmute",
         "mem.slice_from_raw",
+        # std.par's `map`, whose bodies run on the runtime's workers
+        # (decision 333): no SIR names it, `native_bodies` gives `par.map`
+        # a call of it.
+        "par.map",
     ]

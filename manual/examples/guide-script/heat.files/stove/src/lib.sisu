@@ -1,0 +1,6 @@
+##! A sauna stove's arithmetic.
+
+## The minutes a stove of `kilowatts` takes to heat a sauna of
+## `cubic_metres` from 20 to 80 degrees.
+pub def heating_minutes(kilowatts: int, cubic_metres: int) -> int:
+    return 60 * cubic_metres // kilowatts

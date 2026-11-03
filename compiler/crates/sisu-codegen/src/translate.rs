@@ -121,6 +121,9 @@ impl Tr {
         };
         set(&mut flags, "opt_level", if release { "speed" } else { "none" })?;
         set(&mut flags, "is_pic", "true")?;
+        // The runtime's words the code reaches by symbol are thread-local
+        // (decision 332).
+        set(&mut flags, "tls_model", "elf_gd")?;
         set(&mut flags, "enable_verifier", if cfg!(debug_assertions) { "true" } else { "false" })?;
         let isa = cranelift_native::builder()
             .map_err(|e| Error::internal(format!("this machine: {e}")))?
@@ -155,10 +158,10 @@ impl Tr {
 
     fn item(&mut self, item: &Item) -> Result<(), Error> {
         match item {
-            Item::Import(name) => {
+            Item::Import(name, tls) => {
                 let id = self
                     .module
-                    .declare_data(name, cranelift_module::Linkage::Import, true, false)
+                    .declare_data(name, cranelift_module::Linkage::Import, true, *tls)
                     .map_err(|e| Error::internal(e.to_string()))?;
                 self.data.push(id);
             }
@@ -428,6 +431,11 @@ impl Tr {
                     let id = *self.data.get(*d as usize).ok_or_else(|| format!("no data d{d}"))?;
                     let gv = *gvs.entry(id).or_insert_with(|| self.module.declare_data_in_func(id, b.func));
                     vals.push(b.ins().symbol_value(types::I64, gv));
+                }
+                Op::TlsValue(d) => {
+                    let id = *self.data.get(*d as usize).ok_or_else(|| format!("no data d{d}"))?;
+                    let gv = *gvs.entry(id).or_insert_with(|| self.module.declare_data_in_func(id, b.func));
+                    vals.push(b.ins().tls_value(types::I64, gv));
                 }
                 Op::FuncAddr(symbol) => {
                     let id = self.func(symbol).map_err(|e| format!("{e:?}"))?;

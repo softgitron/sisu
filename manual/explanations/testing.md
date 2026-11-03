@@ -69,11 +69,12 @@ memory, a fake environment, a seeded source of random numbers, no
 network unless it asks for one, and a clock that advances only when
 every task in the test is waiting. That last idea is Go's
 `testing/synctest`, made the default rather than a package to opt into.
-Together they remove the known causes of flakiness by construction. A
-test that waits for a timer finishes at once, with the clock where the
-timer said, so the 45% of flakes that came from waiting cannot occur. No
-test can see another's files, environment or clock, so order cannot
-matter. And concurrency is handled by the scheduler, as the next section
+Together they remove two of the three known causes of flakiness by
+construction and make the third reproducible. A test that waits for a
+timer finishes at once, with the clock where the timer said, so the 45%
+of flakes that came from waiting cannot occur. No test can see another's
+files, environment or clock, so order cannot matter. And concurrency is
+handled by the seeded scheduler, as "Schedules, simulation and replay"
 shows.
 
 ## Schedules, simulation and replay

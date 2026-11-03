@@ -1,0 +1,33 @@
+# A field whose type the derived code cannot write as text.
+## A value written as a line of comma-separated values.
+trait Csv:
+    ## The names of the columns, separated by commas.
+    def header() -> String
+    ## The values of the fields, separated by commas.
+    def row(self) -> String
+
+    comptime def derive(T: type) -> impl Csv for T:
+        return impl Csv for T:
+            def header() -> String:
+                comptime if not reflect.is_struct(T):
+                    comptime panic("`{reflect.name_of(T)}` is not a struct")
+                var names: list[String] = []
+                comptime for f in reflect.fields_of(T):
+                    names.push(f.name.to_string())
+                return names.join(",")
+
+            def row(self) -> String:
+                var cells: list[String] = []
+                comptime for f in reflect.fields_of(T):
+                    cells.push("{self.[f]}")
+                return cells.join(",")
+
+## A sauna's stove.
+struct Stove:
+    kilowatts: int
+
+## A sauna and its stove.
+@derive(Csv)
+struct Sauna:
+    name: String
+    stove: Stove

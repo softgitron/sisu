@@ -145,8 +145,9 @@ framework, no global test hooks and no container for dependency
 injection. Go's `io.Reader`, Zig's `Io` and every style guide that says
 "pass the dependencies in" reach the same pattern by convention; in Sisu
 it is the only way, so a library can be tested whether or not its author
-planned for it ([chapter 19](../tutorial/19-testing.md) shows the
-fakes).
+planned for it ([chapter 19](../tutorial/19-testing.md) shows the fakes,
+and [Testing without mocks](testing.md) explains what they make
+possible).
 
 The same parameter makes code portable. A capability is an interface
 with more than one implementation, so the same function runs on the full
@@ -161,8 +162,9 @@ where aspect-oriented programming's pointcuts went wrong (D-075).
 
 ## The alternatives other languages chose
 
-Most languages keep ambient authority and defend from outside, as the
-first section describes. Three other designs were weighed.
+Most languages keep ambient authority and defend from outside, as "The
+problem: every dependency can do anything" describes. Three other
+designs were weighed.
 
 Effect systems, in Koka, Effekt, Flix and Unison, track in a function's
 type what it does, and let a caller handle each effect. They are more

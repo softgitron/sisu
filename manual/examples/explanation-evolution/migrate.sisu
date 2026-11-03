@@ -1,0 +1,16 @@
+# A library's old function, rewritten in terms of its new one: the
+# body is the migration that a tool can inline into each caller.
+struct Temperature:
+    celsius: f64
+
+    def fahrenheit(self) -> f64:
+        return self.celsius * 9.0 / 5.0 + 32.0
+
+@deprecated("use Temperature(celsius).fahrenheit()")
+@fix_inline
+def to_fahrenheit(celsius: f64) -> f64:
+    return Temperature(celsius).fahrenheit()
+
+def main():
+    print(to_fahrenheit(80.0))
+    print(Temperature(80.0).fahrenheit())

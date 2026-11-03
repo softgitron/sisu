@@ -1,0 +1,18 @@
+#!/usr/bin/env sisu
+# /// script
+# [dependencies]
+# stove = "1.2"
+# ///
+# The script with a dependency from the registry, which stage 0 lacks.
+import stove
+
+## The size in cubic metres that a line `NAME SIZE` gives, or 0.
+def size(line: str) -> int:
+    let (_, cubic) = line.split_once(" ") ?? ("", "0")
+    return cubic.parse_int() ?? 0
+
+let kilowatts = (sys.env.args().first() ?? "9").parse_int() ?? 9
+let text = sys.fs.read_to_string("saunas.txt")?
+for line in text.lines():
+    let minutes = stove.heating_minutes(kilowatts, size(line))
+    print("{line}: {minutes} minutes")

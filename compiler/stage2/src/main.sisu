@@ -99,11 +99,13 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     if let Err(ReadError.Bad(line, message)) = r:
         print_err("{path}:{line}: {message}")
         return Err(Failed)
-    let Ok(prog) = r else:
+    let Ok(read_prog) = r else:
         return Err(Failed)
     if command == "sir":
-        emit(write.write(prog))
+        emit(write.write(read_prog))
         return Ok(())
+    var prog = read_prog
+    gen.native_bodies(mut prog)
     let lowered = gen.lower(prog, release)
     if let Err(e) = lowered:
         match e:

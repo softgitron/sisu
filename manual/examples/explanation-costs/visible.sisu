@@ -1,0 +1,25 @@
+# Each cost is written where it is paid: a copy, a count, a box on the
+# heap, a call through a trait object.
+trait Shape:
+    def area(self) -> f64
+
+struct Square:
+    side: f64
+
+impl Shape for Square:
+    def area(self) -> f64:
+        return self.side * self.side
+
+def total(shapes: list[Box[dyn Shape]]) -> f64:
+    var sum_so_far = 0.0
+    for s in shapes:
+        sum_so_far += s.area()
+    return sum_so_far
+
+def main():
+    let sides = [2.0, 3.0]
+    let kept = sides.copy()
+    let square = Shared(Square(4.0))
+    let other = square.copy()
+    let boxes: list[Box[dyn Shape]] = [Box(Square(2.0)), Box(Square(3.0))]
+    print("{len(kept)} {other.area()} {total(boxes)}")

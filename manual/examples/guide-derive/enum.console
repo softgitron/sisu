@@ -1,0 +1,10 @@
+$ sisu check enum.sisu
+error[E0608]: deriving `Csv` for `Heater` stopped at compile time: `Heater` is not a struct
+  --> enum.sisu:26:9
+   |
+26 | @derive(Csv)
+   |         ^^^
+   |
+13 |                     comptime panic("`{reflect.name_of(T)}` is not a struct")
+   |                              ----------------------------------------------- the derive's template, where it stopped
+

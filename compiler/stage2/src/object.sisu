@@ -34,8 +34,8 @@ pub pure def compile(text: str, comp_dir: str, std_dir: str) -> list[int] ! Obje
                 break
             case Item.Source(s):
                 sources.push(s.copy())
-            case Item.Import(name):
-                o.import_data(name)
+            case Item.Import(name, tls):
+                o.import_data(name, tls)
             case Item.Data(bytes, align, funcs):
                 o.local_data(bytes, align, funcs)
             case Item.Declare(symbol, linkage, _):

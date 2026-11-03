@@ -107,6 +107,7 @@ pub const R_PC32: int = 2
 pub const R_32: int = 10
 pub const R_PLT32: int = 4
 pub const R_REX_GOTPCRELX: int = 42
+pub const R_GOTTPOFF: int = 22
 
 ## A relocation of a section: where, against which symbol (a name, or a
 ## section's: `.text`, `.rodata`, `.data.rel.ro`), how, and the addend.
@@ -128,6 +129,8 @@ pub struct Defined:
 ## (in `.rodata`, or in `.data.rel.ro` when they hold functions' addresses).
 pub enum Datum:
     Import(String)
+    ## A thread-local symbol of the runtime's (decision 332).
+    Tls(String)
     Local(bool, int)
 
 ## Where the code of a source line starts: the offset (in the function's
@@ -158,6 +161,8 @@ pub struct Obj:
     pub defined: list[Defined]
     pub imports: list[String]
     imported: set[String]
+    ## The imports that are thread-local data (decision 332).
+    pub tls: set[String]
     pub data: list[Datum]
     ## The text offset of each function defined so far, by symbol.
     placed: dict[String, int]
@@ -191,6 +196,7 @@ impl Obj:
             defined=[],
             imports=[],
             imported=set(),
+            tls=set(),
             data=[],
             placed={},
             pending=[],
@@ -206,9 +212,13 @@ impl Obj:
             _ = self.imported.add(name.to_string())
             self.imports.push(name.to_string())
 
-    ## `data dN import NAME`.
-    pub pure def import_data(mut self, name: str):
-        self.data.push(Datum.Import(name.to_string()))
+    ## `data dN import [tls] NAME`.
+    pub pure def import_data(mut self, name: str, tls: bool):
+        if tls:
+            _ = self.tls.add(name.to_string())
+            self.data.push(Datum.Tls(name.to_string()))
+        else:
+            self.data.push(Datum.Import(name.to_string()))
 
     ## Read-only data, with the words that hold functions' addresses.
     pub pure def local_data(mut self, bytes: list[int], align: int, funcs: list[(int, String)]):
@@ -271,7 +281,7 @@ impl Obj:
         self.text.append(epi.bytes)
         let end = self.text.pos()
         for r in g.relocs:
-            if r.kind == R_PLT32 or r.kind == R_REX_GOTPCRELX:
+            if r.kind == R_PLT32 or r.kind == R_REX_GOTPCRELX or r.kind == R_GOTTPOFF:
                 self.import_symbol(r.symbol)
             self.text_relocs.push(
                 Reloc(offset=base + r.offset, symbol=r.symbol.copy(), kind=r.kind, addend=r.addend)
@@ -872,6 +882,20 @@ impl Gen:
                                 offset=at, symbol=section.to_string(), kind=R_PC32, addend=off - 4
                             )
                         )
+                    case Datum.Tls(name):
+                        return unsupported("`symbol_value` of the thread-local `{name}`")
+                self.define(v, RAX)
+            case Op.TlsValue(d):
+                # The initial-exec model (decision 332): the thread pointer
+                # plus the variable's offset from it, which the GOT holds and
+                # the linker relaxes to a constant in an executable.
+                if d >= len(data):
+                    return unsupported("the data `d{d}`, which is not declared")
+                let Datum.Tls(name) = data[d] else:
+                    return unsupported("`tls_value` of the data `d{d}`, which is not thread-local")
+                self.body.load_thread_pointer(RAX)
+                let at = self.body.add_rip(RAX)
+                self.relocs.push(Reloc(offset=at, symbol=name.copy(), kind=R_GOTTPOFF, addend=-4))
                 self.define(v, RAX)
             case Op.FuncAddr(symbol):
                 let at = self.body.lea_rip(RAX)

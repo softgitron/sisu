@@ -14,15 +14,21 @@
 import stage1.sir.write
 import stage2.abi
 from stage1.sir import (
+    BasicBlock,
+    BlockId,
     Callee,
     Const,
     Entry,
     FnKind,
     Function,
     ImplTarget,
+    LocalDecl,
+    LocalId,
     Operand,
+    Place,
     Program,
     Rvalue,
+    Statement,
     StatementKind,
     Terminator,
     Type,
@@ -273,16 +279,25 @@ impl Cg:
             b=Fb.new(0),
             fx=Fx.empty(),
         )
-        cg.depth = cg.import_data(abi.SYM_DEPTH)
-        cg.budget = cg.import_data(abi.SYM_BUDGET)
-        cg.stack = cg.import_data(abi.SYM_STACK)
-        cg.site = cg.import_data(abi.SYM_SITE)
+        # Each thread keeps its own count of nested calls, budget, stack
+        # limits and site (decision 332).
+        cg.depth = cg.import_tls(abi.SYM_DEPTH)
+        cg.budget = cg.import_tls(abi.SYM_BUDGET)
+        cg.stack = cg.import_tls(abi.SYM_STACK)
+        cg.site = cg.import_tls(abi.SYM_SITE)
         return cg
 
     pub pure def import_data(mut self, name: str) -> int:
         let d = self.data_count
         self.data_count += 1
         self.items.push(Item.Line("data d{d} import {name}"))
+        return d
+
+    ## A thread-local data symbol of the runtime's (decision 332).
+    pub pure def import_tls(mut self, name: str) -> int:
+        let d = self.data_count
+        self.data_count += 1
+        self.items.push(Item.Line("data d{d} import tls {name}"))
         return d
 
     ## The number of the intrinsic `name`, if the runtime has it.
@@ -931,6 +946,81 @@ pub pure def lower(p: Program, release: bool) -> String ! LirError:
             continue
         cg.define_main(main, flags, ret_ty)?
         return Ok(cg.write_lir(p))
+
+## The program with std.par's `map` given the body the native backend
+## compiles for it (decision 333), as `sisu-codegen/src/bodies.rs` gives
+## it: a call of the runtime's parallel map (`par.map`, an intrinsic no SIR
+## names), whose bodies the runtime's workers run, and the drop of the
+## function `map` owns. The interpreter runs the SIR as written.
+pub pure def native_bodies(mut p: Program):
+    var at = -1
+    for i in range(len(p.functions)):
+        if is_par_map(p, p.functions[i]):
+            at = i
+            break
+    if at < 0:
+        return
+    let body = par_map(p.functions[at])
+    p.functions[at] = body
+
+## Whether `f` is std.par's `map[T, U](xs, f)`.
+pure def is_par_map(p: Program, f: Function) -> bool:
+    return (
+        f.name == "par.map"
+            and f.param_count == 2
+            and len(f.type_params) == 2
+            and len(f.locals) >= 3
+            and f.source < len(p.sources)
+            and p.sources[f.source] == "<std>/par.sisu"
+    )
+
+## `_0 = call intrinsic par.map[$0, $1](copy _1, copy _2)`, then the drop of
+## `_2` on the way out and on the way unwinding.
+pure def par_map(f: Function) -> Function:
+    let call = Statement(
+        kind=StatementKind.Call(
+            dest=Place.local(LocalId(index=0)),
+            callee=Callee.Intrinsic(name="par.map".to_string(), args=[Type.Param(0), Type.Param(1)]),
+            args=[
+                Operand.Copy(Place.local(LocalId(index=1))),
+                Operand.Copy(Place.local(LocalId(index=2))),
+            ],
+        ),
+        loc=f.loc,
+    )
+    let drop_f = Statement(
+        kind=StatementKind.Drop(place=Place.local(LocalId(index=2)), flag=None), loc=f.loc
+    )
+    var locals: list[LocalDecl] = []
+    for k in range(3):
+        locals.push(f.locals[k].copy())
+    let entry = BasicBlock(
+        stmts=[call],
+        term=Terminator.Goto(BlockId(index=1)),
+        unwind=Some(BlockId(index=2)),
+        cleanup=False,
+        loc=None,
+    )
+    let out = BasicBlock(
+        stmts=[drop_f.copy()], term=Terminator.Return, unwind=None, cleanup=False, loc=None
+    )
+    let unwinding = BasicBlock(
+        stmts=[drop_f], term=Terminator.Resume, unwind=None, cleanup=True, loc=None
+    )
+    return Function(
+        name=f.name.copy(),
+        type_params=f.type_params.copy(),
+        kind=f.kind,
+        param_count=f.param_count,
+        pure=f.pure,
+        from_=f.from_.copy(),
+        inner=f.inner.copy(),
+        owns=f.owns.copy(),
+        locals=locals,
+        blocks=[entry, out, unwinding],
+        loc=f.loc,
+        source=f.source,
+    )
 
 ## The signature of the runtime's entry point `name` as LIR declares it.
 pub pure def runtime_signature(name: str) -> str?:

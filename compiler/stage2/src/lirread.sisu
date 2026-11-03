@@ -116,6 +116,7 @@ pub enum Op:
     StackLoad(int)
     StackStore(int, int)
     SymbolValue(int)
+    TlsValue(int)
     FuncAddr(String)
     GetSp
     Call(String, list[int], int)
@@ -169,8 +170,8 @@ pub struct LirFunc:
 
 ## An item of the file, in the order of the object.
 pub enum Item:
-    ## `data dN import NAME`.
-    Import(String)
+    ## `data dN import [tls] NAME`: thread-local with `tls` (decision 332).
+    Import(String, bool)
     ## `data dN [align A] ...`: the bytes, the alignment, and the words
     ## holding functions' addresses (offset, symbol).
     Data(list[int], int, list[(int, String)])
@@ -497,7 +498,8 @@ impl LirReader:
                 return wrong("data must be numbered in order: `d{d}`, expected `d{self.data}`")
             self.data += 1
             if c.keyword("import"):
-                return Ok(Some(Item.Import(c.word()?)))
+                let tls = c.keyword("tls")
+                return Ok(Some(Item.Import(c.word()?, tls)))
             var align = 1
             if c.keyword("align"):
                 align = c.int()?
@@ -752,6 +754,8 @@ impl LirReader:
                 return Ok((Op.StackStore(v, c.numbered(115)?), []))
             case "symbol_value":
                 return Ok((Op.SymbolValue(c.numbered(100)?), [T_I64]))
+            case "tls_value":
+                return Ok((Op.TlsValue(c.numbered(100)?), [T_I64]))
             case "func_addr":
                 return Ok((Op.FuncAddr(c.word()?), [T_I64]))
             case "get_stack_pointer":

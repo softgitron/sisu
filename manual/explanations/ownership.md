@@ -234,7 +234,8 @@ exists for self-referential values, has no counterpart. A `task.scope`
 is a frame that cannot return before its tasks end, so a task may borrow
 from the function that started it, which Rust allows only inside
 `thread::scope` and otherwise answers with `'static` bounds ([chapter
-20](../tutorial/20-concurrency.md) shows it).
+20](../tutorial/20-concurrency.md) shows it, and [Concurrency without
+colours](concurrency.md#scopes-as-supervisors) explains the scope).
 
 Most of all, two bindings never reach the same value unless its type is
 `Shared`. A list passed to a function cannot change behind the caller's

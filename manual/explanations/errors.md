@@ -188,8 +188,10 @@ the alternative that works: the unit of failure is small and isolated,
 and a supervisor outside it decides what happens next. In Sisu the
 supervisor is the scope that started the task ([chapter
 20](../tutorial/20-concurrency.md) shows a scope watching a task that
-panics). When `main` itself panics, the program prints the message and a
-trace and exits with a status that is not 0.
+panics, and [Concurrency without
+colours](concurrency.md#scopes-as-supervisors) explains scopes). When
+`main` itself panics, the program prints the message and a trace and
+exits with a status that is not 0.
 
 Unwinding leaves one problem, which Rust solves by poisoning a mutex
 that was locked when its task panicked: the data behind the lock may be

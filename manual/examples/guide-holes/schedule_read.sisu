@@ -1,0 +1,33 @@
+# The sketch with its first hole filled.
+
+## A turn in the sauna: who, and at which hour.
+@derive(Eq, Debug)
+struct Turn:
+    name: String
+    hour: int
+
+## The turns that `text` lists, one `HOUR NAME` on each line.
+def parse_turns(text: str) -> list[Turn]:
+    var turns: list[Turn] = []
+    for line in text.lines():
+        if let Some((hour, name)) = line.split_once(" "):
+            turns.push(Turn(name.to_string(), hour.parse_int() ?? 0))
+    return turns
+
+## A line for each hour from 17 to 20, with whoever has it, or "free".
+def schedule(turns: list[Turn]) -> list[String]:
+    return todo("lay out the evening")
+
+def main(sys: System) -> ! IoError:
+    let text = sys.fs.read_to_string("turns.txt")?
+    for line in schedule(parse_turns(text)):
+        print(line)
+    return Ok(())
+
+test "turns from text":
+    let turns = parse_turns("18 Aino\n20 Eero")
+    assert turns == [Turn("Aino", 18), Turn("Eero", 20)]
+
+test "a free hour says so":
+    let lines = schedule([Turn("Aino", 18)])
+    assert lines == ["17:00 free", "18:00 Aino", "19:00 free", "20:00 free"]

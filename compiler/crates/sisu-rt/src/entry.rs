@@ -9,7 +9,6 @@ use crate::sched::{system, system_status};
 use crate::value;
 use sisu_diag::msg;
 use std::ffi::{CStr, c_char};
-use std::sync::atomic::AtomicI64;
 
 pub(crate) const EXIT_OK: i32 = 0;
 pub(crate) const EXIT_ERROR: i32 = 1;
@@ -24,10 +23,6 @@ pub(crate) const STACK_BYTES: usize = 1 << 30;
 /// Of the program's thread's stack, what is kept below its probe limit
 /// beyond the reserve: the thread's guard and what the system put there.
 const ROOT_MARGIN: usize = 256 * 1024;
-
-/// The nested calls of the program, counted by the generated code.
-#[unsafe(no_mangle)]
-pub static SISU_RT_DEPTH: AtomicI64 = AtomicI64::new(0);
 
 /// The program's arguments, after its name.
 static ARGS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
@@ -75,6 +70,7 @@ unsafe extern "C" fn sisu_rt_start(
     };
     let Some(table) = table else { rt::internal("the program's type table does not decode") };
     rt::init(table, fns);
+    crate::par::set_unprobed(unprobed as usize);
     let _ = ARGS.set(args);
     let run = move || {
         // The root task runs on this thread's stack, whose probe limit is
@@ -313,7 +309,7 @@ unsafe extern "C" fn sisu_rt_panic_stack(name: *const u8, name_len: u64) -> u8 {
 /// panic unwinds within [`abi::UNWIND_DEPTH`] more, else the overflow,
 /// raised.
 pub(crate) fn over_depth(function: &str) -> u8 {
-    let d = SISU_RT_DEPTH.load(std::sync::atomic::Ordering::Relaxed);
+    let d = crate::tls::depth().load(std::sync::atomic::Ordering::Relaxed);
     if d <= abi::MAX_DEPTH + abi::UNWIND_DEPTH && rt::unwinding() {
         return abi::OK;
     }
@@ -679,6 +675,12 @@ unsafe extern "C" fn sisu_rt_list_reserve(l: *mut u8, size: u64) {
 unsafe extern "C" fn sisu_rt_intrinsic(desc: *const u32, ret: *mut u8, args: *const *mut u8) -> u8 {
     // SAFETY: as the caller guarantees.
     let (i, c) = unsafe { crate::intrinsics::decode(desc, ret, args) };
+    // std.par's bodies are Sisu code, run on the workers or on this stack
+    // (decision 333).
+    if i == abi::Intrinsic::ParMap {
+        // SAFETY: as the caller guarantees.
+        return unsafe { crate::par::map(&c) };
+    }
     if crate::tasks::handles(i) {
         // SAFETY: as the caller guarantees.
         return unsafe { crate::tasks::call(i, &c) };
