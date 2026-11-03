@@ -1,0 +1,4 @@
+# The lexer makes NEWLINE, INDENT and DEDENT from the layout.
+def main():
+    if True:
+        print("hei {1 + 2}")

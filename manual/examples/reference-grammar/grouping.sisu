@@ -1,0 +1,3 @@
+# How the parser groups the operators of one expression.
+def main():
+    print(not 1 + 2 * 3 == 6)

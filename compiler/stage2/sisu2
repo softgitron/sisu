@@ -11,6 +11,8 @@
 #   sisu2 x86 FILE.lir --output FILE.o                   a LIR program compiled to an x86-64
 #                                                        ELF object by the backend in Sisu
 #                                                        (D-087, step 2; decision 306)
+#   sisu2 build FILE.sir --output FILE.o                 a SIR program lowered and compiled in
+#                                                        one process (decision 334)
 #
 # The first use builds stage 2 natively (`sisu build --native`, through
 # stage 1, the front end of `sisu`) into compiler/target/stage2/, and so
@@ -35,7 +37,9 @@ if stale; then
     mkdir -p "$(dirname "$exe")"
     # Built beside the old one and renamed over it, so that a use that
     # starts meanwhile runs a whole executable.
-    if ! (cd "$here" && "$sisu" build --native --output "$exe.new" > /dev/null); then
+    # With the Rust lowering and Cranelift, the seed, as the driver builds
+    # it (decision 305): stage 2 does not lower itself until it is built.
+    if ! (cd "$here" && "$sisu" build --native --lower=rust --backend=cranelift --output "$exe.new" > /dev/null); then
         echo "sisu2: stage 2 does not build" >&2
         rm -f "$exe.new"
         exit 1

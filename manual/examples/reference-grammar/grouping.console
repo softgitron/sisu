@@ -1,0 +1,39 @@
+$ sisu parse --tree grouping.sisu
+SOURCE_FILE 0..99
+  FN_DEF 57..99
+    DEF_KW 57..60 "def"
+    IDENT 61..65 "main"
+    PARAM_LIST 65..67
+      L_PAREN 65..66 "("
+      R_PAREN 66..67 ")"
+    COLON 67..68 ":"
+    BLOCK 68..99
+      NEWLINE 68..69 "\n"
+      INDENT 73..73 ""
+      EXPR_STMT 73..99
+        CALL_EXPR 73..98
+          NAME_REF 73..78
+            IDENT 73..78 "print"
+          ARG_LIST 78..98
+            L_PAREN 78..79 "("
+            ARG 79..97
+              PREFIX_EXPR 79..97
+                NOT_KW 79..82 "not"
+                COMPARE_EXPR 83..97
+                  BIN_EXPR 83..92
+                    LITERAL 83..84
+                      INT_NUMBER 83..84 "1"
+                    PLUS 85..86 "+"
+                    BIN_EXPR 87..92
+                      LITERAL 87..88
+                        INT_NUMBER 87..88 "2"
+                      STAR 89..90 "*"
+                      LITERAL 91..92
+                        INT_NUMBER 91..92 "3"
+                  EQ_EQ 93..95 "=="
+                  LITERAL 96..97
+                    INT_NUMBER 96..97 "6"
+            R_PAREN 97..98 ")"
+        NEWLINE 98..99 "\n"
+      DEDENT 99..99 ""
+  EOF 99..99 ""

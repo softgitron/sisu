@@ -1,0 +1,10 @@
+# An `if` whose `:` ends its line is a statement; one that goes on is an
+# expression, and an expression has no statements in it.
+def sign(n: int) -> str:
+    if n > 0: return "plus"
+    return "zero or minus"
+
+def main():
+    let n = 4
+    if n > 3: print("big") else: print("small")
+    print(sign(n))

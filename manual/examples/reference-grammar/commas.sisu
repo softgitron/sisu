@@ -1,0 +1,15 @@
+# A trailing comma ends a list, and makes a tuple of one.
+def total(
+    prices: list[int],
+    tip: int,
+) -> int:
+    return sum(prices) + tip
+
+def main():
+    let one = (5,)
+    let plain = (5)
+    let prices = [
+        350,
+        280,
+    ]
+    print("{one} {plain} {total(prices, 20,)}")

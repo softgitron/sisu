@@ -1,0 +1,8 @@
+$ sisu run if_forms.sisu
+error[E0102]: a block starts on the next line, indented; nothing may follow `:` on the line that opens it
+  --> if_forms.sisu:4:15
+  |
+4 |     if n > 0: return "plus"
+  |               ^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
