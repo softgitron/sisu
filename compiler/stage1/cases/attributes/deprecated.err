@@ -1,0 +1,18 @@
+warning[W0023]: `parse` is deprecated: use `parse_v2`, which counts in characters
+  --> deprecated.sisu:26:17
+   |
+26 |     let count = parse
+   |                 ^^^^^
+
+warning[W0023]: `parse` is deprecated: use `parse_v2`, which counts in characters
+  --> deprecated.sisu:27:13
+   |
+27 |     print("{parse("abc")} {parse_v2("abc")} {m.read_old()} {m.read()} {count("xy")}")
+   |             ^^^^^^^^^^^^
+
+warning[W0025]: `Meter.read_old` is deprecated
+  --> deprecated.sisu:27:46
+   |
+27 |     print("{parse("abc")} {parse_v2("abc")} {m.read_old()} {m.read()} {count("xy")}")
+   |                                              ^^^^^^^^^^^^
+

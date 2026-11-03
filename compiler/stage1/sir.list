@@ -544,3 +544,4 @@ compiler/stage1/cases/packages/doc_pages.pkg/shop
 compiler/stage1/cases/packages/names.pkg/app
 compiler/stage1/cases/packages/overlapping_impl.pkg
 compiler/stage1/cases/packages/template_elsewhere.pkg
+compiler/stage1/cases/comptime/evaluator.sisu

@@ -350,6 +350,7 @@ pub pure def resolve(
     r.declare_items()
     r.declare_imports()
     r.check_module()
+    r.check_attributes(text.contains("attributes_of"))
     return kept_diagnostics(text, syntax, r.diags, catalog)
 
 ## The diagnostics but those on a line with a syntax error, sorted.
@@ -450,6 +451,12 @@ pub pure def resolve_program(
         r.declare_imports()
         let again = r.module
         tables.scopes[i] = again
+    # Whether compile-time code of the program reads attributes, which are
+    # then data a name Sisu does not read may be (D-046).
+    var reads = False
+    for m in modules:
+        if m.text.contains("attributes_of"):
+            reads = True
     # Each module's bodies.
     var out: list[list[Diagnostic]] = []
     for i in range(len(modules)):
@@ -458,6 +465,7 @@ pub pure def resolve_program(
         scope.poisoned = poisoned.copy()
         var r = Resolver.new(m.text, m.tree, env, tables, i, scope, m.package != 0)
         r.check_module()
+        r.check_attributes(reads)
         for d in r.diags:
             diags[i].push(d.copy())
         out.push(kept_diagnostics(m.text, m.syntax, diags[i], catalog))
@@ -473,6 +481,26 @@ pure def child_nodes(tree: Tree, n: int) -> list[int]:
     return out
 
 ## The first significant token of kind `kind` among the children of `n`.
+## The bytes a node's tokens cover, but trivia.
+pure def node_bytes(tree: Tree, n: int) -> TextRange:
+    var start = -1
+    var end = -1
+    for m in tree.preorder(n):
+        for e in tree.nodes[m].children:
+            if let Leaf(t) = e:
+                let token = tree.tokens[t]
+                if token.kind.is_trivia() or token.start >= token.end:
+                    continue
+                if token.kind == SyntaxKind.Newline:
+                    continue
+                if start < 0 or token.start < start:
+                    start = token.start
+                if token.end > end:
+                    end = token.end
+    if start < 0:
+        return TextRange.new(0, 0)
+    return TextRange.new(start, end)
+
 pure def first_token(tree: Tree, n: int, kind: SyntaxKind) -> int?:
     for e in tree.nodes[n].children:
         if let Leaf(t) = e:
@@ -569,6 +597,51 @@ const SCALARS: list[str] = [
     "i64",
     "i128",
 ]
+
+## The attributes Sisu reads (02, 03, 04, 06, 07, 08, 09, 10, 11, 12, 13,
+## 17, 19 and 22 give them; RULES.md, R30), those only the standard
+## library writes among them.
+const READ_ATTRIBUTES: list[str] = [
+    "blocking",
+    "builtin",
+    "cfg",
+    "comptime_budget",
+    "delegate",
+    "deprecated",
+    "derive",
+    "diagnostic_name",
+    "export",
+    "fix_inline",
+    "fixture",
+    "float",
+    "inline",
+    "internal",
+    "intrinsic",
+    "keeps",
+    "marker",
+    "must_consume",
+    "no_alloc",
+    "no_block",
+    "no_panic",
+    "persisted",
+    "preview",
+    "refines",
+    "repr",
+    "sealed",
+    "stack",
+    "structural",
+    "tag",
+    "tile",
+    "unroll",
+    "vectorize",
+]
+
+## Whether Sisu reads the attribute `name`.
+pure def read_attribute(name: str) -> bool:
+    for a in READ_ATTRIBUTES:
+        if a == name:
+            return True
+    return False
 
 ## The name of `candidates` closest to a misspelt `name`, if one is close
 ## enough to be the likely intent: an edit distance of at most a third of
@@ -1430,6 +1503,57 @@ impl Resolver:
             self.top_level(n, statements)
         if script:
             self.pop_scope()
+
+    ## The attributes of the module (D-046: data the toolchain and
+    ## compile-time code read; RULES.md, R30): a name Sisu does not read is
+    ## `W0024` when it is a misspelling of one it does, with the fix that
+    ## writes that one, and `W0022` when no compile-time code of the program
+    ## reads attributes (`reads`), so that nothing can.
+    pure def check_attributes(mut self, reads: bool):
+        if self.foreign or self.quiet:
+            return
+        var nodes = [self.tree.root]
+        while let Some(n) = nodes.pop():
+            if self.kind(n) == SyntaxKind.Attribute:
+                self.attribute(n, reads)
+                continue
+            nodes.extend(child_nodes(self.tree, n))
+
+    pure def attribute(mut self, n: int, reads: bool):
+        let t = first_token(self.tree, n, SyntaxKind.Ident) else:
+            return
+        let token = self.tree.tokens[t]
+        let name = self.text.byte_slice(token.start, token.end).to_string()
+        # `@float(fast)` permits contraction and reassociation in the
+        # function (03), which strict floating point satisfies; it takes
+        # `fast` only. `@diagnostic_name` waits for compile-time type
+        # construction (D-065, Q-27). RULES.md, R33.
+        let range = node_bytes(self.tree, n)
+        if name == "float":
+            let written = self.text.byte_slice(range.start, range.end).replace(" ", "")
+            if written != "@float(fast)":
+                let d = Diagnostic.new(Msg.ResolveFloatAttribute, range.start, range.end)
+                self.report(d)
+            return
+        if name == "diagnostic_name":
+            var d = Diagnostic.new(Msg.Stage0Unsupported, range.start, range.end)
+            d = d.with("construct", "`@diagnostic_name`")
+            self.report(d.with("phase", "compile-time type construction (Q-27)"))
+            return
+        if read_attribute(name):
+            return
+        var known: list[String] = []
+        for a in READ_ATTRIBUTES:
+            known.push(a.to_string())
+        if let Some(similar) = closest(name, known):
+            var d = Diagnostic.new(Msg.ResolveMisspeltAttribute, token.start, token.end)
+            d = d.with("name", name)
+            let params = [Param(name="name".to_string(), value=similar.copy())]
+            let edit = Edit(start=token.start, end=token.end, text=similar)
+            self.report(d.fix_params(Msg.ResolveSimilarAttribute, params, [edit]))
+        elif not reads:
+            let d = Diagnostic.new(Msg.ResolveUnknownAttribute, token.start, token.end)
+            self.report(d.with("name", name))
 
     ## A statement of a script's top level, which is `main`'s body.
     pure def script_statement(mut self, n: int):
@@ -2654,3 +2778,12 @@ test "a signature prints as stage 0 prints it in E0234":
     )
     assert signature_text("fmt", sig, None) == "pure def fmt(self, mut f: Formatter)"
     assert replace_self("list[Self]?", Some("Plant")) == "list[Plant]?"
+
+test "an attribute Sisu does not read is told from one it misspells":
+    assert read_attribute("deprecated")
+    assert not read_attribute("deprecatd")
+    var known: list[String] = []
+    for a in READ_ATTRIBUTES:
+        known.push(a.to_string())
+    assert closest("deprecatd", known) == Some("deprecated".to_string())
+    assert closest("route", known) == None

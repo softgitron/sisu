@@ -25,6 +25,7 @@ from stage1.syntax.ast import (
     Block,
     Cond,
     CondPart,
+    ContractKind,
     ElseBody,
     ExprId,
     ExprKind,
@@ -289,6 +290,14 @@ pub struct Checker:
     ## While an argument is checked: the function called and the
     ## parameter's index (RULES.md, R24).
     pub arg_callee: (DefId, int)?
+    ## For a method of a trait impl, the contract of the trait's method
+    ## (07; RULES.md, R29): its clauses, the trait's names of the
+    ## parameters with the impl's locals, and the method's name; and, while
+    ## one is checked, the name a clause's failure gives.
+    pub inherited: list[(ContractKind, ExprId, TextRange)]
+    pub inherited_names: list[(String, int)]
+    pub inherited_owner: String?
+    pub clause_owner: String?
 
 impl Checker:
     pub pure def new(cx: Cx, own types: Types, def_: DefId) -> Checker:
@@ -352,6 +361,10 @@ impl Checker:
             ref_items_seen=[],
             undecided_call=None,
             arg_callee=None,
+            inherited=[],
+            inherited_names=[],
+            inherited_owner=None,
+            clause_owner=None,
         )
 
     pub pure def finish(own self) -> Finished:
@@ -1494,6 +1507,9 @@ impl Checker:
                 let b = self.check_block(cx, body)
                 self.exit_loop()
                 self.pop_scope()
+                # The body of a `par` loop is `pure` (06; RULES.md, R28).
+                if self.is_par_loop(cx, x):
+                    self.check_par_body(cx, b, span.start)
                 out.push(TStmt.For(pat=p, iter=x, mode=fmode, item=item, body=b, span=span))
             case StmtKind.Assert(cond, message):
                 let c = self.check_condition_expr(cx, cond)

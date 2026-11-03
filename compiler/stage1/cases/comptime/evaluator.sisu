@@ -1,0 +1,59 @@
+# Stage 1's evaluator of compile-time code runs what the interpreter runs
+# of a `pure` function: a `for` over a list, a set and a dict, `in`,
+# `sum`, `int.to_f64`, `String.push`, `list.join`, `str.byte_at` and a
+# comprehension, as stage 0's `comptime` does, to the same SIR.
+pure def total(xs: list[int]) -> int:
+    var t = 0
+    for x in xs:
+        t += x
+    return t
+
+pure def counts(words: list[str]) -> dict[str, int]:
+    var d: dict[str, int] = {}
+    for w in words:
+        d[w] = (d.get(w).copied() ?? 0) + 1
+    return d
+
+pure def unique(xs: list[int]) -> set[int]:
+    var s: set[int] = set()
+    for x in xs:
+        _ = s.add(x)
+    return s
+
+pure def weigh() -> int:
+    let d = {"a": 1, "b": 2}
+    var n = 0
+    for k, v in d.items():
+        n += v + len(k)
+    if "a" in d:
+        n += 10
+    return n + d["b"] + len(d)
+
+pure def built() -> String:
+    var s = String.new()
+    s.push("löyly")
+    s.push("!")
+    return s
+
+pure def split_at_colon(s: str) -> (int, int):
+    var i = 0
+    while i < s.byte_len() and s.byte_at(i) != 58:
+        i += 1
+    return (i, s.byte_len() - i - 1)
+
+const TOTAL: int = comptime total([1, 2, 3])
+const COUNTS: dict[str, int] = comptime counts(["sauna", "kota", "sauna"])
+const UNIQUE: set[int] = comptime unique([3, 1, 3, 2])
+const WEIGHT: int = comptime weigh()
+const BUILT: String = comptime built()
+const JOINED: String = comptime ["a", "b", "c"].join(", ")
+const PARTS: (int, int) = comptime split_at_colon("18:30")
+const HALF: f64 = comptime 7.to_f64() / 2.0
+const SQUARES: list[int] = comptime [i * i for i in range(5)]
+const SUM: int = comptime sum([1, 2, 3, 4])
+const MEAN: f64 = comptime sum([0.1, 0.2, 0.3]) / 3.0
+
+def main():
+    print("{TOTAL} {COUNTS:?} {UNIQUE:?} {WEIGHT}")
+    print("{BUILT} {JOINED} {PARTS:?} {HALF}")
+    print("{SQUARES:?} {SUM} {MEAN}")

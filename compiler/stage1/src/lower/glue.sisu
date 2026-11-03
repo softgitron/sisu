@@ -301,4 +301,5 @@ pure def glue(t: TypeDecl, needs: dict[String, bool]) -> Function:
         blocks=b.blocks,
         loc=None,
         source=0,
+        shown=[],
     )

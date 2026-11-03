@@ -1,0 +1,360 @@
+##! The closure of a typed hole (D-061; 10, "Holes", and 17,
+##! "Assertions"; RULES.md, R27): a run that reaches `todo`, a test's
+##! among them, prints the `Debug` rendering of each binding in scope
+##! there, then stops at the hole as the run time stops at it.
+##!
+##! The statements that print it are written into the SIR once the
+##! ownership checker has checked the program and placed its drops, so
+##! that nothing the compiler adds here changes what the checker reports;
+##! they only read, and each binding they read is one that holds its whole
+##! value at the hole (the initialisation dataflow says so: a binding not
+##! yet assigned, moved or out of scope is left out) and that holds no loan
+##! the program may have ended since, or is a parameter, whose referent is
+##! the caller's. Lowering names the bindings whose `Debug` the host writes
+##! (`Function.shown`, the structural ones), and a capability is no value
+##! to show.
+
+from stage1.borrowck.init import Analysis, State
+from stage1.borrowck.paths import Cover
+from stage1.borrowck.types import Types
+from stage1.sir import (
+    BasicBlock,
+    BlockId,
+    Callee,
+    Const,
+    FnKind,
+    Function,
+    IntrinsicDecl,
+    Loc,
+    LocalDecl,
+    LocalId,
+    Operand,
+    Place,
+    Program,
+    Proj,
+    Rvalue,
+    Statement,
+    StatementKind,
+    Terminator,
+    Type,
+)
+
+## Writes the closure of each typed hole of the program's functions before
+## the hole: `header` (the catalog's text, whose `{hole}` is the hole as
+## its call is written), then a line `NAME = VALUE` for each binding shown.
+pub pure def close(mut p: Program, header: str):
+    let types = Types.of(p)
+    var any = False
+    for k in range(len(p.functions)):
+        if p.functions[k].shown.is_empty():
+            continue
+        if let FnKind.Comptime(_) = p.functions[k].kind:
+            continue
+        let f = ref p.functions[k]
+        if f.source < len(p.sources) and p.sources[f.source].starts_with("<std>/"):
+            continue
+        var g = f.copy()
+        if close_function(mut g, types, header):
+            p.functions[k] = g
+            any = True
+    if any:
+        declare(mut p, "fmt.debug", True)
+        declare(mut p, "fmt.new", True)
+        declare(mut p, "fmt.text", True)
+        declare(mut p, "print_err", False)
+
+## Declares an intrinsic the closures call, as lowering declares it,
+## keeping the declarations in the order of their names.
+pure def declare(mut p: Program, name: str, pure: bool):
+    var at = len(p.intrinsics)
+    for i in range(len(p.intrinsics)):
+        if p.intrinsics[i].name == name:
+            return
+        if p.intrinsics[i].name > name.to_string() and at == len(p.intrinsics):
+            at = i
+    let d = IntrinsicDecl(name=name.to_string(), pure=pure, from_=[], inner=[], owns=[], keeps=[])
+    p.intrinsics.insert(at, d)
+
+## Whether a statement is a typed hole.
+pure def is_hole(s: Statement) -> bool:
+    if let StatementKind.Call(_, Callee.Intrinsic(n, _), _) = s.kind:
+        return n == "todo"
+    return False
+
+## The hole as its call is written, as the run time names it.
+pure def hole_text(s: Statement) -> String:
+    if let StatementKind.Call(_, _, args) = s.kind:
+        if let Some(Operand.Const(Const.Str(name))) = args.first():
+            if not name.is_empty():
+                return "`todo({quoted(name)})`"
+    return "`todo()`".to_string()
+
+## Writes the closures of one function's holes; whether it wrote any.
+pure def close_function(mut f: Function, types: Types, header: str) -> bool:
+    var sites: list[(int, int)] = []
+    for b in range(len(f.blocks)):
+        for i in range(len(f.blocks[b].stmts)):
+            if is_hole(f.blocks[b].stmts[i]):
+                sites.push((b, i))
+    if sites.is_empty():
+        return False
+    let a = Analysis.run(f, types)
+    # What each hole shows, decided on the function as it was; the
+    # statements go in afterwards, the last hole of a block first, so that
+    # the places of the others stay where they were.
+    var plans: list[(int, int, list[int])] = []
+    let candidates = f.shown.copy()
+    var states_of = -1
+    var states: list[State] = []
+    for (b, i) in sites:
+        if not a.reachable[b]:
+            continue
+        if states_of != b:
+            states = a.states(f, b)
+            states_of = b
+        var shown: list[int] = []
+        for l in candidates:
+            if l < 0:
+                # A capture: a part of the environment, local 1.
+                let place = capture_place(f, -l - 1) else:
+                    continue
+                let (id, cover) = a.paths.lookup(place)
+                var root = a.paths.roots[1]
+                if cover == Cover.Exact:
+                    root = id
+                if capture_shows(f, types, -l - 1) and a.fully_init(states[i], root):
+                    shown.push(l)
+                continue
+            if l == 0 or l >= len(f.locals):
+                continue
+            if shows(f, types, l) and a.fully_init(states[i], a.paths.roots[l]):
+                shown.push(l)
+        if not shown.is_empty():
+            plans.push((b, i, shown))
+    if plans.is_empty():
+        return False
+    var k = len(plans) - 1
+    while k >= 0:
+        let (b, i, shown) = plans[k].copy()
+        let (stmts, c) = closure_statements(mut f, b, i, shown, header)
+        # The block goes on to the print, then to the drop of the text, which
+        # ends a block of its own, then to the hole and what followed it.
+        var before: list[Statement] = []
+        var rest: list[Statement] = []
+        for j in range(len(f.blocks[b].stmts)):
+            if j < i:
+                before.push(f.blocks[b].stmts[j].copy())
+            else:
+                rest.push(f.blocks[b].stmts[j].copy())
+        for x in stmts:
+            before.push(x.copy())
+        let at = f.blocks[b].stmts[i].loc
+        let unwind = f.blocks[b].unwind
+        let dropping = len(f.blocks)
+        let drop = Statement(kind=StatementKind.Drop(place=Place.local(c), flag=None), loc=at)
+        f.blocks.push(
+            BasicBlock(
+                stmts=[drop],
+                term=Terminator.Goto(BlockId(index=dropping + 1)),
+                unwind=unwind,
+                cleanup=f.blocks[b].cleanup,
+                loc=f.blocks[b].loc,
+            )
+        )
+        f.blocks.push(
+            BasicBlock(
+                stmts=rest,
+                term=f.blocks[b].term.copy(),
+                unwind=unwind,
+                cleanup=f.blocks[b].cleanup,
+                loc=f.blocks[b].loc,
+            )
+        )
+        f.blocks[b].stmts = before
+        f.blocks[b].term = Terminator.Goto(BlockId(index=dropping))
+        k -= 1
+    return True
+
+## Whether the binding `l` is shown: a parameter or a value that holds no
+## loan, of a type that holds no capability and is a value.
+pure def shows(f: Function, types: Types, l: int) -> bool:
+    let decl = ref f.locals[l]
+    let name = decl.name.copy() else:
+        return False
+    if name.is_empty() or name == "_" or name.starts_with("env"):
+        return False
+    let ty = ref decl.ty
+    match ty:
+        case Type.Unit | Type.Never | Type.Fn(_, _, _) | Type.Dyn(_, _) | Type.ErrSet(_):
+            return False
+        case _:
+            pass
+    if types.holds_handle(ty):
+        return False
+    let param = l <= f.param_count
+    if not param and types.may_hold(ty):
+        return False
+    if let Type.Ref(inner, _) = ty:
+        for t in inner:
+            match t:
+                case Type.Fn(_, _, _) | Type.Dyn(_, _):
+                    return False
+                case _:
+                    if types.holds_handle(t):
+                        return False
+    return True
+
+## The environment of a closure, local 1, and its parts' types: a tuple,
+## or a reference to one.
+pure def environment(f: Function) -> (Place, list[Type])?:
+    if len(f.locals) < 2:
+        return None
+    match f.locals[1].ty:
+        case Type.Tuple(es):
+            return Some((Place.local(LocalId(index=1)), es.copy()))
+        case Type.Ref(inner, _):
+            if let Some(Type.Tuple(es)) = inner.first():
+                return Some((Place.local(LocalId(index=1)).project(Proj.Deref), es.copy()))
+            return None
+        case _:
+            return None
+
+## The place of the `i`th capture of a closure.
+pure def capture_place(f: Function, i: int) -> Place?:
+    let (env, parts) = environment(f) else:
+        return None
+    if i >= len(parts):
+        return None
+    return Some(env.project(Proj.Field(i)))
+
+## The `i`th capture's name, from the environment's (`env(a, b)`).
+pure def capture_name(f: Function, i: int) -> String?:
+    let name = f.locals[1].name.copy() else:
+        return None
+    if not name.starts_with("env(") or not name.ends_with(")"):
+        return None
+    let inside = name.byte_slice(4, name.byte_len() - 1)
+    var k = 0
+    for part in inside.split(", "):
+        if k == i:
+            return Some(part.to_string())
+        k += 1
+    return None
+
+## Whether the `i`th capture is shown: one borrowed is the owner's, which
+## the closure's call keeps; one held by value holds no loan; neither holds
+## a capability.
+pure def capture_shows(f: Function, types: Types, i: int) -> bool:
+    let (_, parts) = environment(f) else:
+        return False
+    if i >= len(parts) or capture_name(f, i).is_none():
+        return False
+    let ty = ref parts[i]
+    if types.holds_handle(ty):
+        return False
+    match ty:
+        case Type.Ref(inner, _):
+            for t in inner:
+                if types.holds_handle(t):
+                    return False
+            return True
+        case Type.Fn(_, _, _) | Type.Dyn(_, _) | Type.Unit:
+            return False
+        case _:
+            return not types.may_hold(ty)
+
+## Whether a value of the type is passed to `fmt.debug` as it is, as
+## lowering passes one (a number, a character, a truth value, or a
+## reference), rather than by a reference to it.
+pure def passed_as_is(t: Type) -> bool:
+    match t:
+        case Type.Int | Type.Float | Type.Bool | Type.Char | Type.Ref(_, _):
+            return True
+        case Type.Named(n, args):
+            if not args.is_empty():
+                return False
+            return match n:
+                case "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i128": True
+                case "f32": True
+                case _: False
+        case _:
+            return False
+
+## The statements that print the closure of the hole at statement `i` of
+## block `b`, with the locals they need added to `f`, and the local that
+## holds the text, which the caller drops.
+pure def closure_statements(
+    mut f: Function, b: int, i: int, shown: list[int], header: str
+) -> (list[Statement], LocalId):
+    let at = f.blocks[b].stmts[i].loc
+    let hole = hole_text(f.blocks[b].stmts[i])
+    let text = header.replace("{{hole}}", hole)
+    let string = Type.named("String", [])
+    let c = add_local(mut f, string.copy())
+    let m = add_local(mut f, Type.Ref(inner=[string.copy()], mutable=True))
+    let u = add_local(mut f, Type.Unit)
+    var out: list[Statement] = []
+    out.push(call(Place.local(c), "fmt.new", [], at))
+    out.push(assign(Place.local(m), Rvalue.Ref(place=Place.local(c), mutable=True), at))
+    var line = text.copy()
+    for l in shown:
+        # The binding's name, place and type.
+        var name = String.new()
+        var place = Place.local(LocalId(index=0))
+        var ty = Type.Unit
+        if l < 0:
+            name = capture_name(f, -l - 1) ?? String.new()
+            place = capture_place(f, -l - 1) ?? place
+            if let Some((_, parts)) = environment(f):
+                ty = parts[-l - 1].copy()
+        else:
+            name = f.locals[l].name.copy() ?? String.new()
+            place = Place.local(LocalId(index=l))
+            ty = f.locals[l].ty.copy()
+        line.push("\n  {name} = ")
+        out.push(call(Place.local(u), "fmt.text", [copy_of(m), Operand.Const(Const.Str(line))], at))
+        line = String.new()
+        var value = Operand.Copy(place.copy())
+        if not passed_as_is(ty):
+            let r = add_local(mut f, Type.Ref(inner=[ty.copy()], mutable=False))
+            out.push(assign(Place.local(r), Rvalue.Ref(place=place, mutable=False), at))
+            value = copy_of(r)
+        let spec = Operand.Const(Const.Str(String.new()))
+        out.push(call(Place.local(u), "fmt.debug", [copy_of(m), value, spec], at))
+    let shown_ref = add_local(mut f, Type.Ref(inner=[string.copy()], mutable=False))
+    out.push(assign(Place.local(shown_ref), Rvalue.Ref(place=Place.local(c), mutable=False), at))
+    let printed = add_local(mut f, Type.Unit)
+    out.push(call(Place.local(printed), "print_err", [copy_of(shown_ref)], at))
+    return (out, c)
+
+pure def add_local(mut f: Function, own ty: Type) -> LocalId:
+    f.locals.push(LocalDecl.new(ty, None))
+    return LocalId(index=len(f.locals) - 1)
+
+pure def copy_of(l: LocalId) -> Operand:
+    return Operand.Copy(Place.local(l))
+
+pure def call(own dest: Place, name: str, own args: list[Operand], at: Loc?) -> Statement:
+    let callee = Callee.Intrinsic(name=name.to_string(), args=[])
+    return Statement(kind=StatementKind.Call(dest=dest, callee=callee, args=args), loc=at)
+
+pure def assign(own dest: Place, own value: Rvalue, at: Loc?) -> Statement:
+    return Statement(kind=StatementKind.Assign(place=dest, value=value), loc=at)
+
+## Text quoted as the run time quotes a hole's name (`todo("area")`).
+pure def quoted(s: str) -> String:
+    var out = String.new("\"")
+    for c in s.chars():
+        match c:
+            case '"':
+                out.push("\\\"")
+            case '\\':
+                out.push("\\\\")
+            case '\n':
+                out.push("\\n")
+            case '\t':
+                out.push("\\t")
+            case _:
+                out.push_char(c)
+    out.push_char('"')
+    return out

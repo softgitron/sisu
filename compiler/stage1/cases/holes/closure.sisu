@@ -1,0 +1,25 @@
+# RULES.md, R27: a run that reaches a typed hole prints the hole's
+# closure, the `Debug` rendering of each binding in scope there (10, 17),
+# before it stops at the hole: the parameters, the locals that hold a
+# value there (not one moved away or not yet assigned), and a closure's
+# captures.
+struct Booking:
+    room: String
+    hours: int
+
+def price(b: Booking, own note: String, discount: f64) -> int:
+    let base = b.hours * 20
+    let kept = note
+    var nights: list[int] = []
+    for night in range(2):
+        nights.push(night)
+    let later: int
+    return todo("price")
+
+def main():
+    let b = Booking(room="sauna", hours=3)
+    let rate = 5
+    let costs = [1, 2].iter().map(x -> x * rate).collect()
+    print("costs {costs:?}")
+    let total = price(b, "regular".to_string(), 0.5)
+    print("price {total}")

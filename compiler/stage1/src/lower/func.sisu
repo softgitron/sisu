@@ -25,6 +25,7 @@ from stage1.lower.names import Ctx
 from stage1.sir import (
     BasicBlock,
     BlockId,
+    Callee,
     ClosureRole,
     Const,
     FnKind,
@@ -429,6 +430,7 @@ impl FnLower:
             me.emit_exit(cx, 0, end)
             me.terminate(Terminator.Return, None)
         let blocks = me.finish_blocks()
+        let shown = me.hole_bindings(cx, blocks)
         let f = Function(
             name=me.name.copy(),
             type_params=me.type_params.copy(),
@@ -442,8 +444,46 @@ impl FnLower:
             blocks=blocks,
             loc=loc,
             source=source,
+            shown=shown,
         )
         return (f, me.types)
+
+    ## For a function with a typed hole, the bindings its closure may show
+    ## (RULES.md, R27): the named locals whose `Debug` the host writes, as
+    ## an interpolation's `{x:?}` has it written; the hole's own statements
+    ## decide later which of them hold a value there.
+    pure def hole_bindings(mut self, cx: Cx, blocks: list[BasicBlock]) -> list[int]:
+        var has_hole = False
+        for b in blocks:
+            for s in b.stmts:
+                if let StatementKind.Call(_, Callee.Intrinsic(n, _), _) = s.kind:
+                    if n == "todo":
+                        has_hole = True
+        if not has_hole:
+            return []
+        let debug = cx.prog.wk.debug else:
+            return []
+        var out: list[int] = []
+        for (k, l) in self.map:
+            let decl = ref cx.body.locals[k]
+            if decl.name.is_empty():
+                continue
+            let stripped = self.types.strip_ref(decl.ty)
+            let base = cx.prog.erase_refinements(mut self.types, stripped)
+            if cx.prog.is_structural(mut self.types, base, debug):
+                out.push(l.index)
+        out.sort()
+        # A closure's captures, the `i`th of its environment as `-(i + 1)`.
+        if let Some(c) = self.closure:
+            let cl = ref cx.body.closures[c.index]
+            if not cl.comptime_:
+                for i in range(len(cl.captures)):
+                    let t = cx.body.locals[cl.captures[i].local].ty
+                    let stripped = self.types.strip_ref(t)
+                    let base = cx.prog.erase_refinements(mut self.types, stripped)
+                    if cx.prog.is_structural(mut self.types, base, debug):
+                        out.push(-(i + 1))
+        return out
 
     ## The end of a block's last statement: where its scope ends.
     pub pure def block_end(self, cx: Cx, b: TBlockId) -> Loc?:

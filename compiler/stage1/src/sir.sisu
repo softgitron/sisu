@@ -532,6 +532,10 @@ pub struct Function:
     pub loc: Loc?
     ## Index into `Program.sources` for statement locations.
     pub source: int
+    ## The bindings a typed hole's closure may show, for a function with a
+    ## hole: the named locals whose `Debug` the host writes (RULES.md,
+    ## R27). Not written.
+    pub shown: list[int]
 
 ## The end of the name of a function's value wrapper (`first#value`).
 pub const VALUE_WRAPPER: str = "#value"
@@ -674,6 +678,7 @@ pub pure def value_wrapper(f: Function, takes: list[Type]) -> Function:
         blocks=blocks,
         loc=f.loc,
         source=f.source,
+        shown=[],
     )
 
 ## Whether parameter `i` is one `value_wrapper` lends.

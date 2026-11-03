@@ -68,6 +68,11 @@ pub pure def leading_contracts(ast: Ast, b: Block) -> list[Clause]:
                 return out
     return out
 
+## Whether a body is its contract alone: in a trait, a method declared
+## with the clauses every impl keeps and no default (07; RULES.md, R29).
+pub pure def contract_only(ast: Ast, b: Block) -> bool:
+    return not b.stmts.is_empty() and len(leading_contracts(ast, b)) == len(b.stmts)
+
 impl Checker:
     ## The contract of the function being checked, from the clauses its
     ## body starts with, once its parameters are declared; `ret` is the
@@ -94,6 +99,12 @@ impl Checker:
             for c in clauses:
                 self.report_other(self.error(cx, Msg.ContractNotInTest, c.range))
             return
+        # The trait's contract first: a precondition the caller keeps, then
+        # the impl's own, which runtime double-checking holds to it (07).
+        for (kind, e, _) in self.inherited.copy():
+            if kind == ContractKind.Requires:
+                if let Some(x) = self.inherited_clause(cx, TContractKind.Requires, e):
+                    out.requires.push(x)
         for c in clauses:
             if c.kind == ContractKind.Requires:
                 out.requires.push(self.contract_clause(cx, TContractKind.Requires, c.expr))
@@ -101,7 +112,11 @@ impl Checker:
         for c in clauses:
             if c.kind == ContractKind.Ensures:
                 ensures.push(c)
-        if ensures.is_empty() or self.generator.is_some():
+        var inherited_ensures: list[Clause] = []
+        for (kind, e, r) in self.inherited:
+            if kind == ContractKind.Ensures:
+                inherited_ensures.push(Clause(kind=kind, expr=e, range=r))
+        if (ensures.is_empty() and inherited_ensures.is_empty()) or self.generator.is_some():
             if not ensures.is_empty():
                 self.report_other(self.error(cx, Msg.ContractGeneratorEnsures, ensures[0].range))
             self.keep_contracts(out)
@@ -111,7 +126,11 @@ impl Checker:
         # is `Copy`.
         self.push_scope()
         let scope = len(self.scopes) - 1
-        let span = ensures[0].range
+        var span = TextRange.new(0, 0)
+        if let Some(c) = ensures.first():
+            span = c.range
+        elif let Some(c) = inherited_ensures.first():
+            span = c.range
         let rty = self.param_local_ty(cx, ret, Mode.Borrow)
         let r = self.new_local("result", rty, False, span)
         self.declare(cx, "result", r, False, span)
@@ -126,11 +145,41 @@ impl Checker:
         self.ensures = Some(EnsuresCtx(scope=scope, olds=[]))
         for c in ensures:
             out.ensures.push(self.contract_clause(cx, TContractKind.Ensures, c.expr))
+        # The trait's postcondition after the impl's own, which may only
+        # strengthen it (07).
+        for c in inherited_ensures:
+            if let Some(x) = self.inherited_clause(cx, TContractKind.Ensures, c.expr):
+                out.ensures.push(x)
         if let Some(e) = self.ensures:
             out.olds = e.olds.copy()
         self.ensures = None
         self.pop_scope()
         self.keep_contracts(out)
+
+    ## A clause of the trait's method an impl's method implements (07;
+    ## RULES.md, R29), checked in the impl's body with the trait's names of
+    ## the parameters naming the impl's; what it reports is the trait's
+    ## own, reported where the trait is checked, so it goes here.
+    pure def inherited_clause(
+        mut self, cx: Cx, kind: TContractKind, expr: ExprId
+    ) -> ContractCheck?:
+        let before = len(self.diags)
+        let other = self.other_error
+        self.push_scope()
+        for (n, l) in self.inherited_names.copy():
+            self.declare(cx, n, l, False, cx.ast.expr(expr).range)
+        let owner = self.clause_owner.copy()
+        self.clause_owner = self.inherited_owner.copy()
+        let x = self.contract_clause(cx, kind, expr)
+        self.clause_owner = owner
+        self.pop_scope()
+        let clean = len(self.diags) == before
+        while len(self.diags) > before:
+            _ = self.diags.pop()
+        self.other_error = other
+        if not clean:
+            return None
+        return Some(x)
 
     ## Keeps a contract that checks something, for lowering.
     pure def keep_contracts(mut self, own c: TContracts):
@@ -155,7 +204,12 @@ impl Checker:
         let text = self.source_text(cx, cx.ast.expr(expr).range).trim_end().to_string()
         let replay = self.only_reads(cx, cond, True)
         return ContractCheck(
-            kind=kind, cond=cond, text=text, span=cx.ast.expr(expr).range, replay=replay
+            kind=kind,
+            cond=cond,
+            text=text,
+            span=cx.ast.expr(expr).range,
+            replay=replay,
+            owner=self.clause_owner.copy(),
         )
 
     ## A contract statement inside a body: an `invariant` line of the check
@@ -330,6 +384,7 @@ impl Checker:
                         text=ri.text.copy(),
                         span=span,
                         replay=False,
+                        owner=None,
                     )
                 )
             )

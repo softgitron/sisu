@@ -873,6 +873,18 @@ behaviour_one() {
     if [ -f "$base.out" ]; then cp "$base.out" "$out"; else : > "$out"; fi
     if [ -f "$base.err" ]; then cp "$base.err" "$err"; else : > "$err"; fi
     [ -f "$base.status" ] && status=$(tr -d ' \n' < "$base.status")
+    # A rule of RULES.md that changes what a case prints (its output
+    # `behaviour`) has the case's file as the rule has it under stage 1's
+    # `expected/`, at the case's path from the compiler's directory, which
+    # the run is held to instead (and which the coordinator copies into the
+    # suite).
+    local override="$compiler/stage1/expected/${base#"$compiler"/}"
+    if [ -f "$override.out" ]; then cp "$override.out" "$out"; echo out >> "$box/overridden"; fi
+    if [ -f "$override.err" ]; then cp "$override.err" "$err"; echo err >> "$box/overridden"; fi
+    if [ -f "$override.status" ]; then
+        status=$(tr -d ' \n' < "$override.status")
+        echo status >> "$box/overridden"
+    fi
     local failed=""
     # same_err ERR: the run's standard error is the case's, or what follows
     # the front end's warnings in it (each a block ending in a blank line).
@@ -967,6 +979,19 @@ while read -r f; do
     i=$((i + 1))
     rel="${f#"$repo"/}"
     result=$(cat "$work/behaviour/$i/result" 2> /dev/null || echo "not run")
+    # A case whose expectation a rule changes, held to stage 1's `expected/`
+    # (RULES.md lists its output `behaviour`).
+    if [ -z "$result" ] && [ -f "$work/behaviour/$i/overridden" ]; then
+        [ "$(cat "$work/behaviour/$i/native" 2> /dev/null)" = 1 ] && natively=$((natively + 1))
+        if grep -qxF -e "$rel behaviour" "$allowed"; then
+            class_listed=$((class_listed + 1))
+            report="$report\n  listed:   $rel: behaviour (as the rule has the case)"
+        else
+            class_unlisted=$((class_unlisted + 1))
+            report="$report\n  UNLISTED: $rel: behaviour: held to stage 1's expected/, which RULES.md does not list"
+        fi
+        continue
+    fi
     if [ -z "$result" ]; then
         same=$((same + 1))
         [ "$(cat "$work/behaviour/$i/native" 2> /dev/null)" = 1 ] && natively=$((natively + 1))
@@ -985,7 +1010,7 @@ while read -r f; do
 done < "$list"
 total=$((total + n)); identical=$((identical + same)); unlisted=$((unlisted + class_unlisted))
 listed=$((listed + class_listed))
-behaviour_summary="$(printf '  %-12s %4d programs, %4d as expected interpreted (%d of them natively too), %3d refused as listed, %3d otherwise; stage 1 %6ss, the runs %6ss' \
+behaviour_summary="$(printf '  %-12s %4d programs, %4d as expected interpreted (%d of them natively too), %3d refused or changed as listed, %3d otherwise; stage 1 %6ss, the runs %6ss' \
     "$class" "$n" "$same" "$natively" "$class_listed" "$class_unlisted" "$took_sir" "$seconds")"
 
 # What `check` prints: every diagnostic of a program, in the conformance
@@ -1149,8 +1174,53 @@ while read -r f; do
         report="$report\n  UNLISTED: ${f#"$repo"/}: expected sir (the case's ${base##*/}.sir against stage 1 in $work/sir-expected/$k.out)"
     fi
 done < <(grep -F "$here/cases/" "$work/cases-check.list")
+# And what `build --native --release` prints of each case with a
+# `NAME.release` (RULES.md, R27: a release build rejects typed holes), its
+# directory taken off the paths it names, against that file.
+mkdir -p "$work/release-expected"
+k=0
+while read -r f; do
+    base="${f%.sisu}"
+    [ -f "$base.release" ] || continue
+    k=$((k + 1)); n=$((n + 1))
+    dir=$(dirname "$f" | sed 's/[.[\*^$|]/\\&/g')
+    stage1 build --native --release "$f" --output "$work/release-expected/$k.exe" 2>&1 > /dev/null |
+        sed "s|$dir/||g" > "$work/release-expected/$k.out"
+    if cmp -s "$base.release" "$work/release-expected/$k.out"; then
+        same=$((same + 1))
+    else
+        class_unlisted=$((class_unlisted + 1))
+        report="$report\n  UNLISTED: ${f#"$repo"/}: expected release (the case's ${base##*/}.release against stage 1 in $work/release-expected/$k.out)"
+    fi
+done < <(grep -F "$here/cases/" "$work/cases-check.list")
+# And what `test` prints of each case with a `NAME.tests` (RULES.md, R27:
+# the closure of a blocked test's hole, and the status of a run with one),
+# a copy run in a directory of its own: standard output, then `---
+# stderr` and standard error, whose last line says the status, with the
+# directory taken off the paths and the hash of a replay token, which
+# hashes the SIR that names the copy's path, written `HASH`.
+mkdir -p "$work/tests-expected"
+k=0
+while read -r f; do
+    base="${f%.sisu}"
+    [ -f "$base.tests" ] || continue
+    k=$((k + 1)); n=$((n + 1))
+    box="$work/tests-expected/$k"
+    mkdir -p "$box"
+    cp "$f" "$box/"
+    name=$(basename "$f")
+    stage1 test "$box/$name" > "$box/out" 2> "$box/err"
+    { cat "$box/out"; echo "--- stderr"; cat "$box/err"; } | sed "s|$box/||g" |
+        sed -E 's/(--replay [0-9]+-)[0-9a-f]+-/\1HASH-/' > "$box/all"
+    if cmp -s "$base.tests" "$box/all"; then
+        same=$((same + 1))
+    else
+        class_unlisted=$((class_unlisted + 1))
+        report="$report\n  UNLISTED: ${f#"$repo"/}: expected tests (the case's ${base##*/}.tests against stage 1 in $box/all)"
+    fi
+done < <(grep -F "$here/cases/" "$work/cases-check.list")
 total=$((total + n)); identical=$((identical + same)); unlisted=$((unlisted + class_unlisted))
-check_summary="$check_summary\n$(printf '  %-12s %4d files, %4d as their .diag, .audit, .lint or .sir expects, %3d otherwise' expected "$n" "$same" "$class_unlisted")"
+check_summary="$check_summary\n$(printf '  %-12s %4d files, %4d as their .diag, .audit, .lint, .sir, .release or .tests expects, %3d otherwise' expected "$n" "$same" "$class_unlisted")"
 
 # The formatter: the text `sisu fmt` leaves of each file, what `sisu fmt
 # --check` prints of it and its status, against stage 1's `fmt-batch`; and

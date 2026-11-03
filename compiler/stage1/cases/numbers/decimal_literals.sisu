@@ -1,0 +1,12 @@
+# RULES.md, R33: a float literal reaches a `Decimal` as written (03,
+# "Numbers": "a literal reaches them as written"), with the places it is
+# written with, where it was read from the shortest digits of its `f64`;
+# and a list of numbers is sorted or not as a slice of them is.
+from std.num import Decimal
+
+def main():
+    let price: Decimal = 3.50
+    let rate: Decimal = 0.075
+    let big: Decimal = 1_000.25
+    print("{price} {rate} {big} {price * Decimal.of(2)}")
+    print("{[1, 2, 2, 5].is_sorted()} {[3, 1].is_sorted()}")

@@ -1,0 +1,20 @@
+# RULES.md, R28: an `Atomic` observes the schedule, which a `pure`
+# function may not (06, "Effects"): its `load` too, and each is named as
+# the program calls it. Making one observes nothing.
+pure def peek(a: Atomic[int]) -> int:
+    return a.load()
+
+pure def bump(a: Atomic[int]):
+    a.store(3)
+
+pure def trade(a: Atomic[int]) -> int:
+    return a.swap(2)
+
+pure def made() -> int:
+    let a = Atomic(3)
+    return 1
+
+def main():
+    let a = Atomic(1)
+    print("{peek(a)} {trade(a)} {made()}")
+    bump(a)

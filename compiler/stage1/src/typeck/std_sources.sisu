@@ -53,9 +53,16 @@ pub pure def stage1_only(name: str) -> bool:
 ## links to the compiler's `catalog/` and `std/` (decision 268), in which
 ## `std/../stage1` is the compiler's `stage1/`.
 pub pure def std_file(home: str, name: str) -> String:
-    if stage1_only(name):
+    if stage1_only(name) or stage1_copy(name):
         return "{home}/std/../stage1/std/{name}.sisu"
     return "{home}/std/{name}.sisu"
+
+## The std modules stage 1 reads in a copy of its own, which a rule of
+## RULES.md changes where the Rust front end, which reads the original,
+## cannot evaluate the change: `json`, whose decoder validates refinements
+## and invariants with reflection the Rust front end lacks (R32).
+pub pure def stage1_copy(name: str) -> bool:
+    return name == "json"
 
 ## The paths an import may name a std module by, for the fix of one that
 ## names none.

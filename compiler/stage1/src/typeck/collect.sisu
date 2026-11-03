@@ -69,6 +69,7 @@ from stage1.syntax.ast import visit
 from stage1.typeck.borrows import ResultShape
 from stage1.typeck.check import derive_edit
 from stage1.typeck.consts import ConstScope
+from stage1.typeck.contracts import contract_only
 from stage1.typeck.folding import Term
 from stage1.typeck.instances import DeriveCheck
 from stage1.typeck.program import (
@@ -1232,6 +1233,7 @@ impl Resolver:
             contracts=False,
             template=False,
             type_params=[],
+            deprecated=None,
         )
 
     pub pure def ast(self, module: ModuleId) -> ref Ast:
@@ -2320,6 +2322,8 @@ impl Resolver:
             info.intrinsic = Some("extern.{library}.{f.name.text}")
         info.structural = self.builtin_attr(module, f.attrs, "structural")
         info.internal = has_attr(f.attrs, "internal")
+        if has_attr(f.attrs, "deprecated"):
+            info.deprecated = Some(self.builtin_attr(module, f.attrs, "deprecated") ?? String.new())
         if self.is_root(module):
             info.contracts = not f.contracts(self.ast(module)).is_empty()
             if has_attr(f.attrs, "structural") or has_attr(f.attrs, "keeps"):
@@ -3976,7 +3980,14 @@ impl Resolver:
             for m in trait_methods:
                 let f = self.prog.fn_info(m) else:
                     continue
-                if f.body.is_some() or f.intrinsic.is_some() or f.header_broken:
+                # A body that is the method's contract alone is no default
+                # (RULES.md, R29).
+                var provided = f.body.is_some()
+                let tm = self.prog.defs[m.index].module
+                if let Some(b) = f.body:
+                    if not self.is_std(tm) and contract_only(self.ast(tm), b):
+                        provided = False
+                if provided or f.intrinsic.is_some() or f.header_broken:
                     continue
                 var found = False
                 for (n, _) in methods:

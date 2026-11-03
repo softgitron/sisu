@@ -313,6 +313,93 @@ impl Checker:
                         pass
         return None
 
+    ## Whether a loop's iterable is `std.par`'s `iter`, whose loop runs its
+    ## body for each value on a worker (06, "Data parallelism").
+    pub pure def is_par_loop(self, cx: Cx, iter: TExprId) -> bool:
+        if let TExprKind.Call(Callee.Fn(d, _), _) = self.exprs[iter.index].kind:
+            let def_ = ref cx.prog.defs[d.index]
+            let module = ref cx.prog.modules[def_.module.index]
+            return def_.name == "iter" and module.is_std and module.name == "par"
+        return False
+
+    ## The body of a `par` loop is `pure` (06, "Data parallelism": "it may
+    ## mutate its own element and nothing shared"; RULES.md, R28): each
+    ## call of a function that is not `pure` is `E0446`, and each change of
+    ## a binding declared before the loop (`start`), by assignment, a `mut`
+    ## argument or a `ref mut`, `E0447`. The element the loop gives and the
+    ## bindings of the body are its own.
+    pub pure def check_par_body(mut self, cx: Cx, body: BlockId, start: int):
+        var exprs: list[TExprId] = []
+        self.visit_block(body, mut exprs)
+        for e in exprs:
+            if let Some(name) = self.impure_callee(cx, e):
+                let d = self.error(cx, Msg.TypeParBodyImpure, self.span_of(e))
+                self.report(d.with("callee", name))
+            var changed: list[TExprId] = []
+            match self.exprs[e.index].kind:
+                case TExprKind.Call(_, args):
+                    for a in args:
+                        if a.mode == ArgMode.BorrowMut:
+                            changed.push(a.expr)
+                case TExprKind.Borrow(place, True):
+                    changed.push(place)
+                case _:
+                    pass
+            for c in changed:
+                self.par_change(cx, c, start)
+        var stmts: list[TStmt] = []
+        self.block_stmts_deep(body, mut stmts)
+        for s in stmts:
+            match s:
+                case TStmt.Assign(place, _, _) | TStmt.AugAssign(place, _, _, _):
+                    self.par_change(cx, place, start)
+                case TStmt.AssignTuple(places, _, _):
+                    for place in places:
+                        self.par_change(cx, place, start)
+                case _:
+                    pass
+
+    ## `E0447` when the place changed is a binding declared before `start`.
+    pure def par_change(mut self, cx: Cx, place: TExprId, start: int):
+        var at = place
+        for _ in range(64):
+            match self.exprs[at.index].kind:
+                case TExprKind.Field(base, _) | TExprKind.Index(base, _, _) | TExprKind.Deref(base):
+                    at = base
+                case TExprKind.Coerce(inner, _):
+                    at = inner
+                case TExprKind.Local(k):
+                    if k < len(self.locals) and self.locals[k].span.start < start:
+                        let d = self.error(cx, Msg.TypeParBodyChanges, self.span_of(place))
+                        self.report(d.with("name", self.locals[k].name.copy()))
+                    return
+                case _:
+                    return
+
+    ## The statements of a block and of the blocks inside it, but closures'.
+    pure def block_stmts_deep(self, b: BlockId, mut out: list[TStmt]):
+        for s in self.blocks[b.index].stmts:
+            out.push(s.copy())
+            match s:
+                case TStmt.If(branches, else_, _):
+                    for (_, x) in branches:
+                        self.block_stmts_deep(x, mut out)
+                    if let Some(x) = else_:
+                        self.block_stmts_deep(x, mut out)
+                case TStmt.While(_, x, _) | TStmt.For(_, _, _, _, x, _) | TStmt.Defer(x, _):
+                    self.block_stmts_deep(x, mut out)
+                case TStmt.Block(x):
+                    self.block_stmts_deep(x, mut out)
+                case TStmt.Match(_, arms, _):
+                    for a in arms:
+                        if let TArmBody.Block(x) = a.body:
+                            self.block_stmts_deep(x, mut out)
+                case TStmt.Let(_, _, _, else_, _):
+                    if let Some(TLetElse.Diverge(_, x)) = else_:
+                        self.block_stmts_deep(x, mut out)
+                case _:
+                    pass
+
     ## Whether an argument moves a place out of where it is (an `own`
     ## receiver or argument given a variable whose type is not `Copy`): a
     ## condition that does cannot be evaluated again to show its parts

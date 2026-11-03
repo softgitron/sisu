@@ -1,0 +1,3 @@
+26:17-26:22 W0023 type.deprecated name="parse" reason="use `parse_v2`, which counts in characters"
+27:13-27:25 W0023 type.deprecated name="parse" reason="use `parse_v2`, which counts in characters"
+27:46-27:58 W0025 type.deprecated-plain name="Meter.read_old"

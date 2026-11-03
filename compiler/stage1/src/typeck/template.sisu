@@ -147,6 +147,11 @@ pub struct TypeShape:
     pub elem: list[TypeShape]
     ## A trait's methods, or a type's own (decision 251).
     pub methods: list[MethodShape]
+    ## A refinement's base type (at most one), `reflect.base_of`, and
+    ## whether a struct has an `invariant`, `reflect.has_invariant`
+    ## (RULES.md, R32).
+    pub base: list[TypeShape]
+    pub invariant: bool
 
 ## A method as reflection sees it (`reflect.methods_of`, decision 251): its
 ## name, how it takes `self` (`self`, `mut self`, `own self`, or nothing
@@ -184,6 +189,8 @@ impl TypeShape:
             impls=[],
             elem=[],
             methods=[],
+            base=[],
+            invariant=False,
         )
 
     ## The shape of a derive's target, from its declaration's names.
@@ -1916,6 +1923,16 @@ pure def reflect(f: str, t: TypeShape) -> Value?:
             let e = t.elem.first() else:
                 return None
             return Some(Value.Type(e.copy()))
+        # A refinement and its base, and a struct's invariant, which a
+        # decoder checks at the boundary (11; RULES.md, R32).
+        case "is_refinement":
+            return Some(Value.Bool(not t.base.is_empty()))
+        case "base_of":
+            let b = t.base.first() else:
+                return None
+            return Some(Value.Type(b.copy()))
+        case "has_invariant":
+            return Some(Value.Bool(t.invariant))
         case "fields_of":
             var out: list[Value] = []
             var index = 0

@@ -1065,9 +1065,22 @@ impl Checker:
         let tr = TraitRef(def_=tr_def, args=[lit])
         if not cx.prog.implements(mut self.types, exp, tr, self.env).holds():
             return x
+        let span = self.span_of(x)
+        # A float literal reaches a `Decimal` as written, its places kept
+        # (03, "Numbers"; RULES.md, R33): from its text, not its `f64`.
+        if let TExprKind.Float(_) = self.exprs[x.index].kind:
+            if self.is_std_named(cx, exp, "num", "Decimal"):
+                if let TyData.Adt(d, _) = self.types.data(exp):
+                    if let Some(of) = cx.prog.method(TyKey.Adt(d), "of_literal"):
+                        let text = self.source_text(cx, span)
+                        let written = self.add(TExprKind.Str(text), Ty.str(), span)
+                        let made = TExprKind.Call(
+                            callee=Callee.Fn(def_=of, type_args=[]),
+                            args=[TArg(expr=written, mode=ArgMode.Ref)],
+                        )
+                        return self.add(made, exp, span)
         let m = cx.prog.trait_method(tr_def, "from_literal") else:
             return x
-        let span = self.span_of(x)
         let call = TExprKind.Call(
             callee=Callee.Fn(def_=m, type_args=[exp, lit]), args=[TArg(expr=x, mode=ArgMode.Ref)]
         )
@@ -1681,8 +1694,21 @@ impl Checker:
         # An optional value used as the value it may hold.
         if self.is_option(cx, lt) or self.is_option(cx, rt):
             d = d.note(Msg.TypeOptionNotValue)
+        # Two `Decimal`s divided: the quotient is rounded where it is made
+        # (D-076; RULES.md, R33).
+        if op == BinOp.Div and self.is_std_named(cx, lt, "num", "Decimal"):
+            if self.is_std_named(cx, rt, "num", "Decimal"):
+                d = d.note(Msg.TypeDecimalQuotient)
         self.report(d)
         return (Ty.error(), False)
+
+    ## Whether `t` is the std module `module`'s type `name`.
+    pub pure def is_std_named(self, cx: Cx, t: Ty, module: str, name: str) -> bool:
+        if let TyData.Adt(d, _) = self.types.data(self.resolved(t)):
+            let def_ = ref cx.prog.defs[d.index]
+            let m = ref cx.prog.modules[def_.module.index]
+            return def_.name == name and m.is_std and m.name == module
+        return False
 
     pub pure def is_text(self, cx: Cx, t: Ty) -> bool:
         return t == Ty.str() or self.is_string(cx, t)

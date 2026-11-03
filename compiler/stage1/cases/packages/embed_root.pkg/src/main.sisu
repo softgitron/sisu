@@ -1,0 +1,12 @@
+# RULES.md, R31: `embed("path")` names a file from the package's root (08:
+# "the path resolved relative to the package root"), whatever module of
+# the package names it: `data/words.txt` is beside `sisu.toml`, not under
+# `src/`.
+import embed_root.words
+
+const BANNER: str = embed("data/words.txt")
+
+def main():
+    print("{len(BANNER.lines().collect())} words")
+    for w in words.all():
+        print("> {w}")

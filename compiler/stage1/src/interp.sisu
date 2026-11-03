@@ -115,6 +115,15 @@ pub enum Value:
     Ref(Pointer)
     ## A range's iterator: the next number, the end and the step.
     Range(cur: int, stop: int, step: int)
+    ## A borrowed list's iterator (`iter.ref`, `iter.mut`): references to
+    ## its items from `idx` on (stage 0's `IterState::ListRef`).
+    ListIter(base: Pointer, idx: int)
+    ## Items made up front (`iter.own`): those from `idx` on.
+    Items(items: list[Value], idx: int)
+    ## A set's items and a dict's entries, in the order they were added
+    ## (D-074), compared as values.
+    Set(list[Value])
+    Dict(list[(Value, Value)])
     Fn(String)
     Closure(name: String, types: list[Type], env: list[Value])
     Moved
@@ -130,8 +139,11 @@ enum Step:
     Field(int)
     ## The payload of an enum value of the given variant.
     Payload(int)
-    ## A list element.
+    ## A list element, or a set's item.
     Index(int)
+    ## The value of a dict's entry, and its key.
+    Entry(int)
+    EntryKey(int)
 
 struct Frame:
     func: int
@@ -423,6 +435,17 @@ impl Interp:
         match s.kind:
             case StatementKind.Assign(p, rv):
                 let v = self.rvalue(prog, rv)?
+                # An entry of a dict that has none for the key is made.
+                if let Some(Proj.Key(l)) = p.proj.last():
+                    var prefix = p.copy()
+                    _ = prefix.proj.pop()
+                    let dp = self.resolve(prefix)?
+                    let key = self.target(self.frames[len(self.frames) - 1].locals[l.index].copy())?
+                    if let Value.Dict(es) = self.read(dp)?:
+                        if (entry_index(es, key)?).is_none():
+                            var more = es
+                            more.push((key, Value.Moved))
+                            self.write(dp, Value.Dict(more))?
                 let at = self.resolve(p)?
                 self.write(at, v)?
             case StatementKind.Call(dest, callee, args):
@@ -514,6 +537,19 @@ impl Interp:
                         return Ok(Value.Tuple(vals))
                     case Aggregate.List:
                         return Ok(Value.List(vals))
+                    case Aggregate.Set:
+                        var items: list[Value] = []
+                        for v in vals:
+                            if (index_of(items, v)?).is_none():
+                                items.push(v.copy())
+                        return Ok(Value.Set(items))
+                    case Aggregate.Dict:
+                        var entries: list[(Value, Value)] = []
+                        var k = 0
+                        while k + 1 < len(vals):
+                            _ = put(mut entries, vals[k].copy(), vals[k + 1].copy())?
+                            k += 2
+                        return Ok(Value.Dict(entries))
                     case Aggregate.Struct(name):
                         return Ok(Value.Adt(ty=name.copy(), variant=0, fields=vals))
                     case Aggregate.Variant(ty, name):
@@ -691,8 +727,15 @@ impl Interp:
                         return Err(Stop.Beyond("an index into a value that is not a list"))
                     let at = list_index(i, len(xs), from_end, self.catalog)?
                     ptr.path.push(Step.Index(at))
-                case Proj.Key(_):
-                    return Err(Stop.Beyond("a dict"))
+                case Proj.Key(l):
+                    let key = self.target(self.frames[top].locals[l.index].copy())?
+                    let Value.Dict(es) = self.read(ptr)? else:
+                        return Err(Stop.Beyond("a key of a value that is not a dict"))
+                    let i = entry_index(es, key)? else:
+                        return Err(
+                            self.panicked("panic.missing-key", [param("key", key_text(key))])
+                        )
+                    ptr.path.push(Step.Entry(i))
         return Ok(Some(ptr))
 
     ## A copy of the value a pointer leads to.
@@ -753,7 +796,17 @@ impl Interp:
                     return Err(Stop.Beyond("a concatenation of values that are not text"))
                 return Ok(Value.String("{x}{y}"))
             case BinOp.In:
-                return Err(Stop.Beyond("`in`"))
+                match b:
+                    case Value.List(xs) | Value.Set(xs):
+                        return Ok(Value.Bool((index_of(xs, a)?).is_some()))
+                    case Value.Dict(es):
+                        return Ok(Value.Bool((entry_index(es, a)?).is_some()))
+                    case Value.Str(t) | Value.String(t):
+                        let needle = text_of(a) else:
+                            return Err(Stop.Beyond("`in` of a value that is not text in text"))
+                        return Ok(Value.Bool(t.contains(needle)))
+                    case _:
+                        return Err(Stop.Beyond("`in` a value that is not a collection"))
             case _:
                 pass
         match (a, b):
@@ -811,6 +864,14 @@ impl Interp:
             case "panic":
                 let m = self.text(args, 0)?
                 return Err(self.panicked("panic.explicit", [param("message", m)]))
+            # A typed hole reached at compile time is the expression's
+            # panic, as the interpreter's (stage 0's `todo`).
+            case "todo":
+                let n = self.text(args, 0)?
+                var shown = "`todo()`".to_string()
+                if not n.is_empty():
+                    shown = "`todo({quote_str(n)})`"
+                return Err(self.panicked("panic.hole", [param("hole", shown)]))
             case "unreachable":
                 let m = self.text(args, 0)?
                 if m.is_empty():
@@ -825,7 +886,8 @@ impl Interp:
             case "len":
                 return match self.target(arg(args, 0)?)?:
                     case Value.Str(s) | Value.String(s): Ok(Value.Int(len(s)))
-                    case Value.List(xs): Ok(Value.Int(len(xs)))
+                    case Value.List(xs) | Value.Set(xs): Ok(Value.Int(len(xs)))
+                    case Value.Dict(es): Ok(Value.Int(len(es)))
                     case _: Err(Stop.Beyond("`len` of a value that is not text or a list"))
             case "range":
                 let start = int_arg(self, args, 0)?
@@ -834,10 +896,65 @@ impl Interp:
                 if step == 0:
                     return Err(self.panicked("panic.range-step", []))
                 return Ok(Value.Range(cur=start, stop=stop, step=step))
+            # The iterators of a `for` over a list (stage 0's `iter_borrow`
+            # and `iter_own`).
+            case "iter.ref" | "iter.mut":
+                let Value.Ref(p) = arg(args, 0)? else:
+                    return Err(Stop.Beyond("an iterator over a value that is not a list"))
+                match self.read(p)?:
+                    case Value.List(_) | Value.Set(_) | Value.Dict(_):
+                        return Ok(Value.ListIter(base=p.copy(), idx=0))
+                    case _:
+                        return Err(Stop.Beyond("an iterator over a value that is not a list"))
+            case "iter.own":
+                match arg(args, 0)?:
+                    case Value.List(xs):
+                        return Ok(Value.Items(items=xs, idx=0))
+                    case Value.Ref(p):
+                        if let Value.List(_) = self.read(p)?:
+                            return Ok(Value.ListIter(base=p.copy(), idx=0))
+                        return Err(Stop.Beyond("an iterator over a value that is not a list"))
+                    case Value.Range(cur, stop, step):
+                        return Ok(Value.Range(cur=cur, stop=stop, step=step))
+                    case _:
+                        return Err(Stop.Beyond("an iterator over a value that is not a list"))
             case "Iter.next":
                 let Value.Ref(p) = arg(args, 0)? else:
                     return Err(Stop.Beyond("an iterator that is not a range"))
-                let Value.Range(cur, stop, step) = self.read(p)? else:
+                let it = self.read(p)?
+                if let Value.ListIter(base, idx) = it:
+                    var n = 0
+                    var dict = False
+                    match self.read(base)?:
+                        case Value.List(xs) | Value.Set(xs):
+                            n = len(xs)
+                        case Value.Dict(es):
+                            n = len(es)
+                            dict = True
+                        case _:
+                            return Err(Stop.Beyond("an iterator over a value that is not a list"))
+                    if idx >= n:
+                        return Ok(none())
+                    self.write(p, Value.ListIter(base=base.copy(), idx=idx + 1))?
+                    var at = base.copy()
+                    if dict:
+                        # A dict's items are pairs of references.
+                        var key = base.copy()
+                        key.path.push(Step.EntryKey(idx))
+                        at.path.push(Step.Entry(idx))
+                        return Ok(some(Value.Tuple([Value.Ref(key), Value.Ref(at)])))
+                    at.path.push(Step.Index(idx))
+                    return Ok(some(Value.Ref(at)))
+                if let Value.Items(_, idx) = it:
+                    let Value.Items(items, _) = self.take(p)? else:
+                        return Err(Stop.Beyond("an iterator that is not a range"))
+                    if idx >= len(items):
+                        self.write(p, Value.Items(items=items, idx=idx))?
+                        return Ok(none())
+                    let item = items[idx].copy()
+                    self.write(p, Value.Items(items=items, idx=idx + 1))?
+                    return Ok(some(item))
+                let Value.Range(cur, stop, step) = it else:
                     return Err(Stop.Beyond("an iterator that is not a range"))
                 let more = if step > 0: cur < stop else: cur > stop
                 if not more:
@@ -904,6 +1021,113 @@ impl Interp:
                 let t = text_of(self.target(arg(args, 0)?)?) else:
                     return Err(Stop.Beyond("`byte_len` of a value that is not text"))
                 return Ok(Value.Int(t.byte_len()))
+            case "String.push":
+                let Value.Ref(p) = arg(args, 0)? else:
+                    return Err(Stop.Beyond("a push onto a value that is not a `String`"))
+                let t = text_of(self.target(arg(args, 1)?)?) else:
+                    return Err(Stop.Beyond("a push of a value that is not text"))
+                let Value.String(s) = self.read(p)? else:
+                    return Err(Stop.Beyond("a push onto a value that is not a `String`"))
+                self.write(p, Value.String("{s}{t}"))?
+                return Ok(Value.Unit)
+            case "list.join":
+                let Value.List(xs) = self.target(arg(args, 0)?)? else:
+                    return Err(Stop.Beyond("`join` of a value that is not a list"))
+                let sep = self.text(args, 1)?
+                var out = String.new()
+                for i in range(len(xs)):
+                    if i > 0:
+                        out.push(sep)
+                    self.display_into(prog, xs[i], mut out)?
+                return Ok(Value.String(out))
+            case "list.new":
+                return Ok(Value.List([]))
+            # Sets and dicts (stage 0's `set` and `dict` methods).
+            case "set.new":
+                return Ok(Value.Set([]))
+            case "dict.new":
+                return Ok(Value.Dict([]))
+            case "set.add" | "set.remove" | "set.contains":
+                let Value.Ref(p) = arg(args, 0)? else:
+                    return Err(Stop.Beyond("a set method on a value that is not a set"))
+                let Value.Set(xs) = self.read(p)? else:
+                    return Err(Stop.Beyond("a set method on a value that is not a set"))
+                let x = self.target(arg(args, 1)?)?
+                let at = index_of(xs, x)?
+                if name == "set.contains":
+                    return Ok(Value.Bool(at.is_some()))
+                var ys = xs
+                if name == "set.add":
+                    if at.is_some():
+                        return Ok(Value.Bool(False))
+                    ys.push(x)
+                else:
+                    let i = at else:
+                        return Ok(Value.Bool(False))
+                    _ = ys.remove(i)
+                self.write(p, Value.Set(ys))?
+                return Ok(Value.Bool(True))
+            case "dict.insert":
+                let Value.Ref(p) = arg(args, 0)? else:
+                    return Err(Stop.Beyond("a dict method on a value that is not a dict"))
+                let Value.Dict(es) = self.read(p)? else:
+                    return Err(Stop.Beyond("a dict method on a value that is not a dict"))
+                let k = self.target(arg(args, 1)?)?
+                var more = es
+                let old = put(mut more, k, arg(args, 2)?)?
+                self.write(p, Value.Dict(more))?
+                if let Some(v) = old:
+                    return Ok(some(v.copy()))
+                return Ok(none())
+            case "dict.get" | "dict.contains" | "dict.remove":
+                let Value.Ref(p) = arg(args, 0)? else:
+                    return Err(Stop.Beyond("a dict method on a value that is not a dict"))
+                let Value.Dict(es) = self.read(p)? else:
+                    return Err(Stop.Beyond("a dict method on a value that is not a dict"))
+                let at = entry_index(es, self.target(arg(args, 1)?)?)?
+                if name == "dict.contains":
+                    return Ok(Value.Bool(at.is_some()))
+                let i = at else:
+                    return Ok(none())
+                if name == "dict.get":
+                    var v = p.copy()
+                    v.path.push(Step.Entry(i))
+                    return Ok(some(Value.Ref(v)))
+                var rest = es
+                let (_, v) = rest.remove(i)
+                self.write(p, Value.Dict(rest))?
+                return Ok(some(v))
+            case "dict.items" | "dict.keys" | "dict.values":
+                let Value.Ref(p) = arg(args, 0)? else:
+                    return Err(Stop.Beyond("a dict method on a value that is not a dict"))
+                let Value.Dict(es) = self.read(p)? else:
+                    return Err(Stop.Beyond("a dict method on a value that is not a dict"))
+                var items: list[Value] = []
+                for i in range(len(es)):
+                    var k = p.copy()
+                    k.path.push(Step.EntryKey(i))
+                    var v = p.copy()
+                    v.path.push(Step.Entry(i))
+                    if name == "dict.items":
+                        items.push(Value.Tuple([Value.Ref(k), Value.Ref(v)]))
+                    elif name == "dict.keys":
+                        items.push(Value.Ref(k))
+                    else:
+                        items.push(Value.Ref(v))
+                return Ok(Value.Items(items=items, idx=0))
+            case "str.byte_at":
+                let t = text_of(self.target(arg(args, 0)?)?) else:
+                    return Err(Stop.Beyond("`byte_at` of a value that is not text"))
+                let i = int_arg(self, args, 1)?
+                if i < 0 or i >= t.byte_len():
+                    let ps = [param("len", "{t.byte_len()}"), param("index", "{i}")]
+                    return Err(self.panicked("panic.index-out-of-bounds", ps))
+                return Ok(Value.Int(t.byte_at(i).to_int()))
+            case "int.to_f64":
+                let n = int_arg(self, args, 0)?
+                return Ok(Value.Float(n.to_f64()))
+            case "sum":
+                return self.sum(prog, tys, arg(args, 0)?)
             case "String.new":
                 if args.is_empty():
                     return Ok(Value.String(String.new()))
@@ -949,6 +1173,51 @@ impl Interp:
                 case _:
                     pass
         return Err(Stop.Beyond("the intrinsic `{name}`"))
+
+    ## `sum` of an iterable (stage 0's): an `f64`'s pairwise, as the run
+    ## time sums (D-074), an `f32`'s in `f32`, an `int`'s with its overflow.
+    pure def sum(mut self, prog: Program, tys: list[Type], xs_in: Value) -> Value ! Stop:
+        var items: list[Value] = []
+        match self.target(xs_in)?:
+            case Value.List(xs):
+                items = xs
+            case Value.Range(cur, stop, step):
+                var at = cur
+                while (step > 0 and at < stop) or (step < 0 and at > stop):
+                    items.push(Value.Int(at))
+                    at += step
+            case _:
+                return Err(Stop.Beyond("`sum` of a value that is not a list or a range"))
+        var floats: list[f64] = []
+        var float32s: list[f32] = []
+        var total = 0
+        var kind = 0
+        if let Some(Type.Float) = tys.first():
+            kind = 1
+        if let Some(Type.Named(n, _)) = tys.first():
+            if n == "f32":
+                kind = 2
+        for x in items:
+            match self.target(x)?:
+                case Value.Float(f):
+                    floats.push(f)
+                    kind = 1
+                case Value.F32(f):
+                    float32s.push(f)
+                    kind = 2
+                case Value.Int(n):
+                    let t = checked_add(total, n) else:
+                        return Err(
+                            self.panicked("panic.overflow", [param("expr", "{total} + {n}")])
+                        )
+                    total = t
+                case _:
+                    return Err(Stop.Beyond("`sum` of values that are not numbers"))
+        if kind == 1:
+            return Ok(Value.Float(pairwise(floats, 0, len(floats))))
+        if kind == 2:
+            return Ok(Value.F32(pairwise32(float32s, 0, len(float32s))))
+        return Ok(Value.Int(total))
 
     ## The operations of the sized integers `u8` to `u32` and `i8` to
     ## `i32`, whose values are `int`s in their range (stage 0's
@@ -1151,6 +1420,61 @@ pure def symbol(op: BinOp) -> str:
         case _: op.name()
 
 ## `x + y`, or `None` when it does not fit an `int`.
+## A key as a missing key's panic shows it: as `{k:?}` writes it.
+pure def key_text(v: Value) -> String:
+    return match v:
+        case Value.Int(n): "{n}"
+        case Value.Str(t) | Value.String(t): quote_str(t)
+        case Value.Char(c): quote_char(c)
+        case Value.Bool(b): (if b: "True" else: "False").to_string()
+        case _: "a key".to_string()
+
+## Where a set's or a list's items hold one equal to `x`.
+pure def index_of(xs: list[Value], x: Value) -> int? ! Stop:
+    for i in range(len(xs)):
+        if equal(xs[i], x)?:
+            return Ok(Some(i))
+    return Ok(None)
+
+## Where a dict's entries hold the key `k`.
+pure def entry_index(es: list[(Value, Value)], k: Value) -> int? ! Stop:
+    for i in range(len(es)):
+        if equal(es[i].0, k)?:
+            return Ok(Some(i))
+    return Ok(None)
+
+## Puts `v` at the key `k`, where the key's entry is or last; the value
+## the entry held.
+pure def put(mut es: list[(Value, Value)], own k: Value, own v: Value) -> Value? ! Stop:
+    let at = entry_index(es, k)?
+    if let Some(i) = at:
+        let old = es[i].1.copy()
+        es[i] = (k, v)
+        return Ok(Some(old))
+    es.push((k, v))
+    return Ok(None)
+
+## The pairwise sum of `xs[lo:hi]` (stage 0's `pairwise`): the halves'
+## sums added, so that compile time and run time give the same bits.
+pure def pairwise(xs: list[f64], lo: int, hi: int) -> f64:
+    let n = hi - lo
+    if n == 0:
+        return 0.0
+    if n == 1:
+        return xs[lo]
+    let mid = lo + n // 2
+    return pairwise(xs, lo, mid) + pairwise(xs, mid, hi)
+
+## `pairwise` in `f32`: each sum rounded once to `f32`.
+pure def pairwise32(xs: list[f32], lo: int, hi: int) -> f32:
+    let n = hi - lo
+    if n == 0:
+        return 0.0f32
+    if n == 1:
+        return xs[lo]
+    let mid = lo + n // 2
+    return pairwise32(xs, lo, mid) + pairwise32(xs, mid, hi)
+
 pure def checked_add(x: int, y: int) -> int?:
     if (y > 0 and x > INT_MAX - y) or (y < 0 and x < INT_MIN - y):
         return None
@@ -1274,6 +1598,17 @@ pure def value_at(v: Value, path: list[Step], i: int) -> ref Value? from v:
             if let Value.List(xs) = v:
                 if k < len(xs):
                     return value_at(xs[k], path, i + 1)
+            if let Value.Set(xs) = v:
+                if k < len(xs):
+                    return value_at(xs[k], path, i + 1)
+        case Step.Entry(k):
+            if let Value.Dict(es) = v:
+                if k < len(es):
+                    return value_at(es[k].1, path, i + 1)
+        case Step.EntryKey(k):
+            if let Value.Dict(es) = v:
+                if k < len(es):
+                    return value_at(es[k].0, path, i + 1)
     return None
 
 ## Writes `x` at a path from `v`; whether the path leads somewhere.
@@ -1299,6 +1634,12 @@ pure def set_at(mut v: Value, path: list[Step], i: int, own x: Value) -> bool:
             if let Value.List(xs) = ref mut v:
                 if k < len(xs):
                     return set_at(mut xs[k], path, i + 1, x)
+        case Step.Entry(k):
+            if let Value.Dict(es) = ref mut v:
+                if k < len(es):
+                    return set_at(mut es[k].1, path, i + 1, x)
+        case _:
+            pass
     return False
 
 ## Where the last `.` of a name is.
@@ -1403,6 +1744,24 @@ pure def equal(a: Value, b: Value) -> bool ! Stop:
             return Ok(True)
         case (Value.Fn(x), Value.Fn(y)):
             return Ok(x == y)
+        # A set and a dict are equal to one with the same items, in any
+        # order.
+        case (Value.Set(xs), Value.Set(ys)):
+            if len(xs) != len(ys):
+                return Ok(False)
+            for x in xs:
+                if (index_of(ys, x)?).is_none():
+                    return Ok(False)
+            return Ok(True)
+        case (Value.Dict(xs), Value.Dict(ys)):
+            if len(xs) != len(ys):
+                return Ok(False)
+            for (k, v) in xs:
+                let i = entry_index(ys, k)? else:
+                    return Ok(False)
+                if not equal(v, ys[i].1)?:
+                    return Ok(False)
+            return Ok(True)
         case (Value.Ref(_), _) | (_, Value.Ref(_)):
             return Err(Stop.Beyond("a comparison through a reference"))
         case _:
@@ -1650,7 +2009,23 @@ impl Interp:
                 out.push("<fn {n}>")
             case Value.Closure(_, _, _):
                 out.push("<closure>")
-            case Value.Range(_, _, _):
+            case Value.Set(xs):
+                if xs.is_empty():
+                    out.push("set()")
+                else:
+                    out.push("{{")
+                    self.debug_list(prog, xs, mut out)?
+                    out.push("}}")
+            case Value.Dict(es):
+                out.push("{{")
+                for i in range(len(es)):
+                    if i > 0:
+                        out.push(", ")
+                    self.debug_into(prog, es[i].0, mut out)?
+                    out.push(": ")
+                    self.debug_into(prog, es[i].1, mut out)?
+                out.push("}}")
+            case Value.Range(_, _, _) | Value.ListIter(_, _) | Value.Items(_, _):
                 out.push("<iter>")
         return Ok(())
 
@@ -1779,6 +2154,17 @@ impl Baker:
                 for x in xs:
                     ops.push(self.part(decls, x, type_arg(ty, 0))?)
                 self.assign(dest.copy(), Rvalue.Aggregate(kind=Aggregate.List, operands=ops))
+            case Value.Set(xs):
+                var ops: list[Operand] = []
+                for x in xs:
+                    ops.push(self.part(decls, x, type_arg(ty, 0))?)
+                self.assign(dest.copy(), Rvalue.Aggregate(kind=Aggregate.Set, operands=ops))
+            case Value.Dict(es):
+                var ops: list[Operand] = []
+                for (k, x) in es:
+                    ops.push(self.part(decls, k, type_arg(ty, 0))?)
+                    ops.push(self.part(decls, x, type_arg(ty, 1))?)
+                self.assign(dest.copy(), Rvalue.Aggregate(kind=Aggregate.Dict, operands=ops))
             case Value.Adt(name, variant, fields):
                 var is_struct = False
                 if let Some(TypeDecl.Struct(_, _, _, _, _, _)) = decls.get(name):
@@ -1861,7 +2247,7 @@ pure def kind_of(v: Value) -> String:
     let what = match v:
         case Value.Ref(_): "a reference"
         case Value.Fn(_) | Value.Closure(_, _, _): "a function"
-        case Value.Range(_, _, _): "an iterator"
+        case Value.Range(_, _, _) | Value.ListIter(_, _) | Value.Items(_, _): "an iterator"
         case _: "a value"
     return what.to_string()
 
@@ -1970,3 +2356,11 @@ test "an index at compile time panics with the catalog's messages":
     if let Ok(at) = list_index(1, 2, True, catalog):
         last = at
     assert last == 1
+
+test "a sum of floats at compile time is pairwise, as the run time's":
+    let xs = [0.1, 0.2, 0.3]
+    # The halves' sums added: 0.1 + (0.2 + 0.3), where a left fold rounds
+    # 0.1 + 0.2 first.
+    assert pairwise(xs, 0, 3) == 0.1 + (0.2 + 0.3)
+    assert pairwise(xs, 0, 3) != (0.1 + 0.2) + 0.3
+    assert pairwise([], 0, 0) == 0.0

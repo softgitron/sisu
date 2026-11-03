@@ -1,0 +1,16 @@
+error[E0445]: a release build rejects the typed hole `todo("area")` of type `f64`: blocked is never a shipped state
+  --> release.sisu:5:12
+  |
+5 |     return todo("area")
+  |            ^^^^^^^^^^^^
+  = note: fill the hole before the release build; a placeholder meant to ship is `panic("...")`
+
+error[E0445]: a release build rejects the typed hole `todo()` of type `String`: blocked is never a shipped state
+  --> release.sisu:8:12
+  |
+8 |     return todo()
+  |            ^^^^^^
+  = note: fill the hole before the release build; a placeholder meant to ship is `panic("...")`
+
+error[D0006]: the program was not run: errors found (2)
+error: Failed

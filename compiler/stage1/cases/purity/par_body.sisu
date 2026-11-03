@@ -1,0 +1,17 @@
+# RULES.md, R28: the body of a `par` loop is `pure` (06, "Data
+# parallelism"): it calls no function that is not `pure` and changes
+# nothing declared before the loop; its own values are its to change.
+import std.par
+
+def main():
+    let xs = [1, 2, 3]
+    var total = 0
+    var seen: list[int] = []
+    for x in par.iter(xs):
+        let doubled = x * 2
+        var mine = doubled
+        mine += 1
+        total += x
+        seen.push(x)
+        print("{mine}")
+    print("{total} {seen:?}")
