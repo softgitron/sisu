@@ -128,7 +128,7 @@ impl Checker:
                             self.visit_expr(e, mut out)
                         case TArmBody.Block(b):
                             self.visit_block(b, mut out)
-            case TStmt.Assert(cond, message, _, _, _):
+            case TStmt.Assert(cond, message, _, _, _, _):
                 self.visit_expr(cond, mut out)
                 if let Some(m) = message:
                     self.visit_expr(m, mut out)
@@ -190,7 +190,7 @@ impl Checker:
             case TExprKind.Index(base, index, _):
                 self.visit_expr(base, mut out)
                 self.visit_expr(index, mut out)
-            case TExprKind.Slice(base, lo, hi):
+            case TExprKind.Slice(base, lo, hi, _, _):
                 self.visit_expr(base, mut out)
                 if let Some(x) = lo:
                     self.visit_expr(x, mut out)

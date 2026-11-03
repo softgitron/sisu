@@ -1,0 +1,5 @@
+# RULES.md, R37: a trait's associated constants across modules: the trait
+# in one, an impl in another, read through a bound in a third.
+[package]
+name = "shapes"
+version = "0.1.0"

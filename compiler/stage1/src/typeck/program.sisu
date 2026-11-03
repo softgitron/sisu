@@ -294,6 +294,9 @@ pub struct FnInfo:
     ## `@deprecated("...")` (13, "Deprecation"; RULES.md, R30): the text it
     ## names the replacement with, empty when it names none.
     pub deprecated: String?
+    ## The function that gives an associated constant of a trait or of its
+    ## impl (03, "Traits"; RULES.md, R37): read as `T.NAME`, not called.
+    pub assoc_const: bool
 
 impl FnInfo:
     ## Whether this template is made once, for all its type arguments at
@@ -560,6 +563,15 @@ pub struct Program:
     pub variants: dict[String, list[(DefId, int)]]
     ## Tests in declaration order.
     pub tests: list[DefId]
+    ## The types and constants marked `@deprecated("...")` (13; RULES.md,
+    ## R40), with the attribute's text, empty when it names no replacement;
+    ## and the variants so marked, by their enum or error set and index.
+    pub deprecated: dict[DefId, String]
+    pub deprecated_variants: dict[(DefId, int), String]
+    ## The program is built with its tests (`sisu test`, `sir --tests`):
+    ## an `expect` that fails records its failure and the test goes on
+    ## (17; RULES.md, R38).
+    pub with_tests: bool
     ## Each test's `@tag("...")`s, in the order written (decision 285).
     pub test_tags: dict[DefId, list[String]]
     ## Benchmarks in declaration order.
@@ -620,6 +632,9 @@ impl Program:
             methods={},
             variants={},
             tests=[],
+            deprecated={},
+            deprecated_variants={},
+            with_tests=False,
             test_tags={},
             benches=[],
             impls=[],
@@ -1038,6 +1053,11 @@ impl Program:
                 let f = self.fn_info(m) else:
                     continue
                 let name = self.defs[m.index].name.copy()
+                # A constant is each type's, and a `dyn` value does not say
+                # which type it is (RULES.md, R37).
+                if f.assoc_const:
+                    let why = "it is a constant, which each implementing type gives, and a `dyn` value does not say which type it is"
+                    return Some((name, why.to_string()))
                 match f.self_mode:
                     case Some(Mode.Borrow) | Some(Mode.Mut):
                         pass

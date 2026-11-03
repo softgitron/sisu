@@ -1,0 +1,6 @@
+# RULES.md, R39: a trait's contract binds an impl of another module (07),
+# checked in the trait's module's syntax: its names (a private helper),
+# `old`, and the parts a failure shows; through a generic call too.
+[package]
+name = "tally"
+version = "0.1.0"

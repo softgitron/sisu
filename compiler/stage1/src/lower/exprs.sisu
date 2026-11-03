@@ -490,6 +490,20 @@ impl FnLower:
                 vname = e.variants[v].name.copy()
         return (tname, vname)
 
+    ## `len(xs) - k` for a bound `^k` of a slice of the list `xs` points at
+    ## (RULES.md, R43).
+    pure def from_end(mut self, cx: Cx, own xs: Operand, own k: Operand, loc: Loc?) -> Operand:
+        let n = self.temp_sir(Type.Int)
+        self.intrinsic_call(cx, Place.local(n), "len", [], [xs], loc)
+        let at = self.temp_sir(Type.Int)
+        self.assign(
+            cx,
+            Place.local(at),
+            Rvalue.Binary(op=SirBinOp.Sub, lhs=Operand.Copy(Place.local(n)), rhs=k),
+            loc,
+        )
+        return Operand.Copy(Place.local(at))
+
     pub pure def intrinsic_call(
         mut self,
         cx: Cx,
@@ -678,14 +692,18 @@ impl FnLower:
                     es.push(v)
                 let ops = self.operands(cx, es)
                 self.assign(cx, dest, Rvalue.Aggregate(kind=Aggregate.Dict, operands=ops), loc)
-            case TExprKind.Slice(base, lo, hi):
+            case TExprKind.Slice(base, lo, hi, lo_end, hi_end):
                 let b = self.borrow_operand(cx, base, False)
                 var l = Operand.Const(Const.Int(0))
                 if let Some(v) = lo:
                     l = self.operand(cx, v)
+                    if lo_end:
+                        l = self.from_end(cx, b.copy(), l, loc)
                 var h = Operand.Const(Const.Int(9223372036854775807))
                 if let Some(v) = hi:
                     h = self.operand(cx, v)
+                    if hi_end:
+                        h = self.from_end(cx, b.copy(), h, loc)
                 self.intrinsic_call(cx, dest, "list.slice", [], [b, l, h], loc)
             case TExprKind.Borrow(place, mutable):
                 let p = self.place_of(cx, place)

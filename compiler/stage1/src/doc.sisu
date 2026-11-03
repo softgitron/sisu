@@ -949,6 +949,9 @@ impl Writer:
             code.push("\n")
         if e.open:
             code.push("{STEP}..\n")
+        for c in e.consts:
+            self.doc_comment(self.docs_before_keyword(c.name.range.start), STEP, mut code)
+            self.constant(c, STEP, mut code)
         self.impl_constants(impls, mut code)
         self.impl_headers(impls, mut code)
         var parts = self.type_start(name, code, item.docs)
@@ -968,6 +971,10 @@ impl Writer:
             code.push(STEP)
             code.push(self.compact(a.range.start, a.range.end))
             code.push("\n")
+        # Its associated constants (RULES.md, R37).
+        for c in t.consts:
+            self.doc_comment(self.docs_before_keyword(c.name.range.start), STEP, mut code)
+            self.constant(c, STEP, mut code)
         var parts = self.type_start(name, code, item.docs)
         for m in t.methods:
             parts.push(self.function(m, self.docs_before(m.range.start), Some(name), None, 3))

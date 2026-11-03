@@ -75,9 +75,12 @@ impl Checker:
             case ExprKind.Name(n):
                 if self.lookup_local(n).is_some() or n == "it":
                     return None
-                # A generic parameter: `T.zero()`.
+                # A generic parameter: `T.zero()`. A `const` one is a value,
+                # whose methods `N.to_f32()` calls (RULES.md, R43).
                 for i in range(len(self.generic_names)):
                     if self.generic_names[i] == n:
+                        if i < len(self.const_generics) and self.const_generics[i]:
+                            return None
                         return Some(StaticPath.Type(self.types.param(i)))
                 if let Some(t) = primitive_value_type(n):
                     if cx.prog.lookup(self.module, n).is_none():
@@ -286,6 +289,11 @@ impl Checker:
                     if let Some(a) = args:
                         self.check_args_loosely(cx, a)
                     return self.error_expr(at)
+                # A deprecated type named before `.` (RULES.md, R40).
+                if let TyData.Adt(d, _) = self.types.data(ty):
+                    if at.start < name.range.start:
+                        let written = TextRange.new(at.start, max(at.start, name.range.start - 1))
+                        self.deprecated_item_use(cx, d, written)
                 # `X.try_from(v)` for a refinement type (07).
                 if name.text == "try_from" and self.refinement_of(cx, ty).is_some():
                     if let Some(a) = args:
@@ -344,6 +352,35 @@ impl Checker:
                         case None:
                             self.check_method_vis(cx, d, name.range)
                             return self.def_value(cx, d, name.text, at)
+                # A trait's associated constant (`T.SIDES`, `Self.SIDES`,
+                # `Square.SIDES`; RULES.md, R37): the call of the function
+                # that gives its value, for the type.
+                if let Some((tr, m)) = self.trait_static(cx, ty, name.text):
+                    if self.is_assoc_const(cx, m):
+                        let z = self.infer.zonk(mut self.types, ty)
+                        let norm = cx.prog.normalize(mut self.types, z, self.env)
+                        var outer = [norm]
+                        for t in tr.args:
+                            outer.push(t)
+                        match args:
+                            case Some(a):
+                                let value = self.call_fn_with(
+                                    cx, m, None, Some(outer), Some(norm), None, [], None, at, None
+                                )
+                                return self.call_value(cx, value, a, trailing, at)
+                            case None:
+                                return self.call_fn_with(
+                                    cx,
+                                    m,
+                                    None,
+                                    Some(outer),
+                                    Some(norm),
+                                    None,
+                                    [],
+                                    None,
+                                    at,
+                                    expected,
+                                )
                 if let Some(a) = args:
                     if let Some((tr, m)) = self.trait_static(cx, ty, name.text):
                         var has_self = False
@@ -374,6 +411,14 @@ impl Checker:
                             expected,
                         )
                 let shown = self.show(cx, ty)
+                # A name written as a variant's of an enum that has no such
+                # variant is `E0327`, as in a pattern, with the variant it
+                # most likely means (RULES.md, R45).
+                if let Some(d) = self.missing_variant(cx, ty, name, shown):
+                    self.report(d)
+                    if let Some(a) = args:
+                        self.check_args_loosely(cx, a)
+                    return self.error_expr(at)
                 let diag = self.error(cx, Msg.TypeUnknownAssociated, name.range).with("ty", shown)
                 self.report(diag.with("name", name.text))
                 if let Some(a) = args:
@@ -386,6 +431,35 @@ impl Checker:
                 let diag = self.error(cx, Msg.TypeUnknownField, name.range).with("ty", owner)
                 self.report(diag.with("name", name.text))
                 return self.error_expr(at)
+
+    ## `E0327` for `Light.Blue`, a CamelCase name after an enum or an error
+    ## set that has no such variant (RULES.md, R45), with the variant closest
+    ## to it.
+    pure def missing_variant(mut self, cx: Cx, ty: Ty, name: Name, shown: str) -> Diagnostic?:
+        let TyData.Adt(d, _) = self.types.data(ty) else:
+            return None
+        let e = cx.prog.enum_info(d) else:
+            return None
+        let first = name.text.chars().next() else:
+            return None
+        if not first.is_uppercase():
+            return None
+        var names: list[String] = []
+        for v in e.variants:
+            names.push(v.name.copy())
+        var diag = self.error(cx, Msg.TypeUnknownVariant, name.range).with("ty", shown)
+        diag = diag.with("name", name.text)
+        if let Some(similar) = cx.prog.closest(name.text, names):
+            let r = name.range
+            diag = diag.fix(Msg.ResolveSimilarName, "name", similar, r.start, r.end, similar)
+        return Some(diag)
+
+    ## Whether `d` is the function that gives an associated constant
+    ## (RULES.md, R37), read as `T.NAME` rather than called.
+    pub pure def is_assoc_const(self, cx: Cx, d: DefId) -> bool:
+        if let Some(f) = cx.prog.fn_info(d):
+            return f.assoc_const
+        return False
 
     ## The one trait method called `name` that `ty` has through the traits
     ## it implements.
@@ -429,6 +503,15 @@ impl Checker:
             let tname = cx.prog.defs[t.index].name.copy()
             let diag = self.error(cx, Msg.TypeUnknownAssociated, name.range).with("ty", tname)
             self.report(diag.with("name", name.text))
+            if let Some(a) = args_in:
+                self.check_args_loosely(cx, a)
+            return self.error_expr(at)
+        # A trait's constant is each type's, read through one (RULES.md,
+        # R37).
+        if self.is_assoc_const(cx, m):
+            let tname = cx.prog.defs[t.index].name.copy()
+            var diag = self.error(cx, Msg.TypeTraitConstant, at)
+            self.report(diag.with("name", name.text).with("trait", tname))
             if let Some(a) = args_in:
                 self.check_args_loosely(cx, a)
             return self.error_expr(at)
@@ -1247,6 +1330,17 @@ impl Checker:
                     if not named:
                         var d = self.error(cx, Msg.TypeUnknownKeyword, key.range)
                         d = d.with("name", sig.name).with("arg", key.text)
+                        # A misspelt parameter's name, `prot=443` for `port`
+                        # (RULES.md, R45), when no parameter has it.
+                        if found.is_none():
+                            var names: list[String] = []
+                            for i in range(sig.positional_only_until, n):
+                                names.push(sig.params[i].name.copy())
+                            if let Some(similar) = cx.prog.closest(key.text, names):
+                                let r = key.range
+                                d = d.fix(
+                                    Msg.ResolveSimilarName, "name", similar, r.start, r.end, similar
+                                )
                         # Python's `sorted(xs, key=len)`, `max(xs, key=f)`:
                         # Sisu compares by a key with `sort_by` and picks by
                         # one with `max_by` and `min_by` (RULES.md, R25).
@@ -1338,6 +1432,11 @@ impl Checker:
                         found += 1
             var d = self.error(cx, Msg.TypeArgumentCount, at)
             d = d.with("name", sig.name).with("expected", "{expected}").with("found", "{found}")
+            # Too many by position where the next parameter is keyword-only:
+            # it takes its name (RULES.md, R45).
+            if let Some(k) = sig.keyword_only_from:
+                if k < n and found > expected:
+                    d = d.note_with(Msg.TypeKeywordOnly, "param", sig.params[k].name)
             # Python's `print(a, b)`: one text with the values in it (02,
             # "Prelude functions"; R16).
             if (sig.name == "print" or sig.name == "print_err") and trailing.is_none():

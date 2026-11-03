@@ -1,0 +1,2 @@
+9:5-9:6 E0205 resolve.duplicate-field name="x" owner="Point"
+14:5-14:8 E0206 resolve.duplicate-variant name="Red" owner="Light"

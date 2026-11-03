@@ -15,6 +15,7 @@
 
 from stage1.diag import TextRange
 from stage1.syntax.ast import BinOp, CmpOp, UnOp
+from stage1.typeck.program import ModuleId
 from stage1.typeck.ty import DefId, Ty
 
 @derive(Eq, Hash, Debug, Copy)
@@ -118,6 +119,10 @@ pub struct ContractCheck:
     ## a trait's method, whose contract binds its impls (07; RULES.md,
     ## R29), `Stack.push`.
     pub owner: String?
+    ## The module whose text the clause is written in, when not the body's:
+    ## a trait's of another module (RULES.md, R39), whose text shows the
+    ## clause's parts and whose lines the body's file does not have.
+    pub module: ModuleId?
 
 pub enum TStmt:
     ## `unwrap` is set when `init` is a `T?` or `T ! E` whose value the
@@ -137,8 +142,12 @@ pub enum TStmt:
     While(cond: TCond, body: BlockId, span: TextRange)
     For(pat: PatId, iter: TExprId, mode: ForMode, item: Ty, body: BlockId, span: TextRange)
     Match(scrutinee: TExprId, arms: list[TArm], span: TextRange)
-    ## `text` is the condition as written, for the panic message.
-    Assert(cond: TExprId, message: TExprId?, text: String, span: TextRange, replay: bool)
+    ## `text` is the condition as written, for the panic message; `soft`
+    ## for `expect`, which a test records and goes on after (17; RULES.md,
+    ## R38).
+    Assert(
+        cond: TExprId, message: TExprId?, text: String, span: TextRange, replay: bool, soft: bool
+    )
     Contract(ContractCheck)
     Defer(body: BlockId, span: TextRange)
     ## A nested scope (from `with`).
@@ -328,7 +337,9 @@ pub enum TExprKind:
     Field(base: TExprId, index: int)
     Index(base: TExprId, index: TExprId, kind: IndexKind)
     ## `xs[lo:hi]` on a list: a new list of copies.
-    Slice(base: TExprId, lo: TExprId?, hi: TExprId?)
+    ## `xs[lo:hi]`; a bound written `^k` (`from_end`) counts from the end
+    ## (02; RULES.md, R43).
+    Slice(base: TExprId, lo: TExprId?, hi: TExprId?, lo_end: bool, hi_end: bool)
     ## The place a reference points to.
     Deref(TExprId)
     Borrow(place: TExprId, mutable: bool)
@@ -436,6 +447,9 @@ pub struct TContracts:
     pub ensures: list[ContractCheck]
     ## `old(e)`: the local that holds `e`'s value from the entry, and `e`.
     pub olds: list[(int, TExprId)]
+    ## The locals of the `old(e)`s of a trait's clauses of another module
+    ## (RULES.md, R39), whose lines are not the body's file's.
+    pub foreign_olds: list[int]
     ## The local `ensures` calls `result`.
     pub result: int?
     ## The labels of a labelled result, each the local that names the

@@ -1,0 +1,54 @@
+sir 0
+source 0 "suite_tags.sisu"
+entry main
+test "lights/red" test#0 tags "slow"
+test "lights/green" test#1 tags "slow" "net"
+test "alone" test#2
+
+intrinsic assert.fail pure
+
+fn test#0(0) test source 0 @5:10-5:15 {
+    let _0: ()
+    let _1: Never
+  bb0:
+    switch const true [0: bb2, else: bb1] @6:9-6:20
+  bb1:
+    _0 = const ()
+    return
+  bb2:
+    _1 = call intrinsic assert.fail(const "True", const "") @6:9-6:20
+    unreachable @6:9-6:20
+}
+
+fn test#1(0) test source 0 @9:10-9:17 {
+    let _0: ()
+    let _1: Never
+  bb0:
+    switch const true [0: bb2, else: bb1] @10:9-10:20
+  bb1:
+    _0 = const ()
+    return
+  bb2:
+    _1 = call intrinsic assert.fail(const "True", const "") @10:9-10:20
+    unreachable @10:9-10:20
+}
+
+fn test#2(0) test source 0 @12:6-12:13 {
+    let _0: ()
+    let _1: Never
+  bb0:
+    switch const true [0: bb2, else: bb1] @13:5-13:16
+  bb1:
+    _0 = const ()
+    return
+  bb2:
+    _1 = call intrinsic assert.fail(const "True", const "") @13:5-13:16
+    unreachable @13:5-13:16
+}
+
+fn main(0) source 0 @15:5-15:9 {
+    let _0: ()
+  bb0:
+    _0 = const ()
+    return
+}

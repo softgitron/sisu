@@ -85,6 +85,14 @@ from stage1.typeck.thir import (
 )
 from stage1.typeck.ty import DefId, TraitRef, Ty, TyData, Types
 
+## The spaces before `at` on its line, the indentation of what starts
+## there.
+pure def column_text(source: str, at: int) -> String:
+    var start = at
+    while start > 0 and source.byte_at(start - 1) == 32:
+        start -= 1
+    return source.byte_slice(start, at).to_string()
+
 ## What the checker reads and does not change: the program, the syntax of
 ## the module whose bodies it checks, that module's text, and the error
 ## sets the `T !` functions inferred so far.
@@ -131,6 +139,8 @@ pub struct SendCheck:
 pub struct EnsuresCtx:
     pub scope: int
     pub olds: list[(int, TExprId)]
+    ## The `old`s of a trait's clauses of another module (RULES.md, R39).
+    pub foreign: list[int]
 
 ## What checking a body leaves: the table of types, the diagnostics, why
 ## the body is beyond the slice, and whether stage 0 reports an error here
@@ -298,6 +308,13 @@ pub struct Checker:
     pub inherited_names: list[(String, int)]
     pub inherited_owner: String?
     pub clause_owner: String?
+    ## The module of the trait whose contract the impl's method inherits,
+    ## when it is not the method's own (RULES.md, R39): the clauses are its
+    ## syntax, whose names it resolves.
+    pub inherited_module: ModuleId?
+    ## While a clause of another module is checked: the module whose
+    ## syntax its expressions are, which `ContractCheck.module` records.
+    pub clause_module: ModuleId?
 
 impl Checker:
     pub pure def new(cx: Cx, own types: Types, def_: DefId) -> Checker:
@@ -365,6 +382,8 @@ impl Checker:
             inherited_names=[],
             inherited_owner=None,
             clause_owner=None,
+            inherited_module=None,
+            clause_module=None,
         )
 
     pub pure def finish(own self) -> Finished:
@@ -1061,6 +1080,8 @@ impl Checker:
                         return cx.prog.normalize(mut self.types, t, self.env)
                 match found:
                     case Some(d):
+                        # A deprecated type named (RULES.md, R40).
+                        self.deprecated_item_use(cx, d, rng)
                         let t = self.def_type(cx, d, targs, rng)
                         self.written_ref_items(cx, d, args, t)
                         return t
@@ -1518,12 +1539,20 @@ impl Checker:
                     m = Some(self.assert_message(cx, msg))
                 let text = self.source_text(cx, cx.ast.expr(cond).range)
                 let replay = self.only_reads(cx, c, False)
-                out.push(TStmt.Assert(cond=c, message=m, text=text, span=span, replay=replay))
+                out.push(
+                    TStmt.Assert(cond=c, message=m, text=text, span=span, replay=replay, soft=False)
+                )
+            # `expect` is `assert`'s non-fatal form (17): a test records
+            # its failure and goes on (RULES.md, R38).
             case StmtKind.Expect(cond):
                 let c = self.check_condition_expr(cx, cond)
                 let text = self.source_text(cx, cx.ast.expr(cond).range)
                 let replay = self.only_reads(cx, c, False)
-                out.push(TStmt.Assert(cond=c, message=None, text=text, span=span, replay=replay))
+                out.push(
+                    TStmt.Assert(
+                        cond=c, message=None, text=text, span=span, replay=replay, soft=True
+                    )
+                )
             case StmtKind.Contract(c):
                 self.contract_stmt(cx, c.kind, c.expr, c.range, mut out)
             case StmtKind.Defer(block):
@@ -1871,6 +1900,14 @@ impl Checker:
         self.require_mutable_as(cx, e, range, False)
 
     ## `assign` distinguishes `x = v` (E0312) from a `mut` borrow (E0341).
+    ## Where the first statement of the body being checked starts.
+    pure def body_start(self, cx: Cx) -> int?:
+        let f = cx.prog.fn_info(self.def_)?
+        if let Some(b) = ref f.body:
+            if let Some(first) = b.stmts.first():
+                return Some(cx.ast.stmt(first).range.start)
+        return None
+
     pub pure def require_mutable_as(mut self, cx: Cx, e: TExprId, range: TextRange, assign: bool):
         var is_local = False
         if let TExprKind.Local(_) = self.exprs[e.index].kind:
@@ -1893,7 +1930,16 @@ impl Checker:
                     case Some((at, pname)):
                         let edit = Edit(start=at.start, end=at.start, text="mut ".to_string())
                         let named = Param(name="name".to_string(), value=pname.copy())
-                        d = d.fix_params(Msg.TypeTakeMut, [named], [edit])
+                        d = d.fix_params(Msg.TypeTakeMut, [named.copy()], [edit])
+                        # A `mut` parameter changes every call; a copy the
+                        # body changes is the other way, when the value is
+                        # `Copy` (RULES.md, R45).
+                        if assign and is_local and self.is_copy(cx, self.locals[l].ty):
+                            if let Some(start) = self.body_start(cx):
+                                let indent = column_text(cx.source, start)
+                                let text = "var {pname} = {pname}\n{indent}"
+                                let copy_edit = Edit(start=start, end=start, text=text)
+                                d = d.fix_params(Msg.TypeChangeCopy, [named], [copy_edit])
                     case None:
                         let named = Param(name="name".to_string(), value=name.copy())
                         d = d.fix_params(Msg.TypeDeclareVar, [named], [])
@@ -1909,6 +1955,7 @@ impl Checker:
                 var base = e
                 var walking = True
                 var read_guard = False
+                var shared = False
                 while walking:
                     match self.exprs[base.index].kind:
                         case TExprKind.Deref(inner):
@@ -1916,6 +1963,10 @@ impl Checker:
                             if let TyData.Adt(g, _) = self.data(it):
                                 if cx.prog.builtin(g) == Some("ReadGuard"):
                                     read_guard = True
+                                # What a `Shared` holds changes through a
+                                # `Cell` or a `Mutex` in it (RULES.md, R45).
+                                if cx.prog.builtin(g) == Some("Shared"):
+                                    shared = True
                             base = inner
                         case TExprKind.Field(inner, _):
                             base = inner
@@ -1946,7 +1997,9 @@ impl Checker:
                                     )
                                     d = d.fix_params(Msg.TypeTakeMut, [named], [edit])
                 # Otherwise it is a borrow that only reads.
-                if not read_guard and d.fixes.is_empty():
+                if shared:
+                    d = d.note(Msg.TypeSharedChanges)
+                elif not read_guard and d.fixes.is_empty():
                     d = d.note(Msg.TypeBorrowWithMut)
                 self.report(d)
             case None:

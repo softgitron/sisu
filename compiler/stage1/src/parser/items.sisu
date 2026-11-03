@@ -15,7 +15,8 @@
 ##! variant   := name ('(' (name ':')? type (',' (name ':')? type)* ')')? NEWLINE
 ##! impl_def  := 'unsafe'? 'impl' generic_params? type ('for' type)? ':' INDENT fn_def+ DEDENT
 ##! trait_def := 'unsafe'? 'trait' name generic_params? ('(' type (',' type)* ')')? ':'
-##!              INDENT fn_def+ DEDENT
+##!              INDENT (fn_def | type_alias | trait_const)+ DEDENT
+##! trait_const := 'const' name ':' type ('=' expr)? NEWLINE
 ##! import    := 'import' path ('as' name)? NEWLINE
 ##! from_import := 'from' path 'import' name ('as' name)? (',' name ('as' name)?)* NEWLINE
 ##! test_def  := 'test' string ('for' patterns 'in' expr)? params? ':' block
@@ -492,7 +493,10 @@ impl Parser:
         self.type_()
         if self.eat(SyntaxKind.ForKw):
             self.type_()
+        let outer = self.in_trait_body
+        self.in_trait_body = False
         self.colon_members("impl", line, Members.Methods)
+        self.in_trait_body = outer
         self.finish_node()
 
     pure def impl_member(mut self):
@@ -506,6 +510,10 @@ impl Parser:
             self.bump()
             self.end_stmt()
             self.finish_node()
+        elif self.in_trait_body and self.at(SyntaxKind.ConstKw):
+            # A trait's constant without a value is one each impl gives
+            # (03; RULES.md, R37).
+            self.const_def_with(cp, True)
         elif not self.item_body(cp):
             self.error_found(Msg.ParseExpectedDeclaration)
             self.recover_line()
@@ -526,7 +534,10 @@ impl Parser:
                 if not self.eat(SyntaxKind.Comma):
                     break
             _ = self.expect(SyntaxKind.RParen)
+        let outer = self.in_trait_body
+        self.in_trait_body = True
         self.colon_members("trait", line, Members.Methods)
+        self.in_trait_body = outer
         self.finish_node()
 
     pure def module_path(mut self):
@@ -612,11 +623,20 @@ impl Parser:
         self.finish_node()
 
     pub(package) pure def const_def(mut self, cp: int):
+        self.const_def_with(cp, False)
+
+    ## `const NAME: T = value`; in a trait's body (`in_trait`) the value
+    ## may be left out, for each impl to give.
+    pure def const_def_with(mut self, cp: int, in_trait: bool):
         self.start_at(cp, SyntaxKind.ConstDef)
         self.bump()
         _ = self.expect_name()
         if self.eat(SyntaxKind.Colon):
             self.type_()
+        if in_trait and not self.at(SyntaxKind.Eq):
+            self.end_stmt()
+            self.finish_node()
+            return
         if self.expect(SyntaxKind.Eq):
             _ = self.expr()
         self.end_stmt()
@@ -642,5 +662,8 @@ impl Parser:
         self.bump()
         if self.at(SyntaxKind.StringStart):
             self.string_expr()
+        let outer = self.in_trait_body
+        self.in_trait_body = False
         self.colon_members("extern", line, Members.Methods)
+        self.in_trait_body = outer
         self.finish_node()

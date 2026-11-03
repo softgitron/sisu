@@ -1,0 +1,20 @@
+# RULES.md, R42: a comprehension in parentheses is a lazy `Iter` (02,
+# "Comprehension": `(x for x in xs)`), the generator that runs its clauses
+# as loops and tests around a `yield` of the element; it borrows what it
+# reads of the function's own while it lives, as a loop over it would.
+
+## The even items of `xs`, lazily: the result borrows `xs`.
+def evens(xs: list[int]) -> Iter[int]:
+    return (x for x in xs if x % 2 == 0)
+
+def main():
+    let xs = [1, 2, 3, 4]
+    let doubled = (x * 2 for x in xs)
+    for d in doubled:
+        print(d)
+    print(sum((x for x in xs if x % 2 == 0)))
+    let words = ["sauna", "löyly", "vihta"]
+    print((len(w) for w in words).collect())
+    print(((a, b) for a in range(0, 3) for b in range(0, a)).collect())
+    print(evens(xs).collect())
+    print(len(xs))

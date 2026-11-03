@@ -79,6 +79,7 @@ from stage1.typeck.thir import (
     TExprId,
     TExprKind,
     TLetElse,
+    TPatKind,
     TStmt,
 )
 from stage1.typeck.ty import DefId, TraitRef, Ty, TyData, Types
@@ -234,7 +235,7 @@ pure def std_promotions(
         var text = String.new()
         if let Some(t) = texts.get(module_name):
             text = t.copy()
-        let done = check_one(prog, ast, text, none, all.types.copy(), d, catalog, False)
+        let done = check_one(prog, ast, text, ast, text, none, all.types.copy(), d, catalog, False)
         for q in done.requests:
             if let Request.Promote(x) = q:
                 if x == d:
@@ -780,7 +781,8 @@ pure def check_round(
         var changed = False
         for d in inferred_fns:
             let (ast, src) = syntax_of(r, modules, at_module, d)
-            let done = check_one(prog, ast, src, inferred, types, d, catalog, False)
+            let (tast, tsrc) = contract_syntax(r, modules, at_module, d)
+            let done = check_one(prog, ast, src, tast, tsrc, inferred, types, d, catalog, False)
             let absorbed = done.absorbed.copy()
             types = done.types
             var before: list[DefId] = []
@@ -812,7 +814,8 @@ pure def check_round(
             result = Some(x.copy())
         if result.is_none():
             let (ast, src) = syntax_of(r, modules, at_module, d)
-            let done = check_one(prog, ast, src, inferred, types, d, catalog, keep)
+            let (tast, tsrc) = contract_syntax(r, modules, at_module, d)
+            let done = check_one(prog, ast, src, tast, tsrc, inferred, types, d, catalog, keep)
             let x = result_of(done)
             types = done.types
             _ = memo.insert(d, x.copy())
@@ -1009,6 +1012,26 @@ pure def syntax_of(
     let m = r.prog.defs[d.index].module
     let at = at_module.get(m) ?? 0
     return (ref r.sources[m.index].ast, modules[at].1)
+
+## The syntax and the text of the module of the trait whose contract the
+## method `d` of a trait impl inherits (RULES.md, R39), when it is one of
+## the checked modules; `d`'s own otherwise.
+pure def contract_syntax(
+    r: Resolver, modules: list[(ModuleId, String)], at_module: dict[ModuleId, int], d: DefId
+) -> (ref Ast, str) from r, modules:
+    let own_module = r.prog.defs[d.index].module
+    var m = own_module
+    if let Some(f) = r.prog.fn_info(d):
+        if let Some(i) = f.impl_:
+            if let Some(info) = r.prog.impl_info(i):
+                if let Some(t) = r.prog.trait_info(info.trait_ref.def_):
+                    let name = r.prog.defs[d.index].name.copy()
+                    for tm in t.methods:
+                        if r.prog.defs[tm.index].name == name:
+                            let home = r.prog.defs[tm.index].module
+                            if at_module.contains(home):
+                                m = home
+    return syntax_in(r, modules, at_module, m)
 
 ## The syntax and the text of the checked module `m`.
 pure def syntax_in(
@@ -1289,11 +1312,15 @@ pure def relabel(
                 unrendered.push("a label in a file stage 1 does not have".to_string())
             diags[i].labels[j].file = file
 
-## Checks one function body.
+## Checks one function body; `tast` and `ttext` are the syntax and text
+## of the module of the trait whose contract it inherits, when it is a
+## method of a trait impl (RULES.md, R39), `ast` and `text` otherwise.
 pure def check_one(
     prog: Program,
     ast: Ast,
     text: str,
+    tast: Ast,
+    ttext: str,
     inferred: dict[DefId, list[DefId]],
     own types: Types,
     d: DefId,
@@ -1301,8 +1328,11 @@ pure def check_one(
     keep: bool,
 ) -> Finished:
     let cx = Cx(prog=ref prog, ast=ref ast, source=text, inferred=ref inferred, catalog=ref catalog)
+    let tcx = Cx(
+        prog=ref prog, ast=ref tast, source=ttext, inferred=ref inferred, catalog=ref catalog
+    )
     var c = Checker.new(cx, types, d)
-    c.check_fn(cx)
+    c.check_fn(cx, tcx)
     c.unsafe_lints(cx)
     c.requests = c.template_requests(cx)
     var typed: TBody? = None
@@ -1562,7 +1592,7 @@ pure def check_std_in(
     catalog: Catalog,
 ) -> (TBody?, Types):
     if kind == BodyKind.Fn:
-        let done = check_one(prog, ast, text, inferred, types, d, catalog, True)
+        let done = check_one(prog, ast, text, ast, text, inferred, types, d, catalog, True)
         if done.beyond.is_some():
             return (None, done.types)
         std_errors(prog, d, text, done.diags, catalog)
@@ -1733,8 +1763,10 @@ pure def remove_pure_edit(text: str, name_at: int) -> Edit?:
     return None
 
 impl Checker:
-    ## Checks one function body (stage 0's `check_fn`).
-    pub pure def check_fn(mut self, cx: Cx):
+    ## Checks one function body (stage 0's `check_fn`); `tcx` is the syntax
+    ## and text of the module of the trait whose contract a method of a
+    ## trait impl inherits (RULES.md, R39), `cx` itself for any other.
+    pub pure def check_fn(mut self, cx: Cx, tcx: Cx):
         let f = cx.prog.fn_info(self.def_) else:
             return
         let body_full = f.body.copy() else:
@@ -1810,8 +1842,8 @@ impl Checker:
         var is_test = False
         if let FnKind.Test(_) = f.kind:
             is_test = True
-        self.inherit_contract(cx, f, params)
-        self.check_contracts(cx, is_test, clauses, ret)
+        self.inherit_contract(cx, tcx, f, params)
+        self.check_contracts(cx, tcx, is_test, clauses, ret)
         # A trait's method whose body is its contract alone has no default.
         let contract_body = f.trait_.is_some() and contract_only(cx.ast, body_full)
         var stmts = body_full.stmts.copy()
@@ -1885,6 +1917,25 @@ impl Checker:
         for c in self.closures.copy():
             if let Some(cl) = c:
                 self.visit_block(cl.body, mut exprs)
+        # A deprecated type built, a deprecated constant read, a deprecated
+        # variant built or matched (RULES.md, R40).
+        for e in exprs:
+            let span = self.span_of(e)
+            match self.exprs[e.index].kind:
+                case TExprKind.Struct(d, _):
+                    self.deprecated_item_use(cx, d, span)
+                case TExprKind.Const(d):
+                    self.deprecated_item_use(cx, d, span)
+                case TExprKind.Variant(d, v, _):
+                    self.deprecated_variant_use(cx, d, v, span)
+                case _:
+                    pass
+        var seen: list[TextRange] = []
+        for p in self.pats.copy():
+            if let TPatKind.Variant(d, v, _) = p.kind:
+                if not seen.contains(p.span):
+                    seen.push(p.span)
+                    self.deprecated_variant_use(cx, d, v, p.span)
         for e in exprs:
             var used: DefId? = None
             match self.exprs[e.index].kind:
@@ -1913,12 +1964,60 @@ impl Checker:
                 let diag = Diagnostic.new(Msg.TypeDeprecated, span.start, span.end)
                 self.report(diag.with("name", name).with("reason", why))
 
+    ## `W0023` (or `W0025`) for a use at `span` of a deprecated type or
+    ## constant `d` (RULES.md, R40), but in its own declaration: the
+    ## constant's value, or the type's methods and impls.
+    pub pure def deprecated_item_use(mut self, cx: Cx, d: DefId, span_in: TextRange):
+        let why = cx.prog.deprecated.get(d) else:
+            return
+        if d == self.def_ or self.declared_by(cx, d):
+            return
+        # A construction, `Point(x=1, y=2)`, is reported at the type's name.
+        let name = cx.prog.defs[d.index].name.copy()
+        var span = span_in
+        let end = min(span.end, cx.source.byte_len())
+        let start = min(span.start, end)
+        if cx.source.byte_slice(start, end).starts_with("{name}("):
+            span = TextRange.new(start, start + name.byte_len())
+        self.report_deprecated(name, why, span)
+
+    ## The same for a variant of `d`.
+    pub pure def deprecated_variant_use(mut self, cx: Cx, d: DefId, v: int, span: TextRange):
+        let why = cx.prog.deprecated_variants.get((d, v)) else:
+            return
+        if self.declared_by(cx, d):
+            return
+        var name = cx.prog.defs[d.index].name.copy()
+        if let Some(e) = cx.prog.enum_info(d):
+            if v < len(e.variants):
+                name = "{name}.{e.variants[v].name}"
+        self.report_deprecated(name, why, span)
+
+    ## Whether the body is part of the declaration of the type `d`: one of
+    ## its methods, or of its impls'.
+    pure def declared_by(self, cx: Cx, d: DefId) -> bool:
+        let f = cx.prog.fn_info(self.def_) else:
+            return False
+        let owner = f.owner else:
+            return False
+        if let TyData.Adt(o, _) = self.types.data(owner):
+            return o == d
+        return False
+
+    pure def report_deprecated(mut self, name: str, why: str, span: TextRange):
+        if why.is_empty():
+            let diag = Diagnostic.new(Msg.TypeDeprecatedPlain, span.start, span.end)
+            self.report(diag.with("name", name))
+        else:
+            let diag = Diagnostic.new(Msg.TypeDeprecated, span.start, span.end)
+            self.report(diag.with("name", name).with("reason", why))
+
     ## For a method of a trait impl, the contract of the trait's method it
     ## implements (07: "Trait methods may declare contracts", which bind
     ## every implementation; RULES.md, R29): its clauses, checked with the
-    ## impl's parameters under the trait's names of them. A trait of
-    ## another module is checked where its module is (W0021).
-    pub pure def inherit_contract(mut self, cx: Cx, f: FnInfo, params: list[int]):
+    ## impl's parameters under the trait's names of them; those of a trait
+    ## of another module in that module's syntax (RULES.md, R39).
+    pub pure def inherit_contract(mut self, cx: Cx, tcx: Cx, f: FnInfo, params: list[int]):
         let impl_ = f.impl_ else:
             return
         let info = cx.prog.impl_info(impl_) else:
@@ -1940,12 +2039,17 @@ impl Checker:
         if not tf.contracts:
             return
         let owner = "{cx.prog.defs[trait_.index].name}.{name}"
-        if cx.prog.defs[tm.index].module != self.module:
-            let span = cx.prog.defs[self.def_.index].span
-            var d = Diagnostic.new(Msg.ContractTraitElsewhere, span.start, span.end)
-            self.report(d.with("method", owner))
-            return
-        for c in leading_contracts(cx.ast, tbody):
+        let tmodule = cx.prog.defs[tm.index].module
+        if tmodule != self.module:
+            # A trait of a module whose syntax this check does not have is
+            # not held to (`W0021`); every module of the program is.
+            if tcx.source == cx.source:
+                let span = cx.prog.defs[self.def_.index].span
+                var d = Diagnostic.new(Msg.ContractTraitElsewhere, span.start, span.end)
+                self.report(d.with("method", owner))
+                return
+            self.inherited_module = Some(tmodule)
+        for c in leading_contracts(tcx.ast, tbody):
             self.inherited.push((c.kind, c.expr, c.range))
         var offset = 0
         if f.self_mode.is_some():

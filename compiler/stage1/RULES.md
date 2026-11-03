@@ -2112,10 +2112,10 @@ contract of every impl of the method:
   binds the impls that write their own;
 - a mistake in a trait's clause is the trait's, reported once where the
   trait is checked, not in each impl;
-- an impl in another module than the trait's is not held to the trait's
-  contract by stage 1 yet, and says so (`W0021`,
-  `contract.trait-elsewhere`), since a checker of stage 1 holds the
-  syntax of its own module only.
+- an impl in another module than the trait's is held to the trait's
+  contract too since R39; `W0021` (`contract.trait-elsewhere`) stays for
+  one whose trait's module stage 1 has no syntax of, which no module of a
+  program is.
 
 **Why.** The manual's writer of chapter 23 found that "contracts on a
 trait's methods ... are accepted and never checked, in either front end
@@ -2445,3 +2445,618 @@ at `json.encode_shape` now. The case `cases/json/derive_encode_decode.sisu`
      too; `@derive(Encode, Decode)` gives a type the form of its shape and
      an impl written by hand a form of its own (11). Stage 1 decides it
      (RULES.md, R36).
+
+## R37. A trait's associated constants (decision 361)
+
+**The rule** (03, "Traits": "A trait declares required and provided
+methods, associated types, and associated constants"). A trait's body may
+declare constants, `const NAME: T`, which every impl gives, or `const
+NAME: T = value`, whose value an impl may replace:
+
+```sisu
+trait Shape:
+    const SIDES: int
+    const CORNERS: int = Self.SIDES
+
+impl Shape for Square:
+    const SIDES: int = 4
+```
+
+- a constant is read through a type: `T.NAME` for a type parameter bounded
+  by the trait (through a supertrait too), `Self.NAME` in the trait's and
+  its impls' methods and in a default's value, and `Square.NAME` for a
+  type that implements the trait, whose impl's value it is, or the
+  trait's when the impl gives none; `Shape.SIDES`, through the trait, is
+  `E0449` (`type.trait-constant`), since each impl gives its own;
+- an impl gives each constant the trait declares without a value
+  (`E0232`, whose note writes `const SIDES: int = ...`), and no other
+  (`E0271`, `resolve.not-a-trait-constant`), with the trait's type
+  (`E0272`, `resolve.constant-type`), as a constant: a constant written as
+  a method, or a method as a constant, is `E0273`
+  (`resolve.const-or-method`);
+- a trait with a constant is no `dyn` type (`E0241`: a `dyn` value does
+  not say which type's constant it would read), as one with an
+  associated function is;
+- a constant has a type (`E0219`) and a SCREAMING_CASE name (`E0269`, R12),
+  in a trait, an impl or a type's body alike, where the name pass checked
+  a module's constants only; its value is checked as the body of a
+  `pure` function, which it is: the function that gives the constant,
+  `pure def NAME() -> T: return value`, a method of the trait without
+  `self` that each impl gives, so a read through a type parameter is the
+  trait's call made for the instance (`call trait Shape.SIDES[$0]()` in
+  SIR, `Square.Shape.SIDES` in the impl's table). A value is computed
+  where it is read, as a module's constant's is.
+
+**Why.** The manual's writer of chapter 14 found it E0100 without a value
+and, with one, unreadable as `Self.SIDES` or `Square.SIDES` (E0351), and
+its reference says "designed and missing" of it.
+
+**In stage 1.** The parser (`Parser.in_trait_body`, `const_def_with`,
+which leaves the value out in a trait's body); the AST's
+`TraitDef.consts` (printed by `parse --ast` only when there are any);
+`resolve.member_const` (the name, types and value of a constant of a
+trait, an impl or a type's body); `typeck.collect` (`const_fn`, the
+constants of a trait in `resolve_trait` and of an impl in
+`resolve_impl`, `check_const_type` and the checks of `check_traits`,
+`FnInfo.assoc_const`); `typeck.call` (the read in `static_member`,
+`E0449` in `trait_path_call`); `typeck.program.object_safety_problem`;
+and `doc.trait_section`, which lists a trait's constants.
+
+**What it changes.** Nothing in the corpus, which declares no trait
+constant. The cases `cases/traits/assoc_consts.sisu` (its `.out`: it
+runs, interpreted and natively), `assoc_const_refusals.sisu` (its
+`.diag`) and `cases/packages/assoc_consts.pkg` (the trait in one module,
+an impl in another, the read in a third; its `.out`).
+
+- Differs: `compiler/stage1/cases/packages/assoc_consts.pkg/src/shape.sisu`: tree, ast, fmt-check
+- Differs: `compiler/stage1/cases/packages/assoc_consts.pkg`: types, sir, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/traits/assoc_const_refusals.sisu`: tree, ast, names, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/traits/assoc_consts.sisu`: tree, ast, ids, human, fmt-check, doc, doc-output
+
+**Decision 361**, for docs/architecture.md:
+
+361. A trait declares associated constants (03): `const NAME: T`, which
+     every impl gives, or with a value an impl may replace; each is read
+     through a type, `T.NAME` under a bound, `Self.NAME`, or `Type.NAME`,
+     and is the trait's `pure` function without `self` that gives it, made
+     for the type at the read. An impl gives each constant the trait
+     leaves without a value, no other, with the trait's type and as a
+     constant (`E0232`, `E0271` to `E0273`); a read through the trait is
+     `E0449`, and a trait with a constant is no `dyn` type. Stage 1
+     decides it (RULES.md, R37).
+
+## R38. `expect` records its failure and the test goes on (decision 362)
+
+**The rule** (17, "Assertions": "`expect expr` is the non-fatal form: the
+test continues and fails at the end"; 02: "`expect cond` # in tests:
+records the failure and continues"). In a program built with its tests
+(`sisu test`, `sisu bench`, `sir --tests`), `expect cond` lowers as
+`assert cond` does, its condition and the parts or the two sides it
+shows, but a failure calls `expect.fail(text, message)`,
+`expect.fail_compare(text, message, left, right)` or
+`expect.fail_parts(text, message, parts)`, which take what `assert.fail`,
+`fail_compare` and `fail_parts` take and return `()`: the run records the
+failure in the running test's report, as `assert`'s would be rendered,
+and goes on after the statement. The test fails at its end with every
+failure it recorded, whatever it does after (it passes no other way, as a
+test blocked by a hole is blocked whatever it does after, decision 359),
+and `expect` in a helper the test calls records in the same test.
+`assert` stops the test as before. Outside a build with its tests (`sisu
+run`, `sisu build`, `sir`) no test is running to report at its end, so
+`expect` stops the run as `assert` does, as it always did; and
+compile-time code stops at a failed `expect` as at a failed `assert`.
+
+**Why.** The manual's writer of chapter 19 found that `expect` stops a
+test at its first failure, as `assert` does, and the runtime round, which
+runs `sisu test` from stage 1's SIR (decision 357), named what it needs of
+the front end (port-debt.md, "Tests and benchmarks from stage 1's SIR"):
+`expect` lowered to intrinsics of its own that record the failure and
+return.
+
+**In stage 1.** `TStmt.Assert.soft` (`typeck.check`), `Program.with_tests`
+(set from the resolver's `tests`), `lower.stmts.assert_` and
+`lower.contracts.assert_showing_parts` (the intrinsics, and the jump to
+the statement after where `assert`'s ends the block); `interp`, which
+stops compile-time code at them. `check.sh` holds a case to its
+`NAME.sir-tests`, what `sir --tests` prints of it.
+
+**What it changes.** Nothing in the corpus, which writes no `expect`
+statement. The case `cases/testing/expect.sisu`: its `.sir-tests`, the
+SIR of its test with the three intrinsics, and its `.out` (its `main`
+runs, interpreted and natively, where the `expect` holds).
+
+**What the stage-0 side must do.** Stage 0's interpreter does not know
+the three intrinsics yet, so a test whose `expect` fails stops with
+"internal error in the interpreter: unknown intrinsic `expect.fail`" and
+is reported failed: the interpreter renders each as `assert_fail`
+renders its `assert` form and keeps it with the statement's location
+(its frame's stack), the runner (`run_test`) reports a test that kept a
+failure `Failed` with each failure in order, after the test returns or
+before the panic that ended it, and the native table (`sisu_rt::abi`,
+stage 2's) needs none, since a native build is no build with its tests.
+
+**Decision 362**, for docs/architecture.md:
+
+362. `expect cond` in a program built with its tests (`sisu test`) lowers
+     as `assert cond` does but for the failure, which calls
+     `expect.fail`, `expect.fail_compare` or `expect.fail_parts` with
+     `assert`'s arguments: the run records the failure in the running
+     test's report and goes on, and the runner fails the test at its end
+     with every failure recorded (17). `assert` stops the test as before;
+     outside a build with its tests, and at compile time, `expect` stops
+     as `assert` does. Stage 1 decides it (RULES.md, R38); the interpreter
+     and the runner implement the three intrinsics.
+
+## R39. A trait's contract binds an impl of another module (decision 363)
+
+**The rule** (07, as R29: a trait's method's contract binds "every
+implementation"). An impl's method checks the trait's `requires` and
+`ensures` wherever the impl is, in another module of the package or
+another package's than the trait: the trait's clauses are checked in the
+syntax of the trait's module, with the impl's parameters under the
+trait's names of them, so a clause's names (a private helper of the
+trait's module, a constant) are the trait's module's; `old(e)` saves `e`
+on entry; a failure names the trait's method and shows the clause's
+parts as the trait's text writes them; and the check's statements stand
+at the impl's method's name, in the impl's file, whose lines the clause
+is not on. `W0021` stays for an impl whose trait's module stage 1 has no
+syntax of, which no module of a program is.
+
+**Why.** R29 left it: "an impl in another module than the trait's is
+warned that stage 1 does not check it yet (`W0021`)", since a checker of
+stage 1 held the syntax of its own module only; the third round's "Still
+open" list asks for the check.
+
+**In stage 1.** `typeck.contract_syntax` (the trait's module's syntax
+and text for a method of an impl of a trait of another module, given to
+`check_one` beside the method's own), `Checker.inherit_contract`,
+`check_contracts` and `inherited_clause`, which check the clause there
+(`Checker.inherited_module`, `clause_module`), `ContractCheck.module` and
+`TContracts.foreign_olds`; `lower.contracts` (`foreign_loc`,
+`FnLower.fixed_loc` and `text_module`, which `emit` and `terminate`
+read).
+
+**What it changes.** Nothing in the corpus, whose traits declare no
+contracts. The case `cases/packages/trait_contract_elsewhere.pkg` (its
+`.out`, `.err` and `.status`: it runs, interpreted and natively), the
+trait in one module, two impls in another, one of which breaks the
+postcondition through a generic call.
+
+- Differs: `compiler/stage1/cases/packages/trait_contract_elsewhere.pkg`: types, sir, ids, human, doc, doc-output
+
+**Decision 363**, for docs/architecture.md:
+
+363. A trait's contract binds an impl of any module (07): the impl's
+     method checks the trait's clauses as R29's rule says, checked in the
+     syntax of the trait's module with the impl's parameters under the
+     trait's names, its failure naming the trait's method and showing the
+     clause's parts, its statements standing at the impl's method's name.
+     `W0021` remains only for a trait whose module's syntax the check
+     does not have. Stage 1 decides it (RULES.md, R39).
+
+## R40. Deprecated types, constants and variants; an attribute where it means nothing (decision 364)
+
+**The rule** (13, "Deprecation": "Deprecated items warn with the
+replacement named"; D-046: attributes are data the toolchain reads, for
+the declarations they are written for). Three parts:
+
+- **A deprecated type, constant or variant warns where it is used**, as a
+  deprecated function does since R30 (`W0023` with the attribute's text,
+  `W0025` without): a struct, an enum, an error set or a type alias (a
+  refinement too) named in a function's signature, a field's or a
+  variant's type, an annotation (`let q: Point`) or before `.`
+  (`Point.origin()`), or built (`Point(x=1, y=2)`, at the name); a
+  module's constant read; a variant built or matched (`Light.Lime`, `case
+  Light.Lime:`), its name written `Light.Lime`. The type's own
+  declaration may use it: its fields, its methods, its impls and their
+  headers, as a function's own body may call it.
+- **An attribute Sisu reads that stands where it means nothing warns**
+  (`W0026`, `resolve.misplaced-attribute`, "`@derive` means something on a
+  struct, an enum or an error set, so on a function it does nothing"):
+  `@derive` and `@must_consume` belong on a struct, an enum or an error
+  set, `@repr` and `@persisted` on a struct or an enum, `@delegate` on a
+  struct, `@export`, `@inline`, `@float`, `@fix_inline`, `@fixture`,
+  `@refines`, `@no_alloc`, `@no_block`, `@no_panic` and `@stack` on a
+  function, `@comptime_budget` on a function or a constant, `@tag` on a
+  test, a benchmark or a suite, `@deprecated` on a function, a type, a
+  constant or a variant, and `@tile`, `@unroll` and `@vectorize` on a
+  loop nest (which no declaration is). `@cfg` and `@preview` mean
+  something anywhere; the attributes only the standard library writes
+  (`@sealed`, `@marker`, `@intrinsic`, ...) are `E0225` in a program.
+- **A suite's `@tag`s tag each of its tests** (17: "`@tag` selects and
+  skips"), before a test's own, where they tagged none (`sir --tests`
+  writes them on each test's line, which the runner selects by).
+
+**Why.** The manual's writers found them (chapter 28, X11 and the
+reference's R14): R30 warned at a deprecated function's calls only, and
+an attribute Sisu reads was accepted wherever it stood, `@derive(Debug)`
+or `@must_consume` on a function, `@comptime_budget` or `@export` on a
+struct, and `@tag("slow")` on a suite, which tagged none of its tests.
+
+**In stage 1.** `typeck.collect` (`deprecate`, `Program.deprecated` and
+`deprecated_variants`, `deprecated_type_use` from `def_as_type`, with
+`decl_owner` and `quiet_deprecation` for a type's own declaration and
+its impls' headers; `suite_tags`); `typeck.Checker.deprecated_uses`
+(`deprecated_item_use`, `deprecated_variant_use`), with the checker's
+`resolve_ty` and `static_member`; the AST's `VariantDef.attrs` (printed by
+`parse --ast` only when there are any); `resolve.attribute_places` and
+`declaration_kind`, which the name pass's `check_attributes` reads.
+
+**What it changes.** Nothing in the corpus, whose attributes stand where
+they mean something and which deprecates nothing. The cases
+`cases/attributes/deprecated_items.sisu` (its `.diag`, and its `.out`: it
+runs), `misplaced.sisu` (its `.diag`) and `suite_tags.sisu` (its
+`.sir-tests`, the tags on each test's line).
+
+- Differs: `compiler/stage1/cases/attributes/deprecated_items.sisu`: ast, ids, human
+- Differs: `compiler/stage1/cases/attributes/misplaced.sisu`: names, ids, human
+
+**Decision 364**, for docs/architecture.md:
+
+364. A type, a constant or a variant marked `@deprecated("...")` warns
+     where it is used, as a deprecated function does (`W0023`, `W0025`):
+     a type named or built, a constant read, a variant built or matched,
+     but in the type's own declaration and impls (13). An attribute Sisu
+     reads that stands on a declaration it means nothing on warns
+     (`W0026`, naming where it means something); and a suite's `@tag`s
+     tag each of its tests. Stage 1 decides it (RULES.md, R40).
+
+## R41. `@derive(Arbitrary)` and an impl of `Arbitrary` written by hand (decision 365)
+
+**The rule** (17, "Property-based testing and fuzzing": "generators are
+derived for every type (`arbitrary[T]`; with `@derive(Arbitrary)` for
+custom shapes, and refinement predicates honoured as filters)"; a
+property test is `check(arbitrary[T]) do x:`, as 17 writes it). The
+prelude declares the trait
+
+```sisu
+trait Arbitrary:
+    def arbitrary(d: Draws) -> Self
+```
+
+- an impl written by hand draws a type its own way (`impl Arbitrary for
+  Money:` building a value from `Draws.gen_in(d, 0, 10000)`), and
+  `arbitrary[Money]` and the generator of every type of the module that
+  holds a `Money` draw it through the impl, where they drew its fields;
+- `@derive(Arbitrary)` gives a struct or an enum without type parameters
+  the impl that draws its shape, the generator `arbitrary[T]` writes for
+  any type (a struct's fields, then its invariant; an enum's variant, then
+  its fields), so that a bound `T: Arbitrary` draws it too
+  (`T.arbitrary(d)`); a type with a part that has no generator, or with
+  type parameters, is `E0820` (`test.no-generator`) at the derive, which
+  `E0243` refused;
+- a type needs neither to be drawn: `arbitrary[T]` draws the shape of any
+  type of the module, as before.
+
+**Why.** The manual's writer of G11 found `@derive(Arbitrary)` refused
+(E0243) and no way to draw a type its own way ("the generator of a custom
+shape"), though `Gen.of(make)` builds one generator from a function.
+
+**In stage 1.** `compiler/std/prelude.sisu` (the trait, which the Rust
+front end reads too); `typeck.arbitrary.declare_generators` (the types an
+impl written by hand draws, whose generator calls it, and the derived
+impls, written beside the generators in `<arbitrary>/main.sisu`;
+`derives_arbitrary`, `arbitrary_impl_of`, `Writer.shape_why`); and
+`typeck.instances`, which leaves the derive to them.
+
+**What it changes.** Nothing in the corpus, which derives no `Arbitrary`.
+The cases `cases/testing/derive_arbitrary.sisu` (its `.tests`: three
+properties hold, and one fails at the custom generator's boundary, `Money(cents=5000)`)
+and `arbitrary_refusals.sisu` (its `.diag`).
+
+- Differs: `compiler/stage1/cases/testing/arbitrary_refusals.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/testing/derive_arbitrary.sisu`: ids, human, doc, doc-output
+
+**Decision 365**, for docs/architecture.md:
+
+365. The prelude's `Arbitrary` (`def arbitrary(d: Draws) -> Self`) draws a
+     type for property tests (17): an impl written by hand draws it its
+     own way, which `arbitrary[T]` and the generators of the types that
+     hold one use; `@derive(Arbitrary)` gives a struct or an enum without
+     type parameters the impl that draws its shape, the generator
+     `arbitrary[T]` writes for any type, and is `E0820` for one with a
+     part that has no generator. Stage 1 decides it (RULES.md, R41).
+
+## R42. A generator expression is a lazy `Iter` (decision 366)
+
+**The rule** (02, "Comprehension": `(x for x in xs)` is a "lazy `Iter`",
+beside the list, dict and set forms). `(f(x) for x in xs if c(x))` is an
+`Iter[T]`, `T` the element's type: the generator whose body runs the
+clauses as loops and tests around a `yield` of the element, as a
+generator function's body runs (a task-like closure, D-056's generators),
+so `sum((x for x in xs if x > 0))`, a `for` over it, its `collect()` and
+any other `Iter` method take one item at a time. It borrows what it reads
+of the function's own while it lives, as a loop over it would, and copies
+what is `Copy`: what it reads cannot change meanwhile (`E0405`), and it
+cannot outlive a local it reads (`E0407`), but it may borrow a parameter
+(`def evens(xs: list[int]) -> Iter[int]: return (x for x in xs if ...)`).
+Its clauses run when the `Iter` is first advanced, its first iterable
+among them, which Python evaluates where the expression is. Python's bare
+form as a call's one argument, `sum(x for x in xs)`, stays a syntax error
+(`E0100`); the parentheses are 02's.
+
+**Why.** The manual's writer of chapter 16 found it `E0900`, "as
+planned", and then `E0304`, since the checker typed it as a list; the
+third round named the missing piece, a closure that yields, which a
+generator function's body already is.
+
+**In stage 1.** `typeck.expr.generator_comprehension`, from
+`comprehension`: the closure (`ClosureRole.Task`, its captures decided as
+a task's), its loops, tests and `yield`, and `TExprKind.Generator`,
+which lowering makes the `gen.new` of the closure, as for a generator
+function.
+
+**What it changes.** Nothing in the corpus, which writes no generator
+expression. The cases `cases/generators/generator_expressions.sisu` (its
+`.out`: it runs, interpreted and natively) and `generator_borrows.sisu`
+(its `.diag`).
+
+- Differs: `compiler/stage1/cases/generators/generator_borrows.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/generators/generator_expressions.sisu`: ids, human, doc, doc-output
+
+**Decision 366**, for docs/architecture.md:
+
+366. A comprehension in parentheses, `(f(x) for x in xs if c(x))`, is a
+     lazy `Iter[T]` (02): a generator whose body runs the clauses as loops
+     and tests around a `yield` of the element, task-like as a generator
+     function's body is, borrowing what it reads of the function's own
+     while it lives and copying what is `Copy`; its clauses run when it is
+     first advanced. Stage 1 decides it (RULES.md, R42).
+
+## R43. Forms the documents give that the checker refused, the manual's fourth round (decision 367)
+
+**The rule.** Five forms the documents give, which stage 1 refused, and
+the declarations it let through:
+
+- **A slice bound counted from the end** (02: `a[i:^1]`): `xs[1:^1]`,
+  `xs[^2:]` and `xs[:^3]` of a list are its items from or up to `len(xs) -
+  k`, where `^` stood only inside an index (`E0383`).
+- **A constant in an enum's body** (`const COUNT: int = 3`) is read as
+  `Light.COUNT`, as a struct's is, where it was declared and unreadable
+  (`E0351`).
+- **A method of a `const` parameter's value**: `N.to_f32()`, `N` an `int`
+  parameter of the function, is the method of the number, where it was
+  looked up as an associated function of a type `N` (`E0351`).
+- **Two sized integers compare as they add** (D-016): the narrower widens
+  when that loses nothing, so `small < wide`, a `u8` and an `i32`, is
+  `True` where it was `E0369`; a chain widens each pair.
+- **A number or text on the left of an operator** reaches an impl of the
+  operator for it when the right is a type of the program's own: `2.0 *
+  v` with `impl Mul[Vector] for f64`, which `E0310` refused whatever the
+  impls.
+- **A supertrait cycle through other traits**, `trait A(B)` and `trait
+  B(A)`, is `E0247` at each trait, as `trait A(A)` is, where it compiled.
+- **A field or a variant declared twice** is `E0205` or `E0206`, as stage
+  0 reports it, where stage 1 kept one of the two and said nothing. The
+  second variant is left out of the derived impls, so stage 0's `W0003`
+  at the arm its derived impl writes for it, at `<derive>/main.sisu`, a
+  text the program does not have, has no counterpart.
+
+**Why.** The manual's writers found each (chapters 5, 14 and 27, the
+reference's R2 and R3; "Syntax and names", "Types and traits").
+
+**In stage 1.** `typeck.expr` (`slice_bound`, `TExprKind.Slice.lo_end`
+and `hi_end`; `compare_expr`; `operator_call`), `lower.exprs.from_end`;
+the AST's `EnumDef.consts` (printed by `parse --ast` only when there are
+any), `typeck.collect.declare_enum`, `resolve`'s enum members and
+`doc.enum_section`; `typeck.call.static_path` (a `const` parameter is a
+value); `typeck.collect.check_trait_cycles`, `resolve_struct` and
+`resolve_enum`.
+
+**What it changes.** Nothing in the corpus, which writes none of these.
+The cases `cases/findings4/forms.sisu` (its `.out`: it runs, interpreted
+and natively), `supertrait_cycle.sisu` and `duplicates.sisu` (their
+`.diag`).
+
+- Differs: `compiler/stage1/cases/findings4/duplicates.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings4/forms.sisu`: ast, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings4/supertrait_cycle.sisu`: ids, human, doc, doc-output
+
+**Decision 367**, for docs/architecture.md:
+
+367. A list's slice takes a bound counted from the end (`xs[1:^1]`, 02);
+     an enum's body declares constants as a struct's does (`Light.COUNT`);
+     a `const` parameter's value has the methods of its number
+     (`N.to_f32()`); two sized integers compare as they add, the narrower
+     widened when that loses nothing (D-016); a number or text on an
+     operator's left reaches an impl of the operator for it when the right
+     is a type of the program's (`2.0 * v`); a supertrait cycle through
+     other traits is `E0247`; and a field or a variant declared twice is
+     `E0205` or `E0206`, as in stage 0, the second variant left out of the
+     derived impls. Stage 1 decides it (RULES.md, R43).
+
+## R44. `@cfg` on the members of a struct or an enum (decision 368)
+
+**The rule** (08, "Conditional compilation": `@cfg` on items; decision
+243). A field, a variant or a method in a struct's or an enum's own body
+whose `@cfg(...)` does not hold is left out of the build, as an item and
+a method of an impl or a trait are: a build without its tests has no
+`@cfg(test)` field, variant or method of the type, and its SIR declares
+the type without them. A field left out takes its default nowhere; one
+the build keeps is built and read as any other.
+
+**Why.** The manual's writer of the reference's R14 found `@cfg(test)` on
+a field, a variant or a method in a struct's or an enum's own body kept
+in every build, where a method of an impl was left out.
+
+**In stage 1.** `cfg.Filter.items` and `cfg.affected` (the struct's and
+the enum's members), the AST's `FieldDef.attrs` (printed by `parse --ast`
+only when there are any) and `VariantDef.attrs` (R40); the name pass
+leaves out their nodes as it leaves out an item's (`Tree.without`).
+
+**What it changes.** Nothing in the corpus, which puts no `@cfg` on a
+member. The case `cases/findings4/cfg_members.sisu` (its `.out`, the run
+of the build without its tests, interpreted and natively, and its
+`.tests`, the build with them).
+
+- Differs: `compiler/stage1/cases/findings4/cfg_members.sisu`: ast, doc, doc-output
+
+**Decision 368**, for docs/architecture.md:
+
+368. `@cfg` on a field, a variant or a method in a struct's or an enum's
+     own body leaves it out of a build its condition does not hold in, as
+     it leaves out an item and a method of an impl (08). Stage 1 decides
+     it (RULES.md, R44).
+
+## R45. The fixes and notes the manual's fourth round found missing (decision 369)
+
+**The rule.** Each a fix or a note on an error stage 1 already reports,
+as R16 and R24 gave theirs:
+
+- `'Aino'`, Python's text in single quotes (`E0016`): the fix writes
+  double quotes;
+- `Light.Gren`, a CamelCase name after an enum or an error set without
+  such a variant: `E0327` (`type.unknown-variant`), as in a pattern, with
+  the variant it most likely means, where it was `E0351`;
+- `int("42")`, `str(n)`, `float(x)` and `bool(x)`, Python's conversions
+  (`E0200`): the note `resolve.python-conversion` names the methods
+  (`s.parse_int()`, `n.to_string()`, `x.to_int()`, ...), and `uint` is no
+  longer offered for `int`;
+- a value where its option is expected, `let n: int? = 5` (`E0300`): the
+  fix `Some(5)`;
+- an `int` where a float is expected (`E0300`): the fix `.to_f64()` (or
+  `.to_f32()`), where the note named an `=` that a `return` does not have;
+- `"0" * 64` (`E0310`): the fix `"0".repeat(64)`;
+- an operator on a type of the program's own without the impl (`E0310`):
+  the note `type.operator-trait` names the trait and the impl that gives
+  it (`impl Sub[Money] for Money`);
+- a misspelt keyword argument, `prot=443` (`E0306`): the parameter it most
+  likely means, as a misspelt name has;
+- an argument by position past the positional parameters, where the next
+  is keyword-only (`E0305`): the note `type.keyword-only` names it;
+- `??` on a result (`E0371`): the fix `.or(...)`;
+- `?.` after a result, Rust's `read(path)?.lines()` (`E0370`): the note
+  `type.question-dot` (`?.` is one token; `(x?).lines()` passes the error
+  on first);
+- an assignment to a parameter of a `Copy` type (`E0312`): besides `mut`,
+  the fix that changes a copy the body declares, `var n = n`;
+- an item moved out of a list the function owns, `let first = queue[0]`
+  (`E0338`): besides `.copy()`, the fix `queue.remove(0)`;
+- a field of a `Shared` assigned (`E0341`): the note
+  `type.shared-changes` (a `Cell` or a `Mutex` inside it), not the one about
+  `ref mut`;
+- a capture of an `own` closure that is not `Copy` (`E0423`): the note
+  `type.capture-borrow`, a plain closure, where the note's copy made
+  first was `E0423` again.
+
+**Why.** The manual's writers found each ("Diagnostics without fixes",
+chapters 2 to 4, 10, 13, 14, 16, 18, 21 and 22, the reference's R1 and
+R17; "Ownership").
+
+**In stage 1.** `lexer.scan.char_literal`; `typeck.call` (`missing_variant`,
+`check_args`'s keyword arguments and count); `resolve.use_name`;
+`typeck.expr` (`coerce`, `mismatch_fix`, `binary_result`, `coalesce`, the
+optional chain, `check_movable`, `check_own_closures`); `typeck.check`
+(`require_mutable_as`, `body_start`, `column_text`).
+
+**What it changes.** The diagnostics of the corpus's programs that make
+these mistakes and of stage 1's older cases that do (`lexical_mistakes`,
+`unicode_escape_sign`, `type_calls`, `type_arguments_in_values`), as the
+lines below list them: the tokens and the tree of a file whose
+diagnostics carry `E0016`'s fix, which their dumps print, and its
+formatter's verdict, which prints them too. The conformance suite's
+`.diag` files of `syntax/unicode_escape_sign` (`E0016`'s fix) and
+`types/argument_count` (the misspelt keyword's), which hold stage 1's
+`check --format=ids`, are blessed again with the fix. The cases
+`cases/findings4/fixes.sisu` and `fixes_lexical.sisu` (their `.diag`).
+
+- Differs: `compiler/conformance/cases/ownership/own_closure_errors.sisu`: human, doc, doc-output
+- Differs: `compiler/conformance/cases/ownership/shared_immutable.sisu`: human, doc, doc-output
+- Differs: `compiler/conformance/cases/syntax/unicode_escape_sign.sisu`: tokens, tree, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/conformance/cases/types/argument_count.sisu`: types, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/types/keyword_only_count.sisu`: human, doc, doc-output
+- Differs: `compiler/conformance/cases/wrong/own_closure_captures_text.sisu`: human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings4/fixes.sisu`: names, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings4/fixes_lexical.sisu`: tokens, tree, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/lexical_mistakes.sisu`: tokens, tree, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/type_arguments_in_values.sisu`: names, ids, human
+- Differs: `compiler/stage1/cases/type_calls.sisu`: human, doc, doc-output
+- Differs: `compiler/stage1/cases/unicode_escape_sign.sisu`: tokens, tree, ids, human, fmt-check, doc, doc-output
+
+**Documents to bring along:** the manual's transcripts of these errors,
+which `sisu`, whose front end is stage 1, now prints with the fixes and
+notes (`E0423`'s in chapter 16 and the reference's ownership and
+diagnostics pages among them).
+
+**Decision 369**, for docs/architecture.md:
+
+369. The fixes and notes the manual's fourth round found missing: double
+     quotes for text in single quotes (`E0016`); `E0327` with the closest
+     variant for `Type.Name` an enum lacks; a note on Python's conversion
+     functions (`E0200`); `Some(...)` for a value where its option is
+     expected and `.to_f64()` for an `int` where a float is (`E0300`);
+     `repeat` for text times a number and the operator's trait for a
+     type's own (`E0310`); the closest parameter for a misspelt keyword
+     (`E0306`); keyword-only parameters (`E0305`); `.or(...)` for `??` on a
+     result (`E0371`); `?.` as one token after a result (`E0370`); a copy
+     of a parameter the body changes (`E0312`); `remove` for an item moved
+     out of a list (`E0338`); `Cell` or `Mutex` for a `Shared`'s field
+     (`E0341`); and a plain closure for an `own` closure's capture
+     (`E0423`). Stage 1 decides it (RULES.md, R45).
+
+## R46. A build with its tests has no SIR of a program with an error (decision 370)
+
+**The rule** (17: the runner runs the tests of a program that compiles;
+decision 357: `sisu test` and `sisu bench` run from the SIR stage 1's
+`sir --tests` prints). `sir --tests`, the program built with its tests,
+prints no SIR of a program with an error of any phase: the front end's,
+the ownership checker's, or a `comptime` expression's that fails (a
+budget spent, `E0603`, a panic, a refinement a constant breaks). It
+prints on standard error what `sisu test` prints of the program, its
+diagnostics and `D0006` ("the program was not run: errors found"), or
+for the ownership checker's errors `D0021`, which names `--defer-borrow`
+(a run under the monitor, which the Rust front end serves), with the
+front end's warnings before the latter two, and it fails (status 1).
+`sir`, the program without its tests, prints the SIR of a program the
+ownership checker rejects or whose `comptime` expression fails, as stage
+0's `sisu sir` does ("`sisu sir` prints the SIR of a rejected program
+too"), and nothing at an error of the front end, as before.
+
+**Why.** The coordinator found, with the manual's exercises 11.4
+(`winner`, `E0408`) and 25.2 (`journeys`, `E0603`) in their start
+states, that `sisu test` ran the tests of a program `sisu check`
+refuses: `sir --tests` printed the SIR of a program the ownership
+checker rejects or whose `comptime` expression spent its budget, as
+stage 0's `sisu sir --tests` does, and the driver ran it; at an error of
+the front end it printed nothing and exited 0, which left the driver to
+find out why.
+
+**In stage 1.** `main`: `Lowering.refused`, set by `front_of` at the
+front end's errors and by `finish_of` at the ownership checker's errors
+and a failed `comptime` expression; `lowering_of`, which leaves out the
+SIR of a refused program built with its tests (for `sir-batch --tests`
+too); the `sir` command (`app_input`, `report_of`, and `refusal`, which
+`test_program` shares). `check.sh` holds a case's `NAME.sir-tests` to
+its standard error too when it prints any, after a line `--- stderr`.
+
+**What it changes.** The SIR with its tests of the conformance case
+`testing/parametrised_once_ownership` (`E0400`), which stage 1 no longer
+prints (the class `sir-tests`), and what `sisu sir --tests` prints of a
+refused program, which fails with its diagnostics where stage 0's prints
+its SIR. The cases `cases/testing/refused_ownership.sisu`,
+`refused_comptime.sisu` and `refused_types.sisu`: their `.sir-tests`,
+no SIR and on standard error what stage 0's `sisu test` prints of each,
+word for word; `sir.list` names the three, and the first two differ in
+the class `sir-tests`:
+
+- Differs: `compiler/conformance/cases/testing/parametrised_once_ownership.sisu`: sir-tests
+- Differs: `compiler/stage1/cases/testing/refused_comptime.sisu`: sir-tests
+- Differs: `compiler/stage1/cases/testing/refused_ownership.sisu`: sir-tests
+
+**What the stage-0 side must do.** The driver (`cli.rs`, `sisu test` and
+`sisu bench` served by stage 1): when `sir --tests` fails, show what it
+printed on standard error and take its status, without running stage
+1's `check` after it, which prints the diagnostics a second time (as the
+driver is, the tests of a refused program no longer run, and its
+diagnostics are printed twice).
+
+**Decision 370**, for docs/architecture.md:
+
+370. A program built with its tests (`sir --tests`, from which `sisu
+     test` and `sisu bench` run, decision 357) has no SIR when it has an
+     error of any phase: the front end's, the ownership checker's, or a
+     failed `comptime` expression's. `sir --tests` prints the diagnostics
+     and `D0006`, or `D0021` at the ownership checker's errors, as `sisu
+     test` prints them, and fails. `sir`, the program without its tests,
+     keeps printing the SIR of a program the ownership checker rejects,
+     as stage 0's `sisu sir` does. Stage 1 decides it (RULES.md, R46).

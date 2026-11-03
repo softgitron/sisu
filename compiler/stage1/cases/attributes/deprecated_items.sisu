@@ -1,0 +1,53 @@
+# RULES.md, R40: a deprecated type, constant or variant warns where it is
+# used (13, "Deprecation"), with the replacement its `@deprecated` names:
+# a type named in a signature, an annotation or before `.`, or built; a
+# constant read; a variant built or matched. The type's own declaration,
+# its methods and its impls, may use it.
+@deprecated("use `Vec2`")
+struct Point:
+    x: int
+    y: int
+
+    def sum(self) -> int:
+        return self.x + self.y
+
+impl Point:
+    def origin() -> Point:
+        return Point(x=0, y=0)
+
+struct Vec2:
+    x: int
+    y: int
+
+struct Segment:
+    start: Point
+    end: Vec2
+
+@deprecated("use `LIMIT`")
+const OLD_LIMIT: int = 10
+
+const LIMIT: int = 10
+
+@deprecated
+type Pair = (int, int)
+
+enum Light:
+    @deprecated("use `Green`")
+    Lime
+    Green
+
+def first(p: Point) -> int:
+    return p.x
+
+def colour(l: Light) -> str:
+    return match l:
+        case Light.Lime: "lime"
+        case Light.Green: "green"
+
+def main():
+    let p = Point(x=1, y=2)
+    let q: Point = Point.origin()
+    print(first(p) + q.sum() + OLD_LIMIT + LIMIT)
+    let pair: Pair = (1, 2)
+    print(pair.0 + Vec2(x=1, y=1).x)
+    print(colour(Light.Lime))

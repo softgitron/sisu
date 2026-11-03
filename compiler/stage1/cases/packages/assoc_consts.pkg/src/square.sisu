@@ -1,0 +1,8 @@
+from shapes.shape import Shape
+
+pub struct Square:
+    pub side: int
+
+impl Shape for Square:
+    const SIDES: int = 4
+    const NAME: str = "a square"

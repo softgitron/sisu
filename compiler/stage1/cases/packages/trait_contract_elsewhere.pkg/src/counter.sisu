@@ -1,0 +1,14 @@
+## How far a count may go.
+pub const LIMIT: int = 100
+
+## Whether `n` is a step a counter takes.
+pure def is_step(n: int) -> bool:
+    return 0 < n and n <= LIMIT
+
+## A counter: its contract binds every impl, wherever it is.
+pub trait Counter:
+    def add(mut self, amount: int):
+        requires is_step(amount)
+        ensures self.total() == old(self.total()) + amount
+    pure def total(self) -> int:
+        ensures result >= 0

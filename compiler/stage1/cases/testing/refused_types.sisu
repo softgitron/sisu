@@ -1,0 +1,11 @@
+# RULES.md, R46: nor of a program with an error of the front end, for
+# which it printed nothing and exited as if it had built (`E0300`, then
+# `D0006`).
+
+## Twice `n`.
+def double(n: int) -> int:
+    return n * 2
+
+test "doubles":
+    let four: int = "four"
+    assert double(2) == four

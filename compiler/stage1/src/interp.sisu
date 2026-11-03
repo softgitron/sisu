@@ -118,8 +118,10 @@ pub enum Value:
     ## A borrowed list's iterator (`iter.ref`, `iter.mut`): references to
     ## its items from `idx` on (stage 0's `IterState::ListRef`).
     ListIter(base: Pointer, idx: int)
-    ## Items made up front (`iter.own`): those from `idx` on.
-    Items(items: list[Value], idx: int)
+    ## Items made up front (`iter.own`), the next one last: each step pops
+    ## it where the iterator is, which a copy of the items at each step
+    ## would make quadratic.
+    Items(list[Value])
     ## A set's items and a dict's entries, in the order they were added
     ## (D-074), compared as values.
     Set(list[Value])
@@ -723,20 +725,65 @@ impl Interp:
                         from_end = True
                     let Value.Int(i) = self.target(self.frames[top].locals[l.index].copy())? else:
                         return Err(Stop.Beyond("an index that is not a number"))
-                    let Value.List(xs) = self.read(ptr)? else:
+                    # The list is measured where it is, not copied: a loop
+                    # that indexes a list would copy it at each step.
+                    let n = self.list_len_at(ptr)? else:
                         return Err(Stop.Beyond("an index into a value that is not a list"))
-                    let at = list_index(i, len(xs), from_end, self.catalog)?
+                    let at = list_index(i, n, from_end, self.catalog)?
                     ptr.path.push(Step.Index(at))
                 case Proj.Key(l):
                     let key = self.target(self.frames[top].locals[l.index].copy())?
-                    let Value.Dict(es) = self.read(ptr)? else:
+                    let found = self.entry_at(ptr, key)? else:
                         return Err(Stop.Beyond("a key of a value that is not a dict"))
-                    let i = entry_index(es, key)? else:
+                    let i = found else:
                         return Err(
                             self.panicked("panic.missing-key", [param("key", key_text(key))])
                         )
                     ptr.path.push(Step.Entry(i))
         return Ok(Some(ptr))
+
+    ## The length of the list a pointer leads to, read where it is; `None`
+    ## when the value is no list.
+    pure def list_len_at(self, p: Pointer) -> int? ! Stop:
+        if p.frame >= len(self.frames) or p.local >= len(self.frames[p.frame].locals):
+            return Err(Stop.Beyond("a reference to a frame that has returned"))
+        let found = value_at(self.frames[p.frame].locals[p.local], p.path, 0) else:
+            return Err(Stop.Beyond("a place that does not hold its value"))
+        if let Value.List(xs) = found:
+            return Ok(Some(len(xs)))
+        return Ok(None)
+
+    ## How many items the list, set or dict a pointer leads to holds, read
+    ## where it is, and whether it is a dict; `None` for another value.
+    pure def extent_at(self, p: Pointer) -> (int, bool)? ! Stop:
+        if p.frame >= len(self.frames) or p.local >= len(self.frames[p.frame].locals):
+            return Err(Stop.Beyond("a reference to a frame that has returned"))
+        let found = value_at(self.frames[p.frame].locals[p.local], p.path, 0) else:
+            return Err(Stop.Beyond("a place that does not hold its value"))
+        match found:
+            case Value.List(xs) | Value.Set(xs):
+                return Ok(Some((len(xs), False)))
+            case Value.Dict(es):
+                return Ok(Some((len(es), True)))
+            case _:
+                return Ok(None)
+
+    ## The index of the entry of the key `k` in the dict a pointer leads
+    ## to, read where it is; `None` when the value is no dict.
+    pure def entry_at(self, p: Pointer, k: Value) -> (int?)? ! Stop:
+        if p.frame >= len(self.frames) or p.local >= len(self.frames[p.frame].locals):
+            return Err(Stop.Beyond("a reference to a frame that has returned"))
+        let found = value_at(self.frames[p.frame].locals[p.local], p.path, 0) else:
+            return Err(Stop.Beyond("a place that does not hold its value"))
+        if let Value.Dict(es) = found:
+            return Ok(Some(entry_index(es, k)?))
+        return Ok(None)
+
+    ## Changes the value a pointer leads to where it is (`edit_at`).
+    pure def edit(mut self, p: Pointer, own e: InPlace) -> Value? ! Stop:
+        if p.frame >= len(self.frames) or p.local >= len(self.frames[p.frame].locals):
+            return Err(Stop.Beyond("a reference to a frame that has returned"))
+        return Ok(edit_at(mut self.frames[p.frame].locals[p.local], p.path, 0, e))
 
     ## A copy of the value a pointer leads to.
     pure def read(self, p: Pointer) -> Value ! Stop:
@@ -859,6 +906,12 @@ impl Interp:
         match name:
             case "assert.fail" | "assert.fail_parts" | "assert.fail_compare":
                 return self.assert_fail(prog, name, args)
+            # A failed `expect` of a test built with its tests (RULES.md,
+            # R38) stops compile-time code as `assert` does: compile time
+            # has no test to report it at the end of.
+            case "expect.fail" | "expect.fail_parts" | "expect.fail_compare":
+                let form = name.byte_slice(7, name.byte_len())
+                return self.assert_fail(prog, "assert.{form}", args)
             case "contract.fail":
                 return self.contract_fail(args)
             case "panic":
@@ -884,6 +937,10 @@ impl Interp:
             case "print_err" | "eprint":
                 return Err(Stop.World("the standard error"))
             case "len":
+                # A collection behind a reference is measured where it is.
+                if let Value.Ref(q) = arg(args, 0)?:
+                    if let Some((n, _)) = self.extent_at(q)?:
+                        return Ok(Value.Int(n))
                 return match self.target(arg(args, 0)?)?:
                     case Value.Str(s) | Value.String(s): Ok(Value.Int(len(s)))
                     case Value.List(xs) | Value.Set(xs): Ok(Value.Int(len(xs)))
@@ -909,7 +966,9 @@ impl Interp:
             case "iter.own":
                 match arg(args, 0)?:
                     case Value.List(xs):
-                        return Ok(Value.Items(items=xs, idx=0))
+                        var items = xs
+                        items.reverse()
+                        return Ok(Value.Items(items))
                     case Value.Ref(p):
                         if let Value.List(_) = self.read(p)?:
                             return Ok(Value.ListIter(base=p.copy(), idx=0))
@@ -921,18 +980,14 @@ impl Interp:
             case "Iter.next":
                 let Value.Ref(p) = arg(args, 0)? else:
                     return Err(Stop.Beyond("an iterator that is not a range"))
+                # Items made up front are popped where the iterator is.
+                if let Some(x) = self.edit(p, InPlace.PopItem)?:
+                    return Ok(x)
                 let it = self.read(p)?
                 if let Value.ListIter(base, idx) = it:
-                    var n = 0
-                    var dict = False
-                    match self.read(base)?:
-                        case Value.List(xs) | Value.Set(xs):
-                            n = len(xs)
-                        case Value.Dict(es):
-                            n = len(es)
-                            dict = True
-                        case _:
-                            return Err(Stop.Beyond("an iterator over a value that is not a list"))
+                    # The collection is measured where it is.
+                    let (n, dict) = self.extent_at(base)? else:
+                        return Err(Stop.Beyond("an iterator over a value that is not a list"))
                     if idx >= n:
                         return Ok(none())
                     self.write(p, Value.ListIter(base=base.copy(), idx=idx + 1))?
@@ -945,15 +1000,6 @@ impl Interp:
                         return Ok(some(Value.Tuple([Value.Ref(key), Value.Ref(at)])))
                     at.path.push(Step.Index(idx))
                     return Ok(some(Value.Ref(at)))
-                if let Value.Items(_, idx) = it:
-                    let Value.Items(items, _) = self.take(p)? else:
-                        return Err(Stop.Beyond("an iterator that is not a range"))
-                    if idx >= len(items):
-                        self.write(p, Value.Items(items=items, idx=idx))?
-                        return Ok(none())
-                    let item = items[idx].copy()
-                    self.write(p, Value.Items(items=items, idx=idx + 1))?
-                    return Ok(some(item))
                 let Value.Range(cur, stop, step) = it else:
                     return Err(Stop.Beyond("an iterator that is not a range"))
                 let more = if step > 0: cur < stop else: cur > stop
@@ -965,26 +1011,20 @@ impl Interp:
                     next = Value.Range(cur=cur + step, stop=stop, step=step)
                 self.write(p, next)?
                 return Ok(some(Value.Int(cur)))
+            # A push and a pop change the list where it is: a loop that
+            # builds a list would copy it at each step.
             case "list.push":
                 let Value.Ref(p) = arg(args, 0)? else:
                     return Err(Stop.Beyond("a push onto a value that is not a list"))
-                let Value.List(xs) = self.read(p)? else:
+                let done = self.edit(p, InPlace.ListPush(arg(args, 1)?))? else:
                     return Err(Stop.Beyond("a push onto a value that is not a list"))
-                var ys = xs
-                ys.push(arg(args, 1)?)
-                self.write(p, Value.List(ys))?
-                return Ok(Value.Unit)
+                return Ok(done)
             case "list.pop":
                 let Value.Ref(p) = arg(args, 0)? else:
                     return Err(Stop.Beyond("a pop from a value that is not a list"))
-                let Value.List(xs) = self.read(p)? else:
+                let done = self.edit(p, InPlace.ListPop)? else:
                     return Err(Stop.Beyond("a pop from a value that is not a list"))
-                var ys = xs
-                let last = ys.pop()
-                self.write(p, Value.List(ys))?
-                if let Some(x) = last:
-                    return Ok(some(x.copy()))
-                return Ok(none())
+                return Ok(done)
             case "list.is_empty":
                 let Value.List(xs) = self.target(arg(args, 0)?)? else:
                     return Err(Stop.Beyond("a list method on a value that is not a list"))
@@ -1026,10 +1066,9 @@ impl Interp:
                     return Err(Stop.Beyond("a push onto a value that is not a `String`"))
                 let t = text_of(self.target(arg(args, 1)?)?) else:
                     return Err(Stop.Beyond("a push of a value that is not text"))
-                let Value.String(s) = self.read(p)? else:
+                let done = self.edit(p, InPlace.TextPush(t))? else:
                     return Err(Stop.Beyond("a push onto a value that is not a `String`"))
-                self.write(p, Value.String("{s}{t}"))?
-                return Ok(Value.Unit)
+                return Ok(done)
             case "list.join":
                 let Value.List(xs) = self.target(arg(args, 0)?)? else:
                     return Err(Stop.Beyond("`join` of a value that is not a list"))
@@ -1114,7 +1153,8 @@ impl Interp:
                         items.push(Value.Ref(k))
                     else:
                         items.push(Value.Ref(v))
-                return Ok(Value.Items(items=items, idx=0))
+                items.reverse()
+                return Ok(Value.Items(items))
             case "str.byte_at":
                 let t = text_of(self.target(arg(args, 0)?)?) else:
                     return Err(Stop.Beyond("`byte_at` of a value that is not text"))
@@ -1611,6 +1651,66 @@ pure def value_at(v: Value, path: list[Step], i: int) -> ref Value? from v:
                     return value_at(es[k].0, path, i + 1)
     return None
 
+## A change a list, a `String` or an iterator takes where it is.
+enum InPlace:
+    ListPush(Value)
+    ListPop
+    TextPush(String)
+    ## The next of an iterator's items made up front (`Value.Items`).
+    PopItem
+
+## Makes the change `e` to the value at a path from `v`, where it is: the
+## value it gives (a popped item as an option, `Unit` for a push), or
+## `None` when the path leads nowhere or to a value the change does not
+## take.
+pure def edit_at(mut v: Value, path: list[Step], i: int, own e: InPlace) -> Value?:
+    if i == len(path):
+        match e:
+            case InPlace.ListPush(x):
+                if let Value.List(xs) = ref mut v:
+                    xs.push(x.copy())
+                    return Some(Value.Unit)
+            case InPlace.ListPop:
+                if let Value.List(xs) = ref mut v:
+                    if let Some(x) = xs.pop():
+                        return Some(some(x))
+                    return Some(none())
+            case InPlace.TextPush(t):
+                if let Value.String(s) = ref mut v:
+                    s.push(t)
+                    return Some(Value.Unit)
+            case InPlace.PopItem:
+                if let Value.Items(items) = ref mut v:
+                    if let Some(x) = items.pop():
+                        return Some(some(x))
+                    return Some(none())
+        return None
+    match path[i]:
+        case Step.Field(k):
+            if let Value.Tuple(xs) = ref mut v:
+                if k < len(xs):
+                    return edit_at(mut xs[k], path, i + 1, e)
+            if let Value.Adt(_, _, xs) = ref mut v:
+                if k < len(xs):
+                    return edit_at(mut xs[k], path, i + 1, e)
+        case Step.Payload(w):
+            var holds = False
+            if let Value.Adt(_, variant, _) = v:
+                holds = variant == w
+            if holds:
+                return edit_at(mut v, path, i + 1, e)
+        case Step.Index(k):
+            if let Value.List(xs) = ref mut v:
+                if k < len(xs):
+                    return edit_at(mut xs[k], path, i + 1, e)
+        case Step.Entry(k):
+            if let Value.Dict(es) = ref mut v:
+                if k < len(es):
+                    return edit_at(mut es[k].1, path, i + 1, e)
+        case _:
+            pass
+    return None
+
 ## Writes `x` at a path from `v`; whether the path leads somewhere.
 pure def set_at(mut v: Value, path: list[Step], i: int, own x: Value) -> bool:
     if i == len(path):
@@ -2025,7 +2125,7 @@ impl Interp:
                     out.push(": ")
                     self.debug_into(prog, es[i].1, mut out)?
                 out.push("}}")
-            case Value.Range(_, _, _) | Value.ListIter(_, _) | Value.Items(_, _):
+            case Value.Range(_, _, _) | Value.ListIter(_, _) | Value.Items(_):
                 out.push("<iter>")
         return Ok(())
 
@@ -2247,7 +2347,7 @@ pure def kind_of(v: Value) -> String:
     let what = match v:
         case Value.Ref(_): "a reference"
         case Value.Fn(_) | Value.Closure(_, _, _): "a function"
-        case Value.Range(_, _, _) | Value.ListIter(_, _) | Value.Items(_, _): "an iterator"
+        case Value.Range(_, _, _) | Value.ListIter(_, _) | Value.Items(_): "an iterator"
         case _: "a value"
     return what.to_string()
 

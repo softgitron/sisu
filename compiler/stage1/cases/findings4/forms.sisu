@@ -1,0 +1,37 @@
+# RULES.md, R43: forms the documents give that the checker refused: a
+# slice bound counted from the end (02: `a[i:^1]`), a constant in an
+# enum's body, a method of a `const` parameter's value, two sized integers
+# compared as they add (D-016), and a number on the left of an operator an
+# impl gives a type of the program's own.
+enum Light:
+    Red
+    Green
+    Blue
+    const COUNT: int = 3
+
+struct Vector:
+    x: f64
+    y: f64
+
+impl Mul[Vector] for f64:
+    type Output = Vector
+
+    def mul(self, v: Vector) -> Vector:
+        return Vector(x=self * v.x, y=self * v.y)
+
+def scale[const N: int]() -> f32:
+    return N.to_f32() / 2.0
+
+def main():
+    let xs = [1, 2, 3, 4, 5]
+    print(xs[1:^1])
+    print(xs[^2:])
+    print(xs[:^3])
+    print(Light.COUNT)
+    print(scale[3]())
+    let small: u8 = 200
+    let wide: i32 = 300
+    print(small < wide)
+    print(wide > small)
+    let v = 2.0 * Vector(x=1.5, y=-1.0)
+    print("{v.x} {v.y}")

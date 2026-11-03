@@ -32,6 +32,8 @@ E0013 error   lex.lone-close-brace        a single `}}` in a string closes nothi
 E0014 error   lex.bad-indent-char         `{char}` in indentation; Sisu indents with ASCII spaces only
 E0015 error   lex.backslash-continuation  Sisu has no backslash continuation; break the line inside brackets, after a comma or before an operator
 E0016 error   lex.bad-char-literal        a character literal holds exactly one character
+# Stage 1's (RULES.md, R45): Python's text in single quotes.
+-     fix     lex.double-quotes           text is written in double quotes
 E0018 error   lex.newline-in-interpolation  an interpolation in a one-line string must end on the same line
 -     label   lex.opened-here             opened here
 -     help    lex.use-spaces              replace each tab with spaces
@@ -166,6 +168,13 @@ E0270 error   resolve.copy-by-hand        `Copy` is derived, not implemented: an
 -     fix     resolve.rename              rename it
 -     fix     resolve.declare-with        declare it with `{keyword}`
 -     note    resolve.open-file           a program reaches files through the capability `Fs`, which `def main(sys: System)` holds as `sys.fs`: `sys.fs.read_to_string("data.txt")`
+# Stage 1's (RULES.md, R45): Python's conversion functions.
+-     note    resolve.python-conversion   Sisu converts with methods: text is read with `s.parse_int()` or `s.parse_float()`, which give an option, a number is made text with `n.to_string()` or `"{n}"`, and one number made another with `x.to_int()` or `n.to_f64()`
+# Stage 1's (RULES.md, R37; 03, "Traits"): a trait's associated constants,
+# which each impl gives.
+E0271 error   resolve.not-a-trait-constant  `{name}` is not a constant of `{trait}`
+E0272 error   resolve.constant-type       the constant `{name}` has the type `{found}` here, and `{trait}` declares it with the type `{expected}`
+E0273 error   resolve.const-or-method     `{name}` is {what} of `{trait}`, and this impl gives it as {given}
 
 # ---------------------------------------------------------------- types
 E0300 error   type.mismatch               expected `{expected}`, found `{found}`
@@ -274,6 +283,16 @@ E0399 error   type.bad-format-spec        `{spec}` is not a format spec; it is `
 -     fix     type.add-error-set          add `{set}` to the function's error set
 -     fix     type.add-copy               copy it with `.copy()`
 -     fix     type.convert-to-float       make the `int` an `{ty}`
+# Stage 1's (RULES.md, R45): a value where an option of it is expected.
+-     fix     type.wrap-some              make it the option's value with `Some`
+-     note    type.operator-trait         `{op}` on a `{ty}` is the method of the trait `{trait}`: an `impl {trait}[{rhs}] for {ty}` gives it one
+-     note    type.keyword-only           `{param}` and the parameters after it are keyword-only: pass them by name, `{param}=...`
+-     fix     type.result-or              take the result's value, or the default when it is an error, with `or`
+-     note    type.question-dot           `?.` is one token, the optional chain; to pass the error on first and then call, write `(x?).f()` or bind the value with `let` first
+-     fix     type.change-copy            or change a copy of `{name}` that the body declares, which leaves the callers' value alone
+-     note    type.shared-changes         what a `Shared` holds is shared, so it is not changed in place: put the part that changes in a `Cell` or a `Mutex` inside it, and change it through that
+-     fix     type.take-out               or take it out of the list, which then no longer holds it
+-     note    type.capture-borrow         a plain closure borrows `{name}` instead, while it lives; a copy made first is no more `Copy` than `{name}` is
 -     fix     type.interpolate            write the value into the text
 -     note    type.option-not-value       the value may be missing: give a default with `??`, or take it apart with `if let` or `match`
 -     note    type.read-guard-value       a read guard only reads the value; `write()` gives the guard that changes it
@@ -329,6 +348,9 @@ E0445 error   type.hole-in-release        a release build rejects the typed hole
 E0448 error   resolve.float-attribute     `@float` takes `fast`, which allows contraction and reassociation in the function (03); floating point is strict elsewhere
 E0446 error   type.par-body-impure        `{callee}` is not `pure`, so the body of a `par` loop cannot call it: a `par` body runs on a worker and is `pure` (06)
 E0447 error   type.par-body-changes       the body of a `par` loop changes nothing but its own values, and `{name}` is declared before the loop: compute each value with `par.map` and combine them with `sum` or a reducer (06)
+# Stage 1's (RULES.md, R37; 03, "Traits"): a trait's constant is each
+# implementing type's.
+E0449 error   type.trait-constant         each impl of `{trait}` gives its own `{name}`, so it is read through a type: `T.{name}` for a type `T` that implements `{trait}`
 
 # ---------------------------------------------------------------- ownership
 # The signature rules (E0411-E0415) are the resolver's; the rest are the
@@ -564,9 +586,10 @@ W0015 warning lint.wildcard-own-enum     `case _` matches {variants} of `{ty}`, 
 -     fix     lint.list-variants          list them
 # Stage 1's (RULES.md, R15; D-024): an error set that hides the prelude's.
 W0016 warning resolve.shadow-prelude-set  the error set `{name}` hides the prelude's in this module, and the two are different sets: what the prelude's functions return is not this one
-# Stage 1's (RULES.md, R29; 07): a trait's contract binds its impls, and
-# stage 1 checks it in the impls of the trait's own module.
-W0021 warning contract.trait-elsewhere    the contract of `{method}` binds this impl, and stage 1 checks a trait's contract only in the impls of the module that declares the trait
+# Stage 1's (RULES.md, R29 and R39; 07): a trait's contract binds its
+# impls, which stage 1 checks in the syntax of the trait's module, every
+# module of the program's.
+W0021 warning contract.trait-elsewhere    the contract of `{method}` binds this impl, and stage 1 does not have the syntax of the trait's module to check it in
 # Stage 1's (RULES.md, R30; 13, "Deprecation", and D-046): an attribute
 # nothing reads, and a call of a deprecated function.
 W0022 warning resolve.unknown-attribute   `@{name}` is not an attribute Sisu reads, and no compile-time code of the program reads attributes (`reflect.attributes_of`), so it means nothing here
@@ -574,6 +597,9 @@ W0023 warning type.deprecated             `{name}` is deprecated: {reason}
 W0024 warning resolve.misspelt-attribute  `@{name}` is not an attribute Sisu reads
 -     fix     resolve.similar-attribute   write `@{name}`
 W0025 warning type.deprecated-plain       `{name}` is deprecated
+# Stage 1's (RULES.md, R40; D-046): an attribute Sisu reads, standing where
+# it means nothing.
+W0026 warning resolve.misplaced-attribute  `@{name}` means something on {places}, so on {what} it does nothing
 
 # ---------------------------------------------------------------- run time
 R0001 runtime panic.explicit              {message}

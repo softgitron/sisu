@@ -77,9 +77,17 @@ impl Checker:
     ## The contract of the function being checked, from the clauses its
     ## body starts with, once its parameters are declared; `ret` is the
     ## type `result` is in `ensures`.
-    pub pure def check_contracts(mut self, cx: Cx, is_test: bool, clauses: list[Clause], ret: Ty):
+    pub pure def check_contracts(
+        mut self, cx: Cx, tcx: Cx, is_test: bool, clauses: list[Clause], ret: Ty
+    ):
         var out = TContracts(
-            requires=[], ensures=[], olds=[], result=None, labels=[], invariant=None
+            requires=[],
+            ensures=[],
+            olds=[],
+            foreign_olds=[],
+            result=None,
+            labels=[],
+            invariant=None,
         )
         # A `mut self` method of a type with an invariant checks it again
         # when it returns (07).
@@ -103,7 +111,7 @@ impl Checker:
         # the impl's own, which runtime double-checking holds to it (07).
         for (kind, e, _) in self.inherited.copy():
             if kind == ContractKind.Requires:
-                if let Some(x) = self.inherited_clause(cx, TContractKind.Requires, e):
+                if let Some(x) = self.inherited_clause(tcx, TContractKind.Requires, e):
                     out.requires.push(x)
         for c in clauses:
             if c.kind == ContractKind.Requires:
@@ -142,16 +150,17 @@ impl Checker:
                     let x = self.new_local(labels[i], lt, False, span)
                     self.declare(cx, labels[i], x, False, span)
                     out.labels.push((x, i))
-        self.ensures = Some(EnsuresCtx(scope=scope, olds=[]))
+        self.ensures = Some(EnsuresCtx(scope=scope, olds=[], foreign=[]))
         for c in ensures:
             out.ensures.push(self.contract_clause(cx, TContractKind.Ensures, c.expr))
         # The trait's postcondition after the impl's own, which may only
         # strengthen it (07).
         for c in inherited_ensures:
-            if let Some(x) = self.inherited_clause(cx, TContractKind.Ensures, c.expr):
+            if let Some(x) = self.inherited_clause(tcx, TContractKind.Ensures, c.expr):
                 out.ensures.push(x)
         if let Some(e) = self.ensures:
             out.olds = e.olds.copy()
+            out.foreign_olds = e.foreign.copy()
         self.ensures = None
         self.pop_scope()
         self.keep_contracts(out)
@@ -159,20 +168,29 @@ impl Checker:
     ## A clause of the trait's method an impl's method implements (07;
     ## RULES.md, R29), checked in the impl's body with the trait's names of
     ## the parameters naming the impl's; what it reports is the trait's
-    ## own, reported where the trait is checked, so it goes here.
+    ## own, reported where the trait is checked, so it goes here. `tcx` is
+    ## the syntax and text of the trait's module, which may be another than
+    ## the impl's (RULES.md, R39): the clause is checked there, its names
+    ## the trait's module's but the parameters'.
     pure def inherited_clause(
-        mut self, cx: Cx, kind: TContractKind, expr: ExprId
+        mut self, tcx: Cx, kind: TContractKind, expr: ExprId
     ) -> ContractCheck?:
         let before = len(self.diags)
         let other = self.other_error
+        let home = self.module
+        if let Some(m) = self.inherited_module:
+            self.module = m
+            self.clause_module = Some(m)
         self.push_scope()
         for (n, l) in self.inherited_names.copy():
-            self.declare(cx, n, l, False, cx.ast.expr(expr).range)
+            self.declare(tcx, n, l, False, tcx.ast.expr(expr).range)
         let owner = self.clause_owner.copy()
         self.clause_owner = self.inherited_owner.copy()
-        let x = self.contract_clause(cx, kind, expr)
+        let x = self.contract_clause(tcx, kind, expr)
         self.clause_owner = owner
         self.pop_scope()
+        self.module = home
+        self.clause_module = None
         let clean = len(self.diags) == before
         while len(self.diags) > before:
             _ = self.diags.pop()
@@ -210,6 +228,7 @@ impl Checker:
             span=cx.ast.expr(expr).range,
             replay=replay,
             owner=self.clause_owner.copy(),
+            module=self.clause_module,
         )
 
     ## A contract statement inside a body: an `invariant` line of the check
@@ -283,8 +302,11 @@ impl Checker:
             value = self.add(TExprKind.CopyOf(x), ty, s)
         let text = "old({self.source_text(cx, cx.ast.expr(arg.value).range)})"
         let l = self.new_local(text, ty, False, at)
+        let foreign = self.clause_module.is_some()
         if let Some(e) = ref mut self.ensures:
             e.olds.push((l, value))
+            if foreign:
+                e.foreign.push(l)
         return self.add(TExprKind.Local(l), ty, at)
 
     ## A value of a refinement type as its base, the same value (07: a
@@ -385,6 +407,7 @@ impl Checker:
                         span=span,
                         replay=False,
                         owner=None,
+                        module=None,
                     )
                 )
             )

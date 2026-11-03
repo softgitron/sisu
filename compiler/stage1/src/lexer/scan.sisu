@@ -5,7 +5,7 @@
 ##! `INTERP_START`, the expression's tokens, an optional `COLON
 ##! FORMAT_SPEC` or `EQ`, `INTERP_END`, and `STRING_END` (PEP 701).
 
-from stage1.diag import Diagnostic, Msg
+from stage1.diag import Diagnostic, Edit, Msg
 from stage1.syntax.kinds import KEYWORDS, PUNCTUATION, SyntaxKind
 from stage1.syntax.tree import Token
 from stage1.text import char_at, is_alphanumeric
@@ -352,6 +352,15 @@ impl Scanner:
             count += 1
         if not closed:
             self.error(Msg.LexUnterminatedChar, start, self.pos)
+        elif count > 1 and not self.text.byte_slice(start, self.pos).contains("\""):
+            # Text in single quotes, Python's `'Aino'`: Sisu writes text in
+            # double quotes (RULES.md, R45).
+            let d = Diagnostic.new(Msg.LexBadCharLiteral, start, self.pos)
+            let edits = [
+                Edit(start=start, end=start + 1, text="\""),
+                Edit(start=self.pos - 1, end=self.pos, text="\""),
+            ]
+            self.diags.push(d.fix_edits(Msg.LexDoubleQuotes, edits))
         elif count != 1:
             self.error(Msg.LexBadCharLiteral, start, self.pos)
         self.push(SyntaxKind.CharLit, start)

@@ -1,0 +1,19 @@
+# RULES.md, R46: a build with its tests, `sir --tests`, prints no SIR of a
+# program the ownership checker rejects, whose tests `sisu test` would run
+# from it, and says why it is not run, as `sisu test` says it (`E0408`,
+# then `D0021`); `sir` prints the SIR of the program without its tests, as
+# stage 0's `sisu sir` does. The manual's exercise 11.4.
+struct Player:
+    name: String
+    points: int
+
+## The name of whichever of `a` and `b` has more points; `a` on a tie.
+def winner(a: Player, b: Player) -> ref String from a:
+    if b.points > a.points:
+        return ref b.name
+    return ref a.name
+
+test "the winner":
+    let aino = Player("Aino", 7)
+    let eero = Player("Eero", 9)
+    assert winner(aino, eero) == "Eero"

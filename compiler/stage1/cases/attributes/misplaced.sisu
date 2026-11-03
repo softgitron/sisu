@@ -1,0 +1,33 @@
+# RULES.md, R40: an attribute Sisu reads that stands where it means
+# nothing warns (D-046): `@derive` and `@must_consume` belong on a type,
+# `@export` and `@inline` on a function, `@deprecated` on a function, a
+# type, a constant or a variant, `@unroll` on a loop.
+@derive(Debug)
+def broken():
+    pass
+
+@must_consume
+def handle() -> int:
+    return 1
+
+@export("sauna")
+struct NotAFunction:
+    a: int
+
+@unroll(4)
+def unrolled():
+    pass
+
+@deprecated
+test "a test":
+    pass
+
+@inline
+@derive(Eq)
+struct Fine:
+    a: int
+
+def main():
+    broken()
+    print(handle())
+    unrolled()

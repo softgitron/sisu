@@ -361,6 +361,17 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             tests,
             mut kept,
         )?
+        if tests and done.refused and not partial:
+            # What `sisu test` runs (decision 357): a program with an error
+            # of a phase is not run, as `sisu test` says (RULES.md, R46).
+            var why = String.new()
+            if let Some(input) = app_input(sys, home, path, True, mut env, catalog)?:
+                var built = input.copy()
+                built.contracts = level
+                let r = report_of(base, built, path, catalog, mut kept)
+                why = refusal(r, catalog) ?? String.new()
+            emit("", why)
+            return Err(Failed)
         var errs = String.new()
         for b in done.beyond:
             errs.push("beyond the slice: {b}\n")
@@ -819,6 +830,12 @@ struct Lowering:
     beyond: list[String]
     ## The SIR has an entry, a `main` to run.
     entry: bool
+    ## The program has an error of a phase: the front end's, the ownership
+    ## checker's or a failed `comptime` expression's. A build with its
+    ## tests prints no SIR of it, since `sisu test` would run it (RULES.md,
+    ## R46); a build without them prints the SIR of a program the ownership
+    ## checker rejects, as `sisu sir` does.
+    refused: bool
 
 ## A program as the front end reads it (stage 0's `ProgramSource`): its
 ## modules and packages, whether stage 0 reports an error about it that is
@@ -1396,7 +1413,8 @@ pure def files_by_source(lowered: lower.Lowered, files: list[ProgramFile]) -> li
 ## built with them, every member's for a workspace, as `sisu check` checks
 ## each member. A program that a build without its tests compiles as it is
 ## goes through the pipeline once for both, when the SIR checks every
-## contract.
+## contract. Built with its tests (`tests`), a program with an error of a
+## phase has no SIR (`Lowering.refused`; RULES.md, R46).
 def lowering_of(
     sys: System,
     home: str,
@@ -1411,7 +1429,9 @@ def lowering_of(
     tests: bool,
     mut kept: Kept,
 ) -> Lowering ! IoError:
-    var done = Lowering(sir=String.new(), ownership=String.new(), beyond=[], entry=False)
+    var done = Lowering(
+        sir=String.new(), ownership=String.new(), beyond=[], entry=False, refused=False
+    )
     var checks: list[Input] = []
     if ownership:
         checks = inputs_of(sys, home, arg, False, True, FeatureRequest.none(), mut env, catalog)?
@@ -1426,30 +1446,39 @@ def lowering_of(
         if not sir_done and len(checks) == 1 and same:
             done.sir = one.sir.copy()
             done.entry = one.entry
+            done.refused = one.refused
             sir_done = True
-    if sir_done:
-        return Ok(done)
-    # The program built without its tests: a file's, a package's, or a
-    # workspace's one application.
-    var app: Input? = None
+    if not sir_done:
+        # The program built without its tests, or with them: a file's, a
+        # package's, or a workspace's one application.
+        if let Some(input) = app_input(sys, home, arg, tests, mut env, catalog)?:
+            var built = input.copy()
+            built.contracts = level
+            let one = sir_of(sys, base, built, catalog, mut times, partial, mut kept)
+            done.sir = one.sir.copy()
+            done.entry = one.entry
+            done.refused = one.refused
+            for b in one.beyond:
+                if not done.beyond.contains(b):
+                    done.beyond.push(b.copy())
+    if tests and done.refused and not partial:
+        done.sir = String.new()
+    return Ok(done)
+
+## The program `sir` builds of what `arg` names, with its tests or without
+## them: a file's, a package's, or a workspace's one application.
+def app_input(
+    sys: System, home: str, arg: str, tests: bool, mut env: Environment, catalog: Catalog
+) -> Input? ! IoError:
     if let Some(layouts) = layouts_of(sys, arg, True, FeatureRequest.none()):
         if len(layouts) == 1 and not layouts[0].modules.is_empty():
-            app = Some(layout_input(sys, home, layouts[0], tests, mut env, catalog)?)
-    else:
-        let none = FeatureRequest.none()
-        let built = inputs_of(sys, home, arg, False, tests, none, mut env, catalog)?
-        if let Some(x) = built.first():
-            app = Some(x.copy())
-    if let Some(input) = app:
-        var built = input.copy()
-        built.contracts = level
-        let one = sir_of(sys, base, built, catalog, mut times, partial, mut kept)
-        done.sir = one.sir.copy()
-        done.entry = one.entry
-        for b in one.beyond:
-            if not done.beyond.contains(b):
-                done.beyond.push(b.copy())
-    return Ok(done)
+            return Ok(Some(layout_input(sys, home, layouts[0], tests, mut env, catalog)?))
+        return Ok(None)
+    let none = FeatureRequest.none()
+    let built = inputs_of(sys, home, arg, False, tests, none, mut env, catalog)?
+    if let Some(x) = built.first():
+        return Ok(Some(x.copy()))
+    return Ok(None)
 
 ## Whether a build without its tests may compile the program otherwise than
 ## one with them (decision 243): a module of it has a `@cfg`, or an item
@@ -1492,6 +1521,7 @@ def sir_of(
             ownership=String.new(),
             beyond=["nothing to lower".to_string()],
             entry=False,
+            refused=False,
         )
     let t2 = now(sys)
     times.lower += t2 - t1
@@ -1534,11 +1564,17 @@ pure def front_of(checked: typeck.Checked) -> Lowering?:
         if not checked.owner_beyond.contains(b):
             why.push("beyond the type checker's slice: {b}")
     if not why.is_empty():
-        return Some(Lowering(sir=String.new(), ownership=String.new(), beyond=why, entry=False))
+        return Some(
+            Lowering(
+                sir=String.new(), ownership=String.new(), beyond=why, entry=False, refused=False
+            )
+        )
     # `sisu sir` prints nothing for a program with a front-end error, and
     # the ownership checker does not run.
     if checked.has_error:
-        return Some(Lowering(sir=String.new(), ownership=String.new(), beyond=[], entry=False))
+        return Some(
+            Lowering(sir=String.new(), ownership=String.new(), beyond=[], entry=False, refused=True)
+        )
     if checked.typed.is_none():
         return Some(
             Lowering(
@@ -1546,6 +1582,7 @@ pure def front_of(checked: typeck.Checked) -> Lowering?:
                 ownership=String.new(),
                 beyond=["nothing to lower".to_string()],
                 entry=False,
+                refused=False,
             )
         )
     return None
@@ -1561,21 +1598,30 @@ pure def finish_of(
 ) -> Lowering:
     if not lowered.beyond.is_empty() and not partial:
         return Lowering(
-            sir=String.new(), ownership=String.new(), beyond=lowered.beyond.copy(), entry=False
+            sir=String.new(),
+            ownership=String.new(),
+            beyond=lowered.beyond.copy(),
+            entry=False,
+            refused=False,
         )
     # A partial SIR is wanted for its statements: the drops the ownership
     # checker places, not its findings.
     var done = borrowck.check_with(lowered.program, not partial, mut placed)
     simplify.program(mut done.program)
     # The compiler runs the `comptime` expressions of a program the
-    # ownership checker accepts (08), and bakes their values into it.
+    # ownership checker accepts (08), and bakes their values into it; one
+    # that fails is an error of the program.
+    var refused = False
     if done.findings.is_empty():
         let evaluated = interp.evaluate(mut done.program, catalog)
         if not evaluated.beyond.is_empty() and not partial:
             var reasons = lowered.beyond.copy()
             for why in evaluated.beyond:
                 reasons.push(why.copy())
-            return Lowering(sir=String.new(), ownership=String.new(), beyond=reasons, entry=False)
+            return Lowering(
+                sir=String.new(), ownership=String.new(), beyond=reasons, entry=False, refused=False
+            )
+        refused = not evaluated.errors.is_empty()
     # Each typed hole prints its closure where a run reaches it (RULES.md,
     # R27), once the checker is done with the program.
     let hole = Param(name="hole".to_string(), value="{{hole}}".to_string())
@@ -1588,13 +1634,18 @@ pure def finish_of(
         var sir = String.new()
         if partial:
             sir = write.write(done.program)
-        return Lowering(sir=sir, ownership=String.new(), beyond=reasons, entry=False)
+        return Lowering(sir=sir, ownership=String.new(), beyond=reasons, entry=False, refused=False)
     var out = String.new()
     for k in range(len(files)):
         out.push(render_ids_in(files[k].name, files[k].text, per_file[k], catalog))
+        for d in per_file[k]:
+            if catalog.is_error(d.msg):
+                refused = True
     let entry = done.program.entry.is_some()
     let text = write.write(done.program)
-    return Lowering(sir=text, ownership=out, beyond=lowered.beyond.copy(), entry=entry)
+    return Lowering(
+        sir=text, ownership=out, beyond=lowered.beyond.copy(), entry=entry, refused=refused
+    )
 
 ## What `check` prints of a program (stage 0's `Db::diagnostics`): every
 ## diagnostic of each of its files, the front end's and, when it found no
@@ -2287,38 +2338,10 @@ def test_program(
     var built = input.copy()
     built.contracts = CONTRACTS_ALL
     let r = report_of(base, built, path, catalog, mut kept)
-    let front = r.front(catalog, None)
-    let errors = front.errors(catalog)
-    var beyond = String.new()
-    for b in r.beyond:
-        beyond.push("beyond the slice: {b}\n")
-    if errors > 0:
-        var errs = front.human(catalog)
-        let count = Param(name="count".to_string(), value="{errors}")
-        errs.push(catalog.plain_error("cli.errors-found", [count]))
-        errs.push(beyond)
-        emit("", errs)
+    if let Some(why) = refusal(r, catalog):
+        emit("", why)
         return Ok((1, False))
     emit("", r.front(catalog, Some(False)).human(catalog))
-    let evaluation = r.evaluation()
-    let failed = evaluation.errors(catalog)
-    if failed > 0:
-        var errs = evaluation.human(catalog)
-        let count = Param(name="count".to_string(), value="{failed}")
-        errs.push(catalog.plain_error("cli.errors-found", [count]))
-        emit("", errs)
-        return Ok((1, False))
-    let ownership = r.ownership()
-    let owned = ownership.errors(catalog)
-    if owned > 0:
-        var errs = ownership.human(catalog)
-        let count = Param(name="count".to_string(), value="{owned}")
-        errs.push(catalog.plain_error("cli.ownership-errors", [count]))
-        emit("", errs)
-        return Ok((1, False))
-    if not beyond.is_empty():
-        emit("", beyond)
-        return Ok((1, False))
     var times = SirTimes(check=0, lower=0, ownership=0)
     let done = sir_of(sys, base, built, catalog, mut times, False, mut kept)
     if not done.beyond.is_empty():
@@ -2351,6 +2374,43 @@ def test_program(
         case Err(e):
             emit("", "cannot run `{sisu}`: {e}\n")
             return Ok((1, False))
+
+## Why a program built with its tests is not run, as `sisu test` says it:
+## the front end's diagnostics and `D0006` at its errors; else its
+## warnings, then the failed `comptime` expressions and `D0006`, or the
+## ownership checker's errors and `D0021`, or why stage 1 cannot tell;
+## `None` when it runs.
+pure def refusal(r: Report, catalog: Catalog) -> String?:
+    let front = r.front(catalog, None)
+    let errors = front.errors(catalog)
+    var beyond = String.new()
+    for b in r.beyond:
+        beyond.push("beyond the slice: {b}\n")
+    if errors > 0:
+        var errs = front.human(catalog)
+        let count = Param(name="count".to_string(), value="{errors}")
+        errs.push(catalog.plain_error("cli.errors-found", [count]))
+        errs.push(beyond)
+        return Some(errs)
+    var errs = r.front(catalog, Some(False)).human(catalog)
+    let evaluation = r.evaluation()
+    let failed = evaluation.errors(catalog)
+    if failed > 0:
+        errs.push(evaluation.human(catalog))
+        let count = Param(name="count".to_string(), value="{failed}")
+        errs.push(catalog.plain_error("cli.errors-found", [count]))
+        return Some(errs)
+    let ownership = r.ownership()
+    let owned = ownership.errors(catalog)
+    if owned > 0:
+        errs.push(ownership.human(catalog))
+        let count = Param(name="count".to_string(), value="{owned}")
+        errs.push(catalog.plain_error("cli.ownership-errors", [count]))
+        return Some(errs)
+    if not beyond.is_empty():
+        errs.push(beyond)
+        return Some(errs)
+    return None
 
 ## The counts of the runner's last line, `N passed, M failed, K blocked`.
 def test_summary(out: str) -> (int, int, int)?:

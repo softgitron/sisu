@@ -481,6 +481,7 @@ impl B:
                 supertraits.push(self.type_expr(c))
         var methods: list[FnDef] = []
         var assoc_types: list[AssocTypeDef] = []
+        var consts: list[ConstDef] = []
         if let Some(b) = self.child(n, SyntaxKind.Block):
             for c in self.nodes(b):
                 match self.kind(c):
@@ -488,6 +489,8 @@ impl B:
                         methods.push(self.fn_def(c))
                     case TypeAlias:
                         assoc_types.push(self.assoc_type(c))
+                    case ConstDef:
+                        consts.push(self.const_def(c))
                     case _:
                         pass
         let generics = self.generics(n)
@@ -498,6 +501,7 @@ impl B:
             supertraits=supertraits,
             methods=methods,
             assoc_types=assoc_types,
+            consts=consts,
         )
 
     pure def fn_def(mut self, n: int) -> FnDef:
@@ -648,6 +652,7 @@ impl B:
                         var default: ExprId? = None
                         if let Some(x) = self.find_node(c, is_expr_node):
                             default = Some(self.expr(x))
+                        let attrs = self.attrs(c)
                         fields.push(
                             FieldDef(
                                 node=c,
@@ -656,6 +661,7 @@ impl B:
                                 ty=ty_id,
                                 default=default,
                                 vis=self.vis(c),
+                                attrs=attrs,
                             )
                         )
                     case FnDef:
@@ -690,6 +696,7 @@ impl B:
         let keyword = if is_error: SyntaxKind.ErrorKw else: SyntaxKind.EnumKw
         var variants: list[VariantDef] = []
         var methods: list[FnDef] = []
+        var consts: list[ConstDef] = []
         var open = False
         if let Some(b) = self.child(n, SyntaxKind.Block):
             for c in self.nodes(b):
@@ -710,16 +717,20 @@ impl B:
                                     TypeExpr(node=f, range=self.range(f), kind=TypeKind.Error)
                                 )
                             fields.push(VariantField(name=fname, ty=ty_id, range=self.range(f)))
+                        let attrs = self.attrs(c)
                         variants.push(
                             VariantDef(
                                 node=c,
                                 range=self.range(c),
                                 name=self.first_ident(c) ?? self.missing_name(c),
                                 fields=fields,
+                                attrs=attrs,
                             )
                         )
                     case OpenMarker:
                         open = True
+                    case ConstDef:
+                        consts.push(self.const_def(c))
                     case FnDef:
                         methods.push(self.fn_def(c))
                     case _:
@@ -731,6 +742,7 @@ impl B:
             variants=variants,
             methods=methods,
             open=open,
+            consts=consts,
         )
 
     pure def impl_def(mut self, n: int) -> ImplDef:
