@@ -1,27 +1,190 @@
 ##! The runtime of native code in Sisu (D-086; D-087, step 3): the functions
-##! the generated code calls by symbol, with Sisu's own convention (decision
-##! 189: the result's address, then each argument's, and the status byte),
-##! compiled once into an object that every native program is linked with.
-##! Each `export_NAME` function of this module is the symbol `sisu_rt_NAME`;
-##! what they call is compiled with them. The code is the runtime's own:
-##! it counts no frame and passes no yield point, as drop glue does not, and
-##! it reaches raw memory only through the operations of std.mem the
-##! backend compiles inline, so it needs nothing of the program's type
-##! table. Each function replaces its counterpart in the runtime in Rust
-##! (`crates/sisu-rt`), which is deleted.
+##! the generated code and the runtime in Rust call by symbol, with Sisu's
+##! own convention (decision 189: the result's address, then each
+##! argument's, and the status byte), compiled once into an object that every
+##! native program is linked with. Each `export_NAME` function of this module
+##! is the symbol `sisu_rt_NAME`; what they call is compiled with them. The
+##! code is the runtime's own: it counts no frame and passes no yield point,
+##! as drop glue does not, and it reaches raw memory only through the
+##! operations of std.mem the backend compiles inline. A value is walked by
+##! its type in the program's table, which the runtime in Rust lays out in
+##! memory when the program starts and passes to each structural operation
+##! (`types.sisu`, decision 350). Each function replaces its counterpart in
+##! the runtime in Rust (`crates/sisu-rt`), which is deleted.
 
+import rt.search
+import rt.text
+import rt.value
+from rt.host import memcmp
+from rt.host import memmove
+from rt.types import Types
 from std.mem import ptr
 
 ## Whether the `n` bytes at `a` and `b` are the same: `==` of two texts of
 ## one length (decision 253), whose lengths the code compares first.
-pub pure def export_bytes_eq(a: ptr[u8], b: ptr[u8], n: int) -> bool:
-    var i = 0
-    while i < n:
-        # safety: valid, aligned, in_bounds: the code passes the bytes of two
-        #   texts, `n` of each, so byte `i`, below `n`, lies within both, and
-        #   a byte needs no alignment.
-        unsafe:
-            if a.offset(i).read() != b.offset(i).read():
-                return False
-        i += 1
-    return True
+##
+## Requires:
+## - `readable`: `a` and `b` each point to `n` live bytes
+def export_bytes_eq(a: ptr[u8], b: ptr[u8], n: int) -> bool:
+    if n == 0:
+        return True
+    # safety: returns_promptly: memcmp reads the `n` bytes of each, which
+    #   this function's `readable` says are live.
+    return unsafe memcmp(a, b, n) == 0
+
+## Structural equality of the value at `a` of type `ta` and the value at `b`
+## of type `tb` (`value.equal`), in the table at `types`.
+##
+## Requires:
+## - `typed`: `types` is the program's table, and `a` and `b` hold live
+##   values of types `ta` and `tb`
+def export_value_eq(types: ptr[int], a: ptr mut u8, ta: int, b: ptr mut u8, tb: int) -> bool:
+    return value.equal(Types(words=types), a, ta, b, tb)
+
+## The order of the value at `a` of type `ta` and the value at `b` of type
+## `tb` (`value.order`): -1, 0 or 1, and 2 for none.
+##
+## Requires:
+## - `typed`: `types` is the program's table, and `a` and `b` hold live
+##   values of types `ta` and `tb`
+def export_value_cmp(types: ptr[int], a: ptr mut u8, ta: int, b: ptr mut u8, tb: int) -> int:
+    return value.order(Types(words=types), a, ta, b, tb)
+
+## The structural hash of the value at `p` of type `t` mixed into `state`
+## (`value.hash`, decision 256).
+##
+## Requires:
+## - `typed`: `types` is the program's table, and `p` holds a live value of
+##   type `t`
+def export_value_hash(types: ptr[int], state: int, p: ptr mut u8, t: int) -> int:
+    return value.hash(Types(words=types), state, p, t)
+
+## `.copy()` of the value at `src` of type `t`, written at `dst`
+## (`value.copy`).
+##
+## Requires:
+## - `typed`: `types` is the program's table, `src` holds a live value of
+##   type `t`, and `dst` has room for one
+def export_value_copy(types: ptr[int], dst: ptr mut u8, src: ptr mut u8, t: int):
+    value.copy(Types(words=types), dst, src, t)
+
+## The drop of the value at `p` of type `t` (`value.drop`): its status, 1
+## when a panic is leaving.
+##
+## Requires:
+## - `typed`: `types` is the program's table, and `p` holds a live value of
+##   type `t`, dead afterwards
+def export_value_drop(types: ptr[int], p: ptr mut u8, t: int, mode: int) -> int:
+    return value.drop(Types(words=types), p, t, mode)
+
+## The drop of the fields the glue of the struct or enum at `p` of type `t`
+## leaves out, once the glue has run (`value.drop_rest`): its status.
+##
+## Requires:
+## - `typed`: `types` is the program's table, and `p` holds a live value of
+##   type `t` whose glue has run, dead afterwards
+def export_value_drop_rest(types: ptr[int], p: ptr mut u8, t: int, mode: int) -> int:
+    return value.drop_rest(Types(words=types), p, t, mode)
+
+## One more count for each capability handle the value at `p` of type `t`
+## holds (`value.retain`, decision 237).
+##
+## Requires:
+## - `typed`: `types` is the program's table, and `p` holds a live value of
+##   type `t`
+def export_value_retain(types: ptr[int], p: ptr mut u8, t: int):
+    value.retain(Types(words=types), p, t)
+
+## Appends the `n` bytes at `b` to the `String` at `t`: `String.push`,
+## `fmt.text`, and `fmt.display` of a text (decisions 265 and 351).
+##
+## Requires:
+## - `text`: `t` holds a live `String`, and `b` points to `n` live bytes
+def export_text_push(t: ptr mut u8, b: ptr mut u8, n: int):
+    if n <= 0:
+        return
+    # safety: text: this function's; valid, aligned, writable, in_bounds: the
+    #   buffer has room for the bytes after its length; returns_promptly:
+    #   memmove copies them.
+    unsafe:
+        let words = t.cast[int]()
+        let len = words.offset(1).read()
+        var source = b
+        if len + n > words.offset(2).read():
+            source = text.grow(t, len + n, b)
+        let bytes = words.cast[ptr[u8]]().read().cast_mut()
+        _ = memmove(bytes.offset(len), source.as_const(), n)
+        words.offset(1).write(len + n)
+
+## Appends the decimal digits of `n` to the `String` at `t`, after a `-`
+## when it is negative, as `Display` writes an `int`: `fmt.display` of an
+## `int` (decisions 265 and 351). The digits are worked out on the negative
+## of the magnitude, whose quotient by 10 rounded toward zero is `(m + 9) //
+## 10`, so that the most negative `int` needs no positive counterpart.
+##
+## Requires:
+## - `text`: `t` holds a live `String`
+def export_text_push_int(t: ptr mut u8, n: int):
+    let m = if n < 0: n else: -n
+    var digits = 1
+    var x = m
+    while x <= -10:
+        x = (x + 9) // 10
+        digits += 1
+    let total = digits + (if n < 0: 1 else: 0)
+    # safety: text: this function's; valid, aligned, writable, in_bounds: the
+    #   buffer has room for `total` bytes after its length, and a byte needs
+    #   no alignment.
+    unsafe:
+        let words = t.cast[int]()
+        let len = words.offset(1).read()
+        if len + total > words.offset(2).read():
+            _ = text.grow(t, len + total, t)
+        let bytes = words.cast[ptr[u8]]().read().cast_mut().offset(len)
+        if n < 0:
+            bytes.write(u8.wrapping_from(45))
+        var pos = total - 1
+        x = m
+        while True:
+            let q = (x + 9) // 10
+            bytes.offset(pos).write(u8.wrapping_from(48 + q * 10 - x))
+            pos -= 1
+            x = q
+            if x == 0:
+                break
+        words.offset(1).write(len + total)
+
+## Writes at `dst` a new `String` holding the `n` bytes at `b`, no buffer
+## when there are none, else one of at least 16 bytes: `str.to_string` and
+## `String.new` (decisions 265 and 351).
+##
+## Requires:
+## - `text`: `dst` has room for a `String`, and `b` points to `n` live bytes
+def export_text_from(dst: ptr mut u8, b: ptr mut u8, n: int):
+    text.from_bytes(dst, b, n)
+
+## Writes at `dst` a new `String` of the digits of the magnitude whose words
+## are `low` and `high`, in `base`, capitals with `upper` (`text.digits`):
+## `fmt.digits` and `fmt.wide_digits`.
+##
+## Requires:
+## - `text`: `dst` has room for a `String`
+def export_int_digits(dst: ptr mut u8, low: int, high: int, base: int, upper: bool):
+    text.digits(dst, low, high, base, upper)
+
+## The position of the first occurrence of the `m` bytes at `part` in the
+## `n` bytes at `text`, or -1 (`search.find`): `in` on texts and
+## `bytes.find`.
+##
+## Requires:
+## - `readable`: `text` points to `n` live bytes and `part` to `m`
+def export_find(text: ptr mut u8, n: int, part: ptr mut u8, m: int) -> int:
+    return search.find(text, n, part, m)
+
+## Whether the `n` bytes at `text` start with the `m` at `part`, or end with
+## them (`at_end`; `search.has_edge`): `bytes.starts_with` and `ends_with`.
+##
+## Requires:
+## - `readable`: `text` points to `n` live bytes and `part` to `m`
+def export_has_edge(text: ptr mut u8, n: int, part: ptr mut u8, m: int, at_end: bool) -> bool:
+    return search.has_edge(text, n, part, m, at_end)

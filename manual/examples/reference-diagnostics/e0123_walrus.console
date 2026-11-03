@@ -1,0 +1,14 @@
+$ sisu run e0123_walrus.sisu
+error[E0123]: Sisu has no `:=`; bind with `let` or use `if let`
+  --> e0123_walrus.sisu:3:11
+  |
+3 |     count := 3
+  |           ^^
+
+error[E0200]: cannot find `count` in this scope
+  --> e0123_walrus.sisu:4:13
+  |
+4 |     print("{count} saunas")
+  |             ^^^^^
+
+error[D0006]: the program was not run: errors found (2)

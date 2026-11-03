@@ -1,2 +1,4 @@
 # What `sisu test FILE` writes beside a file it tests (its result cache).
 *.test-cache
+# Python's caches, which the tools' imports of check.py write.
+__pycache__/

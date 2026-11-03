@@ -1,0 +1,7 @@
+# `embed` given a constant's name, not a literal.
+const NAME: str = "menu.txt"
+const MENU: str = embed(NAME)
+
+def main():
+    for line in MENU.lines():
+        print(line)

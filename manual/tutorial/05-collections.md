@@ -545,14 +545,14 @@ error[E0400]: `scores` was moved on line 4 and cannot be used afterwards
   |
 4 |     var ranked = scores
   |                  ------ `scores` is moved here
-  = note: copy it with `.copy()` before it is moved, or move it later
+  = note: copy it with `.copy()` before the move, which makes a second value (for a list or a `String`, an allocation); move it later, after its last use, which costs nothing; or, where what it moves into only reads it, take it there without `own`, and the call lends it
 
 error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```
 
 E0400 (`borrow.use-after-move`) points at the use and, on line 4, at
-the move. Its note gives the two fixes. `.copy()` makes a second list,
-so that each binding owns one:
+the move. Its note gives the fixes and what each costs. `.copy()` makes
+a second list, so that each binding owns one:
 
 <!-- file: examples/05-collections/copied.sisu -->
 ```sisu

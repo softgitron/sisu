@@ -1,0 +1,3 @@
+# A tool that reads JSON.
+def main():
+    print("json_tool")

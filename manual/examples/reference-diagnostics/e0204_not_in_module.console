@@ -1,0 +1,8 @@
+$ sisu run e0204_not_in_module.sisu
+error[E0204]: module `std.collections` has no item `Stack`
+  --> e0204_not_in_module.sisu:2:29
+  |
+2 | from std.collections import Stack
+  |                             ^^^^^
+
+error[D0006]: the program was not run: errors found (1)

@@ -9,6 +9,11 @@
 ##!                                                      # lowered and compiled in one process
 ##! ```
 ##!
+##! `--library` (with `lir` and `build`) lowers the runtime in Sisu
+##! (`compiler/rt`) as a library rather than a program (decision 353): its
+##! root module's `export_NAME` functions the global symbols `sisu_rt_NAME`,
+##! and no C `main`.
+##!
 ##! `lir` lowers the program (`stage2.lower`) and prints its LIR, or writes
 ##! it to `--output`. `sir` reads the program (`stage2.read`) and prints it
 ##! with stage 1's writer, which gives the same bytes back: the reader's
@@ -47,7 +52,7 @@ def emit(text: str):
         print(text)
 
 def usage() -> String:
-    return "usage: sisu2 lir FILE.sir [--release] [--output FILE.lir]\n       sisu2 sir FILE.sir\n       sisu2 x86 FILE.lir --output FILE.o [--comp-dir DIR] [--std DIR]\n       sisu2 build FILE.sir --output FILE.o [--release] [--comp-dir DIR] [--std DIR] [--times]".to_string()
+    return "usage: sisu2 lir FILE.sir [--release] [--library] [--output FILE.lir]\n       sisu2 sir FILE.sir\n       sisu2 x86 FILE.lir --output FILE.o [--comp-dir DIR] [--std DIR]\n       sisu2 build FILE.sir --output FILE.o [--release] [--library] [--comp-dir DIR] [--std DIR] [--times]".to_string()
 
 ## The bytes as `bytes`, each converted by a table of the 256 values, in
 ## pieces on the workers of `std.par`.
@@ -100,6 +105,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     let command = args[0].copy()
     let path = args[1].copy()
     var release = False
+    var library = False
     var output: String? = None
     var comp_dir = String.new()
     var std_dir = String.new()
@@ -108,6 +114,8 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     while i < len(args):
         if args[i] == "--release":
             release = True
+        elif args[i] == "--library":
+            library = True
         elif args[i] == "--times":
             times = True
         elif args[i] == "--output" and i + 1 < len(args):
@@ -140,8 +148,10 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         emit(write.write(read_prog))
         return Ok(())
     var prog = read_prog
-    gen.native_bodies(mut prog)
-    let lowered = gen.lower_spanned(prog, release)
+    # The library has no std.par to give its native body (decision 353).
+    if not library:
+        gen.native_bodies(mut prog)
+    let lowered = if library: gen.lower_library_spanned(prog, release) else: gen.lower_spanned(prog, release)
     let lowered_at = sys.clock.now().unix_nanos()
     if let Err(e) = lowered:
         match e:

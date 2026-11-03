@@ -7,7 +7,7 @@ error[E0400]: `guests` was moved on line 4 and cannot be used afterwards
   |
 4 |     let sauna = guests
   |                 ------ `guests` is moved here
-  = note: copy it with `.copy()` before it is moved, or move it later
+  = note: copy it with `.copy()` before the move, which makes a second value (for a list or a `String`, an allocation); move it later, after its last use, which costs nothing; or, where what it moves into only reads it, take it there without `own`, and the call lends it
 
 $ sisu check --format=ids moved.sisu
 5:11-5:17 E0400 borrow.use-after-move name="guests" line="4"

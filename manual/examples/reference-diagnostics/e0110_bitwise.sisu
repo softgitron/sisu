@@ -1,0 +1,4 @@
+# A bit mask mixed with arithmetic, without parentheses.
+def main():
+    let flags = 6
+    print(flags & 1 + 2)

@@ -14,9 +14,11 @@ languages do instead, what it costs, and how its claims are tested.
 20](../tutorial/20-concurrency.md#testing-under-many-schedules) (tests
 under many schedules) and [chapter 22](../tutorial/22-web-service.md)
 (simulation and replay); the reference's [R15,
-Testing](../README.md#the-reference); the
-[guides](../README.md#the-guides) on testing with the clock and the
-network, finding a concurrency bug and reproducing a failure; the
+Testing](../reference/testing.md); the guides [Test code that uses the
+clock](../guides/clock.md), [Test code that uses the
+network](../guides/network.md), [Find a concurrency
+bug](../guides/concurrency-bug.md) and [Reproduce a
+failure](../guides/replay.md); the
 proposal's [17, Testing](../../proposal/17-testing.md) and decisions
 D-057 and D-070 in its [decision
 log](../../proposal/15-decision-log.md); the research in

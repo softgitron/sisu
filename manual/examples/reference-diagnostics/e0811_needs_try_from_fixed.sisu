@@ -1,0 +1,12 @@
+# `try_from` checks the predicate where the value becomes a `Percent`.
+type Percent = int where 0 <= self <= 100
+
+def steam(humidity: Percent) -> str:
+    return if humidity < 50: "soft" else: "heavy"
+
+def main():
+    let n = "70".parse_int() ?? 0
+    let humidity = Percent.try_from(n) else:
+        print("{n} is not a percentage")
+        return
+    print(steam(humidity))

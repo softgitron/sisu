@@ -215,3 +215,7 @@ explored 20 schedules per test (seeds 0 to 19)
 `--sim` combines with `--explore` and the schedulers, and its replay
 token holds the fault rate, so a failure that the simulator finds runs
 again the same way.
+
+**Status.** `--explore`, `--schedule-seed` and the schedulers are in
+stage 0 (D-014, D-075); `--sim` and its faults are a prototype of the
+experiment (D-070), as [R15](../reference/testing.md#simulation) says.

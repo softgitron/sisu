@@ -1,0 +1,9 @@
+$ sisu run e0110_bitwise.sisu
+error[E0110]: `&` cannot be mixed with arithmetic or shifts without parentheses
+  --> e0110_bitwise.sisu:4:24
+  |
+4 |     print(flags & 1 + 2)
+  |                        ^
+  = fix: add parentheses: `(`, `)`
+
+error[D0006]: the program was not run: errors found (1)

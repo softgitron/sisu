@@ -26,7 +26,7 @@ A pattern stands in each of these places:
 | `while let` | `while let PATTERN = VALUE:` | the loop ends |
 | A chained condition | `if let P = A, let Q = B, TEST:` | the chain fails at that part |
 | `let ... else` | `let PATTERN = VALUE else: ...` | the `else` block leaves the scope |
-| A plain `let` or `var` | `let (a, b) = pair` | the pattern must match every value (E0329) |
+| A plain `let` or `var` | `let (a, b) = pair` | the pattern must match every value ([E0329](diagnostics.md#e0329)) |
 | A `for` loop | `for (i, word) in enumerate(words):` | the pattern must match every element |
 
 <!-- file: examples/reference-patterns/other_places.sisu -->

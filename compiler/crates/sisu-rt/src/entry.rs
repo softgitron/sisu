@@ -482,20 +482,14 @@ unsafe extern "C" fn sisu_rt_trace_release(p: *mut u8) {
 }
 
 /// Drops the value at `p` of type `t`: by its glue (Sisu code) on the
-/// task's stack, or structurally on the system stack.
+/// task's stack, and structurally on the system stack (`value::drop_value`).
 ///
 /// # Safety
 /// `p` must hold a value of type `t`, dead afterwards.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn sisu_rt_drop(p: *mut u8, t: u32) -> u8 {
-    match ty(t).kind {
-        // SAFETY: as the caller guarantees.
-        Kind::Struct { glue: Some(_), .. } | Kind::Enum { glue: Some(_), .. } | Kind::Guard(..) => unsafe {
-            value::drop_value(p, t)
-        },
-        // SAFETY: as the caller guarantees.
-        _ => system_status(|| unsafe { value::drop_value(p, t) }),
-    }
+    // SAFETY: as the caller guarantees.
+    unsafe { value::drop_value(p, t) }
 }
 
 /// `.copy()`.
@@ -553,67 +547,13 @@ unsafe fn binary(op: u32, dst: *mut u8, a: *mut u8, ta: u32, b: *mut u8, tb: u32
     abi::OK
 }
 
-/// The `n` bytes at `b`, or none.
-///
-/// # Safety
-/// Unless `n` is 0, `b` must hold `n` bytes, which must outlive the slice.
-unsafe fn bytes_at<'a>(b: *const u8, n: u64) -> &'a [u8] {
-    if n == 0 {
-        return &[];
-    }
-    // SAFETY: as the caller guarantees.
-    unsafe { std::slice::from_raw_parts(b, n as usize) }
-}
-
-/// Appends `n` bytes at `b` to the `String` at `t`, without the
-/// intrinsic's descriptor (decision 265): `fmt.text`, `fmt.display` of a
-/// text and `String.push`. Bytes of the text itself, which a program the
-/// ownership checker accepts never pushes, are copied out first.
-///
-/// # Safety
-/// `t` must hold a `String`, and `b` `n` bytes.
+/// The block at `p` (null for none) grown, or made, to `bytes`, keeping
+/// what it held: a text's buffer that the runtime in Sisu builds (decisions
+/// 265 and 350).
 #[unsafe(no_mangle)]
-unsafe extern "C" fn sisu_rt_text_push(t: *mut u8, b: *const u8, n: u64) {
-    let (t, b) = (t as usize, b as usize);
-    // SAFETY: as the caller guarantees.
-    system(|| unsafe {
-        let text = mem::at::<Text>(t as *mut u8);
-        let bytes = bytes_at(b as *const u8, n);
-        let start = text.ptr as usize;
-        if !text.ptr.is_null() && b >= start && b < start + text.cap as usize {
-            let own = bytes.to_vec();
-            text.push(&own);
-        } else {
-            text.push(bytes);
-        }
-    })
-}
-
-/// Appends the decimal digits of `n` to the `String` at `t`, as `Display`
-/// writes an `int` (decision 265).
-///
-/// # Safety
-/// `t` must hold a `String`.
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sisu_rt_text_push_int(t: *mut u8, n: i64) {
-    let t = t as usize;
-    let mut buf = [0u8; 20];
-    let digits = value::int_digits(n, &mut buf);
-    let (d, len) = (digits.as_ptr() as usize, digits.len());
-    // SAFETY: as the caller guarantees; the digits are in `buf`.
-    system(|| unsafe { mem::at::<Text>(t as *mut u8).push(bytes_at(d as *const u8, len as u64)) })
-}
-
-/// Writes at `dst` a new `String` holding the `n` bytes at `b`
-/// (decision 265): `str.to_string` and `String.new`.
-///
-/// # Safety
-/// `dst` must have room for a `String`, and `b` hold `n` bytes.
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sisu_rt_text_from(dst: *mut u8, b: *const u8, n: u64) {
-    let (dst, b) = (dst as usize, b as usize);
-    // SAFETY: as the caller guarantees.
-    system(|| unsafe { value::write_string(dst as *mut u8, bytes_at(b as *const u8, n)) })
+extern "C" fn sisu_rt_grow(p: *mut u8, bytes: i64) -> *mut u8 {
+    let p = p as usize;
+    system(|| mem::grow(p as *mut u8, bytes.max(0) as usize) as usize) as *mut u8
 }
 
 /// Looks a key up in the `dict` or `set` at `t`, without the intrinsic's

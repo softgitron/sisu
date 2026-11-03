@@ -1,0 +1,10 @@
+# A field of a type with an invariant, changed from outside.
+struct Schedule:
+    opens: int
+    closes: int
+    invariant 0 <= self.opens < self.closes <= 24
+
+def main():
+    var today = Schedule(opens=16, closes=21)
+    today.closes = 25
+    print("open {today.opens} to {today.closes}")

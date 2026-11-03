@@ -1,0 +1,2 @@
+4:24-4:25 E0110 parse.bitwise-arithmetic op="&"
+  fix parse.parenthesize 4:19-4:19 "(" 4:24-4:24 ")"

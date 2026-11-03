@@ -355,3 +355,8 @@ default argument is computed at each call, each iteration of a loop
 binds its own variable, a closure cannot outlive a borrowed loop
 variable, and an `int` has 64 bits and panics past them. R19's section
 "Python habits whose meaning Sisu changes" shows each.
+
+**Status.** In stage 0, with two of Python's builtins narrower than
+[02](../../proposal/02-syntax.md)'s prelude suggests: `max` and `min`
+compare two values, not the items of a collection, and `enumerate` has
+no `start`.

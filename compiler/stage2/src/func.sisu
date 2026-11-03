@@ -41,7 +41,7 @@ from stage2.gen import (
     runtime_results,
 )
 from stage2.layout import fat
-from stage2.lir import Fb, LirError, internal
+from stage2.lir import Fb, LirError, internal, unsupported
 from stage2.scan import cold_blocks, drop_flag, frame_iterators, register_locals
 
 ## Values larger than this many words are copied through memory rather
@@ -173,7 +173,9 @@ impl Cg:
         for _ in f.blocks:
             self.fx.blocks.push(self.b.create_block())
             self.fx.fails.push(None)
-        self.fx.glue = f.kind == FnKind.Glue
+        # The runtime in Sisu is the runtime's own code, as drop glue is
+        # (decision 336).
+        self.fx.glue = f.kind == FnKind.Glue or self.library
         var file = String.new()
         if f.source < len(p.sources):
             file = p.sources[f.source].copy()
@@ -207,6 +209,21 @@ impl Cg:
         let Some(v) = r else:
             return internal("`{name}` returns nothing")
         return Ok(v)
+
+    ## A call of the runtime in Sisu (decisions 336 and 350), of Sisu's
+    ## convention: the address of a word for its result, then each
+    ## argument's, in memory of its own, and a status that leads to the
+    ## failure path. The address of the result's word.
+    pub pure def rt_sisu(mut self, name: str, args: list[int]) -> int ! LirError:
+        let ret = self.slot(8)
+        var all = [ret]
+        for _ in args:
+            all.push(self.slot(8))
+        for i in range(len(args)):
+            self.store_word(args[i], all[i + 1], 0)
+        let st = self.rt_status(name, all)?
+        self.check(st)
+        return Ok(ret)
 
     pub pure def iconst(mut self, v: int) -> int:
         return self.b.iconst("i64", v)
@@ -311,6 +328,11 @@ impl Cg:
         return self.types.size(t)
 
     pub pure def type_id(mut self, t: Type) -> int ! LirError:
+        # The runtime in Sisu has no type table of its own (decision 336).
+        if self.library:
+            return unsupported(
+                "a value the runtime walks by its type (`{write.ty(t)}`), in the runtime's own code"
+            )
         return self.types.id(t)
 
     ## The words of the value at `addr`.
@@ -489,6 +511,9 @@ impl Cg:
     ## A yield point: one less of the budget, and the scheduler when it is
     ## spent.
     pub pure def yield_check(mut self) -> () ! LirError:
+        # The runtime's own code passes none (decision 336).
+        if self.library:
+            return Ok(())
         let a = self.data_addr(self.budget)
         let n = self.load(a, 0)
         let n1 = self.b.imm("iadd_imm", n, -1)

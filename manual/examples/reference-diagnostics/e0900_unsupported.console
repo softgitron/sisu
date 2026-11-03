@@ -1,0 +1,8 @@
+$ sisu run e0900_unsupported.sisu
+error[E0900]: a generator expression is not implemented in stage 0 yet; it arrives with generators (Phase 8)
+  --> e0900_unsupported.sisu:4:19
+  |
+4 |     let doubled = (r * 2 for r in readings)
+  |                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

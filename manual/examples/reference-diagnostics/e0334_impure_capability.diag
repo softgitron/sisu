@@ -1,0 +1,2 @@
+2:20-2:26 E0334 type.impure-capability name="has_notes" ty="Fs"
+  fix type.remove-pure 2:1-2:6 ""

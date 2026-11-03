@@ -1,0 +1,6 @@
+# A constant that the refinement type does not admit.
+type Percent = int where 0 <= self <= 100
+
+def main():
+    let after_ladle: Percent = 135
+    print("{after_ladle} percent")

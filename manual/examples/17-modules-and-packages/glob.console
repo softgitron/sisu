@@ -1,5 +1,5 @@
 $ sisu run
-error[E0100]: expected a name, found `*`
+error[E0128]: Sisu has no glob imports: name what the module gives, as in `from std.collections import Deque, Heap`, or import the module and write `collections.Deque`
   --> src/main.sisu:2:27
   |
 2 | from trip.distance import *

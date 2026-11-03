@@ -1,0 +1,6 @@
+# The function that reaches the file system is not pure.
+def has_notes(fs: Fs) -> bool:
+    return fs.exists("notes.txt")
+
+def main(sys: System):
+    print(has_notes(sys.fs))

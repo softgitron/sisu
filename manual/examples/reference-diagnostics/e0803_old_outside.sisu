@@ -1,0 +1,12 @@
+# `old(...)` in a precondition.
+struct Stove:
+    celsius: int
+
+    def heat(mut self, degrees: int):
+        requires old(self.celsius) < 110
+        self.celsius = min(self.celsius + degrees, 110)
+
+def main():
+    var stove = Stove(celsius=60)
+    stove.heat(30)
+    print("{stove.celsius} degrees")

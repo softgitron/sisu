@@ -447,7 +447,7 @@ error[E0400]: `names` was moved on line 4 and cannot be used afterwards
   |
 4 |     let team = names
   |                ----- `names` is moved here
-  = note: copy it with `.copy()` before it is moved, or move it later
+  = note: copy it with `.copy()` before the move, which makes a second value (for a list or a `String`, an allocation); move it later, after its last use, which costs nothing; or, where what it moves into only reads it, take it there without `own`, and the call lends it
 
 error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 $ sisu run --defer-borrow moved.sisu
@@ -676,8 +676,10 @@ error[D0111]: `--release` builds with the native backend's release profile (09);
 **Stage 0 differs.** The native backend compiles every program that the
 conformance suite runs, and reports what it does not compile yet with
 D0103. The proposal's debug backend is its own and its release backend
-is LLVM ([10](../../proposal/10-tooling.md)); stage 0's release profile
-uses the same backend with the checks it proves unnecessary left out.
+is LLVM ([10](../../proposal/10-tooling.md)); stage 0 compiles a debug
+build with its backend written in Sisu and a release build with
+Cranelift, which stands in for LLVM (`--backend=cranelift` asks for
+Cranelift in a debug build too).
 
 **Status.** In stage 0 (stage 2 of the bootstrap,
 [18](../../proposal/18-next-steps.md)).
@@ -1909,30 +1911,30 @@ a command line can produce, by what they report:
 | Codes | Report |
 |---|---|
 | D0001, D0013 | A file that cannot be read or written. |
-| D0002, D0003, D0004, D0009, D0023 | The usage, an unknown command, a missing argument, an unknown option, a value that is not a number. |
+| D0002, [D0003](diagnostics.md#d0003), [D0004](diagnostics.md#d0004), [D0009](diagnostics.md#d0009), [D0023](diagnostics.md#d0023) | The usage, an unknown command, a missing argument, an unknown option, a value that is not a number. |
 | D0005, D0069 | A program without `main`; a library run as an application. |
-| D0006, D0021, D0114 | A program with errors that did not run, or was not documented. |
+| [D0006](diagnostics.md#d0006), [D0021](diagnostics.md#d0021), D0114 | A program with errors that did not run, or was not documented. |
 | D0007, D0008, D0053, D0060 to D0063 | The lines of `sisu test`: a test's outcome, the counts, the tests not selected, transcripts. |
-| D0010, D0011 | `sisu explain`. |
+| [D0010](diagnostics.md#d0010), D0011 | `sisu explain`. |
 | D0012, D0076, D0118 | Internal errors (status 70). |
 | D0014 to D0020 | `sisu explain-borrow`. |
 | D0022 | `sisu audit` without an audit. |
 | D0024 to D0027, D0041 to D0050 | Schedules explored, and the schedulers. |
-| D0028, D0029 | `--contracts`. |
+| [D0028](diagnostics.md#d0028), [D0029](diagnostics.md#d0029) | `--contracts`. |
 | D0030 to D0040 | Replay tokens, capability logs and replays. |
-| D0051, D0052 | `--faults`. |
+| D0051, [D0052](diagnostics.md#d0052) | `--faults`. |
 | D0054 to D0056 | Snapshots. |
 | D0057 to D0059 | `sisu bench`. |
 | D0064 to D0067, D0112 | Packages, lockfiles, workspaces and features. |
-| D0070 to D0073 | `sisu build` and `sisu new`. |
+| D0070 to [D0073](diagnostics.md#d0073) | `sisu build` and `sisu new`. |
 | D0074, D0075, D0077 | `sisu fmt`. |
 | D0078 | `--watch`. |
 | D0079 to D0093 | `sisu repl` and `sisu ws`. |
 | D0094 | `--stats`. |
 | D0095 to D0102 | The language server's answers. |
-| D0103 to D0111, D0119 | The native backend. |
-| D0113 | `sisu doc --std`. |
-| D0115 to D0118 | The front end. |
+| D0103 to [D0111](diagnostics.md#d0111), D0119 | The native backend. |
+| [D0113](diagnostics.md#d0113) | `sisu doc --std`. |
+| [D0115](diagnostics.md#d0115) to D0118 | The front end. |
 
 `sisu explain CODE` prints any of them, and [R17, Diagnostics](diagnostics.md#the-driver)
 has an entry for each one that the manual shows, with the fix.

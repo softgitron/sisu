@@ -147,15 +147,16 @@ error[E0400]: `song` was moved on line 22 and cannot be used afterwards
    |
 22 |     evening.add(song)
    |     ----------------- `song` is moved here
-  = note: copy it with `.copy()` before it is moved, or move it later
+  = note: copy it with `.copy()` before the move, which makes a second value (for a list or a `String`, an allocation); move it later, after its last use, which costs nothing; or, where what it moves into only reads it, take it there without `own`, and the call lends it
 
 error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```
 
 E0400 (`borrow.use-after-move`) tells you where the song went: the
 line marked with `^` is the use, and the line marked with `-` is the
-move, however far apart they are. The note names two fixes, which the
-section "Choosing a fix for a move" weighs. The last line says that the
+move, however far apart they are. The note names three fixes and what
+each costs, which the section "Choosing a fix for a move" weighs. The
+last line says that the
 program was not run; chapter 11 shows `--defer-borrow`, which runs it
 under a monitor that stops it where the moved value is used.
 
@@ -284,13 +285,13 @@ error[E0400]: `songs` was moved on line 11 and cannot be used afterwards
    |
 11 |     print("{minutes(songs)} minutes:")
    |             -------------- `songs` is moved here
-  = note: copy it with `.copy()` before it is moved, or move it later
+  = note: copy it with `.copy()` before the move, which makes a second value (for a list or a `String`, an allocation); move it later, after its last use, which costs nothing; or, where what it moves into only reads it, take it there without `own`, and the call lends it
 
 error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```
 
-The note offers two fixes, and there is a third that a diagnostic
-cannot offer. In the order to try them:
+The note offers three fixes, each with what it costs. In the order to
+try them:
 
 1. **Move it later.** Use the value before the line that moves it. This
    costs nothing, and works when nothing needs the value after the
@@ -299,7 +300,8 @@ cannot offer. In the order to try them:
    it, its parameter should not say `own`. `minutes` only adds up
    lengths, so delete `own`, and the call borrows the list. This costs
    nothing when the program runs, but it changes the function, which
-   only you can judge, so the note does not offer it.
+   only you can judge, so the note offers it only where what the value
+   moves into only reads it.
 3. **Copy it.** Write `.copy()` where the value moves, so that the
    function gets a copy and you keep the original. This always works,
    and costs the time and the memory of the copy. It is right when two
@@ -366,7 +368,7 @@ error[E0400]: `text` was moved on line 10 and cannot be used afterwards
 10 |         cards.push(Card(name.to_string(), text))
    |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    |                    ---------------------------- `text` is moved here, in an earlier iteration of the loop
-  = note: copy it with `.copy()` before it is moved, or move it later
+  = note: copy it with `.copy()` before the move, which makes a second value (for a list or a `String`, an allocation); move it later, after its last use, which costs nothing; or, where what it moves into only reads it, take it there without `own`, and the call lends it
 
 error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```
@@ -462,7 +464,7 @@ error[E0401]: `order` cannot be used as a whole, because `order.items` was moved
    |
  8 |     let items = order.items
    |                 ----------- `order.items` is moved here
-  = note: copy it with `.copy()` before it is moved, or move it later
+  = note: copy it with `.copy()` before the move, which makes a second value (for a list or a `String`, an allocation); move it later, after its last use, which costs nothing; or, where what it moves into only reads it, take it there without `own`, and the call lends it
 
 error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```

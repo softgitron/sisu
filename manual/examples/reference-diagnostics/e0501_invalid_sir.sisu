@@ -1,7 +1,0 @@
-# A default for a field of a generic struct.
-struct Shelf[T]:
-    items: list[T] = []
-
-def main():
-    let shelf = Shelf[int]()
-    print(len(shelf.items))

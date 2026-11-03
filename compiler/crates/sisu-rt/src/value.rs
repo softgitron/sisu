@@ -121,10 +121,12 @@ pub(crate) unsafe fn forget_value(p: *mut u8, t: u32) {
 }
 
 /// Drops the value at `p`, of type `t`, and every value it owns, in the
-/// order the interpreter does: a list's elements first to last, a tuple's
-/// last to first, a struct or enum by its drop glue. A part whose drop
-/// panics does not stop the others, which are dropped as cleanup (a second
-/// panic aborts); the status says whether a panic is leaving.
+/// order the interpreter does; the status says whether a panic is leaving.
+/// The runtime in Sisu walks the value (`compiler/rt`, decision 350), on the
+/// system stack, where it moves aside what would run the program's code;
+/// on a task's own stack, a struct's or an enum's drop glue, and a guard's
+/// check of its value's invariant, run where they are, and the walk of
+/// what the glue leaves out on the system stack.
 ///
 /// # Safety
 /// `p` must hold a value of type `t`, which is dead afterwards.
@@ -132,167 +134,27 @@ pub(crate) unsafe fn drop_value(p: *mut u8, t: u32) -> u8 {
     if !rt::needs_drop(t) {
         return abi::OK;
     }
+    if crate::sched::deferring() {
+        // SAFETY: as the caller guarantees.
+        return unsafe { crate::bridge::drop(p, t) };
+    }
     let entry = ty(t);
-    // SAFETY: the parts are where the type says, each dropped once.
+    // SAFETY: as the caller guarantees.
     unsafe {
-        // By the parts that need a drop, when the type has them listed
-        // (decision 266).
-        match rt::drop_parts(t) {
-            rt::DropParts::Parts(parts) => return drop_parts(p, parts),
-            rt::DropParts::Variants(variants) => {
-                return match variants.get(tag(p, entry) as usize) {
-                    Some(parts) => drop_parts(p, parts),
-                    None => abi::OK,
-                };
-            }
-            rt::DropParts::ByKind => {}
-        }
         match &entry.kind {
-            Kind::String | Kind::Path | Kind::Bytes => {
-                mem::at::<Text>(p).release();
-                abi::OK
-            }
-            Kind::List(e) => {
-                let list = mem::at::<List>(p);
-                let size = ty(*e).size;
-                let mut status = abi::OK;
-                if rt::needs_drop(*e) {
-                    // The element's way of dropping looked at once.
-                    match (rt::drop_parts(*e), &ty(*e).kind) {
-                        (rt::DropParts::Parts(parts), _) => {
-                            for i in 0..list.len {
-                                status = after_part(status, drop_parts(list.at(i, size), parts));
-                            }
-                        }
-                        (_, Kind::String | Kind::Path | Kind::Bytes) => {
-                            for i in 0..list.len {
-                                mem::at::<Text>(list.at(i, size)).release();
-                            }
-                        }
-                        _ => {
-                            for i in 0..list.len {
-                                status = after_part(status, drop_value(list.at(i, size), *e));
-                            }
-                        }
-                    }
-                }
-                mem::release(list.ptr);
-                *list = List::empty();
-                status
-            }
-            Kind::Iter(_) => crate::iter::drop_iter(mem::word(p, 0) as *mut u8),
-            Kind::Dyn => {
-                let cell = mem::word(p, 8) as *mut u8;
-                let status = drop_value(cell, mem::word(p, 0) as u32);
-                mem::release(cell);
-                status
-            }
-            Kind::Dict(..) | Kind::Set(_) => {
-                crate::dict::drop_table(mem::word(p, 0) as *mut crate::dict::Table)
-            }
-            Kind::Entry(k, _) => drop_value(p.add(8), *k),
-            Kind::Option(payload) => {
-                if tag(p, entry) == 0 {
-                    drop_value(p.add(8), *payload)
-                } else {
-                    abi::OK
-                }
-            }
-            Kind::Result(ok, err) => {
-                if tag(p, entry) == 0 {
-                    drop_value(p.add(8), *ok)
-                } else {
-                    drop_value(p.add(8), *err)
-                }
-            }
-            Kind::Tuple(slots) => {
-                let mut status = abi::OK;
-                for s in slots.iter().rev() {
-                    status = after_part(status, drop_value(p.add(s.offset as usize), s.ty));
-                }
-                status
-            }
-            // A box whose value was moved out has no cell (decision 216).
-            Kind::Box(inner) => {
-                let cell = mem::word(p, 0) as *mut u8;
-                if cell.is_null() {
-                    return abi::OK;
-                }
-                let status = drop_value(cell, *inner);
-                mem::release(cell);
-                status
-            }
-            // Glue is Sisu code: on the system stack, the value is moved
-            // aside and dropped on the task's stack (`sched::defer`).
-            Kind::Struct { glue: Some(_), .. } | Kind::Enum { glue: Some(_), .. } | Kind::Guard(..)
-                if crate::sched::deferring() && !forgetting() =>
-            {
-                crate::sched::defer(p, t)
-            }
-            // The glue (Sisu code: the `Drop` impl, then the fields whose drop
-            // is observed), then the fields it leaves out (decision 218); an
-            // error lets go of its return trace (decision 215). Forgetting,
-            // every field is freed and no glue runs.
-            Kind::Struct { glue, fields, .. } => {
-                if forgetting() {
-                    return drop_fields(p, fields, false);
-                }
-                let status = run_glue(*glue, p);
-                after_part(status, drop_silent(p, fields))
-            }
-            Kind::Enum { glue, variants, error, .. } => {
-                if *error {
+            Kind::Struct { glue: Some(g), .. } | Kind::Enum { glue: Some(g), .. } if !forgetting() => {
+                // An error lets go of its return trace (decision 215).
+                if let Kind::Enum { error: true, .. } = entry.kind {
                     crate::intrinsics::release_trace(mem::word(p, abi::ERROR_TRACE));
                     mem::set_word(p, abi::ERROR_TRACE, 0);
                 }
-                let v = variants.get(tag(p, entry) as usize);
-                if forgetting() {
-                    return v.map_or(abi::OK, |v| drop_fields(p, &v.fields, false));
-                }
-                let status = run_glue(*glue, p);
-                match v {
-                    Some(v) => after_part(status, drop_silent(p, &v.fields)),
-                    None => status,
-                }
+                let status = crate::bridge::run_glue(*g, p);
+                after_part(status, crate::sched::system_status(|| crate::bridge::drop_rest(p, t)))
             }
-            Kind::Guard(..) | Kind::ReadGuard(_) if forgetting() => abi::OK,
-            Kind::Guard(_, check) => crate::tasks::unlock(mem::word(p, 0) as *mut u8, *check),
-            Kind::ReadGuard(_) => crate::tasks::read_unlock(mem::word(p, 0) as *mut u8),
-            Kind::Mutex(v) | Kind::RwLock(v) => drop_value(p.add(abi::MUTEX_HEADER as usize), *v),
-            Kind::Sender(_) => crate::tasks::drop_channel_end(mem::word(p, 0) as u32, false),
-            Kind::Receiver(_) => crate::tasks::drop_channel_end(mem::word(p, 0) as u32, true),
-            Kind::Shared(v) => crate::cells::drop_shared(mem::word(p, 0) as *mut u8, *v),
-            Kind::Weak(_) => crate::cells::drop_weak(mem::word(p, 0) as *mut u8),
-            Kind::Cell(v) => drop_value(p, *v),
-            Kind::Arena(_) => crate::cells::drop_arena(p),
-            Kind::ErrSet(_) => {
-                let decl = concrete(p, t);
-                if decl == t { abi::OK } else { drop_value(p, decl) }
-            }
-            // A copy of a capability handle, or of a `Cap`: one count
-            // fewer (decision 237).
-            Kind::Opaque(n) if counted(n) => crate::caps::release_cell(mem::word(p, 0) as *mut u8),
-            // A function value goes with what its environment holds
-            // (decision 248).
-            Kind::Fn => match fn_env(p, entry) {
-                Some(env) => drop_value(p.add(8), env),
-                None => abi::OK,
-            },
-            _ => abi::OK,
+            Kind::Guard(..) | Kind::ReadGuard(_) => crate::bridge::object_drop(p, t),
+            _ => crate::sched::system_status(|| crate::bridge::drop(p, t)),
         }
     }
-}
-
-/// The type of what a function value's environment holds, when a drop or
-/// a copy of the value must reach it: the value's last word, the type's
-/// number plus one, or 0 (decision 248).
-///
-/// # Safety
-/// `p` must hold a function value of the type `entry` describes.
-unsafe fn fn_env(p: *mut u8, entry: &abi::TypeEntry) -> Option<u32> {
-    // SAFETY: as the caller guarantees.
-    let w = unsafe { mem::word(p, entry.size - 8) };
-    (w != 0).then(|| (w - 1) as u32)
 }
 
 /// Whether a type the runtime knows by its name is a counted handle
@@ -310,99 +172,8 @@ pub(crate) unsafe fn retain_value(p: *mut u8, t: u32) {
     if !rt::needs_drop(t) {
         return;
     }
-    let entry = ty(t);
-    // SAFETY: the parts are where the type says.
-    unsafe {
-        match &entry.kind {
-            Kind::Opaque(n) if counted(n) => crate::caps::retain_cell(mem::word(p, 0) as *mut u8),
-            Kind::Option(payload) => {
-                if tag(p, entry) == 0 {
-                    retain_value(p.add(8), *payload);
-                }
-            }
-            Kind::Result(ok, err) => {
-                let part = if tag(p, entry) == 0 { *ok } else { *err };
-                retain_value(p.add(8), part);
-            }
-            Kind::Tuple(slots) => {
-                for s in slots {
-                    retain_value(p.add(s.offset as usize), s.ty);
-                }
-            }
-            Kind::Struct { fields, .. } => {
-                for f in fields {
-                    retain_value(p.add(f.offset as usize), f.ty);
-                }
-            }
-            Kind::Enum { variants, .. } => {
-                if let Some(v) = variants.get(tag(p, entry) as usize) {
-                    for f in &v.fields {
-                        retain_value(p.add(f.offset as usize), f.ty);
-                    }
-                }
-            }
-            Kind::Fn => {
-                if let Some(env) = fn_env(p, entry) {
-                    retain_value(p.add(8), env);
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-/// Runs a struct's or enum's drop glue on the value at `p`, if it has one.
-///
-/// # Safety
-/// `p` must hold a value of the type whose glue `glue` is.
-unsafe fn run_glue(glue: Option<u32>, p: *mut u8) -> u8 {
-    match glue.map(rt::function) {
-        None => abi::OK,
-        Some(Some(f)) => {
-            let mut unit = 0u64;
-            // SAFETY: the glue takes the value's address.
-            unsafe { f(&mut unit as *mut u64 as *mut u8, p) }
-        }
-        Some(None) => rt::internal("drop glue missing from the function table"),
-    }
-}
-
-/// Drops the parts of the value at `p` that need a drop, in order
-/// ([`rt::DropParts`]).
-///
-/// # Safety
-/// `p` must hold a value whose parts these are, dead afterwards.
-unsafe fn drop_parts(p: *mut u8, parts: &[(u32, u32)]) -> u8 {
-    let mut status = abi::OK;
-    for &(off, t) in parts {
-        // SAFETY: each part is at its offset.
-        status = after_part(status, unsafe { drop_value(p.add(off as usize), t) });
-    }
-    status
-}
-
-/// Drops the fields at `p` that the type's glue leaves out, last to first
-/// as the glue drops its own; none of them runs Sisu code.
-///
-/// # Safety
-/// `p` must hold the fields at their offsets.
-unsafe fn drop_silent(p: *mut u8, fields: &[abi::Field]) -> u8 {
     // SAFETY: as the caller guarantees.
-    unsafe { drop_fields(p, fields, true) }
-}
-
-/// Drops the fields at `p`, last to first: those the glue leaves out
-/// (`silent`), or every one.
-///
-/// # Safety
-/// `p` must hold the fields at their offsets.
-unsafe fn drop_fields(p: *mut u8, fields: &[abi::Field], silent: bool) -> u8 {
-    let mut status = abi::OK;
-    for f in fields.iter().rev().filter(|f| !(silent && f.glue) && rt::needs_drop(f.ty)) {
-        // SAFETY: the field is where the type says.
-        status = after_part(status, unsafe { drop_value(p.add(f.offset as usize), f.ty) });
-    }
-    status
+    unsafe { crate::bridge::retain(p, t) }
 }
 
 /// The status after dropping one more part: once a part's drop has
@@ -415,318 +186,32 @@ pub(crate) fn after_part(before: u8, now: u8) -> u8 {
     }
 }
 
-// --------------------------------------------------------------------- copy
+// ------------------------------------------------------------ copy, equality
 
-/// Copies a part of a value: a word, or other bytes, when its copy is a
-/// copy of its bytes, without a call of [`copy_value`] for it.
-///
-/// # Safety
-/// As [`copy_value`].
-unsafe fn copy_part(dst: *mut u8, src: *mut u8, t: u32) {
-    // SAFETY: as the caller guarantees.
-    unsafe {
-        if !rt::plain(t) {
-            return copy_value(dst, src, t);
-        }
-        match ty(t).size {
-            8 => mem::set_word(dst, 0, mem::word(src, 0)),
-            n => mem::copy(dst, src, n as usize),
-        }
-    }
-}
-
-/// Copies again, over the bytes already copied, the parts of a value that
-/// own something ([`rt::CopyParts`]).
-///
-/// # Safety
-/// `src` must hold a value whose parts these are, and `dst` its bytes.
-unsafe fn copy_parts(dst: *mut u8, src: *mut u8, parts: &[(u32, u32)]) {
-    for &(off, t) in parts {
-        // SAFETY: each part is at its offset in both.
-        unsafe { copy_value(dst.add(off as usize), src.add(off as usize), t) };
-    }
-}
-
-/// `.copy()`: writes at `dst` a deep copy of the value at `src`.
+/// `.copy()`: writes at `dst` a deep copy of the value at `src`, by the
+/// runtime in Sisu (decision 350).
 ///
 /// # Safety
 /// `src` must hold a value of type `t`, and `dst` have room for one.
 pub(crate) unsafe fn copy_value(dst: *mut u8, src: *mut u8, t: u32) {
-    let entry = ty(t);
-    // SAFETY: the parts are where the type says.
+    // SAFETY: as the caller guarantees.
     unsafe {
         if rt::plain(t) {
-            mem::copy(dst, src, entry.size as usize);
+            mem::copy(dst, src, ty(t).size as usize);
             return;
         }
-        match rt::copy_parts(t) {
-            rt::CopyParts::Parts(parts) => {
-                mem::copy(dst, src, entry.size as usize);
-                copy_parts(dst, src, parts);
-                return;
-            }
-            rt::CopyParts::Variants(variants) if matches!(entry.kind, Kind::Enum { error: false, .. }) => {
-                mem::copy(dst, src, entry.size as usize);
-                if let Some(parts) = variants.get(tag(src, entry) as usize) {
-                    copy_parts(dst, src, parts);
-                }
-                return;
-            }
-            _ => {}
-        }
-        match &entry.kind {
-            Kind::String | Kind::Path | Kind::Bytes => {
-                let b = mem::at::<Text>(src).bytes();
-                (dst as *mut Text).write(Text::from_bytes(b));
-            }
-            Kind::List(e) => {
-                let from = mem::at::<List>(src);
-                let size = ty(*e).size;
-                let mut to = List::empty();
-                to.reserve(from.len, size);
-                // The elements' bytes at once; then, for elements that own
-                // something, those parts again, the element's kind looked at
-                // once rather than for each (decision 262).
-                match rt::copy_parts(*e) {
-                    _ if rt::plain(*e) => mem::copy(to.ptr, from.ptr, (from.len * u64::from(size)) as usize),
-                    rt::CopyParts::Parts(parts) => {
-                        mem::copy(to.ptr, from.ptr, (from.len * u64::from(size)) as usize);
-                        for i in 0..from.len {
-                            copy_parts(to.at(i, size), from.at(i, size), parts);
-                        }
-                    }
-                    _ => match ty(*e).kind {
-                        Kind::String | Kind::Path | Kind::Bytes => {
-                            for i in 0..from.len {
-                                let b = mem::at::<Text>(from.at(i, size)).bytes();
-                                (to.at(i, size) as *mut Text).write(Text::from_bytes(b));
-                            }
-                        }
-                        Kind::Option(payload) => {
-                            for i in 0..from.len {
-                                let (d, s) = (to.at(i, size), from.at(i, size));
-                                let tg = mem::word(s, 0);
-                                mem::set_word(d, 0, tg);
-                                if tg == 0 {
-                                    copy_part(d.add(8), s.add(8), payload);
-                                }
-                            }
-                        }
-                        _ => {
-                            for i in 0..from.len {
-                                copy_value(to.at(i, size), from.at(i, size), *e);
-                            }
-                        }
-                    },
-                }
-                to.len = from.len;
-                (dst as *mut List).write(to);
-            }
-            Kind::Option(payload) => {
-                let tg = tag(src, entry);
-                mem::set_word(dst, 0, tg);
-                if tg == 0 {
-                    copy_part(dst.add(8), src.add(8), *payload);
-                }
-            }
-            Kind::Result(ok, err) => {
-                let tg = tag(src, entry);
-                mem::set_word(dst, 0, tg);
-                copy_part(dst.add(8), src.add(8), if tg == 0 { *ok } else { *err });
-            }
-            Kind::Tuple(slots) => {
-                for s in slots {
-                    copy_part(dst.add(s.offset as usize), src.add(s.offset as usize), s.ty);
-                }
-            }
-            Kind::Dict(..) | Kind::Set(_) => {
-                let t = crate::dict::table(src);
-                mem::set_word(dst, 0, crate::dict::into_word(crate::dict::copy_table(t)));
-            }
-            Kind::Box(inner) => {
-                let size = ty(*inner).size;
-                let cell = mem::alloc(size as usize);
-                copy_value(cell, mem::word(src, 0) as *mut u8, *inner);
-                mem::set_word(dst, 0, cell as u64);
-            }
-            Kind::Dyn => {
-                let t = mem::word(src, 0) as u32;
-                let cell = mem::alloc(ty(t).size as usize);
-                copy_value(cell, mem::word(src, 8) as *mut u8, t);
-                mem::set_word(dst, 0, u64::from(t));
-                mem::set_word(dst, 8, cell as u64);
-            }
-            Kind::Struct { fields, .. } => {
-                for f in fields {
-                    copy_part(dst.add(f.offset as usize), src.add(f.offset as usize), f.ty);
-                }
-            }
-            Kind::Enum { variants, error, .. } => {
-                // The number of its type and its trace (shared, and held
-                // once more: a trace is never changed in place), then the
-                // variant's fields.
-                let off = entry.kind.tag_offset();
-                mem::copy(dst, src, off as usize);
-                if *error {
-                    crate::intrinsics::retain_trace(mem::word(dst, abi::ERROR_TRACE));
-                }
-                let tg = tag(src, entry);
-                mem::set_word(dst, off, tg);
-                if let Some(v) = variants.get(tg as usize) {
-                    for f in &v.fields {
-                        copy_part(dst.add(f.offset as usize), src.add(f.offset as usize), f.ty);
-                    }
-                }
-            }
-            Kind::ErrSet(_) => {
-                let decl = concrete(src, t);
-                if decl == t {
-                    mem::copy(dst, src, entry.size as usize);
-                } else {
-                    copy_value(dst, src, decl);
-                }
-            }
-            // Another sender (or receiver) of the same channel.
-            Kind::Sender(_) | Kind::Receiver(_) => {
-                mem::copy(dst, src, 8);
-                crate::tasks::copy_channel_end(
-                    mem::word(src, 0) as u32,
-                    matches!(entry.kind, Kind::Receiver(_)),
-                );
-            }
-            // Another owner (or weak handle) of the same cell.
-            Kind::Shared(_) | Kind::Weak(_) => {
-                mem::copy(dst, src, 8);
-                crate::cells::copy_handle(mem::word(src, 0) as *mut u8, matches!(entry.kind, Kind::Weak(_)));
-            }
-            Kind::Cell(v) => copy_value(dst, src, *v),
-            Kind::Arena(_) => crate::cells::copy_arena(dst, src),
-            // Another copy of a handle (decision 237).
-            Kind::Opaque(n) if counted(n) => {
-                mem::copy(dst, src, 8);
-                crate::caps::retain_cell(mem::word(src, 0) as *mut u8);
-            }
-            // Another copy of a function value and what its environment
-            // holds (decision 248).
-            Kind::Fn => {
-                mem::copy(dst, src, entry.size as usize);
-                retain_value(dst, t);
-            }
-            // An unlocked mutex holding a copy of the value.
-            Kind::Mutex(v) | Kind::RwLock(v) => {
-                mem::set_word(dst, abi::MUTEX_LOCKED, 0);
-                mem::set_word(dst, abi::MUTEX_HOLDER, 0);
-                mem::set_word(dst, abi::MUTEX_POISONED, mem::word(src, abi::MUTEX_POISONED));
-                mem::set_word(dst, abi::MUTEX_WRITERS, 0);
-                let off = abi::MUTEX_HEADER as usize;
-                copy_value(dst.add(off), src.add(off), *v);
-            }
-            _ => mem::copy(dst, src, entry.size as usize),
-        }
+        crate::bridge::copy(dst, src, t)
     }
 }
 
-// ----------------------------------------------------------- equality, order
-
 /// Structural equality, through references; texts of any kind with the
-/// same bytes are equal.
+/// same bytes are equal. The runtime in Sisu's (decision 350).
 ///
 /// # Safety
 /// `a` and `b` must hold values of types `ta` and `tb`.
 pub(crate) unsafe fn equal(a: *mut u8, ta: u32, b: *mut u8, tb: u32) -> bool {
-    // SAFETY: the parts are where the types say.
-    unsafe {
-        let (a, ta) = target(a, ta);
-        let (b, tb) = target(b, tb);
-        let (ea, eb) = (ty(ta), ty(tb));
-        if let (Some(x), Some(y)) = (text_at(a, ea), text_at(b, eb)) {
-            return x == y;
-        }
-        match (&ea.kind, &eb.kind) {
-            (Kind::Int | Kind::Sized(_), Kind::Int | Kind::Sized(_))
-            | (Kind::U64, Kind::U64)
-            | (Kind::Bool, Kind::Bool)
-            | (Kind::Char, Kind::Char) => mem::word(a, 0) == mem::word(b, 0),
-            (Kind::I128, Kind::I128) | (Kind::U128, Kind::U128) => {
-                crate::wide::bits(a) == crate::wide::bits(b)
-            }
-            (Kind::Float, Kind::Float) => f64::from_bits(mem::word(a, 0)) == f64::from_bits(mem::word(b, 0)),
-            (Kind::F32, Kind::F32) => f32_at(a) == f32_at(b),
-            (Kind::Unit, Kind::Unit) => true,
-            (Kind::DateTime, Kind::DateTime) => mem::word(a, 0) == mem::word(b, 0),
-            (Kind::Bytes, Kind::Bytes) => mem::at::<Text>(a).bytes() == mem::at::<Text>(b).bytes(),
-            (Kind::Tuple(xs), Kind::Tuple(ys)) => {
-                xs.len() == ys.len()
-                    && xs
-                        .iter()
-                        .zip(ys)
-                        .all(|(x, y)| equal(a.add(x.offset as usize), x.ty, b.add(y.offset as usize), y.ty))
-            }
-            (Kind::List(x), Kind::List(y)) => {
-                let (la, lb) = (mem::at::<List>(a), mem::at::<List>(b));
-                let (sx, sy) = (ty(*x).size, ty(*y).size);
-                la.len == lb.len && (0..la.len).all(|i| equal(la.at(i, sx), *x, lb.at(i, sy), *y))
-            }
-            (Kind::Option(x), Kind::Option(y)) => {
-                let (tx, ty_) = (tag(a, ea), tag(b, eb));
-                tx == ty_ && (tx != 0 || equal(a.add(8), *x, b.add(8), *y))
-            }
-            (Kind::Result(x1, x2), Kind::Result(y1, y2)) => {
-                let (tx, ty_) = (tag(a, ea), tag(b, eb));
-                tx == ty_
-                    && if tx == 0 {
-                        equal(a.add(8), *x1, b.add(8), *y1)
-                    } else {
-                        equal(a.add(8), *x2, b.add(8), *y2)
-                    }
-            }
-            (Kind::Box(x), Kind::Box(y)) => {
-                equal(mem::word(a, 0) as *mut u8, *x, mem::word(b, 0) as *mut u8, *y)
-            }
-            (Kind::Set(_), Kind::Set(_)) => {
-                let (x, y) = (crate::dict::table(a), crate::dict::table(b));
-                x.len() == y.len() && (0..x.len()).all(|i| y.position(x.key_at(i), x.key).is_some())
-            }
-            (Kind::Dict(..), Kind::Dict(..)) => {
-                let (x, y) = (crate::dict::table(a), crate::dict::table(b));
-                x.len() == y.len()
-                    && (0..x.len()).all(|i| match y.position(x.key_at(i), x.key) {
-                        Some(j) => equal(x.val_at(i), x.val, y.val_at(j), y.val),
-                        None => false,
-                    })
-            }
-            (Kind::Struct { name: n1, fields: f1, .. }, Kind::Struct { name: n2, fields: f2, .. }) => {
-                n1 == n2
-                    && f1.len() == f2.len()
-                    && f1
-                        .iter()
-                        .zip(f2)
-                        .all(|(x, y)| equal(a.add(x.offset as usize), x.ty, b.add(y.offset as usize), y.ty))
-            }
-            (Kind::Enum { .. } | Kind::ErrSet(_), Kind::Enum { .. } | Kind::ErrSet(_)) => {
-                let (ca, cb) = (concrete(a, ta), concrete(b, tb));
-                let (ea, eb) = (ty(ca), ty(cb));
-                let (Kind::Enum { name: n1, variants: v1, .. }, Kind::Enum { name: n2, variants: v2, .. }) =
-                    (&ea.kind, &eb.kind)
-                else {
-                    return false;
-                };
-                let (tx, ty_) = (tag(a, ea), tag(b, eb));
-                if n1 != n2 || tx != ty_ {
-                    return false;
-                }
-                match (v1.get(tx as usize), v2.get(ty_ as usize)) {
-                    (Some(x), Some(y)) => {
-                        x.fields.iter().zip(&y.fields).all(|(f, g)| {
-                            equal(a.add(f.offset as usize), f.ty, b.add(g.offset as usize), g.ty)
-                        })
-                    }
-                    _ => false,
-                }
-            }
-            _ => false,
-        }
-    }
+    // SAFETY: as the caller guarantees.
+    unsafe { crate::bridge::equal(a, ta, b, tb) }
 }
 
 /// # Safety
@@ -737,107 +222,13 @@ unsafe fn f32_at(p: *const u8) -> f32 {
 }
 
 /// The order of two values of an ordered type; `None` for NaN and values
-/// without an order.
+/// without an order. The runtime in Sisu's (decision 350).
 ///
 /// # Safety
 /// `a` and `b` must hold values of types `ta` and `tb`.
 pub(crate) unsafe fn compare(a: *mut u8, ta: u32, b: *mut u8, tb: u32) -> Option<Ordering> {
-    // SAFETY: the parts are where the types say.
-    unsafe {
-        let (a, ta) = target(a, ta);
-        let (b, tb) = target(b, tb);
-        let (ea, eb) = (ty(ta), ty(tb));
-        if let (Some(x), Some(y)) = (text_at(a, ea), text_at(b, eb)) {
-            return Some(x.cmp(y));
-        }
-        match (&ea.kind, &eb.kind) {
-            (Kind::Int | Kind::Sized(_), Kind::Int | Kind::Sized(_)) => {
-                Some((mem::word(a, 0) as i64).cmp(&(mem::word(b, 0) as i64)))
-            }
-            (Kind::U64, Kind::U64) | (Kind::Bool, Kind::Bool) | (Kind::Char, Kind::Char) => {
-                Some(mem::word(a, 0).cmp(&mem::word(b, 0)))
-            }
-            (Kind::I128, Kind::I128) => {
-                Some((crate::wide::bits(a) as i128).cmp(&(crate::wide::bits(b) as i128)))
-            }
-            (Kind::U128, Kind::U128) => Some(crate::wide::bits(a).cmp(&crate::wide::bits(b))),
-            (Kind::Float, Kind::Float) => {
-                f64::from_bits(mem::word(a, 0)).partial_cmp(&f64::from_bits(mem::word(b, 0)))
-            }
-            (Kind::F32, Kind::F32) => f32_at(a).partial_cmp(&f32_at(b)),
-            (Kind::Unit, Kind::Unit) => Some(Ordering::Equal),
-            (Kind::DateTime, Kind::DateTime) => Some((mem::word(a, 0) as i64).cmp(&(mem::word(b, 0) as i64))),
-            (Kind::Bytes, Kind::Bytes) => Some(mem::at::<Text>(a).bytes().cmp(mem::at::<Text>(b).bytes())),
-            (Kind::Tuple(xs), Kind::Tuple(ys)) => {
-                for (x, y) in xs.iter().zip(ys) {
-                    match compare(a.add(x.offset as usize), x.ty, b.add(y.offset as usize), y.ty) {
-                        Some(Ordering::Equal) => {}
-                        other => return other,
-                    }
-                }
-                Some(xs.len().cmp(&ys.len()))
-            }
-            (Kind::List(x), Kind::List(y)) => {
-                let (la, lb) = (mem::at::<List>(a), mem::at::<List>(b));
-                let (sx, sy) = (ty(*x).size, ty(*y).size);
-                for i in 0..la.len.min(lb.len) {
-                    match compare(la.at(i, sx), *x, lb.at(i, sy), *y) {
-                        Some(Ordering::Equal) => {}
-                        other => return other,
-                    }
-                }
-                Some(la.len.cmp(&lb.len))
-            }
-            (Kind::Option(x), Kind::Option(y)) => {
-                let (tx, ty_) = (tag(a, ea), tag(b, eb));
-                match tx.cmp(&ty_) {
-                    Ordering::Equal if tx == 0 => compare(a.add(8), *x, b.add(8), *y),
-                    o => Some(o),
-                }
-            }
-            (Kind::Result(x1, x2), Kind::Result(y1, y2)) => {
-                let (tx, ty_) = (tag(a, ea), tag(b, eb));
-                match tx.cmp(&ty_) {
-                    Ordering::Equal if tx == 0 => compare(a.add(8), *x1, b.add(8), *y1),
-                    Ordering::Equal => compare(a.add(8), *x2, b.add(8), *y2),
-                    o => Some(o),
-                }
-            }
-            (Kind::Box(x), Kind::Box(y)) => {
-                compare(mem::word(a, 0) as *mut u8, *x, mem::word(b, 0) as *mut u8, *y)
-            }
-            (Kind::Struct { fields: f1, .. }, Kind::Struct { fields: f2, .. }) => {
-                for (x, y) in f1.iter().zip(f2) {
-                    match compare(a.add(x.offset as usize), x.ty, b.add(y.offset as usize), y.ty) {
-                        Some(Ordering::Equal) => {}
-                        other => return other,
-                    }
-                }
-                Some(f1.len().cmp(&f2.len()))
-            }
-            (Kind::Enum { .. } | Kind::ErrSet(_), Kind::Enum { .. } | Kind::ErrSet(_)) => {
-                let (ca, cb) = (concrete(a, ta), concrete(b, tb));
-                let (ea, eb) = (ty(ca), ty(cb));
-                let (Kind::Enum { variants: v1, .. }, Kind::Enum { variants: v2, .. }) = (&ea.kind, &eb.kind)
-                else {
-                    return None;
-                };
-                let (tx, ty_) = (tag(a, ea), tag(b, eb));
-                if tx != ty_ {
-                    return Some(tx.cmp(&ty_));
-                }
-                let (Some(x), Some(y)) = (v1.get(tx as usize), v2.get(ty_ as usize)) else { return None };
-                for (f, g) in x.fields.iter().zip(&y.fields) {
-                    match compare(a.add(f.offset as usize), f.ty, b.add(g.offset as usize), g.ty) {
-                        Some(Ordering::Equal) => {}
-                        other => return other,
-                    }
-                }
-                Some(x.fields.len().cmp(&y.fields.len()))
-            }
-            _ => None,
-        }
-    }
+    // SAFETY: as the caller guarantees.
+    unsafe { crate::bridge::compare(a, ta, b, tb) }
 }
 
 // -------------------------------------------------------------- formatting

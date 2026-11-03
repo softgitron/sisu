@@ -1,0 +1,18 @@
+# A contract that calls a function that is not `pure`.
+def all_different(hours: Slice[int]) -> bool:
+    var seen: set[int] = set()
+    for h in hours:
+        if seen.contains(h):
+            return False
+        seen.add(h)
+    return True
+
+def book(mut hours: list[int], hour: int):
+    requires hour not in hours
+    ensures all_different(hours)
+    hours.push(hour)
+
+def main():
+    var hours = [17, 18]
+    book(mut hours, 20)
+    print(hours)

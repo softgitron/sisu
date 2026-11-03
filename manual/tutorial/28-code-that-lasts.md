@@ -908,7 +908,7 @@ its first line to its native build: values and functions, ownership,
 traits and generics, capabilities, tests of every kind, tasks, the
 standard library, contracts, numbers, compile-time code, data
 parallelism, unsafe code and code that lasts. From here, the reference
-describes each part of the language completely, and the guides and the
-explanations, as they are written, do one task each and say why Sisu is
-the way it is; the manual's plan, [README.md](../README.md), lists every
-page.
+describes each part of the language completely, the guides do one task
+each, and the explanations say why Sisu is the way it is;
+[SUMMARY.md](../SUMMARY.md) lists every page, and the manual's plan,
+[README.md](../README.md), says what each one covers.

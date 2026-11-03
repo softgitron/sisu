@@ -1,0 +1,5 @@
+##! How hot the stones get.
+
+## The stones at `celsius`, after an hour of heating.
+pub def heat(celsius: int) -> int:
+    return celsius + 25

@@ -274,15 +274,17 @@ error[E0413]: `longer` returns `str`, which borrows, and has more than one borro
    |                               ^^^
    |            ------ `a` is a borrowed parameter
    |                    ------ `b` is a borrowed parameter
+  = fix: return owned text instead: `String`
   = fix: name `a, b` in the `from` clause: ` from a, b`
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-E0413 (`borrow.from-required`) marks the two borrowed parameters, and
-its fix writes the clause back. With it, the caller knows that the
-result may borrow from either argument, and keeps both alive while it
-uses the result.
+E0413 (`borrow.from-required`) marks the two borrowed parameters. Its
+second fix writes the clause back; the first, a `String` result, would
+copy text that `longer` only passes on. With the clause, the caller
+knows that the result may borrow from either argument, and keeps both
+alive while it uses the result.
 
 </details>
 
@@ -309,17 +311,16 @@ error[E0407]: this returns a borrow of `text`, which belongs to `greeting` and i
 4 |     return text
   |     ^^^^^^^^^^^
   |            ---- borrowed here
-  = note: return an owned value instead, such as a copy made with `.copy()`
+  = note: a `str` views text, and a copy of it is the same view: return a `String`, which owns its text (`-> String`, or `list[String]` for views in a list)
 
 error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```
 
 The interpolation makes a `String` that belongs to `greeting`, and a
 `str` result would borrow it. E0407 (`borrow.return-local`) says so,
-and its note asks for an owned result. Here that means the result type
-`String`, which moves the text out to the caller. The `.copy()` that
-the note names would make one more `String` inside `greeting`, and get
-the same error: the result's type is the fix.
+and its note asks for an owned result: a copy of a `str` is the same
+view, so the fix is the result type `String`, which moves the text out
+to the caller.
 
 ## Three ways through a list
 

@@ -69,7 +69,8 @@ last rows when reading code aloud in prose.
 - An example is a whole file with a `main`, tests, or a worksheet's
   first line, never a fragment. It starts with a comment that says what
   it shows, is at most 40 lines, and keeps lines to 72 columns (80 is the
-  hard limit).
+  hard limit). `sisu fmt` keeps a line of up to 100 columns whole; a
+  trailing comma inside its brackets makes the formatter break it.
 - One concept per example. Names come from the problem (`greeting`,
   `word_counts`), never `foo` or `bar`; the proposal's people (Aino,
   Eero, Roni) are welcome.
@@ -81,8 +82,10 @@ last rows when reading code aloud in prose.
   does not compile, it fails a test. Show what Sisu prints from the
   example's expectation file or session, never retyped.
 - Fences start at column 0, with `sisu` for source, `console` for a
-  session and `text` for output, and a marker on the line before each
-  ([README.md](README.md#examples)).
+  session, `text` for output and `toml` for a manifest (`sisu.toml`),
+  or the language's own name for a file in another language, such as
+  `python` for the script that G2 ports; and a marker on the line before
+  each ([README.md](README.md#examples)).
 
 ## Diagnostics
 
@@ -112,14 +115,28 @@ last rows when reading code aloud in prose.
   designed but not implemented gets one sentence at most, saying that it
   is coming and where it is designed; its section waits for it.
 - The reference marks each feature: in stage 0, designed, leaning (with
-  its D-xxx), or a prototype of the experiment.
+  its D-xxx), or a prototype of the experiment. Each section ends with a
+  paragraph that starts **Status.** in those words, as R16's "How to
+  read this page" explains them: "**Status.** In stage 0 (D-074),
+  except `total_order`.", "**Status.** Designed (D-031).",
+  "**Status.** A prototype of the experiment (Q-49)."
+- Where stage 0 does something other than what the proposal says, a
+  paragraph that starts **Stage 0 differs.** comes before the status,
+  names the proposal's document, and says what each does. The status
+  may then end "with the differences noted", which points at that
+  paragraph and is written only where one comes before it.
+- A guide ends with a **Status.** paragraph when something it uses is
+  designed, a prototype, or different in stage 0; the tutorial says what
+  is coming in its one sentence, and an explanation says it in its text.
 - Refer to decisions and questions by their IDs (D-056, Q-41), which the
   documentation checker verifies, and to the proposal by its documents.
 
 ## What not to do
 
 - Do not show a block that nothing checks. An `unchecked:` marker needs
-  a reason a reviewer accepts, such as an installation command.
+  one of the four reasons that [README.md](README.md#examples) accepts:
+  an installation command, an editor's configuration, output that
+  differs on every run, or grammar notation.
 - Do not edit an expectation or a session by hand; bless it and read the
   diff.
 - Do not use a concept before the page that teaches it, beyond the one

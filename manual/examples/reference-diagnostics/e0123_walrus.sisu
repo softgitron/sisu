@@ -1,0 +1,4 @@
+# `:=` from Go, which declares a name and gives it a value.
+def main():
+    count := 3
+    print("{count} saunas")

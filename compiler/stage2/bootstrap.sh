@@ -6,25 +6,30 @@
 #              front end of `sisu`, with the Rust lowering and Cranelift
 #              (`sisu build --native --lower=rust --backend=cranelift` in
 #              this directory), as the driver builds target/stage2/sisu2
-#   A.stage2.sir, A.stage1.sir
-#              the SIR of stage 2's package and of stage 1's, as `sisu sir`
-#              prints them in their directories (stage 1 as `sisu` runs it)
+#   A.stage2.sir, A.stage1.sir, A.rt.sir
+#              the SIR of stage 2's package, of stage 1's and of the
+#              runtime in Sisu's (`compiler/rt`), as `sisu sir` prints them
+#              in their directories (stage 1 as `sisu` runs it); the last
+#              is the runtime's seed, `compiler/rt/rt.sir`
+#   rt-A.o     the runtime in Sisu lowered and compiled by sisu2-C as a
+#              library (`sisu2 build --library`, decision 353)
 #   sisu2-A, stage1-A
 #              that SIR lowered by sisu2-C and compiled by its backend, the
 #              one written in Sisu (`sisu build --native --backend=sisu
-#              --from-sir`, with `SISU_STAGE2` naming sisu2-C)
-#   B.stage2.sir, B.stage1.sir
+#              --from-sir`, with `SISU_STAGE2` naming sisu2-C), and linked
+#              with rt-A.o (`SISU_RT`)
+#   B.stage2.sir, B.stage1.sir, B.rt.sir
 #              the SIR stage1-A, stage 1 compiled by the Sisu backend,
-#              prints of the two packages
-#   sisu2-B, stage1-B
+#              prints of the three packages
+#   rt-B.o, sisu2-B, stage1-B
 #              that SIR lowered and compiled by sisu2-A, stage 2 compiled
-#              by itself
+#              by itself, the executables linked with rt-B.o
 #
 # The fixed point holds when each B is its A byte for byte: stage 2 built
-# by the Sisu backend lowers and compiles itself and stage 1 to the bytes
-# the Cranelift build of it gives, so building again changes nothing, and
-# stage 1 built by it prints the SIR that stage 1 built by Cranelift
-# prints. The backend is deterministic (no addresses, no hash order, no
+# by the Sisu backend lowers and compiles itself, stage 1 and the runtime
+# in Sisu to the bytes the Cranelift build of it gives, so building again
+# changes nothing, and stage 1 built by it prints the SIR that stage 1
+# built by Cranelift prints, the runtime's seed among it. The backend is deterministic (no addresses, no hash order, no
 # time), so any difference is a miscompilation. The script prints the size
 # and SHA-256 of each file, and exits non-zero when a pair differs.
 #
@@ -66,9 +71,10 @@ else
     work=$(mktemp -d)
     trap 'rm -rf "$work"' EXIT
 fi
-# The choices are the script's: no backend, lowering or stage 2 from the
-# caller's environment.
-unset SISU_BACKEND SISU_LOWER SISU_STAGE2 SISU_FRONT_END
+# The choices are the script's: no backend, lowering, stage 2 or runtime
+# object from the caller's environment.
+unset SISU_BACKEND SISU_LOWER SISU_STAGE2 SISU_FRONT_END SISU_RT
+rt_dir="$compiler/rt"
 
 seconds() { awk "BEGIN { printf \"%.1f\", $2 - $1 }"; }
 step() {
@@ -93,11 +99,19 @@ sir_of() {
     rm -f "$3.err"
 }
 build_with() {
-    # build_with STAGE2 DIR SIR OUT: the SIR built in DIR (where the debug
+    # build_with STAGE2 DIR SIR OUT RT: the SIR built in DIR (where the debug
     # information says the sources are) by the Sisu backend, with STAGE2
-    # lowering and compiling it.
-    step "$4.log" env SISU_STAGE2="$1" bash -c 'cd "$1" && "$2" build --native --backend=sisu --from-sir "$3" --output "$4"' \
+    # lowering and compiling it, linked with the runtime in Sisu's object RT.
+    step "$4.log" env SISU_STAGE2="$1" SISU_RT="$5" \
+        bash -c 'cd "$1" && "$2" build --native --backend=sisu --from-sir "$3" --output "$4"' \
         _ "$2" "$sisu" "$3" "$4"
+}
+library_with() {
+    # library_with STAGE2 SIR OUT: the runtime in Sisu's SIR lowered and
+    # compiled by STAGE2 as a library, as the driver gives its sources'
+    # directories to the backend.
+    step "$3.log" bash -c 'cd "$4" && "$1" build "$2" --library --output "$3" --comp-dir "$4" --std "$5"' \
+        _ "$1" "$2" "$3" "$rt_dir" "$(cd "$compiler/std" && pwd)"
 }
 
 t0=$(date +%s.%N)
@@ -105,23 +119,27 @@ echo "sisu2-C: stage 2 built through the Cranelift path"
 step "$work/sisu2-C.log" bash -c 'cd "$1" && "$2" build --native --lower=rust --backend=cranelift --output "$3"' \
     _ "$here" "$sisu" "$work/sisu2-C"
 t1=$(date +%s.%N)
-echo "A.stage2.sir, A.stage1.sir: the packages' SIR (sisu sir)"
+echo "A.stage2.sir, A.stage1.sir, A.rt.sir: the packages' SIR (sisu sir)"
 sir_of "$sisu" "$here" "$work/A.stage2.sir"
 sir_of "$sisu" "$stage1" "$work/A.stage1.sir"
+sir_of "$sisu" "$rt_dir" "$work/A.rt.sir"
 t2=$(date +%s.%N)
-echo "sisu2-A, stage1-A: lowered and compiled by sisu2-C"
-build_with "$work/sisu2-C" "$here" "$work/A.stage2.sir" "$work/sisu2-A"
+echo "rt-A.o, sisu2-A, stage1-A: lowered and compiled by sisu2-C"
+library_with "$work/sisu2-C" "$work/A.rt.sir" "$work/rt-A.o"
+build_with "$work/sisu2-C" "$here" "$work/A.stage2.sir" "$work/sisu2-A" "$work/rt-A.o"
 t3=$(date +%s.%N)
-build_with "$work/sisu2-C" "$stage1" "$work/A.stage1.sir" "$work/stage1-A"
+build_with "$work/sisu2-C" "$stage1" "$work/A.stage1.sir" "$work/stage1-A" "$work/rt-A.o"
 t4=$(date +%s.%N)
-echo "B.stage2.sir, B.stage1.sir: printed by stage1-A"
+echo "B.stage2.sir, B.stage1.sir, B.rt.sir: printed by stage1-A"
 sir_of "$work/stage1-A" "$here" "$work/B.stage2.sir"
 sir_of "$work/stage1-A" "$stage1" "$work/B.stage1.sir"
+sir_of "$work/stage1-A" "$rt_dir" "$work/B.rt.sir"
 t5=$(date +%s.%N)
-echo "sisu2-B, stage1-B: lowered and compiled by sisu2-A"
-build_with "$work/sisu2-A" "$here" "$work/B.stage2.sir" "$work/sisu2-B"
+echo "rt-B.o, sisu2-B, stage1-B: lowered and compiled by sisu2-A"
+library_with "$work/sisu2-A" "$work/B.rt.sir" "$work/rt-B.o"
+build_with "$work/sisu2-A" "$here" "$work/B.stage2.sir" "$work/sisu2-B" "$work/rt-B.o"
 t6=$(date +%s.%N)
-build_with "$work/sisu2-A" "$stage1" "$work/B.stage1.sir" "$work/stage1-B"
+build_with "$work/sisu2-A" "$stage1" "$work/B.stage1.sir" "$work/stage1-B" "$work/rt-B.o"
 t7=$(date +%s.%N)
 
 describe() {
@@ -132,13 +150,17 @@ describe() {
 echo
 describe sisu2-C "$work/sisu2-C" "built through the Cranelift path ($(seconds "$t0" "$t1") s)"
 describe A.stage2.sir "$work/A.stage2.sir" "printed by sisu sir"
-describe A.stage1.sir "$work/A.stage1.sir" "printed by sisu sir (both $(seconds "$t1" "$t2") s)"
-describe sisu2-A "$work/sisu2-A" "built by sisu2-C ($(seconds "$t2" "$t3") s)"
-describe stage1-A "$work/stage1-A" "built by sisu2-C ($(seconds "$t3" "$t4") s)"
+describe A.stage1.sir "$work/A.stage1.sir" "printed by sisu sir"
+describe A.rt.sir "$work/A.rt.sir" "printed by sisu sir (all three $(seconds "$t1" "$t2") s)"
+describe rt-A.o "$work/rt-A.o" "built by sisu2-C"
+describe sisu2-A "$work/sisu2-A" "built by sisu2-C, with rt-A.o ($(seconds "$t2" "$t3") s)"
+describe stage1-A "$work/stage1-A" "built by sisu2-C, with rt-A.o ($(seconds "$t3" "$t4") s)"
 describe B.stage2.sir "$work/B.stage2.sir" "printed by stage1-A"
-describe B.stage1.sir "$work/B.stage1.sir" "printed by stage1-A (both $(seconds "$t4" "$t5") s)"
-describe sisu2-B "$work/sisu2-B" "built by sisu2-A ($(seconds "$t5" "$t6") s)"
-describe stage1-B "$work/stage1-B" "built by sisu2-A ($(seconds "$t6" "$t7") s)"
+describe B.stage1.sir "$work/B.stage1.sir" "printed by stage1-A"
+describe B.rt.sir "$work/B.rt.sir" "printed by stage1-A (all three $(seconds "$t4" "$t5") s)"
+describe rt-B.o "$work/rt-B.o" "built by sisu2-A"
+describe sisu2-B "$work/sisu2-B" "built by sisu2-A, with rt-B.o ($(seconds "$t5" "$t6") s)"
+describe stage1-B "$work/stage1-B" "built by sisu2-A, with rt-B.o ($(seconds "$t6" "$t7") s)"
 echo
 same() {
     # same FILE FILE: whether both exist, are not empty and are equal.
@@ -163,6 +185,9 @@ verdict() {
 }
 verdict "stage 2's SIR, A.stage2.sir and B.stage2.sir" "$work/A.stage2.sir" "$work/B.stage2.sir"
 verdict "stage 1's SIR, A.stage1.sir and B.stage1.sir" "$work/A.stage1.sir" "$work/B.stage1.sir"
+verdict "the runtime's SIR, A.rt.sir and B.rt.sir" "$work/A.rt.sir" "$work/B.rt.sir"
+verdict "the runtime's seed, compiler/rt/rt.sir and A.rt.sir" "$rt_dir/rt.sir" "$work/A.rt.sir"
+verdict "the runtime in Sisu, rt-A.o and rt-B.o" "$work/rt-A.o" "$work/rt-B.o"
 verdict "stage 2, sisu2-A and sisu2-B" "$work/sisu2-A" "$work/sisu2-B"
 verdict "stage 1, stage1-A and stage1-B" "$work/stage1-A" "$work/stage1-B"
 if [ "$failed" = 0 ]; then

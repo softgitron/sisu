@@ -327,6 +327,13 @@ error[E0347]: `Version` does not implement `Ord`
    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   = fix: derive it: `@derive(Eq, PartialOrd, Ord)`
 
+error[E0438]: `list[ref Version]` would hold references, and a collection holds values it owns or views, never references (04, rule 3)
+  --> no_derive.sisu:10:13
+   |
+10 |     print("{sorted([Version(1, 10), Version(0, 9), Version(1, 2)])}")
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = note: put copies in it, made with `.copy()` (or `.to_string()` for text), or views, such as `str` for a `String`; a reference is kept only in a `view struct`'s `ref` field
+
 error[E0347]: `Version` does not implement `Hash`
   --> no_derive.sisu:11:17
    |
@@ -334,14 +341,16 @@ error[E0347]: `Version` does not implement `Hash`
    |                 ^^^^^^^^^^^^^^^^^^^
   = fix: derive it: `@derive(Eq, Hash)`
 
-error[D0006]: the program was not run: errors found (4)
+error[D0006]: the program was not run: errors found (5)
 ```
 
 Each line that needs an ability now names the trait it lacks: E0347
 (`type.bound-not-satisfied`) for `Eq`, `Ord` and `Hash`, and E0368
-(`type.not-ordered`) for `<`. None of them offers the fix, which is the
-`@derive` line. Without `Copy`, the ownership check would report the
-move of `installed` as well, once these errors were fixed.
+(`type.not-ordered`) for `<`, each with the fix that writes the
+`@derive` line. E0438 comes from `sorted` without `Copy`, which hands
+out references to the items rather than the items, as chapter 11
+explains. Without `Copy`, the ownership check would report the move of
+`installed` as well, once these errors were fixed.
 
 </details>
 

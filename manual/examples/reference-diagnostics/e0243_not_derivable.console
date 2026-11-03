@@ -1,5 +1,5 @@
 $ sisu run e0243_not_derivable.sisu
-error[E0243]: `Display` cannot be derived; `@derive` takes `Copy` and the traits that have a `comptime def derive`: `Debug`, `Eq`, `PartialOrd`, `Ord`, `Hash`, and any trait that declares one
+error[E0243]: `Display` cannot be derived; `@derive` takes `Copy` and the traits that have a `comptime def derive`: `Debug`, `Default`, `Eq`, `PartialOrd`, `Ord`, `Hash`, and any trait that declares one
   --> e0243_not_derivable.sisu:2:16
   |
 2 | @derive(Debug, Display)

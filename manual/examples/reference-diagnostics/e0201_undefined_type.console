@@ -1,0 +1,8 @@
+$ sisu run e0201_undefined_type.sisu
+error[E0201]: cannot find a type named `Deque`
+  --> e0201_undefined_type.sisu:2:20
+  |
+2 | def waiting(queue: Deque[str]) -> int:
+  |                    ^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

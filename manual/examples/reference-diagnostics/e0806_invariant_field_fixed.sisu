@@ -1,0 +1,13 @@
+# The type's own method changes the field, and the invariant is checked.
+struct Schedule:
+    opens: int
+    closes: int
+    invariant 0 <= self.opens < self.closes <= 24
+
+    def close_at(mut self, hour: int):
+        self.closes = hour
+
+def main():
+    var today = Schedule(opens=16, closes=21)
+    today.close_at(23)
+    print("open {today.opens} to {today.closes}")

@@ -1,0 +1,8 @@
+$ sisu run
+error[E1015]: `[trust] unsafe` names `zlib`, which is not a dependency of this package
+  --> sisu.toml:7:11
+  |
+7 | unsafe = ["zlib"]
+  |           ^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

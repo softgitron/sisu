@@ -1,0 +1,6 @@
+# A `String` owns its text, so a `Shared` can hold it.
+def main():
+    let name = "Aino".to_string()
+    let shared = Shared(name)
+    let other = shared.copy()
+    print("{Shared.count(other)} owners of the name")

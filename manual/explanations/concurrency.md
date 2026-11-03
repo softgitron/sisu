@@ -12,7 +12,7 @@ measurements so far say.
 **See also:** the tutorial's [chapter 20](../tutorial/20-concurrency.md)
 (concurrency) and [chapter 22](../tutorial/22-web-service.md) (a service
 with a task per connection); the reference's [R9,
-Concurrency](../README.md#the-reference); the proposal's [06,
+Concurrency](../reference/concurrency.md); the proposal's [06,
 Concurrency and
 capabilities](../../proposal/06-concurrency-and-capabilities.md) and
 decisions D-014, D-040 and D-075 in its [decision

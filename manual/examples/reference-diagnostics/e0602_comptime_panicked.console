@@ -1,0 +1,12 @@
+$ sisu run e0602_comptime_panicked.sisu
+error[E0602]: the compile-time evaluation of this expression panicked: assertion failed: SLOTS & (SLOTS - 1) == 0
+  message: 12 is not a power of two
+    SLOTS & (SLOTS - 1) == 0
+          │        │
+          8        11
+  --> e0602_comptime_panicked.sisu:5:5
+  |
+5 |     comptime assert SLOTS & (SLOTS - 1) == 0, "{SLOTS} is not a power of two"
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

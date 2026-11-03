@@ -1,0 +1,9 @@
+# Unsafe code without the comment that says why it is sound.
+from std.mem import ptr
+
+def main():
+    var celsius = 80
+    let p = ptr.of_mut(mut celsius)
+    unsafe:
+        p.write(p.read() + 5)
+    print(celsius)

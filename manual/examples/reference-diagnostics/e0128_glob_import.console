@@ -1,0 +1,20 @@
+$ sisu run e0128_glob_import.sisu
+error[E0128]: Sisu has no glob imports: name what the module gives, as in `from std.collections import Deque, Heap`, or import the module and write `collections.Deque`
+  --> e0128_glob_import.sisu:2:22
+  |
+2 | from std.math import *
+  |                      ^
+
+error[E0200]: cannot find `floor` in this scope
+  --> e0128_glob_import.sisu:5:11
+  |
+5 |     print(floor(sqrt(20.0)))
+  |           ^^^^^
+
+error[E0200]: cannot find `sqrt` in this scope
+  --> e0128_glob_import.sisu:5:17
+  |
+5 |     print(floor(sqrt(20.0)))
+  |                 ^^^^
+
+error[D0006]: the program was not run: errors found (3)

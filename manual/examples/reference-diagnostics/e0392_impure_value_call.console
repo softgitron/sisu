@@ -1,0 +1,11 @@
+$ sisu run e0392_impure_value_call.sisu
+error[E0392]: `apply` is pure, so it cannot call a function value whose type is not `pure`
+  --> e0392_impure_value_call.sisu:3:12
+  |
+3 |     return f(x) + 1
+  |            ^^^^
+  |
+2 | pure def apply(f: (int) -> int, x: int) -> int:
+  |          ----- `apply` is declared `pure` here
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

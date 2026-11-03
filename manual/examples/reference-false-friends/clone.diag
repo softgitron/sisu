@@ -1,1 +1,2 @@
 4:24-4:29 E0304 type.unknown-method ty="list[str]" name="clone"
+  fix type.sisu-spelling 4:24-4:29 "copy"

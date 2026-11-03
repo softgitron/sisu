@@ -1,0 +1,4 @@
+# `f` writes a float with a fixed number of decimals.
+def main():
+    let price = 4.5
+    print("{price:>8.2f}")

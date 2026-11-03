@@ -272,6 +272,7 @@ error[E0304]: `list[str]` has no method `clone`
   |
 4 |     let copied = names.clone()
   |                        ^^^^^
+  = fix: Sisu spells it this way: `copy`
 
 error[E0117]: unexpected `as` after the end of the statement
   --> habits.sisu:5:29
@@ -281,7 +282,8 @@ error[E0117]: unexpected `as` after the end of the statement
 
 ```
 
-Neither diagnostic names the Sisu spelling, `.copy()` and `to_f64()`.
+The first names the Sisu spelling, `.copy()`, as a fix; the second
+does not name `to_f64()`.
 The table of R19's "Rust habits" lists every such spelling with its
 code: `let mut` is `var`, `&&` is `and`, `x as f64` is `x.to_f64()`,
 `// note` is `# note`, `=>` in a match is `case ...:`, `0..3` is

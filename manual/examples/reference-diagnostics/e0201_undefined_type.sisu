@@ -1,0 +1,6 @@
+# A type from the standard library, used without its import.
+def waiting(queue: Deque[str]) -> int:
+    return len(queue)
+
+def main():
+    print("no queue yet")

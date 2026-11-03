@@ -56,9 +56,10 @@ functions (Q-23).
 structural key of a value, not the `Hash` and `Eq` impls: a key type with
 impls of its own is rejected (`E0398`) instead. Nothing observable
 depends on the hash, since iteration is in insertion order (D-074). The
-native runtime's tables hash the same structural key a word at a time
-with a multiplicative mix (decision 253), keyed by nothing, so neither
-implementation resists hash flooding yet. *Pay*: write `dict` and `set`
+native runtime's tables hash a key by its structural hash (decision 256),
+the runtime in Sisu's, its bits spread by MurmurHash3's last step
+(decision 350), keyed by nothing, so neither implementation resists hash
+flooding yet. *Pay*: write `dict` and `set`
 in Sisu over `Hash` and `Eq`, with the per-process SipHash key of D-049
 as std's, and lift `E0398`.
 
@@ -860,22 +861,29 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   to compile (`--backend=sisu --release`) is compiled the same way,
   without optimisations, and there is no AArch64, Mach-O or COFF. *Pay*:
   D-087's steps.
-- **The runtime in Sisu has one piece** (decisions 335 and 336):
-  `compiler/rt` holds `sisu_rt_bytes_eq`, a byte at a time where the Rust
-  one compared slices; the structural hash, equality, copy and drop of
-  values by their parts, the formatting of numbers and the building of
-  text, text search and lists over `RawBuf` are still `sisu-rt`'s. Each
-  needs more than a word or a byte of raw memory inline (the type table's
-  entries read from Sisu, the runtime's allocation, calls from the Rust
-  runtime into Sisu code, which runs on the system stack without yield
-  points, as the library's code does), and the structural operations are
-  meant per type in the end (22's table, R9's std.mem), not walked. The
-  object is built by the Rust lowering from a seed of the package's SIR
-  kept in the tree (`compiler/rt/rt.sir`, which a test holds to what
-  stage 1 prints): stage 2 has no library mode, so the fixed point of
-  decision 330 does not rebuild the runtime in Sisu with itself. *Pay*:
-  the pieces in D-086's order, each deleting its Rust counterpart; stage
-  2's library mode, and the object in the fixed point.
+- **The runtime in Sisu has its first pieces** (decisions 335, 336 and
+  350 to 353): `compiler/rt` holds `==` of two texts' bytes, the
+  structural operations by a value's parts (equality, order, the hash of
+  decision 256, `.copy()`, the drop, the count of a copy's handles), text
+  building and an integer's digits, and text search. Still `sisu-rt`'s:
+  `Display` and `Debug` by the type table, floats' digits ("Float to
+  text" above), lists (growth, `pop`, `insert`, slices and the other
+  intrinsics) rather than over `RawBuf`, the tables of dicts and sets,
+  iterators, the scheduler with its tasks, channels and mutexes,
+  capabilities and the host, panics and their traces, allocation's count,
+  the descriptor-driven dispatch of the intrinsics, and the type table's
+  words themselves (`desc.rs`), which the runtime in Rust lays out from
+  the table it decodes. A struct's or enum's glue that runs on a task's
+  own stack is run by the runtime in Rust, since the Sisu walk's frames
+  are 1 to 3 KB, every argument of a call being in memory (decision 350),
+  and the walk calls back for each object the runtime in Rust keeps. The
+  structural operations are meant per type in the end (22's table, R9's
+  std.mem), not walked. *Pay*: the pieces in D-086's order, each deleting
+  its Rust counterpart: floats' digits (a shortest round-trip algorithm
+  and the correctly rounded fixed forms), `Display` and `Debug`, lists
+  over `RawBuf`, then the tables; smaller frames for the walk (the
+  arguments of a call in registers, or the backend's own frames for the
+  runtime's code), after which a glue's drop can stay in Sisu.
 - **Stage 2 reads SIR itself**: stage 1 writes SIR but has no reader, so
   `stage2/src/read.sisu` transcribes `sisu-sir/src/read.rs`. *Pay*: the
   reader moves to stage 1's `sir` module when stage 1 needs one (`sisu

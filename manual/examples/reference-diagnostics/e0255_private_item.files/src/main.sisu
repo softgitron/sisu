@@ -1,0 +1,5 @@
+# A function that another module keeps private.
+from sauna.heat import band, feel
+
+def main():
+    print("{band(85)}: {feel(85)}")

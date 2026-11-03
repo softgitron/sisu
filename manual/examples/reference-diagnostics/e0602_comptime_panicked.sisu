@@ -1,0 +1,9 @@
+# A check made while compiling, which fails.
+const SLOTS: int = 12
+
+def slot(n: int) -> int:
+    comptime assert SLOTS & (SLOTS - 1) == 0, "{SLOTS} is not a power of two"
+    return n & (SLOTS - 1)
+
+def main():
+    print(slot(21))

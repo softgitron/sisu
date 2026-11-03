@@ -1,0 +1,17 @@
+$ sisu run e0608_derive_failed.sisu
+error[E0608]: deriving `Columns` for `Heater` stopped at compile time: `Heater` is not a struct
+  --> e0608_derive_failed.sisu:15:9
+   |
+15 | @derive(Columns)
+   |         ^^^^^^^
+   |
+ 9 |                     comptime panic("`{reflect.name_of(T)}` is not a struct")
+   |                              ----------------------------------------------- the derive's template, where it stopped
+
+error[E0351]: `Heater` has no associated function `columns`
+  --> e0608_derive_failed.sisu:21:18
+   |
+21 |     print(Heater.columns())
+   |                  ^^^^^^^
+
+error[D0006]: the program was not run: errors found (2)

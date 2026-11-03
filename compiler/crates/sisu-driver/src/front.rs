@@ -59,6 +59,12 @@ pub const BACKEND_VAR: &str = "SISU_BACKEND";
 /// it built. Stage 1 passes it on to the backend it calls.
 pub const STAGE2_VAR: &str = "SISU_STAGE2";
 
+/// The environment variable naming the object of the runtime in Sisu that
+/// native builds link with, as it is, instead of `compiler/target/rt/rt.o`
+/// (decision 353): how the fixed point links the A and B builds with the
+/// runtime stage 2 compiled. Stage 1 passes it on to the backend it calls.
+pub const RT_VAR: &str = "SISU_RT";
+
 /// Which front end checks, lowers and serialises a program.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FrontEnd {
@@ -566,9 +572,11 @@ impl Stage2 {
 /// The runtime in Sisu (`compiler/rt`, decision 336), compiled once into
 /// `compiler/target/rt/rt.o`, which every native program is linked with.
 /// It is compiled from its seed, the SIR stage 1 printed of it
-/// (`compiler/rt/rt.sir`), by the Rust lowering and Cranelift, as stage 1
-/// and stage 2 are seeded: it must exist before stage 1, which reads
-/// std.mem, can compile it, since stage 1 is a native program too.
+/// (`compiler/rt/rt.sir`), by the Rust lowering in the release profile and
+/// Cranelift, as stage 1 and stage 2 are seeded: it must exist before stage
+/// 1, which reads std.mem, can compile it, since stage 1 is a native program
+/// too. Stage 2 compiles the same seed with the Sisu backend (`sisu2 build
+/// --library`), which the fixed point links its builds with (decision 353).
 pub struct Rt {
     pub object: PathBuf,
 }
@@ -576,6 +584,12 @@ pub struct Rt {
 impl Rt {
     /// The object, built first when it is missing or older than the seed.
     pub fn ready(host: &mut dyn Host) -> Result<Rt, i32> {
+        // An object the caller built (decision 353), neither built nor
+        // checked here.
+        if let Some(given) = std::env::var_os(RT_VAR).filter(|p| !p.is_empty()) {
+            let given = PathBuf::from(given);
+            return Ok(Rt { object: std::fs::canonicalize(&given).unwrap_or(given) });
+        }
         let compiler = compiler_dir();
         let seed = compiler.join("rt").join("rt.sir");
         let object = compiler.join("target").join("rt").join("rt.o");
@@ -624,7 +638,7 @@ impl Rt {
         };
         let std_dir = std::fs::canonicalize(compiler.join("std")).ok().map(|d| d.display().to_string());
         let sources = sisu_codegen::Sources { comp_dir: compiler.join("rt").display().to_string(), std_dir };
-        let options = sisu_codegen::Options { sources, release: false };
+        let options = sisu_codegen::Options { sources, release: true };
         let compiled = match sisu_codegen::compile_library(&prog, &options) {
             Ok(c) => c,
             Err(e) => return Err(fail(host, format!("{e:?}"))),

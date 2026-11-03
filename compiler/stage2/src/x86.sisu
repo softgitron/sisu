@@ -303,7 +303,10 @@ impl Obj:
                 self.import_symbol(symbol)
         self.defined.push(
             Defined(
-                symbol=f.symbol.copy(), offset=start, size=end - start, global_=f.symbol == "main"
+                symbol=f.symbol.copy(),
+                offset=start,
+                size=end - start,
+                global_=not locals.contains(f.symbol.copy()),
             )
         )
         var rows: list[Row] = []

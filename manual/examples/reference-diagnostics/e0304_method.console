@@ -4,5 +4,6 @@ error[E0304]: `str` has no method `strip`
   |
 3 |     print("  hei  ".strip())
   |                     ^^^^^
+  = fix: Sisu spells it this way: `trim`
 
 error[D0006]: the program was not run: errors found (1)

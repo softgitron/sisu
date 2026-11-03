@@ -1,0 +1,2 @@
+3:12-3:16 E0392 type.impure-value-call name="apply"
+  label 2:10-2:15 type.declared-pure-here name="apply"

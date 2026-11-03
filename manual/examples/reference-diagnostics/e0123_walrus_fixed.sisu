@@ -1,0 +1,4 @@
+# `let` declares a name and gives it a value.
+def main():
+    let count = 3
+    print("{count} saunas")

@@ -3502,10 +3502,12 @@ The runtime's entry points (`abi::sym`) are the boundary:
 | `sisu_rt_int_op(op, x, y, out) -> u8`, `sisu_rt_float_op(op, x, y) -> f64` | the arithmetic that is not one instruction |
 | `sisu_rt_alloc(bytes) -> ptr` | heap memory for a list or a box |
 | `sisu_rt_task_env(bytes, ty) -> ptr` | the environment of a task's closure (or a generator's), of type `ty`, which the runtime frees when the closure returns, and drops for a generator closed before it started (decision 236) |
-| `sisu_rt_drop(value, ty) -> u8`, `sisu_rt_copy(dst, src, ty)` | the drop and `.copy()` of a value by its type |
+| `sisu_rt_drop(value, ty) -> u8`, `sisu_rt_copy(dst, src, ty)` | the drop and `.copy()` of a value by its type, which the runtime in Sisu walks (decision 350) |
 | `sisu_rt_retain(value, ty)` | a copy of a value of type `ty` that holds capability handles was made: each handle's cell counts one more (decision 237) |
-| `sisu_rt_binary(op, out, a, a_ty, b, b_ty) -> u8` | equality, order, `in` and concatenation of values that are not numbers |
+| `sisu_rt_binary(op, out, a, a_ty, b, b_ty) -> u8` | equality, order, `in` and concatenation of values that are not numbers, the first three by the runtime in Sisu (decisions 350 and 352) |
 | `sisu_rt_bytes_eq(ret, a, b, n) -> u8` | whether the `n` bytes at `a` and `b` are the same: `==` of two texts of one length (decision 253); of Sisu's convention, the runtime in Sisu's (decision 336) |
+| `sisu_rt_text_push(ret, t, b, n) -> u8`, `sisu_rt_text_push_int(ret, t, n) -> u8`, `sisu_rt_text_from(ret, dst, b, n) -> u8` | the `n` bytes at `b`, or the digits of `n`, appended to the `String` at `t`; a new `String` at `dst` (decision 265); of Sisu's convention, the runtime in Sisu's (decision 351) |
+| `sisu_rt_list_reserve(l, size)` | room for one more element of `size` bytes in the list at `l` (decision 265) |
 | `sisu_rt_intrinsic(desc, ret, args) -> u8` | a call of an intrinsic |
 | `sisu_rt_sized(kind, op, flags, x, y, out) -> u8`, `sisu_rt_wide(kind, op, x, x_ty, y, y_ty, out) -> u8` | an operation of a sized integer type, of one word or of 128 bits |
 | `sisu_rt_table(ty, items, n, out) -> u8`, `sisu_rt_dict_slot(dict, key, key_ty, mode, out) -> u8` | a dict or set literal; a dict's value for a key |
@@ -3545,7 +3547,9 @@ the address of each type's drop glue, which is an SIR function compiled
 like any other. The structural operations (drop, copy, equality, order,
 hashing, `Display` and `Debug`) walk a value by its type's entry, in the
 order and with the texts of the interpreter's, and a struct or enum with a
-`Drop` impl or fields that need dropping runs its glue (decision 192). An
+`Drop` impl or fields that need dropping runs its glue (decision 192); all
+but `Display` and `Debug` are the runtime in Sisu's, over the table laid
+out in memory (section "The runtime in Sisu", decision 350). An
 intrinsic call passes a descriptor that the code generator writes once per
 shape of call (the intrinsic's number, the types of the result, of each
 argument and of each type argument) and the addresses of the arguments;
@@ -3561,24 +3565,56 @@ when the program ends, so the two interleave as the interpreter's do.
 ### The runtime in Sisu
 
 The runtime is being written in Sisu, piece by piece, as D-086 orders
-(decisions 335 and 336). `compiler/rt` is a Sisu package (`unsafe =
-"memory"`) whose root module's `export_NAME` functions are the runtime's
-symbols `sisu_rt_NAME`, of Sisu's convention (decision 189), which the
-generated code calls as it calls any function: the result's address,
-each argument's, the status byte. It is compiled once into
-`compiler/target/rt/rt.o`, which every native program is linked with
-before the runtime in Rust, from its seed, `compiler/rt/rt.sir`, the SIR
-stage 1 prints of the package (a test holds it to that), by the Rust
-lowering and Cranelift (`sisu_codegen::compile_library`), since it must
-exist before stage 1, a native program itself, can compile it. Its code
-is the runtime's own: it counts no frame, passes no yield point and adds
-no line to a stack trace, as drop glue does not, and it reaches raw memory
-only through the operations of std.mem the backend compiles inline
-(decision 335), so it needs nothing of the program's type table; a
-construct that would is refused when the object is built. The first piece
-ported is `sisu_rt_bytes_eq`, the comparison of two texts' bytes that `==`
-of two texts of one length calls (decision 253), whose Rust counterpart is
-deleted. port-debt.md ("The runtime in Sisu") lists the pieces left.
+(decisions 335, 336 and 350 to 352). `compiler/rt` is a Sisu package
+(`unsafe = "extern"`) whose root module's `export_NAME` functions are the
+runtime's symbols `sisu_rt_NAME`, of Sisu's convention (decision 189),
+which the generated code and the runtime in Rust call as any function is
+called: the result's address, each argument's, the status byte. It is
+compiled once into `compiler/target/rt/rt.o`, which every native program
+is linked with before the runtime in Rust, from its seed,
+`compiler/rt/rt.sir`, the SIR stage 1 prints of the package (a test holds
+it to that), by the Rust lowering in the release profile and Cranelift
+(`sisu_codegen::compile_library`), since it must exist before stage 1, a
+native program itself, can compile it; stage 2 compiles the same seed
+with the Sisu backend (`sisu2 build --library`), which the fixed point of
+decision 330 covers (decision 353). Its code is the runtime's own: it
+counts no frame, passes no yield point and adds no line to a stack trace,
+as drop glue does not; it reaches raw memory only through the operations
+of std.mem the backend compiles inline (decision 335), and the runtime in
+Rust and C's `memmove` and `memcmp` through foreign calls, before which it
+writes out no output (decision 350); a construct that needs a type table
+of its own is refused when the object is built.
+
+What is in Sisu (port-debt.md, "The runtime in Sisu", has what is not):
+
+| Piece | Module | Called by |
+|---|---|---|
+| `==` of two texts' bytes (`sisu_rt_bytes_eq`) | `lib.sisu` | the generated code (decision 253) |
+| equality, order, the structural hash, `.copy()`, the drop and the count of a copy's handles, by a value's parts (`sisu_rt_value_*`) | `value.sisu` over `types.sisu` | the runtime in Rust (`bridge.rs`), for `sisu_rt_drop`, `sisu_rt_copy`, `sisu_rt_binary`, dicts and sets, sorting and the intrinsics (decision 350) |
+| text appended to a `String`, an `int`'s digits appended, a `String` from a text (`sisu_rt_text_push`, `_push_int`, `_from`), and the digits of an integer of up to 128 bits in a base (`sisu_rt_int_digits`) | `text.sisu` | the generated code (decision 265), and the runtime in Rust for `fmt.digits` and `fmt.wide_digits` (decision 351) |
+| text search by Two-Way, and a prefix or suffix (`sisu_rt_find`, `sisu_rt_has_edge`) | `search.sisu` | the runtime in Rust, for `in` on texts and `bytes.find`, `starts_with` and `ends_with` (decision 352) |
+
+The structural operations walk a value by the program's type table, which
+the runtime in Rust lays out in memory when the program starts
+(`sisu-rt/src/desc.rs`): a header of ten words for each type (its kind,
+size, flags, the types it holds, its name's number, where its lists are,
+the offset of its tag) and the lists after them (a struct's fields, a
+tuple's elements, an enum's variants, an error set's members, and the
+parts a drop and a copy reach in place, decisions 262 and 266). The
+runtime in Rust passes the table's address to each operation. What it
+keeps as objects of its own (iterators, the tables of dicts and sets,
+channels, guards, `Shared` cells, arenas, the cells of capability handles,
+return traces) the Sisu code hands back to it (`sisu_rt_object_drop`,
+`_copy`, `_retain`, `_eq`, `sisu_rt_trace_retain`), and the program's drop
+glue it runs through the function table (`sisu_rt_glue`), or, on the
+system stack, moves aside to be dropped on the task's (`sisu_rt_defer`).
+On a task's own stack, the runtime in Rust runs a struct's or an enum's
+glue where it is and the Sisu walk of what the glue leaves out on the
+system stack (`export_value_drop_rest`), so that a task whose stack is
+spent still unwinds with its drops: the walk's frames are a few
+kilobytes, every argument of a call being in memory of its own. While
+runtime code runs on the system stack for a task, the task's probe limit
+is lifted, since the Sisu code probes the stack as every function does.
 
 ### Tasks
 
@@ -7589,4 +7625,74 @@ D-086, D-087 step 3)
      construction calls with the struct's type arguments, where lowering
      named the struct's parameter in the caller (`E0501`). Stage 1 decides
      it (RULES.md, R26).
+
+**The runtime in Sisu, continued** (section "Stage 2", "The runtime in
+Sisu"; D-086, D-087 step 3)
+
+350. The structural operations on values by their parts are the runtime in
+     Sisu's (D-086): `compiler/rt/src/value.sisu` holds equality, order,
+     the structural hash of decision 256, `.copy()`, the drop and the count
+     of a copy's capability handles (decision 237), each a walk of a value
+     by its type in the program's table, which the runtime in Rust lays out
+     in memory when the program starts (`sisu-rt/src/desc.rs`: ten words
+     for each type, its kind as `abi` encodes it, size, flags, the types it
+     holds, its name's number and where its lists are, then the lists of
+     fields, variants, members and the parts a drop and a copy reach in
+     place, decisions 262 and 266) and passes to each export
+     (`export_value_eq`, `_cmp`, `_hash`, `_copy`, `_drop`, `_drop_rest`,
+     `_retain`). The runtime in Rust calls them wherever it compared,
+     hashed, copied or dropped a value (`bridge.rs`), and they call it back
+     by foreign calls (`host.sisu`, `extern "C"`, so the package declares
+     `unsafe = "extern"`) for what it keeps as objects of its own, for its
+     allocation and for the program's drop glue, which on the system stack
+     they move aside to be dropped on the task's; a foreign call in the
+     runtime's own code writes out no output first, as a program's does
+     (`library` in both lowerings), and C's `memcmp` and `memmove` compare
+     and move bytes, `sisu_rt_bytes_eq` among them. A dict's and a set's
+     index hashes a key by its structural hash with its bits spread by
+     MurmurHash3's last step, where the runtime in Rust had a second hash
+     of its own, so equality and the index agree by one definition. The
+     drop of a value whose glue runs on a task's own stack stays the
+     runtime in Rust's there: the glue runs where it is and the walk of
+     what it leaves out on the system stack, since the walk's frames are 1
+     to 3 KB (every argument of a call in memory) and a task whose stack
+     overflowed unwinds within 3 KB of the stack it has left; while runtime
+     code runs on the system stack for a task, the task's probe limit is 0,
+     since the runtime's Sisu code probes the stack as any function does
+     and that stack is not the task's. The object is compiled in the
+     release profile. What the runtime in Rust no longer has: the walks of
+     `value.rs` (`drop_value`, `copy_value`, `retain_value`, `equal`,
+     `compare` and their helpers) and of `dict.rs` (`structural_hash` and
+     the key hasher), which are calls of the exports now. The other ways
+     were the operations generated per type in each program's SIR (22's
+     end, and R9's generic versions in `std.mem`), which compiles them
+     again for every program and changes every program's SIR, and the
+     Rust walk kept beside a Sisu one, which is two definitions. This
+     changes no rule of the language.
+351. Text is built by the runtime in Sisu (`compiler/rt/src/text.sisu`):
+     `sisu_rt_text_push`, `sisu_rt_text_push_int` and `sisu_rt_text_from`,
+     the entries that interpolation, `String.push`, `fmt.text`,
+     `fmt.display` of a text or an `int`, `str.to_string` and `String.new`
+     call (decision 265), are exports of Sisu's convention, which both
+     lowerings call as they call `sisu_rt_bytes_eq`, the arguments in
+     memory and the status tested (`rt_sisu` in `func.rs` and in stage 2's
+     `func.sisu`), so LIR still gives the Rust lowering's executables byte
+     for byte; a buffer grows by the runtime in Rust's `sisu_rt_grow`, to
+     twice its size and at least 16 bytes as before, and bytes of the text
+     itself pushed onto it are read where the growth moved them. An
+     `int`'s digits are worked out on its negative, so that the most
+     negative needs no positive counterpart, and `fmt.digits` and
+     `fmt.wide_digits` take the digits of a magnitude of up to 128 bits in
+     base 2, 8, 10 or 16 from four parts of 32 bits divided in turn
+     (`sisu_rt_int_digits`). The runtime in Rust's three entries and its
+     `wide_digits` are deleted. Floats' digits stay Rust's (port-debt.md,
+     "Float to text"). This changes no rule of the language.
+352. Text search is the runtime in Sisu's (`compiler/rt/src/search.sisu`):
+     `in` on texts (and of a `char` in a text) and `bytes.find` find a run
+     of bytes by Crochemore and Perrin's Two-Way, transcribed from the
+     prelude's `str.byte_find`, linear in the lengths and in constant
+     space, where the runtime in Rust compared every window of the text
+     (quadratic at worst); `bytes.starts_with` and `ends_with` compare the
+     edge (`sisu_rt_find`, `sisu_rt_has_edge`). An empty part occurs at 0.
+     This changes no rule of the language.
 

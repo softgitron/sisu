@@ -687,11 +687,11 @@ rather than as missing ([R3](declarations.md#bindings)).
 | [E0107](diagnostics.md#e0107), [E0106](diagnostics.md#e0106) | `parse.top-level-statement`, `parse.expected-declaration` | [Files and items](#files-and-items) |
 | E0224 | `resolve.missing-body` | [Functions and parameters](#functions-and-parameters) |
 | E0126, [E0117](diagnostics.md#e0117) | `parse.expected-member`, `parse.trailing-tokens` | [Structs, enums and error sets](#structs-enums-and-error-sets) |
-| [E0100](diagnostics.md#e0100), E0900 | `parse.expected`, `stage0.unsupported` | [Imports](#imports) |
+| [E0100](diagnostics.md#e0100), [E0900](diagnostics.md#e0900) | `parse.expected`, `stage0.unsupported` | [Imports](#imports) |
 | E0219 | `resolve.const-type-required` | [Constants and type declarations](#constants-and-type-declarations) |
-| [E0102](diagnostics.md#e0102), E0101, E0114, E0123 | `parse.block-on-same-line`, `parse.expected-block`, `parse.assignment-in-expression`, `parse.walrus` | [Blocks and statements](#blocks-and-statements) |
+| [E0102](diagnostics.md#e0102), E0101, E0114, [E0123](diagnostics.md#e0123) | `parse.block-on-same-line`, `parse.expected-block`, `parse.assignment-in-expression`, `parse.walrus` | [Blocks and statements](#blocks-and-statements) |
 | [E0127](diagnostics.md#e0127) | `parse.loop-else` | [Conditions and loops](#conditions-and-loops) |
-| [E0108](diagnostics.md#e0108), E0109, E0110, E0111, E0112, [E0113](diagnostics.md#e0113), E0119 | `parse.mixed-and-or`, `parse.mixed-bitwise`, `parse.bitwise-arithmetic`, `parse.shift-arithmetic`, `parse.negative-power`, `parse.mixed-chain`, `parse.chain-operator` | [Expressions and precedence](#expressions-and-precedence) |
+| [E0108](diagnostics.md#e0108), E0109, [E0110](diagnostics.md#e0110), E0111, [E0112](diagnostics.md#e0112), [E0113](diagnostics.md#e0113), E0119 | `parse.mixed-and-or`, `parse.mixed-bitwise`, `parse.bitwise-arithmetic`, `parse.shift-arithmetic`, `parse.negative-power`, `parse.mixed-chain`, `parse.chain-operator` | [Expressions and precedence](#expressions-and-precedence) |
 | [E0115](diagnostics.md#e0115), [E0116](diagnostics.md#e0116), E0118 | `parse.python-conditional`, `parse.if-expression-else`, `parse.arm-statement` | [If and match expressions](#if-and-match-expressions) |
 | E0122 | `parse.closure-parameter` | [Closures](#closures) |
 | [E0105](diagnostics.md#e0105) | `parse.expected-pattern` | [Patterns](#patterns) |

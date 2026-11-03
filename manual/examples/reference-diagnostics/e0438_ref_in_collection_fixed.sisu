@@ -1,0 +1,6 @@
+# The list holds values of its own.
+def main():
+    let aino = "Aino".to_string()
+    var names: list[String] = []
+    names.push(aino.copy())
+    print("{names} and {aino}")

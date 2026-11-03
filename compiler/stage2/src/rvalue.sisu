@@ -646,17 +646,8 @@ impl Cg:
             self.b.switch_to_block(bytes)
             let da = self.load(xa, 0)
             let db = self.load(xb, 0)
-            # The runtime in Sisu's, of Sisu's convention (decision 336): the
-            # result's address, then each argument's.
-            let ret = self.slot(8)
-            let sa = self.slot(8)
-            let sb = self.slot(8)
-            let sn = self.slot(8)
-            self.store_word(da, sa, 0)
-            self.store_word(db, sb, 0)
-            self.store_word(la, sn, 0)
-            let st = self.rt_status(abi.SYM_BYTES_EQ, [ret, sa, sb, sn])?
-            self.check(st)
+            # The runtime in Sisu's (decision 336).
+            let ret = self.rt_sisu(abi.SYM_BYTES_EQ, [da, db, la])?
             let eq = self.load(ret, 0)
             self.b.jump(join, [eq])
             self.b.switch_to_block(join)

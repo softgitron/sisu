@@ -136,3 +136,7 @@ Keep the failing case as a test, as the second test of step 1 does
 with the line from the log, so that the bug cannot come back
 unnoticed. A recorded log replays the program it holds, not your fix:
 check the fix with a test, or by running it on the same input.
+
+**Status.** Replay tokens, `sisu run --record` and `sisu replay` are in
+stage 0, a prototype of the experiment (Q-49, D-070), and what they
+print may change.

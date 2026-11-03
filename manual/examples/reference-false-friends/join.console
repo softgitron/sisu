@@ -5,4 +5,5 @@ error[E0304]: `str` has no method `join`
 4 |     print(", ".join(names))
   |                ^^^^
   = note: `join` is a method of `Iterator`
+  = fix: join the items with their own method: `names.join(", ")`
 

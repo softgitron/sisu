@@ -1,0 +1,6 @@
+# Text that borrows, put in a value that has shared owners.
+def main():
+    let name = "Aino"
+    let shared = Shared(name)
+    let other = shared.copy()
+    print("{Shared.count(other)} owners of the name")

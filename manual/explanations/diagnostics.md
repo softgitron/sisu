@@ -88,7 +88,7 @@ error[E0400]: `guests` was moved on line 4 and cannot be used afterwards
   |
 4 |     let sauna = guests
   |                 ------ `guests` is moved here
-  = note: copy it with `.copy()` before it is moved, or move it later
+  = note: copy it with `.copy()` before the move, which makes a second value (for a list or a `String`, an allocation); move it later, after its last use, which costs nothing; or, where what it moves into only reads it, take it there without `own`, and the call lends it
 
 $ sisu check --format=ids moved.sisu
 5:11-5:17 E0400 borrow.use-after-move name="guests" line="4"
@@ -144,11 +144,11 @@ an option without understanding it, and a generator that writes prose
 about what code does, which would rot and duplicates what other tools
 already do (idea 13).
 
-The consequence lines are designed and not yet built. E0400 in the
-session names two ways out, a copy or a later move, without their costs,
-and it does not name a third, a parameter that borrows instead of taking
-with `own`. The tutorial says what each costs in prose, and the plan's
-findings record the gap for the compiler's maintainers.
+The consequence lines are designed and not yet built as a part of each
+fix. E0400 in the session says in its note what each of its three ways
+out costs: a copy, a later move, and a parameter that borrows instead of
+taking with `own`. The tutorial says the same in prose, and the plan's
+findings record what other diagnostics still lack.
 
 ## Tested like any interface
 

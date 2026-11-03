@@ -461,9 +461,9 @@ at the clause:
 
 | Code | Identifier | When |
 |---|---|---|
-| R0100 | `contract.requires-failed` | a precondition fails |
-| R0101 | `contract.ensures-failed` | a postcondition fails |
-| R0102 | `contract.invariant-failed` | an invariant fails |
+| [R0100](diagnostics.md#r0100) | `contract.requires-failed` | a precondition fails |
+| [R0101](diagnostics.md#r0101) | `contract.ensures-failed` | a postcondition fails |
+| [R0102](diagnostics.md#r0102) | `contract.invariant-failed` | an invariant fails |
 
 <!-- file: examples/reference-contracts/violation.sisu -->
 ```sisu
@@ -609,10 +609,10 @@ needs no change for it.
 | Code | Identifier | Section |
 |---|---|---|
 | [E0800](diagnostics.md#e0800), [E0302](diagnostics.md#e0302), [E0805](diagnostics.md#e0805), [E0807](diagnostics.md#e0807) | `contract.misplaced`, `type.not-bool`, `contract.generator-ensures`, `contract.not-in-test` | [Where clauses stand](#where-clauses-stand) |
-| E0803, [E0804](diagnostics.md#e0804) | `contract.old-outside`, `contract.old-arguments` | [Postconditions](#postconditions) |
-| E0801, E0802, E0988 | `contract.not-pure`, `contract.changes`, `unsafe.in-contract` | [What a clause may do](#what-a-clause-may-do) |
-| E0806 | `contract.invariant-field` | [Invariants](#invariants) |
-| E0810, E0811, [E0812](diagnostics.md#e0812), [E0813](diagnostics.md#e0813), [E0814](diagnostics.md#e0814) | `refine.not-satisfied`, `refine.needs-try-from`, `refine.change-through-base`, `refine.own-impl`, `refine.predicate-type` | [Refinement types](#refinement-types) |
-| [D0028](diagnostics.md#d0028), D0029 | `cli.bad-contract-level`, `cli.test-checks-contracts` | [Check levels](#check-levels) |
+| [E0803](diagnostics.md#e0803), [E0804](diagnostics.md#e0804) | `contract.old-outside`, `contract.old-arguments` | [Postconditions](#postconditions) |
+| [E0801](diagnostics.md#e0801), E0802, E0988 | `contract.not-pure`, `contract.changes`, `unsafe.in-contract` | [What a clause may do](#what-a-clause-may-do) |
+| [E0806](diagnostics.md#e0806) | `contract.invariant-field` | [Invariants](#invariants) |
+| [E0810](diagnostics.md#e0810), [E0811](diagnostics.md#e0811), [E0812](diagnostics.md#e0812), [E0813](diagnostics.md#e0813), [E0814](diagnostics.md#e0814) | `refine.not-satisfied`, `refine.needs-try-from`, `refine.change-through-base`, `refine.own-impl`, `refine.predicate-type` | [Refinement types](#refinement-types) |
+| [D0028](diagnostics.md#d0028), [D0029](diagnostics.md#d0029) | `cli.bad-contract-level`, `cli.test-checks-contracts` | [Check levels](#check-levels) |
 | [R0100](diagnostics.md#r0100), [R0101](diagnostics.md#r0101), [R0102](diagnostics.md#r0102) | `contract.requires-failed`, `contract.ensures-failed`, `contract.invariant-failed` | [Violations](#violations) |
-| E0900 | `stage0.unsupported` | [What waits for the verifier](#what-waits-for-the-verifier) |
+| [E0900](diagnostics.md#e0900) | `stage0.unsupported` | [What waits for the verifier](#what-waits-for-the-verifier) |

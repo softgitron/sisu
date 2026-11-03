@@ -1,0 +1,6 @@
+# The file is beside the program, so the build embeds it.
+const MENU: str = embed("menu.txt")
+
+def main():
+    for line in MENU.lines():
+        print(line)

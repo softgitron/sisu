@@ -1,0 +1,9 @@
+# A value that the compiler cannot check, passed as a refinement.
+type Percent = int where 0 <= self <= 100
+
+def steam(humidity: Percent) -> str:
+    return if humidity < 50: "soft" else: "heavy"
+
+def main():
+    let n = "70".parse_int() ?? 0
+    print(steam(n))

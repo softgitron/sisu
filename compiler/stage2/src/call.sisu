@@ -534,7 +534,10 @@ impl Cg:
                     "the result of the foreign function `{symbol}`, a `{write.ty(dest_ty)}`"
                 )
             rets.push(ct)
-        _ = self.rt(abi.SYM_FLUSH, [])?
+        # What the program printed goes out before foreign code runs; the
+        # runtime in Sisu's calls are the runtime's own (decision 350).
+        if not self.library:
+            _ = self.rt(abi.SYM_FLUSH, [])?
         self.c_function(symbol, params, rets)?
         let results = self.b.call(symbol, vals, len(rets))
         if results.is_empty():
@@ -798,14 +801,15 @@ impl Cg:
             if not self.read_in_place(t1)?:
                 return Ok(Fast.No)
             let (v, vt) = self.base_of(a1, t1)
+            # The runtime in Sisu's (decision 350).
             if is_text(vt):
                 let ptr = self.load(v, 0)
                 let len = self.load(v, 8)
-                _ = self.rt(abi.SYM_TEXT_PUSH, [b, ptr, len])?
+                _ = self.rt_sisu(abi.SYM_TEXT_PUSH, [b, ptr, len])?
                 return Ok(Fast.Done)
             if vt == Type.Int and i == abi.I_FMT_DISPLAY:
                 let n = self.load(v, 0)
-                _ = self.rt(abi.SYM_TEXT_PUSH_INT, [b, n])?
+                _ = self.rt_sisu(abi.SYM_TEXT_PUSH_INT, [b, n])?
                 return Ok(Fast.Done)
             return Ok(Fast.No)
         if (i == abi.I_STR_TO_STRING or i == abi.I_STRING_NEW) and is_text(bt):
@@ -813,7 +817,7 @@ impl Cg:
                 let ptr = self.load(b, 0)
                 let len = self.load(b, 8)
                 let (d, _) = self.place(p, dest, None)?
-                _ = self.rt(abi.SYM_TEXT_FROM, [d, ptr, len])?
+                _ = self.rt_sisu(abi.SYM_TEXT_FROM, [d, ptr, len])?
                 return Ok(Fast.Done)
             return Ok(Fast.No)
         if (i == abi.I_DICT_GET or i == abi.I_DICT_CONTAINS or i == abi.I_SET_CONTAINS)
@@ -1232,6 +1236,25 @@ impl Cg:
             fast = Some(self.b.imm("iadd_imm", dv, 1))
         elif op == abi.SIZED_NOT and not unsigned:
             fast = Some(self.b.un("bnot", x))
+        elif op == abi.SIZED_WRAPPING_FROM and kind < len(abi.sized_types()):
+            # An `int` reduced to the type's width, as two's complement wraps
+            # it: masked, or its low bits extended by their sign.
+            let name = abi.sized_types()[kind]
+            if name == "u64":
+                fast = Some(x)
+            else:
+                var bits = 32
+                if name == "u8" or name == "i8":
+                    bits = 8
+                elif name == "u16" or name == "i16":
+                    bits = 16
+                if unsigned:
+                    let mask = self.iconst((1 << bits) - 1)
+                    fast = Some(self.b.bin("band", x, mask))
+                else:
+                    let shift = self.iconst(64 - bits)
+                    let up = self.b.bin("ishl", x, shift)
+                    fast = Some(self.b.bin("sshr", up, shift))
         if let Some(r) = fast:
             let (addr, _) = self.place(p, dest, None)?
             self.store_word(r, addr, 0)

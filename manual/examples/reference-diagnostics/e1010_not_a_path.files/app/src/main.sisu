@@ -1,0 +1,5 @@
+# A sauna that heats its stones.
+import stones
+
+def main():
+    print(stones.heat(60))

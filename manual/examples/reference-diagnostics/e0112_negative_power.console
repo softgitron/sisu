@@ -1,0 +1,9 @@
+$ sisu run e0112_negative_power.sisu
+error[E0112]: `-x ** y` is ambiguous; write `-(x ** y)` or `(-x) ** y`
+  --> e0112_negative_power.sisu:4:18
+  |
+4 |     print(-n ** 2)
+  |                  ^
+  = fix: add parentheses: `(`, `)`
+
+error[D0006]: the program was not run: errors found (1)

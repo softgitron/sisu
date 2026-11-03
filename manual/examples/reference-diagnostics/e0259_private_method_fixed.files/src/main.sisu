@@ -1,0 +1,7 @@
+# The method that the type's module offers.
+from kiuas.stove import Stove
+
+def main():
+    var stove = Stove(celsius=90)
+    stove.rest()
+    print(stove.celsius)

@@ -4,16 +4,19 @@ error[E0304]: `list[str]` has no method `append`
   |
 4 |     names.append("eero")
   |           ^^^^^^
+  = fix: Sisu spells it this way: `push`
 
 error[E0304]: `str` has no method `strip`
   --> methods.sisu:5:21
   |
 5 |     print("  hei  ".strip())
   |                     ^^^^^
+  = fix: Sisu spells it this way: `trim`
 
 error[E0304]: `str` has no method `upper`
   --> methods.sisu:6:17
   |
 6 |     print("hei".upper())
   |                 ^^^^^
+  = fix: Sisu spells it this way: `to_uppercase`
 

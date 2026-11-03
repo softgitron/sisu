@@ -1,0 +1,11 @@
+$ sisu run e0333_impure_call.sisu
+error[E0333]: `print` is not pure, so the pure function `feel` cannot call it
+  --> e0333_impure_call.sisu:3:5
+  |
+3 |     print("checking {celsius}")
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+2 | pure def feel(celsius: int) -> String:
+  |          ---- `feel` is declared `pure` here
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

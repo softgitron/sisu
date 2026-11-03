@@ -1,0 +1,9 @@
+# How a sauna's heat feels, by bands of ten degrees.
+
+## `celsius` rounded down to tens.
+pub def band(celsius: int) -> int:
+    return celsius // 10 * 10
+
+## How a sauna at `celsius` degrees feels.
+pub def feel(celsius: int) -> str:
+    return if band(celsius) >= 80: "hot" else: "warm"

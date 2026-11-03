@@ -1,0 +1,4 @@
+# Parentheses say which operation comes first.
+def main():
+    let flags = 6
+    print((flags & 1) + 2)

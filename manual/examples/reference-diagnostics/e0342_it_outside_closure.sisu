@@ -1,0 +1,5 @@
+# `it` where no function is expected.
+def main():
+    let ages = [7, 34, 61]
+    let next = it + 1
+    print(next)

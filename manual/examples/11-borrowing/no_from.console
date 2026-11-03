@@ -6,6 +6,7 @@ error[E0413]: `longer` returns `str`, which borrows, and has more than one borro
    |                               ^^^
    |            ------ `a` is a borrowed parameter
    |                    ------ `b` is a borrowed parameter
+  = fix: return owned text instead: `String`
   = fix: name `a, b` in the `from` clause: ` from a, b`
 
 error[D0006]: the program was not run: errors found (1)

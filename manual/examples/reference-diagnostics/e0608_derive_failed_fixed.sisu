@@ -1,0 +1,21 @@
+# The derive asked for a struct, whose fields it lists.
+trait Columns:
+    def columns() -> String
+
+    comptime def derive(T: type) -> impl Columns for T:
+        return impl Columns for T:
+            def columns() -> String:
+                comptime if not reflect.is_struct(T):
+                    comptime panic("`{reflect.name_of(T)}` is not a struct")
+                var names: list[String] = []
+                comptime for f in reflect.fields_of(T):
+                    names.push(f.name.to_string())
+                return names.join(",")
+
+@derive(Columns)
+struct Stove:
+    kind: String
+    celsius: int
+
+def main():
+    print(Stove.columns())

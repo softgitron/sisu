@@ -15,11 +15,18 @@
 //! A runtime entry point that can panic records the panic and returns
 //! [`abi::UNWINDING`]; the generated code then runs its cleanup blocks, so
 //! unwinding is ordinary control flow, with no unwinder.
+//!
+//! The runtime is being written in Sisu, piece by piece (`compiler/rt`,
+//! decisions 336 and 350): what is written there is linked into every
+//! executable beside this library, which calls it (`bridge.rs`) with the
+//! type table laid out in memory (`desc.rs`).
 
 pub mod abi;
+mod bridge;
 mod bytes;
 mod caps;
 mod cells;
+mod desc;
 mod dict;
 mod entry;
 mod host;

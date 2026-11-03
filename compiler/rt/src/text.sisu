@@ -1,0 +1,115 @@
+##! Text built in place (decisions 265 and 351): the growth of a `String`'s
+##! buffer, which the root module's text entries use (their bodies are
+##! there, a call fewer for what interpolation calls most), and an
+##! integer's digits in a base, which the runtime in Rust calls for
+##! `fmt.digits` and `fmt.wide_digits`. A `String` is three words: the
+##! address of its bytes' buffer (0 for none), their number, and the
+##! buffer's size.
+
+from rt.host import memmove
+from rt.host import sisu_rt_alloc
+from rt.host import sisu_rt_grow
+from rt.words import at
+from rt.words import held
+from rt.words import set_word
+from std.mem import ptr
+
+## The `String` at `t`, whose length is `len`, given a buffer of room for
+## `need` bytes: at least twice its size, and 16 bytes when it has none. The
+## address of the bytes `b` names afterwards, which move with the buffer
+## when they are its own.
+##
+## Requires:
+## - `text`: `t` holds a live `String` of `len` bytes, and `b` the address
+##   of live bytes
+pub(package) def grow(t: ptr mut u8, need: int, b: ptr mut u8) -> ptr mut u8:
+    # safety: valid, aligned, writable, in_bounds: a `String` is its buffer's
+    #   address, its length and its size, by `text`; returns_promptly: the
+    #   runtime in Rust grows the buffer, keeping its bytes.
+    unsafe:
+        let words = t.cast[int]()
+        let size = words.offset(2).read()
+        let old = words.read()
+        let source = b.addr()
+        var room = max(need, size * 2)
+        if room < 16:
+            room = 16
+        let buffer = sisu_rt_grow(words.cast[ptr[u8]]().read().cast_mut(), room)
+        words.write(buffer.addr())
+        words.offset(2).write(room)
+        # Bytes of the text itself, which a program the ownership checker
+        # accepts never pushes, are where the buffer moved them.
+        if old != 0 and source >= old and source < old + size:
+            return buffer.offset(source - old)
+        return b
+
+## Writes at `dst` a new `String` holding the `n` bytes at `b`: no buffer
+## when there are none, else one of at least 16 bytes.
+##
+## Requires:
+## - `text`: `dst` has room for a `String`, and `b` points to `n` live bytes
+pub(package) def from_bytes(dst: ptr mut u8, b: ptr mut u8, n: int):
+    # safety: inside: `dst` has room for the three words, by `text`;
+    #   returns_promptly: the runtime in Rust gives the buffer, which memmove
+    #   fills.
+    unsafe:
+        if n <= 0:
+            set_word(dst, 0, 0)
+            set_word(dst, 8, 0)
+            set_word(dst, 16, 0)
+            return
+        let room = if n > 16: n else: 16
+        let buffer = sisu_rt_alloc(room)
+        _ = memmove(buffer, b.as_const(), n)
+        set_word(dst, 0, buffer.addr())
+        set_word(dst, 8, n)
+        set_word(dst, 16, room)
+
+## The digit `d`, 0 to 15, as its character's code: `0` to `9`, then `a` to
+## `f`, or `A` to `F` with `upper`.
+pure def digit_code(d: int, upper: bool) -> int:
+    if d < 10:
+        return 48 + d
+    return (if upper: 55 else: 87) + d
+
+## Writes at `dst` a new `String` of the digits of the magnitude whose low
+## and high words are `low` and `high`, unsigned, in `base` (2, 8, 10 or
+## 16, capitals with `upper`), as `fmt.digits` and `fmt.wide_digits` give
+## them: at least one digit, no sign.
+##
+## Requires:
+## - `text`: `dst` has room for a `String`
+pub(package) def digits(dst: ptr mut u8, low: int, high: int, base: int, upper: bool):
+    # The magnitude in four parts of 32 bits, the highest first, divided by
+    # the base again and again; each remainder is the next digit, from the
+    # last.
+    var p3 = (high >> 32) & 4294967295
+    var p2 = high & 4294967295
+    var p1 = (low >> 32) & 4294967295
+    var p0 = low & 4294967295
+    var count = 0
+    # safety: text: this function's; inside, writable, aligned: the `String`'s
+    #   buffer has room for the 128 digits a magnitude has at most, and a byte
+    #   needs no alignment.
+    unsafe:
+        from_bytes(dst, dst, 0)
+        _ = grow(dst, 128, dst)
+        let bytes = held(dst, 0)
+        while True:
+            var r = p3 % base
+            p3 = p3 // base
+            var next = r * 4294967296 + p2
+            p2 = next // base
+            r = next % base
+            next = r * 4294967296 + p1
+            p1 = next // base
+            r = next % base
+            next = r * 4294967296 + p0
+            p0 = next // base
+            r = next % base
+            at(bytes, 127 - count).write(u8.wrapping_from(digit_code(r, upper)))
+            count += 1
+            if p3 == 0 and p2 == 0 and p1 == 0 and p0 == 0:
+                break
+        _ = memmove(bytes, at(bytes, 128 - count).as_const(), count)
+        set_word(dst, 8, count)

@@ -231,11 +231,10 @@ gives `Display` only to a `Labelled[T]` whose `T` has `Display`, and
 
 </details>
 
-Stage 0 cannot yet give a field of a generic struct a default value: a
-field `items: list[T] = []` stops the compiler with E0501
-(`sir.invalid`), an internal error. Until it can, give the type an
-associated function that builds an empty value, as exercise 15.4
-does.
+A field of a generic struct can have a default, as any field can: with
+`items: list[T] = []`, each `Shelf[int]()` starts with an empty list of
+`int`s. An associated function that builds the empty value, as exercise
+15.4 writes, does the same where the value needs more than defaults.
 
 ## Type parameters with defaults
 

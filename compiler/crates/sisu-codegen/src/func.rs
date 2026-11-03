@@ -345,6 +345,24 @@ impl<'a, 'p> Cx<'a, 'p> {
         self.rt(name, args)?.ok_or_else(|| Error::internal(format!("`{name}` returns nothing")))
     }
 
+    /// A call of the runtime in Sisu (decisions 336 and 350), of Sisu's
+    /// convention: the address of a word for its result, then each
+    /// argument's, in memory of its own, and a status that leads to the
+    /// failure path. The address of the result's word.
+    fn rt_sisu(&mut self, name: &'static str, args: &[Value]) -> Result<Value, Error> {
+        let ret = self.slot(8);
+        let slots: Vec<Value> = args.iter().map(|_| self.slot(8)).collect();
+        for (&a, &s) in args.iter().zip(&slots) {
+            self.store_word(a, s, 0);
+        }
+        let mut all = Vec::with_capacity(slots.len() + 1);
+        all.push(ret);
+        all.extend(slots);
+        let st = self.rt_status(name, &all)?;
+        self.check(st);
+        Ok(ret)
+    }
+
     fn iconst(&mut self, v: i64) -> Value {
         self.b.ins().iconst(types::I64, v)
     }
@@ -1548,15 +1566,8 @@ impl<'a, 'p> Cx<'a, 'p> {
             self.b.ins().brif(same, bytes, &[], join, &[zero.into()]);
             self.b.switch_to_block(bytes);
             let (da, db) = (self.load(xa, 0), self.load(xb, 0));
-            // The runtime in Sisu's, of Sisu's convention (decision 336):
-            // the result's address, then each argument's.
-            let ret = self.slot(8);
-            let (sa, sb, sn) = (self.slot(8), self.slot(8), self.slot(8));
-            self.store_word(da, sa, 0);
-            self.store_word(db, sb, 0);
-            self.store_word(la, sn, 0);
-            let st = self.rt_status(sym::BYTES_EQ, &[ret, sa, sb, sn])?;
-            self.check(st);
+            // The runtime in Sisu's (decision 336).
+            let ret = self.rt_sisu(sym::BYTES_EQ, &[da, db, la])?;
             let eq = self.load(ret, 0);
             self.b.ins().jump(join, &[eq.into()]);
             self.b.switch_to_block(join);
@@ -2608,7 +2619,11 @@ impl<'a, 'p> Cx<'a, 'p> {
                 ))
             })?),
         };
-        self.rt(sym::FLUSH, &[])?;
+        // What the program printed goes out before foreign code runs; the
+        // runtime in Sisu's calls are the runtime's own (decision 350).
+        if !self.cg.library {
+            self.rt(sym::FLUSH, &[])?;
+        }
         let id = self.cg.c_function(symbol, &params, ret.as_slice())?;
         let r = self.func_ref(id);
         let call = self.b.ins().call(r, &vals);
@@ -2906,14 +2921,15 @@ impl<'a, 'p> Cx<'a, 'p> {
                     return Ok(Fast::No);
                 }
                 let (v, vt) = self.base_of(a1, &t1);
+                // The runtime in Sisu's (decision 350).
                 if text(&vt) {
                     let (ptr, len) = (self.load(v, 0), self.load(v, 8));
-                    self.rt(sym::TEXT_PUSH, &[b, ptr, len])?;
+                    self.rt_sisu(sym::TEXT_PUSH, &[b, ptr, len])?;
                     return Ok(Fast::Done);
                 }
                 if vt == Type::Int && i == I::FmtDisplay {
                     let n = self.load(v, 0);
-                    self.rt(sym::TEXT_PUSH_INT, &[b, n])?;
+                    self.rt_sisu(sym::TEXT_PUSH_INT, &[b, n])?;
                     return Ok(Fast::Done);
                 }
                 Ok(Fast::No)
@@ -2921,7 +2937,7 @@ impl<'a, 'p> Cx<'a, 'p> {
             I::StrToString | I::StringNew if text(&bt) && named(&self.place_type(dest)?, &["String"]) => {
                 let (ptr, len) = (self.load(b, 0), self.load(b, 8));
                 let (d, _) = self.place(dest, None)?;
-                self.rt(sym::TEXT_FROM, &[d, ptr, len])?;
+                self.rt_sisu(sym::TEXT_FROM, &[d, ptr, len])?;
                 Ok(Fast::Done)
             }
             // A key looked up in a dict or a set by the runtime's own entry
@@ -3322,6 +3338,27 @@ impl<'a, 'p> Cx<'a, 'p> {
                 Some(self.b.ins().iadd_imm(d, 1))
             }
             SizedOp::Not if !unsigned => Some(self.b.ins().bnot(x)),
+            // An `int` reduced to the type's width, as two's complement
+            // wraps it: masked, or its low bits extended by their sign.
+            SizedOp::WrappingFrom => match abi::SIZED_TYPES.get(kind as usize).copied() {
+                Some("u64") => Some(x),
+                Some(t) => {
+                    let bits: i64 = match t {
+                        "u8" | "i8" => 8,
+                        "u16" | "i16" => 16,
+                        _ => 32,
+                    };
+                    if unsigned {
+                        let mask = self.iconst((1i64 << bits) - 1);
+                        Some(self.b.ins().band(x, mask))
+                    } else {
+                        let shift = self.iconst(64 - bits);
+                        let up = self.b.ins().ishl(x, shift);
+                        Some(self.b.ins().sshr(up, shift))
+                    }
+                }
+                None => None,
+            },
             _ => None,
         };
         if let Some(r) = fast {
@@ -3367,11 +3404,12 @@ impl<'a, 'p> Cx<'a, 'p> {
 /// Whether a local is a flag of drop elaboration's: named `flag`, with no
 /// place in the source (a variable the program names `flag` has one).
 /// Whether a local of type `t` is one word the release profile may keep
-/// in a variable: a number, a `bool`, a `char`, or a reference that is an
-/// address (not a `dyn`'s two words).
+/// in a variable: a number, a `bool`, a `char`, a reference that is an
+/// address (not a `dyn`'s two words), or a raw pointer (decision 350).
 fn one_word(t: &Type) -> bool {
     match t {
         Type::Ref(inner, _) => !crate::layout::fat(inner),
+        Type::Named(n, a) if (n == "ptr" || n == "ptr_mut") && a.len() == 1 => true,
         _ => matches!(
             scalar_kind(t),
             Some(Scalar::Int | Scalar::U64 | Scalar::Float | Scalar::F32 | Scalar::Bool | Scalar::Char)

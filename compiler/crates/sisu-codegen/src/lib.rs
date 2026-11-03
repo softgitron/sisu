@@ -1198,9 +1198,11 @@ impl<'p> Codegen<'p> {
             sym::DROP => (&[i64_, i32_], &[i8_]),
             sym::COPY => (&[i64_, i64_, i32_], &[]),
             sym::BINARY => (&[i32_, i64_, i64_, i32_, i64_, i32_], &[i8_]),
-            sym::BYTES_EQ => (&[i64_, i64_, i64_, i64_], &[i8_]),
-            sym::TEXT_PUSH | sym::TEXT_FROM => (&[i64_, i64_, i64_], &[]),
-            sym::TEXT_PUSH_INT | sym::LIST_RESERVE => (&[i64_, i64_], &[]),
+            // The runtime in Sisu's, of Sisu's convention (decisions 336 and
+            // 350): the result's address, each argument's, the status.
+            sym::BYTES_EQ | sym::TEXT_PUSH | sym::TEXT_FROM => (&[i64_, i64_, i64_, i64_], &[i8_]),
+            sym::TEXT_PUSH_INT => (&[i64_, i64_, i64_], &[i8_]),
+            sym::LIST_RESERVE => (&[i64_, i64_], &[]),
             sym::TABLE_FIND => (&[i64_, i64_, i32_, i32_], &[i64_]),
             sym::INTRINSIC => (&[i64_, i64_, i64_], &[i8_]),
             sym::SIZED => (&[i32_, i32_, i32_, i64_, i64_, i64_], &[i8_]),

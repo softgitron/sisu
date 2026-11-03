@@ -1,0 +1,10 @@
+# A contract, and a test of the function it guards.
+def half(n: int) -> int:
+    requires n >= 0
+    return n // 2
+
+test "half of eight":
+    assert half(8) == 4
+
+def main():
+    print(half(8))

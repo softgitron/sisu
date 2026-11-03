@@ -1,0 +1,8 @@
+$ sisu run
+error[E1017]: `json` is the name of a standard-library module, which `import json` names; a package of the program needs another name
+  --> sisu.toml:2:8
+  |
+2 | name = "json"
+  |        ^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

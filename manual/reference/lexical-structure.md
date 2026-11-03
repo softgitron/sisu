@@ -711,7 +711,7 @@ $ sisu fmt --check layout.sisu
 | E0018 | `lex.newline-in-interpolation` | [String literals](#string-literals) |
 | E0101, [E0102](diagnostics.md#e0102), E0125 | `parse.expected-block`, `parse.block-on-same-line`, `parse.unexpected-indent` | [Indentation and blocks](#indentation-and-blocks) |
 | E0121 | `parse.empty-interpolation` | [String literals](#string-literals) |
-| E0123 | `parse.walrus` | [Operators and punctuation](#operators-and-punctuation) |
+| [E0123](diagnostics.md#e0123) | `parse.walrus` | [Operators and punctuation](#operators-and-punctuation) |
 | [E0124](diagnostics.md#e0124) | `parse.keyword-as-name` | [Names](#names) |
 
 [R17, Diagnostics](diagnostics.md) lists every code.

@@ -226,11 +226,6 @@ impl Text {
         // SAFETY: the caller guarantees the buffer.
         unsafe { std::slice::from_raw_parts(self.ptr, self.len as usize) }
     }
-
-    pub(crate) fn release(&mut self) {
-        release(self.ptr);
-        *self = Text::empty();
-    }
 }
 
 impl List {

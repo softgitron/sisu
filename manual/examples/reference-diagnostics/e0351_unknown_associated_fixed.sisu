@@ -1,0 +1,11 @@
+# The associated function, declared in the type's body.
+struct Point:
+    x: int
+    y: int
+
+    def origin() -> Point:
+        return Point(0, 0)
+
+def main():
+    let p = Point.origin()
+    print(p.x)

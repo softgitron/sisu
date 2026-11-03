@@ -12,8 +12,8 @@ design costs, and what would change it.
 **See also:** the tutorial's [chapter
 1](../tutorial/01-hello.md#how-exercises-work) (how exercises work) and
 [chapter 3](../tutorial/03-functions.md) (typed holes in your own code);
-the guide on planning with typed holes in the [list of
-guides](../README.md#the-guides); the reference's [R16, The sisu
+the guide [Plan with typed holes](../guides/holes.md); the reference's
+[R16, The sisu
 command](../reference/sisu-command.md) and [R17,
 Diagnostics](../reference/diagnostics.md#w0001); the proposal's [17,
 Testing](../../proposal/17-testing.md#assertions) and N-27 of [19, Novel

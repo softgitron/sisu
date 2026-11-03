@@ -1,5 +1,5 @@
 # `Ord` needs `Eq` and `PartialOrd`, which the type does not derive.
-@derive(Ord)
+@derive(Copy, Ord)
 struct Version:
     major: int
     minor: int

@@ -287,7 +287,7 @@ panic while unwinding: the cup broke while being put away
 | Status | When |
 |---|---|
 | 0 | `main` returned, or returned `Ok(())` |
-| 1 | `main` returned `Err(e)`, or the program did not compile (D0006, D0021) |
+| 1 | `main` returned `Err(e)`, or the program did not compile ([D0006](diagnostics.md#d0006), [D0021](diagnostics.md#d0021)) |
 | 2 | a usage error of the command line ([R16](sisu-command.md#exit-statuses)) |
 | 101 | a panic that unwound out of `main` |
 | 134 | an abort: a panic during unwinding, or a deadlock ([R9](concurrency.md#the-scheduler)) |

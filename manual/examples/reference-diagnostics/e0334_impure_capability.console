@@ -1,0 +1,9 @@
+$ sisu run e0334_impure_capability.sisu
+error[E0334]: the pure function `has_notes` cannot use the capability `Fs`
+  --> e0334_impure_capability.sisu:2:20
+  |
+2 | pure def has_notes(fs: Fs) -> bool:
+  |                    ^^^^^^
+  = fix: remove `pure`
+
+error[D0006]: the program was not run: errors found (1)

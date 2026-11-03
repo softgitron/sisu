@@ -1,0 +1,10 @@
+# A stove whose method `cool` is private to its module.
+pub struct Stove:
+    pub celsius: int
+
+    def cool(mut self):
+        self.celsius -= 10
+
+    ## Lets the stove rest, which cools it by ten degrees.
+    pub def rest(mut self):
+        self.cool()

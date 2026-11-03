@@ -12,7 +12,7 @@ chose them, what Sisu's design costs in turn, and what would change it.
 20](../tutorial/20-concurrency.md) (panics in tasks); the reference's
 [R2, Types](../reference/types.md#optional-values), with optional
 values, results and error sets, and [R8, Errors and
-panics](../README.md#the-reference); the proposal's [05,
+panics](../reference/errors.md); the proposal's [05,
 Errors](../../proposal/05-errors.md) and decisions D-010, D-011, D-040
 and D-042 in its [decision log](../../proposal/15-decision-log.md); the
 research in

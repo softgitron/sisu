@@ -14,9 +14,10 @@ edition, and `sisu fix` and previews wait.
 **See also:** the reference's [R13, Modules, packages and the
 manifest](../reference/modules.md#editions), [R16, The sisu
 command](../reference/sisu-command.md#sisu-fix) and [R19, False
-friends](../reference/false-friends.md); the tutorial's chapter 28, in
-the [plan](../README.md#part-v-further), and the guide on moving to a
-new edition, in the [list of guides](../README.md#the-guides); the
+friends](../reference/false-friends.md); the tutorial's [chapter
+28](../tutorial/28-code-that-lasts.md) (code that lasts); the guide on
+moving to a new edition, G25 in the [list of
+guides](../README.md#the-guides), which waits for `sisu fix`; the
 proposal's [13, Evolution and
 governance](../../proposal/13-evolution-and-governance.md),
 [10](../../proposal/10-tooling.md#migration) and

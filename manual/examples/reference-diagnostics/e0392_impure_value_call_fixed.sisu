@@ -1,0 +1,6 @@
+# The parameter's type says that the function it takes is pure.
+pure def apply(f: pure (int) -> int, x: int) -> int:
+    return f(x) + 1
+
+def main():
+    print(apply(n -> n * 3, 4))

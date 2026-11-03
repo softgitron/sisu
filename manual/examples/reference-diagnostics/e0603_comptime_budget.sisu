@@ -1,0 +1,10 @@
+# A constant computed while compiling, slowly.
+def climbs(n: int) -> int:
+    if n < 2:
+        return 1
+    return climbs(n - 1) + climbs(n - 2)
+
+const STAIRS: int = comptime climbs(26)
+
+def main():
+    print("{STAIRS} ways up 26 steps")

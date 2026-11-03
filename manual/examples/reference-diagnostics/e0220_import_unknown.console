@@ -1,0 +1,9 @@
+$ sisu run e0220_import_unknown.sisu
+error[E0220]: cannot import `std.colections`: it names no module of this package, of a dependency in `sisu.toml`, or of the standard library
+  --> e0220_import_unknown.sisu:2:8
+  |
+2 | import std.colections
+  |        ^^^^^^^^^^^^^^
+  = fix: a module with a similar name exists: `std.collections`
+
+error[D0006]: the program was not run: errors found (1)

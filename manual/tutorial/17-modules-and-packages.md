@@ -128,7 +128,7 @@ trip.distance import *`, and call `between` without `distance.`.
 <!-- output: examples/17-modules-and-packages/glob.console -->
 ```console
 $ sisu run
-error[E0100]: expected a name, found `*`
+error[E0128]: Sisu has no glob imports: name what the module gives, as in `from std.collections import Deque, Heap`, or import the module and write `collections.Deque`
   --> src/main.sisu:2:27
   |
 2 | from trip.distance import *
@@ -143,9 +143,9 @@ error[E0200]: cannot find `between` in this scope
 error[D0006]: the program was not run: errors found (2)
 ```
 
-E0100 (`parse.expected`) wants a name where the `*` is: Sisu has no
-glob imports, so the second error follows. Name each item you import,
-or import the module and write `distance.between`.
+E0128 (`parse.glob-import`) says that Sisu has no glob imports, so the
+second error follows. Name each item you import, or import the module
+and write `distance.between`.
 
 </details>
 

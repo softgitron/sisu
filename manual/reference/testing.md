@@ -519,5 +519,5 @@ and the reports of coverage and mutation testing are designed
 | E0614 | `comptime.no-fake` | [Fakes of your own traits](#fakes-of-your-own-traits) |
 | D0061 | `cli.transcript-differs` | [Transcripts](#transcripts) |
 | R0107, [R0108](diagnostics.md#r0108) | `test.snapshot-changed`, `test.snapshot-missing` | [Snapshots](#snapshots) |
-| D0031, D0032, D0033, D0034, D0035 | `cli.replay-no-token`, `cli.bad-replay-token`, `cli.token-other-code`, `cli.other-toolchain`, `cli.token-no-test` | [Replay tokens](#replay-tokens) |
+| D0031, D0032, [D0033](diagnostics.md#d0033), D0034, D0035 | `cli.replay-no-token`, `cli.bad-replay-token`, `cli.token-other-code`, `cli.other-toolchain`, `cli.token-no-test` | [Replay tokens](#replay-tokens) |
 | R0105, E0971 | `sim.always-failed`, `sim.unmodelled-extern` | [Simulation](#simulation) |

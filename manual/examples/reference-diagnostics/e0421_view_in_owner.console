@@ -1,0 +1,9 @@
+$ sisu run e0421_view_in_owner.sisu
+error[E0421]: `str` borrows, so it cannot be put in `Shared`, which can outlive what it borrows (04, rule 3)
+  --> e0421_view_in_owner.sisu:4:18
+  |
+4 |     let shared = Shared(name)
+  |                  ^^^^^^^^^^^^
+  = note: put an owned value in it instead, such as a `String` made with `.to_string()`
+
+error[D0006]: the program was not run: errors found (1)

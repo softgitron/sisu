@@ -203,6 +203,10 @@ pub struct Cg:
     ## The thunk of each named function used as a value, and its type.
     thunks: dict[String, (String, Type)]
     pub release: bool
+    ## The runtime in Sisu's own code (decision 336): no count of nested
+    ## calls, no yield point, no line of a stack trace, and no value walked
+    ## by a type table, which a library has none of.
+    pub library: bool
     ## The LIR file's items, and the functions defined, in order.
     items: list[Item]
     pub funcs: list[FnOut]
@@ -260,6 +264,7 @@ impl Cg:
             foreign=foreign_objects(p, reachable(p)),
             thunks={},
             release=release,
+            library=False,
             items=[],
             funcs=[],
             carried={},
@@ -332,6 +337,17 @@ impl Cg:
         _ = self.instances.insert(key, symbol.copy())
         self.queue.push((name.to_string(), targs.copy(), symbol.copy()))
         return Ok(symbol)
+
+    ## The function `name`, without type arguments, under the global symbol
+    ## `symbol` of a runtime library (decision 336), declared and queued.
+    pub pure def export_instance(mut self, p: Program, name: str, symbol: str) -> () ! LirError:
+        let fi = self.function(name) else:
+            return internal("the library has no function `{name}`")
+        let params = p.functions[fi].param_count
+        self.items.push(Item.Line("declare {symbol} export sisu {params}"))
+        _ = self.instances.insert(instance_key(name, []), symbol.to_string())
+        self.queue.push((name.to_string(), [], symbol.to_string()))
+        return Ok(())
 
     ## Records that a `dyn` of type `dyn_ty` holds a value of `value_ty`.
     pub pure def carry(mut self, dyn_ty: Type, value_ty: Type) -> () ! LirError:
@@ -966,6 +982,29 @@ pub pure def lower_spanned(p: Program, release: bool) -> (String, list[(int, int
         cg.define_main(main, flags, ret_ty)?
         return Ok(cg.write_lir(p))
 
+## The LIR of the runtime in Sisu (`compiler/rt`, decisions 336 and 353),
+## and where each function is in it, as `sisu_codegen::compile_library`
+## compiles it: each `export_NAME` function of its root module (a name
+## without a dot, without type parameters) the global symbol
+## `sisu_rt_NAME` of Sisu's convention, and what it calls under local
+## symbols; no C `main` and no type table.
+pub pure def lower_library_spanned(p: Program, release: bool) -> (String, list[(int, int, int)]) ! LirError:
+    var cg = Cg.new(p, 1, release)
+    cg.library = True
+    var exports: list[(String, String)] = []
+    for f in p.functions:
+        var normal = False
+        if let FnKind.Normal = f.kind:
+            normal = True
+        if f.name.starts_with("export_") and not f.name.contains(".") and f.type_params.is_empty() and normal:
+            exports.push((f.name.copy(), "sisu_rt_{f.name.byte_slice(7, f.name.byte_len())}"))
+    if exports.is_empty():
+        return unsupported("a runtime library without an `export_` function")
+    for (name, symbol) in exports:
+        cg.export_instance(p, name, symbol)?
+    cg.complete(p)?
+    return Ok(cg.write_lir(p))
+
 ## The program with std.par's `map` given the body the native backend
 ## compiles for it (decision 333), as `sisu-codegen/src/bodies.rs` gives
 ## it: a call of the runtime's parallel map (`par.map`, an intrinsic no SIR
@@ -1070,9 +1109,11 @@ pub pure def runtime_signature(name: str) -> str?:
         case "sisu_rt_drop": Some("(i64, i32) -> (i8)")
         case "sisu_rt_copy": Some("(i64, i64, i32) -> ()")
         case "sisu_rt_binary": Some("(i32, i64, i64, i32, i64, i32) -> (i8)")
-        case "sisu_rt_bytes_eq": Some("(i64, i64, i64, i64) -> (i8)")
-        case "sisu_rt_text_push" | "sisu_rt_text_from": Some("(i64, i64, i64) -> ()")
-        case "sisu_rt_text_push_int" | "sisu_rt_list_reserve": Some("(i64, i64) -> ()")
+        # The runtime in Sisu's, of Sisu's convention (decisions 336 and 350):
+        # the result's address, each argument's, the status.
+        case "sisu_rt_bytes_eq" | "sisu_rt_text_push" | "sisu_rt_text_from": Some("(i64, i64, i64, i64) -> (i8)")
+        case "sisu_rt_text_push_int": Some("(i64, i64, i64) -> (i8)")
+        case "sisu_rt_list_reserve": Some("(i64, i64) -> ()")
         case "sisu_rt_table_find": Some("(i64, i64, i32, i32) -> (i64)")
         case "sisu_rt_intrinsic": Some("(i64, i64, i64) -> (i8)")
         case "sisu_rt_sized": Some("(i32, i32, i32, i64, i64, i64) -> (i8)")

@@ -1,0 +1,14 @@
+$ sisu test --replay 1-c239940ba84d571f-0.0.1-t0-s0-r0 d0033_other_code.sisu
+test "the total of three prices" ... FAILED
+
+test "the total of three prices" ... FAILED
+panic: assertion failed: total([3, 4, 5]) == 12
+  left:  9
+  right: 12
+  at test "the total of three prices" (d0033_other_code.sisu:9:5)
+replay: sisu test --replay 1-c239940ba84d571f-0.0.1-t0-s0-r0 d0033_other_code.sisu
+
+0 passed, 1 failed, 0 blocked
+$ sisu test d0033_other_code_fixed.sisu
+test "the total of three prices" ... ok
+1 passed, 0 failed, 0 blocked

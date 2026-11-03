@@ -1,0 +1,6 @@
+# A file embedded while compiling, which is not there.
+const MENU: str = embed("menu.txt")
+
+def main():
+    for line in MENU.lines():
+        print(line)

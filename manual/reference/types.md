@@ -213,7 +213,7 @@ so:
 
 | Operators | On overflow |
 |---|---|
-| `+`, `-`, `*`, `//`, `%`, `**` | panic (R0003) |
+| `+`, `-`, `*`, `//`, `%`, `**` | panic ([R0003](diagnostics.md#r0003)) |
 | `+%`, `-%`, `*%` | wrap around, as two's complement does |
 | `+\|`, `-\|`, `*\|` | stay at the type's least or greatest value |
 | `checked_add`, `checked_sub`, `checked_mul`, `checked_pow` of `std.num` | give `None` |
@@ -546,7 +546,7 @@ character. These say which they count:
 | `s.byte_len()` | the number of bytes of the encoding |
 | `s.chars()` | an iterator over the characters |
 | `s.bytes()` | an iterator over the bytes, as `u8`s |
-| `s.byte_slice(a, b)` | the text from byte `a` to byte `b`, a view; a panic (R0115) when either is inside a character |
+| `s.byte_slice(a, b)` | the text from byte `a` to byte `b`, a view; a panic ([R0115](diagnostics.md#r0115)) when either is inside a character |
 
 An interpolation makes a `String`, and so do the methods that build new
 text (`to_uppercase`, `replace`, `repeat`); the methods that cut text
@@ -1726,12 +1726,12 @@ These are left out on purpose ([03](../../proposal/03-types-and-generics.md#what
 | E0212, E0226, E0227 | `resolve.not-an-error-set`, `resolve.inferred-set-position`, `resolve.union-outside-result` | [Results and error sets](#results-and-error-sets) |
 | [E0211](diagnostics.md#e0211) | `resolve.ambiguous-variant` | [Structs and enums](#structs-and-enums) |
 | E0309, E0352, E0353 | `type.not-callable`, `type.value-returns-borrow`, `type.closure-parameter-count` | [Function types](#function-types) |
-| E0333, E0334, [E0335](diagnostics.md#e0335), E0392 | `type.impure-call`, `type.impure-capability`, `type.impure-argument`, `type.impure-value-call` | [Pure function types](#pure-function-types) |
+| [E0333](diagnostics.md#e0333), [E0334](diagnostics.md#e0334), [E0335](diagnostics.md#e0335), [E0392](diagnostics.md#e0392) | `type.impure-call`, `type.impure-capability`, `type.impure-argument`, `type.impure-value-call` | [Pure function types](#pure-function-types) |
 | [E0235](diagnostics.md#e0235), [E0236](diagnostics.md#e0236), E0240 | `resolve.overlapping-impl`, `resolve.orphan-impl`, `resolve.sealed-trait` | [One impl for each type and trait](#one-impl-for-each-type-and-trait) |
 | [E0368](diagnostics.md#e0368), E0208, E0349, E0375 | `type.not-ordered`, `resolve.type-argument-count`, `type.not-generic`, `type.type-arguments-needed` | [Generic types and functions](#generic-types-and-functions) |
 | [E0245](diagnostics.md#e0245), E0246 | `resolve.generic-default-order`, `resolve.impl-default` | [Defaulted type parameters](#defaulted-type-parameters) |
-| E0262, E0263, E0264, E0265, E0602 | `resolve.const-argument`, `resolve.type-argument`, `resolve.const-expression`, `resolve.const-not-int`, `comptime.panicked` | [Constant parameters](#constant-parameters) |
+| E0262, E0263, E0264, E0265, [E0602](diagnostics.md#e0602) | `resolve.const-argument`, `resolve.type-argument`, `resolve.const-expression`, `resolve.const-not-int`, `comptime.panicked` | [Constant parameters](#constant-parameters) |
 | [E0395](diagnostics.md#e0395), [E0241](diagnostics.md#e0241), E0396, [E0231](diagnostics.md#e0231) | `type.unsized-dyn`, `resolve.not-object-safe`, `type.view-to-dyn`, `resolve.trait-as-type` | [Trait objects](#trait-objects) |
 | [E0244](diagnostics.md#e0244), E0984, E0986 | `resolve.derive-field`, `unsafe.impl-needed`, `unsafe.never-asserted` | [The auto traits](#the-auto-traits) |
-| E0810, E0811, [E0812](diagnostics.md#e0812) | `refine.not-satisfied`, `refine.needs-try-from`, `refine.change-through-base` | [Refinement types](#refinement-types) |
+| [E0810](diagnostics.md#e0810), [E0811](diagnostics.md#e0811), [E0812](diagnostics.md#e0812) | `refine.not-satisfied`, `refine.needs-try-from`, `refine.change-through-base` | [Refinement types](#refinement-types) |
 | E0228, [E0310](diagnostics.md#e0310) | `resolve.alias-cycle`, `type.binary-operator` | [Type aliases and newtypes](#type-aliases-and-newtypes) |

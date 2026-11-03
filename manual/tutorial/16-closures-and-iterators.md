@@ -459,6 +459,7 @@ error[E0304]: `list[int]` has no method `collect`
 5 |     print(squares.collect())
   |                   ^^^^^^^
   = note: `collect` is a method of `Iterator`
+  = fix: iterate it first: `.iter()`
 
 error[D0006]: the program was not run: errors found (2)
 ```

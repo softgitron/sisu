@@ -1,0 +1,6 @@
+# The call inside `comptime`, so it runs while compiling.
+comptime def power_of_two(n: int) -> bool:
+    return n > 0 and n & (n - 1) == 0
+
+def main():
+    print(comptime power_of_two(16))

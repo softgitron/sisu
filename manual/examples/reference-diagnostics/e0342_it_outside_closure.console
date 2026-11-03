@@ -1,0 +1,8 @@
+$ sisu run e0342_it_outside_closure.sisu
+error[E0342]: `it` is the parameter of an implicit closure and exists only where a one-parameter function is expected
+  --> e0342_it_outside_closure.sisu:4:16
+  |
+4 |     let next = it + 1
+  |                ^^
+
+error[D0006]: the program was not run: errors found (1)

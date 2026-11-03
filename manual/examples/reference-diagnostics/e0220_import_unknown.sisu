@@ -1,0 +1,6 @@
+# An import of a module whose name is misspelt.
+import std.colections
+
+def main():
+    let sizes: colections.Deque[int] = colections.Deque.new()
+    print(sizes.is_empty())

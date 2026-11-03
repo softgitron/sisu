@@ -4,6 +4,7 @@ error[E0304]: `list[str]` has no method `clone`
   |
 4 |     let copied = names.clone()
   |                        ^^^^^
+  = fix: Sisu spells it this way: `copy`
 
 error[E0117]: unexpected `as` after the end of the statement
   --> habits.sisu:5:29

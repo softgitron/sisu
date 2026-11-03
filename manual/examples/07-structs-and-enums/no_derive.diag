@@ -4,5 +4,6 @@
   fix type.derive-trait 2:1-2:1 "@derive(PartialOrd)\n"
 10:13-10:67 E0347 type.bound-not-satisfied ty="Version" bound="Ord"
   fix type.derive-trait 2:1-2:1 "@derive(Eq, PartialOrd, Ord)\n"
+10:13-10:67 E0438 borrow.ref-in-collection ty="list[ref Version]"
 11:17-11:36 E0347 type.bound-not-satisfied ty="Version" bound="Hash"
   fix type.derive-trait 2:1-2:1 "@derive(Eq, Hash)\n"

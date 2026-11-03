@@ -1,0 +1,8 @@
+$ sisu run e0810_refinement_constant.sisu
+error[E0810]: `135` is not a `Percent`: `0 <= self <= 100` is false for it
+  --> e0810_refinement_constant.sisu:5:32
+  |
+5 |     let after_ladle: Percent = 135
+  |                                ^^^
+
+error[D0006]: the program was not run: errors found (1)

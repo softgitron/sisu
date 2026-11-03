@@ -122,8 +122,8 @@ pub pure def cold_blocks(f: Function) -> list[bool]:
             return cold
 
 ## Whether a local of type `t` is one word the release profile may keep in
-## a variable: a number, a `bool`, a `char`, or a reference that is an
-## address.
+## a variable: a number, a `bool`, a `char`, a reference that is an
+## address, or a raw pointer (decision 350).
 pure def one_word(t: Type) -> bool:
     match t:
         case Type.Ref(inner, _):
@@ -131,6 +131,9 @@ pure def one_word(t: Type) -> bool:
         case Type.Int | Type.Float | Type.Bool | Type.Char:
             return True
         case Type.Named(n, a):
+            # A raw pointer is one word too (decision 350).
+            if (n == "ptr" or n == "ptr_mut") and len(a) == 1:
+                return True
             if not a.is_empty():
                 return False
             return match n.to_string():

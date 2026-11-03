@@ -1,0 +1,10 @@
+##! The last of a list of readings, read through a raw pointer.
+from std.mem import as_ptr
+
+## The last reading of `temps`, which holds at least one.
+pub def last(temps: Slice[int]) -> int:
+    requires len(temps) > 0
+    let first = as_ptr(temps)
+    # safety: in_bounds, valid, aligned: the precondition gives the last
+    #   index, and `temps` lives, unchanged, until the read.
+    return unsafe first.offset(len(temps) - 1).read()

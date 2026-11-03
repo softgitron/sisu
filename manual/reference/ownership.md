@@ -74,7 +74,7 @@ error[E0400]: `names` was moved on line 4 and cannot be used afterwards
   |
 4 |     let team = names
   |                ----- `names` is moved here
-  = note: copy it with `.copy()` before it is moved, or move it later
+  = note: copy it with `.copy()` before the move, which makes a second value (for a list or a `String`, an allocation); move it later, after its last use, which costs nothing; or, where what it moves into only reads it, take it there without `own`, and the call lends it
 
 error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```
@@ -149,7 +149,7 @@ error[E0401]: `order` cannot be used as a whole, because `order.items` was moved
    |
  8 |     let items = order.items
    |                 ----------- `order.items` is moved here
-  = note: copy it with `.copy()` before it is moved, or move it later
+  = note: copy it with `.copy()` before the move, which makes a second value (for a list or a `String`, an allocation); move it later, after its last use, which costs nothing; or, where what it moves into only reads it, take it there without `own`, and the call lends it
 
 error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```
@@ -794,10 +794,10 @@ stage 0 yet.
 | [E0402](diagnostics.md#e0402), [E0403](diagnostics.md#e0403), [E0404](diagnostics.md#e0404), [E0405](diagnostics.md#e0405) | `borrow.modify-while-borrowed`, `borrow.use-while-mut-borrowed`, `borrow.move-while-borrowed`, `borrow.mut-while-borrowed` | [One mutable borrow or many shared ones](#one-mutable-borrow-or-many-shared-ones) |
 | [E0406](diagnostics.md#e0406) | `borrow.does-not-live-long-enough` | [One mutable borrow or many shared ones](#one-mutable-borrow-or-many-shared-ones) |
 | [E0407](diagnostics.md#e0407), [E0408](diagnostics.md#e0408), [E0413](diagnostics.md#e0413), E0414, E0415 | `borrow.return-local`, `borrow.return-not-from`, `borrow.from-required`, `borrow.from-not-a-parameter`, `borrow.from-without-borrow` | [Returning a borrow](#returning-a-borrow) |
-| E0409, E0410, [E0411](diagnostics.md#e0411), [E0412](diagnostics.md#e0412), E0421 | `borrow.store-in-plain-type`, `borrow.store-into-caller`, `borrow.view-field-in-plain-struct`, `borrow.view-in-enum`, `borrow.view-in-owner` | [Views](#views) |
+| E0409, E0410, [E0411](diagnostics.md#e0411), [E0412](diagnostics.md#e0412), [E0421](diagnostics.md#e0421) | `borrow.store-in-plain-type`, `borrow.store-into-caller`, `borrow.view-field-in-plain-struct`, `borrow.view-in-enum`, `borrow.view-in-owner` | [Views](#views) |
 | E0416, E0419 | `borrow.move-out-of-drop`, `borrow.move-out-of-place` | [Moving out of part of a value](#moving-out-of-part-of-a-value) |
 | [E0417](diagnostics.md#e0417), [E0418](diagnostics.md#e0418), E0420, E0422 | `borrow.must-consume`, `borrow.must-consume-exit`, `borrow.must-consume-intrinsic`, `borrow.must-consume-in-owner` | [Values that must be consumed](#values-that-must-be-consumed) |
-| E0423, E0424 | `type.own-closure-capture`, `type.own-closure-changes` | [Closures and their captures](#closures-and-their-captures) |
+| [E0423](diagnostics.md#e0423), E0424 | `type.own-closure-capture`, `type.own-closure-changes` | [Closures and their captures](#closures-and-their-captures) |
 
 The codes of tasks, E0425 to E0437, belong to
 [R9](concurrency.md#diagnostics-of-this-page), Concurrency.

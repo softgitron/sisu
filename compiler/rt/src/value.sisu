@@ -1,0 +1,1146 @@
+##! The structural operations on values in the native layout, by their
+##! types (decision 350): equality, order, the structural hash of decision
+##! 256, `.copy()`, the drop, and the count of the capability handles a copy
+##! holds (decision 237). Each walks a value by its type's parts in the
+##! program's table (`types.sisu`), in the order and with the results of the
+##! interpreter's own (`sisu-interp/src/drops.rs`, `ops.rs`, `copy_value`);
+##! what the runtime in Rust keeps as objects of its own, it drops, copies
+##! and compares itself (`host.sisu`).
+##!
+##! Every function here takes values by their addresses and the numbers of
+##! their types, and its obligation, `typed`, is that each address holds a
+##! live value of its type, as the program's table describes it: then every
+##! part a function reaches is where the table says, and each word of a
+##! type's header (`h`, the address of its ten words) and of its lists is
+##! the table's. The walks read those words, and the values' own, in place
+##! rather than through helper functions, since a call costs a probe and
+##! the memory of its arguments.
+
+from rt.host import memcmp
+from rt.host import memmove
+from rt.host import sisu_rt_abort_unwind
+from rt.host import sisu_rt_alloc
+from rt.host import sisu_rt_defer
+from rt.host import sisu_rt_free
+from rt.host import sisu_rt_glue
+from rt.host import sisu_rt_object_copy
+from rt.host import sisu_rt_object_drop
+from rt.host import sisu_rt_object_eq
+from rt.host import sisu_rt_object_retain
+from rt.host import sisu_rt_trace_release
+from rt.host import sisu_rt_trace_retain
+from rt.types import A
+from rt.types import ARENA
+from rt.types import B
+from rt.types import BOOL
+from rt.types import BOX
+from rt.types import BYTES
+from rt.types import CELL
+from rt.types import CHAR
+from rt.types import COPIES
+from rt.types import COPIES_BY_VARIANT
+from rt.types import COUNTED
+from rt.types import DATETIME
+from rt.types import DICT
+from rt.types import DROPS
+from rt.types import DROPS_BY_VARIANT
+from rt.types import DYN
+from rt.types import ENTRY
+from rt.types import ENUM
+from rt.types import ERRSET
+from rt.types import ERROR
+from rt.types import F32
+from rt.types import FLAGS
+from rt.types import FLOAT
+from rt.types import FN
+from rt.types import GUARD
+from rt.types import I128
+from rt.types import INT
+from rt.types import ITER
+from rt.types import LIST
+from rt.types import MUTEX
+from rt.types import NAME
+from rt.types import NEEDS_DROP
+from rt.types import OPTION
+from rt.types import PARTS
+from rt.types import PATH
+from rt.types import PLAIN
+from rt.types import READ_GUARD
+from rt.types import RECEIVER
+from rt.types import REF
+from rt.types import RESULT
+from rt.types import RW_LOCK
+from rt.types import SENDER
+from rt.types import SET
+from rt.types import SHARED
+from rt.types import SIZE
+from rt.types import SIZED
+from rt.types import STR
+from rt.types import STRING
+from rt.types import STRUCT
+from rt.types import TAG
+from rt.types import TUPLE
+from rt.types import Types
+from rt.types import U128
+from rt.types import U64
+from rt.types import UNIT
+from rt.types import WEAK
+from rt.types import WORDS
+from std.mem import ptr
+
+## A function returned normally; a panic is leaving it.
+pub const OK: int = 0
+pub const UNWINDING: int = 1
+
+## The ways of dropping: forgetting frees what a value owns and runs no Sisu
+## code (decision 223); deferring, on the system stack, moves a value whose
+## drop would run the program's code aside, to be dropped on the task's
+## stack.
+pub const FORGETTING: int = 1
+pub const DEFERRING: int = 2
+
+## The bytes of a `Mutex`'s header, before its value, and the word that says
+## whether it is poisoned.
+const MUTEX_HEADER: int = 32
+const MUTEX_POISONED: int = 16
+
+## `Hasher.write_int`'s multiplier (decision 256).
+const PRIME: int = 1099511628211
+
+# ------------------------------------------------------------------- types
+
+## The value behind any number of references and `dyn`s at `p`, of type
+## `t`, and its type.
+##
+## Requires:
+## - `typed`: `p` holds a live value of type `t`
+pub(package) def target(ts: Types, p: ptr mut u8, t: int) -> (ptr mut u8, int):
+    var place = p
+    var ty = t
+    # safety: typed, in_bounds, valid, aligned, writable: a reference's word
+    #   is the address of its target, and a `dyn`'s two words the type and
+    #   the address of its value.
+    unsafe:
+        var kind = ts.words.offset(ty * WORDS).read()
+        while kind == REF or kind == DYN:
+            if kind == REF:
+                let inner = ts.words.offset(ty * WORDS + A).read()
+                # A reference to a `dyn` is the `dyn`'s two words, in place.
+                if ts.words.offset(inner * WORDS).read() != DYN:
+                    place = place.cast[ptr[u8]]().read().cast_mut()
+                ty = inner
+            else:
+                ty = place.cast[int]().read()
+                place = place.offset(8).cast[ptr[u8]]().read().cast_mut()
+            kind = ts.words.offset(ty * WORDS).read()
+    return (place, ty)
+
+## The enum type the value at `p` of type `t` belongs to: an error value's
+## first word is its own type's number.
+##
+## Requires:
+## - `typed`: `p` holds a live value of type `t`
+def concrete(ts: Types, p: ptr mut u8, t: int) -> int:
+    # safety: typed, in_bounds, valid, aligned: the type's flags are its
+    #   header's, and an error value's first word is its type.
+    unsafe:
+        if (ts.words.offset(t * WORDS + FLAGS).read() & ERROR) != 0:
+            return p.cast[int]().read()
+    return t
+
+## The list of fields of the variant the value at `p` of the enum whose
+## header is at `h` holds, or 0 for a tag the enum has no variant for.
+##
+## Requires:
+## - `typed`: `p` holds a live value of that enum
+def variant(ts: Types, p: ptr mut u8, h: ptr[int]) -> int:
+    # safety: typed, in_bounds, valid, aligned: an enum's tag is the word at
+    #   its tag's offset, and its list of variants is the table's.
+    unsafe:
+        let tag = p.offset(h.offset(TAG).read()).cast[int]().read()
+        let variants = h.offset(PARTS).read()
+        if tag < 0 or tag >= ts.words.offset(variants).read():
+            return 0
+        return ts.words.offset(variants + 1 + tag).read()
+
+## The type of what a function value's environment holds when a drop or a
+## copy must reach it (its last word, the type's number plus one), else -1
+## (decision 248).
+##
+## Requires:
+## - `typed`: `p` holds a function value of the type whose header is at `h`
+def fn_env(p: ptr mut u8, h: ptr[int]) -> int:
+    # safety: typed, in_bounds, valid, aligned: a function value's last word
+    #   names its environment's type.
+    unsafe:
+        return p.offset(h.offset(SIZE).read() - 8).cast[int]().read() - 1
+
+## Whether a kind is one of texts, whose first two words are the address of
+## their bytes and their length.
+pure def is_text(k: int) -> bool:
+    return k == STR or k == STRING or k == PATH
+
+# ---------------------------------------------------------------- equality
+
+## Whether the `na` bytes at `a` and the `nb` at `b` are the same.
+##
+## Requires:
+## - `inside`: `a` and `b` point to live bytes, `na` and `nb` of them
+pub(package) def same_bytes(a: ptr[u8], na: int, b: ptr[u8], nb: int) -> bool:
+    if na != nb:
+        return False
+    if na == 0:
+        return True
+    # safety: returns_promptly: memcmp reads the `na` bytes of each, which
+    #   this function's `inside` says are live.
+    return unsafe memcmp(a, b, na) == 0
+
+## Whether two `f32`s, the low halves of these words, are equal: neither a
+## NaN, and the same bits or both zeros.
+pure def f32_equal(x: int, y: int) -> bool:
+    let a = x & 4294967295
+    let b = y & 4294967295
+    if f32_nan(a) or f32_nan(b):
+        return False
+    return a == b or ((a | b) & 2147483647) == 0
+
+## Whether the bits of an `f32` are a NaN's.
+pure def f32_nan(bits: int) -> bool:
+    return (bits & 2139095040) == 2139095040 and (bits & 8388607) != 0
+
+## Structural equality of the value at `a` of type `ta` and the value at `b`
+## of type `tb`, through references and `dyn`s (`==` on values that are not
+## numbers): texts of any kind with the same bytes are equal.
+##
+## Requires:
+## - `typed`: `a` and `b` hold live values of types `ta` and `tb`
+pub(package) def equal(ts: Types, a0: ptr mut u8, ta0: int, b0: ptr mut u8, tb0: int) -> bool:
+    # safety: typed, inside, in_bounds, valid, aligned, writable: the values
+    #   are of their types, and each part is where its type's entry in the
+    #   table says; returns_promptly: the runtime in Rust compares its tables.
+    unsafe:
+        var (a, ta, b, tb) = (a0, ta0, b0, tb0)
+        var x = ts.words.offset(ta * WORDS)
+        var k = x.read()
+        if k == REF or k == DYN:
+            let (p, t) = target(ts, a0, ta0)
+            a = p
+            ta = t
+            x = ts.words.offset(ta * WORDS)
+            k = x.read()
+        var y = ts.words.offset(tb * WORDS)
+        var l = y.read()
+        if l == REF or l == DYN:
+            let (p, t) = target(ts, b0, tb0)
+            b = p
+            tb = t
+            y = ts.words.offset(tb * WORDS)
+            l = y.read()
+        let (aw, bw) = (a.cast[int](), b.cast[int]())
+        if is_text(k) and is_text(l):
+            let n = aw.offset(1).read()
+            if n != bw.offset(1).read():
+                return False
+            return n == 0 or memcmp(a.cast[ptr[u8]]().read(), b.cast[ptr[u8]]().read(), n) == 0
+        if (k == INT or k == SIZED) and (l == INT or l == SIZED):
+            return aw.read() == bw.read()
+        if (k == ENUM or k == ERRSET) and (l == ENUM or l == ERRSET):
+            return enum_equal(ts, a, concrete(ts, a, ta), b, concrete(ts, b, tb))
+        if k != l:
+            return False
+        if k == U64 or k == BOOL or k == CHAR or k == DATETIME:
+            return aw.read() == bw.read()
+        if k == I128 or k == U128:
+            return aw.read() == bw.read() and aw.offset(1).read() == bw.offset(1).read()
+        if k == FLOAT:
+            return a.cast[f64]().read() == b.cast[f64]().read()
+        if k == F32:
+            return f32_equal(aw.read(), bw.read())
+        if k == UNIT:
+            return True
+        if k == BYTES:
+            return same_bytes(
+                a.cast[ptr[u8]]().read(), aw.offset(1).read(), b.cast[ptr[u8]]().read(), bw.offset(1).read()
+            )
+        if k == TUPLE:
+            let (fa, fb) = (x.offset(PARTS).read(), y.offset(PARTS).read())
+            return ts.words.offset(fa).read() == ts.words.offset(fb).read() and fields_equal(ts, a, fa, b, fb)
+        if k == LIST:
+            let n = aw.offset(1).read()
+            if n != bw.offset(1).read():
+                return False
+            let (ea, eb) = (x.offset(A).read(), y.offset(A).read())
+            let (sa, sb) = (ts.words.offset(ea * WORDS + SIZE).read(), ts.words.offset(eb * WORDS + SIZE).read())
+            let (pa, pb) = (a.cast[ptr[u8]]().read().cast_mut(), b.cast[ptr[u8]]().read().cast_mut())
+            var i = 0
+            while i < n:
+                if not equal(ts, pa.offset(i * sa), ea, pb.offset(i * sb), eb):
+                    return False
+                i += 1
+            return True
+        if k == OPTION:
+            let tag = aw.read()
+            if tag != bw.read():
+                return False
+            return tag != 0 or equal(ts, a.offset(8), x.offset(A).read(), b.offset(8), y.offset(A).read())
+        if k == RESULT:
+            let tag = aw.read()
+            if tag != bw.read():
+                return False
+            let part = if tag == 0: A else: B
+            return equal(ts, a.offset(8), x.offset(part).read(), b.offset(8), y.offset(part).read())
+        if k == BOX:
+            return equal(
+                ts,
+                a.cast[ptr[u8]]().read().cast_mut(),
+                x.offset(A).read(),
+                b.cast[ptr[u8]]().read().cast_mut(),
+                y.offset(A).read(),
+            )
+        if k == SET or k == DICT:
+            return sisu_rt_object_eq(a, ta, b, tb)
+        if k == STRUCT:
+            let (fa, fb) = (x.offset(PARTS).read(), y.offset(PARTS).read())
+            return (
+                x.offset(NAME).read() == y.offset(NAME).read()
+                and ts.words.offset(fa).read() == ts.words.offset(fb).read()
+                and fields_equal(ts, a, fa, b, fb)
+            )
+        return False
+
+## Whether the values of two enums are equal: of one name, the same variant
+## and equal fields.
+##
+## Requires:
+## - `typed`: `a` and `b` hold live values of types `ta` and `tb`
+def enum_equal(ts: Types, a: ptr mut u8, ta: int, b: ptr mut u8, tb: int) -> bool:
+    # safety: typed, in_bounds, valid, aligned: an enum's tag and fields are
+    #   where its entry says.
+    unsafe:
+        let (x, y) = (ts.words.offset(ta * WORDS), ts.words.offset(tb * WORDS))
+        if x.read() != ENUM or y.read() != ENUM or x.offset(NAME).read() != y.offset(NAME).read():
+            return False
+        if a.offset(x.offset(TAG).read()).cast[int]().read() != b.offset(y.offset(TAG).read()).cast[int]().read():
+            return False
+        let (fa, fb) = (variant(ts, a, x), variant(ts, b, y))
+        if fa == 0 or fb == 0:
+            return False
+        return fields_equal(ts, a, fa, b, fb)
+
+## Whether the fields of two lists of fields are equal, pair by pair, as far
+## as the shorter goes.
+##
+## Requires:
+## - `typed`: `a` and `b` hold the fields of the lists at their offsets
+def fields_equal(ts: Types, a: ptr mut u8, fa: int, b: ptr mut u8, fb: int) -> bool:
+    # safety: typed, in_bounds, valid, aligned: a list of fields holds three
+    #   words for each field after its length, and each field is at its
+    #   offset.
+    unsafe:
+        let (wa, wb) = (ts.words.offset(fa), ts.words.offset(fb))
+        let n = min(wa.read(), wb.read())
+        var i = 0
+        while i < n:
+            let (fx, fy) = (wa.offset(1 + 3 * i), wb.offset(1 + 3 * i))
+            if not equal(ts, a.offset(fx.read()), fx.offset(1).read(), b.offset(fy.read()), fy.offset(1).read()):
+                return False
+            i += 1
+    return True
+
+# ------------------------------------------------------------------- order
+
+## An order: less, equal, greater, or none (a NaN, or values without one).
+pub const LESS: int = -1
+pub const EQUAL: int = 0
+pub const GREATER: int = 1
+pub const UNORDERED: int = 2
+
+## The order of two words as signed numbers.
+pure def signed_order(x: int, y: int) -> int:
+    if x < y:
+        return LESS
+    if x > y:
+        return GREATER
+    return EQUAL
+
+## The order of two words as unsigned numbers: one with its high bit set is
+## the larger.
+pure def unsigned_order(x: int, y: int) -> int:
+    if (x < 0) == (y < 0):
+        return signed_order(x, y)
+    return if x < 0: GREATER else: LESS
+
+## The order of the `na` bytes at `a` and the `nb` at `b`, byte by byte,
+## then by length.
+##
+## Requires:
+## - `inside`: `a` and `b` point to live bytes, `na` and `nb` of them
+def bytes_order(a: ptr[u8], na: int, b: ptr[u8], nb: int) -> int:
+    let n = min(na, nb)
+    if n > 0:
+        # safety: returns_promptly: memcmp reads `n` bytes of each, which this
+        #   function's `inside` says are live.
+        let c = unsafe memcmp(a, b, n)
+        if c < 0:
+            return LESS
+        if c > 0:
+            return GREATER
+    return signed_order(na, nb)
+
+## The order of two `f32`s, the low halves of these words: none for a NaN,
+## equal zeros, and otherwise the order their bits give by sign and
+## magnitude.
+pure def f32_order(x: int, y: int) -> int:
+    let a = x & 4294967295
+    let b = y & 4294967295
+    if f32_nan(a) or f32_nan(b):
+        return UNORDERED
+    if a == b or ((a | b) & 2147483647) == 0:
+        return EQUAL
+    let (na, nb) = ((a & 2147483648) != 0, (b & 2147483648) != 0)
+    if na != nb:
+        return if na: LESS else: GREATER
+    let magnitude = signed_order(a & 2147483647, b & 2147483647)
+    return if na: -magnitude else: magnitude
+
+## The order of two `f64`s: none for a NaN.
+pure def float_order(x: f64, y: f64) -> int:
+    if x < y:
+        return LESS
+    if x > y:
+        return GREATER
+    if x == y:
+        return EQUAL
+    return UNORDERED
+
+## The order of the value at `a` of type `ta` and the value at `b` of type
+## `tb`, through references and `dyn`s (`<` and its kin on values that are
+## not numbers): texts by their bytes, numbers by their values, tuples,
+## lists, structs and an enum's fields part by part and then by their
+## number, options and results and enums by their variants first;
+## `UNORDERED` for a NaN and for values without an order.
+##
+## Requires:
+## - `typed`: `a` and `b` hold live values of types `ta` and `tb`
+pub(package) def order(ts: Types, a0: ptr mut u8, ta0: int, b0: ptr mut u8, tb0: int) -> int:
+    # safety: typed, inside, in_bounds, valid, aligned, writable: the values
+    #   are of their types, and each part is where its type's entry in the
+    #   table says.
+    unsafe:
+        let (a, ta) = target(ts, a0, ta0)
+        let (b, tb) = target(ts, b0, tb0)
+        let (x, y) = (ts.words.offset(ta * WORDS), ts.words.offset(tb * WORDS))
+        let (k, l) = (x.read(), y.read())
+        let (aw, bw) = (a.cast[int](), b.cast[int]())
+        if is_text(k) and is_text(l):
+            return bytes_order(
+                a.cast[ptr[u8]]().read(), aw.offset(1).read(), b.cast[ptr[u8]]().read(), bw.offset(1).read()
+            )
+        if (k == INT or k == SIZED) and (l == INT or l == SIZED):
+            return signed_order(aw.read(), bw.read())
+        if (k == ENUM or k == ERRSET) and (l == ENUM or l == ERRSET):
+            return enum_order(ts, a, concrete(ts, a, ta), b, concrete(ts, b, tb))
+        if k != l:
+            return UNORDERED
+        if k == U64 or k == BOOL or k == CHAR:
+            return unsigned_order(aw.read(), bw.read())
+        if k == DATETIME:
+            return signed_order(aw.read(), bw.read())
+        if k == I128:
+            let high = signed_order(aw.offset(1).read(), bw.offset(1).read())
+            return if high != EQUAL: high else: unsigned_order(aw.read(), bw.read())
+        if k == U128:
+            let high = unsigned_order(aw.offset(1).read(), bw.offset(1).read())
+            return if high != EQUAL: high else: unsigned_order(aw.read(), bw.read())
+        if k == FLOAT:
+            return float_order(a.cast[f64]().read(), b.cast[f64]().read())
+        if k == F32:
+            return f32_order(aw.read(), bw.read())
+        if k == UNIT:
+            return EQUAL
+        if k == BYTES:
+            return bytes_order(
+                a.cast[ptr[u8]]().read(), aw.offset(1).read(), b.cast[ptr[u8]]().read(), bw.offset(1).read()
+            )
+        if k == TUPLE or k == STRUCT:
+            let (fa, fb) = (x.offset(PARTS).read(), y.offset(PARTS).read())
+            let o = fields_order(ts, a, fa, b, fb)
+            if o != EQUAL:
+                return o
+            return signed_order(ts.words.offset(fa).read(), ts.words.offset(fb).read())
+        if k == LIST:
+            let (na, nb) = (aw.offset(1).read(), bw.offset(1).read())
+            let (ea, eb) = (x.offset(A).read(), y.offset(A).read())
+            let (sa, sb) = (ts.words.offset(ea * WORDS + SIZE).read(), ts.words.offset(eb * WORDS + SIZE).read())
+            let (pa, pb) = (a.cast[ptr[u8]]().read().cast_mut(), b.cast[ptr[u8]]().read().cast_mut())
+            var i = 0
+            while i < na and i < nb:
+                let o = order(ts, pa.offset(i * sa), ea, pb.offset(i * sb), eb)
+                if o != EQUAL:
+                    return o
+                i += 1
+            return signed_order(na, nb)
+        if k == OPTION or k == RESULT:
+            let (tx, ty) = (aw.read(), bw.read())
+            if tx != ty:
+                return signed_order(tx, ty)
+            if tx == 0:
+                return order(ts, a.offset(8), x.offset(A).read(), b.offset(8), y.offset(A).read())
+            if k == RESULT:
+                return order(ts, a.offset(8), x.offset(B).read(), b.offset(8), y.offset(B).read())
+            return EQUAL
+        if k == BOX:
+            return order(
+                ts,
+                a.cast[ptr[u8]]().read().cast_mut(),
+                x.offset(A).read(),
+                b.cast[ptr[u8]]().read().cast_mut(),
+                y.offset(A).read(),
+            )
+        return UNORDERED
+
+## The order of two enums' values: by their variants, then their fields.
+##
+## Requires:
+## - `typed`: `a` and `b` hold live values of types `ta` and `tb`
+def enum_order(ts: Types, a: ptr mut u8, ta: int, b: ptr mut u8, tb: int) -> int:
+    # safety: typed, in_bounds, valid, aligned: an enum's tag and fields are
+    #   where its entry says.
+    unsafe:
+        let (x, y) = (ts.words.offset(ta * WORDS), ts.words.offset(tb * WORDS))
+        if x.read() != ENUM or y.read() != ENUM:
+            return UNORDERED
+        let tx = a.offset(x.offset(TAG).read()).cast[int]().read()
+        let ty = b.offset(y.offset(TAG).read()).cast[int]().read()
+        if tx != ty:
+            return signed_order(tx, ty)
+        let (fa, fb) = (variant(ts, a, x), variant(ts, b, y))
+        if fa == 0 or fb == 0:
+            return UNORDERED
+        let o = fields_order(ts, a, fa, b, fb)
+        if o != EQUAL:
+            return o
+        return signed_order(ts.words.offset(fa).read(), ts.words.offset(fb).read())
+
+## The order of the fields of two lists of fields, pair by pair, as far as
+## the shorter goes: the first that differ, else equal.
+##
+## Requires:
+## - `typed`: `a` and `b` hold the fields of the lists at their offsets
+def fields_order(ts: Types, a: ptr mut u8, fa: int, b: ptr mut u8, fb: int) -> int:
+    # safety: typed, in_bounds, valid, aligned: a list of fields holds three
+    #   words for each field after its length, and each field is at its
+    #   offset.
+    unsafe:
+        let (wa, wb) = (ts.words.offset(fa), ts.words.offset(fb))
+        let n = min(wa.read(), wb.read())
+        var i = 0
+        while i < n:
+            let (fx, fy) = (wa.offset(1 + 3 * i), wb.offset(1 + 3 * i))
+            let o = order(ts, a.offset(fx.read()), fx.offset(1).read(), b.offset(fy.read()), fy.offset(1).read())
+            if o != EQUAL:
+                return o
+            i += 1
+    return EQUAL
+
+# -------------------------------------------------------------------- hash
+
+## The state with a text's or `bytes`' `n` bytes at `p` mixed in: their
+## length, then each byte.
+##
+## Requires:
+## - `inside`: `p` points to `n` live bytes
+def hash_bytes(state: int, p: ptr[u8], n: int) -> int:
+    var s = (state ^ n) *% PRIME
+    var i = 0
+    # safety: in_bounds, valid, aligned: byte `i` is one of the `n`, which
+    #   this function's `inside` says are live; a byte needs no alignment.
+    unsafe:
+        while i < n:
+            s = (s ^ p.offset(i).read().to_int()) *% PRIME
+            i += 1
+    return s
+
+## The structural hash of the value at `p` of type `t` (decision 256): its
+## parts mixed into `state` as `Hasher.write_int` mixes an `int`, in the
+## order the derived impls and the prelude's own impls hash them; a text's
+## or `bytes`' length then each byte, an integer, a `char`, a `bool`, a
+## `DateTime` or a float's bits as one word (an `f32`'s as its low half), a
+## 128-bit integer's two words, a list's length then its elements, an
+## option's or a result's or an enum's variant then its fields, a tuple's
+## and a struct's fields in order, and anything else as nothing.
+##
+## Requires:
+## - `typed`: `p` holds a live value of type `t`
+pub(package) def hash(ts: Types, state: int, p0: ptr mut u8, t0: int) -> int:
+    # safety: typed, inside, in_bounds, valid, aligned, writable: the value
+    #   is of its type, and each part is where its type's entry in the table
+    #   says.
+    unsafe:
+        var p = p0
+        var t = t0
+        var h = ts.words.offset(t * WORDS)
+        var k = h.read()
+        if k == REF or k == DYN:
+            let (q, u) = target(ts, p0, t0)
+            p = q
+            t = u
+            h = ts.words.offset(t * WORDS)
+            k = h.read()
+        let w = p.cast[int]()
+        if is_text(k) or k == BYTES:
+            return hash_bytes(state, p.cast[ptr[u8]]().read(), w.offset(1).read())
+        if k == INT or k == SIZED or k == U64 or k == BOOL or k == CHAR or k == FLOAT or k == DATETIME:
+            return (state ^ w.read()) *% PRIME
+        if k == F32:
+            return (state ^ (w.read() & 4294967295)) *% PRIME
+        if k == I128 or k == U128:
+            return (((state ^ w.read()) *% PRIME) ^ w.offset(1).read()) *% PRIME
+        if k == TUPLE or k == STRUCT:
+            return hash_fields(ts, state, p, h.offset(PARTS).read())
+        if k == LIST:
+            let n = w.offset(1).read()
+            let e = h.offset(A).read()
+            let size = ts.words.offset(e * WORDS + SIZE).read()
+            let elems = p.cast[ptr[u8]]().read().cast_mut()
+            var s = (state ^ n) *% PRIME
+            var i = 0
+            while i < n:
+                s = hash(ts, s, elems.offset(i * size), e)
+                i += 1
+            return s
+        if k == OPTION:
+            let tag = w.read()
+            let s = (state ^ tag) *% PRIME
+            if tag == 0:
+                return hash(ts, s, p.offset(8), h.offset(A).read())
+            return s
+        if k == RESULT:
+            let tag = w.read()
+            return hash(ts, (state ^ tag) *% PRIME, p.offset(8), h.offset(if tag == 0: A else: B).read())
+        if k == BOX:
+            return hash(ts, state, p.cast[ptr[u8]]().read().cast_mut(), h.offset(A).read())
+        if k == ENUM or k == ERRSET:
+            let e = ts.words.offset(concrete(ts, p, t) * WORDS)
+            if e.read() != ENUM:
+                return state
+            let s = (state ^ p.offset(e.offset(TAG).read()).cast[int]().read()) *% PRIME
+            let fields = variant(ts, p, e)
+            if fields == 0:
+                return s
+            return hash_fields(ts, s, p, fields)
+        return state
+
+## The state with the fields of a list of fields mixed in, in order.
+##
+## Requires:
+## - `typed`: `p` holds the fields of the list at their offsets
+def hash_fields(ts: Types, state: int, p: ptr mut u8, fields: int) -> int:
+    var s = state
+    # safety: typed, in_bounds, valid, aligned: a list of fields holds three
+    #   words for each field after its length, and each field is at its
+    #   offset.
+    unsafe:
+        let w = ts.words.offset(fields)
+        let n = w.read()
+        var i = 0
+        while i < n:
+            let f = w.offset(1 + 3 * i)
+            s = hash(ts, s, p.offset(f.read()), f.offset(1).read())
+            i += 1
+    return s
+
+# -------------------------------------------------------------------- copy
+
+## Copies `n` bytes from `src` to `dst`.
+##
+## Requires:
+## - `inside`: `src` holds `n` live bytes and `dst` has room for them
+def move_bytes(dst: ptr mut u8, src: ptr mut u8, n: int):
+    # safety: valid, aligned, writable: a word is copied as one;
+    #   returns_promptly: memmove copies the `n` bytes this function's
+    #   `inside` names.
+    unsafe:
+        if n == 8:
+            dst.cast[int]().write(src.cast[int]().read())
+        elif n > 0:
+            _ = memmove(dst, src.as_const(), n)
+
+## Copies again, over the bytes already copied, each part of a list of
+## parts (decision 262).
+##
+## Requires:
+## - `typed`: `src` holds the parts at their offsets, and `dst` their bytes
+def copy_parts(ts: Types, dst: ptr mut u8, src: ptr mut u8, parts: int):
+    # safety: typed, in_bounds, valid, aligned: the list's words are the
+    #   table's, and each part is at its offset in both.
+    unsafe:
+        let w = ts.words.offset(parts)
+        let n = w.read()
+        var i = 0
+        while i < n:
+            let off = w.offset(1 + 2 * i).read()
+            copy(ts, dst.offset(off), src.offset(off), w.offset(2 + 2 * i).read())
+            i += 1
+
+## Copies each field of a list of fields, in order.
+##
+## Requires:
+## - `typed`: `src` holds the fields at their offsets, and `dst` has room
+##   for them
+def copy_fields(ts: Types, dst: ptr mut u8, src: ptr mut u8, fields: int):
+    # safety: typed, in_bounds, valid, aligned: a list of fields holds three
+    #   words for each field after its length, and each field is at its
+    #   offset in both.
+    unsafe:
+        let w = ts.words.offset(fields)
+        let n = w.read()
+        var i = 0
+        while i < n:
+            let f = w.offset(1 + 3 * i)
+            let off = f.read()
+            copy(ts, dst.offset(off), src.offset(off), f.offset(1).read())
+            i += 1
+
+## Writes the three words of a text's or a list's value at `dst`: a new
+## block of `room` bytes holding a copy of the `n` bytes at `src`, the
+## length `len` and the capacity `count`; no block when `len` is 0.
+##
+## Requires:
+## - `inside`: `src` holds `n` live bytes, `n` at most `room`, and `dst` has
+##   room for three words
+def new_buffer(dst: ptr mut u8, src: ptr[u8], n: int, room: int, len: int, count: int):
+    # safety: writable, aligned, in_bounds: `dst` has room for the three
+    #   words; returns_promptly: the runtime in Rust gives a block of `room`
+    #   bytes, which memmove fills.
+    unsafe:
+        let w = dst.cast[int]()
+        if len == 0:
+            w.write(0)
+            w.offset(1).write(0)
+            w.offset(2).write(0)
+            return
+        let block = sisu_rt_alloc(room)
+        if n > 0:
+            _ = memmove(block, src, n)
+        w.write(block.addr())
+        w.offset(1).write(len)
+        w.offset(2).write(count)
+
+## `.copy()` of a list of elements of type `e`: a new buffer of room for at
+## least four, holding a copy of each.
+##
+## Requires:
+## - `typed`: `src` holds a live list of `e`s, and `dst` has room for one
+def copy_list(ts: Types, dst: ptr mut u8, src: ptr mut u8, e: int):
+    # safety: typed, inside, in_bounds, valid, aligned, writable: a list is
+    #   its elements' address, their number and its capacity, and each element
+    #   is a value of type `e`.
+    unsafe:
+        let n = src.offset(8).cast[int]().read()
+        let eh = ts.words.offset(e * WORDS)
+        let size = eh.offset(SIZE).read()
+        let flags = eh.offset(FLAGS).read()
+        let parts = eh.offset(COPIES).read()
+        let cap = if n > 4: n else: 4
+        let source = src.cast[ptr[u8]]().read()
+        # The elements' bytes, when they are what a copy copies first.
+        let plain = (flags & PLAIN) != 0
+        let by_parts = parts != 0 and (flags & COPIES_BY_VARIANT) == 0
+        let bytes = if plain or by_parts: n * size else: 0
+        new_buffer(dst, source, bytes, cap * (if size > 1: size else: 1), n, cap)
+        if plain or n == 0:
+            return
+        let to = dst.cast[ptr[u8]]().read().cast_mut()
+        let elems = source.cast_mut()
+        var i = 0
+        if by_parts:
+            # Over the bytes, the parts that own something again (decision
+            # 262).
+            while i < n:
+                copy_parts(ts, to.offset(i * size), elems.offset(i * size), parts)
+                i += 1
+        else:
+            while i < n:
+                copy(ts, to.offset(i * size), elems.offset(i * size), e)
+                i += 1
+
+## `.copy()`: writes at `dst` a deep copy of the value at `src`, of type `t`.
+##
+## Requires:
+## - `typed`: `src` holds a live value of type `t`, and `dst` has room for
+##   one
+pub(package) def copy(ts: Types, dst: ptr mut u8, src: ptr mut u8, t: int):
+    # safety: typed, inside, in_bounds, valid, aligned, writable: the value
+    #   is of its type, and each part is where its type's entry in the table
+    #   says; returns_promptly: the runtime in Rust copies its own objects and
+    #   gives the cells of boxes and `dyn`s.
+    unsafe:
+        let h = ts.words.offset(t * WORDS)
+        let flags = h.offset(FLAGS).read()
+        let size = h.offset(SIZE).read()
+        if (flags & PLAIN) != 0:
+            move_bytes(dst, src, size)
+            return
+        let k = h.read()
+        let copies = h.offset(COPIES).read()
+        if copies != 0:
+            if (flags & COPIES_BY_VARIANT) == 0:
+                move_bytes(dst, src, size)
+                copy_parts(ts, dst, src, copies)
+                return
+            if k == ENUM and (flags & ERROR) == 0:
+                move_bytes(dst, src, size)
+                let tag = src.cast[int]().read()
+                if tag >= 0 and tag < ts.words.offset(copies).read():
+                    copy_parts(ts, dst, src, ts.words.offset(copies + 1 + tag).read())
+                return
+        let (dw, sw) = (dst.cast[int](), src.cast[int]())
+        if k == STRING or k == PATH or k == BYTES:
+            let n = sw.offset(1).read()
+            let room = if n > 16: n else: 16
+            new_buffer(dst, src.cast[ptr[u8]]().read(), n, room, n, room)
+        elif k == LIST:
+            copy_list(ts, dst, src, h.offset(A).read())
+        elif k == OPTION:
+            let tag = sw.read()
+            dw.write(tag)
+            if tag == 0:
+                copy(ts, dst.offset(8), src.offset(8), h.offset(A).read())
+        elif k == RESULT:
+            let tag = sw.read()
+            dw.write(tag)
+            copy(ts, dst.offset(8), src.offset(8), h.offset(if tag == 0: A else: B).read())
+        elif k == TUPLE or k == STRUCT:
+            copy_fields(ts, dst, src, h.offset(PARTS).read())
+        elif k == BOX:
+            let inner = h.offset(A).read()
+            let cell = sisu_rt_alloc(ts.words.offset(inner * WORDS + SIZE).read())
+            copy(ts, cell, src.cast[ptr[u8]]().read().cast_mut(), inner)
+            dw.write(cell.addr())
+        elif k == DYN:
+            let held_type = sw.read()
+            let cell = sisu_rt_alloc(ts.words.offset(held_type * WORDS + SIZE).read())
+            copy(ts, cell, src.offset(8).cast[ptr[u8]]().read().cast_mut(), held_type)
+            dw.write(held_type)
+            dw.offset(1).write(cell.addr())
+        elif k == ENUM:
+            # Its type's number and its trace (shared, and held once more: a
+            # trace never changes in place), then the variant's fields.
+            let tag_at = h.offset(TAG).read()
+            move_bytes(dst, src, tag_at)
+            if (flags & ERROR) != 0:
+                sisu_rt_trace_retain(dst)
+            dst.offset(tag_at).cast[int]().write(src.offset(tag_at).cast[int]().read())
+            let fields = variant(ts, src, h)
+            if fields != 0:
+                copy_fields(ts, dst, src, fields)
+        elif k == ERRSET:
+            let decl = concrete(ts, src, t)
+            if decl == t:
+                move_bytes(dst, src, size)
+            else:
+                copy(ts, dst, src, decl)
+        elif k == CELL:
+            copy(ts, dst, src, h.offset(A).read())
+        elif k == FN:
+            # Another copy of the function value and of what its environment
+            # holds (decision 248).
+            move_bytes(dst, src, size)
+            retain(ts, dst, t)
+        elif k == MUTEX or k == RW_LOCK:
+            # An unlocked mutex holding a copy of the value.
+            dw.write(0)
+            dw.offset(1).write(0)
+            dst.offset(MUTEX_POISONED).cast[int]().write(src.offset(MUTEX_POISONED).cast[int]().read())
+            dw.offset(3).write(0)
+            copy(ts, dst.offset(MUTEX_HEADER), src.offset(MUTEX_HEADER), h.offset(A).read())
+        elif (
+            k == DICT
+            or k == SET
+            or k == SENDER
+            or k == RECEIVER
+            or k == SHARED
+            or k == WEAK
+            or k == ARENA
+            or (flags & COUNTED) != 0
+        ):
+            sisu_rt_object_copy(dst, src, t)
+        else:
+            move_bytes(dst, src, size)
+
+## One more count for every capability handle the value at `p` of type `t`
+## holds: a copy of it was made (decision 237).
+##
+## Requires:
+## - `typed`: `p` holds a live value of type `t`
+pub(package) def retain(ts: Types, p: ptr mut u8, t: int):
+    # safety: typed, in_bounds, valid, aligned: the value is of its type, and
+    #   each part is where its type's entry in the table says;
+    #   returns_promptly: the runtime in Rust counts a handle's cell.
+    unsafe:
+        let h = ts.words.offset(t * WORDS)
+        let flags = h.offset(FLAGS).read()
+        if (flags & NEEDS_DROP) == 0:
+            return
+        let k = h.read()
+        if (flags & COUNTED) != 0:
+            sisu_rt_object_retain(p, t)
+        elif k == OPTION:
+            if p.cast[int]().read() == 0:
+                retain(ts, p.offset(8), h.offset(A).read())
+        elif k == RESULT:
+            retain(ts, p.offset(8), h.offset(if p.cast[int]().read() == 0: A else: B).read())
+        elif k == TUPLE or k == STRUCT or k == ENUM:
+            let fields = if k == ENUM: variant(ts, p, h) else: h.offset(PARTS).read()
+            if fields == 0:
+                return
+            let w = ts.words.offset(fields)
+            var i = 0
+            while i < w.read():
+                let f = w.offset(1 + 3 * i)
+                retain(ts, p.offset(f.read()), f.offset(1).read())
+                i += 1
+        elif k == FN:
+            let env = fn_env(p, h)
+            if env >= 0:
+                retain(ts, p.offset(8), env)
+
+# -------------------------------------------------------------------- drop
+
+## The status after dropping one more part: once a part's drop has
+## panicked, the parts left are dropped as cleanup, and another panic
+## aborts.
+def after_part(before: int, now: int) -> int:
+    if before == OK:
+        return now
+    if now == OK:
+        return before
+    # safety: returns_promptly: it does not return; the program aborts with
+    #   both messages, as a panic during unwinding does.
+    unsafe sisu_rt_abort_unwind()
+    return now
+
+## Runs the drop glue `glue` (its index in the function table, plus one; 0
+## for none) on the value at `p`.
+##
+## Requires:
+## - `typed`: `p` holds a live value of the type whose glue it is
+def run_glue(glue: int, p: ptr mut u8) -> int:
+    if glue == 0:
+        return OK
+    # safety: returns_promptly: the runtime in Rust calls the program's glue,
+    #   on this stack, and returns its status.
+    return unsafe sisu_rt_glue(glue - 1, p).to_int()
+
+## Drops each part of a list of parts, in order (decision 266).
+##
+## Requires:
+## - `typed`: `p` holds the parts at their offsets, dead afterwards
+def drop_parts(ts: Types, p: ptr mut u8, parts: int, mode: int) -> int:
+    var status = OK
+    # safety: typed, in_bounds, valid, aligned: the list's words are the
+    #   table's, and each part is at its offset.
+    unsafe:
+        let w = ts.words.offset(parts)
+        let n = w.read()
+        var i = 0
+        while i < n:
+            let st = drop(ts, p.offset(w.offset(1 + 2 * i).read()), w.offset(2 + 2 * i).read(), mode)
+            if st != OK or status != OK:
+                status = after_part(status, st)
+            i += 1
+    return status
+
+## Drops the fields of a list of fields, last to first: those the type's
+## glue leaves out (`silent`), whose drop runs no program code (decision
+## 218), or every one.
+##
+## Requires:
+## - `typed`: `p` holds the fields at their offsets, dead afterwards
+def drop_fields(ts: Types, p: ptr mut u8, fields: int, silent: bool, mode: int) -> int:
+    var status = OK
+    # safety: typed, in_bounds, valid, aligned: a list of fields holds three
+    #   words for each field after its length, and each field is at its
+    #   offset.
+    unsafe:
+        let w = ts.words.offset(fields)
+        var i = w.read() - 1
+        while i >= 0:
+            let f = w.offset(1 + 3 * i)
+            if not (silent and f.offset(2).read() != 0):
+                let st = drop(ts, p.offset(f.read()), f.offset(1).read(), mode)
+                if st != OK or status != OK:
+                    status = after_part(status, st)
+            i -= 1
+    return status
+
+## Frees a text's or a list's buffer, and leaves the value empty.
+##
+## Requires:
+## - `typed`: `p` holds a text or a list, whose buffer is its own, dead
+##   afterwards
+def free_buffer(p: ptr mut u8):
+    # safety: in_bounds, valid, aligned, writable: a text's and a list's first
+    #   word is its buffer's address, or 0; returns_promptly: the runtime in
+    #   Rust frees the block.
+    unsafe:
+        let w = p.cast[int]()
+        if w.read() != 0:
+            sisu_rt_free(p.cast[ptr[u8]]().read().cast_mut())
+        w.write(0)
+        w.offset(1).write(0)
+        w.offset(2).write(0)
+
+## Drops the fields that the glue of the struct or the enum at `p`, of type
+## `t`, leaves out (decision 218), once the glue has run on the task's stack:
+## those whose drop runs no program code, last to first.
+##
+## Requires:
+## - `typed`: `p` holds a live value of type `t`, whose glue has run, dead
+##   afterwards
+pub(package) def drop_rest(ts: Types, p: ptr mut u8, t: int, mode: int) -> int:
+    # safety: typed, in_bounds, valid, aligned: the value's fields are where
+    #   its type's entry says.
+    unsafe:
+        let h = ts.words.offset(t * WORDS)
+        let k = h.read()
+        if k == STRUCT:
+            return drop_fields(ts, p, h.offset(PARTS).read(), True, mode)
+        if k == ENUM:
+            let fields = variant(ts, p, h)
+            if fields != 0:
+                return drop_fields(ts, p, fields, True, mode)
+    return OK
+
+## Drops the value at `p`, of type `t`, and every value it owns, in the
+## order the interpreter does: a list's elements first to last, a tuple's
+## last to first, a struct or enum by its drop glue, then the fields the
+## glue leaves out. A part whose drop panics does not stop the others,
+## which are dropped as cleanup (a second panic aborts); the status says
+## whether a panic is leaving. `mode` says whether the drop forgets or
+## defers (`FORGETTING`, `DEFERRING`).
+##
+## Requires:
+## - `typed`: `p` holds a live value of type `t`, dead afterwards
+pub(package) def drop(ts: Types, p: ptr mut u8, t: int, mode: int) -> int:
+    # safety: typed, in_bounds, valid, aligned, writable: the value is of its
+    #   type, each part is where its type's entry in the table says, and each
+    #   is dropped once; returns_promptly: the runtime in Rust drops its own
+    #   objects, frees blocks, and runs the program's glue.
+    unsafe:
+        let h = ts.words.offset(t * WORDS)
+        let flags = h.offset(FLAGS).read()
+        if (flags & NEEDS_DROP) == 0:
+            return OK
+        # By the parts that need a drop, when the type has them listed
+        # (decision 266).
+        let drops = h.offset(DROPS).read()
+        if drops != 0:
+            if (flags & DROPS_BY_VARIANT) == 0:
+                return drop_parts(ts, p, drops, mode)
+            let tag = p.offset(h.offset(TAG).read()).cast[int]().read()
+            if tag >= 0 and tag < ts.words.offset(drops).read():
+                return drop_parts(ts, p, ts.words.offset(drops + 1 + tag).read(), mode)
+            return OK
+        let k = h.read()
+        if k == STRING or k == PATH or k == BYTES:
+            free_buffer(p)
+            return OK
+        let w = p.cast[int]()
+        if k == LIST:
+            var status = OK
+            let e = h.offset(A).read()
+            if (ts.words.offset(e * WORDS + FLAGS).read() & NEEDS_DROP) != 0:
+                let n = w.offset(1).read()
+                let size = ts.words.offset(e * WORDS + SIZE).read()
+                let elems = p.cast[ptr[u8]]().read().cast_mut()
+                var i = 0
+                while i < n:
+                    let st = drop(ts, elems.offset(i * size), e, mode)
+                    if st != OK or status != OK:
+                        status = after_part(status, st)
+                    i += 1
+            free_buffer(p)
+            return status
+        if k == OPTION:
+            if w.read() == 0:
+                return drop(ts, p.offset(8), h.offset(A).read(), mode)
+            return OK
+        if k == RESULT:
+            return drop(ts, p.offset(8), h.offset(if w.read() == 0: A else: B).read(), mode)
+        if k == TUPLE:
+            return drop_fields(ts, p, h.offset(PARTS).read(), False, mode)
+        if k == BOX:
+            # A box whose value was moved out has no cell (decision 216).
+            if w.read() == 0:
+                return OK
+            let cell = p.cast[ptr[u8]]().read().cast_mut()
+            let status = drop(ts, cell, h.offset(A).read(), mode)
+            sisu_rt_free(cell)
+            return status
+        if k == DYN:
+            let cell = p.offset(8).cast[ptr[u8]]().read().cast_mut()
+            let status = drop(ts, cell, w.read(), mode)
+            sisu_rt_free(cell)
+            return status
+        if k == ENTRY:
+            return drop(ts, p.offset(8), h.offset(A).read(), mode)
+        if k == CELL:
+            return drop(ts, p, h.offset(A).read(), mode)
+        if k == MUTEX or k == RW_LOCK:
+            return drop(ts, p.offset(MUTEX_HEADER), h.offset(A).read(), mode)
+        let glue = h.offset(B).read()
+        if (k == STRUCT or k == ENUM) and glue != 0 and mode == DEFERRING:
+            # Glue is the program's code: on the system stack, the value is
+            # moved aside and dropped on the task's stack.
+            return sisu_rt_defer(p, t).to_int()
+        if k == STRUCT:
+            # The glue (the `Drop` impl, then the fields whose drop is
+            # observed), then the fields it leaves out (decision 218);
+            # forgetting, every field is freed and no glue runs.
+            let fields = h.offset(PARTS).read()
+            if (mode & FORGETTING) != 0:
+                return drop_fields(ts, p, fields, False, mode)
+            let status = run_glue(glue, p)
+            return after_part(status, drop_fields(ts, p, fields, True, mode))
+        if k == ENUM:
+            # An error lets go of its return trace (decision 215).
+            if (flags & ERROR) != 0:
+                sisu_rt_trace_release(p)
+            let fields = variant(ts, p, h)
+            if (mode & FORGETTING) != 0:
+                if fields == 0:
+                    return OK
+                return drop_fields(ts, p, fields, False, mode)
+            let status = run_glue(glue, p)
+            if fields == 0:
+                return status
+            return after_part(status, drop_fields(ts, p, fields, True, mode))
+        if k == ERRSET:
+            let decl = concrete(ts, p, t)
+            if decl == t:
+                return OK
+            return drop(ts, p, decl, mode)
+        if k == FN:
+            # A function value goes with what its environment holds
+            # (decision 248).
+            let env = fn_env(p, h)
+            if env >= 0:
+                return drop(ts, p.offset(8), env, mode)
+            return OK
+        if (
+            k == ITER
+            or k == DICT
+            or k == SET
+            or k == GUARD
+            or k == READ_GUARD
+            or k == SENDER
+            or k == RECEIVER
+            or k == SHARED
+            or k == WEAK
+            or k == ARENA
+            or (flags & COUNTED) != 0
+        ):
+            return sisu_rt_object_drop(p, t).to_int()
+        return OK

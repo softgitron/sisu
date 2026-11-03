@@ -1,0 +1,8 @@
+$ sisu run e0603_comptime_budget.sisu
+error[E0603]: the compile-time evaluation in `STAIRS` used up its budget of 1000000 steps; raise it with `@comptime_budget(steps=N)` on `STAIRS`
+  --> e0603_comptime_budget.sisu:7:21
+  |
+7 | const STAIRS: int = comptime climbs(26)
+  |                     ^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

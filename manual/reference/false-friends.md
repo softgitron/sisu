@@ -185,30 +185,30 @@ maintainers.
 
 | Habit | Sisu | Code | Names the Sisu way |
 |---|---|---|---|
-| `xs[-1]` | `xs[^1]` | E0344 | yes, as a fix |
-| `7 / 2` | `7 // 2` | E0301 | yes, as a fix |
-| `if xs:` | `if not xs.is_empty():` | E0302 | yes, in a note |
-| `a if c else b` | `if c: a else: b` | E0115, E0100 | in a `let` only |
-| `count = 0` to declare | `var count = 0` | E0200 | `let`, as a fix |
-| `print(a, b)` | `print("{a} {b}")` | E0305 | yes, as a fix |
-| `'text'` | `"text"` | E0016 | no |
-| `for c in word` | `for c in word.chars()` | E0325 | yes, as a fix |
-| `word[0]` | `word.chars()`, `word.byte_slice(a, b)` | E0345 | yes, in the message |
-| `x or default` | `x ?? default` | E0302 | no |
-| `", ".join(xs)` | `xs.join(", ")` | E0304 | in a note |
-| `(n := f())` | `let n = f()`, `if let` | E0123, E0100 | outside brackets only |
-| `for ... else:` | `if let` on a search's result | E0127 | yes, in the message |
-| `a < b > c` | one direction | E0113 | yes, in the message |
-| `x is None` | `x == None`, `if let` | E0100 | no |
-| `lambda x: e` | `x -> e` | E0117 | no |
-| `f"{x}"` | `"{x}"` | E0100 | no |
-| `class`, `__init__` | `struct` | E0107, E0215 | no |
-| `try:` `except:` | `T ! E`, `?`, `else` | E0117 | no |
-| `int(s)`, `str(n)` | `s.parse_int()`, `"{n}"` | E0200 | no; offers `uint` |
-| `append`, `strip`, `upper` | `push`, `trim`, `to_uppercase` | E0304 | no |
-| `d.get(k, default)` | `d.get(k) ?? default` | E0305 | no |
-| `enumerate(xs, start=1)` | `enumerate(xs)` and `i + 1` | E0306 | no |
-| `max(xs)` | `max(a, b)`, `sorted(xs)[^1]` | E0308 | no |
+| `xs[-1]` | `xs[^1]` | [E0344](diagnostics.md#e0344) | yes, as a fix |
+| `7 / 2` | `7 // 2` | [E0301](diagnostics.md#e0301) | yes, as a fix |
+| `if xs:` | `if not xs.is_empty():` | [E0302](diagnostics.md#e0302) | yes, in a note |
+| `a if c else b` | `if c: a else: b` | [E0115](diagnostics.md#e0115), [E0100](diagnostics.md#e0100) | in a `let` only |
+| `count = 0` to declare | `var count = 0` | [E0200](diagnostics.md#e0200) | `let`, as a fix |
+| `print(a, b)` | `print("{a} {b}")` | [E0305](diagnostics.md#e0305) | yes, as a fix |
+| `'text'` | `"text"` | [E0016](diagnostics.md#e0016) | no |
+| `for c in word` | `for c in word.chars()` | [E0325](diagnostics.md#e0325) | yes, as a fix |
+| `word[0]` | `word.chars()`, `word.byte_slice(a, b)` | [E0345](diagnostics.md#e0345) | yes, in the message |
+| `x or default` | `x ?? default` | [E0302](diagnostics.md#e0302) | no |
+| `", ".join(xs)` | `xs.join(", ")` | [E0304](diagnostics.md#e0304) | yes, as a fix |
+| `(n := f())` | `let n = f()`, `if let` | [E0123](diagnostics.md#e0123), [E0100](diagnostics.md#e0100) | outside brackets only |
+| `for ... else:` | `if let` on a search's result | [E0127](diagnostics.md#e0127) | yes, in the message |
+| `a < b > c` | one direction | [E0113](diagnostics.md#e0113) | yes, in the message |
+| `x is None` | `x == None`, `if let` | [E0100](diagnostics.md#e0100) | no |
+| `lambda x: e` | `x -> e` | [E0117](diagnostics.md#e0117) | no |
+| `f"{x}"` | `"{x}"` | [E0100](diagnostics.md#e0100) | no |
+| `class`, `__init__` | `struct` | [E0107](diagnostics.md#e0107), [E0215](diagnostics.md#e0215) | no |
+| `try:` `except:` | `T ! E`, `?`, `else` | [E0117](diagnostics.md#e0117) | no |
+| `int(s)`, `str(n)` | `s.parse_int()`, `"{n}"` | [E0200](diagnostics.md#e0200) | no; offers `uint` |
+| `append`, `strip`, `upper` | `push`, `trim`, `to_uppercase` | [E0304](diagnostics.md#e0304) | yes, as a fix |
+| `d.get(k, default)` | `d.get(k) ?? default` | [E0305](diagnostics.md#e0305) | no |
+| `enumerate(xs, start=1)` | `enumerate(xs)` and `i + 1` | [E0306](diagnostics.md#e0306) | no |
+| `max(xs)` | `max(a, b)`, `sorted(xs)[^1]` | [E0308](diagnostics.md#e0308) | no |
 
 ### Assignment declares a name
 
@@ -367,8 +367,8 @@ error[E0302]: a condition must be a `bool`, not `str`; Sisu has no truthiness
 
 ### `", ".join(names)`
 
-`join` is a method of an iterator: `names.join(", ")`. E0304, with a
-note.
+`join` is a method of an iterator: `names.join(", ")`. E0304's note
+says so, and its fix writes the call.
 
 <!-- file: examples/reference-false-friends/join.sisu -->
 ```sisu
@@ -387,6 +387,7 @@ error[E0304]: `str` has no method `join`
 4 |     print(", ".join(names))
   |                ^^^^
   = note: `join` is a method of `Iterator`
+  = fix: join the items with their own method: `names.join(", ")`
 
 ```
 
@@ -643,7 +644,7 @@ error[E0200]: cannot find `str` in this scope
 ### Python's method names
 
 Sisu's `list` has `push`, and its `str` has `trim` and `to_uppercase`.
-E0304 names no similar method.
+E0304's fix names each.
 
 <!-- file: examples/reference-false-friends/methods.sisu -->
 ```sisu
@@ -663,18 +664,21 @@ error[E0304]: `list[str]` has no method `append`
   |
 4 |     names.append("eero")
   |           ^^^^^^
+  = fix: Sisu spells it this way: `push`
 
 error[E0304]: `str` has no method `strip`
   --> methods.sisu:5:21
   |
 5 |     print("  hei  ".strip())
   |                     ^^^^^
+  = fix: Sisu spells it this way: `trim`
 
 error[E0304]: `str` has no method `upper`
   --> methods.sisu:6:17
   |
 6 |     print("hei".upper())
   |                 ^^^^^
+  = fix: Sisu spells it this way: `to_uppercase`
 
 ```
 
@@ -864,17 +868,17 @@ traits. These Rust spellings are not Sisu, and each is an error.
 
 | Habit | Sisu | Code |
 |---|---|---|
-| `let mut x` | `var x` | E0105 |
-| `a && b`, `a \|\| b`, `!a` | `a and b`, `a or b`, `not a` | E0103 |
-| `x as f64` | `x.to_f64()` | E0100 |
-| `// note` | `# note` | E0117 |
-| `x.clone()` | `x.copy()` | E0304 |
-| `1 => "one"` | `case 1: "one"` | E0100 |
-| `f(&xs)` | `f(xs)` | E0103 |
-| `0..3` | `range(3)` | E0100 |
-| `Vec<T>` | `list[T]` | E0117 |
-| `println!(...)` | `print(...)` | E0117 |
-| `7 / 2` is 3 | `7 // 2` | E0301 |
+| `let mut x` | `var x` | [E0105](diagnostics.md#e0105) |
+| `a && b`, `a \|\| b`, `!a` | `a and b`, `a or b`, `not a` | [E0103](diagnostics.md#e0103) |
+| `x as f64` | `x.to_f64()` | [E0100](diagnostics.md#e0100) |
+| `// note` | `# note` | [E0117](diagnostics.md#e0117) |
+| `x.clone()` | `x.copy()` | [E0304](diagnostics.md#e0304) |
+| `1 => "one"` | `case 1: "one"` | [E0100](diagnostics.md#e0100) |
+| `f(&xs)` | `f(xs)` | [E0103](diagnostics.md#e0103) |
+| `0..3` | `range(3)` | [E0100](diagnostics.md#e0100) |
+| `Vec<T>` | `list[T]` | [E0117](diagnostics.md#e0117) |
+| `println!(...)` | `print(...)` | [E0117](diagnostics.md#e0117) |
+| `7 / 2` is 3 | `7 // 2` | [E0301](diagnostics.md#e0301) |
 | `-7 % 3` is -1 | 2, as in Python | none: FF-6 |
 
 ### `let mut`
@@ -976,7 +980,7 @@ error[E0117]: unexpected `count` after the end of the statement
 
 ### `.clone()`
 
-A copy is `.copy()`. E0304 names no similar method.
+A copy is `.copy()`, which E0304's fix writes.
 
 <!-- file: examples/reference-false-friends/clone.sisu -->
 ```sisu
@@ -995,6 +999,7 @@ error[E0304]: `list[str]` has no method `clone`
   |
 4 |     let copied = names.clone()
   |                        ^^^^^
+  = fix: Sisu spells it this way: `copy`
 
 ```
 

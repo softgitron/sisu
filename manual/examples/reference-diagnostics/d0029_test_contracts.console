@@ -1,0 +1,2 @@
+$ sisu test --contracts=all d0029_test_contracts.sisu
+error[D0029]: `sisu test` checks every contract; `--contracts` sets what `sisu run` and `sisu sir` check

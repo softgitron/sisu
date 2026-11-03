@@ -1,0 +1,5 @@
+# An application that uses a dependency with unsafe code.
+import readings
+
+def main():
+    print(readings.last([78, 85, 92]))

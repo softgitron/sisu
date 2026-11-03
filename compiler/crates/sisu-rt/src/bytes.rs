@@ -126,7 +126,7 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> Option<u8> {
                 let (b, p) = (arg(c, 0), arg(c, 1));
                 match i {
                     I::BytesFind => {
-                        let at = if p.is_empty() { Some(0) } else { b.windows(p.len()).position(|w| w == p) };
+                        let at = crate::bridge::find(b, p);
                         match at {
                             Some(k) => {
                                 mem::set_word(c.ret, 0, 0);
@@ -135,8 +135,8 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> Option<u8> {
                             None => c.none(),
                         }
                     }
-                    I::BytesStartsWith => c.set_bool(b.starts_with(p)),
-                    _ => c.set_bool(b.ends_with(p)),
+                    I::BytesStartsWith => c.set_bool(crate::bridge::has_edge(b, p, false)),
+                    _ => c.set_bool(crate::bridge::has_edge(b, p, true)),
                 }
             }
             I::BytesDecode => match std::str::from_utf8(arg(c, 0)) {

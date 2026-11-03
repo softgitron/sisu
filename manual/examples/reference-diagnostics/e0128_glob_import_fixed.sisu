@@ -1,0 +1,5 @@
+# The import names what the module gives.
+from std.math import floor, sqrt
+
+def main():
+    print(floor(sqrt(20.0)))

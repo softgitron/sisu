@@ -1,0 +1,6 @@
+# The path written as a literal, which the build can read.
+const MENU: str = embed("menu.txt")
+
+def main():
+    for line in MENU.lines():
+        print(line)

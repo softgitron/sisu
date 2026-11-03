@@ -1,0 +1,8 @@
+$ sisu check w0014_ambient_authority.sisu
+warning[W0014]: `is_set` is public and safe and reaches the foreign function `getenv` without taking a capability, so its callers need no authority for what the call does
+  --> w0014_ambient_authority.sisu:10:9
+   |
+10 | pub def is_set(name: str) -> bool:
+   |         ^^^^^^
+  = note: take the capability whose authority the call exercises (22, clause 5), as `std.rt.os` does behind `System`
+

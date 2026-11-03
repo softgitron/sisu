@@ -1,0 +1,7 @@
+# An `own` closure that would keep a `String`.
+def make_greeter(own greeting: String) -> (str) -> String:
+    return own (name: str) -> "{greeting}, {name}!"
+
+def main():
+    let hei = make_greeter("Hei".to_string())
+    print(hei("Aino"))

@@ -1,0 +1,1 @@
+10:9-10:15 W0014 unsafe.ambient-authority name="is_set" callee="getenv"

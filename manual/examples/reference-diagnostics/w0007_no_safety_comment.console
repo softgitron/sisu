@@ -1,0 +1,8 @@
+$ sisu run w0007_no_safety_comment.sisu
+warning[W0007]: this `unsafe:` block has no `# safety:` comment above it saying why each obligation it takes on holds
+  --> w0007_no_safety_comment.sisu:7:5
+  |
+7 |     unsafe:
+  |     ^^^^^^
+
+85

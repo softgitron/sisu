@@ -1,0 +1,7 @@
+# A method that the type's module keeps private.
+from kiuas.stove import Stove
+
+def main():
+    var stove = Stove(celsius=90)
+    stove.cool()
+    print(stove.celsius)

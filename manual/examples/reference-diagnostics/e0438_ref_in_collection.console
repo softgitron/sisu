@@ -1,0 +1,9 @@
+$ sisu run e0438_ref_in_collection.sisu
+error[E0438]: `list[ref String]` would hold references, and a collection holds values it owns or views, never references (04, rule 3)
+  --> e0438_ref_in_collection.sisu:4:21
+  |
+4 |     var names: list[ref String] = []
+  |                     ^^^^^^^^^^
+  = fix: hold the values themselves: `list[String]`
+
+error[D0006]: the program was not run: errors found (1)

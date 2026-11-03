@@ -290,7 +290,7 @@ trait's template stopped.
 <!-- file: examples/reference-attributes/derive_needs.sisu -->
 ```sisu
 # `Ord` needs `Eq` and `PartialOrd`, which the type does not derive.
-@derive(Ord)
+@derive(Copy, Ord)
 struct Version:
     major: int
     minor: int
@@ -303,10 +303,10 @@ def main():
 ```console
 $ sisu run derive_needs.sisu
 error[E0242]: `Version` implements `Ord`, which requires `Eq`, but `Version` does not implement `Eq`
-  --> derive_needs.sisu:2:9
+  --> derive_needs.sisu:2:15
   |
-2 | @derive(Ord)
-  |         ^^^
+2 | @derive(Copy, Ord)
+  |               ^^^
 
 error[D0006]: the program was not run: errors found (1)
 ```
@@ -314,8 +314,8 @@ error[D0006]: the program was not run: errors found (1)
 **Stage 0 differs.** `@derive(Into, From)`, which
 [03](../../proposal/03-types-and-generics.md#type-aliases-and-newtypes)
 gives newtypes, `@derive(Encode, Decode)` of `std.json` and
-`@derive(Arbitrary)` of `std.test` are E0243, whose list of the traits
-it takes leaves out `Default`. A diagnostic in a derived impl is placed
+`@derive(Arbitrary)` of `std.test` are E0243. A diagnostic in a derived
+impl is placed
 in `<derive>/main.sisu`, a module that the compiler writes, so E0235 for
 an impl beside a derived one points there and at the written impl, not
 at the `@derive`.
@@ -921,11 +921,11 @@ idea for later, and `@inline` has no design.
 |---|---|---|
 | [E0117](diagnostics.md#e0117), [E0106](diagnostics.md#e0106), [E0100](diagnostics.md#e0100) | `parse.trailing-tokens`, `parse.expected-declaration`, `parse.expected` | [Writing an attribute](#writing-an-attribute) |
 | [E0243](diagnostics.md#e0243), [E0244](diagnostics.md#e0244), [E0242](diagnostics.md#e0242), [E0235](diagnostics.md#e0235) | `resolve.not-derivable`, `resolve.derive-field`, `resolve.supertrait-missing`, `resolve.overlapping-impl` | [Deriving traits](#deriving-traits) |
-| E0608 | `comptime.derive-failed` | [Deriving traits](#deriving-traits), [The layout of a type](#the-layout-of-a-type) |
+| [E0608](diagnostics.md#e0608) | `comptime.derive-failed` | [Deriving traits](#deriving-traits), [The layout of a type](#the-layout-of-a-type) |
 | E0250, E0251, [E0252](diagnostics.md#e0252), E0253 | `resolve.not-delegable`, `resolve.delegate-to`, `resolve.delegate-self`, `resolve.delegate-field` | [Delegating traits to a field](#delegating-traits-to-a-field) |
 | [E0417](diagnostics.md#e0417), [E0418](diagnostics.md#e0418) | `borrow.must-consume`, `borrow.must-consume-exit` | [Values that must be consumed](#values-that-must-be-consumed) |
 | [E0266](diagnostics.md#e0266), W0006 | `resolve.bad-cfg`, `resolve.unknown-feature` | [Conditional compilation](#conditional-compilation) |
-| E0603, [E0606](diagnostics.md#e0606) | `comptime.budget`, `comptime.budget-attribute` | [Compile-time budgets](#compile-time-budgets) |
+| [E0603](diagnostics.md#e0603), [E0606](diagnostics.md#e0606) | `comptime.budget`, `comptime.budget-attribute` | [Compile-time budgets](#compile-time-budgets) |
 | E0821 | `test.refines-mismatch` | [Refinement tests](#refinement-tests) |
 | E0702 | `type.test-signature` | [Fixtures](#fixtures) |
 | [E0989](diagnostics.md#e0989) | `unsafe.export-signature` | [Exported functions](#exported-functions) |

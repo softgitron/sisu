@@ -524,14 +524,15 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 let (s, _) = c.place(0);
                 mem::at::<Text>(s).push(&out);
             }
+            // The runtime in Sisu's (decision 350).
             I::FmtDigits => {
                 let (n, base, upper) = (c.int(0), c.int(1), c.bool(2));
-                c.set_string(wide_digits(u128::from(n.unsigned_abs()), base, upper).as_bytes());
+                crate::bridge::digits(c.ret, u128::from(n.unsigned_abs()), base, upper);
             }
             I::FmtWideDigits => {
                 let (p, t) = c.place(0);
                 let mag = crate::wide::num(p, t).map(|n| n.magnitude().1).unwrap_or(0);
-                c.set_string(wide_digits(mag, c.int(1), c.bool(2)).as_bytes());
+                crate::bridge::digits(c.ret, mag, c.int(1), c.bool(2));
             }
             I::FmtFloatDigits => {
                 let x = c.float(0);
@@ -1477,7 +1478,7 @@ pub(crate) unsafe fn contains(container: *mut u8, ct: u32, item: *mut u8, it: u3
                         .unwrap_or_default(),
                     _ => value::text(ip, itt).unwrap_or(&[]).to_vec(),
                 };
-                needle.is_empty() || hay.windows(needle.len()).any(|w| w == needle.as_slice())
+                crate::bridge::find(hay, &needle).is_some()
             }
             _ => false,
         }
@@ -1829,17 +1830,6 @@ fn parts_diagram(text: &str, parts: &[(usize, String)]) -> String {
         out.push_str(s.trim_end());
     }
     out
-}
-
-/// `fmt.wide_digits`: the digits of a magnitude in `base`.
-fn wide_digits(mag: u128, base: i64, upper: bool) -> String {
-    match base {
-        16 if upper => format!("{mag:X}"),
-        16 => format!("{mag:x}"),
-        8 => format!("{mag:o}"),
-        2 => format!("{mag:b}"),
-        _ => mag.to_string(),
-    }
 }
 
 /// `fmt.float_digits`.

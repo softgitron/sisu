@@ -1,0 +1,8 @@
+$ sisu run e0613_embed_path.sisu
+error[E0613]: `embed` takes the path of a file as a string literal
+  --> e0613_embed_path.sisu:3:19
+  |
+3 | const MENU: str = embed(NAME)
+  |                   ^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

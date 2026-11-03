@@ -719,73 +719,125 @@ impl Writer {
     }
 }
 
-/// The type table as bytes, for the program's read-only data.
+impl Kind {
+    /// The kind's number, as [`encode`] writes it and the runtime in Sisu
+    /// reads it in the type table's words (`desc.rs`).
+    pub fn code(&self) -> u8 {
+        match self {
+            Kind::Unit => K_UNIT,
+            Kind::Int => K_INT,
+            Kind::Sized(_) => K_SIZED,
+            Kind::U64 => K_U64,
+            Kind::I128 => K_I128,
+            Kind::U128 => K_U128,
+            Kind::Float => K_FLOAT,
+            Kind::F32 => K_F32,
+            Kind::Bool => K_BOOL,
+            Kind::Char => K_CHAR,
+            Kind::Str => K_STR,
+            Kind::String => K_STRING,
+            Kind::Path => K_PATH,
+            Kind::Bytes => K_BYTES,
+            Kind::DateTime => K_DATETIME,
+            Kind::Ref(_) => K_REF,
+            Kind::List(_) => K_LIST,
+            Kind::Iter(_) => K_ITER,
+            Kind::Option(_) => K_OPTION,
+            Kind::Result(..) => K_RESULT,
+            Kind::Tuple(_) => K_TUPLE,
+            Kind::Box(_) => K_BOX,
+            Kind::Struct { .. } => K_STRUCT,
+            Kind::Enum { .. } => K_ENUM,
+            Kind::ErrSet(_) => K_ERRSET,
+            Kind::Fn => K_FN,
+            Kind::Opaque(_) => K_OPAQUE,
+            Kind::Const(_) => K_CONST,
+            Kind::Dict(..) => K_DICT,
+            Kind::Set(_) => K_SET,
+            Kind::Entry(..) => K_ENTRY,
+            Kind::Dyn => K_DYN,
+            Kind::Scope => K_SCOPE,
+            Kind::Handle(_) => K_HANDLE,
+            Kind::Cancellation => K_CANCELLATION,
+            Kind::Sender(_) => K_SENDER,
+            Kind::Receiver(_) => K_RECEIVER,
+            Kind::Timer => K_TIMER,
+            Kind::Mutex(_) => K_MUTEX,
+            Kind::Guard(..) => K_GUARD,
+            Kind::RwLock(_) => K_RW_LOCK,
+            Kind::ReadGuard(_) => K_READ_GUARD,
+            Kind::Shared(_) => K_SHARED,
+            Kind::Weak(_) => K_WEAK,
+            Kind::Cell(_) => K_CELL,
+            Kind::Arena(_) => K_ARENA,
+            Kind::Ptr(_) => K_PTR,
+        }
+    }
+}
+
+/// The type table as bytes, for the program's read-only data: each type's
+/// size, its kind's number, then what the kind holds.
 pub fn encode(table: &[TypeEntry]) -> Vec<u8> {
     let mut w = Writer(Vec::new());
     w.u32(table.len() as u32);
     for t in table {
         w.u32(t.size);
+        w.u8(t.kind.code());
         match &t.kind {
-            Kind::Unit => w.u8(K_UNIT),
-            Kind::Int => w.u8(K_INT),
-            Kind::Sized(n) => {
-                w.u8(K_SIZED);
-                w.text(n);
-            }
-            Kind::U64 => w.u8(K_U64),
-            Kind::I128 => w.u8(K_I128),
-            Kind::Dyn => w.u8(K_DYN),
-            Kind::U128 => w.u8(K_U128),
-            Kind::Float => w.u8(K_FLOAT),
-            Kind::F32 => w.u8(K_F32),
-            Kind::Bool => w.u8(K_BOOL),
-            Kind::Char => w.u8(K_CHAR),
-            Kind::Str => w.u8(K_STR),
-            Kind::String => w.u8(K_STRING),
-            Kind::Path => w.u8(K_PATH),
-            Kind::Bytes => w.u8(K_BYTES),
-            Kind::DateTime => w.u8(K_DATETIME),
-            Kind::Ref(t) => {
-                w.u8(K_REF);
-                w.u32(*t);
-            }
-            Kind::List(t) => {
-                w.u8(K_LIST);
-                w.u32(*t);
-            }
-            Kind::Iter(t) => {
-                w.u8(K_ITER);
-                w.u32(*t);
-            }
-            Kind::Option(t) => {
-                w.u8(K_OPTION);
-                w.u32(*t);
-            }
-            Kind::Result(a, b) => {
-                w.u8(K_RESULT);
+            Kind::Unit
+            | Kind::Int
+            | Kind::U64
+            | Kind::I128
+            | Kind::Dyn
+            | Kind::U128
+            | Kind::Float
+            | Kind::F32
+            | Kind::Bool
+            | Kind::Char
+            | Kind::Str
+            | Kind::String
+            | Kind::Path
+            | Kind::Bytes
+            | Kind::DateTime
+            | Kind::Fn
+            | Kind::Scope
+            | Kind::Cancellation
+            | Kind::Timer => {}
+            Kind::Sized(n) | Kind::Opaque(n) => w.text(n),
+            Kind::Ref(t)
+            | Kind::List(t)
+            | Kind::Iter(t)
+            | Kind::Option(t)
+            | Kind::Box(t)
+            | Kind::Set(t)
+            | Kind::Handle(t)
+            | Kind::Sender(t)
+            | Kind::Receiver(t)
+            | Kind::Mutex(t)
+            | Kind::RwLock(t)
+            | Kind::ReadGuard(t)
+            | Kind::Shared(t)
+            | Kind::Weak(t)
+            | Kind::Cell(t)
+            | Kind::Arena(t)
+            | Kind::Ptr(t) => w.u32(*t),
+            Kind::Result(a, b) | Kind::Dict(a, b) | Kind::Entry(a, b) => {
                 w.u32(*a);
                 w.u32(*b);
             }
             Kind::Tuple(slots) => {
-                w.u8(K_TUPLE);
                 w.u32(slots.len() as u32);
                 for s in slots {
                     w.u32(s.offset);
                     w.u32(s.ty);
                 }
             }
-            Kind::Box(t) => {
-                w.u8(K_BOX);
-                w.u32(*t);
-            }
             Kind::Struct { name, fields, glue } => {
-                w.u8(K_STRUCT);
                 w.text(name);
                 w.opt(*glue);
                 w.fields(fields);
             }
             Kind::Enum { name, variants, glue, error } => {
-                w.u8(K_ENUM);
                 w.text(name);
                 w.opt(*glue);
                 w.u8(u8::from(*error));
@@ -796,87 +848,18 @@ pub fn encode(table: &[TypeEntry]) -> Vec<u8> {
                 }
             }
             Kind::ErrSet(members) => {
-                w.u8(K_ERRSET);
                 w.u32(members.len() as u32);
                 for m in members {
                     w.u32(*m);
                 }
             }
-            Kind::Fn => w.u8(K_FN),
-            Kind::Opaque(n) => {
-                w.u8(K_OPAQUE);
-                w.text(n);
-            }
             Kind::Const(n) => {
-                w.u8(K_CONST);
                 w.u32(*n as u64 as u32);
                 w.u32((*n as u64 >> 32) as u32);
             }
-            Kind::Dict(k, v) => {
-                w.u8(K_DICT);
-                w.u32(*k);
-                w.u32(*v);
-            }
-            Kind::Set(t) => {
-                w.u8(K_SET);
-                w.u32(*t);
-            }
-            Kind::Entry(k, v) => {
-                w.u8(K_ENTRY);
-                w.u32(*k);
-                w.u32(*v);
-            }
-            Kind::Scope => w.u8(K_SCOPE),
-            Kind::Handle(t) => {
-                w.u8(K_HANDLE);
-                w.u32(*t);
-            }
-            Kind::Cancellation => w.u8(K_CANCELLATION),
-            Kind::Sender(t) => {
-                w.u8(K_SENDER);
-                w.u32(*t);
-            }
-            Kind::Receiver(t) => {
-                w.u8(K_RECEIVER);
-                w.u32(*t);
-            }
-            Kind::Timer => w.u8(K_TIMER),
-            Kind::Mutex(t) => {
-                w.u8(K_MUTEX);
-                w.u32(*t);
-            }
             Kind::Guard(t, check) => {
-                w.u8(K_GUARD);
                 w.u32(*t);
                 w.opt(*check);
-            }
-            Kind::RwLock(t) => {
-                w.u8(K_RW_LOCK);
-                w.u32(*t);
-            }
-            Kind::ReadGuard(t) => {
-                w.u8(K_READ_GUARD);
-                w.u32(*t);
-            }
-            Kind::Shared(t) => {
-                w.u8(K_SHARED);
-                w.u32(*t);
-            }
-            Kind::Weak(t) => {
-                w.u8(K_WEAK);
-                w.u32(*t);
-            }
-            Kind::Cell(t) => {
-                w.u8(K_CELL);
-                w.u32(*t);
-            }
-            Kind::Arena(t) => {
-                w.u8(K_ARENA);
-                w.u32(*t);
-            }
-            Kind::Ptr(t) => {
-                w.u8(K_PTR);
-                w.u32(*t);
             }
         }
     }

@@ -5,6 +5,6 @@ error[E0407]: this returns a borrow of `text`, which belongs to `greeting` and i
 4 |     return text
   |     ^^^^^^^^^^^
   |            ---- borrowed here
-  = note: return an owned value instead, such as a copy made with `.copy()`
+  = note: a `str` views text, and a copy of it is the same view: return a `String`, which owns its text (`-> String`, or `list[String]` for views in a list)
 
 error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

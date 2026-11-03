@@ -476,7 +476,10 @@ fn save_ctx(ctx: &mut Ctx) {
 // ---------------------------------------------------------- the system stack
 
 /// Runs `f` on the system stack: directly in the root task (or when
-/// already there), and through the parent's stack in any other.
+/// already there), and through the parent's stack in any other. Meanwhile
+/// the task's probe limit is 0, which no stack pointer is below: the
+/// runtime in Sisu that `f` may call (decision 350) probes the stack as
+/// every function does, and the system stack is not the task's.
 pub(crate) fn system<R>(f: impl FnOnce() -> R) -> R {
     let y = YIELDER.with(Cell::get);
     if y.is_null() || ON_SYSTEM.with(Cell::get) {
@@ -488,15 +491,19 @@ pub(crate) fn system<R>(f: impl FnOnce() -> R) -> R {
     unsafe impl<F> Send for AssertSend<F> {}
     let w = AssertSend(f);
     ON_SYSTEM.with(|c| c.set(true));
+    let probe = &crate::tls::stack()[(abi::STACK_PROBE / 8) as usize];
+    let limit = probe.swap(0, Relaxed);
     // SAFETY: `y` is the yielder of the coroutine running now, and `f`
     // neither suspends it (only `switch` does, never inside `system`) nor
-    // runs Sisu code (drops that would are deferred).
+    // runs Sisu code but the runtime's own, which passes no yield point
+    // (drops that would run the program's code are deferred).
     let r = unsafe {
         (*y).on_parent_stack(move || {
             let w = w;
             (w.0)()
         })
     };
+    probe.store(limit, Relaxed);
     ON_SYSTEM.with(|c| c.set(false));
     r
 }

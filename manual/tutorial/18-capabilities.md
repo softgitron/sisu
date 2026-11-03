@@ -218,7 +218,7 @@ test "each entry has its time":
     clock.advance(Duration.minutes(40))
     journal.add("went for a swim").expect("in memory")
     let text = fs.read_to_string("journal.txt").expect("written")
-    let lines = text.lines().collect[list[str]]()
+    let lines: list[str] = text.lines().collect()
     assert lines[0] == "2026-11-03T17:00:00Z lit the sauna"
     assert lines[1] == "2026-11-03T17:40:00Z went for a swim"
 ```

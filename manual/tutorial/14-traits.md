@@ -364,7 +364,7 @@ on a `Money` struct, and print a value.
 <!-- output: examples/14-traits/derive_display.console -->
 ```console
 $ sisu run derive_display.sisu
-error[E0243]: `Display` cannot be derived; `@derive` takes `Copy` and the traits that have a `comptime def derive`: `Debug`, `Eq`, `PartialOrd`, `Ord`, `Hash`, and any trait that declares one
+error[E0243]: `Display` cannot be derived; `@derive` takes `Copy` and the traits that have a `comptime def derive`: `Debug`, `Default`, `Eq`, `PartialOrd`, `Ord`, `Hash`, and any trait that declares one
   --> derive_display.sisu:2:16
   |
 2 | @derive(Debug, Display)
@@ -379,8 +379,8 @@ error[E0347]: `Money` does not implement `Display`
 error[D0006]: the program was not run: errors found (2)
 ```
 
-E0243 (`resolve.not-derivable`) lists the traits that can be derived
-(its list leaves out `Default`, which can). `Display` is not among
+E0243 (`resolve.not-derivable`) lists the traits that can be derived.
+`Display` is not among
 them on purpose: text for users is a decision about how a value should
 read, and no rule over the fields can make it. A trait of your own can
 have a derive too, written in Sisu, which chapter 25 shows.

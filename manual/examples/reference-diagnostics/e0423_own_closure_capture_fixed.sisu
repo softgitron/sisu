@@ -1,0 +1,7 @@
+# The closure is called where the greeting lives, and borrows it.
+def greet_all(greeting: String, names: list[str]) -> list[String]:
+    return [("{greeting}, {name}!") for name in names]
+
+def main():
+    for line in greet_all("Hei".to_string(), ["Aino", "Eero"]):
+        print(line)

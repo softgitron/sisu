@@ -1,0 +1,4 @@
+# A format spec with a type letter that Sisu does not have.
+def main():
+    let price = 4.5
+    print("{price:>8.2z}")

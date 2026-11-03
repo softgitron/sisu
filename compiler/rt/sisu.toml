@@ -8,5 +8,6 @@ version = "0.1.0"
 edition = "2027"
 description = "The runtime of native code, written in Sisu"
 license = "Apache-2.0 OR Unlicense"
-# Raw memory, through std.mem's operations the backend compiles inline.
-unsafe = "memory"
+# Raw memory, through std.mem's operations the backend compiles inline,
+# and calls of the runtime in Rust and of C's memmove and memcmp.
+unsafe = "extern"

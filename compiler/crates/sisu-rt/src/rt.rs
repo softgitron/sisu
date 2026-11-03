@@ -13,12 +13,6 @@ static TYPES: OnceLock<Vec<TypeEntry>> = OnceLock::new();
 static NEEDS_DROP: OnceLock<Vec<bool>> = OnceLock::new();
 /// Whether a copy of a value of each type is a copy of its bytes.
 static PLAIN: OnceLock<Vec<bool>> = OnceLock::new();
-/// The parts of each struct, tuple and enum variant that a copy copies
-/// again over the value's bytes (decision 262).
-static COPY_PARTS: OnceLock<Vec<CopyParts>> = OnceLock::new();
-/// The parts of each struct, tuple and enum variant that a drop drops
-/// (decision 266).
-static DROP_PARTS: OnceLock<Vec<DropParts>> = OnceLock::new();
 /// The addresses of the program's functions the type table names (drop
 /// glue), as integers.
 static FNS: OnceLock<Vec<usize>> = OnceLock::new();
@@ -53,17 +47,19 @@ pub(crate) enum DropParts {
 /// A compiled function that takes one value: `fn(ret, value) -> status`.
 pub(crate) type ValueFn = unsafe extern "C" fn(*mut u8, *mut u8) -> u8;
 
+/// Keeps the program's tables, and lays the type table out in memory for
+/// the runtime in Sisu, with the parts of each type a copy and a drop reach
+/// in place (`desc.rs`, decision 350).
 pub(crate) fn init(types: Vec<TypeEntry>, fns: Vec<usize>) {
     let needs = needs_drop_table(&types);
     let plain = plain_table(&types, &needs);
     let parts = copy_parts_table(&types, &plain);
     let drops = drop_parts_table(&types, &needs);
     crate::rawmem::set_up(&types);
+    crate::desc::set_up(&types, &needs, &plain, &drops, &parts);
     let _ = TYPES.set(types);
     let _ = NEEDS_DROP.set(needs);
     let _ = PLAIN.set(plain);
-    let _ = COPY_PARTS.set(parts);
-    let _ = DROP_PARTS.set(drops);
     let _ = FNS.set(fns);
 }
 
@@ -88,18 +84,6 @@ pub(crate) fn needs_drop(id: u32) -> bool {
 /// nothing and holds no lock, whose copy starts unlocked.
 pub(crate) fn plain(id: u32) -> bool {
     PLAIN.get().and_then(|t| t.get(id as usize)).copied().unwrap_or(false)
-}
-
-/// How a value of type `id` that is not plain is copied ([`CopyParts`]).
-pub(crate) fn copy_parts(id: u32) -> &'static CopyParts {
-    static BY_KIND: CopyParts = CopyParts::ByKind;
-    COPY_PARTS.get().and_then(|t| t.get(id as usize)).unwrap_or(&BY_KIND)
-}
-
-/// How a value of type `id` that needs a drop is dropped ([`DropParts`]).
-pub(crate) fn drop_parts(id: u32) -> &'static DropParts {
-    static BY_KIND: DropParts = DropParts::ByKind;
-    DROP_PARTS.get().and_then(|t| t.get(id as usize)).unwrap_or(&BY_KIND)
 }
 
 /// [`DropParts`] for every type that needs a drop: a struct without drop

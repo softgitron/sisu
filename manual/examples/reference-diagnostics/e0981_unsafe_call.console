@@ -1,0 +1,10 @@
+$ sisu run e0981_unsafe_call.sisu
+error[E0981]: `reading_at` is an `unsafe def`: call it inside an `unsafe:` block or an `unsafe` expression
+  --> e0981_unsafe_call.sisu:16:11
+   |
+16 |     print(reading_at(temps, 2))
+   |           ^^^^^^^^^^^^^^^^^^^^
+   |           -------------------- its obligation: `in_range`
+  = note: write why they hold in a `# safety:` comment above the block, naming each obligation it discharges
+
+error[D0006]: the program was not run: errors found (1)

@@ -1,0 +1,5 @@
+# A glob import, which Sisu does not have.
+from std.math import *
+
+def main():
+    print(floor(sqrt(20.0)))

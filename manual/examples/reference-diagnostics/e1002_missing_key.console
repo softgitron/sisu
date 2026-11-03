@@ -1,0 +1,7 @@
+$ sisu run
+error[E1002]: `[package]` needs `version`
+  --> sisu.toml:1:2
+  |
+1 | [package]
+  |  ^^^^^^^
+

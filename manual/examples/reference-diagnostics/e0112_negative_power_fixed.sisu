@@ -1,0 +1,5 @@
+# Parentheses say whether the minus applies before the power.
+def main():
+    let n = 3
+    print(-(n ** 2))
+    print((-n) ** 2)

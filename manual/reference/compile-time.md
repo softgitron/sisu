@@ -573,11 +573,11 @@ which parsing needs, so such a function runs under `sisu test` only
 
 | Code | Identifier | Section |
 |---|---|---|
-| E0605 | `comptime.only` | [Asking for compile-time evaluation](#asking-for-compile-time-evaluation) |
-| E0600, [E0601](diagnostics.md#e0601), E0602, [E0604](diagnostics.md#e0604), E0615 | `comptime.not-constant`, `comptime.io`, `comptime.panicked`, `comptime.not-kept`, `comptime.unsafe-written` | [What compile-time code may do](#what-compile-time-code-may-do) |
-| E0603, [E0606](diagnostics.md#e0606) | `comptime.budget`, `comptime.budget-attribute` | [Budgets](#budgets) |
-| [E0200](diagnostics.md#e0200), E0900 | `resolve.undefined-name`, `stage0.unsupported` | [Reflection](#reflection) |
+| [E0605](diagnostics.md#e0605) | `comptime.only` | [Asking for compile-time evaluation](#asking-for-compile-time-evaluation) |
+| E0600, [E0601](diagnostics.md#e0601), [E0602](diagnostics.md#e0602), [E0604](diagnostics.md#e0604), E0615 | `comptime.not-constant`, `comptime.io`, `comptime.panicked`, `comptime.not-kept`, `comptime.unsafe-written` | [What compile-time code may do](#what-compile-time-code-may-do) |
+| [E0603](diagnostics.md#e0603), [E0606](diagnostics.md#e0606) | `comptime.budget`, `comptime.budget-attribute` | [Budgets](#budgets) |
+| [E0200](diagnostics.md#e0200), [E0900](diagnostics.md#e0900) | `resolve.undefined-name`, `stage0.unsupported` | [Reflection](#reflection) |
 | [E0609](diagnostics.md#e0609), E0610, E0611 | `comptime.instance-failed`, `comptime.instances-unbounded`, `comptime.template-value` | [Templates](#templates) |
-| E0607, E0608 | `comptime.derive-template`, `comptime.derive-failed` | [The derive protocol](#the-derive-protocol) |
-| E0612, E0613 | `comptime.embed-failed`, `comptime.embed-path` | [Embedding a file](#embedding-a-file) |
+| E0607, [E0608](diagnostics.md#e0608) | `comptime.derive-template`, `comptime.derive-failed` | [The derive protocol](#the-derive-protocol) |
+| [E0612](diagnostics.md#e0612), [E0613](diagnostics.md#e0613) | `comptime.embed-failed`, `comptime.embed-path` | [Embedding a file](#embedding-a-file) |
 | [D0003](diagnostics.md#d0003) | `cli.unknown-command` | [Configuration files](#configuration-files) |

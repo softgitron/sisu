@@ -1,0 +1,7 @@
+# An import of an item that the module does not have.
+from std.collections import Stack
+
+def main():
+    var stack = Stack[int]()
+    stack.push(3)
+    print(stack.pop())

@@ -1,0 +1,2 @@
+4:21-4:31 E0438 borrow.ref-in-collection ty="list[ref String]"
+  fix borrow.own-items 4:21-4:25 ""

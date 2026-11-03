@@ -1,0 +1,5 @@
+# `it` is the parameter of a closure passed where a function is expected.
+def main():
+    let ages = [7, 34, 61]
+    let next = ages.iter().map(it + 1).collect()
+    print(next)

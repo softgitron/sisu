@@ -1,0 +1,200 @@
+##! The program's types as the runtime in Rust lays them out for this
+##! package when the program starts (`crates/sisu-rt/src/desc.rs`, decision
+##! 350): a header of ten words for each type, then the lists the headers
+##! point to. The runtime's code walks a value by them, as the runtime in
+##! Rust walked the type table it decodes.
+
+from std.mem import ptr
+
+## The kinds of type, by the numbers `sisu_rt::abi` encodes them by.
+pub const UNIT: int = 0
+pub const INT: int = 1
+pub const SIZED: int = 2
+pub const U64: int = 3
+pub const FLOAT: int = 4
+pub const F32: int = 5
+pub const BOOL: int = 6
+pub const CHAR: int = 7
+pub const STR: int = 8
+pub const STRING: int = 9
+pub const PATH: int = 10
+pub const REF: int = 11
+pub const LIST: int = 12
+pub const ITER: int = 13
+pub const OPTION: int = 14
+pub const RESULT: int = 15
+pub const TUPLE: int = 16
+pub const BOX: int = 17
+pub const STRUCT: int = 18
+pub const ENUM: int = 19
+pub const ERRSET: int = 20
+pub const FN: int = 21
+pub const OPAQUE: int = 22
+pub const CONST: int = 23
+pub const DICT: int = 24
+pub const SET: int = 25
+pub const ENTRY: int = 26
+pub const I128: int = 27
+pub const U128: int = 28
+pub const DYN: int = 29
+pub const SCOPE: int = 30
+pub const HANDLE: int = 31
+pub const CANCELLATION: int = 32
+pub const SENDER: int = 33
+pub const RECEIVER: int = 34
+pub const TIMER: int = 35
+pub const MUTEX: int = 36
+pub const GUARD: int = 37
+pub const SHARED: int = 38
+pub const WEAK: int = 39
+pub const CELL: int = 40
+pub const ARENA: int = 41
+pub const BYTES: int = 42
+pub const DATETIME: int = 43
+pub const RW_LOCK: int = 44
+pub const READ_GUARD: int = 45
+pub const PTR: int = 46
+
+## A type's flags: a drop of a value of it can do something; a copy is a
+## copy of its bytes; an error value, whose first word is its own type's
+## number and whose second is its return trace; a capability handle whose
+## copies are counted (decision 237); the parts a drop reaches, and those a
+## copy reaches, are each variant's.
+pub const NEEDS_DROP: int = 1
+pub const PLAIN: int = 2
+pub const ERROR: int = 4
+pub const COUNTED: int = 8
+pub const DROPS_BY_VARIANT: int = 16
+pub const COPIES_BY_VARIANT: int = 32
+
+## The words of a type's header, and where each is in it.
+pub const WORDS: int = 10
+pub const KIND: int = 0
+pub const SIZE: int = 1
+pub const FLAGS: int = 2
+pub const A: int = 3
+pub const B: int = 4
+pub const NAME: int = 5
+pub const PARTS: int = 6
+pub const DROPS: int = 7
+pub const COPIES: int = 8
+pub const TAG: int = 9
+
+## A type's header: its kind, its size in bytes and its flags; `a` and `b`,
+## what it holds (a reference's target, a list's or an option's element, a
+## result's two types, a dict's key and value, a guard's check or a
+## struct's or an enum's drop glue, each plus one); the number of its name,
+## the same for types of one name; the positions of its parts, of the parts
+## its drop reaches and of those its copy reaches, 0 for none; and the
+## offset of its tag.
+@derive(Copy)
+pub struct Header:
+    pub kind: int
+    pub size: int
+    pub flags: int
+    pub a: int
+    pub b: int
+    pub name: int
+    pub parts: int
+    pub drops: int
+    pub copies: int
+    pub tag: int
+
+impl Header:
+    ## Whether dropping a value of the type can do something.
+    pub(package) pure def needs_drop(self) -> bool:
+        return (self.flags & NEEDS_DROP) != 0
+
+    ## Whether a copy of a value of the type is a copy of its bytes.
+    pub(package) pure def plain(self) -> bool:
+        return (self.flags & PLAIN) != 0
+
+    ## Whether the type is one of texts, whose first two words are the
+    ## address of their bytes and their length.
+    pub(package) pure def text(self) -> bool:
+        return self.kind == STR or self.kind == STRING or self.kind == PATH
+
+## The table: the address of its words, which the runtime in Rust keeps for
+## the whole run.
+@derive(Copy)
+pub struct Types:
+    ## The table's words, which the walks of `value.sisu` read in place in
+    ## their loops, since a call costs a probe and its arguments' memory.
+    pub words: ptr[int]
+
+impl Types:
+    ## The table whose words are at `words`.
+    pub(package) pure def new(words: ptr[int]) -> Types:
+        return Types(words=words)
+
+    ## Word `k` of the table.
+    pub(package) pure def at(self, k: int) -> int:
+        # safety: in_bounds, valid, aligned: every position the headers hold
+        #   is a word of the table, which the runtime in Rust made for the run.
+        return unsafe self.words.offset(k).read()
+
+    ## The header of type `t`.
+    pub(package) pure def header(self, t: int) -> Header:
+        # safety: in_bounds, valid, aligned: each type of the program has its
+        #   ten words at the start of the table, which lives for the run.
+        unsafe:
+            let w = self.words.offset(t * WORDS)
+            return Header(
+                kind=w.read(),
+                size=w.offset(1).read(),
+                flags=w.offset(2).read(),
+                a=w.offset(3).read(),
+                b=w.offset(4).read(),
+                name=w.offset(5).read(),
+                parts=w.offset(6).read(),
+                drops=w.offset(7).read(),
+                copies=w.offset(8).read(),
+                tag=w.offset(9).read(),
+            )
+
+    ## The kind of type `t`.
+    pub(package) pure def kind(self, t: int) -> int:
+        return self.at(t * WORDS)
+
+    ## What type `t` holds: a reference's target, a list's or an option's
+    ## element, a result's `Ok` type, a dict's key.
+    pub(package) pure def a(self, t: int) -> int:
+        return self.at(t * WORDS + 3)
+
+    ## The size of type `t`, in bytes.
+    pub(package) pure def size(self, t: int) -> int:
+        return self.at(t * WORDS + 1)
+
+    ## Whether dropping a value of type `t` can do something.
+    pub(package) pure def needs_drop(self, t: int) -> bool:
+        return (self.at(t * WORDS + 2) & NEEDS_DROP) != 0
+
+    ## Whether a copy of a value of type `t` is a copy of its bytes.
+    pub(package) pure def plain(self, t: int) -> bool:
+        return (self.at(t * WORDS + 2) & PLAIN) != 0
+
+    ## The number of items of the list at position `list`.
+    pub(package) pure def count(self, list: int) -> int:
+        return self.at(list)
+
+    ## Item `i` of a list of words: a variant's list of fields, or an error
+    ## set's member.
+    pub(package) pure def item(self, list: int, i: int) -> int:
+        return self.at(list + 1 + i)
+
+    ## Field `i` of a list of fields: its offset, its type, and whether the
+    ## type's drop glue drops it (decision 218).
+    pub(package) pure def field(self, list: int, i: int) -> (int, int, bool):
+        # safety: in_bounds, valid, aligned: a list of fields holds three words
+        #   for each field after its length.
+        unsafe:
+            let w = self.words.offset(list + 1 + 3 * i)
+            return (w.read(), w.offset(1).read(), w.offset(2).read() != 0)
+
+    ## Part `i` of a list of parts: its offset and its type.
+    pub(package) pure def part(self, list: int, i: int) -> (int, int):
+        # safety: in_bounds, valid, aligned: a list of parts holds two words
+        #   for each part after its length.
+        unsafe:
+            let w = self.words.offset(list + 1 + 2 * i)
+            return (w.read(), w.offset(1).read())

@@ -1,0 +1,6 @@
+# A pure function that takes a file system.
+pure def has_notes(fs: Fs) -> bool:
+    return fs.exists("notes.txt")
+
+def main(sys: System):
+    print(has_notes(sys.fs))

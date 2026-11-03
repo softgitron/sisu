@@ -106,6 +106,6 @@ stage 2 of the bootstrap ([18](../../proposal/18-next-steps.md)).
 [12](../../proposal/12-interop-and-targets.md) designs the targets,
 their tiers and `--target`, which stage 0 does not have, and
 [09](../../proposal/09-modules-packages-and-build.md) a content-addressed
-cache of builds. Stage 0's release profile uses the same backend as the
-debug one, where [10](../../proposal/10-tooling.md) plans LLVM for
-release.
+cache of builds. Stage 0 compiles a debug build with the backend written
+in Sisu and a release build with Cranelift, which stands in for the
+LLVM backend that [10](../../proposal/10-tooling.md) plans for release.

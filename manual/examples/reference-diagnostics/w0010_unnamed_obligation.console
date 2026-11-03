@@ -1,0 +1,8 @@
+$ sisu run w0010_unnamed_obligation.sisu
+warning[W0010]: the `# safety:` comment names no obligation of `reading_at`, which are `in_range`
+  --> w0010_unnamed_obligation.sisu:16:5
+   |
+16 |     # safety: the list was made on the line above.
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+92

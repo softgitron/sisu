@@ -1,0 +1,7 @@
+# The pure function computes, and its caller prints.
+pure def feel(celsius: int) -> String:
+    return if celsius > 80: "hot" else: "warm"
+
+def main():
+    print("checking 85")
+    print(feel(85))

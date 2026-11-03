@@ -1,0 +1,51 @@
+##! The runtime in Rust (`crates/sisu-rt`) as the runtime's Sisu code calls
+##! it (decision 350): its allocation, which counts the program's blocks;
+##! what it keeps as objects of its own, which it alone drops, copies and
+##! compares (iterators, the tables of dicts and sets, channels, the guards
+##! of mutexes, `Shared` cells, arenas, the cells of capability handles,
+##! return traces); the program's drop glue, which it calls through the
+##! function table; and C's `memmove` and `memcmp`, which move and compare
+##! bytes. The code the backend writes for this package makes no call of
+##! `sisu_rt_flush` before these, as it does before a program's foreign
+##! calls: they are the runtime's own.
+
+from std.mem import ptr
+
+# safety: the runtime in Rust defines each `sisu_rt_` function with this C
+#   signature, and C's library `memmove` and `memcmp`; none unwinds, and each
+#   returns at once, but `sisu_rt_abort_unwind`, which ends the process.
+extern "C":
+    ## A block of `bytes` of heap memory, counted among the program's
+    ## allocations; null for none.
+    pub def sisu_rt_alloc(bytes: int) -> ptr mut u8
+    ## The block at `p` (null for none) grown, or made, to `bytes`, keeping
+    ## what it held.
+    pub def sisu_rt_grow(p: ptr mut u8, bytes: int) -> ptr mut u8
+    ## Frees a block of `sisu_rt_alloc`.
+    pub def sisu_rt_free(p: ptr mut u8)
+    ## A panic while the parts after a panicking one were dropped: the
+    ## program aborts with both messages.
+    pub def sisu_rt_abort_unwind()
+    ## Runs the drop glue at index `glue` of the function table on the value
+    ## at `p`; the status.
+    pub def sisu_rt_glue(glue: int, p: ptr mut u8) -> u8
+    ## Moves the value at `p` of type `t` aside, to be dropped on the task's
+    ## stack, since this code runs on the system stack (decision 350).
+    pub def sisu_rt_defer(p: ptr mut u8, t: int) -> u8
+    ## Drops the value at `p` of a type whose objects the runtime in Rust
+    ## keeps; the status.
+    pub def sisu_rt_object_drop(p: ptr mut u8, t: int) -> u8
+    ## Copies the value at `src` of such a type to `dst`.
+    pub def sisu_rt_object_copy(dst: ptr mut u8, src: ptr mut u8, t: int)
+    ## One more count for the capability handle at `p` (decision 237).
+    pub def sisu_rt_object_retain(p: ptr mut u8, t: int)
+    ## Whether the dicts or sets at `a` and `b` hold equal entries.
+    pub def sisu_rt_object_eq(a: ptr mut u8, ta: int, b: ptr mut u8, tb: int) -> bool
+    ## The error value at `p` lets go of its return trace, which is gone.
+    pub def sisu_rt_trace_release(p: ptr mut u8)
+    ## The error value at `p` is a copy: its return trace is held once more.
+    pub def sisu_rt_trace_retain(p: ptr mut u8)
+    ## Copies `n` bytes from `src` to `dst`; the regions may overlap.
+    pub def memmove(dst: ptr mut u8, src: ptr[u8], n: int) -> ptr mut u8
+    ## The order of the `n` bytes at `a` and at `b`: 0 when they are the same.
+    pub def memcmp(a: ptr[u8], b: ptr[u8], n: int) -> i32

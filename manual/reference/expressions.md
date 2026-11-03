@@ -29,15 +29,15 @@ From the operators that bind tightest to the loosest:
 | Level | Operators | Notes |
 |---|---|---|
 | Postfix | `x.f`, `x[i]`, `x[i:j]`, `f(x)`, `x?`, `x?.f` | left to right |
-| Power | `**` | right to left; `-x ** y` is E0112 |
+| Power | `**` | right to left; `-x ** y` is [E0112](diagnostics.md#e0112) |
 | Unary | `-x`, `~x`, `ref x`, `ref mut x` | |
 | Multiplicative | `*`, `/`, `//`, `%`, `*%`, `*\|` | |
 | Additive | `+`, `-`, `+%`, `-%`, `+\|`, `-\|` | |
 | Shift | `<<`, `>>` | not mixed with arithmetic without parentheses (E0111) |
-| Bitwise | `&`, `^`, `\|` | not mixed with each other (E0109) or with arithmetic and shifts (E0110) without parentheses |
+| Bitwise | `&`, `^`, `\|` | not mixed with each other (E0109) or with arithmetic and shifts ([E0110](diagnostics.md#e0110)) without parentheses |
 | Comparison | `==`, `!=`, `<`, `<=`, `>`, `>=`, `in`, `not in` | chained in one direction ([Comparisons](#comparisons)) |
 | `not` | `not x` | |
-| `and` | `a and b` | not mixed with `or` without parentheses (E0108) |
+| `and` | `a and b` | not mixed with `or` without parentheses ([E0108](diagnostics.md#e0108)) |
 | `or` | `a or b` | |
 | `??` | `a ?? b` | the fallback of an optional value |
 | Closure | `x -> e` | |
@@ -96,7 +96,7 @@ error[E0113]: a chained comparison must point one way; `<` and `>` do not
 | Operator | On | Gives |
 |---|---|---|
 | `a + b`, `a - b`, `a * b` | numbers of one type | that type; an overflow panics ([R2](types.md#overflow-traps)) |
-| `a / b` | floats | a float; on integers E0301 |
+| `a / b` | floats | a float; on integers [E0301](diagnostics.md#e0301) |
 | `a // b` | integers | the quotient rounded down, toward negative infinity; on floats E0372 |
 | `a % b` | integers or floats | the remainder, with the sign of `b`, so `-7 % 3` is 2 |
 | `a ** b` | numbers | the power; a negative integer exponent panics |
@@ -563,14 +563,14 @@ def main():
 
 | Code | Identifier | Section |
 |---|---|---|
-| [E0108](diagnostics.md#e0108), E0109, E0110, E0111, E0112, E0114, E0123 | `parse.mixed-and-or`, `parse.mixed-bitwise`, `parse.bitwise-arithmetic`, `parse.shift-arithmetic`, `parse.negative-power`, `parse.assignment-in-expression`, `parse.walrus` | [Precedence](#precedence) |
+| [E0108](diagnostics.md#e0108), E0109, [E0110](diagnostics.md#e0110), E0111, [E0112](diagnostics.md#e0112), E0114, [E0123](diagnostics.md#e0123) | `parse.mixed-and-or`, `parse.mixed-bitwise`, `parse.bitwise-arithmetic`, `parse.shift-arithmetic`, `parse.negative-power`, `parse.assignment-in-expression`, `parse.walrus` | [Precedence](#precedence) |
 | [E0301](diagnostics.md#e0301), E0372, [E0373](diagnostics.md#e0373), [E0310](diagnostics.md#e0310) | `type.integer-division`, `type.float-floor-division`, `type.mixed-numbers`, `type.binary-operator` | [Arithmetic](#arithmetic) |
 | [E0113](diagnostics.md#e0113), E0119, E0369, [E0368](diagnostics.md#e0368) | `parse.mixed-chain`, `parse.chain-operator`, `type.comparison-types`, `type.not-ordered` | [Comparisons](#comparisons) |
 | [E0302](diagnostics.md#e0302) | `type.not-bool` | [Logic](#logic) |
 | [E0305](diagnostics.md#e0305), [E0306](diagnostics.md#e0306), E0307, [E0308](diagnostics.md#e0308), E0376, E0350, E0394 | `type.argument-count`, `type.unknown-keyword`, `type.duplicate-argument`, `type.missing-argument`, `type.positional-after-keyword`, `type.not-a-value`, `type.ambiguous-method` | [Calls](#calls) |
 | [E0344](diagnostics.md#e0344), E0383, [R0002](diagnostics.md#r0002), [R0010](diagnostics.md#r0010), R0015 | `type.constant-negative-index`, `type.from-end-outside-index`, `panic.index-out-of-bounds`, `panic.missing-key`, `panic.negative-index` | [Indexing and slicing](#indexing-and-slicing) |
-| E0342, E0353 | `type.it-outside-closure`, `type.closure-parameter-count` | [Closures](#closures) |
+| [E0342](diagnostics.md#e0342), E0353 | `type.it-outside-closure`, `type.closure-parameter-count` | [Closures](#closures) |
 | [E0116](diagnostics.md#e0116), [E0115](diagnostics.md#e0115), E0384, E0365 | `parse.if-expression-else`, `parse.python-conditional`, `type.arm-needs-expression`, `type.if-branches` | [If and match as expressions](#if-and-match-as-expressions) |
 | E0319, [E0320](diagnostics.md#e0320), E0321, E0370, E0371, [E0318](diagnostics.md#e0318) | `type.try-needs-fallible`, `type.try-context`, `type.error-not-in-set`, `type.optional-chain`, `type.coalesce`, `type.unused-result` | [Optional values and results](#optional-values-and-results) |
-| E0399, E0380 | `type.bad-format-spec`, `type.no-display` | [Interpolation and format specs](#interpolation-and-format-specs) |
+| [E0399](diagnostics.md#e0399), E0380 | `type.bad-format-spec`, `type.no-display` | [Interpolation and format specs](#interpolation-and-format-specs) |
 | E0600, W0009 | `comptime.not-constant`, `unsafe.unused` | [Compile-time and unsafe expressions](#compile-time-and-unsafe-expressions) |

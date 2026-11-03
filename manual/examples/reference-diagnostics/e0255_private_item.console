@@ -1,0 +1,8 @@
+$ sisu run
+error[E0255]: `band` is private to the module `sauna.heat`; declare it `pub` to use it from another module
+  --> src/main.sisu:2:24
+  |
+2 | from sauna.heat import band, feel
+  |                        ^^^^
+
+error[D0006]: the program was not run: errors found (1)

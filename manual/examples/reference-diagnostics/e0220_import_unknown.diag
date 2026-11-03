@@ -1,0 +1,2 @@
+2:8-2:22 E0220 resolve.import-unknown name="std.colections"
+  fix resolve.similar-module 2:8-2:22 "std.collections"

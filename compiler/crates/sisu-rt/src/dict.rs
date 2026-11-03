@@ -9,7 +9,7 @@ use crate::rt::{self, ty};
 use crate::value::{self, target};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::hash::{BuildHasherDefault, Hash, Hasher};
+use std::hash::{BuildHasherDefault, Hasher};
 
 /// The index: each key hash's entries. A hash is its own key in it, so
 /// it is not hashed again (decision 253).
@@ -86,66 +86,8 @@ impl Hasher for Spread {
     }
 }
 
-/// The multiplier of [`KeyHasher`]'s rounds.
+/// The multiplier of [`Spread`]'s rounds.
 const MIX: u64 = 0x517c_c1b7_2722_0a95;
-
-/// The hasher of keys: a word at a time, multiplied in, then mixed so
-/// that every bit of the result depends on every bit of the input.
-#[derive(Default)]
-struct KeyHasher(u64);
-
-impl KeyHasher {
-    fn add(&mut self, w: u64) {
-        self.0 = (self.0.rotate_left(5) ^ w).wrapping_mul(MIX);
-    }
-}
-
-impl Hasher for KeyHasher {
-    fn finish(&self) -> u64 {
-        let mut h = self.0;
-        h ^= h >> 33;
-        h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
-        h ^= h >> 33;
-        h = h.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
-        h ^ (h >> 33)
-    }
-
-    fn write(&mut self, bytes: &[u8]) {
-        let mut words = bytes.chunks_exact(8);
-        for w in &mut words {
-            let mut b = [0u8; 8];
-            b.copy_from_slice(w);
-            self.add(u64::from_le_bytes(b));
-        }
-        let rest = words.remainder();
-        if !rest.is_empty() {
-            let mut b = [0u8; 8];
-            b[..rest.len()].copy_from_slice(rest);
-            self.add(u64::from_le_bytes(b) ^ ((rest.len() as u64) << 59));
-        }
-    }
-
-    fn write_u8(&mut self, n: u8) {
-        self.add(u64::from(n));
-    }
-
-    fn write_u32(&mut self, n: u32) {
-        self.add(u64::from(n));
-    }
-
-    fn write_u64(&mut self, n: u64) {
-        self.add(n);
-    }
-
-    fn write_u128(&mut self, n: u128) {
-        self.add(n as u64);
-        self.add((n >> 64) as u64);
-    }
-
-    fn write_usize(&mut self, n: usize) {
-        self.add(n as u64);
-    }
-}
 
 /// A dict's entries, each its key's bytes then its value's, in the order
 /// they were inserted; a set's are its elements (`val` is `()`).
@@ -281,177 +223,34 @@ unsafe fn key_equal(a: *mut u8, ta: u32, b: *mut u8, tb: u32) -> bool {
     }
 }
 
-/// The structural hash of a key: equal keys hash alike.
-///
 /// The structural hash of the value at `p` (decision 256), as the
 /// interpreter computes it (`Interp::structural_hash`): its parts mixed
 /// into `state` as `Hasher.write_int` mixes an `int`, `(state ^ n) *%
 /// 1099511628211`, in the order the derived impls and the prelude's own
-/// impls hash them.
+/// impls hash them. The runtime in Sisu's (decision 350).
 ///
 /// # Safety
 /// `p` must hold a value of type `t`.
 pub(crate) unsafe fn structural_hash(state: u64, p: *mut u8, t: u32) -> u64 {
-    fn mix(state: u64, n: u64) -> u64 {
-        (state ^ n).wrapping_mul(1_099_511_628_211)
-    }
-    fn text(state: u64, b: &[u8]) -> u64 {
-        b.iter().fold(mix(state, b.len() as u64), |s, x| mix(s, u64::from(*x)))
-    }
-    // SAFETY: the parts are where the type says.
-    unsafe {
-        let (p, t) = target(p, t);
-        let entry = ty(t);
-        match &entry.kind {
-            Kind::Str | Kind::String | Kind::Path => text(state, value::text(p, t).unwrap_or(&[])),
-            Kind::Bytes => text(state, mem::at::<crate::mem::Text>(p).bytes()),
-            Kind::Int
-            | Kind::Sized(_)
-            | Kind::U64
-            | Kind::Bool
-            | Kind::Char
-            | Kind::Float
-            | Kind::DateTime => mix(state, mem::word(p, 0)),
-            Kind::F32 => mix(state, u64::from(mem::word(p, 0) as u32)),
-            Kind::I128 | Kind::U128 => {
-                let bits = crate::wide::bits(p);
-                mix(mix(state, bits as u64), (bits >> 64) as u64)
-            }
-            Kind::Tuple(slots) => {
-                slots.iter().fold(state, |s, slot| structural_hash(s, p.add(slot.offset as usize), slot.ty))
-            }
-            Kind::List(e) => {
-                let l = mem::at::<List>(p);
-                let size = ty(*e).size;
-                (0..l.len).fold(mix(state, l.len), |s, i| structural_hash(s, l.at(i, size), *e))
-            }
-            Kind::Option(payload) => {
-                let tag = value::tag(p, entry);
-                let s = mix(state, tag);
-                if tag == 0 { structural_hash(s, p.add(8), *payload) } else { s }
-            }
-            Kind::Result(a, b) => {
-                let tag = value::tag(p, entry);
-                structural_hash(mix(state, tag), p.add(8), if tag == 0 { *a } else { *b })
-            }
-            Kind::Box(inner) => structural_hash(state, mem::word(p, 0) as *mut u8, *inner),
-            Kind::Struct { fields, .. } => {
-                fields.iter().fold(state, |s, f| structural_hash(s, p.add(f.offset as usize), f.ty))
-            }
-            Kind::Enum { .. } | Kind::ErrSet(_) => {
-                let decl = value::concrete(p, t);
-                let e = ty(decl);
-                match &e.kind {
-                    Kind::Enum { variants, .. } => {
-                        let tag = value::tag(p, e);
-                        let s = mix(state, tag);
-                        match variants.get(tag as usize) {
-                            Some(v) => v
-                                .fields
-                                .iter()
-                                .fold(s, |s, f| structural_hash(s, p.add(f.offset as usize), f.ty)),
-                            None => s,
-                        }
-                    }
-                    _ => state,
-                }
-            }
-            _ => state,
-        }
-    }
+    // SAFETY: as the caller guarantees.
+    unsafe { crate::bridge::hash(state, p, t) }
 }
 
+/// The hash of a key in a table's index: its structural hash, from the
+/// state an empty hasher has, with every bit then spread over the others
+/// (MurmurHash3's last step), since the index takes the low bits of a hash
+/// for its buckets and the high ones for its tags. Equal keys hash alike.
+///
 /// # Safety
 /// `p` must hold a value of type `t`.
 pub(crate) unsafe fn hash_value(p: *mut u8, t: u32) -> u64 {
-    let mut h = KeyHasher::default();
     // SAFETY: as the caller guarantees.
-    unsafe { hash_into(&mut h, p, t) };
-    h.finish()
-}
-
-/// # Safety
-/// `p` must hold a value of type `t`.
-unsafe fn hash_into(h: &mut impl Hasher, p: *mut u8, t: u32) {
-    // SAFETY: the parts are where the type says.
-    unsafe {
-        let (p, t) = target(p, t);
-        let entry = ty(t);
-        match &entry.kind {
-            Kind::Str | Kind::String => {
-                0u8.hash(h);
-                value::text(p, t).unwrap_or(&[]).hash(h);
-            }
-            Kind::Path => {
-                1u8.hash(h);
-                value::text(p, t).unwrap_or(&[]).hash(h);
-            }
-            Kind::Bytes => {
-                2u8.hash(h);
-                mem::at::<crate::mem::Text>(p).bytes().hash(h);
-            }
-            Kind::Int
-            | Kind::Sized(_)
-            | Kind::U64
-            | Kind::Bool
-            | Kind::Char
-            | Kind::Float
-            | Kind::DateTime => {
-                mem::word(p, 0).hash(h);
-            }
-            Kind::F32 => (mem::word(p, 0) as u32).hash(h),
-            Kind::I128 | Kind::U128 => crate::wide::bits(p).hash(h),
-            Kind::Unit => {}
-            Kind::Tuple(slots) => {
-                for s in slots {
-                    hash_into(h, p.add(s.offset as usize), s.ty);
-                }
-            }
-            Kind::List(e) => {
-                let l = mem::at::<List>(p);
-                let size = ty(*e).size;
-                l.len.hash(h);
-                for i in 0..l.len {
-                    hash_into(h, l.at(i, size), *e);
-                }
-            }
-            Kind::Option(payload) => {
-                let tag = value::tag(p, entry);
-                tag.hash(h);
-                if tag == 0 {
-                    hash_into(h, p.add(8), *payload);
-                }
-            }
-            Kind::Result(a, b) => {
-                let tag = value::tag(p, entry);
-                tag.hash(h);
-                hash_into(h, p.add(8), if tag == 0 { *a } else { *b });
-            }
-            Kind::Box(inner) => hash_into(h, mem::word(p, 0) as *mut u8, *inner),
-            Kind::Struct { name, fields, .. } => {
-                name.hash(h);
-                for f in fields {
-                    hash_into(h, p.add(f.offset as usize), f.ty);
-                }
-            }
-            Kind::Enum { .. } | Kind::ErrSet(_) => {
-                let decl = value::concrete(p, t);
-                let e = ty(decl);
-                if let Kind::Enum { name, variants, .. } = &e.kind {
-                    name.hash(h);
-                    let tag = value::tag(p, e);
-                    tag.hash(h);
-                    if let Some(v) = variants.get(tag as usize) {
-                        for f in &v.fields {
-                            hash_into(h, p.add(f.offset as usize), f.ty);
-                        }
-                    }
-                }
-            }
-            Kind::Opaque(_) => mem::word(p, 0).hash(h),
-            _ => {}
-        }
-    }
+    let mut h = unsafe { structural_hash(0xcbf2_9ce4_8422_2325, p, t) };
+    h ^= h >> 33;
+    h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    h ^= h >> 33;
+    h = h.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+    h ^ (h >> 33)
 }
 
 /// Copies the key at `k` (of type `kt`, perhaps behind references) into

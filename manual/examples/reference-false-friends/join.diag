@@ -1,1 +1,2 @@
 4:16-4:20 E0304 type.unknown-method ty="str" name="join"
+  fix type.join-items 4:11-4:27 "names.join(\", \")"

@@ -1,0 +1,8 @@
+$ sisu run e0612_embed_failed.sisu
+error[E0612]: cannot embed `menu.txt`: there is no such file
+  --> e0612_embed_failed.sisu:2:19
+  |
+2 | const MENU: str = embed("menu.txt")
+  |                   ^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

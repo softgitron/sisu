@@ -192,6 +192,7 @@ pub const SIZED_NOT: int = 17
 pub const SIZED_CMP: int = 19
 pub const SIZED_TO_INT: int = 20
 pub const SIZED_WIDEN: int = 22
+pub const SIZED_WRAPPING_FROM: int = 24
 pub const SIZED_TO_SIZED: int = 25
 
 ## The number of the sized operation `n`, if it is one.

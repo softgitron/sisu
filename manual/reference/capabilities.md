@@ -496,6 +496,6 @@ fakes do.
 |---|---|---|
 | [E0200](diagnostics.md#e0200) | `resolve.undefined-name` | [The rule](#the-rule) |
 | E0378, E0701 | `type.main-signature`, `cap.internal` | [The root capabilities](#the-root-capabilities) |
-| E0421, E0422, E0700 | `borrow.view-in-owner`, `borrow.must-consume-in-owner`, `cap.not-shareable` | [Capabilities in generic code](#capabilities-in-generic-code) |
-| E0334 | `type.impure-capability` | [Pure functions take no capability](#pure-functions-take-no-capability) |
-| E0703, [E0601](diagnostics.md#e0601), E0971 | `cap.untrusted`, `comptime.io`, `sim.unmodelled-extern` | [How the rule is enforced](#how-the-rule-is-enforced) |
+| [E0421](diagnostics.md#e0421), E0422, E0700 | `borrow.view-in-owner`, `borrow.must-consume-in-owner`, `cap.not-shareable` | [Capabilities in generic code](#capabilities-in-generic-code) |
+| [E0334](diagnostics.md#e0334) | `type.impure-capability` | [Pure functions take no capability](#pure-functions-take-no-capability) |
+| [E0703](diagnostics.md#e0703), [E0601](diagnostics.md#e0601), E0971 | `cap.untrusted`, `comptime.io`, `sim.unmodelled-extern` | [How the rule is enforced](#how-the-rule-is-enforced) |

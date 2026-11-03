@@ -1,0 +1,8 @@
+$ sisu run
+error[E0259]: the method `cool` of `kiuas.stove.Stove` is private to the module `kiuas.stove`; declare it `pub` to call it from another module
+  --> src/main.sisu:6:11
+  |
+6 |     stove.cool()
+  |           ^^^^
+
+error[D0006]: the program was not run: errors found (1)

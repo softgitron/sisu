@@ -1,0 +1,17 @@
+# The call in an `unsafe` expression, with the reason it is sound.
+from std.mem import as_ptr
+
+## The reading at `i` of `temps`, without the check that there is one.
+##
+## Safety:
+## - `in_range`: `i` is at least 0 and less than `len(temps)`
+unsafe def reading_at(temps: Slice[int], i: int) -> int:
+    let first = as_ptr(temps)
+    # safety: in_bounds, valid, aligned: this function's `in_range`, and
+    #   `temps` lives, unchanged, until the read.
+    return unsafe first.offset(i).read()
+
+def main():
+    let temps = [78, 85, 92]
+    # safety: in_range: the list holds three readings, so 2 is in range.
+    print(unsafe reading_at(temps, 2))

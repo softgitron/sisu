@@ -1,0 +1,9 @@
+# A test that fails, and prints the token that replays it.
+def total(prices: list[int]) -> int:
+    var sum = 0
+    for p in prices[1:]:
+        sum += p
+    return sum
+
+test "the total of three prices":
+    assert total([3, 4, 5]) == 12

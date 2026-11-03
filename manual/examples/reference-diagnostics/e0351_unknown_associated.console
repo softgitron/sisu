@@ -1,0 +1,8 @@
+$ sisu run e0351_unknown_associated.sisu
+error[E0351]: `Point` has no associated function `origin`
+  --> e0351_unknown_associated.sisu:7:19
+  |
+7 |     let p = Point.origin()
+  |                   ^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

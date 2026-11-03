@@ -308,5 +308,5 @@ E0201 (`resolve.undefined-type`).
 | [D0009](diagnostics.md#d0009) | `cli.unknown-option` | [Cross compilation](#cross-compilation) |
 | [W0005](diagnostics.md#w0005), E0971 | `package.unknown-key`, `sim.unmodelled-extern` | [Runtime profiles](#runtime-profiles) |
 | R0032 | `panic.stack-overflow` | [Tasks, I/O and stacks](#tasks-io-and-stacks) |
-| E0201 | `resolve.undefined-type` | [Binary size and startup](#binary-size-and-startup) |
+| [E0201](diagnostics.md#e0201) | `resolve.undefined-type` | [Binary size and startup](#binary-size-and-startup) |
 | [D0111](diagnostics.md#d0111), D0103 | `native.release`, `native.unsupported` | [Where a program runs](#where-a-program-runs) |

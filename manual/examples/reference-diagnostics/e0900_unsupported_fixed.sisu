@@ -1,0 +1,6 @@
+# A list comprehension, which stage 0 implements.
+def main():
+    let readings = [78, 85, 92]
+    let doubled = [r * 2 for r in readings]
+    for d in doubled:
+        print(d)

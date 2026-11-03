@@ -438,7 +438,7 @@ Shown in [chapter 2](../tutorial/02-values.md).
 
 ## Parsing
 
-Codes E0100 to E0127. The parser builds the syntax tree. Its errors name
+Codes E0100 to E0128. The parser builds the syntax tree. Its errors name
 what it expected and what it found, and several name a habit from
 another language and the Sisu way to write it.
 
@@ -779,6 +779,106 @@ stay in
 
 Shown in [chapter 2](../tutorial/02-values.md).
 
+### E0110
+
+`parse.bitwise-arithmetic`: `{op}` cannot be mixed with arithmetic or
+shifts without parentheses.
+
+`&`, `^` and `|` are not mixed with arithmetic or shifts without
+parentheses: languages order them differently (C puts `&` below `==`,
+Python above it), so the parentheses say which one a reader should not
+have to remember ([R4](expressions.md#precedence)).
+
+<!-- file: examples/reference-diagnostics/e0110_bitwise.sisu -->
+```sisu
+# A bit mask mixed with arithmetic, without parentheses.
+def main():
+    let flags = 6
+    print(flags & 1 + 2)
+```
+
+<!-- output: examples/reference-diagnostics/e0110_bitwise.console -->
+```console
+$ sisu run e0110_bitwise.sisu
+error[E0110]: `&` cannot be mixed with arithmetic or shifts without parentheses
+  --> e0110_bitwise.sisu:4:24
+  |
+4 |     print(flags & 1 + 2)
+  |                        ^
+  = fix: add parentheses: `(`, `)`
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+The fix adds the parentheses around the operation the parser took first,
+here `1 + 2`. Move them if the program meant the other order, as the
+fixed program does.
+
+<!-- file: examples/reference-diagnostics/e0110_bitwise_fixed.sisu -->
+```sisu
+# Parentheses say which operation comes first.
+def main():
+    let flags = 6
+    print((flags & 1) + 2)
+```
+
+<!-- output: examples/reference-diagnostics/e0110_bitwise_fixed.out -->
+```text
+2
+```
+
+Shown in [R4](expressions.md#precedence).
+
+### E0112
+
+`parse.negative-power`: `-x ** y` is ambiguous; write `-(x ** y)` or
+`(-x) ** y`.
+
+In mathematics and in Python, `-n ** 2` is `-(n ** 2)`; in other
+languages a minus sign binds tighter. Sisu asks for parentheses, so the
+expression means one thing to every reader.
+
+<!-- file: examples/reference-diagnostics/e0112_negative_power.sisu -->
+```sisu
+# A minus sign before a power, without parentheses.
+def main():
+    let n = 3
+    print(-n ** 2)
+```
+
+<!-- output: examples/reference-diagnostics/e0112_negative_power.console -->
+```console
+$ sisu run e0112_negative_power.sisu
+error[E0112]: `-x ** y` is ambiguous; write `-(x ** y)` or `(-x) ** y`
+  --> e0112_negative_power.sisu:4:18
+  |
+4 |     print(-n ** 2)
+  |                  ^
+  = fix: add parentheses: `(`, `)`
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+The fix writes the parentheses of one reading; choose the one the
+program means. The fixed program prints both.
+
+<!-- file: examples/reference-diagnostics/e0112_negative_power_fixed.sisu -->
+```sisu
+# Parentheses say whether the minus applies before the power.
+def main():
+    let n = 3
+    print(-(n ** 2))
+    print((-n) ** 2)
+```
+
+<!-- output: examples/reference-diagnostics/e0112_negative_power_fixed.out -->
+```text
+-9
+9
+```
+
+Shown in [R4](expressions.md#precedence).
+
 ### E0113
 
 `parse.mixed-chain`: a chained comparison must point one way; `{first}`
@@ -964,6 +1064,60 @@ def main():
 3
 ```
 
+### E0123
+
+`parse.walrus`: Sisu has no `:=`; bind with `let` or use `if let`.
+
+Sisu has no `:=`: a name is declared with `let` or `var`, and a value
+bound inside a condition is written with `if let` or a chained condition
+([R5](statements.md)). The statement that `:=` would have declared is
+not read, so each use of its name is E0200 too.
+
+<!-- file: examples/reference-diagnostics/e0123_walrus.sisu -->
+```sisu
+# `:=` from Go, which declares a name and gives it a value.
+def main():
+    count := 3
+    print("{count} saunas")
+```
+
+<!-- output: examples/reference-diagnostics/e0123_walrus.console -->
+```console
+$ sisu run e0123_walrus.sisu
+error[E0123]: Sisu has no `:=`; bind with `let` or use `if let`
+  --> e0123_walrus.sisu:3:11
+  |
+3 |     count := 3
+  |           ^^
+
+error[E0200]: cannot find `count` in this scope
+  --> e0123_walrus.sisu:4:13
+  |
+4 |     print("{count} saunas")
+  |             ^^^^^
+
+error[D0006]: the program was not run: errors found (2)
+```
+
+Write `let`, or `var` for a name that changes. Python's walrus in a
+condition, `if (n := len(xs)) > 2:`, becomes `let n = len(xs)` on the
+line before the `if`.
+
+<!-- file: examples/reference-diagnostics/e0123_walrus_fixed.sisu -->
+```sisu
+# `let` declares a name and gives it a value.
+def main():
+    let count = 3
+    print("{count} saunas")
+```
+
+<!-- output: examples/reference-diagnostics/e0123_walrus_fixed.out -->
+```text
+3 saunas
+```
+
+Shown in the guide [Coming from Go](../guides/from-go.md).
+
 ### E0124
 
 `parse.keyword-as-name`: `{keyword}` is a keyword and cannot be used as
@@ -1072,9 +1226,75 @@ no reading above 90
 
 Shown in [chapter 4](../tutorial/04-control-flow.md).
 
+### E0128
+
+`parse.glob-import`: Sisu has no glob imports: name what the module
+gives, as in `from std.collections import Deque, Heap`, or import the
+module and write `collections.Deque`.
+
+An import names each item it brings in, or the module itself, so that a
+reader of a file can find where each name comes from: glob imports make
+name resolution unreadable, as
+[09](../../proposal/09-modules-packages-and-build.md) found in Rust and
+Python, and a variant is written unqualified where its type is known
+instead ([R13](modules.md#imports)).
+
+<!-- file: examples/reference-diagnostics/e0128_glob_import.sisu -->
+```sisu
+# A glob import, which Sisu does not have.
+from std.math import *
+
+def main():
+    print(floor(sqrt(20.0)))
+```
+
+<!-- output: examples/reference-diagnostics/e0128_glob_import.console -->
+```console
+$ sisu run e0128_glob_import.sisu
+error[E0128]: Sisu has no glob imports: name what the module gives, as in `from std.collections import Deque, Heap`, or import the module and write `collections.Deque`
+  --> e0128_glob_import.sisu:2:22
+  |
+2 | from std.math import *
+  |                      ^
+
+error[E0200]: cannot find `floor` in this scope
+  --> e0128_glob_import.sisu:5:11
+  |
+5 |     print(floor(sqrt(20.0)))
+  |           ^^^^^
+
+error[E0200]: cannot find `sqrt` in this scope
+  --> e0128_glob_import.sisu:5:17
+  |
+5 |     print(floor(sqrt(20.0)))
+  |                 ^^^^
+
+error[D0006]: the program was not run: errors found (3)
+```
+
+Name the items the module gives, as the message shows, or import the
+module and write its name before each item, as `math.sqrt`. Each name
+the glob would have brought in is E0200 where it is used.
+
+<!-- file: examples/reference-diagnostics/e0128_glob_import_fixed.sisu -->
+```sisu
+# The import names what the module gives.
+from std.math import floor, sqrt
+
+def main():
+    print(floor(sqrt(20.0)))
+```
+
+<!-- output: examples/reference-diagnostics/e0128_glob_import_fixed.out -->
+```text
+4.0
+```
+
+Shown in [R13](modules.md).
+
 ## Names and declarations
 
-Codes E0200 to E0269. Name resolution finds what each name means and
+Codes E0200 to E0270. Name resolution finds what each name means and
 checks declarations: undefined and duplicate names, imports and
 visibility, derives, traits and impls.
 
@@ -1122,6 +1342,61 @@ Hei, maailma!
 ```
 
 Shown in [chapter 1](../tutorial/01-hello.md).
+
+### E0201
+
+`resolve.undefined-type`: cannot find a type named `{name}`.
+
+Where a type is expected, a name must be a type that is declared,
+imported or in the prelude. The prelude holds the types every program
+uses; the others come from their modules.
+
+<!-- file: examples/reference-diagnostics/e0201_undefined_type.sisu -->
+```sisu
+# A type from the standard library, used without its import.
+def waiting(queue: Deque[str]) -> int:
+    return len(queue)
+
+def main():
+    print("no queue yet")
+```
+
+<!-- output: examples/reference-diagnostics/e0201_undefined_type.console -->
+```console
+$ sisu run e0201_undefined_type.sisu
+error[E0201]: cannot find a type named `Deque`
+  --> e0201_undefined_type.sisu:2:20
+  |
+2 | def waiting(queue: Deque[str]) -> int:
+  |                    ^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Import the type from its module, as `from std.collections import Deque`,
+or correct its spelling. When an expression names the type too, as
+`Deque[str].new()`, that use gets E0200.
+
+<!-- file: examples/reference-diagnostics/e0201_undefined_type_fixed.sisu -->
+```sisu
+# The type imported from its module.
+from std.collections import Deque
+
+def waiting(queue: Deque[str]) -> int:
+    return len(queue)
+
+def main():
+    var queue = Deque[str].new()
+    queue.push_back("Aino")
+    print(waiting(queue))
+```
+
+<!-- output: examples/reference-diagnostics/e0201_undefined_type_fixed.out -->
+```text
+1
+```
+
+Shown in [chapter 17](../tutorial/17-modules-and-packages.md).
 
 ### E0202
 
@@ -1234,6 +1509,59 @@ $ sisu run
 ```
 
 Shown in [R13](modules.md#imports).
+
+### E0204
+
+`resolve.not-in-module`: module `{module}` has no item `{name}`.
+
+`from MODULE import NAME` names an item that the module declares `pub`:
+a type, a function, a constant or an error set. A variant is reached
+through its type, as `BookingError.Taken`, and is not an item of the
+module.
+
+<!-- file: examples/reference-diagnostics/e0204_not_in_module.sisu -->
+```sisu
+# An import of an item that the module does not have.
+from std.collections import Stack
+
+def main():
+    var stack = Stack[int]()
+    stack.push(3)
+    print(stack.pop())
+```
+
+<!-- output: examples/reference-diagnostics/e0204_not_in_module.console -->
+```console
+$ sisu run e0204_not_in_module.sisu
+error[E0204]: module `std.collections` has no item `Stack`
+  --> e0204_not_in_module.sisu:2:29
+  |
+2 | from std.collections import Stack
+  |                             ^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Check the module's items with `sisu doc --std std.collections`, or in
+its source; the diagnostic offers no similar name.
+
+<!-- file: examples/reference-diagnostics/e0204_not_in_module_fixed.sisu -->
+```sisu
+# A `Deque` is a stack, pushed and popped at its back.
+from std.collections import Deque
+
+def main():
+    var stack = Deque[int].new()
+    stack.push_back(3)
+    print(stack.pop_back())
+```
+
+<!-- output: examples/reference-diagnostics/e0204_not_in_module_fixed.out -->
+```text
+Some(3)
+```
+
+Shown in [R13](modules.md).
 
 ### E0211
 
@@ -1408,6 +1736,60 @@ def main():
 ```
 
 Shown in [chapter 14](../tutorial/14-traits.md).
+
+### E0220
+
+`resolve.import-unknown`: cannot import `{name}`: it names no module of
+this package, of a dependency in `sisu.toml`, or of the standard
+library.
+
+An import names a module of the package, of a dependency in `sisu.toml`,
+or of the standard library. A single file is a package of one module, so
+it can import only the standard library.
+
+<!-- file: examples/reference-diagnostics/e0220_import_unknown.sisu -->
+```sisu
+# An import of a module whose name is misspelt.
+import std.colections
+
+def main():
+    let sizes: colections.Deque[int] = colections.Deque.new()
+    print(sizes.is_empty())
+```
+
+<!-- output: examples/reference-diagnostics/e0220_import_unknown.console -->
+```console
+$ sisu run e0220_import_unknown.sisu
+error[E0220]: cannot import `std.colections`: it names no module of this package, of a dependency in `sisu.toml`, or of the standard library
+  --> e0220_import_unknown.sisu:2:8
+  |
+2 | import std.colections
+  |        ^^^^^^^^^^^^^^
+  = fix: a module with a similar name exists: `std.collections`
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+The fix writes the module with the most similar name, when there is one.
+For a dependency, add it to `sisu.toml` first
+([R13](modules.md#the-manifest)).
+
+<!-- file: examples/reference-diagnostics/e0220_import_unknown_fixed.sisu -->
+```sisu
+# The module's name spelt as the standard library spells it.
+import std.collections
+
+def main():
+    let sizes: collections.Deque[int] = collections.Deque.new()
+    print(sizes.is_empty())
+```
+
+<!-- output: examples/reference-diagnostics/e0220_import_unknown_fixed.out -->
+```text
+True
+```
+
+Shown in the guide [Write a script with dependencies](../guides/script.md).
 
 ### E0225
 
@@ -2020,8 +2402,9 @@ Shown in [chapter 14](../tutorial/14-traits.md).
 ### E0243
 
 `resolve.not-derivable`: `{name}` cannot be derived; `@derive` takes
-`Copy` and the traits that have a `comptime def derive`: `Debug`, `Eq`,
-`PartialOrd`, `Ord`, `Hash`, and any trait that declares one.
+`Copy` and the traits that have a `comptime def derive`: `Debug`,
+`Default`, `Eq`, `PartialOrd`, `Ord`, `Hash`, and any trait that
+declares one.
 
 `@derive` takes `Copy` and the traits that declare a `comptime def
 derive`; the message lists them. `Display` has none, since only you know
@@ -2041,7 +2424,7 @@ def main():
 <!-- output: examples/reference-diagnostics/e0243_not_derivable.console -->
 ```console
 $ sisu run e0243_not_derivable.sisu
-error[E0243]: `Display` cannot be derived; `@derive` takes `Copy` and the traits that have a `comptime def derive`: `Debug`, `Eq`, `PartialOrd`, `Ord`, `Hash`, and any trait that declares one
+error[E0243]: `Display` cannot be derived; `@derive` takes `Copy` and the traits that have a `comptime def derive`: `Debug`, `Default`, `Eq`, `PartialOrd`, `Ord`, `Hash`, and any trait that declares one
   --> e0243_not_derivable.sisu:2:16
   |
 2 | @derive(Debug, Display)
@@ -2245,6 +2628,74 @@ def main():
 
 Shown in [R14](attributes.md#delegating-traits-to-a-field).
 
+### E0255
+
+`resolve.private-item`: `{name}` is private to the module `{module}`;
+declare it `pub` to use it from another module.
+
+An item of a module, a function, a type, a constant or an error set, is
+private to the module unless it is `pub` ([R13](modules.md#visibility)).
+Another module of the same package may import only its `pub` items, and
+another package only those of the package's API.
+
+<!-- file: examples/reference-diagnostics/e0255_private_item.files/src/heat.sisu -->
+```sisu
+# How a sauna's heat feels; `band` is this module's own.
+def band(celsius: int) -> int:
+    return celsius // 10 * 10
+
+## How a sauna at `celsius` degrees feels.
+pub def feel(celsius: int) -> str:
+    return if band(celsius) >= 80: "hot" else: "warm"
+```
+
+<!-- file: examples/reference-diagnostics/e0255_private_item.files/src/main.sisu -->
+```sisu
+# A function that another module keeps private.
+from sauna.heat import band, feel
+
+def main():
+    print("{band(85)}: {feel(85)}")
+```
+
+<!-- output: examples/reference-diagnostics/e0255_private_item.console -->
+```console
+$ sisu run
+error[E0255]: `band` is private to the module `sauna.heat`; declare it `pub` to use it from another module
+  --> src/main.sisu:2:24
+  |
+2 | from sauna.heat import band, feel
+  |                        ^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Declare the item `pub`, with a doc comment, if it belongs to what the
+module offers, as the fixed module does; otherwise keep it private and
+give the other module what it needs through a `pub` function.
+`pub(package)` makes an item visible to the package's own modules only.
+
+<!-- file: examples/reference-diagnostics/e0255_private_item_fixed.files/src/heat.sisu -->
+```sisu
+# How a sauna's heat feels, by bands of ten degrees.
+
+## `celsius` rounded down to tens.
+pub def band(celsius: int) -> int:
+    return celsius // 10 * 10
+
+## How a sauna at `celsius` degrees feels.
+pub def feel(celsius: int) -> str:
+    return if band(celsius) >= 80: "hot" else: "warm"
+```
+
+<!-- output: examples/reference-diagnostics/e0255_private_item_fixed.console -->
+```console
+$ sisu run
+80: hot
+```
+
+Shown in [chapter 17](../tutorial/17-modules-and-packages.md).
+
 ### E0256
 
 `resolve.package-item`: `{name}` is `pub(package)` in `{module}`, so
@@ -2366,6 +2817,74 @@ $ sisu run
 ```
 
 Shown in [chapter 17](../tutorial/17-modules-and-packages.md).
+
+### E0259
+
+`resolve.private-method`: the method `{name}` of `{ty}` is private to
+the module `{module}`; declare it `pub` to call it from another module.
+
+A method is private to its type's module unless it is `pub`, as a field
+is; the type itself can be `pub` while some of its methods are the
+module's own ([R13](modules.md#visibility)).
+
+<!-- file: examples/reference-diagnostics/e0259_private_method.files/src/stove.sisu -->
+```sisu
+# A stove whose method `cool` is private to its module.
+pub struct Stove:
+    pub celsius: int
+
+    def cool(mut self):
+        self.celsius -= 10
+
+    ## Lets the stove rest, which cools it by ten degrees.
+    pub def rest(mut self):
+        self.cool()
+```
+
+<!-- file: examples/reference-diagnostics/e0259_private_method.files/src/main.sisu -->
+```sisu
+# A method that the type's module keeps private.
+from kiuas.stove import Stove
+
+def main():
+    var stove = Stove(celsius=90)
+    stove.cool()
+    print(stove.celsius)
+```
+
+<!-- output: examples/reference-diagnostics/e0259_private_method.console -->
+```console
+$ sisu run
+error[E0259]: the method `cool` of `kiuas.stove.Stove` is private to the module `kiuas.stove`; declare it `pub` to call it from another module
+  --> src/main.sisu:6:11
+  |
+6 |     stove.cool()
+  |           ^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Call the method the type offers, as the fixed program does with `rest`,
+or declare the method `pub` if it belongs to the type's API.
+
+<!-- file: examples/reference-diagnostics/e0259_private_method_fixed.files/src/main.sisu -->
+```sisu
+# The method that the type's module offers.
+from kiuas.stove import Stove
+
+def main():
+    var stove = Stove(celsius=90)
+    stove.rest()
+    print(stove.celsius)
+```
+
+<!-- output: examples/reference-diagnostics/e0259_private_method_fixed.console -->
+```console
+$ sisu run
+80
+```
+
+Shown in [R13](modules.md#visibility).
 
 ### E0266
 
@@ -2590,6 +3109,7 @@ error[E0304]: `str` has no method `strip`
   |
 3 |     print("  hei  ".strip())
   |                     ^^^^^
+  = fix: Sisu spells it this way: `trim`
 
 error[D0006]: the program was not run: errors found (1)
 ```
@@ -3379,6 +3899,116 @@ def main():
 
 Shown in [chapter 2](../tutorial/02-values.md).
 
+### E0333
+
+`type.impure-call`: `{callee}` is not pure, so the pure function
+`{name}` cannot call it.
+
+A `pure` function gives the same result for the same arguments and does
+nothing else, so it calls only `pure` functions. `print` writes to
+standard output, which is not `pure`. The ownership checker reports it,
+so the run ends with D0021.
+
+<!-- file: examples/reference-diagnostics/e0333_impure_call.sisu -->
+```sisu
+# A pure function that prints.
+pure def feel(celsius: int) -> String:
+    print("checking {celsius}")
+    return if celsius > 80: "hot" else: "warm"
+
+def main():
+    print(feel(85))
+```
+
+<!-- output: examples/reference-diagnostics/e0333_impure_call.console -->
+```console
+$ sisu run e0333_impure_call.sisu
+error[E0333]: `print` is not pure, so the pure function `feel` cannot call it
+  --> e0333_impure_call.sisu:3:5
+  |
+3 |     print("checking {celsius}")
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+2 | pure def feel(celsius: int) -> String:
+  |          ---- `feel` is declared `pure` here
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
+```
+
+Keep the output in the caller, as the fixed program does, or remove
+`pure` if the function needs to print ([chapter
+26](../tutorial/26-purity.md)).
+
+<!-- file: examples/reference-diagnostics/e0333_impure_call_fixed.sisu -->
+```sisu
+# The pure function computes, and its caller prints.
+pure def feel(celsius: int) -> String:
+    return if celsius > 80: "hot" else: "warm"
+
+def main():
+    print("checking 85")
+    print(feel(85))
+```
+
+<!-- output: examples/reference-diagnostics/e0333_impure_call_fixed.out -->
+```text
+checking 85
+hot
+```
+
+Shown in [chapter 26](../tutorial/26-purity.md).
+
+### E0334
+
+`type.impure-capability`: the pure function `{name}` cannot use the
+capability `{ty}`.
+
+A capability reaches the world, whose answers change from call to call,
+so a `pure` function takes none ([R10](capabilities.md)).
+
+<!-- file: examples/reference-diagnostics/e0334_impure_capability.sisu -->
+```sisu
+# A pure function that takes a file system.
+pure def has_notes(fs: Fs) -> bool:
+    return fs.exists("notes.txt")
+
+def main(sys: System):
+    print(has_notes(sys.fs))
+```
+
+<!-- output: examples/reference-diagnostics/e0334_impure_capability.console -->
+```console
+$ sisu run e0334_impure_capability.sisu
+error[E0334]: the pure function `has_notes` cannot use the capability `Fs`
+  --> e0334_impure_capability.sisu:2:20
+  |
+2 | pure def has_notes(fs: Fs) -> bool:
+  |                    ^^^^^^
+  = fix: remove `pure`
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+The fix removes `pure`. Where the work itself is pure, read the file in
+the caller and pass the text to a `pure` function instead.
+
+<!-- file: examples/reference-diagnostics/e0334_impure_capability_fixed.sisu -->
+```sisu
+# The function that reaches the file system is not pure.
+def has_notes(fs: Fs) -> bool:
+    return fs.exists("notes.txt")
+
+def main(sys: System):
+    print(has_notes(sys.fs))
+```
+
+<!-- output: examples/reference-diagnostics/e0334_impure_capability_fixed.out -->
+```text
+False
+```
+
+Shown in [chapter 18](../tutorial/18-capabilities.md).
+
 ### E0335
 
 `type.impure-argument`: this function is passed where a pure function
@@ -3702,6 +4332,56 @@ def main():
 
 Shown in [chapter 7](../tutorial/07-structs-and-enums.md).
 
+### E0342
+
+`type.it-outside-closure`: `it` is the parameter of an implicit closure
+and exists only where a one-parameter function is expected.
+
+`it` is the parameter of an implicit closure: `map(it + 1)` is `map(x ->
+x + 1)`. It exists only in an argument where a function of one parameter
+is expected ([R4](expressions.md#closures)).
+
+<!-- file: examples/reference-diagnostics/e0342_it_outside_closure.sisu -->
+```sisu
+# `it` where no function is expected.
+def main():
+    let ages = [7, 34, 61]
+    let next = it + 1
+    print(next)
+```
+
+<!-- output: examples/reference-diagnostics/e0342_it_outside_closure.console -->
+```console
+$ sisu run e0342_it_outside_closure.sisu
+error[E0342]: `it` is the parameter of an implicit closure and exists only where a one-parameter function is expected
+  --> e0342_it_outside_closure.sisu:4:16
+  |
+4 |     let next = it + 1
+  |                ^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Pass the expression where a function is expected, or write the closure
+with a named parameter, `x -> x + 1`. A method that a list lacks, such
+as `map`, is reached through `iter()` first.
+
+<!-- file: examples/reference-diagnostics/e0342_it_outside_closure_fixed.sisu -->
+```sisu
+# `it` is the parameter of a closure passed where a function is expected.
+def main():
+    let ages = [7, 34, 61]
+    let next = ages.iter().map(it + 1).collect()
+    print(next)
+```
+
+<!-- output: examples/reference-diagnostics/e0342_it_outside_closure_fixed.out -->
+```text
+[8, 35, 62]
+```
+
+Shown in [chapter 16](../tutorial/16-closures-and-iterators.md).
+
 ### E0344
 
 `type.constant-negative-index`: a constant negative index does not
@@ -3849,6 +4529,66 @@ True
 ```
 
 Shown in [chapter 7](../tutorial/07-structs-and-enums.md).
+
+### E0351
+
+`type.unknown-associated`: `{ty}` has no associated function `{name}`.
+
+`Type.name(...)` calls an associated function: a function of the type's
+body, or of an impl of it, without `self`. A name that the type has
+neither as an associated function nor as a constant is this error
+([R3](declarations.md)).
+
+<!-- file: examples/reference-diagnostics/e0351_unknown_associated.sisu -->
+```sisu
+# An associated function that the type does not have.
+struct Point:
+    x: int
+    y: int
+
+def main():
+    let p = Point.origin()
+    print(p.x)
+```
+
+<!-- output: examples/reference-diagnostics/e0351_unknown_associated.console -->
+```console
+$ sisu run e0351_unknown_associated.sisu
+error[E0351]: `Point` has no associated function `origin`
+  --> e0351_unknown_associated.sisu:7:19
+  |
+7 |     let p = Point.origin()
+  |                   ^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Declare the function in the type's body, as the fixed program does, or
+call one the type has. For a variant that an enum does not have,
+`Light.Blue`, stage 0 gives this code too, where E0327 would say that
+`Light` has no variant `Blue`.
+
+<!-- file: examples/reference-diagnostics/e0351_unknown_associated_fixed.sisu -->
+```sisu
+# The associated function, declared in the type's body.
+struct Point:
+    x: int
+    y: int
+
+    def origin() -> Point:
+        return Point(0, 0)
+
+def main():
+    let p = Point.origin()
+    print(p.x)
+```
+
+<!-- output: examples/reference-diagnostics/e0351_unknown_associated_fixed.out -->
+```text
+0
+```
+
+Shown in the entry for [E0608](#e0608).
 
 ### E0368
 
@@ -4102,6 +4842,62 @@ def main():
 Aino
 ```
 
+### E0392
+
+`type.impure-value-call`: `{name}` is pure, so it cannot call a function
+value whose type is not `pure`.
+
+A `pure` function calls only `pure` functions, and a function value of
+type `(int) -> int` may be any function, `print` included. The type
+`pure (int) -> int` admits only pure ones
+([R2](types.md#function-types)).
+
+<!-- file: examples/reference-diagnostics/e0392_impure_value_call.sisu -->
+```sisu
+# A pure function that calls a function value that may not be pure.
+pure def apply(f: (int) -> int, x: int) -> int:
+    return f(x) + 1
+
+def main():
+    print(apply(n -> n * 3, 4))
+```
+
+<!-- output: examples/reference-diagnostics/e0392_impure_value_call.console -->
+```console
+$ sisu run e0392_impure_value_call.sisu
+error[E0392]: `apply` is pure, so it cannot call a function value whose type is not `pure`
+  --> e0392_impure_value_call.sisu:3:12
+  |
+3 |     return f(x) + 1
+  |            ^^^^
+  |
+2 | pure def apply(f: (int) -> int, x: int) -> int:
+  |          ----- `apply` is declared `pure` here
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
+```
+
+Write `pure` in the parameter's type, as the fixed program does; a
+caller that passes a function that is not pure then gets the error at
+its call.
+
+<!-- file: examples/reference-diagnostics/e0392_impure_value_call_fixed.sisu -->
+```sisu
+# The parameter's type says that the function it takes is pure.
+pure def apply(f: pure (int) -> int, x: int) -> int:
+    return f(x) + 1
+
+def main():
+    print(apply(n -> n * 3, 4))
+```
+
+<!-- output: examples/reference-diagnostics/e0392_impure_value_call_fixed.out -->
+```text
+13
+```
+
+Shown in [chapter 26](../tutorial/26-purity.md).
+
 ### E0395
 
 `type.unsized-dyn`: `{ty}` has no size of its own; hold it behind `ref`
@@ -4236,9 +5032,59 @@ Eero
 
 Shown in [chapter 13](../tutorial/13-sharing.md).
 
+### E0399
+
+`type.bad-format-spec`: `{spec}` is not a format spec; it is
+`[[fill]align][sign][#][0][width][,|_][.precision][type]`, as in
+`>8.2f`, with the type one of `d x X o b e E f F % s ?`.
+
+The text after `:` in an interpolation is a format spec, in the form the
+message gives: a fill and an alignment, a sign, a width, grouping, a
+precision and a type letter
+([R4](expressions.md#interpolation-and-format-specs)).
+
+<!-- file: examples/reference-diagnostics/e0399_bad_format_spec.sisu -->
+```sisu
+# A format spec with a type letter that Sisu does not have.
+def main():
+    let price = 4.5
+    print("{price:>8.2z}")
+```
+
+<!-- output: examples/reference-diagnostics/e0399_bad_format_spec.console -->
+```console
+$ sisu run e0399_bad_format_spec.sisu
+error[E0399]: `>8.2z` is not a format spec; it is `[[fill]align][sign][#][0][width][,|_][.precision][type]`, as in `>8.2f`, with the type one of `d x X o b e E f F % s ?`
+  --> e0399_bad_format_spec.sisu:4:13
+  |
+4 |     print("{price:>8.2z}")
+  |             ^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Use one of the type letters the message lists: `f` for a fixed number of
+decimals, `e` for an exponent, `%` for a percentage, `?` for the `Debug`
+form.
+
+<!-- file: examples/reference-diagnostics/e0399_bad_format_spec_fixed.sisu -->
+```sisu
+# `f` writes a float with a fixed number of decimals.
+def main():
+    let price = 4.5
+    print("{price:>8.2f}")
+```
+
+<!-- output: examples/reference-diagnostics/e0399_bad_format_spec_fixed.out -->
+```text
+    4.50
+```
+
+Shown in [R4](expressions.md#interpolation-and-format-specs).
+
 ## Ownership
 
-Codes E0400 to E0437. The ownership checker checks moves, borrows,
+Codes E0400 to E0438. The ownership checker checks moves, borrows,
 views, tasks and must-consume values
 ([R7](ownership.md)).
 
@@ -4271,14 +5117,15 @@ error[E0400]: `names` was moved on line 4 and cannot be used afterwards
   |
 4 |     let team = names
   |                ----- `names` is moved here
-  = note: copy it with `.copy()` before it is moved, or move it later
+  = note: copy it with `.copy()` before the move, which makes a second value (for a list or a `String`, an allocation); move it later, after its last use, which costs nothing; or, where what it moves into only reads it, take it there without `own`, and the call lends it
 
 error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```
 
-The note offers two ways: copy the value before the move, which costs a
-copy, or use the old name before the move. Reading through a borrow
-instead of moving is the third.
+The note offers three ways, each with its cost: copy the value before
+the move, which makes a second value; use the old name before the move,
+which costs nothing; or, where what the value moves into only reads it,
+take it there without `own`, so that the call lends it.
 
 <!-- file: examples/reference-diagnostics/e0400_moved_fixed.sisu -->
 ```sisu
@@ -4331,7 +5178,7 @@ error[E0401]: `order` cannot be used as a whole, because `order.items` was moved
    |
  8 |     let items = order.items
    |                 ----------- `order.items` is moved here
-  = note: copy it with `.copy()` before it is moved, or move it later
+  = note: copy it with `.copy()` before the move, which makes a second value (for a list or a `String`, an allocation); move it later, after its last use, which costs nothing; or, where what it moves into only reads it, take it there without `own`, and the call lends it
 
 error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```
@@ -4673,7 +5520,7 @@ error[E0407]: this returns a borrow of `text`, which belongs to `greeting` and i
 4 |     return text
   |     ^^^^^^^^^^^
   |            ---- borrowed here
-  = note: return an owned value instead, such as a copy made with `.copy()`
+  = note: a `str` views text, and a copy of it is the same view: return a `String`, which owns its text (`-> String`, or `list[String]` for views in a list)
 
 error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```
@@ -4899,13 +5746,17 @@ error[E0413]: `longer` returns `str`, which borrows, and has more than one borro
   |                               ^^^
   |            ------ `a` is a borrowed parameter
   |                    ------ `b` is a borrowed parameter
+  = fix: return owned text instead: `String`
   = fix: name `a, b` in the `from` clause: ` from a, b`
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-The fix names every borrowed parameter; name fewer when the result
-borrows from fewer.
+The first fix makes the result owned text, a `String`, which is right
+when the result borrows from neither parameter, such as text the
+function reads or makes; here it would copy. The second names every
+borrowed parameter in `from`; name fewer when the result borrows from
+fewer.
 
 <!-- file: examples/reference-diagnostics/e0413_from_fixed.sisu -->
 ```sisu
@@ -5064,6 +5915,118 @@ Hei Aino
 
 Shown in [chapter 13](../tutorial/13-sharing.md).
 
+### E0421
+
+`borrow.view-in-owner`: `{ty}` borrows, so it cannot be put in
+`{owner}`, which can outlive what it borrows (04, rule 3).
+
+A view, such as a `str` or a `Lent[Fs]`, borrows what it shows. A
+`Shared`, a `Box`, a field of a struct that is not a view, and a
+capability that is kept can all outlive the frame that owns what the
+view borrows, so none of them may hold one ([R7](ownership.md#views)).
+
+<!-- file: examples/reference-diagnostics/e0421_view_in_owner.sisu -->
+```sisu
+# Text that borrows, put in a value that has shared owners.
+def main():
+    let name = "Aino"
+    let shared = Shared(name)
+    let other = shared.copy()
+    print("{Shared.count(other)} owners of the name")
+```
+
+<!-- output: examples/reference-diagnostics/e0421_view_in_owner.console -->
+```console
+$ sisu run e0421_view_in_owner.sisu
+error[E0421]: `str` borrows, so it cannot be put in `Shared`, which can outlive what it borrows (04, rule 3)
+  --> e0421_view_in_owner.sisu:4:18
+  |
+4 |     let shared = Shared(name)
+  |                  ^^^^^^^^^^^^
+  = note: put an owned value in it instead, such as a `String` made with `.to_string()`
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Put an owned value in it, such as a `String` made with `.to_string()`,
+as the note says. For a lent capability, take the capability itself as a
+parameter, or do the work inside the call that lends it.
+
+<!-- file: examples/reference-diagnostics/e0421_view_in_owner_fixed.sisu -->
+```sisu
+# A `String` owns its text, so a `Shared` can hold it.
+def main():
+    let name = "Aino".to_string()
+    let shared = Shared(name)
+    let other = shared.copy()
+    print("{Shared.count(other)} owners of the name")
+```
+
+<!-- output: examples/reference-diagnostics/e0421_view_in_owner_fixed.out -->
+```text
+2 owners of the name
+```
+
+Shown in [chapter 18](../tutorial/18-capabilities.md).
+
+### E0423
+
+`type.own-closure-capture`: an `own` closure keeps a copy of `{name}`,
+and `{ty}` is not `Copy`; stage 0 copies captures (a capture by move
+arrives with tasks).
+
+An `own` closure keeps what it captures, so that it can outlive the
+frame that made it. Stage 0 copies each capture into the closure, so a
+capture must be `Copy`; a capture by move arrives with tasks
+([R7](ownership.md#closures-and-their-captures)).
+
+<!-- file: examples/reference-diagnostics/e0423_own_closure_capture.sisu -->
+```sisu
+# An `own` closure that would keep a `String`.
+def make_greeter(own greeting: String) -> (str) -> String:
+    return own (name: str) -> "{greeting}, {name}!"
+
+def main():
+    let hei = make_greeter("Hei".to_string())
+    print(hei("Aino"))
+```
+
+<!-- output: examples/reference-diagnostics/e0423_own_closure_capture.console -->
+```console
+$ sisu run e0423_own_closure_capture.sisu
+error[E0423]: an `own` closure keeps a copy of `greeting`, and `String` is not `Copy`; stage 0 copies captures (a capture by move arrives with tasks)
+  --> e0423_own_closure_capture.sisu:3:12
+  |
+3 |     return own (name: str) -> "{greeting}, {name}!"
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = note: copy it into a local first (`let c = name.copy()`) and capture that, or use a plain closure, which borrows it
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Keep the work where the value lives and pass the values in, as the fixed
+program does, or capture `Copy` values only. A copy of the `String` made
+first is not `Copy` either, so it gets E0423 again.
+
+<!-- file: examples/reference-diagnostics/e0423_own_closure_capture_fixed.sisu -->
+```sisu
+# The closure is called where the greeting lives, and borrows it.
+def greet_all(greeting: String, names: list[str]) -> list[String]:
+    return [("{greeting}, {name}!") for name in names]
+
+def main():
+    for line in greet_all("Hei".to_string(), ["Aino", "Eero"]):
+        print(line)
+```
+
+<!-- output: examples/reference-diagnostics/e0423_own_closure_capture_fixed.out -->
+```text
+Hei, Aino!
+Hei, Eero!
+```
+
+Shown in [chapter 16](../tutorial/16-closures-and-iterators.md).
+
 ### E0427
 
 `task.not-sync`: `{name}` is shared with the task by reference, but
@@ -5184,61 +6147,63 @@ Ok(5)
 
 Shown in [chapter 20](../tutorial/20-concurrency.md).
 
-## Lowering
+### E0438
 
-Codes E0500 and E0501. Lowering writes the checked program as SIR,
-the form that the interpreter and the native backend run, and checks
-what it wrote; an error here is the compiler's mistake, which the
-message reports without a place in the source.
+`borrow.ref-in-collection`: `{ty}` would hold references, and a
+collection holds values it owns or views, never references (04, rule 3).
 
-### E0501
+A collection's items are values it owns, or views such as `str`, and
+never references: a reference cannot be stored, so that no collection
+can outlive what its items borrow
+([04](../../proposal/04-memory-and-ownership.md#the-decision), rule 3;
+[R7](ownership.md)). It holds wherever the program has such a type,
+written or inferred.
 
-`sir.invalid`: invalid SIR in `{function}`: {detail}.
-
-Lowering checks the SIR it writes before anything runs it; an invalid
-program is the compiler's mistake, not the program's, and the message
-has no place in the source. In stage 0 a default for a field of a
-generic struct is one such case.
-
-<!-- file: examples/reference-diagnostics/e0501_invalid_sir.sisu -->
+<!-- file: examples/reference-diagnostics/e0438_ref_in_collection.sisu -->
 ```sisu
-# A default for a field of a generic struct.
-struct Shelf[T]:
-    items: list[T] = []
-
+# A list that would hold references.
 def main():
-    let shelf = Shelf[int]()
-    print(len(shelf.items))
+    let aino = "Aino".to_string()
+    var names: list[ref String] = []
+    names.push(ref aino)
+    print(len(names))
 ```
 
-<!-- output: examples/reference-diagnostics/e0501_invalid_sir.console -->
+<!-- output: examples/reference-diagnostics/e0438_ref_in_collection.console -->
 ```console
-$ sisu run e0501_invalid_sir.sisu
-error[E0501]: invalid SIR in `main`: the type of _2 names a type parameter the function does not have
+$ sisu run e0438_ref_in_collection.sisu
+error[E0438]: `list[ref String]` would hold references, and a collection holds values it owns or views, never references (04, rule 3)
+  --> e0438_ref_in_collection.sisu:4:21
+  |
+4 |     var names: list[ref String] = []
+  |                     ^^^^^^^^^^
+  = fix: hold the values themselves: `list[String]`
+
+error[D0006]: the program was not run: errors found (1)
 ```
 
-Until it is fixed, build the value in an associated function.
+The fix holds the values themselves, `list[String]`; then push copies,
+made with `.copy()`, or move the values in. A list of views, such as
+`list[str]`, holds borrows without references. `sorted` of a list whose
+items are not `Copy` makes a list of references too, so derive `Copy`
+for a small type, or sort the list in place with `sort()`.
 
-<!-- file: examples/reference-diagnostics/e0501_invalid_sir_fixed.sisu -->
+<!-- file: examples/reference-diagnostics/e0438_ref_in_collection_fixed.sisu -->
 ```sisu
-# An associated function builds the empty shelf.
-struct Shelf[T]:
-    items: list[T]
-
-    def empty() -> Shelf[T]:
-        return Shelf(items=[])
-
+# The list holds values of its own.
 def main():
-    let shelf = Shelf[int].empty()
-    print(len(shelf.items))
+    let aino = "Aino".to_string()
+    var names: list[String] = []
+    names.push(aino.copy())
+    print("{names} and {aino}")
 ```
 
-<!-- output: examples/reference-diagnostics/e0501_invalid_sir_fixed.out -->
+<!-- output: examples/reference-diagnostics/e0438_ref_in_collection_fixed.out -->
 ```text
-0
+["Aino"] and Aino
 ```
 
-Shown in [chapter 15](../tutorial/15-generics.md).
+Shown in [chapter 7](../tutorial/07-structs-and-enums.md).
 
 ## Compile-time evaluation
 
@@ -5302,6 +6267,133 @@ Hei, Aino!
 
 Shown in [chapter 25](../tutorial/25-compile-time.md).
 
+### E0602
+
+`comptime.panicked`: the compile-time evaluation of this expression
+panicked: {message}.
+
+Code that runs while compiling, a `comptime` expression, a `comptime
+assert`, a constant's value, can panic as code at run time can; the
+panic is then an error of the program, with its message, and the program
+does not compile ([R12](compile-time.md)).
+
+<!-- file: examples/reference-diagnostics/e0602_comptime_panicked.sisu -->
+```sisu
+# A check made while compiling, which fails.
+const SLOTS: int = 12
+
+def slot(n: int) -> int:
+    comptime assert SLOTS & (SLOTS - 1) == 0, "{SLOTS} is not a power of two"
+    return n & (SLOTS - 1)
+
+def main():
+    print(slot(21))
+```
+
+<!-- output: examples/reference-diagnostics/e0602_comptime_panicked.console -->
+```console
+$ sisu run e0602_comptime_panicked.sisu
+error[E0602]: the compile-time evaluation of this expression panicked: assertion failed: SLOTS & (SLOTS - 1) == 0
+  message: 12 is not a power of two
+    SLOTS & (SLOTS - 1) == 0
+          │        │
+          8        11
+  --> e0602_comptime_panicked.sisu:5:5
+  |
+5 |     comptime assert SLOTS & (SLOTS - 1) == 0, "{SLOTS} is not a power of two"
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Read the panic's message: here the check holds for a power of two, so
+the constant changes. A typed hole reached while compiling is E0602 too,
+since it panics.
+
+<!-- file: examples/reference-diagnostics/e0602_comptime_panicked_fixed.sisu -->
+```sisu
+# The constant that the check needs.
+const SLOTS: int = 16
+
+def slot(n: int) -> int:
+    comptime assert SLOTS & (SLOTS - 1) == 0, "{SLOTS} is not a power of two"
+    return n & (SLOTS - 1)
+
+def main():
+    print(slot(21))
+```
+
+<!-- output: examples/reference-diagnostics/e0602_comptime_panicked_fixed.out -->
+```text
+5
+```
+
+Shown in [chapter 25](../tutorial/25-compile-time.md).
+
+### E0603
+
+`comptime.budget`: the compile-time evaluation in `{item}` used up its
+budget of {steps} steps; raise it with `@comptime_budget(steps=N)` on
+`{item}`.
+
+Compile-time evaluation has a budget of steps, a million by default, so
+that a loop that never ends cannot hang the build (D-063). An item that
+needs more says so with `@comptime_budget(steps=N)`
+([R12](compile-time.md#budgets)).
+
+<!-- file: examples/reference-diagnostics/e0603_comptime_budget.sisu -->
+```sisu
+# A constant computed while compiling, slowly.
+def climbs(n: int) -> int:
+    if n < 2:
+        return 1
+    return climbs(n - 1) + climbs(n - 2)
+
+const STAIRS: int = comptime climbs(26)
+
+def main():
+    print("{STAIRS} ways up 26 steps")
+```
+
+<!-- output: examples/reference-diagnostics/e0603_comptime_budget.console -->
+```console
+$ sisu run e0603_comptime_budget.sisu
+error[E0603]: the compile-time evaluation in `STAIRS` used up its budget of 1000000 steps; raise it with `@comptime_budget(steps=N)` on `STAIRS`
+  --> e0603_comptime_budget.sisu:7:21
+  |
+7 | const STAIRS: int = comptime climbs(26)
+  |                     ^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Raise the budget on the item, as the message says, when the work is
+worth it; here a loop takes 26 steps where the recursion took hundreds
+of thousands, and needs no budget of its own.
+
+<!-- file: examples/reference-diagnostics/e0603_comptime_budget_fixed.sisu -->
+```sisu
+# A faster way to compute the same constant.
+def climbs(n: int) -> int:
+    var a = 1
+    var b = 1
+    for _ in range(n - 1):
+        a, b = b, a + b
+    return b
+
+const STAIRS: int = comptime climbs(26)
+
+def main():
+    print("{STAIRS} ways up 26 steps")
+```
+
+<!-- output: examples/reference-diagnostics/e0603_comptime_budget_fixed.out -->
+```text
+196418 ways up 26 steps
+```
+
+Shown in [chapter 25](../tutorial/25-compile-time.md).
+
 ### E0604
 
 `comptime.not-kept`: {what} made at compile time cannot be kept for run
@@ -5357,6 +6449,58 @@ def main():
 ```
 
 Shown in [R12](compile-time.md#what-compile-time-code-may-do).
+
+### E0605
+
+`comptime.only`: `{name}` is a `comptime def`: it can be called only at
+compile time, inside `comptime`.
+
+A `comptime def` runs only while compiling: it may take types as
+arguments and build code, which a running program cannot do. Call it
+inside `comptime`, in a constant's value or in a `comptime assert`
+([R12](compile-time.md)).
+
+<!-- file: examples/reference-diagnostics/e0605_comptime_only.sisu -->
+```sisu
+# A compile-time function called while the program runs.
+comptime def power_of_two(n: int) -> bool:
+    return n > 0 and n & (n - 1) == 0
+
+def main():
+    print(power_of_two(16))
+```
+
+<!-- output: examples/reference-diagnostics/e0605_comptime_only.console -->
+```console
+$ sisu run e0605_comptime_only.sisu
+error[E0605]: `power_of_two` is a `comptime def`: it can be called only at compile time, inside `comptime`
+  --> e0605_comptime_only.sisu:6:11
+  |
+6 |     print(power_of_two(16))
+  |           ^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Write `comptime` before the call, as the fixed program does, or make the
+function a plain `def` if the program needs it while it runs.
+
+<!-- file: examples/reference-diagnostics/e0605_comptime_only_fixed.sisu -->
+```sisu
+# The call inside `comptime`, so it runs while compiling.
+comptime def power_of_two(n: int) -> bool:
+    return n > 0 and n & (n - 1) == 0
+
+def main():
+    print(comptime power_of_two(16))
+```
+
+<!-- output: examples/reference-diagnostics/e0605_comptime_only_fixed.out -->
+```text
+True
+```
+
+Shown in [chapter 25](../tutorial/25-compile-time.md).
 
 ### E0606
 
@@ -5415,6 +6559,99 @@ def main():
 ```
 
 Shown in [R14](attributes.md#compile-time-budgets).
+
+### E0608
+
+`comptime.derive-failed`: deriving `{trait}` for `{ty}` stopped at
+compile time: {reason}.
+
+A derive is a trait's `comptime def derive`, which writes the impl while
+compiling. When it stops, with `comptime panic` or a failed `comptime
+assert`, the `@derive` that asked for it is the error, with the derive's
+reason, and the type has none of the trait's functions, so each use of
+one is E0351 ([R12](compile-time.md)).
+
+<!-- file: examples/reference-diagnostics/e0608_derive_failed.sisu -->
+```sisu
+# A derive that refuses a type it cannot handle.
+trait Columns:
+    def columns() -> String
+
+    comptime def derive(T: type) -> impl Columns for T:
+        return impl Columns for T:
+            def columns() -> String:
+                comptime if not reflect.is_struct(T):
+                    comptime panic("`{reflect.name_of(T)}` is not a struct")
+                var names: list[String] = []
+                comptime for f in reflect.fields_of(T):
+                    names.push(f.name.to_string())
+                return names.join(",")
+
+@derive(Columns)
+enum Heater:
+    Wood
+    Electric
+
+def main():
+    print(Heater.columns())
+```
+
+<!-- output: examples/reference-diagnostics/e0608_derive_failed.console -->
+```console
+$ sisu run e0608_derive_failed.sisu
+error[E0608]: deriving `Columns` for `Heater` stopped at compile time: `Heater` is not a struct
+  --> e0608_derive_failed.sisu:15:9
+   |
+15 | @derive(Columns)
+   |         ^^^^^^^
+   |
+ 9 |                     comptime panic("`{reflect.name_of(T)}` is not a struct")
+   |                              ----------------------------------------------- the derive's template, where it stopped
+
+error[E0351]: `Heater` has no associated function `columns`
+  --> e0608_derive_failed.sisu:21:18
+   |
+21 |     print(Heater.columns())
+   |                  ^^^^^^^
+
+error[D0006]: the program was not run: errors found (2)
+```
+
+Read the reason, which the derive's author wrote: here the derive lists
+a struct's fields, and an enum has none. Derive it for a type it
+handles, or write the impl by hand.
+
+<!-- file: examples/reference-diagnostics/e0608_derive_failed_fixed.sisu -->
+```sisu
+# The derive asked for a struct, whose fields it lists.
+trait Columns:
+    def columns() -> String
+
+    comptime def derive(T: type) -> impl Columns for T:
+        return impl Columns for T:
+            def columns() -> String:
+                comptime if not reflect.is_struct(T):
+                    comptime panic("`{reflect.name_of(T)}` is not a struct")
+                var names: list[String] = []
+                comptime for f in reflect.fields_of(T):
+                    names.push(f.name.to_string())
+                return names.join(",")
+
+@derive(Columns)
+struct Stove:
+    kind: String
+    celsius: int
+
+def main():
+    print(Stove.columns())
+```
+
+<!-- output: examples/reference-diagnostics/e0608_derive_failed_fixed.out -->
+```text
+kind,celsius
+```
+
+Shown in the guide [Write a derive](../guides/derive.md).
 
 ### E0609
 
@@ -5480,6 +6717,229 @@ def main():
 
 Shown in [chapter 25](../tutorial/25-compile-time.md).
 
+### E0612
+
+`comptime.embed-failed`: cannot embed `{path}`: {reason}.
+
+`embed("PATH")` makes a file's text part of the program while it
+compiles, so the file must be there and readable, and its path must stay
+inside the program's directory
+([R12](compile-time.md#embedding-a-file)). The reason after the colon
+says which.
+
+<!-- file: examples/reference-diagnostics/e0612_embed_failed.sisu -->
+```sisu
+# A file embedded while compiling, which is not there.
+const MENU: str = embed("menu.txt")
+
+def main():
+    for line in MENU.lines():
+        print(line)
+```
+
+<!-- output: examples/reference-diagnostics/e0612_embed_failed.console -->
+```console
+$ sisu run e0612_embed_failed.sisu
+error[E0612]: cannot embed `menu.txt`: there is no such file
+  --> e0612_embed_failed.sisu:2:19
+  |
+2 | const MENU: str = embed("menu.txt")
+  |                   ^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Put the file where the path says, relative to the module's directory;
+the fixed program has `menu.txt` beside it.
+
+<!-- file: examples/reference-diagnostics/e0612_embed_failed_fixed.sisu -->
+```sisu
+# The file is beside the program, so the build embeds it.
+const MENU: str = embed("menu.txt")
+
+def main():
+    for line in MENU.lines():
+        print(line)
+```
+
+<!-- file: examples/reference-diagnostics/e0612_embed_failed_fixed.files/menu.txt -->
+```text
+kahvi 3
+pulla 2
+```
+
+<!-- output: examples/reference-diagnostics/e0612_embed_failed_fixed.out -->
+```text
+kahvi 3
+pulla 2
+```
+
+Shown in the guide [Embed a file at compile time](../guides/embed.md).
+
+### E0613
+
+`comptime.embed-path`: `embed` takes the path of a file as a string
+literal.
+
+The path of `embed` is a string literal, so that the files a build reads
+are in its source for every tool to see, and a build records them
+([R12](compile-time.md#embedding-a-file)).
+
+<!-- file: examples/reference-diagnostics/e0613_embed_path.sisu -->
+```sisu
+# `embed` given a constant's name, not a literal.
+const NAME: str = "menu.txt"
+const MENU: str = embed(NAME)
+
+def main():
+    for line in MENU.lines():
+        print(line)
+```
+
+<!-- output: examples/reference-diagnostics/e0613_embed_path.console -->
+```console
+$ sisu run e0613_embed_path.sisu
+error[E0613]: `embed` takes the path of a file as a string literal
+  --> e0613_embed_path.sisu:3:19
+  |
+3 | const MENU: str = embed(NAME)
+  |                   ^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Write the path as a literal in the call. A program that chooses among
+files embeds each of them and chooses among the constants.
+
+<!-- file: examples/reference-diagnostics/e0613_embed_path_fixed.sisu -->
+```sisu
+# The path written as a literal, which the build can read.
+const MENU: str = embed("menu.txt")
+
+def main():
+    for line in MENU.lines():
+        print(line)
+```
+
+<!-- file: examples/reference-diagnostics/e0613_embed_path_fixed.files/menu.txt -->
+```text
+kahvi 3
+pulla 2
+```
+
+<!-- output: examples/reference-diagnostics/e0613_embed_path_fixed.out -->
+```text
+kahvi 3
+pulla 2
+```
+
+Shown in the guide [Embed a file at compile time](../guides/embed.md).
+
+## Capabilities
+
+Codes E0700 to E0703. The rules of capabilities, of a test's parameters,
+and of `[trust]`, which says which dependencies may hold unsafe and
+foreign code ([R10](capabilities.md), [R13](modules.md#trust)).
+
+### E0703
+
+`cap.untrusted`: the package `{package}` is not trusted with {what}; a
+dependency may contain `unsafe` and `extern` only when `[trust] unsafe`
+in the root package's `sisu.toml` lists it.
+
+A dependency may contain `unsafe` and `extern` code only when the root
+package's `[trust] unsafe` lists it, since unsafe code can do what no
+capability allows (D-032, D-082). Each block of a dependency that the
+root does not trust is an error, and so is a package whose `sisu.toml`
+does not declare the unsafe code it holds (E1019).
+
+<!-- file: examples/reference-diagnostics/e0703_untrusted.files/app/sisu.toml -->
+```toml
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2027"
+
+[dependencies]
+readings = { path = "../readings" }
+```
+
+<!-- file: examples/reference-diagnostics/e0703_untrusted.files/readings/sisu.toml -->
+```toml
+[package]
+name = "readings"
+version = "0.1.0"
+edition = "2027"
+```
+
+<!-- file: examples/reference-diagnostics/e0703_untrusted.files/readings/src/lib.sisu -->
+```sisu
+##! The last of a list of readings, read through a raw pointer.
+from std.mem import as_ptr
+
+## The last reading of `temps`, which holds at least one.
+pub def last(temps: Slice[int]) -> int:
+    requires len(temps) > 0
+    let first = as_ptr(temps)
+    # safety: in_bounds, valid, aligned: the precondition gives the last
+    #   index, and `temps` lives, unchanged, until the read.
+    return unsafe first.offset(len(temps) - 1).read()
+```
+
+<!-- output: examples/reference-diagnostics/e0703_untrusted.console -->
+```console
+$ sisu run app
+error[E0703]: the package `readings` is not trusted with `unsafe`; a dependency may contain `unsafe` and `extern` only when `[trust] unsafe` in the root package's `sisu.toml` lists it
+  --> ../readings/src/lib.sisu:10:12
+   |
+10 |     return unsafe first.offset(len(temps) - 1).read()
+   |            ^^^^^^
+
+error[E1019]: the package `readings` contains unsafe code, and its `sisu.toml` declares no `unsafe`: add `unsafe = "memory"` to its `[package]`
+  --> ../readings/src/lib.sisu:10:12
+   |
+10 |     return unsafe first.offset(len(temps) - 1).read()
+   |            ^^^^^^
+
+error[D0006]: the program was not run: errors found (2)
+```
+
+The dependency's author declares its level, `unsafe = "memory"` for
+unsafe blocks or `"extern"` for foreign code, and the root package's
+author, having read the code, lists it in `[trust] unsafe`
+([R13](modules.md#trust)).
+
+<!-- file: examples/reference-diagnostics/e0703_untrusted_fixed.files/readings/sisu.toml -->
+```toml
+[package]
+name = "readings"
+version = "0.1.0"
+edition = "2027"
+unsafe = "memory"
+```
+
+<!-- file: examples/reference-diagnostics/e0703_untrusted_fixed.files/app/sisu.toml -->
+```toml
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2027"
+
+[dependencies]
+readings = { path = "../readings" }
+
+[trust]
+unsafe = ["readings"]
+```
+
+<!-- output: examples/reference-diagnostics/e0703_untrusted_fixed.console -->
+```console
+$ sisu run app
+92
+```
+
+Shown in the guide [Call a C library](../guides/c-library.md).
+
 ## Contracts
 
 Codes E0800 to E0821. The checker checks where contract clauses stand
@@ -5535,6 +6995,146 @@ def main():
 <!-- output: examples/reference-diagnostics/e0800_misplaced_clause_fixed.out -->
 ```text
 4
+```
+
+Shown in [chapter 23](../tutorial/23-contracts.md).
+
+### E0801
+
+`contract.not-pure`: a contract only reads what it is given, and
+`{callee}` is not `pure`.
+
+A contract only reads: a build can check its clauses or leave them out
+(`--contracts`), and the program must mean the same either way. So a
+clause calls only `pure` functions ([R11](contracts.md)).
+
+<!-- file: examples/reference-diagnostics/e0801_contract_not_pure.sisu -->
+```sisu
+# A contract that calls a function that is not `pure`.
+def all_different(hours: Slice[int]) -> bool:
+    var seen: set[int] = set()
+    for h in hours:
+        if seen.contains(h):
+            return False
+        seen.add(h)
+    return True
+
+def book(mut hours: list[int], hour: int):
+    requires hour not in hours
+    ensures all_different(hours)
+    hours.push(hour)
+
+def main():
+    var hours = [17, 18]
+    book(mut hours, 20)
+    print(hours)
+```
+
+<!-- output: examples/reference-diagnostics/e0801_contract_not_pure.console -->
+```console
+$ sisu run e0801_contract_not_pure.sisu
+error[E0801]: a contract only reads what it is given, and `all_different` is not `pure`
+  --> e0801_contract_not_pure.sisu:12:13
+   |
+12 |     ensures all_different(hours)
+   |             ^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Mark the function `pure` when it only computes, as `all_different` does:
+its own `var` changes nothing outside it. The diagnostic offers no fix.
+
+<!-- file: examples/reference-diagnostics/e0801_contract_not_pure_fixed.sisu -->
+```sisu
+# The function the contract calls is `pure`.
+pure def all_different(hours: Slice[int]) -> bool:
+    var seen: set[int] = set()
+    for h in hours:
+        if seen.contains(h):
+            return False
+        seen.add(h)
+    return True
+
+def book(mut hours: list[int], hour: int):
+    requires hour not in hours
+    ensures all_different(hours)
+    hours.push(hour)
+
+def main():
+    var hours = [17, 18]
+    book(mut hours, 20)
+    print(hours)
+```
+
+<!-- output: examples/reference-diagnostics/e0801_contract_not_pure_fixed.out -->
+```text
+[17, 18, 20]
+```
+
+Shown in [chapter 23](../tutorial/23-contracts.md).
+
+### E0803
+
+`contract.old-outside`: `old(...)` is a value as it was on entry, which
+only an `ensures` clause can ask for.
+
+`old(e)` is the value of `e` when the call began. Only an `ensures`
+clause, which is checked when the call returns, has an earlier moment to
+ask about; a `requires` clause is checked on entry, where `e` is the
+value already ([R11](contracts.md)).
+
+<!-- file: examples/reference-diagnostics/e0803_old_outside.sisu -->
+```sisu
+# `old(...)` in a precondition.
+struct Stove:
+    celsius: int
+
+    def heat(mut self, degrees: int):
+        requires old(self.celsius) < 110
+        self.celsius = min(self.celsius + degrees, 110)
+
+def main():
+    var stove = Stove(celsius=60)
+    stove.heat(30)
+    print("{stove.celsius} degrees")
+```
+
+<!-- output: examples/reference-diagnostics/e0803_old_outside.console -->
+```console
+$ sisu run e0803_old_outside.sisu
+error[E0803]: `old(...)` is a value as it was on entry, which only an `ensures` clause can ask for
+  --> e0803_old_outside.sisu:6:18
+  |
+6 |         requires old(self.celsius) < 110
+  |                  ^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Write the expression without `old` in a `requires` clause, and keep
+`old` for the postcondition that compares the result with the start.
+
+<!-- file: examples/reference-diagnostics/e0803_old_outside_fixed.sisu -->
+```sisu
+# A precondition reads the value as it is; `old` is for `ensures`.
+struct Stove:
+    celsius: int
+
+    def heat(mut self, degrees: int):
+        requires self.celsius < 110
+        ensures self.celsius == min(old(self.celsius) + degrees, 110)
+        self.celsius = min(self.celsius + degrees, 110)
+
+def main():
+    var stove = Stove(celsius=60)
+    stove.heat(30)
+    print("{stove.celsius} degrees")
+```
+
+<!-- output: examples/reference-diagnostics/e0803_old_outside_fixed.out -->
+```text
+90 degrees
 ```
 
 Shown in [chapter 23](../tutorial/23-contracts.md).
@@ -5655,6 +7255,72 @@ def main():
 
 Shown in [R11](contracts.md#where-clauses-stand).
 
+### E0806
+
+`contract.invariant-field`: `{what}` is part of a `{ty}`, whose
+invariant only its own methods may change and check again; change it
+through one of them.
+
+An invariant holds for every value of its type that the program can see:
+construction checks it, and so does each return of a `mut self` method.
+A field changed from outside the type's methods would skip the check, so
+only those methods assign the fields of a type with an invariant
+([R11](contracts.md#invariants)).
+
+<!-- file: examples/reference-diagnostics/e0806_invariant_field.sisu -->
+```sisu
+# A field of a type with an invariant, changed from outside.
+struct Schedule:
+    opens: int
+    closes: int
+    invariant 0 <= self.opens < self.closes <= 24
+
+def main():
+    var today = Schedule(opens=16, closes=21)
+    today.closes = 25
+    print("open {today.opens} to {today.closes}")
+```
+
+<!-- output: examples/reference-diagnostics/e0806_invariant_field.console -->
+```console
+$ sisu run e0806_invariant_field.sisu
+error[E0806]: `today.closes` is part of a `Schedule`, whose invariant only its own methods may change and check again; change it through one of them
+  --> e0806_invariant_field.sisu:9:5
+  |
+9 |     today.closes = 25
+  |     ^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Give the type a method that makes the change, as `close_at` does; the
+invariant is checked when it returns, so `close_at(25)` panics there.
+The diagnostic offers no fix.
+
+<!-- file: examples/reference-diagnostics/e0806_invariant_field_fixed.sisu -->
+```sisu
+# The type's own method changes the field, and the invariant is checked.
+struct Schedule:
+    opens: int
+    closes: int
+    invariant 0 <= self.opens < self.closes <= 24
+
+    def close_at(mut self, hour: int):
+        self.closes = hour
+
+def main():
+    var today = Schedule(opens=16, closes=21)
+    today.close_at(23)
+    print("open {today.opens} to {today.closes}")
+```
+
+<!-- output: examples/reference-diagnostics/e0806_invariant_field_fixed.out -->
+```text
+open 16 to 23
+```
+
+Shown in [chapter 23](../tutorial/23-contracts.md).
+
 ### E0807
 
 `contract.not-in-test`: a test has no contract; check what it needs
@@ -5706,6 +7372,120 @@ test "halves" ... ok
 ```
 
 Shown in [R11](contracts.md#where-clauses-stand).
+
+### E0810
+
+`refine.not-satisfied`: `{value}` is not a `{ty}`: `{predicate}` is
+false for it.
+
+A value whose type is a refinement satisfies its predicate. The compiler
+checks a constant while compiling, and a value it cannot know passes
+through `try_from` (E0811) ([R11](contracts.md#refinement-types)).
+
+<!-- file: examples/reference-diagnostics/e0810_refinement_constant.sisu -->
+```sisu
+# A constant that the refinement type does not admit.
+type Percent = int where 0 <= self <= 100
+
+def main():
+    let after_ladle: Percent = 135
+    print("{after_ladle} percent")
+```
+
+<!-- output: examples/reference-diagnostics/e0810_refinement_constant.console -->
+```console
+$ sisu run e0810_refinement_constant.sisu
+error[E0810]: `135` is not a `Percent`: `0 <= self <= 100` is false for it
+  --> e0810_refinement_constant.sisu:5:32
+  |
+5 |     let after_ladle: Percent = 135
+  |                                ^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Use a value that satisfies the predicate the message names, or a wider
+type where the value can be outside it.
+
+<!-- file: examples/reference-diagnostics/e0810_refinement_constant_fixed.sisu -->
+```sisu
+# A constant within the refinement.
+type Percent = int where 0 <= self <= 100
+
+def main():
+    let after_ladle: Percent = 85
+    print("{after_ladle} percent")
+```
+
+<!-- output: examples/reference-diagnostics/e0810_refinement_constant_fixed.out -->
+```text
+85 percent
+```
+
+Shown in [chapter 23](../tutorial/23-contracts.md).
+
+### E0811
+
+`refine.needs-try-from`: expected `{expected}`, found `{found}`; a value
+becomes a `{expected}` where its predicate is checked, with
+`{name}.try_from(...)`.
+
+A refinement is a subtype of its base, so a `Percent` is an `int`
+wherever one is expected, but an `int` becomes a `Percent` only where
+its predicate is checked: in `try_from`, which returns an error for a
+value outside it ([R11](contracts.md#refinement-types)).
+
+<!-- file: examples/reference-diagnostics/e0811_needs_try_from.sisu -->
+```sisu
+# A value that the compiler cannot check, passed as a refinement.
+type Percent = int where 0 <= self <= 100
+
+def steam(humidity: Percent) -> str:
+    return if humidity < 50: "soft" else: "heavy"
+
+def main():
+    let n = "70".parse_int() ?? 0
+    print(steam(n))
+```
+
+<!-- output: examples/reference-diagnostics/e0811_needs_try_from.console -->
+```console
+$ sisu run e0811_needs_try_from.sisu
+error[E0811]: expected `Percent`, found `int`; a value becomes a `Percent` where its predicate is checked, with `Percent.try_from(...)`
+  --> e0811_needs_try_from.sisu:9:17
+  |
+9 |     print(steam(n))
+  |                 ^
+  = note: check it where it runs: `Percent.try_from(...)`
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Call `Percent.try_from(n)`, as the message says, and decide what to do
+with a value outside the predicate, here with `else`.
+
+<!-- file: examples/reference-diagnostics/e0811_needs_try_from_fixed.sisu -->
+```sisu
+# `try_from` checks the predicate where the value becomes a `Percent`.
+type Percent = int where 0 <= self <= 100
+
+def steam(humidity: Percent) -> str:
+    return if humidity < 50: "soft" else: "heavy"
+
+def main():
+    let n = "70".parse_int() ?? 0
+    let humidity = Percent.try_from(n) else:
+        print("{n} is not a percentage")
+        return
+    print(steam(humidity))
+```
+
+<!-- output: examples/reference-diagnostics/e0811_needs_try_from_fixed.out -->
+```text
+heavy
+```
+
+Shown in [chapter 23](../tutorial/23-contracts.md).
 
 ### E0812
 
@@ -5874,6 +7654,141 @@ errors, the check that a `sim` build cannot escape, and the rules of
 unsafe code and foreign functions
 ([R7](ownership.md#unsafe-code-and-raw-pointers)).
 
+### E0900
+
+`stage0.unsupported`: {construct} is not implemented in stage 0 yet; it
+arrives with {phase}.
+
+Stage 0 parses some of what the proposal designs before it can run it,
+and names the construct and the phase it arrives with
+([R16](sisu-command.md)). The rest of the program is checked as far as
+it can be, so an error that follows from the missing construct, such as
+a method that the stand-in type lacks, may come after it.
+
+<!-- file: examples/reference-diagnostics/e0900_unsupported.sisu -->
+```sisu
+# A generator expression, which stage 0 does not implement yet.
+def main():
+    let readings = [78, 85, 92]
+    let doubled = (r * 2 for r in readings)
+    for d in doubled:
+        print(d)
+```
+
+<!-- output: examples/reference-diagnostics/e0900_unsupported.console -->
+```console
+$ sisu run e0900_unsupported.sisu
+error[E0900]: a generator expression is not implemented in stage 0 yet; it arrives with generators (Phase 8)
+  --> e0900_unsupported.sisu:4:19
+  |
+4 |     let doubled = (r * 2 for r in readings)
+  |                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Write what stage 0 runs: here a list comprehension, which builds the
+list at once, or a generator function with `yield` for a lazy sequence
+([chapter 16](../tutorial/16-closures-and-iterators.md)).
+
+<!-- file: examples/reference-diagnostics/e0900_unsupported_fixed.sisu -->
+```sisu
+# A list comprehension, which stage 0 implements.
+def main():
+    let readings = [78, 85, 92]
+    let doubled = [r * 2 for r in readings]
+    for d in doubled:
+        print(d)
+```
+
+<!-- output: examples/reference-diagnostics/e0900_unsupported_fixed.out -->
+```text
+156
+170
+184
+```
+
+Shown in [chapter 16](../tutorial/16-closures-and-iterators.md).
+
+### E0981
+
+`unsafe.call`: `{name}` is an `unsafe def`: call it inside an `unsafe:`
+block or an `unsafe` expression.
+
+An `unsafe def` has obligations that its callers must make true, listed
+under `Safety:` in its doc comment, so a call of one is an unsafe
+operation: it stands in an `unsafe:` block or an `unsafe` expression,
+where the audit finds it
+([R7](ownership.md#unsafe-code-and-raw-pointers)). The message names the
+builtins by their internal names, such as `ptr_mut.write` for a write
+through a `ptr mut T`.
+
+<!-- file: examples/reference-diagnostics/e0981_unsafe_call.sisu -->
+```sisu
+# An `unsafe def` called outside unsafe code.
+from std.mem import as_ptr
+
+## The reading at `i` of `temps`, without the check that there is one.
+##
+## Safety:
+## - `in_range`: `i` is at least 0 and less than `len(temps)`
+unsafe def reading_at(temps: Slice[int], i: int) -> int:
+    let first = as_ptr(temps)
+    # safety: in_bounds, valid, aligned: this function's `in_range`, and
+    #   `temps` lives, unchanged, until the read.
+    return unsafe first.offset(i).read()
+
+def main():
+    let temps = [78, 85, 92]
+    print(reading_at(temps, 2))
+```
+
+<!-- output: examples/reference-diagnostics/e0981_unsafe_call.console -->
+```console
+$ sisu run e0981_unsafe_call.sisu
+error[E0981]: `reading_at` is an `unsafe def`: call it inside an `unsafe:` block or an `unsafe` expression
+  --> e0981_unsafe_call.sisu:16:11
+   |
+16 |     print(reading_at(temps, 2))
+   |           ^^^^^^^^^^^^^^^^^^^^
+   |           -------------------- its obligation: `in_range`
+  = note: write why they hold in a `# safety:` comment above the block, naming each obligation it discharges
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Write `unsafe` before the call, with a `# safety:` comment above its
+line that names each obligation and says why it holds; without the
+comment the call is W0007.
+
+<!-- file: examples/reference-diagnostics/e0981_unsafe_call_fixed.sisu -->
+```sisu
+# The call in an `unsafe` expression, with the reason it is sound.
+from std.mem import as_ptr
+
+## The reading at `i` of `temps`, without the check that there is one.
+##
+## Safety:
+## - `in_range`: `i` is at least 0 and less than `len(temps)`
+unsafe def reading_at(temps: Slice[int], i: int) -> int:
+    let first = as_ptr(temps)
+    # safety: in_bounds, valid, aligned: this function's `in_range`, and
+    #   `temps` lives, unchanged, until the read.
+    return unsafe first.offset(i).read()
+
+def main():
+    let temps = [78, 85, 92]
+    # safety: in_range: the list holds three readings, so 2 is in range.
+    print(unsafe reading_at(temps, 2))
+```
+
+<!-- output: examples/reference-diagnostics/e0981_unsafe_call_fixed.out -->
+```text
+92
+```
+
+Shown in [chapter 27](../tutorial/27-systems.md).
+
 ### E0989
 
 `unsafe.export-signature`: `{name}` is `@export`ed, and foreign code
@@ -5979,6 +7894,50 @@ Shown in [R14](attributes.md#foreign-functions-that-block).
 Codes E1000 to E1022. The driver reads `sisu.toml`, `sisu.lock` and
 the module tree of a package before anything is parsed, and reports a
 mistake at its place in the manifest ([R13](modules.md#the-manifest)).
+
+### E1002
+
+`package.missing-key`: `{table}` needs `{key}`.
+
+`[package]` needs `name`, `version` and `edition`; the message names the
+table and the key that is missing ([R13](modules.md#package)).
+
+<!-- file: examples/reference-diagnostics/e1002_missing_key.files/sisu.toml -->
+```toml
+[package]
+name = "kiuas"
+edition = "2027"
+```
+
+<!-- output: examples/reference-diagnostics/e1002_missing_key.console -->
+```console
+$ sisu run
+error[E1002]: `[package]` needs `version`
+  --> sisu.toml:1:2
+  |
+1 | [package]
+  |  ^^^^^^^
+
+```
+
+Add the key. Stage 0 also reports E1002 for a `version` that is there
+but not `MAJOR.MINOR.PATCH`, beside E1003.
+
+<!-- file: examples/reference-diagnostics/e1002_missing_key_fixed.files/sisu.toml -->
+```toml
+[package]
+name = "kiuas"
+version = "0.1.0"
+edition = "2027"
+```
+
+<!-- output: examples/reference-diagnostics/e1002_missing_key_fixed.console -->
+```console
+$ sisu run
+kiuas
+```
+
+Shown in [R13](modules.md#mistakes-in-the-manifest).
 
 ### E1003
 
@@ -6095,6 +8054,309 @@ $ sisu run stove
 ```
 
 Shown in [chapter 17](../tutorial/17-modules-and-packages.md).
+
+### E1010
+
+`package.not-a-path`: the dependency `{name}` is not a `path`
+dependency; stage 0 has no registry, so a dependency is `{name} = { path
+= "../{name}" }`.
+
+Stage 0 has no registry, so a dependency is a package in a directory,
+named by its path; a version, as `stones = "0.4"`, waits for the
+registry (D-031). The import of the dependency then names nothing, so it
+is E0220 too ([R13](modules.md#dependencies-and-dev-dependencies)).
+
+<!-- file: examples/reference-diagnostics/e1010_not_a_path.files/app/sisu.toml -->
+```toml
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2027"
+
+[dependencies]
+stones = "0.4"
+```
+
+<!-- output: examples/reference-diagnostics/e1010_not_a_path.console -->
+```console
+$ sisu run app
+error[E0220]: cannot import `stones`: it names no module of this package, of a dependency in `sisu.toml`, or of the standard library
+  --> src/main.sisu:2:8
+  |
+2 | import stones
+  |        ^^^^^^
+
+error[E1010]: the dependency `stones` is not a `path` dependency; stage 0 has no registry, so a dependency is `stones = { path = "../stones" }`
+  --> sisu.toml:7:10
+  |
+7 | stones = "0.4"
+  |          ^^^^^
+
+error[D0006]: the program was not run: errors found (2)
+```
+
+Write the dependency as the message does, with the path of its directory
+relative to the manifest.
+
+<!-- file: examples/reference-diagnostics/e1010_not_a_path_fixed.files/app/sisu.toml -->
+```toml
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2027"
+
+[dependencies]
+stones = { path = "../stones" }
+```
+
+<!-- output: examples/reference-diagnostics/e1010_not_a_path_fixed.console -->
+```console
+$ sisu run app
+85
+```
+
+Shown in [R13](modules.md#mistakes-in-the-manifest).
+
+### E1015
+
+`package.trust-unknown`: `[trust] unsafe` names `{name}`, which is not a
+dependency of this package.
+
+`[trust] unsafe` lists dependencies of the package, so a name in it that
+is not one is a mistake: a dependency removed, or a name misspelt
+([R13](modules.md#trust)).
+
+<!-- file: examples/reference-diagnostics/e1015_trust_unknown.files/sisu.toml -->
+```toml
+[package]
+name = "kiuas"
+version = "0.1.0"
+edition = "2027"
+
+[trust]
+unsafe = ["zlib"]
+```
+
+<!-- output: examples/reference-diagnostics/e1015_trust_unknown.console -->
+```console
+$ sisu run
+error[E1015]: `[trust] unsafe` names `zlib`, which is not a dependency of this package
+  --> sisu.toml:7:11
+  |
+7 | unsafe = ["zlib"]
+  |           ^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Remove the name, as the fixed manifest does, or correct it to the
+dependency it means.
+
+<!-- file: examples/reference-diagnostics/e1015_trust_unknown_fixed.files/sisu.toml -->
+```toml
+[package]
+name = "kiuas"
+version = "0.1.0"
+edition = "2027"
+```
+
+<!-- output: examples/reference-diagnostics/e1015_trust_unknown_fixed.console -->
+```console
+$ sisu run
+kiuas
+```
+
+Shown in [R13](modules.md#trust).
+
+### E1017
+
+`package.reserved-name`: `{name}` is the name of a standard-library
+module, which `import {name}` names; a package of the program needs
+another name.
+
+A package's name is the first part of its modules' paths, as in `import
+json`, so it cannot be the name of a module of the standard library,
+which the same import names ([R13](modules.md#package)).
+
+<!-- file: examples/reference-diagnostics/e1017_reserved_name.files/sisu.toml -->
+```toml
+[package]
+name = "json"
+version = "0.1.0"
+edition = "2027"
+```
+
+<!-- output: examples/reference-diagnostics/e1017_reserved_name.console -->
+```console
+$ sisu run
+error[E1017]: `json` is the name of a standard-library module, which `import json` names; a package of the program needs another name
+  --> sisu.toml:2:8
+  |
+2 | name = "json"
+  |        ^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Choose another name, as `json_tool`.
+
+<!-- file: examples/reference-diagnostics/e1017_reserved_name_fixed.files/sisu.toml -->
+```toml
+[package]
+name = "json_tool"
+version = "0.1.0"
+edition = "2027"
+```
+
+<!-- output: examples/reference-diagnostics/e1017_reserved_name_fixed.console -->
+```console
+$ sisu run
+json_tool
+```
+
+Shown in [R13](modules.md#mistakes-in-the-manifest).
+
+### E1019
+
+`package.unsafe-undeclared`: the package `{package}` contains {what},
+and its `sisu.toml` declares no `unsafe`: add `unsafe = "{level}"` to
+its `[package]`.
+
+A package that holds `unsafe` blocks or foreign code says so in its
+`[package]`, with the level the code needs: `"memory"` for unsafe
+operations on memory, `"extern"` for foreign functions
+([R13](modules.md#trust)). The level is part of what a user of the
+package reads before trusting it, and the lockfile records it.
+
+<!-- file: examples/reference-diagnostics/e1019_unsafe_undeclared.files/sisu.toml -->
+```toml
+[package]
+name = "kiuas"
+version = "0.1.0"
+edition = "2027"
+```
+
+<!-- file: examples/reference-diagnostics/e1019_unsafe_undeclared.files/src/main.sisu -->
+```sisu
+# A package with unsafe code, which its manifest must declare.
+from std.mem import ptr
+
+def main():
+    var celsius = 80
+    let p = ptr.of_mut(mut celsius)
+    # safety: valid, aligned, writable: p points to the live local
+    #   celsius, which nothing else uses until the block ends.
+    unsafe:
+        p.write(p.read() + 5)
+    print(celsius)
+```
+
+<!-- output: examples/reference-diagnostics/e1019_unsafe_undeclared.console -->
+```console
+$ sisu run
+error[E1019]: the package `kiuas` contains unsafe code, and its `sisu.toml` declares no `unsafe`: add `unsafe = "memory"` to its `[package]`
+  --> src/main.sisu:9:5
+  |
+9 |     unsafe:
+  |     ^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Add the level that the message names to `[package]`.
+
+<!-- file: examples/reference-diagnostics/e1019_unsafe_undeclared_fixed.files/sisu.toml -->
+```toml
+[package]
+name = "kiuas"
+version = "0.1.0"
+edition = "2027"
+unsafe = "memory"
+```
+
+<!-- output: examples/reference-diagnostics/e1019_unsafe_undeclared_fixed.console -->
+```console
+$ sisu run
+85
+```
+
+Shown in [chapter 27](../tutorial/27-systems.md).
+
+### E1021
+
+`package.unsafe-untrusted`: the dependency `{name}` declares `unsafe =
+"{level}"`, and `[trust] unsafe` in the root package's `sisu.toml` does
+not list it.
+
+A dependency that declares an unsafe level asks the root package for
+consent, which `[trust] unsafe` in the root's `sisu.toml` gives by
+naming it ([R13](modules.md#trust)). The unsafe blocks of a dependency
+without it are E0703 too.
+
+<!-- file: examples/reference-diagnostics/e1021_unsafe_untrusted.files/app/sisu.toml -->
+```toml
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2027"
+
+[dependencies]
+readings = { path = "../readings" }
+```
+
+<!-- file: examples/reference-diagnostics/e1021_unsafe_untrusted.files/readings/sisu.toml -->
+```toml
+[package]
+name = "readings"
+version = "0.1.0"
+edition = "2027"
+unsafe = "memory"
+```
+
+<!-- output: examples/reference-diagnostics/e1021_unsafe_untrusted.console -->
+```console
+$ sisu run app
+error[E0703]: the package `readings` is not trusted with `unsafe`; a dependency may contain `unsafe` and `extern` only when `[trust] unsafe` in the root package's `sisu.toml` lists it
+  --> ../readings/src/lib.sisu:10:12
+   |
+10 |     return unsafe first.offset(len(temps) - 1).read()
+   |            ^^^^^^
+
+error[E1021]: the dependency `readings` declares `unsafe = "memory"`, and `[trust] unsafe` in the root package's `sisu.toml` does not list it
+  --> ../readings/sisu.toml:5:10
+  |
+5 | unsafe = "memory"
+  |          ^^^^^^^^
+  = note: the root package consents by listing it: `[trust] unsafe = ["readings"]`
+
+error[D0006]: the program was not run: errors found (2)
+```
+
+List the dependency in `[trust] unsafe`, as the note says, once you have
+read what its unsafe code does; `sisu audit` lists the blocks with their
+`# safety:` comments ([R16](sisu-command.md#sisu-audit)).
+
+<!-- file: examples/reference-diagnostics/e1021_unsafe_untrusted_fixed.files/app/sisu.toml -->
+```toml
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2027"
+
+[dependencies]
+readings = { path = "../readings" }
+
+[trust]
+unsafe = ["readings"]
+```
+
+<!-- output: examples/reference-diagnostics/e1021_unsafe_untrusted_fixed.console -->
+```console
+$ sisu run app
+92
+```
+
+Shown in the guide [Call a C library](../guides/c-library.md).
 
 ## Warnings
 
@@ -6306,6 +8568,217 @@ kiuas
 ```
 
 Shown in [R22](targets.md#runtime-profiles).
+
+### W0007
+
+`unsafe.no-safety-comment`: this {what} has no `# safety:` comment above
+it saying why each obligation it takes on holds.
+
+Each `unsafe:` block, `unsafe` expression, `unsafe impl` and `extern`
+block has a `# safety:` comment on the lines above it that says why each
+obligation it takes on holds, so that the audit can list the reason with
+the code (D-083). A warning, so the program runs.
+
+<!-- file: examples/reference-diagnostics/w0007_no_safety_comment.sisu -->
+```sisu
+# Unsafe code without the comment that says why it is sound.
+from std.mem import ptr
+
+def main():
+    var celsius = 80
+    let p = ptr.of_mut(mut celsius)
+    unsafe:
+        p.write(p.read() + 5)
+    print(celsius)
+```
+
+<!-- output: examples/reference-diagnostics/w0007_no_safety_comment.console -->
+```console
+$ sisu run w0007_no_safety_comment.sisu
+warning[W0007]: this `unsafe:` block has no `# safety:` comment above it saying why each obligation it takes on holds
+  --> w0007_no_safety_comment.sisu:7:5
+  |
+7 |     unsafe:
+  |     ^^^^^^
+
+85
+```
+
+Write the comment, naming the obligations as the operations list them
+(`valid`, `aligned`, `writable` for a write through a pointer). `sisu
+publish` will refuse a package with this warning.
+
+<!-- file: examples/reference-diagnostics/w0007_no_safety_comment_fixed.sisu -->
+```sisu
+# The comment names each obligation the block takes on.
+from std.mem import ptr
+
+def main():
+    var celsius = 80
+    let p = ptr.of_mut(mut celsius)
+    # safety: valid, aligned, writable: p points to the live local
+    #   celsius, which nothing else uses until the block ends.
+    unsafe:
+        p.write(p.read() + 5)
+    print(celsius)
+```
+
+<!-- output: examples/reference-diagnostics/w0007_no_safety_comment_fixed.out -->
+```text
+85
+```
+
+Shown in [chapter 27](../tutorial/27-systems.md).
+
+### W0010
+
+`unsafe.unnamed-obligation`: the `# safety:` comment names no obligation
+of `{callee}`, which are {obligations}.
+
+A `# safety:` comment names the obligations it discharges, each a name
+and a `:` (`in_range: ...`), so that a reader can check each against the
+`Safety:` list of the function called (Q-72). A comment that names none
+of a callee's obligations gets this warning once per callee.
+
+<!-- file: examples/reference-diagnostics/w0010_unnamed_obligation.sisu -->
+```sisu
+# A safety comment that names none of the callee's obligations.
+from std.mem import as_ptr
+
+## The reading at `i` of `temps`, without the check that there is one.
+##
+## Safety:
+## - `in_range`: `i` is at least 0 and less than `len(temps)`
+unsafe def reading_at(temps: Slice[int], i: int) -> int:
+    let first = as_ptr(temps)
+    # safety: in_bounds, valid, aligned: this function's `in_range`, and
+    #   `temps` lives, unchanged, until the read.
+    return unsafe first.offset(i).read()
+
+def main():
+    let temps = [78, 85, 92]
+    # safety: the list was made on the line above.
+    print(unsafe reading_at(temps, 2))
+```
+
+<!-- output: examples/reference-diagnostics/w0010_unnamed_obligation.console -->
+```console
+$ sisu run w0010_unnamed_obligation.sisu
+warning[W0010]: the `# safety:` comment names no obligation of `reading_at`, which are `in_range`
+  --> w0010_unnamed_obligation.sisu:16:5
+   |
+16 |     # safety: the list was made on the line above.
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+92
+```
+
+Name the obligations that the message lists, and say why each holds.
+
+<!-- file: examples/reference-diagnostics/w0010_unnamed_obligation_fixed.sisu -->
+```sisu
+# The comment names the obligation that the call discharges.
+from std.mem import as_ptr
+
+## The reading at `i` of `temps`, without the check that there is one.
+##
+## Safety:
+## - `in_range`: `i` is at least 0 and less than `len(temps)`
+unsafe def reading_at(temps: Slice[int], i: int) -> int:
+    let first = as_ptr(temps)
+    # safety: in_bounds, valid, aligned: this function's `in_range`, and
+    #   `temps` lives, unchanged, until the read.
+    return unsafe first.offset(i).read()
+
+def main():
+    let temps = [78, 85, 92]
+    # safety: in_range: the list holds three readings, so 2 is in range.
+    print(unsafe reading_at(temps, 2))
+```
+
+<!-- output: examples/reference-diagnostics/w0010_unnamed_obligation_fixed.out -->
+```text
+92
+```
+
+Shown in [chapter 27](../tutorial/27-systems.md).
+
+### W0014
+
+`unsafe.ambient-authority`: `{name}` is public and safe and reaches the
+foreign function `{callee}` without taking a capability, so its callers
+need no authority for what the call does.
+
+A function that is public, safe and not `pure`, and that calls a foreign
+function, would give every caller the authority of the call without a
+capability, which the rest of the language never does
+([22](../../proposal/22-unsafe.md), clause 5). It is a warning, and a
+library that wraps C answers it by taking the capability the call
+exercises.
+
+<!-- file: examples/reference-diagnostics/w0014_ambient_authority.sisu -->
+```sisu
+# A safe function that reads the environment through C without a capability.
+from std.ffi import CString, c_char
+from std.mem import ptr
+
+# safety: the signature as <stdlib.h> declares it; it returns promptly.
+extern "C":
+    def getenv(name: ptr[c_char]) -> ptr[c_char]?
+
+## Whether the environment variable `name` is set.
+pub def is_set(name: str) -> bool:
+    let c = CString.new(name) else:
+        return False
+    # safety: valid: `c` lives across the call and ends with its NUL, and
+    #   getenv keeps no pointer to it.
+    return unsafe getenv(c.as_ptr()).is_some()
+```
+
+<!-- output: examples/reference-diagnostics/w0014_ambient_authority.console -->
+```console
+$ sisu check w0014_ambient_authority.sisu
+warning[W0014]: `is_set` is public and safe and reaches the foreign function `getenv` without taking a capability, so its callers need no authority for what the call does
+  --> w0014_ambient_authority.sisu:10:9
+   |
+10 | pub def is_set(name: str) -> bool:
+   |         ^^^^^^
+  = note: take the capability whose authority the call exercises (22, clause 5), as `std.rt.os` does behind `System`
+
+```
+
+Take the capability, as `env: Env` here for `getenv`, so that only a
+caller that holds it can read the environment. A foreign function that
+reaches nothing, such as `abs`, belongs in a `pure` function, whose `#
+safety:` comment says so under `pure:`. Both programs are only checked:
+the interpreter cannot yet pass a `CString` to C, as [chapter
+27](../tutorial/27-systems.md) says.
+
+<!-- file: examples/reference-diagnostics/w0014_ambient_authority_fixed.sisu -->
+```sisu
+# The function takes `Env`, the authority that the call exercises.
+from std.ffi import CString, c_char
+from std.mem import ptr
+
+# safety: the signature as <stdlib.h> declares it; it returns promptly.
+extern "C":
+    def getenv(name: ptr[c_char]) -> ptr[c_char]?
+
+## Whether the variable `name` of the environment `env` reaches is set.
+pub def is_set(env: Env, name: str) -> bool:
+    let c = CString.new(name) else:
+        return False
+    # safety: valid: `c` lives across the call and ends with its NUL, and
+    #   getenv keeps no pointer to it.
+    return unsafe getenv(c.as_ptr()).is_some()
+```
+
+<!-- output: examples/reference-diagnostics/w0014_ambient_authority_fixed.console -->
+```console
+$ sisu check w0014_ambient_authority_fixed.sisu
+```
+
+Shown in [chapter 27](../tutorial/27-systems.md).
 
 ## Run time
 
@@ -7099,6 +9572,129 @@ $ sisu run --contracts=preconditions d0028_bad_level.sisu
 
 Shown in [R11](contracts.md#check-levels).
 
+### D0029
+
+`cli.test-checks-contracts`: `sisu test` checks every contract;
+`--contracts` sets what `sisu run` and `sisu sir` check.
+
+`sisu test` checks every contract and adds a test for each function's
+contract, so it takes no `--contracts`; the level is for `sisu run` and
+`sisu sir`, which build the program a user runs
+([R11](contracts.md#check-levels)).
+
+<!-- file: examples/reference-diagnostics/d0029_test_contracts.sisu -->
+```sisu
+# A contract, and a test of the function it guards.
+def half(n: int) -> int:
+    requires n >= 0
+    return n // 2
+
+test "half of eight":
+    assert half(8) == 4
+
+def main():
+    print(half(8))
+```
+
+<!-- output: examples/reference-diagnostics/d0029_test_contracts.console -->
+```console
+$ sisu test --contracts=all d0029_test_contracts.sisu
+error[D0029]: `sisu test` checks every contract; `--contracts` sets what `sisu run` and `sisu sir` check
+```
+
+Leave `--contracts` out of `sisu test`, and give it to `sisu run` for
+the level the run needs.
+
+<!-- output: examples/reference-diagnostics/d0029_test_contracts_fixed.console -->
+```console
+$ sisu test d0029_test_contracts.sisu
+test "half of eight" ... ok
+test "contract of half" ... ok
+2 passed, 0 failed, 0 blocked
+$ sisu run --contracts=off d0029_test_contracts.sisu
+4
+```
+
+Shown in [chapter 23](../tutorial/23-contracts.md).
+
+### D0033
+
+`cli.token-other-code`: the token is for other code (content hash
+{expected}); `{file}` has content hash {found}.
+
+A replay token names the content hash of the code it was made for, and
+replays a run of exactly that code: the token is a fact about one
+version of the program ([R15](testing.md#replay-tokens)). After any
+change to the file, the hash differs, so the token is refused rather
+than replaying something else.
+
+<!-- file: examples/reference-diagnostics/d0033_other_code.sisu -->
+```sisu
+# A test that fails, and prints the token that replays it.
+def total(prices: list[int]) -> int:
+    var sum = 0
+    for p in prices[1:]:
+        sum += p
+    return sum
+
+test "the total of three prices":
+    assert total([3, 4, 5]) == 12
+```
+
+<!-- output: examples/reference-diagnostics/d0033_other_code.console -->
+```console
+$ sisu test d0033_other_code.sisu
+test "the total of three prices" ... FAILED
+
+test "the total of three prices" ... FAILED
+panic: assertion failed: total([3, 4, 5]) == 12
+  left:  9
+  right: 12
+  at test "the total of three prices" (d0033_other_code.sisu:9:5)
+replay: sisu test --replay 1-c239940ba84d571f-0.0.1-t0-s0-r0 d0033_other_code.sisu
+
+0 passed, 1 failed, 0 blocked
+$ sisu test --replay 1-c239940ba84d571f-0.0.1-t0-s0-r0 d0033_other_code_fixed.sisu
+error[D0033]: the token is for other code (content hash c239940ba84d571f); `d0033_other_code_fixed.sisu` has content hash 45b5b32410fd660b
+```
+
+Replay the token against the code it was made for, to see the failure
+again, and run the tests anew on the changed code, which makes tokens of
+its own.
+
+<!-- file: examples/reference-diagnostics/d0033_other_code_fixed.sisu -->
+```sisu
+# The function fixed, so the token's code is gone.
+def total(prices: list[int]) -> int:
+    var sum = 0
+    for p in prices:
+        sum += p
+    return sum
+
+test "the total of three prices":
+    assert total([3, 4, 5]) == 12
+```
+
+<!-- output: examples/reference-diagnostics/d0033_other_code_fixed.console -->
+```console
+$ sisu test --replay 1-c239940ba84d571f-0.0.1-t0-s0-r0 d0033_other_code.sisu
+test "the total of three prices" ... FAILED
+
+test "the total of three prices" ... FAILED
+panic: assertion failed: total([3, 4, 5]) == 12
+  left:  9
+  right: 12
+  at test "the total of three prices" (d0033_other_code.sisu:9:5)
+replay: sisu test --replay 1-c239940ba84d571f-0.0.1-t0-s0-r0 d0033_other_code.sisu
+
+0 passed, 1 failed, 0 blocked
+$ sisu test d0033_other_code_fixed.sisu
+test "the total of three prices" ... ok
+1 passed, 0 failed, 0 blocked
+```
+
+Shown in the guide [Reproduce a failure](../guides/replay.md).
+
 ### D0037
 
 `cli.replay-diverged`: the replay diverged from the log: {detail}.
@@ -7225,9 +9821,9 @@ it. `sisu explain CODE` prints the same line.
 | [E0107](#e0107) | `parse.top-level-statement` | statements cannot appear at the top level of a module; put them in a function such as `main` |
 | [E0108](#e0108) | `parse.mixed-and-or` | `and` and `or` cannot be mixed without parentheses |
 | E0109 | `parse.mixed-bitwise` | `{first}` and `{second}` cannot be mixed without parentheses |
-| E0110 | `parse.bitwise-arithmetic` | `{op}` cannot be mixed with arithmetic or shifts without parentheses |
+| [E0110](#e0110) | `parse.bitwise-arithmetic` | `{op}` cannot be mixed with arithmetic or shifts without parentheses |
 | E0111 | `parse.shift-arithmetic` | a shift cannot be mixed with arithmetic without parentheses |
-| E0112 | `parse.negative-power` | `-x ** y` is ambiguous; write `-(x ** y)` or `(-x) ** y` |
+| [E0112](#e0112) | `parse.negative-power` | `-x ** y` is ambiguous; write `-(x ** y)` or `(-x) ** y` |
 | [E0113](#e0113) | `parse.mixed-chain` | a chained comparison must point one way; `{first}` and `{second}` do not |
 | E0114 | `parse.assignment-in-expression` | assignment is a statement and has no value; to compare, write `==` |
 | [E0115](#e0115) | `parse.python-conditional` | `a if c else b` is not Sisu; write `if c: a else: b` |
@@ -7237,21 +9833,22 @@ it. `sisu explain CODE` prints the same line.
 | E0119 | `parse.chain-operator` | `{op}` cannot be chained; use parentheses or `and` |
 | E0121 | `parse.empty-interpolation` | an interpolation needs an expression between `{` and `}` |
 | E0122 | `parse.closure-parameter` | a closure parameter must be a name |
-| E0123 | `parse.walrus` | Sisu has no `:=`; bind with `let` or use `if let` |
+| [E0123](#e0123) | `parse.walrus` | Sisu has no `:=`; bind with `let` or use `if let` |
 | [E0124](#e0124) | `parse.keyword-as-name` | `{keyword}` is a keyword and cannot be used as a name here |
 | E0125 | `parse.unexpected-indent` | this line is indented more than the line before it, which does not open a block |
 | E0126 | `parse.expected-member` | a struct body holds fields, methods and `pass`; this line is none of them |
 | [E0127](#e0127) | `parse.loop-else` | a loop has no `else` in Sisu; keep what the loop finds in a variable and test it after the loop, as in `if let Some(i) = found:` |
+| [E0128](#e0128) | `parse.glob-import` | Sisu has no glob imports: name what the module gives, as in `from std.collections import Deque, Heap`, or import the module and write `collections.Deque` |
 
 ### Names and declarations, every code
 
 | Code | Identifier | Message |
 |---|---|---|
 | [E0200](#e0200) | `resolve.undefined-name` | cannot find `{name}` in this scope |
-| E0201 | `resolve.undefined-type` | cannot find a type named `{name}` |
+| [E0201](#e0201) | `resolve.undefined-type` | cannot find a type named `{name}` |
 | [E0202](#e0202) | `resolve.duplicate-definition` | `{name}` is defined more than once in this module |
 | [E0203](#e0203) | `resolve.unknown-module` | there is no module `{name}` |
-| E0204 | `resolve.not-in-module` | module `{module}` has no item `{name}` |
+| [E0204](#e0204) | `resolve.not-in-module` | module `{module}` has no item `{name}` |
 | E0205 | `resolve.duplicate-field` | `{name}` is declared more than once in `{owner}` |
 | E0206 | `resolve.duplicate-variant` | `{owner}` has more than one variant named `{name}` |
 | E0207 | `resolve.duplicate-parameter` | the parameter `{name}` appears more than once |
@@ -7265,7 +9862,7 @@ it. `sisu explain CODE` prints the same line.
 | [E0217](#e0217) | `resolve.duplicate-method` | `{owner}` has more than one method named `{name}` |
 | E0218 | `resolve.self-not-first` | `self` must be the first parameter |
 | E0219 | `resolve.const-type-required` | a `const` needs a type: `const {name}: T = ...` |
-| E0220 | `resolve.import-unknown` | cannot import `{name}`: it names no module of this package, of a dependency in `sisu.toml`, or of the standard library |
+| [E0220](#e0220) | `resolve.import-unknown` | cannot import `{name}`: it names no module of this package, of a dependency in `sisu.toml`, or of the standard library |
 | E0221 | `resolve.field-default-order` | a field with a default must not use the value of another field |
 | E0222 | `resolve.parameter-default-order` | a parameter without a default cannot follow one with a default |
 | E0223 | `resolve.not-a-module` | `{name}` is not a module |
@@ -7288,7 +9885,7 @@ it. `sisu explain CODE` prints the same line.
 | E0240 | `resolve.sealed-trait` | `{trait}` is implemented only by the standard library, so `{ty}` cannot implement it |
 | [E0241](#e0241) | `resolve.not-object-safe` | `{trait}` cannot be used as `dyn {trait}`: its method `{method}` cannot be called through it, because {reason} |
 | [E0242](#e0242) | `resolve.supertrait-missing` | `{ty}` implements `{trait}`, which requires `{super}`, but `{ty}` does not implement `{super}` |
-| [E0243](#e0243) | `resolve.not-derivable` | `{name}` cannot be derived; `@derive` takes `Copy` and the traits that have a `comptime def derive`: `Debug`, `Eq`, `PartialOrd`, `Ord`, `Hash`, and any trait that declares one |
+| [E0243](#e0243) | `resolve.not-derivable` | `{name}` cannot be derived; `@derive` takes `Copy` and the traits that have a `comptime def derive`: `Debug`, `Default`, `Eq`, `PartialOrd`, `Ord`, `Hash`, and any trait that declares one |
 | [E0244](#e0244) | `resolve.derive-field` | `{ty}` cannot derive `{trait}`: its field `{field}` has type `{fty}`, which does not implement `{trait}` |
 | [E0245](#e0245) | `resolve.generic-default-order` | a type parameter without a default cannot follow one with a default |
 | E0246 | `resolve.impl-default` | the type parameters of an `impl` or a function take no defaults; a default belongs to a type's or a trait's parameter |
@@ -7300,11 +9897,11 @@ it. `sisu explain CODE` prints the same line.
 | [E0252](#e0252) | `resolve.delegate-self` | `{trait}` returns a `{ty}`, so `{ty}` can delegate it only when `{field}` is its one field |
 | E0253 | `resolve.delegate-field` | `{ty}` cannot delegate `{trait}` to `{field}`: its type `{fty}` does not implement `{trait}` |
 | E0254 | `resolve.drop-generic` | a `Drop` for `{ty}` must apply to every `{name}`: write `{expected}`, with the type's parameters in order and only the bounds the type declares |
-| E0255 | `resolve.private-item` | `{name}` is private to the module `{module}`; declare it `pub` to use it from another module |
+| [E0255](#e0255) | `resolve.private-item` | `{name}` is private to the module `{module}`; declare it `pub` to use it from another module |
 | [E0256](#e0256) | `resolve.package-item` | `{name}` is `pub(package)` in `{module}`, so only the modules of the package `{package}` can use it |
 | E0257 | `resolve.not-reexported` | `{name}` is imported into `{module}`, not declared there; import it from `{origin}`, or re-export it with `pub from {origin} import {name}` |
 | [E0258](#e0258) | `resolve.private-field` | the field `{field}` of `{ty}` is private to the module `{module}`; declare it `pub` to use it from another module |
-| E0259 | `resolve.private-method` | the method `{name}` of `{ty}` is private to the module `{module}`; declare it `pub` to call it from another module |
+| [E0259](#e0259) | `resolve.private-method` | the method `{name}` of `{ty}` is private to the module `{module}`; declare it `pub` to call it from another module |
 | E0260 | `resolve.not-a-dependency` | cannot import `{name}`: `{package}` is not a dependency of `{this}`; add it to `[dependencies]` in that package's `sisu.toml` |
 | E0261 | `resolve.script-main` | a script's statements at the top level are its `main`, so it cannot also declare `main` |
 | E0262 | `resolve.const-argument` | `{param}` is a `const` parameter of `{name}`, so it takes a constant, such as `{name}[..., 8]`, not a type |
@@ -7315,6 +9912,7 @@ it. `sisu explain CODE` prints the same line.
 | E0267 | `resolve.not-camel-case` | the name of {kind} is written in CamelCase, and `{name}` is not |
 | E0268 | `resolve.not-snake-case` | the name of {kind} is written in snake_case, and `{name}` is not |
 | E0269 | `resolve.not-screaming-case` | the name of {kind} is written in SCREAMING_CASE, and `{name}` is not |
+| E0270 | `resolve.copy-by-hand` | `Copy` is derived, not implemented: an `impl Copy for {ty}` written by hand leaves `{ty}` moved, and `@derive(Copy)` makes it copied when every field is `Copy` (03) |
 
 ### Types, every code
 
@@ -7353,21 +9951,21 @@ it. `sisu explain CODE` prints the same line.
 | E0330 | `type.else-not-fallible` | `else` after `let` needs a `T?`, a `T ! E` or a pattern that can fail; this value is `{ty}` |
 | E0331 | `type.else-must-diverge` | the block after `else:` must leave the scope with `return`, `break`, `continue` or a panic |
 | E0332 | `type.float-suffix` | a float literal takes the suffix `f32` or `f64`, not `{suffix}` |
-| E0333 | `type.impure-call` | `{callee}` is not pure, so the pure function `{name}` cannot call it |
-| E0334 | `type.impure-capability` | the pure function `{name}` cannot use the capability `{ty}` |
+| [E0333](#e0333) | `type.impure-call` | `{callee}` is not pure, so the pure function `{name}` cannot call it |
+| [E0334](#e0334) | `type.impure-capability` | the pure function `{name}` cannot use the capability `{ty}` |
 | [E0335](#e0335) | `type.impure-argument` | this function is passed where a pure function is required, but it calls `{callee}`, which is not pure |
 | [E0337](#e0337) | `type.missing-field` | missing the field `{field}` of `{ty}` |
 | [E0338](#e0338) | `type.move-out-of-borrow` | cannot move `{what}` out of a borrowed value; copy it with `.copy()` |
 | [E0339](#e0339) | `type.mut-argument-missing` | `{param}` is a `mut` parameter, so the call must say `mut` before the argument |
 | [E0340](#e0340) | `type.mut-argument-unexpected` | `{param}` is not a `mut` parameter, so the argument takes no `mut` |
 | [E0341](#e0341) | `type.not-mutable` | cannot modify `{what}`; it is not declared with `var` |
-| E0342 | `type.it-outside-closure` | `it` is the parameter of an implicit closure and exists only where a one-parameter function is expected |
+| [E0342](#e0342) | `type.it-outside-closure` | `it` is the parameter of an implicit closure and exists only where a one-parameter function is expected |
 | [E0344](#e0344) | `type.constant-negative-index` | a constant negative index does not compile; count from the end with `^`: `{fix}` |
 | [E0345](#e0345) | `type.str-not-indexable` | `{ty}` cannot be indexed by position; use `.chars()`, `.bytes()` or `.byte_slice(a, b)` |
 | [E0347](#e0347) | `type.bound-not-satisfied` | `{ty}` does not implement `{bound}` |
 | E0349 | `type.not-generic` | `{name}` does not take type arguments |
 | E0350 | `type.not-a-value` | `{name}` is a {kind}, not a value |
-| E0351 | `type.unknown-associated` | `{ty}` has no associated function `{name}` |
+| [E0351](#e0351) | `type.unknown-associated` | `{ty}` has no associated function `{name}` |
 | E0352 | `type.value-returns-borrow` | `{name}` cannot be a value: it returns a borrow of its parameter `{param}`, which a function value takes by value |
 | E0353 | `type.closure-parameter-count` | wrong number of closure parameters: expected {expected}, found {found} |
 | E0356 | `type.open-set-needs-wildcard` | `{ty}` is an open error set; matching it needs a `case _` arm |
@@ -7404,14 +10002,14 @@ it. `sisu explain CODE` prints the same line.
 | [E0389](#e0389) | `type.no-self` | `self` exists only inside a method |
 | E0390 | `type.not-a-struct-pattern` | `{name}` cannot be matched with fields |
 | E0391 | `type.const-pattern` | a constant cannot be used as a pattern yet; compare with `==` in a guard |
-| E0392 | `type.impure-value-call` | `{name}` is pure, so it cannot call a function value whose type is not `pure` |
+| [E0392](#e0392) | `type.impure-value-call` | `{name}` is pure, so it cannot call a function value whose type is not `pure` |
 | E0393 | `type.impure-drop` | dropping `{value}` here runs the `Drop` of `{ty}`, which is not pure, so the pure function `{name}` cannot do it |
 | E0394 | `type.ambiguous-method` | `{name}` is a method of more than one trait `{ty}` implements ({traits}); call it on the trait, as in `Trait.{name}(x)` |
 | [E0395](#e0395) | `type.unsized-dyn` | `{ty}` has no size of its own; hold it behind `ref` or in a `Box` |
 | E0396 | `type.view-to-dyn` | `{ty}` borrows, so it cannot become `{dyn}`, which owns its value |
 | E0397 | `type.must-consume-argument` | `{ty}` is must-consume, so it cannot be the argument of the generic parameter `{param}`, whose values the body may drop |
 | [E0398](#e0398) | `type.structural-only` | {callee} is hashed and compared structurally in stage 0, and `{ty}` has an impl of `{trait}` of its own; derive `Hash` and `Eq` for it, or key by a field |
-| E0399 | `type.bad-format-spec` | `{spec}` is not a format spec; it is `[[fill]align][sign][#][0][width][,\|_][.precision][type]`, as in `>8.2f`, with the type one of `d x X o b e E f F % s ?` |
+| [E0399](#e0399) | `type.bad-format-spec` | `{spec}` is not a format spec; it is `[[fill]align][sign][#][0][width][,\|_][.precision][type]`, as in `>8.2f`, with the type one of `d x X o b e E f F % s ?` |
 
 ### Ownership, every code
 
@@ -7438,9 +10036,9 @@ it. `sisu explain CODE` prints the same line.
 | [E0418](#e0418) | `borrow.must-consume-exit` | this leaves the scope with `{name}` unconsumed: a `{ty}` must be passed to an `own` parameter first |
 | E0419 | `borrow.move-out-of-place` | cannot move out of `{name}` through a reference or an index; copy it with `.copy()` |
 | E0420 | `borrow.must-consume-intrinsic` | `{callee}` may drop values that `{name}` holds, and a `{ty}` is must-consume: its values must be passed to an `own` parameter |
-| E0421 | `borrow.view-in-owner` | `{ty}` borrows, so it cannot be put in `{owner}`, which can outlive what it borrows (04, rule 3) |
+| [E0421](#e0421) | `borrow.view-in-owner` | `{ty}` borrows, so it cannot be put in `{owner}`, which can outlive what it borrows (04, rule 3) |
 | E0422 | `borrow.must-consume-in-owner` | `{ty}` is must-consume, so it cannot be put in `{owner}`, which can drop it where the checker does not see |
-| E0423 | `type.own-closure-capture` | an `own` closure keeps a copy of `{name}`, and `{ty}` is not `Copy`; stage 0 copies captures (a capture by move arrives with tasks) |
+| [E0423](#e0423) | `type.own-closure-capture` | an `own` closure keeps a copy of `{name}`, and `{ty}` is not `Copy`; stage 0 copies captures (a capture by move arrives with tasks) |
 | E0424 | `type.own-closure-changes` | an `own` closure keeps a copy of `{name}` and cannot change it; borrow it with a plain closure instead |
 | E0425 | `task.closure-literal` | `{function}` takes a closure written at the call (or a `do` block), so that what it captures can be checked; a function value is not one |
 | E0426 | `task.not-send` | `{name}` moves into the task, but `{ty}` is not `Send` |
@@ -7455,13 +10053,14 @@ it. `sisu explain CODE` prints the same line.
 | E0435 | `type.yield-outside-generator` | `yield` belongs in the body of a generator, a function that returns `Iter[T]` (not in a closure) |
 | E0436 | `type.generator-result` | `{name}` yields, so it must return `Iter[T]`, not `{ty}` |
 | E0437 | `task.not-send-mut` | `{name}` is changed by the task through a reference, but `{ty}` is not `Send` |
+| [E0438](#e0438) | `borrow.ref-in-collection` | `{ty}` would hold references, and a collection holds values it owns or views, never references (04, rule 3) |
 
 ### Lowering, every code
 
 | Code | Identifier | Message |
 |---|---|---|
 | E0500 | `sir.parse` | SIR: {detail} |
-| [E0501](#e0501) | `sir.invalid` | invalid SIR in `{function}`: {detail} |
+| E0501 | `sir.invalid` | invalid SIR in `{function}`: {detail} |
 
 ### Compile-time evaluation, every code
 
@@ -7469,18 +10068,18 @@ it. `sisu explain CODE` prints the same line.
 |---|---|---|
 | E0600 | `comptime.not-constant` | `comptime` evaluates what is known at compile time, and `{name}` is known only at run time |
 | [E0601](#e0601) | `comptime.io` | the compile-time evaluation of this expression used {what}; nothing reaches the world at compile time |
-| E0602 | `comptime.panicked` | the compile-time evaluation of this expression panicked: {message} |
-| E0603 | `comptime.budget` | the compile-time evaluation in `{item}` used up its budget of {steps} steps; raise it with `@comptime_budget(steps=N)` on `{item}` |
+| [E0602](#e0602) | `comptime.panicked` | the compile-time evaluation of this expression panicked: {message} |
+| [E0603](#e0603) | `comptime.budget` | the compile-time evaluation in `{item}` used up its budget of {steps} steps; raise it with `@comptime_budget(steps=N)` on `{item}` |
 | [E0604](#e0604) | `comptime.not-kept` | {what} made at compile time cannot be kept for run time; numbers, text, booleans, characters, and lists, sets, dicts, tuples, options, results, structs and enums of them can |
-| E0605 | `comptime.only` | `{name}` is a `comptime def`: it can be called only at compile time, inside `comptime` |
+| [E0605](#e0605) | `comptime.only` | `{name}` is a `comptime def`: it can be called only at compile time, inside `comptime` |
 | [E0606](#e0606) | `comptime.budget-attribute` | `@comptime_budget` takes `steps=N`, a positive number of steps |
 | E0607 | `comptime.derive-template` | a trait's derive is `comptime def derive(T: type) -> impl {trait} for T`, whose body is `return impl {trait} for T:` with the impl's methods |
-| E0608 | `comptime.derive-failed` | deriving `{trait}` for `{ty}` stopped at compile time: {reason} |
+| [E0608](#e0608) | `comptime.derive-failed` | deriving `{trait}` for `{ty}` stopped at compile time: {reason} |
 | [E0609](#e0609) | `comptime.instance-failed` | making `{name}` stopped at compile time: {reason} |
 | E0610 | `comptime.instances-unbounded` | `{name}` needs more than {count} instances: its instances call it with ever more types |
 | E0611 | `comptime.template-value` | `{name}` reflects on its type parameters, so it is made for each call's types and cannot be used as a value |
-| E0612 | `comptime.embed-failed` | cannot embed `{path}`: {reason} |
-| E0613 | `comptime.embed-path` | `embed` takes the path of a file as a string literal |
+| [E0612](#e0612) | `comptime.embed-failed` | cannot embed `{path}`: {reason} |
+| [E0613](#e0613) | `comptime.embed-path` | `embed` takes the path of a file as a string literal |
 | E0614 | `comptime.no-fake` | `cap.Fake[{name}]` needs a trait of the program whose methods can all be forwarded: a `self` or `mut self` receiver, no type parameters, and no borrow or `Self` in a signature |
 | E0615 | `comptime.unsafe-written` | code that compile-time evaluation writes holds no `unsafe`, so that every unsafe block stays in a source file, where `sisu audit --unsafe` shows it |
 
@@ -7491,22 +10090,22 @@ it. `sisu explain CODE` prints the same line.
 | E0700 | `cap.not-shareable` | `{ty}` cannot become `{cap}`: a capability may reach every task, and `{ty}` is not `{auto}` |
 | E0701 | `cap.internal` | `{name}` is internal to the standard library; a program reaches the world only through the capabilities it is given |
 | E0702 | `type.test-signature` | a test takes nothing, the real `System` as its one parameter (`test "name"(sys: System):`), or fresh fakes of the capabilities it names, one of each (`test "name"(fs: Fs, clock: Clock):`) |
-| E0703 | `cap.untrusted` | the package `{package}` is not trusted with {what}; a dependency may contain `unsafe` and `extern` only when `[trust] unsafe` in the root package's `sisu.toml` lists it |
+| [E0703](#e0703) | `cap.untrusted` | the package `{package}` is not trusted with {what}; a dependency may contain `unsafe` and `extern` only when `[trust] unsafe` in the root package's `sisu.toml` lists it |
 
 ### Contracts, every code
 
 | Code | Identifier | Message |
 |---|---|---|
 | [E0800](#e0800) | `contract.misplaced` | `{keyword}` is a function's contract and belongs at the start of its body, before its first statement |
-| E0801 | `contract.not-pure` | a contract only reads what it is given, and `{callee}` is not `pure` |
+| [E0801](#e0801) | `contract.not-pure` | a contract only reads what it is given, and `{callee}` is not `pure` |
 | E0802 | `contract.changes` | a contract only reads what it is given, and this changes it |
-| E0803 | `contract.old-outside` | `old(...)` is a value as it was on entry, which only an `ensures` clause can ask for |
+| [E0803](#e0803) | `contract.old-outside` | `old(...)` is a value as it was on entry, which only an `ensures` clause can ask for |
 | [E0804](#e0804) | `contract.old-arguments` | `old` takes one expression, as in `old(self.balance)` |
 | [E0805](#e0805) | `contract.generator-ensures` | a generator has no `ensures`: what it returns is its iterator |
-| E0806 | `contract.invariant-field` | `{what}` is part of a `{ty}`, whose invariant only its own methods may change and check again; change it through one of them |
+| [E0806](#e0806) | `contract.invariant-field` | `{what}` is part of a `{ty}`, whose invariant only its own methods may change and check again; change it through one of them |
 | [E0807](#e0807) | `contract.not-in-test` | a test has no contract; check what it needs with `assert` |
-| E0810 | `refine.not-satisfied` | `{value}` is not a `{ty}`: `{predicate}` is false for it |
-| E0811 | `refine.needs-try-from` | expected `{expected}`, found `{found}`; a value becomes a `{expected}` where its predicate is checked, with `{name}.try_from(...)` |
+| [E0810](#e0810) | `refine.not-satisfied` | `{value}` is not a `{ty}`: `{predicate}` is false for it |
+| [E0811](#e0811) | `refine.needs-try-from` | expected `{expected}`, found `{found}`; a value becomes a `{expected}` where its predicate is checked, with `{name}.try_from(...)` |
 | [E0812](#e0812) | `refine.change-through-base` | `{what}` is a `{ty}`, which a change through its base could take outside `{predicate}`; change a copy of the base and check it again with `try_from` |
 | [E0813](#e0813) | `refine.own-impl` | `{ty}` refines `{base}` and has its reading impls; it cannot have an impl of `{trait}` of its own |
 | [E0814](#e0814) | `refine.predicate-type` | the predicate of `{ty}` must be a `bool`, found `{found}` |
@@ -7517,10 +10116,10 @@ it. `sisu explain CODE` prints the same line.
 
 | Code | Identifier | Message |
 |---|---|---|
-| E0900 | `stage0.unsupported` | {construct} is not implemented in stage 0 yet; it arrives with {phase} |
+| [E0900](#e0900) | `stage0.unsupported` | {construct} is not implemented in stage 0 yet; it arrives with {phase} |
 | E0901 | `stage0.internal` | internal compiler error in {stage}: {detail} |
 | E0971 | `sim.unmodelled-extern` | this `sim` build reaches `{callee}`, an `extern` call with no simulation model, in `{function}` at {at} |
-| E0981 | `unsafe.call` | `{name}` is an `unsafe def`: call it inside an `unsafe:` block or an `unsafe` expression |
+| [E0981](#e0981) | `unsafe.call` | `{name}` is an `unsafe def`: call it inside an `unsafe:` block or an `unsafe` expression |
 | E0982 | `unsafe.foreign-call` | `{name}` is a foreign function, whose signature is a claim the compiler cannot check: call it inside an `unsafe:` block or an `unsafe` expression |
 | E0983 | `unsafe.fn-value` | `{name}` is {what}, which cannot be a function value: a call through the value would need no `unsafe` |
 | E0984 | `unsafe.impl-needed` | `{trait}` is an `unsafe trait`, whose implementors keep a promise the compiler cannot check: its impl is written `unsafe impl` |
@@ -7537,7 +10136,7 @@ it. `sisu explain CODE` prints the same line.
 |---|---|---|
 | E1000 | `package.toml-syntax` | this is not TOML that `sisu.toml` reads: expected {expected}, found {found} |
 | E1001 | `package.toml-duplicate` | `{key}` is given more than once in `{table}` |
-| E1002 | `package.missing-key` | `{table}` needs `{key}` |
+| [E1002](#e1002) | `package.missing-key` | `{table}` needs `{key}` |
 | [E1003](#e1003) | `package.bad-value` | `{key}` takes {expected}, found {found} |
 | E1004 | `package.bad-name` | `{name}` cannot name a package: {why} |
 | E1005 | `package.no-manifest` | the dependency `{name}` has no `sisu.toml` at `{path}` |
@@ -7545,18 +10144,18 @@ it. `sisu explain CODE` prints the same line.
 | [E1007](#e1007) | `package.cycle` | the packages depend on each other in a cycle: {cycle}; packages build in dependency order, so their graph has no cycle |
 | E1008 | `package.no-root-module` | the package `{name}` has no root module; add `src/main.sisu` (an application) or `src/lib.sisu` (a library) |
 | E1009 | `package.two-root-modules` | the package `{name}` has both `src/main.sisu` and `src/lib.sisu`; a package has one root module |
-| E1010 | `package.not-a-path` | the dependency `{name}` is not a `path` dependency; stage 0 has no registry, so a dependency is `{name} = { path = "../{name}" }` |
+| [E1010](#e1010) | `package.not-a-path` | the dependency `{name}` is not a `path` dependency; stage 0 has no registry, so a dependency is `{name} = { path = "../{name}" }` |
 | E1011 | `package.bad-when` | `when` takes the build target's facts `os`, `arch` and `runtime`, each a string or a list of strings, as in `when = { os = "windows" }` |
 | E1012 | `package.module-name` | `{file}` is not a module: `{name}` is not a module name; a module is named in lowercase letters, digits and `_` |
 | E1013 | `package.no-member` | the workspace member `{path}` has no `sisu.toml` |
 | E1014 | `package.script-metadata` | a script's metadata starts with `# /// script` and ends with a line `# ///`; this block has no end |
-| E1015 | `package.trust-unknown` | `[trust] unsafe` names `{name}`, which is not a dependency of this package |
+| [E1015](#e1015) | `package.trust-unknown` | `[trust] unsafe` names `{name}`, which is not a dependency of this package |
 | E1016 | `package.no-package` | `{path}` has `[workspace]` but no `[package]`, so it cannot be a dependency |
-| E1017 | `package.reserved-name` | `{name}` is the name of a standard-library module, which `import {name}` names; a package of the program needs another name |
+| [E1017](#e1017) | `package.reserved-name` | `{name}` is the name of a standard-library module, which `import {name}` names; a package of the program needs another name |
 | E1018 | `package.unknown-feature` | `{name}` is not a feature of `{package}`; a package's features are the keys of its `[features]` |
-| E1019 | `package.unsafe-undeclared` | the package `{package}` contains {what}, and its `sisu.toml` declares no `unsafe`: add `unsafe = "{level}"` to its `[package]` |
+| [E1019](#e1019) | `package.unsafe-undeclared` | the package `{package}` contains {what}, and its `sisu.toml` declares no `unsafe`: add `unsafe = "{level}"` to its `[package]` |
 | E1020 | `package.unsafe-level` | the package `{package}` declares `unsafe = "memory"`, which allows no {what}: declare `unsafe = "extern"` |
-| E1021 | `package.unsafe-untrusted` | the dependency `{name}` declares `unsafe = "{level}"`, and `[trust] unsafe` in the root package's `sisu.toml` does not list it |
+| [E1021](#e1021) | `package.unsafe-untrusted` | the dependency `{name}` declares `unsafe = "{level}"`, and `[trust] unsafe` in the root package's `sisu.toml` does not list it |
 | E1022 | `package.unsafe-raised` | `sisu.lock` records `{name}` with {old}, and it now declares `unsafe = "{level}"`: accept the change with `--accept-unsafe` |
 
 ### Warnings, every code
@@ -7569,14 +10168,14 @@ it. `sisu explain CODE` prints the same line.
 | W0004 | `type.unreachable-code` | this code is unreachable |
 | [W0005](#w0005) | `package.unknown-key` | `{key}` is not a key of `{table}` that stage 0 knows; it is ignored |
 | W0006 | `resolve.unknown-feature` | no `[features]` of this package declares `{name}`, so `feature="{name}"` never holds |
-| W0007 | `unsafe.no-safety-comment` | this {what} has no `# safety:` comment above it saying why each obligation it takes on holds |
+| [W0007](#w0007) | `unsafe.no-safety-comment` | this {what} has no `# safety:` comment above it saying why each obligation it takes on holds |
 | W0008 | `unsafe.no-safety-list` | `{name}` is an `unsafe {kind}` without a `Safety:` list in its `##` comment naming the obligations its {who} take |
 | W0009 | `unsafe.unused` | this {what} holds no unsafe operation |
-| W0010 | `unsafe.unnamed-obligation` | the `# safety:` comment names no obligation of `{callee}`, which are {obligations} |
+| [W0010](#w0010) | `unsafe.unnamed-obligation` | the `# safety:` comment names no obligation of `{callee}`, which are {obligations} |
 | W0011 | `unsafe.unexplained-purity` | this {what} calls `{callee}`, which is not `pure`, in the `pure` function `{name}`: its `# safety:` comment says why the function stays observationally pure, under a `pure:` part |
 | W0012 | `unsafe.level` | the package declares `unsafe = "{level}"`, {why} |
 | W0013 | `unsafe.auto-trait-bound` | `unsafe impl {trait}` claims `{trait}` for every `{param}`, which is not bounded by `{trait}` |
-| W0014 | `unsafe.ambient-authority` | `{name}` is public and safe and reaches the foreign function `{callee}` without taking a capability, so its callers need no authority for what the call does |
+| [W0014](#w0014) | `unsafe.ambient-authority` | `{name}` is public and safe and reaches the foreign function `{callee}` without taking a capability, so its callers need no authority for what the call does |
 | W0015 | `lint.wildcard-own-enum` | `case _` matches {variants} of `{ty}`, an enum of this package, so a variant added to `{ty}` later is not an error here |
 | W0016 | `resolve.shadow-prelude-set` | the error set `{name}` hides the prelude's in this module, and the two are different sets: what the prelude's functions return is not this one |
 
@@ -7757,11 +10356,11 @@ it. `sisu explain CODE` prints the same line.
 | D0026 | `cli.explore-test-failed` | with schedule seed {seed}; `--schedule-seed {seed}` runs it again |
 | D0027 | `cli.explore-summary` | explored {count} schedules per test (seeds {first} to {last}) |
 | [D0028](#d0028) | `cli.bad-contract-level` | `--contracts` takes `off`, `preconditions` or `all`, not `{value}` |
-| D0029 | `cli.test-checks-contracts` | `sisu test` checks every contract; `--contracts` sets what `sisu run` and `sisu sir` check |
+| [D0029](#d0029) | `cli.test-checks-contracts` | `sisu test` checks every contract; `--contracts` sets what `sisu run` and `sisu sir` check |
 | D0030 | `cli.replay-token` | replay: sisu test --replay {token} {file} |
 | D0031 | `cli.replay-no-token` | no replay token: the test takes the real `System`, which a replay cannot stand in for |
 | D0032 | `cli.bad-replay-token` | `{token}` is not a replay token |
-| D0033 | `cli.token-other-code` | the token is for other code (content hash {expected}); `{file}` has content hash {found} |
+| [D0033](#d0033) | `cli.token-other-code` | the token is for other code (content hash {expected}); `{file}` has content hash {found} |
 | D0034 | `cli.other-toolchain` | {what} was made by toolchain {expected}, and this is {found} |
 | D0035 | `cli.token-no-test` | the token names test {index}, and `{file}` has {count} |
 | D0036 | `cli.bad-log` | `{path}` is not a capability log: {reason} |

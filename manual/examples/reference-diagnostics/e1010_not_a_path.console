@@ -1,0 +1,14 @@
+$ sisu run app
+error[E0220]: cannot import `stones`: it names no module of this package, of a dependency in `sisu.toml`, or of the standard library
+  --> src/main.sisu:2:8
+  |
+2 | import stones
+  |        ^^^^^^
+
+error[E1010]: the dependency `stones` is not a `path` dependency; stage 0 has no registry, so a dependency is `stones = { path = "../stones" }`
+  --> sisu.toml:7:10
+  |
+7 | stones = "0.4"
+  |          ^^^^^
+
+error[D0006]: the program was not run: errors found (2)

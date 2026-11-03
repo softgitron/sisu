@@ -34,6 +34,12 @@ manual is checked"). This script checks the rest:
    says why; every example is shown by some page (its source, an
    expectation or a session), so is every session, and every exercise
    is named by one.
+5. The catalog. The tables of reference/diagnostics.md's "Every code"
+   list each code of compiler/catalog/messages.catalog once, with its
+   identifier and its message (`{{` and `}}` written as one brace, `\n`
+   as a space and `|` escaped), and no code the catalog lacks; every
+   entry of the page is a code of the catalog; and each section's
+   "Codes A to B." names the lowest and the highest code of its range.
 
 Exit status 1 on any problem.
 """
@@ -55,6 +61,11 @@ MARKER = re.compile(r"^<!-- (file|output|unchecked): (.+?) -->$")
 HEADER = re.compile(
     r"^##! Exercise (\d+)\.(\d+), (.+)\. Kind: (\w+)\. Level: ([123])\.$")
 SUMMARY = re.compile(r"^(\d+) passed, (\d+) failed, (\d+) blocked$", re.M)
+CATALOG = os.path.join(ROOT, "compiler", "catalog", "messages.catalog")
+DIAGNOSTICS = os.path.join(MANUAL, "reference", "diagnostics.md")
+ROW = re.compile(r"^\| \[?([EWRD]\d{4})(?:\]\(#[ewrd]\d{4}\))? \| `([^`]+)` \| (.*) \|$")
+# A message whose text is a page of its own is described in its row.
+DESCRIBED = {"D0002": "the list of commands that `sisu help` prints"}
 
 problems = []
 
@@ -173,21 +184,29 @@ def parse_session(text):
     return steps
 
 
+def session_sandbox(path):
+    """A fresh directory for the session PATH (rule 2): the regular files
+    beside it, or for a session under solutions/ the exercise's start state,
+    or for a session beside NAME.pkg/ the package's tree; then the contents
+    of NAME.files/."""
+    stem = os.path.basename(path)[: -len(".console")]
+    here = os.path.dirname(os.path.abspath(path))
+    sources = here
+    if rel(here).startswith("solutions" + os.sep):
+        sources = os.path.join(MANUAL, "exercises", rel(here)[len("solutions") + 1:])
+    return sandbox(sources, os.path.join(here, stem + ".files"),
+                   os.path.join(here, stem + ".pkg"))
+
+
 def check_sessions(sisu, bless):
     """Rule 2."""
     sessions = walk("examples", ".console") + walk("solutions", ".console")
     for path in sessions:
-        stem = os.path.basename(path)[: -len(".console")]
-        here = os.path.dirname(path)
         steps = parse_session(read(path))
         if not steps:
             problem(rel(path), "a session starts with a line `$ sisu ...`")
             continue
-        sources = here
-        if rel(here).startswith("solutions" + os.sep):
-            sources = os.path.join(MANUAL, "exercises", rel(here)[len("solutions") + 1:])
-        tmp = sandbox(sources, os.path.join(here, stem + ".files"),
-                      os.path.join(here, stem + ".pkg"))
+        tmp = session_sandbox(path)
         try:
             text = ""
             for command, want in steps:
@@ -316,6 +335,72 @@ def check_sources(sisu, shown):
     return len(sources)
 
 
+def catalog():
+    """{code: (identifier, message)} of the message catalog, in its order."""
+    codes = {}
+    for line in read(CATALOG).split("\n"):
+        m = re.match(r"^([EWRD]\d{4})\s+(\w+)\s+(\S+)\s+(.*)$", line)
+        if m:
+            codes[m.group(1)] = (m.group(3), m.group(4))
+    return codes
+
+
+def table_message(code, text):
+    """TEXT, a catalog message, as a row of "Every code" writes it."""
+    if code in DESCRIBED:
+        return DESCRIBED[code]
+    text = re.sub(r"\\n\s*", " ", text).replace("{{", "{").replace("}}", "}")
+    return text.replace("|", "\\|")
+
+
+def group(code):
+    return code[:3] if code[0] == "E" else code[0]
+
+
+def check_catalog():
+    """Rule 5. Returns the number of codes in the catalog."""
+    codes = catalog()
+    where = rel(DIAGNOSTICS)
+    lines = read(DIAGNOSTICS).split("\n")
+    start = next((i for i, l in enumerate(lines) if l == "## Every code"), None)
+    if start is None:
+        problem(where, "the page has no section \"Every code\"")
+        return len(codes)
+    seen = {}
+    for n, line in enumerate(lines[start:], start + 1):
+        m = ROW.match(line)
+        if not m:
+            continue
+        code, ident, text = m.groups()
+        if code in seen:
+            problem(f"{where}:{n}", f"{code} is in the tables twice (line {seen[code]})")
+            continue
+        seen[code] = n
+        if code not in codes:
+            problem(f"{where}:{n}", f"{code} is not in the catalog: a retired code is left out of the tables")
+        elif ident != codes[code][0]:
+            problem(f"{where}:{n}", f"{code}'s identifier is `{codes[code][0]}` in the catalog, not `{ident}`")
+        elif text != table_message(code, codes[code][1]):
+            problem(f"{where}:{n}", f"{code}'s message differs from the catalog's, which reads: "
+                    f"{table_message(code, codes[code][1])}")
+    for code in codes:
+        if code not in seen:
+            problem(where, f"{code} ({codes[code][0]}) is in the catalog and not in the tables of \"Every code\"")
+    fence = False
+    for n, line in enumerate(lines[:start], 1):
+        if line.startswith("```"):
+            fence = not fence
+        elif not fence and re.match(r"^### [EWRD]\d{4}$", line) and line[4:] not in codes:
+            problem(f"{where}:{n}", f"the entry {line[4:]} is not a code of the catalog")
+        m = None if fence else re.match(r"^Codes ([EWRD]\d{4}) (?:to|and) ([EWRD]\d{4})\.", line)
+        if m:
+            members = sorted(c for c in codes if group(c) == group(m.group(1))
+                             or (m.group(1)[0] in "RD" and c[0] == m.group(1)[0]))
+            if members and (m.group(1), m.group(2)) != (members[0], members[-1]):
+                problem(f"{where}:{n}", f"the range is {members[0]} to {members[-1]} in the catalog")
+    return len(codes)
+
+
 def named_exercises():
     """The exercise files that some page names by their path."""
     named = set()
@@ -342,10 +427,11 @@ def main():
     pages, blocks, unchecked = check_pages(shown, bless)
     exercises = check_exercises(sisu, named_exercises())
     sources = check_sources(sisu, shown)
+    codes = check_catalog()
     for p in problems:
         print(p)
     print(f"{pages} pages, {blocks} blocks ({unchecked} unchecked), {sessions} sessions, "
-          f"{exercises} exercises, {sources} source files, {len(problems)} problems")
+          f"{exercises} exercises, {sources} source files, {codes} codes, {len(problems)} problems")
     return 1 if problems else 0
 
 

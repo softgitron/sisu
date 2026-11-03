@@ -1,0 +1,10 @@
+# The type imported from its module.
+from std.collections import Deque
+
+def waiting(queue: Deque[str]) -> int:
+    return len(queue)
+
+def main():
+    var queue = Deque[str].new()
+    queue.push_back("Aino")
+    print(waiting(queue))

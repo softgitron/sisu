@@ -1,0 +1,9 @@
+$ sisu run e0811_needs_try_from.sisu
+error[E0811]: expected `Percent`, found `int`; a value becomes a `Percent` where its predicate is checked, with `Percent.try_from(...)`
+  --> e0811_needs_try_from.sisu:9:17
+  |
+9 |     print(steam(n))
+  |                 ^
+  = note: check it where it runs: `Percent.try_from(...)`
+
+error[D0006]: the program was not run: errors found (1)

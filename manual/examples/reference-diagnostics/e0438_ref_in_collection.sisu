@@ -1,0 +1,6 @@
+# A list that would hold references.
+def main():
+    let aino = "Aino".to_string()
+    var names: list[ref String] = []
+    names.push(ref aino)
+    print(len(names))

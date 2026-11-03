@@ -11,7 +11,7 @@ portability, what it costs, and what evidence would change it.
 **See also:** the tutorial's [chapter 9](../tutorial/09-word-counter.md)
 (the first capability) and [chapter 18](../tutorial/18-capabilities.md)
 (capabilities); the reference's [R10,
-Capabilities](../README.md#the-reference) and [R13, Modules, packages
+Capabilities](../reference/capabilities.md) and [R13, Modules, packages
 and the manifest](../reference/modules.md) for `[trust]`; the proposal's
 [06, Concurrency and
 capabilities](../../proposal/06-concurrency-and-capabilities.md#capabilities)

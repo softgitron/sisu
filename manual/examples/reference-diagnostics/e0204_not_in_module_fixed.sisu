@@ -1,0 +1,7 @@
+# A `Deque` is a stack, pushed and popped at its back.
+from std.collections import Deque
+
+def main():
+    var stack = Deque[int].new()
+    stack.push_back(3)
+    print(stack.pop_back())
