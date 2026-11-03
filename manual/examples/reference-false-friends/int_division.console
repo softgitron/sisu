@@ -1,0 +1,8 @@
+$ sisu check int_division.sisu
+error[E0301]: `/` divides floats; for integers use `//`, or convert to `f64` first
+  --> int_division.sisu:3:11
+  |
+3 |     print(7 / 2)
+  |           ^^^^^
+  = fix: use `//` for integer division: `//`
+

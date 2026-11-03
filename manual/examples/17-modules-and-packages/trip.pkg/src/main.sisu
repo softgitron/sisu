@@ -1,0 +1,7 @@
+# The root module imports the other modules by the package's name.
+import trip.distance
+from trip.fuel.cost import trip_cost
+
+def main():
+    let km = distance.between("Turku", "Tampere")
+    print("{km} km, {trip_cost(km, 6.5, 1.95):.2f} € of fuel")

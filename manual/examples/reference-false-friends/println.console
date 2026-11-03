@@ -1,0 +1,7 @@
+$ sisu check println.sisu
+error[E0117]: unexpected `!` after the end of the statement
+  --> println.sisu:3:12
+  |
+3 |     println!("{}", 3)
+  |            ^
+

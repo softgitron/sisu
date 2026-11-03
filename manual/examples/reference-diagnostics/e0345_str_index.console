@@ -1,8 +1,1 @@
 $ sisu run e0345_str_index.sisu
-error[E0345]: `str` cannot be indexed by position; use `.chars()`, `.bytes()` or `.byte_slice(a, b)`
-  --> e0345_str_index.sisu:4:11
-  |
-4 |     print(word[0])
-  |           ^^^^^^^
-
-error[D0006]: the program was not run: errors found (1)

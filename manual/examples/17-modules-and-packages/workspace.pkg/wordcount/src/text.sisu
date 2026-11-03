@@ -1,0 +1,24 @@
+##! Cutting a text into words.
+
+## The words of `text`: its runs of letters and digits, in lower case.
+##
+## ```
+## assert words("Hei, hei!") == ["hei", "hei"]
+## ```
+pub pure def words(text: str) -> list[String]:
+    var found: list[String] = []
+    var word = String()
+    for c in text.chars():
+        if c.is_alphabetic() or c.is_digit():
+            word.push_char(c)
+        elif not word.is_empty():
+            found.push(word.to_lowercase())
+            word = String()
+    if not word.is_empty():
+        found.push(word.to_lowercase())
+    return found
+
+## Each word of `text` with the word after it, in order.
+pub pure def pairs(text: str) -> list[(String, String)]:
+    let all = words(text)
+    return [(all[i].copy(), all[i + 1].copy()) for i in range(len(all) - 1)]

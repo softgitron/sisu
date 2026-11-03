@@ -1,0 +1,44 @@
+##! Exercise 15.2, the most common item. Kind: fix. Level: 1.
+##!
+##! `most_common` finds the item that appears most often in a list, for
+##! any type of item that can be compared and copied. The file does not
+##! compile. Run `sisu test most_common.sisu`, read the diagnostics, and
+##! fix `most_common`, not the tests, so that every test passes. The
+##! hints are in chapter 15 of the tutorial, under "Exercise 15.2: the
+##! most common item".
+
+## The item that appears most often in `items`, the first of them when
+## several appear as often; `None` for an empty list.
+def most_common[T](items: list[T]) -> T?:
+    var best: T? = None
+    var best_count = 0
+    for item in items:
+        var count = 0
+        for other in items:
+            if other == item:
+                count += 1
+        if count > best_count:
+            best = Some(item)
+            best_count = count
+    return best
+
+@derive(Copy, Eq)
+enum Weather:
+    Sun
+    Rain
+    Snow
+
+test "numbers":
+    assert most_common([3, 1, 3, 2, 1, 3]) == Some(3)
+    assert most_common([5, 7, 7, 5]) == Some(5)
+
+test "words":
+    assert most_common(["kyllä", "ei", "ei"]) == Some("ei")
+
+test "a week of weather":
+    let week = [Rain, Sun, Rain, Snow, Sun, Rain, Sun]
+    assert most_common(week) == Some(Rain)
+
+test "nothing at all":
+    let empty: list[int] = []
+    assert most_common(empty) == None

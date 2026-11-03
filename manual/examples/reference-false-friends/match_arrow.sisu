@@ -1,0 +1,7 @@
+# Rust's `=>` in a match arm.
+def main():
+    let n = 1
+    let word = match n:
+        case 1 => "one"
+        case _ => "many"
+    print(word)

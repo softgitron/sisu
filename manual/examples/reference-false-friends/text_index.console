@@ -1,0 +1,7 @@
+$ sisu check text_index.sisu
+error[E0345]: `str` cannot be indexed by position; use `.chars()`, `.bytes()` or `.byte_slice(a, b)`
+  --> text_index.sisu:4:11
+  |
+4 |     print(word[0])
+  |           ^^^^^^^
+

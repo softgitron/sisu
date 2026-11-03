@@ -1,0 +1,3 @@
+# Text between single quotes.
+def main():
+    print('Hei')

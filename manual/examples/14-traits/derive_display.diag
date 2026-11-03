@@ -1,0 +1,2 @@
+2:16-2:23 E0243 resolve.not-derivable name="Display"
+7:5-7:23 E0347 type.bound-not-satisfied ty="Money" bound="Display"

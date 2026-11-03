@@ -1,0 +1,4 @@
+# The expression on one line, as `sisu fmt` writes it.
+def main():
+    let total = 1 + 2
+    print(total)

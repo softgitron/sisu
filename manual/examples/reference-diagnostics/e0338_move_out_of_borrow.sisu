@@ -1,0 +1,5 @@
+# An element moved out of a list that is borrowed.
+def main():
+    let queue: list[String] = ["Aino", "Eero"]
+    let first = queue[0]
+    print("{first} is first of {len(queue)}")

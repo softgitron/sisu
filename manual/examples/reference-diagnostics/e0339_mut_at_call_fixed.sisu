@@ -1,0 +1,8 @@
+# The call says `mut` too.
+def deposit(mut balance: int, amount: int):
+    balance += amount
+
+def main():
+    var balance = 100
+    deposit(mut balance, 50)
+    print(balance)

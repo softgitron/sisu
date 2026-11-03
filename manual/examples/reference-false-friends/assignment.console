@@ -1,0 +1,13 @@
+$ sisu check assignment.sisu
+error[E0200]: cannot find `count` in this scope
+  --> assignment.sisu:3:5
+  |
+3 |     count = 0
+  |     ^^^^^
+
+error[E0200]: cannot find `count` in this scope
+  --> assignment.sisu:4:11
+  |
+4 |     print(count)
+  |           ^^^^^
+

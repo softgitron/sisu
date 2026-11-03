@@ -1,0 +1,8 @@
+# A `mut` parameter called without `mut` at the call.
+def deposit(mut balance: int, amount: int):
+    balance += amount
+
+def main():
+    var balance = 100
+    deposit(balance, 50)
+    print(balance)

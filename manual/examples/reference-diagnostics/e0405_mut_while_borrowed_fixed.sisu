@@ -1,0 +1,7 @@
+# The borrow's last use before the change.
+def main():
+    var scores = [7, 9, 4]
+    let first = ref scores[0]
+    print("first {first}")
+    scores.push(10)
+    print("{len(scores)} scores")

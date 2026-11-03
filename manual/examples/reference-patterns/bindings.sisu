@@ -1,0 +1,14 @@
+# A lowercase name binds; a capitalised one names a variant.
+enum Light:
+    Red
+    Amber
+    Green
+
+def action(light: Light) -> String:
+    return match light:
+        case Red: "stop"
+        case other: "not red: {other:?}"
+
+def main():
+    print(action(Red))
+    print(action(Green))

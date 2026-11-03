@@ -1,0 +1,12 @@
+# Each alternative in an arm of its own.
+enum Reading:
+    Celsius(f64)
+    Missing
+
+def value(r: Reading) -> f64:
+    return match r:
+        case Celsius(t): t
+        case Missing: 0.0
+
+def main():
+    print(value(Missing))

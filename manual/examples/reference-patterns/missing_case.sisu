@@ -1,0 +1,12 @@
+# A `match` that does not cover every value.
+enum Light:
+    Red
+    Amber
+    Green
+
+def action(light: Light) -> str:
+    return match light:
+        case Red: "stop"
+
+def main():
+    print(action(Green))

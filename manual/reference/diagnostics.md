@@ -163,6 +163,56 @@ Hei, maailma!
 
 Shown in [chapter 1](../tutorial/01-hello.md).
 
+### E0002
+
+`lex.inconsistent-dedent`: this line's indentation matches no enclosing
+block; the enclosing blocks start at column {columns}.
+
+A line that is indented less than the one before closes blocks until its
+indentation matches an enclosing block's. When it matches none, the
+message names the columns that would.
+
+<!-- file: examples/reference-diagnostics/e0002_dedent.sisu -->
+```sisu
+# A line that matches no enclosing block's indentation.
+def main():
+    let n = 2
+    if n > 1:
+        print("big")
+      print("done")
+```
+
+<!-- output: examples/reference-diagnostics/e0002_dedent.console -->
+```console
+$ sisu run e0002_dedent.sisu
+error[E0002]: this line's indentation matches no enclosing block; the enclosing blocks start at column 1 or 5
+  --> e0002_dedent.sisu:6:1
+  |
+6 |       print("done")
+  | ^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Indent the line to one of the columns the message names: the block it
+belongs to.
+
+<!-- file: examples/reference-diagnostics/e0002_dedent_fixed.sisu -->
+```sisu
+# The line back at the indentation of its block.
+def main():
+    let n = 2
+    if n > 1:
+        print("big")
+    print("done")
+```
+
+<!-- output: examples/reference-diagnostics/e0002_dedent_fixed.out -->
+```text
+big
+done
+```
+
 ### E0003
 
 `lex.unterminated-string`: this string literal is not closed before the
@@ -208,6 +258,138 @@ Hei, maailma!
 ```
 
 Shown in [chapter 1](../tutorial/01-hello.md).
+
+### E0011
+
+`lex.semicolon`: Sisu has no semicolons; put each statement on its own
+line.
+
+A statement takes one line, and a line break ends it; Sisu has no
+semicolons (D-020).
+
+<!-- file: examples/reference-diagnostics/e0011_semicolon.sisu -->
+```sisu
+# Two statements on one line.
+def main():
+    let a = 1; let b = 2
+    print(a + b)
+```
+
+<!-- output: examples/reference-diagnostics/e0011_semicolon.console -->
+```console
+$ sisu run e0011_semicolon.sisu
+error[E0011]: Sisu has no semicolons; put each statement on its own line
+  --> e0011_semicolon.sisu:3:14
+  |
+3 |     let a = 1; let b = 2
+  |              ^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Put each statement on its own line.
+
+<!-- file: examples/reference-diagnostics/e0011_semicolon_fixed.sisu -->
+```sisu
+# One statement per line.
+def main():
+    let a = 1
+    let b = 2
+    print(a + b)
+```
+
+<!-- output: examples/reference-diagnostics/e0011_semicolon_fixed.out -->
+```text
+3
+```
+
+### E0012
+
+`lex.invalid-number`: `{text}` is not a valid number literal.
+
+A number literal is digits, with `_` between them, a prefix `0x`, `0b`
+or `0o`, and a suffix that names a numeric type
+([R1](lexical-structure.md#integer-literals)).
+
+<!-- file: examples/reference-diagnostics/e0012_number.sisu -->
+```sisu
+# A number with letters that are not a suffix.
+def main():
+    print(12abc)
+```
+
+<!-- output: examples/reference-diagnostics/e0012_number.console -->
+```console
+$ sisu run e0012_number.sisu
+error[E0012]: `12abc` is not a valid number literal
+  --> e0012_number.sisu:3:11
+  |
+3 |     print(12abc)
+  |           ^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Write the number without the letters, or with a suffix such as `u8` or
+`f32`.
+
+<!-- file: examples/reference-diagnostics/e0012_number_fixed.sisu -->
+```sisu
+# A number, and a suffix that names a type.
+def main():
+    print(12u8)
+```
+
+<!-- output: examples/reference-diagnostics/e0012_number_fixed.out -->
+```text
+12
+```
+
+### E0015
+
+`lex.backslash-continuation`: Sisu has no backslash continuation; break
+the line inside brackets, after a comma or before an operator.
+
+A logical line continues inside brackets, after a comma or an open
+bracket, and before a binary operator; a backslash does not continue it
+(D-020).
+
+<!-- file: examples/reference-diagnostics/e0015_backslash.sisu -->
+```sisu
+# A backslash at the end of a line.
+def main():
+    let total = 1 + \
+        2
+    print(total)
+```
+
+<!-- output: examples/reference-diagnostics/e0015_backslash.console -->
+```console
+$ sisu run e0015_backslash.sisu
+error[E0015]: Sisu has no backslash continuation; break the line inside brackets, after a comma or before an operator
+  --> e0015_backslash.sisu:3:21
+  |
+3 |     let total = 1 + \
+  |                     ^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Join the lines, or break the line in one of the three ways the message
+names; `sisu fmt` joins it again when it fits in 100 columns.
+
+<!-- file: examples/reference-diagnostics/e0015_backslash_fixed.sisu -->
+```sisu
+# The expression on one line, as `sisu fmt` writes it.
+def main():
+    let total = 1 + 2
+    print(total)
+```
+
+<!-- output: examples/reference-diagnostics/e0015_backslash_fixed.out -->
+```text
+3
+```
 
 ### E0016
 
@@ -303,6 +485,49 @@ Hei, maailma!
 ```
 
 Shown in [chapter 1](../tutorial/01-hello.md).
+
+### E0102
+
+`parse.block-on-same-line`: a block starts on the next line, indented;
+nothing may follow `:` on the line that opens it.
+
+A block starts on the line after the `:` that opens it, indented
+(D-027).
+
+<!-- file: examples/reference-diagnostics/e0102_same_line.sisu -->
+```sisu
+# A block on the line that opens it.
+def main():
+    for n in [1, 2]: print(n)
+```
+
+<!-- output: examples/reference-diagnostics/e0102_same_line.console -->
+```console
+$ sisu run e0102_same_line.sisu
+error[E0102]: a block starts on the next line, indented; nothing may follow `:` on the line that opens it
+  --> e0102_same_line.sisu:3:22
+  |
+3 |     for n in [1, 2]: print(n)
+  |                      ^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Move what follows the `:` to the next line and indent it.
+
+<!-- file: examples/reference-diagnostics/e0102_same_line_fixed.sisu -->
+```sisu
+# The block on the next line, indented.
+def main():
+    for n in [1, 2]:
+        print(n)
+```
+
+<!-- output: examples/reference-diagnostics/e0102_same_line_fixed.out -->
+```text
+1
+2
+```
 
 ### E0103
 
@@ -403,6 +628,54 @@ zero
 ```
 
 Shown in [chapter 2](../tutorial/02-values.md).
+
+### E0107
+
+`parse.top-level-statement`: statements cannot appear at the top level
+of a module; put them in a function such as `main`.
+
+A module holds declarations; statements belong in functions. A script, a
+file that starts with `#!`, is the exception: its top-level statements
+are its `main`. Python's `class` is reported here too, since it is not a
+declaration.
+
+<!-- file: examples/reference-diagnostics/e0107_top_level.sisu -->
+```sisu
+# A statement outside every function.
+print("Hei")
+
+def main():
+    print("maailma")
+```
+
+<!-- output: examples/reference-diagnostics/e0107_top_level.console -->
+```console
+$ sisu run e0107_top_level.sisu
+error[E0107]: statements cannot appear at the top level of a module; put them in a function such as `main`
+  --> e0107_top_level.sisu:2:1
+  |
+2 | print("Hei")
+  | ^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Move the statement into `main` or another function, or make the file a
+script.
+
+<!-- file: examples/reference-diagnostics/e0107_top_level_fixed.sisu -->
+```sisu
+# The statement inside `main`.
+def main():
+    print("Hei")
+    print("maailma")
+```
+
+<!-- output: examples/reference-diagnostics/e0107_top_level_fixed.out -->
+```text
+Hei
+maailma
+```
 
 ### E0108
 
@@ -596,6 +869,98 @@ big
 
 Shown in [chapter 3](../tutorial/03-functions.md).
 
+### E0117
+
+`parse.trailing-tokens`: unexpected {found} after the end of the
+statement.
+
+After a statement ends, only a line break may follow. The parser reports
+the first token it did not expect, which often stands for a habit from
+another language: a Rust comment `//`, `lambda`, `println!`.
+
+<!-- file: examples/reference-diagnostics/e0117_trailing.sisu -->
+```sisu
+# Two statements on one line, without a semicolon.
+def main():
+    let n = 3 print(n)
+```
+
+<!-- output: examples/reference-diagnostics/e0117_trailing.console -->
+```console
+$ sisu run e0117_trailing.sisu
+error[E0117]: unexpected `print` after the end of the statement
+  --> e0117_trailing.sisu:3:15
+  |
+3 |     let n = 3 print(n)
+  |               ^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+End the statement where it ends, and put what follows on a line of its
+own, in Sisu's spelling.
+
+<!-- file: examples/reference-diagnostics/e0117_trailing_fixed.sisu -->
+```sisu
+# One statement per line.
+def main():
+    let n = 3
+    print(n)
+```
+
+<!-- output: examples/reference-diagnostics/e0117_trailing_fixed.out -->
+```text
+3
+```
+
+### E0124
+
+`parse.keyword-as-name`: `{keyword}` is a keyword and cannot be used as
+a name here.
+
+A keyword is not a name, except after `.`, `?.` and `def`
+([R1](lexical-structure.md#keywords)).
+
+<!-- file: examples/reference-diagnostics/e0124_keyword.sisu -->
+```sisu
+# A keyword used as a parameter's name.
+def score(match: str) -> int:
+    return 0
+
+def main():
+    print(score("final"))
+```
+
+<!-- output: examples/reference-diagnostics/e0124_keyword.console -->
+```console
+$ sisu run e0124_keyword.sisu
+error[E0124]: `match` is a keyword and cannot be used as a name here
+  --> e0124_keyword.sisu:2:11
+  |
+2 | def score(match: str) -> int:
+  |           ^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Choose another name. A keyword elsewhere where a name should be gets the
+parser's E0100, E0103 or E0105 instead.
+
+<!-- file: examples/reference-diagnostics/e0124_keyword_fixed.sisu -->
+```sisu
+# A parameter named with a name.
+def score(game: str) -> int:
+    return len(game)
+
+def main():
+    print(score("final"))
+```
+
+<!-- output: examples/reference-diagnostics/e0124_keyword_fixed.out -->
+```text
+5
+```
+
 ## Names and declarations
 
 Codes E0200 to E0266. Name resolution finds what each name means and
@@ -769,6 +1134,462 @@ Red
 ```
 
 Shown in [chapter 7](../tutorial/07-structs-and-enums.md).
+
+### E0215
+
+`resolve.self-outside-method`: `self` exists only inside a method.
+
+`self` is the first parameter of a method, in the body of a `struct`,
+`enum`, `trait` or `impl`; as a parameter of any other function it is
+E0215, and as a value outside a method E0389.
+
+<!-- file: examples/reference-diagnostics/e0215_self.sisu -->
+```sisu
+# A `self` parameter in a function that is not a method.
+def describe(self) -> String:
+    return "a thing"
+
+def main():
+    print(describe())
+```
+
+<!-- output: examples/reference-diagnostics/e0215_self.console -->
+```console
+$ sisu run e0215_self.sisu
+error[E0215]: `self` exists only inside a method
+  --> e0215_self.sisu:2:14
+  |
+2 | def describe(self) -> String:
+  |              ^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Leave `self` out of a free function, or move the function into the
+type's body as a method.
+
+<!-- file: examples/reference-diagnostics/e0215_self_fixed.sisu -->
+```sisu
+# A function without `self`.
+def describe() -> String:
+    return "a thing"
+
+def main():
+    print(describe())
+```
+
+<!-- output: examples/reference-diagnostics/e0215_self_fixed.out -->
+```text
+a thing
+```
+
+### E0231
+
+`resolve.trait-as-type`: `{name}` is a trait, not a type; a value of a
+type that implements it is `dyn {name}`.
+
+A trait is not a type. A value of some type that implements it is a type
+parameter with the trait as its bound, or a `dyn` value behind `ref` or
+`Box`.
+
+<!-- file: examples/reference-diagnostics/e0231_trait_as_type.sisu -->
+```sisu
+# A trait used where a type should be.
+trait Priced:
+    def price(self) -> int
+
+struct Bun:
+    filling: String
+
+impl Priced for Bun:
+    def price(self) -> int:
+        return 280
+
+def show(item: Priced) -> String:
+    return "{item.price()} cents"
+
+def main():
+    print(show(Bun("cardamom")))
+```
+
+<!-- output: examples/reference-diagnostics/e0231_trait_as_type.console -->
+```console
+$ sisu run e0231_trait_as_type.sisu
+error[E0231]: `Priced` is a trait, not a type; a value of a type that implements it is `dyn Priced`
+  --> e0231_trait_as_type.sisu:12:16
+   |
+12 | def show(item: Priced) -> String:
+   |                ^^^^^^
+  = fix: write `dyn Priced`: `dyn `
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+The fix writes `dyn Priced`, which then needs `ref` or `Box` (E0395); a
+bounded type parameter is the usual choice.
+
+<!-- file: examples/reference-diagnostics/e0231_trait_as_type_fixed.sisu -->
+```sisu
+# A type parameter bounded by the trait.
+trait Priced:
+    def price(self) -> int
+
+struct Bun:
+    filling: String
+
+impl Priced for Bun:
+    def price(self) -> int:
+        return 280
+
+def show[T: Priced](item: T) -> String:
+    return "{item.price()} cents"
+
+def main():
+    print(show(Bun("cardamom")))
+```
+
+<!-- output: examples/reference-diagnostics/e0231_trait_as_type_fixed.out -->
+```text
+280 cents
+```
+
+Shown in [chapter 14](../tutorial/14-traits.md).
+
+### E0232
+
+`resolve.missing-trait-method`: the impl of `{trait}` for `{ty}` is
+missing {methods}.
+
+An `impl` of a trait writes every method the trait declares without a
+body.
+
+<!-- file: examples/reference-diagnostics/e0232_missing_method.sisu -->
+```sisu
+# An impl without one of the trait's required methods.
+trait Priced:
+    def price(self) -> int
+    def name(self) -> String
+
+struct Bun:
+    filling: String
+
+impl Priced for Bun:
+    def price(self) -> int:
+        return 280
+
+def main():
+    print(Bun("cardamom").price())
+```
+
+<!-- output: examples/reference-diagnostics/e0232_missing_method.console -->
+```console
+$ sisu run e0232_missing_method.sisu
+error[E0232]: the impl of `Priced` for `Bun` is missing `name`
+  --> e0232_missing_method.sisu:9:1
+  |
+9 | impl Priced for Bun:
+  | ^^^^^^^^^^^^^^^^^^^
+  = note: write `def name(self) -> String` in the impl
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Write the method the note names, with the signature it gives.
+
+<!-- file: examples/reference-diagnostics/e0232_missing_method_fixed.sisu -->
+```sisu
+# Every required method written.
+trait Priced:
+    def price(self) -> int
+    def name(self) -> String
+
+struct Bun:
+    filling: String
+
+impl Priced for Bun:
+    def price(self) -> int:
+        return 280
+
+    def name(self) -> String:
+        return "a {self.filling} bun"
+
+def main():
+    print(Bun("cardamom").price())
+```
+
+<!-- output: examples/reference-diagnostics/e0232_missing_method_fixed.out -->
+```text
+280
+```
+
+Shown in [chapter 14](../tutorial/14-traits.md).
+
+### E0235
+
+`resolve.overlapping-impl`: `{trait}` is implemented for `{ty}` more
+than once; a type implements a trait at most once.
+
+A type implements a trait at most once, so that a call never has two
+meanings (D-013).
+
+<!-- file: examples/reference-diagnostics/e0235_overlap.sisu -->
+```sisu
+# Two impls of one trait for one type.
+struct Money:
+    cents: int
+
+impl Display for Money:
+    def fmt(self, mut f: Formatter):
+        f.write("{self.cents // 100} €")
+
+impl Display for Money:
+    def fmt(self, mut f: Formatter):
+        f.write("€{self.cents // 100}")
+
+def main():
+    print(Money(1250))
+```
+
+<!-- output: examples/reference-diagnostics/e0235_overlap.console -->
+```console
+$ sisu run e0235_overlap.sisu
+error[E0235]: `Display` is implemented for `Money` more than once; a type implements a trait at most once
+  --> e0235_overlap.sisu:9:1
+  |
+9 | impl Display for Money:
+  | ^^^^^^^^^^^^^^^^^^^^^^
+  |
+5 | impl Display for Money:
+  | ---------------------- the other impl is here
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Keep one impl. For a second way to show the value, write a method, or
+wrap the value in a type of its own.
+
+<!-- file: examples/reference-diagnostics/e0235_overlap_fixed.sisu -->
+```sisu
+# One impl.
+struct Money:
+    cents: int
+
+impl Display for Money:
+    def fmt(self, mut f: Formatter):
+        f.write("{self.cents // 100} €")
+
+def main():
+    print(Money(1250))
+```
+
+<!-- output: examples/reference-diagnostics/e0235_overlap_fixed.out -->
+```text
+12 €
+```
+
+Shown in [chapter 14](../tutorial/14-traits.md).
+
+### E0241
+
+`resolve.not-object-safe`: `{trait}` cannot be used as `dyn {trait}`:
+its method `{method}` cannot be called through it, because {reason}.
+
+A trait can be a `dyn` type only when every method can be called through
+it: each takes `self` or `mut self`, and none names `Self` elsewhere
+(D-017).
+
+<!-- file: examples/reference-diagnostics/e0241_object_safety.sisu -->
+```sisu
+# A trait used as `dyn` with a method that takes no `self`.
+trait Shape:
+    def unit() -> Self
+    def area(self) -> f64
+
+struct Square:
+    side: f64
+
+impl Shape for Square:
+    def unit() -> Square:
+        return Square(1.0)
+
+    def area(self) -> f64:
+        return self.side * self.side
+
+def total(shapes: list[Box[dyn Shape]]) -> f64:
+    return sum([shape.area() for shape in shapes])
+
+def main():
+    print(total([Box(Square(2.0))]))
+```
+
+<!-- output: examples/reference-diagnostics/e0241_object_safety.console -->
+```console
+$ sisu run e0241_object_safety.sisu
+error[E0241]: `Shape` cannot be used as `dyn Shape`: its method `unit` cannot be called through it, because it does not take `self` or `mut self`
+  --> e0241_object_safety.sisu:16:28
+   |
+16 | def total(shapes: list[Box[dyn Shape]]) -> f64:
+   |                            ^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Move the method out of the trait, into the type or another trait, or use
+a type parameter instead of `dyn`.
+
+<!-- file: examples/reference-diagnostics/e0241_object_safety_fixed.sisu -->
+```sisu
+# The method without `self` moved out of the trait.
+trait Shape:
+    def area(self) -> f64
+
+struct Square:
+    side: f64
+
+    def unit() -> Square:
+        return Square(1.0)
+
+impl Shape for Square:
+    def area(self) -> f64:
+        return self.side * self.side
+
+def total(shapes: list[Box[dyn Shape]]) -> f64:
+    return sum([shape.area() for shape in shapes])
+
+def main():
+    print(total([Box(Square(2.0)), Box(Square.unit())]))
+```
+
+<!-- output: examples/reference-diagnostics/e0241_object_safety_fixed.out -->
+```text
+5.0
+```
+
+Shown in [chapter 15](../tutorial/15-generics.md).
+
+### E0242
+
+`resolve.supertrait-missing`: `{ty}` implements `{trait}`, which
+requires `{super}`, but `{ty}` does not implement `{super}`.
+
+A trait that names a supertrait, as `trait Labelled(Display)`, can be
+implemented only for types that implement the supertrait.
+
+<!-- file: examples/reference-diagnostics/e0242_supertrait.sisu -->
+```sisu
+# An impl of a trait whose supertrait the type lacks.
+trait Labelled(Display):
+    def label(self) -> String:
+        return "[ {self} ]"
+
+struct Weight:
+    grams: int
+
+impl Labelled for Weight:
+    pass
+
+def main():
+    print(Weight(90).label())
+```
+
+<!-- output: examples/reference-diagnostics/e0242_supertrait.console -->
+```console
+$ sisu run e0242_supertrait.sisu
+error[E0242]: `Weight` implements `Labelled`, which requires `Display`, but `Weight` does not implement `Display`
+  --> e0242_supertrait.sisu:9:1
+  |
+9 | impl Labelled for Weight:
+  | ^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Implement the supertrait for the type as well.
+
+<!-- file: examples/reference-diagnostics/e0242_supertrait_fixed.sisu -->
+```sisu
+# The supertrait implemented too.
+trait Labelled(Display):
+    def label(self) -> String:
+        return "[ {self} ]"
+
+struct Weight:
+    grams: int
+
+impl Display for Weight:
+    def fmt(self, mut f: Formatter):
+        f.write("{self.grams} g")
+
+impl Labelled for Weight:
+    pass
+
+def main():
+    print(Weight(90).label())
+```
+
+<!-- output: examples/reference-diagnostics/e0242_supertrait_fixed.out -->
+```text
+[ 90 g ]
+```
+
+Shown in [chapter 14](../tutorial/14-traits.md).
+
+### E0243
+
+`resolve.not-derivable`: `{name}` cannot be derived; `@derive` takes
+`Copy` and the traits that have a `comptime def derive`: `Debug`, `Eq`,
+`PartialOrd`, `Ord`, `Hash`, and any trait that declares one.
+
+`@derive` takes `Copy` and the traits that declare a `comptime def
+derive`; the message lists them. `Display` has none, since only you know
+how your type should read.
+
+<!-- file: examples/reference-diagnostics/e0243_not_derivable.sisu -->
+```sisu
+# A derive of a trait that has no derive.
+@derive(Debug, Display)
+struct Money:
+    cents: int
+
+def main():
+    print("{Money(1250):?}")
+```
+
+<!-- output: examples/reference-diagnostics/e0243_not_derivable.console -->
+```console
+$ sisu run e0243_not_derivable.sisu
+error[E0243]: `Display` cannot be derived; `@derive` takes `Copy` and the traits that have a `comptime def derive`: `Debug`, `Eq`, `PartialOrd`, `Ord`, `Hash`, and any trait that declares one
+  --> e0243_not_derivable.sisu:2:16
+  |
+2 | @derive(Debug, Display)
+  |                ^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Write an `impl` of the trait.
+
+<!-- file: examples/reference-diagnostics/e0243_not_derivable_fixed.sisu -->
+```sisu
+# `Display` written by hand.
+@derive(Debug)
+struct Money:
+    cents: int
+
+impl Display for Money:
+    def fmt(self, mut f: Formatter):
+        f.write("{self.cents // 100} €")
+
+def main():
+    print(Money(1250))
+```
+
+<!-- output: examples/reference-diagnostics/e0243_not_derivable_fixed.out -->
+```text
+12 €
+```
+
+Shown in [chapter 14](../tutorial/14-traits.md).
 
 ### E0244
 
@@ -973,6 +1794,50 @@ some
 
 Shown in [chapter 2](../tutorial/02-values.md).
 
+### E0304
+
+`type.unknown-method`: `{ty}` has no method `{name}`.
+
+A method call names a method of the value's type or of a trait it
+implements. A note names the trait when another type has the method, as
+`join` of `Iterator`.
+
+<!-- file: examples/reference-diagnostics/e0304_method.sisu -->
+```sisu
+# A method that `str` does not have.
+def main():
+    print("  hei  ".strip())
+```
+
+<!-- output: examples/reference-diagnostics/e0304_method.console -->
+```console
+$ sisu run e0304_method.sisu
+error[E0304]: `str` has no method `strip`
+  --> e0304_method.sisu:3:21
+  |
+3 |     print("  hei  ".strip())
+  |                     ^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Use the type's method; [R19](false-friends.md) lists the Python and Rust
+names that differ.
+
+<!-- file: examples/reference-diagnostics/e0304_method_fixed.sisu -->
+```sisu
+# `trim` removes the spaces at both ends.
+def main():
+    print("  hei  ".trim())
+```
+
+<!-- output: examples/reference-diagnostics/e0304_method_fixed.out -->
+```text
+hei
+```
+
+Shown in [chapter 15](../tutorial/15-generics.md).
+
 ### E0305
 
 `type.argument-count`: wrong number of arguments to `{name}`: expected
@@ -1017,6 +1882,51 @@ Hei, maailma!
 ```
 
 Shown in [chapter 1](../tutorial/01-hello.md).
+
+### E0306
+
+`type.unknown-keyword`: `{name}` has no parameter named `{arg}`.
+
+A keyword argument names a parameter of the function.
+
+<!-- file: examples/reference-diagnostics/e0306_keyword_argument.sisu -->
+```sisu
+# A keyword argument that the function does not have.
+def greet(name: str, polite: bool = False) -> String:
+    return if polite: "Good day, {name}" else: "Hei, {name}"
+
+def main():
+    print(greet("Aino", formal=True))
+```
+
+<!-- output: examples/reference-diagnostics/e0306_keyword_argument.console -->
+```console
+$ sisu run e0306_keyword_argument.sisu
+error[E0306]: `greet` has no parameter named `formal`
+  --> e0306_keyword_argument.sisu:6:25
+  |
+6 |     print(greet("Aino", formal=True))
+  |                         ^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Use the parameter's name as the function declares it.
+
+<!-- file: examples/reference-diagnostics/e0306_keyword_argument_fixed.sisu -->
+```sisu
+# The parameter's own name.
+def greet(name: str, polite: bool = False) -> String:
+    return if polite: "Good day, {name}" else: "Hei, {name}"
+
+def main():
+    print(greet("Aino", polite=True))
+```
+
+<!-- output: examples/reference-diagnostics/e0306_keyword_argument_fixed.out -->
+```text
+Good day, Aino
+```
 
 ### E0308
 
@@ -1594,6 +2504,111 @@ def main():
 
 Shown in [chapter 7](../tutorial/07-structs-and-enums.md).
 
+### E0338
+
+`type.move-out-of-borrow`: cannot move `{what}` out of a borrowed value;
+copy it with `.copy()`.
+
+Indexing reads through a borrow of the collection, so it cannot move an
+element that is not `Copy` out of it: the collection would be left with
+a hole.
+
+<!-- file: examples/reference-diagnostics/e0338_move_out_of_borrow.sisu -->
+```sisu
+# An element moved out of a list that is borrowed.
+def main():
+    let queue: list[String] = ["Aino", "Eero"]
+    let first = queue[0]
+    print("{first} is first of {len(queue)}")
+```
+
+<!-- output: examples/reference-diagnostics/e0338_move_out_of_borrow.console -->
+```console
+$ sisu run e0338_move_out_of_borrow.sisu
+error[E0338]: cannot move `queue[0]` out of a borrowed value; copy it with `.copy()`
+  --> e0338_move_out_of_borrow.sisu:4:17
+  |
+4 |     let first = queue[0]
+  |                 ^^^^^^^^
+  = fix: copy it with `.copy()`: `.copy()`
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+The fix copies the element, which costs a copy. To take it out instead,
+use a method that removes it, such as `pop` or `remove`, on a `var`
+collection.
+
+<!-- file: examples/reference-diagnostics/e0338_move_out_of_borrow_fixed.sisu -->
+```sisu
+# A copy of the element, which the list keeps.
+def main():
+    let queue: list[String] = ["Aino", "Eero"]
+    let first = queue[0].copy()
+    print("{first} is first of {len(queue)}")
+```
+
+<!-- output: examples/reference-diagnostics/e0338_move_out_of_borrow_fixed.out -->
+```text
+Aino is first of 2
+```
+
+Shown in [chapter 10](../tutorial/10-ownership.md).
+
+### E0339
+
+`type.mut-argument-missing`: `{param}` is a `mut` parameter, so the call
+must say `mut` before the argument.
+
+A call passes an argument to a `mut` parameter with `mut` before it, so
+that the reader of the call sees what can change (D-006).
+
+<!-- file: examples/reference-diagnostics/e0339_mut_at_call.sisu -->
+```sisu
+# A `mut` parameter called without `mut` at the call.
+def deposit(mut balance: int, amount: int):
+    balance += amount
+
+def main():
+    var balance = 100
+    deposit(balance, 50)
+    print(balance)
+```
+
+<!-- output: examples/reference-diagnostics/e0339_mut_at_call.console -->
+```console
+$ sisu run e0339_mut_at_call.sisu
+error[E0339]: `balance` is a `mut` parameter, so the call must say `mut` before the argument
+  --> e0339_mut_at_call.sisu:7:13
+  |
+7 |     deposit(balance, 50)
+  |             ^^^^^^^
+  = fix: write `mut` before the argument: `mut `
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+The fix writes `mut` before the argument.
+
+<!-- file: examples/reference-diagnostics/e0339_mut_at_call_fixed.sisu -->
+```sisu
+# The call says `mut` too.
+def deposit(mut balance: int, amount: int):
+    balance += amount
+
+def main():
+    var balance = 100
+    deposit(mut balance, 50)
+    print(balance)
+```
+
+<!-- output: examples/reference-diagnostics/e0339_mut_at_call_fixed.out -->
+```text
+150
+```
+
+Shown in [chapter 11](../tutorial/11-borrowing.md).
+
 ### E0341
 
 `type.not-mutable`: cannot modify `{what}`; it is not declared with
@@ -1939,6 +2954,123 @@ def main():
 
 Shown in [chapter 2](../tutorial/02-values.md).
 
+### E0389
+
+`type.no-self`: `self` exists only inside a method.
+
+`self` names the value a method is called on, so it exists only inside a
+method.
+
+<!-- file: examples/reference-diagnostics/e0389_self.sisu -->
+```sisu
+# `self` used in a function that is not a method.
+def describe() -> String:
+    return "{self}"
+
+def main():
+    print(describe())
+```
+
+<!-- output: examples/reference-diagnostics/e0389_self.console -->
+```console
+$ sisu run e0389_self.sisu
+error[E0389]: `self` exists only inside a method
+  --> e0389_self.sisu:3:14
+  |
+3 |     return "{self}"
+  |              ^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Pass the value as a parameter, or move the function into the type's body
+as a method.
+
+<!-- file: examples/reference-diagnostics/e0389_self_fixed.sisu -->
+```sisu
+# The value passed as a parameter.
+def describe(name: str) -> String:
+    return "{name}"
+
+def main():
+    print(describe("Aino"))
+```
+
+<!-- output: examples/reference-diagnostics/e0389_self_fixed.out -->
+```text
+Aino
+```
+
+### E0395
+
+`type.unsized-dyn`: `{ty}` has no size of its own; hold it behind `ref`
+or in a `Box`.
+
+A `dyn Trait` value can be of any size, since any type that implements
+the trait can stand there, so it is held behind `ref` or in a `Box`.
+
+<!-- file: examples/reference-diagnostics/e0395_bare_dyn.sisu -->
+```sisu
+# A `dyn` value passed by itself.
+trait Priced:
+    def price(self) -> int
+
+struct Bun:
+    filling: String
+
+impl Priced for Bun:
+    def price(self) -> int:
+        return 280
+
+def show(item: dyn Priced) -> String:
+    return "{item.price()} cents"
+
+def main():
+    print(show(Bun("cardamom")))
+```
+
+<!-- output: examples/reference-diagnostics/e0395_bare_dyn.console -->
+```console
+$ sisu run e0395_bare_dyn.sisu
+error[E0395]: `dyn Priced` has no size of its own; hold it behind `ref` or in a `Box`
+  --> e0395_bare_dyn.sisu:12:10
+   |
+12 | def show(item: dyn Priced) -> String:
+   |          ^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Hold it behind `ref`, or in a `Box` to own it.
+
+<!-- file: examples/reference-diagnostics/e0395_bare_dyn_fixed.sisu -->
+```sisu
+# The `dyn` value behind `ref`.
+trait Priced:
+    def price(self) -> int
+
+struct Bun:
+    filling: String
+
+impl Priced for Bun:
+    def price(self) -> int:
+        return 280
+
+def show(item: ref dyn Priced) -> String:
+    return "{item.price()} cents"
+
+def main():
+    let bun = Bun("cardamom")
+    print(show(ref bun))
+```
+
+<!-- output: examples/reference-diagnostics/e0395_bare_dyn_fixed.out -->
+```text
+280 cents
+```
+
+Shown in [chapter 15](../tutorial/15-generics.md).
+
 ## Ownership
 
 Codes E0400 to E0437. The ownership checker checks moves, borrows,
@@ -2001,6 +3133,291 @@ def main():
 
 Shown in [chapter 5](../tutorial/05-collections.md).
 
+### E0401
+
+`borrow.use-after-partial-move`: `{name}` cannot be used as a whole,
+because `{part}` was moved out of it on line {line}.
+
+Moving a field out of a struct leaves the struct without it: the other
+fields can still be used, and the struct as a whole cannot.
+
+<!-- file: examples/reference-diagnostics/e0401_partial_move.sisu -->
+```sisu
+# A struct used whole after a field moved out of it.
+struct Order:
+    customer: String
+    items: list[String]
+
+def main():
+    let order = Order("Aino", ["coffee", "bun"])
+    let items = order.items
+    print("{len(items)} items")
+    print("{order:?}")
+```
+
+<!-- output: examples/reference-diagnostics/e0401_partial_move.console -->
+```console
+$ sisu run e0401_partial_move.sisu
+error[E0401]: `order` cannot be used as a whole, because `order.items` was moved out of it on line 8
+  --> e0401_partial_move.sisu:10:13
+   |
+10 |     print("{order:?}")
+   |             ^^^^^
+   |
+ 8 |     let items = order.items
+   |                 ----------- `order.items` is moved here
+  = note: copy it with `.copy()` before it is moved, or move it later
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
+```
+
+Use the whole struct before the move, as the note says, or copy the
+field with `.copy()` and leave the struct whole.
+
+<!-- file: examples/reference-diagnostics/e0401_partial_move_fixed.sisu -->
+```sisu
+# The struct used before the field moves out.
+struct Order:
+    customer: String
+    items: list[String]
+
+def main():
+    let order = Order("Aino", ["coffee", "bun"])
+    print("{order:?}")
+    let items = order.items
+    print("{len(items)} items")
+```
+
+<!-- output: examples/reference-diagnostics/e0401_partial_move_fixed.out -->
+```text
+Order(customer="Aino", items=["coffee", "bun"])
+2 items
+```
+
+Shown in [chapter 10](../tutorial/10-ownership.md).
+
+### E0402
+
+`borrow.modify-while-borrowed`: `{name}` is borrowed on line {line} and
+cannot be modified until that borrow ends on line {end}.
+
+A value that is borrowed cannot change until the borrow's last use. A
+borrow ends at its last use, not at the end of its block.
+
+<!-- file: examples/reference-diagnostics/e0402_modify_while_borrowed.sisu -->
+```sisu
+# A list changed while a borrow of an element is still used.
+def main():
+    var names: list[String] = ["Aino", "Eero", "Roni"]
+    let first = ref names[0]
+    names[1] = "Ella"
+    print("{first} is first")
+```
+
+<!-- output: examples/reference-diagnostics/e0402_modify_while_borrowed.console -->
+```console
+$ sisu run e0402_modify_while_borrowed.sisu
+error[E0402]: `names` is borrowed on line 4 and cannot be modified until that borrow ends on line 6
+  --> e0402_modify_while_borrowed.sisu:5:5
+  |
+5 |     names[1] = "Ella"
+  |     ^^^^^^^^^^^^^^^^^
+  |
+4 |     let first = ref names[0]
+  |                 ------------ borrowed here by `first`
+  |
+6 |     print("{first} is first")
+  |             ----- the borrow is still used here
+  = note: move this after line 6, where the borrow ends, or work on a copy made with `.copy()`
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
+```
+
+Move the change after the line the note names, or work on a copy.
+
+<!-- file: examples/reference-diagnostics/e0402_modify_while_borrowed_fixed.sisu -->
+```sisu
+# The change after the borrow's last use.
+def main():
+    var names: list[String] = ["Aino", "Eero", "Roni"]
+    let first = ref names[0]
+    print("{first} is first")
+    names[1] = "Ella"
+```
+
+<!-- output: examples/reference-diagnostics/e0402_modify_while_borrowed_fixed.out -->
+```text
+Aino is first
+```
+
+Shown in [chapter 11](../tutorial/11-borrowing.md).
+
+### E0405
+
+`borrow.mut-while-borrowed`: `{name}` is already borrowed on line
+{line}, so it cannot be borrowed with `mut` until that borrow ends on
+line {end}.
+
+A value has either one `mut` borrow or any number of shared ones at a
+time. A call of a `mut self` method borrows with `mut`.
+
+<!-- file: examples/reference-diagnostics/e0405_mut_while_borrowed.sisu -->
+```sisu
+# A method that changes a list called while it is borrowed.
+def main():
+    var scores = [7, 9, 4]
+    let first = ref scores[0]
+    scores.push(10)
+    print("first {first}, of {len(scores)}")
+```
+
+<!-- output: examples/reference-diagnostics/e0405_mut_while_borrowed.console -->
+```console
+$ sisu run e0405_mut_while_borrowed.sisu
+error[E0405]: `scores` is already borrowed on line 4, so it cannot be borrowed with `mut` until that borrow ends on line 6
+  --> e0405_mut_while_borrowed.sisu:5:5
+  |
+5 |     scores.push(10)
+  |     ^^^^^^^^^^^^^^^
+  |
+4 |     let first = ref scores[0]
+  |                 ------------- borrowed here by `first`
+  |
+6 |     print("first {first}, of {len(scores)}")
+  |                   ----- the borrow is still used here
+  = note: move this after line 6, where the borrow ends, or work on a copy made with `.copy()`
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
+```
+
+Finish with the shared borrow first, as the note says, or copy what it
+reads.
+
+<!-- file: examples/reference-diagnostics/e0405_mut_while_borrowed_fixed.sisu -->
+```sisu
+# The borrow's last use before the change.
+def main():
+    var scores = [7, 9, 4]
+    let first = ref scores[0]
+    print("first {first}")
+    scores.push(10)
+    print("{len(scores)} scores")
+```
+
+<!-- output: examples/reference-diagnostics/e0405_mut_while_borrowed_fixed.out -->
+```text
+first 7
+4 scores
+```
+
+Shown in [chapter 11](../tutorial/11-borrowing.md).
+
+### E0406
+
+`borrow.does-not-live-long-enough`: `{name}` does not live long enough:
+it is borrowed on line {line}, and the borrow is still used on line
+{end}, after `{name}` is gone.
+
+A borrow cannot be used after what it borrows is gone. The message names
+the line of the borrow and the line of its last use.
+
+<!-- file: examples/reference-diagnostics/e0406_short_life.sisu -->
+```sisu
+# A closure that borrows the loop's `i` outlives the iteration.
+def main():
+    var steps: list[() -> int] = []
+    for i in range(3):
+        steps.push(() -> i)
+    print(len(steps))
+```
+
+<!-- output: examples/reference-diagnostics/e0406_short_life.console -->
+```console
+$ sisu run e0406_short_life.sisu
+error[E0406]: `i` does not live long enough: it is borrowed on line 5, and the borrow is still used on line 5, after `i` is gone
+  --> e0406_short_life.sisu:5:28
+  |
+5 |         steps.push(() -> i)
+  |                            ^
+  |                    ------- borrowed here by `steps`
+  |         ----- the borrow is still used here
+  = note: declare `i` where it lives as long as the borrow is used, outside the block or loop it is in now
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
+```
+
+Declare the borrowed value where it lives long enough, as the note says,
+or move a copy into what outlives it: an `own` closure, or `.copy()`.
+
+<!-- file: examples/reference-diagnostics/e0406_short_life_fixed.sisu -->
+```sisu
+# An `own` closure takes its own copy of `i`.
+def main():
+    var steps: list[() -> int] = []
+    for i in range(3):
+        steps.push(own () -> i)
+    print(len(steps))
+```
+
+<!-- output: examples/reference-diagnostics/e0406_short_life_fixed.out -->
+```text
+3
+```
+
+### E0407
+
+`borrow.return-local`: this returns a borrow of `{name}`, which belongs
+to `{function}` and is gone when it returns.
+
+A function's locals are gone when it returns, so it cannot return a
+borrow of one; `str` is a borrow, and an interpolated literal is a local
+`String`.
+
+<!-- file: examples/reference-diagnostics/e0407_return_local.sisu -->
+```sisu
+# A function that returns a borrow of its own local.
+def greeting(name: str) -> str:
+    let text = "Hei, {name}!"
+    return text
+
+def main():
+    print(greeting("Aino"))
+```
+
+<!-- output: examples/reference-diagnostics/e0407_return_local.console -->
+```console
+$ sisu run e0407_return_local.sisu
+error[E0407]: this returns a borrow of `text`, which belongs to `greeting` and is gone when it returns
+  --> e0407_return_local.sisu:4:5
+  |
+4 |     return text
+  |     ^^^^^^^^^^^
+  |            ---- borrowed here
+  = note: return an owned value instead, such as a copy made with `.copy()`
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
+```
+
+Return an owned value: here, make the result type `String`.
+
+<!-- file: examples/reference-diagnostics/e0407_return_local_fixed.sisu -->
+```sisu
+# The function returns the owned text.
+def greeting(name: str) -> String:
+    let text = "Hei, {name}!"
+    return text
+
+def main():
+    print(greeting("Aino"))
+```
+
+<!-- output: examples/reference-diagnostics/e0407_return_local_fixed.out -->
+```text
+Hei, Aino!
+```
+
+Shown in [chapter 11](../tutorial/11-borrowing.md).
+
 ### E0411
 
 `borrow.view-field-in-plain-struct`: `{ty}` holds `{field}: {fty}`,
@@ -2056,6 +3473,126 @@ bread
 ```
 
 Shown in [chapter 7](../tutorial/07-structs-and-enums.md).
+
+### E0413
+
+`borrow.from-required`: `{name}` returns `{ret}`, which borrows, and has
+more than one borrowed parameter ({params}); name the ones it borrows
+from with `from`.
+
+A function that returns a borrow and has one borrowed parameter returns
+a borrow of it. With more than one, `from` names those the result may
+borrow from, so a caller knows what must outlive the result.
+
+<!-- file: examples/reference-diagnostics/e0413_from.sisu -->
+```sisu
+# A returned borrow that could come from either parameter.
+def longer(a: str, b: str) -> str:
+    return if len(a) >= len(b): a else: b
+
+def main():
+    print(longer("sauna", "sisu"))
+```
+
+<!-- output: examples/reference-diagnostics/e0413_from.console -->
+```console
+$ sisu run e0413_from.sisu
+error[E0413]: `longer` returns `str`, which borrows, and has more than one borrowed parameter (a, b); name the ones it borrows from with `from`
+  --> e0413_from.sisu:2:31
+  |
+2 | def longer(a: str, b: str) -> str:
+  |                               ^^^
+  |            ------ `a` is a borrowed parameter
+  |                    ------ `b` is a borrowed parameter
+  = fix: name `a, b` in the `from` clause: ` from a, b`
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+The fix names every borrowed parameter; name fewer when the result
+borrows from fewer.
+
+<!-- file: examples/reference-diagnostics/e0413_from_fixed.sisu -->
+```sisu
+# `from` names where the borrow comes from.
+def longer(a: str, b: str) -> str from a, b:
+    return if len(a) >= len(b): a else: b
+
+def main():
+    print(longer("sauna", "sisu"))
+```
+
+<!-- output: examples/reference-diagnostics/e0413_from_fixed.out -->
+```text
+sauna
+```
+
+Shown in [chapter 11](../tutorial/11-borrowing.md).
+
+### E0417
+
+`borrow.must-consume`: `{name}` is never consumed: a `{ty}` must be
+passed to an `own` parameter before it goes out of scope.
+
+A `@must_consume` type cannot be dropped silently: each value is passed
+to an `own` parameter before it goes out of scope (D-054).
+
+<!-- file: examples/reference-diagnostics/e0417_must_consume.sisu -->
+```sisu
+# A must-consume value that goes out of scope unconsumed.
+@must_consume
+struct Draft:
+    text: String
+
+    def discard(own self):
+        pass
+
+def main():
+    let note = Draft("a first try")
+    print("drafted {note.text}")
+```
+
+<!-- output: examples/reference-diagnostics/e0417_must_consume.console -->
+```console
+$ sisu run e0417_must_consume.sisu
+error[E0417]: `note` is never consumed: a `Draft` must be passed to an `own` parameter before it goes out of scope
+  --> e0417_must_consume.sisu:11:33
+   |
+11 |     print("drafted {note.text}")
+   |                                 ^
+   |
+10 |     let note = Draft("a first try")
+   |         ---- `note` is declared here
+  = note: consume it with one of its methods that take `own self`: `discard`
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
+```
+
+Consume it with one of the methods the note names, each of which says
+what ending it means.
+
+<!-- file: examples/reference-diagnostics/e0417_must_consume_fixed.sisu -->
+```sisu
+# The value consumed by a method that takes `own self`.
+@must_consume
+struct Draft:
+    text: String
+
+    def discard(own self):
+        pass
+
+def main():
+    let note = Draft("a first try")
+    print("drafted {note.text}")
+    note.discard()
+```
+
+<!-- output: examples/reference-diagnostics/e0417_must_consume_fixed.out -->
+```text
+drafted a first try
+```
+
+Shown in [chapter 13](../tutorial/13-sharing.md).
 
 ## Warnings
 
@@ -2777,7 +4314,7 @@ def main():
 
 ## The driver
 
-Codes D0001 to D0119. The messages of the `sisu` command itself
+Codes D0001 to D0122. The messages of the `sisu` command itself
 ([R16](sisu-command.md)): usage errors, the lines of `sisu test` and
 `sisu bench`, replays, packages and the native backend.
 
@@ -2961,7 +4498,7 @@ it. `sisu explain CODE` prints the same line.
 | Code | Identifier | Message |
 |---|---|---|
 | [E0001](#e0001) | `lex.tab-in-indentation` | a tab in indentation; Sisu indents with spaces only |
-| E0002 | `lex.inconsistent-dedent` | this line's indentation matches no enclosing block; the enclosing blocks start at column {columns} |
+| [E0002](#e0002) | `lex.inconsistent-dedent` | this line's indentation matches no enclosing block; the enclosing blocks start at column {columns} |
 | [E0003](#e0003) | `lex.unterminated-string` | this string literal is not closed before the end of the line |
 | E0004 | `lex.unterminated-block-string` | this multi-line string literal is never closed |
 | E0005 | `lex.unknown-character` | `{char}` cannot appear in Sisu source outside a string or comment |
@@ -2970,11 +4507,11 @@ it. `sisu explain CODE` prints the same line.
 | E0008 | `lex.unmatched-close` | `{close}` closes nothing |
 | E0009 | `lex.unclosed-bracket` | `{open}` is never closed |
 | E0010 | `lex.mismatched-bracket` | `{close}` does not close the `{open}` before it |
-| E0011 | `lex.semicolon` | Sisu has no semicolons; put each statement on its own line |
-| E0012 | `lex.invalid-number` | `{text}` is not a valid number literal |
+| [E0011](#e0011) | `lex.semicolon` | Sisu has no semicolons; put each statement on its own line |
+| [E0012](#e0012) | `lex.invalid-number` | `{text}` is not a valid number literal |
 | E0013 | `lex.lone-close-brace` | a single `}` in a string closes nothing; write `}}` for a literal brace |
 | E0014 | `lex.bad-indent-char` | `{char}` in indentation; Sisu indents with ASCII spaces only |
-| E0015 | `lex.backslash-continuation` | Sisu has no backslash continuation; break the line inside brackets, after a comma or before an operator |
+| [E0015](#e0015) | `lex.backslash-continuation` | Sisu has no backslash continuation; break the line inside brackets, after a comma or before an operator |
 | [E0016](#e0016) | `lex.bad-char-literal` | a character literal holds exactly one character |
 | E0018 | `lex.newline-in-interpolation` | an interpolation in a one-line string must end on the same line |
 
@@ -2984,12 +4521,12 @@ it. `sisu explain CODE` prints the same line.
 |---|---|---|
 | [E0100](#e0100) | `parse.expected` | expected {expected}, found {found} |
 | E0101 | `parse.expected-block` | expected an indented block after `{keyword}` on line {line} |
-| E0102 | `parse.block-on-same-line` | a block starts on the next line, indented; nothing may follow `:` on the line that opens it |
+| [E0102](#e0102) | `parse.block-on-same-line` | a block starts on the next line, indented; nothing may follow `:` on the line that opens it |
 | [E0103](#e0103) | `parse.expected-expression` | expected an expression, found {found} |
 | E0104 | `parse.expected-type` | expected a type, found {found} |
 | [E0105](#e0105) | `parse.expected-pattern` | expected a pattern, found {found} |
 | E0106 | `parse.expected-declaration` | expected a declaration, found {found} |
-| E0107 | `parse.top-level-statement` | statements cannot appear at the top level of a module; put them in a function such as `main` |
+| [E0107](#e0107) | `parse.top-level-statement` | statements cannot appear at the top level of a module; put them in a function such as `main` |
 | [E0108](#e0108) | `parse.mixed-and-or` | `and` and `or` cannot be mixed without parentheses |
 | E0109 | `parse.mixed-bitwise` | `{first}` and `{second}` cannot be mixed without parentheses |
 | E0110 | `parse.bitwise-arithmetic` | `{op}` cannot be mixed with arithmetic or shifts without parentheses |
@@ -2999,13 +4536,13 @@ it. `sisu explain CODE` prints the same line.
 | E0114 | `parse.assignment-in-expression` | assignment is a statement and has no value; to compare, write `==` |
 | [E0115](#e0115) | `parse.python-conditional` | `a if c else b` is not Sisu; write `if c: a else: b` |
 | [E0116](#e0116) | `parse.if-expression-else` | an `if` expression needs an `else` branch, because it must have a value |
-| E0117 | `parse.trailing-tokens` | unexpected {found} after the end of the statement |
+| [E0117](#e0117) | `parse.trailing-tokens` | unexpected {found} after the end of the statement |
 | E0118 | `parse.arm-statement` | a `case` arm on one line holds a single expression; put statements in an indented block |
 | E0119 | `parse.chain-operator` | `{op}` cannot be chained; use parentheses or `and` |
 | E0121 | `parse.empty-interpolation` | an interpolation needs an expression between `{` and `}` |
 | E0122 | `parse.closure-parameter` | a closure parameter must be a name |
 | E0123 | `parse.walrus` | Sisu has no `:=`; bind with `let` or use `if let` |
-| E0124 | `parse.keyword-as-name` | `{keyword}` is a keyword and cannot be used as a name here |
+| [E0124](#e0124) | `parse.keyword-as-name` | `{keyword}` is a keyword and cannot be used as a name here |
 | E0125 | `parse.unexpected-indent` | this line is indented more than the line before it, which does not open a block |
 | E0126 | `parse.expected-member` | a struct body holds fields, methods and `pass`; this line is none of them |
 
@@ -3026,7 +4563,7 @@ it. `sisu explain CODE` prints the same line.
 | [E0211](#e0211) | `resolve.ambiguous-variant` | `{name}` is a variant of more than one type ({candidates}); qualify it, as in `{example}` |
 | E0212 | `resolve.not-an-error-set` | `{name}` is not an error set, so it cannot follow `!` |
 | E0213 | `resolve.drop-target` | `Drop` can be implemented only for a struct or enum declared in this module |
-| E0215 | `resolve.self-outside-method` | `self` exists only inside a method |
+| [E0215](#e0215) | `resolve.self-outside-method` | `self` exists only inside a method |
 | E0216 | `resolve.drop-signature` | `Drop` has one method, `def drop(mut self)` |
 | E0217 | `resolve.duplicate-method` | `{owner}` has more than one method named `{name}` |
 | E0218 | `resolve.self-not-first` | `self` must be the first parameter |
@@ -3042,19 +4579,19 @@ it. `sisu explain CODE` prints the same line.
 | E0228 | `resolve.alias-cycle` | the type alias `{name}` refers to itself |
 | E0229 | `resolve.self-type-outside` | `Self` exists only inside a type's declaration or `impl` |
 | E0230 | `resolve.not-a-trait` | `{name}` is not a trait |
-| E0231 | `resolve.trait-as-type` | `{name}` is a trait, not a type; a value of a type that implements it is `dyn {name}` |
-| E0232 | `resolve.missing-trait-method` | the impl of `{trait}` for `{ty}` is missing {methods} |
+| [E0231](#e0231) | `resolve.trait-as-type` | `{name}` is a trait, not a type; a value of a type that implements it is `dyn {name}` |
+| [E0232](#e0232) | `resolve.missing-trait-method` | the impl of `{trait}` for `{ty}` is missing {methods} |
 | E0233 | `resolve.not-a-trait-method` | `{name}` is not a method of `{trait}` |
 | E0234 | `resolve.method-signature` | `{name}` does not have the signature `{trait}` gives it: expected `{expected}`, found `{found}` |
-| E0235 | `resolve.overlapping-impl` | `{trait}` is implemented for `{ty}` more than once; a type implements a trait at most once |
+| [E0235](#e0235) | `resolve.overlapping-impl` | `{trait}` is implemented for `{ty}` more than once; a type implements a trait at most once |
 | E0236 | `resolve.orphan-impl` | `{trait}` for `{ty}` can be implemented only in the package of the trait or of the type, or in the root package |
 | E0237 | `resolve.missing-assoc-type` | the impl of `{trait}` for `{ty}` does not say what `{name}` is; add `type {name} = ...` |
 | E0238 | `resolve.unknown-assoc-type` | `{trait}` has no associated type `{name}` |
 | E0239 | `resolve.no-assoc-type` | `{ty}` has no associated type `{name}` among its bounds |
 | E0240 | `resolve.sealed-trait` | `{trait}` is implemented only by the standard library, so `{ty}` cannot implement it |
-| E0241 | `resolve.not-object-safe` | `{trait}` cannot be used as `dyn {trait}`: its method `{method}` cannot be called through it, because {reason} |
-| E0242 | `resolve.supertrait-missing` | `{ty}` implements `{trait}`, which requires `{super}`, but `{ty}` does not implement `{super}` |
-| E0243 | `resolve.not-derivable` | `{name}` cannot be derived; `@derive` takes `Copy` and the traits that have a `comptime def derive`: `Debug`, `Eq`, `PartialOrd`, `Ord`, `Hash`, and any trait that declares one |
+| [E0241](#e0241) | `resolve.not-object-safe` | `{trait}` cannot be used as `dyn {trait}`: its method `{method}` cannot be called through it, because {reason} |
+| [E0242](#e0242) | `resolve.supertrait-missing` | `{ty}` implements `{trait}`, which requires `{super}`, but `{ty}` does not implement `{super}` |
+| [E0243](#e0243) | `resolve.not-derivable` | `{name}` cannot be derived; `@derive` takes `Copy` and the traits that have a `comptime def derive`: `Debug`, `Eq`, `PartialOrd`, `Ord`, `Hash`, and any trait that declares one |
 | [E0244](#e0244) | `resolve.derive-field` | `{ty}` cannot derive `{trait}`: its field `{field}` has type `{fty}`, which does not implement `{trait}` |
 | E0245 | `resolve.generic-default-order` | a type parameter without a default cannot follow one with a default |
 | E0246 | `resolve.impl-default` | the type parameters of an `impl` or a function take no defaults; a default belongs to a type's or a trait's parameter |
@@ -3087,9 +4624,9 @@ it. `sisu explain CODE` prints the same line.
 | [E0301](#e0301) | `type.integer-division` | `/` divides floats; for integers use `//`, or convert to `f64` first |
 | [E0302](#e0302) | `type.not-bool` | a condition must be a `bool`, not `{found}`; Sisu has no truthiness |
 | E0303 | `type.unknown-field` | `{ty}` has no field `{name}` |
-| E0304 | `type.unknown-method` | `{ty}` has no method `{name}` |
+| [E0304](#e0304) | `type.unknown-method` | `{ty}` has no method `{name}` |
 | [E0305](#e0305) | `type.argument-count` | wrong number of arguments to `{name}`: expected {expected}, found {found} |
-| E0306 | `type.unknown-keyword` | `{name}` has no parameter named `{arg}` |
+| [E0306](#e0306) | `type.unknown-keyword` | `{name}` has no parameter named `{arg}` |
 | E0307 | `type.duplicate-argument` | the argument `{arg}` is given more than once |
 | [E0308](#e0308) | `type.missing-argument` | missing the argument `{arg}` of `{name}` |
 | E0309 | `type.not-callable` | a value of type `{ty}` cannot be called |
@@ -3120,8 +4657,8 @@ it. `sisu explain CODE` prints the same line.
 | E0334 | `type.impure-capability` | the pure function `{name}` cannot use the capability `{ty}` |
 | E0335 | `type.impure-argument` | this function is passed where a pure function is required, but it calls `{callee}`, which is not pure |
 | [E0337](#e0337) | `type.missing-field` | missing the field `{field}` of `{ty}` |
-| E0338 | `type.move-out-of-borrow` | cannot move `{what}` out of a borrowed value; copy it with `.copy()` |
-| E0339 | `type.mut-argument-missing` | `{param}` is a `mut` parameter, so the call must say `mut` before the argument |
+| [E0338](#e0338) | `type.move-out-of-borrow` | cannot move `{what}` out of a borrowed value; copy it with `.copy()` |
+| [E0339](#e0339) | `type.mut-argument-missing` | `{param}` is a `mut` parameter, so the call must say `mut` before the argument |
 | E0340 | `type.mut-argument-unexpected` | `{param}` is not a `mut` parameter, so the argument takes no `mut` |
 | [E0341](#e0341) | `type.not-mutable` | cannot modify `{what}`; it is not declared with `var` |
 | E0342 | `type.it-outside-closure` | `it` is the parameter of an implicit closure and exists only where a one-parameter function is expected |
@@ -3164,13 +4701,13 @@ it. `sisu explain CODE` prints the same line.
 | E0386 | `type.variant-needs-fields` | `{name}` has fields; write `{name}(...)` |
 | E0387 | `type.star-outside-list` | `*name` collects the rest of a list and appears only in a list pattern |
 | E0388 | `type.rest-outside-arguments` | `..` skips the remaining fields and appears only inside `Name(...)` |
-| E0389 | `type.no-self` | `self` exists only inside a method |
+| [E0389](#e0389) | `type.no-self` | `self` exists only inside a method |
 | E0390 | `type.not-a-struct-pattern` | `{name}` cannot be matched with fields |
 | E0391 | `type.const-pattern` | a constant cannot be used as a pattern yet; compare with `==` in a guard |
 | E0392 | `type.impure-value-call` | `{name}` is pure, so it cannot call a function value whose type is not `pure` |
 | E0393 | `type.impure-drop` | dropping `{value}` here runs the `Drop` of `{ty}`, which is not pure, so the pure function `{name}` cannot do it |
 | E0394 | `type.ambiguous-method` | `{name}` is a method of more than one trait `{ty}` implements ({traits}); call it on the trait, as in `Trait.{name}(x)` |
-| E0395 | `type.unsized-dyn` | `{ty}` has no size of its own; hold it behind `ref` or in a `Box` |
+| [E0395](#e0395) | `type.unsized-dyn` | `{ty}` has no size of its own; hold it behind `ref` or in a `Box` |
 | E0396 | `type.view-to-dyn` | `{ty}` borrows, so it cannot become `{dyn}`, which owns its value |
 | E0397 | `type.must-consume-argument` | `{ty}` is must-consume, so it cannot be the argument of the generic parameter `{param}`, whose values the body may drop |
 | E0398 | `type.structural-only` | {callee} is hashed and compared structurally in stage 0, and `{ty}` has an impl of `{trait}` of its own; derive `Hash` and `Eq` for it, or key by a field |
@@ -3181,23 +4718,23 @@ it. `sisu explain CODE` prints the same line.
 | Code | Identifier | Message |
 |---|---|---|
 | [E0400](#e0400) | `borrow.use-after-move` | `{name}` was moved on line {line} and cannot be used afterwards |
-| E0401 | `borrow.use-after-partial-move` | `{name}` cannot be used as a whole, because `{part}` was moved out of it on line {line} |
-| E0402 | `borrow.modify-while-borrowed` | `{name}` is borrowed on line {line} and cannot be modified until that borrow ends on line {end} |
+| [E0401](#e0401) | `borrow.use-after-partial-move` | `{name}` cannot be used as a whole, because `{part}` was moved out of it on line {line} |
+| [E0402](#e0402) | `borrow.modify-while-borrowed` | `{name}` is borrowed on line {line} and cannot be modified until that borrow ends on line {end} |
 | E0403 | `borrow.use-while-mut-borrowed` | `{name}` is borrowed with `mut` on line {line} and cannot be used until that borrow ends on line {end} |
 | E0404 | `borrow.move-while-borrowed` | `{name}` is borrowed on line {line} and cannot be moved until that borrow ends on line {end} |
-| E0405 | `borrow.mut-while-borrowed` | `{name}` is already borrowed on line {line}, so it cannot be borrowed with `mut` until that borrow ends on line {end} |
-| E0406 | `borrow.does-not-live-long-enough` | `{name}` does not live long enough: it is borrowed on line {line}, and the borrow is still used on line {end}, after `{name}` is gone |
-| E0407 | `borrow.return-local` | this returns a borrow of `{name}`, which belongs to `{function}` and is gone when it returns |
+| [E0405](#e0405) | `borrow.mut-while-borrowed` | `{name}` is already borrowed on line {line}, so it cannot be borrowed with `mut` until that borrow ends on line {end} |
+| [E0406](#e0406) | `borrow.does-not-live-long-enough` | `{name}` does not live long enough: it is borrowed on line {line}, and the borrow is still used on line {end}, after `{name}` is gone |
+| [E0407](#e0407) | `borrow.return-local` | this returns a borrow of `{name}`, which belongs to `{function}` and is gone when it returns |
 | E0408 | `borrow.return-not-from` | this returns a borrow of the parameter `{param}`, which is not in the `from` clause of `{function}` |
 | E0409 | `borrow.store-in-plain-type` | `{ty}` cannot hold this value, because it borrows `{name}`; only a `view struct` holds borrows |
 | E0410 | `borrow.store-into-caller` | this value borrows `{name}`, so it cannot be stored in `{param}`, which belongs to the caller of `{function}` |
 | [E0411](#e0411) | `borrow.view-field-in-plain-struct` | `{ty}` holds `{field}: {fty}`, which borrows; only a `view struct` may hold a borrow |
 | E0412 | `borrow.view-in-enum` | `{ty}` cannot hold `{fty}`, which borrows; an enum has no view form, so store an owned value such as `String` |
-| E0413 | `borrow.from-required` | `{name}` returns `{ret}`, which borrows, and has more than one borrowed parameter ({params}); name the ones it borrows from with `from` |
+| [E0413](#e0413) | `borrow.from-required` | `{name}` returns `{ret}`, which borrows, and has more than one borrowed parameter ({params}); name the ones it borrows from with `from` |
 | E0414 | `borrow.from-not-a-parameter` | `{name}` in the `from` clause is not a borrowed parameter of `{function}` |
 | E0415 | `borrow.from-without-borrow` | `{function}` returns `{ty}`, which does not borrow, so it takes no `from` clause |
 | E0416 | `borrow.move-out-of-drop` | cannot move `{part}` out of `{name}`, because `{ty}` implements `Drop`, which needs the whole value |
-| E0417 | `borrow.must-consume` | `{name}` is never consumed: a `{ty}` must be passed to an `own` parameter before it goes out of scope |
+| [E0417](#e0417) | `borrow.must-consume` | `{name}` is never consumed: a `{ty}` must be passed to an `own` parameter before it goes out of scope |
 | E0418 | `borrow.must-consume-exit` | this leaves the scope with `{name}` unconsumed: a `{ty}` must be passed to an `own` parameter first |
 | E0419 | `borrow.move-out-of-place` | cannot move out of `{name}` through a reference or an index; copy it with `.copy()` |
 | E0420 | `borrow.must-consume-intrinsic` | `{callee}` may drop values that `{name}` holds, and a `{ty}` is must-consume: its values must be passed to an `own` parameter |
@@ -3606,4 +5143,7 @@ it. `sisu explain CODE` prints the same line.
 | D0117 | `front.stage1-build` | building the stage-1 front end in `{dir}` failed; `--front-end=rust` uses the Rust front end: {detail} |
 | D0118 | `front.stage1-failed` | internal compiler error: the stage-1 front end stopped with status {status}; `--front-end=rust` uses the Rust front end |
 | D0119 | `native.from-lir` | `--from-lir FILE` builds a LIR program (what stage 2's `sisu2 lir` writes) with the native backend; it goes with `--native` |
+| D0120 | `cli.bad-lower` | `--lower` takes `stage2` (the lowering written in Sisu, the default) or `rust` (the Rust lowering, the oracle), not `{value}` |
+| D0121 | `native.stage2-build` | building stage 2 in `{dir}` failed; `--lower=rust` lowers with the Rust backend: {detail} |
+| D0122 | `native.stage2-failed` | internal compiler error: stage 2 failed to lower the program (status {status}); `--lower=rust` lowers with the Rust backend: {detail} |
 

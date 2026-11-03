@@ -1,0 +1,7 @@
+$ sisu check enumerate_start.sisu
+error[E0306]: `enumerate` has no parameter named `start`
+  --> enumerate_start.sisu:3:48
+  |
+3 |     for i, name in enumerate(["Aino", "Eero"], start=1):
+  |                                                ^^^^^
+

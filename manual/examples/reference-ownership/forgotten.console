@@ -1,0 +1,12 @@
+$ sisu run forgotten.sisu
+error[E0417]: `scrap` is never consumed: a `Draft` must be passed to an `own` parameter before it goes out of scope
+  --> forgotten.sisu:11:22
+   |
+11 |     print(scrap.text)
+   |                      ^
+   |
+10 |     let scrap = Draft("a first try")
+   |         ----- `scrap` is declared here
+  = note: consume it with one of its methods that take `own self`: `discard`
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

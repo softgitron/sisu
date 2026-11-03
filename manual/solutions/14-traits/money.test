@@ -1,0 +1,5 @@
+test "whole euros" ... ok
+test "euros and cents" ... ok
+test "amounts below zero" ... ok
+test "a column of amounts" ... ok
+4 passed, 0 failed, 0 blocked

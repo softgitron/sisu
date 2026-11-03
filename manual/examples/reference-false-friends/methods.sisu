@@ -1,0 +1,6 @@
+# Python's names for three methods.
+def main():
+    var names = ["aino"]
+    names.append("eero")
+    print("  hei  ".strip())
+    print("hei".upper())

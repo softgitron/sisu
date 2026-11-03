@@ -1,0 +1,4 @@
+# Python's `enumerate(..., start=1)`.
+def main():
+    for i, name in enumerate(["Aino", "Eero"], start=1):
+        print("{i}. {name}")

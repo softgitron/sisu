@@ -1,0 +1,7 @@
+$ sisu check print_many.sisu
+error[E0305]: wrong number of arguments to `print`: expected 1, found 2
+  --> print_many.sisu:4:5
+  |
+4 |     print("Hei,", name)
+  |     ^^^^^^^^^^^^^^^^^^^
+

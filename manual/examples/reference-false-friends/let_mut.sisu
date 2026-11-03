@@ -1,0 +1,5 @@
+# Rust's `let mut`.
+def main():
+    let mut total = 1
+    total += 1
+    print(total)

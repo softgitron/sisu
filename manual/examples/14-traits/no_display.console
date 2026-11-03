@@ -1,0 +1,8 @@
+$ sisu run no_display.sisu
+error[E0242]: `Weight` implements `Labelled`, which requires `Display`, but `Weight` does not implement `Display`
+  --> no_display.sisu:9:1
+  |
+9 | impl Labelled for Weight:
+  | ^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

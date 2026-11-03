@@ -1,0 +1,7 @@
+$ sisu check conditional.sisu
+error[E0100]: expected `)`, found `if`
+  --> conditional.sisu:4:17
+  |
+4 |     print("big" if n > 2 else "small")
+  |                 ^^
+

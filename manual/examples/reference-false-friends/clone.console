@@ -1,0 +1,7 @@
+$ sisu check clone.sisu
+error[E0304]: `list[str]` has no method `clone`
+  --> clone.sisu:4:24
+  |
+4 |     let copied = names.clone()
+  |                        ^^^^^
+

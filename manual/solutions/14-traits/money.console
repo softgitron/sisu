@@ -1,0 +1,12 @@
+$ sisu test money.sisu
+warning[W0001]: typed hole `fmt` of type `_`
+  --> money.sisu:17:9
+   |
+17 |         todo("fmt")
+   |         ^^^^^^^^^^^
+
+test "whole euros" ... blocked by todo("fmt")
+test "euros and cents" ... blocked by todo("fmt")
+test "amounts below zero" ... blocked by todo("fmt")
+test "a column of amounts" ... blocked by todo("fmt")
+0 passed, 0 failed, 4 blocked

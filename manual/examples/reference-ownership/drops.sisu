@@ -1,0 +1,22 @@
+# Values are dropped at the end of their scope, the last made first.
+struct Guest:
+    name: String
+
+impl Drop for Guest:
+    def drop(mut self):
+        print("{self.name} goes home")
+
+struct Couple:
+    first: Guest
+    second: Guest
+
+def stay(own guest: Guest):
+    print("{guest.name} stays for tea")
+
+def main():
+    let aino = Guest("Aino")
+    let couple = Couple(Guest("Liisa"), Guest("Pekka"))
+    stay(Guest("Eero"))
+    var host = Guest("Roni")
+    host = Guest("Ella")
+    print("the evening ends")

@@ -1,0 +1,20 @@
+# Metres added to seconds.
+@delegate(Add, Sub, Eq, PartialOrd, Display, to="value")
+@derive(Copy, Debug)
+struct Metres:
+    value: f64
+
+@delegate(Add, Eq, PartialOrd, Display, to="value")
+@derive(Copy, Debug)
+struct Seconds:
+    value: f64
+
+def speed(distance: Metres, time: Seconds) -> f64:
+    return distance.value / time.value
+
+def main():
+    let run = Metres(400.0) + Metres(800.0)
+    let time = Seconds(150.0) + Seconds(90.0)
+    print("{run} m in {time} s, {speed(time, run)} m/s")
+    print("{run > Metres(1000.0)} {run:?}")
+    print("all together: {run + time}")

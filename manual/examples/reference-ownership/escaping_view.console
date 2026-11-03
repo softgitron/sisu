@@ -1,0 +1,10 @@
+$ sisu run escaping_view.sisu
+error[E0407]: this returns a borrow of `source`, which belongs to `first_token` and is gone when it returns
+  --> escaping_view.sisu:7:5
+  |
+7 |     return Token(source.split_whitespace().next() ?? "")
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |                  ------ borrowed here
+  = note: return an owned value instead, such as a copy made with `.copy()`
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

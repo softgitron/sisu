@@ -1,0 +1,54 @@
+##! Exercise 14.3, vectors on a grid. Kind: complete. Level: 1.
+##!
+##! A robot moves on a grid by vectors of whole steps. Replace the holes
+##! in the impls so that `+`, `-`, unary `-` and `*` work on vectors and
+##! every test passes. Run the tests with `sisu test grid_vectors.sisu`.
+##! The hints are in chapter 14 of the tutorial, under "Exercise 14.3:
+##! vectors on a grid".
+
+## A move on the grid: `x` steps east and `y` steps north.
+@derive(Copy, Debug, Eq)
+struct Vector:
+    x: int
+    y: int
+
+impl Add for Vector:
+    def add(self, other: Vector) -> Vector:
+        return Vector(self.x + other.x, self.y + other.y)
+
+impl Sub for Vector:
+    def sub(self, other: Vector) -> Vector:
+        return Vector(self.x - other.x, self.y - other.y)
+
+impl Neg for Vector:
+    def neg(self) -> Vector:
+        return Vector(-self.x, -self.y)
+
+impl Mul[int] for Vector:
+    def mul(self, times: int) -> Vector:
+        return Vector(self.x * times, self.y * times)
+
+## Where the robot ends after it makes each of `moves` from `start`.
+def end_of(start: Vector, moves: list[Vector]) -> Vector:
+    var here = start
+    for step in moves:
+        here += step
+    return here
+
+test "adding and taking away":
+    assert Vector(1, 2) + Vector(3, -4) == Vector(4, -2)
+    assert Vector(5, 5) - Vector(2, 7) == Vector(3, -2)
+
+test "the opposite move":
+    assert -Vector(2, -3) == Vector(-2, 3)
+    assert Vector(4, 1) + -Vector(4, 1) == Vector(0, 0)
+
+test "a move made several times":
+    assert Vector(1, -2) * 3 == Vector(3, -6)
+    assert Vector(7, 7) * 0 == Vector(0, 0)
+
+test "a walk":
+    let east = Vector(1, 0)
+    let north = Vector(0, 1)
+    assert end_of(Vector(0, 0), [east, north, east * 2]) == Vector(3, 1)
+    assert end_of(Vector(5, 5), [-north, -east]) == Vector(4, 4)

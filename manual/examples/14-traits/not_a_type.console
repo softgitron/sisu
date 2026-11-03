@@ -1,0 +1,16 @@
+$ sisu run not_a_type.sisu
+error[E0231]: `Priced` is a trait, not a type; a value of a type that implements it is `dyn Priced`
+  --> not_a_type.sisu:19:17
+   |
+19 | def together(a: Priced, b: Priced) -> int:
+   |                 ^^^^^^
+  = fix: write `dyn Priced`: `dyn `
+
+error[E0231]: `Priced` is a trait, not a type; a value of a type that implements it is `dyn Priced`
+  --> not_a_type.sisu:19:28
+   |
+19 | def together(a: Priced, b: Priced) -> int:
+   |                            ^^^^^^
+  = fix: write `dyn Priced`: `dyn `
+
+error[D0006]: the program was not run: errors found (2)

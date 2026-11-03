@@ -1,0 +1,2 @@
+5:16-5:17 E0100 parse.expected expected="`:`" found="`=`"
+6:16-6:17 E0100 parse.expected expected="`:`" found="`=`"

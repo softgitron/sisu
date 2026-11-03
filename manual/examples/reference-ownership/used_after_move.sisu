@@ -1,0 +1,6 @@
+# A value used after it moved.
+def main():
+    let names = ["Aino", "Eero"]
+    let team = names
+    print(names)
+    print(team)

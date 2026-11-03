@@ -1,0 +1,17 @@
+# The supertrait implemented too.
+trait Labelled(Display):
+    def label(self) -> String:
+        return "[ {self} ]"
+
+struct Weight:
+    grams: int
+
+impl Display for Weight:
+    def fmt(self, mut f: Formatter):
+        f.write("{self.grams} g")
+
+impl Labelled for Weight:
+    pass
+
+def main():
+    print(Weight(90).label())

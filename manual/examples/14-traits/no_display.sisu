@@ -1,0 +1,13 @@
+# An impl of a trait whose supertrait the type does not have.
+trait Labelled(Display):
+    def label(self) -> String:
+        return "[ {self} ]"
+
+struct Weight:
+    grams: int
+
+impl Labelled for Weight:
+    pass
+
+def main():
+    print(Weight(90).label())

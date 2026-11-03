@@ -1,0 +1,9 @@
+# The root package may give a standard type a standard trait.
+impl Ord for f64:
+    def cmp(self, other: f64) -> Ordering:
+        return self.cmp(other)
+
+def main():
+    let times = [12.5, 9.75, 11.0]
+    print(sorted(times))
+    print(sorted(times)[0] < times[0])

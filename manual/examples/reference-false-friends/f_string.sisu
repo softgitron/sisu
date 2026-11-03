@@ -1,0 +1,4 @@
+# Python's f-string prefix.
+def main():
+    let n = 3
+    print(f"n is {n}")

@@ -1,0 +1,3 @@
+# `%` and `//` round towards minus infinity, as in Python.
+def main():
+    print("{-7 % 3} {-7 // 3} {7 % -3}")

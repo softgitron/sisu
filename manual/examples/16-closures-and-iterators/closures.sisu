@@ -1,0 +1,11 @@
+# A closure is a function written where it is used.
+def apply_to_all(numbers: list[int], f: (int) -> int) -> list[int]:
+    return [f(n) for n in numbers]
+
+def main():
+    let numbers = [1, 2, 3]
+    print(apply_to_all(numbers, n -> n * n))
+    print(apply_to_all(numbers, it + 100))
+    let add = (a: int, b: int) -> a + b
+    let answer = () -> 42
+    print("{add(2, 3)} {answer()}")

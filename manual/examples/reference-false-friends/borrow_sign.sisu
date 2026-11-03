@@ -1,0 +1,7 @@
+# Rust's `&` to borrow.
+def total(prices: list[int]) -> int:
+    return sum(prices)
+
+def main():
+    let prices = [3, 4]
+    print(total(&prices))

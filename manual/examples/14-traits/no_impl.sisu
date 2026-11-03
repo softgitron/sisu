@@ -1,0 +1,13 @@
+# `Money` has the method of `Display`, and no `impl` that says so.
+struct Money:
+    cents: int
+
+    def fmt(self, mut f: Formatter):
+        f.write("{self.cents // 100},{self.cents % 100:02} €")
+
+def main():
+    let price = Money(1250)
+    print(price)
+    print("Total: {price}, or [{price:>10}]")
+    print("{price:?}")
+    print([Money(250), Money(5)])

@@ -1,0 +1,17 @@
+# A trait can require another, and its methods can use it.
+trait Labelled(Display):
+    def label(self) -> String:
+        return "[ {self} ]"
+
+struct Money:
+    cents: int
+
+impl Display for Money:
+    def fmt(self, mut f: Formatter):
+        f.write("{self.cents // 100},{self.cents % 100:02} €")
+
+impl Labelled for Money:
+    pass
+
+def main():
+    print(Money(1250).label())

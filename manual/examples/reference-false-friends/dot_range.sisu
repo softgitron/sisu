@@ -1,0 +1,4 @@
+# Rust's range `0..3`.
+def main():
+    for i in 0..3:
+        print(i)

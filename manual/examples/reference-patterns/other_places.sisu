@@ -1,0 +1,12 @@
+# Patterns in `let`, `if let`, `while let`, `let ... else` and `for`.
+def main():
+    let (name, age) = ("Aino", 7)
+    if let Some(n) = "42".parse_int():
+        print("{name} is {age}; parsed {n}")
+    var stack = [1, 2, 3]
+    while let Some(top) = stack.pop():
+        print("popped {top}")
+    let Some(first) = "1 2".split_whitespace().next() else:
+        return
+    for (i, word) in enumerate(["a", "b"]):
+        print("{first} {i} {word}")

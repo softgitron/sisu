@@ -1,0 +1,5 @@
+# Rust's `&&` for `and`.
+def main():
+    let warm = True
+    let dry = False
+    print(warm && dry)

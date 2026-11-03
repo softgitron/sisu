@@ -1,0 +1,48 @@
+##! Exercise 16.3, a pipeline over sales. Kind: write. Level: 2.
+##!
+##! A bakery keeps a record of each sale. Write the bodies of the three
+##! functions so that every test passes, each as one pipeline of
+##! adapters if you can. Run the tests with `sisu test sales.sisu`. The
+##! hints are in chapter 16 of the tutorial, under "Exercise 16.3: a
+##! pipeline over sales".
+
+## One sale: a product, the town of the shop, and the price in cents.
+struct Sale:
+    product: String
+    town: String
+    cents: int
+
+## The total in cents of the sales in `town`.
+def total_in(sales: list[Sale], town: str) -> int:
+    return todo("total_in")
+
+## The products of the sales of at least `cents`, in capitals, in the
+## order of the sales.
+def dear(sales: list[Sale], cents: int) -> list[String]:
+    return todo("dear")
+
+## The product of the largest sale, the first of them on a tie.
+def best_seller(sales: list[Sale]) -> String?:
+    return todo("best_seller")
+
+## A morning's sales.
+def morning() -> list[Sale]:
+    return [
+        Sale("pulla", "Turku", 280),
+        Sale("kakku", "Tampere", 2400),
+        Sale("leipä", "Turku", 590),
+        Sale("pulla", "Tampere", 280),
+        Sale("piirakka", "Turku", 2400),
+    ]
+
+test "a town's total":
+    assert total_in(morning(), "Turku") == 3270
+    assert total_in(morning(), "Oulu") == 0
+
+test "the dear products":
+    assert dear(morning(), 500) == ["KAKKU", "LEIPÄ", "PIIRAKKA"]
+    assert dear(morning(), 3000) == []
+
+test "the best seller":
+    assert best_seller(morning()) == Some("kakku")
+    assert best_seller([]) == None

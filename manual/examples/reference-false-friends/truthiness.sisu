@@ -1,0 +1,5 @@
+# A list used as a condition.
+def main():
+    let names = ["Aino"]
+    if names:
+        print("someone is here")

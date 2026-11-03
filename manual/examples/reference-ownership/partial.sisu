@@ -1,0 +1,10 @@
+# A field moved out of a struct, which cannot then be used whole.
+struct Order:
+    customer: String
+    items: list[String]
+
+def main():
+    let order = Order("Aino", ["coffee", "bun"])
+    let items = order.items
+    print("{order.customer} has {len(items)} items")
+    print("{order:?}")

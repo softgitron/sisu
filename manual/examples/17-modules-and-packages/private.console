@@ -1,0 +1,8 @@
+$ sisu run
+error[E0255]: `table` is private to the module `trip.distance`; declare it `pub` to use it from another module
+  --> src/main.sisu:8:26
+  |
+8 |     print("{len(distance.table())} known distances")
+  |                          ^^^^^
+
+error[D0006]: the program was not run: errors found (1)

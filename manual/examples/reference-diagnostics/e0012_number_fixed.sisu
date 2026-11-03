@@ -1,0 +1,3 @@
+# A number, and a suffix that names a type.
+def main():
+    print(12u8)

@@ -1,0 +1,4 @@
+# Python's `class` and `__init__`.
+class Point:
+    def __init__(self, x: int):
+        self.x = x

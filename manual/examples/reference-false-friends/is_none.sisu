@@ -1,0 +1,5 @@
+# Python's `is None`.
+def main():
+    let found: int? = None
+    if found is None:
+        print("nothing")

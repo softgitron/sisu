@@ -1,0 +1,14 @@
+$ sisu check conversions.sisu
+error[E0200]: cannot find `int` in this scope
+  --> conversions.sisu:3:13
+  |
+3 |     let n = int("42")
+  |             ^^^
+  = fix: a similar name is in scope: `uint`
+
+error[E0200]: cannot find `str` in this scope
+  --> conversions.sisu:4:11
+  |
+4 |     print(str(n))
+  |           ^^^
+

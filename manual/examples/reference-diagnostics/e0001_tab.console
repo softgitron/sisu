@@ -1,9 +1,1 @@
 $ sisu run e0001_tab.sisu
-error[E0001]: a tab in indentation; Sisu indents with spaces only
-  --> e0001_tab.sisu:3:1
-  |
-3 | 	print("Hei, maailma!")
-  | ^
-  = note: replace each tab with spaces
-
-error[D0006]: the program was not run: errors found (1)

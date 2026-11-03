@@ -1,0 +1,13 @@
+# Alternatives that bind must bind the same names.
+enum Reading:
+    Celsius(f64)
+    Kelvin(f64)
+    Missing
+
+def value(r: Reading) -> f64:
+    return match r:
+        case Celsius(t) | Kelvin(t): t
+        case Missing: 0.0
+
+def main():
+    print("{value(Celsius(21.5))} {value(Kelvin(290.0))} {value(Missing)}")

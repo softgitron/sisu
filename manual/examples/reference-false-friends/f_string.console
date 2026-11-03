@@ -1,0 +1,7 @@
+$ sisu check f_string.sisu
+error[E0100]: expected `)`, found a string
+  --> f_string.sisu:4:12
+  |
+4 |     print(f"n is {n}")
+  |            ^
+

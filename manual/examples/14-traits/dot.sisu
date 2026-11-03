@@ -1,0 +1,21 @@
+# The operator traits have an associated type too: `Output`.
+@derive(Copy, Debug)
+struct Vector:
+    x: f64
+    y: f64
+
+impl Mul for Vector:
+    type Output = f64
+
+    def mul(self, other: Vector) -> f64:
+        return self.x * other.x + self.y * other.y
+
+impl Mul[f64] for Vector:
+    def mul(self, k: f64) -> Vector:
+        return Vector(self.x * k, self.y * k)
+
+def main():
+    let a = Vector(1.0, 2.0)
+    let b = Vector(3.0, -1.0)
+    print(a * b)
+    print("{a * 2.0:?}")

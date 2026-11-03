@@ -1,0 +1,12 @@
+# A struct pattern that leaves out a field without `..`.
+struct Point:
+    x: int
+    y: int
+
+def describe(p: Point) -> str:
+    return match p:
+        case Point(x=0): "on the y axis"
+        case _: "elsewhere"
+
+def main():
+    print(describe(Point(0, 4)))

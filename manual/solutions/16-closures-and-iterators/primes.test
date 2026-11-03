@@ -1,0 +1,5 @@
+test "the first primes" ... ok
+test "the first prime above a thousand" ... ok
+test "the hundredth prime" ... ok
+test "primes that end in 3" ... ok
+4 passed, 0 failed, 0 blocked

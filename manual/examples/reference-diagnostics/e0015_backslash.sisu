@@ -1,0 +1,5 @@
+# A backslash at the end of a line.
+def main():
+    let total = 1 + \
+        2
+    print(total)

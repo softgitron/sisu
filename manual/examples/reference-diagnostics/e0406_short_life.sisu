@@ -1,0 +1,6 @@
+# A closure that borrows the loop's `i` outlives the iteration.
+def main():
+    var steps: list[() -> int] = []
+    for i in range(3):
+        steps.push(() -> i)
+    print(len(steps))

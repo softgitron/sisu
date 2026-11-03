@@ -1,0 +1,7 @@
+$ sisu check borrow_sign.sisu
+error[E0103]: expected an expression, found `&`
+  --> borrow_sign.sisu:7:17
+  |
+7 |     print(total(&prices))
+  |                 ^
+

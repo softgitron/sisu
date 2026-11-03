@@ -1,0 +1,14 @@
+$ sisu run till
+error[E0204]: module `money` has no item `with_vat`
+  --> src/main.sisu:2:26
+  |
+2 | from money import Money, with_vat
+  |                          ^^^^^^^^
+
+error[E0200]: cannot find `with_vat` in this scope
+  --> src/main.sisu:9:37
+  |
+9 |     print("total {total}, with tax {with_vat(total, 24)}")
+  |                                     ^^^^^^^^
+
+error[D0006]: the program was not run: errors found (2)

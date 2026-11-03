@@ -1,0 +1,7 @@
+$ sisu check loop_else.sisu
+error[E0103]: expected an expression, found `else`
+  --> loop_else.sisu:6:5
+  |
+6 |     else:
+  |     ^^^^
+

@@ -1,0 +1,4 @@
+# Rust's angle brackets for type arguments.
+def main():
+    let names: Vec<str> = ["Aino"]
+    print(names)

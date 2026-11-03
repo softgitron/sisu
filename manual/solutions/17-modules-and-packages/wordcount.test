@@ -1,0 +1,8 @@
+test "part 1, a tally of words/the words of a text" ... ok
+test "part 1, a tally of words/a tally of words" ... ok
+test "part 1, a tally of words/a tally of numbers" ... ok
+test "part 2, pairs of words/the pairs of a text" ... ok
+test "part 2, pairs of words/the pair that comes most often" ... ok
+test "part 3, a table/a short table" ... ok
+test "part 3, a table/ten lines at most" ... ok
+7 passed, 0 failed, 0 blocked

@@ -1,0 +1,14 @@
+# Bounds join with `+`, and a `where` clause can hold them instead.
+def tally[T](items: list[T]) -> dict[T, int] where T: Hash + Copy:
+    var counts: dict[T, int] = {}
+    for item in items:
+        counts.entry(item).or_insert(0) += 1
+    return counts
+
+def report[T: Display + Hash](counts: dict[T, int]) -> String:
+    let parts = ["{item} x{n}" for item, n in counts.items()]
+    return parts.join(", ")
+
+def main():
+    print(report(tally(["kyllä", "ei", "kyllä"])))
+    print(report(tally([3, 1, 3, 3])))

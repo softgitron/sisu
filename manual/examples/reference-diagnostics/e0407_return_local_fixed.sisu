@@ -1,0 +1,7 @@
+# The function returns the owned text.
+def greeting(name: str) -> String:
+    let text = "Hei, {name}!"
+    return text
+
+def main():
+    print(greeting("Aino"))

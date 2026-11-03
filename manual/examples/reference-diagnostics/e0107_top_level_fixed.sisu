@@ -1,0 +1,4 @@
+# The statement inside `main`.
+def main():
+    print("Hei")
+    print("maailma")

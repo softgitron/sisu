@@ -1,0 +1,4 @@
+# Python's `max` over a list.
+def main():
+    let scores = [3, 9, 4]
+    print(max(scores))

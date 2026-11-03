@@ -1,9 +1,1 @@
 $ sisu run e0337_missing_field.sisu
-error[E0337]: missing the field `y` of `Point`
-  --> e0337_missing_field.sisu:7:13
-  |
-7 |     let p = Point(x=1)
-  |             ^^^^^^^^^^
-  = fix: pass `y` as a hole to fill: `, y=todo("y")`
-
-error[D0006]: the program was not run: errors found (1)

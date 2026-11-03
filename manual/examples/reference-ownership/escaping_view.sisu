@@ -1,0 +1,10 @@
+# A view that would outlive the text it borrows.
+view struct Token:
+    text: str
+
+def first_token() -> Token:
+    let source = "let x".to_string()
+    return Token(source.split_whitespace().next() ?? "")
+
+def main():
+    print(first_token().text)

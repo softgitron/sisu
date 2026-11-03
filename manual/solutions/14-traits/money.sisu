@@ -1,0 +1,35 @@
+##! Exercise 14.4, money that prints. Kind: write. Level: 2.
+##!
+##! An amount of money is kept in cents, and written for people the way
+##! Finland writes it: the euros, a comma, two digits of cents, a space
+##! and the euro sign, with a minus sign first for an amount below zero.
+##! Write the body of `fmt` so that every test passes. Run the tests with
+##! `sisu test money.sisu`. The hints are in chapter 14 of the tutorial,
+##! under "Exercise 14.4: money that prints".
+
+## An amount of money, in cents.
+@derive(Copy, Eq)
+struct Money:
+    cents: int
+
+impl Display for Money:
+    def fmt(self, mut f: Formatter):
+        let sign = if self.cents < 0: "-" else: ""
+        let cents = abs(self.cents)
+        f.write("{sign}{cents // 100},{cents % 100:02} €")
+
+test "whole euros":
+    assert "{Money(1200)}" == "12,00 €"
+    assert "{Money(0)}" == "0,00 €"
+
+test "euros and cents":
+    assert "{Money(1250)}" == "12,50 €"
+    assert "{Money(7)}" == "0,07 €"
+
+test "amounts below zero":
+    assert "{Money(-1250)}" == "-12,50 €"
+    assert "{Money(-5)}" == "-0,05 €"
+
+test "a column of amounts":
+    let lines = ["[{Money(m):>9}]" for m in [250, -99999]]
+    assert lines == ["[   2,50 €]", "[-999,99 €]"]

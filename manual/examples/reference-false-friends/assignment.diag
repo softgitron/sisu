@@ -1,0 +1,2 @@
+3:5-3:10 E0200 resolve.undefined-name name="count"
+4:11-4:16 E0200 resolve.undefined-name name="count"

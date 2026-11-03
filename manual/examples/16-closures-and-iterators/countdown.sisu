@@ -1,0 +1,18 @@
+# A type with `next` is an iterator, and gets every adapter with it.
+struct Countdown:
+    left: int
+
+impl Iterator for Countdown:
+    type Item = int
+
+    def next(mut self) -> int?:
+        if self.left == 0:
+            return None
+        self.left -= 1
+        return Some(self.left + 1)
+
+def main():
+    for n in Countdown(3):
+        print(n)
+    print(Countdown(10).filter(it % 3 == 0).collect())
+    print(sum(Countdown(4)))

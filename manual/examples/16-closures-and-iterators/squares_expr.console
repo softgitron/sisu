@@ -1,0 +1,15 @@
+$ sisu run squares_expr.sisu
+error[E0900]: a generator expression is not implemented in stage 0 yet; it arrives with generators (Phase 8)
+  --> squares_expr.sisu:4:19
+  |
+4 |     let squares = (p * p for p in primes)
+  |                   ^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0304]: `list[int]` has no method `collect`
+  --> squares_expr.sisu:5:19
+  |
+5 |     print(squares.collect())
+  |                   ^^^^^^^
+  = note: `collect` is a method of `Iterator`
+
+error[D0006]: the program was not run: errors found (2)

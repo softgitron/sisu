@@ -1,0 +1,6 @@
+# A keyword argument that the function does not have.
+def greet(name: str, polite: bool = False) -> String:
+    return if polite: "Good day, {name}" else: "Hei, {name}"
+
+def main():
+    print(greet("Aino", formal=True))

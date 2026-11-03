@@ -1,0 +1,21 @@
+# Literal patterns, alternatives with `|`, and `_` for any value.
+def describe(n: int) -> str:
+    return match n:
+        case 0: "none"
+        case 1 | 2 | 3: "a few"
+        case -1: "one owed"
+        case _: "many"
+
+def kind(c: char) -> str:
+    return match c:
+        case 'a' | 'e' | 'i' | 'o' | 'u': "a vowel"
+        case ' ': "a space"
+        case _: "another character"
+
+def main():
+    print("{describe(0)}, {describe(2)}, {describe(-1)}, {describe(9)}")
+    print("{kind('e')}, {kind(' ')}, {kind('k')}")
+    let answer = match "kyllä":
+        case "kyllä" | "joo": True
+        case _: False
+    print(answer)

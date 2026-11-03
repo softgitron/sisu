@@ -1,0 +1,13 @@
+$ sisu check try_except.sisu
+error[E0117]: unexpected `:` after the end of the statement
+  --> try_except.sisu:3:8
+  |
+3 |     try:
+  |        ^
+
+error[E0117]: unexpected `:` after the end of the statement
+  --> try_except.sisu:5:11
+  |
+5 |     except:
+  |           ^
+

@@ -1,9 +1,1 @@
 $ sisu run e0302_truthiness.sisu
-error[E0302]: a condition must be a `bool`, not `int`; Sisu has no truthiness
-  --> e0302_truthiness.sisu:4:8
-  |
-4 |     if count:
-  |        ^^^^^
-  = note: write the test explicitly, as in `not xs.is_empty()` or `x != 0`
-
-error[D0006]: the program was not run: errors found (1)

@@ -1,0 +1,15 @@
+$ sisu test most_common.sisu
+error[E0347]: `T` does not implement `Eq`
+  --> most_common.sisu:18:16
+   |
+18 |             if other == item:
+   |                ^^^^^^^^^^^^^
+  = fix: bound `T` by `Eq`: `: Eq`
+
+error[E0300]: expected `T`, found `ref T`
+  --> most_common.sisu:21:25
+   |
+21 |             best = Some(item)
+   |                         ^^^^
+
+error[D0006]: the program was not run: errors found (2)

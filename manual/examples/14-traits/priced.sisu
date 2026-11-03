@@ -1,0 +1,23 @@
+# A trait names an ability, and an `impl` gives it to a type.
+trait Priced:
+    def price(self) -> int
+
+struct Coffee:
+    cups: int
+
+struct Bun:
+    filling: String
+
+impl Priced for Coffee:
+    def price(self) -> int:
+        return 350 * self.cups
+
+impl Priced for Bun:
+    def price(self) -> int:
+        return 280
+
+def main():
+    let coffee = Coffee(2)
+    let bun = Bun("cardamom")
+    print("coffee {coffee.price()}, bun {bun.price()}")
+    print("together {coffee.price() + bun.price()} cents")

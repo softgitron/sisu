@@ -1,0 +1,3 @@
+# `/` between two integers.
+def main():
+    print(7 / 2)

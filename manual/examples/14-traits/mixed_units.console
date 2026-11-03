@@ -1,0 +1,20 @@
+$ sisu run mixed_units.sisu
+error[E0300]: expected `Metres`, found `Seconds`
+  --> mixed_units.sisu:18:40
+   |
+18 |     print("{run} m in {time} s, {speed(time, run)} m/s")
+   |                                        ^^^^
+
+error[E0300]: expected `Seconds`, found `Metres`
+  --> mixed_units.sisu:18:46
+   |
+18 |     print("{run} m in {time} s, {speed(time, run)} m/s")
+   |                                              ^^^
+
+error[E0310]: `+` cannot be applied to `Metres` and `Seconds`
+  --> mixed_units.sisu:20:27
+   |
+20 |     print("all together: {run + time}")
+   |                           ^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (3)

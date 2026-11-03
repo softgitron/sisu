@@ -1,0 +1,7 @@
+# `Display` asked of `@derive`.
+@derive(Debug, Display)
+struct Money:
+    cents: int
+
+def main():
+    print(Money(1250))

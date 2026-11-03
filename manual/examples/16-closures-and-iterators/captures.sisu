@@ -1,0 +1,16 @@
+# A closure borrows what it uses; an `own` closure keeps a copy.
+def each_word(text: str, action: (str) -> ()):
+    for word in text.split_whitespace():
+        action(word)
+
+def scaler(factor: f64) -> (f64) -> f64:
+    return own x -> x * factor
+
+def main():
+    var longest = ""
+    each_word("hei kaunis maailma") do word:
+        if len(word) > len(longest):
+            longest = word
+    print(longest)
+    let to_feet = scaler(3.28)
+    print(to_feet(2.0))

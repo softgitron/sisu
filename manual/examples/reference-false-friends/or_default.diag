@@ -1,0 +1,2 @@
+4:11-4:15 E0302 type.not-bool found="str"
+4:19-4:30 E0302 type.not-bool found="str"

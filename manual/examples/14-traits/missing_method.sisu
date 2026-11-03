@@ -1,0 +1,14 @@
+# An impl that leaves out a required method.
+trait Priced:
+    def price(self) -> int
+    def name(self) -> String
+
+struct Bun:
+    filling: String
+
+impl Priced for Bun:
+    def price(self) -> int:
+        return 280
+
+def main():
+    print(Bun("cardamom").price())

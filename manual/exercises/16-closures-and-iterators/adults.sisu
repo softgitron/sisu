@@ -1,0 +1,32 @@
+##! Exercise 16.2, the adults. Kind: fix. Level: 1.
+##!
+##! A guest list is filtered and mapped the way a Python programmer
+##! would write it. The file does not compile. Run
+##! `sisu test adults.sisu`, read the diagnostics, and fix the two
+##! functions, not the tests, so that every test passes. The hints are
+##! in chapter 16 of the tutorial, under "Exercise 16.2: the adults".
+
+struct Guest:
+    name: String
+    age: int
+
+## The names of the guests who are `age` or older, in capitals.
+def adults(guests: list[Guest], age: int) -> list[String]:
+    let old_enough = guests.filter(it.age >= age)
+    return old_enough.map(it.name.to_uppercase()).collect()
+
+## The total age of the guests.
+def total_age(guests: list[Guest]) -> int:
+    return guests.map(it.age).fold(0, (total, n) -> total + n)
+
+## The guests of the party.
+def party() -> list[Guest]:
+    return [Guest("Aino", 34), Guest("Ella", 12), Guest("Eero", 29)]
+
+test "the adults":
+    assert adults(party(), 18) == ["AINO", "EERO"]
+    assert adults(party(), 30) == ["AINO"]
+
+test "the total age":
+    assert total_age(party()) == 75
+    assert total_age([]) == 0

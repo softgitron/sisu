@@ -1,0 +1,4 @@
+# Python's `dict.get` with a default.
+def main():
+    let ages = {"Aino": 7}
+    print(ages.get("Eero", 0))

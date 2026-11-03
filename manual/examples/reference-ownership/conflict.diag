@@ -1,0 +1,3 @@
+5:5-5:20 E0405 borrow.mut-while-borrowed name="scores" line="4" end="6"
+  label 4:17-4:30 borrow.borrowed-by borrower="first"
+  label 6:19-6:24 borrow.later-used

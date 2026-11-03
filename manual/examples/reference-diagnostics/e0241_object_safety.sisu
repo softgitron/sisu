@@ -1,0 +1,20 @@
+# A trait used as `dyn` with a method that takes no `self`.
+trait Shape:
+    def unit() -> Self
+    def area(self) -> f64
+
+struct Square:
+    side: f64
+
+impl Shape for Square:
+    def unit() -> Square:
+        return Square(1.0)
+
+    def area(self) -> f64:
+        return self.side * self.side
+
+def total(shapes: list[Box[dyn Shape]]) -> f64:
+    return sum([shape.area() for shape in shapes])
+
+def main():
+    print(total([Box(Square(2.0))]))

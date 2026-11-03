@@ -1,0 +1,5 @@
+test "numbers" ... ok
+test "words" ... ok
+test "versions" ... ok
+test "an empty list" ... ok
+4 passed, 0 failed, 0 blocked

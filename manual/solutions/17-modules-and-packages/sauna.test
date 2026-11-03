@@ -1,0 +1,3 @@
+test "two seats, three rounds" ... ok
+test "one seat, four rounds" ... ok
+2 passed, 0 failed, 0 blocked

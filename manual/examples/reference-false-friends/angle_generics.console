@@ -1,0 +1,7 @@
+$ sisu check angle_generics.sisu
+error[E0117]: unexpected `<` after the end of the statement
+  --> angle_generics.sisu:3:19
+  |
+3 |     let names: Vec<str> = ["Aino"]
+  |                   ^
+

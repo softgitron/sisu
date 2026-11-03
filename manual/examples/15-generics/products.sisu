@@ -1,0 +1,16 @@
+# A closed set of kinds is an enum, and a `match` covers every kind.
+enum Product:
+    Coffee(cups: int)
+    Bun(filling: String)
+
+def price(product: Product) -> int:
+    return match product:
+        case Coffee(cups): 350 * cups
+        case Bun(_): 280
+
+def main():
+    let basket: list[Product] = [Coffee(2), Bun("apple")]
+    var total = 0
+    for product in basket:
+        total += price(product)
+    print(total)

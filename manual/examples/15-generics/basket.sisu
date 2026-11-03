@@ -1,0 +1,32 @@
+# A `dyn` value carries its type, and calls that type's impl.
+trait Priced:
+    def price(self) -> int
+
+struct Coffee:
+    cups: int
+
+struct Bun:
+    filling: String
+
+impl Priced for Coffee:
+    def price(self) -> int:
+        return 350 * self.cups
+
+impl Priced for Bun:
+    def price(self) -> int:
+        return 280
+
+def total(basket: list[Box[dyn Priced]]) -> int:
+    var sum_so_far = 0
+    for item in basket:
+        sum_so_far += item.price()
+    return sum_so_far
+
+def show(item: ref dyn Priced) -> String:
+    return "{item.price()} cents"
+
+def main():
+    let basket: list[Box[dyn Priced]] = [Box(Coffee(2)), Box(Bun("apple"))]
+    print(total(basket))
+    let bun = Bun("cardamom")
+    print(show(ref bun))

@@ -1,0 +1,15 @@
+# A function that prints, passed where a pure one is required.
+pure def apply_twice(f: pure (int) -> int, x: int) -> int:
+    return f(f(x))
+
+pure def square(n: int) -> int:
+    return n * n
+
+def noisy_square(n: int) -> int:
+    print("squaring {n}")
+    return n * n
+
+def main():
+    print(apply_twice(n -> n * 3, 2))
+    print(apply_twice(square, 3))
+    print(apply_twice(noisy_square, 3))

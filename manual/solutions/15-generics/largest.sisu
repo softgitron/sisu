@@ -1,0 +1,37 @@
+##! Exercise 15.3, the largest. Kind: write. Level: 2.
+##!
+##! Write the body of `largest`, which works for a list of any type that
+##! has an order, so that every test passes. Run the tests with
+##! `sisu test largest.sisu`. The hints are in chapter 15 of the
+##! tutorial, under "Exercise 15.3: the largest".
+
+## The largest of `items`, the first of them when several are as large;
+## `None` for an empty list.
+def largest[T: Ord + Copy](items: list[T]) -> T?:
+    var best: T? = None
+    for item in items:
+        if let Some(b) = best, b >= item:
+            continue
+        best = Some(item)
+    return best
+
+## A version number, ordered by its major number first.
+@derive(Copy, Eq, Ord)
+struct Version:
+    major: int
+    minor: int
+
+test "numbers":
+    assert largest([3, 9, 4]) == Some(9)
+    assert largest([-5, -2, -7]) == Some(-2)
+
+test "words":
+    assert largest(["kuusi", "koivu", "mänty"]) == Some("mänty")
+
+test "versions":
+    let versions = [Version(1, 10), Version(2, 0), Version(1, 9)]
+    assert largest(versions) == Some(Version(2, 0))
+
+test "an empty list":
+    let empty: list[int] = []
+    assert largest(empty) == None

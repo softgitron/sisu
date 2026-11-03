@@ -1,0 +1,9 @@
+# A closure borrows what it captures; an `own` closure keeps copies.
+def make_adder(step: int) -> (int) -> int:
+    return own (n: int) -> n + step
+
+def main():
+    let limit = 10
+    let small = [n for n in [3, 12, 7] if n < limit]
+    let add_two = make_adder(2)
+    print("{small} {add_two(5)}")

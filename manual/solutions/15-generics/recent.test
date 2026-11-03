@@ -1,0 +1,5 @@
+test "fewer items than slots" ... ok
+test "the oldest items go" ... ok
+test "round and round" ... ok
+test "nothing yet" ... ok
+4 passed, 0 failed, 0 blocked

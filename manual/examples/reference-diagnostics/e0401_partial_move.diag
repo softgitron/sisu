@@ -1,0 +1,2 @@
+10:13-10:18 E0401 borrow.use-after-partial-move name="order" part="order.items" line="8"
+  label 8:17-8:28 borrow.moved-here name="order.items"

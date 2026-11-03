@@ -1,0 +1,7 @@
+$ sisu check chain.sisu
+error[E0113]: a chained comparison must point one way; `<` and `>` do not
+  --> chain.sisu:4:17
+  |
+4 |     print(0 < n > 2)
+  |                 ^
+

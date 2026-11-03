@@ -1,0 +1,6 @@
+# The line back at the indentation of its block.
+def main():
+    let n = 2
+    if n > 1:
+        print("big")
+    print("done")

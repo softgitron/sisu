@@ -1,0 +1,12 @@
+$ sisu run partial.sisu
+error[E0401]: `order` cannot be used as a whole, because `order.items` was moved out of it on line 8
+  --> partial.sisu:10:13
+   |
+10 |     print("{order:?}")
+   |             ^^^^^
+   |
+ 8 |     let items = order.items
+   |                 ----------- `order.items` is moved here
+  = note: copy it with `.copy()` before it is moved, or move it later
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

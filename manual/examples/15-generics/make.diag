@@ -1,0 +1,1 @@
+16:28-16:37 E0241 resolve.not-object-safe trait="Shape" method="unit" reason="it does not take `self` or `mut self`"

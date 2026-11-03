@@ -1,0 +1,4 @@
+# The block on the next line, indented.
+def main():
+    for n in [1, 2]:
+        print(n)

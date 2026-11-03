@@ -1,0 +1,7 @@
+# An `own` closure that would keep a copy of a `String`.
+def greeter(own greeting: String) -> (str) -> String:
+    return own name -> "{greeting}, {name}"
+
+def main():
+    let hei = greeter("Hei")
+    print(hei("Aino"))

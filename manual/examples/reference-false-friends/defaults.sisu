@@ -1,0 +1,9 @@
+# A default value is computed at each call.
+def add_name(name: str, own names: list[String] = []) -> list[String]:
+    var all = names
+    all.push(name.to_string())
+    return all
+
+def main():
+    print(add_name("Aino"))
+    print(add_name("Eero"))

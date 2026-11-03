@@ -1,0 +1,7 @@
+# A `dict` iterates in the order its keys were inserted.
+def main():
+    var ages = {"Roni": 9}
+    ages["Aino"] = 7
+    ages["Eero"] = 8
+    for name, age in ages.items():
+        print("{name} {age}")

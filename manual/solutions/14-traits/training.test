@@ -1,0 +1,4 @@
+test "totals" ... ok
+test "the longest run" ... ok
+test "a summary" ... ok
+3 passed, 0 failed, 0 blocked

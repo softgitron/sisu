@@ -1,0 +1,23 @@
+# A board of another size than the function takes.
+struct Grid[T, const W: int, const H: int]:
+    cells: Array[T, W * H]
+
+    def get(self, x: int, y: int) -> T where T: Copy:
+        return self.cells[y * W + x]
+
+    def set(mut self, x: int, y: int, own value: T):
+        self.cells[y * W + x] = value
+
+def show(board: Grid[char, 3, 2]):
+    for y in range(2):
+        var line: String = ""
+        for x in range(3):
+            line.push("{board.get(x, y)}")
+        print(line)
+
+def main():
+    var board: Grid[char, 3, 3] = Grid(Array.filled('.'))
+    board.set(1, 0, 'x')
+    board.set(2, 1, 'o')
+    show(board)
+    print("{len(board.cells)} cells")

@@ -1,0 +1,1 @@
+9:1-9:20 E0232 resolve.missing-trait-method trait="Priced" ty="Bun" methods="`name`"

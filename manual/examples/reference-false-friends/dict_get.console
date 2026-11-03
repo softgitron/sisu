@@ -1,0 +1,7 @@
+$ sisu check dict_get.sisu
+error[E0305]: wrong number of arguments to `get`: expected 1, found 2
+  --> dict_get.sisu:4:11
+  |
+4 |     print(ages.get("Eero", 0))
+  |           ^^^^^^^^^^^^^^^^^^^
+

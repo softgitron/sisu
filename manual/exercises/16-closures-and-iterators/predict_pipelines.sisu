@@ -1,0 +1,45 @@
+##! Exercise 16.1, predict the pipelines. Kind: predict. Level: 1.
+##!
+##! Each constant is your prediction of the value of the expression in
+##! its test. Write each as a literal, then run
+##! `sisu test predict_pipelines.sisu`. The hints are in chapter 16 of
+##! the tutorial, under "Exercise 16.1: predict the pipelines".
+
+## 0, 1, 2 and so on, without end.
+def count_up() -> Iter[int]:
+    var n = 0
+    while True:
+        yield n
+        n += 1
+
+## How many squares a pipeline works out before it is done.
+def squares_worked_out() -> int:
+    var calls = 0
+    let squares = range(1, 100).map() do n:
+        calls += 1
+        return n * n
+    let first_three = squares.take(3).collect()
+    return calls
+
+const MULTIPLES: list[int] = todo("multiples of 3 below 10, times 10")
+const FOLDED: int = todo("10 minus each number in turn")
+const TAKEN: list[int] = todo("a slice of the counting")
+const JOINED: str = todo("letters in capitals, joined")
+const CALLS: int = todo("squares worked out")
+
+test "multiples":
+    let tens = range(1, 10).filter(it % 3 == 0).map(it * 10)
+    assert tens.collect() == MULTIPLES
+
+test "a fold":
+    assert [1, 2, 3, 4].iter().fold(10, (acc, x) -> acc - x) == FOLDED
+
+test "counting without end":
+    assert count_up().skip(2).take(3).collect() == TAKEN
+
+test "a join":
+    let letters = ["a", "b", "c"]
+    assert letters.iter().map(it.to_uppercase()).join("-") == JOINED
+
+test "laziness":
+    assert squares_worked_out() == CALLS

@@ -1,0 +1,4 @@
+# `or` to give a default.
+def main():
+    let name = ""
+    print(name or "anonymous")

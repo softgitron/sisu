@@ -1,0 +1,19 @@
+# The method without `self` moved out of the trait.
+trait Shape:
+    def area(self) -> f64
+
+struct Square:
+    side: f64
+
+    def unit() -> Square:
+        return Square(1.0)
+
+impl Shape for Square:
+    def area(self) -> f64:
+        return self.side * self.side
+
+def total(shapes: list[Box[dyn Shape]]) -> f64:
+    return sum([shape.area() for shape in shapes])
+
+def main():
+    print(total([Box(Square(2.0)), Box(Square.unit())]))

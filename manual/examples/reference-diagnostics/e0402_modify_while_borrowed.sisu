@@ -1,0 +1,6 @@
+# A list changed while a borrow of an element is still used.
+def main():
+    var names: list[String] = ["Aino", "Eero", "Roni"]
+    let first = ref names[0]
+    names[1] = "Ella"
+    print("{first} is first")

@@ -1,0 +1,6 @@
+# `self` used in a function that is not a method.
+def describe() -> String:
+    return "{self}"
+
+def main():
+    print(describe())

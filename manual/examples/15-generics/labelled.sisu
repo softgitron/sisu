@@ -1,0 +1,18 @@
+# A generic type takes the types of its fields as parameters.
+struct Labelled[T]:
+    label: String
+    value: T
+
+    def relabel(own self, label: str) -> Labelled[T]:
+        return Labelled(label.to_string(), self.value)
+
+impl[T: Display] Display for Labelled[T]:
+    def fmt(self, mut f: Formatter):
+        f.write("{self.label}: {self.value}")
+
+def main():
+    let age = Labelled("age", 34)
+    let heat: Labelled[f64] = Labelled("sauna", 80.5)
+    print(age)
+    print(heat.relabel("löyly"))
+    print(Labelled("guests", ["Aino", "Eero"]))

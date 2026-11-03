@@ -1,0 +1,16 @@
+# A function is a value, and its type says what it takes and gives.
+def apply_to_all(numbers: list[int], f: (int) -> int) -> list[int]:
+    return [f(n) for n in numbers]
+
+def double(n: int) -> int:
+    return n * 2
+
+def negate(n: int) -> int:
+    return -n
+
+def main():
+    let numbers = [1, 2, 3]
+    print(apply_to_all(numbers, double))
+    print(apply_to_all(numbers, negate))
+    let chosen: (int) -> int = if len(numbers) > 2: double else: negate
+    print(chosen(21))

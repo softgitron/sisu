@@ -1,0 +1,57 @@
+##! Exercise 14.1, predict the methods. Kind: predict. Level: 1.
+##!
+##! Each constant is your prediction of the value of the expression in
+##! its test. Write each as a literal, then run
+##! `sisu test predict_methods.sisu`. The hints are in chapter 14 of the
+##! tutorial, under "Exercise 14.1: predict the methods".
+
+trait Greeter:
+    def name(self) -> String
+
+    def greet(self) -> String:
+        return "Hei, {self.name()}"
+
+struct Guest:
+    first: String
+
+struct Host:
+    first: String
+
+impl Greeter for Guest:
+    def name(self) -> String:
+        return self.first.copy()
+
+impl Greeter for Host:
+    def name(self) -> String:
+        return "host {self.first}"
+
+    def greet(self) -> String:
+        return "Tervetuloa, I am the {self.name()}"
+
+struct Room:
+    number: int
+
+impl Display for Room:
+    def fmt(self, mut f: Formatter):
+        f.write("room {self.number}")
+
+const GUEST: str = "Hei, Aino"
+const HOST: str = "Tervetuloa, I am the host Eero"
+const SHOWN: str = "room 12"
+const DEBUGGED: str = "Room(number=12)"
+const PADDED: str = "[  room 7]"
+
+test "a guest":
+    assert Guest("Aino").greet() == GUEST
+
+test "a host":
+    assert Host("Eero").greet() == HOST
+
+test "a room for users":
+    assert "{Room(12)}" == SHOWN
+
+test "a room for programmers":
+    assert "{Room(12):?}" == DEBUGGED
+
+test "a padded room":
+    assert "[{Room(7):>8}]" == PADDED

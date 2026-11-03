@@ -1,0 +1,7 @@
+# Every name of a module, imported at once, as Python allows.
+from trip.distance import *
+from trip.fuel.cost import trip_cost
+
+def main():
+    let km = between("Turku", "Tampere")
+    print("{km} km, {trip_cost(km, 6.5, 1.95):.2f} € of fuel")

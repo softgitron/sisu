@@ -1,0 +1,11 @@
+# Adapters make an iterator from an iterator; consumers drive it.
+def main():
+    let trees = ["kuusi", "mänty", "koivu", "leppä", "tammi", "pihlaja"]
+    let k_trees = trees.iter().filter(it.starts_with("k"))
+    print(k_trees.map(it.to_uppercase()).collect())
+    print(trees.iter().map(len(it)).fold(0, (total, n) -> total + n))
+    print(trees.iter().skip(2).take(3).join(" "))
+    print(trees.iter().find(len(it) > 5))
+    let has_oak = trees.iter().any(it == "tammi")
+    print("{has_oak} {trees.iter().all(len(it) > 4)}")
+    print(trees.iter().max_by(len(it)))

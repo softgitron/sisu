@@ -1,0 +1,73 @@
+##! Exercise 14.5, metres and seconds. Kind: fix. Level: 3.
+##!
+##! A training log keeps the distance and the time of each run. Both were
+##! plain `f64` values until a time was added to a distance by mistake,
+##! so now each has a type of its own. The file does not compile. Run
+##! `sisu test training.sisu`, read the diagnostics, and fix the types
+##! and the functions, not the tests, so that every test passes. The
+##! hints are in chapter 14 of the tutorial, under "Exercise 14.5: metres
+##! and seconds".
+
+## A distance.
+@delegate(Add, Eq, PartialOrd, Display, to="value")
+@derive(Copy)
+struct Metres:
+    value: f64
+
+## A time.
+@delegate(Add, Eq, Display, to="value")
+@derive(Copy)
+struct Seconds:
+    value: f64
+
+## One run of the log.
+struct Run:
+    distance: Metres
+    time: Seconds
+
+## The total distance of `runs`.
+def total_distance(runs: list[Run]) -> Metres:
+    var total = Metres(0.0)
+    for run in runs:
+        total += run.distance
+    return total
+
+## The total time of `runs`.
+def total_time(runs: list[Run]) -> Seconds:
+    var total = Seconds(0.0)
+    for run in runs:
+        total += run.time
+    return total
+
+## The distance of the longest of `runs`.
+def longest(runs: list[Run]) -> Metres:
+    var best = Metres(0.0)
+    for run in runs:
+        if run.distance > best:
+            best = run.distance
+    return best
+
+## The log in a line, such as "2 runs, 5000.0 m in 1500.0 s".
+def summary(runs: list[Run]) -> String:
+    let distance = total_distance(runs)
+    return "{len(runs)} runs, {distance} m in {total_time(runs)} s"
+
+## A week of runs.
+def week() -> list[Run]:
+    return [
+        Run(Metres(4000.0), Seconds(1200.0)),
+        Run(Metres(5000.0), Seconds(1500.0)),
+        Run(Metres(3000.0), Seconds(900.0)),
+    ]
+
+test "totals":
+    assert total_distance(week()) == Metres(12000.0)
+    assert total_time(week()) == Seconds(3600.0)
+    assert total_time([]) == Seconds(0.0)
+
+test "the longest run":
+    assert longest(week()) == Metres(5000.0)
+    assert longest(week()[:1]) == Metres(4000.0)
+
+test "a summary":
+    assert summary(week()) == "3 runs, 12000.0 m in 3600.0 s"

@@ -1,0 +1,19 @@
+##! The word counter's command line, over the library `wordcount`.
+
+import cli
+import wordcount
+from wordcount import Tally
+
+## What the command line can say.
+struct Options:
+    paths: list[Path]
+
+def main(sys: System) -> ! {IoError, cli.Error}:
+    let options = cli.parse[Options](sys.env.args())?
+    var tally = Tally[String].new()
+    for path in options.paths:
+        let text = sys.fs.read_to_string(path)?
+        for word in own wordcount.words(text):
+            tally.add(word)
+    print(tally)
+    return Ok(())

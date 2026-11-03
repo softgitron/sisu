@@ -1,0 +1,10 @@
+# `Shared` owns a value with others; `Cell` lets them change it.
+struct Counter:
+    hits: Cell[int]
+
+def main():
+    let counter = Shared(Counter(Cell(0)))
+    let other = counter.copy()
+    other.hits.set(other.hits.get() + 1)
+    counter.hits.set(counter.hits.get() + 1)
+    print("{Shared.count(counter)} owners, {counter.hits.get()} hits")

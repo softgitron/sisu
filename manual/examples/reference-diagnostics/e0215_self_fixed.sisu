@@ -1,0 +1,6 @@
+# A function without `self`.
+def describe() -> String:
+    return "a thing"
+
+def main():
+    print(describe())

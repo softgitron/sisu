@@ -1,0 +1,14 @@
+# `@derive` writes the impls of common traits from the fields.
+@derive(Debug, Default, Eq, Hash)
+struct Settings:
+    volume: int = 5
+    muted: bool
+    theme: String
+
+def main():
+    let start = Settings.default()
+    print("{start:?}")
+    print(start == Settings(volume=5, muted=False, theme=""))
+    let quiet = Settings(volume=1, muted=False, theme="dark")
+    print(len({start, quiet, Settings.default()}))
+    print("{int.default()} {String.default():?} {bool.default()}")

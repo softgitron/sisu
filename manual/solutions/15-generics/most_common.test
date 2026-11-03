@@ -1,0 +1,5 @@
+test "numbers" ... ok
+test "words" ... ok
+test "a week of weather" ... ok
+test "nothing at all" ... ok
+4 passed, 0 failed, 0 blocked

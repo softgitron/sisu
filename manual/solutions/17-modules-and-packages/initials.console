@@ -1,0 +1,19 @@
+$ sisu test initials.sisu
+test "spaces around the words" ... FAILED
+test "initials (doc example)" ... FAILED
+
+test "spaces around the words" ... FAILED
+panic: assertion failed: initials("Eero  Virtanen") == "E.V."
+  left:  "E..V."
+  right: "E.V."
+  at test "spaces around the words" (initials.sisu:25:5)
+replay: sisu test --replay 1-588072136504aa03-0.0.1-t0-s0-r0 initials.sisu
+
+test "initials (doc example)" ... FAILED
+panic: assertion failed: initials("aino maria virtanen") == "A.M.V."
+  left:  "a.m.v."
+  right: "A.M.V."
+  at test "initials (doc example)" (initials.sisu:14:4)
+replay: sisu test --replay 1-588072136504aa03-0.0.1-t1-s0-r0 initials.sisu
+
+0 passed, 2 failed, 0 blocked

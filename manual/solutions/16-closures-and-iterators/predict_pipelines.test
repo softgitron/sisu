@@ -1,0 +1,6 @@
+test "multiples" ... ok
+test "a fold" ... ok
+test "counting without end" ... ok
+test "a join" ... ok
+test "laziness" ... ok
+5 passed, 0 failed, 0 blocked

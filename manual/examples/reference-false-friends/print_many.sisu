@@ -1,0 +1,4 @@
+# `print` with several arguments.
+def main():
+    let name = "Aino"
+    print("Hei,", name)

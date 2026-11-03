@@ -1,8 +1,1 @@
 $ sisu run e0320_try_context.sisu
-error[E0320]: `?` on `int?` needs a function that returns `T?`, but this one returns `()`
-  --> e0320_try_context.sisu:3:13
-  |
-3 |     let n = "42".parse_int()?
-  |             ^^^^^^^^^^^^^^^^^
-
-error[D0006]: the program was not run: errors found (1)

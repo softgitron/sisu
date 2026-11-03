@@ -1,0 +1,59 @@
+##! Exercise 15.1, predict the generic calls. Kind: predict. Level: 1.
+##!
+##! Each constant is your prediction of the value of the expression in
+##! its test. Write each as a literal, then run
+##! `sisu test predict_generics.sisu`. The hints are in chapter 15 of the
+##! tutorial, under "Exercise 15.1: predict the generic calls".
+
+trait Animal:
+    def sound(self) -> String
+
+    def call(self) -> String:
+        return "{self.sound()} {self.sound()}"
+
+struct Cat:
+    name: String
+
+struct Cow:
+    name: String
+
+impl Animal for Cat:
+    def sound(self) -> String:
+        return "miau"
+
+impl Animal for Cow:
+    def sound(self) -> String:
+        return "ammuu"
+
+    def call(self) -> String:
+        return "{self.name} says {self.sound()}"
+
+def chorus[T: Animal](animals: list[T]) -> String:
+    let calls = [animal.call() for animal in animals]
+    return calls.join(" / ")
+
+def sounds(animals: list[Box[dyn Animal]]) -> String:
+    let each = [animal.sound() for animal in animals]
+    return each.join(" ")
+
+struct Shelf[T, const N: int]:
+    slots: Array[T, N]
+
+const CATS: str = "miau miau / miau miau"
+const COWS: str = "Kukka says ammuu"
+const BARN: str = "miau ammuu"
+const SLOTS: int = 6
+
+test "a chorus of cats":
+    assert chorus([Cat("Mirri"), Cat("Musti")]) == CATS
+
+test "a chorus of cows":
+    assert chorus([Cow("Kukka")]) == COWS
+
+test "a barn":
+    let barn: list[Box[dyn Animal]] = [Box(Cat("Mirri")), Box(Cow("Kukka"))]
+    assert sounds(barn) == BARN
+
+test "a shelf":
+    let shelf: Shelf[int, 2 * 3] = Shelf(Array.filled(0))
+    assert len(shelf.slots) == SLOTS

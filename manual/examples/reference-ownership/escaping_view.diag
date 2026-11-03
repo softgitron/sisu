@@ -1,0 +1,2 @@
+7:5-7:57 E0407 borrow.return-local name="source" function="first_token"
+  label 7:18-7:24 borrow.borrowed-here

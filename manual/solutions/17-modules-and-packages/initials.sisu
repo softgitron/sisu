@@ -1,0 +1,26 @@
+##! Exercise 17.2, a documented function. Kind: fix. Level: 1.
+##!
+##! A library documents each `pub` item, and the examples in its doc
+##! comments run as tests. `initials` fails its doc example and a test.
+##! Run `sisu test initials.sisu`, read the reports, and fix the body of
+##! `initials`, not its doc comment or the tests, so that every test
+##! passes. The hints are in chapter 17 of the tutorial, under
+##! "Exercise 17.2: a documented function".
+
+## The initials of `name`: the first letter of each of its words, in
+## capitals, each followed by a dot.
+##
+## ```
+## assert initials("aino maria virtanen") == "A.M.V."
+## ```
+pub def initials(name: str) -> String:
+    var out = String()
+    for word in name.split_whitespace():
+        if let Some(first) = word.chars().next():
+            out.push_char(first)
+            out.push(".")
+    return out.to_uppercase()
+
+test "spaces around the words":
+    assert initials("Eero  Virtanen") == "E.V."
+    assert initials(" Roni ") == "R."

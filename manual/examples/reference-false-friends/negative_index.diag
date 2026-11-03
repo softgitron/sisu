@@ -1,0 +1,2 @@
+4:17-4:19 E0344 type.constant-negative-index fix="names[^1]"
+  fix type.from-end-index 4:17-4:19 "^1"

@@ -1,0 +1,38 @@
+$ sisu test sauna.sisu
+error[E0100]: expected a name, found `*`
+  --> sauna.sisu:11:29
+   |
+11 | from std.collections import *
+   |                             ^
+
+error[E0201]: cannot find a type named `SortedDict`
+  --> sauna.sisu:16:57
+   |
+16 | def bathe(names: list[str], seats: int, rounds: int) -> SortedDict[str, int]:
+   |                                                         ^^^^^^^^^^^^^^^^^^^^
+
+error[E0201]: cannot find a type named `Deque`
+  --> sauna.sisu:17:16
+   |
+17 |     var queue: Deque[str] = Deque.new()
+   |                ^^^^^^^^^^
+
+error[E0200]: cannot find `Deque` in this scope
+  --> sauna.sisu:17:29
+   |
+17 |     var queue: Deque[str] = Deque.new()
+   |                             ^^^^^
+
+error[E0201]: cannot find a type named `SortedDict`
+  --> sauna.sisu:20:17
+   |
+20 |     var visits: SortedDict[str, int] = SortedDict.new()
+   |                 ^^^^^^^^^^^^^^^^^^^^
+
+error[E0200]: cannot find `SortedDict` in this scope
+  --> sauna.sisu:20:40
+   |
+20 |     var visits: SortedDict[str, int] = SortedDict.new()
+   |                                        ^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (6)

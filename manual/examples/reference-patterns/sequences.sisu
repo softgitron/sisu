@@ -1,0 +1,18 @@
+# Tuple and list patterns; `*rest` takes the rest of a list.
+def first_two(xs: list[int]) -> String:
+    return match xs:
+        case []: "empty"
+        case [only]: "just {only}"
+        case [first, second, *rest]: "{first}, {second} and {len(rest)} more"
+
+def main():
+    print(first_two([]))
+    print(first_two([7]))
+    print(first_two([1, 2, 3, 4]))
+    let point = (3, -1)
+    let quadrant = match point:
+        case (0, 0): "origin"
+        case (x, y) if x > 0 and y > 0: "first"
+        case (_, y) if y < 0: "below the axis"
+        case _: "elsewhere"
+    print(quadrant)

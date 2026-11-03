@@ -1,0 +1,2 @@
+10:5-10:17 E0347 type.bound-not-satisfied ty="Money" bound="Display"
+  fix type.add-impl

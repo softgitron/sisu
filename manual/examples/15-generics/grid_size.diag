@@ -1,0 +1,1 @@
+22:10-22:15 E0300 type.mismatch expected="Grid[char, 3, 2]" found="Grid[char, 3, 3]"

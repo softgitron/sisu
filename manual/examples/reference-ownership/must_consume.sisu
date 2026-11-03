@@ -1,0 +1,18 @@
+# A must-consume value is ended by a method that takes `own self`.
+@must_consume
+struct Draft:
+    text: String
+
+    def publish(own self, mut shelf: list[String]):
+        shelf.push(self.text)
+
+    def discard(own self):
+        pass
+
+def main():
+    var shelf: list[String] = []
+    let letter = Draft("Hei Aino")
+    let scrap = Draft("a first try")
+    letter.publish(mut shelf)
+    scrap.discard()
+    print(shelf)

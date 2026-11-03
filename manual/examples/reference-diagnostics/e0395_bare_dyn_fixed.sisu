@@ -1,0 +1,17 @@
+# The `dyn` value behind `ref`.
+trait Priced:
+    def price(self) -> int
+
+struct Bun:
+    filling: String
+
+impl Priced for Bun:
+    def price(self) -> int:
+        return 280
+
+def show(item: ref dyn Priced) -> String:
+    return "{item.price()} cents"
+
+def main():
+    let bun = Bun("cardamom")
+    print(show(ref bun))

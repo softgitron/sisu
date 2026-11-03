@@ -1,0 +1,5 @@
+test "a chorus of cats" ... ok
+test "a chorus of cows" ... ok
+test "a barn" ... ok
+test "a shelf" ... ok
+4 passed, 0 failed, 0 blocked

@@ -1,0 +1,8 @@
+$ sisu run grid_size.sisu
+error[E0300]: expected `Grid[char, 3, 2]`, found `Grid[char, 3, 3]`
+  --> grid_size.sisu:22:10
+   |
+22 |     show(board)
+   |          ^^^^^
+
+error[D0006]: the program was not run: errors found (1)

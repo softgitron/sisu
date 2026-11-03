@@ -1,0 +1,12 @@
+$ sisu test primes.sisu
+warning[W0001]: typed hole `primes` of type `Iter[int]`
+  --> primes.sisu:12:12
+   |
+12 |     return todo("primes")
+   |            ^^^^^^^^^^^^^^
+
+test "the first primes" ... blocked by todo("primes")
+test "the first prime above a thousand" ... blocked by todo("primes")
+test "the hundredth prime" ... blocked by todo("primes")
+test "primes that end in 3" ... blocked by todo("primes")
+0 passed, 0 failed, 4 blocked

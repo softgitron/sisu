@@ -1,0 +1,23 @@
+$ sisu test sales.sisu
+warning[W0001]: typed hole `total_in` of type `int`
+  --> sales.sisu:17:12
+   |
+17 |     return todo("total_in")
+   |            ^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `dear` of type `list[String]`
+  --> sales.sisu:22:12
+   |
+22 |     return todo("dear")
+   |            ^^^^^^^^^^^^
+
+warning[W0001]: typed hole `best_seller` of type `String?`
+  --> sales.sisu:26:12
+   |
+26 |     return todo("best_seller")
+   |            ^^^^^^^^^^^^^^^^^^^
+
+test "a town's total" ... blocked by todo("total_in")
+test "the dear products" ... blocked by todo("dear")
+test "the best seller" ... blocked by todo("best_seller")
+0 passed, 0 failed, 3 blocked

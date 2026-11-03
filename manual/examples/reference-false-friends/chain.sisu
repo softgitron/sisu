@@ -1,0 +1,4 @@
+# A comparison chain that points two ways.
+def main():
+    let n = 3
+    print(0 < n > 2)

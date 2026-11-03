@@ -1,0 +1,5 @@
+# Rust's `.clone()`.
+def main():
+    let names = ["Aino"]
+    let copied = names.clone()
+    print(copied)

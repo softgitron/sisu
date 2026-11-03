@@ -1,0 +1,14 @@
+# A call with a type that lacks the bound.
+def count_matching[T: Eq](items: list[T], wanted: T) -> int:
+    var count = 0
+    for item in items:
+        if item == wanted:
+            count += 1
+    return count
+
+struct Guest:
+    name: String
+
+def main():
+    let guests = [Guest("Aino"), Guest("Eero")]
+    print(count_matching(guests, Guest("Aino")))

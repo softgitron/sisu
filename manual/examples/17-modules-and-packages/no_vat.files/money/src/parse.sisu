@@ -1,0 +1,17 @@
+##! Reading amounts of money from text.
+
+from money import Money
+
+## Why a text is not an amount of money.
+pub error MoneyError:
+    NotAnAmount(text: String)
+
+## The amount that `text` writes in euros and cents, such as "12,50".
+pub def parse_money(text: str) -> Money ! MoneyError:
+    let euros, cents = text.trim().split_once(",") else:
+        return Err(NotAnAmount(text.to_string()))
+    let e = euros.parse_int() else:
+        return Err(NotAnAmount(text.to_string()))
+    let c = cents.parse_int() else:
+        return Err(NotAnAmount(text.to_string()))
+    return Ok(Money(e * 100 + c))

@@ -1,0 +1,5 @@
+test "adding and taking away" ... ok
+test "the opposite move" ... ok
+test "a move made several times" ... ok
+test "a walk" ... ok
+4 passed, 0 failed, 0 blocked

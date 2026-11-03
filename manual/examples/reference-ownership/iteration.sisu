@@ -1,0 +1,13 @@
+# `for` borrows, `for ... in mut` changes in place, `for ... in own` takes.
+def main():
+    var prices = [12, 5, 30]
+    var total = 0
+    for p in prices:
+        total += p
+    for p in mut prices:
+        p += 1
+    var names: list[String] = ["Aino", "Eero"]
+    var kept: list[String] = []
+    for name in own names:
+        kept.push(name)
+    print("{total} {prices} {kept}")

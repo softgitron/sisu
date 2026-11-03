@@ -1,0 +1,7 @@
+# Python's `else` on a loop.
+def main():
+    for name in ["Aino", "Eero"]:
+        if name == "Roni":
+            break
+    else:
+        print("no Roni")

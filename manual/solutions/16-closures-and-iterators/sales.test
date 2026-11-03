@@ -1,0 +1,4 @@
+test "a town's total" ... ok
+test "the dear products" ... ok
+test "the best seller" ... ok
+3 passed, 0 failed, 0 blocked

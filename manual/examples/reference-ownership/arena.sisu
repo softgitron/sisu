@@ -1,0 +1,15 @@
+# An `Arena` holds the nodes of a graph, and a `Key` names one.
+struct Town:
+    name: String
+    roads: list[Key[Town]]
+
+def main():
+    var map = Arena[Town]()
+    let oulu = map.insert(Town("Oulu", []))
+    let kemi = map.insert(Town("Kemi", []))
+    map[oulu].roads.push(kemi)
+    map[kemi].roads.push(oulu)
+    let next = map[oulu].roads[0]
+    print("from {map[oulu].name} to {map[next].name}")
+    map.remove(kemi)
+    print(map.get(kemi)?.name ?? "Kemi is gone")

@@ -1,0 +1,18 @@
+# Struct patterns by position and keyword, with `..` for the rest.
+struct Point:
+    x: int
+    y: int
+    z: int = 0
+
+def place(p: Point) -> String:
+    return match p:
+        case Point(0, 0, 0): "the origin"
+        case Point(x=0, ..): "on the y-z plane"
+        case Point(x, y, z=0): "flat at {x}, {y}"
+        case _: "somewhere else"
+
+def main():
+    print(place(Point(0, 0)))
+    print(place(Point(0, 5, 1)))
+    print(place(Point(2, 3)))
+    print(place(Point(1, 1, 1)))

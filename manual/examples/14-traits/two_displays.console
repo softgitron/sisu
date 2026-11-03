@@ -1,0 +1,11 @@
+$ sisu run two_displays.sisu
+error[E0235]: `Display` is implemented for `Money` more than once; a type implements a trait at most once
+  --> two_displays.sisu:9:1
+  |
+9 | impl Display for Money:
+  | ^^^^^^^^^^^^^^^^^^^^^^
+  |
+5 | impl Display for Money:
+  | ---------------------- the other impl is here
+
+error[D0006]: the program was not run: errors found (1)

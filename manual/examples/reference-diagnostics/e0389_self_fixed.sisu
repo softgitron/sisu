@@ -1,0 +1,6 @@
+# The value passed as a parameter.
+def describe(name: str) -> String:
+    return "{name}"
+
+def main():
+    print(describe("Aino"))

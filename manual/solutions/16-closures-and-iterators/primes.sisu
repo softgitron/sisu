@@ -1,0 +1,39 @@
+##! Exercise 16.4, primes without end. Kind: write. Level: 2.
+##!
+##! A prime is a whole number above 1 that only 1 and itself divide.
+##! Write `primes`, a generator that gives every prime in order, without
+##! end, so that every test passes. The tests take only as many as they
+##! need. Run the tests with `sisu test primes.sisu`. The hints are in
+##! chapter 16 of the tutorial, under "Exercise 16.4: primes without
+##! end".
+
+## Every prime, from 2 up.
+def primes() -> Iter[int]:
+    var n = 2
+    while True:
+        if is_prime(n):
+            yield n
+        n += 1
+
+## Whether only 1 and `n` itself divide `n`.
+def is_prime(n: int) -> bool:
+    var d = 2
+    while d * d <= n:
+        if n % d == 0:
+            return False
+        d += 1
+    return True
+
+test "the first primes":
+    let first = primes().take(10).collect()
+    assert first == [2, 3, 5, 7, 11, 13, 17, 19, 23, 29]
+
+test "the first prime above a thousand":
+    assert primes().find(it > 1000) == Some(1009)
+
+test "the hundredth prime":
+    assert primes().nth(99) == Some(541)
+
+test "primes that end in 3":
+    let threes = primes().filter(it % 10 == 3).take(4).collect()
+    assert threes == [3, 13, 23, 43]

@@ -1,0 +1,59 @@
+$ sisu test training.sisu
+error[E0310]: `+` cannot be applied to `Metres` and `Metres`
+  --> training.sisu:28:9
+   |
+28 |         total += run.distance
+   |         ^^^^^^^^^^^^^^^^^^^^^
+
+error[E0310]: `+` cannot be applied to `Seconds` and `Metres`
+  --> training.sisu:35:9
+   |
+35 |         total += run.distance
+   |         ^^^^^^^^^^^^^^^^^^^^^
+
+error[E0368]: `Metres` has no order, so it cannot be compared with `>` or sorted
+  --> training.sisu:42:12
+   |
+42 |         if run.distance > best:
+   |            ^^^^^^^^^^^^^^^^^^^
+
+error[E0338]: cannot move `run.distance` out of a borrowed value; copy it with `.copy()`
+  --> training.sisu:43:20
+   |
+43 |             best = run.distance
+   |                    ^^^^^^^^^^^^
+  = fix: copy it with `.copy()`: `.copy()`
+
+error[E0347]: `Metres` does not implement `Display`
+  --> training.sisu:49:32
+   |
+49 |     return "{len(runs)} runs, {distance} m in {total_time(runs)} s"
+   |                                ^^^^^^^^
+  = fix: show its `Debug` form: `:?`
+
+error[E0347]: `Seconds` does not implement `Display`
+  --> training.sisu:49:48
+   |
+49 |     return "{len(runs)} runs, {distance} m in {total_time(runs)} s"
+   |                                                ^^^^^^^^^^^^^^^^
+  = fix: show its `Debug` form: `:?`
+
+error[E0347]: `Metres` does not implement `Eq`
+  --> training.sisu:60:12
+   |
+60 |     assert total_distance(week()) == Metres(12000.0)
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0347]: `Seconds` does not implement `Eq`
+  --> training.sisu:61:12
+   |
+61 |     assert total_time(week()) == Seconds(3600.0)
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0347]: `Metres` does not implement `Eq`
+  --> training.sisu:65:12
+   |
+65 |     assert longest(week()) == Metres(5000.0)
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (9)

@@ -1,0 +1,2 @@
+7:13-7:20 E0339 type.mut-argument-missing param="balance"
+  fix type.add-mut 7:13-7:13 "mut "

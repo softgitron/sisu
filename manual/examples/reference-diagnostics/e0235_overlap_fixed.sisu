@@ -1,0 +1,10 @@
+# One impl.
+struct Money:
+    cents: int
+
+impl Display for Money:
+    def fmt(self, mut f: Formatter):
+        f.write("{self.cents // 100} €")
+
+def main():
+    print(Money(1250))

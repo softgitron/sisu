@@ -1,9 +1,1 @@
 $ sisu run e0344_negative_index.sisu
-error[E0344]: a constant negative index does not compile; count from the end with `^`: `names[^1]`
-  --> e0344_negative_index.sisu:4:17
-  |
-4 |     print(names[-1])
-  |                 ^^
-  = fix: count from the end with `^`: `^1`
-
-error[D0006]: the program was not run: errors found (1)

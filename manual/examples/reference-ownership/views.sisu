@@ -1,0 +1,16 @@
+# A `view struct` holds borrows of text that lives elsewhere.
+view struct Token:
+    text: str
+    line: int
+
+def tokens(source: str) -> list[Token]:
+    var found: list[Token] = []
+    for i, line in enumerate(source.lines()):
+        for word in line.split_whitespace():
+            found.push(Token(word, i + 1))
+    return found
+
+def main():
+    let source = "let x\nprint x"
+    for token in tokens(source):
+        print("{token.line}: {token.text}")

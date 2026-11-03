@@ -1,0 +1,17 @@
+# Every required method written.
+trait Priced:
+    def price(self) -> int
+    def name(self) -> String
+
+struct Bun:
+    filling: String
+
+impl Priced for Bun:
+    def price(self) -> int:
+        return 280
+
+    def name(self) -> String:
+        return "a {self.filling} bun"
+
+def main():
+    print(Bun("cardamom").price())

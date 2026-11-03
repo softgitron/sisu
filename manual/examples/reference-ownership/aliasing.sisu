@@ -1,0 +1,9 @@
+# A borrow ends at its last use, after which the value can change.
+def main():
+    var scores = [7, 9, 4]
+    let first = ref scores[0]
+    print("first {first}")
+    scores.push(10)
+    let last = ref mut scores[^1]
+    last += 1
+    print(scores)

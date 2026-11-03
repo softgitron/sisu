@@ -1,0 +1,13 @@
+# The module `trip.distance`, from the file `src/distance.sisu`.
+
+## The road distance in kilometres between two towns, or 0 when it is
+## not known.
+pub def between(a: str, b: str) -> int:
+    for x, y, km in table():
+        if (x == a and y == b) or (x == b and y == a):
+            return km
+    return 0
+
+## The known distances.
+def table() -> list[(str, str, int)]:
+    return [("Turku", "Tampere", 160), ("Tampere", "Oulu", 490)]

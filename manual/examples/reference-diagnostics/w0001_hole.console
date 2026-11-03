@@ -1,8 +1,1 @@
 $ sisu run w0001_hole.sisu
-warning[W0001]: typed hole `double` of type `int`
-  --> w0001_hole.sisu:3:12
-  |
-3 |     return todo("double")
-  |            ^^^^^^^^^^^^^^
-
-ready

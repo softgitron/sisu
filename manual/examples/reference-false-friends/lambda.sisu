@@ -1,0 +1,4 @@
+# Python's `lambda`.
+def main():
+    let double = lambda n: n * 2
+    print(double(4))

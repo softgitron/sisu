@@ -1,0 +1,28 @@
+# A provided method has a body, which an impl may replace.
+trait Priced:
+    def price(self) -> int
+
+    def label(self) -> String:
+        let cents = self.price()
+        return "{cents // 100}.{cents % 100:02} €"
+
+struct Coffee:
+    cups: int
+
+struct Bun:
+    filling: String
+
+impl Priced for Coffee:
+    def price(self) -> int:
+        return 350 * self.cups
+
+impl Priced for Bun:
+    def price(self) -> int:
+        return 280
+
+    def label(self) -> String:
+        return "{self.filling} bun, {self.price()} cents"
+
+def main():
+    print(Coffee(2).label())
+    print(Bun("cardamom").label())

@@ -1,3 +1,1 @@
 $ sisu run r0003_overflow.sisu
-panic: integer overflow: 9223372036854775807 + 1
-  at main (r0003_overflow.sisu:4:11)

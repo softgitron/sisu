@@ -1,0 +1,12 @@
+# `impl Type:` adds methods to a type that you did not declare.
+impl str:
+    def shout(self) -> String:
+        return "{self.to_uppercase()}!"
+
+impl int:
+    def is_even(self) -> bool:
+        return self % 2 == 0
+
+def main():
+    print("hei maailma".shout())
+    print("{4.is_even()} {7.is_even()}")

@@ -1,8 +1,1 @@
 $ sisu run e0329_refutable_let.sisu
-error[E0329]: this pattern might not match; add `else:` with a block that leaves the scope
-  --> e0329_refutable_let.sisu:4:9
-  |
-4 |     let Some(n) = maybe
-  |         ^^^^^^^
-
-error[D0006]: the program was not run: errors found (1)

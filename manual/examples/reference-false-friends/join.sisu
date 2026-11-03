@@ -1,0 +1,4 @@
+# Python's `str.join`.
+def main():
+    let names = ["Aino", "Eero"]
+    print(", ".join(names))

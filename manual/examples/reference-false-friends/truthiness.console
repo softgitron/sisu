@@ -1,0 +1,8 @@
+$ sisu check truthiness.sisu
+error[E0302]: a condition must be a `bool`, not `list[str]`; Sisu has no truthiness
+  --> truthiness.sisu:4:8
+  |
+4 |     if names:
+  |        ^^^^^
+  = note: write the test explicitly, as in `not xs.is_empty()` or `x != 0`
+

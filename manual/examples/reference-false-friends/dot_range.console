@@ -1,0 +1,7 @@
+$ sisu check dot_range.sisu
+error[E0100]: expected `:`, found `..`
+  --> dot_range.sisu:3:15
+  |
+3 |     for i in 0..3:
+  |               ^^
+

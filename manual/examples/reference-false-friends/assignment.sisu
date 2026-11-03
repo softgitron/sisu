@@ -1,0 +1,4 @@
+# An assignment that should declare a name.
+def main():
+    count = 0
+    print(count)

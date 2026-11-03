@@ -1,0 +1,8 @@
+$ sisu run impure_twice.sisu
+error[E0335]: this function is passed where a pure function is required, but it calls `noisy_square`, which is not pure
+  --> impure_twice.sisu:15:23
+   |
+15 |     print(apply_twice(noisy_square, 3))
+   |                       ^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

@@ -1,0 +1,2 @@
+3:11-3:16 E0301 type.integer-division
+  fix type.use-floor-division 3:13-3:14 "//"

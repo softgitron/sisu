@@ -1,0 +1,21 @@
+$ sisu test receipt.sisu
+error[E0242]: `Ticket` implements `Item`, which requires `Display`, but `Ticket` does not implement `Display`
+  --> receipt.sisu:28:1
+   |
+28 | impl Item for Ticket:
+   | ^^^^^^^^^^^^^^^^^^^^
+
+error[E0232]: the impl of `Item` for `Coffee` is missing `price`
+  --> receipt.sisu:32:1
+   |
+32 | impl Item for Coffee:
+   | ^^^^^^^^^^^^^^^^^^^^
+  = note: write `def price(self) -> int` in the impl
+
+error[E0233]: `cost` is not a method of `Item`
+  --> receipt.sisu:33:9
+   |
+33 |     def cost(self) -> int:
+   |         ^^^^
+
+error[D0006]: the program was not run: errors found (3)

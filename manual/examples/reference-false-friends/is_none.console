@@ -1,0 +1,7 @@
+$ sisu check is_none.sisu
+error[E0100]: expected `:`, found `is`
+  --> is_none.sisu:4:14
+  |
+4 |     if found is None:
+  |              ^^
+

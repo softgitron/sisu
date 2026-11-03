@@ -1,8 +1,1 @@
 $ sisu run e0211_ambiguous_variant.sisu
-error[E0211]: `Red` is a variant of more than one type (Light, Wine); qualify it, as in `Light.Red`
-  --> e0211_ambiguous_variant.sisu:11:18
-   |
-11 |     let colour = Red
-   |                  ^^^
-
-error[D0006]: the program was not run: errors found (1)

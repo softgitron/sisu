@@ -1,0 +1,7 @@
+$ sisu check as_cast.sisu
+error[E0100]: expected `)`, found `as`
+  --> as_cast.sisu:4:13
+  |
+4 |     print(n as f64)
+  |             ^^
+

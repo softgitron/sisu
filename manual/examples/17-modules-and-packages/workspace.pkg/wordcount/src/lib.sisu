@@ -1,0 +1,35 @@
+##! Counting the words of a text, and anything else a dict can key.
+
+pub from wordcount.text import words, pairs
+
+## How often each item was added, for items that a dict can use as a
+## key.
+pub struct Tally[T: Hash]:
+    counts: dict[T, int]
+
+    ## A tally of nothing yet.
+    pub pure def new() -> Tally[T]:
+        return Tally({})
+
+    ## Counts `item` once more.
+    pub pure def add(mut self, own item: T):
+        self.counts.entry(item).or_insert(0) += 1
+
+    ## The `n` most common items with their counts, the most common
+    ## first; items counted as often keep the order of their first add.
+    pub pure def top(self, n: int) -> list[(T, int)]:
+        var ranked = [(item.copy(), n) for item, n in self.counts]
+        ranked.sort_by((a, b) -> b.1.cmp(a.1))
+        return ranked[:n]
+
+## The ten most common items, a line for each, as "   3  kissa".
+impl[T: Hash + Display] Display for Tally[T]:
+    def fmt(self, mut f: Formatter):
+        let lines = ["{n:>4}  {item}" for item, n in self.top(10)]
+        f.write(lines.join("\n"))
+
+test "a tally of words":
+    var tally = Tally[String].new()
+    for word in own words("kissa koira kissa"):
+        tally.add(word)
+    assert tally.top(1) == [("kissa", 2)]

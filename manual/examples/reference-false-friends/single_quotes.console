@@ -1,0 +1,7 @@
+$ sisu check single_quotes.sisu
+error[E0016]: a character literal holds exactly one character
+  --> single_quotes.sisu:3:11
+  |
+3 |     print('Hei')
+  |           ^^^^^
+

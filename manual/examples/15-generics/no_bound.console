@@ -1,0 +1,9 @@
+$ sisu run no_bound.sisu
+error[E0347]: `T` does not implement `Eq`
+  --> no_bound.sisu:5:12
+  |
+5 |         if item == wanted:
+  |            ^^^^^^^^^^^^^^
+  = fix: bound `T` by `Eq`: `: Eq`
+
+error[D0006]: the program was not run: errors found (1)

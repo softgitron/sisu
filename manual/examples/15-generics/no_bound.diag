@@ -1,0 +1,2 @@
+5:12-5:26 E0347 type.bound-not-satisfied ty="T" bound="Eq"
+  fix type.add-bound 2:21-2:21 ": Eq"

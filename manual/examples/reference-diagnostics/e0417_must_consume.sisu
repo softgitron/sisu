@@ -1,0 +1,11 @@
+# A must-consume value that goes out of scope unconsumed.
+@must_consume
+struct Draft:
+    text: String
+
+    def discard(own self):
+        pass
+
+def main():
+    let note = Draft("a first try")
+    print("drafted {note.text}")

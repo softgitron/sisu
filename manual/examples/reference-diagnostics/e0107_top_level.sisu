@@ -1,0 +1,5 @@
+# A statement outside every function.
+print("Hei")
+
+def main():
+    print("maailma")

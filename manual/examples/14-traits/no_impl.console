@@ -1,0 +1,9 @@
+$ sisu run no_impl.sisu
+error[E0347]: `Money` does not implement `Display`
+  --> no_impl.sisu:10:5
+   |
+10 |     print(price)
+   |     ^^^^^^^^^^^^
+  = fix: `Money` has every method of `Display`; add `impl Display for Money`
+
+error[D0006]: the program was not run: errors found (1)

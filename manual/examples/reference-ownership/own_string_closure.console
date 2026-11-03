@@ -1,0 +1,9 @@
+$ sisu run own_string_closure.sisu
+error[E0423]: an `own` closure keeps a copy of `greeting`, and `String` is not `Copy`; stage 0 copies captures (a capture by move arrives with tasks)
+  --> own_string_closure.sisu:3:12
+  |
+3 |     return own (name: str) -> "{greeting}, {name}!"
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = note: copy it into a local first (`let c = name.copy()`) and capture that, or use a plain closure, which borrows it
+
+error[D0006]: the program was not run: errors found (1)

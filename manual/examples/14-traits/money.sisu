@@ -1,0 +1,14 @@
+# `Display` says how a value is written for the program's users.
+struct Money:
+    cents: int
+
+impl Display for Money:
+    def fmt(self, mut f: Formatter):
+        f.write("{self.cents // 100},{self.cents % 100:02} €")
+
+def main():
+    let price = Money(1250)
+    print(price)
+    print("Total: {price}, or [{price:>10}]")
+    print("{price:?}")
+    print([Money(250), Money(5)])

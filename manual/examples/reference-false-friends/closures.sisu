@@ -1,0 +1,6 @@
+# Each iteration binds its own `i`, which an `own` closure captures.
+def main():
+    var steps: list[() -> int] = []
+    for i in range(3):
+        steps.push(own () -> i)
+    print([step() for step in steps])

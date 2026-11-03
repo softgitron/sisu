@@ -1,0 +1,69 @@
+##! Exercise 16.5, a quiz scoreboard. Kind: write. Level: 3.
+##!
+##! A quiz keeps its scores as text, one line for each team: a name, a
+##! colon and the points, such as "Kettu: 12". Blank lines and lines
+##! that start with `#` are left out. Write `parse_board`, which reads
+##! every line or gives the error of the first bad one, and `ranking`,
+##! so that every test passes. Run the tests with
+##! `sisu test scoreboard.sisu`. The hints are in chapter 16 of the
+##! tutorial, under "Exercise 16.5: a quiz scoreboard".
+
+error BoardError:
+    NoColon(line: int)
+    BadPoints(line: int, text: String)
+
+## A team and its points.
+@derive(Debug, Eq)
+struct Score:
+    team: String
+    points: int
+
+## The scores on the lines of `text`. An error names the first bad
+## line, counting every line from 1.
+def parse_board(text: str) -> list[Score] ! BoardError:
+    var scores: list[Score] = []
+    for i, line in enumerate(text.lines()):
+        let trimmed = line.trim()
+        if trimmed.is_empty() or trimmed.starts_with("#"):
+            continue
+        scores.push(parse_line(i + 1, trimmed)?)
+    return Ok(scores)
+
+## The score on `line`, which is line `number` of the board.
+def parse_line(number: int, line: str) -> Score ! BoardError:
+    let team, text = line.split_once(":") else:
+        return Err(NoColon(number))
+    let points = text.trim().parse_int() else:
+        return Err(BadPoints(number, text.trim().to_string()))
+    return Ok(Score(team.trim().to_string(), points))
+
+## The teams of `scores` from the most points to the fewest, written as
+## "1. Karhu (15)". Teams with as many points keep their order.
+def ranking(scores: list[Score]) -> list[String]:
+    var order = [i for i in range(len(scores))]
+    order.sort_by((a, b) -> scores[b].points.cmp(scores[a].points))
+    var lines: list[String] = []
+    for place, i in enumerate(order):
+        lines.push("{place + 1}. {scores[i].team} ({scores[i].points})")
+    return lines
+
+## The scores of an evening, with a comment and a blank line.
+def evening() -> str:
+    return "# round 3\nKettu: 12\nKarhu: 15\n\nIlves:  12\n"
+
+test "a board":
+    let scores = [
+        Score("Kettu", 12),
+        Score("Karhu", 15),
+        Score("Ilves", 12),
+    ]
+    assert parse_board(evening()) == Ok(scores)
+    assert parse_board("") == Ok([])
+
+test "the first bad line":
+    assert parse_board("Kettu: 12\nKarhu 15\nIlves: x") == Err(NoColon(2))
+    assert parse_board("Kettu: 12\n\nIlves: x") == Err(BadPoints(3, "x"))
+
+test "a ranking":
+    let lines = ranking(parse_board(evening()).or([]))
+    assert lines == ["1. Karhu (15)", "2. Kettu (12)", "3. Ilves (12)"]

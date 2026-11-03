@@ -1,0 +1,10 @@
+$ sisu check closures_borrowed.sisu
+error[E0406]: `i` does not live long enough: it is borrowed on line 5, and the borrow is still used on line 5, after `i` is gone
+  --> closures_borrowed.sisu:5:28
+  |
+5 |         steps.push(() -> i)
+  |                            ^
+  |                    ------- borrowed here by `steps`
+  |         ----- the borrow is still used here
+  = note: declare `i` where it lives as long as the borrow is used, outside the block or loop it is in now
+

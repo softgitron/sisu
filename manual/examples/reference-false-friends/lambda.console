@@ -1,0 +1,7 @@
+$ sisu check lambda.sisu
+error[E0117]: unexpected `n` after the end of the statement
+  --> lambda.sisu:3:25
+  |
+3 |     let double = lambda n: n * 2
+  |                         ^
+

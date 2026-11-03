@@ -1,0 +1,27 @@
+# An operator on a type of your own calls the trait that names it.
+@derive(Copy, Debug, Eq)
+struct Vector:
+    x: f64
+    y: f64
+
+impl Add for Vector:
+    def add(self, other: Vector) -> Vector:
+        return Vector(self.x + other.x, self.y + other.y)
+
+impl Neg for Vector:
+    def neg(self) -> Vector:
+        return Vector(-self.x, -self.y)
+
+impl Mul[f64] for Vector:
+    def mul(self, k: f64) -> Vector:
+        return Vector(self.x * k, self.y * k)
+
+def main():
+    let step = Vector(1.0, 2.0)
+    let wind = Vector(0.5, -1.0)
+    print("{step + wind:?} {-step:?} {step * 3.0:?}")
+    print(step + wind == Vector(1.5, 1.0))
+    var position = Vector(0.0, 0.0)
+    for _ in range(3):
+        position += step
+    print("{position:?}")

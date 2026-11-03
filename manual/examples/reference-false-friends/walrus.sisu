@@ -1,0 +1,5 @@
+# Python's assignment expression.
+def main():
+    let names = ["Aino", "Eero", "Roni"]
+    if (n := len(names)) > 2:
+        print(n)

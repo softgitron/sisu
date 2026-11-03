@@ -1,0 +1,7 @@
+$ sisu check walrus.sisu
+error[E0100]: expected `)`, found `:=`
+  --> walrus.sisu:4:11
+  |
+4 |     if (n := len(names)) > 2:
+  |           ^^
+

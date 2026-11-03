@@ -1,0 +1,4 @@
+# An `int` has 64 bits, and an operation past them panics.
+def main():
+    let big = 4_611_686_018_427_387_904
+    print(big + big)

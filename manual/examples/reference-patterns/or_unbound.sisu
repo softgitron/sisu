@@ -1,0 +1,11 @@
+# An alternative that binds a name the other does not.
+enum Reading:
+    Celsius(f64)
+    Missing
+
+def value(r: Reading) -> f64:
+    return match r:
+        case Celsius(t) | Missing: t
+
+def main():
+    print(value(Missing))

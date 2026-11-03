@@ -1,0 +1,8 @@
+$ sisu run make.sisu
+error[E0241]: `Shape` cannot be used as `dyn Shape`: its method `unit` cannot be called through it, because it does not take `self` or `mut self`
+  --> make.sisu:16:28
+   |
+16 | def total(shapes: list[Box[dyn Shape]]) -> f64:
+   |                            ^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

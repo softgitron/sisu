@@ -1,9 +1,1 @@
 $ sisu run e0100_no_colon.sisu
-error[E0100]: expected `:`, found the end of the line
-  --> e0100_no_colon.sisu:2:11
-  |
-2 | def main()
-  |           ^
-  = fix: write the missing token: `:`
-
-error[D0006]: the program was not run: errors found (1)

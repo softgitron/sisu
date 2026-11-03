@@ -1,0 +1,9 @@
+$ sisu run missing_method.sisu
+error[E0232]: the impl of `Priced` for `Bun` is missing `name`
+  --> missing_method.sisu:9:1
+  |
+9 | impl Priced for Bun:
+  | ^^^^^^^^^^^^^^^^^^^
+  = note: write `def name(self) -> String` in the impl
+
+error[D0006]: the program was not run: errors found (1)

@@ -1,0 +1,30 @@
+# An associated type is a type that each impl of the trait chooses.
+trait Sensor:
+    type Reading
+    def read(mut self) -> Reading
+
+struct Thermometer:
+    celsius: f64
+
+struct Door:
+    opened: int
+
+impl Sensor for Thermometer:
+    type Reading = f64
+
+    def read(mut self) -> f64:
+        self.celsius += 0.5
+        return self.celsius
+
+impl Sensor for Door:
+    type Reading = bool
+
+    def read(mut self) -> bool:
+        self.opened += 1
+        return self.opened % 2 == 1
+
+def main():
+    var sauna = Thermometer(78.0)
+    var door = Door(0)
+    for _ in range(2):
+        print("{sauna.read()} °C, door open: {door.read()}")

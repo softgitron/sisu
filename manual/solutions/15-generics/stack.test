@@ -1,0 +1,5 @@
+test "the last in is the first out" ... ok
+test "an empty stack" ... ok
+test "a look at the top" ... ok
+test "a stack as text" ... ok
+4 passed, 0 failed, 0 blocked

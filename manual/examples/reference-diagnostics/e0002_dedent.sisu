@@ -1,0 +1,6 @@
+# A line that matches no enclosing block's indentation.
+def main():
+    let n = 2
+    if n > 1:
+        print("big")
+      print("done")

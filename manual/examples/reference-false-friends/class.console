@@ -1,0 +1,19 @@
+$ sisu check class.sisu
+error[E0107]: statements cannot appear at the top level of a module; put them in a function such as `main`
+  --> class.sisu:2:1
+  |
+2 | class Point:
+  | ^^^^^
+
+error[E0215]: `self` exists only inside a method
+  --> class.sisu:3:18
+  |
+3 |     def __init__(self, x: int):
+  |                  ^^^^
+
+error[E0389]: `self` exists only inside a method
+  --> class.sisu:4:9
+  |
+4 |         self.x = x
+  |         ^^^^
+

@@ -1,0 +1,6 @@
+# `from` names where the borrow comes from.
+def longer(a: str, b: str) -> str from a, b:
+    return if len(a) >= len(b): a else: b
+
+def main():
+    print(longer("sauna", "sisu"))

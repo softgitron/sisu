@@ -1,0 +1,6 @@
+# A parameter named with a name.
+def score(game: str) -> int:
+    return len(game)
+
+def main():
+    print(score("final"))

@@ -1,0 +1,8 @@
+$ sisu run till
+error[E0236]: `Ord` for `f64` can be implemented only in the package of the trait or of the type, or in the root package
+  --> ../money/src/lib.sisu:22:1
+   |
+22 | impl Ord for f64:
+   | ^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

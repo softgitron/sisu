@@ -1,0 +1,6 @@
+# A returned borrow that could come from either parameter.
+def longer(a: str, b: str) -> str:
+    return if len(a) >= len(b): a else: b
+
+def main():
+    print(longer("sauna", "sisu"))

@@ -1,3 +1,1 @@
 $ sisu run r0002_index.sisu
-panic: index out of bounds: the length is 3 but the index is 3
-  at main (r0002_index.sisu:4:5)

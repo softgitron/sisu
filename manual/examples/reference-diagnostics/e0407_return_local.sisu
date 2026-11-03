@@ -1,0 +1,7 @@
+# A function that returns a borrow of its own local.
+def greeting(name: str) -> str:
+    let text = "Hei, {name}!"
+    return text
+
+def main():
+    print(greeting("Aino"))

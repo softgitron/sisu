@@ -1,0 +1,16 @@
+# A trait used where a type should be.
+trait Priced:
+    def price(self) -> int
+
+struct Bun:
+    filling: String
+
+impl Priced for Bun:
+    def price(self) -> int:
+        return 280
+
+def show(item: Priced) -> String:
+    return "{item.price()} cents"
+
+def main():
+    print(show(Bun("cardamom")))

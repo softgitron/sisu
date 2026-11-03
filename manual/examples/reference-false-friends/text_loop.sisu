@@ -1,0 +1,4 @@
+# A loop over a text.
+def main():
+    for letter in "hei":
+        print(letter)

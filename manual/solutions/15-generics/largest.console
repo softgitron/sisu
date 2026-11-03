@@ -1,0 +1,12 @@
+$ sisu test largest.sisu
+warning[W0001]: typed hole `largest` of type `T?`
+  --> largest.sisu:11:12
+   |
+11 |     return todo("largest")
+   |            ^^^^^^^^^^^^^^^
+
+test "numbers" ... blocked by todo("largest")
+test "words" ... blocked by todo("largest")
+test "versions" ... blocked by todo("largest")
+test "an empty list" ... blocked by todo("largest")
+0 passed, 0 failed, 4 blocked

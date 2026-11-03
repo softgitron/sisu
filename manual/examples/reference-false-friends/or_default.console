@@ -1,0 +1,15 @@
+$ sisu check or_default.sisu
+error[E0302]: a condition must be a `bool`, not `str`; Sisu has no truthiness
+  --> or_default.sisu:4:11
+  |
+4 |     print(name or "anonymous")
+  |           ^^^^
+  = note: write the test explicitly, as in `not xs.is_empty()` or `x != 0`
+
+error[E0302]: a condition must be a `bool`, not `str`; Sisu has no truthiness
+  --> or_default.sisu:4:19
+  |
+4 |     print(name or "anonymous")
+  |                   ^^^^^^^^^^^
+  = note: write the test explicitly, as in `not xs.is_empty()` or `x != 0`
+

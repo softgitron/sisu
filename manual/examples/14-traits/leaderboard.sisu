@@ -1,0 +1,19 @@
+# An order of your own: the highest score comes first.
+@derive(Eq)
+struct Player:
+    name: String
+    score: int
+
+impl PartialOrd for Player:
+    def partial_cmp(self, other: Player) -> Ordering?:
+        return Some(self.cmp(other))
+
+impl Ord for Player:
+    def cmp(self, other: Player) -> Ordering:
+        return other.score.cmp(self.score)
+
+def main():
+    var board = [Player("Aino", 7), Player("Eero", 12), Player("Roni", 9)]
+    board.sort()
+    for player in board:
+        print("{player.score:>3} {player.name}")

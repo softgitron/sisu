@@ -1,0 +1,107 @@
+##! Exercise 17.3, Challenge III: a word library. Kind: challenge. Level: 3.
+##!
+##! The word counter of chapter 9 becomes a library that any program can
+##! use. A library's API is its `pub` items, each with a doc comment
+##! that says what it does. This file holds the library and its tests;
+##! when every test passes, the section "Challenge III" of chapter 17
+##! shows how it moves into a workspace beside an application. Solve the
+##! parts in order: each part's tests are blocked until it is done. Run
+##! the tests with `sisu test wordcount.sisu`.
+##!
+##! Part 1. Write `words` and the methods of `Tally[T]`, which counts
+##! items of any type that a dict can use as a key.
+##!
+##! Part 2. A tally counts more than words. Write `pairs`, which gives
+##! each word of a text with the word after it, so that a tally of pairs
+##! finds the words that most often come together.
+##!
+##! Part 3. Write the `Display` of a tally: its ten most common items,
+##! a line for each, with the count right-aligned in four columns, two
+##! spaces and the item, and no newline after the last line. `pure`
+##! marks a function that only computes, as chapter 26 explains; `fmt`
+##! is `pure`, so it can call only `pure` methods, such as `top`.
+##!
+##! The hints are in chapter 17 of the tutorial, under "Challenge III: a
+##! word library".
+
+## The words of `text`: its runs of letters and digits, in lower case.
+pub pure def words(text: str) -> list[String]:
+    return todo("words")
+
+## Each word of `text` with the word after it, in order.
+pub pure def pairs(text: str) -> list[(String, String)]:
+    return todo("pairs")
+
+## How often each item was added, for items that a dict can use as a
+## key.
+pub struct Tally[T: Hash]:
+    counts: dict[T, int]
+
+    ## A tally of nothing yet.
+    pub pure def new() -> Tally[T]:
+        return todo("new")
+
+    ## Counts `item` once more.
+    pub pure def add(mut self, own item: T):
+        todo("add")
+
+    ## How often `item` was added.
+    pub pure def count(self, item: T) -> int:
+        return todo("count")
+
+    ## The `n` most common items with their counts, the most common
+    ## first; items counted as often keep the order in which they were
+    ## first added.
+    pub pure def top(self, n: int) -> list[(T, int)]:
+        return todo("top")
+
+## The ten most common items, a line for each, as "   3  kissa".
+impl[T: Hash + Display] Display for Tally[T]:
+    def fmt(self, mut f: Formatter):
+        todo("fmt")
+
+suite "part 1, a tally of words":
+    test "the words of a text":
+        assert words("Hei, hei maailma!") == ["hei", "hei", "maailma"]
+        assert words("a well-known walk") == ["a", "well", "known", "walk"]
+
+    test "a tally of words":
+        var tally = Tally[String].new()
+        for word in own words("kissa koira kissa kala kissa koira"):
+            tally.add(word)
+        assert tally.count("kissa") == 3
+        assert tally.count("lehmä") == 0
+        assert tally.top(2) == [("kissa", 3), ("koira", 2)]
+
+    test "a tally of numbers":
+        var tally = Tally[int].new()
+        for n in [3, 1, 3, 2, 1, 3]:
+            tally.add(n)
+        assert tally.top(5) == [(3, 3), (1, 2), (2, 1)]
+
+suite "part 2, pairs of words":
+    test "the pairs of a text":
+        let found = pairs("yksi kaksi, kolme")
+        assert found == [("yksi", "kaksi"), ("kaksi", "kolme")]
+        assert pairs("yksi") == []
+
+    test "the pair that comes most often":
+        var tally = Tally[(String, String)].new()
+        for pair in own pairs("on the lake, on the shore, in the sauna"):
+            tally.add(pair)
+        assert tally.top(1) == [(("on", "the"), 2)]
+        assert tally.count(("the", "lake")) == 1
+
+suite "part 3, a table":
+    test "a short table":
+        var tally = Tally[String].new()
+        for word in own words("kissa koira kissa"):
+            tally.add(word)
+        assert "{tally}" == "   2  kissa\n   1  koira"
+
+    test "ten lines at most":
+        var tally = Tally[int].new()
+        for n in range(20):
+            tally.add(n % 15)
+        assert "{tally}".lines().count() == 10
+        assert "{tally}".starts_with("   2  0\n   2  1\n")

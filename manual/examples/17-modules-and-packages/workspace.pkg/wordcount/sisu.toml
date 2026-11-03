@@ -1,0 +1,7 @@
+[package]
+name = "wordcount"
+version = "0.1.0"
+edition = "2027"
+description = "Counting the words of a text, and anything else."
+
+[dependencies]

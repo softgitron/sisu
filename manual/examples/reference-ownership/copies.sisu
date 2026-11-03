@@ -1,0 +1,13 @@
+# `Copy` values copy; any other value copies only with `.copy()`.
+@derive(Copy, Debug)
+struct Point:
+    x: int
+    y: int
+
+def main():
+    let a = Point(1, 2)
+    let b = a
+    let names = ["Aino"]
+    var more = names.copy()
+    more.push("Eero")
+    print("{a:?} {b:?} {names} {more}")

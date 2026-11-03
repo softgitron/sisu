@@ -1,0 +1,17 @@
+$ sisu test scoreboard.sisu
+warning[W0001]: typed hole `parse_board` of type `list[Score] ! BoardError`
+  --> scoreboard.sisu:24:12
+   |
+24 |     return todo("parse_board")
+   |            ^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `ranking` of type `list[String]`
+  --> scoreboard.sisu:29:12
+   |
+29 |     return todo("ranking")
+   |            ^^^^^^^^^^^^^^^
+
+test "a board" ... blocked by todo("parse_board")
+test "the first bad line" ... blocked by todo("parse_board")
+test "a ranking" ... blocked by todo("parse_board")
+0 passed, 0 failed, 3 blocked

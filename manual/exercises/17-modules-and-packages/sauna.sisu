@@ -1,0 +1,39 @@
+##! Exercise 17.1, the sauna queue. Kind: fix. Level: 1.
+##!
+##! A sauna lets bathers in from a queue, and keeps how many times each
+##! bather has been in, in alphabetical order. The types come from the
+##! standard library's module `std.collections`, which the file does not
+##! import the way Sisu imports. The file does not compile. Run
+##! `sisu test sauna.sisu`, read the diagnostics, and fix the imports,
+##! not the code or the tests, so that every test passes. The hints are in
+##! chapter 17 of the tutorial, under "Exercise 17.1: the sauna queue".
+
+from std.collections import *
+
+## The bathers of `names`, let in `seats` at a time: each round goes
+## in, and comes out to the back of the queue, until `rounds` are done.
+## The result counts how many times each bather went in.
+def bathe(names: list[str], seats: int, rounds: int) -> SortedDict[str, int]:
+    var queue: Deque[str] = Deque.new()
+    for name in names:
+        queue.push_back(name)
+    var visits: SortedDict[str, int] = SortedDict.new()
+    for _ in range(rounds):
+        var inside: list[str] = []
+        for _ in range(seats):
+            if let Some(name) = queue.pop_front():
+                inside.push(name)
+        for name in inside:
+            _ = visits.insert(name, (visits.get(name) ?? 0) + 1)
+            queue.push_back(name)
+    return visits
+
+test "two seats, three rounds":
+    let visits = bathe(["Roni", "Aino", "Eero"], 2, 3)
+    assert visits.keys() == ["Aino", "Eero", "Roni"]
+    assert (visits.get("Roni") ?? 0) == 2
+
+test "one seat, four rounds":
+    let visits = bathe(["Roni", "Aino", "Eero"], 1, 4)
+    assert (visits.get("Roni") ?? 0) == 2
+    assert (visits.get("Eero") ?? 0) == 1

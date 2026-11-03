@@ -1,0 +1,20 @@
+# `?` inside a closure leaves the closure, not the function around it.
+error ParseError:
+    NotANumber(text: String)
+
+def number(text: str) -> int ! ParseError:
+    let n = text.trim().parse_int() else:
+        return Err(NotANumber(text.to_string()))
+    return Ok(n)
+
+def all_doubled(lines: list[str]) -> list[int] ! ParseError:
+    var numbers: list[int] = []
+    for line in lines:
+        numbers.push(number(line)? * 2)
+    return Ok(numbers)
+
+def main():
+    let lines = ["12", " 7", "x"]
+    print(lines.iter().map(line -> Ok(number(line)? * 2)).collect())
+    print(all_doubled(lines))
+    print(all_doubled(lines[:2]))

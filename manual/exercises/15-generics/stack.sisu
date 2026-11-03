@@ -1,0 +1,67 @@
+##! Exercise 15.4, a stack. Kind: write. Level: 2.
+##!
+##! A stack holds items of any one type: the last item pushed is the
+##! first one taken off. Write the bodies of its methods and impls so
+##! that every test passes. Run the tests with `sisu test stack.sisu`.
+##! The hints are in chapter 15 of the tutorial, under "Exercise 15.4: a
+##! stack".
+
+## Items of type `T`, taken off in the reverse of the order they came.
+struct Stack[T]:
+    items: list[T]
+
+    ## A stack with nothing on it.
+    def empty() -> Stack[T]:
+        return todo("empty")
+
+    ## Puts `item` on top.
+    def push(mut self, own item: T):
+        todo("push")
+
+    ## Takes the top item off, or gives `None` when there is none.
+    def pop(mut self) -> T?:
+        return todo("pop")
+
+    ## The top item, left where it is.
+    def peek(self) -> ref T?:
+        return todo("peek")
+
+impl[T] Len for Stack[T]:
+    def len(self) -> int:
+        return todo("len")
+
+## A stack written from the bottom to the top, as in "[1, 2, 3>".
+impl[T: Display] Display for Stack[T]:
+    def fmt(self, mut f: Formatter):
+        todo("fmt")
+
+test "the last in is the first out":
+    var stack = Stack[int].empty()
+    stack.push(1)
+    stack.push(2)
+    stack.push(3)
+    assert stack.pop() == Some(3)
+    assert stack.pop() == Some(2)
+    assert len(stack) == 1
+
+test "an empty stack":
+    var stack: Stack[String] = Stack.empty()
+    assert stack.pop() == None
+    assert stack.peek() == None
+    assert len(stack) == 0
+
+test "a look at the top":
+    var plates: Stack[String] = Stack.empty()
+    plates.push("blue")
+    plates.push("green")
+    assert plates.peek().is_some()
+    if let Some(top) = plates.peek():
+        assert top == "green"
+    assert len(plates) == 2
+
+test "a stack as text":
+    var stack = Stack[int].empty()
+    assert "{stack}" == "[>"
+    for n in [4, 5, 6]:
+        stack.push(n)
+    assert "{stack}" == "[4, 5, 6>"

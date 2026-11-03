@@ -1,0 +1,17 @@
+# `in` calls `Contains`, and `len` calls `Len`.
+struct Opening:
+    first: int
+    last: int
+
+impl Contains[int] for Opening:
+    def contains(self, hour: int) -> bool:
+        return self.first <= hour <= self.last
+
+impl Len for Opening:
+    def len(self) -> int:
+        return self.last - self.first + 1
+
+def main():
+    let sauna = Opening(17, 21)
+    print("{18 in sauna} {9 in sauna}")
+    print("open for {len(sauna)} hours")

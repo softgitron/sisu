@@ -1,0 +1,6 @@
+# An `own` closure takes its own copy of `i`.
+def main():
+    var steps: list[() -> int] = []
+    for i in range(3):
+        steps.push(own () -> i)
+    print(len(steps))

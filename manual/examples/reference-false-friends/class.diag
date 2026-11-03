@@ -1,0 +1,3 @@
+2:1-2:6 E0107 parse.top-level-statement
+3:18-3:22 E0215 resolve.self-outside-method
+4:9-4:13 E0389 type.no-self

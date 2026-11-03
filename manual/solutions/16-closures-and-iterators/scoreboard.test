@@ -1,0 +1,4 @@
+test "a board" ... ok
+test "the first bad line" ... ok
+test "a ranking" ... ok
+3 passed, 0 failed, 0 blocked

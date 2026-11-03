@@ -1,0 +1,5 @@
+# A generator expression, Python's lazy comprehension.
+def main():
+    let primes = [2, 3, 5, 7, 11]
+    let squares = (p * p for p in primes)
+    print(squares.collect())

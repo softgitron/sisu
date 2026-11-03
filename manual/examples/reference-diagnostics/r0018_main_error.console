@@ -1,3 +1,1 @@
 $ sisu run r0018_main_error.sisu
-error: NotANumber(text="kolme")
-  at r0018_main_error.sisu:11:11

@@ -1,0 +1,3 @@
+# A method that `str` does not have.
+def main():
+    print("  hei  ".strip())

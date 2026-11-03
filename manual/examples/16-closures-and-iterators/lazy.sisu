@@ -1,0 +1,10 @@
+# An adapter does nothing until something asks for its items.
+def loud_square(n: int) -> int:
+    print("  squaring {n}")
+    return n * n
+
+def main():
+    let squares = range(1, 1_000_000).map(loud_square)
+    print("nothing has run yet")
+    for square in squares.take(2):
+        print("got {square}")

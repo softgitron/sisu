@@ -1,0 +1,6 @@
+# A value changed while a borrow of it is still used.
+def main():
+    var scores = [7, 9, 4]
+    let first = ref scores[0]
+    scores.push(10)
+    print("first {first}")

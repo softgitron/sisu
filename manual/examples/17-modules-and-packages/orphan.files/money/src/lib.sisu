@@ -1,0 +1,24 @@
+##! Amounts of money in euros and cents.
+
+## An amount of money, in cents.
+@derive(Copy, Eq, Ord)
+pub struct Money:
+    pub cents: int
+
+impl Display for Money:
+    def fmt(self, mut f: Formatter):
+        f.write("{self.cents // 100},{self.cents % 100:02} €")
+
+impl Add for Money:
+    def add(self, other: Money) -> Money:
+        return Money(self.cents + other.cents)
+
+## `amount` with value added tax at `percent`, rounded down to a cent.
+@cfg(feature="vat")
+pub def with_vat(amount: Money, percent: int) -> Money:
+    return Money(amount.cents * (100 + percent) // 100)
+
+## Floats in order, for `sorted`.
+impl Ord for f64:
+    def cmp(self, other: f64) -> Ordering:
+        return self.cmp(other)

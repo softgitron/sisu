@@ -1,0 +1,34 @@
+# The same total, generic and through `dyn`.
+trait Priced:
+    def price(self) -> int
+
+struct Coffee:
+    cups: int
+
+struct Bun:
+    filling: String
+
+impl Priced for Coffee:
+    def price(self) -> int:
+        return 350 * self.cups
+
+impl Priced for Bun:
+    def price(self) -> int:
+        return 280
+
+def total_of[T: Priced](items: list[T]) -> int:
+    var sum_so_far = 0
+    for item in items:
+        sum_so_far += item.price()
+    return sum_so_far
+
+def total_dyn(items: list[Box[dyn Priced]]) -> int:
+    var sum_so_far = 0
+    for item in items:
+        sum_so_far += item.price()
+    return sum_so_far
+
+def main():
+    print(total_of([Coffee(1), Coffee(3)]))
+    print(total_of([Bun("apple"), Bun("plum")]))
+    print(total_dyn([Box(Coffee(1)), Box(Bun("apple"))]))

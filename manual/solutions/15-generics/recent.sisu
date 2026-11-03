@@ -1,0 +1,66 @@
+##! Exercise 15.5, the last few. Kind: write. Level: 3.
+##!
+##! A program that watches a sensor keeps only its last `N` readings, in
+##! `N` slots that never grow: a ring buffer. A new reading goes into the
+##! slot after the newest one, round to the first slot after the last,
+##! and replaces the oldest once every slot is full. Write `Recent`, and
+##! add the fields it needs besides `slots`, so that every test passes.
+##! Run the tests with `sisu test recent.sisu`. The hints are in chapter
+##! 15 of the tutorial, under "Exercise 15.5: the last few".
+
+## The last `N` items pushed, kept in `N` slots.
+struct Recent[T, const N: int]:
+    slots: Array[T?, N]
+    oldest: int
+    count: int
+
+    ## A buffer that holds nothing yet.
+    def empty() -> Recent[T, N]:
+        return Recent(Array.filled(None), 0, 0)
+
+    ## Keeps `item`, in place of the oldest item once the buffer is full.
+    def push(mut self, own item: T):
+        self.slots[(self.oldest + self.count) % N] = Some(item)
+        if self.count < N:
+            self.count += 1
+        else:
+            self.oldest = (self.oldest + 1) % N
+
+    ## The items, from the oldest to the newest.
+    def items(self) -> list[T] where T: Copy:
+        var found: list[T] = []
+        for i in range(self.count):
+            if let Some(item) = self.slots[(self.oldest + i) % N]:
+                found.push(item)
+        return found
+
+    ## The newest item, or `None` when there is none.
+    def newest(self) -> T? where T: Copy:
+        if self.count == 0:
+            return None
+        return self.slots[(self.oldest + self.count - 1) % N]
+
+test "fewer items than slots":
+    var recent = Recent[int, 3].empty()
+    recent.push(7)
+    recent.push(8)
+    assert recent.items() == [7, 8]
+    assert recent.newest() == Some(8)
+
+test "the oldest items go":
+    var recent = Recent[int, 3].empty()
+    for n in range(1, 6):
+        recent.push(n)
+    assert recent.items() == [3, 4, 5]
+    assert recent.newest() == Some(5)
+
+test "round and round":
+    var recent = Recent[str, 2].empty()
+    for word in ["yksi", "kaksi", "kolme", "neljä", "viisi"]:
+        recent.push(word)
+    assert recent.items() == ["neljä", "viisi"]
+
+test "nothing yet":
+    let recent = Recent[f64, 4].empty()
+    assert recent.items() == []
+    assert recent.newest() == None

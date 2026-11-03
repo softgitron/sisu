@@ -1,9 +1,1 @@
 $ sisu run e0308_missing_argument.sisu
-error[E0308]: missing the argument `height` of `area`
-  --> e0308_missing_argument.sisu:6:11
-  |
-6 |     print(area(3))
-  |           ^^^^^^^
-  = fix: pass `height` as a hole to fill: `, todo("height")`
-
-error[D0006]: the program was not run: errors found (1)

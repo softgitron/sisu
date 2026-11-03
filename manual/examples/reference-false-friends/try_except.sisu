@@ -1,0 +1,6 @@
+# Python's `try` and `except`.
+def main():
+    try:
+        print("42".parse_int())
+    except:
+        print("not a number")

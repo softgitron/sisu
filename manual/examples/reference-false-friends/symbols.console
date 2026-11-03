@@ -1,0 +1,7 @@
+$ sisu check symbols.sisu
+error[E0103]: expected an expression, found `&`
+  --> symbols.sisu:5:17
+  |
+5 |     print(warm && dry)
+  |                 ^
+

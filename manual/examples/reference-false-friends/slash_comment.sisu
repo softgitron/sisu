@@ -1,0 +1,4 @@
+# Rust's `//` comment.
+def main():
+    let n = 3 // the count
+    print(n)

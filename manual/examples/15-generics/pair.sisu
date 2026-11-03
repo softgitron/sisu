@@ -1,0 +1,13 @@
+# A type parameter can have a default, which a use may leave out.
+struct Pair[A, B = A]:
+    first: A
+    second: B
+
+def total(pair: Pair[int]) -> int:
+    return pair.first + pair.second
+
+def main():
+    let both: Pair[int] = Pair(2, 3)
+    let mixed: Pair[str, int] = Pair("Aino", 34)
+    print(total(both))
+    print("{mixed.first} is {mixed.second}")

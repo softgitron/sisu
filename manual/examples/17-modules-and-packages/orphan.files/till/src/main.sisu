@@ -1,0 +1,10 @@
+# A till adds up a receipt with the library `money`.
+from money import Money, with_vat
+from money.parse import MoneyError, parse_money
+
+def main() -> ! MoneyError:
+    var total = Money(0)
+    for line in ["2,80", "12,50", "3,05"]:
+        total = total + parse_money(line)?
+    print("total {total}, with tax {with_vat(total, 24)}")
+    return Ok(())

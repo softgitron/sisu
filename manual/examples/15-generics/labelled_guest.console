@@ -1,0 +1,8 @@
+$ sisu run labelled_guest.sisu
+error[E0347]: `Labelled[Guest]` does not implement `Display`
+  --> labelled_guest.sisu:22:5
+   |
+22 |     print(Labelled("first", Guest("Aino")))
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

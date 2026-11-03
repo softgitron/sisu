@@ -1,0 +1,6 @@
+test "a guest" ... ok
+test "a host" ... ok
+test "a room for users" ... ok
+test "a room for programmers" ... ok
+test "a padded room" ... ok
+5 passed, 0 failed, 0 blocked

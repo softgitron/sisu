@@ -1,0 +1,8 @@
+$ sisu run unreachable.sisu
+warning[W0003]: this `case` arm is unreachable; the arms above it cover every value it matches
+  --> unreachable.sisu:5:14
+  |
+5 |         case 0: "zero"
+  |              ^
+
+a number

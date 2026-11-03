@@ -1,0 +1,6 @@
+# A `self` parameter in a function that is not a method.
+def describe(self) -> String:
+    return "a thing"
+
+def main():
+    print(describe())

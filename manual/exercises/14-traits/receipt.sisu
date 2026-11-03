@@ -1,0 +1,41 @@
+##! Exercise 14.2, a receipt. Kind: fix. Level: 1.
+##!
+##! A shop prints a line of its receipt for each item it sells. The file
+##! does not compile. Run `sisu test receipt.sisu`, read the diagnostics,
+##! and fix the impls, not the trait or the tests, so that every test
+##! passes. The hints are in chapter 14 of the tutorial, under
+##! "Exercise 14.2: a receipt".
+
+## Something the shop sells: it is written as its name, and has a price
+## in cents.
+trait Item(Display):
+    def price(self) -> int
+
+    ## The item's line on a receipt.
+    def line(self) -> String:
+        return "{self}: {self.price()} c"
+
+struct Ticket:
+    concert: String
+
+struct Coffee:
+    cups: int
+
+impl Display for Coffee:
+    def fmt(self, mut f: Formatter):
+        f.write("coffee x{self.cups}")
+
+impl Item for Ticket:
+    def price(self) -> int:
+        return 4500
+
+impl Item for Coffee:
+    def cost(self) -> int:
+        return 350 * self.cups
+
+test "a coffee":
+    assert Coffee(2).line() == "coffee x2: 700 c"
+    assert Coffee(1).line() == "coffee x1: 350 c"
+
+test "a ticket":
+    assert Ticket("Sibelius").line() == "ticket to Sibelius: 4500 c"
