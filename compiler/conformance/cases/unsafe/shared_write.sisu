@@ -1,0 +1,12 @@
+# The checked memory model (D-085) refuses a write through a pointer made
+# from a shared borrow, whatever `cast_mut` says of its type: the
+# obligation `writable`.
+
+from std.mem import ptr
+
+def main():
+    let x = 1
+    let p = ptr.of(ref x)
+    # safety: writable: wrong on purpose, p came from a shared borrow.
+    unsafe p.cast_mut().write(2)
+    print(x)

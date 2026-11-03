@@ -1,0 +1,13 @@
+# The checked memory model (D-085) refuses to read a value as another type
+# whose bits it does not share: `ptr.read`'s obligation `valid`.
+
+from std.mem import Global, Layout
+
+def main():
+    let block = Global().acquire(Layout(size=24, align=8)) else:
+        panic("out of memory")
+    # safety: writable, aligned: the block holds nothing yet; valid: wrong
+    #   on purpose, its first word is part of a `String`.
+    unsafe:
+        block.cast[String]().write("text".to_string())
+        print(block.cast[int]().read())

@@ -175,6 +175,40 @@ interpreter's step limit exists for the conformance runner's sake; the
 frame limit is a constant (100 000). *Pay*: stage 1 has no host panics;
 the limits become options of `sisu run`.
 
+- **The checked memory model** (architecture.md, "The checked memory
+  model"; decision 301) is the first round of D-085's. The monitor sees
+  two accesses into raw memory as overlapping only at one offset, not by
+  their byte ranges; memory still held when a run ends is not reported,
+  where Miri reports a leak; the bits it knows are the numbers', `bool`'s,
+  `char`'s and those of structs, tuples and enums of them, so reading a
+  `String` written in raw memory as bytes, or `transmute` of one, is
+  refused rather than reinterpreted; a function value's size is taken
+  with one word of environment; `sisu test --panic-each` (22: a panic
+  forced at each potential panic site of a function with unsafe code) is
+  not there, nor comptime's raw memory (the Rust front end's comptime does
+  not read std.mem, and stage 1's stops at a `mem.*` intrinsic). Foreign
+  calls run only for the six C functions the interpreter emulates (Q-55).
+  *Pay*: byte ranges in the monitor's places of raw memory; a report of
+  what is held at exit; `--panic-each`; raw memory in the compile-time
+  evaluator of stage 1.
+- **Two changes stage 1 must make before `RawBuf` runs** (decision 301):
+  its lowering writes an intrinsic's type arguments only when a type
+  parameter appears in the result and in no parameter, so `mem.size_of[T]()`
+  and `mem.align_of[T]()`, whose `T` appears in neither, lose theirs, and
+  nothing can know `T` (the interpreter and the runtime report an internal
+  error naming the missing argument); and std.mem calls
+  `Layout.array[T](n)`, explicit type arguments on a type's function, which
+  neither front end types (`E0360`), so `RawBuf.with_capacity_in`, `grow`
+  and its `Drop` lower to `unreachable` (a standard library module's
+  diagnostics are not shown to a program). The cases that need them wait in
+  `conformance/held/unsafe/` (a `RawBuf` stack, and the layouts of
+  `size_of` and `align_of`), checked against a stage 1 with both changed:
+  their expectations are that stage 1's run, interpreted and native.
+  *Pay*: stage 1 writes the type arguments of a function whose type
+  parameter appears in no parameter, and std.mem calls a free function (or
+  typeck takes `Type.f[Args](...)`); the held cases then move into
+  `cases/unsafe/` and `native.list`.
+
 ## Shortcuts in the front end
 
 **The query layer is hand-written.** `sisu_driver::Db` memoises per
@@ -498,11 +532,12 @@ role to replace before it can be deleted, when the flag and the Rust
 branches of `cli.rs` go with it:
 
 - **The language server** (`sisu lsp`), **the REPL** (`sisu repl`),
-  **worksheets** (`sisu ws`), **hot replacement** (`sisu run --watch`),
-  and **the capability log and replay** (`sisu run --record`, `sisu
-  replay`, whose log `replay` compiles again from the source it holds):
-  each needs the front end in the process, its queries kept between edits
-  (the memo), or the diagnostics and the program as data. *Pay*: stage 1
+  **worksheets** (`sisu ws`) and **hot replacement** (`sisu run --watch`,
+  and a run under it recorded, whose log replays the saves): each needs
+  the front end in the process, its queries kept between edits (the
+  memo), or the diagnostics and the program as data. (The capability log
+  and replay of a plain run are stage 1's, the log holding the SIR that
+  ran, decision 303.) *Pay*: stage 1
   as a library of the tools, or a server of its queries the tools ask;
   the REPL and worksheets need only a program checked and lowered per
   input, which stage 1's `build` gives.
@@ -603,6 +638,28 @@ leaves out:
   that tasks are native (tests run in parallel tasks); PCT and the
   bounded search as the runtime's other ways to pick (decision 204 keeps
   the generator's draws in one place).
+
+What the unsafe round (decisions 301 and 302) leaves natively:
+
+- **Raw memory goes through the runtime**: every intrinsic of std.mem is
+  a call of `sisu_rt_intrinsic` with a descriptor, a read or a write of a
+  word included, and a value whose layout in raw memory is not its value's
+  is converted part by part at each access. *Pay*: loads, stores and
+  pointer arithmetic inline, as decision 253 made the commonest intrinsics,
+  and one layout for values and raw memory in the backend in Sisu (each
+  part at its own width), when it replaces decision 188's.
+- **A pointer to a place, and a reference from a pointer, of a type whose
+  two layouts differ** (a sized integer narrower than 64 bits, an `f32`, a
+  C struct of them) are `D0103`, since a place holds a value's layout: a
+  C struct a foreign function fills goes in memory of `Global`. *Pay*: the
+  same, one layout.
+- **Foreign calls**: a C function's signature is taken from the call's
+  operands and result, `@blocking` does not move a call off the task's
+  thread, there is no header import (`import c`) and no `@export`, and a
+  struct is not passed by value. `rt.switch` has instructions for x86-64
+  and AArch64 Linux only, and nothing makes a context for a new stack yet
+  (the stack pool's `Context.start`). *Pay*: 22's `@blocking`, header
+  import and `@export`; the runtime in Sisu (D-086) over the switch.
 
 What round 2 (tasks, decisions 203 to 206; the rest of the suite,
 decisions 207 to 211) leaves:
@@ -724,18 +781,31 @@ LIR, and the Rust backend translates LIR one to one into Cranelift IR,
 every case of `native.list` to the same executable in both profiles
 (architecture.md, "LIR"; decisions 281 to 284). What it leaves:
 
-- **The decisions live twice**: `sisu-codegen` lowers SIR itself, and
-  stage 2 transcribes it; a change to one is a change to the other, which
-  the runner's `--native-from-lir` mode catches. *Pay*: `sisu build
-  --native` through stage 2 (SIR, `sisu2 lir`, the translation), and
+- **The decisions live twice**: `sisu build --native` lowers through
+  stage 2 (decision 304), but `sisu-codegen` still lowers SIR itself, as
+  the oracle (`--lower=rust`, which the runner's `--native-from-lir` mode
+  compares with) and as the fallback for a program with a construct stage
+  2 does not lower yet; a change to one is a change to the other, which
+  the runner's `--native-from-lir` mode catches. A native build also pays
+  for stage 2 as a separate process: the SIR written out, `sisu2` started,
+  the LIR read back. *Pay*: stage 2 lowering everything the Rust lowering
+  does (today the unsafe code of decision 302), then the fallback and
   `sisu-codegen`'s own lowering (`lib.rs`, `func.rs`, `layout.rs`,
   `facts.rs`, the type walk of `debug.rs`) deleted, the Rust left with the
-  translation, the DWARF writer and the link until step 2 replaces them.
+  translation, the DWARF writer and the link until step 2 replaces them;
+  stage 2 as a library of the driver's, or the backend in Sisu, rather
+  than a process.
 - **The machine code is Cranelift's**: step 2, the x86-64 Linux debug
   backend in Sisu (one analysis pass, single-pass code generation, its own
   encoders, ELF objects, DWARF, the system linker), is not begun, and
   neither are the textual-IR prototype of the LLVM release backend (D-088)
   nor the runtime in Sisu (step 3). *Pay*: D-087's order of work.
+- **Stage 2 lowers no unsafe code**: the intrinsics of std.mem, the
+  `Ptr` entry of the type table, foreign calls and the machine intrinsics
+  are `sisu-codegen`'s only (decision 302), so the cases of `native.list`
+  that use them are marked `not from LIR:` and left out of
+  `--native-from-lir`. *Pay*: what architecture.md lists ("Raw memory,
+  foreign calls and the machine intrinsics"), in stage 2.
 - **Stage 2 reads SIR itself**: stage 1 writes SIR but has no reader, so
   `stage2/src/read.sisu` transcribes `sisu-sir/src/read.rs`. *Pay*: the
   reader moves to stage 1's `sir` module when stage 1 needs one (`sisu
@@ -792,7 +862,9 @@ every case of `native.list` to the same executable in both profiles
   (`testing/proposal_testing`, whose last test reads `HOME` from the
   real environment and fails in the suite's empty one) run with their
   missing declarations (and a `main`) appended, kept starting with the
-  originals by a test. `ffi.sisu` needs foreign functions.
+  originals by a test. `ffi.sisu` needs the header import of C
+  (`import c`), `ptr.null` and `@export`, which no implementation has;
+  `extern` blocks and their calls run (decisions 301 and 302).
 
 From Phase 3 (18, "Phase 3: the ownership checker and the dynamic
 monitor"):

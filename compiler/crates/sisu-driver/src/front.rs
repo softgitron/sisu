@@ -34,9 +34,16 @@ pub const FRONT_END_VAR: &str = "SISU_FRONT_END";
 /// given to `OUT` and compiles nothing. Internal to the driver and stage 1.
 pub const KEEP_SIR: &str = "SISU_KEEP_SIR";
 
-/// The variables of the native runtime, which stage 1, a native program,
-/// would read for itself: they are the program's, not the front end's.
-const RUNTIME_VARS: &[&str] = &["SISU_RT_ALLOCS", "SISU_SCHEDULE_SEED", "SISU_STATS", "SISU_TASK_STACK"];
+/// The variables of the native runtime, which stage 1 and stage 2, native
+/// programs, would read for themselves: they are the program's, not theirs.
+pub(crate) const RUNTIME_VARS: &[&str] =
+    &["SISU_RT_ALLOCS", "SISU_SCHEDULE_SEED", "SISU_STATS", "SISU_TASK_STACK"];
+
+/// The environment variable that chooses how a native build lowers SIR
+/// (`stage2` or `rust`) for a whole process, and that the driver gives
+/// stage 1 so that its backend lowers as the command chose; `--lower=NAME`
+/// wins (decision 304).
+pub const LOWER_VAR: &str = "SISU_LOWER";
 
 /// Which front end checks, lowers and serialises a program.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -120,6 +127,67 @@ pub fn take_choice(
         },
     };
     Ok((out, front))
+}
+
+/// The command line without its `--lower=NAME` (or `--lower NAME`), taken
+/// where [`take_choice`] takes `--front-end`, and the lowering it and
+/// `SISU_LOWER` choose (decision 304). A name that is no lowering is a
+/// usage error.
+pub(crate) fn take_lowering(
+    args: &[String],
+    env: Option<&str>,
+    value_flags: &[&str],
+    host: &mut dyn Host,
+) -> Result<(Vec<String>, crate::native::Lowering), i32> {
+    let mut chosen: Option<String> = None;
+    let mut out = Vec::with_capacity(args.len());
+    let mut command: Option<&str> = None;
+    let mut i = 0;
+    while i < args.len() {
+        let a = args[i].as_str();
+        if a == "--" || (command.is_some() && !a.starts_with("--")) {
+            out.extend(args[i..].iter().cloned());
+            break;
+        }
+        if let Some(v) = a.strip_prefix("--lower=") {
+            chosen = Some(v.to_string());
+            i += 1;
+            continue;
+        }
+        if a == "--lower" {
+            chosen = Some(args.get(i + 1).cloned().unwrap_or_default());
+            i += 2;
+            continue;
+        }
+        out.push(args[i].clone());
+        i += 1;
+        if !a.starts_with("--") {
+            command = Some(a);
+            continue;
+        }
+        if value_flags.contains(&a)
+            && let Some(v) = args.get(i)
+        {
+            out.push(v.clone());
+            i += 1;
+        }
+        if command == Some("run") && (a == "--from-sir" || a.starts_with("--from-sir=")) {
+            out.extend(args[i..].iter().cloned());
+            break;
+        }
+    }
+    let name = chosen.or_else(|| env.map(str::to_string)).filter(|n| !n.is_empty());
+    let lowering = match name {
+        None => crate::native::Lowering::Stage2,
+        Some(n) => match crate::native::Lowering::parse(&n) {
+            Some(l) => l,
+            None => {
+                host.stderr(&crate::cli::plain_error(msg::CLI_BAD_LOWER, &[("value", n)]));
+                return Err(crate::cli::EXIT_USAGE);
+            }
+        },
+    };
+    Ok((out, lowering))
 }
 
 /// The compiler's directory, which holds `stage1/`, `std/`, `catalog/` and
@@ -229,6 +297,9 @@ impl Stage1 {
         if backend == Backend::KeepSir {
             cmd.env(KEEP_SIR, "1");
         }
+        // The backend stage 1 hands the SIR to lowers as the command chose
+        // (decision 304).
+        cmd.env(LOWER_VAR, crate::native::lowering().name());
         // Stage 1 knows the working directory by the shell's `PWD`.
         if let Ok(cwd) = std::env::current_dir() {
             cmd.env("PWD", cwd);
@@ -325,7 +396,9 @@ fn build(exe: &Path, package: &Path, src: &Path, host: &mut dyn Host) -> Result<
     let part = dir.join(format!("sisu1.part-{}", std::process::id()));
     let mut cmd = std::process::Command::new(me);
     cmd.args(["build", "--native", "--output"]).arg(&part).current_dir(package);
-    cmd.env(FRONT_END_VAR, "rust").env_remove(KEEP_SIR);
+    // Stage 1 is built with the Rust lowering, since stage 2 is built with
+    // stage 1 (decision 304).
+    cmd.env(FRONT_END_VAR, "rust").env(LOWER_VAR, "rust").env_remove(KEEP_SIR);
     for v in RUNTIME_VARS {
         cmd.env_remove(v);
     }
@@ -346,6 +419,97 @@ fn build(exe: &Path, package: &Path, src: &Path, host: &mut dyn Host) -> Result<
     }
     drop(lock);
     Ok(())
+}
+
+/// Stage 2, the lowering written in Sisu (`compiler/stage2`), built and
+/// ready to run: what a native build lowers SIR with by default (decision
+/// 304).
+pub struct Stage2 {
+    pub exe: PathBuf,
+}
+
+impl Stage2 {
+    /// The stage-2 executable, `compiler/target/stage2/sisu2`, built first
+    /// when it is missing or older than a source of stage 2 or of the `sir`
+    /// module of stage 1 it depends on, as `stage2/sisu2` builds it.
+    pub fn ready(host: &mut dyn Host) -> Result<Stage2, i32> {
+        let compiler = compiler_dir();
+        let exe = compiler.join("target").join("stage2").join("sisu2");
+        let package = compiler.join("stage2");
+        let fail = |host: &mut dyn Host, detail: String| {
+            host.stderr(&crate::cli::plain_error(
+                msg::NATIVE_STAGE2_BUILD,
+                &[("dir", package.display().to_string()), ("detail", detail)],
+            ));
+            sisu_interp::exit::ERROR
+        };
+        if !package.join("src").is_dir() {
+            return Err(fail(host, "no `src` there".into()));
+        }
+        if !stage2_stale(&exe, &compiler) {
+            return Ok(Stage2 { exe });
+        }
+        let dir = exe.parent().map(Path::to_path_buf).unwrap_or_default();
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            return Err(fail(host, e.to_string()));
+        }
+        // Under a lock, so that the builds that start at once build it once.
+        let lock = match std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(dir.join(".build-lock"))
+        {
+            Ok(f) => f,
+            Err(e) => return Err(fail(host, e.to_string())),
+        };
+        if let Err(e) = lock.lock() {
+            return Err(fail(host, e.to_string()));
+        }
+        if !stage2_stale(&exe, &compiler) {
+            return Ok(Stage2 { exe });
+        }
+        let me = match std::env::current_exe() {
+            Ok(p) => p,
+            Err(e) => return Err(fail(host, e.to_string())),
+        };
+        let part = dir.join(format!("sisu2.part-{}", std::process::id()));
+        let mut cmd = std::process::Command::new(me);
+        cmd.args(["build", "--native", "--output"]).arg(&part).current_dir(&package);
+        // Built through stage 1, with the Rust lowering: stage 2 does not
+        // lower itself until it is built.
+        cmd.env(LOWER_VAR, "rust").env_remove(FRONT_END_VAR).env_remove(KEEP_SIR);
+        for v in RUNTIME_VARS {
+            cmd.env_remove(v);
+        }
+        cmd.stdin(std::process::Stdio::null());
+        let out = match cmd.output() {
+            Ok(o) => o,
+            Err(e) => return Err(fail(host, e.to_string())),
+        };
+        if !out.status.success() || !part.is_file() {
+            let _ = std::fs::remove_file(&part);
+            let mut detail = String::from_utf8_lossy(&out.stdout).into_owned();
+            detail.push_str(&String::from_utf8_lossy(&out.stderr));
+            return Err(fail(host, detail.trim_end().to_string()));
+        }
+        if let Err(e) = std::fs::rename(&part, &exe) {
+            let _ = std::fs::remove_file(&part);
+            return Err(fail(host, e.to_string()));
+        }
+        drop(lock);
+        Ok(Stage2 { exe })
+    }
+}
+
+/// Whether stage 2's executable is missing or older than a source of stage
+/// 2 or of stage 1's `sir` module.
+fn stage2_stale(exe: &Path, compiler: &Path) -> bool {
+    let Ok(built) = std::fs::metadata(exe).and_then(|m| m.modified()) else { return true };
+    let stage1 = compiler.join("stage1").join("src");
+    newer_source(&compiler.join("stage2").join("src"), built)
+        || newer_source(&stage1.join("sir"), built)
+        || std::fs::metadata(stage1.join("sir.sisu")).and_then(|m| m.modified()).is_ok_and(|t| t > built)
 }
 
 /// A home directory for stage 1 whose `target/release/sisu`, the backend

@@ -1,0 +1,2 @@
+panic: `transmute` gives the bits 0x2, which are not a valid value of type `bool` (`valid_bits`)
+  at main (invalid_bits.sisu:10:18)

@@ -1,0 +1,2 @@
+panic: `Global.release` of memory that `Global.acquire` did not give out, or not at its start (`from_here`)
+  at main (release_other.sisu:11:12)

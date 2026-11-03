@@ -4,7 +4,7 @@
 # dropped in place, and a bump `Region` handing out blocks through the
 # `Allocator` trait. A slot is one word, the width of an `Item`.
 
-from std.mem import Allocator, Global, Layout, Region, ptr
+from std.mem import Global, Layout, Region, ptr
 
 ## A value whose drop says so.
 struct Item:

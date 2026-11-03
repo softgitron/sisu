@@ -1,0 +1,46 @@
+# The layout of a type in raw memory (`size_of`, `align_of`; 22, "Plain
+# data and reinterpretation"), the native backend's: a sized integer
+# narrower than 64 bits and an `f32` at their own width, a struct and a
+# tuple in C's order with their padding, an option of a raw pointer one
+# word, and every other type the words of its value.
+
+from std.mem import align_of, ptr, size_of
+
+## Laid out as C lays it out: a byte, seven of padding, a word, two bytes.
+@repr(c)
+struct Mixed:
+    flag: u8
+    n: int
+    small: i16
+
+## Four bytes in a row.
+@repr(c)
+struct Pixel:
+    r: u8
+    g: u8
+    b: u8
+    a: u8
+
+def show(name: str, size: int, align: int):
+    print("{name}: size {size}, alignment {align}")
+
+def main():
+    show("int", size_of[int](), align_of[int]())
+    show("u8", size_of[u8](), align_of[u8]())
+    show("i16", size_of[i16](), align_of[i16]())
+    show("u32", size_of[u32](), align_of[u32]())
+    show("f32", size_of[f32](), align_of[f32]())
+    show("f64", size_of[f64](), align_of[f64]())
+    show("u128", size_of[u128](), align_of[u128]())
+    show("bool", size_of[bool](), align_of[bool]())
+    show("char", size_of[char](), align_of[char]())
+    show("()", size_of[()](), align_of[()]())
+    show("str", size_of[str](), align_of[str]())
+    show("String", size_of[String](), align_of[String]())
+    show("list[u8]", size_of[list[u8]](), align_of[list[u8]]())
+    show("ptr[u8]", size_of[ptr[u8]](), align_of[ptr[u8]]())
+    show("ptr[u8]?", size_of[Option[ptr[u8]]](), align_of[Option[ptr[u8]]]())
+    show("int?", size_of[Option[int]](), align_of[Option[int]]())
+    show("(u8, u32)", size_of[(u8, u32)](), align_of[(u8, u32)]())
+    show("Mixed", size_of[Mixed](), align_of[Mixed]())
+    show("Pixel", size_of[Pixel](), align_of[Pixel]())

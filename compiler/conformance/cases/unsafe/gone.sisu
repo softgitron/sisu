@@ -1,0 +1,13 @@
+# The checked memory model (D-085) refuses a read through a pointer to a
+# local whose frame has returned: `ptr.read`'s obligation `valid`.
+
+from std.mem import ptr
+
+def make() -> ptr[int]:
+    let x = 5
+    return ptr.of(ref x)
+
+def main():
+    let p = make()
+    # safety: valid: wrong on purpose, x went with its frame.
+    print(unsafe p.read())

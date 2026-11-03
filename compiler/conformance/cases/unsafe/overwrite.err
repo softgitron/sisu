@@ -1,0 +1,2 @@
+panic: `ptr.write` over a value of type `String` at offset 0 that was never dropped (`writable`)
+  at main (overwrite.sisu:15:9)

@@ -1,0 +1,2 @@
+panic: `ptr.offset` by 3 from offset 0 of a block of 16 bytes leaves it (`in_bounds`)
+  at main (out_of_bounds.sisu:12:20)

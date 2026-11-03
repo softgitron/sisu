@@ -1,0 +1,15 @@
+# Under the monitor, a pointer made from a `mut` borrow is that borrow's
+# loan (D-085): an assignment to the place ends it, so a write through the
+# pointer afterwards is the violation. Without the monitor the write is
+# made, as native code makes it.
+
+from std.mem import ptr
+
+def main():
+    var x = 1
+    let p = ptr.of_mut(mut x)
+    x = 2
+    # safety: writable, aligned: wrong on purpose, the assignment to x ended
+    #   the borrow p came from.
+    unsafe p.write(3)
+    print(x)

@@ -1,0 +1,15 @@
+# The checked memory model (D-085) refuses a write over a value that was
+# never dropped, whose memory would be lost: `ptr.write`'s obligation
+# `writable`.
+
+from std.mem import Global, Layout
+
+def main():
+    let block = Global().acquire(Layout(size=24, align=8)) else:
+        panic("out of memory")
+    let p = block.cast[String]()
+    # safety: writable, aligned: the block holds nothing the first time;
+    #   wrong on purpose the second, when it holds a `String`.
+    unsafe:
+        p.write("one".to_string())
+        p.write("two".to_string())

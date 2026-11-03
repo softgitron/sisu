@@ -1,0 +1,2 @@
+panic: `ptr.write` through a pointer made from a shared borrow (`writable`)
+  at main (shared_write.sisu:11:12)

@@ -135,6 +135,8 @@ impl<'p> Types<'p> {
                     "i128" | "u128" => 2 * w,
                     "u64" | "f32" | "u8" | "u16" | "u32" | "i8" | "i16" | "i32" | "DateTime" | "Iter"
                     | "Box" | "dict" | "set" => w,
+                    // A raw pointer is an address (22, "Raw pointers").
+                    "ptr" | "ptr_mut" => w,
                     // The values of tasks and channels are numbers in the
                     // runtime's scheduler; a guard is the address of the
                     // value its mutex holds.
@@ -186,6 +188,37 @@ impl<'p> Types<'p> {
                 return Err(Error::unsupported(format!("values of the type `{}`", sir::write::ty(other))));
             }
         })
+    }
+
+    /// Whether a value of the type lies in raw memory as it lies in a value
+    /// (the runtime's `rawmem::layout`, decision 302): no sized integer
+    /// narrower than 64 bits, `f32` or option of a raw pointer is among the
+    /// parts it holds in place, which raw memory keeps at their own width.
+    /// A reference into raw memory is only made to such a value, since the
+    /// code reads a reference's value as a value is laid out.
+    pub(crate) fn same_in_memory(&self, t: &Type) -> bool {
+        self.same_in_memory_at(t, 0)
+    }
+
+    fn same_in_memory_at(&self, t: &Type, depth: u32) -> bool {
+        if depth > 64 {
+            return false;
+        }
+        match t {
+            Type::Tuple(items) => items.iter().all(|x| self.same_in_memory_at(x, depth + 1)),
+            Type::Named(n, args) => match n.as_str() {
+                "u8" | "u16" | "u32" | "i8" | "i16" | "i32" | "f32" => false,
+                "Option" => !matches!(args.first(), Some(Type::Named(p, _)) if p == "ptr" || p == "ptr_mut"),
+                _ => match self.decl(n) {
+                    // A builtin that SIR declares as a struct has no fields.
+                    Some(sir::TypeDecl::Struct { fields, .. }) => {
+                        fields.iter().all(|f| self.same_in_memory_at(&f.ty.subst(args), depth + 1))
+                    }
+                    _ => true,
+                },
+            },
+            _ => true,
+        }
     }
 
     /// The number of a concrete type, if a value of it was made (the code
@@ -351,6 +384,10 @@ impl<'p> Types<'p> {
             "Box" => {
                 let e = self.id(&arg(0))?;
                 return simple(Kind::Box(e), w);
+            }
+            "ptr" | "ptr_mut" => {
+                let e = self.id(&arg(0))?;
+                return simple(Kind::Ptr(e), w);
             }
             "Scope" => return simple(Kind::Scope, w),
             "Cancellation" => return simple(Kind::Cancellation, w),

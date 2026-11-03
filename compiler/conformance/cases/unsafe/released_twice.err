@@ -1,0 +1,2 @@
+panic: `Global.release` of memory that was released already (`once`)
+  at main (released_twice.sisu:14:9)

@@ -49,6 +49,22 @@ unsafe extern "C" {
     fn realloc(p: *mut u8, size: usize) -> *mut u8;
     fn free(p: *mut u8);
     fn memmove(dst: *mut u8, src: *const u8, n: usize) -> *mut u8;
+    fn posix_memalign(out: *mut *mut u8, align: usize, size: usize) -> i32;
+}
+
+/// A block of `bytes` aligned to `align`, a power of two, counted as the
+/// program's: what `Global.acquire` gives out (decision 302), released with
+/// [`release`]. Null when there is no memory.
+pub(crate) fn alloc_aligned(bytes: usize, align: usize) -> *mut u8 {
+    let mut p: *mut u8 = std::ptr::null_mut();
+    // SAFETY: the alignment is a power of two and a multiple of a pointer's
+    // size, as posix_memalign asks; a zero size still gives a block.
+    let rc = unsafe { posix_memalign(&mut p, align.max(16), bytes.max(1)) };
+    if rc != 0 || p.is_null() {
+        return std::ptr::null_mut();
+    }
+    counted();
+    p
 }
 
 /// `bytes` of heap memory, aligned for a word; null for none.

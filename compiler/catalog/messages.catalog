@@ -805,3 +805,11 @@ D0118 cli     front.stage1-failed         internal compiler error: the stage-1 f
 # `--from-lir FILE` without `--native` (decision 284): LIR, the low IR
 # stage 2 writes, is compiled by the native backend; nothing interprets it.
 D0119 cli     native.from-lir             `--from-lir FILE` builds a LIR program (what stage 2's `sisu2 lir` writes) with the native backend; it goes with `--native`
+# How a native build lowers SIR (decision 304): through stage 2, the backend
+# written in Sisu, by default, or `--lower=rust` (`SISU_LOWER=rust`) through
+# the Rust lowering, the oracle; stage 2's executable, built when a source of
+# it is newer; and stage 2 stopping other than on a construct it does not
+# lower yet.
+D0120 cli     cli.bad-lower               `--lower` takes `stage2` (the lowering written in Sisu, the default) or `rust` (the Rust lowering, the oracle), not `{value}`
+D0121 cli     native.stage2-build         building stage 2 in `{dir}` failed; `--lower=rust` lowers with the Rust backend:\n{detail}
+D0122 cli     native.stage2-failed        internal compiler error: stage 2 failed to lower the program (status {status}); `--lower=rust` lowers with the Rust backend:\n{detail}

@@ -1,0 +1,10 @@
+# The checked memory model (D-085) refuses bits that are not a valid value
+# of the type they are read as: `transmute`'s obligation `valid_bits`.
+
+from std.mem import transmute
+
+def main():
+    # safety: valid_bits: 1 is the bits of `True`.
+    print(unsafe transmute[bool, int](1))
+    # safety: valid_bits: wrong on purpose, 2 is no `bool`.
+    print(unsafe transmute[bool, int](2))

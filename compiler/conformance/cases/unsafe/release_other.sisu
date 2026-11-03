@@ -1,0 +1,12 @@
+# The checked memory model (D-085) refuses to release memory `Global` did
+# not give out, here a local of the program: the obligation `from_here`.
+
+from std.mem import Global, Layout, ptr
+
+def main():
+    var x = 7
+    let p = ptr.of_mut(mut x)
+    # safety: from_here: wrong on purpose, x is a local, not a block of
+    #   Global; once: released once.
+    unsafe Global().release(p.cast[u8](), Layout(size=8, align=8))
+    print(x)

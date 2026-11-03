@@ -1,7 +1,8 @@
 # Foreign calls (22, "Foreign calls"; 12, "Interop"): a C string built in
 # raw memory and measured by C's `strlen`, copied by `memcpy` into memory
-# that `malloc` gave out and `free` takes back, an environment variable
-# that is not set, and bytes written to standard output by `write`. The
+# that `malloc` gave out and `free` takes back, a pointer made again from
+# an address in that memory, an environment variable that is not set, and
+# bytes written to standard output by `write`. The
 # interpreter emulates these functions of the C library on its checked
 # memory model (Q-55); native code calls C's.
 
@@ -38,7 +39,8 @@ def main():
     let block = Global().acquire(layout) else:
         panic("out of memory")
     # safety: room: 32 bytes hold either text and its NUL; valid: strlen,
-    #   memcpy and write read bytes the block or the copy holds; from_here,
+    #   memcpy and write read bytes the block or the copy holds; exposed: the
+    #   address is in memory that malloc, foreign code, gave out; from_here,
     #   once: the copy came from malloc and the block from Global with this
     #   layout, each given back once.
     unsafe:
@@ -48,6 +50,8 @@ def main():
             panic("out of memory")
         _ = memcpy(copy, block.as_const(), 7)
         print(strlen(copy.cast[c_char]().as_const()))
+        let again: ptr[u8] = ptr.from_address(copy.addr() + 1)
+        print(again.read() == 105u8)
         let n = write(1, copy.as_const(), 6)
         print("")
         print(n)

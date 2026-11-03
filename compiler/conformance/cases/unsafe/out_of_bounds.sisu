@@ -1,0 +1,13 @@
+# The checked memory model (D-085) refuses an offset that leaves its block:
+# `ptr.offset`'s obligation `in_bounds`.
+
+from std.mem import Global, Layout
+
+def main():
+    let block = Global().acquire(Layout(size=16, align=8)) else:
+        panic("out of memory")
+    let p = block.cast[int]()
+    # safety: in_bounds: wrong on purpose, the block has two ints and the
+    #   offset reaches past the one past the end.
+    let q = unsafe p.offset(3)
+    print(q.addr() > 0)

@@ -1,0 +1,7 @@
+# `bit_cast` between plain types of different sizes is refused when it
+# runs, since the front end does not check the sizes yet.
+
+from std.mem import bit_cast
+
+def main():
+    print(bit_cast[u32, u16](7u16))

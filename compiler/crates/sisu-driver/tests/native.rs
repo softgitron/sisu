@@ -71,7 +71,9 @@ fn native_conformance_from_lir() {
         .unwrap_or_else(|e| panic!("stage 2 does not build:\n{e}"));
     let text =
         std::fs::read_to_string(compiler_dir().join("conformance/native.list")).expect("the coverage list");
-    let list = sisu_conformance::native::read_list(&text);
+    // Less the cases whose constructs stage 2 does not lower yet, each
+    // marked `not from LIR:` with the reason (decision 302).
+    let list = sisu_conformance::native::read_list_from_lir(&text);
     let report = sisu_conformance::native::run_native_from_lir(&sisu, &root, &list, &stage2);
     if let Some(dir) = stage2.parent() {
         let _ = std::fs::remove_dir_all(dir);
@@ -442,6 +444,38 @@ fn run_native_runs_the_program() {
         .expect("sisu builds");
     assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
     assert!(dir.join("count").is_file());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The machine intrinsics of std.rt (22, "Machine intrinsics"; decision
+/// 302), which no program can call (std.rt is internal to std), from SIR
+/// written for them (`tests/machine/machine.sir`): natively the stack
+/// pointer, a word written and read through the thread's slot, and a
+/// switch that saves the running stack's registers and loads them again,
+/// so that it returns; the interpreter, which runs its own scheduler,
+/// refuses the first of them.
+#[test]
+fn machine_intrinsics_run_natively_and_the_interpreter_refuses_them() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let dir = scratch("machine");
+    let sir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/machine/machine.sir");
+    std::fs::copy(&sir, dir.join("machine.sir")).expect("the SIR");
+    let built = std::process::Command::new(&sisu)
+        .args(["build", "--native", "--from-sir", "machine.sir", "--output", "machine"])
+        .current_dir(&dir)
+        .output()
+        .expect("sisu builds");
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    let ran = std::process::Command::new(dir.join("machine")).current_dir(&dir).output().expect("it runs");
+    assert_eq!(outcome(ran), ("True\n42\nswitched back\n".to_string(), String::new(), Some(0)));
+    let interpreted = std::process::Command::new(&sisu)
+        .args(["run", "--from-sir", "machine.sir"])
+        .current_dir(&dir)
+        .output()
+        .expect("sisu runs");
+    let (out, err, status) = outcome(interpreted);
+    assert_eq!((out.as_str(), status), ("", Some(101)));
+    assert!(err.starts_with("panic: `rt.stack_pointer` is a machine intrinsic of native code"), "{err}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

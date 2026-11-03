@@ -1,0 +1,14 @@
+# The checked memory model (D-085) refuses a block released twice:
+# `Allocator.release`'s obligation `once`.
+
+from std.mem import Global, Layout
+
+def main():
+    let layout = Layout(size=8, align=8)
+    let block = Global().acquire(layout) else:
+        panic("out of memory")
+    # safety: from_here: the block came from Global with this layout; once:
+    #   wrong on purpose, it is released twice.
+    unsafe:
+        Global().release(block, layout)
+        Global().release(block, layout)

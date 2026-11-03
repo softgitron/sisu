@@ -75,6 +75,50 @@ fn sources() -> sisu_codegen::Sources {
     sisu_codegen::Sources { comp_dir, std_dir }
 }
 
+/// How a native build lowers a SIR program (decision 304): through stage 2,
+/// the lowering written in Sisu, to LIR, which the Rust backend translates
+/// one to one, by default; or through the Rust lowering (`--lower=rust`,
+/// `SISU_LOWER=rust`), the oracle, which also lowers a program stage 2 does
+/// not lower yet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Lowering {
+    Stage2,
+    Rust,
+}
+
+impl Lowering {
+    pub fn parse(name: &str) -> Option<Lowering> {
+        match name {
+            "stage2" => Some(Lowering::Stage2),
+            "rust" => Some(Lowering::Rust),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Lowering::Stage2 => "stage2",
+            Lowering::Rust => "rust",
+        }
+    }
+}
+
+/// The lowering this process's command chose ([`set_lowering`]).
+static LOWERING: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// The lowering the running command chose.
+pub(crate) fn lowering() -> Lowering {
+    match LOWERING.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => Lowering::Rust,
+        _ => Lowering::Stage2,
+    }
+}
+
+/// Chooses the lowering for the command this process runs.
+pub(crate) fn set_lowering(l: Lowering) {
+    LOWERING.store(u8::from(l == Lowering::Rust), std::sync::atomic::Ordering::Relaxed);
+}
+
 /// What the backend compiles: a SIR program, or the text of a LIR program
 /// (stage 2's lowering of one, decision 284).
 #[derive(Clone, Copy)]
@@ -102,6 +146,17 @@ pub(crate) fn build(code: Code<'_>, output: &Path, profile: Profile, host: &mut 
             return link(&compiled, start.elapsed(), &runtime, output, profile, host);
         }
     };
+    // Through stage 2 by default (decision 304): its LIR, translated; a
+    // program with a construct it does not lower yet goes on to the Rust
+    // lowering below.
+    if lowering() == Lowering::Stage2
+        && std::env::var_os("SISU_NATIVE_SURVEY").is_none()
+        && let Some(lir) = lower_with_stage2(prog, profile, host)?
+    {
+        let start = std::time::Instant::now();
+        let compiled = sisu_codegen::compile_lir(&lir, &sources()).map_err(|e| report(e, output, host))?;
+        return link(&compiled, start.elapsed(), &runtime, output, profile, host);
+    }
     // `SISU_NATIVE_SURVEY=1`: every construct the backend does not compile
     // yet, rather than the first.
     if std::env::var_os("SISU_NATIVE_SURVEY").is_some() {
@@ -124,6 +179,73 @@ pub(crate) fn build(code: Code<'_>, output: &Path, profile: Profile, host: &mut 
         Err(e) => return Err(report(e, output, host)),
     };
     link(&compiled, start.elapsed(), &runtime, output, profile, host)
+}
+
+/// The LIR stage 2 lowers the program to (`sisu2 lir`, decision 304), or
+/// `None` when stage 2 does not lower one of its constructs yet; stage 2
+/// failing otherwise is an internal error, reported.
+fn lower_with_stage2(
+    prog: &sisu_sir::Program,
+    profile: Profile,
+    host: &mut dyn Host,
+) -> Result<Option<String>, i32> {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static N: AtomicU32 = AtomicU32::new(0);
+    let stage2 = crate::front::Stage2::ready(host)?;
+    let dir = std::env::temp_dir().join(format!(
+        "sisu-lir-{}-{}",
+        std::process::id(),
+        N.fetch_add(1, Ordering::Relaxed)
+    ));
+    let failed = |host: &mut dyn Host, status: i32, detail: String| {
+        host.stderr(&text(msg::NATIVE_STAGE2_FAILED, &[("status", status.to_string()), ("detail", detail)]));
+        EXIT_ICE
+    };
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        return Err(failed(host, 0, e.to_string()));
+    }
+    let (sir, lir) = (dir.join("program.sir"), dir.join("program.lir"));
+    let start = std::time::Instant::now();
+    let result =
+        std::fs::write(&sir, sisu_sir::write::write(prog)).map_err(|e| e.to_string()).and_then(|()| {
+            let mut cmd = std::process::Command::new(&stage2.exe);
+            cmd.arg("lir").arg(&sir);
+            if profile == Profile::Release {
+                cmd.arg("--release");
+            }
+            cmd.arg("--output").arg(&lir).stdin(std::process::Stdio::null());
+            // Stage 2 is a native program: the runtime's variables are the
+            // program's being built, not its.
+            for v in crate::front::RUNTIME_VARS {
+                cmd.env_remove(v);
+            }
+            cmd.output().map_err(|e| e.to_string())
+        });
+    let lowered = match result {
+        Ok(out) if out.status.success() => match std::fs::read_to_string(&lir) {
+            Ok(text) => Ok(Some(text)),
+            Err(e) => Err(failed(host, 0, e.to_string())),
+        },
+        Ok(out) => {
+            let err = String::from_utf8_lossy(&out.stderr).into_owned();
+            if err.lines().any(|l| l.starts_with("lir: not lowered:")) {
+                Ok(None)
+            } else {
+                let status = out.status.code().unwrap_or(-1);
+                Err(failed(host, status, format!("{}{err}", String::from_utf8_lossy(&out.stdout))))
+            }
+        }
+        Err(e) => Err(failed(host, 0, e)),
+    };
+    let _ = std::fs::remove_dir_all(&dir);
+    if std::env::var_os("SISU_NATIVE_TIMES").is_some() {
+        let what = match &lowered {
+            Ok(Some(_)) => "lowered by stage 2",
+            _ => "not lowered by stage 2",
+        };
+        host.stderr(&format!("native: {what} in {:.1} ms\n", start.elapsed().as_secs_f64() * 1e3));
+    }
+    lowered
 }
 
 /// Links a compiled program at `output`, and reports where a build's time

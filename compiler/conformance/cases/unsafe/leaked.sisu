@@ -1,0 +1,17 @@
+# The checked memory model (D-085) refuses to release memory that still
+# holds a value that was never dropped (22, the soundness contract, clause
+# 3: every value is dropped exactly once).
+
+from std.mem import Global, Layout
+
+def main():
+    let layout = Layout(size=24, align=8)
+    let block = Global().acquire(layout) else:
+        panic("out of memory")
+    # safety: writable, aligned: the block holds nothing yet; from_here,
+    #   once: it came from Global with this layout, released once; wrong on
+    #   purpose, it still holds the `String`.
+    unsafe:
+        block.cast[String]().write("kept".to_string())
+        print("released while holding a value")
+        Global().release(block, layout)

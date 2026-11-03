@@ -737,7 +737,10 @@ impl Runner<'_> {
                 "sisu run --monitor",
                 Some("monitor"),
                 &expected,
-                &format!("{}--- stderr\n{}--- status {}\n", monitored.stdout, monitored.stderr, monitored.status),
+                &format!(
+                    "{}--- stderr\n{}--- status {}\n",
+                    monitored.stdout, monitored.stderr, monitored.status
+                ),
             ),
             None => self.compare(
                 case,

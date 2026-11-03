@@ -183,6 +183,10 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> u8 {
 
 unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
     use Intrinsic as I;
+    if crate::rawmem::handles(i) {
+        // SAFETY: as this function's caller guarantees.
+        return unsafe { crate::rawmem::call(i, c) };
+    }
     // SAFETY: the arguments are of the types the descriptor gives.
     unsafe {
         match i {

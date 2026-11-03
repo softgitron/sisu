@@ -501,8 +501,17 @@ impl Host for Captured<'_> {
 /// one (decision 268).
 pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
     let env = std::env::var(crate::front::FRONT_END_VAR).ok();
-    match crate::front::take_choice(args, env.as_deref(), VALUE_FLAGS, host) {
-        Ok((args, front)) => execute_with(&args, front, host),
+    let (args, front) = match crate::front::take_choice(args, env.as_deref(), VALUE_FLAGS, host) {
+        Ok(chosen) => chosen,
+        Err(code) => return code,
+    };
+    // How a native build lowers SIR (decision 304).
+    let lower = std::env::var(crate::front::LOWER_VAR).ok();
+    match crate::front::take_lowering(&args, lower.as_deref(), VALUE_FLAGS, host) {
+        Ok((args, lowering)) => {
+            crate::native::set_lowering(lowering);
+            execute_with(&args, front, host)
+        }
         Err(code) => code,
     }
 }
@@ -1152,7 +1161,7 @@ fn from_lir(
 /// again at each save), `run --defer-borrow` (the ownership checker's
 /// findings beside the run), `check --diary` (the diagnostics as data) and
 /// `parse --shape`. `run --record` is stage 1's, its log holding the SIR
-/// that `sisu replay` runs (decision 301). A file of SIR needs no front end
+/// that `sisu replay` runs (decision 303). A file of SIR needs no front end
 /// at all.
 fn stage1_serves(cmd: &str, p: &Parsed<'_>) -> bool {
     let value = |k: &str| p.values.iter().any(|(v, _)| *v == k);
@@ -1458,7 +1467,7 @@ fn stage1_command(
                 ..Options::default()
             };
             // `--record FILE`: the run with every host call logged, and the
-            // SIR it ran, which `sisu replay` runs again (decision 301).
+            // SIR it ran, which `sisu replay` runs again (decision 303).
             if let Some(path) = &opts.record {
                 let header = sisu_interp::record::Header {
                     toolchain: crate::replay::TOOLCHAIN.into(),
@@ -1472,6 +1481,7 @@ fn stage1_command(
                     layout: None,
                     watch: false,
                     sir: true,
+                    warnings: r.stderr.clone(),
                 };
                 let mut rec = sisu_interp::record::Recorder::new(&mut h, opts.redact.clone());
                 let report = sisu_interp::run_main_report(&prog, &mut rec, &options);
@@ -2503,6 +2513,7 @@ fn command(
                             layout: input.program.as_ref().map(|(p, _)| p.write()),
                             watch,
                             sir: false,
+                            warnings: String::new(),
                         };
                         let mut rec = sisu_interp::record::Recorder::new(&mut h, opts.redact.clone());
                         let report = if watch {
@@ -3647,17 +3658,15 @@ fn replay(args: &[String], host: &mut dyn Host) -> i32 {
         return bad_log(host, "its source does not match its content hash".into());
     }
     // A run whose front end was stage 1 logged the SIR it ran, which runs
-    // again without a front end (decision 301).
+    // again without a front end (decision 303).
     if log.header.sir {
         let prog = match read_sir(&log.header.source, host) {
             Ok(prog) => prog,
             Err(code) => return code,
         };
-        let options = Options {
-            monitor: p.flags.contains(&"--monitor"),
-            seed: log.header.seed,
-            ..Options::default()
-        };
+        let options =
+            Options { monitor: p.flags.contains(&"--monitor"), seed: log.header.seed, ..Options::default() };
+        host.stderr(&log.header.warnings);
         let mut rep = sisu_interp::record::Replayer::new(&log, host);
         let report = sisu_interp::run_main_report(&prog, &mut rep, &options);
         let diverged = rep.divergence();

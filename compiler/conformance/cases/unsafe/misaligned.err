@@ -1,0 +1,2 @@
+panic: `ptr.write` of `int` at offset 3 of its block, which is not aligned to 8 (`aligned`)
+  at main (misaligned.sisu:13:9)

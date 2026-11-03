@@ -26,6 +26,7 @@ mod host;
 mod intrinsics;
 mod iter;
 mod mem;
+mod rawmem;
 mod rt;
 mod sched;
 mod sized;

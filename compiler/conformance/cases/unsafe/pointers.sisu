@@ -1,9 +1,10 @@
-# Raw pointers to the program's own places (22, "Raw pointers"; D-085, the
-# checked memory model): made from a borrow, read and written through,
-# turned into a reference, offset over a slice's values, cast to a type of
-# the same bytes, and moved with their provenance.
+# Raw pointers (22, "Raw pointers"; D-085, the checked memory model): to
+# the program's own places, made from a borrow, read and written through,
+# turned into a reference, offset over a slice's values and moved with their
+# provenance; and into memory of `Global` holding a C struct, whose second
+# field a pointer cast to its type reaches.
 
-from std.mem import as_ptr, ptr, slice_from_raw
+from std.mem import Global, Layout, as_ptr, ptr, slice_from_raw
 
 ## Two halves of a word, laid out as C lays them out.
 @repr(c)
@@ -45,15 +46,19 @@ def main():
         hit(tp)
     print("{t.name}: {t.hits}")
 
-    var h = Halves(low=1i32, high=-2i32)
-    let hp = ptr.of_mut(mut h)
-    # safety: valid, aligned, in_bounds: an i32 at offset 4 of the eight
-    #   bytes of h is its `high`; writable: hp came from a `mut` borrow.
+    let block = Global().acquire(Layout(size=8, align=4)) else:
+        panic("out of memory")
+    let hp = block.cast[Halves]()
+    # safety: writable, valid, aligned, in_bounds: the block holds the eight
+    #   bytes of a `Halves`, whose `high` is the i32 at offset 4; from_here,
+    #   once: it came from Global with this layout, released once.
     unsafe:
+        hp.write(Halves(low=1i32, high=-2i32))
         let high = hp.cast[i32]().offset(1)
         print(high.read())
         high.write(7i32)
-    print("{h:?}")
+        print("{hp.read():?}")
+        Global().release(block, Layout(size=8, align=4))
 
     let xs = [3, 5, 8, 13]
     let seen = xs.as_slice()

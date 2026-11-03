@@ -138,6 +138,16 @@ pub mod sym {
     /// holds capability handles was made; each handle's cell counts one
     /// more (decision 237).
     pub const RETAIN: &str = "sisu_rt_retain";
+    /// `sisu_rt_flush()`: writes what the program printed so far, before a
+    /// foreign call, which may write to the same streams (decision 302).
+    pub const FLUSH: &str = "sisu_rt_flush";
+    /// `sisu_rt_thread_slot() -> ptr`: the address of the thread's one word
+    /// of thread-local storage, the machine intrinsic `rt.thread_slot`.
+    pub const THREAD_SLOT: &str = "sisu_rt_thread_slot";
+    /// `sisu_rt_switch(save, load)`: saves the running stack's registers in
+    /// the `Context` at `save` and continues from those at `load`, the
+    /// machine intrinsic `rt.switch` (22, "Machine intrinsics").
+    pub const SWITCH: &str = "sisu_rt_switch";
 }
 
 /// The words of [`sym::STACK`]. The probe at a function's entry compares
@@ -515,6 +525,9 @@ pub enum Kind {
     /// `Arena[T]`: one word, the address of a runtime object holding the
     /// slots.
     Arena(u32),
+    /// `ptr[T]` and `ptr mut T` (22, "Raw pointers"): one word, an address;
+    /// `T` is what it points to.
+    Ptr(u32),
 }
 
 /// The bytes of a `Shared` cell's header, before its value, and its words
@@ -670,6 +683,7 @@ const K_BYTES: u8 = 42;
 const K_DATETIME: u8 = 43;
 const K_RW_LOCK: u8 = 44;
 const K_READ_GUARD: u8 = 45;
+const K_PTR: u8 = 46;
 
 struct Writer(Vec<u8>);
 
@@ -859,6 +873,10 @@ pub fn encode(table: &[TypeEntry]) -> Vec<u8> {
                 w.u8(K_ARENA);
                 w.u32(*t);
             }
+            Kind::Ptr(t) => {
+                w.u8(K_PTR);
+                w.u32(*t);
+            }
         }
     }
     w.0
@@ -993,6 +1011,7 @@ pub fn decode(bytes: &[u8]) -> Option<Vec<TypeEntry>> {
             K_WEAK => Kind::Weak(r.u32()?),
             K_CELL => Kind::Cell(r.u32()?),
             K_ARENA => Kind::Arena(r.u32()?),
+            K_PTR => Kind::Ptr(r.u32()?),
             _ => return None,
         };
         out.push(TypeEntry { size, kind });
@@ -1310,6 +1329,37 @@ intrinsics! {
     HostProcRun = "host.proc.run",
     LiveBoundary = "live.boundary",
     LiveEpoch = "live.epoch",
+    // The raw memory of std.mem (22; decision 302), after the others so
+    // that their numbers stay what they were.
+    MemPtrOf = "mem.ptr.of",
+    MemPtrOfMut = "mem.ptr.of_mut",
+    MemPtrDangling = "mem.ptr.dangling",
+    MemPtrFromAddress = "mem.ptr.from_address",
+    MemPtrCast = "mem.ptr.cast",
+    MemPtrWithAddr = "mem.ptr.with_addr",
+    MemPtrAsConst = "mem.ptr.as_const",
+    MemPtrAddr = "mem.ptr.addr",
+    MemPtrOffset = "mem.ptr.offset",
+    MemPtrCastMut = "mem.ptr.cast_mut",
+    MemPtrRead = "mem.ptr.read",
+    MemPtrWrite = "mem.ptr.write",
+    MemPtrDropInPlace = "mem.ptr.drop_in_place",
+    MemPtrCopyFrom = "mem.ptr.copy_from",
+    MemPtrAsRef = "mem.ptr.as_ref",
+    MemPtrAsMut = "mem.ptr.as_mut",
+    MemPtrReadVolatile = "mem.ptr.read_volatile",
+    MemPtrWriteVolatile = "mem.ptr.write_volatile",
+    MemSliceAsPtr = "mem.slice.as_ptr",
+    MemSizeOf = "mem.size_of",
+    MemAlignOf = "mem.align_of",
+    MemGlobalAcquire = "mem.global.acquire",
+    MemGlobalRelease = "mem.global.release",
+    MemBitCast = "mem.bit_cast",
+    MemAsBytes = "mem.as_bytes",
+    MemReadPlain = "mem.read_plain",
+    MemViewPlain = "mem.view_plain",
+    MemTransmute = "mem.transmute",
+    MemSliceFromRaw = "mem.slice_from_raw",
 }
 
 impl Intrinsic {
@@ -1423,6 +1473,7 @@ mod tests {
             Kind::Weak(6),
             Kind::Cell(7),
             Kind::Arena(8),
+            Kind::Ptr(9),
         ];
         let table: Vec<TypeEntry> =
             kinds.into_iter().enumerate().map(|(i, kind)| TypeEntry { size: 8 * i as u32, kind }).collect();

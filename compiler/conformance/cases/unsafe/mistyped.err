@@ -1,0 +1,2 @@
+panic: `ptr.read` of `int` at offset 0, where the memory holds a value of type `String` (`valid`)
+  at main (mistyped.sisu:13:15)

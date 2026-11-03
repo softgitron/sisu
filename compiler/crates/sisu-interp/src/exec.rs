@@ -780,7 +780,8 @@ impl<'p> Interp<'p, '_> {
                     // (`rawmem.rs`) read the static types of their operands
                     // and of the result, as native code does.
                     if crate::rawmem::is_raw(name) {
-                        let arg_tys: Vec<Option<sir::Type>> = args.iter().map(|o| self.operand_type(o)).collect();
+                        let arg_tys: Vec<Option<sir::Type>> =
+                            args.iter().map(|o| self.operand_type(o)).collect();
                         let dest_ty = self.dest_type(dest).or_else(|| self.place_type(dest));
                         let r = self
                             .raw_intrinsic(name, tys, vals, &arg_tys, dest_ty.as_ref())

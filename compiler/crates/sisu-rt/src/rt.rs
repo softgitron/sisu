@@ -58,6 +58,7 @@ pub(crate) fn init(types: Vec<TypeEntry>, fns: Vec<usize>) {
     let plain = plain_table(&types, &needs);
     let parts = copy_parts_table(&types, &plain);
     let drops = drop_parts_table(&types, &needs);
+    crate::rawmem::set_up(&types);
     let _ = TYPES.set(types);
     let _ = NEEDS_DROP.set(needs);
     let _ = PLAIN.set(plain);

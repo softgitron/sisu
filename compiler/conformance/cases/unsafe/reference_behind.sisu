@@ -1,0 +1,19 @@
+# Under the monitor, a reference made from a raw pointer is a loan of the
+# memory it points to (D-085): dropping the value through the pointer ends
+# it, so using the reference afterwards is the violation. Without the
+# monitor the value is found gone.
+
+from std.mem import Global, Layout
+
+def main():
+    let block = Global().acquire(Layout(size=24, align=8)) else:
+        panic("out of memory")
+    let slot = block.cast[String]()
+    # safety: writable, aligned: the block held nothing; valid,
+    #   valid_for_origin: wrong on purpose, the reference is used after the
+    #   value it refers to was dropped through the pointer.
+    unsafe:
+        slot.write("kept".to_string())
+        let s = slot.as_ref()
+        slot.drop_in_place()
+        print(s)

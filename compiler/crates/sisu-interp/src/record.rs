@@ -120,8 +120,11 @@ pub struct Header {
     /// The run was under `--watch`: its saves are `edit` records.
     pub watch: bool,
     /// `source` is the program's serialised SIR, which a replay runs
-    /// without a front end: the run's front end was stage 1 (decision 301).
+    /// without a front end: the run's front end was stage 1 (decision 303).
     pub sir: bool,
+    /// What the front end printed before the run (its warnings), which a
+    /// replay without a front end prints first.
+    pub warnings: String,
 }
 
 impl Header {
@@ -147,6 +150,9 @@ impl Header {
         }
         if self.sir {
             out.push_str("sir\n");
+        }
+        if !self.warnings.is_empty() {
+            out.push_str(&format!("warnings {}\n", q(&self.warnings)));
         }
         out
     }
@@ -532,6 +538,7 @@ impl Log {
             layout: None,
             watch: false,
             sir: false,
+            warnings: String::new(),
         };
         let mut header = header;
         let mut records = Vec::new();
@@ -555,6 +562,10 @@ impl Log {
                 }
                 "sir" if records.is_empty() => {
                     header.sir = true;
+                    continue;
+                }
+                "warnings" if records.is_empty() => {
+                    header.warnings = str_at(&f, 1);
                     continue;
                 }
                 _ => {}
@@ -1106,6 +1117,7 @@ mod tests {
             layout: None,
             watch: false,
             sir: false,
+            warnings: String::new(),
             toolchain: "0.0.1".into(),
             file: "a.sisu".into(),
             hash: 0xabc,

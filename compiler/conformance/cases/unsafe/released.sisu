@@ -1,0 +1,17 @@
+# The checked memory model (D-085) refuses a read of memory that was
+# released: `ptr.read`'s obligation `valid`.
+
+from std.mem import Global, Layout
+
+def main():
+    let layout = Layout(size=8, align=8)
+    let block = Global().acquire(layout) else:
+        panic("out of memory")
+    let p = block.cast[int]()
+    # safety: writable, aligned: the block was just acquired; from_here,
+    #   once: it came from Global with this layout and is released once.
+    unsafe:
+        p.write(7)
+        Global().release(block, layout)
+    # safety: valid: wrong on purpose, the block was released.
+    print(unsafe p.read())

@@ -75,7 +75,10 @@ enum Scalar {
     Unit,
     Int,
     U64,
-    Sized { bytes: u8, signed: bool },
+    Sized {
+        bytes: u8,
+        signed: bool,
+    },
     I128,
     U128,
     F64,
@@ -146,14 +149,18 @@ pub(crate) struct Block {
     pub items: BTreeMap<u64, Item>,
 }
 
+/// What names a place of the program: (task, frame, serial, local, path,
+/// and whether the block is of a slice's values).
+type PlaceKey = (u32, u32, u64, u32, Vec<Step>, bool);
+
 /// The raw memory of a run.
 #[derive(Default)]
 pub(crate) struct RawMem {
     pub blocks: Vec<Block>,
     next: u64,
     /// The block made for each place, so that two pointers to one place
-    /// have one address: (task, frame, serial, local, path, elements).
-    places: HashMap<(u32, u32, u64, u32, Vec<Step>, bool), u32>,
+    /// have one address.
+    places: HashMap<PlaceKey, u32>,
 }
 
 fn align_up(n: u64, align: u64) -> u64 {
@@ -345,16 +352,20 @@ impl<'p> Interp<'p, '_> {
         if depth > 64 {
             return Err(ice(format!("the type `{}` holds itself", shown(t))));
         }
-        let scalar = |size: u64, s: Scalar| Ok((Layout { size, align: size.clamp(1, WORD) }, Shape::Scalar(s)));
+        let scalar =
+            |size: u64, s: Scalar| Ok((Layout { size, align: size.clamp(1, WORD) }, Shape::Scalar(s)));
         match t {
-            Type::Unit | Type::Never => return Ok((Layout { size: 0, align: 1 }, Shape::Scalar(Scalar::Unit))),
+            Type::Unit | Type::Never => {
+                return Ok((Layout { size: 0, align: 1 }, Shape::Scalar(Scalar::Unit)));
+            }
             Type::Int => return scalar(WORD, Scalar::Int),
             Type::Float => return scalar(WORD, Scalar::F64),
             Type::Bool => return scalar(WORD, Scalar::Bool),
             Type::Char => return scalar(WORD, Scalar::Char),
             Type::Tuple(items) => return self.c_layout(items.iter().cloned(), depth),
             Type::Named(n, args) => {
-                let sized = |bytes: u8, signed: bool| scalar(u64::from(bytes), Scalar::Sized { bytes, signed });
+                let sized =
+                    |bytes: u8, signed: bool| scalar(u64::from(bytes), Scalar::Sized { bytes, signed });
                 match n.as_str() {
                     "u8" => return sized(1, false),
                     "i8" => return sized(1, true),
@@ -430,8 +441,8 @@ impl<'p> Interp<'p, '_> {
             | Type::Fn(..) => false,
             Type::Tuple(ts) => any(ts),
             Type::Named(n, args) => match n.as_str() {
-                "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i128" | "f32" | "DateTime"
-                | "ptr" | "ptr_mut" => false,
+                "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i128" | "f32"
+                | "DateTime" | "ptr" | "ptr_mut" => false,
                 "Option" | "Result" | "Cell" | "Atomic" => any(args),
                 other if builtin(other) => true,
                 other => {
@@ -445,7 +456,9 @@ impl<'p> Interp<'p, '_> {
                         Some(sir::TypeDecl::Enum { variants, error, .. }) => {
                             *error
                                 || variants.iter().any(|v| {
-                                    v.fields.iter().any(|(_, ft)| self.needs_drop_at(&ft.subst(args), depth + 1))
+                                    v.fields
+                                        .iter()
+                                        .any(|(_, ft)| self.needs_drop_at(&ft.subst(args), depth + 1))
                                 })
                         }
                         None => true,
@@ -533,7 +546,9 @@ impl<'p> Interp<'p, '_> {
                     };
                     let field_tys: Vec<Type> = match (n.as_str(), self.types.get(n.as_str())) {
                         ("Option", _) if variant == 0 => args.first().cloned().into_iter().collect(),
-                        ("Result", _) if variant <= 1 => args.get(variant as usize).cloned().into_iter().collect(),
+                        ("Result", _) if variant <= 1 => {
+                            args.get(variant as usize).cloned().into_iter().collect()
+                        }
                         ("Option" | "Result", _) => Vec::new(),
                         (_, Some(sir::TypeDecl::Struct { fields, .. })) if variant == u32::MAX => {
                             fields.iter().map(|f| f.ty.subst(args)).collect()
@@ -748,7 +763,7 @@ impl<'p> Interp<'p, '_> {
         obligation: &str,
     ) -> Result<u32, Unwind> {
         let Some(b) = p.block else {
-            if l.size == 0 && p.off != 0 && (p.off as u64) % l.align == 0 {
+            if l.size == 0 && p.off != 0 && (p.off as u64).is_multiple_of(l.align) {
                 // A zero-sized access through an aligned pointer touches
                 // nothing (a dangling pointer of an empty buffer).
                 return Ok(u32::MAX);
@@ -777,7 +792,7 @@ impl<'p> Interp<'p, '_> {
                 ],
             ));
         }
-        if (block.base + p.off as u64) % l.align != 0 {
+        if !(block.base + p.off as u64).is_multiple_of(l.align) {
             return Err(panic(
                 msg::PANIC_RAW_MISALIGNED,
                 &[
@@ -796,7 +811,9 @@ impl<'p> Interp<'p, '_> {
     /// is gone.
     fn place_of(&self, b: u32, off: u64) -> Result<(Pointer, Type, u64), Unwind> {
         let block = self.raw.blocks.get(b as usize).ok_or_else(|| ice("a pointer into no block"))?;
-        let Kind::Place { at, ty, elems } = &block.kind else { return Err(ice("a place's block that is none")) };
+        let Kind::Place { at, ty, elems } = &block.kind else {
+            return Err(ice("a place's block that is none"));
+        };
         let size = self.mem_layout(ty)?.size;
         match elems {
             Some(_) if size > 0 => Ok((at.join(Step::Index((off / size) as usize)), ty.clone(), off % size)),
@@ -811,21 +828,28 @@ impl<'p> Interp<'p, '_> {
             return self.heap.get(at.local as usize).is_some_and(|c| c.serial == at.serial && c.strong > 0);
         }
         if at.frame == RAW {
-            return self
-                .raw
-                .blocks
-                .get(at.local as usize)
-                .is_some_and(|b| b.serial == at.serial && b.live);
+            return self.raw.blocks.get(at.local as usize).is_some_and(|b| b.serial == at.serial && b.live);
         }
         self.frames_of(at.task).get(at.frame as usize).is_some_and(|f| f.serial == at.serial)
     }
 
     /// The pointer the monitor sees an access through `p` at as: the
-    /// place, or the block and offset, with the pointer's loan.
-    fn access_pointer(&self, p: &RawPtr, b: u32) -> Result<Pointer, Unwind> {
+    /// place, or the block and offset, with the pointer's loan. A place
+    /// that is gone is the panic of `op`, before the monitor looks at the
+    /// loan, so that a run gives the same panic with the monitor or without.
+    fn access_pointer(&self, p: &RawPtr, b: u32, op: &str, obligation: &str) -> Result<Pointer, Unwind> {
         let block = self.raw.blocks.get(b as usize).ok_or_else(|| ice("a pointer into no block"))?;
         let mut at = match &block.kind {
-            Kind::Place { .. } => self.place_of(b, p.off as u64)?.0,
+            Kind::Place { .. } => {
+                let at = self.place_of(b, p.off as u64)?.0;
+                if !self.place_alive(&at) {
+                    return Err(panic(
+                        msg::PANIC_RAW_GONE,
+                        &[("op", format!("ptr.{op}")), ("obligation", obligation.into())],
+                    ));
+                }
+                at
+            }
             _ => Pointer {
                 task: 0,
                 frame: RAW,
@@ -849,7 +873,7 @@ impl<'p> Interp<'p, '_> {
         if b == u32::MAX {
             return Ok(Some(self.decode(&[], ty).map_err(|_| ice("a zero-sized value of no type"))?));
         }
-        let at = self.access_pointer(p, b)?;
+        let at = self.access_pointer(p, b, op, "valid")?;
         self.mon_access(&at, if take { Op::Move } else { Op::Read })?;
         let off = p.off as u64;
         if let Some(Kind::Place { .. }) = self.raw.blocks.get(b as usize).map(|x| &x.kind) {
@@ -995,7 +1019,14 @@ impl<'p> Interp<'p, '_> {
     }
 
     /// A read through a pointer into a place of the program.
-    fn place_read(&mut self, b: u32, off: u64, ty: &Type, take: bool, op: &str) -> Result<Option<Value>, Unwind> {
+    fn place_read(
+        &mut self,
+        b: u32,
+        off: u64,
+        ty: &Type,
+        take: bool,
+        op: &str,
+    ) -> Result<Option<Value>, Unwind> {
         let (at, pty, inner) = self.place_of(b, off)?;
         if !self.place_alive(&at) {
             return Err(panic(
@@ -1026,7 +1057,12 @@ impl<'p> Interp<'p, '_> {
             Ok(v) => Ok(Some(v)),
             Err(Bad::Invalid(bits)) => Err(panic(
                 msg::PANIC_RAW_INVALID_BITS,
-                &[("op", format!("ptr.{op}")), ("bits", bits), ("ty", shown(ty)), ("obligation", "valid".into())],
+                &[
+                    ("op", format!("ptr.{op}")),
+                    ("bits", bits),
+                    ("ty", shown(ty)),
+                    ("obligation", "valid".into()),
+                ],
             )),
             Err(Bad::Opaque) => Err(self.place_mistyped(off, ty, &pty, op, "valid")),
         }
@@ -1062,7 +1098,7 @@ impl<'p> Interp<'p, '_> {
         if matches!(self.raw.blocks[b as usize].kind, Kind::ReadOnly) {
             return Err(panic(msg::PANIC_RAW_READ_ONLY, &[("op", format!("ptr.{op}"))]));
         }
-        let at = self.access_pointer(p, b)?;
+        let at = self.access_pointer(p, b, op, "writable")?;
         self.mon_access(&at, Op::Write)?;
         let off = p.off as u64;
         if let Kind::Place { .. } = self.raw.blocks[b as usize].kind {
@@ -1184,7 +1220,7 @@ impl<'p> Interp<'p, '_> {
         if b == u32::MAX || n == 0 {
             return Ok(Vec::new());
         }
-        let at = self.access_pointer(p, b)?;
+        let at = self.access_pointer(p, b, op, "valid")?;
         self.mon_access(&at, Op::Read)?;
         if let Kind::Place { .. } = self.raw.blocks[b as usize].kind {
             let mut out = Vec::with_capacity(n as usize);
@@ -1272,7 +1308,9 @@ impl<'p> Interp<'p, '_> {
         let arg = |i: usize| args.get(i).ok_or_else(|| ice(format!("`{name}` without argument {i}")));
         let targ = |i: usize| {
             tys.get(i).cloned().ok_or_else(|| {
-                ice(format!("`{name}` without its type argument {i}: the front end must write it in the SIR call"))
+                ice(format!(
+                    "`{name}` without its type argument {i}: the front end must write it in the SIR call"
+                ))
             })
         };
         let op = op_name(name);
@@ -1316,7 +1354,9 @@ impl<'p> Interp<'p, '_> {
                     None => RawPtr { block: None, off: a, shared: false, tag: 0 },
                 }))
             }
-            "mem.ptr.cast" | "mem.ptr.as_const" | "mem.ptr.cast_mut" => Ok(Self::ptr_value(self.raw_ptr(arg(0)?)?)),
+            "mem.ptr.cast" | "mem.ptr.as_const" | "mem.ptr.cast_mut" => {
+                Ok(Self::ptr_value(self.raw_ptr(arg(0)?)?))
+            }
             "mem.ptr.with_addr" => {
                 let mut p = self.raw_ptr(arg(0)?)?;
                 let a = self.int(arg(1)?)?;
@@ -1341,7 +1381,11 @@ impl<'p> Interp<'p, '_> {
                     if !inside {
                         return Err(panic(
                             msg::PANIC_RAW_OFFSET,
-                            &[("count", n.to_string()), ("offset", p.off.to_string()), ("size", b.size.to_string())],
+                            &[
+                                ("count", n.to_string()),
+                                ("offset", p.off.to_string()),
+                                ("size", b.size.to_string()),
+                            ],
                         ));
                     }
                 }
@@ -1450,7 +1494,13 @@ impl<'p> Interp<'p, '_> {
             "mem.bit_cast" | "mem.transmute" => {
                 let (to, from) = (targ(0)?, targ(1)?);
                 let x = self.target(arg(0)?)?.clone();
-                self.reinterpret(&x, &from, &to, &op, if name == "mem.bit_cast" { "valid" } else { "valid_bits" })
+                self.reinterpret(
+                    &x,
+                    &from,
+                    &to,
+                    &op,
+                    if name == "mem.bit_cast" { "valid" } else { "valid_bits" },
+                )
             }
             "mem.as_bytes" => {
                 let t = arg_tys
@@ -1505,7 +1555,8 @@ impl<'p> Interp<'p, '_> {
                 // A `bytes`' buffer is aligned for any plain value, as the
                 // C allocator aligns it natively.
                 let Some(part) = data.get(..l.size as usize) else { return Ok(Value::none()) };
-                let v = self.decode(part, &t).map_err(|_| ice(format!("`view_plain` of a `{}`", shown(&t))))?;
+                let v =
+                    self.decode(part, &t).map_err(|_| ice(format!("`view_plain` of a `{}`", shown(&t))))?;
                 self.serial += 1;
                 let b = self.raw.add(l.size, l.align, Kind::ReadOnly, self.serial);
                 let serial = self.raw.blocks[b as usize].serial;
@@ -1527,7 +1578,13 @@ impl<'p> Interp<'p, '_> {
                             items.push(c);
                         }
                         None => {
-                            return Err(self.uninitialised(q.block.unwrap_or(0), q.off as u64, &t, "slice_from_raw", "valid"));
+                            return Err(self.uninitialised(
+                                q.block.unwrap_or(0),
+                                q.off as u64,
+                                &t,
+                                "slice_from_raw",
+                                "valid",
+                            ));
                         }
                     }
                 }
@@ -1574,7 +1631,10 @@ impl<'p> Interp<'p, '_> {
     ) -> Result<(), Unwind> {
         let want = if layout.is_some() { Kind::Global } else { Kind::Malloc };
         let other = || {
-            panic(msg::PANIC_RAW_RELEASE_OTHER, &[("op", op.to_string()), ("allocator", allocator.to_string())])
+            panic(
+                msg::PANIC_RAW_RELEASE_OTHER,
+                &[("op", op.to_string()), ("allocator", allocator.to_string())],
+            )
         };
         let Some(b) = p.block else { return Err(other()) };
         let Some(block) = self.raw.blocks.get(b as usize) else { return Err(other()) };
@@ -1723,7 +1783,14 @@ impl<'p> Interp<'p, '_> {
 
     /// `bit_cast` and `transmute`: the bits of `x`, a `from`, as a `to` of
     /// the same size.
-    fn reinterpret(&self, x: &Value, from: &Type, to: &Type, op: &str, obligation: &str) -> Result<Value, Unwind> {
+    fn reinterpret(
+        &self,
+        x: &Value,
+        from: &Type,
+        to: &Type,
+        op: &str,
+        obligation: &str,
+    ) -> Result<Value, Unwind> {
         let (lf, lt) = (self.mem_layout(from)?, self.mem_layout(to)?);
         if lf.size != lt.size {
             return Err(panic(
@@ -1748,7 +1815,12 @@ impl<'p> Interp<'p, '_> {
             Ok(v) => Ok(v),
             Err(Bad::Invalid(bits)) => Err(panic(
                 msg::PANIC_RAW_INVALID_BITS,
-                &[("op", op.to_string()), ("bits", bits), ("ty", shown(to)), ("obligation", obligation.into())],
+                &[
+                    ("op", op.to_string()),
+                    ("bits", bits),
+                    ("ty", shown(to)),
+                    ("obligation", obligation.into()),
+                ],
             )),
             Err(Bad::Opaque) => Err(self.place_mistyped(0, to, from, op, obligation)),
         }
@@ -1773,7 +1845,10 @@ impl<'p> Interp<'p, '_> {
         match f {
             "strlen" => {
                 let p = self.nullable(arg(0)?)?.ok_or_else(|| {
-                    panic(msg::PANIC_RAW_NO_MEMORY, &[("op", "strlen".into()), ("obligation", "valid".into())])
+                    panic(
+                        msg::PANIC_RAW_NO_MEMORY,
+                        &[("op", "strlen".into()), ("obligation", "valid".into())],
+                    )
                 })?;
                 let n = self.c_string(&p, "strlen")?.len();
                 int_result(n as i128)
@@ -1814,7 +1889,10 @@ impl<'p> Interp<'p, '_> {
             }
             "getenv" => {
                 let p = self.nullable(arg(0)?)?.ok_or_else(|| {
-                    panic(msg::PANIC_RAW_NO_MEMORY, &[("op", "getenv".into()), ("obligation", "valid".into())])
+                    panic(
+                        msg::PANIC_RAW_NO_MEMORY,
+                        &[("op", "getenv".into()), ("obligation", "valid".into())],
+                    )
                 })?;
                 let key = self.c_string(&p, "getenv")?;
                 let value = self.host.env_var(&String::from_utf8_lossy(&key));
@@ -1853,7 +1931,9 @@ impl<'p> Interp<'p, '_> {
                 }
                 int_result(bytes.len() as i128)
             }
-            _ => Err(panic(msg::PANIC_FOREIGN_UNKNOWN, &[("name", f.to_string()), ("known", EMULATED.into())])),
+            _ => {
+                Err(panic(msg::PANIC_FOREIGN_UNKNOWN, &[("name", f.to_string()), ("known", EMULATED.into())]))
+            }
         }
     }
 
@@ -1913,7 +1993,9 @@ fn encode_scalar(v: &Value, s: Scalar, out: &mut Vec<u8>) -> Result<(), Bad> {
         (Scalar::Int, Value::Int(i)) => out.extend_from_slice(&i.to_le_bytes()),
         (Scalar::DateTime, Value::DateTime(i)) => out.extend_from_slice(&i.to_le_bytes()),
         (Scalar::U64, Value::U64(u)) => out.extend_from_slice(&u.to_le_bytes()),
-        (Scalar::Sized { bytes, .. }, Value::Int(i)) => out.extend_from_slice(&i.to_le_bytes()[..bytes as usize]),
+        (Scalar::Sized { bytes, .. }, Value::Int(i)) => {
+            out.extend_from_slice(&i.to_le_bytes()[..bytes as usize])
+        }
         (Scalar::I128, Value::I128(i)) => out.extend_from_slice(&i.to_le_bytes()),
         (Scalar::U128, Value::U128(u)) => out.extend_from_slice(&u.to_le_bytes()),
         (Scalar::F64, Value::Float(f)) => out.extend_from_slice(&f.to_bits().to_le_bytes()),

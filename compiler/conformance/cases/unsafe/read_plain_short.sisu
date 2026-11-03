@@ -1,0 +1,7 @@
+# `read_plain` of more bytes than the data holds panics, as std.mem says.
+
+from std.mem import read_plain
+
+def main():
+    print(read_plain[u16](b"\x01\x02\x03", 0))
+    print(read_plain[u32](b"\x01\x02\x03", 0))

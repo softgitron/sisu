@@ -1,0 +1,2 @@
+panic: the interpreter makes no foreign call: `puts` is not one of the C functions it emulates (strlen, memcpy, malloc, free, getenv, write); `sisu run --native` calls it
+  at main (foreign_unknown.sisu:15:16)

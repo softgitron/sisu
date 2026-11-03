@@ -1045,6 +1045,9 @@ pub(crate) unsafe fn debug(out: &mut Vec<u8>, p: *mut u8, t: u32) {
                 }
             }
             Kind::Entry(..) => out.extend_from_slice(b"<entry>"),
+            // As std's `Debug` for raw pointers writes one, without its
+            // address (22, clause 6).
+            Kind::Ptr(_) => out.extend_from_slice(b"ptr"),
             Kind::Scope => out.extend_from_slice(b"<scope>"),
             Kind::Handle(_) => {
                 let path = crate::tasks::task_path(mem::word(p, 0) as u32);

@@ -4,7 +4,9 @@
 # exit status with the expectations the interpreter meets
 # (conformance/README.md, "The native mode"). One case per line; the list
 # grows as the backend does (`--native-survey` names the cases outside it
-# that would pass).
+# that would pass). A line whose comment starts `not from LIR:` is left out
+# of `--native-from-lir`, for the reason it gives: what stage 2 does not
+# lower yet.
 capabilities/attenuation
 capabilities/closure_drops
 capabilities/datetime
@@ -205,3 +207,8 @@ traits/own_eq_ord
 traits/static_methods
 traits/supertraits
 types/typed_hole
+unsafe/foreign  # not from LIR: stage 2 lowers no foreign call yet (architecture.md, decision 302)
+unsafe/plain_casts  # not from LIR: stage 2 lowers no raw memory intrinsic yet (decision 302)
+unsafe/pointers  # not from LIR: stage 2 lowers no raw memory intrinsic yet (decision 302)
+unsafe/stale_pointer  # not from LIR: stage 2 lowers no raw memory intrinsic yet (decision 302)
+unsafe/vector  # not from LIR: stage 2 lowers no raw memory intrinsic yet (decision 302)

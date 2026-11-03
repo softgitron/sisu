@@ -1,0 +1,12 @@
+67305985
+Pixel(r=0, g=255, b=0, a=255)
+b"\x01\x02\x03\x04"
+Pixel(r=1, g=2, b=3, a=4)
+24
+Sample(at=7, value=1.5, channel=2, pad=0)
+2
+1.5
+None
+3.14
+True
+H

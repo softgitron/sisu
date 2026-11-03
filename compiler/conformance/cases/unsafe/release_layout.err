@@ -1,0 +1,2 @@
+panic: `Global.release` with a layout of 16 bytes aligned to 8 of a block acquired with 8 bytes aligned to 8 (`from_here`)
+  at main (release_layout.sisu:11:12)

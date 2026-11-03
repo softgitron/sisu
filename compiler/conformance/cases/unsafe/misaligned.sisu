@@ -1,0 +1,13 @@
+# The checked memory model (D-085) refuses an access at an address that is
+# not a multiple of its type's alignment: the obligation `aligned`.
+
+from std.mem import Global, Layout
+
+def main():
+    let block = Global().acquire(Layout(size=16, align=8)) else:
+        panic("out of memory")
+    # safety: in_bounds, writable: offset 3 is inside the block; aligned:
+    #   wrong on purpose, an int there is not aligned.
+    unsafe:
+        let p = block.offset(3).cast[int]()
+        p.write(1)

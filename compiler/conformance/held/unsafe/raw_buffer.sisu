@@ -1,0 +1,76 @@
+# A stack on std.mem's `RawBuf` (22, "The standard library's layer"):
+# values written into slots, moved out, referred to, the buffer grown with
+# its slots copied as bits, the values left dropped in place by
+# `drop_range`, and a buffer that allocates from a bump `Region` it owns.
+
+from std.mem import RawBuf, Region
+
+## A value whose drop says so.
+struct Item:
+    id: int
+
+impl Drop for Item:
+    def drop(mut self):
+        print("drop {self.id}")
+
+## A last-in, first-out stack of `T`s in a `RawBuf`. Invariant (kept by
+## every method below): slots 0 to count-1 hold values, the others none.
+struct Stack[T]:
+    buf: RawBuf[T]
+    count: int
+
+impl[T] Stack[T]:
+    def new() -> Stack[T]:
+        return Stack(buf=RawBuf.with_capacity(1), count=0)
+
+    def push(mut self, own value: T):
+        if self.count == self.buf.capacity():
+            self.buf.grow(2 * self.buf.capacity())
+        # safety: uninitialised: slot count holds no value, by the invariant.
+        unsafe self.buf.write(self.count, value)
+        self.count += 1
+
+    def pop(mut self) -> T?:
+        if self.count == 0:
+            return None
+        self.count -= 1
+        # safety: initialised: slot count held a value, which moves out.
+        return Some(unsafe self.buf.read(self.count))
+
+    def top(self) -> ref T:
+        if self.count == 0:
+            panic("an empty stack has no top")
+        # safety: initialised: slot count-1 holds a value while the stack,
+        #   which the reference borrows, lives.
+        return unsafe self.buf.get(self.count - 1)
+
+impl[T] Drop for Stack[T]:
+    def drop(mut self):
+        # safety: initialised: slots 0 to count-1 hold values, dropped once.
+        unsafe self.buf.drop_range(0, self.count)
+
+def main():
+    var words: Stack[String] = Stack.new()
+    for w in ["yksi", "kaksi", "kolme", "neljä", "viisi"]:
+        words.push(w.to_string())
+    print(words.top())
+    print(words.buf.capacity())
+    print(words.pop())
+    print(words.count)
+
+    var items: Stack[Item] = Stack.new()
+    for id in range(1, 4):
+        items.push(Item(id=id))
+    match items.pop():
+        case Some(item):
+            print("popped {item.id}")
+        case None:
+            print("empty")
+
+    var scratch: RawBuf[int, Region] = RawBuf.with_capacity_in(4, Region.bump(256))
+    # safety: uninitialised, initialised: slot 2 holds nothing until it is
+    #   written, and an int after.
+    unsafe:
+        scratch.write(2, 21)
+        print(scratch.read(2) * 2)
+    print("end")

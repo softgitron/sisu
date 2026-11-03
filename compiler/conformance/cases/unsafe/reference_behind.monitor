@@ -1,0 +1,46 @@
+--- stderr
+ownership violation: a reference was used after its loan had ended
+  the loan: a shared borrow of `raw memory[byte 0]` in `main`, created at reference_behind.sisu:17:17 by `_11 = call intrinsic mem.ptr.as_ref(copy _8)`
+  ended by: a move of `raw memory[byte 0]` at reference_behind.sisu:18:9 (`_12 = call intrinsic mem.ptr.drop_in_place(copy _8)`)
+  used at: reference_behind.sisu:19:9 (`_13 = call intrinsic print(copy _11)`)
+  loans of `raw memory[byte 0]` not ended yet: 0 shared, 0 with `mut`
+  at main (reference_behind.sisu:19:9)
+SIR of `main`:
+fn main(0) source 0 @8:5-8:9 {
+    let _0: ()
+    let _1: Option[ptr_mut[u8]]
+    let _2: mem.Global
+    let _3: ref mem.Global
+    let _4: mem.Layout
+    let _5: int
+    let _6: ptr_mut[u8] "block" @9:9-9:14
+    let _7: Never
+    let _8: ptr_mut[String] "slot" @11:9-11:13
+    let _9: ()
+    let _10: String
+    let _11: ref String "s" @17:13-17:14
+    let _12: ()
+    let _13: ()
+  bb0:
+    _2 = struct mem.Global() @9:17-9:25
+    _3 = ref _2 @9:17-9:25
+    _4 = struct mem.Layout(const 24, const 8) @9:34-9:58
+    _1 = call intrinsic mem.global.acquire(copy _3, copy _4) @9:17-9:59
+    _5 = discriminant _1 @9:5-10:31
+    switch copy _5 [0: bb1, else: bb2] @9:5-10:31
+  bb1:
+    _6 = copy _1.as(0).0 @9:5-10:31
+    dead _2 @10:31-10:31
+    _8 = call intrinsic mem.ptr.cast[u8, String](copy _6) @11:16-11:36
+    _10 = call intrinsic str.to_string(const "kept") @16:20-16:38
+    _9 = call intrinsic mem.ptr.write(copy _8, move _10) @16:9-16:39
+    _11 = call intrinsic mem.ptr.as_ref(copy _8) @17:17-17:30
+    _12 = call intrinsic mem.ptr.drop_in_place(copy _8) @18:9-18:29
+    _13 = call intrinsic print(copy _11) @19:9-19:17
+    _0 = const ()
+    return
+  bb2:
+    _7 = call intrinsic panic(const "out of memory") @10:9-10:31
+    unreachable @10:9-10:31
+}
+--- status 134

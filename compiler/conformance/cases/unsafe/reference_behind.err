@@ -1,0 +1,2 @@
+panic: use of a value after it was moved
+  at main (reference_behind.sisu:19:9)

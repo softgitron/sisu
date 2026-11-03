@@ -1,0 +1,2 @@
+panic: `ptr.read` of memory that was released (`valid`)
+  at main (released.sisu:17:18)

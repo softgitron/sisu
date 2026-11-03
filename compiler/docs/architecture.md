@@ -64,11 +64,11 @@ architecture"); data flows down the table.
 | `sisu-sir` | 3215 | SIR: the data model, the text writer and reader, the validator, the types of places, and the jump threading of the SIR that runs |
 | `sisu-lower` | 5975 | THIR to SIR: control flow, scopes and their drops, unwind edges, closure conversion, trait calls and their static resolution, drop glue, `comptime` functions, the borrow facts of signatures |
 | `sisu-borrowck` | 5686 | The ownership checker on SIR: initialisation and moves, drop elaboration, loans and the borrow rules, the task rules, escapes, must-consume, purity, `explain-borrow`, and the `Shared` escape analysis |
-| `sisu-interp` | 14186 | The trampolined SIR interpreter, values, drops, dispatch of trait calls, unwinding, host intrinsics, the task scheduler (random, PCT, bounded exhaustive) and the `sim` profile's faults, capabilities and the host's objects, the capability log, hot replacement in epochs, the parallel test runner, the dynamic ownership monitor, and the compile-time evaluator |
-| `sisu-rt` | 12340 | Stage 2's runtime, linked into every native executable: the shared ABI (the value layout, the type table's encoding, the entry points), panics and stack traces, allocation, the structural operations on values, iterators, dicts and sets, the intrinsics, the scheduler of tasks on pooled stacks, the library types, capabilities, and the host's files, network and processes |
-| `sisu-codegen` | 8069 | Stage 2's debug backend: SIR to Cranelift IR, one instance per function and list of type arguments, with trait calls resolved at compile time; the release profile's facts about a function's integers, which leave out the checks they prove; the object file and the link |
-| `sisu-driver` | 13792 | The query layer and the `sisu` command line, whose front end is stage 1's unless the Rust one is asked for (`front.rs`); manifests (a TOML reader of its own), the package layout and the lockfile; the counterexample mode, `audit --ownership` and `--caps`, `sisu doc`, replay tokens, snapshot files and transcripts, the `sim` build check; `fmt`, the REPL and worksheets, `run --watch`'s rebuilds, and the language server with its JSON; `build --native` and `run --native`; the soundness tests (fault injection, mutation fuzzing), the language server's protocol tests and the native conformance test |
-| `sisu-conformance` | 1583 | The language-agnostic conformance runner, and its native mode; either front end of the executable |
+| `sisu-interp` | 16409 | The trampolined SIR interpreter, values, drops, dispatch of trait calls, unwinding, host intrinsics, the checked memory model of unsafe code, the task scheduler (random, PCT, bounded exhaustive) and the `sim` profile's faults, capabilities and the host's objects, the capability log, hot replacement in epochs, the parallel test runner, the dynamic ownership monitor, and the compile-time evaluator |
+| `sisu-rt` | 13038 | Stage 2's runtime, linked into every native executable: the shared ABI (the value layout, the type table's encoding, the entry points), panics and stack traces, allocation, the structural operations on values, iterators, dicts and sets, the intrinsics, the scheduler of tasks on pooled stacks, the library types, capabilities, and the host's files, network and processes |
+| `sisu-codegen` | 10142 | Stage 2's debug backend: SIR to Cranelift IR, one instance per function and list of type arguments, with trait calls resolved at compile time; the release profile's facts about a function's integers, which leave out the checks they prove; the object file and the link |
+| `sisu-driver` | 14390 | The query layer and the `sisu` command line, whose front end is stage 1's unless the Rust one is asked for (`front.rs`); manifests (a TOML reader of its own), the package layout and the lockfile; the counterexample mode, `audit --ownership` and `--caps`, `sisu doc`, replay tokens, snapshot files and transcripts, the `sim` build check; `fmt`, the REPL and worksheets, `run --watch`'s rebuilds, and the language server with its JSON; `build --native` and `run --native`; the soundness tests (fault injection, mutation fuzzing), the language server's protocol tests and the native conformance test |
+| `sisu-conformance` | 1830 | The language-agnostic conformance runner, and its native mode; either front end of the executable |
 
 Line counts are of each crate's `src`, unit tests included. Besides the crates:
 `catalog/messages.catalog` (every message); the standard library, in
@@ -1625,7 +1625,8 @@ its guard, `Arena`, iterators, dict entries, capability handles and
 `Cap`s (a heap cell that counts the handle's copies, decision 237),
 clocks, host sockets, the task
 handles (scopes, task handles, cancellations, channel halves, timers),
-references, and `Moved`. A `Slice` is a `list` of its values (a copy,
+references, raw pointers (a block of the checked memory model, an offset
+and a loan: "The checked memory model" below), and `Moved`. A `Slice` is a `list` of its values (a copy,
 like `str`'s; port-debt.md), and an `Array` a `list` of exactly its
 length.
 
@@ -1937,6 +1938,127 @@ One run proves nothing about other inputs, which the report says by its
 wording; the mode is for the team (20, A2), and the `.defer` files of
 `conformance/cases/ownership/` pin its output for every rejected case
 that has a `main`.
+
+### The checked memory model
+
+Unsafe code (22; D-080 to D-086), which stage 1 checks and lowers, runs in
+the interpreter on a checked memory model (D-085, decision 301), Miri's
+design on the interpreter's values (`sisu-interp/src/rawmem.rs`). Every
+intrinsic of std.mem's raw pointers, layouts, allocation and plain data
+is the model's, and so is every foreign call (`extern.c.NAME`).
+
+**Blocks and pointers.** Raw memory is a set of blocks, each with an
+identity, an address, a size, an alignment and whether it is live: what
+`Global.acquire` gave out and `Global.release` takes back, what the
+emulated `malloc` gave out and `free` takes back, what a foreign function
+handed out to be read (`getenv`'s text) and the value `view_plain` made of
+bytes, both read-only, and the places of the program a pointer was made
+from (`ptr.of`, `ptr.of_mut`, a slice's `as_ptr`), whose reads and writes
+go to the place itself, through its frame or heap cell. A raw pointer
+(`value::RawPtr`) is a block, an offset in bytes, whether it was made from a
+shared borrow, and the monitor's loan it was made through; one with no
+block (`ptr.dangling`, `ptr.from_address` of an address no foreign code
+gave out) holds its address. Its type is the static type of the operand
+that holds it, as native code has it: the interpreter reads the operands'
+types for these intrinsics (`exec.rs`), and a raw pointer's value does not
+carry one. Addresses are made up deterministically: blocks are laid out
+from 1 MiB on, in the order made, aligned and with a gap between them, so
+that two pointers to one place have one address and `addr` means the same
+in every run; `from_address` gives a pointer the block of foreign memory
+its address falls in (`exposed`), and none for any other address.
+
+**What a block holds.** A block of `Global` holds values at offsets, each
+with the type it was written as, and bytes of plain data where a write cut
+a plain value apart. A read at the type a value was written as gives the
+value, moved out when the type needs a drop (the slot then holds none, so
+a second read is caught); a read at another type goes through the bytes,
+which the model knows for the integers, the floats, `bool` and `char` (a
+word each, as a value has them), and the structs, tuples and enums made of
+them, and decodes them with the bits checked: a `bool` other than 0 or 1,
+a `char` that is no scalar value and an enum's tag that names no variant
+are refused. A write through a pointer made from a shared borrow, into
+read-only memory, or over a value that needs a drop and was never dropped
+(`writable`) is refused, and so is a release of memory that still holds
+such a value (22's clause 3; not while a panic unwinds, when a half-done
+operation may leave one). `copy_from` copies slot by slot, each holding
+afterwards what its source held, a value or none, and a value that needs a
+drop is the copy's alone; `drop_in_place` moves the value out and queues
+its drop, which runs its glue on the run loop as any drop does;
+`as_ref` and `as_mut` give a reference into the block (a pointer whose
+frame is `value::RAW`, whose first step is the offset) or into the place,
+which reads and writes as any reference does.
+
+**The checks**, in this order for every access, each a panic that names
+the obligation of the operation's `Safety:` list in std.mem
+(`panic.raw-*`, `R0131` to `R0148`): memory behind the pointer
+(`R0141`), live (`R0134` for a released block, `R0135` for a place whose
+frame returned), the access inside its block (`R0131`, and `R0132` for
+`offset`, `in_bounds`), aligned for its type (`R0133`), what it reads
+holding a value of that type (`R0136`, `R0137`) with valid bits
+(`R0138`), and a write neither through a pointer from a shared borrow
+(`R0139`) nor over a value never dropped (`R0140`); `Global.release` of
+memory it did not give out (`R0142`), released already (`R0143`), with
+another layout (`R0144`) or holding a value never dropped (`R0145`).
+`bit_cast` and `transmute` between types of different sizes are refused
+when they run (`R0146`), since the front end does not compare the sizes
+yet, and `read_plain` past the end of its data panics as std.mem says
+(`R0147`).
+
+**Loans.** Under the monitor (`sisu run --monitor`, `sisu test`), a pointer
+made from a place carries the loan of the borrow that made it, so the
+monitor tracks it while the pointer is used: every access through the
+pointer goes through that loan, as an access through a reference does, and
+an access to the place that conflicts with it ends it; a later use of the
+pointer is then the violation, reported like an ownership violation. A
+reference made from a pointer (`as_ref`, `as_mut`) is a loan under the
+pointer's, and a block's references end when the block is released. The
+monitor's rules are those it applies to references ("The dynamic
+ownership monitor" above), which 22 asks for and Q-56 may refine: a read
+of the place ends a pointer's `mut` loan, so a pointer made by `ptr.of_mut`
+is used before its place is read directly again. A liveness check comes
+before the monitor's, so a pointer to a place that is gone panics the same
+way with the monitor and without it. Without the monitor the loans are not
+kept, and an aliasing violation goes unseen, as natively; the conformance
+cases that show one (`unsafe/stale_pointer`, `unsafe/reference_behind`)
+have a `.monitor` expectation of their own (decision 303).
+
+**The layout of a type in raw memory** (`mem.size_of`, `mem.align_of`) is
+the native backend's (decision 302), so that a program computes the same
+sizes either way: a sized integer narrower than 64 bits and an `f32` take
+their own width and alignment, a struct and a tuple their parts in C's
+order with their padding (SIR does not say which structs are `@repr(c)`,
+and the order a struct declares is as good as any other), an option of a
+raw pointer one word, null for `None`, and every other type the words of
+its value (decision 188) aligned to a word: `bool` and `char` are a word, a
+128-bit integer two, and an enum, a list or a `String` its value's words.
+So `Layout.of` a `@derive(Plain)` struct of four `u8`s is 4 bytes aligned
+to 1, and `bit_cast` of one to a `u32` keeps its bytes in the target's
+order. The model takes a function value's size as one word of environment
+more than its code's, where natively it is the program's widest closure
+(decision 224).
+
+**Foreign calls** (Q-55): the interpreter makes none, but emulates six
+functions of the C library on the model, as 22's examples need them:
+`strlen` (the bytes up to the NUL, each read checked), `memcpy` (refused
+when its ranges overlap, `R0151`), `malloc` and `free` (blocks of their
+own, which `Global.release` does not take), `getenv` (the host's variable,
+as read-only foreign memory, or null) and `write` to the standard streams
+(file descriptors 1 and 2, `R0152` otherwise). A pointer the declaration
+types as an option is null for `None`, and a non-null one a foreign
+function returns null for is refused (`R0150`). Any other foreign function
+is refused (`R0149`), and `sisu run --native` calls it. **The machine
+intrinsics** of std.rt (`rt.switch`, `rt.stack_pointer`, `rt.thread_slot`)
+are refused too (`R0153`): the interpreter runs its tasks on a scheduler of
+its own.
+
+What the model leaves out: overlapping accesses at different offsets are
+not seen as overlapping by the monitor (each offset is a place of its
+own); memory still held at the end of a run is not reported; a `Slice` is
+a copy in stage 0 (port-debt.md), so a pointer from `as_ptr` of a slice
+points into the copy and dangles with it, and one from `xs.as_slice()`
+written as a temporary dangles at the end of its statement, as it does
+natively; and compile-time evaluation runs on the Rust front end's
+comptime, which does not read std.mem.
 
 ## Tasks and the scheduler
 
@@ -3141,6 +3263,11 @@ lists every such construct of a program with the number of functions
 that have it, and `SISU_NATIVE_TIMES=1` prints where a build's time went:
 a line for each step of checking and lowering the program (`time: names
 resolved 133.0 ms`), of generating its code, and the link.
+The SIR is lowered through stage 2, the lowering written in Sisu, to LIR,
+which the backend translates one to one (section "LIR" below), unless
+`--lower=rust` (or `SISU_LOWER=rust`) keeps the Rust lowering, the oracle,
+which also lowers a program with a construct stage 2 does not lower yet
+(decision 304).
 `sisu build --native --from-sir FILE [--output PATH]` and `sisu run
 --native --from-sir FILE [ARGS...]` compile a file of serialised SIR
 instead, without the front end (section "From serialised SIR" below), and
@@ -3195,6 +3322,7 @@ where the parts are:
 | `Cell[T]` | T | the value |
 | `Arena[T]` | 1 | the address of a runtime object holding the slots, each a generation, whether it holds a value, and the value |
 | `ref Iterable[T]` | 2 | the number of the type of what the caller passed, and its address (decision 210) |
+| `ptr[T]`, `ptr mut T` | 1 | the address (decision 302); an option of one is a tag and the address, as any option, and a nullable word only in raw memory and at a foreign call |
 
 A union of error sets holds a value of one of its member enums, as that
 enum lays it out; the first word says which. A dict or set is a table of
@@ -3380,6 +3508,8 @@ The runtime's entry points (`abi::sym`) are the boundary:
 | `sisu_rt_table(ty, items, n, out) -> u8`, `sisu_rt_dict_slot(dict, key, key_ty, mode, out) -> u8` | a dict or set literal; a dict's value for a key |
 | `sisu_rt_arena_slot(arena, key, mode, out) -> u8` | the address of the value an arena holds for a key; a stale key panics (`R0072`), but for a drop, which does nothing |
 | `sisu_rt_shared_touch(value)` | a `Shared`'s cell reached through `*`: counts it for `--stats` when another task than its maker reaches it |
+| `sisu_rt_flush()` | writes what the program printed so far, before a foreign call (decision 302) |
+| `sisu_rt_thread_slot() -> ptr`, `sisu_rt_switch(save, load)` | the machine intrinsics `rt.thread_slot` and `rt.switch` (decision 302) |
 | `sisu_rt_free(ptr)` | frees a box's or a `dyn`'s cell whose value was moved out (decision 216) |
 | `sisu_rt_trace_release(error)` | a field was moved out of an error value, which is never dropped whole: it lets go of its return trace (decision 215) |
 | `sisu_rt_yield()` | a yield point found the budget spent: the scheduler may switch tasks |
@@ -3532,6 +3662,73 @@ cancellation does not wake one.
 **Deadlock.** When nothing is ready and no timer is pending, the program
 stops with the interpreter's report (`R0080`, `R0081`) and status 134; a
 call that may wait records where it is (`SISU_RT_SITE`) for it.
+
+### Raw memory, foreign calls and the machine intrinsics
+
+Unsafe code runs natively without the interpreter's checks (decision 302):
+the raw memory operations are the unchecked ones (22), and the checked
+memory model is where unsafe code is checked. The intrinsics of std.mem
+are the runtime's (`sisu-rt/src/rawmem.rs`), called through the
+descriptor as the others are (`abi::Intrinsic`, numbered after the older
+ones so that theirs stay what they were), and `ptr[T]` and `ptr mut T` are
+a word whose type table entry names what they point to (`Kind::Ptr`). The
+runtime computes each type's layout in raw memory from the type table when
+the program starts, the interpreter's rule ("The checked memory model"):
+a value whose layout in memory is its layout as a value (most types) is
+read and written as its bytes, another (a sized integer narrower than 64
+bits, an `f32`, an option of a raw pointer, a struct or tuple holding one)
+is converted part by part, each part at its C offset and width.
+`Global.acquire` is `posix_memalign` with the layout's alignment, counted
+among the program's allocations, and `Global.release` frees it;
+`drop_in_place` converts the value back and drops it by its type, its glue
+on the task's stack; `copy_from` is `memmove`; `bit_cast` and `transmute`
+convert the value to its bytes and the bytes to the other type, refusing
+other sizes with the interpreter's panic; `read_plain` reads from bytes at
+any alignment; `view_plain` gives the bytes in place, or, for a type laid
+out otherwise in a value, a copy as a value that is freed with the bytes it
+views (`views.rs`, decision 214); and `slice_from_raw` copies the values
+into a new slice, which is what a `Slice` is in stage 0.
+
+A place of the program holds its value as a value is laid out, and a
+reference is read so, so a pointer to a place (`ptr.of`, `ptr.of_mut`, a
+slice's `as_ptr`) and a reference made from a pointer (`as_ref`,
+`as_mut`) are made only to a type that raw memory holds as a value is laid
+out; another is `D0103` when the program is built, naming the operation
+and the type, and the interpreter runs the program. A foreign call
+(`extern.LIBRARY.NAME`) is a call of the C function `NAME`, imported from
+the C library the executable is linked with, in C's convention: each
+argument loaded from its slot and narrowed to its C type (an integer or
+float of its width, a raw pointer, an option of one as a nullable
+pointer), the result widened back (sign-extended for a signed type) or
+made an option, and the runtime's buffered standard output written first,
+since the function may write to the same streams. Two calls that give one
+function different C signatures are `D0103`. The machine intrinsics are
+the backend's: `rt.stack_pointer` reads the stack pointer in place,
+`rt.thread_slot` is the address of a thread-local word of the runtime, and
+`rt.switch` is a routine of the runtime's (x86-64 and AArch64 Linux) that
+pushes the registers C keeps across a call, saves the stack pointer, the
+frame pointer and the address to resume at in the `Context` at `save`, and
+continues from the one at `load`, whose second half pops the registers and
+returns from the switch that saved it. No program reaches them (std.rt is
+internal), so `crates/sisu-driver/tests/machine/machine.sir` calls them
+from SIR, and a test of the runtime switches to a second stack and back.
+
+What stage 2, the lowering in Sisu, must add to lower the same programs
+(the cases of `native.list` marked `not from LIR:` wait for it): the
+intrinsics of std.mem in its table of names, at the numbers
+`abi::Intrinsic` gives them after `live.epoch` (277 to 305, in its
+order); `ptr` and `ptr_mut` laid out as one word with the entry `Ptr`
+(kind 46) naming their argument, in `layout.sisu` and in the encoding of
+the type table; the build-time refusal above, by the rule of
+`Types::same_in_memory`; a foreign call as `declare NAME import (C
+TYPES) -> (C TYPE)`, a `call sisu_rt_flush()` before it, the arguments
+loaded and narrowed (`ireduce`, `bitcast` for the floats, a `select` of
+the payload or 0 for an option of a pointer) and the result widened back
+(`sextend`, `uextend`, `bitcast`, or an `icmp_imm eq` making an option's
+tag), as `call_foreign` and `c_argument` in `func.rs` do; and the machine
+intrinsics (`get_stack_pointer`, and calls of `sisu_rt_thread_slot` and
+`sisu_rt_switch`), as `machine_intrinsic` does. LIR needs no new
+construct for any of them.
 
 ### Linking
 
@@ -3809,9 +4006,10 @@ type t13 word "Scope"                    -- one word of the runtime's
 ### Coverage
 
 `conformance/native.list` names the cases the backend builds and runs:
-200 of them, every case of the suite that runs a program (the others are
-diagnostics, `sisu test` files, and the tools' cases: `--watch`, the
-REPL, worksheets, tokens, SIR and documentation). Among them are every
+205 of them, every case of the suite that runs a program but the
+refusals of the checked memory model, which are the interpreter's (the
+others are diagnostics, `sisu test` files, and the tools' cases:
+`--watch`, the REPL, worksheets, tokens, SIR and documentation). Among them are every
 case of `concurrency/` that runs (tasks, scopes, cancellation, channels,
 `select`, races, generators and their closing, `log`, mutexes across
 tasks, the deadlock report, a task's stack overflow), all 48 of `run/`
@@ -6560,3 +6758,120 @@ library", "Tasks and the scheduler", "Capabilities", "Stage 2")
      takes `--tests` and writes these lines, and stage 2 reads them and
      leaves them out, since stage 1's SIR types do not hold them yet. This
      changes no rule of the language.
+
+**The unsafe round of stage 0** (sections "The checked memory model" and
+"Raw memory, foreign calls and the machine intrinsics"; D-085, D-086)
+
+301. The interpreter runs unsafe code on a checked memory model (D-085):
+     raw memory is blocks with an identity, an address, a size, an
+     alignment and whether they are live (`Global`'s, the emulated
+     `malloc`'s, read-only foreign memory, and the program's places a
+     pointer was made from), a raw pointer is a block, an offset, whether
+     it came from a shared borrow and the monitor's loan it came through,
+     and its type is the static type of the operand holding it. A block of
+     `Global` holds values at offsets, each with its type, read back whole
+     at that type (moved out when the type needs a drop) or through their
+     bytes at another, for the types whose bits the model knows (the
+     numbers, `bool`, `char`, and structs, tuples and enums of them), the
+     bits checked for the type. Every access checks, in order, memory
+     behind the pointer, liveness, bounds, alignment, initialisation,
+     valid bits, and that a write goes neither through a pointer made from
+     a shared borrow nor over a value never dropped; each failure is a
+     panic naming the obligation of std.mem's `Safety:` list it broke
+     (`panic.raw-*`, `R0131` to `R0148`); a release checks that the block
+     is `Global`'s, live, of the layout given and holds no value never
+     dropped, but while a panic unwinds. Under the monitor a pointer made
+     from a place carries the loan of the borrow that made it and every
+     access through it goes through that loan, a reference made from a
+     pointer is a loan under it, and the monitor's rules for references
+     apply (22: "applies the loan rules the monitor already applies to
+     references"). The layout of a type in raw memory, which `size_of` and
+     `align_of` give, is the native backend's (decision 302). Foreign calls
+     run only for six functions of the C library the interpreter emulates
+     on the model (`strlen`, `memcpy`, `malloc`, `free`, `getenv`, `write`
+     to the standard streams; Q-55), and the machine intrinsics not at all
+     (`R0149` to `R0153`). The intrinsics need their type arguments as
+     stage 1 writes them, but `mem.size_of` and `mem.align_of`, whose `T`
+     appears in no parameter and not in the result, which stage 1's rule
+     for an intrinsic's type arguments leaves out today (port-debt.md,
+     "Shortcuts in the interpreter"); a call without one is an internal
+     error naming it. This changes no rule of the language: it implements
+     22's and D-085's.
+     `conformance/cases/unsafe/` runs it: a vector on raw memory, pointers
+     to places, plain data, foreign calls, and a refusal for each check.
+302. Native code runs the same unsafe code without the checks (22: the
+     raw memory operations are the unchecked ones): std.mem's intrinsics
+     are the runtime's, called through the descriptor and numbered after
+     the older intrinsics, so that every program without unsafe code
+     compiles to the same bytes; `ptr[T]` and `ptr mut T` are a word whose
+     type table entry is `Ptr`. A type lies in raw memory as the
+     interpreter's model lays it out: a sized integer narrower than 64 bits
+     and an `f32` at their own width, structs and tuples in C's order, an
+     option of a raw pointer as a nullable word, everything else as its
+     value's words; that layout is C's for the types a foreign function
+     takes, which a value's (decision 188, a word for every part) is not,
+     so values whose two layouts differ are converted part by part at
+     every read and write. A pointer to a place and a reference made from
+     a pointer are therefore only made to a type whose two layouts are one
+     (`D0103` otherwise, at the build), since a place and a reference hold
+     a value as a value is laid out; `view_plain` of another type gives a
+     copy freed with the bytes it views. The other choices were each part
+     at its own width in values too, which changes every layout of
+     decision 188 and stage 2's transcription with it, and raw memory laid
+     out as values, which C cannot read (a `c_char` would take a word, and
+     `strlen` would see one byte). A foreign call is a C call of the
+     function the declaration names, with C types from the operands' and
+     the result's types, after the runtime's standard output is written
+     out; the machine intrinsics are the stack pointer read in place, a
+     thread-local word of the runtime, and a switch routine of the
+     runtime's that saves and loads `std.rt`'s `Context` (stack pointer,
+     frame pointer, resume address), for x86-64 and AArch64 Linux, where
+     corosensei's switch keeps its own frames and takes no such context.
+     Stage 2 lowers none of it yet: what it must add is listed in the
+     section above, and the unsafe cases of `native.list` are marked `not
+     from LIR:` with the reason, which `--native-from-lir` leaves out
+     (`native::read_list_from_lir`). This changes no front-end rule.
+303. `sisu run --record LOG` runs on stage 1, as `sisu run` does: the log
+     holds the SIR that ran (a `sir` line in its header, the SIR as its
+     source and the front end's warnings in a `warnings` line), and `sisu
+     replay LOG` runs that SIR again with no front end, printing the
+     warnings first; a log of the Rust front end's still compiles its
+     source again. So a program only stage 1 reads (unsafe code) is
+     recorded and replayed, as the conformance runner does with every case
+     that runs, and one more role of the Rust front end is stage 1's
+     (port-debt.md, "The Rust front end's roles"). `sisu run --from-sir`
+     takes `--monitor` too, which it read and ignored. A case whose run
+     under the monitor stops where the plain run does not, because the
+     monitor's checked memory model sees an aliasing violation of unsafe
+     code that no static checker checks, has a `NAME.monitor` expectation
+     (its output, `--- stderr`, its standard error, `--- status N`), which
+     the runner compares instead of requiring the two runs to agree. This
+     changes no rule of the language.
+304. `sisu build --native` lowers SIR through stage 2 by default, as
+     D-087's first step intends: the backend writes the SIR it is given (by
+     stage 1's `build --native`, by `--from-sir`, or by the Rust front end)
+     to a file, `compiler/target/stage2/sisu2 lir` lowers it (with
+     `--release` in the release profile), and the Rust backend translates
+     the LIR one to one (decision 283), which gives the executable the Rust
+     lowering gives, byte for byte (decision 284); `sisu run --native`
+     builds so too. `--lower=rust` among a command's options, or
+     `SISU_LOWER=rust` for a whole process, keeps the Rust lowering, the
+     oracle, which the runner's `--native-from-lir` mode builds the
+     executable it compares with (`--lower=stage2` names the default; any
+     other name is `D0120`); the driver gives stage 1 the choice in
+     `SISU_LOWER`, so that the backend stage 1 calls lowers as the command
+     chose. The driver builds stage 2 as it builds stage 1 (decision 268):
+     when `sisu2` is missing or older than a source of stage 2 or of stage
+     1's `sir` module, under a lock, with `sisu build --native` in
+     `compiler/stage2` through stage 1 and the Rust lowering, into a file
+     renamed over the old one (`D0121` when it does not build); stage 1 is
+     built with the Rust lowering too, since stage 2 is built with stage 1.
+     A program with a construct stage 2 does not lower yet (it stops with
+     `lir: not lowered: ...`) is lowered by the Rust lowering instead, so
+     that a construct `sisu-codegen` has and stage 2 has not transcribed
+     (today the unsafe code of decision 302) still builds; any other failure
+     of stage 2 is `D0122`, an internal error. So stage 2 is what `sisu`
+     builds with, and the Rust lowering is the oracle and that fallback
+     (port-debt.md, "The backend in Sisu"). `SISU_NATIVE_TIMES` reports the
+     lowering's time, and `SISU_NATIVE_SURVEY` the Rust lowering's survey.
+     This changes no rule of the language.

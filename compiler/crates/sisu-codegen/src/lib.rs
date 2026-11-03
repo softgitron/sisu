@@ -371,6 +371,9 @@ pub(crate) struct Codegen<'p> {
     queue: VecDeque<(String, Vec<Type>, FuncId)>,
     /// The runtime's entry points, declared once.
     runtime: fx::FxMap<&'static str, FuncId>,
+    /// The foreign functions of `extern` blocks a call names, with their C
+    /// signatures (decision 302).
+    c_functions: fx::FxMap<String, (FuncId, Vec<ir::Type>, Vec<ir::Type>)>,
     pub depth: DataId,
     /// The scheduler's budget, the running task's stack limits, and the
     /// site of the last call that may wait (`sisu_rt::abi::sym`).
@@ -531,6 +534,7 @@ impl<'p> Codegen<'p> {
             instances: fx::FxMap::default(),
             queue: VecDeque::new(),
             runtime: fx::FxMap::default(),
+            c_functions: fx::FxMap::default(),
             depth,
             budget,
             stack,
@@ -1131,6 +1135,9 @@ impl<'p> Codegen<'p> {
             sym::WIDE => (&[i32_, i32_, i64_, i32_, i64_, i32_, i64_], &[i8_]),
             sym::TABLE => (&[i32_, i64_, i64_, i64_], &[i8_]),
             sym::DICT_SLOT => (&[i64_, i64_, i32_, i32_, i64_], &[i8_]),
+            sym::FLUSH => (&[], &[]),
+            sym::THREAD_SLOT => (&[], &[i64_]),
+            sym::SWITCH => (&[i64_, i64_], &[]),
             _ => return Err(Error::internal(format!("an unknown runtime entry point `{name}`"))),
         };
         let mut sig = Signature::new(self.call_conv);
@@ -1141,6 +1148,34 @@ impl<'p> Codegen<'p> {
             .declare_function(name, Linkage::Import, &sig)
             .map_err(|e| Error::internal(e.to_string()))?;
         self.runtime.insert(name, id);
+        Ok(id)
+    }
+
+    /// The foreign function `name` (a C function of an `extern` block),
+    /// declared with the C signature its first call gives; a call that
+    /// gives another is a construct the backend does not compile.
+    pub(crate) fn c_function(
+        &mut self,
+        name: &str,
+        params: &[ir::Type],
+        returns: &[ir::Type],
+    ) -> Result<FuncId, Error> {
+        if let Some((id, p, r)) = self.c_functions.get(name) {
+            if p.as_slice() != params || r.as_slice() != returns {
+                return Err(Error::unsupported(format!(
+                    "two calls of the foreign function `{name}` with different C signatures"
+                )));
+            }
+            return Ok(*id);
+        }
+        let mut sig = Signature::new(self.call_conv);
+        sig.params.extend(params.iter().map(|t| AbiParam::new(*t)));
+        sig.returns.extend(returns.iter().map(|t| AbiParam::new(*t)));
+        let id = self
+            .module
+            .declare_function(name, Linkage::Import, &sig)
+            .map_err(|e| Error::unsupported(format!("the foreign function `{name}`: {e}")))?;
+        self.c_functions.insert(name.to_string(), (id, params.to_vec(), returns.to_vec()));
         Ok(id)
     }
 

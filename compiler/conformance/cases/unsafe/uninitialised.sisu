@@ -1,0 +1,15 @@
+# The checked memory model (D-085) refuses a read of memory that holds no
+# value: `ptr.read`'s obligation `valid`.
+
+from std.mem import Global, Layout
+
+def main():
+    let block = Global().acquire(Layout(size=16, align=8)) else:
+        panic("out of memory")
+    let p = block.cast[int]()
+    # safety: writable, aligned, in_bounds: the first slot is the block's;
+    #   valid: wrong on purpose, the second slot was never written.
+    unsafe:
+        p.write(1)
+        print(p.read())
+        print(p.offset(1).read())

@@ -1,0 +1,15 @@
+# The interpreter makes no foreign call but to the C functions it emulates
+# (Q-55): any other stops the run, and `sisu run --native` makes it.
+
+from std.ffi import c_char, c_int
+from std.mem import ptr
+
+# safety: the signature as <stdio.h> declares it; puts returns promptly.
+extern "C":
+    def puts(s: ptr[c_char]) -> c_int
+
+def main():
+    let s: ptr[c_char] = ptr.dangling()
+    # safety: valid: wrong on purpose, s points to no string; the call does
+    #   not reach C in the interpreter.
+    _ = unsafe puts(s)

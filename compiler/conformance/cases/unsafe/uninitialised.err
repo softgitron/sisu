@@ -1,0 +1,2 @@
+panic: `ptr.read` of `int` at offset 8 of a block of 16 bytes, which holds no value there (`valid`)
+  at main (uninitialised.sisu:15:15)

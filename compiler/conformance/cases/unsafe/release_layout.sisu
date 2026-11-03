@@ -1,0 +1,11 @@
+# The checked memory model (D-085) refuses a block released with another
+# layout than the one it was acquired with: the obligation `from_here`.
+
+from std.mem import Global, Layout
+
+def main():
+    let block = Global().acquire(Layout(size=8, align=8)) else:
+        panic("out of memory")
+    # safety: from_here: wrong on purpose, the layout is not the block's;
+    #   once: it is released once.
+    unsafe Global().release(block, Layout(size=16, align=8))

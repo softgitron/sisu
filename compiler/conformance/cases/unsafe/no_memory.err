@@ -1,0 +1,2 @@
+panic: `ptr.read` through a pointer with no memory behind it (`valid`)
+  at main (no_memory.sisu:10:18)

@@ -52,6 +52,14 @@ pub(crate) unsafe fn view(l: *mut u8, size: u32, lo: u64, hi: u64) -> *mut u8 {
     }
 }
 
+/// Keeps `block`, a heap block of [`mem::alloc`], until the block at
+/// `root` is released: a copy of a plain value that `view_plain` made of
+/// bytes laid out otherwise in a value (decision 302).
+pub(crate) fn hold(root: *mut u8, block: *mut u8) {
+    let _ = VIEWS.try_with(|v| v.borrow_mut().entry(root as usize).or_default().push(block as usize));
+    REGISTERED.fetch_add(1, Relaxed);
+}
+
 /// The block at `p` is being released: the headers of the views of it go
 /// with it.
 pub(crate) fn released(p: *mut u8) {

@@ -60,6 +60,7 @@ is compared byte for byte.
 | `NAME.tokens` | `sisu tokens NAME.sisu` |
 | `NAME.tree` | `sisu parse --tree NAME.sisu` |
 | `NAME.defer` | `sisu run --defer-borrow NAME.sisu ARGS...`: standard output, then `--- stderr`, standard error, and `--- status N` |
+| `NAME.monitor` | `sisu run --monitor NAME.sisu ARGS...`: standard output, then `--- stderr`, standard error, and `--- status N`, for a case whose run under the monitor stops where the plain run does not (below) |
 | `NAME.explain` | `sisu explain-borrow NAME.sisu:N`, where `N` is given by a line `# explain-borrow N` in the case |
 | `NAME.explore` | `sisu test --explore N NAME.sisu`, where `N` is given by a line `# explore N` in the case |
 | `NAME.sim` | `sisu test --sim ARGS NAME.sisu`, where `ARGS` (such as `--faults 0.05 --explore 5`) is given by a line `# sim ARGS` |
@@ -121,10 +122,16 @@ These checks apply to every case without an expectation file:
   A case that runs was accepted by the ownership checker, so any
   difference is the monitor stopping a program the checker accepted: a
   soundness hole in the checker, which fails the suite (18, principle 5,
-  "the checker checks itself").
+  "the checker checks itself"). The one exception is unsafe code, which
+  no static checker checks: a case with a `NAME.monitor` expectation is
+  one whose aliasing violation the monitor's checked memory model stops
+  (D-085), and its monitored run is compared with that file instead
+  (decision 303).
 - For a case that runs, `sisu run --record LOG` prints and exits as the
   plain run did, and `sisu replay LOG` reproduces that run from the
-  capability log alone (N-04).
+  capability log alone (N-04); a run through stage 1 keeps the SIR it
+  ran in the log, which the replay runs without a front end (decision
+  303).
 - Every failing test in `.test`, `.sim`, `.schedule` and `.select` output
   prints a replay token; `sisu test --replay TOKEN NAME.sisu` must fail
   that test again with the same report.
@@ -176,7 +183,9 @@ one body: `testing/parametrised_once`).
 `native.list` names the cases the native backend (stage 2;
 [architecture.md](../docs/architecture.md), "Stage 2") must build and
 run, one per line as the runner names them (`run/arithmetic`); `#`
-starts a comment. With `--native LIST` the runner builds each case with
+starts a comment, and a case whose comment starts `not from LIR:` is left
+out of `--native-from-lir`, for the reason the comment gives (a construct
+stage 2 does not lower yet; decision 302). With `--native LIST` the runner builds each case with
 `sisu build --native --output EXE NAME.sisu` (a package case without the
 file) in the case's sandbox, runs the executable as it runs `sisu run`
 (with the case's `.args`, `.stdin` and `.cwd`, the time limit, and an
@@ -194,7 +203,9 @@ environment holding only `SISU_RT_ALLOCS=1`), and compares:
   program that aborts (status 134) ends without one.
 
 The expectations are the interpreter's: the native mode reads no file of
-its own and does not bless. With `--native-from-sir LIST` the runner
+its own and does not bless. A native build lowers SIR through stage 2 by
+default, and through the Rust lowering where stage 2 does not lower a
+construct yet (decision 304). With `--native-from-sir LIST` the runner
 builds each case from serialised SIR instead, `sisu build --native
 --from-sir NAME.sir`, with the case's own `NAME.sir` where it has one and
 what `sisu sir` prints for it otherwise, and compares the same way (a
@@ -215,8 +226,9 @@ With `--native-from-lir LIST` it lowers each case's SIR, the file
 written in Sisu: `sisu2 lir NAME.sir --output NAME.lir`), builds the LIR
 with `sisu build --native --from-lir NAME.lir`, runs the executable and
 compares as above, and requires the executable to be byte for byte the
-one `--from-sir` builds from the same SIR, and the release profile's
-(`sisu2 lir --release`) the one `--release --from-sir` builds; a
+one `--from-sir --lower=rust` builds from the same SIR through the Rust
+lowering, the oracle, and the release profile's (`sisu2 lir --release`)
+the one `--release --from-sir --lower=rust` builds; a
 construct stage 2 does not lower yet fails the case with stage 2's
 message. Stage 2 is the
 executable `--sisu2 PATH` names, else the runner builds
@@ -425,6 +437,30 @@ and the time spent building and running them.
   while borrowed, a value read whole while a field is borrowed with
   `mut`), each pinning its code and its counterexample run (`.defer`), and
   the two-phase borrow they accept (`two_phase_allowed`), which runs.
+- `unsafe/` is unsafe code (22; stage 1's RULES.md, R2 to R9) as the
+  interpreter's checked memory model runs it (D-085, decision 301) and
+  native code does (decision 302): a vector on memory of `Global`, grown
+  by copying its slots, its values moved out, referred to and dropped in
+  place, and a bump `Region` (`vector`); pointers to the program's places
+  and into a C struct (`pointers`); plain data, its bit casts, bytes and
+  views, and `transmute` (`plain_casts`); foreign calls the interpreter
+  emulates, `strlen`, `memcpy`, `malloc`, `free`, `getenv` and `write`
+  (`foreign`); and a refusal of the model for each obligation it checks,
+  each a panic naming it (`out_of_bounds`, `released`, `uninitialised`,
+  `misaligned`, `released_twice`, `release_layout`, `release_other`,
+  `shared_write`, `invalid_bits`, `overwrite`, `leaked`, `gone`,
+  `no_memory`, `mistyped`, `bit_cast_sizes`, `read_plain_short`,
+  `foreign_unknown`), the two that only the monitor sees with their
+  `.monitor` (`stale_pointer`, a write through a pointer whose borrow an
+  assignment ended, and `reference_behind`, a reference used after the
+  value behind it was dropped through the pointer). The behaviour cases
+  are in `native.list`, the refusals not: native code does not check raw
+  memory. `../held/unsafe/` holds the cases that wait for two changes of
+  stage 1 (port-debt.md, "Shortcuts in the interpreter"): a stack on
+  std.mem's `RawBuf` and the layouts `size_of` and `align_of` give, with
+  their expectations; the runner checks them with `cargo run -p
+  sisu-conformance -- --sisu target/debug/sisu conformance/held`, and
+  they move here when stage 1 has changed.
 - `wrong/` is the wrong-program corpus (18, Phases 2 and 3): ninety-three
   short programs a newcomer might write, each with one intended mistake
   that its first comment names (a misspelling, a missing `mut`, a use

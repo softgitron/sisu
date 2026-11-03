@@ -2430,6 +2430,37 @@ impl<'a, 'p> Cx<'a, 'p> {
         if let Some((kind, op)) = wide_op(name) {
             return self.call_wide(dest, kind, op, args);
         }
+        // A foreign function is called as C calls it, and the machine
+        // intrinsics of std.rt are the backend's (decision 302).
+        if let Some(f) = name.strip_prefix("extern.") {
+            return self.call_foreign(dest, f, args);
+        }
+        if name.starts_with("rt.") {
+            return self.machine_intrinsic(dest, name, args);
+        }
+        // A place of the program holds a value as it is laid out, and a
+        // reference into raw memory is read so: a pointer to a place, and a
+        // reference made from a pointer, are only made to a type that raw
+        // memory holds as a value is laid out (decision 302).
+        let pointee = match name {
+            "mem.ptr.as_ref" | "mem.ptr.as_mut" | "mem.slice.as_ptr" => self.raw_pointee(args.first())?,
+            "mem.ptr.of" | "mem.ptr.of_mut" => match args.first() {
+                Some(Operand::Copy(p) | Operand::Move(p)) => match self.place_type(p)? {
+                    Type::Ref(inner, _) => Some(*inner),
+                    t => Some(t),
+                },
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(t) = pointee
+            && !self.cg.types.same_in_memory(&t)
+        {
+            return Err(Error::unsupported(format!(
+                "`{name}` of a `{}`, which raw memory holds otherwise than a value of it",
+                sir::write::ty(&t)
+            )));
+        }
         let Some(i) = Intrinsic::from_name(name) else {
             return Err(Error::unsupported(format!("the intrinsic `{name}`")));
         };
@@ -2508,6 +2539,133 @@ impl<'a, 'p> Cx<'a, 'p> {
         if let Some(done) = done {
             self.b.ins().jump(done, &[]);
             self.b.switch_to_block(done);
+        }
+        Ok(())
+    }
+
+    /// The type a raw pointer operand (or a slice operand, through
+    /// references) holds values of.
+    fn raw_pointee(&mut self, o: Option<&Operand>) -> Result<Option<Type>, Error> {
+        let Some(Operand::Copy(p) | Operand::Move(p)) = o else { return Ok(None) };
+        let mut t = self.place_type(p)?;
+        while let Type::Ref(inner, _) = t {
+            t = *inner;
+        }
+        Ok(match t {
+            Type::Named(n, args) if matches!(n.as_str(), "ptr" | "ptr_mut" | "Slice" | "list") => {
+                args.first().cloned()
+            }
+            _ => None,
+        })
+    }
+
+    /// A call of a foreign function (`extern.LIBRARY.NAME`), as C calls it:
+    /// each argument converted to its C type, the result back to its Sisu
+    /// one, and what the program printed so far written first, since the
+    /// function may write to the same streams (decision 302).
+    fn call_foreign(&mut self, dest: &Place, f: &str, args: &[Operand]) -> Result<(), Error> {
+        let symbol = f.split_once('.').map_or(f, |(_, n)| n);
+        let argv = self.arguments(args, 0, None)?;
+        let mut params = Vec::with_capacity(argv.len());
+        let mut vals = Vec::with_capacity(argv.len());
+        for (addr, t) in &argv {
+            let (ct, v) = self.c_argument(*addr, t, symbol)?;
+            params.push(ct);
+            vals.push(v);
+        }
+        let dest_ty = self.place_type(dest)?;
+        let ret = match &dest_ty {
+            Type::Unit => None,
+            t => Some(c_type(t).ok_or_else(|| {
+                Error::unsupported(format!(
+                    "the result of the foreign function `{symbol}`, a `{}`",
+                    sir::write::ty(t)
+                ))
+            })?),
+        };
+        self.rt(sym::FLUSH, &[])?;
+        let id = self.cg.c_function(symbol, &params, ret.as_slice())?;
+        let r = self.func_ref(id);
+        let call = self.b.ins().call(r, &vals);
+        let result = self.b.inst_results(call).first().copied();
+        let (Some(v), Some(ct)) = (result, ret) else { return Ok(()) };
+        let (d, _) = self.place(dest, None)?;
+        let word = match &dest_ty {
+            Type::Named(n, _) if n == "Option" => {
+                let none = self.b.ins().icmp_imm(IntCC::Equal, v, 0);
+                let tag = self.b.ins().uextend(types::I64, none);
+                self.store_word(tag, d, 0);
+                self.store_word(v, d, 8);
+                return Ok(());
+            }
+            Type::Named(n, _) if n == "f32" => {
+                let bits = self.b.ins().bitcast(types::I32, MemFlags::new(), v);
+                self.b.ins().uextend(types::I64, bits)
+            }
+            Type::Float => self.b.ins().bitcast(types::I64, MemFlags::new(), v),
+            Type::Named(n, _) if matches!(n.as_str(), "i8" | "i16" | "i32") => {
+                self.b.ins().sextend(types::I64, v)
+            }
+            _ if ct != types::I64 => self.b.ins().uextend(types::I64, v),
+            _ => v,
+        };
+        self.store_word(word, d, 0);
+        Ok(())
+    }
+
+    /// An argument of a foreign call as its C type: its value loaded from
+    /// `addr` and narrowed, an option of a raw pointer as a nullable one.
+    fn c_argument(&mut self, addr: Value, t: &Type, symbol: &str) -> Result<(ir::Type, Value), Error> {
+        let ct = c_type(t).ok_or_else(|| {
+            Error::unsupported(format!(
+                "an argument of the foreign function `{symbol}` of type `{}`",
+                sir::write::ty(t)
+            ))
+        })?;
+        let word = self.load(addr, 0);
+        let v = match t {
+            Type::Named(n, _) if n == "Option" => {
+                let payload = self.load(addr, 8);
+                let some = self.b.ins().icmp_imm(IntCC::Equal, word, 0);
+                let zero = self.iconst(0);
+                self.b.ins().select(some, payload, zero)
+            }
+            Type::Float => self.b.ins().bitcast(types::F64, MemFlags::new(), word),
+            Type::Named(n, _) if n == "f32" => {
+                let low = self.b.ins().ireduce(types::I32, word);
+                self.b.ins().bitcast(types::F32, MemFlags::new(), low)
+            }
+            _ if ct != types::I64 => self.b.ins().ireduce(ct, word),
+            _ => word,
+        };
+        Ok((ct, v))
+    }
+
+    /// The machine intrinsics of std.rt (22, "Machine intrinsics"; D-086):
+    /// the stack pointer read in place, the thread's slot and the switch
+    /// between stacks through the runtime.
+    fn machine_intrinsic(&mut self, dest: &Place, name: &str, args: &[Operand]) -> Result<(), Error> {
+        match name {
+            "rt.stack_pointer" => {
+                let sp = self.b.ins().get_stack_pointer(types::I64);
+                let (d, _) = self.place(dest, None)?;
+                self.store_word(sp, d, 0);
+            }
+            "rt.thread_slot" => {
+                let slot =
+                    self.rt(sym::THREAD_SLOT, &[])?.ok_or_else(|| Error::internal("no thread slot"))?;
+                let (d, _) = self.place(dest, None)?;
+                self.store_word(slot, d, 0);
+            }
+            "rt.switch" => {
+                let argv = self.arguments(args, 0, None)?;
+                let [(save, _), (load, _)] = argv.as_slice() else {
+                    return Err(Error::internal("`rt.switch` without its two contexts"));
+                };
+                let (save, load) = (self.load(*save, 0), self.load(*load, 0));
+                self.rt(sym::SWITCH, &[save, load])?;
+            }
+            _ => return Err(Error::unsupported(format!("the machine intrinsic `{name}`"))),
         }
         Ok(())
     }
@@ -3498,6 +3656,31 @@ fn returned_constant(f: &sir::Function) -> Option<&Const> {
         }
         _ => None,
     }
+}
+
+/// The C type a foreign function takes or gives for a Sisu type
+/// (22, "Foreign calls"): the integers and floats at their width, a raw
+/// pointer and an option of one as an address; `None` for a type that has
+/// no C form.
+fn c_type(t: &Type) -> Option<ir::Type> {
+    Some(match t {
+        Type::Int => types::I64,
+        Type::Float => types::F64,
+        Type::Bool => types::I8,
+        Type::Named(n, args) => match n.as_str() {
+            "u64" => types::I64,
+            "u8" | "i8" => types::I8,
+            "u16" | "i16" => types::I16,
+            "u32" | "i32" => types::I32,
+            "f32" => types::F32,
+            "ptr" | "ptr_mut" => types::I64,
+            "Option" if matches!(args.first(), Some(Type::Named(p, _)) if p == "ptr" || p == "ptr_mut") => {
+                types::I64
+            }
+            _ => return None,
+        },
+        _ => return None,
+    })
 }
 
 /// The source-level name of a SIR function, for stack traces

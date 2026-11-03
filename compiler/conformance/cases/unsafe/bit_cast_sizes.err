@@ -1,0 +1,2 @@
+panic: `bit_cast` from `u16` of 2 bytes to `u32` of 4 bytes: the sizes differ
+  at main (bit_cast_sizes.sisu:7:11)

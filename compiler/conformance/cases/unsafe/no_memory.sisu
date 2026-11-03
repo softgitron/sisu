@@ -1,0 +1,10 @@
+# The checked memory model (D-085) refuses a read through a pointer with
+# no memory behind it, the dangling pointer of an empty buffer: `ptr.read`'s
+# obligation `valid`.
+
+from std.mem import ptr
+
+def main():
+    let p: ptr[int] = ptr.dangling()
+    # safety: valid: wrong on purpose, a dangling pointer points to nothing.
+    print(unsafe p.read())

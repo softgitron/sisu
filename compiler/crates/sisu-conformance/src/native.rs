@@ -96,6 +96,18 @@ pub fn read_list(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// The case names a coverage list holds for the mode from LIR: those whose
+/// comment does not start `not from LIR:`, a construct stage 2 does not
+/// lower yet (decision 302).
+pub fn read_list_from_lir(text: &str) -> Vec<String> {
+    text.lines()
+        .filter(|l| !l.split_once('#').is_some_and(|(_, c)| c.trim_start().starts_with("not from LIR:")))
+        .map(|l| l.split('#').next().unwrap_or("").trim())
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 /// How [`run_list`] runs each case.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Mode {
@@ -363,10 +375,16 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&P
                     fail(&mut r, what, format!("{}{}", lowered.stdout, lowered.stderr));
                     return r;
                 }
-                // The executable the SIR gives, which the LIR's must equal.
+                // The executable the SIR gives through the Rust lowering, the
+                // oracle, which the LIR's must equal (decision 304).
                 let from_sir_exe = sandbox.dir.join("native-program-from-sir");
-                let mut sir_build =
-                    s(&["build", "--native", "--output", &from_sir_exe.display().to_string()]);
+                let mut sir_build = s(&[
+                    "build",
+                    "--native",
+                    "--lower=rust",
+                    "--output",
+                    &from_sir_exe.display().to_string(),
+                ]);
                 if release {
                     sir_build.push("--release".to_string());
                 }
