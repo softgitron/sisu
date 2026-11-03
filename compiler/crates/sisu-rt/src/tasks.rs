@@ -681,13 +681,6 @@ unsafe fn scope_end(c: &Call<'_>, s: u32, status: u8, body: Box<[u64]>, body_ty:
         let queue = system(|| with(|sc| sc.unjoined(&children)));
         return drop_queued(queue);
     }
-    // An error the body returns is the result.
-    if body_ty.is_some_and(|t| is_err(&body, t)) {
-        let queue = system(|| with(|sc| sc.unjoined(&children)));
-        let st = drop_queued(queue);
-        write_body(&body);
-        return st;
-    }
     // A failure nobody joined: the first in time, or in a `pure` scope the
     // lowest index.
     let failed = system(|| {
@@ -714,6 +707,18 @@ unsafe fn scope_end(c: &Call<'_>, s: u32, status: u8, body: Box<[u64]>, body_ty:
             }
         })
     });
+    // An error the body returns is the result, but `Cancelled` when a
+    // failure nobody joined cancelled the scope: the scope returns the
+    // failure that started the cancelling (06, "Tasks and scopes").
+    if let Some(bt) = body_ty
+        && is_err(&body, bt)
+        && (failed.is_none() || !system(|| with(|sc| sc.is_cancelled_error(&body, bt))))
+    {
+        let queue = system(|| with(|sc| sc.unjoined(&children)));
+        let st = drop_queued(queue);
+        write_body(&body);
+        return st;
+    }
     let Some(t) = failed else {
         let queue = system(|| with(|sc| sc.unjoined(&children)));
         let st = drop_queued(queue);

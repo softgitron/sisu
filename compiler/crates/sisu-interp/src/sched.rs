@@ -1046,10 +1046,6 @@ impl<'p> Interp<'p, '_> {
             self.queue_drop(body, None);
             return Ok(Event::Returned(v, fr.ret));
         }
-        if is_result_ty(&result_ty) && is_err(&body) {
-            self.drop_unjoined(&children);
-            return Ok(Event::Returned(body, fr.ret));
-        }
         // A failure nobody joined: the first in time, or in a `pure`
         // scope the lowest index.
         let unobserved = |t: u32, me: &Self| {
@@ -1071,6 +1067,16 @@ impl<'p> Interp<'p, '_> {
         } else {
             self.sched.scopes[si].first_failure.filter(|&t| unobserved(t, self))
         };
+        // An error the body returns is the result, but `Cancelled` when a
+        // failure nobody joined cancelled the scope: the scope returns the
+        // failure that started the cancelling (06, "Tasks and scopes").
+        if is_result_ty(&result_ty)
+            && is_err(&body)
+            && (failed.is_none() || !Self::is_cancelled_error(&body))
+        {
+            self.drop_unjoined(&children);
+            return Ok(Event::Returned(body, fr.ret));
+        }
         let Some(t) = failed else {
             self.drop_unjoined(&children);
             return Ok(Event::Returned(body, fr.ret));

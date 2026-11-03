@@ -98,6 +98,7 @@ ownership/returned_views
 ownership/rustc/two_phase_allowed
 ownership/shared
 ownership/shared_param_passed_on
+ownership/shared_same
 ownership/str_views
 ownership/two_phase
 ownership/views
