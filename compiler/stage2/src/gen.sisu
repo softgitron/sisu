@@ -1,0 +1,1264 @@
+##! The lowering of a whole program (stage 0's `sisu-codegen/src/lib.rs`):
+##! generic functions are lowered once per list of type arguments a call
+##! gives them, from the entry; a call through a trait is resolved to its
+##! impl's method when the instance is lowered, except on a `dyn`, whose
+##! dispatcher chooses by the type of its value; then C's `main`, which
+##! hands the type table and the entry to the runtime. What `sisu-codegen`
+##! declares and defines in its object module, this lowering writes as LIR
+##! items in the same order (`data`, `declare`, `function`), so that the
+##! translation makes the same object file.
+##!
+##! One function is lowered by `stage2.func`, whose methods are this
+##! module's `Cg`'s too; the debug information's types by `stage2.debug`.
+
+import stage1.sir.write
+import stage2.abi
+from stage1.sir import (
+    Callee,
+    Const,
+    Entry,
+    FnKind,
+    Function,
+    ImplTarget,
+    Operand,
+    Program,
+    Rvalue,
+    StatementKind,
+    Terminator,
+    Type,
+)
+from stage2.abi import WORD
+from stage2.layout import Types, arg, instance_key, named0
+from stage2.lir import Fb, LirError, in_function, internal, quote_bytes, text_bytes, unsupported
+
+## What a call through a trait runs.
+@derive(Eq)
+pub enum Target:
+    Fn(String, list[Type])
+    Intrinsic(String, list[Type])
+    ## A method of a trait called on a `dyn`, with the `dyn` as `Self`: the
+    ## impl is chosen when the program runs, by a dispatcher.
+    Dyn(String, list[Type])
+
+## Where a local lives: the caller's memory at an address, a slot of the
+## frame, or a variable (with the slot its value is copied to when code
+## needs its address).
+pub enum Storage:
+    Param(int)
+    Slot(int)
+    Var(int, int?)
+
+pub struct LocalSt:
+    pub ty: Type
+    pub storage: Storage
+
+## An operand's value: its words, or (when large) the address of a copy.
+pub enum Val:
+    Words(list[int])
+    Mem(int)
+
+## An argument of the runtime call a failed check makes: a value, or a
+## constant made in the failure's block.
+pub enum Arg:
+    V(int)
+    I32(int)
+    I64(int)
+
+## A named local, as the debug information describes it: its name, type,
+## slot, whether the slot holds its address, whether it is a parameter, and
+## where it is declared.
+pub struct DebugLocal:
+    pub name: String
+    pub ty: Type
+    pub slot: int
+    pub indirect: bool
+    pub param: bool
+    pub line: int?
+
+## A function as LIR defines it.
+pub struct FnOut:
+    ## `SYMBOL FRAME name "SHOWN"` and, for one lowered from SIR, its
+    ## `source S line L`.
+    pub head: String
+    pub slots: list[int]
+    pub vars: int
+    pub locals: list[DebugLocal]
+    pub body: String
+
+## An item of the LIR file: a line, or a function by its place in `funcs`.
+pub enum Item:
+    Line(String)
+    Func(int)
+
+## The dispatcher of a trait's method called on a `dyn`, for its type
+## arguments: the types its `dyn` holds and what the call runs for each.
+pub struct Dispatcher:
+    pub name: String
+    pub tys: list[Type]
+    pub symbol: String
+    pub arg_tys: list[Type]
+    pub ret_ty: Type
+    pub cases: list[(Type, int, Target)]
+
+## What the lowering of one function keeps (stage 0's `Cx`, without its
+## builder and its program, which are `Cg`'s).
+pub struct Fx:
+    ## The SIR function, by its place in the program.
+    pub fi: int
+    pub targs: list[Type]
+    pub locals: list[LocalSt]
+    ## The LIR block of each SIR block.
+    pub blocks: list[int]
+    ## The failure path of each SIR block, made when first needed.
+    pub fails: list[int?]
+    ## The variables holding the line and column of the statement.
+    pub line: int
+    pub col: int
+    ## The function's name and file for its stack trace lines (data and
+    ## length of each); none for drop glue and the standard library.
+    pub trace: (int, int, int, int)?
+    pub name: (int, int)
+    pub file: (int, int)
+    pub glue: bool
+    ## The SIR block being lowered.
+    pub cur: int
+    pub vars: list[DebugLocal]
+    ## The parameters whose addresses are kept in slots of their own.
+    pub kept: list[(int, int)]
+    ## The variables whose slot the statement writes, read back after it.
+    pub reload: list[int]
+    ## The slot of each local whose iterator lives in the frame.
+    pub frames: list[int?]
+    ## The failed checks of the SIR block, written after its terminator.
+    pub deferred: list[(int, str, list[Arg])]
+    ## The blocks every path from which ends in a panic or in unwinding.
+    pub cold: list[bool]
+
+impl Fx:
+    pub pure def empty() -> Fx:
+        return Fx(
+            fi=0,
+            targs=[],
+            locals=[],
+            blocks=[],
+            fails=[],
+            line=0,
+            col=0,
+            trace=None,
+            name=(0, 0),
+            file=(0, 0),
+            glue=False,
+            cur=0,
+            vars=[],
+            kept=[],
+            reload=[],
+            frames=[],
+            deferred=[],
+            cold=[],
+        )
+
+## What the lowering keeps across the functions of a program (stage 0's
+## `Codegen`).
+pub struct Cg:
+    ## The program's functions by name, the first of each name.
+    fn_index: dict[String, int]
+    pub types: Types
+    ## Every instance declared, by function and type arguments: its symbol.
+    instances: dict[String, String]
+    queue: list[(String, list[Type], String)]
+    queue_head: int
+    ## The runtime's entry points declared.
+    runtime_done: set[String]
+    ## The data declared, and the runtime's data.
+    data_count: int
+    pub depth: int
+    pub budget: int
+    pub stack: int
+    pub site: int
+    ## Texts and call descriptors in the read-only data, by content.
+    texts: dict[String, int]
+    descs: dict[String, int]
+    ## The glue instances the type table names, as they are declared.
+    glue_ids: list[String]
+    ## The capability handles of which the program makes objects other than
+    ## the host's.
+    pub foreign: set[String]
+    ## The thunk of each named function used as a value, and its type.
+    thunks: dict[String, (String, Type)]
+    pub release: bool
+    ## The LIR file's items, and the functions defined, in order.
+    items: list[Item]
+    pub funcs: list[FnOut]
+    ## The types of the values each `dyn` type holds, by the `dyn` type.
+    carried: dict[String, list[Type]]
+    dispatchers: list[Dispatcher]
+    dispatcher_index: dict[String, int]
+    dispatched: bool
+    names: int
+    pub compiled: int
+    pub statements: int
+    pub index_checks: int
+    pub index_proven: int
+    pub overflow_checks: int
+    pub overflow_proven: int
+    pub tests_decided: int
+    pub env_needed: int
+    ## The intrinsics by name.
+    intrinsics: dict[String, int]
+    ## The function being lowered: its builder and its state.
+    pub b: Fb
+    pub fx: Fx
+
+impl Cg:
+    pub pure def new(p: Program, env_words: int, release: bool) -> Cg:
+        var fn_index: dict[String, int] = {}
+        for i in range(len(p.functions)):
+            let n = p.functions[i].name.copy()
+            if not fn_index.contains(n):
+                _ = fn_index.insert(n, i)
+        var intrinsics: dict[String, int] = {}
+        let names = abi.intrinsic_names()
+        for i in range(len(names)):
+            _ = intrinsics.insert(names[i].to_string(), i)
+        var cg = Cg(
+            fn_index=fn_index,
+            types=Types.new(p.types, p.functions, env_words),
+            instances={},
+            queue=[],
+            queue_head=0,
+            runtime_done=set(),
+            data_count=0,
+            depth=0,
+            budget=0,
+            stack=0,
+            site=0,
+            texts={},
+            descs={},
+            glue_ids=[],
+            foreign=foreign_objects(p, reachable(p)),
+            thunks={},
+            release=release,
+            items=[],
+            funcs=[],
+            carried={},
+            dispatchers=[],
+            dispatcher_index={},
+            dispatched=False,
+            names=0,
+            compiled=0,
+            statements=0,
+            index_checks=0,
+            index_proven=0,
+            overflow_checks=0,
+            overflow_proven=0,
+            tests_decided=0,
+            env_needed=0,
+            intrinsics=intrinsics,
+            b=Fb.new(0),
+            fx=Fx.empty(),
+        )
+        cg.depth = cg.import_data(abi.SYM_DEPTH)
+        cg.budget = cg.import_data(abi.SYM_BUDGET)
+        cg.stack = cg.import_data(abi.SYM_STACK)
+        cg.site = cg.import_data(abi.SYM_SITE)
+        return cg
+
+    pure def import_data(mut self, name: str) -> int:
+        let d = self.data_count
+        self.data_count += 1
+        self.items.push(Item.Line("data d{d} import {name}"))
+        return d
+
+    ## The number of the intrinsic `name`, if the runtime has it.
+    pub pure def intrinsic(self, name: str) -> int?:
+        if let Some(i) = self.intrinsics.get(name.to_string()):
+            return Some(i)
+        return None
+
+    ## The program's function named `name`: its place.
+    pub pure def function(self, name: str) -> int?:
+        if let Some(i) = self.fn_index.get(name.to_string()):
+            return Some(i)
+        return None
+
+    pure def no_function[T](self, name: str) -> T ! LirError:
+        return internal("the program has no function `{name}`")
+
+    ## The instance of `name` for these (concrete) type arguments, declared
+    ## and queued to be lowered the first time it is asked for: its symbol.
+    pub pure def instance(mut self, p: Program, name: str, targs: list[Type]) -> String ! LirError:
+        let key = instance_key(name, targs)
+        if let Some(s) = self.instances.get(key.copy()):
+            return Ok(s.copy())
+        let fi = self.function(name) else:
+            return self.no_function(name)
+        let params = p.functions[fi].param_count
+        self.names += 1
+        let symbol = "sisu${sanitize(name)}${self.names}"
+        self.items.push(Item.Line("declare {symbol} local sisu {params}"))
+        _ = self.instances.insert(key, symbol.copy())
+        self.queue.push((name.to_string(), targs.copy(), symbol.copy()))
+        return Ok(symbol)
+
+    ## Records that a `dyn` of type `dyn_ty` holds a value of `value_ty`.
+    pub pure def carry(mut self, dyn_ty: Type, value_ty: Type) -> () ! LirError:
+        let key = write.ty(dyn_ty)
+        var held: list[Type] = []
+        if let Some(h) = self.carried.get(key.copy()):
+            held = h.copy()
+        for t in held:
+            if t == value_ty:
+                return Ok(())
+        if self.dispatched:
+            return internal("a `dyn` made after the dispatchers were written")
+        held.push(value_ty.copy())
+        _ = self.carried.insert(key, held)
+        return Ok(())
+
+    ## What a call of the intrinsic `name` tells the dispatchers (decision
+    ## 209).
+    pub pure def note_intrinsic(mut self, name: str, targs: list[Type]) -> () ! LirError:
+        if name == "cap.new":
+            if len(targs) == 2:
+                if let Type.Named(_, _) = targs[1]:
+                    return self.carry(targs[1], targs[0])
+            return internal("`cap.new` without its object's and handle's types")
+        if name == "host.net.connect" or name == "host.net.accept":
+            _ = self.types.id(named0("HostStream"))?
+            return self.carry(Type.Dyn(name="Stream".to_string(), args=[]), named0("HostStream"))
+        if name == "host.net.listen":
+            _ = self.types.id(named0("HostListener"))?
+            return self.carry(Type.Dyn(name="Accept".to_string(), args=[]), named0("HostListener"))
+        return Ok(())
+
+    ## The dispatcher of `name` for these type arguments, whose `Self` is a
+    ## `dyn`: declared the first time it is asked for, written when the
+    ## program is complete.
+    pub pure def dispatcher(
+        mut self, name: str, tys: list[Type], arg_tys: list[Type], ret_ty: Type
+    ) -> String ! LirError:
+        let key = instance_key(name, tys)
+        if let Some(i) = self.dispatcher_index.get(key.copy()):
+            return Ok(self.dispatchers[i].symbol.copy())
+        if self.dispatched:
+            return internal("a call through a `dyn` compiled after the dispatchers were written")
+        self.names += 1
+        let symbol = "sisu$dyn${sanitize(name)}${self.names}"
+        self.items.push(Item.Line("declare {symbol} local sisu {len(arg_tys) + 1}"))
+        _ = self.dispatcher_index.insert(key, len(self.dispatchers))
+        self.dispatchers.push(
+            Dispatcher(
+                name=name.to_string(),
+                tys=tys.copy(),
+                symbol=symbol.copy(),
+                arg_tys=arg_tys.copy(),
+                ret_ty=ret_ty.copy(),
+                cases=[],
+            )
+        )
+        return Ok(symbol)
+
+    ## Lowers everything the program needs: the queued instances, then what
+    ## each dispatcher runs for each type its `dyn` holds a value of, until
+    ## nothing is left; then writes the dispatchers.
+    pure def complete(mut self, p: Program) -> () ! LirError:
+        if self.dispatched:
+            return self.drain(p)
+        while True:
+            self.drain(p)?
+            var more = False
+            for i in range(len(self.dispatchers)):
+                var self_ty = Type.Unit
+                if not self.dispatchers[i].tys.is_empty():
+                    self_ty = self.dispatchers[i].tys[0].copy()
+                var held: list[Type] = []
+                if let Some(h) = self.carried.get(write.ty(self_ty)):
+                    held = h.copy()
+                for value_ty in held:
+                    var done = False
+                    for c in self.dispatchers[i].cases:
+                        if c.0 == value_ty:
+                            done = True
+                    if done:
+                        continue
+                    let name = self.dispatchers[i].name.copy()
+                    var tys = self.dispatchers[i].tys.copy()
+                    if not tys.is_empty():
+                        tys[0] = value_ty.copy()
+                    let r = self.resolve_trait(p, name, tys)
+                    let (target, _) = match r:
+                        case Ok(x): x
+                        case Err(e): return Err(in_function(e, name))
+                    match target:
+                        case Target.Fn(f, targs):
+                            _ = self.instance(p, f, targs)?
+                        case Target.Intrinsic(n, targs):
+                            self.note_intrinsic(n, targs)?
+                        case Target.Dyn(_, _):
+                            return unsupported("a `dyn` that holds a `dyn`")
+                    let number = self.types.id(value_ty)?
+                    self.dispatchers[i].cases.push((value_ty.copy(), number, target))
+                    more = True
+            if not more:
+                break
+        for i in range(len(self.dispatchers)):
+            self.define_dispatcher(p, i)?
+        self.dispatched = True
+        return self.drain(p)
+
+    ## Writes dispatcher `i`: a switch on the number of the type of the
+    ## value the `dyn` holds, and for each type a call of what the call
+    ## runs for it.
+    pure def define_dispatcher(mut self, p: Program, i: int) -> () ! LirError:
+        let d = ref self.dispatchers[i]
+        let symbol = d.symbol.copy()
+        let dname = d.name.copy()
+        let n = len(d.arg_tys) + 1
+        let ret_ty = d.ret_ty.copy()
+        let arg_tys = d.arg_tys.copy()
+        let cases = d.cases.copy()
+        # What each case passes as `self`, and how: (callee, by_value,
+        # count) for a method, the descriptor for an intrinsic.
+        var calls: list[(String?, int?, int?, int)] = []
+        for (value_ty, _, target) in cases:
+            match target:
+                case Target.Fn(f, targs):
+                    let fi = self.function(f) else:
+                        return self.no_function(f)
+                    var first = Type.Unit
+                    if len(p.functions[fi].locals) > 1:
+                        first = self.concrete(p, p.functions[fi].locals[1].ty, targs)?
+                    var by_value: int? = None
+                    if not is_ref(first):
+                        by_value = Some(self.types.size(value_ty)?)
+                    var count: int? = None
+                    if by_value.is_some() and self.types.counted(value_ty)?:
+                        count = Some(self.types.id(value_ty)?)
+                    let callee = self.instance(p, f, targs)?
+                    calls.push((Some(callee), by_value, count, 0))
+                case Target.Intrinsic(name, targs):
+                    let intrinsic = self.intrinsic(name) else:
+                        return unsupported("the intrinsic `{name}`")
+                    var desc = [intrinsic, n, len(targs), self.types.id(ret_ty)?]
+                    desc.push(self.types.id(Type.Ref(inner=[value_ty.copy()], mutable=False))?)
+                    for t in arg_tys:
+                        desc.push(self.types.id(t)?)
+                    for t in targs:
+                        desc.push(self.types.id(t)?)
+                    calls.push((None, None, None, self.desc(desc)))
+                case Target.Dyn(_, _):
+                    return unsupported("a `dyn` that holds a `dyn`")
+        var any_intrinsic = False
+        var any_count = False
+        for c in calls:
+            if c.0.is_none():
+                any_intrinsic = True
+            elif c.2.is_some():
+                any_count = True
+        if any_intrinsic:
+            self.runtime(abi.SYM_INTRINSIC)?
+        if any_count:
+            self.runtime(abi.SYM_RETAIN)?
+        var b = Fb.new(n + 1)
+        let entry = b.create_block()
+        b.switch_to_block(entry)
+        let ret = 0
+        let dyn_words = 1
+        let number = b.load("i64", dyn_words, 0)
+        let value = b.load("i64", dyn_words, 8)
+        var entries: list[(int, int)] = []
+        var blocks: list[int] = []
+        for c in cases:
+            let blk = b.create_block()
+            entries.push((c.1, blk))
+            blocks.push(blk)
+        let default = b.create_block()
+        b.switch(number, default, entries)
+        b.switch_to_block(default)
+        b.trap(3)
+        for k in range(len(blocks)):
+            b.switch_to_block(blocks[k])
+            let (callee, by_value, count, desc) = calls[k].copy()
+            var status = 0
+            match callee:
+                case Some(callee):
+                    var me = 0
+                    match by_value:
+                        case None:
+                            me = b.stack_addr(b.create_slot(8))
+                            b.store(value, me, 0)
+                        case Some(size):
+                            me = b.stack_addr(b.create_slot(max(size, 8)))
+                            for w in range(size // 8):
+                                let x = b.load("i64", value, w * 8)
+                                b.store(x, me, w * 8)
+                    if let Some(t) = count:
+                        let tv = b.iconst("i32", t)
+                        _ = b.call(abi.SYM_RETAIN, [me, tv], 0)
+                    var args = [ret, me]
+                    for a in range(2, n + 1):
+                        args.push(a)
+                    status = b.call(callee, args, 1)[0]
+                case None:
+                    let me = b.stack_addr(b.create_slot(8))
+                    b.store(value, me, 0)
+                    let arr = b.stack_addr(b.create_slot(max(8 * n, 8)))
+                    b.store(me, arr, 0)
+                    for a in range(2, n + 1):
+                        b.store(a, arr, 8 * (a - 1))
+                    let dv = b.symbol_value(desc)
+                    status = b.call(abi.SYM_INTRINSIC, [dv, ret, arr], 1)[0]
+            b.return_([status])
+        self.define(symbol, "unprobed", "{dname}#dispatch", None, b, [])
+        return Ok(())
+
+    ## Defines a function: its LIR is the next item.
+    pub pure def define(
+        mut self, symbol: str, frame: str, shown: str, source: (int, int)?, own b: Fb, own locals: list[DebugLocal]
+    ):
+        var head = "{symbol} {frame} name {write.quote_lir(shown)}"
+        if let Some((s, l)) = source:
+            head.push(" source {s} line {l}")
+        self.items.push(Item.Func(len(self.funcs)))
+        self.funcs.push(FnOut(head=head, slots=b.slots.copy(), vars=b.vars, locals=locals, body=b.out.copy()))
+
+    ## Everything but `main`: the instances the entry reaches, the
+    ## dispatchers and the drop glue; the entry's symbol, `main`'s flags
+    ## and the number of the entry's result type.
+    pure def generate(mut self, p: Program, entry: Entry) -> (String, int, int) ! LirError:
+        let main = self.instance(p, entry.function, [])?
+        self.complete(p)?
+        var ret = Type.Unit
+        if let Some(fi) = self.function(entry.function):
+            ret = p.functions[fi].locals[0].ty.copy()
+        let ret_ty = self.types.id(self.concrete(p, ret, [])?)?
+        self.complete(p)?
+        var flags = if entry.returns_result: abi.ENTRY_RESULT else: 0
+        if entry.takes_system:
+            flags = flags | abi.ENTRY_SYSTEM
+        return Ok((main, flags, ret_ty))
+
+    ## Lowers every queued instance, and the drop glue the type table
+    ## names, until nothing is left.
+    pure def drain(mut self, p: Program) -> () ! LirError:
+        while True:
+            while len(self.glue_ids) < len(self.types.glue):
+                let (name, targs) = self.types.glue[len(self.glue_ids)].copy()
+                let symbol = self.instance(p, name, targs)?
+                self.glue_ids.push(symbol)
+            if self.queue_head >= len(self.queue):
+                if len(self.glue_ids) == len(self.types.glue):
+                    return Ok(())
+                continue
+            let (name, targs, symbol) = self.queue[self.queue_head].copy()
+            self.queue_head += 1
+            let r = self.compile_instance(p, name, targs, symbol)
+            if let Err(e) = r:
+                return Err(in_function(e, name))
+
+    pure def compile_instance(mut self, p: Program, name: str, targs: list[Type], symbol: str) -> () ! LirError:
+        let fi = self.function(name) else:
+            return self.no_function(name)
+        let vars = self.translate(p, fi, targs)?
+        var shown = name.to_string()
+        if not targs.is_empty():
+            shown.push("[")
+            for i in range(len(targs)):
+                if i > 0:
+                    shown.push(", ")
+                shown.push(write.ty(targs[i]))
+            shown.push("]")
+        let f = ref p.functions[fi]
+        var line = 0
+        if let Some(l) = f.loc:
+            line = l.line
+        let b = self.b
+        self.b = Fb.new(0)
+        self.define(symbol, "probed", shown, Some((f.source, line)), b, vars)
+        self.compiled += 1
+        return Ok(())
+
+    ## The named function `name` as a value: the thunk that calls it with
+    ## an environment first (which it ignores), and the value's type.
+    pub pure def fn_value(mut self, p: Program, name: str) -> (String, Type) ! LirError:
+        if let Some(t) = self.thunks.get(name.to_string()):
+            return Ok(t.copy())
+        let fi = self.function(name) else:
+            return self.no_function(name)
+        let f = ref p.functions[fi]
+        if not f.type_params.is_empty():
+            return unsupported("the generic function `{name}` as a value")
+        let n = f.param_count
+        var params: list[Type] = []
+        for i in range(1, n + 1):
+            params.push(self.concrete(p, f.locals[i].ty, [])?)
+        let ty = Type.Fn(params=params, ret=[self.concrete(p, f.locals[0].ty, [])?], pure=f.pure)
+        let target = self.instance(p, name, [])?
+        self.names += 1
+        let symbol = "sisu${sanitize(name)}$value${self.names}"
+        self.items.push(Item.Line("declare {symbol} local sisu {n + 1}"))
+        var b = Fb.new(n + 2)
+        let block = b.create_block()
+        b.switch_to_block(block)
+        # The result's address, then the arguments without the environment.
+        var args = [0]
+        for a in range(2, n + 2):
+            args.push(a)
+        let st = b.call(target, args, 1)[0]
+        b.return_([st])
+        self.define(symbol, "unprobed", "{name}#thunk", None, b, [])
+        _ = self.thunks.insert(name.to_string(), (symbol.copy(), ty.copy()))
+        return Ok((symbol, ty))
+
+    ## A runtime entry point, declared once with its signature.
+    pub pure def runtime(mut self, name: str) -> () ! LirError:
+        if self.runtime_done.contains(name.to_string()):
+            return Ok(())
+        let sig = runtime_signature(name) else:
+            return internal("an unknown runtime entry point `{name}`")
+        self.items.push(Item.Line("declare {name} import {sig}"))
+        _ = self.runtime_done.add(name.to_string())
+        return Ok(())
+
+    ## Read-only bytes, once per content.
+    pub pure def text(mut self, bytes: list[int]) -> int:
+        var content = bytes.copy()
+        content.push(0)
+        let quoted = quote_bytes(content)
+        if let Some(d) = self.texts.get(quoted.copy()):
+            return d
+        let d = self.data_count
+        self.data_count += 1
+        self.items.push(Item.Line("data d{d} bytes {quoted}"))
+        _ = self.texts.insert(quoted, d)
+        return d
+
+    pub pure def text_of(mut self, s: str) -> int:
+        return self.text(text_bytes(s))
+
+    ## A call descriptor in the read-only data.
+    pub pure def desc(mut self, words: list[int]) -> int:
+        var text = String.new()
+        for w in words:
+            text.push(" {w}")
+        if let Some(d) = self.descs.get(text.copy()):
+            return d
+        let d = self.data_count
+        self.data_count += 1
+        self.items.push(Item.Line("data d{d} align 8 u32{text}"))
+        _ = self.descs.insert(text, d)
+        return d
+
+    ## A type with the instance's type arguments put in, and the associated
+    ## types of impls looked up.
+    pub pure def concrete(self, p: Program, t: Type, targs: list[Type]) -> Type ! LirError:
+        if settled(t):
+            return Ok(t.copy())
+        return self.resolve_assoc(p, t.subst(targs))
+
+    pure def resolve_assoc(self, p: Program, t: Type) -> Type ! LirError:
+        match t:
+            case Type.Assoc(base, tr, args, name):
+                let b = self.resolve_assoc(p, base[0])?
+                var rargs: list[Type] = []
+                for a in args:
+                    rargs.push(self.resolve_assoc(p, a)?)
+                for imp in p.impls:
+                    if imp.trait_name != tr:
+                        continue
+                    var binds = no_binds(imp.params)
+                    if not match_type(imp.self_ty, b, mut binds):
+                        continue
+                    if not match_all(imp.trait_args, rargs, mut binds):
+                        continue
+                    for (n, at) in imp.assoc:
+                        if n == name:
+                            return self.resolve_assoc(p, at.subst(bound(binds)))
+                return unsupported("the associated type `{write.ty(t)}`")
+            case Type.Named(n, a):
+                return Ok(Type.Named(name=n.copy(), args=self.resolve_all(p, a)?))
+            case Type.Tuple(a):
+                return Ok(Type.Tuple(self.resolve_all(p, a)?))
+            case Type.Ref(x, m):
+                return Ok(Type.Ref(inner=[self.resolve_assoc(p, x[0])?], mutable=m))
+            case Type.Fn(ps, r, pure):
+                return Ok(Type.Fn(params=self.resolve_all(p, ps)?, ret=self.resolve_all(p, r)?, pure=pure))
+            case Type.Param(i):
+                return internal("the type parameter `${i}` has no argument")
+            case _:
+                return Ok(t.copy())
+
+    pure def resolve_all(self, p: Program, ts: list[Type]) -> list[Type] ! LirError:
+        var out: list[Type] = []
+        for t in ts:
+            out.push(self.resolve_assoc(p, t)?)
+        return Ok(out)
+
+    ## A call through a capability handle (`cap.forward`): the operation of
+    ## the object behind it (decisions 194 and 209). A `Lent` is its handle.
+    pub pure def forward(
+        mut self, p: Program, name: str, handle: Type, own tys: list[Type], derefs: int
+    ) -> (Target, int) ! LirError:
+        if let Type.Named(n, a) = handle:
+            if n == "Lent" and len(a) == 1:
+                if not tys.is_empty():
+                    tys[0] = a[0].copy()
+                let (target, more) = self.resolve_trait(p, name, tys)?
+                return Ok((target, derefs + more))
+        var host: str? = None
+        var h = String.new()
+        if let Type.Named(hn, a) = handle:
+            if a.is_empty():
+                host = abi.host_object(hn)
+            h = hn.copy()
+        let Some(host_name) = host else:
+            return unsupported("a call of `{name}` through a `{write.ty(handle)}`")
+        if self.foreign.contains(h.copy()):
+            # The root handles of `main`'s `System` hold the host's objects.
+            self.carry(handle, named0(host_name))?
+            return Ok((Target.Dyn(name.to_string(), tys), derefs))
+        if not tys.is_empty():
+            tys[0] = named0(host_name)
+        let (target, _) = self.resolve_trait(p, name, tys)?
+        return Ok((target, derefs))
+
+    ## What a call through a trait runs for these (concrete) type
+    ## arguments, and how many references its `Self` is behind
+    ## (`sisu-interp/src/dispatch.rs`, at compile time).
+    pub pure def resolve_trait(mut self, p: Program, name: str, own tys: list[Type]) -> (Target, int) ! LirError:
+        let (trait_name, method) = rsplit_dot(name) else:
+            return internal("bad trait method `{name}`")
+        if tys.is_empty():
+            return internal("`{name}` without `Self`")
+        var self_ty = tys[0].copy()
+        var derefs = 0
+        while True:
+            match self_ty.copy():
+                case Type.Ref(inner, _):
+                    self_ty = inner[0].copy()
+                    derefs += 1
+                case _:
+                    break
+        tys[0] = self_ty.copy()
+        if let Type.Dyn(_, _) = self_ty:
+            return Ok((Target.Dyn(name.to_string(), tys), derefs))
+        for imp in p.impls:
+            if imp.trait_name != trait_name:
+                continue
+            let n = len(imp.trait_args)
+            var binds = no_binds(imp.params)
+            if not match_type(imp.self_ty, self_ty, mut binds):
+                continue
+            var rest: list[Type] = []
+            for k in range(1, len(tys)):
+                rest.push(tys[k].copy())
+            if not match_all(imp.trait_args, rest, mut binds):
+                continue
+            var targs = bound(binds)
+            for k in range(1 + n, len(tys)):
+                targs.push(tys[k].copy())
+            for (m, target) in imp.methods:
+                if m != method:
+                    continue
+                match target:
+                    case ImplTarget.Intrinsic(i):
+                        if i == "cap.forward":
+                            return self.forward(p, name, self_ty, tys, derefs)
+                        return Ok((Target.Intrinsic(i.copy(), targs), derefs))
+                    case ImplTarget.Fn(f):
+                        return Ok((Target.Fn(f.copy(), targs), derefs))
+            return Ok((Target.Fn(name.to_string(), tys), derefs))
+        var structural = ""
+        if trait_name == "Display" and method == "fmt":
+            structural = "structural.display"
+        elif trait_name == "Debug" and method == "fmt_debug":
+            structural = "structural.debug"
+        elif trait_name == "Eq" and method == "eq":
+            structural = "structural.eq"
+        elif trait_name == "PartialOrd" and method == "partial_cmp":
+            structural = "structural.partial_cmp"
+        elif trait_name == "Ord" and method == "cmp":
+            structural = "structural.cmp"
+        elif trait_name == "Hash" and method == "hash":
+            structural = "structural.hash"
+        else:
+            return internal("no impl of `{trait_name}` for `{write.ty(self_ty)}`")
+        return Ok((Target.Intrinsic(structural.to_string(), tys), derefs))
+
+    ## C's `main`: hands the program's tables and its entry to
+    ## `sisu_rt_start`.
+    pure def define_main(mut self, entry: str, flags: int, ret_ty: int) -> () ! LirError:
+        let table = abi.encode(self.types.table()?)
+        let types_id = self.text(table)
+        # The function table: the address of each glue instance.
+        let fns_id = self.data_count
+        self.data_count += 1
+        let n = len(self.glue_ids)
+        var fns = "data d{fns_id} align 8 zeros {max(n, 1) * 8}"
+        for i in range(n):
+            fns.push(" func {i * 8} {self.glue_ids[i]}")
+        self.items.push(Item.Line(fns))
+        self.items.push(Item.Line("declare main export (i32, i64) -> (i32)"))
+        self.runtime(abi.SYM_START)?
+        var b = Fb.new(2)
+        let block = b.create_block()
+        b.switch_to_block(block)
+        let entry_addr = b.func_addr(entry)
+        let types_addr = b.symbol_value(types_id)
+        let fns_addr = b.symbol_value(fns_id)
+        let fv = b.iconst("i32", flags)
+        let rv = b.iconst("i32", ret_ty)
+        let types_len = b.iconst("i64", len(table))
+        let fns_len = b.iconst("i64", n)
+        # What a call may write below a probe limit before a probe sees it,
+        # which the translation knows once the other functions are compiled.
+        let unprobed = b.probe_reserve()
+        let code = b.call(
+            abi.SYM_START,
+            [0, 1, entry_addr, fv, rv, types_addr, types_len, fns_addr, fns_len, unprobed],
+            1,
+        )[0]
+        b.return_([code])
+        self.define("main", "outside", "main", None, b, [])
+        return Ok(())
+
+    ## The LIR file: the header, the items, the debug types and the counts.
+    pub pure def write_lir(mut self, p: Program) -> String:
+        var out = String.new("lir 1\n")
+        out.push(if self.release: "profile release\n" else: "profile debug\n")
+        for i in range(len(p.sources)):
+            out.push("source {i} {write.quote_lir(p.sources[i])}\n")
+        let numbers = self.describe_locals()
+        var k = 0
+        for item in self.items:
+            match item:
+                case Item.Line(text):
+                    out.push(text)
+                    out.push("\n")
+                case Item.Func(fi):
+                    let f = ref self.funcs[fi]
+                    out.push("function {f.head}\n")
+                    for s in range(len(f.slots)):
+                        out.push("    slot s{s} {f.slots[s]}\n")
+                    out.push("    vars {f.vars}\n")
+                    for l in f.locals:
+                        out.push("    local {write.quote_lir(l.name)} t{numbers[k]} s{l.slot}")
+                        k += 1
+                        if l.indirect:
+                            out.push(" indirect")
+                        if l.param:
+                            out.push(" param")
+                        if let Some(line) = l.line:
+                            out.push(" line {line}")
+                        out.push("\n")
+                    out.push(f.body)
+                    out.push("end\n")
+        out.push("types\n")
+        out.push(self.debug_types())
+        out.push(
+            "stats {self.compiled} {self.statements} {self.index_checks} {self.index_proven} {self.overflow_checks} {self.overflow_proven} {self.tests_decided}\n"
+        )
+        return out
+
+## The LIR of a program: lowered with function values of one word of
+## environment, and again with more when an `own` closure needs them
+## (decision 224).
+pub pure def lower(p: Program, release: bool) -> String ! LirError:
+    let entry = p.entry.copy() else:
+        return unsupported("a program without `main`")
+    var env_words = 1
+    while True:
+        var cg = Cg.new(p, env_words, release)
+        let (main, flags, ret_ty) = cg.generate(p, entry)?
+        if cg.env_needed > env_words:
+            env_words = cg.env_needed
+            continue
+        cg.define_main(main, flags, ret_ty)?
+        return Ok(cg.write_lir(p))
+    return unsupported("a program without `main`")
+
+## The signature of the runtime's entry point `name` as LIR declares it.
+pub pure def runtime_signature(name: str) -> str?:
+    return match name:
+        case "sisu_rt_start": Some("(i32, i64, i64, i32, i32, i64, i64, i64, i64, i64) -> (i32)")
+        case "sisu_rt_yield": Some("() -> ()")
+        case "sisu_rt_arena_slot": Some("(i64, i64, i32, i64) -> (i8)")
+        case "sisu_rt_shared_touch": Some("(i64) -> ()")
+        case "sisu_rt_frame": Some("(i64, i64, i64, i64, i64, i64) -> ()")
+        case "sisu_rt_abort_unwind": Some("() -> ()")
+        case "sisu_rt_panic_overflow": Some("(i32, i64, i64) -> (i8)")
+        case "sisu_rt_panic_index": Some("(i64, i64, i64) -> (i8)")
+        case "sisu_rt_panic_stack": Some("(i64, i64) -> (i8)")
+        case "sisu_rt_retain": Some("(i64, i32) -> ()")
+        case "sisu_rt_panic_unreachable": Some("() -> (i8)")
+        case "sisu_rt_int_op": Some("(i32, i64, i64, i64) -> (i8)")
+        case "sisu_rt_float_op": Some("(i32, f64, f64) -> (f64)")
+        case "sisu_rt_alloc": Some("(i64) -> (i64)")
+        case "sisu_rt_task_env": Some("(i64, i32) -> (i64)")
+        case "sisu_rt_free" | "sisu_rt_trace_release": Some("(i64) -> ()")
+        case "sisu_rt_drop": Some("(i64, i32) -> (i8)")
+        case "sisu_rt_copy": Some("(i64, i64, i32) -> ()")
+        case "sisu_rt_binary": Some("(i32, i64, i64, i32, i64, i32) -> (i8)")
+        case "sisu_rt_bytes_eq": Some("(i64, i64, i64) -> (i8)")
+        case "sisu_rt_text_push" | "sisu_rt_text_from": Some("(i64, i64, i64) -> ()")
+        case "sisu_rt_text_push_int" | "sisu_rt_list_reserve": Some("(i64, i64) -> ()")
+        case "sisu_rt_table_find": Some("(i64, i64, i32, i32) -> (i64)")
+        case "sisu_rt_intrinsic": Some("(i64, i64, i64) -> (i8)")
+        case "sisu_rt_sized": Some("(i32, i32, i32, i64, i64, i64) -> (i8)")
+        case "sisu_rt_wide": Some("(i32, i32, i64, i32, i64, i32, i64) -> (i8)")
+        case "sisu_rt_table": Some("(i32, i64, i64, i64) -> (i8)")
+        case "sisu_rt_dict_slot": Some("(i64, i64, i32, i32, i64) -> (i8)")
+        case _: None
+
+## How many values a call of the runtime's `name` gives.
+pub pure def runtime_results(name: str) -> int:
+    let sig = runtime_signature(name) ?? "() -> ()"
+    return if sig.ends_with("-> ()"): 0 else: 1
+
+pure def is_ref(t: Type) -> bool:
+    if let Type.Ref(_, _) = t:
+        return True
+    return False
+
+## `name` split at its last dot.
+pub pure def rsplit_dot(name: str) -> (str, str)?:
+    var i = name.byte_len() - 1
+    while i >= 0:
+        if name.byte_at(i).to_int() == 46:
+            return Some((name.byte_slice(0, i), name.byte_slice(i + 1, name.byte_len())))
+        i -= 1
+    return None
+
+## Whether a type is concrete as it is.
+pub pure def settled(t: Type) -> bool:
+    match t:
+        case Type.Param(_) | Type.Assoc(_, _, _, _) | Type.ConstOp(_, _):
+            return False
+        case Type.Named(_, a) | Type.Tuple(a) | Type.Dyn(_, a):
+            for x in a:
+                if not settled(x):
+                    return False
+            return True
+        case Type.Fn(ps, r, _):
+            for x in ps:
+                if not settled(x):
+                    return False
+            for x in r:
+                if not settled(x):
+                    return False
+            return True
+        case Type.Ref(x, _):
+            return settled(x[0])
+        case _:
+            return True
+
+pub pure def no_binds(n: int) -> list[Type?]:
+    var out: list[Type?] = []
+    for _ in range(n):
+        out.push(None)
+    return out
+
+pub pure def bound(binds: list[Type?]) -> list[Type]:
+    var out: list[Type] = []
+    for b in binds:
+        out.push(b.copy() ?? Type.Unit)
+    return out
+
+## Matches an impl's patterns against concrete types, pair by pair, as far
+## as the shorter list goes.
+pub pure def match_all(pats: list[Type], tys: list[Type], mut binds: list[Type?]) -> bool:
+    for k in range(min(len(pats), len(tys))):
+        if not match_type(pats[k], tys[k], mut binds):
+            return False
+    return True
+
+## Matches an impl's pattern (its parameters bound in `binds`) against a
+## concrete type (`sisu-interp/src/dispatch.rs`).
+pub pure def match_type(pat: Type, ty: Type, mut binds: list[Type?]) -> bool:
+    match pat:
+        case Type.Param(i):
+            if i >= len(binds):
+                return False
+            match binds[i].copy():
+                case None:
+                    binds[i] = Some(ty.copy())
+                    return True
+                case Some(b):
+                    return b == ty
+        case Type.Named(n, a):
+            if let Type.Named(m, b) = ty:
+                return m == n and len(a) == len(b) and match_pairs(a, b, mut binds)
+            return False
+        case Type.Tuple(a):
+            if let Type.Tuple(b) = ty:
+                return len(a) == len(b) and match_pairs(a, b, mut binds)
+            return False
+        case Type.Ref(a, m):
+            if let Type.Ref(b, k) = ty:
+                return m == k and match_type(a[0], b[0], mut binds)
+            return False
+        case Type.Fn(ps, r, pure):
+            if let Type.Fn(qs, s, q) = ty:
+                return (
+                    pure == q
+                    and len(ps) == len(qs)
+                    and match_pairs(ps, qs, mut binds)
+                    and match_type(r[0], s[0], mut binds)
+                )
+            return False
+        case Type.Dyn(n, a):
+            if let Type.Dyn(m, b) = ty:
+                return m == n and len(a) == len(b) and match_pairs(a, b, mut binds)
+            return False
+        case _:
+            return pat == ty
+
+pure def match_pairs(a: list[Type], b: list[Type], mut binds: list[Type?]) -> bool:
+    for k in range(len(a)):
+        if not match_type(a[k], b[k], mut binds):
+            return False
+    return True
+
+## A symbol-safe spelling of a SIR name.
+pub pure def sanitize(name: str) -> String:
+    var out = String.new()
+    for c in name.chars():
+        let k = c.code()
+        let alnum = (k >= 48 and k <= 57) or (k >= 65 and k <= 90) or (k >= 97 and k <= 122)
+        if alnum or k == 95:
+            out.push_char(c)
+        else:
+            out.push_char('_')
+    return out
+
+## The literal a constant's function returns, when that is all it does.
+pub pure def returned_constant(f: Function) -> Const?:
+    if f.kind != FnKind.Value or f.param_count != 0 or not f.type_params.is_empty():
+        return None
+    if len(f.blocks) != 1 or len(f.blocks[0].stmts) != 1:
+        return None
+    if f.blocks[0].term != Terminator.Return:
+        return None
+    if let StatementKind.Assign(place, value) = f.blocks[0].stmts[0].kind:
+        if place.local.index == 0 and place.proj.is_empty():
+            if let Rvalue.Use(Operand.Const(c)) = value:
+                if let Const.Fn(_) = c:
+                    return None
+                return Some(c.copy())
+    return None
+
+## The source-level name of a SIR function, for stack traces.
+pub pure def display_fn_name(name: str, p: Program) -> String:
+    if name.starts_with("test#"):
+        if let Some(i) = name.byte_slice(5, name.byte_len()).parse_int():
+            if i >= 0 and i < len(p.tests):
+                return "test {write.quote(p.tests[i].0)}"
+    if name.ends_with(".__check_invariant"):
+        let owner = name.byte_slice(0, name.byte_len() - 18)
+        return "the invariant of {owner}"
+    if let Some(at) = name.find("#closure"):
+        return "closure in {display_fn_name(name.byte_slice(0, at), p)}"
+    return name.to_string()
+
+## The functions `main` may reach, by name: through direct calls,
+## closures, function values, and the impls a call through a trait may run.
+pub pure def reachable(p: Program) -> set[String]:
+    var fns: dict[String, int] = {}
+    for i in range(len(p.functions)):
+        let n = p.functions[i].name.copy()
+        if not fns.contains(n):
+            _ = fns.insert(n, i)
+    var seen: set[String] = set()
+    # The object types each capability handle type may hold, by text.
+    var objects: dict[String, list[Type]] = {}
+    for (h, o) in abi.capabilities():
+        _ = objects.insert(h.to_string(), [named0(o)])
+    while True:
+        let before = (len(seen), count_objects(objects))
+        var work: list[String] = []
+        if let Some(e) = p.entry:
+            work.push(e.function.copy())
+        for s in seen.iter():
+            work.push(s.copy())
+        var done: set[String] = set()
+        while not work.is_empty():
+            let name = work.pop() ?? String.new()
+            if not done.add(name.copy()):
+                continue
+            _ = seen.add(name.copy())
+            let fi = fns.get(name.copy()) else:
+                continue
+            var found: list[String] = []
+            let f = ref p.functions[fi]
+            for b in f.blocks:
+                for s in b.stmts:
+                    match s.kind:
+                        case StatementKind.Call(_, callee, args):
+                            for a in args:
+                                operand_fn(a, mut found)
+                            match callee:
+                                case Callee.Fn(n, _):
+                                    found.push(n.copy())
+                                case Callee.Trait(n, tys):
+                                    trait_targets(p, n, tys, objects, mut found)
+                                case Callee.Value(o):
+                                    operand_fn(o, mut found)
+                                case Callee.Intrinsic(n, tys):
+                                    if n == "cap.new" and len(tys) >= 2:
+                                        if let Type.Named(h, _) = tys[1]:
+                                            add_object(mut objects, h, tys[0])
+                        case StatementKind.Assign(_, r):
+                            match r:
+                                case Rvalue.Closure(n, _, ops):
+                                    found.push(n.copy())
+                                    for o in ops:
+                                        operand_fn(o, mut found)
+                                case Rvalue.Use(o) | Rvalue.Unary(_, o):
+                                    operand_fn(o, mut found)
+                                case Rvalue.Binary(_, x, y):
+                                    operand_fn(x, mut found)
+                                    operand_fn(y, mut found)
+                                case Rvalue.Aggregate(_, ops):
+                                    for o in ops:
+                                        operand_fn(o, mut found)
+                                case _:
+                                    pass
+                        case _:
+                            pass
+            for x in found:
+                work.push(x)
+        let after = (len(seen), count_objects(objects))
+        if after == before:
+            break
+    # Drop glue runs wherever a value of its type is dropped.
+    for f in p.functions:
+        if f.kind == FnKind.Glue:
+            _ = seen.add(f.name.copy())
+    return seen
+
+pure def count_objects(objects: dict[String, list[Type]]) -> int:
+    var n = 0
+    for (_, os) in objects.items():
+        n += len(os)
+    return n
+
+pure def add_object(mut objects: dict[String, list[Type]], h: str, t: Type):
+    var os: list[Type] = []
+    if let Some(x) = objects.get(h.to_string()):
+        os = x.copy()
+    for o in os:
+        if o == t:
+            return
+    os.push(t.copy())
+    _ = objects.insert(h.to_string(), os)
+
+pure def operand_fn(o: Operand, mut out: list[String]):
+    if let Operand.Const(Const.Fn(n)) = o:
+        out.push(n.copy())
+
+## What a call through `Trait.method` may run, as `reachable` finds it.
+pure def trait_targets(p: Program, n: str, tys: list[Type], objects: dict[String, list[Type]], mut found: list[String]):
+    var tr = n
+    var method = ""
+    if let Some((a, b)) = rsplit_dot(n):
+        tr = a
+        method = b
+    var self_ty = Type.Unit
+    if not tys.is_empty():
+        self_ty = tys[0].copy()
+    while True:
+        match self_ty.copy():
+            case Type.Ref(inner, _):
+                self_ty = inner[0].copy()
+            case Type.Named(ln, la):
+                if ln == "Lent" and len(la) == 1:
+                    self_ty = la[0].copy()
+                else:
+                    break
+            case _:
+                break
+    var handle: list[Type]? = None
+    if let Type.Named(h, a) = self_ty:
+        if a.is_empty():
+            if let Some(os) = objects.get(h.copy()):
+                handle = Some(os.copy())
+    match handle:
+        case Some(objs):
+            for o in objs:
+                impls_for(p, tr, method, Some(o), mut found)
+        case None:
+            var is_dyn = False
+            if let Type.Dyn(_, _) = self_ty:
+                is_dyn = True
+            if self_ty.has_params() or is_dyn:
+                impls_for(p, tr, method, None, mut found)
+            else:
+                impls_for(p, tr, method, Some(self_ty), mut found)
+
+pure def impls_for(p: Program, tr: str, method: str, self_ty: Type?, mut out: list[String]):
+    for imp in p.impls:
+        if imp.trait_name != tr:
+            continue
+        if let Some(t) = self_ty:
+            var binds = no_binds(imp.params)
+            if not match_type(imp.self_ty, t, mut binds):
+                continue
+        var hit = False
+        for (m, target) in imp.methods:
+            if m == method and not hit:
+                hit = True
+                if let ImplTarget.Fn(f) = target:
+                    out.push(f.copy())
+        if not hit:
+            out.push("{tr}.{method}")
+
+## The capability handle types the program makes objects of, besides the
+## host's, in the functions `main` may reach.
+pub pure def foreign_objects(p: Program, reached: set[String]) -> set[String]:
+    var out: set[String] = set()
+    for f in p.functions:
+        if not reached.contains(f.name.copy()):
+            continue
+        for b in f.blocks:
+            for s in b.stmts:
+                if let StatementKind.Call(_, Callee.Intrinsic(name, tys), _) = s.kind:
+                    if name != "cap.new":
+                        continue
+                    var named = False
+                    if len(tys) >= 2:
+                        if let Type.Named(h, _) = tys[1]:
+                            _ = out.add(h.copy())
+                            named = True
+                    if not named:
+                        for (h, _) in abi.capabilities():
+                            _ = out.add(h.to_string())
+    return out
+
+## The bits of a float, as Rust's `f64::to_bits` gives them, found by
+## scaling by powers of two, which is exact.
+pub pure def float_bits(x: f64) -> int:
+    if x.is_nan():
+        return 9221120237041090560
+    let sign = if x < 0.0 or (x == 0.0 and 1.0 / x < 0.0): -9223372036854775807 - 1 else: 0
+    var m = if x < 0.0: -x else: x
+    if m == 0.0:
+        return sign
+    if m > 1.7976931348623157e308:
+        return sign | 9218868437227405312
+    var e = 0
+    while m >= 2.0:
+        m = m * 0.5
+        e += 1
+    while m < 1.0:
+        m = m * 2.0
+        e -= 1
+    if e >= -1022:
+        var frac = m - 1.0
+        for _ in range(52):
+            frac = frac * 2.0
+        return sign | ((e + 1023) << 52) | frac.truncate_to_int()
+    # A subnormal: the value in units of 2^-1074.
+    var units = m
+    for _ in range(e + 1074):
+        units = units * 2.0
+    return sign | units.truncate_to_int()

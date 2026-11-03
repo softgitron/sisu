@@ -117,7 +117,7 @@ Stage 0 runs all of it except star unpacking in `let a, *rest = xs` (the
 list pattern `[a, *rest]` works in `match` and in `let ... else`) and
 list literals typed as `Array` (stage 0 builds one with `Array.filled`).
 
-**6. Text.** `str` and `String` and why both exist, interpolation in
+**6. Text** ([written](tutorial/06-text.md)). `str` and `String` and why both exist, interpolation in
 full (format specs such as `{x:>8}` and `{x:.2f}`, `{x:?}` for `Debug`),
 the common methods (`split`, `split_whitespace`, `trim`, `lines`, `find`,
 `replace`, `starts_with`, `strip_prefix`, `to_lowercase`), iterating
@@ -903,6 +903,11 @@ Writing the rest of Part I turned up more, by chapter:
   is; the binding holds a borrow, and `.copy()` is not offered. A test
   name is interpolated, so `test "len({3, 1})":` gets E0103, and an
   escaped quote in a test name gets E0005.
+- Chapter 6. `for letter in word` gets E0325 (`type.not-iterable`) with
+  no fix, where E0345 for `word[0]` lists `.chars()`, `.bytes()` and
+  `.byte_slice(a, b)`. Python's `letter in "aeiou"` with `letter` a
+  `char` gets E0369 (`type.comparison-types`) with no fix; a list of
+  `char` values, or `"aeiou".contains("{letter}")`, is what works.
 
 Planning the later chapters turned up the parts of the proposal that
 they teach and stage 0 does not run yet, each named in its chapter's

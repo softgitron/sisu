@@ -177,8 +177,9 @@ let missing = line.find("x")  # => None
   `strip_prefix` and `strip_suffix` remove them if they are there.
 - `replace` replaces every occurrence of a piece of text.
 - `find` gives the position, counted in characters, where a piece of
-  text starts, as an optional value: `None` when it is not there. Chapter 8 shows how to
-  use one; a worksheet shows an optional value only in a `let`.
+  text starts, as an optional value: `None` when it is not there.
+  Chapter 8 shows how to use one; a worksheet shows an optional value
+  only in a `let`.
 - `split(",")` cuts at every comma, `split_whitespace` at every run of
   spaces, tabs and line breaks, and `lines` at every line break. Each
   gives its pieces one at a time to a `for` loop or a comprehension.

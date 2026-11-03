@@ -11,6 +11,9 @@
 ##! check.
 
 import stage1.sir.write
+import stage2.abi
+import stage2.layout
+import stage2.lir
 import stage2.read
 from stage2.read import ReadError
 

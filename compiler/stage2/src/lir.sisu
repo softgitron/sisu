@@ -1,0 +1,271 @@
+##! LIR as it is written (README.md, "LIR"; docs/architecture.md, "LIR"):
+##! a function's body is the calls `sisu-codegen` makes of Cranelift's
+##! function builder, one per line, in their order, so that the Rust
+##! backend's translation (`sisu-codegen/src/translate.rs`) makes the same
+##! calls and gets the same function. Values, blocks, slots and variables
+##! are numbered as the builder numbers them: values in the order defined
+##! (the entry's parameters first), blocks and slots in the order made.
+
+## Why a program was not lowered (stage 0's `sisu_codegen::Error`).
+pub error LirError:
+    ## A construct the lowering does not handle yet: what, and the
+    ## function it is in.
+    Unsupported(what: String, function: String)
+    ## The lowering broke one of its own rules.
+    Internal(what: String)
+
+pub pure def unsupported[T](what: str) -> T ! LirError:
+    return Err(Unsupported(what=what.to_string(), function=String.new()))
+
+pub pure def internal[T](what: str) -> T ! LirError:
+    return Err(Internal(what=what.to_string()))
+
+## The error, saying which function it was found in.
+pub pure def in_function(e: LirError, f: str) -> LirError:
+    match e:
+        case Unsupported(what, function):
+            if function.is_empty():
+                return Unsupported(what=what.copy(), function=f.to_string())
+            return Unsupported(what=what.copy(), function=function.copy())
+        case Internal(what):
+            return Internal(what=what.copy())
+
+## A function's LIR as the lowering writes it.
+pub struct Fb:
+    ## The body: its lines, from the entry block's.
+    pub out: String
+    ## The values defined so far, the parameters first.
+    pub values: int
+    ## The blocks made so far.
+    pub blocks: int
+    ## The size of each slot made, in order.
+    pub slots: list[int]
+    ## The variables declared.
+    pub vars: int
+    ## The blocks marked cold, by number.
+    cold: list[bool]
+    ## Whether it reads the probe reserve (C's `main`).
+    pub reserve: bool
+
+impl Fb:
+    ## A function of `params` parameters, before its entry block is made.
+    pub pure def new(params: int) -> Fb:
+        return Fb(out=String.new(), values=params, blocks=0, slots=[], vars=0, cold=[], reserve=False)
+
+    ## A line defining one value: its number.
+    pure def def1(mut self, text: str) -> int:
+        let v = self.values
+        self.values += 1
+        self.out.push("    v{v} = {text}\n")
+        return v
+
+    pure def line(mut self, text: str):
+        self.out.push("    ")
+        self.out.push(text)
+        self.out.push("\n")
+
+    pub pure def create_block(mut self) -> int:
+        let b = self.blocks
+        self.blocks += 1
+        self.cold.push(False)
+        return b
+
+    pub pure def set_cold_block(mut self, b: int):
+        if b < len(self.cold):
+            self.cold[b] = True
+
+    pub pure def switch_to_block(mut self, b: int):
+        if b < len(self.cold) and self.cold[b]:
+            self.out.push("block b{b} cold\n")
+        else:
+            self.out.push("block b{b}\n")
+
+    pub pure def append_block_param(mut self, b: int) -> int:
+        return self.def1("param b{b}")
+
+    pub pure def create_slot(mut self, size: int) -> int:
+        let s = len(self.slots)
+        self.slots.push(size)
+        return s
+
+    pub pure def declare_var(mut self) -> int:
+        let x = self.vars
+        self.vars += 1
+        return x
+
+    pub pure def use_var(mut self, x: int) -> int:
+        return self.def1("use x{x}")
+
+    pub pure def def_var(mut self, x: int, v: int):
+        self.line("def x{x}, v{v}")
+
+    pub pure def set_srcloc(mut self, line: int, col: int):
+        self.line("loc {line} {col}")
+
+    pub pure def iconst(mut self, ty: str, n: int) -> int:
+        return self.def1("iconst.{ty} {n}")
+
+    pub pure def bin(mut self, op: str, a: int, b: int) -> int:
+        return self.def1("{op} v{a}, v{b}")
+
+    pub pure def imm(mut self, op: str, a: int, n: int) -> int:
+        return self.def1("{op} v{a}, {n}")
+
+    pub pure def un(mut self, op: str, a: int) -> int:
+        return self.def1("{op} v{a}")
+
+    pub pure def icmp(mut self, cc: str, a: int, b: int) -> int:
+        return self.def1("icmp.{cc} v{a}, v{b}")
+
+    pub pure def icmp_imm(mut self, cc: str, a: int, n: int) -> int:
+        return self.def1("icmp_imm.{cc} v{a}, {n}")
+
+    pub pure def fcmp(mut self, cc: str, a: int, b: int) -> int:
+        return self.def1("fcmp.{cc} v{a}, v{b}")
+
+    ## `sadd_overflow`, `ssub_overflow`, `smul_overflow`: the wrapped
+    ## result and the flag.
+    pub pure def overflow(mut self, op: str, a: int, b: int) -> (int, int):
+        let v = self.values
+        self.values += 2
+        self.out.push("    v{v}, v{v + 1} = {op} v{a}, v{b}\n")
+        return (v, v + 1)
+
+    pub pure def select(mut self, c: int, a: int, b: int) -> int:
+        return self.def1("select v{c}, v{a}, v{b}")
+
+    ## `uextend`, `ireduce`, `bitcast`, `fpromote`, `fdemote` to `ty`.
+    pub pure def convert(mut self, op: str, ty: str, a: int) -> int:
+        return self.def1("{op}.{ty} v{a}")
+
+    pub pure def load(mut self, ty: str, a: int, off: int) -> int:
+        return self.def1("load.{ty} v{a}, {off}")
+
+    pub pure def uload8(mut self, a: int, off: int) -> int:
+        return self.def1("uload8 v{a}, {off}")
+
+    pub pure def sload8(mut self, a: int, off: int) -> int:
+        return self.def1("sload8 v{a}, {off}")
+
+    pub pure def store(mut self, v: int, a: int, off: int):
+        self.line("store v{v}, v{a}, {off}")
+
+    pub pure def stack_addr(mut self, s: int) -> int:
+        return self.def1("stack_addr s{s}")
+
+    pub pure def stack_load(mut self, s: int) -> int:
+        return self.def1("stack_load s{s}")
+
+    pub pure def stack_store(mut self, v: int, s: int):
+        self.line("stack_store v{v}, s{s}")
+
+    pub pure def symbol_value(mut self, d: int) -> int:
+        return self.def1("symbol_value d{d}")
+
+    pub pure def func_addr(mut self, symbol: str) -> int:
+        return self.def1("func_addr {symbol}")
+
+    pub pure def get_stack_pointer(mut self) -> int:
+        return self.def1("get_stack_pointer")
+
+    ## A call of `symbol`, which gives `results` values: their numbers.
+    pub pure def call(mut self, symbol: str, args: list[int], results: int) -> list[int]:
+        var out: list[int] = []
+        var defs = String.new()
+        for k in range(results):
+            out.push(self.values + k)
+            if k > 0:
+                defs.push(", ")
+            defs.push("v{self.values + k}")
+        self.values += results
+        if results > 0:
+            defs.push(" = ")
+        self.out.push("    {defs}call {symbol}{value_args(args)}\n")
+        return out
+
+    ## A call of the code at `f`, of Sisu's convention with `n` arguments:
+    ## its status.
+    pub pure def call_indirect(mut self, n: int, f: int, args: list[int]) -> int:
+        return self.def1("call_indirect {n}, v{f}{value_args(args)}")
+
+    pub pure def memcpy(mut self, d: int, s: int, n: int):
+        self.line("memcpy v{d}, v{s}, v{n}")
+
+    pub pure def probe_reserve(mut self) -> int:
+        self.reserve = True
+        return self.def1("probe_reserve")
+
+    pub pure def jump(mut self, b: int, args: list[int]):
+        self.line("jump b{b}{value_args(args)}")
+
+    pub pure def brif(mut self, c: int, a: int, a_args: list[int], b: int, b_args: list[int]):
+        self.line("brif v{c}, b{a}{value_args(a_args)}, b{b}{value_args(b_args)}")
+
+    ## Cranelift's `Switch` on `v`: to the block of the entry `v` equals,
+    ## else to `default`. `made`: the blocks made before it, after which
+    ## the switch makes its own.
+    pub pure def switch(mut self, v: int, default: int, entries: list[(int, int)]):
+        var cases = String.new()
+        for (k, b) in entries:
+            if not cases.is_empty():
+                cases.push(", ")
+            cases.push("{k} b{b}")
+        self.line("switch v{v}, b{default}, [{cases}] made {self.blocks}")
+
+    pub pure def return_(mut self, vs: list[int]):
+        var text = String.new("return")
+        for i in range(len(vs)):
+            text.push(if i == 0: " " else: ", ")
+            text.push("v{vs[i]}")
+        self.line(text)
+
+    pub pure def trap(mut self, code: int):
+        self.line("trap {code}")
+
+## `(v1, v2)`, or nothing for no values.
+pub pure def value_args(vs: list[int]) -> String:
+    if vs.is_empty():
+        return String.new()
+    var out = String.new("(")
+    for i in range(len(vs)):
+        if i > 0:
+            out.push(", ")
+        out.push("v{vs[i]}")
+    out.push(")")
+    return out
+
+## Bytes as LIR quotes them: printable ASCII as itself, `\\`, `\"`, and
+## `\xHH` for any other byte.
+pub pure def quote_bytes(bs: list[int]) -> String:
+    var out = String.new("\"")
+    for b in bs:
+        out.push(quoted_byte(b))
+    out.push("\"")
+    return out
+
+## A text's UTF-8 bytes as LIR quotes them.
+pub pure def quote_text(s: str) -> String:
+    var out = String.new("\"")
+    for i in range(s.byte_len()):
+        out.push(quoted_byte(s.byte_at(i).to_int()))
+    out.push("\"")
+    return out
+
+pure def quoted_byte(b: int) -> String:
+    if b == 92:
+        return "\\\\".to_string()
+    if b == 34:
+        return "\\\"".to_string()
+    if b >= 32 and b < 127:
+        var s = String.new()
+        s.push_char(char.from_code(b) ?? ' ')
+        return s
+    let digits = "0123456789abcdef"
+    return "\\x{digits.byte_slice(b >> 4, (b >> 4) + 1)}{digits.byte_slice(b & 15, (b & 15) + 1)}"
+
+## The text's UTF-8 bytes.
+pub pure def text_bytes(s: str) -> list[int]:
+    var out: list[int] = []
+    for i in range(s.byte_len()):
+        out.push(s.byte_at(i).to_int())
+    return out

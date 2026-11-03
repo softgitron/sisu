@@ -1,0 +1,749 @@
+##! Layouts of concrete SIR types and the type table the runtime reads
+##! (stage 0's `sisu-codegen/src/layout.rs`): every type is a whole number
+##! of words, a struct or a tuple its parts in order, an enum a tag word and
+##! its variants' payloads over each other, an error set three words (its
+##! type's number, its return trace, its tag) and the payload. A type is
+##! known by its text (`sir.write.ty`), which names one type.
+
+import stage1.sir.write
+import stage2.abi
+from stage1.sir import Function, Type, TypeDecl
+from stage1.sir.types import glue_name
+from stage2.abi import Field, Kind, Slot, TypeEntry, Variant, WORD
+from stage2.lir import LirError, internal, unsupported
+
+## Whether a reference to the type is two words, the type of the value and
+## its address: a `dyn`, and an `Iterable[T]` (decision 210).
+pub pure def fat(t: Type) -> bool:
+    match t:
+        case Type.Dyn(_, _):
+            return True
+        case Type.Named(n, _):
+            return n == "Iterable"
+        case _:
+            return False
+
+## Argument `i` of a type's arguments, or `()`.
+pub pure def arg(args: list[Type], i: int) -> Type:
+    if i < len(args):
+        return args[i].copy()
+    return Type.Unit
+
+pub pure def named0(n: str) -> Type:
+    return Type.Named(name=n.to_string(), args=[])
+
+## Whether dropping a value of the type can do anything: run a `Drop`,
+## change a count, unlock a mutex (stage 0's `sir::types::drops_something`).
+## `needs` says which declared types have drop glue.
+pub pure def drops_something(t: Type, needs: dict[String, bool]) -> bool:
+    match t:
+        case Type.Int | Type.Float | Type.Bool | Type.Char | Type.Str | Type.Unit | Type.Never:
+            return False
+        case Type.Ref(_, _) | Type.Const(_) | Type.ConstOp(_, _):
+            return False
+        case Type.Fn(_, _, _):
+            return True
+        case Type.Tuple(es):
+            for e in es:
+                if drops_something(e, needs):
+                    return True
+            return False
+        case Type.Param(_) | Type.Assoc(_, _, _, _) | Type.Dyn(_, _):
+            return True
+        case Type.ErrSet(ms):
+            for m in ms:
+                if needs.get(m.to_string()) ?? True:
+                    return True
+            return False
+        case Type.Named(n, args):
+            return drops_named(n, args, needs)
+
+pure def drops_named(n: str, args: list[Type], needs: dict[String, bool]) -> bool:
+    match n:
+        case "Shared" | "Weak" | "MutexGuard" | "ReadGuard" | "Fs" | "Net" | "Clock":
+            return True
+        case "Rand" | "Env" | "Proc" | "Stdin" | "System" | "Cap":
+            return True
+        case "String" | "Path" | "DateTime" | "HostFs" | "HostNet" | "HostClock":
+            return False
+        case "HostRand" | "HostEnv" | "HostProc" | "HostStdin" | "TestClock" | "Lent":
+            return False
+        case "f32" | "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32":
+            return False
+        case "i128" | "bytes" | "Slice":
+            return False
+        case "list" | "Array" | "dict" | "set" | "Iter" | "Entry" | "Iterable":
+            return any_drops(args, needs)
+        case "Option" | "Result" | "Cell" | "Atomic" | "Mutex" | "RwLock" | "Arena":
+            return any_drops(args, needs)
+        case _:
+            return needs.get(n.to_string()) ?? True
+
+pure def any_drops(ts: list[Type], needs: dict[String, bool]) -> bool:
+    for t in ts:
+        if drops_something(t, needs):
+            return True
+    return False
+
+## The interned types of a program and their entries.
+pub struct Types:
+    decls: list[TypeDecl]
+    ## Each declared type's place in `decls`, the first of a name.
+    decl_index: dict[String, int]
+    ## Each type's number, by its text.
+    ids: dict[String, int]
+    ## The entries by number; none while a type's entry is being made.
+    entries: list[TypeEntry?]
+    ## The type each number stands for.
+    by_id: list[Type]
+    sizes: dict[String, int]
+    ## The types whose sizes are being computed.
+    sizing: list[String]
+    ## The function table: the instances the runtime calls itself (drop
+    ## glue, a mutex guard's `invariant` check), by their index.
+    pub glue: list[(String, list[Type])]
+    glue_index: dict[String, int]
+    ## Which declared types have drop glue, by name.
+    with_glue: dict[String, bool]
+    ## The names of the program's functions.
+    fn_names: set[String]
+    ## Whether dropping a value of each type can do anything, by number.
+    drops: dict[int, bool]
+    ## The words of a function value's environment (decision 224).
+    pub env_words: int
+
+impl Types:
+    pub pure def new(types: list[TypeDecl], functions: list[Function], env_words: int) -> Types:
+        var decl_index: dict[String, int] = {}
+        for i in range(len(types)):
+            let n = types[i].name().to_string()
+            if not decl_index.contains(n):
+                _ = decl_index.insert(n, i)
+        var fn_names: set[String] = set()
+        for f in functions:
+            _ = fn_names.add(f.name.copy())
+        var with_glue: dict[String, bool] = {}
+        for t in types:
+            _ = with_glue.insert(t.name().to_string(), fn_names.contains(glue_name(t.name())))
+        return Types(
+            decls=types.copy(),
+            decl_index=decl_index,
+            ids={},
+            entries=[],
+            by_id=[],
+            sizes={},
+            sizing=[],
+            glue=[],
+            glue_index={},
+            with_glue=with_glue,
+            fn_names=fn_names,
+            drops={},
+            env_words=env_words,
+        )
+
+    pub pure def decl(self, name: str) -> ref TypeDecl?:
+        if let Some(i) = self.decl_index.get(name.to_string()):
+            return Some(ref self.decls[i])
+        return None
+
+    ## The finished table, in the order of the types' numbers.
+    pub pure def table(self) -> list[TypeEntry] ! LirError:
+        var out: list[TypeEntry] = []
+        for e in self.entries:
+            match e:
+                case Some(x):
+                    out.push(x.copy())
+                case None:
+                    return internal("a type's entry was never finished")
+        return Ok(out)
+
+    ## The bytes of a value of the type, computed from the type alone.
+    pub pure def size(mut self, t: Type) -> int ! LirError:
+        let key = write.ty(t)
+        if let Some(s) = self.sizes.get(key.copy()):
+            return Ok(s)
+        for k in self.sizing:
+            if k == key:
+                return unsupported("the type `{key}`, which holds itself without a `Box`")
+        self.sizing.push(key.copy())
+        let r = self.size_of(t)
+        _ = self.sizing.pop()
+        let s = r?
+        _ = self.sizes.insert(key, s)
+        return Ok(s)
+
+    pure def size_of(mut self, t: Type) -> int ! LirError:
+        let w = WORD
+        match t:
+            case Type.Ref(inner, _):
+                if fat(inner[0]):
+                    return Ok(2 * w)
+                return Ok(w)
+            case Type.Int | Type.Float | Type.Bool | Type.Char:
+                return Ok(w)
+            case Type.Str | Type.Dyn(_, _):
+                return Ok(2 * w)
+            case Type.Fn(_, _, _):
+                return Ok((2 + self.env_words) * w)
+            case Type.Unit | Type.Never | Type.Const(_):
+                return Ok(0)
+            case Type.Tuple(items):
+                var n = 0
+                for it in items:
+                    n += self.size(it)?
+                return Ok(n)
+            case Type.ErrSet(names):
+                var n = abi.ERROR_PAYLOAD
+                for name in names:
+                    n = max(n, self.size(named0(name))?)
+                return Ok(n)
+            case Type.Named(n, args):
+                return self.named_size(n, args)
+            case _:
+                return unsupported("values of the type `{write.ty(t)}`")
+
+    pure def named_size(mut self, n: str, args: list[Type]) -> int ! LirError:
+        let w = WORD
+        match n:
+            case "String" | "Path" | "list" | "Array" | "Slice" | "bytes":
+                return Ok(3 * w)
+            case "i128" | "u128":
+                return Ok(2 * w)
+            case "u64" | "f32" | "u8" | "u16" | "u32" | "i8" | "i16" | "i32" | "DateTime":
+                return Ok(w)
+            case "Iter" | "Box" | "dict" | "set":
+                return Ok(w)
+            case "Scope" | "Handle" | "Cancellation" | "Sender" | "Receiver" | "MutexGuard":
+                return Ok(w)
+            case "ReadGuard":
+                return Ok(w)
+            case "Timer":
+                return Ok(2 * w)
+            case "Mutex" | "RwLock":
+                return Ok(abi.MUTEX_HEADER + self.size(arg(args, 0))?)
+            case "Shared" | "Weak" | "Arena":
+                return Ok(w)
+            case "Cell" | "Atomic":
+                return self.size(arg(args, 0))
+            case "Cap" | "TestClock" | "HostStream" | "HostListener":
+                return Ok(w)
+            case "Iterable":
+                return Ok(2 * w)
+            case "Lent":
+                return self.size(arg(args, 0))
+            case "Entry":
+                return Ok(w + self.size(arg(args, 0))?)
+            case "System":
+                return Ok(len(abi.capabilities()) * w)
+            case _:
+                pass
+        if abi.is_capability(n):
+            return Ok(w)
+        if n == "Option":
+            return Ok(w + self.size(arg(args, 0))?)
+        if n == "Result":
+            let a = self.size(arg(args, 0))?
+            let b = self.size(arg(args, 1))?
+            return Ok(w + max(a, b))
+        let d = self.decl(n) else:
+            return unsupported("values of the builtin type `{n}`")
+        let decl = d.copy()
+        match decl:
+            case TypeDecl.Struct(_, _, fields, _, _, _):
+                var s = 0
+                for f in fields:
+                    s += self.size(f.ty.subst(args))?
+                return Ok(s)
+            case TypeDecl.Enum(_, _, variants, _, error_, _, _):
+                let start = if error_: abi.ERROR_PAYLOAD else: w
+                var s = start
+                for v in variants:
+                    var off = start
+                    for (_, ft) in v.fields:
+                        off += self.size(ft.subst(args))?
+                    s = max(s, off)
+                return Ok(s)
+
+    ## The number of a concrete type, if a value of it was made.
+    pub pure def known_id(self, t: Type) -> int?:
+        if let Some(i) = self.ids.get(write.ty(t)):
+            return Some(i)
+        return None
+
+    ## The number of a concrete type, interning it (and its parts).
+    pub pure def id(mut self, t: Type) -> int ! LirError:
+        let key = write.ty(t)
+        if let Some(id) = self.ids.get(key.copy()):
+            return Ok(id)
+        let id = len(self.entries)
+        _ = self.ids.insert(key.copy(), id)
+        self.entries.push(None)
+        self.by_id.push(t.copy())
+        let entry = self.make(t)?
+        if entry.size != self.size(t)?:
+            return internal("two sizes for the type `{key}`")
+        self.entries[id] = Some(entry)
+        return Ok(id)
+
+    ## A part held by value: its number and size.
+    pure def part(mut self, t: Type) -> (int, int) ! LirError:
+        let size = self.size(t)?
+        return Ok((self.id(t)?, size))
+
+    pure def make(mut self, t: Type) -> TypeEntry ! LirError:
+        let w = WORD
+        match t:
+            case Type.Int:
+                return Ok(TypeEntry(size=w, kind=Kind.Int))
+            case Type.Float:
+                return Ok(TypeEntry(size=w, kind=Kind.Float))
+            case Type.Bool:
+                return Ok(TypeEntry(size=w, kind=Kind.Bool))
+            case Type.Char:
+                return Ok(TypeEntry(size=w, kind=Kind.Char))
+            case Type.Str:
+                return Ok(TypeEntry(size=2 * w, kind=Kind.Str))
+            case Type.Unit | Type.Never:
+                return Ok(TypeEntry(size=0, kind=Kind.Unit))
+            case Type.Ref(inner, _):
+                let target = self.id(inner[0])?
+                let size = if fat(inner[0]): 2 * w else: w
+                return Ok(TypeEntry(size=size, kind=Kind.Ref(target)))
+            case Type.Dyn(_, _):
+                return Ok(TypeEntry(size=2 * w, kind=Kind.Dyn))
+            case Type.Fn(_, _, _):
+                return Ok(TypeEntry(size=(2 + self.env_words) * w, kind=Kind.Fn))
+            case Type.Tuple(items):
+                var slots: list[Slot] = []
+                var off = 0
+                for it in items:
+                    let (ty, size) = self.part(it)?
+                    slots.push(Slot(offset=off, ty=ty))
+                    off += size
+                return Ok(TypeEntry(size=off, kind=Kind.Tuple(slots)))
+            case Type.ErrSet(names):
+                var members: list[int] = []
+                var size = abi.ERROR_PAYLOAD
+                for n in names:
+                    let (id, s) = self.part(named0(n))?
+                    members.push(id)
+                    size = max(size, s)
+                return Ok(TypeEntry(size=size, kind=Kind.ErrSet(members)))
+            case Type.Named(n, args):
+                return self.named(n, args)
+            case Type.Const(c):
+                return Ok(TypeEntry(size=0, kind=Kind.Const(c)))
+            case _:
+                return unsupported("values of the type `{write.ty(t)}`")
+
+    pure def named(mut self, n: str, args: list[Type]) -> TypeEntry ! LirError:
+        let w = WORD
+        match n:
+            case "String":
+                return Ok(TypeEntry(size=3 * w, kind=Kind.String_))
+            case "Path":
+                return Ok(TypeEntry(size=3 * w, kind=Kind.Path))
+            case "bytes":
+                return Ok(TypeEntry(size=3 * w, kind=Kind.Bytes))
+            case "Iterable":
+                return Ok(TypeEntry(size=2 * w, kind=Kind.Dyn))
+            case "Cap" | "TestClock" | "HostStream" | "HostListener":
+                return Ok(TypeEntry(size=w, kind=Kind.Opaque(n.to_string())))
+            case "Lent":
+                let inner = self.id(arg(args, 0))?
+                match self.entries[inner].copy():
+                    case Some(e):
+                        if let Kind.Opaque(o) = e.kind:
+                            return Ok(TypeEntry(size=e.size, kind=Kind.Opaque("Lent {o}")))
+                        return Ok(e)
+                    case None:
+                        return unsupported("a `Lent` of a type that holds itself")
+            case "u64":
+                return Ok(TypeEntry(size=w, kind=Kind.U64))
+            case "i128":
+                return Ok(TypeEntry(size=2 * w, kind=Kind.I128))
+            case "u128":
+                return Ok(TypeEntry(size=2 * w, kind=Kind.U128))
+            case "f32":
+                return Ok(TypeEntry(size=w, kind=Kind.F32))
+            case "u8" | "u16" | "u32" | "i8" | "i16" | "i32":
+                return Ok(TypeEntry(size=w, kind=Kind.Sized(n.to_string())))
+            case "DateTime":
+                return Ok(TypeEntry(size=w, kind=Kind.DateTime))
+            case "System":
+                var fields: list[Field] = []
+                let caps = abi.capabilities()
+                for i in range(len(caps)):
+                    let (cap, _) = caps[i]
+                    let ty = self.id(named0(cap))?
+                    fields.push(Field(name=Some(cap.to_lowercase()), offset=i * w, ty=ty, glue=False))
+                return Ok(
+                    TypeEntry(
+                        size=len(caps) * w,
+                        kind=Kind.Struct(name="System".to_string(), fields=fields, glue=None),
+                    )
+                )
+            case _:
+                pass
+        if abi.is_capability(n):
+            return Ok(TypeEntry(size=w, kind=Kind.Opaque(n.to_string())))
+        match n:
+            case "list" | "Array" | "Slice":
+                return Ok(TypeEntry(size=3 * w, kind=Kind.List(self.id(arg(args, 0))?)))
+            case "Iter":
+                return Ok(TypeEntry(size=w, kind=Kind.Iter(self.id(arg(args, 0))?)))
+            case "dict":
+                let k = self.id(arg(args, 0))?
+                let v = self.id(arg(args, 1))?
+                return Ok(TypeEntry(size=w, kind=Kind.Dict(k, v)))
+            case "set":
+                return Ok(TypeEntry(size=w, kind=Kind.Set(self.id(arg(args, 0))?)))
+            case "Entry":
+                let (k, ks) = self.part(arg(args, 0))?
+                let v = self.id(arg(args, 1))?
+                return Ok(TypeEntry(size=w + ks, kind=Kind.Entry(k, v)))
+            case "Option":
+                let (p, size) = self.part(arg(args, 0))?
+                return Ok(TypeEntry(size=w + size, kind=Kind.Option(p)))
+            case "Result":
+                let (a, sa) = self.part(arg(args, 0))?
+                let (b, sb) = self.part(arg(args, 1))?
+                return Ok(TypeEntry(size=w + max(sa, sb), kind=Kind.Result(a, b)))
+            case "Box":
+                return Ok(TypeEntry(size=w, kind=Kind.Box(self.id(arg(args, 0))?)))
+            case "Scope":
+                return Ok(TypeEntry(size=w, kind=Kind.Scope))
+            case "Cancellation":
+                return Ok(TypeEntry(size=w, kind=Kind.Cancellation))
+            case "Timer":
+                return Ok(TypeEntry(size=2 * w, kind=Kind.Timer))
+            case "Handle":
+                return Ok(TypeEntry(size=w, kind=Kind.Handle(self.id(arg(args, 0))?)))
+            case "Sender":
+                return Ok(TypeEntry(size=w, kind=Kind.Sender(self.id(arg(args, 0))?)))
+            case "Receiver":
+                return Ok(TypeEntry(size=w, kind=Kind.Receiver(self.id(arg(args, 0))?)))
+            case "Mutex":
+                let (e, size) = self.part(arg(args, 0))?
+                return Ok(TypeEntry(size=abi.MUTEX_HEADER + size, kind=Kind.Mutex(e)))
+            case "RwLock":
+                let (e, size) = self.part(arg(args, 0))?
+                return Ok(TypeEntry(size=abi.MUTEX_HEADER + size, kind=Kind.RwLock(e)))
+            case "ReadGuard":
+                return Ok(TypeEntry(size=w, kind=Kind.ReadGuard(self.id(arg(args, 0))?)))
+            case "Shared":
+                return Ok(TypeEntry(size=w, kind=Kind.Shared(self.id(arg(args, 0))?)))
+            case "Weak":
+                return Ok(TypeEntry(size=w, kind=Kind.Weak(self.id(arg(args, 0))?)))
+            case "Arena":
+                return Ok(TypeEntry(size=w, kind=Kind.Arena(self.id(arg(args, 0))?)))
+            case "Cell" | "Atomic":
+                let (e, size) = self.part(arg(args, 0))?
+                return Ok(TypeEntry(size=size, kind=Kind.Cell(e)))
+            case "MutexGuard":
+                let value = arg(args, 0)
+                let e = self.id(value)?
+                # A guard dropped by unwinding checks the value's invariant
+                # (D-077), a function the runtime calls by its index.
+                var check: int? = None
+                if let Type.Named(vn, vargs) = value:
+                    check = self.function_index("{vn}.__invariant", vargs)
+                return Ok(TypeEntry(size=w, kind=Kind.Guard(e, check)))
+            case _:
+                pass
+        let d = self.decl(n) else:
+            return unsupported("values of the builtin type `{n}`")
+        let decl = d.copy()
+        let glue = self.function_index(glue_name(n), args)
+        # What the glue drops is decided on the declared types, so a field
+        # of a type parameter is the glue's (decision 218).
+        var flags: list[list[bool]] = []
+        match decl:
+            case TypeDecl.Struct(_, _, fields, _, _, _):
+                var fs: list[bool] = []
+                for f in fields:
+                    fs.push(glue.is_some() and drops_something(f.ty, self.with_glue))
+                flags.push(fs)
+            case TypeDecl.Enum(_, _, variants, _, _, _, _):
+                for v in variants:
+                    var fs: list[bool] = []
+                    for (_, ft) in v.fields:
+                        fs.push(glue.is_some() and drops_something(ft, self.with_glue))
+                    flags.push(fs)
+        return self.declared(n, args, decl, glue, flags)
+
+    ## The entry of a declared struct or enum; `by_glue` says which fields
+    ## (of each variant) its glue drops.
+    pure def declared(
+        mut self, n: str, args: list[Type], decl: TypeDecl, glue: int?, by_glue: list[list[bool]]
+    ) -> TypeEntry ! LirError:
+        let w = WORD
+        match decl:
+            case TypeDecl.Struct(_, _, fields, _, _, _):
+                var out: list[Field] = []
+                var off = 0
+                for i in range(len(fields)):
+                    let g = flag(by_glue, 0, i)
+                    let (ty, size) = self.part(fields[i].ty.subst(args))?
+                    out.push(Field(name=Some(fields[i].name.copy()), offset=off, ty=ty, glue=g))
+                    off += size
+                return Ok(TypeEntry(size=off, kind=Kind.Struct(name=n.to_string(), fields=out, glue=glue)))
+            case TypeDecl.Enum(_, _, variants, _, error_, _, _):
+                let start = if error_: abi.ERROR_PAYLOAD else: w
+                var vs: list[Variant] = []
+                var size = start
+                for k in range(len(variants)):
+                    var fields: list[Field] = []
+                    var off = start
+                    let v = ref variants[k]
+                    for i in range(len(v.fields)):
+                        let g = flag(by_glue, k, i)
+                        let (ty, s) = self.part(v.fields[i].1.subst(args))?
+                        fields.push(Field(name=v.fields[i].0.copy(), offset=off, ty=ty, glue=g))
+                        off += s
+                    size = max(size, off)
+                    vs.push(Variant(name=v.name.copy(), fields=fields))
+                return Ok(
+                    TypeEntry(
+                        size=size,
+                        kind=Kind.Enum(name=n.to_string(), variants=vs, glue=glue, error_=error_),
+                    )
+                )
+
+    ## The function-table index of the instance of `name` for `args`, when
+    ## the program has the function.
+    pure def function_index(mut self, name: str, args: list[Type]) -> int?:
+        if not self.fn_names.contains(name.to_string()):
+            return None
+        let key = instance_key(name, args)
+        if let Some(i) = self.glue_index.get(key.copy()):
+            return Some(i)
+        let i = len(self.glue)
+        self.glue.push((name.to_string(), args.copy()))
+        _ = self.glue_index.insert(key, i)
+        return Some(i)
+
+    ## Whether a program can observe a value's drop.
+    pub pure def observable_drop(self, t: Type) -> bool:
+        return drops_something(t, self.with_glue)
+
+    ## Whether dropping a value of the type can do anything.
+    pub pure def needs_drop(mut self, t: Type) -> bool ! LirError:
+        let id = self.id(t)?
+        if let Some(known) = self.drops.get(id):
+            return Ok(known)
+        var seen: list[int] = []
+        let answer = self.needs_drop_in(t, mut seen)?
+        _ = self.drops.insert(id, answer)
+        return Ok(answer)
+
+    pure def needs_drop_in(mut self, t: Type, mut seen: list[int]) -> bool ! LirError:
+        let id = self.id(t)?
+        if seen.contains(id):
+            return Ok(False)
+        seen.push(id)
+        let e = self.entries[id].copy() else:
+            return Ok(False)
+        var parts: list[int] = []
+        match e.kind:
+            case Kind.String_ | Kind.Path | Kind.Bytes | Kind.List(_) | Kind.Iter(_) | Kind.Box(_):
+                return Ok(True)
+            case Kind.Dict(_, _) | Kind.Set(_) | Kind.Dyn | Kind.Sender(_) | Kind.Receiver(_):
+                return Ok(True)
+            case Kind.Guard(_, _) | Kind.ReadGuard(_) | Kind.Shared(_) | Kind.Weak(_) | Kind.Arena(_):
+                return Ok(True)
+            case Kind.Opaque(n):
+                return Ok(abi.counted_handle(n))
+            case Kind.Fn:
+                return Ok(True)
+            case Kind.Mutex(v) | Kind.RwLock(v) | Kind.Cell(v):
+                if v < len(self.by_id):
+                    return self.needs_drop_in(self.by_id[v].copy(), mut seen)
+                return Ok(False)
+            case Kind.Enum(_, variants, glue, error_):
+                if error_ or glue.is_some():
+                    return Ok(True)
+                for v in variants:
+                    for f in v.fields:
+                        parts.push(f.ty)
+            case Kind.Struct(_, fields, glue):
+                if glue.is_some():
+                    return Ok(True)
+                for f in fields:
+                    parts.push(f.ty)
+            case Kind.Option(p) | Kind.Entry(p, _):
+                parts.push(p)
+            case Kind.Result(a, b):
+                parts.push(a)
+                parts.push(b)
+            case Kind.Tuple(slots):
+                for s in slots:
+                    parts.push(s.ty)
+            case Kind.ErrSet(m):
+                parts = m.copy()
+            case _:
+                return Ok(False)
+        var any = False
+        for p in parts:
+            if p < len(self.by_id):
+                if self.needs_drop_in(self.by_id[p].copy(), mut seen)?:
+                    any = True
+        return Ok(any)
+
+    ## Whether a value of the type holds a capability handle or a `Cap` by
+    ## value: a copy of it counts (decision 237).
+    pub pure def counted(mut self, t: Type) -> bool ! LirError:
+        if not self.needs_drop(t)?:
+            return Ok(False)
+        var seen: list[int] = []
+        let id = self.id(t)?
+        return Ok(self.counted_in(id, mut seen))
+
+    pure def counted_in(self, id: int, mut seen: list[int]) -> bool:
+        if seen.contains(id):
+            return False
+        seen.push(id)
+        if id >= len(self.entries):
+            return False
+        let e = self.entries[id].copy() else:
+            return False
+        var parts: list[int] = []
+        match e.kind:
+            case Kind.Opaque(n):
+                return abi.counted_handle(n)
+            case Kind.Fn:
+                return True
+            case Kind.Option(p):
+                parts.push(p)
+            case Kind.Result(a, b):
+                parts.push(a)
+                parts.push(b)
+            case Kind.Tuple(slots):
+                for s in slots:
+                    parts.push(s.ty)
+            case Kind.Struct(_, fields, _):
+                for f in fields:
+                    parts.push(f.ty)
+            case Kind.Enum(_, variants, _, _):
+                for v in variants:
+                    for f in v.fields:
+                        parts.push(f.ty)
+            case _:
+                return False
+        for p in parts:
+            if self.counted_in(p, mut seen):
+                return True
+        return False
+
+    ## The type a number stands for.
+    pub pure def type_of_id(self, id: int) -> Type?:
+        if id < len(self.by_id):
+            return Some(self.by_id[id].copy())
+        return None
+
+    ## Where field `i` is in a value of type `t` (of `variant`, after a
+    ## downcast), and its type.
+    pub pure def field(mut self, t: Type, variant: int?, i: int) -> (int, Type) ! LirError:
+        match t:
+            case Type.Tuple(items):
+                if variant.is_none():
+                    var off = 0
+                    for k in range(len(items)):
+                        if k == i:
+                            return Ok((off, items[k].copy()))
+                        off += self.size(items[k])?
+                return no_field(t, i)
+            case Type.Named(n, args):
+                if n == "Option" or n == "Result":
+                    let Some(v) = variant else:
+                        return self.declared_field(t, n, args, variant, i)
+                    let pi = if n == "Option" or v == 0: 0 else: 1
+                    if pi >= len(args) or i != 0:
+                        return no_field(t, i)
+                    return Ok((WORD, args[pi].copy()))
+                if n == "System" and variant.is_none():
+                    let caps = abi.capabilities()
+                    if i >= len(caps):
+                        return no_field(t, i)
+                    let (cap, _) = caps[i]
+                    return Ok((i * WORD, named0(cap)))
+                return self.declared_field(t, n, args, variant, i)
+            case _:
+                return no_field(t, i)
+
+    pure def declared_field(
+        mut self, t: Type, n: str, args: list[Type], variant: int?, i: int
+    ) -> (int, Type) ! LirError:
+        let d = self.decl(n) else:
+            return no_field(t, i)
+        let decl = d.copy()
+        match decl:
+            case TypeDecl.Struct(_, _, fields, _, _, _):
+                if variant.is_some():
+                    return no_field(t, i)
+                var off = 0
+                for k in range(len(fields)):
+                    let ft = fields[k].ty.subst(args)
+                    if k == i:
+                        return Ok((off, ft))
+                    off += self.size(ft)?
+                return no_field(t, i)
+            case TypeDecl.Enum(_, _, variants, _, error_, _, _):
+                let Some(v) = variant else:
+                    return no_field(t, i)
+                if v >= len(variants):
+                    return no_field(t, i)
+                var off = if error_: abi.ERROR_PAYLOAD else: WORD
+                let vr = ref variants[v]
+                for k in range(len(vr.fields)):
+                    let ft = vr.fields[k].1.subst(args)
+                    if k == i:
+                        return Ok((off, ft))
+                    off += self.size(ft)?
+                return no_field(t, i)
+
+    ## The index of variant `name` of the enum `ty`.
+    pub pure def variant_index(self, ty: str, name: str) -> int?:
+        if (ty == "Option" and name == "Some") or (ty == "Result" and name == "Ok"):
+            return Some(0)
+        if (ty == "Option" and name == "None") or (ty == "Result" and name == "Err"):
+            return Some(1)
+        let d = self.decl(ty) else:
+            return None
+        if let TypeDecl.Enum(_, _, variants, _, _, _, _) = d:
+            for i in range(len(variants)):
+                if variants[i].name == name:
+                    return Some(i)
+        return None
+
+    ## Whether a declared enum is an error set (its tag after two words).
+    pub pure def is_error(self, t: Type) -> bool:
+        match t:
+            case Type.ErrSet(_):
+                return True
+            case Type.Named(n, _):
+                let d = self.decl(n) else:
+                    return False
+                if let TypeDecl.Enum(_, _, _, _, error_, _, _) = d:
+                    return error_
+                return False
+            case _:
+                return False
+
+pure def flag(by_glue: list[list[bool]], v: int, i: int) -> bool:
+    if v < len(by_glue) and i < len(by_glue[v]):
+        return by_glue[v][i]
+    return False
+
+pure def no_field[T](t: Type, i: int) -> T ! LirError:
+    return internal("no field {i} in `{write.ty(t)}`")
+
+## A function and its type arguments as one key.
+pub pure def instance_key(name: str, args: list[Type]) -> String:
+    var key = name.to_string()
+    key.push("|")
+    for i in range(len(args)):
+        if i > 0:
+            key.push(", ")
+        key.push(write.ty(args[i]))
+    return key

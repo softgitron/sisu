@@ -1,0 +1,1061 @@
+##! The runtime's ABI as the code generator sees it (stage 0's
+##! `sisu-rt/src/abi.rs`, the part `sisu-codegen` shares): the statuses, the
+##! words of the runtime's data, the numbers of the runtime's operations and
+##! intrinsics, and the type table the runtime decodes when a program
+##! starts, with its encoding. Every number here is the runtime's, which the
+##! executable links; a change there is a change here.
+
+## A function returned normally; a panic is leaving it.
+pub const OK: int = 0
+pub const UNWINDING: int = 1
+
+## The bytes of a word.
+pub const WORD: int = 8
+
+## The runtime's symbols that generated code refers to (`abi::sym`).
+pub const SYM_START: str = "sisu_rt_start"
+pub const SYM_FRAME: str = "sisu_rt_frame"
+pub const SYM_ABORT_UNWIND: str = "sisu_rt_abort_unwind"
+pub const SYM_PANIC_OVERFLOW: str = "sisu_rt_panic_overflow"
+pub const SYM_PANIC_INDEX: str = "sisu_rt_panic_index"
+pub const SYM_PANIC_STACK: str = "sisu_rt_panic_stack"
+pub const SYM_PANIC_UNREACHABLE: str = "sisu_rt_panic_unreachable"
+pub const SYM_INT_OP: str = "sisu_rt_int_op"
+pub const SYM_FLOAT_OP: str = "sisu_rt_float_op"
+pub const SYM_ALLOC: str = "sisu_rt_alloc"
+pub const SYM_FREE: str = "sisu_rt_free"
+pub const SYM_TASK_ENV: str = "sisu_rt_task_env"
+pub const SYM_TRACE_RELEASE: str = "sisu_rt_trace_release"
+pub const SYM_DROP: str = "sisu_rt_drop"
+pub const SYM_COPY: str = "sisu_rt_copy"
+pub const SYM_BINARY: str = "sisu_rt_binary"
+pub const SYM_BYTES_EQ: str = "sisu_rt_bytes_eq"
+pub const SYM_TEXT_PUSH: str = "sisu_rt_text_push"
+pub const SYM_TEXT_PUSH_INT: str = "sisu_rt_text_push_int"
+pub const SYM_TEXT_FROM: str = "sisu_rt_text_from"
+pub const SYM_TABLE_FIND: str = "sisu_rt_table_find"
+pub const SYM_LIST_RESERVE: str = "sisu_rt_list_reserve"
+pub const SYM_INTRINSIC: str = "sisu_rt_intrinsic"
+pub const SYM_SIZED: str = "sisu_rt_sized"
+pub const SYM_WIDE: str = "sisu_rt_wide"
+pub const SYM_TABLE: str = "sisu_rt_table"
+pub const SYM_DICT_SLOT: str = "sisu_rt_dict_slot"
+pub const SYM_DEPTH: str = "SISU_RT_DEPTH"
+pub const SYM_YIELD: str = "sisu_rt_yield"
+pub const SYM_BUDGET: str = "SISU_RT_BUDGET"
+pub const SYM_STACK: str = "SISU_RT_STACK"
+pub const SYM_SITE: str = "SISU_RT_SITE"
+pub const SYM_ARENA_SLOT: str = "sisu_rt_arena_slot"
+pub const SYM_SHARED_TOUCH: str = "sisu_rt_shared_touch"
+pub const SYM_RETAIN: str = "sisu_rt_retain"
+
+## The words of `SISU_RT_STACK` (decisions 203 and 234).
+pub const STACK_PROBE: int = 0
+pub const STACK_REAL: int = 8
+pub const STACK_FLOOR: int = 16
+pub const STACK_DIRTY: int = 24
+pub const STACK_FAILED: int = 32
+pub const STACK_FAILED_LEN: int = 48
+
+## The words of `SISU_RT_SITE`: the file's name and its length, the line
+## and column of the call, and flags.
+pub const SITE_FILE: int = 0
+pub const SITE_FILE_LEN: int = 8
+pub const SITE_LINE: int = 16
+pub const SITE_COL: int = 24
+pub const SITE_FLAGS: int = 32
+pub const SITE_PURE: int = 1
+
+## Nested calls beyond this many panic (the interpreter's limit).
+pub const MAX_DEPTH: int = 100000
+
+## `flags` of `sisu_rt_start`: `main` returns `T ! E`; takes a `System`.
+pub const ENTRY_RESULT: int = 1
+pub const ENTRY_SYSTEM: int = 2
+
+## `sisu_rt_dict_slot`'s modes.
+pub const SLOT_READ: int = 0
+pub const SLOT_WRITE: int = 1
+pub const SLOT_DROP: int = 2
+
+## The capability handles a `System` holds, in its fields' order (decision
+## 101), and the host's object behind each.
+pub pure def capabilities() -> list[(str, str)]:
+    return [
+        ("Fs", "HostFs"),
+        ("Net", "HostNet"),
+        ("Clock", "HostClock"),
+        ("Rand", "HostRand"),
+        ("Env", "HostEnv"),
+        ("Proc", "HostProc"),
+        ("Stdin", "HostStdin"),
+    ]
+
+## The host's object behind the capability handle `h`, if `h` is one.
+pub pure def host_object(h: str) -> str?:
+    for (c, o) in capabilities():
+        if c == h:
+            return Some(o)
+    return None
+
+## Whether `n` is a capability handle or the host's object behind one.
+pub pure def is_capability(n: str) -> bool:
+    for (c, o) in capabilities():
+        if c == n or o == n:
+            return True
+    return False
+
+## Whether a type the runtime knows by its name (`Kind.Opaque`) is a
+## counted handle: a capability's or a `Cap` (decision 237).
+pub pure def counted_handle(name: str) -> bool:
+    if name == "Cap":
+        return True
+    for (c, _) in capabilities():
+        if c == name:
+            return True
+    return False
+
+## `IntOp`: the integer operations whose failures the runtime reports, and
+## those it computes (`sisu_rt_int_op`).
+pub const INT_ADD: int = 0
+pub const INT_SUB: int = 1
+pub const INT_MUL: int = 2
+pub const INT_FLOOR_DIV: int = 3
+pub const INT_MOD: int = 4
+pub const INT_POW: int = 5
+pub const INT_SHL: int = 6
+pub const INT_SHR: int = 7
+pub const INT_NEG: int = 8
+
+## `ValueOp`: the operators `sisu_rt_binary` computes on values that are
+## not numbers.
+pub const VALUE_EQ: int = 0
+pub const VALUE_NE: int = 1
+pub const VALUE_LT: int = 2
+pub const VALUE_LE: int = 3
+pub const VALUE_GT: int = 4
+pub const VALUE_GE: int = 5
+pub const VALUE_IN: int = 6
+pub const VALUE_CONCAT: int = 7
+
+## The sized integer types a word holds, by `sisu_rt_sized`'s number; the
+## 128-bit ones, by `sisu_rt_wide`'s.
+pub pure def sized_types() -> list[str]:
+    return ["u8", "u16", "u32", "u64", "i8", "i16", "i32"]
+
+pub pure def wide_types() -> list[str]:
+    return ["i128", "u128"]
+
+## `SizedOp`: the operations of the sized integers, by their intrinsics'
+## method names, in the runtime's order.
+pub pure def sized_op_names() -> list[str]:
+    return [
+        "add",
+        "sub",
+        "mul",
+        "floordiv",
+        "rem",
+        "pow",
+        "wrap_add",
+        "wrap_sub",
+        "wrap_mul",
+        "sat_add",
+        "sat_sub",
+        "sat_mul",
+        "shl",
+        "shr",
+        "and",
+        "or",
+        "xor",
+        "not",
+        "neg",
+        "cmp",
+        "to_int",
+        "from_literal",
+        "widen",
+        "from_bits",
+        "wrapping_from",
+        "to_sized",
+        "from_text",
+    ]
+
+pub const SIZED_AND: int = 14
+pub const SIZED_OR: int = 15
+pub const SIZED_XOR: int = 16
+pub const SIZED_NOT: int = 17
+pub const SIZED_CMP: int = 19
+pub const SIZED_TO_INT: int = 20
+pub const SIZED_WIDEN: int = 22
+pub const SIZED_TO_SIZED: int = 25
+
+## The number of the sized operation `n`, if it is one.
+pub pure def sized_op(n: str) -> int?:
+    let names = sized_op_names()
+    for i in range(len(names)):
+        if names[i] == n:
+            return Some(i)
+    return None
+
+## `sisu_rt_float_op`'s operations.
+pub const FLOAT_MOD: int = 0
+pub const FLOAT_POW: int = 1
+pub const FLOAT_FLOORDIV: int = 2
+
+## The header of an iterator's object that compiled code steps itself
+## (decision 253), and the bytes of one kept in a slot of the frame.
+pub const ITER_KIND: int = 0
+pub const ITER_A: int = 8
+pub const ITER_B: int = 16
+pub const ITER_C: int = 24
+pub const ITER_FRAME: int = 32
+pub const ITER_RANGE: int = 1
+pub const ITER_LIST_REF: int = 2
+
+## The bytes of a `Mutex`'s header, before its value.
+pub const MUTEX_HEADER: int = 32
+
+## Where an error set's words are: the number of its type, the trace, the
+## tag, and the payload after them.
+pub const ERROR_DECL: int = 0
+pub const ERROR_TRACE: int = 8
+pub const ERROR_TAG: int = 16
+pub const ERROR_PAYLOAD: int = 24
+
+## A part of a tuple: its offset and type.
+@derive(Eq, Copy)
+pub struct Slot:
+    pub offset: int
+    pub ty: int
+
+## A named part of a struct or a variant; `glue`: the type's drop glue
+## drops it (decision 218).
+@derive(Eq)
+pub struct Field:
+    pub name: String?
+    pub offset: int
+    pub ty: int
+    pub glue: bool
+
+@derive(Eq)
+pub struct Variant:
+    pub name: String
+    pub fields: list[Field]
+
+## What a type is, and where its parts are (`abi::Kind`).
+@derive(Eq)
+pub enum Kind:
+    Unit
+    Int
+    Sized(String)
+    U64
+    I128
+    U128
+    Float
+    F32
+    Bool
+    Char
+    Str
+    String_
+    Path
+    Bytes
+    DateTime
+    Ref(int)
+    List(int)
+    Iter(int)
+    Option(int)
+    Result(int, int)
+    Tuple(list[Slot])
+    Box(int)
+    Struct(name: String, fields: list[Field], glue: int?)
+    Enum(name: String, variants: list[Variant], glue: int?, error_: bool)
+    ErrSet(list[int])
+    Fn
+    Opaque(String)
+    Const(int)
+    Dict(int, int)
+    Set(int)
+    Entry(int, int)
+    Dyn
+    Scope
+    Handle(int)
+    Cancellation
+    Sender(int)
+    Receiver(int)
+    Timer
+    Mutex(int)
+    Guard(int, int?)
+    RwLock(int)
+    ReadGuard(int)
+    Shared(int)
+    Weak(int)
+    Cell(int)
+    Arena(int)
+
+## One concrete type of the program: its bytes and kind.
+@derive(Eq)
+pub struct TypeEntry:
+    pub size: int
+    pub kind: Kind
+
+## The bytes of the encoded type table, as `abi::encode` writes them.
+struct Writer:
+    out: list[int]
+
+impl Writer:
+    pure def u8(mut self, x: int):
+        self.out.push(x & 255)
+
+    pure def u32(mut self, x: int):
+        self.out.push(x & 255)
+        self.out.push((x >> 8) & 255)
+        self.out.push((x >> 16) & 255)
+        self.out.push((x >> 24) & 255)
+
+    pure def opt(mut self, x: int?):
+        match x:
+            case Some(v):
+                self.u32(v + 1)
+            case None:
+                self.u32(0)
+
+    pure def text(mut self, s: str):
+        self.u32(s.byte_len())
+        for i in range(s.byte_len()):
+            self.out.push(s.byte_at(i).to_int())
+
+    pure def fields(mut self, fs: list[Field]):
+        self.u32(len(fs))
+        for f in fs:
+            match f.name:
+                case Some(n):
+                    self.u8(1)
+                    self.text(n)
+                case None:
+                    self.u8(0)
+            self.u32(f.offset)
+            self.u32(f.ty)
+            self.u8(if f.glue: 1 else: 0)
+
+    ## A kind's code, then the numbers it holds.
+    pure def code(mut self, k: int, parts: list[int]):
+        self.u8(k)
+        for p in parts:
+            self.u32(p)
+
+## The type table as bytes, for the program's read-only data.
+pub pure def encode(table: list[TypeEntry]) -> list[int]:
+    var w = Writer(out=[])
+    w.u32(len(table))
+    for t in table:
+        w.u32(t.size)
+        match t.kind:
+            case Unit:
+                w.u8(0)
+            case Int:
+                w.u8(1)
+            case Sized(n):
+                w.u8(2)
+                w.text(n)
+            case U64:
+                w.u8(3)
+            case I128:
+                w.u8(27)
+            case Dyn:
+                w.u8(29)
+            case U128:
+                w.u8(28)
+            case Float:
+                w.u8(4)
+            case F32:
+                w.u8(5)
+            case Bool:
+                w.u8(6)
+            case Char:
+                w.u8(7)
+            case Str:
+                w.u8(8)
+            case String_:
+                w.u8(9)
+            case Path:
+                w.u8(10)
+            case Bytes:
+                w.u8(42)
+            case DateTime:
+                w.u8(43)
+            case Ref(x):
+                w.code(11, [x])
+            case List(x):
+                w.code(12, [x])
+            case Iter(x):
+                w.code(13, [x])
+            case Option(x):
+                w.code(14, [x])
+            case Result(a, b):
+                w.code(15, [a, b])
+            case Tuple(slots):
+                w.u8(16)
+                w.u32(len(slots))
+                for s in slots:
+                    w.u32(s.offset)
+                    w.u32(s.ty)
+            case Box(x):
+                w.code(17, [x])
+            case Struct(name, fields, glue):
+                w.u8(18)
+                w.text(name)
+                w.opt(glue)
+                w.fields(fields)
+            case Enum(name, variants, glue, error_):
+                w.u8(19)
+                w.text(name)
+                w.opt(glue)
+                w.u8(if error_: 1 else: 0)
+                w.u32(len(variants))
+                for v in variants:
+                    w.text(v.name)
+                    w.fields(v.fields)
+            case ErrSet(members):
+                w.u8(20)
+                w.u32(len(members))
+                for m in members:
+                    w.u32(m)
+            case Fn:
+                w.u8(21)
+            case Opaque(n):
+                w.u8(22)
+                w.text(n)
+            case Const(n):
+                w.u8(23)
+                w.u32(n & 4294967295)
+                w.u32((n >> 32) & 4294967295)
+            case Dict(k, v):
+                w.code(24, [k, v])
+            case Set(x):
+                w.code(25, [x])
+            case Entry(k, v):
+                w.code(26, [k, v])
+            case Scope:
+                w.u8(30)
+            case Handle(x):
+                w.code(31, [x])
+            case Cancellation:
+                w.u8(32)
+            case Sender(x):
+                w.code(33, [x])
+            case Receiver(x):
+                w.code(34, [x])
+            case Timer:
+                w.u8(35)
+            case Mutex(x):
+                w.code(36, [x])
+            case Guard(x, check):
+                w.code(37, [x])
+                w.opt(check)
+            case RwLock(x):
+                w.code(44, [x])
+            case ReadGuard(x):
+                w.code(45, [x])
+            case Shared(x):
+                w.code(38, [x])
+            case Weak(x):
+                w.code(39, [x])
+            case Cell(x):
+                w.code(40, [x])
+            case Arena(x):
+                w.code(41, [x])
+    return w.out
+
+## The intrinsics that may wait, whose call records its site first.
+pub pure def may_wait(i: int) -> bool:
+    return (
+        i == I_TASK_SCOPE
+        or i == I_TASK_RACE
+        or i == I_HANDLE_JOIN
+        or i == I_CANCELLATION_WAIT
+        or i == I_SENDER_SEND
+        or i == I_RECEIVER_RECV
+        or i == I_TIMER_WAIT
+        or i == I_SELECT_WAIT
+        or i == I_GEN_YIELD
+        or i == I_MUTEX_LOCK
+        or i == I_RW_LOCK_READ
+        or i == I_RW_LOCK_WRITE
+        or i == I_ITER_NEXT
+    )
+
+## Whether argument `k` of intrinsic `i` is an `Iterable[T]` it takes
+## (decision 210).
+pub pure def takes_iterable(i: int, k: int) -> bool:
+    if i == I_ZIP or i == I_ZIP_SHORTEST:
+        return k < 2
+    let first = (
+        i == I_ENUMERATE
+        or i == I_REVERSED
+        or i == I_ITERABLE_LIST
+        or i == I_SORTED
+        or i == I_SUM
+        or i == I_ANY
+        or i == I_ALL
+    )
+    return first and k == 0
+
+## The intrinsics, by number (`abi::Intrinsic`, in its order).
+pub const I_PRINT: int = 0
+pub const I_PRINT_ERR: int = 1
+pub const I_LEN: int = 2
+pub const I_PANIC: int = 3
+pub const I_UNREACHABLE: int = 4
+pub const I_TODO: int = 5
+pub const I_ABS: int = 6
+pub const I_MIN: int = 7
+pub const I_MAX: int = 8
+pub const I_RANGE: int = 9
+pub const I_ENUMERATE: int = 10
+pub const I_ZIP: int = 11
+pub const I_ZIP_SHORTEST: int = 12
+pub const I_REVERSED: int = 13
+pub const I_ITERABLE_LIST: int = 14
+pub const I_SORTED: int = 15
+pub const I_SUM: int = 16
+pub const I_ANY: int = 17
+pub const I_ALL: int = 18
+pub const I_ITER_REF: int = 19
+pub const I_ITER_MUT: int = 20
+pub const I_ITER_OWN: int = 21
+pub const I_ITER_NEXT: int = 22
+pub const I_ITER_OF: int = 23
+pub const I_FMT_NEW: int = 24
+pub const I_FMT_TEXT: int = 25
+pub const I_FMT_DISPLAY: int = 26
+pub const I_FMT_DEBUG: int = 27
+pub const I_FMT_DIGITS: int = 28
+pub const I_FMT_WIDE_DIGITS: int = 29
+pub const I_FMT_FLOAT_DIGITS: int = 30
+pub const I_FMT_FLOAT32_DIGITS: int = 31
+pub const I_FMT_FORMATTER: int = 32
+pub const I_STRUCTURAL_DISPLAY: int = 33
+pub const I_STRUCTURAL_DEBUG: int = 34
+pub const I_STRUCTURAL_EQ: int = 35
+pub const I_STRUCTURAL_CMP: int = 36
+pub const I_STRUCTURAL_PARTIAL_CMP: int = 37
+pub const I_STRUCTURAL_HASH: int = 38
+pub const I_ASSERT_FAIL: int = 39
+pub const I_ASSERT_FAIL_COMPARE: int = 40
+pub const I_ASSERT_FAIL_PARTS: int = 41
+pub const I_ERROR_TRACE_PUSH: int = 42
+pub const I_ERROR_TRACE: int = 43
+pub const I_ERROR_IS: int = 44
+pub const I_INT_CMP: int = 45
+pub const I_BOOL_CMP: int = 46
+pub const I_CHAR_CMP: int = 47
+pub const I_INT_TO_F64: int = 48
+pub const I_INT_POW: int = 49
+pub const I_F64_CMP: int = 50
+pub const I_F64_SQRT: int = 51
+pub const I_F64_FLOOR: int = 52
+pub const I_F64_CEIL: int = 53
+pub const I_F64_ROUND: int = 54
+pub const I_F64_ABS: int = 55
+pub const I_F64_IS_NAN: int = 56
+pub const I_F64_MUL_ADD: int = 57
+pub const I_F64_WITHIN_ULPS: int = 58
+pub const I_F64_TRUNCATE_TO_INT: int = 59
+pub const I_CHAR_FROM_CODE: int = 60
+pub const I_CHAR_IS_DIGIT: int = 61
+pub const I_CHAR_TO_DIGIT: int = 62
+pub const I_CHAR_IS_ALPHABETIC: int = 63
+pub const I_CHAR_IS_WHITESPACE: int = 64
+pub const I_CHAR_IS_UPPERCASE: int = 65
+pub const I_CHAR_IS_LOWERCASE: int = 66
+pub const I_CHAR_CODE: int = 67
+pub const I_STR_BYTE_LEN: int = 68
+pub const I_STR_BYTE_AT: int = 69
+pub const I_STR_BYTE_SLICE: int = 70
+pub const I_STR_BYTES: int = 71
+pub const I_STR_CMP: int = 72
+pub const I_STR_CHARS: int = 73
+pub const I_STR_PARSE_FLOAT: int = 74
+pub const I_STR_PARSE_F32: int = 75
+pub const I_STR_TO_LOWERCASE: int = 76
+pub const I_STR_TO_UPPERCASE: int = 77
+pub const I_STR_TO_STRING: int = 78
+pub const I_STRING_NEW: int = 79
+pub const I_STRING_PUSH: int = 80
+pub const I_STRING_PUSH_CHAR: int = 81
+pub const I_STRING_AS_STR: int = 82
+pub const I_STRING_CLEAR: int = 83
+pub const I_STRING_LEN: int = 84
+pub const I_LIST_NEW: int = 85
+pub const I_LIST_WITH_CAPACITY: int = 86
+pub const I_LIST_PUSH: int = 87
+pub const I_LIST_POP: int = 88
+pub const I_LIST_LAST: int = 89
+pub const I_LIST_FIRST: int = 90
+pub const I_LIST_GET: int = 91
+pub const I_LIST_IS_EMPTY: int = 92
+pub const I_LIST_INSERT: int = 93
+pub const I_LIST_REMOVE: int = 94
+pub const I_LIST_EXTEND: int = 95
+pub const I_LIST_REVERSE: int = 96
+pub const I_LIST_SWAP: int = 97
+pub const I_LIST_CLEAR: int = 98
+pub const I_LIST_SLICE: int = 99
+pub const I_LIST_SLICE_MIDDLE: int = 100
+pub const I_LIST_CONTAINS: int = 101
+pub const I_LIST_ITER: int = 102
+pub const I_LIST_JOIN: int = 103
+pub const I_LIST_SORT: int = 104
+pub const I_LIST_INDEX_OF: int = 105
+pub const I_OPTION_EXPECT: int = 106
+pub const I_OPTION_UNWRAP: int = 107
+pub const I_OPTION_IS_SOME: int = 108
+pub const I_OPTION_IS_NONE: int = 109
+pub const I_OPTION_OR: int = 110
+pub const I_RESULT_EXPECT: int = 111
+pub const I_RESULT_UNWRAP: int = 112
+pub const I_RESULT_IS_OK: int = 113
+pub const I_RESULT_IS_ERR: int = 114
+pub const I_RESULT_OK: int = 115
+pub const I_RESULT_ERR: int = 116
+pub const I_RESULT_OR: int = 117
+pub const I_F32_CMP: int = 118
+pub const I_F32_TO_F64: int = 119
+pub const I_F32_SQRT: int = 120
+pub const I_F32_FLOOR: int = 121
+pub const I_F32_CEIL: int = 122
+pub const I_F32_ROUND: int = 123
+pub const I_F32_ABS: int = 124
+pub const I_F32_IS_NAN: int = 125
+pub const I_F32_MUL_ADD: int = 126
+pub const I_F32_TRUNCATE_TO_INT: int = 127
+pub const I_F32_TO_BITS: int = 128
+pub const I_F32_FROM_BITS: int = 129
+pub const I_F32_FROM_LITERAL: int = 130
+pub const I_INT_TO_F32: int = 131
+pub const I_F64_TO_F32: int = 132
+pub const I_INT_WIDEN: int = 133
+pub const I_HOST_ENV_ARGS: int = 134
+pub const I_HOST_ENV_GET: int = 135
+pub const I_HOST_STDIN_READ_LINE: int = 136
+pub const I_HOST_RAND_BITS: int = 137
+pub const I_HOST_FS_READ_TO_STRING: int = 138
+pub const I_HOST_FS_WRITE_TEXT: int = 139
+pub const I_HOST_FS_EXISTS: int = 140
+pub const I_HOST_FS_METADATA: int = 141
+pub const I_HOST_FS_REMOVE: int = 142
+pub const I_HOST_FS_LIST_DIR: int = 143
+pub const I_HOST_FS_CREATE_DIR: int = 144
+pub const I_HOST_FS_SYNC: int = 145
+pub const I_CLOCK_NOW: int = 146
+pub const I_DATE_TIME_FROM_UNIX_NANOS: int = 147
+pub const I_DATE_TIME_UNIX_NANOS: int = 148
+pub const I_DICT_NEW: int = 149
+pub const I_DICT_GET: int = 150
+pub const I_DICT_CONTAINS: int = 151
+pub const I_DICT_IS_EMPTY: int = 152
+pub const I_DICT_INSERT: int = 153
+pub const I_DICT_REMOVE: int = 154
+pub const I_DICT_ENTRY: int = 155
+pub const I_DICT_KEYS: int = 156
+pub const I_DICT_VALUES: int = 157
+pub const I_DICT_ITEMS: int = 158
+pub const I_ENTRY_OR_INSERT: int = 159
+pub const I_SET_NEW: int = 160
+pub const I_SET_ADD: int = 161
+pub const I_SET_REMOVE: int = 162
+pub const I_SET_CONTAINS: int = 163
+pub const I_SET_IS_EMPTY: int = 164
+pub const I_SET_ITER: int = 165
+pub const I_PATH_NEW: int = 166
+pub const I_PATH_AS_STR: int = 167
+pub const I_OP_ADD: int = 168
+pub const I_OP_SUB: int = 169
+pub const I_OP_MUL: int = 170
+pub const I_OP_DIV: int = 171
+pub const I_OP_REM: int = 172
+pub const I_OP_NEG: int = 173
+pub const I_CONTRACT_FAIL: int = 174
+pub const I_LIST_AS_SLICE: int = 175
+pub const I_SLICE_TO_LIST: int = 176
+pub const I_SLICE_AT: int = 177
+pub const I_SLICE_GET: int = 178
+pub const I_SLICE_IS_EMPTY: int = 179
+pub const I_SLICE_SLICE: int = 180
+pub const I_SLICE_CUT: int = 181
+pub const I_SLICE_ITER: int = 182
+pub const I_GENERIC_VALUE: int = 183
+pub const I_ARRAY_FILLED: int = 184
+pub const I_ARRAY_TO_LIST: int = 185
+pub const I_TASK_SCOPE: int = 186
+pub const I_TASK_RACE: int = 187
+pub const I_TASK_SHIELD: int = 188
+pub const I_TASK_YIELD_NOW: int = 189
+pub const I_TASK_IS_CANCELLED: int = 190
+pub const I_TASK_CHECKPOINT: int = 191
+pub const I_SCOPE_SPAWN: int = 192
+pub const I_SCOPE_SPAWN_WITH: int = 193
+pub const I_SCOPE_CANCEL: int = 194
+pub const I_SCOPE_IS_CANCELLED: int = 195
+pub const I_SCOPE_CANCELLED: int = 196
+pub const I_HANDLE_JOIN: int = 197
+pub const I_HANDLE_IS_FINISHED: int = 198
+pub const I_CANCELLATION_WAIT: int = 199
+pub const I_CHANNEL: int = 200
+pub const I_SENDER_SEND: int = 201
+pub const I_SENDER_TRY_SEND: int = 202
+pub const I_SENDER_CLOSE: int = 203
+pub const I_RECEIVER_RECV: int = 204
+pub const I_RECEIVER_TRY_RECV: int = 205
+pub const I_CLOCK_AFTER: int = 206
+pub const I_TIMER_WAIT: int = 207
+pub const I_SELECT_WAIT: int = 208
+pub const I_LOG_WRITE: int = 209
+pub const I_GEN_NEW: int = 210
+pub const I_GEN_YIELD: int = 211
+pub const I_MUTEX_NEW: int = 212
+pub const I_MUTEX_LOCK: int = 213
+pub const I_MUTEX_IS_POISONED: int = 214
+pub const I_MUTEX_INTO_INNER: int = 215
+pub const I_RW_LOCK_NEW: int = 216
+pub const I_RW_LOCK_READ: int = 217
+pub const I_RW_LOCK_WRITE: int = 218
+pub const I_RW_LOCK_IS_POISONED: int = 219
+pub const I_RW_LOCK_INTO_INNER: int = 220
+pub const I_SHARED_NEW: int = 221
+pub const I_SHARED_NEW_ATOMIC: int = 222
+pub const I_SHARED_GET: int = 223
+pub const I_SHARED_DOWNGRADE: int = 224
+pub const I_SHARED_COUNT: int = 225
+pub const I_WEAK_UPGRADE: int = 226
+pub const I_CELL_NEW: int = 227
+pub const I_CELL_GET: int = 228
+pub const I_CELL_SET: int = 229
+pub const I_CELL_REPLACE: int = 230
+pub const I_ATOMIC_COMPARE_EXCHANGE: int = 231
+pub const I_ARENA_NEW: int = 232
+pub const I_ARENA_INSERT: int = 233
+pub const I_ARENA_GET: int = 234
+pub const I_ARENA_GET_MUT: int = 235
+pub const I_ARENA_REMOVE: int = 236
+pub const I_ARENA_TAKE: int = 237
+pub const I_ARENA_CONTAINS: int = 238
+pub const I_ARENA_KEYS: int = 239
+pub const I_BYTES_NEW: int = 240
+pub const I_BYTES_FROM_HEX: int = 241
+pub const I_BYTES_FROM_LIST: int = 242
+pub const I_BYTES_AT: int = 243
+pub const I_BYTES_GET: int = 244
+pub const I_BYTES_IS_EMPTY: int = 245
+pub const I_BYTES_SLICE: int = 246
+pub const I_BYTES_CUT: int = 247
+pub const I_BYTES_ITER: int = 248
+pub const I_BYTES_TO_LIST: int = 249
+pub const I_BYTES_AS_SLICE: int = 250
+pub const I_BYTES_FIND: int = 251
+pub const I_BYTES_STARTS_WITH: int = 252
+pub const I_BYTES_ENDS_WITH: int = 253
+pub const I_BYTES_DECODE: int = 254
+pub const I_BYTES_CONCAT: int = 255
+pub const I_STR_ENCODE: int = 256
+pub const I_HOST_FS_READ: int = 257
+pub const I_HOST_FS_WRITE: int = 258
+pub const I_CAP_NEW: int = 259
+pub const I_CAP_CELL_NEW: int = 260
+pub const I_CAP_GET: int = 261
+pub const I_CAP_LEND: int = 262
+pub const I_SYSTEM_ASSEMBLE: int = 263
+pub const I_CLOCK_FAKE: int = 264
+pub const I_TEST_CLOCK_ADVANCE: int = 265
+pub const I_TEST_CLOCK_SET: int = 266
+pub const I_FMT_STRFTIME: int = 267
+pub const I_HOST_NET_CONNECT: int = 268
+pub const I_HOST_NET_LISTEN: int = 269
+pub const I_HOST_NET_ACCEPT: int = 270
+pub const I_HOST_NET_READ: int = 271
+pub const I_HOST_NET_WRITE: int = 272
+pub const I_HOST_NET_CLOSE: int = 273
+pub const I_HOST_PROC_RUN: int = 274
+pub const I_LIVE_BOUNDARY: int = 275
+pub const I_LIVE_EPOCH: int = 276
+
+## The intrinsics' names, by number (`sisu_rt::abi::Intrinsic`).
+pub pure def intrinsic_names() -> list[str]:
+    return [
+        "print",
+        "print_err",
+        "len",
+        "panic",
+        "unreachable",
+        "todo",
+        "abs",
+        "min",
+        "max",
+        "range",
+        "enumerate",
+        "zip",
+        "zip_shortest",
+        "reversed",
+        "iterable_list",
+        "sorted",
+        "sum",
+        "any",
+        "all",
+        "iter.ref",
+        "iter.mut",
+        "iter.own",
+        "Iter.next",
+        "Iter.of",
+        "fmt.new",
+        "fmt.text",
+        "fmt.display",
+        "fmt.debug",
+        "fmt.digits",
+        "fmt.wide_digits",
+        "fmt.float_digits",
+        "fmt.float32_digits",
+        "fmt.formatter",
+        "structural.display",
+        "structural.debug",
+        "structural.eq",
+        "structural.cmp",
+        "structural.partial_cmp",
+        "structural.hash",
+        "assert.fail",
+        "assert.fail_compare",
+        "assert.fail_parts",
+        "error.trace_push",
+        "error.trace",
+        "error.is",
+        "int.cmp",
+        "bool.cmp",
+        "char.cmp",
+        "int.to_f64",
+        "int.pow",
+        "f64.cmp",
+        "f64.sqrt",
+        "f64.floor",
+        "f64.ceil",
+        "f64.round",
+        "f64.abs",
+        "f64.is_nan",
+        "f64.mul_add",
+        "f64.within_ulps",
+        "f64.truncate_to_int",
+        "char.from_code",
+        "char.is_digit",
+        "char.to_digit",
+        "char.is_alphabetic",
+        "char.is_whitespace",
+        "char.is_uppercase",
+        "char.is_lowercase",
+        "char.code",
+        "str.byte_len",
+        "str.byte_at",
+        "str.byte_slice",
+        "str.bytes",
+        "str.cmp",
+        "str.chars",
+        "str.parse_float",
+        "str.parse_f32",
+        "str.to_lowercase",
+        "str.to_uppercase",
+        "str.to_string",
+        "String.new",
+        "String.push",
+        "String.push_char",
+        "String.as_str",
+        "String.clear",
+        "String.len",
+        "list.new",
+        "list.with_capacity",
+        "list.push",
+        "list.pop",
+        "list.last",
+        "list.first",
+        "list.get",
+        "list.is_empty",
+        "list.insert",
+        "list.remove",
+        "list.extend",
+        "list.reverse",
+        "list.swap",
+        "list.clear",
+        "list.slice",
+        "list.slice_middle",
+        "list.contains",
+        "list.iter",
+        "list.join",
+        "list.sort",
+        "list.index_of",
+        "Option.expect",
+        "Option.unwrap",
+        "Option.is_some",
+        "Option.is_none",
+        "Option.or",
+        "Result.expect",
+        "Result.unwrap",
+        "Result.is_ok",
+        "Result.is_err",
+        "Result.ok",
+        "Result.err",
+        "Result.or",
+        "f32.cmp",
+        "f32.to_f64",
+        "f32.sqrt",
+        "f32.floor",
+        "f32.ceil",
+        "f32.round",
+        "f32.abs",
+        "f32.is_nan",
+        "f32.mul_add",
+        "f32.truncate_to_int",
+        "f32.to_bits",
+        "f32.from_bits",
+        "f32.from_literal",
+        "int.to_f32",
+        "f64.to_f32",
+        "int.widen",
+        "host.env.args",
+        "host.env.get",
+        "host.stdin.read_line",
+        "host.rand.bits",
+        "host.fs.read_to_string",
+        "host.fs.write_text",
+        "host.fs.exists",
+        "host.fs.metadata",
+        "host.fs.remove",
+        "host.fs.list_dir",
+        "host.fs.create_dir",
+        "host.fs.sync",
+        "clock.now",
+        "DateTime.from_unix_nanos",
+        "DateTime.unix_nanos",
+        "dict.new",
+        "dict.get",
+        "dict.contains",
+        "dict.is_empty",
+        "dict.insert",
+        "dict.remove",
+        "dict.entry",
+        "dict.keys",
+        "dict.values",
+        "dict.items",
+        "Entry.or_insert",
+        "set.new",
+        "set.add",
+        "set.remove",
+        "set.contains",
+        "set.is_empty",
+        "set.iter",
+        "Path.new",
+        "Path.as_str",
+        "op.add",
+        "op.sub",
+        "op.mul",
+        "op.div",
+        "op.rem",
+        "op.neg",
+        "contract.fail",
+        "list.as_slice",
+        "Slice.to_list",
+        "Slice.at",
+        "Slice.get",
+        "Slice.is_empty",
+        "Slice.slice",
+        "Slice.cut",
+        "Slice.iter",
+        "generic.value",
+        "Array.filled",
+        "Array.to_list",
+        "task.scope",
+        "task.race",
+        "task.shield",
+        "task.yield_now",
+        "task.is_cancelled",
+        "task.checkpoint",
+        "Scope.spawn",
+        "Scope.spawn_with",
+        "Scope.cancel",
+        "Scope.is_cancelled",
+        "Scope.cancelled",
+        "Handle.join",
+        "Handle.is_finished",
+        "Cancellation.wait",
+        "channel",
+        "Sender.send",
+        "Sender.try_send",
+        "Sender.close",
+        "Receiver.recv",
+        "Receiver.try_recv",
+        "clock.after",
+        "Timer.wait",
+        "select.wait",
+        "log.write",
+        "gen.new",
+        "gen.yield",
+        "Mutex.new",
+        "Mutex.lock",
+        "Mutex.is_poisoned",
+        "Mutex.into_inner",
+        "RwLock.new",
+        "RwLock.read",
+        "RwLock.write",
+        "RwLock.is_poisoned",
+        "RwLock.into_inner",
+        "Shared.new",
+        "Shared.new_atomic",
+        "Shared.get",
+        "Shared.downgrade",
+        "Shared.count",
+        "Weak.upgrade",
+        "Cell.new",
+        "Cell.get",
+        "Cell.set",
+        "Cell.replace",
+        "Atomic.compare_exchange",
+        "Arena.new",
+        "Arena.insert",
+        "Arena.get",
+        "Arena.get_mut",
+        "Arena.remove",
+        "Arena.take",
+        "Arena.contains",
+        "Arena.keys",
+        "bytes.new",
+        "bytes.from_hex",
+        "bytes.from_list",
+        "bytes.at",
+        "bytes.get",
+        "bytes.is_empty",
+        "bytes.slice",
+        "bytes.cut",
+        "bytes.iter",
+        "bytes.to_list",
+        "bytes.as_slice",
+        "bytes.find",
+        "bytes.starts_with",
+        "bytes.ends_with",
+        "bytes.decode",
+        "bytes.concat",
+        "str.encode",
+        "host.fs.read",
+        "host.fs.write",
+        "cap.new",
+        "Cap.new",
+        "Cap.get",
+        "cap.lend",
+        "System.assemble",
+        "Clock.fake",
+        "TestClock.advance",
+        "TestClock.set",
+        "fmt.strftime",
+        "host.net.connect",
+        "host.net.listen",
+        "host.net.accept",
+        "host.net.read",
+        "host.net.write",
+        "host.net.close",
+        "host.proc.run",
+        "live.boundary",
+        "live.epoch",
+    ]
