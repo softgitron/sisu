@@ -1520,12 +1520,13 @@ its `.out`).
 
 - Differs: `compiler/conformance/cases/contracts/properties.sisu`: ids, human
 - Differs: `compiler/conformance/cases/generics/loan_through_own.sisu`: sir, ownership, ids, human, doc, doc-output
-- Differs: `compiler/conformance/cases/run/iterators.sisu`: sir, ids, human, doc, doc-output, behaviour
 - Differs: `compiler/stage1/cases/references/ref_items.sisu`: ids, human, doc, doc-output
 
-The output `behaviour` is the class of that name: the program a case
-expects to run is refused, so stage 1 lowers nothing and the run is not
-made (`check.sh` counts it "refused as listed").
+(`run/iterators` differed in every class, `behaviour` included, until the
+suite's case took the owned spelling below; it matches stage 0 in every
+class since.) The output `behaviour` is the class of that name: the
+program a case expects to run is refused, so stage 1 lowers nothing and
+the run is not made (`check.sh` counts it "refused as listed").
 
 **Documents to bring along:** the conformance suite's `run/iterators`,
 whose fourth line becomes `print(xs.iter().filter(it > 4).map(it.copy()).collect())`
