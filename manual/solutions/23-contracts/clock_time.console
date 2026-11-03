@@ -1,0 +1,20 @@
+$ sisu test clock_time.sisu
+warning[W0001]: typed hole `parse_time` of type `Time ! FormError`
+  --> clock_time.sisu:28:12
+   |
+28 |     return todo("parse_time")
+   |            ^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `later` of type `Time`
+  --> clock_time.sisu:34:12
+   |
+34 |     return todo("later")
+   |            ^^^^^^^^^^^^^
+
+test "a time of day" ... blocked by todo("parse_time")
+test "numbers that are not on the clock" ... blocked by todo("parse_time")
+test "text that is not a time" ... blocked by todo("parse_time")
+test "later on the same day" ... blocked by todo("later")
+test "later, past midnight" ... blocked by todo("later")
+test "contract of later" ... blocked by todo("later")
+0 passed, 0 failed, 6 blocked

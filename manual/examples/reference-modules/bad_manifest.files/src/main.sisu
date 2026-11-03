@@ -1,0 +1,3 @@
+# The program that the manifest's mistakes keep from running.
+def main():
+    print("steam")

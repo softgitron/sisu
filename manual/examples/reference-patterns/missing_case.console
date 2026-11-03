@@ -1,9 +1,9 @@
 $ sisu run missing_case.sisu
-error[E0314]: this `match` does not cover `Amber`
+error[E0314]: this `match` does not cover `Amber`, `Green`
   --> missing_case.sisu:8:12
   |
 8 |     return match light:
   |            ^^^^^^^^^^^
-  = note: add an arm for `Amber`, or a `case _` arm
+  = note: add an arm for each of `Amber`, `Green`, or a `case _` arm
 
 error[D0006]: the program was not run: errors found (1)

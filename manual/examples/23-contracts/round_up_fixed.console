@@ -1,0 +1,5 @@
+$ sisu test round_up_fixed.sisu
+test "a turn and a half" ... ok
+test "a little over two turns" ... ok
+test "contract of round_up" ... ok
+3 passed, 0 failed, 0 blocked

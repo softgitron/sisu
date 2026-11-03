@@ -1,0 +1,10 @@
+# The sized integers, for data whose size is fixed by a format.
+def main():
+    let level: u8 = 255
+    let sample: i16 = -32768
+    let colour = 0xFF8800u32
+    let file_size: u64 = 18_446_744_073_709_551_615
+    print("{level} {sample} {colour} {file_size}")
+    let wider: int = sample
+    let total = level + colour
+    print("{wider} {total}")

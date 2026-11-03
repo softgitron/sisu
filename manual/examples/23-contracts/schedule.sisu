@@ -1,0 +1,22 @@
+# An `invariant` holds after construction and after every `mut self` method.
+
+## The hours a sauna is open, from `opens` to `closes`.
+struct Schedule:
+    opens: int
+    closes: int
+    invariant 0 <= self.opens < self.closes <= 24
+
+    ## Opens `hours` earlier.
+    def open_earlier(mut self, hours: int):
+        self.opens -= hours
+
+    ## How many hours it is open.
+    def hours(self) -> int:
+        return self.closes - self.opens
+
+def main():
+    var today = Schedule(opens=16, closes=21)
+    today.open_earlier(2)
+    print("open {today.opens} to {today.closes}, {today.hours()} hours")
+    today.open_earlier(20)
+    print("open {today.opens} to {today.closes}")

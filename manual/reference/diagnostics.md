@@ -1861,6 +1861,7 @@ error[E0305]: wrong number of arguments to `print`: expected 1, found 2
   |
 3 |     print("Hei,", "maailma!")
   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: write the value into the text: `"Hei, maailma!"`
 
 error[D0006]: the program was not run: errors found (1)
 ```
@@ -2317,6 +2318,8 @@ error[E0325]: a `for` loop cannot iterate over `str`
   |
 3 |     for letter in "hei":
   |                   ^^^^^
+  = fix: iterate over its characters: `.chars()`
+  = fix: iterate over its bytes: `.bytes()`
 
 error[D0006]: the program was not run: errors found (1)
 ```
@@ -2844,6 +2847,7 @@ error[E0347]: `Point` does not implement `Eq`
   |
 7 |     print(Point(1, 2) == Point(1, 2))
   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: derive it: `@derive(Eq)`
 
 error[D0006]: the program was not run: errors found (1)
 ```
@@ -2897,6 +2901,7 @@ error[E0368]: `Point` has no order, so it cannot be compared with `<` or sorted
   |
 7 |     print(Point(1, 2) < Point(2, 1))
   |           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: derive it: `@derive(PartialOrd)`
 
 error[D0006]: the program was not run: errors found (1)
 ```
@@ -3568,6 +3573,7 @@ error[E0411]: `Order` holds `item: str`, which borrows; only a `view struct` may
   |
 2 | struct Order:
   |        ----- `Order` is declared here
+  = fix: own the text instead: `String`
   = fix: declare it `view struct Order`: `view `
 
 error[D0006]: the program was not run: errors found (1)

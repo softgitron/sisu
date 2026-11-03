@@ -1,0 +1,23 @@
+# `old(e)` is the value of `e` on entry; a labelled result is its label.
+struct Stove:
+    celsius: int
+
+    ## Heats the stove by `degrees`, to 110 at most.
+    def heat(mut self, degrees: int):
+        requires old(self.celsius) < 110
+        ensures self.celsius == min(old(self.celsius) + degrees, 110)
+        self.celsius = min(self.celsius + degrees, 110)
+
+## Splits `minutes` into turns of `turn` minutes, and the minutes left.
+def turns(minutes: int, turn: int) -> (count: int, left: int):
+    requires turn > 0
+    ensures count * turn + left == minutes and 0 <= left < turn
+    return (minutes // turn, minutes % turn)
+
+def main():
+    var stove = Stove(celsius=60)
+    stove.heat(30)
+    stove.heat(30)
+    print("{stove.celsius} degrees")
+    let count, left = turns(95, 20)
+    print("{count} turns and {left} minutes")

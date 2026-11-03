@@ -1,0 +1,7 @@
+# A refinement of a refinement checks each predicate, the base's first.
+type Percent = int where 0 <= self <= 100
+type Dry = Percent where self < 20
+
+def main():
+    for n in [10, 30, 130]:
+        print(Dry.try_from(n))

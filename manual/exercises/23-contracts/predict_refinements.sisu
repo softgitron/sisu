@@ -1,0 +1,44 @@
+##! Exercise 23.1, predict the refinements. Kind: predict. Level: 1.
+##!
+##! Each constant is your prediction of what `failed` or `steam` gives.
+##! Write each as a literal, then run `sisu test predict_refinements.sisu`.
+##! The hints are in chapter 23 of the tutorial, under "Exercise 23.1:
+##! predict the refinements".
+
+type Percent = int where 0 <= self <= 100
+type Dry = Percent where self < 20
+type Bone = Dry where self < 5
+
+## The type that the error names when `n` is not a `Bone`, or "none".
+def failed(n: int) -> String:
+    match Bone.try_from(n):
+        case Ok(_):
+            return "none"
+        case Err(Unsatisfied(ty, _)):
+            return ty
+
+## The humidity after `ladles` of water, each adding 15 percent.
+def steam(start: Dry, ladles: int) -> int:
+    return start + 15 * ladles
+
+const ZERO: str = todo("failed(0)")
+const SEVEN: str = todo("failed(7)")
+const FIFTY: str = todo("failed(50)")
+const MINUS_ONE: str = todo("failed(-1)")
+const STEAM: int = todo("steam from 10 with 7 ladles")
+
+test "nothing fails":
+    assert failed(0) == ZERO
+
+test "a little too wet":
+    assert failed(7) == SEVEN
+
+test "wet":
+    assert failed(50) == FIFTY
+
+test "below zero":
+    assert failed(-1) == MINUS_ONE
+
+test "steam from a dry start":
+    let start = Dry.try_from(10).expect("10 is dry")
+    assert steam(start, 7) == STEAM

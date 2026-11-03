@@ -1,0 +1,28 @@
+$ sisu run levels.sisu
+panic: postcondition of `minutes_until` failed: 0 <= result < 1440
+    0 <= result < 1440
+         │
+         -180
+  at minutes_until (levels.sisu:6:13)
+  at main (levels.sisu:10:11)
+$ sisu run --contracts=preconditions levels.sisu
+-180
+panic: precondition of `minutes_until` failed: 0 <= now < 1440
+    0 <= now < 1440
+         │
+         1500
+  at minutes_until (levels.sisu:5:14)
+  at main (levels.sisu:11:11)
+$ sisu run --contracts=off levels.sisu
+-180
+-480
+$ sisu run --native --release levels.sisu
+-180
+panic: precondition of `minutes_until` failed: 0 <= now < 1440
+    0 <= now < 1440
+         │
+         1500
+  at minutes_until (levels.sisu:5:14)
+  at main (levels.sisu:11:11)
+$ sisu test --contracts=off levels.sisu
+error[D0029]: `sisu test` checks every contract; `--contracts` sets what `sisu run` and `sisu sir` check

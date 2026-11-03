@@ -377,7 +377,7 @@ def main():
 <!-- output: examples/04-control-flow/loop_else.console -->
 ```console
 $ sisu run loop_else.sisu
-error[E0103]: expected an expression, found `else`
+error[E0127]: a loop has no `else` in Sisu; keep what the loop finds in a variable and test it after the loop, as in `if let Some(i) = found:`
   --> loop_else.sisu:8:5
   |
 8 |     else:

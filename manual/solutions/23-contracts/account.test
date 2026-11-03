@@ -1,0 +1,9 @@
+test "money in and out" ... ok
+test "below zero costs the fee" ... ok
+test "past the limit is refused" ... ok
+test "a transfer moves the money" ... ok
+test "a transfer that cannot be paid changes nothing" ... ok
+test "contract of Account.deposit" ... ok
+test "contract of Account.withdraw" ... ok
+test "contract of transfer" ... ok
+8 passed, 0 failed, 0 blocked

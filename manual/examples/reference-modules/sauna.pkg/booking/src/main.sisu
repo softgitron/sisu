@@ -1,0 +1,8 @@
+# An application that uses the library `sauna` of its workspace.
+import sauna
+from sauna.comfort import feel
+
+def main():
+    let c = sauna.GOOD
+    print("{c} °C is {sauna.feel(c)}, 60 °C is {feel(60)}")
+    print("{c} °C is {sauna.to_fahrenheit(c)} °F")

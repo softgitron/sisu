@@ -1,0 +1,90 @@
+##! Exercise 23.5, an account that keeps its promises. Kind: write. Level: 3.
+##!
+##! An account's balance may go below zero, as far as its limit. Write
+##! the bodies of `deposit`, `withdraw` and `transfer` so that every test
+##! passes. A withdrawal that leaves the balance below zero costs a fee,
+##! and one that would take the balance and the fee past the limit is
+##! refused and changes nothing. `sisu test` also checks the contracts on
+##! accounts of its own making, so each body must keep the invariant and
+##! every `ensures`, not only pass the tests below. Run the tests with
+##! `sisu test account.sisu`. The hints are in chapter 23 of the tutorial,
+##! under "Exercise 23.5: an account that keeps its promises".
+
+## What an overdrawn balance costs, in cents.
+const FEE: int = 50
+
+error AccountError:
+    Overdrawn(short_by: int)
+
+## An account's balance in cents, which goes below zero as far as `limit`.
+struct Account:
+    balance: int
+    limit: int
+    invariant self.limit >= 0
+    invariant self.balance >= -self.limit
+
+    ## Puts `cents` in.
+    def deposit(mut self, cents: int):
+        requires cents > 0
+        ensures self.balance == old(self.balance) + cents
+        self.balance += cents
+
+    ## Takes `cents` out, and `FEE` too when the balance ends below zero,
+    ## or gives `Overdrawn` with the cents missing and changes nothing.
+    def withdraw(mut self, cents: int) -> ! AccountError:
+        requires cents > 0
+        ensures match result:
+            case Ok(()): self.balance <= old(self.balance) - cents
+            case Err(_): self.balance == old(self.balance)
+        var after = self.balance - cents
+        if after < 0:
+            after -= FEE
+        if after < -self.limit:
+            return Err(Overdrawn(short_by=-self.limit - after))
+        self.balance = after
+        return Ok(())
+
+## Moves `cents` from `source` to `target` as a withdrawal and a deposit,
+## or changes neither when `source` cannot pay.
+def transfer(
+    mut source: Account,
+    mut target: Account,
+    cents: int,
+) -> ! AccountError:
+    requires cents > 0
+    ensures match result:
+        case Ok(()): target.balance == old(target.balance) + cents
+        case Err(_): source.balance == old(source.balance)
+    source.withdraw(cents)?
+    target.deposit(cents)
+    return Ok(())
+
+test "money in and out":
+    var a = Account(balance=1000, limit=500)
+    a.deposit(250)
+    assert a.withdraw(1200) == Ok(())
+    assert a.balance == 50
+
+test "below zero costs the fee":
+    var a = Account(balance=1000, limit=500)
+    assert a.withdraw(1100) == Ok(())
+    assert a.balance == -150
+
+test "past the limit is refused":
+    var a = Account(balance=1000, limit=500)
+    assert a.withdraw(1600) == Err(Overdrawn(short_by=150))
+    assert a.balance == 1000
+    assert a.withdraw(1450) == Ok(())
+    assert a.balance == -500
+
+test "a transfer moves the money":
+    var aino = Account(balance=2000, limit=0)
+    var eero = Account(balance=100, limit=1000)
+    assert transfer(mut aino, mut eero, 1500) == Ok(())
+    assert aino.balance == 500 and eero.balance == 1600
+
+test "a transfer that cannot be paid changes nothing":
+    var aino = Account(balance=2000, limit=0)
+    var eero = Account(balance=100, limit=1000)
+    assert transfer(mut eero, mut aino, 1200) == Err(Overdrawn(short_by=150))
+    assert aino.balance == 2000 and eero.balance == 100

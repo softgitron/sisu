@@ -1,0 +1,26 @@
+# A trait's `derive` writes its impl for a type, with reflection.
+trait Changes:
+    ## The names of the fields in which `self` and `other` differ.
+    def changes(self, other: Self) -> list[String]
+
+    comptime def derive(T: type) -> impl Changes for T:
+        return impl Changes for T:
+            def changes(self, other: Self) -> list[String]:
+                var names: list[String] = []
+                comptime for f in reflect.fields_of(T):
+                    if self.[f] != other.[f]:
+                        names.push(f.name.to_string())
+                return names
+
+## A turn in the sauna.
+@derive(Changes)
+struct Booking:
+    name: String
+    hour: int
+    minutes: int
+
+def main():
+    let before = Booking(name="Aino", hour=18, minutes=60)
+    let after = Booking(name="Aino", hour=19, minutes=90)
+    print(before.changes(after))
+    print(before.changes(before))

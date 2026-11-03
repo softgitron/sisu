@@ -1,0 +1,8 @@
+$ sisu run ensures.sisu
+60
+panic: postcondition of `minutes_until` failed: 0 <= result < 1440
+    0 <= result < 1440
+         │
+         -180
+  at minutes_until (ensures.sisu:7:13)
+  at main (ensures.sisu:12:11)

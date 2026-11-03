@@ -1,0 +1,12 @@
+# A `Ratio` is an exact fraction, kept in lowest terms.
+from std.num import Ratio
+
+def main():
+    let third = Ratio.of(1, 3)
+    print("{third + third + third} {Ratio.of(2, 6)} {Ratio.of(3, -4)}")
+    let shares = [Ratio.of(1, 2), Ratio.of(1, 3), Ratio.of(1, 6)]
+    var total = Ratio.whole(0)
+    for share in shares:
+        total = total + share
+    print("{total} {total == Ratio.whole(1)}")
+    print(Ratio.of(1, 10) + Ratio.of(2, 10) == Ratio.of(3, 10))

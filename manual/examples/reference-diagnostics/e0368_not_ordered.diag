@@ -1,1 +1,2 @@
 7:11-7:36 E0368 type.not-ordered ty="Point" op="<"
+  fix type.derive-trait 2:1-2:1 "@derive(PartialOrd)\n"

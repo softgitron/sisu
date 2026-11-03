@@ -1,0 +1,9 @@
+$ sisu run bigint_literal.sisu
+error[E0374]: `123456789012345678901234567890` does not fit in `int`
+  --> bigint_literal.sisu:14:21
+   |
+14 |     let n: BigInt = 123456789012345678901234567890
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = note: `int` holds -9223372036854775808 to 9223372036854775807
+
+error[D0006]: the program was not run: errors found (1)

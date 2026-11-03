@@ -1,0 +1,14 @@
+$ sisu run
+error[E0258]: the field `lon` of `Point` is private to the module `atlas.geo.point`; declare it `pub` to use it from another module
+  --> src/main.sisu:5:13
+  |
+5 |     let p = Point(65.0, 25.5)
+  |             ^^^^^^^^^^^^^^^^^
+
+error[E0259]: the method `secret` of `atlas.geo.point.Point` is private to the module `atlas.geo.point`; declare it `pub` to call it from another module
+  --> src/main.sisu:6:23
+  |
+6 |     print("{p.lat} {p.secret()}")
+  |                       ^^^^^^
+
+error[D0006]: the program was not run: errors found (2)

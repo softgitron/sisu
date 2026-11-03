@@ -4,5 +4,6 @@ error[E0320]: `?` on `int ! ClockError` needs a function that returns `T ! E`, b
    |
 21 |         let minutes = minutes_since_midnight(text)?
    |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: let `main` return its errors: ` -> ! ClockError`, `    return Ok(())`
 
 error[D0006]: the program was not run: errors found (1)

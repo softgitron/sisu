@@ -1,0 +1,10 @@
+[package]
+name = "sauna"
+version = "0.2.0"
+edition = "2027"
+description = "How hot a sauna is"
+license = "MIT"
+
+[features]
+default = []
+fahrenheit = []

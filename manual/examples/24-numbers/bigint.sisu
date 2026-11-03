@@ -1,0 +1,15 @@
+# A `BigInt` is an integer of any size.
+from std.num import BigInt
+
+## `n` factorial: 1 times 2 times 3, and so on up to `n`.
+def factorial(n: int) -> BigInt:
+    var product: BigInt = 1
+    for k in range(2, n + 1):
+        product = product * BigInt.of(k)
+    return product
+
+def main():
+    print(factorial(25))
+    print(BigInt.of(2).pow(64) - BigInt.of(1))
+    let n = BigInt.parse("123456789012345678901234567890") ?? BigInt.of(0)
+    print(n * n)

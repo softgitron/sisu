@@ -1,0 +1,8 @@
+$ sisu run decreases.sisu
+error[E0900]: a termination measure (`decreases`) is not implemented in stage 0 yet; it arrives with the contract verifier (after version 1)
+  --> decreases.sisu:6:5
+  |
+6 |     decreases n
+  |     ^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

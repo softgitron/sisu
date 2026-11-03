@@ -1,0 +1,11 @@
+#!/usr/bin/env sisu
+# /// script
+# [dependencies]
+# sauna = { path = "sauna" }
+# ///
+# A script that names its dependency in its inline metadata.
+import sauna
+
+for arg in sys.env.args():
+    let celsius = arg.parse_int() ?? 0
+    print("{celsius} °C is {sauna.feel(celsius)}")

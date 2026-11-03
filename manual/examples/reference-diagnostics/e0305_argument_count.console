@@ -4,5 +4,6 @@ error[E0305]: wrong number of arguments to `print`: expected 1, found 2
   |
 3 |     print("Hei,", "maailma!")
   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: write the value into the text: `"Hei, maailma!"`
 
 error[D0006]: the program was not run: errors found (1)

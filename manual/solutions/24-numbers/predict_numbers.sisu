@@ -1,0 +1,46 @@
+##! Exercise 24.1, predict the numbers. Kind: predict. Level: 1.
+##!
+##! Each constant is your prediction of what an expression gives, written
+##! as `print` would write it. Write each as a literal, then run
+##! `sisu test predict_numbers.sisu`. The hints are in chapter 24 of the
+##! tutorial, under "Exercise 24.1: predict the numbers".
+
+from std.num import Ratio
+
+# 300 is past 255; wrapping takes 256 off.
+const WRAPPED: str = "44"
+# -200 is below what an `i8` holds, so it stops at the smallest.
+const SATURATED: str = "-128"
+# The 16 lowest bits of -1 are all ones.
+const TRUNCATED: str = "65535"
+# A `u16` holds no negative number, and `to_u16` says so.
+const CONVERTED: str = "None"
+# Halves and quarters are exact in binary, so nothing rounds.
+const HALVES: str = "True"
+# Tenths are not exact in binary: the sum rounds to another number.
+const TENTHS: str = "False"
+# Lowest terms, with the sign on top.
+const RATIO: str = "-3/2"
+
+test "wrapping":
+    let level: u8 = 200
+    assert "{level +% 100}" == WRAPPED
+
+test "saturating":
+    let sample: i8 = -100
+    assert "{sample -| 100}" == SATURATED
+
+test "truncating":
+    assert "{(-1).truncate_to[u16]()}" == TRUNCATED
+
+test "converting":
+    assert "{(-1).to_u16()}" == CONVERTED
+
+test "binary fractions":
+    assert "{0.5 + 0.25 == 0.75}" == HALVES
+
+test "decimal fractions":
+    assert "{0.1 + 0.2 == 0.3}" == TENTHS
+
+test "an exact fraction":
+    assert "{Ratio.of(6, -4)}" == RATIO

@@ -4,5 +4,7 @@ error[E0325]: a `for` loop cannot iterate over `str`
   |
 3 |     for letter in "hei":
   |                   ^^^^^
+  = fix: iterate over its characters: `.chars()`
+  = fix: iterate over its bytes: `.bytes()`
 
 error[D0006]: the program was not run: errors found (1)

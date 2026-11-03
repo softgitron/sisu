@@ -1,0 +1,3 @@
+panic: NaN has no order
+  at closure in main (nan.sisu:10:29)
+  at main (nan.sisu:10:5)

@@ -1,0 +1,6 @@
+test "nothing fails" ... ok
+test "a little too wet" ... ok
+test "wet" ... ok
+test "below zero" ... ok
+test "steam from a dry start" ... ok
+5 passed, 0 failed, 0 blocked

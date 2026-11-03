@@ -1,0 +1,9 @@
+# Imports that name nothing.
+import atlas.geo
+import atlas.roads
+from atlas.geo import Route
+from std.collections import *
+import maps
+
+def main():
+    print(geo.EARTH_KM)

@@ -1,0 +1,4 @@
+test "a number in the middle" ... ok
+test "a number that is not there" ... ok
+test "contract of find" ... ok
+3 passed, 0 failed, 0 blocked

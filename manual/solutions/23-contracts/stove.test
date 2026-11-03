@@ -1,0 +1,6 @@
+test "heating stops at the limit" ... ok
+test "water cools the stove" ... ok
+test "water cannot cool it below zero" ... ok
+test "contract of Stove.heat" ... ok
+test "contract of Stove.cool" ... ok
+5 passed, 0 failed, 0 blocked

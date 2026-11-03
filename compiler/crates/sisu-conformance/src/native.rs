@@ -147,7 +147,9 @@ pub fn take_build_report(stderr: &str) -> BuildReport {
     let mut r = BuildReport::default();
     for line in stderr.split_inclusive('\n') {
         let text = line.trim_end_matches('\n');
-        if let Some(t) = text.strip_prefix("native: lowered by stage 2 in ").and_then(|t| t.strip_suffix(" ms")) {
+        if let Some(t) =
+            text.strip_prefix("native: lowered by stage 2 in ").and_then(|t| t.strip_suffix(" ms"))
+        {
             r.lowered = Some(ms(t));
         } else if let Some(t) = text
             .strip_prefix("native: compiled by the Sisu backend in ")
@@ -716,7 +718,9 @@ mod tests {
         let r = take_build_report("time: names resolved 1.0 ms\nnative: not lowered by stage 2 in 3.0 ms\n");
         assert_eq!((r.rest.as_str(), r.lowered), ("", None));
         // The Sisu backend's build says what compiled it.
-        let r = take_build_report("native: lowered by stage 2 in 2.0 ms\nnative: compiled by the Sisu backend in 4.5 ms, linked in 80.0 ms\n");
+        let r = take_build_report(
+            "native: lowered by stage 2 in 2.0 ms\nnative: compiled by the Sisu backend in 4.5 ms, linked in 80.0 ms\n",
+        );
         assert_eq!(r.sisu, Some(Duration::from_secs_f64(0.0045)));
     }
 }

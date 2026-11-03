@@ -1,0 +1,7 @@
+test "a time of day" ... ok
+test "numbers that are not on the clock" ... ok
+test "text that is not a time" ... ok
+test "later on the same day" ... ok
+test "later, past midnight" ... ok
+test "contract of later" ... ok
+6 passed, 0 failed, 0 blocked

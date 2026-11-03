@@ -1,0 +1,7 @@
+# The module `atlas.geo`, from the file beside the directory `src/geo/`.
+from atlas.geo.point import Point
+
+pub const EARTH_KM: int = 6371
+
+pub def describe(p: Point) -> String:
+    return "{p.lat} N, {p.lon} E"

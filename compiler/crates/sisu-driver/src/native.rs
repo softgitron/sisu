@@ -325,6 +325,12 @@ fn build_with_sisu(lir: &str, runtime: &Path, output: &Path, host: &mut dyn Host
     let result = std::fs::write(&file, lir).map_err(|e| e.to_string()).and_then(|()| {
         let mut cmd = std::process::Command::new(&stage2.exe);
         cmd.arg("x86").arg(&file).arg("--output").arg(&obj).stdin(std::process::Stdio::null());
+        // Where the line table says the sources are (decision 312).
+        let src = sources();
+        cmd.arg("--comp-dir").arg(&src.comp_dir);
+        if let Some(d) = &src.std_dir {
+            cmd.arg("--std").arg(d);
+        }
         for v in crate::front::RUNTIME_VARS {
             cmd.env_remove(v);
         }

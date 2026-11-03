@@ -1,0 +1,3 @@
+# The benches.
+pub def seats() -> int:
+    return 6

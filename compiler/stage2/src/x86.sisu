@@ -1,7 +1,7 @@
 ##! The x86-64 Linux debug backend in Sisu (D-087, step 2): LIR compiled to
 ##! machine code in one pass over each function, after one analysis pass,
 ##! as TPDE compiles LLVM IR (docs/architecture.md, "Stage 2", "The Sisu
-##! backend"; decisions 306 to 311).
+##! backend"; decisions 306 to 312).
 ##!
 ##! Every function has a frame pointer, and every frame slot a fixed offset
 ##! from it: the callee-saved registers the function uses, LIR's slots, its
@@ -104,6 +104,7 @@ pure def unsupported[T](what: str) -> T ! X86Error:
 ## The relocations the backend writes (the System V x86-64 ABI's numbers).
 pub const R_64: int = 1
 pub const R_PC32: int = 2
+pub const R_32: int = 10
 pub const R_PLT32: int = 4
 pub const R_REX_GOTPCRELX: int = 42
 
@@ -129,13 +130,23 @@ pub enum Datum:
     Import(String)
     Local(bool, int)
 
-## Where the code of a source line starts: the offset in `.text`, the file,
-## the line and the column (for the line table, decision 227).
+## Where the code of a source line starts: the offset (in the function's
+## body, then in `.text`), the line and the column (for the line table,
+## decision 312).
 pub struct Row:
     pub offset: int
-    pub file: int
     pub line: int
     pub col: int
+
+## A function as the debug information names it: where its code is in
+## `.text`, its name, the source and line it is declared at, and its rows.
+pub struct FnInfo:
+    pub start: int
+    pub end: int
+    pub name: String
+    pub source: int?
+    pub line: int
+    pub rows: list[Row]
 
 ## The object being built: its sections, symbols and relocations.
 pub struct Obj:
@@ -157,10 +168,8 @@ pub struct Obj:
     ## of an unprobed one (decision 234).
     max_top: int
     max_unprobed: int
-    pub rows: list[Row]
-    ## Each function's start and end in `.text`, its name, file and line,
-    ## for the debug information.
-    pub ranges: list[(int, int, String, int?, int)]
+    ## Each function compiled, for the debug information.
+    pub infos: list[FnInfo]
 
 ## What a call adds to the callee's frame beyond what the frames say (the
 ## return address, the saved frame pointer, the arguments on the stack), as
@@ -187,8 +196,7 @@ impl Obj:
             pending=[],
             max_top=0,
             max_unprobed=0,
-            rows=[],
-            ranges=[],
+            infos=[],
         )
 
     ## The symbol `name` named by a relocation and not defined here: an
@@ -207,12 +215,12 @@ impl Obj:
         if funcs.is_empty():
             self.rodata.align(max(align, 1), 0)
             self.data.push(Datum.Local(False, self.rodata.pos()))
-            self.rodata.append(bytes)
+            self.rodata.append(bytes.copy())
             return
         self.relro.align(max(align, 8), 0)
         let at = self.relro.pos()
         self.data.push(Datum.Local(True, at))
-        self.relro.append(bytes)
+        self.relro.append(bytes.copy())
         for (off, symbol) in funcs:
             self.relro_relocs.push(
                 Reloc(offset=at + off, symbol=symbol.copy(), kind=R_64, addend=0)
@@ -257,8 +265,10 @@ impl Obj:
         let pro = g.prologue(f)
         self.text.append(pro.bytes)
         let base = self.text.pos()
+        let epi = g.epilogue()
+        let frame_size = g.frame_size()
         self.text.append(g.body.bytes)
-        self.text.append(g.epilogue().bytes)
+        self.text.append(epi.bytes)
         let end = self.text.pos()
         for r in g.relocs:
             if r.kind == R_PLT32 or r.kind == R_REX_GOTPCRELX:
@@ -266,38 +276,38 @@ impl Obj:
             self.text_relocs.push(
                 Reloc(offset=base + r.offset, symbol=r.symbol.copy(), kind=r.kind, addend=r.addend)
             )
+        # The function is placed before its calls are resolved, so that it
+        # calls itself directly; a call of one placed later waits for
+        # `finish`.
+        if not self.placed.contains(f.symbol.copy()):
+            _ = self.placed.insert(f.symbol.copy(), start)
         for (at, symbol) in g.calls:
             if let Some(target) = self.placed.get(symbol.copy()):
                 self.text.patch32(base + at, target - (base + at + 4))
-            elif locals.contains(symbol.copy()) or symbol == f.symbol:
+            elif locals.contains(symbol.copy()):
                 self.pending.push((base + at, symbol.copy()))
             else:
                 self.text_relocs.push(
                     Reloc(offset=base + at, symbol=symbol.copy(), kind=R_PLT32, addend=-4)
                 )
                 self.import_symbol(symbol)
-        if not self.placed.contains(f.symbol.copy()):
-            _ = self.placed.insert(f.symbol.copy(), start)
-        # A call of the function itself, made before it was placed.
-        var still: list[(int, String)] = []
-        for (at, symbol) in self.pending:
-            if symbol == f.symbol:
-                self.text.patch32(at, start - (at + 4))
-            else:
-                still.push((at, symbol.copy()))
-        self.pending = still
         self.defined.push(
             Defined(
                 symbol=f.symbol.copy(), offset=start, size=end - start, global_=f.symbol == "main"
             )
         )
+        var rows: list[Row] = []
         for row in g.rows:
-            self.rows.push(Row(offset=base + row.offset, file=row.file, line=row.line, col=row.col))
-        self.ranges.push((start, end, f.name.copy(), f.source, f.line))
+            rows.push(Row(offset=base + row.offset, line=row.line, col=row.col))
+        self.infos.push(
+            FnInfo(
+                start=start, end=end, name=f.name.copy(), source=f.source, line=f.line, rows=rows
+            )
+        )
         if f.frame == F_PROBED:
             self.max_top = max(self.max_top, 16 + SAVED)
         elif f.frame == F_UNPROBED:
-            self.max_unprobed = max(self.max_unprobed, 16 + g.frame_size())
+            self.max_unprobed = max(self.max_unprobed, 16 + frame_size)
 
 ## The registers the allocator hands out, which a call keeps.
 pure def pool() -> list[int]:
@@ -367,7 +377,6 @@ pub struct Gen:
     ## Calls and addresses of functions, resolved when they are placed.
     pub calls: list[(int, String)]
     pub rows: list[Row]
-    file: int
     ## Whether the code since the last terminator can be reached.
     live: bool
 
@@ -408,7 +417,6 @@ impl Gen:
             relocs=[],
             calls=[],
             rows=[],
-            file=f.source ?? 0,
             live=True,
         )
 
@@ -740,7 +748,7 @@ impl Gen:
                     self.block_pos[b] = self.body.pos()
                 self.live = True
             case Op.Loc(line, col):
-                self.rows.push(Row(offset=self.body.pos(), file=self.file, line=line, col=col))
+                self.rows.push(Row(offset=self.body.pos(), line=line, col=col))
             case Op.Iconst(_, n):
                 self.body.mov_imm(RAX, n)
                 self.define(v, RAX)

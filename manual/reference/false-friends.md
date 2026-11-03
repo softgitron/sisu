@@ -189,15 +189,15 @@ maintainers.
 | `7 / 2` | `7 // 2` | E0301 | yes, as a fix |
 | `if xs:` | `if not xs.is_empty():` | E0302 | yes, in a note |
 | `a if c else b` | `if c: a else: b` | E0115, E0100 | in a `let` only |
-| `count = 0` to declare | `var count = 0` | E0200 | no |
-| `print(a, b)` | `print("{a} {b}")` | E0305 | no |
+| `count = 0` to declare | `var count = 0` | E0200 | `let`, as a fix |
+| `print(a, b)` | `print("{a} {b}")` | E0305 | yes, as a fix |
 | `'text'` | `"text"` | E0016 | no |
-| `for c in word` | `for c in word.chars()` | E0325 | no |
+| `for c in word` | `for c in word.chars()` | E0325 | yes, as a fix |
 | `word[0]` | `word.chars()`, `word.byte_slice(a, b)` | E0345 | yes, in the message |
 | `x or default` | `x ?? default` | E0302 | no |
 | `", ".join(xs)` | `xs.join(", ")` | E0304 | in a note |
 | `(n := f())` | `let n = f()`, `if let` | E0123, E0100 | outside brackets only |
-| `for ... else:` | `if let` on a search's result | E0103 | no |
+| `for ... else:` | `if let` on a search's result | E0127 | yes, in the message |
 | `a < b > c` | one direction | E0113 | yes, in the message |
 | `x is None` | `x == None`, `if let` | E0100 | no |
 | `lambda x: e` | `x -> e` | E0117 | no |
@@ -213,7 +213,8 @@ maintainers.
 ### Assignment declares a name
 
 A binding is declared with `let` or `var`; an assignment to a name that
-nothing declared is E0200 at each use.
+nothing declared is E0200, whose fix declares it with `let` (write
+`var` instead when the name changes later).
 
 <!-- file: examples/reference-false-friends/assignment.sisu -->
 ```sisu
@@ -231,12 +232,7 @@ error[E0200]: cannot find `count` in this scope
   |
 3 |     count = 0
   |     ^^^^^
-
-error[E0200]: cannot find `count` in this scope
-  --> assignment.sisu:4:11
-  |
-4 |     print(count)
-  |           ^^^^^
+  = fix: declare it with `let`: `let `
 
 ```
 
@@ -261,6 +257,7 @@ error[E0305]: wrong number of arguments to `print`: expected 1, found 2
   |
 4 |     print("Hei,", name)
   |     ^^^^^^^^^^^^^^^^^^^
+  = fix: write the value into the text: `"Hei, {name}"`
 
 ```
 
@@ -307,6 +304,8 @@ error[E0325]: a `for` loop cannot iterate over `str`
   |
 3 |     for letter in "hei":
   |                   ^^^^^
+  = fix: iterate over its characters: `.chars()`
+  = fix: iterate over its bytes: `.bytes()`
 
 ```
 
@@ -420,7 +419,7 @@ error[E0100]: expected `)`, found `:=`
 ### `else` on a loop
 
 A loop has no `else` (D-021); search with a function that returns `T?`
-and test the result with `if let`. E0103.
+and test the result with `if let`. E0127.
 
 <!-- file: examples/reference-false-friends/loop_else.sisu -->
 ```sisu
@@ -436,7 +435,7 @@ def main():
 <!-- output: examples/reference-false-friends/loop_else.console -->
 ```console
 $ sisu check loop_else.sisu
-error[E0103]: expected an expression, found `else`
+error[E0127]: a loop has no `else` in Sisu; keep what the loop finds in a variable and test it after the loop, as in `if let Some(i) = found:`
   --> loop_else.sisu:6:5
   |
 6 |     else:

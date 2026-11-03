@@ -1,0 +1,43 @@
+##! Exercise 23.2, a field changed from outside. Kind: fix. Level: 1.
+##!
+##! A sauna's stove keeps its temperature between 0 degrees and its limit,
+##! and says so in its invariant. `throw_water` changes the temperature
+##! from outside the type, and the file does not compile. Run
+##! `sisu test stove.sisu`, read the diagnostic, and fix the program, not
+##! the tests, so that every test passes. The hints are in chapter 23 of
+##! the tutorial, under "Exercise 23.2: a field changed from outside".
+
+## A stove at `celsius` degrees, which never goes past `limit`.
+struct Stove:
+    celsius: int
+    limit: int
+    invariant 0 <= self.celsius <= self.limit
+
+    ## Heats the stove by `degrees`, up to its limit.
+    def heat(mut self, degrees: int):
+        requires degrees >= 0
+        self.celsius = min(self.celsius + degrees, self.limit)
+
+## Throws a ladle of water on the stones, which cools the stove by 15
+## degrees, to 0 at the lowest.
+def throw_water(mut stove: Stove):
+    stove.celsius = max(stove.celsius - 15, 0)
+
+test "heating stops at the limit":
+    var stove = Stove(celsius=60, limit=110)
+    stove.heat(30)
+    assert stove.celsius == 90
+    stove.heat(30)
+    assert stove.celsius == 110
+
+test "water cools the stove":
+    var stove = Stove(celsius=80, limit=110)
+    throw_water(mut stove)
+    assert stove.celsius == 65
+    throw_water(mut stove)
+    assert stove.celsius == 50
+
+test "water cannot cool it below zero":
+    var stove = Stove(celsius=10, limit=110)
+    throw_water(mut stove)
+    assert stove.celsius == 0

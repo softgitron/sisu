@@ -229,10 +229,7 @@ impl Cur:
         let n = t.byte_len()
         if self.pos + n > self.end:
             return False
-        for i in range(n):
-            if self.byte(self.pos + i) != t.byte_at(i).to_int():
-                return False
-        return True
+        return self.s.byte_slice(self.pos, self.pos + n) == t
 
     pure def eat(mut self, t: str) -> bool:
         self.ws()
@@ -274,11 +271,14 @@ impl Cur:
             negative = True
             self.pos += 1
         let digits = self.pos
-        # Accumulated negatively, so that the least `int` fits.
+        # Accumulated negatively, so that the least `int` fits; eighteen
+        # digits cannot overflow, so only a longer number checks each step.
         var n = 0
-        while self.pos < self.end and is_digit(self.byte(self.pos)):
+        while self.pos < self.end:
             let d = self.byte(self.pos) - 48
-            if n < (-9223372036854775807 - 1 + d) // 10:
+            if d < 0 or d > 9:
+                break
+            if self.pos - digits >= 18 and n < (-9223372036854775807 - 1 + d) // 10:
                 return wrong("expected an integer at `{self.s.byte_slice(start, self.end)}`")
             n = n * 10 - d
             self.pos += 1

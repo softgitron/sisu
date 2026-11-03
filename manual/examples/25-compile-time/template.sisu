@@ -1,0 +1,26 @@
+# A generic function that reflects is made once for each type it is given.
+
+## A turn in the sauna.
+struct Booking:
+    name: String
+    hour: int
+
+## A reading of the stove's thermometer.
+struct Reading:
+    minute: int
+    celsius: f64
+
+## `value` as a line of comma-separated values, a field at a time.
+def csv_row[T](value: T) -> String:
+    if comptime reflect.is_struct(T):
+        var cells: list[String] = []
+        comptime for f in reflect.fields_of(T):
+            cells.push("{value.[f]}")
+        return cells.join(",")
+    else:
+        return "{value}"
+
+def main():
+    print(csv_row(Booking(name="Aino", hour=18)))
+    print(csv_row(Reading(minute=5, celsius=78.5)))
+    print(csv_row(42))

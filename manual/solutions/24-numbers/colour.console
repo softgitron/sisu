@@ -1,0 +1,24 @@
+$ sisu test colour.sisu
+warning[W0001]: typed hole `pack` of type `u32`
+  --> colour.sisu:19:12
+   |
+19 |     return todo("pack")
+   |            ^^^^^^^^^^^^
+
+warning[W0001]: typed hole `unpack` of type `Colour`
+  --> colour.sisu:23:12
+   |
+23 |     return todo("unpack")
+   |            ^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `brighten` of type `Colour`
+  --> colour.sisu:28:12
+   |
+28 |     return todo("brighten")
+   |            ^^^^^^^^^^^^^^^^
+
+test "packing" ... blocked by todo("pack")
+test "unpacking" ... blocked by todo("unpack")
+test "unpacking undoes packing" ... blocked by todo("pack")
+test "brightening stops at 255" ... blocked by todo("brighten")
+0 passed, 0 failed, 4 blocked

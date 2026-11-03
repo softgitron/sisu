@@ -1,0 +1,30 @@
+# `reflect` answers questions about a type while the program compiles.
+
+## A turn in the sauna.
+struct Booking:
+    name: String
+    hour: int
+    minutes: int = 60
+
+enum Heater:
+    Wood
+    Electric(kilowatts: int)
+
+## The names of the fields of `T`, a struct.
+comptime def columns(T: type) -> list[str]:
+    var names: list[str] = []
+    comptime for f in reflect.fields_of(T):
+        names.push(f.name)
+    return names
+
+## A sentence about `T`.
+comptime def describe(T: type) -> String:
+    let name = reflect.name_of(T)
+    if comptime reflect.is_struct(T):
+        return "{name} has {len(reflect.fields_of(T))} fields"
+    return "{name} has {len(reflect.variants_of(T))} variants"
+
+def main():
+    print(comptime columns(Booking))
+    print(comptime describe(Booking))
+    print(comptime describe(Heater))

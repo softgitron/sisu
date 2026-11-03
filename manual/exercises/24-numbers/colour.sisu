@@ -1,0 +1,45 @@
+##! Exercise 24.3, a colour in 32 bits. Kind: write. Level: 2.
+##!
+##! A colour is three bytes, red, green and blue, which a screen keeps in
+##! one `u32` as 0xRRGGBB: red in the bits from 16 to 23, green in those
+##! from 8 to 15 and blue in those from 0 to 7. Write the bodies of `pack`,
+##! `unpack` and `brighten` so that every test passes. Run the tests with
+##! `sisu test colour.sisu`. The hints are in chapter 24 of the tutorial,
+##! under "Exercise 24.3: a colour in 32 bits".
+
+## A colour of three bytes.
+@derive(Eq, Debug)
+struct Colour:
+    red: u8
+    green: u8
+    blue: u8
+
+## `colour` as one number, 0xRRGGBB.
+def pack(colour: Colour) -> u32:
+    return todo("pack")
+
+## The colour that the lowest 24 bits of `packed` hold.
+def unpack(packed: u32) -> Colour:
+    return todo("unpack")
+
+## `colour` with each of its parts made brighter by `amount`, to 255 at
+## most.
+def brighten(colour: Colour, amount: u8) -> Colour:
+    return todo("brighten")
+
+test "packing":
+    assert pack(Colour(red=0xFF, green=0x88, blue=0x00)) == 0xFF8800
+    assert pack(Colour(red=1, green=2, blue=3)) == 0x010203
+
+test "unpacking":
+    assert unpack(0xFF8800) == Colour(red=255, green=136, blue=0)
+    assert unpack(0x12345678) == Colour(red=0x34, green=0x56, blue=0x78)
+
+test "unpacking undoes packing":
+    check(arbitrary[Colour]) do colour:
+        return unpack(pack(colour)) == colour
+
+test "brightening stops at 255":
+    let orange = Colour(red=250, green=100, blue=0)
+    assert brighten(orange, 10) == Colour(red=255, green=110, blue=10)
+    assert brighten(orange, 0) == orange

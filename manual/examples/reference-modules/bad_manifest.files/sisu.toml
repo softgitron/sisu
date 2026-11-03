@@ -1,0 +1,12 @@
+[package]
+name = "stove"
+version = "1.0"
+edition = "2027"
+colour = "black"
+
+[dependencies]
+json = "2.1"
+stones = "0.4"
+
+[trust]
+unsafe = ["zlib"]

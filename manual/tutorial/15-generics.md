@@ -111,6 +111,7 @@ error[E0347]: `Guest` does not implement `Eq`
    |
 14 |     print(count_matching(guests, Guest("Aino")))
    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: derive it: `@derive(Eq)`
 
 error[D0006]: the program was not run: errors found (1)
 ```

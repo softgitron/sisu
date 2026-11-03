@@ -4,5 +4,6 @@ error[E0368]: `Point` has no order, so it cannot be compared with `<` or sorted
   |
 7 |     print(Point(1, 2) < Point(2, 1))
   |           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: derive it: `@derive(PartialOrd)`
 
 error[D0006]: the program was not run: errors found (1)

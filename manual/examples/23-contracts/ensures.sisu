@@ -1,0 +1,12 @@
+# `ensures` states what a function gives back, named `result`.
+
+## The minutes from `now` until the sauna opens at `opens`; both are
+## minutes after midnight.
+def minutes_until(now: int, opens: int) -> int:
+    requires 0 <= now < 1440 and 0 <= opens < 1440
+    ensures 0 <= result < 1440
+    return opens - now
+
+def main():
+    print(minutes_until(16 * 60, 17 * 60))
+    print(minutes_until(20 * 60, 17 * 60))

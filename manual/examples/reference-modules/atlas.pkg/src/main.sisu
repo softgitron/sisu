@@ -1,0 +1,7 @@
+# The root module, `atlas`, from `src/main.sisu`.
+import atlas.geo
+from atlas.geo.point import Point
+
+def main():
+    let oulu = Point(65.0, 25.5)
+    print("{geo.describe(oulu)}, {geo.EARTH_KM} km from the centre")

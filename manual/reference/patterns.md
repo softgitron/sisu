@@ -361,8 +361,8 @@ error[D0006]: the program was not run: errors found (1)
 
 A `match` covers every value of its subject's type, so that a new
 variant shows each `match` that must handle it (D-043). One that does
-not is E0314, whose note names a case it misses and suggests an arm for
-it or a `case _` arm.
+not is E0314, which names every case it misses and suggests an arm for
+each or a `case _` arm.
 
 <!-- file: examples/reference-patterns/missing_case.sisu -->
 ```sisu
@@ -383,21 +383,20 @@ def main():
 <!-- output: examples/reference-patterns/missing_case.console -->
 ```console
 $ sisu run missing_case.sisu
-error[E0314]: this `match` does not cover `Amber`
+error[E0314]: this `match` does not cover `Amber`, `Green`
   --> missing_case.sisu:8:12
   |
 8 |     return match light:
   |            ^^^^^^^^^^^
-  = note: add an arm for `Amber`, or a `case _` arm
+  = note: add an arm for each of `Amber`, `Green`, or a `case _` arm
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-**Stage 0 differs.** [03](../../proposal/03-types-and-generics.md) has
-the error list the missing patterns; stage 0's E0314 names one at a time.
-The proposal's linter also warns about `case _` on an enum of the same
-package, since a new variant should then be a compile error; stage 0 has
-no such warning.
+**Stage 0 differs.** The linter of
+[03](../../proposal/03-types-and-generics.md) warns about `case _` on an
+enum of the same package, since a new variant should then be a compile
+error; stage 0 has no such warning.
 
 **Status.** In stage 0 (D-043).
 

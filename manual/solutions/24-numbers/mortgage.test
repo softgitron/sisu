@@ -1,0 +1,5 @@
+test "the first month" ... ok
+test "a tie goes to the even cent" ... ok
+test "the last payment pays off what is left" ... ok
+test "a long loan loses no cent" ... ok
+4 passed, 0 failed, 0 blocked

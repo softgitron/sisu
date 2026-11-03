@@ -1,0 +1,39 @@
+##! Exercise 24.1, predict the numbers. Kind: predict. Level: 1.
+##!
+##! Each constant is your prediction of what an expression gives, written
+##! as `print` would write it. Write each as a literal, then run
+##! `sisu test predict_numbers.sisu`. The hints are in chapter 24 of the
+##! tutorial, under "Exercise 24.1: predict the numbers".
+
+from std.num import Ratio
+
+const WRAPPED: str = todo("200u8 +% 100")
+const SATURATED: str = todo("-100i8 -| 100")
+const TRUNCATED: str = todo("(-1).truncate_to[u16]()")
+const CONVERTED: str = todo("(-1).to_u16()")
+const HALVES: str = todo("0.5 + 0.25 == 0.75")
+const TENTHS: str = todo("0.1 + 0.2 == 0.3")
+const RATIO: str = todo("Ratio.of(6, -4)")
+
+test "wrapping":
+    let level: u8 = 200
+    assert "{level +% 100}" == WRAPPED
+
+test "saturating":
+    let sample: i8 = -100
+    assert "{sample -| 100}" == SATURATED
+
+test "truncating":
+    assert "{(-1).truncate_to[u16]()}" == TRUNCATED
+
+test "converting":
+    assert "{(-1).to_u16()}" == CONVERTED
+
+test "binary fractions":
+    assert "{0.5 + 0.25 == 0.75}" == HALVES
+
+test "decimal fractions":
+    assert "{0.1 + 0.2 == 0.3}" == TENTHS
+
+test "an exact fraction":
+    assert "{Ratio.of(6, -4)}" == RATIO

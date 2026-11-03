@@ -237,7 +237,15 @@ message. Stage 2 is the
 executable `--sisu2 PATH` names, else the runner builds
 `ROOT/../../stage2` with the `sisu` it tests (`sisu build --native`)
 before the cases.
-`cargo test -p sisu-driver --test native` runs the list all five ways,
+With `--native-sisu LIST` it builds each case with the x86-64 backend
+written in Sisu (`sisu build --native --backend=sisu`, decision 306),
+whose build must also say that it compiled the program (`native: compiled
+by the Sisu backend in T ms`), and compares the runs as `--native` does;
+its executables are its own, so nothing is compared byte for byte. Its
+list is `native-sisu.list`, the cases of `native.list` the Sisu backend
+builds, which grows as that backend does.
+`cargo test -p sisu-driver --test native` runs `native.list` all five ways
+and `native-sisu.list` with the Sisu backend,
 and CI runs them on every push, each through the front end the executable
 uses (stage 1 by default, so a case built from source or from `sisu sir`
 is built from stage 1's SIR). `--native-survey
@@ -251,6 +259,7 @@ cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-from-sir conf
 cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-release conformance/native.list
 cargo run -p sisu-conformance -- --sisu target/debug/sisu --interpreted-from-sir conformance/native.list
 cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-from-lir conformance/native.list
+cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-sisu conformance/native-sisu.list
 cargo run -p sisu-conformance -- --sisu target/debug/sisu --native-survey conformance/native.list
 ```
 

@@ -1,1 +1,2 @@
 4:5-4:24 E0305 type.argument-count name="print" expected="1" found="2"
+  fix type.interpolate 4:11-4:23 "\"Hei, {name}\""

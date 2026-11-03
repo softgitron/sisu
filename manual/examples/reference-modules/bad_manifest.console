@@ -1,0 +1,43 @@
+$ sisu check
+error[E1002]: `[package]` needs `version`
+  --> sisu.toml:1:2
+  |
+1 | [package]
+  |  ^^^^^^^
+
+error[E1003]: `version` takes a version `MAJOR.MINOR.PATCH`, as in `"0.3.1"`, found `"1.0"`
+  --> sisu.toml:3:11
+  |
+3 | version = "1.0"
+  |           ^^^^^
+
+warning[W0005]: `colour` is not a key of `[package]` that stage 0 knows; it is ignored
+  --> sisu.toml:5:1
+  |
+5 | colour = "black"
+  | ^^^^^^
+
+error[E1017]: `json` is the name of a standard-library module, which `import json` names; a package of the program needs another name
+  --> sisu.toml:8:1
+  |
+8 | json = "2.1"
+  | ^^^^
+
+error[E1010]: the dependency `json` is not a `path` dependency; stage 0 has no registry, so a dependency is `json = { path = "../json" }`
+  --> sisu.toml:8:8
+  |
+8 | json = "2.1"
+  |        ^^^^^
+
+error[E1010]: the dependency `stones` is not a `path` dependency; stage 0 has no registry, so a dependency is `stones = { path = "../stones" }`
+  --> sisu.toml:9:10
+  |
+9 | stones = "0.4"
+  |          ^^^^^
+
+error[E1015]: `[trust] unsafe` names `zlib`, which is not a dependency of this package
+  --> sisu.toml:12:11
+   |
+12 | unsafe = ["zlib"]
+   |           ^^^^^^
+

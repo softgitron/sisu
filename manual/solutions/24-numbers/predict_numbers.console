@@ -1,0 +1,51 @@
+$ sisu test predict_numbers.sisu
+warning[W0001]: typed hole `200u8 +% 100` of type `str`
+  --> predict_numbers.sisu:10:22
+   |
+10 | const WRAPPED: str = todo("200u8 +% 100")
+   |                      ^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `-100i8 -| 100` of type `str`
+  --> predict_numbers.sisu:11:24
+   |
+11 | const SATURATED: str = todo("-100i8 -| 100")
+   |                        ^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `(-1).truncate_to[u16]()` of type `str`
+  --> predict_numbers.sisu:12:24
+   |
+12 | const TRUNCATED: str = todo("(-1).truncate_to[u16]()")
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `(-1).to_u16()` of type `str`
+  --> predict_numbers.sisu:13:24
+   |
+13 | const CONVERTED: str = todo("(-1).to_u16()")
+   |                        ^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `0.5 + 0.25 == 0.75` of type `str`
+  --> predict_numbers.sisu:14:21
+   |
+14 | const HALVES: str = todo("0.5 + 0.25 == 0.75")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `0.1 + 0.2 == 0.3` of type `str`
+  --> predict_numbers.sisu:15:21
+   |
+15 | const TENTHS: str = todo("0.1 + 0.2 == 0.3")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `Ratio.of(6, -4)` of type `str`
+  --> predict_numbers.sisu:16:20
+   |
+16 | const RATIO: str = todo("Ratio.of(6, -4)")
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^
+
+test "wrapping" ... blocked by todo("200u8 +% 100")
+test "saturating" ... blocked by todo("-100i8 -| 100")
+test "truncating" ... blocked by todo("(-1).truncate_to[u16]()")
+test "converting" ... blocked by todo("(-1).to_u16()")
+test "binary fractions" ... blocked by todo("0.5 + 0.25 == 0.75")
+test "decimal fractions" ... blocked by todo("0.1 + 0.2 == 0.3")
+test "an exact fraction" ... blocked by todo("Ratio.of(6, -4)")
+0 passed, 0 failed, 7 blocked

@@ -4,4 +4,5 @@ error[E0305]: wrong number of arguments to `print`: expected 1, found 2
   |
 4 |     print("Hei,", name)
   |     ^^^^^^^^^^^^^^^^^^^
+  = fix: write the value into the text: `"Hei, {name}"`
 

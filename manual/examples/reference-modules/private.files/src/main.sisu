@@ -1,0 +1,6 @@
+# Private items of another module.
+from atlas.geo.point import Point
+
+def main():
+    let p = Point(65.0, 25.5)
+    print("{p.lat} {p.secret()}")

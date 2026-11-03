@@ -101,9 +101,8 @@ impl Code:
         while len(self.bytes) % align != 0:
             self.bytes.push(fill)
 
-    pub pure def append(mut self, other: list[int]):
-        for b in other:
-            self.bytes.push(b)
+    pub pure def append(mut self, own other: list[int]):
+        self.bytes.extend(other)
 
     # ----------------------------------------------------------- encoding
 

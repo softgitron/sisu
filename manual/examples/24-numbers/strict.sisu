@@ -1,0 +1,10 @@
+# Each float operation rounds once, in the same way on every machine.
+def main():
+    print(0.1 + 0.2)
+    let tenths = [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
+    var folded = 0.0
+    for x in tenths:
+        folded += x
+    print("{folded} {sum(tenths)}")
+    let a = 0.1
+    print("{a * 10.0 - 1.0} {a.mul_add(10.0, -1.0)}")

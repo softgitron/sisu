@@ -1,0 +1,21 @@
+# A contract may call only `pure` functions, and changes nothing.
+
+## Whether no hour of `hours` is there twice.
+def all_different(hours: Slice[int]) -> bool:
+    var seen: set[int] = set()
+    for h in hours:
+        if seen.contains(h):
+            return False
+        seen.add(h)
+    return True
+
+## Books `hour` in `hours`, where it must not be already.
+def book(mut hours: list[int], hour: int):
+    requires hour not in hours
+    ensures all_different(hours)
+    hours.push(hour)
+
+def main():
+    var hours = [17, 18]
+    book(mut hours, 20)
+    print(hours)

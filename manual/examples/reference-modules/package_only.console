@@ -1,0 +1,8 @@
+$ sisu run booking
+error[E0256]: `round_to_ten` is `pub(package)` in `sauna`, so only the modules of the package `sauna` can use it
+  --> src/main.sisu:5:17
+  |
+5 |     print(sauna.round_to_ten(84))
+  |                 ^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

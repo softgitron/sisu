@@ -3,7 +3,8 @@
 ##! ```text
 ##! sisu2 lir FILE.sir [--release] [--output FILE.lir]   # the LIR of a serialised SIR program
 ##! sisu2 sir FILE.sir                                   # the program read and written again
-##! sisu2 x86 FILE.lir --output FILE.o                   # the program compiled to an x86-64 object
+##! sisu2 x86 FILE.lir --output FILE.o [--comp-dir DIR] [--std DIR]
+##!                                                      # the program compiled to an x86-64 object
 ##! ```
 ##!
 ##! `lir` lowers the program (`stage2.lower`) and prints its LIR, or writes
@@ -11,7 +12,8 @@
 ##! with stage 1's writer, which gives the same bytes back: the reader's
 ##! check. `x86` compiles a LIR program with the Sisu backend
 ##! (`stage2.object`) into an ELF object, which the system linker links with
-##! the runtime.
+##! the runtime, its line table naming the program's files relative to
+##! `--comp-dir` and the standard library's in `--std`.
 
 import stage1.sir.write
 import stage2.gen
@@ -39,13 +41,16 @@ def emit(text: str):
         print(text)
 
 def usage() -> String:
-    return "usage: sisu2 lir FILE.sir [--release] [--output FILE.lir]\n       sisu2 sir FILE.sir\n       sisu2 x86 FILE.lir --output FILE.o".to_string()
+    return "usage: sisu2 lir FILE.sir [--release] [--output FILE.lir]\n       sisu2 sir FILE.sir\n       sisu2 x86 FILE.lir --output FILE.o [--comp-dir DIR] [--std DIR]".to_string()
 
-## The bytes as `bytes`.
+## The bytes as `bytes`, each converted by a table of the 256 values.
 pure def as_bytes(xs: list[int]) -> bytes:
+    var table: list[u8] = []
+    for k in range(256):
+        table.push(k.to_u8() ?? 0u8)
     var out: list[u8] = []
     for x in xs:
-        out.push((x & 255).to_u8() ?? 0u8)
+        out.push(table[x & 255])
     return bytes.from_list(out)
 
 def main(sys: System) -> ! {IoError, UsageError, CommandError}:
@@ -56,12 +61,20 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     let path = args[1].copy()
     var release = False
     var output: String? = None
+    var comp_dir = String.new()
+    var std_dir = String.new()
     var i = 2
     while i < len(args):
         if args[i] == "--release":
             release = True
         elif args[i] == "--output" and i + 1 < len(args):
             output = Some(args[i + 1].to_string())
+            i += 1
+        elif args[i] == "--comp-dir" and i + 1 < len(args):
+            comp_dir = args[i + 1].to_string()
+            i += 1
+        elif args[i] == "--std" and i + 1 < len(args):
+            std_dir = args[i + 1].to_string()
             i += 1
         else:
             return Err(Usage(text=usage()))
@@ -72,7 +85,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     if command == "x86":
         let o = output else:
             return Err(Usage(text=usage()))
-        let compiled = object.compile(text)
+        let compiled = object.compile(text, comp_dir, std_dir)
         match compiled:
             case Ok(code):
                 sys.fs.write(Path.new(o), as_bytes(code))?

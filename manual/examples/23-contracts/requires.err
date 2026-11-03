@@ -1,0 +1,6 @@
+panic: precondition of `average` failed: len(temps) > 0
+    len(temps) > 0
+    │   │
+    0   []
+  at average (requires.sisu:5:14)
+  at main (requires.sisu:14:11)

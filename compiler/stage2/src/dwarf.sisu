@@ -1,0 +1,266 @@
+##! The Sisu backend's debug information (decision 312): DWARF 4, as the
+##! Cranelift path's is (decision 227), so far its line table, which maps
+##! each function's code to the file, line and column of the LIR `loc`
+##! before it, and a unit naming each function's code, so that a debugger
+##! stops at a Sisu line or function and names the Sisu lines of the frames
+##! it unwinds through the frame pointers. The code before a function's
+##! first row is its declaration's line, and the first row is the
+##! prologue's end, as Cranelift's path marks it.
+
+from stage2.elf import DebugSection
+from stage2.x64 import Code
+from stage2.x86 import FnInfo, Obj, R_32, R_64, Reloc
+
+## DWARF's numbers this writer uses.
+const DW_TAG_COMPILE_UNIT: int = 17
+const DW_TAG_SUBPROGRAM: int = 46
+const DW_AT_NAME: int = 3
+const DW_AT_STMT_LIST: int = 16
+const DW_AT_LOW_PC: int = 17
+const DW_AT_HIGH_PC: int = 18
+const DW_AT_LANGUAGE: int = 19
+const DW_AT_COMP_DIR: int = 27
+const DW_AT_PRODUCER: int = 37
+const DW_AT_DECL_FILE: int = 58
+const DW_AT_DECL_LINE: int = 59
+const DW_AT_FRAME_BASE: int = 64
+const DW_FORM_ADDR: int = 1
+const DW_FORM_DATA2: int = 5
+const DW_FORM_DATA8: int = 7
+const DW_FORM_STRING: int = 8
+const DW_FORM_UDATA: int = 15
+const DW_FORM_SEC_OFFSET: int = 23
+const DW_FORM_EXPRLOC: int = 24
+const DW_LANG_RUST: int = 28
+const DW_OP_BREG6: int = 118
+
+## The standard opcodes of the line program.
+const LNS_COPY: int = 1
+const LNS_ADVANCE_PC: int = 2
+const LNS_ADVANCE_LINE: int = 3
+const LNS_SET_FILE: int = 4
+const LNS_SET_COLUMN: int = 5
+const LNS_SET_PROLOGUE_END: int = 10
+const LNE_END_SEQUENCE: int = 1
+const LNE_SET_ADDRESS: int = 2
+
+## An unsigned LEB128 number.
+pure def uleb(mut c: Code, x: int):
+    var v = x
+    while True:
+        let b = v & 127
+        v = v >> 7
+        if v == 0:
+            c.byte(b)
+            return
+        c.byte(b | 128)
+
+## A signed LEB128 number.
+pure def sleb(mut c: Code, x: int):
+    var v = x
+    while True:
+        let b = v & 127
+        v = v >> 7
+        if (v == 0 and (b & 64) == 0) or (v == -1 and (b & 64) != 0):
+            c.byte(b)
+            return
+        c.byte(b | 128)
+
+## A text and its terminating null byte (`DW_FORM_string`), without the null
+## bytes a name may not hold.
+pure def cstring(mut c: Code, s: str):
+    for k in range(s.byte_len()):
+        let b = s.byte_at(k).to_int()
+        if b != 0:
+            c.byte(b)
+    c.byte(0)
+
+## The line program's state between rows.
+struct Lines:
+    out: Code
+    relocs: list[Reloc]
+    address: int
+    line: int
+    col: int
+
+impl Lines:
+    pure def row(mut self, address: int, line: int, col: int, prologue_end: bool):
+        if address != self.address:
+            self.out.byte(LNS_ADVANCE_PC)
+            uleb(mut self.out, address - self.address)
+            self.address = address
+        if line != self.line:
+            self.out.byte(LNS_ADVANCE_LINE)
+            sleb(mut self.out, line - self.line)
+            self.line = line
+        if col != self.col:
+            self.out.byte(LNS_SET_COLUMN)
+            uleb(mut self.out, col)
+            self.col = col
+        if prologue_end:
+            self.out.byte(LNS_SET_PROLOGUE_END)
+        self.out.byte(LNS_COPY)
+
+    ## One function's rows: a sequence from its start to its end.
+    pure def function(mut self, f: FnInfo, file: int):
+        self.out.byte(0)
+        uleb(mut self.out, 9)
+        self.out.byte(LNE_SET_ADDRESS)
+        self.relocs.push(
+            Reloc(offset=self.out.pos(), symbol=".text".to_string(), kind=R_64, addend=f.start)
+        )
+        self.out.u64(0)
+        self.address = f.start
+        self.line = 1
+        self.col = 0
+        if file != 1:
+            self.out.byte(LNS_SET_FILE)
+            uleb(mut self.out, file)
+        var first = f.line
+        if first <= 0 and not f.rows.is_empty():
+            first = f.rows[0].line
+        self.row(f.start, max(first, 1), 0, False)
+        var last: (int, int)? = None
+        for r in f.rows:
+            if last == Some((r.line, r.col)):
+                continue
+            self.row(r.offset, r.line, r.col, last.is_none())
+            last = Some((r.line, r.col))
+        self.out.byte(LNS_ADVANCE_PC)
+        uleb(mut self.out, f.end - self.address)
+        self.out.byte(0)
+        uleb(mut self.out, 1)
+        self.out.byte(LNE_END_SEQUENCE)
+
+## The debug sections of the object `o`: `sources` are the program's files
+## as LIR numbers them, `comp_dir` the directory of the build (the
+## program's files are relative to it), and `std_dir` the directory of the
+## standard library (`<std>/` in a source's name) when it is known.
+pub pure def sections(
+    o: Obj, sources: list[String], comp_dir: str, std_dir: str
+) -> list[DebugSection]:
+    # The line table: its header, then a sequence for each function that
+    # has a source.
+    var lines = Lines(out=Code.new(), relocs=[], address=0, line=1, col=0)
+    lines.out.u32(0)
+    lines.out.u16(4)
+    let header_at = lines.out.pos()
+    lines.out.u32(0)
+    let header_start = lines.out.pos()
+    lines.out.byte(1)
+    lines.out.byte(1)
+    lines.out.byte(1)
+    lines.out.byte(-5)
+    lines.out.byte(14)
+    lines.out.byte(13)
+    for n in [0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1]:
+        lines.out.byte(n)
+    if not std_dir.is_empty():
+        cstring(mut lines.out, std_dir)
+    lines.out.byte(0)
+    for s in sources:
+        if not std_dir.is_empty() and s.starts_with("<std>/"):
+            cstring(mut lines.out, s.strip_prefix("<std>/"))
+            uleb(mut lines.out, 1)
+        else:
+            cstring(mut lines.out, if s.is_empty(): "<source>" else: s)
+            uleb(mut lines.out, 0)
+        uleb(mut lines.out, 0)
+        uleb(mut lines.out, 0)
+    lines.out.byte(0)
+    lines.out.patch32(header_at, lines.out.pos() - header_start)
+    for f in o.infos:
+        if let Some(s) = f.source:
+            if s >= 0 and s < len(sources):
+                lines.function(f, s + 1)
+    lines.out.patch32(0, lines.out.pos() - 4)
+    # The abbreviations: the unit, and a function with and without its
+    # declaration's place.
+    var abbrev = Code.new()
+    let unit_attrs = [
+        (DW_AT_PRODUCER, DW_FORM_STRING),
+        (DW_AT_LANGUAGE, DW_FORM_DATA2),
+        (DW_AT_NAME, DW_FORM_STRING),
+        (DW_AT_COMP_DIR, DW_FORM_STRING),
+        (DW_AT_STMT_LIST, DW_FORM_SEC_OFFSET),
+        (DW_AT_LOW_PC, DW_FORM_ADDR),
+        (DW_AT_HIGH_PC, DW_FORM_DATA8),
+    ]
+    abbreviation(mut abbrev, 1, DW_TAG_COMPILE_UNIT, True, unit_attrs)
+    let declared = [
+        (DW_AT_NAME, DW_FORM_STRING),
+        (DW_AT_DECL_FILE, DW_FORM_UDATA),
+        (DW_AT_DECL_LINE, DW_FORM_UDATA),
+        (DW_AT_LOW_PC, DW_FORM_ADDR),
+        (DW_AT_HIGH_PC, DW_FORM_DATA8),
+        (DW_AT_FRAME_BASE, DW_FORM_EXPRLOC),
+    ]
+    abbreviation(mut abbrev, 2, DW_TAG_SUBPROGRAM, False, declared)
+    let undeclared = [
+        (DW_AT_NAME, DW_FORM_STRING),
+        (DW_AT_LOW_PC, DW_FORM_ADDR),
+        (DW_AT_HIGH_PC, DW_FORM_DATA8),
+        (DW_AT_FRAME_BASE, DW_FORM_EXPRLOC),
+    ]
+    abbreviation(mut abbrev, 3, DW_TAG_SUBPROGRAM, False, undeclared)
+    abbrev.byte(0)
+    # The unit and its functions.
+    var info = Code.new()
+    var info_relocs: list[Reloc] = []
+    info.u32(0)
+    info.u16(4)
+    info_relocs.push(
+        Reloc(offset=info.pos(), symbol=".debug_abbrev".to_string(), kind=R_32, addend=0)
+    )
+    info.u32(0)
+    info.byte(8)
+    uleb(mut info, 1)
+    cstring(mut info, "sisu x86-64 backend in Sisu")
+    info.u16(DW_LANG_RUST)
+    cstring(mut info, if sources.is_empty(): "<program>" else: sources[0])
+    cstring(mut info, if comp_dir.is_empty(): "." else: comp_dir)
+    info_relocs.push(
+        Reloc(offset=info.pos(), symbol=".debug_line".to_string(), kind=R_32, addend=0)
+    )
+    info.u32(0)
+    info_relocs.push(Reloc(offset=info.pos(), symbol=".text".to_string(), kind=R_64, addend=0))
+    info.u64(0)
+    info.u64(o.text.pos())
+    for f in o.infos:
+        var file = 0
+        if let Some(s) = f.source:
+            if s >= 0 and s < len(sources):
+                file = s + 1
+        uleb(mut info, if file > 0: 2 else: 3)
+        cstring(mut info, f.name)
+        if file > 0:
+            uleb(mut info, file)
+            uleb(mut info, max(f.line, 0))
+        info_relocs.push(
+            Reloc(offset=info.pos(), symbol=".text".to_string(), kind=R_64, addend=f.start)
+        )
+        info.u64(0)
+        info.u64(f.end - f.start)
+        # The frame base is the frame pointer.
+        uleb(mut info, 2)
+        info.byte(DW_OP_BREG6)
+        sleb(mut info, 0)
+    info.byte(0)
+    info.patch32(0, info.pos() - 4)
+    return [
+        DebugSection(name=".debug_abbrev".to_string(), data=abbrev.bytes, relocs=[]),
+        DebugSection(name=".debug_info".to_string(), data=info.bytes, relocs=info_relocs),
+        DebugSection(name=".debug_line".to_string(), data=lines.out.bytes, relocs=lines.relocs),
+    ]
+
+## An abbreviation: its code, tag, whether its entries have children, and
+## its attributes with their forms.
+pure def abbreviation(mut c: Code, code: int, tag: int, children: bool, attrs: list[(int, int)]):
+    uleb(mut c, code)
+    uleb(mut c, tag)
+    c.byte(if children: 1 else: 0)
+    for (a, f) in attrs:
+        uleb(mut c, a)
+        uleb(mut c, f)
+    c.byte(0)
+    c.byte(0)

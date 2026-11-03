@@ -1,0 +1,8 @@
+$ sisu run sizes_mixed.sisu
+error[E0310]: `+` cannot be applied to `i16` and `u32`
+  --> sizes_mixed.sisu:9:17
+  |
+9 |     let total = sample + colour
+  |                 ^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

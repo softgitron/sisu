@@ -1,0 +1,5 @@
+test "every reading worked" ... ok
+test "a reading in the middle failed" ... ok
+test "the first reading failed" ... ok
+test "no reading worked" ... ok
+4 passed, 0 failed, 0 blocked

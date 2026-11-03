@@ -168,6 +168,12 @@ jobs:
         # --from-lir`, run, and its executable compared byte for byte with
         # the one the SIR gives, in both profiles (decision 284).
         run: ./target/debug/sisu-conformance --sisu target/debug/sisu --native-from-lir conformance/native.list
+      - name: Native conformance with the Sisu backend (`--backend=sisu`)
+        # The x86-64 backend written in Sisu (D-087, step 2; decision 306)
+        # compiles stage 2's LIR of each case of conformance/native-sisu.list
+        # to an object linked with the same runtime; the runs are compared
+        # with the interpreter's expectations.
+        run: ./target/debug/sisu-conformance --sisu target/debug/sisu --native-sisu conformance/native-sisu.list
       - name: Stage 1 compiled natively (informational, never fails)
         # The bootstrap path: stage 1 built by the backend with stage 1 as
         # its front end, its token stream and tree of the prelude against

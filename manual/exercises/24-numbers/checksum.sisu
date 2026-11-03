@@ -1,0 +1,27 @@
+##! Exercise 24.2, a checksum that overflows. Kind: fix. Level: 1.
+##!
+##! `djb2` is a quick checksum of bytes: start at 5381, and for each byte
+##! multiply by 33 and add the byte, keeping the lowest 32 bits. Two tests
+##! pass and two stop the program. Run `sisu test checksum.sisu`, read what
+##! stops it, and fix `djb2`, not the tests, so that every test passes.
+##! The hints are in chapter 24 of the tutorial, under "Exercise 24.2: a
+##! checksum that overflows".
+
+## The djb2 checksum of `data`.
+def djb2(data: bytes) -> u32:
+    var hash: u32 = 5381
+    for byte in data:
+        hash = hash * 33 + byte
+    return hash
+
+test "nothing":
+    assert djb2(b"") == 5381
+
+test "one letter":
+    assert djb2(b"a") == 177670
+
+test "a word":
+    assert djb2(b"sauna") == 274150173
+
+test "letters beyond ASCII":
+    assert djb2("löyly".encode()) == 301641992

@@ -363,6 +363,10 @@ fn aggregates_dropped_in_a_loop_run_in_bounded_memory() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The program the debuggers are tried on: a struct, an error, a function
+/// with parameters and locals, and `main` calling it.
+const SHAPES: &str = "struct Point:\n    x: int\n    y: int\n\nerror Problem:\n    TooBig(limit: int)\n\ndef check(n: int) -> int ! Problem:\n    if n > 2:\n        return Err(TooBig(limit=2))\n    return Ok(n)\n\ndef area(p: Point, scale: int) -> int:\n    let w = p.x * scale\n    let h = p.y * scale\n    return w * h\n\ndef main():\n    let name = \"corner\".to_string()\n    let p = Point(x=3, y=4)\n    let xs = [1, 2, 3]\n    let r = check(5)\n    let a = area(p, 2)\n    print(\"{name} {a} {xs} {r:?}\")\n";
+
 /// The executable carries DWARF for the Sisu source (decision 227): a
 /// debugger stops at a line of a Sisu file, names the Sisu functions and
 /// lines of the frames it unwinds, and shows the locals and parameters
@@ -372,8 +376,7 @@ fn aggregates_dropped_in_a_loop_run_in_bounded_memory() {
 fn a_debugger_names_sisu_lines_and_locals() {
     let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
     let dir = scratch("debug-info");
-    let program = "struct Point:\n    x: int\n    y: int\n\nerror Problem:\n    TooBig(limit: int)\n\ndef check(n: int) -> int ! Problem:\n    if n > 2:\n        return Err(TooBig(limit=2))\n    return Ok(n)\n\ndef area(p: Point, scale: int) -> int:\n    let w = p.x * scale\n    let h = p.y * scale\n    return w * h\n\ndef main():\n    let name = \"corner\".to_string()\n    let p = Point(x=3, y=4)\n    let xs = [1, 2, 3]\n    let r = check(5)\n    let a = area(p, 2)\n    print(\"{name} {a} {xs} {r:?}\")\n";
-    std::fs::write(dir.join("shapes.sisu"), program).expect("the program");
+    std::fs::write(dir.join("shapes.sisu"), SHAPES).expect("the program");
     let built = std::process::Command::new(&sisu)
         .args(["build", "--native", "shapes.sisu"])
         .current_dir(&dir)
@@ -430,6 +433,113 @@ fn a_debugger_names_sisu_lines_and_locals() {
                 "bt 2",
                 "-o",
                 "frame variable",
+                "./shapes",
+            ],
+        );
+        assert!(out.contains("shapes.sisu:15"), "{out}");
+        assert!(out.contains("shapes.sisu:23"), "{out}");
+    } else {
+        let out = run("readelf", &["--debug-dump=decodedline", "./shapes"]);
+        assert!(
+            out.lines().any(|l| l.starts_with("shapes.sisu") && l.split_whitespace().nth(1) == Some("15")),
+            "{out}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The backend is chosen by name (decision 306): `--backend=sisu` and
+/// `SISU_BACKEND=sisu` build with the backend written in Sisu, the build
+/// saying so, `--backend=cranelift` with the default; another name is
+/// `D0123`, and the Sisu backend with the Rust lowering, whose output is
+/// not LIR, is `D0124`.
+#[test]
+fn the_backend_is_chosen_by_name() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let dir = scratch("backend-names");
+    std::fs::write(
+        dir.join("count.sisu"),
+        "def main():\n    var n = 0\n    for i in range(5):\n        n += i\n    print(n)\n",
+    )
+    .expect("the program");
+    let build = |args: &[&str], env: Option<&str>| {
+        let mut cmd = std::process::Command::new(&sisu);
+        cmd.arg("build").arg("--native").args(args).arg("count.sisu").current_dir(&dir);
+        cmd.env("SISU_NATIVE_TIMES", "1").env_remove("SISU_BACKEND");
+        if let Some(b) = env {
+            cmd.env("SISU_BACKEND", b);
+        }
+        outcome(cmd.output().expect("sisu runs"))
+    };
+    for (args, env) in [(&["--backend=sisu"][..], None), (&[][..], Some("sisu"))] {
+        let (_, err, status) = build(args, env);
+        assert_eq!(status, Some(0), "{err}");
+        assert!(err.contains("native: compiled by the Sisu backend in "), "{err}");
+        let ran = std::process::Command::new(dir.join("count")).output().expect("it runs");
+        assert_eq!(String::from_utf8_lossy(&ran.stdout), "10\n");
+    }
+    let (_, err, status) = build(&["--backend=cranelift"], Some("sisu"));
+    assert_eq!(status, Some(0), "{err}");
+    assert!(!err.contains("Sisu backend"), "{err}");
+    let (_, err, status) = build(&["--backend=llvm"], None);
+    assert_eq!(status, Some(2), "{err}");
+    assert!(err.contains("D0123") && err.contains("not `llvm`"), "{err}");
+    let (_, err, status) = build(&["--backend=sisu", "--lower=rust"], None);
+    assert_eq!(status, Some(1), "{err}");
+    assert!(err.contains("does not go with `--lower=rust`"), "{err}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The Sisu backend's objects carry a line table and a unit naming each
+/// function's code (decision 312): a debugger stops at a Sisu function
+/// (after its prologue, on its declaration's line) and at a Sisu line, and
+/// names the Sisu functions and lines of the frames it unwinds through the
+/// frame pointers. Under `gdb --batch` where there is one, else `lldb`,
+/// else the line table as `readelf` decodes it.
+#[test]
+fn the_sisu_backends_line_table_names_sisu_lines() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let dir = scratch("sisu-lines");
+    std::fs::write(dir.join("shapes.sisu"), SHAPES).expect("the program");
+    let built = std::process::Command::new(&sisu)
+        .args(["build", "--native", "--backend=sisu", "shapes.sisu"])
+        .current_dir(&dir)
+        .output()
+        .expect("sisu builds");
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    let ran = std::process::Command::new(dir.join("shapes")).current_dir(&dir).output().expect("it runs");
+    assert_eq!(String::from_utf8_lossy(&ran.stdout), "corner 48 [1, 2, 3] Err(TooBig(limit=2))\n");
+    let have = |tool: &str| {
+        std::process::Command::new(tool).arg("--version").output().is_ok_and(|o| o.status.success())
+    };
+    let run = |tool: &str, args: &[&str]| {
+        let out =
+            std::process::Command::new(tool).args(args).current_dir(&dir).output().expect("the tool runs");
+        format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr))
+    };
+    if have("gdb") {
+        let commands = ["break area", "run", "break shapes.sisu:15", "continue", "bt 2"];
+        let mut args = vec!["--batch"];
+        for c in commands {
+            args.extend(["-ex", c]);
+        }
+        args.push("./shapes");
+        let out = run("gdb", &args);
+        assert!(out.contains("Breakpoint 1 at ") && out.contains("file shapes.sisu, line 13."), "{out}");
+        assert!(out.contains("area () at shapes.sisu:13"), "{out}");
+        assert!(out.contains("area () at shapes.sisu:15"), "{out}");
+        assert!(out.contains("main () at shapes.sisu:23"), "{out}");
+    } else if have("lldb") {
+        let out = run(
+            "lldb",
+            &[
+                "--batch",
+                "-o",
+                "breakpoint set --file shapes.sisu --line 15",
+                "-o",
+                "run",
+                "-o",
+                "bt 2",
                 "./shapes",
             ],
         );

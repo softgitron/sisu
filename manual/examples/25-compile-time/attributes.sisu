@@ -1,0 +1,23 @@
+# Attributes are data that compile-time code can read.
+
+## A turn in the sauna, kept in the table `bookings`.
+@table(bookings)
+struct Booking:
+    name: String
+    hour: int
+
+## The query that reads every row of `T` from its table.
+comptime def select_all(T: type) -> String:
+    var table = reflect.name_of(T).to_lowercase()
+    comptime for a in reflect.attributes_of(T):
+        if a.name == "table":
+            table = a.args[0].to_string()
+    var columns = String.new("")
+    var comma = ""
+    comptime for f in reflect.fields_of(T):
+        columns = "{columns}{comma}{f.name}"
+        comma = ", "
+    return "SELECT {columns} FROM {table}"
+
+def main():
+    print(comptime select_all(Booking))

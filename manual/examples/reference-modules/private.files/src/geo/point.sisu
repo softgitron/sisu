@@ -1,0 +1,7 @@
+# A struct with a private field and a private method.
+pub struct Point:
+    pub lat: f64
+    lon: f64
+
+    def secret(self) -> int:
+        return 42

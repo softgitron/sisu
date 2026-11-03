@@ -1,0 +1,12 @@
+# A `Decimal` holds a base-10 number exactly, and rounds when told to.
+from std.num import Decimal, Rounding
+
+def main():
+    let price: Decimal = 0.1
+    print(price + price + price)
+    let bill: Decimal = 100
+    let share = bill.div(Decimal.of(3), 2, Rounding.HalfEven)
+    print("{share} each, {bill - share * Decimal.of(3)} left over")
+    let tip: Decimal = 2.345
+    for mode in [Rounding.HalfEven, Rounding.HalfUp, Rounding.Down]:
+        print("{mode:?}: {tip.round(2, mode)}")

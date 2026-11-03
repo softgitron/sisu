@@ -1,0 +1,15 @@
+$ sisu test round_up.sisu
+test "a turn and a half" ... ok
+test "a little over two turns" ... ok
+test "contract of round_up" ... FAILED
+
+test "contract of round_up" ... FAILED
+panic: the property failed for (0, 1) (case 2, shrunk 3 times)
+  it panicked: postcondition of `round_up` failed: minutes <= result < minutes + turn
+    minutes <= result < minutes + turn
+    │          │        │       │ │
+    0          1        0       1 1
+  at test "contract of round_up" (<arbitrary>/main.sisu:13:5)
+replay: sisu test --replay 1-bf1544b37d7f271b-0.0.1-t2-s0-r0-c0.0.0.1 round_up.sisu
+
+2 passed, 1 failed, 0 blocked

@@ -1,0 +1,19 @@
+$ sisu test checksum.sisu
+test "nothing" ... ok
+test "one letter" ... ok
+test "a word" ... FAILED
+test "letters beyond ASCII" ... FAILED
+
+test "a word" ... FAILED
+panic: integer overflow: 193505550 * 33 as u32
+  at djb2 (checksum.sisu:14:16)
+  at test "a word" (checksum.sisu:24:12)
+replay: sisu test --replay 1-f8aa413be5b4d3d3-0.0.1-t2-s0-r0 checksum.sisu
+
+test "letters beyond ASCII" ... FAILED
+panic: integer overflow: 193501226 * 33 as u32
+  at djb2 (checksum.sisu:14:16)
+  at test "letters beyond ASCII" (checksum.sisu:27:12)
+replay: sisu test --replay 1-f8aa413be5b4d3d3-0.0.1-t3-s0-r0 checksum.sisu
+
+2 passed, 2 failed, 0 blocked

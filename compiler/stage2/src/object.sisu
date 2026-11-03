@@ -3,8 +3,8 @@
 ##! it is read, then the ELF object written (`sisu2 x86 FILE.lir --output
 ##! FILE.o`).
 
+import stage2.dwarf
 import stage2.elf
-from stage2.elf import DebugSection
 from stage2.lirread import Item, K_LOCAL, LirReadError, LirReader
 from stage2.x86 import Obj, X86Error
 
@@ -15,8 +15,10 @@ pub error ObjectError:
     ## A construct the backend does not compile yet, and its function.
     Unsupported(what: String, function: String)
 
-## The object file the backend makes of a LIR program's text.
-pub pure def compile(text: str) -> list[int] ! ObjectError:
+## The object file the backend makes of a LIR program's text, its debug
+## information naming the program's files relative to `comp_dir` and the
+## standard library's in `std_dir` (when not empty).
+pub pure def compile(text: str, comp_dir: str, std_dir: str) -> list[int] ! ObjectError:
     var r = LirReader.new()
     var o = Obj.new()
     var locals: set[String] = set()
@@ -44,5 +46,5 @@ pub pure def compile(text: str) -> list[int] ! ObjectError:
                 if let Err(X86Error.Unsupported(what, function)) = done:
                     return Err(Unsupported(what=what.copy(), function=function.copy()))
     o.finish()
-    let debug: list[DebugSection] = []
+    let debug = dwarf.sections(o, sources, comp_dir, std_dir)
     return Ok(elf.write(o, debug))

@@ -1,0 +1,14 @@
+# `requires` states what a caller must give, and is checked on entry.
+
+## The average of `temps`, rounded down.
+def average(temps: Slice[int]) -> int:
+    requires len(temps) > 0
+    var total = 0
+    for t in temps:
+        total += t
+    return total // len(temps)
+
+def main():
+    print(average([80, 85, 120]))
+    let none: list[int] = []
+    print(average(none))

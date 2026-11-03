@@ -1,0 +1,37 @@
+##! Exercise 24.4, the warmest reading. Kind: fix. Level: 2.
+##!
+##! A thermometer that fails reports NaN in place of a temperature.
+##! `warmest` finds the warmest reading of a day and must leave out the
+##! failed ones, but two of its tests fail. Run `sisu test warmest.sisu`,
+##! read the values in the reports, and fix `warmest`, not the tests, so
+##! that every test passes. The hints are in chapter 24 of the tutorial,
+##! under "Exercise 24.4: the warmest reading".
+
+## The warmest of `readings`, leaving out the failed ones, or `None` when
+## there is no reading that worked.
+def warmest(readings: Slice[f64]) -> f64?:
+    if len(readings) == 0:
+        return None
+    var best = readings[0]
+    for r in readings:
+        if r > best:
+            best = r
+    return Some(best)
+
+## What a thermometer that failed reports.
+def failed() -> f64:
+    return 0.0 / 0.0
+
+test "every reading worked":
+    assert warmest([21.5, 23.0, 19.5]) == Some(23.0)
+    assert warmest([-4.0]) == Some(-4.0)
+
+test "a reading in the middle failed":
+    assert warmest([21.5, failed(), 23.0]) == Some(23.0)
+
+test "the first reading failed":
+    assert warmest([failed(), 21.5, 19.0]) == Some(21.5)
+
+test "no reading worked":
+    assert warmest([failed(), failed()]) == None
+    assert warmest([]) == None

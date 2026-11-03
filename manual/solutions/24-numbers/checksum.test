@@ -1,0 +1,5 @@
+test "nothing" ... ok
+test "one letter" ... ok
+test "a word" ... ok
+test "letters beyond ASCII" ... ok
+4 passed, 0 failed, 0 blocked

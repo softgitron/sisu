@@ -1,0 +1,4 @@
+# The module `atlas.geo.point`, from `src/geo/point.sisu`.
+pub struct Point:
+    pub lat: f64
+    pub lon: f64

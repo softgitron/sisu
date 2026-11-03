@@ -1,0 +1,25 @@
+$ sisu check
+error[E0203]: there is no module `atlas.roads`
+  --> src/main.sisu:3:8
+  |
+3 | import atlas.roads
+  |        ^^^^^^^^^^^
+
+error[E0204]: module `atlas.geo` has no item `Route`
+  --> src/main.sisu:4:23
+  |
+4 | from atlas.geo import Route
+  |                       ^^^^^
+
+error[E0100]: expected a name, found `*`
+  --> src/main.sisu:5:29
+  |
+5 | from std.collections import *
+  |                             ^
+
+error[E0220]: cannot import `maps`: it names no module of this package, of a dependency in `sisu.toml`, or of the standard library
+  --> src/main.sisu:6:8
+  |
+6 | import maps
+  |        ^^^^
+

@@ -1,0 +1,20 @@
+# A refinement type is a type whose values satisfy a predicate.
+type Percent = int where 0 <= self <= 100
+
+## How the steam feels at `humidity`, which is an `int` too.
+def steam(humidity: Percent) -> str:
+    if humidity < 20:
+        return "dry"
+    if humidity < 50:
+        return "soft"
+    return "heavy"
+
+def main():
+    let after_ladle: Percent = 35
+    print("{after_ladle}: {steam(after_ladle)}")
+    for reading in ["12", "70", "140"]:
+        let n = reading.parse_int() ?? 0
+        let humidity = Percent.try_from(n) else as e:
+            print("{n}: {e}")
+            continue
+        print("{n}: {steam(n)}")

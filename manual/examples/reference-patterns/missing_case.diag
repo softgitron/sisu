@@ -1,1 +1,1 @@
-8:12-8:23 E0314 type.non-exhaustive missing="`Amber`"
+8:12-8:23 E0314 type.non-exhaustive missing="`Amber`, `Green`"

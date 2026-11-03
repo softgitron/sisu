@@ -1,0 +1,5 @@
+##! How hot a sauna is.
+
+## How a sauna at `celsius` degrees feels.
+pub def feel(celsius: int) -> str:
+    return if celsius >= 70: "hot" else: "warm"

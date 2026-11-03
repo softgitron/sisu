@@ -1,0 +1,23 @@
+# `comptime` runs ordinary code while the program compiles.
+
+## The prime numbers below `n`, by the sieve of Eratosthenes.
+def primes_below(n: int) -> list[int]:
+    var composite: list[bool] = []
+    for _ in range(n):
+        composite.push(False)
+    var primes: list[int] = []
+    for k in range(2, n):
+        if not composite[k]:
+            primes.push(k)
+            var multiple = k * k
+            while multiple < n:
+                composite[multiple] = True
+                multiple += k
+    return primes
+
+const PRIMES: list[int] = comptime primes_below(100)
+
+def main():
+    print("{len(PRIMES)} primes, the last {PRIMES[^1]}")
+    print(comptime "computed while compiling".to_uppercase())
+    print(primes_below(20))

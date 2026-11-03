@@ -1,0 +1,7 @@
+panic: invariant of `Schedule` failed: 0 <= self.opens < self.closes <= 24
+    0 <= self.opens < self.closes <= 24
+         │            │
+         -6           21
+  at the invariant of Schedule (schedule.sisu:7:15)
+  at Schedule.open_earlier (schedule.sisu:11:28)
+  at main (schedule.sisu:21:5)

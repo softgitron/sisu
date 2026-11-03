@@ -1,0 +1,7 @@
+$ sisu run nan.sisu
+False False False True
+inf -inf
+[19.0, 21.5, 23.25]
+panic: NaN has no order
+  at closure in main (nan.sisu:10:29)
+  at main (nan.sisu:10:5)

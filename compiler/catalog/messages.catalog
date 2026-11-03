@@ -848,7 +848,7 @@ D0119 cli     native.from-lir             `--from-lir FILE` builds a LIR program
 D0120 cli     cli.bad-lower               `--lower` takes `stage2` (the lowering written in Sisu, the default) or `rust` (the Rust lowering, the oracle), not `{value}`
 D0121 cli     native.stage2-build         building stage 2 in `{dir}` failed; `--lower=rust` lowers with the Rust backend:\n{detail}
 D0122 cli     native.stage2-failed        internal compiler error: stage 2 failed to lower the program (status {status}); `--lower=rust` lowers with the Rust backend:\n{detail}
-# Which backend compiles LIR to machine code (decisions 306 to 311):
+# Which backend compiles LIR to machine code (decision 306):
 # Cranelift through the Rust translation, the default, or `--backend=sisu`
 # (`SISU_BACKEND=sisu`), the x86-64 backend written in Sisu (`sisu2 x86`),
 # which compiles stage 2's LIR and so not the Rust lowering's; and the Sisu

@@ -8,6 +8,9 @@
 #                                                        output or into FILE.lir
 #   sisu2 sir FILE.sir                                   the program read and written again,
 #                                                        as `sisu sir` wrote it
+#   sisu2 x86 FILE.lir --output FILE.o                   a LIR program compiled to an x86-64
+#                                                        ELF object by the backend in Sisu
+#                                                        (D-087, step 2; decision 306)
 #
 # The first use builds stage 2 natively (`sisu build --native`, through
 # stage 1, the front end of `sisu`) into compiler/target/stage2/, and so

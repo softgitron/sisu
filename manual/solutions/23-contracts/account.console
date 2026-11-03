@@ -1,0 +1,28 @@
+$ sisu test account.sisu
+warning[W0001]: typed hole `deposit` of type `_`
+  --> account.sisu:30:9
+   |
+30 |         todo("deposit")
+   |         ^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `withdraw` of type `! AccountError`
+  --> account.sisu:39:16
+   |
+39 |         return todo("withdraw")
+   |                ^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `transfer` of type `! AccountError`
+  --> account.sisu:52:12
+   |
+52 |     return todo("transfer")
+   |            ^^^^^^^^^^^^^^^^
+
+test "money in and out" ... blocked by todo("deposit")
+test "below zero costs the fee" ... blocked by todo("withdraw")
+test "past the limit is refused" ... blocked by todo("withdraw")
+test "a transfer moves the money" ... blocked by todo("transfer")
+test "a transfer that cannot be paid changes nothing" ... blocked by todo("transfer")
+test "contract of Account.deposit" ... blocked by todo("deposit")
+test "contract of Account.withdraw" ... blocked by todo("withdraw")
+test "contract of transfer" ... blocked by todo("transfer")
+0 passed, 0 failed, 8 blocked

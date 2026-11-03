@@ -1,0 +1,14 @@
+$ sisu test search.sisu
+test "a number in the middle" ... ok
+test "a number that is not there" ... ok
+test "contract of find" ... FAILED
+
+test "contract of find" ... FAILED
+panic: the property failed for ([0], 0) (case 58, shrunk 3 times)
+  it panicked: postcondition of `find` failed: match result:
+        case Some(i): items[i] == target
+        case None: not items.contains(target)
+  at test "contract of find" (<arbitrary>/main.sisu:13:5)
+replay: sisu test --replay 1-1b1679770fa54e9d-0.0.1-t2-s0-r0-c1.0.0.0.0.0 search.sisu
+
+2 passed, 1 failed, 0 blocked

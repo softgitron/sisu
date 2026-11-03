@@ -1,0 +1,8 @@
+$ sisu run old_in_requires.sisu
+error[E0803]: `old(...)` is a value as it was on entry, which only an `ensures` clause can ask for
+  --> old_in_requires.sisu:7:18
+  |
+7 |         requires old(self.celsius) < 110
+  |                  ^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

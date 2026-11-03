@@ -290,7 +290,7 @@ TLS.
 
 ### Part V. Further
 
-**23. Contracts.** `requires`, `ensures` with `result` and `old`,
+**23. Contracts** ([written](tutorial/23-contracts.md)). `requires`, `ensures` with `result` and `old`,
 `invariant` on structs and the rule that only the type's own methods
 assign its fields, refinement types (`type Port = int where ...`) and
 `try_from`, the check levels (`--contracts`), contracts in the
@@ -299,7 +299,7 @@ what waits for the verifier (`decreases`, ghost code). Exercises: a
 bank account with an invariant, a binary search with its contract.
 Stage 0 runs all of it.
 
-**24. Numbers in depth.** The sized integers and `uint`, the operator
+**24. Numbers in depth** ([written](tutorial/24-numbers.md)). The sized integers and `uint`, the operator
 families for wrapping, saturating and checked arithmetic, conversions
 that can lose information, strict floating point (one rounding per
 operation, `mul_add`, pairwise `sum`, `@float(fast)`; D-074), NaN and
@@ -834,7 +834,7 @@ solutions and passing checks.
 | 8 | Chapters 14 (3, done), 15 (3, done), 16 (3, done), 17 with challenge III (2.5, done); R2 (3, done), R3 (2, done), R6 (1, done), R13 (2.5) | 20 |
 | 9 | Chapters 18 (3, done), 19 (3, done), 20 (4, done), 21 (3, done), 22 with challenge IV (4, done); R9 (2.5), R10 (2), R15 (2); G5 to G16 (9) | 32.5 |
 | 10 | R4 (2), R5 (1.5), R8 (1.5), R14 (1.5), R20 (2), R21 (1), R22 (1); X1, X2, X4, X5, X8, X10, X12 (7) | 17.5 |
-| 11 | Chapters 23 (2), 24 (2), 25 (3), 26 (2); R11 (1), R12 (2); G17, G20, G21, G26, G27, G28, G29, G30, G31, G32 (7.5); X6, X7, X9, X13, X14 (5) | 26.5 |
+| 11 | Chapters 23 (2, done), 24 (2, done), 25 (3), 26 (2); R11 (1), R12 (2); G17, G20, G21, G26, G27, G28, G29, G30, G31, G32 (7.5); X6, X7, X9, X13, X14 (5) | 26.5 |
 | 12 | When their features exist: chapters 27 (3) and 28 with challenge V (2); G18, G19, G22, G23, G24, G25 (4.5); X11 (1); the site (3) | 13.5 |
 | | Total | about 159 |
 
@@ -845,16 +845,9 @@ chapter: each diagnostic a page shows gets its entry.
 ## What the plan found in stage 0
 
 Writing the first chapter, and trying the habits chapter 4 will meet,
-against stage 0 turned up five things for the compiler's maintainers,
+against stage 0 turned up three things for the compiler's maintainers,
 recorded here so that later chapters do not rediscover them:
 
-- `print("Hei,", "maailma!")`, the commonest Python habit, gets E0305
-  (`type.argument-count`) with no fix; the fix that teaches is
-  interpolation, `print("Hei, {x}")`.
-- An assignment to an undeclared name, `greeting = "..."`, gets E0200 on
-  each use and no fix; the fix is `let`. A Python loop `else` gets E0103
-  (`parse.expected-expression`), where the fix is the `if let` on the
-  search's result that [02](../proposal/02-syntax.md) gives.
 - `{x=:.1f}` ignores the precision for a float and prints every digit,
   though [02](../proposal/02-syntax.md) says a format spec may follow the
   `=`; `{n=:>5}` works.
@@ -908,42 +901,23 @@ Writing the rest of Part I turned up more, by chapter:
   is; the binding holds a borrow, and `.copy()` is not offered. A test
   name is interpolated, so `test "len({3, 1})":` gets E0103, and an
   escaped quote in a test name gets E0005.
-- Chapter 6. `for letter in word` gets E0325 (`type.not-iterable`) with
-  no fix, where E0345 for `word[0]` lists `.chars()`, `.bytes()` and
-  `.byte_slice(a, b)`. Python's `letter in "aeiou"` with `letter` a
+- Chapter 6. Python's `letter in "aeiou"` with `letter` a
   `char` gets E0369 (`type.comparison-types`) with no fix; a list of
   `char` values, or `"aeiou".contains("{letter}")`, is what works.
-- Chapter 7. A `str` field gets E0411, whose fix makes the struct a
-  `view struct`, where a beginner wants `String`. A field changed
-  through a plain `self` gets E0341 ("not declared with `var`") with a
-  note about `ref mut`, and no fix that adds `mut self`. A missing
-  `Eq`, `Ord` or `Hash` on a type of the same file gets E0347 or E0368
-  with no `@derive` fix, and `sorted([...])` names the type `ref
-  Version`. `sorted(hand)` on a borrowed list of items that are not
-  `Copy` gets E0300 ("expected `Iterable[Card]`, found `ref
-  list[Card]`") without a word about `Copy`. E0314 names one missing
-  case at a time, though [03](../proposal/03-types-and-generics.md)
-  says it lists them. A variant named like a prelude trait (`Add`,
-  `Mul`, `Neg`, `Num`) called where no type is expected gets E0309
-  ("a value of type `Add` cannot be called"); `Expr.Add(...)` works.
-  `struct point:` compiles without a word, though 02 enforces
-  `CamelCase`; `case _` on an enum of the same package does not warn
-  (D-043); a `pub` type has a `Debug` form without asking, though
-  [10](../proposal/10-tooling.md) makes it opt-in; and a `todo(...)`
-  statement in a method that returns nothing is a hole "of type `_`".
+- Chapter 7. `case _` on an enum of the same package does not warn
+  (D-043), and a `pub` type has a `Debug` form without asking, though
+  [10](../proposal/10-tooling.md) makes it opt-in.
 - Chapter 8. `{u.team?.name}` moves `name` out of `u.team` when it is
   not `Copy`, so the next use gets E0400 and E0401, where `{u.name}`
   only reads. An error that `main` returns is printed in its `Debug`
   form, so a `.context` error prints as `Context(message="...",
   cause="NotANumber(text=\"kolme\")")` rather than as its `Display`
-  form, `reading line 2: NotANumber(text="kolme")`. `?` in a `main`
-  that returns nothing gets E0320 with no fix that adds `-> ! E`. An
-  error set named like one of the prelude's (`TimeError`) shadows it
-  without a word, and diagnostics then name it `main.TimeError`. An
+  form, `reading line 2: NotANumber(text="kolme")`. An error set named
+  like one of the prelude's (`TimeError`) gets W0016, and diagnostics
+  then name it `main.TimeError`. An
   assignment on the line of a `case`, `case None: label = "x"`, gets
   E0117; it needs a block. `.or_else` gets E0304, as planned.
-- Chapter 9. Python's `open(path)` gets E0200 with no word about
-  `Fs`. An argument from `sys.env.args()` passed where a `Path` is
+- Chapter 9. An argument from `sys.env.args()` passed where a `Path` is
   expected gets E0300 ("expected `Path`, found `ref str`") with no fix
   offering `Path.new(arg)`. A transcript line for a run that fails
   holds the error's trace (`at counter.sisu:34:19`), so a transcript
@@ -1196,6 +1170,43 @@ Writing the rest of Part I turned up more, by chapter:
   build --native` prints the executable's absolute path, so no session
   can show it (`--output PATH` prints the path given), and the chapter
   shows `sisu build` instead.
+- Chapter 23. E0806 and E0810 write "a `{ty}`" for every type, so the
+  messages read "part of a `Opening`" and "`24` is not a `Hour`"; the
+  chapter's examples are a `Schedule` and a `Percent`. E0801 names the
+  function that is not `pure` with no fix that writes `pure def`, and
+  E0806 offers no fix, where the fix is a method of the type. A `ref
+  int`, such as the variable of a loop over a `list[int]`, passed where
+  a refinement of `int` is expected gets E0300 ("expected `Percent`,
+  found `ref int`") without E0811's note about `try_from`, which an
+  `int` gets. Contracts on a trait's methods, which
+  [07](../proposal/07-contracts.md#interaction-with-the-rest-of-the-language)
+  makes binding on every implementation, are accepted and never
+  checked, in either front end and through a generic call too: a
+  trait's `requires x >= 0` lets `push(-1)` through without a word.
+  `items.is_sorted()` on a `list[int]` parameter gets E0304 ("`list[int]`
+  has no method `is_sorted`"); only `Slice[T]` has it, so the chapter's
+  contracts take slices. `sisu doc` prints Markdown with code fences, as
+  chapter 17 found, so the chapter describes the documented contracts
+  in prose.
+- Chapter 24. A literal beside a `BigInt` or a `Decimal` does not take
+  its type: `f * 2` gets E0310 ("`*` cannot be applied to `num.BigInt`
+  and `int`") and `d + 0.25` gets it too, though D-076 gives the exact
+  types literals through `FromLiteral` and the ordinary operators; a
+  typed `let` or `BigInt.of` is needed. A `Decimal` literal is read from
+  the shortest digits of its `f64`, so `3.50` is `3.5` and loses the
+  places it was written with, where
+  [03](../proposal/03-types-and-generics.md#numbers) says that a literal
+  reaches it as written; `Decimal.parse("3.50")` keeps them. The sized
+  integers have no `truncate_to` and no narrowing methods of their own
+  (E0304), so a `u32` becomes a `u8` through `to_int()`, and they have
+  no `MAX` or `MIN` (E0351) and no `count_ones`, `leading_zeros` or
+  `rotate_left` (E0304), which a checksum reaches for. A `u32` shifted
+  by an `int`, `s << k`, widens to `int` and gives one, so `1u32 << 32`
+  with the amount in an `int` is 4294967296, where a `u32` amount
+  panics. E0310 for an `i16` plus a `u32` offers no conversion.
+  `@float(fast)` is accepted without a word and changes nothing. The
+  comment of `std.num`'s `Rounding` says that Python's `decimal` names
+  the same seven modes; it has an eighth, `ROUND_05UP`.
 
 Planning the later chapters turned up the parts of the proposal that
 they teach and stage 0 does not run yet, each named in its chapter's
@@ -1244,8 +1255,7 @@ Writing the reference turned up more, by page:
   space reads "`` ` ` `` cannot appear", and a byte-order mark at the
   start of a file is E0005 too. A keyword as a field's name gets E0100
   ("expected a name, found `:`"), and a function declared `def type()`
-  cannot be called (E0103); only a parameter gets E0124. `def Main()`
-  and `const pi` compile without a word, like `struct point`. A one-line
+  cannot be called (E0103); only a parameter gets E0124. A one-line
   `if c: print(x)` gets E0116 (an `if` expression without `else`) where
   E0102 says that a block starts on the next line, as it does for
   `for`. `1.` and `.5`, Python's floats, get E0100 and E0103 with no word

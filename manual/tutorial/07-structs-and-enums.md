@@ -110,6 +110,7 @@ error[E0411]: `Order` holds `item: str`, which borrows; only a `view struct` may
   |
 2 | struct Order:
   |        ----- `Order` is declared here
+  = fix: own the text instead: `String`
   = fix: declare it `view struct Order`: `view `
 
 error[D0006]: the program was not run: errors found (1)
@@ -182,14 +183,14 @@ error[E0341]: cannot modify `self.x`; it is not declared with `var`
    |
 12 |         self.x += dx
    |         ^^^^^^
-  = note: borrow it with `ref mut` to change what the borrow refers to
+  = fix: take `self` with `mut`: `mut `
 
 error[E0341]: cannot modify `self.y`; it is not declared with `var`
   --> no_mut_self.sisu:13:9
    |
 13 |         self.y += dy
    |         ^^^^^^
-  = note: borrow it with `ref mut` to change what the borrow refers to
+  = fix: take `self` with `mut`: `mut `
 
 error[D0006]: the program was not run: errors found (2)
 ```
@@ -310,24 +311,28 @@ error[E0347]: `Version` does not implement `Eq`
   |
 9 |     print("{installed == wanted} {installed < Version(2, 0)}")
   |             ^^^^^^^^^^^^^^^^^^^
+  = fix: derive it: `@derive(Eq)`
 
 error[E0368]: `Version` has no order, so it cannot be compared with `<` or sorted
   --> no_derive.sisu:9:35
   |
 9 |     print("{installed == wanted} {installed < Version(2, 0)}")
   |                                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: derive it: `@derive(PartialOrd)`
 
-error[E0347]: `ref Version` does not implement `Ord`
+error[E0347]: `Version` does not implement `Ord`
   --> no_derive.sisu:10:13
    |
 10 |     print("{sorted([Version(1, 10), Version(0, 9), Version(1, 2)])}")
    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: derive it: `@derive(Eq, PartialOrd, Ord)`
 
 error[E0347]: `Version` does not implement `Hash`
   --> no_derive.sisu:11:17
    |
 11 |     print("{len({installed, wanted})} different versions")
    |                 ^^^^^^^^^^^^^^^^^^^
+  = fix: derive it: `@derive(Eq, Hash)`
 
 error[D0006]: the program was not run: errors found (4)
 ```

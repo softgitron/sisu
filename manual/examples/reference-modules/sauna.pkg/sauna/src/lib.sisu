@@ -1,0 +1,13 @@
+##! How hot a sauna is.
+pub from sauna.comfort import feel
+
+## The temperature of a good sauna, in degrees Celsius.
+pub const GOOD: int = 80
+
+pub(package) def round_to_ten(c: int) -> int:
+    return c // 10 * 10
+
+## `c` degrees Celsius in Fahrenheit, rounded down.
+@cfg(feature="fahrenheit")
+pub def to_fahrenheit(c: int) -> int:
+    return c * 9 // 5 + 32

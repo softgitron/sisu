@@ -4,5 +4,6 @@ error[E0347]: `Point` does not implement `Eq`
   |
 7 |     print(Point(1, 2) == Point(1, 2))
   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: derive it: `@derive(Eq)`
 
 error[D0006]: the program was not run: errors found (1)

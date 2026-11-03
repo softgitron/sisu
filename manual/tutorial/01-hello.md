@@ -207,6 +207,7 @@ error[E0305]: wrong number of arguments to `print`: expected 1, found 2
   |
 3 |     print("Hei,", "maailma!")
   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: write the value into the text: `"Hei, maailma!"`
 
 error[D0006]: the program was not run: errors found (1)
 ```
@@ -258,20 +259,9 @@ error[E0200]: cannot find `greeting` in this scope
   |
 3 |     greeting = "Hei, maailma!"
   |     ^^^^^^^^
+  = fix: declare it with `let`: `let `
 
-error[E0200]: cannot find `greeting` in this scope
-  --> no_let.sisu:4:11
-  |
-4 |     print(greeting)
-  |           ^^^^^^^^
-
-error[E0200]: cannot find `greeting` in this scope
-  --> no_let.sisu:5:11
-  |
-5 |     print(greeting)
-  |           ^^^^^^^^
-
-error[D0006]: the program was not run: errors found (3)
+error[D0006]: the program was not run: errors found (1)
 ```
 
 Without `let` nothing creates `greeting`, so every line that names it

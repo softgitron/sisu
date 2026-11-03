@@ -1,0 +1,3 @@
+Ok(10)
+Err(Unsatisfied(ty="Dry", predicate="self < 20"))
+Err(Unsatisfied(ty="Percent", predicate="0 <= self <= 100"))

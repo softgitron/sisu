@@ -1,0 +1,8 @@
+test "wrapping" ... ok
+test "saturating" ... ok
+test "truncating" ... ok
+test "converting" ... ok
+test "binary fractions" ... ok
+test "decimal fractions" ... ok
+test "an exact fraction" ... ok
+7 passed, 0 failed, 0 blocked

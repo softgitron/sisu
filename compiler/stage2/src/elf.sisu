@@ -167,7 +167,7 @@ pub pure def write(o: Obj, debug: list[DebugSection]) -> list[int]:
     for s in sections:
         out.align(max(s.align, 1), 0)
         offsets.push(out.pos())
-        out.append(s.data)
+        out.append(s.data.copy())
     out.align(8, 0)
     let shoff = out.pos()
     for _ in range(64):

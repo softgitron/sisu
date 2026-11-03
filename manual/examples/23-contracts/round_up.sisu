@@ -1,0 +1,14 @@
+# `sisu test` checks each function's contract on cases it makes.
+
+## `minutes` rounded up to whole turns of `turn` minutes.
+def round_up(minutes: int, turn: int) -> int:
+    requires minutes >= 0 and turn > 0
+    ensures result % turn == 0
+    ensures minutes <= result < minutes + turn
+    return (minutes // turn + 1) * turn
+
+test "a turn and a half":
+    assert round_up(30, 20) == 40
+
+test "a little over two turns":
+    assert round_up(41, 20) == 60

@@ -1,0 +1,4 @@
+35: soft
+12: dry
+70: heavy
+140: Unsatisfied(ty="Percent", predicate="0 <= self <= 100")

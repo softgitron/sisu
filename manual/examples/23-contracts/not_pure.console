@@ -1,0 +1,8 @@
+$ sisu run not_pure.sisu
+error[E0801]: a contract only reads what it is given, and `all_different` is not `pure`
+  --> not_pure.sisu:15:13
+   |
+15 |     ensures all_different(hours)
+   |             ^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

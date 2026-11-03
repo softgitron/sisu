@@ -1,0 +1,56 @@
+##! Exercise 23.4, a time of day from text. Kind: write. Level: 2.
+##!
+##! A sauna's booking form sends the time as text such as "18:30". Write
+##! the bodies of `parse_time`, which checks the text and makes a `Time`,
+##! and `later`, which moves a time on, so that every test passes. The
+##! fields of `Time` are refinement types, so each number becomes an
+##! `Hour` or a `Minute` only where its predicate is checked. Run the
+##! tests with `sisu test clock_time.sisu`. The hints are in chapter 23 of
+##! the tutorial, under "Exercise 23.4: a time of day from text".
+
+type Hour = int where 0 <= self <= 23
+type Minute = int where 0 <= self <= 59
+
+## A time of day.
+@derive(Eq, Debug)
+struct Time:
+    hour: Hour
+    minute: Minute
+
+error FormError:
+    BadFormat(text: String)
+    OutOfRange(text: String)
+
+## The time that `text` writes as `HH:MM`: `BadFormat` when it is not two
+## numbers with a colon between them, and `OutOfRange` when a number is
+## not on the clock.
+def parse_time(text: str) -> Time ! FormError:
+    return todo("parse_time")
+
+## The time `minutes` after `time`, past midnight into the next day if it
+## must.
+def later(time: Time, minutes: int) -> Time:
+    requires minutes >= 0
+    return todo("later")
+
+test "a time of day":
+    assert parse_time("18:30") == Ok(Time(hour=18, minute=30))
+    assert parse_time("07:05") == Ok(Time(hour=7, minute=5))
+
+test "numbers that are not on the clock":
+    assert parse_time("24:00") == Err(OutOfRange("24:00"))
+    assert parse_time("12:60") == Err(OutOfRange("12:60"))
+
+test "text that is not a time":
+    assert parse_time("noon") == Err(BadFormat("noon"))
+    assert parse_time("12:3x") == Err(BadFormat("12:3x"))
+
+test "later on the same day":
+    let start = Time(hour=17, minute=45)
+    assert later(start, 30) == Time(hour=18, minute=15)
+    assert later(start, 0) == start
+
+test "later, past midnight":
+    let start = Time(hour=23, minute=50)
+    assert later(start, 20) == Time(hour=0, minute=10)
+    assert later(start, 24 * 60) == start

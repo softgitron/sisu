@@ -1,0 +1,9 @@
+$ sisu run refinement_unchecked.sisu
+error[E0811]: expected `Percent`, found `int`; a value becomes a `Percent` where its predicate is checked, with `Percent.try_from(...)`
+  --> refinement_unchecked.sisu:20:28
+   |
+20 |         print("{n}: {steam(n)}")
+   |                            ^
+  = note: check it where it runs: `Percent.try_from(...)`
+
+error[D0006]: the program was not run: errors found (1)

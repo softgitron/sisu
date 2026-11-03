@@ -1,0 +1,16 @@
+# `comptime assert` checks while compiling; a `comptime def` runs only then.
+
+## Whether `n` is a power of two.
+comptime def power_of_two(n: int) -> bool:
+    return n > 0 and n & (n - 1) == 0
+
+## How many turns the sauna's booking ring holds.
+const SLOTS: int = 16
+
+## The slot of the `n`th booking, counting round the ring.
+def slot(n: int) -> int:
+    comptime assert power_of_two(SLOTS), "{SLOTS} slots is not a power of two"
+    return n & (SLOTS - 1)
+
+def main():
+    print([slot(n) for n in [3, 16, 21]])

@@ -93,7 +93,9 @@ diagnostics round) to 4 263 811 lines in 7.1 to 8.5 s on a loaded
 machine, and in 17.8 to 21.1 s in the release profile, whose facts about
 integers it computes. Built from that LIR, stage 1 is the same executable
 its SIR gives, in both profiles. The Sisu backend compiles that LIR in
-20 s on one thread, 4.7 ms for each thousand lines, to a 38 MB object.
+15 to 19 s on one thread, about 4 ms for each thousand lines, to a 39 MB
+object with its line table; a conformance case's LIR (1 000 to 6 000
+lines) takes 15 to 30 ms, the process and the files included.
 
 ## The default
 

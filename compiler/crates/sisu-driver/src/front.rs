@@ -518,7 +518,10 @@ impl Stage2 {
         cmd.args(["build", "--native", "--output"]).arg(&part).current_dir(&package);
         // Built through stage 1, with the Rust lowering: stage 2 does not
         // lower itself until it is built.
-        cmd.env(LOWER_VAR, "rust").env(BACKEND_VAR, "cranelift").env_remove(FRONT_END_VAR).env_remove(KEEP_SIR);
+        cmd.env(LOWER_VAR, "rust")
+            .env(BACKEND_VAR, "cranelift")
+            .env_remove(FRONT_END_VAR)
+            .env_remove(KEEP_SIR);
         for v in RUNTIME_VARS {
             cmd.env_remove(v);
         }
