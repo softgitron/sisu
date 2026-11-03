@@ -1,0 +1,2 @@
+5:5-5:9 E0202 resolve.duplicate-definition name="area"
+  label 2:5-2:9 resolve.first-defined

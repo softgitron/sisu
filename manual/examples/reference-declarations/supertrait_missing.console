@@ -1,0 +1,8 @@
+$ sisu run supertrait_missing.sisu
+error[E0242]: `Basket` implements `Container`, which requires `Named`, but `Basket` does not implement `Named`
+  --> supertrait_missing.sisu:11:1
+   |
+11 | impl Container for Basket:
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

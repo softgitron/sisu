@@ -261,7 +261,7 @@ pub enum Kind:
     Bool
     Char
     Str
-    String_
+    String
     Path
     Bytes
     DateTime
@@ -382,7 +382,7 @@ pub pure def encode(table: list[TypeEntry]) -> list[int]:
                 w.u8(7)
             case Str:
                 w.u8(8)
-            case String_:
+            case String:
                 w.u8(9)
             case Path:
                 w.u8(10)

@@ -1,0 +1,16 @@
+# The items of a module may come in any order.
+def main():
+    print(double(LIMIT))
+    print(Point(-3).norm())
+
+def double(n: int) -> int:
+    return n * 2
+
+const LIMIT: int = 21
+
+struct Point:
+    x: int
+
+impl Point:
+    def norm(self) -> int:
+        return abs(self.x)

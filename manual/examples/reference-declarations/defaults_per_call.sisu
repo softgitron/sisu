@@ -1,0 +1,10 @@
+# A default is computed again at each call that leaves it out.
+def add_item(item: str, own items: list[str] = []) -> list[str]:
+    var kept = items
+    kept.push(item)
+    return kept
+
+def main():
+    print(add_item("coffee"))
+    print(add_item("bun"))
+    print(add_item("tea", ["milk"]))

@@ -1,0 +1,6 @@
+# `import` binds a module, `from ... import` binds names from it.
+import std.math
+from std.num import gcd, lcm as least_multiple
+
+def main():
+    print("{math.sqrt(16.0)} {gcd(12, 18)} {least_multiple(4, 6)}")

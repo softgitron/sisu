@@ -1,0 +1,13 @@
+# Tests, a suite and a parametrised test beside the code they test.
+def double(n: int) -> int:
+    return n * 2
+
+test "double doubles":
+    assert double(2) == 4
+
+suite "double":
+    test "of zero":
+        assert double(0) == 0
+
+    test "of each case" for n, want in [(1, 2), (-3, -6)]:
+        assert double(n) == want

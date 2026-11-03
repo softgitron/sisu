@@ -1,0 +1,21 @@
+# A function returns a value only with `return`.
+error Closed:
+    Shop
+
+def area(width: int, height: int) -> int:
+    return width * height
+
+def greet(name: str):
+    print("Hei, {name}!")
+
+def open_at(hour: int) -> ! Closed:
+    if hour < 8:
+        return Err(Shop)
+    print("open at {hour}")
+    return Ok(())
+
+def main():
+    greet("Aino")
+    print(area(3, 4))
+    _ = open_at(9)
+    print(open_at(6))

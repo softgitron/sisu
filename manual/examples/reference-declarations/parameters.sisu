@@ -1,0 +1,12 @@
+# Defaults, keyword arguments, and `*` and `/` in a parameter list.
+def greet(name: str, word: str = "Hei", *, mark: str = "!") -> String:
+    return "{word}, {name}{mark}"
+
+def clamp(value: int, /, low: int, high: int) -> int:
+    return max(low, min(value, high))
+
+def main():
+    print(greet("Aino"))
+    print(greet("Eero", word="Moi", mark="."))
+    print(greet(word="Terve", name="Roni"))
+    print("{clamp(15, low=0, high=10)} {clamp(-3, 0, 10)}")

@@ -1,0 +1,5 @@
+# A binding is a statement, and statements belong in a function.
+let greeting = "Hei"
+
+def main():
+    print(greeting)

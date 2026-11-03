@@ -1,0 +1,11 @@
+# A constant has a type and a value known at compile time.
+const SAUNA_DEGREES: int = 80
+const GREETING: str = "Hei"
+const LIMITS: (int, int) = (60, 2 * SAUNA_DEGREES)
+
+struct Thermometer:
+    reading: int
+    const MAX: int = 120
+
+def main():
+    print("{GREETING} {SAUNA_DEGREES} {LIMITS} {Thermometer.MAX}")

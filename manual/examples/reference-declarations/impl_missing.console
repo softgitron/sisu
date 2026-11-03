@@ -1,0 +1,15 @@
+$ sisu run impl_missing.sisu
+error[E0232]: the impl of `Priced` for `Coffee` is missing `discount`
+  --> impl_missing.sisu:9:1
+  |
+9 | impl Priced for Coffee:
+  | ^^^^^^^^^^^^^^^^^^^^^^
+  = note: write `def discount(self) -> int` in the impl
+
+error[E0233]: `tip` is not a method of `Priced`
+  --> impl_missing.sisu:13:9
+   |
+13 |     def tip(self) -> int:
+   |         ^^^
+
+error[D0006]: the program was not run: errors found (2)

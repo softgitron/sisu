@@ -24,8 +24,14 @@
 //! what a front end (stage 0's or stage 1's) serialised, must meet the
 //! expectations the source meets.
 //!
+//! The mode of the Sisu backend (decision 306) builds each case with
+//! `sisu build --native --backend=sisu`, the x86-64 backend written in Sisu
+//! compiling stage 2's LIR, and compares the runs only: its executables are
+//! its own, not Cranelift's.
+//!
 //! The modes that build with the default lowering (natively, from SIR,
-//! and with the release profile) ask the build to report its steps
+//! with the release profile, and with the Sisu backend) ask the build to
+//! report its steps
 //! (`SISU_NATIVE_TIMES=1`) and require it to say that stage 2 lowered the
 //! program (`native: lowered by stage 2 in T ms`), so that no case is
 //! built through the Rust lowering, which lowers only when asked for
@@ -60,6 +66,9 @@ pub struct NativeReport {
     /// In the modes that build with the default lowering: the cases whose
     /// build said stage 2 lowered them, and the time it took.
     pub stage2: Option<(usize, Duration)>,
+    /// With the Sisu backend: the cases its build said it compiled, and the
+    /// time it took.
+    pub sisu: Option<(usize, Duration)>,
     pub failures: Vec<Failure>,
     /// Time spent building (the front end, the backend and the linker)
     /// and running the executables, over every case.
@@ -86,12 +95,18 @@ impl NativeReport {
             }
             Some(own) => format!("native from SIR: {} cases ({own} from their own `.sir`)", self.cases),
             None if self.release => format!("native, release: {} cases ({} lines)", self.cases, self.lines),
+            None if self.sisu.is_some() => {
+                format!("native, Sisu backend: {} cases ({} lines)", self.cases, self.lines)
+            }
             None => format!("native: {} cases ({} lines)", self.cases, self.lines),
         };
-        let lowered = match self.stage2 {
+        let mut lowered = match self.stage2 {
             Some((n, t)) => format!(", {n} lowered by stage 2 in {:.2} s", t.as_secs_f64()),
             None => String::new(),
         };
+        if let Some((n, t)) = self.sisu {
+            lowered.push_str(&format!(", {n} compiled by the Sisu backend in {:.2} s", t.as_secs_f64()));
+        }
         out.push_str(&format!(
             "{what}{lowered}, built in {:.2} s, run in {:.2} s, {} failed\n",
             self.build.as_secs_f64(),
@@ -111,25 +126,40 @@ pub fn read_list(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// What a build that reported its steps (`SISU_NATIVE_TIMES=1`) printed,
-/// less those reports (`native: ...`, and the Rust front end's `time:
-/// ...`), and how long stage 2 took to lower the program, if the build said
-/// it did (`native: lowered by stage 2 in T ms`).
-pub fn take_build_report(stderr: &str) -> (String, Option<Duration>) {
-    let mut rest = String::new();
-    let mut lowered = None;
+/// What a build reported of its steps (`SISU_NATIVE_TIMES=1`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BuildReport {
+    /// What the build printed but those reports (`native: ...`, and the Rust
+    /// front end's `time: ...`).
+    pub rest: String,
+    /// How long stage 2 took to lower the program, if the build said it did
+    /// (`native: lowered by stage 2 in T ms`).
+    pub lowered: Option<Duration>,
+    /// How long the Sisu backend took to compile it, if it did (`native:
+    /// compiled by the Sisu backend in T ms, ...`).
+    pub sisu: Option<Duration>,
+}
+
+/// The reports a build printed with `SISU_NATIVE_TIMES=1`, taken off its
+/// standard error.
+pub fn take_build_report(stderr: &str) -> BuildReport {
+    let ms = |t: &str| Duration::from_secs_f64(t.parse::<f64>().unwrap_or(0.0).max(0.0) / 1e3);
+    let mut r = BuildReport::default();
     for line in stderr.split_inclusive('\n') {
         let text = line.trim_end_matches('\n');
-        if let Some(ms) =
-            text.strip_prefix("native: lowered by stage 2 in ").and_then(|t| t.strip_suffix(" ms"))
+        if let Some(t) = text.strip_prefix("native: lowered by stage 2 in ").and_then(|t| t.strip_suffix(" ms")) {
+            r.lowered = Some(ms(t));
+        } else if let Some(t) = text
+            .strip_prefix("native: compiled by the Sisu backend in ")
+            .and_then(|t| t.split_once(" ms"))
+            .map(|(t, _)| t)
         {
-            let ms: f64 = ms.parse().unwrap_or(0.0);
-            lowered = Some(Duration::from_secs_f64(ms.max(0.0) / 1e3));
+            r.sisu = Some(ms(t));
         } else if !text.starts_with("native: ") && !text.starts_with("time: ") {
-            rest.push_str(line);
+            r.rest.push_str(line);
         }
     }
-    (rest, lowered)
+    r
 }
 
 /// How [`run_list`] runs each case.
@@ -145,13 +175,15 @@ enum Mode {
     /// Lowered from serialised SIR by stage 2 and built from its LIR
     /// (decision 284).
     FromLir,
+    /// Built with the backend written in Sisu (decision 306).
+    Sisu,
 }
 
 impl Mode {
     /// Whether the mode builds with the default lowering, whose build must
     /// say that stage 2 lowered the program.
     fn lowers(self) -> bool {
-        matches!(self, Mode::Native | Mode::FromSir | Mode::Release)
+        matches!(self, Mode::Native | Mode::FromSir | Mode::Release | Mode::Sisu)
     }
 }
 
@@ -172,6 +204,13 @@ pub fn run_native_from_sir(sisu: &Sisu, root: &Path, list: &[String]) -> NativeR
 /// does.
 pub fn run_native_release(sisu: &Sisu, root: &Path, list: &[String]) -> NativeReport {
     run_list(sisu, root, list, Mode::Release, None)
+}
+
+/// [`run_native`], each case built with the x86-64 backend written in Sisu
+/// (`sisu build --native --backend=sisu`, decision 306), and run against
+/// the same expectations: the executables are the Sisu backend's own.
+pub fn run_native_sisu(sisu: &Sisu, root: &Path, list: &[String]) -> NativeReport {
+    run_list(sisu, root, list, Mode::Sisu, None)
 }
 
 /// Every case of `list` interpreted from serialised SIR (`sisu run
@@ -245,6 +284,10 @@ fn run_list(sisu: &Sisu, root: &Path, list: &[String], mode: Mode, stage2: Optio
         let lowered: Vec<Duration> = results.iter().filter_map(|r| r.stage2).collect();
         report.stage2 = Some((lowered.len(), lowered.iter().sum()));
     }
+    if mode == Mode::Sisu {
+        let compiled: Vec<Duration> = results.iter().filter_map(|r| r.sisu).collect();
+        report.sisu = Some((compiled.len(), compiled.iter().sum()));
+    }
     for r in results {
         report.cases += 1;
         report.build += r.build;
@@ -308,8 +351,10 @@ struct CaseResult {
     own_sir: bool,
     /// Built from LIR to the executable the case's SIR gives.
     identical: bool,
-    /// How long stage 2 took to lower the case, as its build said.
+    /// How long stage 2 took to lower the case, and the Sisu backend to
+    /// compile it, as its build said.
     stage2: Option<Duration>,
+    sisu: Option<Duration>,
 }
 
 fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&Path>) -> CaseResult {
@@ -323,6 +368,7 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&P
         own_sir: false,
         identical: false,
         stage2: None,
+        sisu: None,
     };
     let fail = |r: &mut CaseResult, check: &str, detail: String| {
         r.failures.push(Failure { case: case.name.clone(), check: check.to_string(), detail });
@@ -334,6 +380,7 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&P
         Mode::Release => 3_000_000,
         Mode::Interpreted => 4_000_000,
         Mode::FromLir => 5_000_000,
+        Mode::Sisu => 6_000_000,
     };
     let sandbox = match Sandbox::new(case, offset + n) {
         Ok(s) => s,
@@ -351,6 +398,9 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&P
     if release {
         build_args.push("--release".to_string());
         build_args.push("--contracts=all".to_string());
+    }
+    if mode == Mode::Sisu {
+        build_args.push("--backend=sisu".to_string());
     }
     if !case.package {
         build_args.push(format!("{}.sisu", case.stem));
@@ -488,18 +538,26 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&P
     // program: nothing is built through the Rust lowering unasked.
     let mut built = crate::invoke_with_env(sisu, &cwd, &build_args, &[("SISU_NATIVE_TIMES", "1")]);
     r.build = start.elapsed();
-    let (rest, lowered) = take_build_report(&built.stderr);
-    built.stderr = rest;
-    r.stage2 = lowered;
+    let report = take_build_report(&built.stderr);
+    built.stderr = report.rest;
+    r.stage2 = report.lowered;
+    r.sisu = report.sisu;
     if built.status != 0 || !exe.is_file() {
         fail(&mut r, "sisu build --native", format!("{}{}", built.stdout, built.stderr));
         return r;
     }
-    if lowered.is_none() {
+    if report.lowered.is_none() {
         fail(
             &mut r,
             "lowered by stage 2",
             "the build did not say that stage 2 lowered the program (`native: lowered by stage 2`)".into(),
+        );
+    }
+    if mode == Mode::Sisu && report.sisu.is_none() {
+        fail(
+            &mut r,
+            "compiled by the Sisu backend",
+            "the build did not say that the Sisu backend compiled the program".into(),
         );
     }
     run_and_compare(case, &exe, &cwd, warned_by_sir, !built.stderr.is_empty(), &mut r);
@@ -649,13 +707,16 @@ mod tests {
     #[test]
     fn a_build_report_says_what_lowered_the_program() {
         let printed = "warning[W0003]: unreachable code\n  --> a.sisu:3:5\nnative: lowered by stage 2 in 12.5 ms\nnative: 3 functions, 40 statements, code generated in 4.0 ms, linked in 80.0 ms\n";
-        let (rest, lowered) = take_build_report(printed);
-        assert_eq!(rest, "warning[W0003]: unreachable code\n  --> a.sisu:3:5\n");
-        assert_eq!(lowered, Some(Duration::from_secs_f64(0.0125)));
+        let r = take_build_report(printed);
+        assert_eq!(r.rest, "warning[W0003]: unreachable code\n  --> a.sisu:3:5\n");
+        assert_eq!(r.lowered, Some(Duration::from_secs_f64(0.0125)));
+        assert_eq!(r.sisu, None);
         // The Rust lowering's build says nothing of stage 2, and neither
         // does a stage 2 that did not lower the program.
-        let (rest, lowered) =
-            take_build_report("time: names resolved 1.0 ms\nnative: not lowered by stage 2 in 3.0 ms\n");
-        assert_eq!((rest.as_str(), lowered), ("", None));
+        let r = take_build_report("time: names resolved 1.0 ms\nnative: not lowered by stage 2 in 3.0 ms\n");
+        assert_eq!((r.rest.as_str(), r.lowered), ("", None));
+        // The Sisu backend's build says what compiled it.
+        let r = take_build_report("native: lowered by stage 2 in 2.0 ms\nnative: compiled by the Sisu backend in 4.5 ms, linked in 80.0 ms\n");
+        assert_eq!(r.sisu, Some(Duration::from_secs_f64(0.0045)));
     }
 }

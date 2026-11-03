@@ -1,0 +1,9 @@
+# Every path through a function with a result must return.
+def sign(n: int) -> int:
+    if n > 0:
+        return 1
+    elif n < 0:
+        return -1
+
+def main():
+    print(sign(2))

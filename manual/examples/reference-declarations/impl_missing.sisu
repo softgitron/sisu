@@ -1,0 +1,17 @@
+# An impl defines every required method and nothing else.
+trait Priced:
+    def price(self) -> int
+    def discount(self) -> int
+
+struct Coffee:
+    cups: int
+
+impl Priced for Coffee:
+    def price(self) -> int:
+        return 350 * self.cups
+
+    def tip(self) -> int:
+        return 50
+
+def main():
+    print(Coffee(1).price())

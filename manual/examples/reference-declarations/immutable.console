@@ -1,0 +1,12 @@
+$ sisu run immutable.sisu
+error[E0312]: `visits` is immutable; declare it with `var` to assign to it
+  --> immutable.sisu:4:5
+  |
+4 |     visits += 1
+  |     ^^^^^^
+  |
+3 |     let visits = 0
+  |         ------ `visits` is defined here
+  = fix: declare `visits` with `var`
+
+error[D0006]: the program was not run: errors found (1)

@@ -1,0 +1,2 @@
+9:1-9:23 E0232 resolve.missing-trait-method trait="Priced" ty="Coffee" methods="`discount`"
+13:9-13:12 E0233 resolve.not-a-trait-method name="tip" trait="Priced"

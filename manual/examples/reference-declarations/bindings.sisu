@@ -1,0 +1,14 @@
+# `let` binds once, `var` may change, and a tuple unpacks into names.
+def divide(a: int, b: int) -> (int, int):
+    return a // b, a % b
+
+def main():
+    let name = "Aino"
+    var visits = 0
+    visits += 1
+    let limit: int = 10
+    let q, r = divide(17, 5)
+    let (low, high) = (1, 9)
+    let total = q + r
+    let total = total * 2
+    print("{name} {visits} {limit} {q} {r} {low} {high} {total}")

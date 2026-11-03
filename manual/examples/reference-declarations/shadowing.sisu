@@ -1,0 +1,7 @@
+# A name bound again in an inner block hides the outer one, and warns.
+def main():
+    let name = "Aino"
+    for i in range(1):
+        let name = "Eero"
+        print("{i} {name}")
+    print(name)

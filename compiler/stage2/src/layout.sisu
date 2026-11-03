@@ -383,7 +383,7 @@ impl Types:
         let w = WORD
         match n:
             case "String":
-                return Ok(TypeEntry(size=3 * w, kind=Kind.String_))
+                return Ok(TypeEntry(size=3 * w, kind=Kind.String))
             case "Path":
                 return Ok(TypeEntry(size=3 * w, kind=Kind.Path))
             case "bytes":
@@ -595,7 +595,7 @@ impl Types:
             return Ok(False)
         var parts: list[int] = []
         match e.kind:
-            case Kind.String_ | Kind.Path | Kind.Bytes | Kind.List(_) | Kind.Iter(_) | Kind.Box(_):
+            case Kind.String | Kind.Path | Kind.Bytes | Kind.List(_) | Kind.Iter(_) | Kind.Box(_):
                 return Ok(True)
             case Kind.Dict(_, _) | Kind.Set(_) | Kind.Dyn | Kind.Sender(_) | Kind.Receiver(_):
                 return Ok(True)

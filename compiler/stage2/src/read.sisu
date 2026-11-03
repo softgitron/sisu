@@ -639,6 +639,8 @@ pub pure def read(text: str) -> Program ! ReadError:
         intrinsics=[],
         functions=[],
         tests=[],
+        test_tags=[],
+        benches=[],
         trait_methods=[],
         impls=[],
         # Not in the text form (stage 1's `sir.Program`, D-085): what the
@@ -739,22 +741,27 @@ pure def header_line(
     if c.eat("test "):
         let name = c.string()?
         let f = c.name()?
-        p.tests.push((name, f))
-        # A test's `tags` (decision 285), which stage 1's SIR types do not
-        # hold yet: read and left out.
+        # A test's `tags` (decision 285).
+        var tags: list[String] = []
         if c.eat("tags"):
             while not c.at_end():
-                _ = c.string()?
+                tags.push(c.string()?)
         if not c.at_end():
             return wrong("unexpected `{c.rest()}`")
+        if not tags.is_empty():
+            # Each test before this one has none.
+            while len(p.test_tags) < len(p.tests):
+                p.test_tags.push([])
+            p.test_tags.push(tags)
+        p.tests.push((name, f))
         return Ok(())
     if c.eat("bench "):
-        # A benchmark (decision 285), which stage 1's SIR types do not hold
-        # yet: read and left out.
-        _ = c.string()?
-        _ = c.name()?
+        # A benchmark (decision 285).
+        let name = c.string()?
+        let f = c.name()?
         if not c.at_end():
             return wrong("unexpected `{c.rest()}`")
+        p.benches.push((name, f))
         return Ok(())
     let method = starts_at(text, s, e, "method ")
     if c.eat("intrinsic ") or c.eat("method "):

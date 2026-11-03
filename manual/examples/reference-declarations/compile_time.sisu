@@ -1,0 +1,12 @@
+# A `comptime def` runs at compile time only; a `pure def` at either.
+comptime def square(n: int) -> int:
+    return n * n
+
+pure def cube(n: int) -> int:
+    return n * n * n
+
+const AREA: int = comptime square(5)
+const VOLUME: int = comptime cube(3)
+
+def main():
+    print("{AREA} {VOLUME} {cube(4)}")

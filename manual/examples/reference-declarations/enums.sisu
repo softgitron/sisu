@@ -1,0 +1,16 @@
+# An enum's variants, and a method in its body.
+enum Shape:
+    Dot
+    Circle(f64)
+    Rect(w: f64, h: f64)
+
+    def area(self) -> f64:
+        return match self:
+            case Dot: 0.0
+            case Circle(r): 3.0 * r * r
+            case Rect(w, h): w * h
+
+def main():
+    let shapes = [Dot, Shape.Circle(1.0), Rect(w=2.0, h=3.0)]
+    for shape in shapes:
+        print("{shape:?} {shape.area()}")

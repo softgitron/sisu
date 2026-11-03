@@ -1,0 +1,6 @@
+warning[W0002]: `name` shadows a binding of an enclosing scope
+  --> shadowing.sisu:5:13
+  |
+5 |         let name = "Eero"
+  |             ^^^^
+

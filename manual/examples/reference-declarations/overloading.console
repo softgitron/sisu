@@ -1,0 +1,12 @@
+$ sisu run overloading.sisu
+error[E0202]: `area` is defined more than once in this module
+  --> overloading.sisu:5:5
+  |
+5 | def area(width: int, height: int) -> int:
+  |     ^^^^
+  |
+2 | def area(side: int) -> int:
+  |     ---- first defined here
+  = note: rename one of them, or remove the one not wanted
+
+error[D0006]: the program was not run: errors found (1)

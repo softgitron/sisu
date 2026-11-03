@@ -1,0 +1,31 @@
+# A trait with a supertrait, an associated type, and a provided method.
+trait Named:
+    def name(self) -> String
+
+trait Container(Named):
+    type Item
+    def items(self) -> list[Item]
+
+    def describe(self) -> String:
+        return "{self.name()} with {len(self.items())} items"
+
+struct Basket:
+    fruit: list[String]
+
+impl Named for Basket:
+    def name(self) -> String:
+        return "a basket"
+
+impl Container for Basket:
+    type Item = String
+
+    def items(self) -> list[String]:
+        return self.fruit.copy()
+
+impl[T: Display] Named for list[T]:
+    def name(self) -> String:
+        return "a list of {len(self)}"
+
+def main():
+    print(Basket(["omena", "päärynä"]).describe())
+    print([1, 2].name())

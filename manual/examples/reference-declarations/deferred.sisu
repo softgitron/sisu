@@ -1,0 +1,14 @@
+# A `let` without a value is assigned once on every path before its use.
+def describe(n: int) -> String:
+    let label: str
+    if n > 0:
+        label = "positive"
+    elif n < 0:
+        label = "negative"
+    else:
+        label = "zero"
+    return "{n} is {label}"
+
+def main():
+    print(describe(5))
+    print(describe(0))

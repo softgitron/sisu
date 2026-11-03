@@ -1,0 +1,9 @@
+# Two functions cannot share a name, whatever their parameters.
+def area(side: int) -> int:
+    return side * side
+
+def area(width: int, height: int) -> int:
+    return width * height
+
+def main():
+    print(area(2))

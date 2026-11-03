@@ -1,0 +1,16 @@
+# An error set; `..` leaves it open to other packages' variants.
+error LoadError:
+    Missing(name: String)
+    Corrupt
+    ..
+
+def load(name: str) -> String ! LoadError:
+    if name == "":
+        return Err(Corrupt)
+    return Err(Missing(name.to_string()))
+
+def main():
+    match load("menu.txt"):
+        case Ok(text): print(text)
+        case Err(Missing(name)): print("missing {name}")
+        case Err(_): print("something else")

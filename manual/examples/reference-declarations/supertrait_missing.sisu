@@ -1,0 +1,16 @@
+# Implementing a trait needs its supertraits too.
+trait Named:
+    def name(self) -> String
+
+trait Container(Named):
+    def count(self) -> int
+
+struct Basket:
+    n: int
+
+impl Container for Basket:
+    def count(self) -> int:
+        return self.n
+
+def main():
+    print(Basket(1).count())
