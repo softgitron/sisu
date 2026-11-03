@@ -256,6 +256,7 @@ impl<'p> Interp<'p, '_> {
                     self.binary(op, &x, &y)
                 }
                 "assert" => self.assert_fail(method, &a),
+                "expect" => self.expect_fail(method, &a),
                 "contract" if method == "fail" => self.contract_fail(&a),
                 "test" => self.test_intrinsic(method, &a),
                 "error" => self.error_method(method, tys, &a),
@@ -1199,6 +1200,35 @@ impl<'p> Interp<'p, '_> {
     }
 
     fn assert_fail(&mut self, method: &str, a: &Args) -> Result<Value, Unwind> {
+        let m = self.assert_message(method, a)?;
+        Err(panic(msg::PANIC_EXPLICIT, &[("message", m)]))
+    }
+
+    /// `expect.fail`, `expect.fail_compare` and `expect.fail_parts`, which
+    /// take what `assert`'s take (17: `expect` is `assert`'s non-fatal form;
+    /// stage 1's R38, decision 388): in a test, the failure is recorded in
+    /// the running test's report as `assert`'s panic would be, with the
+    /// frames it would leave, and the test goes on, to fail at its end;
+    /// elsewhere, a plain run or compile time, it is `assert`'s panic.
+    fn expect_fail(&mut self, method: &str, a: &Args) -> Result<Value, Unwind> {
+        let m = self.assert_message(method, a)?;
+        if !self.in_test {
+            return Err(panic(msg::PANIC_EXPLICIT, &[("message", m)]));
+        }
+        let failure = crate::PanicInfo {
+            message: crate::render(msg::PANIC_EXPLICIT, &[("message", m)]),
+            stack: self.frame_lines(),
+            hole: None,
+            refinement: None,
+            too_long: None,
+            abandon: false,
+        };
+        self.expected.push(crate::panic_report(&failure));
+        Ok(Value::Unit)
+    }
+
+    /// What `assert.fail` (and `fail_compare`, `fail_parts`) panics with.
+    fn assert_message(&mut self, method: &str, a: &Args) -> Result<String, Unwind> {
         let expr = self.text(a.get(0)?)?.to_string();
         let message = self.text(a.get(1)?)?.to_string();
         let mut m = if message.is_empty() {
@@ -1222,7 +1252,7 @@ impl<'p> Interp<'p, '_> {
                 &[("value", self.debug_string(self.target(a.get(3)?)?))],
             ));
         }
-        Err(panic(msg::PANIC_EXPLICIT, &[("message", m)]))
+        Ok(m)
     }
 
     fn error_method(&mut self, method: &str, tys: &[sir::Type], a: &Args) -> Result<Value, Unwind> {

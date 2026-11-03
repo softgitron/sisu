@@ -610,7 +610,12 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 let state = crate::dict::structural_hash(mem::word(h, 0), v, t);
                 mem::set_word(h, 0, state);
             }
-            I::AssertFail | I::AssertFailCompare | I::AssertFailParts => return assert_fail(c, i),
+            I::AssertFail
+            | I::AssertFailCompare
+            | I::AssertFailParts
+            | I::ExpectFail
+            | I::ExpectFailCompare
+            | I::ExpectFailParts => return assert_fail(c, i),
             I::ErrorTracePush => {
                 let (p, _) = c.place(0);
                 let loc = c.text(1).to_vec().into_boxed_slice();
@@ -1609,11 +1614,11 @@ unsafe fn assert_fail(c: &Call<'_>, i: Intrinsic) -> u8 {
         } else {
             rt::render(msg::PANIC_ASSERT_MESSAGE, &[("expr", expr.clone()), ("message", message)])
         };
-        if i == Intrinsic::AssertFailParts {
+        if matches!(i, Intrinsic::AssertFailParts | Intrinsic::ExpectFailParts) {
             let parts = shown_parts(c.arg(2), c.ty(2));
             m.push_str(&parts_diagram(&expr, &parts));
         }
-        if i == Intrinsic::AssertFailCompare {
+        if matches!(i, Intrinsic::AssertFailCompare | Intrinsic::ExpectFailCompare) {
             for (k, id) in [(2, msg::RUN_ASSERT_LEFT), (3, msg::RUN_ASSERT_RIGHT)] {
                 let (p, t) = c.place(k);
                 let mut out = Vec::new();

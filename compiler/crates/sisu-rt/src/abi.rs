@@ -1351,6 +1351,11 @@ intrinsics! {
     // The identity of shared values (02; decision 355), after the others
     // so that their numbers stay what they were.
     SharedSame = "Shared.same",
+    // `expect`'s failures in a program built with its tests (17; decision
+    // 388), which no native build is: natively they are `assert`'s.
+    ExpectFail = "expect.fail",
+    ExpectFailCompare = "expect.fail_compare",
+    ExpectFailParts = "expect.fail_parts",
 }
 
 impl Intrinsic {

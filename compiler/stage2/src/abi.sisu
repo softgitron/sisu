@@ -1116,4 +1116,9 @@ pub pure def intrinsic_names() -> list[str]:
         "par.map",
         # The identity of shared values (02; decision 355).
         "Shared.same",
+        # `expect`'s failures in a program built with its tests (decision
+        # 388), `assert`'s natively.
+        "expect.fail",
+        "expect.fail_compare",
+        "expect.fail_parts",
     ]

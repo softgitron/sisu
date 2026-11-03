@@ -1489,6 +1489,20 @@ fn stage1_target(cmd: &str, target: Option<&str>, host: &mut dyn Host) -> Result
     }
 }
 
+/// The line `sisu run` ends with after the diagnostics stage 1's `check`
+/// printed (`errors`): `D0021` after the ownership checker's errors, of a
+/// program the front end let through to its SIR (`lowered`), else `D0006`;
+/// none when it printed no error of the program.
+fn errors_line(errors: &str, lowered: bool) -> Option<String> {
+    let codes: Vec<&str> = errors.lines().filter_map(|l| l.strip_prefix("error[E")).collect();
+    if codes.is_empty() {
+        return None;
+    }
+    let owned = lowered && codes.iter().all(|c| c.starts_with("04"));
+    let id = if owned { msg::CLI_OWNERSHIP_ERRORS } else { msg::CLI_ERRORS_FOUND };
+    Some(plain_error(id, &[("count", codes.len().to_string())]))
+}
+
 /// `sisu fmt` and `sisu doc` with stage 1: its command with the same
 /// arguments, which it checks as `sisu` does.
 fn stage1_as_is(cmd: &str, rest: &[String], host: &mut dyn Host) -> i32 {
@@ -1617,72 +1631,78 @@ fn stage1_command(
             for input in &inputs {
                 let code = {
                     // Stage 1's `sir` takes `--accept-unsafe` and the path;
-                    // its `check` the lockfile's and the features' options too,
-                    // and writes the lockfile first (a run with features
-                    // stays the Rust front end's, `stage1_serves`).
+                    // its `check` `--locked` too (a run with features stays
+                    // the Rust front end's, `stage1_serves`). Each writes the
+                    // lockfile, with each package's `unsafe` level.
                     let mut common: Vec<String> = Vec::new();
                     if accept {
                         common.push("--accept-unsafe".into());
                     }
                     common.push(input.shown.clone());
-                    let mut lock_words: Vec<String> = Vec::new();
+                    let check_words = |locked: bool| {
+                        let mut check = vec!["check".to_string()];
+                        if has_ids(&p.flags) {
+                            check.push("--format=ids".into());
+                        }
+                        if locked {
+                            check.push("--locked".into());
+                        }
+                        check.extend(common.iter().cloned());
+                        check
+                    };
+                    // `--locked` is checked before anything writes the
+                    // lockfile: by stage 1's `check`, its `sir` taking none.
+                    let mut checked = None;
                     if locked {
-                        lock_words.push("--locked".into());
-                    }
-                    // The program's errors, the ownership checker's and a
-                    // `comptime` expression's among them, stop it before its
-                    // tests run, as they stop `sisu run`, and its warnings
-                    // come first (decision 380): stage 1's `sir` prints the
-                    // SIR of a program its ownership checker rejects or whose
-                    // `comptime` fails, and nothing for one with an error of
-                    // the front end; its `check`, of the program with its
-                    // tests, says which, and writes the lockfile.
-                    let mut check = vec!["check".to_string()];
-                    if has_ids(&p.flags) {
-                        check.push("--format=ids".into());
-                    }
-                    check.extend(lock_words);
-                    check.extend(common.iter().cloned());
-                    let c = match run(host, &check, Backend::Unused) {
-                        Ok(c) => c,
-                        Err(code) => return code,
-                    };
-                    host.stderr(&c.stdout);
-                    host.stderr(&c.stderr);
-                    let mut words = vec!["sir".to_string(), "--tests".to_string()];
-                    words.extend(contracts.clone());
-                    words.extend(common);
-                    let r = if c.status == exit::OK || !c.stdout.is_empty() {
-                        None
-                    } else {
-                        match run(host, &words, Backend::Unused) {
-                            Ok(r) => Some(r),
-                            Err(code) => return code,
-                        }
-                    };
-                    if c.status != exit::OK {
-                        // The line `sisu run` ends with: the ownership checker's
-                        // errors when the front end let the program through
-                        // to its SIR, else errors (`D0021`, `D0006`).
-                        let errors: Vec<&str> =
-                            c.stderr.lines().filter_map(|l| l.strip_prefix("error[")).collect();
-                        if !errors.is_empty() {
-                            let lowered =
-                                r.as_ref().is_some_and(|r| r.status == exit::OK && !r.stdout.is_empty());
-                            let owned = lowered && errors.iter().all(|e| e.starts_with("E04"));
-                            let id = if owned { msg::CLI_OWNERSHIP_ERRORS } else { msg::CLI_ERRORS_FOUND };
-                            host.stderr(&plain_error(id, &[("count", errors.len().to_string())]));
-                        }
-                        c.status.max(exit::ERROR)
-                    } else {
-                        let r = match run(host, &words, Backend::Unused) {
-                            Ok(r) => r,
+                        let c = match run(host, &check_words(true), Backend::Unused) {
+                            Ok(c) => c,
                             Err(code) => return code,
                         };
+                        if c.status != exit::OK {
+                            host.stderr(&c.stdout);
+                            host.stderr(&c.stderr);
+                            if let Some(line) = errors_line(&c.stderr, false) {
+                                host.stderr(&line);
+                            }
+                            return c.status.max(exit::ERROR);
+                        }
+                        checked = Some(c);
+                    }
+                    // The program with its tests: stage 1's `sir --tests`
+                    // prints no SIR of a program with an error, but what
+                    // `sisu test` says of it, and fails (decision 370), which
+                    // is shown as it is (decision 380).
+                    let mut words = vec!["sir".to_string(), "--tests".to_string()];
+                    words.extend(contracts.clone());
+                    words.extend(common.iter().cloned());
+                    let r = match run(host, &words, Backend::Unused) {
+                        Ok(r) => r,
+                        Err(code) => return code,
+                    };
+                    if r.status != exit::OK {
                         host.stderr(&r.stderr);
-                        if r.status != exit::OK || r.stdout.is_empty() {
-                            r.status.max(exit::ERROR)
+                        r.status.max(exit::ERROR)
+                    } else {
+                        // Its warnings come before the report, as `sisu run`
+                        // prints them, and a stage 1 whose `sir` printed the SIR
+                        // of a program its ownership checker rejects, or no SIR
+                        // at an error of the front end, says which here.
+                        let c = match checked {
+                            Some(c) => c,
+                            None => match run(host, &check_words(false), Backend::Unused) {
+                                Ok(c) => c,
+                                Err(code) => return code,
+                            },
+                        };
+                        host.stderr(&c.stdout);
+                        host.stderr(&c.stderr);
+                        if c.status != exit::OK || r.stdout.is_empty() {
+                            if let Some(line) = errors_line(&c.stderr, !r.stdout.is_empty()) {
+                                host.stderr(&line);
+                            }
+                            c.status.max(exit::ERROR)
                         } else {
+                            host.stderr(&r.stderr);
                             match read_sir(&r.stdout, host) {
                                 Ok(prog) if cmd == "bench" => bench_from_sir(&prog, opts, host),
                                 Ok(prog) => test_from_sir(&prog, &p.flags, opts, input, true, host),

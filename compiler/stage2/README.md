@@ -158,19 +158,19 @@ rt-B.o (decision 353). It holds: each B is its A byte for byte, and
 stage1-A prints the SIR `sisu sir` prints, the runtime's seed among it.
 
 ```text
-  sisu2-C       23536552 bytes  sha256 4ebfa64db1cd453d...  built through the Cranelift path (65.2 s)
-  A.stage2.sir   4204001 bytes  sha256 df41a8a5447a9444...  printed by sisu sir
+  sisu2-C       23539384 bytes  sha256 729f41d7266ae7df...  built through the Cranelift path (52.6 s)
+  A.stage2.sir   4204078 bytes  sha256 12b54f73d025ffda...  printed by sisu sir
   A.stage1.sir  18015195 bytes  sha256 ddc542c20f268407...  printed by sisu sir
-  A.rt.sir        428692 bytes  sha256 4c985bfeab3977d8...  printed by sisu sir (all three 87.4 s)
+  A.rt.sir        428692 bytes  sha256 4c985bfeab3977d8...  printed by sisu sir (all three 80.4 s)
   rt-A.o          799152 bytes  sha256 b42a1b24b1059549...  built by sisu2-C
-  sisu2-A       27655024 bytes  sha256 c803f28b9d79495c...  built by sisu2-C, with rt-A.o (5.8 s)
-  stage1-A      54716320 bytes  sha256 32da331b9ba38535...  built by sisu2-C, with rt-A.o (26.5 s)
-  B.stage2.sir   4204001 bytes  sha256 df41a8a5447a9444...  printed by stage1-A
+  sisu2-A       27657704 bytes  sha256 3cc6756e1da30ed0...  built by sisu2-C, with rt-A.o (5.3 s)
+  stage1-A      54718840 bytes  sha256 3025b4a426e7a980...  built by sisu2-C, with rt-A.o (21.1 s)
+  B.stage2.sir   4204078 bytes  sha256 12b54f73d025ffda...  printed by stage1-A
   B.stage1.sir  18015195 bytes  sha256 ddc542c20f268407...  printed by stage1-A
-  B.rt.sir        428692 bytes  sha256 4c985bfeab3977d8...  printed by stage1-A (all three 224.2 s)
+  B.rt.sir        428692 bytes  sha256 4c985bfeab3977d8...  printed by stage1-A (all three 205.9 s)
   rt-B.o          799152 bytes  sha256 b42a1b24b1059549...  built by sisu2-A
-  sisu2-B       27655024 bytes  sha256 c803f28b9d79495c...  built by sisu2-A, with rt-B.o (13.3 s)
-  stage1-B      54716320 bytes  sha256 32da331b9ba38535...  built by sisu2-A, with rt-B.o (53.7 s)
+  sisu2-B       27657704 bytes  sha256 3cc6756e1da30ed0...  built by sisu2-A, with rt-B.o (10.0 s)
+  stage1-B      54718840 bytes  sha256 3025b4a426e7a980...  built by sisu2-A, with rt-B.o (42.7 s)
 ```
 
 It takes six to eight minutes on four cores; `--keep DIR` leaves the files

@@ -7971,16 +7971,18 @@ in Sisu"; D-086)
      the status its report gives, summed over its summary lines. Three
      regressions of decision 357's routing, which the manual's round found,
      are mended: a program the front end rejects no longer has its tests
-     run, since stage 1's `sir --tests` prints the SIR of a program its
-     ownership checker rejects or whose `comptime` fails (the exercises
-     `winner`, `E0408`, and `journeys`, `E0603`, ran under the monitor,
-     which stopped them with 60 to 230 lines of SIR), so the driver asks
-     stage 1's `check` of the program with its tests first and, when it
-     finds an error, prints its diagnostics and the line `sisu run` ends
-     with (`D0021` after the ownership checker's errors, `D0006` after the
-     others) and exits with 1 (`sisu bench` alike); the program's warnings,
-     `W0001` among them, come before the report, as `sisu run` prints them;
-     and the driver no longer writes the lockfile of what stage 1 tests,
+     run (the exercises `winner`, `E0408`, and `journeys`, `E0603`, ran
+     under the monitor, which stopped them with 60 to 230 lines of SIR),
+     since the driver shows what stage 1's `sir --tests` prints when it
+     fails, its diagnostics and the line `sisu run` ends with (`D0021`
+     after the ownership checker's errors, `D0006` after the others), and
+     takes its status, 1 (stage 1's R46, decision 370, where it printed the
+     SIR of such a program), and asks its `check` of the program with its
+     tests after a `sir --tests` that printed SIR, for the warnings, and
+     for the errors a stage 1 without R46 leaves to it, which it reports
+     the same way (`sisu bench` alike); the program's warnings, `W0001`
+     among them, come before the report, as `sisu run` prints them; and
+     the driver no longer writes the lockfile of what stage 1 tests,
      leaving it to stage 1, which records each package's `unsafe` level
      (decision 275), where the driver's lockfile without it made stage 1
      refuse it with `E1022` and broke `sisu run` until it was deleted
@@ -8106,8 +8108,8 @@ runtime in Sisu"; D-086, D-087 step 3)
      With decision 383, the runtime's seed grows from 308 916 to 428 692
      bytes of SIR and its object, as the fixed point builds it, from
      582 664 to 799 152 bytes, which the fixed point still holds (rt-A.o
-     and rt-B.o the same bytes, as sisu2-A and sisu2-B, 27 655 024, and
-     stage1-A and stage1-B, 54 716 320). The other way was the list methods
+     and rt-B.o the same bytes, as sisu2-A and sisu2-B, 27 657 704, and
+     stage1-A and stage1-B, 54 718 840). The other way was the list methods
      written in Sisu over `RawBuf` in the prelude and compiled with every
      program, which needs per-type code (22's end) and changes every
      program's SIR. This changes no rule of the language.
@@ -8140,3 +8142,24 @@ driver"; 10, 17; the manual's findings R13, R16, R17 and G14)
      `12345678901234567890.123456789` as written); the frozen Rust front end
      still reads the literal from its `f64`'s shortest digits. This changes
      no rule of the language.
+
+**The runner: `expect` goes on** (section "Testing"; 17; stage 1's R38,
+decision 362)
+
+388. `expect.fail(text, message)`, `expect.fail_compare(text, message,
+     left, right)` and `expect.fail_parts(text, message, parts)`, which
+     stage 1 lowers a failed `expect` to in a program built with its tests
+     (its R38), take what `assert`'s three take: the interpreter renders the
+     failure as `assert`'s panic would be reported, with the frames it
+     would leave (the statement's and its callers' in the running task,
+     but drop glue's and the standard library's), records it in the running
+     test and returns, and the runner fails the test at its end with every
+     failure it recorded, in order, before the report of the panic that
+     ended it if one did, whatever else it did, blocked by a hole too;
+     outside a test, a plain run and compile time, they are `assert`'s
+     panic. Natively, where no test runs, they are `assert`'s (appended to
+     `sisu_rt::abi`'s intrinsics and stage 2's table, so the others keep
+     their numbers). `tests/expect/expect.sir`, what stage 1's `sir --tests`
+     prints of its case `testing/expect`, holds it
+     (`expect_records_its_failures_and_the_test_goes_on`). This changes no
+     rule of the language: it implements 17's `expect`.

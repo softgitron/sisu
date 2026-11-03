@@ -279,3 +279,42 @@ fn sisu_test_reports_a_program_as_sisu_run_does() {
     assert!(out.ends_with("0 passed, 0 failed, 1 blocked\n"), "{out}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `expect`'s failures, which stage 1 lowers in a program built with its
+/// tests to `expect.fail`, `expect.fail_compare` and `expect.fail_parts`
+/// (its R38; `tests/expect/expect.sir`, what its `sir --tests` prints of its
+/// case `testing/expect`): the interpreter records each in the running
+/// test's report as `assert`'s panic would be, at its statement, and the
+/// test goes on to its end, where it fails with all three; a plain run of
+/// the same SIR, whose `expect` holds, prints and exits with 0 (decision
+/// 388).
+#[test]
+fn expect_records_its_failures_and_the_test_goes_on() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let sir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/expect/expect.sir");
+    let dir = std::env::temp_dir().join(format!("sisu-expect-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    std::fs::copy(&sir, dir.join("expect.sir")).expect("the SIR");
+    let run = |args: &[&str]| {
+        let out = std::process::Command::new(&sisu).args(args).current_dir(&dir).output().expect("sisu runs");
+        (String::from_utf8_lossy(&out.stdout).into_owned(), out.status.code())
+    };
+    let (out, status) = run(&["test", "--from-sir", "expect.sir"]);
+    assert_eq!(status, Some(1), "{out}");
+    let failures: Vec<&str> = out.lines().filter(|l| l.starts_with("panic: assertion failed: ")).collect();
+    assert_eq!(
+        failures,
+        [
+            "panic: assertion failed: double(2) == 5",
+            "panic: assertion failed: four > 5",
+            "panic: assertion failed: even(double(3) + 1)",
+        ],
+        "{out}"
+    );
+    for at in ["(expect.sisu:14:5)", "(expect.sisu:15:5)", "(expect.sisu:16:5)"] {
+        assert!(out.contains(at), "{out}");
+    }
+    assert!(out.ends_with("0 passed, 1 failed, 0 blocked\n"), "{out}");
+    assert_eq!(run(&["run", "--from-sir", "expect.sir"]), ("six\n".to_string(), Some(0)));
+    let _ = std::fs::remove_dir_all(&dir);
+}

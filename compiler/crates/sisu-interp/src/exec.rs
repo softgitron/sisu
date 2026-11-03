@@ -517,6 +517,29 @@ impl<'p> Interp<'p, '_> {
             .is_some_and(|s| s.starts_with("<std>/") || s.starts_with("<shims>/"))
     }
 
+    /// The lines a panic raised here would leave in its trace: each frame
+    /// of the running task's, innermost first, but drop glue's and the
+    /// standard library's (an `expect` that failed, decision 388).
+    pub(crate) fn frame_lines(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for fr in self.frames.iter().rev() {
+            let Some(f) = fr.func.and_then(|i| self.func(i)) else { continue };
+            let file = self.prog.sources.get(f.source as usize).map(String::as_str).unwrap_or("?");
+            if f.kind == sir::FnKind::Glue || file.starts_with("<std>/") || file.starts_with("<shims>/") {
+                continue;
+            }
+            let location = match fr.loc {
+                Some(l) => format!("{file}:{}:{}", l.line, l.col),
+                None => file.to_string(),
+            };
+            out.push(render(
+                msg::RUN_FRAME,
+                &[("function", display_fn_name(&f.name, self.prog)), ("location", location)],
+            ));
+        }
+        out
+    }
+
     /// `name (file:line:col)` for the top frame, as a catalog line.
     fn frame_line(&self) -> String {
         let Some(fr) = self.frames.last() else { return String::new() };

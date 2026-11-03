@@ -323,6 +323,11 @@ pub struct Interp<'p, 'h> {
     pub(crate) recorded_case: Option<Vec<i64>>,
     /// The name of the test running, and the snapshots it took (17).
     pub(crate) test_name: String,
+    /// Whether the run is a test's, whose failed `expect`s are recorded in
+    /// `expected`, each as `assert`'s panic would be reported, for the test
+    /// to fail at its end (17; decision 388).
+    pub(crate) in_test: bool,
+    pub(crate) expected: Vec<String>,
     pub(crate) snapshots_taken: Vec<(String, String)>,
     /// For each open `test.catch`, innermost last: the step count at which
     /// its call has run out of steps, and the budget.
@@ -405,6 +410,8 @@ impl<'p, 'h> Interp<'p, 'h> {
             replay_case: options.replay_case.clone(),
             recorded_case: None,
             test_name: String::new(),
+            in_test: false,
+            expected: Vec::new(),
             snapshots_taken: Vec::new(),
             case_ends: Vec::new(),
             sim: options.sim,
@@ -532,6 +539,8 @@ impl<'p, 'h> Interp<'p, 'h> {
         };
         self.test_name =
             self.prog.tests.iter().find(|(_, f)| f == function).map(|(n, _)| n.clone()).unwrap_or_default();
+        self.in_test = true;
+        self.expected.clear();
         // A test that declares a `System` receives the real one, as `main`
         // does (17, "Isolation and parallelism"); one that names
         // capabilities receives fresh fakes of them (decision 241); the
@@ -559,6 +568,18 @@ impl<'p, 'h> Interp<'p, 'h> {
             vec![self.system()]
         };
         let result = self.call_fn(fi, args);
+        // A test whose `expect` failed fails at its end with every failure
+        // it recorded, in order, before the panic that ended it, if one did,
+        // whatever else it did (17; decision 388).
+        if !self.expected.is_empty() {
+            let mut failures = std::mem::take(&mut self.expected).concat();
+            match &result {
+                Err(Unwind::Panic(p)) if p.hole.is_none() => failures.push_str(&panic_report(p)),
+                Err(Unwind::Abort(m)) => failures.push_str(m),
+                _ => {}
+            }
+            return TestResult::Failed(failures);
+        }
         // A hole a task reached blocks the test, though the test went on to
         // wait for what the task would have done, or to fail without it
         // (17: the run stops at a hole).
@@ -656,7 +677,7 @@ fn mentions_counted(t: &sir::Type) -> bool {
     }
 }
 
-fn panic_report(p: &PanicInfo) -> String {
+pub(crate) fn panic_report(p: &PanicInfo) -> String {
     let mut text = render(msg::RUN_PANIC_HEADER, &[("message", p.message.clone())]);
     text.push('\n');
     for line in &sisu_diag::trace::shown(&p.stack) {

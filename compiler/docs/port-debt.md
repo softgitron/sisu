@@ -630,14 +630,14 @@ What the driver does around stage 1, because of what its commands are:
   prints nothing for a program with an error of the front end, and the
   SIR of one its ownership checker rejects, so the driver runs its `check`
   first for the diagnostics, a second run of stage 1 (about 0.6 s for a
-  small file; decision 380). `expect` is lowered as `assert` by both front
-  ends, so it stops a test at its first failure, where 17 lets the test go
-  on and report every failure (manual, chapter 19). *Pay*: the reports in
-  stage 1's `sir` (`--tests` refusing a program its ownership checker
-  rejects); `expect` lowered to intrinsics of its own (`expect.fail`,
-  `expect.fail_compare`, `expect.fail_parts`) that record the failure in
-  the test's report and return, which the interpreter and the runner then
-  implement.
+  small file; decision 380), which a stage 1 whose `sir --tests` refuses
+  a program with an error (its R46, decision 370) needs only for the
+  warnings. The interpreter and the runner implement `expect.fail`,
+  `expect.fail_compare` and `expect.fail_parts`, which stage 1's R38
+  lowers a failed `expect` to (decision 388); the frozen Rust front end
+  still lowers `expect` as `assert`, so a test it builds stops at its
+  first failure. *Pay*: stage 1's `sir --tests` printing the warnings, so
+  that one run of stage 1 serves a test run.
 
 ## Stage 2: what the native backend leaves out
 
