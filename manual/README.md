@@ -406,7 +406,7 @@ prototype in the experiment ([STYLE.md](STYLE.md)).
 | R3 | Declarations | `let`, `var`, `const`, `def` and its parameters, `pure def`, `comptime def`, `struct`, `view struct`, `enum`, `error`, `trait`, `impl`, `type`, `test`, `suite`, `bench`, `import`, `extern`, visibility. |
 | R4 | Expressions and operators | The precedence table and each operator, calls and keyword arguments, indexing, slicing and `^`, comprehensions, closures and `it`, `if` and `match` expressions, `else` fallbacks, `?`, `?.`, `??`, interpolation and format specs, `comptime e`, `unsafe e`. |
 | R5 | Statements and control flow | Assignment and places, `if`, chained conditions, `if let`, `while let`, `let ... else`, `while`, the three `for` modes, `break`, `continue`, `return`, `match`, `select`, `with`, `defer`, `assert`, `debug_assert`, `expect`, `pass`, `unsafe` blocks. |
-| R6 | Patterns | Every pattern form, binding by case, exhaustiveness, guards, alternatives that bind. |
+| R6 | Patterns ([written](reference/patterns.md)) | Every pattern form, binding by case, exhaustiveness, guards, alternatives that bind. |
 | R7 | Ownership and borrowing ([written](reference/ownership.md)) | Moves, copies, drops and their order, conventions, references, elision and `from`, views, captures, iteration modes, must-consume, guaranteed drop, the library pointer types, allocators. |
 | R8 | Errors and panics | Error sets, propagation, traces, context, panics, unwinding, abort, exit statuses. |
 | R9 | Concurrency | Tasks, scopes, handles, failures and their order, cancellation, shields, deadlines, races, channels, `select`, the sync types, `Send` and `Sync`, atomics and orderings, `std.par`, the scheduler and its yield points. |
@@ -831,7 +831,7 @@ solutions and passing checks.
 | 5 | Chapter 9 with challenge I (3, done); G2 Coming from Python (1); R19 false friends (1, done) | 2 |
 | 6 | Chapters 10 (3, done), 11 (4, done), 12 (3, done), 13 with challenge II (3, done); R7 ownership (3, done); G13 borrow errors (1); X3 (1) | 5 |
 | 7 | Reader test of Parts I and II: five readers who know Python, their stuck points, the rewrites | 4 |
-| 8 | Chapters 14 (3, done), 15 (3, done), 16 (3, done), 17 with challenge III (2.5, done); R2 (3), R3 (2), R6 (1), R13 (2.5) | 20 |
+| 8 | Chapters 14 (3, done), 15 (3, done), 16 (3, done), 17 with challenge III (2.5, done); R2 (3), R3 (2), R6 (1, done), R13 (2.5) | 20 |
 | 9 | Chapters 18 (3), 19 (3), 20 (4), 21 (3), 22 with challenge IV (4); R9 (2.5), R10 (2), R15 (2); G5 to G16 (9) | 32.5 |
 | 10 | R4 (2), R5 (1.5), R8 (1.5), R14 (1.5), R20 (2), R21 (1), R22 (1); X1, X2, X4, X5, X8, X10, X12 (7) | 17.5 |
 | 11 | Chapters 23 (2), 24 (2), 25 (3), 26 (2); R11 (1), R12 (2); G17, G20, G21, G26, G27, G28, G29, G30, G31, G32 (7.5); X6, X7, X9, X13, X14 (5) | 26.5 |

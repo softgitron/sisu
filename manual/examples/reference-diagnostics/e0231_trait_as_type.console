@@ -1,1 +1,9 @@
 $ sisu run e0231_trait_as_type.sisu
+error[E0231]: `Priced` is a trait, not a type; a value of a type that implements it is `dyn Priced`
+  --> e0231_trait_as_type.sisu:12:16
+   |
+12 | def show(item: Priced) -> String:
+   |                ^^^^^^
+  = fix: write `dyn Priced`: `dyn `
+
+error[D0006]: the program was not run: errors found (1)

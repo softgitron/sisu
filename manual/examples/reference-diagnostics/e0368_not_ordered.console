@@ -1,1 +1,8 @@
 $ sisu run e0368_not_ordered.sisu
+error[E0368]: `Point` has no order, so it cannot be compared with `<` or sorted
+  --> e0368_not_ordered.sisu:7:11
+  |
+7 |     print(Point(1, 2) < Point(2, 1))
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

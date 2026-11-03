@@ -1,1 +1,8 @@
 $ sisu run e0215_self.sisu
+error[E0215]: `self` exists only inside a method
+  --> e0215_self.sisu:2:14
+  |
+2 | def describe(self) -> String:
+  |              ^^^^
+
+error[D0006]: the program was not run: errors found (1)

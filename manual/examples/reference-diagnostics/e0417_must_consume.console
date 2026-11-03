@@ -1,1 +1,12 @@
 $ sisu run e0417_must_consume.sisu
+error[E0417]: `note` is never consumed: a `Draft` must be passed to an `own` parameter before it goes out of scope
+  --> e0417_must_consume.sisu:11:33
+   |
+11 |     print("drafted {note.text}")
+   |                                 ^
+   |
+10 |     let note = Draft("a first try")
+   |         ---- `note` is declared here
+  = note: consume it with one of its methods that take `own self`: `discard`
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

@@ -1,1 +1,9 @@
 $ sisu run e0310_operator.sisu
+error[E0310]: `+` cannot be applied to `str` and `int`
+  --> e0310_operator.sisu:4:11
+  |
+4 |     print("age " + age)
+  |           ^^^^^^^^^^^^
+  = fix: write the value into the text: `"age {age}"`
+
+error[D0006]: the program was not run: errors found (1)

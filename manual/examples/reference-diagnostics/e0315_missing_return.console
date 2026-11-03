@@ -1,1 +1,9 @@
 $ sisu run e0315_missing_return.sisu
+error[E0315]: `sign` returns `int`, but control can reach the end of its body without a `return`
+  --> e0315_missing_return.sisu:2:5
+  |
+2 | def sign(n: int) -> int:
+  |     ^^^^
+  = note: return a value on that path too, or end the body with a `return`
+
+error[D0006]: the program was not run: errors found (1)

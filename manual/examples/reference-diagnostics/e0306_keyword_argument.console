@@ -1,1 +1,8 @@
 $ sisu run e0306_keyword_argument.sisu
+error[E0306]: `greet` has no parameter named `formal`
+  --> e0306_keyword_argument.sisu:6:25
+  |
+6 |     print(greet("Aino", formal=True))
+  |                         ^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

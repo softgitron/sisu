@@ -1,1 +1,8 @@
 $ sisu run e0389_self.sisu
+error[E0389]: `self` exists only inside a method
+  --> e0389_self.sisu:3:14
+  |
+3 |     return "{self}"
+  |              ^^^^
+
+error[D0006]: the program was not run: errors found (1)

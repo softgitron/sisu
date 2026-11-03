@@ -1,1 +1,8 @@
 $ sisu run e0304_method.sisu
+error[E0304]: `str` has no method `strip`
+  --> e0304_method.sisu:3:21
+  |
+3 |     print("  hei  ".strip())
+  |                     ^^^^^
+
+error[D0006]: the program was not run: errors found (1)

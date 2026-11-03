@@ -1,1 +1,9 @@
 $ sisu run e0314_non_exhaustive.sisu
+error[E0314]: this `match` does not cover `Amber`
+  --> e0314_non_exhaustive.sisu:8:12
+  |
+8 |     return match light:
+  |            ^^^^^^^^^^^
+  = note: add an arm for `Amber`, or a `case _` arm
+
+error[D0006]: the program was not run: errors found (1)

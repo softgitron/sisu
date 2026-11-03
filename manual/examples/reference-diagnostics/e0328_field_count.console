@@ -1,1 +1,8 @@
 $ sisu run e0328_field_count.sisu
+error[E0328]: wrong number of fields in the pattern for `Point`: expected 2, found 1
+  --> e0328_field_count.sisu:8:14
+  |
+8 |         case Point(x=0): "on the y axis"
+  |              ^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

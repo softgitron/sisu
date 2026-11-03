@@ -1,1 +1,12 @@
 $ sisu run e0411_view_field.sisu
+error[E0411]: `Order` holds `item: str`, which borrows; only a `view struct` may hold a borrow
+  --> e0411_view_field.sisu:3:5
+  |
+3 |     item: str
+  |     ^^^^^^^^^
+  |
+2 | struct Order:
+  |        ----- `Order` is declared here
+  = fix: declare it `view struct Order`: `view `
+
+error[D0006]: the program was not run: errors found (1)

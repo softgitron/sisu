@@ -1,1 +1,8 @@
 $ sisu run e0105_pattern.sisu
+error[E0105]: expected a pattern, found `not`
+  --> e0105_pattern.sisu:5:14
+  |
+5 |         case not 0: "other"
+  |              ^^^
+
+error[D0006]: the program was not run: errors found (1)

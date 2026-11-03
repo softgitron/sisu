@@ -1,1 +1,8 @@
 $ sisu run e0395_bare_dyn.sisu
+error[E0395]: `dyn Priced` has no size of its own; hold it behind `ref` or in a `Box`
+  --> e0395_bare_dyn.sisu:12:10
+   |
+12 | def show(item: dyn Priced) -> String:
+   |          ^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

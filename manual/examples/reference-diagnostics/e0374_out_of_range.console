@@ -1,1 +1,9 @@
 $ sisu run e0374_out_of_range.sisu
+error[E0374]: `300` does not fit in `u8`
+  --> e0374_out_of_range.sisu:3:21
+  |
+3 |     let level: u8 = 300
+  |                     ^^^
+  = note: `u8` holds 0 to 255
+
+error[D0006]: the program was not run: errors found (1)

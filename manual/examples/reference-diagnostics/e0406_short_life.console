@@ -1,1 +1,11 @@
 $ sisu run e0406_short_life.sisu
+error[E0406]: `i` does not live long enough: it is borrowed on line 5, and the borrow is still used on line 5, after `i` is gone
+  --> e0406_short_life.sisu:5:28
+  |
+5 |         steps.push(() -> i)
+  |                            ^
+  |                    ------- borrowed here by `steps`
+  |         ----- the borrow is still used here
+  = note: declare `i` where it lives as long as the borrow is used, outside the block or loop it is in now
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

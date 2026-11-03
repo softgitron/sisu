@@ -1,1 +1,8 @@
 $ sisu run e0117_trailing.sisu
+error[E0117]: unexpected `print` after the end of the statement
+  --> e0117_trailing.sisu:3:15
+  |
+3 |     let n = 3 print(n)
+  |               ^^^^^
+
+error[D0006]: the program was not run: errors found (1)

@@ -1,1 +1,8 @@
 $ sisu run e0325_not_iterable.sisu
+error[E0325]: a `for` loop cannot iterate over `str`
+  --> e0325_not_iterable.sisu:3:19
+  |
+3 |     for letter in "hei":
+  |                   ^^^^^
+
+error[D0006]: the program was not run: errors found (1)

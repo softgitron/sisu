@@ -1,1 +1,9 @@
 $ sisu run e0339_mut_at_call.sisu
+error[E0339]: `balance` is a `mut` parameter, so the call must say `mut` before the argument
+  --> e0339_mut_at_call.sisu:7:13
+  |
+7 |     deposit(balance, 50)
+  |             ^^^^^^^
+  = fix: write `mut` before the argument: `mut `
+
+error[D0006]: the program was not run: errors found (1)

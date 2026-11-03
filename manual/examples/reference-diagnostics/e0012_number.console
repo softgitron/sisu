@@ -1,1 +1,8 @@
 $ sisu run e0012_number.sisu
+error[E0012]: `12abc` is not a valid number literal
+  --> e0012_number.sisu:3:11
+  |
+3 |     print(12abc)
+  |           ^^^^^
+
+error[D0006]: the program was not run: errors found (1)

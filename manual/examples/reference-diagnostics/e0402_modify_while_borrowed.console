@@ -1,1 +1,15 @@
 $ sisu run e0402_modify_while_borrowed.sisu
+error[E0402]: `names` is borrowed on line 4 and cannot be modified until that borrow ends on line 6
+  --> e0402_modify_while_borrowed.sisu:5:5
+  |
+5 |     names[1] = "Ella"
+  |     ^^^^^^^^^^^^^^^^^
+  |
+4 |     let first = ref names[0]
+  |                 ------------ borrowed here by `first`
+  |
+6 |     print("{first} is first")
+  |             ----- the borrow is still used here
+  = note: move this after line 6, where the borrow ends, or work on a copy made with `.copy()`
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

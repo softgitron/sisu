@@ -180,8 +180,9 @@ def main():
 
 A struct pattern is the struct's name with a pattern for its fields, by
 position in declaration order or by keyword, as in Python. `..` at the
-end stands for the fields not named, which a pattern otherwise names
-all of.
+end stands for the fields not named; without it, a pattern names every
+field, and one that leaves a field out is E0328
+([R17](diagnostics.md#e0328)).
 
 <!-- file: examples/reference-patterns/structs.sisu -->
 ```sisu
@@ -469,6 +470,7 @@ error[D0006]: the program was not run: errors found (1)
 | [E0105](diagnostics.md#e0105) | `parse.expected-pattern` | [Literal patterns](#literal-patterns) |
 | [E0211](diagnostics.md#e0211) | `resolve.ambiguous-variant` | [Names that bind and names that name](#names-that-bind-and-names-that-name) |
 | [E0314](diagnostics.md#e0314) | `type.non-exhaustive` | [A match covers every value](#a-match-covers-every-value) |
+| [E0328](diagnostics.md#e0328) | `type.pattern-field-count` | [Struct patterns](#struct-patterns) |
 | [E0327](diagnostics.md#e0327) | `type.unknown-variant` | [Names that bind and names that name](#names-that-bind-and-names-that-name) |
 | [E0329](diagnostics.md#e0329) | `type.refutable-let` | [A plain let matches every value](#a-plain-let-matches-every-value) |
 | [E0385](diagnostics.md#e0385) | `type.bindings-in-or-pattern` | [Alternatives that bind](#alternatives-that-bind) |

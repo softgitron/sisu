@@ -1,1 +1,8 @@
 $ sisu run e0107_top_level.sisu
+error[E0107]: statements cannot appear at the top level of a module; put them in a function such as `main`
+  --> e0107_top_level.sisu:2:1
+  |
+2 | print("Hei")
+  | ^^^^^
+
+error[D0006]: the program was not run: errors found (1)

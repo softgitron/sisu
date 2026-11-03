@@ -2402,6 +2402,67 @@ stop
 
 Shown in [chapter 2](../tutorial/02-values.md).
 
+### E0328
+
+`type.pattern-field-count`: wrong number of fields in the pattern for
+`{name}`: expected {expected}, found {found}.
+
+A struct or variant pattern gives a pattern for every field, by position
+or by keyword, unless it ends with `..`, which stands for the fields it
+leaves out.
+
+<!-- file: examples/reference-diagnostics/e0328_field_count.sisu -->
+```sisu
+# A struct pattern that leaves out a field without `..`.
+struct Point:
+    x: int
+    y: int
+
+def describe(p: Point) -> str:
+    return match p:
+        case Point(x=0): "on the y axis"
+        case _: "elsewhere"
+
+def main():
+    print(describe(Point(0, 4)))
+```
+
+<!-- output: examples/reference-diagnostics/e0328_field_count.console -->
+```console
+$ sisu run e0328_field_count.sisu
+error[E0328]: wrong number of fields in the pattern for `Point`: expected 2, found 1
+  --> e0328_field_count.sisu:8:14
+  |
+8 |         case Point(x=0): "on the y axis"
+  |              ^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Add `..` at the end of the pattern, or a pattern for each field; `_` for
+a field matches any value.
+
+<!-- file: examples/reference-diagnostics/e0328_field_count_fixed.sisu -->
+```sisu
+# `..` stands for the fields the pattern does not name.
+struct Point:
+    x: int
+    y: int
+
+def describe(p: Point) -> str:
+    return match p:
+        case Point(x=0, ..): "on the y axis"
+        case _: "elsewhere"
+
+def main():
+    print(describe(Point(0, 4)))
+```
+
+<!-- output: examples/reference-diagnostics/e0328_field_count_fixed.out -->
+```text
+on the y axis
+```
+
 ### E0329
 
 `type.refutable-let`: this pattern might not match; add `else:` with a
@@ -2953,6 +3014,65 @@ def main():
 ```
 
 Shown in [chapter 2](../tutorial/02-values.md).
+
+### E0385
+
+`type.bindings-in-or-pattern`: `{name}` is bound in some alternatives of
+`\|` but not in all; every alternative must bind the same names.
+
+The alternatives of `|` run the same arm, so every alternative binds the
+same names, with the same types.
+
+<!-- file: examples/reference-diagnostics/e0385_or_bindings.sisu -->
+```sisu
+# An alternative that binds a name the other does not.
+enum Reading:
+    Celsius(f64)
+    Missing
+
+def value(r: Reading) -> f64:
+    return match r:
+        case Celsius(t) | Missing: t
+
+def main():
+    print(value(Missing))
+```
+
+<!-- output: examples/reference-diagnostics/e0385_or_bindings.console -->
+```console
+$ sisu run e0385_or_bindings.sisu
+error[E0385]: `t` is bound in some alternatives of `|` but not in all; every alternative must bind the same names
+  --> e0385_or_bindings.sisu:8:27
+  |
+8 |         case Celsius(t) | Missing: t
+  |                           ^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Bind the name in every alternative, or give the alternatives arms of
+their own.
+
+<!-- file: examples/reference-diagnostics/e0385_or_bindings_fixed.sisu -->
+```sisu
+# Each alternative in an arm of its own.
+enum Reading:
+    Celsius(f64)
+    Missing
+
+def value(r: Reading) -> f64:
+    return match r:
+        case Celsius(t): t
+        case Missing: 0.0
+
+def main():
+    print(value(Missing))
+```
+
+<!-- output: examples/reference-diagnostics/e0385_or_bindings_fixed.out -->
+```text
+0.0
+```
 
 ### E0389
 
@@ -4648,7 +4768,7 @@ it. `sisu explain CODE` prints the same line.
 | [E0325](#e0325) | `type.not-iterable` | a `for` loop cannot iterate over `{ty}` |
 | E0326 | `type.pattern-mismatch` | this pattern cannot match a value of type `{ty}` |
 | [E0327](#e0327) | `type.unknown-variant` | `{ty}` has no variant `{name}` |
-| E0328 | `type.pattern-field-count` | wrong number of fields in the pattern for `{name}`: expected {expected}, found {found} |
+| [E0328](#e0328) | `type.pattern-field-count` | wrong number of fields in the pattern for `{name}`: expected {expected}, found {found} |
 | [E0329](#e0329) | `type.refutable-let` | this pattern might not match; add `else:` with a block that leaves the scope |
 | E0330 | `type.else-not-fallible` | `else` after `let` needs a `T?`, a `T ! E` or a pattern that can fail; this value is `{ty}` |
 | E0331 | `type.else-must-diverge` | the block after `else:` must leave the scope with `return`, `break`, `continue` or a panic |
@@ -4697,7 +4817,7 @@ it. `sisu explain CODE` prints the same line.
 | E0382 | `type.self-type-outside` | `Self` exists only inside a type's declaration |
 | E0383 | `type.from-end-outside-index` | `^` counts from the end and appears only inside an index, as in `xs[^1]` |
 | E0384 | `type.arm-needs-expression` | an arm of a `match` that has a value holds one expression, not a block |
-| E0385 | `type.bindings-in-or-pattern` | `{name}` is bound in some alternatives of `\|` but not in all; every alternative must bind the same names |
+| [E0385](#e0385) | `type.bindings-in-or-pattern` | `{name}` is bound in some alternatives of `\|` but not in all; every alternative must bind the same names |
 | E0386 | `type.variant-needs-fields` | `{name}` has fields; write `{name}(...)` |
 | E0387 | `type.star-outside-list` | `*name` collects the rest of a list and appears only in a list pattern |
 | E0388 | `type.rest-outside-arguments` | `..` skips the remaining fields and appears only inside `Name(...)` |

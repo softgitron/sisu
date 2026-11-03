@@ -1,1 +1,11 @@
 $ sisu run e0413_from.sisu
+error[E0413]: `longer` returns `str`, which borrows, and has more than one borrowed parameter (a, b); name the ones it borrows from with `from`
+  --> e0413_from.sisu:2:31
+  |
+2 | def longer(a: str, b: str) -> str:
+  |                               ^^^
+  |            ------ `a` is a borrowed parameter
+  |                    ------ `b` is a borrowed parameter
+  = fix: name `a, b` in the `from` clause: ` from a, b`
+
+error[D0006]: the program was not run: errors found (1)

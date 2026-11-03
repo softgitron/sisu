@@ -1,1 +1,3 @@
 $ sisu run r0010_missing_key.sisu
+panic: the key "Roni" is not in the dict
+  at main (r0010_missing_key.sisu:4:5)

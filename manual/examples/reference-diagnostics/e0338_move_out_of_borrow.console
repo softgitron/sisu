@@ -1,1 +1,9 @@
 $ sisu run e0338_move_out_of_borrow.sisu
+error[E0338]: cannot move `queue[0]` out of a borrowed value; copy it with `.copy()`
+  --> e0338_move_out_of_borrow.sisu:4:17
+  |
+4 |     let first = queue[0]
+  |                 ^^^^^^^^
+  = fix: copy it with `.copy()`: `.copy()`
+
+error[D0006]: the program was not run: errors found (1)
