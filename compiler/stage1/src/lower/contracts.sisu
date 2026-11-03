@@ -129,9 +129,13 @@ impl FnLower:
         if cx.ctx.level < CONTRACTS_ALL:
             return
         # A generator the compiler wrote refuses a case that breaks the
-        # invariant instead (17).
+        # invariant instead (17), and `json.decode_struct`'s instance
+        # returns a `Mismatch` (11; RULES.md, R32).
         let module = cx.prog.defs[cx.body.def_.index].module
-        if cx.prog.modules[module.index].name.starts_with("<arbitrary>/"):
+        let m = ref cx.prog.modules[module.index]
+        if m.name.starts_with("<arbitrary>/"):
+            return
+        if m.is_std and m.name.starts_with("<decode_struct["):
             return
         let check = cx.prog.invariant_check(def_) else:
             return
@@ -170,7 +174,8 @@ impl FnLower:
                                     shown.push(cx.prog.display(self.types, t))
                                 owner = "{name}[{shown.join(", ")}]"
             case _:
-                owner = self.contract_owner(cx)
+                # A trait's clause names the trait's method (RULES.md, R29).
+                owner = c.owner.copy() ?? self.contract_owner(cx)
         var parts: list[TExprId] = [c.cond]
         if c.kind != TContractKind.Refinement:
             parts = self.conjuncts(cx, c.cond)

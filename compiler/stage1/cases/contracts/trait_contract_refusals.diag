@@ -1,0 +1,2 @@
+8:32-8:39 E0304 type.unknown-method ty="Self" name="missing"
+13:1-13:22 E0232 resolve.missing-trait-method trait="Counter" ty="Lazy" methods="`add`"

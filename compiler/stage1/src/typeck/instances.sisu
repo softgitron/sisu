@@ -40,6 +40,7 @@ from stage1.syntax.ast import (
     GenericParam,
     ItemId,
     ItemKind,
+    StmtKind,
     TypeExprId,
     Vis,
 )
@@ -311,7 +312,13 @@ impl Resolver:
                     case DeriveSource.Std(dm):
                         let f = self.std_derive_fn(dm, t) else:
                             continue
-                        let template_text = self.safety_text(dm) ?? String.new()
+                        var template_text = self.safety_text(dm) ?? String.new()
+                        # A module the base keeps the text of for its
+                        # templates (`std.json`'s `Encode`, R36).
+                        if template_text.is_empty():
+                            let std_name = self.prog.modules[dm.index].name.copy()
+                            if let Some(t) = self.std_texts.get(std_name):
+                                template_text = t.copy()
                         let src = Src(ast=ref self.sources[dm.index].ast, source=template_text)
                         match unfold(src, f, head, target):
                             case Ok(x):
@@ -669,6 +676,10 @@ impl Resolver:
                         d = d.label_in(Msg.ComptimeInstanceHere, s, e, module.index)
                     else:
                         d = d.label(Msg.ComptimeInstanceHere, range.start, range.end)
+                        # A plain `for` over what compile time knows is the
+                        # `comptime for` the template meant (RULES.md, R34).
+                        if let Some(at) = self.plain_for_over(module, range):
+                            d = d.fix_at(Msg.ComptimeWriteFor, at, at, "comptime ")
                 self.report_other(site_module, d)
             return
         let m = self.declare_generated_in(module, "<{what}>", text)
@@ -751,6 +762,25 @@ impl Resolver:
             if let ItemKind.Const(c) = self.sources[m.index].ast.item(it).kind:
                 if let Some(v) = c.value:
                     return Some((v, m))
+        return None
+
+    ## Where the `for` statement starts whose iterable is at `iterable` in
+    ## the module's syntax, if one is.
+    pure def plain_for_over(self, module: ModuleId, iterable: TextRange) -> int?:
+        if module.index >= len(self.sources):
+            return None
+        let ast = ref self.sources[module.index].ast
+        # The loops `comptime` already unrolls are not plain.
+        var unrolled: set[int] = set()
+        for st in ast.stmts:
+            if let StmtKind.Comptime(inner) = st.kind:
+                _ = unrolled.add(inner.index)
+        for i in range(len(ast.stmts)):
+            if unrolled.contains(i):
+                continue
+            if let StmtKind.For(_, _, iter, _) = ast.stmts[i].kind:
+                if ast.expr(iter).range == iterable:
+                    return Some(ast.stmts[i].range.start)
         return None
 
     ## A module of the text an unfolded value is written in (`unfold_value`):
@@ -938,6 +968,11 @@ impl Resolver:
         if let TyData.Adt(d, _) = self.types.data(t):
             if let Some(attrs) = self.attrs_of.get(d):
                 s.attrs = attrs.copy()
+        # A refinement's base, and a struct's invariant (RULES.md, R32).
+        if base != t:
+            s.base = [self.shape(base, "{written}_b", depth + 1, mut aliases)]
+        if let TyData.Adt(d, _) = self.types.data(base):
+            s.invariant = self.prog.invariant_check(d).is_some()
         s.impls = self.impl_names(t)
         if depth == 0:
             s.methods = self.own_methods(t)

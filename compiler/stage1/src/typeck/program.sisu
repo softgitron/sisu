@@ -291,6 +291,9 @@ pub struct FnInfo:
     ## and its name, and the generic parameter whose argument the call's
     ## argument, a type, is. They are not among `params`.
     pub type_params: list[(int, String, int)]
+    ## `@deprecated("...")` (13, "Deprecation"; RULES.md, R30): the text it
+    ## names the replacement with, empty when it names none.
+    pub deprecated: String?
 
 impl FnInfo:
     ## Whether this template is made once, for all its type arguments at

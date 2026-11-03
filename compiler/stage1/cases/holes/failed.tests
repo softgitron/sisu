@@ -1,0 +1,21 @@
+test "doubles" ... FAILED
+test "halves" ... blocked by todo("halve")
+
+test "doubles" ... FAILED
+panic: assertion failed: double(2) == 4
+  left:  6
+  right: 4
+  at test "doubles" (failed.sisu:10:5)
+replay: sisu test --replay 1-HASH-0.0.1-t0-s0-r0 failed.sisu
+
+0 passed, 1 failed, 1 blocked
+--- stderr
+warning[W0001]: typed hole `halve` of type `int`
+  --> failed.sisu:4:12
+  |
+4 |     return todo("halve")
+  |            ^^^^^^^^^^^^^
+
+in scope at the typed hole `todo("halve")`:
+  x = 4
+error: Exit(status=1)

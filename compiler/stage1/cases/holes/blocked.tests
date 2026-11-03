@@ -1,0 +1,14 @@
+test "doubles" ... ok
+test "scales" ... blocked by todo("offset")
+1 passed, 0 failed, 1 blocked
+--- stderr
+warning[W0001]: typed hole `offset` of type `int`
+  --> blocked.sisu:6:44
+  |
+6 |     return xs.iter().map(x -> x * factor + todo("offset")).collect()
+  |                                            ^^^^^^^^^^^^^^
+
+in scope at the typed hole `todo("offset")`:
+  x = 1
+  factor = 3
+error: Exit(status=3)

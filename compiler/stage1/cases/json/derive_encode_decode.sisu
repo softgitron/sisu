@@ -1,0 +1,28 @@
+# RULES.md, R36: `@derive(Encode, Decode)` (11) gives a type the JSON form
+# `encode` and `decode` give any of its shape, which an impl written by
+# hand replaces with a form of the type's own, wherever the type is.
+import std.json
+from std.json import Decode, Encode
+
+@derive(Encode, Decode, Eq, Debug)
+struct Point:
+    x: int
+    y: int
+
+struct Money:
+    cents: int
+
+impl Encode for Money:
+    def encode_json(self) -> String:
+        return "\"{self.cents // 100}.{self.cents % 100:02}\""
+
+struct Order:
+    item: String
+    price: Money
+    at: Point
+
+def main():
+    let p = Point(x=1, y=2)
+    print(json.encode(p))
+    print(json.decode[Point]("{{\"x\": 3, \"y\": 4}}"))
+    print(json.encode(Order(item="sauna", price=Money(cents=1250), at=p)))

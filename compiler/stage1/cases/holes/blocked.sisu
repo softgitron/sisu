@@ -1,0 +1,15 @@
+# RULES.md, R27: `sisu test` exits with status 3 when no test failed and
+# one is blocked by a typed hole, which is never a shipped state (17), and
+# the blocked test prints the hole's closure: here a closure's parameter
+# and the parameter it captures.
+def scaled(xs: list[int], factor: int) -> list[int]:
+    return xs.iter().map(x -> x * factor + todo("offset")).collect()
+
+def double(x: int) -> int:
+    return x * 2
+
+test "doubles":
+    assert double(2) == 4
+
+test "scales":
+    assert scaled([1, 2], 3) == [3, 6]

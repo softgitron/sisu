@@ -1,0 +1,19 @@
+# RULES.md, R29: a trait's method whose body is its contract alone is
+# required, as one without a body is, so an impl that leaves it out is
+# `E0232`; the contract's own mistakes are the trait's, reported once.
+trait Counter:
+    def add(mut self, amount: int):
+        requires amount > 0
+    def total(self) -> int:
+        ensures result >= self.missing()
+
+struct Lazy:
+    n: int
+
+impl Counter for Lazy:
+    def total(self) -> int:
+        return self.n
+
+def main():
+    let l = Lazy(n=1)
+    print("{l.total()}")

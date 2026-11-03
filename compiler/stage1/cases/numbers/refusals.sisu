@@ -1,0 +1,22 @@
+# RULES.md, R33: `/` between two `Decimal`s names `div` and `to_ratio`,
+# since the quotient is rounded where it is made (D-076); `@float` takes
+# `fast`, which strict floating point satisfies; `@diagnostic_name` waits
+# for compile-time type construction (Q-27).
+from std.num import Decimal
+
+@float(fast)
+def blend(a: f64, b: f64) -> f64:
+    return a * b + a
+
+@float(loose)
+def scale(a: f64) -> f64:
+    return a * 2.0
+
+@diagnostic_name(show_meters)
+struct Meters:
+    value: f64
+
+def main():
+    let a = Decimal.of(2)
+    let b = Decimal.of(3)
+    print("{a / b} {blend(1.0, 2.0)} {scale(1.0)}")

@@ -1932,3 +1932,516 @@ prints what it printed. The case `cases/habits/generic_structs.sisu`
      construction calls with the struct's type arguments, where lowering
      named the struct's parameter in the caller (`E0501`). Stage 1 decides
      it (RULES.md, R26).
+
+## R27. Typed holes: a release build rejects them, a run shows their closure, and a blocked suite says so (decision 340)
+
+**The rule** (D-061; 10, "Holes"; 17, "Assertions": "When it reaches a
+hole, `todo("name")`, the interpreter stops with the hole's closure (the
+`Debug` rendering of every binding in scope), and the runner reports the
+test as blocked by that hole, neither passed nor failed. ... Release
+builds and `sisu publish` reject holes, so blocked is never a shipped
+state"). Three parts:
+
+- **A release build rejects each typed hole.** `sisu build --native
+  --release` (and `sisu run --native --release`, and `sisu1 build
+  --release`) of a program with a hole is `E0445` at each
+  (`type.hole-in-release`, "a release build rejects the typed hole
+  `todo("area")` of type `f64`: blocked is never a shipped state"), with
+  the note `type.hole-placeholder` ("fill the hole before the release
+  build; a placeholder meant to ship is `panic("...")`"), in place of its
+  warning `W0001`, then `D0006`, and nothing is built. `check` and a debug
+  build still warn.
+- **A run that reaches a hole prints its closure** before the run time
+  stops at it: the line `in scope at the typed hole `todo("area")`:`
+  (`panic.hole-closure`), then `  NAME = VALUE` for each binding in scope
+  there, in the order the function declares them, its value written as
+  `{NAME:?}` writes it, and a closure's captures after its own. A binding
+  is shown when the initialisation dataflow finds it holding its whole
+  value at the hole (one not yet assigned, moved away or out of scope is
+  not), when it is a parameter or holds no loan (a reference or view kept
+  in a local may outlive what it borrowed, which the program no longer
+  uses there), when its `Debug` is the one the host writes (a type with a
+  `Debug` of its own, or a type parameter, is left out), and when it holds
+  no capability. A hole with nothing to show prints nothing more. A test
+  blocked by a hole prints the same, so the runner's report says which
+  hole each test waits on and the closure says with what.
+- **A suite with a blocked test and no failed one exits with status 3**
+  (17 names three outcomes and no status; this rule gives the third its
+  own): 0 when every test passed, 1 when a test failed (whatever else is
+  blocked) or the program has an error, 3 when none failed and one is
+  blocked by a hole. Stage 1's `sisu1 test [OPTIONS] [PATH]` checks and
+  lowers the program with its tests as `sisu test` builds it, prints its
+  diagnostics as `sisu test` does (a program with an error is not run,
+  `D0006`), runs its SIR with stage 0's runner (`sisu test --from-sir`,
+  decision 285) with the runner's options (`--jobs`, `--filter`, `--tag`,
+  `--skip-tag`, `--no-monitor`, `--sim`, `--faults`, `--update`,
+  `--no-cache`, `--schedule-seed`, `--explore`, `--scheduler`,
+  `--depth`), passes its report on with each replay line naming the
+  program, and exits with the status. What `--from-sir` leaves out stays
+  out until the runner takes it from stage 1 (`--replay`, transcripts, the
+  cache and `--defer-borrow`), and `sisu test` itself, whose runner and
+  front end are stage 0's, exits as before: the driver's routing of `test`
+  through stage 1, or its runner's status, is the stage-0 round's.
+
+**Why.** The manual's writers found all three (X13 and G26, "Typed
+holes"): `sisu build --native --release` built a program with a hole with
+W0001 and status 0, `sisu test` exited 0 on blocked tests, so nothing
+stopped a hole from shipping, and a blocked test and a run that reached a
+hole printed the hole's name only. 17's sentence that blocked is never a
+shipped state needs a build that refuses and a status a CI job can tell
+from success; the closure is what 10 and 17 say the interpreter stops with.
+
+**In stage 1.** `main.build_program` and `main.release_report` (the
+release refusal); `lower.func.FnLower.hole_bindings` (the bindings whose
+`Debug` the host writes, `sir.Function.shown`) and `borrowck.holes` (the
+closure's statements, written once the ownership checker is done, after
+compile-time evaluation, so that nothing it adds changes what the checker
+reports or what a `comptime` expression does); `main.test_command`,
+`test_program` and `test_summary`, and `sisu1`'s `test`. `check.sh`
+holds a case to its `NAME.release` (what `build --native --release`
+prints) and its `NAME.tests` (what `test` prints, standard output then
+standard error, the replay tokens' hashes written `HASH`), and, for a
+conformance case whose expectation a rule changes, to the file under
+`stage1/expected/` at the case's path, which RULES.md lists as its output
+`behaviour`.
+
+**What it changes.** The SIR of the programs of the corpus that reach a
+hole, which print the closure (the conformance suite's `types/typed_hole`,
+whose `.err` gains it, `stage1/expected/conformance/cases/types/typed_hole.err`;
+`run/testing`'s tests); nothing a debug build or `check` prints. The cases
+`cases/holes/release.sisu` (its `.release` and `.diag`), `closure.sisu`
+(its `.out`, `.err` and `.status`: it runs, interpreted and natively),
+`blocked.sisu` and `failed.sisu` (their `.tests`).
+
+- Differs: `compiler/conformance/cases/run/testing.sisu`: sir, sir-tests
+- Differs: `compiler/conformance/cases/types/typed_hole.sisu`: sir, behaviour
+
+**Documents to bring along:** the conformance suite's
+`types/typed_hole.err` (the file `stage1/expected/` holds); 10's and 17's
+sentences on holes, which can name the status; the manual's reference of
+`sisu test` ("The status is 1 if a test failed, 0 otherwise, even when a
+test is blocked") and of `sisu build`, and its exercise checker
+(`tools/check.py`), which runs exercises whose tests start blocked and
+reads status 3 as waiting; and the stage-0 round's runner, whose status
+and whose `--from-sir` (replay, transcripts, the cache) are the rest.
+
+**Decision 340**, for docs/architecture.md:
+
+340. Typed holes (D-061): a release build rejects each with `E0445`, which
+     names the hole and its type and the `panic("...")` that may ship,
+     where `check` and a debug build warn (`W0001`); a run that reaches a
+     hole prints its closure first, `in scope at the typed hole
+     `todo("name")`:` and a line `NAME = VALUE` (`Debug`) for each binding
+     that holds its whole value there and holds no loan or is a parameter,
+     whose `Debug` the host writes and which holds no capability, a
+     closure's captures after its own; and `sisu test` exits with 3 when
+     no test failed and one is blocked, 1 when one failed, 0 when all
+     passed. The closure is written into the SIR after the ownership
+     checker and compile-time evaluation, which it changes in nothing.
+     Stage 1 decides it (RULES.md, R27).
+
+## R28. What `pure` code may not do: read an `Atomic`, or change what a `par` loop's body does not own (decision 341)
+
+**The rule** (06, "Effects": "The operations that observe the schedule are
+errors in `pure` code: `select`, `Mutex`, `Atomic`, ..."; "Data
+parallelism": a `par` body "is `pure` ...: it may mutate its own element
+and nothing shared. It cannot do I/O, take a lock, wait on a channel").
+Two holes close:
+
+- every method of an `Atomic` is an impure call in a `pure` function,
+  `load` among them, which the prelude lowered to `Cell.get`, a pure
+  intrinsic: `E0333` names the method as the program calls it
+  (`Atomic.load`, `Atomic.store`, `Atomic.swap`,
+  `Atomic.compare_exchange`, where it named the intrinsic, `set` or
+  `replace`), with the note `type.observes-schedule`. Making one
+  (`Atomic(0)`) observes nothing and stays pure;
+- the body of `for x in par.iter(xs):` is `pure`: a call of a function
+  that is not is `E0446` (`type.par-body-impure`), and a change of a
+  binding declared before the loop, by assignment, a `mut` argument (a
+  `push`) or a `ref mut`, `E0447` (`type.par-body-changes`, which names
+  `par.map` and a reducer). The loop's element and the body's own
+  bindings are its own.
+
+**Why.** The manual's writers found both (chapter 26 and G17): `a.load()`
+compiled in a `pure` function, and a `par.iter` loop's body printed and
+summed into a variable outside it, which 06 makes impossible so that a
+parallel loop's result is its serial elision's.
+
+**In stage 1.** `borrowck.purity` (`atomic_method`); `typeck.purity`
+(`is_par_loop`, `check_par_body`, `par_change`, `block_stmts_deep`),
+called from `typeck.check` where a `for` is checked.
+
+**What it changes.** Nothing in the corpus, which has no such program.
+The cases `cases/purity/atomic.sisu` and `par_body.sisu` (their `.diag`).
+
+- Differs: `compiler/stage1/cases/purity/atomic.sisu`: types, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/purity/par_body.sisu`: types, ids, human, doc, doc-output
+
+**Decision 341**, for docs/architecture.md:
+
+341. Every method of an `Atomic` but its construction is impure in `pure`
+     code (`E0333`, named as the program calls it, with a note that it
+     observes the schedule), as 06 lists `Atomic` among the operations
+     that observe the schedule; and the body of a `par` loop (`for x in
+     par.iter(xs):`) is `pure`: it calls only `pure` functions (`E0446`)
+     and changes nothing declared before the loop (`E0447`). Stage 1
+     decides it (RULES.md, R28).
+
+## R29. A trait's contract binds every impl (decision 342)
+
+**The rule** (07, "Interaction with the rest of the language": "Trait
+methods may declare contracts; an implementation may weaken the
+precondition and strengthen the postcondition (Liskov), which the
+compiler checks ... by runtime double-checking otherwise"). A trait's
+method may begin with `requires` and `ensures` clauses, which are the
+contract of every impl of the method:
+
+- an impl's method checks the trait's `requires` on entry, before its
+  own, and the trait's `ensures` on exit, after its own: runtime
+  double-checking, so that an impl that strengthens the precondition or
+  weakens the postcondition fails at the clause it broke. The trait's
+  clauses are checked in the impl's body with the trait's names of the
+  parameters naming the impl's (an impl may call `amount` `by`), and
+  their failure names the trait's method (`precondition of `Counter.add`
+  failed: amount > 0`), wherever the call comes from: the type itself, a
+  generic bound or a `dyn`;
+- a trait's method whose body is its contract alone has no default: it is
+  required, as one without a body is (`E0232` names it when an impl leaves
+  it out), where it was a provided method that did nothing (or `E0315`,
+  for one with a result). A provided method with a contract and a body
+  binds the impls that write their own;
+- a mistake in a trait's clause is the trait's, reported once where the
+  trait is checked, not in each impl;
+- an impl in another module than the trait's is not held to the trait's
+  contract by stage 1 yet, and says so (`W0021`,
+  `contract.trait-elsewhere`), since a checker of stage 1 holds the
+  syntax of its own module only.
+
+**Why.** The manual's writer of chapter 23 found that "contracts on a
+trait's methods ... are accepted and never checked, in either front end
+and through a generic call too: a trait's `requires x >= 0` lets
+`push(-1)` through without a word"; 07 makes them binding.
+
+**In stage 1.** `typeck.Checker.inherit_contract` (the trait's method's
+clauses, its parameters' names and the name a failure gives),
+`typeck.contracts` (`contract_only`, `inherited_clause`, the trait's
+clauses in `check_contracts`), `ContractCheck.owner`, which
+`lower.contracts` names a failure by, and `typeck.collect`'s
+`E0232`.
+
+**What it changes.** Nothing in the corpus, whose traits declare no
+contracts. The cases `cases/contracts/trait_contracts.sisu` (its `.out`,
+`.err` and `.status`: it runs, interpreted and natively) and
+`trait_contract_refusals.sisu` (its `.diag`).
+
+- Differs: `compiler/stage1/cases/contracts/trait_contracts.sisu`: sir, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/contracts/trait_contract_refusals.sisu`: ids, human, doc, doc-output
+
+**Decision 342**, for docs/architecture.md:
+
+342. A trait's method's `requires` and `ensures` bind every impl (07):
+     an impl's method checks the trait's preconditions on entry before its
+     own and the trait's postconditions on exit after its own, with the
+     trait's names of the parameters, and a failure names the trait's
+     method; a trait's method whose body is its contract alone is
+     required, not a default. An impl in another module than the trait's
+     is warned that stage 1 does not check it yet (`W0021`). Stage 1
+     decides it (RULES.md, R29).
+
+## R30. A deprecated item warns where it is used, and an attribute nothing reads warns (decision 343)
+
+**The rule** (13, "Deprecation": "Deprecated items warn with the
+replacement named"; 02 and D-046: attributes are "compile-time data,
+not run-time calls", which the toolchain and compile-time code read):
+
+- each call of a function or method marked `@deprecated("...")`, and
+  each use of one as a value, is `W0023` (`type.deprecated`, "`parse` is
+  deprecated: use `parse_v2`"), the attribute's text naming the
+  replacement, or `W0025` (`type.deprecated-plain`) when it gives none,
+  but in the item's own body;
+- an attribute whose name Sisu does not read (the list in
+  `resolve.READ_ATTRIBUTES`, the attributes the documents give: `derive`,
+  `deprecated`, `cfg`, `inline`, `export`, `must_consume`, `tag`,
+  `repr`, `float`, `diagnostic_name`, `fixture`, `no_alloc`, `stack`, ...,
+  and those only the standard library writes) is `W0024`
+  (`resolve.misspelt-attribute`) when it is within the similar-name
+  distance of one Sisu reads, with the fix that writes that one
+  (`@deprecatd` for `@deprecated`), and otherwise `W0022`
+  (`resolve.unknown-attribute`) when no compile-time code of the program
+  reads attributes (no `reflect.attributes_of`), since nothing can read it
+  then. A program whose compile-time code does read them keeps its own
+  attributes as data, without a word (`@route` of the conformance suite's
+  `reflect/queries`).
+
+**Why.** The manual's writers found both (chapter 28, X11 and the
+reference's R14): `@deprecated("...")` compiled without a word and its
+calls got no warning, and any attribute was accepted, so a misspelt one
+was too.
+
+**In stage 1.** `typeck.collect` (`FnInfo.deprecated`, from the
+attribute), `typeck.Checker.deprecated_uses`; `resolve` (`check_attributes`,
+`attribute`, `READ_ATTRIBUTES`, `read_attribute`), run by both the
+program's and a single module's name pass.
+
+**What it changes.** Nothing in the corpus, whose attributes Sisu reads
+or are read by the program's compile-time code. The cases
+`cases/attributes/deprecated.sisu` (its `.diag`, and its `.out` and
+`.err`: it runs) and `unknown.sisu` (its `.diag`). What the warnings do
+not reach yet: a deprecated type, constant or variant, and `@fix_inline`'s
+rewrite (`sisu fix --deps`, 10), which is a command of its own.
+
+- Differs: `compiler/stage1/cases/attributes/deprecated.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/attributes/unknown.sisu`: names, ids, human, doc, doc-output
+
+**Decision 343**, for docs/architecture.md:
+
+343. A call of a function or method marked `@deprecated("...")`, or a
+     use of one as a value, warns with the attribute's text (`W0023`, or
+     `W0025` without one), but in its own body (13); an attribute whose
+     name Sisu does not read warns: with the fix to the attribute it
+     misspells (`W0024`), or, when no compile-time code of the program
+     reads attributes, because nothing can read it (`W0022`). Stage 1
+     decides it (RULES.md, R30).
+
+## R31. `embed` names a file from the package's root (decision 344)
+
+**The rule** (08, "Compile-time evaluation": "`embed("path")` as a
+compiler intrinsic with the path resolved relative to the package root").
+In a package, every module's `embed("data/words.txt")` reads
+`data/words.txt` beside the package's `sisu.toml`, whatever directory
+the module is in; a single file's, from the file's directory, as before.
+A path that leaves the root (`..`, or an absolute one) stays `E0612`.
+
+**Why.** The manual's writer of G30 found that a module of a package read
+`src/data/words.txt` and that `../data/words.txt`, the package's file, was
+`E0612`.
+
+**In stage 1.** `main.embedded_files` (the root it resolves from) and
+`main.layout_input`.
+
+**What it changes.** Nothing in the corpus, whose `embed`s are a single
+file's. The case `cases/packages/embed_root.pkg` (its `.out`: it runs),
+which the Rust front end refuses (`E0612`, the file not being under
+`src/`).
+
+- Differs: `compiler/stage1/cases/packages/embed_root.pkg`: sir, ids, human, doc, doc-output
+
+**Decision 344**, for docs/architecture.md:
+
+344. `embed("path")` in a module of a package resolves the path from the
+     package's root, the directory of its `sisu.toml` (08), whatever
+     directory the module is in; a single file's from its directory.
+     Stage 1 decides it (RULES.md, R31).
+
+## R32. `json.decode` validates refinements and invariants at the boundary (decision 345)
+
+**The rule** (11: "`Decode` validates untrusted input against the type
+(including refinement predicates) at the boundary, so that "parse, don't
+validate" is the default"; 05: an expected failure, such as malformed
+input, is an error value, a bug a panic). `json.decode[T]` and
+`json.from_json[T]` decode a refinement's base and check its predicate,
+and a struct's fields and then its `invariant`: text that breaks either is
+`Err(Mismatch(path, expected))`, the path naming where (`$.hour`, `$[2]`)
+and `expected` the type (``a `Hour` ``, ``a `Span` whose invariant
+holds``), where a refinement was a type error in the decoder's instance
+(`E0811` at `<std>/<from_json[Hour]>/json.sisu`) and an invariant a panic
+that stopped the program. Untrusted text that breaks a struct's
+invariant is malformed input, which a correct program must handle, not a
+bug of the program that reads it.
+
+Reflection gains three queries for it, which any compile-time code may
+ask: `reflect.is_refinement(T)`, `reflect.base_of(T)` and
+`reflect.has_invariant(T)`. The decoder's construction of a struct does
+not check the invariant, which its code checks with the struct's
+`__invariant`, as the generators of property tests do (17).
+
+**Why.** The manual's writer of G7 found both: a field of a refinement
+type stopped the build in a line of the decoder the reader cannot see,
+and text breaking an invariant made `decode` panic, "so untrusted text can
+stop the program".
+
+**In stage 1.** `stage1/std/json.sisu`, stage 1's copy of the module
+(`typeck.std_sources.stage1_copy`), since the Rust front end, which reads
+`compiler/std/json.sisu`, cannot evaluate the new queries;
+`typeck.template` (`TypeShape.base` and `invariant`, the queries) and
+`typeck.instances.shape`; `lower.contracts.invariant_after_construction`.
+
+**What it changes.** The SIR of the corpus's programs that decode, whose
+instances of `from_json` construct a struct into a local first, and what
+`sisu doc --std` writes of `std.json` (its `##!` lines), which R4's line
+for `--std` already lists. The case `cases/json/decode_validates.sisu`
+(its `.out`: it runs, interpreted and natively).
+
+- Differs: `compiler/conformance/cases/reflect/json.sisu`: sir
+- Differs: `compiler/stage1/cases/json/decode_validates.sisu`: ids, human, doc, doc-output
+
+**Documents to bring along:** 11's row of `std.json`, which can say that
+an invariant is checked too; and `compiler/std/json.sisu`, which takes
+stage 1's copy once the Rust front end is retired.
+
+**Decision 345**, for docs/architecture.md:
+
+345. `json.decode[T]` validates the text at the boundary (11): a
+     refinement's predicate and a struct's invariant that the text breaks
+     are a `Mismatch` naming the path and the type, not a type error in
+     the decoder or a panic (05: malformed input is an expected failure).
+     Reflection gains `is_refinement`, `base_of` and `has_invariant`.
+     Stage 1 decides it, in its own copy of `std.json` (RULES.md, R32).
+
+## R33. Exact numbers as written, and the floating-point attributes (decision 346)
+
+**The rule.** Four of 03's promises:
+
+- a float literal reaches a `Decimal` as written (03, "Numbers": "a
+  literal reaches them as written: `0.1` as a `Decimal` is exactly one
+  tenth"), with the places it is written with: `let price: Decimal =
+  3.50` is `3.50`, from the literal's text (`Decimal.of_literal`, which
+  `std.num` gains), where it was `3.5`, read from the shortest digits of
+  its `f64`;
+- `/` between two `Decimal`s keeps `E0310` and gets the note
+  `type.decimal-quotient`, which names `a.div(b, places, mode)` and
+  `a.to_ratio()`: the quotient is rounded where it is made (D-076), and
+  the places are the program's choice, so the note names them rather than
+  a fix choosing them;
+- `@float(fast)` permits contraction and reassociation in its function
+  (03), which strict floating point satisfies, so it is accepted; any
+  other argument is `E0448` (`resolve.float-attribute`);
+- `@diagnostic_name(f)` waits for compile-time type construction (D-065:
+  "once Q-27's type construction ships"), so it is `E0900`, where it was
+  accepted and did nothing.
+
+And `list[T].is_sorted()` where `T: Ord`, a method of the prelude's
+`list` (07's `requires items.is_sorted()` on a list), which a slice had.
+
+**Why.** The manual's writers found each (chapters 23 and 24, chapter 25,
+the reference's R2, G31): a `Decimal` literal lost its places, `/` between
+`Decimal`s named nothing, `@float(fast)` and `@diagnostic_name` were
+accepted without a word, and `is_sorted` was a slice's only.
+
+**In stage 1.** `typeck.expr.literal_via_trait` (the literal's text) and
+`is_std_named`, the binary operator's note; `resolve.attribute`
+(`@float` and `@diagnostic_name`); `compiler/std/num.sisu`
+(`Decimal.of_literal`) and `compiler/std/prelude.sisu` (`list.is_sorted`),
+which the Rust front end reads too, unchanged for it but for the new
+methods it does not call.
+
+**What it changes.** The SIR of the conformance suite's `std/num_exact`,
+whose `0.075` as a `Decimal` is made from its text, printing what it
+printed. The cases `cases/numbers/decimal_literals.sisu` (its `.out`: it
+runs) and `refusals.sisu` (its `.diag`).
+
+- Differs: `compiler/conformance/cases/std/num_exact.sisu`: sir
+- Differs: `compiler/stage1/cases/numbers/decimal_literals.sisu`: sir, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/numbers/refusals.sisu`: names, ids, human, doc, doc-output
+
+**Decision 346**, for docs/architecture.md:
+
+346. A float literal reaches a `Decimal` from its text, its places kept
+     (`3.50` stays `3.50`, 03); `/` between `Decimal`s names `div` and
+     `to_ratio` in a note (D-076); `@float(fast)` is accepted, strict
+     floating point satisfying the permission it gives, and `@float` with
+     any other argument is `E0448`; `@diagnostic_name` is `E0900` until
+     compile-time type construction (Q-27); and a `list` of an `Ord` type
+     has `is_sorted`. Stage 1 decides it (RULES.md, R33).
+
+## R34. A plain `for` over a compile-time list gets `comptime for` (decision 347)
+
+**The rule** (08, "Reflection": `comptime for` unrolls a loop over what
+compile time knows). `E0609` for a plain `for` over a compile-time list
+("a list is a compile-time value with no run-time form") gets the fix
+`comptime.write-comptime-for`, which writes `comptime ` before the `for`,
+when the template is in the call's file.
+
+**Why.** The manual's writer of chapter 25 found the error without the fix
+that names the loop the template meant.
+
+**Decided against:** the same writer found that `reflect.fields_of(int)` is
+an empty list, so a template that forgets `if comptime
+reflect.is_struct(T)` compiles and makes empty output. 08 says what
+reflection exposes but not what a type without fields gives, and the
+conformance suite's `reflect/methods` holds `fields_of(str)` to an empty
+list (its `count_fields[str]()` prints 0): a type declared without fields
+has none, as a struct has no variants. Stage 1 keeps it.
+
+**In stage 1.** `typeck.instances` (`plain_for_over`, the fix).
+
+**What it changes.** Nothing in the corpus. The case
+`cases/comptime/plain_for.sisu` (its `.diag`).
+
+- Differs: `compiler/stage1/cases/comptime/plain_for.sisu`: ids, human, doc, doc-output
+
+**Decision 347**, for docs/architecture.md:
+
+347. `E0609` for a plain `for` over a compile-time list offers the fix
+     that writes `comptime for` (08). Stage 1 decides it (RULES.md, R34).
+
+## R35. `max` and `min` of a collection (decision 348)
+
+**The rule** (02, "Prelude functions and intrinsics": Python's builtins
+`min` and `max` are kept, "ordinary generic functions over traits").
+`max(xs)` and `min(xs)`, one argument given by position, are the largest
+and the smallest item of a collection or an iterator by its `Ord`, the
+first of equal ones, as Python's are: the prelude's `max_of` and `min_of`,
+which a call of `max` or `min` with one argument is. A collection with no
+item panics (`` `max` of no items ``), as Python's raises. `max(a, b)`
+and `min(a, b)` compare two values as before (03).
+
+**Why.** The manual's writer of chapter 5 found `max(scores)` refused
+with `E0308` and a fix that added a hole, though 02's list of prelude
+functions is Python's.
+
+**In stage 1.** `typeck.call.extreme_of`, from `call_def`; the prelude's
+`max_of` and `min_of` (`compiler/std/prelude.sisu`), which the Rust front
+end reads too and calls nowhere.
+
+**What it changes.** Nothing in the corpus. The case
+`cases/numbers/max_min.sisu` (its `.out`, `.err` and `.status`: it runs).
+
+- Differs: `compiler/stage1/cases/numbers/max_min.sisu`: ids, human, doc, doc-output
+
+**Decision 348**, for docs/architecture.md:
+
+348. `max(xs)` and `min(xs)` with one argument are the largest and the
+     smallest item of a collection, the first of equals, and panic for
+     none, as Python's raise (02): the prelude's `max_of` and `min_of`.
+     Stage 1 decides it (RULES.md, R35).
+
+## R36. `@derive(Encode, Decode)` (decision 349)
+
+**The rule** (11: `std.json` is an "encoder/decoder with
+`@derive(Encode, Decode)`"). `std.json` declares the traits `Encode`
+(`encode_json(self) -> String`) and `Decode` (`decode_json(j: Json, path:
+str) -> Self ! JsonError`), and `encode` and `decode` write and read a
+value of a type that implements one through it, inside other values too.
+`@derive(Encode)` gives a struct or an enum, and `@derive(Decode)` a
+struct, the form `encode` and `decode` give any type of its shape (by
+fields, or by variant; `decode` checking refinements and the invariant,
+R32), saying in the declaration that JSON is one of the type's forms; an
+impl written by hand gives the type a form of its own (a `Money` as
+`"12.50"`).
+
+**Why.** The manual's writer of G7 found `@derive(Encode, Decode)` refused
+(`E0243`).
+
+**In stage 1.** `stage1/std/json.sisu` (the traits, whose methods reflect
+so that each impl gets its own, `encode_shape` and `decode_struct`, and
+the first branch of `encode` and `from_json`); `typeck.instances`, which
+unfolds the derive of a std module that has templates from the text the
+base keeps of it.
+
+**What it changes.** The SIR of the corpus's programs that encode or
+decode, whose instances take the new branches, and stage 1's case of the
+bound on a template's instances in the standard library, whose label is
+at `json.encode_shape` now. The case `cases/json/derive_encode_decode.sisu`
+(its `.out`: it runs).
+
+- Differs: `compiler/stage1/cases/instances_unbounded_in_std.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/json/derive_encode_decode.sisu`: names, ids, human, doc, doc-output
+
+**Decision 349**, for docs/architecture.md:
+
+349. `std.json` declares `Encode` and `Decode`, which `encode` and
+     `decode` use for a type that implements them, inside other values
+     too; `@derive(Encode, Decode)` gives a type the form of its shape and
+     an impl written by hand a form of its own (11). Stage 1 decides it
+     (RULES.md, R36).

@@ -316,6 +316,19 @@ E0399 error   type.bad-format-spec        `{spec}` is not a format spec; it is `
 # Stage 1's (RULES.md, R25).
 -     note    type.annotate-params        a closure's parameters take their types from where the closure is passed; one kept in a `let` names them, as in `(a: int, b: int) -> a + b`
 -     note    type.sort-by-key            Sisu takes no `key=`: sort a list by a key with `sort_by`, as in `xs.sort_by((a, b) -> len(a).cmp(len(b)))`, and pick an item by one with an iterator's `max_by` or `min_by`, as in `xs.iter().max_by(len(it))`
+# Stage 1's (RULES.md, R27; D-061, 10 and 17): a release build rejects
+# typed holes, so that blocked is never a shipped state.
+E0445 error   type.hole-in-release        a release build rejects the typed hole {hole} of type `{ty}`: blocked is never a shipped state
+-     note    type.hole-placeholder       fill the hole before the release build; a placeholder meant to ship is `panic("...")`
+# Stage 1's (RULES.md, R28; 06, "Effects"): what observes the schedule.
+-     note    type.observes-schedule      an `Atomic` is shared by tasks, so what a read of it gives depends on the schedule, which a `pure` function's result may not (06)
+# Stage 1's (RULES.md, R33; D-076): a `Decimal` quotient is rounded where
+# it is made.
+-     note    type.decimal-quotient       a quotient of `Decimal`s has as many digits as it is given: `a.div(b, places, mode)` rounds it to `places` digits after the point by `mode` (`Rounding.HalfEven`, ...), and `a.to_ratio()` makes the exact fraction
+# Stage 1's (RULES.md, R33; 03): what `@float` takes.
+E0448 error   resolve.float-attribute     `@float` takes `fast`, which allows contraction and reassociation in the function (03); floating point is strict elsewhere
+E0446 error   type.par-body-impure        `{callee}` is not `pure`, so the body of a `par` loop cannot call it: a `par` body runs on a worker and is `pure` (06)
+E0447 error   type.par-body-changes       the body of a `par` loop changes nothing but its own values, and `{name}` is declared before the loop: compute each value with `par.map` and combine them with `sum` or a reducer (06)
 
 # ---------------------------------------------------------------- ownership
 # The signature rules (E0411-E0415) are the resolver's; the rest are the
@@ -436,6 +449,8 @@ E0608 error   comptime.derive-failed      deriving `{trait}` for `{ty}` stopped 
 -     label   comptime.derive-here        the derive's template, where it stopped
 E0609 error   comptime.instance-failed    making `{name}` stopped at compile time: {reason}
 -     label   comptime.instance-here      the template, where it stopped
+# Stage 1's (RULES.md, R34; 08): a `for` over what compile time knows.
+-     fix     comptime.write-comptime-for  unroll the loop at compile time with `comptime for`
 E0610 error   comptime.instances-unbounded  `{name}` needs more than {count} instances: its instances call it with ever more types
 E0611 error   comptime.template-value     `{name}` reflects on its type parameters, so it is made for each call's types and cannot be used as a value
 E0612 error   comptime.embed-failed       cannot embed `{path}`: {reason}
@@ -549,6 +564,16 @@ W0015 warning lint.wildcard-own-enum     `case _` matches {variants} of `{ty}`, 
 -     fix     lint.list-variants          list them
 # Stage 1's (RULES.md, R15; D-024): an error set that hides the prelude's.
 W0016 warning resolve.shadow-prelude-set  the error set `{name}` hides the prelude's in this module, and the two are different sets: what the prelude's functions return is not this one
+# Stage 1's (RULES.md, R29; 07): a trait's contract binds its impls, and
+# stage 1 checks it in the impls of the trait's own module.
+W0021 warning contract.trait-elsewhere    the contract of `{method}` binds this impl, and stage 1 checks a trait's contract only in the impls of the module that declares the trait
+# Stage 1's (RULES.md, R30; 13, "Deprecation", and D-046): an attribute
+# nothing reads, and a call of a deprecated function.
+W0022 warning resolve.unknown-attribute   `@{name}` is not an attribute Sisu reads, and no compile-time code of the program reads attributes (`reflect.attributes_of`), so it means nothing here
+W0023 warning type.deprecated             `{name}` is deprecated: {reason}
+W0024 warning resolve.misspelt-attribute  `@{name}` is not an attribute Sisu reads
+-     fix     resolve.similar-attribute   write `@{name}`
+W0025 warning type.deprecated-plain       `{name}` is deprecated
 
 # ---------------------------------------------------------------- run time
 R0001 runtime panic.explicit              {message}
@@ -566,6 +591,9 @@ R0010 runtime panic.missing-key           the key {key} is not in the dict
 R0011 runtime panic.negative-exponent     a negative exponent on an integer: {expr}
 R0012 runtime panic.zip-lengths           zip: the arguments have different lengths
 R0013 runtime panic.hole                  reached the typed hole {hole}
+# Stage 1's (RULES.md, R27; 10 and 17): the closure of a typed hole, the
+# bindings in scope where a run reached it, printed before the panic.
+R0160 runtime panic.hole-closure          in scope at the typed hole {hole}:
 R0014 runtime panic.during-unwind         panic while unwinding: {message}\n  the first panic: {first}\n  a panic during unwinding aborts the program
 R0015 runtime panic.negative-index        the index {index} is negative; count from the end with `^`
 R0016 runtime panic.slice-bounds          the slice bounds {start}:{end} are negative

@@ -114,6 +114,10 @@ pub struct ContractCheck:
     pub span: TextRange
     ## The condition only reads (17, "Assertions").
     pub replay: bool
+    ## The function whose contract the clause is, when not the body's own:
+    ## a trait's method, whose contract binds its impls (07; RULES.md,
+    ## R29), `Stack.push`.
+    pub owner: String?
 
 pub enum TStmt:
     ## `unwrap` is set when `init` is a `T?` or `T ! E` whose value the

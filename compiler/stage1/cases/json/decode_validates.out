@@ -1,0 +1,5 @@
+Ok("sauna")
+Err(Mismatch(path="$.hour", expected="a `Hour`"))
+Err(Mismatch(path="$[2]", expected="a `Hour`"))
+Ok(3)
+Err(Mismatch(path="$", expected="a `Span` whose invariant holds"))

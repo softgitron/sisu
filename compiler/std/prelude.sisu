@@ -1251,6 +1251,39 @@ pure def max[T: Ord](a: T, b: T) -> T:
         return b.copy()
     return a.copy()
 
+## The largest of the items by their `Ord`, the first of equal ones:
+## Python's `max(xs)` (02), which `max` with one argument is; a panic when
+## there is none, as Python's raises.
+## ```
+## assert max_of([3, 9, 4]) == 9
+## assert max_of(["pear", "apple"]) == "pear"
+## ```
+pure def max_of[T: Ord](xs: Iterable[T]) -> T:
+    var items = iterable_list(xs)
+    if items.is_empty():
+        panic("`max` of no items")
+    var best = 0
+    for i in range(1, len(items)):
+        if items[i].cmp(items[best]) == Ordering.Greater:
+            best = i
+    return items.remove(best)
+
+## The smallest of the items by their `Ord`, the first of equal ones:
+## Python's `min(xs)` (02), which `min` with one argument is; a panic when
+## there is none.
+## ```
+## assert min_of([3, 9, 4]) == 3
+## ```
+pure def min_of[T: Ord](xs: Iterable[T]) -> T:
+    var items = iterable_list(xs)
+    if items.is_empty():
+        panic("`min` of no items")
+    var best = 0
+    for i in range(1, len(items)):
+        if items[i].cmp(items[best]) == Ordering.Less:
+            best = i
+    return items.remove(best)
+
 ## The sum of the items, 0 for none; integer overflow panics. Floats are summed
 ## pairwise in a fixed shape (D-074).
 @intrinsic("sum")
@@ -1861,6 +1894,15 @@ impl[T] list[T]:
             if y == x:
                 return True
         return False
+    ## Whether the elements are in order, each at most the next, as a
+    ## slice's are (07's `requires items.is_sorted()`).
+    pure def is_sorted(self) -> bool where T: Ord:
+        var i = 1
+        while i < len(self):
+            if self[i - 1] > self[i]:
+                return False
+            i += 1
+        return True
     ## The element at `i`, or `None` when out of bounds.
     @intrinsic("list.get")
     pure def get(self, i: int) -> ref T?

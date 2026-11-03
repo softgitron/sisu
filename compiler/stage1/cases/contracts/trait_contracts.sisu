@@ -1,0 +1,30 @@
+# RULES.md, R29: a trait's method declares a contract that binds every
+# impl (07): its `requires` checked on entry, before the impl's own, its
+# `ensures` on exit, after them, through a generic call too, with the
+# trait's names of the parameters naming the impl's. A method whose body
+# is its contract alone has no default.
+trait Counter:
+    def add(mut self, amount: int):
+        requires amount > 0
+    def total(self) -> int:
+        ensures result >= 0
+
+struct Tally:
+    n: int
+
+impl Counter for Tally:
+    def add(mut self, by: int):
+        self.n += by
+    def total(self) -> int:
+        return self.n
+
+def fill[C: Counter](mut c: C, n: int):
+    c.add(n)
+
+def main():
+    var t = Tally(n=0)
+    t.add(2)
+    fill(mut t, 3)
+    print("total {t.total()}")
+    fill(mut t, -1)
+    print("not reached")

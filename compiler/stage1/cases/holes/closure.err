@@ -1,0 +1,15 @@
+warning[W0001]: typed hole `price` of type `int`
+  --> closure.sisu:17:12
+   |
+17 |     return todo("price")
+   |            ^^^^^^^^^^^^^
+
+in scope at the typed hole `todo("price")`:
+  b = Booking(room="sauna", hours=3)
+  discount = 0.5
+  base = 60
+  kept = "regular"
+  nights = [0, 1]
+panic: reached the typed hole `todo("price")`
+  at price (closure.sisu:17:12)
+  at main (closure.sisu:24:17)

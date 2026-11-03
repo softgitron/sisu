@@ -46,12 +46,13 @@ from stage1.syntax.ast import build
 from stage1.syntax.ast import visit
 from stage1.typeck.check import Checker, Cx, Finished, RetCtx
 from stage1.typeck.collect import Resolver, SourceModule, SourcePackage
-from stage1.typeck.contracts import leading_contracts
+from stage1.typeck.contracts import contract_only, leading_contracts
 from stage1.typeck.generic_asserts import Assert, ConstCall, failures
 from stage1.typeck.program import (
     Answer,
     DefKind,
     Embedded,
+    FnInfo,
     FnKind,
     ModuleId,
     ParamInfo,
@@ -1710,7 +1711,11 @@ pure def agree_mut_fixes(mut ds: list[Diagnostic]):
         ds[i].fixes = keep
 
 pure def is_warning(m: Msg) -> bool:
-    return m == Msg.TypeHole or m == Msg.TypeUnreachableCode or m == Msg.TypeUnreachableArm
+    return m == Msg.TypeHole
+        or m == Msg.TypeUnreachableCode
+        or m == Msg.TypeUnreachableArm
+        or m == Msg.TypeDeprecated
+        or m == Msg.TypeDeprecatedPlain
 
 ## Where `pure ` is written before a function's name on its line: the
 ## edit that removes it.
@@ -1798,12 +1803,17 @@ impl Checker:
             params.push(l)
         self.params = params.copy()
         self.body_ret = ret
-        # The contract: the clauses the body starts with (07).
+        # The contract: the clauses the body starts with (07), and for a
+        # method of a trait impl the trait's method's, which bind every impl
+        # (RULES.md, R29).
         let clauses = leading_contracts(cx.ast, body_full)
         var is_test = False
         if let FnKind.Test(_) = f.kind:
             is_test = True
+        self.inherit_contract(cx, f, params)
         self.check_contracts(cx, is_test, clauses, ret)
+        # A trait's method whose body is its contract alone has no default.
+        let contract_body = f.trait_.is_some() and contract_only(cx.ast, body_full)
         var stmts = body_full.stmts.copy()
         if not clauses.is_empty():
             stmts = []
@@ -1841,7 +1851,7 @@ impl Checker:
             let value = self.add(TExprKind.Generator(id), gen_ty, span)
             block = self.new_block([TStmt.Return(value=Some(value), span=span)], span)
         self.body_block = Some(block)
-        let ends = r == Ty.unit() or r == Ty.never() or r == Ty.error()
+        let ends = r == Ty.unit() or r == Ty.never() or r == Ty.error() or contract_body
         if not ends and not f.body_broken and not self.block_diverges(block):
             let name = cx.prog.defs[self.def_.index].name.copy()
             let shown = cx.prog.display(self.types, r)
@@ -1854,6 +1864,7 @@ impl Checker:
         self.check_ref_items(cx)
         self.check_comptime_types(cx)
         self.report_uninferred(cx)
+        self.deprecated_uses(cx)
         # A pure body's calls and drops are checked on SIR, by stage 0's
         # ownership checker (E0333, E0392, E0393).
         if f.pure and self.pure_body_problem(cx, block):
@@ -1862,6 +1873,87 @@ impl Checker:
         # argument (E0397).
         if self.must_consume_generic_call(cx):
             self.owner_go_beyond("a must-consume value given to a generic function")
+
+    ## Each call or function value of a deprecated function or method, but
+    ## in its own body (13, "Deprecated items warn with the replacement
+    ## named"; RULES.md, R30): `W0023` with the text of its `@deprecated`,
+    ## or `W0025` when it gives none.
+    pub pure def deprecated_uses(mut self, cx: Cx):
+        var exprs: list[TExprId] = []
+        if let Some(b) = self.body_block:
+            self.visit_block(b, mut exprs)
+        for c in self.closures.copy():
+            if let Some(cl) = c:
+                self.visit_block(cl.body, mut exprs)
+        for e in exprs:
+            var used: DefId? = None
+            match self.exprs[e.index].kind:
+                case TExprKind.Call(Callee.Fn(d, _), _):
+                    used = Some(d)
+                case TExprKind.FnRef(d, _):
+                    used = Some(d)
+                case _:
+                    pass
+            let d = used else:
+                continue
+            if d == self.def_:
+                continue
+            let f = cx.prog.fn_info(d) else:
+                continue
+            let why = f.deprecated.copy() else:
+                continue
+            var name = cx.prog.defs[d.index].name.copy()
+            if let Some(o) = f.owner:
+                name = "{cx.prog.display(self.types, o)}.{name}"
+            let span = self.span_of(e)
+            if why.is_empty():
+                let diag = Diagnostic.new(Msg.TypeDeprecatedPlain, span.start, span.end)
+                self.report(diag.with("name", name))
+            else:
+                let diag = Diagnostic.new(Msg.TypeDeprecated, span.start, span.end)
+                self.report(diag.with("name", name).with("reason", why))
+
+    ## For a method of a trait impl, the contract of the trait's method it
+    ## implements (07: "Trait methods may declare contracts", which bind
+    ## every implementation; RULES.md, R29): its clauses, checked with the
+    ## impl's parameters under the trait's names of them. A trait of
+    ## another module is checked where its module is (W0021).
+    pub pure def inherit_contract(mut self, cx: Cx, f: FnInfo, params: list[int]):
+        let impl_ = f.impl_ else:
+            return
+        let info = cx.prog.impl_info(impl_) else:
+            return
+        let trait_ = info.trait_ref.def_
+        let tinfo = cx.prog.trait_info(trait_) else:
+            return
+        let name = cx.prog.defs[self.def_.index].name.copy()
+        var found: DefId? = None
+        for m in tinfo.methods:
+            if cx.prog.defs[m.index].name == name:
+                found = Some(m)
+        let tm = found else:
+            return
+        let tf = cx.prog.fn_info(tm) else:
+            return
+        let tbody = tf.body.copy() else:
+            return
+        if not tf.contracts:
+            return
+        let owner = "{cx.prog.defs[trait_.index].name}.{name}"
+        if cx.prog.defs[tm.index].module != self.module:
+            let span = cx.prog.defs[self.def_.index].span
+            var d = Diagnostic.new(Msg.ContractTraitElsewhere, span.start, span.end)
+            self.report(d.with("method", owner))
+            return
+        for c in leading_contracts(cx.ast, tbody):
+            self.inherited.push((c.kind, c.expr, c.range))
+        var offset = 0
+        if f.self_mode.is_some():
+            offset = 1
+        for i in range(len(tf.params)):
+            if offset + i < len(params):
+                self.inherited_names.push((tf.params[i].name.copy(), params[offset + i]))
+        self.inherited_owner = Some(owner)
 
     ## Checks a default value or a constant as a body returning it.
     pub pure def check_value(mut self, cx: Cx, e: ExprId, ty: Ty, field_of: DefId?):

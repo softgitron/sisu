@@ -1,0 +1,11 @@
+warning[W0001]: typed hole `area` of type `f64`
+  --> typed_hole.sisu:2:12
+  |
+2 |     return todo("area")
+  |            ^^^^^^^^^^^^
+
+in scope at the typed hole `todo("area")`:
+  r = 2.0
+panic: reached the typed hole `todo("area")`
+  at area (typed_hole.sisu:2:12)
+  at main (typed_hole.sisu:5:11)

@@ -1,0 +1,13 @@
+# RULES.md, R27: a test that failed decides the status, 1, whatever else
+# is blocked.
+def halve(x: int) -> int:
+    return todo("halve")
+
+def double(x: int) -> int:
+    return x * 3
+
+test "doubles":
+    assert double(2) == 4
+
+test "halves":
+    assert halve(4) == 2

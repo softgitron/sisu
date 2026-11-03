@@ -1,0 +1,21 @@
+# RULES.md, R30: an attribute is data (D-046), so a name Sisu does not
+# read warns: with the fix when it misspells one Sisu reads, and when no
+# compile-time code of the program reads attributes, since then nothing
+# can.
+@deprecatd("use `area`")
+def size(w: int, h: int) -> int:
+    return w * h
+
+@derive(Eq, Debug)
+@route("/boxes")
+struct Box:
+    width: int
+
+@must_consum
+struct Ticket:
+    id: int
+
+def main():
+    print("{size(2, 3)} {Box(width=1) == Box(width=1)}")
+    let t = Ticket(id=1)
+    print("{t.id}")

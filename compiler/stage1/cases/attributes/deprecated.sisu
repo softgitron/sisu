@@ -1,0 +1,27 @@
+# RULES.md, R30: a call of a deprecated function or method warns with the
+# replacement its `@deprecated` names (13, "Deprecation"), and so does one
+# used as a value; its own body may call it.
+@deprecated("use `parse_v2`, which counts in characters")
+def parse(text: str) -> int:
+    if text.is_empty():
+        return 0
+    return 1 + parse(text.byte_slice(1, text.byte_len()))
+
+def parse_v2(text: str) -> int:
+    return len(text)
+
+struct Meter:
+    n: int
+
+impl Meter:
+    @deprecated
+    def read_old(self) -> int:
+        return self.n
+
+    def read(self) -> int:
+        return self.n
+
+def main():
+    let m = Meter(n=2)
+    let count = parse
+    print("{parse("abc")} {parse_v2("abc")} {m.read_old()} {m.read()} {count("xy")}")

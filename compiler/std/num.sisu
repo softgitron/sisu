@@ -669,6 +669,12 @@ pub struct Decimal:
     pub pure def of(n: int) -> Decimal:
         return Decimal(digits=BigInt.of(n), places=0)
 
+    ## A float literal's value with the places it is written with, which
+    ## the front end makes where a literal becomes a `Decimal` (03: a
+    ## literal reaches an exact type as written): `3.50` has two.
+    pub pure def of_literal(text: str) -> Decimal:
+        return Decimal.parse(text.replace("_", "")).expect("a float literal's digits")
+
     ## The number written in `text`: digits with an optional sign, point
     ## and exponent (`-12.50`, `1e-3`, `2.5E+4`); `None` for anything else.
     ##

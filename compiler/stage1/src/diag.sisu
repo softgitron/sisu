@@ -493,6 +493,21 @@ pub enum Msg:
     TypeSortByKey
     ParseGlobImport
     TypeAnnotateParams
+    # Stage 1's rules of the third round (RULES.md, R27 on).
+    TypeHoleInRelease
+    TypeHolePlaceholder
+    TypeObservesSchedule
+    TypeParBodyImpure
+    TypeParBodyChanges
+    ContractTraitElsewhere
+    ResolveUnknownAttribute
+    ResolveMisspeltAttribute
+    ResolveSimilarAttribute
+    TypeDeprecated
+    TypeDeprecatedPlain
+    TypeDecimalQuotient
+    ResolveFloatAttribute
+    ComptimeWriteFor
 
 impl Msg:
     ## The catalog identifier.
@@ -969,6 +984,20 @@ impl Msg:
             case TypeSortByKey: "type.sort-by-key"
             case ParseGlobImport: "parse.glob-import"
             case TypeAnnotateParams: "type.annotate-params"
+            case TypeHoleInRelease: "type.hole-in-release"
+            case TypeHolePlaceholder: "type.hole-placeholder"
+            case TypeObservesSchedule: "type.observes-schedule"
+            case TypeParBodyImpure: "type.par-body-impure"
+            case TypeParBodyChanges: "type.par-body-changes"
+            case ContractTraitElsewhere: "contract.trait-elsewhere"
+            case ResolveUnknownAttribute: "resolve.unknown-attribute"
+            case ResolveMisspeltAttribute: "resolve.misspelt-attribute"
+            case ResolveSimilarAttribute: "resolve.similar-attribute"
+            case TypeDeprecated: "type.deprecated"
+            case TypeDeprecatedPlain: "type.deprecated-plain"
+            case TypeDecimalQuotient: "type.decimal-quotient"
+            case ResolveFloatAttribute: "resolve.float-attribute"
+            case ComptimeWriteFor: "comptime.write-comptime-for"
 
 ## A byte range of a text: from `start` up to, not including, `end`.
 @derive(Eq, Hash, Debug, Copy)

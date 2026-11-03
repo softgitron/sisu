@@ -20,6 +20,10 @@
 #   sisu1 doc --std [MODULE...]                  as `sisu doc` writes it, with its exit status
 #   sisu1 lint [--format=ids] [PATH]             the program's lints, which `check` does not
 #                                                print (RULES.md, R11)
+#   sisu1 test [OPTIONS] [PATH]                  the tests, built by stage 1 and run by stage 0's
+#                                                runner (`sisu test --from-sir`), exiting 1 when
+#                                                one failed and 3 when none did and one is
+#                                                blocked by a typed hole (RULES.md, R27)
 #
 # `check`, `build`, `run` and `doc` take `--features NAMES` (the root
 # package's features to turn on, separated by commas or spaces,
@@ -64,10 +68,12 @@ if [ "${1:-}" = build ]; then
     exec "$exe" --home "$compiler" build "$@"
 fi
 # `fmt` and `doc` exit with stage 0's status (2 for a usage error, 70 for
-# a file the formatter refused as changed), which stage 1 returns as the
-# error `Exit(status=N)`: the run time prints it as the last line of
-# standard error, which goes, and N is the exit status.
-if [ "${1:-}" = fmt ] || [ "${1:-}" = doc ]; then
+# a file the formatter refused as changed), and `test` with the status that
+# says how the tests ended (3 when none failed and one is blocked by a typed
+# hole, RULES.md, R27), which stage 1 returns as the error
+# `Exit(status=N)`: the run time prints it as the last line of standard
+# error, which goes, and N is the exit status.
+if [ "${1:-}" = fmt ] || [ "${1:-}" = doc ] || [ "${1:-}" = test ]; then
     err=$(mktemp)
     trap 'rm -f "$err"' EXIT
     "$exe" --home "$compiler" "$@" 2> "$err"

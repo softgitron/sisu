@@ -614,6 +614,10 @@ impl Checker:
                     self.report(diag)
                     self.check_args_loosely(cx, args)
                     return self.error_expr(at)
+                # Python's `max(xs)` and `min(xs)` over a collection (02):
+                # the prelude's `max_of` and `min_of` (RULES.md, R35).
+                if let Some(of) = self.extreme_of(cx, d, args, trailing):
+                    return self.call_fn(cx, of, tys, None, None, args, trailing, at, expected)
                 return self.call_fn(cx, d, tys, None, None, args, trailing, at, expected)
             case DefKind.Struct(_) | DefKind.Enum(_) | DefKind.ErrorSet(_) | DefKind.TypeAlias(_):
                 let ty = self.def_type(cx, d, tys.copy() ?? [], at)
@@ -628,6 +632,19 @@ impl Checker:
                 self.report(diag)
                 self.check_args_loosely(cx, args)
                 return self.error_expr(at)
+
+    ## For a call of the prelude's `max` or `min` with one argument, given
+    ## by position: the function of the items of a collection, `max_of` or
+    ## `min_of`.
+    pure def extreme_of(self, cx: Cx, d: DefId, args: list[Arg], trailing: Closure?) -> DefId?:
+        if trailing.is_some() or len(args) != 1 or args[0].name.is_some():
+            return None
+        if cx.prog.defs[d.index].module != cx.prog.prelude:
+            return None
+        let name = cx.prog.defs[d.index].name.copy()
+        if name != "max" and name != "min":
+            return None
+        return cx.prog.lookup_in(cx.prog.prelude, "{name}_of")
 
     ## `T(...)` for a type: a struct's fields, or `new` for a builtin type.
     pub pure def construct(

@@ -1,0 +1,23 @@
+# RULES.md, R32: `json.decode` validates the text against the type at the
+# boundary (11): a refinement's predicate and a struct's invariant that
+# the text breaks are a `Mismatch` naming where, not a panic, since
+# untrusted text is an expected failure (05).
+import std.json
+
+type Hour = int where 0 <= self < 24
+
+struct Slot:
+    room: String
+    hour: Hour
+
+struct Span:
+    start: int
+    end: int
+    invariant self.start <= self.end
+
+def main():
+    print(json.decode[Slot]("{{\"room\": \"sauna\", \"hour\": 18}}").map((s) -> s.room))
+    print(json.decode[Slot]("{{\"room\": \"sauna\", \"hour\": 30}}").map((s) -> s.room))
+    print(json.decode[list[Hour]]("[1, 2, 24]"))
+    print(json.decode[Span]("{{\"start\": 1, \"end\": 3}}").map((s) -> s.end))
+    print(json.decode[Span]("{{\"start\": 5, \"end\": 3}}").map((s) -> s.end))

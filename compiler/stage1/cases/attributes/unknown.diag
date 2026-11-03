@@ -1,0 +1,5 @@
+5:2-5:11 W0024 resolve.misspelt-attribute name="deprecatd"
+  fix resolve.similar-attribute 5:2-5:11 "deprecated"
+10:2-10:7 W0022 resolve.unknown-attribute name="route"
+14:2-14:13 W0024 resolve.misspelt-attribute name="must_consum"
+  fix resolve.similar-attribute 14:2-14:13 "must_consume"

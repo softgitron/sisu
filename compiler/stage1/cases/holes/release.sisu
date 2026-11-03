@@ -1,0 +1,18 @@
+# RULES.md, R27: a release build rejects each typed hole (D-061), which
+# `check` and a debug build warn of, so that blocked is never a shipped
+# state; `panic("...")` is the placeholder that ships.
+def area(r: f64) -> f64:
+    return todo("area")
+
+def describe(name: str) -> String:
+    return todo()
+
+def shipped(n: int) -> int:
+    if n < 0:
+        panic("negative sizes come later")
+    return n
+
+def main():
+    print(area(2.0))
+    print(describe("disc"))
+    print(shipped(3))

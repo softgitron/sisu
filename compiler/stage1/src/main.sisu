@@ -71,6 +71,7 @@
 ##! `../catalog/messages.catalog`.
 
 import stage1.borrowck
+import stage1.borrowck.holes
 import stage1.cfg
 import stage1.diff
 import stage1.doc
@@ -632,6 +633,14 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         return build_command(
             sys, home, path, native, release, (locked, accept), level, output, request, catalog
         )
+    if command == "test":
+        # `test [OPTIONS] [PATH]` (RULES.md, R27): the program checked and
+        # lowered with its tests by stage 1, run by stage 0's runner, with
+        # the status that says how the tests ended, as `Exit(status=N)`.
+        let status = test_command(sys, home, rest, catalog)?
+        if status != 0:
+            return Err(Exit(status=status))
+        return Ok(())
     if command == "audit":
         # `audit --unsafe [--std] [PATH]` (22, "The audit and the lints").
         return audit_command(sys, home, rest, catalog)
@@ -903,7 +912,7 @@ def file_input(
             packages=[package],
             named=named,
             name_errors=name_errors,
-            embedded=embedded_files(sys, arg, text, catalog),
+            embedded=embedded_files(sys, arg, None, text, catalog),
             multi=False,
             tests=tests,
             features=[Features.none()],
@@ -939,9 +948,10 @@ def layout_input(
                 path=m.path.copy(), file=m.name.copy(), text=text.copy(), package=m.package
             )
         )
-        # The files `embed` names, relative to each module's file; the first
-        # module that names one decides.
-        for (k, v) in embedded_files(sys, m.disk, text, catalog).items():
+        # The files `embed` names, relative to the root of each module's
+        # package; the first module that names one decides.
+        let root = layout.packages[m.package].dir.copy()
+        for (k, v) in embedded_files(sys, m.disk, Some(root), text, catalog).items():
             if not embedded.contains(k.copy()):
                 _ = embedded.insert(k.copy(), v.copy())
     var packages: list[SourcePackage] = []
@@ -1566,6 +1576,10 @@ pure def finish_of(
             for why in evaluated.beyond:
                 reasons.push(why.copy())
             return Lowering(sir=String.new(), ownership=String.new(), beyond=reasons, entry=False)
+    # Each typed hole prints its closure where a run reaches it (RULES.md,
+    # R27), once the checker is done with the program.
+    let hole = Param(name="hole".to_string(), value="{{hole}}".to_string())
+    holes.close(mut done.program, catalog.render("panic.hole-closure", [hole]))
     let by_source = files_by_source(lowered, files)
     let elsewhere = "an ownership finding in a file of the standard library or one the compiler wrote"
     let per_file = borrowck.diagnostics_by_file(done.findings, by_source, len(files), catalog) else:
@@ -2062,7 +2076,19 @@ def build_program(
         errs.push(beyond)
         emit("", errs)
         return Ok(False)
-    emit("", r.front(catalog, Some(False)).human(catalog))
+    # A release build rejects typed holes (D-061; RULES.md, R27): each is
+    # an error where a debug build warns, and nothing is built.
+    let warned = r.front(catalog, Some(False))
+    if release:
+        let (shipped, holes) = release_report(warned)
+        if holes > 0:
+            var errs = shipped.human(catalog)
+            let count = Param(name="count".to_string(), value="{holes}")
+            errs.push(catalog.plain_error("cli.errors-found", [count]))
+            errs.push(beyond)
+            emit("", errs)
+            return Ok(False)
+    emit("", warned.human(catalog))
     # A `comptime` expression that failed is an error of the program.
     let evaluation = r.evaluation()
     let failed = evaluation.errors(catalog)
@@ -2130,6 +2156,231 @@ def build_program(
         case Err(e):
             emit("", "cannot run `{sisu}`: {e}\n")
             return Ok(False)
+
+## The front end's warnings of a program built in the release profile
+## (D-061, 10 and 17; RULES.md, R27): each typed hole an error naming the
+## hole and its type where the debug profile warns, with the placeholder
+## that may ship, so that blocked is never a shipped state; and how many.
+pure def release_report(warned: Report) -> (Report, int):
+    var r = warned.copy()
+    var diags: list[Filed] = []
+    var holes = 0
+    for x in warned.diags:
+        var d = x.copy()
+        if x.diag.msg == Msg.TypeHole:
+            # The hole as its call is written, as the run time names it.
+            let name = x.diag.param("name") ?? String.new()
+            var hole = "`todo()`".to_string()
+            if not name.is_empty():
+                hole = "`todo({quote(name)})`"
+            var diag = Diagnostic.new(Msg.TypeHoleInRelease, x.diag.start, x.diag.end)
+            diag = diag.with("hole", hole).with("ty", x.diag.param("ty") ?? String.new())
+            d.diag = diag.note(Msg.TypeHolePlaceholder)
+            holes += 1
+        diags.push(d)
+    r.diags = diags
+    return (r, holes)
+
+## The exit status of `sisu test` when no test failed and a test is
+## blocked by a typed hole (RULES.md, R27): neither passed (0) nor failed
+## (1), since blocked is never a shipped state (17).
+pub const TESTS_BLOCKED: int = 3
+
+## Whether a word is an option of stage 0's test runner that takes a
+## value.
+pure def runner_value(w: str) -> bool:
+    return match w:
+        case "--jobs" | "--filter" | "--tag" | "--skip-tag" | "--schedule-seed": True
+        case "--explore" | "--scheduler" | "--depth" | "--faults": True
+        case _: False
+
+## Whether a word is a flag of stage 0's test runner.
+pure def runner_flag(w: str) -> bool:
+    return match w:
+        case "--no-monitor" | "--sim" | "--update" | "--no-cache": True
+        case _: False
+
+## `test [OPTIONS] [PATH]` (RULES.md, R27): each program the path names,
+## checked and lowered with its tests by stage 1 as `sisu test` builds it,
+## its diagnostics printed as `sisu test` prints them and a program with
+## an error not run (`D0006`, `D0021`); then its SIR, written beside where
+## `build` puts its executable, run by stage 0's runner (`sisu test
+## --from-sir`, decision 285) with the runner's options, whose report is
+## printed with each replay line naming the program. The status: 1 when a
+## program has an error or a test failed, `TESTS_BLOCKED` when none did
+## and a test is blocked by a typed hole, 0 when every test passed (or the
+## runner's own, for its usage errors).
+def test_command(sys: System, home: str, rest: list[String], catalog: Catalog) -> int ! IoError:
+    let (request, given) = feature_request(rest)
+    var runner: list[String] = []
+    var words: list[String] = []
+    var k = 0
+    while k < len(given):
+        let w: str = given[k]
+        if runner_value(w) and k + 1 < len(given):
+            runner.push(given[k].copy())
+            runner.push(given[k + 1].copy())
+            k += 2
+            continue
+        if runner_flag(w):
+            runner.push(given[k].copy())
+            k += 1
+            continue
+        words.push(given[k].copy())
+        k += 1
+    let flags = ["--locked", "--no-default-features", "--accept-unsafe"]
+    var path = path_of(words, flags) else:
+        emit("", "{usage()}\n")
+        return Ok(2)
+    if not names_path(words, flags):
+        let found = nearest_package(sys, "test", catalog) else:
+            return Ok(1)
+        path = found
+    if let Some(e) = unknown_feature(sys, path, request):
+        emit("", catalog.plain_error("cli.unknown-feature", e))
+        return Ok(2)
+    let locked = words.contains("--locked")
+    if not write_lockfile(sys, path, False, locked, words.contains("--accept-unsafe"), catalog)?:
+        return Ok(1)
+    let base = base_of(sys, home, std_texts(sys, home)?, catalog)
+    var kept = Kept.new()
+    var env = base.environment()
+    var programs: list[Input] = []
+    match layouts_of(sys, path, False, request):
+        case Some(layouts):
+            for layout in layouts:
+                if layout.modules.is_empty():
+                    emit("", problems_report(layout, catalog).human(catalog))
+                    return Ok(1)
+                programs.push(layout_input(sys, home, layout, True, mut env, catalog)?)
+        case None:
+            for input in inputs_of(sys, home, path, False, True, request, mut env, catalog)?:
+                programs.push(input.copy())
+    var failed = False
+    var blocked = False
+    for input in programs:
+        let (status, held) = test_program(sys, home, path, input, runner, base, catalog, mut kept)?
+        if status == 1:
+            failed = True
+        elif status != 0:
+            return Ok(status)
+        if held:
+            blocked = True
+    if failed:
+        return Ok(1)
+    if blocked:
+        return Ok(TESTS_BLOCKED)
+    return Ok(0)
+
+## One program's tests (`test_command`): the runner's status (1 for a
+## program with an error, or a failed test), and whether a test is blocked.
+def test_program(
+    sys: System,
+    home: str,
+    path: str,
+    input: Input,
+    runner: list[String],
+    base: typeck.Base,
+    catalog: Catalog,
+    mut kept: Kept,
+) -> (int, bool) ! IoError:
+    var built = input.copy()
+    built.contracts = CONTRACTS_ALL
+    let r = report_of(base, built, path, catalog, mut kept)
+    let front = r.front(catalog, None)
+    let errors = front.errors(catalog)
+    var beyond = String.new()
+    for b in r.beyond:
+        beyond.push("beyond the slice: {b}\n")
+    if errors > 0:
+        var errs = front.human(catalog)
+        let count = Param(name="count".to_string(), value="{errors}")
+        errs.push(catalog.plain_error("cli.errors-found", [count]))
+        errs.push(beyond)
+        emit("", errs)
+        return Ok((1, False))
+    emit("", r.front(catalog, Some(False)).human(catalog))
+    let evaluation = r.evaluation()
+    let failed = evaluation.errors(catalog)
+    if failed > 0:
+        var errs = evaluation.human(catalog)
+        let count = Param(name="count".to_string(), value="{failed}")
+        errs.push(catalog.plain_error("cli.errors-found", [count]))
+        emit("", errs)
+        return Ok((1, False))
+    let ownership = r.ownership()
+    let owned = ownership.errors(catalog)
+    if owned > 0:
+        var errs = ownership.human(catalog)
+        let count = Param(name="count".to_string(), value="{owned}")
+        errs.push(catalog.plain_error("cli.ownership-errors", [count]))
+        emit("", errs)
+        return Ok((1, False))
+    if not beyond.is_empty():
+        emit("", beyond)
+        return Ok((1, False))
+    var times = SirTimes(check=0, lower=0, ownership=0)
+    let done = sir_of(sys, base, built, catalog, mut times, False, mut kept)
+    if not done.beyond.is_empty():
+        var why = String.new()
+        for b in done.beyond:
+            why.push("beyond the slice: {b}\n")
+        emit("", why)
+        return Ok((1, False))
+    let exe = output_for(built.disk, built.package_name, built.build_root.copy(), False)
+    _ = sys.fs.create_dir(Path.new(parent(exe)))
+    let sir_file = "{exe}.sir"
+    sys.fs.write_text(Path.new(sir_file), done.sir)?
+    let sisu = "{home}/target/release/sisu"
+    var args: list[str] = ["test", "--from-sir", sir_file]
+    for i in range(len(runner)):
+        args.push(runner[i])
+    let ran = sys.proc.run(sisu, args)
+    _ = sys.fs.remove(Path.new(sir_file))
+    match ran:
+        case Ok(o):
+            # A replay line names the program, which `sisu test` runs again.
+            let shown = o.stdout.replace(" {sir_file}\n", " {path}\n")
+            emit(shown, o.stderr)
+            let (_, failures, holes) = test_summary(o.stdout) ?? (0, 0, 0)
+            if o.status != 0 and failures == 0:
+                return Ok((o.status, False))
+            if failures > 0:
+                return Ok((1, holes > 0))
+            return Ok((0, holes > 0))
+        case Err(e):
+            emit("", "cannot run `{sisu}`: {e}\n")
+            return Ok((1, False))
+
+## The counts of the runner's last line, `N passed, M failed, K blocked`.
+def test_summary(out: str) -> (int, int, int)?:
+    var found: (int, int, int)? = None
+    for line in out.lines():
+        let parts = line.split(", ").collect()
+        if len(parts) != 3:
+            continue
+        let passed = count_before(parts[0], " passed") else:
+            continue
+        let failed = count_before(parts[1], " failed") else:
+            continue
+        let blocked = count_before(parts[2], " blocked") else:
+            continue
+        found = Some((passed, failed, blocked))
+    return found
+
+## The number that `text` is followed by `word` in, as `3 passed`.
+pure def count_before(text: str, word: str) -> int?:
+    if not text.ends_with(word):
+        return None
+    let digits = text.byte_slice(0, text.byte_len() - word.byte_len())
+    if digits.is_empty():
+        return None
+    var n = 0
+    for c in digits.chars():
+        if c < '0' or c > '9':
+            return None
+        n = n * 10 + (c.code() - '0'.code())
+    return Some(n)
 
 ## A level of `--contracts` (07): `off`, `preconditions` or `all`.
 pure def contract_level(word: str) -> int?:
@@ -2557,7 +2808,9 @@ def std_texts(sys: System, home: str) -> dict[String, String] ! IoError:
 ## The files the `embed("path")` calls of `text` name, read relative to
 ## the file at `path` (stage 0's `embedded_files`): each text, or why it
 ## could not be read, in words of its own, the same on every machine.
-def embedded_files(sys: System, path: str, text: str, catalog: Catalog) -> dict[String, Embedded]:
+def embedded_files(
+    sys: System, path: str, root: String?, text: str, catalog: Catalog
+) -> dict[String, Embedded]:
     var out: dict[String, Embedded] = {}
     if not text.contains("embed("):
         return out
@@ -2568,6 +2821,11 @@ def embedded_files(sys: System, path: str, text: str, catalog: Catalog) -> dict[
             cut = i
     if cut >= 0:
         dir = path.byte_slice(0, cut).to_string()
+    # A package's module names its files from the package's root (08: "the
+    # path resolved relative to the package root"; RULES.md, R31), a single
+    # file from its directory.
+    if let Some(r) = root:
+        dir = r.copy()
     let module = build.module(parse(text, catalog).tree)
     for e in visit.exprs_in_items(module.ast, module.items):
         let ExprKind.Call(callee, args, _) = module.ast.expr(e).kind.copy() else:
@@ -3433,3 +3691,11 @@ test "a lockfile's `unsafe` level that rises waits for `--accept-unsafe`":
     # A package the old lockfile does not record is new, which admission
     # reviews.
     assert raised_level(memory.replace("\"z\"", "\"y\""), foreign, catalog).is_none()
+
+test "a test run's last line gives its counts, which a blocked suite's status reads":
+    let report = "test \"a\" ... ok\ntest \"b\" ... blocked by todo(\"b\")\n1 passed, 0 failed, 1 blocked\n"
+    assert test_summary(report) == Some((1, 0, 1))
+    assert test_summary("no counts here\n") == None
+    assert count_before("12 passed", " passed") == Some(12)
+    assert count_before("x passed", " passed") == None
+    assert count_before(" passed", " passed") == None

@@ -1,0 +1,15 @@
+# RULES.md, R34: a plain `for` over what compile time knows, which has no
+# run-time form, gets the fix that writes `comptime for` (08), which
+# unrolls it.
+def names[T]() -> list[String]:
+    var out: list[String] = []
+    for f in reflect.fields_of(T):
+        out.push(f.name.to_string())
+    return out
+
+struct Point:
+    x: int
+    y: int
+
+def main():
+    print(names[Point]())

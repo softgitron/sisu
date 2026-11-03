@@ -1,0 +1,5 @@
+# The same file, named the same way from a module under `src/`.
+const WORDS: str = embed("data/words.txt")
+
+pub def all() -> list[str]:
+    return WORDS.lines().collect()
