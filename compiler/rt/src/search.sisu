@@ -1,10 +1,11 @@
-##! Text search (decision 350): where a run of bytes first occurs in
+##! Text search (decision 352): where a run of bytes first occurs in
 ##! another, by Crochemore and Perrin's Two-Way, as the prelude's
 ##! `str.byte_find` searches a text (`compiler/std/prelude.sisu`): linear in
 ##! the lengths of the two, in constant space. The runtime in Rust calls it
 ##! for `in` on texts and for `bytes.find`, `starts_with` and `ends_with`.
+##! Each function requires that `text` points to `n` live bytes and `part`
+##! to `m` (`inside`), which every read below stays within.
 
-from rt.words import byte
 from std.mem import ptr
 
 ## The critical position and period of the part's maximal suffix, by the
@@ -12,14 +13,15 @@ from std.mem import ptr
 ##
 ## Requires:
 ## - `inside`: `part` points to `m` live bytes
-def maximal_suffix(part: ptr mut u8, m: int, reversed: bool) -> (int, int):
+def maximal_suffix(part: ptr[u8], m: int, reversed: bool) -> (int, int):
     var cut = -1
     var j = 0
     var k = 1
     var p = 1
     while j + k < m:
-        # safety: inside: both positions are below `m`.
-        let (a, b) = unsafe (byte(part, j + k), byte(part, cut + k))
+        # safety: in_bounds, valid, aligned: both positions are below `m`, and
+        #   a byte needs no alignment.
+        let (a, b) = unsafe (part.offset(j + k).read(), part.offset(cut + k).read())
         if a == b:
             if k != p:
                 k += 1
@@ -42,13 +44,15 @@ def maximal_suffix(part: ptr mut u8, m: int, reversed: bool) -> (int, int):
 ##
 ## Requires:
 ## - `inside`: both runs of bytes are within the part's live bytes
-def same_run(part: ptr mut u8, a: int, b: int, count: int) -> bool:
+def same_run(part: ptr[u8], a: int, b: int, count: int) -> bool:
     var k = 0
-    while k < count:
-        # safety: inside: this function's.
-        if unsafe byte(part, a + k) != unsafe byte(part, b + k):
-            return False
-        k += 1
+    # safety: in_bounds, valid, aligned: both runs are within the part, and a
+    #   byte needs no alignment.
+    unsafe:
+        while k < count:
+            if part.offset(a + k).read() != part.offset(b + k).read():
+                return False
+            k += 1
     return True
 
 ## The position of the first occurrence of the `m` bytes at `part` in the
@@ -56,39 +60,43 @@ def same_run(part: ptr mut u8, a: int, b: int, count: int) -> bool:
 ##
 ## Requires:
 ## - `inside`: `text` points to `n` live bytes and `part` to `m`
-pub(package) def find(text: ptr mut u8, n: int, part: ptr mut u8, m: int) -> int:
+pub(package) def find(text: ptr[u8], n: int, part: ptr[u8], m: int) -> int:
     let last = n - m
     if m == 0:
         return if last >= 0: 0 else: -1
-    # safety: inside: every position read is below `m` in the part and below
-    #   `n` in the text, as the loops' bounds keep them.
-    unsafe:
-        if m == 1:
-            let b = byte(part, 0)
+    if m == 1:
+        # safety: in_bounds, valid, aligned: the part has one byte, and every
+        #   position read is below `n`.
+        unsafe:
+            let b = part.read()
             var i = 0
             while i <= last:
-                if byte(text, i) == b:
+                if text.offset(i).read() == b:
                     return i
                 i += 1
-            return -1
-        # The critical factorization: the later of the two maximal suffixes,
-        # by the order of the bytes and by its reverse. The part is matched
-        # right of it first, then left of it.
-        let (s1, p1) = maximal_suffix(part, m, False)
-        let (s2, p2) = maximal_suffix(part, m, True)
-        let (cut, period) = if s1 > s2: (s1, p1) else: (s2, p2)
-        var j = 0
-        if same_run(part, 0, period, cut + 1):
-            # A periodic part: after a whole match of the right side, the
-            # bytes a shift by the period keeps are not compared again.
-            var memory = -1
+        return -1
+    # The critical factorization: the later of the two maximal suffixes, by
+    # the order of the bytes and by its reverse. The part is matched right of
+    # it first, then left of it.
+    let (s1, p1) = maximal_suffix(part, m, False)
+    let (s2, p2) = maximal_suffix(part, m, True)
+    let (cut, period) = if s1 > s2: (s1, p1) else: (s2, p2)
+    var j = 0
+    if same_run(part, 0, period, cut + 1):
+        # A periodic part: after a whole match of the right side, the bytes a
+        # shift by the period keeps are not compared again.
+        var memory = -1
+        # safety: in_bounds, valid, aligned: each position read is below `m`
+        #   in the part and below `n` in the text, as the loops' bounds keep
+        #   them, and a byte needs no alignment.
+        unsafe:
             while j <= last:
                 var i = max(cut, memory) + 1
-                while i < m and byte(part, i) == byte(text, i + j):
+                while i < m and part.offset(i).read() == text.offset(i + j).read():
                     i += 1
                 if i >= m:
                     i = cut
-                    while i > memory and byte(part, i) == byte(text, i + j):
+                    while i > memory and part.offset(i).read() == text.offset(i + j).read():
                         i -= 1
                     if i <= memory:
                         return j
@@ -97,36 +105,40 @@ pub(package) def find(text: ptr mut u8, n: int, part: ptr mut u8, m: int) -> int
                 else:
                     j += i - cut
                     memory = -1
-            return -1
-        let shift = max(cut + 1, m - cut - 1) + 1
+        return -1
+    let shift = max(cut + 1, m - cut - 1) + 1
+    # safety: in_bounds, valid, aligned: as above.
+    unsafe:
         while j <= last:
             var i = cut + 1
-            while i < m and byte(part, i) == byte(text, i + j):
+            while i < m and part.offset(i).read() == text.offset(i + j).read():
                 i += 1
             if i >= m:
                 i = cut
-                while i >= 0 and byte(part, i) == byte(text, i + j):
+                while i >= 0 and part.offset(i).read() == text.offset(i + j).read():
                     i -= 1
                 if i < 0:
                     return j
                 j += shift
             else:
                 j += i - cut
-        return -1
+    return -1
 
 ## Whether the `n` bytes at `text` start with the `m` at `part`, or end with
 ## them (`at_end`).
 ##
 ## Requires:
 ## - `inside`: `text` points to `n` live bytes and `part` to `m`
-pub(package) def has_edge(text: ptr mut u8, n: int, part: ptr mut u8, m: int, at_end: bool) -> bool:
+pub(package) def has_edge(text: ptr[u8], n: int, part: ptr[u8], m: int, at_end: bool) -> bool:
     if m > n:
         return False
     let start = if at_end: n - m else: 0
     var k = 0
-    while k < m:
-        # safety: inside: both positions are within the bytes.
-        if unsafe byte(text, start + k) != unsafe byte(part, k):
-            return False
-        k += 1
+    # safety: in_bounds, valid, aligned: both positions are within the bytes,
+    #   and a byte needs no alignment.
+    unsafe:
+        while k < m:
+            if text.offset(start + k).read() != part.offset(k).read():
+                return False
+            k += 1
     return True

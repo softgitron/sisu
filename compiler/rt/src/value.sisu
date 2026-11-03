@@ -47,8 +47,8 @@ from rt.types import DROPS_BY_VARIANT
 from rt.types import DYN
 from rt.types import ENTRY
 from rt.types import ENUM
-from rt.types import ERRSET
 from rt.types import ERROR
+from rt.types import ERRSET
 from rt.types import F32
 from rt.types import FLAGS
 from rt.types import FLOAT
@@ -260,18 +260,26 @@ pub(package) def equal(ts: Types, a0: ptr mut u8, ta0: int, b0: ptr mut u8, tb0:
             return True
         if k == BYTES:
             return same_bytes(
-                a.cast[ptr[u8]]().read(), aw.offset(1).read(), b.cast[ptr[u8]]().read(), bw.offset(1).read()
+                a.cast[ptr[u8]]().read(),
+                aw.offset(1).read(),
+                b.cast[ptr[u8]]().read(),
+                bw.offset(1).read(),
             )
         if k == TUPLE:
             let (fa, fb) = (x.offset(PARTS).read(), y.offset(PARTS).read())
-            return ts.words.offset(fa).read() == ts.words.offset(fb).read() and fields_equal(ts, a, fa, b, fb)
+            return ts.words.offset(fa).read() == ts.words.offset(fb).read()
+                and fields_equal(ts, a, fa, b, fb)
         if k == LIST:
             let n = aw.offset(1).read()
             if n != bw.offset(1).read():
                 return False
             let (ea, eb) = (x.offset(A).read(), y.offset(A).read())
-            let (sa, sb) = (ts.words.offset(ea * WORDS + SIZE).read(), ts.words.offset(eb * WORDS + SIZE).read())
-            let (pa, pb) = (a.cast[ptr[u8]]().read().cast_mut(), b.cast[ptr[u8]]().read().cast_mut())
+            let (sa, sb) = (
+                ts.words.offset(ea * WORDS + SIZE).read(), ts.words.offset(eb * WORDS + SIZE).read()
+            )
+            let (pa, pb) = (
+                a.cast[ptr[u8]]().read().cast_mut(), b.cast[ptr[u8]]().read().cast_mut()
+            )
             var i = 0
             while i < n:
                 if not equal(ts, pa.offset(i * sa), ea, pb.offset(i * sb), eb):
@@ -282,7 +290,8 @@ pub(package) def equal(ts: Types, a0: ptr mut u8, ta0: int, b0: ptr mut u8, tb0:
             let tag = aw.read()
             if tag != bw.read():
                 return False
-            return tag != 0 or equal(ts, a.offset(8), x.offset(A).read(), b.offset(8), y.offset(A).read())
+            return tag != 0
+                or equal(ts, a.offset(8), x.offset(A).read(), b.offset(8), y.offset(A).read())
         if k == RESULT:
             let tag = aw.read()
             if tag != bw.read():
@@ -303,8 +312,8 @@ pub(package) def equal(ts: Types, a0: ptr mut u8, ta0: int, b0: ptr mut u8, tb0:
             let (fa, fb) = (x.offset(PARTS).read(), y.offset(PARTS).read())
             return (
                 x.offset(NAME).read() == y.offset(NAME).read()
-                and ts.words.offset(fa).read() == ts.words.offset(fb).read()
-                and fields_equal(ts, a, fa, b, fb)
+                    and ts.words.offset(fa).read() == ts.words.offset(fb).read()
+                    and fields_equal(ts, a, fa, b, fb)
             )
         return False
 
@@ -320,7 +329,8 @@ def enum_equal(ts: Types, a: ptr mut u8, ta: int, b: ptr mut u8, tb: int) -> boo
         let (x, y) = (ts.words.offset(ta * WORDS), ts.words.offset(tb * WORDS))
         if x.read() != ENUM or y.read() != ENUM or x.offset(NAME).read() != y.offset(NAME).read():
             return False
-        if a.offset(x.offset(TAG).read()).cast[int]().read() != b.offset(y.offset(TAG).read()).cast[int]().read():
+        if a.offset(x.offset(TAG).read()).cast[int]().read()
+                != b.offset(y.offset(TAG).read()).cast[int]().read():
             return False
         let (fa, fb) = (variant(ts, a, x), variant(ts, b, y))
         if fa == 0 or fb == 0:
@@ -342,7 +352,13 @@ def fields_equal(ts: Types, a: ptr mut u8, fa: int, b: ptr mut u8, fb: int) -> b
         var i = 0
         while i < n:
             let (fx, fy) = (wa.offset(1 + 3 * i), wb.offset(1 + 3 * i))
-            if not equal(ts, a.offset(fx.read()), fx.offset(1).read(), b.offset(fy.read()), fy.offset(1).read()):
+            if not equal(
+                ts,
+                a.offset(fx.read()),
+                fx.offset(1).read(),
+                b.offset(fy.read()),
+                fy.offset(1).read(),
+            ):
                 return False
             i += 1
     return True
@@ -434,7 +450,10 @@ pub(package) def order(ts: Types, a0: ptr mut u8, ta0: int, b0: ptr mut u8, tb0:
         let (aw, bw) = (a.cast[int](), b.cast[int]())
         if is_text(k) and is_text(l):
             return bytes_order(
-                a.cast[ptr[u8]]().read(), aw.offset(1).read(), b.cast[ptr[u8]]().read(), bw.offset(1).read()
+                a.cast[ptr[u8]]().read(),
+                aw.offset(1).read(),
+                b.cast[ptr[u8]]().read(),
+                bw.offset(1).read(),
             )
         if (k == INT or k == SIZED) and (l == INT or l == SIZED):
             return signed_order(aw.read(), bw.read())
@@ -460,7 +479,10 @@ pub(package) def order(ts: Types, a0: ptr mut u8, ta0: int, b0: ptr mut u8, tb0:
             return EQUAL
         if k == BYTES:
             return bytes_order(
-                a.cast[ptr[u8]]().read(), aw.offset(1).read(), b.cast[ptr[u8]]().read(), bw.offset(1).read()
+                a.cast[ptr[u8]]().read(),
+                aw.offset(1).read(),
+                b.cast[ptr[u8]]().read(),
+                bw.offset(1).read(),
             )
         if k == TUPLE or k == STRUCT:
             let (fa, fb) = (x.offset(PARTS).read(), y.offset(PARTS).read())
@@ -471,8 +493,12 @@ pub(package) def order(ts: Types, a0: ptr mut u8, ta0: int, b0: ptr mut u8, tb0:
         if k == LIST:
             let (na, nb) = (aw.offset(1).read(), bw.offset(1).read())
             let (ea, eb) = (x.offset(A).read(), y.offset(A).read())
-            let (sa, sb) = (ts.words.offset(ea * WORDS + SIZE).read(), ts.words.offset(eb * WORDS + SIZE).read())
-            let (pa, pb) = (a.cast[ptr[u8]]().read().cast_mut(), b.cast[ptr[u8]]().read().cast_mut())
+            let (sa, sb) = (
+                ts.words.offset(ea * WORDS + SIZE).read(), ts.words.offset(eb * WORDS + SIZE).read()
+            )
+            let (pa, pb) = (
+                a.cast[ptr[u8]]().read().cast_mut(), b.cast[ptr[u8]]().read().cast_mut()
+            )
             var i = 0
             while i < na and i < nb:
                 let o = order(ts, pa.offset(i * sa), ea, pb.offset(i * sb), eb)
@@ -537,7 +563,13 @@ def fields_order(ts: Types, a: ptr mut u8, fa: int, b: ptr mut u8, fb: int) -> i
         var i = 0
         while i < n:
             let (fx, fy) = (wa.offset(1 + 3 * i), wb.offset(1 + 3 * i))
-            let o = order(ts, a.offset(fx.read()), fx.offset(1).read(), b.offset(fy.read()), fy.offset(1).read())
+            let o = order(
+                ts,
+                a.offset(fx.read()),
+                fx.offset(1).read(),
+                b.offset(fy.read()),
+                fy.offset(1).read(),
+            )
             if o != EQUAL:
                 return o
             i += 1
@@ -590,7 +622,13 @@ pub(package) def hash(ts: Types, state: int, p0: ptr mut u8, t0: int) -> int:
         let w = p.cast[int]()
         if is_text(k) or k == BYTES:
             return hash_bytes(state, p.cast[ptr[u8]]().read(), w.offset(1).read())
-        if k == INT or k == SIZED or k == U64 or k == BOOL or k == CHAR or k == FLOAT or k == DATETIME:
+        if k == INT
+                or k == SIZED
+                or k == U64
+                or k == BOOL
+                or k == CHAR
+                or k == FLOAT
+                or k == DATETIME:
             return (state ^ w.read()) *% PRIME
         if k == F32:
             return (state ^ (w.read() & 4294967295)) *% PRIME
@@ -617,7 +655,9 @@ pub(package) def hash(ts: Types, state: int, p0: ptr mut u8, t0: int) -> int:
             return s
         if k == RESULT:
             let tag = w.read()
-            return hash(ts, (state ^ tag) *% PRIME, p.offset(8), h.offset(if tag == 0: A else: B).read())
+            return hash(
+                ts, (state ^ tag) *% PRIME, p.offset(8), h.offset(if tag == 0: A else: B).read()
+            )
         if k == BOX:
             return hash(ts, state, p.cast[ptr[u8]]().read().cast_mut(), h.offset(A).read())
         if k == ENUM or k == ERRSET:
@@ -852,18 +892,20 @@ pub(package) def copy(ts: Types, dst: ptr mut u8, src: ptr mut u8, t: int):
             # An unlocked mutex holding a copy of the value.
             dw.write(0)
             dw.offset(1).write(0)
-            dst.offset(MUTEX_POISONED).cast[int]().write(src.offset(MUTEX_POISONED).cast[int]().read())
+            dst.offset(MUTEX_POISONED).cast[int]().write(
+                src.offset(MUTEX_POISONED).cast[int]().read()
+            )
             dw.offset(3).write(0)
             copy(ts, dst.offset(MUTEX_HEADER), src.offset(MUTEX_HEADER), h.offset(A).read())
         elif (
             k == DICT
-            or k == SET
-            or k == SENDER
-            or k == RECEIVER
-            or k == SHARED
-            or k == WEAK
-            or k == ARENA
-            or (flags & COUNTED) != 0
+                    or k == SET
+                    or k == SENDER
+                    or k == RECEIVER
+                    or k == SHARED
+                    or k == WEAK
+                    or k == ARENA
+                    or (flags & COUNTED) != 0
         ):
             sisu_rt_object_copy(dst, src, t)
         else:
@@ -946,7 +988,9 @@ def drop_parts(ts: Types, p: ptr mut u8, parts: int, mode: int) -> int:
         let n = w.read()
         var i = 0
         while i < n:
-            let st = drop(ts, p.offset(w.offset(1 + 2 * i).read()), w.offset(2 + 2 * i).read(), mode)
+            let st = drop(
+                ts, p.offset(w.offset(1 + 2 * i).read()), w.offset(2 + 2 * i).read(), mode
+            )
             if st != OK or status != OK:
                 status = after_part(status, st)
             i += 1
@@ -1131,16 +1175,16 @@ pub(package) def drop(ts: Types, p: ptr mut u8, t: int, mode: int) -> int:
             return OK
         if (
             k == ITER
-            or k == DICT
-            or k == SET
-            or k == GUARD
-            or k == READ_GUARD
-            or k == SENDER
-            or k == RECEIVER
-            or k == SHARED
-            or k == WEAK
-            or k == ARENA
-            or (flags & COUNTED) != 0
+                    or k == DICT
+                    or k == SET
+                    or k == GUARD
+                    or k == READ_GUARD
+                    or k == SENDER
+                    or k == RECEIVER
+                    or k == SHARED
+                    or k == WEAK
+                    or k == ARENA
+                    or (flags & COUNTED) != 0
         ):
             return sisu_rt_object_drop(p, t).to_int()
         return OK

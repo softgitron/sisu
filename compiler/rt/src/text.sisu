@@ -9,9 +9,6 @@
 from rt.host import memmove
 from rt.host import sisu_rt_alloc
 from rt.host import sisu_rt_grow
-from rt.words import at
-from rt.words import held
-from rt.words import set_word
 from std.mem import ptr
 
 ## The `String` at `t`, whose length is `len`, given a buffer of room for
@@ -49,21 +46,22 @@ pub(package) def grow(t: ptr mut u8, need: int, b: ptr mut u8) -> ptr mut u8:
 ## Requires:
 ## - `text`: `dst` has room for a `String`, and `b` points to `n` live bytes
 pub(package) def from_bytes(dst: ptr mut u8, b: ptr mut u8, n: int):
-    # safety: inside: `dst` has room for the three words, by `text`;
-    #   returns_promptly: the runtime in Rust gives the buffer, which memmove
-    #   fills.
+    # safety: writable, aligned, in_bounds: `dst` has room for the three
+    #   words, by `text`; returns_promptly: the runtime in Rust gives the
+    #   buffer, which memmove fills.
     unsafe:
+        let words = dst.cast[int]()
         if n <= 0:
-            set_word(dst, 0, 0)
-            set_word(dst, 8, 0)
-            set_word(dst, 16, 0)
+            words.write(0)
+            words.offset(1).write(0)
+            words.offset(2).write(0)
             return
         let room = if n > 16: n else: 16
         let buffer = sisu_rt_alloc(room)
         _ = memmove(buffer, b.as_const(), n)
-        set_word(dst, 0, buffer.addr())
-        set_word(dst, 8, n)
-        set_word(dst, 16, room)
+        words.write(buffer.addr())
+        words.offset(1).write(n)
+        words.offset(2).write(room)
 
 ## The digit `d`, 0 to 15, as its character's code: `0` to `9`, then `a` to
 ## `f`, or `A` to `F` with `upper`.
@@ -88,13 +86,13 @@ pub(package) def digits(dst: ptr mut u8, low: int, high: int, base: int, upper: 
     var p1 = (low >> 32) & 4294967295
     var p0 = low & 4294967295
     var count = 0
-    # safety: text: this function's; inside, writable, aligned: the `String`'s
-    #   buffer has room for the 128 digits a magnitude has at most, and a byte
-    #   needs no alignment.
+    from_bytes(dst, dst, 0)
+    _ = grow(dst, 128, dst)
+    # safety: valid, writable, aligned, in_bounds: the `String`'s buffer has
+    #   room for the 128 digits a magnitude has at most, and a byte needs no
+    #   alignment; returns_promptly: memmove moves them to its start.
     unsafe:
-        from_bytes(dst, dst, 0)
-        _ = grow(dst, 128, dst)
-        let bytes = held(dst, 0)
+        let bytes = dst.cast[ptr[u8]]().read().cast_mut()
         while True:
             var r = p3 % base
             p3 = p3 // base
@@ -107,9 +105,9 @@ pub(package) def digits(dst: ptr mut u8, low: int, high: int, base: int, upper: 
             next = r * 4294967296 + p0
             p0 = next // base
             r = next % base
-            at(bytes, 127 - count).write(u8.wrapping_from(digit_code(r, upper)))
+            bytes.offset(127 - count).write(u8.wrapping_from(digit_code(r, upper)))
             count += 1
             if p3 == 0 and p2 == 0 and p1 == 0 and p0 == 0:
                 break
-        _ = memmove(bytes, at(bytes, 128 - count).as_const(), count)
-        set_word(dst, 8, count)
+        _ = memmove(bytes, bytes.offset(128 - count).as_const(), count)
+        dst.offset(8).cast[int]().write(count)

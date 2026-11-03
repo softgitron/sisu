@@ -178,7 +178,7 @@ def export_int_digits(dst: ptr mut u8, low: int, high: int, base: int, upper: bo
 ##
 ## Requires:
 ## - `readable`: `text` points to `n` live bytes and `part` to `m`
-def export_find(text: ptr mut u8, n: int, part: ptr mut u8, m: int) -> int:
+def export_find(text: ptr[u8], n: int, part: ptr[u8], m: int) -> int:
     return search.find(text, n, part, m)
 
 ## Whether the `n` bytes at `text` start with the `m` at `part`, or end with
@@ -186,5 +186,5 @@ def export_find(text: ptr mut u8, n: int, part: ptr mut u8, m: int) -> int:
 ##
 ## Requires:
 ## - `readable`: `text` points to `n` live bytes and `part` to `m`
-def export_has_edge(text: ptr mut u8, n: int, part: ptr mut u8, m: int, at_end: bool) -> bool:
+def export_has_edge(text: ptr[u8], n: int, part: ptr[u8], m: int, at_end: bool) -> bool:
     return search.has_edge(text, n, part, m, at_end)
