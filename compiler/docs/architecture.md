@@ -3679,8 +3679,13 @@ since stage 1 writes SIR but has no reader of it) into stage 1's SIR types
 `rvalue.sisu`, `call.sisu` and `scan.sisu` are `func.rs`, `facts.sisu`
 is `facts.rs`, `layout.sisu` is `layout.rs`, `debug.sisu` is the part of
 `debug.rs` that describes types, `abi.sisu` is the part of
-`sisu-rt/src/abi.rs` the code generator shares), in both profiles. It lowers the SIR of `examples/wordcount` (5 065 lines) to 39 108
-lines of LIR in 0.07 s.
+`sisu-rt/src/abi.rs` the code generator shares), in both profiles. It
+lowers the SIR of `examples/wordcount` (5 065 lines) to 39 108 lines of
+LIR in 0.07 s, and the SIR of stage 1's own package (493 018 lines, 2 616
+function instances) to 4 026 377 lines of LIR (96 MB) in 6.0 s, or in
+15 s in the release profile, whose facts it computes; built from that
+LIR, stage 1 is the same 23 MB executable its SIR gives, in both profiles
+(6.1 s from LIR as from SIR: the translation, Cranelift and the link).
 
 #### The text form
 
@@ -6395,8 +6400,9 @@ library", "Tasks and the scheduler", "Capabilities", "Stage 2")
      powers of two, which is exact, since Sisu has no `f64.to_bits`.
      `compiler/stage2/sisu2 lir FILE.sir [--release] [--output FILE.lir]`
      builds stage 2 natively on first use, through stage 1, in about 21 s,
-     and lowers the SIR of `examples/wordcount` (5 065 lines) to 39 108
-     lines of LIR in 0.07 s. A construct it does not lower stops it with
+     and lowers the SIR of stage 1's own package (493 018 lines) in 6.0 s,
+     15 s in the release profile, to the LIR from which stage 1 is the same
+     executable its SIR gives. A construct it does not lower stops it with
      `lir: not lowered: WHAT (in FUNCTION)` and status 1, as `D0103`
      stops the Rust backend.
 283. The translation of LIR into Cranelift IR (`sisu-codegen/src/lir.rs`

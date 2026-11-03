@@ -311,6 +311,8 @@ impl State:
 
     ## Keeps the facts `keep` says to keep, by place.
     pure def keep(mut self, keep: list[bool]):
+        if not keep.contains(False):
+            return
         var facts: list[Fact] = []
         var codes: list[list[int]] = []
         for i in range(len(self.facts)):

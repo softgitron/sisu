@@ -70,6 +70,15 @@ sources, then its items in the order of the object file (`data`,
 its counts (`stats`); a function is its frame (`slot`, `vars`, `local`)
 and its blocks, each line one call of the function builder.
 
+## How fast
+
+The SIR of `examples/wordcount` (5 065 lines) lowers to 39 108 lines of
+LIR in 0.07 s; the SIR of stage 1's own package (493 018 lines, 2 616
+function instances) to 4 026 377 lines in 6.0 s, and in 15 s in the
+release profile, whose facts about integers it computes. Built from that
+LIR, stage 1 is the same 23 MB executable its SIR gives, in both
+profiles.
+
 ## The check
 
 The conformance runner's mode `--native-from-lir`

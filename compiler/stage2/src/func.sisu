@@ -637,10 +637,9 @@ impl Cg:
     pub pure def step_facts(mut self, s: StatementKind):
         let Some(st0) = self.fx.known.copy() else:
             return
-        let Some(fa) = self.fx.facts.copy() else:
-            return
         var st = st0
-        fa.step(mut st, s)
+        if let Some(fa) = self.fx.facts:
+            fa.step(mut st, s)
         self.fx.known = Some(st)
 
     ## What the facts decide of a `switch` on a `bool`, if anything.
