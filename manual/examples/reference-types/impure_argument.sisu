@@ -1,0 +1,10 @@
+# A function that prints is not pure.
+pure def apply_twice(f: pure (int) -> int, x: int) -> int:
+    return f(f(x))
+
+def noisy(n: int) -> int:
+    print("called with {n}")
+    return n * 3
+
+def main():
+    print(apply_twice(noisy, 2))

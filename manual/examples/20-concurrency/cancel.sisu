@@ -1,0 +1,18 @@
+# Cancelling a scope stops its tasks at their next blocking point.
+
+## Heats the stove for an hour, a minute at a time.
+def heat(clock: Clock) -> ! TaskError:
+    for _ in range(60):
+        clock.sleep(Duration.minutes(1))?
+    return Ok(())
+
+def main(sys: System):
+    task.scope do s:
+        let heater = s.spawn(() -> heat(sys.clock))
+        s.cancel()
+        print("the heater: {heater.join()}")
+        print("cancelled: {task.is_cancelled()}")
+        print("a blocking point: {task.checkpoint()}")
+        let shielded = task.shield do:
+            return task.checkpoint()
+        print("in a shield: {shielded}")

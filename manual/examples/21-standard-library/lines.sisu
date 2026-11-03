@@ -1,0 +1,11 @@
+# `std.io` reads a stream a line at a time, here standard input.
+from std.io import BufReader, StdinReader
+
+def main(sys: System) -> !:
+    var input = BufReader.new(StdinReader.new(sys.stdin))
+    var total = 0
+    while let Some(line) = input.read_line()?:
+        let minutes = line.trim().parse_int() ?? 0
+        total += minutes
+        print("{minutes:>3} min, {total:>3} in all")
+    return Ok(())

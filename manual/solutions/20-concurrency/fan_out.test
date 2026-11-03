@@ -1,0 +1,5 @@
+test "the answers in the order of the towns" ... ok
+test "every town at once" ... ok
+test "an unknown town" ... ok
+test "no towns" ... ok
+4 passed, 0 failed, 0 blocked

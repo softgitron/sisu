@@ -1,0 +1,8 @@
+$ sisu run not_send.sisu
+error[E0347]: `Shared[Cell[int]]` does not implement `Send`
+  --> not_send.sisu:7:11
+  |
+7 |     print(hand_over(counter))
+  |           ^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

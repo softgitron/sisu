@@ -76,11 +76,7 @@ fn main() {
     let sisu = sisu_conformance::Sisu::new(sisu).with_front_end(front_end.as_deref());
     if let Some(list) = native {
         let text = std::fs::read_to_string(&list).unwrap_or_default();
-        let names = if from_lir {
-            sisu_conformance::native::read_list_from_lir(&text)
-        } else {
-            sisu_conformance::native::read_list(&text)
-        };
+        let names = sisu_conformance::native::read_list(&text);
         if survey {
             for (case, verdict) in sisu_conformance::native::survey(&sisu, &root, &names) {
                 println!("{case}: {verdict}");

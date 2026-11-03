@@ -1,0 +1,31 @@
+$ sisu test lost.sisu
+test "two visits make two" ... ok
+1 passed, 0 failed, 0 blocked
+$ sisu test --explore 20 lost.sisu
+test "two visits make two" ... FAILED
+
+test "two visits make two" ... FAILED
+with schedule seed 2; `--schedule-seed 2` runs it again
+panic: assertion failed: total == 2
+    total == 2
+    │
+    1
+  at test "two visits make two" (lost.sisu:15:5)
+replay: sisu test --replay 1-9c7361fd0bdc4ec9-0.0.1-t0-s2-r0 lost.sisu
+
+0 passed, 1 failed, 0 blocked
+explored 20 schedules per test (seeds 0 to 19)
+$ sisu test --scheduler pct --depth 2 --explore 10 lost.sisu
+test "two visits make two" ... FAILED
+
+test "two visits make two" ... FAILED
+with schedule seed 0 of a PCT scheduler of depth 2; `--scheduler pct --depth 2 --schedule-seed 0` runs it again
+panic: assertion failed: total == 2
+    total == 2
+    │
+    1
+  at test "two visits make two" (lost.sisu:15:5)
+replay: sisu test --replay 1-9c7361fd0bdc4ec9-0.0.1-t0-s0-r0-p2 lost.sisu
+
+0 passed, 1 failed, 0 blocked
+explored 10 schedules of a PCT scheduler of depth 2 per test (seeds 0 to 9)

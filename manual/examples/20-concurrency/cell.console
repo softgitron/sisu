@@ -1,0 +1,9 @@
+$ sisu run cell.sisu
+error[E0427]: `letters` is shared with the task by reference, but `Cell[int]` is not `Sync`
+  --> cell.sisu:7:13
+  |
+7 |             s.spawn do:
+  |             ^^^^^^^^^^^
+  = note: wrap it: `Mutex[int]` shares mutation between tasks; or move the value with an `own` task
+
+error[D0006]: the program was not run: errors found (1)

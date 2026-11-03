@@ -79,6 +79,16 @@ release profile, whose facts about integers it computes. Built from that
 LIR, stage 1 is the same 23 MB executable its SIR gives, in both
 profiles.
 
+## The default
+
+`sisu build --native` (and `sisu run --native`) lowers every program
+through stage 2 (decisions 304 and 305): the driver writes the SIR to a
+file, `compiler/target/stage2/sisu2 lir` lowers it, and the Rust backend
+translates the LIR. A construct stage 2 does not lower is the program's
+`D0103`; nothing falls back to the Rust lowering, which lowers only when
+`--lower=rust` asks for it (the oracle the check below compares with, and
+the seed that builds stage 1 and stage 2 themselves).
+
 ## The check
 
 The conformance runner's mode `--native-from-lir`
@@ -98,9 +108,17 @@ What is done, and what is not, is kept here as the work goes.
   decisions 281 to 284).
 - The lowering: both profiles, the release one with its facts about
   integers (`facts.sisu`, transcribing `facts.rs`; decision 270).
-- The translation and the check: all 200 cases of `native.list` pass
+- The translation and the check: all 205 cases of `native.list` pass
   `--native-from-lir`, their executables byte for byte the ones from SIR
-  in both profiles.
+  in both profiles, the five unsafe ones included.
+- Unsafe code (decisions 302 and 305): the intrinsics of std.mem (277 to
+  305), `ptr` and `ptr_mut` with their `Ptr` entry, the refusal of a
+  pointer to a place whose two layouts differ, foreign calls (`call.sisu`,
+  `call_foreign` and `c_argument`) and the machine intrinsics
+  (`machine_intrinsic`).
+- The default: `sisu build --native` lowers through stage 2 alone, and the
+  runner's `--native`, `--native-from-sir` and `--native-release` modes
+  fail a case whose build does not say stage 2 lowered it.
 - The reader takes the SIR of a program built with its tests (`sisu sir
   --tests`, decision 285) and leaves its tests' tags and its benchmarks
   out, since stage 1's SIR types do not hold them yet. When they do, the

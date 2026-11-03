@@ -1,0 +1,13 @@
+# A refinement type is its base with a predicate.
+type Port = int where 1 <= self <= 65535
+
+def connect(port: Port) -> String:
+    return "port {port}, then {port + 1}"
+
+def main():
+    let web: Port = 443
+    print(connect(web))
+    for n in [8080, 70000]:
+        match Port.try_from(n):
+            case Ok(port): print(connect(port))
+            case Err(e): print("{e:?}")

@@ -390,6 +390,7 @@ impl Tr {
                     let x = val(&vals, *x)?;
                     let r = match k {
                         Conv::Uextend => b.ins().uextend(*t, x),
+                        Conv::Sextend => b.ins().sextend(*t, x),
                         Conv::Ireduce => b.ins().ireduce(*t, x),
                         Conv::Bitcast => b.ins().bitcast(*t, MemFlags::new(), x),
                         Conv::Fpromote => b.ins().fpromote(*t, x),

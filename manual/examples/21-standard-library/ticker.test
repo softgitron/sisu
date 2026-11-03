@@ -1,0 +1,3 @@
+test "a ticker skips the ticks a slow turn missed" ... ok
+test "a timeline does not add up the work between sleeps" ... ok
+2 passed, 0 failed, 0 blocked

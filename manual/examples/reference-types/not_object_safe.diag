@@ -1,0 +1,1 @@
+6:21-6:30 E0241 resolve.not-object-safe trait="Shape" method="larger" reason="its signature mentions `Self` besides `self`"

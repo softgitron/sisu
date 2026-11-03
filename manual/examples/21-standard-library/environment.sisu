@@ -1,0 +1,15 @@
+# `std.env` reads variables a program needs; `std.process` runs programs.
+import std.env
+from std.process import Command
+
+test "variables as numbers, lists and text":
+    let vars = Env.fake(vars={"SAUNA_HEAT": "85", "PATH": "/bin:/usr/bin"})
+    assert env.get_int(vars, "SAUNA_HEAT") == Ok(Some(85))
+    assert env.get_list(vars, "PATH") == ["/bin", "/usr/bin"]
+    assert env.expand(vars, "heat: $SAUNA_HEAT") == "heat: 85"
+    assert env.require(vars, "HOME") == Err(Missing("HOME"))
+
+test "a command run to its end":
+    let proc = Proc.fake({"date": "Tue Nov 3"})
+    assert Command.new("date").output(proc) == Ok("Tue Nov 3")
+    assert Command.new("cal").arg("-3").output(proc) == Err(NotFound("cal"))

@@ -1,0 +1,10 @@
+# `std.hash` digests bytes: a checksum, a fast hash, a secure one.
+import std.hash
+from std.encoding import hex_encode
+
+def main():
+    let data = b"Hei, maailma!"
+    print("crc32:  {hash.crc32(data)}")
+    print("fnv1a:  {hash.fnv1a_64(data)}")
+    print("sha256: {hex_encode(hash.sha256(data))}")
+    print("changed: {hex_encode(hash.sha256(b"Hei, maailma?"))}")

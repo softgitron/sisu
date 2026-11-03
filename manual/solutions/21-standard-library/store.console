@@ -1,0 +1,18 @@
+$ sisu test store.sisu
+warning[W0001]: typed hole `put` of type `String ! IoError`
+  --> store.sisu:19:12
+   |
+19 |     return todo("put")
+   |            ^^^^^^^^^^^
+
+warning[W0001]: typed hole `get` of type `bytes ! {IoError, StoreError}`
+  --> store.sisu:24:12
+   |
+24 |     return todo("get")
+   |            ^^^^^^^^^^^
+
+test "data comes back" ... blocked by todo("put")
+test "the same data is kept once" ... blocked by todo("put")
+test "a file that changed is corrupt" ... blocked by todo("put")
+test "a name never kept" ... blocked by todo("get")
+0 passed, 0 failed, 4 blocked

@@ -1,0 +1,22 @@
+# `std.time`'s `Ticker` and `Timeline` keep time that does not drift.
+from std.time import Ticker, Timeline
+
+test "a ticker skips the ticks a slow turn missed"(clock: TestClock):
+    let start = clock.now()
+    var ticker = Ticker.every(clock, Duration.seconds(10))
+    var ticks: list[int] = []
+    for turn in range(4):
+        ticker.wait().expect("not cancelled")
+        ticks.push((clock.now() - start).as_seconds())
+        if turn == 1:
+            clock.advance(Duration.seconds(25))
+    assert ticks == [10, 20, 50, 60]
+    assert ticker.missed == 2
+
+test "a timeline does not add up the work between sleeps"(clock: TestClock):
+    var timeline = Timeline.start(clock)
+    let start = timeline.now
+    timeline.sleep(Duration.seconds(30)).expect("not cancelled")
+    clock.advance(Duration.seconds(5))
+    timeline.sleep(Duration.seconds(30)).expect("not cancelled")
+    assert clock.now() - start == Duration.seconds(60)

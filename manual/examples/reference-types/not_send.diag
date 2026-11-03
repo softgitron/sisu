@@ -1,0 +1,1 @@
+7:11-7:29 E0347 type.bound-not-satisfied ty="Shared[Cell[int]]" bound="Send"

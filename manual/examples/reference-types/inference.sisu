@@ -1,0 +1,13 @@
+# Types inside a body are inferred, from a value or from a later use.
+def mean(values: list[f64]) -> f64:
+    return sum(values) / len(values).to_f64()
+
+def main():
+    let count = 3
+    let ratio = 0.5
+    var names = []
+    names.push("Aino")
+    let small: u8 = 7
+    let empty: dict[str, int] = {}
+    print("{count} {ratio} {names} {small} {len(empty)}")
+    print(mean([1.0, 2.5]))

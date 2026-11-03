@@ -1,0 +1,37 @@
+$ sisu test predict_scopes.sisu
+warning[W0001]: typed hole `halves(10, 4)` of type `str`
+  --> predict_scopes.sisu:38:24
+   |
+38 | const BOTH_EVEN: str = todo("halves(10, 4)")
+   |                        ^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `halves(10, 3)` of type `str`
+  --> predict_scopes.sisu:39:22
+   |
+39 | const ONE_ODD: str = todo("halves(10, 3)")
+   |                      ^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `started([2, 4, 6])` of type `str`
+  --> predict_scopes.sisu:40:26
+   |
+40 | const ALL_STARTED: str = todo("started([2, 4, 6])")
+   |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `started([2, 5, 6])` of type `str`
+  --> predict_scopes.sisu:41:24
+   |
+41 | const ONE_FAILS: str = todo("started([2, 5, 6])")
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `cancelled(clock)` of type `str`
+  --> predict_scopes.sisu:42:24
+   |
+42 | const CANCELLED: str = todo("cancelled(clock)")
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^
+
+test "two even numbers" ... blocked by todo("halves(10, 4)")
+test "an odd number" ... blocked by todo("halves(10, 3)")
+test "tasks that nobody joins" ... blocked by todo("started([2, 4, 6])")
+test "a task that fails, which nobody joins" ... blocked by todo("started([2, 5, 6])")
+test "a cancelled task" ... blocked by todo("cancelled(clock)")
+0 passed, 0 failed, 5 blocked

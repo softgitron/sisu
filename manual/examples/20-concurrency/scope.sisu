@@ -1,0 +1,20 @@
+# A scope runs tasks side by side, and waits for every one of them.
+
+## How many primes there are below `n`.
+def primes_below(n: int) -> int:
+    var count = 0
+    for k in range(2, n):
+        var d = 2
+        while d * d <= k and k % d != 0:
+            d += 1
+        if d * d > k:
+            count += 1
+    return count
+
+def main():
+    task.scope do s:
+        let small = s.spawn(() -> primes_below(1000))
+        let large = s.spawn(() -> primes_below(5000))
+        print("below 1000: {small.join()}")
+        print("below 5000: {large.join()}")
+    print("both tasks have ended")

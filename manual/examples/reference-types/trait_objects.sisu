@@ -1,0 +1,30 @@
+# `dyn Shape` holds a value of any type that implements `Shape`.
+trait Shape:
+    def area(self) -> f64
+
+struct Square:
+    side: f64
+
+struct Circle:
+    radius: f64
+
+impl Shape for Square:
+    def area(self) -> f64:
+        return self.side * self.side
+
+impl Shape for Circle:
+    def area(self) -> f64:
+        return 3.0 * self.radius * self.radius
+
+def describe(shape: ref dyn Shape) -> String:
+    return "an area of {shape.area()}"
+
+def main():
+    let shapes: list[Box[dyn Shape]] = [
+        Box(Square(2.0)),
+        Box(Circle(1.0)),
+    ]
+    for shape in shapes:
+        print(shape.area())
+    let square = Square(3.0)
+    print(describe(ref square))

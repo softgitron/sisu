@@ -1,0 +1,28 @@
+# `select` waits for whichever of several things comes first.
+
+## The next order from `orders`, or a note when none comes in time.
+def next_order(orders: Receiver[String], clock: Clock) -> String:
+    select:
+        case got = orders.recv():
+            let order = got else:
+                return "the counter is closed"
+            return "order: {order}"
+        case _ = clock.after(Duration.minutes(5)):
+            return "no order in five minutes"
+
+test "an order that is waiting"(clock: TestClock):
+    let tx, rx = channel[String](capacity=1)
+    tx.send("coffee".to_string()).expect("there is room")
+    assert next_order(rx, clock) == "order: coffee"
+
+test "no order comes"(clock: TestClock):
+    let tx, rx = channel[String](capacity=1)
+    let start = clock.now()
+    assert next_order(rx, clock) == "no order in five minutes"
+    assert clock.now() - start == Duration.minutes(5)
+    _ = tx
+
+test "the counter closes"(clock: TestClock):
+    let tx, rx = channel[String](capacity=1)
+    tx.close()
+    assert next_order(rx, clock) == "the counter is closed"

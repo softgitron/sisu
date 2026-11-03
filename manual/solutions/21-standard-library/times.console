@@ -1,0 +1,11 @@
+$ sisu test times.sisu
+warning[W0001]: typed hole `the pattern` of type `str`
+  --> times.sisu:14:29
+   |
+14 |     let pattern = Regex.new(todo("the pattern"))?
+   |                             ^^^^^^^^^^^^^^^^^^^
+
+test "times with two digits" ... blocked by todo("the pattern")
+test "an hour of one digit" ... blocked by todo("the pattern")
+test "no time" ... blocked by todo("the pattern")
+0 passed, 0 failed, 3 blocked

@@ -1,0 +1,11 @@
+$ sisu test sizes.sisu
+warning[W0001]: typed hole `sizes_by_extension` of type `dict[String, int] ! IoError`
+  --> sizes.sisu:15:12
+   |
+15 |     return todo("sizes_by_extension")
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test "every kind of file" ... blocked by todo("sizes_by_extension")
+test "a directory deeper down" ... blocked by todo("sizes_by_extension")
+test "a directory that is not there" ... blocked by todo("sizes_by_extension")
+0 passed, 0 failed, 3 blocked

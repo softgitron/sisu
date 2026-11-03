@@ -1,0 +1,38 @@
+##! Exercise 21.4, sizes by kind of file. Kind: write. Level: 2.
+##!
+##! `sizes_by_extension` adds up the sizes of the files under a directory,
+##! at any depth, for each extension, so that a user sees what fills a
+##! disk. Write its body so that every test passes. Run the tests with
+##! `sisu test sizes.sisu`. The hints are in chapter 21 of the tutorial,
+##! under "Exercise 21.4: sizes by kind of file".
+
+## The total size in bytes of the files under `dir`, at any depth, for
+## each extension; a file without an extension counts under "".
+def sizes_by_extension[F: FsOps](
+    files: F,
+    dir: Path,
+) -> dict[String, int] ! IoError:
+    return todo("sizes_by_extension")
+
+## Photos in two directories, a note and a file without an extension.
+def disk() -> Fs:
+    return Fs.in_memory(
+        {
+            "photos/a.jpg": "12345",
+            "photos/b.jpg": "123",
+            "photos/notes.txt": "ab",
+            "photos/2025/c.jpg": "1234567",
+            "photos/README": "x",
+        }
+    )
+
+test "every kind of file":
+    let sizes = sizes_by_extension(disk(), "photos")
+    assert sizes == Ok({"jpg": 15, "txt": 2, "": 1})
+
+test "a directory deeper down":
+    assert sizes_by_extension(disk(), "photos/2025") == Ok({"jpg": 7})
+
+test "a directory that is not there":
+    let sizes = sizes_by_extension(disk(), "music")
+    assert sizes == Err(NotFound("music"))

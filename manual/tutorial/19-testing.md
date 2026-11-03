@@ -386,16 +386,16 @@ replay: sisu test --replay 1-9c5428daab4aad00-0.0.1-t1-s0-r0-c1.0.0.1.0.0.0 sort
   numbers. The report says that it was the third case tried, and that
   shrinking took ten steps.
 
-`arbitrary` makes cases of any type of the program, structs and enums
-included: the compiler writes the generator from the type's fields and
-variants. Saving each failing case to try it first on the next run, as
+`arbitrary` makes cases of the program's own types too, structs and
+enums included: the compiler writes the generator from the type's
+fields and variants. Saving each failing case to try it first on the next run, as
 Python's Hypothesis does, is designed in
 [17](../../proposal/17-testing.md#property-based-testing-and-fuzzing)
 and not in the compiler.
 
 > **From Python.** `check` and `arbitrary` are Hypothesis's `@given` and
-> its strategies, built in: there is nothing to install, and every type
-> has a generator.
+> its strategies, built in: there is nothing to install, and a type
+> needs no code of yours to have a generator.
 
 ## Replaying a failure
 
@@ -596,8 +596,8 @@ test "a refused reminder is counted" ... ok
   the method's name.
 
 A fake can be made for a trait whose methods all take `self` or `mut
-self` and have no type parameters of their own; other traits get E0614
-(`comptime.no-fake`). The same machinery gives `cap.Wrap` of chapter 18
+self`, have no type parameters of their own, and have no borrow or
+`Self` in their signatures; other traits get E0614 (`comptime.no-fake`). The same machinery gives `cap.Wrap` of chapter 18
 for your traits: an interceptor around a real implementation.
 
 > **From Python.** There is no `unittest.mock`. A mock replaces what a
@@ -875,8 +875,7 @@ test "the vowels of a short word" ... ok
 
 ## What sisu test remembers
 
-A test that passed is not run again while its code and what it calls
-are the same: `sisu test` keeps the results in a file beside the
+A test that passed is not run again while the code is the same: `sisu test` keeps the results in a file beside the
 program, `NAME.test-cache`, and prints what the test printed when it
 ran. `--no-cache` runs everything. A machine-readable report of the
 results in JSON, coverage (`--cover`), mutation testing (`--mutate`)

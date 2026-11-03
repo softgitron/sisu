@@ -1,0 +1,14 @@
+# A recursive enum needs no `Box`: the compiler adds the indirection.
+enum Expr:
+    Number(int)
+    Add(Expr, Expr)
+    Neg(Expr)
+
+def eval(e: Expr) -> int:
+    return match e:
+        case Number(n): n
+        case Add(a, b): eval(a) + eval(b)
+        case Neg(inner): -eval(inner)
+
+def main():
+    print(eval(Expr.Add(Number(2), Expr.Neg(Number(5)))))

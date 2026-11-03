@@ -175,6 +175,9 @@ pub struct Cg:
     queue_head: int
     ## The runtime's entry points declared.
     runtime_done: set[String]
+    ## The foreign functions of `extern` blocks a call names, with their C
+    ## signatures as LIR declares them (decision 302).
+    c_functions: dict[String, String]
     ## The data declared, and the runtime's data.
     data_count: int
     pub depth: int
@@ -237,6 +240,7 @@ impl Cg:
             queue=[],
             queue_head=0,
             runtime_done=set(),
+            c_functions={},
             data_count=0,
             depth=0,
             budget=0,
@@ -648,6 +652,24 @@ impl Cg:
         _ = self.runtime_done.add(name.to_string())
         return Ok(())
 
+    ## The foreign function `name` (a C function of an `extern` block),
+    ## declared with the C signature its first call gives; a call that gives
+    ## another is a construct the lowering does not handle.
+    pub pure def c_function(
+        mut self, name: str, params: list[String], returns: list[String]
+    ) -> () ! LirError:
+        let sep = ", "
+        let sig = "({params.join(sep)}) -> ({returns.join(sep)})"
+        if let Some(known) = self.c_functions.get(name.to_string()):
+            if known != sig:
+                return unsupported(
+                    "two calls of the foreign function `{name}` with different C signatures"
+                )
+            return Ok(())
+        self.items.push(Item.Line("declare {name} import {sig}"))
+        _ = self.c_functions.insert(name.to_string(), sig)
+        return Ok(())
+
     ## Read-only bytes, once per content.
     pub pure def text(mut self, bytes: list[int]) -> int:
         var content = bytes.copy()
@@ -941,6 +963,9 @@ pub pure def runtime_signature(name: str) -> str?:
         case "sisu_rt_wide": Some("(i32, i32, i64, i32, i64, i32, i64) -> (i8)")
         case "sisu_rt_table": Some("(i32, i64, i64, i64) -> (i8)")
         case "sisu_rt_dict_slot": Some("(i64, i64, i32, i32, i64) -> (i8)")
+        case "sisu_rt_flush": Some("() -> ()")
+        case "sisu_rt_thread_slot": Some("() -> (i64)")
+        case "sisu_rt_switch": Some("(i64, i64) -> ()")
         case _: None
 
 ## How many values a call of the runtime's `name` gives.

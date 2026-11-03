@@ -1,0 +1,15 @@
+# `std.sort` sorts in place; `std.search` finds in sorted lists.
+import std.search
+import std.sort
+
+def main():
+    var words = ["löyly", "kiuas", "sauna", "vihta", "lauteet", "kiulu"]
+    sort.sort_by_key(mut words, (w) -> len(w))
+    print(words)
+    let hours = [9, 12, 15, 17, 18, 21]
+    print(search.binary_search(hours, 17))
+    print(search.binary_search(hours, 16))
+    print(search.bisect_left(hours, 16))
+    var temps = [80, 95, 70, 88, 101, 76]
+    search.select_nth(mut temps, 2)
+    print(temps[2])

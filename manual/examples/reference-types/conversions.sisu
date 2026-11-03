@@ -1,0 +1,9 @@
+# Conversions that can lose information are methods.
+def main():
+    let big = 300
+    let small: u8 = 200
+    let wide: u32 = small.into()
+    print("{big.to_u8()} {small.to_int()} {wide}")
+    print("{big.truncate_to[u8]()} {(-1).truncate_to[u8]()}")
+    let price = 2.75
+    print("{price.truncate_to_int()} {price.round()} {big.to_f64()}")

@@ -1,0 +1,16 @@
+# `std.json` writes a value as JSON, and reads it back into its type.
+import std.json
+
+struct Booking:
+    name: String
+    hour: int
+    towels: int = 1
+
+def main():
+    let aino = Booking(name="Aino", hour=18)
+    print(json.encode(aino))
+    print(json.decode[Booking](r"""{"name": "Eero", "hour": 19}"""))
+    print(json.decode[Booking](r"""{"name": "Roni", "hour": "late"}"""))
+    let hours = json.parse(r"""{"open": [17, 18, 19], "closed": false}""")
+    if let Ok(value) = hours, let Some(open) = value.get("open"):
+        print("open at {open}")

@@ -247,7 +247,7 @@ of what is ambient (`print`, `log`, `task.scope`), interceptors
 `sisu audit --caps`. Exercises: narrow a program's file system, make a
 function testable by taking a `Clock`. Stage 0 runs all of it.
 
-**19. Testing in depth.** Tests beside the code and in `tests/`,
+**19. Testing in depth** ([written](tutorial/19-testing.md)). Tests beside the code and in `tests/`,
 `suite` and `@tag`, parametrised tests, what a failing `assert` prints,
 `expect`, fixtures as values and `@fixture`, each test's own fakes and the
 clock that advances only when every task waits, property tests (`check`,
@@ -259,7 +259,7 @@ one property, write a transcript test for the word counter. Stage 0 runs
 all of it except `@fixture`, `Expectation`, `--fuzz`, `--cover` and
 `--mutate`.
 
-**20. Concurrency.** `task.scope` and `spawn`, `join` and how error sets
+**20. Concurrency** ([written](tutorial/20-concurrency.md)). `task.scope` and `spawn`, `join` and how error sets
 flatten, the scope's result, tasks that borrow from the frame, `Send`
 and `Sync` in the messages that mention them, `Mutex`, `RwLock`,
 `Atomic`, `Once` and `Condvar`, bounded channels and closing them,
@@ -270,7 +270,7 @@ trace context, and testing all of it under the seeded scheduler
 (`--explore`, `--scheduler pct`). Exercises: a fan-out fetch over a fake
 network, a worker pool, a race with a timeout. Stage 0 runs all of it.
 
-**21. A tour of the standard library.** One section per module a program
+**21. A tour of the standard library** ([written](tutorial/21-standard-library.md)). One section per module a program
 reaches for first: `std.fs` and `std.io`, `std.time` (with `Ticker` and
 `Timeline`), `std.rand`, `std.env` and `std.process`, `std.json`,
 `std.regex`, `std.collections` (`SortedDict`, `Deque`, `Heap`,
@@ -402,7 +402,7 @@ prototype in the experiment ([STYLE.md](STYLE.md)).
 | | Page | Contents |
 |---|---|---|
 | R1 | Lexical structure ([written](reference/lexical-structure.md)) | Source text, identifiers and the naming rules, the 47 keywords and the contextual ones, comments and doc comments, every literal, line continuation, indentation, the formatter's layout. |
-| R2 | Types | Every builtin type, numeric conversions, text types, collections and literal typing (`FromLiteral`), tuples, unit and `Never`, `T?` and `T ! E`, error-set subtyping, function types and `pure`, references, views, the library pointer types, `dyn`, refinements, aliases, the auto traits, what the type system leaves out. |
+| R2 | Types ([written](reference/types.md)) | Every builtin type, numeric conversions, text types, collections and literal typing (`FromLiteral`), tuples, unit and `Never`, `T?` and `T ! E`, error-set subtyping, function types and `pure`, references, views, the library pointer types, `dyn`, refinements, aliases, the auto traits, what the type system leaves out. |
 | R3 | Declarations | `let`, `var`, `const`, `def` and its parameters, `pure def`, `comptime def`, `struct`, `view struct`, `enum`, `error`, `trait`, `impl`, `type`, `test`, `suite`, `bench`, `import`, `extern`, visibility. |
 | R4 | Expressions and operators | The precedence table and each operator, calls and keyword arguments, indexing, slicing and `^`, comprehensions, closures and `it`, `if` and `match` expressions, `else` fallbacks, `?`, `?.`, `??`, interpolation and format specs, `comptime e`, `unsafe e`. |
 | R5 | Statements and control flow | Assignment and places, `if`, chained conditions, `if let`, `while let`, `let ... else`, `while`, the three `for` modes, `break`, `continue`, `return`, `match`, `select`, `with`, `defer`, `assert`, `debug_assert`, `expect`, `pass`, `unsafe` blocks. |
@@ -831,8 +831,8 @@ solutions and passing checks.
 | 5 | Chapter 9 with challenge I (3, done); G2 Coming from Python (1); R19 false friends (1, done) | 2 |
 | 6 | Chapters 10 (3, done), 11 (4, done), 12 (3, done), 13 with challenge II (3, done); R7 ownership (3, done); G13 borrow errors (1); X3 (1) | 5 |
 | 7 | Reader test of Parts I and II: five readers who know Python, their stuck points, the rewrites | 4 |
-| 8 | Chapters 14 (3, done), 15 (3, done), 16 (3, done), 17 with challenge III (2.5, done); R2 (3), R3 (2), R6 (1, done), R13 (2.5) | 20 |
-| 9 | Chapters 18 (3, done), 19 (3), 20 (4), 21 (3), 22 with challenge IV (4); R9 (2.5), R10 (2), R15 (2); G5 to G16 (9) | 32.5 |
+| 8 | Chapters 14 (3, done), 15 (3, done), 16 (3, done), 17 with challenge III (2.5, done); R2 (3, done), R3 (2), R6 (1, done), R13 (2.5) | 20 |
+| 9 | Chapters 18 (3, done), 19 (3, done), 20 (4, done), 21 (3, done), 22 with challenge IV (4); R9 (2.5), R10 (2), R15 (2); G5 to G16 (9) | 32.5 |
 | 10 | R4 (2), R5 (1.5), R8 (1.5), R14 (1.5), R20 (2), R21 (1), R22 (1); X1, X2, X4, X5, X8, X10, X12 (7) | 17.5 |
 | 11 | Chapters 23 (2), 24 (2), 25 (3), 26 (2); R11 (1), R12 (2); G17, G20, G21, G26, G27, G28, G29, G30, G31, G32 (7.5); X6, X7, X9, X13, X14 (5) | 26.5 |
 | 12 | When their features exist: chapters 27 (3) and 28 with challenge V (2); G18, G19, G22, G23, G24, G25 (4.5); X11 (1); the site (3) | 13.5 |
@@ -1125,6 +1125,56 @@ Writing the rest of Part I turned up more, by chapter:
   [06](../proposal/06-concurrency-and-capabilities.md#the-rule) lists
   among the root capabilities; `print` and `print_err` are ambient
   instead.
+- Chapter 19. `expect condition` stops a test at its first failure, as
+  `assert` does, where [17](../proposal/17-testing.md#assertions) makes
+  it the form that lets the test go on. An assertion whose parts call
+  the program's own functions inside a method call, `assert
+  temps.contains(average(temps))`, or that joins two conditions with
+  `and`, prints no values at all, though 17 shows every
+  sub-expression. `prices.get("bun") == Some(280)`, with `prices` a
+  `dict[String, int]`, gets E0300 ("expected `ref int`, found `int`"),
+  since `get` gives an optional reference, with no fix; `prices["bun"]
+  == 280` works. The `.sisu` files of a package's `tests/` directory,
+  17's black-box tests, are not run; only its transcripts are. The test
+  that `@refines` adds fails at `<arbitrary>/main.sisu:7:5`, in the
+  module the compiler writes, rather than at the `@refines` line. The
+  failure database of property tests is missing. `sisu bench` prints
+  times that differ between runs, so no session can show it. The plan's
+  exercise "write a transcript test for the word counter" cannot be
+  judged by tests the learner does not edit, since the transcript is the
+  test; exercise 19.4 fixes a program against its transcript instead.
+- Chapter 20. `assert visits.into_inner() == 2` gets E0400 twice
+  ("moved ... in an earlier iteration of the loop") where there is no
+  loop: an assertion whose expression moves a value is evaluated twice,
+  and binding the value with `let` first works. A task that changes a
+  captured `var`, `s.spawn do: count += 1`, gets E0402 whose message
+  names the closure's whole text as the value borrowed, says that it
+  "cannot be modified", and says nothing about a `Mutex`. E0428's note
+  offers `own () -> ...`, which moves the list into the first task and
+  leaves none for the next; the fix that works, making the value
+  outside the scope's block, is not offered. When a task fails while
+  the scope's block is joining an earlier sibling, the failure cancels
+  the sibling, the block's `join()?` returns `Err(Cancelled)`, and that
+  becomes the scope's result, hiding the failure that started the
+  cancelling, which [06](../proposal/06-concurrency-and-capabilities.md#tasks-and-scopes)
+  says the scope returns; exercise 20.4's test asks about the failing
+  town first. A `dict[String, String]` field looked up with a `str` gets
+  E0300 with the fix `.to_lowercase()`, as chapter 10 found. The plan's
+  "fan-out fetch over a fake network" became a fan-out to a slow fake
+  service, since `http.FakeNet` answers at once and a test could not
+  tell a fan-out from a loop; the slow fake on the test clock can.
+- Chapter 21. A parameter named like an imported module, `fs: F` beside
+  `import std.fs`, hides the module, and each call such as
+  `fs.walk(...)` gets E0304 ("`F` has no method `walk`") with no word
+  about the module; exercise 21.4 names its parameter `files`. `sisu
+  fmt` removes an import that a file does not use yet, so an exercise
+  cannot hand the learner the import its solution needs. `std.json`'s
+  error set is `json.JsonError`; `JsonError` alone gets E0201 with the
+  fix `IoError`. Python's `"0" * 64` gets E0310 ("`*` cannot be applied
+  to `str` and `int`") with no word about `repeat`. The plan asks for a
+  link to each module's generated page, which is not in the repository
+  until the site exists, so the chapter links each module's source,
+  which holds the documentation that `sisu doc --std` writes.
 
 Planning the later chapters turned up the parts of the proposal that
 they teach and stage 0 does not run yet, each named in its chapter's
@@ -1197,6 +1247,30 @@ Writing the reference turned up more, by page:
   which is E0423 again: stage 0's `own` closures keep `Copy` values only.
   `sisu check` of `unsafe 1 + 1` gives W0009 now that the front end has
   `unsafe`, so the tutorial's "waits for" of chapter 27 is moving.
+- R2, types. `x.into()` where no type is expected, as in `"{a.into()}"`,
+  passes the checker and stops the interpreter with "internal error in
+  the interpreter: no impl of `Into` for `u8`" (status 134); E0324
+  would say what is missing. A generic function over a tuple, `def
+  first[T: Copy](p: (T, T)) -> T` returning `p.0`, stops both front
+  ends with "internal error in the interpreter: dereferencing
+  Tuple([Int(1), Int(2)])", where the same function over `(int, int)`
+  works. `impl Copy for Token:` written by hand compiles without a word
+  and leaves `Token` moving, so the next use is E0400; only
+  `@derive(Copy)` makes a type `Copy`. `@repr(u8)` on an enum is
+  accepted and changes nothing, an explicit discriminant `Red = 1` gets
+  E0117, and `F[_]`, the syntax 03 reserves for higher-kinded types,
+  gets E0100 with no word that it is reserved. `let n: int? = 5` gets
+  E0300 with no fix that writes `Some(5)`, and `a < b` with a `u8` and
+  an `i32` gets E0369 with no fix, though `a + b` widens. A `BigInt`
+  literal beyond `int` gets E0374 whose note gives `int`'s range,
+  with no word about `BigInt.parse`. Missing beside 03: `ptrsize` and
+  `uptrsize` (E0201), `Sized` (E0201), the method form of checked
+  arithmetic (`a.checked_add(b)`, E0304; `std.num` has the functions),
+  `f64.total_order()`, `@float(fast)`, `max_by` and `min_by` over a
+  partially ordered key, `Decimal`'s `/` giving a `Ratio` (E0310),
+  `graphemes`, `@derive(Into, From)` (E0243), a list literal typed as
+  an `Array`, `FromLiteral` for `Url`, which 02 lists and R1 claimed
+  (corrected), and the sharing of instances with `--explain-size`.
 
 ## Open questions
 

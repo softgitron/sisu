@@ -1,0 +1,5 @@
+test "data comes back" ... ok
+test "the same data is kept once" ... ok
+test "a file that changed is corrupt" ... ok
+test "a name never kept" ... ok
+4 passed, 0 failed, 0 blocked

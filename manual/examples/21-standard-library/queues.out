@@ -1,0 +1,4 @@
+first in: Some("Roni")
+earliest: Some((17, "Liisa"))
+by name: ["Aino", "Roni"]
+17 booked: True, 18 booked: False

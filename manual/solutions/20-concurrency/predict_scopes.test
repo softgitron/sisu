@@ -1,0 +1,6 @@
+test "two even numbers" ... ok
+test "an odd number" ... ok
+test "tasks that nobody joins" ... ok
+test "a task that fails, which nobody joins" ... ok
+test "a cancelled task" ... ok
+5 passed, 0 failed, 0 blocked

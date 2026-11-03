@@ -1,0 +1,22 @@
+# `std.collections` has a queue, a heap, a sorted dict and a set of bits.
+from std.collections import BitSet, Deque, Heap, SortedDict
+
+def main():
+    var door: Deque[str] = Deque.new()
+    door.push_back("Aino")
+    door.push_back("Eero")
+    door.push_front("Roni")
+    print("first in: {door.pop_front()}")
+    var bookings: Heap[(int, str)] = Heap.new()
+    bookings.push((19, "Eero"))
+    bookings.push((17, "Liisa"))
+    bookings.push((18, "Aino"))
+    print("earliest: {bookings.pop()}")
+    var visits: SortedDict[str, int] = SortedDict.new()
+    _ = visits.insert("Roni", 2)
+    _ = visits.insert("Aino", 5)
+    print("by name: {visits.keys()}")
+    var hours = BitSet.new()
+    hours.insert(17)
+    hours.insert(19)
+    print("17 booked: {hours.contains(17)}, 18 booked: {hours.contains(18)}")

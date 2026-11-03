@@ -1,0 +1,47 @@
+##! Exercise 21.6, a store named by contents. Kind: write. Level: 3.
+##!
+##! A backup tool keeps each piece of data in a file named by the data's
+##! SHA-256 digest, written in hexadecimal. The same data then gets the
+##! same name and is kept once, and a file that changed after it was
+##! kept no longer matches its name. Write the bodies of `put` and `get`
+##! so that every test passes. `std.hash`, `std.encoding` and the file
+##! system's operations are what they need. Run the tests with
+##! `sisu test store.sisu`. The hints are in chapter 21 of the tutorial,
+##! under "Exercise 21.6: a store named by contents".
+
+## A kept file whose contents no longer match its name.
+error StoreError:
+    Corrupt(name: String)
+
+## Keeps `data` in the file `objects/NAME`, where NAME is the
+## hexadecimal SHA-256 digest of `data`, and gives NAME.
+def put(fs: Fs, data: bytes) -> String ! IoError:
+    return todo("put")
+
+## The data kept under `name`; `Corrupt` when the file's digest is no
+## longer `name`.
+def get(fs: Fs, name: str) -> bytes ! {IoError, StoreError}:
+    return todo("get")
+
+test "data comes back"(fs: Fs):
+    let name = put(fs, b"rye bread").expect("in memory")
+    assert len(name) == 64
+    assert fs.exists(Path.new("objects/{name}"))
+    assert get(fs, name) == Ok(b"rye bread")
+
+test "the same data is kept once"(fs: Fs):
+    let first = put(fs, b"blueberry pie").expect("in memory")
+    let second = put(fs, b"blueberry pie").expect("in memory")
+    let other = put(fs, b"porridge").expect("in memory")
+    assert first == second and first != other
+    assert fs.list_dir("objects").map((paths) -> len(paths)) == Ok(2)
+
+test "a file that changed is corrupt"(fs: Fs):
+    let name = put(fs, b"salt").expect("in memory")
+    fs.write_text(Path.new("objects/{name}"), "sugar").expect("in memory")
+    assert get(fs, name) == Err(Corrupt(name))
+
+test "a name never kept"(fs: Fs):
+    let missing = "0".repeat(64)
+    let path = Path.new("objects/{missing}")
+    assert get(fs, missing) == Err(NotFound(path))

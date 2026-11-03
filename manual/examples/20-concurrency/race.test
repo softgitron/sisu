@@ -1,0 +1,3 @@
+test "a task past its deadline is cancelled" ... ok
+test "the first to finish wins the race" ... ok
+2 passed, 0 failed, 0 blocked

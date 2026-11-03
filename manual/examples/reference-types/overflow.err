@@ -1,0 +1,2 @@
+panic: integer overflow: 250 + 10 as u8
+  at main (overflow.sisu:5:11)

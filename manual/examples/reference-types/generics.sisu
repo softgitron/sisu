@@ -1,0 +1,24 @@
+# Type parameters with bounds, a default and a constant.
+def largest[T: Ord + Copy](xs: list[T]) -> T:
+    var best = xs[0]
+    for x in xs:
+        if x > best:
+            best = x
+    return best
+
+def show_all[T](xs: list[T]) -> String where T: Display:
+    return xs.iter().map(x -> "{x}").join(", ")
+
+struct Labelled[T, L = str]:
+    value: T
+    label: L
+
+struct Grid[const W: int, const H: int]:
+    cells: Array[int, W * H]
+
+def main():
+    print("{largest([3, 9, 4])} {largest(['k', 'a'])}")
+    print(show_all(["a", "b"]))
+    let seven: Labelled[int] = Labelled(7, "seven")
+    let grid = Grid[3, 2](Array.filled(0))
+    print("{seven.value} {seven.label} {len(grid.cells)}")

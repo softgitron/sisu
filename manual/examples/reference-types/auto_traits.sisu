@@ -1,0 +1,9 @@
+# The auto traits follow from a type's parts.
+def hand_over[T: Send](own value: T) -> String:
+    return "it can move to another task"
+
+def main():
+    let counter = Cell(0)
+    let scores = Shared([7, 9])
+    print(hand_over(counter))
+    print(hand_over(scores))

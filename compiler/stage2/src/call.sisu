@@ -23,6 +23,39 @@ pub enum Fast:
     Done
     Slow(int)
 
+## The C type a foreign function takes or gives for a Sisu type (22,
+## "Foreign calls"): the integers and floats at their width, a raw pointer
+## and an option of one as an address; `None` for a type that has no C
+## form.
+pure def c_type(t: Type) -> String?:
+    match t:
+        case Type.Int:
+            return Some("i64".to_string())
+        case Type.Float:
+            return Some("f64".to_string())
+        case Type.Bool:
+            return Some("i8".to_string())
+        case Type.Named(n, args):
+            match n:
+                case "u64" | "ptr" | "ptr_mut":
+                    return Some("i64".to_string())
+                case "u8" | "i8":
+                    return Some("i8".to_string())
+                case "u16" | "i16":
+                    return Some("i16".to_string())
+                case "u32" | "i32":
+                    return Some("i32".to_string())
+                case "f32":
+                    return Some("f32".to_string())
+                case "Option":
+                    if not args.is_empty() and named_in(args[0], ["ptr", "ptr_mut"]):
+                        return Some("i64".to_string())
+                    return None
+                case _:
+                    return None
+        case _:
+            return None
+
 pure def named_in(t: Type, names: list[str]) -> bool:
     if let Type.Named(n, _) = t:
         for x in names:
@@ -348,6 +381,38 @@ impl Cg:
             return self.call_sized(p, dest, kind, op, args)
         if let Some((kind, op)) = wide_op(name):
             return self.call_wide(p, dest, kind, op, args)
+        # A foreign function is called as C calls it, and the machine
+        # intrinsics of std.rt are the backend's (decision 302).
+        if name.starts_with("extern."):
+            return self.call_foreign(p, dest, name.strip_prefix("extern."), args)
+        if name.starts_with("rt."):
+            return self.machine_intrinsic(p, dest, name, args)
+        # A place of the program holds a value as it is laid out, and a
+        # reference into raw memory is read so: a pointer to a place, and a
+        # reference made from a pointer, are only made to a type that raw
+        # memory holds as a value is laid out (decision 302).
+        var pointee: Type? = None
+        match name:
+            case "mem.ptr.as_ref" | "mem.ptr.as_mut" | "mem.slice.as_ptr":
+                pointee = self.raw_pointee(args)?
+            case "mem.ptr.of" | "mem.ptr.of_mut":
+                if not args.is_empty():
+                    match args[0]:
+                        case Operand.Copy(pl) | Operand.Move(pl):
+                            let t = self.place_type(pl)?
+                            if let Type.Ref(inner, _) = t:
+                                pointee = Some(inner[0].copy())
+                            else:
+                                pointee = Some(t)
+                        case _:
+                            pass
+            case _:
+                pass
+        if let Some(t) = pointee:
+            if not self.types.same_in_memory(t):
+                return unsupported(
+                    "`{name}` of a `{write.ty(t)}`, which raw memory holds otherwise than a value of it"
+                )
         let i = self.intrinsic(name) else:
             return unsupported("the intrinsic `{name}`")
         self.note_intrinsic(name, targs)?
@@ -420,6 +485,129 @@ impl Cg:
         if let Some(d) = done:
             self.b.jump(d, [])
             self.b.switch_to_block(d)
+        return Ok(())
+
+    ## The type a raw pointer operand (or a slice operand, through
+    ## references), the first of `args`, holds values of.
+    pure def raw_pointee(mut self, args: list[Operand]) -> Type? ! LirError:
+        if args.is_empty():
+            return Ok(None)
+        var t = Type.Unit
+        match args[0]:
+            case Operand.Copy(pl) | Operand.Move(pl):
+                t = self.place_type(pl)?
+            case _:
+                return Ok(None)
+        while True:
+            let Type.Ref(inner, _) = t.copy() else:
+                break
+            t = inner[0].copy()
+        if let Type.Named(n, targs) = t:
+            if n == "ptr" or n == "ptr_mut" or n == "Slice" or n == "list":
+                if targs.is_empty():
+                    return Ok(None)
+                return Ok(Some(targs[0].copy()))
+        return Ok(None)
+
+    ## A call of a foreign function (`extern.LIBRARY.NAME`), as C calls it:
+    ## each argument converted to its C type, the result back to its Sisu
+    ## one, and what the program printed so far written first, since the
+    ## function may write to the same streams (decision 302).
+    pure def call_foreign(
+        mut self, p: Program, dest: Place, f: str, args: list[Operand]
+    ) -> () ! LirError:
+        var symbol = f
+        if let Some((_, n)) = f.split_once("."):
+            symbol = n
+        let argv = self.arguments(p, args, 0, None)?
+        var params: list[String] = []
+        var vals: list[int] = []
+        for (addr, t) in argv:
+            let (ct, v) = self.c_argument(addr, t, symbol)?
+            params.push(ct)
+            vals.push(v)
+        let dest_ty = self.place_type(dest)?
+        var rets: list[String] = []
+        if dest_ty != Type.Unit:
+            let ct = c_type(dest_ty) else:
+                return unsupported(
+                    "the result of the foreign function `{symbol}`, a `{write.ty(dest_ty)}`"
+                )
+            rets.push(ct)
+        _ = self.rt(abi.SYM_FLUSH, [])?
+        self.c_function(symbol, params, rets)?
+        let results = self.b.call(symbol, vals, len(rets))
+        if results.is_empty():
+            return Ok(())
+        let v = results[0]
+        let ct = rets[0].copy()
+        let (d, _) = self.place(p, dest, None)?
+        var word = v
+        if named_in(dest_ty, ["Option"]):
+            let none = self.b.icmp_imm("eq", v, 0)
+            let tag = self.b.convert("uextend", "i64", none)
+            self.store_word(tag, d, 0)
+            self.store_word(v, d, 8)
+            return Ok(())
+        if named_in(dest_ty, ["f32"]):
+            let bits = self.b.convert("bitcast", "i32", v)
+            word = self.b.convert("uextend", "i64", bits)
+        elif dest_ty == Type.Float:
+            word = self.b.convert("bitcast", "i64", v)
+        elif named_in(dest_ty, ["i8", "i16", "i32"]):
+            word = self.b.convert("sextend", "i64", v)
+        elif ct != "i64":
+            word = self.b.convert("uextend", "i64", v)
+        self.store_word(word, d, 0)
+        return Ok(())
+
+    ## An argument of a foreign call as its C type: its value loaded from
+    ## `addr` and narrowed, an option of a raw pointer as a nullable one.
+    pure def c_argument(mut self, addr: int, t: Type, symbol: str) -> (String, int) ! LirError:
+        let ct = c_type(t) else:
+            return unsupported(
+                "an argument of the foreign function `{symbol}` of type `{write.ty(t)}`"
+            )
+        let word = self.load(addr, 0)
+        if named_in(t, ["Option"]):
+            let payload = self.load(addr, 8)
+            let some = self.b.icmp_imm("eq", word, 0)
+            let zero = self.iconst(0)
+            return Ok((ct, self.b.select(some, payload, zero)))
+        if t == Type.Float:
+            return Ok((ct, self.b.convert("bitcast", "f64", word)))
+        if named_in(t, ["f32"]):
+            let low = self.b.convert("ireduce", "i32", word)
+            return Ok((ct, self.b.convert("bitcast", "f32", low)))
+        if ct != "i64":
+            return Ok((ct, self.b.convert("ireduce", ct, word)))
+        return Ok((ct, word))
+
+    ## The machine intrinsics of std.rt (22, "Machine intrinsics"; D-086):
+    ## the stack pointer read in place, the thread's slot and the switch
+    ## between stacks through the runtime.
+    pure def machine_intrinsic(
+        mut self, p: Program, dest: Place, name: str, args: list[Operand]
+    ) -> () ! LirError:
+        match name:
+            case "rt.stack_pointer":
+                let sp = self.b.get_stack_pointer()
+                let (d, _) = self.place(p, dest, None)?
+                self.store_word(sp, d, 0)
+            case "rt.thread_slot":
+                let slot = self.rt(abi.SYM_THREAD_SLOT, [])? else:
+                    return internal("no thread slot")
+                let (d, _) = self.place(p, dest, None)?
+                self.store_word(slot, d, 0)
+            case "rt.switch":
+                let argv = self.arguments(p, args, 0, None)?
+                if len(argv) != 2:
+                    return internal("`rt.switch` without its two contexts")
+                let save = self.load(argv[0].0, 0)
+                let load = self.load(argv[1].0, 0)
+                _ = self.rt(abi.SYM_SWITCH, [save, load])?
+            case _:
+                return unsupported("the machine intrinsic `{name}`")
         return Ok(())
 
     ## The slot of a local whose iterator lives in the frame.

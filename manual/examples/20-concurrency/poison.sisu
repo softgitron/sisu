@@ -1,0 +1,26 @@
+# A guard that a panic drops checks the value's invariant (D-077).
+struct Tank:
+    litres: int
+    invariant self.litres >= 0
+
+    ## Pours out `litres`, and panics when a sensor fails halfway.
+    def pour(mut self, litres: int, sensor_fails: bool):
+        self.litres -= litres
+        if sensor_fails:
+            panic("the sensor failed")
+
+def pour_in_a_task(tank: Mutex[Tank], litres: int):
+    task.scope do s:
+        let pouring = s.spawn do:
+            var guard = tank.lock()
+            guard.pour(litres, True)
+        print("pouring {litres}: {pouring.join().is_err()}")
+    print("poisoned: {tank.is_poisoned()}")
+
+def main():
+    let water = Mutex(Tank(litres=10))
+    pour_in_a_task(water, 4)
+    print("left: {water.lock().litres}")
+    let more = Mutex(Tank(litres=10))
+    pour_in_a_task(more, 15)
+    print("left: {more.lock().litres}")

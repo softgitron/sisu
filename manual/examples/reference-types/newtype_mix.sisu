@@ -1,0 +1,11 @@
+# Metres and seconds do not add.
+@delegate(Add, to="value")
+struct Metres:
+    value: f64
+
+struct Seconds:
+    value: f64
+
+def main():
+    let total = Metres(400.0) + Seconds(95.0)
+    print(total.value)

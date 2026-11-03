@@ -1,0 +1,8 @@
+$ sisu test --explore 20 lost_fixed.sisu
+test "two visits make two" ... ok
+1 passed, 0 failed, 0 blocked
+explored 20 schedules per test (seeds 0 to 19)
+$ sisu test --scheduler exhaustive --depth 2 lost_fixed.sisu
+test "two visits make two" ... ok
+1 passed, 0 failed, 0 blocked
+searched 32 schedules (preemption bound 2)

@@ -1,0 +1,4 @@
+test "every kind of file" ... ok
+test "a directory deeper down" ... ok
+test "a directory that is not there" ... ok
+3 passed, 0 failed, 0 blocked

@@ -75,11 +75,11 @@ fn sources() -> sisu_codegen::Sources {
     sisu_codegen::Sources { comp_dir, std_dir }
 }
 
-/// How a native build lowers a SIR program (decision 304): through stage 2,
-/// the lowering written in Sisu, to LIR, which the Rust backend translates
-/// one to one, by default; or through the Rust lowering (`--lower=rust`,
-/// `SISU_LOWER=rust`), the oracle, which also lowers a program stage 2 does
-/// not lower yet.
+/// How a native build lowers a SIR program (decisions 304 and 305): through
+/// stage 2, the lowering written in Sisu, to LIR, which the Rust backend
+/// translates one to one; or, only when asked (`--lower=rust`,
+/// `SISU_LOWER=rust`), through the Rust lowering, the oracle that the
+/// conformance runner compares stage 2's executables with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Lowering {
     Stage2,
@@ -146,19 +146,9 @@ pub(crate) fn build(code: Code<'_>, output: &Path, profile: Profile, host: &mut 
             return link(&compiled, start.elapsed(), &runtime, output, profile, host);
         }
     };
-    // Through stage 2 by default (decision 304): its LIR, translated; a
-    // program with a construct it does not lower yet goes on to the Rust
-    // lowering below.
-    if lowering() == Lowering::Stage2
-        && std::env::var_os("SISU_NATIVE_SURVEY").is_none()
-        && let Some(lir) = lower_with_stage2(prog, profile, host)?
-    {
-        let start = std::time::Instant::now();
-        let compiled = sisu_codegen::compile_lir(&lir, &sources()).map_err(|e| report(e, output, host))?;
-        return link(&compiled, start.elapsed(), &runtime, output, profile, host);
-    }
     // `SISU_NATIVE_SURVEY=1`: every construct the backend does not compile
-    // yet, rather than the first.
+    // yet, rather than the first, as the Rust lowering, which lowers what
+    // stage 2 lowers, finds them.
     if std::env::var_os("SISU_NATIVE_SURVEY").is_some() {
         match sisu_codegen::survey(prog) {
             Ok(missing) => {
@@ -172,6 +162,15 @@ pub(crate) fn build(code: Code<'_>, output: &Path, profile: Profile, host: &mut 
             Err(e) => return Err(report(e, output, host)),
         }
     }
+    // Through stage 2 (decisions 304 and 305): its LIR, translated. A
+    // construct it does not lower is the program's `D0103`; nothing falls
+    // back to the Rust lowering, which lowers only when it is asked for.
+    if lowering() == Lowering::Stage2 {
+        let lir = lower_with_stage2(prog, profile, output, host)?;
+        let start = std::time::Instant::now();
+        let compiled = sisu_codegen::compile_lir(&lir, &sources()).map_err(|e| report(e, output, host))?;
+        return link(&compiled, start.elapsed(), &runtime, output, profile, host);
+    }
     let start = std::time::Instant::now();
     let options = sisu_codegen::Options { sources: sources(), release: profile == Profile::Release };
     let compiled = match sisu_codegen::compile_with_options(prog, &options) {
@@ -181,14 +180,16 @@ pub(crate) fn build(code: Code<'_>, output: &Path, profile: Profile, host: &mut 
     link(&compiled, start.elapsed(), &runtime, output, profile, host)
 }
 
-/// The LIR stage 2 lowers the program to (`sisu2 lir`, decision 304), or
-/// `None` when stage 2 does not lower one of its constructs yet; stage 2
-/// failing otherwise is an internal error, reported.
+/// The LIR stage 2 lowers the program to (`sisu2 lir`, decision 304). A
+/// construct stage 2 does not lower is reported as the backend's `D0103`,
+/// naming it and its function as stage 2 does (`lir: not lowered: WHAT (in
+/// FUNCTION)`); stage 2 failing otherwise is an internal error, reported.
 fn lower_with_stage2(
     prog: &sisu_sir::Program,
     profile: Profile,
+    output: &Path,
     host: &mut dyn Host,
-) -> Result<Option<String>, i32> {
+) -> Result<String, i32> {
     use std::sync::atomic::{AtomicU32, Ordering};
     static N: AtomicU32 = AtomicU32::new(0);
     let stage2 = crate::front::Stage2::ready(host)?;
@@ -223,29 +224,41 @@ fn lower_with_stage2(
         });
     let lowered = match result {
         Ok(out) if out.status.success() => match std::fs::read_to_string(&lir) {
-            Ok(text) => Ok(Some(text)),
+            Ok(text) => Ok(text),
             Err(e) => Err(failed(host, 0, e.to_string())),
         },
         Ok(out) => {
             let err = String::from_utf8_lossy(&out.stderr).into_owned();
-            if err.lines().any(|l| l.starts_with("lir: not lowered:")) {
-                Ok(None)
-            } else {
-                let status = out.status.code().unwrap_or(-1);
-                Err(failed(host, status, format!("{}{err}", String::from_utf8_lossy(&out.stdout))))
+            match err.lines().find_map(|l| l.strip_prefix("lir: not lowered: ")) {
+                Some(what) => Err(not_lowered(what, output, host)),
+                None => {
+                    let status = out.status.code().unwrap_or(-1);
+                    Err(failed(host, status, format!("{}{err}", String::from_utf8_lossy(&out.stdout))))
+                }
             }
         }
         Err(e) => Err(failed(host, 0, e)),
     };
     let _ = std::fs::remove_dir_all(&dir);
     if std::env::var_os("SISU_NATIVE_TIMES").is_some() {
-        let what = match &lowered {
-            Ok(Some(_)) => "lowered by stage 2",
-            _ => "not lowered by stage 2",
-        };
+        let what = if lowered.is_ok() { "lowered by stage 2" } else { "not lowered by stage 2" };
         host.stderr(&format!("native: {what} in {:.1} ms\n", start.elapsed().as_secs_f64() * 1e3));
     }
     lowered
+}
+
+/// Stage 2's `lir: not lowered: WHAT (in FUNCTION)`, reported as the
+/// backend's `D0103`: its exit status.
+fn not_lowered(what: &str, output: &Path, host: &mut dyn Host) -> i32 {
+    let (what, function) = match what.rsplit_once(" (in ") {
+        Some((w, f)) => (w, f.strip_suffix(')').unwrap_or(f)),
+        None => (what, ""),
+    };
+    report(
+        sisu_codegen::Error::Unsupported { what: what.to_string(), function: function.to_string() },
+        output,
+        host,
+    )
 }
 
 /// Links a compiled program at `output`, and reports where a build's time

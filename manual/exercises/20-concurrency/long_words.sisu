@@ -1,0 +1,25 @@
+##! Exercise 20.2, a count that tasks share. Kind: fix. Level: 1.
+##!
+##! `count_long` counts the long words of a list, with a task for each
+##! word. The file does not compile. Run `sisu test long_words.sisu`,
+##! read the diagnostic, and fix `count_long`, not the tests, so that
+##! every test passes. The hints are in chapter 20 of the tutorial, under
+##! "Exercise 20.2: a count that tasks share".
+
+## How many of `words` have more than five letters, counted by a task
+## for each word.
+def count_long(words: list[str]) -> int:
+    let count = Cell(0)
+    task.scope do s:
+        for word in words:
+            s.spawn do:
+                if len(word) > 5:
+                    count.set(count.get() + 1)
+    return count.get()
+
+test "long words":
+    assert count_long(["sauna", "lauteet", "kiulu", "saunavihta"]) == 2
+    assert count_long(["löylyhuone"]) == 1
+
+test "no words":
+    assert count_long([]) == 0

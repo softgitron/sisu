@@ -1,0 +1,55 @@
+##! Exercise 20.3, a pool of workers. Kind: write. Level: 2.
+##!
+##! A sauna's bookings are checked one at a time, and each check takes a
+##! second. `check_all` hands the bookings over a channel to `workers`
+##! tasks, which check them side by side, and gives the bookings that
+##! pass in alphabetical order. Write its body so that every test passes.
+##! The tests run on the test clock, so they see how long the checks
+##! took. Run them with `sisu test pool.sisu`. The hints are in chapter 20
+##! of the tutorial, under "Exercise 20.3: a pool of workers".
+
+## Whether `booking` names its hour; the check takes a second.
+def check(clock: Clock, booking: str) -> bool ! TaskError:
+    clock.sleep(Duration.seconds(1))?
+    return Ok(not booking.contains("?"))
+
+## The bookings that `check` passes, in alphabetical order, checked by
+## `workers` tasks that take them from a channel.
+def check_all(clock: Clock, bookings: list[str], workers: int) -> list[String]:
+    let tx, rx = channel[String](capacity=1)
+    let passed: Mutex[list[String]] = Mutex([])
+    task.scope do s:
+        for _ in range(workers):
+            s.spawn do:
+                for booking in rx:
+                    if check(clock, booking).or(False):
+                        passed.lock().value.push(booking)
+        for booking in bookings:
+            _ = tx.send(booking.to_string())
+        tx.close()
+    var out = passed.into_inner()
+    out.sort()
+    return out
+
+## A week of bookings, one of which has no hour.
+def week() -> list[str]:
+    return ["mon 18 Aino", "tue ? Eero", "wed 19 Roni", "thu 17 Liisa"]
+
+test "the bookings that pass"(clock: TestClock):
+    let passed = check_all(clock, week(), 2)
+    assert passed == ["mon 18 Aino", "thu 17 Liisa", "wed 19 Roni"]
+
+test "two workers take half the time of one"(clock: TestClock):
+    let start = clock.now()
+    _ = check_all(clock, week(), 2)
+    assert clock.now() - start == Duration.seconds(2)
+
+test "one worker checks one booking at a time"(clock: TestClock):
+    let start = clock.now()
+    _ = check_all(clock, week(), 1)
+    assert clock.now() - start == Duration.seconds(4)
+
+test "a worker for each booking"(clock: TestClock):
+    let start = clock.now()
+    assert len(check_all(clock, week(), 4)) == 3
+    assert clock.now() - start == Duration.seconds(1)

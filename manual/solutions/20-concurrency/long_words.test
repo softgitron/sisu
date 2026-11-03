@@ -1,0 +1,3 @@
+test "long words" ... ok
+test "no words" ... ok
+2 passed, 0 failed, 0 blocked

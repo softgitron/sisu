@@ -1,0 +1,11 @@
+# `std.regex` finds, takes apart and replaces patterns in text.
+from std.regex import Regex, RegexError
+
+def main() -> ! RegexError:
+    let time = Regex.new(r"(\d{1,2}):(\d\d)")?
+    let text = "Sauna at 17:30, swim at 18:05, tea at 9:15."
+    for m in time.find_all(text):
+        print("{m.group(1) ?? ""} hours, {m.group(2) ?? ""} minutes")
+    print(time.replace_all(text, "$1.$2"))
+    print(time.is_match("no times here"))
+    return Ok(())

@@ -23,6 +23,9 @@ fn native_conformance() {
     println!("{}", report.render());
     assert!(report.cases > 0, "no cases in the coverage list");
     assert!(report.failures.is_empty(), "{}", report.render());
+    // Stage 2 lowered every case: none was built through the Rust lowering
+    // (decision 305).
+    assert_eq!(report.stage2.map(|(n, _)| n), Some(report.cases), "{}", report.render());
 }
 
 /// The same cases built from serialised SIR (decision 212): each from its
@@ -39,6 +42,9 @@ fn native_conformance_from_sir() {
     println!("{}", report.render());
     assert!(report.cases > 0, "no cases in the coverage list");
     assert!(report.failures.is_empty(), "{}", report.render());
+    // Stage 2 lowered every case: none was built through the Rust lowering
+    // (decision 305).
+    assert_eq!(report.stage2.map(|(n, _)| n), Some(report.cases), "{}", report.render());
 }
 
 /// The same cases built with the release profile, every contract checked
@@ -55,6 +61,9 @@ fn native_conformance_release() {
     println!("{}", report.render());
     assert!(report.cases > 0, "no cases in the coverage list");
     assert!(report.failures.is_empty(), "{}", report.render());
+    // Stage 2 lowered every case: none was built through the Rust lowering
+    // (decision 305).
+    assert_eq!(report.stage2.map(|(n, _)| n), Some(report.cases), "{}", report.render());
 }
 
 /// The same cases lowered by stage 2, the backend written in Sisu
@@ -71,9 +80,7 @@ fn native_conformance_from_lir() {
         .unwrap_or_else(|e| panic!("stage 2 does not build:\n{e}"));
     let text =
         std::fs::read_to_string(compiler_dir().join("conformance/native.list")).expect("the coverage list");
-    // Less the cases whose constructs stage 2 does not lower yet, each
-    // marked `not from LIR:` with the reason (decision 302).
-    let list = sisu_conformance::native::read_list_from_lir(&text);
+    let list = sisu_conformance::native::read_list(&text);
     let report = sisu_conformance::native::run_native_from_lir(&sisu, &root, &list, &stage2);
     if let Some(dir) = stage2.parent() {
         let _ = std::fs::remove_dir_all(dir);
@@ -476,6 +483,46 @@ fn machine_intrinsics_run_natively_and_the_interpreter_refuses_them() {
     let (out, err, status) = outcome(interpreted);
     assert_eq!((out.as_str(), status), ("", Some(101)));
     assert!(err.starts_with("panic: `rt.stack_pointer` is a machine intrinsic of native code"), "{err}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Foreign calls whose arguments and results are narrower than a word (a C
+/// `int` sign-extended back, a `uint16_t`) or floats (decision 302),
+/// lowered by stage 2, the only lowering a build uses unless the Rust one
+/// is asked for (decision 305): the build says stage 2 lowered it, its
+/// executable is byte for byte the one `--lower=rust` builds, and it prints
+/// what C computes. The interpreter emulates none of these functions, so no
+/// conformance case holds them.
+#[test]
+fn foreign_calls_of_every_width_lower_through_stage_2() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let dir = scratch("widths");
+    let program = "from std.ffi import c_int\n\n# safety: the signatures as <stdlib.h>, <ctype.h>, <arpa/inet.h> and\n#   <math.h> declare them for 64-bit Linux; each returns promptly.\nextern \"C\":\n    def abs(x: c_int) -> c_int\n    def toupper(c: c_int) -> c_int\n    def htons(x: u16) -> u16\n    def ntohs(x: u16) -> u16\n    def sqrt(x: f64) -> f64\n    def ldexp(x: f64, e: c_int) -> f64\n\ndef main():\n    # safety: none of these functions has a precondition the arguments\n    #   could break.\n    unsafe:\n        print(abs(-7))\n        print(abs(-2147483647))\n        print(toupper(97))\n        print(htons(258u16))\n        print(ntohs(htons(4660u16)))\n        print(sqrt(2.0))\n        print(ldexp(1.5, -3))\n";
+    std::fs::write(dir.join("widths.sisu"), program).expect("the program");
+    let build = |lower: &[&str], exe: &str| {
+        let out = std::process::Command::new(&sisu)
+            .arg("build")
+            .arg("--native")
+            .args(lower)
+            .args(["--output", exe, "widths.sisu"])
+            .env("SISU_NATIVE_TIMES", "1")
+            .current_dir(&dir)
+            .output()
+            .expect("sisu builds");
+        let (_, err, status) = outcome(out);
+        assert_eq!(status, Some(0), "{err}");
+        (std::fs::read(dir.join(exe)).expect("the executable"), err)
+    };
+    let (by_stage2, err) = build(&[], "by-stage2");
+    assert!(err.contains("native: lowered by stage 2 in "), "{err}");
+    let (by_rust, err) = build(&["--lower=rust"], "by-rust");
+    assert!(!err.contains("lowered by stage 2"), "{err}");
+    assert!(by_stage2 == by_rust, "the executables differ");
+    let ran = std::process::Command::new(dir.join("by-stage2")).current_dir(&dir).output().expect("it runs");
+    assert_eq!(
+        outcome(ran),
+        ("7\n2147483647\n65\n513\n4660\n1.4142135623730951\n0.1875\n".to_string(), String::new(), Some(0))
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

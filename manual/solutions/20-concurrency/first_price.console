@@ -1,0 +1,12 @@
+$ sisu test first_price.sisu
+warning[W0001]: typed hole `first_price` of type `int ! {TaskError, PriceError}`
+  --> first_price.sisu:40:12
+   |
+40 |     return todo("first_price")
+   |            ^^^^^^^^^^^^^^^^^^^
+
+test "the primary answers first" ... blocked by todo("first_price")
+test "the replica answers first" ... blocked by todo("first_price")
+test "neither answers in time" ... blocked by todo("first_price")
+test "an error is an answer too" ... blocked by todo("first_price")
+0 passed, 0 failed, 4 blocked

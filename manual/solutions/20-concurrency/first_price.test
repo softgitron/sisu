@@ -1,0 +1,5 @@
+test "the primary answers first" ... ok
+test "the replica answers first" ... ok
+test "neither answers in time" ... ok
+test "an error is an answer too" ... ok
+4 passed, 0 failed, 0 blocked

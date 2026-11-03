@@ -1,0 +1,16 @@
+# Functions and closures are values of function types.
+error Overflow:
+    TooBig
+
+def twice(f: (int) -> int, x: int) -> int:
+    return f(f(x))
+
+def triple(n: int) -> int:
+    return n * 3
+
+def main():
+    let step: (int) -> int = n -> n + 1
+    let by_name = triple
+    print("{twice(step, 5)} {twice(by_name, 2)} {twice(it * it, 3)}")
+    let add: (int, int) -> int ! Overflow = (a, b) -> Ok(a + b)
+    print(add(1, 2))

@@ -1,0 +1,4 @@
+Ok(42)
+Err(Empty)
+Err(NotANumber(text="x"))
+Err(TooLarge(value=500))

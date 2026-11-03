@@ -1,0 +1,5 @@
+test "the bookings that pass" ... ok
+test "two workers take half the time of one" ... ok
+test "one worker checks one booking at a time" ... ok
+test "a worker for each booking" ... ok
+4 passed, 0 failed, 0 blocked

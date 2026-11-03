@@ -1,0 +1,20 @@
+# Where a type is expected, a few others convert to it implicitly.
+type Percent = int where 0 <= self <= 100
+
+pure def double(n: int) -> int:
+    return n * 2
+
+def apply(f: (int) -> int, x: int) -> int:
+    return f(x)
+
+def half(n: int) -> int:
+    return n // 2
+
+def initial(text: str) -> str:
+    return text.byte_slice(0, 1)
+
+def main():
+    let share: Percent = 40
+    let name = "Aino".to_string()
+    let small: u8 = 9
+    print("{half(share)} {apply(double, small)} {initial(name)}")

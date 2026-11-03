@@ -1,0 +1,10 @@
+# A method that names `Self` cannot be called through `dyn`.
+trait Shape:
+    def area(self) -> f64
+    def larger(self, other: Self) -> bool
+
+def show(shape: ref dyn Shape) -> f64:
+    return shape.area()
+
+def main():
+    print("shapes")

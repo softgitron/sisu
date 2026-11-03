@@ -1,0 +1,8 @@
+$ sisu run float_keys.sisu
+error[E0347]: `f64` does not implement `Hash`
+  --> float_keys.sisu:3:17
+  |
+3 |     let names = {1.5: "bun", 2.0: "coffee"}
+  |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

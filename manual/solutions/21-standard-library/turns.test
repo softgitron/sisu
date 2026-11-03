@@ -1,0 +1,5 @@
+test "one sauna, everyone at once" ... ok
+test "two saunas" ... ok
+test "a sauna free before the bather comes" ... ok
+test "nobody comes" ... ok
+4 passed, 0 failed, 0 blocked

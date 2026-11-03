@@ -193,6 +193,20 @@ pub fn invoke(sisu: &Sisu, cwd: &Path, args: &[String]) -> Output {
     invoke_with_input(sisu, cwd, args, None)
 }
 
+/// [`invoke`], with the environment holding `vars` too.
+pub fn invoke_with_env(sisu: &Sisu, cwd: &Path, args: &[String], vars: &[(&str, &str)]) -> Output {
+    let spawned = sisu
+        .command()
+        .args(args)
+        .envs(vars.iter().copied())
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+    wait_output(spawned, None, &sisu.path)
+}
+
 /// [`invoke`], with `input` as the standard input (else none).
 pub fn invoke_with_input(sisu: &Sisu, cwd: &Path, args: &[String], input: Option<&str>) -> Output {
     let spawned = sisu

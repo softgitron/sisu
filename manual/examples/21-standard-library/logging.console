@@ -1,0 +1,7 @@
+$ sisu run logging.sisu
+debug: asked to heat to 80
+info: heating to 80
+True
+debug: asked to heat to 120
+error: 120 degrees is too hot; the stove stays off
+False

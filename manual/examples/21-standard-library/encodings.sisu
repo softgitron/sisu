@@ -1,0 +1,13 @@
+# `std.encoding` writes bytes as text and numbers as bytes, and back.
+from std.encoding import base64_decode, base64_encode, hex_encode
+from std.encoding import varint_decode, varint_encode
+
+def main():
+    let data = "löyly".encode()
+    print(hex_encode(data))
+    let text = base64_encode(data)
+    print(text)
+    print(base64_decode(text) == Ok(data))
+    print(base64_decode("not base64!"))
+    print(hex_encode(varint_encode(300)))
+    print(varint_decode(varint_encode(300)))

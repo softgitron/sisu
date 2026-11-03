@@ -1,0 +1,24 @@
+# A deadline cancels a task that runs too long; a race keeps the first.
+
+## The answer `name` gives after `seconds` on `clock`.
+def answer(clock: Clock, seconds: int, name: str) -> String ! TaskError:
+    clock.sleep(Duration.seconds(seconds))?
+    return Ok(name.to_string())
+
+test "a task past its deadline is cancelled"(clock: TestClock):
+    let start = clock.now()
+    let reply = task.scope do s:
+        let deadline = clock.after(Duration.seconds(5))
+        let slow = s.spawn_with(deadline=deadline) do:
+            return answer(clock, 60, "slow")
+        return slow.join()
+    assert reply == Err(Cancelled)
+    assert clock.now() - start == Duration.seconds(5)
+
+test "the first to finish wins the race"(clock: TestClock):
+    let start = clock.now()
+    let reply = task.race do r:
+        r.spawn(() -> answer(clock, 3, "replica"))
+        r.spawn(() -> answer(clock, 1, "primary"))
+    assert reply == Ok("primary")
+    assert clock.now() - start == Duration.seconds(1)

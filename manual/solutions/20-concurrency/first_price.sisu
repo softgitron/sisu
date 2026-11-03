@@ -1,0 +1,78 @@
+##! Exercise 20.5, a race against the clock. Kind: write. Level: 3.
+##!
+##! A price service runs as two copies, a primary and a replica, and
+##! either may be slow. `first_price` asks both at once and takes the
+##! first answer, and gives up with `TimedOut` when neither answers within
+##! `limit`. An error from a copy is an answer too. Write its body so that
+##! every test passes. The tests give it fakes on the test clock. Run
+##! them with `sisu test first_price.sisu`. The hints are in chapter 20 of
+##! the tutorial, under "Exercise 20.5: a race against the clock".
+
+error PriceError:
+    TimedOut
+    NoSuchItem(name: String)
+
+trait Prices:
+    def price(self, item: str) -> int ! {PriceError, TaskError}
+
+## A fake copy of the service, which answers after `delay` on `clock`
+## and knows the price of coffee only.
+struct SlowPrices:
+    clock: Clock
+    delay: Duration
+
+impl Prices for SlowPrices:
+    def price(self, item: str) -> int ! {PriceError, TaskError}:
+        self.clock.sleep(self.delay)?
+        if item == "coffee":
+            return Ok(350)
+        return Err(NoSuchItem(item.to_string()))
+
+## The price of `item` from whichever of `primary` and `replica` answers
+## first, or `TimedOut` when neither answers within `limit` on `clock`.
+def first_price[P: Prices + Sync](
+    primary: P,
+    replica: P,
+    item: str,
+    clock: Clock,
+    limit: Duration,
+) -> int ! {PriceError, TaskError}:
+    return task.race do r:
+        r.spawn(() -> primary.price(item))
+        r.spawn(() -> replica.price(item))
+        r.spawn(() -> timeout(clock, limit))
+
+## `TimedOut`, once `limit` has passed on `clock`.
+def timeout(clock: Clock, limit: Duration) -> int ! {PriceError, TaskError}:
+    clock.sleep(limit)?
+    return Err(TimedOut)
+
+## A copy of the service that answers after `seconds`.
+def after(clock: Clock, seconds: int) -> SlowPrices:
+    return SlowPrices(clock=clock, delay=Duration.seconds(seconds))
+
+test "the primary answers first"(clock: TestClock):
+    let start = clock.now()
+    let five = Duration.seconds(5)
+    let p = first_price(after(clock, 1), after(clock, 3), "coffee", clock, five)
+    assert p == Ok(350)
+    assert clock.now() - start == Duration.seconds(1)
+
+test "the replica answers first"(clock: TestClock):
+    let start = clock.now()
+    let five = Duration.seconds(5)
+    let p = first_price(after(clock, 4), after(clock, 2), "coffee", clock, five)
+    assert p == Ok(350)
+    assert clock.now() - start == Duration.seconds(2)
+
+test "neither answers in time"(clock: TestClock):
+    let start = clock.now()
+    let five = Duration.seconds(5)
+    let p = first_price(after(clock, 8), after(clock, 9), "coffee", clock, five)
+    assert p == Err(TimedOut)
+    assert clock.now() - start == Duration.seconds(5)
+
+test "an error is an answer too"(clock: TestClock):
+    let five = Duration.seconds(5)
+    let p = first_price(after(clock, 1), after(clock, 2), "tea", clock, five)
+    assert p == Err(NoSuchItem("tea"))

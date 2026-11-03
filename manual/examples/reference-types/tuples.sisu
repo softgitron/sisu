@@ -1,0 +1,15 @@
+# Tuples, labelled results, unit and `Never`.
+def divide(a: int, b: int) -> (quotient: int, remainder: int):
+    return (a // b, a % b)
+
+def fail(reason: str) -> Never:
+    panic(reason)
+
+def main():
+    let pair = (3, "kolme")
+    print("{pair.0} {pair.1} {pair}")
+    let result = divide(17, 5)
+    print("{result.quotient} {result.remainder} {result.0}")
+    let q, r = divide(9, 4)
+    let n: int = if q > 0: q else: fail("no quotient")
+    print("{q} {r} {n} {()}")

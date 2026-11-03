@@ -1,0 +1,15 @@
+# The lock held from the read to the write: no update is lost.
+
+## Adds a visit to `visits`, holding the lock while it gives way.
+def add_visit(visits: Mutex[int]):
+    var guard = visits.lock()
+    task.yield_now()
+    guard.value += 1
+
+test "two visits make two":
+    let visits = Mutex(0)
+    task.scope do s:
+        s.spawn(() -> add_visit(visits))
+        s.spawn(() -> add_visit(visits))
+    let total = visits.into_inner()
+    assert total == 2

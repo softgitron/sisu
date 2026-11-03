@@ -1,0 +1,9 @@
+$ sisu run unbounded.sisu
+error[E0368]: `T` has no order, so it cannot be compared with `>` or sorted
+  --> unbounded.sisu:3:12
+  |
+3 |     return a > b
+  |            ^^^^^
+  = fix: bound `T` by `PartialOrd`: `: PartialOrd`
+
+error[D0006]: the program was not run: errors found (1)

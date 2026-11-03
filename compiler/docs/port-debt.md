@@ -611,7 +611,7 @@ What the driver does around stage 1, because of what its commands are:
 ## Stage 2: what the native backend leaves out
 
 The native debug backend (architecture.md, "Stage 2") compiles every
-program the conformance suite runs (`conformance/native.list`, 200
+program the conformance suite runs (`conformance/native.list`, 205
 cases), with the debug profile and the release one (decision 232), and
 every one of those runs frees what it allocated (decision 226). A
 construct it does not compile is `D0103` under `--native`, and the
@@ -777,35 +777,37 @@ What round 1 does, and a later round must not copy:
 ### The backend in Sisu (D-087)
 
 Step 1 of D-087 is done: stage 2 (`compiler/stage2`, Sisu) lowers SIR to
-LIR, and the Rust backend translates LIR one to one into Cranelift IR,
-every case of `native.list` to the same executable in both profiles
-(architecture.md, "LIR"; decisions 281 to 284). What it leaves:
+LIR, unsafe code included, and the Rust backend translates LIR one to one
+into Cranelift IR, every case of `native.list` to the same executable in
+both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
+`sisu build --native` lowers through stage 2 alone. What it leaves:
 
-- **The decisions live twice**: `sisu build --native` lowers through
-  stage 2 (decision 304), but `sisu-codegen` still lowers SIR itself, as
+- **The decisions live twice**: `sisu-codegen` still lowers SIR itself, as
   the oracle (`--lower=rust`, which the runner's `--native-from-lir` mode
-  compares with) and as the fallback for a program with a construct stage
-  2 does not lower yet; a change to one is a change to the other, which
-  the runner's `--native-from-lir` mode catches. A native build also pays
-  for stage 2 as a separate process: the SIR written out, `sisu2` started,
-  the LIR read back. *Pay*: stage 2 lowering everything the Rust lowering
-  does (today the unsafe code of decision 302), then the fallback and
-  `sisu-codegen`'s own lowering (`lib.rs`, `func.rs`, `layout.rs`,
-  `facts.rs`, the type walk of `debug.rs`) deleted, the Rust left with the
+  compares with) and as the seed that builds stage 1 and stage 2 (stage 2
+  cannot lower itself before it is built); a change to one is a change to
+  the other, which the runner's `--native-from-lir` mode catches. A native
+  build also pays for stage 2 as a separate process: the SIR written out,
+  `sisu2` started, the LIR read back (about 10 ms for a conformance case,
+  6 s for stage 1). *Pay*: `sisu-codegen`'s own lowering (`lib.rs`,
+  `func.rs`, `layout.rs`, `facts.rs`, the type walk of `debug.rs`)
+  deleted once nothing compares with it, stage 2 built by a stage 2 kept
+  from the previous build (or a seed of its LIR), the Rust left with the
   translation, the DWARF writer and the link until step 2 replaces them;
   stage 2 as a library of the driver's, or the backend in Sisu, rather
   than a process.
+- **A constant has no type in SIR**: `const 258` of a `u16` argument is
+  read back as an `int`, so a foreign call given a literal passes it as a
+  64-bit word where C takes a `uint16_t` (correct on x86-64 and AArch64,
+  whose callee reads the low bits), and two calls of one function, one
+  with a literal and one with a variable, give it two C signatures, which
+  is `D0103`. Both lowerings agree. *Pay*: the constant's type in SIR's
+  text form, or the C signature taken from the declaration.
 - **The machine code is Cranelift's**: step 2, the x86-64 Linux debug
   backend in Sisu (one analysis pass, single-pass code generation, its own
   encoders, ELF objects, DWARF, the system linker), is not begun, and
   neither are the textual-IR prototype of the LLVM release backend (D-088)
   nor the runtime in Sisu (step 3). *Pay*: D-087's order of work.
-- **Stage 2 lowers no unsafe code**: the intrinsics of std.mem, the
-  `Ptr` entry of the type table, foreign calls and the machine intrinsics
-  are `sisu-codegen`'s only (decision 302), so the cases of `native.list`
-  that use them are marked `not from LIR:` and left out of
-  `--native-from-lir`. *Pay*: what architecture.md lists ("Raw memory,
-  foreign calls and the machine intrinsics"), in stage 2.
 - **Stage 2 reads SIR itself**: stage 1 writes SIR but has no reader, so
   `stage2/src/read.sisu` transcribes `sisu-sir/src/read.rs`. *Pay*: the
   reader moves to stage 1's `sir` module when stage 1 needs one (`sisu

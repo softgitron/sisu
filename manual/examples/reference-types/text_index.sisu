@@ -1,0 +1,4 @@
+# Text has no index by position.
+def main():
+    let word = "hyvää"
+    print(word[3])

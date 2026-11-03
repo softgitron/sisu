@@ -1,0 +1,32 @@
+##! Exercise 21.2, a field of the wrong type. Kind: fix. Level: 1.
+##!
+##! A sauna's booking system sends each booking as JSON, and
+##! `parse_booking` reads one into a `Booking`. Two of its tests fail.
+##! Run `sisu test booking.sisu`, read the reports, and fix the struct
+##! `Booking`, not the tests or the JSON, so that every test passes. The
+##! hints are in chapter 21 of the tutorial, under "Exercise 21.2: a
+##! field of the wrong type".
+
+import std.json
+
+## A booking of the sauna: who, at which hour, and whether it is paid.
+struct Booking:
+    name: String
+    hour: String
+    paid: bool = False
+
+## The booking that the JSON `text` writes.
+def parse_booking(text: str) -> Booking ! json.JsonError:
+    return json.decode[Booking](text)
+
+test "a booking":
+    let booking = parse_booking(r"""{"name": "Aino", "hour": 18}""")
+    assert booking.is_ok()
+
+test "a booking that is paid":
+    let text = r"""{"name": "Eero", "hour": 19, "paid": true}"""
+    let booking = parse_booking(text)
+    assert booking.is_ok()
+
+test "text that is not JSON":
+    assert parse_booking("Aino at six").is_err()

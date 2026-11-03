@@ -1,0 +1,4 @@
+test "a booking" ... ok
+test "a booking that is paid" ... ok
+test "text that is not JSON" ... ok
+3 passed, 0 failed, 0 blocked

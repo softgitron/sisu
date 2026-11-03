@@ -1,0 +1,13 @@
+# A literal becomes a value of any type that implements `FromLiteral`.
+struct Celsius:
+    degrees: f64
+
+impl FromLiteral[f64] for Celsius:
+    def from_literal(literal: f64) -> Celsius:
+        return Celsius(literal)
+
+def main():
+    let home: Path = "/home/aino"
+    let name: String = "Aino"
+    let warm: Celsius = 21.5
+    print("{home} {name} {warm.degrees}")

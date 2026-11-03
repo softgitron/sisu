@@ -1,0 +1,12 @@
+# A type alias is another name for the same type.
+type Scores = dict[String, int]
+type Pair[T] = (T, T)
+
+def total(scores: Scores) -> int:
+    return sum(scores.values())
+
+def main():
+    let scores: Scores = {"Aino": 7, "Eero": 9}
+    let plain: dict[String, int] = scores
+    let corners: Pair[int] = (0, 10)
+    print("{total(plain)} {corners.1}")

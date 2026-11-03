@@ -1,0 +1,57 @@
+##! Exercise 20.1, predict the scopes. Kind: predict. Level: 1.
+##!
+##! Each constant is your prediction of what a function gives, written as
+##! `print` would write it. Write each as a literal, then run
+##! `sisu test predict_scopes.sisu`. The hints are in chapter 20 of the
+##! tutorial, under "Exercise 20.1: predict the scopes".
+
+error OddError:
+    Odd(n: int)
+
+## Half of `n`, which must be even.
+def half(n: int) -> int ! OddError:
+    if n % 2 != 0:
+        return Err(Odd(n))
+    return Ok(n // 2)
+
+## The halves of `a` and `b`, worked out by two tasks.
+def halves(a: int, b: int) -> (int, int) ! {OddError, TaskError}:
+    return task.scope do s:
+        let x = s.spawn(() -> half(a))
+        let y = s.spawn(() -> half(b))
+        return Ok((x.join()?, y.join()?))
+
+## How many tasks it started, one for each number, which nobody joins.
+def started(numbers: list[int]) -> int ! {OddError, TaskError}:
+    return task.scope do s:
+        for n in numbers:
+            s.spawn(() -> half(n))
+        return Ok(len(numbers))
+
+## What a task that waits gives when its scope is cancelled.
+def cancelled(clock: Clock) -> String:
+    return task.scope do s:
+        let waiting = s.spawn(() -> clock.sleep(Duration.seconds(10)))
+        s.cancel()
+        return "{waiting.join()}"
+
+const BOTH_EVEN: str = "Ok((5, 2))"
+const ONE_ODD: str = "Err(Odd(n=3))"
+const ALL_STARTED: str = "Ok(3)"
+const ONE_FAILS: str = "Err(Odd(n=5))"
+const CANCELLED: str = "Err(Cancelled)"
+
+test "two even numbers":
+    assert "{halves(10, 4)}" == BOTH_EVEN
+
+test "an odd number":
+    assert "{halves(10, 3)}" == ONE_ODD
+
+test "tasks that nobody joins":
+    assert "{started([2, 4, 6])}" == ALL_STARTED
+
+test "a task that fails, which nobody joins":
+    assert "{started([2, 5, 6])}" == ONE_FAILS
+
+test "a cancelled task"(clock: TestClock):
+    assert cancelled(clock) == CANCELLED

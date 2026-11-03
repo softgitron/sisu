@@ -1,0 +1,4 @@
+test "times with two digits" ... ok
+test "an hour of one digit" ... ok
+test "no time" ... ok
+3 passed, 0 failed, 0 blocked

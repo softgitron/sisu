@@ -1,0 +1,21 @@
+# A task that panics fails, and the task that joins it can start another.
+def stove(round: int) -> int:
+    if round < 2:
+        panic("the stove went out in round {round}")
+    return 80 + round
+
+def main():
+    var round = 0
+    task.scope do s:
+        while True:
+            let r = round
+            match s.spawn(() -> stove(r)).join():
+                case Ok(degrees):
+                    print("round {r}: {degrees} degrees")
+                    break
+                case Err(TaskPanicked(message, _)):
+                    print("restarting after: {message}")
+                    round += 1
+                case Err(e):
+                    print("giving up: {e}")
+                    break

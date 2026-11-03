@@ -1,0 +1,11 @@
+# The integer types, and literals that take the type expected.
+def main():
+    let count = 42
+    let small: u8 = 200
+    let flags = 0xFFu16
+    let wide: i128 = 170_141_183_460_469_231_731_687_303_715_884_105_727
+    let unsigned: uint = 18_000_000_000_000_000_000
+    let same: i64 = count
+    print("{count} {small} {flags} {same}")
+    print("{wide}")
+    print("{unsigned}")

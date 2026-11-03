@@ -1,0 +1,44 @@
+$ sisu test predict_library.sisu
+warning[W0001]: typed hole `the stem of a file name` of type `str`
+  --> predict_library.sisu:14:19
+   |
+14 | const STEM: str = todo("the stem of a file name")
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the directory that holds a file` of type `str`
+  --> predict_library.sisu:15:21
+   |
+15 | const PARENT: str = todo("the directory that holds a file")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `two bytes in hexadecimal` of type `str`
+  --> predict_library.sisu:16:18
+   |
+16 | const HEX: str = todo("two bytes in hexadecimal")
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `where 25 would go in a sorted list` of type `int`
+  --> predict_library.sisu:17:20
+   |
+17 | const PLACE: int = todo("where 25 would go in a sorted list")
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `how many runs of digits there are` of type `int`
+  --> predict_library.sisu:18:22
+   |
+18 | const MATCHES: int = todo("how many runs of digits there are")
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `a list of words as JSON` of type `str`
+  --> predict_library.sisu:19:22
+   |
+19 | const ENCODED: str = todo("a list of words as JSON")
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+test "the stem of a file name" ... blocked by todo("the stem of a file name")
+test "the directory that holds a file" ... blocked by todo("the directory that holds a file")
+test "two bytes in hexadecimal" ... blocked by todo("two bytes in hexadecimal")
+test "where 25 would go" ... blocked by todo("where 25 would go in a sorted list")
+test "runs of digits" ... blocked by todo("how many runs of digits there are")
+test "words as JSON" ... blocked by todo("a list of words as JSON")
+0 passed, 0 failed, 6 blocked

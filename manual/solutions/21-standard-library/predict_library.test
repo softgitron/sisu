@@ -1,0 +1,7 @@
+test "the stem of a file name" ... ok
+test "the directory that holds a file" ... ok
+test "two bytes in hexadecimal" ... ok
+test "where 25 would go" ... ok
+test "runs of digits" ... ok
+test "words as JSON" ... ok
+6 passed, 0 failed, 0 blocked

@@ -213,6 +213,9 @@ impl Types:
                 return Ok(w)
             case "Iter" | "Box" | "dict" | "set":
                 return Ok(w)
+            # A raw pointer is an address (22, "Raw pointers").
+            case "ptr" | "ptr_mut":
+                return Ok(w)
             case "Scope" | "Handle" | "Cancellation" | "Sender" | "Receiver" | "MutexGuard":
                 return Ok(w)
             case "ReadGuard":
@@ -263,6 +266,46 @@ impl Types:
                         off += self.size(ft.subst(args))?
                     s = max(s, off)
                 return Ok(s)
+
+    ## Whether a value of the type lies in raw memory as it lies in a value
+    ## (the runtime's `rawmem::layout`, decision 302): no sized integer
+    ## narrower than 64 bits, `f32` or option of a raw pointer is among the
+    ## parts it holds in place, which raw memory keeps at their own width.
+    ## A reference into raw memory is only made to such a value, since the
+    ## code reads a reference's value as a value is laid out.
+    pub pure def same_in_memory(self, t: Type) -> bool:
+        return self.same_in_memory_at(t, 0)
+
+    pure def same_in_memory_at(self, t: Type, depth: int) -> bool:
+        if depth > 64:
+            return False
+        match t:
+            case Type.Tuple(items):
+                for x in items:
+                    if not self.same_in_memory_at(x, depth + 1):
+                        return False
+                return True
+            case Type.Named(n, args):
+                match n:
+                    case "u8" | "u16" | "u32" | "i8" | "i16" | "i32" | "f32":
+                        return False
+                    case "Option":
+                        if let Type.Named(pn, _) = arg(args, 0):
+                            return pn != "ptr" and pn != "ptr_mut"
+                        return True
+                    case _:
+                        pass
+                # A builtin that SIR declares as a struct has no fields.
+                let d = self.decl(n) else:
+                    return True
+                let decl = d.copy()
+                if let TypeDecl.Struct(_, _, fields, _, _, _) = decl:
+                    for f in fields:
+                        if not self.same_in_memory_at(f.ty.subst(args), depth + 1):
+                            return False
+                return True
+            case _:
+                return True
 
     ## The number of a concrete type, if a value of it was made.
     pub pure def known_id(self, t: Type) -> int?:
@@ -413,6 +456,8 @@ impl Types:
                 return Ok(TypeEntry(size=w + max(sa, sb), kind=Kind.Result(a, b)))
             case "Box":
                 return Ok(TypeEntry(size=w, kind=Kind.Box(self.id(arg(args, 0))?)))
+            case "ptr" | "ptr_mut":
+                return Ok(TypeEntry(size=w, kind=Kind.Ptr(self.id(arg(args, 0))?)))
             case "Scope":
                 return Ok(TypeEntry(size=w, kind=Kind.Scope))
             case "Cancellation":

@@ -1,0 +1,5 @@
+# An `int` and an `f64` do not mix without a conversion.
+def main():
+    let count = 3
+    let price = 2.5
+    print(count * price)

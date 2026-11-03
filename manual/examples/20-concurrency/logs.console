@@ -1,0 +1,6 @@
+$ sisu run logs.sisu
+info: opening the sauna
+info [task 2]: carrying the water
+info [task 1]: heating the stove
+warn [task 1.1]: the stove is hot
+info: the sauna is ready

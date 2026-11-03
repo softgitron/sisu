@@ -1,0 +1,4 @@
+the heater: Err(Cancelled)
+cancelled: True
+a blocking point: Err(Cancelled)
+in a shield: Ok(())

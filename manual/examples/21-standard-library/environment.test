@@ -1,0 +1,3 @@
+test "variables as numbers, lists and text" ... ok
+test "a command run to its end" ... ok
+2 passed, 0 failed, 0 blocked

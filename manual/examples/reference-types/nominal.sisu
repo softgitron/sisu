@@ -1,0 +1,18 @@
+# A type implements a trait only through an `impl`.
+trait Priced:
+    def price(self) -> int
+
+struct Coffee:
+    cups: int
+
+    def price(self) -> int:
+        return 350 * self.cups
+
+def total[T: Priced](items: list[T]) -> int:
+    var sum = 0
+    for item in items:
+        sum += item.price()
+    return sum
+
+def main():
+    print(total([Coffee(1), Coffee(2)]))

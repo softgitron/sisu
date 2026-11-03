@@ -24,6 +24,14 @@
 //! what a front end (stage 0's or stage 1's) serialised, must meet the
 //! expectations the source meets.
 //!
+//! The modes that build with the default lowering (natively, from SIR,
+//! and with the release profile) ask the build to report its steps
+//! (`SISU_NATIVE_TIMES=1`) and require it to say that stage 2 lowered the
+//! program (`native: lowered by stage 2 in T ms`), so that no case is
+//! built through the Rust lowering, which lowers only when asked for
+//! (`--lower=rust`, decision 305); the report counts those cases and the
+//! time stage 2 took over them.
+//!
 //! Either way, the executable runs with `SISU_RT_ALLOCS=1`, which makes
 //! the runtime report how many of its allocations are live when the
 //! program ends (decisions 217 and 226): the report must say none, and is left out
@@ -49,6 +57,9 @@ pub struct NativeReport {
     /// In the mode from LIR: the cases whose executable is byte for byte
     /// the one built from their SIR.
     pub identical: Option<usize>,
+    /// In the modes that build with the default lowering: the cases whose
+    /// build said stage 2 lowered them, and the time it took.
+    pub stage2: Option<(usize, Duration)>,
     pub failures: Vec<Failure>,
     /// Time spent building (the front end, the backend and the linker)
     /// and running the executables, over every case.
@@ -77,8 +88,12 @@ impl NativeReport {
             None if self.release => format!("native, release: {} cases ({} lines)", self.cases, self.lines),
             None => format!("native: {} cases ({} lines)", self.cases, self.lines),
         };
+        let lowered = match self.stage2 {
+            Some((n, t)) => format!(", {n} lowered by stage 2 in {:.2} s", t.as_secs_f64()),
+            None => String::new(),
+        };
         out.push_str(&format!(
-            "{what}, built in {:.2} s, run in {:.2} s, {} failed\n",
+            "{what}{lowered}, built in {:.2} s, run in {:.2} s, {} failed\n",
             self.build.as_secs_f64(),
             self.run.as_secs_f64(),
             self.failures.len()
@@ -96,16 +111,25 @@ pub fn read_list(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// The case names a coverage list holds for the mode from LIR: those whose
-/// comment does not start `not from LIR:`, a construct stage 2 does not
-/// lower yet (decision 302).
-pub fn read_list_from_lir(text: &str) -> Vec<String> {
-    text.lines()
-        .filter(|l| !l.split_once('#').is_some_and(|(_, c)| c.trim_start().starts_with("not from LIR:")))
-        .map(|l| l.split('#').next().unwrap_or("").trim())
-        .filter(|l| !l.is_empty())
-        .map(str::to_string)
-        .collect()
+/// What a build that reported its steps (`SISU_NATIVE_TIMES=1`) printed,
+/// less those reports (`native: ...`, and the Rust front end's `time:
+/// ...`), and how long stage 2 took to lower the program, if the build said
+/// it did (`native: lowered by stage 2 in T ms`).
+pub fn take_build_report(stderr: &str) -> (String, Option<Duration>) {
+    let mut rest = String::new();
+    let mut lowered = None;
+    for line in stderr.split_inclusive('\n') {
+        let text = line.trim_end_matches('\n');
+        if let Some(ms) =
+            text.strip_prefix("native: lowered by stage 2 in ").and_then(|t| t.strip_suffix(" ms"))
+        {
+            let ms: f64 = ms.parse().unwrap_or(0.0);
+            lowered = Some(Duration::from_secs_f64(ms.max(0.0) / 1e3));
+        } else if !text.starts_with("native: ") && !text.starts_with("time: ") {
+            rest.push_str(line);
+        }
+    }
+    (rest, lowered)
 }
 
 /// How [`run_list`] runs each case.
@@ -121,6 +145,14 @@ enum Mode {
     /// Lowered from serialised SIR by stage 2 and built from its LIR
     /// (decision 284).
     FromLir,
+}
+
+impl Mode {
+    /// Whether the mode builds with the default lowering, whose build must
+    /// say that stage 2 lowered the program.
+    fn lowers(self) -> bool {
+        matches!(self, Mode::Native | Mode::FromSir | Mode::Release)
+    }
 }
 
 /// Builds and runs every case of `list` natively, on as many threads as
@@ -209,6 +241,10 @@ fn run_list(sisu: &Sisu, root: &Path, list: &[String], mode: Mode, stage2: Optio
     if mode == Mode::FromLir {
         report.identical = Some(results.iter().filter(|r| r.identical).count());
     }
+    if mode.lowers() {
+        let lowered: Vec<Duration> = results.iter().filter_map(|r| r.stage2).collect();
+        report.stage2 = Some((lowered.len(), lowered.iter().sum()));
+    }
     for r in results {
         report.cases += 1;
         report.build += r.build;
@@ -272,6 +308,8 @@ struct CaseResult {
     own_sir: bool,
     /// Built from LIR to the executable the case's SIR gives.
     identical: bool,
+    /// How long stage 2 took to lower the case, as its build said.
+    stage2: Option<Duration>,
 }
 
 fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&Path>) -> CaseResult {
@@ -284,6 +322,7 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&P
         lines: 0,
         own_sir: false,
         identical: false,
+        stage2: None,
     };
     let fail = |r: &mut CaseResult, check: &str, detail: String| {
         r.failures.push(Failure { case: case.name.clone(), check: check.to_string(), detail });
@@ -445,11 +484,23 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&P
         run_and_compare(case, &exe, &cwd, warned_by_sir, false, &mut r);
         return r;
     }
-    let built = invoke_with_input(sisu, &cwd, &build_args, None);
+    // The build reports its steps, and must say that stage 2 lowered the
+    // program: nothing is built through the Rust lowering unasked.
+    let mut built = crate::invoke_with_env(sisu, &cwd, &build_args, &[("SISU_NATIVE_TIMES", "1")]);
     r.build = start.elapsed();
+    let (rest, lowered) = take_build_report(&built.stderr);
+    built.stderr = rest;
+    r.stage2 = lowered;
     if built.status != 0 || !exe.is_file() {
         fail(&mut r, "sisu build --native", format!("{}{}", built.stdout, built.stderr));
         return r;
+    }
+    if lowered.is_none() {
+        fail(
+            &mut r,
+            "lowered by stage 2",
+            "the build did not say that stage 2 lowered the program (`native: lowered by stage 2`)".into(),
+        );
     }
     run_and_compare(case, &exe, &cwd, warned_by_sir, !built.stderr.is_empty(), &mut r);
     r
@@ -589,4 +640,22 @@ fn run_exe(exe: &Path, cwd: &Path, args: &[String], input: Option<&str>) -> Outp
         .stderr(Stdio::piped())
         .spawn();
     crate::wait_output(spawned, input, exe)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_build_report_says_what_lowered_the_program() {
+        let printed = "warning[W0003]: unreachable code\n  --> a.sisu:3:5\nnative: lowered by stage 2 in 12.5 ms\nnative: 3 functions, 40 statements, code generated in 4.0 ms, linked in 80.0 ms\n";
+        let (rest, lowered) = take_build_report(printed);
+        assert_eq!(rest, "warning[W0003]: unreachable code\n  --> a.sisu:3:5\n");
+        assert_eq!(lowered, Some(Duration::from_secs_f64(0.0125)));
+        // The Rust lowering's build says nothing of stage 2, and neither
+        // does a stage 2 that did not lower the program.
+        let (rest, lowered) =
+            take_build_report("time: names resolved 1.0 ms\nnative: not lowered by stage 2 in 3.0 ms\n");
+        assert_eq!((rest.as_str(), lowered), ("", None));
+    }
 }

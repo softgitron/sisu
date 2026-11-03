@@ -183,9 +183,7 @@ one body: `testing/parametrised_once`).
 `native.list` names the cases the native backend (stage 2;
 [architecture.md](../docs/architecture.md), "Stage 2") must build and
 run, one per line as the runner names them (`run/arithmetic`); `#`
-starts a comment, and a case whose comment starts `not from LIR:` is left
-out of `--native-from-lir`, for the reason the comment gives (a construct
-stage 2 does not lower yet; decision 302). With `--native LIST` the runner builds each case with
+starts a comment. With `--native LIST` the runner builds each case with
 `sisu build --native --output EXE NAME.sisu` (a package case without the
 file) in the case's sandbox, runs the executable as it runs `sisu run`
 (with the case's `.args`, `.stdin` and `.cwd`, the time limit, and an
@@ -203,9 +201,14 @@ environment holding only `SISU_RT_ALLOCS=1`), and compares:
   program that aborts (status 134) ends without one.
 
 The expectations are the interpreter's: the native mode reads no file of
-its own and does not bless. A native build lowers SIR through stage 2 by
-default, and through the Rust lowering where stage 2 does not lower a
-construct yet (decision 304). With `--native-from-sir LIST` the runner
+its own and does not bless. A native build lowers SIR through stage 2, the
+lowering written in Sisu, and through nothing else unless `--lower=rust`
+asks for the Rust lowering, the oracle (decisions 304 and 305): the modes
+below that build with the default lowering (`--native`, `--native-from-sir`
+and `--native-release`) run each build with `SISU_NATIVE_TIMES=1` and fail
+a case whose build does not say that stage 2 lowered it (`native: lowered
+by stage 2 in T ms`); their summary counts the cases stage 2 lowered and
+the time it took over them. With `--native-from-sir LIST` the runner
 builds each case from serialised SIR instead, `sisu build --native
 --from-sir NAME.sir`, with the case's own `NAME.sir` where it has one and
 what `sisu sir` prints for it otherwise, and compares the same way (a

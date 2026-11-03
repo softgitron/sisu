@@ -1,0 +1,4 @@
+test "an order that is waiting" ... ok
+test "no order comes" ... ok
+test "the counter closes" ... ok
+3 passed, 0 failed, 0 blocked

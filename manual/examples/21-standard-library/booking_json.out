@@ -1,0 +1,4 @@
+{"name":"Aino","hour":18,"towels":1}
+Ok(Booking(name="Eero", hour=19, towels=1))
+Err(Mismatch(path="$.hour", expected="an integer"))
+open at [17,18,19]

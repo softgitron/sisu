@@ -397,7 +397,7 @@ the literal a type: `i8`, `i16`, `i32`, `i64`, `i128`, `u8`, `u16`,
 `u32`, `u64`, `u128`, `int` or `uint`; `f32` and `f64` make a decimal
 literal a float. Without a suffix, the literal is an `int`, unless the
 type expected where it stands is another integer type or an exact type
-of `std.num` ([R2](../README.md#the-reference), when it is written).
+of `std.num` ([R2](types.md#integers)).
 
 <!-- file: examples/reference-lexical-structure/numbers.sisu -->
 ```sisu
@@ -518,9 +518,9 @@ A string literal is text between double quotes. Its forms are these:
   E0121, and a line break inside an interpolation of a one-line
   literal E0018.
 - A string literal takes the type expected where it stands when that
-  type implements `FromLiteral[str]`, as `Path`, `Url` and `String` do:
-  `let home: Path = "/home/aino"` ([R2](../README.md#the-reference),
-  when it is written).
+  type implements `FromLiteral[str]`, as `Path` and `String` do:
+  `let home: Path = "/home/aino"`
+  ([R2](types.md#literals-that-take-the-type-expected)).
 
 <!-- file: examples/reference-lexical-structure/strings.sisu -->
 ```sisu

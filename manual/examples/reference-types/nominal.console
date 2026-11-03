@@ -1,0 +1,9 @@
+$ sisu run nominal.sisu
+error[E0347]: `Coffee` does not implement `Priced`
+  --> nominal.sisu:18:11
+   |
+18 |     print(total([Coffee(1), Coffee(2)]))
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: `Coffee` has every method of `Priced`; add `impl Priced for Coffee`
+
+error[D0006]: the program was not run: errors found (1)

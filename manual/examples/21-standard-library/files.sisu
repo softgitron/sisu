@@ -1,0 +1,15 @@
+# `std.fs` walks a directory, takes paths apart and reads lines.
+import std.fs
+
+def main(sys: System) -> ! IoError:
+    if sys.fs.exists("shopping.txt"):
+        sys.fs.remove("shopping.txt")?
+    for path in fs.walk(sys.fs, "recipes")?:
+        if fs.extension(path) != Some("txt"):
+            continue
+        let lines = fs.read_lines(sys.fs, path)?
+        print("{fs.stem(path) ?? "?"}: {len(lines)} ingredients")
+        fs.append(sys.fs, "shopping.txt", "{lines.join("\n")}\n".encode())?
+    let list = fs.read_lines(sys.fs, "shopping.txt")?
+    print("to buy: {len(list)} things")
+    return Ok(())

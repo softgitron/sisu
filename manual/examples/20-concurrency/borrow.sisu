@@ -1,0 +1,16 @@
+# A task may borrow what the frame around its scope owns.
+
+## How many of `words` hold `letter`.
+def count_with(words: list[str], letter: char) -> int:
+    var n = 0
+    for w in words:
+        if w.contains("{letter}"):
+            n += 1
+    return n
+
+def main():
+    let words = ["sauna", "löyly", "vihta", "kiuas", "lauteet"]
+    task.scope do s:
+        let with_a = s.spawn(() -> count_with(words, 'a'))
+        let with_y = s.spawn(() -> count_with(words, 'y'))
+        print("{with_a.join()} with a, {with_y.join()} with y")

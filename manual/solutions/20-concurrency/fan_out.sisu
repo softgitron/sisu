@@ -1,0 +1,66 @@
+##! Exercise 20.4, a fan-out to a slow service. Kind: write. Level: 2.
+##!
+##! A weather service takes two seconds to answer. `forecasts` asks it
+##! about several towns at once, with a task for each town, and gives the
+##! answers in the order of the towns. Write its body so that every test
+##! passes. The tests give it a fake service on the test clock, so they
+##! see whether the questions were asked at once. Run them with
+##! `sisu test fan_out.sisu`. The hints are in chapter 20 of the tutorial,
+##! under "Exercise 20.4: a fan-out to a slow service".
+
+error WeatherError:
+    UnknownTown(name: String)
+
+trait Weather:
+    def forecast(self, town: str) -> String ! {WeatherError, TaskError}
+
+## A fake service that answers after `delay` on `clock`, for the towns
+## of `known`.
+struct SlowWeather:
+    clock: Clock
+    delay: Duration
+    known: dict[String, String]
+
+impl Weather for SlowWeather:
+    def forecast(self, town: str) -> String ! {WeatherError, TaskError}:
+        self.clock.sleep(self.delay)?
+        let answer = self.known.get(town.to_string()) else:
+            return Err(UnknownTown(town.to_string()))
+        return Ok(answer.copy())
+
+## The forecasts for `towns`, in their order, asked of `service` at once.
+def forecasts[W: Weather + Sync](
+    service: W,
+    towns: list[str],
+) -> list[String] ! {WeatherError, TaskError}:
+    return task.scope do s:
+        let asked = [s.spawn(() -> service.forecast(town)) for town in towns]
+        var answers: list[String] = []
+        for h in asked:
+            answers.push(h.join()?)
+        return Ok(answers)
+
+## A service that knows three towns and takes two seconds to answer.
+def service(clock: Clock) -> SlowWeather:
+    let known: dict[String, String] = {
+        "Oulu": "snow",
+        "Turku": "rain",
+        "Kemi": "sun",
+    }
+    return SlowWeather(clock=clock, delay=Duration.seconds(2), known=known)
+
+test "the answers in the order of the towns"(clock: TestClock):
+    let got = forecasts(service(clock), ["Turku", "Oulu", "Kemi"])
+    assert got == Ok(["rain", "snow", "sun"])
+
+test "every town at once"(clock: TestClock):
+    let start = clock.now()
+    _ = forecasts(service(clock), ["Turku", "Oulu", "Kemi"])
+    assert clock.now() - start == Duration.seconds(2)
+
+test "an unknown town"(clock: TestClock):
+    let got = forecasts(service(clock), ["Atlantis", "Oulu"])
+    assert got == Err(UnknownTown("Atlantis"))
+
+test "no towns"(clock: TestClock):
+    assert forecasts(service(clock), []) == Ok([])

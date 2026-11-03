@@ -1,0 +1,7 @@
+# A `Shared` value that holds a `Cell` cannot move to another task.
+def hand_over[T: Send](own value: T) -> String:
+    return "it can move to another task"
+
+def main():
+    let counter = Shared(Cell(0))
+    print(hand_over(counter))

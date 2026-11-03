@@ -1,0 +1,15 @@
+# A one-field struct is a new type; an alias is the same type.
+type Kilometres = f64
+
+@delegate(Add, Display, to="value")
+struct Metres:
+    value: f64
+
+struct Seconds:
+    value: f64
+
+def main():
+    let run = Metres(400.0) + Metres(800.0)
+    let lap = Seconds(95.0)
+    let walk: Kilometres = 2.5
+    print("{run} in {lap.value} s, then {walk + 1.0} km")

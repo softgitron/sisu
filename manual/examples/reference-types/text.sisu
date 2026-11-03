@@ -1,0 +1,15 @@
+# `str` views text, `String` owns it, and `char` is one scalar value.
+def shout(text: str) -> String:
+    return text.to_uppercase()
+
+def main():
+    let word: str = "sisu"
+    var owned: String = word.to_string()
+    owned.push("!")
+    owned.push_char('?')
+    print(shout(owned))
+    let greeting = "hyvää"
+    print("{len(greeting)} {greeting.byte_len()}")
+    print(greeting.byte_slice(0, 3))
+    for c in "äö".chars():
+        print("{c} {c.code()}")

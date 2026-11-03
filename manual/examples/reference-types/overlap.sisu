@@ -1,0 +1,14 @@
+# A type implements a trait at most once.
+struct Money:
+    cents: int
+
+impl Display for Money:
+    def fmt(self, mut f: Formatter):
+        f.write("{self.cents} cents")
+
+impl Display for Money:
+    def fmt(self, mut f: Formatter):
+        f.write("{self.cents // 100} euros")
+
+def main():
+    print(Money(250))

@@ -1,0 +1,11 @@
+# `T?` is `Option[T]`: `Some` with a value, or `None`.
+def find(names: list[str], wanted: str) -> int?:
+    for i, name in enumerate(names):
+        if name == wanted:
+            return Some(i)
+    return None
+
+def main():
+    let names = ["Aino", "Eero"]
+    let missing = find(names, "Roni")
+    print("{find(names, "Eero")} {missing} {missing ?? -1}")

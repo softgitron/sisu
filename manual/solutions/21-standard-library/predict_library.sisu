@@ -1,0 +1,39 @@
+##! Exercise 21.1, predict the library's answers. Kind: predict. Level: 1.
+##!
+##! Each constant is your prediction of the value of the expression in
+##! its test. Write each as a literal, then run
+##! `sisu test predict_library.sisu`. The hints are in chapter 21 of the
+##! tutorial, under "Exercise 21.1: predict the library's answers".
+
+import std.fs
+import std.json
+import std.search
+from std.encoding import hex_encode
+from std.regex import Regex
+
+const STEM: str = "todo"
+const PARENT: str = "notes/old"
+const HEX: str = "4142"
+const PLACE: int = 2
+const MATCHES: int = 3
+const ENCODED: str = "[\"sauna\",\"löyly\"]"
+
+test "the stem of a file name":
+    assert (fs.stem(Path.new("notes/todo.txt")) ?? "") == STEM
+
+test "the directory that holds a file":
+    let parent = fs.parent(Path.new("notes/old/todo.txt"))
+    assert "{parent ?? Path.new("")}" == PARENT
+
+test "two bytes in hexadecimal":
+    assert hex_encode(b"AB") == HEX
+
+test "where 25 would go":
+    assert search.bisect_left([10, 20, 30, 40], 25) == PLACE
+
+test "runs of digits":
+    let digits = Regex.new(r"\d+").expect("a valid pattern")
+    assert len(digits.find_all("1 sauna, 2 swims, 10 coffees")) == MATCHES
+
+test "words as JSON":
+    assert json.encode(["sauna", "löyly"]) == ENCODED

@@ -1,0 +1,24 @@
+# An error set is a subtype of every union that holds it.
+error ParseError:
+    Empty
+    NotANumber(text: String)
+
+error RangeError:
+    TooLarge(value: int)
+
+def parse(text: str) -> int ! ParseError:
+    if text == "":
+        return Err(Empty)
+    let n = text.parse_int() else:
+        return Err(NotANumber(text.to_string()))
+    return Ok(n)
+
+def check(n: int) -> int ! RangeError:
+    return if n > 100: Err(TooLarge(n)) else: Ok(n)
+
+def read(text: str) -> int ! {ParseError, RangeError}:
+    return check(parse(text)?)
+
+def main():
+    for text in ["42", "", "x", "500"]:
+        print(read(text))

@@ -1,0 +1,7 @@
+# `bytes` holds any bytes; `decode` checks that they are UTF-8.
+def main():
+    let raw: bytes = b"hei\xff"
+    print("{raw[0]} {len(raw)} {raw[0:3]}")
+    print(raw.decode().is_err())
+    let text = "hei".encode()
+    print(text.decode())

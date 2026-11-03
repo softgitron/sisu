@@ -1,0 +1,14 @@
+# A `pure` function type admits only functions proved pure.
+pure def apply_twice(f: pure (int) -> int, x: int) -> int:
+    return f(f(x))
+
+pure def double(n: int) -> int:
+    return n * 2
+
+def apply(f: (int) -> int, x: int) -> int:
+    return f(x)
+
+def main():
+    print(apply_twice(n -> n * 3, 2))
+    print(apply_twice(double, 5))
+    print(apply(double, 4))

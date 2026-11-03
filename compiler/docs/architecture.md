@@ -3264,10 +3264,10 @@ that have it, and `SISU_NATIVE_TIMES=1` prints where a build's time went:
 a line for each step of checking and lowering the program (`time: names
 resolved 133.0 ms`), of generating its code, and the link.
 The SIR is lowered through stage 2, the lowering written in Sisu, to LIR,
-which the backend translates one to one (section "LIR" below), unless
-`--lower=rust` (or `SISU_LOWER=rust`) keeps the Rust lowering, the oracle,
-which also lowers a program with a construct stage 2 does not lower yet
-(decision 304).
+which the backend translates one to one (section "LIR" below); a construct
+stage 2 does not lower is `D0103`, and only `--lower=rust` (or
+`SISU_LOWER=rust`) lowers with the Rust lowering, the oracle (decisions 304
+and 305).
 `sisu build --native --from-sir FILE [--output PATH]` and `sisu run
 --native --from-sir FILE [ARGS...]` compile a file of serialised SIR
 instead, without the front end (section "From serialised SIR" below), and
@@ -3713,22 +3713,22 @@ returns from the switch that saved it. No program reaches them (std.rt is
 internal), so `crates/sisu-driver/tests/machine/machine.sir` calls them
 from SIR, and a test of the runtime switches to a second stack and back.
 
-What stage 2, the lowering in Sisu, must add to lower the same programs
-(the cases of `native.list` marked `not from LIR:` wait for it): the
-intrinsics of std.mem in its table of names, at the numbers
-`abi::Intrinsic` gives them after `live.epoch` (277 to 305, in its
+Stage 2, the lowering in Sisu, lowers all of it as `sisu-codegen` does
+(decision 305): the intrinsics of std.mem in its table of names, at the
+numbers `abi::Intrinsic` gives them after `live.epoch` (277 to 305, in its
 order); `ptr` and `ptr_mut` laid out as one word with the entry `Ptr`
-(kind 46) naming their argument, in `layout.sisu` and in the encoding of
-the type table; the build-time refusal above, by the rule of
-`Types::same_in_memory`; a foreign call as `declare NAME import (C
-TYPES) -> (C TYPE)`, a `call sisu_rt_flush()` before it, the arguments
-loaded and narrowed (`ireduce`, `bitcast` for the floats, a `select` of
-the payload or 0 for an option of a pointer) and the result widened back
-(`sextend`, `uextend`, `bitcast`, or an `icmp_imm eq` making an option's
-tag), as `call_foreign` and `c_argument` in `func.rs` do; and the machine
-intrinsics (`get_stack_pointer`, and calls of `sisu_rt_thread_slot` and
-`sisu_rt_switch`), as `machine_intrinsic` does. LIR needs no new
-construct for any of them.
+(kind 46) naming their argument (`layout.sisu`, and the encoding of the
+type table in `abi.sisu`); the build-time refusal above, by the rule of
+`Types::same_in_memory`; a foreign call as `declare NAME import (C TYPES)
+-> (C TYPE)`, made at its first call, a `call sisu_rt_flush()` before it,
+the arguments loaded and narrowed (`ireduce`, `bitcast` for the floats, a
+`select` of the payload or 0 for an option of a pointer) and the result
+widened back (`sextend`, `uextend`, `bitcast`, or an `icmp_imm eq` making
+an option's tag), as `call_foreign` and `c_argument` in `func.rs` do
+(`call.sisu`); and the machine intrinsics (`get_stack_pointer`, and calls
+of `sisu_rt_thread_slot` and `sisu_rt_switch`), as `machine_intrinsic`
+does. LIR gained two words for them: the conversion `sextend` and the type
+`i16`, a C `short`'s.
 
 ### Linking
 
@@ -3958,8 +3958,9 @@ order.
   index checks, those proven, the overflow checks, those proven, and the
   tests decided (decision 270).
 
-Values are `vN`, each defined once; types are `i8`, `i32`, `i64`, `f32`
-and `f64`. An operation that defines values starts with them (`v7 =
+Values are `vN`, each defined once; types are `i8`, `i16`, `i32`, `i64`,
+`f32` and `f64` (`i16` only in a foreign function's signature, decision
+305). An operation that defines values starts with them (`v7 =
 ...`, `v8, v9 = ...`):
 
 | Operation | Meaning |
@@ -3970,7 +3971,7 @@ and `f64`. An operation that defines values starts with them (`v7 =
 | `icmp.CC a, b`, `icmp_imm.CC a, N`, `fcmp.CC a, b` | a comparison giving an `i8`, 1 or 0 (`eq ne slt sle sgt sge ult ule ugt uge`; `eq ne lt le gt ge`) |
 | `sadd_overflow`, `ssub_overflow`, `smul_overflow` `a, b` | the wrapped result and the overflow flag |
 | `select c, a, b` | `a` when `c` is not 0, else `b` |
-| `uextend.T`, `ireduce.T`, `bitcast.T`, `fpromote.T`, `fdemote.T` `a` | conversions |
+| `uextend.T`, `sextend.T`, `ireduce.T`, `bitcast.T`, `fpromote.T`, `fdemote.T` `a` | conversions |
 | `load.T a, OFF`, `uload8 a, OFF`, `sload8 a, OFF`; `store v, a, OFF` | memory at `a + OFF`, aligned, never faulting |
 | `stack_addr sN`, `stack_load sN`, `stack_store v, sN` | a slot's address, its first word |
 | `symbol_value dN`, `func_addr SYMBOL`, `get_stack_pointer` | addresses |
@@ -6875,3 +6876,42 @@ library", "Tasks and the scheduler", "Capabilities", "Stage 2")
      (port-debt.md, "The backend in Sisu"). `SISU_NATIVE_TIMES` reports the
      lowering's time, and `SISU_NATIVE_SURVEY` the Rust lowering's survey.
      This changes no rule of the language.
+
+**Stage 2 in Sisu: the unsafe code, and stage 2 alone** (sections "Raw
+memory, foreign calls and the machine intrinsics" and "LIR"; D-087)
+
+305. Stage 2 lowers everything the Rust lowering lowers: the intrinsics of
+     std.mem, `ptr` and `ptr_mut` with their `Ptr` entry in the type table,
+     the build-time refusal of a pointer to a place or a reference from a
+     pointer whose two layouts differ, foreign calls and the three machine
+     intrinsics, each as `sisu-codegen` lowers it (decision 302), so the
+     five unsafe cases of `native.list` build from LIR to the executables
+     their SIR gives, in both profiles, and the list's `not from LIR:`
+     marks and the runner's reading of them are gone. LIR gains the
+     conversion `sextend` (a C function's `int`, `short` or `signed char`
+     result widened back) and the type `i16` (a C `short` in a foreign
+     function's signature); the alternative, a sign extension spelled as
+     shifts, would not have been the Rust lowering's instructions and so
+     not its executable. A foreign function is declared at its first call,
+     with the C signature that call gives, where `sisu-codegen` declares
+     it. With nothing left that only the Rust lowering lowers, a native
+     build lowers through stage 2 alone: decision 304's fallback, which
+     lowered a program stage 2 stopped on with the Rust lowering, is
+     removed, and stage 2's `lir: not lowered: WHAT (in FUNCTION)` is the
+     program's `D0103`, naming what and where as the Rust backend names
+     it. The Rust lowering lowers only when `--lower=rust` (or
+     `SISU_LOWER=rust`) asks for it: the oracle the runner's
+     `--native-from-lir` mode compares executables with, and the seed that
+     builds stage 1 and stage 2 themselves, since stage 2 cannot lower
+     itself before it is built. `SISU_NATIVE_SURVEY` still lists a
+     program's missing constructs through the Rust lowering's survey, which
+     lowers what stage 2 lowers, and the build then goes on through stage
+     2. The runner's modes that build with the default lowering (`--native`,
+     `--native-from-sir`, `--native-release`) run each build with
+     `SISU_NATIVE_TIMES=1`, take its reports off the standard error they
+     compare, and fail a case whose build does not say `native: lowered by
+     stage 2 in T ms`; their summary counts those cases and the time stage
+     2 took, and `cargo test` requires every case of the list to have been
+     lowered so. All 205 cases are, and all 205 build from LIR to
+     identical executables in both profiles. This changes no rule of the
+     language.

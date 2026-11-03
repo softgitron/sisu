@@ -1,0 +1,2 @@
+5:11-5:24 E0373 type.mixed-numbers op="*" lhs="int" rhs="f64"
+  fix type.convert-to-float 5:16-5:16 ".to_f64()"

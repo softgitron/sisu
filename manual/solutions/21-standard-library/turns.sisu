@@ -1,0 +1,39 @@
+##! Exercise 21.5, turns in the saunas. Kind: write. Level: 2.
+##!
+##! Bathers arrive at a spa with several saunas. Each takes the sauna that
+##! is free first, waits for it if none is free, and stays a fixed number
+##! of minutes. `start_times` works out when each bather goes in. Write
+##! its body so that every test passes; a `Heap` from `std.collections`
+##! keeps the time each sauna is free again. Run the tests with
+##! `sisu test turns.sisu`. The hints are in chapter 21 of the tutorial,
+##! under "Exercise 21.5: turns in the saunas".
+
+from std.collections import Heap
+
+## When each bather goes in, for bathers who arrive at the minutes of
+## `arrivals`, in that order, each staying `stay` minutes in whichever
+## of `saunas` saunas is free first.
+def start_times(arrivals: list[int], stay: int, saunas: int) -> list[int]:
+    var free: Heap[int] = Heap.new()
+    for _ in range(saunas):
+        free.push(0)
+    var starts: list[int] = []
+    for arrival in arrivals:
+        let ready = free.pop() ?? 0
+        let start = max(arrival, ready)
+        starts.push(start)
+        free.push(start + stay)
+    return starts
+
+test "one sauna, everyone at once":
+    assert start_times([0, 0, 0], 10, 1) == [0, 10, 20]
+
+test "two saunas":
+    assert start_times([0, 0, 0, 5], 10, 2) == [0, 0, 10, 10]
+    assert start_times([0, 3, 4, 30], 15, 2) == [0, 3, 15, 30]
+
+test "a sauna free before the bather comes":
+    assert start_times([0, 30], 10, 1) == [0, 30]
+
+test "nobody comes":
+    assert start_times([], 10, 3) == []

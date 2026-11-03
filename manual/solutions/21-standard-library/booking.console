@@ -1,0 +1,22 @@
+$ sisu test booking.sisu
+test "a booking" ... FAILED
+test "a booking that is paid" ... FAILED
+test "text that is not JSON" ... ok
+
+test "a booking" ... FAILED
+panic: assertion failed: booking.is_ok()
+    booking.is_ok()
+    │
+    Err(Mismatch(path="$.hour", expected="a string"))
+  at test "a booking" (booking.sisu:24:5)
+replay: sisu test --replay 1-8803fbe97066ac53-0.0.1-t0-s0-r0 booking.sisu
+
+test "a booking that is paid" ... FAILED
+panic: assertion failed: booking.is_ok()
+    booking.is_ok()
+    │
+    Err(Mismatch(path="$.hour", expected="a string"))
+  at test "a booking that is paid" (booking.sisu:29:5)
+replay: sisu test --replay 1-8803fbe97066ac53-0.0.1-t1-s0-r0 booking.sisu
+
+1 passed, 2 failed, 0 blocked

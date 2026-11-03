@@ -1,0 +1,11 @@
+# `std.rand` chooses, samples and shuffles with any `Rand`.
+import std.rand
+
+def main():
+    let r = Rand.seeded(2026)
+    print("a die: {[r.between(1, 7) for _ in range(6)]}")
+    print("first to the sauna: {rand.choose(r, ["Aino", "Eero", "Roni"])}")
+    print("three of ten: {rand.sample(r, 10, 3)}")
+    var turns = ["Aino", "Eero", "Roni", "Liisa"]
+    r.shuffle(mut turns)
+    print("the order: {turns}")

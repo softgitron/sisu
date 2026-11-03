@@ -1,0 +1,5 @@
+pouring 4: True
+poisoned: False
+left: 6
+pouring 15: True
+poisoned: True

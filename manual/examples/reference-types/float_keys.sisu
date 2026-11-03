@@ -1,0 +1,4 @@
+# An `f64` cannot be the key of a `dict`.
+def main():
+    let names = {1.5: "bun", 2.0: "coffee"}
+    print(names)

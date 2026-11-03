@@ -1,0 +1,15 @@
+# A lost update: each task reads the count, gives way, and writes.
+
+## Adds a visit to `visits`, the slow way: read, give way, write.
+def add_visit(visits: Mutex[int]):
+    let seen = visits.lock().value
+    task.yield_now()
+    visits.lock().value = seen + 1
+
+test "two visits make two":
+    let visits = Mutex(0)
+    task.scope do s:
+        s.spawn(() -> add_visit(visits))
+        s.spawn(() -> add_visit(visits))
+    let total = visits.into_inner()
+    assert total == 2

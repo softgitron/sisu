@@ -1,0 +1,12 @@
+# `std.log` writes records to standard error, each with its level.
+def heat(degrees: int) -> bool:
+    log.debug("asked to heat to {degrees}")
+    if degrees > 110:
+        log.error("{degrees} degrees is too hot; the stove stays off")
+        return False
+    log.info("heating to {degrees}")
+    return True
+
+def main():
+    print(heat(80))
+    print(heat(120))

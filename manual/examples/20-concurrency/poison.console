@@ -1,0 +1,8 @@
+$ sisu run poison.sisu
+pouring 4: True
+poisoned: False
+left: 6
+pouring 15: True
+poisoned: True
+panic: the lock is poisoned: a task panicked holding it and left its value's invariant broken
+  at main (poison.sisu:26:19)

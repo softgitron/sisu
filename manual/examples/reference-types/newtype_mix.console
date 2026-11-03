@@ -1,0 +1,8 @@
+$ sisu run newtype_mix.sisu
+error[E0310]: `+` cannot be applied to `Metres` and `Seconds`
+  --> newtype_mix.sisu:10:17
+   |
+10 |     let total = Metres(400.0) + Seconds(95.0)
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

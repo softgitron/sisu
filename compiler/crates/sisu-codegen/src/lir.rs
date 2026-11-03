@@ -142,6 +142,7 @@ pub(crate) enum Ovf {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Conv {
     Uextend,
+    Sextend,
     Ireduce,
     Bitcast,
     Fpromote,
@@ -409,6 +410,7 @@ impl<'a> Cur<'a> {
 fn type_named(w: &str) -> Option<types::Type> {
     Some(match w {
         "i8" => types::I8,
+        "i16" => types::I16,
         "i32" => types::I32,
         "i64" => types::I64,
         "f32" => types::F32,
@@ -783,9 +785,10 @@ impl Reader {
                 c.expect(",")?;
                 Op::Select(a, x, c.value()?)
             }
-            ("uextend" | "ireduce" | "bitcast" | "fpromote" | "fdemote", Some(t)) => {
+            ("uextend" | "sextend" | "ireduce" | "bitcast" | "fpromote" | "fdemote", Some(t)) => {
                 let k = match op {
                     "uextend" => Conv::Uextend,
+                    "sextend" => Conv::Sextend,
                     "ireduce" => Conv::Ireduce,
                     "bitcast" => Conv::Bitcast,
                     "fpromote" => Conv::Fpromote,

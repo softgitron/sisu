@@ -1,0 +1,2 @@
+18:11-18:40 E0347 type.bound-not-satisfied ty="Coffee" bound="Priced"
+  fix type.add-impl

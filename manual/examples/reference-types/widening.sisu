@@ -1,0 +1,14 @@
+# A narrower number widens where a wider type is expected.
+def total(prices: list[int]) -> int:
+    return sum(prices)
+
+def main():
+    let a: u8 = 200
+    let b: i32 = 7
+    let c: int = a
+    print("{a + b} {c} {total([a, b])}")
+    let half: f32 = 0.5
+    let precise: f64 = half
+    let huge: u64 = 18_000_000_000_000_000_000
+    let wider: i128 = huge
+    print("{precise} {wider}")

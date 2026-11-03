@@ -1,0 +1,10 @@
+# A log record from a task names the task, and its children name it too.
+def main():
+    log.info("opening the sauna")
+    task.scope do s:
+        s.spawn do:
+            log.info("heating the stove")
+            task.scope do inner:
+                inner.spawn(() -> log.warn("the stove is hot"))
+        s.spawn(() -> log.info("carrying the water"))
+    log.info("the sauna is ready")

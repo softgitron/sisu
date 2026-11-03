@@ -1,0 +1,5 @@
+# Arithmetic that overflows its type stops the program.
+def main():
+    let level: u8 = 250
+    print(level + 3)
+    print(level + 10)

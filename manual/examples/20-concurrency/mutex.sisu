@@ -1,0 +1,10 @@
+# A `Mutex` lets tasks change one value, one task at a time.
+def main():
+    let words = ["sauna", "löyly", "vihta", "kiuas", "lauteet"]
+    let letters = Mutex(0)
+    task.scope do s:
+        for w in words:
+            s.spawn do:
+                var guard = letters.lock()
+                guard.value += len(w)
+    print("{letters.into_inner()} letters")

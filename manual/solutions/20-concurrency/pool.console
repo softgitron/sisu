@@ -1,0 +1,12 @@
+$ sisu test pool.sisu
+warning[W0001]: typed hole `check_all` of type `list[String]`
+  --> pool.sisu:19:12
+   |
+19 |     return todo("check_all")
+   |            ^^^^^^^^^^^^^^^^^
+
+test "the bookings that pass" ... blocked by todo("check_all")
+test "two workers take half the time of one" ... blocked by todo("check_all")
+test "one worker checks one booking at a time" ... blocked by todo("check_all")
+test "a worker for each booking" ... blocked by todo("check_all")
+0 passed, 0 failed, 4 blocked

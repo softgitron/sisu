@@ -1,0 +1,9 @@
+# A `Cell` cannot be shared between tasks.
+def main():
+    let words = ["sauna", "löyly", "vihta", "kiuas", "lauteet"]
+    let letters = Cell(0)
+    task.scope do s:
+        for w in words:
+            s.spawn do:
+                letters.set(letters.get() + len(w))
+    print("{letters.get()} letters")

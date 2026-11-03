@@ -1,0 +1,29 @@
+##! Exercise 21.3, times in a text. Kind: complete. Level: 2.
+##!
+##! `times` finds every time of day in a text, written as an hour of one
+##! or two digits, a colon and two digits of minutes, and gives each as
+##! minutes after midnight. Replace the hole with the pattern so that
+##! every test passes. Run the tests with `sisu test times.sisu`. The
+##! hints are in chapter 21 of the tutorial, under "Exercise 21.3: times
+##! in a text".
+
+from std.regex import Regex, RegexError
+
+## The times of day in `text`, in minutes after midnight.
+def times(text: str) -> list[int] ! RegexError:
+    let pattern = Regex.new(r"(\d{1,2}):(\d\d)")?
+    var found: list[int] = []
+    for m in pattern.find_all(text):
+        let hours = (m.group(1) ?? "").parse_int() ?? 0
+        let minutes = (m.group(2) ?? "").parse_int() ?? 0
+        found.push(hours * 60 + minutes)
+    return Ok(found)
+
+test "times with two digits":
+    assert times("Sauna at 17:30, swim at 18:05.") == Ok([1050, 1085])
+
+test "an hour of one digit":
+    assert times("Tea at 9:15 and 21:00") == Ok([555, 1260])
+
+test "no time":
+    assert times("no times here, and 12:3 has one digit") == Ok([])

@@ -1,0 +1,8 @@
+$ sisu run impure_argument.sisu
+error[E0335]: this function is passed where a pure function is required, but it calls `noisy`, which is not pure
+  --> impure_argument.sisu:10:23
+   |
+10 |     print(apply_twice(noisy, 2))
+   |                       ^^^^^
+
+error[D0006]: the program was not run: errors found (1)
