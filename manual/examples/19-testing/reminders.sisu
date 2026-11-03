@@ -1,0 +1,29 @@
+# `cap.Fake[T]` is a fake of one of the program's own traits.
+error SendError:
+    Refused(to: String)
+
+trait Mailer:
+    def send(self, to: str, text: str) -> ! SendError
+
+## Reminds each borrower of `loans` that a book is due, and gives the
+## number of reminders that could not be sent.
+def remind[M: Mailer](mailer: M, loans: list[(str, str)]) -> int:
+    var failed = 0
+    for who, book in loans:
+        if mailer.send(who, "{book} is due tomorrow").is_err():
+            failed += 1
+    return failed
+
+test "a reminder for each loan":
+    let mailer = cap.Fake[Mailer].new()
+    mailer.on_send(Ok(()))
+    assert remind(mailer, [("aino", "Kalevala"), ("eero", "Sinuhe")]) == 0
+    let calls = mailer.calls()
+    assert calls[0] == "send(\"aino\", \"Kalevala is due tomorrow\")"
+    assert len(calls) == 2
+
+test "a refused reminder is counted":
+    let mailer = cap.Fake[Mailer].new()
+    mailer.on_send(Err(Refused("roni")))
+    mailer.on_send(Ok(()))
+    assert remind(mailer, [("roni", "Sinuhe"), ("aino", "Sinuhe")]) == 1

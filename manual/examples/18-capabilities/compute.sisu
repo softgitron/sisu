@@ -1,0 +1,15 @@
+# Code that takes no capability can only compute.
+pure def word_count(text: str) -> int:
+    var n = 0
+    for _ in text.split_whitespace():
+        n += 1
+    return n
+
+def file_word_count(fs: Fs, path: Path) -> int ! IoError:
+    let text = fs.read_to_string(path)?
+    return Ok(word_count(text))
+
+def main(sys: System) -> ! IoError:
+    print(word_count("hei kaunis maailma"))
+    print(file_word_count(sys.fs, "poem.txt")?)
+    return Ok(())

@@ -1,0 +1,9 @@
+$ sisu run pure_file.sisu
+error[E0334]: the pure function `file_word_count` cannot use the capability `Fs`
+  --> pure_file.sisu:8:26
+  |
+8 | pure def file_word_count(fs: Fs, path: Path) -> int ! IoError:
+  |                          ^^^^^^
+  = fix: remove `pure`
+
+error[D0006]: the program was not run: errors found (1)

@@ -1,0 +1,16 @@
+transcript "tests/sauna.transcript" ... FAILED
+
+transcript "tests/sauna.transcript" ... FAILED
+what the program printed differs from the transcript (`sisu test --update` accepts it):
+  $ sauna list
+  17:00 Roni
+  $ sauna book Aino 18
+- booked 18:00 for Aino
++ Aino has the sauna at 18:00
+  $ sauna book Eero 18
+  error: Taken(hour=18) (exit 1)
+  $ sauna list
+  17:00 Roni
+  18:00 Aino
+
+0 passed, 1 failed, 0 blocked

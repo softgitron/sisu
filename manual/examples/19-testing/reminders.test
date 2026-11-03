@@ -1,0 +1,3 @@
+test "a reminder for each loan" ... ok
+test "a refused reminder is counted" ... ok
+2 passed, 0 failed, 0 blocked

@@ -1,0 +1,46 @@
+##! Exercise 18.1, predict the narrowed file systems. Kind: predict. Level: 1.
+##!
+##! Each constant is your prediction of the value of the expression in
+##! its test. Write each as a literal, then run
+##! `sisu test predict_narrowing.sisu`. The hints are in chapter 18 of
+##! the tutorial, under "Exercise 18.1: predict the narrowed file
+##! systems".
+
+## A file system with a note under `notes/`, and a secret beside it.
+def disk() -> Fs:
+    return Fs.in_memory({"notes/todo.txt": "heat the sauna", "pin.txt": "1234"})
+
+const INSIDE: bool = True
+const REFUSED: str = "Err(PermissionDenied(path=\"../pin.txt\"))"
+const READ_ONLY_WRITE: bool = False
+const WRITTEN_THROUGH: bool = True
+const COPY_SEES: bool = True
+const AFTER_REVOKE: bool = False
+
+test "inside the narrowed directory":
+    let notes = disk().restrict_to("notes")
+    assert notes.exists("todo.txt") == INSIDE
+
+test "outside it":
+    let notes = disk().restrict_to("notes")
+    assert "{notes.read_to_string("../pin.txt")}" == REFUSED
+
+test "a write through a read-only one":
+    let ro = disk().read_only()
+    assert ro.write_text("notes/new.txt", "x").is_ok() == READ_ONLY_WRITE
+
+test "a write through the narrowed one":
+    let fs = disk()
+    fs.restrict_to("notes").write_text("new.txt", "x").expect("allowed")
+    assert fs.exists("notes/new.txt") == WRITTEN_THROUGH
+
+test "a copy of a capability":
+    let fs = disk()
+    let copy = fs
+    copy.write_text("draft.txt", "x").expect("allowed")
+    assert fs.exists("draft.txt") == COPY_SEES
+
+test "a revoked caretaker":
+    let caretaker, revoker = disk().revocable()
+    revoker.revoke()
+    assert caretaker.exists("notes/todo.txt") == AFTER_REVOKE

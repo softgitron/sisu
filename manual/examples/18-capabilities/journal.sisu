@@ -1,0 +1,33 @@
+# A struct can hold the capabilities its methods use.
+struct Journal:
+    fs: Fs
+    clock: Clock
+
+impl Journal:
+    ## Adds `entry` to the journal, after the time it was added.
+    def add(self, entry: str) -> ! IoError:
+        let old = self.fs.read_to_string("journal.txt") else: String()
+        let line = "{self.clock.now()} {entry}\n"
+        self.fs.write_text("journal.txt", "{old}{line}")?
+        return Ok(())
+
+def main(sys: System) -> ! IoError:
+    let journal = Journal(fs=sys.fs, clock=sys.clock)
+    for entry in ["lit the sauna", "went for a swim"]:
+        journal.add(entry)?
+        print("added: {entry}")
+    print("journal.txt is there: {sys.fs.exists("journal.txt")}")
+    return Ok(())
+
+test "each entry has its time":
+    let fs = Fs.in_memory()
+    let start = DateTime.parse("2026-11-03T17:00:00Z").expect("a time")
+    let clock = Clock.frozen_at(start)
+    let journal = Journal(fs=fs, clock=clock)
+    journal.add("lit the sauna").expect("in memory")
+    clock.advance(Duration.minutes(40))
+    journal.add("went for a swim").expect("in memory")
+    let text = fs.read_to_string("journal.txt").expect("written")
+    let lines = text.lines().collect[list[str]]()
+    assert lines[0] == "2026-11-03T17:00:00Z lit the sauna"
+    assert lines[1] == "2026-11-03T17:40:00Z went for a swim"

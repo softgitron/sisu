@@ -1,0 +1,72 @@
+##! Exercise 19.5, a retry that waits longer each time. Kind: write. Level: 3.
+##!
+##! A weather service is busy now and then. `ask` asks it for a town's
+##! forecast, and when the service is busy, waits and asks again: 1
+##! second after the first try, 2 after the second, 4 after the third,
+##! each wait twice the one before, for at most `tries` tries. Write the
+##! body of `ask` so that every test passes. The tests give it a fake of
+##! the service and the test clock, so they run at once and see every
+##! wait. Run them with `sisu test retry.sisu`. The hints are in chapter
+##! 19 of the tutorial, under "Exercise 19.5: a retry that waits longer
+##! each time".
+
+error ServiceError:
+    Busy
+    UnknownTown(name: String)
+
+trait Forecasts:
+    def today(self, town: str) -> String ! ServiceError
+
+## The forecast for `town`, asked of `service` at most `tries` times
+## while it is busy, waiting on `clock` before each try after the first.
+## An unknown town is not asked again.
+def ask[F: Forecasts](
+    service: F,
+    clock: Clock,
+    town: str,
+    tries: int,
+) -> String ! {ServiceError, TaskError}:
+    var wait = Duration.seconds(1)
+    for attempt in range(1, tries + 1):
+        match service.today(town):
+            case Err(Busy) if attempt < tries:
+                clock.sleep(wait)?
+                wait = wait + wait
+            case Ok(forecast):
+                return Ok(forecast)
+            case Err(e):
+                return Err(e)
+    return Err(Busy)
+
+test "an answer at once"(clock: TestClock):
+    let service = cap.Fake[Forecasts].new()
+    service.on_today(Ok("snow"))
+    let start = clock.now()
+    assert ask(service, clock, "Oulu", 3) == Ok("snow")
+    assert clock.now() == start
+    assert service.calls() == ["today(\"Oulu\")"]
+
+test "busy twice, then an answer"(clock: TestClock):
+    let service = cap.Fake[Forecasts].new()
+    service.on_today(Err(Busy))
+    service.on_today(Err(Busy))
+    service.on_today(Ok("rain"))
+    let start = clock.now()
+    assert ask(service, clock, "Turku", 5) == Ok("rain")
+    assert clock.now() - start == Duration.seconds(3)
+    assert len(service.calls()) == 3
+
+test "busy every time"(clock: TestClock):
+    let service = cap.Fake[Forecasts].new()
+    service.on_today(Err(Busy))
+    let start = clock.now()
+    assert ask(service, clock, "Oulu", 4) == Err(Busy)
+    assert clock.now() - start == Duration.seconds(7)
+    assert len(service.calls()) == 4
+
+test "an unknown town is asked once"(clock: TestClock):
+    let service = cap.Fake[Forecasts].new()
+    service.on_today(Err(UnknownTown("Atlantis")))
+    let answer = ask(service, clock, "Atlantis", 3)
+    assert answer == Err(UnknownTown("Atlantis"))
+    assert len(service.calls()) == 1

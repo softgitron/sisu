@@ -1,0 +1,2 @@
+8:26-8:32 E0334 type.impure-capability name="file_word_count" ty="Fs"
+  fix type.remove-pure 8:1-8:6 ""

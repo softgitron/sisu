@@ -1,0 +1,5 @@
+test "an answer is kept in a file" ... ok
+test "a key that was never kept" ... ok
+test "an answer goes stale" ... ok
+test "a new answer replaces a stale one" ... ok
+4 passed, 0 failed, 0 blocked

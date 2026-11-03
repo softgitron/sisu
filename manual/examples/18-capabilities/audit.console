@@ -1,0 +1,11 @@
+$ sisu audit --caps settings.sisu compute.sisu
+settings.sisu function main caps=1 io=calls depth=0
+settings.sisu function setting caps=2 io=direct depth=1
+settings.sisu function test#0 caps=0 io=calls depth=-
+settings.sisu use setting EnvOps.get depth=1
+settings.sisu use setting FsOps.read_to_string depth=1
+settings.sisu summary functions=3 median=1 max=2 uses=2 deepest=1 structs=0
+compute.sisu function file_word_count caps=1 io=direct depth=1
+compute.sisu function main caps=1 io=calls depth=0
+compute.sisu use file_word_count FsOps.read_to_string depth=1
+compute.sisu summary functions=2 median=1 max=1 uses=1 deepest=1 structs=0

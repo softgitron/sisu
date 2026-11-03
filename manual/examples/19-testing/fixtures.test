@@ -1,0 +1,4 @@
+test "every line is a price" ... ok
+test "a price in cents" ... ok
+test "a test's own file system starts empty" ... ok
+3 passed, 0 failed, 0 blocked

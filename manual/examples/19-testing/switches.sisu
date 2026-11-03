@@ -1,0 +1,29 @@
+# `exhaustive` makes every small case, rather than random ones.
+@derive(Copy, Eq, Debug)
+enum Press:
+    On
+    Off
+    Toggle
+
+## Whether the light is on after `presses`, starting from off.
+def light(presses: list[Press]) -> bool:
+    var on = False
+    for p in presses:
+        match p:
+            case On:
+                on = True
+            case Off:
+                on = False
+            case Toggle:
+                on = not on
+    return on
+
+test "two toggles at the end change nothing":
+    var cases = 0
+    check(exhaustive[list[Press]](max_len=4)) do presses:
+        cases += 1
+        var twice = presses.copy()
+        twice.push(Toggle)
+        twice.push(Toggle)
+        return light(twice) == light(presses)
+    assert cases == 121

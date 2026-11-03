@@ -1,0 +1,7 @@
+test "one wait after the other" ... ok
+test "two waits in two tasks" ... ok
+test "a task of two steps beside a task of one" ... ok
+test "the test moves the clock" ... ok
+test "a busy loop" ... ok
+test "every short list of booleans" ... ok
+6 passed, 0 failed, 0 blocked

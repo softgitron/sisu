@@ -1,0 +1,28 @@
+test "a comparison shows both sides" ... FAILED
+test "the parts that only read show their values" ... FAILED
+test "a message says what was meant" ... FAILED
+
+test "a comparison shows both sides" ... FAILED
+panic: assertion failed: average([80, 85, 120]) == 90
+  left:  95
+  right: 90
+  at test "a comparison shows both sides" (asserts.sisu:11:5)
+replay: sisu test --replay 1-e4f3e873c7a7fcfa-0.0.1-t0-s0-r0 asserts.sisu
+
+test "the parts that only read show their values" ... FAILED
+panic: assertion failed: len(temps) == 4
+    len(temps) == 4
+    │   │
+    3   [80, 85, 120]
+  at test "the parts that only read show their values" (asserts.sisu:15:5)
+replay: sisu test --replay 1-e4f3e873c7a7fcfa-0.0.1-t1-s0-r0 asserts.sisu
+
+test "a message says what was meant" ... FAILED
+panic: assertion failed: average(temps) >= 80
+  message: a sauna at 72 is too cool
+  left:  72
+  right: 80
+  at test "a message says what was meant" (asserts.sisu:19:5)
+replay: sisu test --replay 1-e4f3e873c7a7fcfa-0.0.1-t2-s0-r0 asserts.sisu
+
+0 passed, 3 failed, 0 blocked

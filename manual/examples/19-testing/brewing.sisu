@@ -1,0 +1,21 @@
+# The test clock moves only when every task waits.
+
+## Brews for `minutes` on `clock`, and gives the minutes back.
+def brew(clock: Clock, minutes: int) -> int ! TaskError:
+    clock.sleep(Duration.minutes(minutes))?
+    return Ok(minutes)
+
+test "two pots brew at once"(clock: TestClock):
+    let start = clock.now()
+    let total = task.scope do s:
+        let coffee = s.spawn(() -> brew(clock, 4))
+        let tea = s.spawn(() -> brew(clock, 3))
+        return Ok(coffee.join()? + tea.join()?)
+    assert total == Ok(7)
+    assert clock.now() - start == Duration.minutes(4)
+
+test "one pot after the other"(clock: TestClock):
+    let start = clock.now()
+    brew(clock, 4).expect("not cancelled")
+    brew(clock, 3).expect("not cancelled")
+    assert clock.now() - start == Duration.minutes(7)

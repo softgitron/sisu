@@ -1,0 +1,12 @@
+test "number words (1, \"yksi\")" ... ok
+test "number words (2, \"kaksi\")" ... ok
+test "number words (4, \"neljä\")" ... FAILED
+
+test "number words (4, \"neljä\")" ... FAILED
+panic: assertion failed: word(n) == Some(w)
+  left:  None
+  right: Some("neljä")
+  at test "number words (4, \"neljä\")" (cases.sisu:16:5)
+replay: sisu test --replay 1-c87a4c0eef313560-0.0.1-t2-s0-r0 cases.sisu
+
+2 passed, 1 failed, 0 blocked

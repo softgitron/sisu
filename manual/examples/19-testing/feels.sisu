@@ -1,0 +1,25 @@
+# A suite groups tests under a name, and a tag marks some of them.
+
+## How a sauna at `celsius` degrees feels.
+def feels(celsius: int) -> str:
+    if celsius < 60:
+        return "cool"
+    if celsius < 80:
+        return "warm"
+    if celsius <= 100:
+        return "hot"
+    return "too hot"
+
+suite "feels":
+    test "the edges of warm":
+        assert feels(60) == "warm"
+        assert feels(79) == "warm"
+
+    test "hot and too hot":
+        assert feels(100) == "hot"
+        assert feels(101) == "too hot"
+
+    @tag("slow")
+    test "every degree feels like something":
+        for celsius in range(0, 200):
+            assert feels(celsius) in ["cool", "warm", "hot", "too hot"]

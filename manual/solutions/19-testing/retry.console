@@ -1,0 +1,12 @@
+$ sisu test retry.sisu
+warning[W0001]: typed hole `ask` of type `String ! {TaskError, ServiceError}`
+  --> retry.sisu:29:12
+   |
+29 |     return todo("ask")
+   |            ^^^^^^^^^^^
+
+test "an answer at once" ... blocked by todo("ask")
+test "busy twice, then an answer" ... blocked by todo("ask")
+test "busy every time" ... blocked by todo("ask")
+test "an unknown town is asked once" ... blocked by todo("ask")
+0 passed, 0 failed, 4 blocked

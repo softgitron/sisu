@@ -1,0 +1,7 @@
+$ sisu run journal.sisu
+added: lit the sauna
+added: went for a swim
+journal.txt is there: True
+$ sisu test journal.sisu
+test "each entry has its time" ... ok
+1 passed, 0 failed, 0 blocked

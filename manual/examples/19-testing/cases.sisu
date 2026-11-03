@@ -1,0 +1,16 @@
+# A parametrised test is a test of its own for each case.
+
+## The Finnish word for a number from 1 to 3, or `None`.
+def word(n: int) -> str?:
+    match n:
+        case 1:
+            return Some("yksi")
+        case 2:
+            return Some("kaksi")
+        case 3:
+            return Some("kolme")
+        case _:
+            return None
+
+test "number words" for n, w in [(1, "yksi"), (2, "kaksi"), (4, "neljä")]:
+    assert word(n) == Some(w)

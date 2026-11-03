@@ -1,0 +1,37 @@
+##! Exercise 19.4, a program and its transcript. Kind: fix. Level: 2.
+##!
+##! `tally` prints how often each word of a file appears: the most
+##! common first, words with the same count in alphabetical order, and
+##! with `--top N` only the first N. Its transcript,
+##! `tests/tally.transcript`, records what it must print for a short
+##! poem, and the program does not print it yet. Run
+##! `sisu test tally.sisu`, read the transcript's diff, and fix the
+##! program, not the transcript or the test, so that everything passes.
+##! The hints are in chapter 19 of the tutorial, under "Exercise 19.4: a
+##! program and its transcript".
+
+import cli
+
+## What the command line can say.
+struct Options:
+    top: int = 10
+    paths: list[Path]
+
+## How often each word of `text` appears, in lower case.
+def count_words(text: str) -> dict[String, int]:
+    var counts: dict[String, int] = {}
+    for word in text.split_whitespace():
+        counts.entry(word.to_lowercase()).or_insert(0) += 1
+    return counts
+
+def main(sys: System) -> ! {IoError, cli.Error}:
+    let options = cli.parse[Options](sys.env.args())?
+    for path in options.paths:
+        let text = sys.fs.read_to_string(path)?
+        let counts = count_words(text)
+        for word, n in counts:
+            print("{n:>4}  {word}")
+    return Ok(())
+
+test "words in any case count together":
+    assert count_words("Kissa kissa koira") == {"kissa": 2, "koira": 1}

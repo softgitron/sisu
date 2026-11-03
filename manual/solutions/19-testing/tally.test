@@ -1,0 +1,3 @@
+test "words in any case count together" ... ok
+transcript "tests/tally.transcript" ... ok
+2 passed, 0 failed, 0 blocked

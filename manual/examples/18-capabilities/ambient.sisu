@@ -1,0 +1,7 @@
+# Printing, logging and opening a scope need no capability.
+def main():
+    print("the sauna is warm")
+    print_err("the stove needs wood")
+    log.info("added two logs")
+    task.scope do s:
+        s.spawn(() -> log.warn("the water bucket is empty"))

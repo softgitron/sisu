@@ -1,0 +1,10 @@
+test "the numbers come out in order" ... ok
+test "every number is kept" ... FAILED
+
+test "every number is kept" ... FAILED
+panic: the property failed for [0, 0] (case 3, shrunk 10 times)
+  the property returned False
+  at test "every number is kept" (sorting.sisu:20:5)
+replay: sisu test --replay 1-9c5428daab4aad00-0.0.1-t1-s0-r0-c1.0.0.1.0.0.0 sorting.sisu
+
+1 passed, 1 failed, 0 blocked

@@ -696,23 +696,23 @@ $ sisu fmt --check layout.sisu
 | Code | Identifier | Section |
 |---|---|---|
 | [E0001](diagnostics.md#e0001) | `lex.tab-in-indentation` | [Indentation and blocks](#indentation-and-blocks) |
-| E0002 | `lex.inconsistent-dedent` | [Indentation and blocks](#indentation-and-blocks) |
+| [E0002](diagnostics.md#e0002) | `lex.inconsistent-dedent` | [Indentation and blocks](#indentation-and-blocks) |
 | [E0003](diagnostics.md#e0003) | `lex.unterminated-string` | [String literals](#string-literals) |
 | E0004 | `lex.unterminated-block-string` | [String literals](#string-literals) |
 | E0005 | `lex.unknown-character` | [Source text](#source-text) |
 | E0006 | `lex.unterminated-char` | [Character literals](#character-literals) |
 | E0007 | `lex.invalid-escape` | [Character literals](#character-literals) |
 | E0008, E0009, E0010 | `lex.unmatched-close`, `lex.unclosed-bracket`, `lex.mismatched-bracket` | [Lines and statements](#lines-and-statements) |
-| E0011 | `lex.semicolon` | [Lines and statements](#lines-and-statements) |
-| E0012 | `lex.invalid-number` | [Integer literals](#integer-literals) |
+| [E0011](diagnostics.md#e0011) | `lex.semicolon` | [Lines and statements](#lines-and-statements) |
+| [E0012](diagnostics.md#e0012) | `lex.invalid-number` | [Integer literals](#integer-literals) |
 | E0013 | `lex.lone-close-brace` | [String literals](#string-literals) |
 | E0014 | `lex.bad-indent-char` | [Indentation and blocks](#indentation-and-blocks) |
-| E0015 | `lex.backslash-continuation` | [Lines and statements](#lines-and-statements) |
+| [E0015](diagnostics.md#e0015) | `lex.backslash-continuation` | [Lines and statements](#lines-and-statements) |
 | [E0016](diagnostics.md#e0016) | `lex.bad-char-literal` | [Character literals](#character-literals) |
 | E0018 | `lex.newline-in-interpolation` | [String literals](#string-literals) |
-| E0101, E0102, E0125 | `parse.expected-block`, `parse.block-on-same-line`, `parse.unexpected-indent` | [Indentation and blocks](#indentation-and-blocks) |
+| E0101, [E0102](diagnostics.md#e0102), E0125 | `parse.expected-block`, `parse.block-on-same-line`, `parse.unexpected-indent` | [Indentation and blocks](#indentation-and-blocks) |
 | E0121 | `parse.empty-interpolation` | [String literals](#string-literals) |
 | E0123 | `parse.walrus` | [Operators and punctuation](#operators-and-punctuation) |
-| E0124 | `parse.keyword-as-name` | [Names](#names) |
+| [E0124](diagnostics.md#e0124) | `parse.keyword-as-name` | [Names](#names) |
 
 [R17, Diagnostics](diagnostics.md) lists every code.

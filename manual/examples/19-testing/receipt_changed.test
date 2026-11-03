@@ -1,0 +1,14 @@
+test "a receipt for two" ... FAILED
+
+test "a receipt for two" ... FAILED
+panic: the snapshot `a receipt for two` changed (`sisu test --update` accepts the new one):
+- coffee    3,50
+- bun       2,80
+- total     6,30
++ coffee    3,50 €
++ bun       2,80 €
++ total     6,30 €
+  at test "a receipt for two" (receipt_changed.sisu:15:5)
+replay: sisu test --replay 1-0c3a2103f89cb8aa-0.0.1-t0-s0-r0 receipt_changed.sisu
+
+0 passed, 1 failed, 0 blocked

@@ -1,0 +1,3 @@
+test "a book due in three days" ... ok
+test "a book that is late" ... ok
+2 passed, 0 failed, 0 blocked

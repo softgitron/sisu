@@ -1,0 +1,3 @@
+test "two pots brew at once" ... ok
+test "one pot after the other" ... ok
+2 passed, 0 failed, 0 blocked

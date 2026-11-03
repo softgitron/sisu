@@ -1,0 +1,50 @@
+##! Exercise 18.3, a narrow file system. Kind: complete. Level: 2.
+##!
+##! A report generator writes its reports under `reports/`, and a preview
+##! shows the first line of one. Neither should see anything outside
+##! `reports/`, and the preview should change nothing. Replace the two
+##! holes so that every test passes. Run the tests with
+##! `sisu test reports.sisu`. The hints are in chapter 18 of the tutorial,
+##! under "Exercise 18.3: a narrow file system".
+
+## The file system the generator gets: the files under `reports/`, to
+## read and write, and nothing outside it.
+def for_generator(fs: Fs) -> Fs:
+    return fs.restrict_to("reports")
+
+## The file system the preview gets: the same files, read only.
+def for_preview(fs: Fs) -> Fs:
+    return for_generator(fs).read_only()
+
+## Writes the report `name`, a line for each of `lines`.
+def generate(fs: Fs, name: str, lines: list[str]) -> ! IoError:
+    fs.write_text(Path.new("{name}.txt"), lines.join("\n"))?
+    return Ok(())
+
+## The first line of the report `name`.
+def preview(fs: Fs, name: str) -> String ! IoError:
+    let text = fs.read_to_string(Path.new("{name}.txt"))?
+    let first = text.lines().next() ?? ""
+    return Ok(first.to_string())
+
+## A disk with last week's report and a file that is none of theirs.
+def disk() -> Fs:
+    return Fs.in_memory({"reports/w44.txt": "quiet\nwarm", "pin.txt": "1234"})
+
+test "the generator writes under reports/":
+    let fs = disk()
+    generate(for_generator(fs), "w45", ["busy", "full"]).expect("allowed")
+    assert fs.read_to_string("reports/w45.txt") == Ok("busy\nfull")
+
+test "the generator sees nothing outside":
+    let fs = for_generator(disk())
+    assert fs.exists("w44.txt")
+    assert not fs.exists("pin.txt")
+    assert not fs.exists("../pin.txt")
+
+test "the preview reads and does not write":
+    let fs = disk()
+    assert preview(for_preview(fs), "w44") == Ok("quiet")
+    assert generate(for_preview(fs), "w46", ["x"]).is_err()
+    assert not fs.exists("reports/w46.txt")
+    assert not for_preview(fs).exists("../pin.txt")

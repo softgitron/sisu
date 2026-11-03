@@ -1,0 +1,4 @@
+test "the generator writes under reports/" ... ok
+test "the generator sees nothing outside" ... ok
+test "the preview reads and does not write" ... ok
+3 passed, 0 failed, 0 blocked

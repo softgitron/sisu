@@ -1,0 +1,8 @@
+# `main` receives the program's capabilities in one value, a `System`.
+def main(sys: System) -> ! IoError:
+    let guests = sys.env.args()
+    let heat = sys.env.get("SAUNA_HEAT") ?? "80"
+    sys.fs.write_text("guests.txt", guests.join("\n"))?
+    let saved = sys.fs.read_to_string("guests.txt")?
+    print("{saved.lines().count()} guests, the sauna at {heat} degrees")
+    return Ok(())

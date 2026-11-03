@@ -1,0 +1,15 @@
+# A snapshot keeps what a value looked like, and fails when it changes.
+from std.test import assert_snapshot
+
+## A receipt: each item and its price in euros, and the total.
+def receipt(items: list[(str, int)]) -> String:
+    var lines: list[String] = []
+    var total = 0
+    for name, cents in items:
+        lines.push("{name:<8}{cents // 100:>3},{cents % 100:02} €")
+        total += cents
+    lines.push("{"total":<8}{total // 100:>3},{total % 100:02} €")
+    return lines.join("\n")
+
+test "a receipt for two":
+    assert_snapshot(receipt([("coffee", 350), ("bun", 280)]))

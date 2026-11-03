@@ -1,0 +1,19 @@
+# A failing `assert` shows the values that made it fail.
+
+## The average of `temps`, rounded down.
+def average(temps: list[int]) -> int:
+    var total = 0
+    for t in temps:
+        total += t
+    return total // len(temps)
+
+test "a comparison shows both sides":
+    assert average([80, 85, 120]) == 90
+
+test "the parts that only read show their values":
+    let temps = [80, 85, 120]
+    assert len(temps) == 4
+
+test "a message says what was meant":
+    let temps = [70, 75]
+    assert average(temps) >= 80, "a sauna at {average(temps)} is too cool"

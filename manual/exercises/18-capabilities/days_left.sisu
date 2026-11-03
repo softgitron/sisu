@@ -1,0 +1,29 @@
+##! Exercise 18.2, a clock to test with. Kind: fix. Level: 1.
+##!
+##! `days_left` says how many whole days are left until a library book is
+##! due. It takes the whole `System` to read the clock, so a test cannot
+##! hand it a clock of its own. The file does not compile. Run
+##! `sisu test days_left.sisu`, read the diagnostics, and change
+##! `days_left`, not the tests, so that every test passes. The hints are
+##! in chapter 18 of the tutorial, under "Exercise 18.2: a clock to test
+##! with".
+
+## The whole days from now until `due`, or 0 once it has passed.
+def days_left(sys: System, due: DateTime) -> int:
+    let left = due - sys.clock.now()
+    if left < Duration.seconds(0):
+        return 0
+    return left.as_seconds() // 86400
+
+## The time that `text` writes, for the tests.
+def at(text: str) -> DateTime:
+    return DateTime.parse(text).expect("a time")
+
+test "a book due in three days":
+    let clock = Clock.frozen_at(at("2026-11-03T12:00:00Z"))
+    assert days_left(clock, at("2026-11-06T12:00:00Z")) == 3
+    assert days_left(clock, at("2026-11-06T11:00:00Z")) == 2
+
+test "a book that is late":
+    let clock = Clock.frozen_at(at("2026-11-10T09:00:00Z"))
+    assert days_left(clock, at("2026-11-06T12:00:00Z")) == 0

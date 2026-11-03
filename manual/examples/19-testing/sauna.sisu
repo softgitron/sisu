@@ -1,0 +1,33 @@
+# A program whose transcript, `tests/sauna.transcript`, tests it whole.
+error BookingError:
+    Taken(hour: int)
+    Usage
+
+## The bookings in `bookings.txt`, one `HOUR NAME` on each line.
+def bookings(fs: Fs) -> dict[int, String]:
+    var booked: dict[int, String] = {}
+    let text = fs.read_to_string("bookings.txt") else:
+        return booked
+    for line in text.lines():
+        if let Some((hour, name)) = line.split_once(" "):
+            _ = booked.insert(hour.parse_int() ?? 0, name.to_string())
+    return booked
+
+def main(sys: System) -> ! {BookingError, IoError}:
+    var booked = bookings(sys.fs)
+    match sys.env.args():
+        case ["book", name, hour]:
+            let h = hour.parse_int() else:
+                return Err(Usage)
+            if h in booked:
+                return Err(Taken(h))
+            _ = booked.insert(h, name.to_string())
+            let lines = ["{t} {who}" for t, who in booked]
+            sys.fs.write_text("bookings.txt", lines.join("\n"))?
+            print("booked {h}:00 for {name}")
+        case ["list"]:
+            for hour in sorted(booked.keys()):
+                print("{hour}:00 {booked[hour]}")
+        case _:
+            return Err(Usage)
+    return Ok(())

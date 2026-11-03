@@ -1,0 +1,44 @@
+##! Exercise 18.4, any form of a file system. Kind: write. Level: 2.
+##!
+##! `total_size` adds up the sizes of the files directly in a directory.
+##! It only reads, and only while it runs, so it accepts every form of a
+##! file system: a plain one, a narrowed one, and one lent for the call.
+##! Write its body so that every test passes. Run the tests with
+##! `sisu test total_size.sisu`. The hints are in chapter 18 of the
+##! tutorial, under "Exercise 18.4: any form of a file system".
+
+## The sum of the sizes, in bytes, of the files directly in `dir`; the
+## directories in it do not count.
+def total_size[F: FsOps](fs: F, dir: Path) -> int ! IoError:
+    var total = 0
+    for path in fs.list_dir(dir)?:
+        let meta = fs.metadata(path)?
+        if not meta.is_dir:
+            total += meta.len
+    return Ok(total)
+
+## Two photos, and an older one in a directory of its own.
+def disk() -> Fs:
+    return Fs.in_memory(
+        {
+            "photos/a.jpg": "12345",
+            "photos/b.jpg": "123",
+            "photos/old/c.jpg": "1234567",
+        }
+    )
+
+test "the files directly in a directory":
+    assert total_size(disk(), "photos") == Ok(8)
+    assert total_size(disk(), "photos/old") == Ok(7)
+
+test "a lent file system":
+    let fs = disk()
+    assert total_size(fs.lend(), "photos") == Ok(8)
+
+test "narrowed file systems":
+    let fs = disk()
+    assert total_size(fs.restrict_to("photos"), ".") == Ok(8)
+    assert total_size(fs.read_only(), "photos/old") == Ok(7)
+
+test "a directory that is not there":
+    assert total_size(disk(), "music") == Err(NotFound("music"))

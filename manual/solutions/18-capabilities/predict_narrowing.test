@@ -1,0 +1,7 @@
+test "inside the narrowed directory" ... ok
+test "outside it" ... ok
+test "a write through a read-only one" ... ok
+test "a write through the narrowed one" ... ok
+test "a copy of a capability" ... ok
+test "a revoked caretaker" ... ok
+6 passed, 0 failed, 0 blocked

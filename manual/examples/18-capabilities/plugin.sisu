@@ -1,0 +1,16 @@
+# A caretaker's capability fails once its revoker revokes it.
+struct Plugin:
+    fs: Fs
+
+impl Plugin:
+    def settings(self) -> String ! IoError:
+        return self.fs.read_to_string("plugin.toml")
+
+def main(sys: System):
+    let plugin_dir = sys.fs.restrict_to("plugins/clock")
+    let plugin_fs, revoker = plugin_dir.revocable()
+    let plugin = Plugin(fs=plugin_fs)
+    print(plugin.settings())
+    revoker.revoke()
+    print(plugin.settings())
+    print(plugin_dir.read_to_string("plugin.toml"))

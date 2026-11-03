@@ -1,0 +1,41 @@
+##! Exercise 19.3, one property for three examples. Kind: write. Level: 2.
+##!
+##! `dedupe` keeps the first of each number and leaves out the numbers
+##! that repeat one before them. Three tests with examples could check it
+##! on three lists: [3, 1, 2], [1, 2, 1, 3, 2] and []. A property checks
+##! every list instead. Write the body of `dedupe_ok`, which says whether
+##! `out` is what `dedupe` should give for `xs`, so that every test
+##! passes: the property holds of `dedupe` on a hundred random lists,
+##! accepts the three examples, and rejects wrong answers. Run the tests
+##! with `sisu test dedupe.sisu`. The hints are in chapter 19 of the
+##! tutorial, under "Exercise 19.3: one property for three examples".
+
+## `xs` without the numbers that repeat one before them.
+def dedupe(xs: list[int]) -> list[int]:
+    var seen: set[int] = set()
+    var out: list[int] = []
+    for x in xs:
+        if not seen.contains(x):
+            seen.add(x)
+            out.push(x)
+    return out
+
+## Whether `out` holds each number of `xs` once, in the order of the
+## numbers' first places in `xs`, and nothing else.
+def dedupe_ok(xs: list[int], out: list[int]) -> bool:
+    return todo("dedupe_ok")
+
+test "the property holds of dedupe":
+    check(arbitrary[list[int]]) do xs:
+        return dedupe_ok(xs, dedupe(xs))
+
+test "the property accepts the three examples":
+    assert dedupe_ok([3, 1, 2], [3, 1, 2])
+    assert dedupe_ok([1, 2, 1, 3, 2], [1, 2, 3])
+    assert dedupe_ok([], [])
+
+test "the property rejects wrong answers":
+    assert not dedupe_ok([1, 2, 1], [1, 2, 1])
+    assert not dedupe_ok([1, 2], [1])
+    assert not dedupe_ok([2, 1, 2], [1, 2])
+    assert not dedupe_ok([1], [1, 5])

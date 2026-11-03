@@ -1,0 +1,14 @@
+$ sisu test feels.sisu
+test "feels/the edges of warm" ... ok
+test "feels/hot and too hot" ... ok
+test "feels/every degree feels like something" ... ok
+3 passed, 0 failed, 0 blocked
+$ sisu test --skip-tag slow feels.sisu
+test "feels/the edges of warm" ... ok
+test "feels/hot and too hot" ... ok
+2 passed, 0 failed, 0 blocked
+1 not selected
+$ sisu test --filter edges feels.sisu
+test "feels/the edges of warm" ... ok
+1 passed, 0 failed, 0 blocked
+2 not selected

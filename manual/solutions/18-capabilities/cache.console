@@ -1,0 +1,18 @@
+$ sisu test cache.sisu
+warning[W0001]: typed hole `put` of type `! IoError`
+  --> cache.sisu:21:16
+   |
+21 |         return todo("put")
+   |                ^^^^^^^^^^^
+
+warning[W0001]: typed hole `get` of type `String?`
+  --> cache.sisu:26:16
+   |
+26 |         return todo("get")
+   |                ^^^^^^^^^^^
+
+test "an answer is kept in a file" ... blocked by todo("put")
+test "a key that was never kept" ... blocked by todo("get")
+test "an answer goes stale" ... blocked by todo("put")
+test "a new answer replaces a stale one" ... blocked by todo("put")
+0 passed, 0 failed, 4 blocked

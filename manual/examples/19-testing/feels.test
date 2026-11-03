@@ -1,0 +1,4 @@
+test "feels/the edges of warm" ... ok
+test "feels/hot and too hot" ... ok
+test "feels/every degree feels like something" ... ok
+3 passed, 0 failed, 0 blocked

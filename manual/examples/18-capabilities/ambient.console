@@ -1,0 +1,5 @@
+$ sisu run ambient.sisu
+the sauna is warm
+the stove needs wood
+info: added two logs
+warn [task 1]: the water bucket is empty

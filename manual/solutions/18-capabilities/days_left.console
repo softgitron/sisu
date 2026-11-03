@@ -1,0 +1,20 @@
+$ sisu test days_left.sisu
+error[E0300]: expected `System`, found `TestClock`
+  --> days_left.sisu:24:22
+   |
+24 |     assert days_left(clock, at("2026-11-06T12:00:00Z")) == 3
+   |                      ^^^^^
+
+error[E0300]: expected `System`, found `TestClock`
+  --> days_left.sisu:25:22
+   |
+25 |     assert days_left(clock, at("2026-11-06T11:00:00Z")) == 2
+   |                      ^^^^^
+
+error[E0300]: expected `System`, found `TestClock`
+  --> days_left.sisu:29:22
+   |
+29 |     assert days_left(clock, at("2026-11-06T12:00:00Z")) == 0
+   |                      ^^^^^
+
+error[D0006]: the program was not run: errors found (3)

@@ -1,0 +1,11 @@
+test "a receipt for two" ... FAILED
+
+test "a receipt for two" ... FAILED
+panic: there is no snapshot `a receipt for two` yet (`sisu test --update` stores this one):
+coffee    3,50
+bun       2,80
+total     6,30
+  at test "a receipt for two" (receipt.sisu:15:5)
+replay: sisu test --replay 1-230ba086fa32ec26-0.0.1-t0-s0-r0 receipt.sisu
+
+0 passed, 1 failed, 0 blocked

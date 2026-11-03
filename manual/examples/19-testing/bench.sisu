@@ -1,0 +1,17 @@
+# A benchmark times a loop; `sisu test` checks it and does not run it.
+from std.test import Bench, black_box
+
+## The number of vowels in `word`.
+def vowels(word: str) -> int:
+    var n = 0
+    for c in word.chars():
+        if c in ['a', 'e', 'i', 'o', 'u', 'y', 'ä', 'ö']:
+            n += 1
+    return n
+
+test "the vowels of a short word":
+    assert vowels("sauna") == 3
+
+bench "the vowels of a long word"(b: Bench):
+    for _ in b.loop():
+        black_box(vowels("lentokonesuihkuturbiinimoottoriapumekaanikko"))

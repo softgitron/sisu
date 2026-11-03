@@ -1,0 +1,25 @@
+$ sisu test tally.sisu
+test "words in any case count together" ... ok
+transcript "tests/tally.transcript" ... FAILED
+
+transcript "tests/tally.transcript" ... FAILED
+what the program printed differs from the transcript (`sisu test --update` accepts it):
+  $ tally poem.txt
+-    3  is
+     3  the
+     2  sauna
++    3  is
+     2  warm
+-    1  cold
+     1  lake
++    1  cold
+  $ tally --top 2 poem.txt
+-    3  is
+     3  the
++    2  sauna
++    3  is
++    2  warm
++    1  lake
++    1  cold
+
+1 passed, 1 failed, 0 blocked

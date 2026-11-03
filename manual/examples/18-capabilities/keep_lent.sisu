@@ -1,0 +1,10 @@
+# A lent capability cannot be kept in a struct.
+struct Reader:
+    fs: Fs
+
+def keep(fs: Lent[Fs]) -> Reader:
+    return Reader(fs=fs)
+
+def main(sys: System):
+    let reader = keep(sys.fs.lend())
+    print(reader.fs.exists("a.txt"))

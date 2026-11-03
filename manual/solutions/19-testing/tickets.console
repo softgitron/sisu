@@ -1,0 +1,24 @@
+$ sisu test tickets.sisu
+test "ticket prices (3, 3)" ... ok
+test "ticket prices (7, 5)" ... ok
+test "ticket prices (17, 5)" ... FAILED
+test "ticket prices (18, 8)" ... ok
+test "ticket prices (64, 8)" ... ok
+test "ticket prices (65, 5)" ... FAILED
+test "ticket prices (80, 5)" ... ok
+
+test "ticket prices (17, 5)" ... FAILED
+panic: assertion failed: price(age) == euros
+  left:  8
+  right: 5
+  at test "ticket prices (17, 5)" (tickets.sisu:29:5)
+replay: sisu test --replay 1-6d968e649cb4a43a-0.0.1-t2-s0-r0 tickets.sisu
+
+test "ticket prices (65, 5)" ... FAILED
+panic: assertion failed: price(age) == euros
+  left:  8
+  right: 5
+  at test "ticket prices (65, 5)" (tickets.sisu:29:5)
+replay: sisu test --replay 1-6d968e649cb4a43a-0.0.1-t5-s0-r0 tickets.sisu
+
+5 passed, 2 failed, 0 blocked

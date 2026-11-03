@@ -1,0 +1,2 @@
+heat = 80
+steam = gentle

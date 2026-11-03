@@ -1,0 +1,65 @@
+##! Exercise 19.1, predict the test clock. Kind: predict. Level: 1.
+##!
+##! Each constant is your prediction of how many seconds the test clock
+##! moves in its test, or of how many cases a generator makes. Write
+##! each as a literal, then run `sisu test predict_clock.sisu`. The hints
+##! are in chapter 19 of the tutorial, under "Exercise 19.1: predict the
+##! test clock".
+
+## Waits `seconds` on `clock`.
+def wait(clock: Clock, seconds: int) -> ! TaskError:
+    clock.sleep(Duration.seconds(seconds))?
+    return Ok(())
+
+const ONE_AFTER_THE_OTHER: int = todo("seconds for two waits in a row")
+const SIDE_BY_SIDE: int = todo("seconds for two waits in two tasks")
+const IN_STEPS: int = todo("seconds for two steps beside one step")
+const ADVANCED: int = todo("seconds that the test moved the clock")
+const BUSY: int = todo("seconds that a busy loop takes")
+const CASES: int = todo("lists of at most two booleans")
+
+test "one wait after the other"(clock: TestClock):
+    let start = clock.now()
+    wait(clock, 10).expect("not cancelled")
+    wait(clock, 20).expect("not cancelled")
+    assert (clock.now() - start).as_seconds() == ONE_AFTER_THE_OTHER
+
+test "two waits in two tasks"(clock: TestClock):
+    let start = clock.now()
+    let done = task.scope do s:
+        s.spawn(() -> wait(clock, 10))
+        s.spawn(() -> wait(clock, 20))
+        return Ok(())
+    assert done.is_ok()
+    assert (clock.now() - start).as_seconds() == SIDE_BY_SIDE
+
+test "a task of two steps beside a task of one"(clock: TestClock):
+    let start = clock.now()
+    let done = task.scope do s:
+        s.spawn do:
+            wait(clock, 5)?
+            return wait(clock, 5)
+        s.spawn(() -> wait(clock, 8))
+        return Ok(())
+    assert done.is_ok()
+    assert (clock.now() - start).as_seconds() == IN_STEPS
+
+test "the test moves the clock"(clock: TestClock):
+    let start = clock.now()
+    clock.advance(Duration.minutes(2))
+    assert (clock.now() - start).as_seconds() == ADVANCED
+
+test "a busy loop"(clock: TestClock):
+    let start = clock.now()
+    var total = 0
+    for i in range(100000):
+        total += i
+    assert total > 0
+    assert (clock.now() - start).as_seconds() == BUSY
+
+test "every short list of booleans":
+    var cases = 0
+    check(exhaustive[list[bool]](max_len=2)) do xs:
+        cases += 1
+        return len(xs) <= 2
+    assert cases == CASES

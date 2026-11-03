@@ -1,0 +1,4 @@
+test "the property holds of dedupe" ... ok
+test "the property accepts the three examples" ... ok
+test "the property rejects wrong answers" ... ok
+3 passed, 0 failed, 0 blocked

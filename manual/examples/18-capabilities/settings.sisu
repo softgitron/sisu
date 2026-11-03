@@ -1,0 +1,24 @@
+# A function takes the capabilities it uses, and its caller passes them.
+
+## The setting `name`: the variable SAUNA_NAME if it is set, or else the
+## line `name = value` of the file `settings.txt`.
+def setting(env: Env, fs: Fs, name: str) -> String?:
+    if let Some(value) = env.get("SAUNA_{name.to_uppercase()}"):
+        return Some(value)
+    let text = fs.read_to_string("settings.txt") else:
+        return None
+    for line in text.lines():
+        if let Some((key, value)) = line.split_once(" = "), key == name:
+            return Some(value.to_string())
+    return None
+
+def main(sys: System):
+    for name in ["heat", "steam", "music"]:
+        print("{name}: {setting(sys.env, sys.fs, name) ?? "not set"}")
+
+test "a variable comes before the file":
+    let env = Env.fake(vars={"SAUNA_HEAT": "90"})
+    let fs = Fs.in_memory({"settings.txt": "heat = 80\nsteam = gentle"})
+    assert setting(env, fs, "heat") == Some("90")
+    assert setting(env, fs, "steam") == Some("gentle")
+    assert setting(env, Fs.in_memory(), "steam") == None

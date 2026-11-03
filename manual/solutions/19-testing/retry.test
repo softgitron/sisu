@@ -1,0 +1,5 @@
+test "an answer at once" ... ok
+test "busy twice, then an answer" ... ok
+test "busy every time" ... ok
+test "an unknown town is asked once" ... ok
+4 passed, 0 failed, 0 blocked

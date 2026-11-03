@@ -1,0 +1,63 @@
+##! Exercise 18.5, a cache that expires. Kind: write. Level: 3.
+##!
+##! A weather widget asks a slow service for the forecast. It keeps each
+##! answer in a file under `cache/`, so that it can answer again without
+##! asking, until the answer is older than the widget accepts. `Cache`
+##! holds the capabilities it needs. Write the bodies of `put` and `get`
+##! so that every test passes. Run the tests with `sisu test cache.sisu`.
+##! The hints are in chapter 18 of the tutorial, under "Exercise 18.5: a
+##! cache that expires".
+
+## Answers kept in files under `cache/`, a file for each key, and how
+## long each stays fresh.
+struct Cache:
+    fs: Fs
+    clock: Clock
+    max_age: Duration
+
+impl Cache:
+    ## Keeps `text` as the answer for `key`, in the file `cache/KEY`.
+    def put(self, key: str, text: str) -> ! IoError:
+        return todo("put")
+
+    ## The answer kept for `key`, if there is one and it is no older than
+    ## `max_age`.
+    def get(self, key: str) -> String?:
+        return todo("get")
+
+## A clock that stands at noon on 3 November 2026 until a test moves it.
+def noon() -> TestClock:
+    let t = DateTime.parse("2026-11-03T12:00:00Z").expect("a time")
+    return Clock.frozen_at(t)
+
+test "an answer is kept in a file":
+    let fs = Fs.in_memory()
+    let ten = Duration.minutes(10)
+    let cache = Cache(fs=fs, clock=noon(), max_age=ten)
+    cache.put("helsinki", "snow").expect("in memory")
+    assert fs.exists("cache/helsinki")
+    assert cache.get("helsinki") == Some("snow")
+
+test "a key that was never kept":
+    let hour = Duration.hours(1)
+    let cache = Cache(fs=Fs.in_memory(), clock=noon(), max_age=hour)
+    assert cache.get("turku") == None
+
+test "an answer goes stale":
+    let clock = noon()
+    let ten = Duration.minutes(10)
+    let cache = Cache(fs=Fs.in_memory(), clock=clock, max_age=ten)
+    cache.put("oulu", "rain").expect("in memory")
+    clock.advance(Duration.minutes(10))
+    assert cache.get("oulu") == Some("rain")
+    clock.advance(Duration.seconds(1))
+    assert cache.get("oulu") == None
+
+test "a new answer replaces a stale one":
+    let clock = noon()
+    let five = Duration.minutes(5)
+    let cache = Cache(fs=Fs.in_memory(), clock=clock, max_age=five)
+    cache.put("oulu", "rain").expect("in memory")
+    clock.advance(Duration.minutes(30))
+    cache.put("oulu", "sleet").expect("in memory")
+    assert cache.get("oulu") == Some("sleet")

@@ -2202,7 +2202,7 @@ Shown in [chapter 3](../tutorial/03-functions.md).
 ### E0318
 
 `type.unused-result`: this `{ty}` is not used; handle it, or discard it
-with `_ = ..`.
+with `_ = ...`.
 
 A value that can hold an error or an absence must be used, so that no
 failure passes unseen.

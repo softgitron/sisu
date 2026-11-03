@@ -1,0 +1,5 @@
+test "the files directly in a directory" ... ok
+test "a lent file system" ... ok
+test "narrowed file systems" ... ok
+test "a directory that is not there" ... ok
+4 passed, 0 failed, 0 blocked

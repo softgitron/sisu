@@ -1,0 +1,6 @@
+> Fs.read_to_string("settings.txt")
+< Ok("heat = 80\n")
+Ok("heat = 80\n")
+> Fs.exists("other.txt")
+< False
+False

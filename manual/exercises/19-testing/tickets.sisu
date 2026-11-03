@@ -1,0 +1,29 @@
+##! Exercise 19.2, the cases that fail. Kind: fix. Level: 1.
+##!
+##! A swimming hall's ticket costs 3 euros for a child under 7, 5 euros
+##! from 7 to 17 years, 8 euros from 18 to 64, and 5 euros again from 65
+##! on. `price` is wrong for some of the cases of its parametrised test.
+##! Run `sisu test tickets.sisu`, read which cases fail, and fix `price`,
+##! not the test, so that every case passes. The hints are in chapter 19
+##! of the tutorial, under "Exercise 19.2: the cases that fail".
+
+## The price in euros of a ticket for someone `age` years old.
+def price(age: int) -> int:
+    if age < 7:
+        return 3
+    if age < 17:
+        return 5
+    if age > 65:
+        return 5
+    return 8
+
+test "ticket prices" for age, euros in [
+    (3, 3),
+    (7, 5),
+    (17, 5),
+    (18, 8),
+    (64, 8),
+    (65, 5),
+    (80, 5),
+]:
+    assert price(age) == euros

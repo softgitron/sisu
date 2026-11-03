@@ -1,0 +1,18 @@
+# An interceptor is shown each call through a capability.
+struct Printer:
+    pass
+
+impl cap.Interceptor for Printer:
+    def before(self, call: cap.Call):
+        print("> {call.capability}.{call.method}({call.args})")
+
+    def after(self, call: cap.Call, outcome: str):
+        print("< {outcome}")
+
+def load(fs: Fs) -> String ! IoError:
+    return fs.read_to_string("settings.txt")
+
+def main(sys: System):
+    let fs: Fs = cap.Wrap(inner=sys.fs, hook=Printer())
+    print(load(fs))
+    print(fs.exists("other.txt"))
