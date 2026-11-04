@@ -8791,6 +8791,61 @@ the driver"; decision 424)
      `SISU_STAGE1_SIR_REPORTS` still decides first. This changes no rule
      of the language.
 
+**Stage 1's seventh round** (stage 1's RULES.md, R65 to R72; black-box tests, the evaluator's `Shared`, derive diagnostics at the derive, more habits)
+
+480. A file directly in a package's `tests/` directory is a program of
+     one module whose dependencies are the package, by its name, and the
+     package's dev-dependencies (17's black-box tests): it sees the
+     package's `pub` items only, the package is built without its own
+     tests, the file has the package's features, and its files are named
+     relative to the package's directory. `sir --tests PKG/tests/NAME.sisu`
+     prints its SIR with its own tests' lines, which `sisu test` runs after
+     the package's own, a program each; `sisu1 test` does so, and stage
+     1's version is 0.7.0. Stage 1 decides it (RULES.md, R65).
+
+481. Stage 1's compile-time evaluator holds a `Shared` as the value it
+     shares, so `==`, `hash`, a set and a dict follow it to the value as
+     decision 464 has the run time do; its identity (`same`, `count`, a
+     `Weak`) is beyond the evaluator, and a `Shared` kept for run time is
+     `E0604`. Stage 1 decides it (RULES.md, R66).
+
+482. R54's spelling fix is given also where the parse error expects a
+     bracket or a colon (`print(n as f64)`, `for i in 0..3:`), and `#` for
+     a `//` comment at the end of a line, also where it is a division by
+     a name (`E0200`); a fix's message no longer names the replacement its
+     edit shows. Stage 1 decides it (RULES.md, R67).
+
+483. `E0418`, `E0420`, `E0812`, `R0069` and `R0103` write the type without
+     an article ("a value of `T`", "of type `T`"); a trait's constant read
+     through a type parameter where a type goes is `E0274`, which calls it
+     a constant, where `E0239` called it an associated type. Stage 1
+     decides it (RULES.md, R68).
+
+484. `sisu lint` answers an option it does not take with `D0009` and
+     status 2; the audit heads a program of one file "no level"; a file
+     whose only parse diagnostic is `E0130` is formatted, its tree being
+     whole. Stage 1 decides it (RULES.md, R69).
+
+485. A diagnostic in an impl a derive writes is placed at the derive's
+     argument that asked for it, with a note giving the impl's line and
+     without the labels and fixes that point into the generated text;
+     `E0243` for a std module's derivable trait names its import; the fix
+     "derive it" goes to the type argument that lacks the trait when the
+     type derives it, and is offered for `Arbitrary`. Stage 1 decides it
+     (RULES.md, R70).
+
+486. An import of a dependency whose `when` excludes the target is
+     `E0275`, which says so, where `E0260` asked to add it to
+     `[dependencies]`; a call of a function with a variadic parameter is
+     not checked against its parameters, so R64's `E0900` is its one
+     error. Stage 1 decides it (RULES.md, R71).
+
+487. A parse error at Python's `lambda`, `f"..."` or `class` gets the fix
+     that writes Sisu's spelling; at `try:`, `except:`, `finally:` and Go's
+     `go f()` a note that says what Sisu has instead; at a keyword where a
+     binding's name goes a note that it is a keyword. Stage 1 decides it
+     (RULES.md, R72).
+
 **Stage 2: the interpreter's test modes natively** (sections "Testing",
 "Simulation, schedulers and replay" and "Stage 2"; 17; D-089, port-debt.md's
 plan for a native `sisu run`)
