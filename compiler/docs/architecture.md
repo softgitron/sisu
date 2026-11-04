@@ -9039,6 +9039,45 @@ query layer and the driver"; 17; stage 1's seventh round, R65, decision
      where a file of `tests/` was never run. This changes no rule of the
      language.
 
+**Stage 1's eighth round** (stage 1's RULES.md, R73 to R78; fixed test names, modules behind imports, dev-dependencies under `@cfg(test)`, diagnostics at the instance's call, literals beside `BigInt` and `Decimal`)
+
+520. The name of a test, a suite or a benchmark is fixed text: an
+     interpolation in it is `E0132`, with the fix that doubles its braces,
+     and what the braces hold is not parsed. Stage 1 decides it (RULES.md,
+     R73).
+
+521. The name a child module has in its parent gives way to an import of
+     that name there, and the module is still reached by its path; `E0304` on a local named like an imported module says the
+     local hides it. Stage 1 decides it (RULES.md, R74).
+
+522. A package's code imports its dev-dependency only by an import marked
+     `@cfg(test)`; any other import of it is `E0276`, in every build, and
+     the black-box tests of `tests/` import it freely. Stage 1 decides it
+     (RULES.md, R75).
+
+523. `else` after a statement that is no `let` notes that it belongs to a
+     `let` and fixes `else as e` to `if let Err(e) = ...`; `d.get(k,
+     default)` is fixed to `d.get(k) ?? default`; a positional-only
+     parameter passed by name is noted, fixed and taken as passed; a std
+     module's error set written alone is named through its module; and
+     `E0981` writes `ptr mut T` as the program does. Stage 1 decides it
+     (RULES.md, R76).
+
+524. A diagnostic in a template's instance is placed at the call that made
+     it, with a note giving the instance's line and without the labels and
+     fixes that point into the generated text; a typed hole of a derive's
+     template is reported once; an untyped binding's interpolated literal
+     of compile-time values stays a `String` in the instance; and
+     `E0342`, `E0369`, `E0438` (of `sorted`) and a conflict inside a loop
+     the borrow lasts through say what the program writes instead. Stage 1
+     decides it (RULES.md, R77).
+
+525. A literal operand beside a non-numeric type that implements
+     `FromLiteral` for it becomes that type when the operator has no impl
+     for the literal as it is; an explicit discriminant is `E0900` until
+     the layouts of `@repr` enums are lowered. Stage 1 decides it
+     (RULES.md, R78).
+
 **Stage 2: a property's budget natively** (sections "Property tests" and
 "Stage 2", "Tasks"; 17; decision 461, port-debt.md's plan for a native
 `sisu run`)
