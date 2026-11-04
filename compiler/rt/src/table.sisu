@@ -76,6 +76,27 @@ def set_word(tb: ptr mut u8, k: int, w: int):
 pub(package) def length(tb: ptr mut u8) -> int:
     return word(tb, LEN)
 
+## The type of the keys of the table at `tb`.
+##
+## Requires:
+## - `table`: `tb` is the address of a live table
+pub(package) def key_type(tb: ptr mut u8) -> int:
+    return word(tb, KEY)
+
+## The bytes of a key of the table at `tb`.
+##
+## Requires:
+## - `table`: `tb` is the address of a live table
+pub(package) def key_size(tb: ptr mut u8) -> int:
+    return word(tb, KEY_SIZE)
+
+## The bytes of a value of the table at `tb` (0 for a set's).
+##
+## Requires:
+## - `table`: `tb` is the address of a live table
+pub(package) def value_size(tb: ptr mut u8) -> int:
+    return word(tb, VALUE_SIZE)
+
 ## The bytes of an entry of the table at `tb`: its key's hash, its key and
 ## its value.
 ##

@@ -1,0 +1,35 @@
+# A `sim.always` predicate that locks a mutex another task holds across a
+# switch (decision 503): the check cannot wait for the critical section,
+# which cannot end while the predicate runs, so it is skipped until the
+# next switch, as a predicate on the holder's own stack is, where the run
+# waited forever for the lock. The total is seen whole after each section,
+# in every schedule of the bounded exhaustive search.
+# schedule --scheduler exhaustive --depth 1
+
+import std.sim
+
+@derive(Copy)
+struct Bank:
+    accounts: Cap[Mutex[list[int]]]
+
+impl Bank:
+    def total(self) -> int:
+        var t = 0
+        for x in self.accounts.get().lock().value.iter():
+            t += x
+        return t
+
+def transfer_slowly(bank: Bank, a: int, b: int, n: int):
+    var g = bank.accounts.get().lock()
+    g.value[a] -= n
+    task.yield_now()
+    g.value[b] += n
+
+test "a critical section across a switch":
+    let bank = Bank(accounts=Cap(Mutex([50, 50])))
+    sim.always("the total is 100", () -> bank.total() == 100) do:
+        _ = task.scope do s:
+            s.spawn(() -> transfer_slowly(bank, 0, 1, 10))
+            s.spawn(() -> transfer_slowly(bank, 1, 0, 5))
+            return Ok(())
+    assert bank.total() == 100

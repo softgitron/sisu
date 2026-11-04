@@ -1601,18 +1601,7 @@ impl<'p> Interp<'p, '_> {
 
 /// The source-level name of a SIR function, for stack traces.
 pub(crate) fn display_fn_name(name: &str, prog: &sir::Program) -> String {
-    if let Some(i) = name.strip_prefix("test#").and_then(|n| n.parse::<usize>().ok())
-        && let Some((t, _)) = prog.tests.get(i)
-    {
-        return format!("test {}", sisu_sir::write::quote(t));
-    }
-    if let Some(owner) = name.strip_suffix(".__check_invariant") {
-        return format!("the invariant of {owner}");
-    }
-    match name.split_once("#closure") {
-        Some((owner, _)) => format!("closure in {}", display_fn_name(owner, prog)),
-        None => name.to_string(),
-    }
+    sir::display_fn_name(name, prog)
 }
 
 impl<'p> Interp<'p, '_> {

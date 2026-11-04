@@ -1,0 +1,2 @@
+test "a critical section across a switch" ... ok
+1 passed, 0 failed, 0 blocked

@@ -1293,6 +1293,26 @@ pub pure def display_fn_name(name: str, p: Program) -> String:
         return "the invariant of {owner}"
     if let Some(at) = name.find("#closure"):
         return "closure in {display_fn_name(name.byte_slice(0, at), p)}"
+    # A method of a trait's impl, `Type.Trait.method` in SIR (a prefix that
+    # names a declared type, then a trait's path whose last name is
+    # capitalised), as `Trait.method for Type` (decision 504).
+    let (rest, method) = rsplit_dot(name) else:
+        return name.to_string()
+    let (_, trait_name) = rsplit_dot(rest) else:
+        return name.to_string()
+    if trait_name.byte_len() == 0:
+        return name.to_string()
+    let first = trait_name.byte_at(0).to_int()
+    if first < 65 or first > 90:
+        return name.to_string()
+    var at = 0
+    while at <= rest.byte_len() - trait_name.byte_len() - 1:
+        if rest.byte_at(at).to_int() == 46:
+            let ty = name.byte_slice(0, at)
+            for t in p.types:
+                if t.name() == ty:
+                    return "{trait_name}.{method} for {ty}"
+        at += 1
     return name.to_string()
 
 ## The functions `main` may reach, by name: through direct calls,

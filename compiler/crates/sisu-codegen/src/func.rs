@@ -4064,18 +4064,7 @@ fn c_type(t: &Type) -> Option<ir::Type> {
 /// The source-level name of a SIR function, for stack traces
 /// (`sisu-interp/src/exec.rs`, `display_fn_name`).
 fn display_fn_name(name: &str, prog: &sir::Program) -> String {
-    if let Some(i) = name.strip_prefix("test#").and_then(|n| n.parse::<usize>().ok())
-        && let Some((t, _)) = prog.tests.get(i)
-    {
-        return format!("test {}", sir::write::quote(t));
-    }
-    if let Some(owner) = name.strip_suffix(".__check_invariant") {
-        return format!("the invariant of {owner}");
-    }
-    match name.split_once("#closure") {
-        Some((owner, _)) => format!("closure in {}", display_fn_name(owner, prog)),
-        None => name.to_string(),
-    }
+    sir::display_fn_name(name, prog)
 }
 
 /// How `==` compares two values of one variant of an enum compiled inline

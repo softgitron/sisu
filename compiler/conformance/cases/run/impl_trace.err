@@ -1,0 +1,6 @@
+panic: index out of bounds: the length is 2 but the index is 2
+  at closure in Meter.read for Dial (impl_trace.sisu:15:32)
+  at Meter.read for Dial (impl_trace.sisu:16:16)
+  at Display.fmt for Dial (impl_trace.sisu:20:27)
+  at show (impl_trace.sisu:23:14)
+  at main (impl_trace.sisu:27:11)

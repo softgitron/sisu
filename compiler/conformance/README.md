@@ -271,7 +271,10 @@ program is built from SIR), `--native-release` with `--release`
 `--native-from-lir` through the Rust lowering and Cranelift (`--lower=rust
 --backend=cranelift`), and `--interpreted-from-sir` in the interpreter;
 each report is compared with the expectation, held to the status it
-gives, and each failure replayed natively from its token. A case whose
+gives, and each failure replayed natively from its token. PCT, the bounded
+exhaustive search, the `sim` profile's faults, `sim.choose`, `sim.always`
+and `expect` run natively as in the interpreter (decisions 500 to 503), so
+every such run of a case is one a native test makes. A case whose
 source has a line `# native tests: WHY` runs its program natively and
 leaves its tests to the interpreter, for the reason it gives. A case that has
 only such runs is built for nothing else. A case whose program its errors

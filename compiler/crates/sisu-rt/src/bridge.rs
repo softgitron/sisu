@@ -190,6 +190,11 @@ unsafe extern "C" {
         k: *const *mut u8,
     ) -> u8;
     fn sisu_rt_table_remove(ret: *mut u64, tb: *const *mut u8, i: *const i64, out: *const *mut u8) -> u8;
+    fn sisu_rt_table_key_type(ret: *mut i64, tb: *const *mut u8) -> u8;
+    fn sisu_rt_table_len(ret: *mut i64, tb: *const *mut u8) -> u8;
+    fn sisu_rt_table_key_bytes(ret: *mut i64, tb: *const *mut u8) -> u8;
+    fn sisu_rt_table_value_bytes(ret: *mut i64, tb: *const *mut u8) -> u8;
+    fn sisu_rt_table_value_at(ret: *mut *mut u8, tb: *const *mut u8, i: *const i64) -> u8;
     fn sisu_rt_iter_next(
         ret: *mut i64,
         types: *const *const u64,
@@ -912,6 +917,53 @@ pub(crate) unsafe fn table_remove(tb: *mut u8, i: u64, out: *mut u8) {
     if unsafe { sisu_rt_table_remove(&mut ret, &tb, &i, &out) } != abi::OK {
         failed("table's remove");
     }
+}
+
+/// The parts of the table at `tb`'s header the runtime in Rust reads,
+/// through the runtime in Sisu's exports (decision 506): its key's type,
+/// its number of entries, and the bytes of a key and of a value.
+///
+/// # Safety
+/// `tb` must be the address of a live table.
+pub(crate) unsafe fn table_word(tb: *mut u8, part: TablePart) -> u64 {
+    let mut ret = 0i64;
+    // SAFETY: as for [`equal`].
+    let status = unsafe {
+        match part {
+            TablePart::KeyType => sisu_rt_table_key_type(&mut ret, &tb),
+            TablePart::Len => sisu_rt_table_len(&mut ret, &tb),
+            TablePart::KeyBytes => sisu_rt_table_key_bytes(&mut ret, &tb),
+            TablePart::ValueBytes => sisu_rt_table_value_bytes(&mut ret, &tb),
+        }
+    };
+    if status != abi::OK {
+        failed("table's header");
+    }
+    ret as u64
+}
+
+/// What [`table_word`] reads.
+#[derive(Clone, Copy)]
+pub(crate) enum TablePart {
+    KeyType,
+    Len,
+    KeyBytes,
+    ValueBytes,
+}
+
+/// The address of the value of entry `i` of the table at `tb`.
+///
+/// # Safety
+/// `tb` must be the address of a live table of more than `i` entries.
+pub(crate) unsafe fn table_value_at(tb: *mut u8, i: u64) -> *mut u8 {
+    let i = i as i64;
+    let mut ret = std::ptr::null_mut();
+    // SAFETY: as for [`equal`].
+    let status = unsafe { sisu_rt_table_value_at(&mut ret, &tb, &i) };
+    if status != abi::OK {
+        failed("table's entry");
+    }
+    ret
 }
 
 // --------------------------------------------------------------- iterators

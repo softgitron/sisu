@@ -9,24 +9,14 @@
 //! left; the runtime in Sisu's `value.sisu` copies, compares, shows and
 //! drops a whole table itself.
 
+use crate::bridge::TablePart;
 use crate::value::{self, target};
 
-/// A table's header, nine words, as `table.sisu` lays it out: the key's
-/// type, the value's (-1 for a set's), the bytes of a key and of a value,
-/// the entries (each its key's hash, the key and the value), their number
-/// and the room for them, and the index and its mask, which only the
-/// runtime in Sisu reads.
-#[repr(C)]
+/// A table, as `table.sisu` lays it out: the runtime in Rust reads its
+/// header and finds its entries only through the runtime in Sisu's exports
+/// (decision 506), so the layout is written once.
 pub(crate) struct Table {
-    key: i64,
-    val: i64,
-    pub ksize: u64,
-    pub vsize: u64,
-    entries: *mut u8,
-    len: u64,
-    _cap: u64,
-    _index: *mut u64,
-    _mask: u64,
+    _opaque: [u8; 0],
 }
 
 impl Table {
@@ -37,29 +27,39 @@ impl Table {
         crate::bridge::table_new(i64::from(key), val).cast::<Table>()
     }
 
+    fn addr(&self) -> *mut u8 {
+        (self as *const Table).cast_mut().cast()
+    }
+
+    fn part(&self, part: TablePart) -> u64 {
+        // SAFETY: a `Table` is a live table's address.
+        unsafe { crate::bridge::table_word(self.addr(), part) }
+    }
+
     /// The type of its keys.
     pub(crate) fn key(&self) -> u32 {
-        self.key as u32
+        self.part(TablePart::KeyType) as u32
     }
 
     pub(crate) fn len(&self) -> u64 {
-        self.len
+        self.part(TablePart::Len)
     }
 
-    fn entry_size(&self) -> u64 {
-        8 + self.ksize + self.vsize
+    /// The bytes of a key.
+    pub(crate) fn ksize(&self) -> u64 {
+        self.part(TablePart::KeyBytes)
     }
 
-    /// The address of entry `i`'s key, which its value follows.
-    pub(crate) fn key_at(&self, i: u64) -> *mut u8 {
-        // SAFETY: the entries' block has room for entry `i`, after the hash.
-        unsafe { self.entries.add((i * self.entry_size() + 8) as usize) }
+    /// The bytes of a value (0 for a set's).
+    pub(crate) fn vsize(&self) -> u64 {
+        self.part(TablePart::ValueBytes)
     }
 
     /// The address of entry `i`'s value.
     pub(crate) fn val_at(&self, i: u64) -> *mut u8 {
-        // SAFETY: the value follows the key within the entry.
-        unsafe { self.key_at(i).add(self.ksize as usize) }
+        // SAFETY: a `Table` is a live table's address, and the callers ask
+        // for its entries.
+        unsafe { crate::bridge::table_value_at(self.addr(), i) }
     }
 
     /// The position of the key at `k` (of type `kt`), if it is there.

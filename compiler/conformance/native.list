@@ -159,6 +159,7 @@ run/expect
 run/f32
 run/float_text
 run/format_specs
+run/impl_trace
 run/inline_operations
 run/integer_division
 run/interpolation
@@ -190,8 +191,15 @@ run/text_bytes
 run/unicode_escapes
 run/unwind
 run/wide_overflow
+sim/always_held
+sim/choose_always
 sim/crash
+sim/faults
+sim/http_faults
+sim/lost_update
+sim/no_revoked
 sim/nodes
+sim/pct
 sim/rename
 sir/closure
 sir/drop_flags
@@ -222,6 +230,7 @@ syntax/option_nested
 syntax/option_spaced
 syntax/option_sugar
 testing/doc_examples
+testing/expect
 testing/explore_output
 testing/fakes
 testing/hole_in_task

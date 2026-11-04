@@ -1,0 +1,31 @@
+# `expect` records a failure and the test goes on (17; decision 388): the
+# test fails at its end with every failure it recorded, each with the
+# frames a panic there would have left, in order, and then the panic that
+# stopped it, if one did. Natively the frames are walked by the panic's
+# own unwinding in a copy of the process (decision 500), so both runs
+# report the same.
+
+def double(n: int) -> int:
+    return n + 2
+
+def check_double(n: int):
+    expect double(n) == 2 * n
+
+test "doubles":
+    expect double(2) == 4
+    expect double(3) == 6
+    print("after the expects")
+    check_double(4)
+    assert double(5) == 10
+    print("never printed")
+
+test "expect holds":
+    expect double(2) == 4
+    check_double(2)
+
+test "a failure in a task":
+    let r = task.scope do s:
+        let h = s.spawn(() -> check_double(7))
+        return h.join()
+    assert r == Ok(())
+    print("the test goes on")

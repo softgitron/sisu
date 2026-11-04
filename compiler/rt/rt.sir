@@ -683,56 +683,97 @@ fn export_table_remove(3) source 0 @387:5-387:24 {
     return
 }
 
-fn export_iter_next(4) source 0 @398:5-398:21 {
+fn export_table_key_type(1) source 0 @396:5-396:26 {
     let _0: int
-    let _1: ptr[int] "types" @398:22-398:37
-    let _2: ptr_mut[u8] "it" @398:39-398:53
-    let _3: ptr_mut[u8] "out" @398:55-398:70
-    let _4: int "mode" @398:72-398:81
-    let _5: rt.types.Types
+    let _1: ptr_mut[u8] "tb" @396:27-396:41
   bb0:
-    _5 = struct rt.types.Types(copy _1) @399:22-399:40
-    _0 = call fn rt.iter.next(copy _5, copy _2, copy _3, copy _4) @399:12-399:56
-    return @399:5-399:56
+    _0 = call fn rt.table.key_type(copy _1) @397:12-397:30
+    return @397:5-397:30
 }
 
-fn export_iter_drop(3) source 0 @407:5-407:21 {
+fn export_table_len(1) source 0 @403:5-403:21 {
     let _0: int
-    let _1: ptr[int] "types" @407:22-407:37
-    let _2: ptr_mut[u8] "it" @407:39-407:53
-    let _3: int "mode" @407:55-407:64
+    let _1: ptr_mut[u8] "tb" @403:22-403:36
+  bb0:
+    _0 = call fn rt.table.length(copy _1) @404:12-404:28
+    return @404:5-404:28
+}
+
+fn export_table_key_bytes(1) source 0 @410:5-410:27 {
+    let _0: int
+    let _1: ptr_mut[u8] "tb" @410:28-410:42
+  bb0:
+    _0 = call fn rt.table.key_size(copy _1) @411:12-411:30
+    return @411:5-411:30
+}
+
+fn export_table_value_bytes(1) source 0 @418:5-418:29 {
+    let _0: int
+    let _1: ptr_mut[u8] "tb" @418:30-418:44
+  bb0:
+    _0 = call fn rt.table.value_size(copy _1) @419:12-419:32
+    return @419:5-419:32
+}
+
+fn export_table_value_at(2) source 0 @426:5-426:26 {
+    let _0: ptr_mut[u8]
+    let _1: ptr_mut[u8] "tb" @426:27-426:41
+    let _2: int "i" @426:43-426:49
+  bb0:
+    _0 = call fn rt.table.value_at(copy _1, copy _2) @427:12-427:33
+    return @427:5-427:33
+}
+
+fn export_iter_next(4) source 0 @437:5-437:21 {
+    let _0: int
+    let _1: ptr[int] "types" @437:22-437:37
+    let _2: ptr_mut[u8] "it" @437:39-437:53
+    let _3: ptr_mut[u8] "out" @437:55-437:70
+    let _4: int "mode" @437:72-437:81
+    let _5: rt.types.Types
+  bb0:
+    _5 = struct rt.types.Types(copy _1) @438:22-438:40
+    _0 = call fn rt.iter.next(copy _5, copy _2, copy _3, copy _4) @438:12-438:56
+    return @438:5-438:56
+}
+
+fn export_iter_drop(3) source 0 @446:5-446:21 {
+    let _0: int
+    let _1: ptr[int] "types" @446:22-446:37
+    let _2: ptr_mut[u8] "it" @446:39-446:53
+    let _3: int "mode" @446:55-446:64
     let _4: rt.types.Types
   bb0:
-    _4 = struct rt.types.Types(copy _1) @408:22-408:40
-    _0 = call fn rt.iter.drop(copy _4, copy _2, copy _3) @408:12-408:51
-    return @408:5-408:51
+    _4 = struct rt.types.Types(copy _1) @447:22-447:40
+    _0 = call fn rt.iter.drop(copy _4, copy _2, copy _3) @447:12-447:51
+    return @447:5-447:51
 }
 
-fn export_iter_iterable(4) source 0 @417:5-417:25 {
+fn export_iter_iterable(4) source 0 @456:5-456:25 {
     let _0: ptr_mut[u8]
-    let _1: ptr[int] "types" @417:26-417:41
-    let _2: ptr_mut[u8] "p" @417:43-417:56
-    let _3: int "arg" @417:58-417:66
-    let _4: int "item" @417:68-417:77
+    let _1: ptr[int] "types" @456:26-456:41
+    let _2: ptr_mut[u8] "p" @456:43-456:56
+    let _3: int "arg" @456:58-456:66
+    let _4: int "item" @456:68-456:77
     let _5: rt.types.Types
   bb0:
-    _5 = struct rt.types.Types(copy _1) @418:26-418:44
-    _0 = call fn rt.iter.iterable(copy _5, copy _2, copy _3, copy _4) @418:12-418:59
-    return @418:5-418:59
+    _5 = struct rt.types.Types(copy _1) @457:26-457:44
+    _0 = call fn rt.iter.iterable(copy _5, copy _2, copy _3, copy _4) @457:12-457:59
+    return @457:5-457:59
 }
 
-fn export_iter_collect(5) source 0 @427:5-427:24 {
+fn export_iter_collect(5) source 0 @466:5-466:24 {
     let _0: int
-    let _1: ptr[int] "types" @428:5-428:20
-    let _2: ptr_mut[u8] "it" @428:22-428:36
-    let _3: int "item" @428:38-428:47
-    let _4: ptr_mut[u8] "out" @428:49-428:64
-    let _5: int "mode" @428:66-428:75
+    let _1: ptr[int] "types" @467:5-467:20
+    let _2: ptr_mut[u8] "it" @467:22-467:36
+    let _3: int "item" @467:38-467:47
+    let _4: ptr_mut[u8] "out" @467:49-467:64
+    let _5: int "mode" @467:66-467:75
     let _6: rt.types.Types
   bb0:
-    _6 = struct rt.types.Types(copy _1) @430:25-430:43
-    _0 = call fn rt.iter.collect(copy _6, copy _2, copy _3, copy _4, copy _5) @430:12-430:65
-    return @430:5-430:65
+    _6 = struct rt.types.Types(copy _1) @469:25-469:43
+    _0 = call fn rt.iter.collect(copy _6, copy _2, copy _3, copy _4, copy _5) @469:12-469:65
+    return @469:5-469:65
 }
 
 fn rt.floats.set(2) source 1 @48:5-48:8 {
@@ -8688,29 +8729,59 @@ fn rt.table.length(1) source 6 @76:18-76:24 {
     return @77:5-77:25
 }
 
-fn rt.table.entry_size(1) source 6 @84:18-84:28 {
+fn rt.table.key_type(1) source 6 @83:18-83:26 {
     let _0: int
-    let _1: ptr_mut[u8] "tb" @84:29-84:43
+    let _1: ptr_mut[u8] "tb" @83:27-83:41
+    let _2: int
+  bb0:
+    _2 = call fn rt.table.KEY() @84:21-84:24
+    _0 = call fn rt.table.word(copy _1, copy _2) @84:12-84:25
+    return @84:5-84:25
+}
+
+fn rt.table.key_size(1) source 6 @90:18-90:26 {
+    let _0: int
+    let _1: ptr_mut[u8] "tb" @90:27-90:41
+    let _2: int
+  bb0:
+    _2 = call fn rt.table.KEY_SIZE() @91:21-91:29
+    _0 = call fn rt.table.word(copy _1, copy _2) @91:12-91:30
+    return @91:5-91:30
+}
+
+fn rt.table.value_size(1) source 6 @97:18-97:28 {
+    let _0: int
+    let _1: ptr_mut[u8] "tb" @97:29-97:43
+    let _2: int
+  bb0:
+    _2 = call fn rt.table.VALUE_SIZE() @98:21-98:31
+    _0 = call fn rt.table.word(copy _1, copy _2) @98:12-98:32
+    return @98:5-98:32
+}
+
+fn rt.table.entry_size(1) source 6 @105:18-105:28 {
+    let _0: int
+    let _1: ptr_mut[u8] "tb" @105:29-105:43
     let _2: int
     let _3: int
     let _4: int
     let _5: int
     let _6: int
   bb0:
-    _4 = call fn rt.table.KEY_SIZE() @85:25-85:33
-    _3 = call fn rt.table.word(copy _1, copy _4) @85:16-85:34
-    _2 = add const 8, copy _3 @85:12-85:34
-    _6 = call fn rt.table.VALUE_SIZE() @85:46-85:56
-    _5 = call fn rt.table.word(copy _1, copy _6) @85:37-85:57
-    _0 = add copy _2, copy _5 @85:12-85:57
-    return @85:5-85:57
+    _4 = call fn rt.table.KEY_SIZE() @106:25-106:33
+    _3 = call fn rt.table.word(copy _1, copy _4) @106:16-106:34
+    _2 = add const 8, copy _3 @106:12-106:34
+    _6 = call fn rt.table.VALUE_SIZE() @106:46-106:56
+    _5 = call fn rt.table.word(copy _1, copy _6) @106:37-106:57
+    _0 = add copy _2, copy _5 @106:12-106:57
+    return @106:5-106:57
 }
 
-fn rt.table.entry(2) source 6 @93:5-93:10 {
+fn rt.table.entry(2) source 6 @114:5-114:10 {
     let _0: ptr_mut[u8]
-    let _1: ptr_mut[u8] "tb" @93:11-93:25
-    let _2: int "i" @93:27-93:33
-    let _3: ptr_mut[u8] "entries" @97:13-97:20
+    let _1: ptr_mut[u8] "tb" @114:11-114:25
+    let _2: int "i" @114:27-114:33
+    let _3: ptr_mut[u8] "entries" @118:13-118:20
     let _4: ptr[u8]
     let _5: ptr_mut[ptr[u8]]
     let _6: ptr_mut[ptr[u8]]
@@ -8718,51 +8789,51 @@ fn rt.table.entry(2) source 6 @93:5-93:10 {
     let _8: int
     let _9: int
   bb0:
-    _6 = call intrinsic mem.ptr.cast[u8, ptr[u8]](copy _1) @97:23-97:41
-    _7 = call fn rt.table.ENTRIES() @97:49-97:56
-    _5 = call intrinsic mem.ptr.offset(copy _6, copy _7) @97:23-97:57
-    _4 = call intrinsic mem.ptr.read(copy _5) @97:23-97:64
-    _3 = call intrinsic mem.ptr.cast_mut(copy _4) @97:23-97:75
-    _9 = call fn rt.table.entry_size(copy _1) @98:35-98:49
-    _8 = mul copy _2, copy _9 @98:31-98:49
-    _0 = call intrinsic mem.ptr.offset(copy _3, copy _8) @98:16-98:50
-    return @98:9-98:50
+    _6 = call intrinsic mem.ptr.cast[u8, ptr[u8]](copy _1) @118:23-118:41
+    _7 = call fn rt.table.ENTRIES() @118:49-118:56
+    _5 = call intrinsic mem.ptr.offset(copy _6, copy _7) @118:23-118:57
+    _4 = call intrinsic mem.ptr.read(copy _5) @118:23-118:64
+    _3 = call intrinsic mem.ptr.cast_mut(copy _4) @118:23-118:75
+    _9 = call fn rt.table.entry_size(copy _1) @119:35-119:49
+    _8 = mul copy _2, copy _9 @119:31-119:49
+    _0 = call intrinsic mem.ptr.offset(copy _3, copy _8) @119:16-119:50
+    return @119:9-119:50
 }
 
-fn rt.table.key_at(2) source 6 @104:18-104:24 {
+fn rt.table.key_at(2) source 6 @125:18-125:24 {
     let _0: ptr_mut[u8]
-    let _1: ptr_mut[u8] "tb" @104:25-104:39
-    let _2: int "i" @104:41-104:47
+    let _1: ptr_mut[u8] "tb" @125:25-125:39
+    let _2: int "i" @125:41-125:47
     let _3: ptr_mut[u8]
   bb0:
-    _3 = call fn rt.table.entry(copy _1, copy _2) @106:19-106:31
-    _0 = call intrinsic mem.ptr.offset(copy _3, const 8) @106:19-106:41
-    return @106:5-106:41
+    _3 = call fn rt.table.entry(copy _1, copy _2) @127:19-127:31
+    _0 = call intrinsic mem.ptr.offset(copy _3, const 8) @127:19-127:41
+    return @127:5-127:41
 }
 
-fn rt.table.value_at(2) source 6 @112:18-112:26 {
+fn rt.table.value_at(2) source 6 @133:18-133:26 {
     let _0: ptr_mut[u8]
-    let _1: ptr_mut[u8] "tb" @112:27-112:41
-    let _2: int "i" @112:43-112:49
+    let _1: ptr_mut[u8] "tb" @133:27-133:41
+    let _2: int "i" @133:43-133:49
     let _3: ptr_mut[u8]
     let _4: int
     let _5: int
     let _6: int
   bb0:
-    _3 = call fn rt.table.entry(copy _1, copy _2) @114:19-114:31
-    _6 = call fn rt.table.KEY_SIZE() @114:52-114:60
-    _5 = call fn rt.table.word(copy _1, copy _6) @114:43-114:61
-    _4 = add const 8, copy _5 @114:39-114:61
-    _0 = call intrinsic mem.ptr.offset(copy _3, copy _4) @114:19-114:62
-    return @114:5-114:62
+    _3 = call fn rt.table.entry(copy _1, copy _2) @135:19-135:31
+    _6 = call fn rt.table.KEY_SIZE() @135:52-135:60
+    _5 = call fn rt.table.word(copy _1, copy _6) @135:43-135:61
+    _4 = add const 8, copy _5 @135:39-135:61
+    _0 = call intrinsic mem.ptr.offset(copy _3, copy _4) @135:19-135:62
+    return @135:5-135:62
 }
 
-fn rt.table.new(3) source 6 @122:18-122:21 {
+fn rt.table.new(3) source 6 @143:18-143:21 {
     let _0: ptr_mut[u8]
-    let _1: rt.types.Types "ts" @122:22-122:31
-    let _2: int "key" @122:33-122:41
-    let _3: int "val" @122:43-122:51
-    let _4: ptr_mut[u8] "tb" @125:9-125:11
+    let _1: rt.types.Types "ts" @143:22-143:31
+    let _2: int "key" @143:33-143:41
+    let _3: int "val" @143:43-143:51
+    let _4: ptr_mut[u8] "tb" @146:9-146:11
     let _5: int
     let _6: int
     let _7: ()
@@ -8787,47 +8858,47 @@ fn rt.table.new(3) source 6 @122:18-122:21 {
     let _26: ()
     let _27: int
   bb0:
-    _6 = call fn rt.table.HEADER() @125:35-125:41
-    _5 = mul copy _6, const 8 @125:35-125:45
-    _4 = call intrinsic extern.c.sisu_rt_alloc(copy _5) @125:21-125:46
-    _8 = call fn rt.table.KEY() @126:18-126:21
-    _7 = call fn rt.table.set_word(copy _4, copy _8, copy _2) @126:5-126:27
-    _10 = call fn rt.table.VALUE() @127:18-127:23
-    _9 = call fn rt.table.set_word(copy _4, copy _10, copy _3) @127:5-127:29
-    _12 = call fn rt.table.KEY_SIZE() @128:18-128:26
-    _13 = call fn rt.types.Types.size(copy _1, copy _2) @128:28-128:40
-    _11 = call fn rt.table.set_word(copy _4, copy _12, copy _13) @128:5-128:41
-    _15 = call fn rt.table.VALUE_SIZE() @129:18-129:28
-    _17 = lt copy _3, const 0 @129:33-129:40
-    switch copy _17 [0: bb2, else: bb1] @129:30-129:62
+    _6 = call fn rt.table.HEADER() @146:35-146:41
+    _5 = mul copy _6, const 8 @146:35-146:45
+    _4 = call intrinsic extern.c.sisu_rt_alloc(copy _5) @146:21-146:46
+    _8 = call fn rt.table.KEY() @147:18-147:21
+    _7 = call fn rt.table.set_word(copy _4, copy _8, copy _2) @147:5-147:27
+    _10 = call fn rt.table.VALUE() @148:18-148:23
+    _9 = call fn rt.table.set_word(copy _4, copy _10, copy _3) @148:5-148:29
+    _12 = call fn rt.table.KEY_SIZE() @149:18-149:26
+    _13 = call fn rt.types.Types.size(copy _1, copy _2) @149:28-149:40
+    _11 = call fn rt.table.set_word(copy _4, copy _12, copy _13) @149:5-149:41
+    _15 = call fn rt.table.VALUE_SIZE() @150:18-150:28
+    _17 = lt copy _3, const 0 @150:33-150:40
+    switch copy _17 [0: bb2, else: bb1] @150:30-150:62
   bb1:
-    _16 = const 0 @129:42-129:43
+    _16 = const 0 @150:42-150:43
     goto bb3
   bb2:
-    _16 = call fn rt.types.Types.size(copy _1, copy _3) @129:50-129:62
+    _16 = call fn rt.types.Types.size(copy _1, copy _3) @150:50-150:62
     goto bb3
   bb3:
-    _14 = call fn rt.table.set_word(copy _4, copy _15, copy _16) @129:5-129:63
-    _19 = call fn rt.table.ENTRIES() @130:18-130:25
-    _18 = call fn rt.table.set_word(copy _4, copy _19, const 0) @130:5-130:29
-    _21 = call fn rt.table.LEN() @131:18-131:21
-    _20 = call fn rt.table.set_word(copy _4, copy _21, const 0) @131:5-131:25
-    _23 = call fn rt.table.CAP() @132:18-132:21
-    _22 = call fn rt.table.set_word(copy _4, copy _23, const 0) @132:5-132:25
-    _25 = call fn rt.table.INDEX() @133:18-133:23
-    _24 = call fn rt.table.set_word(copy _4, copy _25, const 0) @133:5-133:27
-    _27 = call fn rt.table.MASK() @134:18-134:22
-    _26 = call fn rt.table.set_word(copy _4, copy _27, const 0) @134:5-134:26
-    _0 = copy _4 @135:12-135:14
-    return @135:5-135:14
+    _14 = call fn rt.table.set_word(copy _4, copy _15, copy _16) @150:5-150:63
+    _19 = call fn rt.table.ENTRIES() @151:18-151:25
+    _18 = call fn rt.table.set_word(copy _4, copy _19, const 0) @151:5-151:29
+    _21 = call fn rt.table.LEN() @152:18-152:21
+    _20 = call fn rt.table.set_word(copy _4, copy _21, const 0) @152:5-152:25
+    _23 = call fn rt.table.CAP() @153:18-153:21
+    _22 = call fn rt.table.set_word(copy _4, copy _23, const 0) @153:5-153:25
+    _25 = call fn rt.table.INDEX() @154:18-154:23
+    _24 = call fn rt.table.set_word(copy _4, copy _25, const 0) @154:5-154:27
+    _27 = call fn rt.table.MASK() @155:18-155:22
+    _26 = call fn rt.table.set_word(copy _4, copy _27, const 0) @155:5-155:26
+    _0 = copy _4 @156:12-156:14
+    return @156:5-156:14
 }
 
-fn rt.table.hash_key(3) source 6 @143:5-143:13 {
+fn rt.table.hash_key(3) source 6 @164:5-164:13 {
     let _0: int
-    let _1: rt.types.Types "ts" @143:14-143:23
-    let _2: ptr_mut[u8] "p" @143:25-143:38
-    let _3: int "t" @143:40-143:46
-    let _4: int "h" @144:9-144:10
+    let _1: rt.types.Types "ts" @164:14-164:23
+    let _2: ptr_mut[u8] "p" @164:25-164:38
+    let _3: int "t" @164:40-164:46
+    let _4: int "h" @165:9-165:10
     let _5: int
     let _6: int
     let _7: int
@@ -8845,40 +8916,40 @@ fn rt.table.hash_key(3) source 6 @143:5-143:13 {
     let _19: int
     let _20: int
   bb0:
-    _5 = call fn rt.table.BASIS() @144:28-144:33
-    _4 = call fn rt.value.hash(copy _1, copy _5, copy _2, copy _3) @144:13-144:40
-    _9 = shr copy _4, const 33 @145:15-145:24
-    _10 = call fn rt.table.LOW_31() @145:27-145:33
-    _8 = bitand copy _9, copy _10 @145:14-145:34
-    _7 = bitxor copy _4, copy _8 @145:9-145:35
-    _11 = call fn rt.table.SPREAD_1() @145:39-145:47
-    _6 = wmul copy _7, copy _11 @145:9-145:47
-    _4 = copy _6 @145:5-145:47
-    _15 = shr copy _4, const 33 @146:15-146:24
-    _16 = call fn rt.table.LOW_31() @146:27-146:33
-    _14 = bitand copy _15, copy _16 @146:14-146:34
-    _13 = bitxor copy _4, copy _14 @146:9-146:35
-    _17 = call fn rt.table.SPREAD_2() @146:39-146:47
-    _12 = wmul copy _13, copy _17 @146:9-146:47
-    _4 = copy _12 @146:5-146:47
-    _19 = shr copy _4, const 33 @147:17-147:26
-    _20 = call fn rt.table.LOW_31() @147:29-147:35
-    _18 = bitand copy _19, copy _20 @147:16-147:36
-    _0 = bitxor copy _4, copy _18 @147:12-147:36
-    return @147:5-147:36
+    _5 = call fn rt.table.BASIS() @165:28-165:33
+    _4 = call fn rt.value.hash(copy _1, copy _5, copy _2, copy _3) @165:13-165:40
+    _9 = shr copy _4, const 33 @166:15-166:24
+    _10 = call fn rt.table.LOW_31() @166:27-166:33
+    _8 = bitand copy _9, copy _10 @166:14-166:34
+    _7 = bitxor copy _4, copy _8 @166:9-166:35
+    _11 = call fn rt.table.SPREAD_1() @166:39-166:47
+    _6 = wmul copy _7, copy _11 @166:9-166:47
+    _4 = copy _6 @166:5-166:47
+    _15 = shr copy _4, const 33 @167:15-167:24
+    _16 = call fn rt.table.LOW_31() @167:27-167:33
+    _14 = bitand copy _15, copy _16 @167:14-167:34
+    _13 = bitxor copy _4, copy _14 @167:9-167:35
+    _17 = call fn rt.table.SPREAD_2() @167:39-167:47
+    _12 = wmul copy _13, copy _17 @167:9-167:47
+    _4 = copy _12 @167:5-167:47
+    _19 = shr copy _4, const 33 @168:17-168:26
+    _20 = call fn rt.table.LOW_31() @168:29-168:35
+    _18 = bitand copy _19, copy _20 @168:16-168:36
+    _0 = bitxor copy _4, copy _18 @168:12-168:36
+    return @168:5-168:36
 }
 
-fn rt.table.same_key(5) source 6 @154:5-154:13 {
+fn rt.table.same_key(5) source 6 @175:5-175:13 {
     let _0: bool
-    let _1: rt.types.Types "ts" @154:14-154:23
-    let _2: ptr_mut[u8] "a" @154:25-154:38
-    let _3: int "ta" @154:40-154:47
-    let _4: ptr_mut[u8] "b" @154:49-154:62
-    let _5: int "tb" @154:64-154:71
+    let _1: rt.types.Types "ts" @175:14-175:23
+    let _2: ptr_mut[u8] "a" @175:25-175:38
+    let _3: int "ta" @175:40-175:47
+    let _4: ptr_mut[u8] "b" @175:49-175:62
+    let _5: int "tb" @175:64-175:71
     let _6: (ptr_mut[u8], int)
-    let _7: int "ra" @155:13-155:15
+    let _7: int "ra" @176:13-176:15
     let _8: (ptr_mut[u8], int)
-    let _9: int "rb" @156:13-156:15
+    let _9: int "rb" @177:13-177:15
     let _10: bool
     let _11: bool
     let _12: int
@@ -8887,33 +8958,33 @@ fn rt.table.same_key(5) source 6 @154:5-154:13 {
     let _15: int
     let _16: int
   bb0:
-    _6 = call fn rt.value.target(copy _1, copy _2, copy _3) @155:19-155:42
-    _7 = copy _6.1 @155:13-155:15
-    _8 = call fn rt.value.target(copy _1, copy _4, copy _5) @156:19-156:42
-    _9 = copy _8.1 @156:13-156:15
-    _12 = call fn rt.types.Types.kind(copy _1, copy _7) @157:9-157:20
-    _13 = call fn rt.types.PATH() @157:24-157:28
-    _11 = eq copy _12, copy _13 @157:8-157:29
-    _15 = call fn rt.types.Types.kind(copy _1, copy _9) @157:34-157:45
-    _16 = call fn rt.types.PATH() @157:49-157:53
-    _14 = eq copy _15, copy _16 @157:33-157:54
-    _10 = ne copy _11, copy _14 @157:8-157:54
-    switch copy _10 [0: bb1, else: bb2] @157:8-157:54
+    _6 = call fn rt.value.target(copy _1, copy _2, copy _3) @176:19-176:42
+    _7 = copy _6.1 @176:13-176:15
+    _8 = call fn rt.value.target(copy _1, copy _4, copy _5) @177:19-177:42
+    _9 = copy _8.1 @177:13-177:15
+    _12 = call fn rt.types.Types.kind(copy _1, copy _7) @178:9-178:20
+    _13 = call fn rt.types.PATH() @178:24-178:28
+    _11 = eq copy _12, copy _13 @178:8-178:29
+    _15 = call fn rt.types.Types.kind(copy _1, copy _9) @178:34-178:45
+    _16 = call fn rt.types.PATH() @178:49-178:53
+    _14 = eq copy _15, copy _16 @178:33-178:54
+    _10 = ne copy _11, copy _14 @178:8-178:54
+    switch copy _10 [0: bb1, else: bb2] @178:8-178:54
   bb1:
-    _0 = call fn rt.value.equal(copy _1, copy _2, copy _3, copy _4, copy _5) @159:12-159:41
-    return @159:5-159:41
+    _0 = call fn rt.value.equal(copy _1, copy _2, copy _3, copy _4, copy _5) @180:12-180:41
+    return @180:5-180:41
   bb2:
-    _0 = const false @158:16-158:21
-    return @158:9-158:21
+    _0 = const false @179:16-179:21
+    return @179:9-179:21
 }
 
-fn rt.table.place(4) source 6 @167:5-167:10 {
+fn rt.table.place(4) source 6 @188:5-188:10 {
     let _0: ()
-    let _1: ptr_mut[int] "index" @167:11-167:29
-    let _2: int "mask" @167:31-167:40
-    let _3: int "h" @167:42-167:48
-    let _4: int "i" @167:50-167:56
-    let _5: int "slot" @168:9-168:13
+    let _1: ptr_mut[int] "index" @188:11-188:29
+    let _2: int "mask" @188:31-188:40
+    let _3: int "h" @188:42-188:48
+    let _4: int "i" @188:50-188:56
+    let _5: int "slot" @189:9-189:13
     let _6: bool
     let _7: int
     let _8: ptr_mut[int]
@@ -8923,31 +8994,31 @@ fn rt.table.place(4) source 6 @167:5-167:10 {
     let _12: ptr_mut[int]
     let _13: int
   bb0:
-    _5 = bitand copy _3, copy _2 @168:16-168:24
+    _5 = bitand copy _3, copy _2 @189:16-189:24
     goto bb1
   bb1:
-    _8 = call intrinsic mem.ptr.offset(copy _1, copy _5) @172:15-172:33
-    _7 = call intrinsic mem.ptr.read(copy _8) @172:15-172:40
-    _6 = ne copy _7, const 0 @172:15-172:45
-    switch copy _6 [0: bb2, else: bb3] @172:15-172:45
+    _8 = call intrinsic mem.ptr.offset(copy _1, copy _5) @193:15-193:33
+    _7 = call intrinsic mem.ptr.read(copy _8) @193:15-193:40
+    _6 = ne copy _7, const 0 @193:15-193:45
+    switch copy _6 [0: bb2, else: bb3] @193:15-193:45
   bb2:
-    _12 = call intrinsic mem.ptr.offset(copy _1, copy _5) @174:9-174:27
-    _13 = add copy _4, const 1 @174:34-174:39
-    _11 = call intrinsic mem.ptr.write(copy _12, copy _13) @174:9-174:40
+    _12 = call intrinsic mem.ptr.offset(copy _1, copy _5) @195:9-195:27
+    _13 = add copy _4, const 1 @195:34-195:39
+    _11 = call intrinsic mem.ptr.write(copy _12, copy _13) @195:9-195:40
     _0 = const ()
     return
   bb3:
-    _10 = add copy _5, const 1 @173:20-173:30
-    _9 = bitand copy _10, copy _2 @173:20-173:37
-    _5 = copy _9 @173:13-173:37
+    _10 = add copy _5, const 1 @194:20-194:30
+    _9 = bitand copy _10, copy _2 @194:20-194:37
+    _5 = copy _9 @194:13-194:37
     goto bb1
 }
 
-fn rt.table.reindex(2) source 6 @182:5-182:12 {
+fn rt.table.reindex(2) source 6 @203:5-203:12 {
     let _0: ()
-    let _1: ptr_mut[u8] "tb" @182:13-182:27
-    let _2: int "slots" @182:29-182:39
-    let _3: int "old" @188:13-188:16
+    let _1: ptr_mut[u8] "tb" @203:13-203:27
+    let _2: int "slots" @203:29-203:39
+    let _3: int "old" @209:13-209:16
     let _4: int
     let _5: bool
     let _6: ()
@@ -8956,10 +9027,10 @@ fn rt.table.reindex(2) source 6 @182:5-182:12 {
     let _9: ptr_mut[ptr[u8]]
     let _10: ptr_mut[ptr[u8]]
     let _11: int
-    let _12: ptr_mut[int] "index" @191:13-191:18
+    let _12: ptr_mut[int] "index" @212:13-212:18
     let _13: ptr_mut[u8]
     let _14: int
-    let _15: int "s" @192:13-192:14
+    let _15: int "s" @213:13-213:14
     let _16: bool
     let _17: ()
     let _18: ptr_mut[int]
@@ -8970,9 +9041,9 @@ fn rt.table.reindex(2) source 6 @182:5-182:12 {
     let _23: ()
     let _24: int
     let _25: int
-    let _26: int "n" @198:13-198:14
+    let _26: int "n" @219:13-219:14
     let _27: int
-    let _28: int "i" @199:13-199:14
+    let _28: int "i" @220:13-220:14
     let _29: bool
     let _30: ()
     let _31: int
@@ -8981,82 +9052,82 @@ fn rt.table.reindex(2) source 6 @182:5-182:12 {
     let _34: ptr_mut[u8]
     let _35: int
   bb0:
-    _4 = call fn rt.table.INDEX() @188:28-188:33
-    _3 = call fn rt.table.word(copy _1, copy _4) @188:19-188:34
-    _5 = ne copy _3, const 0 @189:12-189:20
-    switch copy _5 [0: bb1, else: bb2] @189:12-189:20
+    _4 = call fn rt.table.INDEX() @209:28-209:33
+    _3 = call fn rt.table.word(copy _1, copy _4) @209:19-209:34
+    _5 = ne copy _3, const 0 @210:12-210:20
+    switch copy _5 [0: bb1, else: bb2] @210:12-210:20
   bb1:
-    _14 = mul copy _2, const 8 @191:35-191:44
-    _13 = call intrinsic extern.c.sisu_rt_alloc(copy _14) @191:21-191:45
-    _12 = call intrinsic mem.ptr.cast[u8, int](copy _13) @191:21-191:57
-    _15 = const 0 @192:17-192:18
+    _14 = mul copy _2, const 8 @212:35-212:44
+    _13 = call intrinsic extern.c.sisu_rt_alloc(copy _14) @212:21-212:45
+    _12 = call intrinsic mem.ptr.cast[u8, int](copy _13) @212:21-212:57
+    _15 = const 0 @213:17-213:18
     goto bb3
   bb2:
-    _10 = call intrinsic mem.ptr.cast[u8, ptr[u8]](copy _1) @190:26-190:44
-    _11 = call fn rt.table.INDEX() @190:52-190:57
-    _9 = call intrinsic mem.ptr.offset(copy _10, copy _11) @190:26-190:58
-    _8 = call intrinsic mem.ptr.read(copy _9) @190:26-190:65
-    _7 = call intrinsic mem.ptr.cast_mut(copy _8) @190:26-190:76
-    _6 = call intrinsic extern.c.sisu_rt_free(copy _7) @190:13-190:77
+    _10 = call intrinsic mem.ptr.cast[u8, ptr[u8]](copy _1) @211:26-211:44
+    _11 = call fn rt.table.INDEX() @211:52-211:57
+    _9 = call intrinsic mem.ptr.offset(copy _10, copy _11) @211:26-211:58
+    _8 = call intrinsic mem.ptr.read(copy _9) @211:26-211:65
+    _7 = call intrinsic mem.ptr.cast_mut(copy _8) @211:26-211:76
+    _6 = call intrinsic extern.c.sisu_rt_free(copy _7) @211:13-211:77
     goto bb1
   bb3:
-    _16 = lt copy _15, copy _2 @193:15-193:24
-    switch copy _16 [0: bb4, else: bb5] @193:15-193:24
+    _16 = lt copy _15, copy _2 @214:15-214:24
+    switch copy _16 [0: bb4, else: bb5] @214:15-214:24
   bb4:
-    _21 = call fn rt.table.INDEX() @196:22-196:27
-    _22 = call intrinsic mem.ptr.addr(copy _12) @196:29-196:41
-    _20 = call fn rt.table.set_word(copy _1, copy _21, copy _22) @196:9-196:42
-    _24 = call fn rt.table.MASK() @197:22-197:26
-    _25 = sub copy _2, const 1 @197:28-197:37
-    _23 = call fn rt.table.set_word(copy _1, copy _24, copy _25) @197:9-197:38
-    _27 = call fn rt.table.LEN() @198:26-198:29
-    _26 = call fn rt.table.word(copy _1, copy _27) @198:17-198:30
-    _28 = const 0 @199:17-199:18
+    _21 = call fn rt.table.INDEX() @217:22-217:27
+    _22 = call intrinsic mem.ptr.addr(copy _12) @217:29-217:41
+    _20 = call fn rt.table.set_word(copy _1, copy _21, copy _22) @217:9-217:42
+    _24 = call fn rt.table.MASK() @218:22-218:26
+    _25 = sub copy _2, const 1 @218:28-218:37
+    _23 = call fn rt.table.set_word(copy _1, copy _24, copy _25) @218:9-218:38
+    _27 = call fn rt.table.LEN() @219:26-219:29
+    _26 = call fn rt.table.word(copy _1, copy _27) @219:17-219:30
+    _28 = const 0 @220:17-220:18
     goto bb6
   bb5:
-    _18 = call intrinsic mem.ptr.offset(copy _12, copy _15) @194:13-194:28
-    _17 = call intrinsic mem.ptr.write(copy _18, const 0) @194:13-194:37
-    _19 = add copy _15, const 1 @195:13-195:19
-    _15 = move _19 @195:13-195:19
+    _18 = call intrinsic mem.ptr.offset(copy _12, copy _15) @215:13-215:28
+    _17 = call intrinsic mem.ptr.write(copy _18, const 0) @215:13-215:37
+    _19 = add copy _15, const 1 @216:13-216:19
+    _15 = move _19 @216:13-216:19
     goto bb3
   bb6:
-    _29 = lt copy _28, copy _26 @200:15-200:20
-    switch copy _29 [0: bb7, else: bb8] @200:15-200:20
+    _29 = lt copy _28, copy _26 @221:15-221:20
+    switch copy _29 [0: bb7, else: bb8] @221:15-221:20
   bb7:
     _0 = const ()
     return
   bb8:
-    _31 = sub copy _2, const 1 @201:26-201:35
-    _34 = call fn rt.table.entry(copy _1, copy _28) @201:37-201:49
-    _33 = call intrinsic mem.ptr.cast[u8, int](copy _34) @201:37-201:61
-    _32 = call intrinsic mem.ptr.read(copy _33) @201:37-201:68
-    _30 = call fn rt.table.place(copy _12, copy _31, copy _32, copy _28) @201:13-201:72
-    _35 = add copy _28, const 1 @202:13-202:19
-    _28 = move _35 @202:13-202:19
+    _31 = sub copy _2, const 1 @222:26-222:35
+    _34 = call fn rt.table.entry(copy _1, copy _28) @222:37-222:49
+    _33 = call intrinsic mem.ptr.cast[u8, int](copy _34) @222:37-222:61
+    _32 = call intrinsic mem.ptr.read(copy _33) @222:37-222:68
+    _30 = call fn rt.table.place(copy _12, copy _31, copy _32, copy _28) @222:13-222:72
+    _35 = add copy _28, const 1 @223:13-223:19
+    _28 = move _35 @223:13-223:19
     goto bb6
 }
 
-fn rt.table.reserve(2) source 6 @210:5-210:12 {
+fn rt.table.reserve(2) source 6 @231:5-231:12 {
     let _0: ()
-    let _1: ptr_mut[u8] "tb" @210:13-210:27
-    let _2: int "extra" @210:29-210:39
-    let _3: int "need" @211:9-211:13
+    let _1: ptr_mut[u8] "tb" @231:13-231:27
+    let _2: int "extra" @231:29-231:39
+    let _3: int "need" @232:9-232:13
     let _4: int
     let _5: int
-    let _6: int "cap" @212:9-212:12
+    let _6: int "cap" @233:9-233:12
     let _7: int
     let _8: bool
-    let _9: int "room" @215:9-215:13
+    let _9: int "room" @236:9-236:13
     let _10: ref int
     let _11: int
     let _12: ref int
     let _13: bool
-    let _14: ptr_mut[u8] "entries" @222:13-222:20
+    let _14: ptr_mut[u8] "entries" @243:13-243:20
     let _15: ptr[u8]
     let _16: ptr_mut[ptr[u8]]
     let _17: ptr_mut[ptr[u8]]
     let _18: int
-    let _19: ptr_mut[u8] "grown" @223:13-223:18
+    let _19: ptr_mut[u8] "grown" @244:13-244:18
     let _20: int
     let _21: int
     let _22: ()
@@ -9064,92 +9135,92 @@ fn rt.table.reserve(2) source 6 @210:5-210:12 {
     let _24: int
     let _25: ()
     let _26: int
-    let _27: int "slots" @226:9-226:14
+    let _27: int "slots" @247:9-247:14
     let _28: bool
     let _29: int
     let _30: int
     let _31: ()
   bb0:
-    _5 = call fn rt.table.LEN() @211:25-211:28
-    _4 = call fn rt.table.word(copy _1, copy _5) @211:16-211:29
-    _3 = add copy _4, copy _2 @211:16-211:37
-    _7 = call fn rt.table.CAP() @212:24-212:27
-    _6 = call fn rt.table.word(copy _1, copy _7) @212:15-212:28
-    _8 = le copy _3, copy _6 @213:8-213:19
-    switch copy _8 [0: bb1, else: bb2] @213:8-213:19
+    _5 = call fn rt.table.LEN() @232:25-232:28
+    _4 = call fn rt.table.word(copy _1, copy _5) @232:16-232:29
+    _3 = add copy _4, copy _2 @232:16-232:37
+    _7 = call fn rt.table.CAP() @233:24-233:27
+    _6 = call fn rt.table.word(copy _1, copy _7) @233:15-233:28
+    _8 = le copy _3, copy _6 @234:8-234:19
+    switch copy _8 [0: bb1, else: bb2] @234:8-234:19
   bb1:
-    _10 = ref _3 @215:20-215:24
-    _11 = mul copy _6, const 2 @215:26-215:33
-    _12 = ref _11 @215:26-215:33
-    _9 = call intrinsic max(copy _10, copy _12) @215:16-215:34
-    dead _11 @215:34-215:34
-    _13 = lt copy _9, const 4 @216:8-216:16
-    switch copy _13 [0: bb3, else: bb4] @216:8-216:16
+    _10 = ref _3 @236:20-236:24
+    _11 = mul copy _6, const 2 @236:26-236:33
+    _12 = ref _11 @236:26-236:33
+    _9 = call intrinsic max(copy _10, copy _12) @236:16-236:34
+    dead _11 @236:34-236:34
+    _13 = lt copy _9, const 4 @237:8-237:16
+    switch copy _13 [0: bb3, else: bb4] @237:8-237:16
   bb2:
-    _0 = const () @214:9-214:15
-    return @214:9-214:15
+    _0 = const () @235:9-235:15
+    return @235:9-235:15
   bb3:
-    _17 = call intrinsic mem.ptr.cast[u8, ptr[u8]](copy _1) @222:23-222:41
-    _18 = call fn rt.table.ENTRIES() @222:49-222:56
-    _16 = call intrinsic mem.ptr.offset(copy _17, copy _18) @222:23-222:57
-    _15 = call intrinsic mem.ptr.read(copy _16) @222:23-222:64
-    _14 = call intrinsic mem.ptr.cast_mut(copy _15) @222:23-222:75
-    _21 = call fn rt.table.entry_size(copy _1) @223:50-223:64
-    _20 = mul copy _9, copy _21 @223:43-223:64
-    _19 = call intrinsic extern.c.sisu_rt_grow(copy _14, copy _20) @223:21-223:65
-    _23 = call fn rt.table.ENTRIES() @224:22-224:29
-    _24 = call intrinsic mem.ptr.addr(copy _19) @224:31-224:43
-    _22 = call fn rt.table.set_word(copy _1, copy _23, copy _24) @224:9-224:44
-    _26 = call fn rt.table.CAP() @225:18-225:21
-    _25 = call fn rt.table.set_word(copy _1, copy _26, copy _9) @225:5-225:28
-    _27 = const 8 @226:17-226:18
+    _17 = call intrinsic mem.ptr.cast[u8, ptr[u8]](copy _1) @243:23-243:41
+    _18 = call fn rt.table.ENTRIES() @243:49-243:56
+    _16 = call intrinsic mem.ptr.offset(copy _17, copy _18) @243:23-243:57
+    _15 = call intrinsic mem.ptr.read(copy _16) @243:23-243:64
+    _14 = call intrinsic mem.ptr.cast_mut(copy _15) @243:23-243:75
+    _21 = call fn rt.table.entry_size(copy _1) @244:50-244:64
+    _20 = mul copy _9, copy _21 @244:43-244:64
+    _19 = call intrinsic extern.c.sisu_rt_grow(copy _14, copy _20) @244:21-244:65
+    _23 = call fn rt.table.ENTRIES() @245:22-245:29
+    _24 = call intrinsic mem.ptr.addr(copy _19) @245:31-245:43
+    _22 = call fn rt.table.set_word(copy _1, copy _23, copy _24) @245:9-245:44
+    _26 = call fn rt.table.CAP() @246:18-246:21
+    _25 = call fn rt.table.set_word(copy _1, copy _26, copy _9) @246:5-246:28
+    _27 = const 8 @247:17-247:18
     goto bb5
   bb4:
-    _9 = const 4 @217:9-217:17
+    _9 = const 4 @238:9-238:17
     goto bb3
   bb5:
-    _29 = mul copy _9, const 2 @227:19-227:27
-    _28 = lt copy _27, copy _29 @227:11-227:27
-    switch copy _28 [0: bb6, else: bb7] @227:11-227:27
+    _29 = mul copy _9, const 2 @248:19-248:27
+    _28 = lt copy _27, copy _29 @248:11-248:27
+    switch copy _28 [0: bb6, else: bb7] @248:11-248:27
   bb6:
-    _31 = call fn rt.table.reindex(copy _1, copy _27) @229:5-229:23
+    _31 = call fn rt.table.reindex(copy _1, copy _27) @250:5-250:23
     _0 = const ()
     return
   bb7:
-    _30 = mul copy _27, const 2 @228:9-228:19
-    _27 = move _30 @228:9-228:19
+    _30 = mul copy _27, const 2 @249:9-249:19
+    _27 = move _30 @249:9-249:19
     goto bb5
 }
 
-fn rt.table.find(4) source 6 @239:18-239:22 {
+fn rt.table.find(4) source 6 @260:18-260:22 {
     let _0: int
-    let _1: rt.types.Types "ts" @239:23-239:32
-    let _2: ptr_mut[u8] "tb" @239:34-239:48
-    let _3: ptr_mut[u8] "k" @239:50-239:63
-    let _4: int "kt" @239:65-239:72
-    let _5: ptr_mut[int] "w" @244:13-244:14
+    let _1: rt.types.Types "ts" @260:23-260:32
+    let _2: ptr_mut[u8] "tb" @260:34-260:48
+    let _3: ptr_mut[u8] "k" @260:50-260:63
+    let _4: int "kt" @260:65-260:72
+    let _5: ptr_mut[int] "w" @265:13-265:14
     let _6: bool
     let _7: int
     let _8: ptr_mut[int]
     let _9: int
-    let _10: int "key" @247:13-247:16
-    let _11: int "kind" @248:13-248:17
-    let _12: bool "uniform" @249:13-249:20
+    let _10: int "key" @268:13-268:16
+    let _11: int "kind" @269:13-269:17
+    let _12: bool "uniform" @270:13-270:20
     let _13: int
     let _14: int
     let _15: (ptr_mut[u8], int)
-    let _16: int "target" @251:21-251:27
+    let _16: int "target" @272:21-272:27
     let _17: bool
     let _18: bool
     let _19: int
     let _20: int
     let _21: bool
     let _22: int
-    let _23: int "h" @254:13-254:14
-    let _24: int "mask" @255:13-255:17
+    let _23: int "h" @275:13-275:14
+    let _24: int "mask" @276:13-276:17
     let _25: ptr_mut[int]
     let _26: int
-    let _27: int "size" @256:13-256:17
+    let _27: int "size" @277:13-277:17
     let _28: int
     let _29: int
     let _30: ptr_mut[int]
@@ -9157,26 +9228,26 @@ fn rt.table.find(4) source 6 @239:18-239:22 {
     let _32: int
     let _33: ptr_mut[int]
     let _34: int
-    let _35: ptr[int] "index" @257:13-257:18
+    let _35: ptr[int] "index" @278:13-278:18
     let _36: ptr_mut[ptr[int]]
     let _37: ptr_mut[ptr[int]]
     let _38: int
-    let _39: ptr_mut[u8] "entries" @258:13-258:20
+    let _39: ptr_mut[u8] "entries" @279:13-279:20
     let _40: ptr[u8]
     let _41: ptr_mut[ptr[u8]]
     let _42: ptr_mut[ptr[u8]]
     let _43: int
-    let _44: int "slot" @259:13-259:17
-    let _45: int "s" @261:17-261:18
+    let _44: int "slot" @280:13-280:17
+    let _45: int "s" @282:17-282:18
     let _46: ptr[int]
     let _47: bool
-    let _48: ptr_mut[u8] "e" @264:17-264:18
+    let _48: ptr_mut[u8] "e" @285:17-285:18
     let _49: int
     let _50: int
     let _51: bool
     let _52: int
     let _53: ptr_mut[int]
-    let _54: bool "same" @266:21-266:25
+    let _54: bool "same" @287:21-287:25
     let _55: bool
     let _56: ptr_mut[u8]
     let _57: bool
@@ -9184,121 +9255,121 @@ fn rt.table.find(4) source 6 @239:18-239:22 {
     let _59: int
     let _60: int
   bb0:
-    _5 = call intrinsic mem.ptr.cast[u8, int](copy _2) @244:17-244:31
-    _9 = call fn rt.table.LEN() @245:21-245:24
-    _8 = call intrinsic mem.ptr.offset(copy _5, copy _9) @245:12-245:25
-    _7 = call intrinsic mem.ptr.read(copy _8) @245:12-245:32
-    _6 = eq copy _7, const 0 @245:12-245:37
-    switch copy _6 [0: bb1, else: bb2] @245:12-245:37
+    _5 = call intrinsic mem.ptr.cast[u8, int](copy _2) @265:17-265:31
+    _9 = call fn rt.table.LEN() @266:21-266:24
+    _8 = call intrinsic mem.ptr.offset(copy _5, copy _9) @266:12-266:25
+    _7 = call intrinsic mem.ptr.read(copy _8) @266:12-266:32
+    _6 = eq copy _7, const 0 @266:12-266:37
+    switch copy _6 [0: bb1, else: bb2] @266:12-266:37
   bb1:
-    _10 = call intrinsic mem.ptr.read(copy _5) @247:19-247:27
-    _11 = call fn rt.types.Types.kind(copy _1, copy _10) @248:20-248:32
-    _13 = call fn rt.types.REF() @249:31-249:34
-    _12 = ne copy _11, copy _13 @249:23-249:34
-    switch copy _12 [0: bb4, else: bb3] @249:23-249:50
+    _10 = call intrinsic mem.ptr.read(copy _5) @268:19-268:27
+    _11 = call fn rt.types.Types.kind(copy _1, copy _10) @269:20-269:32
+    _13 = call fn rt.types.REF() @270:31-270:34
+    _12 = ne copy _11, copy _13 @270:23-270:34
+    switch copy _12 [0: bb4, else: bb3] @270:23-270:50
   bb2:
-    _0 = const -1 @246:20-246:22
-    return @246:13-246:22
+    _0 = const -1 @267:20-267:22
+    return @267:13-267:22
   bb3:
-    _14 = call fn rt.types.DYN() @249:47-249:50
-    _12 = ne copy _11, copy _14 @249:39-249:50
-    switch copy _12 [0: bb5, else: bb6] @250:12-250:19
+    _14 = call fn rt.types.DYN() @270:47-270:50
+    _12 = ne copy _11, copy _14 @270:39-270:50
+    switch copy _12 [0: bb5, else: bb6] @271:12-271:19
   bb4:
-    switch copy _12 [0: bb5, else: bb6] @250:12-250:19
+    switch copy _12 [0: bb5, else: bb6] @271:12-271:19
   bb5:
-    _23 = call fn rt.table.hash_key(copy _1, copy _3, copy _4) @254:17-254:36
-    _26 = call fn rt.table.MASK() @255:29-255:33
-    _25 = call intrinsic mem.ptr.offset(copy _5, copy _26) @255:20-255:34
-    _24 = call intrinsic mem.ptr.read(copy _25) @255:20-255:41
-    _31 = call fn rt.table.KEY_SIZE() @256:33-256:41
-    _30 = call intrinsic mem.ptr.offset(copy _5, copy _31) @256:24-256:42
-    _29 = call intrinsic mem.ptr.read(copy _30) @256:24-256:49
-    _28 = add const 8, copy _29 @256:20-256:49
-    _34 = call fn rt.table.VALUE_SIZE() @256:61-256:71
-    _33 = call intrinsic mem.ptr.offset(copy _5, copy _34) @256:52-256:72
-    _32 = call intrinsic mem.ptr.read(copy _33) @256:52-256:79
-    _27 = add copy _28, copy _32 @256:20-256:79
-    _37 = call intrinsic mem.ptr.cast[u8, ptr[int]](copy _2) @257:21-257:40
-    _38 = call fn rt.table.INDEX() @257:48-257:53
-    _36 = call intrinsic mem.ptr.offset(copy _37, copy _38) @257:21-257:54
-    _35 = call intrinsic mem.ptr.read(copy _36) @257:21-257:61
-    _42 = call intrinsic mem.ptr.cast[u8, ptr[u8]](copy _2) @258:23-258:41
-    _43 = call fn rt.table.ENTRIES() @258:49-258:56
-    _41 = call intrinsic mem.ptr.offset(copy _42, copy _43) @258:23-258:57
-    _40 = call intrinsic mem.ptr.read(copy _41) @258:23-258:64
-    _39 = call intrinsic mem.ptr.cast_mut(copy _40) @258:23-258:75
-    _44 = bitand copy _23, copy _24 @259:20-259:28
-    switch const true [0: bb8, else: bb9] @260:15-260:19
+    _23 = call fn rt.table.hash_key(copy _1, copy _3, copy _4) @275:17-275:36
+    _26 = call fn rt.table.MASK() @276:29-276:33
+    _25 = call intrinsic mem.ptr.offset(copy _5, copy _26) @276:20-276:34
+    _24 = call intrinsic mem.ptr.read(copy _25) @276:20-276:41
+    _31 = call fn rt.table.KEY_SIZE() @277:33-277:41
+    _30 = call intrinsic mem.ptr.offset(copy _5, copy _31) @277:24-277:42
+    _29 = call intrinsic mem.ptr.read(copy _30) @277:24-277:49
+    _28 = add const 8, copy _29 @277:20-277:49
+    _34 = call fn rt.table.VALUE_SIZE() @277:61-277:71
+    _33 = call intrinsic mem.ptr.offset(copy _5, copy _34) @277:52-277:72
+    _32 = call intrinsic mem.ptr.read(copy _33) @277:52-277:79
+    _27 = add copy _28, copy _32 @277:20-277:79
+    _37 = call intrinsic mem.ptr.cast[u8, ptr[int]](copy _2) @278:21-278:40
+    _38 = call fn rt.table.INDEX() @278:48-278:53
+    _36 = call intrinsic mem.ptr.offset(copy _37, copy _38) @278:21-278:54
+    _35 = call intrinsic mem.ptr.read(copy _36) @278:21-278:61
+    _42 = call intrinsic mem.ptr.cast[u8, ptr[u8]](copy _2) @279:23-279:41
+    _43 = call fn rt.table.ENTRIES() @279:49-279:56
+    _41 = call intrinsic mem.ptr.offset(copy _42, copy _43) @279:23-279:57
+    _40 = call intrinsic mem.ptr.read(copy _41) @279:23-279:64
+    _39 = call intrinsic mem.ptr.cast_mut(copy _40) @279:23-279:75
+    _44 = bitand copy _23, copy _24 @280:20-280:28
+    switch const true [0: bb8, else: bb9] @281:15-281:19
   bb6:
-    _15 = call fn rt.value.target(copy _1, copy _3, copy _4) @251:31-251:54
-    _16 = copy _15.1 @251:21-251:27
-    _19 = call fn rt.types.Types.kind(copy _1, copy _16) @252:17-252:32
-    _20 = call fn rt.types.PATH() @252:36-252:40
-    _18 = eq copy _19, copy _20 @252:16-252:41
-    _22 = call fn rt.types.PATH() @252:54-252:58
-    _21 = eq copy _11, copy _22 @252:45-252:59
-    _17 = ne copy _18, copy _21 @252:16-252:59
-    switch copy _17 [0: bb5, else: bb7] @252:16-252:59
+    _15 = call fn rt.value.target(copy _1, copy _3, copy _4) @272:31-272:54
+    _16 = copy _15.1 @272:21-272:27
+    _19 = call fn rt.types.Types.kind(copy _1, copy _16) @273:17-273:32
+    _20 = call fn rt.types.PATH() @273:36-273:40
+    _18 = eq copy _19, copy _20 @273:16-273:41
+    _22 = call fn rt.types.PATH() @273:54-273:58
+    _21 = eq copy _11, copy _22 @273:45-273:59
+    _17 = ne copy _18, copy _21 @273:16-273:59
+    switch copy _17 [0: bb5, else: bb7] @273:16-273:59
   bb7:
-    _0 = const -1 @253:24-253:26
-    return @253:17-253:26
+    _0 = const -1 @274:24-274:26
+    return @274:17-274:26
   bb8:
     _0 = const ()
     return
   bb9:
-    _46 = call intrinsic mem.ptr.offset(copy _35, copy _44) @261:21-261:39
-    _45 = call intrinsic mem.ptr.read(copy _46) @261:21-261:46
-    _47 = eq copy _45, const 0 @262:16-262:22
-    switch copy _47 [0: bb10, else: bb11] @262:16-262:22
+    _46 = call intrinsic mem.ptr.offset(copy _35, copy _44) @282:21-282:39
+    _45 = call intrinsic mem.ptr.read(copy _46) @282:21-282:46
+    _47 = eq copy _45, const 0 @283:16-283:22
+    switch copy _47 [0: bb10, else: bb11] @283:16-283:22
   bb10:
-    _50 = sub copy _45, const 1 @264:36-264:43
-    _49 = mul copy _50, copy _27 @264:36-264:50
-    _48 = call intrinsic mem.ptr.offset(copy _39, copy _49) @264:21-264:51
-    _53 = call intrinsic mem.ptr.cast[u8, int](copy _48) @265:16-265:29
-    _52 = call intrinsic mem.ptr.read(copy _53) @265:16-265:36
-    _51 = eq copy _52, copy _23 @265:16-265:41
-    switch copy _51 [0: bb12, else: bb13] @265:16-265:41
+    _50 = sub copy _45, const 1 @285:36-285:43
+    _49 = mul copy _50, copy _27 @285:36-285:50
+    _48 = call intrinsic mem.ptr.offset(copy _39, copy _49) @285:21-285:51
+    _53 = call intrinsic mem.ptr.cast[u8, int](copy _48) @286:16-286:29
+    _52 = call intrinsic mem.ptr.read(copy _53) @286:16-286:36
+    _51 = eq copy _52, copy _23 @286:16-286:41
+    switch copy _51 [0: bb12, else: bb13] @286:16-286:41
   bb11:
-    _0 = const -1 @263:24-263:26
-    return @263:17-263:26
+    _0 = const -1 @284:24-284:26
+    return @284:17-284:26
   bb12:
-    _60 = add copy _44, const 1 @273:20-273:30
-    _59 = bitand copy _60, copy _24 @273:20-273:37
-    _44 = copy _59 @273:13-273:37
-    switch const true [0: bb8, else: bb9] @260:15-260:19
+    _60 = add copy _44, const 1 @294:20-294:30
+    _59 = bitand copy _60, copy _24 @294:20-294:37
+    _44 = copy _59 @294:13-294:37
+    switch const true [0: bb8, else: bb9] @281:15-281:19
   bb13:
-    _54 = const false @266:28-266:33
-    switch copy _12 [0: bb14, else: bb15] @267:20-267:27
+    _54 = const false @287:28-287:33
+    switch copy _12 [0: bb14, else: bb15] @288:20-288:27
   bb14:
-    _58 = call intrinsic mem.ptr.offset(copy _48, const 8) @270:41-270:52
-    _57 = call fn rt.table.same_key(copy _1, copy _58, copy _10, copy _3, copy _4) @270:28-270:65
-    _54 = copy _57 @270:21-270:65
-    switch copy _54 [0: bb12, else: bb16] @271:20-271:24
+    _58 = call intrinsic mem.ptr.offset(copy _48, const 8) @291:41-291:52
+    _57 = call fn rt.table.same_key(copy _1, copy _58, copy _10, copy _3, copy _4) @291:28-291:65
+    _54 = copy _57 @291:21-291:65
+    switch copy _54 [0: bb12, else: bb16] @292:20-292:24
   bb15:
-    _56 = call intrinsic mem.ptr.offset(copy _48, const 8) @268:44-268:55
-    _55 = call fn rt.value.equal(copy _1, copy _56, copy _10, copy _3, copy _4) @268:28-268:68
-    _54 = copy _55 @268:21-268:68
-    switch copy _54 [0: bb12, else: bb16] @271:20-271:24
+    _56 = call intrinsic mem.ptr.offset(copy _48, const 8) @289:44-289:55
+    _55 = call fn rt.value.equal(copy _1, copy _56, copy _10, copy _3, copy _4) @289:28-289:68
+    _54 = copy _55 @289:21-289:68
+    switch copy _54 [0: bb12, else: bb16] @292:20-292:24
   bb16:
-    _0 = sub copy _45, const 1 @272:28-272:33
-    return @272:21-272:33
+    _0 = sub copy _45, const 1 @293:28-293:33
+    return @293:21-293:33
 }
 
-fn rt.table.push(3) source 6 @282:18-282:22 {
+fn rt.table.push(3) source 6 @303:18-303:22 {
     let _0: int
-    let _1: rt.types.Types "ts" @282:23-282:32
-    let _2: ptr_mut[u8] "tb" @282:34-282:48
-    let _3: ptr_mut[u8] "k" @282:50-282:63
+    let _1: rt.types.Types "ts" @303:23-303:32
+    let _2: ptr_mut[u8] "tb" @303:34-303:48
+    let _3: ptr_mut[u8] "k" @303:50-303:63
     let _4: ()
-    let _5: int "n" @284:9-284:10
+    let _5: int "n" @305:9-305:10
     let _6: int
-    let _7: ptr_mut[u8] "e" @285:9-285:10
-    let _8: ptr_mut[u8] "key" @290:13-290:16
+    let _7: ptr_mut[u8] "e" @306:9-306:10
+    let _8: ptr_mut[u8] "key" @311:13-311:16
     let _9: ptr_mut[u8]
     let _10: ptr[u8]
     let _11: int
     let _12: int
-    let _13: int "h" @292:13-292:14
+    let _13: int "h" @313:13-313:14
     let _14: int
     let _15: int
     let _16: ()
@@ -9315,44 +9386,44 @@ fn rt.table.push(3) source 6 @282:18-282:22 {
     let _27: int
     let _28: int
   bb0:
-    _4 = call fn rt.table.reserve(copy _2, const 1) @283:5-283:19
-    _6 = call fn rt.table.LEN() @284:22-284:25
-    _5 = call fn rt.table.word(copy _2, copy _6) @284:13-284:26
-    _7 = call fn rt.table.entry(copy _2, copy _5) @285:13-285:25
-    _8 = call intrinsic mem.ptr.offset(copy _7, const 8) @290:19-290:30
-    _10 = call intrinsic mem.ptr.as_const(copy _3) @291:26-291:38
-    _12 = call fn rt.table.KEY_SIZE() @291:49-291:57
-    _11 = call fn rt.table.word(copy _2, copy _12) @291:40-291:58
-    _9 = call intrinsic extern.c.memmove(copy _8, copy _10, copy _11) @291:13-291:59
-    _15 = call fn rt.table.KEY() @292:44-292:47
-    _14 = call fn rt.table.word(copy _2, copy _15) @292:35-292:48
-    _13 = call fn rt.table.hash_key(copy _1, copy _8, copy _14) @292:17-292:49
-    _17 = call intrinsic mem.ptr.cast[u8, int](copy _7) @293:9-293:22
-    _16 = call intrinsic mem.ptr.write(copy _17, copy _13) @293:9-293:31
-    _22 = call intrinsic mem.ptr.cast[u8, ptr[int]](copy _2) @294:15-294:34
-    _23 = call fn rt.table.INDEX() @294:42-294:47
-    _21 = call intrinsic mem.ptr.offset(copy _22, copy _23) @294:15-294:48
-    _20 = call intrinsic mem.ptr.read(copy _21) @294:15-294:55
-    _19 = call intrinsic mem.ptr.cast_mut(copy _20) @294:15-294:66
-    _25 = call fn rt.table.MASK() @294:77-294:81
-    _24 = call fn rt.table.word(copy _2, copy _25) @294:68-294:82
-    _18 = call fn rt.table.place(copy _19, copy _24, copy _13, copy _5) @294:9-294:89
-    _27 = call fn rt.table.LEN() @295:18-295:21
-    _28 = add copy _5, const 1 @295:23-295:28
-    _26 = call fn rt.table.set_word(copy _2, copy _27, copy _28) @295:5-295:29
-    _0 = copy _5 @296:12-296:13
-    return @296:5-296:13
+    _4 = call fn rt.table.reserve(copy _2, const 1) @304:5-304:19
+    _6 = call fn rt.table.LEN() @305:22-305:25
+    _5 = call fn rt.table.word(copy _2, copy _6) @305:13-305:26
+    _7 = call fn rt.table.entry(copy _2, copy _5) @306:13-306:25
+    _8 = call intrinsic mem.ptr.offset(copy _7, const 8) @311:19-311:30
+    _10 = call intrinsic mem.ptr.as_const(copy _3) @312:26-312:38
+    _12 = call fn rt.table.KEY_SIZE() @312:49-312:57
+    _11 = call fn rt.table.word(copy _2, copy _12) @312:40-312:58
+    _9 = call intrinsic extern.c.memmove(copy _8, copy _10, copy _11) @312:13-312:59
+    _15 = call fn rt.table.KEY() @313:44-313:47
+    _14 = call fn rt.table.word(copy _2, copy _15) @313:35-313:48
+    _13 = call fn rt.table.hash_key(copy _1, copy _8, copy _14) @313:17-313:49
+    _17 = call intrinsic mem.ptr.cast[u8, int](copy _7) @314:9-314:22
+    _16 = call intrinsic mem.ptr.write(copy _17, copy _13) @314:9-314:31
+    _22 = call intrinsic mem.ptr.cast[u8, ptr[int]](copy _2) @315:15-315:34
+    _23 = call fn rt.table.INDEX() @315:42-315:47
+    _21 = call intrinsic mem.ptr.offset(copy _22, copy _23) @315:15-315:48
+    _20 = call intrinsic mem.ptr.read(copy _21) @315:15-315:55
+    _19 = call intrinsic mem.ptr.cast_mut(copy _20) @315:15-315:66
+    _25 = call fn rt.table.MASK() @315:77-315:81
+    _24 = call fn rt.table.word(copy _2, copy _25) @315:68-315:82
+    _18 = call fn rt.table.place(copy _19, copy _24, copy _13, copy _5) @315:9-315:89
+    _27 = call fn rt.table.LEN() @316:18-316:21
+    _28 = add copy _5, const 1 @316:23-316:28
+    _26 = call fn rt.table.set_word(copy _2, copy _27, copy _28) @316:5-316:29
+    _0 = copy _5 @317:12-317:13
+    return @317:5-317:13
 }
 
-fn rt.table.remove(3) source 6 @304:18-304:24 {
+fn rt.table.remove(3) source 6 @325:18-325:24 {
     let _0: ()
-    let _1: ptr_mut[u8] "tb" @304:25-304:39
-    let _2: int "i" @304:41-304:47
-    let _3: ptr_mut[u8] "out" @304:49-304:64
-    let _4: int "n" @305:9-305:10
+    let _1: ptr_mut[u8] "tb" @325:25-325:39
+    let _2: int "i" @325:41-325:47
+    let _3: ptr_mut[u8] "out" @325:49-325:64
+    let _4: int "n" @326:9-326:10
     let _5: int
-    let _6: int "size" @306:9-306:13
-    let _7: ptr_mut[u8] "e" @310:13-310:14
+    let _6: int "size" @327:9-327:13
+    let _7: ptr_mut[u8] "e" @331:13-331:14
     let _8: ptr_mut[u8]
     let _9: ptr[u8]
     let _10: ptr_mut[u8]
@@ -9371,54 +9442,54 @@ fn rt.table.remove(3) source 6 @304:18-304:24 {
     let _23: int
     let _24: int
   bb0:
-    _5 = call fn rt.table.LEN() @305:22-305:25
-    _4 = call fn rt.table.word(copy _1, copy _5) @305:13-305:26
-    _6 = call fn rt.table.entry_size(copy _1) @306:16-306:30
-    _7 = call fn rt.table.entry(copy _1, copy _2) @310:17-310:29
-    _10 = call intrinsic mem.ptr.offset(copy _7, const 8) @311:26-311:37
-    _9 = call intrinsic mem.ptr.as_const(copy _10) @311:26-311:48
-    _11 = sub copy _6, const 8 @311:50-311:58
-    _8 = call intrinsic extern.c.memmove(copy _3, copy _9, copy _11) @311:13-311:59
-    _14 = call intrinsic mem.ptr.offset(copy _7, copy _6) @312:24-312:38
-    _13 = call intrinsic mem.ptr.as_const(copy _14) @312:24-312:49
-    _17 = sub copy _4, copy _2 @312:52-312:57
-    _16 = sub copy _17, const 1 @312:51-312:62
-    _15 = mul copy _16, copy _6 @312:51-312:69
-    _12 = call intrinsic extern.c.memmove(copy _7, copy _13, copy _15) @312:13-312:70
-    _19 = call fn rt.table.LEN() @313:18-313:21
-    _20 = sub copy _4, const 1 @313:23-313:28
-    _18 = call fn rt.table.set_word(copy _1, copy _19, copy _20) @313:5-313:29
-    _24 = call fn rt.table.MASK() @314:26-314:30
-    _23 = call fn rt.table.word(copy _1, copy _24) @314:17-314:31
-    _22 = add copy _23, const 1 @314:17-314:35
-    _21 = call fn rt.table.reindex(copy _1, copy _22) @314:5-314:36
+    _5 = call fn rt.table.LEN() @326:22-326:25
+    _4 = call fn rt.table.word(copy _1, copy _5) @326:13-326:26
+    _6 = call fn rt.table.entry_size(copy _1) @327:16-327:30
+    _7 = call fn rt.table.entry(copy _1, copy _2) @331:17-331:29
+    _10 = call intrinsic mem.ptr.offset(copy _7, const 8) @332:26-332:37
+    _9 = call intrinsic mem.ptr.as_const(copy _10) @332:26-332:48
+    _11 = sub copy _6, const 8 @332:50-332:58
+    _8 = call intrinsic extern.c.memmove(copy _3, copy _9, copy _11) @332:13-332:59
+    _14 = call intrinsic mem.ptr.offset(copy _7, copy _6) @333:24-333:38
+    _13 = call intrinsic mem.ptr.as_const(copy _14) @333:24-333:49
+    _17 = sub copy _4, copy _2 @333:52-333:57
+    _16 = sub copy _17, const 1 @333:51-333:62
+    _15 = mul copy _16, copy _6 @333:51-333:69
+    _12 = call intrinsic extern.c.memmove(copy _7, copy _13, copy _15) @333:13-333:70
+    _19 = call fn rt.table.LEN() @334:18-334:21
+    _20 = sub copy _4, const 1 @334:23-334:28
+    _18 = call fn rt.table.set_word(copy _1, copy _19, copy _20) @334:5-334:29
+    _24 = call fn rt.table.MASK() @335:26-335:30
+    _23 = call fn rt.table.word(copy _1, copy _24) @335:17-335:31
+    _22 = add copy _23, const 1 @335:17-335:35
+    _21 = call fn rt.table.reindex(copy _1, copy _22) @335:5-335:36
     _0 = const ()
     return
 }
 
-fn rt.table.copy(2) source 6 @322:18-322:22 {
+fn rt.table.copy(2) source 6 @343:18-343:22 {
     let _0: ptr_mut[u8]
-    let _1: rt.types.Types "ts" @322:23-322:32
-    let _2: ptr_mut[u8] "tb" @322:34-322:48
+    let _1: rt.types.Types "ts" @343:23-343:32
+    let _2: ptr_mut[u8] "tb" @343:34-343:48
     let _3: (int, int)
     let _4: int
     let _5: int
     let _6: int
     let _7: int
-    let _8: int "key" @323:10-323:13
-    let _9: int "val" @323:15-323:18
-    let _10: ptr_mut[u8] "out" @324:9-324:12
-    let _11: int "n" @325:9-325:10
+    let _8: int "key" @344:10-344:13
+    let _9: int "val" @344:15-344:18
+    let _10: ptr_mut[u8] "out" @345:9-345:12
+    let _11: int "n" @346:9-346:10
     let _12: int
     let _13: bool
     let _14: ()
-    let _15: int "i" @329:9-329:10
+    let _15: int "i" @350:9-350:10
     let _16: bool
     let _17: (ptr_mut[u8], ptr_mut[u8])
     let _18: ptr_mut[u8]
     let _19: ptr_mut[u8]
-    let _20: ptr_mut[u8] "src" @334:18-334:21
-    let _21: ptr_mut[u8] "dst" @334:23-334:26
+    let _20: ptr_mut[u8] "src" @355:18-355:21
+    let _21: ptr_mut[u8] "dst" @355:23-355:26
     let _22: ()
     let _23: ptr_mut[int]
     let _24: int
@@ -9438,66 +9509,66 @@ fn rt.table.copy(2) source 6 @322:18-322:22 {
     let _38: int
     let _39: int
   bb0:
-    _5 = call fn rt.table.KEY() @323:32-323:35
-    _4 = call fn rt.table.word(copy _2, copy _5) @323:23-323:36
-    _7 = call fn rt.table.VALUE() @323:47-323:52
-    _6 = call fn rt.table.word(copy _2, copy _7) @323:38-323:53
-    _3 = tuple(copy _4, copy _6) @323:22-323:54
-    _8 = copy _3.0 @323:10-323:13
-    _9 = copy _3.1 @323:15-323:18
-    _10 = call fn rt.table.new(copy _1, copy _8, copy _9) @324:15-324:32
-    _12 = call fn rt.table.LEN() @325:22-325:25
-    _11 = call fn rt.table.word(copy _2, copy _12) @325:13-325:26
-    _13 = eq copy _11, const 0 @326:8-326:14
-    switch copy _13 [0: bb1, else: bb2] @326:8-326:14
+    _5 = call fn rt.table.KEY() @344:32-344:35
+    _4 = call fn rt.table.word(copy _2, copy _5) @344:23-344:36
+    _7 = call fn rt.table.VALUE() @344:47-344:52
+    _6 = call fn rt.table.word(copy _2, copy _7) @344:38-344:53
+    _3 = tuple(copy _4, copy _6) @344:22-344:54
+    _8 = copy _3.0 @344:10-344:13
+    _9 = copy _3.1 @344:15-344:18
+    _10 = call fn rt.table.new(copy _1, copy _8, copy _9) @345:15-345:32
+    _12 = call fn rt.table.LEN() @346:22-346:25
+    _11 = call fn rt.table.word(copy _2, copy _12) @346:13-346:26
+    _13 = eq copy _11, const 0 @347:8-347:14
+    switch copy _13 [0: bb1, else: bb2] @347:8-347:14
   bb1:
-    _14 = call fn rt.table.reserve(copy _10, copy _11) @328:5-328:20
-    _15 = const 0 @329:13-329:14
+    _14 = call fn rt.table.reserve(copy _10, copy _11) @349:5-349:20
+    _15 = const 0 @350:13-350:14
     goto bb3
   bb2:
-    _0 = copy _10 @327:16-327:19
-    return @327:9-327:19
+    _0 = copy _10 @348:16-348:19
+    return @348:9-348:19
   bb3:
-    _16 = lt copy _15, copy _11 @333:15-333:20
-    switch copy _16 [0: bb4, else: bb5] @333:15-333:20
+    _16 = lt copy _15, copy _11 @354:15-354:20
+    switch copy _16 [0: bb4, else: bb5] @354:15-354:20
   bb4:
-    _35 = call fn rt.table.LEN() @340:19-340:22
-    _34 = call fn rt.table.set_word(copy _10, copy _35, copy _11) @340:5-340:26
-    _39 = call fn rt.table.MASK() @341:28-341:32
-    _38 = call fn rt.table.word(copy _10, copy _39) @341:18-341:33
-    _37 = add copy _38, const 1 @341:18-341:37
-    _36 = call fn rt.table.reindex(copy _10, copy _37) @341:5-341:38
-    _0 = copy _10 @342:12-342:15
-    return @342:5-342:15
+    _35 = call fn rt.table.LEN() @361:19-361:22
+    _34 = call fn rt.table.set_word(copy _10, copy _35, copy _11) @361:5-361:26
+    _39 = call fn rt.table.MASK() @362:28-362:32
+    _38 = call fn rt.table.word(copy _10, copy _39) @362:18-362:33
+    _37 = add copy _38, const 1 @362:18-362:37
+    _36 = call fn rt.table.reindex(copy _10, copy _37) @362:5-362:38
+    _0 = copy _10 @363:12-363:15
+    return @363:5-363:15
   bb5:
-    _18 = call fn rt.table.entry(copy _2, copy _15) @334:31-334:43
-    _19 = call fn rt.table.entry(copy _10, copy _15) @334:45-334:58
-    _17 = tuple(copy _18, copy _19) @334:30-334:59
-    _20 = copy _17.0 @334:18-334:21
-    _21 = copy _17.1 @334:23-334:26
-    _23 = call intrinsic mem.ptr.cast[u8, int](copy _21) @335:13-335:28
-    _25 = call intrinsic mem.ptr.cast[u8, int](copy _20) @335:35-335:50
-    _24 = call intrinsic mem.ptr.read(copy _25) @335:35-335:57
-    _22 = call intrinsic mem.ptr.write(copy _23, copy _24) @335:13-335:58
-    _27 = call intrinsic mem.ptr.offset(copy _21, const 8) @336:28-336:41
-    _28 = call intrinsic mem.ptr.offset(copy _20, const 8) @336:43-336:56
-    _26 = call fn rt.value.copy(copy _1, copy _27, copy _28, copy _8) @336:13-336:62
-    _29 = ge copy _9, const 0 @337:16-337:24
-    switch copy _29 [0: bb6, else: bb7] @337:16-337:24
+    _18 = call fn rt.table.entry(copy _2, copy _15) @355:31-355:43
+    _19 = call fn rt.table.entry(copy _10, copy _15) @355:45-355:58
+    _17 = tuple(copy _18, copy _19) @355:30-355:59
+    _20 = copy _17.0 @355:18-355:21
+    _21 = copy _17.1 @355:23-355:26
+    _23 = call intrinsic mem.ptr.cast[u8, int](copy _21) @356:13-356:28
+    _25 = call intrinsic mem.ptr.cast[u8, int](copy _20) @356:35-356:50
+    _24 = call intrinsic mem.ptr.read(copy _25) @356:35-356:57
+    _22 = call intrinsic mem.ptr.write(copy _23, copy _24) @356:13-356:58
+    _27 = call intrinsic mem.ptr.offset(copy _21, const 8) @357:28-357:41
+    _28 = call intrinsic mem.ptr.offset(copy _20, const 8) @357:43-357:56
+    _26 = call fn rt.value.copy(copy _1, copy _27, copy _28, copy _8) @357:13-357:62
+    _29 = ge copy _9, const 0 @358:16-358:24
+    switch copy _29 [0: bb6, else: bb7] @358:16-358:24
   bb6:
-    _33 = add copy _15, const 1 @339:13-339:19
-    _15 = move _33 @339:13-339:19
+    _33 = add copy _15, const 1 @360:13-360:19
+    _15 = move _33 @360:13-360:19
     goto bb3
   bb7:
-    _31 = call fn rt.table.value_at(copy _10, copy _15) @338:32-338:48
-    _32 = call fn rt.table.value_at(copy _2, copy _15) @338:50-338:65
-    _30 = call fn rt.value.copy(copy _1, copy _31, copy _32, copy _9) @338:17-338:71
+    _31 = call fn rt.table.value_at(copy _10, copy _15) @359:32-359:48
+    _32 = call fn rt.table.value_at(copy _2, copy _15) @359:50-359:65
+    _30 = call fn rt.value.copy(copy _1, copy _31, copy _32, copy _9) @359:17-359:71
     goto bb6
 }
 
-fn rt.table.free(1) source 6 @348:18-348:22 {
+fn rt.table.free(1) source 6 @369:18-369:22 {
     let _0: ()
-    let _1: ptr_mut[u8] "tb" @348:23-348:37
+    let _1: ptr_mut[u8] "tb" @369:23-369:37
     let _2: bool
     let _3: int
     let _4: int
@@ -9518,57 +9589,57 @@ fn rt.table.free(1) source 6 @348:18-348:22 {
     let _19: int
     let _20: ()
   bb0:
-    _4 = call fn rt.table.ENTRIES() @352:21-352:28
-    _3 = call fn rt.table.word(copy _1, copy _4) @352:12-352:29
-    _2 = ne copy _3, const 0 @352:12-352:34
-    switch copy _2 [0: bb1, else: bb2] @352:12-352:34
+    _4 = call fn rt.table.ENTRIES() @373:21-373:28
+    _3 = call fn rt.table.word(copy _1, copy _4) @373:12-373:29
+    _2 = ne copy _3, const 0 @373:12-373:34
+    switch copy _2 [0: bb1, else: bb2] @373:12-373:34
   bb1:
-    _13 = call fn rt.table.INDEX() @354:21-354:26
-    _12 = call fn rt.table.word(copy _1, copy _13) @354:12-354:27
-    _11 = ne copy _12, const 0 @354:12-354:32
-    switch copy _11 [0: bb3, else: bb4] @354:12-354:32
+    _13 = call fn rt.table.INDEX() @375:21-375:26
+    _12 = call fn rt.table.word(copy _1, copy _13) @375:12-375:27
+    _11 = ne copy _12, const 0 @375:12-375:32
+    switch copy _11 [0: bb3, else: bb4] @375:12-375:32
   bb2:
-    _9 = call intrinsic mem.ptr.cast[u8, ptr[u8]](copy _1) @353:26-353:44
-    _10 = call fn rt.table.ENTRIES() @353:52-353:59
-    _8 = call intrinsic mem.ptr.offset(copy _9, copy _10) @353:26-353:60
-    _7 = call intrinsic mem.ptr.read(copy _8) @353:26-353:67
-    _6 = call intrinsic mem.ptr.cast_mut(copy _7) @353:26-353:78
-    _5 = call intrinsic extern.c.sisu_rt_free(copy _6) @353:13-353:79
+    _9 = call intrinsic mem.ptr.cast[u8, ptr[u8]](copy _1) @374:26-374:44
+    _10 = call fn rt.table.ENTRIES() @374:52-374:59
+    _8 = call intrinsic mem.ptr.offset(copy _9, copy _10) @374:26-374:60
+    _7 = call intrinsic mem.ptr.read(copy _8) @374:26-374:67
+    _6 = call intrinsic mem.ptr.cast_mut(copy _7) @374:26-374:78
+    _5 = call intrinsic extern.c.sisu_rt_free(copy _6) @374:13-374:79
     goto bb1
   bb3:
-    _20 = call intrinsic extern.c.sisu_rt_free(copy _1) @356:9-356:25
+    _20 = call intrinsic extern.c.sisu_rt_free(copy _1) @377:9-377:25
     _0 = const ()
     return
   bb4:
-    _18 = call intrinsic mem.ptr.cast[u8, ptr[u8]](copy _1) @355:26-355:44
-    _19 = call fn rt.table.INDEX() @355:52-355:57
-    _17 = call intrinsic mem.ptr.offset(copy _18, copy _19) @355:26-355:58
-    _16 = call intrinsic mem.ptr.read(copy _17) @355:26-355:65
-    _15 = call intrinsic mem.ptr.cast_mut(copy _16) @355:26-355:76
-    _14 = call intrinsic extern.c.sisu_rt_free(copy _15) @355:13-355:77
+    _18 = call intrinsic mem.ptr.cast[u8, ptr[u8]](copy _1) @376:26-376:44
+    _19 = call fn rt.table.INDEX() @376:52-376:57
+    _17 = call intrinsic mem.ptr.offset(copy _18, copy _19) @376:26-376:58
+    _16 = call intrinsic mem.ptr.read(copy _17) @376:26-376:65
+    _15 = call intrinsic mem.ptr.cast_mut(copy _16) @376:26-376:76
+    _14 = call intrinsic extern.c.sisu_rt_free(copy _15) @376:13-376:77
     goto bb3
 }
 
-fn rt.table.drop(4) source 6 @365:18-365:22 {
+fn rt.table.drop(4) source 6 @386:18-386:22 {
     let _0: int
-    let _1: rt.types.Types "ts" @365:23-365:32
-    let _2: ptr_mut[u8] "tb" @365:34-365:48
-    let _3: int "first" @365:50-365:60
-    let _4: int "mode" @365:62-365:71
+    let _1: rt.types.Types "ts" @386:23-386:32
+    let _2: ptr_mut[u8] "tb" @386:34-386:48
+    let _3: int "first" @386:50-386:60
+    let _4: int "mode" @386:62-386:71
     let _5: (int, int)
     let _6: int
     let _7: int
     let _8: int
     let _9: int
-    let _10: int "key" @366:10-366:13
-    let _11: int "val" @366:15-366:18
-    let _12: bool "drops_key" @367:9-367:18
-    let _13: bool "drops_value" @368:9-368:20
-    let _14: int "status" @369:9-369:15
+    let _10: int "key" @387:10-387:13
+    let _11: int "val" @387:15-387:18
+    let _12: bool "drops_key" @388:9-388:18
+    let _13: bool "drops_value" @389:9-389:20
+    let _14: int "status" @390:9-390:15
     let _15: bool
-    let _16: int "n" @371:13-371:14
+    let _16: int "n" @392:13-392:14
     let _17: int
-    let _18: int "i" @372:13-372:14
+    let _18: int "i" @393:13-393:14
     let _19: bool
     let _20: int
     let _21: int
@@ -9579,68 +9650,68 @@ fn rt.table.drop(4) source 6 @365:18-365:22 {
     let _26: int
     let _27: ()
   bb0:
-    _7 = call fn rt.table.KEY() @366:32-366:35
-    _6 = call fn rt.table.word(copy _2, copy _7) @366:23-366:36
-    _9 = call fn rt.table.VALUE() @366:47-366:52
-    _8 = call fn rt.table.word(copy _2, copy _9) @366:38-366:53
-    _5 = tuple(copy _6, copy _8) @366:22-366:54
-    _10 = copy _5.0 @366:10-366:13
-    _11 = copy _5.1 @366:15-366:18
-    _12 = call fn rt.types.Types.needs_drop(copy _1, copy _10) @367:21-367:39
-    _13 = ge copy _11, const 0 @368:23-368:31
-    switch copy _13 [0: bb2, else: bb1] @368:23-368:54
+    _7 = call fn rt.table.KEY() @387:32-387:35
+    _6 = call fn rt.table.word(copy _2, copy _7) @387:23-387:36
+    _9 = call fn rt.table.VALUE() @387:47-387:52
+    _8 = call fn rt.table.word(copy _2, copy _9) @387:38-387:53
+    _5 = tuple(copy _6, copy _8) @387:22-387:54
+    _10 = copy _5.0 @387:10-387:13
+    _11 = copy _5.1 @387:15-387:18
+    _12 = call fn rt.types.Types.needs_drop(copy _1, copy _10) @388:21-388:39
+    _13 = ge copy _11, const 0 @389:23-389:31
+    switch copy _13 [0: bb2, else: bb1] @389:23-389:54
   bb1:
-    _13 = call fn rt.types.Types.needs_drop(copy _1, copy _11) @368:36-368:54
+    _13 = call fn rt.types.Types.needs_drop(copy _1, copy _11) @389:36-389:54
     goto bb2
   bb2:
-    _14 = call fn rt.value.OK() @369:18-369:26
-    _15 = copy _12 @370:8-370:17
-    switch copy _15 [0: bb4, else: bb5] @370:8-370:32
+    _14 = call fn rt.value.OK() @390:18-390:26
+    _15 = copy _12 @391:8-391:17
+    switch copy _15 [0: bb4, else: bb5] @391:8-391:32
   bb3:
-    _27 = call fn rt.table.free(copy _2) @379:5-379:13
-    _0 = copy _14 @380:12-380:18
-    return @380:5-380:18
+    _27 = call fn rt.table.free(copy _2) @400:5-400:13
+    _0 = copy _14 @401:12-401:18
+    return @401:5-401:18
   bb4:
-    _15 = copy _13 @370:21-370:32
-    switch copy _15 [0: bb3, else: bb6] @370:8-370:32
+    _15 = copy _13 @391:21-391:32
+    switch copy _15 [0: bb3, else: bb6] @391:8-391:32
   bb5:
-    switch copy _15 [0: bb3, else: bb6] @370:8-370:32
+    switch copy _15 [0: bb3, else: bb6] @391:8-391:32
   bb6:
-    _17 = call fn rt.table.LEN() @371:26-371:29
-    _16 = call fn rt.table.word(copy _2, copy _17) @371:17-371:30
-    _18 = copy _3 @372:17-372:22
+    _17 = call fn rt.table.LEN() @392:26-392:29
+    _16 = call fn rt.table.word(copy _2, copy _17) @392:17-392:30
+    _18 = copy _3 @393:17-393:22
     goto bb7
   bb7:
-    _19 = lt copy _18, copy _16 @373:15-373:20
-    switch copy _19 [0: bb3, else: bb8] @373:15-373:20
+    _19 = lt copy _18, copy _16 @394:15-394:20
+    switch copy _19 [0: bb3, else: bb8] @394:15-394:20
   bb8:
-    switch copy _13 [0: bb9, else: bb10] @374:16-374:27
+    switch copy _13 [0: bb9, else: bb10] @395:16-395:27
   bb9:
-    switch copy _12 [0: bb11, else: bb12] @376:16-376:25
+    switch copy _12 [0: bb11, else: bb12] @397:16-397:25
   bb10:
-    _22 = call fn rt.table.value_at(copy _2, copy _18) @375:66-375:81
-    _21 = call fn rt.value.drop(copy _1, copy _22, copy _11, copy _4) @375:51-375:93
-    _20 = call fn rt.value.after_part(copy _14, copy _21) @375:26-375:94
-    _14 = copy _20 @375:17-375:94
-    switch copy _12 [0: bb11, else: bb12] @376:16-376:25
+    _22 = call fn rt.table.value_at(copy _2, copy _18) @396:66-396:81
+    _21 = call fn rt.value.drop(copy _1, copy _22, copy _11, copy _4) @396:51-396:93
+    _20 = call fn rt.value.after_part(copy _14, copy _21) @396:26-396:94
+    _14 = copy _20 @396:17-396:94
+    switch copy _12 [0: bb11, else: bb12] @397:16-397:25
   bb11:
-    _26 = add copy _18, const 1 @378:13-378:19
-    _18 = move _26 @378:13-378:19
+    _26 = add copy _18, const 1 @399:13-399:19
+    _18 = move _26 @399:13-399:19
     goto bb7
   bb12:
-    _25 = call fn rt.table.key_at(copy _2, copy _18) @377:66-377:79
-    _24 = call fn rt.value.drop(copy _1, copy _25, copy _10, copy _4) @377:51-377:91
-    _23 = call fn rt.value.after_part(copy _14, copy _24) @377:26-377:92
-    _14 = copy _23 @377:17-377:92
+    _25 = call fn rt.table.key_at(copy _2, copy _18) @398:66-398:79
+    _24 = call fn rt.value.drop(copy _1, copy _25, copy _10, copy _4) @398:51-398:91
+    _23 = call fn rt.value.after_part(copy _14, copy _24) @398:26-398:92
+    _14 = copy _23 @398:17-398:92
     goto bb11
 }
 
-fn rt.table.equal(3) source 6 @387:18-387:23 {
+fn rt.table.equal(3) source 6 @408:18-408:23 {
     let _0: bool
-    let _1: rt.types.Types "ts" @387:24-387:33
-    let _2: ptr_mut[u8] "a" @387:35-387:48
-    let _3: ptr_mut[u8] "b" @387:50-387:63
-    let _4: int "n" @388:9-388:10
+    let _1: rt.types.Types "ts" @408:24-408:33
+    let _2: ptr_mut[u8] "a" @408:35-408:48
+    let _3: ptr_mut[u8] "b" @408:50-408:63
+    let _4: int "n" @409:9-409:10
     let _5: int
     let _6: bool
     let _7: int
@@ -9650,11 +9721,11 @@ fn rt.table.equal(3) source 6 @387:18-387:23 {
     let _11: int
     let _12: int
     let _13: int
-    let _14: int "key" @391:10-391:13
-    let _15: int "val" @391:15-391:18
-    let _16: int "i" @392:9-392:10
+    let _14: int "key" @412:10-412:13
+    let _15: int "val" @412:15-412:18
+    let _16: int "i" @413:9-413:10
     let _17: bool
-    let _18: int "j" @394:13-394:14
+    let _18: int "j" @415:13-415:14
     let _19: ptr_mut[u8]
     let _20: bool
     let _21: bool
@@ -9665,59 +9736,59 @@ fn rt.table.equal(3) source 6 @387:18-387:23 {
     let _26: int
     let _27: int
   bb0:
-    _5 = call fn rt.table.LEN() @388:21-388:24
-    _4 = call fn rt.table.word(copy _2, copy _5) @388:13-388:25
-    _8 = call fn rt.table.LEN() @389:21-389:24
-    _7 = call fn rt.table.word(copy _3, copy _8) @389:13-389:25
-    _6 = ne copy _4, copy _7 @389:8-389:25
-    switch copy _6 [0: bb1, else: bb2] @389:8-389:25
+    _5 = call fn rt.table.LEN() @409:21-409:24
+    _4 = call fn rt.table.word(copy _2, copy _5) @409:13-409:25
+    _8 = call fn rt.table.LEN() @410:21-410:24
+    _7 = call fn rt.table.word(copy _3, copy _8) @410:13-410:25
+    _6 = ne copy _4, copy _7 @410:8-410:25
+    switch copy _6 [0: bb1, else: bb2] @410:8-410:25
   bb1:
-    _11 = call fn rt.table.KEY() @391:31-391:34
-    _10 = call fn rt.table.word(copy _2, copy _11) @391:23-391:35
-    _13 = call fn rt.table.VALUE() @391:45-391:50
-    _12 = call fn rt.table.word(copy _2, copy _13) @391:37-391:51
-    _9 = tuple(copy _10, copy _12) @391:22-391:52
-    _14 = copy _9.0 @391:10-391:13
-    _15 = copy _9.1 @391:15-391:18
-    _16 = const 0 @392:13-392:14
+    _11 = call fn rt.table.KEY() @412:31-412:34
+    _10 = call fn rt.table.word(copy _2, copy _11) @412:23-412:35
+    _13 = call fn rt.table.VALUE() @412:45-412:50
+    _12 = call fn rt.table.word(copy _2, copy _13) @412:37-412:51
+    _9 = tuple(copy _10, copy _12) @412:22-412:52
+    _14 = copy _9.0 @412:10-412:13
+    _15 = copy _9.1 @412:15-412:18
+    _16 = const 0 @413:13-413:14
     goto bb3
   bb2:
-    _0 = const false @390:16-390:21
-    return @390:9-390:21
+    _0 = const false @411:16-411:21
+    return @411:9-411:21
   bb3:
-    _17 = lt copy _16, copy _4 @393:11-393:16
-    switch copy _17 [0: bb4, else: bb5] @393:11-393:16
+    _17 = lt copy _16, copy _4 @414:11-414:16
+    switch copy _17 [0: bb4, else: bb5] @414:11-414:16
   bb4:
-    _0 = const true @400:12-400:16
-    return @400:5-400:16
+    _0 = const true @421:12-421:16
+    return @421:5-421:16
   bb5:
-    _19 = call fn rt.table.key_at(copy _2, copy _16) @394:29-394:41
-    _18 = call fn rt.table.find(copy _1, copy _3, copy _19, copy _14) @394:17-394:47
-    _20 = lt copy _18, const 0 @395:12-395:17
-    switch copy _20 [0: bb6, else: bb7] @395:12-395:17
+    _19 = call fn rt.table.key_at(copy _2, copy _16) @415:29-415:41
+    _18 = call fn rt.table.find(copy _1, copy _3, copy _19, copy _14) @415:17-415:47
+    _20 = lt copy _18, const 0 @416:12-416:17
+    switch copy _20 [0: bb6, else: bb7] @416:12-416:17
   bb6:
-    _21 = ge copy _15, const 0 @397:12-397:20
-    switch copy _21 [0: bb10, else: bb9] @397:12-397:97
+    _21 = ge copy _15, const 0 @418:12-418:20
+    switch copy _21 [0: bb10, else: bb9] @418:12-418:97
   bb7:
-    _0 = const false @396:20-396:25
-    return @396:13-396:25
+    _0 = const false @417:20-417:25
+    return @417:13-417:25
   bb8:
-    _27 = add copy _16, const 1 @399:9-399:15
-    _16 = move _27 @399:9-399:15
+    _27 = add copy _16, const 1 @420:9-420:15
+    _16 = move _27 @420:9-420:15
     goto bb3
   bb9:
-    _23 = call fn rt.table.value_at(copy _2, copy _16) @397:45-397:59
-    _24 = call fn rt.table.value_at(copy _3, copy _18) @397:66-397:80
-    _26 = call fn rt.table.VALUE() @397:90-397:95
-    _25 = call fn rt.table.word(copy _3, copy _26) @397:82-397:96
-    _22 = call fn rt.value.equal(copy _1, copy _23, copy _15, copy _24, copy _25) @397:29-397:97
-    _21 = not copy _22 @397:25-397:97
-    switch copy _21 [0: bb8, else: bb11] @397:12-397:97
+    _23 = call fn rt.table.value_at(copy _2, copy _16) @418:45-418:59
+    _24 = call fn rt.table.value_at(copy _3, copy _18) @418:66-418:80
+    _26 = call fn rt.table.VALUE() @418:90-418:95
+    _25 = call fn rt.table.word(copy _3, copy _26) @418:82-418:96
+    _22 = call fn rt.value.equal(copy _1, copy _23, copy _15, copy _24, copy _25) @418:29-418:97
+    _21 = not copy _22 @418:25-418:97
+    switch copy _21 [0: bb8, else: bb11] @418:12-418:97
   bb10:
-    switch copy _21 [0: bb8, else: bb11] @397:12-397:97
+    switch copy _21 [0: bb8, else: bb11] @418:12-418:97
   bb11:
-    _0 = const false @398:20-398:25
-    return @398:13-398:25
+    _0 = const false @419:20-419:25
+    return @419:13-419:25
 }
 
 fn rt.text.grow(3) source 7 @23:18-23:22 {

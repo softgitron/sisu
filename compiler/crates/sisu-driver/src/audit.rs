@@ -292,6 +292,10 @@ pub fn caps(file: &str, prog: &sisu_sir::Program, own_structs: &[String]) -> Str
         }
     }
     let shown = |d: Option<usize>| d.map_or("-".to_string(), |d| d.to_string());
+    // A test is named as its trace names it, `test "its name"`, where its
+    // SIR name numbers it (decision 505).
+    let named =
+        |n: &str| if n.starts_with("test#") { sisu_sir::display_fn_name(n, prog) } else { n.to_string() };
     let mut out = String::new();
     let mut counts = Vec::new();
     for (&name, &i) in &index {
@@ -306,12 +310,17 @@ pub fn caps(file: &str, prog: &sisu_sir::Program, own_structs: &[String]) -> Str
             })
             .count();
         counts.push(params);
+        let name = named(name);
         out.push_str(&format!("{file} function {name} caps={params} io={kind} depth={}\n", shown(depth[i])));
     }
     uses.sort_by(|a, b| (&prog.functions[a.0].name, &a.1).cmp(&(&prog.functions[b.0].name, &b.1)));
     uses.dedup();
     for (i, op) in &uses {
-        out.push_str(&format!("{file} use {} {op} depth={}\n", prog.functions[*i].name, shown(depth[*i])));
+        out.push_str(&format!(
+            "{file} use {} {op} depth={}\n",
+            named(&prog.functions[*i].name),
+            shown(depth[*i])
+        ));
     }
     let mut bundles = 0;
     for d in &prog.types {

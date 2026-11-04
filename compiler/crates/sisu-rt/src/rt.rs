@@ -400,7 +400,7 @@ static HOLE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 pub(crate) fn note_hole(name: &str) {
     let mut h = HOLE.lock().unwrap_or_else(|p| p.into_inner());
-    if h.is_none() {
+    if h.is_none() && !expect_copy() {
         *h = Some(name.to_string());
         // At once: a run the hole leaves waiting may end in a deadlock's
         // abort before its report.
@@ -467,9 +467,131 @@ pub(crate) fn snapshot(text: String) -> Option<u8> {
     }
 }
 
-/// The newest panic, taken.
+/// The newest panic, taken. In the copy of the process an `expect` made
+/// (decision 500), the unwinding it walked is over: its trace goes to the
+/// original, and the copy ends.
 pub(crate) fn take_panic() -> Option<Panic> {
-    with_panics(|p| p.pop())
+    let p = with_panics(|p| p.pop());
+    if expect_copy() {
+        end_expect_copy(p.as_ref().map_or(&[][..], |p| &p.stack));
+    }
+    p
+}
+
+/// The write end of the pipe of the copy of the process a failed `expect`
+/// walks its frames in (decision 500); -1 outside such a copy.
+static EXPECT_COPY: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+
+/// The failures `expect` recorded in this test, each a panic's report.
+static EXPECTED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Whether this process is the copy a failed `expect` walks its frames in.
+pub(crate) fn expect_copy() -> bool {
+    EXPECT_COPY.load(std::sync::atomic::Ordering::Relaxed) >= 0
+}
+
+/// Ends the copy of a failed `expect`: the lines of the trace it walked go
+/// to the original, one to a line.
+pub(crate) fn end_expect_copy(stack: &[String]) -> ! {
+    let fd = EXPECT_COPY.load(std::sync::atomic::Ordering::Relaxed);
+    let mut text = String::new();
+    for line in stack {
+        text.push_str(line);
+        text.push('\n');
+    }
+    let mut b = text.as_bytes();
+    while !b.is_empty() {
+        // SAFETY: `fd` is the pipe's write end and `b` the bytes left.
+        let n = unsafe { libc::write(fd, b.as_ptr().cast(), b.len()) };
+        if n <= 0 {
+            break;
+        }
+        b = &b[n as usize..];
+    }
+    // SAFETY: the copy ends at once, running nothing more of the program.
+    unsafe { libc::_exit(0) }
+}
+
+/// A failed `expect` in a native test (17; decision 500): the failure is
+/// recorded with the frames a panic would leave and the test goes on, to
+/// fail at its end. The frames are walked by a panic's own unwinding, in a
+/// copy of the process (`fork`) that writes the trace it collected to a
+/// pipe when the unwinding ends and then exits, writing nothing else; the
+/// original waits for it and goes on. `None` outside a test or in the copy,
+/// where the failure is `assert`'s panic.
+pub(crate) fn expect_failed(message: &str) -> Option<u8> {
+    if std::env::var_os("SISU_TEST_REPORT").is_none() || expect_copy() {
+        return None;
+    }
+    flush();
+    let mut fds = [0i32; 2];
+    // SAFETY: `fds` has room for the pipe's two ends.
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+        return None;
+    }
+    // SAFETY: the copy runs only this thread, which goes on unwinding and
+    // ends in `end_expect_copy`.
+    let pid = unsafe { libc::fork() };
+    if pid < 0 {
+        // SAFETY: the pipe's ends are this process's.
+        unsafe {
+            libc::close(fds[0]);
+            libc::close(fds[1]);
+        }
+        return None;
+    }
+    if pid == 0 {
+        // SAFETY: the copy reads nothing from the pipe.
+        unsafe { libc::close(fds[0]) };
+        EXPECT_COPY.store(fds[1], std::sync::atomic::Ordering::Relaxed);
+        return Some(raise_msg(msg::PANIC_EXPLICIT, &[("message", message.to_string())]));
+    }
+    // SAFETY: the original writes nothing to the pipe.
+    unsafe { libc::close(fds[1]) };
+    let mut out = Vec::new();
+    let mut buf = [0u8; 4096];
+    loop {
+        // SAFETY: `buf` has room for what is read.
+        let n = unsafe { libc::read(fds[0], buf.as_mut_ptr().cast(), buf.len()) };
+        if n <= 0 {
+            break;
+        }
+        out.extend_from_slice(&buf[..n as usize]);
+    }
+    let mut status = 0;
+    // SAFETY: the pipe's read end is this process's, and `pid` its child.
+    unsafe {
+        libc::close(fds[0]);
+        libc::waitpid(pid, &mut status, 0);
+    }
+    let stack: Vec<String> = String::from_utf8_lossy(&out).lines().map(str::to_string).collect();
+    let message = render(msg::PANIC_EXPLICIT, &[("message", message.to_string())]);
+    let report = panic_report(&message, &stack);
+    EXPECTED.lock().unwrap_or_else(|p| p.into_inner()).push(report);
+    Some(crate::abi::OK)
+}
+
+/// A panic's report, as a test's failure shows it: its header and its
+/// trace (the interpreter's `panic_report`).
+pub(crate) fn panic_report(message: &str, stack: &[String]) -> String {
+    let mut text = render(msg::RUN_PANIC_HEADER, &[("message", message.to_string())]);
+    text.push('\n');
+    for line in &sisu_diag::trace::shown(stack) {
+        text.push_str("  ");
+        text.push_str(line);
+        text.push('\n');
+    }
+    text
+}
+
+/// The trace of the newest panic so far.
+pub(crate) fn newest_stack() -> Vec<String> {
+    with_panics(|p| p.last().map(|x| x.stack.clone()).unwrap_or_default())
+}
+
+/// The failures `expect` recorded, in order, taken.
+pub(crate) fn take_expected() -> String {
+    std::mem::take(&mut *EXPECTED.lock().unwrap_or_else(|p| p.into_inner())).concat()
 }
 
 /// A panic reached a frame that runs cleanup for an earlier one: the
@@ -494,6 +616,10 @@ pub(crate) fn abort_unwinding() -> ! {
 
 /// Stops the program at once: the message on standard error, status 134.
 pub(crate) fn abort(message: &str) -> ! {
+    if expect_copy() {
+        end_expect_copy(&newest_stack());
+    }
+    crate::sched::write_trail();
     stderr(&format!("{message}\n"));
     flush();
     std::process::exit(crate::entry::EXIT_ABORT)
@@ -505,6 +631,9 @@ pub(crate) fn internal(detail: &str) -> ! {
 }
 
 pub(crate) fn stdout(bytes: &[u8]) {
+    if expect_copy() {
+        return;
+    }
     OUT.with(|o| {
         let mut o = o.borrow_mut();
         o.extend_from_slice(bytes);
@@ -517,6 +646,9 @@ pub(crate) fn stdout(bytes: &[u8]) {
 
 /// Writes to standard error, after what is waiting for standard output.
 pub(crate) fn stderr(text: &str) {
+    if expect_copy() {
+        return;
+    }
     flush();
     let _ = std::io::stderr().write_all(text.as_bytes());
 }

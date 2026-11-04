@@ -87,7 +87,7 @@ unsafe extern "C" fn sisu_rt_start(
         let seed =
             std::env::var("SISU_SCHEDULE_SEED").ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(0);
         let keep_stats = std::env::var_os("SISU_STATS").is_some();
-        crate::sched::start(seed, keep_stats, pool, root_limits);
+        crate::sched::start(seed, crate::sched::Strategy::from_env(), keep_stats, pool, root_limits);
         let size = ty(ret_ty).size.max(8) as usize;
         let mut ret = vec![0u64; size.div_ceil(8)];
         let r = ret.as_mut_ptr() as *mut u8;
@@ -109,17 +109,19 @@ unsafe extern "C" fn sisu_rt_start(
         // A native test (decision 460): how it ended goes to the file the
         // driver names, apart from what the test wrote to standard error.
         let test_report = std::env::var_os("SISU_TEST_REPORT");
+        // A test whose `expect` failed fails at its end with every failure
+        // it recorded, before the panic that ended it, if one did, whatever
+        // else it did (decisions 388 and 500).
+        let expected = rt::take_expected();
         let code = if status != abi::OK {
             match rt::take_panic() {
                 Some(p) => {
-                    let mut text = rt::render(msg::RUN_PANIC_HEADER, &[("message", p.message)]);
-                    text.push('\n');
-                    for line in &sisu_diag::trace::shown(&p.stack) {
-                        text.push_str("  ");
-                        text.push_str(line);
-                        text.push('\n');
-                    }
+                    let text = rt::panic_report(&p.message, &p.stack);
                     match &test_report {
+                        Some(path) if !expected.is_empty() => {
+                            let shown = if rt::hole().is_some() { "" } else { text.as_str() };
+                            let _ = std::fs::write(path, format!("failed\n{expected}{shown}"));
+                        }
                         Some(_) if rt::hole().is_some() => {}
                         Some(path) => {
                             let _ = std::fs::write(path, format!("failed\n{text}"));
@@ -129,6 +131,11 @@ unsafe extern "C" fn sisu_rt_start(
                 }
                 None => rt::internal("a panic left `main` without its message"),
             }
+            EXIT_PANIC
+        } else if !expected.is_empty()
+            && let Some(path) = &test_report
+        {
+            let _ = std::fs::write(path, format!("failed\n{expected}"));
             EXIT_PANIC
         } else if flags & abi::ENTRY_RESULT != 0 {
             // SAFETY: the result is a `Result` of type `ret_ty`.
@@ -145,6 +152,7 @@ unsafe extern "C" fn sisu_rt_start(
             unsafe { value::forget_value(r, ret_ty) };
         }
         crate::caps::release_kept();
+        crate::sched::write_trail();
         if let Some(stats) = crate::sched::finish() {
             rt::stderr(&stats_report(&stats));
         }
@@ -626,6 +634,12 @@ unsafe extern "C" fn sisu_rt_intrinsic(desc: *const u32, ret: *mut u8, args: *co
         // SAFETY: as the caller guarantees.
         return unsafe { crate::tasks::call(i, &c) };
     }
+    // The copy of the process a failed `expect` walks its frames in
+    // (decision 500) reaches nothing outside: the walk ends at the host.
+    if rt::expect_copy() && i.name().starts_with("host.") {
+        let stack = rt::newest_stack();
+        rt::end_expect_copy(&stack);
+    }
     if crate::host::handles(i) {
         // SAFETY: as the caller guarantees.
         return unsafe { crate::host::call(i, &c) };
@@ -658,7 +672,7 @@ unsafe fn table(t: u32, items: *mut u8, n: u64, out: *mut u8) -> u8 {
     let made = crate::dict::Table::new(k, v);
     // SAFETY: the table was just made.
     let table = unsafe { &mut *made };
-    let (ksize, vsize) = (table.ksize as usize, table.vsize as usize);
+    let (ksize, vsize) = (table.ksize() as usize, table.vsize() as usize);
     let mut status = abi::OK;
     // SAFETY: the entries are in `items`.
     unsafe {
@@ -704,7 +718,7 @@ unsafe fn dict_slot(d: *mut u8, key: *mut u8, key_ty: u32, mode: u32, out: *mut 
         let at = match t.position(key, key_ty) {
             Some(i) => t.val_at(i),
             None if mode == abi::SLOT_WRITE => {
-                let mut k = vec![0u64; (t.ksize as usize).div_ceil(8)];
+                let mut k = vec![0u64; (t.ksize() as usize).div_ceil(8)];
                 let kp = k.as_mut_ptr() as *mut u8;
                 crate::dict::copy_key(kp, key, key_ty);
                 let i = t.push_key(kp);

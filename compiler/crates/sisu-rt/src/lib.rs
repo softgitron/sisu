@@ -29,6 +29,7 @@ mod cells;
 mod desc;
 mod dict;
 mod entry;
+mod faults;
 mod host;
 mod intrinsics;
 mod iter;

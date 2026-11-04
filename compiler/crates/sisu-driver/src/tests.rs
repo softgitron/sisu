@@ -407,6 +407,21 @@ fn audit_caps_counts_capability_threading() {
     assert!(host.err.contains("error[D0022]"), "{}", host.err);
 }
 
+/// `sisu audit --caps` of a library names a test as its trace does, where
+/// its SIR name numbers it (decision 505).
+#[test]
+fn audit_caps_names_tests() {
+    let f = temp_file(
+        "audit_caps_tests.sisu",
+        "pub def load(fs: Fs) -> String ! IoError:\n    return fs.read_to_string(Path.new(\"x.txt\"))\n\n\
+         test \"loads a file\"(fs: Fs):\n    _ = load(fs)\n",
+    );
+    let (code, host) = cli(&["audit", "--caps", &f]);
+    assert_eq!(code, 0, "{}", host.err);
+    assert!(host.out.contains(" function test \"loads a file\" caps=1 io=calls depth=-\n"), "{}", host.out);
+    assert!(!host.out.contains("test#"), "{}", host.out);
+}
+
 /// The test cache (decision 242): a test that passed is not run again
 /// while what it reaches is the same, and keeps what it printed; an edit
 /// of what it reaches runs it again.

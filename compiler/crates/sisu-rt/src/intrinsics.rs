@@ -412,7 +412,7 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 // and dropping the one given) and gives the old value.
                 let (p, _) = c.place(0);
                 let t = crate::dict::table(p);
-                let vsize = t.vsize as usize;
+                let vsize = t.vsize() as usize;
                 match t.position(c.arg(1), c.ty(1)) {
                     Some(k) => {
                         mem::set_word(c.ret, 0, 0);
@@ -432,11 +432,11 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 let t = crate::dict::table(p);
                 match t.position(c.arg(1), c.ty(1)) {
                     Some(k) => {
-                        let mut entry = vec![0u64; ((t.ksize + t.vsize) as usize).div_ceil(8)];
+                        let mut entry = vec![0u64; ((t.ksize() + t.vsize()) as usize).div_ceil(8)];
                         let e = entry.as_mut_ptr() as *mut u8;
                         t.remove(k, e);
                         mem::set_word(c.ret, 0, 0);
-                        mem::copy(c.ret.add(8), e.add(t.ksize as usize), t.vsize as usize);
+                        mem::copy(c.ret.add(8), e.add(t.ksize() as usize), t.vsize() as usize);
                         return value::drop_value(e, t.key());
                     }
                     None => c.none(),
@@ -449,7 +449,7 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                     c.set_bool(false);
                     return value::drop_value(c.arg(1), c.ty(1));
                 }
-                let mut key = vec![0u64; (t.ksize as usize).div_ceil(8)];
+                let mut key = vec![0u64; (t.ksize() as usize).div_ceil(8)];
                 let kp = key.as_mut_ptr() as *mut u8;
                 crate::dict::copy_key(kp, c.arg(1), c.ty(1));
                 t.push_key(kp);
@@ -461,7 +461,7 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 let t = crate::dict::table(p);
                 match t.position(c.arg(1), c.ty(1)) {
                     Some(k) => {
-                        let mut entry = vec![0u64; (t.ksize as usize).div_ceil(8)];
+                        let mut entry = vec![0u64; (t.ksize() as usize).div_ceil(8)];
                         let e = entry.as_mut_ptr() as *mut u8;
                         t.remove(k, e);
                         c.set_bool(true);
@@ -474,7 +474,7 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 // The dict's table and the key, moved in.
                 let (p, _) = c.place(0);
                 mem::set_word(c.ret, 0, mem::word(p, 0));
-                let ksize = crate::dict::table(p).ksize as usize;
+                let ksize = crate::dict::table(p).ksize() as usize;
                 mem::copy(c.ret.add(8), c.arg(1), ksize);
             }
             I::EntryOrInsert => {
@@ -489,7 +489,7 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                     }
                     None => {
                         let k = t.push_key(key);
-                        mem::copy(t.val_at(k), c.arg(1), t.vsize as usize);
+                        mem::copy(t.val_at(k), c.arg(1), t.vsize() as usize);
                         c.set_word(t.val_at(k) as u64);
                     }
                 }
@@ -1075,6 +1075,16 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 if let Some(s) = rt::snapshot(text) {
                     return s;
                 }
+            }
+            I::TestSimFault => c.set_bool(crate::faults::decide(c)),
+            I::TestSimFaultError => crate::faults::write(c),
+            I::SimChoose => {
+                let n = c.int(0);
+                if n < 1 {
+                    return rt::raise_msg(msg::SIM_CHOOSE_NONE, &[]);
+                }
+                let n = n.min(i64::from(u32::MAX)) as u32;
+                c.set_word(u64::from(crate::sched::with(|s| s.choose(n, false))));
             }
             I::TestEntry => {
                 let k = std::env::var("SISU_TEST_ENTRY").ok().and_then(|v| v.trim().parse::<i64>().ok());
@@ -1679,6 +1689,12 @@ unsafe fn assert_fail(c: &Call<'_>, i: Intrinsic) -> u8 {
                 m.push_str("\n  ");
                 m.push_str(&rt::render(id, &[("value", String::from_utf8_lossy(&out).into_owned())]));
             }
+        }
+        // In a test, `expect` records the failure and goes on (decision 500).
+        if matches!(i, Intrinsic::ExpectFail | Intrinsic::ExpectFailCompare | Intrinsic::ExpectFailParts)
+            && let Some(status) = rt::expect_failed(&m)
+        {
+            return status;
         }
         rt::raise_msg(msg::PANIC_EXPLICIT, &[("message", m)])
     }

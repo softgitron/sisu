@@ -1131,4 +1131,10 @@ pub pure def intrinsic_names() -> list[str]:
         "test.replay_case",
         "test.record_case",
         "test.snapshot",
+        # `sim.choose`, and the faults of a native test (decisions 501
+        # and 502).
+        "sim.choose",
+        "test.sim_fault",
+        "test.sim_fault_error",
+        "sim.always",
     ]

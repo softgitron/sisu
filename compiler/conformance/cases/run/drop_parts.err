@@ -1,3 +1,3 @@
 panic: boom
-  at Bomb.Drop.drop (drop_parts.sisu:20:9)
+  at Drop.drop for Bomb (drop_parts.sisu:20:9)
   at main (drop_parts.sisu:59:25)

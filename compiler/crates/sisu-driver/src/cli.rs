@@ -1019,8 +1019,11 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                 return EXIT_USAGE;
             }
             // A native run takes the seed of its schedule, `--explore` and
-            // the scheduler's `--stats` (decision 203); the interpreter's
+            // the scheduler's `--stats` (decision 203), and a native test
+            // the other schedulers too (decision 501); the interpreter's
             // other modes are its own.
+            let schedulers: &[&str] =
+                if cmd == "test" { &["--record"] } else { &["--record", "--scheduler"] };
             if p.flags.contains(&"--native")
                 && let Some(other) = ["--sir", "--monitor", "--defer-borrow", "--watch"]
                     .iter()
@@ -1028,7 +1031,7 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                     .map(|o| o.to_string())
                     .or_else(|| p.stats.map(|k| format!("--stats {k}")))
                     .or_else(|| {
-                        ["--record", "--scheduler"]
+                        schedulers
                             .iter()
                             .find(|o| p.values.iter().any(|(k, _)| k == *o))
                             .map(|o| o.to_string())
@@ -3585,7 +3588,13 @@ fn test_runs(
     // its failure (17; decision 466).
     let mut quiet = Captured { inner: &mut *host, out: String::new(), err: String::new() };
     match crate::native_tests::chosen() {
-        Some(profile) => crate::native_tests::run(prog, &mut quiet, options, which, profile),
+        // A build that failed says why, which is no test's output.
+        Some(profile) => {
+            crate::native_tests::run(prog, &mut quiet, options, which, profile).inspect_err(|_| {
+                let err = std::mem::take(&mut quiet.err);
+                quiet.inner.stderr(&err);
+            })
+        }
         None => Ok(sisu_interp::run_tests_report_at(prog, &mut quiet, options, which)),
     }
 }
@@ -3635,9 +3644,11 @@ fn run_tests(
                 }
                 count += 1;
                 searched += 1;
-                let mut quiet = Captured { inner: &mut *host, out: String::new(), err: String::new() };
                 let o = Options { strategy: sisu_interp::Strategy::Exhaustive { prefix }, ..options.clone() };
-                let mut again = sisu_interp::run_tests_report_at(prog, &mut quiet, &o, &[index]);
+                let mut again = match test_runs(prog, host, &o, &[index]) {
+                    Ok(r) => r,
+                    Err(code) => return (code, Vec::new()),
+                };
                 let Some((name, r, rep)) = again.pop() else { break };
                 trail = rep.trail.clone();
                 if matches!(r, TestResult::Failed(_)) {

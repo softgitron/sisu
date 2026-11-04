@@ -60,6 +60,7 @@ pub(crate) fn handles(i: Intrinsic) -> bool {
             | I::RwLockIntoInner
             | I::IterNext
             | I::TestCatch
+            | I::SimAlways
     )
 }
 
@@ -76,6 +77,7 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> u8 {
             I::TaskRace => scope(c, true),
             I::TaskShield => shield(c),
             I::TestCatch => catch(c),
+            I::SimAlways => always(c),
             I::TaskYieldNow => {
                 sched::yield_now();
                 abi::OK
@@ -550,6 +552,30 @@ unsafe fn closure_here(c: &Call<'_>, i: usize) -> (usize, usize) {
     }
 }
 
+/// `sim.always(what, holds, body)` (17; decision 503): `body()`, with
+/// `holds` checked now, at every switch until the body returns (on the
+/// stack of the task switched to, outside its budget), and once more then;
+/// a check that finds it false ends the run as the interpreter's does,
+/// naming `what`.
+unsafe fn always(c: &Call<'_>) -> u8 {
+    // SAFETY: the arguments are the description, the predicate and the
+    // body, which live while the call does.
+    let (what, pred, (code, env)) =
+        unsafe { (String::from_utf8_lossy(c.text(0)).into_owned(), closure_here(c, 1), closure_here(c, 2)) };
+    system(|| with(|s| s.always.push((pred.0, pred.1, what))));
+    sched::check_always();
+    // The interpreter pushes the body's frame itself: its entry is not a
+    // yield point.
+    // SAFETY: the code takes its result's address and its environment.
+    let status =
+        sched::neutral(|| unsafe { std::mem::transmute::<usize, Body0>(code)(c.ret, env as *mut u8) });
+    if status == abi::OK {
+        sched::check_always();
+    }
+    system(|| with(|s| s.always.pop()));
+    status
+}
+
 /// `task.shield(body)`: the body under a context that is never cancelled.
 unsafe fn shield(c: &Call<'_>) -> u8 {
     // SAFETY: the argument is the body.
@@ -585,7 +611,9 @@ unsafe fn catch(c: &Call<'_>) -> u8 {
             mem::set_word(c.ret, 0, 0);
             return abi::OK;
         }
-        if rt::hole().is_some() {
+        // The copy a failed `expect` walks its frames in catches nothing
+        // (decision 500).
+        if rt::hole().is_some() || rt::expect_copy() {
             return status;
         }
         let Some(p) = system(rt::take_panic) else { return status };
@@ -891,6 +919,9 @@ fn task_main(t: u32, y: &Yielder<(), sched::Suspend>, generator: bool) {
         task.yielder = y;
         (task.body, task.ret_ty)
     });
+    // The switch to a task that had not run checks `sim.always` first, as
+    // every switch does (decision 503).
+    sched::check_always();
     let size = if generator { 0 } else { ty(ret_ty).size };
     let mut ret = vec![0u64; (size as usize).div_ceil(8)].into_boxed_slice();
     let mut unit = 0u64;
@@ -1446,7 +1477,11 @@ unsafe fn lock(c: &Call<'_>, rw: bool) -> u8 {
                 if state != 0 {
                     // A lock word of 2 is an `RwLock`'s readers: its holder
                     // word counts them.
-                    if state == 1 && mem::word(p, abi::MUTEX_HOLDER) == u64::from(cur) {
+                    // A `sim.always` predicate cannot see what a critical
+                    // section protects: the check waits for the next switch
+                    // (decision 503).
+                    if s.checking || (state == 1 && mem::word(p, abi::MUTEX_HOLDER) == u64::from(cur)) {
+                        s.check_skipped |= s.checking;
                         return Attempt::Done(rt::raise_msg(msg::PANIC_MUTEX_HELD, &[]));
                     }
                     if rw && !waiting {
@@ -1482,6 +1517,11 @@ unsafe fn read_lock(c: &Call<'_>) -> u8 {
             unsafe {
                 if mem::word(p, abi::MUTEX_POISONED) != 0 {
                     return Attempt::Done(rt::raise_msg(msg::PANIC_MUTEX_POISONED, &[]));
+                }
+                let held = mem::word(p, abi::MUTEX_LOCKED) == 1 || mem::word(p, abi::MUTEX_WRITERS) != 0;
+                if s.checking && held {
+                    s.check_skipped = true;
+                    return Attempt::Done(rt::raise_msg(msg::PANIC_MUTEX_HELD, &[]));
                 }
                 match mem::word(p, abi::MUTEX_LOCKED) {
                     1 if mem::word(p, abi::MUTEX_HOLDER) == u64::from(cur) => {

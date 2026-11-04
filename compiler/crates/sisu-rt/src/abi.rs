@@ -1370,6 +1370,15 @@ intrinsics! {
     TestRecordCase = "test.record_case",
     // `assert_snapshot` against the stored snapshots (decision 461).
     TestSnapshot = "test.snapshot",
+    // A value the simulation chooses (17), natively (decision 501).
+    SimChoose = "sim.choose",
+    // The `sim` profile's faults under a native test (decision 502): the
+    // driver puts a call of each before a call through `FsOps` or
+    // `NetOps` on a handle, which no front end writes.
+    TestSimFault = "test.sim_fault",
+    TestSimFaultError = "test.sim_fault_error",
+    // `sim.always`, natively (decision 503).
+    SimAlways = "sim.always",
 }
 
 impl Intrinsic {

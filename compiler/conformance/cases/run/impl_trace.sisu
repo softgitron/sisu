@@ -1,0 +1,27 @@
+# A method of a trait's impl in a panic's trace (decision 504): its SIR
+# name, `Dial.Meter.read`, holds the type and the trait's path, so a trace
+# names it as `Meter.read for Dial`, the trait's method and the type it is
+# implemented for, in the interpreter and natively; a closure in it, and a
+# std trait's method, the same.
+
+trait Meter:
+    pure def read(self) -> int
+
+struct Dial:
+    turns: list[int]
+
+impl Meter for Dial:
+    pure def read(self) -> int:
+        let pick = (k: int) -> self.turns[k]
+        return pick(len(self.turns))
+
+impl Display for Dial:
+    def fmt(self, mut f: Formatter):
+        f.write("dial at {self.read()}")
+
+def show(m: Dial) -> String:
+    return "{m}"
+
+def main():
+    print("reading")
+    print(show(Dial(turns=[1, 2])))

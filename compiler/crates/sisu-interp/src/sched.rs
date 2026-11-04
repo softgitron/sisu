@@ -2146,8 +2146,15 @@ impl<'p> Interp<'p, '_> {
     pub(crate) fn lock(&mut self, args: &mut Vec<Value>) -> Result<Value, Unwind> {
         let p = self.pointer_of(&args[0])?;
         let cur = self.sched.cur;
+        let checking = self.sched.checking;
         let wait = match self.write(&p)? {
             Value::Mutex(m) if m.poisoned => return Err(panic(msg::PANIC_MUTEX_POISONED, &[])),
+            // Nor can it wait for another task's critical section, which
+            // would never end while it waits (decision 503).
+            Value::Mutex(m) if checking && (m.locked || m.readers > 0) => {
+                self.sched.check_skipped = true;
+                return Err(panic(msg::PANIC_MUTEX_HELD, &[]));
+            }
             Value::Mutex(m) if m.locked && m.holder == cur => {
                 // A `sim.always` predicate on the stack of a task inside a
                 // critical section cannot see the state it protects: the
@@ -2187,8 +2194,13 @@ impl<'p> Interp<'p, '_> {
     pub(crate) fn read_lock(&mut self, args: &mut Vec<Value>) -> Result<Value, Unwind> {
         let p = self.pointer_of(&args[0])?;
         let cur = self.sched.cur;
+        let checking = self.sched.checking;
         let wait = match self.write(&p)? {
             Value::Mutex(m) if m.poisoned => return Err(panic(msg::PANIC_MUTEX_POISONED, &[])),
+            Value::Mutex(m) if checking && (m.locked || !m.writers.is_empty()) => {
+                self.sched.check_skipped = true;
+                return Err(panic(msg::PANIC_MUTEX_HELD, &[]));
+            }
             Value::Mutex(m) if m.locked && m.holder == cur => {
                 if self.sched.checking {
                     self.sched.check_skipped = true;

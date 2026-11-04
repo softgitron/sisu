@@ -601,6 +601,42 @@ pub fn value_wrapper(f: &Function, takes: &[Type]) -> Function {
     }
 }
 
+/// The source-level name of a SIR function, for stack traces and the
+/// messages that name a frame, in the interpreter and natively alike
+/// (stage 2's `gen.sisu` has the same): a test by its name, an invariant's
+/// check by its type, a closure by the function it is in, and a method of
+/// a trait's impl as `Trait.method for Type` (decision 504), where its SIR
+/// name is `Type.Trait.method`, the type's path and the trait's in it.
+pub fn display_fn_name(name: &str, prog: &Program) -> String {
+    if let Some(i) = name.strip_prefix("test#").and_then(|n| n.parse::<usize>().ok())
+        && let Some((t, _)) = prog.tests.get(i)
+    {
+        return format!("test {}", write::quote(t));
+    }
+    if let Some(owner) = name.strip_suffix(".__check_invariant") {
+        return format!("the invariant of {owner}");
+    }
+    if let Some((owner, _)) = name.split_once("#closure") {
+        return format!("closure in {}", display_fn_name(owner, prog));
+    }
+    // `Type.Trait.method`: a prefix that names a declared type, then a
+    // trait's path whose last name is capitalised, then the method.
+    let segs: Vec<&str> = name.split('.').collect();
+    let n = segs.len();
+    if n >= 3 && segs[n - 2].starts_with(|c: char| c.is_ascii_uppercase()) {
+        let mut at = 0;
+        for k in 1..n - 1 {
+            at += segs[k - 1].len() + usize::from(k > 1);
+            let ty = &name[..at];
+            if prog.types.iter().any(|t| t.name() == ty) {
+                let method = segs[n - 1];
+                return format!("{}.{method} for {ty}", segs[n - 2]);
+            }
+        }
+    }
+    name.to_string()
+}
+
 /// Whether a test function takes the real `System` (17): one parameter,
 /// a `System`. A test that names capabilities instead receives fakes of
 /// them (decision 241).

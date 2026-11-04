@@ -8790,3 +8790,128 @@ the driver"; decision 424)
      it as before. The answer is kept beside the executable as it was, and
      `SISU_STAGE1_SIR_REPORTS` still decides first. This changes no rule
      of the language.
+
+**Stage 2: the interpreter's test modes natively** (sections "Testing",
+"Simulation, schedulers and replay" and "Stage 2"; 17; D-089, port-debt.md's
+plan for a native `sisu run`)
+
+500. A failed `expect` in a native test records its failure and the test
+     goes on, as in the interpreter (decision 388), where natively it was
+     `assert`'s panic: `expect.fail` and its two forms, in a process whose
+     `SISU_TEST_REPORT` names a report, fork the process; the copy raises
+     the panic `assert` would and unwinds it as a panic unwinds, each frame
+     adding its line, and when the unwinding ends (the panic taken by the
+     task's root, an abort, or a call of a host intrinsic, which a copy
+     makes none of) it writes the trace to a pipe and exits, writing nothing
+     else (its standard output and error, a hole and a `test.catch` are the
+     original's); the original reads the trace, keeps the failure and
+     returns. The frames are therefore those a panic there leaves, by the
+     code that leaves them, with no table of return addresses. At the
+     test's end the runtime writes every recorded failure, in order, before
+     the panic that ended the test if one did, as the report's failure,
+     whatever else the test did. Outside a test it is `assert`'s panic, as
+     the interpreter's is. A copy's drops run as an unwinding's do, so a
+     `Drop` of the program that writes a file through a fake writes it in
+     the copy only; one that reaches the host ends the copy's walk there.
+     `testing/expect` holds it (a failure in a helper, two frames, and one
+     in a task). This changes no rule of the language.
+501. `sisu test --native` runs PCT and the bounded exhaustive search, where
+     it refused them with `D0134`: the runtime's scheduler takes
+     `SISU_SCHEDULER` (`pct:DEPTH`, or `exhaustive:PREFIX` with the prefix
+     dotted) and keeps the interpreter's `Strategy` in `sched.rs`: PCT's
+     priorities drawn from the run's generator when a task is first asked
+     about, its `depth - 1` change points drawn after the first budget from
+     the first 1000 yield points, a task that gives way dropping below every
+     other, and the highest-priority ready task picked; the search's choice
+     at each yield point (go on, or preempt for a ready task in creation
+     order) and at each switch, from the prefix and then the first option,
+     each recorded with how many options it had and whether it was at a
+     yield point. Under either, every yield point reaches the scheduler
+     (the generated code's budget stays at 1), and the budgets the seeded
+     scheduler draws are still drawn, so a seed draws what the
+     interpreter's does. The search's choices go beside the report
+     (`.trail`, `taken/options/y` dotted) and the driver's search, whose
+     loop now runs each schedule through the native or the interpreted
+     runs alike, takes the next schedule from them (`next_schedule`).
+     `sim.choose` is compiled (`sim.choose`, a choice of the search or a
+     draw of the generator). `sisu test --native` takes `--scheduler`;
+     `sisu run --native` still does not (`D0109`). A native test build that
+     fails now prints why, where its message went to the run's captured
+     output and the command ended with status 1 and nothing said.
+     `sim/pct`, `sim/lost_update` and the third test of
+     `sim/choose_always` hold it. This changes no rule of the language.
+502. The `sim` profile's faults are injected natively (`--sim --faults R`
+     under `--native`, where it was `D0134`): the driver rewrites the SIR of
+     the test executable it builds in the `sim` profile, so that each call
+     through `FsOps` or `NetOps` whose handle's type is `Fs` or `Net` (the
+     calls the interpreter's `sim_fault` looks at) first asks
+     `test.sim_fault[R](handle, path)`, `R` the call's result and `path`
+     its first `Path` argument, and on `true` gives its destination
+     `test.sim_fault_error()` and drops what the call would have taken,
+     in place of the call; the new blocks follow the call's own and the
+     later blocks are renumbered after them, so a jump that was forward
+     stays forward and the yield points, the back edges, are the
+     interpreter's. The runtime decides as `sim_fault` does
+     (`sisu-rt/src/faults.rs`): the object behind the handle must be
+     `cap.SimFs`, `cap.SimNetwork` or `sim.SimNet`, the rate is
+     `SISU_SIM_FAULTS` per million, the draws are from a generator seeded
+     with the schedule's seed `^ 0x5157FA17` in the interpreter's order,
+     the error is of the call's declared set but `TaskError`, never
+     `Revoked`, its path field the call's path, its text field "a fault
+     the simulation made". No lowering knows of it: both compile the
+     rewritten SIR. `sim/faults`, `sim/http_faults` and `sim/no_revoked`
+     hold it, replay tokens included. This changes no rule of the
+     language.
+503. `sim.always(what, holds, body)` is compiled: the runtime pushes the
+     predicate, checks it, runs the body on the task's stack (its entry no
+     yield point, as the interpreter pushes its frame), checks again when
+     it returns, and pops it; meanwhile every switch checks the predicates
+     on the stack of the task switched to, a task's first run included,
+     with the budget set aside so that no yield point of a predicate
+     reaches the scheduler, as the interpreter's `check_always` runs them
+     outside it. A false predicate ends the run with `sim.always`'s
+     message, as the interpreter's abort does. A predicate that locks a
+     mutex another task holds (or an `RwLock` a task writes or waits to
+     write) skips the check until the next switch, in the interpreter and
+     natively, as one that locks the mutex its own task holds did, where
+     the interpreter waited for a critical section that cannot end while
+     the predicate runs, and `sisu test` hung with its memory growing (the
+     manual's finding from chapter 22). `sim/choose_always` and
+     `sim/always_held` hold it. This changes no rule of the language.
+
+**Stack traces: a trait's method by its trait and type** (section "The
+interpreter"; the manual's finding from R11 and R17)
+
+504. A frame of a method of a trait's impl is named `Trait.method for
+     Type`, where it was its SIR name, `Type.Trait.method` with both paths
+     in it (`kiuas.meter.Dial.kiuas.meter.Meter.read` is `Meter.read for
+     kiuas.meter.Dial`, `Bomb.Drop.drop` is `Drop.drop for Bomb`), in the
+     interpreter and natively, and a closure in it `closure in Meter.read
+     for Dial`. The SIR name stays as the front ends write it; the name a
+     trace shows is `sisu_sir::display_fn_name`, which the interpreter and
+     the Rust lowering share and `stage2/src/gen.sisu` repeats: a name
+     whose prefix up to a dot is a type the program declares, followed by
+     a path whose last name is capitalised and then the method. A stack
+     overflow's message names the function the same way. `run/impl_trace`
+     holds it, and two expectations of `run/` show the new name. This
+     changes no rule of the language.
+
+**`sisu audit --caps` names a test** (section "The query layer and the
+driver"; the manual's finding from G32)
+
+505. A test among the functions `sisu audit --caps` lists, and among the
+     uses, is named as a trace names it, `test "loads a file"`, where its
+     SIR name numbered it (`test#1`); every other function keeps its SIR
+     name. This changes no rule of the language.
+
+**The runtime in Sisu: a table's header read through its exports**
+(section "Stage 2", "The runtime in Sisu"; D-086)
+
+506. The runtime in Rust reads a dict's or set's table only through the
+     runtime in Sisu's exports, `table_key_type`, `table_len`,
+     `table_key_bytes`, `table_value_bytes` and `table_value_at`, beside
+     the lookup, the push and the removal it called already, where
+     `sisu-rt/src/dict.rs` mirrored `table.sisu`'s nine-word header as a
+     `#[repr(C)]` struct: `dict::Table` is opaque, and the header's layout
+     is written once. A value's address costs a call where it was a field
+     read. RT_SIZES_PLACEHOLDER This changes no rule of the language.

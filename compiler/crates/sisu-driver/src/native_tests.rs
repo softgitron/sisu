@@ -48,14 +48,10 @@ fn text(id: msg::MsgId, params: &[(&str, String)]) -> String {
     s
 }
 
-/// Why the options ask for what a native run does not do, if they do.
-pub(crate) fn refused(options: &Options) -> Option<&'static str> {
-    if !matches!(options.strategy, sisu_interp::Strategy::Random) {
-        return Some("a scheduler other than the seeded one");
-    }
-    if options.sim.is_some_and(|rate| rate > 0) {
-        return Some("injected faults (`--faults`)");
-    }
+/// Why the options ask for what a native run does not do, if they do:
+/// nothing since PCT, the exhaustive search and the faults run natively
+/// (decisions 501 and 502).
+pub(crate) fn refused(_options: &Options) -> Option<&'static str> {
     None
 }
 
@@ -159,8 +155,16 @@ fn with_dispatcher(prog: &sir::Program, case_seed: u64, sim: bool) -> Result<sir
     ));
     text.push_str(&blocks);
     text.push_str(&format!("  bb{last}:\n    unreachable\n}}\n"));
+    if sim {
+        text.push_str("\nintrinsic test.sim_fault\nintrinsic test.sim_fault_error\n");
+    }
     let extra = sir::read::read(&text).map_err(|e| format!("its dispatcher ({e:?})"))?;
     let mut out = prog.clone();
+    if sim {
+        for f in &mut out.functions {
+            with_faults(f);
+        }
+    }
     for d in extra.intrinsics {
         if !out.intrinsics.iter().any(|i| i.name == d.name) {
             out.intrinsics.push(d);
@@ -170,6 +174,186 @@ fn with_dispatcher(prog: &sir::Program, case_seed: u64, sim: bool) -> Result<sir
     out.entry =
         Some(sir::Entry { function: DISPATCHER.into(), takes_system: entry_system, returns_result: false });
     Ok(out)
+}
+
+/// The `sim` profile's faults (17; decision 502), where the interpreter
+/// injects them at a call (`exec.rs`, `sim_fault`): each call through
+/// `FsOps` or `NetOps` on an `Fs` or a `Net` asks the runtime first
+/// (`test.sim_fault[R](handle, path)`, `R` the call's result), and on its
+/// `true` its destination is the fault (`test.sim_fault_error`), the
+/// arguments it moved dropped, in place of the call. The new blocks follow
+/// the call's own, the later ones renumbered after them, so that a jump
+/// that was forward stays forward and the yield points (the back edges)
+/// are the interpreter's.
+fn with_faults(f: &mut sir::Function) {
+    use sir::{
+        BasicBlock, BlockId, Callee, Operand, Place, Rvalue, Statement, StatementKind, Terminator, Type,
+    };
+    let faulted = |st: &Statement, locals: &[sir::LocalDecl]| -> bool {
+        let StatementKind::Call { dest, callee: Callee::Trait(name, tys), .. } = &st.kind else {
+            return false;
+        };
+        let ops = name.starts_with("FsOps.") || name.starts_with("NetOps.");
+        let handle =
+            matches!(tys.first(), Some(Type::Named(n, a)) if a.is_empty() && (n == "Fs" || n == "Net"));
+        let result = dest.proj.is_empty()
+            && matches!(locals.get(dest.local.0 as usize).map(|l| &l.ty), Some(Type::Named(n, _)) if n == "Result");
+        ops && handle && result
+    };
+    if !f.blocks.iter().any(|b| b.stmts.iter().any(|st| faulted(st, &f.locals))) {
+        return;
+    }
+    // Each old block becomes one or more new ones, in order.
+    let mut pieces: Vec<Vec<BasicBlock>> = Vec::new();
+    let mut locals = f.locals.clone();
+    // A reference to an argument's place: a reference is copied, another
+    // value borrowed into a new local.
+    fn by_ref(
+        op: &Operand,
+        cur: &mut BasicBlock,
+        locals: &mut Vec<sir::LocalDecl>,
+        loc: Option<sir::Loc>,
+    ) -> Option<Operand> {
+        let place = match op {
+            Operand::Copy(p) | Operand::Move(p) if p.proj.is_empty() => p,
+            _ => return None,
+        };
+        let ty = locals.get(place.local.0 as usize)?.ty.clone();
+        if matches!(ty, Type::Ref(..)) {
+            return Some(Operand::Copy(place.clone()));
+        }
+        locals.push(sir::LocalDecl::new(Type::Ref(Box::new(ty), false), None));
+        let r = Place::local(sir::LocalId(locals.len() as u32 - 1));
+        cur.stmts.push(Statement {
+            kind: StatementKind::Assign(r.clone(), Rvalue::Ref(place.clone(), false)),
+            loc,
+        });
+        Some(Operand::Copy(r))
+    }
+    for mut b in std::mem::take(&mut f.blocks) {
+        let stmts = std::mem::take(&mut b.stmts);
+        let mut out: Vec<BasicBlock> = Vec::new();
+        let mut cur = BasicBlock { stmts: Vec::new(), term: Terminator::Unreachable, ..b.clone() };
+        for st in stmts {
+            if !faulted(&st, &locals) {
+                cur.stmts.push(st);
+                continue;
+            }
+            let StatementKind::Call { dest, args, .. } = &st.kind else { continue };
+            let loc = st.loc;
+            let is_path = |op: &Operand, locals: &[sir::LocalDecl]| match op {
+                Operand::Copy(p) | Operand::Move(p) if p.proj.is_empty() => {
+                    let mut t = locals.get(p.local.0 as usize).map(|l| &l.ty);
+                    while let Some(Type::Ref(inner, _)) = t {
+                        t = Some(inner);
+                    }
+                    matches!(t, Some(Type::Named(n, a)) if n == "Path" && a.is_empty())
+                }
+                _ => false,
+            };
+            let mut asked = Vec::new();
+            let Some(handle) = args.first().and_then(|a| by_ref(a, &mut cur, &mut locals, loc)) else {
+                cur.stmts.push(st);
+                continue;
+            };
+            asked.push(handle);
+            let path = args.iter().skip(1).find(|a| is_path(a, &locals)).cloned();
+            if let Some(path) = path.and_then(|a| by_ref(&a, &mut cur, &mut locals, loc)) {
+                asked.push(path);
+            }
+            let result = locals[dest.local.0 as usize].ty.clone();
+            locals.push(sir::LocalDecl::new(Type::Bool, None));
+            let flag = Place::local(sir::LocalId(locals.len() as u32 - 1));
+            cur.stmts.push(Statement {
+                kind: StatementKind::Call {
+                    dest: flag.clone(),
+                    callee: Callee::Intrinsic("test.sim_fault".into(), vec![result.clone()]),
+                    args: asked,
+                },
+                loc,
+            });
+            // The ids are fixed up below: these say which piece is meant.
+            let base = out.len() as u32;
+            cur.term = Terminator::Switch {
+                value: Operand::Copy(flag),
+                cases: vec![(1, BlockId(base + 1))],
+                default: BlockId(base + 2),
+            };
+            let mut fault = BasicBlock {
+                stmts: vec![Statement {
+                    kind: StatementKind::Call {
+                        dest: dest.clone(),
+                        callee: Callee::Intrinsic("test.sim_fault_error".into(), vec![result]),
+                        args: Vec::new(),
+                    },
+                    loc,
+                }],
+                term: Terminator::Goto(BlockId(base + 3)),
+                ..b.clone()
+            };
+            for a in args {
+                if let Operand::Move(p) = a {
+                    fault
+                        .stmts
+                        .push(Statement { kind: StatementKind::Drop { place: p.clone(), flag: None }, loc });
+                }
+            }
+            let call = BasicBlock {
+                stmts: vec![st.clone()],
+                term: Terminator::Goto(BlockId(base + 3)),
+                ..b.clone()
+            };
+            out.push(std::mem::replace(
+                &mut cur,
+                BasicBlock { stmts: Vec::new(), term: Terminator::Unreachable, ..b.clone() },
+            ));
+            out.push(fault);
+            out.push(call);
+        }
+        cur.term = b.term;
+        out.push(cur);
+        pieces.push(out);
+    }
+    // The new number of each old block, and of each piece.
+    let mut first = Vec::with_capacity(pieces.len());
+    let mut n = 0u32;
+    for p in &pieces {
+        first.push(n);
+        n += p.len() as u32;
+    }
+    let old = |id: BlockId| BlockId(first.get(id.0 as usize).copied().unwrap_or(id.0));
+    for (k, p) in pieces.into_iter().enumerate() {
+        let last = p.len() - 1;
+        for (j, mut b) in p.into_iter().enumerate() {
+            b.unwind = b.unwind.map(old);
+            if j == last {
+                match &mut b.term {
+                    Terminator::Goto(t) => *t = old(*t),
+                    Terminator::Switch { cases, default, .. } => {
+                        for (_, t) in cases.iter_mut() {
+                            *t = old(*t);
+                        }
+                        *default = old(*default);
+                    }
+                    _ => {}
+                }
+            } else {
+                let local = |t: BlockId| BlockId(first[k] + t.0);
+                match &mut b.term {
+                    Terminator::Goto(t) => *t = local(*t),
+                    Terminator::Switch { cases, default, .. } => {
+                        for (_, t) in cases.iter_mut() {
+                            *t = local(*t);
+                        }
+                        *default = local(*default);
+                    }
+                    _ => {}
+                }
+            }
+            f.blocks.push(b);
+        }
+    }
+    f.locals = locals;
 }
 
 /// The executable that runs the program's tests, built once for each
@@ -204,7 +388,7 @@ fn executable(
 
 /// One test's run: its result, what it wrote, and the case a property
 /// recorded.
-type Done = (TestResult, String, String, Option<Vec<i64>>, Vec<(String, String)>);
+type Done = (TestResult, String, String, Option<Vec<i64>>, Vec<(String, String)>, Vec<sisu_interp::Choice>);
 
 /// One test's run.
 fn run_one(exe: &Path, k: usize, name: &str, options: &Options, real: bool) -> Done {
@@ -214,6 +398,21 @@ fn run_one(exe: &Path, k: usize, name: &str, options: &Options, real: bool) -> D
     cmd.env("SISU_TEST_ENTRY", k.to_string()).env("SISU_TEST_REPORT", &report);
     if options.seed != 0 {
         cmd.env("SISU_SCHEDULE_SEED", options.seed.to_string());
+    }
+    // The interpreter's other schedulers (decision 501) and the `sim`
+    // profile's faults (decision 502).
+    match &options.strategy {
+        sisu_interp::Strategy::Random => {}
+        sisu_interp::Strategy::Pct { depth } => {
+            cmd.env("SISU_SCHEDULER", format!("pct:{depth}"));
+        }
+        sisu_interp::Strategy::Exhaustive { prefix } => {
+            let shown: Vec<String> = prefix.iter().map(u32::to_string).collect();
+            cmd.env("SISU_SCHEDULER", format!("exhaustive:{}", shown.join(".")));
+        }
+    }
+    if let Some(rate) = options.sim.filter(|r| *r > 0) {
+        cmd.env("SISU_SIM_FAULTS", rate.to_string());
     }
     // The test's name and its stored snapshots (decision 461).
     cmd.env("SISU_TEST_NAME", name);
@@ -244,7 +443,7 @@ fn run_one(exe: &Path, k: usize, name: &str, options: &Options, real: bool) -> D
         Ok(o) => o,
         Err(e) => {
             let failed = TestResult::Failed(format!("{}: {e}\n", exe.display()));
-            return (failed, String::new(), String::new(), None, Vec::new());
+            return (failed, String::new(), String::new(), None, Vec::new(), Vec::new());
         }
     };
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
@@ -259,6 +458,20 @@ fn run_one(exe: &Path, k: usize, name: &str, options: &Options, real: bool) -> D
     });
     let _ = std::fs::remove_file(&case_file);
     let _ = std::fs::remove_file(&stored);
+    // The exhaustive search's choices, `taken/options/y` dotted.
+    let mut trail_file = report.clone().into_os_string();
+    trail_file.push(".trail");
+    let trail = std::fs::read_to_string(&trail_file).unwrap_or_default();
+    let _ = std::fs::remove_file(&trail_file);
+    let trail: Vec<sisu_interp::Choice> = trail
+        .split('.')
+        .filter_map(|c| {
+            let mut parts = c.split('/');
+            let taken = parts.next()?.parse().ok()?;
+            let options = parts.next()?.parse().ok()?;
+            Some(sisu_interp::Choice { taken, options, at_yield: parts.next()? == "y" })
+        })
+        .collect();
     // The snapshots it took, for `--update`.
     let mut snap_file = report.clone().into_os_string();
     snap_file.push(".snap");
@@ -274,7 +487,7 @@ fn run_one(exe: &Path, k: usize, name: &str, options: &Options, real: bool) -> D
         // An abort's message is the failure, as the interpreter's is.
         None => TestResult::Failed(std::mem::take(&mut stderr)),
     };
-    (result, stdout, stderr, case, snapshots)
+    (result, stdout, stderr, case, snapshots, trail)
 }
 
 /// Runs the tests at these indices natively; see the module's comment.
@@ -326,13 +539,13 @@ pub(crate) fn run(
     }
     let mut out = Vec::new();
     for (i, &k) in which.iter().enumerate() {
-        let Some((r, o, e, case, snapshots)) = done[i].take() else { continue };
+        let Some((r, o, e, case, snapshots, trail)) = done[i].take() else { continue };
         let Some((name, _)) = prog.tests.get(k) else { continue };
         let status = if matches!(r, TestResult::Passed) { 0 } else { 1 };
         out.push((
             name.clone(),
             r,
-            RunReport { status, out: o, err: e, case, snapshots, ..Default::default() },
+            RunReport { status, out: o, err: e, case, snapshots, trail, ..Default::default() },
         ));
     }
     Ok(out)

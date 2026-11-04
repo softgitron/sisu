@@ -300,6 +300,136 @@ pub(crate) struct Sched {
     pub pool: Pool,
     /// The run's test clock (`Clock.fake`), once made.
     pub fake_clock: Option<u32>,
+    /// How the next task is chosen (`SISU_SCHEDULER`, decision 501).
+    pub strategy: Strategy,
+    /// PCT's priorities by task, drawn when first asked.
+    pub priorities: Vec<u64>,
+    /// PCT's change points: the yield points at which the running task
+    /// drops below every other.
+    pub change_points: Vec<u64>,
+    /// The priority the next change point gives.
+    pub next_low: u64,
+    /// The yield points passed, which PCT's change points count.
+    pub yields: u64,
+    /// The exhaustive search's choices so far: taken, of how many, and
+    /// whether at a yield point.
+    pub trail: Vec<(u32, u32, bool)>,
+    /// The task a choice at a yield point preempts for.
+    pub forced: Option<u32>,
+    /// The predicates of `sim.always` open, innermost last: the code and
+    /// environment of each, and what it says (decision 503).
+    pub always: Vec<(usize, usize, String)>,
+    /// The predicates are being checked.
+    pub checking: bool,
+    /// A predicate met a lock it cannot take: the check waits for the next
+    /// switch.
+    pub check_skipped: bool,
+}
+
+/// Checks the predicates of `sim.always` on the running task's stack, as
+/// the interpreter's `check_always` does at the end of every switch: each
+/// runs outside the budget (its yield points reach no scheduler); one that
+/// is false ends the run, naming it, and one that panicked ends it with its
+/// panic, unless it met a lock it cannot take, which skips the check.
+pub(crate) fn check_always() {
+    if driving() {
+        return;
+    }
+    let preds = system(|| {
+        with(|s| {
+            if s.always.is_empty() || s.checking {
+                return None;
+            }
+            s.checking = true;
+            Some(s.always.clone())
+        })
+    });
+    let Some(preds) = preds else { return };
+    let budget = crate::tls::budget().load(Relaxed);
+    crate::tls::budget().store(STARVED, Relaxed);
+    let mut failed = None;
+    for (code, env, what) in preds {
+        let mut ret = 0u64;
+        // SAFETY: a predicate takes its result's address and its
+        // environment, and gives a `bool`.
+        let status = unsafe {
+            std::mem::transmute::<usize, unsafe extern "C" fn(*mut u8, *mut u8) -> u8>(code)(
+                &mut ret as *mut u64 as *mut u8,
+                env as *mut u8,
+            )
+        };
+        if status == abi::OK {
+            if ret & 1 == 0 {
+                failed = Some(rt::render(msg::SIM_ALWAYS_FAILED, &[("what", what)]));
+                break;
+            }
+            continue;
+        }
+        let p = system(rt::take_panic);
+        if system(|| with(|s| std::mem::take(&mut s.check_skipped))) {
+            break;
+        }
+        failed = Some(p.map(|p| rt::panic_report(&p.message, &p.stack)).unwrap_or_default());
+        break;
+    }
+    crate::tls::budget().store(budget, Relaxed);
+    system(|| with(|s| s.checking = false));
+    if let Some(m) = failed {
+        system(|| rt::abort(m.trim_end()));
+    }
+}
+
+/// The interpreter's strategies (`sisu-interp/src/sched.rs`, `Strategy`),
+/// as `SISU_SCHEDULER` names them: `pct:DEPTH`, or `exhaustive:PREFIX`
+/// with the prefix dotted (decision 501).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Strategy {
+    Random,
+    Pct { depth: u32 },
+    Exhaustive { prefix: Vec<u32> },
+}
+
+/// PCT's change points are drawn from the first this many yield points,
+/// as the interpreter's `PCT_STEPS`.
+const PCT_STEPS: u64 = 1000;
+
+impl Strategy {
+    pub(crate) fn from_env() -> Strategy {
+        let Ok(v) = std::env::var("SISU_SCHEDULER") else { return Strategy::Random };
+        match v.split_once(':') {
+            Some(("pct", d)) => Strategy::Pct { depth: d.trim().parse().unwrap_or(2) },
+            Some(("exhaustive", p)) => Strategy::Exhaustive {
+                prefix: p.split('.').filter(|x| !x.is_empty()).filter_map(|x| x.parse().ok()).collect(),
+            },
+            _ => Strategy::Random,
+        }
+    }
+}
+
+/// Writes the search's choices beside a native test's report
+/// (`SISU_TEST_REPORT` and `.trail`), for the driver (decision 501).
+pub(crate) fn write_trail() {
+    if let (Some(path), Some(text)) = (std::env::var_os("SISU_TEST_REPORT"), trail_text()) {
+        let mut path = path;
+        path.push(".trail");
+        let _ = std::fs::write(path, text);
+    }
+}
+
+/// The choices of the exhaustive search this run made, dotted as
+/// `taken/options/y` (`y` at a yield point, `n` elsewhere), for the
+/// driver's next schedule (decision 501); none outside the search.
+pub(crate) fn trail_text() -> Option<String> {
+    SCHED.with(|s| {
+        let g = s.try_borrow().ok()?;
+        let sched = g.as_ref()?;
+        if !matches!(sched.strategy, Strategy::Exhaustive { .. }) {
+            return None;
+        }
+        let parts: Vec<String> =
+            sched.trail.iter().map(|(t, o, y)| format!("{t}/{o}/{}", if *y { "y" } else { "n" })).collect();
+        Some(parts.join("."))
+    })
 }
 
 /// The type numbers of `TaskError` and `ChannelError` (`u32::MAX` when the
@@ -359,10 +489,29 @@ fn error_type(name: &str) -> Option<u32> {
 
 /// Starts the scheduler with the root task running: the generator seeded
 /// by `seed` draws the root's first budget, as the interpreter's does.
-pub(crate) fn start(seed: u64, keep_stats: bool, pool: Pool, root_limits: [u64; abi::STACK_WORDS]) {
+pub(crate) fn start(
+    seed: u64,
+    strategy: Strategy,
+    keep_stats: bool,
+    pool: Pool,
+    root_limits: [u64; abi::STACK_WORDS],
+) {
     let mut rng = Rng::new(seed);
     let budget = 1 + rng.next() % BUDGET_MAX;
     crate::tls::budget().store(budget as i64, Relaxed);
+    // Under PCT and the exhaustive search every yield point reaches the
+    // scheduler, as each of the interpreter's does.
+    let mut change_points = Vec::new();
+    let mut next_low = 0;
+    if let Strategy::Pct { depth } = &strategy {
+        for _ in 1..(*depth).max(1) {
+            change_points.push(1 + rng.next() % PCT_STEPS);
+        }
+        next_low = 1 << 39;
+    }
+    if strategy != Strategy::Random {
+        crate::tls::budget().store(1, Relaxed);
+    }
     for (w, v) in crate::tls::stack().iter().zip(root_limits) {
         w.store(v, Relaxed);
     }
@@ -409,6 +558,16 @@ pub(crate) fn start(seed: u64, keep_stats: bool, pool: Pool, root_limits: [u64; 
         neutral_armed: false,
         pool,
         fake_clock: None,
+        strategy,
+        priorities: Vec::new(),
+        change_points,
+        next_low,
+        yields: 0,
+        trail: Vec::new(),
+        forced: None,
+        always: Vec::new(),
+        checking: false,
+        check_skipped: false,
     };
     TASK_ERROR.store(error_type("TaskError").unwrap_or(u32::MAX), Relaxed);
     CHANNEL_ERROR.store(error_type("ChannelError").unwrap_or(u32::MAX), Relaxed);
@@ -420,7 +579,7 @@ pub(crate) fn start(seed: u64, keep_stats: bool, pool: Pool, root_limits: [u64; 
 /// tasks; its budget never runs out, so no yield point reaches it, as a
 /// body runs apart from the task scheduler.
 pub(crate) fn start_worker(pool: Pool, limits: [u64; abi::STACK_WORDS]) {
-    start(0, false, pool, limits);
+    start(0, Strategy::Random, false, pool, limits);
     with(|s| s.starved = true);
     crate::tls::budget().store(STARVED, Relaxed);
 }
@@ -640,6 +799,7 @@ pub(crate) fn switch(why: Suspend) {
     let y = YIELDER.with(Cell::get);
     if y.is_null() {
         run_loop();
+        check_always();
         return;
     }
     if ON_SYSTEM.with(Cell::get) {
@@ -652,6 +812,7 @@ pub(crate) fn switch(why: Suspend) {
     // SAFETY: `y` is the yielder of the coroutine running now, and this is
     // its own stack.
     unsafe { (*y).suspend(why) };
+    check_always();
 }
 
 /// The scheduler's loop, on the root task's stack: runs other tasks until
@@ -934,8 +1095,12 @@ impl Sched {
         if !asked && self.neutral_armed {
             // The entry of a function entered by `neutral`.
             self.neutral_armed = false;
-            crate::tls::budget().store(0, Relaxed);
+            let next = if self.strategy == Strategy::Random { 0 } else { 1 };
+            crate::tls::budget().store(next, Relaxed);
             return false;
+        }
+        if self.strategy != Strategy::Random {
+            return self.yield_point_chosen(asked);
         }
         let spent = crate::tls::budget().load(Relaxed) <= 0 || self.starved;
         if spent && !self.starved {
@@ -954,12 +1119,119 @@ impl Sched {
         false
     }
 
+    /// A yield point under PCT or the exhaustive search, each of which
+    /// reaches the scheduler: the interpreter's `yield_point` for them.
+    fn yield_point_chosen(&mut self, asked: bool) -> bool {
+        crate::tls::budget().store(1, Relaxed);
+        let cur = self.cur;
+        let go = match self.strategy {
+            Strategy::Random => false,
+            Strategy::Pct { .. } => {
+                self.yields += 1;
+                if self.change_points.contains(&self.yields) {
+                    self.priority(cur);
+                    self.next_low = self.next_low.saturating_sub(1);
+                    self.priorities[cur as usize] = self.next_low;
+                }
+                // A task that gives way drops below every other, or a spin
+                // loop would never let one run.
+                if asked && !self.ready.is_empty() {
+                    self.priority(cur);
+                    let low = self.priorities.iter().copied().min().unwrap_or(1).saturating_sub(1);
+                    self.priorities[cur as usize] = low;
+                }
+                let mine = self.priority(cur);
+                let ready = self.ready.clone();
+                let best = ready.iter().map(|t| self.priority(*t)).max();
+                best.is_some_and(|b| b > mine)
+            }
+            Strategy::Exhaustive { .. } => {
+                if self.ready.is_empty() {
+                    return false;
+                }
+                let ready = self.ready_sorted();
+                let c = self.choose(1 + ready.len() as u32, true);
+                if c > 0 {
+                    self.forced = Some(ready[c as usize - 1]);
+                }
+                c > 0
+            }
+        };
+        if go {
+            self.task(cur).state = TState::Ready;
+            self.push_ready(cur);
+        }
+        go
+    }
+
+    /// A task's PCT priority, drawn when first asked: above every change
+    /// point's.
+    fn priority(&mut self, t: u32) -> u64 {
+        while self.priorities.len() <= t as usize {
+            let p = (1 << 40) + self.rng.next() % 1_000_000_000;
+            self.priorities.push(p);
+        }
+        self.priorities[t as usize]
+    }
+
+    /// The ready tasks in creation order.
+    fn ready_sorted(&self) -> Vec<u32> {
+        let mut r = self.ready.clone();
+        r.sort_unstable();
+        r
+    }
+
+    /// The next choice among `options` (`sim.choose`, and the exhaustive
+    /// search's): the search's schedule, or a draw of the generator;
+    /// recorded for the search (the interpreter's `choose`).
+    pub(crate) fn choose(&mut self, options: u32, at_yield: bool) -> u32 {
+        if options <= 1 {
+            return 0;
+        }
+        let taken = match &self.strategy {
+            Strategy::Exhaustive { prefix } => {
+                prefix.get(self.trail.len()).copied().unwrap_or(0).min(options - 1)
+            }
+            _ => self.rng.below(options as usize) as u32,
+        };
+        if matches!(self.strategy, Strategy::Exhaustive { .. }) {
+            self.trail.push((taken, options, at_yield));
+        }
+        taken
+    }
+
     /// The interpreter's `switch`: the next task among the ready ones, by
-    /// the generator (advancing the clocks when none is ready); its budget.
+    /// the generator, PCT's priorities or the search's schedule (advancing
+    /// the clocks when none is ready); its budget.
     fn pick(&mut self, last: u32) -> u32 {
         let next = loop {
             if !self.ready.is_empty() {
-                let i = self.rng.below(self.ready.len());
+                let i = match self.strategy {
+                    Strategy::Random => self.rng.below(self.ready.len()),
+                    Strategy::Pct { .. } => {
+                        let ready = self.ready.clone();
+                        let (mut best, mut top) = (0, None);
+                        for (k, t) in ready.iter().enumerate() {
+                            let p = self.priority(*t);
+                            if top.is_none_or(|q| p > q) {
+                                top = Some(p);
+                                best = k;
+                            }
+                        }
+                        best
+                    }
+                    Strategy::Exhaustive { .. } => {
+                        let chosen = match self.forced.take() {
+                            Some(t) => t,
+                            None => {
+                                let ready = self.ready_sorted();
+                                let c = self.choose(ready.len() as u32, false);
+                                ready[c as usize]
+                            }
+                        };
+                        self.ready.iter().position(|t| *t == chosen).unwrap_or(0)
+                    }
+                };
                 break self.ready.swap_remove(i);
             }
             if !self.advance_time() {
@@ -978,7 +1250,8 @@ impl Sched {
             self.stats.latency_micros.push(us);
         }
         let budget = 1 + self.rng.next() % BUDGET_MAX;
-        crate::tls::budget().store(budget as i64, Relaxed);
+        let budget = if self.strategy == Strategy::Random { budget as i64 } else { 1 };
+        crate::tls::budget().store(budget, Relaxed);
         self.starved = false;
         next
     }

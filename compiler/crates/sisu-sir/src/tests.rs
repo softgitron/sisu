@@ -451,3 +451,29 @@ fn threading_keeps_cycles_drops_and_unwinding() {
         "  bb0:\n    _1 = call intrinsic String.new()\n    goto bb1\n  bb1 (unwind bb4):\n    _0 = const ()\n    goto bb2\n  bb2:\n    drop _1\n    goto bb3\n  bb3:\n    dead _1\n    return\n  bb4 (cleanup):\n    drop _1\n    resume\n"
     );
 }
+
+/// A method of a trait's impl is named in traces by the trait's method and
+/// the type, wherever the type and the trait are declared (decision 504).
+#[test]
+fn an_impl_method_is_named_by_its_trait_and_type() {
+    let mut p = sample();
+    p.types.push(TypeDecl::Struct {
+        name: "kiuas.meter.Dial".into(),
+        params: vec![],
+        fields: vec![],
+        drop: None,
+        view: false,
+        must_consume: false,
+    });
+    let shown = |n: &str| display_fn_name(n, &p);
+    assert_eq!(shown("kiuas.meter.Dial.kiuas.meter.Meter.read"), "Meter.read for kiuas.meter.Dial");
+    assert_eq!(shown("Point.kiuas.meter.Meter.read"), "Meter.read for Point");
+    assert_eq!(shown("Point.Display.fmt"), "Display.fmt for Point");
+    assert_eq!(shown("Point.Display.fmt#closure0"), "closure in Display.fmt for Point");
+    // An inherent method, a module's function and an unknown type keep
+    // their names.
+    assert_eq!(shown("Point.norm"), "Point.norm");
+    assert_eq!(shown("kiuas.meter.Dial.read"), "kiuas.meter.Dial.read");
+    assert_eq!(shown("kiuas.meter.helper"), "kiuas.meter.helper");
+    assert_eq!(shown("Nowhere.Display.fmt"), "Nowhere.Display.fmt");
+}

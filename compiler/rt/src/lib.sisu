@@ -387,6 +387,45 @@ def export_table_push(types: ptr[int], tb: ptr mut u8, k: ptr mut u8) -> int:
 def export_table_remove(tb: ptr mut u8, i: int, out: ptr mut u8):
     table.remove(tb, i, out)
 
+## The type of the keys of the table at `tb` (`table.key_type`): the
+## runtime in Rust reads a table's header only through these exports
+## (decision 506), whose layout is this package's alone.
+##
+## Requires:
+## - `table`: `tb` is the address of a live table
+def export_table_key_type(tb: ptr mut u8) -> int:
+    return table.key_type(tb)
+
+## The number of entries of the table at `tb` (`table.length`).
+##
+## Requires:
+## - `table`: `tb` is the address of a live table
+def export_table_len(tb: ptr mut u8) -> int:
+    return table.length(tb)
+
+## The bytes of a key of the table at `tb` (`table.key_size`).
+##
+## Requires:
+## - `table`: `tb` is the address of a live table
+def export_table_key_bytes(tb: ptr mut u8) -> int:
+    return table.key_size(tb)
+
+## The bytes of a value of the table at `tb`, 0 for a set's
+## (`table.value_size`).
+##
+## Requires:
+## - `table`: `tb` is the address of a live table
+def export_table_value_bytes(tb: ptr mut u8) -> int:
+    return table.value_size(tb)
+
+## The address of the value of entry `i` of the table at `tb`
+## (`table.value_at`).
+##
+## Requires:
+## - `table`: `tb` is the address of a live table of more than `i` entries
+def export_table_value_at(tb: ptr mut u8, i: int) -> ptr mut u8:
+    return table.value_at(tb, i)
+
 ## Writes the next item of the iterator at `it` as an option at `out`
 ## (`iter.next`, decision 423): `Iter.next` of one that does not wait, and
 ## every iterator the runtime in Rust takes items from. Its status, 1 when a

@@ -422,8 +422,10 @@ interpreter decides a fault at a trait call of `FsOps` or `NetOps` whose
 object is one of the simulation's (`cap.SimFs`, `cap.SimNetwork`,
 `sim.SimNet`, known by name, `exec.rs`), and builds an error of the
 operation's declared set (a path field from the call's path argument).
-*Pay*: the fault model as Sisu in the simulation objects themselves,
-drawing from the run's seeded generator.
+A native test does the same, through a call of the runtime the driver puts
+before each such call in the SIR it builds (decision 502), the objects
+known by name there too. *Pay*: the fault model as Sisu in the simulation
+objects themselves, drawing from the run's seeded generator.
 
 **Tests share the host behind a lock.** The parallel test runner
 (`parallel.rs`) gives each test thread a view of the one host whose calls
@@ -948,7 +950,7 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   without optimisations, and there is no AArch64, Mach-O or COFF. *Pay*:
   D-087's steps.
 - **The runtime in Sisu has its first pieces** (decisions 335, 336, 350
-  to 353, 358, 383, 385, 422, 423, 464 and 469): `compiler/rt` holds `==` of two
+  to 353, 358, 383, 385, 422, 423, 464, 469 and 506): `compiler/rt` holds `==` of two
   texts' bytes, the structural operations by a value's parts (equality,
   order, the hash of decision 256, a `Shared` followed to its value,
   `.copy()`, the drop, the count of a
@@ -961,10 +963,13 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   structural hash, the copy, equality and drop of a table) and iterators
   (the next item of every state but a generator's and a receiver's, the
   iterator of an `Iterable[T]` argument, collecting what is left, the
-  drop). Still `sisu-rt`'s: the decoding of each intrinsic's call and its
-  checks, whose panics its messages name (a list's indices, a missing
-  key), the making of the iterators its intrinsics return (as
-  `iter.sisu` lays them out), a generator's items and a receiver's values,
+  drop), a table's header the runtime in Rust reads only through its
+  exports (decision 506). Still `sisu-rt`'s: the decoding of each
+  intrinsic's call and its checks, whose panics its messages name (a
+  list's indices, a missing key), the making of the iterators its
+  intrinsics return (`iter::IterObj` still mirrors `iter.sisu`'s layout,
+  since the runtime in Rust writes a new object's words; a constructor
+  exported for each of the eleven kinds would end it, about a day), a generator's items and a receiver's values,
   the scheduler with its tasks, channels and mutexes, capabilities and the
   host, panics and their traces, allocation's count, the
   descriptor-driven dispatch of the intrinsics, the text of an arena, and
@@ -1012,12 +1017,12 @@ Nothing here switches the default.
   run in the interpreter checks every raw access (released, out of
   bounds, uninitialised, misaligned, of another type, two layouts, a leak
   at exit); natively such a program's fault is undefined behaviour. Of
-  the suite's 270 runnable cases (a run, or a `sisu test` run, to compare,
-  decision 460), 248 run natively (`native.list`, 39 of them their tests
-  too); 15 of the other 22 are `unsafe/` cases whose expectation is the
-  model's report, and the last 7 wait for the interpreter's test modes
-  (below: PCT, the exhaustive search, faults, `sim.always`, a property's
-  budget). *Need*: a program whose packages declare `unsafe` (its
+  the suite's 273 runnable cases (a run, or a `sisu test` run, to compare,
+  decision 460), 257 run natively (`native.list`, 47 of them their tests
+  too, decisions 500 to 504); 15 of the other 16 are `unsafe/` cases
+  whose expectation is the model's report, and the last,
+  `contracts/properties`, waits for a property's budget (below), as
+  `contracts/checks`'s tests do. *Need*: a program whose packages declare `unsafe` (its
   lockfile has the level, decision 275) keeps running in the interpreter
   by default, the others natively; a native checked mode (shadow memory
   for `Global`'s blocks, a check before each raw read and write lowered
@@ -1038,29 +1043,20 @@ Nothing here switches the default.
   its yield point); a test natively is the dispatcher's call of it, whose
   entry is a yield point the interpreter's root frame has not, and no case
   of the list shows a difference. PCT and the bounded exhaustive search
-  are the interpreter's, so `sisu test --native` refuses them (`D0134`).
-  *Need*: PCT's priorities and change points in `sisu-rt/src/sched.rs`,
-  where the generator's draws already are; the exhaustive search as a run
-  per schedule, its prefix of choices given to the executable and its
-  trail of choices written beside the test's report, the driver
-  enumerating as `next_schedule` does; `sim.choose` as a draw of the
-  generator (an hour), and `sim.always`'s predicates run at each switch on
-  the next task's stack outside the budget, a wait in one skipping the
-  check as the interpreter's `check_skipped` does. *Estimate*: PCT two
-  days, the search four, `sim.always` one; then `sim/pct`,
-  `sim/lost_update` and `sim/choose_always` join the list.
+  were the interpreter's; `sisu test --native` now runs both, with
+  `sim.choose` and `sim.always` (decisions 501 and 503: `sim/pct`,
+  `sim/lost_update`, `sim/choose_always` and `sim/always_held` are in the
+  list). *Need*: for `sisu run`, `--scheduler` natively, the same code
+  reached from `sisu run --native` (half a day).
 - **Capabilities**: the host's root objects are the runtime in Rust's
   intrinsics and the fakes std's Sisu code in both, so a plain run needs
   nothing more, and `sisu test --native` gives a test its fakes and the
   `sim` profile's `System.sim` as the interpreter does (decision 460); the
-  profile's faults are injected by the interpreter (`exec.rs`, "Faults are
-  injected by the interpreter" above). *Need*: for `sisu run`, nothing;
-  for `sisu test --native --faults`, a runtime call before each dispatch
-  of a method of `FsOps` or `NetOps` on a handle whose object is
-  `cap.SimFs`, `cap.SimNetwork` or `sim.SimNet`, drawing from a generator
-  of the run's own and writing an error of the method's declared set as
-  `sim_fault` does, in both lowerings. *Estimate*: two days; then
-  `sim/faults`, `sim/http_faults` and `sim/no_revoked` join the list.
+  profile's faults are injected natively too (decision 502: the driver
+  puts a call of the runtime before each such dispatch in the test
+  executable's SIR, so no lowering knows of them; `sim/faults`,
+  `sim/http_faults` and `sim/no_revoked` are in the list). *Need*:
+  nothing.
 - **A property's budget**: native code counts no statements, so
   `test.catch`'s `steps` bounds nothing and a case that runs past its
   budget passes natively (`contracts/properties`), and one whose case
@@ -1069,13 +1065,24 @@ Nothing here switches the default.
   count of the yield checks the case passes (function entries and back
   edges), which the generated code already counts, `TooLong` when it runs
   out, which needs a yield check that can unwind (its call returns no
-  status yet, in both lowerings and both backends); a case's count then differs from the interpreter's statements, so
-  the budget's number means another amount of work. *Estimate*: two days.
-- **`expect`**: natively `assert`'s panic (decision 388), so a test that
-  goes on after a failed `expect` stops there. *Need*: the runtime records
-  the failure with the frames it would leave (the trace walk a panic
-  makes, without unwinding) and the test's end reports them; no case of
-  the suite's natively run tests reaches it. *Estimate*: one day.
+  status yet, in both lowerings and both backends): `sisu_rt_yield`
+  returning a status, the slow path of each yield check branching to the
+  failure path of the block it is in (or, at a function's entry, to the
+  return that gives the depth back), byte for byte the same in the Rust
+  lowering and stage 2's, and the runtime counting the yield points a case
+  passes while the seeded scheduler's budget, which the same counter
+  holds, keeps its meaning (the counter capped at what the case has left,
+  the rest kept aside, every store of it through one helper). A case's
+  count then differs from the interpreter's statements, so the budget's
+  number means another amount of work. *Estimate*: two days; then
+  `contracts/properties` joins the list and `contracts/checks` runs its
+  tests natively.
+- **`expect`**: recorded natively with the frames a panic would leave,
+  walked by the panic's own unwinding in a copy of the process (decision
+  500; `testing/expect`). *Need*: nothing; the copy's drops run as an
+  unwinding's do (a `Drop` that reaches the host ends its walk), which a
+  table of return addresses would avoid, if one is ever kept for the
+  debugger.
 - **The capability log and replay** (N-04; `--record`, `sisu replay`):
   only the interpreter's host is wrapped (`record.rs`). *Need*: the same
   wrapper in the runtime in Rust, around each host intrinsic (files,
@@ -1108,7 +1115,8 @@ and replay, the two `--stats` kinds), with the interpreter kept for
 `unsafe` code, the monitor, the counterexample mode and `--watch`; about
 two more (PCT, the exhaustive search, `sim.always`, the faults, a
 property's budget, `expect`) make every test of the suite outside
-`unsafe/` run natively too.
+`unsafe/` run natively too; of those, a property's budget is left (two
+days), decisions 500 to 503 having done the rest.
 
 ## Not yet done from Phases 0, 2, 3, 4, 6 and 8
 

@@ -1,3 +1,3 @@
 panic: boom
-  at Bomb.Drop.drop (drop_panic_fields.sisu:21:9)
+  at Drop.drop for Bomb (drop_panic_fields.sisu:21:9)
   at main (drop_panic_fields.sisu:26:25)
