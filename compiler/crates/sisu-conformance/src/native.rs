@@ -765,13 +765,19 @@ fn native_tests(sisu: &Sisu, case: &Case, dir: &Path, mode: Mode, r: &mut CaseRe
 /// Whether a build that failed is the run the case expects of a program
 /// its errors stop (decision 463): nothing on standard output, the errors
 /// and `D0006` as `.err` has them, and the status `.status` gives, which
-/// `sisu run --native` prints and exits with too.
+/// `sisu run --native` prints and exits with too. A build, and `sir`,
+/// end with `D0132` where the run ends with `D0006` (decision 441): the
+/// comparison reads the build's line as the run's.
 fn stopped(case: &Case, status: i32, stderr: &str) -> bool {
     let expected = case.expected("status").map(|s| s.trim().to_string()).unwrap_or_else(|| "0".into());
+    let as_run = stderr.replace(
+        "error[D0132]: the program was not compiled: errors found (",
+        "error[D0006]: the program was not run: errors found (",
+    );
     expected != "0"
         && expected == status.to_string()
         && case.expected("out").unwrap_or_default().is_empty()
-        && case.expected("err").is_some_and(|e| e == stderr)
+        && case.expected("err").is_some_and(|e| e == as_run)
 }
 
 /// How long `sisu test --native` may take, which builds the program and

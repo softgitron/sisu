@@ -5,4 +5,4 @@ error[E0445]: a release build rejects the typed hole `todo("area")` of type `f64
   |            ^^^^^^^^^^^^
   = note: fill the hole before the release build; a placeholder meant to ship is `panic("...")`
 
-error[D0006]: the program was not run: errors found (1)
+error[D0132]: the program was not compiled: errors found (1)
