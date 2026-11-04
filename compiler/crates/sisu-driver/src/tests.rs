@@ -408,7 +408,7 @@ fn audit_caps_counts_capability_threading() {
 }
 
 /// The test cache (decision 242): a test that passed is not run again
-/// while what it reaches is the same, and prints what it printed; an edit
+/// while what it reaches is the same, and keeps what it printed; an edit
 /// of what it reaches runs it again.
 #[test]
 fn the_test_cache_keeps_what_passed() {
@@ -435,7 +435,9 @@ fn the_test_cache_keeps_what_passed() {
     let (code, third) = cli(&["test", &f]);
     assert_eq!(code, 1);
     assert!(third.out.contains("test \"another\" ... FAILED"), "{}", third.out);
-    assert!(third.out.starts_with("ran\n"), "{}", third.out);
+    // A passing test's output is held, and shown with a failure alone
+    // (decision 466).
+    assert!(!third.out.contains("ran\n"), "{}", third.out);
     let held = std::fs::read_to_string(&cache).unwrap_or_default();
     assert_eq!(held.lines().count(), 1, "{held}");
     let _ = std::fs::remove_file(&cache);

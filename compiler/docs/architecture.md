@@ -8577,8 +8577,9 @@ and 9, and G32)
      runner's native modes run, for a case of `native.list` that pins `sisu
      test` (`.test`, and the runs `# sim`, `# schedule`, `# select` and `#
      explore N` with `.explore` ask for), `sisu test --native` with the
-     mode's flags (`--release`, a test checking every contract, `--backend=cranelift`, and
-     `--lower=rust --backend=cranelift` under `--native-from-lir`; the
+     mode's flags (`--release`, a test checking every contract,
+     `--backend=cranelift`, and `--lower=rust --backend=cranelift` under
+     `--native-from-lir`; the
      tests are built from SIR whatever the mode, and
      `--interpreted-from-sir` runs them in the interpreter), compare its
      report with the expectation, hold it to the status its report gives,
@@ -8702,4 +8703,10 @@ counterexample mode** (sections "Concurrency", "Testing" and "Ownership";
      `Debug` quotes a text through `sisu_rt_quote` (`show.quote_str`). What
      the runtime in Rust no longer has: `value.rs`'s `quote_str`, `civil`,
      `strftime`'s body and `datetime_text`, and the callback
-     `sisu_rt_show_datetime`. This changes no rule of the language.
+     `sisu_rt_show_datetime`. With decision 464, the runtime's seed grows
+     from 552 134 to 570 450 bytes of SIR and its object from 564 704 to
+     584 912 bytes (`target/rt/rt.o`), and as the fixed point builds it
+     with the Sisu backend from 1 059 600 to 1 099 920 bytes, which the
+     fixed point still holds (rt-A.o and rt-B.o the same bytes, as sisu2-A
+     and sisu2-B, 28 244 928, and stage1-A and stage1-B, 56 485 624). This
+     changes no rule of the language.

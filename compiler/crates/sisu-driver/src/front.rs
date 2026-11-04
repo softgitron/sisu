@@ -385,6 +385,24 @@ impl Stage1 {
         {
             return answer == "yes";
         }
+        // A stage 1 that names its version says what it does (decision
+        // 470): `sisu1 0.6.0` and later report from `sir --tests`; one whose
+        // `--version` fails is older, and the probe below asks it.
+        let version = std::process::Command::new(&self.exe)
+            .arg("--version")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .and_then(|o| stage1_version(&String::from_utf8_lossy(&o.stdout)));
+        if let Some(v) = version {
+            let answer = v >= SIR_REPORTS_SINCE;
+            let aside = kept.with_extension(format!("{}", std::process::id()));
+            if std::fs::write(&aside, format!("{stamp} {}\n", if answer { "yes" } else { "no" })).is_ok() {
+                let _ = std::fs::rename(&aside, &kept);
+            }
+            return answer;
+        }
         let empty = std::env::temp_dir().join(format!("sisu-stage1-probe-{}", std::process::id()));
         if std::fs::create_dir_all(&empty).is_err() {
             return false;
@@ -900,5 +918,33 @@ mod tests {
         );
         assert_eq!(built_path(&line), Some(PathBuf::from("a/b c")));
         assert_eq!(built_path("nothing\n"), None);
+    }
+}
+
+/// The first stage 1 whose `sir --tests` reports the program's
+/// diagnostics and takes `--locked` and the features (decision 470).
+const SIR_REPORTS_SINCE: (u32, u32, u32) = (0, 6, 0);
+
+/// The version `sisu1 --version` printed (`sisu1 0.6.0`), if it is one.
+pub(crate) fn stage1_version(printed: &str) -> Option<(u32, u32, u32)> {
+    let v = printed.lines().next()?.trim().strip_prefix("sisu1 ")?;
+    let mut parts = v.split('.').map(|p| p.parse::<u32>().ok());
+    let (a, b, c) = (parts.next()??, parts.next()??, parts.next()??);
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((a, b, c))
+}
+
+#[cfg(test)]
+mod version_tests {
+    #[test]
+    fn a_stage_1_version_is_read_from_its_line() {
+        assert_eq!(super::stage1_version("sisu1 0.6.0\n"), Some((0, 6, 0)));
+        assert_eq!(super::stage1_version("sisu1 1.10.2"), Some((1, 10, 2)));
+        assert!(super::stage1_version("sisu1 0.6.0") >= Some(super::SIR_REPORTS_SINCE));
+        assert!(super::stage1_version("sisu1 0.5.9") < Some(super::SIR_REPORTS_SINCE));
+        assert_eq!(super::stage1_version("error: Usage(\"--version\")"), None);
+        assert_eq!(super::stage1_version("sisu 0.0.1"), None);
     }
 }
