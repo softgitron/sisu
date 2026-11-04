@@ -974,7 +974,7 @@ D0130 cli     cli.missing-name            `sisu new` needs the name of the packa
 D0131 cli     cli.version                 sisu {version}
 # `sisu test --native` (decision 460): what a native test run does not do
 # yet, which the interpreter's run does.
-D0132 cli     native.test-unsupported     `sisu test --native` does not run {what} yet; `sisu test` without `--native` runs it
+D0134 cli     native.test-unsupported     `sisu test --native` does not run {what} yet; `sisu test` without `--native` runs it
 # A test's output is captured and shown with its failure (17, "What is
 # deliberately absent"; decision 466).
-D0133 cli     cli.test-output             what the test printed:
+D0135 cli     cli.test-output             what the test printed:

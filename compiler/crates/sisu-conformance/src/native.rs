@@ -85,6 +85,10 @@ pub struct NativeReport {
     pub run: Duration,
     /// Lines of the cases' sources.
     pub lines: usize,
+    /// The cases whose program the mode built (or interpreted): not one
+    /// a release build refuses, one whose errors stop it (decision 463),
+    /// or one that only pins `sisu test` runs (decision 460).
+    pub programs: usize,
 }
 
 impl NativeReport {
@@ -314,6 +318,7 @@ fn run_list(sisu: &Sisu, root: &Path, list: &[String], mode: Mode, stage2: Optio
     for r in results {
         report.cases += 1;
         report.refused += usize::from(r.refused);
+        report.programs += usize::from(r.program && !r.refused);
         report.build += r.build;
         report.run += r.run;
         report.lines += r.lines;
@@ -392,6 +397,8 @@ struct CaseResult {
     sisu: Option<Duration>,
     /// A release build refused it, as its `.release` expects.
     refused: bool,
+    /// Its program was built (or interpreted), and its run compared.
+    program: bool,
 }
 
 fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&Path>) -> CaseResult {
@@ -407,6 +414,7 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&P
         stage2: None,
         sisu: None,
         refused: false,
+        program: false,
     };
     let fail = |r: &mut CaseResult, check: &str, detail: String| {
         r.failures.push(Failure { case: case.name.clone(), check: check.to_string(), detail });
@@ -436,6 +444,7 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&P
         }
         return r;
     }
+    r.program = true;
     let exe = sandbox.dir.join("native-program");
     let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
     let mut build_args = s(&["build", "--native", "--output", &exe.display().to_string()]);
@@ -480,6 +489,7 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&P
             // errors are what `sisu run` prints (decision 463).
             None if stopped(case, printed.status, &printed.stderr) => {
                 r.build = start.elapsed();
+                r.program = false;
                 return r;
             }
             None => {
@@ -617,6 +627,7 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&P
         return r;
     }
     if built.status != 0 && stopped(case, built.status, &built.stderr) {
+        r.program = false;
         return r;
     }
     if built.status != 0 || !exe.is_file() {
@@ -660,6 +671,11 @@ fn native_tests(sisu: &Sisu, case: &Case, dir: &Path, mode: Mode, r: &mut CaseRe
     let source =
         if case.package { String::new() } else { std::fs::read_to_string(case.source()).unwrap_or_default() };
     let file = format!("{}.sisu", case.stem);
+    // `# native tests: WHY`: the case's tests wait for what the interpreter
+    // alone does, and only its program runs natively.
+    if source.lines().any(|l| l.starts_with("# native tests: ")) {
+        return false;
+    }
     // Each run: its arguments after `test` and the expectation.
     let mut runs: Vec<(Vec<String>, String)> = Vec::new();
     if let Some(expected) = case.expected("test") {

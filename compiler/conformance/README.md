@@ -271,7 +271,9 @@ program is built from SIR), `--native-release` with `--release`
 `--native-from-lir` through the Rust lowering and Cranelift (`--lower=rust
 --backend=cranelift`), and `--interpreted-from-sir` in the interpreter;
 each report is compared with the expectation, held to the status it
-gives, and each failure replayed natively from its token. A case that has
+gives, and each failure replayed natively from its token. A case whose
+source has a line `# native tests: WHY` runs its program natively and
+leaves its tests to the interpreter, for the reason it gives. A case that has
 only such runs is built for nothing else. A case whose program its errors
 stop (`run/stopped_by_errors`) passes when the build, or `sisu sir`,
 prints its `.err` and exits with its `.status`, as `sisu run --native`

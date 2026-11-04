@@ -29,7 +29,7 @@ fn native_conformance() {
     // (decision 305); and the Sisu backend, the debug profile's, compiled
     // every one (decision 331), but those a build refuses as their
     // expectation says (none in the debug profile).
-    let built = Some(report.cases - report.refused);
+    let built = Some(report.programs);
     assert_eq!(report.stage2.map(|(n, _)| n), built, "{}", report.render());
     assert_eq!(report.sisu.map(|(n, _)| n), built, "{}", report.render());
 }
@@ -51,7 +51,7 @@ fn native_conformance_from_sir() {
     // Stage 2 lowered every case: none was built through the Rust lowering
     // (decision 305); the Sisu backend compiled every one (decision 331),
     // but those a build refuses as their expectation says.
-    let built = Some(report.cases - report.refused);
+    let built = Some(report.programs);
     assert_eq!(report.stage2.map(|(n, _)| n), built, "{}", report.render());
     assert_eq!(report.sisu.map(|(n, _)| n), built, "{}", report.render());
 }
@@ -74,7 +74,7 @@ fn native_conformance_release() {
     // Stage 2 lowered every case but those a release build refuses (a
     // typed hole, decision 340): none was built through the Rust lowering
     // (decision 305).
-    assert_eq!(report.stage2.map(|(n, _)| n), Some(report.cases - report.refused), "{}", report.render());
+    assert_eq!(report.stage2.map(|(n, _)| n), Some(report.programs), "{}", report.render());
 }
 
 /// The same cases lowered by stage 2, the backend written in Sisu
@@ -99,7 +99,7 @@ fn native_conformance_from_lir() {
     println!("{}", report.render());
     assert!(report.cases > 0, "no cases in the coverage list");
     assert!(report.failures.is_empty(), "{}", report.render());
-    assert_eq!(report.identical, Some(report.cases), "{}", report.render());
+    assert_eq!(report.identical, Some(report.programs), "{}", report.render());
 }
 
 /// The same cases built with Cranelift, the oracle of the backend written
@@ -118,7 +118,7 @@ fn native_conformance_cranelift() {
     println!("{}", report.render());
     assert!(report.cases > 0, "no cases in the coverage list");
     assert!(report.failures.is_empty(), "{}", report.render());
-    assert_eq!(report.stage2.map(|(n, _)| n), Some(report.cases - report.refused), "{}", report.render());
+    assert_eq!(report.stage2.map(|(n, _)| n), Some(report.programs), "{}", report.render());
     assert_eq!(report.sisu, None, "{}", report.render());
 }
 
@@ -239,6 +239,10 @@ fn the_sir_of_every_native_case_reads_back_byte_for_byte() {
                         .output()
                         .expect("sisu runs");
                     let _ = std::fs::remove_dir_all(&sandbox);
+                    // A program its errors stop has no SIR (decision 463).
+                    if !out.status.success() && path.with_extension("err").is_file() {
+                        continue;
+                    }
                     let printed = String::from_utf8_lossy(&out.stdout).into_owned();
                     let problem = match sisu_sir::read(&printed) {
                         Ok(p) if sisu_sir::write(&p) == printed => None,

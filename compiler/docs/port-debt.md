@@ -691,7 +691,7 @@ What the driver does around stage 1, because of what its commands are:
 
 The native debug backend (architecture.md, "Stage 2") compiles every
 program the conformance suite runs (`conformance/native.list`, 248
-cases, 40 of which run their tests natively too, decision 460), with the
+cases, 39 of which run their tests natively too, decision 460), with the
 debug profile and the release one (decision 232), and every one of those
 runs frees what it allocated (decision 226). A
 construct it does not compile is `D0103` under `--native`, and the
@@ -1013,7 +1013,7 @@ Nothing here switches the default.
   bounds, uninitialised, misaligned, of another type, two layouts, a leak
   at exit); natively such a program's fault is undefined behaviour. Of
   the suite's 270 runnable cases (a run, or a `sisu test` run, to compare,
-  decision 460), 248 run natively (`native.list`, 40 of them their tests
+  decision 460), 248 run natively (`native.list`, 39 of them their tests
   too); 15 of the other 22 are `unsafe/` cases whose expectation is the
   model's report, and the last 7 wait for the interpreter's test modes
   (below: PCT, the exhaustive search, faults, `sim.always`, a property's
@@ -1038,7 +1038,7 @@ Nothing here switches the default.
   its yield point); a test natively is the dispatcher's call of it, whose
   entry is a yield point the interpreter's root frame has not, and no case
   of the list shows a difference. PCT and the bounded exhaustive search
-  are the interpreter's, so `sisu test --native` refuses them (`D0132`).
+  are the interpreter's, so `sisu test --native` refuses them (`D0134`).
   *Need*: PCT's priorities and change points in `sisu-rt/src/sched.rs`,
   where the generator's draws already are; the exhaustive search as a run
   per schedule, its prefix of choices given to the executable and its
@@ -1063,11 +1063,14 @@ Nothing here switches the default.
   `sim/faults`, `sim/http_faults` and `sim/no_revoked` join the list.
 - **A property's budget**: native code counts no statements, so
   `test.catch`'s `steps` bounds nothing and a case that runs past its
-  budget passes natively (`contracts/properties`). *Need*: the budget as a
+  budget passes natively (`contracts/properties`), and one whose case
+  runs for minutes is not stopped (`contracts/checks`'s generated test of
+  `isqrt`, whose tests stay the interpreter's). *Need*: the budget as a
   count of the yield checks the case passes (function entries and back
   edges), which the generated code already counts, `TooLong` when it runs
-  out; a case's count then differs from the interpreter's statements, so
-  the budget's number means another amount of work. *Estimate*: one day.
+  out, which needs a yield check that can unwind (its call returns no
+  status yet, in both lowerings and both backends); a case's count then differs from the interpreter's statements, so
+  the budget's number means another amount of work. *Estimate*: two days.
 - **`expect`**: natively `assert`'s panic (decision 388), so a test that
   goes on after a failed `expect` stops there. *Need*: the runtime records
   the failure with the frames it would leave (the trace walk a panic

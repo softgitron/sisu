@@ -8569,7 +8569,7 @@ and 9, and G32)
      blocks the test whatever else it did. The report, replay tokens,
      `--explore N` (each seed a run of the executable), `--replay` and the
      summary are the interpreter's code, which takes the results; the test
-     cache is not used. What it refuses with `D0132` is the interpreter's
+     cache is not used. What it refuses with `D0134` is the interpreter's
      alone: `--scheduler pct` and `exhaustive`, `--faults` (the
      interpreter injects them), and a test parameter no fake stands for;
      `expect` is `assert`'s panic natively (decision 388), and `sim.always`
@@ -8590,8 +8590,10 @@ and 9, and G32)
      failing test, `std/doc_examples`), 24 of them with nothing else to
      run, and 6 by their runs (`run/stopped_by_errors`, decision 463, two
      `unsafe/` cases whose runs the checked model does not stop, and the
-     cases of decisions 462, 464 and 465); the 15 cases already in it that
-     pin `sisu test` run their tests natively as well, 40 in all. Of the
+     cases of decisions 462, 464 and 465); 14 of the 15 cases already in it
+     that pin `sisu test` run their tests natively as well, 39 in all
+     (`contracts/checks`'s wait for a property's budget, decision 461, and
+     its source says so, `# native tests: WHY`, which the runner reads). Of the
      suite's 270 runnable cases 22 are left out: 15 `unsafe/` cases whose
      expectation is the checked memory model's report, and 7 that wait for
      the interpreter's test modes (port-debt.md, D-089). This changes no
@@ -8665,7 +8667,7 @@ counterexample mode** (sections "Concurrency", "Testing" and "Ownership";
      ("output is captured per test and shown on failure"): what a test
      prints to standard output and error is held in its report, a passing
      or blocked test's is dropped, and a failing test's block shows it
-     after its header, under `what the test printed:` (`D0133`), each line
+     after its header, under `what the test printed:` (`D0135`), each line
      indented, before how it failed, where every test's output was printed
      before the report. Under `--explore N` and the exhaustive search the
      run shown is the one that failed (decision 386), and a replay token's
@@ -8710,3 +8712,16 @@ counterexample mode** (sections "Concurrency", "Testing" and "Ownership";
      fixed point still holds (rt-A.o and rt-B.o the same bytes, as sisu2-A
      and sisu2-B, 28 244 928, and stage1-A and stage1-B, 56 485 624). This
      changes no rule of the language.
+
+**The driver: stage 1 says its version** (section "The query layer and
+the driver"; decision 424)
+
+470. `Stage1::sir_reports` asks stage 1 its version first: a stage 1 that
+     prints `sisu1 X.Y.Z` for `--version` (stage 1's sixth round prints
+     `sisu1 0.6.0`) reports the program's diagnostics from `sir --tests`
+     and takes `--locked` and the features from 0.6.0 on, and is trusted
+     by its version; one whose `--version` fails is older, and the probe
+     of decision 424 (`sir --tests --locked` of an empty directory) asks
+     it as before. The answer is kept beside the executable as it was, and
+     `SISU_STAGE1_SIR_REPORTS` still decides first. This changes no rule
+     of the language.
