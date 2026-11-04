@@ -1542,3 +1542,16 @@ conformance diff.
 
 **What would settle it.** The owner's decision; then the prelude's change and the manual's finding closed.
 
+### Q-76. What are `System.stdin`, `stdout` and `stderr`?
+
+**Question.** [06](proposal/06-concurrency-and-capabilities.md) lists `stdin`, `stdout` and `stderr` among `System`'s root capabilities and writes `Tracer.to(sys.stderr)`, but no document gives their types, their operations trait, their fakes or how a test's log records them; Q-5 decided that `print` stays ambient. The manual's writers asked for them twice (a program that must write to standard error, and a test that captures what it printed), and the stage 0 round of November 2026 found no basis to implement them from ([`compiler/docs/port-debt.md`](compiler/docs/port-debt.md), "Behaviour that comes from the host").
+
+**Options.**
+- *Capabilities like the others* (lean): `Stdout` and `Stderr` implement the writer trait of `std.io` (`write`, `write_text`, `flush`), `Stdin` its reader trait; each has a fake a test reads back (`Stdout.fake()` and `.text()`), is recorded in the capability log and replayed, and can be wrapped like `Fs`; `print` stays the ambient form of `sys.stdout` that Q-5 allows, so a program that never names them changes in nothing. About two to three days, and the `.sir` expectations that hold a `System` change once for its two new fields.
+- *Plain writers*: `sys.stdout` and `sys.stderr` as `std.io` writers with no fake, log or replay, which gives the Tracer example and nothing a test can see.
+- *Drop them from 06*: `System` keeps its seven fields and standard error is reached through `print_err`, which exists today.
+
+**Current lean.** Capabilities like the others, since 06 lists them with the root capabilities and tests want to read what a program printed.
+
+**What would settle it.** The owner's decision, then a round of stage 0 (the handles, their fakes, the log) and of the manual (chapter 18, R10, G28).
+
