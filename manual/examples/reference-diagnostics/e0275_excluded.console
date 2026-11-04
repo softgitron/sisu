@@ -1,0 +1,8 @@
+$ sisu run sauna
+error[E0275]: cannot import `winlog`: the dependency `winlog` of `sauna` is not built for this target, which its `when` in that package's `sisu.toml` excludes
+  --> src/main.sisu:2:8
+  |
+2 | import winlog
+  |        ^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

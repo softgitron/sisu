@@ -10,4 +10,30 @@ test "an empty text" ... blocked by todo("parse_version")
 test "the wrong number of parts" ... blocked by todo("parse_version")
 test "a part that is not a number" ... blocked by todo("parse_version")
 test "versions in order" ... blocked by todo("parse_version")
+
+test "versions" ... blocked by todo("parse_version")
+what the test printed:
+  in scope at the typed hole `todo("parse_version")`:
+    text = "2.10.1"
+
+test "an empty text" ... blocked by todo("parse_version")
+what the test printed:
+  in scope at the typed hole `todo("parse_version")`:
+    text = ""
+
+test "the wrong number of parts" ... blocked by todo("parse_version")
+what the test printed:
+  in scope at the typed hole `todo("parse_version")`:
+    text = "1.2"
+
+test "a part that is not a number" ... blocked by todo("parse_version")
+what the test printed:
+  in scope at the typed hole `todo("parse_version")`:
+    text = "1.x.3"
+
+test "versions in order" ... blocked by todo("parse_version")
+what the test printed:
+  in scope at the typed hole `todo("parse_version")`:
+    text = "1.9.0"
+
 0 passed, 0 failed, 5 blocked

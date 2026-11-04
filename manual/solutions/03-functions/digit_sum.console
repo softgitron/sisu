@@ -8,4 +8,20 @@ warning[W0001]: typed hole `digit_sum` of type `int`
 test "one digit" ... blocked by todo("digit_sum")
 test "many digits" ... blocked by todo("digit_sum")
 test "digit_sum (doc example)" ... blocked by todo("digit_sum")
+
+test "one digit" ... blocked by todo("digit_sum")
+what the test printed:
+  in scope at the typed hole `todo("digit_sum")`:
+    n = 7
+
+test "many digits" ... blocked by todo("digit_sum")
+what the test printed:
+  in scope at the typed hole `todo("digit_sum")`:
+    n = 9876543210
+
+test "digit_sum (doc example)" ... blocked by todo("digit_sum")
+what the test printed:
+  in scope at the typed hole `todo("digit_sum")`:
+    n = 2026
+
 0 passed, 0 failed, 3 blocked

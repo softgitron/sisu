@@ -4,5 +4,5 @@ error[E0103]: expected an expression, found `&`
   |
 5 |     print(warm && dry)
   |                 ^
-  = fix: Sisu writes it `and`: `and`
+  = fix: Sisu writes it so: `and`
 

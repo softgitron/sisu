@@ -15,4 +15,25 @@ test "data comes back" ... blocked by todo("put")
 test "the same data is kept once" ... blocked by todo("put")
 test "a file that changed is corrupt" ... blocked by todo("put")
 test "a name never kept" ... blocked by todo("get")
+
+test "data comes back" ... blocked by todo("put")
+what the test printed:
+  in scope at the typed hole `todo("put")`:
+    data = b"rye bread"
+
+test "the same data is kept once" ... blocked by todo("put")
+what the test printed:
+  in scope at the typed hole `todo("put")`:
+    data = b"blueberry pie"
+
+test "a file that changed is corrupt" ... blocked by todo("put")
+what the test printed:
+  in scope at the typed hole `todo("put")`:
+    data = b"salt"
+
+test "a name never kept" ... blocked by todo("get")
+what the test printed:
+  in scope at the typed hole `todo("get")`:
+    name = "0000000000000000000000000000000000000000000000000000000000000000"
+
 0 passed, 0 failed, 4 blocked

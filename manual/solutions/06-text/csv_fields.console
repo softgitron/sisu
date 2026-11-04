@@ -8,4 +8,20 @@ warning[W0001]: typed hole `csv_fields` of type `list[String]`
 test "plain fields" ... blocked by todo("csv_fields")
 test "an empty field" ... blocked by todo("csv_fields")
 test "a comma inside quotes" ... blocked by todo("csv_fields")
+
+test "plain fields" ... blocked by todo("csv_fields")
+what the test printed:
+  in scope at the typed hole `todo("csv_fields")`:
+    line = "a,b,c"
+
+test "an empty field" ... blocked by todo("csv_fields")
+what the test printed:
+  in scope at the typed hole `todo("csv_fields")`:
+    line = "a,,b"
+
+test "a comma inside quotes" ... blocked by todo("csv_fields")
+what the test printed:
+  in scope at the typed hole `todo("csv_fields")`:
+    line = "\"Oulu, Finland\",214000"
+
 0 passed, 0 failed, 3 blocked

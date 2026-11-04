@@ -17,4 +17,35 @@ test "text that is not a time" ... blocked by todo("parse_time")
 test "later on the same day" ... blocked by todo("later")
 test "later, past midnight" ... blocked by todo("later")
 test "contract of later" ... blocked by todo("later")
+
+test "a time of day" ... blocked by todo("parse_time")
+what the test printed:
+  in scope at the typed hole `todo("parse_time")`:
+    text = "18:30"
+
+test "numbers that are not on the clock" ... blocked by todo("parse_time")
+what the test printed:
+  in scope at the typed hole `todo("parse_time")`:
+    text = "24:00"
+
+test "text that is not a time" ... blocked by todo("parse_time")
+what the test printed:
+  in scope at the typed hole `todo("parse_time")`:
+    text = "noon"
+
+test "later on the same day" ... blocked by todo("later")
+what the test printed:
+  in scope at the typed hole `todo("later")`:
+    minutes = 30
+
+test "later, past midnight" ... blocked by todo("later")
+what the test printed:
+  in scope at the typed hole `todo("later")`:
+    minutes = 20
+
+test "contract of later" ... blocked by todo("later")
+what the test printed:
+  in scope at the typed hole `todo("later")`:
+    minutes = 1
+
 0 passed, 0 failed, 6 blocked

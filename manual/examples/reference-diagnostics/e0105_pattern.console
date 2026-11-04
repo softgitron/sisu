@@ -4,5 +4,6 @@ error[E0105]: expected a pattern, found `not`
   |
 5 |         case not 0: "other"
   |              ^^^
+  = note: `not` is a keyword, which names no binding: give it another name
 
 error[D0006]: the program was not run: errors found (1)

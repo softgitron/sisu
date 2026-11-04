@@ -15,4 +15,28 @@ test "an answer is kept in a file" ... blocked by todo("put")
 test "a key that was never kept" ... blocked by todo("get")
 test "an answer goes stale" ... blocked by todo("put")
 test "a new answer replaces a stale one" ... blocked by todo("put")
+
+test "an answer is kept in a file" ... blocked by todo("put")
+what the test printed:
+  in scope at the typed hole `todo("put")`:
+    key = "helsinki"
+    text = "snow"
+
+test "a key that was never kept" ... blocked by todo("get")
+what the test printed:
+  in scope at the typed hole `todo("get")`:
+    key = "turku"
+
+test "an answer goes stale" ... blocked by todo("put")
+what the test printed:
+  in scope at the typed hole `todo("put")`:
+    key = "oulu"
+    text = "rain"
+
+test "a new answer replaces a stale one" ... blocked by todo("put")
+what the test printed:
+  in scope at the typed hole `todo("put")`:
+    key = "oulu"
+    text = "rain"
+
 0 passed, 0 failed, 4 blocked

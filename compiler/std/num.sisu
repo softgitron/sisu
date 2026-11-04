@@ -626,8 +626,10 @@ impl Debug for BigInt:
 ## two of the precision asked for: to the nearer, a tie to the even one
 ## (`HalfEven`, banker's rounding), away from zero (`HalfUp`) or toward
 ## zero (`HalfDown`); or always toward zero (`Down`), away from zero
-## (`Up`), down (`Floor`) or up (`Ceiling`). Python's `decimal` names the
-## same seven.
+## (`Up`), down (`Floor`) or up (`Ceiling`). Python's `decimal` names
+## these seven and an eighth, `ROUND_05UP` (away from zero when the last
+## digit kept would be 0 or 5, else toward zero), which this enum leaves
+## out.
 @derive(Copy, Eq)
 pub enum Rounding:
     HalfEven

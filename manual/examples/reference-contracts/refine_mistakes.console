@@ -11,7 +11,7 @@ error[E0813]: `Small` refines `int` and has its reading impls; it cannot have an
 6 | impl Display for Small:
   | ^^^^^^^^^^^^^^^^^^^^^^
 
-error[E0812]: `xs` is a `Short`, which a change through its base could take outside `len(self) <= 3`; change a copy of the base and check it again with `try_from`
+error[E0812]: `xs` is of type `Short`, which a change through its base could take outside `len(self) <= 3`; change a copy of the base and check it again with `try_from`
   --> refine_mistakes.sisu:12:5
    |
 12 |     xs.push(3)

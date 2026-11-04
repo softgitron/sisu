@@ -75,9 +75,12 @@ pub const SITE_PURE: int = 1
 ## Nested calls beyond this many panic (the interpreter's limit).
 pub const MAX_DEPTH: int = 100000
 
-## `flags` of `sisu_rt_start`: `main` returns `T ! E`; takes a `System`.
+## `flags` of `sisu_rt_start`: `main` returns `T ! E`; takes a `System`;
+## was built in the debug profile, whose raw memory the runtime checks
+## (decision 543).
 pub const ENTRY_RESULT: int = 1
 pub const ENTRY_SYSTEM: int = 2
+pub const ENTRY_CHECKED: int = 4
 
 ## `sisu_rt_dict_slot`'s modes.
 pub const SLOT_READ: int = 0

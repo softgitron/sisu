@@ -279,7 +279,7 @@ error[E0117]: unexpected `as` after the end of the statement
   |
 5 |     let ratio = len(copied) as f64
   |                             ^^
-  = fix: Sisu writes it `.to_f64()`: `.to_f64()`
+  = fix: Sisu writes it so: `.to_f64()`
 
 ```
 
@@ -290,7 +290,7 @@ code, and most get the same kind of fix: `let mut` is `var`, `&&` is
 `and`, `i++` is `i += 1`, `x as f64` is `x.to_f64()`, `// note` is
 `# note`, `=>` in a match is `case ...:`, `0..3` is `range(3)`, `Vec<T>`
 is `list[T]`, `println!` is `print`, `pub(crate)` is `pub(package)`,
-and `7 / 2` on integers is `7 // 2`. A cast inside a call's parentheses
-and a range in a `for` header get no fix yet.
+and `7 / 2` on integers is `7 // 2`, a cast inside a call's parentheses
+and a range in a `for` header included.
 One spelling compiles and means something else: `-7 % 3` is 2, as in
 Python, where Rust gives -1.

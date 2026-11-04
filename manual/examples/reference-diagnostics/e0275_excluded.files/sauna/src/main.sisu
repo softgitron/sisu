@@ -1,0 +1,5 @@
+# A program that imports a dependency built for Windows only.
+import winlog
+
+def main():
+    winlog.record("the stove is on")

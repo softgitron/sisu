@@ -14,4 +14,11 @@ warning[W0001]: typed hole `the middle element of sorted_xs` of type `int`
 
 test "the mean of three" ... ok
 test "the median of three" ... blocked by todo("the middle element of sorted_xs")
+
+test "the median of three" ... blocked by todo("the middle element of sorted_xs")
+what the test printed:
+  in scope at the typed hole `todo("the middle element of sorted_xs")`:
+    xs = [3, 1, 2]
+    sorted_xs = [1, 2, 3]
+
 1 passed, 0 failed, 1 blocked

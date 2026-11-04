@@ -1,1 +1,2 @@
 3:25-3:26 E0117 parse.trailing-tokens found="`n`"
+  fix parse.sisu-spelling 3:18-3:27 "n ->"

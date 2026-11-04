@@ -1,0 +1,5 @@
+test "a throw adds three degrees" ... ok
+1 passed, 0 failed, 0 blocked
+test "no throw keeps the heat" ... ok
+test "two throws" ... ok
+2 passed, 0 failed, 0 blocked

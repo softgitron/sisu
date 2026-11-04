@@ -361,15 +361,20 @@ error[D0006]: the program was not run: errors found (1)
 file imports, `from std.json import Decode, Encode`; it gives a type
 the JSON form of its shape ([Read and write JSON](../guides/json.md)).
 
+Without the import, `@derive(Encode)` is E0243 (`resolve.not-derivable`),
+whose note names the import. A diagnostic in a derived impl is placed at the
+derive's argument that asked for the impl, with a note that quotes the
+impl's line, and without the labels and fixes that would point into
+code the program does not have: E0235 for an impl written beside
+`@derive(Eq)` stands at the `Eq` of the derive. E0347's fix "derive
+it", for a generic type that derives the trait and a type argument
+that does not, `Pair[Plain]`, goes to the argument, `Plain`.
+
 **Stage 0 differs.** `@derive(Into, From)`, which
 [03](../../proposal/03-types-and-generics.md#type-aliases-and-newtypes)
-gives newtypes, and `@derive(Arbitrary)` of `std.test` are E0243, and so
-is `@derive(Encode, Decode)` without the import, with no word about it.
-A diagnostic in a derived impl is placed in `<derive>/main.sisu`, a
-module that the compiler writes, so E0235 for an impl beside a derived
-one points there and at the written impl, not at the `@derive`.
+gives newtypes, are E0243.
 
-**Status.** In stage 0 (D-018), except `Into`, `From` and `Arbitrary`.
+**Status.** In stage 0 (D-018), except `Into` and `From`.
 
 ## Delegating traits to a field
 

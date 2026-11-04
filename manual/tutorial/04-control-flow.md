@@ -676,6 +676,27 @@ test "plain numbers" ... blocked by todo("fizzbuzz")
 test "multiples of three or five" ... blocked by todo("fizzbuzz")
 test "multiples of fifteen" ... blocked by todo("fizzbuzz")
 test "a line of words" ... blocked by todo("fizzbuzz")
+
+test "plain numbers" ... blocked by todo("fizzbuzz")
+what the test printed:
+  in scope at the typed hole `todo("fizzbuzz")`:
+    n = 1
+
+test "multiples of three or five" ... blocked by todo("fizzbuzz")
+what the test printed:
+  in scope at the typed hole `todo("fizzbuzz")`:
+    n = 9
+
+test "multiples of fifteen" ... blocked by todo("fizzbuzz")
+what the test printed:
+  in scope at the typed hole `todo("fizzbuzz")`:
+    n = 30
+
+test "a line of words" ... blocked by todo("fizzbuzz")
+what the test printed:
+  in scope at the typed hole `todo("fizzbuzz")`:
+    n = 1
+
 0 passed, 0 failed, 4 blocked
 ```
 
@@ -745,6 +766,27 @@ test "one is already there" ... blocked by todo("collatz_steps")
 test "a power of two only halves" ... blocked by todo("collatz_steps")
 test "small numbers" ... blocked by todo("collatz_steps")
 test "twenty-seven takes a long way" ... blocked by todo("collatz_steps")
+
+test "one is already there" ... blocked by todo("collatz_steps")
+what the test printed:
+  in scope at the typed hole `todo("collatz_steps")`:
+    n = 1
+
+test "a power of two only halves" ... blocked by todo("collatz_steps")
+what the test printed:
+  in scope at the typed hole `todo("collatz_steps")`:
+    n = 16
+
+test "small numbers" ... blocked by todo("collatz_steps")
+what the test printed:
+  in scope at the typed hole `todo("collatz_steps")`:
+    n = 6
+
+test "twenty-seven takes a long way" ... blocked by todo("collatz_steps")
+what the test printed:
+  in scope at the typed hole `todo("collatz_steps")`:
+    n = 27
+
 0 passed, 0 failed, 4 blocked
 ```
 

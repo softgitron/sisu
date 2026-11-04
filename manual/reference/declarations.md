@@ -810,6 +810,10 @@ def main():
 [4, 4, 4, 4]
 ```
 
+Written through the type parameter, the length is E0274
+(`resolve.const-not-type`), which calls `SIDES` a constant of `Shape`
+and whose note names the `const` parameter:
+
 <!-- file: examples/reference-declarations/const_through_param.sisu -->
 ```sisu
 # A trait's constant through a type parameter, as an array's length.
@@ -823,7 +827,7 @@ def corners[T: Shape](shape: T) -> Array[int, T.SIDES]:
 <!-- output: examples/reference-declarations/const_through_param.console -->
 ```console
 $ sisu check const_through_param.sisu
-error[E0239]: `T` has no associated type `SIDES` among its bounds
+error[E0274]: `SIDES` is a constant of `Shape`, which bounds `T`, not a type
   --> const_through_param.sisu:5:47
   |
 5 | def corners[T: Shape](shape: T) -> Array[int, T.SIDES]:
@@ -1091,7 +1095,7 @@ their examples ([R1](lexical-structure.md#comments-and-doc-comments)).
 | [E0411](diagnostics.md#e0411) | `borrow.view-field-in-plain-struct` | [View structs](#view-structs) |
 | E0206, E0386 | `resolve.duplicate-variant`, `type.variant-needs-fields` | [Enums](#enums) |
 | E0356 | `type.open-set-needs-wildcard` | [Error sets](#error-sets) |
-| E0230, E0247, [E0449](diagnostics.md#e0449), [E0239](diagnostics.md#e0239) | `resolve.not-a-trait`, `resolve.trait-cycle`, `type.trait-constant`, `resolve.no-assoc-type` | [Traits](#traits) |
+| E0230, E0247, [E0449](diagnostics.md#e0449), [E0274](diagnostics.md#e0274) | `resolve.not-a-trait`, `resolve.trait-cycle`, `type.trait-constant`, `resolve.const-not-type` | [Traits](#traits) |
 | [E0232](diagnostics.md#e0232), [E0233](diagnostics.md#e0233), E0234, [E0237](diagnostics.md#e0237), E0238, E0248, [E0271](diagnostics.md#e0271), [E0272](diagnostics.md#e0272), [E0273](diagnostics.md#e0273), [E0242](diagnostics.md#e0242), E0213, E0216 | `resolve.missing-trait-method`, `resolve.not-a-trait-method`, `resolve.method-signature`, `resolve.missing-assoc-type`, `resolve.unknown-assoc-type`, `resolve.assoc-outside-trait-impl`, `resolve.not-a-trait-constant`, `resolve.constant-type`, `resolve.const-or-method`, `resolve.supertrait-missing`, `resolve.drop-target`, `resolve.drop-signature` | [Impls](#impls) |
 | E0228 | `resolve.alias-cycle` | [Type declarations](#type-declarations) |
 | E0702, E0381, [E0807](diagnostics.md#e0807) | `type.test-signature`, `type.return-in-test`, `contract.not-in-test` | [Tests, suites and benchmarks](#tests-suites-and-benchmarks) |

@@ -4,6 +4,7 @@ error[E0107]: statements cannot appear at the top level of a module; put them in
   |
 2 | class Point:
   | ^^^^^
+  = fix: Sisu writes it so: `struct`
 
 error[E0215]: `self` exists only inside a method
   --> class.sisu:3:18

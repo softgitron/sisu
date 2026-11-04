@@ -107,6 +107,20 @@ pub(crate) fn grow(p: *mut u8, bytes: usize) -> *mut u8 {
     q
 }
 
+/// A block of [`alloc_aligned`] is no longer the program's, though its
+/// memory is kept (decision 543).
+pub(crate) fn uncount() {
+    LIVE.fetch_sub(1, Relaxed);
+}
+
+/// Frees a block [`uncount`] already took from the count.
+pub(crate) fn free_uncounted(p: *mut u8) {
+    if !p.is_null() {
+        // SAFETY: `p` is a block of [`alloc_aligned`], freed once.
+        unsafe { free(p) }
+    }
+}
+
 pub(crate) fn release(p: *mut u8) {
     if !p.is_null() {
         LIVE.fetch_sub(1, Relaxed);

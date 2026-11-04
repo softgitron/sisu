@@ -4,5 +4,5 @@ error[E0105]: expected a pattern, found `mut`
   |
 3 |     let mut total = 1
   |         ^^^
-  = fix: Sisu writes it `var`: `var`
+  = fix: Sisu writes it so: `var`
 

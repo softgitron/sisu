@@ -11,4 +11,9 @@ panic: assertion failed: double(x) == y
   at test "doubles (-3, -5)" (tests.sisu:12:5)
 replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
 
+test "halves a number" ... blocked by todo("halve")
+what the test printed:
+  in scope at the typed hole `todo("halve")`:
+    x = 42
+
 3 passed, 1 failed, 1 blocked

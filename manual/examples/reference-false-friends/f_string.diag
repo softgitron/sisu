@@ -1,1 +1,2 @@
 4:12-4:13 E0100 parse.expected expected="`)`" found="a string"
+  fix parse.sisu-spelling 4:11-4:22 "\"n is {n}\""

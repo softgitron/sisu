@@ -111,8 +111,11 @@ at a terminal: each `$` line runs `main` with the words after the
 tool's name as its arguments, and the lines after it are what the run
 prints. The fake `System` it runs on lasts from one `$` line to the
 next, so each run sees what the one before wrote, and its file system
-starts with the files of `tests/NAME/`; here `tests/todo/todo.txt`
-holds two items, `logs` and `towels`:
+starts with the files of `tests/NAME/`. (In a package, `tests/` holds
+black-box tests too, files `tests/NAME.sisu` that test the library's
+`pub` items from outside, [R15](../reference/testing.md#black-box-tests);
+a transcript tests the whole tool.) Here `tests/todo/todo.txt` holds
+two items, `logs` and `towels`:
 
 <!-- file: examples/guide-test-tool/todo.files/tests/todo.transcript -->
 ```text

@@ -28,4 +28,35 @@ test "a negative bottom" ... blocked by todo("new")
 test "adding" ... blocked by todo("new")
 test "upside down" ... blocked by todo("new")
 test "as text" ... blocked by todo("new")
+
+test "lowest terms" ... blocked by todo("new")
+what the test printed:
+  in scope at the typed hole `todo("new")`:
+    top = 2
+    bottom = 4
+
+test "a negative bottom" ... blocked by todo("new")
+what the test printed:
+  in scope at the typed hole `todo("new")`:
+    top = 1
+    bottom = -2
+
+test "adding" ... blocked by todo("new")
+what the test printed:
+  in scope at the typed hole `todo("new")`:
+    top = 1
+    bottom = 2
+
+test "upside down" ... blocked by todo("new")
+what the test printed:
+  in scope at the typed hole `todo("new")`:
+    top = 2
+    bottom = 3
+
+test "as text" ... blocked by todo("new")
+what the test printed:
+  in scope at the typed hole `todo("new")`:
+    top = 3
+    bottom = 4
+
 0 passed, 0 failed, 5 blocked

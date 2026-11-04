@@ -804,6 +804,22 @@ warning[W0001]: typed hole `the pattern` of type `str`
 test "times with two digits" ... blocked by todo("the pattern")
 test "an hour of one digit" ... blocked by todo("the pattern")
 test "no time" ... blocked by todo("the pattern")
+
+test "times with two digits" ... blocked by todo("the pattern")
+what the test printed:
+  in scope at the typed hole `todo("the pattern")`:
+    text = "Sauna at 17:30, swim at 18:05."
+
+test "an hour of one digit" ... blocked by todo("the pattern")
+what the test printed:
+  in scope at the typed hole `todo("the pattern")`:
+    text = "Tea at 9:15 and 21:00"
+
+test "no time" ... blocked by todo("the pattern")
+what the test printed:
+  in scope at the typed hole `todo("the pattern")`:
+    text = "no times here, and 12:3 has one digit"
+
 0 passed, 0 failed, 3 blocked
 ```
 
@@ -886,6 +902,22 @@ warning[W0001]: typed hole `sizes_by_extension` of type `dict[String, int] ! IoE
 test "every kind of file" ... blocked by todo("sizes_by_extension")
 test "a directory deeper down" ... blocked by todo("sizes_by_extension")
 test "a directory that is not there" ... blocked by todo("sizes_by_extension")
+
+test "every kind of file" ... blocked by todo("sizes_by_extension")
+what the test printed:
+  in scope at the typed hole `todo("sizes_by_extension")`:
+    dir = "photos"
+
+test "a directory deeper down" ... blocked by todo("sizes_by_extension")
+what the test printed:
+  in scope at the typed hole `todo("sizes_by_extension")`:
+    dir = "photos/2025"
+
+test "a directory that is not there" ... blocked by todo("sizes_by_extension")
+what the test printed:
+  in scope at the typed hole `todo("sizes_by_extension")`:
+    dir = "music"
+
 0 passed, 0 failed, 3 blocked
 ```
 
@@ -960,6 +992,35 @@ test "one sauna, everyone at once" ... blocked by todo("start_times")
 test "two saunas" ... blocked by todo("start_times")
 test "a sauna free before the bather comes" ... blocked by todo("start_times")
 test "nobody comes" ... blocked by todo("start_times")
+
+test "one sauna, everyone at once" ... blocked by todo("start_times")
+what the test printed:
+  in scope at the typed hole `todo("start_times")`:
+    arrivals = [0, 0, 0]
+    stay = 10
+    saunas = 1
+
+test "two saunas" ... blocked by todo("start_times")
+what the test printed:
+  in scope at the typed hole `todo("start_times")`:
+    arrivals = [0, 0, 0, 5]
+    stay = 10
+    saunas = 2
+
+test "a sauna free before the bather comes" ... blocked by todo("start_times")
+what the test printed:
+  in scope at the typed hole `todo("start_times")`:
+    arrivals = [0, 30]
+    stay = 10
+    saunas = 1
+
+test "nobody comes" ... blocked by todo("start_times")
+what the test printed:
+  in scope at the typed hole `todo("start_times")`:
+    arrivals = []
+    stay = 10
+    saunas = 3
+
 0 passed, 0 failed, 4 blocked
 ```
 
@@ -1058,6 +1119,27 @@ test "data comes back" ... blocked by todo("put")
 test "the same data is kept once" ... blocked by todo("put")
 test "a file that changed is corrupt" ... blocked by todo("put")
 test "a name never kept" ... blocked by todo("get")
+
+test "data comes back" ... blocked by todo("put")
+what the test printed:
+  in scope at the typed hole `todo("put")`:
+    data = b"rye bread"
+
+test "the same data is kept once" ... blocked by todo("put")
+what the test printed:
+  in scope at the typed hole `todo("put")`:
+    data = b"blueberry pie"
+
+test "a file that changed is corrupt" ... blocked by todo("put")
+what the test printed:
+  in scope at the typed hole `todo("put")`:
+    data = b"salt"
+
+test "a name never kept" ... blocked by todo("get")
+what the test printed:
+  in scope at the typed hole `todo("get")`:
+    name = "0000000000000000000000000000000000000000000000000000000000000000"
+
 0 passed, 0 failed, 4 blocked
 ```
 

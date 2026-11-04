@@ -9,4 +9,25 @@ test "the files directly in a directory" ... blocked by todo("total_size")
 test "a lent file system" ... blocked by todo("total_size")
 test "narrowed file systems" ... blocked by todo("total_size")
 test "a directory that is not there" ... blocked by todo("total_size")
+
+test "the files directly in a directory" ... blocked by todo("total_size")
+what the test printed:
+  in scope at the typed hole `todo("total_size")`:
+    dir = "photos"
+
+test "a lent file system" ... blocked by todo("total_size")
+what the test printed:
+  in scope at the typed hole `todo("total_size")`:
+    dir = "photos"
+
+test "narrowed file systems" ... blocked by todo("total_size")
+what the test printed:
+  in scope at the typed hole `todo("total_size")`:
+    dir = "."
+
+test "a directory that is not there" ... blocked by todo("total_size")
+what the test printed:
+  in scope at the typed hole `todo("total_size")`:
+    dir = "music"
+
 0 passed, 0 failed, 4 blocked

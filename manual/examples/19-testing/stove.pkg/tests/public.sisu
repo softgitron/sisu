@@ -1,0 +1,8 @@
+# A black-box test: it sees only what `stove` makes public.
+from stove import heat_after
+
+test "no throw keeps the heat":
+    assert heat_after(80, 0) == 80
+
+test "two throws":
+    assert heat_after(80, 2) == 86

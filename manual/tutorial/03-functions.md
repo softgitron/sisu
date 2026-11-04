@@ -538,9 +538,10 @@ The warning names the hole and its type, `f64`, which is what the
 missing code must produce. The first call never reaches the hole and
 prints its line. The second reaches it, prints what is in scope there,
 `weight_kg = 7.0`, and stops with a panic that names the hole. A test
-that reaches a hole is reported as blocked rather than failed, as in
-the exercises. A report of every hole of a program
-at once, with its bindings and the tests that reach it, `sisu check
+that reaches a hole prints the same closure and is reported as blocked
+rather than failed, as in the exercises, where the closure comes in the
+blocked test's own block after the list. A report of every hole of a
+program at once, with its bindings and the tests that reach it, `sisu check
 --holes`, is designed in [10](../../proposal/10-tooling.md) and is not
 in the compiler yet.
 
@@ -783,6 +784,27 @@ test "an ordinary year" ... blocked by todo("is_leap_year")
 test "every fourth year" ... blocked by todo("is_leap_year")
 test "a century year that is not a leap year" ... blocked by todo("is_leap_year")
 test "every fourth century year is a leap year" ... blocked by todo("is_leap_year")
+
+test "an ordinary year" ... blocked by todo("is_leap_year")
+what the test printed:
+  in scope at the typed hole `todo("is_leap_year")`:
+    year = 2026
+
+test "every fourth year" ... blocked by todo("is_leap_year")
+what the test printed:
+  in scope at the typed hole `todo("is_leap_year")`:
+    year = 2024
+
+test "a century year that is not a leap year" ... blocked by todo("is_leap_year")
+what the test printed:
+  in scope at the typed hole `todo("is_leap_year")`:
+    year = 1900
+
+test "every fourth century year is a leap year" ... blocked by todo("is_leap_year")
+what the test printed:
+  in scope at the typed hole `todo("is_leap_year")`:
+    year = 2000
+
 0 passed, 0 failed, 4 blocked
 ```
 
@@ -850,6 +872,22 @@ warning[W0001]: typed hole `digit_sum` of type `int`
 test "one digit" ... blocked by todo("digit_sum")
 test "many digits" ... blocked by todo("digit_sum")
 test "digit_sum (doc example)" ... blocked by todo("digit_sum")
+
+test "one digit" ... blocked by todo("digit_sum")
+what the test printed:
+  in scope at the typed hole `todo("digit_sum")`:
+    n = 7
+
+test "many digits" ... blocked by todo("digit_sum")
+what the test printed:
+  in scope at the typed hole `todo("digit_sum")`:
+    n = 9876543210
+
+test "digit_sum (doc example)" ... blocked by todo("digit_sum")
+what the test printed:
+  in scope at the typed hole `todo("digit_sum")`:
+    n = 2026
+
 0 passed, 0 failed, 3 blocked
 ```
 
@@ -938,6 +976,29 @@ test "an hour, two minutes and five seconds" ... blocked by todo("split_time")
 test "less than a minute" ... blocked by todo("split_time")
 test "shown with seconds" ... blocked by todo("show_time")
 test "shown without seconds" ... blocked by todo("show_time")
+
+test "an hour, two minutes and five seconds" ... blocked by todo("split_time")
+what the test printed:
+  in scope at the typed hole `todo("split_time")`:
+    total = 3725
+
+test "less than a minute" ... blocked by todo("split_time")
+what the test printed:
+  in scope at the typed hole `todo("split_time")`:
+    total = 59
+
+test "shown with seconds" ... blocked by todo("show_time")
+what the test printed:
+  in scope at the typed hole `todo("show_time")`:
+    total = 3725
+    seconds = True
+
+test "shown without seconds" ... blocked by todo("show_time")
+what the test printed:
+  in scope at the typed hole `todo("show_time")`:
+    total = 3725
+    seconds = False
+
 0 passed, 0 failed, 4 blocked
 ```
 

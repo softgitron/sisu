@@ -23,9 +23,11 @@
 
 pub mod abi;
 mod bridge;
+mod budget;
 mod bytes;
 mod caps;
 mod cells;
+mod checked;
 mod desc;
 mod dict;
 mod entry;

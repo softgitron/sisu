@@ -1211,30 +1211,36 @@ impl<'p> Interp<'p, '_> {
     /// frames it would leave, and the test goes on, to fail at its end;
     /// elsewhere, a plain run or compile time, it is `assert`'s panic.
     fn expect_fail(&mut self, method: &str, a: &Args) -> Result<Value, Unwind> {
-        let m = self.assert_message(method, a)?;
         if !self.in_test {
+            let m = self.assert_message(method, a)?;
             return Err(panic(msg::PANIC_EXPLICIT, &[("message", m)]));
         }
-        let failure = crate::PanicInfo {
-            message: crate::render(msg::PANIC_EXPLICIT, &[("message", m)]),
-            stack: self.frame_lines(),
-            hole: None,
-            refinement: None,
-            too_long: None,
-            abandon: false,
-        };
-        self.expected.push(crate::panic_report(&failure));
+        // Recorded as an expectation that failed, not as a panic: nothing
+        // panicked, and the test goes on (decision 545).
+        let m = self.check_message(method, a, true)?;
+        self.expected.push(crate::expect_report(&m, &self.frame_lines()));
         Ok(Value::Unit)
     }
 
     /// What `assert.fail` (and `fail_compare`, `fail_parts`) panics with.
     fn assert_message(&mut self, method: &str, a: &Args) -> Result<String, Unwind> {
+        self.check_message(method, a, false)
+    }
+
+    /// A failed check's text: `assert`'s, or with `expect` the words of a
+    /// failed expectation.
+    fn check_message(&mut self, method: &str, a: &Args, expect: bool) -> Result<String, Unwind> {
         let expr = self.text(a.get(0)?)?.to_string();
         let message = self.text(a.get(1)?)?.to_string();
-        let mut m = if message.is_empty() {
-            render(msg::PANIC_ASSERT, &[("expr", expr.clone())])
+        let (plain, with) = if expect {
+            (msg::RUN_EXPECT_FAILED, msg::RUN_EXPECT_FAILED_MESSAGE)
         } else {
-            render(msg::PANIC_ASSERT_MESSAGE, &[("expr", expr.clone()), ("message", message)])
+            (msg::PANIC_ASSERT, msg::PANIC_ASSERT_MESSAGE)
+        };
+        let mut m = if message.is_empty() {
+            render(plain, &[("expr", expr.clone())])
+        } else {
+            render(with, &[("expr", expr.clone()), ("message", message)])
         };
         if method == "fail_parts" {
             let parts = self.shown_parts(a.get(2)?)?;

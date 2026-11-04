@@ -637,7 +637,7 @@ impl<'a, 'p> Cx<'a, 'p> {
         self.store_word(d, a, 0);
         self.b.ins().return_(&[st]);
         self.b.switch_to_block(counted);
-        self.yield_check()?;
+        self.yield_check(true)?;
         let first = self.blocks[0];
         self.b.ins().jump(first, &[]);
         Ok(())
@@ -711,13 +711,16 @@ impl<'a, 'p> Cx<'a, 'p> {
         self.check(st);
         self.b.ins().jump(counted, &[]);
         self.b.switch_to_block(counted);
-        self.yield_check()?;
+        self.yield_check(false)?;
         self.statement(&StatementKind::Assign(dest.clone(), Rvalue::Use(Operand::Const(c.clone()))))
     }
 
     /// A yield point (decision 85): one less of the budget, and the
-    /// scheduler when it is spent.
-    fn yield_check(&mut self) -> Result<(), Error> {
+    /// scheduler when it is spent. The scheduler's call fails when a
+    /// property's case has run past its budget (decision 540): at a
+    /// function's `entry` the failure gives the frame's count back and
+    /// returns, elsewhere it takes the failure path of the block.
+    fn yield_check(&mut self, entry: bool) -> Result<(), Error> {
         // The runtime's own code passes none (decision 336).
         if self.cg.library {
             return Ok(());
@@ -732,8 +735,14 @@ impl<'a, 'p> Cx<'a, 'p> {
         self.b.ins().brif(spent, slow, &[], cont, &[]);
         self.b.set_cold_block(slow);
         self.b.switch_to_block(slow);
-        self.rt(sym::YIELD, &[])?;
-        self.b.ins().jump(cont, &[]);
+        let st = self.rt_status(sym::YIELD, &[])?;
+        let fail = if entry { self.b.create_block() } else { self.fail_block() };
+        self.b.ins().brif(st, fail, &[], cont, &[]);
+        if entry {
+            self.b.set_cold_block(fail);
+            self.b.switch_to_block(fail);
+            self.leave(abi::UNWINDING);
+        }
         self.b.switch_to_block(cont);
         Ok(())
     }
@@ -938,7 +947,7 @@ impl<'a, 'p> Cx<'a, 'p> {
                 // A jump to a block at or before this one is a loop's back
                 // edge: a yield point (decision 85).
                 if bb.0 as usize <= self.cur {
-                    self.yield_check()?;
+                    self.yield_check(false)?;
                 }
                 let target = self.blocks[bb.0 as usize];
                 self.b.ins().jump(target, &[]);
@@ -953,7 +962,7 @@ impl<'a, 'p> Cx<'a, 'p> {
                 let k = u64::from(v);
                 let t = cases.iter().find(|(c, _)| *c as u64 == k).map_or(default.0, |(_, b)| b.0) as usize;
                 if t <= self.cur {
-                    self.yield_check()?;
+                    self.yield_check(false)?;
                 }
                 let target = self.blocks[t];
                 self.b.ins().jump(target, &[]);
@@ -982,7 +991,7 @@ impl<'a, 'p> Cx<'a, 'p> {
                 sw.emit(&mut self.b, v, d);
                 for (t, blk) in back {
                     self.b.switch_to_block(blk);
-                    self.yield_check()?;
+                    self.yield_check(false)?;
                     let to = self.blocks[t];
                     self.b.ins().jump(to, &[]);
                 }
@@ -2875,7 +2884,9 @@ impl<'a, 'p> Cx<'a, 'p> {
     /// raw pointer's address, made, cast or offset, and the value at it read
     /// or written at its width, for the types whose raw memory is their
     /// value's word and for `u8` and `i8`, a byte; `None` for the others,
-    /// which the runtime converts part by part (decision 302).
+    /// which the runtime converts part by part (decision 302). The debug
+    /// profile offsets, reads and writes through the runtime, which checks
+    /// them (decision 543).
     fn raw_inline(
         &mut self,
         i: Intrinsic,
@@ -2902,6 +2913,11 @@ impl<'a, 'p> Cx<'a, 'p> {
             _ => None,
         };
         let Some((width, signed)) = scalar else { return Ok(None) };
+        // The debug profile checks raw memory (decision 543): the runtime
+        // offsets, reads and writes, but in the runtime's own code.
+        if !self.cg.release && !self.cg.library {
+            return Ok(None);
+        }
         match i {
             I::MemPtrOffset => {
                 let Some((a1, t1)) = argv.get(1).cloned() else { return Ok(None) };

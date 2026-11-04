@@ -4,4 +4,5 @@ error[E0100]: expected `)`, found `as`
   |
 4 |     print(n as f64)
   |             ^^
+  = fix: Sisu writes it so: `.to_f64()`
 

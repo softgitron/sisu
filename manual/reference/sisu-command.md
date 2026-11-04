@@ -960,7 +960,8 @@ monitor, with fresh fakes for the capabilities it names, and ends `ok`,
 `FAILED`, or `blocked by` a typed hole that it reached. Tests
 run in parallel and are reported in the order they are declared. Each
 failure is shown again after the list, with what the test printed
-(D0135; a test that passes prints nothing) and a replay token; the last
+(D0135; a test that passes prints nothing) and a replay token, and so is
+each blocked test, with what it printed, its hole's closure; the last
 line counts the outcomes. The program's warnings come before the list,
 as `sisu run` prints them, and a program with an error runs no test:
 `sisu test` prints its diagnostics and the line D0006, or D0021 for the
@@ -1014,6 +1015,11 @@ panic: assertion failed: double(x) == y
   at test "doubles (-3, -5)" (tests.sisu:12:5)
 replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
 
+test "halves a number" ... blocked by todo("halve")
+what the test printed:
+  in scope at the typed hole `todo("halve")`:
+    x = 42
+
 3 passed, 1 failed, 1 blocked
 $ sisu test --filter large tests.sisu
 warning[W0001]: typed hole `halve` of type `int`
@@ -1053,6 +1059,11 @@ panic: assertion failed: double(x) == y
   right: -5
   at test "doubles (-3, -5)" (tests.sisu:12:5)
 replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
+
+test "halves a number" ... blocked by todo("halve")
+what the test printed:
+  in scope at the typed hole `todo("halve")`:
+    x = 42
 
 2 passed, 1 failed, 1 blocked
 1 not selected
@@ -1106,9 +1117,10 @@ replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
   alone.
 - `--native` compiles the tests into one executable and runs each in a
   process of its own, and `--release` compiles them with the release
-  profile ([R15](testing.md#native-tests)); what only the interpreter
-  does, `--faults` and the schedulers `pct` and `exhaustive`, is D0134
-  or D0109.
+  profile ([R15](testing.md#native-tests)), with the schedulers,
+  `--faults` and `sim.always` as the interpreter runs them; what only
+  the interpreter does, a test parameter that no fake stands for, is
+  D0134.
 - `--defer-borrow` runs the tests of a program that the ownership
   checker rejected, as [`sisu run
   --defer-borrow`](#running-a-rejected-program---defer-borrow) does.
@@ -1689,13 +1701,15 @@ audit.sisu function save caps=1 io=direct depth=1
 audit.sisu use save FsOps.write_text depth=1
 audit.sisu summary functions=2 median=1 max=1 uses=1 deepest=1 structs=0
 $ sisu audit --unsafe audit.sisu
-audit.sisu   no `unsafe`   a program of one file, which declares no level
+audit.sisu   no level   a program of one file, which may hold any unsafe code
   no unsafe code
 std (toolchain)   unsafe = "extern"   see `sisu audit --unsafe --std`
 ```
 
-`audit.sisu` has no unsafe code, so its `--unsafe` report is its level
-and the standard library's.
+`audit.sisu` has no unsafe code. A program of one file declares no
+level, so its `--unsafe` report heads it "no level", a file that may
+hold any unsafe code, and lists what it holds, here nothing, and the
+standard library's level.
 
 **Stage 0 differs.** The line of the standard library names `sisu1
 audit --unsafe --std`, stage 1's own command, where `sisu audit

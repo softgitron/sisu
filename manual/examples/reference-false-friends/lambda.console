@@ -4,4 +4,5 @@ error[E0117]: unexpected `n` after the end of the statement
   |
 3 |     let double = lambda n: n * 2
   |                         ^
+  = fix: Sisu writes it so: `n ->`
 

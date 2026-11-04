@@ -321,8 +321,16 @@ test "tests/a request that is not a booking" ... ok
 3 passed, 0 failed, 0 blocked
 ```
 
-The `info` lines come first, since the log is written as the tests
-run, and each test's report is written once it has ended.
+What a test logs is captured with the rest of what it prints, and
+shown only if it fails, so the passing tests show no `info` lines.
+
+These two tests reach the service only through its `pub` items,
+`Service.open` and the network, so they could live outside the
+package's code: moved to a file `tests/requests.sisu` beside the
+manifest, they become a program of their own that imports `bookings`
+as its users would, and `sisu test` runs it after the package's tests
+([chapter 19](19-testing.md#suites-tags-and-choosing-tests)). A test
+that needs an item that is not `pub` stays in a module of the package.
 
 ## Two nodes and a crash
 
@@ -709,6 +717,20 @@ warning[W0001]: typed hole `answer 200 with the names as JSON` of type `http.Res
 
 test "names in the book" ... blocked by todo("add the name, and answer 201 Created")
 test "an empty name is not a guest" ... blocked by todo("answer 200 with the names as JSON")
+
+test "names in the book" ... blocked by todo("add the name, and answer 201 Created")
+what the test printed:
+  in scope at the typed hole `todo("add the name, and answer 201 Created")`:
+    self = GuestBook(names=Mutex([]))
+    request = Request(method="POST", target="/guests", headers=[], body=b"Aino")
+    name = "Aino"
+
+test "an empty name is not a guest" ... blocked by todo("answer 200 with the names as JSON")
+what the test printed:
+  in scope at the typed hole `todo("answer 200 with the names as JSON")`:
+    self = GuestBook(names=Mutex([]))
+    request = Request(method="GET", target="/guests", headers=[], body=b"")
+
 0 passed, 0 failed, 2 blocked
 ```
 
@@ -963,6 +985,55 @@ test "part 2, a cache/an error is not kept" ... blocked by todo("Cache.new")
 test "part 2, a cache/tasks asking at once ask the service once" ... blocked by todo("Cache.new")
 test "part 3, towns side by side/two towns at once take as long as one" ... blocked by todo("Cache.new")
 test "part 3, towns side by side/one request for a town at a time, at every switch" ... blocked by todo("Cache.new")
+
+test "part 1, a limit for each client/two requests in a window" ... blocked by todo("Limiter.new")
+what the test printed:
+  in scope at the typed hole `todo("Limiter.new")`:
+    limit = 2
+    window = Duration(nanos=10000000000)
+
+test "part 1, a limit for each client/a new window" ... blocked by todo("Limiter.new")
+what the test printed:
+  in scope at the typed hole `todo("Limiter.new")`:
+    limit = 1
+    window = Duration(nanos=10000000000)
+
+test "part 1, a limit for each client/tasks share one limit" ... blocked by todo("Limiter.new")
+what the test printed:
+  in scope at the typed hole `todo("Limiter.new")`:
+    limit = 2
+    window = Duration(nanos=10000000000)
+
+test "part 2, a cache/a fresh answer is kept" ... blocked by todo("Cache.new")
+what the test printed:
+  in scope at the typed hole `todo("Cache.new")`:
+    fresh = Duration(nanos=300000000000)
+
+test "part 2, a cache/a stale answer is asked for again" ... blocked by todo("Cache.new")
+what the test printed:
+  in scope at the typed hole `todo("Cache.new")`:
+    fresh = Duration(nanos=300000000000)
+
+test "part 2, a cache/an error is not kept" ... blocked by todo("Cache.new")
+what the test printed:
+  in scope at the typed hole `todo("Cache.new")`:
+    fresh = Duration(nanos=300000000000)
+
+test "part 2, a cache/tasks asking at once ask the service once" ... blocked by todo("Cache.new")
+what the test printed:
+  in scope at the typed hole `todo("Cache.new")`:
+    fresh = Duration(nanos=300000000000)
+
+test "part 3, towns side by side/two towns at once take as long as one" ... blocked by todo("Cache.new")
+what the test printed:
+  in scope at the typed hole `todo("Cache.new")`:
+    fresh = Duration(nanos=300000000000)
+
+test "part 3, towns side by side/one request for a town at a time, at every switch" ... blocked by todo("Cache.new")
+what the test printed:
+  in scope at the typed hole `todo("Cache.new")`:
+    fresh = Duration(nanos=1000000000)
+
 0 passed, 0 failed, 9 blocked
 ```
 

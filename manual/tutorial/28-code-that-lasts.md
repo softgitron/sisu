@@ -461,6 +461,17 @@ warning[W0001]: typed hole `keep the slots that fit` of type `list[Slot]`
 test "slots that overlap" ... ok
 test "a slot from text" ... blocked by todo("parse a slot")
 test "the slots that fit" ... blocked by todo("keep the slots that fit")
+
+test "a slot from text" ... blocked by todo("parse a slot")
+what the test printed:
+  in scope at the typed hole `todo("parse a slot")`:
+    line = "Aino 17:30 90"
+
+test "the slots that fit" ... blocked by todo("keep the slots that fit")
+what the test printed:
+  in scope at the typed hole `todo("keep the slots that fit")`:
+    text = "Aino 17:00 90\nEero 18:00 60\nRoni 18:30 30"
+
 1 passed, 0 failed, 2 blocked
 ```
 
@@ -846,6 +857,31 @@ test "part 3/a file of both versions" ... blocked by todo("migrate")
 test "part 3/a line that cannot be read stops it" ... blocked by todo("migrate")
 test "part 3/an empty file" ... blocked by todo("migrate")
 
+test "part 1/a slot" ... blocked by todo("parse_slot")
+what the test printed:
+  in scope at the typed hole `todo("parse_slot")`:
+    line = "Aino 18:30 90"
+
+test "part 1/a line with a part missing" ... blocked by todo("parse_slot")
+what the test printed:
+  in scope at the typed hole `todo("parse_slot")`:
+    line = "Aino"
+
+test "part 1/a time that is not on the clock" ... blocked by todo("parse_slot")
+what the test printed:
+  in scope at the typed hole `todo("parse_slot")`:
+    line = "Aino 25:00 60"
+
+test "part 1/a length that is not a length" ... blocked by todo("parse_slot")
+what the test printed:
+  in scope at the typed hole `todo("parse_slot")`:
+    line = "Aino 18:00 0"
+
+test "part 2/a line of version 1 is a slot of an hour" ... blocked by todo("parse_slot")
+what the test printed:
+  in scope at the typed hole `todo("parse_slot")`:
+    line = "Eero 19"
+
 test "part 2/a program of version 1 reads lines of version 2" ... FAILED
 panic: assertion failed: shown == "Eero at 19"
     shown == "Eero at 19"
@@ -858,6 +894,21 @@ test "part 2/a slot that is not a whole hour" ... FAILED
 panic: assertion failed: parse_booking("Eero 19:00 60").is_ok()
   at test "part 2/a slot that is not a whole hour" (next_version.sisu:111:9)
 replay: sisu test --replay 1-657429893577fb66-0.0.1-t6-s0-r0 next_version.sisu
+
+test "part 3/a file of both versions" ... blocked by todo("migrate")
+what the test printed:
+  in scope at the typed hole `todo("migrate")`:
+    text = "Aino 17\nEero 18:30 45\nRoni 9"
+
+test "part 3/a line that cannot be read stops it" ... blocked by todo("migrate")
+what the test printed:
+  in scope at the typed hole `todo("migrate")`:
+    text = "Aino 17\nEero 25:00 45\nRoni 9"
+
+test "part 3/an empty file" ... blocked by todo("migrate")
+what the test printed:
+  in scope at the typed hole `todo("migrate")`:
+    text = ""
 
 0 passed, 2 failed, 8 blocked
 ```

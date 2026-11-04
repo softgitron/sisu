@@ -512,6 +512,12 @@ pub(crate) fn end_expect_copy(stack: &[String]) -> ! {
     unsafe { libc::_exit(0) }
 }
 
+/// Whether a failed `expect` is recorded here: in a native test, outside
+/// the copy of the process its frames are walked in.
+pub(crate) fn records_expect() -> bool {
+    std::env::var_os("SISU_TEST_REPORT").is_some() && !expect_copy()
+}
+
 /// A failed `expect` in a native test (17; decision 500): the failure is
 /// recorded with the frames a panic would leave and the test goes on, to
 /// fail at its end. The frames are walked by a panic's own unwinding, in a
@@ -520,7 +526,7 @@ pub(crate) fn end_expect_copy(stack: &[String]) -> ! {
 /// original waits for it and goes on. `None` outside a test or in the copy,
 /// where the failure is `assert`'s panic.
 pub(crate) fn expect_failed(message: &str) -> Option<u8> {
-    if std::env::var_os("SISU_TEST_REPORT").is_none() || expect_copy() {
+    if !records_expect() {
         return None;
     }
     flush();
@@ -565,8 +571,14 @@ pub(crate) fn expect_failed(message: &str) -> Option<u8> {
         libc::waitpid(pid, &mut status, 0);
     }
     let stack: Vec<String> = String::from_utf8_lossy(&out).lines().map(str::to_string).collect();
-    let message = render(msg::PANIC_EXPLICIT, &[("message", message.to_string())]);
-    let report = panic_report(&message, &stack);
+    // A failed expectation, not a panic (decision 545).
+    let mut report = message.to_string();
+    report.push('\n');
+    for line in &sisu_diag::trace::shown(&stack) {
+        report.push_str("  ");
+        report.push_str(line);
+        report.push('\n');
+    }
     EXPECTED.lock().unwrap_or_else(|p| p.into_inner()).push(report);
     Some(crate::abi::OK)
 }

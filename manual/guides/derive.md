@@ -121,25 +121,25 @@ where it stopped. Write the message for the person who wrote the
 ## 5. Say what each field needs
 
 The derived `row` interpolates each field, so each field's type needs
-`Display`. A struct with a field that has none gets E0347 at the line of
-the code that the derive wrote, in `<derive>/main.sisu`, the module
-where the compiler keeps derived impls:
+`Display`. A struct with a field that has none gets E0347 at the
+`@derive` that asked for the impl, with a note that quotes the line of
+the code that the derive wrote:
 
 <!-- output: examples/guide-derive/stove.console -->
 ```console
 $ sisu check stove.sisu
 error[E0347]: `Stove` does not implement `Display`
-  --> <derive>/main.sisu:20:22
+  --> stove.sisu:30:9
    |
-20 |         cells.push("{self.stove}")
-   |                      ^^^^^^^^^^
-  = fix: show its `Debug` form: `:?`
+30 | @derive(Csv)
+   |         ^^^
+  = note: in the impl of `Csv` that the derive writes for `Sauna`: `cells.push("{self.stove}")`
 
 ```
 
-The fix that E0347 offers, `:?`, is for the derived code, which the
-person who wrote the `@derive` cannot edit: implement `Display` for
-`Stove` instead. Say in the trait's documentation what each field's
+E0347 offers no fix here, since the line it quotes is the derive's,
+which the person who wrote the `@derive` cannot edit: implement
+`Display` for `Stove` instead. Say in the trait's documentation what each field's
 type must implement, so that the error is no surprise.
 
 **Status.** In stage 0 (D-018). A derive's template has no `f.ty`, so

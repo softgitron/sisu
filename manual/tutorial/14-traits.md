@@ -777,8 +777,11 @@ def main():
 ```
 
 Read through a type parameter, `Array[int, T.RACKS]`, it cannot be: in
-a generic function `T.RACKS` is known only when the function runs
-(chapter 15 shows the parameter that carries such a number).
+a generic function `T.RACKS` is known only when the function runs, and
+Sisu refuses it with E0274 (`resolve.const-not-type`), which says that
+`RACKS` is a constant where a type's argument goes
+([R3](../reference/declarations.md#traits) shows it; chapter 15 shows
+the parameter that carries such a number).
 
 **Try it.** Replace the last line of `main` with
 `print(Stove.MAX_HEAT)`, the constant read through the trait.
@@ -1319,6 +1322,30 @@ test "adding and taking away" ... blocked by todo("the sum")
 test "the opposite move" ... blocked by todo("the opposite move")
 test "a move made several times" ... blocked by todo("the move made `times` times")
 test "a walk" ... blocked by todo("the move made `times` times")
+
+test "adding and taking away" ... blocked by todo("the sum")
+what the test printed:
+  in scope at the typed hole `todo("the sum")`:
+    self = Vector(x=1, y=2)
+    other = Vector(x=3, y=-4)
+
+test "the opposite move" ... blocked by todo("the opposite move")
+what the test printed:
+  in scope at the typed hole `todo("the opposite move")`:
+    self = Vector(x=2, y=-3)
+
+test "a move made several times" ... blocked by todo("the move made `times` times")
+what the test printed:
+  in scope at the typed hole `todo("the move made `times` times")`:
+    self = Vector(x=1, y=-2)
+    times = 3
+
+test "a walk" ... blocked by todo("the move made `times` times")
+what the test printed:
+  in scope at the typed hole `todo("the move made `times` times")`:
+    self = Vector(x=1, y=0)
+    times = 2
+
 0 passed, 0 failed, 4 blocked
 ```
 
@@ -1396,6 +1423,31 @@ test "whole euros" ... blocked by todo("fmt")
 test "euros and cents" ... blocked by todo("fmt")
 test "amounts below zero" ... blocked by todo("fmt")
 test "a column of amounts" ... blocked by todo("fmt")
+
+test "whole euros" ... blocked by todo("fmt")
+what the test printed:
+  in scope at the typed hole `todo("fmt")`:
+    self = Money(cents=1200)
+    f = Formatter(out="", spec="", depth=0)
+
+test "euros and cents" ... blocked by todo("fmt")
+what the test printed:
+  in scope at the typed hole `todo("fmt")`:
+    self = Money(cents=1250)
+    f = Formatter(out="", spec="", depth=0)
+
+test "amounts below zero" ... blocked by todo("fmt")
+what the test printed:
+  in scope at the typed hole `todo("fmt")`:
+    self = Money(cents=-1250)
+    f = Formatter(out="", spec="", depth=0)
+
+test "a column of amounts" ... blocked by todo("fmt")
+what the test printed:
+  in scope at the typed hole `todo("fmt")`:
+    self = Money(cents=250)
+    f = Formatter(out="", spec=">9", depth=0)
+
 0 passed, 0 failed, 4 blocked
 ```
 

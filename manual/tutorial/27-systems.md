@@ -974,6 +974,17 @@ warning[W0001]: typed hole `fade` of type `()`
 test "mixing a voice in" ... blocked by todo("mix")
 test "mixing keeps the samples in range" ... blocked by todo("mix")
 test "a fade to silence" ... blocked by todo("fade")
+
+test "mixing a voice in" ... blocked by todo("mix")
+what the test printed:
+  in scope at the typed hole `todo("mix")`:
+    gain = 0.5
+
+test "mixing keeps the samples in range" ... blocked by todo("mix")
+what the test printed:
+  in scope at the typed hole `todo("mix")`:
+    gain = 1.0
+
 0 passed, 0 failed, 3 blocked
 ```
 
@@ -1069,6 +1080,27 @@ test "two records" ... blocked by todo("parse_log")
 test "a temperature below zero" ... blocked by todo("parse_log")
 test "an empty log" ... blocked by todo("parse_log")
 test "a log cut short" ... blocked by todo("parse_log")
+
+test "two records" ... blocked by todo("parse_log")
+what the test printed:
+  in scope at the typed hole `todo("parse_log")`:
+    data = b"-\x00\x00\x00\x1e\x03\x02\x00.\x00\x00\x00$\x03\x02\x01"
+
+test "a temperature below zero" ... blocked by todo("parse_log")
+what the test printed:
+  in scope at the typed hole `todo("parse_log")`:
+    data = b"\x00\x01\x00\x00\xe7\xff\x01\x00"
+
+test "an empty log" ... blocked by todo("parse_log")
+what the test printed:
+  in scope at the typed hole `todo("parse_log")`:
+    data = b""
+
+test "a log cut short" ... blocked by todo("parse_log")
+what the test printed:
+  in scope at the typed hole `todo("parse_log")`:
+    data = b"-\x00\x00\x00\x1e\x03\x02\x00.\x00"
+
 0 passed, 0 failed, 4 blocked
 ```
 

@@ -80,6 +80,7 @@ error[E0105]: expected a pattern, found `type`
   |
 3 |     let type = "csv"
   |         ^^^^
+  = note: `type` is a keyword, which names no binding: give it another name
 
 error[E0103]: expected an expression, found `type`
   --> keyword_name.sisu:4:11
@@ -115,8 +116,9 @@ error[D0006]: the program was not run: errors found (1)
 **Stage 0 differs.** The confusable and mixed-script lints of D-048 are
 on by default in [02](../../proposal/02-syntax.md); stage 0 has neither,
 so a name that mixes Latin and Cyrillic letters that look alike
-compiles without a word. A keyword as a binding's name gets E0105 and
-E0103, where E0124 would say that the word is a keyword.
+compiles without a word. A keyword as a binding's name gets E0105, whose
+note `parse.keyword-name` says that the word is a keyword, and each use
+of it E0103, where E0124 reports the declaration alone.
 
 **Status.** In stage 0; non-ASCII names are decided (D-048).
 

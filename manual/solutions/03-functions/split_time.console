@@ -15,4 +15,27 @@ test "an hour, two minutes and five seconds" ... blocked by todo("split_time")
 test "less than a minute" ... blocked by todo("split_time")
 test "shown with seconds" ... blocked by todo("show_time")
 test "shown without seconds" ... blocked by todo("show_time")
+
+test "an hour, two minutes and five seconds" ... blocked by todo("split_time")
+what the test printed:
+  in scope at the typed hole `todo("split_time")`:
+    total = 3725
+
+test "less than a minute" ... blocked by todo("split_time")
+what the test printed:
+  in scope at the typed hole `todo("split_time")`:
+    total = 59
+
+test "shown with seconds" ... blocked by todo("show_time")
+what the test printed:
+  in scope at the typed hole `todo("show_time")`:
+    total = 3725
+    seconds = True
+
+test "shown without seconds" ... blocked by todo("show_time")
+what the test printed:
+  in scope at the typed hole `todo("show_time")`:
+    total = 3725
+    seconds = False
+
 0 passed, 0 failed, 4 blocked

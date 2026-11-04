@@ -27,4 +27,28 @@ test "adding and taking away" ... blocked by todo("the sum")
 test "the opposite move" ... blocked by todo("the opposite move")
 test "a move made several times" ... blocked by todo("the move made `times` times")
 test "a walk" ... blocked by todo("the move made `times` times")
+
+test "adding and taking away" ... blocked by todo("the sum")
+what the test printed:
+  in scope at the typed hole `todo("the sum")`:
+    self = Vector(x=1, y=2)
+    other = Vector(x=3, y=-4)
+
+test "the opposite move" ... blocked by todo("the opposite move")
+what the test printed:
+  in scope at the typed hole `todo("the opposite move")`:
+    self = Vector(x=2, y=-3)
+
+test "a move made several times" ... blocked by todo("the move made `times` times")
+what the test printed:
+  in scope at the typed hole `todo("the move made `times` times")`:
+    self = Vector(x=1, y=-2)
+    times = 3
+
+test "a walk" ... blocked by todo("the move made `times` times")
+what the test printed:
+  in scope at the typed hole `todo("the move made `times` times")`:
+    self = Vector(x=1, y=0)
+    times = 2
+
 0 passed, 0 failed, 4 blocked

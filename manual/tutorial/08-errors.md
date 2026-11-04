@@ -947,6 +947,31 @@ test "the user's own choice" ... blocked by todo("the code chosen, or a fallback
 test "the team's choice" ... blocked by todo("the code chosen, or a fallback")
 test "no choice at all" ... blocked by todo("the code chosen, or a fallback")
 test "a language without messages" ... blocked by todo("the code chosen, or a fallback")
+
+test "the user's own choice" ... blocked by todo("the code chosen, or a fallback")
+what the test printed:
+  in scope at the typed hole `todo("the code chosen, or a fallback")`:
+    user = {"language": "fi"}
+    team = {"language": "sv"}
+
+test "the team's choice" ... blocked by todo("the code chosen, or a fallback")
+what the test printed:
+  in scope at the typed hole `todo("the code chosen, or a fallback")`:
+    user = {}
+    team = {"language": "sv"}
+
+test "no choice at all" ... blocked by todo("the code chosen, or a fallback")
+what the test printed:
+  in scope at the typed hole `todo("the code chosen, or a fallback")`:
+    user = {}
+    team = {}
+
+test "a language without messages" ... blocked by todo("the code chosen, or a fallback")
+what the test printed:
+  in scope at the typed hole `todo("the code chosen, or a fallback")`:
+    user = {"language": "de"}
+    team = {}
+
 0 passed, 0 failed, 4 blocked
 ```
 
@@ -1037,6 +1062,32 @@ test "an empty text" ... blocked by todo("parse_version")
 test "the wrong number of parts" ... blocked by todo("parse_version")
 test "a part that is not a number" ... blocked by todo("parse_version")
 test "versions in order" ... blocked by todo("parse_version")
+
+test "versions" ... blocked by todo("parse_version")
+what the test printed:
+  in scope at the typed hole `todo("parse_version")`:
+    text = "2.10.1"
+
+test "an empty text" ... blocked by todo("parse_version")
+what the test printed:
+  in scope at the typed hole `todo("parse_version")`:
+    text = ""
+
+test "the wrong number of parts" ... blocked by todo("parse_version")
+what the test printed:
+  in scope at the typed hole `todo("parse_version")`:
+    text = "1.2"
+
+test "a part that is not a number" ... blocked by todo("parse_version")
+what the test printed:
+  in scope at the typed hole `todo("parse_version")`:
+    text = "1.x.3"
+
+test "versions in order" ... blocked by todo("parse_version")
+what the test printed:
+  in scope at the typed hole `todo("parse_version")`:
+    text = "1.9.0"
+
 0 passed, 0 failed, 5 blocked
 ```
 
@@ -1153,6 +1204,34 @@ test "lines without a quantity" ... blocked by todo("parse_line")
 test "an order of several lines" ... blocked by todo("parse_order")
 test "the total of an order" ... blocked by todo("order_total")
 test "errors from every layer" ... blocked by todo("order_total")
+
+test "one line" ... blocked by todo("parse_line")
+what the test printed:
+  in scope at the typed hole `todo("parse_line")`:
+    line = "coffee 2"
+
+test "lines without a quantity" ... blocked by todo("parse_line")
+what the test printed:
+  in scope at the typed hole `todo("parse_line")`:
+    line = "coffee"
+
+test "an order of several lines" ... blocked by todo("parse_order")
+what the test printed:
+  in scope at the typed hole `todo("parse_order")`:
+    text = "coffee 2\n\nbun 1\n"
+
+test "the total of an order" ... blocked by todo("order_total")
+what the test printed:
+  in scope at the typed hole `todo("order_total")`:
+    text = "coffee 2\nbun 1"
+    prices = {"coffee": 350, "tea": 300, "bun": 280}
+
+test "errors from every layer" ... blocked by todo("order_total")
+what the test printed:
+  in scope at the typed hole `todo("order_total")`:
+    text = "tea 1\nbun"
+    prices = {"coffee": 350, "tea": 300, "bun": 280}
+
 0 passed, 0 failed, 5 blocked
 ```
 

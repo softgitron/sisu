@@ -1,3 +1,14 @@
 test "turns from text" ... blocked by todo("read the turns")
 test "a free hour says so" ... blocked by todo("lay out the evening")
+
+test "turns from text" ... blocked by todo("read the turns")
+what the test printed:
+  in scope at the typed hole `todo("read the turns")`:
+    text = "18 Aino\n20 Eero"
+
+test "a free hour says so" ... blocked by todo("lay out the evening")
+what the test printed:
+  in scope at the typed hole `todo("lay out the evening")`:
+    turns = [Turn(name="Aino", hour=18)]
+
 0 passed, 0 failed, 2 blocked

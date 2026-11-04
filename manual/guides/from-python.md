@@ -324,7 +324,8 @@ for Python 3's, convert both sides to `f64`, as step 4 does.
 
 These are the habits, with the Sisu spelling of each. R19 shows the
 diagnostic that each one gets, and which ones carry a fix that writes
-the Sisu spelling, `.is_none()` for `x is None` among them:
+the Sisu spelling, `.is_none()` for `x is None`, `x ->` for `lambda
+x:` and `struct` for `class` among them, or a note, as `try:` does:
 
 | Python | Sisu |
 |---|---|

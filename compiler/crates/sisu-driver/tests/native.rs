@@ -67,7 +67,8 @@ fn native_conformance_release() {
     let text =
         std::fs::read_to_string(compiler_dir().join("conformance/native.list")).expect("the coverage list");
     let list = sisu_conformance::native::read_list(&text);
-    let report = sisu_conformance::native::run_native_release(&sisu, &root, &list);
+    let checked = sisu_conformance::native::read_checked(&text);
+    let report = sisu_conformance::native::run_native_release(&sisu, &root, &list, &checked);
     println!("{}", report.render());
     assert!(report.cases > 0, "no cases in the coverage list");
     assert!(report.failures.is_empty(), "{}", report.render());
@@ -1054,6 +1055,39 @@ fn native_runs_take_seeds_and_report_the_schedulers_numbers() {
     let (_, err, status) = run(&["run", "--native", "--stats", "stack-depth", "join.sisu"]);
     assert_eq!(status, Some(2));
     assert!(err.contains("`--stats stack-depth`"), "{err}");
+}
+
+/// `sisu run --native` takes `--scheduler pct` and `--scheduler
+/// exhaustive` (decision 541): each run, and the search's summary or its
+/// failing schedule, is the interpreter's.
+#[test]
+fn native_runs_take_the_other_schedulers() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let dir = compiler_dir().join("crates/sisu-driver/tests/schedules");
+    let run = |args: &[&str]| {
+        outcome(std::process::Command::new(&sisu).args(args).current_dir(&dir).output().expect("sisu runs"))
+    };
+    for options in [
+        &["--scheduler", "exhaustive", "--depth", "1"][..],
+        &["--scheduler", "exhaustive", "--depth", "0"][..],
+        &["--scheduler", "pct", "--depth", "2", "--explore", "5"][..],
+        &["--scheduler", "pct"][..],
+    ] {
+        let mut interpreted = vec!["run"];
+        interpreted.extend_from_slice(options);
+        interpreted.push("lost_update.sisu");
+        let mut native = vec!["run", "--native"];
+        native.extend_from_slice(options);
+        native.push("lost_update.sisu");
+        let (i, n) = (run(&interpreted), run(&native));
+        assert_eq!(i, n, "{options:?}");
+        if options.contains(&"exhaustive") && options.contains(&"0") {
+            assert_eq!(i.2, Some(0), "{}", i.1);
+            assert!(i.1.contains("searched 4 schedules (preemption bound 0)"), "{}", i.1);
+        } else {
+            assert_eq!(i.2, Some(101), "{options:?}: {}", i.1);
+        }
+    }
 }
 
 /// `--explore N` reports the first seed whose run prints other output than

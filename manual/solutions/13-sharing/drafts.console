@@ -1,5 +1,5 @@
 $ sisu test drafts.sisu
-error[E0418]: this leaves the scope with `drafts` unconsumed: a `list[Draft]` must be passed to an `own` parameter first
+error[E0418]: this leaves the scope with `drafts` unconsumed: a value of `list[Draft]` must be passed to an `own` parameter first
   --> drafts.sisu:32:13
    |
 32 |             return Err(Empty(position))

@@ -453,7 +453,7 @@ impl Cg:
         self.store_word(d, a2, 0)
         self.b.return_([st])
         self.b.switch_to_block(counted)
-        self.yield_check()?
+        self.yield_check(True)?
         self.b.jump(self.fx.blocks[0], [])
         return Ok(())
 
@@ -515,14 +515,17 @@ impl Cg:
         self.check(st)
         self.b.jump(counted, [])
         self.b.switch_to_block(counted)
-        self.yield_check()?
+        self.yield_check(False)?
         return self.statement(
             p, StatementKind.Assign(place=dest.copy(), value=Rvalue.Use(Operand.Const(c.copy())))
         )
 
     ## A yield point: one less of the budget, and the scheduler when it is
-    ## spent.
-    pub pure def yield_check(mut self) -> () ! LirError:
+    ## spent. The scheduler's call fails when a property's case has run past
+    ## its budget (decision 540): at a function's `entry` the failure gives
+    ## the frame's count back and returns, elsewhere it takes the failure
+    ## path of the block.
+    pub pure def yield_check(mut self, entry: bool) -> () ! LirError:
         # The runtime's own code passes none (decision 336).
         if self.library:
             return Ok(())
@@ -536,8 +539,13 @@ impl Cg:
         self.b.brif(spent, slow, [], cont, [])
         self.b.set_cold_block(slow)
         self.b.switch_to_block(slow)
-        _ = self.rt(abi.SYM_YIELD, [])?
-        self.b.jump(cont, [])
+        let st = self.rt_status(abi.SYM_YIELD, [])?
+        let fail = if entry: self.b.create_block() else: self.fail_block()
+        self.b.brif(st, fail, [], cont, [])
+        if entry:
+            self.b.set_cold_block(fail)
+            self.b.switch_to_block(fail)
+            self.leave(abi.UNWINDING)
         self.b.switch_to_block(cont)
         return Ok(())
 
@@ -743,7 +751,7 @@ impl Cg:
                         to = bb.index
                         break
                 if to <= self.fx.cur:
-                    self.yield_check()?
+                    self.yield_check(False)?
                 self.b.jump(self.fx.blocks[to], [])
                 return Ok(())
         match t:
@@ -751,7 +759,7 @@ impl Cg:
                 # A jump to a block at or before this one is a loop's back
                 # edge: a yield point.
                 if bb.index <= self.fx.cur:
-                    self.yield_check()?
+                    self.yield_check(False)?
                 self.b.jump(self.fx.blocks[bb.index], [])
             case Terminator.Switch(value, cases, default):
                 let (v, _) = self.scalar(p, value)?
@@ -764,7 +772,7 @@ impl Cg:
                 self.b.switch(v, d, entries)
                 for (to, blk) in back:
                     self.b.switch_to_block(blk)
-                    self.yield_check()?
+                    self.yield_check(False)?
                     self.b.jump(self.fx.blocks[to], [])
             case Terminator.Return:
                 # A text an interpolation was building when a `?` left it is

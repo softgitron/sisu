@@ -392,7 +392,8 @@ beside the type and checked like an impl written by hand.
 - A derive that stops, by `comptime panic` or a query that does not
   apply, is E0608 (`comptime.derive-failed`), at the `@derive` with a
   label where the template stopped; an error in the code it wrote is
-  placed in `<derive>/main.sisu`.
+  placed at the derive's argument, with a note that quotes the line of
+  the impl it wrote.
 - The traits of the prelude derive this way; `@derive` and the traits
   it takes are [R14](attributes.md#deriving-traits).
 

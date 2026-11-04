@@ -15,4 +15,25 @@ test "a summer day" ... blocked by todo("celsius in Fahrenheit")
 test "a winter day" ... blocked by todo("celsius in Fahrenheit")
 test "water boils" ... blocked by todo("celsius in Fahrenheit")
 test "the two scales meet" ... blocked by todo("celsius in Fahrenheit")
+
+test "a summer day" ... blocked by todo("celsius in Fahrenheit")
+what the test printed:
+  in scope at the typed hole `todo("celsius in Fahrenheit")`:
+    celsius = 21.5
+
+test "a winter day" ... blocked by todo("celsius in Fahrenheit")
+what the test printed:
+  in scope at the typed hole `todo("celsius in Fahrenheit")`:
+    celsius = -12.0
+
+test "water boils" ... blocked by todo("celsius in Fahrenheit")
+what the test printed:
+  in scope at the typed hole `todo("celsius in Fahrenheit")`:
+    celsius = 100.0
+
+test "the two scales meet" ... blocked by todo("celsius in Fahrenheit")
+what the test printed:
+  in scope at the typed hole `todo("celsius in Fahrenheit")`:
+    celsius = -40.0
+
 0 passed, 0 failed, 4 blocked

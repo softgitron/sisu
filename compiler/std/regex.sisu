@@ -14,7 +14,10 @@
 ##! start and the end of the text); `\b` and `\B` (a word boundary or
 ##! not); groups `(...)` and `(?:...)`; `|`; and `*`, `+`, `?`, `{n}`,
 ##! `{n,}`, `{n,m}`, each lazy with a `?` after it. Positions are byte
-##! indices into the text.
+##! indices into the text. A back-reference (`\1`) is left out, since no
+##! engine matches one in linear time, and so are flags (`(?i)`), named
+##! groups (`(?P<name>...)`) and Unicode classes (`\p{L}`), which stage 0
+##! does not have yet; each is a `Syntax` error that says so.
 
 ## What a pattern cannot be compiled for: the problem, and the character
 ## index in the pattern where it was found.
@@ -187,8 +190,18 @@ impl Parser:
             var index: int? = None
             if self.peek() == Some('?'):
                 self.at += 1
+                if self.peek() == Some('P') or self.peek() == Some('<'):
+                    return Err(
+                        self.error(
+                            "a named group, which stage 0 leaves out: `(?:...)` is the one group flag"
+                        )
+                    )
                 if self.peek() != Some(':'):
-                    return Err(self.error("`(?:`, the only group flag"))
+                    return Err(
+                        self.error(
+                            "a flag such as `(?i)`, which stage 0 leaves out: `(?:...)` is the one group flag"
+                        )
+                    )
                 self.at += 1
             else:
                 self.groups += 1
@@ -249,7 +262,23 @@ impl Parser:
                 if in_class:
                     return Err(Syntax(at=self.at - 2, message=String.new("`\\B` in a class")))
                 return Ok(Word(negated=True))
+            case 'p' | 'P':
+                return Err(
+                    Syntax(
+                        at=self.at - 2,
+                        message=String.new("the class `\\{c}{{...}}`, which stage 0 leaves out"),
+                    )
+                )
             case _:
+                if c.is_digit() and c != '0':
+                    return Err(
+                        Syntax(
+                            at=self.at - 2,
+                            message=String.new(
+                                "the back-reference `\\{c}`, which a match in linear time leaves out"
+                            ),
+                        )
+                    )
                 if c.is_alphabetic() or c.is_digit():
                     return Err(Syntax(at=self.at - 2, message=String.new("the escape `\\{c}`")))
                 return Ok(Lit(c=c))

@@ -211,6 +211,30 @@ unsafe extern "C" {
         arg: *const i64,
         item: *const i64,
     ) -> u8;
+    fn sisu_rt_iter_range(ret: *mut *mut u8, cur: *const i64, stop: *const i64, step: *const i64) -> u8;
+    fn sisu_rt_iter_list_ref(ret: *mut *mut u8, xs: *const *mut u8, size: *const i64) -> u8;
+    fn sisu_rt_iter_items(
+        ret: *mut *mut u8,
+        types: *const *const u64,
+        xs: *const *mut u8,
+        elem: *const i64,
+    ) -> u8;
+    fn sisu_rt_iter_chars(ret: *mut *mut u8, b: *const *const u8, n: *const i64) -> u8;
+    fn sisu_rt_iter_bytes(ret: *mut *mut u8, b: *const *const u8, n: *const i64) -> u8;
+    fn sisu_rt_iter_owned_bytes(ret: *mut *mut u8, b: *const *const u8, n: *const i64) -> u8;
+    fn sisu_rt_iter_enumerate(ret: *mut *mut u8, inner: *const *mut u8) -> u8;
+    fn sisu_rt_iter_zip(
+        ret: *mut *mut u8,
+        a: *const *mut u8,
+        b: *const *mut u8,
+        strict: *const u64,
+        ta: *const i64,
+        tb: *const i64,
+    ) -> u8;
+    fn sisu_rt_iter_table_ref(ret: *mut *mut u8, tb: *const *mut u8, part: *const i64) -> u8;
+    fn sisu_rt_iter_generator(ret: *mut *mut u8, task: *const i64, size: *const i64) -> u8;
+    fn sisu_rt_iter_receiver(ret: *mut *mut u8, chan: *const i64, size: *const i64) -> u8;
+    fn sisu_rt_iter_waits(ret: *mut i64, it: *const *mut u8, out: *const *mut u8) -> u8;
     fn sisu_rt_iter_collect(
         ret: *mut i64,
         types: *const *const u64,
@@ -1039,6 +1063,82 @@ pub(crate) unsafe fn iter_collect(it: *mut u8, item: Option<u32>, out: *mut u8) 
         failed("iterator's items");
     }
     status_of(ret)
+}
+
+/// A new iterator's object, made by the runtime in Sisu (decision 542),
+/// whose layout is `iter.sisu`'s alone.
+pub(crate) enum NewIter<'a> {
+    Range(i64, i64, i64),
+    /// A borrowed list's elements, of `size` bytes.
+    ListRef(*mut u8, u32),
+    /// The elements of a list it owns, of type `elem`.
+    Items(&'a mut crate::mem::List, u32),
+    Chars(*const u8, u64),
+    Bytes(*const u8, u64),
+    OwnedBytes(&'a [u8]),
+    Enumerate(*mut u8),
+    Zip(*mut u8, *mut u8, bool, u32, u32),
+    /// A borrowed table's keys (0), values (1) or both (2).
+    TableRef(*mut u8, u64),
+    /// A generator's items, its task and their size.
+    Generator(u32, u32),
+    /// A receiver's values, its channel and their size.
+    Receiver(u32, u32),
+}
+
+/// Makes a new iterator's object.
+///
+/// # Safety
+/// What each kind names must be live: a list, a text that outlives the
+/// iterator, an iterator's object it takes, a table.
+pub(crate) unsafe fn iter_new(kind: NewIter<'_>) -> *mut u8 {
+    let mut ret: *mut u8 = std::ptr::null_mut();
+    let i = |v: u32| i64::from(v);
+    // SAFETY: as for [`equal`]; each argument is in memory of its own.
+    let status = unsafe {
+        match kind {
+            NewIter::Range(cur, stop, step) => sisu_rt_iter_range(&mut ret, &cur, &stop, &step),
+            NewIter::ListRef(xs, size) => sisu_rt_iter_list_ref(&mut ret, &xs, &i(size)),
+            NewIter::Items(list, elem) => {
+                let types = crate::desc::base();
+                let xs = (list as *mut crate::mem::List).cast::<u8>();
+                sisu_rt_iter_items(&mut ret, &types, &xs, &i(elem))
+            }
+            NewIter::Chars(b, n) => sisu_rt_iter_chars(&mut ret, &b, &(n as i64)),
+            NewIter::Bytes(b, n) => sisu_rt_iter_bytes(&mut ret, &b, &(n as i64)),
+            NewIter::OwnedBytes(data) => {
+                sisu_rt_iter_owned_bytes(&mut ret, &data.as_ptr(), &(data.len() as i64))
+            }
+            NewIter::Enumerate(inner) => sisu_rt_iter_enumerate(&mut ret, &inner),
+            NewIter::Zip(a, b, strict, ta, tb) => {
+                sisu_rt_iter_zip(&mut ret, &a, &b, &u64::from(strict), &i(ta), &i(tb))
+            }
+            NewIter::TableRef(tb, part) => sisu_rt_iter_table_ref(&mut ret, &tb, &(part as i64)),
+            NewIter::Generator(task, size) => sisu_rt_iter_generator(&mut ret, &i(task), &i(size)),
+            NewIter::Receiver(chan, size) => sisu_rt_iter_receiver(&mut ret, &i(chan), &i(size)),
+        }
+    };
+    if status != abi::OK {
+        failed("iterator's making");
+    }
+    ret
+}
+
+/// What `Iter.next` of the iterator at `it` may wait for: 1 for a
+/// generator's item, 2 for a receiver's value, with its task or channel
+/// and the size of an item; 0 when it does not wait.
+///
+/// # Safety
+/// `it` must be an iterator's object.
+pub(crate) unsafe fn iter_waits(it: *mut u8) -> (i64, u64, u64) {
+    let mut ret = 0i64;
+    let mut words = [0u64; 2];
+    let out = words.as_mut_ptr().cast::<u8>();
+    // SAFETY: as for [`equal`].
+    if unsafe { sisu_rt_iter_waits(&mut ret, &it, &out) } != abi::OK {
+        failed("iterator's waits");
+    }
+    (ret, words[0], words[1])
 }
 
 /// The next item of the generator whose task is `task`, `size` bytes,

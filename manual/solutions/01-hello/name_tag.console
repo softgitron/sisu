@@ -7,4 +7,17 @@ warning[W0001]: typed hole `name tag` of type `String`
 
 test "a tag for Aino from Oulu" ... blocked by todo("name tag")
 test "a tag for Eero from Turku" ... blocked by todo("name tag")
+
+test "a tag for Aino from Oulu" ... blocked by todo("name tag")
+what the test printed:
+  in scope at the typed hole `todo("name tag")`:
+    name = "Aino"
+    town = "Oulu"
+
+test "a tag for Eero from Turku" ... blocked by todo("name tag")
+what the test printed:
+  in scope at the typed hole `todo("name tag")`:
+    name = "Eero"
+    town = "Turku"
+
 0 passed, 0 failed, 2 blocked

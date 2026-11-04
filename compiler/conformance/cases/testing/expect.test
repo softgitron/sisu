@@ -5,11 +5,11 @@ test "a failure in a task" ... FAILED
 test "doubles" ... FAILED
 what the test printed:
   after the expects
-panic: assertion failed: double(3) == 6
+expectation failed: double(3) == 6
   left:  5
   right: 6
   at test "doubles" (expect.sisu:16:5)
-panic: assertion failed: double(n) == 2 * n
+expectation failed: double(n) == 2 * n
   left:  6
   right: 8
   at check_double (expect.sisu:12:5)
@@ -23,7 +23,7 @@ replay: sisu test --replay 1-5b9ac99578469fca-0.0.1-t0-s0-r0 expect.sisu
 test "a failure in a task" ... FAILED
 what the test printed:
   the test goes on
-panic: assertion failed: double(n) == 2 * n
+expectation failed: double(n) == 2 * n
   left:  9
   right: 14
   at check_double (expect.sisu:12:5)

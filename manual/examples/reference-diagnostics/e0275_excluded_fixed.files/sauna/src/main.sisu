@@ -1,0 +1,5 @@
+# A dependency that every target builds has no `when`.
+import winlog
+
+def main():
+    winlog.record("the stove is on")

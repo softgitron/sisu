@@ -4,5 +4,5 @@ error[E0117]: unexpected `!` after the end of the statement
   |
 3 |     println!("{}", 3)
   |            ^
-  = fix: Sisu writes it `print`: `print`
+  = fix: Sisu writes it so: `print`
 

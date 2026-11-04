@@ -14,4 +14,23 @@ warning[W0001]: typed hole `whether the line holds the word` of type `bool`
 test "lines that hold the word" ... blocked by todo("the text of the file")
 test "no line holds it" ... blocked by todo("the text of the file")
 test "a file that is not there" ... blocked by todo("the text of the file")
+
+test "lines that hold the word" ... blocked by todo("the text of the file")
+what the test printed:
+  in scope at the typed hole `todo("the text of the file")`:
+    path = "poem.txt"
+    word = "warm"
+
+test "no line holds it" ... blocked by todo("the text of the file")
+what the test printed:
+  in scope at the typed hole `todo("the text of the file")`:
+    path = "poem.txt"
+    word = "snow"
+
+test "a file that is not there" ... blocked by todo("the text of the file")
+what the test printed:
+  in scope at the typed hole `todo("the text of the file")`:
+    path = "song.txt"
+    word = "warm"
+
 0 passed, 0 failed, 3 blocked

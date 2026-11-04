@@ -1,8 +1,8 @@
 $ sisu check stove.sisu
 error[E0347]: `Stove` does not implement `Display`
-  --> <derive>/main.sisu:20:22
+  --> stove.sisu:30:9
    |
-20 |         cells.push("{self.stove}")
-   |                      ^^^^^^^^^^
-  = fix: show its `Debug` form: `:?`
+30 | @derive(Csv)
+   |         ^^^
+  = note: in the impl of `Csv` that the derive writes for `Sauna`: `cells.push("{self.stove}")`
 

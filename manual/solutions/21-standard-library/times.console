@@ -8,4 +8,20 @@ warning[W0001]: typed hole `the pattern` of type `str`
 test "times with two digits" ... blocked by todo("the pattern")
 test "an hour of one digit" ... blocked by todo("the pattern")
 test "no time" ... blocked by todo("the pattern")
+
+test "times with two digits" ... blocked by todo("the pattern")
+what the test printed:
+  in scope at the typed hole `todo("the pattern")`:
+    text = "Sauna at 17:30, swim at 18:05."
+
+test "an hour of one digit" ... blocked by todo("the pattern")
+what the test printed:
+  in scope at the typed hole `todo("the pattern")`:
+    text = "Tea at 9:15 and 21:00"
+
+test "no time" ... blocked by todo("the pattern")
+what the test printed:
+  in scope at the typed hole `todo("the pattern")`:
+    text = "no times here, and 12:3 has one digit"
+
 0 passed, 0 failed, 3 blocked

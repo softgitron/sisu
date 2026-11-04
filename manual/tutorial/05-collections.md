@@ -836,6 +836,22 @@ warning[W0001]: typed hole `word_frequencies` of type `dict[str, int]`
 test "every word once" ... blocked by todo("word_frequencies")
 test "repeated words" ... blocked by todo("word_frequencies")
 test "no words" ... blocked by todo("word_frequencies")
+
+test "every word once" ... blocked by todo("word_frequencies")
+what the test printed:
+  in scope at the typed hole `todo("word_frequencies")`:
+    words = ["kuu", "kissa", "kala"]
+
+test "repeated words" ... blocked by todo("word_frequencies")
+what the test printed:
+  in scope at the typed hole `todo("word_frequencies")`:
+    words = ["a", "b", "a", "c", "a", "b"]
+
+test "no words" ... blocked by todo("word_frequencies")
+what the test printed:
+  in scope at the typed hole `todo("word_frequencies")`:
+    words = []
+
 0 passed, 0 failed, 3 blocked
 ```
 
@@ -903,6 +919,27 @@ test "two values" ... blocked by todo("second_largest")
 test "the largest value twice" ... blocked by todo("second_largest")
 test "negative values" ... blocked by todo("second_largest")
 test "many repeats" ... blocked by todo("second_largest")
+
+test "two values" ... blocked by todo("second_largest")
+what the test printed:
+  in scope at the typed hole `todo("second_largest")`:
+    values = [1, 2]
+
+test "the largest value twice" ... blocked by todo("second_largest")
+what the test printed:
+  in scope at the typed hole `todo("second_largest")`:
+    values = [5, 9, 9, 3]
+
+test "negative values" ... blocked by todo("second_largest")
+what the test printed:
+  in scope at the typed hole `todo("second_largest")`:
+    values = [-4, -8, -4]
+
+test "many repeats" ... blocked by todo("second_largest")
+what the test printed:
+  in scope at the typed hole `todo("second_largest")`:
+    values = [7, 3, 7, 7, 1, 3]
+
 0 passed, 0 failed, 4 blocked
 ```
 

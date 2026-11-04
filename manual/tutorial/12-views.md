@@ -681,6 +681,22 @@ warning[W0001]: typed hole `tokenize` of type `list[Token]`
 test "one line" ... blocked by todo("tokenize")
 test "lines are counted" ... blocked by todo("tokenize")
 test "comments give no tokens" ... blocked by todo("tokenize")
+
+test "one line" ... blocked by todo("tokenize")
+what the test printed:
+  in scope at the typed hole `todo("tokenize")`:
+    source = "total = 12 + x"
+
+test "lines are counted" ... blocked by todo("tokenize")
+what the test printed:
+  in scope at the typed hole `todo("tokenize")`:
+    source = "a = 1\n\nprint a"
+
+test "comments give no tokens" ... blocked by todo("tokenize")
+what the test printed:
+  in scope at the typed hole `todo("tokenize")`:
+    source = "x = 2  # the start\n# a whole line\nx2"
+
 0 passed, 0 failed, 3 blocked
 ```
 

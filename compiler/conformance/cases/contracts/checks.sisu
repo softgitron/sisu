@@ -66,7 +66,3 @@ test "labelled results":
 test "every exit checks the postcondition":
     assert first_positive([0, 0, 5]) == Some(2)
     assert first_positive([]) == None
-
-# native tests: the interpreter's, which bounds a case of `isqrt`'s generated
-# test by its budget of statements; native code counts none yet
-# (port-debt.md, "A property's budget").

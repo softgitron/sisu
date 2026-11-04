@@ -287,4 +287,4 @@ and not decoded, since `decode` makes no enum's variants yet (E0609),
 and `@derive(Decode)`, which 11 gives a struct, is accepted on an enum
 too, whose `decode` then stops the run at E0501, an error of the
 compiler's own. Without `from std.json import Decode, Encode`, the
-derive is E0243, which does not name the import.
+derive is E0243, whose note names the import.

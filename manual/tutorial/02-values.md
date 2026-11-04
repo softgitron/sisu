@@ -626,6 +626,7 @@ error[E0105]: expected a pattern, found `type`
   |
 3 |     let type = "csv"
   |         ^^^^
+  = note: `type` is a keyword, which names no binding: give it another name
 
 error[E0103]: expected an expression, found `type`
   --> keyword_name.sisu:4:23
@@ -637,9 +638,10 @@ error[D0006]: the program was not run: errors found (2)
 ```
 
 E0105 (`parse.expected-pattern`) and E0103 (`parse.expected-expression`)
-say that the parser met the keyword `type` where it expected a name. The
-diagnostics do not say that the word is a keyword; the fix is another
-name, such as `kind` or `file_type`.
+say that the parser met the keyword `type` where it expected a name.
+The note on the first says that the word is a keyword, and the fix is
+another name, such as `kind` or `file_type`; the second error, at the
+use, goes with the first.
 
 **Try it.** Rename `type` to `Kind` in `keyword_name.sisu`, in both
 places, and run it.
@@ -655,7 +657,7 @@ error[E0327]: `str` has no variant `Kind`
   |
 3 |     let Kind = "csv"
   |         ^^^^
-  = fix: a binding's name starts with a lowercase letter: `kind`: `kind`
+  = fix: a binding's name starts with a lowercase letter: `kind`
 
 error[E0329]: this pattern might not match; add `else:` with a block that leaves the scope
   --> capital_name.sisu:3:9
@@ -1217,6 +1219,27 @@ test "a summer day" ... blocked by todo("celsius in Fahrenheit")
 test "a winter day" ... blocked by todo("celsius in Fahrenheit")
 test "water boils" ... blocked by todo("celsius in Fahrenheit")
 test "the two scales meet" ... blocked by todo("celsius in Fahrenheit")
+
+test "a summer day" ... blocked by todo("celsius in Fahrenheit")
+what the test printed:
+  in scope at the typed hole `todo("celsius in Fahrenheit")`:
+    celsius = 21.5
+
+test "a winter day" ... blocked by todo("celsius in Fahrenheit")
+what the test printed:
+  in scope at the typed hole `todo("celsius in Fahrenheit")`:
+    celsius = -12.0
+
+test "water boils" ... blocked by todo("celsius in Fahrenheit")
+what the test printed:
+  in scope at the typed hole `todo("celsius in Fahrenheit")`:
+    celsius = 100.0
+
+test "the two scales meet" ... blocked by todo("celsius in Fahrenheit")
+what the test printed:
+  in scope at the typed hole `todo("celsius in Fahrenheit")`:
+    celsius = -40.0
+
 0 passed, 0 failed, 4 blocked
 ```
 

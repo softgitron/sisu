@@ -6,7 +6,11 @@
 # mode"), as `--native-cranelift` does with Cranelift's executables; a
 # case that pins `sisu test` has its tests run by `sisu test --native`
 # too (decision 460). One case per line; the list grows as the backend
-# does (`--native-survey` names the cases outside it that would pass).
+# does (`--native-survey` names the cases outside it that would pass). A
+# case marked `checked` stops with the checked memory model's report, which
+# a debug build gives as the interpreter does (decisions 543 and 544):
+# `--native-release`, whose raw memory is unchecked, builds it and does not
+# run it.
 capabilities/attenuation
 capabilities/closure_drops
 capabilities/datetime
@@ -54,6 +58,7 @@ contracts/checks
 contracts/explain
 contracts/invariants
 contracts/power_assert
+contracts/properties
 contracts/proposal_contracts
 contracts/refinements
 contracts/result_references
@@ -258,10 +263,22 @@ traits/supertraits
 types/typed_hole
 unsafe/bit_cast_sizes
 unsafe/foreign
+unsafe/invalid_bits checked
 unsafe/layouts
+unsafe/leaked checked
+unsafe/misaligned checked
+unsafe/mistyped checked
+unsafe/no_memory checked
+unsafe/out_of_bounds checked
+unsafe/overwrite checked
 unsafe/plain_casts
 unsafe/pointers
 unsafe/raw_buffer
 unsafe/read_plain_short
+unsafe/release_layout checked
+unsafe/release_other checked
+unsafe/released checked
+unsafe/released_twice checked
 unsafe/stale_pointer
+unsafe/uninitialised checked
 unsafe/vector

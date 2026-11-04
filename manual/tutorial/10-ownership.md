@@ -1162,6 +1162,31 @@ test "tickets count up" ... blocked by todo("leave")
 test "a ticket gives its coat back" ... blocked by todo("leave")
 test "a ticket works once" ... blocked by todo("leave")
 test "closing time" ... blocked by todo("leave")
+
+test "tickets count up" ... blocked by todo("leave")
+what the test printed:
+  in scope at the typed hole `todo("leave")`:
+    self = Cloakroom(coats={}, next_ticket=1)
+    coat = Coat(owner="Aino", colour="red")
+
+test "a ticket gives its coat back" ... blocked by todo("leave")
+what the test printed:
+  in scope at the typed hole `todo("leave")`:
+    self = Cloakroom(coats={}, next_ticket=1)
+    coat = Coat(owner="Aino", colour="red")
+
+test "a ticket works once" ... blocked by todo("leave")
+what the test printed:
+  in scope at the typed hole `todo("leave")`:
+    self = Cloakroom(coats={}, next_ticket=1)
+    coat = Coat(owner="Roni", colour="blue")
+
+test "closing time" ... blocked by todo("leave")
+what the test printed:
+  in scope at the typed hole `todo("leave")`:
+    self = Cloakroom(coats={}, next_ticket=1)
+    coat = Coat(owner="Aino", colour="red")
+
 0 passed, 0 failed, 4 blocked
 ```
 

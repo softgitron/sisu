@@ -686,7 +686,7 @@ test "an empty draft does not stop the others":
 <!-- output: solutions/13-sharing/drafts.console -->
 ```console
 $ sisu test drafts.sisu
-error[E0418]: this leaves the scope with `drafts` unconsumed: a `list[Draft]` must be passed to an `own` parameter first
+error[E0418]: this leaves the scope with `drafts` unconsumed: a value of `list[Draft]` must be passed to an `own` parameter first
   --> drafts.sisu:32:13
    |
 32 |             return Err(Empty(position))
@@ -904,6 +904,63 @@ test "part 2, cycles/a cycle further on" ... blocked by todo("add")
 test "part 3, shared and weak/items own what they need" ... blocked by todo("add")
 test "part 3, shared and weak/a weak handle keeps nothing" ... blocked by todo("add")
 test "part 3, shared and weak/a cycle has no items" ... blocked by todo("add")
+
+test "part 1, the install order/a chain" ... blocked by todo("add")
+what the test printed:
+  in scope at the typed hole `todo("add")`:
+    self = Graph(packages=Arena([]), keys={})
+    name = "c"
+    needs = ["b"]
+
+test "part 1, the install order/needs that are shared" ... blocked by todo("add")
+what the test printed:
+  in scope at the typed hole `todo("add")`:
+    self = Graph(packages=Arena([]), keys={})
+    name = "app"
+    needs = ["web", "log"]
+
+test "part 2, cycles/a cycle of three" ... blocked by todo("add")
+what the test printed:
+  in scope at the typed hole `todo("add")`:
+    self = Graph(packages=Arena([]), keys={})
+    name = "a"
+    needs = ["b"]
+
+test "part 2, cycles/a package that needs itself" ... blocked by todo("add")
+what the test printed:
+  in scope at the typed hole `todo("add")`:
+    self = Graph(packages=Arena([]), keys={})
+    name = "a"
+    needs = ["a"]
+
+test "part 2, cycles/a cycle further on" ... blocked by todo("add")
+what the test printed:
+  in scope at the typed hole `todo("add")`:
+    self = Graph(packages=Arena([]), keys={})
+    name = "app"
+    needs = ["web"]
+
+test "part 3, shared and weak/items own what they need" ... blocked by todo("add")
+what the test printed:
+  in scope at the typed hole `todo("add")`:
+    self = Graph(packages=Arena([]), keys={})
+    name = "app"
+    needs = ["web", "log"]
+
+test "part 3, shared and weak/a weak handle keeps nothing" ... blocked by todo("add")
+what the test printed:
+  in scope at the typed hole `todo("add")`:
+    self = Graph(packages=Arena([]), keys={})
+    name = "app"
+    needs = ["web", "log"]
+
+test "part 3, shared and weak/a cycle has no items" ... blocked by todo("add")
+what the test printed:
+  in scope at the typed hole `todo("add")`:
+    self = Graph(packages=Arena([]), keys={})
+    name = "a"
+    needs = ["a"]
+
 0 passed, 0 failed, 8 blocked
 ```
 

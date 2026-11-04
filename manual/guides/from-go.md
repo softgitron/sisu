@@ -233,6 +233,7 @@ error[E0117]: unexpected `print` after the end of the statement
   |
 4 |     go print("hello {count}")
   |        ^^^^^
+  = note: a task starts in a scope, which joins it: `task.scope do s:` and `s.spawn(() -> f())`
 
 $ sisu check nil.sisu
 error[E0200]: cannot find `nil` in this scope
@@ -240,14 +241,15 @@ error[E0200]: cannot find `nil` in this scope
   |
 3 |     let best: str? = nil
   |                      ^^^
-  = fix: Sisu writes it `None`: `None`
+  = fix: Sisu writes it so: `None`
 
 ```
 
 E0123 names the fix, `let` (or `var`, for a value that changes), and
 E0200's fix writes `None` for `nil`, which is for an optional type
-`T?`; a type that is not optional has no `nil` at all. `go f()` gets
-no fix: it is `s.spawn(() -> f())` in a scope. Some other differences:
+`T?`; a type that is not optional has no `nil` at all. `go f()` gets a
+note instead of a fix, since the task needs a scope around it: it is
+`s.spawn(() -> f())` inside `task.scope do s:`. Some other differences:
 a name is exported with `pub`, not with a capital letter; a variable
 has no zero value, and one read before it is given a value is E0366;
 `for i := 0; i < n; i++` is `for i in range(n)`, and a statement `i++`

@@ -618,6 +618,9 @@ impl Cg:
         var flags = if entry.returns_result: abi.ENTRY_RESULT else: 0
         if entry.takes_system:
             flags = flags | abi.ENTRY_SYSTEM
+        # The debug profile checks raw memory (decision 543).
+        if not self.release:
+            flags = flags | abi.ENTRY_CHECKED
         return Ok((main, flags, ret_ty))
 
     ## Lowers every queued instance, and the drop glue the type table
@@ -1109,7 +1112,7 @@ pure def par_map(f: Function) -> Function:
 pub pure def runtime_signature(name: str) -> str?:
     return match name:
         case "sisu_rt_start": Some("(i32, i64, i64, i32, i32, i64, i64, i64, i64, i64) -> (i32)")
-        case "sisu_rt_yield": Some("() -> ()")
+        case "sisu_rt_yield": Some("() -> (i8)")
         case "sisu_rt_arena_slot": Some("(i64, i64, i32, i64) -> (i8)")
         case "sisu_rt_shared_touch": Some("(i64) -> ()")
         case "sisu_rt_frame": Some("(i64, i64, i64, i64, i64, i64) -> ()")

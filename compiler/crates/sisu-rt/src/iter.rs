@@ -1,57 +1,26 @@
-//! Iterators (`Iter[T]`): a word holding the address of an object of
-//! eleven words that yields items of a fixed size, as the interpreter's
-//! `IterState` does (`sisu-interp/src/iter.rs`). The runtime in Sisu
-//! (`compiler/rt/src/iter.sisu`, decision 423) gives an iterator's next
-//! item, makes the iterator of an `Iterable[T]` argument, collects what an
-//! iterator has left and drops one; here is the object as both read it,
-//! the iterators the runtime in Rust makes, and the calls of those exports.
-//! The object starts with the header compiled code reads
-//! (`abi::ITER_KIND`, decision 253): a range and a borrowed list's elements
-//! keep their state there, so that a loop over one steps without calling
-//! the runtime.
+//! Iterators (`Iter[T]`): a word holding the address of an object that
+//! yields items of a fixed size, as the interpreter's `IterState` does
+//! (`sisu-interp/src/iter.rs`). The runtime in Sisu
+//! (`compiler/rt/src/iter.sisu`, decisions 423 and 542) lays the object
+//! out, makes it, gives its next item, makes the iterator of an
+//! `Iterable[T]` argument, collects what it has left and drops it; here
+//! are the calls of those exports, the object opaque. Compiled code reads
+//! its header (`abi::ITER_KIND`, decision 253): a range and a borrowed
+//! list's elements keep their state there, so that a loop over one steps
+//! without calling the runtime.
 
 use crate::abi;
+use crate::bridge::{self, NewIter};
 use crate::dict::Table;
-use crate::mem::{self, List, Str};
+use crate::mem::{List, Str};
 use crate::rt::ty;
 
-/// An iterator's object, as `iter.sisu` lays it out: the header compiled
-/// code reads (`abi::ITER_RANGE`, whose `a`, `b` and `c` are the current
-/// value, the end and the step; `abi::ITER_LIST_REF`, the list's address,
-/// the next index and the size of an element; or `abi::ITER_OTHER`), the
-/// state that gives the other kinds' items, the bytes of an item, and the
-/// state's five words.
-#[repr(C)]
-pub(crate) struct IterObj {
-    pub kind: u64,
-    pub a: u64,
-    pub b: u64,
-    pub c: u64,
-    state: u64,
-    pub item_size: u64,
-    p: [u64; 5],
-}
+/// An iterator's object, which only `iter.sisu` reads and writes.
+pub(crate) enum IterObj {}
 
-/// The states, as `iter.sisu` numbers them.
-const S_RANGE: u64 = 0;
-const S_LIST_REF: u64 = 1;
-const S_ITEMS: u64 = 2;
-const S_CHARS: u64 = 3;
-const S_BYTES: u64 = 4;
-const S_OWNED_BYTES: u64 = 5;
-const S_ENUMERATE: u64 = 6;
-const S_ZIP: u64 = 7;
-const S_TABLE_REF: u64 = 9;
-const S_GEN: u64 = 11;
-const S_RECV: u64 = 12;
-
-/// A new object of an iterator, in the runtime's own block.
-fn make(kind: u64, header: [u64; 3], state: u64, item_size: u64, p: [u64; 5]) -> *mut IterObj {
-    let obj = mem::alloc(std::mem::size_of::<IterObj>()).cast::<IterObj>();
-    let [a, b, c] = header;
-    // SAFETY: the block has room for the object.
-    unsafe { obj.write(IterObj { kind, a, b, c, state, item_size, p }) };
-    obj
+fn made(kind: NewIter<'_>) -> *mut IterObj {
+    // SAFETY: the callers give live values, as each constructor says.
+    unsafe { bridge::iter_new(kind) }.cast::<IterObj>()
 }
 
 /// The iterators whose `Iter.next` may wait: a generator's (its task and
@@ -63,22 +32,26 @@ pub(crate) enum Waits {
 }
 
 /// Whether `Iter.next` on the iterator may wait.
-pub(crate) fn waits(obj: &IterObj) -> Option<Waits> {
-    match obj.state {
-        S_GEN => Some(Waits::Gen(obj.p[0] as u32, obj.item_size as u32)),
-        S_RECV => Some(Waits::Recv(obj.p[0] as u32, obj.item_size as u32)),
+///
+/// # Safety
+/// `obj` must be an iterator's object.
+pub(crate) unsafe fn waits(obj: *mut IterObj) -> Option<Waits> {
+    // SAFETY: as the caller guarantees.
+    match unsafe { bridge::iter_waits(obj.cast()) } {
+        (1, t, size) => Some(Waits::Gen(t as u32, size as u32)),
+        (2, ch, size) => Some(Waits::Recv(ch as u32, size as u32)),
         _ => None,
     }
 }
 
 /// The iterator of the values a receiver gets.
 pub(crate) fn receiver(chan: u32, elem: u32) -> *mut IterObj {
-    make(abi::ITER_OTHER, [0; 3], S_RECV, u64::from(ty(elem).size), [u64::from(chan), 0, 0, 0, 0])
+    made(NewIter::Receiver(chan, ty(elem).size))
 }
 
 /// The iterator of a generator's items, of `item_size` bytes.
 pub(crate) fn generator(task: u32, item_size: u32) -> *mut IterObj {
-    make(abi::ITER_OTHER, [0; 3], S_GEN, u64::from(item_size), [u64::from(task), 0, 0, 0, 0])
+    made(NewIter::Generator(task, item_size))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -91,8 +64,7 @@ pub(crate) enum Part {
 /// An iterator over a borrowed dict's keys, values or pairs, or a set's
 /// elements (`Keys`).
 pub(crate) fn table_ref(table: *mut Table, part: Part) -> *mut IterObj {
-    let item_size = if part == Part::Items { 16 } else { 8 };
-    make(abi::ITER_OTHER, [0; 3], S_TABLE_REF, item_size, [table as u64, 0, part as u64, 0, 0])
+    made(NewIter::TableRef(table.cast(), part as u64))
 }
 
 /// The heap object of a new iterator, as the word that holds it.
@@ -101,42 +73,36 @@ pub(crate) fn into_word(obj: *mut IterObj) -> u64 {
 }
 
 pub(crate) fn range(cur: i64, stop: i64, step: i64) -> *mut IterObj {
-    make(abi::ITER_RANGE, [cur as u64, stop as u64, step as u64], S_RANGE, 8, [0; 5])
+    made(NewIter::Range(cur, stop, step))
 }
 
 /// An iterator over the elements of a borrowed list: their addresses.
 pub(crate) fn list_ref(list: *mut List, elem: u32) -> *mut IterObj {
-    make(abi::ITER_LIST_REF, [list as u64, 0, u64::from(ty(elem).size)], S_LIST_REF, 8, [0; 5])
+    made(NewIter::ListRef(list.cast(), ty(elem).size))
 }
 
 /// An iterator that owns a list's elements.
-pub(crate) fn items(list: List, elem: u32) -> *mut IterObj {
-    let size = u64::from(ty(elem).size);
-    make(abi::ITER_OTHER, [0; 3], S_ITEMS, size, [list.ptr as u64, list.len, list.cap, 0, u64::from(elem)])
+pub(crate) fn items(mut list: List, elem: u32) -> *mut IterObj {
+    made(NewIter::Items(&mut list, elem))
 }
 
 pub(crate) fn chars(text: Str) -> *mut IterObj {
-    make(abi::ITER_OTHER, [0; 3], S_CHARS, 8, [text.ptr as u64, text.len, 0, 0, 0])
+    made(NewIter::Chars(text.ptr, text.len))
 }
 
 pub(crate) fn bytes(text: Str) -> *mut IterObj {
-    make(abi::ITER_OTHER, [0; 3], S_BYTES, 8, [text.ptr as u64, text.len, 0, 0, 0])
+    made(NewIter::Bytes(text.ptr, text.len))
 }
 
 /// A copy of the bytes of a `bytes` in a block the iterator owns.
 pub(crate) fn owned_bytes(data: Vec<u8>) -> *mut IterObj {
-    let block = mem::alloc(data.len());
-    // SAFETY: the block has room for the bytes.
-    unsafe { mem::copy(block, data.as_ptr(), data.len()) };
-    make(abi::ITER_OTHER, [0; 3], S_OWNED_BYTES, 8, [block as u64, data.len() as u64, 0, 0, 0])
+    made(NewIter::OwnedBytes(&data))
 }
 
 /// # Safety
 /// `inner` must be an iterator's object, which the new one owns.
 pub(crate) unsafe fn enumerate(inner: *mut IterObj) -> *mut IterObj {
-    // SAFETY: as the caller guarantees.
-    let item_size = 8 + unsafe { (*inner).item_size };
-    make(abi::ITER_OTHER, [0; 3], S_ENUMERATE, item_size, [inner as u64, 0, 0, 0, 0])
+    made(NewIter::Enumerate(inner.cast()))
 }
 
 /// # Safety
@@ -148,10 +114,7 @@ pub(crate) unsafe fn zip(
     a_ty: u32,
     b_ty: u32,
 ) -> *mut IterObj {
-    // SAFETY: as the caller guarantees.
-    let item_size = unsafe { (*a).item_size + (*b).item_size };
-    let p = [a as u64, b as u64, u64::from(strict), u64::from(a_ty), u64::from(b_ty)];
-    make(abi::ITER_OTHER, [0; 3], S_ZIP, item_size, p)
+    made(NewIter::Zip(a.cast(), b.cast(), strict, a_ty, b_ty))
 }
 
 /// The items of an `Iterable[T]` argument (`p`, of type `arg`): a

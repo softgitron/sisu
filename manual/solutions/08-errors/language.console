@@ -15,4 +15,29 @@ test "the user's own choice" ... blocked by todo("the code chosen, or a fallback
 test "the team's choice" ... blocked by todo("the code chosen, or a fallback")
 test "no choice at all" ... blocked by todo("the code chosen, or a fallback")
 test "a language without messages" ... blocked by todo("the code chosen, or a fallback")
+
+test "the user's own choice" ... blocked by todo("the code chosen, or a fallback")
+what the test printed:
+  in scope at the typed hole `todo("the code chosen, or a fallback")`:
+    user = {"language": "fi"}
+    team = {"language": "sv"}
+
+test "the team's choice" ... blocked by todo("the code chosen, or a fallback")
+what the test printed:
+  in scope at the typed hole `todo("the code chosen, or a fallback")`:
+    user = {}
+    team = {"language": "sv"}
+
+test "no choice at all" ... blocked by todo("the code chosen, or a fallback")
+what the test printed:
+  in scope at the typed hole `todo("the code chosen, or a fallback")`:
+    user = {}
+    team = {}
+
+test "a language without messages" ... blocked by todo("the code chosen, or a fallback")
+what the test printed:
+  in scope at the typed hole `todo("the code chosen, or a fallback")`:
+    user = {"language": "de"}
+    team = {}
+
 0 passed, 0 failed, 4 blocked

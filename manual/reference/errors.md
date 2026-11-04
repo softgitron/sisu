@@ -242,6 +242,11 @@ panic: too many guests: 5
   at main (unwind.sisu:18:11)
 ```
 
+Each line of the trace gives a place and names what runs there: a
+function by its name, a method by its type, `Stove.warm`, a method of a
+trait's impl by the trait and the type, `Drop.drop for Guest`, and a
+closure by what it is in, `closure in Stove.warm`.
+
 A must-consume value need not be consumed while unwinding
 ([R7](ownership.md#values-that-must-be-consumed)).
 

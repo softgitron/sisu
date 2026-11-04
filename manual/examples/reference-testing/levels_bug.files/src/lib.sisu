@@ -1,0 +1,11 @@
+##! A water tank's level, in whole litres.
+
+## The litres left after `used` of `full`, never below zero.
+pub def left(full: int, used: int) -> int:
+    return full - used
+
+def clamp(litres: int) -> int:
+    return max(litres, 0)
+
+test "clamp keeps zero":
+    assert clamp(-4) == 0

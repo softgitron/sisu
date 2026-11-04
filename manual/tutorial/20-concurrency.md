@@ -1084,6 +1084,31 @@ test "the bookings that pass" ... blocked by todo("check_all")
 test "two workers take half the time of one" ... blocked by todo("check_all")
 test "one worker checks one booking at a time" ... blocked by todo("check_all")
 test "a worker for each booking" ... blocked by todo("check_all")
+
+test "the bookings that pass" ... blocked by todo("check_all")
+what the test printed:
+  in scope at the typed hole `todo("check_all")`:
+    bookings = ["mon 18 Aino", "tue ? Eero", "wed 19 Roni", "thu 17 Liisa"]
+    workers = 2
+
+test "two workers take half the time of one" ... blocked by todo("check_all")
+what the test printed:
+  in scope at the typed hole `todo("check_all")`:
+    bookings = ["mon 18 Aino", "tue ? Eero", "wed 19 Roni", "thu 17 Liisa"]
+    workers = 2
+
+test "one worker checks one booking at a time" ... blocked by todo("check_all")
+what the test printed:
+  in scope at the typed hole `todo("check_all")`:
+    bookings = ["mon 18 Aino", "tue ? Eero", "wed 19 Roni", "thu 17 Liisa"]
+    workers = 1
+
+test "a worker for each booking" ... blocked by todo("check_all")
+what the test printed:
+  in scope at the typed hole `todo("check_all")`:
+    bookings = ["mon 18 Aino", "tue ? Eero", "wed 19 Roni", "thu 17 Liisa"]
+    workers = 4
+
 0 passed, 0 failed, 4 blocked
 ```
 
@@ -1191,6 +1216,27 @@ test "the answers in the order of the towns" ... blocked by todo("forecasts")
 test "every town at once" ... blocked by todo("forecasts")
 test "an unknown town" ... blocked by todo("forecasts")
 test "no towns" ... blocked by todo("forecasts")
+
+test "the answers in the order of the towns" ... blocked by todo("forecasts")
+what the test printed:
+  in scope at the typed hole `todo("forecasts")`:
+    towns = ["Turku", "Oulu", "Kemi"]
+
+test "every town at once" ... blocked by todo("forecasts")
+what the test printed:
+  in scope at the typed hole `todo("forecasts")`:
+    towns = ["Turku", "Oulu", "Kemi"]
+
+test "an unknown town" ... blocked by todo("forecasts")
+what the test printed:
+  in scope at the typed hole `todo("forecasts")`:
+    towns = ["Atlantis", "Oulu"]
+
+test "no towns" ... blocked by todo("forecasts")
+what the test printed:
+  in scope at the typed hole `todo("forecasts")`:
+    towns = []
+
 0 passed, 0 failed, 4 blocked
 ```
 
@@ -1306,6 +1352,31 @@ test "the primary answers first" ... blocked by todo("first_price")
 test "the replica answers first" ... blocked by todo("first_price")
 test "neither answers in time" ... blocked by todo("first_price")
 test "an error is an answer too" ... blocked by todo("first_price")
+
+test "the primary answers first" ... blocked by todo("first_price")
+what the test printed:
+  in scope at the typed hole `todo("first_price")`:
+    item = "coffee"
+    limit = Duration(nanos=5000000000)
+
+test "the replica answers first" ... blocked by todo("first_price")
+what the test printed:
+  in scope at the typed hole `todo("first_price")`:
+    item = "coffee"
+    limit = Duration(nanos=5000000000)
+
+test "neither answers in time" ... blocked by todo("first_price")
+what the test printed:
+  in scope at the typed hole `todo("first_price")`:
+    item = "coffee"
+    limit = Duration(nanos=5000000000)
+
+test "an error is an answer too" ... blocked by todo("first_price")
+what the test printed:
+  in scope at the typed hole `todo("first_price")`:
+    item = "tea"
+    limit = Duration(nanos=5000000000)
+
 0 passed, 0 failed, 4 blocked
 ```
 

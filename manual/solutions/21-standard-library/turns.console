@@ -9,4 +9,33 @@ test "one sauna, everyone at once" ... blocked by todo("start_times")
 test "two saunas" ... blocked by todo("start_times")
 test "a sauna free before the bather comes" ... blocked by todo("start_times")
 test "nobody comes" ... blocked by todo("start_times")
+
+test "one sauna, everyone at once" ... blocked by todo("start_times")
+what the test printed:
+  in scope at the typed hole `todo("start_times")`:
+    arrivals = [0, 0, 0]
+    stay = 10
+    saunas = 1
+
+test "two saunas" ... blocked by todo("start_times")
+what the test printed:
+  in scope at the typed hole `todo("start_times")`:
+    arrivals = [0, 0, 0, 5]
+    stay = 10
+    saunas = 2
+
+test "a sauna free before the bather comes" ... blocked by todo("start_times")
+what the test printed:
+  in scope at the typed hole `todo("start_times")`:
+    arrivals = [0, 30]
+    stay = 10
+    saunas = 1
+
+test "nobody comes" ... blocked by todo("start_times")
+what the test printed:
+  in scope at the typed hole `todo("start_times")`:
+    arrivals = []
+    stay = 10
+    saunas = 3
+
 0 passed, 0 failed, 4 blocked

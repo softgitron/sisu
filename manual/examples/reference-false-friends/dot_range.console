@@ -4,4 +4,5 @@ error[E0100]: expected `:`, found `..`
   |
 3 |     for i in 0..3:
   |               ^^
+  = fix: Sisu writes it so: `range(0, 3)`
 

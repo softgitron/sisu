@@ -1,2 +1,1 @@
-20:22-20:32 E0347 type.bound-not-satisfied ty="Stove" bound="Display"
-  fix type.show-debug 20:32-20:32 ":?"
+30:9-30:12 E0347 type.bound-not-satisfied ty="Stove" bound="Display"

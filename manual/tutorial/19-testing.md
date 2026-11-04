@@ -69,12 +69,56 @@ test "feels/the edges of warm" ... ok
   slow` runs only those. `--filter TEXT` runs the tests whose names
   hold the text. The last line counts the tests left out.
 
-In a package, `sisu test` runs the tests of every module, and the
-directory `tests/` holds the transcripts of the section "Transcripts".
-A `tests/` directory of test files that see only a library's `pub`
-items, as Rust has, is designed in
-[17](../../proposal/17-testing.md#discovery-and-organisation) and not
-in the compiler yet.
+In a package, `sisu test` runs the tests of every module. The
+directory `tests/` beside the manifest holds tests from outside: each
+file `tests/NAME.sisu` is a program of its own that imports the
+package by its name, as a user of the library would, and so sees only
+its `pub` items. Here the library `stove` keeps its helper `step`
+private and tests it beside the code:
+
+<!-- file: examples/19-testing/stove.pkg/src/lib.sisu -->
+```sisu
+##! A sauna stove's heat, in steps.
+
+## The heat after `throws` ladles of water on a stove at `base` degrees.
+pub def heat_after(base: int, throws: int) -> int:
+    return base + step(throws)
+
+def step(throws: int) -> int:
+    return 3 * throws
+
+test "a throw adds three degrees":
+    assert step(1) == 3
+```
+
+<!-- file: examples/19-testing/stove.pkg/tests/public.sisu -->
+```sisu
+# A black-box test: it sees only what `stove` makes public.
+from stove import heat_after
+
+test "no throw keeps the heat":
+    assert heat_after(80, 0) == 80
+
+test "two throws":
+    assert heat_after(80, 2) == 86
+```
+
+<!-- output: examples/19-testing/stove.console -->
+```console
+$ sisu test
+test "a throw adds three degrees" ... ok
+1 passed, 0 failed, 0 blocked
+test "no throw keeps the heat" ... ok
+test "two throws" ... ok
+2 passed, 0 failed, 0 blocked
+```
+
+- The package's own tests run first, then each file of `tests/` in the
+  order of its name, each with its own list and counts.
+- An import of a private item, `from stove import step`, is E0255 in
+  a file of `tests/`, as in any user of the library.
+- The directory also holds the transcripts of the section
+  "Transcripts".
 
 ## A test for each case
 
@@ -1224,6 +1268,25 @@ warning[W0001]: typed hole `dedupe_ok` of type `bool`
 test "the property holds of dedupe" ... blocked by todo("dedupe_ok")
 test "the property accepts the three examples" ... blocked by todo("dedupe_ok")
 test "the property rejects wrong answers" ... blocked by todo("dedupe_ok")
+
+test "the property holds of dedupe" ... blocked by todo("dedupe_ok")
+what the test printed:
+  in scope at the typed hole `todo("dedupe_ok")`:
+    xs = [5]
+    out = [5]
+
+test "the property accepts the three examples" ... blocked by todo("dedupe_ok")
+what the test printed:
+  in scope at the typed hole `todo("dedupe_ok")`:
+    xs = [3, 1, 2]
+    out = [3, 1, 2]
+
+test "the property rejects wrong answers" ... blocked by todo("dedupe_ok")
+what the test printed:
+  in scope at the typed hole `todo("dedupe_ok")`:
+    xs = [1, 2, 1]
+    out = [1, 2, 1]
+
 0 passed, 0 failed, 3 blocked
 ```
 
@@ -1455,6 +1518,31 @@ test "an answer at once" ... blocked by todo("ask")
 test "busy twice, then an answer" ... blocked by todo("ask")
 test "busy every time" ... blocked by todo("ask")
 test "an unknown town is asked once" ... blocked by todo("ask")
+
+test "an answer at once" ... blocked by todo("ask")
+what the test printed:
+  in scope at the typed hole `todo("ask")`:
+    town = "Oulu"
+    tries = 3
+
+test "busy twice, then an answer" ... blocked by todo("ask")
+what the test printed:
+  in scope at the typed hole `todo("ask")`:
+    town = "Turku"
+    tries = 5
+
+test "busy every time" ... blocked by todo("ask")
+what the test printed:
+  in scope at the typed hole `todo("ask")`:
+    town = "Oulu"
+    tries = 4
+
+test "an unknown town is asked once" ... blocked by todo("ask")
+what the test printed:
+  in scope at the typed hole `todo("ask")`:
+    town = "Atlantis"
+    tries = 3
+
 0 passed, 0 failed, 4 blocked
 ```
 

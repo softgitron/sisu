@@ -193,7 +193,11 @@ one body: `testing/parametrised_once`).
 `native.list` names the cases the native backend (stage 2;
 [architecture.md](../docs/architecture.md), "Stage 2") must build and
 run, one per line as the runner names them (`run/arithmetic`); `#`
-starts a comment. With `--native LIST` the runner builds each case with
+starts a comment. A case marked `checked` after its name (`unsafe/released
+checked`) stops with the checked memory model's report, which a debug
+build gives as the interpreter does (decisions 543 and 544):
+`--native-release`, whose raw memory is unchecked, builds it and does not
+run it. With `--native LIST` the runner builds each case with
 `sisu build --native --output EXE NAME.sisu` (a package case without the
 file) in the case's sandbox, runs the executable as it runs `sisu run`
 (with the case's `.args`, `.stdin` and `.cwd`, the time limit, and an
@@ -274,10 +278,9 @@ each report is compared with the expectation, held to the status it
 gives, and each failure replayed natively from its token. PCT, the bounded
 exhaustive search, the `sim` profile's faults, `sim.choose`, `sim.always`
 and `expect` run natively as in the interpreter (decisions 500 to 503), so
-every such run of a case is one a native test makes. A case whose
-source has a line `# native tests: WHY` runs its program natively and
-leaves its tests to the interpreter, for the reason it gives. A case that has
-only such runs is built for nothing else. A case whose program its errors
+every such run of a case is one a native test makes, a property's
+budget of statements counted as yield points (decision 540). A case that
+has only such runs is built for nothing else. A case whose program its errors
 stop (`run/stopped_by_errors`) passes when the build, or `sisu sir`,
 prints its `.err` and exits with its `.status`, as `sisu run --native`
 does (decision 463).
@@ -515,8 +518,12 @@ and the time spent building and running them.
   `.monitor` (`stale_pointer`, a write through a pointer whose borrow an
   assignment ended, and `reference_behind`, a reference used after the
   value behind it was dropped through the pointer). The behaviour cases
-  are in `native.list`, the refusals not: native code does not check raw
-  memory. `../held/unsafe/` holds the cases that wait for two changes of
+  are in `native.list`, and twelve of the refusals, marked `checked`,
+  whose panics a debug build's checks of `Global`'s blocks give
+  (decisions 543 and 544); `shared_write`, `gone`, `reference_behind` and
+  `foreign_unknown` are the interpreter's alone (a pointer's provenance,
+  a place's frame, a reference read after a drop, and the C functions it
+  emulates). `../held/unsafe/` holds the cases that wait for two changes of
   stage 1 (port-debt.md, "Shortcuts in the interpreter"): a stack on
   std.mem's `RawBuf` and the layouts `size_of` and `align_of` give, with
   their expectations; the runner checks them with `cargo run -p

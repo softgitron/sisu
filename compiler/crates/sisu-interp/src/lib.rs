@@ -688,6 +688,20 @@ pub(crate) fn panic_report(p: &PanicInfo) -> String {
     text
 }
 
+/// A failed `expect`'s report in a test's failure: its text, which names
+/// it a failed expectation rather than a panic (decision 545), and the
+/// frames a panic there would leave.
+pub fn expect_report(message: &str, stack: &[String]) -> String {
+    let mut text = message.to_string();
+    text.push('\n');
+    for line in &sisu_diag::trace::shown(stack) {
+        text.push_str("  ");
+        text.push_str(line);
+        text.push('\n');
+    }
+    text
+}
+
 /// Runs `main` on a thread with a large stack. Returns the exit status.
 pub fn run_main(prog: &sir::Program, host: &mut dyn Host, options: &Options) -> i32 {
     run_main_report(prog, host, options).status

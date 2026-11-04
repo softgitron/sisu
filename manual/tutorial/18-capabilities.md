@@ -546,7 +546,7 @@ capability and how far each is from `main`:
 $ sisu audit --caps settings.sisu compute.sisu
 settings.sisu function main caps=1 io=calls depth=0
 settings.sisu function setting caps=2 io=direct depth=1
-settings.sisu function test#0 caps=0 io=calls depth=-
+settings.sisu function test "a variable comes before the file" caps=0 io=calls depth=-
 settings.sisu use setting EnvOps.get depth=1
 settings.sisu use setting FsOps.read_to_string depth=1
 settings.sisu summary functions=3 median=1 max=2 uses=2 deepest=1 structs=0
@@ -560,7 +560,8 @@ compute.sisu summary functions=2 median=1 max=1 uses=1 deepest=1 structs=0
   parameters that hold a capability (`caps`), whether it uses one
   itself (`io=direct`) or only calls functions that do (`io=calls`),
   and its depth: the fewest calls from `main`, or `-` when `main` does
-  not reach it, as for a test.
+  not reach it, as for a test, which the line names as `sisu test`
+  does.
 - A `use` line names each operation a function calls, as a method of
   its trait: `EnvOps.get` and `FsOps.read_to_string`.
 - The `summary` counts them; `structs` counts the structs that hold
@@ -944,6 +945,27 @@ test "the files directly in a directory" ... blocked by todo("total_size")
 test "a lent file system" ... blocked by todo("total_size")
 test "narrowed file systems" ... blocked by todo("total_size")
 test "a directory that is not there" ... blocked by todo("total_size")
+
+test "the files directly in a directory" ... blocked by todo("total_size")
+what the test printed:
+  in scope at the typed hole `todo("total_size")`:
+    dir = "photos"
+
+test "a lent file system" ... blocked by todo("total_size")
+what the test printed:
+  in scope at the typed hole `todo("total_size")`:
+    dir = "photos"
+
+test "narrowed file systems" ... blocked by todo("total_size")
+what the test printed:
+  in scope at the typed hole `todo("total_size")`:
+    dir = "."
+
+test "a directory that is not there" ... blocked by todo("total_size")
+what the test printed:
+  in scope at the typed hole `todo("total_size")`:
+    dir = "music"
+
 0 passed, 0 failed, 4 blocked
 ```
 
@@ -1059,6 +1081,30 @@ test "an answer is kept in a file" ... blocked by todo("put")
 test "a key that was never kept" ... blocked by todo("get")
 test "an answer goes stale" ... blocked by todo("put")
 test "a new answer replaces a stale one" ... blocked by todo("put")
+
+test "an answer is kept in a file" ... blocked by todo("put")
+what the test printed:
+  in scope at the typed hole `todo("put")`:
+    key = "helsinki"
+    text = "snow"
+
+test "a key that was never kept" ... blocked by todo("get")
+what the test printed:
+  in scope at the typed hole `todo("get")`:
+    key = "turku"
+
+test "an answer goes stale" ... blocked by todo("put")
+what the test printed:
+  in scope at the typed hole `todo("put")`:
+    key = "oulu"
+    text = "rain"
+
+test "a new answer replaces a stale one" ... blocked by todo("put")
+what the test printed:
+  in scope at the typed hole `todo("put")`:
+    key = "oulu"
+    text = "rain"
+
 0 passed, 0 failed, 4 blocked
 ```
 

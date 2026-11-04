@@ -1,0 +1,5 @@
+test "clamp keeps zero" ... ok
+1 passed, 0 failed, 0 blocked
+test "a full tank" ... ok
+test "more used than there was" ... ok
+2 passed, 0 failed, 0 blocked

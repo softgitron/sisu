@@ -198,6 +198,9 @@ pub const UNWIND_DEPTH: i64 = 1_000;
 pub const ENTRY_RESULT: u32 = 1;
 /// `flags` of `sisu_rt_start`: `main` takes a `System`.
 pub const ENTRY_SYSTEM: u32 = 2;
+/// `flags` of `sisu_rt_start`: the program was built in the debug profile,
+/// whose raw memory the runtime checks (decision 543).
+pub const ENTRY_CHECKED: u32 = 4;
 
 /// `sisu_rt_dict_slot`'s modes: a missing key panics; is inserted (the
 /// destination of an assignment); is nothing to drop.

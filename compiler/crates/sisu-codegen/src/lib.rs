@@ -1037,6 +1037,10 @@ impl<'p> Codegen<'p> {
         if entry.takes_system {
             flags |= abi::ENTRY_SYSTEM;
         }
+        // The debug profile checks raw memory (decision 543).
+        if !self.release {
+            flags |= abi::ENTRY_CHECKED;
+        }
         Ok((main_id, flags, ret_ty))
     }
 
@@ -1180,7 +1184,7 @@ impl<'p> Codegen<'p> {
         let (i64_, i32_, i8_, f64_) = (types::I64, types::I32, types::I8, types::F64);
         let (params, returns): (&[ir::Type], &[ir::Type]) = match name {
             sym::START => (&[i32_, i64_, i64_, i32_, i32_, i64_, i64_, i64_, i64_, i64_], &[i32_]),
-            sym::YIELD => (&[], &[]),
+            sym::YIELD => (&[], &[i8_]),
             sym::ARENA_SLOT => (&[i64_, i64_, i32_, i64_], &[i8_]),
             sym::SHARED_TOUCH => (&[i64_], &[]),
             sym::FRAME => (&[i64_, i64_, i64_, i64_, i64_, i64_], &[]),

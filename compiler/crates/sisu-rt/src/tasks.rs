@@ -596,17 +596,20 @@ unsafe fn shield(c: &Call<'_>) -> u8 {
 }
 
 /// `test.catch(f, x, steps)`, which only std's `check` calls (decision
-/// 461): `f(x)`, its result `Ok`, or `Err(Panicked(message))` when it
-/// panicked, the panic taken and its unwinding over; a typed hole is not
-/// caught, and native code counts no statements, so `steps` bounds
-/// nothing (`TooLong` is the interpreter's).
+/// 461): `f(x)`, its result `Ok`, `Err(Panicked(message))` when it
+/// panicked, the panic taken and its unwinding over, or `Err(TooLong(steps))`
+/// when it passed more than `steps` yield points, over every task (decision
+/// 540, [`crate::budget`]); a typed hole is not caught.
 unsafe fn catch(c: &Call<'_>) -> u8 {
     // SAFETY: the arguments are the function, its argument and the budget;
     // the result is a `Result` whose payload starts a word in.
     unsafe {
         let (code, env) = closure_here(c, 0);
         let (x, _) = c.place(1);
+        let steps = c.int(2);
+        crate::budget::open(steps);
         let status = std::mem::transmute::<usize, Body1>(code)(c.ret.add(8), env as *mut u8, x);
+        let too_long = crate::budget::close();
         if status == abi::OK {
             mem::set_word(c.ret, 0, 0);
             return abi::OK;
@@ -625,6 +628,19 @@ unsafe fn catch(c: &Call<'_>) -> u8 {
             _ => err,
         };
         mem::set_word(c.ret, 0, 1);
+        if too_long {
+            let Some((tag, fields)) = variant(decl, "TooLong") else {
+                rt::internal("`Panicked` has no `TooLong`")
+            };
+            let p = c.ret.add(8);
+            mem::set_word(p, abi::ERROR_DECL, u64::from(decl));
+            mem::set_word(p, abi::ERROR_TRACE, 0);
+            mem::set_word(p, abi::ERROR_TAG, tag);
+            if let Some(f) = fields.first() {
+                mem::set_word(p, f.offset, steps as u64);
+            }
+            return abi::OK;
+        }
         system(|| write_error(c.ret.add(8), decl, "Panicked", Some((&p.message, ""))));
         abi::OK
     }
@@ -1300,7 +1316,7 @@ unsafe fn iter_next(c: &Call<'_>) -> u8 {
         return abi::OK;
     }
     // SAFETY: the object is an iterator the runtime made.
-    let state = unsafe { crate::iter::waits(&*obj) };
+    let state = unsafe { crate::iter::waits(obj) };
     let site = Site::current();
     match state {
         // Code that cannot wait drives the generator instead.

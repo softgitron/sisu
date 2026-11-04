@@ -11,5 +11,5 @@ error[E0117]: unexpected `as` after the end of the statement
   |
 5 |     let ratio = len(copied) as f64
   |                             ^^
-  = fix: Sisu writes it `.to_f64()`: `.to_f64()`
+  = fix: Sisu writes it so: `.to_f64()`
 

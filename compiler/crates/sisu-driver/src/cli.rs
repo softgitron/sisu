@@ -195,7 +195,7 @@ pub(crate) const VALUE_FLAGS: &[&str] = &[
 
 /// The most schedules a bounded exhaustive search runs of one test (or of
 /// `main`) unless `--explore N` says otherwise.
-const EXHAUSTIVE_CAP: u64 = 10_000;
+pub(crate) const EXHAUSTIVE_CAP: u64 = 10_000;
 
 /// The fault rate of `--sim` unless `--faults` says otherwise, in parts per
 /// million.
@@ -921,7 +921,12 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                     "--depth" => depth = Some(n.min(u64::from(u32::MAX)) as u32),
                     "--jobs" => jobs = n.clamp(1, 256) as usize,
                     "--iterations" => iterations = n.clamp(1, 1_000_000_000),
-                    "--samples" => samples = n.clamp(1, 10_000),
+                    // One sample has no interval (decision 546).
+                    "--samples" if n < 2 => {
+                        host.stderr(&plain_error(msg::CLI_BENCH_SAMPLES, &[("value", n.to_string())]));
+                        return EXIT_USAGE;
+                    }
+                    "--samples" => samples = n.min(10_000),
                     _ => seeds.explore = Some(n.max(1)),
                 }
             }
@@ -1018,12 +1023,11 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                 host.stderr(&plain_error(msg::CLI_WATCH_ALONE, &[("option", other)]));
                 return EXIT_USAGE;
             }
-            // A native run takes the seed of its schedule, `--explore` and
-            // the scheduler's `--stats` (decision 203), and a native test
-            // the other schedulers too (decision 501); the interpreter's
-            // other modes are its own.
-            let schedulers: &[&str] =
-                if cmd == "test" { &["--record"] } else { &["--record", "--scheduler"] };
+            // A native run takes the seed of its schedule, `--explore`, the
+            // scheduler's `--stats` (decision 203) and the other schedulers
+            // (decisions 501 and 541); the interpreter's other modes are its
+            // own.
+            let schedulers: &[&str] = &["--record"];
             if p.flags.contains(&"--native")
                 && let Some(other) = ["--sir", "--monitor", "--defer-borrow", "--watch"]
                     .iter()
@@ -1192,6 +1196,8 @@ fn from_sir(
         explore: opts.seeds.explore,
         stats: flags.contains(&"--stats"),
         profile,
+        strategy: opts.strategy.clone(),
+        bound: opts.bound,
         keep: None,
     };
     crate::native::run_command(crate::native::Code::Sir(&prog), &name, &args, &how, host)
@@ -1480,6 +1486,8 @@ fn from_lir(
         explore: opts.seeds.explore,
         stats: false,
         profile,
+        strategy: opts.strategy.clone(),
+        bound: opts.bound,
         keep: None,
     };
     crate::native::run_command(code, &name, &args, &how, host)
@@ -1949,6 +1957,8 @@ fn stage1_command(
                             explore: opts.seeds.explore,
                             stats: has("--stats"),
                             profile: crate::native::Profile::of(opts.release),
+                            strategy: opts.strategy.clone(),
+                            bound: opts.bound,
                             keep: None,
                         };
                         crate::native::run_built(&e, &args, &how, host)
@@ -2986,6 +2996,8 @@ fn command(
                             explore: seeds.explore,
                             stats: has("--stats"),
                             profile,
+                            strategy: opts.strategy.clone(),
+                            bound: opts.bound,
                             // A package's executable stays where its builds
                             // go; a file's is built aside and removed.
                             keep: input.build_root.as_ref().and_then(|root| {

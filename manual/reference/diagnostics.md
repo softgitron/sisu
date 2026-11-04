@@ -604,12 +604,16 @@ error[E0105]: expected a pattern, found `not`
   |
 5 |         case not 0: "other"
   |              ^^^
+  = note: `not` is a keyword, which names no binding: give it another name
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-Write the case as a pattern; a `case _` arm, or a guard `case n if n !=
-0`, says "any other value".
+The note `parse.keyword-name` is written for a keyword used as a
+binding's name, `let type = "csv"` ([R1](lexical-structure.md#names));
+here it misleads, since `not` was meant as an operator, and no other
+name helps. Write the case as a pattern; a `case _` arm, or a guard
+`case n if n != 0`, says "any other value".
 
 <!-- file: examples/reference-diagnostics/e0105_pattern_fixed.sisu -->
 ```sisu
@@ -687,7 +691,7 @@ of a module; put them in a function such as `main`.
 A module holds declarations; statements belong in functions. A script, a
 file that starts with `#!`, is the exception: its top-level statements
 are its `main`. Python's `class` is reported here too, since it is not a
-declaration.
+declaration, with the fix that writes `struct`.
 
 <!-- file: examples/reference-diagnostics/e0107_top_level.sisu -->
 ```sisu
@@ -1026,7 +1030,10 @@ statement.
 
 After a statement ends, only a line break may follow. The parser reports
 the first token it did not expect, which often stands for a habit from
-another language: a Rust comment `//`, `lambda`, `println!`.
+another language: a Rust comment `//`, `lambda`, `println!`. Where it
+stops at such a habit, a fix writes Sisu's spelling (`#`, `x ->`,
+`print`) or a note says what Sisu has instead (`try:`, Go's `go f()`);
+[R19](false-friends.md) shows each.
 
 <!-- file: examples/reference-diagnostics/e0117_trailing.sisu -->
 ```sisu
@@ -1469,7 +1476,7 @@ Shown in [R14](attributes.md#writing-an-attribute).
 
 ## Names and declarations
 
-Codes E0200 to E0273. Name resolution finds what each name means and
+Codes E0200 to E0275. Name resolution finds what each name means and
 checks declarations: undefined and duplicate names, imports and
 visibility, derives, traits and impls.
 
@@ -2337,7 +2344,10 @@ error[D0006]: the program was not run: errors found (1)
 ```
 
 Keep one impl. For a second way to show the value, write a method, or
-wrap the value in a type of its own.
+wrap the value in a type of its own. An impl written beside a derive of
+the same trait is E0235 at the derive's argument, `Eq` in
+`@derive(Eq)`, with the note `type.derived-code`, which quotes the
+derived impl's first line ([R14](attributes.md#deriving-traits)).
 
 <!-- file: examples/reference-diagnostics/e0235_overlap_fixed.sisu -->
 ```sisu
@@ -2493,24 +2503,6 @@ Aino
 ```
 
 Shown in [chapter 14](../tutorial/14-traits.md).
-
-### E0239
-
-`resolve.no-assoc-type`: `{ty}` has no associated type `{name}` among its
-bounds.
-
-`T.NAME` names an associated type or constant of a trait that bounds
-`T`; none of `T`'s bounds declares `NAME`, or it is a constant used
-where a type's constant argument goes. A trait's constant read through
-a type parameter, `Array[int, T.SIDES]`, is a value of the instance,
-known where the function runs, while a type's constant argument is
-known where the type is written, so it gets the note
-`resolve.const-through-param`, which names the `const` parameter that
-carries the value instead. The message calls the constant an
-associated type.
-
-Example: [R3](declarations.md#traits) shows it, and the `const`
-parameter that is its fix.
 
 ### E0241
 
@@ -3400,6 +3392,86 @@ def main():
 ```
 
 [R3](declarations.md#impls) describes it.
+
+### E0274
+
+`resolve.const-not-type`: `{name}` is a constant of `{trait}`, which
+bounds `{ty}`, not a type.
+
+A trait's constant read through a type parameter, `T.SIDES` where a
+type's constant argument goes (`Array[int, T.SIDES]`), is a value of the
+instance, known where the function runs, while a type's constant
+argument is known where the type is written. The note
+`resolve.const-through-param` names the fix: a `const` parameter that
+carries the value, which a caller gives as `Square.SIDES`.
+
+Example: [R3](declarations.md#traits) shows it, and the `const`
+parameter that is its fix.
+
+### E0275
+
+`resolve.dependency-excluded`: cannot import `{name}`: the dependency
+`{package}` of `{this}` is not built for this target, which its `when`
+in that package's `sisu.toml` excludes.
+
+A dependency with `when` is part of the build only on the targets its
+condition holds for ([R13](modules.md#target-conditions)). Here the
+program `sauna` names `winlog` for Windows only, and imports it on
+every target:
+
+<!-- file: examples/reference-diagnostics/e0275_excluded.files/sauna/sisu.toml -->
+```toml
+[package]
+name = "sauna"
+version = "0.1.0"
+edition = "2027"
+
+[dependencies]
+winlog = { path = "../winlog", when = { os = "windows" } }
+```
+
+<!-- file: examples/reference-diagnostics/e0275_excluded.files/sauna/src/main.sisu -->
+```sisu
+# A program that imports a dependency built for Windows only.
+import winlog
+
+def main():
+    winlog.record("the stove is on")
+```
+
+<!-- output: examples/reference-diagnostics/e0275_excluded.console -->
+```console
+$ sisu run sauna
+error[E0275]: cannot import `winlog`: the dependency `winlog` of `sauna` is not built for this target, which its `when` in that package's `sisu.toml` excludes
+  --> src/main.sisu:2:8
+  |
+2 | import winlog
+  |        ^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+A dependency that every target can build, as `winlog` can, has no
+`when`. One that only some targets build cannot be imported by code
+that builds on the others: an import takes no condition on the target
+in stage 0.
+
+<!-- file: examples/reference-diagnostics/e0275_excluded_fixed.files/sauna/sisu.toml -->
+```toml
+[package]
+name = "sauna"
+version = "0.1.0"
+edition = "2027"
+
+[dependencies]
+winlog = { path = "../winlog" }
+```
+
+<!-- output: examples/reference-diagnostics/e0275_excluded_fixed.console -->
+```console
+$ sisu run sauna
+event log: the stove is on
+```
 
 ## Types
 
@@ -4973,7 +5045,11 @@ error[D0006]: the program was not run: errors found (1)
 ```
 
 Derive the trait with `@derive(...)` on the type, or write an `impl` of
-it.
+it. In code that a derive wrote, E0347 stands at the derive's argument
+that asked for the impl, with the note `type.derived-code`, which
+quotes the line of the derived impl, and without a fix, since that line
+is not in the program ([chapter 25](../tutorial/25-compile-time.md)
+shows it).
 
 <!-- file: examples/reference-diagnostics/e0347_bound_fixed.sisu -->
 ```sisu
@@ -6310,7 +6386,8 @@ Shown in [chapter 13](../tutorial/13-sharing.md).
 ### E0418
 
 `borrow.must-consume-exit`: this leaves the scope with `{name}`
-unconsumed: a `{ty}` must be passed to an `own` parameter first.
+unconsumed: a value of `{ty}` must be passed to an `own` parameter
+first.
 
 A value of a `@must_consume` type ends in an `own` parameter on every
 path (D-054), so a `return`, `break` or `?` that leaves it behind is
@@ -6339,7 +6416,7 @@ def main():
 <!-- output: examples/reference-diagnostics/e0418_left_unconsumed.console -->
 ```console
 $ sisu run e0418_left_unconsumed.sisu
-error[E0418]: this leaves the scope with `draft` unconsumed: a `Draft` must be passed to an `own` parameter first
+error[E0418]: this leaves the scope with `draft` unconsumed: a value of `Draft` must be passed to an `own` parameter first
   --> e0418_left_unconsumed.sisu:12:9
    |
 12 |         return "nothing to post"
@@ -7383,7 +7460,10 @@ error[D0006]: the program was not run: errors found (2)
 
 Read the reason, which the derive's author wrote: here the derive lists
 a struct's fields, and an enum has none. Derive it for a type it
-handles, or write the impl by hand.
+handles, or write the impl by hand. E0608 is the derive stopping; an
+error in the impl it went on to write is that error's own code, placed
+at the same `@derive` with a note that quotes the impl's line, as
+[E0347](#e0347) is.
 
 <!-- file: examples/reference-diagnostics/e0608_derive_failed_fixed.sisu -->
 ```sisu
@@ -8258,9 +8338,9 @@ Shown in [chapter 23](../tutorial/23-contracts.md).
 
 ### E0812
 
-`refine.change-through-base`: `{what}` is a `{ty}`, which a change
-through its base could take outside `{predicate}`; change a copy of the
-base and check it again with `try_from`.
+`refine.change-through-base`: `{what}` is of type `{ty}`, which a
+change through its base could take outside `{predicate}`; change a copy
+of the base and check it again with `try_from`.
 
 A refinement's predicate is checked where a value comes in, so a method
 of the base that changes the value, such as `push`, could break it
@@ -8280,7 +8360,7 @@ def main():
 <!-- output: examples/reference-diagnostics/e0812_change_through_base.console -->
 ```console
 $ sisu run e0812_change_through_base.sisu
-error[E0812]: `picks` is a `Short`, which a change through its base could take outside `len(self) <= 3`; change a copy of the base and check it again with `try_from`
+error[E0812]: `picks` is of type `Short`, which a change through its base could take outside `len(self) <= 3`; change a copy of the base and check it again with `try_from`
   --> e0812_change_through_base.sisu:6:5
   |
 6 |     picks.push(3)
@@ -10577,8 +10657,9 @@ A run that reaches a typed hole prints the hole's closure before it
 stops ([R0013](#r0013)): this line, then a line `NAME = VALUE` for each
 binding in scope there, in the order the function declares them, each
 value in its `Debug` form ([17](../../proposal/17-testing.md#assertions)).
-A test blocked by a hole prints nothing of what it did, the closure
-included ([R15](testing.md#what-a-test-prints)). A binding is left out when it
+A test blocked by a hole prints the same closure, which `sisu test`
+shows in the blocked test's block after the list, under `what the test
+printed:` ([R15](testing.md#what-a-test-prints)). A binding is left out when it
 does not hold its whole value at the hole (it was moved away, as
 `names` is here), when it is a local that holds a borrow or a view (as
 `greeting`, a `str`, does), when its type writes its own `Debug` or is a
@@ -11156,15 +11237,13 @@ Example: [R16](sisu-command.md#sisu-build), and
 yet; `sisu test` without `--native` runs it.
 
 `sisu test --native` was asked for what only the interpreter's run of
-the tests does: injected faults (`--faults`) or a test parameter that no
-fake stands for. A scheduler other than the seeded one is refused before
-it, with D0109. The status is 1.
+the tests does: a test parameter that no fake stands for, or a
+simulated or faked `System` that the program's build does not keep.
+The schedulers, injected faults and `sim.always` run natively
+([R15](testing.md#native-tests)). The line goes to standard error and
+the status is 1.
 
 Run those tests without `--native`.
-
-Stage 0 holds the line with the tests' captured output and drops it, so
-`sisu test --native --sim --faults 0.2` prints nothing and ends with
-status 1 ([R15](testing.md#native-tests)).
 
 ### D0135
 
@@ -11172,8 +11251,9 @@ status 1 ([R15](testing.md#native-tests)).
 
 Not an error: the line in a failing test's block, after its header,
 under which `sisu test` shows what the test wrote to standard output
-and standard error, each line indented. A test that passes or is
-blocked prints nothing.
+and standard error, each line indented, and in a blocked test's block,
+under which its hole's closure comes. A test that passes prints
+nothing.
 
 Example: [R15](testing.md#what-a-test-prints).
 
@@ -11283,7 +11363,7 @@ it. `sisu explain CODE` prints the same line.
 | [E0236](#e0236) | `resolve.orphan-impl` | `{trait}` for `{ty}` can be implemented only in the package of the trait or of the type, or in the root package |
 | [E0237](#e0237) | `resolve.missing-assoc-type` | the impl of `{trait}` for `{ty}` does not say what `{name}` is; add `type {name} = ...` |
 | E0238 | `resolve.unknown-assoc-type` | `{trait}` has no associated type `{name}` |
-| [E0239](#e0239) | `resolve.no-assoc-type` | `{ty}` has no associated type `{name}` among its bounds |
+| E0239 | `resolve.no-assoc-type` | `{ty}` has no associated type `{name}` among its bounds |
 | E0240 | `resolve.sealed-trait` | `{trait}` is implemented only by the standard library, so `{ty}` cannot implement it |
 | [E0241](#e0241) | `resolve.not-object-safe` | `{trait}` cannot be used as `dyn {trait}`: its method `{method}` cannot be called through it, because {reason} |
 | [E0242](#e0242) | `resolve.supertrait-missing` | `{ty}` implements `{trait}`, which requires `{super}`, but `{ty}` does not implement `{super}` |
@@ -11318,6 +11398,8 @@ it. `sisu explain CODE` prints the same line.
 | [E0271](#e0271) | `resolve.not-a-trait-constant` | `{name}` is not a constant of `{trait}` |
 | [E0272](#e0272) | `resolve.constant-type` | the constant `{name}` has the type `{found}` here, and `{trait}` declares it with the type `{expected}` |
 | [E0273](#e0273) | `resolve.const-or-method` | `{name}` is {what} of `{trait}`, and this impl gives it as {given} |
+| [E0274](#e0274) | `resolve.const-not-type` | `{name}` is a constant of `{trait}`, which bounds `{ty}`, not a type |
+| [E0275](#e0275) | `resolve.dependency-excluded` | cannot import `{name}`: the dependency `{package}` of `{this}` is not built for this target, which its `when` in that package's `sisu.toml` excludes |
 
 ### Types, every code
 
@@ -11438,9 +11520,9 @@ it. `sisu explain CODE` prints the same line.
 | E0415 | `borrow.from-without-borrow` | `{function}` returns `{ty}`, which does not borrow, so it takes no `from` clause |
 | E0416 | `borrow.move-out-of-drop` | cannot move `{part}` out of `{name}`, because `{ty}` implements `Drop`, which needs the whole value |
 | [E0417](#e0417) | `borrow.must-consume` | `{name}` is never consumed: a value of `{ty}` must be passed to an `own` parameter before it goes out of scope |
-| [E0418](#e0418) | `borrow.must-consume-exit` | this leaves the scope with `{name}` unconsumed: a `{ty}` must be passed to an `own` parameter first |
+| [E0418](#e0418) | `borrow.must-consume-exit` | this leaves the scope with `{name}` unconsumed: a value of `{ty}` must be passed to an `own` parameter first |
 | E0419 | `borrow.move-out-of-place` | cannot move out of `{name}` through a reference or an index; copy it with `.copy()` |
-| E0420 | `borrow.must-consume-intrinsic` | `{callee}` may drop values that `{name}` holds, and a `{ty}` is must-consume: its values must be passed to an `own` parameter |
+| E0420 | `borrow.must-consume-intrinsic` | `{callee}` may drop values that `{name}` holds, and a value of `{ty}` is must-consume: its values must be passed to an `own` parameter |
 | [E0421](#e0421) | `borrow.view-in-owner` | `{ty}` borrows, so it cannot be put in `{owner}`, which can outlive what it borrows (04, rule 3) |
 | E0422 | `borrow.must-consume-in-owner` | `{ty}` is must-consume, so it cannot be put in `{owner}`, which can drop it where the checker does not see |
 | [E0423](#e0423) | `type.own-closure-capture` | an `own` closure keeps a copy of `{name}`, and `{ty}` is not `Copy`; stage 0 copies captures (a capture by move arrives with tasks) |
@@ -11516,7 +11598,7 @@ it. `sisu explain CODE` prints the same line.
 | [E0807](#e0807) | `contract.not-in-test` | a test has no contract; check what it needs with `assert` |
 | [E0810](#e0810) | `refine.not-satisfied` | `{value}` is not of type `{ty}`: `{predicate}` is false for it |
 | [E0811](#e0811) | `refine.needs-try-from` | expected `{expected}`, found `{found}`; a value becomes a `{expected}` where its predicate is checked, with `{name}.try_from(...)` |
-| [E0812](#e0812) | `refine.change-through-base` | `{what}` is a `{ty}`, which a change through its base could take outside `{predicate}`; change a copy of the base and check it again with `try_from` |
+| [E0812](#e0812) | `refine.change-through-base` | `{what}` is of type `{ty}`, which a change through its base could take outside `{predicate}`; change a copy of the base and check it again with `try_from` |
 | [E0813](#e0813) | `refine.own-impl` | `{ty}` refines `{base}` and has its reading impls; it cannot have an impl of `{trait}` of its own |
 | [E0814](#e0814) | `refine.predicate-type` | the predicate of `{ty}` must be a `bool`, found `{found}` |
 | E0820 | `test.no-generator` | `{ty}` has no generator for property tests: {why} |
@@ -11662,7 +11744,7 @@ it. `sisu explain CODE` prints the same line.
 | R0066 | `defer.inconclusive` | a rejected statement was never reached: inconclusive, an untested path |
 | R0067 | `defer.signature` | the checker still rejects line {line} ({code} {id}), a rule about declarations that no run can test |
 | R0068 | `monitor.no-value` | <no value> |
-| R0069 | `monitor.unconsumed` | `{name}` was dropped holding a `{ty}`, which must be passed to an `own` parameter |
+| R0069 | `monitor.unconsumed` | `{name}` was dropped holding a value of `{ty}`, which must be passed to an `own` parameter |
 | R0070 | `defer.declarations-only` | only rules about declarations reject the program, and the run reached no conflict: a candidate false positive |
 | R0071 | `monitor.op-return` | the return from the frame |
 | R0072 | `panic.stale-key` | stale arena key: slot {index}, generation {generation}, no longer holds its value |
@@ -11690,7 +11772,7 @@ it. `sisu explain CODE` prints the same line.
 | [R0100](#r0100) | `contract.requires-failed` | precondition of `{function}` failed: {clause} |
 | [R0101](#r0101) | `contract.ensures-failed` | postcondition of `{function}` failed: {clause} |
 | [R0102](#r0102) | `contract.invariant-failed` | invariant of `{ty}` failed: {clause} |
-| R0103 | `contract.refinement-failed` | `{value}` is not a `{ty}`: `{clause}` is false for it |
+| R0103 | `contract.refinement-failed` | `{value}` is not of type `{ty}`: `{clause}` is false for it |
 | R0104 | `run.case-too-long` | the case ran past its budget of {steps} statements |
 | R0105 | `sim.always-failed` | `sim.always` does not hold: {what} |
 | R0106 | `sim.choose-none` | `sim.choose` needs at least one option |

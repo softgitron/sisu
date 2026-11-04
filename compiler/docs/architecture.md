@@ -2051,6 +2051,18 @@ intrinsics** of std.rt (`rt.switch`, `rt.stack_pointer`, `rt.thread_slot`)
 are refused too (`R0153`): the interpreter runs its tasks on a scheduler of
 its own.
 
+**Natively** (decisions 543 and 544), a program built in the debug
+profile checks the same obligations, with the same panics, for the blocks
+of `Global` (`sisu-rt/src/checked.rs`): a shadow of each block holds what
+the interpreter's holds, a pointer belongs to the block its address falls
+in, an address below 64 KiB has no memory behind it, and every other
+address (a place, foreign memory) goes unchecked; a released block keeps
+its address for the last 4 096 releases, a foreign call exposes every live
+block's bytes, and what live blocks hold is let go at the end of the run.
+A pointer's provenance (`R0139`), a place's liveness (`R0135`) and the
+emulated C functions are the interpreter's alone; the release profile
+checks nothing.
+
 What the model leaves out: overlapping accesses at different offsets are
 not seen as overlapping by the monitor (each offset is a place of its
 own); memory still held at the end of a run is not reported; a `Slice` is
@@ -2459,7 +2471,9 @@ and lowering choices (each lowered by binary search; at most 1000
 attempts) and reported with its value; each case has a budget of
 statements (`Gen.steps`; past it is a failure, `R0104`, unless the
 generator is quiet), so a property that loops forever fails instead of
-hanging, deterministically.
+hanging, deterministically. Natively the budget counts the yield points
+the case passes, function entries and back edges, in the counter the
+seeded scheduler's budget shares (decision 540).
 
 **Generators** are written by the compiler as Sisu source
 (`sisu-resolve/src/arbitrary.rs`, `<arbitrary>/main.sisu`), only for the
@@ -3266,11 +3280,11 @@ where its builds go and a file into a directory of its own under the
 system's temporary directory, which it removes after, runs the executable
 with the arguments, the standard streams and the environment of the
 command, and exits with its status (decision 197). It takes
-`--schedule-seed N`, `--explore N` and the scheduler's `--stats` (section
-"Tasks" below); it does not combine with the options that only the
+`--schedule-seed N`, `--explore N`, the scheduler's `--stats` and
+`--scheduler pct` or `exhaustive` with `--depth` (section "Tasks" below;
+decision 541); it does not combine with the options that only the
 interpreter has (`--sir`, `--monitor`, `--defer-borrow`, `--stats
-stack-depth`, `--stats shared`, `--watch`, `--record`, `--scheduler`;
-`D0109`), and `--release` goes with `--native` only (`D0111`). A
+stack-depth`, `--stats shared`, `--watch`, `--record`; `D0109`), and `--release` goes with `--native` only (`D0111`). A
 construct the backend does not compile yet is `D0103`, naming it and the
 function it is in; the program still runs without `--native`. `SISU_NATIVE_SURVEY=1`
 lists every such construct of a program with the number of functions
@@ -3531,7 +3545,7 @@ The runtime's entry points (`abi::sym`) are the boundary:
 | `sisu_rt_thread_slot() -> ptr`, `sisu_rt_switch(save, load)` | the machine intrinsics `rt.thread_slot` and `rt.switch` (decision 302) |
 | `sisu_rt_free(ptr)` | frees a box's or a `dyn`'s cell whose value was moved out (decision 216) |
 | `sisu_rt_trace_release(error)` | a field was moved out of an error value, which is never dropped whole: it lets go of its return trace (decision 215) |
-| `sisu_rt_yield()` | a yield point found the budget spent: the scheduler may switch tasks |
+| `sisu_rt_yield() -> u8` | a yield point found the budget spent: the scheduler may switch tasks, and a property's case that ran out unwinds (decision 540) |
 | `SISU_RT_DEPTH` | the counter of nested calls; this and the next three are thread-local, each thread's own (decision 332) |
 | `SISU_RT_BUDGET` | the yield points left before the scheduler is asked |
 | `SISU_RT_STACK` | the running task's stack limits: the probe's, the real one, the unwinding floor, and the watermark's and the failure's flags; and whether it is a generator being closed (decision 236) |
@@ -3579,7 +3593,7 @@ when the program ends, so the two interleave as the interpreter's do.
 ### The runtime in Sisu
 
 The runtime is being written in Sisu, piece by piece, as D-086 orders
-(decisions 335, 336, 350 to 352, 358, 383, 385, 422 and 423). `compiler/rt` is a Sisu package
+(decisions 335, 336, 350 to 352, 358, 383, 385, 422, 423, 506 and 542). `compiler/rt` is a Sisu package
 (`unsafe = "extern"`) whose root module's `export_NAME` functions are the
 runtime's symbols `sisu_rt_NAME`, of Sisu's convention (decision 189),
 which the generated code and the runtime in Rust call as any function is
@@ -3611,7 +3625,7 @@ What is in Sisu (port-debt.md, "The runtime in Sisu", has what is not):
 | `Display` and `Debug` of a value by its type (`sisu_rt_value_display`, `_debug`) | `show.sisu` | the runtime in Rust, for `fmt.display`, `fmt.debug`, `print`, `list.join`, a failed `assert`'s sides and the error `main` returns (decision 383) |
 | a list's growth and moves, a slice's copies, the sort, `in` and `join` (`sisu_rt_list_*`) | `list.sisu` | the runtime in Rust, for the list intrinsics and every list it builds, and the generated code's `sisu_rt_list_reserve` (decision 385) |
 | the tables of dicts and sets: a new one, a key looked up, an entry appended and one taken out (`sisu_rt_table_new`, `_lookup`, `_push`, `_remove`), and a whole table copied, compared, shown and dropped | `table.sisu` | the runtime in Rust, for the dict and set intrinsics, a table literal and `d{k}` (`sisu_rt_table`, `sisu_rt_table_find`, `sisu_rt_dict_slot`), and `value.sisu` and `show.sisu` (decision 422) |
-| iterators: the next item, the iterator of an `Iterable[T]` argument, every item left, and the drop (`sisu_rt_iter_next`, `_iterable`, `_collect`, `_drop`) | `iter.sisu` | the runtime in Rust, for `Iter.next` of what does not wait and every iterator it takes items from, and `value.sisu` (decision 423) |
+| iterators: the next item, the iterator of an `Iterable[T]` argument, every item left, the drop, a new iterator of each of the eleven kinds and what one may wait for (`sisu_rt_iter_next`, `_iterable`, `_collect`, `_drop`, `_range` and its kin, `_waits`) | `iter.sisu` | the runtime in Rust, for `Iter.next` of what does not wait, every iterator it takes items from or makes, and `value.sisu` (decisions 423 and 542) |
 
 The structural operations walk a value by the program's type table, which
 the runtime in Rust lays out in memory when the program starts
@@ -3711,7 +3725,9 @@ of every function the interpreter enters with a call statement (the
 probe and the count of the frame come first), every edge to a block at
 or before the current one, a spawn (which spends one without switching),
 and `task.yield_now`. Generated code counts them down in
-`SISU_RT_BUDGET` and calls `sisu_rt_yield` when it reaches zero; the
+`SISU_RT_BUDGET` and calls `sisu_rt_yield` when it reaches zero, whose
+status unwinds a property's case that ran out of its budget (the counter
+holds both budgets, decision 540); the
 budgets, the next task and every choice among ready `select` arms are
 drawn from the interpreter's generator in its order, and the ready list,
 the waits and the timers are its data. A function the interpreter enters
@@ -3761,9 +3777,13 @@ the asking task, whose budget its bodies spend (port-debt.md).
 
 ### Raw memory, foreign calls and the machine intrinsics
 
-Unsafe code runs natively without the interpreter's checks (decision 302):
-the raw memory operations are the unchecked ones (22), and the checked
-memory model is where unsafe code is checked. The intrinsics of std.mem
+Unsafe code runs natively without the interpreter's checks in the release
+profile (decision 302): the raw memory operations are the unchecked ones
+(22). In the debug profile the runtime checks them against a shadow of
+`Global`'s blocks, as the checked memory model does (decisions 543 and
+544): `main`'s flags carry `ENTRY_CHECKED`, the raw reads, writes and
+offsets the release profile compiles inline go through the runtime, and
+each intrinsic of std.mem checks what it reaches before it does it. The intrinsics of std.mem
 are the runtime's (`sisu-rt/src/rawmem.rs`), called through the
 descriptor as the others are (`abi::Intrinsic`, numbered after the older
 ones so that theirs stay what they were), and `ptr[T]` and `ptr mut T` are
@@ -9018,3 +9038,176 @@ query layer and the driver"; 17; stage 1's seventh round, R65, decision
      (`Stage1::black_box_tests`; `SISU_STAGE1_BLACK_BOX` decides first),
      where a file of `tests/` was never run. This changes no rule of the
      language.
+
+**Stage 2: a property's budget natively** (sections "Property tests" and
+"Stage 2", "Tasks"; 17; decision 461, port-debt.md's plan for a native
+`sisu run`)
+
+540. A property's case runs natively within its budget: `test.catch(f, x,
+     steps)` gives `Err(TooLong(steps))` when the call passes more than
+     `steps` yield points (function entries and back edges, over every
+     task, as the interpreter counts its statements over every task), where
+     native code bounded nothing and a case that ran for minutes was not
+     stopped. A yield check can unwind: `sisu_rt_yield` returns a status
+     (`() -> (i8)`), and its slow path branches on it, to the failure path
+     of the block it is in, or at a function's entry to a block of its own
+     that gives the frame's count back and returns `UNWINDING`
+     (`yield_check(entry)`), the same blocks in the same order in the Rust
+     lowering and stage 2's, so that `--native-from-lir` finds the
+     executables the same bytes. The runtime keeps both budgets in the one
+     counter the generated code counts down (`sisu-rt/src/budget.rs`):
+     while a case is open the counter holds the smaller of the case's
+     budget left and the seeded scheduler's, the rest of the scheduler's
+     kept aside, and every read and write of it but the generated code's
+     goes through `budget::load`, `store` and `spend`, so the scheduler's
+     budget means what it did and a seed names the same schedule (the
+     cases of `sim/` and `concurrency/` show it); a yield point that finds
+     the counter spent asks the case first: one that ran out raises
+     `run.case-too-long` and unwinds (not while a panic is already
+     unwinding, and the unwinding's drops run without a budget, as the
+     interpreter's), one whose budget only was spent goes on without the
+     scheduler. A case's count is of yield points, not statements, so the
+     budget's number means more work natively than in the interpreter;
+     only a case that loops past it shows the difference, and
+     `contracts/properties`' case of 100 000 iterations past 2 000 fails
+     both ways. `contracts/properties` joins `native.list` and
+     `contracts/checks` runs its tests natively; the runner's `# native
+     tests: WHY`, which no case needs now, is gone. This changes no rule
+     of the language.
+
+**`sisu run --native --scheduler`** (section "Simulation, schedulers and
+replay"; decision 501)
+
+541. `sisu run --native` takes `--scheduler pct` and `--scheduler
+     exhaustive` with `--depth`, where it refused them with `D0109`: the
+     runtime's schedulers of decision 501, asked for through
+     `SISU_SCHEDULER` (`native_tests::scheduler_env`, which the tests
+     share); PCT runs once or under `--explore N` seeds, reported with the
+     interpreter's `CLI_PCT_FAILED` and `CLI_PCT_OK`, and the bounded
+     exhaustive search runs the executable under each schedule as
+     `run_main_search` runs `main`, the runtime writing each run's choices
+     to the file `SISU_TRAIL` names, from which `next_schedule` takes the
+     next prefix, up to `--explore N` schedules or 10 000, with the
+     interpreter's summary or failing schedule. `driver/tests/native.rs`
+     holds four runs of a lost update to the interpreter's, byte for byte.
+     This changes no rule of the language.
+
+**The runtime in Sisu: iterators made by their exports** (section "Stage
+2", "The runtime in Sisu"; D-086; decision 423)
+
+542. The runtime in Rust makes every iterator through the runtime in
+     Sisu's exports, one for each of the eleven kinds (`sisu_rt_iter_range`,
+     `_list_ref`, `_items`, `_chars`, `_bytes`, `_owned_bytes`,
+     `_enumerate`, `_zip`, `_table_ref`, `_generator`, `_receiver`), and
+     asks it what an iterator may wait for (`sisu_rt_iter_waits`), where
+     `sisu-rt/src/iter.rs` mirrored `iter.sisu`'s eleven words as a
+     `#[repr(C)]` struct and wrote a new object's words itself:
+     `iter::IterObj` is opaque, and the object's layout is written once,
+     in `iter.sisu`, but for the four words of its header that compiled
+     code reads (decision 253). `sum` takes its items' size from its
+     result's type. The seed grows from 572 380 to 586 692 bytes of SIR
+     and the runtime's object from 591 240 to 617 856 bytes
+     (`target/rt/rt.o`). This changes no rule of the language.
+
+**The native checked memory model, begun** (sections "The checked memory
+model" and "Raw memory, foreign calls and the machine intrinsics"; 22;
+D-085; decisions 301 and 302)
+
+543. A program built in the debug profile checks its raw memory as the
+     interpreter's model does, with the interpreter's panics, for the
+     memory the runtime can name; the release profile keeps the unchecked
+     operations of decision 302. Both lowerings set `ENTRY_CHECKED` among
+     `main`'s flags in the debug profile, and there compile no raw read,
+     write or offset inline (decision 335): each is a call of the runtime,
+     which checks it before it does it (`sisu-rt/src/checked.rs`); the
+     runtime's own code, the library, still reads and writes inline and is
+     not checked. The model is a shadow of the blocks `Global.acquire`
+     gives out, each with its size, its alignment, whether it is live, and
+     what it holds as the interpreter's block does: the values written
+     into it at their offsets with their types, and the bytes left of a
+     plain value a write cut apart. Native pointers are addresses, so a
+     pointer belongs to the block on whose bytes or end its address falls;
+     an address below 64 KiB (Linux's `mmap_min_addr`) has no memory
+     behind it, so a dangling pointer is seen; any other address is a
+     place of the program or memory foreign code gave out, and is not
+     checked. The checks are the interpreter's, in its order: memory,
+     liveness, bounds and alignment on every access; a read finding a
+     value of its type (taken when the type needs a drop), or bytes that
+     values of plain types give, whose bits are then checked for the type
+     on the program's memory, or nothing; a write refused over a value that
+     needs a drop; `offset` leaving its block; `Global.release` of memory
+     it did not give out or not at its start, released already, of another
+     layout, or holding a value never dropped (not while a panic unwinds);
+     `copy_from` slot by slot; `drop_in_place`, `as_ref`, `as_mut` and
+     `slice_from_raw` on what they reach; and the bits `transmute` and
+     `bit_cast` give. A released block keeps its address and its memory
+     for a while, the last 4 096 released, so that a pointer into it is
+     seen to point into released memory, as AddressSanitizer's quarantine
+     does; beyond that its memory is freed and its record forgotten. A
+     foreign call (the `sisu_rt_flush` every one makes first) marks every
+     live block exposed, whose bytes that hold no value then read as plain
+     bytes, since C may have written them. At the end of a run the values
+     left in live blocks are forgotten and the blocks freed, as the
+     interpreter drops its model with the run, so that only the runtime's
+     own allocations are counted at exit. The other choices were tagged
+     pointers, which would carry a block and the borrow a pointer came
+     from as the interpreter's do but change every pointer's word and the
+     C calls; shadow memory for every address, which needs the stack's
+     and the heap's places registered as they come and go; and the
+     interpreter for every program that declares `unsafe` (Q-77's second
+     option), which keeps the checks but not the native run. A raw read
+     or write in the debug profile costs a call of the runtime, its
+     descriptor and a lookup under a lock: two million of them take 2.3 s
+     natively, 7.1 s in the interpreter and 0.03 s in the release profile.
+     What the model leaves out natively: the provenance of a pointer
+     (whether it came from a shared borrow, `R0139`), the liveness of a
+     place of the program (`R0135`), which the monitor's loans and the
+     interpreter's frames give, a reference's reads after its value was
+     dropped through the pointer, memory foreign code gave out (`malloc`'s
+     blocks, `getenv`'s text), and the read-only memory and emulated C
+     functions of the interpreter (`R0148` to `R0152`), whose calls are
+     real ones natively. This changes no rule of the language: it
+     implements 22's checked model in a debug build.
+544. The first slice runs 12 of the 16 `unsafe/` cases the native list
+     left out with the interpreter's panics: `invalid_bits`, `leaked`,
+     `misaligned`, `mistyped`, `no_memory`, `out_of_bounds`, `overwrite`,
+     `release_layout`, `release_other`, `released`, `released_twice` and
+     `uninitialised`. Each is marked `checked` in `native.list`, which
+     `--native-release` reads (`native::read_checked`): it builds the case
+     in the release profile, whose raw memory is unchecked, and does not
+     run it; the other five modes run it, `--native-from-lir`'s
+     executables the same bytes in both profiles. A refused write drops
+     the value it was given, and a refused overwrite leaves the value it
+     would have lost in place for the end of the run. Left out:
+     `shared_write` (a pointer's provenance), `gone` (a frame's place),
+     `reference_behind` (a reference read after a drop through the
+     pointer) and `foreign_unknown` (a C function the interpreter does not
+     emulate, which native code calls, so that one stays the
+     interpreter's). `native.list` grows from 258 cases to 271, 50 of them
+     with their tests natively. This changes no rule of the language.
+
+**What the manual found: `expect`, `sisu bench`, `std.regex` and
+`std.num`** (sections "Testing" and "The query layer and the driver"; 11,
+17; the manual's findings from chapters 19 and 24, R15, G8 and G27)
+
+545. A failure `expect` records is reported in the words of a failed
+     expectation, `expectation failed: double(3) == 6` (`R0154`, and
+     `R0155` with a message), with the frames a panic there would leave and
+     its sides as `assert`'s, where it was `panic: assertion failed: ...`
+     though nothing panicked and the test went on; the panic that ends a
+     test, an `assert`'s among them, keeps its header. Outside a test
+     `expect` is still `assert`'s panic. The interpreter and the runtime
+     write the same block (`sisu_interp::expect_report`, and
+     `rt::expect_failed`); `testing/expect` shows it. This changes no rule
+     of the language.
+546. `sisu bench --samples K` takes 2 or more (`D0136`), where 0 and 1
+     timed one sample without a word and reported "the median of 1
+     samples" with an interval that was the one time; the mean of one
+     sample has no interval. This changes no rule of the language.
+547. `std.regex` names what its syntax leaves out where it meets it: a
+     back-reference (`\1`), "which a match in linear time leaves out", a
+     flag (`(?i)`) and a named group (`(?P<h>...)`, `(?<h>...)`), which
+     stage 0 leaves out, `(?:...)` being the one group flag, and a Unicode
+     class (`\p{L}`); its module's comment says so. `std.num`'s `Rounding`
+     says that Python's `decimal` has an eighth mode, `ROUND_05UP`, which
+     the enum leaves out. This changes no rule of the language.

@@ -1,8 +1,9 @@
 $ sisu run derive_heater.sisu
 error[E0347]: `Heater` does not implement `Eq`
-  --> <derive>/main.sisu:19:12
+  --> derive_heater.sisu:21:9
    |
-19 |         if self.heater != other.heater:
-   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+21 | @derive(Changes)
+   |         ^^^^^^^
+  = note: in the impl of `Changes` that the derive writes for `Booking`: `if self.heater != other.heater:`
 
 error[D0006]: the program was not run: errors found (1)

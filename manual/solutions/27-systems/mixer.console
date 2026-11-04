@@ -14,4 +14,15 @@ warning[W0001]: typed hole `fade` of type `()`
 test "mixing a voice in" ... blocked by todo("mix")
 test "mixing keeps the samples in range" ... blocked by todo("mix")
 test "a fade to silence" ... blocked by todo("fade")
+
+test "mixing a voice in" ... blocked by todo("mix")
+what the test printed:
+  in scope at the typed hole `todo("mix")`:
+    gain = 0.5
+
+test "mixing keeps the samples in range" ... blocked by todo("mix")
+what the test printed:
+  in scope at the typed hole `todo("mix")`:
+    gain = 1.0
+
 0 passed, 0 failed, 3 blocked

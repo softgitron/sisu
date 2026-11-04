@@ -4,5 +4,5 @@ error[E0103]: expected an expression, found `&`
   |
 7 |     print(total(&prices))
   |                 ^
-  = fix: Sisu writes it `ref`: `ref `
+  = fix: Sisu writes it so: `ref `
 

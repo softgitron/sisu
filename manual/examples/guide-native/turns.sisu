@@ -1,0 +1,16 @@
+# Two tasks add their logs to one stove; the total holds in every order.
+import std.sim
+
+def add_logs(stove: Mutex[int], n: int):
+    for _ in range(n):
+        var g = stove.lock()
+        g.value += 1
+
+test "every log reaches the stove":
+    let stove = Mutex(0)
+    sim.always("never more than five", () -> stove.lock().value <= 5) do:
+        _ = task.scope do s:
+            s.spawn(() -> add_logs(stove, 2))
+            s.spawn(() -> add_logs(stove, 3))
+            return Ok(())
+    assert stove.lock().value == 5

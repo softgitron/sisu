@@ -74,6 +74,7 @@ unsafe extern "C" fn sisu_rt_start(
     };
     let Some(table) = table else { rt::internal("the program's type table does not decode") };
     rt::init(table, fns);
+    crate::checked::set_on(flags & abi::ENTRY_CHECKED != 0);
     crate::par::set_unprobed(unprobed as usize);
     let _ = ARGS.set(args);
     let run = move || {
@@ -152,6 +153,7 @@ unsafe extern "C" fn sisu_rt_start(
             unsafe { value::forget_value(r, ret_ty) };
         }
         crate::caps::release_kept();
+        crate::checked::let_go();
         crate::sched::write_trail();
         if let Some(stats) = crate::sched::finish() {
             rt::stderr(&stats_report(&stats));

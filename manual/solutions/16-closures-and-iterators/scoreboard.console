@@ -14,4 +14,20 @@ warning[W0001]: typed hole `ranking` of type `list[String]`
 test "a board" ... blocked by todo("parse_board")
 test "the first bad line" ... blocked by todo("parse_board")
 test "a ranking" ... blocked by todo("parse_board")
+
+test "a board" ... blocked by todo("parse_board")
+what the test printed:
+  in scope at the typed hole `todo("parse_board")`:
+    text = "# round 3\nKettu: 12\nKarhu: 15\n\nIlves:  12\n"
+
+test "the first bad line" ... blocked by todo("parse_board")
+what the test printed:
+  in scope at the typed hole `todo("parse_board")`:
+    text = "Kettu: 12\nKarhu 15\nIlves: x"
+
+test "a ranking" ... blocked by todo("parse_board")
+what the test printed:
+  in scope at the typed hole `todo("parse_board")`:
+    text = "# round 3\nKettu: 12\nKarhu: 15\n\nIlves:  12\n"
+
 0 passed, 0 failed, 3 blocked

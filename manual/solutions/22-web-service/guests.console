@@ -13,4 +13,18 @@ warning[W0001]: typed hole `answer 200 with the names as JSON` of type `http.Res
 
 test "names in the book" ... blocked by todo("add the name, and answer 201 Created")
 test "an empty name is not a guest" ... blocked by todo("answer 200 with the names as JSON")
+
+test "names in the book" ... blocked by todo("add the name, and answer 201 Created")
+what the test printed:
+  in scope at the typed hole `todo("add the name, and answer 201 Created")`:
+    self = GuestBook(names=Mutex([]))
+    request = Request(method="POST", target="/guests", headers=[], body=b"Aino")
+    name = "Aino"
+
+test "an empty name is not a guest" ... blocked by todo("answer 200 with the names as JSON")
+what the test printed:
+  in scope at the typed hole `todo("answer 200 with the names as JSON")`:
+    self = GuestBook(names=Mutex([]))
+    request = Request(method="GET", target="/guests", headers=[], body=b"")
+
 0 passed, 0 failed, 2 blocked

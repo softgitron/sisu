@@ -938,6 +938,17 @@ test "part 2, pairs of words/the pairs of a text" ... blocked by todo("pairs")
 test "part 2, pairs of words/the pair that comes most often" ... blocked by todo("new")
 test "part 3, a table/a short table" ... blocked by todo("new")
 test "part 3, a table/ten lines at most" ... blocked by todo("new")
+
+test "part 1, a tally of words/the words of a text" ... blocked by todo("words")
+what the test printed:
+  in scope at the typed hole `todo("words")`:
+    text = "Hei, hei maailma!"
+
+test "part 2, pairs of words/the pairs of a text" ... blocked by todo("pairs")
+what the test printed:
+  in scope at the typed hole `todo("pairs")`:
+    text = "yksi kaksi, kolme"
+
 0 passed, 0 failed, 7 blocked
 ```
 

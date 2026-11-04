@@ -136,9 +136,23 @@ impl NativeReport {
 /// The case names a coverage list holds.
 pub fn read_list(text: &str) -> Vec<String> {
     text.lines()
-        .map(|l| l.split('#').next().unwrap_or("").trim())
-        .filter(|l| !l.is_empty())
+        .filter_map(|l| l.split('#').next().unwrap_or("").split_whitespace().next())
         .map(str::to_string)
+        .collect()
+}
+
+/// The cases of `native.list` marked `checked` after their name: their run
+/// stops with the checked memory model's report, which a build of the
+/// debug profile gives as the interpreter does (decision 544) and a release
+/// build, whose raw memory is unchecked, does not; `--native-release`
+/// builds them and does not run them.
+pub fn read_checked(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|l| {
+            let mut words = l.split('#').next().unwrap_or("").split_whitespace();
+            let name = words.next()?;
+            words.any(|w| w == "checked").then(|| name.to_string())
+        })
         .collect()
 }
 
@@ -228,8 +242,8 @@ pub fn run_native_from_sir(sisu: &Sisu, root: &Path, list: &[String]) -> NativeR
 /// contract checked (`sisu build --native --release --contracts=all`,
 /// decision 232): Cranelift's optimisations must not change what a program
 /// does.
-pub fn run_native_release(sisu: &Sisu, root: &Path, list: &[String]) -> NativeReport {
-    run_list(sisu, root, list, Mode::Release, None)
+pub fn run_native_release(sisu: &Sisu, root: &Path, list: &[String], checked: &[String]) -> NativeReport {
+    run_list_checked(sisu, root, list, Mode::Release, None, checked)
 }
 
 /// [`run_native`], each case built with Cranelift, the oracle of the
@@ -282,6 +296,19 @@ pub fn build_stage2(sisu: &Sisu, dir: &Path) -> Result<std::path::PathBuf, Strin
 }
 
 fn run_list(sisu: &Sisu, root: &Path, list: &[String], mode: Mode, stage2: Option<&Path>) -> NativeReport {
+    run_list_checked(sisu, root, list, mode, stage2, &[])
+}
+
+/// [`run_list`], the cases of `checked` (`read_checked`) built and not run
+/// in the release profile.
+fn run_list_checked(
+    sisu: &Sisu,
+    root: &Path,
+    list: &[String],
+    mode: Mode,
+    stage2: Option<&Path>,
+    checked: &[String],
+) -> NativeReport {
     let all = discover(root);
     let mut report = NativeReport {
         release: mode == Mode::Release,
@@ -300,7 +327,10 @@ fn run_list(sisu: &Sisu, root: &Path, list: &[String], mode: Mode, stage2: Optio
             }),
         }
     }
-    let results = parallel(&cases, |case, n| native_case(sisu, case, n, mode, stage2));
+    let results = parallel(&cases, |case, n| {
+        let unchecked = mode == Mode::Release && checked.contains(&case.name);
+        native_case(sisu, case, n, mode, stage2, unchecked)
+    });
     if matches!(mode, Mode::FromSir | Mode::Interpreted | Mode::FromLir) {
         report.from_sir = Some(results.iter().filter(|r| r.own_sir).count());
     }
@@ -332,7 +362,7 @@ fn run_list(sisu: &Sisu, root: &Path, list: &[String], mode: Mode, stage2: Optio
 pub fn survey(sisu: &Sisu, root: &Path, list: &[String]) -> Vec<(String, String)> {
     let cases: Vec<Case> =
         discover(root).into_iter().filter(|c| !list.contains(&c.name) && runnable(c)).collect();
-    let results = parallel(&cases, |case, n| native_case(sisu, case, n, Mode::Native, None));
+    let results = parallel(&cases, |case, n| native_case(sisu, case, n, Mode::Native, None, false));
     cases
         .iter()
         .zip(results)
@@ -401,7 +431,16 @@ struct CaseResult {
     program: bool,
 }
 
-fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&Path>) -> CaseResult {
+/// `unchecked`: the release build of a case whose run the checked memory
+/// model stops is built, and its run left out (decision 544).
+fn native_case(
+    sisu: &Sisu,
+    case: &Case,
+    n: usize,
+    mode: Mode,
+    stage2: Option<&Path>,
+    unchecked: bool,
+) -> CaseResult {
     let from_sir = matches!(mode, Mode::FromSir | Mode::Interpreted | Mode::FromLir);
     let release = mode == Mode::Release;
     let mut r = CaseResult {
@@ -648,6 +687,9 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&P
             "the build did not say that the Sisu backend compiled the program".into(),
         );
     }
+    if unchecked {
+        return r;
+    }
     run_and_compare(case, &exe, &cwd, warned_by_sir, !built.stderr.is_empty(), &mut r);
     r
 }
@@ -671,11 +713,6 @@ fn native_tests(sisu: &Sisu, case: &Case, dir: &Path, mode: Mode, r: &mut CaseRe
     let source =
         if case.package { String::new() } else { std::fs::read_to_string(case.source()).unwrap_or_default() };
     let file = format!("{}.sisu", case.stem);
-    // `# native tests: WHY`: the case's tests wait for what the interpreter
-    // alone does, and only its program runs natively.
-    if source.lines().any(|l| l.starts_with("# native tests: ")) {
-        return false;
-    }
     // Each run: its arguments after `test` and the expectation.
     let mut runs: Vec<(Vec<String>, String)> = Vec::new();
     if let Some(expected) = case.expected("test") {

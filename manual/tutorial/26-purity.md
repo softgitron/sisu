@@ -961,6 +961,31 @@ test "merging" ... blocked by todo("merge")
 test "sorting" ... blocked by todo("sort_halves")
 test "sorting agrees with sorted" ... blocked by todo("sort_halves")
 test "contract of sort_halves" ... blocked by todo("sort_halves")
+
+test "merging" ... blocked by todo("merge")
+what the test printed:
+  in scope at the typed hole `todo("merge")`:
+    a = [1, 4, 9]
+    b = [2, 3, 10]
+
+test "sorting" ... blocked by todo("sort_halves")
+what the test printed:
+  in scope at the typed hole `todo("sort_halves")`:
+    xs = [5, 3, 8, 1, 9, 2]
+    small = 1
+
+test "sorting agrees with sorted" ... blocked by todo("sort_halves")
+what the test printed:
+  in scope at the typed hole `todo("sort_halves")`:
+    xs = [5]
+    small = 2
+
+test "contract of sort_halves" ... blocked by todo("sort_halves")
+what the test printed:
+  in scope at the typed hole `todo("sort_halves")`:
+    xs = [5]
+    small = 4
+
 0 passed, 0 failed, 4 blocked
 ```
 

@@ -829,6 +829,24 @@ warning[W0001]: typed hole `best_seller` of type `String?`
 test "a town's total" ... blocked by todo("total_in")
 test "the dear products" ... blocked by todo("dear")
 test "the best seller" ... blocked by todo("best_seller")
+
+test "a town's total" ... blocked by todo("total_in")
+what the test printed:
+  in scope at the typed hole `todo("total_in")`:
+    sales = [Sale(product="pulla", town="Turku", cents=280), Sale(product="kakku", town="Tampere", cents=2400), Sale(product="leipä", town="Turku", cents=590), Sale(product="pulla", town="Tampere", cents=280), Sale(product="piirakka", town="Turku", cents=2400)]
+    town = "Turku"
+
+test "the dear products" ... blocked by todo("dear")
+what the test printed:
+  in scope at the typed hole `todo("dear")`:
+    sales = [Sale(product="pulla", town="Turku", cents=280), Sale(product="kakku", town="Tampere", cents=2400), Sale(product="leipä", town="Turku", cents=590), Sale(product="pulla", town="Tampere", cents=280), Sale(product="piirakka", town="Turku", cents=2400)]
+    cents = 500
+
+test "the best seller" ... blocked by todo("best_seller")
+what the test printed:
+  in scope at the typed hole `todo("best_seller")`:
+    sales = [Sale(product="pulla", town="Turku", cents=280), Sale(product="kakku", town="Tampere", cents=2400), Sale(product="leipä", town="Turku", cents=590), Sale(product="pulla", town="Tampere", cents=280), Sale(product="piirakka", town="Turku", cents=2400)]
+
 0 passed, 0 failed, 3 blocked
 ```
 
@@ -1005,6 +1023,22 @@ warning[W0001]: typed hole `ranking` of type `list[String]`
 test "a board" ... blocked by todo("parse_board")
 test "the first bad line" ... blocked by todo("parse_board")
 test "a ranking" ... blocked by todo("parse_board")
+
+test "a board" ... blocked by todo("parse_board")
+what the test printed:
+  in scope at the typed hole `todo("parse_board")`:
+    text = "# round 3\nKettu: 12\nKarhu: 15\n\nIlves:  12\n"
+
+test "the first bad line" ... blocked by todo("parse_board")
+what the test printed:
+  in scope at the typed hole `todo("parse_board")`:
+    text = "Kettu: 12\nKarhu 15\nIlves: x"
+
+test "a ranking" ... blocked by todo("parse_board")
+what the test printed:
+  in scope at the typed hole `todo("parse_board")`:
+    text = "# round 3\nKettu: 12\nKarhu: 15\n\nIlves:  12\n"
+
 0 passed, 0 failed, 3 blocked
 ```
 

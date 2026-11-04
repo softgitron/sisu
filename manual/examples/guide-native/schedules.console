@@ -1,0 +1,8 @@
+$ sisu test --native --scheduler pct --explore 20 turns.sisu
+test "every log reaches the stove" ... ok
+1 passed, 0 failed, 0 blocked
+explored 20 schedules of a PCT scheduler of depth 3 per test (seeds 0 to 19)
+$ sisu test --native --scheduler exhaustive turns.sisu
+test "every log reaches the stove" ... ok
+1 passed, 0 failed, 0 blocked
+searched 127 schedules (preemption bound 2)

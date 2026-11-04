@@ -4,4 +4,5 @@ error[E0100]: expected `)`, found a string
   |
 4 |     print(f"n is {n}")
   |            ^
+  = fix: Sisu writes it so: `"n is {n}"`
 

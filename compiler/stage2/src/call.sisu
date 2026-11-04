@@ -694,7 +694,9 @@ impl Cg:
     ## and 265), as the runtime runs them on the values' layouts.
     ## Raw memory of a word or a byte without the runtime (decision 335), as
     ## `raw_inline` in `func.rs` does it: a raw pointer's address, made,
-    ## cast or offset, and the value at it read or written at its width.
+    ## cast or offset, and the value at it read or written at its width. The
+    ## debug profile offsets, reads and writes through the runtime, which
+    ## checks them (decision 543).
     pub pure def raw_inline(
         mut self, p: Program, i: int, dest: Place, b: int, bt: Type, argv: list[(int, Type)]
     ) -> Fast? ! LirError:
@@ -717,6 +719,10 @@ impl Cg:
         if args.is_empty():
             return Ok(None)
         let (width, signed) = raw_scalar(args[0]) else:
+            return Ok(None)
+        # The debug profile checks raw memory (decision 543): the runtime
+        # offsets, reads and writes, but in the runtime's own code.
+        if not self.release and not self.library:
             return Ok(None)
         if i == abi.I_MEM_PTR_OFFSET:
             if len(argv) < 2:

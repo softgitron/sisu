@@ -387,6 +387,33 @@ fn executable(
 /// recorded.
 type Done = (TestResult, String, String, Option<Vec<i64>>, Vec<(String, String)>, Vec<sisu_interp::Choice>);
 
+/// The exhaustive search's choices as the runtime writes them,
+/// `taken/options/y` dotted (decision 501).
+pub(crate) fn parse_trail(trail: &str) -> Vec<sisu_interp::Choice> {
+    trail
+        .split('.')
+        .filter_map(|c| {
+            let mut parts = c.split('/');
+            let taken = parts.next()?.parse().ok()?;
+            let options = parts.next()?.parse().ok()?;
+            Some(sisu_interp::Choice { taken, options, at_yield: parts.next()? == "y" })
+        })
+        .collect()
+}
+
+/// The environment that asks the runtime for the scheduler `strategy`
+/// (`SISU_SCHEDULER`, decision 501); none for the seeded one.
+pub(crate) fn scheduler_env(strategy: &sisu_interp::Strategy) -> Option<String> {
+    match strategy {
+        sisu_interp::Strategy::Random => None,
+        sisu_interp::Strategy::Pct { depth } => Some(format!("pct:{depth}")),
+        sisu_interp::Strategy::Exhaustive { prefix } => {
+            let shown: Vec<String> = prefix.iter().map(u32::to_string).collect();
+            Some(format!("exhaustive:{}", shown.join(".")))
+        }
+    }
+}
+
 /// One test's run.
 fn run_one(exe: &Path, k: usize, name: &str, options: &Options, real: bool) -> Done {
     let report = exe.with_file_name(format!("report-{}-{k}", std::process::id()));
@@ -398,15 +425,8 @@ fn run_one(exe: &Path, k: usize, name: &str, options: &Options, real: bool) -> D
     }
     // The interpreter's other schedulers (decision 501) and the `sim`
     // profile's faults (decision 502).
-    match &options.strategy {
-        sisu_interp::Strategy::Random => {}
-        sisu_interp::Strategy::Pct { depth } => {
-            cmd.env("SISU_SCHEDULER", format!("pct:{depth}"));
-        }
-        sisu_interp::Strategy::Exhaustive { prefix } => {
-            let shown: Vec<String> = prefix.iter().map(u32::to_string).collect();
-            cmd.env("SISU_SCHEDULER", format!("exhaustive:{}", shown.join(".")));
-        }
+    if let Some(v) = scheduler_env(&options.strategy) {
+        cmd.env("SISU_SCHEDULER", v);
     }
     if let Some(rate) = options.sim.filter(|r| *r > 0) {
         cmd.env("SISU_SIM_FAULTS", rate.to_string());
@@ -460,15 +480,7 @@ fn run_one(exe: &Path, k: usize, name: &str, options: &Options, real: bool) -> D
     trail_file.push(".trail");
     let trail = std::fs::read_to_string(&trail_file).unwrap_or_default();
     let _ = std::fs::remove_file(&trail_file);
-    let trail: Vec<sisu_interp::Choice> = trail
-        .split('.')
-        .filter_map(|c| {
-            let mut parts = c.split('/');
-            let taken = parts.next()?.parse().ok()?;
-            let options = parts.next()?.parse().ok()?;
-            Some(sisu_interp::Choice { taken, options, at_yield: parts.next()? == "y" })
-        })
-        .collect();
+    let trail = parse_trail(&trail);
     // The snapshots it took, for `--update`.
     let mut snap_file = report.clone().into_os_string();
     snap_file.push(".snap");

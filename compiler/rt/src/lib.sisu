@@ -456,6 +456,88 @@ def export_iter_drop(types: ptr[int], it: ptr mut u8, mode: int) -> int:
 def export_iter_iterable(types: ptr[int], p: ptr mut u8, arg: int, item: int) -> ptr mut u8:
     return iter.iterable(Types(words=types), p, arg, item)
 
+## The iterator of a range from `cur` to `stop` by `step` (`iter.new_range`):
+## the runtime in Rust makes every iterator through these exports (decision
+## 542), and the object's layout is this package's alone.
+def export_iter_range(cur: int, stop: int, step: int) -> ptr mut u8:
+    return iter.new_range(cur, stop, step)
+
+## The iterator of the addresses of the elements, `size` bytes each, of the
+## borrowed list at `xs` (`iter.new_list_ref`).
+def export_iter_list_ref(xs: ptr mut u8, size: int) -> ptr mut u8:
+    return iter.new_list_ref(xs, size)
+
+## The iterator that owns the elements, of type `elem`, of the list at `xs`
+## (`iter.new_items`).
+##
+## Requires:
+## - `typed`: `types` is the program's table, and `xs` holds a live list of
+##   elements of type `elem`, which moves in
+def export_iter_items(types: ptr[int], xs: ptr mut u8, elem: int) -> ptr mut u8:
+    return iter.new_items(Types(words=types), xs, elem)
+
+## The iterator of the characters of the `n` bytes at `b`, a text that
+## outlives it (`iter.new_text`).
+def export_iter_chars(b: ptr mut u8, n: int) -> ptr mut u8:
+    return iter.new_text(b, n, True)
+
+## The iterator of the `n` bytes at `b`, a text that outlives it.
+def export_iter_bytes(b: ptr mut u8, n: int) -> ptr mut u8:
+    return iter.new_text(b, n, False)
+
+## The iterator of a copy of the `n` bytes at `b`, which it owns
+## (`iter.new_owned_bytes`).
+##
+## Requires:
+## - `readable`: `b` points to `n` live bytes
+def export_iter_owned_bytes(b: ptr[u8], n: int) -> ptr mut u8:
+    return iter.new_owned_bytes(b, n)
+
+## The iterator of an index beside each item of the iterator at `inner`,
+## which it owns (`iter.new_enumerate`).
+##
+## Requires:
+## - `iterator`: `inner` is the address of a live iterator's object
+def export_iter_enumerate(inner: ptr mut u8) -> ptr mut u8:
+    return iter.new_enumerate(inner)
+
+## The iterator of the pairs of the iterators at `a` and `b`, which it owns,
+## of items of types `ta` and `tb`, their lengths agreeing when `strict`
+## (`iter.new_zip`).
+##
+## Requires:
+## - `iterator`: `a` and `b` are the addresses of live iterators' objects
+def export_iter_zip(a: ptr mut u8, b: ptr mut u8, strict: bool, ta: int, tb: int) -> ptr mut u8:
+    return iter.new_zip(a, b, strict, ta, tb)
+
+## The iterator of references into the table at `tb`: its keys (0), its
+## values (1) or both (2) (`iter.table_part`).
+##
+## Requires:
+## - `table`: `tb` is the address of a live table
+def export_iter_table_ref(tb: ptr mut u8, part: int) -> ptr mut u8:
+    return iter.table_part(tb, part)
+
+## The iterator of the items, `size` bytes each, of the generator whose task
+## is `task` (`iter.new_waiting`).
+def export_iter_generator(task: int, size: int) -> ptr mut u8:
+    return iter.new_waiting(task, size, True)
+
+## The iterator of the values, `size` bytes each, of the channel `chan`'s
+## receiver.
+def export_iter_receiver(chan: int, size: int) -> ptr mut u8:
+    return iter.new_waiting(chan, size, False)
+
+## What `Iter.next` of the iterator at `it` may wait for (`iter.waits`): 1
+## for a generator's item, 2 for a receiver's value, its task or channel and
+## the size of an item written at `out`; 0 when it does not wait.
+##
+## Requires:
+## - `iterator`: `it` is the address of a live iterator's object, and `out`
+##   has room for two words
+def export_iter_waits(it: ptr mut u8, out: ptr mut u8) -> int:
+    return iter.waits(it, out)
+
 ## Every item the iterator at `it` has left, of type `item` (-1 when the
 ## call does not say), moved into a new list at `out`, the iterator dropped
 ## after (`iter.collect`): its status.

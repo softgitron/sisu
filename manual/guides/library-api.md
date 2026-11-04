@@ -174,17 +174,17 @@ test "tests/a line that is not a booking" ... ok
 $ sisu audit --caps
 . function ledger.store.load caps=1 io=direct depth=-
 . function ledger.store.save caps=1 io=direct depth=-
-. function test#1 caps=1 io=calls depth=-
-. function test#2 caps=1 io=direct depth=-
+. function test "tests/a ledger comes back from its file" caps=1 io=calls depth=-
+. function test "tests/a line that is not a booking" caps=1 io=direct depth=-
 . use ledger.store.load FsOps.read_to_string depth=-
 . use ledger.store.save FsOps.write_text depth=-
-. use test#2 FsOps.write_text depth=-
+. use test "tests/a line that is not a booking" FsOps.write_text depth=-
 . summary functions=4 median=1 max=1 uses=3 deepest=- structs=0
 ```
 
 The audit of the package, the session's last command, lists every
-function that takes a capability, its tests among them by number: only
-`save` and `load` of the library do, each through one `Fs` operation,
+function that takes a capability, its tests among them by their names:
+only `save` and `load` of the library do, each through one `Fs` operation,
 and `depth=-` says that a library has no `main` to reach them from.
 
 From another module a variant is named through its error set,

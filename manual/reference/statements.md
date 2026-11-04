@@ -315,8 +315,9 @@ type is expected where it stands, so the code around it compiles
 (D-061). `sisu check` and `sisu run` report each as W0001 with its type
 ([R17](diagnostics.md#w0001)); a run that reaches one prints its closure,
 each binding in scope with its value (R0160), and stops there (R0013),
-and a test that reaches one is blocked rather than failed. A release build rejects a program with a hole (E0445), and
-`sisu publish` will.
+and a test that reaches one is blocked rather than failed, and shows
+the same closure in its block after the list. A release build rejects
+a program with a hole (E0445), and `sisu publish` will.
 
 <!-- file: examples/reference-statements/holes.sisu -->
 ```sisu

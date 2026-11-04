@@ -17,6 +17,7 @@
 //! check yet (`bit_cast`, `transmute`), with the interpreter's messages.
 
 use crate::abi::{Intrinsic, Kind, TypeEntry};
+use crate::checked;
 use crate::intrinsics::Call;
 use crate::mem::{self, List, Text};
 use crate::rt::{self, ty};
@@ -116,7 +117,7 @@ pub(crate) fn layout(t: u32) -> Layout {
 
 /// The memory offsets of a struct's or tuple's parts, with their types and
 /// their offsets in the value.
-fn parts(entry: &TypeEntry) -> Vec<(u64, u64, u32)> {
+pub(crate) fn parts(entry: &TypeEntry) -> Vec<(u64, u64, u32)> {
     let value_parts: Vec<(u64, u32)> = match &entry.kind {
         Kind::Tuple(slots) => slots.iter().map(|s| (u64::from(s.offset), s.ty)).collect(),
         Kind::Struct { fields, .. } => fields.iter().map(|f| (u64::from(f.offset), f.ty)).collect(),
@@ -254,27 +255,52 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> u8 {
             I::MemPtrOf | I::MemPtrOfMut => c.set_word(mem::word(c.arg(0), 0)),
             I::MemPtrDangling => c.set_word(layout(c.targ(0)).align),
             I::MemPtrFromAddress | I::MemPtrWithAddr => c.set_word(c.int(c.args.len() - 1) as u64),
-            I::MemPtrCast
-            | I::MemPtrAsConst
-            | I::MemPtrCastMut
-            | I::MemPtrAddr
-            | I::MemPtrAsRef
-            | I::MemPtrAsMut => c.set_word(pointer(c, 0) as u64),
+            I::MemPtrCast | I::MemPtrAsConst | I::MemPtrCastMut | I::MemPtrAddr => {
+                c.set_word(pointer(c, 0) as u64)
+            }
             I::MemPtrOffset => {
                 let size = layout(pointee(c.ty(0))).size as i64;
                 let p = pointer(c, 0) as i64;
+                if let Err(st) = checked::offset(p as u64, c.int(1), size as u64) {
+                    return st;
+                }
                 c.set_word(p.wrapping_add(c.int(1).wrapping_mul(size)) as u64);
             }
-            I::MemPtrRead | I::MemPtrReadVolatile => to_value(c.ret, pointer(c, 0), pointee(c.ty(0))),
+            I::MemPtrRead | I::MemPtrReadVolatile => {
+                let (p, e) = (pointer(c, 0), pointee(c.ty(0)));
+                let op = if i == I::MemPtrRead { "read" } else { "read_volatile" };
+                if let Err(st) = checked::read(p as u64, e, i == I::MemPtrRead, op) {
+                    return st;
+                }
+                to_value(c.ret, p, e)
+            }
             I::MemPtrWrite | I::MemPtrWriteVolatile => {
                 let e = pointee(c.ty(0));
+                let op = if i == I::MemPtrWrite { "write" } else { "write_volatile" };
+                if let Err(st) = checked::write(pointer(c, 0) as u64, e, true, op) {
+                    // The value the call was given is dropped with the panic.
+                    if c.ty(1) == e {
+                        return value::after_part(st, value::drop_value(c.arg(1), e));
+                    }
+                    return st;
+                }
                 // The value itself, or a reference to it for a `Copy` one
                 // passed by reference.
                 let src = if c.ty(1) == e { c.arg(1) } else { value::target(c.arg(1), c.ty(1)).0 };
                 to_memory(pointer(c, 0), src, e);
             }
+            I::MemPtrAsRef | I::MemPtrAsMut => {
+                let op = if i == I::MemPtrAsRef { "as_ref" } else { "as_mut" };
+                if let Err(st) = checked::touch(pointer(c, 0) as u64, pointee(c.ty(0)), 1, op) {
+                    return st;
+                }
+                c.set_word(pointer(c, 0) as u64)
+            }
             I::MemPtrDropInPlace => {
                 let e = pointee(c.ty(0));
+                if let Err(st) = checked::drop_in_place(pointer(c, 0) as u64, e) {
+                    return st;
+                }
                 if !rt::needs_drop(e) {
                     return crate::abi::OK;
                 }
@@ -284,7 +310,11 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> u8 {
                 return value::drop_value(tmp, e);
             }
             I::MemPtrCopyFrom => {
-                let size = layout(pointee(c.ty(0))).size;
+                let e = pointee(c.ty(0));
+                if let Err(st) = checked::copy_from(pointer(c, 0) as u64, pointer(c, 1) as u64, c.int(2), e) {
+                    return st;
+                }
+                let size = layout(e).size;
                 let n = c.int(2).max(0) as u64;
                 mem::copy(pointer(c, 0), pointer(c, 1), (size * n) as usize);
             }
@@ -311,11 +341,21 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> u8 {
                 if block.is_null() {
                     c.none();
                 } else {
+                    checked::acquired(block, size as u64, align as u64);
                     mem::set_word(c.ret, 0, 0);
                     mem::set_word(c.ret, 8, block as u64);
                 }
             }
-            I::MemGlobalRelease => mem::release(pointer(c, 1)),
+            I::MemGlobalRelease => {
+                let (p, _) = c.place(2);
+                let (size, align) = (mem::word(p, 0) as i64, mem::word(p, 8) as i64);
+                match checked::release(pointer(c, 1), size, align) {
+                    Err(st) => return st,
+                    // The model keeps the block's memory for a while.
+                    Ok(true) => {}
+                    Ok(false) => mem::release(pointer(c, 1)),
+                }
+            }
             I::MemBitCast | I::MemTransmute => {
                 let (to, from) = (c.targ(0), c.targ(1));
                 let (lt, lf) = (layout(to), layout(from));
@@ -336,6 +376,11 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> u8 {
                 let mut buf = scratch(lf.size);
                 let tmp = buf.as_mut_ptr() as *mut u8;
                 to_memory(tmp, src, from);
+                let (op, obligation) =
+                    if i == I::MemBitCast { ("bit_cast", "valid") } else { ("transmute", "valid_bits") };
+                if let Err(st) = checked::valid_bits(tmp, to, op, obligation) {
+                    return st;
+                }
                 to_value(c.ret, tmp, to);
             }
             I::MemAsBytes => {
@@ -395,6 +440,9 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> u8 {
             I::MemSliceFromRaw => {
                 let e = pointee(c.ty(0));
                 let n = c.int(1).max(0) as u64;
+                if let Err(st) = checked::touch(pointer(c, 0) as u64, e, n, "slice_from_raw") {
+                    return st;
+                }
                 let (msize, vsize) = (layout(e).size, ty(e).size);
                 let mut list = List::empty();
                 list.reserve(n, vsize);
@@ -416,7 +464,7 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> u8 {
 
 /// A type's name as the interpreter's messages write it, for the types a
 /// plain value is made of; another is shown by its kind.
-fn type_name(t: u32) -> String {
+pub(crate) fn type_name(t: u32) -> String {
     match &ty(t).kind {
         Kind::Unit => "()".into(),
         Kind::Int => "int".into(),
@@ -460,6 +508,9 @@ unsafe fn bytes_arg<'a>(c: &Call<'_>, i: usize) -> &'a [u8] {
 #[unsafe(no_mangle)]
 extern "C" fn sisu_rt_flush() {
     crate::sched::system(crate::rt::flush);
+    // A foreign call follows, which may read and write the program's raw
+    // memory (decision 543).
+    checked::expose();
 }
 
 thread_local! {

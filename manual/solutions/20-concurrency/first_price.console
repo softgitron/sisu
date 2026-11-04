@@ -9,4 +9,29 @@ test "the primary answers first" ... blocked by todo("first_price")
 test "the replica answers first" ... blocked by todo("first_price")
 test "neither answers in time" ... blocked by todo("first_price")
 test "an error is an answer too" ... blocked by todo("first_price")
+
+test "the primary answers first" ... blocked by todo("first_price")
+what the test printed:
+  in scope at the typed hole `todo("first_price")`:
+    item = "coffee"
+    limit = Duration(nanos=5000000000)
+
+test "the replica answers first" ... blocked by todo("first_price")
+what the test printed:
+  in scope at the typed hole `todo("first_price")`:
+    item = "coffee"
+    limit = Duration(nanos=5000000000)
+
+test "neither answers in time" ... blocked by todo("first_price")
+what the test printed:
+  in scope at the typed hole `todo("first_price")`:
+    item = "coffee"
+    limit = Duration(nanos=5000000000)
+
+test "an error is an answer too" ... blocked by todo("first_price")
+what the test printed:
+  in scope at the typed hole `todo("first_price")`:
+    item = "tea"
+    limit = Duration(nanos=5000000000)
+
 0 passed, 0 failed, 4 blocked

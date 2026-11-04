@@ -1120,6 +1120,37 @@ test "text that is not a time" ... blocked by todo("parse_time")
 test "later on the same day" ... blocked by todo("later")
 test "later, past midnight" ... blocked by todo("later")
 test "contract of later" ... blocked by todo("later")
+
+test "a time of day" ... blocked by todo("parse_time")
+what the test printed:
+  in scope at the typed hole `todo("parse_time")`:
+    text = "18:30"
+
+test "numbers that are not on the clock" ... blocked by todo("parse_time")
+what the test printed:
+  in scope at the typed hole `todo("parse_time")`:
+    text = "24:00"
+
+test "text that is not a time" ... blocked by todo("parse_time")
+what the test printed:
+  in scope at the typed hole `todo("parse_time")`:
+    text = "noon"
+
+test "later on the same day" ... blocked by todo("later")
+what the test printed:
+  in scope at the typed hole `todo("later")`:
+    minutes = 30
+
+test "later, past midnight" ... blocked by todo("later")
+what the test printed:
+  in scope at the typed hole `todo("later")`:
+    minutes = 20
+
+test "contract of later" ... blocked by todo("later")
+what the test printed:
+  in scope at the typed hole `todo("later")`:
+    minutes = 1
+
 0 passed, 0 failed, 6 blocked
 ```
 
@@ -1265,6 +1296,69 @@ test "a transfer that cannot be paid changes nothing" ... blocked by todo("trans
 test "contract of Account.deposit" ... blocked by todo("deposit")
 test "contract of Account.withdraw" ... blocked by todo("withdraw")
 test "contract of transfer" ... blocked by todo("transfer")
+
+test "money in and out" ... blocked by todo("deposit")
+what the test printed:
+  in scope at the typed hole `todo("deposit")`:
+    self = Account(balance=1000, limit=500)
+    cents = 250
+    old(self.balance) = 1000
+
+test "below zero costs the fee" ... blocked by todo("withdraw")
+what the test printed:
+  in scope at the typed hole `todo("withdraw")`:
+    self = Account(balance=1000, limit=500)
+    cents = 1100
+    old(self.balance) = 1000
+
+test "past the limit is refused" ... blocked by todo("withdraw")
+what the test printed:
+  in scope at the typed hole `todo("withdraw")`:
+    self = Account(balance=1000, limit=500)
+    cents = 1600
+    old(self.balance) = 1000
+
+test "a transfer moves the money" ... blocked by todo("transfer")
+what the test printed:
+  in scope at the typed hole `todo("transfer")`:
+    source = Account(balance=2000, limit=0)
+    target = Account(balance=100, limit=1000)
+    cents = 1500
+    old(target.balance) = 100
+    old(source.balance) = 2000
+
+test "a transfer that cannot be paid changes nothing" ... blocked by todo("transfer")
+what the test printed:
+  in scope at the typed hole `todo("transfer")`:
+    source = Account(balance=100, limit=1000)
+    target = Account(balance=2000, limit=0)
+    cents = 1200
+    old(target.balance) = 2000
+    old(source.balance) = 100
+
+test "contract of Account.deposit" ... blocked by todo("deposit")
+what the test printed:
+  in scope at the typed hole `todo("deposit")`:
+    self = Account(balance=0, limit=7)
+    cents = 7
+    old(self.balance) = 0
+
+test "contract of Account.withdraw" ... blocked by todo("withdraw")
+what the test printed:
+  in scope at the typed hole `todo("withdraw")`:
+    self = Account(balance=0, limit=7)
+    cents = 7
+    old(self.balance) = 0
+
+test "contract of transfer" ... blocked by todo("transfer")
+what the test printed:
+  in scope at the typed hole `todo("transfer")`:
+    source = Account(balance=2870197286250646421, limit=3)
+    target = Account(balance=5, limit=8)
+    cents = 2
+    old(target.balance) = 5
+    old(source.balance) = 2870197286250646421
+
 0 passed, 0 failed, 8 blocked
 ```
 

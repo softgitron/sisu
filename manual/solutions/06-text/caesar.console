@@ -9,4 +9,29 @@ test "one place along" ... blocked by todo("caesar")
 test "past the end of the alphabet" ... blocked by todo("caesar")
 test "capitals and punctuation" ... blocked by todo("caesar")
 test "there and back" ... blocked by todo("caesar")
+
+test "one place along" ... blocked by todo("caesar")
+what the test printed:
+  in scope at the typed hole `todo("caesar")`:
+    text = "abc"
+    shift = 1
+
+test "past the end of the alphabet" ... blocked by todo("caesar")
+what the test printed:
+  in scope at the typed hole `todo("caesar")`:
+    text = "xyz"
+    shift = 3
+
+test "capitals and punctuation" ... blocked by todo("caesar")
+what the test printed:
+  in scope at the typed hole `todo("caesar")`:
+    text = "Hei, Aino!"
+    shift = 13
+
+test "there and back" ... blocked by todo("caesar")
+what the test printed:
+  in scope at the typed hole `todo("caesar")`:
+    text = "Kissa"
+    shift = 5
+
 0 passed, 0 failed, 4 blocked

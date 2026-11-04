@@ -1,1 +1,1 @@
-19:12-19:39 E0347 type.bound-not-satisfied ty="Heater" bound="Eq"
+21:9-21:16 E0347 type.bound-not-satisfied ty="Heater" bound="Eq"

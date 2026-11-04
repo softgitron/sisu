@@ -1,0 +1,8 @@
+# A test from outside the package: `levels.clamp` is not reachable here.
+from levels import left
+
+test "a full tank":
+    assert left(40, 0) == 40
+
+test "more used than there was":
+    assert left(40, 50) == 0

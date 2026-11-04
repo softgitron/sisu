@@ -641,13 +641,18 @@ pub(crate) fn relative(path: &Path, from: &Path) -> std::path::PathBuf {
 }
 
 /// How `sisu run --native` runs the executable: the seed of its schedule
-/// (`--schedule-seed`), `--explore N`, and whether it reports the
-/// scheduler's numbers (`--stats`), which the runtime reads from
-/// `SISU_SCHEDULE_SEED` and `SISU_STATS` (decision 203).
+/// (`--schedule-seed`), `--explore N`, whether it reports the scheduler's
+/// numbers (`--stats`), which the runtime reads from `SISU_SCHEDULE_SEED`
+/// and `SISU_STATS` (decision 203), and the scheduler (`--scheduler`, with
+/// the search's bound of preemptions), from `SISU_SCHEDULER` (decision
+/// 541).
+#[derive(Clone)]
 pub(crate) struct Run {
     pub seed: u64,
     pub explore: Option<u64>,
     pub stats: bool,
+    pub strategy: sisu_interp::Strategy,
+    pub bound: u32,
     pub profile: Profile,
     /// Where a package's executable goes and stays (decision 231); none
     /// for a file, whose executable is built aside and removed.
@@ -689,20 +694,26 @@ pub(crate) fn run_command(
 /// Runs a built executable as `sisu run --native` does: once with the seed
 /// of `how`, or under `--explore N` seeds; its exit status is the run's.
 pub(crate) fn run_built(exe: &Path, args: &[String], how: &Run, host: &mut dyn Host) -> i32 {
+    if matches!(how.strategy, sisu_interp::Strategy::Exhaustive { .. }) {
+        return search(exe, args, how, host);
+    }
     match how.explore {
-        None => run_once(exe, args, how.seed, how.stats, host),
+        None => run_once(exe, args, how, host),
         Some(n) => explore(exe, args, how, n, host),
     }
 }
 
-fn command(exe: &Path, args: &[String], seed: u64, stats: bool) -> std::process::Command {
+fn command(exe: &Path, args: &[String], seed: u64, how: &Run) -> std::process::Command {
     let mut cmd = std::process::Command::new(exe);
     cmd.args(args);
     if seed != 0 {
         cmd.env("SISU_SCHEDULE_SEED", seed.to_string());
     }
-    if stats {
+    if how.stats {
         cmd.env("SISU_STATS", "1");
+    }
+    if let Some(v) = crate::native_tests::scheduler_env(&how.strategy) {
+        cmd.env("SISU_SCHEDULER", v);
     }
     cmd
 }
@@ -715,8 +726,8 @@ fn cannot_run(exe: &Path, e: &std::io::Error, host: &mut dyn Host) -> i32 {
     EXIT_ERROR
 }
 
-fn run_once(exe: &Path, args: &[String], seed: u64, stats: bool, host: &mut dyn Host) -> i32 {
-    match command(exe, args, seed, stats).status() {
+fn run_once(exe: &Path, args: &[String], how: &Run, host: &mut dyn Host) -> i32 {
+    match command(exe, args, how.seed, how).status() {
         Ok(st) => exit_code(st),
         Err(e) => cannot_run(exe, &e, host),
     }
@@ -730,7 +741,7 @@ fn explore(exe: &Path, args: &[String], how: &Run, n: u64, host: &mut dyn Host) 
     let mut first: Option<(String, String)> = None;
     for k in 0..n {
         let seed = how.seed.wrapping_add(k);
-        let out = match command(exe, args, seed, how.stats).stdin(std::process::Stdio::null()).output() {
+        let out = match command(exe, args, seed, how).stdin(std::process::Stdio::null()).output() {
             Ok(o) => o,
             Err(e) => return cannot_run(exe, &e, host),
         };
@@ -742,10 +753,16 @@ fn explore(exe: &Path, args: &[String], how: &Run, n: u64, host: &mut dyn Host) 
         if status != 0 {
             host.stdout(&stdout);
             host.stderr(&stderr);
-            host.stderr(&text(
-                msg::CLI_EXPLORE_FAILED,
-                &[("seed", seed.to_string()), ("count", n.to_string()), ("status", status.to_string())],
-            ));
+            let mut params =
+                vec![("seed", seed.to_string()), ("count", n.to_string()), ("status", status.to_string())];
+            let line = match &how.strategy {
+                sisu_interp::Strategy::Pct { depth } => {
+                    params.push(("depth", depth.to_string()));
+                    msg::CLI_PCT_FAILED
+                }
+                _ => msg::CLI_EXPLORE_FAILED,
+            };
+            host.stderr(&text(line, &params));
             return status;
         }
         match &first {
@@ -774,9 +791,92 @@ fn explore(exe: &Path, args: &[String], how: &Run, n: u64, host: &mut dyn Host) 
         host.stderr(&err);
     }
     let last = how.seed.wrapping_add(n - 1);
+    let mut params =
+        vec![("count", n.to_string()), ("first", how.seed.to_string()), ("last", last.to_string())];
+    let line = match &how.strategy {
+        sisu_interp::Strategy::Pct { depth } => {
+            params.push(("depth", depth.to_string()));
+            msg::CLI_PCT_OK
+        }
+        _ => msg::CLI_EXPLORE_OK,
+    };
+    host.stderr(&text(line, &params));
+    0
+}
+
+/// `sisu run --native --scheduler exhaustive` (decision 541): the
+/// executable under every schedule with at most `how.bound` preemptions,
+/// depth first, up to `--explore N` of them (else 10 000), as the
+/// interpreter's `run_main_search` runs `main`: each run's choices come
+/// back from the runtime in the file `SISU_TRAIL` names, and give the next
+/// schedule; the first run that fails is reported with its output, and
+/// when none fails the first run's output is printed with a summary.
+fn search(exe: &Path, args: &[String], how: &Run, host: &mut dyn Host) -> i32 {
+    let cap = how.explore.unwrap_or(crate::cli::EXHAUSTIVE_CAP);
+    let trail_file = exe.with_file_name(format!("trail-{}", std::process::id()));
+    let mut first: Option<(String, String)> = None;
+    let mut prefix: Vec<u32> = Vec::new();
+    let mut count = 0u64;
+    let mut stopped = false;
+    loop {
+        count += 1;
+        let _ = std::fs::remove_file(&trail_file);
+        let run =
+            Run { strategy: sisu_interp::Strategy::Exhaustive { prefix: prefix.clone() }, ..how.clone() };
+        let out = match command(exe, args, how.seed, &run)
+            .env("SISU_TRAIL", &trail_file)
+            .stdin(std::process::Stdio::null())
+            .output()
+        {
+            Ok(o) => o,
+            Err(e) => return cannot_run(exe, &e, host),
+        };
+        let trail =
+            crate::native_tests::parse_trail(&std::fs::read_to_string(&trail_file).unwrap_or_default());
+        let _ = std::fs::remove_file(&trail_file);
+        let status = exit_code(out.status);
+        let (stdout, stderr) = (
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        );
+        if status != 0 {
+            host.stdout(&stdout);
+            host.stderr(&stderr);
+            let schedule: Vec<String> = trail.iter().map(|c| c.taken.to_string()).collect();
+            host.stderr(&text(
+                msg::CLI_EXHAUSTIVE_FAILED,
+                &[
+                    ("schedule", schedule.join(".")),
+                    ("status", status.to_string()),
+                    ("count", count.to_string()),
+                    ("bound", how.bound.to_string()),
+                ],
+            ));
+            return status;
+        }
+        if first.is_none() {
+            first = Some((stdout, stderr));
+        }
+        match sisu_interp::next_schedule(&trail, how.bound) {
+            Some(p) if count < cap => prefix = p,
+            Some(_) => {
+                stopped = true;
+                break;
+            }
+            None => break,
+        }
+    }
+    if let Some((out, err)) = first {
+        host.stdout(&out);
+        host.stderr(&err);
+    }
+    let stop =
+        if stopped { text(msg::CLI_EXHAUSTIVE_STOPPED, &[("cap", cap.to_string())]) } else { String::new() };
+    // The catalog's line ends where the stop's note would go.
+    let stop = stop.trim_end_matches('\n').to_string();
     host.stderr(&text(
-        msg::CLI_EXPLORE_OK,
-        &[("count", n.to_string()), ("first", how.seed.to_string()), ("last", last.to_string())],
+        msg::CLI_EXHAUSTIVE_OK,
+        &[("count", count.to_string()), ("bound", how.bound.to_string()), ("stopped", stop)],
     ));
     0
 }

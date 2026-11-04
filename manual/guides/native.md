@@ -132,9 +132,49 @@ test "no count at all" ... ok
   test`; the test cache is not used, so every test runs each time.
 - A release build of the tests still checks every contract, as `sisu
   test` always does.
-- What only the interpreter does is refused with D0134 or D0109: the
-  schedulers `pct` and `exhaustive`, and injected faults. Run those
-  tests without `--native`.
+- A failed `expect` records its failure and the test goes on, as in
+  the interpreter.
+- The schedulers, the `sim` profile's faults (`--sim --faults P`) and
+  `sim.always` run natively too, with the interpreter's choices, so a
+  seed or a schedule found one way runs the same the other. Here PCT
+  and the exhaustive search check that two tasks never put more than
+  five logs on the stove:
+
+<!-- file: examples/guide-native/turns.sisu -->
+```sisu
+# Two tasks add their logs to one stove; the total holds in every order.
+import std.sim
+
+def add_logs(stove: Mutex[int], n: int):
+    for _ in range(n):
+        var g = stove.lock()
+        g.value += 1
+
+test "every log reaches the stove":
+    let stove = Mutex(0)
+    sim.always("never more than five", () -> stove.lock().value <= 5) do:
+        _ = task.scope do s:
+            s.spawn(() -> add_logs(stove, 2))
+            s.spawn(() -> add_logs(stove, 3))
+            return Ok(())
+    assert stove.lock().value == 5
+```
+
+<!-- output: examples/guide-native/schedules.console -->
+```console
+$ sisu test --native --scheduler pct --explore 20 turns.sisu
+test "every log reaches the stove" ... ok
+1 passed, 0 failed, 0 blocked
+explored 20 schedules of a PCT scheduler of depth 3 per test (seeds 0 to 19)
+$ sisu test --native --scheduler exhaustive turns.sisu
+test "every log reaches the stove" ... ok
+1 passed, 0 failed, 0 blocked
+searched 127 schedules (preemption bound 2)
+```
+
+- What only the interpreter does is refused with D0134 (a test
+  parameter that no fake stands for); `sisu run --native` takes no
+  `--scheduler` (D0109). Run those without `--native`.
 
 ## 4. Choose a target
 

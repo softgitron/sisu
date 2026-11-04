@@ -56,6 +56,11 @@ list them (D-019):
   `src/geo.sisu` beside `src/geo/`, gives that module items of its own.
 - A module's name is lowercase letters, digits and `_`, so a file
   named otherwise is E1012.
+- A file directly in `tests/` beside the manifest is no module of the
+  package: it is a black-box test, a program of its own that imports
+  the package by its name and sees its `pub` items only, with the
+  package's dev-dependencies, which `sisu test` runs after the
+  package's tests ([R15](testing.md#black-box-tests)).
 
 <!-- file: examples/reference-modules/atlas.pkg/sisu.toml -->
 ```toml
@@ -333,7 +338,8 @@ Each key is a dependency's name, and its value a table:
 
 A dependency is named by its own `[package] name` (E1006 for another
 key), its directory has a manifest (E1005), and a dev-dependency is seen
-only by the package's tests. `NAME = "1.2"`, a version range alone, is
+only by the package's tests and by the black-box tests of `tests/`
+([R15](testing.md#black-box-tests)). `NAME = "1.2"`, a version range alone, is
 E1010 in stage 0 ([The registry](#the-registry)).
 
 ### `[features]`
@@ -448,11 +454,11 @@ compares with the target, not an expression (D-063). A dependency whose
 condition does not hold is not part of the build, and is still recorded
 in the lockfile, which is the same on every target.
 
-**Stage 0 differs.** An import of a dependency whose condition does not
-hold on this target is E0260, whose message asks to add the dependency
-to `[dependencies]`, where it already is.
+An import of a dependency whose condition does not hold on this target
+is E0275 ([R17](diagnostics.md#e0275)), which says that the `when`
+excludes it.
 
-**Status.** In stage 0 (D-063), with the difference noted.
+**Status.** In stage 0 (D-063).
 
 ## Features
 
@@ -771,7 +777,7 @@ C++ interop (Q-24).
 | E0257 | `resolve.not-reexported` | [Re-exports](#re-exports) |
 | E1000, E1001, [E1002](diagnostics.md#e1002), [E1003](diagnostics.md#e1003), E1004, E1005, E1006, [E1010](diagnostics.md#e1010), [E1017](diagnostics.md#e1017), [W0005](diagnostics.md#w0005) | `package.toml-syntax`, `package.toml-duplicate`, `package.missing-key`, `package.bad-value`, `package.bad-name`, `package.no-manifest`, `package.renamed-dependency`, `package.not-a-path`, `package.reserved-name`, `package.unknown-key` | [The manifest](#the-manifest) |
 | [E1015](diagnostics.md#e1015), [E0703](diagnostics.md#e0703), [E1019](diagnostics.md#e1019), E1020, [E1021](diagnostics.md#e1021), E1022 | `package.trust-unknown`, `cap.untrusted`, `package.unsafe-undeclared`, `package.unsafe-level`, `package.unsafe-untrusted`, `package.unsafe-raised` | [`[trust]`](#trust) |
-| E1011 | `package.bad-when` | [Target conditions](#target-conditions) |
+| E1011, [E0275](diagnostics.md#e0275) | `package.bad-when`, `resolve.dependency-excluded` | [Target conditions](#target-conditions) |
 | W0006, E1018 | `resolve.unknown-feature`, `package.unknown-feature` | [Features](#features) |
 | [E1007](diagnostics.md#e1007) | `package.cycle` | [Dependencies](#dependencies) |
 | E1013, E1016 | `package.no-member`, `package.no-package` | [Workspaces](#workspaces) |

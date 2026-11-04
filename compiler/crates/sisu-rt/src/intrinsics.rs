@@ -1556,7 +1556,8 @@ unsafe fn sum(c: &Call<'_>) -> u8 {
     // SAFETY: the arguments are of their types.
     unsafe {
         let it = iter::iterable(c.arg(0), c.ty(0), c.item(0));
-        let size = (*it).item_size as u32;
+        // The items are the result's numbers.
+        let size = ty(c.ret_ty).size;
         let items = match iter::collect_all(it, c.item(0)) {
             Ok(l) => l,
             Err(s) => return s,
@@ -1672,10 +1673,20 @@ unsafe fn assert_fail(c: &Call<'_>, i: Intrinsic) -> u8 {
     unsafe {
         let expr = String::from_utf8_lossy(c.text(0)).into_owned();
         let message = String::from_utf8_lossy(c.text(1)).into_owned();
-        let mut m = if message.is_empty() {
-            rt::render(msg::PANIC_ASSERT, &[("expr", expr.clone())])
+        let expect =
+            matches!(i, Intrinsic::ExpectFail | Intrinsic::ExpectFailCompare | Intrinsic::ExpectFailParts);
+        // In a test, a failed `expect` is recorded in the words of a failed
+        // expectation (decision 545).
+        let recorded = expect && rt::records_expect();
+        let (plain, with) = if recorded {
+            (msg::RUN_EXPECT_FAILED, msg::RUN_EXPECT_FAILED_MESSAGE)
         } else {
-            rt::render(msg::PANIC_ASSERT_MESSAGE, &[("expr", expr.clone()), ("message", message)])
+            (msg::PANIC_ASSERT, msg::PANIC_ASSERT_MESSAGE)
+        };
+        let mut m = if message.is_empty() {
+            rt::render(plain, &[("expr", expr.clone())])
+        } else {
+            rt::render(with, &[("expr", expr.clone()), ("message", message)])
         };
         if matches!(i, Intrinsic::AssertFailParts | Intrinsic::ExpectFailParts) {
             let parts = shown_parts(c.arg(2), c.ty(2));
@@ -1691,9 +1702,7 @@ unsafe fn assert_fail(c: &Call<'_>, i: Intrinsic) -> u8 {
             }
         }
         // In a test, `expect` records the failure and goes on (decision 500).
-        if matches!(i, Intrinsic::ExpectFail | Intrinsic::ExpectFailCompare | Intrinsic::ExpectFailParts)
-            && let Some(status) = rt::expect_failed(&m)
-        {
+        if recorded && let Some(status) = rt::expect_failed(&m) {
             return status;
         }
         rt::raise_msg(msg::PANIC_EXPLICIT, &[("message", m)])

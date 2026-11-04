@@ -5,9 +5,3 @@ error[E0900]: a variadic parameter, `*xs: T`, is not implemented in stage 0 yet;
 2 | def total(*prices: int) -> int:
   |           ^^^^^^^^^^^^
 
-error[E0305]: wrong number of arguments to `total`: expected 0, found 3
-  --> star_args.sisu:9:11
-  |
-9 |     print(total(3, 4, 5))
-  |           ^^^^^^^^^^^^^^
-

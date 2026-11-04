@@ -566,6 +566,115 @@ pub(package) def table_part(tb: ptr mut u8, part: int) -> ptr mut u8:
     set(it, P + 2, part)
     return it
 
+## The iterator of a range from `cur` to `stop` by `step`, which compiled
+## code steps through its header.
+pub(package) def new_range(cur: int, stop: int, step: int) -> ptr mut u8:
+    let it = make(S_RANGE, 8)
+    set(it, KIND, RANGE_KIND)
+    set(it, A, cur)
+    set(it, B, stop)
+    set(it, C, step)
+    return it
+
+## The iterator of the addresses of the elements, `size` bytes each, of the
+## borrowed list at `xs`, which compiled code steps through its header.
+pub(package) def new_list_ref(xs: ptr mut u8, size: int) -> ptr mut u8:
+    let it = make(S_LIST_REF, 8)
+    set(it, KIND, LIST_KIND)
+    set(it, A, xs.addr())
+    set(it, C, size)
+    return it
+
+## The iterator that owns the elements, of type `elem`, of the list whose
+## three words are at `xs`, which it takes.
+##
+## Requires:
+## - `typed`: `xs` holds a live list of elements of type `elem`, which moves
+##   in
+pub(package) def new_items(ts: Types, xs: ptr mut u8, elem: int) -> ptr mut u8:
+    let it = make(S_ITEMS, ts.size(elem))
+    # safety: in_bounds: the state's five words are in the object;
+    #   returns_promptly: memmove copies the list's three words, which
+    #   `typed` says are live, into them.
+    unsafe:
+        _ = memmove(it.offset(P * 8), xs.as_const(), 24)
+    set(it, P + 4, elem)
+    return it
+
+## The iterator of the characters (`chars`) or the bytes of the `n` bytes
+## at `b`, a text that outlives it.
+pub(package) def new_text(b: ptr mut u8, n: int, chars: bool) -> ptr mut u8:
+    let it = make(if chars: S_CHARS else: S_BYTES, 8)
+    set(it, P, b.addr())
+    set(it, P + 1, n)
+    return it
+
+## The iterator of a copy of the `n` bytes at `b`, which it owns.
+##
+## Requires:
+## - `readable`: `b` points to `n` live bytes
+pub(package) def new_owned_bytes(b: ptr[u8], n: int) -> ptr mut u8:
+    # safety: returns_promptly: the runtime in Rust gives a block of `n`
+    #   bytes, and memmove copies the `n` bytes `readable` says are live.
+    let block = unsafe sisu_rt_alloc(n)
+    if n > 0:
+        # safety: as above.
+        _ = unsafe memmove(block, b, n)
+    let it = make(S_OWNED_BYTES, 8)
+    set(it, P, block.addr())
+    set(it, P + 1, n)
+    return it
+
+## The iterator of an index beside each item of the iterator at `inner`,
+## which it owns.
+##
+## Requires:
+## - `iterator`: `inner` is the address of a live iterator's object
+pub(package) def new_enumerate(inner: ptr mut u8) -> ptr mut u8:
+    let it = make(S_ENUMERATE, 8 + get(inner, SIZE))
+    set(it, P, inner.addr())
+    return it
+
+## The iterator of the pairs of the iterators at `a` and `b`, which it
+## owns, of items of types `ta` and `tb`; with `strict`, their lengths must
+## agree.
+##
+## Requires:
+## - `iterator`: `a` and `b` are the addresses of live iterators' objects
+pub(package) def new_zip(
+    a: ptr mut u8, b: ptr mut u8, strict: bool, ta: int, tb: int
+) -> ptr mut u8:
+    let it = make(S_ZIP, get(a, SIZE) + get(b, SIZE))
+    set(it, P, a.addr())
+    set(it, P + 1, b.addr())
+    set(it, P + 2, if strict: 1 else: 0)
+    set(it, P + 3, ta)
+    set(it, P + 4, tb)
+    return it
+
+## The iterator of a generator's items (`generator`, its task `id`) or of a
+## receiver's values (its channel `id`), `size` bytes each, which the runtime
+## in Rust gives, running the scheduler.
+pub(package) def new_waiting(id: int, size: int, generator: bool) -> ptr mut u8:
+    let it = make(if generator: S_GEN else: S_RECV, size)
+    set(it, P, id)
+    return it
+
+## What `Iter.next` of the iterator at `it` may wait for: 1 for a
+## generator's item, 2 for a receiver's value, writing its task or channel
+## and the size of an item at `out`, two words; 0 when it does not wait.
+##
+## Requires:
+## - `iterator`: `it` is the address of a live iterator's object, and `out`
+##   has room for two words
+pub(package) def waits(it: ptr mut u8, out: ptr mut u8) -> int:
+    let state = get(it, STATE)
+    if state != S_GEN and state != S_RECV:
+        return 0
+    set(out, 0, get(it, P))
+    set(out, 1, get(it, SIZE))
+    return if state == S_GEN: 1 else: 2
+
 ## Every item left of the iterator at `it`, of type `item` (-1 when the
 ## call does not say), moved into a new list at `out`; the iterator is
 ## dropped after, and when a panic stops it, with what it has left, and so

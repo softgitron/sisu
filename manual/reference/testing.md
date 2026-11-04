@@ -1,13 +1,12 @@
 # Testing
 
 This page states what a test is and what the tools around it do: the
-forms of `test`, its outcomes, the capabilities a test receives and how
-tests are kept apart, what a test prints, native tests, assertions,
-property tests and their generators, `@refines`, fakes of a program's
-own traits, doc examples, transcripts, snapshots, replay tokens,
-simulation, benchmarks, and what `sisu test` remembers. The command and
-its options are
-[R16](sisu-command.md#sisu-test).
+forms of `test`, black-box tests, its outcomes, the capabilities a test
+receives and how tests are kept apart, what a test prints, native tests,
+assertions, property tests and their generators, `@refines`, fakes of a
+program's own traits, doc examples, transcripts, snapshots, replay
+tokens, simulation, benchmarks, and what `sisu test` remembers. The
+command and its options are [R16](sisu-command.md#sisu-test).
 
 **See also:** the tutorial's [chapter 1](../tutorial/01-hello.md)
 (tests and holes) and [chapter 19](../tutorial/19-testing.md) (testing
@@ -81,6 +80,112 @@ test "large numbers/doubles a large number" ... ok
 
 **Status.** In stage 0 (D-041).
 
+## Black-box tests
+
+A file `tests/NAME.sisu` beside a package's manifest is a program of
+one module whose dependencies are the package, by its name, and the
+package's dev-dependencies
+([17](../../proposal/17-testing.md#discovery-and-organisation)): it
+imports the package as a user does, so it reaches the package's `pub`
+items only (E0255 for any other), and the package is built without its
+own tests. The file has the package's features, so `--features` and
+`--no-default-features` mean what they mean for the package, and its
+names are relative to the package's directory.
+
+`sisu test` of a package runs its own tests, then each file of
+`tests/`, in the order of their names, as a program each, with its own
+list, failures and counts; a workspace does so for each member. A
+failure's replay token names the file, and `sisu test --replay TOKEN
+tests/NAME.sisu` runs that test alone. The status is the worst of the
+programs', a failure outweighing a blocked test.
+
+<!-- file: examples/reference-testing/levels.pkg/src/lib.sisu -->
+```sisu
+##! A water tank's level, in whole litres.
+
+## The litres left after `used` of `full`, never below zero.
+pub def left(full: int, used: int) -> int:
+    return clamp(full - used)
+
+def clamp(litres: int) -> int:
+    return max(litres, 0)
+
+test "clamp keeps zero":
+    assert clamp(-4) == 0
+```
+
+<!-- file: examples/reference-testing/levels.pkg/tests/tank.sisu -->
+```sisu
+# A test from outside the package: `levels.clamp` is not reachable here.
+from levels import left
+
+test "a full tank":
+    assert left(40, 0) == 40
+
+test "more used than there was":
+    assert left(40, 50) == 0
+```
+
+<!-- output: examples/reference-testing/levels.console -->
+```console
+$ sisu test
+test "clamp keeps zero" ... ok
+1 passed, 0 failed, 0 blocked
+test "a full tank" ... ok
+test "more used than there was" ... ok
+2 passed, 0 failed, 0 blocked
+```
+
+With `left` written as `full - used`, without the clamp, the black-box
+test fails, and its replay token runs it again from its file:
+
+<!-- file: examples/reference-testing/levels_bug.files/src/lib.sisu -->
+```sisu
+##! A water tank's level, in whole litres.
+
+## The litres left after `used` of `full`, never below zero.
+pub def left(full: int, used: int) -> int:
+    return full - used
+
+def clamp(litres: int) -> int:
+    return max(litres, 0)
+
+test "clamp keeps zero":
+    assert clamp(-4) == 0
+```
+
+<!-- output: examples/reference-testing/levels_bug.console -->
+```console
+$ sisu test
+test "clamp keeps zero" ... ok
+1 passed, 0 failed, 0 blocked
+test "a full tank" ... ok
+test "more used than there was" ... FAILED
+
+test "more used than there was" ... FAILED
+panic: assertion failed: left(40, 50) == 0
+  left:  -10
+  right: 0
+  at test "more used than there was" (tests/tank.sisu:8:5)
+replay: sisu test --replay 1-b79581b3297380ab-0.0.1-t1-s0-r0 tests/tank.sisu
+
+1 passed, 1 failed, 0 blocked
+$ sisu test --replay 1-b79581b3297380ab-0.0.1-t1-s0-r0 tests/tank.sisu
+test "more used than there was" ... FAILED
+
+test "more used than there was" ... FAILED
+panic: assertion failed: left(40, 50) == 0
+  left:  -10
+  right: 0
+  at test "more used than there was" (tests/tank.sisu:8:5)
+replay: sisu test --replay 1-b79581b3297380ab-0.0.1-t1-s0-r0 tests/tank.sisu
+
+0 passed, 1 failed, 0 blocked
+```
+
+**Status.** In stage 0 (D-041; decisions 480 and 508 of the
+architecture notes).
+
 ## Outcomes
 
 Each test ends in one of three outcomes:
@@ -102,14 +207,14 @@ and 3 when no test failed and one is blocked, so a pipeline can tell a
 suite that waits for code from one that is done (D-061;
 [R16](sisu-command.md#sisu-test)).
 
-**Stage 0 differs.** In [17](../../proposal/17-testing.md#assertions)
-a test that reaches a hole stops with the hole's closure, a line naming
-the hole and a line `NAME = VALUE` for each binding in scope there
-([R17](diagnostics.md#r0160)), as a run does. Stage 0 drops a blocked
-test's output ([What a test prints](#what-a-test-prints)), and the
-closure with it, so only `sisu run` shows one.
+A test that reaches a hole stops with the hole's closure, as a run
+does ([17](../../proposal/17-testing.md#assertions)): a line naming the
+hole and a line `NAME = VALUE` for each binding in scope there
+([R17](diagnostics.md#r0160)). It is the blocked test's output, so it
+comes in the test's block after the list ([What a test
+prints](#what-a-test-prints)).
 
-**Status.** In stage 0 (D-061), with the differences noted.
+**Status.** In stage 0 (D-061).
 
 ## Isolation and the test clock
 
@@ -130,9 +235,11 @@ time ([R10](capabilities.md#fakes)).
 ## What a test prints
 
 What a test writes to standard output and standard error is captured.
-A test that passes or is blocked prints nothing of it; a failing test's
-block after the list shows it after its header, under `what the test
-printed:` (D0135), each line indented, before how it failed. Under
+A test that passes prints nothing of it; a failing test's block after
+the list shows it after its header, under `what the test printed:`
+(D0135), each line indented, before how it failed, and a blocked test
+that printed anything, its hole's closure at least, has a block of its
+own, its header and what it printed. Under
 `--explore N` the output shown is that of the schedule that failed, and
 a replay token's run shows what its own run printed.
 
@@ -213,18 +320,19 @@ tokens and `--explore N`, each seed a run of the executable, are the
 interpreter's; the test cache is not used. The session of [What a test
 prints](#what-a-test-prints) runs its tests both ways.
 
-What only the interpreter does is D0134: the schedulers `pct` and
-`exhaustive` (D0109 when `--scheduler` is given), injected faults
-(`--faults`), and a test parameter that no fake stands for. A failed
-`expect` stops a native test as `assert` does.
+The schedulers are the interpreter's too: `--scheduler pct` and
+`--scheduler exhaustive` run natively with the same choices, so a seed
+or a schedule found one way replays the other. So are the `sim`
+profile's injected faults (`--sim --faults P`), drawn as the interpreter
+draws them, and `sim.choose` and `sim.always`, whose predicate is
+checked at each switch. A failed `expect` records its failure and the
+test goes on, as in the interpreter ([Assertions](#assertions)); the
+failures are reported in order at the test's end. What only the
+interpreter does is D0134, a test parameter that no fake stands for,
+and a native build that fails says why on standard error.
 
-**Stage 0 differs.** `sisu test --native --sim` and `--native --sim
---faults P` print nothing and exit with status 1: the refusal, D0134 or
-the build's error, is held with the tests' captured output and dropped.
-`sim.always` and `sim.choose` are not compiled yet (D0103).
-
-**Status.** In stage 0 (decision 460 of the architecture notes), with
-the differences noted.
+**Status.** In stage 0 (decisions 460 and 500 to 503 of the
+architecture notes).
 
 ## Assertions
 
@@ -297,10 +405,29 @@ panic: assertion failed: double(5) == 10
 replay: sisu test --replay 1-f194bbb30a1dcbdc-0.0.1-t0-s0-r0 expect.sisu
 
 0 passed, 1 failed, 0 blocked
+$ sisu test --native expect.sisu
+test "doubles" ... FAILED
+
+test "doubles" ... FAILED
+what the test printed:
+  after the expects
+panic: assertion failed: double(3) == 6
+  left:  5
+  right: 6
+  at test "doubles" (expect.sisu:7:5)
+panic: assertion failed: double(5) == 10
+  left:  7
+  right: 10
+  at test "doubles" (expect.sisu:9:5)
+replay: sisu test --replay 1-f194bbb30a1dcbdc-0.0.1-t0-s0-r0 expect.sisu
+
+0 passed, 1 failed, 0 blocked
 ```
 
-Outside a test, in a program that `sisu run` runs, and at compile time,
-a failed `expect` stops the run as `assert` does, since no test is there
+A native test goes on after a failed `expect` in the same way, and
+reports the same failures ([Native tests](#native-tests)). Outside a
+test, in a program that `sisu run` runs, and at compile time, a failed
+`expect` stops the run as `assert` does, since no test is there
 to fail at the end. `debug_assert CONDITION[, MESSAGE]` is the form
 that follows the contract level ([R11](contracts.md#check-levels)):
 checked as `assert` is wherever every contract is checked, `sisu test`
@@ -694,12 +821,13 @@ and the reports of coverage and mutation testing are designed
 | Code | Identifier | Section |
 |---|---|---|
 | E0381, E0702, [E0807](diagnostics.md#e0807) | `type.return-in-test`, `type.test-signature`, `contract.not-in-test` | [The forms of a test](#the-forms-of-a-test) |
+| [E0255](diagnostics.md#e0255) | `resolve.private-item` | [Black-box tests](#black-box-tests) |
 | [R0006](diagnostics.md#r0006), E0379 | `panic.assert`, `type.assert-message` | [Assertions](#assertions) |
 | E0820 | `test.no-generator` | [Property tests](#property-tests) |
 | E0821 | `test.refines-mismatch` | [Refinement tests](#refinement-tests) |
 | E0614 | `comptime.no-fake` | [Fakes of your own traits](#fakes-of-your-own-traits) |
 | [D0135](diagnostics.md#d0135) | `cli.test-output` | [What a test prints](#what-a-test-prints) |
-| [D0134](diagnostics.md#d0134), D0109 | `native.test-unsupported`, `native.alone` | [Native tests](#native-tests) |
+| [D0134](diagnostics.md#d0134) | `native.test-unsupported` | [Native tests](#native-tests) |
 | D0061, [D0128](diagnostics.md#d0128) | `cli.transcript-differs`, `cli.transcript-front-end` | [Transcripts](#transcripts) |
 | R0107, [R0108](diagnostics.md#r0108) | `test.snapshot-changed`, `test.snapshot-missing` | [Snapshots](#snapshots) |
 | D0031, D0032, [D0033](diagnostics.md#d0033), D0034, D0035 | `cli.replay-no-token`, `cli.bad-replay-token`, `cli.token-other-code`, `cli.other-toolchain`, `cli.token-no-test` | [Replay tokens](#replay-tokens) |

@@ -1,0 +1,24 @@
+# A lost update that the seeded scheduler's first schedule misses: each
+# task reads the counter, gives way, then writes what it read plus one.
+# `sisu run --scheduler pct` and `--scheduler exhaustive` find it, in the
+# interpreter and natively (decision 541).
+
+@derive(Copy)
+struct Counter:
+    cell: Cap[Mutex[int]]
+
+def bump(c: Counter):
+    let seen = c.cell.get().lock().value
+    task.yield_now()
+    var g = c.cell.get().lock()
+    g.value = seen + 1
+
+def main():
+    let c = Counter(cell=Cap(Mutex(0)))
+    _ = task.scope do s:
+        s.spawn(() -> bump(c))
+        s.spawn(() -> bump(c))
+        return Ok(())
+    let v = c.cell.get().lock().value
+    print("bumped to {v}")
+    assert v == 2

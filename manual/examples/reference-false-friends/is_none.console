@@ -4,5 +4,5 @@ error[E0100]: expected `:`, found `is`
   |
 4 |     if found is None:
   |              ^^
-  = fix: Sisu writes it `.is_none()`: `.is_none()`
+  = fix: Sisu writes it so: `.is_none()`
 

@@ -4,10 +4,12 @@ error[E0117]: unexpected `:` after the end of the statement
   |
 3 |     try:
   |        ^
+  = note: Sisu has no `try`: an error is a value, a `Result` or a `T ! E`, which `?` passes on and `match`, `else` or `if let` handles
 
 error[E0117]: unexpected `:` after the end of the statement
   --> try_except.sisu:5:11
   |
 5 |     except:
   |           ^
+  = note: Sisu has no `except`: an error is a value, a `Result` or a `T ! E`, which `?` passes on and `match`, `else` or `if let` handles
 

@@ -472,19 +472,21 @@ bookings `heater=Wood`.
 ```console
 $ sisu run derive_heater.sisu
 error[E0347]: `Heater` does not implement `Eq`
-  --> <derive>/main.sisu:19:12
+  --> derive_heater.sisu:21:9
    |
-19 |         if self.heater != other.heater:
-   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+21 | @derive(Changes)
+   |         ^^^^^^^
+  = note: in the impl of `Changes` that the derive writes for `Booking`: `if self.heater != other.heater:`
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
 E0347 (`type.bound-not-satisfied`) comes from the code that the derive
 wrote: the comparison of the two heaters needs `Eq`, which `Heater`
-does not have. Its place is in `<derive>/main.sisu`, the module where
-the compiler writes derived impls, and the line it shows is the
-unrolled code. `@derive(Eq)` on `Heater` fixes it.
+does not have. Its place is the derive's argument that asked for the
+impl, `Changes` in `@derive(Changes)`, and its note quotes the line of
+the impl that the derive wrote for `Booking`, the unrolled code.
+`@derive(Eq)` on `Heater` fixes it.
 
 </details>
 
@@ -1021,6 +1023,17 @@ warning[W0001]: typed hole `count_ones` of type `int`
 test "the bits of a byte" ... blocked by todo("ones_in")
 test "the table" ... blocked by todo("a table worked out with `comptime`")
 test "counting the bits of data" ... blocked by todo("count_ones")
+
+test "the bits of a byte" ... blocked by todo("ones_in")
+what the test printed:
+  in scope at the typed hole `todo("ones_in")`:
+    byte = 0
+
+test "counting the bits of data" ... blocked by todo("count_ones")
+what the test printed:
+  in scope at the typed hole `todo("count_ones")`:
+    data = b""
+
 0 passed, 0 failed, 3 blocked
 ```
 
@@ -1106,26 +1119,40 @@ test "a stove":
 ```console
 $ sisu test form.sisu
 warning[W0001]: typed hole `form` of type `String`
-  --> <derive>/main.sisu:4:16
-  |
-4 |         return todo("form")
-  |                ^^^^^^^^^^^^
+  --> form.sisu:22:9
+   |
+22 | @derive(Form)
+   |         ^^^^
+  = note: in the impl of `Form` that the derive writes for `Booking`: `return todo("form")`
 
 warning[W0001]: typed hole `form` of type `String`
-  --> <derive>/main.sisu:23:16
+  --> form.sisu:29:9
    |
-23 |         return todo("form")
-   |                ^^^^^^^^^^^^
+29 | @derive(Form)
+   |         ^^^^
+  = note: in the impl of `Form` that the derive writes for `Stove`: `return todo("form")`
 
 test "a booking" ... blocked by todo("form")
 test "a stove" ... blocked by todo("form")
+
+test "a booking" ... blocked by todo("form")
+what the test printed:
+  in scope at the typed hole `todo("form")`:
+    self = Booking(name="Aino", hour=18, minutes=90)
+
+test "a stove" ... blocked by todo("form")
+what the test printed:
+  in scope at the typed hole `todo("form")`:
+    self = Stove(celsius=78.5, lit=True)
+
 0 passed, 0 failed, 2 blocked
 ```
 
-The warnings name `<derive>/main.sisu`, where the compiler writes the
-impls that `derive` makes, once for each struct: the hole is in the
-template, so each derived impl has one. Each test stops at the hole
-with `self` in scope, the value whose form it makes.
+The warnings stand at each `@derive(Form)`, once for each struct, and
+their notes quote the line of the impl that the derive wrote: the hole
+is in the template, so each derived impl has one. Each test stops at
+the hole with `self` in scope, the value whose form it makes, which its
+block after the list shows.
 
 <details>
 <summary>Hint 1</summary>

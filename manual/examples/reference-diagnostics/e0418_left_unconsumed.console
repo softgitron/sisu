@@ -1,5 +1,5 @@
 $ sisu run e0418_left_unconsumed.sisu
-error[E0418]: this leaves the scope with `draft` unconsumed: a `Draft` must be passed to an `own` parameter first
+error[E0418]: this leaves the scope with `draft` unconsumed: a value of `Draft` must be passed to an `own` parameter first
   --> e0418_left_unconsumed.sisu:12:9
    |
 12 |         return "nothing to post"

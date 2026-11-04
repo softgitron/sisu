@@ -684,8 +684,9 @@ What the driver does around stage 1, because of what its commands are:
 ## Stage 2: what the native backend leaves out
 
 The native debug backend (architecture.md, "Stage 2") compiles every
-program the conformance suite runs (`conformance/native.list`, 248
-cases, 39 of which run their tests natively too, decision 460), with the
+program the conformance suite runs (`conformance/native.list`, 271
+cases, 50 of which run their tests natively too, decisions 460 and 540),
+with the
 debug profile and the release one (decision 232), and every one of those
 runs frees what it allocated (decision 226). A
 construct it does not compile is `D0103` under `--native`, and the
@@ -706,29 +707,30 @@ leaves out:
   through a switch on the member, if another front end needs one.
 - **The interpreter's modes**: the ownership monitor, the counterexample
   mode, the capability log and replay, hot replacement, `--stats
-  stack-depth` and `--stats shared`, and the schedulers other than the
-  seeded one (`--scheduler pct`, `exhaustive`). `sisu test --native`
-  runs a program's tests compiled (decisions 460 and 461), but for what
-  is the interpreter's alone: PCT and the exhaustive search, the `sim`
-  profile's injected faults (`--faults`), `sim.always` and `sim.choose`,
-  `expect`'s recording (natively `assert`'s panic), a property's budget
-  of statements (`TooLong`), and the test cache. *Pay*: PCT and the
-  bounded search as the runtime's other ways to pick (decision 204 keeps
-  the generator's draws in one place); the faults at the dispatch of
-  `FsOps` and `NetOps` on the simulation's objects; `sim.always`'s
-  predicates run at each switch on the next task's stack, outside the
-  budget; `expect` recorded by the runtime and reported at the test's
-  end; a count of yield points standing for the budget of statements.
+  stack-depth` and `--stats shared`, and the test cache. The schedulers
+  other than the seeded one run natively for `sisu test` and `sisu run`
+  (decisions 501 and 541), and so do the `sim` profile's faults,
+  `sim.always`, `sim.choose`, `expect`'s recording and a property's
+  budget (decisions 500 to 503 and 540). *Pay*: as "A native run as the
+  default of `sisu run`" below says.
 
 What the unsafe round (decisions 301 and 302) leaves natively:
 
 - **Raw memory goes through the runtime** but for a word or a byte: a raw
   pointer's address, made, cast or offset, and a read or a write of a type
   whose raw memory is its value's word, or of a `u8` or an `i8`, are
-  compiled inline (decision 335); every other intrinsic of std.mem is a
+  compiled inline in the release profile (decision 335), and in the debug
+  profile only its address and casts, the runtime checking the rest
+  (decision 543); every other intrinsic of std.mem is a
   call of `sisu_rt_intrinsic` with a descriptor, and a value whose layout
   in raw memory is not its value's is converted part by part at each
-  access. *Pay*: the other widths and structs inline, and one layout for
+  access. The debug profile's checks take a lock and a lookup in an
+  ordered map of each block's values (two million reads and writes in
+  2.3 s, 0.03 s in the release profile, 7.1 s in the interpreter).
+  *Pay* for the checks: a shadow of a block's slots as an array beside it
+  and no lock outside `std.par`'s workers (a tenth of the time); the
+  reads and writes of the debug profile that the facts prove (decision
+  270) inline, as the release profile's. *Pay*: the other widths and structs inline, and one layout for
   values and raw memory in the backend in Sisu (each part at its own
   width), when it replaces decision 188's.
 - **A pointer to a place, and a reference from a pointer, of a type whose
@@ -1008,18 +1010,39 @@ Nothing here switches the default.
 - **The checked memory model of unsafe code** (D-085, decision 301): a
   run in the interpreter checks every raw access (released, out of
   bounds, uninitialised, misaligned, of another type, two layouts, a leak
-  at exit); natively such a program's fault is undefined behaviour. Of
-  the suite's 274 runnable cases (a run, or a `sisu test` run, to compare,
-  decision 460), 258 run natively (`native.list`, 48 of them their tests
-  too, decisions 500 to 507); 15 of the other 16 are `unsafe/` cases
-  whose expectation is the model's report, and the last,
-  `contracts/properties`, waits for a property's budget (below), as
-  `contracts/checks`'s tests do. *Need*: a program whose packages declare `unsafe` (its
-  lockfile has the level, decision 275) keeps running in the interpreter
-  by default, the others natively; a native checked mode (shadow memory
-  for `Global`'s blocks, a check before each raw read and write lowered
-  from std.mem's intrinsics) is the replacement. *Estimate*: the rule,
-  half a day; the native checked mode, two to three weeks.
+  at exit); natively, a build of the debug profile now checks the same
+  for the blocks of `Global` with the interpreter's panics (decisions 543
+  and 544), the release profile nothing. Of the suite's runnable cases (a
+  run, or a `sisu test` run, to compare, decision 460), 271 run natively
+  (`native.list`, 50 of them their tests too, decision 540), 12 of them
+  `unsafe/` refusals marked `checked`; the 4 left out are `unsafe/` cases
+  the native model does not see. *Need*, in the order of their worth:
+  a place's liveness, `R0135` (`gone`: a pointer made by `ptr.of` records
+  the task's stack and the frame's depth, and an access through it after
+  that frame returned is refused; the runtime reads the depth counter,
+  and the frame's base from the generated code, which passes it to
+  `ptr.of`: half a week, both lowerings); a pointer's provenance, `R0139`
+  (`shared_write`: the pointers `ptr.of` makes from a shared borrow
+  registered by address and kind until the place's frame returns, a
+  write through an address registered shared refused, wrong for two
+  pointers to one place of different kinds, so a tag of the pointer's
+  word, the high 16 bits, stripped at each access and at a foreign call,
+  is the sound form: a week, both lowerings and the C calls); the
+  reads of a reference into a block (`reference_behind`) checked as a
+  pointer's are, which the monitor's loans do in the interpreter and
+  native code has no hook for (a debug build's reference reads through
+  the runtime: two weeks, and a debug build as slow as the interpreter
+  on such code); the memory C gives out (`malloc`'s blocks, `getenv`'s
+  text) registered at the foreign call that returns it, from the
+  declaration's types (two days); a debug build that runs raw memory as
+  fast as the release profile's where the facts prove an access (the
+  checks of a loop's pointer hoisted, decision 270's facts on offsets:
+  a week). `foreign_unknown` stays the interpreter's: native code calls
+  the C function. A program whose packages declare `unsafe` (its lockfile
+  has the level, decision 275) can now run natively by default in the
+  debug profile without losing the checks of `Global`'s blocks; the rule
+  that keeps it in the interpreter is half a day, if the owner wants the
+  provenance and the places checked first (Q-77).
 - **The time a run starts in**: both run stage 1 first (about 0.55 s for
   a small file); the interpreter then starts at once, where a native run
   lowers, compiles and links (about 1.8 s a case when the suite builds its
@@ -1038,8 +1061,9 @@ Nothing here switches the default.
   were the interpreter's; `sisu test --native` now runs both, with
   `sim.choose` and `sim.always` (decisions 501 and 503: `sim/pct`,
   `sim/lost_update`, `sim/choose_always` and `sim/always_held` are in the
-  list). *Need*: for `sisu run`, `--scheduler` natively, the same code
-  reached from `sisu run --native` (half a day).
+  list), and `sisu run --native` takes `--scheduler` too (decision 541:
+  PCT, and the search through the trail the runtime writes to
+  `SISU_TRAIL`). *Need*: nothing.
 - **Capabilities**: the host's root objects are the runtime in Rust's
   intrinsics and the fakes std's Sisu code in both, so a plain run needs
   nothing more, and `sisu test --native` gives a test its fakes and the
@@ -1049,26 +1073,15 @@ Nothing here switches the default.
   executable's SIR, so no lowering knows of them; `sim/faults`,
   `sim/http_faults` and `sim/no_revoked` are in the list). *Need*:
   nothing.
-- **A property's budget**: native code counts no statements, so
-  `test.catch`'s `steps` bounds nothing and a case that runs past its
-  budget passes natively (`contracts/properties`), and one whose case
-  runs for minutes is not stopped (`contracts/checks`'s generated test of
-  `isqrt`, whose tests stay the interpreter's). *Need*: the budget as a
-  count of the yield checks the case passes (function entries and back
-  edges), which the generated code already counts, `TooLong` when it runs
-  out, which needs a yield check that can unwind (its call returns no
-  status yet, in both lowerings and both backends): `sisu_rt_yield`
-  returning a status, the slow path of each yield check branching to the
-  failure path of the block it is in (or, at a function's entry, to the
-  return that gives the depth back), byte for byte the same in the Rust
-  lowering and stage 2's, and the runtime counting the yield points a case
-  passes while the seeded scheduler's budget, which the same counter
-  holds, keeps its meaning (the counter capped at what the case has left,
-  the rest kept aside, every store of it through one helper). A case's
-  count then differs from the interpreter's statements, so the budget's
-  number means another amount of work. *Estimate*: two days; then
-  `contracts/properties` joins the list and `contracts/checks` runs its
-  tests natively.
+- **A property's budget**: natively `test.catch` counts the yield points
+  a case passes in the counter the seeded scheduler's budget shares, and
+  a yield check unwinds a case that ran out (decision 540:
+  `contracts/properties` is in the list, `contracts/checks` runs its
+  tests natively). A case's count is of yield points, not statements, so
+  the budget's number means more work natively than in the interpreter.
+  *Need*: nothing, unless a budget must mean the same amount of work in
+  both, which needs the interpreter to count yield points too (half a
+  day, and every `steps=` in std and the suite chosen again).
 - **`expect`**: recorded natively with the frames a panic would leave,
   walked by the panic's own unwinding in a copy of the process (decision
   500; `testing/expect`). *Need*: nothing; the copy's drops run as an
@@ -1107,8 +1120,9 @@ and replay, the two `--stats` kinds), with the interpreter kept for
 `unsafe` code, the monitor, the counterexample mode and `--watch`; about
 two more (PCT, the exhaustive search, `sim.always`, the faults, a
 property's budget, `expect`) make every test of the suite outside
-`unsafe/` run natively too; of those, a property's budget is left (two
-days), decisions 500 to 503 having done the rest.
+`unsafe/` run natively too, which decisions 500 to 503 and 540 have done.
+The native checked memory model has its first slice (decisions 543 and
+544), and the rest above is about four weeks.
 
 ## Not yet done from Phases 0, 2, 3, 4, 6 and 8
 

@@ -9,4 +9,29 @@ test "an answer at once" ... blocked by todo("ask")
 test "busy twice, then an answer" ... blocked by todo("ask")
 test "busy every time" ... blocked by todo("ask")
 test "an unknown town is asked once" ... blocked by todo("ask")
+
+test "an answer at once" ... blocked by todo("ask")
+what the test printed:
+  in scope at the typed hole `todo("ask")`:
+    town = "Oulu"
+    tries = 3
+
+test "busy twice, then an answer" ... blocked by todo("ask")
+what the test printed:
+  in scope at the typed hole `todo("ask")`:
+    town = "Turku"
+    tries = 5
+
+test "busy every time" ... blocked by todo("ask")
+what the test printed:
+  in scope at the typed hole `todo("ask")`:
+    town = "Oulu"
+    tries = 4
+
+test "an unknown town is asked once" ... blocked by todo("ask")
+what the test printed:
+  in scope at the typed hole `todo("ask")`:
+    town = "Atlantis"
+    tries = 3
+
 0 passed, 0 failed, 4 blocked

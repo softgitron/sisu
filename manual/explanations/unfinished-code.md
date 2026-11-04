@@ -92,18 +92,26 @@ warning[W0001]: typed hole `the middle element of sorted_xs` of type `int`
 
 test "the mean of three" ... ok
 test "the median of three" ... blocked by todo("the middle element of sorted_xs")
+
+test "the median of three" ... blocked by todo("the middle element of sorted_xs")
+what the test printed:
+  in scope at the typed hole `todo("the middle element of sorted_xs")`:
+    xs = [3, 1, 2]
+    sorted_xs = [1, 2, 3]
+
 1 passed, 0 failed, 1 blocked
 ```
 
 W0001 (`type.hole`) is a warning, not an error, so the program still
 runs: the finished function's test passes, and the test that reaches the
-hole is reported as blocked by it. Blocked is the
-third outcome of a test (D-057), and it is what separates "not written
+hole is reported as blocked by it. After the list, the blocked test's
+block shows the hole's closure, the bindings in scope where the test
+reached it, here `xs` and `sorted_xs`: what the missing code has to
+work with. Blocked is the third outcome of a test (D-057), and it is what separates "not written
 yet" from "wrong". A suite written before its code says which hole each
 test is waiting on, and its last line says how far the work has come. A
-program that reaches a hole while it runs prints the hole's closure,
-the bindings in scope there, what the missing code has to work with,
-and stops there, as a panic does. A placeholder that is meant to ship is
+program that reaches a hole while it runs prints the same closure and
+stops there, as a panic does. A placeholder that is meant to ship is
 spelled `panic("...")` instead, so that the two never look alike, and
 the design closes the loop: a release build rejects each hole (E0445),
 and `sisu publish` is designed to, so blocked is never a state that
@@ -136,17 +144,15 @@ are asked to work.
 ## The report and the fill engine to come
 
 Two tools build on holes, and neither is in stage 0 yet. The first is a
-report. A run already prints a hole's closure, the values in scope
-when it is reached, which is Hazel's idea, though a blocked test does
-not show it in stage 0, which drops the output of a test that does not
-fail; `sisu
+report. A run and a blocked test already print a hole's closure, the
+values in scope each time it is reached, which is Hazel's idea; `sisu
 check --holes` is designed to print, for every hole at once, the
 expected type and the definitions of the types it mentions, the bindings
 in scope with their conventions and capabilities, the enclosing
 `requires` as facts and `ensures` as obligations, the tests that reach
 it with the closures they reached it with, and the expressions in scope
-that fit, to a depth of two, as GHC lists them. It is meant for people, as a language-server query, and
-for programs that write code, in JSON. The last audience is not an
+that fit, to a depth of two, as GHC lists them. It is meant for people,
+as a language-server query, and for programs that write code, in JSON. The last audience is not an
 afterthought: in a study of filling holes in Hazel, giving a
 code-writing model what the checker knew about a hole helped it far more
 in Hazel, the language with the least training data, than in TypeScript,

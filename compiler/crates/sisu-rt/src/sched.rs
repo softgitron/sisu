@@ -345,8 +345,8 @@ pub(crate) fn check_always() {
         })
     });
     let Some(preds) = preds else { return };
-    let budget = crate::tls::budget().load(Relaxed);
-    crate::tls::budget().store(STARVED, Relaxed);
+    let budget = crate::budget::load();
+    crate::budget::store(STARVED);
     let mut failed = None;
     for (code, env, what) in preds {
         let mut ret = 0u64;
@@ -372,7 +372,7 @@ pub(crate) fn check_always() {
         failed = Some(p.map(|p| rt::panic_report(&p.message, &p.stack)).unwrap_or_default());
         break;
     }
-    crate::tls::budget().store(budget, Relaxed);
+    crate::budget::store(budget);
     system(|| with(|s| s.checking = false));
     if let Some(m) = failed {
         system(|| rt::abort(m.trim_end()));
@@ -409,8 +409,12 @@ impl Strategy {
 /// Writes the search's choices beside a native test's report
 /// (`SISU_TEST_REPORT` and `.trail`), for the driver (decision 501).
 pub(crate) fn write_trail() {
-    if let (Some(path), Some(text)) = (std::env::var_os("SISU_TEST_REPORT"), trail_text()) {
-        let mut path = path;
+    let Some(text) = trail_text() else { return };
+    // A run's trail goes where `SISU_TRAIL` names (decision 541), a test's
+    // beside its report.
+    if let Some(path) = std::env::var_os("SISU_TRAIL") {
+        let _ = std::fs::write(path, text);
+    } else if let Some(mut path) = std::env::var_os("SISU_TEST_REPORT") {
         path.push(".trail");
         let _ = std::fs::write(path, text);
     }
@@ -498,7 +502,7 @@ pub(crate) fn start(
 ) {
     let mut rng = Rng::new(seed);
     let budget = 1 + rng.next() % BUDGET_MAX;
-    crate::tls::budget().store(budget as i64, Relaxed);
+    crate::budget::store(budget as i64);
     // Under PCT and the exhaustive search every yield point reaches the
     // scheduler, as each of the interpreter's does.
     let mut change_points = Vec::new();
@@ -510,7 +514,7 @@ pub(crate) fn start(
         next_low = 1 << 39;
     }
     if strategy != Strategy::Random {
-        crate::tls::budget().store(1, Relaxed);
+        crate::budget::store(1);
     }
     for (w, v) in crate::tls::stack().iter().zip(root_limits) {
         w.store(v, Relaxed);
@@ -581,7 +585,7 @@ pub(crate) fn start(
 pub(crate) fn start_worker(pool: Pool, limits: [u64; abi::STACK_WORDS]) {
     start(0, Strategy::Random, false, pool, limits);
     with(|s| s.starved = true);
-    crate::tls::budget().store(STARVED, Relaxed);
+    crate::budget::store(STARVED);
 }
 
 /// Ends the run: the coroutines of generators nobody finished stay
@@ -766,10 +770,10 @@ pub(crate) fn blocking(mut attempt: impl FnMut() -> Attempt) -> u8 {
 /// point, so its count is given back first.
 pub(crate) fn neutral<R>(f: impl FnOnce() -> R) -> R {
     let armed = with(|s| {
-        let c = crate::tls::budget().load(Relaxed);
+        let c = crate::budget::load();
         let armed = !s.starved && c <= 0;
         s.neutral_armed |= armed;
-        crate::tls::budget().store(c + 1, Relaxed);
+        crate::budget::store(c + 1);
         armed
     });
     let r = f();
@@ -779,7 +783,7 @@ pub(crate) fn neutral<R>(f: impl FnOnce() -> R) -> R {
         with(|s| {
             if s.neutral_armed {
                 s.neutral_armed = false;
-                crate::tls::budget().fetch_sub(1, Relaxed);
+                crate::budget::spend();
             }
         });
     }
@@ -914,8 +918,8 @@ pub(crate) fn drive(t: u32) {
         s.cur = t;
         (asking, s.starved)
     });
-    let budget = crate::tls::budget().load(Relaxed);
-    crate::tls::budget().store(STARVED, Relaxed);
+    let budget = crate::budget::load();
+    crate::budget::store(STARVED);
     let mut mine = empty_ctx();
     save_ctx(&mut mine);
     let (my_yielder, on_system) = (YIELDER.with(Cell::get), ON_SYSTEM.with(Cell::get));
@@ -937,7 +941,7 @@ pub(crate) fn drive(t: u32) {
     with(|s| {
         s.cur = asking;
         let ended = was_starved && !s.starved;
-        crate::tls::budget().store(if ended { 0 } else { budget }, Relaxed);
+        crate::budget::store(if ended { 0 } else { budget });
     });
     suspended(t, r, co, ctx);
 }
@@ -998,17 +1002,27 @@ fn empty_ctx() -> Ctx {
     Ctx { depth: 0, stack: [0; abi::STACK_WORDS], panics: Vec::new() }
 }
 
-/// A yield point found the budget spent ([`abi::sym::YIELD`]).
+/// A yield point found the budget spent ([`abi::sym::YIELD`]): a
+/// property's case that ran out panics, which the generated code unwinds
+/// (decision 540); else the scheduler may switch tasks.
 #[unsafe(no_mangle)]
-extern "C" fn sisu_rt_yield() {
+extern "C" fn sisu_rt_yield() -> u8 {
+    match crate::budget::at_yield(system(rt::unwinding)) {
+        crate::budget::AtYield::TooLong(steps) => {
+            return system(|| rt::raise_msg(msg::RUN_CASE_TOO_LONG, &[("steps", steps.to_string())]));
+        }
+        crate::budget::AtYield::Held => return abi::OK,
+        crate::budget::AtYield::Spent => {}
+    }
     // A generator being driven runs to its `yield` without switching.
     if driving() {
-        crate::tls::budget().store(STARVED, Relaxed);
-        return;
+        crate::budget::store(STARVED);
+        return abi::OK;
     }
     if with(|s| s.yield_point(false)) {
         switch(Suspend::Preempt);
     }
+    abi::OK
 }
 
 /// `task.yield_now`: a yield point that gives way whenever another task is
@@ -1019,7 +1033,7 @@ pub(crate) fn yield_now() {
     }
     let go = with(|s| {
         if !s.starved {
-            crate::tls::budget().fetch_sub(1, Relaxed);
+            crate::budget::spend();
         }
         s.yield_point(true)
     });
@@ -1077,14 +1091,14 @@ impl Sched {
         }
         if self.starved {
             self.starved = false;
-            crate::tls::budget().store(0, Relaxed);
+            crate::budget::store(0);
         }
     }
 
     /// A spawn counts as a yield point without switching.
     pub(crate) fn spend_one(&mut self) {
         if !self.starved {
-            crate::tls::budget().fetch_sub(1, Relaxed);
+            crate::budget::spend();
         }
     }
 
@@ -1096,15 +1110,15 @@ impl Sched {
             // The entry of a function entered by `neutral`.
             self.neutral_armed = false;
             let next = if self.strategy == Strategy::Random { 0 } else { 1 };
-            crate::tls::budget().store(next, Relaxed);
+            crate::budget::store(next);
             return false;
         }
         if self.strategy != Strategy::Random {
             return self.yield_point_chosen(asked);
         }
-        let spent = crate::tls::budget().load(Relaxed) <= 0 || self.starved;
+        let spent = crate::budget::load() <= 0 || self.starved;
         if spent && !self.starved {
-            crate::tls::budget().store(0, Relaxed);
+            crate::budget::store(0);
         }
         if (spent || asked) && !self.ready.is_empty() {
             let cur = self.cur;
@@ -1114,7 +1128,7 @@ impl Sched {
         }
         if spent && !self.starved {
             self.starved = true;
-            crate::tls::budget().store(STARVED, Relaxed);
+            crate::budget::store(STARVED);
         }
         false
     }
@@ -1122,7 +1136,7 @@ impl Sched {
     /// A yield point under PCT or the exhaustive search, each of which
     /// reaches the scheduler: the interpreter's `yield_point` for them.
     fn yield_point_chosen(&mut self, asked: bool) -> bool {
-        crate::tls::budget().store(1, Relaxed);
+        crate::budget::store(1);
         let cur = self.cur;
         let go = match self.strategy {
             Strategy::Random => false,
@@ -1251,7 +1265,7 @@ impl Sched {
         }
         let budget = 1 + self.rng.next() % BUDGET_MAX;
         let budget = if self.strategy == Strategy::Random { budget as i64 } else { 1 };
-        crate::tls::budget().store(budget, Relaxed);
+        crate::budget::store(budget);
         self.starved = false;
         next
     }

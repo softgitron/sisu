@@ -10,6 +10,7 @@ error[E0117]: unexpected `print` after the end of the statement
   |
 4 |     go print("hello {count}")
   |        ^^^^^
+  = note: a task starts in a scope, which joins it: `task.scope do s:` and `s.spawn(() -> f())`
 
 $ sisu check nil.sisu
 error[E0200]: cannot find `nil` in this scope
@@ -17,5 +18,5 @@ error[E0200]: cannot find `nil` in this scope
   |
 3 |     let best: str? = nil
   |                      ^^^
-  = fix: Sisu writes it `None`: `None`
+  = fix: Sisu writes it so: `None`
 

@@ -823,6 +823,8 @@ R0152 runtime panic.foreign-fd            `write` to the file descriptor {fd}, w
 # A machine intrinsic of `std.rt` (22, "Machine intrinsics"; D-086): native
 # code only, since the interpreter runs its tasks on its own scheduler.
 R0153 runtime panic.machine-intrinsic     `{name}` is a machine intrinsic of native code; the interpreter runs its tasks on a scheduler of its own
+R0154 runtime run.expect-failed          expectation failed: {expr}
+R0155 runtime run.expect-failed-message  expectation failed: {expr}\n  message: {message}
 
 # ---------------------------------------------------------------- driver
 
@@ -1003,3 +1005,6 @@ D0134 cli     native.test-unsupported     `sisu test --native` does not run {wha
 # A test's output is captured and shown with its failure (17, "What is
 # deliberately absent"; decision 466).
 D0135 cli     cli.test-output             what the test printed:
+# `sisu bench --samples K` (decision 468): an interval needs two samples
+# at least (decision 546; the manual's finding G27).
+D0136 cli     cli.bench-samples           `--samples` takes 2 or more, not {value}: the interval of the mean needs two samples

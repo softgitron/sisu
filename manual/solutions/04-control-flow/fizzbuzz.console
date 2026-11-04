@@ -9,4 +9,25 @@ test "plain numbers" ... blocked by todo("fizzbuzz")
 test "multiples of three or five" ... blocked by todo("fizzbuzz")
 test "multiples of fifteen" ... blocked by todo("fizzbuzz")
 test "a line of words" ... blocked by todo("fizzbuzz")
+
+test "plain numbers" ... blocked by todo("fizzbuzz")
+what the test printed:
+  in scope at the typed hole `todo("fizzbuzz")`:
+    n = 1
+
+test "multiples of three or five" ... blocked by todo("fizzbuzz")
+what the test printed:
+  in scope at the typed hole `todo("fizzbuzz")`:
+    n = 9
+
+test "multiples of fifteen" ... blocked by todo("fizzbuzz")
+what the test printed:
+  in scope at the typed hole `todo("fizzbuzz")`:
+    n = 30
+
+test "a line of words" ... blocked by todo("fizzbuzz")
+what the test printed:
+  in scope at the typed hole `todo("fizzbuzz")`:
+    n = 1
+
 0 passed, 0 failed, 4 blocked

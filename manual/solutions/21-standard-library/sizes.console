@@ -8,4 +8,20 @@ warning[W0001]: typed hole `sizes_by_extension` of type `dict[String, int] ! IoE
 test "every kind of file" ... blocked by todo("sizes_by_extension")
 test "a directory deeper down" ... blocked by todo("sizes_by_extension")
 test "a directory that is not there" ... blocked by todo("sizes_by_extension")
+
+test "every kind of file" ... blocked by todo("sizes_by_extension")
+what the test printed:
+  in scope at the typed hole `todo("sizes_by_extension")`:
+    dir = "photos"
+
+test "a directory deeper down" ... blocked by todo("sizes_by_extension")
+what the test printed:
+  in scope at the typed hole `todo("sizes_by_extension")`:
+    dir = "photos/2025"
+
+test "a directory that is not there" ... blocked by todo("sizes_by_extension")
+what the test printed:
+  in scope at the typed hole `todo("sizes_by_extension")`:
+    dir = "music"
+
 0 passed, 0 failed, 3 blocked

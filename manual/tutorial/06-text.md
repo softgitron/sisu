@@ -647,6 +647,27 @@ test "two words" ... blocked by todo("title_case")
 test "capitals in the middle" ... blocked by todo("title_case")
 test "letters with dots and extra spaces" ... blocked by todo("title_case")
 test "no words" ... blocked by todo("title_case")
+
+test "two words" ... blocked by todo("title_case")
+what the test printed:
+  in scope at the typed hole `todo("title_case")`:
+    text = "hei maailma"
+
+test "capitals in the middle" ... blocked by todo("title_case")
+what the test printed:
+  in scope at the typed hole `todo("title_case")`:
+    text = "tAMPERE AND turku"
+
+test "letters with dots and extra spaces" ... blocked by todo("title_case")
+what the test printed:
+  in scope at the typed hole `todo("title_case")`:
+    text = "  äiti   ja isä "
+
+test "no words" ... blocked by todo("title_case")
+what the test printed:
+  in scope at the typed hole `todo("title_case")`:
+    text = ""
+
 0 passed, 0 failed, 4 blocked
 ```
 
@@ -712,6 +733,22 @@ warning[W0001]: typed hole `csv_fields` of type `list[String]`
 test "plain fields" ... blocked by todo("csv_fields")
 test "an empty field" ... blocked by todo("csv_fields")
 test "a comma inside quotes" ... blocked by todo("csv_fields")
+
+test "plain fields" ... blocked by todo("csv_fields")
+what the test printed:
+  in scope at the typed hole `todo("csv_fields")`:
+    line = "a,b,c"
+
+test "an empty field" ... blocked by todo("csv_fields")
+what the test printed:
+  in scope at the typed hole `todo("csv_fields")`:
+    line = "a,,b"
+
+test "a comma inside quotes" ... blocked by todo("csv_fields")
+what the test printed:
+  in scope at the typed hole `todo("csv_fields")`:
+    line = "\"Oulu, Finland\",214000"
+
 0 passed, 0 failed, 3 blocked
 ```
 
@@ -785,6 +822,31 @@ test "one place along" ... blocked by todo("caesar")
 test "past the end of the alphabet" ... blocked by todo("caesar")
 test "capitals and punctuation" ... blocked by todo("caesar")
 test "there and back" ... blocked by todo("caesar")
+
+test "one place along" ... blocked by todo("caesar")
+what the test printed:
+  in scope at the typed hole `todo("caesar")`:
+    text = "abc"
+    shift = 1
+
+test "past the end of the alphabet" ... blocked by todo("caesar")
+what the test printed:
+  in scope at the typed hole `todo("caesar")`:
+    text = "xyz"
+    shift = 3
+
+test "capitals and punctuation" ... blocked by todo("caesar")
+what the test printed:
+  in scope at the typed hole `todo("caesar")`:
+    text = "Hei, Aino!"
+    shift = 13
+
+test "there and back" ... blocked by todo("caesar")
+what the test printed:
+  in scope at the typed hole `todo("caesar")`:
+    text = "Kissa"
+    shift = 5
+
 0 passed, 0 failed, 4 blocked
 ```
 

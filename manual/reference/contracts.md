@@ -370,7 +370,7 @@ error[E0813]: `Small` refines `int` and has its reading impls; it cannot have an
 6 | impl Display for Small:
   | ^^^^^^^^^^^^^^^^^^^^^^
 
-error[E0812]: `xs` is a `Short`, which a change through its base could take outside `len(self) <= 3`; change a copy of the base and check it again with `try_from`
+error[E0812]: `xs` is of type `Short`, which a change through its base could take outside `len(self) <= 3`; change a copy of the base and check it again with `try_from`
   --> refine_mistakes.sisu:12:5
    |
 12 |     xs.push(3)
@@ -594,9 +594,13 @@ panic: precondition of `Meter.read` failed: at >= 0
     at >= 0
     │
     -5
-  at Dial.Meter.read (trait_contract.sisu:4:18)
+  at Meter.read for Dial (trait_contract.sisu:4:18)
   at main (trait_contract.sisu:15:11)
 ```
+
+The trace names a method of a trait's impl by the trait and the type,
+`Meter.read for Dial`, as a trace does for any trait's impl
+([R8](errors.md#panics-and-unwinding)).
 
 An impl in another module than the trait's, or in another package, is
 held to the contract all the same. The trait's clauses are checked with
@@ -640,7 +644,7 @@ panic: precondition of `Meter.read` failed: at >= 0
     at >= 0
     │
     -5
-  at Dial.kiuas.meter.Meter.read (src/main.sisu:8:9)
+  at Meter.read for Dial (src/main.sisu:8:9)
   at main (src/main.sisu:13:11)
 ```
 

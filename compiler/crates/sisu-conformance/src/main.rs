@@ -139,7 +139,12 @@ fn main() {
         } else if from_sir {
             sisu_conformance::native::run_native_from_sir(&sisu, &root, &names)
         } else if release {
-            sisu_conformance::native::run_native_release(&sisu, &root, &names)
+            sisu_conformance::native::run_native_release(
+                &sisu,
+                &root,
+                &names,
+                &sisu_conformance::native::read_checked(&text),
+            )
         } else {
             sisu_conformance::native::run_native(&sisu, &root, &names)
         };

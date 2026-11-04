@@ -491,6 +491,25 @@ warning[W0001]: typed hole `whether the line holds the word` of type `bool`
 test "lines that hold the word" ... blocked by todo("the text of the file")
 test "no line holds it" ... blocked by todo("the text of the file")
 test "a file that is not there" ... blocked by todo("the text of the file")
+
+test "lines that hold the word" ... blocked by todo("the text of the file")
+what the test printed:
+  in scope at the typed hole `todo("the text of the file")`:
+    path = "poem.txt"
+    word = "warm"
+
+test "no line holds it" ... blocked by todo("the text of the file")
+what the test printed:
+  in scope at the typed hole `todo("the text of the file")`:
+    path = "poem.txt"
+    word = "snow"
+
+test "a file that is not there" ... blocked by todo("the text of the file")
+what the test printed:
+  in scope at the typed hole `todo("the text of the file")`:
+    path = "song.txt"
+    word = "warm"
+
 0 passed, 0 failed, 3 blocked
 ```
 
@@ -651,6 +670,42 @@ test "part 2, punctuation/punctuation inside a word" ... blocked by todo("count_
 test "part 3, the top words/the most common first" ... blocked by todo("top_words")
 test "part 3, the top words/equal counts in alphabetical order" ... blocked by todo("top_words")
 transcript "tests/counter.transcript" ... FAILED
+
+test "part 1, a minimum length/short words are left out" ... blocked by todo("count_words")
+what the test printed:
+  in scope at the typed hole `todo("count_words")`:
+    text = "a bb ccc bb"
+    min_length = 2
+
+test "part 1, a minimum length/every word counts in lower case" ... blocked by todo("count_words")
+what the test printed:
+  in scope at the typed hole `todo("count_words")`:
+    text = "Hei hei HEI"
+    min_length = 1
+
+test "part 2, punctuation/punctuation around a word" ... blocked by todo("count_words")
+what the test printed:
+  in scope at the typed hole `todo("count_words")`:
+    text = "Sauna, sauna. (SAUNA!)"
+    min_length = 1
+
+test "part 2, punctuation/punctuation inside a word" ... blocked by todo("count_words")
+what the test printed:
+  in scope at the typed hole `todo("count_words")`:
+    text = "a well-known 2-minute walk"
+    min_length = 2
+
+test "part 3, the top words/the most common first" ... blocked by todo("top_words")
+what the test printed:
+  in scope at the typed hole `todo("top_words")`:
+    counts = {"kissa": 1, "koira": 3, "kala": 2}
+    n = 2
+
+test "part 3, the top words/equal counts in alphabetical order" ... blocked by todo("top_words")
+what the test printed:
+  in scope at the typed hole `todo("top_words")`:
+    counts = {"tuli": 1, "meni": 1, "kevät": 1}
+    n = 5
 
 transcript "tests/counter.transcript" ... FAILED
 what the program printed differs from the transcript (`sisu test --update` accepts it):

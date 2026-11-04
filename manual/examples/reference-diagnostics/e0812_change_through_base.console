@@ -1,5 +1,5 @@
 $ sisu run e0812_change_through_base.sisu
-error[E0812]: `picks` is a `Short`, which a change through its base could take outside `len(self) <= 3`; change a copy of the base and check it again with `try_from`
+error[E0812]: `picks` is of type `Short`, which a change through its base could take outside `len(self) <= 3`; change a copy of the base and check it again with `try_from`
   --> e0812_change_through_base.sisu:6:5
   |
 6 |     picks.push(3)

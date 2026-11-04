@@ -118,15 +118,25 @@ warning[W0001]: typed hole `lay out the evening` of type `list[String]`
 
 test "turns from text" ... blocked by todo("read the turns")
 test "a free hour says so" ... blocked by todo("lay out the evening")
+
+test "turns from text" ... blocked by todo("read the turns")
+what the test printed:
+  in scope at the typed hole `todo("read the turns")`:
+    text = "18 Aino\n20 Eero"
+
+test "a free hour says so" ... blocked by todo("lay out the evening")
+what the test printed:
+  in scope at the typed hole `todo("lay out the evening")`:
+    turns = [Turn(name="Aino", hour=18)]
+
 0 passed, 0 failed, 2 blocked
 ```
 
 The run starts with the warning of each hole, as `sisu check` lists
-them. A blocked test prints nothing of what it did, so its hole's
-closure is not shown either; `sisu run`, as in step 1, shows it. The
-last line counts the tests that pass, fail
-and wait, which is the state of the plan. While a test is blocked and
-none fails, `sisu test` exits with status 3, so a job that runs the
+them. After the list, each blocked test has a block that shows what it
+printed, the closure of its hole: what the test handed the function.
+The last line counts the tests that pass, fail and wait, which is the
+state of the plan. While a test is blocked and none fails, `sisu test` exits with status 3, so a job that runs the
 tests can tell a plan that waits from one that is done.
 
 ## 3. Fill the holes one at a time
@@ -182,6 +192,12 @@ warning[W0001]: typed hole `lay out the evening` of type `list[String]`
 
 test "turns from text" ... ok
 test "a free hour says so" ... blocked by todo("lay out the evening")
+
+test "a free hour says so" ... blocked by todo("lay out the evening")
+what the test printed:
+  in scope at the typed hole `todo("lay out the evening")`:
+    turns = [Turn(name="Aino", hour=18)]
+
 1 passed, 0 failed, 1 blocked
 ```
 

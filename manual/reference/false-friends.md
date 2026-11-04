@@ -202,10 +202,10 @@ maintainers.
 | `for ... else:` | `if let` on a search's result | [E0127](diagnostics.md#e0127) | yes, in the message |
 | `a < b > c` | one direction | [E0113](diagnostics.md#e0113) | yes, in the message |
 | `x is None` | `x.is_none()`, `if let` | [E0100](diagnostics.md#e0100) | yes, as a fix |
-| `lambda x: e` | `x -> e` | [E0117](diagnostics.md#e0117) | no |
-| `f"{x}"` | `"{x}"` | [E0100](diagnostics.md#e0100) | no |
-| `class`, `__init__` | `struct` | [E0107](diagnostics.md#e0107), [E0215](diagnostics.md#e0215) | no |
-| `try:` `except:` | `T ! E`, `?`, `else` | [E0117](diagnostics.md#e0117) | no |
+| `lambda x: e` | `x -> e` | [E0117](diagnostics.md#e0117) | yes, as a fix |
+| `f"{x}"` | `"{x}"` | [E0100](diagnostics.md#e0100), [E0117](diagnostics.md#e0117) | in a call only |
+| `class`, `__init__` | `struct` | [E0107](diagnostics.md#e0107), [E0215](diagnostics.md#e0215) | `struct`, as a fix |
+| `try:` `except:` | `T ! E`, `?`, `else` | [E0117](diagnostics.md#e0117) | yes, in a note |
 | `int(s)`, `str(n)` | `s.parse_int()`, `"{n}"` | [E0200](diagnostics.md#e0200) | yes, in a note |
 | `append`, `strip`, `upper` | `push`, `trim`, `to_uppercase` | [E0304](diagnostics.md#e0304) | yes, as a fix |
 | `d.get(k, default)` | `d.get(k) ?? default` | [E0305](diagnostics.md#e0305) | no |
@@ -495,14 +495,15 @@ error[E0100]: expected `:`, found `is`
   |
 4 |     if found is None:
   |              ^^
-  = fix: Sisu writes it `.is_none()`: `.is_none()`
+  = fix: Sisu writes it so: `.is_none()`
 
 ```
 
 ### `lambda x: e`
 
 A closure is `x -> e`, or `it` for one parameter, or a `do` block
-(D-026). E0117.
+(D-026). E0117, whose fix writes `n ->` (`(a, b) ->` for two
+parameters).
 
 <!-- file: examples/reference-false-friends/lambda.sisu -->
 ```sisu
@@ -520,13 +521,17 @@ error[E0117]: unexpected `n` after the end of the statement
   |
 3 |     let double = lambda n: n * 2
   |                         ^
+  = fix: Sisu writes it so: `n ->`
 
 ```
 
 ### `f"..."`
 
 Every string literal interpolates, so there is no prefix
-([R1](lexical-structure.md#string-literals)). E0100.
+([R1](lexical-structure.md#string-literals)). E0100, whose fix writes
+the string without the `f`. After `=`, `let s = f"n is {n}"`, it is
+E0117 with no fix, which the plan lists for the compiler's
+maintainers.
 
 <!-- file: examples/reference-false-friends/f_string.sisu -->
 ```sisu
@@ -544,14 +549,17 @@ error[E0100]: expected `)`, found a string
   |
 4 |     print(f"n is {n}")
   |            ^
+  = fix: Sisu writes it so: `"n is {n}"`
 
 ```
 
 ### `class` and `__init__`
 
 A type with fields is a `struct`, built by calling its name with its
-fields; there is no inheritance (D-012). `class` is E0107 and `self`
-outside a method E0215.
+fields; there is no inheritance (D-012). `class` is E0107, whose fix
+writes `struct`, and `self` outside a method E0215; the methods go in
+an `impl` of the struct, and a constructor is the struct's name called
+with its fields, or an associated function.
 
 <!-- file: examples/reference-false-friends/class.sisu -->
 ```sisu
@@ -569,6 +577,7 @@ error[E0107]: statements cannot appear at the top level of a module; put them in
   |
 2 | class Point:
   | ^^^^^
+  = fix: Sisu writes it so: `struct`
 
 error[E0215]: `self` exists only inside a method
   --> class.sisu:3:18
@@ -587,7 +596,8 @@ error[E0389]: `self` exists only inside a method
 ### `try` and `except`
 
 An error is a value of type `T ! E`, handled with `?`, `else` or `match`
-(D-011). E0117.
+(D-011). E0117, at `try:`, `except:` and `finally:`, with the note
+`parse.no-exceptions`, which says so.
 
 <!-- file: examples/reference-false-friends/try_except.sisu -->
 ```sisu
@@ -607,12 +617,14 @@ error[E0117]: unexpected `:` after the end of the statement
   |
 3 |     try:
   |        ^
+  = note: Sisu has no `try`: an error is a value, a `Result` or a `T ! E`, which `?` passes on and `match`, `else` or `if let` handles
 
 error[E0117]: unexpected `:` after the end of the statement
   --> try_except.sisu:5:11
   |
 5 |     except:
   |           ^
+  = note: Sisu has no `except`: an error is a value, a `Result` or a `T ! E`, which `?` passes on and `match`, `else` or `if let` handles
 
 ```
 
@@ -769,12 +781,6 @@ error[E0900]: a variadic parameter, `*xs: T`, is not implemented in stage 0 yet;
 2 | def total(*prices: int) -> int:
   |           ^^^^^^^^^^^^
 
-error[E0305]: wrong number of arguments to `total`: expected 0, found 3
-  --> star_args.sisu:9:11
-  |
-9 |     print(total(3, 4, 5))
-  |           ^^^^^^^^^^^^^^
-
 ```
 
 ### `first, *rest = xs`
@@ -919,12 +925,12 @@ with a fix that writes the Sisu spelling.
 | `let mut x` | `var x` | [E0105](diagnostics.md#e0105) | yes, as a fix |
 | `a && b`, `a \|\| b`, `!a` | `a and b`, `a or b`, `not a` | [E0103](diagnostics.md#e0103) | yes, as a fix |
 | `i++`, `i--` | `i += 1`, `i -= 1` | [E0103](diagnostics.md#e0103) | yes, as a fix |
-| `x as f64` | `x.to_f64()` | [E0100](diagnostics.md#e0100), [E0117](diagnostics.md#e0117) | outside brackets only |
-| `// note` | `# note` | [E0117](diagnostics.md#e0117) | on a line of its own only |
+| `x as f64` | `x.to_f64()` | [E0100](diagnostics.md#e0100), [E0117](diagnostics.md#e0117) | yes, as a fix |
+| `// note` | `# note` | [E0117](diagnostics.md#e0117), [E0200](diagnostics.md#e0200) | yes, as a fix |
 | `x.clone()` | `x.copy()` | [E0304](diagnostics.md#e0304) | yes, as a fix |
 | `1 => "one"` | `case 1: "one"` | [E0100](diagnostics.md#e0100) | yes, as a fix |
 | `f(&xs)` | `f(ref xs)`, or `f(xs)` | [E0103](diagnostics.md#e0103) | yes, as a fix |
-| `0..3` | `range(3)` | [E0100](diagnostics.md#e0100), [E0117](diagnostics.md#e0117) | in a `let` only |
+| `0..3` | `range(3)` | [E0100](diagnostics.md#e0100), [E0117](diagnostics.md#e0117) | yes, as a fix |
 | `Vec<T>` | `list[T]` | [E0117](diagnostics.md#e0117) | yes, as a fix |
 | `println!(...)` | `print(...)` | [E0117](diagnostics.md#e0117) | yes, as a fix |
 | `pub(crate)` | `pub(package)` | [E0130](diagnostics.md#e0130) | yes, as a fix |
@@ -953,7 +959,7 @@ error[E0105]: expected a pattern, found `mut`
   |
 3 |     let mut total = 1
   |         ^^^
-  = fix: Sisu writes it `var`: `var`
+  = fix: Sisu writes it so: `var`
 
 ```
 
@@ -980,7 +986,7 @@ error[E0103]: expected an expression, found `&`
   |
 5 |     print(warm && dry)
   |                 ^
-  = fix: Sisu writes it `and`: `and`
+  = fix: Sisu writes it so: `and`
 
 ```
 
@@ -988,8 +994,8 @@ error[E0103]: expected an expression, found `&`
 
 A conversion is a method, `n.to_f64()`, and a lossy one says how:
 `round()`, `truncate_to_int()`. Inside a call's parentheses, as here,
-it is E0100 with no fix; after a value that ends a statement, `let x =
-n as f64`, it is E0117, whose fix writes `.to_f64()`.
+it is E0100, and after a value that ends a statement, `let x = n as
+f64`, E0117; the fix of each writes `.to_f64()`.
 
 <!-- file: examples/reference-false-friends/as_cast.sisu -->
 ```sisu
@@ -1007,14 +1013,16 @@ error[E0100]: expected `)`, found `as`
   |
 4 |     print(n as f64)
   |             ^^
+  = fix: Sisu writes it so: `.to_f64()`
 
 ```
 
 ### `//` for a comment
 
 A comment starts with `#`; `//` is integer division, as in Python. Here
-E0117 reports the comment's words, with no fix; a `//` comment on a line
-of its own gets E0117 with the fix that writes `#`.
+E0117 reports the comment's words, and its fix writes `#`, as on a line
+of its own; a one-word comment after a value, `print(n) // done`, is a
+division by a name, E0200, with the same fix.
 
 <!-- file: examples/reference-false-friends/slash_comment.sisu -->
 ```sisu
@@ -1032,6 +1040,7 @@ error[E0117]: unexpected `count` after the end of the statement
   |
 3 |     let n = 3 // the count
   |                      ^^^^^
+  = fix: Sisu writes it so: `#`
 
 ```
 
@@ -1083,14 +1092,14 @@ error[E0100]: expected `:`, found `=`
   |
 5 |         case 1 => "one"
   |                ^
-  = fix: Sisu writes it `:`: `:`
+  = fix: Sisu writes it so: `:`
 
 error[E0100]: expected `:`, found `=`
   --> match_arrow.sisu:6:16
   |
 6 |         case _ => "many"
   |                ^
-  = fix: Sisu writes it `:`: `:`
+  = fix: Sisu writes it so: `:`
 
 ```
 
@@ -1119,16 +1128,16 @@ error[E0103]: expected an expression, found `&`
   |
 7 |     print(total(&prices))
   |                 ^
-  = fix: Sisu writes it `ref`: `ref `
+  = fix: Sisu writes it so: `ref `
 
 ```
 
 ### `0..3` for a range
 
 A range is `range(3)` or `range(a, b)`; `..` is the rest of a pattern.
-In a `for` header, as here, it is E0100 with no fix; after a value
-that ends a statement, `let r = 0..3`, it is E0117, whose fix writes
-`range(0, 3)`.
+In a `for` header, as here, it is E0100, and after a value that ends a
+statement, `let r = 0..3`, E0117; the fix of each writes `range(0,
+3)`.
 
 <!-- file: examples/reference-false-friends/dot_range.sisu -->
 ```sisu
@@ -1146,6 +1155,7 @@ error[E0100]: expected `:`, found `..`
   |
 3 |     for i in 0..3:
   |               ^^
+  = fix: Sisu writes it so: `range(0, 3)`
 
 ```
 
@@ -1170,7 +1180,7 @@ error[E0117]: unexpected `<` after the end of the statement
   |
 3 |     let names: Vec<str> = ["Aino"]
   |                   ^
-  = fix: Sisu writes it `list[str]`: `list[str]`
+  = fix: Sisu writes it so: `list[str]`
 
 ```
 
@@ -1194,7 +1204,7 @@ error[E0117]: unexpected `!` after the end of the statement
   |
 3 |     println!("{}", 3)
   |            ^
-  = fix: Sisu writes it `print`: `print`
+  = fix: Sisu writes it so: `print`
 
 ```
 

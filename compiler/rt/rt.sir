@@ -762,18 +762,132 @@ fn export_iter_iterable(4) source 0 @456:5-456:25 {
     return @457:5-457:59
 }
 
-fn export_iter_collect(5) source 0 @466:5-466:24 {
+fn export_iter_range(3) source 0 @462:5-462:22 {
+    let _0: ptr_mut[u8]
+    let _1: int "cur" @462:23-462:31
+    let _2: int "stop" @462:33-462:42
+    let _3: int "step" @462:44-462:53
+  bb0:
+    _0 = call fn rt.iter.new_range(copy _1, copy _2, copy _3) @463:12-463:43
+    return @463:5-463:43
+}
+
+fn export_iter_list_ref(2) source 0 @467:5-467:25 {
+    let _0: ptr_mut[u8]
+    let _1: ptr_mut[u8] "xs" @467:26-467:40
+    let _2: int "size" @467:42-467:51
+  bb0:
+    _0 = call fn rt.iter.new_list_ref(copy _1, copy _2) @468:12-468:39
+    return @468:5-468:39
+}
+
+fn export_iter_items(3) source 0 @476:5-476:22 {
+    let _0: ptr_mut[u8]
+    let _1: ptr[int] "types" @476:23-476:38
+    let _2: ptr_mut[u8] "xs" @476:40-476:54
+    let _3: int "elem" @476:56-476:65
+    let _4: rt.types.Types
+  bb0:
+    _4 = struct rt.types.Types(copy _1) @477:27-477:45
+    _0 = call fn rt.iter.new_items(copy _4, copy _2, copy _3) @477:12-477:56
+    return @477:5-477:56
+}
+
+fn export_iter_chars(2) source 0 @481:5-481:22 {
+    let _0: ptr_mut[u8]
+    let _1: ptr_mut[u8] "b" @481:23-481:36
+    let _2: int "n" @481:38-481:44
+  bb0:
+    _0 = call fn rt.iter.new_text(copy _1, copy _2, const true) @482:12-482:37
+    return @482:5-482:37
+}
+
+fn export_iter_bytes(2) source 0 @485:5-485:22 {
+    let _0: ptr_mut[u8]
+    let _1: ptr_mut[u8] "b" @485:23-485:36
+    let _2: int "n" @485:38-485:44
+  bb0:
+    _0 = call fn rt.iter.new_text(copy _1, copy _2, const false) @486:12-486:38
+    return @486:5-486:38
+}
+
+fn export_iter_owned_bytes(2) source 0 @493:5-493:28 {
+    let _0: ptr_mut[u8]
+    let _1: ptr[u8] "b" @493:29-493:39
+    let _2: int "n" @493:41-493:47
+  bb0:
+    _0 = call fn rt.iter.new_owned_bytes(copy _1, copy _2) @494:12-494:38
+    return @494:5-494:38
+}
+
+fn export_iter_enumerate(1) source 0 @501:5-501:26 {
+    let _0: ptr_mut[u8]
+    let _1: ptr_mut[u8] "inner" @501:27-501:44
+  bb0:
+    _0 = call fn rt.iter.new_enumerate(copy _1) @502:12-502:37
+    return @502:5-502:37
+}
+
+fn export_iter_zip(5) source 0 @510:5-510:20 {
+    let _0: ptr_mut[u8]
+    let _1: ptr_mut[u8] "a" @510:21-510:34
+    let _2: ptr_mut[u8] "b" @510:36-510:49
+    let _3: bool "strict" @510:51-510:63
+    let _4: int "ta" @510:65-510:72
+    let _5: int "tb" @510:74-510:81
+  bb0:
+    _0 = call fn rt.iter.new_zip(copy _1, copy _2, copy _3, copy _4, copy _5) @511:12-511:46
+    return @511:5-511:46
+}
+
+fn export_iter_table_ref(2) source 0 @518:5-518:26 {
+    let _0: ptr_mut[u8]
+    let _1: ptr_mut[u8] "tb" @518:27-518:41
+    let _2: int "part" @518:43-518:52
+  bb0:
+    _0 = call fn rt.iter.table_part(copy _1, copy _2) @519:12-519:37
+    return @519:5-519:37
+}
+
+fn export_iter_generator(2) source 0 @523:5-523:26 {
+    let _0: ptr_mut[u8]
+    let _1: int "task" @523:27-523:36
+    let _2: int "size" @523:38-523:47
+  bb0:
+    _0 = call fn rt.iter.new_waiting(copy _1, copy _2, const true) @524:12-524:46
+    return @524:5-524:46
+}
+
+fn export_iter_receiver(2) source 0 @528:5-528:25 {
+    let _0: ptr_mut[u8]
+    let _1: int "chan" @528:26-528:35
+    let _2: int "size" @528:37-528:46
+  bb0:
+    _0 = call fn rt.iter.new_waiting(copy _1, copy _2, const false) @529:12-529:47
+    return @529:5-529:47
+}
+
+fn export_iter_waits(2) source 0 @538:5-538:22 {
     let _0: int
-    let _1: ptr[int] "types" @467:5-467:20
-    let _2: ptr_mut[u8] "it" @467:22-467:36
-    let _3: int "item" @467:38-467:47
-    let _4: ptr_mut[u8] "out" @467:49-467:64
-    let _5: int "mode" @467:66-467:75
+    let _1: ptr_mut[u8] "it" @538:23-538:37
+    let _2: ptr_mut[u8] "out" @538:39-538:54
+  bb0:
+    _0 = call fn rt.iter.waits(copy _1, copy _2) @539:12-539:31
+    return @539:5-539:31
+}
+
+fn export_iter_collect(5) source 0 @548:5-548:24 {
+    let _0: int
+    let _1: ptr[int] "types" @549:5-549:20
+    let _2: ptr_mut[u8] "it" @549:22-549:36
+    let _3: int "item" @549:38-549:47
+    let _4: ptr_mut[u8] "out" @549:49-549:64
+    let _5: int "mode" @549:66-549:75
     let _6: rt.types.Types
   bb0:
-    _6 = struct rt.types.Types(copy _1) @469:25-469:43
-    _0 = call fn rt.iter.collect(copy _6, copy _2, copy _3, copy _4, copy _5) @469:12-469:65
-    return @469:5-469:65
+    _6 = struct rt.types.Types(copy _1) @551:25-551:43
+    _0 = call fn rt.iter.collect(copy _6, copy _2, copy _3, copy _4, copy _5) @551:12-551:65
+    return @551:5-551:65
 }
 
 fn rt.floats.set(2) source 1 @48:5-48:8 {
@@ -5282,31 +5396,358 @@ fn rt.iter.table_part(2) source 2 @563:18-563:28 {
     return @567:5-567:14
 }
 
-fn rt.iter.collect(5) source 2 @577:18-577:25 {
-    let _0: int
-    let _1: rt.types.Types "ts" @577:26-577:35
-    let _2: ptr_mut[u8] "it" @577:37-577:51
-    let _3: int "item" @577:53-577:62
-    let _4: ptr_mut[u8] "out" @577:64-577:79
-    let _5: int "mode" @577:81-577:90
-    let _6: int "size" @578:9-578:13
+fn rt.iter.new_range(3) source 2 @571:18-571:27 {
+    let _0: ptr_mut[u8]
+    let _1: int "cur" @571:28-571:36
+    let _2: int "stop" @571:38-571:47
+    let _3: int "step" @571:49-571:58
+    let _4: ptr_mut[u8] "it" @572:9-572:11
+    let _5: int
+    let _6: ()
     let _7: int
-    let _8: ptr_mut[int] "w" @583:13-583:14
+    let _8: int
+    let _9: ()
+    let _10: int
+    let _11: ()
+    let _12: int
+    let _13: ()
+    let _14: int
+  bb0:
+    _5 = call fn rt.iter.S_RANGE() @572:19-572:26
+    _4 = call fn rt.iter.make(copy _5, const 8) @572:14-572:30
+    _7 = call fn rt.iter.KIND() @573:13-573:17
+    _8 = call fn rt.iter.RANGE_KIND() @573:19-573:29
+    _6 = call fn rt.iter.set(copy _4, copy _7, copy _8) @573:5-573:30
+    _10 = call fn rt.iter.A() @574:13-574:14
+    _9 = call fn rt.iter.set(copy _4, copy _10, copy _1) @574:5-574:20
+    _12 = call fn rt.iter.B() @575:13-575:14
+    _11 = call fn rt.iter.set(copy _4, copy _12, copy _2) @575:5-575:21
+    _14 = call fn rt.iter.C() @576:13-576:14
+    _13 = call fn rt.iter.set(copy _4, copy _14, copy _3) @576:5-576:21
+    _0 = copy _4 @577:12-577:14
+    return @577:5-577:14
+}
+
+fn rt.iter.new_list_ref(2) source 2 @581:18-581:30 {
+    let _0: ptr_mut[u8]
+    let _1: ptr_mut[u8] "xs" @581:31-581:45
+    let _2: int "size" @581:47-581:56
+    let _3: ptr_mut[u8] "it" @582:9-582:11
+    let _4: int
+    let _5: ()
+    let _6: int
+    let _7: int
+    let _8: ()
+    let _9: int
+    let _10: int
+    let _11: ()
+    let _12: int
+  bb0:
+    _4 = call fn rt.iter.S_LIST_REF() @582:19-582:29
+    _3 = call fn rt.iter.make(copy _4, const 8) @582:14-582:33
+    _6 = call fn rt.iter.KIND() @583:13-583:17
+    _7 = call fn rt.iter.LIST_KIND() @583:19-583:28
+    _5 = call fn rt.iter.set(copy _3, copy _6, copy _7) @583:5-583:29
+    _9 = call fn rt.iter.A() @584:13-584:14
+    _10 = call intrinsic mem.ptr.addr(copy _1) @584:16-584:25
+    _8 = call fn rt.iter.set(copy _3, copy _9, copy _10) @584:5-584:26
+    _12 = call fn rt.iter.C() @585:13-585:14
+    _11 = call fn rt.iter.set(copy _3, copy _12, copy _2) @585:5-585:21
+    _0 = copy _3 @586:12-586:14
+    return @586:5-586:14
+}
+
+fn rt.iter.new_items(3) source 2 @594:18-594:27 {
+    let _0: ptr_mut[u8]
+    let _1: rt.types.Types "ts" @594:28-594:37
+    let _2: ptr_mut[u8] "xs" @594:39-594:53
+    let _3: int "elem" @594:55-594:64
+    let _4: ptr_mut[u8] "it" @595:9-595:11
+    let _5: int
+    let _6: int
+    let _7: ptr_mut[u8]
+    let _8: ptr_mut[u8]
+    let _9: int
+    let _10: int
+    let _11: ptr[u8]
+    let _12: ()
+    let _13: int
+    let _14: int
+  bb0:
+    _5 = call fn rt.iter.S_ITEMS() @595:19-595:26
+    _6 = call fn rt.types.Types.size(copy _1, copy _3) @595:28-595:41
+    _4 = call fn rt.iter.make(copy _5, copy _6) @595:14-595:42
+    _10 = call fn rt.iter.P() @600:31-600:32
+    _9 = mul copy _10, const 8 @600:31-600:36
+    _8 = call intrinsic mem.ptr.offset(copy _4, copy _9) @600:21-600:37
+    _11 = call intrinsic mem.ptr.as_const(copy _2) @600:39-600:52
+    _7 = call intrinsic extern.c.memmove(copy _8, copy _11, const 24) @600:13-600:57
+    _14 = call fn rt.iter.P() @601:13-601:14
+    _13 = add copy _14, const 4 @601:13-601:18
+    _12 = call fn rt.iter.set(copy _4, copy _13, copy _3) @601:5-601:25
+    _0 = copy _4 @602:12-602:14
+    return @602:5-602:14
+}
+
+fn rt.iter.new_text(3) source 2 @606:18-606:26 {
+    let _0: ptr_mut[u8]
+    let _1: ptr_mut[u8] "b" @606:27-606:40
+    let _2: int "n" @606:42-606:48
+    let _3: bool "chars" @606:50-606:61
+    let _4: ptr_mut[u8] "it" @607:9-607:11
+    let _5: int
+    let _6: ()
+    let _7: int
+    let _8: int
+    let _9: ()
+    let _10: int
+    let _11: int
+  bb0:
+    switch copy _3 [0: bb2, else: bb1] @607:19-607:50
+  bb1:
+    _5 = call fn rt.iter.S_CHARS() @607:29-607:36
+    goto bb3
+  bb2:
+    _5 = call fn rt.iter.S_BYTES() @607:43-607:50
+    goto bb3
+  bb3:
+    _4 = call fn rt.iter.make(copy _5, const 8) @607:14-607:54
+    _7 = call fn rt.iter.P() @608:13-608:14
+    _8 = call intrinsic mem.ptr.addr(copy _1) @608:16-608:24
+    _6 = call fn rt.iter.set(copy _4, copy _7, copy _8) @608:5-608:25
+    _11 = call fn rt.iter.P() @609:13-609:14
+    _10 = add copy _11, const 1 @609:13-609:18
+    _9 = call fn rt.iter.set(copy _4, copy _10, copy _2) @609:5-609:22
+    _0 = copy _4 @610:12-610:14
+    return @610:5-610:14
+}
+
+fn rt.iter.new_owned_bytes(2) source 2 @616:18-616:33 {
+    let _0: ptr_mut[u8]
+    let _1: ptr[u8] "b" @616:34-616:44
+    let _2: int "n" @616:46-616:52
+    let _3: ptr_mut[u8] "block" @619:9-619:14
+    let _4: bool
+    let _5: ptr_mut[u8]
+    let _6: ptr_mut[u8] "it" @623:9-623:11
+    let _7: int
+    let _8: ()
+    let _9: int
+    let _10: int
+    let _11: ()
+    let _12: int
+    let _13: int
+  bb0:
+    _3 = call intrinsic extern.c.sisu_rt_alloc(copy _2) @619:24-619:40
+    _4 = gt copy _2, const 0 @620:8-620:13
+    switch copy _4 [0: bb1, else: bb2] @620:8-620:13
+  bb1:
+    _7 = call fn rt.iter.S_OWNED_BYTES() @623:19-623:32
+    _6 = call fn rt.iter.make(copy _7, const 8) @623:14-623:36
+    _9 = call fn rt.iter.P() @624:13-624:14
+    _10 = call intrinsic mem.ptr.addr(copy _3) @624:16-624:28
+    _8 = call fn rt.iter.set(copy _6, copy _9, copy _10) @624:5-624:29
+    _13 = call fn rt.iter.P() @625:13-625:14
+    _12 = add copy _13, const 1 @625:13-625:18
+    _11 = call fn rt.iter.set(copy _6, copy _12, copy _2) @625:5-625:22
+    _0 = copy _6 @626:12-626:14
+    return @626:5-626:14
+  bb2:
+    _5 = call intrinsic extern.c.memmove(copy _3, copy _1, copy _2) @622:20-622:40
+    goto bb1
+}
+
+fn rt.iter.new_enumerate(1) source 2 @633:18-633:31 {
+    let _0: ptr_mut[u8]
+    let _1: ptr_mut[u8] "inner" @633:32-633:49
+    let _2: ptr_mut[u8] "it" @634:9-634:11
+    let _3: int
+    let _4: int
+    let _5: int
+    let _6: int
+    let _7: ()
+    let _8: int
+    let _9: int
+  bb0:
+    _3 = call fn rt.iter.S_ENUMERATE() @634:19-634:30
+    _6 = call fn rt.iter.SIZE() @634:47-634:51
+    _5 = call fn rt.iter.get(copy _1, copy _6) @634:36-634:52
+    _4 = add const 8, copy _5 @634:32-634:52
+    _2 = call fn rt.iter.make(copy _3, copy _4) @634:14-634:53
+    _8 = call fn rt.iter.P() @635:13-635:14
+    _9 = call intrinsic mem.ptr.addr(copy _1) @635:16-635:28
+    _7 = call fn rt.iter.set(copy _2, copy _8, copy _9) @635:5-635:29
+    _0 = copy _2 @636:12-636:14
+    return @636:5-636:14
+}
+
+fn rt.iter.new_zip(5) source 2 @644:18-644:25 {
+    let _0: ptr_mut[u8]
+    let _1: ptr_mut[u8] "a" @645:5-645:18
+    let _2: ptr_mut[u8] "b" @645:20-645:33
+    let _3: bool "strict" @645:35-645:47
+    let _4: int "ta" @645:49-645:56
+    let _5: int "tb" @645:58-645:65
+    let _6: ptr_mut[u8] "it" @647:9-647:11
+    let _7: int
+    let _8: int
+    let _9: int
+    let _10: int
+    let _11: int
+    let _12: int
+    let _13: ()
+    let _14: int
+    let _15: int
+    let _16: ()
+    let _17: int
+    let _18: int
+    let _19: int
+    let _20: ()
+    let _21: int
+    let _22: int
+    let _23: int
+    let _24: ()
+    let _25: int
+    let _26: int
+    let _27: ()
+    let _28: int
+    let _29: int
+  bb0:
+    _7 = call fn rt.iter.S_ZIP() @647:19-647:24
+    _10 = call fn rt.iter.SIZE() @647:33-647:37
+    _9 = call fn rt.iter.get(copy _1, copy _10) @647:26-647:38
+    _12 = call fn rt.iter.SIZE() @647:48-647:52
+    _11 = call fn rt.iter.get(copy _2, copy _12) @647:41-647:53
+    _8 = add copy _9, copy _11 @647:26-647:53
+    _6 = call fn rt.iter.make(copy _7, copy _8) @647:14-647:54
+    _14 = call fn rt.iter.P() @648:13-648:14
+    _15 = call intrinsic mem.ptr.addr(copy _1) @648:16-648:24
+    _13 = call fn rt.iter.set(copy _6, copy _14, copy _15) @648:5-648:25
+    _18 = call fn rt.iter.P() @649:13-649:14
+    _17 = add copy _18, const 1 @649:13-649:18
+    _19 = call intrinsic mem.ptr.addr(copy _2) @649:20-649:28
+    _16 = call fn rt.iter.set(copy _6, copy _17, copy _19) @649:5-649:29
+    _22 = call fn rt.iter.P() @650:13-650:14
+    _21 = add copy _22, const 2 @650:13-650:18
+    switch copy _3 [0: bb2, else: bb1] @650:20-650:40
+  bb1:
+    _23 = const 1 @650:31-650:32
+    goto bb3
+  bb2:
+    _23 = const 0 @650:39-650:40
+    goto bb3
+  bb3:
+    _20 = call fn rt.iter.set(copy _6, copy _21, copy _23) @650:5-650:41
+    _26 = call fn rt.iter.P() @651:13-651:14
+    _25 = add copy _26, const 3 @651:13-651:18
+    _24 = call fn rt.iter.set(copy _6, copy _25, copy _4) @651:5-651:23
+    _29 = call fn rt.iter.P() @652:13-652:14
+    _28 = add copy _29, const 4 @652:13-652:18
+    _27 = call fn rt.iter.set(copy _6, copy _28, copy _5) @652:5-652:23
+    _0 = copy _6 @653:12-653:14
+    return @653:5-653:14
+}
+
+fn rt.iter.new_waiting(3) source 2 @658:18-658:29 {
+    let _0: ptr_mut[u8]
+    let _1: int "id" @658:30-658:37
+    let _2: int "size" @658:39-658:48
+    let _3: bool "generator" @658:50-658:65
+    let _4: ptr_mut[u8] "it" @659:9-659:11
+    let _5: int
+    let _6: ()
+    let _7: int
+  bb0:
+    switch copy _3 [0: bb2, else: bb1] @659:19-659:51
+  bb1:
+    _5 = call fn rt.iter.S_GEN() @659:33-659:38
+    goto bb3
+  bb2:
+    _5 = call fn rt.iter.S_RECV() @659:45-659:51
+    goto bb3
+  bb3:
+    _4 = call fn rt.iter.make(copy _5, copy _2) @659:14-659:58
+    _7 = call fn rt.iter.P() @660:13-660:14
+    _6 = call fn rt.iter.set(copy _4, copy _7, copy _1) @660:5-660:19
+    _0 = copy _4 @661:12-661:14
+    return @661:5-661:14
+}
+
+fn rt.iter.waits(2) source 2 @670:18-670:23 {
+    let _0: int
+    let _1: ptr_mut[u8] "it" @670:24-670:38
+    let _2: ptr_mut[u8] "out" @670:40-670:55
+    let _3: int "state" @671:9-671:14
+    let _4: int
+    let _5: bool
+    let _6: int
+    let _7: int
+    let _8: ()
+    let _9: int
+    let _10: int
+    let _11: ()
+    let _12: int
+    let _13: int
+    let _14: bool
+    let _15: int
+  bb0:
+    _4 = call fn rt.iter.STATE() @671:25-671:30
+    _3 = call fn rt.iter.get(copy _1, copy _4) @671:17-671:31
+    _6 = call fn rt.iter.S_GEN() @672:17-672:22
+    _5 = ne copy _3, copy _6 @672:8-672:22
+    switch copy _5 [0: bb3, else: bb2] @672:8-672:42
+  bb1:
+    _10 = call fn rt.iter.P() @674:25-674:26
+    _9 = call fn rt.iter.get(copy _1, copy _10) @674:17-674:27
+    _8 = call fn rt.iter.set(copy _2, const 0, copy _9) @674:5-674:28
+    _13 = call fn rt.iter.SIZE() @675:25-675:29
+    _12 = call fn rt.iter.get(copy _1, copy _13) @675:17-675:30
+    _11 = call fn rt.iter.set(copy _2, const 1, copy _12) @675:5-675:31
+    _15 = call fn rt.iter.S_GEN() @676:24-676:29
+    _14 = eq copy _3, copy _15 @676:15-676:29
+    switch copy _14 [0: bb6, else: bb5] @676:12-676:40
+  bb2:
+    _7 = call fn rt.iter.S_RECV() @672:36-672:42
+    _5 = ne copy _3, copy _7 @672:27-672:42
+    switch copy _5 [0: bb1, else: bb4] @672:8-672:42
+  bb3:
+    switch copy _5 [0: bb1, else: bb4] @672:8-672:42
+  bb4:
+    _0 = const 0 @673:16-673:17
+    return @673:9-673:17
+  bb5:
+    _0 = const 1 @676:31-676:32
+    return @676:5-676:40
+  bb6:
+    _0 = const 2 @676:39-676:40
+    return @676:5-676:40
+}
+
+fn rt.iter.collect(5) source 2 @686:18-686:25 {
+    let _0: int
+    let _1: rt.types.Types "ts" @686:26-686:35
+    let _2: ptr_mut[u8] "it" @686:37-686:51
+    let _3: int "item" @686:53-686:62
+    let _4: ptr_mut[u8] "out" @686:64-686:79
+    let _5: int "mode" @686:81-686:90
+    let _6: int "size" @687:9-687:13
+    let _7: int
+    let _8: ptr_mut[int] "w" @692:13-692:14
     let _9: ()
     let _10: ()
     let _11: ptr_mut[int]
     let _12: ()
     let _13: ptr_mut[int]
-    let _14: ptr_mut[u8] "room" @587:13-587:17
+    let _14: ptr_mut[u8] "room" @696:13-696:17
     let _15: int
-    let _16: int "st" @588:13-588:15
+    let _16: int "st" @697:13-697:15
     let _17: int
     let _18: bool
     let _19: int
     let _20: int
     let _21: ptr_mut[int]
     let _22: ()
-    let _23: int "n" @594:17-594:18
+    let _23: int "n" @703:17-703:18
     let _24: ptr_mut[u8]
     let _25: ptr_mut[u8]
     let _26: ptr_mut[u8]
@@ -5316,13 +5757,13 @@ fn rt.iter.collect(5) source 2 @577:18-577:25 {
     let _30: ()
     let _31: int
     let _32: ()
-    let _33: int "dropped" @598:13-598:20
+    let _33: int "dropped" @707:13-707:20
     let _34: bool
     let _35: int
     let _36: int
     let _37: int
     let _38: bool
-    let _39: int "i" @604:17-604:18
+    let _39: int "i" @713:17-713:18
     let _40: bool
     let _41: int
     let _42: int
@@ -5341,100 +5782,100 @@ fn rt.iter.collect(5) source 2 @577:18-577:25 {
     let _55: ()
     let _56: ptr_mut[int]
   bb0:
-    _7 = call fn rt.iter.SIZE() @578:24-578:28
-    _6 = call fn rt.iter.get(copy _2, copy _7) @578:16-578:29
-    _8 = call intrinsic mem.ptr.cast[u8, int](copy _4) @583:17-583:32
-    _9 = call intrinsic mem.ptr.write(copy _8, const 0) @584:9-584:19
-    _11 = call intrinsic mem.ptr.offset(copy _8, const 1) @585:9-585:20
-    _10 = call intrinsic mem.ptr.write(copy _11, const 0) @585:9-585:29
-    _13 = call intrinsic mem.ptr.offset(copy _8, const 2) @586:9-586:20
-    _12 = call intrinsic mem.ptr.write(copy _13, const 0) @586:9-586:29
-    _15 = add const 8, copy _6 @587:34-587:42
-    _14 = call intrinsic extern.c.sisu_rt_alloc(copy _15) @587:20-587:43
-    _16 = call fn rt.value.OK() @588:18-588:26
-    switch const true [0: bb1, else: bb2] @589:15-589:19
+    _7 = call fn rt.iter.SIZE() @687:24-687:28
+    _6 = call fn rt.iter.get(copy _2, copy _7) @687:16-687:29
+    _8 = call intrinsic mem.ptr.cast[u8, int](copy _4) @692:17-692:32
+    _9 = call intrinsic mem.ptr.write(copy _8, const 0) @693:9-693:19
+    _11 = call intrinsic mem.ptr.offset(copy _8, const 1) @694:9-694:20
+    _10 = call intrinsic mem.ptr.write(copy _11, const 0) @694:9-694:29
+    _13 = call intrinsic mem.ptr.offset(copy _8, const 2) @695:9-695:20
+    _12 = call intrinsic mem.ptr.write(copy _13, const 0) @695:9-695:29
+    _15 = add const 8, copy _6 @696:34-696:42
+    _14 = call intrinsic extern.c.sisu_rt_alloc(copy _15) @696:20-696:43
+    _16 = call fn rt.value.OK() @697:18-697:26
+    switch const true [0: bb1, else: bb2] @698:15-698:19
   bb1:
-    _32 = call intrinsic extern.c.sisu_rt_free(copy _14) @597:9-597:27
-    _33 = call fn rt.iter.drop(copy _1, copy _2, copy _5) @598:23-598:41
-    _35 = call fn rt.value.OK() @599:18-599:26
-    _34 = eq copy _16, copy _35 @599:12-599:26
-    switch copy _34 [0: bb8, else: bb7] @599:12-599:50
+    _32 = call intrinsic extern.c.sisu_rt_free(copy _14) @706:9-706:27
+    _33 = call fn rt.iter.drop(copy _1, copy _2, copy _5) @707:23-707:41
+    _35 = call fn rt.value.OK() @708:18-708:26
+    _34 = eq copy _16, copy _35 @708:12-708:26
+    switch copy _34 [0: bb8, else: bb7] @708:12-708:50
   bb2:
-    _17 = call fn rt.iter.next(copy _1, copy _2, copy _14, copy _5) @590:18-590:42
-    _16 = copy _17 @590:13-590:42
-    _19 = call fn rt.value.OK() @591:22-591:30
-    _18 = ne copy _16, copy _19 @591:16-591:30
-    switch copy _18 [0: bb4, else: bb5] @591:16-591:62
+    _17 = call fn rt.iter.next(copy _1, copy _2, copy _14, copy _5) @699:18-699:42
+    _16 = copy _17 @699:13-699:42
+    _19 = call fn rt.value.OK() @700:22-700:30
+    _18 = ne copy _16, copy _19 @700:16-700:30
+    switch copy _18 [0: bb4, else: bb5] @700:16-700:62
   bb3:
-    _22 = call fn rt.list.reserve(copy _4, const 1, copy _6) @593:13-593:39
-    _23 = call fn rt.list.length(copy _4) @594:21-594:37
-    _26 = call fn rt.list.buffer(copy _4) @595:25-595:41
-    _27 = mul copy _23, copy _6 @595:49-595:57
-    _25 = call intrinsic mem.ptr.offset(copy _26, copy _27) @595:25-595:58
-    _29 = call intrinsic mem.ptr.offset(copy _14, const 8) @595:60-595:74
-    _28 = call intrinsic mem.ptr.as_const(copy _29) @595:60-595:85
-    _24 = call intrinsic extern.c.memmove(copy _25, copy _28, copy _6) @595:17-595:92
-    _31 = add copy _23, const 1 @596:34-596:39
-    _30 = call fn rt.list.set_length(copy _4, copy _31) @596:13-596:40
-    switch const true [0: bb1, else: bb2] @589:15-589:19
+    _22 = call fn rt.list.reserve(copy _4, const 1, copy _6) @702:13-702:39
+    _23 = call fn rt.list.length(copy _4) @703:21-703:37
+    _26 = call fn rt.list.buffer(copy _4) @704:25-704:41
+    _27 = mul copy _23, copy _6 @704:49-704:57
+    _25 = call intrinsic mem.ptr.offset(copy _26, copy _27) @704:25-704:58
+    _29 = call intrinsic mem.ptr.offset(copy _14, const 8) @704:60-704:74
+    _28 = call intrinsic mem.ptr.as_const(copy _29) @704:60-704:85
+    _24 = call intrinsic extern.c.memmove(copy _25, copy _28, copy _6) @704:17-704:92
+    _31 = add copy _23, const 1 @705:34-705:39
+    _30 = call fn rt.list.set_length(copy _4, copy _31) @705:13-705:40
+    switch const true [0: bb1, else: bb2] @698:15-698:19
   bb4:
-    _21 = call intrinsic mem.ptr.cast[u8, int](copy _14) @591:34-591:50
-    _20 = call intrinsic mem.ptr.read(copy _21) @591:34-591:57
-    _18 = ne copy _20, const 0 @591:34-591:62
-    switch copy _18 [0: bb3, else: bb1] @591:16-591:62
+    _21 = call intrinsic mem.ptr.cast[u8, int](copy _14) @700:34-700:50
+    _20 = call intrinsic mem.ptr.read(copy _21) @700:34-700:57
+    _18 = ne copy _20, const 0 @700:34-700:62
+    switch copy _18 [0: bb3, else: bb1] @700:16-700:62
   bb5:
-    switch copy _18 [0: bb3, else: bb1] @591:16-591:62
+    switch copy _18 [0: bb3, else: bb1] @700:16-700:62
   bb6:
-    _37 = call fn rt.value.after_part(copy _16, copy _33) @601:14-601:43
-    _16 = copy _37 @601:9-601:43
-    _38 = ge copy _3, const 0 @603:12-603:21
-    switch copy _38 [0: bb12, else: bb11] @603:12-603:45
+    _37 = call fn rt.value.after_part(copy _16, copy _33) @710:14-710:43
+    _16 = copy _37 @710:9-710:43
+    _38 = ge copy _3, const 0 @712:12-712:21
+    switch copy _38 [0: bb12, else: bb11] @712:12-712:45
   bb7:
-    _36 = call fn rt.value.OK() @599:42-599:50
-    _34 = eq copy _33, copy _36 @599:31-599:50
-    switch copy _34 [0: bb6, else: bb9] @599:12-599:50
+    _36 = call fn rt.value.OK() @708:42-708:50
+    _34 = eq copy _33, copy _36 @708:31-708:50
+    switch copy _34 [0: bb6, else: bb9] @708:12-708:50
   bb8:
-    switch copy _34 [0: bb6, else: bb9] @599:12-599:50
+    switch copy _34 [0: bb6, else: bb9] @708:12-708:50
   bb9:
-    _0 = call fn rt.value.OK() @600:20-600:28
-    return @600:13-600:28
+    _0 = call fn rt.value.OK() @709:20-709:28
+    return @709:13-709:28
   bb10:
-    _49 = call intrinsic mem.ptr.read(copy _8) @610:12-610:20
-    _48 = ne copy _49, const 0 @610:12-610:25
-    switch copy _48 [0: bb16, else: bb17] @610:12-610:25
+    _49 = call intrinsic mem.ptr.read(copy _8) @719:12-719:20
+    _48 = ne copy _49, const 0 @719:12-719:25
+    switch copy _48 [0: bb16, else: bb17] @719:12-719:25
   bb11:
-    _38 = call fn rt.types.Types.needs_drop(copy _1, copy _3) @603:26-603:45
-    switch copy _38 [0: bb10, else: bb13] @603:12-603:45
+    _38 = call fn rt.types.Types.needs_drop(copy _1, copy _3) @712:26-712:45
+    switch copy _38 [0: bb10, else: bb13] @712:12-712:45
   bb12:
-    switch copy _38 [0: bb10, else: bb13] @603:12-603:45
+    switch copy _38 [0: bb10, else: bb13] @712:12-712:45
   bb13:
-    _39 = const 0 @604:21-604:22
+    _39 = const 0 @713:21-713:22
     goto bb14
   bb14:
-    _41 = call fn rt.list.length(copy _4) @605:23-605:39
-    _40 = lt copy _39, copy _41 @605:19-605:39
-    switch copy _40 [0: bb10, else: bb15] @605:19-605:39
+    _41 = call fn rt.list.length(copy _4) @714:23-714:39
+    _40 = lt copy _39, copy _41 @714:19-714:39
+    switch copy _40 [0: bb10, else: bb15] @714:19-714:39
   bb15:
-    _45 = call fn rt.list.buffer(copy _4) @607:40-607:56
-    _46 = mul copy _39, copy _6 @607:64-607:72
-    _44 = call intrinsic mem.ptr.offset(copy _45, copy _46) @607:40-607:73
-    _43 = call fn rt.value.drop(copy _1, copy _44, copy _3, copy _5) @607:25-607:86
-    _42 = call fn rt.value.after_part(copy _16, copy _43) @606:22-608:18
-    _16 = copy _42 @606:17-608:18
-    _47 = add copy _39, const 1 @609:17-609:23
-    _39 = move _47 @609:17-609:23
+    _45 = call fn rt.list.buffer(copy _4) @716:40-716:56
+    _46 = mul copy _39, copy _6 @716:64-716:72
+    _44 = call intrinsic mem.ptr.offset(copy _45, copy _46) @716:40-716:73
+    _43 = call fn rt.value.drop(copy _1, copy _44, copy _3, copy _5) @716:25-716:86
+    _42 = call fn rt.value.after_part(copy _16, copy _43) @715:22-717:18
+    _16 = copy _42 @715:17-717:18
+    _47 = add copy _39, const 1 @718:17-718:23
+    _39 = move _47 @718:17-718:23
     goto bb14
   bb16:
-    _52 = call intrinsic mem.ptr.write(copy _8, const 0) @612:9-612:19
-    _54 = call intrinsic mem.ptr.offset(copy _8, const 1) @613:9-613:20
-    _53 = call intrinsic mem.ptr.write(copy _54, const 0) @613:9-613:29
-    _56 = call intrinsic mem.ptr.offset(copy _8, const 2) @614:9-614:20
-    _55 = call intrinsic mem.ptr.write(copy _56, const 0) @614:9-614:29
-    _0 = copy _16 @615:16-615:18
-    return @615:9-615:18
+    _52 = call intrinsic mem.ptr.write(copy _8, const 0) @721:9-721:19
+    _54 = call intrinsic mem.ptr.offset(copy _8, const 1) @722:9-722:20
+    _53 = call intrinsic mem.ptr.write(copy _54, const 0) @722:9-722:29
+    _56 = call intrinsic mem.ptr.offset(copy _8, const 2) @723:9-723:20
+    _55 = call intrinsic mem.ptr.write(copy _56, const 0) @723:9-723:29
+    _0 = copy _16 @724:16-724:18
+    return @724:9-724:18
   bb17:
-    _51 = call fn rt.list.buffer(copy _4) @611:26-611:42
-    _50 = call intrinsic extern.c.sisu_rt_free(copy _51) @611:13-611:43
+    _51 = call fn rt.list.buffer(copy _4) @720:26-720:42
+    _50 = call intrinsic extern.c.sisu_rt_free(copy _51) @720:13-720:43
     goto bb16
 }
 
@@ -16003,6 +16444,13 @@ fn rt.iter.OTHER(0) value pure source 2 {
   bb0:
     _0 = const 0 @48:20-48:21
     return @48:20-48:21
+}
+
+fn rt.iter.RANGE_KIND(0) value pure source 2 {
+    let _0: int
+  bb0:
+    _0 = const 1 @49:25-49:26
+    return @49:25-49:26
 }
 
 fn rt.iter.LIST_KIND(0) value pure source 2 {

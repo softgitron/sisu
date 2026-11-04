@@ -9,4 +9,29 @@ test "the bookings that pass" ... blocked by todo("check_all")
 test "two workers take half the time of one" ... blocked by todo("check_all")
 test "one worker checks one booking at a time" ... blocked by todo("check_all")
 test "a worker for each booking" ... blocked by todo("check_all")
+
+test "the bookings that pass" ... blocked by todo("check_all")
+what the test printed:
+  in scope at the typed hole `todo("check_all")`:
+    bookings = ["mon 18 Aino", "tue ? Eero", "wed 19 Roni", "thu 17 Liisa"]
+    workers = 2
+
+test "two workers take half the time of one" ... blocked by todo("check_all")
+what the test printed:
+  in scope at the typed hole `todo("check_all")`:
+    bookings = ["mon 18 Aino", "tue ? Eero", "wed 19 Roni", "thu 17 Liisa"]
+    workers = 2
+
+test "one worker checks one booking at a time" ... blocked by todo("check_all")
+what the test printed:
+  in scope at the typed hole `todo("check_all")`:
+    bookings = ["mon 18 Aino", "tue ? Eero", "wed 19 Roni", "thu 17 Liisa"]
+    workers = 1
+
+test "a worker for each booking" ... blocked by todo("check_all")
+what the test printed:
+  in scope at the typed hole `todo("check_all")`:
+    bookings = ["mon 18 Aino", "tue ? Eero", "wed 19 Roni", "thu 17 Liisa"]
+    workers = 4
+
 0 passed, 0 failed, 4 blocked

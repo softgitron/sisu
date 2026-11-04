@@ -1,0 +1,11 @@
+##! A sauna stove's heat, in steps.
+
+## The heat after `throws` ladles of water on a stove at `base` degrees.
+pub def heat_after(base: int, throws: int) -> int:
+    return base + step(throws)
+
+def step(throws: int) -> int:
+    return 3 * throws
+
+test "a throw adds three degrees":
+    assert step(1) == 3
