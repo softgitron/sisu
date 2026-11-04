@@ -563,9 +563,9 @@ branches of `cli.rs` go with it:
   --defer-borrow` and `--features`**: a program's tests and benchmarks run
   from stage 1's SIR (decision 357), and so do those of a program with
   transcripts, but those of a run that asks for a package's features run on
-  the Rust front end while stage 1's `sir` takes no `--features` (nor
-  `--locked`, which its `check` takes; decision 380; a stage 1 whose `sir`
-  takes them serves them, decision 424), and
+  the Rust front end until stage 1's `sir` took `--features` and
+  `--locked` (its R47, decision 400; the driver finds that it does and
+  serves them from stage 1, decision 424), and
   the transcripts themselves run against a world of transcripts
   (`transcript_world`, `transcript_system`) that only the Rust front end's
   `sir_with` adds to the SIR, so they run on its build of the program,
@@ -574,9 +574,8 @@ branches of `cli.rs` go with it:
   and the deferral is the Rust ownership checker's. Stage 1's own tests
   run on the Rust front end too. *Pay*: stage 1's `sir --tests` writing
   the world of transcripts (`--transcripts`, rooting the two functions)
-  and the standard library's examples (`--std`), and taking `--features`,
-  `--no-default-features` and `--locked`; the deferral as a command of
-  stage 1 (below).
+  and the standard library's examples (`--std`); the deferral as a command
+  of stage 1 (below).
 - **`sisu run --defer-borrow`** (the counterexample mode: the ownership
   checker's findings beside the monitored run), **`sisu check --diary`**
   (the diagnostics as data, with their bytes), **`sisu explain-borrow`**
@@ -642,10 +641,10 @@ What the driver does around stage 1, because of what its commands are:
   `expect.fail_compare` and `expect.fail_parts`, which stage 1's R38
   lowers a failed `expect` to (decision 388); the frozen Rust front end
   still lowers `expect` as `assert`, so a test it builds stops at its
-  first failure. *Pay*: stage 1's `sir --tests` printing the warnings and
-  taking the features and `--locked` (the round after R46), when the
-  switch of decision 424 runs it once; the probe then retires for stage
-  1's version, once it has one.
+  first failure. Stage 1's `sir --tests` prints the warnings and takes the
+  features and `--locked` since its R47 (decision 400), so the switch of
+  decision 424 runs it once. *Pay*: the probe retiring for stage 1's
+  version, once it has one.
 
 ## Stage 2: what the native backend leaves out
 

@@ -8264,6 +8264,73 @@ decision 362)
      (`expect_records_its_failures_and_the_test_goes_on`). This changes no
      rule of the language: it implements 17's `expect`.
 
+**Stage 1's fifth round** (stage 1's RULES.md, R47 to R55; warnings from `sir --tests`, slices from the end, generator expressions, `Arbitrary`, spelling fixes)
+
+400. `sir --tests` prints, beside the SIR of a program without an error,
+     the program's warnings on standard error as `check` prints them (the
+     human form, or `--format=ids`), from one check of the program, so
+     that the driver runs stage 1 once for each program `sisu test` and
+     `sisu bench` run; `sir` takes `--features`, `--no-default-features`
+     and `--locked` as `check` does (decision 250). Stage 1 decides it
+     (RULES.md, R47).
+
+401. A bound counted from the end reads a `Slice` and `bytes` as it reads
+     a list (`xs[^1]`, `xs[1:^1]`, 02), the base evaluated once; a type of
+     a module written with its arguments before `.`,
+     `collections.Deque[int].new()`, has its scalar arguments read as
+     types; and `E0413` offers the `from` clause first when the body
+     returns a borrowed parameter or a part of one, the `String` result
+     first when it returns text it makes. Stage 1 decides it (RULES.md,
+     R48).
+
+402. A generator expression's first iterable is evaluated where the
+     expression is (02, as Python's): a value that is not a place is
+     computed there and kept by the generator, moved into its closure, a
+     `?` in it passing its error on in the enclosing function; a place is
+     borrowed as before. The other clauses run as the generator is
+     advanced. Stage 1 decides it (RULES.md, R49).
+
+403. A constant of a type of the program, given by an impl or by the
+     type's body, is a type's constant argument where folding computes its
+     value (`Array[int, Square.SIDES]`, 03); a trait's constant through a
+     type parameter is a value of the instance and no constant argument,
+     `E0239` noting the `const` parameter that carries it. Stage 1 decides
+     it (RULES.md, R50).
+
+404. A trait or a field marked `@deprecated("...")` warns where it is used
+     (13), as a deprecated type does (decision 364): a trait in a bound, an
+     impl's header, a supertraits list or a `dyn` type, but in its own
+     declaration; a field read, changed, given a value or matched, but in
+     its struct's methods and impls. Stage 1 decides it (RULES.md, R51).
+
+405. `@derive(Arbitrary)` on a generic type gives the impl that draws its
+     shape with each type parameter drawn through its own `Arbitrary`
+     (`impl[T: Arbitrary] Arbitrary for Boxed[T]`), and an impl of
+     `Arbitrary` written in another module than its type's draws the type
+     wherever it is drawn, a site in a module that imports the type
+     drawing it through the impl. Stage 1 decides it (RULES.md, R52).
+
+406. An attribute before a statement is `E0129`, naming the attribute,
+     and the statement is parsed as one (02: attributes stand before
+     declarations); `@tile`, `@unroll` and `@vectorize` there note that
+     they are 19's planned directives (N-22), not in the language yet.
+     Stage 1 decides it (RULES.md, R53).
+
+407. A parse error at another language's spelling gets the fix that
+     writes Sisu's (`and`, `not`, `ref`, `i += 1`, `var`, `.to_f64()`,
+     `print`, `range(0, 3)`, `list[int]`, `match`, `.is_none()`, `:`, `#`,
+     `None`); an attribute on its declaration's line is `E0131` and the
+     declaration is parsed; `pub(crate)` is `E0130` with `pub(package)`; a
+     one-line `if` without `else` is `E0102`; a keyword as a field's name
+     is `E0124`. Stage 1 decides it (RULES.md, R54).
+
+408. The type checker's notes and fixes the manual's writers found
+     missing: a `var` that holds a borrow it was given (`E0341`), a
+     borrowed parameter given to an `own` one, with the fix that takes it
+     with `own` (`E0300`), the narrowing conversion of an `int` (`E0300`),
+     a capitalised name a `let` binds (`E0327`), and `E0417`, `E0806` and
+     `E0810` without an article. Stage 1 decides it (RULES.md, R55).
+
 **Capabilities: a file takes a new name** (section "Capabilities"; 06,
 09, 17; N-04)
 
