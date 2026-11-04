@@ -2055,6 +2055,68 @@ Two of the conformance suite's `.diag` files are blessed again, with R63:
 `contracts/contract_errors` (`E0801`'s fix) and
 `packages/manifest_errors` (no `E1002` beside `E1003`).
 
+### The seventh round: black-box tests, the merge's differences, the open items
+
+This round took the differences the merge of stage 0's fifth round left,
+the black-box tests the driver needs stage 1 to compile, the
+compile-time evaluator's `Shared`, the sixth round's open items and the
+manual's findings of step 16 that were stage 1's. RULES.md has the rules
+(R65 to R72, decisions 480 to 487) and their decision texts:
+
+- **The merge's differences**: the conformance suite's new
+  `run/shared_equality` (decision 464) writes `d.get(b) == Some(ref 1)`,
+  the borrow of a temporary, which R25 lets stage 1 lower and the frozen
+  Rust front end refuses with `E0313`: its six differences (types, sir,
+  ids, human, doc, doc-output) are R25's, listed there; the lowering of
+  `==` on `Shared` and std's new `impl[T: Hash] Hash for Shared[T]` agree
+  (its run, interpreted and native, prints the case's `.out`). And
+  stage 1's `cases/holes/blocked.tests` and `failed.tests` are blessed
+  again: since decision 466 a test's output is captured and shown only
+  with its failure, and a blocked test's hole closure, which the run time
+  prints as the test's output, goes with it. That drops what R27 says a
+  blocked test prints (its text says so now); stage 0 is asked to show a
+  blocked test's captured output under its line.
+- **Black-box tests** (R65): a file of a package's `tests/` is a program
+  whose dependencies are the package, its `pub` items only, and the
+  package's dev-dependencies; `sir --tests PKG/tests/NAME.sisu` prints its
+  SIR and its own tests' lines, without the package's tests, and `sisu1
+  test PKG` runs each after the package's own. Stage 1's version is
+  0.7.0: the driver may rely on it.
+- **The evaluator's `Shared`** (R66): held as its value, so `==`, `hash`,
+  a set and a dict follow it to the value, as decision 464 does at run
+  time; its identity is beyond the evaluator, and a `Shared` kept for run
+  time is `E0604`, as stage 0 has it.
+- **The sixth round's open items**: a derived impl's diagnostics placed at
+  the derive's argument with a note that gives the impl's line, and the
+  derives' messages (R70); `E0275` for a dependency that `when` excludes
+  and a variadic function's call that is no `E0305` (R71).
+- **The manual's findings**: R54's fix inside a call, in a `for` header
+  and for a `//` comment at a line's end, and a fix that names its
+  replacement once (R67); the five messages without "a `{ty}`" and
+  `E0274` for a trait's constant where a type goes (R68); `sisu lint
+  --help` is `D0009`, the audit heads a file "no level", and `fmt`
+  formats a file whose one error is `E0130`, whose tree is whole (R69);
+  Python's `lambda`, `f"..."`, `class`, `try:`, Go's `go f()` and a
+  keyword as a binding's name (R72).
+
+Decided against this round: showing a blocked test's closure from stage 1
+(the runner that captures it is stage 0's, above); offering a fix that
+inserts `from std.json import Encode` (a note names it: where the import
+goes is the program's choice); a derive's diagnostic placed in the
+trait's template (the derive's argument is what the program's writer
+wrote; the note gives the template's line as the impl has it); reading
+`print(a // b)` with a name after `//` as a comment anywhere but at the
+end of a line; formatting a file with any other parse diagnostic.
+
+Open: the rest of "What is next", 11 (below); stage 0's side of R65, the
+driver's `sisu test` running the black-box files; and the closure of a
+blocked test.
+
+The conformance suite's four `.defer` files that hold `R0069` are blessed
+again with R68: `traits/must_consume_generic`,
+`ownership/must_consume_dropped`, `ownership/must_consume_container` and
+`ownership/must_consume_try`.
+
 ## Module layout
 
 | Module | Lines | What | Stage 0 original |
@@ -2874,31 +2936,33 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     build's options, R47; RULES.md says what the driver may rely on), and
     until then print a program's warnings twice (the driver now runs
     stage 1 once when its probe finds a stage 1 that reports, decision
-    424, and may ask `sisu1 --version` instead, R56); and the host's
-    equality of `Shared` values, which compares identity where
-    std's `impl[T: Eq] Eq for Shared[T]` compares the values (`a == b`
-    lowers to the host's structural `eq`, which the interpreter and the
-    runtime in Sisu would follow to the value as decision 384 did for
-    `Display`). Of stage 1's, left: Python's bare generator as a call's
+    424, and may ask `sisu1 --version` instead, R56), and its `sisu
+    test` of a package's black-box tests, which stage 1 compiles since
+    R65. The host's equality of `Shared` values follows them to their
+    values since decision 464, and stage 1's evaluator does at compile
+    time since R66. Of stage 1's, left: Python's bare generator as a call's
     one argument, `sum(x for x in xs)`, which 02's parentheses rule out;
     a trait's constant through a type parameter as a constant argument
     (R50 decides against it); the loop directives (R53, 19's N-22).
-11. **The manual's findings left** (after R54 to R64), of the front end:
+11. **The manual's findings left** (after R54 to R72), of the front end:
     lowering a variadic parameter and star unpacking (R64 refuses them
     with `E0900`, the first waiting for the owner, since 02 and 14
     disagree), a test's name with `{` or `\"`, `it` in a list of
-    functions, a dev-dependency imported by the package's code, `E0202`
-    for a function named like its module, a parameter that hides a
-    module; a literal beside a `BigInt` or a `Decimal`, `@repr(u8)` and
-    explicit discriminants, the `own self` method that skips the
-    invariant, `result` in `ensures`; `zip`'s temporaries, `sorted`'s
-    note, `E0405`'s note and label; a derived impl's diagnostics in
-    `<derive>/`, an error in unrolled code, a template's interpolated
-    literal, `reflect.construct` of a plain parameter, a field's `ty` in a
-    derive; and of "Diagnostics without fixes" the keyword used as a
-    name, a positional-only parameter passed by name, `E0335` naming the
-    operation, `E0204` naming the feature, `JsonError` alone, `else as e`
-    on a statement, `E0981`'s name, `lambda`, `f"..."`, `class`, `try:`
-    and `go f()`, `E0260` for a dependency that `when` excludes, and the
-    derives' messages. Decided against: a `u32` shifted by an `int` keeps
-    D-016's widening (above, "The sixth round").
+    functions, `E0202` for a function named like its module, a parameter
+    that hides a module; a literal beside a `BigInt` or a `Decimal`,
+    `@repr(u8)` and explicit discriminants, the `own self` method that
+    skips the invariant, `result` in `ensures`; `zip`'s temporaries,
+    `sorted`'s note, `E0405`'s note and label; an error in unrolled code,
+    a template's interpolated literal, `reflect.construct` of a plain
+    parameter, a field's `ty` in a derive, a derive's hole reported once
+    for each type; and of "Diagnostics without fixes" a positional-only
+    parameter passed by name, `E0335` naming the operation, `E0204`
+    naming the feature, `JsonError` alone, `else as e` on a statement,
+    `E0981`'s name and `d.get(k, default)`. The seventh round took the
+    derived impl's diagnostics and the derives' messages (R70), `E0260`
+    for a dependency that `when` excludes (R71), the keyword used as a
+    name, `lambda`, `f"..."`, `class`, `try:` and `go f()` (R72); a
+    dev-dependency is now the black-box tests' (R65), but the package's
+    own code may still import one (its unit tests are compiled with the
+    package). Decided against: a `u32` shifted by an `int` keeps D-016's
+    widening (above, "The sixth round").

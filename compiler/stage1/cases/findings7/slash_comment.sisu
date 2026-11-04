@@ -1,0 +1,5 @@
+# RULES.md, R67: a one-word comment written `//` after a value divides the
+# value by a name, which is `E0200` with the fix `#`.
+def main():
+    let n = 3
+    print(n) // done

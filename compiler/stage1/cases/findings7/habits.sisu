@@ -1,0 +1,19 @@
+# RULES.md, R72: habits a parse error stops at, with Sisu's spelling or a
+# note: Python's `lambda`, `f"..."`, `class`, `try:` and `except:`, Go's
+# `go f()`, and a keyword as a binding's name.
+class Point:
+    x: int
+
+def work():
+    pass
+
+def main():
+    let f = lambda x: x + 1
+    let n = 2
+    print(f"n is {n}")
+    try:
+        print(1)
+    except:
+        print(2)
+    go work()
+    let type = "csv"

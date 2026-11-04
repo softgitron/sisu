@@ -1,0 +1,9 @@
+# A library with black-box tests (17): each file of `tests/` is a program
+# whose dependencies are the library, its `pub` items only, and its
+# dev-dependencies (RULES.md, R65).
+[package]
+name = "ledger"
+version = "0.1.0"
+
+[dev-dependencies]
+fixtures = { path = "fixtures" }

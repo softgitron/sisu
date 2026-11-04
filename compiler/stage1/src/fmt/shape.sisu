@@ -8,18 +8,19 @@
 ##! formatter.
 
 import stage1.fmt.prune
-from stage1.diag import Catalog
+from stage1.diag import Catalog, Msg
 from stage1.fmt.lines import Src, option_sugar, result_parts
 from stage1.parser import parse
 from stage1.syntax.kinds import KindNames, SyntaxKind
 from stage1.syntax.tree import Element, Tree
 from stage1.text import debug_str
 
-## The shape of a file's text; `None` when it has a syntax error.
+## The shape of a file's text; `None` when it has a syntax error, as the
+## formatter counts them (`fmt.refuses`: `E0130` is none, RULES.md R69).
 pub pure def shape(text: str, catalog: Catalog) -> String?:
     let p = parse(text, catalog)
     for d in p.diagnostics:
-        if catalog.is_error(d.msg):
+        if catalog.is_error(d.msg) and d.msg != Msg.ParseVisibilityScope:
             return None
     return Some(shape_of(p.tree))
 

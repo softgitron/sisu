@@ -16,6 +16,4 @@ warning[W0001]: typed hole `halve` of type `int`
 4 |     return todo("halve")
   |            ^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("halve")`:
-  x = 4
 error: Exit(status=1)

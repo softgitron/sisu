@@ -349,7 +349,14 @@ pub pure def unsafe_report(
     var out = String.new()
     for k in range(len(packages)):
         let p = ref packages[k]
-        let level = if p.level.is_empty(): "no `unsafe`".to_string() else: "unsafe = \"{p.level}\""
+        # A package's declared level; a program of one file, which
+        # declares none and may hold any unsafe code, says so (RULES.md,
+        # R69).
+        var level = "unsafe = \"{p.level}\""
+        if p.level.is_empty():
+            level = "no `unsafe`".to_string()
+        elif p.level != "memory" and p.level != "extern":
+            level = p.level.copy()
         var title = p.name.copy()
         if not p.version.is_empty():
             title.push(" {p.version}")

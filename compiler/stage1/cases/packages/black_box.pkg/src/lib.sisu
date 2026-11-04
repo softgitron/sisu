@@ -1,0 +1,14 @@
+##! A ledger, whose black-box tests are in `tests/`.
+
+## The balance of some entries.
+pub def balance(entries: list[int]) -> int:
+    return total(entries)
+
+def total(entries: list[int]) -> int:
+    var sum = 0
+    for e in entries:
+        sum += e
+    return sum
+
+test "the unit test sees the private `total`":
+    assert total([1, 2]) == 3

@@ -8,7 +8,4 @@ warning[W0001]: typed hole `offset` of type `int`
 6 |     return xs.iter().map(x -> x * factor + todo("offset")).collect()
   |                                            ^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("offset")`:
-  x = 1
-  factor = 3
 error: Exit(status=3)

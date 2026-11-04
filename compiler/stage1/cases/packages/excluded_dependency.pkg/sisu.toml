@@ -1,0 +1,9 @@
+# RULES.md, R71: an import of a dependency whose `when` excludes the target
+# is `E0275`, which says so, where `E0260` asked to add the dependency to
+# `[dependencies]`, where it is.
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies]
+win = { path = "win", when = { os = "windows" } }

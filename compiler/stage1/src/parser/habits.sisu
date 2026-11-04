@@ -40,6 +40,14 @@ impl Parser:
             prev_start = self.sig[before].start
             prev_end = self.sig[before].end
         let adjacent = prev_end == start
+        var prev_text = String.new()
+        if prev.is_some():
+            prev_text = self.text.byte_slice(prev_start, prev_end).to_string()
+        # Python's `class Point:`: `struct Point:` (RULES.md, R72).
+        if d.msg == Msg.ParseTopLevelStatement:
+            if self.current_text() == "class" and self.nth(1) == SyntaxKind.Ident:
+                return spelled(d, start, end, "struct")
+            return d
         if d.msg == Msg.ParseExpectedExpression:
             # `a && b`, `a || b`: `and`, `or`.
             if k == SyntaxKind.Amp and prev == Some(SyntaxKind.Amp) and adjacent:
@@ -68,6 +76,9 @@ impl Parser:
             # `let mut n`: `var n`.
             if self.current_text() == "mut" and prev == Some(SyntaxKind.LetKw):
                 return spelled(d, prev_start, end, "var")
+            # `let type = ...`: a keyword names no binding (RULES.md, R72).
+            if let Some(word) = k.keyword_text():
+                return d.note_with(Msg.ParseKeywordName, "keyword", word)
             return d
         if d.msg == Msg.ParseExpected:
             # Python's `1.`: `1.0`, digits on both sides of the point
@@ -90,14 +101,48 @@ impl Parser:
             if k == SyntaxKind.Eq and self.nth(1) == SyntaxKind.Gt:
                 let (_, e) = self.nth_range(1) ?? (end, end)
                 return spelled(d, start, e, ":")
+            # Inside a call, `print(n as f64)`, and in a `for` header,
+            # `for i in 0..3:`, the error expects the bracket or the colon
+            # (RULES.md, R67).
+            if let Some((s, e, text)) = self.cast_or_range(prev_end):
+                return spelled(d, s, e, text)
+            # Python's `f"n is {n}"`: every string interpolates (RULES.md,
+            # R72).
+            if k == SyntaxKind.StringStart and adjacent and prev_text == "f":
+                var i = 0
+                while self.nth(i) != SyntaxKind.Newline and self.nth(i) != SyntaxKind.Eof:
+                    if self.nth(i) == SyntaxKind.StringEnd:
+                        let (_, e) = self.nth_range(i) ?? (end, end)
+                        return spelled(d, prev_start, e, self.text.byte_slice(start, e))
+                    i += 1
             return d
         if d.msg != Msg.ParseTrailingTokens:
             return d
-        # `x as f64`: `x.to_f64()`.
-        if k == SyntaxKind.AsKw:
-            if let Some(to) = conversion(self.nth_text(1)):
-                let (_, e) = self.nth_range(1) ?? (end, end)
-                return spelled(d, prev_end, e, to)
+        if prev == Some(SyntaxKind.Ident) and self.starts_line(before):
+            # Python's `try:` and `except:`: errors are values (RULES.md,
+            # R72).
+            if prev_text == "try" or prev_text == "except" or prev_text == "finally":
+                return d.note_with(Msg.ParseNoExceptions, "keyword", prev_text)
+            # Go's `go f()`: a task starts in a scope.
+            if prev_text == "go" and k == SyntaxKind.Ident:
+                return d.note(Msg.ParseGoTask)
+        # Python's `lambda x: x + 1`: `x -> x + 1` (RULES.md, R72).
+        if prev == Some(SyntaxKind.Ident) and prev_text == "lambda":
+            var i = 0
+            while self.nth(i) != SyntaxKind.Newline and self.nth(i) != SyntaxKind.Eof:
+                if self.nth(i) == SyntaxKind.Colon:
+                    let (cs, ce) = self.nth_range(i) ?? (end, end)
+                    let params = self.text.byte_slice(prev_end, cs).trim()
+                    var arrow = "{params} ->"
+                    if params.contains(",") or params.is_empty():
+                        arrow = "({params}) ->"
+                    return spelled(d, prev_start, ce, arrow)
+                i += 1
+            return d
+        # `x as f64`: `x.to_f64()`; `0..3`: `range(0, 3)`.
+        if k == SyntaxKind.AsKw or k == SyntaxKind.DotDot:
+            if let Some((s, e, text)) = self.cast_or_range(prev_end):
+                return spelled(d, s, e, text)
             return d
         # `println!(...)`: `print(...)`.
         if k == SyntaxKind.Bang and adjacent and prev == Some(SyntaxKind.Ident):
@@ -106,25 +151,6 @@ impl Parser:
                 return spelled(d, prev_start, end, "print")
             if name == "panic":
                 return spelled(d, prev_start, end, "panic")
-            return d
-        # `0..3`: `range(0, 3)`.
-        if k == SyntaxKind.DotDot:
-            if let Some((a, b)) = self.last_expr:
-                if b == start:
-                    let next = self.nth(1)
-                    var inclusive = False
-                    var at = 1
-                    if next == SyntaxKind.Eq:
-                        inclusive = True
-                        at = 2
-                    let after = self.nth(at)
-                    if after == SyntaxKind.IntNumber or after == SyntaxKind.Ident:
-                        let (s2, e2) = self.nth_range(at) ?? (end, end)
-                        let lo = self.text.byte_slice(a, b)
-                        var hi = self.text.byte_slice(s2, e2).to_string()
-                        if inclusive:
-                            hi = "{hi} + 1"
-                        return spelled(d, a, e2, "range({lo}, {hi})")
             return d
         # `Vec<int>`: `list[int]`, a type's arguments in brackets.
         if k == SyntaxKind.Lt and adjacent and prev == Some(SyntaxKind.Ident):
@@ -150,15 +176,56 @@ impl Parser:
                 return spelled(d, prev_start, prev_end, "match")
         # `// note`: a comment starts with `#`. The line that starts with
         # `//` continues the one before it, as a line that starts with an
-        # operator does, so the error is at a word of the comment.
+        # operator does, so the error is at a word of the comment. At the
+        # end of a line, `let n = 3 // the count`, `//` divides by the
+        # comment's first word and the error is at its second (RULES.md,
+        # R67): a `//` after a space that only words follow.
+        var words = k == SyntaxKind.Ident
         var i = before
         while i > 0 and i < len(self.sig) and not self.starts_line(i):
             if self.sig[i].kind == SyntaxKind.SlashSlash:
                 let gap = self.text.byte_slice(self.sig[i - 1].end, self.sig[i].start)
                 if gap.contains("\n"):
                     return spelled(d, self.sig[i].start, self.sig[i].end, "#")
+                if words and i < before and not gap.is_empty():
+                    return spelled(d, self.sig[i].start, self.sig[i].end, "#")
+            if self.sig[i].kind != SyntaxKind.Ident:
+                words = False
             i -= 1
         return d
+
+    ## Sisu's spelling of a cast, `x as f64` (`x.to_f64()`), or of a range,
+    ## `0..3` (`range(0, 3)`), at the current token, `as` or `..` after an
+    ## expression that ends at `prev_end`: the range it replaces and the
+    ## text.
+    pure def cast_or_range(self, prev_end: int) -> (int, int, String)?:
+        let k = self.current()
+        let (start, end) = self.current_range()
+        if k == SyntaxKind.AsKw:
+            let to = conversion(self.nth_text(1)) else:
+                return None
+            let (_, e) = self.nth_range(1) ?? (end, end)
+            return Some((prev_end, e, to))
+        if k != SyntaxKind.DotDot:
+            return None
+        let (a, b) = self.last_expr else:
+            return None
+        if b != start:
+            return None
+        var inclusive = False
+        var at = 1
+        if self.nth(1) == SyntaxKind.Eq:
+            inclusive = True
+            at = 2
+        let after = self.nth(at)
+        if after != SyntaxKind.IntNumber and after != SyntaxKind.Ident:
+            return None
+        let (s2, e2) = self.nth_range(at) ?? (end, end)
+        let lo = self.text.byte_slice(a, b)
+        var hi = self.text.byte_slice(s2, e2).to_string()
+        if inclusive:
+            hi = "{hi} + 1"
+        return Some((a, e2, "range({lo}, {hi})"))
 
     ## Whether the significant token `i` is the first of its line.
     pure def starts_line(self, i: int) -> bool:

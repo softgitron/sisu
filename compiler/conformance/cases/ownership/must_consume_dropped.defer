@@ -2,7 +2,7 @@ committed 1
 forgot 2
 --- stderr
 counterexample run: the ownership checker rejected this program; its errors are deferred to the monitor
-ownership violation: `u` was dropped holding a `Transaction`, which must be passed to an `own` parameter
+ownership violation: `u` was dropped holding a value of `Transaction`, which must be passed to an `own` parameter
   used at: must_consume_dropped.sisu:15:27 (`drop _2`)
   at main (must_consume_dropped.sisu:15:27)
 SIR of `main`, its blocks that the conflict passes through:

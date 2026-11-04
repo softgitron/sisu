@@ -279,6 +279,10 @@ struct Loader:
     ## to it (none for the first), to label a cycle's edges: the manifest and
     ## the range of the dependency's name in it.
     edges: list[(int, TextRange)?]
+    ## The package whose dev-dependencies are built and whose `[trust]`
+    ## counts: the root package, or for a package's black-box tests (17)
+    ## the package they test, whose dev-dependencies the tests' file gets.
+    root: int
 
 impl Loader:
     pure def add_file(mut self, name: str, text: str) -> int:
@@ -386,7 +390,7 @@ impl Loader:
                 version=info.version.copy(),
                 dir=canon.copy(),
                 deps=[],
-                trusted=index == 0,
+                trusted=index == self.root,
                 application=False,
                 manifest=Some(file),
                 features=m.features.copy(),
@@ -408,7 +412,7 @@ impl Loader:
         for dep in m.dependencies:
             # A dev-dependency is the package's own tests' business: only
             # the root package's are built.
-            if dep.dev and index != 0:
+            if dep.dev and index != self.root:
                 self.layout.packages[index].wants.push(Want.of(dep, None, False))
                 continue
             var active = True
@@ -417,12 +421,17 @@ impl Loader:
             let found = self.package(
                 fs, join(canon, dep.path), mut stack, Some((index, dep.copy()))
             )
-            self.layout.packages[index].wants.push(Want.of(dep, found, active))
+            # A black-box test's file, not the package it tests, imports
+            # the package's dev-dependencies.
+            var owner = index
+            if dep.dev and index != 0:
+                owner = 0
+            self.layout.packages[owner].wants.push(Want.of(dep, found, active))
             let d = found else:
                 continue
             if active:
-                self.layout.packages[index].deps.push((dep.name.copy(), d))
-            if index == 0:
+                self.layout.packages[owner].deps.push((dep.name.copy(), d))
+            if index == self.root:
                 for (t, _) in m.trust_unsafe:
                     if t == dep.name:
                         self.layout.packages[d].trusted = True
@@ -509,7 +518,9 @@ pub def load_package(fs: Fs, dir: str, base: str) -> Layout:
 
 ## `load_package`, with the features the command line asks for.
 pub def load_package_with(fs: Fs, dir: str, base: str, request: FeatureRequest) -> Layout:
-    var l = Loader(layout=Layout.new(canonical(base)), target=target_facts(), dirs=[], edges=[])
+    var l = Loader(
+        layout=Layout.new(canonical(base)), target=target_facts(), dirs=[], edges=[], root=0
+    )
     var stack: list[int] = []
     _ = l.package(fs, dir, mut stack, None)
     turn_on_features(mut l.layout, request)
@@ -551,6 +562,9 @@ pub def load_file(fs: Fs, name: str, disk: str, text: str) -> Layout:
 ## `load_file`, with the features the command line asks for: a file that is
 ## no script declares none.
 pub def load_file_with(fs: Fs, name: str, disk: str, text: str, request: FeatureRequest) -> Layout:
+    if not text.starts_with("#!"):
+        if let Some(dir) = tested_package(fs, disk):
+            return load_black_box(fs, disk, dir, request)
     var layout = Layout.new(parent(disk))
     layout.script = text.starts_with("#!")
     layout.packages.push(
@@ -591,7 +605,7 @@ pub def load_file_with(fs: Fs, name: str, disk: str, text: str, request: Feature
         turn_on_features(mut layout, request)
         return layout
     # The script is the first package on the stack, reached by no edge.
-    var l = Loader(layout=layout, target=target_facts(), dirs=[String.new()], edges=[None])
+    var l = Loader(layout=layout, target=target_facts(), dirs=[String.new()], edges=[None], root=0)
     l.layout.files.push((name.to_string(), found.copy()))
     let (read, diags) = manifest.read(found)
     for d in diags:
@@ -615,6 +629,71 @@ pub def load_file_with(fs: Fs, name: str, disk: str, text: str, request: Feature
         for (t, _) in m.trust_unsafe:
             if t == dep.name:
                 l.layout.packages[d].trusted = True
+    turn_on_features(mut l.layout, request)
+    return l.layout
+
+## The directory of the package whose black-box tests the file `disk` is
+## (17, RULES.md R65): a file of the `tests/` directory beside a package's
+## manifest.
+pub def tested_package(fs: Fs, disk: str) -> String?:
+    let dir = parent(disk)
+    if file_name(dir) != "tests":
+        return None
+    let up = parent(dir)
+    let text = read_text(fs, join(up, MANIFEST)) else:
+        return None
+    let (read, _) = manifest.read(text)
+    let m = read else:
+        return None
+    if m.package.is_none():
+        return None
+    return Some(up)
+
+## The layout of a package's black-box test file (17, RULES.md R65): a
+## program of one module, the file, whose dependencies are the package it
+## tests, by the package's name, and the package's dev-dependencies. The
+## file sees the package's `pub` items only, as any dependency's; it has
+## the package's features, each turning on the package's own, so that
+## `--features` and `--no-default-features` mean what they mean for the
+## package. Its files are named relative to the package's directory.
+pub def load_black_box(fs: Fs, disk: str, dir: str, request: FeatureRequest) -> Layout:
+    let canon = canonical(dir)
+    var layout = Layout.new(canon)
+    let shown = relative(canon, canonical(disk))
+    layout.packages.push(
+        Package(
+            name=String.new(),
+            version=String.new(),
+            dir=parent(canonical(disk)),
+            deps=[],
+            trusted=True,
+            application=True,
+            manifest=None,
+            features=[],
+            on=[],
+            wants=[],
+            locked_deps=[],
+            release_contracts=None,
+            unsafe_level=None,
+        )
+    )
+    layout.modules.push(ModuleFile(path=[], name=shown, disk=disk.to_string(), package=0))
+    var l = Loader(layout=layout, target=target_facts(), dirs=[String.new()], edges=[None], root=1)
+    var stack = [0]
+    let found = l.package(fs, canon, mut stack, None)
+    if let Some(p) = found:
+        let tested = l.layout.packages[p].name.copy()
+        l.layout.packages[0].deps.insert(0, (tested.copy(), p))
+        let want = Want(
+            name=tested.copy(), package=Some(p), active=True, features=[], defaults=False
+        )
+        l.layout.packages[0].wants.insert(0, want)
+        var features: list[Feature] = []
+        for f in l.layout.packages[p].features:
+            features.push(
+                Feature(name=f.name.copy(), range=f.range, on=[("{tested}/{f.name}", f.range)])
+            )
+        l.layout.packages[0].features = features
     turn_on_features(mut l.layout, request)
     return l.layout
 

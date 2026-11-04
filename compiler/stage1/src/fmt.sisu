@@ -18,7 +18,7 @@
 ##! returned: it must parse to the same tree as the input, up to what the
 ##! formatter changes on purpose (`fmt.shape`), or the formatter refuses.
 
-from stage1.diag import Catalog, Diagnostic
+from stage1.diag import Catalog, Diagnostic, Msg
 from stage1.fmt.lines import Src, result_parts
 from stage1.parser import parse
 from stage1.syntax.kinds import SyntaxKind
@@ -36,6 +36,15 @@ pub error Refusal:
     ## formatter, reported rather than written.
     Changed(at: int)
 
+## Whether a diagnostic of the parser keeps a file from being formatted: a
+## syntax error, which the parser recovers from by skipping or supposing
+## tokens, so that the tree is not the file's. `pub(crate)`'s `E0130`
+## (RULES.md, R54) is given of a tree the parser built whole, a name
+## `pub(...)` does not take, which `check` reports and the formatter
+## leaves as written (RULES.md, R69).
+pub pure def refuses(d: Diagnostic, catalog: Catalog) -> bool:
+    return catalog.is_error(d.msg) and d.msg != Msg.ParseVisibilityScope
+
 ## The canonical text of `text`, with every `Result[T, E]` as written.
 pub pure def format(text: str, catalog: Catalog) -> String ! Refusal:
     return format_with(text, set(), catalog)
@@ -47,7 +56,7 @@ pub pure def format_with(text: str, error_sets: set[String], catalog: Catalog) -
     let parsed = parse(text, catalog)
     var errors: list[Diagnostic] = []
     for d in parsed.diagnostics:
-        if catalog.is_error(d.msg):
+        if refuses(d, catalog):
             errors.push(d.copy())
     if not errors.is_empty():
         return Err(Syntax(diagnostics=errors))
@@ -62,7 +71,7 @@ pub pure def format_with(text: str, error_sets: set[String], catalog: Catalog) -
         return Ok(out)
     let again = parse(out, catalog)
     for d in again.diagnostics:
-        if catalog.is_error(d.msg):
+        if refuses(d, catalog):
             return Err(Changed(at=d.start))
     let a = shape.shape_pruned(src, pruned)
     let b = shape.shape_of(again.tree)
@@ -83,7 +92,7 @@ pub pure def format_with(text: str, error_sets: set[String], catalog: Catalog) -
 pub pure def written_errors(text: str, catalog: Catalog) -> list[String]:
     let parsed = parse(text, catalog)
     for d in parsed.diagnostics:
-        if catalog.is_error(d.msg):
+        if refuses(d, catalog):
             return []
     let tree = ref parsed.tree
     let whole: str = tree.text

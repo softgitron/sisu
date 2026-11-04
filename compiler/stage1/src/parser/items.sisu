@@ -154,7 +154,7 @@ impl Parser:
             self.finish_node()
         else:
             let (start, end) = self.error_span()
-            self.report(Diagnostic.new(Msg.ParseTopLevelStatement, start, end))
+            self.report(self.with_habit(Diagnostic.new(Msg.ParseTopLevelStatement, start, end)))
             self.statement()
 
     ## Parses the declaration at the current token, wrapping everything

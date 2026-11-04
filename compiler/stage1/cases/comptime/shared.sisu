@@ -1,0 +1,16 @@
+# RULES.md, R66: stage 1's compile-time evaluator holds a `Shared` as its
+# value, so `==`, a set's elements and a dict's keys follow it to the
+# value, as decision 464 has the run time do; its identity is beyond it.
+pure def names() -> (bool, bool, int, bool, String):
+    let a = Shared("Aino".to_string())
+    let b = Shared("Aino".to_string())
+    let c = Shared("Eino".to_string())
+    let s = {a.copy(), b.copy(), c.copy()}
+    let d = {a.copy(): 1}
+    let shown = "{a} and {c:?}"
+    return (a == b, a != c, len(s), b in d and d[b] == 1, shown)
+
+const NAMES: (bool, bool, int, bool, String) = comptime names()
+
+def main():
+    print(NAMES)

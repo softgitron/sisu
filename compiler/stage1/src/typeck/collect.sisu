@@ -71,7 +71,7 @@ from stage1.typeck.check import derive_edit
 from stage1.typeck.consts import ConstScope
 from stage1.typeck.contracts import contract_only
 from stage1.typeck.folding import Term
-from stage1.typeck.instances import DeriveCheck
+from stage1.typeck.instances import DeriveCheck, DeriveOrigin
 from stage1.typeck.program import (
     Answer,
     AssocInfo,
@@ -298,6 +298,9 @@ pub struct Resolver:
     pub shims: list[(ModuleId, String)]
     ## The derived and delegated impls to check once every impl is known.
     pub derive_checks: list[DeriveCheck]
+    ## Where each derived impl of the program's modules is in the module
+    ## the compiler wrote for them, by that module (RULES.md, R70).
+    pub derive_origins: dict[ModuleId, list[DeriveOrigin]]
     ## The text of each std module that has templates, by name.
     pub std_texts: dict[String, String]
     ## The text of each std module with unsafe code, by name, for the
@@ -384,6 +387,7 @@ impl Resolver:
             generated=[],
             shims=[],
             derive_checks=[],
+            derive_origins={},
             std_texts={},
             std_safety_texts=Shared(safety_texts),
             foreign_fns={},
@@ -541,7 +545,7 @@ impl Resolver:
         let source = SourceModule(
             path=[], file=String.new(), syntax=module, text=text.to_string(), package=0
         )
-        let package = SourcePackage(name=String.new(), deps=[], trusted=True)
+        let package = SourcePackage(name=String.new(), deps=[], trusted=True, excluded=[])
         self.add_program([source], [package], templates)
 
     ## Declares and resolves a program of several modules and packages
@@ -570,11 +574,14 @@ impl Resolver:
                 trusted=packages[k].trusted or k == 0,
                 deps=deps,
                 root=None,
+                excluded=packages[k].excluded.copy(),
             )
             self.prog.packages.push(data)
             if k == 0:
                 self.prog.packages.push(
-                    PackageData(name="std".to_string(), trusted=True, deps=[], root=None)
+                    PackageData(
+                        name="std".to_string(), trusted=True, deps=[], root=None, excluded=[]
+                    )
                 )
         # The program's own modules, the root module first: each is a module
         # of its package, and a child of the module its path's prefix names.
@@ -2657,6 +2664,10 @@ impl Resolver:
                     let what = "a variadic parameter, `*xs: T`,"
                     let phase = "the decision between 02, which gives it, and 14, which rules variadic functions out; a `Slice[T]` parameter takes a list meanwhile"
                     self.unsupported_in(module, p.range, what, phase)
+                    # Its calls are not checked against the parameters
+                    # before it, which would only repeat the error as
+                    # `E0305` (RULES.md, R71).
+                    info.header_broken = True
                 case ParamKind.Error:
                     pass
         for n in f.from_:
@@ -3376,8 +3387,17 @@ impl Resolver:
             for k in range(2, len(self.prog.packages)):
                 if self.prog.packages[k].name == first:
                     var this = String.new()
+                    var excluded = False
                     if package < len(self.prog.packages):
                         this = self.prog.packages[package].name.copy()
+                        excluded = self.prog.packages[package].excluded.contains(first.copy())
+                    # A dependency whose `when` leaves it out of this build
+                    # is in `[dependencies]` already (RULES.md, R71).
+                    if excluded:
+                        var d = Diagnostic.new(Msg.ResolveDependencyExcluded, at.start, at.end)
+                        d = d.with("name", words.join(".")).with("package", first)
+                        self.report_other(module, d.with("this", this))
+                        return (None, None)
                     var d = Diagnostic.new(Msg.ResolveNotADependency, at.start, at.end)
                     d = d.with("name", words.join(".")).with("package", self.prog.packages[k].name)
                     self.report_other(module, d.with("this", this))
@@ -5150,6 +5170,32 @@ impl Resolver:
                     )
         return None
 
+    ## The trait among `subject`'s bounds that declares the constant
+    ## `name` (a function of the trait without `self`, RULES.md, R37).
+    pure def bound_constant(mut self, subject: Ty, name: str, ctx: TyCtx) -> String?:
+        var candidates: list[TraitRef] = []
+        for p in ctx.predicates:
+            if p.ty == subject:
+                candidates.push(p.bound.copy())
+        for c in candidates:
+            for tr in self.prog.elaborate(mut self.types, subject, c):
+                let owner = self.prog.defs[tr.def_.index].name.copy()
+                if let Some(info) = self.prog.trait_info(tr.def_):
+                    for m in info.methods:
+                        if self.prog.defs[m.index].name == name:
+                            return Some(owner)
+                # A trait whose members are not declared yet: its text.
+                let m = self.prog.defs[tr.def_.index].module
+                if m.index < len(self.sources):
+                    let source = ref self.sources[m.index]
+                    for id in source.items:
+                        if let ItemKind.Trait(t) = source.ast.item(id).kind:
+                            if t.name.text == owner:
+                                for c in t.consts:
+                                    if c.name.text == name:
+                                        return Some(owner.copy())
+        return None
+
     pure def resolve_path_ty(
         mut self, segments: list[Name], args: list[Ty], ctx: TyCtx, at: TextRange
     ) -> Ty:
@@ -5215,6 +5261,11 @@ impl Resolver:
                     return t
                 let shown = self.prog.display_in(self.types, s, ctx.generics)
                 var d = Diagnostic.new(Msg.ResolveNoAssocType, at.start, at.end).with("ty", shown)
+                # A constant of a bound's trait is named as one, not as an
+                # associated type (RULES.md, R68).
+                if let Some(owner) = self.bound_constant(s, name, ctx):
+                    d = Diagnostic.new(Msg.ResolveConstNotType, at.start, at.end).with("ty", shown)
+                    d = d.with("trait", owner)
                 # A trait's constant through a type parameter is a value of
                 # the instance, not a constant argument (RULES.md, R50).
                 if is_screaming(name):
@@ -5498,6 +5549,8 @@ pub struct SourcePackage:
     pub name: String
     pub deps: list[(String, int)]
     pub trusted: bool
+    ## The dependencies whose `when` excludes the target (RULES.md, R71).
+    pub excluded: list[String]
 
 ## The package of the program's `k`th package in the resolved program, where
 ## std is `STD_PACKAGE` (stage 0's `package_id`).

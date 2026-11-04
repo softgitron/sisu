@@ -1,0 +1,8 @@
+# RULES.md, R71: a call of a function with a variadic parameter is not
+# checked against its parameters, which R64's `E0900` refuses: one error,
+# where `E0305` counted the arguments again.
+def total(*prices: int) -> int:
+    return 0
+
+def main():
+    print(total(1, 2, 3))

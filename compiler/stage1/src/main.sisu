@@ -142,7 +142,7 @@ error CommandError:
 ## prints as `sisu1 VERSION`: its minor number is the round of RULES.md
 ## that last changed what the driver may rely on (R56), so that the driver
 ## asks it rather than probing a command (decision 424).
-const VERSION: str = "0.6.0"
+const VERSION: str = "0.7.0"
 
 def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     var args = sys.env.args()
@@ -547,6 +547,15 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         let flags = [
             "--format=ids", "--format=human", "--locked", "--no-default-features", "--accept-unsafe"
         ]
+        # An option `lint` does not take, `--help` among them, is `D0009`,
+        # as the driver's commands answer it (RULES.md, R69).
+        if let Some(o) = unknown_option(words, flags):
+            let params = [
+                Param(name="option".to_string(), value=o),
+                Param(name="command".to_string(), value="lint".to_string()),
+            ]
+            emit("", catalog.plain_error("cli.unknown-option", params))
+            return Err(Exit(status=2))
         var path = path_of(words, flags) else:
             return Err(Usage(text=usage()))
         if not names_path(words, flags):
@@ -971,7 +980,7 @@ def file_input(
         if catalog.is_error(d.msg):
             named = True
     let module = typeck.InputModule(path=[], file=arg.to_string(), text=text.to_string(), package=0)
-    let package = SourcePackage(name=String.new(), deps=[], trusted=True)
+    let package = SourcePackage(name=String.new(), deps=[], trusted=True, excluded=[])
     return Ok(
         Input(
             modules=[module],
@@ -1022,7 +1031,15 @@ def layout_input(
                 _ = embedded.insert(k.copy(), v.copy())
     var packages: list[SourcePackage] = []
     for p in layout.packages:
-        packages.push(SourcePackage(name=p.name.copy(), deps=p.deps.copy(), trusted=p.trusted))
+        var excluded: list[String] = []
+        for w in p.wants:
+            if not w.active and w.package.is_some():
+                excluded.push(w.name.copy())
+        packages.push(
+            SourcePackage(
+                name=p.name.copy(), deps=p.deps.copy(), trusted=p.trusted, excluded=excluded
+            )
+        )
     # Stage 0's errors that are not the type checker's: the manifests' and
     # the module trees' problems, a name that names nothing, and `unsafe` or
     # `extern` in a dependency `[trust]` does not list (`cap.untrusted`).
@@ -1290,8 +1307,8 @@ def audit_command(
             let one = AuditPackage(
                 name=file.copy(),
                 version=String.new(),
-                level=String.new(),
-                consent="a program of one file, which declares no level".to_string(),
+                level="no level".to_string(),
+                consent="a program of one file, which may hold any unsafe code".to_string(),
             )
             packages.push(one)
             modules.push(AuditModule(package=0, path=file.copy(), file=file, text=text))
@@ -2385,21 +2402,28 @@ def test_command(sys: System, home: str, rest: list[String], catalog: Catalog) -
     let base = base_of(sys, home, std_texts(sys, home)?, catalog)
     var kept = Kept.new()
     var env = base.environment()
-    var programs: list[Input] = []
+    var programs: list[(Input, String)] = []
     match layouts_of(sys, path, False, request):
         case Some(layouts):
             for layout in layouts:
                 if layout.modules.is_empty():
                     emit("", problems_report(layout, catalog).human(catalog))
                     return Ok(1)
-                programs.push(layout_input(sys, home, layout, True, mut env, catalog)?)
+                programs.push(
+                    (layout_input(sys, home, layout, True, mut env, catalog)?, path.copy())
+                )
         case None:
             for input in inputs_of(sys, home, path, False, True, request, mut env, catalog)?:
-                programs.push(input.copy())
+                programs.push((input.copy(), path.copy()))
+    # Then each package's black-box tests, `tests/*.sisu` (17), a program
+    # each whose dependency is the package (RULES.md, R65).
+    for file in black_box_files(sys, path):
+        for input in inputs_of(sys, home, file, False, True, request, mut env, catalog)?:
+            programs.push((input.copy(), file.copy()))
     var failed = False
     var blocked = False
-    for input in programs:
-        let (status, held) = test_program(sys, home, path, input, runner, base, catalog, mut kept)?
+    for (input, shown) in programs:
+        let (status, held) = test_program(sys, home, shown, input, runner, base, catalog, mut kept)?
         if status == 1:
             failed = True
         elif status != 0:
@@ -2411,6 +2435,45 @@ def test_command(sys: System, home: str, rest: list[String], catalog: Catalog) -
     if blocked:
         return Ok(TESTS_BLOCKED)
     return Ok(0)
+
+## The black-box test files of the package or the workspace's members
+## `arg` names (17): each package's `tests/*.sisu`, by name, as the
+## command line names `arg` (RULES.md, R65).
+def black_box_files(sys: System, arg: str) -> list[String]:
+    let target = package.locate(sys.fs, absolute(sys, arg)) else:
+        return []
+    var dirs: list[String] = []
+    match target:
+        case Target.Package(d):
+            dirs.push(d.copy())
+        case Target.Workspace(_, members):
+            dirs = members.copy()
+        case Target.File(_):
+            return []
+    var out: list[String] = []
+    for d in dirs:
+        let tests = package.join(d, "tests")
+        let entries = sys.fs.list_dir(Path.new(tests)) else:
+            continue
+        var files: list[String] = []
+        for e in entries:
+            let p = e.as_str().to_string()
+            if p.ends_with(".sisu") and package.is_file(sys.fs, p):
+                files.push(p)
+        files.sort()
+        for f in files:
+            out.push(shown_beside(arg, absolute(sys, arg), f))
+    return out
+
+## The path `p` (absolute) as the command line would name it, given that
+## `arg` names the directory `abs`.
+pure def shown_beside(arg: str, abs: str, p: str) -> String:
+    if p.starts_with("{abs}/"):
+        let rest = p.byte_slice(abs.byte_len() + 1, p.byte_len())
+        if arg == "." or arg.is_empty():
+            return rest.to_string()
+        return package.join(arg.strip_suffix("/"), rest)
+    return p.to_string()
 
 ## One program's tests (`test_command`): the runner's status (1 for a
 ## program with an error, or a failed test), and whether a test is blocked.
@@ -3249,6 +3312,19 @@ pure def path_of(rest: list[String], flags: list[str]) -> String?:
         return Some(".".to_string())
     if len(paths) == 1:
         return Some(paths[0].copy())
+    return None
+
+## The first word after the command's name that is an option, `--NAME`,
+## but none of `flags`.
+pure def unknown_option(rest: list[String], flags: list[str]) -> String?:
+    for k in range(1, len(rest)):
+        if rest[k].starts_with("--"):
+            var known = False
+            for f in flags:
+                if rest[k] == f:
+                    known = True
+            if not known:
+                return Some(rest[k].copy())
     return None
 
 ## What `sisu doc` is asked (stage 0's `doc`, its arguments): the paths

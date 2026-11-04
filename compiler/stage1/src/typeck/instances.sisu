@@ -29,6 +29,7 @@
 ##! none to `reflect.attributes_of`.
 
 from stage1.diag import Diagnostic, Msg, TextRange
+from stage1.diag import Param as MsgParam
 from stage1.parser import parse
 from stage1.syntax.ast import (
     Ast,
@@ -79,6 +80,17 @@ pub struct DeriveCheck:
     pub trait_name: String
     pub span: TextRange
     pub field: String?
+
+## Where a derived impl's text is in the module the compiler wrote for a
+## module's derives (`<derive>/NAME.sisu`): its bytes, the derive's
+## argument that asked for it in the module, the trait and the type; a
+## diagnostic in it is placed at that argument (RULES.md, R70).
+pub struct DeriveOrigin:
+    pub start: int
+    pub end: int
+    pub asked: TextRange
+    pub trait_name: String
+    pub ty: String
 
 ## Where the template of a derive is written.
 enum DeriveSource:
@@ -148,6 +160,7 @@ impl Resolver:
                 made = Some(t.copy())
         var text = String.new()
         var delegate = String.new()
+        var origins: list[DeriveOrigin] = []
         for id in items:
             let item = self.sources[module.index].ast.item(id).copy()
             var name = String.new()
@@ -241,6 +254,21 @@ impl Resolver:
                         var d = Diagnostic.new(
                             Msg.ResolveNotDerivable, arg.range.start, arg.range.end
                         )
+                        # A std module's trait that derives, not imported
+                        # (RULES.md, R70).
+                        let written_name: str = shown
+                        let home = match written_name:
+                            case "Encode" | "Decode": "std.json"
+                            case "Plain": "std.mem"
+                            case _: ""
+                        if not home.is_empty():
+                            d = d.note_params(
+                                Msg.ResolveDeriveImport,
+                                [
+                                    MsgParam(name="name".to_string(), value=shown.copy()),
+                                    MsgParam(name="module".to_string(), value=home.to_string()),
+                                ],
+                            )
                         self.report_other(module, d.with("name", shown))
             # `@delegate(Trait, ..., to="field")`: impls that forward to a
             # field.
@@ -342,7 +370,17 @@ impl Resolver:
                                 failed = Some((dm, at, why.copy()))
                 match unfolded:
                     case Some(x):
+                        let from_ = text.byte_len()
                         text.push(x)
+                        origins.push(
+                            DeriveOrigin(
+                                start=from_,
+                                end=text.byte_len(),
+                                asked=asked,
+                                trait_name=t.copy(),
+                                ty=name.copy(),
+                            )
+                        )
                     case None:
                         if let Some((tm, at, why)) = failed:
                             var d = Diagnostic.new(Msg.ComptimeDeriveFailed, asked.start, asked.end)
@@ -366,7 +404,9 @@ impl Resolver:
         elif std:
             _ = self.std_derived.insert(module_name, text.copy())
         if not text.is_empty():
-            _ = self.declare_generated_in(module, "<derive>", text)
+            let id = self.declare_generated_in(module, "<derive>", text)
+            if not std and made.is_none():
+                _ = self.derive_origins.insert(id, origins)
 
     ## Declares generated code in a module of its own, with the generated
     ## text as its source file and `module` as its scope; its bodies are

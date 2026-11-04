@@ -80,7 +80,12 @@ E0129 error   parse.attribute-on-statement  `@{name}` stands before a statement;
 -     note    parse.loop-directive        `@tile`, `@unroll` and `@vectorize` on a loop nest are planned with the native backend (19, N-22) as checked directives, which hold or fail to compile, and are not in the language yet
 # Stage 1's (RULES.md, R54): another language's spelling where a parse
 # error stops, written as Sisu writes it.
--     fix     parse.sisu-spelling         Sisu writes it `{text}`
+-     fix     parse.sisu-spelling         Sisu writes it so
+# Stage 1's (RULES.md, R72): habits a parse error stops at, which a note
+# answers.
+-     note    parse.keyword-name          `{keyword}` is a keyword, which names no binding: give it another name
+-     note    parse.no-exceptions         Sisu has no `{keyword}`: an error is a value, a `Result` or a `T ! E`, which `?` passes on and `match`, `else` or `if let` handles
+-     note    parse.go-task               a task starts in a scope, which joins it: `task.scope do s:` and `s.spawn(() -> f())`
 E0130 error   parse.visibility-scope      `pub({name})` is not Sisu's: an item is `pub` to every package, or `pub(package)` to the modules of its own
 -     fix     parse.visibility-package    make it visible to its package: `pub(package)`
 E0131 error   parse.attribute-line        an attribute stands on a line of its own, before its declaration
@@ -189,6 +194,10 @@ E0270 error   resolve.copy-by-hand        `Copy` is derived, not implemented: an
 E0271 error   resolve.not-a-trait-constant  `{name}` is not a constant of `{trait}`
 E0272 error   resolve.constant-type       the constant `{name}` has the type `{found}` here, and `{trait}` declares it with the type `{expected}`
 E0273 error   resolve.const-or-method     `{name}` is {what} of `{trait}`, and this impl gives it as {given}
+# Stage 1's (RULES.md, R68): a trait's constant where a type goes.
+E0274 error   resolve.const-not-type      `{name}` is a constant of `{trait}`, which bounds `{ty}`, not a type
+# Stage 1's (RULES.md, R71): a dependency whose `when` leaves it out of the build.
+E0275 error   resolve.dependency-excluded  cannot import `{name}`: the dependency `{package}` of `{this}` is not built for this target, which its `when` in that package's `sisu.toml` excludes
 
 # ---------------------------------------------------------------- types
 E0300 error   type.mismatch               expected `{expected}`, found `{found}`
@@ -394,9 +403,9 @@ E0414 error   borrow.from-not-a-parameter  `{name}` in the `from` clause is not 
 E0415 error   borrow.from-without-borrow  `{function}` returns `{ty}`, which does not borrow, so it takes no `from` clause
 E0416 error   borrow.move-out-of-drop     cannot move `{part}` out of `{name}`, because `{ty}` implements `Drop`, which needs the whole value
 E0417 error   borrow.must-consume         `{name}` is never consumed: a value of `{ty}` must be passed to an `own` parameter before it goes out of scope
-E0418 error   borrow.must-consume-exit    this leaves the scope with `{name}` unconsumed: a `{ty}` must be passed to an `own` parameter first
+E0418 error   borrow.must-consume-exit    this leaves the scope with `{name}` unconsumed: a value of `{ty}` must be passed to an `own` parameter first
 E0419 error   borrow.move-out-of-place    cannot move out of `{name}` through a reference or an index; copy it with `.copy()`
-E0420 error   borrow.must-consume-intrinsic  `{callee}` may drop values that `{name}` holds, and a `{ty}` is must-consume: its values must be passed to an `own` parameter
+E0420 error   borrow.must-consume-intrinsic  `{callee}` may drop values that `{name}` holds, and a value of `{ty}` is must-consume: its values must be passed to an `own` parameter
 E0421 error   borrow.view-in-owner        `{ty}` borrows, so it cannot be put in `{owner}`, which can outlive what it borrows (04, rule 3)
 E0422 error   borrow.must-consume-in-owner  `{ty}` is must-consume, so it cannot be put in `{owner}`, which can drop it where the checker does not see
 E0423 error   type.own-closure-capture    an `own` closure keeps a copy of `{name}`, and `{ty}` is not `Copy`; stage 0 copies captures (a capture by move arrives with tasks)
@@ -462,10 +471,16 @@ E0436 error   type.generator-result       `{name}` yields, so it must return `It
 -     note    type.borrowed-to-own        {callee} takes `{param}` with `own`, which moves the value in, and `{name}` is a borrowed parameter here, which only lends its value
 -     fix     type.take-own               take `{name}` with `own`, so that it is this function's to give on
 -     note    type.narrow-int             an `int` narrows to `{ty}` through `.to_{ty}()`, which gives an option: `None` when the value does not fit
--     fix     type.lowercase-binding      a binding's name starts with a lowercase letter: `{name}`
+-     fix     type.lowercase-binding      a binding's name starts with a lowercase letter
 # Stage 1's (RULES.md, R50): a trait's constant read through a type
 # parameter where a type's constant argument goes.
 -     note    resolve.const-through-param  `{name}` is a trait's constant, which each impl gives: through a type parameter it is a value of the instance, known where the function runs, and a type's constant argument is known where the type is written; take it as a `const` parameter, `[T: Shape, const N: int]`, which a caller gives as `Square.{name}`
+# Stage 1's (RULES.md, R70): a derivable trait of a std module that is not
+# imported.
+-     note    resolve.derive-import       `{name}` is a trait of `{module}`, whose derive is known where it is imported: `from {module} import {name}`
+# Stage 1's (RULES.md, R70): where in a derived impl a diagnostic placed at
+# its derive is.
+-     note    type.derived-code           in the impl of `{trait}` that the derive writes for `{ty}`: `{code}`
 -     note    type.assign-every-path      give it a value on every path before this use, or where it is declared
 -     note    type.dyn-owned              make the `dyn` from a value that owns what it holds, or keep the view as its own type
 -     label   borrow.borrowed-param       `{name}` is a borrowed parameter
@@ -526,7 +541,7 @@ E0806 error   contract.invariant-field    `{what}` is part of a value of `{ty}`,
 E0807 error   contract.not-in-test        a test has no contract; check what it needs with `assert`
 E0810 error   refine.not-satisfied        `{value}` is not of type `{ty}`: `{predicate}` is false for it
 E0811 error   refine.needs-try-from       expected `{expected}`, found `{found}`; a value becomes a `{expected}` where its predicate is checked, with `{name}.try_from(...)`
-E0812 error   refine.change-through-base  `{what}` is a `{ty}`, which a change through its base could take outside `{predicate}`; change a copy of the base and check it again with `try_from`
+E0812 error   refine.change-through-base  `{what}` is of type `{ty}`, which a change through its base could take outside `{predicate}`; change a copy of the base and check it again with `try_from`
 E0813 error   refine.own-impl             `{ty}` refines `{base}` and has its reading impls; it cannot have an impl of `{trait}` of its own
 E0814 error   refine.predicate-type       the predicate of `{ty}` must be a `bool`, found `{found}`
 -     help    refine.use-try-from         check it where it runs: `{name}.try_from(...)`
@@ -701,7 +716,7 @@ R0065 runtime defer.false-positive        every rejected statement was reached w
 R0066 runtime defer.inconclusive          a rejected statement was never reached: inconclusive, an untested path
 R0067 runtime defer.signature             the checker still rejects line {line} ({code} {id}), a rule about declarations that no run can test
 R0068 runtime monitor.no-value            <no value>
-R0069 runtime monitor.unconsumed          `{name}` was dropped holding a `{ty}`, which must be passed to an `own` parameter
+R0069 runtime monitor.unconsumed          `{name}` was dropped holding a value of `{ty}`, which must be passed to an `own` parameter
 R0070 runtime defer.declarations-only     only rules about declarations reject the program, and the run reached no conflict: a candidate false positive
 R0071 runtime monitor.op-return           the return from the frame
 R0072 runtime panic.stale-key             stale arena key: slot {index}, generation {generation}, no longer holds its value
@@ -729,7 +744,7 @@ R0090 runtime panic.into-inner-poisoned   `into_inner` of a poisoned lock: a tas
 R0100 runtime contract.requires-failed    precondition of `{function}` failed: {clause}
 R0101 runtime contract.ensures-failed     postcondition of `{function}` failed: {clause}
 R0102 runtime contract.invariant-failed   invariant of `{ty}` failed: {clause}
-R0103 runtime contract.refinement-failed  `{value}` is not a `{ty}`: `{clause}` is false for it
+R0103 runtime contract.refinement-failed  `{value}` is not of type `{ty}`: `{clause}` is false for it
 R0104 runtime run.case-too-long           the case ran past its budget of {steps} statements
 R0105 runtime sim.always-failed           `sim.always` does not hold: {what}
 R0106 runtime sim.choose-none             `sim.choose` needs at least one option
