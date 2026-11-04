@@ -1,3 +1,2 @@
-2:5-2:18 E0807 contract.not-in-test
-6:16-6:17 E0381 type.return-in-test
-  fix type.drop-return-value 6:15-6:17 ""
+12:6-12:18 E0807 contract.not-in-test
+19:6-19:24 E0381 type.return-in-test

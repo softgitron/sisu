@@ -980,7 +980,7 @@ def file_input(
         if catalog.is_error(d.msg):
             named = True
     let module = typeck.InputModule(path=[], file=arg.to_string(), text=text.to_string(), package=0)
-    let package = SourcePackage(name=String.new(), deps=[], trusted=True, excluded=[])
+    let package = SourcePackage(name=String.new(), deps=[], trusted=True, excluded=[], dev_only=[])
     return Ok(
         Input(
             modules=[module],
@@ -1032,12 +1032,20 @@ def layout_input(
     var packages: list[SourcePackage] = []
     for p in layout.packages:
         var excluded: list[String] = []
+        var dev_only: list[String] = []
         for w in p.wants:
             if not w.active and w.package.is_some():
                 excluded.push(w.name.copy())
+            # A dev-dependency is its package's tests' (RULES.md, R75).
+            if w.dev and w.active and w.package.is_some():
+                dev_only.push(w.name.copy())
         packages.push(
             SourcePackage(
-                name=p.name.copy(), deps=p.deps.copy(), trusted=p.trusted, excluded=excluded
+                name=p.name.copy(),
+                deps=p.deps.copy(),
+                trusted=p.trusted,
+                excluded=excluded,
+                dev_only=dev_only,
             )
         )
     # Stage 0's errors that are not the type checker's: the manifests' and

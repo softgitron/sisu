@@ -262,6 +262,13 @@ pub struct Resolver:
     ## The modules that hold an instance, whose functions are never
     ## templates themselves.
     pub instance_modules: set[ModuleId]
+    ## The call that made each instance's module, its module and the
+    ## instance's name (`make[User]`), where a diagnostic in the instance is
+    ## placed (RULES.md, R77).
+    pub instance_sites: dict[ModuleId, (ModuleId, TextRange, String)]
+    ## While an import is declared: whether it is `@cfg(test)`, as an import
+    ## of a dev-dependency must be (RULES.md, R75).
+    pub import_for_tests: bool
     ## How many definitions the base made: a program's own come after them,
     ## and nothing a program declares changes one of the base's.
     pub base_defs: int
@@ -376,6 +383,8 @@ impl Resolver:
             tests=True,
             instances_declared=0,
             instance_modules=set(),
+            instance_sites={},
+            import_for_tests=False,
             base_defs=0,
             base_eager=[],
             method_instances=[],
@@ -545,7 +554,9 @@ impl Resolver:
         let source = SourceModule(
             path=[], file=String.new(), syntax=module, text=text.to_string(), package=0
         )
-        let package = SourcePackage(name=String.new(), deps=[], trusted=True, excluded=[])
+        let package = SourcePackage(
+            name=String.new(), deps=[], trusted=True, excluded=[], dev_only=[]
+        )
         self.add_program([source], [package], templates)
 
     ## Declares and resolves a program of several modules and packages
@@ -575,12 +586,18 @@ impl Resolver:
                 deps=deps,
                 root=None,
                 excluded=packages[k].excluded.copy(),
+                dev_only=packages[k].dev_only.copy(),
             )
             self.prog.packages.push(data)
             if k == 0:
                 self.prog.packages.push(
                     PackageData(
-                        name="std".to_string(), trusted=True, deps=[], root=None, excluded=[]
+                        name="std".to_string(),
+                        trusted=True,
+                        deps=[],
+                        root=None,
+                        excluded=[],
+                        dev_only=[],
                     )
                 )
         # The program's own modules, the root module first: each is a module
@@ -696,6 +713,7 @@ impl Resolver:
         let last = prefix.pop() ?? String.new()
         let parent = self.module_at(prefix, pid, file)
         let d = self.new_def(parent, last, TextRange.empty(0), Vis.Pub, DefKind.Module(id))
+        _ = self.prog.modules[parent.index].children.insert(last.copy(), id)
         _ = self.prog.modules[parent.index].items.insert(last, d)
 
     ## The module of the program at `path`, made (as a directory's module,
@@ -720,6 +738,7 @@ impl Resolver:
             let last = prefix.pop() ?? String.new()
             let parent = self.module_at(prefix, pid, file)
             let d = self.new_def(parent, last, TextRange.empty(0), Vis.Pub, DefKind.Module(id))
+            _ = self.prog.modules[parent.index].children.insert(last.copy(), id)
             _ = self.prog.modules[parent.index].items.insert(last, d)
         return id
 
@@ -3320,6 +3339,9 @@ impl Resolver:
             return None
         var m = found
         for i in range(1, len(path)):
+            if let Some(c) = self.prog.modules[m.index].children.get(path[i].text.copy()):
+                m = c
+                continue
             let d = self.prog.lookup_in(m, path[i].text) else:
                 return None
             let DefKind.Module(c) = self.prog.defs[d.index].kind() else:
@@ -3330,6 +3352,12 @@ impl Resolver:
     ## An `import` or `from ... import` item of `module` (09, "Modules").
     pure def declare_import(mut self, module: ModuleId, id: ItemId):
         let item = self.sources[module.index].ast.item(id).copy()
+        var for_tests = False
+        for a in item.attrs:
+            if a.name == "cfg" and len(a.args) == 1 and a.args[0].name.is_none():
+                if let ExprKind.Name(n) = self.ast(module).expr(a.args[0].value).kind:
+                    for_tests = n == "test"
+        self.import_for_tests = for_tests
         match item.kind:
             case ItemKind.Import(imp):
                 self.import_module(module, imp, item.range, item.vis)
@@ -3337,6 +3365,7 @@ impl Resolver:
                 self.import_from(module, imp, item.range, item.vis)
             case _:
                 pass
+        self.import_for_tests = False
 
     ## The module an import path names (09, "Modules"): a module of the
     ## importing package (by the package's own name), of one of its
@@ -3355,6 +3384,16 @@ impl Resolver:
             return (None, None)
         let package = self.prog.package_of(module)
         var root: ModuleId? = None
+        # A dev-dependency imported by its package's code by an import that
+        # is not `@cfg(test)` (RULES.md, R75).
+        let outside_tests = not self.is_std(module) and not self.import_for_tests
+        if package < len(self.prog.packages) and outside_tests:
+            if self.prog.packages[package].dev_only.contains(first.copy()):
+                let this = self.prog.packages[package].name.copy()
+                var d = Diagnostic.new(Msg.ResolveDevDependency, at.start, at.end)
+                d = d.with("name", words.join(".")).with("package", first).with("this", this)
+                self.report_other(module, d.note(Msg.ResolveDevDependencyTests))
+                return (None, None)
         if package < len(self.prog.packages):
             let this = ref self.prog.packages[package]
             if not this.name.is_empty() and this.name == first:
@@ -3368,7 +3407,9 @@ impl Resolver:
             for i in range(1, len(path)):
                 let seg = path[i].text.copy()
                 var next: ModuleId? = None
-                if let Some(d) = self.prog.lookup_in(m, seg):
+                if let Some(c) = self.prog.modules[m.index].children.get(seg.copy()):
+                    next = Some(c)
+                elif let Some(d) = self.prog.lookup_in(m, seg):
                     if let DefKind.Module(c) = self.prog.defs[d.index].kind():
                         if not self.prog.modules[m.index].imported.contains(seg.copy()):
                             next = Some(c)
@@ -3452,6 +3493,20 @@ impl Resolver:
             _ = self.prog.poisoned.add(s.copy())
         _ = self.prog.poisoned.add(name.to_string())
 
+    ## Whether `name` in `module` is still the child module 09 links there,
+    ## which no declaration or import took.
+    pure def child_link(self, module: ModuleId, name: str) -> bool:
+        let data = ref self.prog.modules[module.index]
+        let c = data.children.get(name.to_string()) else:
+            return False
+        if data.imported.contains(name.to_string()):
+            return False
+        let d = data.items.get(name.to_string()) else:
+            return False
+        if let DefKind.Module(m) = self.prog.defs[d.index].kind():
+            return m == c
+        return False
+
     ## Records that an import bound `name` in `module`, with the import's
     ## visibility (a `pub` import re-exports it).
     pure def bind_import(mut self, module: ModuleId, name: str, def_: DefId, vis: Vis):
@@ -3462,8 +3517,10 @@ impl Resolver:
                 if let DefKind.Module(b) = self.prog.defs[def_.index].kind():
                     if a == b:
                         return
-            self.bind(module, name, def_)
-            return
+            # A child module's name gives way to an import (RULES.md, R74).
+            if not self.child_link(module, name):
+                self.bind(module, name, def_)
+                return
         _ = self.prog.modules[module.index].items.insert(name.to_string(), def_)
         _ = self.prog.modules[module.index].imported.insert(name.to_string(), vis)
 
@@ -3500,6 +3557,9 @@ impl Resolver:
         if let Some(r) = root:
             var m = r
             for k in range(1, len(prefix)):
+                if let Some(c) = self.prog.modules[m.index].children.get(prefix[k].copy()):
+                    m = c
+                    continue
                 let d = self.prog.lookup_in(m, prefix[k]) else:
                     return False
                 var next: ModuleId? = None
@@ -3517,6 +3577,8 @@ impl Resolver:
             found = m
             std = True
         let m = found else:
+            return False
+        if self.prog.modules[m.index].children.contains(last.copy()):
             return False
         let item = self.prog.lookup_in(m, last)
         if let Some(d) = item:
@@ -5551,6 +5613,9 @@ pub struct SourcePackage:
     pub trusted: bool
     ## The dependencies whose `when` excludes the target (RULES.md, R71).
     pub excluded: list[String]
+    ## The package's own dev-dependencies, which only its `@cfg(test)`
+    ## imports name (RULES.md, R75).
+    pub dev_only: list[String]
 
 ## The package of the program's `k`th package in the resolved program, where
 ## std is `STD_PACKAGE` (stage 0's `package_id`).

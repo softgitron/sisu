@@ -578,6 +578,16 @@ const MODULE_PATHS: list[str] = [
     "std.regex",
 ]
 
+## The error sets of std's modules, which a program names through its
+## import of the module (RULES.md, R76).
+const STD_ERROR_SETS: list[(str, str)] = [
+    ("JsonError", "std.json"),
+    ("DecodeError", "std.encoding"),
+    ("EnvError", "std.env"),
+    ("ProcessError", "std.process"),
+    ("RegexError", "std.regex"),
+]
+
 ## The scalar types a misspelt type name is compared with.
 const SCALARS: list[str] = [
     "int",
@@ -1084,6 +1094,19 @@ impl Resolver:
     pure def bind_import(mut self, own name: String, own identity: String, start: int, end: int):
         if let Some(old) = self.module.identity.get(name.copy()):
             if old == identity:
+                return
+        # A child module's name, which 09 binds in its parent without a
+        # declaration, gives way to an import of the name; the module is
+        # still reached by its path (RULES.md, R74). A declaration of the
+        # name is a second one, which an expression's path `m.name` could
+        # not tell from the module.
+        if let Some((first_start, first_end)) = self.module.items.get(name.copy()):
+            let child = first_start == 0
+                and first_end == 0
+                and self.module.children.contains(name.copy())
+            if child and not identity.starts_with("module "):
+                _ = self.module.identity.insert(name.copy(), identity)
+                _ = self.module.items.insert(name, (start, end))
                 return
         self.bind(name, identity, start, end)
 
@@ -1745,6 +1768,20 @@ impl Resolver:
             if not t.starts_with("_"):
                 candidates.push(t.copy())
         var d = Diagnostic.new(Msg.ResolveUndefinedType, start, end).with("name", name)
+        # A std module's error set written alone, `JsonError`: its module
+        # names it, which the fix or the note says, and a similar name in
+        # scope is no fix (RULES.md, R76).
+        for (ty, module) in STD_ERROR_SETS:
+            if ty == name:
+                let short = module.byte_slice(4, module.byte_len())
+                for (bound, loaded) in self.module.imports.items():
+                    if loaded == short:
+                        self.report(d.fix_at(Msg.ResolveQualifyType, start, end, "{bound}.{name}"))
+                        return
+                var params = [Param(name="name".to_string(), value=name.to_string())]
+                params.push(Param(name="module".to_string(), value=module.to_string()))
+                self.report(d.note_params(Msg.ResolveStdTypeImport, params))
+                return
         if let Some(similar) = closest(name, candidates):
             d = d.fix_at(Msg.ResolveSimilarType, start, end, similar)
         self.report(d)

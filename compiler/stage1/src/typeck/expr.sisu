@@ -1312,8 +1312,11 @@ impl Checker:
         if n == "False":
             return self.add(TExprKind.Bool(False), Ty.bool(), at)
         if n == "it":
+            # `it` makes a closure of a call's argument only (02), so an
+            # item of a list of functions, `[heat, it - 15]`, writes the
+            # closure (RULES.md, R77).
             let d = self.error(cx, Msg.TypeItOutsideClosure, at)
-            self.report(d)
+            self.report(d.note(Msg.TypeItArgumentOnly))
             return self.error_expr(at)
         # A `const` generic parameter is an `int`.
         for i in range(len(self.generic_names)):
@@ -1617,6 +1620,12 @@ impl Checker:
                 l = self.wrap(l, Coercion.FloatWiden, Ty.float())
             elif lk == Some("f64") and rk == Some("f32"):
                 r = self.wrap(r, Coercion.FloatWiden, Ty.float())
+        # A literal beside a type that takes literals through `FromLiteral`,
+        # a `BigInt` or a `Decimal`, is of that type, when the operator has
+        # no impl for the literal's own (D-076; RULES.md, R78).
+        if not widened:
+            r = self.literal_beside(cx, op, l, r)
+            l = self.literal_beside(cx, op, r, l)
         if let Some(call) = self.operator_call(cx, op, l, Some(r), range):
             return call
         let (ty, _) = self.binary_result(cx, op, l, r, range)
@@ -1625,6 +1634,32 @@ impl Checker:
             l = self.coerce(cx, l, Ty.str())
             r = self.coerce(cx, r, Ty.str())
         return self.add(TExprKind.Binary(op=op, lhs=l, rhs=r), ty, range)
+
+    ## The literal `lit` (an integer or a float written as such) as a value
+    ## of the type of `other`, the other operand of `op`, when that type is
+    ## no number, implements `FromLiteral` for the literal's type, and the
+    ## operator has no impl that takes the literal as it is; else `lit`.
+    pure def literal_beside(mut self, cx: Cx, op: BinOp, other: TExprId, lit: TExprId) -> TExprId:
+        match self.exprs[lit.index].kind:
+            case TExprKind.Int(_) | TExprKind.Float(_):
+                pass
+            case _:
+                return lit
+        let ot = self.resolved(self.types.strip_ref(self.ty_of(other)))
+        let TyData.Adt(_, _) = self.types.data(ot) else:
+            return lit
+        if self.is_number(cx, ot) or self.is_string(cx, ot):
+            return lit
+        let lt = self.resolved(self.ty_of(lit))
+        if let Some((tr_def, _)) = self.operator_trait(cx, op):
+            let as_is = TraitRef(def_=tr_def, args=[lt])
+            if cx.prog.implements(mut self.types, ot, as_is, self.env).holds():
+                return lit
+            let flipped = TraitRef(def_=tr_def, args=[ot])
+            if cx.prog.implements(mut self.types, lt, flipped, self.env).holds():
+                return lit
+        let made = self.literal_via_trait(cx, lit, Some(ot))
+        return made
 
     ## The trait behind an operator of the fixed set (D-022), and its method.
     pub pure def operator_trait(self, cx: Cx, op: BinOp) -> (DefId, String)?:
@@ -2149,6 +2184,11 @@ impl Checker:
             let shown_r = self.show(cx, rt)
             var d = self.error(cx, Msg.TypeComparisonTypes, range)
             d = d.with("lhs", shown_l).with("rhs", shown_r)
+            # A `T ! E` compared with a `T`, as `ensures result > 0` of a
+            # function that returns one (RULES.md, R77).
+            let l_result = self.as_result(cx, a).is_some()
+            if l_result != self.as_result(cx, b).is_some():
+                d = d.note(Msg.TypeCompareResult)
             self.report(d)
             return
         if op == CmpOp.Lt or op == CmpOp.Le or op == CmpOp.Gt or op == CmpOp.Ge:

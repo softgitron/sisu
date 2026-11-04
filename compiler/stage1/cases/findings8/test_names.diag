@@ -1,0 +1,4 @@
+4:11-4:17 E0132 parse.interpolated-name
+  fix parse.name-braces 4:11-4:17 "{{3, 1}}"
+7:12-7:18 E0132 parse.interpolated-name
+  fix parse.name-braces 7:12-7:18 "{{kind}}"

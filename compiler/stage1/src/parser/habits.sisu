@@ -118,6 +118,24 @@ impl Parser:
             return d
         if d.msg != Msg.ParseTrailingTokens:
             return d
+        # `self.save(x) else as e:` as a statement: `else` belongs to a
+        # `let`, and a statement that handles only the error is `if let
+        # Err(e) = ...` (RULES.md, R76).
+        if k == SyntaxKind.ElseKw and before >= 0 and before < len(self.sig):
+            var first = before
+            while first > 0 and not self.starts_line(first):
+                first -= 1
+            let lead = self.sig[first].kind
+            if lead != SyntaxKind.LetKw and lead != SyntaxKind.VarKw:
+                let noted = d.note(Msg.ParseElseNeedsLet)
+                if self.nth(1) == SyntaxKind.AsKw and self.nth(2) == SyntaxKind.Ident:
+                    if self.nth(3) == SyntaxKind.Colon:
+                        let s0 = self.sig[first].start
+                        let call = self.text.byte_slice(s0, prev_end)
+                        let (_, e) = self.nth_range(2) ?? (end, end)
+                        let name = self.nth_text(2)
+                        return spelled(noted, s0, e, "if let Err({name}) = {call}")
+                return noted
         if prev == Some(SyntaxKind.Ident) and self.starts_line(before):
             # Python's `try:` and `except:`: errors are values (RULES.md,
             # R72).

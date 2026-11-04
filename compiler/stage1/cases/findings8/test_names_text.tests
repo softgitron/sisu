@@ -1,0 +1,4 @@
+test "a \"quoted\" name and a brace {" ... ok
+test "the {kind} cases/inside" ... ok
+2 passed, 0 failed, 0 blocked
+--- stderr

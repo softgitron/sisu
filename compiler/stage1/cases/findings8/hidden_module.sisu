@@ -1,0 +1,10 @@
+# RULES.md, R74: a parameter named like a module the module imports hides
+# it, so `fs.walk(...)` is a method of the parameter's type, and `E0304`
+# says that the parameter hides the module.
+import std.fs
+
+def count_files(fs: Fs, root: str) -> int:
+    return len(fs.walk(root))
+
+def main():
+    print("nothing")

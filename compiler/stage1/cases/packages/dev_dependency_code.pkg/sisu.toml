@@ -1,0 +1,9 @@
+# RULES.md, R75: a dev-dependency is for the package's tests, benchmarks
+# and black-box tests: its code imports it under `@cfg(test)`, and an
+# import of it outside one is `E0276` in a build without the tests.
+[package]
+name = "ledger"
+version = "0.1.0"
+
+[dev-dependencies]
+fixtures = { path = "fixtures" }

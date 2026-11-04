@@ -1,0 +1,10 @@
+# RULES.md, R78: an explicit discriminant, which 03 gives an enum's variant,
+# is `E0900` until stage 1 lowers it, where it was `E0117`; `@repr(u8)` is
+# accepted, as 03 has it.
+@repr(u8)
+enum Color:
+    Red = 1
+    Green = 2
+
+def main():
+    print("colors")

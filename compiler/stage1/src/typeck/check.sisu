@@ -1027,7 +1027,18 @@ impl Checker:
                 case Some(at):
                     d = d.fix_at(Msg.BorrowCopyItems, at, at, ".map(it.copy())")
                 case None:
-                    d = d.note(Msg.BorrowItemsOwned)
+                    # What `sorted` gave: its caller sorts a list in place
+                    # (RULES.md, R77).
+                    var by_sorted = False
+                    for (s2, e2, k2) in sites:
+                        if k2 >= first_expr and found[k2] == c:
+                            let text = self.source_text(cx, TextRange(start=s2, end=e2))
+                            if text.starts_with("sorted("):
+                                by_sorted = True
+                    if by_sorted:
+                        d = d.note(Msg.BorrowSortedRefs)
+                    else:
+                        d = d.note(Msg.BorrowItemsOwned)
             self.report_other(d)
 
     # ---------------------------------------------------------------- annotations

@@ -1337,6 +1337,21 @@ impl Checker:
                     if not named:
                         var d = self.error(cx, Msg.TypeUnknownKeyword, key.range)
                         d = d.with("name", sig.name).with("arg", key.text)
+                        # A positional-only parameter passed by its name,
+                        # `parse(value=s)`: it is passed without the name,
+                        # and taken as passed, so that no `E0308` follows
+                        # (RULES.md, R76).
+                        if let Some(i) = found:
+                            if slots[i].is_none():
+                                let vr = cx.ast.expr(a.value).range
+                                d = d.note_with(Msg.TypePositionalOnly, "arg", key.text)
+                                self.report(
+                                    d.fix_at(Msg.TypeDropName, key.range.start, vr.start, "")
+                                )
+                                slots[i] = Some(arg_in(cx.ast, a))
+                                if i == pos:
+                                    pos += 1
+                                continue
                         # A misspelt parameter's name, `prot=443` for `port`
                         # (RULES.md, R45), when no parameter has it.
                         if found.is_none():
@@ -1448,6 +1463,17 @@ impl Checker:
             if let Some(k) = sig.keyword_only_from:
                 if k < n and found > expected:
                     d = d.note_with(Msg.TypeKeywordOnly, "param", sig.params[k].name)
+            # Python's `d.get(k, default)`: `get` gives an option, whose
+            # default `??` gives (RULES.md, R76).
+            if sig.name == "get" and n == 1 and len(args) == 2 and trailing.is_none():
+                if args[0].name.is_none()
+                        and args[1].name.is_none()
+                        and self.is_option(cx, sig.ret):
+                    let first = cx.ast.expr(args[0].value).range
+                    let second = cx.ast.expr(args[1].value).range
+                    let call = cx.source.byte_slice(at.start, first.end)
+                    let default = cx.source.byte_slice(second.start, second.end)
+                    d = d.fix_at(Msg.TypeGetDefault, at.start, at.end, "{call}) ?? {default}")
             # Python's `print(a, b)`: one text with the values in it (02,
             # "Prelude functions"; R16).
             if (sig.name == "print" or sig.name == "print_err") and trailing.is_none():
@@ -1798,9 +1824,33 @@ impl Checker:
                             Msg.TypeSimilarMember, name.range.start, name.range.end, similar
                         )
             d = self.method_bound_fix(cx, d, base, name.text)
+            d = self.hidden_module_note(cx, d, recv)
             self.report(unknown_method_note(cx, d, name.text))
             self.check_args_loosely(cx, args)
             return self.error_expr(at)
+
+    ## The note of a method looked for on a local named like a module the
+    ## module imports, `fs.walk(...)` with a parameter `fs` beside `import
+    ## std.fs`: the local hides the module (RULES.md, R74).
+    pure def hidden_module_note(self, cx: Cx, own d: Diagnostic, recv: TExprId) -> Diagnostic:
+        let r = self.span_of(recv)
+        if r.start >= r.end or r.end > cx.source.byte_len():
+            return d
+        let written = cx.source.byte_slice(r.start, r.end).to_string()
+        if self.lookup_local(written).is_none():
+            return d
+        let item = cx.prog.lookup_in(self.module, written) else:
+            return d
+        let DefKind.Module(m) = cx.prog.defs[item.index].kind() else:
+            return d
+        var module = cx.prog.modules[m.index].path.join(".")
+        if module.is_empty():
+            module = "std.{cx.prog.modules[m.index].name}"
+        let params = [
+            Param(name="name".to_string(), value=written),
+            Param(name="module".to_string(), value=module),
+        ]
+        return d.note_params(Msg.TypeHiddenModule, params)
 
     ## The other fix of a `mut` argument for a borrowed parameter, when the
     ## function is the module's own: its parameter taken with `mut`, which is

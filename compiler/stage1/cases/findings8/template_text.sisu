@@ -1,0 +1,17 @@
+# RULES.md, R77: an interpolated literal of compile-time values only, the
+# value of a `let` or a `return` in a template, stays the `String` it is in
+# the template, where the instance's plain literal was a `str`.
+struct User:
+    name: String
+
+def label[T]() -> String:
+    var out = "{reflect.name_of(T)}"
+    out.push("!")
+    return out
+
+def title[T]() -> String:
+    return "{reflect.name_of(T)}"
+
+def main():
+    print(label[User]())
+    print(title[User]())

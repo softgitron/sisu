@@ -1,0 +1,2 @@
+6:9-6:12 E0900 stage0.unsupported construct="an explicit discriminant of an enum's variant" phase="the layouts of `@repr` enums (03, 12)"
+7:11-7:14 E0900 stage0.unsupported construct="an explicit discriminant of an enum's variant" phase="the layouts of `@repr` enums (03, 12)"

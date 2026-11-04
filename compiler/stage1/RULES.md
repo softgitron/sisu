@@ -2029,11 +2029,15 @@ whose `.err` gains it, `stage1/expected/conformance/cases/types/typed_hole.err`;
 Since stage 0's decision 466 the runner captures what a test prints and
 shows it only with a failure, so a blocked test's closure, which the run
 time prints as the test's output, is dropped with that output: the two
-`.tests` are blessed again without it (stage 1's seventh round), and the
-closure of a blocked test waits for stage 0 to show a blocked test's
-captured output under its line, as it shows a failed one's.
+`.tests` are blessed again without it (stage 1's seventh round). Stage
+0's decision 507 shows a blocked test's captured output in a block of its
+own after the summary's lines, as it shows a failed one's, so the closure
+is back, and the two `.tests` are blessed again with it (stage 1's eighth
+round); the conformance suite's `testing/blocked_closure` (decision 507)
+is the program whose closure stage 1's SIR prints, as the others'.
 
 - Differs: `compiler/conformance/cases/run/testing.sisu`: sir, sir-tests
+- Differs: `compiler/conformance/cases/testing/blocked_closure.sisu`: sir
 - Differs: `compiler/conformance/cases/types/typed_hole.sisu`: sir, behaviour
 
 **Documents to bring along:** the conformance suite's
@@ -4228,3 +4232,316 @@ top-level statement's diagnostic through it).
      `go f()` a note that says what Sisu has instead; at a keyword where a
      binding's name goes a note that it is a keyword. Stage 1 decides it
      (RULES.md, R72).
+
+## R73. The name of a test, a suite or a benchmark is fixed text (decision 520)
+
+**The rule.** The name of a `test`, a `suite` or a `bench` is a string
+literal whose text is fixed when the declaration is: an interpolation in
+it, `test "len({3, 1})":`, is `E0132` (`parse.interpolated-name`, "the name
+of a test, a suite or a benchmark is fixed text, and `{` starts no
+interpolation in it; a brace is written `{{` or `}}`"), at the braces,
+with the fix that writes them as text (`{{3, 1}}`), and what the braces
+hold is not parsed as an expression. An escape (`\"`) and a doubled brace
+are text, as in every string literal (02).
+
+**Why.** The manual's finding ("A test's name is interpolated, so `test
+"len({3, 1})":` is E0103, and an escaped quote in a test's name is E0005",
+chapter 5). 02 makes every ordinary string literal interpolate, so the
+braces start an interpolation in a test's name too; but a name is what the
+runner reports, filters and replays by, which no run-time value can be,
+and stage 1 dropped the interpolation's value without a word
+(`test "n {N}":` was the test "n "). The escaped quote's `E0005` was the
+lexer's, inside the interpolation the braces began: with the braces
+doubled it is text.
+
+**In stage 1.** `parser.items` (`name_string`, for `test_def` and
+`suite_def`).
+
+**What it changes.** The cases `cases/findings8/test_names.sisu` (its
+`.diag`) and `test_names_text.sisu` (its `.tests`).
+
+- Differs: `compiler/stage1/cases/findings8/test_names.sisu`: tree, trivia-tree, ast, ids, human, fmt-check, doc, doc-output
+
+**Decision 520**, for docs/architecture.md:
+
+520. The name of a test, a suite or a benchmark is fixed text: an
+     interpolation in it is `E0132`, with the fix that doubles its braces,
+     and what the braces hold is not parsed. Stage 1 decides it (RULES.md,
+     R73).
+
+## R74. A module's name gives way to an import named like it; a local that hides a module (decision 521)
+
+**The rule.** The name of a child module, which 09 binds in its parent
+(the directory's module, or a package's root module for the files of
+`src/`) without a declaration, gives way to an import of the same name
+in the parent: `from bookings.clean import clean` in the root module of
+the package `bookings` binds the function, where it was `E0202`
+("defined more than once", "first defined here" at line 1, column 1) and
+each call `E0309`. The module is still reached by its path, in that
+module and every other (`from bookings.clean import ...`). A declaration
+named like the child module stays `E0202` (`cases/packages/names.pkg`'s
+`def point` beside `geo/point.sisu`): an expression's path `geo.point`
+could not tell the two apart, where an import says which is meant. And a
+local named like a module the module imports, `fs: Fs` beside `import
+std.fs`, hides the module, as any local hides a module's item: `E0304`
+for a method of the local's type it does not have (`fs.walk(...)`) gets
+the note `type.hidden-module` ("`fs` here is a local, which hides the
+module `std.fs` that this module imports: give the local another name").
+
+**Why.** The manual's findings ("A module that imports a function named
+like the module ... gets E0202 ... with its "first defined here" label at
+line 1, column 1", chapters 17 and 22; "A parameter named like an imported
+module ... hides the module, and each call such as `fs.walk(...)` is
+E0304 with no word about the module", chapter 21). 09 makes a file a
+module and names a module by its path from the package's name; it binds
+no name for the module in its parent that an import there could collide
+with, and a program that names its module and the function it imports
+from it alike is ordinary Python.
+
+**In stage 1.** `resolve.Resolver.bind_import` (the child's binding, at
+0..0, replaced), `typeck.collect` (`ModuleData.children`, which an
+import's path goes through, `child_link`, `bind_import`, `import_target`,
+`package_module`, `item_imported`), `typeck.call.hidden_module_note`.
+
+**What it changes.** The cases `cases/packages/module_named_item.pkg`
+(its `.out`: it runs, interpreted and natively) and
+`cases/findings8/hidden_module.sisu` (its `.diag`).
+
+- Differs: `compiler/stage1/cases/packages/module_named_item.pkg`: names, types, sir, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings8/hidden_module.sisu`: human, doc, doc-output
+
+**Decision 521**, for docs/architecture.md:
+
+521. The name a child module has in its parent gives way to an import of
+     that name there, and the module is still reached by its path; `E0304` on a local named like an imported module says the
+     local hides it. Stage 1 decides it (RULES.md, R74).
+
+## R75. A dev-dependency is imported only by the package's tests (decision 522)
+
+**The rule.** A package's dev-dependency (`[dev-dependencies]`) is for its
+`test` blocks, its benchmarks and its black-box tests (R65): its own code
+imports it only by an import marked `@cfg(test)`, which a build without
+the tests leaves out with the items that use it (08). Any other import of
+it is `E0276` (`resolve.dev-dependency`, "cannot import `fixtures` here:
+`fixtures` is a dev-dependency of `ledger`, which its tests import and its
+code does not"), with the note `resolve.dev-dependency-tests` ("a
+dev-dependency is for `test` blocks, benchmarks and the black-box tests
+of `tests/`: import it under `@cfg(test)`, or list it under
+`[dependencies]`"), in every build, so that `sisu check` (which checks the
+tests too) says it as `sisu build` would. The black-box tests' file
+imports the dev-dependencies freely, as before.
+
+**Why.** The manual's finding ("A dev-dependency can be imported by the
+package's own code, not only by its tests, in both front ends", R13) and
+the seventh round's open item: a package built as a dependency is built
+without its dev-dependencies (09's table and the lockfile have them for
+the tests only), so code that imports one compiled in the package's own
+checkout and could not be built by its users. 08 gives `@cfg(test)` on
+items and imports; Sisu has no import inside a test block (an import
+inside a function is `E0900`), so the mark is what says an import is the
+tests'.
+
+**In stage 1.** `package` (`Want.dev`, a package's own dev-dependency),
+`main.layout_input` (`SourcePackage.dev_only`), `typeck.collect`
+(`PackageData.dev_only`, `declare_import`'s `import_for_tests`, the check
+in `import_target`).
+
+**What it changes.** The case `cases/packages/dev_dependency_code.pkg`
+(its `.diag`: a `@cfg(test)` import its unit test uses, and an import its
+code uses). `cases/packages/black_box.pkg` is as it was.
+
+- Differs: `compiler/stage1/cases/packages/dev_dependency_code.pkg`: sir, ids, human, doc, doc-output
+
+**Decision 522**, for docs/architecture.md:
+
+522. A package's code imports its dev-dependency only by an import marked
+     `@cfg(test)`; any other import of it is `E0276`, in every build, and
+     the black-box tests of `tests/` import it freely. Stage 1 decides it
+     (RULES.md, R75).
+
+## R76. The fixes the manual's writers found missing, of the round's diagnostics (decision 523)
+
+**The rule.** Where a diagnostic missed the word or the fix that says what
+Sisu writes:
+
+- `self.save(x) else as e:` as a statement (`E0117` at `else`) gets the
+  note `parse.else-needs-let` ("`else` belongs to a `let`, ...; a
+  statement whose error alone is handled is `if let Err(e) = f():`") and,
+  with `as NAME:`, the fix `if let Err(e) = save(4)`.
+- Python's `d.get(k, default)` (`E0305`, of a `get` of one parameter that
+  gives an option) gets the fix `type.get-default`, `d.get(k) ?? default`.
+- A positional-only parameter passed by its name, `clamp(value=15, ...)`,
+  is `E0306` with the note `type.positional-only` ("`value` is a
+  positional-only parameter, which is passed without its name") and the
+  fix that drops `value=`; the argument is taken as passed, so that no
+  `E0308` follows with a fix that adds `value=todo("value")`, the same
+  mistake.
+- A std module's error set written alone, `JsonError` (`E0201`), is named
+  through the module: with `import std.json`, the fix `json.JsonError`;
+  without, the note `resolve.std-type-import` ("`JsonError` is a type of
+  `std.json`, known where it is imported: `from std.json import
+  JsonError`"); the similar name in scope (`IoError`) is no fix.
+- `E0981` names a method of `ptr mut T` as the program writes the type,
+  `(ptr mut T).read`, not by the builtin's name, `ptr_mut.read`.
+
+**Why.** The manual's findings, "Diagnostics without fixes": "`self.save(x)
+else as e:` as a statement is E0117 ... with no word that `else` belongs
+to a `let`, nor the fix `if let Err(e) = ...`" (chapter 22); "`d.get(k,
+default)` (E0305)" among the habits that name no Sisu spelling (R19, G3,
+G4; the place the fifth round left of R72's); "A positional-only parameter
+passed by name gets E0306 ... and E0308, whose fix adds
+`value=todo("value")`, the same mistake again" (chapter 3); "`JsonError`
+alone is E0201 with the fix `IoError`" (chapter 21); "E0981 names a builtin
+by its internal name, `ptr_mut.read`" (chapter 27).
+
+**In stage 1.** `parser.habits` (`with_habit`), `typeck.call.check_args`,
+`resolve.Resolver.undefined_type` (`STD_ERROR_SETS`, the five `pub error`
+sets of std's modules), `typeck.safety.unsafe_call`.
+
+**What it changes.** The cases `cases/findings8/else_statement.sisu` and
+`fixes.sisu` (their `.diag`), and `cases/type_calls.sisu`, whose
+positional-only argument passed by name is no longer followed by
+`E0308`.
+
+- Differs: `compiler/stage1/cases/findings8/else_statement.sisu`: tree, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/findings8/fixes.sisu`: ast, names, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/type_calls.sisu`: types, ids
+
+**Decision 523**, for docs/architecture.md:
+
+523. `else` after a statement that is no `let` notes that it belongs to a
+     `let` and fixes `else as e` to `if let Err(e) = ...`; `d.get(k,
+     default)` is fixed to `d.get(k) ?? default`; a positional-only
+     parameter passed by name is noted, fixed and taken as passed; a std
+     module's error set written alone is named through its module; and
+     `E0981` writes `ptr mut T` as the program does. Stage 1 decides it
+     (RULES.md, R76).
+
+## R77. A template's instance at its call, a derive's hole once, and the notes of the round (decision 524)
+
+**The rule.** A diagnostic in a template's instance, which stage 0
+places in the module the compiler wrote (`<make[User]>/main.sisu`), is
+placed at the call that made the instance (through the calls in other
+instances, to the first in a module the program wrote), with its message
+and parameters, the note `type.instance-code` ("in the instance of
+`make[User]` that this call makes: `return __T0(name=name)`") and
+neither its labels nor its fixes, as R70 places a derived impl's; an
+`E0300` that finds a reference where a value goes there gets the note
+`type.instance-owns` (a parameter the template gives on, as to
+`reflect.construct`, is taken `own`). This covers code that `comptime
+for` unrolls. A typed hole in a derive's template is reported once, at
+the hole when the module writes it there once, where R70 placed it at
+each derive. An interpolated literal of compile-time values only, the
+value of a `let` or a `var` without a type in a template, stays the
+`String` it is in the template (02): the instance writes
+`"User".to_string()`, where its plain literal was a `str` and `return out`
+from a function that returns a `String` was `E0300` (where a type is
+expected, a `return`'s value or an annotated binding's, the plain literal
+takes it already, as stage 0's SIR has it). And the notes: `E0342` for `it` outside a call's
+argument (a list of functions, `[heat, it - 15]`) says that `it` makes a
+closure of a call's argument only, as 02 has it, and to write the closure;
+`E0369` comparing a `T ! E` with a `T` (`ensures result > 0` of a function
+that returns one) says what compares; `E0438` for what `sorted` gave
+says that a list sorts itself in place (`xs.sort()`), where the note
+about copies named nothing its caller can do; and a conflict with a
+borrow that lasts through the loop the conflicting statement is in
+(`E0405` for `xs.push` inside `for x in xs`) has the note
+`borrow.loop-ends` ("the borrow lasts through the loop, which ends after
+line 9: change `xs` after the loop, or loop over a copy"), where "move
+this after line 9" named the loop's last line, inside the loop.
+
+**Why.** The manual's findings: "An error in code that `comptime for`
+unrolls is reported in a module the compiler writes ... and nothing
+points at the loop's line or the call that instantiated it" (X7);
+"`reflect.construct(T, {"name": name})` in a template whose `name` is a
+plain `String` parameter is E0300 ... in the instance's module; an `own`
+parameter works, and nothing says so" (R12); "a hole in a derive's
+template is reported once for each type" (chapter 25, R14; assigned to
+stage 1); "In a template, an interpolated literal made only of
+compile-time values ... becomes a `str` in the instance" (R14); "`it` in a
+list literal of functions ... is E0342, where an explicit closure works"
+(chapter 26); "`ensures result > 0` is E0369 with no word that
+`result.is_ok()` or `result == Ok(...)` is what compares" (R11); "`sorted`
+of a list whose items are not `Copy` ... with a note about copies that a
+caller of `sorted` cannot act on; `xs.sort()` works" (chapters 7 and 14);
+"A change inside a loop over the same list or dict is E0405, whose note
+says to move the change "after line N", N being the last line of the
+loop's body, inside the loop" (chapter 11).
+
+**In stage 1.** `typeck.collect` (`instance_sites`), `typeck.instances`
+(recorded where an instance's module is declared), `typeck.placed_at_call`
+and `once_at_template_hole` (where a program's files' diagnostics are
+gathered), `typeck.template.kept_string`, `typeck.expr` (`E0342`'s and
+`E0369`'s notes), `typeck.check.check_ref_items`,
+`borrowck.loans.in_loop_of`.
+
+**What it changes.** The cases `cases/findings8/instances.sisu`,
+`notes.sisu` and `loop_change.sisu` (their `.diag`) and
+`template_text.sisu` (its `.out`: it runs, interpreted and natively);
+the conformance suite's `reflect/test_instances`, whose `E0807` and
+`E0381` in a test template's instance are now at the test's name (its
+`.diag` blessed again, and its comment saying so), and the four programs whose change inside a loop gets
+the loop's note (`human`). What the names pass, the lexer and the parser
+find in an instance is the template's own text and stays in the instance
+(`cases/checker_names/template_names.sisu`, `instance_syntax_error.sisu`
+as they were).
+
+- Differs: `compiler/stage1/cases/findings8/instances.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings8/notes.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings8/loop_change.sisu`: human
+- Differs: `compiler/stage1/cases/findings8/template_text.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/reflect/test_instances.sisu`: types, ids, human
+- Differs: `compiler/conformance/cases/ownership/iterate_and_push.sisu`: human
+- Differs: `compiler/conformance/cases/ownership/rustc/for_loop_head_linkage.sisu`: human
+- Differs: `compiler/conformance/cases/wrong/dict_changed_while_iterating.sisu`: human
+- Differs: `compiler/conformance/cases/wrong/push_while_iterating.sisu`: human
+
+**Decision 524**, for docs/architecture.md:
+
+524. A diagnostic in a template's instance is placed at the call that made
+     it, with a note giving the instance's line and without the labels and
+     fixes that point into the generated text; a typed hole of a derive's
+     template is reported once; an untyped binding's interpolated literal
+     of compile-time values stays a `String` in the instance; and
+     `E0342`, `E0369`, `E0438` (of `sorted`) and a conflict inside a loop
+     the borrow lasts through say what the program writes instead. Stage 1
+     decides it (RULES.md, R77).
+
+## R78. A literal beside a `BigInt` or a `Decimal`; an explicit discriminant (decision 525)
+
+**The rule.** An integer or float literal that is an operand of an
+arithmetic operator beside a value of a type that is no number and
+implements `FromLiteral` for the literal's type, `f * 2` and `2 * f` of a
+`BigInt` or `d + 0.25` of a `Decimal`, is a value of that type, made
+through `FromLiteral` as a literal where that type is expected is (a
+float reaching a `Decimal` from its text, R33), when the operator has no
+impl that takes the literal as it is (`impl Mul[int] for Vector` keeps
+its `int`). And an explicit discriminant of an enum's variant, `Red = 1`,
+which 03 gives, is `E0900` ("an explicit discriminant of an enum's
+variant is not implemented in stage 0 yet; it arrives with the layouts of
+`@repr` enums (03, 12)"), where it was `E0117`; `@repr(u8)` stays accepted
+as 03 allows it, its layout being the backend's.
+
+**Why.** The manual's findings ("A literal beside a `BigInt` or a
+`Decimal` does not take its type: `f * 2` and `d + 0.25` are E0310, though
+D-076 gives the exact types literals through `FromLiteral` and the
+ordinary operators", chapter 24; "`@repr(u8)` on an enum is accepted and
+changes nothing, an explicit discriminant `Red = 1` is E0117", R2).
+
+**In stage 1.** `typeck.expr.binary_expr` and `literal_beside`;
+`parser.items.variant_member`.
+
+**What it changes.** The cases `cases/findings8/literals.sisu` (its
+`.out`: it runs, interpreted and natively) and `discriminants.sisu` (its
+`.diag`).
+
+- Differs: `compiler/stage1/cases/findings8/literals.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings8/discriminants.sisu`: tree, ids, human, fmt-check, doc, doc-output
+
+**Decision 525**, for docs/architecture.md:
+
+525. A literal operand beside a non-numeric type that implements
+     `FromLiteral` for it becomes that type when the operator has no impl
+     for the literal as it is; an explicit discriminant is `E0900` until
+     the layouts of `@repr` enums are lowered. Stage 1 decides it
+     (RULES.md, R78).

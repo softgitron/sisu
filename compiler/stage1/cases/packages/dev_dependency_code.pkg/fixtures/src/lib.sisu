@@ -1,0 +1,7 @@
+## Entries to test with.
+pub def entries() -> list[int]:
+    return [1, 2, 3]
+
+## The sum the entries add up to.
+pub def expected_total() -> int:
+    return 6

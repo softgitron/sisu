@@ -1,0 +1,3 @@
+13:13-13:23 E0369 type.comparison-types lhs="ref int ! Bad" rhs="int"
+19:44-19:46 E0342 type.it-outside-closure
+20:9-20:14 E0438 borrow.ref-in-collection ty="list[ref String]"

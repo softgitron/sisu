@@ -94,6 +94,11 @@ E0131 error   parse.attribute-line        an attribute stands on a line of its o
 -     label   parse.opened-here           this `{keyword}` opens the block
 -     fix     parse.use-if-expression     write it as `if c: a else: b`
 -     fix     parse.parenthesize          add parentheses
+# Stage 1's (RULES.md, R73): a test's, a suite's or a benchmark's name is fixed text.
+E0132 error   parse.interpolated-name     the name of a test, a suite or a benchmark is fixed text, and `{{` starts no interpolation in it; a brace is written `{{{{` or `}}}}`
+-     fix     parse.name-braces           write the braces as text
+# Stage 1's (RULES.md, R76): `else` after a statement that is no `let`.
+-     note    parse.else-needs-let        `else` belongs to a `let`, `let value = f() else as e:`; a statement whose error alone is handled is `if let Err(e) = f():`
 
 # ---------------------------------------------------------------- names and declarations
 E0200 error   resolve.undefined-name      cannot find `{name}` in this scope
@@ -198,6 +203,12 @@ E0273 error   resolve.const-or-method     `{name}` is {what} of `{trait}`, and t
 E0274 error   resolve.const-not-type      `{name}` is a constant of `{trait}`, which bounds `{ty}`, not a type
 # Stage 1's (RULES.md, R71): a dependency whose `when` leaves it out of the build.
 E0275 error   resolve.dependency-excluded  cannot import `{name}`: the dependency `{package}` of `{this}` is not built for this target, which its `when` in that package's `sisu.toml` excludes
+# Stage 1's (RULES.md, R75): a dev-dependency is its package's tests'.
+E0276 error   resolve.dev-dependency      cannot import `{name}` here: `{package}` is a dev-dependency of `{this}`, which its tests import and its code does not
+-     note    resolve.dev-dependency-tests  a dev-dependency is for `test` blocks, benchmarks and the black-box tests of `tests/`: import it under `@cfg(test)`, or list it under `[dependencies]`
+# Stage 1's (RULES.md, R76): a std module's error set written alone.
+-     fix     resolve.qualify-type        name it through its module
+-     note    resolve.std-type-import     `{name}` is a type of `{module}`, known where it is imported: `from {module} import {name}`
 
 # ---------------------------------------------------------------- types
 E0300 error   type.mismatch               expected `{expected}`, found `{found}`
@@ -376,6 +387,15 @@ E0447 error   type.par-body-changes       the body of a `par` loop changes nothi
 # Stage 1's (RULES.md, R37; 03, "Traits"): a trait's constant is each
 # implementing type's.
 E0449 error   type.trait-constant         each impl of `{trait}` gives its own `{name}`, so it is read through a type: `T.{name}` for a type `T` that implements `{trait}`
+# Stage 1's (RULES.md, R74, R76 and R77): the notes and fixes the manual's writers found missing.
+-     note    type.hidden-module          `{name}` here is a local, which hides the module `{module}` that this module imports: give the local another name
+-     note    type.positional-only        `{arg}` is a positional-only parameter, which is passed without its name
+-     fix     type.drop-name              pass it by position
+-     fix     type.get-default            `get` gives an option, whose default `??` gives
+-     note    type.instance-code          in the instance of `{name}` that this call makes: `{code}`
+-     note    type.instance-owns          what the instance gives on is borrowed there: a template's parameter that it gives on, as to `reflect.construct`, is taken `own`
+-     note    type.compare-result         a `T ! E` holds a value or an error: compare it with `Ok(...)` or `Err(...)`, or ask `.is_ok()`; in `ensures`, `result` is the whole result of a function that returns one
+-     note    type.it-argument-only       `it` makes a closure of a call's argument only; elsewhere, as for an item of a list of functions, write the closure with its parameter: `x -> ...`
 
 # ---------------------------------------------------------------- ownership
 # The signature rules (E0411-E0415) are the resolver's; the rest are the
@@ -495,6 +515,9 @@ E0436 error   type.generator-result       `{name}` yields, so it must return `It
 -     fix     borrow.declare-view         declare it `view struct {ty}`
 -     fix     borrow.remove-from          remove the `from` clause
 -     fix     borrow.add-from             name `{param}` in the `from` clause
+# Stage 1's (RULES.md, R77): where the borrow of a loop or of `sorted` ends.
+-     note    borrow.loop-ends            the borrow lasts through the loop, which ends after line {end}: change `{name}` after the loop, or loop over a copy made with `.copy()`
+-     note    borrow.sorted-refs          `sorted` gives references to items that are not `Copy`, which a list does not hold: sort a list of its own in place instead, `xs.sort()`
 
 # ---------------------------------------------------------------- lowering and SIR
 E0500 error   sir.parse                   SIR: {detail}
