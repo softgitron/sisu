@@ -1,0 +1,8 @@
+# RULES.md, R61: a scalar type's name given as an argument is the type
+# checker's to read; where no `comptime def` takes a type it is no value,
+# `E0200`, with the note on Python's conversions the name pass gave.
+def twice(x: int) -> int:
+    return x * 2
+
+def main():
+    print(twice(int))

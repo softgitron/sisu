@@ -3,7 +3,7 @@
 # against the Rust front end by `check.sh`.
 [package]
 name = "stage1"
-version = "0.1.0"
+version = "0.6.0"
 edition = "2027"
 description = "The Sisu front end in Sisu: lexer, lossless syntax tree and parser"
 license = "Apache-2.0 OR Unlicense"

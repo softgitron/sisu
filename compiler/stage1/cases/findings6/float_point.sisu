@@ -1,0 +1,4 @@
+# RULES.md, R63: Python's `1.`, a float needs digits after its point.
+def main():
+    let x = 1.
+    print(x)

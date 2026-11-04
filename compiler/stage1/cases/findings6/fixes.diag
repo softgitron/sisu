@@ -1,0 +1,5 @@
+8:14-8:20 E0231 resolve.trait-as-type name="Priced"
+  fix resolve.add-ref-dyn 8:14-8:14 "ref dyn "
+13:39-13:46 E0300 type.mismatch expected="(ref int) -> _" found="(int) -> int"
+  fix type.call-with-value 13:39-13:46 "x -> doubled(x)"
+14:31-14:36 E0306 type.unknown-keyword name="enumerate" arg="start"

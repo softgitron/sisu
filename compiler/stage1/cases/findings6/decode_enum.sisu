@@ -1,0 +1,12 @@
+# RULES.md, R62: `@derive(Decode)` gives a struct the form `json.decode`
+# reads (R36), and an enum none: the derive stops (`E0608`) where it was
+# accepted and the run stopped at an invalid SIR (`E0501`).
+from std.json import Decode, Encode
+
+@derive(Encode, Decode)
+enum Lake:
+    Saimaa
+    Paijanne
+
+def main():
+    pass

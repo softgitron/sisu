@@ -1,0 +1,10 @@
+# RULES.md, R64: 02's variadic parameter and star unpacking, which stage 1
+# does not lower: `E0900`, saying so, where the checker stopped without a
+# code (and `check` passed) and a `let` was three errors of its pattern.
+def total(*prices: int) -> int:
+    return 0
+
+def main():
+    let xs = [1, 2, 3]
+    let first, *rest = xs
+    print(first)

@@ -1,0 +1,23 @@
+# RULES.md, R61: forms the documents give that the checker refused. A
+# `Slice` (and `bytes`) given to an `Iterable[T]` parameter, `sorted(xs)`,
+# as a `for` loop takes it; an interpolation's `place ?? default` over an
+# optional `String` reads it, as `{u.team?.name}` does (R14); a scalar type
+# given to a `comptime def` that takes `T: type`, as `String` is.
+struct Booking:
+    room: String
+    note: String?
+
+def ordered(xs: Slice[int]) -> list[int]:
+    return sorted(xs)
+
+comptime def name(T: type) -> str:
+    return reflect.name_of(T)
+
+def main():
+    print(ordered([3, 1, 2]))
+    print(sorted(b"ba"))
+    let bookings = [Booking(room="sauna", note=None), Booking(room="hall", note=Some("late".to_string()))]
+    for b in bookings:
+        print("{b.room}: {b.note ?? "-"}")
+    print(len(bookings))
+    print("{comptime name(bool)} {comptime name(f64)} {comptime name(String)}")

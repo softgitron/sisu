@@ -5,6 +5,7 @@
 from stage1.diag import TextRange
 from stage1.lower.exprs import bin_op, cmp_op, sized_op
 from stage1.lower.func import Cx, DropEntry, FnLower, ForBody, LoopCtx, stmt_span
+from stage1.lower.names import CONTRACTS_ALL
 from stage1.sir import (
     BlockId,
     Callee,
@@ -163,13 +164,16 @@ impl FnLower:
                 self.for_loop(cx, pat, iter, mode, item, ForBody.Block(body), sp)
             case TStmt.Match(scrutinee, arms, sp):
                 self.match_into(cx, None, scrutinee, arms, sp)
-            case TStmt.Assert(cond, message, text, sp, replay, soft):
+            case TStmt.Assert(cond, message, text, sp, replay, soft, debug):
                 # In a program built with its tests, `expect` records its
                 # failure and goes on, and the runner fails the test at its
                 # end (17; RULES.md, R38); elsewhere it stops as `assert`
-                # does.
-                let goes_on = soft and cx.prog.with_tests
-                self.assert_(cx, cond, message, text, sp, replay, goes_on)
+                # does. A `debug_assert` is stripped, its condition not
+                # evaluated, where the build checks fewer contracts than all,
+                # as a release build does by default (02, 07; RULES.md, R59).
+                if not (debug and cx.ctx.level < CONTRACTS_ALL):
+                    let goes_on = soft and cx.prog.with_tests
+                    self.assert_(cx, cond, message, text, sp, replay, goes_on)
             case TStmt.Contract(c):
                 self.contract_stmt(cx, c)
             case TStmt.Defer(body, _):

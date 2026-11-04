@@ -1,0 +1,2 @@
+4:11-4:23 E0900 stage0.unsupported construct="a variadic parameter, `*xs: T`," phase="the decision between 02, which gives it, and 14, which rules variadic functions out; a `Slice[T]` parameter takes a list meanwhile"
+9:9-9:21 E0900 stage0.unsupported construct="star unpacking in a `let`, `let first, *rest = xs`," phase="a later round; a `match` takes a list apart now, `case [first, *rest]:`"

@@ -375,6 +375,50 @@ impl Checker:
         let set = Param(name="set".to_string(), value=missing)
         return d.fix_params(Msg.TypeAddErrorSet, [set], [])
 
+    ## For a function named where a function type is expected that takes
+    ## by reference each `Copy` value the function takes by value: the
+    ## closure that calls it, `x -> f(x)` (or `(a, b) -> f(a, b)`).
+    pure def by_value_closure(mut self, cx: Cx, x: TExprId, actual: Ty, exp: Ty) -> Edit?:
+        if let TExprKind.FnRef(_, _) = self.exprs[x.index].kind:
+            pass
+        else:
+            return None
+        var have: list[Ty] = []
+        var want: list[Ty] = []
+        if let TyData.Fn(ps, _, _) = self.data(actual):
+            have = ps.copy()
+        if let TyData.Fn(ps, _, _) = self.data(exp):
+            want = ps.copy()
+        if len(have) != len(want) or have.is_empty():
+            return None
+        var any = False
+        for k in range(len(have)):
+            let h = self.resolved(have[k])
+            var w = self.resolved(want[k])
+            if let TyData.Ref(inner, False) = self.data(w):
+                w = self.resolved(inner)
+                if w == h and self.is_copy(cx, h):
+                    any = True
+                    continue
+                return None
+            if not self.infer.try_unify(mut self.types, h, w):
+                return None
+        if not any:
+            return None
+        let r = self.span_of(x)
+        let name = cx.source.byte_slice(r.start, r.end)
+        var params: list[String] = []
+        if len(have) == 1:
+            params.push("x".to_string())
+        else:
+            for k in range(len(have)):
+                params.push("x{k + 1}")
+        let joined = params.join(", ")
+        var head = joined.copy()
+        if len(have) > 1:
+            head = "({joined})"
+        return Some(Edit(start=r.start, end=r.end, text="{head} -> {name}({joined})"))
+
     ## The fix of a value of the wrong type, where one is plain: a number
     ## written as text loses its quotes; a value whose type has a method of
     ## no arguments giving the type expected gets the call (`.count()` of an
@@ -395,6 +439,11 @@ impl Checker:
                         Edit(start=r.end, end=r.end, text=")".to_string()),
                     ]
                     return d.fix_edits(Msg.TypeWrapSome, edits)
+        # A function that takes a `Copy` value where one that takes it by
+        # reference is expected, `map(f)` over a list's `iter()`: a closure
+        # that calls it with the value, `x -> f(x)` (RULES.md, R63).
+        if let Some(edit) = self.by_value_closure(cx, x, actual, exp):
+            return d.fix_edits(Msg.TypeCallWithValue, [edit])
         # Text where a `Path` is expected: `Path.new` makes one (R16).
         if self.is_builtin(cx, exp, "Path") and self.is_text(cx, self.types.strip_ref(actual)):
             let edits = [
@@ -1165,8 +1214,11 @@ impl Checker:
                 case StrPart.Interp(expr, debug, spec_in, _):
                     if let ExprKind.OptField(_, _) = cx.ast.expr(expr).kind:
                         self.reading_chain = True
+                    if let ExprKind.Binary(BinOp.Coalesce, _, _) = cx.ast.expr(expr).kind:
+                        self.reading_coalesce = True
                     let x = self.infer_expr(cx, expr, None)
                     self.reading_chain = False
+                    self.reading_coalesce = False
                     let spec = spec_in.copy() ?? String.new()
                     # A spec ending in `?` asks for `Debug` (`{x:>8?}`).
                     var wanted = cx.prog.wk.debug
@@ -1303,6 +1355,18 @@ impl Checker:
                     let d = self.error(cx, Msg.ResolveFieldDefaultOrder, at)
                     self.report_other(d.note_with(Msg.ResolveDefaultInFunction, "name", n))
                     return self.error_expr(at)
+        # A scalar type's name as a value, which the name pass leaves to the
+        # checker as a call's argument (RULES.md, R61): no value, with the
+        # name pass's note on Python's conversions.
+        let scalar = match n:
+            case "int" | "f64" | "bool" | "char" | "str" | "Never": True
+            case _: False
+        if scalar:
+            var d = self.error(cx, Msg.ResolveUndefinedName, at).with("name", n)
+            if n == "int" or n == "str" or n == "bool":
+                d = d.note(Msg.ResolvePythonConversion)
+            self.report(d)
+            return self.error_expr(at)
         # A name nothing declares (`resolve.undefined-name`).
         self.undefined_name(cx, n, at)
         return self.error_expr(at)
@@ -2126,7 +2190,16 @@ impl Checker:
         if let Some(t) = expected:
             if not is_var_data(self.data(t)):
                 opt_hint = Some(self.option_of(cx, t))
-        let o = self.infer_expr(cx, lhs, opt_hint)
+        let reading = self.reading_coalesce
+        self.reading_coalesce = False
+        var o = self.infer_expr(cx, lhs, opt_hint)
+        # In an interpolation, which only reads its value, an optional
+        # `String` place before `??` is read as an optional `str` rather
+        # than moved out of the place, `{b.note ?? "-"}` (RULES.md, R61).
+        if reading and self.is_place(o):
+            if let Some(t) = self.as_option(cx, self.ty_of(o)):
+                if self.is_string(cx, self.resolved(t)):
+                    o = self.read_option(cx, o, cx.ast.expr(lhs).range)
         let inner = self.as_option(cx, self.ty_of(o)) else:
             if self.ty_of(o) != Ty.error():
                 let shown = self.show(cx, self.ty_of(o))
@@ -2239,12 +2312,10 @@ impl Checker:
         let x = self.infer_expr(cx, iter, None)
         return self.iterable_of(cx, x, cx.ast.expr(iter).range, mode)
 
-    ## How a `for` iterates the value `x` written at `range`.
-    pub pure def iterable_of(
-        mut self, cx: Cx, x_in: TExprId, range: TextRange, mode: Mode
-    ) -> (TExprId, ForMode, Ty):
-        var x = x_in
-        # `bytes` and a `Slice` are iterated through their iterators.
+    ## `bytes` and a `Slice` are iterated through their iterators: `x.iter()`
+    ## for one, `x` itself for anything else (a `for` loop, and an argument
+    ## for an `Iterable[T]` parameter, `sorted(xs)`; RULES.md, R61).
+    pub pure def view_iter(mut self, cx: Cx, x: TExprId) -> TExprId:
         let base = self.resolved(self.types.strip_ref(self.ty_of(x)))
         if let TyData.Adt(d, a) = self.types.data(base).copy():
             if cx.prog.is_builtin(d, "bytes") or cx.prog.is_builtin(d, "Slice"):
@@ -2257,7 +2328,14 @@ impl Checker:
                 if let Some(i) = cx.prog.wk.iter:
                     iter_ty = self.types.adt(i, [item])
                 if let Some(call) = self.builtin_call(cx, x, base, "iter", iter_ty):
-                    x = call
+                    return call
+        return x
+
+    ## How a `for` iterates the value `x` written at `range`.
+    pub pure def iterable_of(
+        mut self, cx: Cx, x_in: TExprId, range: TextRange, mode: Mode
+    ) -> (TExprId, ForMode, Ty):
+        var x = self.view_iter(cx, x_in)
         match self.iteration_item(cx, self.ty_of(x), mode):
             case Some((item, fmode)):
                 match fmode:

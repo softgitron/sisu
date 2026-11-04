@@ -159,11 +159,14 @@ E0264 error   resolve.const-expression    a type's constant argument is computed
 E0265 error   resolve.const-not-int       a type's constant argument is an `int`, and this is a `{ty}`
 -     label   resolve.first-impl          the other impl is here
 -     fix     resolve.add-dyn             write `dyn {name}`
+-     fix     resolve.add-ref-dyn         write `ref dyn {name}`
+-     note    resolve.trait-generic       a function that takes a value of any type implementing `{name}` is generic: `def f[T: {name}](x: T)`, made for each type it is called with
 -     label   resolve.first-defined       first defined here
 -     label   resolve.defined-here        `{name}` is defined here
 -     fix     resolve.similar-name        a similar name is in scope
 -     fix     resolve.similar-type        a type with a similar name is in scope
 -     fix     resolve.similar-module      a module with a similar name exists
+-     fix     resolve.import-from-module  import the item from its module
 -     note    resolve.rename-duplicate    rename one of them, or remove the one not wanted
 -     note    resolve.write-trait-method  write `{signature}` in the impl
 -     note    borrow.consume-with         consume it with one of its methods that take `own self`: {methods}
@@ -293,6 +296,7 @@ E0399 error   type.bad-format-spec        `{spec}` is not a format spec; it is `
 -     fix     type.from-end-index         count from the end with `^`
 -     fix     type.add-error-set          add `{set}` to the function's error set
 -     fix     type.add-copy               copy it with `.copy()`
+-     fix     type.call-with-value        the function takes a value where a reference is passed: call it from a closure that passes the value
 -     fix     type.convert-to-float       make the `int` an `{ty}`
 # Stage 1's (RULES.md, R45): a value where an option of it is expected.
 -     fix     type.wrap-some              make it the option's value with `Some`
@@ -346,6 +350,7 @@ E0399 error   type.bad-format-spec        `{spec}` is not a format spec; it is `
 # Stage 1's (RULES.md, R25).
 -     note    type.annotate-params        a closure's parameters take their types from where the closure is passed; one kept in a `let` names them, as in `(a: int, b: int) -> a + b`
 -     note    type.sort-by-key            Sisu takes no `key=`: sort a list by a key with `sort_by`, as in `xs.sort_by((a, b) -> len(a).cmp(len(b)))`, and pick an item by one with an iterator's `max_by` or `min_by`, as in `xs.iter().max_by(len(it))`
+-     note    type.enumerate-start        `enumerate` counts from 0 and takes no `start`: add the start where the count is used, as `i + 1`
 # Stage 1's (RULES.md, R27; D-061, 10 and 17): a release build rejects
 # typed holes, so that blocked is never a shipped state.
 E0445 error   type.hole-in-release        a release build rejects the typed hole {hole} of type `{ty}`: blocked is never a shipped state
@@ -512,6 +517,7 @@ E0703 error   cap.untrusted              the package `{package}` is not trusted 
 # ---------------------------------------------------------------- contracts and refinement types (07)
 E0800 error   contract.misplaced          `{keyword}` is a function's contract and belongs at the start of its body, before its first statement
 E0801 error   contract.not-pure           a contract only reads what it is given, and `{callee}` is not `pure`
+-     fix     contract.make-pure          declare it `pure`, if it only reads what it is given
 E0802 error   contract.changes            a contract only reads what it is given, and this changes it
 E0803 error   contract.old-outside        `old(...)` is a value as it was on entry, which only an `ensures` clause can ask for
 E0804 error   contract.old-arguments      `old` takes one expression, as in `old(self.balance)`
@@ -972,6 +978,10 @@ D0128 cli     cli.transcript-front-end    a transcript runs on the Rust front en
 D0129 cli     cli.missing-code            `sisu explain` needs a diagnostic's code, such as `E0300`, or its name, such as `type.mismatch`
 D0130 cli     cli.missing-name            `sisu new` needs the name of the package to create
 D0131 cli     cli.version                 sisu {version}
+# A build of a program with an error, which `sisu build` and `sisu sir`
+# end with where `sisu run` ends with D0006 or D0021 (stage 1's R57; the
+# manual's finding R16).
+D0132 cli     cli.not-compiled            the program was not compiled: errors found ({count})
 # `sisu test --native` (decision 460): what a native test run does not do
 # yet, which the interpreter's run does.
 D0134 cli     native.test-unsupported     `sisu test --native` does not run {what} yet; `sisu test` without `--native` runs it

@@ -1,0 +1,1 @@
+6:17-6:23 E0608 comptime.derive-failed trait="Decode" ty="Lake" reason="`json.Decode` is derived for a struct only; an enum implements it with an `impl Decode` of its own"

@@ -291,6 +291,9 @@ pub struct Checker:
     ## While an interpolation's optional chain is checked: the chain only
     ## reads what it reaches through a place (RULES.md, R14).
     pub reading_chain: bool
+    ## An interpolation's `place ?? default` (RULES.md, R61): an optional
+    ## `String` place is read as an optional `str`, not moved.
+    pub reading_coalesce: bool
     ## The locals a generator expression keeps by value: its first
     ## iterable, evaluated where the expression is (RULES.md, R49).
     pub kept_iterables: list[int]
@@ -382,6 +385,7 @@ impl Checker:
             stmt_start=0,
             foreign_calls=[],
             reading_chain=False,
+            reading_coalesce=False,
             kept_iterables=[],
             arg_own=None,
             ref_items_seen=[],
@@ -1554,8 +1558,18 @@ impl Checker:
                     m = Some(self.assert_message(cx, msg))
                 let text = self.source_text(cx, cx.ast.expr(cond).range)
                 let replay = self.only_reads(cx, c, False)
+                # `debug_assert`, the form a release build strips (02).
+                let debug = self.source_text(cx, span).starts_with("debug_assert")
                 out.push(
-                    TStmt.Assert(cond=c, message=m, text=text, span=span, replay=replay, soft=False)
+                    TStmt.Assert(
+                        cond=c,
+                        message=m,
+                        text=text,
+                        span=span,
+                        replay=replay,
+                        soft=False,
+                        debug=debug,
+                    )
                 )
             # `expect` is `assert`'s non-fatal form (17): a test records
             # its failure and goes on (RULES.md, R38).
@@ -1565,7 +1579,13 @@ impl Checker:
                 let replay = self.only_reads(cx, c, False)
                 out.push(
                     TStmt.Assert(
-                        cond=c, message=None, text=text, span=span, replay=replay, soft=True
+                        cond=c,
+                        message=None,
+                        text=text,
+                        span=span,
+                        replay=replay,
+                        soft=True,
+                        debug=False,
                     )
                 )
             case StmtKind.Contract(c):
@@ -1687,6 +1707,37 @@ impl Checker:
         if n > 0 and self.ret[n - 1].loops > 0:
             self.ret[n - 1].loops -= 1
 
+    ## `let first, *rest = xs`, 02's star unpacking, which stage 1 does not
+    ## lower: one error that says so (`E0900`, RULES.md, R64), where three
+    ## said the pattern was wrong; its names are bound, of no type, so
+    ## their uses say nothing more. Whether it was one.
+    pure def star_unpacking(mut self, cx: Cx, pat: PatternId, value: ExprId, mutable: bool) -> bool:
+        let PatKind.Tuple(ps) = cx.ast.pattern(pat).kind.copy() else:
+            return False
+        var star = False
+        for p in ps:
+            if let PatKind.Star(_) = cx.ast.pattern(p).kind:
+                star = True
+        if not star:
+            return False
+        _ = self.infer_expr(cx, value, None)
+        let what = "star unpacking in a `let`, `let first, *rest = xs`,"
+        let phase = "a later round; a `match` takes a list apart now, `case [first, *rest]:`"
+        self.unsupported(cx, cx.ast.pattern(pat).range, what, phase)
+        for p in ps:
+            var name: Name? = None
+            match cx.ast.pattern(p).kind:
+                case PatKind.Bind(n):
+                    name = Some(n.copy())
+                case PatKind.Star(n):
+                    name = n.copy()
+                case _:
+                    pass
+            if let Some(n) = name:
+                let l = self.new_local(n.text, Ty.error(), mutable, n.range)
+                self.declare(cx, n.text, l, False, n.range)
+        return True
+
     pure def check_let(
         mut self,
         cx: Cx,
@@ -1731,6 +1782,8 @@ impl Checker:
                 if let TPatKind.Bind(local, _) = self.pats[p.index].kind:
                     self.locals[local].once = True
             out.push(TStmt.Let(pat=p, init=None, unwrap=None, else_=None, span=span))
+            return
+        if self.star_unpacking(cx, pat, value_expr, mutable):
             return
         let refutable = self.pattern_is_refutable(cx, pat)
         match else_:

@@ -84,6 +84,9 @@ pub enum Msg:
     ResolveSimilarName
     ResolveSimilarType
     ResolveSimilarModule
+    ResolveTraitGeneric
+    ResolveAddRefDyn
+    ResolveImportFromModule
     ResolveShadowOuter
     ResolveImportUnknown
     ResolveMethodSignature
@@ -137,6 +140,8 @@ pub enum Msg:
     TypeUnreachableCode
     TypeMoveOutOfBorrow
     TypeAddCopy
+    TypeEnumerateStart
+    TypeCallWithValue
     TypeMutArgumentMissing
     TypeAddMut
     TypeMutArgumentUnexpected
@@ -305,6 +310,7 @@ pub enum Msg:
     Stage0Unsupported
     ResolveFieldDefaultOrder
     ContractNotPure
+    ContractMakePure
     ContractChanges
     ComptimeNoFake
     ResolveNotInModule
@@ -614,6 +620,9 @@ impl Msg:
             case ResolveSimilarName: "resolve.similar-name"
             case ResolveSimilarType: "resolve.similar-type"
             case ResolveSimilarModule: "resolve.similar-module"
+            case ResolveTraitGeneric: "resolve.trait-generic"
+            case ResolveAddRefDyn: "resolve.add-ref-dyn"
+            case ResolveImportFromModule: "resolve.import-from-module"
             case ResolveShadowOuter: "resolve.shadow-outer"
             case ResolveImportUnknown: "resolve.import-unknown"
             case ResolveMethodSignature: "resolve.method-signature"
@@ -667,6 +676,8 @@ impl Msg:
             case TypeUnreachableCode: "type.unreachable-code"
             case TypeMoveOutOfBorrow: "type.move-out-of-borrow"
             case TypeAddCopy: "type.add-copy"
+            case TypeEnumerateStart: "type.enumerate-start"
+            case TypeCallWithValue: "type.call-with-value"
             case TypeMutArgumentMissing: "type.mut-argument-missing"
             case TypeAddMut: "type.add-mut"
             case TypeMutArgumentUnexpected: "type.mut-argument-unexpected"
@@ -832,6 +843,7 @@ impl Msg:
             case Stage0Unsupported: "stage0.unsupported"
             case ResolveFieldDefaultOrder: "resolve.field-default-order"
             case ContractNotPure: "contract.not-pure"
+            case ContractMakePure: "contract.make-pure"
             case ContractChanges: "contract.changes"
             case ComptimeNoFake: "comptime.no-fake"
             case ResolveNotInModule: "resolve.not-in-module"

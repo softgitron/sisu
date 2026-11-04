@@ -12,5 +12,5 @@ error[E0445]: a release build rejects the typed hole `todo()` of type `String`: 
   |            ^^^^^^
   = note: fill the hole before the release build; a placeholder meant to ship is `panic("...")`
 
-error[D0006]: the program was not run: errors found (2)
+error[D0132]: the program was not compiled: errors found (2)
 error: Failed

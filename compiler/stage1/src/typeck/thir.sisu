@@ -144,9 +144,16 @@ pub enum TStmt:
     Match(scrutinee: TExprId, arms: list[TArm], span: TextRange)
     ## `text` is the condition as written, for the panic message; `soft`
     ## for `expect`, which a test records and goes on after (17; RULES.md,
-    ## R38).
+    ## R38); `debug` for `debug_assert`, which a build that checks fewer
+    ## contracts than all strips (02; RULES.md, R59).
     Assert(
-        cond: TExprId, message: TExprId?, text: String, span: TextRange, replay: bool, soft: bool
+        cond: TExprId,
+        message: TExprId?,
+        text: String,
+        span: TextRange,
+        replay: bool,
+        soft: bool,
+        debug: bool
     )
     Contract(ContractCheck)
     Defer(body: BlockId, span: TextRange)

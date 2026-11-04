@@ -138,6 +138,12 @@ error CommandError:
     Failed
     Exit(status: int)
 
+## Stage 1's version, its package's (`sisu.toml`), which `sisu1 --version`
+## prints as `sisu1 VERSION`: its minor number is the round of RULES.md
+## that last changed what the driver may rely on (R56), so that the driver
+## asks it rather than probing a command (decision 424).
+const VERSION: str = "0.6.0"
+
 def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     var args = sys.env.args()
     # The compiler's directory, which holds the message catalog, the
@@ -157,6 +163,10 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             continue
         rest.push(args[i].to_string())
         i += 1
+    # Stage 1's version, one line, before anything is read (RULES.md, R56).
+    if len(rest) == 1 and (rest[0] == "version" or rest[0] == "--version"):
+        print("sisu1 {VERSION}")
+        return Ok(())
     let catalog_file = catalog_path ?? "{home}/catalog/messages.catalog"
     let catalog = Catalog.parse(sys.fs.read_to_string(Path.new(catalog_file))?)
     if rest.is_empty():
@@ -630,8 +640,17 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             k += 1
         let native = words.contains("--native")
         let release = words.contains("--release")
+        # `--for-run`: the build of `sisu run`, which a program's errors stop
+        # with the line that says it was not run (`D0006`, `D0021`), where a
+        # build says it was not compiled (`D0132`; RULES.md, R57).
+        let for_run = words.contains("--for-run")
         let flags = [
-            "--native", "--release", "--locked", "--no-default-features", "--accept-unsafe"
+            "--native",
+            "--release",
+            "--locked",
+            "--no-default-features",
+            "--accept-unsafe",
+            "--for-run",
         ]
         var path = path_of(words, flags) else:
             return Err(Usage(text=usage()))
@@ -670,8 +689,9 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             return Err(Failed)
         let locked = words.contains("--locked")
         let accept = words.contains("--accept-unsafe")
+        let how = BuildHow(native=native, release=release, for_run=for_run)
         return build_command(
-            sys, home, path, native, release, (locked, accept), level, output, request, catalog
+            sys, home, path, how, (locked, accept), level, output, request, catalog
         )
     if command == "test":
         # `test [OPTIONS] [PATH]` (RULES.md, R27): the program checked and
@@ -1203,7 +1223,7 @@ def audit_command(
 ) -> ! {IoError, UsageError, CommandError}:
     let flags = ["--unsafe", "--std"]
     if not rest.contains("--unsafe"):
-        return Err(Usage(text="usage: sisu1 audit --unsafe [--std] [PATH]".to_string()))
+        return Err(Usage(text="usage: sisu audit --unsafe [--std] [PATH]".to_string()))
     var packages: list[AuditPackage] = []
     var modules: list[AuditModule] = []
     if rest.contains("--std"):
@@ -1295,7 +1315,7 @@ def audit_command(
             if keep:
                 lints.push(line.to_string())
     var out = unsafe_report(packages, modules, lints)
-    out.push("std (toolchain)   unsafe = \"extern\"   see `sisu1 audit --unsafe --std`\n")
+    out.push("std (toolchain)   unsafe = \"extern\"   see `sisu audit --unsafe --std`\n")
     emit(out, "")
     return Ok(())
 
@@ -2100,8 +2120,7 @@ def build_command(
     sys: System,
     home: str,
     path: str,
-    native: bool,
-    release: bool,
+    how: BuildHow,
     lock: (bool, bool),
     level: int?,
     output: String?,
@@ -2131,12 +2150,19 @@ def build_command(
                 programs.push(input.copy())
     for input in programs:
         if not build_program(
-            sys, home, path, input, native, release, level, output, base, mut env, catalog, mut kept
+            sys, home, path, input, how, level, output, base, mut env, catalog, mut kept
         )?:
             failed = True
     if failed:
         return Err(Failed)
     return Ok(())
+
+## How `build` builds: natively (`--native`), in the release profile
+## (`--release`), and for `sisu run` (`--for-run`).
+struct BuildHow:
+    native: bool
+    release: bool
+    for_run: bool
 
 ## A program built as stage 0's `sisu build` builds it, without its tests
 ## (decision 243): its diagnostics in the human form, and the build stopped
@@ -2147,14 +2173,15 @@ def build_command(
 ## contracts`, preconditions by default, 07), written beside the executable
 ## and built by stage 0's backend, which prints `built PATH`; else, or for
 ## a program without `main`, the line that says it was built. Whether it
-## built.
+## built. A build that `sisu run` asks for (`how.for_run`) ends at an error
+## with the line that says the program was not run, `D0006` or `D0021`;
+## any other with `D0132`, that it was not compiled (RULES.md, R57).
 def build_program(
     sys: System,
     home: str,
     path: str,
     input: Input,
-    native: bool,
-    release: bool,
+    how: BuildHow,
     level: int?,
     output: String?,
     base: typeck.Base,
@@ -2162,6 +2189,13 @@ def build_program(
     catalog: Catalog,
     mut kept: Kept,
 ) -> bool ! IoError:
+    let native = how.native
+    let release = how.release
+    var stopped = "cli.not-compiled"
+    var stopped_owned = "cli.not-compiled"
+    if how.for_run:
+        stopped = "cli.errors-found"
+        stopped_owned = "cli.ownership-errors"
     var built = input.copy()
     built.contracts = level ?? CONTRACTS_ALL
     if release and level.is_none():
@@ -2178,7 +2212,7 @@ def build_program(
     if errors > 0:
         var errs = front.human(catalog)
         let count = Param(name="count".to_string(), value="{errors}")
-        errs.push(catalog.plain_error("cli.errors-found", [count]))
+        errs.push(catalog.plain_error(stopped, [count]))
         errs.push(beyond)
         emit("", errs)
         return Ok(False)
@@ -2190,7 +2224,7 @@ def build_program(
         if holes > 0:
             var errs = shipped.human(catalog)
             let count = Param(name="count".to_string(), value="{holes}")
-            errs.push(catalog.plain_error("cli.errors-found", [count]))
+            errs.push(catalog.plain_error(stopped, [count]))
             errs.push(beyond)
             emit("", errs)
             return Ok(False)
@@ -2201,7 +2235,7 @@ def build_program(
     if failed > 0:
         var errs = evaluation.human(catalog)
         let count = Param(name="count".to_string(), value="{failed}")
-        errs.push(catalog.plain_error("cli.errors-found", [count]))
+        errs.push(catalog.plain_error(stopped, [count]))
         errs.push(beyond)
         emit("", errs)
         return Ok(False)
@@ -2210,7 +2244,7 @@ def build_program(
     if owned > 0:
         var errs = ownership.human(catalog)
         let count = Param(name="count".to_string(), value="{owned}")
-        errs.push(catalog.plain_error("cli.ownership-errors", [count]))
+        errs.push(catalog.plain_error(stopped_owned, [count]))
         errs.push(beyond)
         emit("", errs)
         return Ok(False)
@@ -2863,11 +2897,18 @@ pure def read_base_cache(text: str, key: str) -> typeck.BaseCache?:
         return None
     return Some(typeck.BaseCache(derived=derived, promoted=promoted))
 
-## Writes the cache, and removes the caches of other executables; a cache
-## that cannot be written is none, and a reader of one half written finds
-## it not whole.
+## Writes the cache aside, `base-ID.cache.N.aside` with `N` drawn at
+## random, and renames it over the old one (`Fs.rename`, decision 420), so
+## that a reader finds the old cache or the new one, never a part of
+## either; then removes the caches of other executables. A cache that
+## cannot be written is none: its aside goes, and the old one stays.
 def write_base_cache(sys: System, path: str, key: str, cache: typeck.BaseCache):
-    if sys.fs.write_text(Path.new(path), base_cache_text(key, cache)).is_err():
+    let aside = "{path}.{sys.rand.bits() & 0xffffffff}.aside"
+    if sys.fs.write_text(Path.new(aside), base_cache_text(key, cache)).is_err():
+        _ = sys.fs.remove(Path.new(aside))
+        return
+    if sys.fs.rename(Path.new(aside), Path.new(path)).is_err():
+        _ = sys.fs.remove(Path.new(aside))
         return
     let dir = parent(path)
     let mine = file_stem(path)
@@ -2875,7 +2916,10 @@ def write_base_cache(sys: System, path: str, key: str, cache: typeck.BaseCache):
         return
     for p in entries:
         let name = file_stem("{p}")
-        if name.starts_with("base-") and name != mine and "{p}".ends_with(".cache"):
+        if not name.starts_with("base-") or name.starts_with("{mine}."):
+            continue
+        # Another executable's cache, or what a write of one left aside.
+        if (name != mine and "{p}".ends_with(".cache")) or "{p}".ends_with(".aside"):
             _ = sys.fs.remove(p)
 
 ## A reader of the cache's text, line by line.

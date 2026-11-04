@@ -1,0 +1,8 @@
+# RULES.md, R57: a build of a program with an error ends with `D0132`,
+# that the program was not compiled, where it said that it was not run;
+# `sisu run` builds with `--for-run` and still ends with `D0006`.
+def average(xs: list[int]) -> int:
+    return sum(xs) / len(xs)
+
+def main():
+    print(average([3, 4, 5]))

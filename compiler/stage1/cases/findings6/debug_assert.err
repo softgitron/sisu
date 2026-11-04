@@ -1,0 +1,7 @@
+panic: assertion failed: x % 2 == 0
+  message: an even number
+    x % 2 == 0
+    │ │
+    7 1
+  at halved (debug_assert.sisu:6:5)
+  at main (debug_assert.sisu:11:11)

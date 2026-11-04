@@ -1,5 +1,6 @@
 9:5-9:19 E0800 contract.misplaced keyword="requires"
 17:14-17:22 E0801 contract.not-pure callee="noisy"
+  fix contract.make-pure 12:1-12:1 "pure "
 21:14-21:30 E0802 contract.changes
 25:14-25:20 E0803 contract.old-outside
 29:23-29:32 E0804 contract.old-arguments

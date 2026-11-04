@@ -296,7 +296,7 @@ pub pure def stmt_span(body: TBody, s: TStmt) -> TextRange:
         case TStmt.While(_, _, span): span
         case TStmt.For(_, _, _, _, _, span): span
         case TStmt.Match(_, _, span): span
-        case TStmt.Assert(_, _, _, span, _, _): span
+        case TStmt.Assert(_, _, _, span, _, _, _): span
         case TStmt.Contract(c): c.span
         case TStmt.Select(_, span): span
         case TStmt.Yield(_, span): span
