@@ -1,0 +1,10 @@
+16:18-16:23 E0300 type.mismatch expected="list[Item]" found="ref list[Item]"
+  fix type.add-copy 16:23-16:23 ".copy()"
+  fix type.take-own 15:12-15:12 "own "
+20:5-20:13 E0341 type.not-mutable what="in_order"
+  fix type.add-copy 19:28-19:28 ".copy()"
+24:21-24:26 E0300 type.mismatch expected="u8" found="int"
+  label 24:16-24:18 type.expected-because
+28:9-28:14 E0327 type.unknown-variant ty="int" name="Total"
+  fix type.lowercase-binding 28:9-28:14 "total"
+28:9-28:14 E0329 type.refutable-let

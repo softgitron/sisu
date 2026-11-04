@@ -71,6 +71,7 @@ from stage1.typeck.thir import (
     Capture,
     ClosureId,
     ClosureRole,
+    FieldInit,
     ForMode,
     TArmBody,
     TBody,
@@ -1921,21 +1922,42 @@ impl Checker:
         # variant built or matched (RULES.md, R40).
         for e in exprs:
             let span = self.span_of(e)
-            match self.exprs[e.index].kind:
-                case TExprKind.Struct(d, _):
+            match self.exprs[e.index].kind.copy():
+                case TExprKind.Struct(d, fields):
                     self.deprecated_item_use(cx, d, span)
+                    # A deprecated field given a value (RULES.md, R51).
+                    for k in range(len(fields)):
+                        if let FieldInit.Value(v) = fields[k]:
+                            self.deprecated_field_use(cx, d, k, self.span_of(v), True)
                 case TExprKind.Const(d):
                     self.deprecated_item_use(cx, d, span)
                 case TExprKind.Variant(d, v, _):
                     self.deprecated_variant_use(cx, d, v, span)
+                case TExprKind.Field(base, k):
+                    # A deprecated field read or changed (RULES.md, R51).
+                    let bty = self.resolved(self.types.strip_ref(self.ty_of(base)))
+                    if let TyData.Adt(d, _) = self.data(bty):
+                        self.deprecated_field_use(cx, d, k, span, False)
                 case _:
                     pass
         var seen: list[TextRange] = []
         for p in self.pats.copy():
-            if let TPatKind.Variant(d, v, _) = p.kind:
-                if not seen.contains(p.span):
-                    seen.push(p.span)
-                    self.deprecated_variant_use(cx, d, v, p.span)
+            match p.kind.copy():
+                case TPatKind.Variant(d, v, _):
+                    if not seen.contains(p.span):
+                        seen.push(p.span)
+                        self.deprecated_variant_use(cx, d, v, p.span)
+                case TPatKind.Struct(d, subs):
+                    # A deprecated field a pattern matches (RULES.md, R51).
+                    for k in range(len(subs)):
+                        let sub = self.pats[subs[k].index].copy()
+                        if let TPatKind.Wild = sub.kind:
+                            continue
+                        if not seen.contains(sub.span):
+                            seen.push(sub.span)
+                            self.deprecated_field_use(cx, d, k, sub.span, True)
+                case _:
+                    pass
         for e in exprs:
             var used: DefId? = None
             match self.exprs[e.index].kind:
@@ -1980,6 +2002,37 @@ impl Checker:
         if cx.source.byte_slice(start, end).starts_with("{name}("):
             span = TextRange.new(start, start + name.byte_len())
         self.report_deprecated(name, why, span)
+
+    ## The same for the field `k` of the struct `d` (RULES.md, R51), used at
+    ## `span`: read or changed, at its name; given a value or matched,
+    ## `named`, at the keyword before the value, when it has one.
+    pub pure def deprecated_field_use(
+        mut self, cx: Cx, d: DefId, k: int, span: TextRange, named: bool
+    ):
+        let why = cx.prog.deprecated_fields.get((d, k)) else:
+            return
+        if self.declared_by(cx, d):
+            return
+        let s = cx.prog.struct_info(d) else:
+            return
+        if k >= len(s.fields):
+            return
+        let field = s.fields[k].name.copy()
+        let text = cx.source
+        let end = min(span.end, text.byte_len())
+        let start = min(span.start, end)
+        var at = span
+        if named:
+            # `width=3`: the keyword, written just before the value.
+            let before = text.byte_slice(0, start).trim_end()
+            if before.ends_with("=")
+                    and before.byte_slice(0, before.byte_len() - 1).trim_end().ends_with(field):
+                let stop = before.byte_slice(0, before.byte_len() - 1).trim_end().byte_len()
+                at = TextRange.new(stop - field.byte_len(), stop)
+        elif text.byte_slice(start, end).ends_with(field):
+            at = TextRange.new(end - field.byte_len(), end)
+        let name = "{cx.prog.defs[d.index].name}.{field}"
+        self.report_deprecated(name, why, at)
 
     ## The same for a variant of `d`.
     pub pure def deprecated_variant_use(mut self, cx: Cx, d: DefId, v: int, span: TextRange):

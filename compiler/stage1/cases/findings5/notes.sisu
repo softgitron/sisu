@@ -1,0 +1,29 @@
+# RULES.md, R55: the notes and fixes the manual's writers found missing in
+# the type checker. A `var` that holds a borrow it was given is `E0341`
+# with the note that it does and the fix that copies; a borrowed parameter
+# given to an `own` one is `E0300` with the note naming the move and the
+# fix that takes the parameter with `own`; an `int` where a sized integer
+# is expected has the note naming `.to_u8()`; and `let Total = 10` has the
+# fix that writes the binding's name in lowercase.
+
+struct Item:
+    name: String
+
+def total(own items: list[Item]) -> int:
+    return len(items)
+
+def report(items: list[Item]) -> int:
+    return total(items)
+
+def median(readings: list[int]) -> int:
+    var in_order = readings
+    in_order.sort()
+    return in_order[len(in_order) // 2]
+
+def narrow(large: int) -> u8:
+    let small: u8 = large
+    return small
+
+def main():
+    let Total = 10
+    print(median([3, 1, 2]))

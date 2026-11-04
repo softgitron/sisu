@@ -234,6 +234,13 @@ impl Checker:
                 self.undefined_type(cx, n, cx.ast.expr(e).range)
                 return Ty.error()
             case ExprKind.Field(_, _) | ExprKind.Index(_, _):
+                # `Square.SIDES`, a type's constant as a constant argument
+                # (RULES.md, R50).
+                if let ExprKind.Field(b, name) = cx.ast.expr(e).kind.copy():
+                    if let ExprKind.Name(n) = cx.ast.expr(b).kind.copy():
+                        if let Some(d) = cx.prog.lookup(self.module, n):
+                            if let Some(t) = cx.prog.const_args.get((d, name.text.copy())):
+                                return t
                 if let Some(StaticPath.Type(t)) = self.static_path(cx, e):
                     return t
                 let at = cx.ast.expr(e).range
@@ -1534,7 +1541,9 @@ impl Checker:
                         return TArg(expr=cc, mode=ArgMode.Value)
         match p.mode:
             case Mode.Own:
+                self.arg_own = Some(p.name.copy())
                 let x = self.arg_check(cx, a, pty)
+                self.arg_own = None
                 return TArg(expr=self.check_movable(cx, x), mode=ArgMode.Value)
             case Mode.Mut:
                 let x = self.arg_infer(cx, a, Some(pty))

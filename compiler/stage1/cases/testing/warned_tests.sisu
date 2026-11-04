@@ -1,0 +1,13 @@
+# RULES.md, R47: `sir --tests` prints the program's warnings on standard
+# error, as `check` prints them, beside the SIR of the program built with
+# its tests, so that one run of stage 1 serves `sisu test`.
+
+def area(w: int, h: int) -> int:
+    let x = w
+    if h > 0:
+        let x = h
+        return w * x
+    return x
+
+test "area":
+    assert area(2, 3) == 6

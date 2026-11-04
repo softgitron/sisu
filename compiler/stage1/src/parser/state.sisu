@@ -30,6 +30,9 @@ pub view struct Parser:
     ## In the body of a trait, whose `const` members may leave out their
     ## value: each impl gives it (03, "Traits"; RULES.md, R37).
     pub(package) in_trait_body: bool
+    ## How many blocks of statements are open: an attribute there stands
+    ## before a statement (RULES.md, R53).
+    pub(package) in_statements: int
     ## Byte offsets of the lexer's errors.
     pub(package) lex_errors: list[int]
     ## While positive, diagnostics are not reported (inside code that is
@@ -63,6 +66,7 @@ impl Parser:
             in_attribute=False,
             bad_member_reported=False,
             in_trait_body=False,
+            in_statements=0,
             lex_errors=lex_errors,
             quiet=0,
             attempts=0,
@@ -275,7 +279,9 @@ impl Parser:
     pub(package) pure def error_found(mut self, msg: Msg):
         let (start, end) = self.error_span()
         let found = self.found()
-        self.report(Diagnostic.new(msg, start, end).with("found", found))
+        let d = Diagnostic.new(msg, start, end).with("found", found)
+        # Another language's spelling gets Sisu's (RULES.md, R54).
+        self.report(self.with_habit(d))
 
     ## How the current token is named in "found ...".
     pub(package) pure def found(self) -> String:
@@ -290,7 +296,7 @@ impl Parser:
         let (start, end) = self.error_span()
         let found = self.found()
         var d = Diagnostic.new(Msg.ParseExpected, start, end).with("expected", kind.describe())
-        d = d.with("found", found)
+        d = self.with_habit(d.with("found", found))
         # A punctuation token missing at the end of a line: the fix writes it.
         if start == end:
             if let Some(text) = kind.punctuation_text():
@@ -347,7 +353,8 @@ impl Parser:
         else:
             let (start, end) = self.error_span()
             let found = self.found()
-            self.report(Diagnostic.new(Msg.ParseTrailingTokens, start, end).with("found", found))
+            let d = Diagnostic.new(Msg.ParseTrailingTokens, start, end).with("found", found)
+            self.report(self.with_habit(d))
         self.recover_line()
 
     ## `a if c else b` after a statement's expression `a` (E0115), with

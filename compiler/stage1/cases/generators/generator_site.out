@@ -1,0 +1,18 @@
+counted 3
+made
+0
+10
+20
+words for lengths
+returned
+[5, 5]
+counted 2
+pairs made
+counted 0
+counted 1
+[(1, 0)]
+[5, 6]
+Ok(12)
+missing: Gone(name="none")
+words for early
+Some("sauna")

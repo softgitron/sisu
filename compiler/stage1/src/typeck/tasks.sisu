@@ -274,7 +274,10 @@ impl Checker:
             for (l, m) in caps:
                 let ty = self.infer.zonk(mut self.types, self.local_ty(l))
                 let copy = cx.prog.is_copy(mut self.types, ty)
-                by_value.push(owns or (role == ClosureRole.Task and not m and copy))
+                # A generator expression keeps the value of its first
+                # iterable (RULES.md, R49).
+                let kept = self.kept_iterables.contains(l)
+                by_value.push(owns or kept or (role == ClosureRole.Task and not m and copy))
             if let Some(c) = ref mut self.closures[i]:
                 for k in range(len(c.captures)):
                     if k < len(by_value):

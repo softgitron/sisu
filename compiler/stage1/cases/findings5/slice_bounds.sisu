@@ -1,0 +1,26 @@
+# RULES.md, R48: a bound counted from the end, `^k`, reads a `Slice` and
+# `bytes` as it reads a list (02: `a[i:^1]`): `xs[^1]` is the last value
+# of a `Slice[int]`, `b[^2]` the byte before the last, and `xs[1:^1]` the
+# values between the first and the last, where each was `E0383`.
+
+def last(xs: Slice[int]) -> int:
+    return xs[^1]
+
+def inner(xs: Slice[int]) -> Slice[int]:
+    return xs[1:^1]
+
+def tail(b: bytes) -> u8:
+    return b[^2]
+
+## A `Slice` a call gives, evaluated once though `^` reads its length.
+def seen(xs: list[int]) -> Slice[int]:
+    print("viewed")
+    return xs.as_slice()
+
+def main():
+    let xs = [3, 1, 4, 1, 5]
+    print(last(xs))
+    print(inner(xs).to_list())
+    print(tail(b"sauna"))
+    print(seen(xs)[^2])
+    print(len(xs.as_slice()[:^2]))

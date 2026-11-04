@@ -1,2 +1,2 @@
-6:9-6:18 E0820 test.no-generator ty="Opened" why="`Handle` has no generator"
-10:9-10:18 E0820 test.no-generator ty="Boxed" why="`@derive(Arbitrary)` takes a type without type parameters, whose generator needs none"
+7:9-7:18 E0820 test.no-generator ty="Opened" why="`Handle` has no generator"
+11:9-11:18 E0820 test.no-generator ty="Boxed" why="`Handle` has no generator"

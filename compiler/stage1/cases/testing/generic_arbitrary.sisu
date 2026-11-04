@@ -1,0 +1,43 @@
+# RULES.md, R52: `@derive(Arbitrary)` of a generic type gives the impl
+# that draws its shape with each type parameter drawn through its own
+# `Arbitrary` (`impl[T: Arbitrary] Arbitrary for Boxed[T]`), so a bound
+# `T: Arbitrary` draws `Boxed[Money]` and `Pair[int, Money]`.
+
+## An amount in cents, drawn between 0 and 100 euros.
+@derive(Eq)
+struct Money:
+    cents: int
+
+impl Arbitrary for Money:
+    def arbitrary(d: Draws) -> Money:
+        return Money(cents=Draws.gen_in(d, 0, 10000))
+
+@derive(Arbitrary)
+struct Boxed[T]:
+    value: T
+
+@derive(Arbitrary, Eq)
+enum Pair[A: Eq, B: Eq]:
+    Both(first: A, second: B)
+    Left(A)
+
+impl Arbitrary for int:
+    def arbitrary(d: Draws) -> int:
+        return Draws.gen_in(d, 0, 10)
+
+## A value of any type that draws itself.
+def draw_one[T: Arbitrary](d: Draws) -> T:
+    return T.arbitrary(d)
+
+test "a boxed price is drawn its own way":
+    check(Gen.of((d: Draws) -> draw_one[Boxed[Money]](d))) do b:
+        return 0 <= b.value.cents and b.value.cents <= 10000
+
+test "a pair draws both sides":
+    check(Gen.of((d: Draws) -> draw_one[Pair[int, Money]](d))) do p:
+        return match p:
+            case Both(a, m): a < 10 and m.cents <= 10000
+            case Left(a): a < 10
+
+def main():
+    pass

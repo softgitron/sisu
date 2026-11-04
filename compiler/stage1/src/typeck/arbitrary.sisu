@@ -55,7 +55,7 @@ from stage1.syntax.ast import (
 from stage1.syntax.ast import visit
 from stage1.text import is_alphanumeric
 from stage1.typeck.collect import Resolver, has_attr
-from stage1.typeck.program import ModuleId
+from stage1.typeck.program import DefKind, ModuleId
 from stage1.typeck.ty import DefId
 
 ## The largest `int`, past which a bound cannot be widened by one.
@@ -98,6 +98,10 @@ struct Writer:
     ## Which shapes have a generator (decided once for all).
     ok: dict[String, bool]
     out: String
+    ## The types of other modules that implement `Arbitrary`, by hand or by
+    ## the derive, as this module names them (`Money`, `money.Money`):
+    ## each is drawn through its impl (RULES.md, R52).
+    foreign: set[String]
 
 impl Writer:
     ## Whether a shape has a generator.
@@ -134,6 +138,8 @@ impl Writer:
     pure def type_why(self, ast: Ast, t: TypeExprId, params: list[String]) -> String?:
         match ast.type_expr(t).kind:
             case TypeKind.Path(segments, args):
+                if args.is_empty() and self.foreign.contains(path_text(segments)):
+                    return None
                 if len(segments) != 1:
                     return Some(no_generator(ast, t))
                 let n = segments[0].text.copy()
@@ -175,6 +181,9 @@ impl Writer:
     pure def call(self, ast: Ast, t: TypeExprId, d: str, depth: int) -> String:
         match ast.type_expr(t).kind:
             case TypeKind.Path(segments, args):
+                let written = path_text(segments)
+                if args.is_empty() and self.foreign.contains(written.copy()):
+                    return "{written}.arbitrary({d})"
                 var n = String.new()
                 if let Some(s) = segments.first():
                     n = s.text.copy()
@@ -230,6 +239,9 @@ impl Writer:
     ## A function value `(Draws) -> T` for the type `t`.
     pure def func(self, ast: Ast, t: TypeExprId, depth: int) -> String:
         if let TypeKind.Path(segments, args) = ast.type_expr(t).kind:
+            if args.is_empty() and self.foreign.contains(path_text(segments)):
+                let e = "e{depth}"
+                return "(({e}: Draws) -> {path_text(segments)}.arbitrary({e}))"
             if args.is_empty():
                 var n = String.new()
                 if let Some(s) = segments.first():
@@ -358,7 +370,14 @@ impl Resolver:
                 narrowed = Some(Shape.Refinement(generics=g.copy(), base=b, domain=d))
             if let Some(s) = narrowed:
                 _ = shapes.insert(n.copy(), s.copy())
-        var w = Writer(shapes=shapes, ok={}, out=String.new())
+        # A type of the module with an impl written by hand in another
+        # module draws through it too, and so does a type of another
+        # module that implements `Arbitrary` (RULES.md, R52).
+        for (n, _) in order:
+            if let Some(d) = self.prog.lookup_in(module, n):
+                if self.arbitrary_by_hand.contains(d):
+                    _ = custom.add(n.copy())
+        var w = Writer(shapes=shapes, ok={}, out=String.new(), foreign=self.drawn_elsewhere(module))
         # Which types have a generator: assume all do, then drop those with
         # a part that has none, until nothing changes.
         for (n, _) in order:
@@ -452,13 +471,10 @@ impl Resolver:
             let text = w.out.byte_slice(start, w.out.byte_len()).to_string()
             w.out = w.out.byte_slice(0, start).to_string()
             _ = gens.insert(n.copy(), text)
-        # `@derive(Arbitrary)`: the impl that draws the type's shape.
+        # `@derive(Arbitrary)`: the impl that draws the type's shape; of a
+        # generic type, each type parameter drawn through its own
+        # `Arbitrary` (RULES.md, R52).
         for (n, at, plain) in derived:
-            if not plain:
-                var d = Diagnostic.new(Msg.TestNoGenerator, at.start, at.end).with("ty", n)
-                let why = "`@derive(Arbitrary)` takes a type without type parameters, whose generator needs none"
-                self.report_other(module, d.with("why", why))
-                continue
             if not w.has(n):
                 var why = "a part of it has no generator".to_string()
                 if let Some(s) = w.shapes.get(n.copy()):
@@ -467,8 +483,24 @@ impl Resolver:
                 let d = Diagnostic.new(Msg.TestNoGenerator, at.start, at.end).with("ty", n)
                 self.report_other(module, d.with("why", why))
                 continue
-            w.out.push("\nimpl Arbitrary for {n}:\n    def arbitrary(d: Draws) -> {n}:\n")
-            w.out.push("        return __arbitrary_{n}(d)\n")
+            if plain:
+                w.out.push("\nimpl Arbitrary for {n}:\n    def arbitrary(d: Draws) -> {n}:\n")
+                w.out.push("        return __arbitrary_{n}(d)\n")
+                continue
+            var bounded: list[String] = []
+            var params: list[String] = []
+            var draws: list[String] = []
+            for (g, b) in order_bounds(order, n):
+                params.push(g.copy())
+                if b.is_empty():
+                    bounded.push("{g}: Arbitrary")
+                else:
+                    bounded.push("{g}: Arbitrary + {b}")
+                draws.push("((e: Draws) -> {g}.arbitrary(e))")
+            let ty = "{n}[{params.join(", ")}]"
+            w.out.push("\nimpl[{bounded.join(", ")}] Arbitrary for {ty}:\n")
+            w.out.push("    def arbitrary(d: Draws) -> {ty}:\n")
+            w.out.push("        return __arbitrary_{n}(d, {draws.join(", ")})\n")
         self.declare_sites(module, items, mut w)
         # The contracts as properties.
         var tests = String.new()
@@ -707,6 +739,72 @@ impl Resolver:
         for (name, d) in names:
             if not self.prog.modules[module.index].items.contains(name.copy()):
                 _ = self.prog.modules[module.index].items.insert(name.copy(), d)
+
+    ## The types `module`'s items implement `Arbitrary` for by hand or
+    ## derive it for (RULES.md, R52), recorded before any module's
+    ## generators are written.
+    pub pure def find_arbitrary_impls(mut self, module: ModuleId, items: list[ItemId]):
+        for it in items:
+            let item = self.ast(module).item(it).copy()
+            match item.kind:
+                case ItemKind.Struct(s):
+                    if self.derives_arbitrary(module, item.attrs).is_some():
+                        if let Some(d) = self.prog.lookup_in(module, s.name.text):
+                            self.arbitrary_derived.push(d)
+                case ItemKind.Enum(e):
+                    if self.derives_arbitrary(module, item.attrs).is_some():
+                        if let Some(d) = self.prog.lookup_in(module, e.name.text):
+                            self.arbitrary_derived.push(d)
+                case ItemKind.Impl(i):
+                    let t = i.trait_ty else:
+                        continue
+                    if type_text(self.ast(module), t) != "Arbitrary":
+                        continue
+                    if let TypeKind.Path(segments, args) = self.ast(module).type_expr(
+                        i.self_ty
+                    ).kind:
+                        if args.is_empty():
+                            if let Some(d) = self.path_def(module, segments):
+                                self.arbitrary_by_hand.push(d)
+                case _:
+                    pass
+
+    ## The definition a path written in `module` names, through modules.
+    pub pure def path_def(self, module: ModuleId, segments: list[Name]) -> DefId?:
+        var m = module
+        for k in range(len(segments)):
+            let d = (
+                if k == 0: self.prog.lookup(m, segments[k].text) else: self.prog.lookup_in(
+                    m, segments[k].text
+                )
+            )?
+            if k + 1 == len(segments):
+                return Some(d)
+            let DefKind.Module(inner) = self.prog.defs[d.index].kind() else:
+                return None
+            m = inner
+        return None
+
+    ## The names `module` gives the types of other modules that implement
+    ## `Arbitrary`: an imported name, or a module's name and the type's.
+    pure def drawn_elsewhere(self, module: ModuleId) -> set[String]:
+        var out: set[String] = set()
+        for (name, d) in self.prog.modules[module.index].items.items():
+            if self.prog.defs[d.index].module == module:
+                continue
+            if self.arbitrary_by_hand.contains(d) or self.arbitrary_derived.contains(d):
+                if not self.generic_type(d):
+                    _ = out.add(name.copy())
+            if let DefKind.Module(m) = self.prog.defs[d.index].kind():
+                for (inner, e) in self.prog.modules[m.index].items.items():
+                    if self.arbitrary_by_hand.contains(e) or self.arbitrary_derived.contains(e):
+                        if not self.generic_type(e):
+                            _ = out.add("{name}.{inner}")
+        return out
+
+    ## Whether the type `d` has type parameters.
+    pure def generic_type(self, d: DefId) -> bool:
+        return self.declared_type_params(d) > 0
 
     ## Where `@derive(Arbitrary)` is written among `attrs` (RULES.md, R41).
     pure def derives_arbitrary(self, module: ModuleId, attrs: list[Attr]) -> TextRange?:
@@ -1238,6 +1336,23 @@ impl Resolver:
         return Some(
             self.sources[module.index].ast.add_type(TypeExpr(node=x.node, range=x.range, kind=kind))
         )
+
+## The generic parameters of the type `n` among `order`, each with the
+## text of its bounds.
+pure def order_bounds(
+    order: list[(String, list[(String, String)])], n: str
+) -> list[(String, String)]:
+    for (name, bounds) in order:
+        if name == n:
+            return bounds.copy()
+    return []
+
+## A path's names joined by dots, as it is written.
+pure def path_text(segments: list[Name]) -> String:
+    var words: list[String] = []
+    for s in segments:
+        words.push(s.text.copy())
+    return words.join(".")
 
 ## The names of generic parameters.
 pure def generic_names(gs: list[GenericParam]) -> list[String]:

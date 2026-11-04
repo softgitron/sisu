@@ -1229,13 +1229,15 @@ done < <(grep -F "$here/cases/" "$work/cases-check.list")
 # hashes the SIR that names the copy's path, written `HASH`.
 mkdir -p "$work/tests-expected"
 k=0
+# (A package case, `NAME.pkg` with its `NAME.pkg.tests`, is copied whole
+# and tested in its directory: RULES.md, R52.)
 while read -r f; do
     base="${f%.sisu}"
     [ -f "$base.tests" ] || continue
     k=$((k + 1)); n=$((n + 1))
     box="$work/tests-expected/$k"
     mkdir -p "$box"
-    cp "$f" "$box/"
+    cp -r "$f" "$box/"
     name=$(basename "$f")
     stage1 test "$box/$name" > "$box/out" 2> "$box/err"
     { cat "$box/out"; echo "--- stderr"; cat "$box/err"; } | sed "s|$box/||g" |
@@ -1246,7 +1248,7 @@ while read -r f; do
         class_unlisted=$((class_unlisted + 1))
         report="$report\n  UNLISTED: ${f#"$repo"/}: expected tests (the case's ${base##*/}.tests against stage 1 in $box/all)"
     fi
-done < <(grep -F "$here/cases/" "$work/cases-check.list")
+done < <(grep -F "$here/cases/" "$work/cases-check.list"; grep -F "$here/cases/packages/" "$work/packages.list")
 total=$((total + n)); identical=$((identical + same)); unlisted=$((unlisted + class_unlisted))
 check_summary="$check_summary\n$(printf '  %-12s %4d files, %4d as their .diag, .audit, .lint, .sir, .sir-tests, .release or .tests expects, %3d otherwise' expected "$n" "$same" "$class_unlisted")"
 

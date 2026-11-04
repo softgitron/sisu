@@ -1,0 +1,55 @@
+# RULES.md, R49: a generator expression's first iterable is evaluated
+# where the expression is, as Python evaluates it (02), into a value the
+# generator keeps; a name or a field of one is borrowed, as before. The
+# clauses after it run as the generator is advanced.
+
+error Missing:
+    Gone(name: String)
+
+def counted(n: int) -> list[int]:
+    print("counted {n}")
+    var out: list[int] = []
+    for i in range(n):
+        out.push(i)
+    return out
+
+def words(tag: str) -> list[String]:
+    print("words for {tag}")
+    return ["sauna".to_string(), "löyly".to_string()]
+
+## The lengths of words the function makes: the generator keeps the list.
+def lengths() -> Iter[int]:
+    return (len(w) for w in words("lengths"))
+
+## The doubled values `find` gives, or its error, which `?` passes on
+## where the expression is.
+def doubled(name: str) -> int ! Missing:
+    let g = (x * 2 for x in find(name)?)
+    return Ok(sum(g))
+
+def find(name: str) -> list[int] ! Missing:
+    if name == "none":
+        return Err(Missing.Gone(name=name.to_string()))
+    return Ok([1, 2, 3])
+
+def main():
+    let g = (x * 10 for x in counted(3))
+    print("made")
+    for x in g:
+        print(x)
+    let h = lengths()
+    print("returned")
+    print(h.collect())
+    let pairs = ((a, b) for a in counted(2) for b in counted(a))
+    print("pairs made")
+    print(pairs.collect())
+    let xs = [4, 5]
+    print((x + 1 for x in xs).collect())
+    print(doubled("some"))
+    match doubled("none"):
+        case Ok(n):
+            print(n)
+        case Err(e):
+            print("missing: {e}")
+    var early = (s.copy() for s in words("early"))
+    print(early.next())

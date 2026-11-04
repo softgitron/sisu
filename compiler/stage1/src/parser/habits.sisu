@@ -1,0 +1,162 @@
+##! The spellings of other languages a parse error stops at, and the fix
+##! that writes Sisu's (RULES.md, R54; 02, "Departures from Python"): each
+##! looks at the tokens around the one the error is at and adds a fix to
+##! its diagnostic, and changes nothing else.
+
+from stage1.diag import Diagnostic, Edit, Msg, Param
+from stage1.parser.state import Parser
+from stage1.syntax.kinds import SyntaxKind
+
+## Rust's and C's numeric types a cast names, and Sisu's conversion.
+pure def conversion(ty: str) -> String?:
+    return match ty:
+        case "f64" | "f32" | "int" | "i8" | "i16" | "i32" | "i64": Some(".to_{ty}()")
+        case "u8" | "u16" | "u32" | "u64": Some(".to_{ty}()")
+        case "usize" | "isize": Some(".to_int()")
+        case "float": Some(".to_f64()")
+        case _: None
+
+## A generic type of Rust's or Python's, written as Sisu's.
+pure def sisu_type(name: str) -> String:
+    return match name:
+        case "Vec" | "List": "list".to_string()
+        case "HashMap" | "BTreeMap" | "Dict": "dict".to_string()
+        case "HashSet" | "BTreeSet" | "Set": "set".to_string()
+        case _: name.to_string()
+
+impl Parser:
+    ## The diagnostic `d`, reported at the current token, with the fix that
+    ## writes Sisu's spelling of a habit of another language there, when
+    ## the tokens show one.
+    pub(package) pure def with_habit(self, own d: Diagnostic) -> Diagnostic:
+        let k = self.current()
+        let (start, end) = self.current_range()
+        let before = self.pos - 1
+        var prev: SyntaxKind? = None
+        var prev_start = start
+        var prev_end = start
+        if before >= 0 and before < len(self.sig):
+            prev = Some(self.sig[before].kind)
+            prev_start = self.sig[before].start
+            prev_end = self.sig[before].end
+        let adjacent = prev_end == start
+        if d.msg == Msg.ParseExpectedExpression:
+            # `a && b`, `a || b`: `and`, `or`.
+            if k == SyntaxKind.Amp and prev == Some(SyntaxKind.Amp) and adjacent:
+                return spelled(d, prev_start, end, "and")
+            if k == SyntaxKind.Pipe and prev == Some(SyntaxKind.Pipe) and adjacent:
+                return spelled(d, prev_start, end, "or")
+            # `i++`, `i--`: `i += 1`, `i -= 1`.
+            if (k == SyntaxKind.Plus or k == SyntaxKind.Minus) and prev == Some(k) and adjacent:
+                if self.nth(1) == SyntaxKind.Newline or self.nth(1) == SyntaxKind.Eof:
+                    let op = if k == SyntaxKind.Plus: "+" else: "-"
+                    return spelled(d, prev_start, end, " {op}= 1")
+            # `!done`: `not done`.
+            if k == SyntaxKind.Bang:
+                return spelled(d, start, end, "not ")
+            # `&xs`: `ref xs`.
+            if k == SyntaxKind.Amp:
+                return spelled(d, start, end, "ref ")
+            return d
+        if d.msg == Msg.ParseExpectedPattern:
+            # `let mut n`: `var n`.
+            if self.current_text() == "mut" and prev == Some(SyntaxKind.LetKw):
+                return spelled(d, prev_start, end, "var")
+            return d
+        if d.msg == Msg.ParseExpected:
+            # `x is None`, `x is not None`: `.is_none()`, `.is_some()`.
+            if k == SyntaxKind.Ident and self.current_text() == "is":
+                if self.nth_text(1) == "None":
+                    let (_, e) = self.nth_range(1) ?? (end, end)
+                    return spelled(d, prev_end, e, ".is_none()")
+                if self.nth(1) == SyntaxKind.NotKw and self.nth_text(2) == "None":
+                    let (_, e) = self.nth_range(2) ?? (end, end)
+                    return spelled(d, prev_end, e, ".is_some()")
+            # `case 1 => ...`: `case 1: ...`.
+            if k == SyntaxKind.Eq and self.nth(1) == SyntaxKind.Gt:
+                let (_, e) = self.nth_range(1) ?? (end, end)
+                return spelled(d, start, e, ":")
+            return d
+        if d.msg != Msg.ParseTrailingTokens:
+            return d
+        # `x as f64`: `x.to_f64()`.
+        if k == SyntaxKind.AsKw:
+            if let Some(to) = conversion(self.nth_text(1)):
+                let (_, e) = self.nth_range(1) ?? (end, end)
+                return spelled(d, prev_end, e, to)
+            return d
+        # `println!(...)`: `print(...)`.
+        if k == SyntaxKind.Bang and adjacent and prev == Some(SyntaxKind.Ident):
+            let name = self.text.byte_slice(prev_start, prev_end)
+            if name == "println" or name == "print" or name == "eprintln":
+                return spelled(d, prev_start, end, "print")
+            if name == "panic":
+                return spelled(d, prev_start, end, "panic")
+            return d
+        # `0..3`: `range(0, 3)`.
+        if k == SyntaxKind.DotDot:
+            if let Some((a, b)) = self.last_expr:
+                if b == start:
+                    let next = self.nth(1)
+                    var inclusive = False
+                    var at = 1
+                    if next == SyntaxKind.Eq:
+                        inclusive = True
+                        at = 2
+                    let after = self.nth(at)
+                    if after == SyntaxKind.IntNumber or after == SyntaxKind.Ident:
+                        let (s2, e2) = self.nth_range(at) ?? (end, end)
+                        let lo = self.text.byte_slice(a, b)
+                        var hi = self.text.byte_slice(s2, e2).to_string()
+                        if inclusive:
+                            hi = "{hi} + 1"
+                        return spelled(d, a, e2, "range({lo}, {hi})")
+            return d
+        # `Vec<int>`: `list[int]`, a type's arguments in brackets.
+        if k == SyntaxKind.Lt and adjacent and prev == Some(SyntaxKind.Ident):
+            var depth = 0
+            var i = 0
+            while self.nth(i) != SyntaxKind.Newline and self.nth(i) != SyntaxKind.Eof:
+                if self.nth(i) == SyntaxKind.Lt:
+                    depth += 1
+                elif self.nth(i) == SyntaxKind.Gt:
+                    depth -= 1
+                    if depth == 0:
+                        let (_, e) = self.nth_range(i) ?? (end, end)
+                        let name = self.text.byte_slice(prev_start, prev_end)
+                        let inner = self.text.byte_slice(end, e - 1)
+                        let args = inner.replace("<", "[").replace(">", "]")
+                        return spelled(d, prev_start, e, "{sisu_type(name)}[{args}]")
+                i += 1
+            return d
+        # `switch x:`: `match x:`.
+        if prev == Some(SyntaxKind.Ident) and before >= 0:
+            let word = self.text.byte_slice(prev_start, prev_end)
+            if word == "switch" and self.starts_line(before):
+                return spelled(d, prev_start, prev_end, "match")
+        # `// note`: a comment starts with `#`. The line that starts with
+        # `//` continues the one before it, as a line that starts with an
+        # operator does, so the error is at a word of the comment.
+        var i = before
+        while i > 0 and i < len(self.sig) and not self.starts_line(i):
+            if self.sig[i].kind == SyntaxKind.SlashSlash:
+                let gap = self.text.byte_slice(self.sig[i - 1].end, self.sig[i].start)
+                if gap.contains("\n"):
+                    return spelled(d, self.sig[i].start, self.sig[i].end, "#")
+            i -= 1
+        return d
+
+    ## Whether the significant token `i` is the first of its line.
+    pure def starts_line(self, i: int) -> bool:
+        if i <= 0:
+            return True
+        return match self.sig[i - 1].kind:
+            case Newline | Indent | Dedent: True
+            case _: False
+
+## `d` with the fix that writes `text` over `start` to `end`, Sisu's
+## spelling.
+pure def spelled(own d: Diagnostic, start: int, end: int, text: str) -> Diagnostic:
+    let param = Param(name="text".to_string(), value=text.trim().to_string())
+    let edit = Edit(start=start, end=end, text=text.to_string())
+    return d.fix_params(Msg.ParseSisuSpelling, [param], [edit])

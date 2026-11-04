@@ -74,6 +74,17 @@ E0126 error   parse.expected-member       a struct body holds fields, methods an
 E0127 error   parse.loop-else             a loop has no `else` in Sisu; keep what the loop finds in a variable and test it after the loop, as in `if let Some(i) = found:`
 # Stage 1's (RULES.md, R25): Python's glob import.
 E0128 error   parse.glob-import           Sisu has no glob imports: name what the module gives, as in `from std.collections import Deque, Heap`, or import the module and write `collections.Deque`
+# Stage 1's (RULES.md, R53): an attribute before a statement, and the loop
+# directives of 19's N-22, which are not in the language yet.
+E0129 error   parse.attribute-on-statement  `@{name}` stands before a statement; an attribute stands on the line before a declaration (a function, a type, a constant, a test), and none applies to a statement
+-     note    parse.loop-directive        `@tile`, `@unroll` and `@vectorize` on a loop nest are planned with the native backend (19, N-22) as checked directives, which hold or fail to compile, and are not in the language yet
+# Stage 1's (RULES.md, R54): another language's spelling where a parse
+# error stops, written as Sisu writes it.
+-     fix     parse.sisu-spelling         Sisu writes it `{text}`
+E0130 error   parse.visibility-scope      `pub({name})` is not Sisu's: an item is `pub` to every package, or `pub(package)` to the modules of its own
+-     fix     parse.visibility-package    make it visible to its package: `pub(package)`
+E0131 error   parse.attribute-line        an attribute stands on a line of its own, before its declaration
+-     fix     parse.attribute-new-line    put the declaration on the next line
 -     fix     parse.arm-block             put it in an indented block under the `case`
 -     label   parse.opened-here           this `{keyword}` opens the block
 -     fix     parse.use-if-expression     write it as `if c: a else: b`
@@ -377,7 +388,7 @@ E0413 error   borrow.from-required        `{name}` returns `{ret}`, which borrow
 E0414 error   borrow.from-not-a-parameter  `{name}` in the `from` clause is not a borrowed parameter of `{function}`
 E0415 error   borrow.from-without-borrow  `{function}` returns `{ty}`, which does not borrow, so it takes no `from` clause
 E0416 error   borrow.move-out-of-drop     cannot move `{part}` out of `{name}`, because `{ty}` implements `Drop`, which needs the whole value
-E0417 error   borrow.must-consume         `{name}` is never consumed: a `{ty}` must be passed to an `own` parameter before it goes out of scope
+E0417 error   borrow.must-consume         `{name}` is never consumed: a value of `{ty}` must be passed to an `own` parameter before it goes out of scope
 E0418 error   borrow.must-consume-exit    this leaves the scope with `{name}` unconsumed: a `{ty}` must be passed to an `own` parameter first
 E0419 error   borrow.move-out-of-place    cannot move out of `{name}` through a reference or an index; copy it with `.copy()`
 E0420 error   borrow.must-consume-intrinsic  `{callee}` may drop values that `{name}` holds, and a `{ty}` is must-consume: its values must be passed to an `own` parameter
@@ -439,6 +450,17 @@ E0436 error   type.generator-result       `{name}` yields, so it must return `It
 -     note    type.capture-copy           copy it into a local first (`let c = name.copy()`) and capture that, or use a plain closure, which borrows it
 -     note    type.plain-closure          use a plain closure, which borrows the variable and may change it
 -     note    type.borrow-with-mut        borrow it with `ref mut` to change what the borrow refers to
+# Stage 1's (RULES.md, R55): a `var` that holds a borrow, a borrowed
+# parameter given where its value is moved, an `int` where a sized integer
+# is expected, and a capitalised name a `let` binds.
+-     note    type.var-holds-borrow       `{name}` is a `var`, but it holds `ref {ty}`, a borrow of what it was given, which changes nothing of its own; a copy is its own to change
+-     note    type.borrowed-to-own        {callee} takes `{param}` with `own`, which moves the value in, and `{name}` is a borrowed parameter here, which only lends its value
+-     fix     type.take-own               take `{name}` with `own`, so that it is this function's to give on
+-     note    type.narrow-int             an `int` narrows to `{ty}` through `.to_{ty}()`, which gives an option: `None` when the value does not fit
+-     fix     type.lowercase-binding      a binding's name starts with a lowercase letter: `{name}`
+# Stage 1's (RULES.md, R50): a trait's constant read through a type
+# parameter where a type's constant argument goes.
+-     note    resolve.const-through-param  `{name}` is a trait's constant, which each impl gives: through a type parameter it is a value of the instance, known where the function runs, and a type's constant argument is known where the type is written; take it as a `const` parameter, `[T: Shape, const N: int]`, which a caller gives as `Square.{name}`
 -     note    type.assign-every-path      give it a value on every path before this use, or where it is declared
 -     note    type.dyn-owned              make the `dyn` from a value that owns what it holds, or keep the view as its own type
 -     label   borrow.borrowed-param       `{name}` is a borrowed parameter
@@ -494,9 +516,9 @@ E0802 error   contract.changes            a contract only reads what it is given
 E0803 error   contract.old-outside        `old(...)` is a value as it was on entry, which only an `ensures` clause can ask for
 E0804 error   contract.old-arguments      `old` takes one expression, as in `old(self.balance)`
 E0805 error   contract.generator-ensures  a generator has no `ensures`: what it returns is its iterator
-E0806 error   contract.invariant-field    `{what}` is part of a `{ty}`, whose invariant only its own methods may change and check again; change it through one of them
+E0806 error   contract.invariant-field    `{what}` is part of a value of `{ty}`, whose invariant only its own methods may change and check again; change it through one of them
 E0807 error   contract.not-in-test        a test has no contract; check what it needs with `assert`
-E0810 error   refine.not-satisfied        `{value}` is not a `{ty}`: `{predicate}` is false for it
+E0810 error   refine.not-satisfied        `{value}` is not of type `{ty}`: `{predicate}` is false for it
 E0811 error   refine.needs-try-from       expected `{expected}`, found `{found}`; a value becomes a `{expected}` where its predicate is checked, with `{name}.try_from(...)`
 E0812 error   refine.change-through-base  `{what}` is a `{ty}`, which a change through its base could take outside `{predicate}`; change a copy of the base and check it again with `try_from`
 E0813 error   refine.own-impl             `{ty}` refines `{base}` and has its reading impls; it cannot have an impl of `{trait}` of its own

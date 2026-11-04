@@ -667,8 +667,10 @@ pure def attribute_places(name: str) -> (list[SyntaxKind], str)?:
                 SyntaxKind.TypeAlias,
                 SyntaxKind.ConstDef,
                 SyntaxKind.VariantDef,
+                SyntaxKind.TraitDef,
+                SyntaxKind.FieldDef,
             ]
-            return Some((items, "a function, a type, a constant or a variant"))
+            return Some((items, "a function, a type, a trait, a constant, a field or a variant"))
         case "tile" | "unroll" | "vectorize":
             return Some(([], "a loop nest"))
         case _:
@@ -1394,8 +1396,15 @@ impl Resolver:
         # Python's conversions, `int("42")` and `str(n)`, are methods here
         # (RULES.md, R45), and `uint` is no fix for `int`.
         let conversion = name == "int" or name == "float" or name == "str" or name == "bool"
+        # Go's `nil`, and the `null` and `NULL` of the C family: Sisu's
+        # absent value is `None` (RULES.md, R54).
+        let absent = name == "nil" or name == "null" or name == "NULL" or name == "none"
         if conversion:
             d = d.note(Msg.ResolvePythonConversion)
+        elif absent:
+            let param = Param(name="text".to_string(), value="None".to_string())
+            let edit = Edit(start=token.start, end=token.end, text="None".to_string())
+            d = d.fix_params(Msg.ParseSisuSpelling, [param], [edit])
         elif let Some(similar) = self.similar_name(name):
             d = d.fix(Msg.ResolveSimilarName, "name", similar, token.start, token.end, similar)
         # Python's `open(path)`: files are the capability `Fs`'s (R16).
@@ -2416,6 +2425,9 @@ impl Resolver:
                     if i == 0 and self.is_named_type_with_arguments(parts[i]):
                         self.with_type_arguments(parts[i])
                         continue
+                    if i == 0 and self.is_member_with_arguments(parts[i]):
+                        self.member_with_arguments(parts[i])
+                        continue
                     self.expr(parts[i])
             case IndexExpr if self.is_generator_site(n):
                 # `arbitrary[T]` and `exhaustive[T]`: the compiler writes the
@@ -2516,6 +2528,50 @@ impl Resolver:
         if parts.is_empty() or self.kind(parts[0]) != SyntaxKind.NameRef:
             return False
         return self.has_type_arguments(n)
+
+    ## Whether `n` is `a.b[args]`, a member's name with index arguments,
+    ## before `.`: `collections.Deque[int].new()`, whose arguments may be
+    ## types (RULES.md, R48).
+    pure def is_member_with_arguments(self, n: int) -> bool:
+        if self.kind(n) != SyntaxKind.IndexExpr:
+            return False
+        let parts = child_nodes(self.tree, n)
+        return not parts.is_empty() and self.kind(parts[0]) == SyntaxKind.FieldExpr
+
+    ## `a.b[args]` before `.`: the base as an expression, and each argument
+    ## as a value, but a scalar type or a type parameter, which names a
+    ## type there (`collections.Deque[int]`, `cap.Fake[Trait]`), where the
+    ## name pass read `int` as a value it cannot find (RULES.md, R48).
+    pure def member_with_arguments(mut self, index: int):
+        let parts = child_nodes(self.tree, index)
+        if parts.is_empty():
+            return
+        self.expr(parts[0])
+        for i in range(1, len(parts)):
+            self.member_argument(parts[i])
+
+    pure def member_argument(mut self, n: int):
+        match self.kind(n):
+            case NameRef:
+                if let Some(t) = first_token(self.tree, n, SyntaxKind.Ident):
+                    let name = self.text_of(t)
+                    if not self.is_local(name):
+                        if is_primitive(name) or self.generics.contains(name.copy()):
+                            return
+                self.expr(n)
+            case IndexExpr:
+                let parts = child_nodes(self.tree, n)
+                if parts.is_empty() or not self.names_static_path(parts[0]):
+                    self.expr(n)
+                    return
+                self.expr(parts[0])
+                for i in range(1, len(parts)):
+                    self.member_argument(parts[i])
+            case TupleExpr | ParenExpr:
+                for c in child_nodes(self.tree, n):
+                    self.member_argument(c)
+            case _:
+                self.expr(n)
 
     ## Whether `base[...]` makes a generator (stage 0's `generator_kind`):
     ## `base` names the prelude's `arbitrary` or `exhaustive`, which

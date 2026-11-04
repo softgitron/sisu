@@ -1,0 +1,4 @@
+test "a boxed price is drawn its own way" ... ok
+test "a pair draws both sides" ... ok
+2 passed, 0 failed, 0 blocked
+--- stderr

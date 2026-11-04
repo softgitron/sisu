@@ -1,0 +1,17 @@
+# RULES.md, R53: an attribute stands on the line before a declaration
+# (02), and none applies to a statement: one before a statement is
+# `E0129`, which names it, and `@tile`, `@unroll` and `@vectorize` before a
+# loop get the note that they are 19's planned directives (N-22), where
+# each was `E0106` at the statement. The statement is parsed as one.
+
+def main():
+    var total = 0
+    @unroll(4)
+    for i in range(8):
+        total += i
+    @inline
+    let x = 3
+    @tile(64, 64)
+    while total > 100:
+        total -= 1
+    print(total + x)

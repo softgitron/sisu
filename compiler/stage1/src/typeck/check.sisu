@@ -291,6 +291,13 @@ pub struct Checker:
     ## While an interpolation's optional chain is checked: the chain only
     ## reads what it reaches through a place (RULES.md, R14).
     pub reading_chain: bool
+    ## The locals a generator expression keeps by value: its first
+    ## iterable, evaluated where the expression is (RULES.md, R49).
+    pub kept_iterables: list[int]
+    ## While an argument for a parameter taken with `own` is checked: the
+    ## parameter's name, for the note of a borrowed value given to it
+    ## (RULES.md, R55).
+    pub arg_own: String?
     ## The collections of references reported in the body (RULES.md, R21),
     ## each once.
     pub ref_items_seen: list[Ty]
@@ -375,6 +382,8 @@ impl Checker:
             stmt_start=0,
             foreign_calls=[],
             reading_chain=False,
+            kept_iterables=[],
+            arg_own=None,
             ref_items_seen=[],
             undecided_call=None,
             arg_callee=None,
@@ -1086,6 +1095,12 @@ impl Checker:
                         self.written_ref_items(cx, d, args, t)
                         return t
                     case None:
+                        # `Square.SIDES`, a type's constant as a constant
+                        # argument (RULES.md, R50).
+                        if len(names) == 2:
+                            if let Some(d) = cx.prog.lookup(self.module, names[0]):
+                                if let Some(t) = cx.prog.const_args.get((d, names[1].copy())):
+                                    return t
                         self.undefined_path_type(cx, names, rng)
                         return Ty.error()
             case TypeKind.Option(inner):
@@ -1996,9 +2011,28 @@ impl Checker:
                                         name="name".to_string(), value="self".to_string()
                                     )
                                     d = d.fix_params(Msg.TypeTakeMut, [named], [edit])
+                # A `var` that was given a borrowed value holds the borrow:
+                # a copy is its own to change (RULES.md, R55).
+                var held: (String, Ty, int?)? = None
+                if let Some(root) = self.place_root(base):
+                    if self.locals[root].mutable and not self.is_param_local(cx, root):
+                        if let TyData.Ref(inner, False) = self.data(self.locals[root].ty):
+                            let at = self.copied_init_end(cx, self.locals[root].span)
+                            held = Some((self.locals[root].name.copy(), inner, at))
                 # Otherwise it is a borrow that only reads.
                 if shared:
                     d = d.note(Msg.TypeSharedChanges)
+                elif let Some((name, inner, at)) = held:
+                    let shown = self.show(cx, inner)
+                    d = d.note_params(
+                        Msg.TypeVarHoldsBorrow,
+                        [
+                            Param(name="name".to_string(), value=name.copy()),
+                            Param(name="ty".to_string(), value=shown),
+                        ],
+                    )
+                    if let Some(k) = at:
+                        d = d.fix_at(Msg.TypeAddCopy, k, k, ".copy()")
                 elif not read_guard and d.fixes.is_empty():
                     d = d.note(Msg.TypeBorrowWithMut)
                 self.report(d)
@@ -2007,6 +2041,42 @@ impl Checker:
         self.check_protected_place(cx, e, range)
         if let Some(root) = self.place_root(e):
             self.note_use(root, True)
+
+    ## Whether the local is a parameter of the function being checked.
+    pure def is_param_local(self, cx: Cx, l: int) -> bool:
+        let f = cx.prog.fn_info(self.def_) else:
+            return False
+        for p in f.params:
+            if p.span == self.locals[l].span:
+                return True
+        return False
+
+    ## Where `.copy()` goes for a `var` declared at `decl` as `var x = name`,
+    ## the name's end, when its line is that and nothing more.
+    pure def copied_init_end(self, cx: Cx, decl: TextRange) -> int?:
+        let text = cx.source
+        if decl.end > text.byte_len():
+            return None
+        var i = decl.end
+        let n = text.byte_len()
+        while i < n and text.byte_at(i) == 32:
+            i += 1
+        if i >= n or text.byte_at(i) != 61:
+            return None
+        i += 1
+        while i < n and text.byte_at(i) == 32:
+            i += 1
+        let start = i
+        while i < n and is_name_byte(text.byte_at(i)):
+            i += 1
+        if i == start:
+            return None
+        let end = i
+        while i < n and text.byte_at(i) == 32:
+            i += 1
+        if i < n and text.byte_at(i) != 10 and text.byte_at(i) != 13:
+            return None
+        return Some(end)
 
     ## Where the method being checked writes its `self` parameter: after
     ## its name, its generic parameters and `(`.
@@ -2434,3 +2504,7 @@ pub pure def primitive(name: str) -> Ty?:
         case "str": Some(Ty.str())
         case "Never": Some(Ty.never())
         case _: None
+
+## Whether a byte belongs to a name: an ASCII letter or digit, or `_`.
+pure def is_name_byte(b: u8) -> bool:
+    return (b >= 48 and b <= 57) or (b >= 65 and b <= 90) or (b >= 97 and b <= 122) or b == 95

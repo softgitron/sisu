@@ -507,6 +507,19 @@ pub enum Msg:
     BorrowMoveRemedies
     TypeSortByKey
     ParseGlobImport
+    ParseAttributeOnStatement
+    ParseLoopDirective
+    ParseSisuSpelling
+    ParseVisibilityScope
+    ParseVisibilityPackage
+    ParseAttributeLine
+    ParseAttributeNewLine
+    ResolveConstThroughParam
+    TypeVarHoldsBorrow
+    TypeNarrowInt
+    TypeLowercaseBinding
+    TypeBorrowedToOwn
+    TypeTakeOwn
     TypeAnnotateParams
     # Stage 1's rules of the third round (RULES.md, R27 on).
     TypeHoleInRelease
@@ -1014,6 +1027,19 @@ impl Msg:
             case BorrowMoveRemedies: "borrow.move-remedies"
             case TypeSortByKey: "type.sort-by-key"
             case ParseGlobImport: "parse.glob-import"
+            case ParseAttributeOnStatement: "parse.attribute-on-statement"
+            case ParseLoopDirective: "parse.loop-directive"
+            case ParseSisuSpelling: "parse.sisu-spelling"
+            case ParseVisibilityScope: "parse.visibility-scope"
+            case ParseVisibilityPackage: "parse.visibility-package"
+            case ParseAttributeLine: "parse.attribute-line"
+            case ParseAttributeNewLine: "parse.attribute-new-line"
+            case ResolveConstThroughParam: "resolve.const-through-param"
+            case TypeVarHoldsBorrow: "type.var-holds-borrow"
+            case TypeNarrowInt: "type.narrow-int"
+            case TypeLowercaseBinding: "type.lowercase-binding"
+            case TypeBorrowedToOwn: "type.borrowed-to-own"
+            case TypeTakeOwn: "type.take-own"
             case TypeAnnotateParams: "type.annotate-params"
             case TypeHoleInRelease: "type.hole-in-release"
             case TypeHolePlaceholder: "type.hole-placeholder"

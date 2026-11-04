@@ -1,0 +1,21 @@
+# RULES.md, R52: an impl of `Arbitrary` written in another module of the
+# package than its type's draws the type wherever it is drawn: the
+# generators of the type's own module (those of the types that hold a
+# `Money`) call the impl, and so does `arbitrary[Money]` in a module that
+# imports the type, as it does for a type that derives `Arbitrary`.
+from till.money import Money, Purchase
+
+test "a price is drawn its own way":
+    check(arbitrary[Money]) do m:
+        return 0 <= m.cents and m.cents <= 10000
+
+test "a purchase's price is too":
+    check(arbitrary[Purchase]) do p:
+        return 0 <= p.price.cents and p.price.cents <= 10000
+
+test "a price stays under fifty euros":
+    check(arbitrary[Money]) do m:
+        return m.cents < 5000
+
+def main():
+    pass

@@ -1,0 +1,34 @@
+# RULES.md, R50: a type's constant where a type's constant argument goes,
+# `Array[int, Square.SIDES]`: the value the type's impl gives it, or its
+# own body, when folding computes it (`2 + 2`), in a signature, a field's
+# type, a body's annotation and a type's arguments before `.`.
+
+trait Shape:
+    const SIDES: int
+
+struct Square:
+    side: int
+
+impl Shape for Square:
+    const SIDES: int = 2 + 2
+
+enum Light:
+    Red
+    Green
+
+    const COUNT: int = 2
+
+## The corners of a square, each given a value.
+struct Corners:
+    at: Array[int, Square.SIDES]
+
+def four() -> Array[int, Square.SIDES]:
+    return Array.filled(7)
+
+def main():
+    let c = Corners(at=four())
+    print(len(c.at))
+    let d: Array[int, Square.SIDES] = four()
+    print(d[3])
+    let lights = Array[bool, Light.COUNT].filled(False)
+    print(len(lights))
