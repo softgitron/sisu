@@ -65,6 +65,14 @@ pub const STAGE2_VAR: &str = "SISU_STAGE2";
 /// runtime stage 2 compiled. Stage 1 passes it on to the backend it calls.
 pub const RT_VAR: &str = "SISU_RT";
 
+/// The environment variable that says whether stage 1's `sir --tests`
+/// reports a program's diagnostics itself, its warnings among them, and
+/// takes a package's features and `--locked` (`1`), or leaves them to its
+/// `check` (`0`), instead of what [`Stage1::sir_reports`] finds out
+/// (decision 424): the switch between one run of stage 1 for `sisu test`
+/// and two.
+pub const SIR_REPORTS_VAR: &str = "SISU_STAGE1_SIR_REPORTS";
+
 /// Which front end checks, lowers and serialises a program.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FrontEnd {
@@ -282,6 +290,20 @@ fn newer_source(dir: &Path, than: std::time::SystemTime) -> bool {
     false
 }
 
+/// [`Stage1::sir_reports`] of the stage-1 executable as it is, without
+/// building it: false when it is missing or a source of stage 1 is newer.
+pub fn stage1_sir_reports() -> bool {
+    if let Ok(v) = std::env::var(SIR_REPORTS_VAR) {
+        return v == "1";
+    }
+    let compiler = compiler_dir();
+    let exe = stage1_exe(&compiler);
+    if stale(&exe, &compiler.join("stage1").join("src")) {
+        return false;
+    }
+    Stage1 { exe, compiler }.sir_reports()
+}
+
 /// The stage-1 front end, built and ready to run.
 pub struct Stage1 {
     exe: PathBuf,
@@ -332,6 +354,61 @@ impl Stage1 {
             build(&exe, &package, &src, host)?;
         }
         Ok(Stage1 { exe, compiler })
+    }
+
+    /// Whether this stage 1's `sir --tests` reports a program's diagnostics
+    /// itself, its warnings among them, and takes `--features`,
+    /// `--no-default-features` and `--locked`, so that `sisu test` and
+    /// `sisu bench` run stage 1 once and not twice, `sir --tests` and then
+    /// `check` (decisions 380 and 424). [`SIR_REPORTS_VAR`] decides when it
+    /// is set; else a stage 1 is asked once, the answer kept beside it
+    /// (`target/stage1/sir-reports`, with the executable's size and time),
+    /// by `sir --tests --locked` of an empty directory: a stage 1 whose
+    /// `sir` takes no `--locked` stops at its usage, in about 50 ms, before
+    /// it reads anything, and one that takes it finds no package there.
+    pub fn sir_reports(&self) -> bool {
+        if let Ok(v) = std::env::var(SIR_REPORTS_VAR) {
+            return v == "1";
+        }
+        let Ok(meta) = std::fs::metadata(&self.exe) else { return false };
+        let stamp = format!(
+            "{} {}",
+            meta.len(),
+            meta.modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_nanos())
+        );
+        let kept = self.exe.with_file_name("sir-reports");
+        if let Ok(text) = std::fs::read_to_string(&kept)
+            && let Some(answer) = text.trim_end().strip_prefix(&format!("{stamp} "))
+        {
+            return answer == "yes";
+        }
+        let empty = std::env::temp_dir().join(format!("sisu-stage1-probe-{}", std::process::id()));
+        if std::fs::create_dir_all(&empty).is_err() {
+            return false;
+        }
+        let out = std::process::Command::new(&self.exe)
+            .arg("--home")
+            .arg(&self.compiler)
+            .args(["sir", "--tests", "--locked"])
+            .arg(&empty)
+            .current_dir(&empty)
+            .env("PWD", &empty)
+            .stdin(std::process::Stdio::null())
+            .output();
+        let _ = std::fs::remove_dir_all(&empty);
+        let Ok(out) = out else { return false };
+        let usage = String::from_utf8_lossy(&out.stderr).contains("error: Usage(");
+        let answer = !usage && exit_code(out.status) < sisu_interp::exit::PANIC;
+        // Written aside and renamed, so that a command started at once reads
+        // the whole answer or none.
+        let aside = kept.with_extension(format!("{}", std::process::id()));
+        if std::fs::write(&aside, format!("{stamp} {}\n", if answer { "yes" } else { "no" })).is_ok() {
+            let _ = std::fs::rename(&aside, &kept);
+        }
+        answer
     }
 
     /// Runs stage 1 with `args` (after `--home`) in the working directory,

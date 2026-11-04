@@ -4,7 +4,7 @@ The runtime of natively compiled Sisu is being written in Sisu, piece by
 piece, as D-086 orders ([15](../../proposal/15-decision-log.md)); this
 package holds what is written so far, and `crates/sisu-rt`, the runtime
 in Rust, the rest. `docs/architecture.md` ("Stage 2", "The runtime in
-Sisu"; decisions 335, 336, 350 to 353, 358 and 382 to 385) describes it, and
+Sisu"; decisions 335, 336, 350 to 353, 358, 382 to 385, 422 and 423) describes it, and
 `docs/port-debt.md` ("The runtime in Sisu") lists what is left.
 
 ## What it is
@@ -31,6 +31,8 @@ and C's `memmove` and `memcmp` through foreign calls (`unsafe =
 | `floats.sisu` | a float's text: the shortest that reads back as the same number, the fixed form and the form with an exponent, on plain integers or big numbers |
 | `show.sisu` | `Display` and `Debug` of a value by its type, with the names the table holds (decision 383) |
 | `list.sisu` | lists over raw memory: growth, the moves of `insert`, `remove`, `pop`, `extend`, `reverse` and `swap`, a slice's copies, the stable sort, `in` and `join` (decision 385) |
+| `table.sisu` | the tables of dicts and sets: entries in insertion order, each with its key's hash, and an index of slots probed linearly; a lookup, an entry appended and one taken out, and a table copied, compared and dropped (decision 422) |
+| `iter.sisu` | iterators: the object compiled code steps in part (decision 253), the next item of each kind, the iterator of an `Iterable[T]` argument, every item left, the drop (decision 423) |
 
 The runtime's code has no text of its own to point to, so the words
 `Debug` writes are constants of their bytes packed eight to a word

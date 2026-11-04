@@ -1121,4 +1121,6 @@ pub pure def intrinsic_names() -> list[str]:
         "expect.fail",
         "expect.fail_compare",
         "expect.fail_parts",
+        # `Fs.rename` (decision 420).
+        "host.fs.rename",
     ]

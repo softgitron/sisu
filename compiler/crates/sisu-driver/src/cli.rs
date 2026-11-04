@@ -109,6 +109,9 @@ impl Host for WithArgs<'_> {
     fn remove_file(&mut self, path: &str) -> Result<(), sisu_interp::IoErrorKind> {
         self.inner.remove_file(path)
     }
+    fn rename_file(&mut self, from: &str, to: &str) -> Result<(), sisu_interp::IoErrorKind> {
+        self.inner.rename_file(from, to)
+    }
     fn list_dir(&self, path: &str) -> Result<Vec<String>, sisu_interp::IoErrorKind> {
         self.inner.list_dir(path)
     }
@@ -272,6 +275,10 @@ pub(crate) struct Input {
     build_root: Option<std::path::PathBuf>,
     /// The root package's `[profile.release] contracts` (07).
     release_contracts: Option<String>,
+    /// The directory each module's `embed` paths are relative to, by the
+    /// module's name, as stage 1 reads them (its R31): a package's root, a
+    /// single file's own directory. None for a program a log holds.
+    embed_dirs: Vec<(String, std::path::PathBuf)>,
 }
 
 impl Input {
@@ -287,6 +294,10 @@ impl Input {
             disks: vec![(file.to_string(), std::path::PathBuf::from(file))],
             build_root: None,
             release_contracts: None,
+            embed_dirs: vec![(
+                file.to_string(),
+                std::path::Path::new(file).parent().map(std::path::Path::to_path_buf).unwrap_or_default(),
+            )],
         }
     }
 
@@ -332,6 +343,50 @@ impl Input {
                 sisu_interp::record::content_hash(all.as_bytes())
             }
         }
+    }
+
+    /// The content hash a failing test's replay token names: [`Input::hash`]
+    /// with the files the program's `embed` calls read (08; decision 421),
+    /// so that a token made before an embedded file changed is refused
+    /// after it, as one made before the source changed is; the same as
+    /// `hash` for a program that embeds nothing, whose tokens stay as they
+    /// were.
+    fn token_hash(&self) -> u64 {
+        let embedded = self.embedded();
+        if embedded.is_empty() {
+            return self.hash();
+        }
+        let mut all = format!("{:016x}", self.hash());
+        for (path, read) in &embedded {
+            match read {
+                Ok(text) => all.push_str(&format!("\nembed {path}\n{text}")),
+                Err(why) => all.push_str(&format!("\nembed {path} failed\n{why}")),
+            }
+        }
+        sisu_interp::record::content_hash(all.as_bytes())
+    }
+
+    /// The files the program's `embed("path")` calls read, by their paths,
+    /// each with its text or why it could not be read; the first module to
+    /// name a path decides, as in stage 1.
+    fn embedded(&self) -> std::collections::BTreeMap<String, Result<String, String>> {
+        let mut out = std::collections::BTreeMap::new();
+        let mut modules: Vec<(&str, &str)> = vec![(self.file.as_str(), self.source.as_str())];
+        if let Some((_, files)) = &self.program {
+            modules.extend(files.iter().map(|(n, t)| (n.as_str(), t.as_str())));
+        }
+        for (name, text) in modules {
+            let Some((_, dir)) = self.embed_dirs.iter().find(|(n, _)| n == name) else { continue };
+            if !text.contains("embed(") {
+                continue;
+            }
+            let parse = sisu_parser::parse(sisu_diag::FileId(0), text);
+            let module = sisu_syntax::ast::build::module(&parse.tree);
+            for (path, read) in crate::db::embedded_in(dir, &module) {
+                out.entry(path).or_insert(read);
+            }
+        }
+        out
     }
 
     /// Puts the program's files and layout in the query database.
@@ -484,6 +539,9 @@ impl Host for Captured<'_> {
     fn remove_file(&mut self, path: &str) -> Result<(), sisu_interp::IoErrorKind> {
         self.inner.remove_file(path)
     }
+    fn rename_file(&mut self, from: &str, to: &str) -> Result<(), sisu_interp::IoErrorKind> {
+        self.inner.rename_file(from, to)
+    }
     fn list_dir(&self, path: &str) -> Result<Vec<String>, sisu_interp::IoErrorKind> {
         self.inner.list_dir(path)
     }
@@ -600,6 +658,13 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
         "explain-borrow" => explain_borrow(rest, host),
         "doc" => doc(rest, host),
         "replay" => replay(rest, host),
+        // Stage 1's audit of unsafe code (its R7) and its lints beyond the
+        // compiler's warnings (its R11), which only it has (decision 425).
+        "audit" | "lint"
+            if front == FrontEnd::Stage1 && (cmd == "lint" || rest.iter().any(|a| a == "--unsafe")) =>
+        {
+            stage1_as_is(cmd, rest, host)
+        }
         "audit" => audit(rest, host),
         "run" | "check" | "sir" | "test" | "bench" | "build" | "tokens" | "parse" => {
             let p = split_args(rest, cmd == "run");
@@ -1174,7 +1239,7 @@ fn test_from_sir(
             .collect::<Vec<usize>>()
     });
     let which = only.clone().unwrap_or_else(|| (0..prog.tests.len()).collect());
-    let hash = input.hash();
+    let hash = input.token_hash();
     // `--replay TOKEN`: the one test, with the token's seeds and case.
     if sources && let Some(t) = &opts.token {
         if t.toolchain != crate::replay::TOOLCHAIN {
@@ -1401,11 +1466,13 @@ fn stage1_serves(cmd: &str, p: &Parsed<'_>) -> bool {
         // of it built with them (decision 357), but for what only the Rust
         // front end gives: the standard library's examples, the ownership
         // checker's deferral, a file of serialised SIR, and a package's
-        // features, which stage 1's `sir` does not take (decision 380).
+        // features while stage 1's `sir` does not take them (decisions 380
+        // and 424).
         "test" | "bench" => {
-            !p.flags.iter().any(|f| matches!(*f, "--std" | "--defer-borrow" | "--no-default-features"))
+            let features = value("--features") || p.flags.contains(&"--no-default-features");
+            !p.flags.iter().any(|f| matches!(*f, "--std" | "--defer-borrow"))
                 && !value("--from-sir")
-                && !value("--features")
+                && (!features || crate::front::stage1_sir_reports())
         }
         "tokens" => true,
         "build" => !value("--from-sir") && !value("--from-lir"),
@@ -1627,9 +1694,47 @@ fn stage1_command(
                     Ok(i) => i,
                     Err(code) => return code,
                 };
+            // A stage 1 whose `sir --tests` reports the program's diagnostics
+            // itself, its warnings among them, and takes the features and
+            // `--locked` is run once for each program (decision 424); else its
+            // `check` reports them after (decision 380).
+            let once = stage1.sir_reports() && !has_ids(&p.flags);
             let mut status = exit::OK;
             for input in &inputs {
-                let code = {
+                let code = if once {
+                    let mut words = vec!["sir".to_string(), "--tests".to_string()];
+                    words.extend(contracts.clone());
+                    if locked {
+                        words.push("--locked".into());
+                    }
+                    if accept {
+                        words.push("--accept-unsafe".into());
+                    }
+                    if !features.names.is_empty() {
+                        words.push("--features".into());
+                        words.push(features.names.join(","));
+                    }
+                    if features.no_default {
+                        words.push("--no-default-features".into());
+                    }
+                    words.push(input.shown.clone());
+                    let r = match run(host, &words, Backend::Unused) {
+                        Ok(r) => r,
+                        Err(code) => return code,
+                    };
+                    // Its diagnostics, and the line `sisu run` ends with when
+                    // it fails; its warnings before the report.
+                    host.stderr(&r.stderr);
+                    if r.status != exit::OK || r.stdout.is_empty() {
+                        r.status.max(exit::ERROR)
+                    } else {
+                        match read_sir(&r.stdout, host) {
+                            Ok(prog) if cmd == "bench" => bench_from_sir(&prog, opts, host),
+                            Ok(prog) => test_from_sir(&prog, &p.flags, opts, input, true, host),
+                            Err(code) => code,
+                        }
+                    }
+                } else {
                     // Stage 1's `sir` takes `--accept-unsafe` and the path;
                     // its `check` `--locked` too (a run with features stays
                     // the Rust front end's, `stage1_serves`). Each writes the
@@ -2189,6 +2294,17 @@ pub(crate) fn input_with_root(
         disks: layout.modules.iter().map(|m| (m.name.clone(), m.disk.clone())).collect(),
         build_root: layout.lock.as_ref().and_then(|(p, _)| p.parent()).map(std::path::Path::to_path_buf),
         release_contracts: layout.packages.first().and_then(|p| p.release_contracts.clone()),
+        embed_dirs: layout
+            .modules
+            .iter()
+            .map(|m| {
+                let dir = match layout.packages.get(m.package) {
+                    Some(p) if !p.name.is_empty() => p.dir.clone(),
+                    _ => m.disk.parent().map(std::path::Path::to_path_buf).unwrap_or_default(),
+                };
+                (m.name.clone(), dir)
+            })
+            .collect(),
     })
 }
 
@@ -2642,7 +2758,7 @@ fn command(
                             return exit::ERROR;
                         }
                     }
-                    let hash = input.hash();
+                    let hash = input.token_hash();
                     // `--replay TOKEN`: the one test, with the token's seeds
                     // and case.
                     if let Some(t) = &opts.token {
@@ -3969,25 +4085,36 @@ fn audit(args: &[String], host: &mut dyn Host) -> i32 {
 /// `sisu audit --caps FILE...`: each program checked and lowered, then
 /// its capability audit, read from its SIR.
 fn audit_caps(files: &[&String], host: &mut dyn Host) -> i32 {
-    if files.is_empty() {
-        host.stderr(&plain_error(msg::CLI_MISSING_FILE, &[("command", "audit".into())]));
-        return EXIT_USAGE;
-    }
-    let mut out = String::new();
-    for file in files {
-        let source = match std::fs::read_to_string(file) {
-            Ok(s) => s,
-            Err(e) => {
-                host.stdout(&out);
-                host.stderr(&plain_error(
-                    msg::CLI_CANNOT_READ,
-                    &[("path", file.to_string()), ("reason", e.to_string())],
-                ));
-                return exit::ERROR;
+    // Without a file, the program of the working directory's package, each
+    // member of a workspace's in turn, its lines named by its directory
+    // (decision 429); a file is audited as a program of its own.
+    let inputs: Vec<(String, Input)> = if files.is_empty() {
+        let none = crate::package::FeatureRequest { names: Vec::new(), no_default: false };
+        match inputs_for("check", None, Lock::Stage1, false, false, &none, host) {
+            Ok(inputs) => inputs.into_iter().map(|i| (i.shown.clone(), i)).collect(),
+            Err(code) => return code,
+        }
+    } else {
+        let mut each = Vec::new();
+        for file in files {
+            match std::fs::read_to_string(file) {
+                Ok(s) => each.push((file.to_string(), Input::single(file, s))),
+                Err(e) => {
+                    host.stderr(&plain_error(
+                        msg::CLI_CANNOT_READ,
+                        &[("path", file.to_string()), ("reason", e.to_string())],
+                    ));
+                    return exit::ERROR;
+                }
             }
-        };
+        }
+        each
+    };
+    let mut out = String::new();
+    for (shown, input) in &inputs {
         let mut db = Db::new();
-        db.set_file(file, &source);
+        input.load(&mut db);
+        let (file, shown) = (input.file.as_str(), shown.as_str());
         let Some(c) = db.checked(file) else { return exit::ERROR };
         let lowered = if c.has_errors() { None } else { db.lowered(file) };
         let Some(lowered) = lowered.filter(|l| !l.has_errors()) else {
@@ -4004,7 +4131,7 @@ fn audit_caps(files: &[&String], host: &mut dyn Host) -> i32 {
             host.stderr(&text);
             return exit::ERROR;
         };
-        out.push_str(&crate::audit::caps(file, &lowered.sir, &crate::audit::own_structs(&c.program)));
+        out.push_str(&crate::audit::caps(shown, &lowered.sir, &crate::audit::own_structs(&c.program)));
     }
     host.stdout(&out);
     exit::OK
@@ -4154,6 +4281,7 @@ fn replay(args: &[String], host: &mut dyn Host) -> i32 {
                 disks: Vec::new(),
                 build_root: None,
                 release_contracts: None,
+                embed_dirs: Vec::new(),
             }
         }
         None => Input::single(&file, source.clone()),

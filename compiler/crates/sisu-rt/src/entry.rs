@@ -637,7 +637,9 @@ unsafe fn table(t: u32, items: *mut u8, n: u64, out: *mut u8) -> u8 {
         Kind::Set(e) => (e, u32::MAX),
         _ => rt::internal("a table literal of an unknown type"),
     };
-    let mut table = crate::dict::Table::new(k, v);
+    let made = crate::dict::Table::new(k, v);
+    // SAFETY: the table was just made.
+    let table = unsafe { &mut *made };
     let (ksize, vsize) = (table.ksize as usize, table.vsize as usize);
     let mut status = abi::OK;
     // SAFETY: the entries are in `items`.
@@ -657,7 +659,7 @@ unsafe fn table(t: u32, items: *mut u8, n: u64, out: *mut u8) -> u8 {
                 }
             }
         }
-        mem::set_word(out, 0, crate::dict::into_word(table));
+        mem::set_word(out, 0, crate::dict::into_word(made));
     }
     status
 }

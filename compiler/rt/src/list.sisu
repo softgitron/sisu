@@ -26,7 +26,7 @@ const UNORDERED: int = 2
 ##
 ## Requires:
 ## - `list`: `l` holds a live list
-def buffer(l: ptr mut u8) -> ptr mut u8:
+pub(package) def buffer(l: ptr mut u8) -> ptr mut u8:
     # safety: valid, aligned, writable: a list's first word is its buffer's
     #   address, by `list`.
     return unsafe l.cast[ptr[u8]]().read().cast_mut()
@@ -35,7 +35,7 @@ def buffer(l: ptr mut u8) -> ptr mut u8:
 ##
 ## Requires:
 ## - `list`: `l` holds a live list
-def length(l: ptr mut u8) -> int:
+pub(package) def length(l: ptr mut u8) -> int:
     # safety: in_bounds, valid, aligned: a list's second word is its length,
     #   by `list`.
     return unsafe l.offset(8).cast[int]().read()
@@ -44,7 +44,7 @@ def length(l: ptr mut u8) -> int:
 ##
 ## Requires:
 ## - `list`: `l` holds a live list, whose first `n` slots hold elements
-def set_length(l: ptr mut u8, n: int):
+pub(package) def set_length(l: ptr mut u8, n: int):
     # safety: in_bounds, valid, aligned, writable: a list's second word is
     #   its length, by `list`.
     unsafe l.offset(8).cast[int]().write(n)

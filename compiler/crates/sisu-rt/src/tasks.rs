@@ -1306,7 +1306,7 @@ unsafe fn iter_next(c: &Call<'_>) -> u8 {
             })
         }),
         // SAFETY: as above.
-        None => sched::system_status(|| unsafe { crate::iter::next(&mut *obj, c.ret) }),
+        None => sched::system_status(|| unsafe { crate::iter::next(obj, c.ret) }),
     }
 }
 

@@ -90,6 +90,9 @@ impl Host for Shared<'_, '_> {
     fn remove_file(&mut self, path: &str) -> Result<(), IoErrorKind> {
         self.with(|h| h.remove_file(path))
     }
+    fn rename_file(&mut self, from: &str, to: &str) -> Result<(), IoErrorKind> {
+        self.with(|h| h.rename_file(from, to))
+    }
     fn list_dir(&self, path: &str) -> Result<Vec<String>, IoErrorKind> {
         self.with(|h| h.list_dir(path))
     }
@@ -325,6 +328,9 @@ impl Host for Held<'_> {
     }
     fn remove_file(&mut self, path: &str) -> Result<(), IoErrorKind> {
         self.inner.remove_file(path)
+    }
+    fn rename_file(&mut self, from: &str, to: &str) -> Result<(), IoErrorKind> {
+        self.inner.rename_file(from, to)
     }
     fn list_dir(&self, path: &str) -> Result<Vec<String>, IoErrorKind> {
         self.inner.list_dir(path)

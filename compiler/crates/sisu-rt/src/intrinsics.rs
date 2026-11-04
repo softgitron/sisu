@@ -296,11 +296,11 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
             I::Sum => return sum(c),
             I::Any | I::All => {
                 let want = i == I::Any;
-                let mut it = iter::iterable(c.arg(0), c.ty(0), c.item(0));
+                let it = iter::iterable(c.arg(0), c.ty(0), c.item(0));
                 let mut tmp = [0u64; 2];
                 let t = tmp.as_mut_ptr() as *mut u8;
                 loop {
-                    let st = iter::next(&mut it, t);
+                    let st = iter::next(it, t);
                     if st != abi::OK {
                         return value::after_part(st, iter::drop_iter(iter::into_word(it) as *mut u8));
                     }
@@ -436,7 +436,7 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                         t.remove(k, e);
                         mem::set_word(c.ret, 0, 0);
                         mem::copy(c.ret.add(8), e.add(t.ksize as usize), t.vsize as usize);
-                        return value::drop_value(e, t.key);
+                        return value::drop_value(e, t.key());
                     }
                     None => c.none(),
                 }
@@ -464,7 +464,7 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                         let e = entry.as_mut_ptr() as *mut u8;
                         t.remove(k, e);
                         c.set_bool(true);
-                        return value::drop_value(e, t.key);
+                        return value::drop_value(e, t.key());
                     }
                     None => c.set_bool(false),
                 }
@@ -479,7 +479,7 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
             I::EntryOrInsert => {
                 let e = c.arg(0);
                 let t = &mut *(mem::word(e, 0) as *mut crate::dict::Table);
-                let (key, kt) = (e.add(8), t.key);
+                let (key, kt) = (e.add(8), t.key());
                 match t.position(key, kt) {
                     Some(k) => {
                         c.set_word(t.val_at(k) as u64);
@@ -508,7 +508,7 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 if obj.is_null() {
                     c.none();
                 } else {
-                    return iter::next(&mut *obj, c.ret);
+                    return iter::next(obj, c.ret);
                 }
             }
             I::FmtNew => (c.ret as *mut Text).write(Text::empty()),
@@ -1041,6 +1041,20 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                     Err(e) => io_error(c, io_kind(&e), &path),
                 }
             }
+            I::HostFsRename => {
+                // A failure names the source when it is not there, else the
+                // target (decision 420).
+                let from = String::from_utf8_lossy(c.text(1)).into_owned();
+                let to = String::from_utf8_lossy(c.text(2)).into_owned();
+                match std::fs::rename(&from, &to) {
+                    Ok(()) => mem::set_word(c.ret, 0, 0),
+                    Err(e) => {
+                        let kind = io_kind(&e);
+                        let gone = matches!(kind, IoKind::NotFound) && !std::path::Path::new(&from).exists();
+                        io_error(c, kind, if gone { &from } else { &to })
+                    }
+                }
+            }
             I::HostFsExists => {
                 let path = String::from_utf8_lossy(c.text(1)).into_owned();
                 c.set_bool(std::path::Path::new(&path).exists());
@@ -1493,7 +1507,7 @@ unsafe fn sum(c: &Call<'_>) -> u8 {
     // SAFETY: the arguments are of their types.
     unsafe {
         let it = iter::iterable(c.arg(0), c.ty(0), c.item(0));
-        let size = it.item_size;
+        let size = (*it).item_size as u32;
         let items = match iter::collect_all(it, c.item(0)) {
             Ok(l) => l,
             Err(s) => return s,

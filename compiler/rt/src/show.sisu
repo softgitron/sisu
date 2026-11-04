@@ -4,12 +4,14 @@
 ##! structural, `print` of one, `list.join`, the sides of a failed `assert`,
 ##! the error `main` returns and the others the runtime in Rust shows. The
 ##! names come from the table's texts (`desc.rs`), a float's digits from
-##! `floats.sisu` and an integer's from `text.sisu`; what the runtime in Rust
-##! keeps as objects of its own (the tables of dicts and sets, a task's path,
-##! a `Shared` cell, an arena, a time) it shows or reads out through calls of
-##! it. Each function appends to the `String` at `out`.
+##! `floats.sisu` and an integer's from `text.sisu`, and the entries of a
+##! dict or a set from `table.sisu`; what the runtime in Rust keeps as
+##! objects of its own (a task's path, a `Shared` cell, an arena, a time) it
+##! shows or reads out through calls of it. Each function appends to the
+##! `String` at `out`.
 
 import rt.floats
+import rt.table
 import rt.text
 import rt.value
 from rt.host import sisu_rt_alloc
@@ -18,9 +20,6 @@ from rt.host import sisu_rt_shared_alive
 from rt.host import sisu_rt_show_arena
 from rt.host import sisu_rt_show_datetime
 from rt.host import sisu_rt_show_task
-from rt.host import sisu_rt_table_key
-from rt.host import sisu_rt_table_len
-from rt.host import sisu_rt_table_value
 from rt.types import A
 from rt.types import ARENA
 from rt.types import B
@@ -289,18 +288,20 @@ pub(package) def debug(ts: Types, out: ptr mut u8, p: ptr mut u8, t: int):
             if decl != t:
                 debug(ts, out, p, decl)
         elif k == DICT:
+            let tb = p.cast[ptr[u8]]().read().cast_mut()
             text.put(out, 123)
             var i = 0
-            while i < sisu_rt_table_len(p):
+            while i < table.length(tb):
                 if i > 0:
                     text.put_word(out, W_COMMA, 2)
-                debug(ts, out, sisu_rt_table_key(p, i), h.offset(A).read())
+                debug(ts, out, table.key_at(tb, i), h.offset(A).read())
                 text.put_word(out, W_COLON, 2)
-                debug(ts, out, sisu_rt_table_value(p, i), h.offset(B).read())
+                debug(ts, out, table.value_at(tb, i), h.offset(B).read())
                 i += 1
             text.put(out, 125)
         elif k == SET:
-            let n = sisu_rt_table_len(p)
+            let tb = p.cast[ptr[u8]]().read().cast_mut()
+            let n = table.length(tb)
             if n == 0:
                 text.put_word(out, W_EMPTY_SET, 5)
             else:
@@ -309,7 +310,7 @@ pub(package) def debug(ts: Types, out: ptr mut u8, p: ptr mut u8, t: int):
                 while i < n:
                     if i > 0:
                         text.put_word(out, W_COMMA, 2)
-                    debug(ts, out, sisu_rt_table_key(p, i), h.offset(A).read())
+                    debug(ts, out, table.key_at(tb, i), h.offset(A).read())
                     i += 1
                 text.put(out, 125)
         elif k == ENTRY:

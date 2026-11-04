@@ -1,0 +1,70 @@
+# `Fs.rename` (decision 420): a file takes a new name, in place of a file
+# there, on the host and on the fakes alike, and a directory takes it with
+# what it holds. A failure names the source when it is not there and the
+# target otherwise; the attenuations refuse it or relabel it as they do any
+# change, and an interceptor sees it as any call.
+
+@derive(Copy)
+struct Audit:
+    lines: Cap[Mutex[list[String]]]
+
+impl cap.Interceptor for Audit:
+    def before(self, call: cap.Call):
+        var g = self.lines.get().lock()
+        g.value.push("> {call.capability}.{call.method}({call.args})")
+    def after(self, call: cap.Call, outcome: str):
+        var g = self.lines.get().lock()
+        g.value.push("< {call.method} = {outcome}")
+
+## A file written whole under a name of its own and renamed over the old
+## one, so that a reader finds the old text or the new.
+def save(fs: Fs, path: Path, text: str) -> ! IoError:
+    let draft = Path.new("{path.as_str()}.draft")
+    fs.write_text(draft, text)?
+    fs.sync(draft)?
+    fs.rename(draft, path)?
+    return Ok(())
+
+def tour(fs: Fs):
+    save(fs, "notes.txt", "first").expect("saved")
+    save(fs, "notes.txt", "second").expect("saved")
+    print(fs.read_to_string("notes.txt"))
+    print(fs.exists("notes.txt.draft"))
+    print(fs.rename("notes.txt.draft", "other.txt"))
+    fs.create_dir("box/inner").expect("made")
+    fs.write_text("box/inner/a.txt", "a").expect("written")
+    print(fs.rename("box", "crate"))
+    print(fs.exists("box"))
+    print(fs.list_dir("crate/inner"))
+    print(fs.read_to_string("crate/inner/a.txt"))
+
+def main(sys: System):
+    print("-- the host")
+    tour(sys.fs)
+    print(sys.fs.rename("notes.txt", "no/such/dir/notes.txt").is_err())
+    # The directory as each run of the case finds it, which runs again in it.
+    sys.fs.rename("crate", "box").expect("renamed back")
+    sys.fs.remove("notes.txt").expect("removed")
+    print("-- in memory")
+    let mem = Fs.in_memory({"a.txt": "A", "dir/b.txt": "B"})
+    tour(mem)
+    print(mem.rename("a.txt", "dir/b.txt"))
+    print(mem.read_to_string("dir/b.txt"))
+    print(mem.rename("dir/b.txt", "crate"))
+    print(mem.rename("crate", "crate/inner/deeper"))
+    print("-- attenuated")
+    print(mem.read_only().rename("notes.txt", "kept.txt"))
+    let jail = mem.restrict_to("crate")
+    print(jail.rename("inner/a.txt", "../a.txt"))
+    print(jail.rename("inner/a.txt", "top.txt"))
+    print(jail.rename("inner/a.txt", "again.txt"))
+    print(mem.read_to_string("crate/top.txt"))
+    let held, revoker = mem.revocable()
+    revoker.revoke()
+    print(held.rename("notes.txt", "gone.txt"))
+    print("-- intercepted")
+    let audit = Audit(lines=Cap(Mutex(list())))
+    let seen: Fs = cap.Wrap(inner=mem, hook=audit)
+    print(seen.rename("notes.txt", "renamed.txt"))
+    for line in audit.lines.get().lock().value.iter():
+        print(line)

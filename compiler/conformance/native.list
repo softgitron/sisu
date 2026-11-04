@@ -15,6 +15,7 @@ capabilities/interceptors
 capabilities/lent
 capabilities/network
 capabilities/object_drops
+capabilities/rename
 capabilities/revocable
 capabilities/wrap_trait
 comptime/baked

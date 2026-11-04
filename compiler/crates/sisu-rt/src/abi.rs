@@ -1356,6 +1356,9 @@ intrinsics! {
     ExpectFail = "expect.fail",
     ExpectFailCompare = "expect.fail_compare",
     ExpectFailParts = "expect.fail_parts",
+    // `Fs.rename` (decision 420), after the others so that their numbers
+    // stay what they were.
+    HostFsRename = "host.fs.rename",
 }
 
 impl Intrinsic {

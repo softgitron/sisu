@@ -2525,7 +2525,8 @@ blocked by a typed hole (decisions 340 and 380).
   (`sisu-driver/src/transcript.rs`): a `$` line runs `main` with the
   words after the program's name, the `>` lines after it are its
   standard input, the other lines what it prints (output and errors as
-  written, ` (exit N)` on the last line of a run that fails), against a
+  written but a failure's trace, whose lines move with the program's,
+  decision 428; ` (exit N)` on the last line of a run that fails), against a
   fake `System` that persists between the runs of one file: an in-memory
   `Fs` with the files of `tests/NAME/`, a clock frozen at the epoch,
   `Rand.seeded(0)` and no network (`transcript_world` and
@@ -2567,7 +2568,8 @@ records and replays every case that runs.
 
 **Replay tokens** (`sisu-driver/src/replay.rs`) are one word,
 `1-HASH-TOOLCHAIN-tT-sS-rR[-cCHOICES][-pDEPTH|-xSCHEDULE][-mPPM]`: the
-content hash of the file, the toolchain, the test's index, the scheduler's
+content hash of the file (of a package's files, and of the files the
+program's `embed` calls read, decision 421), the toolchain, the test's index, the scheduler's
 seed, the case seed, the shrunk case's choices, the scheduler and the
 `sim` profile's fault rate. `sisu test --replay TOKEN FILE` runs that test
 that way; a token for other code (`D0033`), another toolchain (`D0034`)
@@ -2586,7 +2588,8 @@ seeds of the random or PCT scheduler.
 **The `sim` profile** (17, "Simulation and replay"; `sisu test --sim
 [--faults P]`). A test that declares a `System` gets `System.sim(seed)`: a
 crash-consistent file system (`cap.SimFs`: writes are pending until
-`sync`, a crash keeps what was synced), an in-process network
+`sync`, a crash keeps what was synced, a rename is durable once the new
+name's directory is synced, decision 420), an in-process network
 (`cap.SimNetwork`), the run's test clock, `Rand.seeded`, and fakes of the
 rest. `std.sim` has `Sim` (nodes, each with its own `SimFs`, on one
 network: `crash`, `restart`, `partition`, `heal`), `choose(n)` (a choice
@@ -2594,7 +2597,8 @@ the exhaustive scheduler enumerates) and `always(what, holds, body)` (an
 invariant checked at every switch between tasks, `R0105`). With
 `--faults P` (0.01 by default) a call of a simulation object's operations
 fails at that rate with an error from its declared set, never one it
-cannot return. A `sim` build fails to compile if reachable code calls an
+cannot return, and never `Revoked`, which only a caretaker returns
+(decision 426). A `sim` build fails to compile if reachable code calls an
 `extern` with no simulation model (`E0971`; `sisu-driver/src/sim.rs`).
 
 ## Numbers, bytes and slices
@@ -3571,7 +3575,7 @@ when the program ends, so the two interleave as the interpreter's do.
 ### The runtime in Sisu
 
 The runtime is being written in Sisu, piece by piece, as D-086 orders
-(decisions 335, 336, 350 to 352, 358, 383 and 385). `compiler/rt` is a Sisu package
+(decisions 335, 336, 350 to 352, 358, 383, 385, 422 and 423). `compiler/rt` is a Sisu package
 (`unsafe = "extern"`) whose root module's `export_NAME` functions are the
 runtime's symbols `sisu_rt_NAME`, of Sisu's convention (decision 189),
 which the generated code and the runtime in Rust call as any function is
@@ -3602,6 +3606,8 @@ What is in Sisu (port-debt.md, "The runtime in Sisu", has what is not):
 | a float's text: the shortest that reads back as the same `f64` or `f32`, the fixed form and the form with an exponent (`sisu_rt_float_digits`) | `floats.sisu` | the runtime in Rust, for `Display` and `Debug` of floats, `fmt.float_digits` and `fmt.float32_digits` (decision 358) |
 | `Display` and `Debug` of a value by its type (`sisu_rt_value_display`, `_debug`) | `show.sisu` | the runtime in Rust, for `fmt.display`, `fmt.debug`, `print`, `list.join`, a failed `assert`'s sides and the error `main` returns (decision 383) |
 | a list's growth and moves, a slice's copies, the sort, `in` and `join` (`sisu_rt_list_*`) | `list.sisu` | the runtime in Rust, for the list intrinsics and every list it builds, and the generated code's `sisu_rt_list_reserve` (decision 385) |
+| the tables of dicts and sets: a new one, a key looked up, an entry appended and one taken out (`sisu_rt_table_new`, `_lookup`, `_push`, `_remove`), and a whole table copied, compared, shown and dropped | `table.sisu` | the runtime in Rust, for the dict and set intrinsics, a table literal and `d{k}` (`sisu_rt_table`, `sisu_rt_table_find`, `sisu_rt_dict_slot`), and `value.sisu` and `show.sisu` (decision 422) |
+| iterators: the next item, the iterator of an `Iterable[T]` argument, every item left, and the drop (`sisu_rt_iter_next`, `_iterable`, `_collect`, `_drop`) | `iter.sisu` | the runtime in Rust, for `Iter.next` of what does not wait and every iterator it takes items from, and `value.sisu` (decision 423) |
 
 The structural operations walk a value by the program's type table, which
 the runtime in Rust lays out in memory when the program starts
@@ -3612,10 +3618,12 @@ are, the offset of its tag, where its names are) and the lists after them
 members, the parts a drop and a copy reach in place, decisions 262 and
 266, and the texts of the names `Debug` writes, decision 383). The
 runtime in Rust passes the table's address to each operation. What it
-keeps as objects of its own (iterators, the tables of dicts and sets,
-channels, guards, `Shared` cells, arenas, the cells of capability handles,
-return traces) the Sisu code hands back to it (`sisu_rt_object_drop`,
-`_copy`, `_retain`, `_eq`, `sisu_rt_trace_retain`), and the program's drop
+keeps as objects of its own (channels, guards, `Shared` cells, arenas,
+the cells of capability handles, return traces) the Sisu code hands back
+to it (`sisu_rt_object_drop`, `_copy`, `_retain`, `sisu_rt_trace_retain`);
+a generator's items, a receiver's values and a generator closed early it
+asks it for (`sisu_rt_gen_item`, `sisu_rt_recv_item`,
+`sisu_rt_gen_abandon`), as they run the scheduler; and the program's drop
 glue it runs through the function table (`sisu_rt_glue`), or, on the
 system stack, moves aside to be dropped on the task's (`sisu_rt_defer`).
 On a task's own stack, the runtime in Rust runs a struct's or an enum's
@@ -8255,3 +8263,214 @@ decision 362)
      prints of its case `testing/expect`, holds it
      (`expect_records_its_failures_and_the_test_goes_on`). This changes no
      rule of the language: it implements 17's `expect`.
+
+**Capabilities: a file takes a new name** (section "Capabilities"; 06,
+09, 17; N-04)
+
+420. `Fs.rename(source, target)` is an operation of the file system
+     capability (`FsOps.rename` in the prelude): a file takes its new name
+     in place of a file already there, on the host atomically (POSIX's
+     `rename`), so that a reader finds the old file or the new one, never a
+     part of either, and a directory takes it with what is below it. A
+     failure names `source` when it is not there, a refusal the path
+     refused (`source` for a read-only file system), and any other
+     `target`. The host's is the intrinsic `host.fs.rename`, in the
+     interpreter (`Host::rename_file`, over `std::fs::rename`; a host
+     asked after a `NotFound` whether the source is there) and natively
+     (appended to `sisu_rt::abi`'s intrinsics and stage 2's table, so the
+     others keep their numbers); the capability log records it as
+     `call rename_file "SOURCE" "TARGET" -> ok` and replays it from the
+     log as it replays the other file operations (09). The attenuations
+     and caretakers of std.cap forward or refuse it as they do any change
+     (`ReadOnly` refuses it, `Restricted` refuses a path that leaves its
+     root and names the path given back, a revoked `Caretaker` is
+     `Revoked`), the interceptor shows it to its hook, and the fakes rename
+     in memory: `MemFs` at once; `SimFs` at once for every reader and,
+     as 17 asks of the `sim` profile's model of rename and directory
+     durability, durably once the new name's directory is synced: until
+     then a crash puts the old name back with what it had made durable,
+     after it the new name holds what the file had made durable, and a
+     file whose name was synced but never its contents comes back empty
+     after a crash, where the model made such a name a directory.
+     `capabilities/rename` (host, fakes, attenuations, interceptor; in
+     `native.list`, so the host's rename runs natively too, recorded and
+     replayed by the suite) and `sim/rename` (the atomic save that
+     survives a crash, and the one that does not) hold it. Stage 1's base
+     cache can be written aside and renamed over the old one. This
+     changes no rule of the language: it adds an operation to std's file
+     system capability.
+
+**The driver: a replay token and what a program embeds** (section
+"Simulation, schedulers and replay"; 08, 17; the manual's finding from
+guide G30)
+
+421. A failing test's replay token names the content hash of the program
+     with the files its `embed("path")` calls read, each path and its text
+     (or why it could not be read) after the sources' own hash, so that a
+     token made before an embedded file changed is refused after it
+     (`D0033`), as a token made before the source changed is, where the old
+     token ran the new program; the files are those stage 1 reads (a
+     package's module names them from its package's root, a single file
+     from its directory, the first module to name a path deciding; its
+     R31), found by the Rust parser in the program's own texts. A program
+     that embeds nothing keeps the hash of its sources, so every token of
+     the suite is what it was. The capability log's content hash is
+     unchanged: a log of stage 1's run holds the SIR, whose texts hold what
+     was embedded (`a_replay_token_covers_the_files_the_program_embeds`).
+     This changes no rule of the language: it implements 08's "the same
+     inputs give the same program" for 17's tokens.
+
+**The runtime in Sisu: the tables of dicts and sets, and iterators**
+(section "Stage 2", "The runtime in Sisu"; D-086, D-087 step 3)
+
+422. The tables of dicts and sets are the runtime in Sisu's
+     (`compiler/rt/src/table.sisu`): a `dict`'s or a `set`'s value is the
+     address of a header of nine words (the key's type, the value's, -1
+     for a set, the bytes of a key and of a value, the entries' block,
+     their number and room, the index's block and mask) and the blocks it
+     names, its entries in insertion order, each its key's hash, the key
+     and the value, and its index a power of two of slots at least twice
+     the room for entries, each 0 or one more than an entry's position,
+     probed linearly. A key is hashed by its structural hash (decision 256)
+     with its bits spread by MurmurHash3's last step, and compared by
+     structural equality but that a `Path` is never the same key as
+     another text, as the interpreter keeps them, whether it is a `Path`
+     asked once a lookup; an entry keeps its hash, so a growth or a copy
+     makes the index again without hashing a key again, and a removal
+     moves the entries after it down a place and makes the index again, so
+     no slot is a tombstone (the runtime in Rust walked its whole index on
+     a removal as well). The runtime in Rust decodes each intrinsic's
+     call, writes the value where an entry's goes and drops what a call
+     drops, through four exports (`sisu_rt_table_new`, `_lookup`, `_push`,
+     `_remove`), reading the header as `table.sisu` lays it out
+     (`dict::Table`); `value.sisu` copies, compares and drops a whole table
+     and `show.sisu` shows one itself, where they called back for them.
+     What the runtime in Rust no longer has: `dict.rs`'s `Table` with its
+     `HashMap` index of positions and its hasher, `copy_table`,
+     `drop_table` and `key_equal`, and the callbacks `sisu_rt_object_eq`,
+     `sisu_rt_table_len`, `_key` and `_value`. The entries the generated
+     code calls (`sisu_rt_table_find`, `sisu_rt_table`,
+     `sisu_rt_dict_slot`, decision 265) are as they were, so both
+     lowerings write the same code. The other way was the tables in Sisu
+     over `Hash` and `Eq` in std, compiled per type with each program,
+     which needs per-type code (22's end) and lifts `E0398`
+     (port-debt.md, "Hashing"). This changes no rule of the language.
+423. Iterators are the runtime in Sisu's (`compiler/rt/src/iter.sisu`): an
+     `Iter[T]`'s value is the address of an object of eleven words, the
+     header compiled code reads to step a range or a borrowed list's
+     elements itself (decision 253, unchanged), the state, the bytes of an
+     item and five words of the state's own (a list's three words and the
+     next index, a text's bytes and position, the inner iterators of
+     `enumerate` and `zip`, a table and its next entry, a generator's task,
+     a receiver's channel). Its next item, the iterator of an
+     `Iterable[T]` argument (an owned or borrowed list, dict or set, a
+     receiver, an iterator, behind a reference or a `dyn`, the items of a
+     borrowed collection decaying to copies), every item left (decision
+     235) and its drop are four exports (`sisu_rt_iter_next`, `_iterable`,
+     `_collect`, `_drop`); `enumerate` writes the inner item where its
+     pair's goes, `zip` the second item after the first, over the first's
+     last word kept aside, and the decay the reference in the object's own
+     free words, so that no step allocates, where the runtime in Rust
+     allocated a buffer at each; a text's characters are decoded from
+     UTF-8 in Sisu, a sequence that is not one ending them as Rust's did.
+     A generator's items, a receiver's values and a generator closed
+     before its end (decision 236) it asks the runtime in Rust for
+     (`sisu_rt_gen_item`, `sisu_rt_recv_item`, `sisu_rt_gen_abandon`),
+     since they run the scheduler, which decides there whether
+     `Iter.next` waits by the state's word as before, and the panic of
+     `zip`'s lengths (`sisu_rt_zip_lengths`); the runtime in Rust makes
+     the iterators of its intrinsics as the object is laid out
+     (`iter::IterObj`). What the runtime in Rust no longer has:
+     `iter.rs`'s `State` with `next`, `iterable`, `collect`,
+     `collect_all`'s buffers, `drop_state`, `first_char` and the owned
+     table's drop. Every case of `native.list` runs as before, and stage 2
+     lowering its own SIR (4.2 MB) gives the same LIR in 2.48 to 2.71 s
+     with both pieces in Sisu, against 2.31 to 2.66 s before them, the
+     executables built with the Rust lowering and Cranelift as the driver
+     builds `sisu2`; on `examples/wordcount`'s SIR it executes 507.0
+     million instructions against 495.3 million (callgrind, 1.024 times),
+     most of the difference the structural walks a lookup calls
+     (`value.target`, `equal`, `hash`) where the runtime in Rust's index
+     compared a hash first. The runtime's seed grows from 428 692 to
+     552 134 bytes of SIR and its object (`target/rt/rt.o`) from 418 832 to
+     564 704 bytes, and as the fixed point builds it with the Sisu backend
+     from 799 152 to 1 059 600 bytes, which the fixed point still holds
+     (rt-A.o and rt-B.o the same bytes, as sisu2-A and sisu2-B, 27 603 784,
+     and stage1-A and stage1-B, 55 255 760). This changes no rule of the
+     language.
+
+**The driver: one run of stage 1 for a test** (section "The query layer
+and the driver"; decision 380)
+
+424. `sisu test` and `sisu bench` run stage 1 once for each program, `sir
+     --tests` with `--locked`, `--accept-unsafe`, the features and the
+     path, when its `sir --tests` reports the program's diagnostics itself,
+     its warnings among them, and takes `--features`,
+     `--no-default-features` and `--locked` (the stage 1 round after R46):
+     what it prints on standard error comes before the report, and a run
+     that fails or prints no SIR takes its status. Else the driver runs
+     its `check` after `sir --tests` for the warnings, as decision 380
+     has it. Which stage 1 it is, `Stage1::sir_reports` finds by asking
+     it, once for each executable (its size and time kept beside it in
+     `target/stage1/sir-reports`), for `sir --tests --locked` of an empty
+     directory: a stage 1 whose `sir` takes no `--locked` stops at its
+     usage in about 50 ms before it reads anything, and one that takes it
+     finds no package there; `SISU_STAGE1_SIR_REPORTS=1` or `0` decides
+     instead. With such a stage 1 a run that asks for a package's features
+     is stage 1's too, where it stayed the Rust front end's. The stage 1
+     of this round's start is the first kind: its tests still run stage 1
+     twice. This changes no rule of the language.
+425. `sisu lint` and `sisu audit --unsafe [--std] [PATH]` are stage 1's
+     commands, which the driver passes on with their arguments, output and
+     status as they are (`stage1_as_is`, as `fmt` and `doc`): the lints
+     beyond the compiler's warnings, with their fixes (its R11), and the
+     audit of a program's unsafe code by module, with each block's reason
+     and each package's level (its R7), where `lint` was `D0003` and
+     `audit --unsafe` `D0009`; `sisu help` lists both. On the Rust front
+     end they are refused as before
+     (`lint_and_the_audit_of_unsafe_code_are_stage_1s`). This changes no
+     rule of the language.
+
+**What the manual found: faults, stopped runs, transcripts and the audit**
+(sections "Simulation, schedulers and replay", "Testing" and "The query
+layer and the driver"; 17, Q-51; the manual's findings from X12, chapters 1
+and 9, and G32)
+
+426. A fault of the `sim` profile is never `Revoked`: the simulation's own
+     file system and network, whose calls `--faults` fails, are never
+     revocable, and `Revoked`, which every I/O error set holds (Q-51), is
+     a caretaker's alone, so the variant is drawn from the others of the
+     declared set, where a test that matched every error a file system
+     can give saw it injected into one never made revocable. A caretaker
+     of the simulated file system is revoked as any is
+     (`sim/no_revoked`, every call failing, each with another variant);
+     `sim/http_faults`'s failing schedule now sees `Other` where it saw
+     `NotAllowed`, the draw over four variants rather than five. This
+     changes no rule of the language: it implements 17's "an error it
+     could return".
+427. The conformance runner records a case that runs, and replays its log,
+     only when the run wrote one or exited with 0: a program its errors
+     stop is not run, and writes no capability log, so a case can pin what
+     `sisu run` prints for it, the errors as a person reads them and the
+     line `D0006` (`run/stopped_by_errors`, with its `.err` and
+     `.status`), where the replay of a log never written failed the case;
+     the recorded run is still compared with the plain one. This changes
+     no rule of the language.
+428. A transcript compares a run's output without a failure's trace: the
+     frames after an `error:` or a `panic:` line (`  at FILE:LINE:COL`, a
+     return trace's, and `  at FUNCTION (FILE:LINE:COL)`, a panic's) are
+     left out of what it printed, and of what `--update` writes, as 17's
+     own transcript shows an error (`error: no pears in stock (exit 1)`),
+     so that a transcript does not change when the program's lines move,
+     where it broke at every move; a line a program prints that looks like
+     a frame stays when no failure came before it. `testing/shop`'s
+     transcript of a failing run is the error and its status. This changes
+     no rule of the language: it implements 17's transcripts.
+429. `sisu audit --caps` without a file audits the program of the working
+     directory's package, each member of a workspace's in turn, every
+     module of it, its lines named by the package's directory as a failing
+     test's replay line names it (`.`), where it needed a file and read it
+     alone, so that a module's import of its package was `E0220` and a
+     package's capabilities could not be audited; a file it names is still
+     a program of its own (`the_capability_audit_reads_a_package`). This
+     changes no rule of the language.

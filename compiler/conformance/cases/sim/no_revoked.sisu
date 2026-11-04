@@ -1,0 +1,44 @@
+# Faults come from types (17), but not from every variant of the error set:
+# the file system the simulation gives is never revocable, so none of its
+# faults is `Revoked`, which only a caretaker gives (Q-51; decision 426).
+# Every call fails here, and each error is another of `IoError`'s.
+# sim --faults 1.0
+
+## The kinds of error that many writes and reads fail with.
+def kinds(fs: Fs) -> list[String]:
+    var seen: set[String] = set()
+    for i in range(100):
+        for r in [fs.write_text(Path.new("f{i}.txt"), "x"), fs.sync(Path.new("."))]:
+            match r:
+                case Ok(()):
+                    seen.add("Ok")
+                case Err(Revoked):
+                    seen.add("Revoked")
+                case Err(NotFound(_)):
+                    seen.add("NotFound")
+                case Err(PermissionDenied(_)):
+                    seen.add("PermissionDenied")
+                case Err(AlreadyExists(_)):
+                    seen.add("AlreadyExists")
+                case Err(InvalidData(_)):
+                    seen.add("InvalidData")
+                case Err(Interrupted):
+                    seen.add("Interrupted")
+                case Err(Other(_)):
+                    seen.add("Other")
+    var out: list[String] = []
+    for k in seen.iter():
+        out.push(k.copy())
+    out.sort()
+    return out
+
+test "the simulated file system fails, and is never revoked"(sys: System):
+    let seen = kinds(sys.fs)
+    assert not seen.contains("Revoked")
+    assert seen
+        == ["AlreadyExists", "Interrupted", "InvalidData", "NotFound", "Other", "PermissionDenied"]
+
+test "a caretaker of it is revoked as ever"(sys: System):
+    let held, revoker = sys.fs.revocable()
+    revoker.revoke()
+    assert held.write_text(Path.new("x.txt"), "x") == Err(Revoked)

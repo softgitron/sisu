@@ -68,6 +68,11 @@ pub trait Host: Send {
     fn remove_file(&mut self, _path: &str) -> Result<(), IoErrorKind> {
         Err(IoErrorKind::PermissionDenied)
     }
+    /// Renames a file or a directory, replacing a file at `to` (`rename`
+    /// of POSIX): `NotFound` when there is nothing at `from`.
+    fn rename_file(&mut self, _from: &str, _to: &str) -> Result<(), IoErrorKind> {
+        Err(IoErrorKind::PermissionDenied)
+    }
     /// The names of a directory's entries (not paths), sorted.
     fn list_dir(&self, _path: &str) -> Result<Vec<String>, IoErrorKind> {
         Err(IoErrorKind::PermissionDenied)
@@ -295,6 +300,10 @@ impl Host for StdHost {
         std::fs::remove_file(path).map_err(|e| io_kind(&e))
     }
 
+    fn rename_file(&mut self, from: &str, to: &str) -> Result<(), IoErrorKind> {
+        std::fs::rename(from, to).map_err(|e| io_kind(&e))
+    }
+
     fn list_dir(&self, path: &str) -> Result<Vec<String>, IoErrorKind> {
         let mut names = Vec::new();
         for e in std::fs::read_dir(path).map_err(|e| io_kind(&e))? {
@@ -510,6 +519,38 @@ impl Host for TestHost {
             None if self.exists(path) => Err(IoErrorKind::PermissionDenied),
             None => Err(IoErrorKind::NotFound),
         }
+    }
+
+    /// A file written here, or a directory made here with what is below
+    /// it; what is in the read-only directory stays where it is.
+    fn rename_file(&mut self, from: &str, to: &str) -> Result<(), IoErrorKind> {
+        if let Some(data) = self.files.remove(from) {
+            self.files.insert(to.to_string(), data);
+            return Ok(());
+        }
+        if !self.is_dir(from) {
+            return Err(if self.exists(from) {
+                IoErrorKind::PermissionDenied
+            } else {
+                IoErrorKind::NotFound
+            });
+        }
+        let below = format!("{}/", from.trim_end_matches('/'));
+        let moved =
+            |name: &str| name.strip_prefix(&below).map(|rest| format!("{}/{rest}", to.trim_end_matches('/')));
+        let files: Vec<String> = self.files.keys().filter(|k| k.starts_with(&below)).cloned().collect();
+        for k in files {
+            if let (Some(data), Some(new)) = (self.files.remove(&k), moved(&k)) {
+                self.files.insert(new, data);
+            }
+        }
+        let dirs: Vec<String> =
+            self.dirs.iter().filter(|d| *d == from || d.starts_with(&below)).cloned().collect();
+        for d in dirs {
+            self.dirs.remove(&d);
+            self.dirs.insert(moved(&d).unwrap_or_else(|| to.to_string()));
+        }
+        Ok(())
     }
 
     fn list_dir(&self, path: &str) -> Result<Vec<String>, IoErrorKind> {

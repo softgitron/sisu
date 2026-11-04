@@ -1,12 +1,10 @@
 ##! The runtime in Rust (`crates/sisu-rt`) as the runtime's Sisu code calls
 ##! it (decision 350): its allocation, which counts the program's blocks;
-##! what it keeps as objects of its own, which it alone drops, copies,
-##! compares and shows (iterators, the tables of dicts and sets, channels,
-##! the guards of mutexes, `Shared` cells, arenas, the cells of capability
-##! handles, return traces, tasks); the program's drop glue, which it calls
-##! through the
-##! function table; and C's `memmove` and `memcmp`, which move and compare
-##! bytes. The code the backend writes for this package makes no call of
+##! what it keeps as objects of its own, which it alone drops, copies and
+##! shows (iterators, channels, the guards of mutexes, `Shared` cells,
+##! arenas, the cells of capability handles, return traces, tasks); the
+##! program's drop glue, which it calls through the function table; and C's
+##! `memmove` and `memcmp`, which move and compare bytes. The code the backend writes for this package makes no call of
 ##! `sisu_rt_flush` before these, as it does before a program's foreign
 ##! calls: they are the runtime's own.
 
@@ -40,17 +38,10 @@ extern "C":
     pub def sisu_rt_object_copy(dst: ptr mut u8, src: ptr mut u8, t: int)
     ## One more count for the capability handle at `p` (decision 237).
     pub def sisu_rt_object_retain(p: ptr mut u8, t: int)
-    ## Whether the dicts or sets at `a` and `b` hold equal entries.
-    pub def sisu_rt_object_eq(a: ptr mut u8, ta: int, b: ptr mut u8, tb: int) -> bool
     ## The error value at `p` lets go of its return trace, which is gone.
     pub def sisu_rt_trace_release(p: ptr mut u8)
     ## The error value at `p` is a copy: its return trace is held once more.
     pub def sisu_rt_trace_retain(p: ptr mut u8)
-    ## The number of entries of the dict or set at `p`, and the address of
-    ## entry `i`'s key and of its value (decision 383).
-    pub def sisu_rt_table_len(p: ptr mut u8) -> int
-    pub def sisu_rt_table_key(p: ptr mut u8, i: int) -> ptr mut u8
-    pub def sisu_rt_table_value(p: ptr mut u8, i: int) -> ptr mut u8
     ## Whether the `Shared` cell at `cell` still holds its value.
     pub def sisu_rt_shared_alive(cell: ptr mut u8) -> bool
     ## Appends to the `String` at `out` the `Debug` text of the task whose
@@ -59,6 +50,20 @@ extern "C":
     pub def sisu_rt_show_task(out: ptr mut u8, task: int)
     pub def sisu_rt_show_arena(out: ptr mut u8, p: ptr mut u8)
     pub def sisu_rt_show_datetime(out: ptr mut u8, nanos: int)
+    ## The next item of the generator whose task is `task`, `size` bytes,
+    ## written at `out`, which it runs to its `yield`: 0 for an item, 1 for
+    ## its end, else 2 plus the status of the panic it ended with, raised
+    ## (decision 423).
+    pub def sisu_rt_gen_item(task: int, out: ptr mut u8, size: int) -> int
+    ## The value the channel `chan` holds now, `size` bytes, written at `out`
+    ## and taken: 0 for a value, 1 for its end, else 2 plus the status of the
+    ## panic raised for a receiver that would wait inside another iterator.
+    pub def sisu_rt_recv_item(chan: int, out: ptr mut u8, size: int) -> int
+    ## Closes the generator whose task is `task`, dropped before its end
+    ## (decision 236): the status of what it drops.
+    pub def sisu_rt_gen_abandon(task: int) -> u8
+    ## Raises the panic of `zip` given two lengths: its status.
+    pub def sisu_rt_zip_lengths() -> u8
     ## Copies `n` bytes from `src` to `dst`; the regions may overlap.
     pub def memmove(dst: ptr mut u8, src: ptr[u8], n: int) -> ptr mut u8
     ## The order of the `n` bytes at `a` and at `b`: 0 when they are the same.

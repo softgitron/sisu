@@ -1,0 +1,3 @@
+test "the simulated file system fails, and is never revoked" ... ok
+test "a caretaker of it is revoked as ever" ... ok
+2 passed, 0 failed, 0 blocked

@@ -35,6 +35,27 @@ pure def relabel(own e: IoError, path: Path) -> IoError:
         case _:
             return e
 
+## The path an error names, if it names one.
+pure def error_path(e: IoError) -> Path?:
+    match e:
+        case NotFound(p):
+            return Some(p.copy())
+        case PermissionDenied(p):
+            return Some(p.copy())
+        case AlreadyExists(p):
+            return Some(p.copy())
+        case InvalidData(p):
+            return Some(p.copy())
+        case _:
+            return None
+
+## A rename's error, reported for the paths it was given: `source` when the
+## error names `passed`, the path `source` was passed on as, else `target`.
+pure def relabel_either(own e: IoError, passed: Path, source: Path, target: Path) -> IoError:
+    if error_path(e) == Some(passed.copy()):
+        return relabel(e, source)
+    return relabel(e, target)
+
 ## `Fs.read_only`: forwards what reads, refuses every change.
 struct ReadOnly[T]:
     inner: T
@@ -54,6 +75,8 @@ impl[T: FsOps] FsOps for ReadOnly[T]:
         return self.inner.metadata(path)
     def remove(self, path: Path) -> ! IoError:
         return Err(PermissionDenied(path=path.copy()))
+    def rename(self, source: Path, target: Path) -> ! IoError:
+        return Err(PermissionDenied(path=source.copy()))
     def list_dir(self, path: Path) -> list[Path] ! IoError:
         return self.inner.list_dir(path)
     def create_dir(self, path: Path) -> ! IoError:
@@ -115,6 +138,14 @@ impl[T: FsOps] FsOps for Restricted[T]:
         let full = self.below(path) else:
             return Err(PermissionDenied(path=path.copy()))
         return self.inner.remove(full).map_err((e) -> relabel(e, path))
+    def rename(self, source: Path, target: Path) -> ! IoError:
+        let full_source = self.below(source) else:
+            return Err(PermissionDenied(path=source.copy()))
+        let full_target = self.below(target) else:
+            return Err(PermissionDenied(path=target.copy()))
+        return self.inner.rename(full_source.copy(), full_target).map_err(
+            (e) -> relabel_either(e, full_source, source, target)
+        )
     def list_dir(self, path: Path) -> list[Path] ! IoError:
         let full = self.below(path) else:
             return Err(PermissionDenied(path=path.copy()))
@@ -167,6 +198,10 @@ impl[T: FsOps] FsOps for Caretaker[T]:
         if self.revoker.is_revoked():
             return Err(Revoked)
         return self.inner.remove(path)
+    def rename(self, source: Path, target: Path) -> ! IoError:
+        if self.revoker.is_revoked():
+            return Err(Revoked)
+        return self.inner.rename(source, target)
     def list_dir(self, path: Path) -> list[Path] ! IoError:
         if self.revoker.is_revoked():
             return Err(Revoked)
@@ -259,6 +294,39 @@ impl FsOps for MemFs:
                 return Ok(())
             case None:
                 return Err(NotFound(path=path.copy()))
+    ## A file takes its new name, in place of a file there; a directory
+    ## takes it with everything below it.
+    def rename(self, source: Path, target: Path) -> ! IoError:
+        let old = normal(source.as_str())
+        let new = normal(target.as_str())
+        let moving_dir = self.is_dir(old)
+        if old == ".":
+            return Err(PermissionDenied(path=source.copy()))
+        if not moving_dir and not self.files.lock().value.contains(old.copy()):
+            return Err(NotFound(path=source.copy()))
+        if old == new:
+            return Ok(())
+        if self.is_dir(new) or (moving_dir and self.files.lock().value.contains(new.copy())):
+            return Err(AlreadyExists(path=target.copy()))
+        if new.starts_with("{old}/"):
+            return Err(PermissionDenied(path=target.copy()))
+        var files = self.files.lock()
+        var moves: list[(String, String)] = []
+        for name in files.value.keys():
+            if let Some(to_name) = moved_name(name, old, new):
+                moves.push((name.copy(), to_name))
+        for from_name, to_name in moves:
+            if let Some(f) = files.value.remove(from_name.copy()):
+                _ = files.value.insert(to_name.copy(), f)
+        var dirs = self.dirs.lock()
+        var dir_moves: list[(String, String)] = []
+        for name in dirs.value.iter():
+            if let Some(to_name) = moved_name(name, old, new):
+                dir_moves.push((name.copy(), to_name))
+        for from_name, to_name in dir_moves:
+            _ = dirs.value.remove(from_name.copy())
+            dirs.value.add(to_name.copy())
+        return Ok(())
     def list_dir(self, path: Path) -> list[Path] ! IoError:
         let dir = normal(path.as_str())
         if not self.is_dir(dir):
@@ -308,8 +376,12 @@ impl FsOps for MemFs:
 ## at once for every reader, but only `sync` of the file makes its
 ## contents durable, and only `sync` of its directory (`"."` at the top)
 ## makes its name durable, as POSIX asks of `fsync`; `crash` puts back what
-## was durable, so a file whose name was never synced vanishes whole. A
-## `Copy` handle on the state every copy shares.
+## was durable, so a file whose name was never synced vanishes whole, and
+## one whose name was synced but never its contents comes back empty. A
+## rename is seen at once, and is durable once the new name's directory is
+## synced: until then a crash puts back the old name with what it held, and
+## after it the new name holds what the file had made durable. A `Copy`
+## handle on the state every copy shares.
 @derive(Copy)
 struct SimFs:
     state: Cap[Mutex[SimFsState]]
@@ -322,11 +394,15 @@ struct SimFsState:
     ## The names, of files and directories, whose directory entry was
     ## synced.
     entries: set[String]
+    ## The durable contents a rename took to each new name (none for a file
+    ## never synced), which become the name's own when its directory is
+    ## synced.
+    moved: dict[String, bytes?]
     crashes: int
 
 impl SimFs:
     def new() -> SimFs:
-        let st = SimFsState(files={}, dirs=set(), durable={}, entries=set(), crashes=0)
+        let st = SimFsState(files={}, dirs=set(), durable={}, entries=set(), moved={}, crashes=0)
         return SimFs(state=Cap.new(Mutex(st)))
 
     ## A crash: every file and directory goes back to what was durable.
@@ -343,6 +419,7 @@ impl SimFs:
                 dirs.add(d.copy())
         g.value.files = files
         g.value.dirs = dirs
+        g.value.moved = {}
 
     ## How many crashes it went through.
     def crashes(self) -> int:
@@ -361,6 +438,16 @@ impl SimFs:
             if name.starts_with(prefix):
                 return True
         return False
+
+## The name that `name` takes when `old` is renamed `new`: `new` for `old`
+## itself, `new` and the rest of the name for one below it, none for another.
+pure def moved_name(name: str, old: str, new: str) -> String?:
+    if name == old:
+        return Some(new.to_string())
+    let prefix = "{old}/"
+    if name.starts_with(prefix):
+        return Some("{new}/{name.strip_prefix(prefix)}")
+    return None
 
 ## Whether every name on the way to `name` has a durable entry.
 pure def kept(entries: set[String], name: str) -> bool:
@@ -429,6 +516,43 @@ impl FsOps for SimFs:
                 return Ok(())
             case None:
                 return Err(NotFound(path=path.copy()))
+    ## Seen at once, as `MemFs`'s; each file moved takes its durable
+    ## contents to its new name, where they become durable with the name.
+    def rename(self, source: Path, target: Path) -> ! IoError:
+        let old = normal(source.as_str())
+        let new = normal(target.as_str())
+        let moving_dir = self.is_dir(old)
+        let target_dir = self.is_dir(new)
+        var g = self.state.get().lock()
+        if old == ".":
+            return Err(PermissionDenied(path=source.copy()))
+        if not moving_dir and not g.value.files.contains(old.copy()):
+            return Err(NotFound(path=source.copy()))
+        if old == new:
+            return Ok(())
+        if target_dir or (moving_dir and g.value.files.contains(new.copy())):
+            return Err(AlreadyExists(path=target.copy()))
+        if new.starts_with("{old}/"):
+            return Err(PermissionDenied(path=target.copy()))
+        var moves: list[(String, String)] = []
+        for name in g.value.files.keys():
+            if let Some(to_name) = moved_name(name, old, new):
+                moves.push((name.copy(), to_name))
+        for from_name, to_name in moves:
+            let durable = match g.value.durable.get(from_name.copy()):
+                case Some(d): Some(d.copy())
+                case None: None
+            _ = g.value.moved.insert(to_name.copy(), durable)
+            if let Some(f) = g.value.files.remove(from_name.copy()):
+                _ = g.value.files.insert(to_name.copy(), f)
+        var dir_moves: list[(String, String)] = []
+        for name in g.value.dirs.iter():
+            if let Some(to_name) = moved_name(name, old, new):
+                dir_moves.push((name.copy(), to_name))
+        for from_name, to_name in dir_moves:
+            _ = g.value.dirs.remove(from_name.copy())
+            g.value.dirs.add(to_name.copy())
+        return Ok(())
     def list_dir(self, path: Path) -> list[Path] ! IoError:
         let dir = normal(path.as_str())
         if not self.is_dir(dir.copy()):
@@ -465,6 +589,7 @@ impl FsOps for SimFs:
             case Some(f): Some(f.data.copy())
             case None: None
         if let Some(d) = data:
+            _ = g.value.moved.remove(name.copy())
             _ = g.value.durable.insert(name, d.copy())
             return Ok(())
         if not is_dir:
@@ -478,6 +603,18 @@ impl FsOps for SimFs:
                 entries.add(e.copy())
         for c in now_in.iter():
             entries.add(c.copy())
+            # A name a rename made durable holds what the file had made
+            # durable before, and a file's name made durable before its
+            # contents holds nothing, as a crash leaves such a file empty.
+            match g.value.moved.remove(c.copy()):
+                case Some(Some(d)):
+                    _ = g.value.durable.insert(c.copy(), d)
+                case Some(None):
+                    _ = g.value.durable.remove(c.copy())
+                case None:
+                    pass
+            if g.value.files.contains(c.copy()) and not g.value.durable.contains(c.copy()):
+                _ = g.value.durable.insert(c.copy(), "".encode())
         g.value.entries = entries
         return Ok(())
 
@@ -869,6 +1006,14 @@ impl[T: FsOps, I: Interceptor] FsOps for Wrap[T, I]:
         let c = Call(capability="Fs".to_string(), method="remove".to_string(), args="{path:?}")
         self.hook.before(c.copy())
         let r = self.inner.remove(path)
+        self.hook.after(c, "{r:?}")
+        return r
+    def rename(self, source: Path, target: Path) -> ! IoError:
+        let c = Call(
+            capability="Fs".to_string(), method="rename".to_string(), args="{source:?}, {target:?}"
+        )
+        self.hook.before(c.copy())
+        let r = self.inner.rename(source, target)
         self.hook.after(c, "{r:?}")
         return r
     def list_dir(self, path: Path) -> list[Path] ! IoError:

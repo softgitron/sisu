@@ -158,19 +158,19 @@ rt-B.o (decision 353). It holds: each B is its A byte for byte, and
 stage1-A prints the SIR `sisu sir` prints, the runtime's seed among it.
 
 ```text
-  sisu2-C       23539384 bytes  sha256 729f41d7266ae7df...  built through the Cranelift path (52.6 s)
-  A.stage2.sir   4204078 bytes  sha256 12b54f73d025ffda...  printed by sisu sir
-  A.stage1.sir  18015195 bytes  sha256 ddc542c20f268407...  printed by sisu sir
-  A.rt.sir        428692 bytes  sha256 4c985bfeab3977d8...  printed by sisu sir (all three 80.4 s)
-  rt-A.o          799152 bytes  sha256 b42a1b24b1059549...  built by sisu2-C
-  sisu2-A       27657704 bytes  sha256 3cc6756e1da30ed0...  built by sisu2-C, with rt-A.o (5.3 s)
-  stage1-A      54718840 bytes  sha256 3025b4a426e7a980...  built by sisu2-C, with rt-A.o (21.1 s)
-  B.stage2.sir   4204078 bytes  sha256 12b54f73d025ffda...  printed by stage1-A
-  B.stage1.sir  18015195 bytes  sha256 ddc542c20f268407...  printed by stage1-A
-  B.rt.sir        428692 bytes  sha256 4c985bfeab3977d8...  printed by stage1-A (all three 205.9 s)
-  rt-B.o          799152 bytes  sha256 b42a1b24b1059549...  built by sisu2-A
-  sisu2-B       27657704 bytes  sha256 3cc6756e1da30ed0...  built by sisu2-A, with rt-B.o (10.0 s)
-  stage1-B      54718840 bytes  sha256 3025b4a426e7a980...  built by sisu2-A, with rt-B.o (42.7 s)
+  sisu2-C       23373144 bytes  sha256 b92e463f7bf8f37c...  built through the Cranelift path (58.7 s)
+  A.stage2.sir   4204198 bytes  sha256 2d5b9b8f46f43111...  printed by sisu sir
+  A.stage1.sir  18326735 bytes  sha256 4d39a88341687281...  printed by sisu sir
+  A.rt.sir        552134 bytes  sha256 432f5ce9c3215851...  printed by sisu sir (all three 90.2 s)
+  rt-A.o         1059600 bytes  sha256 7ec905a88a65fbb5...  built by sisu2-C
+  sisu2-A       27603784 bytes  sha256 5ec0a5d1598b6e09...  built by sisu2-C, with rt-A.o (8.8 s)
+  stage1-A      55255760 bytes  sha256 94482294c7f64737...  built by sisu2-C, with rt-A.o (32.1 s)
+  B.stage2.sir   4204198 bytes  sha256 2d5b9b8f46f43111...  printed by stage1-A
+  B.stage1.sir  18326735 bytes  sha256 4d39a88341687281...  printed by stage1-A
+  B.rt.sir        552134 bytes  sha256 432f5ce9c3215851...  printed by stage1-A (all three 237.1 s)
+  rt-B.o         1059600 bytes  sha256 7ec905a88a65fbb5...  built by sisu2-A
+  sisu2-B       27603784 bytes  sha256 5ec0a5d1598b6e09...  built by sisu2-A, with rt-B.o (17.7 s)
+  stage1-B      55255760 bytes  sha256 94482294c7f64737...  built by sisu2-A, with rt-B.o (56.3 s)
 ```
 
 It takes six to eight minutes on four cores; `--keep DIR` leaves the files
@@ -219,15 +219,15 @@ What is done, and what is not, is kept here as the work goes.
 - Its fixed point holds (decision 330, `./bootstrap.sh`), and it is the
   debug profile's backend, Cranelift the release profile's and the
   oracle (decision 331).
-- The runtime in Sisu (decisions 335, 336, 350 to 353, 358, 383 and 385):
-  raw memory of a word or a byte compiled inline, and `compiler/rt`,
-  compiled once into the object every native program is linked with,
-  holding `==` of texts' bytes, the structural operations by a value's
-  parts, text building and integers' digits, text search, a float's text,
-  `Display` and `Debug` by the type table, and lists over raw memory,
-  whose Rust counterparts are gone; stage 2's library mode compiles it
-  with the Sisu backend, and the fixed point links its builds with the
-  objects so made.
+- The runtime in Sisu (decisions 335, 336, 350 to 353, 358, 383, 385,
+  422 and 423): raw memory of a word or a byte compiled inline, and
+  `compiler/rt`, compiled once into the object every native program is
+  linked with, holding `==` of texts' bytes, the structural operations by
+  a value's parts, text building and integers' digits, text search, a
+  float's text, `Display` and `Debug` by the type table, lists over raw
+  memory, the tables of dicts and sets, and iterators, whose Rust
+  counterparts are gone; stage 2's library mode compiles it with the Sisu
+  backend, and the fixed point links its builds with the objects so made.
 - What native code leaked or refused (decisions 381 and 382): the text an
   interpolation is building when a panic or a `?` in one of its values
   leaves the function is freed on that path (`building_texts` in

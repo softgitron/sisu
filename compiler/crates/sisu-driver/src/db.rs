@@ -70,8 +70,17 @@ fn embedded_files(
     name: &str,
     module: &ast::Module,
 ) -> std::collections::HashMap<String, Result<String, String>> {
-    let mut out = std::collections::HashMap::new();
     let dir = std::path::Path::new(name).parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    embedded_in(&dir, module)
+}
+
+/// The files the `embed("path")` calls of `module` name, read relative to
+/// `dir`: each text, or why it could not be read, in words of its own.
+pub(crate) fn embedded_in(
+    dir: &std::path::Path,
+    module: &ast::Module,
+) -> std::collections::HashMap<String, Result<String, String>> {
+    let mut out = std::collections::HashMap::new();
     ast::visit::exprs_in_items(&module.items, &mut |e| {
         if let ast::ExprKind::Call { callee, args, .. } = &e.kind
             && matches!(&callee.kind, ast::ExprKind::Name(n) if n == "embed")

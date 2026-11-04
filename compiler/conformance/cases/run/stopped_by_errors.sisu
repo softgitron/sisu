@@ -1,0 +1,11 @@
+# A program its errors stop is not run: `sisu run` prints the errors as a
+# person reads them, then the line that says the program was not run, and
+# exits with 1. Such a run writes no capability log, so the suite pins
+# what it prints with nothing to replay (decision 427; the manual's
+# finding from chapter 1).
+
+def average(xs: list[int]) -> int:
+    return sum(xs) / len(xs)
+
+def main():
+    print(average([3, 4, 5]))

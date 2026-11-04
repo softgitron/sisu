@@ -318,3 +318,125 @@ fn expect_records_its_failures_and_the_test_goes_on() {
     assert_eq!(run(&["run", "--from-sir", "expect.sir"]), ("six\n".to_string(), Some(0)));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A failing test's replay token covers the files the program embeds as it
+/// covers its source (08; decision 421, the manual's finding from guide
+/// G30): after an embedded file changes, the old token is refused for
+/// other code (`D0033`), where it ran the new program; a token of a
+/// program that embeds nothing is what it was, the hash of its source.
+#[test]
+fn a_replay_token_covers_the_files_the_program_embeds() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let dir = std::env::temp_dir().join(format!("sisu-token-embeds-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    std::fs::write(dir.join("rules.txt"), "one\ntwo\n").expect("the embedded file");
+    std::fs::write(
+        dir.join("rules.sisu"),
+        "const RULES: str = embed(\"rules.txt\")\n\ntest \"three rules\":\n    assert RULES.lines().count() == 3\n",
+    )
+    .expect("the program");
+    let test = |args: &[&str]| {
+        let out = std::process::Command::new(&sisu).args(args).current_dir(&dir).output().expect("sisu runs");
+        (
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+            out.status.code(),
+        )
+    };
+    let (out, err, status) = test(&["test", "--no-cache", "rules.sisu"]);
+    assert_eq!(status, Some(1), "{out}{err}");
+    let token = out
+        .lines()
+        .find_map(|l| l.strip_prefix("replay: sisu test --replay "))
+        .and_then(|l| l.split(' ').next())
+        .expect("a replay token")
+        .to_string();
+    let (again, _, status) = test(&["test", "--replay", &token, "rules.sisu"]);
+    assert_eq!(status, Some(1), "{again}");
+    assert!(again.contains("test \"three rules\" ... FAILED"), "{again}");
+    std::fs::write(dir.join("rules.txt"), "one\ntwo\nthree\n").expect("the embedded file changed");
+    let (out, err, status) = test(&["test", "--replay", &token, "rules.sisu"]);
+    assert_eq!((out.as_str(), status), ("", Some(1)), "{err}");
+    assert!(err.contains("error[D0033]: the token is for other code"), "{err}");
+    // Without the embedded file, the program's token is its source's hash.
+    std::fs::write(dir.join("plain.sisu"), "test \"fails\":\n    assert 1 == 2\n").expect("the program");
+    let (out, _, _) = test(&["test", "--no-cache", "plain.sisu"]);
+    let source = std::fs::read(dir.join("plain.sisu")).expect("the source");
+    let hash = format!("{:016x}", sisu_interp::record::content_hash(&source));
+    assert!(out.contains(&format!("--replay 1-{hash}-")), "{out}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `sisu lint` and `sisu audit --unsafe` are stage 1's commands, which the
+/// driver passes on as they are (decision 425; stage 1's R11 and R7): the
+/// lints of a program and the audit of its unsafe code, where both were
+/// refused (`D0003`, `D0009`).
+#[test]
+fn lint_and_the_audit_of_unsafe_code_are_stage_1s() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let dir = std::env::temp_dir().join(format!("sisu-lint-audit-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    std::fs::write(
+        dir.join("raw.sisu"),
+        "from std.mem import ptr\n\ndef main():\n    let x = 5\n    # safety: valid, aligned: `x` lives.\n    let p = unsafe ptr.of(ref x)\n    print(unsafe p.read())\n",
+    )
+    .expect("the program");
+    let run = |args: &[&str]| {
+        let out = std::process::Command::new(&sisu).args(args).current_dir(&dir).output().expect("sisu runs");
+        (
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+            out.status.code(),
+        )
+    };
+    let (out, err, status) = run(&["audit", "--unsafe", "raw.sisu"]);
+    assert_eq!(status, Some(0), "{out}{err}");
+    assert!(
+        out.contains("raw.sisu:6   unsafe expression in main   # safety: valid, aligned: `x` lives."),
+        "{out}"
+    );
+    assert!(out.contains("W0007 unsafe.no-safety-comment"), "{out}");
+    let (out, err, status) = run(&["lint", "raw.sisu"]);
+    assert_eq!(status, Some(0), "{out}{err}");
+    assert!(err.starts_with("warning[W0009]: this `unsafe` expression holds no unsafe operation"), "{err}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `sisu audit --caps` without a file audits the program of the working
+/// directory's package, every module of it, its lines named by the
+/// package's directory (decision 429; the manual's finding from guide
+/// G32), where it needed a file and read a module alone.
+#[test]
+fn the_capability_audit_reads_a_package() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let dir = std::env::temp_dir().join(format!("sisu-audit-caps-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(dir.join("src"));
+    std::fs::write(
+        dir.join("sisu.toml"),
+        "[package]\nname = \"shelf\"\nversion = \"0.1.0\"\nedition = \"2027\"\n",
+    )
+    .expect("the manifest");
+    std::fs::write(
+        dir.join("src/store.sisu"),
+        "pub def save(fs: Fs, text: str) -> ! IoError:\n    return fs.write_text(\"shelf.txt\", text)\n",
+    )
+    .expect("a module");
+    std::fs::write(
+        dir.join("src/main.sisu"),
+        "import shelf.store\n\ndef main(sys: System):\n    store.save(sys.fs, \"books\").expect(\"saved\")\n",
+    )
+    .expect("the root module");
+    let out = std::process::Command::new(&sisu)
+        .args(["audit", "--caps"])
+        .current_dir(&dir)
+        .output()
+        .expect("sisu runs");
+    let (stdout, stderr) = (
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    );
+    assert_eq!(out.status.code(), Some(0), "{stdout}{stderr}");
+    assert!(stdout.contains("store.save"), "{stdout}");
+    assert!(stdout.lines().all(|l| l.starts_with(". ")), "{stdout}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

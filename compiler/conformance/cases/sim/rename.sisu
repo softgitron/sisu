@@ -1,0 +1,53 @@
+# A rename on the `sim` profile's file system (17; decision 420): seen at
+# once, durable once the directory of the new name is synced. A crash
+# before that puts back the old name with what it had made durable; after
+# it, the new name holds what the file had made durable, which is nothing,
+# an empty file, when it had made nothing durable.
+
+from std.sim import Sim
+
+## The atomic save: the new text under a name of its own, synced, renamed
+## over the old one, and the directory synced.
+def save(fs: Fs, text: str, durable: bool) -> ! IoError:
+    fs.write_text(Path.new("data.txt.new"), text)?
+    fs.sync(Path.new("data.txt.new"))?
+    fs.rename(Path.new("data.txt.new"), Path.new("data.txt"))?
+    if durable:
+        fs.sync(Path.new("."))?
+    return Ok(())
+
+test "a rename whose directory is synced survives a crash":
+    let sim = Sim.new()
+    let a = sim.node("a")
+    let fs = sim.system(a).fs
+    save(fs, "one", True).expect("saved")
+    save(fs, "two", True).expect("saved")
+    sim.crash(a)
+    assert fs.read_to_string(Path.new("data.txt")) == Ok("two".to_string())
+    assert not fs.exists(Path.new("data.txt.new"))
+
+test "a crash before the directory is synced keeps the old text":
+    let sim = Sim.new()
+    let a = sim.node("a")
+    let fs = sim.system(a).fs
+    save(fs, "one", True).expect("saved")
+    save(fs, "two", False).expect("saved")
+    assert fs.read_to_string(Path.new("data.txt")) == Ok("two".to_string())
+    sim.crash(a)
+    assert fs.read_to_string(Path.new("data.txt")) == Ok("one".to_string())
+
+test "a file renamed before it was synced comes back empty":
+    let sim = Sim.new()
+    let a = sim.node("a")
+    let fs = sim.system(a).fs
+    fs.write_text(Path.new("draft.txt"), "x").expect("written")
+    fs.rename(Path.new("draft.txt"), Path.new("final.txt")).expect("renamed")
+    fs.sync(Path.new(".")).expect("synced")
+    sim.crash(a)
+    assert fs.read_to_string(Path.new("final.txt")) == Ok(String.new())
+    assert not fs.exists(Path.new("draft.txt"))
+
+test "a missing file is not found":
+    let sim = Sim.new()
+    let fs = sim.system(sim.node("a")).fs
+    assert fs.rename(Path.new("absent.txt"), Path.new("b.txt")) == Err(NotFound(path="absent.txt"))

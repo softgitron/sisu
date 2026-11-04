@@ -3,8 +3,9 @@
 //! program's `main` with the words after the program's name as its
 //! arguments, the `>` lines after it are its standard input, and every
 //! other line until the next `$` is what it must print (standard output
-//! and error as they were written); a run that exits with a status other
-//! than 0 ends with ` (exit N)` on its last line. The runs share a fake
+//! and error as they were written, but a failure's trace, whose lines move
+//! with the program's); a run that exits with a status other than 0 ends
+//! with ` (exit N)` on its last line. The runs share a fake
 //! `System`: an in-memory `Fs` holding the files of `tests/NAME/` (for
 //! `tests/NAME.transcript`), a clock frozen at the epoch, `Rand.seeded(0)`
 //! and no network; each file starts afresh.
@@ -118,9 +119,20 @@ pub fn parse(text: &str) -> Transcript {
     t
 }
 
-/// The lines a run printed, as a transcript writes them.
+/// The lines a run printed, as a transcript writes them: a failure's
+/// trace, the `at` lines after an `error:` or a `panic:` line, is left out,
+/// so that a transcript does not change when the program's lines move
+/// (decision 428), as 17's own transcript shows an error.
 pub fn shown(output: &str, status: i32) -> Vec<String> {
-    let mut lines: Vec<String> = output.lines().map(str::to_string).collect();
+    let mut lines: Vec<String> = Vec::new();
+    let mut failing = false;
+    for l in output.lines() {
+        if failing && is_frame(l) {
+            continue;
+        }
+        failing |= l.starts_with("error: ") || l.starts_with("panic: ");
+        lines.push(l.to_string());
+    }
     if status != 0 {
         match lines.last_mut() {
             Some(l) => l.push_str(&format!(" (exit {status})")),
@@ -128,6 +140,16 @@ pub fn shown(output: &str, status: i32) -> Vec<String> {
         }
     }
     lines
+}
+
+/// Whether a line is a frame of a trace: `  at FILE:LINE:COL`, a return
+/// trace's, or `  at FUNCTION (FILE:LINE:COL)`, a panic's.
+fn is_frame(line: &str) -> bool {
+    let Some(rest) = line.strip_prefix("  at ") else { return false };
+    let rest = rest.strip_suffix(')').unwrap_or(rest);
+    let mut parts = rest.rsplitn(3, ':');
+    let number = |p: Option<&str>| p.is_some_and(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
+    number(parts.next()) && number(parts.next()) && parts.next().is_some_and(|f| !f.is_empty())
 }
 
 /// The transcript's text, with each run's expected lines as given.
@@ -188,6 +210,11 @@ mod tests {
         assert_eq!(t.runs[0].expected, vec!["apples: 0.40"]);
         assert_eq!(write(&t, &[]), text);
         assert_eq!(shown("a\nb\n", 1), vec!["a", "b (exit 1)"]);
+        let failed = "error: NotFound(path=\"stock.txt\")\n  at shop.sisu:12:16\n  at shop.sisu:29:13\n";
+        assert_eq!(shown(failed, 1), vec!["error: NotFound(path=\"stock.txt\") (exit 1)"]);
+        let panicked = "panic: assertion failed: x\n  left:  1\n  at main (shop.sisu:3:5)\n";
+        assert_eq!(shown(panicked, 101), vec!["panic: assertion failed: x", "  left:  1 (exit 101)"]);
+        assert_eq!(shown("  at a.sisu:1:2\n", 0), vec!["  at a.sisu:1:2"]);
         assert_eq!(shown("", 2), vec!["(exit 2)"]);
     }
 }

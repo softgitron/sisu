@@ -1,10 +1,10 @@
 ##! `std.fs` (11): paths, files, directories and metadata, through the
 ##! file system capability. `Fs`'s operations (`read`, `write`,
 ##! `read_to_string`, `write_text`, `exists`, `metadata`, `list_dir`,
-##! `create_dir`, `remove`, `sync`) and `Path`, `Metadata` and `IoError` are
-##! the prelude's, reached from here too; this module adds the operations
-##! on a path's text, which need no capability, and the ones made of
-##! several of `Fs`'s: walking a tree, copying, appending, lines. Paths
+##! `create_dir`, `remove`, `rename`, `sync`) and `Path`, `Metadata` and
+##! `IoError` are the prelude's, reached from here too; this module adds the
+##! operations on a path's text, which need no capability, and the ones made
+##! of several of `Fs`'s: walking a tree, copying, appending, lines. Paths
 ##! are written with `/`. Watching a file waits for the host contract to
 ##! report changes.
 

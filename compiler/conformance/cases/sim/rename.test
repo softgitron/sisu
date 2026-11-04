@@ -1,0 +1,5 @@
+test "a rename whose directory is synced survives a crash" ... ok
+test "a crash before the directory is synced keeps the old text" ... ok
+test "a file renamed before it was synced comes back empty" ... ok
+test "a missing file is not found" ... ok
+4 passed, 0 failed, 0 blocked

@@ -61,10 +61,11 @@ functions (Q-23).
 structural key of a value, not the `Hash` and `Eq` impls: a key type with
 impls of its own is rejected (`E0398`) instead. Nothing observable
 depends on the hash, since iteration is in insertion order (D-074). The
-native runtime's tables hash a key by its structural hash (decision 256),
-the runtime in Sisu's, its bits spread by MurmurHash3's last step
-(decision 350), keyed by nothing, so neither implementation resists hash
-flooding yet. *Pay*: write `dict` and `set`
+native runtime's tables are the runtime in Sisu's (decision 422): a key
+is hashed by its structural hash (decision 256), its bits spread by
+MurmurHash3's last step, keyed by nothing, so neither implementation
+resists hash flooding yet, and compared by the structural walk, not by
+code made for the key's type. *Pay*: write `dict` and `set`
 in Sisu over `Hash` and `Eq`, with the per-process SipHash key of D-049
 as std's, and lift `E0398`.
 
@@ -562,8 +563,9 @@ branches of `cli.rs` go with it:
   --defer-borrow` and `--features`**: a program's tests and benchmarks run
   from stage 1's SIR (decision 357), and so do those of a program with
   transcripts, but those of a run that asks for a package's features run on
-  the Rust front end, since stage 1's `sir` takes no `--features` (nor
-  `--locked`, which its `check` takes; decision 380), and
+  the Rust front end while stage 1's `sir` takes no `--features` (nor
+  `--locked`, which its `check` takes; decision 380; a stage 1 whose `sir`
+  takes them serves them, decision 424), and
   the transcripts themselves run against a world of transcripts
   (`transcript_world`, `transcript_system`) that only the Rust front end's
   `sir_with` adds to the SIR, so they run on its build of the program,
@@ -632,12 +634,18 @@ What the driver does around stage 1, because of what its commands are:
   first for the diagnostics, a second run of stage 1 (about 0.6 s for a
   small file; decision 380), which a stage 1 whose `sir --tests` refuses
   a program with an error (its R46, decision 370) needs only for the
-  warnings. The interpreter and the runner implement `expect.fail`,
+  warnings; a stage 1 whose `sir --tests` prints them itself and takes
+  `--features`, `--no-default-features` and `--locked` is run once, which
+  the driver finds by asking it (`Stage1::sir_reports`, decision 424), and
+  runs that ask for features go to it too. The interpreter and the runner
+  implement `expect.fail`,
   `expect.fail_compare` and `expect.fail_parts`, which stage 1's R38
   lowers a failed `expect` to (decision 388); the frozen Rust front end
   still lowers `expect` as `assert`, so a test it builds stops at its
-  first failure. *Pay*: stage 1's `sir --tests` printing the warnings, so
-  that one run of stage 1 serves a test run.
+  first failure. *Pay*: stage 1's `sir --tests` printing the warnings and
+  taking the features and `--locked` (the round after R46), when the
+  switch of decision 424 runs it once; the probe then retires for stage
+  1's version, once it has one.
 
 ## Stage 2: what the native backend leaves out
 
@@ -892,16 +900,22 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   without optimisations, and there is no AArch64, Mach-O or COFF. *Pay*:
   D-087's steps.
 - **The runtime in Sisu has its first pieces** (decisions 335, 336, 350
-  to 353, 358, 383 and 385): `compiler/rt` holds `==` of two texts'
-  bytes, the structural operations by a value's parts (equality, order,
-  the hash of decision 256, `.copy()`, the drop, the count of a copy's
-  handles), text building and an integer's digits, text search, a float's
-  text, `Display` and `Debug` by the type table, and lists over raw memory
-  (growth, the moves of `insert`, `remove`, `pop`, `extend`, `reverse` and
-  `swap`, a slice's copies, the sort, `in`, `join`). Still `sisu-rt`'s: the
-  decoding of each list intrinsic's call and its index checks, whose
-  panics its messages name, the tables of dicts and sets, iterators, the
-  scheduler with its tasks, channels and mutexes, capabilities and the
+  to 353, 358, 383, 385, 422 and 423): `compiler/rt` holds `==` of two
+  texts' bytes, the structural operations by a value's parts (equality,
+  order, the hash of decision 256, `.copy()`, the drop, the count of a
+  copy's handles), text building and an integer's digits, text search, a
+  float's text, `Display` and `Debug` by the type table, lists over raw
+  memory (growth, the moves of `insert`, `remove`, `pop`, `extend`,
+  `reverse` and `swap`, a slice's copies, the sort, `in`, `join`), the
+  tables of dicts and sets (insertion order, an index of slots over the
+  structural hash, the copy, equality and drop of a table) and iterators
+  (the next item of every state but a generator's and a receiver's, the
+  iterator of an `Iterable[T]` argument, collecting what is left, the
+  drop). Still `sisu-rt`'s: the decoding of each intrinsic's call and its
+  checks, whose panics its messages name (a list's indices, a missing
+  key), the making of the iterators its intrinsics return (as
+  `iter.sisu` lays them out), a generator's items and a receiver's values,
+  the scheduler with its tasks, channels and mutexes, capabilities and the
   host, panics and their traces, allocation's count, the
   descriptor-driven dispatch of the intrinsics, the text of a time and of
   an arena, and the type table's words themselves (`desc.rs`), which the
@@ -912,12 +926,17 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   object the runtime in Rust keeps. The words `Debug` writes are packed
   into constants, since the runtime's code has no data of its own
   (decision 383). The structural operations are meant per type in the end
-  (22's table, R9's std.mem), not walked. *Pay*: the pieces in D-086's
-  order, each deleting its Rust counterpart: the tables of dicts and sets
-  next, then iterators; text constants for the runtime's code (its data in
+  (22's table, R9's std.mem), not walked: a table's lookup walks the key's
+  type to hash it and again to compare it, 1.024 times the instructions of
+  the runtime in Rust's index on stage 2's lowering of `wordcount`
+  (decision 423). *Pay*: the pieces in D-086's order, each deleting its
+  Rust counterpart: the intrinsics' decoding and their panics next (the
+  descriptor read by Sisu code, the messages rendered by it), then the
+  scheduler's queues; text constants for the runtime's code (its data in
   the library mode); smaller frames for the walk (the arguments of a call
   in registers, or the backend's own frames for the runtime's code), after
-  which a glue's drop can stay in Sisu.
+  which a glue's drop can stay in Sisu; a key hashed and compared by code
+  made for its type.
 - **An `own` closure that keeps a function value has its environment on
   the heap** (decision 382, where decision 360 refused it): a cell
   allocated where the closure is made, copied whole at each copy of the
@@ -929,6 +948,85 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   `stage2/src/read.sisu` transcribes `sisu-sir/src/read.rs`. *Pay*: the
   reader moves to stage 1's `sir` module when stage 1 needs one (`sisu
   run --from-sir` through stage 1), and stage 2 uses it.
+
+### A native run as the default of `sisu run` (D-089)
+
+`sisu run` interprets the SIR stage 1 serialised; `sisu run --native`
+builds the program with stage 2 and the Sisu backend and runs the
+executable. D-089 keeps the interpreter as an oracle until each of its
+roles has a replacement; these are the roles a plain `sisu run` still
+takes from it, what a native default needs for each, and what each costs.
+Nothing here switches the default.
+
+- **The checked memory model of unsafe code** (D-085, decision 301): a
+  run in the interpreter checks every raw access (released, out of
+  bounds, uninitialised, misaligned, of another type, two layouts, a leak
+  at exit); natively such a program's fault is undefined behaviour. Of
+  the suite's 237 runnable cases, 217 run natively (`native.list`); 19 of
+  the other 20 are `unsafe/` cases whose expectation is the model's
+  report, and the last (`run/stopped_by_errors`) is not run at all.
+  *Need*: a program whose packages declare `unsafe` (its lockfile has the
+  level, decision 275) keeps running in the interpreter by default, the
+  others natively; a native checked mode (shadow memory for `Global`'s
+  blocks, a check before each raw read and write lowered from std.mem's
+  intrinsics) is the replacement. *Estimate*: the rule, half a day; the
+  native checked mode, two to three weeks.
+- **The time a run starts in**: both run stage 1 first (about 0.55 s for
+  a small file); the interpreter then starts at once, where a native run
+  lowers, compiles and links (about 1.8 s a case when the suite builds its
+  217 cases four at a time, 384 to 477 s of builds). *Need*: the
+  executable kept under `build/` (a package's) or in the user's cache (a
+  file's), keyed by the SIR's hash and the toolchain's version, so that an
+  unchanged program runs at once; a script (`#!`, 10) stays interpreted
+  until the cache holds it. *Estimate*: two days.
+- **The seeded scheduler**: native code has it, with `--explore N`, the
+  same seeds and `--stats`, and yield checks where the interpreter has
+  them (decisions 203 and 204), so a seed names the same schedule but for
+  port-debt's one known difference (a function whose entry fails before
+  its yield point); PCT and the bounded exhaustive search are the
+  interpreter's. *Need*: PCT's priorities and change points in
+  `sisu-rt/src/sched.rs`, where the generator's draws already are; the
+  exhaustive search as a run per schedule, its prefix of choices given to
+  the executable and its next choice point printed back, the driver
+  enumerating as `next_schedule` does. *Estimate*: PCT two days, the
+  search four; the conformance runner's `.schedule` cases then run
+  natively too.
+- **Capabilities**: the host's root objects are the runtime in Rust's
+  intrinsics and the fakes std's Sisu code in both, so a plain run needs
+  nothing more; a test's `sim` profile injects its faults in the
+  interpreter (`exec.rs`, "Faults are injected by the interpreter"
+  above). *Need*: for `sisu run`, nothing; for `sisu test --native`, the
+  fault model in the simulation objects themselves, drawing from the
+  run's generator. *Estimate*: three days, with `sisu test --native`.
+- **The capability log and replay** (N-04; `--record`, `sisu replay`):
+  only the interpreter's host is wrapped (`record.rs`). *Need*: the same
+  wrapper in the runtime in Rust, around each host intrinsic (files,
+  environment, clock, random bits, standard input, processes, the
+  network's polls) and standard output and error, writing the log of
+  `record.rs`'s format with the SIR in its header (decision 303); a
+  replaying host in the runtime that answers from the log a path names
+  and reports the first divergence (`D0037`), so that `sisu replay`
+  rebuilds the executable from the log's SIR and runs it against the log;
+  the same call names and fields as the interpreter's, so that a log
+  replays in either. *Estimate*: four to five days, the network's polls
+  and the interleaving of output records the most of it.
+- **The ownership monitor and the counterexample mode** (`--monitor`,
+  `--defer-borrow`, decision 54): the monitor is the checker's check
+  (18, principle 5), and stays the interpreter's, as the conformance
+  suite's monitored rerun of every case does. *Need*: none: those options
+  run the interpreter whatever the default. *Estimate*: none.
+- **Hot replacement** (`--watch`) needs the backend's indirection table
+  (10's debug ABI); it stays the interpreter's. `--stats stack-depth` and
+  `--stats shared` need the native frames' depths from the probe and the
+  runtime's counts of `Shared` cells. *Estimate*: one day each.
+- **The suite**: once these are done, the runner's default run of a case
+  is the native one, compared with the interpreter's expectations as
+  `--native` compares them now, and `--interpreted` runs the oracle.
+
+Without the native checked mode and the hot replacement, about three
+weeks of work make a native run the default for every program without
+`unsafe`, with the interpreter kept for `unsafe` code, the monitor, the
+counterexample mode and `--watch`.
 
 ## Not yet done from Phases 0, 2, 3, 4, 6 and 8
 

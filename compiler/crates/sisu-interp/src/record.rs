@@ -292,6 +292,11 @@ impl Host for Recorder<'_> {
         self.log("fs", format!("remove_file {}", q(path)), unit(&v));
         v
     }
+    fn rename_file(&mut self, from: &str, to: &str) -> Result<(), IoErrorKind> {
+        let v = self.inner.rename_file(from, to);
+        self.log("fs", format!("rename_file {} {}", q(from), q(to)), unit(&v));
+        v
+    }
     fn list_dir(&self, path: &str) -> Result<Vec<String>, IoErrorKind> {
         let v = self.inner.list_dir(path);
         let r = match &v {
@@ -847,6 +852,9 @@ impl Host for Replayer<'_> {
     fn remove_file(&mut self, path: &str) -> Result<(), IoErrorKind> {
         unit_of(self.take(format!("remove_file {}", q(path))))
     }
+    fn rename_file(&mut self, from: &str, to: &str) -> Result<(), IoErrorKind> {
+        unit_of(self.take(format!("rename_file {} {}", q(from), q(to))))
+    }
     fn list_dir(&self, path: &str) -> Result<Vec<String>, IoErrorKind> {
         match self.take(format!("list_dir {}", q(path))) {
             Some(f) if word(&f, 0) == "ok" => Ok(f.iter().skip(2).map(|x| x.text().to_string()).collect()),
@@ -1064,6 +1072,9 @@ impl Host for Resume<'_> {
     }
     fn remove_file(&mut self, path: &str) -> Result<(), IoErrorKind> {
         resume_to!(self.remove_file(path))
+    }
+    fn rename_file(&mut self, from: &str, to: &str) -> Result<(), IoErrorKind> {
+        resume_to!(self.rename_file(from, to))
     }
     fn list_dir(&self, path: &str) -> Result<Vec<String>, IoErrorKind> {
         resume_to!(self.list_dir(path))

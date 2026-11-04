@@ -285,6 +285,15 @@ impl Interp<'_, '_> {
                 let r = self.host.remove_file(&path);
                 Ok(self.unit_result(r, &path))
             }
+            // A failure names the source when it is not there (which the
+            // host is asked after a `NotFound`), else the target.
+            "fs.rename" => {
+                let (from, to) = (arg_text(self, 1)?, arg_text(self, 2)?);
+                let r = self.host.rename_file(&from, &to);
+                let named =
+                    if r == Err(IoErrorKind::NotFound) && !self.host.exists(&from) { from } else { to };
+                Ok(self.unit_result(r, &named))
+            }
             "fs.list_dir" => {
                 let path = arg_text(self, 1)?;
                 Ok(match self.host.list_dir(&path) {

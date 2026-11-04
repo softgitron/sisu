@@ -885,8 +885,9 @@ impl<'p> Interp<'p, '_> {
     /// system and network of `System.sim` and of a `Sim`'s nodes) gives an
     /// error of the method's declared error set, never another; `TaskError`
     /// is the scheduler's, and is left out. The fakes a test makes itself
-    /// are left alone. A field of the error is the call's path if it takes
-    /// one, else a value that says the simulation made it.
+    /// are left alone, and so is `Revoked`, which only a caretaker gives. A
+    /// field of the error is the call's path if it takes one, else a value
+    /// that says the simulation made it.
     fn sim_fault(&mut self, name: &str, tys: &[sir::Type], args: &[Value], dest: &Place) -> Option<Value> {
         let rate = self.sim.filter(|r| *r > 0)?;
         let (tr, _) = name.rsplit_once('.')?;
@@ -927,10 +928,14 @@ impl<'p> Interp<'p, '_> {
         let Some(sir::TypeDecl::Enum { variants, .. }) = prog.types.iter().find(|t| t.name() == decl) else {
             return None;
         };
-        if variants.is_empty() {
+        // The simulation's own objects are never revocable: a fault is an
+        // error they could give, which `Revoked`, the caretakers' (Q-51),
+        // is not (decision 426).
+        let possible: Vec<usize> = (0..variants.len()).filter(|&v| variants[v].name != "Revoked").collect();
+        if possible.is_empty() {
             return None;
         }
-        let k = self.fault_rng.below(variants.len());
+        let k = possible[self.fault_rng.below(possible.len())];
         let path = args.iter().find_map(|a| match self.target(a).ok()? {
             Value::Path(p) => Some(p.clone()),
             _ => None,

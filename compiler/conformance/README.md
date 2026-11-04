@@ -133,7 +133,9 @@ These checks apply to every case without an expectation file:
   plain run did, and `sisu replay LOG` reproduces that run from the
   capability log alone (N-04); a run through stage 1 keeps the SIR it
   ran in the log, which the replay runs without a front end (decision
-  303).
+  303). A program its errors stop is not run and writes no log, so it
+  has nothing to replay: a case pins what its run prints with `.err` and
+  `.status` (decision 427).
 - Every failing test in `.test`, `.sim`, `.schedule` and `.select` output
   prints a replay token; `sisu test --replay TOKEN NAME.sisu` must fail
   that test again with the same report.

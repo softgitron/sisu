@@ -4,9 +4,11 @@
 //! handles, and the `Display` and `Debug` texts, decision 383), which walk
 //! a value by the type table's words (`desc.rs`), and the functions that
 //! code calls back here, for what the runtime in Rust keeps as objects of
-//! its own (iterators, the tables of dicts and sets, channels, the guards
-//! of mutexes, `Shared` cells, arenas, the cells of capability handles,
-//! return traces, tasks) and for the program's drop glue.
+//! its own (iterators, channels, the guards of mutexes, `Shared` cells,
+//! arenas, the cells of capability handles, return traces, tasks) and for
+//! the program's drop glue; and the tables of dicts and sets (decision
+//! 422), which the runtime in Sisu makes, looks keys up in, grows and
+//! shrinks.
 //!
 //! Each export of the runtime in Sisu has Sisu's convention (decision 189):
 //! the address of its result, the address of each argument, and its status,
@@ -164,6 +166,46 @@ unsafe extern "C" {
         n: *const i64,
     ) -> u8;
     fn sisu_rt_list_sort(ret: *mut u64, types: *const *const u64, l: *const *mut u8, e: *const i64) -> u8;
+    fn sisu_rt_table_new(ret: *mut *mut u8, types: *const *const u64, key: *const i64, val: *const i64)
+    -> u8;
+    fn sisu_rt_table_lookup(
+        ret: *mut i64,
+        types: *const *const u64,
+        tb: *const *mut u8,
+        k: *const *mut u8,
+        kt: *const i64,
+    ) -> u8;
+    fn sisu_rt_table_push(
+        ret: *mut i64,
+        types: *const *const u64,
+        tb: *const *mut u8,
+        k: *const *mut u8,
+    ) -> u8;
+    fn sisu_rt_table_remove(ret: *mut u64, tb: *const *mut u8, i: *const i64, out: *const *mut u8) -> u8;
+    fn sisu_rt_iter_next(
+        ret: *mut i64,
+        types: *const *const u64,
+        it: *const *mut u8,
+        out: *const *mut u8,
+        mode: *const i64,
+    ) -> u8;
+    fn sisu_rt_iter_drop(ret: *mut i64, types: *const *const u64, it: *const *mut u8, mode: *const i64)
+    -> u8;
+    fn sisu_rt_iter_iterable(
+        ret: *mut *mut u8,
+        types: *const *const u64,
+        p: *const *mut u8,
+        arg: *const i64,
+        item: *const i64,
+    ) -> u8;
+    fn sisu_rt_iter_collect(
+        ret: *mut i64,
+        types: *const *const u64,
+        it: *const *mut u8,
+        item: *const i64,
+        out: *const *mut u8,
+        mode: *const i64,
+    ) -> u8;
 }
 
 /// `mode` of a drop: it forgets (decision 223), or it defers what would run
@@ -655,8 +697,6 @@ pub(crate) unsafe fn object_drop(p: *mut u8, t: u32) -> u8 {
     unsafe {
         let w = mem::word(p, 0);
         match &ty(t).kind {
-            Kind::Iter(_) => crate::iter::drop_iter(w as *mut u8),
-            Kind::Dict(..) | Kind::Set(_) => crate::dict::drop_table(w as *mut crate::dict::Table),
             // A guard's drop checks its value's invariant, Sisu code: on
             // the system stack the guard is moved aside.
             Kind::Guard(..) if crate::sched::deferring() && !forgetting => crate::sched::defer(p, t),
@@ -677,9 +717,9 @@ pub(crate) unsafe fn object_drop(p: *mut u8, t: u32) -> u8 {
 }
 
 /// Copies the value at `src` of a type whose objects the runtime in Rust
-/// keeps to `dst`: a dict's or a set's table copied deeply, another end of
-/// the same channel, another owner or weak handle of the same `Shared`
-/// cell, another arena, another copy of a capability handle.
+/// keeps to `dst`: another end of the same channel, another owner or weak
+/// handle of the same `Shared` cell, another arena, another copy of a
+/// capability handle.
 ///
 /// # Safety
 /// `src` must hold a value of type `t`, and `dst` have room for one.
@@ -689,10 +729,6 @@ unsafe extern "C" fn sisu_rt_object_copy(dst: *mut u8, src: *mut u8, t: i64) {
     // SAFETY: as the caller guarantees.
     unsafe {
         match &entry.kind {
-            Kind::Dict(..) | Kind::Set(_) => {
-                let table = crate::dict::table(src);
-                mem::set_word(dst, 0, crate::dict::into_word(crate::dict::copy_table(table)));
-            }
             Kind::Sender(_) | Kind::Receiver(_) => {
                 mem::copy(dst, src, 8);
                 crate::tasks::copy_channel_end(
@@ -722,57 +758,6 @@ unsafe extern "C" fn sisu_rt_object_copy(dst: *mut u8, src: *mut u8, t: i64) {
 unsafe extern "C" fn sisu_rt_object_retain(p: *mut u8, _t: i64) {
     // SAFETY: a handle's word is the address of its cell.
     unsafe { crate::caps::retain_cell(mem::word(p, 0) as *mut u8) }
-}
-
-/// Whether the dicts or the sets at `a` and `b` hold equal entries: the
-/// same number, each key of one in the other, with an equal value.
-///
-/// # Safety
-/// `a` and `b` must hold dicts or sets of types `ta` and `tb`.
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sisu_rt_object_eq(a: *mut u8, _ta: i64, b: *mut u8, _tb: i64) -> bool {
-    // SAFETY: as the caller guarantees.
-    unsafe {
-        let (x, y) = (crate::dict::table(a), crate::dict::table(b));
-        if x.len() != y.len() {
-            return false;
-        }
-        let dict = !matches!(ty(x.val).kind, Kind::Unit);
-        (0..x.len()).all(|i| match y.position(x.key_at(i), x.key) {
-            Some(j) => !dict || equal(x.val_at(i), x.val, y.val_at(j), y.val),
-            None => false,
-        })
-    }
-}
-
-/// The number of entries of the dict or set at `p` (decision 383).
-///
-/// # Safety
-/// `p` must hold a dict or a set.
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sisu_rt_table_len(p: *mut u8) -> i64 {
-    // SAFETY: as the caller guarantees.
-    unsafe { crate::dict::table(p).len() as i64 }
-}
-
-/// The address of the key of entry `i` of the dict or set at `p`.
-///
-/// # Safety
-/// `p` must hold a dict or a set of more than `i` entries.
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sisu_rt_table_key(p: *mut u8, i: i64) -> *mut u8 {
-    // SAFETY: as the caller guarantees.
-    unsafe { crate::dict::table(p).key_at(i as u64) }
-}
-
-/// The address of the value of entry `i` of the dict at `p`.
-///
-/// # Safety
-/// `p` must hold a dict of more than `i` entries.
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sisu_rt_table_value(p: *mut u8, i: i64) -> *mut u8 {
-    // SAFETY: as the caller guarantees.
-    unsafe { crate::dict::table(p).val_at(i as u64) }
 }
 
 /// Whether the `Shared` cell at `cell` still holds its value.
@@ -832,4 +817,192 @@ unsafe extern "C" fn sisu_rt_show_datetime(out: *mut u8, nanos: i64) {
 unsafe extern "C" fn sisu_rt_trace_retain(p: *mut u8) {
     // SAFETY: an error value's second word is its trace.
     unsafe { crate::intrinsics::retain_trace(mem::word(p, abi::ERROR_TRACE)) }
+}
+
+// ------------------------------------------------------------------ tables
+
+/// A new table of a dict's keys of type `key` and values of type `val`, or
+/// of a set's elements (`val` -1), with no entries (the runtime in Sisu's
+/// `table.new`, decision 422): its address.
+pub(crate) fn table_new(key: i64, val: i64) -> *mut u8 {
+    let types = crate::desc::base();
+    let mut ret = std::ptr::null_mut();
+    // SAFETY: as for [`equal`].
+    if unsafe { sisu_rt_table_new(&mut ret, &types, &key, &val) } != abi::OK {
+        failed("new table");
+    }
+    ret
+}
+
+/// The position of the entry of the table at `tb` whose key is the key at
+/// `k` of type `kt`, or -1.
+///
+/// # Safety
+/// `tb` must be a table, and `k` hold a value of type `kt`.
+pub(crate) unsafe fn table_lookup(tb: *mut u8, k: *mut u8, kt: u32) -> i64 {
+    let types = crate::desc::base();
+    let kt = i64::from(kt);
+    let mut ret = 0i64;
+    // SAFETY: as for [`equal`].
+    if unsafe { sisu_rt_table_lookup(&mut ret, &types, &tb, &k, &kt) } != abi::OK {
+        failed("table's lookup");
+    }
+    ret
+}
+
+/// Appends to the table at `tb` an entry whose key moves in from `k`: its
+/// position, where the caller writes its value.
+///
+/// # Safety
+/// `tb` must be a table without the key, and `k` hold one, which moves in.
+pub(crate) unsafe fn table_push(tb: *mut u8, k: *mut u8) -> u64 {
+    let types = crate::desc::base();
+    let mut ret = 0i64;
+    // SAFETY: as for [`equal`].
+    if unsafe { sisu_rt_table_push(&mut ret, &types, &tb, &k) } != abi::OK {
+        failed("table's push");
+    }
+    ret as u64
+}
+
+/// Moves entry `i` of the table at `tb` out to `out`, key then value.
+///
+/// # Safety
+/// `tb` must be a table of more than `i` entries, and `out` have room for
+/// a key and a value.
+pub(crate) unsafe fn table_remove(tb: *mut u8, i: u64, out: *mut u8) {
+    let i = i as i64;
+    let mut ret = 0u64;
+    // SAFETY: as for [`equal`].
+    if unsafe { sisu_rt_table_remove(&mut ret, &tb, &i, &out) } != abi::OK {
+        failed("table's remove");
+    }
+}
+
+// --------------------------------------------------------------- iterators
+
+/// A drop's status as the runtime in Sisu gives it, 1 when a panic is
+/// leaving, as the runtime in Rust's.
+fn status_of(ret: i64) -> u8 {
+    if ret == 0 { abi::OK } else { abi::UNWINDING }
+}
+
+/// Writes the next item of the iterator at `it` as an option at `out`
+/// (the runtime in Sisu's `iter.next`, decision 423): its status.
+///
+/// # Safety
+/// `it` must be an iterator's object, and `out` have room for a tag word
+/// and an item.
+pub(crate) unsafe fn iter_next(it: *mut u8, out: *mut u8) -> u8 {
+    let types = crate::desc::base();
+    let mode = mode();
+    let mut ret = 0i64;
+    // SAFETY: as for [`equal`].
+    if unsafe { sisu_rt_iter_next(&mut ret, &types, &it, &out, &mode) } != abi::OK {
+        failed("iterator's next item");
+    }
+    status_of(ret)
+}
+
+/// Drops the iterator at `it`, or nothing when it is null, and what it
+/// owns: its status.
+///
+/// # Safety
+/// `it` must be an iterator's object, or null, dead afterwards.
+pub(crate) unsafe fn iter_drop(it: *mut u8) -> u8 {
+    let types = crate::desc::base();
+    let mode = mode();
+    let mut ret = 0i64;
+    // SAFETY: as for [`equal`].
+    if unsafe { sisu_rt_iter_drop(&mut ret, &types, &it, &mode) } != abi::OK {
+        failed("iterator's drop");
+    }
+    status_of(ret)
+}
+
+/// The iterator of the items of an `Iterable[T]` argument at `p`, of type
+/// `arg`, whose items are `item` when the call says.
+///
+/// # Safety
+/// `p` must hold a value of type `arg`; an owned one is moved in.
+pub(crate) unsafe fn iter_iterable(p: *mut u8, arg: u32, item: Option<u32>) -> *mut u8 {
+    let types = crate::desc::base();
+    let (arg, item) = (i64::from(arg), item.filter(|&t| known(t)).map_or(-1, i64::from));
+    let mut ret = std::ptr::null_mut();
+    // SAFETY: as for [`equal`].
+    if unsafe { sisu_rt_iter_iterable(&mut ret, &types, &p, &arg, &item) } != abi::OK {
+        failed("iterator of an argument");
+    }
+    ret
+}
+
+/// Every item the iterator at `it` has left, of type `item` when the call
+/// says, moved into a new list at `out`; the iterator dropped after. Its
+/// status: when a panic stopped it, the list is empty.
+///
+/// # Safety
+/// `it` must be an iterator's object, dead afterwards, and `out` have room
+/// for a list.
+pub(crate) unsafe fn iter_collect(it: *mut u8, item: Option<u32>, out: *mut u8) -> u8 {
+    let types = crate::desc::base();
+    let (item, mode) = (item.filter(|&t| known(t)).map_or(-1, i64::from), mode());
+    let mut ret = 0i64;
+    // SAFETY: as for [`equal`].
+    if unsafe { sisu_rt_iter_collect(&mut ret, &types, &it, &item, &out, &mode) } != abi::OK {
+        failed("iterator's items");
+    }
+    status_of(ret)
+}
+
+/// The next item of the generator whose task is `task`, `size` bytes,
+/// written at `out`, for the runtime in Sisu's iterators: 0 for an item, 1
+/// for its end, else 2 plus the status of the panic it ended with, raised
+/// (`tasks::gen_item`).
+///
+/// # Safety
+/// `out` must have room for an item of the generator's.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_gen_item(task: i64, out: *mut u8, size: i64) -> i64 {
+    match crate::tasks::gen_item(task as u32) {
+        Ok(Some(v)) => {
+            // SAFETY: as the caller guarantees.
+            unsafe { mem::copy(out, v.as_ptr().cast::<u8>(), size as usize) };
+            0
+        }
+        Ok(None) => 1,
+        Err(status) => 2 + i64::from(status),
+    }
+}
+
+/// The value the channel `chan` holds now, `size` bytes, written at `out`
+/// and taken: 0 for a value, 1 for its end, else 2 plus the status of the
+/// panic raised for a receiver that would wait inside another iterator
+/// (port-debt.md).
+///
+/// # Safety
+/// `out` must have room for a value of the channel's.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_recv_item(chan: i64, out: *mut u8, size: i64) -> i64 {
+    match crate::sched::with(|s| s.recv_now(chan as u32)) {
+        Some(Ok(v)) => {
+            // SAFETY: as the caller guarantees.
+            unsafe { mem::copy(out, v.as_ptr().cast::<u8>(), size as usize) };
+            0
+        }
+        Some(Err(())) => 1,
+        None => 2 + i64::from(rt::raise_msg(sisu_diag::msg::PANIC_NESTED_RECV, &[])),
+    }
+}
+
+/// Closes the generator whose task is `task`, dropped before its end
+/// (decision 236): the status of what it drops.
+#[unsafe(no_mangle)]
+extern "C" fn sisu_rt_gen_abandon(task: i64) -> u8 {
+    crate::tasks::abandon(task as u32)
+}
+
+/// Raises the panic of `zip` given two lengths: its status.
+#[unsafe(no_mangle)]
+extern "C" fn sisu_rt_zip_lengths() -> u8 {
+    rt::raise_msg(sisu_diag::msg::PANIC_ZIP_LENGTHS, &[])
 }

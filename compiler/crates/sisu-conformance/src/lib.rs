@@ -818,7 +818,6 @@ impl Runner<'_> {
         recorded_args.extend(args.iter().cloned());
         let recorded = invoke_with_input(self.sisu, &sandbox.dir, &recorded_args, input);
         let shown = |o: &Output| format!("{}\n--- stderr\n{}\n--- status {}\n", o.stdout, o.stderr, o.status);
-        self.report.replayed += 1;
         self.compare(
             case,
             "sisu run --record prints what the run printed",
@@ -826,14 +825,19 @@ impl Runner<'_> {
             &shown(&run),
             &shown(&recorded),
         );
-        let replayed = invoke(self.sisu, &sandbox.dir, &s(&["replay", &log]));
-        self.compare(
-            case,
-            "sisu replay prints what the recorded run printed",
-            None,
-            &shown(&recorded),
-            &shown(&replayed),
-        );
+        // A program its errors stop is not run, and its run writes no log:
+        // the case pins what the errors print, with nothing to replay.
+        if run.status == 0 || sandbox.dir.join(&log).exists() {
+            self.report.replayed += 1;
+            let replayed = invoke(self.sisu, &sandbox.dir, &s(&["replay", &log]));
+            self.compare(
+                case,
+                "sisu replay prints what the recorded run printed",
+                None,
+                &shown(&recorded),
+                &shown(&replayed),
+            );
+        }
         self.compare(case, "stderr", Some("err"), &case.expected("err").unwrap_or_default(), &run.stderr);
         let status = case.expected("status").map(|s| s.trim().to_string()).unwrap_or_else(|| "0".into());
         let actual_status = run.status.to_string();
@@ -1023,7 +1027,6 @@ impl Runner<'_> {
         );
         let log = sandbox.dir.join("run.log").display().to_string();
         let recorded = invoke_with_input(self.sisu, &cwd, &with_args(&["run", "--record", &log]), input);
-        self.report.replayed += 1;
         self.compare(
             case,
             "sisu run --record prints what the run printed",
@@ -1031,14 +1034,18 @@ impl Runner<'_> {
             &shown(&run),
             &shown(&recorded),
         );
-        let replayed = invoke(self.sisu, &cwd, &s(&["replay", &log]));
-        self.compare(
-            case,
-            "sisu replay prints what the recorded run printed",
-            None,
-            &shown(&recorded),
-            &shown(&replayed),
-        );
+        // A program its errors stop writes no log, as for a file case.
+        if run.status == 0 || std::path::Path::new(&log).exists() {
+            self.report.replayed += 1;
+            let replayed = invoke(self.sisu, &cwd, &s(&["replay", &log]));
+            self.compare(
+                case,
+                "sisu replay prints what the recorded run printed",
+                None,
+                &shown(&recorded),
+                &shown(&replayed),
+            );
+        }
         let sir = invoke(self.sisu, &cwd, &s(&["sir"]));
         if sir.status == 0 {
             let sir_file = sandbox.dir.join("program.sir").display().to_string();

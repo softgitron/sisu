@@ -1,0 +1,32 @@
+-- the host
+Ok("second")
+False
+Err(NotFound(path="notes.txt.draft"))
+Ok(())
+False
+Ok(["crate/inner/a.txt"])
+Ok("a")
+True
+-- in memory
+Ok("second")
+False
+Err(NotFound(path="notes.txt.draft"))
+Ok(())
+False
+Ok(["crate/inner/a.txt"])
+Ok("a")
+Ok(())
+Ok("A")
+Err(AlreadyExists(path="crate"))
+Err(PermissionDenied(path="crate/inner/deeper"))
+-- attenuated
+Err(PermissionDenied(path="notes.txt"))
+Err(PermissionDenied(path="../a.txt"))
+Ok(())
+Err(NotFound(path="inner/a.txt"))
+Ok("a")
+Err(Revoked)
+-- intercepted
+Ok(())
+> Fs.rename("notes.txt", "renamed.txt")
+< rename = Ok(())

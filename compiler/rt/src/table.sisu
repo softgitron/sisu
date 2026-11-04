@@ -1,0 +1,400 @@
+##! The tables of dicts and sets over raw memory (decision 422): a `dict`'s
+##! or a `set`'s value is the address of a table, a header of nine words and
+##! the blocks it names. Its entries are in the order they were inserted,
+##! each the hash of its key, the key and the value (a set's entries have no
+##! value), one after another in one block, as a list holds its elements;
+##! its index is a block of slots, a power of two of them at least twice the
+##! room for entries, each 0 or one more than the position of an entry, the
+##! entry whose key's hash leads there by linear probing. A key is hashed by
+##! its structural hash (decision 256, `value.hash`), its bits then spread
+##! by MurmurHash3's last step, and compared by structural equality, but
+##! that a `Path` is never the same key as another text, as the interpreter
+##! keeps them (`sisu-interp/src/value.rs`, `Key::Path`): equality and the
+##! index agree by one definition. A removal moves the entries after it down
+##! a place and makes the index again from the hashes the entries keep, so
+##! no slot is ever a tombstone. The runtime in Rust decodes each
+##! intrinsic's call, writes a value where an entry's goes and drops what a
+##! call drops, whose panics are its own.
+
+import rt.value
+from rt.host import memmove
+from rt.host import sisu_rt_alloc
+from rt.host import sisu_rt_free
+from rt.host import sisu_rt_grow
+from rt.types import DYN
+from rt.types import PATH
+from rt.types import REF
+from rt.types import Types
+from std.mem import ptr
+
+## The words of a table's header: its key's type, its value's type (-1 for
+## a set's), the bytes of a key and of a value, the address of its entries,
+## their number, the room for them, the address of its index, and the
+## index's slots less one (0 when it has none).
+const KEY: int = 0
+const VALUE: int = 1
+const KEY_SIZE: int = 2
+const VALUE_SIZE: int = 3
+const ENTRIES: int = 4
+const LEN: int = 5
+const CAP: int = 6
+const INDEX: int = 7
+const MASK: int = 8
+pub(package) const HEADER: int = 9
+
+## The state of an empty `Hasher` (FNV-1a's offset basis, as a word), and
+## MurmurHash3's multipliers, by which a hash's bits are spread.
+const BASIS: int = -3750763034362895579
+const SPREAD_1: int = -49064778989728563
+const SPREAD_2: int = -4265267296055464877
+## The low 31 bits: a shift right by 33 of a word's bits as an unsigned
+## number.
+const LOW_31: int = 2147483647
+
+## Word `k` of the header of the table at `tb`.
+##
+## Requires:
+## - `table`: `tb` is the address of a live table
+def word(tb: ptr mut u8, k: int) -> int:
+    # safety: in_bounds, valid, aligned: a table's header is nine words, by
+    #   `table`.
+    return unsafe tb.cast[int]().offset(k).read()
+
+## Sets word `k` of the header of the table at `tb` to `w`.
+##
+## Requires:
+## - `table`: `tb` is the address of a live table
+def set_word(tb: ptr mut u8, k: int, w: int):
+    # safety: in_bounds, valid, aligned, writable: a table's header is nine
+    #   words, by `table`.
+    unsafe tb.cast[int]().offset(k).write(w)
+
+## The number of entries of the table at `tb`.
+##
+## Requires:
+## - `table`: `tb` is the address of a live table
+pub(package) def length(tb: ptr mut u8) -> int:
+    return word(tb, LEN)
+
+## The bytes of an entry of the table at `tb`: its key's hash, its key and
+## its value.
+##
+## Requires:
+## - `table`: `tb` is the address of a live table
+pub(package) def entry_size(tb: ptr mut u8) -> int:
+    return 8 + word(tb, KEY_SIZE) + word(tb, VALUE_SIZE)
+
+## The address of entry `i` of the table at `tb`: its key's hash, then the
+## key and the value.
+##
+## Requires:
+## - `table`: `tb` is the address of a live table, whose entries' block
+##   has room for more than `i`
+def entry(tb: ptr mut u8, i: int) -> ptr mut u8:
+    # safety: in_bounds, valid, aligned, writable: the entries' block is the
+    #   header's fifth word, and has room for entry `i`, by `table`.
+    unsafe:
+        let entries = tb.cast[ptr[u8]]().offset(ENTRIES).read().cast_mut()
+        return entries.offset(i * entry_size(tb))
+
+## The address of the key of entry `i` of the table at `tb`.
+##
+## Requires:
+## - `table`: `tb` is the address of a live table of more than `i` entries
+pub(package) def key_at(tb: ptr mut u8, i: int) -> ptr mut u8:
+    # safety: in_bounds: the key follows the entry's hash word.
+    return unsafe entry(tb, i).offset(8)
+
+## The address of the value of entry `i` of the table at `tb`.
+##
+## Requires:
+## - `table`: `tb` is the address of a live table of more than `i` entries
+pub(package) def value_at(tb: ptr mut u8, i: int) -> ptr mut u8:
+    # safety: in_bounds: the value follows the entry's key.
+    return unsafe entry(tb, i).offset(8 + word(tb, KEY_SIZE))
+
+## A new table, with no entries and no blocks, of keys of type `key` and of
+## values of type `val` (-1 for a set's).
+##
+## Requires:
+## - `typed`: `ts` is the program's table, which has the types `key` and
+##   `val`, when it is not -1
+pub(package) def new(ts: Types, key: int, val: int) -> ptr mut u8:
+    # safety: returns_promptly: the runtime in Rust gives the block of the
+    #   header, whose nine words are written here.
+    let tb = unsafe sisu_rt_alloc(HEADER * 8)
+    set_word(tb, KEY, key)
+    set_word(tb, VALUE, val)
+    set_word(tb, KEY_SIZE, ts.size(key))
+    set_word(tb, VALUE_SIZE, if val < 0: 0 else: ts.size(val))
+    set_word(tb, ENTRIES, 0)
+    set_word(tb, LEN, 0)
+    set_word(tb, CAP, 0)
+    set_word(tb, INDEX, 0)
+    set_word(tb, MASK, 0)
+    return tb
+
+## The hash of the key at `p` of type `t` in an index: its structural hash
+## from an empty hasher's state, every bit then spread over the others, as
+## the index takes a hash's low bits for its slots. Equal keys hash alike.
+##
+## Requires:
+## - `typed`: `p` holds a live value of type `t`
+def hash_key(ts: Types, p: ptr mut u8, t: int) -> int:
+    var h = value.hash(ts, BASIS, p, t)
+    h = (h ^ ((h >> 33) & LOW_31)) *% SPREAD_1
+    h = (h ^ ((h >> 33) & LOW_31)) *% SPREAD_2
+    return h ^ ((h >> 33) & LOW_31)
+
+## Whether the key at `a` of type `ta` is the key at `b` of type `tb`: their
+## values are equal, and both or neither is a `Path`.
+##
+## Requires:
+## - `typed`: `a` and `b` hold live values of types `ta` and `tb`
+def same_key(ts: Types, a: ptr mut u8, ta: int, b: ptr mut u8, tb: int) -> bool:
+    let (_, ra) = value.target(ts, a, ta)
+    let (_, rb) = value.target(ts, b, tb)
+    if (ts.kind(ra) == PATH) != (ts.kind(rb) == PATH):
+        return False
+    return value.equal(ts, a, ta, b, tb)
+
+## Puts the position `i` of an entry whose key's hash is `h` in the first
+## free slot its probe reaches.
+##
+## Requires:
+## - `indexed`: `index` holds `mask + 1` slots, a power of two of them, of
+##   which one at least is free
+def place(index: ptr mut int, mask: int, h: int, i: int):
+    var slot = h & mask
+    # safety: in_bounds, valid, aligned, writable: each slot is one of the
+    #   `mask + 1` the block holds, by `indexed`.
+    unsafe:
+        while index.offset(slot).read() != 0:
+            slot = (slot + 1) & mask
+        index.offset(slot).write(i + 1)
+
+## Makes the index of the table at `tb` again, of `slots` slots, from the
+## hashes its entries keep.
+##
+## Requires:
+## - `table`: `tb` is the address of a live table, and `slots` a power of
+##   two more than its entries
+def reindex(tb: ptr mut u8, slots: int):
+    # safety: in_bounds, valid, aligned, writable: the new block holds
+    #   `slots` words, each written before it is read, and each entry's
+    #   first word is its key's hash; returns_promptly: the runtime in Rust
+    #   frees the old block and gives the new one.
+    unsafe:
+        let old = word(tb, INDEX)
+        if old != 0:
+            sisu_rt_free(tb.cast[ptr[u8]]().offset(INDEX).read().cast_mut())
+        let index = sisu_rt_alloc(slots * 8).cast[int]()
+        var s = 0
+        while s < slots:
+            index.offset(s).write(0)
+            s += 1
+        set_word(tb, INDEX, index.addr())
+        set_word(tb, MASK, slots - 1)
+        let n = word(tb, LEN)
+        var i = 0
+        while i < n:
+            place(index, slots - 1, entry(tb, i).cast[int]().read(), i)
+            i += 1
+
+## Room in the table at `tb` for `extra` more entries: its entries' block
+## grown, when it has too little, to twice its room, four entries at least
+## and as many as it then holds, and its index made again for the room.
+##
+## Requires:
+## - `table`: `tb` is the address of a live table
+def reserve(tb: ptr mut u8, extra: int):
+    let need = word(tb, LEN) + extra
+    let cap = word(tb, CAP)
+    if need <= cap:
+        return
+    var room = max(need, cap * 2)
+    if room < 4:
+        room = 4
+    # safety: in_bounds, valid, aligned, writable: the entries' block is the
+    #   header's fifth word; returns_promptly: the runtime in Rust grows the
+    #   block, keeping its bytes.
+    unsafe:
+        let entries = tb.cast[ptr[u8]]().offset(ENTRIES).read().cast_mut()
+        let grown = sisu_rt_grow(entries, room * entry_size(tb))
+        set_word(tb, ENTRIES, grown.addr())
+    set_word(tb, CAP, room)
+    var slots = 8
+    while slots < room * 2:
+        slots *= 2
+    reindex(tb, slots)
+
+## The position of the entry whose key is the key at `k` of type `kt` in
+## the table at `tb`, or -1 when it has none. The header's words are read
+## in place, and whether the key is a `Path` is asked once, since every key
+## of the table is of its key's type.
+##
+## Requires:
+## - `typed`: `tb` is the address of a live table, and `k` holds a live
+##   value of type `kt`
+pub(package) def find(ts: Types, tb: ptr mut u8, k: ptr mut u8, kt: int) -> int:
+    # safety: in_bounds, valid, aligned, writable: the header is nine words,
+    #   each slot is one of the index's, and holds 0 or one more than the
+    #   position of an entry of the block, by `typed`.
+    unsafe:
+        let w = tb.cast[int]()
+        if w.offset(LEN).read() == 0:
+            return -1
+        let key = w.read()
+        let kind = ts.kind(key)
+        let uniform = kind != REF and kind != DYN
+        if uniform:
+            let (_, target) = value.target(ts, k, kt)
+            if (ts.kind(target) == PATH) != (kind == PATH):
+                return -1
+        let h = hash_key(ts, k, kt)
+        let mask = w.offset(MASK).read()
+        let size = 8 + w.offset(KEY_SIZE).read() + w.offset(VALUE_SIZE).read()
+        let index = tb.cast[ptr[int]]().offset(INDEX).read()
+        let entries = tb.cast[ptr[u8]]().offset(ENTRIES).read().cast_mut()
+        var slot = h & mask
+        while True:
+            let s = index.offset(slot).read()
+            if s == 0:
+                return -1
+            let e = entries.offset((s - 1) * size)
+            if e.cast[int]().read() == h:
+                var same = False
+                if uniform:
+                    same = value.equal(ts, e.offset(8), key, k, kt)
+                else:
+                    same = same_key(ts, e.offset(8), key, k, kt)
+                if same:
+                    return s - 1
+            slot = (slot + 1) & mask
+
+## Appends an entry whose key moves in from `k` (of the table's key type)
+## and whose value the caller writes at `value_at` of its position, which
+## is the result; the key is indexed.
+##
+## Requires:
+## - `typed`: `tb` is the address of a live table, which holds no key equal
+##   to the key at `k`, which moves in
+pub(package) def push(ts: Types, tb: ptr mut u8, k: ptr mut u8) -> int:
+    reserve(tb, 1)
+    let n = word(tb, LEN)
+    let e = entry(tb, n)
+    # safety: in_bounds, valid, aligned, writable: entry `n` has room in the
+    #   block, after `reserve`; returns_promptly: memmove moves the key's
+    #   bytes in.
+    unsafe:
+        let key = e.offset(8)
+        _ = memmove(key, k.as_const(), word(tb, KEY_SIZE))
+        let h = hash_key(ts, key, word(tb, KEY))
+        e.cast[int]().write(h)
+        place(tb.cast[ptr[int]]().offset(INDEX).read().cast_mut(), word(tb, MASK), h, n)
+    set_word(tb, LEN, n + 1)
+    return n
+
+## Moves entry `i` of the table at `tb` out to `out`, its key and then its
+## value, the entries after it a place down, and makes the index again.
+##
+## Requires:
+## - `table`: `tb` is the address of a live table of more than `i` entries,
+##   and `out` has room for a key and a value
+pub(package) def remove(tb: ptr mut u8, i: int, out: ptr mut u8):
+    let n = word(tb, LEN)
+    let size = entry_size(tb)
+    # safety: in_bounds, valid, writable: entries `i` to `n - 1` are in the
+    #   block; returns_promptly: memmove moves the bytes.
+    unsafe:
+        let e = entry(tb, i)
+        _ = memmove(out, e.offset(8).as_const(), size - 8)
+        _ = memmove(e, e.offset(size).as_const(), (n - i - 1) * size)
+    set_word(tb, LEN, n - 1)
+    reindex(tb, word(tb, MASK) + 1)
+
+## A new table holding a copy (`.copy()`) of each entry of the table at
+## `tb`, in their order, each keeping its key's hash, since a copy of a key
+## is equal to it.
+##
+## Requires:
+## - `typed`: `tb` is the address of a live table
+pub(package) def copy(ts: Types, tb: ptr mut u8) -> ptr mut u8:
+    let (key, val) = (word(tb, KEY), word(tb, VALUE))
+    let out = new(ts, key, val)
+    let n = word(tb, LEN)
+    if n == 0:
+        return out
+    reserve(out, n)
+    var i = 0
+    # safety: in_bounds, valid, aligned, writable: entry `i` is in both
+    #   blocks, the new one with room for `n` entries.
+    unsafe:
+        while i < n:
+            let (src, dst) = (entry(tb, i), entry(out, i))
+            dst.cast[int]().write(src.cast[int]().read())
+            value.copy(ts, dst.offset(8), src.offset(8), key)
+            if val >= 0:
+                value.copy(ts, value_at(out, i), value_at(tb, i), val)
+            i += 1
+    set_word(out, LEN, n)
+    reindex(out, word(out, MASK) + 1)
+    return out
+
+## Frees the table at `tb` and its blocks, which hold nothing live.
+##
+## Requires:
+## - `table`: `tb` is the address of a live table, whose entries are gone
+pub(package) def free(tb: ptr mut u8):
+    # safety: in_bounds, valid, aligned, writable: the blocks are the
+    #   header's; returns_promptly: the runtime in Rust frees each.
+    unsafe:
+        if word(tb, ENTRIES) != 0:
+            sisu_rt_free(tb.cast[ptr[u8]]().offset(ENTRIES).read().cast_mut())
+        if word(tb, INDEX) != 0:
+            sisu_rt_free(tb.cast[ptr[u8]]().offset(INDEX).read().cast_mut())
+        sisu_rt_free(tb)
+
+## Drops the entries of the table at `tb` from `first` on, each its value
+## and then its key, in order, and frees the table: its status, as
+## `value.drop` gives it.
+##
+## Requires:
+## - `typed`: `tb` is the address of a live table, dead afterwards, whose
+##   entries before `first` are gone
+pub(package) def drop(ts: Types, tb: ptr mut u8, first: int, mode: int) -> int:
+    let (key, val) = (word(tb, KEY), word(tb, VALUE))
+    let drops_key = ts.needs_drop(key)
+    let drops_value = val >= 0 and ts.needs_drop(val)
+    var status = value.OK
+    if drops_key or drops_value:
+        let n = word(tb, LEN)
+        var i = first
+        while i < n:
+            if drops_value:
+                status = value.after_part(status, value.drop(ts, value_at(tb, i), val, mode))
+            if drops_key:
+                status = value.after_part(status, value.drop(ts, key_at(tb, i), key, mode))
+            i += 1
+    free(tb)
+    return status
+
+## Whether the tables at `a` and `b` hold equal entries: as many, each key
+## of one a key of the other, with an equal value.
+##
+## Requires:
+## - `typed`: `a` and `b` are the addresses of live tables
+pub(package) def equal(ts: Types, a: ptr mut u8, b: ptr mut u8) -> bool:
+    let n = word(a, LEN)
+    if n != word(b, LEN):
+        return False
+    let (key, val) = (word(a, KEY), word(a, VALUE))
+    var i = 0
+    while i < n:
+        let j = find(ts, b, key_at(a, i), key)
+        if j < 0:
+            return False
+        if val >= 0 and not value.equal(ts, value_at(a, i), val, value_at(b, j), word(b, VALUE)):
+            return False
+        i += 1
+    return True

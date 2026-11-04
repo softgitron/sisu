@@ -16,6 +16,8 @@
 ##! rather than through helper functions, since a call costs a probe and
 ##! the memory of its arguments.
 
+import rt.iter
+import rt.table
 from rt.host import memcmp
 from rt.host import memmove
 from rt.host import sisu_rt_abort_unwind
@@ -25,7 +27,6 @@ from rt.host import sisu_rt_free
 from rt.host import sisu_rt_glue
 from rt.host import sisu_rt_object_copy
 from rt.host import sisu_rt_object_drop
-from rt.host import sisu_rt_object_eq
 from rt.host import sisu_rt_object_retain
 from rt.host import sisu_rt_trace_release
 from rt.host import sisu_rt_trace_retain
@@ -307,7 +308,9 @@ pub(package) def equal(ts: Types, a0: ptr mut u8, ta0: int, b0: ptr mut u8, tb0:
                 y.offset(A).read(),
             )
         if k == SET or k == DICT:
-            return sisu_rt_object_eq(a, ta, b, tb)
+            return table.equal(
+                ts, a.cast[ptr[u8]]().read().cast_mut(), b.cast[ptr[u8]]().read().cast_mut()
+            )
         if k == STRUCT:
             let (fa, fb) = (x.offset(PARTS).read(), y.offset(PARTS).read())
             return (
@@ -897,10 +900,10 @@ pub(package) def copy(ts: Types, dst: ptr mut u8, src: ptr mut u8, t: int):
             )
             dw.offset(3).write(0)
             copy(ts, dst.offset(MUTEX_HEADER), src.offset(MUTEX_HEADER), h.offset(A).read())
+        elif k == DICT or k == SET:
+            dw.write(table.copy(ts, src.cast[ptr[u8]]().read().cast_mut()).addr())
         elif (
-            k == DICT
-                    or k == SET
-                    or k == SENDER
+            k == SENDER
                     or k == RECEIVER
                     or k == SHARED
                     or k == WEAK
@@ -965,7 +968,7 @@ pub(package) def retain(ts: Types, p: ptr mut u8, t: int):
 ## The status after dropping one more part: once a part's drop has
 ## panicked, the parts left are dropped as cleanup, and another panic
 ## aborts.
-def after_part(before: int, now: int) -> int:
+pub(package) def after_part(before: int, now: int) -> int:
     if before == OK:
         return now
     if now == OK:
@@ -1185,11 +1188,14 @@ pub(package) def drop(ts: Types, p: ptr mut u8, t: int, mode: int) -> int:
             if env >= 0:
                 return drop(ts, p.offset(8), env, mode)
             return OK
+        if k == DICT or k == SET:
+            if w.read() == 0:
+                return OK
+            return table.drop(ts, p.cast[ptr[u8]]().read().cast_mut(), 0, mode)
+        if k == ITER:
+            return iter.drop(ts, p.cast[ptr[u8]]().read().cast_mut(), mode)
         if (
-            k == ITER
-                    or k == DICT
-                    or k == SET
-                    or k == GUARD
+            k == GUARD
                     or k == READ_GUARD
                     or k == SENDER
                     or k == RECEIVER

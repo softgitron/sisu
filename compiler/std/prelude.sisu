@@ -3337,6 +3337,14 @@ trait FsOps:
     def metadata(self, path: Path) -> Metadata ! IoError
     ## Removes the file.
     def remove(self, path: Path) -> ! IoError
+    ## Renames the file or directory `source` to `target`, replacing a file
+    ## already there; on the host atomically, so that a reader finds the
+    ## old file or the new one, never a part of either. The new name is
+    ## durable once the directory that holds it is synced, as POSIX has it
+    ## (the `sim` profile's file system, 17). A failure names `source` when
+    ## it is not there, a refusal the path refused (`source` for a
+    ## read-only file system), and any other `target`.
+    def rename(self, source: Path, target: Path) -> ! IoError
     ## The entries of the directory, sorted, as paths that start with it.
     def list_dir(self, path: Path) -> list[Path] ! IoError
     ## Creates the directory and any missing parents.
@@ -3368,6 +3376,8 @@ impl FsOps for Fs:
     def metadata(self, path: Path) -> Metadata ! IoError
     @intrinsic("cap.forward")
     def remove(self, path: Path) -> ! IoError
+    @intrinsic("cap.forward")
+    def rename(self, source: Path, target: Path) -> ! IoError
     @intrinsic("cap.forward")
     def list_dir(self, path: Path) -> list[Path] ! IoError
     @intrinsic("cap.forward")
@@ -3421,6 +3431,8 @@ impl FsOps for HostFs:
     def metadata(self, path: Path) -> Metadata ! IoError
     @intrinsic("host.fs.remove")
     def remove(self, path: Path) -> ! IoError
+    @intrinsic("host.fs.rename")
+    def rename(self, source: Path, target: Path) -> ! IoError
     @intrinsic("host.fs.list_dir")
     def list_dir(self, path: Path) -> list[Path] ! IoError
     @intrinsic("host.fs.create_dir")
@@ -3443,6 +3455,8 @@ impl[T: FsOps + Copy] FsOps for Lent[T]:
     def metadata(self, path: Path) -> Metadata ! IoError
     @intrinsic("cap.forward")
     def remove(self, path: Path) -> ! IoError
+    @intrinsic("cap.forward")
+    def rename(self, source: Path, target: Path) -> ! IoError
     @intrinsic("cap.forward")
     def list_dir(self, path: Path) -> list[Path] ! IoError
     @intrinsic("cap.forward")
