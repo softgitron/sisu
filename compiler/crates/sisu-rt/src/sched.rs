@@ -465,6 +465,39 @@ thread_local! {
     static DRIVING: Cell<u32> = const { Cell::new(0) };
 }
 
+/// How far above the scheduler's start the root task's frames may begin.
+const ROOT_TOP_MARGIN: u64 = 16 * 1024;
+
+thread_local! {
+    /// The top of the root task's stack on this thread: the stack pointer
+    /// where the scheduler started, above every frame of Sisu code.
+    static ROOT_TOP: Cell<u64> = const { Cell::new(0) };
+}
+
+/// The top of the stack `sp` points into on this thread: a task's slot,
+/// or the root task's stack (decision 560); `None` when the scheduler is
+/// not running or is in use.
+pub(crate) fn stack_top(sp: u64) -> Option<u64> {
+    let root = ROOT_TOP.with(Cell::get);
+    let slot = SCHED.with(|s| {
+        let g = s.try_borrow().ok()?;
+        let sched = g.as_ref()?;
+        Some(
+            sched
+                .tasks
+                .iter()
+                .filter_map(|t| t.region)
+                .find(|r| (r.low as u64) <= sp && sp < r.base as u64)
+                .map(|r| r.base as u64),
+        )
+    })?;
+    match slot {
+        Some(top) => Some(top),
+        None if sp < root => Some(root),
+        None => None,
+    }
+}
+
 /// Runs `f` on the scheduler's state. `f` must neither run Sisu code nor
 /// switch tasks: the state is not shared while it runs.
 pub(crate) fn with<R>(f: impl FnOnce(&mut Sched) -> R) -> R {
@@ -500,6 +533,9 @@ pub(crate) fn start(
     pool: Pool,
     root_limits: [u64; abi::STACK_WORDS],
 ) {
+    // The caller's frame, and the root's first frame beside it, lie a little
+    // above this one.
+    ROOT_TOP.with(|t| t.set(crate::stack::current_sp() as u64 + ROOT_TOP_MARGIN));
     let mut rng = Rng::new(seed);
     let budget = 1 + rng.next() % BUDGET_MAX;
     crate::budget::store(budget as i64);

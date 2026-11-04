@@ -25,9 +25,12 @@ natively, as its tests and benchmarks do
 ([architecture.md](../docs/architecture.md), decisions 268 and 357). The
 commands stage 1 does not serve yet run on the Rust front end: `test
 --std`, `test --defer-borrow`, the tests of a program with transcripts,
-`repl`, `ws`, `run --watch`, `run --record`, `replay`, `run
---defer-borrow`, `explain-borrow` and `parse --shape`
-([port-debt.md](../docs/port-debt.md), "The Rust front end's roles").
+`run --watch`, `run --record`, `replay`, `run --defer-borrow`,
+`explain-borrow` and `parse --shape`
+([port-debt.md](../docs/port-debt.md), "The Rust front end's roles");
+`repl` and `ws` run on stage 1 once it says it serves them (`sisu1 0.8.0`,
+decision 563), and `cargo test` runs the suite's sessions and worksheet
+through stage 1 too, with `SISU_STAGE1_REPL=1`.
 `cargo test` runs the suite so, with stage 1 as the front end.
 `--front-end=stage1` or `--front-end=rust` asks the executable for that
 front end, through `SISU_FRONT_END` in the empty environment the runner
@@ -195,7 +198,7 @@ one body: `testing/parametrised_once`).
 run, one per line as the runner names them (`run/arithmetic`); `#`
 starts a comment. A case marked `checked` after its name (`unsafe/released
 checked`) stops with the checked memory model's report, which a debug
-build gives as the interpreter does (decisions 543 and 544):
+build gives as the interpreter does (decisions 543, 544, 560 and 561):
 `--native-release`, whose raw memory is unchecked, builds it and does not
 run it. With `--native LIST` the runner builds each case with
 `sisu build --native --output EXE NAME.sisu` (a package case without the
@@ -444,7 +447,9 @@ and the time spent building and running them.
   natively as in the interpreter), `par`, `io`, `fs`, `rand`, `encoding`, `hash`
   (each digest against its reference), `sort`, `search`, `process_env`,
   `json_decode`, `regex` (and its rejected patterns) and `text_math`
-  (`Builder`, `std.math`, `SortedSet`).
+  (`Builder`, `std.math`, `SortedSet`); a `DateTime`'s parts
+  (`time_parts`), the `pure` consumers of `Iter[T]` (`pure_iterators`)
+  and std.log's levels and fields (`log_levels`).
 - `concurrency/` is tasks (18, Phase 6), most cases under several
   schedules: joins and their error sets, failures and the scope's result,
   panics in tasks, a task's stack overflow (`stack_overflow`),
@@ -473,7 +478,8 @@ and the time spent building and running them.
   values whose `own` closures hold them (`closure_drops`), and what the
   capability rules reject.
 - `http/` is std.x.http over the in-process network, under several
-  schedules (a test of the driver runs it under a thousand).
+  schedules (a test of the driver runs it under a thousand), and a
+  `FakeNet` that scripts any response and a slow one (`scripted`).
 - `ownership/` is the ownership checker (18, Phase 3). Accepted programs
   run (and so run again under the monitor): moves and partial moves, drop
   placement on every path (`drop_torture` is the drop-order torture
@@ -514,18 +520,20 @@ and the time spent building and running them.
   `misaligned`, `released_twice`, `release_layout`, `release_other`,
   `shared_write`, `invalid_bits`, `overwrite`, `leaked`, `gone`,
   `no_memory`, `mistyped`, `bit_cast_sizes`, `read_plain_short`,
-  `foreign_unknown`), the two that only the monitor sees with their
+  `foreign_unknown`, and of C's memory `malloc_bounds`, `free_twice` and
+  `unterminated`), the two that only the monitor sees with their
   `.monitor` (`stale_pointer`, a write through a pointer whose borrow an
   assignment ended, and `reference_behind`, a reference used after the
   value behind it was dropped through the pointer). The behaviour cases
-  are in `native.list`, and twelve of the refusals, marked `checked`,
-  whose panics a debug build's checks of `Global`'s blocks give
-  (decisions 543 and 544); `shared_write`, `gone`, `reference_behind` and
-  `foreign_unknown` are the interpreter's alone (a pointer's provenance,
-  a place's frame, a reference read after a drop, and the C functions it
-  emulates). `../held/unsafe/` holds the cases that wait for two changes of
-  stage 1 (port-debt.md, "Shortcuts in the interpreter"): a stack on
-  std.mem's `RawBuf` and the layouts `size_of` and `align_of` give, with
+  are in `native.list`, and seventeen of the refusals, marked `checked`,
+  whose panics a debug build's checks of `Global`'s blocks, of the
+  places pointers were made to and of the memory of the C functions the
+  interpreter emulates give (decisions 543, 544, 560 and 561);
+  `reference_behind` and `foreign_unknown` are the interpreter's alone (a
+  reference read after a drop, and the C functions it emulates).
+  `../held/unsafe/` holds the cases that wait for two changes of stage 1
+  (port-debt.md, "Shortcuts in the interpreter"): a stack on std.mem's
+  `RawBuf` and the layouts `size_of` and `align_of` give, with
   their expectations; the runner checks them with `cargo run -p
   sisu-conformance -- --sisu target/debug/sisu conformance/held`, and
   they move here when stage 1 has changed.

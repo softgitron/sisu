@@ -1144,6 +1144,7 @@ pub pure def runtime_signature(name: str) -> str?:
         case "sisu_rt_table": Some("(i32, i64, i64, i64) -> (i8)")
         case "sisu_rt_dict_slot": Some("(i64, i64, i32, i32, i64) -> (i8)")
         case "sisu_rt_flush": Some("() -> ()")
+        case "sisu_rt_c_checked": Some("() -> (i8)")
         case "sisu_rt_thread_slot": Some("() -> (i64)")
         case "sisu_rt_switch": Some("(i64, i64) -> ()")
         case _: None

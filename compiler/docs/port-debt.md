@@ -76,10 +76,10 @@ a check that the text is decimal syntax (no `inf` or `nan`);
 as for literals.
 
 **Civil time.** `DateTime` is nanoseconds since the epoch in UTC, in an
-`i64` (the years 1678 to 2261); its RFC 3339 parser is Sisu, its
-`Display` and `strftime` (a fixed subset) are the host's (`format.rs`).
-*Pay*: the time module of `std` replaces them; time zones are its
-problem.
+`i64` (the years 1678 to 2261); its RFC 3339 parser and its parts in
+UTC (decision 565) are Sisu, its `Display` and `strftime` (a fixed
+subset) are the host's (`format.rs`). *Pay*: the time module of `std`
+replaces them; `Instant` and time zones are its problem.
 
 ## Shortcuts in the interpreter
 
@@ -584,16 +584,27 @@ driver's `db.rs`, `doc.rs` and `format.rs`) is the oracle, behind
 role to replace before it can be deleted, when the flag and the Rust
 branches of `cli.rs` go with it:
 
-- **The language server** (`sisu lsp`), **the REPL** (`sisu repl`),
-  **worksheets** (`sisu ws`) and **hot replacement** (`sisu run --watch`,
-  and a run under it recorded, whose log replays the saves): each needs
-  the front end in the process, its queries kept between edits (the
-  memo), or the diagnostics and the program as data. (The capability log
-  and replay of a plain run are stage 1's, the log holding the SIR that
-  ran, decision 303.) *Pay*: stage 1
-  as a library of the tools, or a server of its queries the tools ask;
-  the REPL and worksheets need only a program checked and lowered per
-  input, which stage 1's `build` gives.
+- **The language server** (`sisu lsp`, its worksheets' inline values
+  among them) and **hot replacement** (`sisu run --watch`, and a run under
+  it recorded, whose log replays the saves): each needs the front end in
+  the process, its queries kept between edits (the memo), or the
+  diagnostics and the program as data. (The capability log and replay of
+  a plain run are stage 1's, the log holding the SIR that ran, decision
+  303.) *Pay*: stage 1 as a library of the tools, or a server of its
+  queries the tools ask. **The REPL** (`sisu repl`) and **worksheets**
+  (`sisu ws`) check and lower each program through stage 1's `sir` and
+  `check` when stage 1 says it serves them (`sisu1 0.8.0` and later,
+  decision 563); with `sisu1 0.7.0` they stay the Rust front end's
+  unless `SISU_STAGE1_REPL=1` asks, which the suite's sessions and
+  worksheet pass. *Pay*: nothing but stage 1's version once its round
+  lands, and the Rust branch of `repl.rs` deleted with the front end; each
+  input costs a run of stage 1 (about 0.5 s; `:why` one for each value it
+  shows), which its base kept between commands would cut; and a file the
+  program embeds (`embed("path")`) is looked for beside the program's
+  copy, since stage 1 reads it from its file's directory, where the Rust
+  front end reads it from the working directory: stage 1 told the
+  program's directory apart from its file's (a `--dir` of `sir`) would
+  serve both.
 - **A program's transcripts, `sisu test --std`, `sisu test
   --defer-borrow` and `--features`**: a program's tests and benchmarks run
   from stage 1's SIR (decision 357), and so do those of a program with
@@ -684,8 +695,8 @@ What the driver does around stage 1, because of what its commands are:
 ## Stage 2: what the native backend leaves out
 
 The native debug backend (architecture.md, "Stage 2") compiles every
-program the conformance suite runs (`conformance/native.list`, 271
-cases, 50 of which run their tests natively too, decisions 460 and 540),
+program the conformance suite runs (`conformance/native.list`, 280
+cases, 51 of which run their tests natively too, decisions 460 and 540),
 with the
 debug profile and the release one (decision 232), and every one of those
 runs frees what it allocated (decision 226). A
@@ -721,7 +732,10 @@ What the unsafe round (decisions 301 and 302) leaves natively:
   whose raw memory is its value's word, or of a `u8` or an `i8`, are
   compiled inline in the release profile (decision 335), and in the debug
   profile only its address and casts, the runtime checking the rest
-  (decision 543); every other intrinsic of std.mem is a
+  (decision 543), which keeps the generated code's stack pointer at each
+  call of an intrinsic for the places of the program (decision 560) and
+  checks the calls of the C functions the interpreter emulates (decision
+  561); every other intrinsic of std.mem is a
   call of `sisu_rt_intrinsic` with a descriptor, and a value whose layout
   in raw memory is not its value's is converted part by part at each
   access. The debug profile's checks take a lock and a lookup in an
@@ -944,7 +958,7 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   without optimisations, and there is no AArch64, Mach-O or COFF. *Pay*:
   D-087's steps.
 - **The runtime in Sisu has its first pieces** (decisions 335, 336, 350
-  to 353, 358, 383, 385, 422, 423, 464, 469, 506 and 542): `compiler/rt` holds `==` of two
+  to 353, 358, 383, 385, 422, 423, 464, 469, 506, 542 and 562): `compiler/rt` holds `==` of two
   texts' bytes, the structural operations by a value's parts (equality,
   order, the hash of decision 256, a `Shared` followed to its value,
   `.copy()`, the drop, the count of a
@@ -952,15 +966,18 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   float's text, a time's text (RFC 3339 and `strftime`'s directives), a
   text quoted as `Debug` writes it, `Display` and `Debug` by the type table, lists over raw
   memory (growth, the moves of `insert`, `remove`, `pop`, `extend`,
-  `reverse` and `swap`, a slice's copies, the sort, `in`, `join`), the
+  `reverse` and `swap`, a slice's copies, the sort, `in`, `join`, and the
+  indices of `insert`, `remove` and `swap` checked, their panics raised
+  through the runtime in Rust, decision 562), the
   tables of dicts and sets (insertion order, an index of slots over the
   structural hash, the copy, equality and drop of a table) and iterators
   (the next item of every state but a generator's and a receiver's, the
   iterator of an `Iterable[T]` argument, collecting what is left, the
   drop), a table's header the runtime in Rust reads only through its
   exports (decision 506). Still `sisu-rt`'s: the decoding of each
-  intrinsic's call and its checks, whose panics its messages name (a
-  list's indices, a missing key), a generator's items and a receiver's
+  intrinsic's call (four words and two slices, which move with the
+  dispatch they feed) and the other checks, whose panics its messages
+  name (a slice's bounds, a missing key), a generator's items and a receiver's
   values (the iterators themselves are made by the runtime in Sisu's
   exports, decision 542),
   the scheduler with its tasks, channels and mutexes, capabilities and the
@@ -978,8 +995,10 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   type to hash it and again to compare it, 1.024 times the instructions of
   the runtime in Rust's index on stage 2's lowering of `wordcount`
   (decision 423). *Pay*: the pieces in D-086's order, each deleting its
-  Rust counterpart: the intrinsics' decoding and their panics next (the
-  descriptor read by Sisu code, the messages rendered by it), then the
+  Rust counterpart: the dispatch of a list's and a table's intrinsics by
+  Sisu code next, which reads the descriptor, their panics raised through
+  entries of the runtime in Rust, since a message is the catalog's (about
+  three days), then the
   scheduler's queues; text constants for the runtime's code (its data in
   the library mode); smaller frames for the walk (the arguments of a call
   in registers, or the backend's own frames for the runtime's code), after
@@ -1009,39 +1028,35 @@ Nothing here switches the default.
 - **The checked memory model of unsafe code** (D-085, decision 301): a
   run in the interpreter checks every raw access (released, out of
   bounds, uninitialised, misaligned, of another type, two layouts, a leak
-  at exit); natively, a build of the debug profile now checks the same
-  for the blocks of `Global` with the interpreter's panics (decisions 543
-  and 544), the release profile nothing. Of the suite's runnable cases (a
-  run, or a `sisu test` run, to compare, decision 460), 271 run natively
-  (`native.list`, 50 of them their tests too, decision 540), 12 of them
-  `unsafe/` refusals marked `checked`; the 4 left out are `unsafe/` cases
-  the native model does not see. *Need*, in the order of their worth:
-  a place's liveness, `R0135` (`gone`: a pointer made by `ptr.of` records
-  the task's stack and the frame's depth, and an access through it after
-  that frame returned is refused; the runtime reads the depth counter,
-  and the frame's base from the generated code, which passes it to
-  `ptr.of`: half a week, both lowerings); a pointer's provenance, `R0139`
-  (`shared_write`: the pointers `ptr.of` makes from a shared borrow
-  registered by address and kind until the place's frame returns, a
-  write through an address registered shared refused, wrong for two
-  pointers to one place of different kinds, so a tag of the pointer's
-  word, the high 16 bits, stripped at each access and at a foreign call,
-  is the sound form: a week, both lowerings and the C calls); the
-  reads of a reference into a block (`reference_behind`) checked as a
-  pointer's are, which the monitor's loans do in the interpreter and
-  native code has no hook for (a debug build's reference reads through
-  the runtime: two weeks, and a debug build as slow as the interpreter
-  on such code); the memory C gives out (`malloc`'s blocks, `getenv`'s
-  text) registered at the foreign call that returns it, from the
-  declaration's types (two days); a debug build that runs raw memory as
-  fast as the release profile's where the facts prove an access (the
-  checks of a loop's pointer hoisted, decision 270's facts on offsets:
-  a week). `foreign_unknown` stays the interpreter's: native code calls
-  the C function. A program whose packages declare `unsafe` (its lockfile
-  has the level, decision 275) could now run natively by default in the
-  debug profile with the checks of `Global`'s blocks; the rule
-  that keeps it in the interpreter is half a day, if the owner wants the
-  provenance and the places checked first (Q-77).
+  at exit, a place gone, a shared pointer written); natively, a build of
+  the debug profile now checks the same for the blocks of `Global` and of
+  the C functions the interpreter emulates, and for the places pointers
+  were made to by their addresses, with the interpreter's panics
+  (decisions 543, 544, 560 and 561), the release profile nothing. Of the
+  suite's runnable cases (a run, or a `sisu test` run, to compare,
+  decision 460), 280 run natively (`native.list`, 51 of them their tests
+  too), 17 of them `unsafe/` refusals marked `checked`; the 2 left out are
+  `reference_behind` and `foreign_unknown`. *Need*, in the order of their
+  worth: a pointer's provenance, the sound form of `R0135` and `R0139`
+  (the tag of the pointer's word, the high 16 bits, naming its borrow and
+  its place's frame, stripped at each access and at a foreign call, where
+  decision 560's addresses miss a returned frame that a call of the same
+  depth covers and a shared pointer to a place a mutable one also
+  reaches: a week, both lowerings and the C calls); the reads of a
+  reference into a block (`reference_behind`) checked as a pointer's are,
+  which the monitor's loans do in the interpreter and native code has no
+  hook for (a debug build's reference reads through the runtime: two
+  weeks, and a debug build as slow as the interpreter on such code); a
+  debug build that runs raw memory as fast as the release profile's where
+  the facts prove an access (the checks of a loop's pointer hoisted,
+  decision 270's facts on offsets, and a shadow of a block's slots as an
+  array beside it without the lock: a week). The memory of other C
+  functions than the emulated six is foreign and unchecked, and
+  `foreign_unknown` stays the interpreter's: native code calls the C
+  function. A program whose packages declare `unsafe` (its lockfile has
+  the level, decision 275) could now run natively by default in the debug
+  profile with these checks; the rule that keeps it in the interpreter is
+  half a day, if the owner wants the provenance checked first (Q-77).
 - **The time a run starts in**: both run stage 1 first (about 0.55 s for
   a small file); the interpreter then starts at once, where a native run
   lowers, compiles and links (about 1.8 s a case when the suite builds its
@@ -1120,8 +1135,9 @@ and replay, the two `--stats` kinds), with the interpreter kept for
 two more (PCT, the exhaustive search, `sim.always`, the faults, a
 property's budget, `expect`) make every test of the suite outside
 `unsafe/` run natively too, which decisions 500 to 503 and 540 have done.
-The native checked memory model has its first slice (decisions 543 and
-544), and the rest above is about four weeks.
+The native checked memory model has its first slices (decisions 543,
+544, 560 and 561), and the rest above is about four weeks, the
+provenance one of them.
 
 ## Not yet done from Phases 0, 2, 3, 4, 6 and 8
 

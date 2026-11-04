@@ -2059,9 +2059,16 @@ in, an address below 64 KiB has no memory behind it, and every other
 address (a place, foreign memory) goes unchecked; a released block keeps
 its address for the last 4 096 releases, a foreign call exposes every live
 block's bytes, and what live blocks hold is let go at the end of the run.
-A pointer's provenance (`R0139`), a place's liveness (`R0135`) and the
-emulated C functions are the interpreter's alone; the release profile
-checks nothing.
+The places of the program are seen by their addresses (decision 560): a
+place `ptr.of` or `ptr.of_mut` made a pointer to is remembered with the
+stack it is on and the borrows that made pointers to it, an access below
+the caller's stack pointer is gone (`R0135`), and a write into a place
+only shared borrows reached is refused (`R0139`); the memory of the C
+functions the interpreter emulates is the model's too (decision 561).
+What a pointer's provenance would add (a frame of the same depth over a
+returned one, two pointers of different borrows to one place) and the
+reads of a reference after a drop through the pointer are the
+interpreter's alone; the release profile checks nothing.
 
 What the model leaves out: overlapping accesses at different offsets are
 not seen as overlapping by the monitor (each offset is a place of its
@@ -2931,6 +2938,14 @@ what it printed (`# | ys is [3, 6]`, `D0093`) to standard output; the
 file is not changed. It runs against a test's fake `System` (files in
 memory, no network, the test clock, seeded random numbers) unless
 `--run` asks for the real one.
+
+Both check and lower their programs through stage 1 when it serves them
+(`sisu1 0.8.0` and later, or `SISU_STAGE1_REPL=1`; decision 563): the
+program is written to a directory of its own, stage 1's `sir` gives its
+SIR and its `check` the report of one that does not check, whose places
+in the input are moved there; an older stage 1 and `--front-end=rust`
+leave them to the Rust front end, as the language server's worksheets
+are.
 
 ## The language server
 
@@ -9255,3 +9270,169 @@ D-085; decisions 301 and 302)
      class (`\p{L}`); its module's comment says so. `std.num`'s `Rounding`
      says that Python's `decimal` has an eighth mode, `ROUND_05UP`, which
      the enum leaves out. This changes no rule of the language.
+
+**The native checked memory model: the places of the program** (sections
+"The checked memory model" and "Raw memory, foreign calls and the machine
+intrinsics"; 22; D-085; decisions 543 and 544)
+
+560. A program built in the debug profile refuses an access through a
+     pointer to a place whose frame has returned (`R0135`) and a write
+     through a pointer that only shared borrows made (`R0139`), with the
+     interpreter's panics, where native code saw neither. The runtime
+     keeps the stack pointer of the generated code's last call of an
+     intrinsic: `sisu_rt_intrinsic` is an entry of four instructions
+     (`#[unsafe(naked)]`, x86-64 and AArch64 Linux) that writes it to the
+     thread's word `SISU_RT_CALLER_SP` and jumps to the call, so no
+     lowering changes and every frame of the running task that is still
+     live lies at or above it. `ptr.of(x)` and `ptr.of_mut(x)` record the
+     place their pointer reaches when it is on the stack of the code that
+     asks (at or above that stack pointer, below the top of its stack: a
+     task's slot, or the root task's stack from where the scheduler
+     started), with the top that names the stack and whether a shared or
+     a mutable borrow made a pointer to it (`checked::place`, at most
+     4 096 places, the oldest forgotten first). An access through an
+     address that no block holds and a remembered place of the same stack
+     covers is refused as gone when the address is below the caller's
+     stack pointer: below every live frame. A write, `write_volatile`,
+     `copy_from` into it, `drop_in_place` and `as_mut` are refused when
+     every pointer made to the place came from a shared borrow, and so is
+     a write into the text `getenv` gave (decision 561), whose pointer the
+     interpreter makes shared. Both checks are of addresses, not of the
+     pointers' provenance, so they say less than the interpreter's: a
+     frame that returned and whose stack another call of the same depth
+     now covers is taken as live when the access comes from that call or
+     a deeper one, and a write through a pointer made shared is allowed
+     when a mutable borrow also made a pointer to an overlapping place
+     (both are panics in the interpreter); a pointer from
+     `ptr.from_address` of a place's address is refused a write where the
+     interpreter allows it. Neither check refuses an access the
+     interpreter allows otherwise. The tagged pointers of port-debt.md,
+     the pointer's high 16 bits naming its borrow, are the sound form and
+     change every pointer's word and the C calls; the generated code
+     passing its frame's base to `ptr.of`, the other way, changes both
+     lowerings. Two million reads and writes through a place take 0.31 s
+     in the debug profile, 0.011 s in the release one and 3.8 s in the
+     interpreter. `unsafe/gone` and `unsafe/shared_write` join
+     `native.list` as `checked`. This changes no rule of the language.
+
+561. The debug profile checks the memory C gives out: a call of one of the
+     C functions the interpreter emulates (`malloc`, `free`, `getenv`,
+     `strlen`, `memcpy`), with words for its arguments and result as their
+     declarations in C have them, is a call of the runtime's
+     `sisu_rt_c_NAME` of the same signature, followed by a status from
+     `sisu_rt_c_checked` that leads to the failure path
+     (`abi::checked_c`, and `checked_c` in stage 2's `abi.sisu`; both
+     lowerings, the same bytes). The runtime calls C's function and keeps
+     what the model needs: `malloc`'s block is one of the model's,
+     uninitialised, aligned to 16, which `free` alone takes back (refused
+     as the interpreter refuses it: not at a block's start or another
+     allocator's, freed already, holding a value never dropped) and whose
+     memory is kept in the quarantine of decision 543, then given to C's
+     `free`; `getenv`'s text is a block to read only; `strlen` and
+     `getenv` read their argument up to its NUL inside its block, the read
+     past the end refused; `memcpy` reads plain bytes from its source,
+     refuses ranges that overlap and leaves bytes at its destination. A
+     `Global.release` of `malloc`'s memory and a `free` of `Global`'s are
+     `R0142`. `write` and every other C function are called as before:
+     their memory is the program's or foreign. `unsafe/malloc_bounds`,
+     `unsafe/free_twice` and `unsafe/unterminated` hold it, in
+     `native.list` as `checked`. This changes no rule of the language.
+
+**The runtime in Sisu: a list's indices** (section "Stage 2", "The runtime
+in Sisu"; D-086)
+
+562. The runtime in Sisu checks the index of a list's `insert`, `remove`
+     and `swap` (`export_list_insert`, `_remove`, `_swap`, which give a
+     status now), and for one outside the list asks the runtime in Rust to
+     raise the panic its catalog names (`sisu_rt_list_bounds`), where the
+     runtime in Rust checked it before calling them; an element `insert`
+     refused is dropped by the runtime in Rust after the panic is raised.
+     The intrinsics' decoding stays the runtime in Rust's: a descriptor's
+     read is four words and two slices, and moves with the dispatch it
+     feeds, which is the next piece (D-086's order: the dispatch of a
+     list's and a table's intrinsics by Sisu code, their panics raised
+     through entries of the runtime in Rust, since a message is the
+     catalog's and the runtime's code has no text of its own; about three
+     days). The seed grows from 586 692 to 589 082 bytes of SIR and the
+     runtime's object from 617 856 to 619 984 bytes (`target/rt/rt.o`).
+     This changes no rule of the language.
+
+**The driver: the REPL and worksheets on stage 1** (section "The REPL and
+worksheets"; 10; port-debt.md, "The Rust front end's roles still to
+replace")
+
+563. `sisu repl` and `sisu ws` check and lower their programs through
+     stage 1 when it serves them, `sisu1 0.8.0` and later
+     (`Stage1::serves_repl`, asked once; `SISU_STAGE1_REPL=1` or `0`
+     decides whatever the version says), and through the Rust front end
+     for an older stage 1 or `--front-end=rust`; the language server's
+     worksheets stay the Rust front end's. A session's program, and a
+     worksheet's, is written to a file of a directory of its own
+     (`repl::Checker`), named as the worksheet or `session.sisu`; stage
+     1's `sir` gives its SIR, the file's path replaced by the program's
+     name (`<repl>`, or the worksheet's), which the interpreter runs as
+     before, against the log of the run before it; and a program that
+     does not check is reported by stage 1's `check`, whose places in the
+     input are moved there (`relocate`: each `--> <repl>:LINE:COL` and the
+     numbers of its gutter, the gutter as wide as they then are), as the
+     Rust front end's diagnostics are. A worksheet's program names the
+     run's fake `System` from a function of its own (`__ws_fake`), since
+     stage 1 keeps what the program's functions reach. An expression is
+     shown by a call on lines of its own (`__repl_show(` before it), so the
+     input keeps its lines and columns, and a panic in a session names the
+     program's line one later for each expression before it
+     (`live/session` says `<repl>:21:1`, where it said 19). The suite's
+     sessions and worksheet give their expectations through stage 1 too
+     (`repl_and_worksheets_run_on_stage_1`), with `sisu1 0.7.0` asked for
+     it: `max(scores)`, `xs[1:^1]` and a generator expression work in a
+     worksheet. A worksheet without its `#!` line names its line as
+     written in stage 1's report, where the Rust front end's is one later.
+     The rest of what stage 1's round offers the REPL is relayed to the
+     driver when it lands. This changes no rule of the language.
+
+**What the manual found: iterators, `DateTime`, `FakeNet` and `std.log`**
+(sections "Formatting", "Testing", "Capabilities"; 11, 17; the manual's
+findings from chapter 18 and guides G9, G10 and G28)
+
+564. `Iter[T]`, the iterator of the standard library's methods, whose
+     `next` is `pure`, has `pure` consumers of its own that take no
+     function: `count`, `nth`, `collect`, `sum` and `join`, as it has
+     `fold` with a `pure` function, so a `pure` function counts, collects,
+     sums or joins the items of `split_whitespace()`, `iter()` or
+     `range(n)` (E0333 before). An adapter's (`map`, `filter`, `take`,
+     `skip`, `enumerate`) stay `Iterator`'s, which are not `pure`, since
+     their `next` calls a function that may be any (03, "Function types");
+     a `pure` chain through `map` needs purity over the monomorphised
+     call graph, which the checkers do not compute (stage 1's, if wanted).
+     The frozen Rust front end resolves the trait's method before the
+     type's and still refuses them. `std/pure_iterators` holds it. This
+     changes no rule of the language.
+
+565. A `DateTime` has its parts in UTC, as methods: `year`, `month`,
+     `day`, `hour`, `minute`, `second`, `nanosecond`, `weekday` (ISO 8601's
+     numbers, 1 for Monday) and `day_of_year`, by Howard Hinnant's
+     `civil_from_days` (the prelude's, beside `days_from_civil`), on any
+     time of the years 1678 to 2261 (`std/time_parts`). `Instant` and
+     time zones, which 11 lists, are still missing: the zones need the
+     embedded data of `std.x.tzdata`. This changes no rule of the
+     language.
+
+566. `http.FakeNet` scripts any answer: `respond(method, url, response)`
+     answers a method of a URL with any `Response` (a `503` among them),
+     `respond_after(..., delay)` does so once `delay` has passed on the
+     run's test clock (`Clock.fake()`), which the client waits for at its
+     first read, and `respond_to(url, body)` is `GET` with `200 OK` as
+     before; a route's URL is written as `Url` writes it, so a default
+     port matches. `http/scripted` holds it, natively too.
+     `HttpError.Network` still holds the `NetError` as text. This changes
+     no rule of the language.
+
+567. `std.log` has levels and fields: `Level` (`Error`, `Warn`, `Info`,
+     `Debug`), `log.at(level, message)`, and a `Logger` that writes the
+     records at its level and the more severe ones and carries fields
+     after the message (`with(key, value)`, written `key=value`, the value
+     quoted as `Debug` writes it when it holds a space, a quote or `=`),
+     with `at_level`, `enabled` and `record`; the module's own functions
+     still write every level, since the facade is ambient and a setting of
+     the process would be state no program declares. `std/log_levels`
+     holds it. This changes no rule of the language.

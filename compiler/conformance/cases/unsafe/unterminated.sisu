@@ -1,0 +1,24 @@
+# The checked memory model (D-085) knows the memory C's `malloc` gives out:
+# `strlen` of bytes with no NUL before the block's end reads past it, which
+# is refused, its obligation `valid`.
+
+from std.ffi import c_char, c_size
+from std.mem import ptr
+
+# safety: the signatures as <string.h> and <stdlib.h> declare them for
+#   64-bit Linux; each returns promptly.
+extern "C":
+    def strlen(s: ptr[c_char]) -> c_size
+    def malloc(n: c_size) -> ptr mut u8?
+    def free(p: ptr mut u8?)
+
+def main():
+    # safety: writable, in_bounds, aligned: the four bytes of the block
+    #   malloc gave out; valid: wrong on purpose, they hold no NUL.
+    unsafe:
+        let block = malloc(4) else:
+            panic("out of memory")
+        for i in range(4):
+            block.offset(i).write(115u8)
+        print(strlen(block.cast[c_char]().as_const()))
+        free(Some(block))

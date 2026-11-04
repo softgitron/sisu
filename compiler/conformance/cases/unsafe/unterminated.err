@@ -1,0 +1,2 @@
+panic: `ptr.strlen` of 1 bytes at offset 4 of a block of 4 bytes reaches outside it (`valid`)
+  at main (unterminated.sisu:23:15)

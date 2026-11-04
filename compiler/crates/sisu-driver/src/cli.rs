@@ -655,7 +655,7 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
             exit::OK
         }
         "explain" => explain(rest, host),
-        "repl" => crate::repl::repl(rest, host),
+        "repl" => crate::repl::repl(rest, front, host),
         "lsp" => {
             if let Some(bad) = rest.first() {
                 host.stderr(&plain_error(
@@ -666,7 +666,7 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
             }
             crate::lsp::serve()
         }
-        "ws" => crate::repl::worksheet(rest, host),
+        "ws" => crate::repl::worksheet(rest, front, host),
         "new" => new_package(rest, host),
         // Stage 1's formatter and `sisu doc` take the command's arguments
         // as `sisu` does, with its messages and exit statuses.

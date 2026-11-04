@@ -14,6 +14,7 @@ test "std.core/str.parse_int (doc example)" ... ok
 test "std.core/Array.filled (doc example)" ... ok
 test "std.core/Shared.same (doc example)" ... ok
 test "std.core/Duration.seconds (doc example)" ... ok
+test "std.core/DateTime.year (doc example)" ... ok
 test "std.core/DateTime.parse (doc example)" ... ok
 test "std.core/Option.copied (doc example)" ... ok
 test "std.core/Fs.read_only (doc example)" ... ok
@@ -116,11 +117,13 @@ test "std.regex/Regex.find_all (doc example)" ... ok
 test "std.regex/Regex.replace_all (doc example)" ... ok
 test "std.regex/Regex.split (doc example)" ... ok
 test "std.net/Url.parse (doc example)" ... ok
+test "std.x.http/FakeNet (doc example)" ... ok
 test "std.json/quote (doc example)" ... ok
 test "std.json/encode (doc example)" ... ok
 test "std.json/Json (doc example)" ... ok
 test "std.json/parse (doc example)" ... ok
 test "std.json/decode (doc example)" ... ok
+test "std.log/Logger (doc example)" ... ok
 test "std.math/TAU (doc example)" ... ok
 test "std.math/EPSILON (doc example)" ... ok
 test "std.math/MAX (doc example)" ... ok
@@ -157,4 +160,4 @@ test "std.task/Once (doc example)" ... ok
 test "std.test/Bench (doc example)" ... ok
 test "std.time/Ticker (doc example)" ... ok
 test "std.time/Timeline (doc example)" ... ok
-159 passed, 0 failed, 0 blocked
+162 passed, 0 failed, 0 blocked

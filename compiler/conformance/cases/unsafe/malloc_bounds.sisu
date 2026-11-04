@@ -1,0 +1,23 @@
+# The checked memory model (D-085) knows the memory C's `malloc` gives out:
+# a write past its end is refused, `ptr.write`'s obligation `in_bounds`.
+
+from std.ffi import c_size
+from std.mem import ptr
+
+# safety: the signatures as <stdlib.h> declares them for 64-bit Linux; each
+#   returns promptly.
+extern "C":
+    def malloc(n: c_size) -> ptr mut u8?
+    def free(p: ptr mut u8?)
+
+def main():
+    # safety: writable, aligned: a byte of the block malloc gave out;
+    #   in_bounds: wrong on purpose, the block has 8 bytes and the second
+    #   write is one past its end.
+    unsafe:
+        let block = malloc(8) else:
+            panic("out of memory")
+        block.offset(7).write(1u8)
+        print(block.offset(7).read())
+        block.offset(8).write(2u8)
+        free(Some(block))

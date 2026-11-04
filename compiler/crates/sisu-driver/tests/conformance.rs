@@ -440,3 +440,68 @@ fn the_capability_audit_reads_a_package() {
     assert!(stdout.lines().all(|l| l.starts_with(". ")), "{stdout}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `sisu repl` and `sisu ws` check and lower their programs through stage 1
+/// when it serves them (decision 563): the suite's sessions and worksheet,
+/// run with stage 1 asked for whatever its version says, print what their
+/// expectations hold, which the Rust front end's runs meet too.
+#[test]
+fn repl_and_worksheets_run_on_stage_1() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let cases = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../conformance/cases");
+    let dir = std::env::temp_dir().join(format!("sisu-repl-stage1-{}", std::process::id()));
+    let copy = |from: &std::path::Path, to: &std::path::Path| {
+        let _ = std::process::Command::new("cp").arg("-r").arg(from).arg(to).status();
+    };
+    for (case, cmd, file) in [
+        ("live/session", "repl", Some("session.sisu")),
+        ("live/worksheet", "ws", Some("worksheet.sisu")),
+        ("packages/repl", "repl", None),
+    ] {
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a directory");
+        let base = cases.join(case);
+        let stem = base.file_name().and_then(|f| f.to_str()).unwrap_or_default().to_string();
+        let parent = base.parent().expect("a group").to_path_buf();
+        let run_dir = match file {
+            Some(f) => {
+                std::fs::copy(parent.join(f), dir.join(f)).expect("the case");
+                let files = parent.join(format!("{stem}.files"));
+                if files.is_dir() {
+                    for e in std::fs::read_dir(&files).expect("its files").flatten() {
+                        copy(&e.path(), &dir);
+                    }
+                }
+                dir.clone()
+            }
+            None => {
+                copy(&parent.join(format!("{stem}.pkg")), &dir.join("pkg"));
+                dir.join("pkg")
+            }
+        };
+        let stdin = std::fs::read(parent.join(format!("{stem}.stdin"))).unwrap_or_default();
+        let mut child = std::process::Command::new(&sisu)
+            .arg(cmd)
+            .args(file)
+            .current_dir(&run_dir)
+            .env("SISU_STAGE1_REPL", "1")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("sisu runs");
+        use std::io::Write;
+        child.stdin.take().expect("its input").write_all(&stdin).expect("the input written");
+        let out = child.wait_with_output().expect("sisu ends");
+        let shown = format!(
+            "{}--- stderr\n{}--- status {}\n",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr),
+            out.status.code().unwrap_or(-1)
+        );
+        let expected =
+            std::fs::read_to_string(parent.join(format!("{stem}.{cmd}"))).expect("its expectation");
+        assert_eq!(shown, expected, "{case}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

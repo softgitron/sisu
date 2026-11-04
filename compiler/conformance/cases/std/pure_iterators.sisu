@@ -1,0 +1,28 @@
+# The consumers of a standard library's iterator are `pure` (`Iter[T]`,
+# whose `next` is): a `pure` function counts, collects, sums or joins its
+# items (the manual's finding from chapter 18). An adapter's (`map`,
+# `filter`) stay `Iterator`'s, which are not, since its `next` calls a
+# function that may be any.
+
+pure def word_count(text: str) -> int:
+    return text.split_whitespace().count()
+
+pure def fields(text: str) -> list[str]:
+    return text.split(",").collect()
+
+pure def total(n: int) -> int:
+    return range(n + 1).sum()
+
+pure def shown(xs: list[int]) -> String:
+    return xs.iter().join(" + ")
+
+pure def second(text: str) -> str?:
+    return text.split_whitespace().nth(1)
+
+def main():
+    print(word_count("the quick brown fox"))
+    print(fields("a,b,,c"))
+    print(total(10))
+    print(shown([1, 2, 3]))
+    print(second("only"))
+    print(second("one two"))

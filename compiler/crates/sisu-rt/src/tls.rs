@@ -2,7 +2,9 @@
 //! (decision 332): the count of nested calls ([`abi::sym::DEPTH`]), the
 //! yield points left ([`abi::sym::BUDGET`]), the running task's stack
 //! limits ([`abi::sym::STACK`]) and where it last called an intrinsic that
-//! may wait ([`abi::sym::SITE`]). They are the executable's thread-local
+//! may wait ([`abi::sym::SITE`]), and the runtime's own word, the stack
+//! pointer of the generated code's last call of an intrinsic
+//! ([`caller_sp`]). They are the executable's thread-local
 //! data (`.tbss`), so that Sisu code running on a worker of `std.par`
 //! (decision 333) counts its own calls, its own budget and its own stack.
 //!
@@ -39,6 +41,11 @@ std::arch::global_asm!(
     ".size SISU_RT_SITE, {site}",
     "SISU_RT_SITE:",
     ".zero {site}",
+    ".globl SISU_RT_CALLER_SP",
+    ".type SISU_RT_CALLER_SP, %object",
+    ".size SISU_RT_CALLER_SP, 8",
+    "SISU_RT_CALLER_SP:",
+    ".zero 8",
     ".popsection",
     stack = const abi::STACK_WORDS * 8,
     site = const abi::SITE_WORDS * 8,
@@ -103,6 +110,8 @@ mod plain {
     #[unsafe(no_mangle)]
     pub static SISU_RT_SITE: [AtomicU64; super::abi::SITE_WORDS] =
         [const { AtomicU64::new(0) }; super::abi::SITE_WORDS];
+    #[unsafe(no_mangle)]
+    pub static SISU_RT_CALLER_SP: AtomicU64 = AtomicU64::new(0);
 }
 
 #[cfg(not(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64"))))]
@@ -118,6 +127,9 @@ macro_rules! tls_address {
     };
     ("SISU_RT_SITE") => {
         &plain::SISU_RT_SITE as *const _ as usize
+    };
+    ("SISU_RT_CALLER_SP") => {
+        &plain::SISU_RT_CALLER_SP as *const _ as usize
     };
 }
 
@@ -152,4 +164,14 @@ pub(crate) fn site() -> &'static [AtomicU64; abi::SITE_WORDS] {
     let a = tls_address!("SISU_RT_SITE");
     // SAFETY: as for [`depth`]: `SITE_WORDS` words of this thread.
     unsafe { &*(a as *const [AtomicU64; abi::SITE_WORDS]) }
+}
+
+/// The stack pointer of the generated code where it last called
+/// `sisu_rt_intrinsic` on this thread, which that entry writes before
+/// anything else runs (decision 560); 0 where the target has no such entry.
+/// Every frame of the running task that is still live lies at or above it.
+pub(crate) fn caller_sp() -> u64 {
+    let a = tls_address!("SISU_RT_CALLER_SP");
+    // SAFETY: as for [`depth`].
+    unsafe { &*(a as *const AtomicU64) }.load(std::sync::atomic::Ordering::Relaxed)
 }

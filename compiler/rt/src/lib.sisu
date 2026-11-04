@@ -23,6 +23,7 @@ import rt.time
 import rt.value
 from rt.host import memcmp
 from rt.host import memmove
+from rt.host import sisu_rt_list_bounds
 from rt.types import Types
 from std.mem import ptr
 
@@ -266,23 +267,34 @@ def export_list_grow(l: ptr mut u8, extra: int, size: int):
 def export_list_pop(types: ptr[int], l: ptr mut u8, e: int, ret: ptr mut u8):
     list.pop(Types(words=types), l, e, ret)
 
-## `list.insert` once its index is checked: the element at `value` moved in
-## at index `k` (`list.insert`).
+## `list.insert`: the element at `elem` moved in at index `k`, or, for an
+## index past the end, the panic raised and the element left for the
+## caller to drop: the status (`list.insert`; decision 562).
 ##
 ## Requires:
-## - `list`: `l` holds a live list of elements of `size` bytes, `value` a
-##   live element, which moves in, and `0 <= k <= len`
-def export_list_insert(l: ptr mut u8, k: int, value: ptr mut u8, size: int):
-    list.insert(l, k, value, size)
+## - `list`: `l` holds a live list of elements of `size` bytes, `elem` a
+##   live element, which moves in
+def export_list_insert(l: ptr mut u8, k: int, elem: ptr mut u8, size: int) -> int:
+    let n = list.length(l)
+    if k < 0 or k > n:
+        # safety: the runtime in Rust raises the panic and returns.
+        return unsafe sisu_rt_list_bounds(True, k, n).to_int()
+    list.insert(l, k, elem, size)
+    return value.OK
 
-## `list.remove` once its index is checked: element `k` moved out to `ret`
-## (`list.remove`).
+## `list.remove`: element `k` moved out to `ret`, or the panic of an index
+## out of bounds raised: the status (`list.remove`; decision 562).
 ##
 ## Requires:
-## - `list`: `l` holds a live list of elements of `size` bytes, `ret` has
-##   room for one, and `0 <= k < len`
-def export_list_remove(l: ptr mut u8, k: int, ret: ptr mut u8, size: int):
+## - `list`: `l` holds a live list of elements of `size` bytes, and `ret`
+##   has room for one
+def export_list_remove(l: ptr mut u8, k: int, ret: ptr mut u8, size: int) -> int:
+    let n = list.length(l)
+    if k < 0 or k >= n:
+        # safety: the runtime in Rust raises the panic and returns.
+        return unsafe sisu_rt_list_bounds(False, k, n).to_int()
     list.remove(l, k, ret, size)
+    return value.OK
 
 ## `list.extend`: the elements of the list at `other` moved to the end of
 ## the one at `l` (`list.extend`).
@@ -300,13 +312,21 @@ def export_list_extend(l: ptr mut u8, other: ptr mut u8, size: int):
 def export_list_reverse(l: ptr mut u8, size: int):
     list.reverse(l, size)
 
-## `list.swap` once its indices are checked (`list.swap`).
+## `list.swap`: elements `i` and `j` swapped, or the panic of the first
+## of them out of bounds raised: the status (`list.swap`; decision 562).
 ##
 ## Requires:
-## - `list`: `l` holds a live list of elements of `size` bytes, and `i` and
-##   `j` are indices of it
-def export_list_swap(l: ptr mut u8, i: int, j: int, size: int):
+## - `list`: `l` holds a live list of elements of `size` bytes
+def export_list_swap(l: ptr mut u8, i: int, j: int, size: int) -> int:
+    let n = list.length(l)
+    if i < 0 or i >= n:
+        # safety: the runtime in Rust raises the panic and returns.
+        return unsafe sisu_rt_list_bounds(False, i, n).to_int()
+    if j < 0 or j >= n:
+        # safety: as above.
+        return unsafe sisu_rt_list_bounds(False, j, n).to_int()
     list.swap(l, i, j, size)
+    return value.OK
 
 ## A slice of a list: a new list at `dst` of copies of the elements from
 ## `lo` to `hi` of the one at `l`, of type `e` (`list.copies`).

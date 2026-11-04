@@ -1214,6 +1214,7 @@ impl<'p> Codegen<'p> {
             sym::TABLE => (&[i32_, i64_, i64_, i64_], &[i8_]),
             sym::DICT_SLOT => (&[i64_, i64_, i32_, i32_, i64_], &[i8_]),
             sym::FLUSH => (&[], &[]),
+            sym::C_CHECKED => (&[], &[i8_]),
             sym::THREAD_SLOT => (&[], &[i64_]),
             sym::SWITCH => (&[i64_, i64_], &[]),
             _ => return Err(Error::internal(format!("an unknown runtime entry point `{name}`"))),

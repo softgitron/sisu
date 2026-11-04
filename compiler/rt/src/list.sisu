@@ -6,8 +6,10 @@
 ##! capacity (at least four elements) when it has no room. Here are a list's
 ##! growth, the moves of `insert`, `remove` and `pop`, `extend`, `reverse`
 ##! and `swap`, the copies a slice makes, the order a sort puts it in,
-##! `contains` and `join`; the runtime in Rust decodes the call, and checks
-##! the indices, whose panics its messages name.
+##! `contains` and `join`; the runtime in Rust decodes the call. The
+##! exports check the indices of `insert`, `remove` and `swap`, and have the
+##! runtime in Rust raise the panics, whose messages its catalog names
+##! (decision 562).
 
 import rt.show
 import rt.text

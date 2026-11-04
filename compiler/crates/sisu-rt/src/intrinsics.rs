@@ -803,30 +803,25 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 let (l, _) = c.list(0);
                 c.set_bool(l.len == 0);
             }
+            // The runtime in Sisu checks the index and has the panic raised
+            // (decision 562); an element refused is dropped here after it.
             I::ListInsert => {
-                let k = c.int(1);
                 let (l, e) = c.list(0);
-                if k < 0 || k as u64 > l.len {
-                    let len = l.len.to_string();
-                    let st = value::drop_value(c.arg(2), e);
-                    let _ = st;
-                    return rt::raise_msg(
-                        msg::PANIC_INSERT_OUT_OF_BOUNDS,
-                        &[("index", k.to_string()), ("len", len)],
-                    );
+                let st =
+                    crate::bridge::list_insert((l as *mut List).cast::<u8>(), c.int(1), c.arg(2), ty(e).size);
+                if st != abi::OK {
+                    let _ = value::drop_value(c.arg(2), e);
                 }
-                crate::bridge::list_insert((l as *mut List).cast::<u8>(), k as u64, c.arg(2), ty(e).size);
+                return st;
             }
             I::ListRemove => {
-                let k = c.int(1);
                 let (l, e) = c.list(0);
-                if k < 0 || k as u64 >= l.len {
-                    return rt::raise_msg(
-                        msg::PANIC_INDEX_OUT_OF_BOUNDS,
-                        &[("len", l.len.to_string()), ("index", k.to_string())],
-                    );
-                }
-                crate::bridge::list_remove((l as *mut List).cast::<u8>(), k as u64, c.ret, ty(e).size);
+                return crate::bridge::list_remove(
+                    (l as *mut List).cast::<u8>(),
+                    c.int(1),
+                    c.ret,
+                    ty(e).size,
+                );
             }
             I::ListExtend => {
                 let (l, e) = c.list(0);
@@ -838,20 +833,12 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
             }
             I::ListSwap => {
                 let (l, e) = c.list(0);
-                let (i, j) = (c.int(1), c.int(2));
-                let at = |k: i64| u64::try_from(k).ok().filter(|k| *k < l.len);
-                match (at(i), at(j)) {
-                    (Some(a), Some(b)) => {
-                        crate::bridge::list_swap((l as *mut List).cast::<u8>(), a, b, ty(e).size);
-                    }
-                    _ => {
-                        let bad = if at(i).is_none() { i } else { j };
-                        return rt::raise_msg(
-                            msg::PANIC_INDEX_OUT_OF_BOUNDS,
-                            &[("index", bad.to_string()), ("len", l.len.to_string())],
-                        );
-                    }
-                }
+                return crate::bridge::list_swap(
+                    (l as *mut List).cast::<u8>(),
+                    c.int(1),
+                    c.int(2),
+                    ty(e).size,
+                );
             }
             I::ListClear => {
                 let (p, t) = c.place(0);

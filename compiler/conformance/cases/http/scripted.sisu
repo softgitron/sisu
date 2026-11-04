@@ -1,0 +1,32 @@
+# A `FakeNet` scripts any answer (17, "Mocks"; the manual's finding from
+# guide G10): a method and a URL answered by any response, a `503` among
+# them, and an answer that comes after a while on the run's test clock,
+# which the client waits for at its first read.
+
+import std.x.http
+from std.net import Url
+
+test "a 503, a slow answer and a 404":
+    let busy = http.Response.text(503, "Service Unavailable", "busy")
+    let late = http.Response.ok(b"late")
+    let net = http.FakeNet()
+        .respond("POST", "http://api.test/jobs", busy)
+        .respond_after("GET", "http://api.test/slow", late, Duration.seconds(30))
+        .respond_to("https://api.example.com/v1/data", b"from net")
+    let jobs = Url.parse("http://api.test/jobs").expect("a URL")
+    let r = http.request(net, "POST", jobs).expect("an answer")
+    assert r.status == 503
+    assert r.reason == "Service Unavailable"
+    assert r.body == b"busy"
+    assert http.get(net, jobs).is_err()
+    let clock = Clock.fake()
+    let before = clock.now()
+    let slow = Url.parse("http://api.test/slow").expect("a URL")
+    assert http.get(net, slow).expect("an answer") == b"late"
+    assert clock.now() - before == Duration.seconds(30)
+    let data = Url.parse("https://api.example.com/v1/data").expect("a URL")
+    assert http.get(net, data).expect("an answer") == b"from net"
+    assert net.request_count() == 4
+
+def main():
+    pass

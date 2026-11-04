@@ -23,6 +23,15 @@
 //! session depends on the package, as a script's inline metadata would,
 //! so it imports the package's modules by their paths.
 //!
+//! The session's program, and a worksheet's, is checked and lowered by
+//! stage 1 when it serves them (`sisu1 0.8.0` and later, decision 563):
+//! the program is written to a file of a directory of its own, stage 1's
+//! `sir` gives its SIR, which the interpreter runs as it runs the Rust
+//! front end's, and a program that does not check is reported by stage
+//! 1's `check`, its places moved into the input as the Rust front end's
+//! are. An older stage 1, or `--front-end=rust`, leaves them to the Rust
+//! front end.
+//!
 //! A worksheet (`sisu ws FILE`, Q-48) is a script run top to bottom, with
 //! each top-level statement's value and printed output written after it
 //! as comments, never saved. It runs against the fake `System` of a test
@@ -32,6 +41,7 @@
 
 use crate::cli::{Captured, Input, NotRun, WithArgs, check_to_run, input_with_root, plain_error, text};
 use crate::db::Db;
+use crate::front::FrontEnd;
 use sisu_diag::{Diagnostic, FileId, MsgId, SourceMap, Span, TextRange, msg};
 use sisu_interp::record::{Header, Log, Recorder, Resume};
 use sisu_interp::{Host, Options, exit};
@@ -52,8 +62,204 @@ const AT: char = '\u{1}';
 const VALUE: char = '\u{2}';
 const WS_HELPERS: &str = "\ndef __ws_at(line: int):\n    print(\"\\u{1}{line}\")\n\ndef __ws_show[T](line: int, value: T):\n    if comptime reflect.name_of(T) != \"()\":\n        print(\"\\u{2}{line} {value:?}\")\n";
 
+/// A function of the worksheet's program that reaches the fake `System`
+/// it runs against, which stage 1 otherwise leaves out of the SIR.
+const WS_FAKE: &str = "\ndef __ws_fake() -> System:\n    return System.fake(0)\n";
+
 fn line(id: MsgId, params: &[(&str, String)]) -> String {
     format!("{}\n", text(id, params))
+}
+
+/// What checks and lowers a session's program, or a worksheet's: stage 1
+/// (decision 563), with the directory its programs are written to, or
+/// the Rust front end.
+pub(crate) enum Checker {
+    Rust,
+    Stage1 { stage1: crate::front::Stage1, dir: std::path::PathBuf },
+}
+
+impl Checker {
+    /// Stage 1 when it is the front end and serves the REPL; else the Rust
+    /// front end.
+    pub(crate) fn choose(front: FrontEnd, host: &mut dyn Host) -> Checker {
+        if front != FrontEnd::Stage1 {
+            return Checker::Rust;
+        }
+        let Ok(stage1) = crate::front::Stage1::ready(host) else { return Checker::Rust };
+        if !stage1.serves_repl() {
+            return Checker::Rust;
+        }
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("sisu-repl-{}-{n}", std::process::id()));
+        if std::fs::create_dir_all(&dir).is_err() {
+            return Checker::Rust;
+        }
+        Checker::Stage1 { stage1, dir }
+    }
+
+    /// The program `text`, named `name` in what is shown of it, checked and
+    /// lowered with the functions `keep` named kept, or why it does not
+    /// run: the Rust front end's diagnostics, or stage 1's report, the
+    /// program named `name` in it.
+    fn compile(
+        &self,
+        name: &str,
+        text: &str,
+        cwd: &std::path::Path,
+        keep: &[&str],
+        host: &mut dyn Host,
+    ) -> Result<sisu_sir::Program, NotRun> {
+        let (stage1, dir) = match self {
+            Checker::Rust => return rust_compile(name, text, cwd, keep, host),
+            Checker::Stage1 { stage1, dir } => (stage1, dir),
+        };
+        use crate::front::Backend;
+        let base = std::path::Path::new(name)
+            .file_name()
+            .and_then(|f| f.to_str())
+            .filter(|f| f.ends_with(".sisu"))
+            .unwrap_or("session.sisu");
+        let path = dir.join(base);
+        if let Err(e) = std::fs::write(&path, text) {
+            return Err(NotRun::Message(format!("{}\n", text_of_io(&path, &e))));
+        }
+        let shown = path.display().to_string();
+        let words = vec!["sir".to_string(), shown.clone()];
+        let ran = stage1.run(&words, Backend::Unused, host).map_err(|_| NotRun::Message(String::new()))?;
+        if ran.status == exit::OK && !ran.stdout.is_empty() {
+            // The program's name, where its sources and the places its
+            // errors record name it.
+            let sir = ran.stdout.replace(&shown, name);
+            return sisu_sir::read(&sir).map_err(|e| {
+                NotRun::Message(line(
+                    msg::SIR_PARSE,
+                    &[("detail", format!("line {}: {}", e.line, e.message))],
+                ))
+            });
+        }
+        // Stage 1's `sir` prints nothing for a program that does not check;
+        // its `check` says why.
+        let mut report = ran.stderr;
+        if report.trim().is_empty() {
+            let words = vec!["check".to_string(), shown.clone()];
+            if let Ok(r) = stage1.run(&words, Backend::Unused, host) {
+                report = r.stderr;
+            }
+        }
+        Err(NotRun::Message(report.replace(&shown, name)))
+    }
+}
+
+impl Drop for Checker {
+    fn drop(&mut self) {
+        if let Checker::Stage1 { dir, .. } = self {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+}
+
+fn text_of_io(path: &std::path::Path, e: &std::io::Error) -> String {
+    text(msg::CLI_CANNOT_READ, &[("path", path.display().to_string()), ("reason", e.to_string())])
+}
+
+/// The Rust front end's check and lowering of a program named `name`.
+fn rust_compile(
+    name: &str,
+    text: &str,
+    cwd: &std::path::Path,
+    keep: &[&str],
+    host: &mut dyn Host,
+) -> Result<sisu_sir::Program, NotRun> {
+    let layout = crate::package::load_file(name, text, cwd);
+    if layout.has_errors() {
+        let mut map = SourceMap::new();
+        for (n, t) in &layout.files {
+            map.add(n.clone(), t.clone());
+        }
+        return Err(NotRun::Diagnostics(map, layout.diagnostics.clone()));
+    }
+    let input = if layout.packages.len() == 1 {
+        Input::single(name, text.to_string())
+    } else {
+        input_with_root(&layout, host, false, Some(text)).map_err(|_| NotRun::Message(String::new()))?
+    };
+    let mut db = Db::new();
+    input.load(&mut db);
+    check_to_run(&mut db, name, keep)
+}
+
+/// A report stage 1 rendered for the program `name`, with the places in
+/// its lines `first` to `last` moved to the text it shows them in, named
+/// `shown`, whose line `shown_first` is the program's line `first`: each
+/// `--> name:LINE:COL` and the line numbers of the gutter beside it, the
+/// gutter as wide as its numbers then are. A diagnostic of another part
+/// of the program is left as it is.
+fn relocate(report: &str, name: &str, first: usize, last: usize, shown: &str, shown_first: usize) -> String {
+    let moved = |l: usize| l - first + shown_first;
+    let mut out = String::new();
+    let lines: Vec<&str> = report.split_inclusive('\n').collect();
+    let mut i = 0;
+    while i < lines.len() {
+        // A diagnostic: its header and the lines after it, which start
+        // with a space or a gutter's number.
+        let mut j = i + 1;
+        while j < lines.len() && !lines[j].starts_with(|c: char| c.is_alphabetic()) {
+            j += 1;
+        }
+        let block = &lines[i..j];
+        i = j;
+        let at = |l: &str| -> Option<(usize, usize)> {
+            let rest = l.trim_start().strip_prefix("--> ")?.trim_end();
+            let (file, pos) = rest.rsplit_once(':').and_then(|(a, col)| {
+                let (file, line) = a.rsplit_once(':')?;
+                Some((file, (line.parse::<usize>().ok()?, col.parse::<usize>().ok()?)))
+            })?;
+            (file == name).then_some(pos)
+        };
+        let inside = block.iter().filter_map(|l| at(l)).any(|(l, _)| (first..=last).contains(&l));
+        if !inside {
+            block.iter().for_each(|l| out.push_str(l));
+            continue;
+        }
+        // The gutter: its bar's column, from the first line that is a bar
+        // alone.
+        let bar = block.iter().find_map(|l| {
+            let t = l.trim_end();
+            (t.ends_with('|') && t[..t.len() - 1].chars().all(|c| c == ' ')).then(|| t.len() - 1)
+        });
+        let number = |l: &str| -> Option<(usize, String)> {
+            let b = bar?;
+            let head = l.get(..b)?;
+            let n: usize = head.trim().parse().ok()?;
+            l.get(b..)?.starts_with('|').then(|| (n, l[b..].to_string()))
+        };
+        let width = block
+            .iter()
+            .filter_map(|l| number(l))
+            .map(|(n, _)| if (first..=last).contains(&n) { moved(n) } else { n })
+            .max()
+            .map_or(0, |n| n.to_string().len());
+        for l in block {
+            if let Some((n, c)) = at(l) {
+                let indent = &l[..l.len() - l.trim_start().len()];
+                let n = if (first..=last).contains(&n) { moved(n) } else { n };
+                out.push_str(&format!("{indent}--> {shown}:{n}:{c}\n"));
+            } else if let Some((n, rest)) = number(l) {
+                let n = if (first..=last).contains(&n) { moved(n) } else { n };
+                out.push_str(&format!("{n:>width$} {rest}"));
+            } else if let Some(b) = bar
+                && l.len() > b
+                && l[..b].chars().all(|c| c == ' ')
+                && matches!(l.as_bytes()[b], b'|' | b'=')
+            {
+                out.push_str(&format!("{:width$} {}", "", &l[b..]));
+            } else {
+                out.push_str(l);
+            }
+        }
+    }
+    out
 }
 
 /// One input the session kept.
@@ -77,7 +283,9 @@ impl Entry {
         let expression = stmts.len() == 1 && tree.kind(stmts[0]) == EXPR_STMT;
         let shown = (INPUT.to_string(), input.trim_end().to_string(), 0);
         if expression {
-            let prefix = "__repl_show(";
+            // The call on a line of its own, so that the input keeps its
+            // lines and columns in the session's program.
+            let prefix = "__repl_show(\n";
             return Entry {
                 text: input.to_string(),
                 source: format!("{prefix}{}\n)\n", input.trim_end()),
@@ -266,6 +474,7 @@ struct Session {
     /// The package the session loads: its name and directory.
     package: Option<(String, std::path::PathBuf)>,
     cwd: std::path::PathBuf,
+    checker: Checker,
 }
 
 impl Session {
@@ -293,30 +502,22 @@ impl Session {
     }
 
     fn compile(&self, program: &str, host: &mut dyn Host) -> Result<sisu_sir::Program, NotRun> {
-        let layout = crate::package::load_file(SESSION, program, &self.cwd);
-        if layout.has_errors() {
-            let mut map = SourceMap::new();
-            for (n, t) in &layout.files {
-                map.add(n.clone(), t.clone());
-            }
-            return Err(NotRun::Diagnostics(map, layout.diagnostics.clone()));
-        }
-        let input = if layout.packages.len() == 1 {
-            Input::single(SESSION, program.to_string())
-        } else {
-            input_with_root(&layout, host, false, Some(program))
-                .map_err(|_| NotRun::Message(String::new()))?
-        };
-        let mut db = Db::new();
-        input.load(&mut db);
-        check_to_run(&mut db, SESSION, &[])
+        self.checker.compile(SESSION, program, &self.cwd, &[], host)
     }
 
     /// Why an input was not kept, as the input's own diagnostics where
     /// they point into it.
-    fn explain(&self, why: NotRun, at: u32, entry: &Entry) -> String {
+    fn explain(&self, why: NotRun, program: &str, at: u32, entry: &Entry) -> String {
         match why {
-            NotRun::Message(m) => m,
+            // Stage 1's report, its places in the input moved there.
+            NotRun::Message(m) => {
+                let start = (at as usize + entry.prefix).min(program.len());
+                let first = program[..start].matches('\n').count() + 1;
+                let last = first + entry.text.trim_end().lines().count().max(1) - 1;
+                let (name, shown, delta) = &entry.shown;
+                let shown_first = shown[..(*delta).min(shown.len())].matches('\n').count() + 1;
+                relocate(&m, SESSION, first, last, name, shown_first)
+            }
             NotRun::Diagnostics(map, diags) => {
                 let root =
                     map.files().iter().find(|f| f.name == SESSION).map(|f| f.id).unwrap_or(FileId(u32::MAX));
@@ -349,7 +550,7 @@ impl Session {
         let prog = match self.compile(&program, host) {
             Ok(p) => p,
             Err(e) => {
-                let shown = self.explain(e, at, &entry);
+                let shown = self.explain(e, &program, at, &entry);
                 host.stderr(&shown);
                 return;
             }
@@ -484,7 +685,7 @@ fn run(
 }
 
 /// `sisu repl [DIR | FILE]`.
-pub(crate) fn repl(args: &[String], host: &mut dyn Host) -> i32 {
+pub(crate) fn repl(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
     if let Some(bad) = args.iter().find(|a| a.starts_with("--")).or(args.get(1)) {
         host.stderr(&plain_error(
             msg::CLI_UNKNOWN_OPTION,
@@ -536,6 +737,7 @@ pub(crate) fn repl(args: &[String], host: &mut dyn Host) -> i32 {
         logs: Vec::new(),
         package,
         cwd,
+        checker: Checker::choose(front, host),
     };
     if let Some((preamble, first)) = loaded {
         s.preamble = preamble;
@@ -605,7 +807,7 @@ pub(crate) fn repl(args: &[String], host: &mut dyn Host) -> i32 {
 }
 
 /// `sisu ws [--run] FILE`.
-pub(crate) fn worksheet(args: &[String], host: &mut dyn Host) -> i32 {
+pub(crate) fn worksheet(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
     let mut real = false;
     let mut file = None;
     for a in args {
@@ -636,7 +838,8 @@ pub(crate) fn worksheet(args: &[String], host: &mut dyn Host) -> i32 {
         }
     };
     let cwd = std::env::current_dir().unwrap_or_default();
-    let sheet = match evaluate_sheet(&file, &source, &cwd, real, None, host) {
+    let checker = Checker::choose(front, host);
+    let sheet = match evaluate_sheet(&file, &source, &cwd, real, None, &checker, host) {
         Ok(s) => s,
         Err(e) => {
             host.stderr(&e);
@@ -683,6 +886,7 @@ pub(crate) fn evaluate_sheet(
     cwd: &std::path::Path,
     real: bool,
     fuel: Option<u64>,
+    checker: &Checker,
     host: &mut dyn Host,
 ) -> Result<Sheet, String> {
     // A worksheet is a script; one without its `#!` line gets one.
@@ -691,26 +895,12 @@ pub(crate) fn evaluate_sheet(
     } else {
         (format!("#!/usr/bin/env sisu\n{source}"), 1)
     };
-    let compile = |text: &str, keep: &[&str], host: &mut dyn Host| -> Result<sisu_sir::Program, NotRun> {
-        let layout = crate::package::load_file(file, text, cwd);
-        if layout.has_errors() {
-            let mut map = SourceMap::new();
-            for (n, t) in &layout.files {
-                map.add(n.clone(), t.clone());
-            }
-            return Err(NotRun::Diagnostics(map, layout.diagnostics.clone()));
-        }
-        let input = if layout.packages.len() == 1 {
-            Input::single(file, text.to_string())
-        } else {
-            input_with_root(&layout, host, false, Some(text)).map_err(|_| NotRun::Message(String::new()))?
-        };
-        let mut db = Db::new();
-        input.load(&mut db);
-        check_to_run(&mut db, file, keep)
-    };
+    let compile =
+        |text: &str, keep: &[&str], host: &mut dyn Host| checker.compile(file, text, cwd, keep, host);
     let show = |e: NotRun| match e {
         NotRun::Diagnostics(map, diags) => sisu_diag::render::render_human(&map, &diags),
+        // Stage 1's report, of the worksheet with its `#!` line.
+        NotRun::Message(m) if shift > 0 => relocate(&m, file, 2, usize::MAX - 1, file, 1),
         NotRun::Message(m) => m,
     };
     // The worksheet as written must check; its instrumented form then does.
@@ -753,6 +943,10 @@ pub(crate) fn evaluate_sheet(
     }
     out.push_str(&sheet[last..]);
     out.push_str(WS_HELPERS);
+    // Stage 1 keeps what the program's own functions reach: the fakes too.
+    if matches!(checker, Checker::Stage1 { .. }) {
+        out.push_str(WS_FAKE);
+    }
     let prog = compile(&out, &["System.fake"], host).map_err(show)?;
     let mut cap = Captured { inner: &mut *host, out: String::new(), err: String::new() };
     let report = {
@@ -792,4 +986,19 @@ pub(crate) fn evaluate_sheet(
         }
     }
     Ok(sheet_out)
+}
+
+#[cfg(test)]
+mod tests {
+    /// Stage 1's report of a session's program is moved into the input:
+    /// the place, the gutter's numbers and its width (decision 563).
+    #[test]
+    fn a_report_of_stage_1_is_moved_into_the_input() {
+        let report = "error[E0300]: expected `str`, found `int`\n  --> <repl>:14:14\n   |\n14 | let y: str = 3\n   |              ^\n   |        --- expected because of this\n\nerror: elsewhere\n  --> <repl>:2:1\n  |\n2 | x\n  | ^\n";
+        let moved = super::relocate(report, "<repl>", 14, 14, "<input>", 1);
+        assert_eq!(
+            moved,
+            "error[E0300]: expected `str`, found `int`\n  --> <input>:1:14\n  |\n1 | let y: str = 3\n  |              ^\n  |        --- expected because of this\n\nerror: elsewhere\n  --> <repl>:2:1\n  |\n2 | x\n  | ^\n"
+        );
+    }
 }

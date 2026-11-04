@@ -8,7 +8,8 @@
 # too (decision 460). One case per line; the list grows as the backend
 # does (`--native-survey` names the cases outside it that would pass). A
 # case marked `checked` stops with the checked memory model's report, which
-# a debug build gives as the interpreter does (decisions 543 and 544):
+# a debug build gives as the interpreter does (decisions 543, 544, 560
+# and 561):
 # `--native-release`, whose raw memory is unchecked, builds it and does not
 # run it.
 capabilities/attenuation
@@ -75,6 +76,7 @@ generics/function_values
 generics/functions
 generics/types
 generics/views_through_params
+http/scripted
 http/server
 names/prelude_type_shadowed
 names/shadowing
@@ -218,17 +220,20 @@ std/fs
 std/hash
 std/io
 std/json_decode
+std/log_levels
 std/modules
 std/num_exact
 std/ord_impls
 std/par
 std/par_map
 std/process_env
+std/pure_iterators
 std/rand
 std/regex
 std/search
 std/sort
 std/text_math
+std/time_parts
 syntax/comments
 syntax/continuation
 syntax/option_nested
@@ -263,9 +268,12 @@ traits/supertraits
 types/typed_hole
 unsafe/bit_cast_sizes
 unsafe/foreign
+unsafe/free_twice checked
+unsafe/gone checked
 unsafe/invalid_bits checked
 unsafe/layouts
 unsafe/leaked checked
+unsafe/malloc_bounds checked
 unsafe/misaligned checked
 unsafe/mistyped checked
 unsafe/no_memory checked
@@ -279,6 +287,8 @@ unsafe/release_layout checked
 unsafe/release_other checked
 unsafe/released checked
 unsafe/released_twice checked
+unsafe/shared_write checked
 unsafe/stale_pointer
 unsafe/uninitialised checked
+unsafe/unterminated checked
 unsafe/vector

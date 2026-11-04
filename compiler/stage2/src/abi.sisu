@@ -54,6 +54,23 @@ pub const SYM_RETAIN: str = "sisu_rt_retain"
 pub const SYM_FLUSH: str = "sisu_rt_flush"
 pub const SYM_THREAD_SLOT: str = "sisu_rt_thread_slot"
 pub const SYM_SWITCH: str = "sisu_rt_switch"
+## After a call of one of the C functions the debug profile checks, whether
+## it refused what it was given (decision 561).
+pub const SYM_C_CHECKED: str = "sisu_rt_c_checked"
+
+## The runtime's checked form of the C function `name` called with `params`
+## word arguments and `results` word results, if it has one (decision 561):
+## the C functions the interpreter emulates on its memory model, as
+## `sisu_rt::abi::CHECKED_C` names them.
+pub pure def checked_c(name: str, params: int, results: int) -> String?:
+    let known = match name:
+        case "malloc" | "getenv" | "strlen": params == 1 and results == 1
+        case "free": params == 1 and results == 0
+        case "memcpy": params == 3 and results == 1
+        case _: False
+    if not known:
+        return None
+    return Some("sisu_rt_c_{name}")
 
 ## The words of `SISU_RT_STACK` (decisions 203 and 234).
 pub const STACK_PROBE: int = 0

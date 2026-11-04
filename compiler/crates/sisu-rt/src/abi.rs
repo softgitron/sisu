@@ -142,6 +142,10 @@ pub mod sym {
     /// `sisu_rt_flush()`: writes what the program printed so far, before a
     /// foreign call, which may write to the same streams (decision 302).
     pub const FLUSH: &str = "sisu_rt_flush";
+    /// `sisu_rt_c_checked() -> u8`: after a call of one of the C functions
+    /// the debug profile checks ([`super::checked_c`]), whether it refused
+    /// what it was given (decision 561).
+    pub const C_CHECKED: &str = "sisu_rt_c_checked";
     /// `sisu_rt_thread_slot() -> ptr`: the address of the thread's one word
     /// of thread-local storage, the machine intrinsic `rt.thread_slot`.
     pub const THREAD_SLOT: &str = "sisu_rt_thread_slot";
@@ -149,6 +153,22 @@ pub mod sym {
     /// the `Context` at `save` and continues from those at `load`, the
     /// machine intrinsic `rt.switch` (22, "Machine intrinsics").
     pub const SWITCH: &str = "sisu_rt_switch";
+}
+
+/// The C functions whose calls the debug profile checks (decision 561):
+/// a call of `NAME` with this many word arguments and results is a call of
+/// the runtime's `sisu_rt_c_NAME`, which checks it on the memory model and
+/// calls C's, and is followed by [`sym::C_CHECKED`]'s status.
+pub const CHECKED_C: [(&str, usize, usize); 5] =
+    [("malloc", 1, 1), ("free", 1, 0), ("getenv", 1, 1), ("strlen", 1, 1), ("memcpy", 3, 1)];
+
+/// The runtime's checked form of the C function `name` called with
+/// `params` word arguments and `results` word results, if it has one.
+pub fn checked_c(name: &str, params: usize, results: usize) -> Option<String> {
+    CHECKED_C
+        .iter()
+        .any(|&(n, p, r)| n == name && p == params && r == results)
+        .then(|| format!("sisu_rt_c_{name}"))
 }
 
 /// The words of [`sym::STACK`]. The probe at a function's entry compares

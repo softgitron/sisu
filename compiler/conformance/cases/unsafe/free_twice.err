@@ -1,0 +1,2 @@
+panic: `free` of memory that was released already (`once`)
+  at main (free_twice.sisu:21:9)

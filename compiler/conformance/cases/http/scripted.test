@@ -1,0 +1,2 @@
+test "a 503, a slow answer and a 404" ... ok
+1 passed, 0 failed, 0 blocked

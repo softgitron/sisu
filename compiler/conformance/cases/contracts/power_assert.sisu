@@ -14,9 +14,9 @@ struct Point:
 def double(n: int) -> int:
     return n * 2
 
-test "an iterator is not pure: the two sides":
+test "an adapter is not pure: the two sides":
     let xs = [3, 1, 2]
-    assert len(xs) == xs.iter().count() + 1
+    assert len(xs) == xs.iter().map(x -> x * 2).count() + 1
 
 test "fields and methods":
     let p = Point(x=3, y=-4)

@@ -860,6 +860,7 @@ impl Server {
             &dir,
             false,
             Some(SHEET_FUEL),
+            &crate::repl::Checker::Rust,
             &mut host,
         ) {
             let ends: Vec<usize> = text

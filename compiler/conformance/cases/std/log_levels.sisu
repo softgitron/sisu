@@ -1,0 +1,19 @@
+# `std.log`'s levels and fields (11, "a structured logging facade with
+# levels and context"; the manual's finding from guide G28): a `Logger`
+# writes the records at its level and the more severe ones, each with its
+# fields after the message; the module's own functions write every level.
+
+import std.log
+
+def main():
+    log.debug("the module's functions write every level")
+    let quiet = log.Logger(level=log.Level.Warn).with("job", "nightly")
+    quiet.debug("left out")
+    quiet.info("left out too")
+    quiet.warn("disk is filling")
+    quiet.error("disk is full")
+    let loud = quiet.at_level(log.Level.Debug).with("user", "Anna Virtanen")
+    loud.debug("signed in")
+    log.at(log.Level.Info, "at a level of the caller's")
+    print(quiet.enabled(log.Level.Info))
+    print(loud.record("the text of a record"))

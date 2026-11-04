@@ -2031,6 +2031,43 @@ impl[T] Iter[T]:
             acc = f(acc, x)
         return acc
 
+    # The consumers that take no function, `pure` here since this `next`
+    # is: a `pure` function counts, collects, sums or joins the items of a
+    # standard library's iterator (`text.split_whitespace().count()`). Those
+    # of an adapter (`map`, `filter`, `take`) stay `Iterator`'s, which are
+    # not, since an adapter's `next` calls a function that may be any.
+
+    ## The number of items.
+    pure def count(own self) -> int:
+        var n = 0
+        for _ in self:
+            n += 1
+        return n
+
+    ## The item at index `n` (from 0), or `None` when there are fewer.
+    pure def nth(own self, n: int) -> T?:
+        var i = 0
+        for x in self:
+            if i == n:
+                return Some(x)
+            i += 1
+        return None
+
+    ## The items in a new list.
+    pure def collect(own self) -> list[T]:
+        var out: list[T] = []
+        for x in self:
+            out.push(x)
+        return out
+
+    ## The sum of the items, as `sum` adds them (floats pairwise, D-074).
+    pure def sum(own self) -> T where T: Num:
+        return self.collect().sum()
+
+    ## The `Display` renderings of the items, separated by `sep`.
+    pure def join(own self, sep: str) -> String where T: Display:
+        return self.collect().join(sep)
+
 ## The elements of two sorted runs in one sorted run; of equal elements,
 ## `earlier`'s come first (`list.sort_by`).
 pure def merge_runs[T](
@@ -2657,6 +2694,53 @@ impl DateTime:
     ## The whole seconds since the epoch, rounded down.
     pure def unix_seconds(self) -> int:
         return self.unix_nanos() // 1000000000
+
+    # The parts of the time in UTC, in the proleptic Gregorian calendar
+    # (11, `std.time`); a time has no zone but UTC in stage 0.
+
+    ## The year, as `2026`.
+    ##
+    ## ```
+    ## let t = DateTime.parse("2026-10-11T12:34:56.25+02:00").expect("a time")
+    ## assert (t.year(), t.month(), t.day()) == (2026, 10, 11)
+    ## assert (t.hour(), t.minute(), t.second()) == (10, 34, 56)
+    ## assert t.nanosecond() == 250000000
+    ## assert t.weekday() == 7 and t.day_of_year() == 284
+    ## ```
+    pure def year(self) -> int:
+        let (y, _, _) = civil_from_days(self.unix_nanos() // 86400000000000)
+        return y
+    ## The month, from 1 (January) to 12.
+    pure def month(self) -> int:
+        let (_, m, _) = civil_from_days(self.unix_nanos() // 86400000000000)
+        return m
+    ## The day of the month, from 1.
+    pure def day(self) -> int:
+        let (_, _, d) = civil_from_days(self.unix_nanos() // 86400000000000)
+        return d
+    ## The hour, from 0 to 23.
+    pure def hour(self) -> int:
+        return self.unix_nanos() % 86400000000000 // 3600000000000
+    ## The minute of the hour, from 0 to 59.
+    pure def minute(self) -> int:
+        return self.unix_nanos() % 3600000000000 // 60000000000
+    ## The second of the minute, from 0 to 59.
+    pure def second(self) -> int:
+        return self.unix_nanos() % 60000000000 // 1000000000
+    ## The nanoseconds past the second, from 0 to 999 999 999.
+    pure def nanosecond(self) -> int:
+        return self.unix_nanos() % 1000000000
+    ## The day of the week as ISO 8601 numbers it: 1 for Monday to 7 for
+    ## Sunday.
+    pure def weekday(self) -> int:
+        # 1970-01-01 was a Thursday.
+        return (self.unix_nanos() // 86400000000000 + 3) % 7 + 1
+    ## The day of the year, from 1 (January 1st) to 365, or 366 in a leap
+    ## year.
+    pure def day_of_year(self) -> int:
+        let days = self.unix_nanos() // 86400000000000
+        let (y, _, _) = civil_from_days(days)
+        return days - days_from_civil(y, 1, 1) + 1
     ## The time an RFC 3339 text gives, as `2026-10-11T12:00:00Z`: a date, `T`,
     ## a time with optional fractions of a second, and `Z` or an offset
     ## such as `+02:00`; `InvalidTime` for anything else, or a time outside
@@ -2753,6 +2837,20 @@ pure def days_from_civil(year: int, month: int, day: int) -> int:
     let doy = (153 * mp + 2) // 5 + day - 1
     let doe = yoe * 365 + yoe // 4 - yoe // 100 + doy
     return era * 146097 + doe - 719468
+
+## The date of the proleptic Gregorian calendar `days` after 1970-01-01:
+## its year, month and day (Howard Hinnant's `civil_from_days`).
+pure def civil_from_days(days: int) -> (int, int, int):
+    let z = days + 719468
+    let era = z // 146097
+    let doe = z - era * 146097
+    let yoe = (doe - doe // 1460 + doe // 36524 - doe // 146096) // 365
+    let doy = doe - (365 * yoe + yoe // 4 - yoe // 100)
+    let mp = (5 * doy + 2) // 153
+    let day = doy - (153 * mp + 2) // 5 + 1
+    let month = if mp < 10: mp + 3 else: mp - 9
+    let year = yoe + era * 400 + (if month <= 2: 1 else: 0)
+    return (year, month, day)
 
 impl Sub for DateTime:
     type Output = Duration

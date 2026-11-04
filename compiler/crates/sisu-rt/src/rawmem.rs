@@ -252,7 +252,11 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> u8 {
     unsafe {
         match i {
             // A pointer to a place: the address the reference holds.
-            I::MemPtrOf | I::MemPtrOfMut => c.set_word(mem::word(c.arg(0), 0)),
+            I::MemPtrOf | I::MemPtrOfMut => {
+                let p = mem::word(c.arg(0), 0);
+                checked::place(p, u64::from(ty(pointee(c.ret_ty)).size), i == I::MemPtrOfMut);
+                c.set_word(p)
+            }
             I::MemPtrDangling => c.set_word(layout(c.targ(0)).align),
             I::MemPtrFromAddress | I::MemPtrWithAddr => c.set_word(c.int(c.args.len() - 1) as u64),
             I::MemPtrCast | I::MemPtrAsConst | I::MemPtrCastMut | I::MemPtrAddr => {
@@ -277,7 +281,9 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> u8 {
             I::MemPtrWrite | I::MemPtrWriteVolatile => {
                 let e = pointee(c.ty(0));
                 let op = if i == I::MemPtrWrite { "write" } else { "write_volatile" };
-                if let Err(st) = checked::write(pointer(c, 0) as u64, e, true, op) {
+                let checked = checked::write(pointer(c, 0) as u64, e, true, op)
+                    .and_then(|()| checked::writable(pointer(c, 0) as u64, op, "writable"));
+                if let Err(st) = checked {
                     // The value the call was given is dropped with the panic.
                     if c.ty(1) == e {
                         return value::after_part(st, value::drop_value(c.arg(1), e));
@@ -291,14 +297,21 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> u8 {
             }
             I::MemPtrAsRef | I::MemPtrAsMut => {
                 let op = if i == I::MemPtrAsRef { "as_ref" } else { "as_mut" };
-                if let Err(st) = checked::touch(pointer(c, 0) as u64, pointee(c.ty(0)), 1, op) {
+                let mut checked = checked::touch(pointer(c, 0) as u64, pointee(c.ty(0)), 1, op);
+                if i == I::MemPtrAsMut {
+                    checked = checked
+                        .and_then(|()| checked::writable(pointer(c, 0) as u64, op, "valid_for_origin"));
+                }
+                if let Err(st) = checked {
                     return st;
                 }
                 c.set_word(pointer(c, 0) as u64)
             }
             I::MemPtrDropInPlace => {
                 let e = pointee(c.ty(0));
-                if let Err(st) = checked::drop_in_place(pointer(c, 0) as u64, e) {
+                let checked = checked::writable(pointer(c, 0) as u64, "drop_in_place", "valid")
+                    .and_then(|()| checked::drop_in_place(pointer(c, 0) as u64, e));
+                if let Err(st) = checked {
                     return st;
                 }
                 if !rt::needs_drop(e) {
@@ -311,7 +324,9 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> u8 {
             }
             I::MemPtrCopyFrom => {
                 let e = pointee(c.ty(0));
-                if let Err(st) = checked::copy_from(pointer(c, 0) as u64, pointer(c, 1) as u64, c.int(2), e) {
+                let checked = checked::copy_from(pointer(c, 0) as u64, pointer(c, 1) as u64, c.int(2), e)
+                    .and_then(|()| checked::writable(pointer(c, 0) as u64, "copy_from", "writable"));
+                if let Err(st) = checked {
                     return st;
                 }
                 let size = layout(e).size;

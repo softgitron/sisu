@@ -467,34 +467,37 @@ pub(crate) unsafe fn list_pop(l: *mut u8, e: u32, out: *mut u8) {
     }
 }
 
-/// The element at `value` moved into the list at `l` at index `k`, which
-/// the caller checked.
+/// The element at `value` moved into the list at `l` at index `k`, or the
+/// panic of an index past its end raised, the element left in place: the
+/// status (decision 562).
 ///
 /// # Safety
-/// `l` must hold a list of elements of `size` bytes, `value` one, which
-/// moves in, and `k` be at most its length.
-pub(crate) unsafe fn list_insert(l: *mut u8, k: u64, value: *mut u8, size: u32) {
-    let (k, size) = (k as i64, i64::from(size));
+/// `l` must hold a list of elements of `size` bytes, and `value` one, which
+/// moves in.
+pub(crate) unsafe fn list_insert(l: *mut u8, k: i64, value: *mut u8, size: u32) -> u8 {
+    let size = i64::from(size);
     let mut ret = 0u64;
     // SAFETY: as for [`equal`].
     if unsafe { sisu_rt_list_insert(&mut ret, &l, &k, &value, &size) } != abi::OK {
         failed("list's insert");
     }
+    ret as u8
 }
 
-/// Element `k` of the list at `l`, which the caller checked, moved out to
-/// `out`.
+/// Element `k` of the list at `l` moved out to `out`, or the panic of an
+/// index out of its bounds raised: the status (decision 562).
 ///
 /// # Safety
-/// `l` must hold a list of elements of `size` bytes with an element `k`,
-/// and `out` have room for one.
-pub(crate) unsafe fn list_remove(l: *mut u8, k: u64, out: *mut u8, size: u32) {
-    let (k, size) = (k as i64, i64::from(size));
+/// `l` must hold a list of elements of `size` bytes, and `out` have room
+/// for one.
+pub(crate) unsafe fn list_remove(l: *mut u8, k: i64, out: *mut u8, size: u32) -> u8 {
+    let size = i64::from(size);
     let mut ret = 0u64;
     // SAFETY: as for [`equal`].
     if unsafe { sisu_rt_list_remove(&mut ret, &l, &k, &out, &size) } != abi::OK {
         failed("list's remove");
     }
+    ret as u8
 }
 
 /// The elements of the list at `other` moved to the end of the one at `l`.
@@ -524,18 +527,19 @@ pub(crate) unsafe fn list_reverse(l: *mut u8, size: u32) {
     }
 }
 
-/// Elements `i` and `j` of the list at `l`, which the caller checked,
-/// swapped.
+/// Elements `i` and `j` of the list at `l` swapped, or the panic of the
+/// first out of its bounds raised: the status (decision 562).
 ///
 /// # Safety
-/// `l` must hold a list of elements of `size` bytes with both indices.
-pub(crate) unsafe fn list_swap(l: *mut u8, i: u64, j: u64, size: u32) {
-    let (i, j, size) = (i as i64, j as i64, i64::from(size));
+/// `l` must hold a list of elements of `size` bytes.
+pub(crate) unsafe fn list_swap(l: *mut u8, i: i64, j: i64, size: u32) -> u8 {
+    let size = i64::from(size);
     let mut ret = 0u64;
     // SAFETY: as for [`equal`].
     if unsafe { sisu_rt_list_swap(&mut ret, &l, &i, &j, &size) } != abi::OK {
         failed("list's swap");
     }
+    ret as u8
 }
 
 /// Writes at `dst` a new list of copies of the elements from `lo` to `hi`
@@ -1192,4 +1196,17 @@ extern "C" fn sisu_rt_gen_abandon(task: i64) -> u8 {
 #[unsafe(no_mangle)]
 extern "C" fn sisu_rt_zip_lengths() -> u8 {
     rt::raise_msg(sisu_diag::msg::PANIC_ZIP_LENGTHS, &[])
+}
+
+/// The runtime in Sisu found an index outside a list (decision 562): the
+/// panic of `insert` when `insert`, else of an index out of bounds,
+/// raised, and its status.
+#[unsafe(no_mangle)]
+extern "C" fn sisu_rt_list_bounds(insert: bool, index: i64, len: i64) -> u8 {
+    let (index, len) = (index.to_string(), len.to_string());
+    if insert {
+        rt::raise_msg(sisu_diag::msg::PANIC_INSERT_OUT_OF_BOUNDS, &[("index", index), ("len", len)])
+    } else {
+        rt::raise_msg(sisu_diag::msg::PANIC_INDEX_OUT_OF_BOUNDS, &[("len", len), ("index", index)])
+    }
 }

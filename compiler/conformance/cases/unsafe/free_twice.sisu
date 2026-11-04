@@ -1,0 +1,21 @@
+# The checked memory model (D-085) knows the memory C's `malloc` gives out:
+# `free` of a block freed already is refused, its obligation `once`.
+
+from std.ffi import c_size
+from std.mem import ptr
+
+# safety: the signatures as <stdlib.h> declares them for 64-bit Linux; each
+#   returns promptly.
+extern "C":
+    def malloc(n: c_size) -> ptr mut u8?
+    def free(p: ptr mut u8?)
+
+def main():
+    # safety: from_here: the block came from malloc; once: wrong on
+    #   purpose, it is freed twice.
+    unsafe:
+        let block = malloc(16) else:
+            panic("out of memory")
+        free(Some(block))
+        print("freed")
+        free(Some(block))

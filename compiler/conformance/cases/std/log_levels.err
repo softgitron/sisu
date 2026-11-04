@@ -1,0 +1,5 @@
+debug: the module's functions write every level
+warn: disk is filling job=nightly
+error: disk is full job=nightly
+debug: signed in job=nightly user="Anna Virtanen"
+info: at a level of the caller's

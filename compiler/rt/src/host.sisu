@@ -62,6 +62,9 @@ extern "C":
     pub def sisu_rt_gen_abandon(task: int) -> u8
     ## Raises the panic of `zip` given two lengths: its status.
     pub def sisu_rt_zip_lengths() -> u8
+    ## Raises the panic of an index `index` outside a list of `len`
+    ## elements, of `insert` when `insert` (decision 562): its status.
+    pub def sisu_rt_list_bounds(insert: bool, index: int, len: int) -> u8
     ## Copies `n` bytes from `src` to `dst`; the regions may overlap.
     pub def memmove(dst: ptr mut u8, src: ptr[u8], n: int) -> ptr mut u8
     ## The order of the `n` bytes at `a` and at `b`: 0 when they are the same.

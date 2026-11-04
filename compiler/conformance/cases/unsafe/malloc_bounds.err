@@ -1,0 +1,2 @@
+panic: `ptr.write` of 1 bytes at offset 8 of a block of 8 bytes reaches outside it (`writable`)
+  at main (malloc_bounds.sisu:22:9)

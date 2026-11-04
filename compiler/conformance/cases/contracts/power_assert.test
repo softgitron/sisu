@@ -1,16 +1,16 @@
-test "an iterator is not pure: the two sides" ... FAILED
+test "an adapter is not pure: the two sides" ... FAILED
 test "fields and methods" ... FAILED
 test "indexing and arithmetic" ... FAILED
 test "a chain of comparisons" ... FAILED
 test "only the left of `and` is shown when the right may not run" ... FAILED
 test "a function that is not pure: the two sides and the message" ... FAILED
 
-test "an iterator is not pure: the two sides" ... FAILED
-panic: assertion failed: len(xs) == xs.iter().count() + 1
+test "an adapter is not pure: the two sides" ... FAILED
+panic: assertion failed: len(xs) == xs.iter().map(x -> x * 2).count() + 1
   left:  3
   right: 4
-  at test "an iterator is not pure: the two sides" (power_assert.sisu:19:5)
-replay: sisu test --replay 1-1e6bcb0ab280f097-0.0.1-t0-s0-r0 power_assert.sisu
+  at test "an adapter is not pure: the two sides" (power_assert.sisu:19:5)
+replay: sisu test --replay 1-2556a206513c3bb8-0.0.1-t0-s0-r0 power_assert.sisu
 
 test "fields and methods" ... FAILED
 panic: assertion failed: p.norm1() < p.x * 2
@@ -19,7 +19,7 @@ panic: assertion failed: p.norm1() < p.x * 2
     │ 7         3   6
     Point(x=3, y=-4)
   at test "fields and methods" (power_assert.sisu:23:5)
-replay: sisu test --replay 1-1e6bcb0ab280f097-0.0.1-t1-s0-r0 power_assert.sisu
+replay: sisu test --replay 1-2556a206513c3bb8-0.0.1-t1-s0-r0 power_assert.sisu
 
 test "indexing and arithmetic" ... FAILED
 panic: assertion failed: xs[i] + xs[i + 1] == 60
@@ -28,7 +28,7 @@ panic: assertion failed: xs[i] + xs[i + 1] == 60
     20 1  │ 30 1 2
           50
   at test "indexing and arithmetic" (power_assert.sisu:28:5)
-replay: sisu test --replay 1-1e6bcb0ab280f097-0.0.1-t2-s0-r0 power_assert.sisu
+replay: sisu test --replay 1-2556a206513c3bb8-0.0.1-t2-s0-r0 power_assert.sisu
 
 test "a chain of comparisons" ... FAILED
 panic: assertion failed: 0 <= lo <= hi
@@ -36,7 +36,7 @@ panic: assertion failed: 0 <= lo <= hi
          │     │
          5     3
   at test "a chain of comparisons" (power_assert.sisu:33:5)
-replay: sisu test --replay 1-1e6bcb0ab280f097-0.0.1-t3-s0-r0 power_assert.sisu
+replay: sisu test --replay 1-2556a206513c3bb8-0.0.1-t3-s0-r0 power_assert.sisu
 
 test "only the left of `and` is shown when the right may not run" ... FAILED
 panic: assertion failed: len(xs) > 0 and xs[0] == 1
@@ -44,7 +44,7 @@ panic: assertion failed: len(xs) > 0 and xs[0] == 1
     │   │
     0   []
   at test "only the left of `and` is shown when the right may not run" (power_assert.sisu:37:5)
-replay: sisu test --replay 1-1e6bcb0ab280f097-0.0.1-t4-s0-r0 power_assert.sisu
+replay: sisu test --replay 1-2556a206513c3bb8-0.0.1-t4-s0-r0 power_assert.sisu
 
 test "a function that is not pure: the two sides and the message" ... FAILED
 panic: assertion failed: double(n) == 15
@@ -52,6 +52,6 @@ panic: assertion failed: double(n) == 15
   left:  14
   right: 15
   at test "a function that is not pure: the two sides and the message" (power_assert.sisu:41:5)
-replay: sisu test --replay 1-1e6bcb0ab280f097-0.0.1-t5-s0-r0 power_assert.sisu
+replay: sisu test --replay 1-2556a206513c3bb8-0.0.1-t5-s0-r0 power_assert.sisu
 
 0 passed, 6 failed, 0 blocked

@@ -214,25 +214,53 @@ def read_request(mut r: Reader) -> Request ! HttpError:
 
 # ------------------------------------------------------------------ the scripted network
 
-## What a `FakeNet` answers, and how many requests it answered.
+## What a `FakeNet` answers, and how many requests it answered: the
+## response to each method and URL (`"GET https://host:443/path"`), and how
+## long it takes on the run's test clock.
 struct Script:
-    routes: dict[String, bytes]
+    routes: dict[String, (Response, Duration)]
     requests: int
 
 ## A scripted network for tests of clients (17, "Mocks"):
 ## `respond_to(url, body)` answers each `GET` of `url` with `200 OK` and
-## `body`, anything else with `404 Not Found`; `request_count` tells how
-## many requests it answered. A `Copy` handle on its script, which every
-## copy shares; it becomes a `Net` where one is expected.
+## `body`; `respond(method, url, response)` answers a method of a URL with
+## any response, a `503` among them, and `respond_after` does so after a
+## while on the run's test clock (`Clock.fake()`), a slow answer that a
+## client's timeout can meet; anything else is `404 Not Found`.
+## `request_count` tells how many requests it answered. A `Copy` handle on
+## its script, which every copy shares; it becomes a `Net` where one is
+## expected.
+##
+## ```
+## let busy = Response.text(503, "Service Unavailable", "busy")
+## let net = FakeNet().respond("POST", "http://api.test/jobs", busy)
+## let url = Url.parse("http://api.test/jobs").expect("a URL")
+## let r = request(net, "POST", url).expect("an answer")
+## assert r.status == 503 and r.body == b"busy"
+## assert get(net, url).is_err()
+## assert net.request_count() == 2
+## ```
 @derive(Copy)
 struct FakeNet:
     state: Cap[Mutex[Script]] = Cap(Mutex(Script(routes={}, requests=0)))
 
 impl FakeNet:
-    ## The network with `url` answered by `body`.
+    ## The network with each `GET` of `url` answered by `200 OK` and `body`.
     def respond_to(self, url: str, body: bytes) -> FakeNet:
+        return self.respond("GET", url, Response.ok(body.copy()))
+
+    ## The network with each `method` request of `url` answered by
+    ## `response`.
+    def respond(self, method: str, url: str, own response: Response) -> FakeNet:
+        return self.respond_after(method, url, response, Duration.seconds(0))
+
+    ## The network with each `method` request of `url` answered by
+    ## `response` once `delay` has passed on the run's test clock: a slow
+    ## answer, which the client waits for at its first read.
+    def respond_after(self, method: str, url: str, own response: Response, delay: Duration) -> FakeNet:
+        let key = route_key(method, url)
         var g = self.state.get().lock()
-        _ = g.value.routes.insert(url.to_string(), body.copy())
+        _ = g.value.routes.insert(key, (response, delay))
         return FakeNet(state=self.state)
 
     ## The number of requests answered so far.
@@ -240,25 +268,35 @@ impl FakeNet:
         let g = self.state.get().lock()
         return g.value.requests
 
-    ## The response to the request `raw` sent to `host` at `port`.
-    def answer(self, host: str, port: int, raw: bytes) -> bytes:
+    ## The response to the request `raw` sent to `host` at `port`, and how
+    ## long it takes.
+    def answer(self, host: str, port: int, raw: bytes) -> (bytes, Duration):
+        let now = Duration.seconds(0)
         let head = parse_head(raw) else:
-            return message("HTTP/1.1 400 Bad Request", [], b"")
+            return (message("HTTP/1.1 400 Bad Request", [], b""), now)
         let parts: list[str] = head.line.split(" ").collect()
         if len(parts) < 2:
-            return message("HTTP/1.1 400 Bad Request", [], b"")
+            return (message("HTTP/1.1 400 Bad Request", [], b""), now)
         let scheme = if port == 443: "https" else: "http"
         let url = match Url.parse("{scheme}://{host}:{port}{parts[1]}"):
             case Ok(u): "{u}"
             case Err(_): ""
         var g = self.state.get().lock()
         g.value.requests += 1
-        let found = match g.value.routes.get(url):
-            case Some(b): Some(b.copy())
-            case None: None
-        return match found:
-            case Some(body) if parts[0] == "GET": message("HTTP/1.1 200 OK", [], body)
-            case _: message("HTTP/1.1 404 Not Found", [], b"not found\n")
+        let key = "{parts[0]} {url}"
+        let route = g.value.routes.get(key) else:
+            return (message("HTTP/1.1 404 Not Found", [], b"not found\n"), now)
+        let r = ref route.0
+        let first = "HTTP/1.1 {r.status} {r.reason}"
+        return (message(first, r.headers.copy(), r.body.copy()), route.1)
+
+## The key of a route: the method and the URL as `Url` writes it, so that
+## `https://api.test/x` and `https://api.test:443/x` are one.
+pure def route_key(method: str, url: str) -> String:
+    let shown = match Url.parse(url):
+        case Ok(u): "{u}"
+        case Err(_): url.to_string()
+    return "{method} {shown}"
 
 impl NetOps for FakeNet:
     def connect(self, host: str, port: int) -> Conn ! {NetError, TaskError}:
@@ -287,7 +325,10 @@ impl Stream for ScriptedStream:
         if self.reply.is_none():
             if self.sent.find(b"\r\n\r\n").is_none():
                 return Ok(bytes.new())
-            self.reply = Some(self.net.answer(self.host, self.port, self.sent))
+            let (reply, delay) = self.net.answer(self.host, self.port, self.sent)
+            if delay > Duration.seconds(0):
+                Clock.fake().sleep(delay)?
+            self.reply = Some(reply)
         let left = self.reply.copy().expect("an answer")
         let n = if max < len(left): max else: len(left)
         self.reply = Some(left.slice(n, len(left)))

@@ -616,14 +616,58 @@ unsafe extern "C" fn sisu_rt_list_reserve(l: *mut u8, size: u64) {
     system(|| unsafe { mem::at::<List>(l as *mut u8).reserve(1, size as u32) })
 }
 
-/// A call of an intrinsic: `desc` says which and the types of its
-/// result, arguments and type arguments ([`abi::CallDesc`]); `args` holds
-/// the arguments' addresses.
+// A call of an intrinsic: `desc` says which and the types of its result,
+// arguments and type arguments ([`abi::CallDesc`]); `args` holds the
+// arguments' addresses. The entry first keeps the caller's stack pointer
+// (`tls::caller_sp`), below which no frame of the task is live, for the
+// checked memory model (decision 560), and goes on in `intrinsic_call`.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_intrinsic(desc: *const u32, ret: *mut u8, args: *const *mut u8) -> u8 {
+    // The caller's stack pointer is above the return address the call
+    // pushed; `rax` and `rcx` carry no argument.
+    std::arch::naked_asm!(
+        "lea rax, [rsp + 8]",
+        "mov rcx, qword ptr fs:[0]",
+        "add rcx, qword ptr [rip + SISU_RT_CALLER_SP@GOTTPOFF]",
+        "mov qword ptr [rcx], rax",
+        "jmp {call}",
+        call = sym intrinsic_call,
+    )
+}
+
+/// As on x86-64: the stack pointer is the caller's, the call having pushed
+/// nothing; `x9` to `x11` are scratch registers.
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_intrinsic(desc: *const u32, ret: *mut u8, args: *const *mut u8) -> u8 {
+    std::arch::naked_asm!(
+        "mov x9, sp",
+        "mrs x10, tpidr_el0",
+        "adrp x11, :gottprel:SISU_RT_CALLER_SP",
+        "ldr x11, [x11, :gottprel_lo12:SISU_RT_CALLER_SP]",
+        "str x9, [x10, x11]",
+        "b {call}",
+        call = sym intrinsic_call,
+    )
+}
+
+/// Elsewhere the caller's stack pointer is not kept, and the model does not
+/// check the places of the program.
+#[cfg(not(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64"))))]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_intrinsic(desc: *const u32, ret: *mut u8, args: *const *mut u8) -> u8 {
+    // SAFETY: as the caller guarantees.
+    unsafe { intrinsic_call(desc, ret, args) }
+}
+
+/// The call of an intrinsic, after its entry.
 ///
 /// # Safety
 /// The descriptor and the addresses are the generated code's.
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sisu_rt_intrinsic(desc: *const u32, ret: *mut u8, args: *const *mut u8) -> u8 {
+unsafe extern "C" fn intrinsic_call(desc: *const u32, ret: *mut u8, args: *const *mut u8) -> u8 {
     // SAFETY: as the caller guarantees.
     let (i, c) = unsafe { crate::intrinsics::decode(desc, ret, args) };
     // std.par's bodies are Sisu code, run on the workers or on this stack

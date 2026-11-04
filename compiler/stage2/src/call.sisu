@@ -538,8 +538,25 @@ impl Cg:
         # runtime in Sisu's calls are the runtime's own (decision 350).
         if not self.library:
             _ = self.rt(abi.SYM_FLUSH, [])?
-        self.c_function(symbol, params, rets)?
-        let results = self.b.call(symbol, vals, len(rets))
+        # The debug profile checks the calls of the C functions the
+        # interpreter emulates on the memory model (decision 561): the
+        # runtime's form of each is called, and its status after.
+        var words = True
+        for ct in params:
+            words = words and ct == "i64"
+        for ct in rets:
+            words = words and ct == "i64"
+        var callee = symbol.to_string()
+        var checked = False
+        if not self.release and not self.library and words:
+            if let Some(name) = abi.checked_c(symbol, len(params), len(rets)):
+                callee = name
+                checked = True
+        self.c_function(callee, params, rets)?
+        let results = self.b.call(callee, vals, len(rets))
+        if checked:
+            let st = self.rt_status(abi.SYM_C_CHECKED, [])?
+            self.check(st)
         if results.is_empty():
             return Ok(())
         let v = results[0]

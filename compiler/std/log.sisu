@@ -20,3 +20,99 @@ def info(message: str):
 
 def debug(message: str):
     write("debug", message)
+
+## The level of a record, from the most severe to the least.
+@derive(Copy, Eq)
+enum Level:
+    Error
+    Warn
+    Info
+    Debug
+
+impl Level:
+    ## How severe the level is: 0 for `Error` to 3 for `Debug`.
+    pure def rank(self) -> int:
+        return match self:
+            case Error: 0
+            case Warn: 1
+            case Info: 2
+            case Debug: 3
+
+    ## The level as a record names it: `error`, `warn`, `info`, `debug`.
+    pure def name(self) -> str:
+        return match self:
+            case Error: "error"
+            case Warn: "warn"
+            case Info: "info"
+            case Debug: "debug"
+
+## Writes one record at `level`.
+def at(level: Level, message: str):
+    write(level.name(), message)
+
+## A logger (11, "a structured logging facade with levels and context"):
+## it writes the records at its `level` and the levels more severe, and
+## leaves out the rest, and each record carries its fields after the
+## message, as `key=value` (the value quoted when it holds a space, a quote
+## or `=`). The module's own functions write every level; a program that
+## wants `debug` left out logs through a `Logger`.
+##
+## ```
+## let log = Logger(level=Level.Warn).with("job", "nightly")
+## assert log.enabled(Level.Error) and log.enabled(Level.Warn)
+## assert not log.enabled(Level.Info)
+## assert log.record("disk is full") == "disk is full job=nightly"
+## assert Logger().with("user", "Anna Virtanen").record("signed in") == "signed in user=\"Anna Virtanen\""
+## ```
+struct Logger:
+    ## The least severe level written.
+    level: Level = Info
+    ## The fields every record carries, in order.
+    fields: list[(String, String)] = []
+
+impl Logger:
+    ## The logger with the field `key=value` after those it has.
+    pure def with(self, key: str, value: str) -> Logger:
+        var fields = self.fields.copy()
+        fields.push((key.to_string(), value.to_string()))
+        return Logger(level=self.level, fields=fields)
+
+    ## The logger with `level` as the least severe it writes.
+    pure def at_level(self, level: Level) -> Logger:
+        return Logger(level=level, fields=self.fields.copy())
+
+    ## Whether a record at `level` is written.
+    pure def enabled(self, level: Level) -> bool:
+        return level.rank() <= self.level.rank()
+
+    ## The text of a record of `message`: the message and the fields.
+    pure def record(self, message: str) -> String:
+        var out = message.to_string()
+        for f in self.fields:
+            let (key, value) = f
+            let plain = not value.is_empty()
+                and not value.contains(" ")
+                and not value.contains("\"")
+                and not value.contains("=")
+            if plain:
+                out.push(" {key}={value}")
+            else:
+                out.push(" {key}={value:?}")
+        return out
+
+    ## Writes `message` at `level`, if the logger writes that level.
+    def log(self, level: Level, message: str):
+        if self.enabled(level):
+            write(level.name(), self.record(message))
+
+    def error(self, message: str):
+        self.log(Error, message)
+
+    def warn(self, message: str):
+        self.log(Warn, message)
+
+    def info(self, message: str):
+        self.log(Info, message)
+
+    def debug(self, message: str):
+        self.log(Debug, message)

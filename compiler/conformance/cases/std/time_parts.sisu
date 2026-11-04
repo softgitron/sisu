@@ -1,0 +1,19 @@
+# A `DateTime`'s parts in UTC (11, `std.time`; the manual's finding from
+# guide G9): the date, the time of day to the nanosecond, the day of the
+# week as ISO 8601 numbers it and the day of the year, before the epoch
+# and in leap years too.
+
+def show(text: str):
+    let t = DateTime.parse(text).expect("a time")
+    let date = "{t.year()}-{t.month()}-{t.day()}"
+    let time = "{t.hour()}:{t.minute()}:{t.second()}.{t.nanosecond()}"
+    print("{t}: {date} {time}, weekday {t.weekday()}, day {t.day_of_year()}")
+
+def main():
+    show("2026-10-11T12:34:56.25+02:00")
+    show("1970-01-01T00:00:00Z")
+    show("1969-12-31T23:59:59.999Z")
+    show("2000-02-29T00:00:00Z")
+    show("2024-12-31T23:00:00Z")
+    show("1678-01-01T00:00:00Z")
+    show("2261-12-31T23:59:59Z")

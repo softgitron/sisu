@@ -2714,10 +2714,21 @@ impl<'a, 'p> Cx<'a, 'p> {
         if !self.cg.library {
             self.rt(sym::FLUSH, &[])?;
         }
-        let id = self.cg.c_function(symbol, &params, ret.as_slice())?;
+        // The debug profile checks the calls of the C functions the
+        // interpreter emulates on the memory model (decision 561): the
+        // runtime's form of each is called, and its status after.
+        let words = params.iter().chain(&ret).all(|t| *t == types::I64);
+        let checked = (!self.cg.release && !self.cg.library && words)
+            .then(|| abi::checked_c(symbol, params.len(), usize::from(ret.is_some())))
+            .flatten();
+        let id = self.cg.c_function(checked.as_deref().unwrap_or(symbol), &params, ret.as_slice())?;
         let r = self.func_ref(id);
         let call = self.b.ins().call(r, &vals);
         let result = self.b.inst_results(call).first().copied();
+        if checked.is_some() {
+            let st = self.rt_status(sym::C_CHECKED, &[])?;
+            self.check(st);
+        }
         let (Some(v), Some(ct)) = (result, ret) else { return Ok(()) };
         let (d, _) = self.place(dest, None)?;
         let word = match &dest_ty {
