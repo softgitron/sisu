@@ -2117,6 +2117,90 @@ again with R68: `traits/must_consume_generic`,
 `ownership/must_consume_dropped`, `ownership/must_consume_container` and
 `ownership/must_consume_try`.
 
+### The eighth round: the merge's differences, item 11, dev-dependencies, `expect`'s words
+
+This round took the differences the merge of stage 0's sixth round left,
+the rest of "What is next", 11, as far as the documents decide it, the
+dev-dependency a package's code could import, the words of a failed
+`expect` and the manual's findings that were stage 1's. RULES.md has the
+rules (R73 to R78, decisions 520 to 525) and their decision texts:
+
+- **The merge's differences**: the conformance suite's new
+  `testing/blocked_closure` (decision 507) reaches a hole, whose closure
+  stage 1's SIR prints (R27's, listed there: `sir`); stage 1's
+  `cases/contracts/trait_contracts` and
+  `cases/packages/trait_contract_elsewhere`, whose traces name the impl's
+  method `Counter.add for Tally` and `Counter.add for Sloppy` since
+  decision 504, and `cases/holes/blocked.tests` and `failed.tests`, which
+  show a blocked test's closure in its block again since decision 507,
+  are blessed again: each new trace and block is what the decisions say.
+- **Item 11**: a test's name is fixed text, `E0132` for an interpolation
+  in it with the fix that doubles its braces (R73); a module's name gives
+  way to an import named like it, and `E0304` on a local
+  that hides an imported module says so (R74); `else as e` on a
+  statement, `d.get(k, default)`, a positional-only parameter passed by
+  name, `JsonError` alone and `E0981`'s `ptr mut T` (R76); a template's
+  instance's diagnostics at the call that made it (code `comptime for`
+  unrolls, `reflect.construct` of a plain parameter), a derive's hole
+  once, a template's interpolated literal kept a `String`, and the notes
+  of `it` in a list, `result` in `ensures`, `sorted`'s references and a
+  change inside a loop (R77); a literal beside a `BigInt` or a `Decimal`,
+  and an explicit discriminant `E0900` where it was `E0117` (R78).
+- **Dev-dependencies** (R75): a package's code imports one only by a
+  `@cfg(test)` import; any other is `E0276`, in every build, so that
+  `check` says it as a build without the tests would fail.
+- **`expect`'s words**: the lowering of `expect` (R38) passes the
+  condition's text and the message, as `assert`'s does; the words
+  `panic: assertion failed:` are the run time's, which renders a recorded
+  failure as `assert`'s panic (`PANIC_EXPLICIT` around `R0006` or `R0007`,
+  in `sisu-interp`'s `expect_fail` and `sisu-rt`'s intrinsic). No change of
+  the front end gives other words, and 17 names none, so the change is
+  stage 0's: a failure `expect` records in a test is written
+  `expectation failed: {expr}` (and `\n  message: {message}`), with its
+  sides or parts and frames as now and without `panic: `, a catalog entry
+  of its own (`run.expect-failed`, `run.expect-failed-message`); the
+  test's block lists it as now, and a panic that then ends the test is
+  still `panic: ...`; outside a test `expect` is `assert`'s panic, as
+  decision 362 has it.
+- **The manual's findings**: the items "assigned to stage 1" are settled:
+  the black-box tests (R65, decision 508), a derived impl's diagnostics
+  and a derive's hole (R70, R77), the habits (R72, and `d.get` here, R76),
+  R54's fix in a call, a `for` header and a line's end (R67). The places
+  the fifth manual round named for a spelling fix, `E0100` (`f"..."`,
+  `print(n as f64)`, `for i in 0..3:`), `E0117` (`lambda`, `try:`, `go
+  f()`, `//` at a line's end), `E0107` (`class`) and `E0305` (`d.get(k,
+  default)`), all have it now.
+
+One of the conformance suite's `.diag` files is blessed again, with R77:
+`reflect/test_instances`, whose `E0807` and `E0381` in a test's instance
+are at the test's name (its comment says so now).
+
+Stage 1's version stays 0.7.0: nothing the driver relies on changed (a
+program that imports a dev-dependency outside `@cfg(test)` is refused
+with its diagnostics, as any program with an error is).
+
+Decided against this round, from the documents: `it` in a list of
+functions (02 makes `it` a closure of a call's argument only; the note
+says to write the closure); the `own self` method that skips the
+invariant (07 checks construction and the exits of `mut self` methods
+only; checking a method that returns `Self` is a change of 07, the
+owner's); `zip`'s temporaries (04: a temporary lives to the end of its
+statement and `zip` borrows what it is given; `E0406`'s note says to bind
+them); lowering explicit discriminants (nothing in stage 1's SIR carries
+a variant's value, and `@repr`'s layouts are the backend's, so `E0900`
+says so); a test's name that interpolates compile-time constants (a name
+is what the runner filters and replays by; 02's interpolation is a run
+time `String`).
+
+Open: `E0335` naming the operation responsible (`print`) rather than the
+function passed (naming it needs a walk of that function's checked body,
+which the check of the call, in another function's body, does not have); `E0204` naming the
+`@cfg(feature=...)` that left an item out (the items a `@cfg` removes are
+gone before the type checker sees the module, so the removal would have
+to be recorded per module); a field's `ty` in a derive's template
+(`E0608`), which needs the derive's template to see the fields' types as
+a generic function's reflection does.
+
 ## Module layout
 
 | Module | Lines | What | Stage 0 original |
@@ -2944,25 +3028,22 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     one argument, `sum(x for x in xs)`, which 02's parentheses rule out;
     a trait's constant through a type parameter as a constant argument
     (R50 decides against it); the loop directives (R53, 19's N-22).
-11. **The manual's findings left** (after R54 to R72), of the front end:
+11. **The manual's findings left** (after R54 to R78), of the front end:
     lowering a variadic parameter and star unpacking (R64 refuses them
     with `E0900`, the first waiting for the owner, since 02 and 14
-    disagree), a test's name with `{` or `\"`, `it` in a list of
-    functions, `E0202` for a function named like its module, a parameter
-    that hides a module; a literal beside a `BigInt` or a `Decimal`,
-    `@repr(u8)` and explicit discriminants, the `own self` method that
-    skips the invariant, `result` in `ensures`; `zip`'s temporaries,
-    `sorted`'s note, `E0405`'s note and label; an error in unrolled code,
-    a template's interpolated literal, `reflect.construct` of a plain
-    parameter, a field's `ty` in a derive, a derive's hole reported once
-    for each type; and of "Diagnostics without fixes" a positional-only
-    parameter passed by name, `E0335` naming the operation, `E0204`
-    naming the feature, `JsonError` alone, `else as e` on a statement,
-    `E0981`'s name and `d.get(k, default)`. The seventh round took the
-    derived impl's diagnostics and the derives' messages (R70), `E0260`
-    for a dependency that `when` excludes (R71), the keyword used as a
-    name, `lambda`, `f"..."`, `class`, `try:` and `go f()` (R72); a
-    dev-dependency is now the black-box tests' (R65), but the package's
-    own code may still import one (its unit tests are compiled with the
-    package). Decided against: a `u32` shifted by an `int` keeps D-016's
-    widening (above, "The sixth round").
+    disagree), explicit discriminants (R78 refuses them with `E0900`
+    until the layouts of `@repr` enums are lowered); and of "Diagnostics
+    without fixes" `E0335` naming the operation and `E0204` naming the
+    feature, and a field's `ty` in a derive's template (above, "The
+    eighth round", open). The eighth round took a test's name (R73), a
+    function named like its module and a parameter that hides a module
+    (R74), a dev-dependency imported by the package's code (R75), `else
+    as e`, `d.get(k, default)`, a positional-only parameter passed by
+    name, `JsonError` alone and `E0981`'s name (R76), an error in a
+    template's instance or in unrolled code, `reflect.construct` of a
+    plain parameter, a derive's hole, a template's interpolated literal,
+    `it` in a list, `result` in `ensures`, `sorted`'s note and `E0405`'s
+    note (R77), a literal beside a `BigInt` or a `Decimal` (R78).
+    Decided against: a `u32` shifted by an `int` keeps D-016's widening
+    (above, "The sixth round"); `it` outside a call's argument, the `own
+    self` method and `zip`'s temporaries (above, "The eighth round").

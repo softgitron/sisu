@@ -1,0 +1,5 @@
+from bookings.clean import clean
+
+## A report, made of cleaned text.
+pub def report() -> String:
+    return "report: {clean("  two bookings ")}"

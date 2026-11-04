@@ -2,6 +2,6 @@ panic: precondition of `Counter.add` failed: amount > 0
     amount > 0
     │
     -1
-  at Tally.Counter.add (trait_contracts.sisu:8:18)
+  at Counter.add for Tally (trait_contracts.sisu:8:18)
   at fill (trait_contracts.sisu:22:5)
   at main (trait_contracts.sisu:29:5)

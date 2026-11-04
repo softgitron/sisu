@@ -1,0 +1,7 @@
+# RULES.md, R74: a function named like the module that declares it is
+# imported by its name, which the module's own name, bound in its parent,
+# gives way to: neither is `E0202`, and the module is still reached by its
+# path.
+[package]
+name = "bookings"
+version = "0.1.0"

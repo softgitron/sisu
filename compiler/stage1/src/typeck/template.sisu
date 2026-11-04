@@ -1690,9 +1690,32 @@ impl Unfold:
     ) -> int ! Unfolding:
         var reps: list[(TextRange, String)] = []
         for x in stmt_exprs(src, s):
+            if self.kept_string(src, s, x):
+                let lit = literal(self.eval(src, x)?) ?? "\"\""
+                reps.push((src.ast.expr(x).range, "{lit}.to_string()"))
+                continue
             self.replacements(src, x, mut reps)?
         self.copy_stmt(src, src.ast.stmt(s).range, reps, depth, mut out)
         return Ok(1)
+
+    ## Whether `x`, the value of the `let` or `var` statement `s` without a
+    ## type, is an interpolated literal of compile-time values only, which
+    ## stays the `String` it is in the template (02) where the instance's
+    ## text is a plain literal, a `str` (RULES.md, R77); where a type is
+    ## expected, a `return`'s or an annotated binding's, the literal takes
+    ## it already.
+    pure def kept_string(self, src: Src, s: StmtId, x: ExprId) -> bool:
+        match src.ast.stmt(s).kind:
+            case StmtKind.Let(_, _, None, _, _):
+                pass
+            case _:
+                return False
+        var interpolated = False
+        if let ExprKind.Str(parts) = src.ast.expr(x).kind:
+            for p in parts:
+                if let StrPart.Interp(_, _, _, _) = p:
+                    interpolated = True
+        return interpolated and self.depends(src, x) and self.is_static(src, x)
 
     pure def comptime_stmt(
         mut self, src: Src, inner: StmtId, depth: int, mut out: String

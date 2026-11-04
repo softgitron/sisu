@@ -1,0 +1,9 @@
+# RULES.md, R77: a change inside a loop over the same list waits for the
+# loop's end, which the note says, where it named the loop's last line as
+# the place to move the change to.
+def main():
+    var xs = [1, 2, 3]
+    for x in xs:
+        if x == 2:
+            xs.push(4)
+        print("{x}")

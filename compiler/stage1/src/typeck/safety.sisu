@@ -250,7 +250,12 @@ impl Checker:
             self.unsafe_regions[k].ops.push(op)
             return
         let m = if f.foreign: Msg.UnsafeForeignCall else: Msg.UnsafeCall
-        var diag = self.error(cx, m, at).with("name", name)
+        # A method of `ptr mut T` is named as the program writes the type,
+        # not by the builtin's name, `ptr_mut` (RULES.md, R76).
+        var shown = name.copy()
+        if shown.starts_with("ptr_mut."):
+            shown = "(ptr mut T).{shown.byte_slice(8, shown.byte_len())}"
+        var diag = self.error(cx, m, at).with("name", shown)
         let end = diag.end
         if let Some(os) = f.obligations:
             if len(os) == 1:

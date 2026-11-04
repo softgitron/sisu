@@ -1,0 +1,22 @@
+# RULES.md, R76: the diagnostics the manual's writers found without a fix
+# or a word: Python's `d.get(k, default)` gets the fix `d.get(k) ?? default`;
+# a positional-only parameter passed by its name gets a note and the fix
+# that passes it by position, and no `E0308` after; a std module's error
+# set written alone is named through its module, by the import's name or
+# with a note that gives the import; and a method of `ptr mut T` is named as
+# the program writes the type.
+from std.mem import ptr
+
+def clamp(value: int, /, low: int, high: int) -> int:
+    return max(low, min(value, high))
+
+def read_back(p: ptr mut int) -> int:
+    return p.read()
+
+def parse(text: str) -> int ! JsonError:
+    return Ok(len(text))
+
+def main():
+    let prices = {"bun": 280}
+    print(prices.get("tea", 0))
+    print(clamp(value=15, low=0, high=10))

@@ -1,0 +1,20 @@
+##! A ledger, whose unit test imports its dev-dependency as it should, and
+##! whose code imports it as it should not.
+
+@cfg(test)
+from fixtures import entries
+from fixtures import expected_total
+
+## The balance of some entries.
+pub def balance(xs: list[int]) -> int:
+    var sum = 0
+    for x in xs:
+        sum += x
+    return sum
+
+## Whether the entries add up to what the fixtures expect.
+pub def as_expected(xs: list[int]) -> bool:
+    return balance(xs) == expected_total()
+
+test "the unit test imports the dev-dependency":
+    assert balance(entries()) == 6

@@ -1,0 +1,6 @@
+from bookings.clean import clean
+from bookings.report import report
+
+def main():
+    print(clean("  sauna at six  "))
+    print(report())

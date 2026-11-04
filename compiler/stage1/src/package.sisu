@@ -69,6 +69,9 @@ pub struct Want:
     pub features: list[(String, TextRange)]
     ## Not `default-features = false`.
     pub defaults: bool
+    ## A `[dev-dependencies]` entry of the package's own, which its tests
+    ## import, not its code (RULES.md, R75).
+    pub dev: bool
 
 impl Want:
     pure def of(dep: Dependency, package: int?, active: bool) -> Want:
@@ -78,6 +81,7 @@ impl Want:
             active=active,
             features=dep.features.copy(),
             defaults=dep.default_features,
+            dev=False,
         )
 
 ## A module of the program: its path, its file and its package.
@@ -426,7 +430,9 @@ impl Loader:
             var owner = index
             if dep.dev and index != 0:
                 owner = 0
-            self.layout.packages[owner].wants.push(Want.of(dep, found, active))
+            var want = Want.of(dep, found, active)
+            want.dev = dep.dev and owner == index
+            self.layout.packages[owner].wants.push(want)
             let d = found else:
                 continue
             if active:
@@ -685,7 +691,12 @@ pub def load_black_box(fs: Fs, disk: str, dir: str, request: FeatureRequest) -> 
         let tested = l.layout.packages[p].name.copy()
         l.layout.packages[0].deps.insert(0, (tested.copy(), p))
         let want = Want(
-            name=tested.copy(), package=Some(p), active=True, features=[], defaults=False
+            name=tested.copy(),
+            package=Some(p),
+            active=True,
+            features=[],
+            defaults=False,
+            dev=False,
         )
         l.layout.packages[0].wants.insert(0, want)
         var features: list[Feature] = []

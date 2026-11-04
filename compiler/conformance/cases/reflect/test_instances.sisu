@@ -2,8 +2,8 @@
 # a test (decisions 251 and 259): a contract in it is `E0807` and a value
 # it returns `E0381`, as in a test written out. Its instance used to be
 # checked as a function, which took the contract for a precondition and
-# named itself in `E0316`. The positions are in each instance's text
-# (`<NAME>/main.sisu`), which `--format=ids` does not name for one file.
+# named itself in `E0316`. Each is placed at the test that made the
+# instance, its name (stage 1's RULES.md, R77), not in the instance's text.
 
 struct Point:
     x: int

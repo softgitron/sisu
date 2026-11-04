@@ -2,6 +2,6 @@ panic: postcondition of `Counter.add` failed: self.total() == old(self.total()) 
     self.total() == old(self.total()) + amount
          │          │                 │ │
          2          0                 1 1
-  at Sloppy.tally.counter.Counter.add (src/main.sisu:16:9)
+  at Counter.add for Sloppy (src/main.sisu:16:9)
   at fill (src/main.sisu:22:5)
   at main (src/main.sisu:30:5)

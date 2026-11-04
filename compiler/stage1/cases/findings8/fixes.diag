@@ -1,0 +1,7 @@
+14:12-14:20 E0981 unsafe.call name="(ptr mut T).read"
+  label 14:12-14:20 unsafe.its-obligations obligations="`valid`, `aligned`"
+16:31-16:40 E0201 resolve.undefined-type name="JsonError"
+21:11-21:31 E0305 type.argument-count name="get" expected="1" found="2"
+  fix type.get-default 21:11-21:31 "prices.get(\"tea\") ?? 0"
+22:17-22:22 E0306 type.unknown-keyword name="clamp" arg="value"
+  fix type.drop-name 22:17-22:23 ""

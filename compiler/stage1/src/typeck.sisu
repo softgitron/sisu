@@ -487,7 +487,7 @@ pub pure def check_file(
     keep: bool,
 ) -> Checked:
     let module = InputModule(path=[], file=String.new(), text=text.to_string(), package=0)
-    let package = SourcePackage(name=String.new(), deps=[], trusted=True, excluded=[])
+    let package = SourcePackage(name=String.new(), deps=[], trusted=True, excluded=[], dev_only=[])
     let features = [Features.none()]
     return check_program(
         base, [module], [package], catalog, name_error, [], embedded, keep, False, True, features
@@ -508,7 +508,7 @@ pub pure def resolve_file(base: Base, text: str, catalog: Catalog) -> Program:
             sources.push(source_of(module, text))
     var r = base.resolver.copy()
     r.tests = True
-    let package = SourcePackage(name=String.new(), deps=[], trusted=True, excluded=[])
+    let package = SourcePackage(name=String.new(), deps=[], trusted=True, excluded=[], dev_only=[])
     r.add_program(sources, [package], base.templates)
     return r.prog
 
@@ -1230,6 +1230,13 @@ pure def finish_file(
         if moved.is_empty():
             continue
         files[k].1 = stay
+        # A hole in a derive's template is the template's, reported once
+        # at the hole when the module writes it there (RULES.md, R77).
+        var parent_text = text.to_string()
+        for j in range(len(files)):
+            if j < len(file_modules) and file_modules[j] == parent and parent != r.prog.root:
+                parent_text = files[j].0.copy()
+        moved = once_at_template_hole(moved, parent_text)
         if parent == r.prog.root:
             for x in moved:
                 kept.push(x.copy())
@@ -1242,6 +1249,57 @@ pure def finish_file(
                         ds.push(x.copy())
                     sort_unique(mut ds, catalog)
                     files[j].1 = ds
+    # A diagnostic in a template's instance goes to the call that made it
+    # (RULES.md, R77), through the calls in instances, to the first in a
+    # module the program wrote.
+    for k in range(len(files)):
+        if k >= len(file_modules) or files[k].1.is_empty():
+            continue
+        let origin = r.instance_sites.get(file_modules[k]) else:
+            continue
+        let (first_site, first_at, made) = origin
+        let name = made.copy()
+        var site = first_site
+        var at = first_at
+        var hops = 0
+        while hops < 16:
+            let (outer, outer_at, _) = r.instance_sites.get(site) else:
+                break
+            site = outer
+            at = outer_at
+            hops += 1
+        var target: int? = None
+        if site == r.prog.root:
+            target = Some(-1)
+        for j in range(len(file_modules)):
+            if file_modules[j] == site and j != k:
+                target = Some(j)
+        let t = target else:
+            continue
+        # What the names pass, the lexer and the parser find is the
+        # template's own text, written in the instance where the program
+        # wrote it: it stays.
+        var moved: list[Diagnostic] = []
+        var stay: list[Diagnostic] = []
+        for d in files[k].1:
+            let id = d.msg.id()
+            if id.starts_with("lex.") or id.starts_with("parse.") or id.starts_with("resolve."):
+                stay.push(d.copy())
+            else:
+                moved.push(placed_at_call(d, at, name, files[k].0))
+        files[k].1 = stay
+        if moved.is_empty():
+            continue
+        if t < 0:
+            for x in moved:
+                kept.push(x.copy())
+            sort_unique(mut kept, catalog)
+        else:
+            var ds = files[t].1.copy()
+            for x in moved:
+                ds.push(x.copy())
+            sort_unique(mut ds, catalog)
+            files[t].1 = ds
     var file_names: list[String] = []
     for m in file_modules:
         file_names.push(file_name_of(r, m))
@@ -1303,6 +1361,60 @@ pure def placed_at_derive(d: Diagnostic, origins: list[DeriveOrigin], text: str)
         ]
         return Some(x.note_params(Msg.TypeDerivedCode, params))
     return None
+
+## The diagnostics moved to the derives of a module, `moved`, with each
+## typed hole of a template once: at the hole the module's `text` writes,
+## when it writes it once, or else at the first derive that reached it.
+pure def once_at_template_hole(moved: list[Diagnostic], text: str) -> list[Diagnostic]:
+    var out: list[Diagnostic] = []
+    var seen: list[String] = []
+    for x in moved:
+        if x.msg != Msg.TypeHole:
+            out.push(x.copy())
+            continue
+        let name = x.param("name") ?? String.new()
+        if seen.contains(name):
+            continue
+        seen.push(name.copy())
+        let written = "todo(\"{name}\")"
+        let found = text.find(written)
+        var placed = x.copy()
+        if let Some(at) = found:
+            let rest = text.byte_slice(at + written.byte_len(), text.byte_len())
+            if rest.find(written).is_none():
+                placed = Diagnostic.new(x.msg, at, at + written.byte_len())
+                placed.params = x.params.copy()
+        out.push(placed)
+    return out
+
+## A diagnostic of a template's instance, at `d.start` of the text the
+## compiler wrote for it, placed at the call `at` that made the instance
+## `name` (RULES.md, R77): its message and parameters, a note with the line
+## of the instance it is about, and neither its labels nor its fixes, which
+## point into code the program does not have.
+pure def placed_at_call(d: Diagnostic, at: TextRange, name: str, text: str) -> Diagnostic:
+    var line_start = d.start
+    while line_start > 0 and text.byte_at(line_start - 1) != 10:
+        line_start -= 1
+    var line_end = d.start
+    while line_end < text.byte_len() and text.byte_at(line_end) != 10:
+        line_end += 1
+    let line = text.byte_slice(line_start, line_end).trim()
+    var x = Diagnostic.new(d.msg, at.start, at.end)
+    x.params = d.params.copy()
+    let params = [
+        Param(name="name".to_string(), value=name.to_string()),
+        Param(name="code".to_string(), value=line.to_string()),
+    ]
+    x = x.note_params(Msg.TypeInstanceCode, params)
+    # A borrowed parameter given on where a value is owned, as by
+    # `reflect.construct(T, {"name": name})`: the template takes it `own`.
+    if d.msg == Msg.TypeMismatch:
+        let found = d.param("found") ?? String.new()
+        let expected = d.param("expected") ?? String.new()
+        if found.starts_with("ref ") and not expected.starts_with("ref "):
+            x = x.note(Msg.TypeInstanceOwns)
+    return x
 
 ## Whether a message is one of `sisu lint`'s (R11).
 pub pure def is_lint(m: Msg) -> bool:

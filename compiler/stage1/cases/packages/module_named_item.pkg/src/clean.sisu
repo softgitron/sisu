@@ -1,0 +1,3 @@
+## The text without the spaces around it.
+pub def clean(text: str) -> String:
+    return text.trim().to_string()

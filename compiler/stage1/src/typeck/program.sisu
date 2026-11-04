@@ -358,6 +358,11 @@ pub struct ModuleData:
     ## The names an import bound here, with the import's visibility (a
     ## `pub` import re-exports).
     pub imported: dict[String, Vis]
+    ## The child modules linked in the module by their names (09: a
+    ## directory's files), which an import path goes through also when a
+    ## declaration or an import of the module took the name (RULES.md,
+    ## R74).
+    pub children: dict[String, ModuleId]
     ## The package the module belongs to (an index of `Program.packages`):
     ## `ROOT_PACKAGE` for the program's own code, `STD_PACKAGE` for the
     ## standard library, and the others for the dependencies.
@@ -381,6 +386,7 @@ impl ModuleData:
             is_std=is_std,
             parent=None,
             imported={},
+            children={},
             package=package,
             path=[],
             file=String.new(),
@@ -407,6 +413,9 @@ pub struct PackageData:
     pub root: ModuleId?
     ## The dependencies whose `when` excludes the target (RULES.md, R71).
     pub excluded: list[String]
+    ## Its own dev-dependencies, which only its `@cfg(test)` imports name
+    ## (RULES.md, R75).
+    pub dev_only: list[String]
 
 ## Definitions of the prelude that the checker refers to by role.
 pub struct WellKnown:

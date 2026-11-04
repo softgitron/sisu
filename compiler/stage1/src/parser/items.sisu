@@ -531,6 +531,20 @@ impl Parser:
                     if not self.eat(SyntaxKind.Comma):
                         break
                 _ = self.expect(SyntaxKind.RParen)
+            elif self.at(SyntaxKind.Eq):
+                # An explicit discriminant, `Red = 1`, which 03 gives and
+                # stage 1 does not lower yet (RULES.md, R78).
+                let (start, _) = self.current_range()
+                var end = start
+                self.start(SyntaxKind.Error)
+                while not self.at_line_end():
+                    let (_, e) = self.current_range()
+                    end = e
+                    self.bump()
+                self.finish_node()
+                var d = Diagnostic.new(Msg.Stage0Unsupported, start, end)
+                d = d.with("construct", "an explicit discriminant of an enum's variant")
+                self.report(d.with("phase", "the layouts of `@repr` enums (03, 12)"))
             self.end_stmt()
             self.finish_node()
         elif not self.item_body(cp):
@@ -657,7 +671,7 @@ impl Parser:
         let keyword = if kind == SyntaxKind.BenchDef: "bench" else: "test"
         self.bump()
         if self.at(SyntaxKind.StringStart):
-            self.string_expr()
+            self.name_string()
         else:
             _ = self.expect(SyntaxKind.StringStart)
         if self.eat(SyntaxKind.ForKw):
@@ -669,11 +683,60 @@ impl Parser:
         self.colon_block(keyword, line)
         self.finish_node()
 
+    ## The name of a test, a suite or a benchmark, a string literal whose
+    ## text is fixed (RULES.md, R73): an interpolation in it is `E0132`,
+    ## with the fix that writes its braces as text, and what it holds is
+    ## kept unparsed.
+    pure def name_string(mut self):
+        self.start(SyntaxKind.StringExpr)
+        self.bump()
+        while True:
+            match self.current():
+                case StringText:
+                    self.bump()
+                case InterpStart:
+                    let (start, _) = self.current_range()
+                    self.start(SyntaxKind.Interpolation)
+                    self.bump()
+                    self.start(SyntaxKind.Error)
+                    var depth = 0
+                    var end = start + 1
+                    while True:
+                        let k = self.current()
+                        if k == SyntaxKind.Newline or k == SyntaxKind.Eof:
+                            break
+                        if k == SyntaxKind.InterpEnd and depth == 0:
+                            break
+                        if k == SyntaxKind.InterpStart:
+                            depth += 1
+                        elif k == SyntaxKind.InterpEnd:
+                            depth -= 1
+                        self.bump()
+                    self.finish_node()
+                    if self.at(SyntaxKind.InterpEnd):
+                        let (_, e) = self.current_range()
+                        end = e
+                        self.bump()
+                    self.finish_node()
+                    let written = self.text.byte_slice(start, end)
+                    let braces = written.replace("{{", "{{{{").replace("}}", "}}}}")
+                    let d = Diagnostic.new(Msg.ParseInterpolatedName, start, end)
+                    self.report(d.fix_at(Msg.ParseNameBraces, start, end, braces))
+                case StringEnd:
+                    self.bump()
+                    break
+                case _:
+                    break
+        self.finish_node()
+
     pure def suite_def(mut self, cp: int):
         self.start_at(cp, SyntaxKind.SuiteDef)
         let line = self.current_line()
         self.bump()
-        self.string_expr()
+        if self.at(SyntaxKind.StringStart):
+            self.name_string()
+        else:
+            self.string_expr()
         self.colon_members("suite", line, Members.Items)
         self.finish_node()
 

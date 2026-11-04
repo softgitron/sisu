@@ -1,0 +1,20 @@
+# RULES.md, R77: the notes the manual's writers found missing. `it` makes a
+# closure of a call's argument only; `result` in `ensures` of a function
+# that returns `T ! E` is the whole result; `sorted` of items that are not
+# `Copy` gives references, where a list sorts itself in place (the change
+# inside a loop is `loop_change.sisu`'s).
+error Bad:
+    Negative
+
+def heat(x: int) -> int:
+    return x + 1
+
+def positive(x: int) -> int ! Bad:
+    ensures result > 0
+    if x < 0:
+        return Err(Bad.Negative)
+    return Ok(x)
+
+def main():
+    let steps: list[(int) -> int] = [heat, it - 15]
+    let names = sorted(["b".to_string(), "a".to_string()])

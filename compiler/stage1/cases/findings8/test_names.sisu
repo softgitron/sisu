@@ -1,0 +1,9 @@
+# RULES.md, R73: the name of a test, a suite or a benchmark is fixed text,
+# so an interpolation in it is `E0132`, with the fix that writes its braces
+# as text (`test_names_text.sisu` has the names that are text).
+test "len({3, 1})":
+    assert len([3, 1]) == 2
+
+suite "the {kind} cases":
+    test "inside":
+        assert True

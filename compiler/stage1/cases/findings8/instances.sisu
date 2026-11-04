@@ -1,0 +1,29 @@
+# RULES.md, R77: a diagnostic in a template's instance is placed at the call
+# that made it, with a note that gives the instance's line, where it was in
+# the module the compiler wrote; and a hole in a derive's template is
+# reported once, at the hole, not at each derive.
+struct User:
+    name: String
+
+def make[T](name: String) -> T:
+    return reflect.construct(T, {"name": name})
+
+trait Csv:
+    def row(self) -> String
+
+    comptime def derive(T: type) -> impl Csv for T:
+        return impl Csv for T:
+            def row(self) -> String:
+                return todo("row")
+
+@derive(Csv)
+struct Sauna:
+    name: String
+
+@derive(Csv)
+struct Stove:
+    kilowatts: int
+
+def main():
+    let u: User = make[User]("Aino".to_string())
+    print(u.name)

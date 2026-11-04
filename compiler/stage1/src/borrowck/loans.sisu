@@ -1617,7 +1617,14 @@ impl Analysis:
         if let Some(l) = later_loc:
             fd = fd.label(Some(l), Msg.BorrowLaterUsed, [])
         if not gone:
-            fd = fd.note(Msg.BorrowMoveAfter, [text("end", end)])
+            # In a loop that the borrow lasts through, the line it ends on
+            # is the loop's last, so the change goes after the loop
+            # (RULES.md, R77).
+            if self.in_loop_of(f, b, y):
+                let shown = place_name(types, f, shorten(name_place))
+                fd = fd.note(Msg.BorrowLoopEnds, [param("name", shown), text("end", end)])
+            else:
+                fd = fd.note(Msg.BorrowMoveAfter, [text("end", end)])
         elif is_named(f, name_place.local):
             fd = fd.note(
                 Msg.BorrowDeclareOutside, [param("name", place_name(types, f, shorten(name_place)))]
@@ -1625,6 +1632,34 @@ impl Analysis:
         else:
             fd = fd.note(Msg.BorrowBindTemporary, [])
         return Some(fd)
+
+    ## Whether block `b` is in a loop that does not make loan `y` again:
+    ## `b` reaches itself, and not the block whose statement makes `y`.
+    pure def in_loop_of(self, f: Function, b: int, y: int) -> bool:
+        var maker: int? = None
+        for (k, m) in self.made.items():
+            if m.rvalue == Some(y):
+                maker = Some(k // 1000000)
+        var seen: list[bool] = []
+        for _ in range(len(f.blocks)):
+            seen.push(False)
+        var queue = targets(f.blocks[b])
+        var head = 0
+        var looped = False
+        while head < len(queue):
+            let t = queue[head]
+            head += 1
+            if t < 0 or t >= len(f.blocks) or seen[t]:
+                continue
+            seen[t] = True
+            if Some(t) == maker:
+                return False
+            if t == b:
+                looped = True
+            if not f.blocks[t].cleanup:
+                for n in targets(f.blocks[t]):
+                    queue.push(n)
+        return looped
 
     ## The last source line at which loan `y` is live: where the borrow
     ## ends, for the message (in a loop that uses it at its head, the end of

@@ -1,0 +1,14 @@
+# RULES.md, R76: `else` after a statement that is no `let` belongs to a
+# `let`, which the note says, and a statement that handles only the error
+# is `if let Err(e) = ...`, which the fix writes.
+error SaveError:
+    Full
+
+def save(x: int) -> () ! SaveError:
+    if x > 3:
+        return Err(SaveError.Full)
+    return Ok(())
+
+def main():
+    save(4) else as e:
+        print("not saved")

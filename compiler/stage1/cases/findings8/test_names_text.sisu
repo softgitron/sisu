@@ -1,0 +1,8 @@
+# RULES.md, R73: an escape and a doubled brace in a test's name are text,
+# as in any string.
+test "a \"quoted\" name and a brace {{":
+    assert True
+
+suite "the {{kind}} cases":
+    test "inside":
+        assert 1 + 1 == 2

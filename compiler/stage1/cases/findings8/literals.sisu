@@ -1,0 +1,11 @@
+# RULES.md, R78: a literal beside a `BigInt` or a `Decimal` takes its type
+# through `FromLiteral` (D-076), when the operator has no impl for the
+# literal's own type, on either side.
+from std.num import BigInt, Decimal
+
+def main():
+    let f = BigInt.parse("10").unwrap()
+    let d = Decimal.parse("1.5").unwrap()
+    print(f * 2)
+    print(2 * f + 1)
+    print(d + 0.25)

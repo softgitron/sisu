@@ -740,6 +740,8 @@ impl Resolver:
         let m = self.declare_generated_in(module, "<{what}>", text)
         self.instances_declared += 1
         _ = self.instance_modules.add(m)
+        let (site_module, site_at) = site
+        _ = self.instance_sites.insert(m, (site_module, site_at, what.to_string()))
         # The types, by the names the unfolded code uses.
         for (alias, t) in aliases:
             let d = self.new_def(m, alias, TextRange.empty(0), Vis.Private, DefKind.TypeAlias(t))

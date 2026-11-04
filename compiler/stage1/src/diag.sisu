@@ -550,6 +550,24 @@ pub enum Msg:
     TypeDecimalQuotient
     ResolveFloatAttribute
     ComptimeWriteFor
+    # Stage 1's eighth round (RULES.md, R73 on).
+    ParseInterpolatedName
+    ParseNameBraces
+    ParseElseNeedsLet
+    ResolveDevDependency
+    ResolveDevDependencyTests
+    ResolveQualifyType
+    ResolveStdTypeImport
+    TypeHiddenModule
+    TypePositionalOnly
+    TypeDropName
+    TypeGetDefault
+    TypeInstanceCode
+    TypeCompareResult
+    TypeItArgumentOnly
+    BorrowLoopEnds
+    BorrowSortedRefs
+    TypeInstanceOwns
 
 impl Msg:
     ## The catalog identifier.
@@ -1082,6 +1100,23 @@ impl Msg:
             case TypeDecimalQuotient: "type.decimal-quotient"
             case ResolveFloatAttribute: "resolve.float-attribute"
             case ComptimeWriteFor: "comptime.write-comptime-for"
+            case ParseInterpolatedName: "parse.interpolated-name"
+            case ParseNameBraces: "parse.name-braces"
+            case ParseElseNeedsLet: "parse.else-needs-let"
+            case ResolveDevDependency: "resolve.dev-dependency"
+            case ResolveDevDependencyTests: "resolve.dev-dependency-tests"
+            case ResolveQualifyType: "resolve.qualify-type"
+            case ResolveStdTypeImport: "resolve.std-type-import"
+            case TypeHiddenModule: "type.hidden-module"
+            case TypePositionalOnly: "type.positional-only"
+            case TypeDropName: "type.drop-name"
+            case TypeGetDefault: "type.get-default"
+            case TypeInstanceCode: "type.instance-code"
+            case TypeCompareResult: "type.compare-result"
+            case TypeItArgumentOnly: "type.it-argument-only"
+            case BorrowLoopEnds: "borrow.loop-ends"
+            case BorrowSortedRefs: "borrow.sorted-refs"
+            case TypeInstanceOwns: "type.instance-owns"
 
 ## A byte range of a text: from `start` up to, not including, `end`.
 @derive(Eq, Hash, Debug, Copy)
