@@ -284,7 +284,7 @@ fn sisu_test_reports_a_program_as_sisu_run_does() {
 /// tests to `expect.fail`, `expect.fail_compare` and `expect.fail_parts`
 /// (its R38; `tests/expect/expect.sir`, what its `sir --tests` prints of its
 /// case `testing/expect`): the interpreter records each in the running
-/// test's report as `assert`'s panic would be, at its statement, and the
+/// test's report as a failed expectation (decision 545), at its statement, and the
 /// test goes on to its end, where it fails with all three; a plain run of
 /// the same SIR, whose `expect` holds, prints and exits with 0 (decision
 /// 388).
@@ -301,13 +301,13 @@ fn expect_records_its_failures_and_the_test_goes_on() {
     };
     let (out, status) = run(&["test", "--from-sir", "expect.sir"]);
     assert_eq!(status, Some(1), "{out}");
-    let failures: Vec<&str> = out.lines().filter(|l| l.starts_with("panic: assertion failed: ")).collect();
+    let failures: Vec<&str> = out.lines().filter(|l| l.starts_with("expectation failed: ")).collect();
     assert_eq!(
         failures,
         [
-            "panic: assertion failed: double(2) == 5",
-            "panic: assertion failed: four > 5",
-            "panic: assertion failed: even(double(3) + 1)",
+            "expectation failed: double(2) == 5",
+            "expectation failed: four > 5",
+            "expectation failed: even(double(3) + 1)",
         ],
         "{out}"
     );
