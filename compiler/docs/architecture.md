@@ -9107,7 +9107,12 @@ replay"; decision 501)
      code reads (decision 253). `sum` takes its items' size from its
      result's type. The seed grows from 572 380 to 586 692 bytes of SIR
      and the runtime's object from 591 240 to 617 856 bytes
-     (`target/rt/rt.o`). This changes no rule of the language.
+     (`target/rt/rt.o`), and as the fixed point builds it with the Sisu
+     backend from 1 106 688 to 1 147 096 bytes; the fixed point holds
+     (rt-A.o and rt-B.o the same bytes, as sisu2-A and sisu2-B,
+     31 464 040, and stage1-A and stage1-B, 61 475 288, which carry
+     decisions 540 and 543's lowering too). This changes no rule of the
+     language.
 
 **The native checked memory model, begun** (sections "The checked memory
 model" and "Raw memory, foreign calls and the machine intrinsics"; 22;
