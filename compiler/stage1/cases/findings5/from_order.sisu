@@ -1,0 +1,19 @@
+# RULES.md, R48: `E0413` offers the `from` clause first when the body
+# returns a borrowed parameter or a part of one, which the clause fits and
+# a `String` result would copy, and the `String` result first when the
+# body returns text it makes, as R24 has it.
+
+def longer(a: str, b: str) -> str:
+    if len(a) >= len(b):
+        return a
+    return b
+
+def tail(a: str, b: str) -> str:
+    return if len(a) > 0: a.trim() else: b.trim_start()
+
+def joined(a: str, b: str) -> str:
+    let both = "{a}{b}"
+    return both
+
+def main():
+    print(longer("ab", "c"))

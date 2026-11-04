@@ -307,34 +307,51 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             sys.fs.write_text(Path.new("{out_dir}/{n}.types"), out)?
             sys.fs.write_text(Path.new("{out_dir}/{n}.beyond"), why)?
         return Ok(())
-    if command == "sir" and len(rest) <= 4:
+    if command == "sir":
         # `--contracts=LEVEL`: the contracts lowering checks (07), all of
         # them by default, as `sisu sir --contracts=LEVEL` lowers.
+        # `--features NAMES`, `--no-default-features` and `--locked` choose
+        # the root package's features and keep the lockfile, as `check`
+        # takes them (decision 250; RULES.md, R47).
+        let (request, given) = feature_request(rest)
         var level = CONTRACTS_ALL
         var words: list[String] = []
-        for w in rest:
+        for w in given:
             if w.starts_with("--contracts="):
-                let given = w.byte_slice(12, w.byte_len())
-                let l = contract_level(given) else:
-                    let params = [Param(name="value".to_string(), value=given.to_string())]
+                let chosen = w.byte_slice(12, w.byte_len())
+                let l = contract_level(chosen) else:
+                    let params = [Param(name="value".to_string(), value=chosen.to_string())]
                     emit("", catalog.plain_error("cli.bad-contract-level", params))
                     return Err(Failed)
                 level = l
             else:
                 words.push(w.copy())
+        let flags = [
+            "--partial",
+            "--accept-unsafe",
+            "--tests",
+            "--locked",
+            "--no-default-features",
+            "--format=ids",
+            "--format=human",
+        ]
         # The program's path, or the package of the working directory or
         # the nearest one above it, as `sisu sir` reads it when it names
         # none; its lockfile written as stage 0 writes it (09).
-        var path = path_of(words, ["--partial", "--accept-unsafe", "--tests"]) else:
+        var path = path_of(words, flags) else:
             return Err(Usage(text=usage()))
-        if not names_path(words, ["--partial", "--accept-unsafe", "--tests"]):
+        if not names_path(words, flags):
             let found = nearest_package(sys, "sir", catalog) else:
                 return Err(Failed)
             path = found
         if let Some(e) = workspace_run_error(sys, path, catalog):
             emit("", e)
             return Err(Failed)
-        if not write_lockfile(sys, path, True, False, words.contains("--accept-unsafe"), catalog)?:
+        if let Some(e) = unknown_feature(sys, path, request):
+            emit("", catalog.plain_error("cli.unknown-feature", e))
+            return Err(Failed)
+        let accept = words.contains("--accept-unsafe")
+        if not write_lockfile(sys, path, True, words.contains("--locked"), accept, catalog)?:
             return Err(Failed)
         let base = base_of(sys, home, std_texts(sys, home)?, catalog)
         var kept = Kept.new()
@@ -347,6 +364,26 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         # `sisu bench` run it, its tests' tags and its benchmarks written
         # (decision 285).
         let tests = words.contains("--tests")
+        if tests and not partial:
+            # What `sisu test` runs (decision 357), from one check of the
+            # program: a program with an error of a phase is not run, as
+            # `sisu test` says (RULES.md, R46); another has its SIR, and
+            # its warnings on standard error, in the form `check` prints
+            # them (RULES.md, R47).
+            let ids = words.contains("--format=ids")
+            let input = app_input(sys, home, path, True, request, mut env, catalog)? else:
+                return Ok(())
+            var built = input.copy()
+            built.contracts = level
+            let (r, sir) = report_with(base, built, path, catalog, mut kept, True)
+            if let Some(why) = refusal(r, catalog, ids):
+                emit("", why)
+                return Err(Failed)
+            var warned = r.human(catalog)
+            if ids:
+                warned = r.ids(catalog)
+            emit(sir, warned)
+            return Ok(())
         let done = lowering_of(
             sys,
             home,
@@ -359,19 +396,9 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             Some(level),
             False,
             tests,
+            request,
             mut kept,
         )?
-        if tests and done.refused and not partial:
-            # What `sisu test` runs (decision 357): a program with an error
-            # of a phase is not run, as `sisu test` says (RULES.md, R46).
-            var why = String.new()
-            if let Some(input) = app_input(sys, home, path, True, mut env, catalog)?:
-                var built = input.copy()
-                built.contracts = level
-                let r = report_of(base, built, path, catalog, mut kept)
-                why = refusal(r, catalog) ?? String.new()
-            emit("", why)
-            return Err(Failed)
         var errs = String.new()
         for b in done.beyond:
             errs.push("beyond the slice: {b}\n")
@@ -394,6 +421,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             None,
             True,
             False,
+            FeatureRequest.none(),
             mut kept,
         )?
         var errs = String.new()
@@ -435,6 +463,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
                 Some(level ?? CONTRACTS_ALL),
                 level.is_none() and not tests,
                 tests,
+                FeatureRequest.none(),
                 mut kept,
             )?
             var reasons = String.new()
@@ -1427,6 +1456,7 @@ def lowering_of(
     sir: int?,
     ownership: bool,
     tests: bool,
+    request: FeatureRequest,
     mut kept: Kept,
 ) -> Lowering ! IoError:
     var done = Lowering(
@@ -1451,7 +1481,7 @@ def lowering_of(
     if not sir_done:
         # The program built without its tests, or with them: a file's, a
         # package's, or a workspace's one application.
-        if let Some(input) = app_input(sys, home, arg, tests, mut env, catalog)?:
+        if let Some(input) = app_input(sys, home, arg, tests, request, mut env, catalog)?:
             var built = input.copy()
             built.contracts = level
             let one = sir_of(sys, base, built, catalog, mut times, partial, mut kept)
@@ -1468,14 +1498,19 @@ def lowering_of(
 ## The program `sir` builds of what `arg` names, with its tests or without
 ## them: a file's, a package's, or a workspace's one application.
 def app_input(
-    sys: System, home: str, arg: str, tests: bool, mut env: Environment, catalog: Catalog
+    sys: System,
+    home: str,
+    arg: str,
+    tests: bool,
+    request: FeatureRequest,
+    mut env: Environment,
+    catalog: Catalog,
 ) -> Input? ! IoError:
-    if let Some(layouts) = layouts_of(sys, arg, True, FeatureRequest.none()):
+    if let Some(layouts) = layouts_of(sys, arg, True, request):
         if len(layouts) == 1 and not layouts[0].modules.is_empty():
             return Ok(Some(layout_input(sys, home, layouts[0], tests, mut env, catalog)?))
         return Ok(None)
-    let none = FeatureRequest.none()
-    let built = inputs_of(sys, home, arg, False, tests, none, mut env, catalog)?
+    let built = inputs_of(sys, home, arg, False, tests, request, mut env, catalog)?
     if let Some(x) = built.first():
         return Ok(Some(x.copy()))
     return Ok(None)
@@ -1776,10 +1811,21 @@ pure def problems_report(layout: Layout, catalog: Catalog) -> Report:
 pure def report_of(
     base: typeck.Base, input: Input, name: str, catalog: Catalog, mut kept: Kept
 ) -> Report:
+    let (r, _) = report_with(base, input, name, catalog, mut kept, False)
+    return r
+
+## `report_of`'s report, and with `sir` the SIR of the program it checked
+## when it has no error and is within the slice (empty otherwise): the
+## program after the ownership checker's drops, its `comptime` values and
+## its holes' closures, as `sir` prints it, from the one check (RULES.md,
+## R47).
+pure def report_with(
+    base: typeck.Base, input: Input, name: str, catalog: Catalog, mut kept: Kept, sir: bool
+) -> (Report, String):
     let checked = check_input(base, input, catalog, True)
     var report = front_report(input, checked, name, catalog)
     if report.has_error:
-        return report
+        return (report, String.new())
     # The ownership checker runs when the front end found no error.
     let program = program_files(input, checked)
     var consuming: dict[String, String] = {}
@@ -1788,11 +1834,11 @@ pure def report_of(
     let lowered = lower_of(
         checked, base, input.modules[0].file, input.contracts, catalog, mut kept
     ) else:
-        return report
+        return (report, String.new())
     if not lowered.beyond.is_empty():
         for b in lowered.beyond:
             report.beyond.push("beyond the slice of lowering: {b}")
-        return report
+        return (report, String.new())
     var done = borrowck.check_with(lowered.program, True, mut kept.placed)
     let by_source = files_by_source(lowered, program)
     match borrowck.diagnostics_by_file(done.findings, by_source, len(program), catalog):
@@ -1807,9 +1853,11 @@ pure def report_of(
             )
     # The compiler runs the `comptime` expressions of a program the
     # ownership checker accepts (08); one that fails is an error at it.
+    var evaluated_all = False
     if done.findings.is_empty():
         simplify.program(mut done.program)
         let evaluated = interp.evaluate(mut done.program, catalog)
+        evaluated_all = evaluated.beyond.is_empty()
         for why in evaluated.beyond:
             report.beyond.push(why.copy())
         for e in evaluated.errors:
@@ -1831,7 +1879,14 @@ pure def report_of(
         if catalog.is_error(x.diag.msg):
             report.has_error = True
     sort_filed(mut report.diags, catalog, True)
-    return report
+    var text = String.new()
+    if sir and evaluated_all and not report.has_error and report.beyond.is_empty():
+        # Each typed hole prints its closure where a run reaches it
+        # (RULES.md, R27), once the checker is done with the program.
+        let hole = Param(name="hole".to_string(), value="{{hole}}".to_string())
+        holes.close(mut done.program, catalog.render("panic.hole-closure", [hole]))
+        text = write.write(done.program)
+    return (report, text)
 
 ## The front end's part of what `check` prints of a checked program
 ## (stage 0's `Db::checked`): the syntax diagnostics of each module, the
@@ -2337,23 +2392,15 @@ def test_program(
 ) -> (int, bool) ! IoError:
     var built = input.copy()
     built.contracts = CONTRACTS_ALL
-    let r = report_of(base, built, path, catalog, mut kept)
-    if let Some(why) = refusal(r, catalog):
+    let (r, sir) = report_with(base, built, path, catalog, mut kept, True)
+    if let Some(why) = refusal(r, catalog, False):
         emit("", why)
         return Ok((1, False))
-    emit("", r.front(catalog, Some(False)).human(catalog))
-    var times = SirTimes(check=0, lower=0, ownership=0)
-    let done = sir_of(sys, base, built, catalog, mut times, False, mut kept)
-    if not done.beyond.is_empty():
-        var why = String.new()
-        for b in done.beyond:
-            why.push("beyond the slice: {b}\n")
-        emit("", why)
-        return Ok((1, False))
+    emit("", r.human(catalog))
     let exe = output_for(built.disk, built.package_name, built.build_root.copy(), False)
     _ = sys.fs.create_dir(Path.new(parent(exe)))
     let sir_file = "{exe}.sir"
-    sys.fs.write_text(Path.new(sir_file), done.sir)?
+    sys.fs.write_text(Path.new(sir_file), sir)?
     let sisu = "{home}/target/release/sisu"
     var args: list[str] = ["test", "--from-sir", sir_file]
     for i in range(len(runner)):
@@ -2379,31 +2426,32 @@ def test_program(
 ## the front end's diagnostics and `D0006` at its errors; else its
 ## warnings, then the failed `comptime` expressions and `D0006`, or the
 ## ownership checker's errors and `D0021`, or why stage 1 cannot tell;
-## `None` when it runs.
-pure def refusal(r: Report, catalog: Catalog) -> String?:
+## `None` when it runs. With `ids`, the diagnostics are in the conformance
+## form, as `check --format=ids` prints them (RULES.md, R47).
+pure def refusal(r: Report, catalog: Catalog, ids: bool) -> String?:
     let front = r.front(catalog, None)
     let errors = front.errors(catalog)
     var beyond = String.new()
     for b in r.beyond:
         beyond.push("beyond the slice: {b}\n")
     if errors > 0:
-        var errs = front.human(catalog)
+        var errs = shown_report(front, catalog, ids)
         let count = Param(name="count".to_string(), value="{errors}")
         errs.push(catalog.plain_error("cli.errors-found", [count]))
         errs.push(beyond)
         return Some(errs)
-    var errs = r.front(catalog, Some(False)).human(catalog)
+    var errs = shown_report(r.front(catalog, Some(False)), catalog, ids)
     let evaluation = r.evaluation()
     let failed = evaluation.errors(catalog)
     if failed > 0:
-        errs.push(evaluation.human(catalog))
+        errs.push(shown_report(evaluation, catalog, ids))
         let count = Param(name="count".to_string(), value="{failed}")
         errs.push(catalog.plain_error("cli.errors-found", [count]))
         return Some(errs)
     let ownership = r.ownership()
     let owned = ownership.errors(catalog)
     if owned > 0:
-        errs.push(ownership.human(catalog))
+        errs.push(shown_report(ownership, catalog, ids))
         let count = Param(name="count".to_string(), value="{owned}")
         errs.push(catalog.plain_error("cli.ownership-errors", [count]))
         return Some(errs)
@@ -2411,6 +2459,12 @@ pure def refusal(r: Report, catalog: Catalog) -> String?:
         errs.push(beyond)
         return Some(errs)
     return None
+
+## A report in the conformance form with `ids`, else the human one.
+pure def shown_report(r: Report, catalog: Catalog, ids: bool) -> String:
+    if ids:
+        return r.ids(catalog)
+    return r.human(catalog)
 
 ## The counts of the runner's last line, `N passed, M failed, K blocked`.
 def test_summary(out: str) -> (int, int, int)?:

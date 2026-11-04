@@ -2549,6 +2549,18 @@ impl bytes:
     @internal
     @intrinsic("bytes.cut")
     pure def cut(self, start: int, end: int) -> bytes
+    ## `b[^k]`: the byte `k` from the end.
+    @internal
+    pure def at_end(self, k: int) -> u8:
+        return self.at(len(self) - k)
+    ## `b[start:end]` with a bound counted from the end (`^k`) where its
+    ## flag says so, and a bound left out the least `int`.
+    @internal
+    pure def cut_end(self, start: int, start_end: bool, end: int, end_end: bool) -> bytes:
+        let n = len(self)
+        let lo = if start_end: n - start else: start
+        let hi = if end_end: n - end else: end
+        return self.cut(lo, hi)
 
 impl Len for bytes:
     @intrinsic("len")
@@ -2593,6 +2605,18 @@ impl[T] Slice[T]:
     @internal
     @intrinsic("Slice.cut")
     pure def cut(self, start: int, end: int) -> Slice[T]
+    ## `s[^k]`: a reference to the value `k` from the end.
+    @internal
+    pure def at_end(self, k: int) -> ref T:
+        return self.at(len(self) - k)
+    ## `s[start:end]` with a bound counted from the end (`^k`) where its
+    ## flag says so, and a bound left out the least `int`.
+    @internal
+    pure def cut_end(self, start: int, start_end: bool, end: int, end_end: bool) -> Slice[T]:
+        let n = len(self)
+        let lo = if start_end: n - start else: start
+        let hi = if end_end: n - end else: end
+        return self.cut(lo, hi)
 
 impl[T] Len for Slice[T]:
     @intrinsic("len")

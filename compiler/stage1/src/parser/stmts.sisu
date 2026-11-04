@@ -61,6 +61,7 @@ impl Parser:
 
     ## The statements of a block after its INDENT, and its DEDENT.
     pure def statements(mut self):
+        self.in_statements += 1
         var after_loop = False
         while not self.at_block_end():
             let before = self.pos_marker()
@@ -74,6 +75,7 @@ impl Parser:
                 self.bump_error()
             after_loop = loop_starts
         _ = self.eat(SyntaxKind.Dedent)
+        self.in_statements -= 1
         self.ended_with_block = True
 
     ## Python's `else` on a loop (02's departures from Python; RULES.md,
@@ -292,7 +294,27 @@ impl Parser:
                     let next = self.nth(i + 1)
                     return match next:
                         case Newline | Eof | Dedent: True
-                        case _: is_statement_keyword(next)
+                        case _: is_statement_keyword(next) or self.no_else_after(i + 1)
+                case _:
+                    pass
+            i += 1
+
+    ## Whether the line from the `n`th token on has no `else` outside
+    ## brackets: `if c: print(x)` is a statement whose block is on its line
+    ## (`E0102`), not an `if` expression without `else` (RULES.md, R54).
+    pure def no_else_after(self, n: int) -> bool:
+        var depth = 0
+        var i = n
+        while True:
+            match self.nth(i):
+                case Newline | Eof | Dedent | Indent:
+                    return True
+                case LParen | LBracket | LBrace | InterpStart:
+                    depth += 1
+                case RParen | RBracket | RBrace | InterpEnd:
+                    depth -= 1
+                case ElseKw | ElifKw if depth <= 0:
+                    return False
                 case _:
                     pass
             i += 1

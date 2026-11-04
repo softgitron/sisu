@@ -568,6 +568,13 @@ pub struct Program:
     ## and the variants so marked, by their enum or error set and index.
     pub deprecated: dict[DefId, String]
     pub deprecated_variants: dict[(DefId, int), String]
+    ## The fields marked `@deprecated("...")`, by their struct and index
+    ## (RULES.md, R51).
+    pub deprecated_fields: dict[(DefId, int), String]
+    ## The constants of a type the program gives a value folding computes,
+    ## by the type and the name, for a type's constant argument written
+    ## `Square.SIDES` (RULES.md, R50).
+    pub const_args: dict[(DefId, String), Ty]
     ## The program is built with its tests (`sisu test`, `sir --tests`):
     ## an `expect` that fails records its failure and the test goes on
     ## (17; RULES.md, R38).
@@ -634,6 +641,8 @@ impl Program:
             tests=[],
             deprecated={},
             deprecated_variants={},
+            deprecated_fields={},
+            const_args={},
             with_tests=False,
             test_tags={},
             benches=[],

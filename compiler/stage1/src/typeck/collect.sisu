@@ -278,6 +278,10 @@ pub struct Resolver:
     ## from now on has the calls that stand for its generators' sites
     ## written as it is declared (`write_sites_in`).
     pub sites_known: bool
+    ## The types with an impl of `Arbitrary` written by hand, and those that
+    ## derive it, in any module of the program (RULES.md, R52).
+    pub arbitrary_by_hand: list[DefId]
+    pub arbitrary_derived: list[DefId]
     ## The attributes on the root module's types, as data for
     ## `reflect.attributes_of`: each name and its arguments' text.
     pub attrs_of: dict[DefId, list[(String, list[String])]]
@@ -370,6 +374,8 @@ impl Resolver:
             method_instances=[],
             instance_of={},
             sites_known=False,
+            arbitrary_by_hand=[],
+            arbitrary_derived=[],
             attrs_of={},
             generated=[],
             shims=[],
@@ -649,10 +655,13 @@ impl Resolver:
             self.declare_import(m, id)
         self.sites_known = False
         for i in range(len(modules)):
+            self.find_arbitrary_impls(ids[i], owned[i])
+        for i in range(len(modules)):
             self.declare_derived(ids[i], owned[i], templates)
             self.declare_generators(ids[i], owned[i])
         self.declare_written_sites()
         self.resolve_pending()
+        self.fold_const_args(ids)
         self.build_variant_index(first_def)
         self.check_traits(first_def)
         self.check_borrow_signatures(first_def)
@@ -849,18 +858,97 @@ impl Resolver:
                             at = p.span
                             break
                     d = d.label_with(Msg.BorrowBorrowedParam, at.start, at.end, "name", n)
-                # A result of text owns it first (RULES.md, R24): a `str`
-                # read from a file, or made in the function, borrows no
-                # parameter, and a `from` clause would lead to E0407.
-                if let Some(owned) = self.owned_text_type(module, ret_span):
-                    let own_edit = Edit(start=ret_span.start, end=ret_span.end, text=owned.copy())
-                    let ty = MsgParam(name="ty".to_string(), value=owned.copy())
-                    d = d.fix_params(Msg.BorrowOwnResult, [ty], [own_edit])
-                # The fix names them all, which is always allowed; the author
-                # may then drop the ones the result never borrows.
+                # The `from` clause names them all, which is always allowed;
+                # the author may then drop the ones the result never borrows.
                 let edit = Edit(start=ret_span.end, end=ret_span.end, text=" from {names}")
                 let param = MsgParam(name="param".to_string(), value=names.copy())
-                self.report_other(module, d.fix_params(Msg.BorrowAddFrom, [param], [edit]))
+                # A result of text may own it instead (RULES.md, R24): a
+                # `str` read from a file, or made in the function, borrows no
+                # parameter, and a `from` clause would lead to E0407. It comes
+                # first unless the body returns a borrowed parameter or a part
+                # of one, which the `from` clause fits and a `String` copies
+                # (RULES.md, R48).
+                var from_first = True
+                var own_fix: (Edit, MsgParam)? = None
+                if let Some(owned) = self.owned_text_type(module, ret_span):
+                    let own_edit = Edit(start=ret_span.start, end=ret_span.end, text=owned.copy())
+                    own_fix = Some((own_edit, MsgParam(name="ty".to_string(), value=owned.copy())))
+                    if let Some(b) = f.body:
+                        from_first = self.returns_borrowed(module, b, borrowed)
+                if from_first:
+                    d = d.fix_params(Msg.BorrowAddFrom, [param.copy()], [edit.copy()])
+                if let Some((own_edit, ty)) = own_fix:
+                    d = d.fix_params(Msg.BorrowOwnResult, [ty.copy()], [own_edit.copy()])
+                if not from_first:
+                    d = d.fix_params(Msg.BorrowAddFrom, [param], [edit])
+                self.report_other(module, d)
+
+    ## Whether a `return` of the body `b` gives one of the parameters
+    ## `names` or a part of one (`a`, `a[1:]`, `a.trim()`, `if c: a else:
+    ## b`): a result that borrows a parameter (RULES.md, R48).
+    pure def returns_borrowed(self, module: ModuleId, b: Block, names: list[String]) -> bool:
+        for s in b.stmts:
+            if self.stmt_returns_borrowed(module, s, names):
+                return True
+        return False
+
+    pure def stmt_returns_borrowed(self, module: ModuleId, s: StmtId, names: list[String]) -> bool:
+        let ast = self.ast(module)
+        match ast.stmt(s).kind:
+            case StmtKind.Return(Some(e)):
+                return self.gives_param(module, e, names, 0)
+            case StmtKind.If(branches, else_block):
+                for (_, blk) in branches:
+                    if self.returns_borrowed(module, blk, names):
+                        return True
+                if let Some(blk) = else_block:
+                    return self.returns_borrowed(module, blk, names)
+                return False
+            case StmtKind.While(_, body) | StmtKind.For(_, _, _, body) | StmtKind.Unsafe(body):
+                return self.returns_borrowed(module, body, names)
+            case StmtKind.With(_, _, body):
+                return self.returns_borrowed(module, body, names)
+            case StmtKind.Expr(e):
+                if let ExprKind.Match(_, arms) = ast.expr(e).kind:
+                    for a in arms:
+                        if let ArmBody.Block(blk) = a.body:
+                            if self.returns_borrowed(module, blk, names):
+                                return True
+                return False
+            case _:
+                return False
+
+    ## Whether the expression gives one of `names` or a part of one.
+    pure def gives_param(
+        self, module: ModuleId, e: ExprId, names: list[String], depth: int
+    ) -> bool:
+        if depth > 16:
+            return False
+        let ast = self.ast(module)
+        match ast.expr(e).kind:
+            case ExprKind.Name(n):
+                return names.contains(n)
+            case ExprKind.Paren(x) | ExprKind.Field(x, _) | ExprKind.Index(x, _):
+                return self.gives_param(module, x, names, depth + 1)
+            case ExprKind.Call(callee, _, _):
+                if let ExprKind.Field(x, _) = ast.expr(callee).kind:
+                    return self.gives_param(module, x, names, depth + 1)
+                return False
+            case ExprKind.If(branches, else_):
+                for (_, v) in branches:
+                    if self.gives_param(module, v, names, depth + 1):
+                        return True
+                if let Some(v) = else_:
+                    return self.gives_param(module, v, names, depth + 1)
+                return False
+            case ExprKind.Match(_, arms):
+                for a in arms:
+                    if let ArmBody.Expr(v) = a.body:
+                        if self.gives_param(module, v, names, depth + 1):
+                            return True
+                return False
+            case _:
+                return False
 
     ## The program, its table of types and the root module's syntax.
     pub pure def into_parts(own self) -> (Program, Types, Module):
@@ -873,6 +961,12 @@ impl Resolver:
                 _ = sources.pop()
             root = sources.pop() ?? root
         return (self.prog, self.types, root)
+
+    ## How many type parameters the type `d` declares, as written.
+    pub pure def declared_type_params(self, d: DefId) -> int:
+        if let Some(ps) = self.type_params.get(d):
+            return len(ps)
+        return 0
 
     ## The syntax of the module of doc examples, when there is one.
     pub pure def doc_syntax(self) -> Module?:
@@ -1337,6 +1431,7 @@ impl Resolver:
                         module, t.name.text, t.name.range, item.vis, DefKind.Trait(TraitInfo.new())
                     )
                     self.bind(module, t.name.text, def_)
+                    self.deprecate(module, def_, item.attrs)
                     _ = self.type_params.insert(def_, t.generics.copy())
                     # The trait's derive, which `@derive` runs at compile time.
                     for m in t.methods:
@@ -1820,6 +1915,8 @@ impl Resolver:
                 return Some(t)
             case Some(Owner.Refinement(r)):
                 return Some(r)
+            case Some(Owner.Trait(t)):
+                return Some(t)
             case Some(Owner.Inherent(_, _, _, t)):
                 st = Some(t)
             case Some(Owner.Impl(i)):
@@ -2073,7 +2170,10 @@ impl Resolver:
                 self.resolve_enum(def_, module, e, attrs)
                 self.decl_owner = None
             case Pending.Trait(def_, module, t, _):
+                # A trait's own uses of itself, as a type's (RULES.md, R51).
+                self.decl_owner = Some(def_)
                 self.resolve_trait(def_, module, t)
+                self.decl_owner = None
             case Pending.Fn(def_, module, f, owner):
                 self.decl_owner = self.owner_def(owner)
                 self.resolve_fn(def_, module, f, owner)
@@ -2188,6 +2288,10 @@ impl Resolver:
                     self.unfold_later.push(
                         Later.Field(def_=def_, index=index, module=module, label=label, value=v)
                     )
+            # A deprecated field warns where it is used (RULES.md, R51).
+            if has_attr(f.attrs, "deprecated"):
+                let why = self.builtin_attr(module, f.attrs, "deprecated") ?? String.new()
+                _ = self.prog.deprecated_fields.insert((def_, len(fields)), why)
             fields.push(
                 FieldInfo(
                     name=f.name.text.copy(),
@@ -4653,6 +4757,10 @@ impl Resolver:
             self.report_other(ctx.module, diag.with("name", name))
             return None
         let generics = info.generics.copy()
+        # A deprecated trait named in a bound, an impl's header, a
+        # supertraits list or a `dyn` type (RULES.md, R51).
+        let last = segments[len(segments) - 1].range
+        self.deprecated_type_use(d, ctx.module, TextRange.new(at.start, last.end))
         var targs: list[Ty] = []
         for a in args:
             targs.push(self.resolve_ty(a, ctx))
@@ -5015,13 +5123,112 @@ impl Resolver:
                     return t
                 let shown = self.prog.display_in(self.types, s, ctx.generics)
                 var d = Diagnostic.new(Msg.ResolveNoAssocType, at.start, at.end).with("ty", shown)
+                # A trait's constant through a type parameter is a value of
+                # the instance, not a constant argument (RULES.md, R50).
+                if is_screaming(name):
+                    d = d.note_params(
+                        Msg.ResolveConstThroughParam,
+                        [MsgParam(name="name".to_string(), value=name.copy())],
+                    )
                 self.report_other(ctx.module, d.with("name", name))
                 return Ty.error()
+            # `Square.SIDES`: a constant of a type, where a type's constant
+            # argument goes (RULES.md, R50).
+            if let Some(t) = self.assoc_const_arg(ctx.module, segments, at, True):
+                return t
         # A qualified name: module.Type.
         let d = self.lookup_path(segments, ctx, at) else:
             return Ty.error()
         let last = segments[len(segments) - 1].text.copy()
         return self.def_as_type(d, last, args, ctx.module, at)
+
+    ## The constants of the program's types whose values folding computes
+    ## (RULES.md, R50), for the checker, which reads `Square.SIDES` in a
+    ## body's types from `Program.const_args`.
+    pure def fold_const_args(mut self, ids: list[ModuleId]):
+        for mid in ids:
+            if self.is_std(mid) or mid.index >= len(self.sources):
+                continue
+            var wanted: list[list[Name]] = []
+            for it in self.sources[mid.index].items:
+                match self.ast(mid).item(it).kind.copy():
+                    case ItemKind.Impl(i):
+                        if let TypeKind.Path(segs, args) = self.ast(mid).type_expr(i.self_ty).kind:
+                            if args.is_empty() and len(segs) == 1:
+                                for c in i.consts:
+                                    wanted.push([segs[0].copy(), c.name.copy()])
+                    case ItemKind.Struct(st):
+                        for c in st.consts:
+                            wanted.push([st.name.copy(), c.name.copy()])
+                    case ItemKind.Enum(e):
+                        for c in e.consts:
+                            wanted.push([e.name.copy(), c.name.copy()])
+                    case _:
+                        pass
+            for path in wanted:
+                if let Some(d) = self.prog.lookup(mid, path[0].text):
+                    if self.prog.const_args.contains((d, path[1].text.copy())):
+                        continue
+                    let at = path[1].range
+                    _ = self.assoc_const_arg(mid, path, at, False)
+
+    ## `Square.SIDES` where a type's constant argument goes (RULES.md,
+    ## R50): the value the program gives the constant of the type, in an
+    ## impl or in the type's own body, when folding computes it; `None` when
+    ## the path names no such constant.
+    pure def assoc_const_arg(
+        mut self, module: ModuleId, segments: list[Name], at: TextRange, report: bool
+    ) -> Ty?:
+        let d = self.prog.lookup(module, segments[0].text)?
+        match self.prog.defs[d.index].kind():
+            case DefKind.Struct(_) | DefKind.Enum(_):
+                pass
+            case _:
+                return None
+        let name = segments[1].text.copy()
+        var found: (ModuleId, ExprId)? = None
+        for m in range(len(self.sources)):
+            let mid = ModuleId(index=m)
+            if found.is_some() or m >= len(self.prog.modules) or self.is_std(mid):
+                continue
+            for it in self.sources[m].items:
+                match self.ast(mid).item(it).kind.copy():
+                    case ItemKind.Impl(i):
+                        if let TypeKind.Path(segs, args) = self.ast(mid).type_expr(i.self_ty).kind:
+                            if args.is_empty() and self.path_def(mid, segs) == Some(d):
+                                for c in i.consts:
+                                    if c.name.text == name:
+                                        if let Some(v) = c.value:
+                                            found = Some((mid, v))
+                    case ItemKind.Struct(st):
+                        if self.prog.lookup_in(mid, st.name.text) == Some(d):
+                            for c in st.consts:
+                                if c.name.text == name:
+                                    if let Some(v) = c.value:
+                                        found = Some((mid, v))
+                    case ItemKind.Enum(e):
+                        if self.prog.lookup_in(mid, e.name.text) == Some(d):
+                            for c in e.consts:
+                                if c.name.text == name:
+                                    if let Some(v) = c.value:
+                                        found = Some((mid, v))
+                    case _:
+                        pass
+        let (vm, v) = found?
+        let ts = self.value_terms(vm, Some(v))
+        let (t, err) = consts.const_arg(self.prog, mut self.types, vm, ts, ConstScope.items())
+        if let Some(x) = err:
+            # Where the constant is written as a type's argument; the
+            # record of the folded ones for the checker reports nothing.
+            if report:
+                var diag = consts.diagnostic(x, Shared.get(self.catalog))
+                diag.start = at.start
+                diag.end = at.end
+                self.report_const(module, diag)
+        else:
+            # A body's annotation reads it from here (`Checker.resolve_ty`).
+            _ = self.prog.const_args.insert((d, name), t)
+        return Some(t)
 
     pure def def_as_type(
         mut self, d: DefId, name: str, args: list[Ty], module: ModuleId, at: TextRange
@@ -5692,3 +5899,13 @@ pure def mode_text(m: Mode) -> str:
 ## Whether a byte is a space or a line break.
 pure def is_blank_byte(b: u8) -> bool:
     return b == 32 or b == 10 or b == 13 or b == 9
+
+## Whether a name is written in SCREAMING_CASE, as a constant's is.
+pure def is_screaming(name: str) -> bool:
+    var letter = False
+    for c in name.chars():
+        if c.is_lowercase():
+            return False
+        if c.is_alphabetic():
+            letter = True
+    return letter

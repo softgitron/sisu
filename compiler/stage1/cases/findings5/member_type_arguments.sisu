@@ -1,0 +1,12 @@
+# RULES.md, R48: a type of a module named with its type arguments before
+# `.`, `collections.Deque[int].new()`, is the type: the name pass reads
+# `int` there as a type, where it was `E0200` and a type annotation was
+# the only spelling.
+import std.collections
+
+def main():
+    var q = collections.Deque[int].new()
+    q.push_back(3)
+    q.push_front(1)
+    print(len(q))
+    print(q.pop_front())

@@ -1,0 +1,7 @@
+16:14-16:22 W0023 type.deprecated name="Measured" reason="use `Sized2`"
+27:6-27:14 W0023 type.deprecated name="Measured" reason="use `Sized2`"
+35:14-35:22 W0023 type.deprecated name="Measured" reason="use `Sized2`"
+43:28-43:33 W0023 type.deprecated name="Panel.width" reason="use `side`"
+46:27-46:32 W0023 type.deprecated name="Panel.width" reason="use `side`"
+47:7-47:12 W0023 type.deprecated name="Panel.width" reason="use `side`"
+48:13-48:18 W0023 type.deprecated name="Panel.width" reason="use `side`"

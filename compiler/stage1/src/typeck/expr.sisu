@@ -8,6 +8,7 @@ from stage1.syntax.ast import (
     Arg,
     Arm,
     ArmBody,
+    Ast,
     BinOp,
     Block,
     Closure,
@@ -30,6 +31,7 @@ from stage1.typeck.program import Answer, DefKind, FnInfo, param_local_ty
 from stage1.typeck.std_sources import int_width, sized, widens
 from stage1.typeck.thir import (
     ArgMode,
+    BindMode,
     BlockId,
     Callee,
     Capture,
@@ -49,6 +51,7 @@ from stage1.typeck.thir import (
     TCondPart,
     TExprId,
     TExprKind,
+    TPatKind,
     TStmt,
     TryKind,
 )
@@ -342,6 +345,13 @@ impl Checker:
                     d.fixes.push(Fix(msg=Msg.TypeConvertToFloat, params=[ty_param], edits=edits))
                     self.report(d)
                     return self.wrap(x, Coercion.Mismatch, exp)
+        # An `int` where a sized integer is expected narrows through a
+        # method that gives an option (RULES.md, R55): `large.to_u8()`.
+        if self.int_kind(cx, self.resolved(actual)) == Some("int".to_string()):
+            if let Some(k) = self.int_kind(cx, self.resolved(exp)):
+                if k != "int" and k != "i64":
+                    let params = [Param(name="ty".to_string(), value=k)]
+                    d = d.note_params(Msg.TypeNarrowInt, params)
         d = self.mismatch_fix(cx, d, x, actual, exp)
         self.report(d)
         return self.wrap(x, Coercion.Mismatch, exp)
@@ -402,7 +412,31 @@ impl Checker:
                     if pr.start >= r.start and pr.end <= r.end and pr.start < pr.end:
                         let place_text = cx.source.byte_slice(pr.start, pr.end)
                         return d.fix_at(Msg.TypeAddCopy, r.start, r.end, "{place_text}.copy()")
-                return d.fix_at(Msg.TypeAddCopy, r.end, r.end, ".copy()")
+                var out = d.fix_at(Msg.TypeAddCopy, r.end, r.end, ".copy()")
+                # A borrowed parameter given where a value is moved (RULES.md,
+                # R55): it lends its value, so the function takes it with
+                # `own` to give it on, or gives a copy.
+                if let TExprKind.Local(l) = self.exprs[x.index].kind:
+                    if let Some(f) = cx.prog.fn_info(self.def_):
+                        for p in f.params:
+                            if p.span == self.locals[l].span and p.mode == Mode.Borrow:
+                                let named = Param(name="name".to_string(), value=p.name.copy())
+                                if let Some(own_param) = self.arg_own.copy():
+                                    var callee = "the call".to_string()
+                                    if let Some((c, _)) = self.arg_callee:
+                                        callee = "`{cx.prog.defs[c.index].name}`"
+                                    let params = [
+                                        named.copy(),
+                                        Param(name="param".to_string(), value=own_param),
+                                        Param(name="callee".to_string(), value=callee),
+                                    ]
+                                    out = out.note_params(Msg.TypeBorrowedToOwn, params)
+                                let edit = Edit(
+                                    start=p.span.start, end=p.span.start, text="own ".to_string()
+                                )
+                                out = out.fix_params(Msg.TypeTakeOwn, [named], [edit])
+                                break
+                return out
         let text = cx.source.byte_slice(r.start, r.end)
         var literal = False
         match self.exprs[x.index].kind:
@@ -2202,7 +2236,14 @@ impl Checker:
     pub pure def check_iterable(
         mut self, cx: Cx, iter: ExprId, mode: Mode
     ) -> (TExprId, ForMode, Ty):
-        var x = self.infer_expr(cx, iter, None)
+        let x = self.infer_expr(cx, iter, None)
+        return self.iterable_of(cx, x, cx.ast.expr(iter).range, mode)
+
+    ## How a `for` iterates the value `x` written at `range`.
+    pub pure def iterable_of(
+        mut self, cx: Cx, x_in: TExprId, range: TextRange, mode: Mode
+    ) -> (TExprId, ForMode, Ty):
+        var x = x_in
         # `bytes` and a `Slice` are iterated through their iterators.
         let base = self.resolved(self.types.strip_ref(self.ty_of(x)))
         if let TyData.Adt(d, a) = self.types.data(base).copy():
@@ -2223,12 +2264,11 @@ impl Checker:
                     case ForMode.Own | ForMode.Iter | ForMode.Trait:
                         x = self.check_movable(cx, x)
                     case ForMode.Mut:
-                        self.require_mutable(cx, x, cx.ast.expr(iter).range)
+                        self.require_mutable(cx, x, range)
                     case ForMode.Borrow:
                         pass
                 return (x, fmode, item)
             case None:
-                let range = cx.ast.expr(iter).range
                 if not is_var_data(self.data(self.ty_of(x))):
                     let shown = self.show(cx, self.ty_of(x))
                     var d = self.error(cx, Msg.TypeNotIterable, range).with("ty", shown)
@@ -2301,6 +2341,18 @@ impl Checker:
     pure def generator_comprehension(
         mut self, cx: Cx, elem: ExprId, clauses: list[CompClause], range: TextRange
     ) -> TExprId:
+        # The first iterable is evaluated where the expression is, as
+        # Python evaluates it (02; RULES.md, R49): a place, a name or a field
+        # of one, the closure borrows as a loop over it would, and any other
+        # value is computed here, into a local the generator keeps by value.
+        var kept: (int, TExprId)? = None
+        if let Some(CompClause.For(_, iter)) = clauses.first():
+            if not names_place(cx.ast, iter, 0):
+                let x0 = self.infer_expr(cx, iter, None)
+                let x = self.decay(cx, x0)
+                let h = self.new_local("(iterable)", self.ty_of(x), False, self.span_of(x))
+                self.kept_iterables.push(h)
+                kept = Some((h, x))
         let id = ClosureId(index=len(self.closures))
         self.closures.push(None)
         let first_local = len(self.locals)
@@ -2309,10 +2361,19 @@ impl Checker:
         )
         self.push_scope()
         var shells: list[TCompClause] = []
+        var k = 0
         for c in clauses:
+            k += 1
             match c:
                 case CompClause.For(pat, iter):
-                    let (x, mode, item) = self.check_iterable(cx, iter, Mode.Borrow)
+                    var checked: (TExprId, ForMode, Ty)? = None
+                    if k == 1:
+                        if let Some((h, x)) = kept:
+                            let at = cx.ast.expr(iter).range
+                            let held = self.add(TExprKind.Local(h), self.ty_of(x), self.span_of(x))
+                            self.note_use(h, False)
+                            checked = Some(self.iterable_of(cx, held, at, Mode.Borrow))
+                    let (x, mode, item) = checked ?? self.check_iterable(cx, iter, Mode.Borrow)
                     let p = self.check_pat(cx, pat, item, None)
                     shells.push(TCompClause.For(pat=p, iter=x, mode=mode, item=item))
                 case CompClause.If(e):
@@ -2323,7 +2384,7 @@ impl Checker:
         let item_ty = self.ty_of(el)
         let espan = self.span_of(el)
         var body = self.new_block([TStmt.Yield(value=el, span=espan)], espan)
-        var k = len(shells)
+        k = len(shells)
         while k > 0:
             k -= 1
             match shells[k].copy():
@@ -2356,7 +2417,16 @@ impl Checker:
         var iter_ty = Ty.error()
         if let Some(it) = cx.prog.wk.iter:
             iter_ty = self.types.adt(it, [item_ty])
-        return self.add(TExprKind.Generator(id), iter_ty, range)
+        let generator = self.add(TExprKind.Generator(id), iter_ty, range)
+        let (h, x) = kept else:
+            return generator
+        # `match value: case kept: the generator`, which binds the value
+        # the generator then keeps.
+        let pat = self.add_pat(
+            TPatKind.Bind(local=h, mode=BindMode.Value), self.ty_of(x), self.span_of(x)
+        )
+        let arm = TArm(pat=pat, guard=None, body=TArmBody.Expr(generator), span=range)
+        return self.add(TExprKind.Match(scrutinee=x, arms=[arm]), iter_ty, range)
 
     # ---------------------------------------------------------------- if and match expressions
 
@@ -3275,31 +3345,38 @@ impl Checker:
             # `b[i]` and `s[i]`: a byte, a reference to a value; `b[i:j]` and
             # `s[i:j]`: a copy of the bytes, a view of the values.
             if cx.prog.is_builtin(d, "bytes") or cx.prog.is_builtin(d, "Slice"):
+                # A bound counted from the end, `^k`, as a list's (02;
+                # RULES.md, R48): the method that reads the length of the
+                # value it is given, so the base is evaluated once.
                 var name = "at"
                 var call_args: list[TExprId] = []
                 match arg:
                     case IndexArg.Expr(e):
-                        call_args.push(self.check_expr(cx, e, Ty.int()))
+                        let (k, end) = self.slice_bound(cx, e)
+                        if end:
+                            name = "at_end"
+                        call_args.push(k)
                     case IndexArg.Slice(lo, hi):
                         name = "cut"
-                        match lo:
-                            case Some(x):
-                                call_args.push(self.check_expr(cx, x, Ty.int()))
-                            case None:
-                                call_args.push(
-                                    self.add(TExprKind.Int(-9223372036854775807 - 1), Ty.int(), at)
-                                )
-                        match hi:
-                            case Some(x):
-                                call_args.push(self.check_expr(cx, x, Ty.int()))
-                            case None:
-                                call_args.push(
-                                    self.add(TExprKind.Int(-9223372036854775807 - 1), Ty.int(), at)
-                                )
+                        var bounds: list[(TExprId, bool)] = []
+                        for bound in [lo, hi]:
+                            match bound:
+                                case Some(x):
+                                    bounds.push(self.slice_bound(cx, x))
+                                case None:
+                                    let least = TExprKind.Int(-9223372036854775807 - 1)
+                                    bounds.push((self.add(least, Ty.int(), at), False))
+                        let counted = bounds[0].1 or bounds[1].1
+                        for (x, end) in bounds:
+                            call_args.push(x)
+                            if counted:
+                                call_args.push(self.add(TExprKind.Bool(end), Ty.bool(), at))
+                        if counted:
+                            name = "cut_end"
                 let m = cx.prog.method(TyKey.Adt(d), name) else:
                     return self.error_expr(at)
                 var ret = t
-                if name == "at":
+                if name == "at" or name == "at_end":
                     if cx.prog.is_builtin(d, "bytes"):
                         ret = self.sized_ty(cx, "u8")
                     else:
@@ -3324,6 +3401,17 @@ impl Checker:
 struct Capture2:
     local: int
     mutable: bool
+
+## Whether the expression names a place: a name, `self`, or a field of
+## one, in parentheses or not (what a generator expression's closure
+## borrows rather than evaluates; RULES.md, R49).
+pure def names_place(ast: Ast, e: ExprId, depth: int) -> bool:
+    if depth > 32:
+        return False
+    return match ast.expr(e).kind:
+        case ExprKind.Name(_) | ExprKind.SelfValue: True
+        case ExprKind.Field(base, _) | ExprKind.Paren(base): names_place(ast, base, depth + 1)
+        case _: False
 
 ## Whether a method gives the type `exp` without arguments: what the fix
 ## of a mismatch may call.

@@ -1,0 +1,50 @@
+# RULES.md, R51: a deprecated trait or field warns where it is used (13,
+# "Deprecation"), as a deprecated type does since R40: a trait in a bound,
+# an impl's header, a supertraits list or a `dyn` type; a field read,
+# changed, given a value or matched. The trait's own declaration, and the
+# struct's methods and impls, may use them.
+@deprecated("use `Sized2`")
+trait Measured:
+    def size(self) -> int
+
+    def doubled(self) -> int:
+        return self.size() * 2
+
+trait Sized2:
+    def size2(self) -> int
+
+trait Ranked(Measured):
+    def rank(self) -> int
+
+struct Panel:
+    side: int
+    @deprecated("use `side`")
+    width: int = 0
+
+    def area(self) -> int:
+        return self.side * self.width
+
+impl Measured for Panel:
+    def size(self) -> int:
+        return self.side + self.width
+
+impl Sized2 for Panel:
+    def size2(self) -> int:
+        return self.side
+
+def total[T: Measured](xs: list[T]) -> int:
+    var n = 0
+    for x in xs:
+        n += x.size()
+    return n
+
+def first(p: Panel) -> int:
+    return match p:
+        case Panel(side=s, width=w): s + w
+
+def main():
+    var p = Panel(side=2, width=3)
+    p.width = 4
+    print(p.width + p.area() + p.size2())
+    print(total([Panel(side=1)]))
+    print(first(p))

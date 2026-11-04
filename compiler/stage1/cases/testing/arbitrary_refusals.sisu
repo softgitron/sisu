@@ -1,5 +1,6 @@
-# RULES.md, R41: `@derive(Arbitrary)` draws a type without type
-# parameters whose every part has a generator (`E0820`).
+# RULES.md, R41: `@derive(Arbitrary)` draws a type whose every part has a
+# generator (`E0820`); a type parameter is drawn through its own
+# `Arbitrary` since R52, which a part of no generator is not.
 struct Handle:
     fs: Fs
 
@@ -10,6 +11,7 @@ struct Opened:
 @derive(Arbitrary)
 struct Boxed[T]:
     value: T
+    handle: Handle
 
 def main():
     pass

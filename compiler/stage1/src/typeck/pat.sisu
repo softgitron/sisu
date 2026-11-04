@@ -3,7 +3,7 @@
 ##! matched parts (copies for `Copy` parts); one matched against a temporary
 ##! takes the parts by value.
 
-from stage1.diag import Msg, TextRange
+from stage1.diag import Edit, Msg, Param, TextRange
 from stage1.syntax.ast import ExprId, Name, PatArg, PatKind, PatternId
 from stage1.typeck.call import StaticPath
 from stage1.typeck.check import Checker, Cx
@@ -11,7 +11,26 @@ from stage1.typeck.program import DefKind
 from stage1.typeck.thir import BindMode, Lit, PatId, TExprKind, TPat, TPatKind
 from stage1.typeck.ty import DefId, Ty, TyData
 
+## A CamelCase name in snake_case: `MaxSize` is `max_size`.
+pure def snake_name(name: str) -> String:
+    var out = String.new()
+    var first = True
+    for c in name.chars():
+        if c.is_uppercase():
+            if not first:
+                out.push("_")
+            out.push("{c}".to_lowercase())
+        else:
+            out.push_char(c)
+        first = False
+    return out
+
 impl Checker:
+    ## Whether the pattern at `at` follows `let` or `var`.
+    pure def after_let(self, cx: Cx, at: int) -> bool:
+        let before = cx.source.byte_slice(0, min(at, cx.source.byte_len())).trim_end()
+        return before.ends_with("let") or before.ends_with("var")
+
     ## A pattern of `match`, `if let`, `for`: bindings are immutable, and
     ## shadowing warns nothing.
     pub pure def check_pat(mut self, cx: Cx, p: PatternId, ty: Ty, by_ref: bool?) -> PatId:
@@ -280,9 +299,16 @@ impl Checker:
         let variant = found else:
             if t != Ty.error():
                 let shown = self.show(cx, t)
-                let d = self.error(cx, Msg.TypeUnknownVariant, last.range).with("ty", shown).with(
+                var d = self.error(cx, Msg.TypeUnknownVariant, last.range).with("ty", shown).with(
                     "name", name
                 )
+                # `let Total = 10`: a binding's name starts with a lowercase
+                # letter, which the fix writes (RULES.md, R55).
+                if len(path) == 1 and args.is_none() and self.after_let(cx, last.range.start):
+                    let lower = snake_name(name)
+                    let params = [Param(name="name".to_string(), value=lower.copy())]
+                    let edit = Edit(start=last.range.start, end=last.range.end, text=lower)
+                    d = d.fix_params(Msg.TypeLowercaseBinding, params, [edit])
                 self.report(d)
             # The names the pattern binds still exist (with the error type),
             # so the arm's body reports nothing about them.

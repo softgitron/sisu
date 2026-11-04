@@ -667,8 +667,14 @@ toward the caller's level (open: it needs the checker's view of calls).
 diagnostic) and `unsafe_trusted.pkg` (declared and trusted; it runs, its
 `.out`); the tests of `manifest` and `package` read the level and write
 and read the lockfile's; `E1022` was checked by hand (a lockfile that
-records `memory` and a manifest that declares `extern`).
+records `memory` and a manifest that declares `extern`). The conformance
+suite's `testing/unsafe_level.pkg` declares `memory` for an `unsafe:`
+block over `std.mem`'s pointers, which the Rust front end reads as none
+of these (`W0005` for the key, `E0220` for the module, `E0900` for the
+block), so its names, SIR, diagnostics and pages are stage 1's alone.
 
+- Differs: `compiler/conformance/cases/testing/unsafe_level.pkg`: names, sir, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/testing/unsafe_level.pkg/src/main.sisu`: ast
 - Differs: `compiler/stage1/cases/packages/unsafe_levels.pkg/app`: names, types, ids, human, doc, doc-output
 - Differs: `compiler/stage1/cases/packages/unsafe_levels.pkg/app/src/main.sisu`: ast
 - Differs: `compiler/stage1/cases/packages/unsafe_levels.pkg/cbind/src/lib.sisu`: ast
@@ -1387,7 +1393,7 @@ function of that text moves.
 
 **What it changes.** What a program prints that formats a float's
 `Debug` with a spec other than `?`, which no program of the corpus does,
-and the SIR of each program that reaches a float's `Debug` impl (42 of
+and the SIR of each program that reaches a float's `Debug` impl (43 of
 the corpus, stage 1's cases and the proposal's examples), whose body
 calls `Spec.float` where it padded the `Debug` text; the frozen Rust
 front end keeps its own body, so their `sir` (the classes `sir` and
@@ -1419,6 +1425,7 @@ what they print does not (the class `behaviour`). The case
 - Differs: `compiler/conformance/cases/reflect/proposal_comptime.sisu`: sir, sir-tests
 - Differs: `compiler/conformance/cases/reflect/trait_methods.sisu`: sir
 - Differs: `compiler/conformance/cases/replay/tokens.sisu`: sir-tests
+- Differs: `compiler/conformance/cases/run/debug_forms.sisu`: sir
 - Differs: `compiler/conformance/cases/run/format_specs.sisu`: sir
 - Differs: `compiler/conformance/cases/run/proven_checks.sisu`: sir
 - Differs: `compiler/conformance/cases/run/sized_integers.sisu`: sir
@@ -2328,9 +2335,11 @@ methods it does not call.
 
 **What it changes.** The SIR of the conformance suite's `std/num_exact`,
 whose `0.075` as a `Decimal` is made from its text, printing what it
-printed. The cases `cases/numbers/decimal_literals.sisu` (its `.out`: it
+printed, and of `std/decimal_literals`, which the stage-0 round added to
+hold the literals' places natively (decision 387). The cases `cases/numbers/decimal_literals.sisu` (its `.out`: it
 runs) and `refusals.sisu` (its `.diag`).
 
+- Differs: `compiler/conformance/cases/std/decimal_literals.sisu`: sir
 - Differs: `compiler/conformance/cases/std/num_exact.sisu`: sir
 - Differs: `compiler/stage1/cases/numbers/decimal_literals.sisu`: sir, ids, human, doc, doc-output
 - Differs: `compiler/stage1/cases/numbers/refusals.sisu`: names, ids, human, doc, doc-output
@@ -3061,3 +3070,476 @@ diagnostics are printed twice).
      test` prints them, and fails. `sir`, the program without its tests,
      keeps printing the SIR of a program the ownership checker rejects,
      as stage 0's `sisu sir` does. Stage 1 decides it (RULES.md, R46).
+
+## R47. `sir --tests` prints the warnings, and takes a build's options (decision 400)
+
+**The rule** (17: the runner runs the tests of a program that compiles,
+and `sisu test` prints the program's warnings before its report; decision
+250: a package's features and the lockfile; decision 357: `sisu test` and
+`sisu bench` run from what `sir --tests` prints). `sir --tests`, the
+program built with its tests, checks the program once and prints, for a
+program without an error, its SIR on standard output and its warnings on
+standard error, as `check` prints them for the program built with its
+tests: the human form, or the conformance form with `--format=ids`. A
+program with an error is refused as R46 has it, in the same form. `sir`,
+with its tests or without them, takes `--features NAMES` (any number of
+times, `--features=NAMES` too), `--no-default-features` and `--locked` as
+`check` does: the features choose what the root package's `@cfg`s keep,
+`D0112` names a feature the package does not declare, and `--locked` stops
+the command with `D0065` where the lockfile would change, before anything
+is lowered. `--accept-unsafe` and `--contracts=LEVEL` stay.
+
+**Why.** The driver runs stage 1 twice for each program `sisu test` runs:
+`sir --tests`, and then `check` for the warnings (decision 380), about 0.6 s
+each for a small file, and it keeps a run that asks for features on the
+Rust front end, since stage 1's `sir` refused `--features` and `--locked` as
+usage errors (port-debt.md, "A program's transcripts, `sisu test --std`,
+`sisu test --defer-borrow` and `--features`").
+
+**In stage 1.** `main`: the `sir` command (`feature_request`,
+`unknown_feature` and `write_lockfile` as `check` has them, and the
+feature request through `lowering_of` and `app_input`); `report_with`,
+`report_of`'s report with the SIR of the program it checked, which `sir
+--tests` and `test` print from one check where they checked twice;
+`refusal` and `shown_report`, in either form.
+
+**What it changes.** Nothing that `check.sh` compares with stage 0: the
+SIR is the same (the class `sir-tests`), and stage 0's `sisu sir --tests`
+prints no warnings. The case `cases/testing/warned_tests.sisu` (its
+`.sir-tests`: the SIR, and the warning after `--- stderr`); `features.pkg`
+of the conformance suite, its `--features verbose`, `--no-default-features`
+and `--locked` after a change of its manifest, were checked by hand.
+
+**What the driver may rely on**, so that `sisu test` and `sisu bench` run
+stage 1 once per program (the stage-0 side's change to `cli.rs`): call
+`sir --tests [--format=ids] [--locked] [--features NAMES]
+[--no-default-features] [--accept-unsafe] [--contracts=LEVEL] PATH` for
+each program (each member of a workspace, as now). Status 0: standard
+output is the SIR (a program without tests prints its SIR all the same),
+and standard error is exactly what `check` with the same options prints
+of the program built with its tests, its warnings (empty when it has
+none), to be shown before the report; there is no `beyond the slice` line
+then, since a program stage 1 cannot follow is refused. Status 1:
+standard output is empty, and standard error is what `sisu test` prints
+of a program it does not run, to be shown as it is and the status taken:
+its diagnostics then `D0006` or `D0021`, or `D0065` (`--locked`),
+`package.unsafe-raised` (`E1022`) or `D0112` (an unknown feature). So the
+driver drops its `check` run (`check_words`, `checked`) and its
+`errors_line` after `sir --tests`, passes `--locked` and the features to
+`sir --tests`, and `stage1_serves` no longer keeps `--features` and
+`--no-default-features` on the Rust front end. Until it does, a program's
+warnings are printed twice by `sisu test` (once from `check`, once from
+`sir --tests`'s standard error, which the driver prints before the
+report), which the conformance suite, comparing standard output, does not
+see.
+
+**Decision 400**, for docs/architecture.md:
+
+400. `sir --tests` prints, beside the SIR of a program without an error,
+     the program's warnings on standard error as `check` prints them (the
+     human form, or `--format=ids`), from one check of the program, so
+     that the driver runs stage 1 once for each program `sisu test` and
+     `sisu bench` run; `sir` takes `--features`, `--no-default-features`
+     and `--locked` as `check` does (decision 250). Stage 1 decides it
+     (RULES.md, R47).
+
+## R48. A bound from the end on a `Slice` and `bytes`; a module's type with its arguments; `E0413`'s order (decision 401)
+
+**The rule.** Three of the forms the stage-0 round assigned to stage 1:
+
+- **A bound counted from the end** (02: `a[i:^1]`; R43 for a list) reads a
+  `Slice` and `bytes` as it reads a list: `xs[^1]` is the last value of a
+  `Slice[int]` (a reference to it), `b[^2]` the byte before the last, and
+  `xs[1:^1]` and `b[:^3]` cut from the end, where each was `E0383`
+  ("appears only inside an index", though it stood in one). The base is
+  evaluated once: the prelude's `Slice.at_end`, `Slice.cut_end`,
+  `bytes.at_end` and `bytes.cut_end`, written in Sisu over `at` and `cut`,
+  read its length, so `view(xs)[^2]` calls `view` once.
+- **A module's type with its type arguments before `.`**,
+  `collections.Deque[int].new()`, is the type: the name pass reads a
+  scalar type or a type parameter among the arguments of `a.b[...]` as a
+  type, where it read `int` as a value and reported `E0200` (with
+  Python's conversions' note since R45); any other argument is a value as
+  before (`cap.Fake[Trait]`).
+- **`E0413`'s fixes** come in the order the body asks for: the `from`
+  clause first when a `return` gives a borrowed parameter or a part of
+  one (`return a`, `a.trim()`, `a[1:]`, `if c: a else: b`), which the
+  clause fits and a `String` result copies; the `String` result first, as
+  R24 has it, when the body returns text it makes.
+
+**Why.** The stage-0 round's list (the maintenance round's findings
+"`xs[^1]` with `xs` a `Slice[int]`", "`collections.Deque[int].new()`" and
+"`E0413`'s order", which only stage 1 can settle).
+
+**In stage 1.** `typeck.expr.index_expr` (the methods of a bound from the
+end, `slice_bound`), `compiler/std/prelude.sisu` (`at_end` and `cut_end`
+of `Slice` and `bytes`, `@internal`, which the Rust front end reads too and
+no program of the corpus reaches), `resolve`'s `is_member_with_arguments`,
+`member_with_arguments` and `member_argument`, and
+`typeck.collect.returns_borrowed` (`stmt_returns_borrowed`,
+`gives_param`).
+
+**What it changes.** The fixes of the conformance suite's
+`ownership/from_required` and `wrong/missing_from`, whose `longer` returns
+`a` or `b`: their `.diag` files, which hold stage 1's `check --format=ids`,
+are blessed again with `borrow.add-from` before `borrow.own-result`. The
+cases `cases/findings5/slice_bounds.sisu` and `member_type_arguments.sisu`
+(their `.out`: they run) and `from_order.sisu` (its `.diag`, both orders).
+
+- Differs: `compiler/stage1/cases/findings5/from_order.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings5/slice_bounds.sisu`: ids, human, doc, doc-output
+
+**Decision 401**, for docs/architecture.md:
+
+401. A bound counted from the end reads a `Slice` and `bytes` as it reads
+     a list (`xs[^1]`, `xs[1:^1]`, 02), the base evaluated once; a type of
+     a module written with its arguments before `.`,
+     `collections.Deque[int].new()`, has its scalar arguments read as
+     types; and `E0413` offers the `from` clause first when the body
+     returns a borrowed parameter or a part of one, the `String` result
+     first when it returns text it makes. Stage 1 decides it (RULES.md,
+     R48).
+
+## R49. A generator expression's first iterable is evaluated where the expression is (decision 402)
+
+**The rule** (02: a comprehension in parentheses is a lazy `Iter`, as in
+Python, which evaluates the first iterable at once; R42). In `(f(x) for x
+in it if c(x))` the first iterable, `it`, is evaluated where the
+expression is, before the `Iter` exists, and the generator keeps its value:
+a call, a literal, a slice or any value that is not a place is computed
+there, into a local the generator's closure keeps by value (moved into it,
+as an `own` closure's capture is), and a `?` in it passes its error on in
+the function that writes the expression; a place (a name, `self`, a field
+of one) is borrowed as before, which is the same as reading it there,
+since nothing may change it while the generator lives (`E0405`). The
+clauses after it, its other iterables and its tests, run as the
+generator is advanced. A generator returned from a function owns what its
+first iterable made (`return (len(w) for w in words())`), and one dropped
+before its end frees it.
+
+**Why.** R42 evaluated the first iterable when the `Iter` was first
+advanced, which the fourth round left open: a call's side effects and
+panics came at the first `next`, and `?` in the iterable was refused,
+since it stood in the closure's body, which returns nothing.
+
+**In stage 1.** `typeck.expr.generator_comprehension` (`names_place`,
+`Checker.kept_iterables`, the `match` that binds the value the generator
+keeps), `iterable_of`, which `check_iterable` now calls, and
+`typeck.tasks.decide_captures`, which keeps that local by value.
+
+**What it changes.** Nothing in the corpus, which writes no generator
+expression; the SIR of R42's cases whose first iterable is a call
+(`range(0, 3)` in `generator_expressions.sisu`), which still print what
+they printed. The case `cases/generators/generator_site.sisu` (its `.out`:
+it runs, interpreted and natively, with no allocation live at exit, a
+generator dropped before its end among them).
+
+- Differs: `compiler/stage1/cases/generators/generator_site.sisu`: ids, human, doc, doc-output
+
+**Decision 402**, for docs/architecture.md:
+
+402. A generator expression's first iterable is evaluated where the
+     expression is (02, as Python's): a value that is not a place is
+     computed there and kept by the generator, moved into its closure, a
+     `?` in it passing its error on in the enclosing function; a place is
+     borrowed as before. The other clauses run as the generator is
+     advanced. Stage 1 decides it (RULES.md, R49).
+
+## R50. A type's constant as a type's constant argument (decision 403)
+
+**The rule** (03, "Const generics" and "Traits"; R37, R43). Where a type's
+constant argument goes, `Array[int, Square.SIDES]`, a constant of a type
+of the program is its value when folding computes it: the value an impl
+of a trait gives the constant for the type, or the type's own body
+(`Light.COUNT`, R43), an integer, a constant of the module or an operation
+on them (`2 + 2`), with folding's rules and errors (`typeck.consts`), in
+a signature, a field's type, a body's annotation and a type's arguments
+before `.` (`Array[bool, Light.COUNT].filled(False)`). A trait's constant
+read through a type parameter, `Array[int, T.SIDES]`, is not one: it is a
+value of the instance, computed where the function runs (the trait's
+`pure` function made for the type, R37), where a type's constant argument
+is known where the type is written; `E0239` gets the note
+`resolve.const-through-param`, which names the `const` parameter that
+carries it (`[T: Shape, const N: int]`, given as `Square.SIDES` by a
+caller).
+
+**Why.** The fourth round's open item: "a trait's constant as a type's
+constant argument (`Array[int, T.SIDES]`), which folding does not reach".
+Through a type parameter it would need a type of SIR that calls a
+function, which the interpreter and both lowerings would have to compute
+where a type argument is needed (a type argument is a number, a type
+parameter or an operation on them, `Type.Const` and `Type.ConstOp`), or a
+hidden `const` parameter added to each generic function whose types read
+one and to each of its callers': that is decided against here, and the
+note says what to write instead.
+
+**In stage 1.** `typeck.collect`: `assoc_const_arg` (an impl's or a type
+body's constant, through `path_def`), `fold_const_args`, which records them
+for the checker in `Program.const_args`, the note in `resolve_ty`;
+`typeck.check.resolve_ty` and `typeck.call`'s type arguments, which read
+them.
+
+**What it changes.** Nothing in the corpus, which writes no such
+argument. The cases `cases/traits/const_arguments.sisu` (its `.out`: it
+runs) and `const_through_param.sisu` (its `.diag`), whose trees, with a
+trait's constant without a value (R37), differ too.
+
+- Differs: `compiler/stage1/cases/traits/const_arguments.sisu`: tree, ast, names, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/traits/const_through_param.sisu`: tree, ast, ids, human, fmt-check, doc, doc-output
+
+**Decision 403**, for docs/architecture.md:
+
+403. A constant of a type of the program, given by an impl or by the
+     type's body, is a type's constant argument where folding computes its
+     value (`Array[int, Square.SIDES]`, 03); a trait's constant through a
+     type parameter is a value of the instance and no constant argument,
+     `E0239` noting the `const` parameter that carries it. Stage 1 decides
+     it (RULES.md, R50).
+
+## R51. Deprecated traits and fields (decision 404)
+
+**The rule** (13, "Deprecation": "every use of a deprecated item warns";
+R30, R40). A trait or a field marked `@deprecated("...")` warns where it
+is used, `W0023` with the attribute's text (`W0025` without), as a
+deprecated type does since R40:
+
+- a trait named in a bound (`T: Measured`), an impl's header (`impl
+  Measured for Panel`), a supertraits list (`trait Ranked(Measured)`) or a
+  `dyn` type, but in the trait's own declaration (its methods' bodies and
+  signatures);
+- a field read or changed (`p.width`, `p.width = 4`), given a value
+  (`Panel(width=3)`, at the keyword) or matched (`case Panel(width=w)`), but
+  in the struct's own methods and impls, as a deprecated type's own
+  declaration may use it.
+
+`@deprecated` on a trait or a field is no longer `W0026` (R40), whose list
+of places now names them.
+
+**Why.** The fourth round's open item: "a deprecated trait and field (R40
+covers functions, types, constants and variants)".
+
+**In stage 1.** `typeck.collect`: `deprecate` of a trait, `decl_owner` set
+for a trait's declaration and its methods (`owner_def`), the use in
+`resolve_bound`, `Program.deprecated_fields` from `resolve_struct`;
+`typeck.Checker.deprecated_field_use`, from `deprecated_uses`;
+`resolve.attribute_places`.
+
+**What it changes.** Nothing in the corpus, which deprecates nothing. The
+case `cases/attributes/deprecated_traits_fields.sisu` (its `.diag`, and
+its `.out`: it runs), and the `places` of `W0026` in
+`cases/attributes/misplaced.sisu` (its `.diag`, blessed again).
+
+- Differs: `compiler/stage1/cases/attributes/deprecated_traits_fields.sisu`: ast, ids, human
+
+**Decision 404**, for docs/architecture.md:
+
+404. A trait or a field marked `@deprecated("...")` warns where it is used
+     (13), as a deprecated type does (decision 364): a trait in a bound, an
+     impl's header, a supertraits list or a `dyn` type, but in its own
+     declaration; a field read, changed, given a value or matched, but in
+     its struct's methods and impls. Stage 1 decides it (RULES.md, R51).
+
+## R52. `@derive(Arbitrary)` of a generic type, and an impl of `Arbitrary` in another module (decision 405)
+
+**The rule** (17, "Property-based testing"; R41). `@derive(Arbitrary)` on a
+generic struct or enum gives the impl that draws its shape, each type
+parameter drawn through its own `Arbitrary`:
+
+```sisu
+impl[T: Arbitrary] Arbitrary for Boxed[T]:
+    def arbitrary(d: Draws) -> Boxed[T]:
+        return __arbitrary_Boxed(d, ((e: Draws) -> T.arbitrary(e)))
+```
+
+a parameter's own bounds kept (`T: Arbitrary + Eq`), so that a bound `T:
+Arbitrary` draws `Boxed[Money]`; a type with a part that has no generator
+is `E0820` as before, and the reason `E0820` gave a generic type is gone.
+An impl of `Arbitrary` written by hand in another module of the package
+than its type's draws the type wherever it is drawn: the generators of the
+type's own module (`arbitrary[Money]` there, and those of its types that
+hold a `Money`) call the impl, and a site `arbitrary[Money]` in a module
+that imports the type draws it through `Money.arbitrary`, as it does a
+type of another module that derives `Arbitrary` (`arbitrary[Purchase]`).
+
+**Why.** The fourth round's open item: "a generic type's
+`@derive(Arbitrary)` and an impl of `Arbitrary` for a type of another
+module (R41 draws a type of the module that writes the impl)".
+
+**In stage 1.** `typeck.arbitrary`: the derived impl of a generic type
+(`order_bounds`), `find_arbitrary_impls`, which records every module's
+impls written by hand and derives before any module's generators are
+written (`Resolver.arbitrary_by_hand`, `arbitrary_derived`), `path_def`,
+`drawn_elsewhere` and the writer's `foreign` names; `check.sh` holds a
+package case to its `NAME.pkg.tests`.
+
+**What it changes.** Nothing in the corpus, which derives no `Arbitrary`.
+The cases `cases/testing/generic_arbitrary.sisu` (its `.tests`: both
+properties hold), `cases/packages/arbitrary_elsewhere.pkg` (its
+`arbitrary_elsewhere.pkg.tests`: the impl in the module `draws` draws a
+`Money` of the module `money` from `main`, and a property fails at the
+impl's boundary, `Money(cents=5000)`), and `arbitrary_refusals.sisu`,
+whose generic type now fails for its part without a generator (its
+`.diag`).
+
+- Differs: `compiler/stage1/cases/packages/arbitrary_elsewhere.pkg`: sir, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/testing/generic_arbitrary.sisu`: ids, human, doc, doc-output
+
+**Decision 405**, for docs/architecture.md:
+
+405. `@derive(Arbitrary)` on a generic type gives the impl that draws its
+     shape with each type parameter drawn through its own `Arbitrary`
+     (`impl[T: Arbitrary] Arbitrary for Boxed[T]`), and an impl of
+     `Arbitrary` written in another module than its type's draws the type
+     wherever it is drawn, a site in a module that imports the type
+     drawing it through the impl. Stage 1 decides it (RULES.md, R52).
+
+## R53. An attribute before a statement (decision 406)
+
+**The rule** (02: an attribute stands on the line before a declaration;
+19, N-22: checked directives on a loop nest are planned with the native
+backend, "attributes sit on the line before an item, not on statements").
+An attribute in a block before what is no declaration stands before a
+statement, which no attribute applies to: `E0129`
+(`parse.attribute-on-statement`), which names it, and the statement is
+parsed as one. `@tile`, `@unroll` and `@vectorize` there get the note
+`parse.loop-directive`: they are 19's planned directives, which hold or
+fail to compile, and not in the language yet. On a declaration, where R40
+warns that they mean nothing (`W0026`), they stay as they are.
+
+**Why.** The fourth round's open item ("`@tile`, `@unroll` and
+`@vectorize` on a loop, which the parser does not take before a
+statement") and the reference's R17 finding: `E0106` for an attribute
+before a statement said "expected a declaration, found `let`" and nothing
+about the attribute. Taking the directives on a loop is N-22's, with the
+dependence analysis that makes them hold, which the documents leave for
+later; parsing them and checking nothing is what 19 rules out.
+
+**In stage 1.** `parser.items.item` (`Parser.in_statements`, counted by
+`statements`).
+
+**What it changes.** Nothing in the corpus, which puts no attribute before
+a statement. The case `cases/attributes/statement_attributes.sisu` (its
+`.diag`); its tree and the formatter's verdict, which prints the
+diagnostics, differ, and so do the formatter's of its deformed copies.
+
+- Differs: `compiler/stage1/cases/attributes/statement_attributes.sisu`: tree, trivia-tree, ast, ids, human, fmt-check, doc, doc-output
+
+**Decision 406**, for docs/architecture.md:
+
+406. An attribute before a statement is `E0129`, naming the attribute,
+     and the statement is parsed as one (02: attributes stand before
+     declarations); `@tile`, `@unroll` and `@vectorize` there note that
+     they are 19's planned directives (N-22), not in the language yet.
+     Stage 1 decides it (RULES.md, R53).
+
+## R54. The syntax the manual's writers found a parse error misnaming (decision 407)
+
+**The rule** (02, "Departures from Python", 09, D-062; the manual's
+findings, "Syntax and names" and "Diagnostics without fixes"). Where a
+parse error stops at another language's spelling, the fix
+`parse.sisu-spelling` writes Sisu's: `and` and `or` for `&&` and `||`,
+`not` for `!x`, `ref` for `&x`, `i += 1` for `i++` (and `-=` for `--`),
+`var` for `let mut`, `.to_f64()` for `as f64` (and each numeric type's
+conversion), `print` for `println!`, `range(0, 3)` for `0..3` (`range(0, 3
++ 1)` for `0..=3`), `list[int]` for `Vec<int>` (`dict`, `set` for Rust's
+maps and sets), `match` for `switch`, `.is_none()` and `.is_some()` for `is
+None` and `is not None`, `:` for `=>` after a `case`'s pattern, `#` for a
+line comment written `//`, and `None` for `nil`, `null` and `NULL`
+(`E0200`). And four forms:
+
+- an attribute on its declaration's line, `@derive(Eq) struct Point:`, is
+  `E0131` (`parse.attribute-line`), with the fix that breaks the line, and
+  the declaration is parsed, where `E0117` and `E0106` lost it;
+- `pub(crate)`, or any name but `package` in `pub(...)`, is `E0130`
+  (`parse.visibility-scope`), with the fix `pub(package)`, where every such
+  name made the item `pub` to every package (D-062 rules the silent
+  difference out);
+- a one-line `if` without `else`, `if c: print(x)`, is a statement whose
+  block is on its line (`E0102`), not an `if` expression without `else`
+  (`E0116`);
+- a keyword as a field's name, `type: str`, is `E0124` as a parameter's
+  is, and the line declares no field, where it was `E0100`.
+
+**Why.** The manual's findings: "Most other habits get a diagnostic that
+does not name the Sisu spelling" (R19, G3, G4), "`switch day:` ... and
+`i++`" (chapter 4), "an attribute on the line of its declaration" (R14),
+"`pub(crate)` compiles and exports the item to every package" (R20), "a
+one-line `if c: print(x)` is E0116" and "a keyword as a field's name is
+E0100" (R1).
+
+**In stage 1.** `parser.habits` (`Parser.with_habit`, from `error_found`,
+`expect` and `end_stmt`), `parser.items` (`attribute`, `visibility`,
+`struct_member`), `parser.stmts.no_else_after`, `resolve.use_name`.
+
+**What it changes.** Nothing in the corpus, which writes none of these.
+The cases `cases/findings5/habits.sisu` and `parse_fixes.sisu` (their
+`.diag`); their trees, which print the parser's diagnostics, and the
+formatter's verdicts differ.
+
+- Differs: `compiler/stage1/cases/findings5/habits.sisu`: tree, names, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/findings5/parse_fixes.sisu`: tree, trivia-tree, ast, ids, human, fmt-check, doc, doc-output
+
+**Decision 407**, for docs/architecture.md:
+
+407. A parse error at another language's spelling gets the fix that
+     writes Sisu's (`and`, `not`, `ref`, `i += 1`, `var`, `.to_f64()`,
+     `print`, `range(0, 3)`, `list[int]`, `match`, `.is_none()`, `:`, `#`,
+     `None`); an attribute on its declaration's line is `E0131` and the
+     declaration is parsed; `pub(crate)` is `E0130` with `pub(package)`; a
+     one-line `if` without `else` is `E0102`; a keyword as a field's name
+     is `E0124`. Stage 1 decides it (RULES.md, R54).
+
+## R55. The type checker's notes and fixes the manual's writers found missing (decision 408)
+
+**The rule.** Each a note or a fix on an error stage 1 already reports,
+as R16, R24 and R45 gave theirs:
+
+- a `var` given a borrowed value, `var in_order = readings` with
+  `readings` a borrowed parameter, then changed (`E0341`, "not declared
+  with `var`", though it is): the note `type.var-holds-borrow` (it holds
+  `ref list[int]`, which changes nothing of its own) and the fix `.copy()`
+  at its value, where the note named `ref mut`;
+- a borrowed parameter given to a parameter taken with `own` (`E0300`):
+  the note `type.borrowed-to-own`, naming the callee and the move, and
+  besides `.copy()` the fix `type.take-own`, the parameter taken with
+  `own`;
+- an `int` where a sized integer is expected (`E0300`): the note
+  `type.narrow-int`, `.to_u8()` and the option it gives;
+- `let Total = 10` (`E0327`): the fix `type.lowercase-binding`, the name in
+  snake case, `total`;
+- `E0417`, `E0806` and `E0810` without an article, which read "a
+  `Opening`" and "a `Hour`": "a value of `{ty}`", "of type `{ty}`", in the
+  catalog's text, which both front ends print.
+
+**Why.** The manual's findings: "`var in_order = readings` ... is E0341
+... though it is" (chapter 5), "a borrowed parameter passed to an `own`
+parameter ... whose one fix copies" (chapter 10), "`let small: u8 =
+large` is E0300 with no fix" and "`let Total = 10` gets E0327, E0329 and
+E0200, none saying that a binding's name starts with a lowercase letter"
+(chapter 2), and "E0806, E0810 and E0417 write `a {ty}` for every type"
+(chapter 23, R14).
+
+**In stage 1.** `typeck.check.require_mutable_as` (`is_param_local`,
+`copied_init_end`), `typeck.expr.mismatch_fix` and `coerce`
+(`Checker.arg_own`, set by `typeck.call.check_arg`), `typeck.pat`
+(`snake_name`, `after_let`); `compiler/catalog/messages.catalog`.
+
+**What it changes.** The human form of the corpus's programs with
+`E0417`, `E0806` or `E0810`, which both front ends print from the same
+catalog, and nothing else of the corpus. The case
+`cases/findings5/notes.sisu` (its `.diag`).
+
+**Documents to bring along:** the manual's transcripts of `E0417`,
+`E0806` and `E0810`, whose text changes for every front end, and of the
+other errors above, which `sisu` now prints with the notes and fixes.
+
+- Differs: `compiler/stage1/cases/findings5/notes.sisu`: ids, human, doc, doc-output
+
+**Decision 408**, for docs/architecture.md:
+
+408. The type checker's notes and fixes the manual's writers found
+     missing: a `var` that holds a borrow it was given (`E0341`), a
+     borrowed parameter given to an `own` one, with the fix that takes it
+     with `own` (`E0300`), the narrowing conversion of an `int` (`E0300`),
+     a capitalised name a `let` binds (`E0327`), and `E0417`, `E0806` and
+     `E0810` without an article. Stage 1 decides it (RULES.md, R55).

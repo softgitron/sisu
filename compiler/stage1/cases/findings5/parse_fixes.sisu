@@ -1,0 +1,20 @@
+# RULES.md, R54: the forms the manual's writers found a parse error
+# misnaming. An attribute on its declaration's line is `E0131`, with the
+# fix that breaks the line, and the declaration is parsed; `pub(crate)` is
+# `E0130`, with `pub(package)`, where it made the item `pub`; a one-line
+# `if` without `else` is `E0102`, its block on the line, not an `if`
+# expression without `else`; and a keyword as a field's name is `E0124`.
+
+@derive(Eq) struct Point:
+    x: int
+
+pub(crate) def helper() -> int:
+    return 2
+
+struct Spec:
+    type: str
+    name: String
+
+def main():
+    let c = True
+    if c: print("yes")

@@ -1,0 +1,49 @@
+sir 0
+source 0 "warned_tests.sisu"
+test "area" test#0
+
+intrinsic assert.fail_compare pure
+
+fn area(2) source 0 @5:5-5:9 {
+    let _0: int
+    let _1: int "w" @5:10-5:16
+    let _2: int "h" @5:18-5:24
+    let _3: int "x" @6:9-6:10
+    let _4: bool
+    let _5: int "x" @8:13-8:14
+  bb0:
+    _3 = copy _1 @6:13-6:14
+    _4 = gt copy _2, const 0 @7:8-7:13
+    switch copy _4 [0: bb1, else: bb2] @7:8-7:13
+  bb1:
+    _0 = copy _3 @10:12-10:13
+    return @10:5-10:13
+  bb2:
+    _5 = copy _2 @8:17-8:18
+    _0 = mul copy _1, copy _5 @9:16-9:21
+    return @9:9-9:21
+}
+
+fn test#0(0) test source 0 @12:6-12:12 {
+    let _0: ()
+    let _1: int
+    let _2: bool
+    let _3: Never
+  bb0:
+    _1 = call fn area(const 2, const 3) @13:12-13:22
+    _2 = eq copy _1, const 6 @13:5-13:27
+    switch copy _2 [0: bb2, else: bb1] @13:5-13:27
+  bb1:
+    _0 = const ()
+    return
+  bb2:
+    _3 = call intrinsic assert.fail_compare(const "area(2, 3) == 6", const "", copy _1, const 6) @13:5-13:27
+    unreachable @13:5-13:27
+}
+--- stderr
+warning[W0002]: `x` shadows a binding of an enclosing scope
+  --> warned_tests.sisu:8:13
+  |
+8 |         let x = h
+  |             ^
+

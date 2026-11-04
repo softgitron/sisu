@@ -110,9 +110,38 @@ impl Parser:
     pub(package) pure def item(mut self):
         let cp = self.checkpoint()
         var prefixed = False
+        let (attrs_start, _) = self.current_range()
+        var first_attr: String? = None
         while self.at(SyntaxKind.At):
+            if first_attr.is_none():
+                if let Some((s, e)) = self.nth_range(1):
+                    first_attr = Some(self.text.byte_slice(s, e).to_string())
             self.attribute()
             prefixed = True
+        # An attribute in a block before what is no declaration stands
+        # before a statement, which no attribute applies to (02; RULES.md,
+        # R53): the statement is parsed as one, the attributes reported.
+        if let Some(name) = first_attr:
+            if self.in_statements > 0
+                    and not self.at(SyntaxKind.PubKw)
+                    and not self.at_item_start():
+                # The last attribute's end, before the line's end.
+                var end = attrs_start
+                var k = self.pos - 1
+                while k >= 0 and k < len(self.sig):
+                    if self.sig[k].kind != SyntaxKind.Newline:
+                        end = self.sig[k].end
+                        break
+                    k -= 1
+                var d = Diagnostic.new(Msg.ParseAttributeOnStatement, attrs_start, end)
+                d = d.with("name", name)
+                if name == "tile" or name == "unroll" or name == "vectorize":
+                    d = d.note(Msg.ParseLoopDirective)
+                self.report(d)
+                self.start_at(cp, SyntaxKind.Error)
+                self.finish_node()
+                self.statement()
+                return
         if self.at(SyntaxKind.PubKw):
             self.visibility()
             prefixed = True
@@ -191,6 +220,17 @@ impl Parser:
             self.in_attribute = True
             self.arg_list()
             self.in_attribute = False
+        # `@derive(Eq) struct Point:`: an attribute stands on a line of its
+        # own (02); the declaration after it on the line is parsed as if it
+        # were on the next (RULES.md, R54).
+        if not self.at(SyntaxKind.Newline) and not self.at_block_end() and self.at_item_start():
+            let (start, end) = self.current_range()
+            let gap_start = self.previous_end() ?? start
+            let indent = line_indent(self.text, gap_start)
+            var d = Diagnostic.new(Msg.ParseAttributeLine, start, end)
+            self.report(d.fix_at(Msg.ParseAttributeNewLine, gap_start, start, "\n{indent}"))
+            self.finish_node()
+            return
         self.end_stmt()
         self.finish_node()
 
@@ -199,6 +239,14 @@ impl Parser:
         self.bump()
         if self.at(SyntaxKind.LParen):
             self.bump()
+            # `pub(package)` is the one form (09; D-062): Rust's `pub(crate)`
+            # and the rest name nothing, where they made the item `pub`
+            # (RULES.md, R54).
+            if self.at(SyntaxKind.Ident) and self.current_text() != "package":
+                let (start, end) = self.current_range()
+                let name = self.current_text().to_string()
+                var d = Diagnostic.new(Msg.ParseVisibilityScope, start, end).with("name", name)
+                self.report(d.fix_at(Msg.ParseVisibilityPackage, start, end, "package"))
             _ = self.expect_name()
             _ = self.expect(SyntaxKind.RParen)
         self.finish_node()
@@ -426,6 +474,13 @@ impl Parser:
             if self.eat(SyntaxKind.Eq):
                 _ = self.expr()
             self.end_stmt()
+            self.finish_node()
+        elif self.current().keyword_text().is_some() and self.nth(1) == SyntaxKind.Colon:
+            # `type: str`: a keyword is no field's name (`E0124`, as for a
+            # parameter; RULES.md, R54), and the line declares no field.
+            self.start_at(cp, SyntaxKind.Error)
+            _ = self.expect_name()
+            self.recover_line()
             self.finish_node()
         elif not self.item_body(cp):
             # `invariant ...` is a contract (Phase 8); any other line is a
@@ -667,3 +722,13 @@ impl Parser:
         self.colon_members("extern", line, Members.Methods)
         self.in_trait_body = outer
         self.finish_node()
+
+## The spaces that indent the line holding the byte `at`.
+pure def line_indent(text: str, at: int) -> String:
+    var start = min(at, text.byte_len())
+    while start > 0 and text.byte_at(start - 1) != 10:
+        start -= 1
+    var end = start
+    while end < text.byte_len() and text.byte_at(end) == 32:
+        end += 1
+    return text.byte_slice(start, end).to_string()

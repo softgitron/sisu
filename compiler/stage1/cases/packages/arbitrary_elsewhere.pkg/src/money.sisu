@@ -1,0 +1,10 @@
+## An amount in cents.
+pub struct Money:
+    pub cents: int
+
+## A purchase: a price and how many, drawn by its shape, its price
+## through the impl the module `draws` writes.
+@derive(Arbitrary)
+pub struct Purchase:
+    pub price: Money
+    pub count: int

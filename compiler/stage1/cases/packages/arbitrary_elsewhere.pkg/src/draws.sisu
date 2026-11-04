@@ -1,0 +1,6 @@
+## How the tests draw an amount: between 0 and 100 euros.
+from till.money import Money
+
+impl Arbitrary for Money:
+    def arbitrary(d: Draws) -> Money:
+        return Money(cents=Draws.gen_in(d, 0, 10000))

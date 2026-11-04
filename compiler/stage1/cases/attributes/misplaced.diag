@@ -2,5 +2,5 @@
 9:2-9:14 W0026 resolve.misplaced-attribute name="must_consume" places="a struct, an enum or an error set" what="a function"
 13:2-13:8 W0026 resolve.misplaced-attribute name="export" places="a function" what="a struct"
 17:2-17:8 W0026 resolve.misplaced-attribute name="unroll" places="a loop nest" what="a function"
-21:2-21:12 W0026 resolve.misplaced-attribute name="deprecated" places="a function, a type, a constant or a variant" what="a test"
+21:2-21:12 W0026 resolve.misplaced-attribute name="deprecated" places="a function, a type, a trait, a constant, a field or a variant" what="a test"
 25:2-25:8 W0026 resolve.misplaced-attribute name="inline" places="a function" what="a struct"
