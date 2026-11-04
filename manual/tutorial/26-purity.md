@@ -661,6 +661,36 @@ test "the failure a pure scope reports":
 <!-- output: solutions/26-purity/predict_par.console -->
 ```console
 $ sisu test predict_par.sisu
+warning[W0001]: typed hole `par.chunks(6, 2)` of type `str`
+  --> predict_par.sisu:31:21
+   |
+31 | const CHUNKS: str = todo("par.chunks(6, 2)")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `par.chunks(4, 4)` of type `str`
+  --> predict_par.sisu:32:24
+   |
+32 | const ONE_CHUNK: str = todo("par.chunks(4, 4)")
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `reduce[Collect[int]]([5, 3, 8], grain=1)` of type `str`
+  --> predict_par.sisu:33:24
+   |
+33 | const COLLECTED: str = todo("reduce[Collect[int]]([5, 3, 8], grain=1)")
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `reduce[Sum[int]]([5, 3, 8], grain=2)` of type `str`
+  --> predict_par.sisu:34:21
+   |
+34 | const SUMMED: str = todo("reduce[Sum[int]]([5, 3, 8], grain=2)")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `check_all([10, 10, 90_000, 10])` of type `str`
+  --> predict_par.sisu:35:21
+   |
+35 | const FAILED: str = todo("check_all([10, 10, 90_000, 10])")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 test "chunks of two" ... blocked by todo("par.chunks(6, 2)")
 test "a chunk that holds them all" ... blocked by todo("par.chunks(4, 4)")
 test "collecting keeps the order" ... blocked by todo("reduce[Collect[int]]([5, 3, 8], grain=1)")
@@ -732,6 +762,7 @@ error[E0335]: this function is passed where a pure function is required, but it 
 19 |     return par.map(prices, add_vat)
    |                            ^^^^^^^
 
+error[D0006]: the program was not run: errors found (1)
 ```
 
 <details>
@@ -816,6 +847,30 @@ test "the chunks change nothing":
 <!-- output: solutions/26-purity/histogram.console -->
 ```console
 $ sisu test histogram.sisu
+warning[W0001]: typed hole `empty` of type `Histogram`
+  --> histogram.sisu:26:16
+   |
+26 |         return todo("empty")
+   |                ^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `add` of type `()`
+  --> histogram.sisu:29:9
+   |
+29 |         todo("add")
+   |         ^^^^^^^^^^^
+
+warning[W0001]: typed hole `merge` of type `Histogram`
+  --> histogram.sisu:32:16
+   |
+32 |         return todo("merge")
+   |                ^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `finish` of type `list[int]`
+  --> histogram.sisu:35:16
+   |
+35 |         return todo("finish")
+   |                ^^^^^^^^^^^^^^
+
 test "an evening's readings" ... blocked by todo("empty")
 test "no readings" ... blocked by todo("empty")
 test "the chunks change nothing" ... blocked by todo("empty")
@@ -890,6 +945,18 @@ test "sorting agrees with sorted":
 <!-- output: solutions/26-purity/halves.console -->
 ```console
 $ sisu test halves.sisu
+warning[W0001]: typed hole `merge` of type `list[int]`
+  --> halves.sisu:15:12
+   |
+15 |     return todo("merge")
+   |            ^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `sort_halves` of type `list[int]`
+  --> halves.sisu:21:12
+   |
+21 |     return todo("sort_halves")
+   |            ^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("merge")`:
   a = [1, 4, 9]
   b = [2, 3, 10]

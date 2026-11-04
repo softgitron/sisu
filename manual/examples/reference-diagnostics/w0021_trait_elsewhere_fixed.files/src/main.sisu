@@ -1,5 +1,0 @@
-# The impl in the trait's module, where the contract is checked.
-from kiuas.meter import Dial
-
-def main():
-    print(Dial(2).read(-5))

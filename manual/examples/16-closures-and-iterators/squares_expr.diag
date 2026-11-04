@@ -1,3 +1,0 @@
-4:19-4:42 E0900 stage0.unsupported construct="a generator expression" phase="generators (Phase 8)"
-5:19-5:26 E0304 type.unknown-method ty="list[int]" name="collect"
-  fix type.iterate-first 5:18-5:18 ".iter()"

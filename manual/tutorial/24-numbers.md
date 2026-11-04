@@ -515,6 +515,48 @@ test "an exact fraction":
 <!-- output: solutions/24-numbers/predict_numbers.console -->
 ```console
 $ sisu test predict_numbers.sisu
+warning[W0001]: typed hole `200u8 +% 100` of type `str`
+  --> predict_numbers.sisu:10:22
+   |
+10 | const WRAPPED: str = todo("200u8 +% 100")
+   |                      ^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `-100i8 -| 100` of type `str`
+  --> predict_numbers.sisu:11:24
+   |
+11 | const SATURATED: str = todo("-100i8 -| 100")
+   |                        ^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `(-1).truncate_to[u16]()` of type `str`
+  --> predict_numbers.sisu:12:24
+   |
+12 | const TRUNCATED: str = todo("(-1).truncate_to[u16]()")
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `(-1).to_u16()` of type `str`
+  --> predict_numbers.sisu:13:24
+   |
+13 | const CONVERTED: str = todo("(-1).to_u16()")
+   |                        ^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `0.5 + 0.25 == 0.75` of type `str`
+  --> predict_numbers.sisu:14:21
+   |
+14 | const HALVES: str = todo("0.5 + 0.25 == 0.75")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `0.1 + 0.2 == 0.3` of type `str`
+  --> predict_numbers.sisu:15:21
+   |
+15 | const TENTHS: str = todo("0.1 + 0.2 == 0.3")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `Ratio.of(6, -4)` of type `str`
+  --> predict_numbers.sisu:16:20
+   |
+16 | const RATIO: str = todo("Ratio.of(6, -4)")
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^
+
 test "wrapping" ... blocked by todo("200u8 +% 100")
 test "saturating" ... blocked by todo("-100i8 -| 100")
 test "truncating" ... blocked by todo("(-1).truncate_to[u16]()")
@@ -683,6 +725,24 @@ test "brightening stops at 255":
 <!-- output: solutions/24-numbers/colour.console -->
 ```console
 $ sisu test colour.sisu
+warning[W0001]: typed hole `pack` of type `u32`
+  --> colour.sisu:19:12
+   |
+19 |     return todo("pack")
+   |            ^^^^^^^^^^^^
+
+warning[W0001]: typed hole `unpack` of type `Colour`
+  --> colour.sisu:23:12
+   |
+23 |     return todo("unpack")
+   |            ^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `brighten` of type `Colour`
+  --> colour.sisu:28:12
+   |
+28 |     return todo("brighten")
+   |            ^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("pack")`:
   colour = Colour(red=255, green=136, blue=0)
 in scope at the typed hole `todo("unpack")`:
@@ -883,6 +943,12 @@ test "a long loan loses no cent":
 <!-- output: solutions/24-numbers/mortgage.console -->
 ```console
 $ sisu test mortgage.sisu
+warning[W0001]: typed hole `schedule` of type `list[Month]`
+  --> mortgage.sisu:27:12
+   |
+27 |     return todo("schedule")
+   |            ^^^^^^^^^^^^^^^^
+
 test "the first month" ... blocked by todo("schedule")
 test "a tie goes to the even cent" ... blocked by todo("schedule")
 test "the last payment pays off what is left" ... blocked by todo("schedule")

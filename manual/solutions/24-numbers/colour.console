@@ -1,4 +1,22 @@
 $ sisu test colour.sisu
+warning[W0001]: typed hole `pack` of type `u32`
+  --> colour.sisu:19:12
+   |
+19 |     return todo("pack")
+   |            ^^^^^^^^^^^^
+
+warning[W0001]: typed hole `unpack` of type `Colour`
+  --> colour.sisu:23:12
+   |
+23 |     return todo("unpack")
+   |            ^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `brighten` of type `Colour`
+  --> colour.sisu:28:12
+   |
+28 |     return todo("brighten")
+   |            ^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("pack")`:
   colour = Colour(red=255, green=136, blue=0)
 in scope at the typed hole `todo("unpack")`:

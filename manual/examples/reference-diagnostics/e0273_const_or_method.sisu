@@ -1,0 +1,13 @@
+# An impl gives a trait's constant as a method.
+trait Stove:
+    const MAX_HEAT: int
+
+struct WoodStove:
+    logs: int
+
+impl Stove for WoodStove:
+    def MAX_HEAT(self) -> int:
+        return 100 + self.logs
+
+def main():
+    print(WoodStove.MAX_HEAT)

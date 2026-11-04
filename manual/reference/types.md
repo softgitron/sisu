@@ -277,9 +277,9 @@ is expected and holds every value of the narrower one (D-016, Q-13):
 
 A signed type never widens to an unsigned one, and no integer becomes a
 float or a float an integer without a method. Two operands of different
-integer types widen the narrower when that loses nothing, and otherwise
-they do not mix (E0373, [R17](diagnostics.md#e0373)); a comparison does
-not widen.
+integer types widen the narrower when that loses nothing, in arithmetic
+and in a comparison alike, and otherwise they do not mix (E0373,
+[R17](diagnostics.md#e0373)).
 
 <!-- file: examples/reference-types/widening.sisu -->
 ```sisu
@@ -291,7 +291,7 @@ def main():
     let a: u8 = 200
     let b: i32 = 7
     let c: int = a
-    print("{a + b} {c} {total([a, b])}")
+    print("{a + b} {c} {total([a, b])} {b < a}")
     let half: f32 = 0.5
     let precise: f64 = half
     let huge: u64 = 18_000_000_000_000_000_000
@@ -301,7 +301,7 @@ def main():
 
 <!-- output: examples/reference-types/widening.out -->
 ```text
-207 200 207
+207 200 207 True
 0.5 18000000000000000000
 ```
 
@@ -1630,6 +1630,7 @@ error[E0310]: `+` cannot be applied to `Metres` and `Seconds`
    |
 10 |     let total = Metres(400.0) + Seconds(95.0)
    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = note: `+` on a `Metres` is the method of the trait `Add`: an `impl Add[Seconds] for Metres` gives it one
 
 error[D0006]: the program was not run: errors found (1)
 ```

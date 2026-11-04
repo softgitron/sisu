@@ -21,9 +21,8 @@ def mix[const N: int](mut out: Array[f32, N], voice: Array[f32, N], gain: f32):
 ## Scales the sample at `i` of `out` by `(N - i) / N`.
 @no_alloc
 def fade[const N: int](mut out: Array[f32, N]):
-    let length = N
-    for i in range(length):
-        out[i] = out[i] * (length - i).to_f32() / length.to_f32()
+    for i in range(N):
+        out[i] = out[i] * (N - i).to_f32() / N.to_f32()
 
 ## Four samples, for the tests.
 def frames(xs: list[f32]) -> Array[f32, 4]:

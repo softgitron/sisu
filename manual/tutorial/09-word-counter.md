@@ -403,6 +403,7 @@ error[E0300]: expected `Path`, found `Fs`
 24 |     assert line_count(fs, "missing.txt") == Err(NotFound("missing.txt"))
    |                       ^^
 
+error[D0006]: the program was not run: errors found (7)
 ```
 
 The first diagnostic is the one to read first, and its note says how a
@@ -475,6 +476,18 @@ test "a file that is not there":
 <!-- output: solutions/09-word-counter/find_lines.console -->
 ```console
 $ sisu test find_lines.sisu
+warning[W0001]: typed hole `the text of the file` of type `String`
+  --> find_lines.sisu:12:24
+   |
+12 |     let text: String = todo("the text of the file")
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `whether the line holds the word` of type `bool`
+  --> find_lines.sisu:15:12
+   |
+15 |         if todo("whether the line holds the word"):
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("the text of the file")`:
   path = "poem.txt"
   word = "warm"
@@ -640,6 +653,24 @@ warning[W0001]: typed hole `main` of type `! {IoError, cli.Error}`
 47 |     return todo("main")
    |            ^^^^^^^^^^^^
 
+in scope at the typed hole `todo("count_words")`:
+  text = "a bb ccc bb"
+  min_length = 2
+in scope at the typed hole `todo("count_words")`:
+  text = "Hei hei HEI"
+  min_length = 1
+in scope at the typed hole `todo("count_words")`:
+  text = "Sauna, sauna. (SAUNA!)"
+  min_length = 1
+in scope at the typed hole `todo("count_words")`:
+  text = "a well-known 2-minute walk"
+  min_length = 2
+in scope at the typed hole `todo("top_words")`:
+  counts = {"kissa": 1, "koira": 3, "kala": 2}
+  n = 2
+in scope at the typed hole `todo("top_words")`:
+  counts = {"tuli": 1, "meni": 1, "kevät": 1}
+  n = 5
 test "part 1, a minimum length/short words are left out" ... blocked by todo("count_words")
 test "part 1, a minimum length/every word counts in lower case" ... blocked by todo("count_words")
 test "part 2, punctuation/punctuation around a word" ... blocked by todo("count_words")

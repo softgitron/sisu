@@ -569,12 +569,7 @@ def main():
 `impl Type:` adds methods and associated functions to a type outside
 its body ([Impls](#impls)).
 
-**Stage 0 differs.** Stage 1, the front end of `sisu check`, `sisu run`
-and `sisu test`, does not report a field declared twice (E0205) and
-keeps one of the two; the Rust front end (`--front-end=rust`) reports
-it.
-
-**Status.** In stage 0, with the difference noted.
+**Status.** In stage 0.
 
 ## View structs
 
@@ -590,9 +585,9 @@ writes `view` ([R17](diagnostics.md#e0411)). The rules of views are
 
 `enum NAME[TYPE PARAMETERS]:` and an indented body declare an enum. Each
 line of the body is a variant, a unit (`Dot`), a tuple (`Circle(f64)`)
-or a record (`Rect(w: f64, h: f64)`), and the body may hold methods
-and associated functions as a struct's does. Two variants of one name
-are E0206.
+or a record (`Rect(w: f64, h: f64)`), and the body may hold methods,
+associated functions and constants as a struct's does. Two variants of
+one name are E0206.
 
 A variant is built like a struct, `Rect(w=2.0, h=3.0)`, named either
 alone where the enum is the type expected or under its enum,
@@ -602,11 +597,13 @@ An enum may name itself in its variants
 
 <!-- file: examples/reference-declarations/enums.sisu -->
 ```sisu
-# An enum's variants, and a method in its body.
+# An enum's variants, and a constant and a method in its body.
 enum Shape:
     Dot
     Circle(f64)
     Rect(w: f64, h: f64)
+
+    const KINDS: int = 3
 
     def area(self) -> f64:
         return match self:
@@ -618,6 +615,7 @@ def main():
     let shapes = [Dot, Shape.Circle(1.0), Rect(w=2.0, h=3.0)]
     for shape in shapes:
         print("{shape:?} {shape.area()}")
+    print("{Shape.KINDS} kinds")
 ```
 
 <!-- output: examples/reference-declarations/enums.out -->
@@ -625,15 +623,10 @@ def main():
 Dot 0.0
 Circle(1.0) 3.0
 Rect(w=2.0, h=3.0) 6.0
+3 kinds
 ```
 
-**Stage 0 differs.** Stage 1 does not report a variant declared twice
-(E0206), as it does not report a field declared twice
-([Structs](#structs)); the Rust front end (`--front-end=rust`) does. A
-`const` in an enum's body compiles, and reading it as `Light.COUNT` is
-E0351.
-
-**Status.** In stage 0 (D-043), with the difference noted.
+**Status.** In stage 0 (D-043).
 
 ## Error sets
 
@@ -681,7 +674,8 @@ a trait. The body holds:
 - provided methods, a `def` with a body, which an impl may replace;
 - associated types, `type NAME`, with an optional default, `= TYPE`,
   which every impl binds;
-- associated constants, `const NAME: TYPE`.
+- associated constants, `const NAME: TYPE`, which every impl gives, or
+  `const NAME: TYPE = VALUE`, whose value an impl may replace.
 
 The supertraits in parentheses, `trait Container(Named):`, are traits
 that every implementer must implement too; a trait that is its own
@@ -730,13 +724,54 @@ a basket with 2 items
 a list of 2
 ```
 
-**Stage 0 differs.** An associated constant without a value gets E0100,
-and one with a value cannot be read as `Self.NAME` or `Type.NAME`
-(E0351); a type's own `const` in its body works. E0247 comes only for a
-trait that names itself, `trait A(A)`: a cycle through another trait,
-`trait A(B)` and `trait B(A)`, compiles.
+An associated constant is read through a type: `Self.NAME` in the
+trait's and its impls' methods and in a default's value, `T.NAME` for a
+type parameter bounded by the trait, and `Square.NAME` for a type that
+implements it, whose impl's value it is, or the trait's default. Read
+through the trait, `Shape.SIDES`, it is E0449, since each impl gives its
+own. A value is checked as the body of a `pure` function, and a trait
+with a constant is no `dyn` type (E0241):
 
-**Status.** In stage 0, except associated constants.
+<!-- file: examples/reference-declarations/trait_consts.sisu -->
+```sisu
+# A trait's constants: one that every impl gives, one with a default.
+trait Shape:
+    const SIDES: int
+    const CORNERS: int = Self.SIDES
+
+    def describe(self) -> String:
+        return "sides {Self.SIDES}, corners {Self.CORNERS}"
+
+struct Square:
+    side: f64
+
+struct Disc:
+    radius: f64
+
+impl Shape for Square:
+    const SIDES: int = 4
+
+impl Shape for Disc:
+    const SIDES: int = 1
+    const CORNERS: int = 0
+
+def sides[T: Shape](shape: T) -> int:
+    return T.SIDES
+
+def main():
+    print(Square(2.0).describe())
+    print(Disc(1.0).describe())
+    print("{Square.CORNERS} {sides(Disc(1.0))}")
+```
+
+<!-- output: examples/reference-declarations/trait_consts.out -->
+```text
+sides 4, corners 4
+sides 1, corners 0
+4 1
+```
+
+**Status.** In stage 0 (03).
 
 ## Impls
 
@@ -750,6 +785,9 @@ TYPE:` adds methods to a type without a trait.
   E0234. It binds every associated type without a default, `type Item =
   String` (E0237); a name the trait does not have is E0238, and an
   associated type outside a trait's impl E0248.
+- It gives each constant that the trait declares without a value
+  (E0232), as a constant with the trait's type (E0272, E0273), and no
+  constant the trait does not declare (E0271).
 - An impl of a trait needs the type to implement the trait's
   supertraits (E0242, [R17](diagnostics.md#e0242)).
 - A method of an impl inherits `pure` from the trait's declaration of
@@ -992,8 +1030,8 @@ their examples ([R1](lexical-structure.md#comments-and-doc-comments)).
 | [E0411](diagnostics.md#e0411) | `borrow.view-field-in-plain-struct` | [View structs](#view-structs) |
 | E0206, E0386 | `resolve.duplicate-variant`, `type.variant-needs-fields` | [Enums](#enums) |
 | E0356 | `type.open-set-needs-wildcard` | [Error sets](#error-sets) |
-| E0230, E0247 | `resolve.not-a-trait`, `resolve.trait-cycle` | [Traits](#traits) |
-| [E0232](diagnostics.md#e0232), [E0233](diagnostics.md#e0233), E0234, [E0237](diagnostics.md#e0237), E0238, E0248, [E0242](diagnostics.md#e0242), E0213, E0216 | `resolve.missing-trait-method`, `resolve.not-a-trait-method`, `resolve.method-signature`, `resolve.missing-assoc-type`, `resolve.unknown-assoc-type`, `resolve.assoc-outside-trait-impl`, `resolve.supertrait-missing`, `resolve.drop-target`, `resolve.drop-signature` | [Impls](#impls) |
+| E0230, E0247, [E0449](diagnostics.md#e0449) | `resolve.not-a-trait`, `resolve.trait-cycle`, `type.trait-constant` | [Traits](#traits) |
+| [E0232](diagnostics.md#e0232), [E0233](diagnostics.md#e0233), E0234, [E0237](diagnostics.md#e0237), E0238, E0248, [E0271](diagnostics.md#e0271), [E0272](diagnostics.md#e0272), [E0273](diagnostics.md#e0273), [E0242](diagnostics.md#e0242), E0213, E0216 | `resolve.missing-trait-method`, `resolve.not-a-trait-method`, `resolve.method-signature`, `resolve.missing-assoc-type`, `resolve.unknown-assoc-type`, `resolve.assoc-outside-trait-impl`, `resolve.not-a-trait-constant`, `resolve.constant-type`, `resolve.const-or-method`, `resolve.supertrait-missing`, `resolve.drop-target`, `resolve.drop-signature` | [Impls](#impls) |
 | E0228 | `resolve.alias-cycle` | [Type declarations](#type-declarations) |
 | E0702, E0381, [E0807](diagnostics.md#e0807) | `type.test-signature`, `type.return-in-test`, `contract.not-in-test` | [Tests, suites and benchmarks](#tests-suites-and-benchmarks) |
 | [E0220](diagnostics.md#e0220) | `resolve.import-unknown` | [Imports](#imports) |

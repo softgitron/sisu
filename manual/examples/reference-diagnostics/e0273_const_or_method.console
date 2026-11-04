@@ -1,0 +1,15 @@
+$ sisu run e0273_const_or_method.sisu
+error[E0268]: the name of a method is written in snake_case, and `MAX_HEAT` is not
+  --> e0273_const_or_method.sisu:9:9
+  |
+9 |     def MAX_HEAT(self) -> int:
+  |         ^^^^^^^^
+  = fix: rename it: `max_heat`
+
+error[E0273]: `MAX_HEAT` is a constant of `Stove`, and this impl gives it as a method
+  --> e0273_const_or_method.sisu:9:9
+  |
+9 |     def MAX_HEAT(self) -> int:
+  |         ^^^^^^^^
+
+error[D0006]: the program was not run: errors found (2)

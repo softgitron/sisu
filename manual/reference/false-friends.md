@@ -191,7 +191,7 @@ maintainers.
 | `a if c else b` | `if c: a else: b` | [E0115](diagnostics.md#e0115), [E0100](diagnostics.md#e0100) | in a `let` only |
 | `count = 0` to declare | `var count = 0` | [E0200](diagnostics.md#e0200) | `let`, as a fix |
 | `print(a, b)` | `print("{a} {b}")` | [E0305](diagnostics.md#e0305) | yes, as a fix |
-| `'text'` | `"text"` | [E0016](diagnostics.md#e0016) | no |
+| `'text'` | `"text"` | [E0016](diagnostics.md#e0016) | yes, as a fix |
 | `for c in word` | `for c in word.chars()` | [E0325](diagnostics.md#e0325) | yes, as a fix |
 | `word[0]` | `word.chars()`, `word.byte_slice(a, b)` | [E0345](diagnostics.md#e0345) | yes, in the message |
 | `x or default` | `x ?? default` | [E0302](diagnostics.md#e0302) | no |
@@ -204,7 +204,7 @@ maintainers.
 | `f"{x}"` | `"{x}"` | [E0100](diagnostics.md#e0100) | no |
 | `class`, `__init__` | `struct` | [E0107](diagnostics.md#e0107), [E0215](diagnostics.md#e0215) | no |
 | `try:` `except:` | `T ! E`, `?`, `else` | [E0117](diagnostics.md#e0117) | no |
-| `int(s)`, `str(n)` | `s.parse_int()`, `"{n}"` | [E0200](diagnostics.md#e0200) | no; offers `uint` |
+| `int(s)`, `str(n)` | `s.parse_int()`, `"{n}"` | [E0200](diagnostics.md#e0200) | yes, in a note |
 | `append`, `strip`, `upper` | `push`, `trim`, `to_uppercase` | [E0304](diagnostics.md#e0304) | yes, as a fix |
 | `d.get(k, default)` | `d.get(k) ?? default` | [E0305](diagnostics.md#e0305) | no |
 | `enumerate(xs, start=1)` | `enumerate(xs)` and `i + 1` | [E0306](diagnostics.md#e0306) | no |
@@ -262,7 +262,8 @@ error[E0305]: wrong number of arguments to `print`: expected 1, found 2
 
 ### `'text'` in single quotes
 
-Single quotes make a `char`; text is between double quotes. E0016.
+Single quotes make a `char`; text is between double quotes. E0016,
+whose fix writes them.
 
 <!-- file: examples/reference-false-friends/single_quotes.sisu -->
 ```sisu
@@ -279,6 +280,7 @@ error[E0016]: a character literal holds exactly one character
   |
 3 |     print('Hei')
   |           ^^^^^
+  = fix: text is written in double quotes: `"`, `"`
 
 ```
 
@@ -611,8 +613,8 @@ error[E0117]: unexpected `:` after the end of the statement
 ### `int(text)` and `str(n)`
 
 Text becomes a number with `text.parse_int()`, which says when it
-cannot, and a value becomes text by interpolation. E0200, whose fix for
-`int` offers `uint`, which is not what you want.
+cannot, and a value becomes text by interpolation. E0200, whose note
+names Sisu's methods for each conversion.
 
 <!-- file: examples/reference-false-friends/conversions.sisu -->
 ```sisu
@@ -630,13 +632,14 @@ error[E0200]: cannot find `int` in this scope
   |
 3 |     let n = int("42")
   |             ^^^
-  = fix: a similar name is in scope: `uint`
+  = note: Sisu converts with methods: text is read with `s.parse_int()` or `s.parse_float()`, which give an option, a number is made text with `n.to_string()` or `"{n}"`, and one number made another with `x.to_int()` or `n.to_f64()`
 
 error[E0200]: cannot find `str` in this scope
   --> conversions.sisu:4:11
   |
 4 |     print(str(n))
   |           ^^^
+  = note: Sisu converts with methods: text is read with `s.parse_int()` or `s.parse_float()`, which give an option, a number is made text with `n.to_string()` or `"{n}"`, and one number made another with `x.to_int()` or `n.to_f64()`
 
 ```
 

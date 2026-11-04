@@ -1,0 +1,3 @@
+16:17-16:22 W0023 type.deprecated name="Stove" reason="use `Heater`"
+17:16-17:25 W0023 type.deprecated name="Fuel.Coal" reason="use `Electric`"
+18:29-18:36 W0023 type.deprecated name="HOTTEST" reason="use `MAX_HEAT`"

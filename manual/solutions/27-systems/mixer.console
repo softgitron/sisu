@@ -1,4 +1,16 @@
 $ sisu test mixer.sisu
+warning[W0001]: typed hole `mix` of type `()`
+  --> mixer.sisu:17:5
+   |
+17 |     todo("mix")
+   |     ^^^^^^^^^^^
+
+warning[W0001]: typed hole `fade` of type `()`
+  --> mixer.sisu:22:5
+   |
+22 |     todo("fade")
+   |     ^^^^^^^^^^^^
+
 in scope at the typed hole `todo("mix")`:
   gain = 0.5
 in scope at the typed hole `todo("mix")`:

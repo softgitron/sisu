@@ -4,5 +4,6 @@ error[E0016]: a character literal holds exactly one character
   |
 3 |     let name = 'Aino'
   |                ^^^^^^
+  = fix: text is written in double quotes: `"`, `"`
 
 error[D0006]: the program was not run: errors found (1)

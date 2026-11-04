@@ -4,5 +4,6 @@ error[E0305]: wrong number of arguments to `price`: expected 1, found 3
    |
 13 |     print(price(90, 300, True))
    |           ^^^^^^^^^^^^^^^^^^^^
+  = note: `per_hour` and the parameters after it are keyword-only: pass them by name, `per_hour=...`
 
 error[D0006]: the program was not run: errors found (1)

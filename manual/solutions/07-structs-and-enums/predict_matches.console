@@ -1,4 +1,34 @@
 $ sisu test predict_matches.sisu
+warning[W0001]: typed hole `a heavy small parcel` of type `int`
+  --> predict_matches.sisu:27:30
+   |
+27 | const SMALL_AND_HEAVY: int = todo("a heavy small parcel")
+   |                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `a heavy medium parcel` of type `int`
+  --> predict_matches.sisu:28:31
+   |
+28 | const MEDIUM_AND_HEAVY: int = todo("a heavy medium parcel")
+   |                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `a large parcel of the default weight` of type `int`
+  --> predict_matches.sisu:29:20
+   |
+29 | const LARGE: int = todo("a large parcel of the default weight")
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `two sizes compared` of type `bool`
+  --> predict_matches.sisu:30:21
+   |
+30 | const SIZES: bool = todo("two sizes compared")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `two parcels compared` of type `bool`
+  --> predict_matches.sisu:31:23
+   |
+31 | const PARCELS: bool = todo("two parcels compared")
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 test "a heavy small parcel" ... blocked by todo("a heavy small parcel")
 test "a heavy medium parcel" ... blocked by todo("a heavy medium parcel")
 test "a large parcel of the default weight" ... blocked by todo("a large parcel of the default weight")

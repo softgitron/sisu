@@ -1,0 +1,5 @@
+$ sisu run cfg_members.sisu
+3 Counter(count=3) Quiet
+$ sisu test cfg_members.sisu
+test "a test build has the members" ... ok
+1 passed, 0 failed, 0 blocked

@@ -1,0 +1,25 @@
+# `@cfg` on a field, a variant and a method of a type's own body.
+struct Counter:
+    count: int
+    @cfg(test)
+    resets: int = 0
+
+    @cfg(test)
+    def reset(mut self):
+        self.count = 0
+        self.resets += 1
+
+enum Mode:
+    Quiet
+    @cfg(test)
+    Traced
+
+def main():
+    let counter = Counter(count=3)
+    print("{counter.count} {counter:?} {Mode.Quiet:?}")
+
+test "a test build has the members":
+    var counter = Counter(count=3)
+    counter.reset()
+    assert counter.count == 0 and counter.resets == 1
+    assert "{Mode.Traced:?}" == "Traced"

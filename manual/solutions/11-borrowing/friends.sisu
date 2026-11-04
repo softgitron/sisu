@@ -1,10 +1,9 @@
 ##! Exercise 11.2, a friend each. Kind: fix. Level: 1.
 ##!
 ##! Every guest at a party brings a friend. The file does not compile.
-##! Check it with `sisu check friends.sisu`, read the diagnostic, and
-##! fix `invite_friends` so that `sisu test friends.sisu` passes every
-##! test. The hints are in chapter 11 of the tutorial, under "Exercise
-##! 11.2: a friend each".
+##! Run `sisu test friends.sisu`, read the diagnostic, and fix
+##! `invite_friends` so that every test passes. The hints are in chapter
+##! 11 of the tutorial, under "Exercise 11.2: a friend each".
 
 ## Adds a friend for each guest, after all the guests: "Aino's friend"
 ## for "Aino".

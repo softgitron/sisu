@@ -1,0 +1,3 @@
+9:9-9:17 E0268 resolve.not-snake-case kind="a method" name="MAX_HEAT"
+  fix resolve.rename 9:9-9:17 "max_heat"
+9:9-9:17 E0273 resolve.const-or-method name="MAX_HEAT" trait="Stove" what="a constant" given="a method"

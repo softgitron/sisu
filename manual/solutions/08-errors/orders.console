@@ -1,4 +1,22 @@
 $ sisu test orders.sisu
+warning[W0001]: typed hole `parse_line` of type `(String, int) ! LineError`
+  --> orders.sisu:24:12
+   |
+24 |     return todo("parse_line")
+   |            ^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `parse_order` of type `list[(String, int)] ! LineError`
+  --> orders.sisu:28:12
+   |
+28 |     return todo("parse_order")
+   |            ^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `order_total` of type `int ! {LineError, PriceError}`
+  --> orders.sisu:32:12
+   |
+32 |     return todo("order_total")
+   |            ^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("parse_line")`:
   line = "coffee 2"
 in scope at the typed hole `todo("parse_line")`:

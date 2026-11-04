@@ -1,4 +1,16 @@
 $ sisu test clock_time.sisu
+warning[W0001]: typed hole `parse_time` of type `Time ! FormError`
+  --> clock_time.sisu:28:12
+   |
+28 |     return todo("parse_time")
+   |            ^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `later` of type `Time`
+  --> clock_time.sisu:34:12
+   |
+34 |     return todo("later")
+   |            ^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("parse_time")`:
   text = "18:30"
 in scope at the typed hole `todo("parse_time")`:

@@ -1,4 +1,10 @@
 $ sisu test mortgage.sisu
+warning[W0001]: typed hole `schedule` of type `list[Month]`
+  --> mortgage.sisu:27:12
+   |
+27 |     return todo("schedule")
+   |            ^^^^^^^^^^^^^^^^
+
 test "the first month" ... blocked by todo("schedule")
 test "a tie goes to the even cent" ... blocked by todo("schedule")
 test "the last payment pays off what is left" ... blocked by todo("schedule")

@@ -16,5 +16,6 @@ error[E0310]: `+` cannot be applied to `Metres` and `Seconds`
    |
 20 |     print("all together: {run + time}")
    |                           ^^^^^^^^^^
+  = note: `+` on a `Metres` is the method of the trait `Add`: an `impl Add[Seconds] for Metres` gives it one
 
 error[D0006]: the program was not run: errors found (3)

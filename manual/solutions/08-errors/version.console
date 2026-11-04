@@ -1,4 +1,10 @@
 $ sisu test version.sisu
+warning[W0001]: typed hole `parse_version` of type `Version ! VersionError`
+  --> version.sisu:22:12
+   |
+22 |     return todo("parse_version")
+   |            ^^^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("parse_version")`:
   text = "2.10.1"
 in scope at the typed hole `todo("parse_version")`:

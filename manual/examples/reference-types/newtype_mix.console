@@ -4,5 +4,6 @@ error[E0310]: `+` cannot be applied to `Metres` and `Seconds`
    |
 10 |     let total = Metres(400.0) + Seconds(95.0)
    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = note: `+` on a `Metres` is the method of the trait `Add`: an `impl Add[Seconds] for Metres` gives it one
 
 error[D0006]: the program was not run: errors found (1)

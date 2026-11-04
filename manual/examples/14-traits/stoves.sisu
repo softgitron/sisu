@@ -1,0 +1,25 @@
+# A trait's constants: each impl gives its own, or keeps the default.
+trait Stove:
+    const MAX_HEAT: int
+    const WARM_UP: int = 30
+
+    def describe(self) -> String:
+        return "up to {Self.MAX_HEAT} °C after {Self.WARM_UP} minutes"
+
+struct WoodStove:
+    logs: int
+
+struct ElectricStove:
+    kilowatts: int
+
+impl Stove for WoodStove:
+    const MAX_HEAT: int = 110
+    const WARM_UP: int = 60
+
+impl Stove for ElectricStove:
+    const MAX_HEAT: int = 90
+
+def main():
+    print("wood: {WoodStove(4).describe()}")
+    print("electric: {ElectricStove(9).describe()}")
+    print(WoodStove.MAX_HEAT - ElectricStove.MAX_HEAT)

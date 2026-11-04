@@ -104,6 +104,18 @@ code that does not exist:
 <!-- output: examples/guide-holes/blocked.console -->
 ```console
 $ sisu test schedule.sisu
+warning[W0001]: typed hole `read the turns` of type `list[Turn]`
+  --> schedule.sisu:11:12
+   |
+11 |     return todo("read the turns")
+   |            ^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `lay out the evening` of type `list[String]`
+  --> schedule.sisu:15:12
+   |
+15 |     return todo("lay out the evening")
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("read the turns")`:
   text = "18 Aino\n20 Eero"
 in scope at the typed hole `todo("lay out the evening")`:
@@ -113,7 +125,8 @@ test "a free hour says so" ... blocked by todo("lay out the evening")
 0 passed, 0 failed, 2 blocked
 ```
 
-Each blocked test shows the closure of its hole too, what the test
+The run starts with the warning of each hole, as `sisu check` lists
+them. Each blocked test shows the closure of its hole too, what the test
 handed the function, and the last line counts the tests that pass, fail
 and wait, which is the state of the plan. While a test is blocked and
 none fails, `sisu test` exits with status 3, so a job that runs the
@@ -164,6 +177,12 @@ test "a free hour says so":
 <!-- output: examples/guide-holes/schedule_read.console -->
 ```console
 $ sisu test schedule_read.sisu
+warning[W0001]: typed hole `lay out the evening` of type `list[String]`
+  --> schedule_read.sisu:19:12
+   |
+19 |     return todo("lay out the evening")
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("lay out the evening")`:
   turns = [Turn(name="Aino", hour=18)]
 test "turns from text" ... ok
@@ -219,11 +238,9 @@ error[E0445]: a release build rejects the typed hole `todo("lay out the evening"
 error[D0006]: the program was not run: errors found (2)
 ```
 
-**Status.** Holes, W0001, blocked tests with their closures, and the
-release build's E0445 are in stage 0 (D-061). Stage 0's `sisu test`
-exits with status 0, not 3, when a test is blocked and none fails, and
-prints no W0001, which `sisu check` prints. `sisu check --holes`, which
-lists each hole with the bindings in scope, the `requires` around it and
-the tests that reach it, is designed in
+**Status.** Holes, W0001, blocked tests with their closures and the
+status 3, and the release build's E0445 are in stage 0 (D-061).
+`sisu check --holes`, which lists each hole with the bindings in scope,
+the `requires` around it and the tests that reach it, is designed in
 [10](../../proposal/10-tooling.md), and stage 0 answers it with D0009;
 so is a `sisu publish` that refuses a program with a hole.

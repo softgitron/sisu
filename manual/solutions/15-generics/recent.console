@@ -1,4 +1,28 @@
 $ sisu test recent.sisu
+warning[W0001]: typed hole `empty` of type `Recent[T, N]`
+  --> recent.sisu:17:16
+   |
+17 |         return todo("empty")
+   |                ^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `push` of type `()`
+  --> recent.sisu:21:9
+   |
+21 |         todo("push")
+   |         ^^^^^^^^^^^^
+
+warning[W0001]: typed hole `items` of type `list[T]`
+  --> recent.sisu:25:16
+   |
+25 |         return todo("items")
+   |                ^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `newest` of type `T?`
+  --> recent.sisu:29:16
+   |
+29 |         return todo("newest")
+   |                ^^^^^^^^^^^^^^
+
 test "fewer items than slots" ... blocked by todo("empty")
 test "the oldest items go" ... blocked by todo("empty")
 test "round and round" ... blocked by todo("empty")

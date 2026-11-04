@@ -490,20 +490,18 @@ test "a tag for Eero from Turku":
 ```
 
 Lines that start `##` are documentation comments, which chapter 3
-returns to. In the file's directory, check the file and run the tests
-before you change anything. `sisu check` reads the program and reports
-its diagnostics without running anything:
+returns to. In the file's directory, run the tests before you change
+anything:
 
 <!-- output: solutions/01-hello/name_tag.console -->
 ```console
-$ sisu check name_tag.sisu
+$ sisu test name_tag.sisu
 warning[W0001]: typed hole `name tag` of type `String`
   --> name_tag.sisu:13:12
    |
 13 |     return todo("name tag")
    |            ^^^^^^^^^^^^^^^^
 
-$ sisu test name_tag.sisu
 in scope at the typed hole `todo("name tag")`:
   name = "Aino"
   town = "Oulu"
@@ -550,9 +548,8 @@ When both tests pass, compare your answer with
   `sisu explain CODE` describes a code.
 - `let` names a value. Braces in a string put values into the text.
 - `sisu ws FILE` runs a worksheet and shows each line's value, `sisu fmt`
-  writes the one layout, `sisu check FILE` reports a file's diagnostics
-  without running it, and `sisu test FILE` runs a file's tests, each of
-  which is blocked, failed or ok.
+  writes the one layout, and `sisu test FILE` runs a file's tests, each
+  of which is blocked, failed or ok.
 
 Chapter 2 introduces numbers, truth values and the other basic types,
 and `var` for names that change. The chapters to come are listed in

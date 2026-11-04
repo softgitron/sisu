@@ -1,0 +1,10 @@
+# The derive moved to the struct, where it gives `==`.
+@derive(Eq)
+struct Reading:
+    celsius: int
+
+def latest() -> Reading:
+    return Reading(82)
+
+def main():
+    print(latest() == Reading(82))

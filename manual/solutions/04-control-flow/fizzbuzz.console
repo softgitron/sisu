@@ -1,4 +1,10 @@
 $ sisu test fizzbuzz.sisu
+warning[W0001]: typed hole `fizzbuzz` of type `String`
+  --> fizzbuzz.sisu:12:12
+   |
+12 |     return todo("fizzbuzz")
+   |            ^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("fizzbuzz")`:
   n = 1
 in scope at the typed hole `todo("fizzbuzz")`:

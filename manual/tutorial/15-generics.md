@@ -671,6 +671,30 @@ test "a shelf":
 <!-- output: solutions/15-generics/predict_generics.console -->
 ```console
 $ sisu test predict_generics.sisu
+warning[W0001]: typed hole `two cats in a chorus` of type `str`
+  --> predict_generics.sisu:42:19
+   |
+42 | const CATS: str = todo("two cats in a chorus")
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `one cow in a chorus` of type `str`
+  --> predict_generics.sisu:43:19
+   |
+43 | const COWS: str = todo("one cow in a chorus")
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the sounds of a cat and a cow` of type `str`
+  --> predict_generics.sisu:44:19
+   |
+44 | const BARN: str = todo("the sounds of a cat and a cow")
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the slots of a shelf` of type `int`
+  --> predict_generics.sisu:45:20
+   |
+45 | const SLOTS: int = todo("the slots of a shelf")
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 test "a chorus of cats" ... blocked by todo("two cats in a chorus")
 test "a chorus of cows" ... blocked by todo("one cow in a chorus")
 test "a barn" ... blocked by todo("the sounds of a cat and a cow")
@@ -767,6 +791,7 @@ error[E0300]: expected `T`, found `ref T`
    |                         ^^^^
   = fix: copy it with `.copy()`: `.copy()`
 
+error[D0006]: the program was not run: errors found (2)
 ```
 
 <details>
@@ -833,6 +858,12 @@ test "an empty list":
 <!-- output: solutions/15-generics/largest.console -->
 ```console
 $ sisu test largest.sisu
+warning[W0001]: typed hole `largest` of type `T?`
+  --> largest.sisu:11:12
+   |
+11 |     return todo("largest")
+   |            ^^^^^^^^^^^^^^^
+
 test "numbers" ... blocked by todo("largest")
 test "words" ... blocked by todo("largest")
 test "versions" ... blocked by todo("largest")
@@ -938,6 +969,42 @@ test "a stack as text":
 <!-- output: solutions/15-generics/stack.console -->
 ```console
 $ sisu test stack.sisu
+warning[W0001]: typed hole `empty` of type `Stack[T]`
+  --> stack.sisu:15:16
+   |
+15 |         return todo("empty")
+   |                ^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `push` of type `()`
+  --> stack.sisu:19:9
+   |
+19 |         todo("push")
+   |         ^^^^^^^^^^^^
+
+warning[W0001]: typed hole `pop` of type `T?`
+  --> stack.sisu:23:16
+   |
+23 |         return todo("pop")
+   |                ^^^^^^^^^^^
+
+warning[W0001]: typed hole `peek` of type `(ref T)?`
+  --> stack.sisu:27:16
+   |
+27 |         return todo("peek")
+   |                ^^^^^^^^^^^^
+
+warning[W0001]: typed hole `len` of type `int`
+  --> stack.sisu:31:16
+   |
+31 |         return todo("len")
+   |                ^^^^^^^^^^^
+
+warning[W0001]: typed hole `fmt` of type `()`
+  --> stack.sisu:36:9
+   |
+36 |         todo("fmt")
+   |         ^^^^^^^^^^^
+
 test "the last in is the first out" ... blocked by todo("empty")
 test "an empty stack" ... blocked by todo("empty")
 test "a look at the top" ... blocked by todo("empty")
@@ -1030,6 +1097,30 @@ test "nothing yet":
 <!-- output: solutions/15-generics/recent.console -->
 ```console
 $ sisu test recent.sisu
+warning[W0001]: typed hole `empty` of type `Recent[T, N]`
+  --> recent.sisu:17:16
+   |
+17 |         return todo("empty")
+   |                ^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `push` of type `()`
+  --> recent.sisu:21:9
+   |
+21 |         todo("push")
+   |         ^^^^^^^^^^^^
+
+warning[W0001]: typed hole `items` of type `list[T]`
+  --> recent.sisu:25:16
+   |
+25 |         return todo("items")
+   |                ^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `newest` of type `T?`
+  --> recent.sisu:29:16
+   |
+29 |         return todo("newest")
+   |                ^^^^^^^^^^^^^^
+
 test "fewer items than slots" ... blocked by todo("empty")
 test "the oldest items go" ... blocked by todo("empty")
 test "round and round" ... blocked by todo("empty")

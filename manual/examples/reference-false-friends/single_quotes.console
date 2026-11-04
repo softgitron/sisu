@@ -4,4 +4,5 @@ error[E0016]: a character literal holds exactly one character
   |
 3 |     print('Hei')
   |           ^^^^^
+  = fix: text is written in double quotes: `"`, `"`
 

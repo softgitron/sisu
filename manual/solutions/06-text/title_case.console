@@ -1,4 +1,10 @@
 $ sisu test title_case.sisu
+warning[W0001]: typed hole `title_case` of type `String`
+  --> title_case.sisu:10:12
+   |
+10 |     return todo("title_case")
+   |            ^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("title_case")`:
   text = "hei maailma"
 in scope at the typed hole `todo("title_case")`:

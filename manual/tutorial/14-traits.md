@@ -446,10 +446,11 @@ Vector(x=3.0, y=6.0)
   `>=` come from `PartialOrd` and `Ord`, which the section after next
   writes by hand.
 
-The left operand decides which impl runs, so `3.0 * step` is an
-operation on a number. On numbers the operators are the language's own
-operations, and stage 0 rejects `3.0 * step` with E0310
-(`type.binary-operator`); write the vector first.
+The left operand decides which impl runs, so `3.0 * step` asks `f64`
+for a `*` that takes a vector, which no impl gives here: it is E0310
+(`type.binary-operator`). Write the vector first, or give `f64` the
+operator with `impl Mul[Vector] for f64:`, which only the root package
+may write, as the section "One impl for each type and trait" explains.
 
 The set of operators is fixed: a type can give a meaning to `+`, but a
 program cannot make up a new operator or change the precedence of one
@@ -693,12 +694,80 @@ Vector(x=2.0, y=4.0)
 ```
 
 `Vector` implements `Mul` twice, once with each type of right operand,
-and the operand decides which impl `*` calls. A type can have
-constants of its own, declared with `const` in its body; constants
-that a trait declares for each impl to give are designed in
-[03](../../proposal/03-types-and-generics.md#traits) and are not in the
-compiler yet. The `Iterator` trait of chapter 16 has an associated
-type, `Item`, the type of what it gives.
+and the operand decides which impl `*` calls. The `Iterator` trait of
+chapter 16 has an associated type, `Item`, the type of what it gives.
+
+A trait can leave a constant to each impl in the same way. `const
+MAX_HEAT: int` in the trait has no value, so every impl gives one;
+`const WARM_UP: int = 30` has one, which an impl may replace. The
+trait's methods read them as `Self.MAX_HEAT`, and other code through a
+type, as `WoodStove.MAX_HEAT`:
+
+<!-- file: examples/14-traits/stoves.sisu -->
+```sisu
+# A trait's constants: each impl gives its own, or keeps the default.
+trait Stove:
+    const MAX_HEAT: int
+    const WARM_UP: int = 30
+
+    def describe(self) -> String:
+        return "up to {Self.MAX_HEAT} °C after {Self.WARM_UP} minutes"
+
+struct WoodStove:
+    logs: int
+
+struct ElectricStove:
+    kilowatts: int
+
+impl Stove for WoodStove:
+    const MAX_HEAT: int = 110
+    const WARM_UP: int = 60
+
+impl Stove for ElectricStove:
+    const MAX_HEAT: int = 90
+
+def main():
+    print("wood: {WoodStove(4).describe()}")
+    print("electric: {ElectricStove(9).describe()}")
+    print(WoodStove.MAX_HEAT - ElectricStove.MAX_HEAT)
+```
+
+<!-- output: examples/14-traits/stoves.out -->
+```text
+wood: up to 110 °C after 60 minutes
+electric: up to 90 °C after 30 minutes
+20
+```
+
+The electric stove keeps the trait's warm-up of 30 minutes, and the
+wood stove gives its own. An impl that leaves out a constant without a
+value gets E0232, whose note writes the line to add, as for a missing
+method. A type can also have constants of its own, declared with `const`
+in its body.
+
+**Try it.** Replace the last line of `main` with
+`print(Stove.MAX_HEAT)`, the constant read through the trait.
+
+<details>
+<summary>What Sisu says</summary>
+
+<!-- output: examples/14-traits/stoves_trait.console -->
+```console
+$ sisu run stoves_trait.sisu
+error[E0449]: each impl of `Stove` gives its own `MAX_HEAT`, so it is read through a type: `T.MAX_HEAT` for a type `T` that implements `Stove`
+  --> stoves_trait.sisu:25:11
+   |
+25 |     print(Stove.MAX_HEAT)
+   |           ^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+E0449 (`type.trait-constant`) says that the trait itself has no value:
+each impl gives its own, so the constant is read through a type that
+implements the trait.
+
+</details>
 
 ## One impl for each type and trait
 
@@ -854,14 +923,16 @@ error[E0310]: `+` cannot be applied to `Metres` and `Seconds`
    |
 20 |     print("all together: {run + time}")
    |                           ^^^^^^^^^^
+  = note: `+` on a `Metres` is the method of the trait `Add`: an `impl Add[Seconds] for Metres` gives it one
 
 error[D0006]: the program was not run: errors found (3)
 ```
 
 The arguments in the wrong order get E0300 (`type.mismatch`), and the
 sum of a distance and a time gets E0310: the types have no `Add`
-between them. With two `f64` values both mistakes would run and print
-a wrong number.
+between them. Its note names the impl that would give them one, which
+here would be the bug that the types are there to stop. With two `f64`
+values both mistakes would run and print a wrong number.
 
 </details>
 
@@ -967,6 +1038,36 @@ test "a padded room":
 <!-- output: solutions/14-traits/predict_methods.console -->
 ```console
 $ sisu test predict_methods.sisu
+warning[W0001]: typed hole `what a guest says` of type `str`
+  --> predict_methods.sisu:38:20
+   |
+38 | const GUEST: str = todo("what a guest says")
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `what a host says` of type `str`
+  --> predict_methods.sisu:39:19
+   |
+39 | const HOST: str = todo("what a host says")
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `a room written for users` of type `str`
+  --> predict_methods.sisu:40:20
+   |
+40 | const SHOWN: str = todo("a room written for users")
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `a room written for programmers` of type `str`
+  --> predict_methods.sisu:41:23
+   |
+41 | const DEBUGGED: str = todo("a room written for programmers")
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `a room padded on the left` of type `str`
+  --> predict_methods.sisu:42:21
+   |
+42 | const PADDED: str = todo("a room padded on the left")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 test "a guest" ... blocked by todo("what a guest says")
 test "a host" ... blocked by todo("what a host says")
 test "a room for users" ... blocked by todo("a room written for users")
@@ -1067,6 +1168,7 @@ error[E0233]: `cost` is not a method of `Item`
 33 |     def cost(self) -> int:
    |         ^^^^
 
+error[D0006]: the program was not run: errors found (3)
 ```
 
 <details>
@@ -1154,6 +1256,30 @@ test "a walk":
 <!-- output: solutions/14-traits/grid_vectors.console -->
 ```console
 $ sisu test grid_vectors.sisu
+warning[W0001]: typed hole `the sum` of type `Vector`
+  --> grid_vectors.sisu:17:16
+   |
+17 |         return todo("the sum")
+   |                ^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the difference` of type `Vector`
+  --> grid_vectors.sisu:21:16
+   |
+21 |         return todo("the difference")
+   |                ^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the opposite move` of type `Vector`
+  --> grid_vectors.sisu:25:16
+   |
+25 |         return todo("the opposite move")
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the move made `times` times` of type `Vector`
+  --> grid_vectors.sisu:29:16
+   |
+29 |         return todo("the move made `times` times")
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("the sum")`:
   self = Vector(x=1, y=2)
   other = Vector(x=3, y=-4)
@@ -1236,6 +1362,12 @@ test "a column of amounts":
 <!-- output: solutions/14-traits/money.console -->
 ```console
 $ sisu test money.sisu
+warning[W0001]: typed hole `fmt` of type `()`
+  --> money.sisu:17:9
+   |
+17 |         todo("fmt")
+   |         ^^^^^^^^^^^
+
 in scope at the typed hole `todo("fmt")`:
   self = Money(cents=1200)
   f = Formatter(out="", spec="", depth=0)
@@ -1369,12 +1501,14 @@ error[E0310]: `+` cannot be applied to `Metres` and `Metres`
    |
 28 |         total += run.distance
    |         ^^^^^^^^^^^^^^^^^^^^^
+  = note: `+` on a `Metres` is the method of the trait `Add`: an `impl Add[Metres] for Metres` gives it one
 
 error[E0310]: `+` cannot be applied to `Seconds` and `Metres`
   --> training.sisu:35:9
    |
 35 |         total += run.distance
    |         ^^^^^^^^^^^^^^^^^^^^^
+  = note: `+` on a `Seconds` is the method of the trait `Add`: an `impl Add[Metres] for Seconds` gives it one
 
 error[E0368]: `Metres` has no order, so it cannot be compared with `>` or sorted
   --> training.sisu:42:12
@@ -1425,6 +1559,7 @@ error[E0347]: `Metres` does not implement `Eq`
    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   = fix: derive it: `@derive(Eq)`
 
+error[D0006]: the program was not run: errors found (9)
 ```
 
 <details>
@@ -1468,7 +1603,8 @@ When every test passes, compare your answer with
 - The operators call `Add`, `Sub`, `Mul`, `Div`, `Rem` and `Neg`, `in`
   calls `Contains` and `len` calls `Len`. The set of operators is fixed.
 - A trait can require supertraits (E0242) and leave associated types
-  for each impl to choose (E0237).
+  for each impl to choose (E0237), and constants for each impl to give,
+  read through a type (E0449).
 - A type implements a trait at most once (E0235). An impl lives in the
   package of the trait or of the type, except in the root package,
   which may implement anything.

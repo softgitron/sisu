@@ -1,6 +1,9 @@
-# A generator expression, which stage 0 does not implement yet.
+# A function inside a function, which stage 0 does not implement yet.
 def main():
     let readings = [78, 85, 92]
-    let doubled = (r * 2 for r in readings)
-    for d in doubled:
-        print(d)
+
+    def doubled(r: int) -> int:
+        return r * 2
+
+    for r in readings:
+        print(doubled(r))

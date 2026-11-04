@@ -748,6 +748,42 @@ test "a result as text":
 <!-- output: solutions/08-errors/predict_fallbacks.console -->
 ```console
 $ sisu test predict_fallbacks.sisu
+warning[W0001]: typed hole `a number read from text, or 0` of type `int`
+  --> predict_fallbacks.sisu:22:21
+   |
+22 | const PARSED: int = todo("a number read from text, or 0")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `a word read as a number, or 0` of type `int`
+  --> predict_fallbacks.sisu:23:25
+   |
+23 | const NOT_PARSED: int = todo("a word read as a number, or 0")
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the item at index 5, or -1` of type `int`
+  --> predict_fallbacks.sisu:24:27
+   |
+24 | const PAST_THE_END: int = todo("the item at index 5, or -1")
+   |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `a quarter of 12, or 0` of type `int`
+  --> predict_fallbacks.sisu:25:22
+   |
+25 | const QUARTER: int = todo("a quarter of 12, or 0")
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `a quarter of 6, or 0` of type `int`
+  --> predict_fallbacks.sisu:26:25
+   |
+26 | const NO_QUARTER: int = todo("a quarter of 6, or 0")
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `a result as text` of type `str`
+  --> predict_fallbacks.sisu:27:20
+   |
+27 | const SHOWN: str = todo("a result as text")
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^
+
 test "a number read from text" ... blocked by todo("a number read from text, or 0")
 test "a word read as a number" ... blocked by todo("a word read as a number, or 0")
 test "an index past the end" ... blocked by todo("the item at index 5, or -1")
@@ -820,6 +856,7 @@ error[E0310]: `+` cannot be applied to `int` and `int?`
    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   = note: the value may be missing: give a default with `??`, or take it apart with `if let` or `match`
 
+error[D0006]: the program was not run: errors found (1)
 ```
 
 <details>
@@ -894,6 +931,18 @@ test "a language without messages":
 <!-- output: solutions/08-errors/language.console -->
 ```console
 $ sisu test language.sisu
+warning[W0001]: typed hole `the code chosen, or a fallback` of type `str`
+  --> language.sisu:22:21
+   |
+22 |     let code: str = todo("the code chosen, or a fallback")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the error for an unknown code` of type `String ! SettingError`
+  --> language.sisu:24:16
+   |
+24 |         return todo("the error for an unknown code")
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("the code chosen, or a fallback")`:
   user = {"language": "fi"}
   team = {"language": "sv"}
@@ -989,6 +1038,12 @@ test "versions in order":
 <!-- output: solutions/08-errors/version.console -->
 ```console
 $ sisu test version.sisu
+warning[W0001]: typed hole `parse_version` of type `Version ! VersionError`
+  --> version.sisu:22:12
+   |
+22 |     return todo("parse_version")
+   |            ^^^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("parse_version")`:
   text = "2.10.1"
 in scope at the typed hole `todo("parse_version")`:
@@ -1097,6 +1152,24 @@ test "errors from every layer":
 <!-- output: solutions/08-errors/orders.console -->
 ```console
 $ sisu test orders.sisu
+warning[W0001]: typed hole `parse_line` of type `(String, int) ! LineError`
+  --> orders.sisu:24:12
+   |
+24 |     return todo("parse_line")
+   |            ^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `parse_order` of type `list[(String, int)] ! LineError`
+  --> orders.sisu:28:12
+   |
+28 |     return todo("parse_order")
+   |            ^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `order_total` of type `int ! {LineError, PriceError}`
+  --> orders.sisu:32:12
+   |
+32 |     return todo("order_total")
+   |            ^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("parse_line")`:
   line = "coffee 2"
 in scope at the typed hole `todo("parse_line")`:

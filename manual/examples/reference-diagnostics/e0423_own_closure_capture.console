@@ -4,6 +4,6 @@ error[E0423]: an `own` closure keeps a copy of `greeting`, and `String` is not `
   |
 3 |     return own (name: str) -> "{greeting}, {name}!"
   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  = note: copy it into a local first (`let c = name.copy()`) and capture that, or use a plain closure, which borrows it
+  = note: a plain closure borrows `greeting` instead, while it lives; a copy made first is no more `Copy` than `greeting` is
 
 error[D0006]: the program was not run: errors found (1)

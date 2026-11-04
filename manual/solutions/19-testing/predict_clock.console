@@ -1,4 +1,40 @@
 $ sisu test predict_clock.sisu
+warning[W0001]: typed hole `seconds for two waits in a row` of type `int`
+  --> predict_clock.sisu:14:34
+   |
+14 | const ONE_AFTER_THE_OTHER: int = todo("seconds for two waits in a row")
+   |                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `seconds for two waits in two tasks` of type `int`
+  --> predict_clock.sisu:15:27
+   |
+15 | const SIDE_BY_SIDE: int = todo("seconds for two waits in two tasks")
+   |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `seconds for two steps beside one step` of type `int`
+  --> predict_clock.sisu:16:23
+   |
+16 | const IN_STEPS: int = todo("seconds for two steps beside one step")
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `seconds that the test moved the clock` of type `int`
+  --> predict_clock.sisu:17:23
+   |
+17 | const ADVANCED: int = todo("seconds that the test moved the clock")
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `seconds that a busy loop takes` of type `int`
+  --> predict_clock.sisu:18:19
+   |
+18 | const BUSY: int = todo("seconds that a busy loop takes")
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `lists of at most two booleans` of type `int`
+  --> predict_clock.sisu:19:20
+   |
+19 | const CASES: int = todo("lists of at most two booleans")
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 test "one wait after the other" ... blocked by todo("seconds for two waits in a row")
 test "two waits in two tasks" ... blocked by todo("seconds for two waits in two tasks")
 test "a task of two steps beside a task of one" ... blocked by todo("seconds for two steps beside one step")

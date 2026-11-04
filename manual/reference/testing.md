@@ -33,7 +33,7 @@ module, beside the code it tests ([R3](declarations.md#tests-suites-and-benchmar
 | `test "NAME"(clock: TestClock, fs: Fs):` | a test that receives a fresh fake of each capability it names |
 | `test "NAME"(sys: System):` | a test that receives the real `System` and runs alone |
 | `suite "NAME":` | a group of tests one level deep, whose tests are named `SUITE/NAME` |
-| `@tag("slow")` before a test | a tag that `--tag` and `--skip-tag` select by |
+| `@tag("slow")` before a test or a suite | a tag that `--tag` and `--skip-tag` select by, which a suite gives each of its tests |
 
 A test returns nothing (E0381), takes nothing but capabilities (E0702)
 and has no contract (E0807). Beside the `test` blocks, `sisu test` runs
@@ -92,19 +92,18 @@ Each test ends in one of three outcomes:
 
 `sisu test` lists the tests in the order they are declared, shows each
 failure again after the list with its replay token, and ends with the
-counts. Before the list, each test that reached a hole shows the hole's
+counts. Before the list come the program's warnings, a W0001 for each
+hole with its type, and each test that reached a hole shows the hole's
 closure: a line naming the hole, then a line `NAME = VALUE` for each
-binding in scope there ([R17](diagnostics.md#r0160)). Its status is 0
-when every test passed, 1 when a test failed or the program has an
-error, and 3 when no test failed and one is blocked, so a pipeline can
-tell a suite that waits for code from one that is done (D-061;
+binding in scope there ([R17](diagnostics.md#r0160)). A program with an
+error runs no test: its diagnostics end with D0006, or with D0021 when
+the ownership checker found them, as a run's do. The status is 0 when
+every test passed, 1 when a test failed or the program has an error,
+and 3 when no test failed and one is blocked, so a pipeline can tell a
+suite that waits for code from one that is done (D-061;
 [R16](sisu-command.md#sisu-test)).
 
-**Stage 0 differs.** `sisu test` exits with status 0 when no test
-failed, also when one is blocked; and it prints no warnings, so the
-W0001 that names each hole and its type comes from `sisu check`.
-
-**Status.** In stage 0 (D-061), with the differences noted.
+**Status.** In stage 0 (D-061).
 
 ## Isolation and the test clock
 
@@ -155,15 +154,57 @@ replay: sisu test --replay 1-c12c6afda705cec9-0.0.1-t0-s0-r0 failing.sisu
 0 passed, 1 failed, 0 blocked
 ```
 
-`debug_assert` is the form that a release build leaves out. The message
-of `assert` is a string (E0379).
+`expect CONDITION` is the form that lets a test go on: a failed one is
+recorded, with the same report, and the test goes on. When the test
+ends, or an `assert` or a panic stops it, it fails with every failure
+it recorded, in order, and then the one that stopped it:
+
+<!-- file: examples/reference-testing/expect.sisu -->
+```sisu
+# `expect` records a failure and the test goes on; `assert` stops it.
+def double(n: int) -> int:
+    return n + 2
+
+test "doubles":
+    expect double(2) == 4
+    expect double(3) == 6
+    print("after the expects")
+    assert double(5) == 10
+    print("after the assert")
+```
+
+<!-- output: examples/reference-testing/expect.console -->
+```console
+$ sisu test expect.sisu
+after the expects
+test "doubles" ... FAILED
+
+test "doubles" ... FAILED
+panic: assertion failed: double(3) == 6
+  left:  5
+  right: 6
+  at test "doubles" (expect.sisu:7:5)
+panic: assertion failed: double(5) == 10
+  left:  7
+  right: 10
+  at test "doubles" (expect.sisu:9:5)
+replay: sisu test --replay 1-f194bbb30a1dcbdc-0.0.1-t0-s0-r0 expect.sisu
+
+0 passed, 1 failed, 0 blocked
+```
+
+Outside a test, in a program that `sisu run` runs, and at compile time,
+a failed `expect` stops the run as `assert` does, since no test is there
+to fail at the end. `debug_assert` is the form that a release build
+leaves out. The message of `assert` is a string (E0379).
 
 **Stage 0 differs.** [17](../../proposal/17-testing.md#assertions) shows
 the value of every sub-expression, where stage 0 shows the two sides of
 a comparison (`left`, `right`) and nothing for a condition joined with
-`and`; `expect CONDITION`, which 17 makes the form that records a
-failure and lets the test go on, stops the test as `assert` does; and
-`debug_assert` is not a statement yet (E0117).
+`and`; `expect` takes no message, `expect CONDITION, MESSAGE` being
+E0117; a failure that `expect` records is reported as `panic: assertion
+failed`, as `assert`'s is; and `debug_assert` is not a statement yet
+(E0117).
 
 **Status.** In stage 0, with the differences noted.
 
@@ -186,6 +227,13 @@ generator makes, and fails when the block returns `False` or panics.
 - `arbitrary[T]` draws cases of `T` at random; the compiler writes the
   generator of `T`, so a refinement's cases satisfy its predicate and a
   struct's its invariant (E0820 for a type it cannot generate).
+- An impl of the prelude's `Arbitrary`, `def arbitrary(d: Draws) ->
+  Self`, draws a type its own way: `arbitrary[T]` and the generator of
+  every type that holds a `T` use it. `@derive(Arbitrary)` gives a
+  struct or an enum without type parameters the impl that draws its
+  shape, so that code bounded by `T: Arbitrary` draws it with
+  `T.arbitrary(d)`; a part with no generator is E0820 at the derive
+  ([G11](../guides/property-test.md#5-draw-a-type-its-own-way)).
 - `Gen.of(make, cases=100)` makes cases from a function of a `Draws`,
   whose draws are `Draws.gen_in(d, lo, hi)` and the others.
 - A failure is shrunk: the case is made smaller while it still fails,
@@ -437,7 +485,11 @@ transcript "tests/greet.transcript" ... ok
 **Stage 0 differs.** The `.sisu` files of a package's `tests/`
 directory, 17's black-box tests, are not run; only its transcripts are.
 A failing run's line holds the error's trace when the error has one, so
-such a line changes when the program's lines move.
+such a line changes when the program's lines move. The transcripts run
+on the Rust front end's build of the program, while its tests run on
+stage 1's, so a program that writes a form only stage 1 takes, such as
+`^` in a slice's bound, fails each transcript with D0128
+([R17](diagnostics.md#d0128)).
 
 **Status.** In stage 0.
 
@@ -526,7 +578,7 @@ and the reports of coverage and mutation testing are designed
 | E0820 | `test.no-generator` | [Property tests](#property-tests) |
 | E0821 | `test.refines-mismatch` | [Refinement tests](#refinement-tests) |
 | E0614 | `comptime.no-fake` | [Fakes of your own traits](#fakes-of-your-own-traits) |
-| D0061 | `cli.transcript-differs` | [Transcripts](#transcripts) |
+| D0061, [D0128](diagnostics.md#d0128) | `cli.transcript-differs`, `cli.transcript-front-end` | [Transcripts](#transcripts) |
 | R0107, [R0108](diagnostics.md#r0108) | `test.snapshot-changed`, `test.snapshot-missing` | [Snapshots](#snapshots) |
 | D0031, D0032, [D0033](diagnostics.md#d0033), D0034, D0035 | `cli.replay-no-token`, `cli.bad-replay-token`, `cli.token-other-code`, `cli.other-toolchain`, `cli.token-no-test` | [Replay tokens](#replay-tokens) |
 | R0105, E0971 | `sim.always-failed`, `sim.unmodelled-extern` | [Simulation](#simulation) |

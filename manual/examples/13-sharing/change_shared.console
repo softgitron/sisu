@@ -4,6 +4,6 @@ error[E0341]: cannot modify `web.config.retries`; it is not declared with `var`
    |
 14 |     web.config.retries = 5
    |     ^^^^^^^^^^^^^^^^^^
-  = note: borrow it with `ref mut` to change what the borrow refers to
+  = note: what a `Shared` holds is shared, so it is not changed in place: put the part that changes in a `Cell` or a `Mutex` inside it, and change it through that
 
 error[D0006]: the program was not run: errors found (1)

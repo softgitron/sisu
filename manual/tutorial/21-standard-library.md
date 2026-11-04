@@ -597,6 +597,42 @@ test "words as JSON":
 <!-- output: solutions/21-standard-library/predict_library.console -->
 ```console
 $ sisu test predict_library.sisu
+warning[W0001]: typed hole `the stem of a file name` of type `str`
+  --> predict_library.sisu:14:19
+   |
+14 | const STEM: str = todo("the stem of a file name")
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the directory that holds a file` of type `str`
+  --> predict_library.sisu:15:21
+   |
+15 | const PARENT: str = todo("the directory that holds a file")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `two bytes in hexadecimal` of type `str`
+  --> predict_library.sisu:16:18
+   |
+16 | const HEX: str = todo("two bytes in hexadecimal")
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `where 25 would go in a sorted list` of type `int`
+  --> predict_library.sisu:17:20
+   |
+17 | const PLACE: int = todo("where 25 would go in a sorted list")
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `how many runs of digits there are` of type `int`
+  --> predict_library.sisu:18:22
+   |
+18 | const MATCHES: int = todo("how many runs of digits there are")
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `a list of words as JSON` of type `str`
+  --> predict_library.sisu:19:22
+   |
+19 | const ENCODED: str = todo("a list of words as JSON")
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 test "the stem of a file name" ... blocked by todo("the stem of a file name")
 test "the directory that holds a file" ... blocked by todo("the directory that holds a file")
 test "two bytes in hexadecimal" ... blocked by todo("two bytes in hexadecimal")
@@ -754,6 +790,12 @@ test "no time":
 <!-- output: solutions/21-standard-library/times.console -->
 ```console
 $ sisu test times.sisu
+warning[W0001]: typed hole `the pattern` of type `str`
+  --> times.sisu:14:29
+   |
+14 |     let pattern = Regex.new(todo("the pattern"))?
+   |                             ^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("the pattern")`:
   text = "Sauna at 17:30, swim at 18:05."
 in scope at the typed hole `todo("the pattern")`:
@@ -836,6 +878,12 @@ test "a directory that is not there":
 <!-- output: solutions/21-standard-library/sizes.console -->
 ```console
 $ sisu test sizes.sisu
+warning[W0001]: typed hole `sizes_by_extension` of type `dict[String, int] ! IoError`
+  --> sizes.sisu:15:12
+   |
+15 |     return todo("sizes_by_extension")
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("sizes_by_extension")`:
   dir = "photos"
 in scope at the typed hole `todo("sizes_by_extension")`:
@@ -909,6 +957,12 @@ test "nobody comes":
 <!-- output: solutions/21-standard-library/turns.console -->
 ```console
 $ sisu test turns.sisu
+warning[W0001]: typed hole `start_times` of type `list[int]`
+  --> turns.sisu:15:12
+   |
+15 |     return todo("start_times")
+   |            ^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("start_times")`:
   arrivals = [0, 0, 0]
   stay = 10
@@ -1011,6 +1065,18 @@ test "a name never kept"(fs: Fs):
 <!-- output: solutions/21-standard-library/store.console -->
 ```console
 $ sisu test store.sisu
+warning[W0001]: typed hole `put` of type `String ! IoError`
+  --> store.sisu:19:12
+   |
+19 |     return todo("put")
+   |            ^^^^^^^^^^^
+
+warning[W0001]: typed hole `get` of type `bytes ! {IoError, StoreError}`
+  --> store.sisu:24:12
+   |
+24 |     return todo("get")
+   |            ^^^^^^^^^^^
+
 in scope at the typed hole `todo("put")`:
   data = b"rye bread"
 in scope at the typed hole `todo("put")`:

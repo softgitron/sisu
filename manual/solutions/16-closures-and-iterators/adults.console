@@ -22,3 +22,4 @@ error[E0324]: the type of `total` cannot be inferred here; add a type annotation
    |                                                     ^^^^^
   = note: a closure's parameters take their types from where the closure is passed; one kept in a `let` names them, as in `(a: int, b: int) -> a + b`
 
+error[D0006]: the program was not run: errors found (3)

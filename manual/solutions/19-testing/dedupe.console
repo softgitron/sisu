@@ -1,4 +1,10 @@
 $ sisu test dedupe.sisu
+warning[W0001]: typed hole `dedupe_ok` of type `bool`
+  --> dedupe.sisu:26:12
+   |
+26 |     return todo("dedupe_ok")
+   |            ^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("dedupe_ok")`:
   xs = [5]
   out = [5]

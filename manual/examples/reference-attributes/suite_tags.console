@@ -1,0 +1,5 @@
+$ sisu test --tag slow suite_tags.sisu
+test "large numbers/a large number" ... ok
+test "large numbers/a larger number" ... ok
+2 passed, 0 failed, 0 blocked
+1 not selected

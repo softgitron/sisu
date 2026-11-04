@@ -42,3 +42,4 @@ error[E0300]: expected `Path`, found `Fs`
 24 |     assert line_count(fs, "missing.txt") == Err(NotFound("missing.txt"))
    |                       ^^
 
+error[D0006]: the program was not run: errors found (7)

@@ -414,12 +414,13 @@ error[E0016]: a character literal holds exactly one character
   |
 3 |     let name = 'Aino'
   |                ^^^^^^
+  = fix: text is written in double quotes: `"`, `"`
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-The diagnostic offers no fix. Use double quotes for text, and keep
-single quotes for one character, such as `'A'`.
+The fix writes double quotes in place of the single ones, which is
+what text needs; keep single quotes for one character, such as `'A'`.
 
 <!-- file: examples/reference-diagnostics/e0016_char_literal_fixed.sisu -->
 ```sisu
@@ -1304,7 +1305,7 @@ Shown in [R13](modules.md).
 
 ## Names and declarations
 
-Codes E0200 to E0270. Name resolution finds what each name means and
+Codes E0200 to E0273. Name resolution finds what each name means and
 checks declarations: undefined and duplicate names, imports and
 visibility, derives, traits and impls.
 
@@ -2579,7 +2580,8 @@ delegate it only when `{field}` is its one field.
 
 An operator trait's method returns `Self`, which `@delegate` builds
 from the field's result, so a struct with other fields could not be
-made. The follow-on E0310 says that the operator then has no impl.
+made. The follow-on E0310 says that the operator then has no impl, and
+its note names the impl that would give it one.
 
 <!-- file: examples/reference-diagnostics/e0252_delegate_self.sisu -->
 ```sisu
@@ -2608,6 +2610,7 @@ error[E0310]: `+` cannot be applied to `Run` and `Run`
   |
 8 |     let total = Run(400.0, "Aino") + Run(800.0, "Aino")
   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = note: `+` on a `Run` is the method of the trait `Add`: an `impl Add[Run] for Run` gives it one
 
 error[D0006]: the program was not run: errors found (2)
 ```
@@ -2946,6 +2949,210 @@ usr/bin
 ```
 
 Shown in [R14](attributes.md#conditional-compilation).
+
+### E0271
+
+`resolve.not-a-trait-constant`: `{name}` is not a constant of
+`{trait}`.
+
+An impl of a trait gives the constants that the trait declares, and no
+other ([R3](declarations.md#impls)): a constant that the trait does not
+name, here a misspelling of `WARM_UP`, is refused at its name.
+
+<!-- file: examples/reference-diagnostics/e0271_not_trait_constant.sisu -->
+```sisu
+# An impl gives a constant that its trait does not declare.
+trait Stove:
+    const MAX_HEAT: int
+    const WARM_UP: int = 30
+
+struct WoodStove:
+    logs: int
+
+impl Stove for WoodStove:
+    const MAX_HEAT: int = 110
+    const WARMUP: int = 60
+
+def main():
+    print("{WoodStove.MAX_HEAT} {WoodStove.WARM_UP}")
+```
+
+<!-- output: examples/reference-diagnostics/e0271_not_trait_constant.console -->
+```console
+$ sisu run e0271_not_trait_constant.sisu
+error[E0271]: `WARMUP` is not a constant of `Stove`
+  --> e0271_not_trait_constant.sisu:11:11
+   |
+11 |     const WARMUP: int = 60
+   |           ^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Spell the constant as the trait does. A constant that belongs to the
+type alone goes in the type's body or in an `impl WoodStove:`, outside
+the trait's impl.
+
+<!-- file: examples/reference-diagnostics/e0271_not_trait_constant_fixed.sisu -->
+```sisu
+# The impl names the trait's constant as the trait spells it.
+trait Stove:
+    const MAX_HEAT: int
+    const WARM_UP: int = 30
+
+struct WoodStove:
+    logs: int
+
+impl Stove for WoodStove:
+    const MAX_HEAT: int = 110
+    const WARM_UP: int = 60
+
+def main():
+    print("{WoodStove.MAX_HEAT} {WoodStove.WARM_UP}")
+```
+
+<!-- output: examples/reference-diagnostics/e0271_not_trait_constant_fixed.out -->
+```text
+110 60
+```
+
+[R3](declarations.md#impls) describes it.
+
+### E0272
+
+`resolve.constant-type`: the constant `{name}` has the type `{found}`
+here, and `{trait}` declares it with the type `{expected}`.
+
+An impl gives a trait's constant the type that the trait declares, so
+that code generic over the trait reads one type whichever impl gives
+the value ([R3](declarations.md#impls)).
+
+<!-- file: examples/reference-diagnostics/e0272_constant_type.sisu -->
+```sisu
+# An impl gives a trait's constant a type other than the trait's.
+trait Stove:
+    const MAX_HEAT: int
+
+struct WoodStove:
+    logs: int
+
+impl Stove for WoodStove:
+    const MAX_HEAT: f64 = 110.0
+
+def main():
+    print(WoodStove.MAX_HEAT)
+```
+
+<!-- output: examples/reference-diagnostics/e0272_constant_type.console -->
+```console
+$ sisu run e0272_constant_type.sisu
+error[E0272]: the constant `MAX_HEAT` has the type `f64` here, and `Stove` declares it with the type `int`
+  --> e0272_constant_type.sisu:9:21
+  |
+9 |     const MAX_HEAT: f64 = 110.0
+  |                     ^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Give the constant the trait's type, and a value of that type.
+
+<!-- file: examples/reference-diagnostics/e0272_constant_type_fixed.sisu -->
+```sisu
+# The impl gives the constant the type that the trait declares.
+trait Stove:
+    const MAX_HEAT: int
+
+struct WoodStove:
+    logs: int
+
+impl Stove for WoodStove:
+    const MAX_HEAT: int = 110
+
+def main():
+    print(WoodStove.MAX_HEAT)
+```
+
+<!-- output: examples/reference-diagnostics/e0272_constant_type_fixed.out -->
+```text
+110
+```
+
+[R3](declarations.md#impls) describes it.
+
+### E0273
+
+`resolve.const-or-method`: `{name}` is {what} of `{trait}`, and this
+impl gives it as {given}.
+
+A trait's constant is given as a constant, and its method as a method
+([R3](declarations.md#impls)): a constant has one value for the type,
+where a method works one out for each value. This impl writes the
+constant `MAX_HEAT` as a method that reads a field, which E0268 refuses
+for its name as well; E0268's fix, a snake_case name, would leave the
+constant missing.
+
+<!-- file: examples/reference-diagnostics/e0273_const_or_method.sisu -->
+```sisu
+# An impl gives a trait's constant as a method.
+trait Stove:
+    const MAX_HEAT: int
+
+struct WoodStove:
+    logs: int
+
+impl Stove for WoodStove:
+    def MAX_HEAT(self) -> int:
+        return 100 + self.logs
+
+def main():
+    print(WoodStove.MAX_HEAT)
+```
+
+<!-- output: examples/reference-diagnostics/e0273_const_or_method.console -->
+```console
+$ sisu run e0273_const_or_method.sisu
+error[E0268]: the name of a method is written in snake_case, and `MAX_HEAT` is not
+  --> e0273_const_or_method.sisu:9:9
+  |
+9 |     def MAX_HEAT(self) -> int:
+  |         ^^^^^^^^
+  = fix: rename it: `max_heat`
+
+error[E0273]: `MAX_HEAT` is a constant of `Stove`, and this impl gives it as a method
+  --> e0273_const_or_method.sisu:9:9
+  |
+9 |     def MAX_HEAT(self) -> int:
+  |         ^^^^^^^^
+
+error[D0006]: the program was not run: errors found (2)
+```
+
+Give the constant one value for the type. A value that depends on each
+stove's fields is a method, which the trait would declare as one.
+
+<!-- file: examples/reference-diagnostics/e0273_const_or_method_fixed.sisu -->
+```sisu
+# The impl gives the constant as a constant, with one value for the type.
+trait Stove:
+    const MAX_HEAT: int
+
+struct WoodStove:
+    logs: int
+
+impl Stove for WoodStove:
+    const MAX_HEAT: int = 110
+
+def main():
+    print(WoodStove.MAX_HEAT)
+```
+
+<!-- output: examples/reference-diagnostics/e0273_const_or_method_fixed.out -->
+```text
+110
+```
+
+[R3](declarations.md#impls) describes it.
 
 ## Types
 
@@ -5094,7 +5301,7 @@ Shown in [R4](expressions.md#interpolation-and-format-specs).
 
 ## Ownership
 
-Codes E0400 to E0448. The ownership checker checks moves, borrows,
+Codes E0400 to E0449. The ownership checker checks moves, borrows,
 views, tasks and must-consume values
 ([R7](ownership.md)). E0445 to E0448, numbered after its codes, are the
 type checker's: a typed hole in a release build, the body of a parallel
@@ -6011,14 +6218,16 @@ error[E0423]: an `own` closure keeps a copy of `greeting`, and `String` is not `
   |
 3 |     return own (name: str) -> "{greeting}, {name}!"
   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  = note: copy it into a local first (`let c = name.copy()`) and capture that, or use a plain closure, which borrows it
+  = note: a plain closure borrows `greeting` instead, while it lives; a copy made first is no more `Copy` than `greeting` is
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-Keep the work where the value lives and pass the values in, as the fixed
-program does, or capture `Copy` values only. A copy of the `String` made
-first is not `Copy` either, so it gets E0423 again.
+The note names what works now: a plain closure, which borrows the value
+while it lives, so that the work stays where the value lives and the
+values are passed in, as the fixed program does; or capture `Copy`
+values only. A copy of the `String` made first is not `Copy` either,
+as the note says.
 
 <!-- file: examples/reference-diagnostics/e0423_own_closure_capture_fixed.sisu -->
 ```sisu
@@ -6443,6 +6652,74 @@ def main():
 ```
 
 [R14](attributes.md#fast-floating-point) describes it.
+
+### E0449
+
+`type.trait-constant`: each impl of `{trait}` gives its own `{name}`,
+so it is read through a type: `T.{name}` for a type `T` that implements
+`{trait}`.
+
+A trait's constant has a value for each type that implements the
+trait, and none of the trait's own, even when the trait gives a
+default ([R3](declarations.md#traits)), so a read through the trait
+names no value.
+
+<!-- file: examples/reference-diagnostics/e0449_trait_constant.sisu -->
+```sisu
+# A trait's constant read through the trait, which has no value of it.
+trait Stove:
+    const MAX_HEAT: int
+
+struct WoodStove:
+    logs: int
+
+impl Stove for WoodStove:
+    const MAX_HEAT: int = 110
+
+def main():
+    print(Stove.MAX_HEAT)
+```
+
+<!-- output: examples/reference-diagnostics/e0449_trait_constant.console -->
+```console
+$ sisu run e0449_trait_constant.sisu
+error[E0449]: each impl of `Stove` gives its own `MAX_HEAT`, so it is read through a type: `T.MAX_HEAT` for a type `T` that implements `Stove`
+  --> e0449_trait_constant.sisu:12:11
+   |
+12 |     print(Stove.MAX_HEAT)
+   |           ^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Read the constant through a type: the type itself, `WoodStove.MAX_HEAT`,
+or a type parameter bounded by the trait, as `hottest` does.
+
+<!-- file: examples/reference-diagnostics/e0449_trait_constant_fixed.sisu -->
+```sisu
+# The constant read through a type, whose impl gives its value.
+trait Stove:
+    const MAX_HEAT: int
+
+struct WoodStove:
+    logs: int
+
+impl Stove for WoodStove:
+    const MAX_HEAT: int = 110
+
+def hottest[T: Stove](stove: T) -> int:
+    return T.MAX_HEAT
+
+def main():
+    print("{WoodStove.MAX_HEAT} {hottest(WoodStove(4))}")
+```
+
+<!-- output: examples/reference-diagnostics/e0449_trait_constant_fixed.out -->
+```text
+110 110
+```
+
+Shown in [chapter 14](../tutorial/14-traits.md#types-that-each-impl-chooses).
 
 ## Compile-time evaluation
 
@@ -7906,42 +8183,51 @@ Stage 0 parses some of what the proposal designs before it can run it,
 and names the construct and the phase it arrives with
 ([R16](sisu-command.md)). The rest of the program is checked as far as
 it can be, so an error that follows from the missing construct, such as
-a method that the stand-in type lacks, may come after it.
+a name that the missing declaration would have made, may come after it.
 
 <!-- file: examples/reference-diagnostics/e0900_unsupported.sisu -->
 ```sisu
-# A generator expression, which stage 0 does not implement yet.
+# A function inside a function, which stage 0 does not implement yet.
 def main():
     let readings = [78, 85, 92]
-    let doubled = (r * 2 for r in readings)
-    for d in doubled:
-        print(d)
+
+    def doubled(r: int) -> int:
+        return r * 2
+
+    for r in readings:
+        print(doubled(r))
 ```
 
 <!-- output: examples/reference-diagnostics/e0900_unsupported.console -->
 ```console
 $ sisu run e0900_unsupported.sisu
-error[E0900]: a generator expression is not implemented in stage 0 yet; it arrives with generators (Phase 8)
-  --> e0900_unsupported.sisu:4:19
+error[E0900]: a nested `def` is not implemented in stage 0 yet; it arrives with nested declarations (a later phase)
+  --> e0900_unsupported.sisu:5:5
   |
-4 |     let doubled = (r * 2 for r in readings)
-  |                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+5 |     def doubled(r: int) -> int:
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-error[D0006]: the program was not run: errors found (1)
+error[E0200]: cannot find `doubled` in this scope
+  --> e0900_unsupported.sisu:9:15
+  |
+9 |         print(doubled(r))
+  |               ^^^^^^^
+
+error[D0006]: the program was not run: errors found (2)
 ```
 
-Write what stage 0 runs: here a list comprehension, which builds the
-list at once, or a generator function with `yield` for a lazy sequence
-([chapter 16](../tutorial/16-closures-and-iterators.md)).
+Write what stage 0 runs: here a closure, which a local name holds as
+it would hold the inner function, or a function at the top of the
+module ([chapter 16](../tutorial/16-closures-and-iterators.md#closures)).
 
 <!-- file: examples/reference-diagnostics/e0900_unsupported_fixed.sisu -->
 ```sisu
-# A list comprehension, which stage 0 implements.
+# A closure, which stage 0 implements, in place of the inner function.
 def main():
     let readings = [78, 85, 92]
-    let doubled = [r * 2 for r in readings]
-    for d in doubled:
-        print(d)
+    let doubled = (r: int) -> r * 2
+    for r in readings:
+        print(doubled(r))
 ```
 
 <!-- output: examples/reference-diagnostics/e0900_unsupported_fixed.out -->
@@ -7951,7 +8237,7 @@ def main():
 184
 ```
 
-Shown in [chapter 16](../tutorial/16-closures-and-iterators.md).
+Shown in [chapter 23](../tutorial/23-contracts.md#what-waits-for-the-verifier).
 
 ### E0981
 
@@ -8603,7 +8889,7 @@ Shown in the guide [Call a C library](../guides/c-library.md).
 
 ## Warnings
 
-Codes W0001 to W0025. A warning does not stop a program: `sisu run`
+Codes W0001 to W0026. A warning does not stop a program: `sisu run`
 prints it and runs.
 
 ### W0001
@@ -9028,100 +9314,19 @@ Shown in [chapter 27](../tutorial/27-systems.md).
 ### W0021
 
 `contract.trait-elsewhere`: the contract of `{method}` binds this impl,
-and stage 1 checks a trait's contract only in the impls of the module
-that declares the trait.
+and stage 1 does not have the syntax of the trait's module to check it
+in.
 
 A trait's method may declare `requires` and `ensures`, which bind every
-impl of the method ([R11](contracts.md#contracts-on-trait-methods)).
-Stage 1 checks them in each impl of the trait's own module, and an impl
-in another module is not held to them yet: the warning says so at the
-impl's method, so that the contract is not taken for checked.
+impl of the method, in any module or package: the impl's method checks
+the trait's clauses in the syntax of the trait's module
+([R11](contracts.md#contracts-on-trait-methods)). The warning is kept
+for an impl whose trait's module the check cannot read, so that the
+contract is not taken for checked; every module of a program can be
+read, so a program does not get it.
 
-<!-- file: examples/reference-diagnostics/w0021_trait_elsewhere.files/src/meter.sisu -->
-```sisu
-# A trait whose method has a contract.
-
-## Something that reads a heat at a moment of the evening.
-pub trait Meter:
-    ## The heat at minute `at`, which is not negative.
-    def read(self, at: int) -> int:
-        requires at >= 0
-```
-
-<!-- file: examples/reference-diagnostics/w0021_trait_elsewhere.files/src/main.sisu -->
-```sisu
-# An impl of a trait in another module than the trait's.
-from kiuas.meter import Meter
-
-struct Dial:
-    scale: int
-
-impl Meter for Dial:
-    def read(self, at: int) -> int:
-        return at * self.scale
-
-def main():
-    print(Dial(2).read(-5))
-```
-
-<!-- output: examples/reference-diagnostics/w0021_trait_elsewhere.console -->
-```console
-$ sisu run
-warning[W0021]: the contract of `Meter.read` binds this impl, and stage 1 checks a trait's contract only in the impls of the module that declares the trait
-  --> src/main.sisu:8:9
-  |
-8 |     def read(self, at: int) -> int:
-  |         ^^^^
-
--10
-```
-
-The run reads a heat at minute -5, which the contract forbids. Put the
-impl in the trait's module, where the contract is checked:
-
-<!-- file: examples/reference-diagnostics/w0021_trait_elsewhere_fixed.files/src/meter.sisu -->
-```sisu
-# A trait whose method has a contract, and an impl beside it.
-
-## Something that reads a heat at a moment of the evening.
-pub trait Meter:
-    ## The heat at minute `at`, which is not negative.
-    def read(self, at: int) -> int:
-        requires at >= 0
-
-## A meter that scales the minute.
-pub struct Dial:
-    pub scale: int
-
-impl Meter for Dial:
-    def read(self, at: int) -> int:
-        return at * self.scale
-```
-
-<!-- file: examples/reference-diagnostics/w0021_trait_elsewhere_fixed.files/src/main.sisu -->
-```sisu
-# The impl in the trait's module, where the contract is checked.
-from kiuas.meter import Dial
-
-def main():
-    print(Dial(2).read(-5))
-```
-
-<!-- output: examples/reference-diagnostics/w0021_trait_elsewhere_fixed.console -->
-```console
-$ sisu run
-panic: precondition of `Meter.read` failed: at >= 0
-    at >= 0
-    │
-    -5
-  at kiuas.meter.Dial.kiuas.meter.Meter.read (src/meter.sisu:7:18)
-  at main (src/main.sisu:5:11)
-```
-
-The impl's `read` now checks the trait's precondition on entry, and the
-failure names the trait's method.
-
-[R11](contracts.md#contracts-on-trait-methods) describes it.
+Example: [R11](contracts.md#contracts-on-trait-methods) shows the
+check, for an impl in another module than the trait's.
 
 ### W0022
 
@@ -9192,10 +9397,14 @@ Shown in [R14](attributes.md#where-an-attribute-may-stand).
 
 `type.deprecated`: `{name}` is deprecated: {reason}.
 
-A call of a function or a method marked `@deprecated("...")`, or a use
-of one as a value, warns with the attribute's text, which names what to
-use instead ([13](../../proposal/13-evolution-and-governance.md#deprecation)).
-The item's own body may use it without a word.
+A use of an item marked `@deprecated("...")` warns with the
+attribute's text, which names what to use instead
+([13](../../proposal/13-evolution-and-governance.md#deprecation)): a
+call of a function or a method, or its use as a value, a type named or
+built, a constant read, a variant built or matched
+([R14](attributes.md#deprecation-and-migrations)). The item's own body
+may use it without a word, and so may a type's own declaration and its
+impls.
 
 <!-- file: examples/reference-diagnostics/w0023_deprecated.sisu -->
 ```sisu
@@ -9368,6 +9577,68 @@ def main():
 ```
 
 [R14](attributes.md#deprecation-and-migrations) describes it.
+
+### W0026
+
+`resolve.misplaced-attribute`: `@{name}` means something on {places},
+so on {what} it does nothing.
+
+Each attribute that Sisu reads means something on some declarations
+only ([R14](attributes.md#where-an-attribute-may-stand)): `@derive` on
+a struct, an enum or an error set, `@export` on a function, `@tag` on a
+test, a benchmark or a suite. On another declaration it would do
+nothing, so it warns, naming the declarations it is for, and the
+program runs without it.
+
+<!-- file: examples/reference-diagnostics/w0026_misplaced_attribute.sisu -->
+```sisu
+# An attribute that Sisu reads, on a declaration where it means nothing.
+struct Reading:
+    celsius: int
+
+@derive(Eq)
+def latest() -> Reading:
+    return Reading(82)
+
+def main():
+    print(latest().celsius)
+```
+
+<!-- output: examples/reference-diagnostics/w0026_misplaced_attribute.console -->
+```console
+$ sisu run w0026_misplaced_attribute.sisu
+warning[W0026]: `@derive` means something on a struct, an enum or an error set, so on a function it does nothing
+  --> w0026_misplaced_attribute.sisu:5:2
+  |
+5 | @derive(Eq)
+  |  ^^^^^^
+
+82
+```
+
+Move the attribute to the declaration it is meant for, here the struct,
+whose values `==` then compares, or remove it.
+
+<!-- file: examples/reference-diagnostics/w0026_misplaced_attribute_fixed.sisu -->
+```sisu
+# The derive moved to the struct, where it gives `==`.
+@derive(Eq)
+struct Reading:
+    celsius: int
+
+def latest() -> Reading:
+    return Reading(82)
+
+def main():
+    print(latest() == Reading(82))
+```
+
+<!-- output: examples/reference-diagnostics/w0026_misplaced_attribute_fixed.out -->
+```text
+True
+```
+
+Shown in [R14](attributes.md#where-an-attribute-may-stand).
 
 ## Run time
 
@@ -10110,7 +10381,7 @@ Shown in [chapter 3](../tutorial/03-functions.md#leaving-a-hole).
 
 ## The driver
 
-Codes D0001 to D0127. The messages of the `sisu` command itself
+Codes D0001 to D0131. The messages of the `sisu` command itself
 ([R16](sisu-command.md)): usage errors, the lines of `sisu test` and
 `sisu bench`, replays, packages and the native backend.
 
@@ -10129,12 +10400,13 @@ Example: [R16](sisu-command.md#commands-options-and-arguments).
 
 `cli.missing-file`: `sisu {command}` needs a file.
 
-The command needs an argument that the command line does not give: a
-file for `sisu ws`, a log for `sisu replay`, a code for `sisu explain`,
-a name for `sisu new`.
+The command needs a file that the command line does not give: a file
+for `sisu ws`, `sisu tokens` or `sisu parse`, a log for `sisu replay`.
+`sisu explain` without a code is D0129, and `sisu new` without a name
+D0130.
 
-Give the argument. The message says "a file" for every command, also
-where a code or a name is needed.
+Give the file. The message says "a file" for `sisu replay` too, whose
+file is a capability log.
 
 Example: [R16](sisu-command.md#commands-options-and-arguments).
 
@@ -10503,6 +10775,103 @@ explored 5 schedules (seeds 0 to 4): every run exited with status 0
 
 [R16](sisu-command.md#choosing-the-schedule) describes it.
 
+### D0128
+
+`cli.transcript-front-end`: a transcript runs on the Rust front end's
+build of the program, which stops at errors stage 1 does not report:
+{diagnostics}.
+
+A program's transcripts run on the Rust front end's build of the
+program, the one build that has the world a transcript runs in, while
+its tests run on stage 1's ([R15](testing.md#transcripts)). The Rust
+front end is frozen and lacks the forms that stage 1 has gained since,
+such as `^` in a slice's bound, so a program that writes one passes its
+check and its tests, and each of its transcripts fails with the Rust
+front end's diagnostics. The status is 1.
+
+<!-- file: examples/reference-diagnostics/d0128_transcript_front_end.sisu -->
+```sisu
+# A program with a transcript, and a slice that only stage 1 reads.
+def main(sys: System):
+    let words = sys.env.args()
+    print(words[1:^1])
+```
+
+<!-- file: examples/reference-diagnostics/d0128_transcript_front_end.files/tests/middle.transcript -->
+```text
+$ middle sauna kiuas löyly
+["kiuas"]
+```
+
+<!-- output: examples/reference-diagnostics/d0128_transcript_front_end.console -->
+```console
+$ sisu test d0128_transcript_front_end.sisu
+transcript "tests/middle.transcript" ... FAILED
+
+transcript "tests/middle.transcript" ... FAILED
+a transcript runs on the Rust front end's build of the program, which stops at errors stage 1 does not report:
+error[E0383]: `^` counts from the end and appears only inside an index, as in `xs[^1]`
+  --> d0128_transcript_front_end.sisu:4:19
+  |
+4 |     print(words[1:^1])
+  |                   ^^
+
+0 passed, 1 failed, 0 blocked
+```
+
+Until transcripts run on stage 1, write the forms that both front ends
+read in a program that has them: here the slice's end as
+`len(words) - 1`.
+
+<!-- file: examples/reference-diagnostics/d0128_transcript_front_end_fixed.sisu -->
+```sisu
+# The slice written with `len`, which both front ends read.
+def main(sys: System):
+    let words = sys.env.args()
+    print(words[1:len(words) - 1])
+```
+
+<!-- output: examples/reference-diagnostics/d0128_transcript_front_end_fixed.console -->
+```console
+$ sisu test d0128_transcript_front_end_fixed.sisu
+transcript "tests/middle.transcript" ... ok
+1 passed, 0 failed, 0 blocked
+```
+
+[R15](testing.md#transcripts) describes it.
+
+### D0129
+
+`cli.missing-code`: `sisu explain` needs a diagnostic's code, such as
+`E0300`, or its name, such as `type.mismatch`.
+
+`sisu explain` was given nothing to explain. The status is 2.
+
+Give the code that the diagnostic shows, or its identifier.
+
+Example: [R16](sisu-command.md#commands-options-and-arguments).
+
+### D0130
+
+`cli.missing-name`: `sisu new` needs the name of the package to create.
+
+`sisu new` was given no name. The status is 2.
+
+Give the package's name, which is also the name of its new directory:
+`sisu new kala`.
+
+Example: [R16](sisu-command.md#commands-options-and-arguments).
+
+### D0131
+
+`cli.version`: sisu {version}.
+
+Not an error: the line that `sisu --version` and `sisu version` print,
+the toolchain's version, which replay tokens and capability logs record
+too. The status is 0.
+
+Example: [R16](sisu-command.md#commands-options-and-arguments).
+
 ## Every code
 
 The tables list every code of the catalog in this version, by range, with
@@ -10638,6 +11007,9 @@ it. `sisu explain CODE` prints the same line.
 | E0268 | `resolve.not-snake-case` | the name of {kind} is written in snake_case, and `{name}` is not |
 | E0269 | `resolve.not-screaming-case` | the name of {kind} is written in SCREAMING_CASE, and `{name}` is not |
 | E0270 | `resolve.copy-by-hand` | `Copy` is derived, not implemented: an `impl Copy for {ty}` written by hand leaves `{ty}` moved, and `@derive(Copy)` makes it copied when every field is `Copy` (03) |
+| [E0271](#e0271) | `resolve.not-a-trait-constant` | `{name}` is not a constant of `{trait}` |
+| [E0272](#e0272) | `resolve.constant-type` | the constant `{name}` has the type `{found}` here, and `{trait}` declares it with the type `{expected}` |
+| [E0273](#e0273) | `resolve.const-or-method` | `{name}` is {what} of `{trait}`, and this impl gives it as {given} |
 
 ### Types, every code
 
@@ -10783,6 +11155,7 @@ it. `sisu explain CODE` prints the same line.
 | [E0446](#e0446) | `type.par-body-impure` | `{callee}` is not `pure`, so the body of a `par` loop cannot call it: a `par` body runs on a worker and is `pure` (06) |
 | [E0447](#e0447) | `type.par-body-changes` | the body of a `par` loop changes nothing but its own values, and `{name}` is declared before the loop: compute each value with `par.map` and combine them with `sum` or a reducer (06) |
 | [E0448](#e0448) | `resolve.float-attribute` | `@float` takes `fast`, which allows contraction and reassociation in the function (03); floating point is strict elsewhere |
+| [E0449](#e0449) | `type.trait-constant` | each impl of `{trait}` gives its own `{name}`, so it is read through a type: `T.{name}` for a type `T` that implements `{trait}` |
 
 ### Lowering, every code
 
@@ -10907,11 +11280,12 @@ it. `sisu explain CODE` prints the same line.
 | [W0014](#w0014) | `unsafe.ambient-authority` | `{name}` is public and safe and reaches the foreign function `{callee}` without taking a capability, so its callers need no authority for what the call does |
 | W0015 | `lint.wildcard-own-enum` | `case _` matches {variants} of `{ty}`, an enum of this package, so a variant added to `{ty}` later is not an error here |
 | W0016 | `resolve.shadow-prelude-set` | the error set `{name}` hides the prelude's in this module, and the two are different sets: what the prelude's functions return is not this one |
-| [W0021](#w0021) | `contract.trait-elsewhere` | the contract of `{method}` binds this impl, and stage 1 checks a trait's contract only in the impls of the module that declares the trait |
+| [W0021](#w0021) | `contract.trait-elsewhere` | the contract of `{method}` binds this impl, and stage 1 does not have the syntax of the trait's module to check it in |
 | [W0022](#w0022) | `resolve.unknown-attribute` | `@{name}` is not an attribute Sisu reads, and no compile-time code of the program reads attributes (`reflect.attributes_of`), so it means nothing here |
 | [W0023](#w0023) | `type.deprecated` | `{name}` is deprecated: {reason} |
 | [W0024](#w0024) | `resolve.misspelt-attribute` | `@{name}` is not an attribute Sisu reads |
 | [W0025](#w0025) | `type.deprecated-plain` | `{name}` is deprecated |
+| [W0026](#w0026) | `resolve.misplaced-attribute` | `@{name}` means something on {places}, so on {what} it does nothing |
 
 ### Run time, every code
 
@@ -11189,4 +11563,8 @@ it. `sisu explain CODE` prints the same line.
 | D0125 | `native.sisu-failed` | internal compiler error: the Sisu backend failed to compile the program (status {status}); `--backend=cranelift` compiles it with the Rust backend: {detail} |
 | D0126 | `native.rt-build` | building the runtime in Sisu from `{seed}` failed: {detail} |
 | [D0127](#d0127) | `cli.explore-differs` | schedule seed {seed} of {count} printed other output than seed {first}, with the same exit status {status}; `--schedule-seed {seed}` runs it again |
+| [D0128](#d0128) | `cli.transcript-front-end` | a transcript runs on the Rust front end's build of the program, which stops at errors stage 1 does not report: {diagnostics} |
+| [D0129](#d0129) | `cli.missing-code` | `sisu explain` needs a diagnostic's code, such as `E0300`, or its name, such as `type.mismatch` |
+| [D0130](#d0130) | `cli.missing-name` | `sisu new` needs the name of the package to create |
+| [D0131](#d0131) | `cli.version` | sisu {version} |
 

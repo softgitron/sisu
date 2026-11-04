@@ -1,0 +1,18 @@
+# A deprecated type, constant and variant warn where they are used.
+@deprecated("use `Heater`")
+struct Stove:
+    heat: int
+
+@deprecated("use `MAX_HEAT`")
+const HOTTEST: int = 110
+
+enum Fuel:
+    Wood
+    @deprecated("use `Electric`")
+    Coal
+    Electric
+
+def main():
+    let stove = Stove(80)
+    let fuel = Fuel.Coal
+    print("{stove.heat} of {HOTTEST} {fuel:?}")

@@ -4,5 +4,6 @@ error[E0200]: cannot find `bool` in this scope
   |
 7 |     print(comptime name(bool))
   |                         ^^^^
+  = note: Sisu converts with methods: text is read with `s.parse_int()` or `s.parse_float()`, which give an option, a number is made text with `n.to_string()` or `"{n}"`, and one number made another with `x.to_int()` or `n.to_f64()`
 
 error[D0006]: the program was not run: errors found (1)

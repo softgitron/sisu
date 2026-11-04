@@ -1,8 +1,14 @@
 $ sisu run e0900_unsupported.sisu
-error[E0900]: a generator expression is not implemented in stage 0 yet; it arrives with generators (Phase 8)
-  --> e0900_unsupported.sisu:4:19
+error[E0900]: a nested `def` is not implemented in stage 0 yet; it arrives with nested declarations (a later phase)
+  --> e0900_unsupported.sisu:5:5
   |
-4 |     let doubled = (r * 2 for r in readings)
-  |                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+5 |     def doubled(r: int) -> int:
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-error[D0006]: the program was not run: errors found (1)
+error[E0200]: cannot find `doubled` in this scope
+  --> e0900_unsupported.sisu:9:15
+  |
+9 |         print(doubled(r))
+  |               ^^^^^^^
+
+error[D0006]: the program was not run: errors found (2)

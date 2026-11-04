@@ -4,12 +4,14 @@ error[E0310]: `+` cannot be applied to `Metres` and `Metres`
    |
 28 |         total += run.distance
    |         ^^^^^^^^^^^^^^^^^^^^^
+  = note: `+` on a `Metres` is the method of the trait `Add`: an `impl Add[Metres] for Metres` gives it one
 
 error[E0310]: `+` cannot be applied to `Seconds` and `Metres`
   --> training.sisu:35:9
    |
 35 |         total += run.distance
    |         ^^^^^^^^^^^^^^^^^^^^^
+  = note: `+` on a `Seconds` is the method of the trait `Add`: an `impl Add[Metres] for Seconds` gives it one
 
 error[E0368]: `Metres` has no order, so it cannot be compared with `>` or sorted
   --> training.sisu:42:12
@@ -60,3 +62,4 @@ error[E0347]: `Metres` does not implement `Eq`
    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   = fix: derive it: `@derive(Eq)`
 
+error[D0006]: the program was not run: errors found (9)

@@ -1,4 +1,28 @@
 $ sisu test predict_generics.sisu
+warning[W0001]: typed hole `two cats in a chorus` of type `str`
+  --> predict_generics.sisu:42:19
+   |
+42 | const CATS: str = todo("two cats in a chorus")
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `one cow in a chorus` of type `str`
+  --> predict_generics.sisu:43:19
+   |
+43 | const COWS: str = todo("one cow in a chorus")
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the sounds of a cat and a cow` of type `str`
+  --> predict_generics.sisu:44:19
+   |
+44 | const BARN: str = todo("the sounds of a cat and a cow")
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the slots of a shelf` of type `int`
+  --> predict_generics.sisu:45:20
+   |
+45 | const SLOTS: int = todo("the slots of a shelf")
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 test "a chorus of cats" ... blocked by todo("two cats in a chorus")
 test "a chorus of cows" ... blocked by todo("one cow in a chorus")
 test "a barn" ... blocked by todo("the sounds of a cat and a cow")

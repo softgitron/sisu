@@ -1,11 +1,10 @@
-$ sisu check name_tag.sisu
+$ sisu test name_tag.sisu
 warning[W0001]: typed hole `name tag` of type `String`
   --> name_tag.sisu:13:12
    |
 13 |     return todo("name tag")
    |            ^^^^^^^^^^^^^^^^
 
-$ sisu test name_tag.sisu
 in scope at the typed hole `todo("name tag")`:
   name = "Aino"
   town = "Oulu"

@@ -1,4 +1,16 @@
 $ sisu test next_version.sisu
+warning[W0001]: typed hole `parse_slot` of type `Slot ! SlotError`
+  --> next_version.sisu:70:12
+   |
+70 |     return todo("parse_slot")
+   |            ^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `migrate` of type `String ! SlotError`
+  --> next_version.sisu:74:12
+   |
+74 |     return todo("migrate")
+   |            ^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("parse_slot")`:
   line = "Aino 18:30 90"
 in scope at the typed hole `todo("parse_slot")`:

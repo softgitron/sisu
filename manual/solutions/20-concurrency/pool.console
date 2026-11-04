@@ -1,4 +1,10 @@
 $ sisu test pool.sisu
+warning[W0001]: typed hole `check_all` of type `list[String]`
+  --> pool.sisu:19:12
+   |
+19 |     return todo("check_all")
+   |            ^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("check_all")`:
   bookings = ["mon 18 Aino", "tue ? Eero", "wed 19 Roni", "thu 17 Liisa"]
   workers = 2

@@ -1,4 +1,10 @@
 $ sisu test caesar.sisu
+warning[W0001]: typed hole `caesar` of type `String`
+  --> caesar.sisu:13:12
+   |
+13 |     return todo("caesar")
+   |            ^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("caesar")`:
   text = "abc"
   shift = 1

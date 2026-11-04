@@ -1,11 +1,12 @@
-$ sisu check drafts.sisu
+$ sisu test drafts.sisu
 error[E0418]: this leaves the scope with `drafts` unconsumed: a `list[Draft]` must be passed to an `own` parameter first
-  --> drafts.sisu:33:13
+  --> drafts.sisu:32:13
    |
-33 |             return Err(Empty(position))
+32 |             return Err(Empty(position))
    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
    |
-29 | def save_all(own drafts: list[Draft], mut saved: list[String]) -> ! SaveError:
+28 | def save_all(own drafts: list[Draft], mut saved: list[String]) -> ! SaveError:
    |              ----------------------- `drafts` is declared here
   = note: the loop that consumes `drafts` has not visited every element yet; finish the loop first, or return what is left
 
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

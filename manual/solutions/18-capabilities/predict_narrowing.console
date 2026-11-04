@@ -1,4 +1,40 @@
 $ sisu test predict_narrowing.sisu
+warning[W0001]: typed hole `whether the narrowed one finds the note` of type `bool`
+  --> predict_narrowing.sisu:13:22
+   |
+13 | const INSIDE: bool = todo("whether the narrowed one finds the note")
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `what the narrowed one says about the secret` of type `str`
+  --> predict_narrowing.sisu:14:22
+   |
+14 | const REFUSED: str = todo("what the narrowed one says about the secret")
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `whether the read-only write works` of type `bool`
+  --> predict_narrowing.sisu:15:31
+   |
+15 | const READ_ONLY_WRITE: bool = todo("whether the read-only write works")
+   |                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `whether the file is under notes/` of type `bool`
+  --> predict_narrowing.sisu:16:31
+   |
+16 | const WRITTEN_THROUGH: bool = todo("whether the file is under notes/")
+   |                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `whether the original sees the copy's file` of type `bool`
+  --> predict_narrowing.sisu:17:25
+   |
+17 | const COPY_SEES: bool = todo("whether the original sees the copy's file")
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `whether the caretaker finds the note` of type `bool`
+  --> predict_narrowing.sisu:18:28
+   |
+18 | const AFTER_REVOKE: bool = todo("whether the caretaker finds the note")
+   |                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 test "inside the narrowed directory" ... blocked by todo("whether the narrowed one finds the note")
 test "outside it" ... blocked by todo("what the narrowed one says about the secret")
 test "a write through a read-only one" ... blocked by todo("whether the read-only write works")

@@ -630,6 +630,42 @@ test "a revoked caretaker":
 <!-- output: solutions/18-capabilities/predict_narrowing.console -->
 ```console
 $ sisu test predict_narrowing.sisu
+warning[W0001]: typed hole `whether the narrowed one finds the note` of type `bool`
+  --> predict_narrowing.sisu:13:22
+   |
+13 | const INSIDE: bool = todo("whether the narrowed one finds the note")
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `what the narrowed one says about the secret` of type `str`
+  --> predict_narrowing.sisu:14:22
+   |
+14 | const REFUSED: str = todo("what the narrowed one says about the secret")
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `whether the read-only write works` of type `bool`
+  --> predict_narrowing.sisu:15:31
+   |
+15 | const READ_ONLY_WRITE: bool = todo("whether the read-only write works")
+   |                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `whether the file is under notes/` of type `bool`
+  --> predict_narrowing.sisu:16:31
+   |
+16 | const WRITTEN_THROUGH: bool = todo("whether the file is under notes/")
+   |                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `whether the original sees the copy's file` of type `bool`
+  --> predict_narrowing.sisu:17:25
+   |
+17 | const COPY_SEES: bool = todo("whether the original sees the copy's file")
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `whether the caretaker finds the note` of type `bool`
+  --> predict_narrowing.sisu:18:28
+   |
+18 | const AFTER_REVOKE: bool = todo("whether the caretaker finds the note")
+   |                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 test "inside the narrowed directory" ... blocked by todo("whether the narrowed one finds the note")
 test "outside it" ... blocked by todo("what the narrowed one says about the secret")
 test "a write through a read-only one" ... blocked by todo("whether the read-only write works")
@@ -719,6 +755,7 @@ error[E0300]: expected `System`, found `TestClock`
 29 |     assert days_left(clock, at("2026-11-06T12:00:00Z")) == 0
    |                      ^^^^^
 
+error[D0006]: the program was not run: errors found (3)
 ```
 
 E0300 (`type.mismatch`) says that the tests pass a test clock where
@@ -807,6 +844,18 @@ test "the preview reads and does not write":
 <!-- output: solutions/18-capabilities/reports.console -->
 ```console
 $ sisu test reports.sisu
+warning[W0001]: typed hole `the generator's file system` of type `Fs`
+  --> reports.sisu:13:12
+   |
+13 |     return todo("the generator's file system")
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the preview's file system` of type `Fs`
+  --> reports.sisu:17:12
+   |
+17 |     return todo("the preview's file system")
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 test "the generator writes under reports/" ... blocked by todo("the generator's file system")
 test "the generator sees nothing outside" ... blocked by todo("the generator's file system")
 test "the preview reads and does not write" ... blocked by todo("the preview's file system")
@@ -885,6 +934,12 @@ test "a directory that is not there":
 <!-- output: solutions/18-capabilities/total_size.console -->
 ```console
 $ sisu test total_size.sisu
+warning[W0001]: typed hole `total_size` of type `int ! IoError`
+  --> total_size.sisu:13:12
+   |
+13 |     return todo("total_size")
+   |            ^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("total_size")`:
   dir = "photos"
 in scope at the typed hole `todo("total_size")`:
@@ -996,6 +1051,18 @@ test "a new answer replaces a stale one":
 <!-- output: solutions/18-capabilities/cache.console -->
 ```console
 $ sisu test cache.sisu
+warning[W0001]: typed hole `put` of type `! IoError`
+  --> cache.sisu:21:16
+   |
+21 |         return todo("put")
+   |                ^^^^^^^^^^^
+
+warning[W0001]: typed hole `get` of type `String?`
+  --> cache.sisu:26:16
+   |
+26 |         return todo("get")
+   |                ^^^^^^^^^^^
+
 in scope at the typed hole `todo("put")`:
   key = "helsinki"
   text = "snow"

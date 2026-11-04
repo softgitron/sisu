@@ -1,4 +1,10 @@
 $ sisu test tokenizer.sisu
+warning[W0001]: typed hole `tokenize` of type `list[Token]`
+  --> tokenizer.sisu:26:12
+   |
+26 |     return todo("tokenize")
+   |            ^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("tokenize")`:
   source = "total = 12 + x"
 in scope at the typed hole `todo("tokenize")`:

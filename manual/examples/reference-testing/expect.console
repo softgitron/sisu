@@ -1,0 +1,16 @@
+$ sisu test expect.sisu
+after the expects
+test "doubles" ... FAILED
+
+test "doubles" ... FAILED
+panic: assertion failed: double(3) == 6
+  left:  5
+  right: 6
+  at test "doubles" (expect.sisu:7:5)
+panic: assertion failed: double(5) == 10
+  left:  7
+  right: 10
+  at test "doubles" (expect.sisu:9:5)
+replay: sisu test --replay 1-f194bbb30a1dcbdc-0.0.1-t0-s0-r0 expect.sisu
+
+0 passed, 1 failed, 0 blocked

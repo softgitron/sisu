@@ -1,4 +1,10 @@
 $ sisu test second_largest.sisu
+warning[W0001]: typed hole `second_largest` of type `int`
+  --> second_largest.sisu:11:12
+   |
+11 |     return todo("second_largest")
+   |            ^^^^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("second_largest")`:
   values = [1, 2]
 in scope at the typed hole `todo("second_largest")`:

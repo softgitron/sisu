@@ -52,10 +52,14 @@ The parts of a command line follow these rules:
   program does not receive it, and a second `--` is the program's.
 - An option that the command does not take is D0009, a command that
   does not exist is D0003, and an option given a word where it needs a
-  number is D0023. Each is a usage error, with exit status 2.
+  number is D0023. A command without the argument it needs says what it
+  needs: a file (D0004), a code for `sisu explain` (D0129) or a name for
+  `sisu new` (D0130). Each is a usage error, with exit status 2.
 - `sisu help` (also `sisu --help` and `sisu -h`) prints the list of
   commands to standard output, with status 0. `sisu` alone prints the
   same list to standard error, with status 2.
+- `sisu --version` (also `sisu version`) prints the toolchain's version
+  (D0131), the one that replay tokens and capability logs record.
 
 <!-- output: examples/reference-sisu-command/usage.console -->
 ```console
@@ -66,7 +70,11 @@ error[D0009]: unknown option `--fast` for `sisu run`
 $ sisu run --explore=many hello.sisu
 error[D0023]: `--explore` needs a number, not `many`
 $ sisu explain
-error[D0004]: `sisu explain` needs a file
+error[D0129]: `sisu explain` needs a diagnostic's code, such as `E0300`, or its name, such as `type.mismatch`
+$ sisu new
+error[D0130]: `sisu new` needs the name of the package to create
+$ sisu --version
+sisu 0.0.1
 ```
 
 The list that `sisu help` prints is the compiler's own summary of this
@@ -110,10 +118,6 @@ The front end is stage 1's, the one written in Sisu, for `check`, `sir`, `build`
 
 </details>
 
-**Stage 0 differs.** `sisu explain` and `sisu new` without their
-argument say that they need "a file" (D0004), where they need a code
-and a name.
-
 **Status.** In stage 0.
 
 ### What a command works on
@@ -131,7 +135,8 @@ A command works on one of these:
   Where there is no `sisu.toml`, the command stops with D0064 and status
   2.
 - **A workspace.** In a workspace, `sisu check`, `build` and `test` work
-  on every member in turn and end with the worst status of the members;
+  on every member in turn and end with the worst status of the members,
+  where a member's failure outweighs another's blocked tests (3);
   `sisu run`, `sir` and `bench` work on the one member that is an
   application, and stop with D0067 when there is more than one.
 
@@ -280,10 +285,7 @@ error: Missing(key="port")
 
 The error is printed in its `Debug` form, `Missing(key="port")`.
 
-**Stage 0 differs.** `sisu test` exits with 0, not 3, when no test
-failed and one is blocked ([sisu test](#sisu-test)).
-
-**Status.** In stage 0, with the difference noted.
+**Status.** In stage 0.
 
 ### Choosing the front end
 
@@ -297,10 +299,10 @@ written in Sisu and compiled natively, which is the default for
 and `parse`, and the Rust front end, the oracle that stage 1 is checked
 against. `--front-end=rust` among a command's options, or
 `SISU_FRONT_END=rust` in the environment, chooses the Rust one. The
-other commands, and `run --watch` and `--defer-borrow`, `test --std`
-and `--defer-borrow`, the tests of a program that has transcripts,
-`check --diary` and `parse --shape`, use the Rust front end whichever
-you choose.
+other commands, and `run --watch` and `--defer-borrow`, `test --std`,
+`--defer-borrow` and `--features`, a program's transcripts (its tests
+run on stage 1, D0128), `check --diary` and `parse --shape`, use the
+Rust front end whichever you choose.
 
 <!-- output: examples/reference-sisu-command/front_end.console -->
 ```console
@@ -765,7 +767,9 @@ the same seed takes the same schedule
   run` that exits as the first seed's did but prints other standard
   output stops it too (D0127, [R17](diagnostics.md#d0127)), since its
   output depends on the schedule. When all succeed it says so (D0024).
-  Under `sisu test` every test runs under each schedule (D0026, D0027).
+  Under `sisu test` every test runs under each schedule (D0026, D0027),
+  and a test that fails shows what it printed under the schedule that
+  failed.
 - `--scheduler random` is the default, a random choice at each yield
   point. `--scheduler pct` is probabilistic concurrency testing, which
   finds bugs of a small depth with a known probability; `--depth N` is
@@ -842,6 +846,9 @@ experiment ([17](../../proposal/17-testing.md); 18, Phase 6).
   key of the package's `[features]` is D0112.
 - `--no-default-features` leaves out the features that the manifest's
   `default` list turns on.
+- `--accept-unsafe`, which `sir` takes too, accepts a package whose
+  `unsafe` level is higher than the one `sisu.lock` records, and records
+  the new level (E1022, [R13](modules.md#trust)).
 
 `@cfg(feature="NAME")` reads the features ([R13](modules.md#features);
 [09](../../proposal/09-modules-packages-and-build.md)).
@@ -982,7 +989,10 @@ monitor, with fresh fakes for the capabilities it names, and ends `ok`,
 the bindings in scope there, is printed before the list (R0160). Tests
 run in parallel and are reported in the order they are declared. Each
 failure is shown again after the list, with a replay token; the last
-line counts the outcomes. The status is 0 when every test passed, 1
+line counts the outcomes. The program's warnings come before the list,
+as `sisu run` prints them, and a program with an error runs no test:
+`sisu test` prints its diagnostics and the line D0006, or D0021 for the
+ownership checker's errors. The status is 0 when every test passed, 1
 when a test failed or the program has an error, and 3 when no test
 failed and one is blocked.
 
@@ -1013,6 +1023,12 @@ suite "large numbers":
 <!-- output: examples/reference-sisu-command/tests.console -->
 ```console
 $ sisu test tests.sisu
+warning[W0001]: typed hole `halve` of type `int`
+  --> tests.sisu:6:12
+  |
+6 |     return todo("halve")
+  |            ^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("halve")`:
   x = 42
 test "doubles a number" ... ok
@@ -1030,14 +1046,32 @@ replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
 
 3 passed, 1 failed, 1 blocked
 $ sisu test --filter large tests.sisu
+warning[W0001]: typed hole `halve` of type `int`
+  --> tests.sisu:6:12
+  |
+6 |     return todo("halve")
+  |            ^^^^^^^^^^^^^
+
 test "large numbers/doubles a large number" ... ok
 1 passed, 0 failed, 0 blocked
 4 not selected
 $ sisu test --tag slow tests.sisu
+warning[W0001]: typed hole `halve` of type `int`
+  --> tests.sisu:6:12
+  |
+6 |     return todo("halve")
+  |            ^^^^^^^^^^^^^
+
 test "large numbers/doubles a large number" ... ok
 1 passed, 0 failed, 0 blocked
 4 not selected
 $ sisu test --skip-tag slow --jobs 1 --no-monitor --no-cache tests.sisu
+warning[W0001]: typed hole `halve` of type `int`
+  --> tests.sisu:6:12
+  |
+6 |     return todo("halve")
+  |            ^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("halve")`:
   x = 42
 test "doubles a number" ... ok
@@ -1055,6 +1089,12 @@ replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
 2 passed, 1 failed, 1 blocked
 1 not selected
 $ sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
+warning[W0001]: typed hole `halve` of type `int`
+  --> tests.sisu:6:12
+  |
+6 |     return todo("halve")
+  |            ^^^^^^^^^^^^^
+
 test "doubles (-3, -5)" ... FAILED
 
 test "doubles (-3, -5)" ... FAILED
@@ -1094,7 +1134,8 @@ replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
   that a capability call fails with an error of its declared set,
   0.01 by default (D0051, and D0052 without `--sim`).
 - `--std` runs the standard library's doc examples besides the
-  program's tests.
+  program's tests; outside a package and without a file, it runs them
+  alone.
 - `--defer-borrow` runs the tests of a program that the ownership
   checker rejected, as [`sisu run
   --defer-borrow`](#running-a-rejected-program---defer-borrow) does.
@@ -1182,13 +1223,6 @@ error[D0052]: `--faults` sets the fault rate of the `sim` profile; add `--sim`
 write a JSON event stream, with TAP and JUnit XML as `--format` options;
 stage 0 prints the human form only, and has none of `--fuzz`, `--cover`
 and `--mutate` ([Commands that are designed](#commands-that-are-designed)).
-Stage 0's `sisu test` exits with 0 when no test failed, a blocked one
-included, and it prints no warnings, so the W0001 that names each hole
-comes from `sisu check`. It reports a program's errors without the
-D0006 line that `sisu run` ends with, and it runs the tests of a
-program that the ownership checker refuses (E0400 to E0438) or whose
-compile-time code spends its budget (E0603), which `sisu check`
-reports: check such a program first.
 
 **Status.** In stage 0. `--sim`, `--faults` and replay tokens are
 prototypes of the experiment (Q-49, D-070).
@@ -1444,7 +1478,10 @@ total.to_f64() / 3.0  # => 15.666666666666666
 
 **Stage 0 differs.** A worksheet is tooling after 0.1 (Q-48), which the
 language server shows as values beside the lines; stage 0 has it now,
-on the command line and in the language server.
+on the command line and in the language server. It runs on the Rust
+front end ([Choosing the front end](#choosing-the-front-end)), so the
+forms that only stage 1 takes, such as `^` in a slice's bound, a
+generator expression or a trait's constant, are errors in a worksheet.
 
 **Status.** In stage 0.
 
@@ -1503,8 +1540,9 @@ error[D0073]: `kala` exists already
 
 `sisu explain` prints a diagnostic's entry in the message catalog: its
 code, its kind (error, warning, runtime or cli), its identifier and its
-message with the parameters in braces. It takes a code or an
-identifier. A code that does not exist is D0010, with status 1.
+message as a reader sees it, each part that the diagnostic fills in
+named in braces, as `{name}`. It takes a code or an identifier. A code
+that does not exist is D0010, with status 1, and no code at all D0129.
 
 <!-- output: examples/reference-sisu-command/explain.console -->
 ```console
@@ -1514,6 +1552,8 @@ $ sisu explain resolve.undefined-name
 E0200 (error) resolve.undefined-name: cannot find `{name}` in this scope
 $ sisu explain W0002
 W0002 (warning) resolve.shadow-outer: `{name}` shadows a binding of an enclosing scope
+$ sisu explain E0121
+E0121 (error) parse.empty-interpolation: an interpolation needs an expression between `{` and `}`
 $ sisu explain R0003
 R0003 (runtime) panic.overflow: integer overflow: {expr}
 $ sisu explain D0006
@@ -1903,16 +1943,16 @@ open as Q-63.
 
 ## Diagnostics of the command line
 
-The driver's messages have codes D0001 to D0119. These are the ones that
+The driver's messages have codes D0001 to D0131. These are the ones that
 a command line can produce, by what they report:
 
 | Codes | Report |
 |---|---|
 | D0001, D0013 | A file that cannot be read or written. |
-| D0002, [D0003](diagnostics.md#d0003), [D0004](diagnostics.md#d0004), [D0009](diagnostics.md#d0009), [D0023](diagnostics.md#d0023) | The usage, an unknown command, a missing argument, an unknown option, a value that is not a number. |
+| D0002, [D0003](diagnostics.md#d0003), [D0004](diagnostics.md#d0004), [D0009](diagnostics.md#d0009), [D0023](diagnostics.md#d0023), [D0129](diagnostics.md#d0129), [D0130](diagnostics.md#d0130), [D0131](diagnostics.md#d0131) | The usage, an unknown command, a missing argument, an unknown option, a value that is not a number, the version. |
 | D0005, D0069 | A program without `main`; a library run as an application. |
 | [D0006](diagnostics.md#d0006), [D0021](diagnostics.md#d0021), D0114 | A program with errors that did not run, or was not documented. |
-| D0007, D0008, D0053, D0060 to D0063 | The lines of `sisu test`: a test's outcome, the counts, the tests not selected, transcripts. |
+| D0007, D0008, D0053, D0060 to D0063, [D0128](diagnostics.md#d0128) | The lines of `sisu test`: a test's outcome, the counts, the tests not selected, transcripts. |
 | [D0010](diagnostics.md#d0010), D0011 | `sisu explain`. |
 | D0012, D0076, D0118 | Internal errors (status 70). |
 | D0014 to D0020 | `sisu explain-borrow`. |
@@ -1930,7 +1970,7 @@ a command line can produce, by what they report:
 | D0079 to D0093 | `sisu repl` and `sisu ws`. |
 | D0094 | `--stats`. |
 | D0095 to D0102 | The language server's answers. |
-| D0103 to [D0111](diagnostics.md#d0111), D0119 | The native backend. |
+| D0103 to [D0111](diagnostics.md#d0111), D0119 to D0126 | The native backend, its lowering and the runtime in Sisu. |
 | [D0113](diagnostics.md#d0113) | `sisu doc --std`. |
 | [D0115](diagnostics.md#d0115) to D0118 | The front end. |
 

@@ -27,3 +27,4 @@ error[E0340]: `items` is not a `mut` parameter, so the argument takes no `mut`
    |              ^^^^^^^^^
   = fix: take `items` with `mut`: `mut `
 
+error[D0006]: the program was not run: errors found (4)

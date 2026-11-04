@@ -1,4 +1,4 @@
-# List, dict and set comprehensions build a collection from a loop.
+# Comprehensions build a collection from a loop, or a lazy `Iter`.
 def main():
     let xs = [3, 1, 2, 4]
     let squares = [x * x for x in xs if x > 1]
@@ -6,3 +6,5 @@ def main():
     let parities = {x % 2 for x in xs}
     let pairs = [(i, x) for i, x in enumerate(xs) if i < 2]
     print("{squares} {lengths} {parities} {pairs}")
+    let lazy = (x * 10 for x in xs if x % 2 == 0)
+    print("{sum((x * x for x in xs))} {lazy.collect()}")

@@ -35,3 +35,4 @@ error[E0200]: cannot find `SortedDict` in this scope
 20 |     var visits: SortedDict[str, int] = SortedDict.new()
    |                                        ^^^^^^^^^^
 
+error[D0006]: the program was not run: errors found (6)

@@ -1,4 +1,22 @@
 $ sisu test cloakroom.sisu
+warning[W0001]: typed hole `leave` of type `int`
+  --> cloakroom.sisu:26:16
+   |
+26 |         return todo("leave")
+   |                ^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `collect` of type `Coat ! CloakroomError`
+  --> cloakroom.sisu:30:16
+   |
+30 |         return todo("collect")
+   |                ^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `close` of type `list[Coat]`
+  --> cloakroom.sisu:35:16
+   |
+35 |         return todo("close")
+   |                ^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("leave")`:
   self = Cloakroom(coats={}, next_ticket=1)
   coat = Coat(owner="Aino", colour="red")

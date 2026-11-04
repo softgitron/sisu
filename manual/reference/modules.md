@@ -334,7 +334,9 @@ on unless a build says otherwise ([Features](#features)).
 dependency with such code that the root package does not list is E0703,
 or E1021 when it declares its level; a package that holds unsafe code
 declares `unsafe` in its `[package]` (E1019, E1020), and a level that
-rises from the one `sisu.lock` records needs `--accept-unsafe` (E1022).
+rises from the one `sisu.lock` records needs `--accept-unsafe` (E1022),
+which the commands that build a package take and which records the new
+level ([R16](sisu-command.md#package-options)).
 This is where a dependency gains more than the capabilities it is
 handed (D-032, D-082).
 
@@ -424,10 +426,8 @@ program may take it, and neither dependency is a `path`.
 **Stage 0 differs.** A `version` that is not `MAJOR.MINOR.PATCH` gets
 both E1003 and E1002 ("needs `version`"), though the key is there. A
 dev-dependency can be imported by the package's own code, not only by
-its tests. E1022 asks for `--accept-unsafe`, which `sisu check`, `run`
-and `build` reject as an option they do not take (D0009), so a raised
-level is accepted by deleting `sisu.lock`. The `[review]` table of
-[10](../../proposal/10-tooling.md) is accepted and ignored.
+its tests. The `[review]` table of [10](../../proposal/10-tooling.md) is
+accepted and ignored.
 
 **Status.** In stage 0 (D-063), with the differences noted.
 

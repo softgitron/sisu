@@ -1,4 +1,28 @@
 $ sisu test fractions.sisu
+warning[W0001]: typed hole `new` of type `Fraction`
+  --> fractions.sisu:17:16
+   |
+17 |         return todo("new")
+   |                ^^^^^^^^^^^
+
+warning[W0001]: typed hole `plus` of type `Fraction`
+  --> fractions.sisu:21:16
+   |
+21 |         return todo("plus")
+   |                ^^^^^^^^^^^^
+
+warning[W0001]: typed hole `flip` of type `Fraction`
+  --> fractions.sisu:25:16
+   |
+25 |         self = todo("flip")
+   |                ^^^^^^^^^^^^
+
+warning[W0001]: typed hole `show` of type `String`
+  --> fractions.sisu:29:16
+   |
+29 |         return todo("show")
+   |                ^^^^^^^^^^^^
+
 in scope at the typed hole `todo("new")`:
   top = 2
   bottom = 4

@@ -1,4 +1,10 @@
 $ sisu test first_price.sisu
+warning[W0001]: typed hole `first_price` of type `int ! {TaskError, PriceError}`
+  --> first_price.sisu:40:12
+   |
+40 |     return todo("first_price")
+   |            ^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("first_price")`:
   item = "coffee"
   limit = Duration(nanos=5000000000)

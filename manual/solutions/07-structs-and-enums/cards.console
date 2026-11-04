@@ -17,3 +17,4 @@ error[E0347]: `list[Card]` does not implement `Eq`
 47 |     assert sort_hand(hand) == expected
    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+error[D0006]: the program was not run: errors found (3)

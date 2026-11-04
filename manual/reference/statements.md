@@ -364,6 +364,7 @@ type, bindings and tests at once, is designed
 | `match VALUE:` with `case` arms | [R6](patterns.md) |
 | `select:` | [R9](concurrency.md#waiting-for-the-first-of-several) |
 | `assert CONDITION` and `assert CONDITION, MESSAGE` | [R15](testing.md#assertions) |
+| `expect CONDITION`, which records its failure and lets a test go on | [R15](testing.md#assertions) |
 | `unsafe:` with a block | [R7](ownership.md#unsafe-code-and-raw-pointers) |
 | `pass`, the empty block | [R1](lexical-structure.md#indentation-and-blocks) |
 | an expression statement, such as a call | [R4](expressions.md) |

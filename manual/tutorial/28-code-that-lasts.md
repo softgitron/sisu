@@ -138,14 +138,15 @@ error[E0305]: wrong number of arguments to `price`: expected 1, found 3
    |
 13 |     print(price(90, 300, True))
    |           ^^^^^^^^^^^^^^^^^^^^
+  = note: `per_hour` and the parameters after it are keyword-only: pass them by name, `per_hour=...`
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
 E0305 (`type.argument-count`) counts one positional parameter, since
-the others follow the `*`. The message does not say that they are
-keyword-only; the signature does. A call that names them is the fix,
-and it keeps working whatever the next version does to their order.
+the others follow the `*`, and its note says that they are keyword-only.
+A call that names them is the fix, and it keeps working whatever the
+next version does to their order.
 
 </details>
 
@@ -320,7 +321,8 @@ warning[W0023]: `to_celsius` is deprecated: use `celsius_of`, which this calls
 
 `@deprecated("...")` marks the old name, with a message saying what to
 use instead. Attributes are data, as chapter 25 showed, and the
-compiler reads this one: each call of a deprecated function gets W0023
+compiler reads this one: each call of a deprecated function, and each
+use of a deprecated type, constant or variant, gets W0023
 (`type.deprecated`), a warning with the attribute's message, and the
 program still runs. A library will also mark such a wrapper
 `@fix_inline`, so that `sisu fix --deps` rewrites each caller to call
@@ -443,7 +445,7 @@ test "the slots that fit":
 
 <!-- output: examples/28-code-that-lasts/plan.console -->
 ```console
-$ sisu check plan.sisu
+$ sisu test plan.sisu
 warning[W0001]: typed hole `parse a slot` of type `Slot?`
   --> plan.sisu:16:12
    |
@@ -456,7 +458,6 @@ warning[W0001]: typed hole `keep the slots that fit` of type `list[Slot]`
 20 |     return todo("keep the slots that fit")
    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-$ sisu test plan.sisu
 in scope at the typed hole `todo("parse a slot")`:
   line = "Aino 17:30 90"
 in scope at the typed hole `todo("keep the slots that fit")`:
@@ -544,6 +545,30 @@ test "half an hour without a towel":
 <!-- output: solutions/28-code-that-lasts/predict_versions.console -->
 ```console
 $ sisu test predict_versions.sisu
+warning[W0001]: typed hole `price(60), written for version 1` of type `int`
+  --> predict_versions.sisu:18:22
+   |
+18 | const AN_HOUR: int = todo("price(60), written for version 1")
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `price(90), written for version 1` of type `int`
+  --> predict_versions.sisu:19:21
+   |
+19 | const LONGER: int = todo("price(90), written for version 1")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `price(60, per_hour=300, towel=False)` of type `int`
+  --> predict_versions.sisu:20:24
+   |
+20 | const AS_BEFORE: int = todo("price(60, per_hour=300, towel=False)")
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `price(30, towel=False)` of type `int`
+  --> predict_versions.sisu:21:20
+   |
+21 | const SHORT: int = todo("price(30, towel=False)")
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 test "an hour, as version 1 users ask for it" ... blocked by todo("price(60), written for version 1")
 test "an hour and a half" ... blocked by todo("price(90), written for version 1")
 test "version 1's price, asked for in version 2" ... blocked by todo("price(60, per_hour=300, towel=False)")
@@ -639,6 +664,7 @@ error[E0314]: this `match` does not cover `Err(Cleaning(_))`
    |     ^^^^^^^^^^^^^^^^
   = note: add an arm for `Err(Cleaning(_))`, or a `case _` arm
 
+error[D0006]: the program was not run: errors found (1)
 ```
 
 <details>
@@ -801,6 +827,18 @@ suite "part 3":
 <!-- output: solutions/28-code-that-lasts/next_version.console -->
 ```console
 $ sisu test next_version.sisu
+warning[W0001]: typed hole `parse_slot` of type `Slot ! SlotError`
+  --> next_version.sisu:70:12
+   |
+70 |     return todo("parse_slot")
+   |            ^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `migrate` of type `String ! SlotError`
+  --> next_version.sisu:74:12
+   |
+74 |     return todo("migrate")
+   |            ^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("parse_slot")`:
   line = "Aino 18:30 90"
 in scope at the typed hole `todo("parse_slot")`:

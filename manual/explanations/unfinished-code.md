@@ -84,6 +84,12 @@ warning[W0001]: typed hole `the middle element of sorted_xs` of type `int`
   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 $ sisu test median.sisu
+warning[W0001]: typed hole `the middle element of sorted_xs` of type `int`
+  --> median.sisu:5:12
+  |
+5 |     return todo("the middle element of sorted_xs")
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("the middle element of sorted_xs")`:
   xs = [3, 1, 2]
   sorted_xs = [1, 2, 3]
@@ -191,8 +197,8 @@ answer.
 - **Blocked is not passed.** `sisu test` exits with status 3 when a test
   is blocked and none fails, 1 when one fails and 0 when all pass, so a
   pipeline that reads only the status can tell a suite full of holes
-  from a finished one. Stage 0's runner still exits with 0 for a blocked
-  suite, so until it changes the summary line is the place to look.
+  from a finished one. A pipeline that treats every status but 0 as a
+  failure has to learn the 3, or it reads an unfinished plan as broken.
 - **The report is partial.** A closure leaves out a local that holds a
   borrow or a view, a value whose type writes its own `Debug`, and one
   that holds a capability, so it can miss the value that matters, and

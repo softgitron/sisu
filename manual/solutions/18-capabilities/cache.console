@@ -1,4 +1,16 @@
 $ sisu test cache.sisu
+warning[W0001]: typed hole `put` of type `! IoError`
+  --> cache.sisu:21:16
+   |
+21 |         return todo("put")
+   |                ^^^^^^^^^^^
+
+warning[W0001]: typed hole `get` of type `String?`
+  --> cache.sisu:26:16
+   |
+26 |         return todo("get")
+   |                ^^^^^^^^^^^
+
 in scope at the typed hole `todo("put")`:
   key = "helsinki"
   text = "snow"

@@ -1,0 +1,8 @@
+$ sisu run e0449_trait_constant.sisu
+error[E0449]: each impl of `Stove` gives its own `MAX_HEAT`, so it is read through a type: `T.MAX_HEAT` for a type `T` that implements `Stove`
+  --> e0449_trait_constant.sisu:12:11
+   |
+12 |     print(Stove.MAX_HEAT)
+   |           ^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

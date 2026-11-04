@@ -1,0 +1,10 @@
+# `expect` records a failure and the test goes on; `assert` stops it.
+def double(n: int) -> int:
+    return n + 2
+
+test "doubles":
+    expect double(2) == 4
+    expect double(3) == 6
+    print("after the expects")
+    assert double(5) == 10
+    print("after the assert")

@@ -153,12 +153,48 @@ compile-time code of the program reads attributes, since nothing can
 read it then. A program whose compile-time code calls
 `reflect.attributes_of` keeps its own attributes without a word.
 
-**Stage 0 differs.** An attribute that Sisu reads, standing where it
-has no meaning, is accepted without a word, such as `@derive(Debug)` on
-a function or `@tag("slow")` on a suite, which tags none of the suite's
-tests.
+An attribute that Sisu reads, standing where it has no meaning, is
+W0026 (`resolve.misplaced-attribute`), which names the declarations it
+means something on, since it would do nothing there:
 
-**Status.** In stage 0, with the difference noted.
+<!-- file: examples/reference-attributes/misplaced.sisu -->
+```sisu
+# Attributes that Sisu reads, each where it means nothing.
+@derive(Debug)
+def reading() -> int:
+    return 82
+
+@export("sauna_heat")
+struct Stove:
+    heat: int
+
+def main():
+    print(reading() + Stove(5).heat)
+```
+
+<!-- output: examples/reference-attributes/misplaced.console -->
+```console
+$ sisu run misplaced.sisu
+warning[W0026]: `@derive` means something on a struct, an enum or an error set, so on a function it does nothing
+  --> misplaced.sisu:2:2
+  |
+2 | @derive(Debug)
+  |  ^^^^^^
+
+warning[W0026]: `@export` means something on a function, so on a struct it does nothing
+  --> misplaced.sisu:6:2
+  |
+6 | @export("sauna_heat")
+  |  ^^^^^^
+
+87
+```
+
+`@cfg` and `@preview` mean something on any declaration, and the
+attributes that only the standard library writes, such as `@intrinsic`,
+are E0225 in a program.
+
+**Status.** In stage 0.
 
 ## Attributes are data
 
@@ -411,6 +447,7 @@ error[E0310]: `+` cannot be applied to `Basket` and `Basket`
   |
 8 |     print(Basket(["leipä"], "Aino") + Basket(["maito"], "Eero"))
   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = note: `+` on a `Basket` is the method of the trait `Add`: an `impl Add[Basket] for Basket` gives it one
 
 error[D0006]: the program was not run: errors found (2)
 ```
@@ -435,7 +472,8 @@ fail is [R8](errors.md#cleanup-that-can-fail).
 `@cfg(CONDITION, ...)` keeps its declaration only in the builds where
 every condition holds; elsewhere the declaration is left out before
 names are resolved, as if it were not written. It stands on an item, an
-item of a suite, an `extern` block, or a method of an impl or a trait. A
+item of a suite, an `extern` block, a method of an impl or a trait, or a
+field, a variant or a method in a struct's or an enum's own body. A
 condition is one of:
 
 | Condition | Holds when |
@@ -511,12 +549,54 @@ error[E0266]: `@cfg` takes a condition: `test`, `feature="NAME"`, `not` and a co
 error[D0006]: the program was not run: errors found (1)
 ```
 
-**Stage 0 differs.** `@cfg` on a field, on a variant, or on a method in
-the body of a struct or an enum is accepted and ignored: the declaration
-is kept in every build. A method in an impl is left out as the rule
-says.
+On a member, `@cfg(test)` gives a type a field, a variant or a method
+that only its tests use. A build without its tests has none of them, so
+the value that `sisu run` prints has no `resets`, while the test reads
+it:
 
-**Status.** In stage 0 (08), with the difference noted.
+<!-- file: examples/reference-attributes/cfg_members.sisu -->
+```sisu
+# `@cfg` on a field, a variant and a method of a type's own body.
+struct Counter:
+    count: int
+    @cfg(test)
+    resets: int = 0
+
+    @cfg(test)
+    def reset(mut self):
+        self.count = 0
+        self.resets += 1
+
+enum Mode:
+    Quiet
+    @cfg(test)
+    Traced
+
+def main():
+    let counter = Counter(count=3)
+    print("{counter.count} {counter:?} {Mode.Quiet:?}")
+
+test "a test build has the members":
+    var counter = Counter(count=3)
+    counter.reset()
+    assert counter.count == 0 and counter.resets == 1
+    assert "{Mode.Traced:?}" == "Traced"
+```
+
+<!-- output: examples/reference-attributes/cfg_members.console -->
+```console
+$ sisu run cfg_members.sisu
+3 Counter(count=3) Quiet
+$ sisu test cfg_members.sisu
+test "a test build has the members" ... ok
+1 passed, 0 failed, 0 blocked
+```
+
+A field that a build leaves out takes its default nowhere, and code
+that every build compiles, such as `main`, cannot name it: the build
+without its tests reports E0303 there.
+
+**Status.** In stage 0 (08).
 
 ## Compile-time budgets
 
@@ -562,15 +642,41 @@ The evaluation and its budget are [R12](compile-time.md#budgets).
 
 ## Tags on tests
 
-`@tag("NAME", ...)` on a test, in a suite or not, gives it tags: `sisu
-test --tag NAME` runs the tests that have the tag, and `--skip-tag NAME`
-those that do not ([R15](testing.md#the-forms-of-a-test),
+`@tag("NAME", ...)` on a test, in a suite or not, or on a suite, gives
+it tags: `sisu test --tag NAME` runs the tests that have the tag, and
+`--skip-tag NAME` those that do not ([R15](testing.md#the-forms-of-a-test),
 [R16](sisu-command.md#sisu-test)).
 
-**Stage 0 differs.** `@tag` on a suite is accepted and tags none of the
-suite's tests.
+A suite's `@tag` tags each of its tests, before the test's own:
 
-**Status.** In stage 0 (D-057), with the difference noted.
+<!-- file: examples/reference-attributes/suite_tags.sisu -->
+```sisu
+# A suite's tags tag each of its tests.
+def double(n: int) -> int:
+    return n * 2
+
+@tag("slow")
+suite "large numbers":
+    test "a large number":
+        assert double(1 << 40) == 1 << 41
+
+    test "a larger number":
+        assert double(1 << 50) == 1 << 51
+
+test "a small number":
+    assert double(2) == 4
+```
+
+<!-- output: examples/reference-attributes/suite_tags.console -->
+```console
+$ sisu test --tag slow suite_tags.sisu
+test "large numbers/a large number" ... ok
+test "large numbers/a larger number" ... ok
+2 passed, 0 failed, 0 blocked
+1 not selected
+```
+
+**Status.** In stage 0 (D-057).
 
 ## Refinement tests
 
@@ -832,14 +938,60 @@ that depend on it with that body, moving borrows, `own` arguments and
 `defer` into the caller, so their behaviour is kept by construction
 (D-067).
 
-A call of a deprecated function or method, or a use of one as a value,
-is W0023 (`type.deprecated`) with the attribute's message, or W0025
-(`type.deprecated-plain`) for an attribute without one, everywhere but
-in the deprecated item's own body
-([R17](diagnostics.md#w0023)).
+A use of a deprecated item is W0023 (`type.deprecated`) with the
+attribute's message, or W0025 (`type.deprecated-plain`) for an
+attribute without one ([R17](diagnostics.md#w0023)): a call of a
+function or a method, or its use as a value; a type named or built; a
+constant read; a variant built or matched. The item's own body may use
+it without a word, and so may a type's own declaration and its impls:
 
-**Stage 0 differs.** A deprecated type, constant or variant gets no
-warning yet, and `@fix_inline` does nothing, since `sisu fix` is
+<!-- file: examples/reference-attributes/deprecated_items.sisu -->
+```sisu
+# A deprecated type, constant and variant warn where they are used.
+@deprecated("use `Heater`")
+struct Stove:
+    heat: int
+
+@deprecated("use `MAX_HEAT`")
+const HOTTEST: int = 110
+
+enum Fuel:
+    Wood
+    @deprecated("use `Electric`")
+    Coal
+    Electric
+
+def main():
+    let stove = Stove(80)
+    let fuel = Fuel.Coal
+    print("{stove.heat} of {HOTTEST} {fuel:?}")
+```
+
+<!-- output: examples/reference-attributes/deprecated_items.console -->
+```console
+$ sisu run deprecated_items.sisu
+warning[W0023]: `Stove` is deprecated: use `Heater`
+  --> deprecated_items.sisu:16:17
+   |
+16 |     let stove = Stove(80)
+   |                 ^^^^^
+
+warning[W0023]: `Fuel.Coal` is deprecated: use `Electric`
+  --> deprecated_items.sisu:17:16
+   |
+17 |     let fuel = Fuel.Coal
+   |                ^^^^^^^^^
+
+warning[W0023]: `HOTTEST` is deprecated: use `MAX_HEAT`
+  --> deprecated_items.sisu:18:29
+   |
+18 |     print("{stove.heat} of {HOTTEST} {fuel:?}")
+   |                             ^^^^^^^
+
+80 of 110 Coal
+```
+
+**Stage 0 differs.** `@fix_inline` does nothing, since `sisu fix` is
 designed ([R16](sisu-command.md#sisu-fix)).
 
 **Status.** `@deprecated` in stage 0
@@ -952,12 +1104,12 @@ idea for later, and `@inline` has no design.
 | Code | Identifier | Section |
 |---|---|---|
 | [E0117](diagnostics.md#e0117), [E0106](diagnostics.md#e0106), [E0100](diagnostics.md#e0100) | `parse.trailing-tokens`, `parse.expected-declaration`, `parse.expected` | [Writing an attribute](#writing-an-attribute) |
-| [W0022](diagnostics.md#w0022), [W0024](diagnostics.md#w0024) | `resolve.unknown-attribute`, `resolve.misspelt-attribute` | [Where an attribute may stand](#where-an-attribute-may-stand) |
+| [W0022](diagnostics.md#w0022), [W0024](diagnostics.md#w0024), [W0026](diagnostics.md#w0026) | `resolve.unknown-attribute`, `resolve.misspelt-attribute`, `resolve.misplaced-attribute` | [Where an attribute may stand](#where-an-attribute-may-stand) |
 | [E0243](diagnostics.md#e0243), [E0244](diagnostics.md#e0244), [E0242](diagnostics.md#e0242), [E0235](diagnostics.md#e0235) | `resolve.not-derivable`, `resolve.derive-field`, `resolve.supertrait-missing`, `resolve.overlapping-impl` | [Deriving traits](#deriving-traits) |
 | [E0608](diagnostics.md#e0608) | `comptime.derive-failed` | [Deriving traits](#deriving-traits), [The layout of a type](#the-layout-of-a-type) |
 | E0250, E0251, [E0252](diagnostics.md#e0252), E0253 | `resolve.not-delegable`, `resolve.delegate-to`, `resolve.delegate-self`, `resolve.delegate-field` | [Delegating traits to a field](#delegating-traits-to-a-field) |
 | [E0417](diagnostics.md#e0417), [E0418](diagnostics.md#e0418) | `borrow.must-consume`, `borrow.must-consume-exit` | [Values that must be consumed](#values-that-must-be-consumed) |
-| [E0266](diagnostics.md#e0266), W0006 | `resolve.bad-cfg`, `resolve.unknown-feature` | [Conditional compilation](#conditional-compilation) |
+| [E0266](diagnostics.md#e0266), W0006, E0303 | `resolve.bad-cfg`, `resolve.unknown-feature`, `type.unknown-field` | [Conditional compilation](#conditional-compilation) |
 | [E0603](diagnostics.md#e0603), [E0606](diagnostics.md#e0606) | `comptime.budget`, `comptime.budget-attribute` | [Compile-time budgets](#compile-time-budgets) |
 | E0821 | `test.refines-mismatch` | [Refinement tests](#refinement-tests) |
 | E0702 | `type.test-signature` | [Fixtures](#fixtures) |

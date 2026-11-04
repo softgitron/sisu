@@ -247,9 +247,10 @@ True
 
 **Stage 0 differs.** A builtin type given to a `T: type` parameter,
 such as `bool` or `int`, is E0200 (`resolve.undefined-name`) in `sisu
-run`, `sisu check` and `sisu test`, whose fix offers `uint` for `int`,
-though a type of the program, `String` and `uint` work and the Rust
-front end takes them all. The documentation of items, which
+run`, `sisu check` and `sisu test`, with a note about Python's
+conversion functions, which the call is not, though a type of the
+program, `String`, `uint` and `u8` work and the Rust front end takes
+them all. The documentation of items, which
 [08](../../proposal/08-metaprogramming.md#reflection) lists among what
 reflection exposes, has no query, and the attributes of a function or a
 field none either ([R14](attributes.md#attributes-are-data)).
@@ -274,6 +275,7 @@ error[E0200]: cannot find `bool` in this scope
   |
 7 |     print(comptime name(bool))
   |                         ^^^^
+  = note: Sisu converts with methods: text is read with `s.parse_int()` or `s.parse_float()`, which give an option, a number is made text with `n.to_string()` or `"{n}"`, and one number made another with `x.to_int()` or `n.to_f64()`
 
 error[D0006]: the program was not run: errors found (1)
 ```
@@ -482,8 +484,9 @@ build.
 ## Conditional compilation and features
 
 `@cfg(CONDITION)` leaves out a declaration whose condition does not
-hold, before names are resolved: `test`, `feature="NAME"`, `not`,
-`all(...)` and `any(...)` ([R14](attributes.md#conditional-compilation)).
+hold, an item or a member of a type alike, before names are resolved:
+`test`, `feature="NAME"`, `not`, `all(...)` and `any(...)`
+([R14](attributes.md#conditional-compilation)).
 Inside a body, `if comptime` chooses instead, and keeps both branches
 checked, so code for a platform that one build does not use keeps
 compiling. A feature is a package's named, additive part

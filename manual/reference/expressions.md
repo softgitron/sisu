@@ -237,7 +237,8 @@ Aino at 18, sauna: Eero at 17, Roni at 19
 `xs[i]` is the element at `i`, counting from 0, and `xs[^i]` the `i`th
 from the end, so `xs[^1]` is the last. `d[k]` is the value of a `dict`
 at the key `k`. `xs[i:j]` is a new list of the elements from `i` up to
-`j`, and either bound may be left out.
+`j`; either bound may be left out, and either may count from the end,
+as `xs[1:^1]` does.
 
 - An index is checked: one past the end panics (R0002), and so does a
   key a `dict` does not have (R0010), where `d.get(k)` gives a `V?`.
@@ -257,6 +258,7 @@ def main():
     let xs = [10, 20, 30, 40]
     print("{xs[0]} {xs[^1]} {xs[^2]}")
     print("{xs[1:3]} {xs[2:]} {xs[:2]} {xs[:]}")
+    print("{xs[1:^1]} {xs[^3:]} {xs[:^3]}")
     let ages = {"Aino": 7}
     print("{ages["Aino"]} {ages.get("Eero")}")
     var grid = [[0, 0], [0, 0]]
@@ -268,6 +270,7 @@ def main():
 ```text
 10 40 30
 [20, 30] [30, 40] [10, 20] [10, 20, 30, 40]
+[20, 30] [20, 30, 40] [10]
 7 None
 [[0, 0], [5, 0]]
 ```
@@ -293,11 +296,12 @@ error[E0344]: a constant negative index does not compile; count from the end wit
 error[D0006]: the program was not run: errors found (1)
 ```
 
-**Stage 0 differs.** `^` in a slice bound, `xs[:^1]` for all but the
-last element, which 02 gives, is E0383 in both front ends; `^` works in
-an index only.
+**Stage 0 differs.** `xs[^1]` on a `Slice`, a view of part of a list,
+is E0383 ("appears only inside an index"), where a list takes it; and
+the worksheet, on the Rust front end, takes `^` in an index only
+([R16](sisu-command.md#sisu-ws)).
 
-**Status.** In stage 0 (D-062), except `^` in a slice.
+**Status.** In stage 0 (D-062), with the differences noted.
 
 ## Comprehensions
 
@@ -308,7 +312,7 @@ in `for i, x in enumerate(xs)`.
 
 <!-- file: examples/reference-expressions/comprehensions.sisu -->
 ```sisu
-# List, dict and set comprehensions build a collection from a loop.
+# Comprehensions build a collection from a loop, or a lazy `Iter`.
 def main():
     let xs = [3, 1, 2, 4]
     let squares = [x * x for x in xs if x > 1]
@@ -316,17 +320,23 @@ def main():
     let parities = {x % 2 for x in xs}
     let pairs = [(i, x) for i, x in enumerate(xs) if i < 2]
     print("{squares} {lengths} {parities} {pairs}")
+    let lazy = (x * 10 for x in xs if x % 2 == 0)
+    print("{sum((x * x for x in xs))} {lazy.collect()}")
 ```
 
 <!-- output: examples/reference-expressions/comprehensions.out -->
 ```text
 [9, 4, 16] {"Aino": 4, "Eero": 4} {1, 0} [(0, 3), (1, 1)]
+30 [20, 40]
 ```
 
-**Stage 0 differs.** A generator expression, `(e for x in xs)`, a lazy
-`Iter`, is E0900.
+In parentheses, `(e for x in xs if c)` is a generator expression: a
+lazy `Iter[T]` whose clauses run as it is advanced, one item at a time,
+borrowing what it reads while it lives (E0405, E0407). As a call's only
+argument it keeps its parentheses, `sum((x * x for x in xs))`, and
+Python's bare `sum(x * x for x in xs)` is E0100.
 
-**Status.** In stage 0, except generator expressions.
+**Status.** In stage 0 (02).
 
 ## Closures
 

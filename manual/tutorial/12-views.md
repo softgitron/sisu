@@ -402,6 +402,30 @@ test "an empty line":
 <!-- output: solutions/12-views/predict_views.console -->
 ```console
 $ sisu test predict_views.sisu
+warning[W0001]: typed hole `how many settings` of type `int`
+  --> predict_views.sisu:24:20
+   |
+24 | const COUNT: int = todo("how many settings")
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the name of the second setting` of type `str`
+  --> predict_views.sisu:25:26
+   |
+25 | const SECOND_NAME: str = todo("the name of the second setting")
+   |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the value of the last setting` of type `str`
+  --> predict_views.sisu:26:25
+   |
+26 | const LAST_VALUE: str = todo("the value of the last setting")
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `how many settings an empty line has` of type `int`
+  --> predict_views.sisu:27:26
+   |
+27 | const NONE_AT_ALL: int = todo("how many settings an empty line has")
+   |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 test "how many" ... blocked by todo("how many settings")
 test "the second name" ... blocked by todo("the name of the second setting")
 test "the last value" ... blocked by todo("the value of the last setting")
@@ -473,6 +497,7 @@ error[E0413]: `longest_line` returns `str ! IoError`, which borrows, and has mor
   = fix: return owned text instead: `String ! IoError`
   = fix: name `fs, path` in the `from` clause: ` from fs, path`
 
+error[D0006]: the program was not run: errors found (1)
 ```
 
 <details>
@@ -567,6 +592,7 @@ error[E0411]: `Contact` holds `email: str`, which borrows; only a `view struct` 
   = fix: own the text instead: `String`
   = fix: declare it `view struct Contact`: `view `
 
+error[D0006]: the program was not run: errors found (2)
 ```
 
 <details>
@@ -646,6 +672,12 @@ test "comments give no tokens":
 <!-- output: solutions/12-views/tokenizer.console -->
 ```console
 $ sisu test tokenizer.sisu
+warning[W0001]: typed hole `tokenize` of type `list[Token]`
+  --> tokenizer.sisu:26:12
+   |
+26 |     return todo("tokenize")
+   |            ^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("tokenize")`:
   source = "total = 12 + x"
 in scope at the typed hole `todo("tokenize")`:

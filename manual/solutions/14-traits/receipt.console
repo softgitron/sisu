@@ -18,3 +18,4 @@ error[E0233]: `cost` is not a method of `Item`
 33 |     def cost(self) -> int:
    |         ^^^^
 
+error[D0006]: the program was not run: errors found (3)

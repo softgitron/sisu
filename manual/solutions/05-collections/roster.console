@@ -1,11 +1,12 @@
-$ sisu check roster.sisu
-error[E0400]: `joined` was moved on line 14 and cannot be used afterwards
-  --> roster.sisu:16:14
+$ sisu test roster.sisu
+error[E0400]: `joined` was moved on line 13 and cannot be used afterwards
+  --> roster.sisu:15:14
    |
-16 |     return "{joined.join(" ")} / {by_name.join(" ")}"
+15 |     return "{joined.join(" ")} / {by_name.join(" ")}"
    |              ^^^^^^
    |
-14 |     var by_name = joined
+13 |     var by_name = joined
    |                   ------ `joined` is moved here
   = note: copy it with `.copy()` before the move, which makes a second value (for a list or a `String`, an allocation); move it later, after its last use, which costs nothing; or, where what it moves into only reads it, take it there without `own`, and the call lends it
 
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

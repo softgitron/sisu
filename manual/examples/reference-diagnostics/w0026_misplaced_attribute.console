@@ -1,0 +1,8 @@
+$ sisu run w0026_misplaced_attribute.sisu
+warning[W0026]: `@derive` means something on a struct, an enum or an error set, so on a function it does nothing
+  --> w0026_misplaced_attribute.sisu:5:2
+  |
+5 | @derive(Eq)
+  |  ^^^^^^
+
+82

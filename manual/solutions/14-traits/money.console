@@ -1,4 +1,10 @@
 $ sisu test money.sisu
+warning[W0001]: typed hole `fmt` of type `()`
+  --> money.sisu:17:9
+   |
+17 |         todo("fmt")
+   |         ^^^^^^^^^^^
+
 in scope at the typed hole `todo("fmt")`:
   self = Money(cents=1200)
   f = Formatter(out="", spec="", depth=0)

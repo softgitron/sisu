@@ -1,1 +1,2 @@
-4:19-4:44 E0900 stage0.unsupported construct="a generator expression" phase="generators (Phase 8)"
+5:5-6:21 E0900 stage0.unsupported construct="a nested `def`" phase="nested declarations (a later phase)"
+9:15-9:22 E0200 resolve.undefined-name name="doubled"

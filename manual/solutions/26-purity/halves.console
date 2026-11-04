@@ -1,4 +1,16 @@
 $ sisu test halves.sisu
+warning[W0001]: typed hole `merge` of type `list[int]`
+  --> halves.sisu:15:12
+   |
+15 |     return todo("merge")
+   |            ^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `sort_halves` of type `list[int]`
+  --> halves.sisu:21:12
+   |
+21 |     return todo("sort_halves")
+   |            ^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("merge")`:
   a = [1, 4, 9]
   b = [2, 3, 10]

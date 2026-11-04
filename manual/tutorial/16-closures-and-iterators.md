@@ -190,7 +190,7 @@ error[E0423]: an `own` closure keeps a copy of `greeting`, and `String` is not `
   |
 3 |     return own name -> "{greeting}, {name}"
   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  = note: copy it into a local first (`let c = name.copy()`) and capture that, or use a plain closure, which borrows it
+  = note: a plain closure borrows `greeting` instead, while it lives; a copy made first is no more `Copy` than `greeting` is
 
 error[D0006]: the program was not run: errors found (1)
 ```
@@ -199,9 +199,9 @@ E0423 (`type.own-closure-capture`) says that stage 0 copies what an
 `own` closure keeps, and a `String` is not `Copy`. A closure that
 moves a value into itself is designed (D-026), and the message says
 that the compiler will have it with tasks. Until then an `own` closure
-keeps `Copy` values, such as numbers. The note's first suggestion, a
-copy in a local, gets the same error, since the copy is a `String`
-too.
+keeps `Copy` values, such as numbers. The note names what works today,
+a plain closure, which borrows `greeting` while it lives, and says why
+a copy made first would not help: the copy is a `String` too.
 
 </details>
 
@@ -438,37 +438,60 @@ makes only the numbers that are asked for. `take(10)` asks for ten,
 and the `for` loop stops it with `break`. A generator's result type
 must be `Iter[T]`, and a generator ends when its body ends.
 
-**Try it.** Python's generator expression, `(p * p for p in primes)`,
-makes a lazy iterator in one line. Write one in Sisu.
+A comprehension in parentheses is a generator expression: `(p * p for
+p in primes)` is an `Iter[int]`, a generator whose body is the loop of
+the comprehension. Like a generator, it works out an item only when
+asked, so it can draw from a generator without end:
 
-<details>
-<summary>What Sisu says</summary>
+<!-- file: examples/16-closures-and-iterators/squares_expr.sisu -->
+```sisu
+# A generator expression: a comprehension in parentheses, and lazy.
+def fibonacci() -> Iter[int]:
+    var a = 0
+    var b = 1
+    while True:
+        yield a
+        a, b = b, a + b
 
-<!-- output: examples/16-closures-and-iterators/squares_expr.console -->
-```console
-$ sisu run squares_expr.sisu
-error[E0900]: a generator expression is not implemented in stage 0 yet; it arrives with generators (Phase 8)
-  --> squares_expr.sisu:4:19
-  |
-4 |     let squares = (p * p for p in primes)
-  |                   ^^^^^^^^^^^^^^^^^^^^^^^
-
-error[E0304]: `list[int]` has no method `collect`
-  --> squares_expr.sisu:5:19
-  |
-5 |     print(squares.collect())
-  |                   ^^^^^^^
-  = note: `collect` is a method of `Iterator`
-  = fix: iterate it first: `.iter()`
-
-error[D0006]: the program was not run: errors found (2)
+def main():
+    let primes = [2, 3, 5, 7, 11]
+    print(sum((p * p for p in primes)))
+    let odd = (f for f in fibonacci() if f % 2 == 1)
+    print(odd.take(6).collect())
 ```
 
-E0900 (`stage0.unsupported`) says that stage 0 does not have
-generator expressions yet; they are designed in
-[01](../../proposal/01-tour.md#collections-and-iteration). The second
-error follows from the first. Until they arrive, write
-`primes.iter().map(it * it)`, which is lazy too.
+<!-- output: examples/16-closures-and-iterators/squares_expr.out -->
+```text
+208
+[1, 1, 3, 5, 13, 21]
+```
+
+`sum` asks for every square in turn, and no list of them is made;
+`take(6)` asks for the first six odd Fibonacci numbers, from a sequence
+that has no end. A generator expression borrows what it reads while it
+lives, as a loop over it would, so the list cannot change meanwhile.
+
+> **From Python.** Python lets the parentheses go when a generator
+> expression is a call's only argument, `sum(p * p for p in primes)`.
+> Sisu keeps them: `sum((p * p for p in primes))`.
+
+<details>
+<summary>What the bare form gets</summary>
+
+<!-- output: examples/16-closures-and-iterators/squares_bare.console -->
+```console
+$ sisu run squares_bare.sisu
+error[E0100]: expected `)`, found `for`
+  --> squares_bare.sisu:5:21
+  |
+5 |     print(sum(p * p for p in primes))
+  |                     ^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+E0100 (`parse.expected`) reads the `for` as the end of the call, and
+says nothing about the parentheses.
 
 </details>
 
@@ -576,6 +599,36 @@ test "laziness":
 <!-- output: solutions/16-closures-and-iterators/predict_pipelines.console -->
 ```console
 $ sisu test predict_pipelines.sisu
+warning[W0001]: typed hole `multiples of 3 below 10, times 10` of type `list[int]`
+  --> predict_pipelines.sisu:24:30
+   |
+24 | const MULTIPLES: list[int] = todo("multiples of 3 below 10, times 10")
+   |                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `10 minus each number in turn` of type `int`
+  --> predict_pipelines.sisu:25:21
+   |
+25 | const FOLDED: int = todo("10 minus each number in turn")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `a slice of the counting` of type `list[int]`
+  --> predict_pipelines.sisu:26:26
+   |
+26 | const TAKEN: list[int] = todo("a slice of the counting")
+   |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `letters in capitals, joined` of type `str`
+  --> predict_pipelines.sisu:27:21
+   |
+27 | const JOINED: str = todo("letters in capitals, joined")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `squares worked out` of type `int`
+  --> predict_pipelines.sisu:28:20
+   |
+28 | const CALLS: int = todo("squares worked out")
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 test "multiples" ... blocked by todo("multiples of 3 below 10, times 10")
 test "a fold" ... blocked by todo("10 minus each number in turn")
 test "counting without end" ... blocked by todo("a slice of the counting")
@@ -672,6 +725,7 @@ error[E0324]: the type of `total` cannot be inferred here; add a type annotation
    |                                                     ^^^^^
   = note: a closure's parameters take their types from where the closure is passed; one kept in a `let` names them, as in `(a: int, b: int) -> a + b`
 
+error[D0006]: the program was not run: errors found (3)
 ```
 
 <details>
@@ -754,6 +808,24 @@ test "the best seller":
 <!-- output: solutions/16-closures-and-iterators/sales.console -->
 ```console
 $ sisu test sales.sisu
+warning[W0001]: typed hole `total_in` of type `int`
+  --> sales.sisu:17:12
+   |
+17 |     return todo("total_in")
+   |            ^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `dear` of type `list[String]`
+  --> sales.sisu:22:12
+   |
+22 |     return todo("dear")
+   |            ^^^^^^^^^^^^
+
+warning[W0001]: typed hole `best_seller` of type `String?`
+  --> sales.sisu:26:12
+   |
+26 |     return todo("best_seller")
+   |            ^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("total_in")`:
   sales = [Sale(product="pulla", town="Turku", cents=280), Sale(product="kakku", town="Tampere", cents=2400), Sale(product="leipä", town="Turku", cents=590), Sale(product="pulla", town="Tampere", cents=280), Sale(product="piirakka", town="Turku", cents=2400)]
   town = "Turku"
@@ -830,6 +902,12 @@ test "primes that end in 3":
 <!-- output: solutions/16-closures-and-iterators/primes.console -->
 ```console
 $ sisu test primes.sisu
+warning[W0001]: typed hole `primes` of type `Iter[int]`
+  --> primes.sisu:12:12
+   |
+12 |     return todo("primes")
+   |            ^^^^^^^^^^^^^^
+
 test "the first primes" ... blocked by todo("primes")
 test "the first prime above a thousand" ... blocked by todo("primes")
 test "the hundredth prime" ... blocked by todo("primes")
@@ -920,6 +998,18 @@ test "a ranking":
 <!-- output: solutions/16-closures-and-iterators/scoreboard.console -->
 ```console
 $ sisu test scoreboard.sisu
+warning[W0001]: typed hole `parse_board` of type `list[Score] ! BoardError`
+  --> scoreboard.sisu:24:12
+   |
+24 |     return todo("parse_board")
+   |            ^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `ranking` of type `list[String]`
+  --> scoreboard.sisu:29:12
+   |
+29 |     return todo("ranking")
+   |            ^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("parse_board")`:
   text = "# round 3\nKettu: 12\nKarhu: 15\n\nIlves:  12\n"
 in scope at the typed hole `todo("parse_board")`:
@@ -977,7 +1067,8 @@ When every test passes, compare your answer with
   A list gives an iterator with `iter()`.
 - Iterators are lazy: an adapter works on an item only when it is
   asked for it, so an endless one is safe to take from.
-- A generator yields its items and returns `Iter[T]`.
+- A generator yields its items and returns `Iter[T]`, and a
+  comprehension in parentheses is a generator expression, as lazy.
 - `?` in a closure leaves the closure; a loop with `?` stops at the
   first error.
 

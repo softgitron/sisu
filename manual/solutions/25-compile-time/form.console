@@ -1,4 +1,4 @@
-$ sisu check form.sisu
+$ sisu test form.sisu
 warning[W0001]: typed hole `form` of type `String`
   --> <derive>/main.sisu:4:16
   |
@@ -11,7 +11,6 @@ warning[W0001]: typed hole `form` of type `String`
 23 |         return todo("form")
    |                ^^^^^^^^^^^^
 
-$ sisu test form.sisu
 in scope at the typed hole `todo("form")`:
   self = Booking(name="Aino", hour=18, minutes=90)
 in scope at the typed hole `todo("form")`:

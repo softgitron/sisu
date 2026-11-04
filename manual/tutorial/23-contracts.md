@@ -650,9 +650,9 @@ publish`, which chapter 28 is about, counts it as a breaking change.
 A trait's method can have a contract too, which binds every impl of it
 ([07](../../proposal/07-contracts.md)): an impl's method checks the
 trait's `requires` on entry and its `ensures` on exit, and a failure
-names the trait's method. Stage 0 checks it in the impls of the trait's
-own module, and warns with W0021 at an impl elsewhere, which it does
-not check yet.
+names the trait's method. The contract binds an impl in any module or
+package, as [R11](../reference/contracts.md#contracts-on-trait-methods)
+shows with a trait in one module and its impl in another.
 
 ## What waits for the verifier
 
@@ -754,6 +754,36 @@ test "steam from a dry start":
 <!-- output: solutions/23-contracts/predict_refinements.console -->
 ```console
 $ sisu test predict_refinements.sisu
+warning[W0001]: typed hole `failed(0)` of type `str`
+  --> predict_refinements.sisu:24:19
+   |
+24 | const ZERO: str = todo("failed(0)")
+   |                   ^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `failed(7)` of type `str`
+  --> predict_refinements.sisu:25:20
+   |
+25 | const SEVEN: str = todo("failed(7)")
+   |                    ^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `failed(50)` of type `str`
+  --> predict_refinements.sisu:26:20
+   |
+26 | const FIFTY: str = todo("failed(50)")
+   |                    ^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `failed(-1)` of type `str`
+  --> predict_refinements.sisu:27:24
+   |
+27 | const MINUS_ONE: str = todo("failed(-1)")
+   |                        ^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `steam from 10 with 7 ladles` of type `int`
+  --> predict_refinements.sisu:28:20
+   |
+28 | const STEAM: int = todo("steam from 10 with 7 ladles")
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 test "nothing fails" ... blocked by todo("failed(0)")
 test "a little too wet" ... blocked by todo("failed(7)")
 test "wet" ... blocked by todo("failed(50)")
@@ -843,6 +873,7 @@ error[E0806]: `stove.celsius` is part of a `Stove`, whose invariant only its own
 24 |     stove.celsius = max(stove.celsius - 15, 0)
    |     ^^^^^^^^^^^^^
 
+error[D0006]: the program was not run: errors found (1)
 ```
 
 <details>
@@ -1016,6 +1047,18 @@ test "later, past midnight":
 <!-- output: solutions/23-contracts/clock_time.console -->
 ```console
 $ sisu test clock_time.sisu
+warning[W0001]: typed hole `parse_time` of type `Time ! FormError`
+  --> clock_time.sisu:28:12
+   |
+28 |     return todo("parse_time")
+   |            ^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `later` of type `Time`
+  --> clock_time.sisu:34:12
+   |
+34 |     return todo("later")
+   |            ^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("parse_time")`:
   text = "18:30"
 in scope at the typed hole `todo("parse_time")`:
@@ -1153,6 +1196,24 @@ test "a transfer that cannot be paid changes nothing":
 <!-- output: solutions/23-contracts/account.console -->
 ```console
 $ sisu test account.sisu
+warning[W0001]: typed hole `deposit` of type `()`
+  --> account.sisu:30:9
+   |
+30 |         todo("deposit")
+   |         ^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `withdraw` of type `! AccountError`
+  --> account.sisu:39:16
+   |
+39 |         return todo("withdraw")
+   |                ^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `transfer` of type `! AccountError`
+  --> account.sisu:52:12
+   |
+52 |     return todo("transfer")
+   |            ^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("deposit")`:
   self = Account(balance=1000, limit=500)
   cents = 250

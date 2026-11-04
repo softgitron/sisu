@@ -2,8 +2,9 @@
 
 This guide writes a property that must hold for every case, lets
 `check` find a case where it does not, reads the shrunk counterexample,
-replays it, and keeps it as a test once the bug is fixed. It assumes
-tests and refinement types, from chapters 19 and 23 of the tutorial.
+replays it, keeps it as a test once the bug is fixed, and draws a type
+its own way. It assumes tests and refinement types, from chapters 19
+and 23 of the tutorial.
 
 **See also:** the tutorial's
 [chapter 19](../tutorial/19-testing.md#properties-instead-of-examples)
@@ -192,11 +193,70 @@ what is possible, so that a counterexample is a case the program can
 meet; where a case is possible, such as a bill for no one, handle it in
 the code instead and keep the property.
 
-**Status.** In stage 0, with two parts of
+## 5. Draw a type its own way
+
+`arbitrary[T]` draws a struct field by field, each from its type. When
+the cases a program meets have a shape that no type says, write the
+generator: an impl of `Arbitrary`, whose `arbitrary` makes a value from
+the draws, is what `arbitrary[T]` uses for the type, and for every type
+that holds one. Cash in Finland is paid to five cents, so a till's sums
+are drawn in steps of five:
+
+<!-- file: examples/guide-property-test/cash.sisu -->
+```sisu
+# Cash sums drawn their own way, in steps of five cents.
+
+## A sum paid in cash, in cents: Finnish shops round cash to 5 cents.
+@derive(Debug)
+struct Cash:
+    cents: int
+
+impl Arbitrary for Cash:
+    def arbitrary(d: Draws) -> Cash:
+        return Cash(Draws.gen_in(d, 0, 20_000) * 5)
+
+## A bill, and the cash that the customer hands over for it.
+@derive(Arbitrary, Debug)
+struct Payment:
+    due: Cash
+    given: Cash
+
+## `cents` rounded to the nearest five cents, a tie upwards.
+def to_cash(cents: int) -> int:
+    return (cents + 2) // 5 * 5
+
+## Two cases of any type that can be drawn.
+def two[T: Arbitrary]() -> Gen[(T, T)]:
+    return Gen.of(d -> (T.arbitrary(d), T.arbitrary(d)))
+
+test "the change needs no rounding":
+    check(arbitrary[Payment]) do p:
+        let change = p.given.cents - p.due.cents
+        return to_cash(change) == change
+
+test "two bills together need no rounding":
+    check(two[Payment]()) do pair:
+        let a, b = pair
+        let total = a.due.cents + b.due.cents
+        return to_cash(total) == total
+```
+
+<!-- output: examples/guide-property-test/cash.test -->
+```text
+test "the change needs no rounding" ... ok
+test "two bills together need no rounding" ... ok
+2 passed, 0 failed, 0 blocked
+```
+
+- `arbitrary[Payment]` draws both of a payment's sums through
+  `Cash`'s impl, so the change is always a sum that cash can pay.
+- `@derive(Arbitrary)` gives `Payment` the impl that draws it field by
+  field, which code generic over `T: Arbitrary` needs to draw a `T`, as
+  `two` does with `T.arbitrary(d)`. A type with a part that has no
+  generator cannot derive it (E0820).
+
+**Status.** In stage 0, with a part of
 [17](../../proposal/17-testing.md#property-based-testing-and-fuzzing)
 designed and missing: the database that keeps each failing case and
-tries it first on the next run, which the test of step 4 stands in for,
-and `@derive(Arbitrary)` for a generator of a custom shape, which is
-E0243. `arbitrary[T]` needs no derive for the shapes of a type's own
-fields, and `Gen.of(make)` builds a generator from a function of the
-draws. Fuzzing with `--fuzz` is designed too.
+tries it first on the next run, which the test of step 4 stands in for.
+Fuzzing with `--fuzz` is designed too.

@@ -6,6 +6,12 @@ warning[W0001]: typed hole `the middle element of sorted_xs` of type `int`
   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 $ sisu test median.sisu
+warning[W0001]: typed hole `the middle element of sorted_xs` of type `int`
+  --> median.sisu:5:12
+  |
+5 |     return todo("the middle element of sorted_xs")
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("the middle element of sorted_xs")`:
   xs = [3, 1, 2]
   sorted_xs = [1, 2, 3]

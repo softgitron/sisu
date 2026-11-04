@@ -1,4 +1,16 @@
 $ sisu test reports.sisu
+warning[W0001]: typed hole `the generator's file system` of type `Fs`
+  --> reports.sisu:13:12
+   |
+13 |     return todo("the generator's file system")
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the preview's file system` of type `Fs`
+  --> reports.sisu:17:12
+   |
+17 |     return todo("the preview's file system")
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 test "the generator writes under reports/" ... blocked by todo("the generator's file system")
 test "the generator sees nothing outside" ... blocked by todo("the generator's file system")
 test "the preview reads and does not write" ... blocked by todo("the preview's file system")

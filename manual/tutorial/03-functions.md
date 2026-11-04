@@ -226,13 +226,14 @@ error[E0305]: wrong number of arguments to `url`: expected 1, found 2
   |
 7 |     print(url("example.org", 443))
   |           ^^^^^^^^^^^^^^^^^^^^^^^
+  = note: `port` and the parameters after it are keyword-only: pass them by name, `port=...`
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
 E0305 (`type.argument-count`) counts only the parameters that take a
-position, and `url` has one, `host`. It does not say that `port` is
-keyword-only; the fix is to name it, `port=443`.
+position, and `url` has one, `host`. Its note says that `port` is
+keyword-only, and the fix is to name it, `port=443`.
 
 </details>
 
@@ -593,6 +594,36 @@ test "halving a hundred":
 <!-- output: solutions/03-functions/predict_calls.console -->
 ```console
 $ sisu test predict_calls.sisu
+warning[W0001]: typed hole `ticket(30)` of type `int`
+  --> predict_calls.sisu:19:20
+   |
+19 | const ADULT: int = todo("ticket(30)")
+   |                    ^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `ticket(12, group=3)` of type `int`
+  --> predict_calls.sisu:20:27
+   |
+20 | const SCHOOL_CLASS: int = todo("ticket(12, group=3)")
+   |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `ticket(25, student=True)` of type `int`
+  --> predict_calls.sisu:21:22
+   |
+21 | const STUDENT: int = todo("ticket(25, student=True)")
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `ticket(4, group=2, student=True)` of type `int`
+  --> predict_calls.sisu:22:23
+   |
+22 | const TODDLERS: int = todo("ticket(4, group=2, student=True)")
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `halvings(100)` of type `int`
+  --> predict_calls.sisu:23:23
+   |
+23 | const HALVINGS: int = todo("halvings(100)")
+   |                       ^^^^^^^^^^^^^^^^^^^^^
+
 test "one adult" ... blocked by todo("ticket(30)")
 test "three twelve-year-olds" ... blocked by todo("ticket(12, group=3)")
 test "a student" ... blocked by todo("ticket(25, student=True)")
@@ -684,6 +715,7 @@ error[E0116]: an `if` expression needs an `else` branch, because it must have a 
 26 |     return if grade(points) >= 1: "passed"
    |                                           ^
 
+error[D0006]: the program was not run: errors found (2)
 ```
 
 <details>
@@ -741,6 +773,12 @@ test "every fourth century year is a leap year":
 <!-- output: solutions/03-functions/leap_year.console -->
 ```console
 $ sisu test leap_year.sisu
+warning[W0001]: typed hole `is_leap_year` of type `bool`
+  --> leap_year.sisu:10:12
+   |
+10 |     return todo("is_leap_year")
+   |            ^^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("is_leap_year")`:
   year = 2026
 in scope at the typed hole `todo("is_leap_year")`:
@@ -811,6 +849,12 @@ test "many digits":
 <!-- output: solutions/03-functions/digit_sum.console -->
 ```console
 $ sisu test digit_sum.sisu
+warning[W0001]: typed hole `digit_sum` of type `int`
+  --> digit_sum.sisu:14:12
+   |
+14 |     return todo("digit_sum")
+   |            ^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("digit_sum")`:
   n = 7
 in scope at the typed hole `todo("digit_sum")`:
@@ -892,6 +936,18 @@ test "shown without seconds":
 <!-- output: solutions/03-functions/split_time.console -->
 ```console
 $ sisu test split_time.sisu
+warning[W0001]: typed hole `split_time` of type `(hours: int, minutes: int, seconds: int)`
+  --> split_time.sisu:11:12
+   |
+11 |     return todo("split_time")
+   |            ^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `show_time` of type `String`
+  --> split_time.sisu:16:12
+   |
+16 |     return todo("show_time")
+   |            ^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("split_time")`:
   total = 3725
 in scope at the typed hole `todo("split_time")`:

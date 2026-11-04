@@ -1,0 +1,4 @@
+# The slice written with `len`, which both front ends read.
+def main(sys: System):
+    let words = sys.env.args()
+    print(words[1:len(words) - 1])

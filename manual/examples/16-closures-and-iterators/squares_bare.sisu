@@ -1,0 +1,5 @@
+# Python's generator expression as a call's argument, without its own
+# parentheses.
+def main():
+    let primes = [2, 3, 5, 7, 11]
+    print(sum(p * p for p in primes))

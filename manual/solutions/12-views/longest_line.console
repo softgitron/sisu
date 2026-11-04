@@ -9,3 +9,4 @@ error[E0413]: `longest_line` returns `str ! IoError`, which borrows, and has mor
   = fix: return owned text instead: `String ! IoError`
   = fix: name `fs, path` in the `from` clause: ` from fs, path`
 
+error[D0006]: the program was not run: errors found (1)

@@ -1,0 +1,14 @@
+$ sisu run misplaced.sisu
+warning[W0026]: `@derive` means something on a struct, an enum or an error set, so on a function it does nothing
+  --> misplaced.sisu:2:2
+  |
+2 | @derive(Debug)
+  |  ^^^^^^
+
+warning[W0026]: `@export` means something on a function, so on a struct it does nothing
+  --> misplaced.sisu:6:2
+  |
+6 | @export("sauna_heat")
+  |  ^^^^^^
+
+87

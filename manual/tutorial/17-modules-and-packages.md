@@ -665,6 +665,7 @@ error[E0200]: cannot find `SortedDict` in this scope
 20 |     var visits: SortedDict[str, int] = SortedDict.new()
    |                                        ^^^^^^^^^^
 
+error[D0006]: the program was not run: errors found (6)
 ```
 
 <details>
@@ -888,6 +889,48 @@ Before you change anything, every test is blocked:
 <!-- output: solutions/17-modules-and-packages/wordcount.console -->
 ```console
 $ sisu test wordcount.sisu
+warning[W0001]: typed hole `words` of type `list[String]`
+  --> wordcount.sisu:29:12
+   |
+29 |     return todo("words")
+   |            ^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `pairs` of type `list[(String, String)]`
+  --> wordcount.sisu:33:12
+   |
+33 |     return todo("pairs")
+   |            ^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `new` of type `Tally[T]`
+  --> wordcount.sisu:42:16
+   |
+42 |         return todo("new")
+   |                ^^^^^^^^^^^
+
+warning[W0001]: typed hole `add` of type `()`
+  --> wordcount.sisu:46:9
+   |
+46 |         todo("add")
+   |         ^^^^^^^^^^^
+
+warning[W0001]: typed hole `count` of type `int`
+  --> wordcount.sisu:50:16
+   |
+50 |         return todo("count")
+   |                ^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `top` of type `list[(T, int)]`
+  --> wordcount.sisu:56:16
+   |
+56 |         return todo("top")
+   |                ^^^^^^^^^^^
+
+warning[W0001]: typed hole `fmt` of type `()`
+  --> wordcount.sisu:61:9
+   |
+61 |         todo("fmt")
+   |         ^^^^^^^^^^^
+
 in scope at the typed hole `todo("words")`:
   text = "Hei, hei maailma!"
 in scope at the typed hole `todo("pairs")`:

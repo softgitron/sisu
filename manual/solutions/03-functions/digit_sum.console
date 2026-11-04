@@ -1,4 +1,10 @@
 $ sisu test digit_sum.sisu
+warning[W0001]: typed hole `digit_sum` of type `int`
+  --> digit_sum.sisu:14:12
+   |
+14 |     return todo("digit_sum")
+   |            ^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("digit_sum")`:
   n = 7
 in scope at the typed hole `todo("digit_sum")`:

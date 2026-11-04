@@ -6,3 +6,4 @@ error[E0310]: `+` cannot be applied to `int` and `int?`
    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   = note: the value may be missing: give a default with `??`, or take it apart with `if let` or `match`
 
+error[D0006]: the program was not run: errors found (1)

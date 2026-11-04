@@ -1,4 +1,40 @@
 $ sisu test stack.sisu
+warning[W0001]: typed hole `empty` of type `Stack[T]`
+  --> stack.sisu:15:16
+   |
+15 |         return todo("empty")
+   |                ^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `push` of type `()`
+  --> stack.sisu:19:9
+   |
+19 |         todo("push")
+   |         ^^^^^^^^^^^^
+
+warning[W0001]: typed hole `pop` of type `T?`
+  --> stack.sisu:23:16
+   |
+23 |         return todo("pop")
+   |                ^^^^^^^^^^^
+
+warning[W0001]: typed hole `peek` of type `(ref T)?`
+  --> stack.sisu:27:16
+   |
+27 |         return todo("peek")
+   |                ^^^^^^^^^^^^
+
+warning[W0001]: typed hole `len` of type `int`
+  --> stack.sisu:31:16
+   |
+31 |         return todo("len")
+   |                ^^^^^^^^^^^
+
+warning[W0001]: typed hole `fmt` of type `()`
+  --> stack.sisu:36:9
+   |
+36 |         todo("fmt")
+   |         ^^^^^^^^^^^
+
 test "the last in is the first out" ... blocked by todo("empty")
 test "an empty stack" ... blocked by todo("empty")
 test "a look at the top" ... blocked by todo("empty")

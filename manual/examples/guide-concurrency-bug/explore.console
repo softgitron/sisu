@@ -3,6 +3,7 @@ info [task 2]: Eero finds 18:00 free
 test "an hour is booked once" ... ok
 1 passed, 0 failed, 0 blocked
 $ sisu test --explore 20 double.sisu
+info [task 1]: Aino finds 18:00 free
 info [task 2]: Eero finds 18:00 free
 test "an hour is booked once" ... FAILED
 

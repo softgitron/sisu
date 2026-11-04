@@ -2,10 +2,9 @@
 ##!
 ##! A small shop keeps its stock as a list of items. The file has three
 ##! move errors, and each needs a different fix: move later, borrow
-##! instead, or copy. Check the file with `sisu check shop.sisu`, read
-##! the diagnostics, and fix each error with the fix that costs least
-##! and keeps what the doc comments promise, until `sisu test shop.sisu`
-##! passes every test. Change the functions, not `Item` or the tests.
+##! instead, or copy. Run `sisu test shop.sisu`, read the diagnostics,
+##! and fix each error with the fix that costs least and keeps what the
+##! doc comments promise. Change the functions, not `Item` or the tests.
 ##! The hints are in chapter 10 of the tutorial, under "Exercise 10.3:
 ##! three moves".
 

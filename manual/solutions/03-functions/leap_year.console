@@ -1,4 +1,10 @@
 $ sisu test leap_year.sisu
+warning[W0001]: typed hole `is_leap_year` of type `bool`
+  --> leap_year.sisu:10:12
+   |
+10 |     return todo("is_leap_year")
+   |            ^^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("is_leap_year")`:
   year = 2026
 in scope at the typed hole `todo("is_leap_year")`:

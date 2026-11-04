@@ -1,4 +1,10 @@
 $ sisu test tests.sisu
+warning[W0001]: typed hole `halve` of type `int`
+  --> tests.sisu:6:12
+  |
+6 |     return todo("halve")
+  |            ^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("halve")`:
   x = 42
 test "doubles a number" ... ok
@@ -16,14 +22,32 @@ replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
 
 3 passed, 1 failed, 1 blocked
 $ sisu test --filter large tests.sisu
+warning[W0001]: typed hole `halve` of type `int`
+  --> tests.sisu:6:12
+  |
+6 |     return todo("halve")
+  |            ^^^^^^^^^^^^^
+
 test "large numbers/doubles a large number" ... ok
 1 passed, 0 failed, 0 blocked
 4 not selected
 $ sisu test --tag slow tests.sisu
+warning[W0001]: typed hole `halve` of type `int`
+  --> tests.sisu:6:12
+  |
+6 |     return todo("halve")
+  |            ^^^^^^^^^^^^^
+
 test "large numbers/doubles a large number" ... ok
 1 passed, 0 failed, 0 blocked
 4 not selected
 $ sisu test --skip-tag slow --jobs 1 --no-monitor --no-cache tests.sisu
+warning[W0001]: typed hole `halve` of type `int`
+  --> tests.sisu:6:12
+  |
+6 |     return todo("halve")
+  |            ^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("halve")`:
   x = 42
 test "doubles a number" ... ok
@@ -41,6 +65,12 @@ replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
 2 passed, 1 failed, 1 blocked
 1 not selected
 $ sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
+warning[W0001]: typed hole `halve` of type `int`
+  --> tests.sisu:6:12
+  |
+6 |     return todo("halve")
+  |            ^^^^^^^^^^^^^
+
 test "doubles (-3, -5)" ... FAILED
 
 test "doubles (-3, -5)" ... FAILED

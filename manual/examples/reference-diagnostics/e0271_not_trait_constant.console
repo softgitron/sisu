@@ -1,0 +1,8 @@
+$ sisu run e0271_not_trait_constant.sisu
+error[E0271]: `WARMUP` is not a constant of `Stove`
+  --> e0271_not_trait_constant.sisu:11:11
+   |
+11 |     const WARMUP: int = 60
+   |           ^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

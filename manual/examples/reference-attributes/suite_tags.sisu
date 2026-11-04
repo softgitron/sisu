@@ -1,0 +1,14 @@
+# A suite's tags tag each of its tests.
+def double(n: int) -> int:
+    return n * 2
+
+@tag("slow")
+suite "large numbers":
+    test "a large number":
+        assert double(1 << 40) == 1 << 41
+
+    test "a larger number":
+        assert double(1 << 50) == 1 << 51
+
+test "a small number":
+    assert double(2) == 4

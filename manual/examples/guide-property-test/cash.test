@@ -1,0 +1,3 @@
+test "the change needs no rounding" ... ok
+test "two bills together need no rounding" ... ok
+2 passed, 0 failed, 0 blocked

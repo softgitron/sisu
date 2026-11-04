@@ -5,4 +5,8 @@ error[D0009]: unknown option `--fast` for `sisu run`
 $ sisu run --explore=many hello.sisu
 error[D0023]: `--explore` needs a number, not `many`
 $ sisu explain
-error[D0004]: `sisu explain` needs a file
+error[D0129]: `sisu explain` needs a diagnostic's code, such as `E0300`, or its name, such as `type.mismatch`
+$ sisu new
+error[D0130]: `sisu new` needs the name of the package to create
+$ sisu --version
+sisu 0.0.1

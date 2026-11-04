@@ -199,9 +199,53 @@ replay: sisu test --replay 1-e4f3e873c7a7fcfa-0.0.1-t2-s0-r0 asserts.sisu
 - `replay:` is a command that runs the failing test again; the section
   "Replaying a failure" is about it.
 
-`expect condition` is designed as an assertion that lets the test go
-on and fails it at its end, so that one run reports every broken
-condition; in the compiler it still stops the test as `assert` does.
+`expect condition` checks as `assert` does, but a failure does not stop
+the test: it is recorded, the test goes on, and at its end the test
+fails with every failure it recorded. One run then reports every broken
+case:
+
+<!-- file: examples/19-testing/expects.sisu -->
+```sisu
+# `expect` records a failure, and the test goes on to its end.
+
+## The average of `temps`, rounded down.
+def average(temps: list[int]) -> int:
+    var total = 0
+    for t in temps:
+        total += t
+    return total // len(temps)
+
+test "an average for each evening":
+    expect average([80, 85, 120]) == 95
+    expect average([70, 75]) == 73
+    expect average([90]) == 90
+    expect average([60, 61]) == 61
+```
+
+<!-- output: examples/19-testing/expects.console -->
+```console
+$ sisu test expects.sisu
+test "an average for each evening" ... FAILED
+
+test "an average for each evening" ... FAILED
+panic: assertion failed: average([70, 75]) == 73
+  left:  72
+  right: 73
+  at test "an average for each evening" (expects.sisu:12:5)
+panic: assertion failed: average([60, 61]) == 61
+  left:  60
+  right: 61
+  at test "an average for each evening" (expects.sisu:14:5)
+replay: sisu test --replay 1-27b42691e342aea0-0.0.1-t0-s0-r0 expects.sisu
+
+0 passed, 1 failed, 0 blocked
+```
+
+Both failures are reported, each with its two sides, under `panic:` as
+a failed `assert` would be, though nothing panicked, and the two checks
+that hold say nothing. Use `expect` for checks that do not depend on
+each other, and `assert` where a failure makes the lines after it
+meaningless.
 
 ## Fixtures are values
 
@@ -959,6 +1003,42 @@ test "every short list of booleans":
 <!-- output: solutions/19-testing/predict_clock.console -->
 ```console
 $ sisu test predict_clock.sisu
+warning[W0001]: typed hole `seconds for two waits in a row` of type `int`
+  --> predict_clock.sisu:14:34
+   |
+14 | const ONE_AFTER_THE_OTHER: int = todo("seconds for two waits in a row")
+   |                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `seconds for two waits in two tasks` of type `int`
+  --> predict_clock.sisu:15:27
+   |
+15 | const SIDE_BY_SIDE: int = todo("seconds for two waits in two tasks")
+   |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `seconds for two steps beside one step` of type `int`
+  --> predict_clock.sisu:16:23
+   |
+16 | const IN_STEPS: int = todo("seconds for two steps beside one step")
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `seconds that the test moved the clock` of type `int`
+  --> predict_clock.sisu:17:23
+   |
+17 | const ADVANCED: int = todo("seconds that the test moved the clock")
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `seconds that a busy loop takes` of type `int`
+  --> predict_clock.sisu:18:19
+   |
+18 | const BUSY: int = todo("seconds that a busy loop takes")
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `lists of at most two booleans` of type `int`
+  --> predict_clock.sisu:19:20
+   |
+19 | const CASES: int = todo("lists of at most two booleans")
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 test "one wait after the other" ... blocked by todo("seconds for two waits in a row")
 test "two waits in two tasks" ... blocked by todo("seconds for two waits in two tasks")
 test "a task of two steps beside a task of one" ... blocked by todo("seconds for two steps beside one step")
@@ -1128,6 +1208,12 @@ test "the property rejects wrong answers":
 <!-- output: solutions/19-testing/dedupe.console -->
 ```console
 $ sisu test dedupe.sisu
+warning[W0001]: typed hole `dedupe_ok` of type `bool`
+  --> dedupe.sisu:26:12
+   |
+26 |     return todo("dedupe_ok")
+   |            ^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("dedupe_ok")`:
   xs = [5]
   out = [5]
@@ -1361,6 +1447,12 @@ test "an unknown town is asked once"(clock: TestClock):
 <!-- output: solutions/19-testing/retry.console -->
 ```console
 $ sisu test retry.sisu
+warning[W0001]: typed hole `ask` of type `String ! {TaskError, ServiceError}`
+  --> retry.sisu:29:12
+   |
+29 |     return todo("ask")
+   |            ^^^^^^^^^^^
+
 in scope at the typed hole `todo("ask")`:
   town = "Oulu"
   tries = 3
@@ -1418,7 +1510,8 @@ When every test passes, compare your answer with
 - `test "name" for x in [...]:` is a test for each case, named by the
   case.
 - A failing `assert` shows both sides of a comparison, the values of
-  the parts that only read, and its message.
+  the parts that only read, and its message. `expect` records its
+  failure and lets the test go on.
 - A fixture is a value a function makes. A test that names
   capabilities as parameters gets fresh fakes of them; one that takes
   `sys: System` gets the real one, runs alone and has no token.

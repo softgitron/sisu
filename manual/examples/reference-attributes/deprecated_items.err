@@ -1,0 +1,18 @@
+warning[W0023]: `Stove` is deprecated: use `Heater`
+  --> deprecated_items.sisu:16:17
+   |
+16 |     let stove = Stove(80)
+   |                 ^^^^^
+
+warning[W0023]: `Fuel.Coal` is deprecated: use `Electric`
+  --> deprecated_items.sisu:17:16
+   |
+17 |     let fuel = Fuel.Coal
+   |                ^^^^^^^^^
+
+warning[W0023]: `HOTTEST` is deprecated: use `MAX_HEAT`
+  --> deprecated_items.sisu:18:29
+   |
+18 |     print("{stove.heat} of {HOTTEST} {fuel:?}")
+   |                             ^^^^^^^
+

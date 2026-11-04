@@ -1,4 +1,16 @@
 $ sisu test find_lines.sisu
+warning[W0001]: typed hole `the text of the file` of type `String`
+  --> find_lines.sisu:12:24
+   |
+12 |     let text: String = todo("the text of the file")
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `whether the line holds the word` of type `bool`
+  --> find_lines.sisu:15:12
+   |
+15 |         if todo("whether the line holds the word"):
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("the text of the file")`:
   path = "poem.txt"
   word = "warm"

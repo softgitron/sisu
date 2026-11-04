@@ -1,0 +1,12 @@
+# The impl gives the constant the type that the trait declares.
+trait Stove:
+    const MAX_HEAT: int
+
+struct WoodStove:
+    logs: int
+
+impl Stove for WoodStove:
+    const MAX_HEAT: int = 110
+
+def main():
+    print(WoodStove.MAX_HEAT)

@@ -1,0 +1,14 @@
+# An impl gives a constant that its trait does not declare.
+trait Stove:
+    const MAX_HEAT: int
+    const WARM_UP: int = 30
+
+struct WoodStove:
+    logs: int
+
+impl Stove for WoodStove:
+    const MAX_HEAT: int = 110
+    const WARMUP: int = 60
+
+def main():
+    print("{WoodStove.MAX_HEAT} {WoodStove.WARM_UP}")

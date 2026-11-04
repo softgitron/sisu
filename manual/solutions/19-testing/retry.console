@@ -1,4 +1,10 @@
 $ sisu test retry.sisu
+warning[W0001]: typed hole `ask` of type `String ! {TaskError, ServiceError}`
+  --> retry.sisu:29:12
+   |
+29 |     return todo("ask")
+   |            ^^^^^^^^^^^
+
 in scope at the typed hole `todo("ask")`:
   town = "Oulu"
   tries = 3

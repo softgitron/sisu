@@ -15,3 +15,4 @@ error[E0324]: the type of `f` cannot be inferred here; add a type annotation
 4 |         names.push(f.name.to_string())
   |                    ^
 
+error[D0006]: the program was not run: errors found (2)

@@ -527,13 +527,15 @@ error[E0423]: an `own` closure keeps a copy of `greeting`, and `String` is not `
   |
 3 |     return own (name: str) -> "{greeting}, {name}!"
   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  = note: copy it into a local first (`let c = name.copy()`) and capture that, or use a plain closure, which borrows it
+  = note: a plain closure borrows `greeting` instead, while it lives; a copy made first is no more `Copy` than `greeting` is
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-The note's advice does not help here, since a copy of a `String` is a
-`String` too; until moves arrive, keep the value outside the closure.
+The note says what works now, a plain closure, which borrows the value
+while it lives, and why a copy made first does not: a copy of a
+`String` is a `String` too. Until moves arrive, keep the value outside
+an `own` closure.
 
 **Status.** In stage 0, with the difference above (D-026).
 
@@ -678,8 +680,10 @@ the standard library's types, each visible in the program's types:
 
 A `Shared` value is read through, and changed only through a `Cell`, a
 `Mutex` or an `Atomic` inside it, so that the `Send` and `Sync` rules can
-tell which is right. There is no cycle collector: a cycle of `Shared`
-values leaks unless a `Weak` breaks it.
+tell which is right, and it prints as the value it holds, with `{s}` and
+with `{s:?}` ([chapter 13](../tutorial/13-sharing.md#values-with-several-owners)).
+There is no cycle collector: a cycle of `Shared` values leaks unless a
+`Weak` breaks it.
 
 <!-- file: examples/reference-ownership/shared.sisu -->
 ```sisu

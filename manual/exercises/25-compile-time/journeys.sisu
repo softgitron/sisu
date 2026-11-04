@@ -2,11 +2,10 @@
 ##!
 ##! `LONGEST` is worked out while the program compiles: the number below
 ##! a thousand whose journey to 1, by the steps of chapter 4's Collatz
-##! exercise, is the longest. The file does not compile. Check it with
-##! `sisu check journeys.sisu`, read the diagnostic, and fix the
-##! program, not the tests, so that `sisu test journeys.sisu` passes
-##! every test. The hints are in chapter 25 of the tutorial, under
-##! "Exercise 25.2: a constant over its budget".
+##! exercise, is the longest. The file does not compile. Run
+##! `sisu test journeys.sisu`, read the diagnostic, and fix the program,
+##! not the tests, so that every test passes. The hints are in chapter 25
+##! of the tutorial, under "Exercise 25.2: a constant over its budget".
 
 ## The number of steps from `n` to 1, halving an even number and taking
 ## an odd one to three times itself plus one.

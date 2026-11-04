@@ -1,0 +1,12 @@
+$ sisu test d0128_transcript_front_end.sisu
+transcript "tests/middle.transcript" ... FAILED
+
+transcript "tests/middle.transcript" ... FAILED
+a transcript runs on the Rust front end's build of the program, which stops at errors stage 1 does not report:
+error[E0383]: `^` counts from the end and appears only inside an index, as in `xs[^1]`
+  --> d0128_transcript_front_end.sisu:4:19
+  |
+4 |     print(words[1:^1])
+  |                   ^^
+
+0 passed, 1 failed, 0 blocked

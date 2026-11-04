@@ -1,4 +1,10 @@
 $ sisu test csv_fields.sisu
+warning[W0001]: typed hole `csv_fields` of type `list[String]`
+  --> csv_fields.sisu:11:12
+   |
+11 |     return todo("csv_fields")
+   |            ^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("csv_fields")`:
   line = "a,b,c"
 in scope at the typed hole `todo("csv_fields")`:

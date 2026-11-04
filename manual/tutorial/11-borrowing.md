@@ -574,6 +574,7 @@ error[E0340]: `items` is not a `mut` parameter, so the argument takes no `mut`
    |              ^^^^^^^^^
   = fix: take `items` with `mut`: `mut `
 
+error[D0006]: the program was not run: errors found (4)
 ```
 
 <details>
@@ -606,10 +607,9 @@ Open
 ##! Exercise 11.2, a friend each. Kind: fix. Level: 1.
 ##!
 ##! Every guest at a party brings a friend. The file does not compile.
-##! Check it with `sisu check friends.sisu`, read the diagnostic, and
-##! fix `invite_friends` so that `sisu test friends.sisu` passes every
-##! test. The hints are in chapter 11 of the tutorial, under "Exercise
-##! 11.2: a friend each".
+##! Run `sisu test friends.sisu`, read the diagnostic, and fix
+##! `invite_friends` so that every test passes. The hints are in chapter
+##! 11 of the tutorial, under "Exercise 11.2: a friend each".
 
 ## Adds a friend for each guest, after all the guests: "Aino's friend"
 ## for "Aino".
@@ -628,22 +628,21 @@ test "nobody brings nobody":
     assert guests == []
 ```
 
-Check it before you change anything:
-
 <!-- output: solutions/11-borrowing/friends.console -->
 ```console
-$ sisu check friends.sisu
-error[E0405]: `guests` is already borrowed on line 12, so it cannot be borrowed with `mut` until that borrow ends on line 13
-  --> friends.sisu:13:9
+$ sisu test friends.sisu
+error[E0405]: `guests` is already borrowed on line 11, so it cannot be borrowed with `mut` until that borrow ends on line 12
+  --> friends.sisu:12:9
    |
-13 |         guests.push("{guest}'s friend")
+12 |         guests.push("{guest}'s friend")
    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    |
-12 |     for guest in guests:
+11 |     for guest in guests:
    |                  ------ borrowed here
    |     ------------------- the borrow is still used here
-  = note: move this after line 13, where the borrow ends, or work on a copy made with `.copy()`
+  = note: move this after line 12, where the borrow ends, or work on a copy made with `.copy()`
 
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```
 
 <details>
@@ -675,11 +674,10 @@ Open
 ##! Exercise 11.3, the leader. Kind: fix. Level: 2.
 ##!
 ##! `sort_and_check` sorts a list of names and tells whether the name
-##! that was first is still first. The file does not compile. Check it
-##! with `sisu check leader.sisu`, read the diagnostic, and fix
-##! `sort_and_check` so that `sisu test leader.sisu` passes every test.
-##! The hints are in chapter 11 of the tutorial, under "Exercise 11.3:
-##! the leader".
+##! that was first is still first. The file does not compile. Run
+##! `sisu test leader.sisu`, read the diagnostic, and fix
+##! `sort_and_check` so that every test passes. The hints are in chapter
+##! 11 of the tutorial, under "Exercise 11.3: the leader".
 
 ## Sorts `names` in alphabetical order, and says whether the name that
 ## was first before the sort is first after it. `names` is not empty.
@@ -699,24 +697,23 @@ test "a leader who does not":
     assert names == ["Aino", "Roni"]
 ```
 
-Check it before you change anything:
-
 <!-- output: solutions/11-borrowing/leader.console -->
 ```console
-$ sisu check leader.sisu
-error[E0405]: `names` is already borrowed on line 13, so it cannot be borrowed with `mut` until that borrow ends on line 15
-  --> leader.sisu:14:5
+$ sisu test leader.sisu
+error[E0405]: `names` is already borrowed on line 12, so it cannot be borrowed with `mut` until that borrow ends on line 14
+  --> leader.sisu:13:5
    |
-14 |     names.sort()
+13 |     names.sort()
    |     ^^^^^^^^^^^^
    |
-13 |     let first = ref names[0]
+12 |     let first = ref names[0]
    |                 ------------ borrowed here by `first`
    |
-15 |     return names[0] == first
+14 |     return names[0] == first
    |            ----------------- the borrow is still used here
-  = note: move this after line 15, where the borrow ends, or work on a copy made with `.copy()`
+  = note: move this after line 14, where the borrow ends, or work on a copy made with `.copy()`
 
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```
 
 <details>
@@ -748,10 +745,9 @@ Open
 ##! Exercise 11.4, the winner. Kind: fix. Level: 2.
 ##!
 ##! `winner` returns a borrow of the winner's name, without copying it.
-##! The file does not compile. Check it with `sisu check winner.sisu`,
-##! read the diagnostic, and fix `winner` so that
-##! `sisu test winner.sisu` passes the test. The hints are in chapter 11
-##! of the tutorial, under "Exercise 11.4: the winner".
+##! The file does not compile. Run `sisu test winner.sisu`, read the
+##! diagnostic, and fix `winner` so that the test passes. The hints are
+##! in chapter 11 of the tutorial, under "Exercise 11.4: the winner".
 
 struct Player:
     name: String
@@ -771,21 +767,20 @@ test "the winner":
     assert winner(aino, Player("Roni", 7)) == "Aino"
 ```
 
-Check it before you change anything:
-
 <!-- output: solutions/11-borrowing/winner.console -->
 ```console
-$ sisu check winner.sisu
+$ sisu test winner.sisu
 error[E0408]: this returns a borrow of the parameter `b`, which is not in the `from` clause of `winner`
-  --> winner.sisu:16:9
+  --> winner.sisu:15:9
    |
-16 |         return ref b.name
+15 |         return ref b.name
    |         ^^^^^^^^^^^^^^^^^
    |
-14 | def winner(a: Player, b: Player) -> ref String from a:
+13 | def winner(a: Player, b: Player) -> ref String from a:
    |                       --------- `b` is declared here
   = fix: name `b` in the `from` clause
 
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```
 
 <details>
@@ -809,10 +804,9 @@ Open
 ##! Exercise 11.5, sold out. Kind: fix. Level: 3.
 ##!
 ##! A café clears the items it has none left of from its stock. The file
-##! does not compile. Check it with `sisu check stock.sisu`, read the
-##! diagnostic, and fix `remove_sold_out` so that `sisu test stock.sisu`
-##! passes every test. The hints are in chapter 11 of the tutorial,
-##! under "Exercise 11.5: sold out".
+##! does not compile. Run `sisu test stock.sisu`, read the diagnostic,
+##! and fix `remove_sold_out` so that every test passes. The hints are in
+##! chapter 11 of the tutorial, under "Exercise 11.5: sold out".
 
 ## Removes every item that has none left from `stock`, and gives their
 ## names in the order of the stock.
@@ -835,24 +829,23 @@ test "nothing sold out":
     assert stock == {"tea": 2}
 ```
 
-Check it before you change anything:
-
 <!-- output: solutions/11-borrowing/stock.console -->
 ```console
-$ sisu check stock.sisu
-error[E0405]: `stock` is already borrowed on line 13, so it cannot be borrowed with `mut` until that borrow ends on line 16
-  --> stock.sisu:15:17
+$ sisu test stock.sisu
+error[E0405]: `stock` is already borrowed on line 12, so it cannot be borrowed with `mut` until that borrow ends on line 15
+  --> stock.sisu:14:17
    |
-15 |             _ = stock.remove(name)
+14 |             _ = stock.remove(name)
    |                 ^^^^^^^^^^^^^^^^^^
    |
-13 |     for name, count in stock.items():
+12 |     for name, count in stock.items():
    |                        ----- borrowed here by `name`
    |
-15 |             _ = stock.remove(name)
+14 |             _ = stock.remove(name)
    |                 ------------------ the borrow is still used here
-  = note: move this after line 16, where the borrow ends, or work on a copy made with `.copy()`
+  = note: move this after line 15, where the borrow ends, or work on a copy made with `.copy()`
 
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```
 
 <details>

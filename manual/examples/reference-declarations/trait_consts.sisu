@@ -1,0 +1,28 @@
+# A trait's constants: one that every impl gives, one with a default.
+trait Shape:
+    const SIDES: int
+    const CORNERS: int = Self.SIDES
+
+    def describe(self) -> String:
+        return "sides {Self.SIDES}, corners {Self.CORNERS}"
+
+struct Square:
+    side: f64
+
+struct Disc:
+    radius: f64
+
+impl Shape for Square:
+    const SIDES: int = 4
+
+impl Shape for Disc:
+    const SIDES: int = 1
+    const CORNERS: int = 0
+
+def sides[T: Shape](shape: T) -> int:
+    return T.SIDES
+
+def main():
+    print(Square(2.0).describe())
+    print(Disc(1.0).describe())
+    print("{Square.CORNERS} {sides(Disc(1.0))}")

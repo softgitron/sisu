@@ -1,3 +1,6 @@
+$ sisu test
+test "getenv reads the process's variables, whatever the Env" ... ok
+1 passed, 0 failed, 0 blocked
 $ sisu run
 Hei, stranger!
 the path: /usr/bin:/bin

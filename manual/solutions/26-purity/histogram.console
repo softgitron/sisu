@@ -1,4 +1,28 @@
 $ sisu test histogram.sisu
+warning[W0001]: typed hole `empty` of type `Histogram`
+  --> histogram.sisu:26:16
+   |
+26 |         return todo("empty")
+   |                ^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `add` of type `()`
+  --> histogram.sisu:29:9
+   |
+29 |         todo("add")
+   |         ^^^^^^^^^^^
+
+warning[W0001]: typed hole `merge` of type `Histogram`
+  --> histogram.sisu:32:16
+   |
+32 |         return todo("merge")
+   |                ^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `finish` of type `list[int]`
+  --> histogram.sisu:35:16
+   |
+35 |         return todo("finish")
+   |                ^^^^^^^^^^^^^^
+
 test "an evening's readings" ... blocked by todo("empty")
 test "no readings" ... blocked by todo("empty")
 test "the chunks change nothing" ... blocked by todo("empty")

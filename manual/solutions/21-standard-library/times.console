@@ -1,4 +1,10 @@
 $ sisu test times.sisu
+warning[W0001]: typed hole `the pattern` of type `str`
+  --> times.sisu:14:29
+   |
+14 |     let pattern = Regex.new(todo("the pattern"))?
+   |                             ^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("the pattern")`:
   text = "Sauna at 17:30, swim at 18:05."
 in scope at the typed hole `todo("the pattern")`:

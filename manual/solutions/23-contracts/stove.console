@@ -5,3 +5,4 @@ error[E0806]: `stove.celsius` is part of a `Stove`, whose invariant only its own
 24 |     stove.celsius = max(stove.celsius - 15, 0)
    |     ^^^^^^^^^^^^^
 
+error[D0006]: the program was not run: errors found (1)

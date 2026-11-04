@@ -131,10 +131,28 @@ len(week[2:4])  # => 2
 
 The list holds a week of temperatures. `week[0:5]` is the five
 weekdays, `week[5:]` runs from index 5 to the end, and `week[:2]` from
-the start up to index 2. Counting from the end in a slice, as in
-`week[:^1]`, is designed in
-[02](../../proposal/02-syntax.md#slicing-and-indexing) and is not in
-the compiler yet.
+the start up to index 2.
+
+A bound can count from the end with `^`, as an index does: `week[:^2]`
+leaves out the last two days, and `week[1:^1]` the first and the last.
+A worksheet does not take `^` in a slice yet, so this one is a program:
+
+<!-- file: examples/05-collections/slice_ends.sisu -->
+```sisu
+# A slice's bounds can count from the end with `^`.
+def main():
+    let week = [-3, -1, 2, 5, 4, 1, -2]
+    print(week[:^2])
+    print(week[^2:])
+    print(week[1:^1])
+```
+
+<!-- output: examples/05-collections/slice_ends.out -->
+```text
+[-3, -1, 2, 5, 4]
+[1, -2]
+[-1, 2, 5, 4, 1]
+```
 
 ## Dicts
 
@@ -648,6 +666,36 @@ test "a name in lowercase among the keys of a dict":
 <!-- output: solutions/05-collections/predict_collections.console -->
 ```console
 $ sisu test predict_collections.sisu
+warning[W0001]: typed hole `the size of a set` of type `int`
+  --> predict_collections.sisu:8:23
+  |
+8 | const DISTINCT: int = todo("the size of a set")
+  |                       ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the last of a sorted list` of type `int`
+  --> predict_collections.sisu:9:22
+  |
+9 | const LARGEST: int = todo("the last of a sorted list")
+  |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the sum of a slice` of type `int`
+  --> predict_collections.sisu:10:24
+   |
+10 | const SLICE_SUM: int = todo("the sum of a slice")
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the length of a comprehension` of type `int`
+  --> predict_collections.sisu:11:20
+   |
+11 | const EVENS: int = todo("the length of a comprehension")
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `a key in a dict` of type `bool`
+  --> predict_collections.sisu:12:21
+   |
+12 | const FOUND: bool = todo("a key in a dict")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^
+
 test "a set of repeated numbers" ... blocked by todo("the size of a set")
 test "the last of a sorted list" ... blocked by todo("the last of a sorted list")
 test "the sum of a slice" ... blocked by todo("the sum of a slice")
@@ -686,11 +734,10 @@ Open
 ##!
 ##! `roster` shows a team's members in the order they joined and in
 ##! the order of their names. `join(" ")` puts a list's items into one
-##! text with spaces between them. The file does not compile. Check it
-##! with `sisu check roster.sisu`, read the diagnostic, and fix the
-##! function so that `sisu test roster.sisu` passes every test. The
-##! hints are in chapter 5 of the tutorial, under "Exercise 5.2: the
-##! team roster".
+##! text with spaces between them. The file does not compile. Run
+##! `sisu test roster.sisu`, read the diagnostic, and fix the function
+##! so that every test passes. The hints are in chapter 5 of the
+##! tutorial, under "Exercise 5.2: the team roster".
 
 ## The three members in the order they joined, then sorted by name.
 def roster(first: str, second: str, third: str) -> String:
@@ -708,21 +755,20 @@ test "a team that joined in the order of their names":
     assert text == "Aino Eero Liisa / Aino Eero Liisa"
 ```
 
-Check it before you change anything:
-
 <!-- output: solutions/05-collections/roster.console -->
 ```console
-$ sisu check roster.sisu
-error[E0400]: `joined` was moved on line 14 and cannot be used afterwards
-  --> roster.sisu:16:14
+$ sisu test roster.sisu
+error[E0400]: `joined` was moved on line 13 and cannot be used afterwards
+  --> roster.sisu:15:14
    |
-16 |     return "{joined.join(" ")} / {by_name.join(" ")}"
+15 |     return "{joined.join(" ")} / {by_name.join(" ")}"
    |              ^^^^^^
    |
-14 |     var by_name = joined
+13 |     var by_name = joined
    |                   ------ `joined` is moved here
   = note: copy it with `.copy()` before the move, which makes a second value (for a list or a `String`, an allocation); move it later, after its last use, which costs nothing; or, where what it moves into only reads it, take it there without `own`, and the call lends it
 
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```
 
 <details>
@@ -777,6 +823,12 @@ test "no words":
 <!-- output: solutions/05-collections/word_frequencies.console -->
 ```console
 $ sisu test word_frequencies.sisu
+warning[W0001]: typed hole `word_frequencies` of type `dict[str, int]`
+  --> word_frequencies.sisu:10:12
+   |
+10 |     return todo("word_frequencies")
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("word_frequencies")`:
   words = ["kuu", "kissa", "kala"]
 in scope at the typed hole `todo("word_frequencies")`:
@@ -843,6 +895,12 @@ test "many repeats":
 <!-- output: solutions/05-collections/second_largest.console -->
 ```console
 $ sisu test second_largest.sisu
+warning[W0001]: typed hole `second_largest` of type `int`
+  --> second_largest.sisu:11:12
+   |
+11 |     return todo("second_largest")
+   |            ^^^^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("second_largest")`:
   values = [1, 2]
 in scope at the typed hole `todo("second_largest")`:
@@ -881,7 +939,7 @@ When every test passes, compare your answer with
 
 - A list keeps values of one type in order. `xs[0]` is the first item
   and `xs[^1]` the last; `xs[-1]` does not compile. `xs[i:j]` is a new
-  list of a run of items.
+  list of a run of items, and `xs[1:^1]` counts its end from the end.
 - A dict maps keys to values in the order they were added, and
   `entry(k).or_insert(0) += 1` counts. A set keeps each value once. A
   tuple groups a fixed number of values, read by position or unpacked.

@@ -1,4 +1,10 @@
 $ sisu test word_frequencies.sisu
+warning[W0001]: typed hole `word_frequencies` of type `dict[str, int]`
+  --> word_frequencies.sisu:10:12
+   |
+10 |     return todo("word_frequencies")
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("word_frequencies")`:
   words = ["kuu", "kissa", "kala"]
 in scope at the typed hole `todo("word_frequencies")`:

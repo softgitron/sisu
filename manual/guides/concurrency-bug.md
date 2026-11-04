@@ -64,6 +64,7 @@ info [task 2]: Eero finds 18:00 free
 test "an hour is booked once" ... ok
 1 passed, 0 failed, 0 blocked
 $ sisu test --explore 20 double.sisu
+info [task 1]: Aino finds 18:00 free
 info [task 2]: Eero finds 18:00 free
 test "an hour is booked once" ... FAILED
 
@@ -81,14 +82,14 @@ replay: sisu test --replay 1-3edcff83e8219252-0.0.1-t0-s2-r0 double.sisu
 explored 20 schedules per test (seeds 0 to 19)
 ```
 
-Under seed 2 both guests get the hour. The report names the seed. The
-`info` line at the top is the log of the first order run, seed 0's,
-and not of the order that failed.
+Under seed 2 both guests get the hour. The report names the seed, and
+the `info` lines at the top are the log of the order that failed: both
+guests found 18:00 free.
 
 ## 3. Run the failing order alone
 
-`--schedule-seed 2` runs that order and no other, so its log is the
-failing run's; the `replay:` command does the same:
+`--schedule-seed 2` runs that order and no other, as the `replay:`
+command does:
 
 <!-- output: examples/guide-concurrency-bug/order.console -->
 ```console

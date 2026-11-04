@@ -1,4 +1,10 @@
 $ sisu test collatz.sisu
+warning[W0001]: typed hole `collatz_steps` of type `int`
+  --> collatz.sisu:12:12
+   |
+12 |     return todo("collatz_steps")
+   |            ^^^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("collatz_steps")`:
   n = 1
 in scope at the typed hole `todo("collatz_steps")`:

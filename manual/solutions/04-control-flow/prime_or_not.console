@@ -5,3 +5,4 @@ error[E0127]: a loop has no `else` in Sisu; keep what the loop finds in a variab
 18 |     else:
    |     ^^^^
 
+error[D0006]: the program was not run: errors found (1)

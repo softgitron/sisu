@@ -119,7 +119,24 @@ True
 
 Compare what two owners hold through the values themselves, as the
 last line does: in stage 0, `==` between two `Shared` values gives
-`False`, even for two owners of one value.
+`False`, even for two owners of one value. Printing needs no such care:
+a `Shared` prints as the value it holds, with `{x}` and with `{x:?}`:
+
+<!-- file: examples/13-sharing/shown.sisu -->
+```sisu
+# A `Shared` prints as the value it holds.
+def main():
+    let region = Shared("north".to_string())
+    let copy = region.copy()
+    print("{region} and {copy}, {Shared.count(region)} owners")
+    print("{region:?}")
+```
+
+<!-- output: examples/13-sharing/shown.out -->
+```text
+north and north, 2 owners
+"north"
+```
 
 **Try it.** Add `web.config.retries = 5` before the first `print`, and
 run the program.
@@ -135,16 +152,16 @@ error[E0341]: cannot modify `web.config.retries`; it is not declared with `var`
    |
 14 |     web.config.retries = 5
    |     ^^^^^^^^^^^^^^^^^^
-  = note: borrow it with `ref mut` to change what the borrow refers to
+  = note: what a `Shared` holds is shared, so it is not changed in place: put the part that changes in a `Cell` or a `Mutex` inside it, and change it through that
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
 Nothing changes a value through a `Shared`, since every other owner
-would see the change without asking for it. E0341 speaks of `var` and
-of `ref mut`, but neither helps: declaring `web` with `var` gets the
-same error. A shared value that must change holds a `Cell`, which the
-next section shows.
+would see the change without asking for it. E0341's message speaks of
+`var`, which does not help: declaring `web` with `var` gets the same
+error. Its note says what does: a shared value that must change holds
+a `Cell` or a `Mutex`, which the next section and chapter 20 show.
 
 </details>
 
@@ -544,6 +561,42 @@ test "a shared cell":
 <!-- output: solutions/13-sharing/predict_owners.console -->
 ```console
 $ sisu test predict_owners.sisu
+warning[W0001]: typed hole `owners after two copies` of type `int`
+  --> predict_owners.sisu:44:21
+   |
+44 | const COPIES: int = todo("owners after two copies")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `owners after a loop` of type `int`
+  --> predict_owners.sisu:45:19
+   |
+45 | const LOOP: int = todo("owners after a loop")
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `owners with a list of copies` of type `int`
+  --> predict_owners.sisu:46:19
+   |
+46 | const LIST: int = todo("owners with a list of copies")
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `owners with a weak handle` of type `int`
+  --> predict_owners.sisu:47:19
+   |
+47 | const WEAK: int = todo("owners with a weak handle")
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `whether the dropped song is still there` of type `bool`
+  --> predict_owners.sisu:48:27
+   |
+48 | const STILL_THERE: bool = todo("whether the dropped song is still there")
+   |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `plays counted through two owners` of type `int`
+  --> predict_owners.sisu:49:20
+   |
+49 | const PLAYS: int = todo("plays counted through two owners")
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 test "copies" ... blocked by todo("owners after two copies")
 test "a loop" ... blocked by todo("owners after a loop")
 test "a list" ... blocked by todo("owners with a list of copies")
@@ -584,11 +637,10 @@ Open
 ##! Exercise 13.2, every draft. Kind: fix. Level: 2.
 ##!
 ##! A `Draft` must be saved or discarded, and `save_all` saves a list of
-##! them. The file does not compile. Check it with `sisu check
-##! drafts.sisu`, read the diagnostic, and fix `save_all`, not `Draft`
-##! or the tests, so that `sisu test drafts.sisu` passes every test. The
-##! hints are in chapter 13 of the tutorial, under "Exercise 13.2: every
-##! draft".
+##! them. The file does not compile. Run `sisu test drafts.sisu`, read
+##! the diagnostic, and fix `save_all`, not `Draft` or the tests, so that
+##! every test passes. The hints are in chapter 13 of the tutorial, under
+##! "Exercise 13.2: every draft".
 
 error SaveError:
     Empty(position: int)
@@ -629,21 +681,20 @@ test "an empty draft does not stop the others":
     assert saved == ["a", "c"]
 ```
 
-Check it before you change anything:
-
 <!-- output: solutions/13-sharing/drafts.console -->
 ```console
-$ sisu check drafts.sisu
+$ sisu test drafts.sisu
 error[E0418]: this leaves the scope with `drafts` unconsumed: a `list[Draft]` must be passed to an `own` parameter first
-  --> drafts.sisu:33:13
+  --> drafts.sisu:32:13
    |
-33 |             return Err(Empty(position))
+32 |             return Err(Empty(position))
    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
    |
-29 | def save_all(own drafts: list[Draft], mut saved: list[String]) -> ! SaveError:
+28 | def save_all(own drafts: list[Draft], mut saved: list[String]) -> ! SaveError:
    |              ----------------------- `drafts` is declared here
   = note: the loop that consumes `drafts` has not visited every element yet; finish the loop first, or return what is left
 
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```
 
 <details>
@@ -813,6 +864,36 @@ the tests call `add`, which is still a hole:
 <!-- output: solutions/13-sharing/dependencies.console -->
 ```console
 $ sisu test dependencies.sisu
+warning[W0001]: typed hole `dependents` of type `list[String]`
+  --> dependencies.sisu:47:16
+   |
+47 |         return todo("dependents")
+   |                ^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `key` of type `Key[Package]`
+  --> dependencies.sisu:56:16
+   |
+56 |         return todo("key")
+   |                ^^^^^^^^^^^
+
+warning[W0001]: typed hole `add` of type `()`
+  --> dependencies.sisu:61:9
+   |
+61 |         todo("add")
+   |         ^^^^^^^^^^^
+
+warning[W0001]: typed hole `install_order` of type `list[String] ! CycleError`
+  --> dependencies.sisu:66:16
+   |
+66 |         return todo("install_order")
+   |                ^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `to_shared` of type `dict[String, Shared[Item]] ! CycleError`
+  --> dependencies.sisu:70:16
+   |
+70 |         return todo("to_shared")
+   |                ^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("add")`:
   self = Graph(packages=Arena([]), keys={})
   name = "c"

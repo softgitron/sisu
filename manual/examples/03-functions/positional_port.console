@@ -4,5 +4,6 @@ error[E0305]: wrong number of arguments to `url`: expected 1, found 2
   |
 7 |     print(url("example.org", 443))
   |           ^^^^^^^^^^^^^^^^^^^^^^^
+  = note: `port` and the parameters after it are keyword-only: pass them by name, `port=...`
 
 error[D0006]: the program was not run: errors found (1)

@@ -1,0 +1,13 @@
+# An impl of a trait in another module, held to the trait's contract.
+from kiuas.meter import Meter
+
+struct Dial:
+    scale: int
+
+impl Meter for Dial:
+    def read(self, at: int) -> int:
+        return at * self.scale
+
+def main():
+    print(Dial(2).read(3))
+    print(Dial(2).read(-5))

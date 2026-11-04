@@ -1,4 +1,10 @@
 $ sisu test schedule_read.sisu
+warning[W0001]: typed hole `lay out the evening` of type `list[String]`
+  --> schedule_read.sisu:19:12
+   |
+19 |     return todo("lay out the evening")
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("lay out the evening")`:
   turns = [Turn(name="Aino", hour=18)]
 test "turns from text" ... ok

@@ -2,11 +2,10 @@
 ##!
 ##! `roster` shows a team's members in the order they joined and in
 ##! the order of their names. `join(" ")` puts a list's items into one
-##! text with spaces between them. The file does not compile. Check it
-##! with `sisu check roster.sisu`, read the diagnostic, and fix the
-##! function so that `sisu test roster.sisu` passes every test. The
-##! hints are in chapter 5 of the tutorial, under "Exercise 5.2: the
-##! team roster".
+##! text with spaces between them. The file does not compile. Run
+##! `sisu test roster.sisu`, read the diagnostic, and fix the function
+##! so that every test passes. The hints are in chapter 5 of the
+##! tutorial, under "Exercise 5.2: the team roster".
 
 ## The three members in the order they joined, then sorted by name.
 def roster(first: str, second: str, third: str) -> String:

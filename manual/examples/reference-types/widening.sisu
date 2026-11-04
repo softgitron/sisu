@@ -6,7 +6,7 @@ def main():
     let a: u8 = 200
     let b: i32 = 7
     let c: int = a
-    print("{a + b} {c} {total([a, b])}")
+    print("{a + b} {c} {total([a, b])} {b < a}")
     let half: f32 = 0.5
     let precise: f64 = half
     let huge: u64 = 18_000_000_000_000_000_000

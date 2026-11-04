@@ -67,13 +67,14 @@ error[E0016]: a character literal holds exactly one character
   |
 3 |     let name = 'Aino'
   |                ^^^^^^
+  = fix: text is written in double quotes: `"`, `"`
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
 Single quotes make a `char`, which is one character, so four characters
-between them are an error. The diagnostic has no fix line; the fix is
-double quotes.
+between them are an error. The fix line puts double quotes in their
+place.
 
 </details>
 
@@ -985,13 +986,13 @@ test "wrapping a byte":
     assert 200u8 +% 100 == WRAPPED
 ```
 
-Check the file and run the tests before you change anything. `sisu
-check` reports each hole with its type, which is the kind of value to
-write, and every test is blocked by its hole:
+Run the tests before you change anything. Each hole is reported with
+its type, which is the kind of value to write, and every test is
+blocked by its hole:
 
 <!-- output: solutions/02-values/predict_values.console -->
 ```console
-$ sisu check predict_values.sisu
+$ sisu test predict_values.sisu
 warning[W0001]: typed hole `(-17) // 5` of type `int`
   --> predict_values.sisu:11:23
    |
@@ -1034,7 +1035,6 @@ warning[W0001]: typed hole `200u8 +% 100` of type `u8`
 17 | const WRAPPED: u8 = todo("200u8 +% 100")
    |                     ^^^^^^^^^^^^^^^^^^^^
 
-$ sisu test predict_values.sisu
 test "floor division of a negative number" ... blocked by todo("(-17) // 5")
 test "the remainder of a negative number" ... blocked by todo("(-17) % 5")
 test "a power of a power" ... blocked by todo("2 ** 3 ** 2")
@@ -1126,8 +1126,7 @@ error[E0300]: expected `f64`, found `int`
    |
 18 |     return total / count
    |            ^^^^^^^^^^^^^
-  = note: `=` cannot mix `f64` and `int`; convert one of them explicitly
-  = fix: call `to_f64`, which gives the type expected: `(`, `).to_f64()`
+  = fix: make the `int` an `f64`: `(`, `).to_f64()`
 
 error[E0301]: `/` divides floats; for integers use `//`, or convert to `f64` first
   --> split_bill.sisu:18:12
@@ -1136,6 +1135,7 @@ error[E0301]: `/` divides floats; for integers use `//`, or convert to `f64` fir
    |            ^^^^^^^^^^^^^
   = fix: use `//` for integer division: `//`
 
+error[D0006]: the program was not run: errors found (3)
 ```
 
 `mean_rating` has two diagnostics on one line. Read both fixes before
@@ -1206,6 +1206,18 @@ test "the two scales meet":
 <!-- output: solutions/02-values/weather_report.console -->
 ```console
 $ sisu test weather_report.sisu
+warning[W0001]: typed hole `celsius in Fahrenheit` of type `f64`
+  --> weather_report.sisu:15:27
+   |
+15 |     let fahrenheit: f64 = todo("celsius in Fahrenheit")
+   |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `fahrenheit rounded, as an int` of type `int`
+  --> weather_report.sisu:16:22
+   |
+16 |     let whole: int = todo("fahrenheit rounded, as an int")
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("celsius in Fahrenheit")`:
   celsius = 21.5
 in scope at the typed hole `todo("celsius in Fahrenheit")`:

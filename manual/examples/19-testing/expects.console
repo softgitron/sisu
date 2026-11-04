@@ -1,0 +1,15 @@
+$ sisu test expects.sisu
+test "an average for each evening" ... FAILED
+
+test "an average for each evening" ... FAILED
+panic: assertion failed: average([70, 75]) == 73
+  left:  72
+  right: 73
+  at test "an average for each evening" (expects.sisu:12:5)
+panic: assertion failed: average([60, 61]) == 61
+  left:  60
+  right: 61
+  at test "an average for each evening" (expects.sisu:14:5)
+replay: sisu test --replay 1-27b42691e342aea0-0.0.1-t0-s0-r0 expects.sisu
+
+0 passed, 1 failed, 0 blocked

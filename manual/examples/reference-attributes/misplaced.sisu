@@ -1,0 +1,11 @@
+# Attributes that Sisu reads, each where it means nothing.
+@derive(Debug)
+def reading() -> int:
+    return 82
+
+@export("sauna_heat")
+struct Stove:
+    heat: int
+
+def main():
+    print(reading() + Stove(5).heat)

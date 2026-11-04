@@ -1,14 +1,15 @@
-$ sisu check leader.sisu
-error[E0405]: `names` is already borrowed on line 13, so it cannot be borrowed with `mut` until that borrow ends on line 15
-  --> leader.sisu:14:5
+$ sisu test leader.sisu
+error[E0405]: `names` is already borrowed on line 12, so it cannot be borrowed with `mut` until that borrow ends on line 14
+  --> leader.sisu:13:5
    |
-14 |     names.sort()
+13 |     names.sort()
    |     ^^^^^^^^^^^^
    |
-13 |     let first = ref names[0]
+12 |     let first = ref names[0]
    |                 ------------ borrowed here by `first`
    |
-15 |     return names[0] == first
+14 |     return names[0] == first
    |            ----------------- the borrow is still used here
-  = note: move this after line 15, where the borrow ends, or work on a copy made with `.copy()`
+  = note: move this after line 14, where the borrow ends, or work on a copy made with `.copy()`
 
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

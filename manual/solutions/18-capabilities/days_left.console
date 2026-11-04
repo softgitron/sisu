@@ -17,3 +17,4 @@ error[E0300]: expected `System`, found `TestClock`
 29 |     assert days_left(clock, at("2026-11-06T12:00:00Z")) == 0
    |                      ^^^^^
 
+error[D0006]: the program was not run: errors found (3)

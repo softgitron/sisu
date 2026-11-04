@@ -6,3 +6,4 @@ error[E0314]: this `match` does not cover `Triangle(_, _)`
    |            ^^^^^^^^^^^
   = note: add an arm for `Triangle(_, _)`, or a `case _` arm
 
+error[D0006]: the program was not run: errors found (1)

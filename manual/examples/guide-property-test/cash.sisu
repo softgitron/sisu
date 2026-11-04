@@ -1,0 +1,35 @@
+# Cash sums drawn their own way, in steps of five cents.
+
+## A sum paid in cash, in cents: Finnish shops round cash to 5 cents.
+@derive(Debug)
+struct Cash:
+    cents: int
+
+impl Arbitrary for Cash:
+    def arbitrary(d: Draws) -> Cash:
+        return Cash(Draws.gen_in(d, 0, 20_000) * 5)
+
+## A bill, and the cash that the customer hands over for it.
+@derive(Arbitrary, Debug)
+struct Payment:
+    due: Cash
+    given: Cash
+
+## `cents` rounded to the nearest five cents, a tie upwards.
+def to_cash(cents: int) -> int:
+    return (cents + 2) // 5 * 5
+
+## Two cases of any type that can be drawn.
+def two[T: Arbitrary]() -> Gen[(T, T)]:
+    return Gen.of(d -> (T.arbitrary(d), T.arbitrary(d)))
+
+test "the change needs no rounding":
+    check(arbitrary[Payment]) do p:
+        let change = p.given.cents - p.due.cents
+        return to_cash(change) == change
+
+test "two bills together need no rounding":
+    check(two[Payment]()) do pair:
+        let a, b = pair
+        let total = a.due.cents + b.due.cents
+        return to_cash(total) == total

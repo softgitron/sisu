@@ -1,4 +1,34 @@
 $ sisu test predict_methods.sisu
+warning[W0001]: typed hole `what a guest says` of type `str`
+  --> predict_methods.sisu:38:20
+   |
+38 | const GUEST: str = todo("what a guest says")
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `what a host says` of type `str`
+  --> predict_methods.sisu:39:19
+   |
+39 | const HOST: str = todo("what a host says")
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `a room written for users` of type `str`
+  --> predict_methods.sisu:40:20
+   |
+40 | const SHOWN: str = todo("a room written for users")
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `a room written for programmers` of type `str`
+  --> predict_methods.sisu:41:23
+   |
+41 | const DEBUGGED: str = todo("a room written for programmers")
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `a room padded on the left` of type `str`
+  --> predict_methods.sisu:42:21
+   |
+42 | const PADDED: str = todo("a room padded on the left")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 test "a guest" ... blocked by todo("what a guest says")
 test "a host" ... blocked by todo("what a host says")
 test "a room for users" ... blocked by todo("a room written for users")

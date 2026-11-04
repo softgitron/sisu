@@ -685,7 +685,10 @@ test "five degrees more" ... ok
 1 passed, 0 failed, 0 blocked
 ```
 
-The interpreter emulates a few C functions, `strlen`, `memcpy`,
+A package's tests of unsafe code run in the same way, with `sisu test`
+in its directory, as the wrapper package of
+[G19](../guides/c-library.md#4-test-it-and-run-it-in-the-interpreter-and-natively)
+shows. The interpreter emulates a few C functions, `strlen`, `memcpy`,
 `malloc`, `free`, `getenv` and `write`, so a test reaches those through
 `extern "C"` too; a test that calls another C function stops at the
 call with a panic, since only a native build makes it.
@@ -762,6 +765,36 @@ test "a short and a byte":
 <!-- output: solutions/27-systems/predict_layout.console -->
 ```console
 $ sisu test predict_layout.sisu
+warning[W0001]: typed hole `a u8, then an int` of type `int`
+  --> predict_layout.sisu:23:24
+   |
+23 | const BYTE_WORD: int = todo("a u8, then an int")
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `an int, then a u8` of type `int`
+  --> predict_layout.sisu:24:24
+   |
+24 | const WORD_BYTE: int = todo("an int, then a u8")
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `u8, u8, u16, u32` of type `int`
+  --> predict_layout.sisu:25:26
+   |
+25 | const SMALL_FIRST: int = todo("u8, u8, u16, u32")
+   |                          ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `u8, u32, u8` of type `int`
+  --> predict_layout.sisu:26:26
+   |
+26 | const BYTE_AROUND: int = todo("u8, u32, u8")
+   |                          ^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `i16, u8` of type `int`
+  --> predict_layout.sisu:27:25
+   |
+27 | const SHORT_BYTE: int = todo("i16, u8")
+   |                         ^^^^^^^^^^^^^^^
+
 test "a byte before a word" ... blocked by todo("a u8, then an int")
 test "a byte after a word" ... blocked by todo("an int, then a u8")
 test "the small fields first" ... blocked by todo("u8, u8, u16, u32")
@@ -927,6 +960,18 @@ test "a fade to silence":
 <!-- output: solutions/27-systems/mixer.console -->
 ```console
 $ sisu test mixer.sisu
+warning[W0001]: typed hole `mix` of type `()`
+  --> mixer.sisu:17:5
+   |
+17 |     todo("mix")
+   |     ^^^^^^^^^^^
+
+warning[W0001]: typed hole `fade` of type `()`
+  --> mixer.sisu:22:5
+   |
+22 |     todo("fade")
+   |     ^^^^^^^^^^^^
+
 in scope at the typed hole `todo("mix")`:
   gain = 0.5
 in scope at the typed hole `todo("mix")`:
@@ -955,8 +1000,8 @@ anything new.
 
 An `f32` is not `Ord`, so `min` and `max` do not take one: keep a sample
 in range with an `if` expression. For `fade`, make `N - i` and `N` into
-`f32`s with `to_f32()`; a constant parameter such as `N` needs a `let`
-before a method can be called on it.
+`f32`s with `to_f32()`, a method that a constant parameter has as any
+`int` does.
 
 </details>
 
@@ -1019,6 +1064,12 @@ test "a log cut short":
 <!-- output: solutions/27-systems/records.console -->
 ```console
 $ sisu test records.sisu
+warning[W0001]: typed hole `parse_log` of type `list[Reading] ! LogError`
+  --> records.sisu:25:12
+   |
+25 |     return todo("parse_log")
+   |            ^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("parse_log")`:
   data = b"-\x00\x00\x00\x1e\x03\x02\x00.\x00\x00\x00$\x03\x02\x01"
 in scope at the typed hole `todo("parse_log")`:

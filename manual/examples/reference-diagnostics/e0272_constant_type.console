@@ -1,0 +1,8 @@
+$ sisu run e0272_constant_type.sisu
+error[E0272]: the constant `MAX_HEAT` has the type `f64` here, and `Stove` declares it with the type `int`
+  --> e0272_constant_type.sisu:9:21
+  |
+9 |     const MAX_HEAT: f64 = 110.0
+  |                     ^^^
+
+error[D0006]: the program was not run: errors found (1)

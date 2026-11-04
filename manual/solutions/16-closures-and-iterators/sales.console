@@ -1,4 +1,22 @@
 $ sisu test sales.sisu
+warning[W0001]: typed hole `total_in` of type `int`
+  --> sales.sisu:17:12
+   |
+17 |     return todo("total_in")
+   |            ^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `dear` of type `list[String]`
+  --> sales.sisu:22:12
+   |
+22 |     return todo("dear")
+   |            ^^^^^^^^^^^^
+
+warning[W0001]: typed hole `best_seller` of type `String?`
+  --> sales.sisu:26:12
+   |
+26 |     return todo("best_seller")
+   |            ^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("total_in")`:
   sales = [Sale(product="pulla", town="Turku", cents=280), Sale(product="kakku", town="Tampere", cents=2400), Sale(product="leipä", town="Turku", cents=590), Sale(product="pulla", town="Tampere", cents=280), Sale(product="piirakka", town="Turku", cents=2400)]
   town = "Turku"

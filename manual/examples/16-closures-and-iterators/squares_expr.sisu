@@ -1,5 +1,13 @@
-# A generator expression, Python's lazy comprehension.
+# A generator expression: a comprehension in parentheses, and lazy.
+def fibonacci() -> Iter[int]:
+    var a = 0
+    var b = 1
+    while True:
+        yield a
+        a, b = b, a + b
+
 def main():
     let primes = [2, 3, 5, 7, 11]
-    let squares = (p * p for p in primes)
-    print(squares.collect())
+    print(sum((p * p for p in primes)))
+    let odd = (f for f in fibonacci() if f % 2 == 1)
+    print(odd.take(6).collect())

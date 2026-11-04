@@ -4,11 +4,12 @@ error[E0200]: cannot find `int` in this scope
   |
 3 |     let n = int("42")
   |             ^^^
-  = fix: a similar name is in scope: `uint`
+  = note: Sisu converts with methods: text is read with `s.parse_int()` or `s.parse_float()`, which give an option, a number is made text with `n.to_string()` or `"{n}"`, and one number made another with `x.to_int()` or `n.to_f64()`
 
 error[E0200]: cannot find `str` in this scope
   --> conversions.sisu:4:11
   |
 4 |     print(str(n))
   |           ^^^
+  = note: Sisu converts with methods: text is read with `s.parse_int()` or `s.parse_float()`, which give an option, a number is made text with `n.to_string()` or `"{n}"`, and one number made another with `x.to_int()` or `n.to_f64()`
 

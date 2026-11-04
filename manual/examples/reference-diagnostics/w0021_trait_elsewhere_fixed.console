@@ -1,7 +1,0 @@
-$ sisu run
-panic: precondition of `Meter.read` failed: at >= 0
-    at >= 0
-    │
-    -5
-  at kiuas.meter.Dial.kiuas.meter.Meter.read (src/meter.sisu:7:18)
-  at main (src/main.sisu:5:11)

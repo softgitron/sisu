@@ -1,0 +1,1 @@
+5:2-5:8 W0026 resolve.misplaced-attribute name="derive" places="a struct, an enum or an error set" what="a function"

@@ -1,4 +1,34 @@
 $ sisu test predict_par.sisu
+warning[W0001]: typed hole `par.chunks(6, 2)` of type `str`
+  --> predict_par.sisu:31:21
+   |
+31 | const CHUNKS: str = todo("par.chunks(6, 2)")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `par.chunks(4, 4)` of type `str`
+  --> predict_par.sisu:32:24
+   |
+32 | const ONE_CHUNK: str = todo("par.chunks(4, 4)")
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `reduce[Collect[int]]([5, 3, 8], grain=1)` of type `str`
+  --> predict_par.sisu:33:24
+   |
+33 | const COLLECTED: str = todo("reduce[Collect[int]]([5, 3, 8], grain=1)")
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `reduce[Sum[int]]([5, 3, 8], grain=2)` of type `str`
+  --> predict_par.sisu:34:21
+   |
+34 | const SUMMED: str = todo("reduce[Sum[int]]([5, 3, 8], grain=2)")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `check_all([10, 10, 90_000, 10])` of type `str`
+  --> predict_par.sisu:35:21
+   |
+35 | const FAILED: str = todo("check_all([10, 10, 90_000, 10])")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 test "chunks of two" ... blocked by todo("par.chunks(6, 2)")
 test "a chunk that holds them all" ... blocked by todo("par.chunks(4, 4)")
 test "collecting keeps the order" ... blocked by todo("reduce[Collect[int]]([5, 3, 8], grain=1)")

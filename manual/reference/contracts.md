@@ -592,13 +592,58 @@ panic: precondition of `Meter.read` failed: at >= 0
   at main (trait_contract.sisu:15:11)
 ```
 
-**Stage 0 differs.** Stage 0 checks a trait's contract only in the
-impls of the module that declares the trait, and warns at an impl in
-another module that it does not check it yet (W0021,
-[R17](diagnostics.md#w0021)). The verifier that would prove an impl's
-clauses against the trait's is after version 1.
+An impl in another module than the trait's, or in another package, is
+held to the contract all the same. The trait's clauses are checked with
+the names of the trait's module, so a clause may call a private helper
+of that module, and the check stands at the name of the impl's method,
+which the failure's place names:
 
-**Status.** In stage 0 (07), with the difference noted.
+<!-- file: examples/reference-contracts/trait_elsewhere.files/src/meter.sisu -->
+```sisu
+# A trait whose method has a contract.
+
+## Something that reads a heat at a moment of the evening.
+pub trait Meter:
+    ## The heat at minute `at`, which is not negative.
+    def read(self, at: int) -> int:
+        requires at >= 0
+```
+
+<!-- file: examples/reference-contracts/trait_elsewhere.files/src/main.sisu -->
+```sisu
+# An impl of a trait in another module, held to the trait's contract.
+from kiuas.meter import Meter
+
+struct Dial:
+    scale: int
+
+impl Meter for Dial:
+    def read(self, at: int) -> int:
+        return at * self.scale
+
+def main():
+    print(Dial(2).read(3))
+    print(Dial(2).read(-5))
+```
+
+<!-- output: examples/reference-contracts/trait_elsewhere.console -->
+```console
+$ sisu run
+6
+panic: precondition of `Meter.read` failed: at >= 0
+    at >= 0
+    │
+    -5
+  at Dial.kiuas.meter.Meter.read (src/main.sisu:8:9)
+  at main (src/main.sisu:13:11)
+```
+
+The verifier that would prove an impl's clauses against the trait's is
+after version 1, and W0021 ([R17](diagnostics.md#w0021)) is kept for an
+impl whose trait's module the check cannot read, which no module of a
+program is.
+
+**Status.** In stage 0 (07).
 
 ## What waits for the verifier
 

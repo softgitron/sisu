@@ -1,0 +1,6 @@
+# A `Shared` prints as the value it holds.
+def main():
+    let region = Shared("north".to_string())
+    let copy = region.copy()
+    print("{region} and {copy}, {Shared.count(region)} owners")
+    print("{region:?}")

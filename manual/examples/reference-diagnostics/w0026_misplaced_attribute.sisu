@@ -1,0 +1,10 @@
+# An attribute that Sisu reads, on a declaration where it means nothing.
+struct Reading:
+    celsius: int
+
+@derive(Eq)
+def latest() -> Reading:
+    return Reading(82)
+
+def main():
+    print(latest().celsius)

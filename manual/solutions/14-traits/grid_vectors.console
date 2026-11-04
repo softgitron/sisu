@@ -1,4 +1,28 @@
 $ sisu test grid_vectors.sisu
+warning[W0001]: typed hole `the sum` of type `Vector`
+  --> grid_vectors.sisu:17:16
+   |
+17 |         return todo("the sum")
+   |                ^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the difference` of type `Vector`
+  --> grid_vectors.sisu:21:16
+   |
+21 |         return todo("the difference")
+   |                ^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the opposite move` of type `Vector`
+  --> grid_vectors.sisu:25:16
+   |
+25 |         return todo("the opposite move")
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the move made `times` times` of type `Vector`
+  --> grid_vectors.sisu:29:16
+   |
+29 |         return todo("the move made `times` times")
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("the sum")`:
   self = Vector(x=1, y=2)
   other = Vector(x=3, y=-4)

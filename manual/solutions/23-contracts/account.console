@@ -1,4 +1,22 @@
 $ sisu test account.sisu
+warning[W0001]: typed hole `deposit` of type `()`
+  --> account.sisu:30:9
+   |
+30 |         todo("deposit")
+   |         ^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `withdraw` of type `! AccountError`
+  --> account.sisu:39:16
+   |
+39 |         return todo("withdraw")
+   |                ^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `transfer` of type `! AccountError`
+  --> account.sisu:52:12
+   |
+52 |     return todo("transfer")
+   |            ^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("deposit")`:
   self = Account(balance=1000, limit=500)
   cents = 250

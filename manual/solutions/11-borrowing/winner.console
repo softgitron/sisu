@@ -1,11 +1,12 @@
-$ sisu check winner.sisu
+$ sisu test winner.sisu
 error[E0408]: this returns a borrow of the parameter `b`, which is not in the `from` clause of `winner`
-  --> winner.sisu:16:9
+  --> winner.sisu:15:9
    |
-16 |         return ref b.name
+15 |         return ref b.name
    |         ^^^^^^^^^^^^^^^^^
    |
-14 | def winner(a: Player, b: Player) -> ref String from a:
+13 | def winner(a: Player, b: Player) -> ref String from a:
    |                       --------- `b` is declared here
   = fix: name `b` in the `from` clause
 
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

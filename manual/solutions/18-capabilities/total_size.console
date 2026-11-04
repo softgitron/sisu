@@ -1,4 +1,10 @@
 $ sisu test total_size.sisu
+warning[W0001]: typed hole `total_size` of type `int ! IoError`
+  --> total_size.sisu:13:12
+   |
+13 |     return todo("total_size")
+   |            ^^^^^^^^^^^^^^^^^^
+
 in scope at the typed hole `todo("total_size")`:
   dir = "photos"
 in scope at the typed hole `todo("total_size")`:

@@ -127,6 +127,11 @@ def main(sys: System):
     let who = cenv.lookup(sys.env, "USER") ?? "stranger"
     print("Hei, {who}!")
     print("the path: {cenv.lookup(sys.env, "PATH") ?? "not set"}")
+
+test "getenv reads the process's variables, whatever the Env":
+    let env = Env.fake(vars={"SAUNA": "Kotiharju"})
+    assert cenv.lookup(env, "SAUNA") == None
+    assert cenv.lookup(env, "PATH") != None
 ```
 
 Without `[trust]`, the build refuses the wrapper: E0703 at each unsafe
@@ -161,15 +166,21 @@ error[D0006]: the program was not run: errors found (3)
 The lockfile records the level too, so that an update of the wrapper
 that raises it is refused unless you accept it, as chapter 27 shows.
 
-## 4. Run it, in the interpreter and natively
+## 4. Test it, and run it in the interpreter and natively
 
 `sisu run --native` calls the C library itself. The interpreter cannot,
 and runs instead the six C functions it knows (`strlen`, `memcpy`,
 `malloc`, `free`, `getenv` and `write`) on its model of memory, where
-the obligations are checked as the program runs. Both print the same:
+the obligations are checked as the program runs. The test in `main.sisu`
+runs there too: it hands `lookup` a fake `Env`, which `getenv` does not
+read, so the process's own `PATH` is found and an unset name is not.
+The runs print the same:
 
 <!-- output: examples/guide-c-library/ffi.console -->
 ```console
+$ sisu test
+test "getenv reads the process's variables, whatever the Env" ... ok
+1 passed, 0 failed, 0 blocked
 $ sisu run
 Hei, stranger!
 the path: /usr/bin:/bin
@@ -180,18 +191,13 @@ the path: /usr/bin:/bin
 
 A C function that the interpreter does not know runs only natively,
 and so does a test that reaches one. `getenv` is one of the few that it
-emulates, so a test of `lookup` runs on the checked memory model, as a
+emulates, so the test of `lookup` runs on the checked memory model, as a
 run does. Keep the logic that needs no C outside the wrapper anyway,
 where every test reaches it, and keep the wrapper thin.
 
-**Status.** In stage 0 (22), except the tests of a package with unsafe
-code: `sisu test` writes the package's `sisu.lock` without its `unsafe`
-level and then stops at E1022, and the lockfile it leaves stops `sisu
-run` too until it is deleted, so test such code in a file of its own,
-as [chapter 27](../tutorial/27-systems.md#testing-unsafe-code) does.
-Importing a C header, `import c "stdlib.h"`, which would write the
-`extern` block, is designed (E0900), and so is `sisu audit --unsafe`
-(D0009). `CString.new(name).as_ptr()`, the shorter way to pass text to
-C, stops the interpreter with a panic that the pointer's value no
-longer exists and does not compile natively yet, so the wrapper builds
-the C string in raw memory.
+**Status.** In stage 0 (22). Importing a C header, `import c
+"stdlib.h"`, which would write the `extern` block, is designed (E0900),
+and so is `sisu audit --unsafe` (D0009). `CString.new(name).as_ptr()`,
+the shorter way to pass text to C, stops the interpreter with a panic
+that the pointer's value no longer exists and does not compile natively
+yet, so the wrapper builds the C string in raw memory.

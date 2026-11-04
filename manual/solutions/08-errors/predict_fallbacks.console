@@ -1,4 +1,40 @@
 $ sisu test predict_fallbacks.sisu
+warning[W0001]: typed hole `a number read from text, or 0` of type `int`
+  --> predict_fallbacks.sisu:22:21
+   |
+22 | const PARSED: int = todo("a number read from text, or 0")
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `a word read as a number, or 0` of type `int`
+  --> predict_fallbacks.sisu:23:25
+   |
+23 | const NOT_PARSED: int = todo("a word read as a number, or 0")
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `the item at index 5, or -1` of type `int`
+  --> predict_fallbacks.sisu:24:27
+   |
+24 | const PAST_THE_END: int = todo("the item at index 5, or -1")
+   |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `a quarter of 12, or 0` of type `int`
+  --> predict_fallbacks.sisu:25:22
+   |
+25 | const QUARTER: int = todo("a quarter of 12, or 0")
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `a quarter of 6, or 0` of type `int`
+  --> predict_fallbacks.sisu:26:25
+   |
+26 | const NO_QUARTER: int = todo("a quarter of 6, or 0")
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning[W0001]: typed hole `a result as text` of type `str`
+  --> predict_fallbacks.sisu:27:20
+   |
+27 | const SHOWN: str = todo("a result as text")
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^
+
 test "a number read from text" ... blocked by todo("a number read from text, or 0")
 test "a word read as a number" ... blocked by todo("a word read as a number, or 0")
 test "an index past the end" ... blocked by todo("the item at index 5, or -1")
