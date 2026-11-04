@@ -1123,4 +1123,12 @@ pub pure def intrinsic_names() -> list[str]:
         "expect.fail_parts",
         # `Fs.rename` (decision 420).
         "host.fs.rename",
+        # The test a native test executable runs (decision 460).
+        "test.entry",
+        # What std's `check` runs on (decision 461).
+        "test.catch",
+        "test.case_seed",
+        "test.replay_case",
+        "test.record_case",
+        "test.snapshot",
     ]

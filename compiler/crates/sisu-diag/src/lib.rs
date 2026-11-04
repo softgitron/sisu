@@ -9,6 +9,7 @@
 
 pub mod catalog;
 pub mod diagnostic;
+pub mod diff;
 pub mod msg;
 pub mod render;
 pub mod source;

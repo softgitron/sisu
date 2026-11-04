@@ -64,6 +64,14 @@ unsafe extern "C" {
         mode: *const i64,
     ) -> u8;
     fn sisu_rt_value_retain(ret: *mut u64, types: *const *const u64, p: *const *mut u8, t: *const i64) -> u8;
+    fn sisu_rt_time_text(
+        ret: *mut u64,
+        out: *const *mut u8,
+        nanos: *const i64,
+        pat: *const *const u8,
+        n: *const i64,
+    ) -> u8;
+    fn sisu_rt_quote(ret: *mut u64, out: *const *mut u8, b: *const *const u8, n: *const i64) -> u8;
     fn sisu_rt_find(
         ret: *mut i64,
         text: *const *const u8,
@@ -609,6 +617,45 @@ pub(crate) fn float_text(bits: u64, mode: i64, precision: usize) -> String {
     shown
 }
 
+/// The text of the time `nanos` by the `strftime` directives of `pattern`,
+/// or its RFC 3339 text without one (the runtime in Sisu's `time.sisu`,
+/// decision 469).
+pub(crate) fn time_text(nanos: i64, pattern: Option<&str>) -> String {
+    let mut text = mem::Text::empty();
+    let out = (&raw mut text).cast::<u8>();
+    let (pat, n) = match pattern {
+        Some(p) => (p.as_ptr(), p.len() as i64),
+        None => (std::ptr::null(), -1),
+    };
+    let mut ret = 0u64;
+    // SAFETY: as for [`equal`]; `out` holds a `String` and the pattern is
+    // live for the call.
+    if unsafe { sisu_rt_time_text(&mut ret, &out, &nanos, &pat, &n) } != abi::OK {
+        failed("time text");
+    }
+    // SAFETY: the export appended to the `String`, which nothing else holds.
+    let shown = String::from_utf8_lossy(unsafe { text.bytes() }).into_owned();
+    mem::release(text.ptr);
+    shown
+}
+
+/// `s` quoted as `Debug` writes a text (the runtime in Sisu's
+/// `show.quote_str`, decision 469).
+pub(crate) fn quote(s: &str) -> String {
+    let mut text = mem::Text::empty();
+    let out = (&raw mut text).cast::<u8>();
+    let (b, n) = (s.as_ptr(), s.len() as i64);
+    let mut ret = 0u64;
+    // SAFETY: as for [`time_text`].
+    if unsafe { sisu_rt_quote(&mut ret, &out, &b, &n) } != abi::OK {
+        failed("quoting a text");
+    }
+    // SAFETY: as for [`time_text`].
+    let shown = String::from_utf8_lossy(unsafe { text.bytes() }).into_owned();
+    mem::release(text.ptr);
+    shown
+}
+
 /// Where `part` first occurs in `text`, by Two-Way (the runtime in Sisu's
 /// `search.find`); an empty part occurs at 0.
 pub(crate) fn find(text: &[u8], part: &[u8]) -> Option<usize> {
@@ -794,18 +841,6 @@ unsafe extern "C" fn sisu_rt_show_arena(out: *mut u8, p: *mut u8) {
         crate::cells::debug_arena(&mut shown, p);
         mem::at::<mem::Text>(out).push(&shown);
     }
-}
-
-/// Appends to the `String` at `out` the RFC 3339 text of a time in
-/// nanoseconds since the epoch, as a `DateTime`'s `Debug` writes it.
-///
-/// # Safety
-/// `out` must hold a `String`.
-#[unsafe(no_mangle)]
-unsafe extern "C" fn sisu_rt_show_datetime(out: *mut u8, nanos: i64) {
-    let shown = crate::value::datetime_text(nanos);
-    // SAFETY: as the caller guarantees.
-    unsafe { mem::at::<mem::Text>(out).push(shown.as_bytes()) }
 }
 
 /// The error value at `p` is a copy: its return trace is held once more (a

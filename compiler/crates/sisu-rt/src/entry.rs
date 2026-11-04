@@ -15,6 +15,10 @@ pub(crate) const EXIT_ERROR: i32 = 1;
 pub(crate) const EXIT_PANIC: i32 = 101;
 pub(crate) const EXIT_ABORT: i32 = 134;
 
+/// The function the driver adds to run one test of a native test
+/// executable (decision 460).
+pub(crate) const TEST_DISPATCHER: &str = "tests#main";
+
 /// The host stack the program runs on: native frames are larger than the
 /// interpreter's, and 100 000 of them must fit (`abi::MAX_DEPTH`). It is
 /// the root task's stack, and the system stack runtime code runs on.
@@ -102,6 +106,9 @@ unsafe extern "C" fn sisu_rt_start(
             // SAFETY: `ret` has room for `main`'s result.
             crate::sched::neutral(|| unsafe { f(r) })
         };
+        // A native test (decision 460): how it ended goes to the file the
+        // driver names, apart from what the test wrote to standard error.
+        let test_report = std::env::var_os("SISU_TEST_REPORT");
         let code = if status != abi::OK {
             match rt::take_panic() {
                 Some(p) => {
@@ -112,7 +119,13 @@ unsafe extern "C" fn sisu_rt_start(
                         text.push_str(line);
                         text.push('\n');
                     }
-                    rt::stderr(&text);
+                    match &test_report {
+                        Some(_) if rt::hole().is_some() => {}
+                        Some(path) => {
+                            let _ = std::fs::write(path, format!("failed\n{text}"));
+                        }
+                        None => rt::stderr(&text),
+                    }
                 }
                 None => rt::internal("a panic left `main` without its message"),
             }
@@ -246,6 +259,11 @@ unsafe extern "C" fn sisu_rt_frame(
     let (name, file) = unsafe {
         (mem::Str { ptr: name, len: name_len }.bytes(), mem::Str { ptr: file, len: file_len }.bytes())
     };
+    // The dispatcher of a native test executable (decision 460) is no
+    // frame of the program's.
+    if name == TEST_DISPATCHER.as_bytes() {
+        return;
+    }
     let file = String::from_utf8_lossy(file);
     let location = if line == 0 { file.into_owned() } else { format!("{file}:{line}:{col}") };
     system(|| {

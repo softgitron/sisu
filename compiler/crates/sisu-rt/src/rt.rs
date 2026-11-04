@@ -394,6 +394,79 @@ pub(crate) fn add_frame(line: String) {
     });
 }
 
+/// The first hole the run reached (`todo(name)`, 17): under a native
+/// test (decision 460) it blocks the test, whichever task reached it.
+static HOLE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+pub(crate) fn note_hole(name: &str) {
+    let mut h = HOLE.lock().unwrap_or_else(|p| p.into_inner());
+    if h.is_none() {
+        *h = Some(name.to_string());
+        // At once: a run the hole leaves waiting may end in a deadlock's
+        // abort before its report.
+        if let Some(path) = std::env::var_os("SISU_TEST_REPORT") {
+            let _ = std::fs::write(path, format!("blocked\n{name}"));
+        }
+    }
+}
+
+pub(crate) fn hole() -> Option<String> {
+    HOLE.lock().unwrap_or_else(|p| p.into_inner()).clone()
+}
+
+/// The choices of the case a replay token names (`SISU_TEST_REPLAY_CASE`,
+/// dotted), which the first `check` runs first, as the interpreter's
+/// `test.replay_case` gives them once (decision 461).
+static REPLAY_TAKEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn take_replay_case() -> Option<Vec<i64>> {
+    if REPLAY_TAKEN.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return None;
+    }
+    let v = std::env::var("SISU_TEST_REPLAY_CASE").ok()?;
+    if v.is_empty() {
+        return Some(Vec::new());
+    }
+    v.split('.').map(|x| x.parse::<i64>().ok()).collect()
+}
+
+/// The snapshots this test took (decision 461).
+static SNAPSHOTS_TAKEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// `test.snapshot(text)` under a native test: the test's `k`-th snapshot
+/// against the one stored under its key (`SISU_TEST_SNAPSHOTS` names a
+/// file of keys and texts, each ended by a NUL), recorded beside the
+/// test's report for `--update` (`SISU_TEST_UPDATE`), as the
+/// interpreter's `test.snapshot` does. A panic's status when it fails.
+pub(crate) fn snapshot(text: String) -> Option<u8> {
+    let k = 1 + SNAPSHOTS_TAKEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let name = std::env::var("SISU_TEST_NAME").unwrap_or_default();
+    let key = if k <= 1 { name } else { format!("{name} #{k}") };
+    if let Some(report) = std::env::var_os("SISU_TEST_REPORT") {
+        let mut path = report;
+        path.push(".snap");
+        use std::io::Write as _;
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            let _ = write!(f, "{key}\0{text}\0");
+        }
+    }
+    if std::env::var_os("SISU_TEST_UPDATE").is_some() {
+        return None;
+    }
+    let stored = std::env::var_os("SISU_TEST_SNAPSHOTS").and_then(|p| std::fs::read_to_string(p).ok());
+    let stored = stored.unwrap_or_default();
+    let parts: Vec<&str> = stored.split('\0').collect();
+    let old = parts.chunks(2).find(|c| c.len() == 2 && c[0] == key).map(|c| c[1]);
+    match old {
+        Some(old) if old == text => None,
+        Some(old) => Some(raise_msg(
+            msg::TEST_SNAPSHOT_CHANGED,
+            &[("name", key), ("diff", sisu_diag::diff::lines(old, &text))],
+        )),
+        None => Some(raise_msg(msg::TEST_SNAPSHOT_MISSING, &[("name", key), ("value", text)])),
+    }
+}
+
 /// The newest panic, taken.
 pub(crate) fn take_panic() -> Option<Panic> {
     with_panics(|p| p.pop())

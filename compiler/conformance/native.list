@@ -3,9 +3,10 @@
 # (the x86-64 backend written in Sisu, decision 331), runs the executable,
 # and compares its standard output, standard error and exit status with the
 # expectations the interpreter meets (conformance/README.md, "The native
-# mode"), as `--native-cranelift` does with Cranelift's executables. One
-# case per line; the list grows as the backend does (`--native-survey`
-# names the cases outside it that would pass).
+# mode"), as `--native-cranelift` does with Cranelift's executables; a
+# case that pins `sisu test` has its tests run by `sisu test --native`
+# too (decision 460). One case per line; the list grows as the backend
+# does (`--native-survey` names the cases outside it that would pass).
 capabilities/attenuation
 capabilities/closure_drops
 capabilities/datetime
@@ -17,6 +18,7 @@ capabilities/network
 capabilities/object_drops
 capabilities/rename
 capabilities/revocable
+capabilities/test_fakes
 capabilities/wrap_trait
 comptime/baked
 comptime/cfg
@@ -47,11 +49,15 @@ concurrency/rwlock_writers
 concurrency/select
 concurrency/stack_overflow
 concurrency/sync_types
+concurrency/unbounded_channel
 contracts/checks
+contracts/explain
 contracts/invariants
+contracts/power_assert
 contracts/proposal_contracts
 contracts/refinements
 contracts/result_references
+examples/capabilities
 examples/concurrency
 examples/errors
 examples/hello
@@ -64,6 +70,7 @@ generics/function_values
 generics/functions
 generics/types
 generics/views_through_params
+http/server
 names/prelude_type_shadowed
 names/shadowing
 ownership/arena
@@ -104,6 +111,7 @@ ownership/shared_same
 ownership/str_views
 ownership/two_phase
 ownership/views
+packages/failing_test
 packages/features
 packages/modules
 packages/path_dependency
@@ -124,6 +132,7 @@ reflect/trait_methods
 replay/network
 replay/panic
 replay/stdin
+replay/tokens
 run/arithmetic
 run/assert_fail
 run/byte_find_two_way
@@ -134,6 +143,7 @@ run/collections
 run/constant_reads
 run/control_flow
 run/copy_tables
+run/counted_copies
 run/debug_forms
 run/declarations
 run/divide_by_zero
@@ -141,8 +151,8 @@ run/double_panic
 run/drop_chain
 run/drop_moved_parts
 run/drop_order
-run/drop_parts
 run/drop_panic_fields
+run/drop_parts
 run/drop_torture
 run/errors
 run/expect
@@ -169,20 +179,27 @@ run/proven_checks
 run/pure_functions
 run/recursion
 run/shared_display
+run/shared_equality
 run/sized_integers
 run/stack_overflow
+run/stopped_by_errors
 run/strings
 run/structs_enums
+run/testing
 run/text_bytes
 run/unicode_escapes
 run/unwind
 run/wide_overflow
+sim/crash
+sim/nodes
+sim/rename
 sir/closure
 sir/drop_flags
 sir/match_lowering
 sir/straight_line
 sir/try_operator
 std/decimal_literals
+std/doc_examples
 std/encoding
 std/fs
 std/hash
@@ -205,6 +222,19 @@ syntax/option_nested
 syntax/option_spaced
 syntax/option_sugar
 testing/doc_examples
+testing/explore_output
+testing/fakes
+testing/hole_in_task
+testing/named_capabilities
+testing/parallel
+testing/parametrised
+testing/proposal_testing
+testing/refines
+testing/refused_comptime
+testing/refused_program
+testing/shop
+testing/snapshots
+testing/unsafe_level
 traits/assoc_types
 traits/basics
 traits/contains
@@ -216,10 +246,12 @@ traits/own_eq_ord
 traits/static_methods
 traits/supertraits
 types/typed_hole
+unsafe/bit_cast_sizes
 unsafe/foreign
+unsafe/layouts
 unsafe/plain_casts
 unsafe/pointers
+unsafe/raw_buffer
+unsafe/read_plain_short
 unsafe/stale_pointer
 unsafe/vector
-unsafe/layouts
-unsafe/raw_buffer

@@ -7,18 +7,9 @@ ownership violation: a reference was used after its loan had ended
   value: `xs` = [1, 2]
   loans of `xs` not ended yet: 0 shared, 2 with `mut`
   at main (mut_and_shared_argument.sisu:10:5)
-SIR of `main`:
+SIR of `main`, its blocks that the conflict passes through:
 fn main(0) source 0 @8:5-8:9 {
-    let _0: ()
-    let _1: list[int] "xs" @9:9-9:11
-    let _2: ()
-    let _3: ref mut list[int]
-    let _4: ref list[int]
-    let _5: ()
-    let _6: ref list[int]
-  bb0:
-    _1 = list(const 1, const 2) @9:14-9:20
-    goto bb1
+  ...
   bb1 (unwind bb2):
     _3 = ref mut _1 @10:20-10:22
     _4 = ref _1 @10:24-10:26
@@ -27,12 +18,7 @@ fn main(0) source 0 @8:5-8:9 {
     _5 = call intrinsic print(copy _6) @11:5-11:14
     _0 = const ()
     goto bb3
-  bb2 (cleanup):
-    drop _1
-    resume
-  bb3:
-    drop _1 @11:14-11:14
-    return
+  ...
 }
 outcome: conflict reached; the run stopped at a concrete ownership conflict
 --- status 134

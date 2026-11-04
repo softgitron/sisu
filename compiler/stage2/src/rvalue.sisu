@@ -1105,8 +1105,12 @@ impl Cg:
                         let bytes = self.iconst(isize)
                         let cell = self.rt_status(abi.SYM_ALLOC, [bytes])?
                         if not ops.is_empty():
-                            let (v, _) = self.operand(p, ops[0])?
+                            let (v, vt) = self.operand(p, ops[0])?
                             self.write(cell, v, isize)
+                            # A copy's handles are counted, as a field's
+                            # are (decision 462).
+                            if let Operand.Copy(_) = ops[0]:
+                                self.count_at(cell, vt)?
                         self.store_word(cell, out, 0)
                         return Ok(Val.Mem(out))
                 for i in range(len(ops)):
@@ -1208,6 +1212,10 @@ impl Cg:
                         let bytes = self.iconst(csize)
                         let cell = self.rt_status(abi.SYM_ALLOC, [bytes])?
                         self.write(cell, v, csize)
+                        # A copy's handles are counted, as a field's are
+                        # (decision 462).
+                        if let Operand.Copy(_) = ops[0]:
+                            self.count_at(cell, carried)?
                         at = cell
                 if let Type.Dyn(_, _) = value_ty:
                     return unsupported("a `dyn` of a `dyn`")

@@ -2073,8 +2073,13 @@ impl<'a, 'p> Cx<'a, 'p> {
                     let bytes = self.iconst(i64::from(isize));
                     let cell = self.rt_status(sym::ALLOC, &[bytes])?;
                     if let Some(o) = ops.first() {
-                        let (v, _) = self.operand(o)?;
+                        let (v, vt) = self.operand(o)?;
                         self.write(cell, &v, isize);
+                        // A copy's handles are counted, as a field's are
+                        // (decision 462).
+                        if matches!(o, Operand::Copy(_)) {
+                            self.count_at(cell, &vt)?;
+                        }
                     }
                     self.store_word(cell, out, 0);
                     return Ok(Val::Mem(out));
@@ -2187,6 +2192,11 @@ impl<'a, 'p> Cx<'a, 'p> {
                         let bytes = self.iconst(i64::from(size));
                         let cell = self.rt_status(sym::ALLOC, &[bytes])?;
                         self.write(cell, &v, size);
+                        // A copy's handles are counted, as a field's are
+                        // (decision 462).
+                        if matches!(op, Operand::Copy(_)) {
+                            self.count_at(cell, &carried)?;
+                        }
                         (carried.clone(), cell)
                     }
                 };

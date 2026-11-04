@@ -6,12 +6,8 @@ ownership violation: a reference was used after its loan had ended
   used at: closure_escape.sisu:10:11 (`_3 = call copy _1(const 1)`)
   loans of `k` not ended yet: 0 shared, 0 with `mut`
   at main (closure_escape.sisu:10:11)
-SIR of `main`:
+SIR of `main`, its blocks that the conflict passes through:
 fn main(0) source 0 @8:5-8:9 {
-    let _0: ()
-    let _1: fn(int) -> int "f" @9:9-9:10
-    let _2: ()
-    let _3: int
   bb0:
     _1 = call fn make_adder(const 1) @9:13-9:26
     goto bb1
@@ -20,12 +16,7 @@ fn main(0) source 0 @8:5-8:9 {
     _2 = call intrinsic print(copy _3) @10:5-10:16
     _0 = const ()
     goto bb3
-  bb2 (cleanup):
-    drop _1
-    resume
-  bb3:
-    drop _1 @10:16-10:16
-    return
+  ...
 }
 outcome: conflict reached; the run stopped at a concrete ownership conflict
 --- status 134

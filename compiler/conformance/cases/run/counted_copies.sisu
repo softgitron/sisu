@@ -1,0 +1,27 @@
+# A copy of a value that holds counted handles (a `cap.Fake`'s logs, a
+# capability) put in a `Box`, or in a `dyn` through one, counts them, as
+# a copy put in a field does (decision 462): the copy and the original
+# share the logs, and dropping the copy leaves the original's.
+
+error MailError:
+    Refused(reason: String)
+
+trait Mailer:
+    def send(self, to: str, body: str) -> ! MailError
+
+def notify_all(own m: Box[dyn Mailer], people: list[str]) -> int:
+    var failed = 0
+    for p in people:
+        if m.send(p, "news").is_err():
+            failed += 1
+    return failed
+
+def keep(b: Box[cap.Fake[Mailer]]) -> int:
+    return len(b.calls())
+
+def main():
+    let fake = cap.Fake[Mailer].new()
+    fake.on_send(Ok(()))
+    print(notify_all(Box(fake), ["x", "y"]))
+    print(keep(Box(fake)))
+    print(fake.calls())

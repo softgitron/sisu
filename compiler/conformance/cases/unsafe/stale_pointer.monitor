@@ -6,14 +6,8 @@ ownership violation: a reference was used after its loan had ended
   value: `x` = 2
   loans of `x` not ended yet: 0 shared, 0 with `mut`
   at main (stale_pointer.sisu:14:12)
-SIR of `main`:
+SIR of `main`, its blocks that the conflict passes through:
 fn main(0) source 0 @8:5-8:9 {
-    let _0: ()
-    let _1: int "x" @9:9-9:10
-    let _2: ptr_mut[int] "p" @10:9-10:10
-    let _3: ref mut int
-    let _4: ()
-    let _5: ()
   bb0:
     _1 = const 1 @9:13-9:14
     _3 = ref mut _1 @10:28-10:29

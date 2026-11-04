@@ -142,7 +142,13 @@ fn tests_and_benches_run_from_sir() {
     );
     let (code, bench) = cli(&["bench", "--from-sir", &s, "--iterations", "3"]);
     assert_eq!(code, 0, "{}", bench.err);
-    assert!(bench.out.starts_with("bench \"doubling\" ... 3 iterations"), "{}", bench.out);
+    // The median of ten samples of three iterations each (decision 468).
+    assert!(
+        bench.out.starts_with("bench \"doubling\" ... ")
+            && bench.out.contains("the median of 10 samples of 3 iterations (95% interval of the mean"),
+        "{}",
+        bench.out
+    );
 }
 
 #[test]
@@ -473,4 +479,16 @@ fn the_features_switch_turns_features_on() {
     assert_eq!(code, 2);
     assert!(err.contains("error[D0112]"), "{err}");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A benchmark's samples (decision 468): the median, the samples far from
+/// it left out as outliers, and the 95% interval of the others' mean.
+#[test]
+fn benchmark_samples_give_a_median_an_interval_and_outliers() {
+    let s = crate::cli::sample_stats(&[10.0, 11.0, 9.0, 10.0, 10.5, 9.5, 100.0]);
+    assert_eq!(s.median, 10.0);
+    assert_eq!(s.outliers, 1);
+    assert!(s.low < 10.0 && s.high > 10.0 && s.high < 11.0, "{} {}", s.low, s.high);
+    let same = crate::cli::sample_stats(&[5.0, 5.0, 5.0]);
+    assert_eq!((same.median, same.low, same.high, same.outliers), (5.0, 5.0, 5.0, 0));
 }

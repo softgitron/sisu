@@ -7,35 +7,19 @@ ownership violation: a reference was used after its loan had ended
   value: `xs` = [3]
   loans of `xs` not ended yet: 0 shared, 2 with `mut`
   at main (closures_two_mut.sisu:8:5)
-SIR of `main`:
+SIR of `main`, its blocks that the conflict passes through:
 fn main(0) source 0 @4:5-4:9 {
-    let _0: ()
-    let _1: list[int] "xs" @5:9-5:11
-    let _2: pure fn() -> () "c1" @6:9-6:11
-    let _3: ref mut list[int]
-    let _4: pure fn() -> () "c2" @7:9-7:11
-    let _5: ref mut list[int]
-    let _6: ()
-    let _7: ()
-    let _8: ()
-    let _9: ref list[int]
-  bb0:
-    _1 = list(const 3) @5:14-5:17
-    goto bb1
+  ...
   bb1 (unwind bb2):
     _3 = ref mut _1 @6:14-6:30
     _2 = closure main#closure0(copy _3) @6:14-6:30
     goto bb3
-  bb2 (cleanup):
-    drop _1
-    resume
+  ...
   bb3 (unwind bb4):
     _5 = ref mut _1 @7:14-7:30
     _4 = closure main#closure1(copy _5) @7:14-7:30
     goto bb5
-  bb4 (cleanup):
-    drop _2
-    goto bb2
+  ...
   bb5 (unwind bb6):
     _6 = call copy _2() @8:5-8:9
     _7 = call copy _4() @9:5-9:9
@@ -43,18 +27,7 @@ fn main(0) source 0 @4:5-4:9 {
     _8 = call intrinsic print(copy _9) @10:5-10:14
     _0 = const ()
     goto bb7
-  bb6 (cleanup):
-    drop _4
-    goto bb4
-  bb7 (unwind bb4):
-    drop _4 @10:14-10:14
-    goto bb8
-  bb8 (unwind bb2):
-    drop _2 @10:14-10:14
-    goto bb9
-  bb9:
-    drop _1 @10:14-10:14
-    return
+  ...
 }
 outcome: conflict reached; the run stopped at a concrete ownership conflict
 --- status 134

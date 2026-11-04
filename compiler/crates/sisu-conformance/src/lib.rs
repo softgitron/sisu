@@ -210,6 +210,19 @@ pub fn invoke_with_env(sisu: &Sisu, cwd: &Path, args: &[String], vars: &[(&str, 
 
 /// [`invoke`], with `input` as the standard input (else none).
 pub fn invoke_with_input(sisu: &Sisu, cwd: &Path, args: &[String], input: Option<&str>) -> Output {
+    invoke_with_limit(sisu, cwd, args, input, TIMEOUT)
+}
+
+/// [`invoke_with_input`], killed past `limit` rather than [`TIMEOUT`]: a
+/// command that builds a program and runs each of its tests natively
+/// (decision 460).
+pub fn invoke_with_limit(
+    sisu: &Sisu,
+    cwd: &Path,
+    args: &[String],
+    input: Option<&str>,
+    limit: std::time::Duration,
+) -> Output {
     let spawned = sisu
         .command()
         .args(args)
@@ -218,7 +231,7 @@ pub fn invoke_with_input(sisu: &Sisu, cwd: &Path, args: &[String], input: Option
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn();
-    wait_output(spawned, input, &sisu.path)
+    wait_output_within(spawned, input, &sisu.path, limit)
 }
 
 /// Waits for a spawned command (killing it past [`TIMEOUT`]), feeding it
@@ -227,6 +240,16 @@ pub(crate) fn wait_output(
     spawned: std::io::Result<std::process::Child>,
     input: Option<&str>,
     program: &Path,
+) -> Output {
+    wait_output_within(spawned, input, program, TIMEOUT)
+}
+
+/// [`wait_output`], killing the command past `limit`.
+pub(crate) fn wait_output_within(
+    spawned: std::io::Result<std::process::Child>,
+    input: Option<&str>,
+    program: &Path,
+    limit: std::time::Duration,
 ) -> Output {
     let mut child = match spawned {
         Ok(c) => c,
@@ -254,7 +277,7 @@ pub(crate) fn wait_output(
     let status = loop {
         match child.try_wait() {
             Ok(Some(s)) => break s.code().unwrap_or(-1),
-            Ok(None) if start.elapsed() > TIMEOUT => {
+            Ok(None) if start.elapsed() > limit => {
                 let _ = child.kill();
                 let _ = child.wait();
                 break -2;
@@ -266,7 +289,7 @@ pub(crate) fn wait_output(
     let stdout = out.join().unwrap_or_default();
     let mut stderr = err.join().unwrap_or_default();
     if status == -2 {
-        stderr.push_str(&format!("(killed after {} seconds)\n", TIMEOUT.as_secs()));
+        stderr.push_str(&format!("(killed after {} seconds)\n", limit.as_secs()));
     }
     Output { stdout, stderr, status }
 }
@@ -353,7 +376,7 @@ struct Runner<'a> {
 /// the property's case number and shrink count left out (a replay starts
 /// from the shrunk case), and so is the line naming the schedule a search
 /// found it under (the token holds the schedule).
-fn failure_blocks(out: &str) -> Vec<(String, String)> {
+pub(crate) fn failure_blocks(out: &str) -> Vec<(String, String)> {
     let mut blocks = Vec::new();
     let mut current: Option<String> = None;
     for line in out.lines() {

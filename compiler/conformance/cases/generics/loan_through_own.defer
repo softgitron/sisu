@@ -7,30 +7,9 @@ ownership violation: a reference was used after its loan had ended
   value: `s` = "xy"
   loans of `s` not ended yet: 0 shared, 2 with `mut`
   at main (loan_through_own.sisu:17:11)
-SIR of `main`:
+SIR of `main`, its blocks that the conflict passes through:
 fn main(0) source 0 @12:5-12:9 {
-    let _0: ()
-    let _1: String "s" @13:9-13:10
-    let _2: Bag[ref String] "b" @14:9-14:10
-    let _3: list[ref String]
-    let _4: ()
-    let _5: ref mut Bag[ref String]
-    let _6: ref String
-    let _7: ()
-    let _8: ref mut String
-    let _9: ()
-    let _10: int
-    let _11: ref list[ref String]
-  bb0:
-    _1 = call intrinsic str.to_string(const "x") @13:13-13:28
-    goto bb1
-  bb1 (unwind bb2):
-    _3 = list() @14:40-14:42
-    _2 = struct Bag(move _3) @14:30-14:43
-    goto bb3
-  bb2 (cleanup):
-    drop _1
-    resume
+  ...
   bb3 (unwind bb4):
     _5 = ref mut _2 @15:5-15:6
     _6 = ref _1 @15:11-15:16
@@ -42,15 +21,7 @@ fn main(0) source 0 @12:5-12:9 {
     _9 = call intrinsic print(copy _10) @17:5-17:24
     _0 = const ()
     goto bb5
-  bb4 (cleanup):
-    drop _2
-    goto bb2
-  bb5 (unwind bb2):
-    drop _2 @17:24-17:24
-    goto bb6
-  bb6:
-    drop _1 @17:24-17:24
-    return
+  ...
 }
 outcome: conflict reached; the run stopped at a concrete ownership conflict
 --- status 134

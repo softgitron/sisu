@@ -1359,6 +1359,17 @@ intrinsics! {
     // `Fs.rename` (decision 420), after the others so that their numbers
     // stay what they were.
     HostFsRename = "host.fs.rename",
+    // The test a native test executable runs (decision 460): the driver's
+    // dispatcher, which no front end writes, switches on it.
+    TestEntry = "test.entry",
+    // What std's `check` runs on (17, "Property-based testing"), natively
+    // under `sisu test --native` (decision 461).
+    TestCatch = "test.catch",
+    TestCaseSeed = "test.case_seed",
+    TestReplayCase = "test.replay_case",
+    TestRecordCase = "test.record_case",
+    // `assert_snapshot` against the stored snapshots (decision 461).
+    TestSnapshot = "test.snapshot",
 }
 
 impl Intrinsic {

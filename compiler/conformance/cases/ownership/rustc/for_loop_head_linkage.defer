@@ -8,32 +8,14 @@ ownership violation: a reference was used after its loan had ended
   value: `vector` = [1, 2, 0]
   loans of `vector` not ended yet: 0 shared, 2 with `mut`
   at main (for_loop_head_linkage.sisu:6:5)
-SIR of `main`:
+SIR of `main`, its blocks that the conflict passes through:
 fn main(0) source 0 @4:5-4:9 {
-    let _0: ()
-    let _1: list[int] "vector" @5:9-5:15
-    let _2: Iter[ref int]
-    let _3: ref list[int]
-    let _4: ref mut Iter[ref int]
-    let _5: Option[ref int]
-    let _6: int
-    let _7: ref int "x" @6:9-6:10
-    let _8: ()
-    let _9: ()
-    let _10: ref mut list[int]
-  bb0:
-    _1 = list(const 1, const 2) @5:18-5:24
-    goto bb1
+  ...
   bb1 (unwind bb2):
     _3 = ref _1 @6:14-6:20
     _2 = call intrinsic iter.ref(copy _3) @6:5-6:20
     goto bb4
-  bb2 (cleanup):
-    drop _1
-    resume
-  bb3 (cleanup):
-    drop _2
-    goto bb2
+  ...
   bb4 (unwind bb3):
     _4 = ref mut _2 @6:5-6:20
     _5 = call intrinsic Iter.next(copy _4) @6:5-6:20
@@ -45,16 +27,7 @@ fn main(0) source 0 @4:5-4:9 {
     _10 = ref mut _1 @8:9-8:15
     _9 = call intrinsic list.push(copy _10, const 0) @8:9-8:23
     goto bb4
-  bb6 (unwind bb2):
-    drop _2 @8:23-8:23
-    goto bb7
-  bb7 (unwind bb2):
-    dead _2 @8:23-8:23
-    _0 = const ()
-    goto bb8
-  bb8:
-    drop _1 @8:23-8:23
-    return
+  ...
 }
 outcome: conflict reached; the run stopped at a concrete ownership conflict
 --- status 134

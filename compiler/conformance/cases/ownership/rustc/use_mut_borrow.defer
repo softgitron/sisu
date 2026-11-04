@@ -8,17 +8,9 @@ ownership violation: a reference was used after its loan had ended
   value: `x.a` = 1
   loans of `x.a` not ended yet: 1 shared, 0 with `mut`
   at main (use_mut_borrow.sisu:15:5)
-SIR of `main`:
+SIR of `main`, its blocks that the conflict passes through:
 fn main(0) source 0 @11:5-11:9 {
-    let _0: ()
-    let _1: A "x" @12:9-12:10
-    let _2: ref mut int "p" @13:9-13:10
-    let _3: ()
-    let _4: ref A
-    let _5: int
-  bb0:
-    _1 = struct A(const 1, const 2) @12:13-12:24
-    goto bb1
+  ...
   bb1 (unwind bb2):
     _2 = ref mut _1.0 @13:13-13:24
     _4 = ref _1 @14:10-14:11
@@ -27,12 +19,7 @@ fn main(0) source 0 @11:5-11:9 {
     _2.* = move _5 @15:5-15:11
     _0 = const ()
     goto bb3
-  bb2 (cleanup):
-    drop _1
-    resume
-  bb3:
-    drop _1 @15:11-15:11
-    return
+  ...
 }
 outcome: conflict reached; the run stopped at a concrete ownership conflict
 --- status 134

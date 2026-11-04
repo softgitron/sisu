@@ -6,17 +6,8 @@ ownership violation: `p.left` was used while it holds no value: it was moved out
   used at: partial_move_use.sisu:12:13 (`_5 = ref _1.*.0`)
   at show (partial_move_use.sisu:12:13)
   at main (partial_move_use.sisu:18:5)
-SIR of `show`:
+SIR of `show`, its blocks that the conflict passes through:
 fn show(1) source 0 @11:5-11:9 {
-    let _0: ()
-    let _1: ref Pair "p" @11:10-11:17
-    let _2: ()
-    let _3: String
-    let _4: ref mut String
-    let _5: ref String
-    let _6: ()
-    let _7: ref String
-    let _8: ref String
   bb0:
     _3 = call intrinsic fmt.new() @12:11-12:31
     _4 = ref mut _3 @12:11-12:31
@@ -26,20 +17,7 @@ fn show(1) source 0 @11:5-11:9 {
     _7 = ref _1.*.1 @12:22-12:29
     _6 = call intrinsic fmt.display(copy _4, copy _7, const "") @12:22-12:29
     goto bb1
-  bb1 (unwind bb2):
-    _8 = ref _3 @12:11-12:31
-    _2 = call intrinsic print(copy _8) @12:5-12:32
-    goto bb3
-  bb2 (cleanup):
-    drop _3
-    resume
-  bb3:
-    drop _3 @12:32-12:32
-    goto bb4
-  bb4:
-    dead _3 @12:32-12:32
-    _0 = const ()
-    return
+  ...
 }
 outcome: conflict reached; the run stopped at a concrete ownership conflict
 --- status 134

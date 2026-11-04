@@ -59,6 +59,7 @@ pub(crate) fn handles(i: Intrinsic) -> bool {
             | I::RwLockIsPoisoned
             | I::RwLockIntoInner
             | I::IterNext
+            | I::TestCatch
     )
 }
 
@@ -74,6 +75,7 @@ pub(crate) unsafe fn call(i: Intrinsic, c: &Call<'_>) -> u8 {
             I::TaskScope => scope(c, false),
             I::TaskRace => scope(c, true),
             I::TaskShield => shield(c),
+            I::TestCatch => catch(c),
             I::TaskYieldNow => {
                 sched::yield_now();
                 abi::OK
@@ -565,6 +567,39 @@ unsafe fn shield(c: &Call<'_>) -> u8 {
     });
     leave_anchor();
     status
+}
+
+/// `test.catch(f, x, steps)`, which only std's `check` calls (decision
+/// 461): `f(x)`, its result `Ok`, or `Err(Panicked(message))` when it
+/// panicked, the panic taken and its unwinding over; a typed hole is not
+/// caught, and native code counts no statements, so `steps` bounds
+/// nothing (`TooLong` is the interpreter's).
+unsafe fn catch(c: &Call<'_>) -> u8 {
+    // SAFETY: the arguments are the function, its argument and the budget;
+    // the result is a `Result` whose payload starts a word in.
+    unsafe {
+        let (code, env) = closure_here(c, 0);
+        let (x, _) = c.place(1);
+        let status = std::mem::transmute::<usize, Body1>(code)(c.ret.add(8), env as *mut u8, x);
+        if status == abi::OK {
+            mem::set_word(c.ret, 0, 0);
+            return abi::OK;
+        }
+        if rt::hole().is_some() {
+            return status;
+        }
+        let Some(p) = system(rt::take_panic) else { return status };
+        let Kind::Result(_, err) = ty(c.ret_ty).kind else { rt::internal("`test.catch` gives no result") };
+        let decl = match &ty(err).kind {
+            Kind::ErrSet(members) => {
+                members.iter().copied().find(|m| variant(*m, "Panicked").is_some()).unwrap_or(err)
+            }
+            _ => err,
+        };
+        mem::set_word(c.ret, 0, 1);
+        system(|| write_error(c.ret.add(8), decl, "Panicked", Some((&p.message, ""))));
+        abi::OK
+    }
 }
 
 /// `task.scope(body)` and `task.race(body)`: the body above the scope's

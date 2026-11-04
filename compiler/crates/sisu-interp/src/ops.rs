@@ -101,8 +101,19 @@ impl Interp<'_, '_> {
             }
             (Value::Cap(x), Value::Cap(y)) | (Value::Clock(x), Value::Clock(y)) => x == y,
             (Value::Fn(x), Value::Fn(y)) => x == y,
+            // Two `Shared` compare their values, as std's `Eq` impl does
+            // (decision 464); a cell that is gone only to itself.
+            (Value::Shared(x), Value::Shared(y)) => match (self.live_shared(*x), self.live_shared(*y)) {
+                (Some(a), Some(b)) => self.equal(a, b)?,
+                _ => x == y,
+            },
             _ => false,
         })
+    }
+
+    /// The value a `Shared` cell holds while it is live.
+    fn live_shared(&self, id: u32) -> Option<&Value> {
+        self.heap.get(id as usize).filter(|c| c.strong > 0).map(|c| &c.value)
     }
 
     fn all_equal(&self, xs: &[Value], ys: &[Value]) -> Result<bool, Unwind> {
@@ -187,6 +198,11 @@ impl Interp<'_, '_> {
                 a.fields.iter().map(|x| self.key_of(x)).collect::<Result<_, _>>()?,
             ),
             Value::Cap(_) | Value::Clock(_) => Key::Handle,
+            // A `Shared` is the key its value is (decision 464).
+            Value::Shared(id) => match self.live_shared(*id) {
+                Some(inner) => self.key_of(inner)?,
+                None => Key::Handle,
+            },
             other => return Err(ice(format!("{other:?} is not hashable"))),
         })
     }
@@ -214,6 +230,12 @@ impl Interp<'_, '_> {
         }
         match self.target(v)? {
             Value::Unit | Value::Cap(_) | Value::Clock(_) => {}
+            // A `Shared` hashes as its value (decision 464).
+            Value::Shared(id) => {
+                if let Some(inner) = self.live_shared(*id) {
+                    self.structural_hash(state, inner)?;
+                }
+            }
             Value::Int(i) | Value::DateTime(i) => mix(state, *i),
             Value::U64(i) => mix(state, *i as i64),
             Value::I128(i) => {

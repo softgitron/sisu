@@ -19,6 +19,7 @@ import rt.search
 import rt.show
 import rt.table
 import rt.text
+import rt.time
 import rt.value
 from rt.host import memcmp
 from rt.host import memmove
@@ -206,6 +207,29 @@ def export_int_digits(dst: ptr mut u8, low: int, high: int, base: int, upper: bo
 ## - `text`: `dst` has room for a `String`
 def export_float_digits(dst: ptr mut u8, bits: int, mode: int, precision: int):
     floats.write(dst, bits, mode, precision)
+
+## Appends to the `String` at `out` the time `nanos` by the `n` bytes of
+## `strftime` directives at `pat`, or, with `n` -1, its RFC 3339 text
+## (`time.sisu`, decision 469): `fmt.strftime` and a `DateTime`'s text.
+##
+## Requires:
+## - `text`: `out` holds a live `String`, and `pat` points to `n` live
+##   bytes
+def export_time_text(out: ptr mut u8, nanos: int, pat: ptr mut u8, n: int):
+    if n < 0:
+        time.rfc3339(out, nanos)
+    else:
+        time.strftime(out, nanos, pat, n)
+
+## Appends to the `String` at `out` the `n` bytes of UTF-8 at `b` quoted
+## as `Debug` writes a text (`show.quote_str`, decision 469): a hole's
+## name in its panic.
+##
+## Requires:
+## - `text`: `out` holds a live `String`, and `b` points to `n` live bytes
+##   of UTF-8
+def export_quote(out: ptr mut u8, b: ptr mut u8, n: int):
+    show.quote_str(out, b, n)
 
 ## The position of the first occurrence of the `m` bytes at `part` in the
 ## `n` bytes at `text`, or -1 (`search.find`): `in` on texts and

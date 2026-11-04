@@ -1,0 +1,136 @@
+##! The text of a time (decision 469): a `DateTime` in nanoseconds since
+##! the epoch, in UTC, as RFC 3339 writes it (its `Debug` and `Display`)
+##! and by the `strftime` directives `fmt.strftime` takes, as the
+##! interpreter writes them (`sisu-interp/src/format.rs`). Each function
+##! appends to the `String` at `out`.
+
+import rt.text
+from std.mem import ptr
+
+## The civil date of a day counted from 1970-01-01, by Howard Hinnant's
+## `civil_from_days`: the year, the month from 1 and the day from 1.
+pub(package) def civil(days: int) -> (int, int, int):
+    let z = days + 719468
+    let era = z // 146097
+    let doe = z % 146097
+    let yoe = (doe - doe // 1460 + doe // 36524 - doe // 146096) // 365
+    let doy = doe - (365 * yoe + yoe // 4 - yoe // 100)
+    let mp = (5 * doy + 2) // 153
+    let d = doy - (153 * mp + 2) // 5 + 1
+    let m = if mp < 10: mp + 3 else: mp - 9
+    let y = yoe + era * 400 + (if m <= 2: 1 else: 0)
+    return (y, m, d)
+
+## Appends `n`, at least `width` digits, zeros before it; a negative `n`
+## after its `-`.
+##
+## Requires:
+## - `text`: `out` holds a live `String`
+def put_padded(out: ptr mut u8, n: int, width: int):
+    var digits = 1
+    var x = if n < 0: -n else: n
+    while x >= 10:
+        x = x // 10
+        digits += 1
+    if n < 0:
+        text.put(out, 45)
+    # The width counts the sign, as Rust's `{:04}` does.
+    var k = digits + (if n < 0: 1 else: 0)
+    while k < width:
+        text.put(out, 48)
+        k += 1
+    text.push_int(out, if n < 0: -n else: n)
+
+## Appends the time `nanos` by the directives `%Y %y %m %d %H %M %S %F %T
+## %%` of the `n` bytes of UTF-8 at `pat`, in UTC; other characters are
+## copied, and a `%` before anything else stays as it is.
+##
+## Requires:
+## - `text`: `out` holds a live `String`, and `pat` points to `n` live
+##   bytes
+pub(package) def strftime(out: ptr mut u8, nanos: int, pat: ptr mut u8, n: int):
+    let secs = nanos // 1000000000
+    let days = secs // 86400
+    let rem = secs % 86400
+    let (y, m, d) = civil(days)
+    let (hh, mm, ss) = (rem // 3600, (rem // 60) % 60, rem % 60)
+    # safety: in_bounds, valid: the `n` bytes at `pat` are live, by `text`,
+    #   and a byte needs no alignment.
+    unsafe:
+        var i = 0
+        while i < n:
+            let c = pat.offset(i).read().to_int()
+            i += 1
+            if c != 37:
+                text.put(out, c)
+                continue
+            if i >= n:
+                text.put(out, 37)
+                continue
+            let k = pat.offset(i).read().to_int()
+            i += 1
+            if k == 89:
+                put_padded(out, y, 4)
+            elif k == 121:
+                put_padded(out, y % 100, 2)
+            elif k == 109:
+                put_padded(out, m, 2)
+            elif k == 100:
+                put_padded(out, d, 2)
+            elif k == 72:
+                put_padded(out, hh, 2)
+            elif k == 77:
+                put_padded(out, mm, 2)
+            elif k == 83:
+                put_padded(out, ss, 2)
+            elif k == 70:
+                put_padded(out, y, 4)
+                text.put(out, 45)
+                put_padded(out, m, 2)
+                text.put(out, 45)
+                put_padded(out, d, 2)
+            elif k == 84:
+                put_padded(out, hh, 2)
+                text.put(out, 58)
+                put_padded(out, mm, 2)
+                text.put(out, 58)
+                put_padded(out, ss, 2)
+            elif k == 37:
+                text.put(out, 37)
+            else:
+                # Another directive is copied, its character's other bytes
+                # of UTF-8 after it as they are.
+                text.put(out, 37)
+                text.put(out, k)
+
+## Appends the RFC 3339 text of the time `nanos`, in UTC, with the
+## fraction of a second when there is one, its zeros at the end left out:
+## `2024-05-01T12:00:00.5Z`.
+##
+## Requires:
+## - `text`: `out` holds a live `String`
+pub(package) def rfc3339(out: ptr mut u8, nanos: int):
+    let secs = nanos // 1000000000
+    let days = secs // 86400
+    let rem = secs % 86400
+    let (y, m, d) = civil(days)
+    put_padded(out, y, 4)
+    text.put(out, 45)
+    put_padded(out, m, 2)
+    text.put(out, 45)
+    put_padded(out, d, 2)
+    text.put(out, 84)
+    put_padded(out, rem // 3600, 2)
+    text.put(out, 58)
+    put_padded(out, (rem // 60) % 60, 2)
+    text.put(out, 58)
+    put_padded(out, rem % 60, 2)
+    var frac = nanos % 1000000000
+    if frac != 0:
+        var width = 9
+        while frac % 10 == 0:
+            frac = frac // 10
+            width -= 1
+        text.put(out, 46)
+        put_padded(out, frac, width)
+    text.put(out, 90)

@@ -7,25 +7,9 @@ ownership violation: a reference was used after its loan had ended
   value: `name` = "aino virtanen"
   loans of `name` not ended yet: 0 shared, 2 with `mut`
   at main (dict_key_view.sisu:9:5)
-SIR of `main`:
+SIR of `main`, its blocks that the conflict passes through:
 fn main(0) source 0 @4:5-4:9 {
-    let _0: ()
-    let _1: String "name" @5:9-5:13
-    let _2: dict[str, int] "ages" @6:9-6:13
-    let _3: str
-    let _4: ()
-    let _5: ref mut String
-    let _6: ()
-    let _7: ref dict[str, int]
-  bb0:
-    _1 = call intrinsic String.new(const "aino") @5:16-5:34
-    goto bb1
-  bb1 (unwind bb2):
-    _2 = dict() @6:32-6:34
-    goto bb3
-  bb2 (cleanup):
-    drop _1
-    resume
+  ...
   bb3 (unwind bb4):
     _3 = strview _1 @7:10-7:14
     _2{_3} = const 27 @7:5-7:20
@@ -35,15 +19,7 @@ fn main(0) source 0 @4:5-4:9 {
     _6 = call intrinsic print(copy _7) @9:5-9:16
     _0 = const ()
     goto bb5
-  bb4 (cleanup):
-    drop _2
-    goto bb2
-  bb5 (unwind bb2):
-    drop _2 @9:16-9:16
-    goto bb6
-  bb6:
-    drop _1 @9:16-9:16
-    return
+  ...
 }
 outcome: conflict reached; the run stopped at a concrete ownership conflict
 --- status 134

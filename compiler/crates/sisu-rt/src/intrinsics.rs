@@ -229,10 +229,11 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
             }
             I::Todo => {
                 let n = String::from_utf8_lossy(c.text(0)).into_owned();
+                rt::note_hole(&n);
                 let shown = if n.is_empty() {
                     "`todo()`".to_string()
                 } else {
-                    format!("`todo({})`", value::quote_str(&n))
+                    format!("`todo({})`", crate::bridge::quote(&n))
                 };
                 return rt::raise_msg(msg::PANIC_HOLE, &[("hole", shown)]);
             }
@@ -1040,6 +1041,44 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                     Ok(()) => mem::set_word(c.ret, 0, 0),
                     Err(e) => io_error(c, io_kind(&e), &path),
                 }
+            }
+            I::TestCaseSeed => {
+                let k = std::env::var("SISU_TEST_CASE_SEED").ok().and_then(|v| v.trim().parse::<u64>().ok());
+                c.set_word(k.unwrap_or(0));
+            }
+            I::TestReplayCase => match rt::take_replay_case() {
+                Some(choices) => {
+                    let mut l = List::empty();
+                    l.reserve(choices.len() as u64, 8);
+                    for (k, v) in choices.iter().enumerate() {
+                        mem::set_word(l.at(k as u64, 8), 0, *v as u64);
+                    }
+                    l.len = choices.len() as u64;
+                    mem::set_word(c.ret, 0, 0);
+                    (c.ret.add(8) as *mut List).write(l);
+                }
+                None => c.none(),
+            },
+            I::TestRecordCase => {
+                let (p, _) = c.place(0);
+                let l = (p as *const List).read();
+                let shown: Vec<String> =
+                    (0..l.len).map(|k| (mem::word(l.at(k, 8), 0) as i64).to_string()).collect();
+                if let Some(path) = std::env::var_os("SISU_TEST_REPORT") {
+                    let mut path = std::path::PathBuf::from(path).into_os_string();
+                    path.push(".case");
+                    let _ = std::fs::write(path, shown.join("."));
+                }
+            }
+            I::TestSnapshot => {
+                let text = String::from_utf8_lossy(c.text(0)).into_owned();
+                if let Some(s) = rt::snapshot(text) {
+                    return s;
+                }
+            }
+            I::TestEntry => {
+                let k = std::env::var("SISU_TEST_ENTRY").ok().and_then(|v| v.trim().parse::<i64>().ok());
+                c.set_word(k.unwrap_or(0) as u64);
             }
             I::HostFsRename => {
                 // A failure names the source when it is not there, else the

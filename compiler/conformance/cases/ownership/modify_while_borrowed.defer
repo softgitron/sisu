@@ -7,12 +7,8 @@ ownership violation: a reference was used after its loan had ended
   value: `n` = 2
   loans of `n` not ended yet: 0 shared, 0 with `mut`
   at main (modify_while_borrowed.sisu:7:5)
-SIR of `main`:
+SIR of `main`, its blocks that the conflict passes through:
 fn main(0) source 0 @3:5-3:9 {
-    let _0: ()
-    let _1: int "n" @4:9-4:10
-    let _2: ref int "r" @5:9-5:10
-    let _3: ()
   bb0:
     _1 = const 1 @4:13-4:14
     _2 = ref _1 @5:13-5:18

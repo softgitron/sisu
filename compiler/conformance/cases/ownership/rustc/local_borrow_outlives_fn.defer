@@ -6,11 +6,8 @@ ownership violation: a reference was used after its loan had ended
   used at: local_borrow_outlives_fn.sisu:9:5 (`_1 = call intrinsic print(copy _2)`)
   loans of `y` not ended yet: 0 shared, 0 with `mut`
   at main (local_borrow_outlives_fn.sisu:9:5)
-SIR of `main`:
+SIR of `main`, its blocks that the conflict passes through:
 fn main(0) source 0 @8:5-8:9 {
-    let _0: ()
-    let _1: ()
-    let _2: ref int
   bb0:
     _2 = call fn keep(const 3) @9:11-9:18
     _1 = call intrinsic print(copy _2) @9:5-9:19

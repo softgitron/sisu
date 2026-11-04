@@ -6,26 +6,13 @@ ownership violation: a reference was used after its loan had ended
   used at: guard_escape.sisu:9:5 (`_1 = call intrinsic print(copy _2.*)`)
   loans of `m` not ended yet: 0 shared, 0 with `mut`
   at main (guard_escape.sisu:9:5)
-SIR of `main`:
+SIR of `main`, its blocks that the conflict passes through:
 fn main(0) source 0 @8:5-8:9 {
-    let _0: ()
-    let _1: ()
-    let _2: MutexGuard[int]
-  bb0:
-    _2 = call fn locked() @9:11-9:19
-    goto bb1
+  ...
   bb1 (unwind bb2):
     _1 = call intrinsic print(copy _2.*) @9:5-9:26
     goto bb3
-  bb2 (cleanup):
-    drop _2
-    resume
-  bb3:
-    drop _2 @9:26-9:26
-    goto bb4
-  bb4:
-    _0 = const ()
-    return
+  ...
 }
 outcome: conflict reached; the run stopped at a concrete ownership conflict
 --- status 134

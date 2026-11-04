@@ -8,63 +8,9 @@ ownership violation: a reference was used after its loan had ended
   value: `s` = "item 1"
   loans of `s` not ended yet: 0 shared, 0 with `mut`
   at main (dangling_loop.sisu:9:9)
-SIR of `main`:
+SIR of `main`, its blocks that the conflict passes through:
 fn main(0) source 0 @4:5-4:9 {
-    let _0: ()
-    let _1: String "start" @5:9-5:14
-    let _2: ref String "last" @6:9-6:13
-    let _3: Iter[int]
-    let _4: int
-    let _5: ref mut Iter[int]
-    let _6: Option[int]
-    let _7: int
-    let _8: int "i" @7:9-7:10
-    let _9: String "s" @8:13-8:14
-    let _10: str
-    let _11: String
-    let _12: ref mut String
-    let _13: ()
-    let _14: ()
-    let _15: ref String
-  bb0:
-    _1 = call intrinsic str.to_string(const "start") @5:17-5:36
-    goto bb1
-  bb1 (unwind bb2):
-    _2 = ref _1 @6:28-6:37
-    _4 = call fn range#step() @7:14-7:22
-    _3 = call intrinsic range(const 0, const 3, copy _4) @7:14-7:22
-    goto bb4
-  bb2 (cleanup):
-    drop _1
-    resume
-  bb3 (cleanup):
-    drop _3
-    goto bb2
-  bb4 (unwind bb3):
-    _5 = ref mut _3 @7:5-7:22
-    _6 = call intrinsic Iter.next(copy _5) @7:5-7:22
-    _7 = discriminant _6 @7:5-7:22
-    switch copy _7 [0: bb5, else: bb13] @7:5-7:22
-  bb5 (unwind bb3):
-    _8 = copy _6.as(0).0 @7:9-7:10
-    _11 = call intrinsic fmt.new() @8:17-8:27
-    _12 = ref mut _11 @8:17-8:27
-    _13 = call intrinsic fmt.text(copy _12, const "item ") @8:17-8:27
-    _13 = call intrinsic fmt.display(copy _12, copy _8, const "") @8:24-8:25
-    goto bb6
-  bb6 (unwind bb7):
-    _10 = strview _11 @8:17-8:27
-    _9 = call intrinsic str.to_string(copy _10) @8:17-8:39
-    goto bb9
-  bb7 (cleanup):
-    drop _11
-    goto bb3
-  bb8 (cleanup):
-    drop _9
-    goto bb3
-  bb9 (unwind bb8):
-    drop _11 @8:39-8:39
-    goto bb10
+  ...
   bb10 (unwind bb8):
     dead _11 @8:39-8:39
     _14 = call intrinsic print(copy _2) @9:9-9:20
@@ -74,19 +20,7 @@ fn main(0) source 0 @4:5-4:9 {
   bb11 (unwind bb3):
     drop _9 @10:21-10:21
     goto bb12
-  bb12 (unwind bb3):
-    dead _9 @10:21-10:21
-    goto bb4
-  bb13 (unwind bb2):
-    drop _3 @10:21-10:21
-    goto bb14
-  bb14 (unwind bb2):
-    dead _3 @10:21-10:21
-    _0 = const ()
-    goto bb15
-  bb15:
-    drop _1 @10:21-10:21
-    return
+  ...
 }
 outcome: conflict reached; the run stopped at a concrete ownership conflict
 --- status 134

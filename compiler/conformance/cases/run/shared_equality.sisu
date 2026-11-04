@@ -1,0 +1,19 @@
+# Two `Shared` are equal when their values are, as std's `Eq` impl says,
+# and a `Shared` hashes as its value, so it is a dict's key or a set's
+# element by what it holds (decision 464): `==` and the tables follow a
+# live `Shared` to its value, in the interpreter and natively.
+
+def main():
+    let a = Shared("Aino".to_string())
+    let b = Shared("Aino".to_string())
+    let c = Shared("Eino".to_string())
+    print(a == b)
+    print(a == c)
+    print(a == a)
+    print(a != c)
+    let s = {a.copy(), b.copy(), c.copy()}
+    print(len(s))
+    let d = {a.copy(): 1}
+    print(d.get(b) == Some(ref 1))
+    print([a.copy(), c.copy()] == [b.copy(), c.copy()])
+    print((a, 1) == (b, 1))

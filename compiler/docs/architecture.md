@@ -2535,10 +2535,12 @@ blocked by a typed hole (decisions 340 and 380).
   program while the tests run on stage 1's, decision 380). A difference
   fails with a diff (`D0061`); `--update` rewrites the file.
 - **Benchmarks**: `bench "name"(b: Bench):` is checked like a test and
-  run by `sisu bench FILE [--iterations N]`, which reports the time of an
-  iteration of `b.loop()` (the interpreter's: compare benchmarks with
-  each other); `black_box(x)` consumes a value the optimiser must not see
-  through.
+  run by `sisu bench FILE [--iterations N] [--samples K]`, which times
+  `K` runs of `b.loop()` (10) after one it does not time and reports the
+  median time of an iteration, with the 95% interval of the mean of the
+  samples that are not outliers (decision 468; the interpreter's times:
+  compare benchmarks with each other); `black_box(x)` consumes a value
+  the optimiser must not see through.
 - **Fakes and interceptors** of the program's traits: `cap.Fake[Trait]`
   and `cap.Wrap`, above ("The interceptors and fakes of a program's
   traits").
@@ -3116,8 +3118,10 @@ sisu test [FILE]             run the tests (and `tests/*.transcript`) under the 
                              FAILED, or blocked by a hole; `--no-monitor`, `--defer-borrow`,
                              `--no-cache`, `--jobs N`, `--filter TEXT`, `--tag T`, `--skip-tag T`,
                              `--update` (snapshots and transcripts), `--replay TOKEN`,
-                             `--sim [--faults P]`, `--std` (the standard library's doc examples)
-sisu bench [FILE]            run the benchmarks; `--iterations N`
+                             `--sim [--faults P]`, `--std` (the standard library's doc examples),
+                             `--native [--release]` (compiled, decision 460); a test's output
+                             is shown with its failure (decision 466)
+sisu bench [FILE]            run the benchmarks; `--iterations N`, `--samples K`
                              (`run` and `test` also take `--schedule-seed N`, `--explore N`,
                              `--scheduler random|pct|exhaustive` and `--depth N`; `run`,
                              `check`, `build`, `doc`, `test` and `bench` take `--locked`)
@@ -8541,3 +8545,161 @@ and 9, and G32)
      package's capabilities could not be audited; a file it names is still
      a program of its own (`the_capability_audit_reads_a_package`). This
      changes no rule of the language.
+
+**Stage 2: a program's tests run natively** (sections "Testing" and
+"Stage 2"; 17; D-089, port-debt.md's plan for a native `sisu run`)
+
+460. `sisu test --native [--release]` compiles a program's tests, the SIR
+     stage 1's `sir --tests` prints, into one executable and runs each test
+     natively as the interpreter runs it (`sisu-driver/src/native_tests.rs`).
+     The driver adds a dispatcher, `tests#main`, as the program's entry: it
+     switches on the intrinsic `test.entry` (the runtime's
+     `SISU_TEST_ENTRY`) and makes what the test takes as the interpreter's
+     `run_test` makes it, the real `System`, `System.sim(seed)` under
+     `--sim`, or fresh fakes of the capabilities it names (`System.fake`'s
+     fields moved out and the rest dropped, `Net.fake()`, `Clock.fake()` for
+     a `TestClock`, decision 241), then calls it; the runtime leaves the
+     dispatcher's frame out of a trace. Each test is a process of its own,
+     those that take no real `System` in parallel (`--jobs`), the others
+     after them one at a time with the terminal's standard input, as
+     `parallel.rs` runs them; how it ended goes to the file
+     `SISU_TEST_REPORT` names, apart from what it printed: a panic's report,
+     or the first hole any task reached (written when it is reached, since
+     a run the hole leaves waiting may end in a deadlock's abort), which
+     blocks the test whatever else it did. The report, replay tokens,
+     `--explore N` (each seed a run of the executable), `--replay` and the
+     summary are the interpreter's code, which takes the results; the test
+     cache is not used. What it refuses with `D0132` is the interpreter's
+     alone: `--scheduler pct` and `exhaustive`, `--faults` (the
+     interpreter injects them), and a test parameter no fake stands for;
+     `expect` is `assert`'s panic natively (decision 388), and `sim.always`
+     and `sim.choose` are not compiled yet (`D0103`). The conformance
+     runner's native modes run, for a case of `native.list` that pins `sisu
+     test` (`.test`, and the runs `# sim`, `# schedule`, `# select` and `#
+     explore N` with `.explore` ask for), `sisu test --native` with the
+     mode's flags (`--release`, a test checking every contract, `--backend=cranelift`, and
+     `--lower=rust --backend=cranelift` under `--native-from-lir`; the
+     tests are built from SIR whatever the mode, and
+     `--interpreted-from-sir` runs them in the interpreter), compare its
+     report with the expectation, hold it to the status its report gives,
+     and replay each failure natively from its token; `--native-survey`
+     tries the cases with such a run too. `native.list` grows from 217
+     cases to 248: 25 by their tests (`testing/`, `contracts/`, `sim/crash`,
+     `nodes` and `rename`, `replay/tokens`, `http/server`, a package's
+     failing test, `std/doc_examples`), 24 of them with nothing else to
+     run, and 6 by their runs (`run/stopped_by_errors`, decision 463, two
+     `unsafe/` cases whose runs the checked model does not stop, and the
+     cases of decisions 462, 464 and 465); the 15 cases already in it that
+     pin `sisu test` run their tests natively as well, 40 in all. Of the
+     suite's 270 runnable cases 22 are left out: 15 `unsafe/` cases whose
+     expectation is the checked memory model's report, and 7 that wait for
+     the interpreter's test modes (port-debt.md, D-089). This changes no
+     rule of the language.
+461. A property test, a snapshot and a contract's generated test run
+     natively: std's `check` calls `test.catch(f, x, steps)`, which the
+     runtime runs as `f(x)` on the task's stack and gives `Ok`, or
+     `Err(Panicked(message))` once a panic has unwound it (its frames'
+     drops run, the panic taken), a typed hole going on unwinding; native
+     code counts no statements, so `steps` bounds nothing and `TooLong` is
+     the interpreter's (`contracts/properties`'s test of a case past its
+     budget passes natively, and the case stays out of the list).
+     `test.case_seed` and `test.replay_case` read what the driver gives the
+     test (`SISU_TEST_CASE_SEED`; `SISU_TEST_REPLAY_CASE`, the token's
+     choices, given once as the interpreter gives them), `test.record_case`
+     writes the failing case's choices beside the report for the token,
+     and `test.snapshot` compares the test's `k`-th snapshot with the one
+     stored under its key (the driver writes the test's snapshots to a file
+     `SISU_TEST_SNAPSHOTS` names, `SISU_TEST_NAME` naming the test) and
+     records what it took, so `--update` stores them as the interpreter's
+     run does; the line diff of a changed snapshot moves from the
+     interpreter to `sisu_diag::diff`, which both use. The five intrinsics
+     are appended to `sisu_rt::abi`'s and stage 2's tables, after
+     `test.entry`, so the others keep their numbers. This changes no rule
+     of the language.
+462. A copy of a value that holds counted handles, put in a `Box` or in a
+     `dyn`'s cell, counts them natively, as a copy put in a field or an
+     element does (decision 237): both lowerings retain the cell's value
+     after writing it when the operand is a copy, where they wrote the
+     words alone, so the copy's drop and the original's released the
+     handles' cells twice (`notify_all(Box(fake), ...)` with a
+     `cap.Fake[Mailer]` freed its logs' mutex while the fake still held
+     it, and the next lock deadlocked or corrupted the heap; the
+     interpreter copies values, so it never showed). `run/counted_copies`
+     holds it, and `testing/fakes`'s third test, which found it. This
+     changes no rule of the language.
+463. The native modes take a case whose program its errors stop
+     (`run/stopped_by_errors`, decision 427) as `sisu run --native` runs
+     it: the build, or `sisu sir` in the modes that build from SIR, fails
+     and prints the errors and `D0006` its `.err` holds, with the status
+     its `.status` gives, and nothing is run. This changes no rule of the
+     language.
+
+**`Shared` equality** (section "Running"; 02, 11; decision 384)
+
+464. Two `Shared` values compare their values, as std's `impl[T: Eq] Eq for
+     Shared[T]` says, and a `Shared` hashes as its value, where `a == b`
+     lowered to the structural `eq` compared nothing the interpreter had a
+     rule for (always false) and natively fell through to false as well:
+     the interpreter's `equal`, `key_of` and structural hash, and the
+     runtime in Sisu's `value.equal` and `value.hash`, follow a live
+     `Shared` to its value, as decision 384 does for `Display`; a cell
+     that is gone is equal only to itself and hashes as nothing. std gains
+     `impl[T: Hash] Hash for Shared[T]`, so a `Shared` is a dict's key or a
+     set's element by what it holds (`run/shared_equality`, in
+     `native.list`). This changes no rule of the language: it implements
+     std's impls.
+
+**What the manual found: channels, tests, benchmarks and the
+counterexample mode** (sections "Concurrency", "Testing" and "Ownership";
+06, 17; the manual's findings from R9, chapters 10 and 19, G13 and G27)
+
+465. `unbounded_channel[T]()`, 06's separate constructor, is a channel whose
+     `send` never waits for room: std's `channel` with the largest
+     capacity, so a value sent and not yet received is held however many
+     there are, in the interpreter and natively, and `recv` waits while it
+     is empty (`concurrency/unbounded_channel`, in `native.list`). Its
+     `T` is `Send + Escapable`, as a channel's values are. This changes no
+     rule of the language: it adds 06's constructor to std.
+466. A test's output is captured and shown with its failure, as 17 says
+     ("output is captured per test and shown on failure"): what a test
+     prints to standard output and error is held in its report, a passing
+     or blocked test's is dropped, and a failing test's block shows it
+     after its header, under `what the test printed:` (`D0133`), each line
+     indented, before how it failed, where every test's output was printed
+     before the report. Under `--explore N` and the exhaustive search the
+     run shown is the one that failed (decision 386), and a replay token's
+     block holds the output its run printed, natively as in the
+     interpreter. `testing/parallel`, `testing/explore_output` and
+     `replay/stdin` show it. This changes no rule of the language: it
+     implements 17's capture.
+467. A counterexample run of `--defer-borrow` that reaches a conflict
+     prints, after its account of the conflict, the blocks of the function
+     it points into that the conflict passes through, the loan's, its
+     end's and the use's (`sir::write::excerpt`: the function's first line,
+     those blocks in order, `...` for the ones left out), where it printed
+     the function's whole SIR, 40 lines for a loop of three; `R0051` says
+     so. Every `.defer` expectation is the shorter form. This changes no
+     rule of the language.
+468. `sisu bench` times each benchmark `--samples K` times (10), after one
+     run it does not time, and reports the median time of an iteration
+     with the 95% interval of the mean of the samples that are not
+     outliers (further from the median than three scaled median absolute
+     deviations, 1.4826 MAD), by Student's t, and how many were outliers
+     (`D0057`), where it reported the mean of one run: three runs of the
+     manual's `parse_int` benchmark now report 17.3 to 19.5 µs, where one
+     run gave 153 µs and another 369 µs. 17's JSON report is not begun.
+     This changes no rule of the language.
+
+**The runtime in Sisu: a time's text and a quoted text** (section "Stage
+2", "The runtime in Sisu"; D-086, D-087 step 3)
+
+469. A time's text is the runtime in Sisu's (`compiler/rt/src/time.sisu`):
+     the RFC 3339 text of a `DateTime` that `Debug` and `Display` write,
+     which `show.sisu` appends itself where it called back for it, and
+     `fmt.strftime`'s directives, both over Hinnant's `civil_from_days` as
+     the interpreter's `format.rs` has them; the runtime in Rust asks for
+     either through `sisu_rt_time_text`, and for a hole's name quoted as
+     `Debug` quotes a text through `sisu_rt_quote` (`show.quote_str`). What
+     the runtime in Rust no longer has: `value.rs`'s `quote_str`, `civil`,
+     `strftime`'s body and `datetime_text`, and the callback
+     `sisu_rt_show_datetime`. This changes no rule of the language.

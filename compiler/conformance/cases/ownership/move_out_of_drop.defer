@@ -5,16 +5,8 @@ ownership violation: `self.name` was used while it holds no value: it was moved 
   used at: move_out_of_drop.sisu:9:25 (`_6 = ref _1.*.0`)
   at File.Drop.drop (move_out_of_drop.sisu:9:25)
   at main (move_out_of_drop.sisu:16:17)
-SIR of `File.Drop.drop`:
+SIR of `File.Drop.drop`, its blocks that the conflict passes through:
 fn File.Drop.drop(1) drop source 0 @8:9-8:13 {
-    let _0: ()
-    let _1: ref mut File "self" @8:9-8:13
-    let _2: ()
-    let _3: String
-    let _4: ref mut String
-    let _5: ()
-    let _6: ref String
-    let _7: ref String
   bb0:
     _3 = call intrinsic fmt.new() @9:15-9:36
     _4 = ref mut _3 @9:15-9:36
@@ -22,20 +14,7 @@ fn File.Drop.drop(1) drop source 0 @8:9-8:13 {
     _6 = ref _1.*.0 @9:25-9:34
     _5 = call intrinsic fmt.display(copy _4, copy _6, const "") @9:25-9:34
     goto bb1
-  bb1 (unwind bb2):
-    _7 = ref _3 @9:15-9:36
-    _2 = call intrinsic print(copy _7) @9:9-9:37
-    goto bb3
-  bb2 (cleanup):
-    drop _3
-    resume
-  bb3:
-    drop _3 @9:37-9:37
-    goto bb4
-  bb4:
-    dead _3 @9:37-9:37
-    _0 = const ()
-    return
+  ...
 }
 outcome: conflict reached; the run stopped at a concrete ownership conflict
 --- status 134

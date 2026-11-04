@@ -325,10 +325,8 @@ fn run_list(sisu: &Sisu, root: &Path, list: &[String], mode: Mode, stage2: Optio
 /// For each runnable case outside `list`, whether it builds and passes
 /// natively: the cases a coverage list could grow by.
 pub fn survey(sisu: &Sisu, root: &Path, list: &[String]) -> Vec<(String, String)> {
-    let cases: Vec<Case> = discover(root)
-        .into_iter()
-        .filter(|c| !list.contains(&c.name) && ["out", "err", "status"].iter().any(|e| c.path(e).exists()))
-        .collect();
+    let cases: Vec<Case> =
+        discover(root).into_iter().filter(|c| !list.contains(&c.name) && runnable(c)).collect();
     let results = parallel(&cases, |case, n| native_case(sisu, case, n, Mode::Native, None));
     cases
         .iter()
@@ -341,6 +339,19 @@ pub fn survey(sisu: &Sisu, root: &Path, list: &[String]) -> Vec<(String, String)
             (c.name.clone(), verdict)
         })
         .collect()
+}
+
+/// Whether a case runs a program or its tests: it has an `.out`, `.err` or
+/// `.status`, or a `sisu test` run it pins (decision 460).
+fn runnable(c: &Case) -> bool {
+    if ["out", "err", "status", "test", "explore"].iter().any(|e| c.path(e).exists()) {
+        return true;
+    }
+    let source =
+        if c.package { String::new() } else { std::fs::read_to_string(c.source()).unwrap_or_default() };
+    ["# sim", "# schedule", "# select"]
+        .iter()
+        .any(|m| source.lines().any(|l| l.trim() == *m || l.trim().starts_with(&format!("{m} "))))
 }
 
 fn parallel<R: Send>(cases: &[Case], f: impl Fn(&Case, usize) -> R + Sync) -> Vec<R> {
@@ -416,6 +427,15 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&P
             return r;
         }
     };
+    // The case's tests, natively (decision 460), then its program.
+    let tested = native_tests(sisu, case, &sandbox.dir, mode, &mut r);
+    let wants_run = ["out", "err", "status"].iter().any(|e| case.path(e).exists());
+    if !wants_run {
+        if !tested {
+            fail(&mut r, "setup", "the case has neither a run nor tests to run natively".into());
+        }
+        return r;
+    }
     let exe = sandbox.dir.join("native-program");
     let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
     let mut build_args = s(&["build", "--native", "--output", &exe.display().to_string()]);
@@ -456,6 +476,12 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&P
                 own
             }
             None if printed.status == 0 => printed.stdout,
+            // A program its errors stop has no SIR, and is not run: the
+            // errors are what `sisu run` prints (decision 463).
+            None if stopped(case, printed.status, &printed.stderr) => {
+                r.build = start.elapsed();
+                return r;
+            }
             None => {
                 fail(&mut r, "sisu sir", format!("{}{}", printed.stdout, printed.stderr));
                 return r;
@@ -590,6 +616,9 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&P
         }
         return r;
     }
+    if built.status != 0 && stopped(case, built.status, &built.stderr) {
+        return r;
+    }
     if built.status != 0 || !exe.is_file() {
         fail(&mut r, "sisu build --native", format!("{}{}", built.stdout, built.stderr));
         return r;
@@ -610,6 +639,156 @@ fn native_case(sisu: &Sisu, case: &Case, n: usize, mode: Mode, stage2: Option<&P
     }
     run_and_compare(case, &exe, &cwd, warned_by_sir, !built.stderr.is_empty(), &mut r);
     r
+}
+
+/// The `sisu test` runs a case pins (`NAME.test`, and the runs that `#
+/// sim`, `# schedule`, `# select` and `# explore N` with `NAME.explore`
+/// ask for), each compiled and run natively by `sisu test --native`
+/// (decision 460) as the mode builds, compared with the interpreter's
+/// expectation, held to the status its report gives, and each failure
+/// replayed natively from its token. The modes that build from SIR build
+/// the tests as `--native` does, since `sisu test` builds them from stage
+/// 1's `sir --tests` anyway; `--native-from-lir` builds them through the
+/// Rust lowering, the oracle, and Cranelift; `--interpreted-from-sir`
+/// runs them in the interpreter. Whether the case has such a run.
+fn native_tests(sisu: &Sisu, case: &Case, dir: &Path, mode: Mode, r: &mut CaseResult) -> bool {
+    let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    let cwd = match case.expected("cwd") {
+        Some(d) => dir.join(d.trim()),
+        None => dir.to_path_buf(),
+    };
+    let source =
+        if case.package { String::new() } else { std::fs::read_to_string(case.source()).unwrap_or_default() };
+    let file = format!("{}.sisu", case.stem);
+    // Each run: its arguments after `test` and the expectation.
+    let mut runs: Vec<(Vec<String>, String)> = Vec::new();
+    if let Some(expected) = case.expected("test") {
+        runs.push((Vec::new(), expected));
+    }
+    for (marker, ext, sim) in
+        [("# sim", "sim", true), ("# schedule", "schedule", false), ("# select", "select", false)]
+    {
+        let Some(line) =
+            source.lines().find(|l| l.trim() == marker || l.trim().starts_with(&format!("{marker} ")))
+        else {
+            continue;
+        };
+        let mut a = Vec::new();
+        if sim {
+            a.push("--sim".to_string());
+        }
+        a.extend(line.trim()[marker.len()..].split_whitespace().map(str::to_string));
+        runs.push((a, case.expected(ext).unwrap_or_default()));
+    }
+    let explore = source
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("# explore ").and_then(|n| n.trim().parse::<u64>().ok()));
+    if let (Some(n), Some(expected)) = (explore, case.expected("explore")) {
+        runs.push((s(&["--explore", &n.to_string()]), expected));
+    }
+    if runs.is_empty() {
+        return false;
+    }
+    let flags: Vec<String> = match mode {
+        Mode::Interpreted => Vec::new(),
+        Mode::Native | Mode::FromSir => s(&["--native"]),
+        // `sisu test` checks every contract, and takes no `--contracts`.
+        Mode::Release => s(&["--native", "--release"]),
+        Mode::FromLir => s(&["--native", "--lower=rust", "--backend=cranelift"]),
+        Mode::Cranelift => s(&["--native", "--backend=cranelift"]),
+    };
+    let mut fail = |check: String, detail: String| {
+        r.failures.push(Failure { case: case.name.clone(), check, detail });
+    };
+    let start = Instant::now();
+    for (given, expected) in runs {
+        let mut a = s(&["test"]);
+        a.extend(flags.iter().cloned());
+        a.extend(given.iter().cloned());
+        if !case.package {
+            a.push(file.clone());
+        }
+        let shown = format!("sisu {}", a.join(" "));
+        let out = crate::invoke_with_limit(sisu, &cwd, &a, None, TESTS_TIMEOUT);
+        if out.stdout != expected {
+            fail(shown.clone(), format!("{}{}", diff::diff(&expected, &out.stdout), out.stderr));
+            continue;
+        }
+        if let Some(status) = report_status(&out)
+            && status != out.status
+        {
+            fail(
+                format!("{shown}: the exit status its report gives"),
+                format!("expected {status}, found {}", out.status),
+            );
+        }
+        // Each failure again from its token, natively.
+        for (token, block) in crate::failure_blocks(&out.stdout) {
+            let mut again = s(&["test"]);
+            again.extend(flags.iter().cloned());
+            again.push("--replay".into());
+            again.push(token.clone());
+            if !case.package {
+                again.push(file.clone());
+            }
+            let replayed = crate::invoke_with_limit(sisu, &cwd, &again, None, TESTS_TIMEOUT);
+            let first = crate::failure_blocks(&replayed.stdout)
+                .into_iter()
+                .next()
+                .map(|(_, b)| b)
+                .unwrap_or_default();
+            if first != block {
+                fail(format!("sisu test --replay {token}"), diff::diff(&block, &first));
+            }
+        }
+    }
+    r.run += start.elapsed();
+    true
+}
+
+/// Whether a build that failed is the run the case expects of a program
+/// its errors stop (decision 463): nothing on standard output, the errors
+/// and `D0006` as `.err` has them, and the status `.status` gives, which
+/// `sisu run --native` prints and exits with too.
+fn stopped(case: &Case, status: i32, stderr: &str) -> bool {
+    let expected = case.expected("status").map(|s| s.trim().to_string()).unwrap_or_else(|| "0".into());
+    expected != "0"
+        && expected == status.to_string()
+        && case.expected("out").unwrap_or_default().is_empty()
+        && case.expected("err").is_some_and(|e| e == stderr)
+}
+
+/// How long `sisu test --native` may take, which builds the program and
+/// runs each test as a process of its own: a test's property draws its
+/// hundred cases there too.
+const TESTS_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// The status a `sisu test` report gives: 1 when a test failed, 3 when
+/// none failed and one is blocked, else 0 (decision 380); none when it
+/// printed no summary or an error.
+fn report_status(out: &Output) -> Option<i32> {
+    let (mut summaries, mut failed, mut blocked) = (0, 0u64, 0u64);
+    for line in out.stdout.lines() {
+        let words: Vec<&str> = line.split([' ', ',']).filter(|w| !w.is_empty()).collect();
+        if let [p, "passed", f, "failed", b, "blocked"] = words.as_slice()
+            && p.parse::<u64>().is_ok()
+            && let (Ok(f), Ok(b)) = (f.parse::<u64>(), b.parse::<u64>())
+        {
+            summaries += 1;
+            failed += f;
+            blocked += b;
+        }
+    }
+    if summaries == 0 || out.stderr.lines().any(|l| l.starts_with("error")) {
+        return None;
+    }
+    Some(if failed > 0 {
+        1
+    } else if blocked > 0 {
+        3
+    } else {
+        0
+    })
 }
 
 /// Runs a case's executable and compares the run with its expectations:

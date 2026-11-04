@@ -261,13 +261,29 @@ build --native --backend=cranelift`, decision 331), and compares the runs
 as `--native` does, so that every case is held to the interpreter's
 behaviour under both backends; the executables of the two are their own,
 so nothing is compared byte for byte between them.
+A case of the list that pins `sisu test` (`NAME.test`, and the runs that
+`# sim`, `# schedule`, `# select` and `# explore N` with `NAME.explore`
+ask for) has its tests run natively too, by `sisu test --native` with the
+mode's flags (decision 460): `--native` and `--native-from-sir` build them
+as they are, from stage 1's `sir --tests` (whatever the mode, a test's
+program is built from SIR), `--native-release` with `--release`
+(a test checks every contract), `--native-cranelift` with `--backend=cranelift`,
+`--native-from-lir` through the Rust lowering and Cranelift (`--lower=rust
+--backend=cranelift`), and `--interpreted-from-sir` in the interpreter;
+each report is compared with the expectation, held to the status it
+gives, and each failure replayed natively from its token. A case that has
+only such runs is built for nothing else. A case whose program its errors
+stop (`run/stopped_by_errors`) passes when the build, or `sisu sir`,
+prints its `.err` and exits with its `.status`, as `sisu run --native`
+does (decision 463).
 `cargo test -p sisu-driver --test native` runs `native.list` all six ways,
 and CI runs them on every push, each through the front end the executable
 uses (stage 1 by default, so a case built from source or from `sisu sir`
 is built from stage 1's SIR). `--native-survey
 LIST` builds and runs every runnable case the list leaves out (one with
-an `.out`, `.err` or `.status`) and prints `pass` or the first thing that
-stopped it, which is how the list grows:
+an `.out`, `.err` or `.status`, or a run of `sisu test` it pins) and
+prints `pass` or the first thing that stopped it, which is how the list
+grows:
 
 ```text
 cargo run -p sisu-conformance -- --sisu target/debug/sisu --native conformance/native.list
@@ -304,7 +320,10 @@ and the time spent building and running them.
   bytes; `char_boundary`), formatting (`format_specs`: the spec
   mini-language, written in Sisu; `debug_forms`: `Debug` and `Display` of
   every kind of value, natively by the runtime in Sisu; `shared_display`: a
-  `Shared` shown as its value), the moves of lists (`list_moves`),
+  `Shared` shown as its value; `shared_equality`: two `Shared` equal by
+  their values, and a `Shared` a table's key by its value), the moves of
+  lists (`list_moves`), copies of counted handles put in a `Box` or a
+  `dyn` (`counted_copies`),
   collections, `match` (`or_bindings`: alternatives of `|` that bind
   names), loops, closures, errors and traces, options (`let_else_copy`),
   `Drop` order on normal and unwinding paths (`drop_panic_fields`: a
@@ -421,7 +440,8 @@ and the time spent building and running them.
 - `concurrency/` is tasks (18, Phase 6), most cases under several
   schedules: joins and their error sets, failures and the scope's result,
   panics in tasks, a task's stack overflow (`stack_overflow`),
-  cancellation at the blocking points, shields and deadlines, channels,
+  cancellation at the blocking points, shields and deadlines, channels
+  (`unbounded_channel`: one whose `send` never waits),
   `select`, races, mutexes across tasks with guards dropped by unwinding,
   the lowest-index rule of `pure` scopes, deadlock reports, generators
   (`generator_close`: one dropped before its end runs its drops and

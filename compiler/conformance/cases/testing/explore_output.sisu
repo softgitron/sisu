@@ -1,7 +1,7 @@
 # explore 20
 # Under `--explore N` a test that fails under one of the seeds shows what
-# that run printed, the lines that go with its failure, not those of the
-# first seed's run, which passed (decision 386; the manual's G14).
+# that run printed with its failure, not what the first seed's run, which
+# passed, printed (decisions 386 and 466; the manual's G14).
 
 test "the second task's value arrives first":
     let (tx, rx) = channel[int](2)

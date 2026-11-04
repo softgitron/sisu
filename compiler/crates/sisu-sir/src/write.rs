@@ -297,24 +297,54 @@ fn write_function(out: &mut String, f: &Function) {
         out.push('\n');
     }
     for (i, b) in f.blocks.iter().enumerate() {
-        let _ = write!(out, "  bb{i}");
-        if b.cleanup {
-            out.push_str(" (cleanup)");
-        } else if let Some(u) = b.unwind {
-            let _ = write!(out, " (unwind bb{})", u.0);
-        }
-        out.push_str(":\n");
-        for s in &b.stmts {
-            out.push_str("    ");
-            out.push_str(&stmt(s));
-            out.push('\n');
-        }
-        out.push_str("    ");
-        out.push_str(&term(&b.term));
-        out.push_str(&loc(&b.loc));
-        out.push('\n');
+        write_block(out, i, b);
     }
     out.push_str("}\n");
+}
+
+fn write_block(out: &mut String, i: usize, b: &BasicBlock) {
+    let _ = write!(out, "  bb{i}");
+    if b.cleanup {
+        out.push_str(" (cleanup)");
+    } else if let Some(u) = b.unwind {
+        let _ = write!(out, " (unwind bb{})", u.0);
+    }
+    out.push_str(":\n");
+    for s in &b.stmts {
+        out.push_str("    ");
+        out.push_str(&stmt(s));
+        out.push('\n');
+    }
+    out.push_str("    ");
+    out.push_str(&term(&b.term));
+    out.push_str(&loc(&b.loc));
+    out.push('\n');
+}
+
+/// The function's blocks at these indices, in order, under its first
+/// line and without its locals, `...` standing for the blocks left out
+/// between them: the part of a function a report points into (the
+/// counterexample mode's conflict, decision 467).
+pub fn excerpt(f: &Function, keep: &[usize]) -> String {
+    let mut keep: Vec<usize> = keep.iter().copied().filter(|&i| i < f.blocks.len()).collect();
+    keep.sort_unstable();
+    keep.dedup();
+    let full = function(f);
+    let mut out = full.lines().next().unwrap_or_default().to_string();
+    out.push('\n');
+    let mut next = 0;
+    for i in keep {
+        if i > next {
+            out.push_str("  ...\n");
+        }
+        write_block(&mut out, i, &f.blocks[i]);
+        next = i + 1;
+    }
+    if next < f.blocks.len() {
+        out.push_str("  ...\n");
+    }
+    out.push_str("}\n");
+    out
 }
 
 /// ` @L:C` or ` @L:C-L:C`, or nothing.

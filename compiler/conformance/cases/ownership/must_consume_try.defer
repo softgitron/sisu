@@ -4,99 +4,13 @@ ownership violation: `_3` was dropped holding a `Receipt`, which must be passed 
   used at: must_consume_try.sisu:27:9 (`drop _3`)
   at settle (must_consume_try.sisu:27:9)
   at main (must_consume_try.sisu:32:5)
-SIR of `settle`:
+SIR of `settle`, its blocks that the conflict passes through:
 fn settle(2) source 0 own 1 @25:5-25:11 {
-    let _0: Result[(), {RepayError}]
-    let _1: ref mut Pool "pool" @25:12-25:26
-    let _2: list[Receipt] "receipts" @25:28-25:55
-    let _3: Iter[Receipt]
-    let _4: ref mut Iter[Receipt]
-    let _5: Option[Receipt]
-    let _6: int
-    let _7: Receipt "r" @26:9-26:10
-    let _8: ()
-    let _9: Result[(), {RepayError}]
-    let _10: int
-    let _11: {RepayError}
-    let _12: ref mut {RepayError}
-    let _13: ()
-    let _14: bool "flag"
-    let _15: bool "flag"
-  bb0:
-    _14 = const false
-    _15 = const false
-    goto bb1
-  bb1 (unwind bb2):
-    _3 = call intrinsic iter.own(move _2) @26:5-26:26
-    goto bb4
-  bb2 (cleanup):
-    resume
-  bb3 (cleanup):
-    drop _3
-    resume
-  bb4 (unwind bb3):
-    _4 = ref mut _3 @26:5-26:26
-    _5 = call intrinsic Iter.next(copy _4) @26:5-26:26
-    _14 = const true
-    goto bb5
-  bb5 (unwind bb6):
-    _6 = discriminant _5 @26:5-26:26
-    switch copy _6 [0: bb7, else: bb8] @26:5-26:26
-  bb6 (cleanup):
-    drop _5.as(0).0 if _14
-    goto bb3
-  bb7 (unwind bb6):
-    _14 = const false
-    _7 = move _5.as(0).0 @26:9-26:10
-    _9 = call fn repay(copy _1, move _7) @27:9-27:27
-    _15 = const true
-    goto bb9
-  bb8 (unwind bb3):
-    _14 = const false
-    goto bb19
-  bb9 (unwind bb10):
-    _10 = discriminant _9 @27:9-27:28
-    switch copy _10 [0: bb11, else: bb12] @27:9-27:28
-  bb10 (cleanup):
-    drop _9.as(1).0 if _15
-    goto bb6
-  bb11 (unwind bb10):
-    _8 = copy _9.as(0).0 @27:9-27:28
-    goto bb17
-  bb12 (unwind bb10):
-    _15 = const false
-    _11 = move _9.as(1).0 @27:9-27:28
-    _12 = ref mut _11 @27:9-27:28
-    _13 = call intrinsic error.trace_push(copy _12, const "must_consume_try.sisu:27:9") @27:9-27:28
-    _0 = variant Result::Err(move _11) @27:9-27:28
-    goto bb13
-  bb13 (unwind bb6):
-    _15 = const false
-    goto bb14
-  bb14 (unwind bb3):
-    _14 = const false
-    goto bb15
+  ...
   bb15 (unwind bb2):
     drop _3 @27:9-27:28
     goto bb16
-  bb16:
-    return @27:9-27:28
-  bb17 (unwind bb6):
-    _15 = const false
-    dead _11 @27:28-27:28
-    goto bb18
-  bb18 (unwind bb3):
-    _14 = const false
-    goto bb4
-  bb19 (unwind bb2):
-    drop _3 @27:28-27:28
-    goto bb20
-  bb20 (unwind bb2):
-    dead _3 @27:28-27:28
-    _0 = variant Result::Ok(const ()) @28:12-28:18
-    goto bb21
-  bb21:
-    return @28:5-28:18
+  ...
 }
 outcome: conflict reached; the run stopped at a concrete ownership conflict
 --- status 134

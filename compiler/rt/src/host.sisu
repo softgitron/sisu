@@ -45,11 +45,9 @@ extern "C":
     ## Whether the `Shared` cell at `cell` still holds its value.
     pub def sisu_rt_shared_alive(cell: ptr mut u8) -> bool
     ## Appends to the `String` at `out` the `Debug` text of the task whose
-    ## number is `task` (`<task PATH>`), of the arena at `p`, and of a time
-    ## in nanoseconds since the epoch.
+    ## number is `task` (`<task PATH>`) and of the arena at `p`.
     pub def sisu_rt_show_task(out: ptr mut u8, task: int)
     pub def sisu_rt_show_arena(out: ptr mut u8, p: ptr mut u8)
-    pub def sisu_rt_show_datetime(out: ptr mut u8, nanos: int)
     ## The next item of the generator whose task is `task`, `size` bytes,
     ## written at `out`, which it runs to its `yield`: 0 for an item, 1 for
     ## its end, else 2 plus the status of the panic it ended with, raised

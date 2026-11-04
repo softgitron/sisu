@@ -1,14 +1,15 @@
-first came 1
 test "the second task's value arrives first" ... FAILED
 
 test "the second task's value arrives first" ... FAILED
 with schedule seed 1; `--schedule-seed 1` runs it again
+what the test printed:
+  first came 1
 panic: assertion failed: first == 2
     first == 2
     │
     1
   at test "the second task's value arrives first" (explore_output.sisu:15:5)
-replay: sisu test --replay 1-2e44100c71977b5e-0.0.1-t0-s1-r0 explore_output.sisu
+replay: sisu test --replay 1-2b46fb58a353945f-0.0.1-t0-s1-r0 explore_output.sisu
 
 0 passed, 1 failed, 0 blocked
 explored 20 schedules per test (seeds 0 to 19)

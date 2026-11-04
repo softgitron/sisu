@@ -756,9 +756,19 @@ impl Interp<'_, '_> {
             }
         };
         lines.push(render(msg::MONITOR_HEADER, &[("what", what)]));
+        // The blocks of the function the report points into (decision 467).
+        let mut blocks = vec![used.bb];
         if let Violation::Ended { tag, .. } = &v
             && let Some(l) = self.loan(*tag).cloned()
         {
+            if l.created.func == used.func {
+                blocks.push(l.created.bb);
+            }
+            if let Some(e) = &l.ended
+                && e.site.func == used.func
+            {
+                blocks.push(e.site.bb);
+            }
             let kind = render(if l.mutable { msg::MONITOR_KIND_MUT } else { msg::MONITOR_KIND_SHARED }, &[]);
             lines.push(format!(
                 "  {}",
@@ -856,7 +866,7 @@ impl Interp<'_, '_> {
         }
         if let Some(f) = used.func.and_then(|i| self.func(i)) {
             lines.push(render(msg::MONITOR_SIR_HEADER, &[("function", f.name.clone())]));
-            lines.push(sir::write::function(f).trim_end().to_string());
+            lines.push(sir::write::excerpt(f, &blocks).trim_end().to_string());
         }
         if let Some(m) = &self.monitor {
             m.violated.set(true);

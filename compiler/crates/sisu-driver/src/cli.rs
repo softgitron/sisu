@@ -185,6 +185,7 @@ pub(crate) const VALUE_FLAGS: &[&str] = &[
     "--tag",
     "--skip-tag",
     "--iterations",
+    "--samples",
     "--diary",
     "--output",
     "--from-sir",
@@ -228,6 +229,9 @@ struct Opts {
     select: Select,
     /// `sisu bench --iterations N`: how often each benchmark's loop runs.
     iterations: u64,
+    /// `sisu bench --samples K`: how many times each benchmark is timed
+    /// (decision 468).
+    samples: u64,
     /// What `--stats` reports.
     stats: sisu_interp::StatsKind,
     /// `sisu check --diary PATH`: the log the check appends to.
@@ -589,6 +593,19 @@ impl Host for Captured<'_> {
 /// 1's unless `--front-end=rust` or `SISU_FRONT_END=rust` asks for the Rust
 /// one (decision 268).
 pub fn execute(args: &[String], host: &mut dyn Host) -> i32 {
+    // `sisu test --native`: the tests compiled and run natively (decision
+    // 460), in the profile `--release` names.
+    let native = args.first().is_some_and(|c| c == "test") && args.iter().any(|a| a == "--native");
+    let release = args.iter().any(|a| a == "--release");
+    crate::native_tests::set(native.then(|| crate::native::Profile::of(release)));
+    let code = execute_command(args, host);
+    // What `sisu test --native` built (decision 460).
+    crate::native_tests::clean();
+    crate::native_tests::set(None);
+    code
+}
+
+fn execute_command(args: &[String], host: &mut dyn Host) -> i32 {
     let env = std::env::var(crate::front::FRONT_END_VAR).ok();
     let (args, front) = match crate::front::take_choice(args, env.as_deref(), VALUE_FLAGS, host) {
         Ok(chosen) => chosen,
@@ -685,6 +702,8 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                     "--accept-unsafe",
                 ],
                 "test" => &[
+                    "--native",
+                    "--release",
                     "--no-monitor",
                     "--defer-borrow",
                     "--sim",
@@ -752,6 +771,7 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
             let (mut scheduler, mut depth, mut faults) = ("random", None, None);
             let mut jobs = 0;
             let mut iterations = 100;
+            let mut samples = BENCH_SAMPLES;
             let mut select = Select::default();
             let mut diary = None;
             let mut output = None;
@@ -766,7 +786,7 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                 let only = match *k {
                     "--record" | "--redact" => Some("run"),
                     "--replay" | "--faults" | "--jobs" | "--filter" | "--tag" | "--skip-tag" => Some("test"),
-                    "--iterations" => Some("bench"),
+                    "--iterations" | "--samples" => Some("bench"),
                     "--diary" => Some("check"),
                     "--output" => Some("build"),
                     _ => None,
@@ -901,6 +921,7 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                     "--depth" => depth = Some(n.min(u64::from(u32::MAX)) as u32),
                     "--jobs" => jobs = n.clamp(1, 256) as usize,
                     "--iterations" => iterations = n.clamp(1, 1_000_000_000),
+                    "--samples" => samples = n.clamp(1, 10_000),
                     _ => seeds.explore = Some(n.max(1)),
                 }
             }
@@ -1042,6 +1063,7 @@ fn execute_with(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32 {
                 jobs,
                 select,
                 iterations,
+                samples,
                 stats,
                 diary,
                 output,
@@ -1301,6 +1323,7 @@ fn test_from_sir(
     // simulates or updates snapshots.
     let cached = sources
         && !has("--no-cache")
+        && crate::native_tests::chosen().is_none()
         && opts.seeds.explore.is_none()
         && opts.sim.is_none()
         && !options.update
@@ -1385,18 +1408,9 @@ fn bench_from_sir(prog: &sisu_sir::Program, opts: &Opts, host: &mut dyn Host) ->
     let mut failed = 0;
     for (name, function) in &prog.benches {
         let name = sisu_diag::render::quote(name);
-        let start = host.now_nanos();
-        let r = sisu_interp::run_bench(prog, host, &options, function, opts.iterations);
-        let took = host.now_nanos() - start;
-        let line = match r {
-            sisu_interp::TestResult::Passed => {
-                let each = took / i128::from(opts.iterations.max(1));
-                text(
-                    msg::CLI_BENCH_RESULT,
-                    &[("name", name), ("iterations", opts.iterations.to_string()), ("each", nanos(each))],
-                )
-            }
-            sisu_interp::TestResult::Failed(m) | sisu_interp::TestResult::Blocked(m) => {
+        let line = match bench_samples(prog, host, &options, function, opts) {
+            Ok(params) => text(msg::CLI_BENCH_RESULT, &bench_params(name, params)),
+            Err(m) => {
                 failed += 1;
                 text(msg::CLI_BENCH_FAILED, &[("name", name), ("message", m)])
             }
@@ -2682,22 +2696,9 @@ fn command(
                     for (i, d) in c.program.benches.iter().enumerate() {
                         let name = sisu_diag::render::quote(&c.program.def(*d).name);
                         let function = format!("bench#{i}");
-                        let start = host.now_nanos();
-                        let r = sisu_interp::run_bench(&prog, host, &options, &function, opts.iterations);
-                        let took = host.now_nanos() - start;
-                        let line = match r {
-                            sisu_interp::TestResult::Passed => {
-                                let each = took / i128::from(opts.iterations.max(1));
-                                text(
-                                    msg::CLI_BENCH_RESULT,
-                                    &[
-                                        ("name", name),
-                                        ("iterations", opts.iterations.to_string()),
-                                        ("each", nanos(each)),
-                                    ],
-                                )
-                            }
-                            sisu_interp::TestResult::Failed(m) | sisu_interp::TestResult::Blocked(m) => {
+                        let line = match bench_samples(&prog, host, &options, &function, opts) {
+                            Ok(params) => text(msg::CLI_BENCH_RESULT, &bench_params(name, params)),
+                            Err(m) => {
                                 failed += 1;
                                 text(msg::CLI_BENCH_FAILED, &[("name", name), ("message", m)])
                             }
@@ -3304,6 +3305,98 @@ struct TestRun<'a> {
 }
 
 /// A time in nanoseconds as a person reads it: `850 ns`, `12.4 µs`, `3.1 ms`.
+/// How many times `sisu bench` times each benchmark by default (decision
+/// 468).
+const BENCH_SAMPLES: u64 = 10;
+
+/// What a benchmark's timings say (decision 468; 17, "Benchmarks": a
+/// confidence interval with outlier detection, never a single mean): the
+/// time of one iteration in each of `samples` runs of its loop; the
+/// median; the samples further from it than three scaled median absolute
+/// deviations (1.4826 MAD, the standard deviation of a normal sample) are
+/// outliers; and the 95% interval of the mean of the others, by Student's
+/// t, after a run that is not timed. The parameters of `CLI_BENCH_RESULT`
+/// but the name, or the failure.
+fn bench_samples(
+    prog: &sisu_sir::Program,
+    host: &mut dyn Host,
+    options: &Options,
+    function: &str,
+    opts: &Opts,
+) -> Result<Vec<(&'static str, String)>, String> {
+    let n = opts.iterations.max(1);
+    // A run first that is not timed: the caches and the allocator warmed.
+    if let TestResult::Failed(m) | TestResult::Blocked(m) =
+        sisu_interp::run_bench(prog, host, options, function, n)
+    {
+        return Err(m);
+    }
+    let mut times = Vec::new();
+    for _ in 0..opts.samples.max(1) {
+        let start = host.now_nanos();
+        match sisu_interp::run_bench(prog, host, options, function, n) {
+            TestResult::Passed => {}
+            TestResult::Failed(m) | TestResult::Blocked(m) => return Err(m),
+        }
+        times.push((host.now_nanos() - start) as f64 / n as f64);
+    }
+    let s = sample_stats(&times);
+    let outliers = match s.outliers {
+        0 => String::new(),
+        1 => ", 1 outlier".to_string(),
+        k => format!(", {k} outliers"),
+    };
+    Ok(vec![
+        ("iterations", n.to_string()),
+        ("samples", times.len().to_string()),
+        ("each", nanos(s.median as i128)),
+        ("low", nanos(s.low as i128)),
+        ("high", nanos(s.high as i128)),
+        ("outliers", outliers),
+    ])
+}
+
+fn bench_params(name: String, mut params: Vec<(&'static str, String)>) -> Vec<(&'static str, String)> {
+    params.insert(0, ("name", name));
+    params
+}
+
+/// The median of some timings, the 95% interval of the mean of those that
+/// are not outliers, and how many are.
+pub(crate) struct SampleStats {
+    pub(crate) median: f64,
+    pub(crate) low: f64,
+    pub(crate) high: f64,
+    pub(crate) outliers: usize,
+}
+
+fn median(xs: &[f64]) -> f64 {
+    let mut v = xs.to_vec();
+    v.sort_by(f64::total_cmp);
+    match v.len() {
+        0 => 0.0,
+        n if n % 2 == 1 => v[n / 2],
+        n => (v[n / 2 - 1] + v[n / 2]) / 2.0,
+    }
+}
+
+pub(crate) fn sample_stats(xs: &[f64]) -> SampleStats {
+    let m = median(xs);
+    let deviations: Vec<f64> = xs.iter().map(|x| (x - m).abs()).collect();
+    let spread = 1.4826 * median(&deviations);
+    let kept: Vec<f64> =
+        xs.iter().copied().filter(|x| spread == 0.0 || (x - m).abs() <= 3.0 * spread).collect();
+    let k = kept.len().max(1) as f64;
+    let mean = kept.iter().sum::<f64>() / k;
+    let var =
+        if kept.len() > 1 { kept.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (k - 1.0) } else { 0.0 };
+    // Student's t at 97.5% for the degrees of freedom, then the normal's.
+    const T: [f64; 10] = [12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228];
+    let t = if kept.len() < 2 { 0.0 } else { T.get(kept.len() - 2).copied().unwrap_or(1.96) };
+    let half = t * (var / k).sqrt();
+    SampleStats { median: m, low: (mean - half).max(0.0), high: mean + half, outliers: xs.len() - kept.len() }
+}
+
 fn nanos(n: i128) -> String {
     let n = n.max(0) as f64;
     if n < 1_000.0 {
@@ -3469,14 +3562,29 @@ fn cached_tests(
                 r
             }
         };
-        host.stdout(&report.out);
-        host.stderr(&report.err);
         out.push((name, result, report));
     }
     if keep != have {
         crate::testcache::write(path, &keep);
     }
     out
+}
+
+/// The tests at these indices run, in the interpreter or, under `sisu test
+/// --native`, natively (decision 460).
+fn test_runs(
+    prog: &sisu_sir::Program,
+    host: &mut dyn Host,
+    options: &Options,
+    which: &[usize],
+) -> Result<Vec<(String, TestResult, sisu_interp::RunReport)>, i32> {
+    // What each test prints is held in its report, and shown only with
+    // its failure (17; decision 466).
+    let mut quiet = Captured { inner: &mut *host, out: String::new(), err: String::new() };
+    match crate::native_tests::chosen() {
+        Some(profile) => crate::native_tests::run(prog, &mut quiet, options, which, profile),
+        None => Ok(sisu_interp::run_tests_report_at(prog, &mut quiet, options, which)),
+    }
 }
 
 fn run_tests(
@@ -3491,16 +3599,16 @@ fn run_tests(
         None => (0..prog.tests.len()).collect(),
     };
     let exhaustive = matches!(options.strategy, sisu_interp::Strategy::Exhaustive { .. });
-    // A run that searches schedules writes each test's output once it knows
-    // which run to show: the one that failed, else the first (decision 386).
-    let exploring = run.search && (exhaustive || seeds.explore.is_some());
-    let mut results = match &run.cache {
-        Some((path, salt)) => cached_tests(prog, host, options, &which, path, salt, run.only.is_none()),
-        None if exploring => {
-            let mut quiet = Captured { inner: &mut *host, out: String::new(), err: String::new() };
-            sisu_interp::run_tests_report_at(prog, &mut quiet, options, &which)
-        }
-        None => sisu_interp::run_tests_report_at(prog, host, options, &which),
+    // Each test's output is held in its report and shown with its failure
+    // (decision 466): under a search of schedules, the run that failed
+    // (decision 386).
+    let ran = match &run.cache {
+        Some((path, salt)) => Ok(cached_tests(prog, host, options, &which, path, salt, run.only.is_none())),
+        None => test_runs(prog, host, options, &which),
+    };
+    let mut results = match ran {
+        Ok(r) => r,
+        Err(code) => return (code, Vec::new()),
     };
     // `--explore N`: every test again under the other seeds, quietly; a
     // test fails with the first seed it fails under. Under the exhaustive
@@ -3541,12 +3649,10 @@ fn run_tests(
         for k in 1..n {
             let seed = seeds.first.wrapping_add(k);
             let mut quiet = Captured { inner: &mut *host, out: String::new(), err: String::new() };
-            let again = sisu_interp::run_tests_report_at(
-                prog,
-                &mut quiet,
-                &Options { seed, ..options.clone() },
-                &which,
-            );
+            let again = match test_runs(prog, &mut quiet, &Options { seed, ..options.clone() }, &which) {
+                Ok(r) => r,
+                Err(code) => return (code, Vec::new()),
+            };
             for (i, (_, r, rep)) in again.into_iter().enumerate() {
                 if failed_seed[i].is_some() || matches!(results[i].1, TestResult::Failed(_)) {
                     continue;
@@ -3562,12 +3668,6 @@ fn run_tests(
             if failed_seed[i].is_none() && matches!(r, TestResult::Failed(_)) {
                 failed_seed[i] = Some(seeds.first);
             }
-        }
-    }
-    if exploring && run.cache.is_none() {
-        for (_, _, report) in &results {
-            host.stdout(&report.out);
-            host.stderr(&report.err);
         }
     }
     let (mut passed, mut failed, mut blocked) = (0, 0, 0);
@@ -3630,8 +3730,19 @@ fn run_tests(
                     text(msg::CLI_REPLAY_TOKEN, &[("token", token.write()), ("file", run.file.to_string())])
                 };
                 let nl = if m.ends_with('\n') { "" } else { "\n" };
+                // What it printed, captured, before how it failed.
+                let mut printed = String::new();
+                if !report.out.is_empty() || !report.err.is_empty() {
+                    printed.push_str(&text(msg::CLI_TEST_OUTPUT, &[]));
+                    printed.push('\n');
+                    for line in report.out.lines().chain(report.err.lines()) {
+                        printed.push_str("  ");
+                        printed.push_str(line);
+                        printed.push('\n');
+                    }
+                }
                 failures.push_str(&format!(
-                    "\n{}\n{seed}{m}{nl}{replay}\n",
+                    "\n{}\n{seed}{printed}{m}{nl}{replay}\n",
                     text(
                         msg::CLI_TEST_RESULT,
                         &[("name", sisu_diag::render::quote(name)), ("outcome", "FAILED".into())]
@@ -4250,6 +4361,7 @@ fn replay(args: &[String], host: &mut dyn Host) -> i32 {
         jobs: 0,
         select: Select::default(),
         iterations: 0,
+        samples: BENCH_SAMPLES,
         stats: sisu_interp::StatsKind::Summary,
         diary: None,
         output: None,

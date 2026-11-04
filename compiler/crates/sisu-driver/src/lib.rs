@@ -17,6 +17,7 @@ pub mod json;
 pub mod lsp;
 pub mod manifest;
 mod native;
+mod native_tests;
 pub mod package;
 pub mod repl;
 pub mod replay;

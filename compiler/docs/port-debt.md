@@ -526,10 +526,51 @@ a size, refuse content the fakes have not pinned (17), or ask. *Pay*:
 the review flow of 17, with the size threshold and the check for
 unpinned content.
 
-**Benchmarks have no statistics.** `sisu bench` reports the mean time of
-an iteration on the host's clock, measured around the whole benchmark,
-with no warm-up, confidence interval or comparison with a baseline (17).
-*Pay*: the harness of 17: repeated samples, intervals, a stored baseline.
+**Benchmarks have few statistics.** `sisu bench` times `--samples K` runs
+of a benchmark after one it does not time and reports the median of an
+iteration with the 95% interval of the mean of the samples that are not
+outliers (decision 468), on the host's clock around each run; the number
+of iterations is the user's (`--iterations N`), not chosen from a target
+time, there is no comparison with a stored baseline and no JSON report
+(17). *Pay*: iterations chosen by the harness, a stored baseline, the
+JSON report.
+
+**A test's output is shown only with its failure** (decision 466), and a
+test has no way to read what it printed: chapter 10's drop-order
+exercise needs a test to see a `Drop` that prints. *Pay*: a capture a
+test can read (`test.output()`, or `System.stdout` as a capability whose
+fake keeps the text, below), which 17 leaves to `Expectation`.
+
+**`System` has no `stdout` and `stderr`** (06, "The rule"; the manual's
+finding from chapter 18): `print` and `print_err` are ambient. *Pay*: two
+capabilities of their own, `Stdout` and `Stderr`, each with its
+operations trait, its host object (the runtime's buffered output, and
+the interpreter's), a fake that keeps the text, `Lent` and the
+interceptors' forms as the other capabilities have them; fields of
+`System`, `System.fake`, `System.sim` and the transcripts' world, which
+moves `System`'s seven handles to nine in both runtimes, the native
+root system and the dispatcher of native tests, and the capability log's
+records of output; `print` stays, as the ambient form of `sys.stdout`
+that 06 does not forbid in a program's `main`. *Estimate*: two to three
+days, and every `.sir` expectation that holds a `System`.
+
+**A package's `tests/*.sisu` are not run** (17's black-box tests; the
+manual's finding from chapter 19): only its transcripts are. *Pay*: the
+driver runs each file as a program of its own whose dependency is the
+package, its `pub` items only; stage 1 must compile such a file, as it
+compiles a package's dependency (its `sir --tests` of a file outside
+`src/` that imports the package by name), which it does not yet.
+*Estimate*: the driver's part half a day, once stage 1 has it.
+
+**A run-time message has no code.** A panic is printed as `panic:
+MESSAGE`, without the `R` code the catalog gives it, so a reader has
+nothing to give `sisu explain` (the manual's finding from R17). *Pay*: a
+panic carries the id of its message (the interpreter's `panic(msg::...)`
+and the runtime's `raise_msg` already have it; `panic("...")` is
+`R0001`) and its header renders it (`panic[R0004]: ...`), in both
+runtimes and stage 1's own; then 82 expectation files of the suite and
+126 lines of 31 pages of the manual change. *Estimate*: half a day, with
+the manual's pages taken again after.
 
 **`Contextual` is displayed by a host rule.** `Result.context` wraps an
 error in std's `Contextual`, whose `Display` (`message: cause`) is a case
@@ -649,9 +690,10 @@ What the driver does around stage 1, because of what its commands are:
 ## Stage 2: what the native backend leaves out
 
 The native debug backend (architecture.md, "Stage 2") compiles every
-program the conformance suite runs (`conformance/native.list`, 216
-cases), with the debug profile and the release one (decision 232), and
-every one of those runs frees what it allocated (decision 226). A
+program the conformance suite runs (`conformance/native.list`, 248
+cases, 40 of which run their tests natively too, decision 460), with the
+debug profile and the release one (decision 232), and every one of those
+runs frees what it allocated (decision 226). A
 construct it does not compile is `D0103` under `--native`, and the
 program runs as before without it (`sisu-conformance --native-survey
 conformance/native.list` tries the cases outside the list). What it
@@ -670,12 +712,19 @@ leaves out:
   through a switch on the member, if another front end needs one.
 - **The interpreter's modes**: the ownership monitor, the counterexample
   mode, the capability log and replay, hot replacement, `--stats
-  stack-depth` and `--stats shared`, the schedulers other than the
-  seeded one (`--scheduler pct`, `exhaustive`), and `sisu test`, whose
-  tests the backend does not compile. *Pay*: `sisu test --native`, now
-  that tasks are native (tests run in parallel tasks); PCT and the
+  stack-depth` and `--stats shared`, and the schedulers other than the
+  seeded one (`--scheduler pct`, `exhaustive`). `sisu test --native`
+  runs a program's tests compiled (decisions 460 and 461), but for what
+  is the interpreter's alone: PCT and the exhaustive search, the `sim`
+  profile's injected faults (`--faults`), `sim.always` and `sim.choose`,
+  `expect`'s recording (natively `assert`'s panic), a property's budget
+  of statements (`TooLong`), and the test cache. *Pay*: PCT and the
   bounded search as the runtime's other ways to pick (decision 204 keeps
-  the generator's draws in one place).
+  the generator's draws in one place); the faults at the dispatch of
+  `FsOps` and `NetOps` on the simulation's objects; `sim.always`'s
+  predicates run at each switch on the next task's stack, outside the
+  budget; `expect` recorded by the runtime and reported at the test's
+  end; a count of yield points standing for the budget of statements.
 
 What the unsafe round (decisions 301 and 302) leaves natively:
 
@@ -899,11 +948,13 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   without optimisations, and there is no AArch64, Mach-O or COFF. *Pay*:
   D-087's steps.
 - **The runtime in Sisu has its first pieces** (decisions 335, 336, 350
-  to 353, 358, 383, 385, 422 and 423): `compiler/rt` holds `==` of two
+  to 353, 358, 383, 385, 422, 423, 464 and 469): `compiler/rt` holds `==` of two
   texts' bytes, the structural operations by a value's parts (equality,
-  order, the hash of decision 256, `.copy()`, the drop, the count of a
+  order, the hash of decision 256, a `Shared` followed to its value,
+  `.copy()`, the drop, the count of a
   copy's handles), text building and an integer's digits, text search, a
-  float's text, `Display` and `Debug` by the type table, lists over raw
+  float's text, a time's text (RFC 3339 and `strftime`'s directives), a
+  text quoted as `Debug` writes it, `Display` and `Debug` by the type table, lists over raw
   memory (growth, the moves of `insert`, `remove`, `pop`, `extend`,
   `reverse` and `swap`, a slice's copies, the sort, `in`, `join`), the
   tables of dicts and sets (insertion order, an index of slots over the
@@ -916,8 +967,8 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   `iter.sisu` lays them out), a generator's items and a receiver's values,
   the scheduler with its tasks, channels and mutexes, capabilities and the
   host, panics and their traces, allocation's count, the
-  descriptor-driven dispatch of the intrinsics, the text of a time and of
-  an arena, and the type table's words themselves (`desc.rs`), which the
+  descriptor-driven dispatch of the intrinsics, the text of an arena, and
+  the type table's words themselves (`desc.rs`), which the
   runtime in Rust lays out from the table it decodes. A struct's or
   enum's glue that runs on a task's own stack is run by the runtime in
   Rust, since the Sisu walk's frames are 1 to 3 KB, every argument of a
@@ -961,15 +1012,17 @@ Nothing here switches the default.
   run in the interpreter checks every raw access (released, out of
   bounds, uninitialised, misaligned, of another type, two layouts, a leak
   at exit); natively such a program's fault is undefined behaviour. Of
-  the suite's 237 runnable cases, 217 run natively (`native.list`); 19 of
-  the other 20 are `unsafe/` cases whose expectation is the model's
-  report, and the last (`run/stopped_by_errors`) is not run at all.
-  *Need*: a program whose packages declare `unsafe` (its lockfile has the
-  level, decision 275) keeps running in the interpreter by default, the
-  others natively; a native checked mode (shadow memory for `Global`'s
-  blocks, a check before each raw read and write lowered from std.mem's
-  intrinsics) is the replacement. *Estimate*: the rule, half a day; the
-  native checked mode, two to three weeks.
+  the suite's 270 runnable cases (a run, or a `sisu test` run, to compare,
+  decision 460), 248 run natively (`native.list`, 40 of them their tests
+  too); 15 of the other 22 are `unsafe/` cases whose expectation is the
+  model's report, and the last 7 wait for the interpreter's test modes
+  (below: PCT, the exhaustive search, faults, `sim.always`, a property's
+  budget). *Need*: a program whose packages declare `unsafe` (its
+  lockfile has the level, decision 275) keeps running in the interpreter
+  by default, the others natively; a native checked mode (shadow memory
+  for `Global`'s blocks, a check before each raw read and write lowered
+  from std.mem's intrinsics) is the replacement. *Estimate*: the rule,
+  half a day; the native checked mode, two to three weeks.
 - **The time a run starts in**: both run stage 1 first (about 0.55 s for
   a small file); the interpreter then starts at once, where a native run
   lowers, compiles and links (about 1.8 s a case when the suite builds its
@@ -982,21 +1035,44 @@ Nothing here switches the default.
   same seeds and `--stats`, and yield checks where the interpreter has
   them (decisions 203 and 204), so a seed names the same schedule but for
   port-debt's one known difference (a function whose entry fails before
-  its yield point); PCT and the bounded exhaustive search are the
-  interpreter's. *Need*: PCT's priorities and change points in
-  `sisu-rt/src/sched.rs`, where the generator's draws already are; the
-  exhaustive search as a run per schedule, its prefix of choices given to
-  the executable and its next choice point printed back, the driver
-  enumerating as `next_schedule` does. *Estimate*: PCT two days, the
-  search four; the conformance runner's `.schedule` cases then run
-  natively too.
+  its yield point); a test natively is the dispatcher's call of it, whose
+  entry is a yield point the interpreter's root frame has not, and no case
+  of the list shows a difference. PCT and the bounded exhaustive search
+  are the interpreter's, so `sisu test --native` refuses them (`D0132`).
+  *Need*: PCT's priorities and change points in `sisu-rt/src/sched.rs`,
+  where the generator's draws already are; the exhaustive search as a run
+  per schedule, its prefix of choices given to the executable and its
+  trail of choices written beside the test's report, the driver
+  enumerating as `next_schedule` does; `sim.choose` as a draw of the
+  generator (an hour), and `sim.always`'s predicates run at each switch on
+  the next task's stack outside the budget, a wait in one skipping the
+  check as the interpreter's `check_skipped` does. *Estimate*: PCT two
+  days, the search four, `sim.always` one; then `sim/pct`,
+  `sim/lost_update` and `sim/choose_always` join the list.
 - **Capabilities**: the host's root objects are the runtime in Rust's
   intrinsics and the fakes std's Sisu code in both, so a plain run needs
-  nothing more; a test's `sim` profile injects its faults in the
-  interpreter (`exec.rs`, "Faults are injected by the interpreter"
-  above). *Need*: for `sisu run`, nothing; for `sisu test --native`, the
-  fault model in the simulation objects themselves, drawing from the
-  run's generator. *Estimate*: three days, with `sisu test --native`.
+  nothing more, and `sisu test --native` gives a test its fakes and the
+  `sim` profile's `System.sim` as the interpreter does (decision 460); the
+  profile's faults are injected by the interpreter (`exec.rs`, "Faults are
+  injected by the interpreter" above). *Need*: for `sisu run`, nothing;
+  for `sisu test --native --faults`, a runtime call before each dispatch
+  of a method of `FsOps` or `NetOps` on a handle whose object is
+  `cap.SimFs`, `cap.SimNetwork` or `sim.SimNet`, drawing from a generator
+  of the run's own and writing an error of the method's declared set as
+  `sim_fault` does, in both lowerings. *Estimate*: two days; then
+  `sim/faults`, `sim/http_faults` and `sim/no_revoked` join the list.
+- **A property's budget**: native code counts no statements, so
+  `test.catch`'s `steps` bounds nothing and a case that runs past its
+  budget passes natively (`contracts/properties`). *Need*: the budget as a
+  count of the yield checks the case passes (function entries and back
+  edges), which the generated code already counts, `TooLong` when it runs
+  out; a case's count then differs from the interpreter's statements, so
+  the budget's number means another amount of work. *Estimate*: one day.
+- **`expect`**: natively `assert`'s panic (decision 388), so a test that
+  goes on after a failed `expect` stops there. *Need*: the runtime records
+  the failure with the frames it would leave (the trace walk a panic
+  makes, without unwinding) and the test's end reports them; no case of
+  the suite's natively run tests reaches it. *Estimate*: one day.
 - **The capability log and replay** (N-04; `--record`, `sisu replay`):
   only the interpreter's host is wrapped (`record.rs`). *Need*: the same
   wrapper in the runtime in Rust, around each host intrinsic (files,
@@ -1022,10 +1098,14 @@ Nothing here switches the default.
   is the native one, compared with the interpreter's expectations as
   `--native` compares them now, and `--interpreted` runs the oracle.
 
-Without the native checked mode and the hot replacement, about three
-weeks of work make a native run the default for every program without
-`unsafe`, with the interpreter kept for `unsafe` code, the monitor, the
-counterexample mode and `--watch`.
+Without the native checked mode and the hot replacement, about two weeks
+of work make a native run the default of `sisu run` for every program
+without `unsafe` (the rule, the cache of executables, the capability log
+and replay, the two `--stats` kinds), with the interpreter kept for
+`unsafe` code, the monitor, the counterexample mode and `--watch`; about
+two more (PCT, the exhaustive search, `sim.always`, the faults, a
+property's budget, `expect`) make every test of the suite outside
+`unsafe/` run natively too.
 
 ## Not yet done from Phases 0, 2, 3, 4, 6 and 8
 

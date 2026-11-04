@@ -4,7 +4,7 @@ The runtime of natively compiled Sisu is being written in Sisu, piece by
 piece, as D-086 orders ([15](../../proposal/15-decision-log.md)); this
 package holds what is written so far, and `crates/sisu-rt`, the runtime
 in Rust, the rest. `docs/architecture.md` ("Stage 2", "The runtime in
-Sisu"; decisions 335, 336, 350 to 353, 358, 382 to 385, 422 and 423) describes it, and
+Sisu"; decisions 335, 336, 350 to 353, 358, 382 to 385, 422, 423, 464 and 469) describes it, and
 `docs/port-debt.md` ("The runtime in Sisu") lists what is left.
 
 ## What it is
@@ -25,11 +25,12 @@ and C's `memmove` and `memcmp` through foreign calls (`unsafe =
 | `lib.sisu` | the exports, `==` of two texts' bytes, and the text entries interpolation calls most (their bodies here, a call fewer) |
 | `types.sisu` | the program's type table, as the runtime in Rust lays it out in memory when the program starts (`crates/sisu-rt/src/desc.rs`) |
 | `host.sisu` | the runtime in Rust's functions this code calls, and C's |
-| `value.sisu` | equality, order, the structural hash, `.copy()`, the drop and the count of a copy's handles (a function value's environment in a heap cell copied whole, decision 382), each a walk of a value by its type's parts |
+| `value.sisu` | equality, order, the structural hash (a `Shared` followed to its value, decision 464), `.copy()`, the drop and the count of a copy's handles (a function value's environment in a heap cell copied whole, decision 382), each a walk of a value by its type's parts |
 | `text.sisu` | a `String`'s growth, a `String` made from a text, bytes, a byte and an integer's digits appended, an integer's digits in a base |
 | `search.sisu` | text search by Two-Way, and a prefix or a suffix |
 | `floats.sisu` | a float's text: the shortest that reads back as the same number, the fixed form and the form with an exponent, on plain integers or big numbers |
-| `show.sisu` | `Display` and `Debug` of a value by its type, with the names the table holds (decision 383) |
+| `show.sisu` | `Display` and `Debug` of a value by its type, with the names the table holds (decision 383), and a text quoted as `Debug` writes it, which the runtime in Rust asks for (decision 469) |
+| `time.sisu` | a time's text: RFC 3339, as a `DateTime`'s `Debug` writes it, and `fmt.strftime`'s directives (decision 469) |
 | `list.sisu` | lists over raw memory: growth, the moves of `insert`, `remove`, `pop`, `extend`, `reverse` and `swap`, a slice's copies, the stable sort, `in` and `join` (decision 385) |
 | `table.sisu` | the tables of dicts and sets: entries in insertion order, each with its key's hash, and an index of slots probed linearly; a lookup, an entry appended and one taken out, and a table copied, compared and dropped (decision 422) |
 | `iter.sisu` | iterators: the object compiled code steps in part (decision 253), the next item of each kind, the iterator of an `Iterable[T]` argument, every item left, the drop (decision 423) |

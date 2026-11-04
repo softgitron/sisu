@@ -6,19 +6,19 @@
 ##! names come from the table's texts (`desc.rs`), a float's digits from
 ##! `floats.sisu` and an integer's from `text.sisu`, and the entries of a
 ##! dict or a set from `table.sisu`; what the runtime in Rust keeps as
-##! objects of its own (a task's path, a `Shared` cell, an arena, a time) it
-##! shows or reads out through calls of it. Each function appends to the
+##! objects of its own (a task's path, a `Shared` cell, an arena) it shows
+##! or reads out through calls of it, and a time's text is `time.sisu`'s. Each function appends to the
 ##! `String` at `out`.
 
 import rt.floats
 import rt.table
 import rt.text
+import rt.time
 import rt.value
 from rt.host import sisu_rt_alloc
 from rt.host import sisu_rt_free
 from rt.host import sisu_rt_shared_alive
 from rt.host import sisu_rt_show_arena
-from rt.host import sisu_rt_show_datetime
 from rt.host import sisu_rt_show_task
 from rt.types import A
 from rt.types import ARENA
@@ -212,7 +212,7 @@ pub(package) def debug(ts: Types, out: ptr mut u8, p: ptr mut u8, t: int):
         elif k == BYTES:
             quote_bytes(out, p.cast[ptr[u8]]().read().cast_mut(), w.offset(1).read())
         elif k == DATETIME:
-            sisu_rt_show_datetime(out, w.read())
+            time.rfc3339(out, w.read())
         elif k == REF or k == DYN:
             let (q, u) = value.target(ts, p, t)
             debug(ts, out, q, u)
@@ -482,7 +482,7 @@ pure def control(c: int) -> bool:
 ## Requires:
 ## - `text`: `out` holds a live `String`, and `b` points to `n` bytes of
 ##   UTF-8
-def quote_str(out: ptr mut u8, b: ptr mut u8, n: int):
+pub(package) def quote_str(out: ptr mut u8, b: ptr mut u8, n: int):
     text.put(out, 34)
     # safety: in_bounds, valid: the `n` bytes at `b` are live, by `text`, and
     #   a byte needs no alignment.

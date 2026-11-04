@@ -1,8 +1,8 @@
 # Tests run in parallel, each in an interpreter of its own (17,
 # "Isolation and parallelism"), the ones that take the real `System` one
-# at a time after the others; each test's output is held and written in
-# declaration order, so the run prints the same on any number of threads
-# (the runner checks `--jobs 1` against it).
+# at a time after the others; each test's output is held, and shown with
+# its failure alone (decision 466), so the run prints the same on any
+# number of threads (the runner checks `--jobs 1` against it).
 
 def busy(n: int) -> int:
     var total = 0

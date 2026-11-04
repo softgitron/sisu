@@ -2235,6 +2235,10 @@ impl[T: Eq] Eq for Shared[T]:
     pure def eq(self, other: Shared[T]) -> bool:
         return Shared.get(self) == Shared.get(other)
 
+impl[T: Hash] Hash for Shared[T]:
+    pure def hash(self, mut h: Hasher):
+        Shared.get(self).hash(mut h)
+
 impl[T] Debug for Weak[T]:
     @intrinsic("structural.debug")
     pure def fmt_debug(self, mut f: Formatter)
@@ -2425,6 +2429,14 @@ struct Receiver[T]:
 ## neither a view nor must-consume.
 @intrinsic("channel")
 def channel[T](capacity: int) -> (Sender[T], Receiver[T])
+
+## An unbounded channel (06: "unbounded is a separate constructor"):
+## `send` never waits for room, and what is sent and not yet received is
+## held, however much it is, so a producer faster than its consumer grows
+## it without limit; `recv` waits while it is empty. Prefer `channel` with
+## a capacity, which makes a slow consumer slow its producers down.
+def unbounded_channel[T: Send + Escapable]() -> (Sender[T], Receiver[T]):
+    return channel[T](9223372036854775807)
 
 impl[T] Sender[T]:
     ## Sends `value`, waiting while the channel is full; `Closed` once the

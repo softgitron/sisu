@@ -1,0 +1,22 @@
+# `unbounded_channel` (06, decision 465): `send` never waits for room, so
+# a producer sends everything before its consumer runs at all.
+
+def main():
+    let (tx, rx) = unbounded_channel[int]()
+    for i in range(10000):
+        tx.send(i).expect("the receiver is here")
+    tx.close()
+    var total = 0
+    var count = 0
+    for x in rx:
+        total += x
+        count += 1
+    print("{count} values, {total} in all")
+    let (out, inbox) = unbounded_channel[String]()
+    task.scope do s:
+        s.spawn do:
+            for name in ["Aino", "Eino", "Toivo"]:
+                out.send(name.to_string()).expect("sent")
+            out.close()
+        for name in inbox:
+            print("hello, {name}")

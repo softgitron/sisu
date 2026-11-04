@@ -28,6 +28,7 @@ from rt.host import sisu_rt_glue
 from rt.host import sisu_rt_object_copy
 from rt.host import sisu_rt_object_drop
 from rt.host import sisu_rt_object_retain
+from rt.host import sisu_rt_shared_alive
 from rt.host import sisu_rt_trace_release
 from rt.host import sisu_rt_trace_retain
 from rt.types import A
@@ -311,6 +312,16 @@ pub(package) def equal(ts: Types, a0: ptr mut u8, ta0: int, b0: ptr mut u8, tb0:
             return table.equal(
                 ts, a.cast[ptr[u8]]().read().cast_mut(), b.cast[ptr[u8]]().read().cast_mut()
             )
+        if k == SHARED:
+            # Two `Shared` compare their values, as std's `Eq` impl does
+            # (decision 464); a cell that is gone only to itself.
+            let (ca, cb) = (aw.read(), bw.read())
+            let (pa, pb) = (
+                a.cast[ptr[u8]]().read().cast_mut(), b.cast[ptr[u8]]().read().cast_mut()
+            )
+            if sisu_rt_shared_alive(pa) and sisu_rt_shared_alive(pb):
+                return equal(ts, pa, x.offset(A).read(), pb, y.offset(A).read())
+            return ca == cb
         if k == STRUCT:
             let (fa, fb) = (x.offset(PARTS).read(), y.offset(PARTS).read())
             return (
@@ -663,6 +674,12 @@ pub(package) def hash(ts: Types, state: int, p0: ptr mut u8, t0: int) -> int:
             )
         if k == BOX:
             return hash(ts, state, p.cast[ptr[u8]]().read().cast_mut(), h.offset(A).read())
+        if k == SHARED:
+            # A `Shared` hashes as its value (decision 464).
+            let cell = p.cast[ptr[u8]]().read().cast_mut()
+            if sisu_rt_shared_alive(cell):
+                return hash(ts, state, cell, h.offset(A).read())
+            return state
         if k == ENUM or k == ERRSET:
             let e = ts.words.offset(concrete(ts, p, t) * WORDS)
             if e.read() != ENUM:
