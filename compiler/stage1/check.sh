@@ -81,7 +81,9 @@
 #                native list names): each must print the case's `.out`
 #                and `.err` and exit with its `.status`, natively with no
 #                allocation live at exit; a case a rule of RULES.md
-#                refuses (its output `behaviour`) is not run
+#                refuses (its output `behaviour`) is not run, and one whose
+#                errors stop it (its `.err` ends with `D0006` or `D0021`)
+#                must get no SIR and that `.err` from `build --for-run`
 #
 # Then what `check` prints, every diagnostic of a program in the order
 # `sisu check` prints them, from one run of stage 1 per class:
@@ -859,14 +861,10 @@ behaviour_one() {
     program=$(cat "$box/program")
     cwd="$program"
     [ -d "$cwd" ] || cwd=$(dirname "$program")
-    if [ ! -s "$work/behaviour.sir/$k.sir" ]; then
-        echo "stage 1 printed no SIR" > "$box/result"
-        return 0
-    fi
     # The sandbox's paths, which the runner's run in it names relatively.
     local dir
     dir=$(printf '%s' "$cwd" | sed 's/[.[\*^$|]/\\&/g')
-    sed "s|$dir/||g" "$work/behaviour.sir/$k.sir" > "$box/program.sir"
+    sed "s|$dir/||g" "$work/behaviour.sir/$k.sir" > "$box/program.sir" 2> /dev/null
     [ -f "$base.args" ] && mapfile -t args < "$base.args"
     [ -f "$base.stdin" ] && stdin="$base.stdin"
     local out="$box/expected.out" err="$box/expected.err" status=0
@@ -884,6 +882,11 @@ behaviour_one() {
     if [ -f "$override.status" ]; then
         status=$(tr -d ' \n' < "$override.status")
         echo status >> "$box/overridden"
+    fi
+    echo "$status" > "$box/expected.status"
+    if [ ! -s "$work/behaviour.sir/$k.sir" ]; then
+        echo "stage 1 printed no SIR" > "$box/result"
+        return 0
     fi
     local failed=""
     # same_err ERR: the run's standard error is the case's, or what follows
@@ -1004,6 +1007,30 @@ while read -r f; do
         class_listed=$((class_listed + 1))
         report="$report\n  listed:   $rel: behaviour (refused by a rule)"
         continue
+    fi
+    # A case that expects its errors to stop the run (decision 427: its
+    # `.err` ends with `D0006` or `D0021`, its status 1): stage 1 lowers
+    # nothing, and what it prints of the run, the errors and that line
+    # (`build --for-run`, which `sisu run` shows, RULES.md R57), must be the
+    # case's `.err`.
+    box="$work/behaviour/$i"
+    if [ "$result" = "stage 1 printed no SIR" ] && [ -f "$box/expected.err" ] &&
+        tail -n 1 "$box/expected.err" | grep -q '^error\[D00\(06\|21\)\]: the program was not run' &&
+        [ "$(tr -d ' \n' < "$box/expected.status" 2> /dev/null || echo 1)" = 1 ]; then
+        program=$(cat "$box/program")
+        cwd="$program"
+        [ -d "$cwd" ] || cwd=$(dirname "$program")
+        stage1 build --for-run "$program" > "$box/stopped.out" 2> "$box/stopped.err"
+        echo "$?" > "$box/stopped.status"
+        # The line a Sisu program's `main` ends with when it fails, which
+        # the driver takes off (`error: Failed`).
+        sed -i -e "s|$(printf '%s' "$cwd" | sed 's/[.[\*^$|]/\\&/g')/||g" -e '${/^error: Failed$/d}' "$box/stopped.err"
+        if cmp -s "$box/stopped.err" "$box/expected.err" && [ ! -s "$box/stopped.out" ] &&
+            [ "$(cat "$box/stopped.status")" = 1 ]; then
+            same=$((same + 1))
+            continue
+        fi
+        result="stopped by errors, as the case expects, but stage 1 printed otherwise (stopped.err)"
     fi
     class_unlisted=$((class_unlisted + 1))
     report="$report\n  UNLISTED: $rel: behaviour: $result (in $work/behaviour/$i)"

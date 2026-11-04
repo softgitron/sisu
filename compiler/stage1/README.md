@@ -1979,6 +1979,82 @@ again, with R48's order: `ownership/from_required` and
 `wrong/missing_from`. `check.sh` holds a package case to its
 `NAME.pkg.tests` too (R52).
 
+### The sixth round: the driver's version, the stage-0 round's items, the open findings
+
+This round took the difference the merge left unlisted, what the driver
+needs to stop probing stage 1, the base cache's atomic write, the items
+the stage-0 rounds assigned to stage 1, the fifth round's open items and
+the manual's findings that were stage 1's. RULES.md has the rules (R56 to
+R64, decisions 440 to 448) and their decision texts:
+
+- **The merge's difference**: the conformance suite's new
+  `run/stopped_by_errors` (decision 427) expects its errors to stop the
+  run. `check.sh`'s `behaviour` now knows such a case, one whose `.err`
+  ends with `D0006` or `D0021` and whose status is 1: stage 1 prints no
+  SIR of it, and what stage 1's `build --for-run` prints of it, the errors
+  and that line, must be the case's `.err`; it counts as expected. No
+  rule is needed: stage 1 does what the case says.
+- **`sisu1 --version`** (R56) prints `sisu1 0.6.0`, one line, before it
+  reads anything; the minor number is the round that last changed what
+  the driver may rely on, so the driver can ask it rather than probe.
+- **The base cache** (`main.write_base_cache`) is written aside,
+  `base-ID.cache.N.aside` with `N` drawn at random, and renamed over the
+  old one with `Fs.rename` (decision 420): a reader finds the old cache or
+  the new one. What a crashed write left aside goes with the next write
+  of another executable's cache. Not a rule: it changes no output.
+- **The stage-0 rounds' items**: a hole's closure shows each `old(...)`
+  once (R58); `sisu build` and `sisu sir` of a program with errors end
+  with `D0132`, "the program was not compiled", and the build a run asks
+  for (`build --for-run`, which the driver's `sisu run` now passes) with
+  `D0006` as before (R57); the audit names `sisu audit --unsafe --std`.
+  The doubled module path of an impl's method,
+  `kiuas.meter.Dial.kiuas.meter.Meter.read`, is the SIR name both front
+  ends give the method (stage 0's SIR of the same package names it so,
+  checked by hand): the name of a method of a trait impl is the
+  qualified type, the qualified trait and the method, unique and the
+  oracle's, which the classes `sir` hold stage 1 to; what reads oddly is
+  the run time's trace, which prints the SIR name, and is stage 0's to
+  shorten (`Dial.read`, or the trait in brackets). `R0103` (a
+  refinement's check, `contract.fail` of kind 3) is raised: a constant
+  given to a refinement is checked at compile time, in a `comptime`
+  expression whose failure is `E0810`, and that expression is kept in
+  the SIR `sisu sir` prints of a refused program, whose run from that SIR
+  panics with R0103's text (`cases/contracts/refinement_check.sisu`, its
+  `.sir`, the same as stage 0's, and `.diag`). Nothing else lowers a
+  refinement's check: any other value becomes one only through
+  `try_from`, which returns an error.
+- **The fifth round's open items and the manual's findings**:
+  `debug_assert` (R59); `import a.b.Item`, `E0223` with the fix
+  `from a.b import Item` (R60); a `Slice` given to `sorted`, `{b.note ??
+  "-"}` in an interpolation and `comptime name(bool)` (R61, the last a
+  regression of stage 1's name pass, which the Rust front end took);
+  `@derive(Decode)` on an enum stopped at the derive (R62); the fixes and
+  notes for `map(f)` over references, `enumerate(start=1)`, `1.` and `.5`,
+  Python's conditional and walrus inside an expression, `E0231` for a
+  parameter's type, `E0801`'s `pure def` and a manifest's key reported
+  twice (R63); a variadic parameter and star unpacking, `E0900` saying so
+  (R64).
+
+Decided against this round, from the documents: a `u32` shifted by an
+`int` widens to `int`, as D-016's implicit lossless widening has every
+mix of a sized integer and an `int` (03 and 02 say nothing of a shift's
+type, so a shift is an operator as the others); the trace's names (stage
+0's, above); lowering star unpacking, whose refutable pattern 02 gives no
+`else` for, and a variadic parameter, which 02 and 14 disagree on (R64);
+and adapting a function given as `map(f)` to references by itself, which
+would be an implicit conversion (R63 offers the closure instead).
+
+Open: a derived impl's diagnostics are still placed in `<derive>/` (only
+R62's derive stops at the derive's argument; the others need each
+template's diagnostics mapped back to the attribute); a call of a
+function with a variadic parameter is also `E0305` after R64's `E0900`;
+`E0260` for a dependency whose `when` excludes the target, and the
+derives' messages; and the rest of "What is next", 11.
+
+Two of the conformance suite's `.diag` files are blessed again, with R63:
+`contracts/contract_errors` (`E0801`'s fix) and
+`packages/manifest_errors` (no `E1002` beside `E1003`).
+
 ## Module layout
 
 | Module | Lines | What | Stage 0 original |
@@ -2678,7 +2754,9 @@ last line and makes the base whole (a miss), and two runs that write at
 once write the same bytes, since the cache of one executable and one
 standard library is one text. A rename is the runtime's to add (a host
 call of the interpreter and of the native runtime, `Fs.rename`), after
-which `write_base_cache` writes `base-ID.cache.PID` and renames it.
+which `write_base_cache` writes `base-ID.cache.PID` and renames it. The
+sixth round does: the cache is written aside, `base-ID.cache.N.aside`,
+and renamed over the old one (decision 420).
 
 ### The compile-time evaluator
 
@@ -2772,9 +2850,9 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
 8. **Start-up and speed** (above, "Starting up" and "The compile-time
    evaluator"): the base's prelude, `cap` and `builtin_impls`, parsed and
    resolved again by each command, which a cache of the parsed and
-   resolved base itself would remove; the base cache's write, atomic once
-   std's `Fs` has a rename (the runtime's); and the evaluator's reads
-   through a reference of a whole value (`target`).
+   resolved base itself would remove; and the evaluator's reads through a
+   reference of a whole value (`target`). The base cache's write is
+   atomic since the sixth round (`Fs.rename`).
 9. **Unsafe code** (above, "Unsafe code"): since round 11 the intrinsics
    of `std.mem` run in stage 0's interpreter, on the checked memory model
    of D-085 with the foreign calls of `extern` blocks emulated, and
@@ -2794,8 +2872,10 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     is stage 0's: the driver's `sisu test` and `sisu bench`, which may now
     run stage 1 once (`sir --tests` with the program's warnings and the
     build's options, R47; RULES.md says what the driver may rely on), and
-    until then print a program's warnings twice; `Fs.rename`; and the
-    host's equality of `Shared` values, which compares identity where
+    until then print a program's warnings twice (the driver now runs
+    stage 1 once when its probe finds a stage 1 that reports, decision
+    424, and may ask `sisu1 --version` instead, R56); and the host's
+    equality of `Shared` values, which compares identity where
     std's `impl[T: Eq] Eq for Shared[T]` compares the values (`a == b`
     lowers to the host's structural `eq`, which the interpreter and the
     runtime in Sisu would follow to the value as decision 384 did for
@@ -2803,24 +2883,22 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     one argument, `sum(x for x in xs)`, which 02's parentheses rule out;
     a trait's constant through a type parameter as a constant argument
     (R50 decides against it); the loop directives (R53, 19's N-22).
-11. **The manual's findings left** (after R54 and R55), of the front end:
-    a variadic parameter and star unpacking (designed and missing), a
-    test's name with `{` or `\"`, `it` in a list of functions,
-    `debug_assert`, `import a.b.Item` (`E0223`), a dev-dependency imported
-    by the package's code, `E0202` for a function named like its module,
-    a parameter that hides a module; `map(f)` over references, `sorted`
-    of a `Slice`, a literal beside a `BigInt` or a `Decimal`, a `u32`
-    shifted by an `int`, `@repr(u8)` and explicit discriminants, the
-    `own self` method that skips the invariant, `result` in `ensures`;
-    `zip`'s temporaries, `sorted`'s note, `E0405`'s note and label, `{b.note
-    ?? "-"}`; a derived impl's diagnostics in `<derive>/`, an error in
-    unrolled code, a template's interpolated literal, `comptime
-    name(bool)`, `reflect.construct` of a plain parameter, a field's `ty`
-    in a derive, `@derive(Decode)` on an enum; and of "Diagnostics without
-    fixes" the keyword used as a name, a positional-only parameter passed
-    by name, `E0231`'s generic parameter, `E0335` naming the operation,
-    `E0204` naming the feature, `JsonError` alone, `else as e` on a
-    statement, `E0801`'s `pure def`, `E0981`'s name, `enumerate(start=1)`,
-    `1.` and `.5`, Python's conditional and the walrus inside an
-    expression, `lambda`, `f"..."`, `class`, `try:` and `go f()`, and the
-    manifest's and the derives' messages.
+11. **The manual's findings left** (after R54 to R64), of the front end:
+    lowering a variadic parameter and star unpacking (R64 refuses them
+    with `E0900`, the first waiting for the owner, since 02 and 14
+    disagree), a test's name with `{` or `\"`, `it` in a list of
+    functions, a dev-dependency imported by the package's code, `E0202`
+    for a function named like its module, a parameter that hides a
+    module; a literal beside a `BigInt` or a `Decimal`, `@repr(u8)` and
+    explicit discriminants, the `own self` method that skips the
+    invariant, `result` in `ensures`; `zip`'s temporaries, `sorted`'s
+    note, `E0405`'s note and label; a derived impl's diagnostics in
+    `<derive>/`, an error in unrolled code, a template's interpolated
+    literal, `reflect.construct` of a plain parameter, a field's `ty` in a
+    derive; and of "Diagnostics without fixes" the keyword used as a
+    name, a positional-only parameter passed by name, `E0335` naming the
+    operation, `E0204` naming the feature, `JsonError` alone, `else as e`
+    on a statement, `E0981`'s name, `lambda`, `f"..."`, `class`, `try:`
+    and `go f()`, `E0260` for a dependency that `when` excludes, and the
+    derives' messages. Decided against: a `u32` shifted by an `int` keeps
+    D-016's widening (above, "The sixth round").

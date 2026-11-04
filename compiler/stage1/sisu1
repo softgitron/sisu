@@ -20,6 +20,7 @@
 #   sisu1 doc --std [MODULE...]                  as `sisu doc` writes it, with its exit status
 #   sisu1 lint [--format=ids] [PATH]             the program's lints, which `check` does not
 #                                                print (RULES.md, R11)
+#   sisu1 --version                              stage 1's version, `sisu1 VERSION` (RULES.md, R56)
 #   sisu1 test [OPTIONS] [PATH]                  the tests, built by stage 1 and run by stage 0's
 #                                                runner (`sisu test --from-sir`), exiting 1 when
 #                                                one failed and 3 when none did and one is
@@ -120,7 +121,7 @@ fi
 [ "${1:-}" = "--" ] && shift
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-"$exe" --home "$compiler" build --native ${features[@]+"${features[@]}"} ${path[@]+"${path[@]}"} \
+"$exe" --home "$compiler" build --native --for-run ${features[@]+"${features[@]}"} ${path[@]+"${path[@]}"} \
     --output "$tmp/program" > /dev/null || exit $?
 "$tmp/program" "$@"
 exit $?

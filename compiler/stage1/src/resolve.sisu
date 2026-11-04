@@ -1230,6 +1230,14 @@ impl Resolver:
                         return ImportTarget.Failed(None)
             if let Some(module) = std_module(words):
                 return ImportTarget.Std(module)
+            # An item of a std module named as a module, `import
+            # std.json.JsonError`: the type checker's `E0223` (RULES.md, R60).
+            if len(parts) >= 2:
+                var prefix: list[String] = []
+                for k in range(len(parts) - 1):
+                    prefix.push(parts[k].copy())
+                if std_module(prefix.join(".")).is_some():
+                    return ImportTarget.Failed(None)
             return ImportTarget.Failed(self.unknown_import(words, start, end))
         var m = found
         for i in range(1, len(parts)):
@@ -2506,8 +2514,30 @@ impl Resolver:
             self.with_type_arguments(callee)
         else:
             self.expr(callee)
+        # A scalar type given as an argument, `comptime name(bool)` to a
+        # `comptime def` that takes `T: type`, is the type checker's to read
+        # (RULES.md, R61), as `String` is.
         for i in range(1, len(kids)):
-            self.expr(kids[i])
+            self.call_argument(kids[i])
+
+    ## A call's argument: a bare scalar type's name, not a local's, is left
+    ## to the type checker; anything else is an expression.
+    pure def call_argument(mut self, n: int):
+        if self.kind(n) == SyntaxKind.ArgList:
+            for c in child_nodes(self.tree, n):
+                self.call_argument(c)
+            return
+        var value = n
+        if self.kind(n) == SyntaxKind.Arg:
+            let inner = child_nodes(self.tree, n)
+            if len(inner) == 1:
+                value = inner[0]
+        if self.kind(value) == SyntaxKind.NameRef:
+            if let Some(t) = first_token(self.tree, value, SyntaxKind.Ident):
+                let name = self.text_of(t)
+                if is_primitive(name) and not self.is_local(name):
+                    return
+        self.expr(n)
 
     ## `base[args]` whose arguments are types: the base as an expression,
     ## each argument as a type.

@@ -1,0 +1,14 @@
+# RULES.md, R58: a hole's closure shows each `old(...)` value of the
+# function's contract once, however many times its `ensures` writes it
+# (the manual's finding from chapter 23, `withdraw`'s closure).
+struct Account:
+    balance: int
+
+    def withdraw(mut self, cents: int) -> bool:
+        ensures result or self.balance == old(self.balance)
+        ensures not result or self.balance <= old(self.balance) - cents
+        return todo("withdraw")
+
+def main():
+    var a = Account(balance=1000)
+    print(a.withdraw(250))

@@ -26,4 +26,4 @@ lints:
   ../cbind/sisu.toml:4:10-4:18 E1021 package.unsafe-untrusted name="cbind" level="memory"
   ../quiet/sisu.toml:4:10-4:18 E1021 package.unsafe-untrusted name="quiet" level="extern"
   ../quiet/sisu.toml:4:10-4:18 W0012 unsafe.level level="extern" why="and contains no unsafe code: remove it"
-std (toolchain)   unsafe = "extern"   see `sisu1 audit --unsafe --std`
+std (toolchain)   unsafe = "extern"   see `sisu audit --unsafe --std`

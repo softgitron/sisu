@@ -7,4 +7,4 @@ operations.sisu   no `unsafe`   a program of one file, which declares no level
     operations.sisu:64   unsafe block in doubled   # safety: pure: the count is read only by `hits_of`, which is not pure, so no pure code can tell how often thi...
     operations.sisu:73   unsafe block in main   # safety: in_range: 4096 has four digits, and 0 to 3 are less than four.
     operations.sisu:77   unsafe expression in main   # safety: in_range: 7 has one digit.
-std (toolchain)   unsafe = "extern"   see `sisu1 audit --unsafe --std`
+std (toolchain)   unsafe = "extern"   see `sisu audit --unsafe --std`

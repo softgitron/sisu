@@ -1853,7 +1853,10 @@ fn stage1_command(
                     .unwrap_or_default()
             };
             let exe = target.file.then(|| aside.join(target.path.as_deref().map(stem).unwrap_or_default()));
-            let mut words = vec!["build".to_string(), "--native".to_string()];
+            // `--for-run`: a program's errors stop it with the line that says
+            // it was not run (`D0006`, `D0021`), where a build says it was
+            // not compiled (stage 1's R57).
+            let mut words = vec!["build".to_string(), "--native".to_string(), "--for-run".to_string()];
             if opts.release {
                 words.push("--release".into());
             }
@@ -1894,7 +1897,7 @@ fn stage1_command(
             let dir = std::env::temp_dir().join(format!("sisu-sir-{}", std::process::id()));
             let _ = std::fs::create_dir_all(&dir);
             let sir_file = dir.join("program.sir");
-            let mut words = vec!["build".to_string(), "--native".to_string()];
+            let mut words = vec!["build".to_string(), "--native".to_string(), "--for-run".to_string()];
             words.extend(contracts);
             program(&mut words);
             words.push("--output".into());

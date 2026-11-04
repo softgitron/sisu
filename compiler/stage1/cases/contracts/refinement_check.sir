@@ -1,0 +1,61 @@
+sir 0
+source 0 "refinement_check.sisu"
+entry main
+
+intrinsic contract.fail pure
+intrinsic fmt.debug pure
+intrinsic fmt.new pure
+intrinsic print
+
+fn main(0) source 0 @11:5-11:9 {
+    let _0: ()
+    let _1: int "p" @12:9-12:10
+    let _2: ()
+  bb0:
+    _1 = call fn main#comptime0() @12:19-12:20
+    _2 = call intrinsic print(copy _1) @13:5-13:13
+    _0 = const ()
+    return
+}
+
+fn main#comptime0(0) comptime 1000000 pure source 0 @12:19-12:20 {
+    let _0: int
+    let _1: bool
+    let _2: String
+    let _3: ref mut String
+    let _4: ()
+    let _5: (int, String)
+    let _6: list[(int, String)]
+    let _7: Never
+  bb0:
+    _1 = call fn Port#where(const 0) @12:19-12:20
+    switch copy _1 [0: bb2, else: bb1] @12:19-12:20
+  bb1:
+    _0 = const 0 @12:19-12:20
+    return @12:19-12:20
+  bb2:
+    _2 = call intrinsic fmt.new() @12:19-12:20
+    _3 = ref mut _2 @12:19-12:20
+    _4 = call intrinsic fmt.debug(copy _3, const 0, const "") @12:19-12:20
+    goto bb3
+  bb3 (unwind bb4):
+    _5 = tuple(const 0, move _2) @12:19-12:20
+    _6 = list(move _5) @12:19-12:20
+    _7 = call intrinsic contract.fail(const 3, const "Port", const "1 <= self <= 65535", move _6) @12:19-12:20
+    unreachable @12:19-12:20
+  bb4 (cleanup):
+    resume
+}
+
+fn Port#where(1) pure source 0 @9:23-9:41 {
+    let _0: bool
+    let _1: int "self" @9:23-9:41
+  bb0:
+    _0 = le const 1, copy _1 @9:23-9:41
+    switch copy _0 [0: bb1, else: bb2] @9:23-9:41
+  bb1:
+    return @9:23-9:41
+  bb2:
+    _0 = le copy _1, const 65535 @9:23-9:41
+    return @9:23-9:41
+}

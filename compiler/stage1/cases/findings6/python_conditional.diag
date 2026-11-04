@@ -1,0 +1,3 @@
+5:11-5:38 E0115 parse.python-conditional
+  fix parse.use-if-expression 5:11-5:38 "if n > 2: \"big\" else: \"small\""
+7:11-7:13 E0123 parse.walrus

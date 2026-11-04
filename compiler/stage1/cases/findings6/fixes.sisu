@@ -1,0 +1,16 @@
+# RULES.md, R63: the fixes and notes the manual's writers found missing.
+trait Priced:
+    def price(self) -> int
+
+def doubled(n: int) -> int:
+    return n * 2
+
+def total(p: Priced) -> int:
+    return p.price()
+
+def main():
+    let xs = [1, 2]
+    let ys: list[int] = xs.iter().map(doubled).collect()
+    for i, x in enumerate(xs, start=1):
+        print("{i} {x}")
+    print(ys)

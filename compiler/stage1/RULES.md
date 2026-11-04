@@ -3543,3 +3543,342 @@ other errors above, which `sisu` now prints with the notes and fixes.
      with `own` (`E0300`), the narrowing conversion of an `int` (`E0300`),
      a capitalised name a `let` binds (`E0327`), and `E0417`, `E0806` and
      `E0810` without an article. Stage 1 decides it (RULES.md, R55).
+
+## R56. `sisu1 --version` prints stage 1's version (decision 440)
+
+**The rule.** `sisu1 --version` and `sisu1 version` print one line,
+`sisu1 0.6.0`, stage 1's version, and exit with 0, before anything is
+read (the catalog, the standard library); any other argument after it is
+the usage error it was. The version is the package's (`sisu.toml`, and
+`main.VERSION`), whose minor number is the round of this file that last
+changed what the driver may rely on: 0.6.0 is the sixth round's, whose
+`sir --tests` reports the program's diagnostics itself (R46, R47).
+
+**Why.** The driver asks which stage 1 it runs by a probe, `sir --tests
+--locked` of an empty directory (decision 424), which reads the catalog
+and the base; a version that says it is cheaper and says more.
+
+**In stage 1.** `main.main` (`VERSION`), `sisu.toml` and its lockfile, and
+stage 2's lockfile, which names stage 1's version.
+
+**What it changes.** Nothing `check.sh` compares.
+
+**What the stage-0 side must do.** `Stage1::sir_reports` may ask
+`--version` instead of probing: a stage 1 that prints `sisu1 0.6.0` or a
+later version reports from `sir --tests` (an older stage 1 stops at its
+usage), and it may keep the answer beside the executable as now.
+
+**Decision 440**, for docs/architecture.md:
+
+440. `sisu1 --version` (and `sisu1 version`) prints `sisu1 VERSION`, stage
+     1's version, one line, before it reads anything; its minor number is
+     the round of stage 1's rules that last changed what the driver may
+     rely on, 6 for the stage 1 whose `sir --tests` reports the program's
+     diagnostics, so that the driver may ask it rather than probe `sir
+     --tests --locked` (decision 424). Stage 1 decides it (RULES.md, R56).
+
+## R57. A build that stops at errors says the program was not compiled (decision 441)
+
+**The rule** (17 and the driver's messages: `D0006` says "the program was
+not run", which only a run means). A build of a program with an error,
+stage 1's `build` (`sisu build`, with or without `--native` and
+`--release`) and what `sisu sir` prints of a program it has no SIR of,
+ends with `D0132` (`cli.not-compiled`, "the program was not compiled:
+errors found (N)"), at the front end's errors, the typed holes of a
+release build, a failed `comptime` expression and the ownership
+checker's errors alike, where it ended with `D0006` or `D0021`. A build
+for a run, `build --for-run` (which the driver's `sisu run` and `sisu run
+--native` ask for, and `sisu1 run`), ends as before, with `D0006`, or
+`D0021` at the ownership checker's errors. `sir --tests` ends as `sisu
+test` does (R46).
+
+**Why.** The manual's finding: "`sisu build` and `sisu sir` of a program
+with errors end with D0006, 'the program was not run'" (R16): a build
+runs nothing. The driver's run prints what stage 1's build printed, so
+the build that a run asks for keeps its line.
+
+**In stage 1.** `main`: the `build` command (`--for-run`, `BuildHow`),
+`build_command` and `build_program`; `sisu1` (`run`); the catalog's
+`D0132`. The driver (`cli.rs`): `sisu run` and `sisu run --native` pass
+`--for-run`.
+
+**What it changes.** What `sisu build` and `sisu sir` print of a program
+with errors, which no class of `check.sh` compares with stage 0 (whose
+Rust front end keeps `D0006`); `sisu run` is as before (the conformance
+suite's `run/stopped_by_errors`). The case
+`cases/run/build_stopped.sisu` (its `.release`, what `build --native
+--release` prints).
+
+**Decision 441**, for docs/architecture.md:
+
+441. A build of a program with an error, `sisu build` (with or without
+     `--native`) and `sisu sir` of a program it has no SIR of, ends with
+     `D0132`, "the program was not compiled: errors found (N)", where it
+     ended with `D0006`, "the program was not run"; `sisu run` builds
+     with stage 1's `build --for-run`, which ends as before with `D0006`,
+     or `D0021` at the ownership checker's errors, and `sir --tests`
+     ends as `sisu test` does. Stage 1 decides it (RULES.md, R57).
+
+## R58. A hole's closure shows each `old(...)` once (decision 442)
+
+**The rule** (17, typed holes: the closure shows the values in scope).
+A hole's closure in a function with a contract shows each `old(...)`
+value the contract keeps once, however many places its clauses write the
+same text, where it showed one line for each (the value is the same: each
+is taken on entry).
+
+**Why.** The manual's finding from chapter 23: `withdraw`'s closure
+showed `old(self.balance) = 1000` twice.
+
+**In stage 1.** `borrowck.holes.close_function` (`old_shown`).
+
+**What it changes.** The closure of a hole in a function whose contract
+writes an `old(...)` more than once, which only stage 1 prints (R27); no
+program of the corpus. The case `cases/holes/old_once.sisu` (its `.err`).
+
+**Decision 442**, for docs/architecture.md:
+
+442. A typed hole's closure shows each `old(...)` value of its
+     function's contract once, by its text, however many clauses write
+     it, where it showed a line for each place. Stage 1 decides it
+     (RULES.md, R58).
+
+## R59. `debug_assert` (decision 443)
+
+**The rule** (02: "`assert`, `debug_assert` and `todo` are compiler
+intrinsics ... `debug_assert` is the form that release builds strip").
+`debug_assert cond` and `debug_assert cond, message` are statements, an
+assertion whose first word is `debug_assert` (a name, not a keyword: as
+`expect`, it is the statement only before an expression). Checked as
+`assert` is, its parts shown when it fails, where the build checks every
+contract (`--contracts=all`, the debug profile's and `sisu test`'s);
+stripped, its condition not evaluated, where it checks fewer (`off` or
+`preconditions`, the release profile's default, 07).
+
+**Why.** The manual's finding (R15): "`debug_assert` ... is not a
+statement: `debug_assert x == y` is E0117".
+
+**In stage 1.** `parser.stmts.statement` (an `AssertStmt` that starts with
+the name), `typeck.check` (`TStmt.Assert.debug`), `lower.stmts`.
+
+**What it changes.** Programs that write `debug_assert`, which stage 0
+refuses (`E0117`); none of the corpus. The case
+`cases/findings6/debug_assert.sisu` (its `.out`, `.err` and `.status`).
+
+- Differs: `compiler/stage1/cases/findings6/debug_assert.sisu`: tree, trivia-tree, ast, ids, human, fmt-check, doc, doc-output
+
+**Decision 443**, for docs/architecture.md:
+
+443. `debug_assert cond[, message]` is a statement, `assert`'s form that
+     a build checking fewer than all contracts strips (02, 07): checked
+     with every part shown where the build checks all of them (a debug
+     build, `sisu test`), not evaluated where it checks `preconditions`
+     or none (the release profile's default). `debug_assert` is a name,
+     the statement only before an expression. Stage 1 decides it
+     (RULES.md, R59).
+
+## R60. `import a.b.Item` is `E0223` (decision 444)
+
+**The rule** (09: `import` names a module; `from a.b import Item` an item
+of one). An `import` whose path but its last name names a module, of the
+program, a dependency or std, of which the last name is no module, is
+`E0223` (`resolve.not-a-module`, "`std.json.JsonError` is not a module"),
+with the fix `resolve.import-from-module` that writes `from std.json
+import JsonError` (with `as` and `pub` as written); where std's module
+declares no such item, `E0204` (`resolve.not-in-module`). The uses of
+the name it would bind are not reported again.
+
+**Why.** The manual's finding (R13): "`import atlas.geo.point.Point`, an
+item named as a module, is E0203 ('there is no module') where the
+catalog has E0223 for it", and for std's modules `E0220`, which names no
+module either.
+
+**In stage 1.** `typeck.collect.item_imported`, before `import_target`;
+the name pass's `import_target` leaves a std module's item to it.
+
+**What it changes.** Programs that import an item with `import`, which
+stage 0 reports as `E0203` or `E0220`. The case
+`cases/findings6/import_item.sisu` (its `.diag`).
+
+- Differs: `compiler/stage1/cases/findings6/import_item.sisu`: names, ids, human, doc, doc-output
+
+**Decision 444**, for docs/architecture.md:
+
+444. `import a.b.Item`, whose path but its last name is a module that has
+     no module `Item`, is `E0223` ("is not a module") with the fix that
+     writes `from a.b import Item`, and `E0204` where a std module
+     declares no such item, where it was `E0203` or `E0220`, which say
+     there is no module. Stage 1 decides it (RULES.md, R60).
+
+## R61. Forms the documents give: a `Slice` as an `Iterable`, `{x ?? "-"}`, a scalar type as a `comptime` argument (decision 445)
+
+**The rule.**
+
+- A `Slice[T]` and `bytes` given to an `Iterable[T]` parameter
+  (`sorted(xs)`, `enumerate`, `zip`, `sum`) is iterated through its
+  iterator, as a `for` loop iterates it, when its items decay to what the
+  parameter takes (a `Copy` item); else the error names the view as
+  before (11: `sorted` takes any iterable).
+- In an interpolation, which only reads its values (R14), `place ??
+  default` over an optional `String` place reads it as an optional `str`
+  rather than moving the `String` out of the place:
+  `{b.note ?? "-"}` with `b` the variable of a loop over a list of
+  structs.
+- A scalar type's name, `int`, `f64`, `bool`, `char`, `str`, given as a
+  call's argument is the type checker's to read, as `String` is: a
+  `comptime def` that takes `T: type` takes it (`comptime name(bool)`,
+  08), and anywhere else it is `E0200` as before, from the type checker,
+  with the note on Python's conversions.
+
+**Why.** The manual's findings: "`sorted(xs)` with `xs` a `Slice[int]` is
+E0300 ... though `for x in xs` works" (chapter 26); "`{b.note ?? "-"}`
+... is E0419" (G7); "`comptime name(bool)` is E0200 ... though `String`,
+`uint`, `u8` and the program's own types work and the Rust front end
+takes every one" (R12), a regression of stage 1's name pass.
+
+**In stage 1.** `typeck.expr.view_iter` (from `iterable_of`) and
+`typeck.call.iterable_arg`; `typeck.expr.string_literal` and `coalesce`
+(`Checker.reading_coalesce`, `read_option`); `resolve.call_argument` and
+`typeck.expr.name_expr`.
+
+**What it changes.** Programs with such forms, which stage 0 refuses but
+the third (whose run is the same). The cases
+`cases/findings6/read_forms.sisu` (its `.out`) and
+`cases/findings6/scalar_values.sisu` (its `.diag`).
+
+- Differs: `compiler/stage1/cases/findings6/read_forms.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings6/scalar_values.sisu`: names, ids, human, doc, doc-output
+
+**Decision 445**, for docs/architecture.md:
+
+445. A `Slice` and `bytes` given to an `Iterable[T]` parameter are
+     iterated through their iterators, as a `for` loop iterates them; an
+     interpolation's `place ?? default` over an optional `String` reads
+     the place as an optional `str` (decision 295's reading); a scalar
+     type's name given as an argument is a type a `comptime def` taking
+     `T: type` takes, and `E0200` elsewhere. Stage 1 decides it (RULES.md,
+     R61).
+
+## R62. `@derive(Decode)` on an enum stops the derive (decision 446)
+
+**The rule** (11; R36: `@derive(Decode)` gives a struct its form).
+`@derive(Decode)` of `std.json` on an enum is `E0608`
+(`comptime.derive-failed`, "deriving `Decode` for `Lake` stopped at
+compile time: `json.Decode` is derived for a struct only; an enum
+implements it with an `impl Decode` of its own") at the derive's
+argument, where the derive was accepted, its method's `comptime panic`
+went unseen and the run stopped at an invalid SIR (`E0501`) that `check`
+did not report.
+
+**Why.** The manual's finding from G7.
+
+**In stage 1.** `typeck.instances` (the derives of a std module).
+
+**What it changes.** Programs that derive `Decode` for an enum, which
+stage 0 accepts. The case `cases/findings6/decode_enum.sisu` (its
+`.diag`).
+
+- Differs: `compiler/stage1/cases/findings6/decode_enum.sisu`: ids, human, doc, doc-output
+
+**Decision 446**, for docs/architecture.md:
+
+446. `@derive(Decode)` on an enum is `E0608` at the derive, since R36's
+     derive gives a struct's form only, where it was accepted and the
+     program's run stopped at an invalid SIR. Stage 1 decides it
+     (RULES.md, R62).
+
+## R63. The fixes and notes the manual's writers found missing, the fifth round's rest (decision 447)
+
+**The rule.** Each a note or a fix on an error stage 1 already reports,
+or the code of a parse error where a statement starts given inside an
+expression too:
+
+- a function that takes a `Copy` value given where one taking it by
+  reference is expected, `xs.iter().map(doubled)` (`E0300`): the fix
+  `type.call-with-value`, `x -> doubled(x)`;
+- Python's `enumerate(xs, start=1)` (`E0306`): the note
+  `type.enumerate-start`, that `enumerate` counts from 0;
+- Python's `1.` and `.5` (`E0100`, `E0103`): the fix
+  `parse.sisu-spelling`, `1.0` and `0.5`;
+- Python's `a if c else b` and walrus inside an expression, where a
+  bracket closes or a comma follows: `E0115` with its fix and `E0123`, as
+  where a statement starts, where both were `E0100` ("expected `)`");
+- a trait written as a parameter's whole type (`E0231`): the fix
+  `resolve.add-ref-dyn`, `ref dyn Priced`, and the note
+  `resolve.trait-generic`, the generic parameter, where the fix wrote
+  `dyn Priced`, which is `E0395` there;
+- a contract that calls a plain `def` of its module that is not `pure`
+  (`E0801`): the fix `contract.make-pure`, `pure def`;
+- a `[package]` key written with a bad value (`E1003`) is not also missing
+  (`E1002`);
+- `sisu audit --unsafe` names itself `sisu audit --unsafe --std`, where
+  it wrote `sisu1`.
+
+**Why.** The manual's findings (Diagnostics without fixes; chapters 14,
+16 and 23; R1, R13, R19, G2).
+
+**In stage 1.** `typeck.expr.by_value_closure`, `typeck.call`
+(`check_args`), `parser.habits.with_habit` and `parser.state.expect_name`,
+`parser.state.expect` and `python_conditional_in`,
+`typeck.collect` (`param_type_at`), `typeck.purity.pure_def_at`,
+`manifest`, `main.audit_command`; the catalog.
+
+**What it changes.** The diagnostics of programs with these mistakes; of
+the corpus, `contracts/contract_errors` (`E0801`'s fix) and
+`packages/manifest_errors` (no `E1002`), whose `.diag` files are blessed
+again. The cases `cases/findings6/fixes.sisu`, `python_conditional.sisu`,
+`float_point.sisu`, `float_lead.sisu` and `pure_fix.sisu` (their
+`.diag`).
+
+- Differs: `compiler/conformance/cases/contracts/contract_errors.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/packages/manifest_errors.pkg`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings6/fixes.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings6/float_lead.sisu`: tree, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/findings6/float_point.sisu`: tree, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/findings6/pure_fix.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings6/python_conditional.sisu`: tree, ids, human, fmt-check, doc, doc-output
+
+**Decision 447**, for docs/architecture.md:
+
+447. The fixes and notes the manual's writers found missing: a closure
+     that passes a value, `x -> f(x)`, for a function given where its
+     argument is a reference; `enumerate`'s count from 0; `1.0` and `0.5`
+     for Python's `1.` and `.5`; `E0115` and `E0123` inside an
+     expression; `ref dyn T` and a generic parameter for a trait written
+     as a parameter's type; `pure def` for a contract's impure callee; no
+     `E1002` for a key written with a bad value. Stage 1 decides it
+     (RULES.md, R63).
+
+## R64. A variadic parameter and star unpacking are `E0900` (decision 448)
+
+**The rule.** 02 gives `*xs: T` (variadic arguments collected into a
+`Slice[T]`) and `let first, *rest = xs` (star unpacking), and 14 lists
+"variadic functions" among what Sisu does not have; stage 1 lowers
+neither. A variadic parameter is `E0900` (`stage0.unsupported`, "a
+variadic parameter, `*xs: T`, is not implemented in stage 0 yet; it
+arrives with the decision between 02, which gives it, and 14, which rules
+variadic functions out ..."), where the checker stopped with "beyond the
+slice", no code, and `check` exited 0; a `let` whose tuple pattern has a
+star is one `E0900` that names `case [first, *rest]:` in a `match`, where
+it was `E0326`, `E0329` and `E0387`, and its names are bound, of no type.
+
+**Why.** The manual's findings (chapters 3 and 5, X1). The documents
+disagree on variadics, which waits for the owner; star unpacking is 02's
+and waits for its lowering (a refutable pattern without `else`, which 02
+does not say how it fails).
+
+**In stage 1.** `typeck.collect` (the parameters), `typeck.check.star_unpacking`.
+
+**What it changes.** Programs with either form, none of the corpus. The
+case `cases/findings6/designed_missing.sisu` (its `.diag`).
+
+- Differs: `compiler/stage1/cases/findings6/designed_missing.sisu`: ids, human, doc, doc-output
+
+**Decision 448**, for docs/architecture.md:
+
+448. A variadic parameter is `E0900`, naming the disagreement between 02,
+     which gives it, and 14, which rules variadic functions out, where the
+     checker stopped without a code and `check` passed; star unpacking in
+     a `let` is one `E0900` that names the list pattern of a `match`,
+     where it was three errors of its pattern. Stage 1 decides it
+     (RULES.md, R64).

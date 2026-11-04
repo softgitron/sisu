@@ -1357,6 +1357,10 @@ impl Checker:
                                     sig.name == "sorted" or sig.name == "max" or sig.name == "min"
                                 ):
                             d = d.note(Msg.TypeSortByKey)
+                        # Python's `enumerate(xs, start=1)`: Sisu's counts from
+                        # 0 (RULES.md, R63).
+                        if key.text == "start" and sig.name == "enumerate":
+                            d = d.note(Msg.TypeEnumerateStart)
                         self.report(d)
                         # A function named as the value (`key=len`) is no
                         # error of its own.
@@ -1586,8 +1590,17 @@ impl Checker:
     ## An argument for an `Iterable[T]` parameter: any collection or
     ## iterator of `T`.
     pure def iterable_arg(mut self, cx: Cx, a: ArgIn, pty: Ty, targs: list[Ty]) -> TArg:
-        let x = self.arg_infer(cx, a, None)
+        let passed = self.arg_infer(cx, a, None)
         let item_ty = if targs.is_empty(): Ty.error() else: targs[0]
+        # A `Slice` or `bytes` through its iterator (RULES.md, R61), when its
+        # items are what the parameter takes; else the error names the view.
+        var x = passed
+        let viewed = self.view_iter(cx, passed)
+        if viewed != passed:
+            if let Some((item, _)) = self.iteration_item(cx, self.ty_of(viewed), Mode.Borrow):
+                let it = self.decay_ty(cx, item)
+                if self.infer.try_unify(mut self.types, it, item_ty):
+                    x = viewed
         # An `Iterable` parameter passed on as it is: the reference to what
         # the caller gave.
         if let TyData.Ref(inner, _) = self.data(self.ty_of(x)):

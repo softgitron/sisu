@@ -1,0 +1,13 @@
+warning[W0001]: typed hole `withdraw` of type `bool`
+  --> old_once.sisu:10:16
+   |
+10 |         return todo("withdraw")
+   |                ^^^^^^^^^^^^^^^^
+
+in scope at the typed hole `todo("withdraw")`:
+  self = Account(balance=1000)
+  cents = 250
+  old(self.balance) = 1000
+panic: reached the typed hole `todo("withdraw")`
+  at Account.withdraw (old_once.sisu:10:16)
+  at main (old_once.sisu:14:11)

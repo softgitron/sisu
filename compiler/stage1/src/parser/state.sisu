@@ -293,6 +293,19 @@ impl Parser:
     pub(package) pure def expect(mut self, kind: SyntaxKind) -> bool:
         if self.eat(kind):
             return True
+        # Inside an expression, where a bracket closes or a comma follows:
+        # Python's `a if c else b` (E0115) and walrus (E0123) say what they
+        # are, as they do where a statement starts (RULES.md, R63).
+        let closing = match kind:
+            case RParen | RBracket | RBrace | Comma: True
+            case _: False
+        if closing:
+            if let Some(c) = self.python_conditional_in(True):
+                self.report(c)
+                return False
+            if self.at(SyntaxKind.Walrus):
+                self.error(Msg.ParseWalrus)
+                return False
         let (start, end) = self.error_span()
         let found = self.found()
         var d = Diagnostic.new(Msg.ParseExpected, start, end).with("expected", kind.describe())
@@ -317,7 +330,7 @@ impl Parser:
         let (start, end) = self.error_span()
         let found = self.found()
         let d = Diagnostic.new(Msg.ParseExpected, start, end).with("expected", "a name")
-        self.report(d.with("found", found))
+        self.report(self.with_habit(d.with("found", found)))
         return False
 
     ## Wraps the current token in an ERROR node.
@@ -361,6 +374,11 @@ impl Parser:
     ## the fix that writes it as `if c: a else: b`. Only looks: the tokens
     ## are recovered as any trailing tokens are.
     pure def python_conditional(self) -> Diagnostic?:
+        return self.python_conditional_in(False)
+
+    ## `python_conditional`, which `inside` an expression ends where a
+    ## bracket it did not open closes or a comma follows.
+    pure def python_conditional_in(self, inside: bool) -> Diagnostic?:
         if not self.at(SyntaxKind.IfKw):
             return None
         let (value_start, value_end) = self.last_expr else:
@@ -377,6 +395,10 @@ impl Parser:
                     depth += 1
                 case RParen | RBracket | RBrace:
                     depth -= 1
+                    if inside and depth < 0:
+                        break
+                case Comma if inside and depth == 0:
+                    break
                 case ElseKw if depth == 0 and else_at == None:
                     else_at = Some(i)
                 # The end of the file ends the look at any depth: an open

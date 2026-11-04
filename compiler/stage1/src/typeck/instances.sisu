@@ -316,6 +316,17 @@ impl Resolver:
                     case DeriveSource.Std(dm):
                         let f = self.std_derive_fn(dm, t) else:
                             continue
+                        # `json.Decode` is derived for a struct only (11; R36),
+                        # its method's code `comptime panic`s for anything
+                        # else, in an instance whose error nothing showed:
+                        # the derive itself stops (RULES.md, R62).
+                        let template_module = self.prog.modules[dm.index].name.copy()
+                        if not is_struct and t == "Decode" and template_module == "json":
+                            let why = "`json.Decode` is derived for a struct only; an enum implements it with an `impl Decode` of its own"
+                            var d = Diagnostic.new(Msg.ComptimeDeriveFailed, asked.start, asked.end)
+                            d = d.with("trait", t).with("ty", name).with("reason", why)
+                            self.report_other(module, d)
+                            continue
                         var template_text = self.safety_text(dm) ?? String.new()
                         # A module the base keeps the text of for its
                         # templates (`std.json`'s `Encode`, R36).

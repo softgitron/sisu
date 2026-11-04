@@ -89,6 +89,17 @@ pure def hole_text(s: Statement) -> String:
                 return "`todo({quoted(name)})`"
     return "`todo()`".to_string()
 
+## Whether the local `l` is an `old(...)` value whose text a local of
+## `shown` has already.
+pure def old_shown(f: Function, shown: list[int], l: int) -> bool:
+    let name = f.locals[l].name.copy() ?? String.new()
+    if not name.starts_with("old("):
+        return False
+    for k in shown:
+        if k > 0 and k < len(f.locals) and (f.locals[k].name.copy() ?? String.new()) == name:
+            return True
+    return False
+
 ## Writes the closures of one function's holes; whether it wrote any.
 pure def close_function(mut f: Function, types: Types, header: str) -> bool:
     var sites: list[(int, int)] = []
@@ -128,6 +139,11 @@ pure def close_function(mut f: Function, types: Types, header: str) -> bool:
             if l == 0 or l >= len(f.locals):
                 continue
             if shows(f, types, l) and a.fully_init(states[i], a.paths.roots[l]):
+                # A contract keeps a value for each place an `old(...)` is
+                # written; the same text is the same value, shown once
+                # (RULES.md, R58).
+                if old_shown(f, shown, l):
+                    continue
                 shown.push(l)
         if not shown.is_empty():
             plans.push((b, i, shown))

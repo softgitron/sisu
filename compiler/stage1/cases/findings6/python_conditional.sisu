@@ -1,0 +1,8 @@
+# RULES.md, R63: Python's conditional expression and walrus inside an
+# expression say what they are (E0115, E0123), as where a statement starts.
+def main():
+    let n = 3
+    print("big" if n > 2 else "small")
+    let xs = [1]
+    if (m := len(xs)) > 0:
+        print(m)

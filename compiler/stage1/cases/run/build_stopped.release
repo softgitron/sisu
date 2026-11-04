@@ -1,0 +1,9 @@
+error[E0301]: `/` divides floats; for integers use `//`, or convert to `f64` first
+  --> build_stopped.sisu:5:12
+  |
+5 |     return sum(xs) / len(xs)
+  |            ^^^^^^^^^^^^^^^^^
+  = fix: use `//` for integer division: `//`
+
+error[D0132]: the program was not compiled: errors found (1)
+error: Failed

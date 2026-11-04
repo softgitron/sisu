@@ -153,6 +153,11 @@ impl Parser:
                 _ = self.expr()
                 self.end_stmt()
                 self.finish_node()
+            # `debug_assert cond[, message]`, `assert`'s form that a release
+            # build strips (02; RULES.md, R59): an assertion whose first
+            # token is the name.
+            case Ident if self.current_text() == "debug_assert" and self.expect_stmt_follows():
+                self.assert_stmt()
             case Ident if self.current_text() == "expect" and self.expect_stmt_follows():
                 self.start(SyntaxKind.ExpectStmt)
                 self.bump()

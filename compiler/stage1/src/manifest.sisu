@@ -201,7 +201,11 @@ impl Reader:
         )
         var name = False
         var version = False
+        # A key written with a bad value is reported as such, not missing
+        # too (RULES.md, R63).
+        var written: set[String] = set()
         for (k, v) in t.entries:
+            _ = written.add(as_text(k.value).to_string())
             match as_text(k.value):
                 case "name":
                     if let Some(s) = self.string("name", v):
@@ -239,7 +243,7 @@ impl Reader:
                 case _:
                     self.unknown(k, "[package]")
         for (missing, key) in [(not name, "name"), (not version, "version")]:
-            if missing:
+            if missing and not written.contains(key.to_string()):
                 let d = Diagnostic.new(Msg.PackageMissingKey, header.start, header.end)
                 self.diags.push(d.with("table", "[package]").with("key", key))
         if name and version:

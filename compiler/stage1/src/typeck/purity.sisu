@@ -61,6 +61,27 @@ impl Checker:
             case _:
                 return None
 
+    ## Where `pure ` goes before the `def` of `name`, the impure function
+    ## an expression of `e` calls, when this module declares it with a plain
+    ## `def` (not a method, whose `self` may change).
+    pure def pure_def_at(self, cx: Cx, e: TExprId, name: str) -> int?:
+        var exprs: list[TExprId] = []
+        self.visit_expr(e, mut exprs)
+        for x in exprs:
+            if let TExprKind.Call(Callee.Fn(def_, _), _) = self.exprs[x.index].kind:
+                let d = ref cx.prog.defs[def_.index]
+                if d.name != name or d.module != self.module:
+                    continue
+                if let Some(f) = cx.prog.fn_info(def_):
+                    if f.self_mode.is_some() or f.owner.is_some():
+                        return None
+                let at = d.span.start - 4
+                if at >= 0 and cx.source.byte_slice(at, d.span.start) == "def ":
+                    if at == 0 or cx.source.byte_at(at - 1) == 10:
+                        return Some(at)
+                return None
+        return None
+
     ## Every expression of a statement, each before the ones inside it.
     pub pure def stmt_exprs(self, s: TStmt) -> list[TExprId]:
         var out: list[TExprId] = []
@@ -128,7 +149,7 @@ impl Checker:
                             self.visit_expr(e, mut out)
                         case TArmBody.Block(b):
                             self.visit_block(b, mut out)
-            case TStmt.Assert(cond, message, _, _, _, _):
+            case TStmt.Assert(cond, message, _, _, _, _, _):
                 self.visit_expr(cond, mut out)
                 if let Some(m) = message:
                     self.visit_expr(m, mut out)
@@ -426,8 +447,13 @@ impl Checker:
                     let range = self.span_of(e)
                     match p:
                         case Reading.Calls(name):
-                            let d = self.error(cx, Msg.ContractNotPure, range)
-                            self.report_other(d.with("callee", name))
+                            var d = self.error(cx, Msg.ContractNotPure, range)
+                            d = d.with("callee", name)
+                            # A function of this module that could be `pure`:
+                            # the fix writes it so (RULES.md, R63).
+                            if let Some(at) = self.pure_def_at(cx, e, name):
+                                d = d.fix_at(Msg.ContractMakePure, at, at, "pure ")
+                            self.report_other(d)
                         case Reading.Changes:
                             self.report_other(self.error(cx, Msg.ContractChanges, range))
                 return False

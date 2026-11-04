@@ -57,6 +57,12 @@ impl Parser:
             # `&xs`: `ref xs`.
             if k == SyntaxKind.Amp:
                 return spelled(d, start, end, "ref ")
+            # Python's `.5`: `0.5`, digits on both sides of the point
+            # (RULES.md, R63).
+            if k == SyntaxKind.Dot and self.nth(1) == SyntaxKind.IntNumber:
+                let (s2, e2) = self.nth_range(1) ?? (end, end)
+                if s2 == end:
+                    return spelled(d, start, e2, "0.{self.text.byte_slice(s2, e2)}")
             return d
         if d.msg == Msg.ParseExpectedPattern:
             # `let mut n`: `var n`.
@@ -64,6 +70,14 @@ impl Parser:
                 return spelled(d, prev_start, end, "var")
             return d
         if d.msg == Msg.ParseExpected:
+            # Python's `1.`: `1.0`, digits on both sides of the point
+            # (RULES.md, R63).
+            if prev == Some(SyntaxKind.Dot) and before >= 1:
+                let num = self.sig[before - 1]
+                if num.kind == SyntaxKind.IntNumber and num.end == prev_start:
+                    if k != SyntaxKind.Ident or not adjacent:
+                        let digits = self.text.byte_slice(num.start, num.end)
+                        return spelled(d, num.start, prev_end, "{digits}.0")
             # `x is None`, `x is not None`: `.is_none()`, `.is_some()`.
             if k == SyntaxKind.Ident and self.current_text() == "is":
                 if self.nth_text(1) == "None":

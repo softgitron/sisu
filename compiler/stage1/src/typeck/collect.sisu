@@ -244,6 +244,9 @@ pub struct Resolver:
     ## The names reflection shows for the type parameters of the template
     ## being made (a generic trait impl's, decision 251).
     pub shape_names: list[String]
+    ## While a parameter's type is resolved, its range: a trait written as
+    ## the whole type is a parameter's `ref dyn` (RULES.md, R63).
+    pub param_type_at: TextRange?
     ## Generic functions the last check found calling a template with their
     ## own type parameters: templates too.
     pub promoted: set[DefId]
@@ -363,6 +366,7 @@ impl Resolver:
             decl_owner=None,
             quiet_deprecation=False,
             shape_names=[],
+            param_type_at=None,
             promoted=set(),
             instances_asked=0,
             instances_bounded=False,
@@ -2619,7 +2623,9 @@ impl Resolver:
                         let at = name.range
                         let d = Diagnostic.new(Msg.ResolveParameterDefaultOrder, at.start, at.end)
                         self.report_other(module, d)
+                    self.param_type_at = Some(self.ast(module).type_expr(ty).range)
                     let resolved = self.resolve_ty(ty, ctx)
+                    self.param_type_at = None
                     self.check_sized(module, resolved, p.range)
                     if let Some(v) = default:
                         if value_unfolds(self.ast(module), v):
@@ -2645,7 +2651,12 @@ impl Resolver:
                 case ParamKind.PositionalOnly:
                     info.positional_only_until = len(info.params)
                 case ParamKind.Variadic(_, _):
-                    self.beyond_in(module, "variadic parameters")
+                    # 02 gives `*xs: T`, 14 rules variadic functions out: an
+                    # error that says so, where the checker stopped without
+                    # a code and `check` passed (RULES.md, R64).
+                    let what = "a variadic parameter, `*xs: T`,"
+                    let phase = "the decision between 02, which gives it, and 14, which rules variadic functions out; a `Slice[T]` parameter takes a list meanwhile"
+                    self.unsupported_in(module, p.range, what, phase)
                 case ParamKind.Error:
                     pass
         for n in f.from_:
@@ -3436,6 +3447,84 @@ impl Resolver:
         _ = self.prog.modules[module.index].items.insert(name.to_string(), def_)
         _ = self.prog.modules[module.index].imported.insert(name.to_string(), vis)
 
+    ## `import a.b.Item`, an item named as a module (09: `import` names a
+    ## module, `from a.b import Item` an item of one): `E0223`, with the fix
+    ## that imports it from its module (RULES.md, R60), when the path but
+    ## its last name is a module, of the program or std, and that module has
+    ## no module of the last name. An item std's module does not declare is
+    ## `E0204`. Whether it reported.
+    pure def item_imported(
+        mut self, module: ModuleId, imp: Import, item_at: TextRange, whole: TextRange, vis: Vis
+    ) -> bool:
+        if len(imp.path) < 2:
+            return False
+        var words: list[String] = []
+        for n in imp.path:
+            words.push(n.text.copy())
+        let last = words[len(words) - 1].copy()
+        var prefix: list[String] = []
+        for k in range(len(words) - 1):
+            prefix.push(words[k].copy())
+        var found: ModuleId? = None
+        let package = self.prog.package_of(module)
+        var root: ModuleId? = None
+        if package < len(self.prog.packages):
+            let this = ref self.prog.packages[package]
+            if not this.name.is_empty() and this.name == words[0]:
+                root = this.root
+            else:
+                for (n, d) in this.deps:
+                    if n == words[0] and root.is_none() and d < len(self.prog.packages):
+                        root = self.prog.packages[d].root
+        var std = False
+        if let Some(r) = root:
+            var m = r
+            for k in range(1, len(prefix)):
+                let d = self.prog.lookup_in(m, prefix[k]) else:
+                    return False
+                var next: ModuleId? = None
+                if let DefKind.Module(c) = self.prog.defs[d.index].kind():
+                    next = Some(c)
+                let c = next else:
+                    return False
+                m = c
+            found = Some(m)
+        elif module_for(prefix).is_some() and module_for(words).is_none():
+            var names: list[Name] = []
+            for k in range(len(prefix)):
+                names.push(imp.path[k].copy())
+            let (m, _) = self.import_target(module, names, whole)
+            found = m
+            std = True
+        let m = found else:
+            return False
+        let item = self.prog.lookup_in(m, last)
+        if let Some(d) = item:
+            if let DefKind.Module(_) = self.prog.defs[d.index].kind():
+                return False
+        elif not std:
+            return False
+        let path = prefix.join(".")
+        if self.is_root(module):
+            self.other_error = True
+        if item.is_none():
+            var diag = Diagnostic.new(Msg.ResolveNotInModule, whole.start, whole.end)
+            self.report_other(module, diag.with("module", path).with("name", last))
+            return True
+        var text = "from {path} import {last}"
+        var end = whole.end
+        if let Some(a) = imp.alias:
+            text = "{text} as {a.text}"
+            end = a.range.end
+        if let Vis.Pub = vis:
+            text = "pub {text}"
+        var diag = Diagnostic.new(Msg.ResolveNotAModule, whole.start, whole.end)
+        diag = diag.with("name", words.join("."))
+        self.report_other(
+            module, diag.fix_at(Msg.ResolveImportFromModule, item_at.start, end, text)
+        )
+        return True
+
     pure def import_module(mut self, module: ModuleId, imp: Import, range: TextRange, vis: Vis):
         if imp.c_header.is_some():
             let what = "a C header import"
@@ -3455,6 +3544,9 @@ impl Resolver:
         if let Some(a) = imp.path.first():
             if let Some(b) = imp.path.last():
                 whole = a.range.cover(b.range)
+        if self.item_imported(module, imp, range, whole, vis):
+            self.poison_import(module, bound, None)
+            return
         let (target, similar) = self.import_target(module, imp.path, whole)
         let m = target else:
             self.poison_import(module, bound, similar)
@@ -5263,7 +5355,16 @@ impl Resolver:
                 var diag = Diagnostic.new(Msg.ResolveTraitAsType, at.start, at.end).with(
                     "name", name
                 )
-                diag = diag.fix(Msg.ResolveAddDyn, "name", name, at.start, at.start, "dyn ")
+                # A parameter's whole type: a reference to some value that
+                # implements it, `ref dyn T` (a `dyn` has no size of its own,
+                # E0395), or a generic parameter (RULES.md, R63).
+                if self.param_type_at == Some(at):
+                    diag = diag.fix(
+                        Msg.ResolveAddRefDyn, "name", name, at.start, at.start, "ref dyn "
+                    )
+                    diag = diag.note_with(Msg.ResolveTraitGeneric, "name", name)
+                else:
+                    diag = diag.fix(Msg.ResolveAddDyn, "name", name, at.start, at.start, "dyn ")
                 self.report_other(module, diag)
                 return Ty.error()
             case DefKind.Unsupported:

@@ -1,0 +1,11 @@
+# RULES.md, R59: `debug_assert cond[, message]` is `assert`'s form that a
+# release build strips (02): checked, its parts shown when it fails, where
+# the build checks every contract, as a debug build and a test do; not
+# evaluated where it checks fewer, as a release build does by default.
+def halved(x: int) -> int:
+    debug_assert x % 2 == 0, "an even number"
+    return x // 2
+
+def main():
+    print(halved(10))
+    print(halved(7))

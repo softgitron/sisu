@@ -1,0 +1,8 @@
+# RULES.md, R60: `import a.b.Item` names an item as a module (09: `import`
+# names a module, `from a.b import Item` an item of one): `E0223`, with the
+# fix that imports it from its module; an item the module lacks is `E0204`.
+import std.json.JsonError
+import std.json.Nothing
+
+def main():
+    pass

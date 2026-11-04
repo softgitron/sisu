@@ -1,0 +1,4 @@
+# RULES.md, R63: Python's `.5`, a float needs digits before its point.
+def main():
+    let y = .5
+    print(y)
