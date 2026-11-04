@@ -11,10 +11,6 @@ warning[W0001]: typed hole `form` of type `String`
 23 |         return todo("form")
    |                ^^^^^^^^^^^^
 
-in scope at the typed hole `todo("form")`:
-  self = Booking(name="Aino", hour=18, minutes=90)
-in scope at the typed hole `todo("form")`:
-  self = Stove(celsius=78.5, lit=True)
 test "a booking" ... blocked by todo("form")
 test "a stove" ... blocked by todo("form")
 0 passed, 0 failed, 2 blocked

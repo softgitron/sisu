@@ -41,10 +41,6 @@ warning[W0001]: typed hole `fmt` of type `()`
 61 |         todo("fmt")
    |         ^^^^^^^^^^^
 
-in scope at the typed hole `todo("words")`:
-  text = "Hei, hei maailma!"
-in scope at the typed hole `todo("pairs")`:
-  text = "yksi kaksi, kolme"
 test "part 1, a tally of words/the words of a text" ... blocked by todo("words")
 test "part 1, a tally of words/a tally of words" ... blocked by todo("new")
 test "part 1, a tally of words/a tally of numbers" ... blocked by todo("new")

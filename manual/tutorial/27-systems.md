@@ -96,18 +96,8 @@ ownership violation: a reference was used after its loan had ended
   value: `celsius` = 85
   loans of `celsius` not ended yet: 0 shared, 0 with `mut`
   at main (pointer_after.sisu:13:22)
-SIR of `main`:
+SIR of `main`, its blocks that the conflict passes through:
 fn main(0) source 0 @4:5-4:9 {
-    let _0: ()
-    let _1: int "celsius" @5:9-5:16
-    let _2: ptr_mut[int] "p" @6:9-6:10
-    let _3: ref mut int
-    let _4: ()
-    let _5: int
-    let _6: int
-    let _7: ()
-    let _8: int "now" @13:9-13:12
-    let _9: ()
   bb0:
     _1 = const 80 @5:19-5:21
     _3 = ref mut _1 @6:28-6:35
@@ -127,8 +117,9 @@ The plain run prints 85 twice, and nothing seems wrong. Under the
 monitor, which checks raw memory as it checks borrows, the second read
 is an ownership violation: `print(celsius)` used `celsius` directly,
 which ended the borrow that the pointer was made from, so the pointer
-may no longer be used. The report ends with the SIR of `main`, the
-compiler's form of the code. The comment's reason, that `celsius` is
+may no longer be used. The report ends with the part of the SIR of
+`main`, the compiler's form of the code, that the conflict passes
+through. The comment's reason, that `celsius` is
 alive, was not enough. Run code that holds `unsafe` under the monitor.
 
 </details>
@@ -607,7 +598,7 @@ $ sisu audit --unsafe
 sauna 0.1.0   unsafe = "memory"   the root package
   sauna (src/main.sisu)   1 block, module hash 7374184f049a918b
     src/main.sisu:9   unsafe block in main   # safety: valid, aligned, writable: p points to the live local celsius, which nothing else uses until the bloc...
-std (toolchain)   unsafe = "extern"   see `sisu1 audit --unsafe --std`
+std (toolchain)   unsafe = "extern"   see `sisu audit --unsafe --std`
 ```
 
 `sisu audit --unsafe` lists the unsafe code a reviewer reads first: for
@@ -980,10 +971,6 @@ warning[W0001]: typed hole `fade` of type `()`
 22 |     todo("fade")
    |     ^^^^^^^^^^^^
 
-in scope at the typed hole `todo("mix")`:
-  gain = 0.5
-in scope at the typed hole `todo("mix")`:
-  gain = 1.0
 test "mixing a voice in" ... blocked by todo("mix")
 test "mixing keeps the samples in range" ... blocked by todo("mix")
 test "a fade to silence" ... blocked by todo("fade")
@@ -1078,14 +1065,6 @@ warning[W0001]: typed hole `parse_log` of type `list[Reading] ! LogError`
 25 |     return todo("parse_log")
    |            ^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("parse_log")`:
-  data = b"-\x00\x00\x00\x1e\x03\x02\x00.\x00\x00\x00$\x03\x02\x01"
-in scope at the typed hole `todo("parse_log")`:
-  data = b"\x00\x01\x00\x00\xe7\xff\x01\x00"
-in scope at the typed hole `todo("parse_log")`:
-  data = b""
-in scope at the typed hole `todo("parse_log")`:
-  data = b"-\x00\x00\x00\x1e\x03\x02\x00.\x00"
 test "two records" ... blocked by todo("parse_log")
 test "a temperature below zero" ... blocked by todo("parse_log")
 test "an empty log" ... blocked by todo("parse_log")

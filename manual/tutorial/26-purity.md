@@ -957,18 +957,6 @@ warning[W0001]: typed hole `sort_halves` of type `list[int]`
 21 |     return todo("sort_halves")
    |            ^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("merge")`:
-  a = [1, 4, 9]
-  b = [2, 3, 10]
-in scope at the typed hole `todo("sort_halves")`:
-  xs = [5, 3, 8, 1, 9, 2]
-  small = 1
-in scope at the typed hole `todo("sort_halves")`:
-  xs = [5]
-  small = 2
-in scope at the typed hole `todo("sort_halves")`:
-  xs = [5]
-  small = 4
 test "merging" ... blocked by todo("merge")
 test "sorting" ... blocked by todo("sort_halves")
 test "sorting agrees with sorted" ... blocked by todo("sort_halves")

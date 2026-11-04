@@ -1,0 +1,7 @@
+# An item of a module imported as if it were a module.
+import std.collections.Deque
+
+def main():
+    var queue = Deque.new()
+    queue.push_back("Aino")
+    print(len(queue))

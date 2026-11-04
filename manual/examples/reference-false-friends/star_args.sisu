@@ -1,0 +1,9 @@
+# Python's `*args`, a parameter that collects any number of arguments.
+def total(*prices: int) -> int:
+    var sum = 0
+    for p in prices:
+        sum += p
+    return sum
+
+def main():
+    print(total(3, 4, 5))

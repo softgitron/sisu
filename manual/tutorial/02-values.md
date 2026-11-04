@@ -1213,14 +1213,6 @@ warning[W0001]: typed hole `fahrenheit rounded, as an int` of type `int`
 16 |     let whole: int = todo("fahrenheit rounded, as an int")
    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("celsius in Fahrenheit")`:
-  celsius = 21.5
-in scope at the typed hole `todo("celsius in Fahrenheit")`:
-  celsius = -12.0
-in scope at the typed hole `todo("celsius in Fahrenheit")`:
-  celsius = 100.0
-in scope at the typed hole `todo("celsius in Fahrenheit")`:
-  celsius = -40.0
 test "a summer day" ... blocked by todo("celsius in Fahrenheit")
 test "a winter day" ... blocked by todo("celsius in Fahrenheit")
 test "water boils" ... blocked by todo("celsius in Fahrenheit")

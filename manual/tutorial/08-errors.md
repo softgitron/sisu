@@ -943,18 +943,6 @@ warning[W0001]: typed hole `the error for an unknown code` of type `String ! Set
 24 |         return todo("the error for an unknown code")
    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("the code chosen, or a fallback")`:
-  user = {"language": "fi"}
-  team = {"language": "sv"}
-in scope at the typed hole `todo("the code chosen, or a fallback")`:
-  user = {}
-  team = {"language": "sv"}
-in scope at the typed hole `todo("the code chosen, or a fallback")`:
-  user = {}
-  team = {}
-in scope at the typed hole `todo("the code chosen, or a fallback")`:
-  user = {"language": "de"}
-  team = {}
 test "the user's own choice" ... blocked by todo("the code chosen, or a fallback")
 test "the team's choice" ... blocked by todo("the code chosen, or a fallback")
 test "no choice at all" ... blocked by todo("the code chosen, or a fallback")
@@ -1044,16 +1032,6 @@ warning[W0001]: typed hole `parse_version` of type `Version ! VersionError`
 22 |     return todo("parse_version")
    |            ^^^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("parse_version")`:
-  text = "2.10.1"
-in scope at the typed hole `todo("parse_version")`:
-  text = ""
-in scope at the typed hole `todo("parse_version")`:
-  text = "1.2"
-in scope at the typed hole `todo("parse_version")`:
-  text = "1.x.3"
-in scope at the typed hole `todo("parse_version")`:
-  text = "1.9.0"
 test "versions" ... blocked by todo("parse_version")
 test "an empty text" ... blocked by todo("parse_version")
 test "the wrong number of parts" ... blocked by todo("parse_version")
@@ -1170,18 +1148,6 @@ warning[W0001]: typed hole `order_total` of type `int ! {LineError, PriceError}`
 32 |     return todo("order_total")
    |            ^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("parse_line")`:
-  line = "coffee 2"
-in scope at the typed hole `todo("parse_line")`:
-  line = "coffee"
-in scope at the typed hole `todo("parse_order")`:
-  text = "coffee 2\n\nbun 1\n"
-in scope at the typed hole `todo("order_total")`:
-  text = "coffee 2\nbun 1"
-  prices = {"coffee": 350, "tea": 300, "bun": 280}
-in scope at the typed hole `todo("order_total")`:
-  text = "tea 1\nbun"
-  prices = {"coffee": 350, "tea": 300, "bun": 280}
 test "one line" ... blocked by todo("parse_line")
 test "lines without a quantity" ... blocked by todo("parse_line")
 test "an order of several lines" ... blocked by todo("parse_order")

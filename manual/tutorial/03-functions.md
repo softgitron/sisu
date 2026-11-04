@@ -538,8 +538,8 @@ The warning names the hole and its type, `f64`, which is what the
 missing code must produce. The first call never reaches the hole and
 prints its line. The second reaches it, prints what is in scope there,
 `weight_kg = 7.0`, and stops with a panic that names the hole. A test
-that reaches a hole prints the same and is reported as blocked rather
-than failed, as in the exercises. A report of every hole of a program
+that reaches a hole is reported as blocked rather than failed, as in
+the exercises. A report of every hole of a program
 at once, with its bindings and the tests that reach it, `sisu check
 --holes`, is designed in [10](../../proposal/10-tooling.md) and is not
 in the compiler yet.
@@ -779,14 +779,6 @@ warning[W0001]: typed hole `is_leap_year` of type `bool`
 10 |     return todo("is_leap_year")
    |            ^^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("is_leap_year")`:
-  year = 2026
-in scope at the typed hole `todo("is_leap_year")`:
-  year = 2024
-in scope at the typed hole `todo("is_leap_year")`:
-  year = 1900
-in scope at the typed hole `todo("is_leap_year")`:
-  year = 2000
 test "an ordinary year" ... blocked by todo("is_leap_year")
 test "every fourth year" ... blocked by todo("is_leap_year")
 test "a century year that is not a leap year" ... blocked by todo("is_leap_year")
@@ -855,12 +847,6 @@ warning[W0001]: typed hole `digit_sum` of type `int`
 14 |     return todo("digit_sum")
    |            ^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("digit_sum")`:
-  n = 7
-in scope at the typed hole `todo("digit_sum")`:
-  n = 9876543210
-in scope at the typed hole `todo("digit_sum")`:
-  n = 2026
 test "one digit" ... blocked by todo("digit_sum")
 test "many digits" ... blocked by todo("digit_sum")
 test "digit_sum (doc example)" ... blocked by todo("digit_sum")
@@ -948,16 +934,6 @@ warning[W0001]: typed hole `show_time` of type `String`
 16 |     return todo("show_time")
    |            ^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("split_time")`:
-  total = 3725
-in scope at the typed hole `todo("split_time")`:
-  total = 59
-in scope at the typed hole `todo("show_time")`:
-  total = 3725
-  seconds = True
-in scope at the typed hole `todo("show_time")`:
-  total = 3725
-  seconds = False
 test "an hour, two minutes and five seconds" ... blocked by todo("split_time")
 test "less than a minute" ... blocked by todo("split_time")
 test "shown with seconds" ... blocked by todo("show_time")

@@ -247,6 +247,11 @@ that hold say nothing. Use `expect` for checks that do not depend on
 each other, and `assert` where a failure makes the lines after it
 meaningless.
 
+What a test prints is kept with its result and shown only if it fails,
+under `what the test printed:` after the test's name, so a passing
+suite stays quiet and a failing test brings its own story
+([R15](../reference/testing.md#what-a-test-prints)).
+
 ## Fixtures are values
 
 A test often needs something set up first: a file system with files
@@ -911,17 +916,19 @@ test "the vowels of a short word" ... ok
 - `black_box(x)` uses a value in a way that the compiler cannot see
   through, so that the work that made it is not optimised away.
 - `sisu test` checks a benchmark and does not run it. `sisu bench
-  bench.sisu` runs each one and prints how long one turn of its loop
-  took, which differs from run to run. The compiler times its
-  interpreter, so compare benchmarks with each other, not with compiled
-  code. *Lentokonesuihkuturbiinimoottoriapumekaanikko* is a Finnish
+  bench.sisu` runs each one once to warm up, times ten samples of its
+  loop, and prints the median time of one turn with a 95% interval.
+  The times differ from run to run; two benchmarks differ when their
+  intervals do not overlap. The compiler times its interpreter, so
+  compare benchmarks with each other, not with compiled code. *Lentokonesuihkuturbiinimoottoriapumekaanikko* is a Finnish
   word for an assistant mechanic of jet engines.
 
 ## What sisu test remembers
 
 A test that passed is not run again while the code is the same: `sisu test` keeps the results in a file beside the
-program, `NAME.test-cache`, and prints what the test printed when it
-ran. `--no-cache` runs everything. A machine-readable report of the
+program, `NAME.test-cache`. `--no-cache` runs everything. `sisu test
+--native` runs the same tests compiled, each in a process of its own
+([G20](../guides/native.md)). A machine-readable report of the
 results in JSON, coverage (`--cover`), mutation testing (`--mutate`)
 and fuzzing (`--fuzz`) are designed in
 [17](../../proposal/17-testing.md) and not in the compiler.
@@ -1214,15 +1221,6 @@ warning[W0001]: typed hole `dedupe_ok` of type `bool`
 26 |     return todo("dedupe_ok")
    |            ^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("dedupe_ok")`:
-  xs = [5]
-  out = [5]
-in scope at the typed hole `todo("dedupe_ok")`:
-  xs = [3, 1, 2]
-  out = [3, 1, 2]
-in scope at the typed hole `todo("dedupe_ok")`:
-  xs = [1, 2, 1]
-  out = [1, 2, 1]
 test "the property holds of dedupe" ... blocked by todo("dedupe_ok")
 test "the property accepts the three examples" ... blocked by todo("dedupe_ok")
 test "the property rejects wrong answers" ... blocked by todo("dedupe_ok")
@@ -1453,18 +1451,6 @@ warning[W0001]: typed hole `ask` of type `String ! {TaskError, ServiceError}`
 29 |     return todo("ask")
    |            ^^^^^^^^^^^
 
-in scope at the typed hole `todo("ask")`:
-  town = "Oulu"
-  tries = 3
-in scope at the typed hole `todo("ask")`:
-  town = "Turku"
-  tries = 5
-in scope at the typed hole `todo("ask")`:
-  town = "Oulu"
-  tries = 4
-in scope at the typed hole `todo("ask")`:
-  town = "Atlantis"
-  tries = 3
 test "an answer at once" ... blocked by todo("ask")
 test "busy twice, then an answer" ... blocked by todo("ask")
 test "busy every time" ... blocked by todo("ask")

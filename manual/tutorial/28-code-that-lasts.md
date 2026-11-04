@@ -458,10 +458,6 @@ warning[W0001]: typed hole `keep the slots that fit` of type `list[Slot]`
 20 |     return todo("keep the slots that fit")
    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("parse a slot")`:
-  line = "Aino 17:30 90"
-in scope at the typed hole `todo("keep the slots that fit")`:
-  text = "Aino 17:00 90\nEero 18:00 60\nRoni 18:30 30"
 test "slots that overlap" ... ok
 test "a slot from text" ... blocked by todo("parse a slot")
 test "the slots that fit" ... blocked by todo("keep the slots that fit")
@@ -839,22 +835,6 @@ warning[W0001]: typed hole `migrate` of type `String ! SlotError`
 74 |     return todo("migrate")
    |            ^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("parse_slot")`:
-  line = "Aino 18:30 90"
-in scope at the typed hole `todo("parse_slot")`:
-  line = "Aino"
-in scope at the typed hole `todo("parse_slot")`:
-  line = "Aino 25:00 60"
-in scope at the typed hole `todo("parse_slot")`:
-  line = "Aino 18:00 0"
-in scope at the typed hole `todo("parse_slot")`:
-  line = "Eero 19"
-in scope at the typed hole `todo("migrate")`:
-  text = "Aino 17\nEero 18:30 45\nRoni 9"
-in scope at the typed hole `todo("migrate")`:
-  text = "Aino 17\nEero 25:00 45\nRoni 9"
-in scope at the typed hole `todo("migrate")`:
-  text = ""
 test "part 1/a slot" ... blocked by todo("parse_slot")
 test "part 1/a line with a part missing" ... blocked by todo("parse_slot")
 test "part 1/a time that is not on the clock" ... blocked by todo("parse_slot")

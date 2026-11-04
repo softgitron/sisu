@@ -1,25 +1,32 @@
 $ sisu check
-error[E0203]: there is no module `atlas.roads`
+error[E0223]: `atlas.geo.point.Point` is not a module
   --> src/main.sisu:3:8
   |
-3 | import atlas.roads
+3 | import atlas.geo.point.Point
+  |        ^^^^^^^^^^^^^^^^^^^^^
+  = fix: import the item from its module: `from atlas.geo.point import Point`
+
+error[E0203]: there is no module `atlas.roads`
+  --> src/main.sisu:4:8
+  |
+4 | import atlas.roads
   |        ^^^^^^^^^^^
 
 error[E0204]: module `atlas.geo` has no item `Route`
-  --> src/main.sisu:4:23
+  --> src/main.sisu:5:23
   |
-4 | from atlas.geo import Route
+5 | from atlas.geo import Route
   |                       ^^^^^
 
 error[E0128]: Sisu has no glob imports: name what the module gives, as in `from std.collections import Deque, Heap`, or import the module and write `collections.Deque`
-  --> src/main.sisu:5:29
+  --> src/main.sisu:6:29
   |
-5 | from std.collections import *
+6 | from std.collections import *
   |                             ^
 
 error[E0220]: cannot import `maps`: it names no module of this package, of a dependency in `sisu.toml`, or of the standard library
-  --> src/main.sisu:6:8
+  --> src/main.sisu:7:8
   |
-6 | import maps
+7 | import maps
   |        ^^^^
 

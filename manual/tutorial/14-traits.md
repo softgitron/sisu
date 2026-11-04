@@ -74,22 +74,25 @@ error[E0231]: `Priced` is a trait, not a type; a value of a type that implements
    |
 19 | def together(a: Priced, b: Priced) -> int:
    |                 ^^^^^^
-  = fix: write `dyn Priced`: `dyn `
+  = note: a function that takes a value of any type implementing `Priced` is generic: `def f[T: Priced](x: T)`, made for each type it is called with
+  = fix: write `ref dyn Priced`: `ref dyn `
 
 error[E0231]: `Priced` is a trait, not a type; a value of a type that implements it is `dyn Priced`
   --> not_a_type.sisu:19:28
    |
 19 | def together(a: Priced, b: Priced) -> int:
    |                            ^^^^^^
-  = fix: write `dyn Priced`: `dyn `
+  = note: a function that takes a value of any type implementing `Priced` is generic: `def f[T: Priced](x: T)`, made for each type it is called with
+  = fix: write `ref dyn Priced`: `ref dyn `
 
 error[D0006]: the program was not run: errors found (2)
 ```
 
 E0231 (`resolve.trait-as-type`) says that `Priced` names an ability,
-not a type, and its fix offers `dyn Priced`, a value of some type that
-has the ability. Chapter 15 shows it, and the other way to write such
-a function, a generic one, which is usually the better choice.
+not a type. Its fix offers `ref dyn Priced`, a borrow of a value of
+some type that has the ability, and its note the other way to write
+such a function, a generic one, which is usually the better choice.
+Chapter 15 shows both.
 
 </details>
 
@@ -1312,17 +1315,6 @@ warning[W0001]: typed hole `the move made `times` times` of type `Vector`
 29 |         return todo("the move made `times` times")
    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("the sum")`:
-  self = Vector(x=1, y=2)
-  other = Vector(x=3, y=-4)
-in scope at the typed hole `todo("the opposite move")`:
-  self = Vector(x=2, y=-3)
-in scope at the typed hole `todo("the move made `times` times")`:
-  self = Vector(x=1, y=-2)
-  times = 3
-in scope at the typed hole `todo("the move made `times` times")`:
-  self = Vector(x=1, y=0)
-  times = 2
 test "adding and taking away" ... blocked by todo("the sum")
 test "the opposite move" ... blocked by todo("the opposite move")
 test "a move made several times" ... blocked by todo("the move made `times` times")
@@ -1400,18 +1392,6 @@ warning[W0001]: typed hole `fmt` of type `()`
 17 |         todo("fmt")
    |         ^^^^^^^^^^^
 
-in scope at the typed hole `todo("fmt")`:
-  self = Money(cents=1200)
-  f = Formatter(out="", spec="", depth=0)
-in scope at the typed hole `todo("fmt")`:
-  self = Money(cents=1250)
-  f = Formatter(out="", spec="", depth=0)
-in scope at the typed hole `todo("fmt")`:
-  self = Money(cents=-1250)
-  f = Formatter(out="", spec="", depth=0)
-in scope at the typed hole `todo("fmt")`:
-  self = Money(cents=250)
-  f = Formatter(out="", spec=">9", depth=0)
 test "whole euros" ... blocked by todo("fmt")
 test "euros and cents" ... blocked by todo("fmt")
 test "amounts below zero" ... blocked by todo("fmt")

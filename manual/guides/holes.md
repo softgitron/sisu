@@ -116,18 +116,15 @@ warning[W0001]: typed hole `lay out the evening` of type `list[String]`
 15 |     return todo("lay out the evening")
    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("read the turns")`:
-  text = "18 Aino\n20 Eero"
-in scope at the typed hole `todo("lay out the evening")`:
-  turns = [Turn(name="Aino", hour=18)]
 test "turns from text" ... blocked by todo("read the turns")
 test "a free hour says so" ... blocked by todo("lay out the evening")
 0 passed, 0 failed, 2 blocked
 ```
 
 The run starts with the warning of each hole, as `sisu check` lists
-them. Each blocked test shows the closure of its hole too, what the test
-handed the function, and the last line counts the tests that pass, fail
+them. A blocked test prints nothing of what it did, so its hole's
+closure is not shown either; `sisu run`, as in step 1, shows it. The
+last line counts the tests that pass, fail
 and wait, which is the state of the plan. While a test is blocked and
 none fails, `sisu test` exits with status 3, so a job that runs the
 tests can tell a plan that waits from one that is done.
@@ -183,8 +180,6 @@ warning[W0001]: typed hole `lay out the evening` of type `list[String]`
 19 |     return todo("lay out the evening")
    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("lay out the evening")`:
-  turns = [Turn(name="Aino", hour=18)]
 test "turns from text" ... ok
 test "a free hour says so" ... blocked by todo("lay out the evening")
 1 passed, 0 failed, 1 blocked
@@ -235,7 +230,7 @@ error[E0445]: a release build rejects the typed hole `todo("lay out the evening"
    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
   = note: fill the hole before the release build; a placeholder meant to ship is `panic("...")`
 
-error[D0006]: the program was not run: errors found (2)
+error[D0132]: the program was not compiled: errors found (2)
 ```
 
 **Status.** Holes, W0001, blocked tests with their closures and the

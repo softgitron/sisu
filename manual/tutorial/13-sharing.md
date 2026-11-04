@@ -100,6 +100,7 @@ two owners hold the very same value, which a copy does and a second
 <!-- file: examples/13-sharing/same.sisu -->
 ```sisu
 # `Shared.same` asks whether two owners hold the very same value.
+@derive(Eq)
 struct Config:
     retries: int
 
@@ -108,7 +109,7 @@ def main():
     let copy = config.copy()
     let other = Shared(Config(retries=3))
     print("{Shared.same(config, copy)} {Shared.same(config, other)}")
-    print(config.retries == other.retries)
+    print(config == other)
 ```
 
 <!-- output: examples/13-sharing/same.out -->
@@ -117,10 +118,11 @@ True False
 True
 ```
 
-Compare what two owners hold through the values themselves, as the
-last line does: in stage 0, `==` between two `Shared` values gives
-`False`, even for two owners of one value. Printing needs no such care:
-a `Shared` prints as the value it holds, with `{x}` and with `{x:?}`:
+`==` is the other question, as the last line asks it: whether the
+values are equal, which `config` and `other` are, so `Shared[Config]`
+compares when `Config` does. A `Shared` hashes as its value too, so it
+can be a dict's key. It also prints as the value it holds, with `{x}`
+and with `{x:?}`:
 
 <!-- file: examples/13-sharing/shown.sisu -->
 ```sisu
@@ -894,38 +896,6 @@ warning[W0001]: typed hole `to_shared` of type `dict[String, Shared[Item]] ! Cyc
 70 |         return todo("to_shared")
    |                ^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("add")`:
-  self = Graph(packages=Arena([]), keys={})
-  name = "c"
-  needs = ["b"]
-in scope at the typed hole `todo("add")`:
-  self = Graph(packages=Arena([]), keys={})
-  name = "app"
-  needs = ["web", "log"]
-in scope at the typed hole `todo("add")`:
-  self = Graph(packages=Arena([]), keys={})
-  name = "a"
-  needs = ["b"]
-in scope at the typed hole `todo("add")`:
-  self = Graph(packages=Arena([]), keys={})
-  name = "a"
-  needs = ["a"]
-in scope at the typed hole `todo("add")`:
-  self = Graph(packages=Arena([]), keys={})
-  name = "app"
-  needs = ["web"]
-in scope at the typed hole `todo("add")`:
-  self = Graph(packages=Arena([]), keys={})
-  name = "app"
-  needs = ["web", "log"]
-in scope at the typed hole `todo("add")`:
-  self = Graph(packages=Arena([]), keys={})
-  name = "app"
-  needs = ["web", "log"]
-in scope at the typed hole `todo("add")`:
-  self = Graph(packages=Arena([]), keys={})
-  name = "a"
-  needs = ["a"]
 test "part 1, the install order/a chain" ... blocked by todo("add")
 test "part 1, the install order/needs that are shared" ... blocked by todo("add")
 test "part 2, cycles/a cycle of three" ... blocked by todo("add")

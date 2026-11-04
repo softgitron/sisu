@@ -1,2 +1,2 @@
 12:16-12:22 E0231 resolve.trait-as-type name="Priced"
-  fix resolve.add-dyn 12:16-12:16 "dyn "
+  fix resolve.add-ref-dyn 12:16-12:16 "ref dyn "

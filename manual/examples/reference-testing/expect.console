@@ -1,8 +1,9 @@
 $ sisu test expect.sisu
-after the expects
 test "doubles" ... FAILED
 
 test "doubles" ... FAILED
+what the test printed:
+  after the expects
 panic: assertion failed: double(3) == 6
   left:  5
   right: 6

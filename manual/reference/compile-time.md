@@ -245,16 +245,8 @@ Heater, variant Wood of 0 fields, variant Electric of 1 fields
 True
 ```
 
-**Stage 0 differs.** A builtin type given to a `T: type` parameter,
-such as `bool` or `int`, is E0200 (`resolve.undefined-name`) in `sisu
-run`, `sisu check` and `sisu test`, with a note about Python's
-conversion functions, which the call is not, though a type of the
-program, `String`, `uint` and `u8` work and the Rust front end takes
-them all. The documentation of items, which
-[08](../../proposal/08-metaprogramming.md#reflection) lists among what
-reflection exposes, has no query, and the attributes of a function or a
-field none either ([R14](attributes.md#attributes-are-data)).
-Reflection in a refinement's `where` clause or an `invariant` is E0900.
+A builtin type, `bool` or `int`, is a type argument as a type of the
+program is:
 
 <!-- file: examples/reference-compile-time/type_argument.sisu -->
 ```sisu
@@ -270,15 +262,15 @@ def main():
 <!-- output: examples/reference-compile-time/type_argument.console -->
 ```console
 $ sisu run type_argument.sisu
-error[E0200]: cannot find `bool` in this scope
-  --> type_argument.sisu:7:25
-  |
-7 |     print(comptime name(bool))
-  |                         ^^^^
-  = note: Sisu converts with methods: text is read with `s.parse_int()` or `s.parse_float()`, which give an option, a number is made text with `n.to_string()` or `"{n}"`, and one number made another with `x.to_int()` or `n.to_f64()`
-
-error[D0006]: the program was not run: errors found (1)
+String
+bool
 ```
+
+**Stage 0 differs.** The documentation of items, which
+[08](../../proposal/08-metaprogramming.md#reflection) lists among what
+reflection exposes, has no query, and the attributes of a function or a
+field none either ([R14](attributes.md#attributes-are-data)).
+Reflection in a refinement's `where` clause or an `invariant` is E0900.
 
 **Status.** In stage 0 (D-018), with the differences noted.
 

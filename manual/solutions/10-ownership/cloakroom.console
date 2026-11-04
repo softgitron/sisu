@@ -17,18 +17,6 @@ warning[W0001]: typed hole `close` of type `list[Coat]`
 35 |         return todo("close")
    |                ^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("leave")`:
-  self = Cloakroom(coats={}, next_ticket=1)
-  coat = Coat(owner="Aino", colour="red")
-in scope at the typed hole `todo("leave")`:
-  self = Cloakroom(coats={}, next_ticket=1)
-  coat = Coat(owner="Aino", colour="red")
-in scope at the typed hole `todo("leave")`:
-  self = Cloakroom(coats={}, next_ticket=1)
-  coat = Coat(owner="Roni", colour="blue")
-in scope at the typed hole `todo("leave")`:
-  self = Cloakroom(coats={}, next_ticket=1)
-  coat = Coat(owner="Aino", colour="red")
 test "tickets count up" ... blocked by todo("leave")
 test "a ticket gives its coat back" ... blocked by todo("leave")
 test "a ticket works once" ... blocked by todo("leave")

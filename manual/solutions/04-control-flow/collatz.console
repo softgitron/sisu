@@ -5,14 +5,6 @@ warning[W0001]: typed hole `collatz_steps` of type `int`
 12 |     return todo("collatz_steps")
    |            ^^^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("collatz_steps")`:
-  n = 1
-in scope at the typed hole `todo("collatz_steps")`:
-  n = 16
-in scope at the typed hole `todo("collatz_steps")`:
-  n = 6
-in scope at the typed hole `todo("collatz_steps")`:
-  n = 27
 test "one is already there" ... blocked by todo("collatz_steps")
 test "a power of two only halves" ... blocked by todo("collatz_steps")
 test "small numbers" ... blocked by todo("collatz_steps")

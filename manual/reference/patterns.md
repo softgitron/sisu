@@ -255,7 +255,7 @@ below the axis
 
 **Stage 0 differs.** `let first, *rest = xs`, star unpacking in a plain
 `let`, is designed in [02](../../proposal/02-syntax.md) and stage 0 does
-not have it; the list pattern `[first, *rest]` works in `match` and in
+not have it (E0900, whose message names this pattern); the list pattern `[first, *rest]` works in `match` and in
 `let ... else`.
 
 **Status.** In stage 0, except star unpacking in a plain `let`.

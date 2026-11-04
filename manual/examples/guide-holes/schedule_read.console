@@ -5,8 +5,6 @@ warning[W0001]: typed hole `lay out the evening` of type `list[String]`
 19 |     return todo("lay out the evening")
    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("lay out the evening")`:
-  turns = [Turn(name="Aino", hour=18)]
 test "turns from text" ... ok
 test "a free hour says so" ... blocked by todo("lay out the evening")
 1 passed, 0 failed, 1 blocked

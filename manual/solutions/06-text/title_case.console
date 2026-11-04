@@ -5,14 +5,6 @@ warning[W0001]: typed hole `title_case` of type `String`
 10 |     return todo("title_case")
    |            ^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("title_case")`:
-  text = "hei maailma"
-in scope at the typed hole `todo("title_case")`:
-  text = "tAMPERE AND turku"
-in scope at the typed hole `todo("title_case")`:
-  text = "  äiti   ja isä "
-in scope at the typed hole `todo("title_case")`:
-  text = ""
 test "two words" ... blocked by todo("title_case")
 test "capitals in the middle" ... blocked by todo("title_case")
 test "letters with dots and extra spaces" ... blocked by todo("title_case")

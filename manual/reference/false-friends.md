@@ -134,8 +134,9 @@ error[E0302]: a condition must be a `bool`, not `list[str]`; Sisu has no truthin
 ### FF-5: `a if c else b`
 
 Sisu's conditional expression is `if c: a else: b`. Python's order is
-E0115 with the fix in a `let`, as [R17](diagnostics.md#e0115) shows;
-inside a call's parentheses it is E0100.
+E0115, whose fix writes Sisu's order, wherever it stands: in a `let`,
+as [R17](diagnostics.md#e0115) shows, and inside a call's parentheses,
+as here.
 
 <!-- file: examples/reference-false-friends/conditional.sisu -->
 ```sisu
@@ -148,11 +149,12 @@ def main():
 <!-- output: examples/reference-false-friends/conditional.console -->
 ```console
 $ sisu check conditional.sisu
-error[E0100]: expected `)`, found `if`
-  --> conditional.sisu:4:17
+error[E0115]: `a if c else b` is not Sisu; write `if c: a else: b`
+  --> conditional.sisu:4:11
   |
 4 |     print("big" if n > 2 else "small")
-  |                 ^^
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: write it as `if c: a else: b`: `if n > 2: "big" else: "small"`
 
 ```
 
@@ -188,7 +190,7 @@ maintainers.
 | `xs[-1]` | `xs[^1]` | [E0344](diagnostics.md#e0344) | yes, as a fix |
 | `7 / 2` | `7 // 2` | [E0301](diagnostics.md#e0301) | yes, as a fix |
 | `if xs:` | `if not xs.is_empty():` | [E0302](diagnostics.md#e0302) | yes, in a note |
-| `a if c else b` | `if c: a else: b` | [E0115](diagnostics.md#e0115), [E0100](diagnostics.md#e0100) | in a `let` only |
+| `a if c else b` | `if c: a else: b` | [E0115](diagnostics.md#e0115) | yes, as a fix |
 | `count = 0` to declare | `var count = 0` | [E0200](diagnostics.md#e0200) | `let`, as a fix |
 | `print(a, b)` | `print("{a} {b}")` | [E0305](diagnostics.md#e0305) | yes, as a fix |
 | `'text'` | `"text"` | [E0016](diagnostics.md#e0016) | yes, as a fix |
@@ -196,7 +198,7 @@ maintainers.
 | `word[0]` | `word.chars()`, `word.byte_slice(a, b)` | [E0345](diagnostics.md#e0345) | yes, in the message |
 | `x or default` | `x ?? default` | [E0302](diagnostics.md#e0302) | no |
 | `", ".join(xs)` | `xs.join(", ")` | [E0304](diagnostics.md#e0304) | yes, as a fix |
-| `(n := f())` | `let n = f()`, `if let` | [E0123](diagnostics.md#e0123), [E0100](diagnostics.md#e0100) | outside brackets only |
+| `(n := f())` | `let n = f()`, `if let` | [E0123](diagnostics.md#e0123) | yes, in the message |
 | `for ... else:` | `if let` on a search's result | [E0127](diagnostics.md#e0127) | yes, in the message |
 | `a < b > c` | one direction | [E0113](diagnostics.md#e0113) | yes, in the message |
 | `x is None` | `x.is_none()`, `if let` | [E0100](diagnostics.md#e0100) | yes, as a fix |
@@ -207,7 +209,9 @@ maintainers.
 | `int(s)`, `str(n)` | `s.parse_int()`, `"{n}"` | [E0200](diagnostics.md#e0200) | yes, in a note |
 | `append`, `strip`, `upper` | `push`, `trim`, `to_uppercase` | [E0304](diagnostics.md#e0304) | yes, as a fix |
 | `d.get(k, default)` | `d.get(k) ?? default` | [E0305](diagnostics.md#e0305) | no |
-| `enumerate(xs, start=1)` | `enumerate(xs)` and `i + 1` | [E0306](diagnostics.md#e0306) | no |
+| `enumerate(xs, start=1)` | `enumerate(xs)` and `i + 1` | [E0306](diagnostics.md#e0306) | yes, in a note |
+| `def f(*args)` | a `Slice[T]` parameter | [E0900](diagnostics.md#e0900) | yes, in the message |
+| `first, *rest = xs` | `case [first, *rest]:` | [E0900](diagnostics.md#e0900) | yes, in the message |
 
 ### Assignment declares a name
 
@@ -395,8 +399,8 @@ error[E0304]: `str` has no method `join`
 ### `:=`
 
 Sisu has no assignment expression: bind with `let`, or use `if let` or a
-chained condition. E0123 where a statement starts with it; E0100 inside
-brackets, as here.
+chained condition. E0123, wherever it stands, inside brackets as
+here.
 
 <!-- file: examples/reference-false-friends/walrus.sisu -->
 ```sisu
@@ -410,7 +414,7 @@ def main():
 <!-- output: examples/reference-false-friends/walrus.console -->
 ```console
 $ sisu check walrus.sisu
-error[E0100]: expected `)`, found `:=`
+error[E0123]: Sisu has no `:=`; bind with `let` or use `if let`
   --> walrus.sisu:4:11
   |
 4 |     if (n := len(names)) > 2:
@@ -711,7 +715,8 @@ error[E0305]: wrong number of arguments to `get`: expected 1, found 2
 
 ### `enumerate(xs, start=1)`
 
-`enumerate` counts from 0; add 1 where the number is used. E0306.
+`enumerate` counts from 0; add 1 where the number is used. E0306, whose
+note says so.
 
 <!-- file: examples/reference-false-friends/enumerate_start.sisu -->
 ```sisu
@@ -729,6 +734,72 @@ error[E0306]: `enumerate` has no parameter named `start`
   |
 3 |     for i, name in enumerate(["Aino", "Eero"], start=1):
   |                                                ^^^^^
+  = note: `enumerate` counts from 0 and takes no `start`: add the start where the count is used, as `i + 1`
+
+```
+
+### `*args`
+
+A parameter that collects any number of arguments, `*prices: int`, is
+E0900: [02](../../proposal/02-syntax.md#declarations) gives it and
+[14](../../proposal/14-non-goals.md) rules variadic functions out, and
+the message says that it waits for that decision. Meanwhile a
+`Slice[int]` parameter takes a list, `total([3, 4, 5])`. The call is
+also E0305, counted against a function of no parameters.
+
+<!-- file: examples/reference-false-friends/star_args.sisu -->
+```sisu
+# Python's `*args`, a parameter that collects any number of arguments.
+def total(*prices: int) -> int:
+    var sum = 0
+    for p in prices:
+        sum += p
+    return sum
+
+def main():
+    print(total(3, 4, 5))
+```
+
+<!-- output: examples/reference-false-friends/star_args.console -->
+```console
+$ sisu check star_args.sisu
+error[E0900]: a variadic parameter, `*xs: T`, is not implemented in stage 0 yet; it arrives with the decision between 02, which gives it, and 14, which rules variadic functions out; a `Slice[T]` parameter takes a list meanwhile
+  --> star_args.sisu:2:11
+  |
+2 | def total(*prices: int) -> int:
+  |           ^^^^^^^^^^^^
+
+error[E0305]: wrong number of arguments to `total`: expected 0, found 3
+  --> star_args.sisu:9:11
+  |
+9 |     print(total(3, 4, 5))
+  |           ^^^^^^^^^^^^^^
+
+```
+
+### `first, *rest = xs`
+
+Star unpacking in a `let` is designed in
+[02](../../proposal/02-syntax.md) and not in stage 0: E0900, whose
+message names the list pattern of a `match`, `case [first, *rest]:`,
+which takes a list apart now ([R6](patterns.md)).
+
+<!-- file: examples/reference-false-friends/star_unpacking.sisu -->
+```sisu
+# Python's star unpacking.
+def main():
+    let first, *rest = ["Aino", "Eero", "Roni"]
+    print("{first}, then {len(rest)} more")
+```
+
+<!-- output: examples/reference-false-friends/star_unpacking.console -->
+```console
+$ sisu check star_unpacking.sisu
+error[E0900]: star unpacking in a `let`, `let first, *rest = xs`, is not implemented in stage 0 yet; it arrives with a later round; a `match` takes a list apart now, `case [first, *rest]:`
+  --> star_unpacking.sisu:3:9
+  |
+3 |     let first, *rest = ["Aino", "Eero", "Roni"]
+  |         ^^^^^^^^^^^^
 
 ```
 

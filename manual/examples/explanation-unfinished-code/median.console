@@ -12,9 +12,6 @@ warning[W0001]: typed hole `the middle element of sorted_xs` of type `int`
 5 |     return todo("the middle element of sorted_xs")
   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("the middle element of sorted_xs")`:
-  xs = [3, 1, 2]
-  sorted_xs = [1, 2, 3]
 test "the mean of three" ... ok
 test "the median of three" ... blocked by todo("the middle element of sorted_xs")
 1 passed, 0 failed, 1 blocked

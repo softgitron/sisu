@@ -826,14 +826,6 @@ warning[W0001]: typed hole `best_seller` of type `String?`
 26 |     return todo("best_seller")
    |            ^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("total_in")`:
-  sales = [Sale(product="pulla", town="Turku", cents=280), Sale(product="kakku", town="Tampere", cents=2400), Sale(product="leipä", town="Turku", cents=590), Sale(product="pulla", town="Tampere", cents=280), Sale(product="piirakka", town="Turku", cents=2400)]
-  town = "Turku"
-in scope at the typed hole `todo("dear")`:
-  sales = [Sale(product="pulla", town="Turku", cents=280), Sale(product="kakku", town="Tampere", cents=2400), Sale(product="leipä", town="Turku", cents=590), Sale(product="pulla", town="Tampere", cents=280), Sale(product="piirakka", town="Turku", cents=2400)]
-  cents = 500
-in scope at the typed hole `todo("best_seller")`:
-  sales = [Sale(product="pulla", town="Turku", cents=280), Sale(product="kakku", town="Tampere", cents=2400), Sale(product="leipä", town="Turku", cents=590), Sale(product="pulla", town="Tampere", cents=280), Sale(product="piirakka", town="Turku", cents=2400)]
 test "a town's total" ... blocked by todo("total_in")
 test "the dear products" ... blocked by todo("dear")
 test "the best seller" ... blocked by todo("best_seller")
@@ -1010,12 +1002,6 @@ warning[W0001]: typed hole `ranking` of type `list[String]`
 29 |     return todo("ranking")
    |            ^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("parse_board")`:
-  text = "# round 3\nKettu: 12\nKarhu: 15\n\nIlves:  12\n"
-in scope at the typed hole `todo("parse_board")`:
-  text = "Kettu: 12\nKarhu 15\nIlves: x"
-in scope at the typed hole `todo("parse_board")`:
-  text = "# round 3\nKettu: 12\nKarhu: 15\n\nIlves:  12\n"
 test "a board" ... blocked by todo("parse_board")
 test "the first bad line" ... blocked by todo("parse_board")
 test "a ranking" ... blocked by todo("parse_board")

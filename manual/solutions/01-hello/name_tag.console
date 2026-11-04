@@ -5,12 +5,6 @@ warning[W0001]: typed hole `name tag` of type `String`
 13 |     return todo("name tag")
    |            ^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("name tag")`:
-  name = "Aino"
-  town = "Oulu"
-in scope at the typed hole `todo("name tag")`:
-  name = "Eero"
-  town = "Turku"
 test "a tag for Aino from Oulu" ... blocked by todo("name tag")
 test "a tag for Eero from Turku" ... blocked by todo("name tag")
 0 passed, 0 failed, 2 blocked

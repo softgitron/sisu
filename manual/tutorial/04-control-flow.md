@@ -672,14 +672,6 @@ warning[W0001]: typed hole `fizzbuzz` of type `String`
 12 |     return todo("fizzbuzz")
    |            ^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("fizzbuzz")`:
-  n = 1
-in scope at the typed hole `todo("fizzbuzz")`:
-  n = 9
-in scope at the typed hole `todo("fizzbuzz")`:
-  n = 30
-in scope at the typed hole `todo("fizzbuzz")`:
-  n = 1
 test "plain numbers" ... blocked by todo("fizzbuzz")
 test "multiples of three or five" ... blocked by todo("fizzbuzz")
 test "multiples of fifteen" ... blocked by todo("fizzbuzz")
@@ -749,14 +741,6 @@ warning[W0001]: typed hole `collatz_steps` of type `int`
 12 |     return todo("collatz_steps")
    |            ^^^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("collatz_steps")`:
-  n = 1
-in scope at the typed hole `todo("collatz_steps")`:
-  n = 16
-in scope at the typed hole `todo("collatz_steps")`:
-  n = 6
-in scope at the typed hole `todo("collatz_steps")`:
-  n = 27
 test "one is already there" ... blocked by todo("collatz_steps")
 test "a power of two only halves" ... blocked by todo("collatz_steps")
 test "small numbers" ... blocked by todo("collatz_steps")

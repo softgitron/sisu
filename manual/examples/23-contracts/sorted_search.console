@@ -1,0 +1,16 @@
+$ sisu run sorted_search.sisu
+True
+panic: assertion failed: xs == sorted(xs)
+  message: the numbers must be sorted
+    xs == sorted(xs)
+    │     │      │
+    [8, 1, 5, 3] [8, 1, 5, 3]
+          [1, 3, 5, 8]
+  at contains (sorted_search.sisu:5:5)
+  at main (sorted_search.sisu:18:11)
+$ sisu run --contracts=preconditions sorted_search.sisu
+True
+False
+$ sisu run --native --release sorted_search.sisu
+True
+False

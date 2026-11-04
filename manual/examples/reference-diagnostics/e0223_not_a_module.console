@@ -1,0 +1,9 @@
+$ sisu run e0223_not_a_module.sisu
+error[E0223]: `std.collections.Deque` is not a module
+  --> e0223_not_a_module.sisu:2:8
+  |
+2 | import std.collections.Deque
+  |        ^^^^^^^^^^^^^^^^^^^^^
+  = fix: import the item from its module: `from std.collections import Deque`
+
+error[D0006]: the program was not run: errors found (1)

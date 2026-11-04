@@ -940,14 +940,6 @@ warning[W0001]: typed hole `total_size` of type `int ! IoError`
 13 |     return todo("total_size")
    |            ^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("total_size")`:
-  dir = "photos"
-in scope at the typed hole `todo("total_size")`:
-  dir = "photos"
-in scope at the typed hole `todo("total_size")`:
-  dir = "."
-in scope at the typed hole `todo("total_size")`:
-  dir = "music"
 test "the files directly in a directory" ... blocked by todo("total_size")
 test "a lent file system" ... blocked by todo("total_size")
 test "narrowed file systems" ... blocked by todo("total_size")
@@ -1063,17 +1055,6 @@ warning[W0001]: typed hole `get` of type `String?`
 26 |         return todo("get")
    |                ^^^^^^^^^^^
 
-in scope at the typed hole `todo("put")`:
-  key = "helsinki"
-  text = "snow"
-in scope at the typed hole `todo("get")`:
-  key = "turku"
-in scope at the typed hole `todo("put")`:
-  key = "oulu"
-  text = "rain"
-in scope at the typed hole `todo("put")`:
-  key = "oulu"
-  text = "rain"
 test "an answer is kept in a file" ... blocked by todo("put")
 test "a key that was never kept" ... blocked by todo("get")
 test "an answer goes stale" ... blocked by todo("put")

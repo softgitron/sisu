@@ -384,6 +384,52 @@ everyone is in
 - `tx.close()` says that no more values come. `for name in rx:`
   receives until the channel is closed and empty.
 
+`unbounded_channel[String]()` gives a channel with room for any number
+of values, so its sender never waits. The same program with one sends
+every name before the first is received:
+
+<!-- file: examples/20-concurrency/unbounded.sisu -->
+```sisu
+# An unbounded channel never makes its sender wait.
+
+## Sends each of `names`, then closes the channel.
+def send_all(
+    tx: Sender[String],
+    names: list[str],
+) -> ! {ChannelError, TaskError}:
+    for name in names:
+        tx.send(name.to_string())?
+        print("sent {name}")
+    tx.close()
+    return Ok(())
+
+def main():
+    let tx, rx = unbounded_channel[String]()
+    task.scope do s:
+        s.spawn(() -> send_all(tx, ["Aino", "Eero", "Roni", "Liisa"]))
+        for name in rx:
+            print("welcome, {name}")
+    print("everyone is in")
+```
+
+<!-- output: examples/20-concurrency/unbounded.out -->
+```text
+sent Aino
+sent Eero
+sent Roni
+sent Liisa
+welcome, Aino
+welcome, Eero
+welcome, Roni
+welcome, Liisa
+everyone is in
+```
+
+A bounded channel is the usual choice: when the receiver falls behind,
+the sender waits instead of filling the memory with values nobody has
+received yet. Choose an unbounded one when the sender must never wait,
+and something else bounds how much it sends.
+
 What a channel carries must be owned, here a `String`: the receiver
 may keep a value longer than anything it borrowed would live. When
 every task waits and nothing can wake any of them, the program has
@@ -1034,18 +1080,6 @@ warning[W0001]: typed hole `check_all` of type `list[String]`
 19 |     return todo("check_all")
    |            ^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("check_all")`:
-  bookings = ["mon 18 Aino", "tue ? Eero", "wed 19 Roni", "thu 17 Liisa"]
-  workers = 2
-in scope at the typed hole `todo("check_all")`:
-  bookings = ["mon 18 Aino", "tue ? Eero", "wed 19 Roni", "thu 17 Liisa"]
-  workers = 2
-in scope at the typed hole `todo("check_all")`:
-  bookings = ["mon 18 Aino", "tue ? Eero", "wed 19 Roni", "thu 17 Liisa"]
-  workers = 1
-in scope at the typed hole `todo("check_all")`:
-  bookings = ["mon 18 Aino", "tue ? Eero", "wed 19 Roni", "thu 17 Liisa"]
-  workers = 4
 test "the bookings that pass" ... blocked by todo("check_all")
 test "two workers take half the time of one" ... blocked by todo("check_all")
 test "one worker checks one booking at a time" ... blocked by todo("check_all")
@@ -1153,14 +1187,6 @@ warning[W0001]: typed hole `forecasts` of type `list[String] ! {TaskError, Weath
 36 |     return todo("forecasts")
    |            ^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("forecasts")`:
-  towns = ["Turku", "Oulu", "Kemi"]
-in scope at the typed hole `todo("forecasts")`:
-  towns = ["Turku", "Oulu", "Kemi"]
-in scope at the typed hole `todo("forecasts")`:
-  towns = ["Atlantis", "Oulu"]
-in scope at the typed hole `todo("forecasts")`:
-  towns = []
 test "the answers in the order of the towns" ... blocked by todo("forecasts")
 test "every town at once" ... blocked by todo("forecasts")
 test "an unknown town" ... blocked by todo("forecasts")
@@ -1276,18 +1302,6 @@ warning[W0001]: typed hole `first_price` of type `int ! {TaskError, PriceError}`
 40 |     return todo("first_price")
    |            ^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("first_price")`:
-  item = "coffee"
-  limit = Duration(nanos=5000000000)
-in scope at the typed hole `todo("first_price")`:
-  item = "coffee"
-  limit = Duration(nanos=5000000000)
-in scope at the typed hole `todo("first_price")`:
-  item = "coffee"
-  limit = Duration(nanos=5000000000)
-in scope at the typed hole `todo("first_price")`:
-  item = "tea"
-  limit = Duration(nanos=5000000000)
 test "the primary answers first" ... blocked by todo("first_price")
 test "the replica answers first" ... blocked by todo("first_price")
 test "neither answers in time" ... blocked by todo("first_price")

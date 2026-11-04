@@ -643,14 +643,6 @@ warning[W0001]: typed hole `title_case` of type `String`
 10 |     return todo("title_case")
    |            ^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("title_case")`:
-  text = "hei maailma"
-in scope at the typed hole `todo("title_case")`:
-  text = "tAMPERE AND turku"
-in scope at the typed hole `todo("title_case")`:
-  text = "  äiti   ja isä "
-in scope at the typed hole `todo("title_case")`:
-  text = ""
 test "two words" ... blocked by todo("title_case")
 test "capitals in the middle" ... blocked by todo("title_case")
 test "letters with dots and extra spaces" ... blocked by todo("title_case")
@@ -717,12 +709,6 @@ warning[W0001]: typed hole `csv_fields` of type `list[String]`
 11 |     return todo("csv_fields")
    |            ^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("csv_fields")`:
-  line = "a,b,c"
-in scope at the typed hole `todo("csv_fields")`:
-  line = "a,,b"
-in scope at the typed hole `todo("csv_fields")`:
-  line = "\"Oulu, Finland\",214000"
 test "plain fields" ... blocked by todo("csv_fields")
 test "an empty field" ... blocked by todo("csv_fields")
 test "a comma inside quotes" ... blocked by todo("csv_fields")
@@ -795,18 +781,6 @@ warning[W0001]: typed hole `caesar` of type `String`
 13 |     return todo("caesar")
    |            ^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("caesar")`:
-  text = "abc"
-  shift = 1
-in scope at the typed hole `todo("caesar")`:
-  text = "xyz"
-  shift = 3
-in scope at the typed hole `todo("caesar")`:
-  text = "Hei, Aino!"
-  shift = 13
-in scope at the typed hole `todo("caesar")`:
-  text = "Kissa"
-  shift = 5
 test "one place along" ... blocked by todo("caesar")
 test "past the end of the alphabet" ... blocked by todo("caesar")
 test "capitals and punctuation" ... blocked by todo("caesar")

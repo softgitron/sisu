@@ -353,9 +353,8 @@ error[E0395]: `dyn Priced` has no size of its own; hold it behind `ref` or in a 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-E0395 (`type.unsized-dyn`) asks for a `ref` or a `Box`. This is also
-where chapter 14's E0231 leads when you accept its fix, `dyn Priced`,
-for a parameter.
+E0395 (`type.unsized-dyn`) asks for a `ref` or a `Box`, which chapter
+14's E0231 writes in its fix, `ref dyn Priced`, for a parameter.
 
 </details>
 

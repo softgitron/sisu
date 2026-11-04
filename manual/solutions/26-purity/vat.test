@@ -1,5 +1,3 @@
-adding VAT to 3 prices
-adding VAT to 0 prices
 test "prices with VAT" ... ok
 test "no prices" ... ok
 2 passed, 0 failed, 0 blocked

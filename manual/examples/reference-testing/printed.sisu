@@ -1,0 +1,10 @@
+# What a test prints is shown only when the test fails.
+def double(n: int) -> int:
+    print("doubling {n}")
+    return n + 2
+
+test "doubles two":
+    assert double(2) == 4
+
+test "doubles three":
+    assert double(3) == 6

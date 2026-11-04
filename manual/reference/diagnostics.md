@@ -1714,11 +1714,20 @@ error[E0204]: module `std.collections` has no item `Stack`
 2 | from std.collections import Stack
   |                             ^^^^^
 
-error[D0006]: the program was not run: errors found (1)
+error[E0200]: cannot find `int` in this scope
+  --> e0204_not_in_module.sisu:5:23
+  |
+5 |     var stack = Stack[int]()
+  |                       ^^^
+  = note: Sisu converts with methods: text is read with `s.parse_int()` or `s.parse_float()`, which give an option, a number is made text with `n.to_string()` or `"{n}"`, and one number made another with `x.to_int()` or `n.to_f64()`
+
+error[D0006]: the program was not run: errors found (2)
 ```
 
 Check the module's items with `sisu doc --std std.collections`, or in
-its source; the diagnostic offers no similar name.
+its source; the diagnostic offers no similar name. The use of the item
+that the import did not bind, `Stack[int]()`, adds an E0200 for `int`,
+with a note on Python's conversions that does not apply.
 
 <!-- file: examples/reference-diagnostics/e0204_not_in_module_fixed.sisu -->
 ```sisu
@@ -1966,6 +1975,60 @@ True
 
 Shown in the guide [Write a script with dependencies](../guides/script.md).
 
+### E0223
+
+`resolve.not-a-module`: `{name}` is not a module.
+
+`import` names a module, and `from MODULE import NAME` an item of one.
+An `import` whose path ends in an item, a type, a function or a
+constant, rather than a module is E0223; where a module of the
+standard library has no such item at all, it is E0204.
+
+<!-- file: examples/reference-diagnostics/e0223_not_a_module.sisu -->
+```sisu
+# An item of a module imported as if it were a module.
+import std.collections.Deque
+
+def main():
+    var queue = Deque.new()
+    queue.push_back("Aino")
+    print(len(queue))
+```
+
+<!-- output: examples/reference-diagnostics/e0223_not_a_module.console -->
+```console
+$ sisu run e0223_not_a_module.sisu
+error[E0223]: `std.collections.Deque` is not a module
+  --> e0223_not_a_module.sisu:2:8
+  |
+2 | import std.collections.Deque
+  |        ^^^^^^^^^^^^^^^^^^^^^
+  = fix: import the item from its module: `from std.collections import Deque`
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+The fix writes the `from` form, which binds the item's name. The uses
+of the name are not reported again.
+
+<!-- file: examples/reference-diagnostics/e0223_not_a_module_fixed.sisu -->
+```sisu
+# An item imported from its module.
+from std.collections import Deque
+
+def main():
+    var queue = Deque.new()
+    queue.push_back("Aino")
+    print(len(queue))
+```
+
+<!-- output: examples/reference-diagnostics/e0223_not_a_module_fixed.out -->
+```text
+1
+```
+
+Shown in [R13](modules.md#imports).
+
 ### E0225
 
 `resolve.std-only-attribute`: `@{name}` is reserved for the standard
@@ -2055,13 +2118,15 @@ error[E0231]: `Priced` is a trait, not a type; a value of a type that implements
    |
 12 | def show(item: Priced) -> String:
    |                ^^^^^^
-  = fix: write `dyn Priced`: `dyn `
+  = note: a function that takes a value of any type implementing `Priced` is generic: `def f[T: Priced](x: T)`, made for each type it is called with
+  = fix: write `ref dyn Priced`: `ref dyn `
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-The fix writes `dyn Priced`, which then needs `ref` or `Box` (E0395); a
-bounded type parameter is the usual choice.
+The fix writes `ref dyn Priced`, a borrow of a value of any type that
+implements the trait; the note names the other way, a bounded type
+parameter, which is the usual choice and the fixed program's.
 
 <!-- file: examples/reference-diagnostics/e0231_trait_as_type_fixed.sisu -->
 ```sisu
@@ -6640,7 +6705,7 @@ error[E0445]: a release build rejects the typed hole `todo("area")` of type `f64
   |            ^^^^^^^^^^^^
   = note: fill the hole before the release build; a placeholder meant to ship is `panic("...")`
 
-error[D0006]: the program was not run: errors found (1)
+error[D0132]: the program was not compiled: errors found (1)
 ```
 
 The note says what to do: fill the hole, or, for a part of the program
@@ -7741,12 +7806,13 @@ error[E0801]: a contract only reads what it is given, and `all_different` is not
    |
 12 |     ensures all_different(hours)
    |             ^^^^^^^^^^^^^^^^^^^^
+  = fix: declare it `pure`, if it only reads what it is given: `pure `
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
 Mark the function `pure` when it only computes, as `all_different` does:
-its own `var` changes nothing outside it. The diagnostic offers no fix.
+its own `var` changes nothing outside it, which is what the fix does.
 
 <!-- file: examples/reference-diagnostics/e0801_contract_not_pure_fixed.sisu -->
 ```sisu
@@ -8669,12 +8735,6 @@ edition = "2027"
 <!-- output: examples/reference-diagnostics/e1003_bad_value.console -->
 ```console
 $ sisu check
-error[E1002]: `[package]` needs `version`
-  --> sisu.toml:1:2
-  |
-1 | [package]
-  |  ^^^^^^^
-
 error[E1003]: `version` takes a version `MAJOR.MINOR.PATCH`, as in `"0.3.1"`, found `"1.0"`
   --> sisu.toml:3:11
   |
@@ -8683,8 +8743,7 @@ error[E1003]: `version` takes a version `MAJOR.MINOR.PATCH`, as in `"0.3.1"`, fo
 
 ```
 
-Stage 0 also reports E1002 (`package.missing-key`), though the key is
-there. Write the version in three parts.
+Write the version in three parts.
 
 <!-- file: examples/reference-diagnostics/e1003_bad_value_fixed.files/sisu.toml -->
 ```toml
@@ -10518,7 +10577,8 @@ A run that reaches a typed hole prints the hole's closure before it
 stops ([R0013](#r0013)): this line, then a line `NAME = VALUE` for each
 binding in scope there, in the order the function declares them, each
 value in its `Debug` form ([17](../../proposal/17-testing.md#assertions)).
-A test blocked by a hole prints the same. A binding is left out when it
+A test blocked by a hole prints nothing of what it did, the closure
+included ([R15](testing.md#what-a-test-prints)). A binding is left out when it
 does not hold its whole value at the hole (it was moved away, as
 `names` is here), when it is a local that holds a borrow or a view (as
 `greeting`, a `str`, does), when its type writes its own `Debug` or is a
@@ -10580,7 +10640,7 @@ Shown in [chapter 3](../tutorial/03-functions.md#leaving-a-hole).
 
 ## The driver
 
-Codes D0001 to D0131. The messages of the `sisu` command itself
+Codes D0001 to D0135. The messages of the `sisu` command itself
 ([R16](sisu-command.md)): usage errors, the lines of `sisu test` and
 `sisu bench`, replays, packages and the native backend.
 
@@ -10613,9 +10673,10 @@ Example: [R16](sisu-command.md#commands-options-and-arguments).
 
 `cli.errors-found`: the program was not run: errors found ({count}).
 
-The program had errors, so the command did not run it (or build or
+The program had errors, so the command did not run it (or test or
 document it). It follows the diagnostics and counts the errors; warnings
-do not stop a run.
+do not stop a run. A build that stops at errors ends with D0132
+instead.
 
 Fix the errors above it. Every session on this page that runs a wrong
 program ends with it.
@@ -11072,6 +11133,50 @@ too. The status is 0.
 
 Example: [R16](sisu-command.md#commands-options-and-arguments).
 
+### D0132
+
+`cli.not-compiled`: the program was not compiled: errors found
+({count}).
+
+A build of a program with errors, `sisu build` with or without
+`--native`, and `sisu sir` of a program it has no SIR of, stopped: it
+follows the diagnostics and counts the errors, the typed holes of a
+release build (E0445) and the ownership checker's errors among them.
+`sisu run` and `sisu test` of the same program end with D0006, or
+D0021, since what they did not do is run it. The status is 1.
+
+Fix the errors above it.
+
+Example: [R16](sisu-command.md#sisu-build), and
+[E0445](#e0445) for a release build's holes.
+
+### D0134
+
+`native.test-unsupported`: `sisu test --native` does not run {what}
+yet; `sisu test` without `--native` runs it.
+
+`sisu test --native` was asked for what only the interpreter's run of
+the tests does: injected faults (`--faults`) or a test parameter that no
+fake stands for. A scheduler other than the seeded one is refused before
+it, with D0109. The status is 1.
+
+Run those tests without `--native`.
+
+Stage 0 holds the line with the tests' captured output and drops it, so
+`sisu test --native --sim --faults 0.2` prints nothing and ends with
+status 1 ([R15](testing.md#native-tests)).
+
+### D0135
+
+`cli.test-output`: what the test printed:.
+
+Not an error: the line in a failing test's block, after its header,
+under which `sisu test` shows what the test wrote to standard output
+and standard error, each line indented. A test that passes or is
+blocked prints nothing.
+
+Example: [R15](testing.md#what-a-test-prints).
+
 ## Every code
 
 The tables list every code of the catalog in this version, by range, with
@@ -11162,7 +11267,7 @@ it. `sisu explain CODE` prints the same line.
 | [E0220](#e0220) | `resolve.import-unknown` | cannot import `{name}`: it names no module of this package, of a dependency in `sisu.toml`, or of the standard library |
 | E0221 | `resolve.field-default-order` | a field with a default must not use the value of another field |
 | E0222 | `resolve.parameter-default-order` | a parameter without a default cannot follow one with a default |
-| E0223 | `resolve.not-a-module` | `{name}` is not a module |
+| [E0223](#e0223) | `resolve.not-a-module` | `{name}` is not a module |
 | E0224 | `resolve.missing-body` | `{name}` has no body; only standard-library intrinsics are declared without one |
 | [E0225](#e0225) | `resolve.std-only-attribute` | `@{name}` is reserved for the standard library |
 | E0226 | `resolve.inferred-set-position` | an inferred error set (`T !`) can only be the result type of a function |
@@ -11539,7 +11644,7 @@ it. `sisu explain CODE` prints the same line.
 | R0048 | `monitor.used-at` | used at: {location} (`{stmt}`) |
 | R0049 | `monitor.value` | value: `{place}` = {value} |
 | R0050 | `monitor.counts` | loans of `{place}` not ended yet: {shared} shared, {exclusive} with `mut` |
-| R0051 | `monitor.sir-header` | SIR of `{function}`: |
+| R0051 | `monitor.sir-header` | SIR of `{function}`, its blocks that the conflict passes through: |
 | R0052 | `monitor.op-write` | a modification |
 | R0053 | `monitor.op-read` | a use |
 | R0054 | `monitor.op-move` | a move |
@@ -11696,7 +11801,7 @@ it. `sisu explain CODE` prints the same line.
 | D0054 | `cli.snapshot-updated` | updated the snapshot `{name}`: {diff} |
 | D0055 | `cli.snapshot-new` | stored the new snapshot `{name}`: {text} |
 | D0056 | `cli.snapshot-unwritable` | cannot write the snapshots to `{path}`: {reason} |
-| D0057 | `cli.bench-result` | bench {name} ... {iterations} iterations, {each} each |
+| D0057 | `cli.bench-result` | bench {name} ... {each} an iteration, the median of {samples} samples of {iterations} iterations (95% interval of the mean {low} to {high}{outliers}) |
 | D0058 | `cli.bench-failed` | bench {name} ... FAILED {message} |
 | D0059 | `cli.bench-summary` | {count} benchmarks, {failed} failed (stage 0 times the interpreter: compare benchmarks with each other, not with compiled code) |
 | D0060 | `cli.transcript-result` | transcript {name} ... {outcome} |
@@ -11770,4 +11875,7 @@ it. `sisu explain CODE` prints the same line.
 | [D0129](#d0129) | `cli.missing-code` | `sisu explain` needs a diagnostic's code, such as `E0300`, or its name, such as `type.mismatch` |
 | [D0130](#d0130) | `cli.missing-name` | `sisu new` needs the name of the package to create |
 | [D0131](#d0131) | `cli.version` | sisu {version} |
+| [D0132](#d0132) | `cli.not-compiled` | the program was not compiled: errors found ({count}) |
+| [D0134](#d0134) | `native.test-unsupported` | `sisu test --native` does not run {what} yet; `sisu test` without `--native` runs it |
+| [D0135](#d0135) | `cli.test-output` | what the test printed: |
 

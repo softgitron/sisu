@@ -2,7 +2,7 @@
 
 This guide compiles a program into an executable that runs without
 `sisu`, checks that it behaves as the interpreter does, builds it for
-release, and says where targets and cross compilation stand. It assumes
+release, runs its tests compiled, and says where targets and cross compilation stand. It assumes
 a program with a `main`, from chapter 1 of the tutorial, and packages,
 from chapter 9.
 
@@ -86,7 +86,57 @@ on, and build for release once the tests pass. `--contracts=LEVEL`
 chooses at build time which contracts the executable checks, as it does
 for `sisu run`.
 
-## 3. Choose a target
+## 3. Run the tests natively
+
+`sisu test --native` compiles a program's tests with the native backend
+into one executable and runs each test in a process of its own, so the
+tests check the code that ships rather than the interpreter's run of
+it. Add `--release` to test the release build:
+
+<!-- file: examples/guide-native/steps.sisu -->
+```sisu
+# A countdown's lines, with tests that run compiled as well.
+
+## The lines of a countdown from `n` to *löyly*.
+def steps(n: int) -> list[String]:
+    var lines: list[String] = []
+    for k in range(n, 0, -1):
+        lines.push("{k}...")
+    lines.push("löyly!".to_string())
+    return lines
+
+test "a countdown from 2":
+    assert steps(2) == ["2...", "1...", "löyly!"]
+
+test "no count at all":
+    assert len(steps(0)) == 1
+```
+
+<!-- output: examples/guide-native/tests.console -->
+```console
+$ sisu test steps.sisu
+test "a countdown from 2" ... ok
+test "no count at all" ... ok
+2 passed, 0 failed, 0 blocked
+$ sisu test --native steps.sisu
+test "a countdown from 2" ... ok
+test "no count at all" ... ok
+2 passed, 0 failed, 0 blocked
+$ sisu test --native --release steps.sisu
+test "a countdown from 2" ... ok
+test "no count at all" ... ok
+2 passed, 0 failed, 0 blocked
+```
+
+- The report, the replay tokens and `--explore N` are those of `sisu
+  test`; the test cache is not used, so every test runs each time.
+- A release build of the tests still checks every contract, as `sisu
+  test` always does.
+- What only the interpreter does is refused with D0134 or D0109: the
+  schedulers `pct` and `exhaustive`, and injected faults. Run those
+  tests without `--native`.
+
+## 4. Choose a target
 
 An executable is built for the machine that builds it. Cross
 compilation, `sisu build --target TARGET` for another system or
@@ -101,7 +151,8 @@ error[D0009]: unknown option `--target` for `sisu build`
 Until it lands, build on a machine of the target's kind, such as a
 build server of each.
 
-**Status.** `--native`, `--release` and `--output` are in stage 0, as
+**Status.** `--native`, `--release`, `--output` and `sisu test
+--native` are in stage 0, as
 stage 2 of the bootstrap ([18](../../proposal/18-next-steps.md)).
 [12](../../proposal/12-interop-and-targets.md) designs the targets,
 their tiers and `--target`, which stage 0 does not have, and

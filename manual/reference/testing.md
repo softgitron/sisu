@@ -2,10 +2,11 @@
 
 This page states what a test is and what the tools around it do: the
 forms of `test`, its outcomes, the capabilities a test receives and how
-tests are kept apart, assertions, property tests and their generators,
-`@refines`, fakes of a program's own traits, doc examples, transcripts,
-snapshots, replay tokens, simulation, benchmarks, and what `sisu test`
-remembers. The command and its options are
+tests are kept apart, what a test prints, native tests, assertions,
+property tests and their generators, `@refines`, fakes of a program's
+own traits, doc examples, transcripts, snapshots, replay tokens,
+simulation, benchmarks, and what `sisu test` remembers. The command and
+its options are
 [R16](sisu-command.md#sisu-test).
 
 **See also:** the tutorial's [chapter 1](../tutorial/01-hello.md)
@@ -93,9 +94,7 @@ Each test ends in one of three outcomes:
 `sisu test` lists the tests in the order they are declared, shows each
 failure again after the list with its replay token, and ends with the
 counts. Before the list come the program's warnings, a W0001 for each
-hole with its type, and each test that reached a hole shows the hole's
-closure: a line naming the hole, then a line `NAME = VALUE` for each
-binding in scope there ([R17](diagnostics.md#r0160)). A program with an
+hole with its type. A program with an
 error runs no test: its diagnostics end with D0006, or with D0021 when
 the ownership checker found them, as a run's do. The status is 0 when
 every test passed, 1 when a test failed or the program has an error,
@@ -103,7 +102,14 @@ and 3 when no test failed and one is blocked, so a pipeline can tell a
 suite that waits for code from one that is done (D-061;
 [R16](sisu-command.md#sisu-test)).
 
-**Status.** In stage 0 (D-061).
+**Stage 0 differs.** In [17](../../proposal/17-testing.md#assertions)
+a test that reaches a hole stops with the hole's closure, a line naming
+the hole and a line `NAME = VALUE` for each binding in scope there
+([R17](diagnostics.md#r0160)), as a run does. Stage 0 drops a blocked
+test's output ([What a test prints](#what-a-test-prints)), and the
+closure with it, so only `sisu run` shows one.
+
+**Status.** In stage 0 (D-061), with the differences noted.
 
 ## Isolation and the test clock
 
@@ -111,8 +117,8 @@ Every test runs in an interpreter of its own, with fresh fakes and
 fresh module state, so tests cannot see each other. The tests that do
 not take the real `System` run at the same time, on up to `--jobs N`
 threads, and those that take it run one after another after them; the
-output of each is held and written in declaration order, so a run prints
-the same at any number of threads.
+report of each is held and written in declaration order, so a run
+prints the same at any number of threads.
 
 A test's clock is the run's test clock, which moves only when it is told
 to (`advance`, `set`) or when every task of the test waits: then it
@@ -120,6 +126,105 @@ jumps to the earliest timer, so a test of a five-minute wait takes no
 time ([R10](capabilities.md#fakes)).
 
 **Status.** In stage 0 (D-057).
+
+## What a test prints
+
+What a test writes to standard output and standard error is captured.
+A test that passes or is blocked prints nothing of it; a failing test's
+block after the list shows it after its header, under `what the test
+printed:` (D0135), each line indented, before how it failed. Under
+`--explore N` the output shown is that of the schedule that failed, and
+a replay token's run shows what its own run printed.
+
+<!-- file: examples/reference-testing/printed.sisu -->
+```sisu
+# What a test prints is shown only when the test fails.
+def double(n: int) -> int:
+    print("doubling {n}")
+    return n + 2
+
+test "doubles two":
+    assert double(2) == 4
+
+test "doubles three":
+    assert double(3) == 6
+```
+
+<!-- output: examples/reference-testing/printed.console -->
+```console
+$ sisu test printed.sisu
+test "doubles two" ... ok
+test "doubles three" ... FAILED
+
+test "doubles three" ... FAILED
+what the test printed:
+  doubling 3
+panic: assertion failed: double(3) == 6
+  left:  5
+  right: 6
+  at test "doubles three" (printed.sisu:10:5)
+replay: sisu test --replay 1-4bca1e2d19a9943e-0.0.1-t1-s0-r0 printed.sisu
+
+1 passed, 1 failed, 0 blocked
+$ sisu test --native printed.sisu
+test "doubles two" ... ok
+test "doubles three" ... FAILED
+
+test "doubles three" ... FAILED
+what the test printed:
+  doubling 3
+panic: assertion failed: double(3) == 6
+  left:  5
+  right: 6
+  at test "doubles three" (printed.sisu:10:5)
+replay: sisu test --replay 1-4bca1e2d19a9943e-0.0.1-t1-s0-r0 printed.sisu
+
+1 passed, 1 failed, 0 blocked
+$ sisu test --native --release printed.sisu
+test "doubles two" ... ok
+test "doubles three" ... FAILED
+
+test "doubles three" ... FAILED
+what the test printed:
+  doubling 3
+panic: assertion failed: double(3) == 6
+  left:  5
+  right: 6
+  at test "doubles three" (printed.sisu:10:5)
+replay: sisu test --replay 1-4bca1e2d19a9943e-0.0.1-t1-s0-r0 printed.sisu
+
+1 passed, 1 failed, 0 blocked
+```
+
+`--native` runs the same tests compiled ([Native tests](#native-tests)),
+and their output is captured in the same way.
+
+**Status.** In stage 0.
+
+## Native tests
+
+`sisu test --native` compiles the program's tests into one executable,
+with the native backend, and runs each test in a process of its own, as
+the interpreter would run it: with the real `System`, a simulated one
+under `--sim`, or fresh fakes of the capabilities it names. `--release`
+compiles it with the release profile, whose contract level is still
+`all`, since `sisu test` checks every contract. The report, the replay
+tokens and `--explore N`, each seed a run of the executable, are the
+interpreter's; the test cache is not used. The session of [What a test
+prints](#what-a-test-prints) runs its tests both ways.
+
+What only the interpreter does is D0134: the schedulers `pct` and
+`exhaustive` (D0109 when `--scheduler` is given), injected faults
+(`--faults`), and a test parameter that no fake stands for. A failed
+`expect` stops a native test as `assert` does.
+
+**Stage 0 differs.** `sisu test --native --sim` and `--native --sim
+--faults P` print nothing and exit with status 1: the refusal, D0134 or
+the build's error, is held with the tests' captured output and dropped.
+`sim.always` and `sim.choose` are not compiled yet (D0103).
+
+**Status.** In stage 0 (decision 460 of the architecture notes), with
+the differences noted.
 
 ## Assertions
 
@@ -176,10 +281,11 @@ test "doubles":
 <!-- output: examples/reference-testing/expect.console -->
 ```console
 $ sisu test expect.sisu
-after the expects
 test "doubles" ... FAILED
 
 test "doubles" ... FAILED
+what the test printed:
+  after the expects
 panic: assertion failed: double(3) == 6
   left:  5
   right: 6
@@ -195,16 +301,20 @@ replay: sisu test --replay 1-f194bbb30a1dcbdc-0.0.1-t0-s0-r0 expect.sisu
 
 Outside a test, in a program that `sisu run` runs, and at compile time,
 a failed `expect` stops the run as `assert` does, since no test is there
-to fail at the end. `debug_assert` is the form that a release build
-leaves out. The message of `assert` is a string (E0379).
+to fail at the end. `debug_assert CONDITION[, MESSAGE]` is the form
+that follows the contract level ([R11](contracts.md#check-levels)):
+checked as `assert` is wherever every contract is checked, `sisu test`
+and `sisu run` by default, and left out, its condition not evaluated, at
+`preconditions` and `off`, a release build's default. Like `expect`,
+`debug_assert` is a statement only before an expression and a name
+elsewhere. The message of `assert` is a string (E0379).
 
 **Stage 0 differs.** [17](../../proposal/17-testing.md#assertions) shows
 the value of every sub-expression, where stage 0 shows the two sides of
 a comparison (`left`, `right`) and nothing for a condition joined with
 `and`; `expect` takes no message, `expect CONDITION, MESSAGE` being
 E0117; a failure that `expect` records is reported as `panic: assertion
-failed`, as `assert`'s is; and `debug_assert` is not a statement yet
-(E0117).
+failed`, as `assert`'s is.
 
 **Status.** In stage 0, with the differences noted.
 
@@ -554,19 +664,24 @@ purpose ([R9](concurrency.md#the-scheduler),
 
 `bench "NAME"(b: Bench):` declares a benchmark, whose `for _ in
 b.loop():` is the loop it times; `sisu test` checks a benchmark and does
-not run it, and `sisu bench` runs it and prints the time of one turn of
-the loop. `black_box(x)` of `std.test` uses a value in a way that
-nothing can see through, so that the work that made it is kept
-([R16](sisu-command.md#sisu-bench)).
+not run it. `sisu bench` runs it once to warm up, then times `--samples
+K` samples of `--iterations N` turns of the loop, and prints the median
+time of one turn, the 95% interval of the mean of the samples that are
+not outliers, and the number of outliers
+([R16](sisu-command.md#sisu-bench)). `black_box(x)` of `std.test` uses a
+value in a way that nothing can see through, so that the work that made
+it is kept.
 
-**Status.** In stage 0.
+**Stage 0 differs.** 17's stable JSON report of the results is not
+begun, and stage 0 times its interpreter.
+
+**Status.** In stage 0, with the differences noted.
 
 ## What sisu test remembers
 
 A test that passed is not run again while its code is the same: `sisu
 test` keeps its results in `FILE.test-cache` beside a file, or in
-`build/debug/test-cache` in a package, and prints what the test printed
-when it ran. `--no-cache` runs everything.
+`build/debug/test-cache` in a package. `--no-cache` runs everything.
 
 **Stage 0 differs.** 17's machine-readable output (JSON, TAP, JUnit XML)
 and the reports of coverage and mutation testing are designed
@@ -583,6 +698,8 @@ and the reports of coverage and mutation testing are designed
 | E0820 | `test.no-generator` | [Property tests](#property-tests) |
 | E0821 | `test.refines-mismatch` | [Refinement tests](#refinement-tests) |
 | E0614 | `comptime.no-fake` | [Fakes of your own traits](#fakes-of-your-own-traits) |
+| [D0135](diagnostics.md#d0135) | `cli.test-output` | [What a test prints](#what-a-test-prints) |
+| [D0134](diagnostics.md#d0134), D0109 | `native.test-unsupported`, `native.alone` | [Native tests](#native-tests) |
 | D0061, [D0128](diagnostics.md#d0128) | `cli.transcript-differs`, `cli.transcript-front-end` | [Transcripts](#transcripts) |
 | R0107, [R0108](diagnostics.md#r0108) | `test.snapshot-changed`, `test.snapshot-missing` | [Snapshots](#snapshots) |
 | D0031, D0032, [D0033](diagnostics.md#d0033), D0034, D0035 | `cli.replay-no-token`, `cli.bad-replay-token`, `cli.token-other-code`, `cli.other-toolchain`, `cli.token-no-test` | [Replay tokens](#replay-tokens) |

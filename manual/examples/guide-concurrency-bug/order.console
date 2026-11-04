@@ -1,9 +1,10 @@
 $ sisu test --schedule-seed 2 double.sisu
-info [task 1]: Aino finds 18:00 free
-info [task 2]: Eero finds 18:00 free
 test "an hour is booked once" ... FAILED
 
 test "an hour is booked once" ... FAILED
+what the test printed:
+  info [task 1]: Aino finds 18:00 free
+  info [task 2]: Eero finds 18:00 free
 panic: assertion failed: booked == Ok([True, False]) or booked == Ok([False, True])
     booked == Ok([True, False]) or booked == Ok([False, True])
     │         │

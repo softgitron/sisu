@@ -4,4 +4,5 @@ error[E0306]: `enumerate` has no parameter named `start`
   |
 3 |     for i, name in enumerate(["Aino", "Eero"], start=1):
   |                                                ^^^^^
+  = note: `enumerate` counts from 0 and takes no `start`: add the start where the count is used, as `i + 1`
 

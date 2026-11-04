@@ -1,11 +1,11 @@
 $ sisu test
-info [task 1.1]: Aino books 18:00
-info [task 1.1]: Aino books 18:00
 test "sim_tests/a booking outlives a crash of the server" ... FAILED
 test "tests/a turn is booked once" ... ok
 test "tests/a request that is not a booking" ... ok
 
 test "sim_tests/a booking outlives a crash of the server" ... FAILED
+what the test printed:
+  info [task 1.1]: Aino books 18:00
 panic: assertion failed: len(kept) == 1
     len(kept) == 1
     │   │

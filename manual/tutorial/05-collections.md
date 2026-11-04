@@ -833,12 +833,6 @@ warning[W0001]: typed hole `word_frequencies` of type `dict[str, int]`
 10 |     return todo("word_frequencies")
    |            ^^^^^^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("word_frequencies")`:
-  words = ["kuu", "kissa", "kala"]
-in scope at the typed hole `todo("word_frequencies")`:
-  words = ["a", "b", "a", "c", "a", "b"]
-in scope at the typed hole `todo("word_frequencies")`:
-  words = []
 test "every word once" ... blocked by todo("word_frequencies")
 test "repeated words" ... blocked by todo("word_frequencies")
 test "no words" ... blocked by todo("word_frequencies")
@@ -905,14 +899,6 @@ warning[W0001]: typed hole `second_largest` of type `int`
 11 |     return todo("second_largest")
    |            ^^^^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("second_largest")`:
-  values = [1, 2]
-in scope at the typed hole `todo("second_largest")`:
-  values = [5, 9, 9, 3]
-in scope at the typed hole `todo("second_largest")`:
-  values = [-4, -8, -4]
-in scope at the typed hole `todo("second_largest")`:
-  values = [7, 3, 7, 7, 1, 3]
 test "two values" ... blocked by todo("second_largest")
 test "the largest value twice" ... blocked by todo("second_largest")
 test "negative values" ... blocked by todo("second_largest")

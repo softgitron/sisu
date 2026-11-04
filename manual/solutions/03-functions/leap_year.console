@@ -5,14 +5,6 @@ warning[W0001]: typed hole `is_leap_year` of type `bool`
 10 |     return todo("is_leap_year")
    |            ^^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("is_leap_year")`:
-  year = 2026
-in scope at the typed hole `todo("is_leap_year")`:
-  year = 2024
-in scope at the typed hole `todo("is_leap_year")`:
-  year = 1900
-in scope at the typed hole `todo("is_leap_year")`:
-  year = 2000
 test "an ordinary year" ... blocked by todo("is_leap_year")
 test "every fourth year" ... blocked by todo("is_leap_year")
 test "a century year that is not a leap year" ... blocked by todo("is_leap_year")

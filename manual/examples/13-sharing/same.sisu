@@ -1,4 +1,5 @@
 # `Shared.same` asks whether two owners hold the very same value.
+@derive(Eq)
 struct Config:
     retries: int
 
@@ -7,4 +8,4 @@ def main():
     let copy = config.copy()
     let other = Shared(Config(retries=3))
     print("{Shared.same(config, copy)} {Shared.same(config, other)}")
-    print(config.retries == other.retries)
+    print(config == other)

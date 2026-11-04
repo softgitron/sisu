@@ -502,22 +502,15 @@ warning[W0001]: typed hole `name tag` of type `String`
 13 |     return todo("name tag")
    |            ^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("name tag")`:
-  name = "Aino"
-  town = "Oulu"
-in scope at the typed hole `todo("name tag")`:
-  name = "Eero"
-  town = "Turku"
 test "a tag for Aino from Oulu" ... blocked by todo("name tag")
 test "a tag for Eero from Turku" ... blocked by todo("name tag")
 0 passed, 0 failed, 2 blocked
 ```
 
 The warning says that the hole is still there and that whatever replaces
-it must be a `String`. Both tests are blocked. Each stopped at the hole,
-and before the report Sisu shows what was in scope there: the `name`
-and the `town` that the test passed, which your code turns into the
-tag. Replace the hole and run the tests again until the last line reads
+it must be a `String`. Both tests are blocked: each stopped at the hole,
+where your code will turn the `name` and the `town` that the test
+passed into the tag. Replace the hole and run the tests again until the last line reads
 `2 passed, 0 failed, 0 blocked`.
 
 <details>

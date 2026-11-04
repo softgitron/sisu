@@ -1,1 +1,1 @@
-4:11-4:13 E0100 parse.expected expected="`)`" found="`:=`"
+4:11-4:13 E0123 parse.walrus

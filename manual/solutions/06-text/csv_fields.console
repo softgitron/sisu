@@ -5,12 +5,6 @@ warning[W0001]: typed hole `csv_fields` of type `list[String]`
 11 |     return todo("csv_fields")
    |            ^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("csv_fields")`:
-  line = "a,b,c"
-in scope at the typed hole `todo("csv_fields")`:
-  line = "a,,b"
-in scope at the typed hole `todo("csv_fields")`:
-  line = "\"Oulu, Finland\",214000"
 test "plain fields" ... blocked by todo("csv_fields")
 test "an empty field" ... blocked by todo("csv_fields")
 test "a comma inside quotes" ... blocked by todo("csv_fields")

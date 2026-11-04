@@ -60,16 +60,16 @@ a different order of the tasks:
 <!-- output: examples/guide-concurrency-bug/explore.console -->
 ```console
 $ sisu test double.sisu
-info [task 2]: Eero finds 18:00 free
 test "an hour is booked once" ... ok
 1 passed, 0 failed, 0 blocked
 $ sisu test --explore 20 double.sisu
-info [task 1]: Aino finds 18:00 free
-info [task 2]: Eero finds 18:00 free
 test "an hour is booked once" ... FAILED
 
 test "an hour is booked once" ... FAILED
 with schedule seed 2; `--schedule-seed 2` runs it again
+what the test printed:
+  info [task 1]: Aino finds 18:00 free
+  info [task 2]: Eero finds 18:00 free
 panic: assertion failed: booked == Ok([True, False]) or booked == Ok([False, True])
     booked == Ok([True, False]) or booked == Ok([False, True])
     │         │
@@ -94,11 +94,12 @@ command does:
 <!-- output: examples/guide-concurrency-bug/order.console -->
 ```console
 $ sisu test --schedule-seed 2 double.sisu
-info [task 1]: Aino finds 18:00 free
-info [task 2]: Eero finds 18:00 free
 test "an hour is booked once" ... FAILED
 
 test "an hour is booked once" ... FAILED
+what the test printed:
+  info [task 1]: Aino finds 18:00 free
+  info [task 2]: Eero finds 18:00 free
 panic: assertion failed: booked == Ok([True, False]) or booked == Ok([False, True])
     booked == Ok([True, False]) or booked == Ok([False, True])
     │         │
@@ -124,12 +125,10 @@ booking. Then search harder than random seeds do:
 <!-- output: examples/guide-concurrency-bug/double_fixed.console -->
 ```console
 $ sisu test --scheduler pct --depth 2 --explore 20 double_fixed.sisu
-info [task 1]: Aino finds 18:00 free
 test "an hour is booked once" ... ok
 1 passed, 0 failed, 0 blocked
 explored 20 schedules of a PCT scheduler of depth 2 per test (seeds 0 to 19)
 $ sisu test --scheduler exhaustive --depth 3 double_fixed.sisu
-info [task 1]: Aino finds 18:00 free
 test "an hour is booked once" ... ok
 1 passed, 0 failed, 0 blocked
 searched 37 schedules (preemption bound 3)

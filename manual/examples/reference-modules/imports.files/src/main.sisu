@@ -1,5 +1,6 @@
 # Imports that name nothing.
 import atlas.geo
+import atlas.geo.point.Point
 import atlas.roads
 from atlas.geo import Route
 from std.collections import *

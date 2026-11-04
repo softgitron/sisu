@@ -5,8 +5,6 @@ warning[W0001]: typed hole `halve` of type `int`
 6 |     return todo("halve")
   |            ^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("halve")`:
-  x = 42
 test "doubles a number" ... ok
 test "doubles (-1, -2)" ... ok
 test "doubles (-3, -5)" ... FAILED
@@ -48,8 +46,6 @@ warning[W0001]: typed hole `halve` of type `int`
 6 |     return todo("halve")
   |            ^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("halve")`:
-  x = 42
 test "doubles a number" ... ok
 test "doubles (-1, -2)" ... ok
 test "doubles (-3, -5)" ... FAILED

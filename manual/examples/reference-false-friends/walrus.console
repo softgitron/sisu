@@ -1,5 +1,5 @@
 $ sisu check walrus.sisu
-error[E0100]: expected `)`, found `:=`
+error[E0123]: Sisu has no `:=`; bind with `let` or use `if let`
   --> walrus.sisu:4:11
   |
 4 |     if (n := len(names)) > 2:

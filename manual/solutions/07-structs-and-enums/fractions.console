@@ -23,21 +23,6 @@ warning[W0001]: typed hole `show` of type `String`
 29 |         return todo("show")
    |                ^^^^^^^^^^^^
 
-in scope at the typed hole `todo("new")`:
-  top = 2
-  bottom = 4
-in scope at the typed hole `todo("new")`:
-  top = 1
-  bottom = -2
-in scope at the typed hole `todo("new")`:
-  top = 1
-  bottom = 2
-in scope at the typed hole `todo("new")`:
-  top = 2
-  bottom = 3
-in scope at the typed hole `todo("new")`:
-  top = 3
-  bottom = 4
 test "lowest terms" ... blocked by todo("new")
 test "a negative bottom" ... blocked by todo("new")
 test "adding" ... blocked by todo("new")

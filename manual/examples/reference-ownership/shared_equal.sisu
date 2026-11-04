@@ -1,0 +1,9 @@
+# Two `Shared` values compare, and hash, as the values they hold.
+def main():
+    let north = Shared("north".to_string())
+    let copy = north.copy()
+    let other = Shared("north".to_string())
+    print("{north == copy} {north == other} {Shared.same(north, other)}")
+    var visits = {north: 1}
+    visits[other] += 1
+    print(visits)

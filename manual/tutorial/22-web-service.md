@@ -315,8 +315,6 @@ test "a request that is not a booking"(fs: Fs, net: Net):
 <!-- output: examples/22-web-service/service.console -->
 ```console
 $ sisu test
-info [task 1.1]: Aino books 18:00
-info [task 1.1]: Aino books 18:00
 test "sim_tests/a booking outlives a crash of the server" ... ok
 test "tests/a turn is booked once" ... ok
 test "tests/a request that is not a booking" ... ok
@@ -390,13 +388,13 @@ run the tests.
 <!-- output: examples/22-web-service/unsynced.console -->
 ```console
 $ sisu test
-info [task 1.1]: Aino books 18:00
-info [task 1.1]: Aino books 18:00
 test "sim_tests/a booking outlives a crash of the server" ... FAILED
 test "tests/a turn is booked once" ... ok
 test "tests/a request that is not a booking" ... ok
 
 test "sim_tests/a booking outlives a crash of the server" ... FAILED
+what the test printed:
+  info [task 1.1]: Aino books 18:00
 panic: assertion failed: len(kept) == 1
     len(kept) == 1
     │   │
@@ -422,15 +420,14 @@ calls to the world fail now and then, at the rate `--faults` gives:
 <!-- output: examples/22-web-service/faults.console -->
 ```console
 $ sisu test --sim --faults 0.1
-info [task 1.1]: Aino books 18:00
-info [task 1.2]: Aino books 18:00
-info [task 1.1]: Aino books 18:00
-info [task 1.2]: Eero books 18:00
 test "sim_tests/a booking outlives a crash of the server" ... ok
 test "tests/a turn is booked once" ... FAILED
 test "tests/a request that is not a booking" ... ok
 
 test "tests/a turn is booked once" ... FAILED
+what the test printed:
+  info [task 1.1]: Aino books 18:00
+  info [task 1.2]: Eero books 18:00
 panic: assertion failed: got[0] == (201, "booked\n")
     got[0] == (201, "booked\n")
     │
@@ -440,11 +437,12 @@ replay: sisu test --replay 1-0dcd89d9ab9c2483-0.0.1-t1-s0-r0-m100000 .
 
 2 passed, 1 failed, 0 blocked
 $ sisu test --replay 1-0dcd89d9ab9c2483-0.0.1-t1-s0-r0-m100000 .
-info [task 1.1]: Aino books 18:00
-info [task 1.2]: Eero books 18:00
 test "tests/a turn is booked once" ... FAILED
 
 test "tests/a turn is booked once" ... FAILED
+what the test printed:
+  info [task 1.1]: Aino books 18:00
+  info [task 1.2]: Eero books 18:00
 panic: assertion failed: got[0] == (201, "booked\n")
     got[0] == (201, "booked\n")
     │
@@ -709,13 +707,6 @@ warning[W0001]: typed hole `answer 200 with the names as JSON` of type `http.Res
 26 |         return todo("answer 200 with the names as JSON")
    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("add the name, and answer 201 Created")`:
-  self = GuestBook(names=Mutex([]))
-  request = Request(method="POST", target="/guests", headers=[], body=b"Aino")
-  name = "Aino"
-in scope at the typed hole `todo("answer 200 with the names as JSON")`:
-  self = GuestBook(names=Mutex([]))
-  request = Request(method="GET", target="/guests", headers=[], body=b"")
 test "names in the book" ... blocked by todo("add the name, and answer 201 Created")
 test "an empty name is not a guest" ... blocked by todo("answer 200 with the names as JSON")
 0 passed, 0 failed, 2 blocked
@@ -963,27 +954,6 @@ warning[W0001]: typed hole `forecast` of type `String ! {TaskError, WeatherError
 68 |         return todo("forecast")
    |                ^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("Limiter.new")`:
-  limit = 2
-  window = Duration(nanos=10000000000)
-in scope at the typed hole `todo("Limiter.new")`:
-  limit = 1
-  window = Duration(nanos=10000000000)
-in scope at the typed hole `todo("Limiter.new")`:
-  limit = 2
-  window = Duration(nanos=10000000000)
-in scope at the typed hole `todo("Cache.new")`:
-  fresh = Duration(nanos=300000000000)
-in scope at the typed hole `todo("Cache.new")`:
-  fresh = Duration(nanos=300000000000)
-in scope at the typed hole `todo("Cache.new")`:
-  fresh = Duration(nanos=300000000000)
-in scope at the typed hole `todo("Cache.new")`:
-  fresh = Duration(nanos=300000000000)
-in scope at the typed hole `todo("Cache.new")`:
-  fresh = Duration(nanos=300000000000)
-in scope at the typed hole `todo("Cache.new")`:
-  fresh = Duration(nanos=1000000000)
 test "part 1, a limit for each client/two requests in a window" ... blocked by todo("Limiter.new")
 test "part 1, a limit for each client/a new window" ... blocked by todo("Limiter.new")
 test "part 1, a limit for each client/tasks share one limit" ... blocked by todo("Limiter.new")

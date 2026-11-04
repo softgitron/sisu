@@ -801,12 +801,6 @@ warning[W0001]: typed hole `the pattern` of type `str`
 14 |     let pattern = Regex.new(todo("the pattern"))?
    |                             ^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("the pattern")`:
-  text = "Sauna at 17:30, swim at 18:05."
-in scope at the typed hole `todo("the pattern")`:
-  text = "Tea at 9:15 and 21:00"
-in scope at the typed hole `todo("the pattern")`:
-  text = "no times here, and 12:3 has one digit"
 test "times with two digits" ... blocked by todo("the pattern")
 test "an hour of one digit" ... blocked by todo("the pattern")
 test "no time" ... blocked by todo("the pattern")
@@ -889,12 +883,6 @@ warning[W0001]: typed hole `sizes_by_extension` of type `dict[String, int] ! IoE
 15 |     return todo("sizes_by_extension")
    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("sizes_by_extension")`:
-  dir = "photos"
-in scope at the typed hole `todo("sizes_by_extension")`:
-  dir = "photos/2025"
-in scope at the typed hole `todo("sizes_by_extension")`:
-  dir = "music"
 test "every kind of file" ... blocked by todo("sizes_by_extension")
 test "a directory deeper down" ... blocked by todo("sizes_by_extension")
 test "a directory that is not there" ... blocked by todo("sizes_by_extension")
@@ -968,22 +956,6 @@ warning[W0001]: typed hole `start_times` of type `list[int]`
 15 |     return todo("start_times")
    |            ^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("start_times")`:
-  arrivals = [0, 0, 0]
-  stay = 10
-  saunas = 1
-in scope at the typed hole `todo("start_times")`:
-  arrivals = [0, 0, 0, 5]
-  stay = 10
-  saunas = 2
-in scope at the typed hole `todo("start_times")`:
-  arrivals = [0, 30]
-  stay = 10
-  saunas = 1
-in scope at the typed hole `todo("start_times")`:
-  arrivals = []
-  stay = 10
-  saunas = 3
 test "one sauna, everyone at once" ... blocked by todo("start_times")
 test "two saunas" ... blocked by todo("start_times")
 test "a sauna free before the bather comes" ... blocked by todo("start_times")
@@ -1082,14 +1054,6 @@ warning[W0001]: typed hole `get` of type `bytes ! {IoError, StoreError}`
 24 |     return todo("get")
    |            ^^^^^^^^^^^
 
-in scope at the typed hole `todo("put")`:
-  data = b"rye bread"
-in scope at the typed hole `todo("put")`:
-  data = b"blueberry pie"
-in scope at the typed hole `todo("put")`:
-  data = b"salt"
-in scope at the typed hole `todo("get")`:
-  name = "0000000000000000000000000000000000000000000000000000000000000000"
 test "data comes back" ... blocked by todo("put")
 test "the same data is kept once" ... blocked by todo("put")
 test "a file that changed is corrupt" ... blocked by todo("put")

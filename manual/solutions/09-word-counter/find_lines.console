@@ -11,15 +11,6 @@ warning[W0001]: typed hole `whether the line holds the word` of type `bool`
 15 |         if todo("whether the line holds the word"):
    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("the text of the file")`:
-  path = "poem.txt"
-  word = "warm"
-in scope at the typed hole `todo("the text of the file")`:
-  path = "poem.txt"
-  word = "snow"
-in scope at the typed hole `todo("the text of the file")`:
-  path = "song.txt"
-  word = "warm"
 test "lines that hold the word" ... blocked by todo("the text of the file")
 test "no line holds it" ... blocked by todo("the text of the file")
 test "a file that is not there" ... blocked by todo("the text of the file")

@@ -5,12 +5,6 @@ warning[W0001]: typed hole `sizes_by_extension` of type `dict[String, int] ! IoE
 15 |     return todo("sizes_by_extension")
    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("sizes_by_extension")`:
-  dir = "photos"
-in scope at the typed hole `todo("sizes_by_extension")`:
-  dir = "photos/2025"
-in scope at the typed hole `todo("sizes_by_extension")`:
-  dir = "music"
 test "every kind of file" ... blocked by todo("sizes_by_extension")
 test "a directory deeper down" ... blocked by todo("sizes_by_extension")
 test "a directory that is not there" ... blocked by todo("sizes_by_extension")

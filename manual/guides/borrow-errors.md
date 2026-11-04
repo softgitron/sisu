@@ -92,7 +92,9 @@ loop and its `name`.
 `sisu run --defer-borrow` runs the refused program under the ownership
 monitor, which watches every borrow as the program runs. It stops at
 the first real conflict, with status 134, and prints an account of it
-and the SIR of the function where it happened:
+and the blocks of the function's SIR that the conflict passes through:
+where the loan was made, where it ended and where it was used, with
+`...` for the blocks left out:
 
 <details>
 <summary>What <code>sisu run --defer-borrow</code> prints</summary>
@@ -109,51 +111,25 @@ ownership violation: a reference was used after its loan had ended
   loans of `bookings` not ended yet: 0 shared, 4 with `mut`
   at remove_ended (ended.sisu:3:5)
   at main (ended.sisu:9:5)
-SIR of `remove_ended`:
+SIR of `remove_ended`, its blocks that the conflict passes through:
 fn remove_ended(2) source 0 @2:5-2:17 {
-    let _0: ()
-    let _1: ref mut dict[str, int] "bookings" @2:18-2:46
-    let _2: int "now" @2:48-2:56
-    let _3: Iter[(ref str, ref int)]
-    let _4: ref dict[str, int]
-    let _5: ref mut Iter[(ref str, ref int)]
-    let _6: Option[(ref str, ref int)]
-    let _7: int
-    let _8: ref str "name" @3:9-3:13
-    let _9: ref int "hour" @3:15-3:19
-    let _10: bool
-    let _11: Option[int]
-    let _12: ref mut dict[str, int]
-    let _13: str
   bb0:
     _4 = ref _1.* @3:23-3:31
     _3 = call intrinsic dict.items(copy _4) @3:23-3:39
     goto bb2
-  bb1 (cleanup):
-    drop _3
-    resume
+  ...
   bb2 (unwind bb1):
     _5 = ref mut _3 @3:5-3:39
     _6 = call intrinsic Iter.next(copy _5) @3:5-3:39
     _7 = discriminant _6 @3:5-3:39
     switch copy _7 [0: bb3, else: bb5] @3:5-3:39
-  bb3 (unwind bb1):
-    _8 = copy _6.as(0).0.0 @3:9-3:13
-    _9 = copy _6.as(0).0.1 @3:15-3:19
-    _10 = lt copy _9, copy _2 @4:12-4:22
-    switch copy _10 [0: bb2, else: bb4] @4:12-4:22
+  ...
   bb4 (unwind bb1):
     _12 = ref mut _1.* @5:17-5:25
     _13 = copy _8.* @5:33-5:37
     _11 = call intrinsic dict.remove(copy _12, copy _13) @5:17-5:38
     goto bb2
-  bb5:
-    drop _3 @5:38-5:38
-    goto bb6
-  bb6:
-    dead _3 @5:38-5:38
-    _0 = const ()
-    return
+  ...
 }
 outcome: conflict reached; the run stopped at a concrete ownership conflict
 ```

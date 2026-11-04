@@ -1,1 +1,2 @@
-4:17-4:19 E0100 parse.expected expected="`)`" found="`if`"
+4:11-4:38 E0115 parse.python-conditional
+  fix parse.use-if-expression 4:11-4:38 "if n > 2: \"big\" else: \"small\""

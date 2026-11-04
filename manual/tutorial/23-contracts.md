@@ -258,12 +258,13 @@ error[E0801]: a contract only reads what it is given, and `all_different` is not
    |
 15 |     ensures all_different(hours)
    |             ^^^^^^^^^^^^^^^^^^^^
+  = fix: declare it `pure`, if it only reads what it is given: `pure `
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
 E0801 (`contract.not-pure`) names the function that is not `pure`, and
-offers no fix. Write `pure def`, which the compiler then checks: a
+its fix writes `pure` before its `def`, which the compiler then checks: a
 function that prints, or takes a capability, cannot be `pure`, and a
 contract cannot call it. A clause that changes what it reads, such as
 `requires xs.pop() != None`, is E0802 (`contract.changes`).
@@ -569,6 +570,60 @@ error[D0029]: `sisu test` checks every contract; `--contracts` sets what `sisu r
 
 One check ignores the level: the invariant of a value in a `Mutex`, which
 chapter 20 showed is checked when a panic drops the guard.
+
+`debug_assert` is the assertion that follows the level. It is checked,
+with the values of its parts, where every contract is, in `sisu run`
+and `sisu test`, and left out, its condition not even computed, where
+fewer are, as in a release build. Use it for a check that costs more
+than the work it guards, such as whether a list is sorted before a
+search that needs it:
+
+<!-- file: examples/23-contracts/sorted_search.sisu -->
+```sisu
+# `debug_assert` is checked where every contract is, and left out elsewhere.
+
+## Whether `x` is in `xs`, which must be sorted.
+def contains(xs: list[int], x: int) -> bool:
+    debug_assert xs == sorted(xs), "the numbers must be sorted"
+    var lo = 0
+    var hi = len(xs)
+    while lo < hi:
+        let mid = (lo + hi) // 2
+        if xs[mid] < x:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo < len(xs) and xs[lo] == x
+
+def main():
+    print(contains([1, 3, 5, 8], 5))
+    print(contains([8, 1, 5, 3], 8))
+```
+
+<!-- output: examples/23-contracts/sorted_search.console -->
+```console
+$ sisu run sorted_search.sisu
+True
+panic: assertion failed: xs == sorted(xs)
+  message: the numbers must be sorted
+    xs == sorted(xs)
+    │     │      │
+    [8, 1, 5, 3] [8, 1, 5, 3]
+          [1, 3, 5, 8]
+  at contains (sorted_search.sisu:5:5)
+  at main (sorted_search.sisu:18:11)
+$ sisu run --contracts=preconditions sorted_search.sisu
+True
+False
+$ sisu run --native --release sorted_search.sisu
+True
+False
+```
+
+The release build answers `False` for a number that is there: the check
+was the only thing that noticed the unsorted list. A broken
+`debug_assert` is a bug as a broken `assert` is; it is left out for
+speed, never because the bug is harmless.
 
 ## Contracts as tests and documentation
 
@@ -1059,18 +1114,6 @@ warning[W0001]: typed hole `later` of type `Time`
 34 |     return todo("later")
    |            ^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("parse_time")`:
-  text = "18:30"
-in scope at the typed hole `todo("parse_time")`:
-  text = "24:00"
-in scope at the typed hole `todo("parse_time")`:
-  text = "noon"
-in scope at the typed hole `todo("later")`:
-  minutes = 30
-in scope at the typed hole `todo("later")`:
-  minutes = 20
-in scope at the typed hole `todo("later")`:
-  minutes = 1
 test "a time of day" ... blocked by todo("parse_time")
 test "numbers that are not on the clock" ... blocked by todo("parse_time")
 test "text that is not a time" ... blocked by todo("parse_time")
@@ -1214,47 +1257,6 @@ warning[W0001]: typed hole `transfer` of type `! AccountError`
 52 |     return todo("transfer")
    |            ^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("deposit")`:
-  self = Account(balance=1000, limit=500)
-  cents = 250
-  old(self.balance) = 1000
-in scope at the typed hole `todo("withdraw")`:
-  self = Account(balance=1000, limit=500)
-  cents = 1100
-  old(self.balance) = 1000
-  old(self.balance) = 1000
-in scope at the typed hole `todo("withdraw")`:
-  self = Account(balance=1000, limit=500)
-  cents = 1600
-  old(self.balance) = 1000
-  old(self.balance) = 1000
-in scope at the typed hole `todo("transfer")`:
-  source = Account(balance=2000, limit=0)
-  target = Account(balance=100, limit=1000)
-  cents = 1500
-  old(target.balance) = 100
-  old(source.balance) = 2000
-in scope at the typed hole `todo("transfer")`:
-  source = Account(balance=100, limit=1000)
-  target = Account(balance=2000, limit=0)
-  cents = 1200
-  old(target.balance) = 2000
-  old(source.balance) = 100
-in scope at the typed hole `todo("deposit")`:
-  self = Account(balance=0, limit=7)
-  cents = 7
-  old(self.balance) = 0
-in scope at the typed hole `todo("withdraw")`:
-  self = Account(balance=0, limit=7)
-  cents = 7
-  old(self.balance) = 0
-  old(self.balance) = 0
-in scope at the typed hole `todo("transfer")`:
-  source = Account(balance=2870197286250646421, limit=3)
-  target = Account(balance=5, limit=8)
-  cents = 2
-  old(target.balance) = 5
-  old(source.balance) = 2870197286250646421
 test "money in and out" ... blocked by todo("deposit")
 test "below zero costs the fee" ... blocked by todo("withdraw")
 test "past the limit is refused" ... blocked by todo("withdraw")

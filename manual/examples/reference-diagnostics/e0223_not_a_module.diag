@@ -1,0 +1,2 @@
+2:8-2:29 E0223 resolve.not-a-module name="std.collections.Deque"
+  fix resolve.import-from-module 2:1-2:29 "from std.collections import Deque"

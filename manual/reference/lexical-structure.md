@@ -447,7 +447,8 @@ A floating-point literal has digits on both sides of its point
 (`1.0`, `0.5`), an exponent (`2.5e-3`, `1e3`), or a suffix `f32` or
 `f64`. It is an `f64` unless its suffix or the type expected says
 otherwise. `1.` and `.5` are not literals: a point needs digits on both
-sides, so that `1.method()` reads as a call.
+sides, so that `1.method()` reads as a call. Python's `1.` is E0100 and
+`.5` E0103, each with the fix that writes `1.0` or `0.5`.
 
 **Status.** In stage 0.
 

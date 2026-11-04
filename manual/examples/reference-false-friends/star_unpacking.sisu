@@ -1,0 +1,4 @@
+# Python's star unpacking.
+def main():
+    let first, *rest = ["Aino", "Eero", "Roni"]
+    print("{first}, then {len(rest)} more")

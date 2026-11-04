@@ -11,17 +11,6 @@ warning[W0001]: typed hole `get` of type `String?`
 26 |         return todo("get")
    |                ^^^^^^^^^^^
 
-in scope at the typed hole `todo("put")`:
-  key = "helsinki"
-  text = "snow"
-in scope at the typed hole `todo("get")`:
-  key = "turku"
-in scope at the typed hole `todo("put")`:
-  key = "oulu"
-  text = "rain"
-in scope at the typed hole `todo("put")`:
-  key = "oulu"
-  text = "rain"
 test "an answer is kept in a file" ... blocked by todo("put")
 test "a key that was never kept" ... blocked by todo("get")
 test "an answer goes stale" ... blocked by todo("put")

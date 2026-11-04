@@ -95,8 +95,8 @@ commands:
   check [<file>]         report diagnostics (`--format=ids` for the conformance form, `--diary LOG` appends them and what resolved the last check's to a JSONL log)
   doc [<path>]           the documentation, a Markdown page per module, printed each after a line naming its file (`--output DIR` writes the pages into DIR instead, `--std [MODULE...]` documents the standard library, or the modules named, as `std.time`)
   build [<file>]         check and lower a package, writing its lockfile (`--native` also compiles a program to an executable: a package's to `build/debug/NAME` beside its lockfile, `build/release/NAME` with `--release`, a file's beside it, named by its stem, or at `--output PATH`; `--native --from-sir` compiles a file of serialised SIR, `--native --from-lir` a file of LIR)
-  test [<file>]          run the tests and transcripts under the ownership monitor (`--no-monitor` without it, `--no-cache` runs the tests that passed before too, `--jobs N`, `--filter TEXT`, `--tag T`, `--skip-tag T`, `--update` for snapshots and transcripts, `--replay TOKEN`, `--sim` with `--faults P`, `--std` for the standard library's doc examples, `--from-sir FILE` runs the tests of a file `sisu sir --tests` printed)
-  bench [<file>]         run the benchmarks (`--iterations N`, `--from-sir FILE` those of a file `sisu sir --tests` printed)
+  test [<file>]          run the tests and transcripts under the ownership monitor (`--no-monitor` without it, `--no-cache` runs the tests that passed before too, `--jobs N`, `--filter TEXT`, `--tag T`, `--skip-tag T`, `--update` for snapshots and transcripts, `--replay TOKEN`, `--sim` with `--faults P`, `--std` for the standard library's doc examples, `--from-sir FILE` runs the tests of a file `sisu sir --tests` printed, `--native` compiles them and runs each natively, `--release` with the release profile)
+  bench [<file>]         run the benchmarks (`--iterations N`, `--samples K` times each after a run not timed, `--from-sir FILE` those of a file `sisu sir --tests` printed)
   replay <log>           run a recorded program again against its capability log
   fmt [<path>...]        format files in place (`--check` reports what would change)
   repl [<file>|<dir>]    an interactive session, with a package loaded from its directory
@@ -319,7 +319,10 @@ error[D0115]: `--front-end` takes `stage1` (the front end written in Sisu, the d
 
 A value other than `stage1` or `rust` is D0115. When stage 1 is missing
 (D0116), fails to build (D0117) or stops as a compiler may not (D0118),
-the message names `--front-end=rust` as the way on.
+the message names `--front-end=rust` as the way on. Stage 1's own
+executable, `sisu1`, says its version with `sisu1 --version` (`sisu1
+0.6.0`, its minor number the round of its rules), which the driver asks
+to learn what that stage 1 can do; `sisu --version` is the toolchain's.
 
 **Status.** In stage 0, for the compiler's own development (its
 decision 268 in the [architecture
@@ -435,8 +438,10 @@ Hei, maailma!
 `sisu run --defer-borrow` runs a program that the ownership checker
 rejected, under the monitor, to find out whether the rejection is a
 real conflict. The run is the counterexample: it stops at the first
-conflict with the monitor's account and the SIR of the function where
-it happened, and ends with status 134; or it ends without one, with
+conflict with the monitor's account and the blocks of the SIR of the
+function where it happened that the conflict passes through (R0051),
+the loan's, its end's and the use's, with `...` for the blocks left
+out, and ends with status 134; or it ends without one, with
 the account of why the checker still rejects the program.
 
 <!-- file: examples/reference-sisu-command/moved.sisu -->
@@ -470,28 +475,9 @@ counterexample run: the ownership checker rejected this program; its errors are 
 ownership violation: `names` was used while it holds no value: it was moved out, or never assigned
   used at: moved.sisu:5:42 (`_10 = ref _1`)
   at main (moved.sisu:5:42)
-SIR of `main`:
+SIR of `main`, its blocks that the conflict passes through:
 fn main(0) source 0 @2:5-2:9 {
-    let _0: ()
-    let _1: list[str] "names" @3:9-3:14
-    let _2: list[str] "team" @4:9-4:13
-    let _3: ()
-    let _4: String
-    let _5: ref mut String
-    let _6: int
-    let _7: ref list[str]
-    let _8: ()
-    let _9: int
-    let _10: ref list[str]
-    let _11: ref String
-  bb0:
-    _1 = list(const "Aino", const "Eero") @3:17-3:33
-    goto bb1
-  bb1 (unwind bb2):
-    _2 = move _1 @4:16-4:21
-    goto bb3
-  bb2 (cleanup):
-    resume
+  ...
   bb3 (unwind bb4):
     _4 = call intrinsic fmt.new() @5:11-5:56
     _5 = ref mut _4 @5:11-5:56
@@ -504,28 +490,7 @@ fn main(0) source 0 @2:5-2:9 {
     _8 = call intrinsic fmt.display(copy _5, copy _9, const "") @5:38-5:48
     _8 = call intrinsic fmt.text(copy _5, const " names") @5:11-5:56
     goto bb5
-  bb4 (cleanup):
-    drop _2
-    resume
-  bb5 (unwind bb6):
-    _11 = ref _4 @5:11-5:56
-    _3 = call intrinsic print(copy _11) @5:5-5:57
-    goto bb7
-  bb6 (cleanup):
-    drop _4
-    goto bb4
-  bb7 (unwind bb4):
-    drop _4 @5:57-5:57
-    goto bb8
-  bb8 (unwind bb4):
-    dead _4 @5:57-5:57
-    _0 = const ()
-    goto bb9
-  bb9 (unwind bb2):
-    drop _2 @5:57-5:57
-    goto bb10
-  bb10:
-    return
+  ...
 }
 outcome: conflict reached; the run stopped at a concrete ownership conflict
 ```
@@ -932,7 +897,8 @@ checked, and recheck such an edit within the target.
 
 `sisu build` checks and lowers the program without its tests, writes
 the lockfile, and says what it built (D0066 for a package, D0070 for a
-file); with an error it prints the diagnostics and D0006. With
+file); with an error it prints the diagnostics and D0132, "the program
+was not compiled", where `sisu run` ends with D0006. With
 `--native` it also compiles the program to an executable: a package's
 to `build/debug/NAME` beside its lockfile, or `build/release/NAME` with
 `--release`; a file's beside it, named by its stem; or to `--output
@@ -956,12 +922,11 @@ error[E0200]: cannot find `totl` in this scope
   |             ^^^^
   = fix: a similar name is in scope: `total`
 
-error[D0006]: the program was not run: errors found (1)
+error[D0132]: the program was not compiled: errors found (1)
 ```
 
-**Stage 0 differs.** D0006 says that "the program was not run" after a
-failed build. [09](../../proposal/09-modules-packages-and-build.md)
-also gives builds a content-addressed cache and `--target` for cross
+**Stage 0 differs.** [09](../../proposal/09-modules-packages-and-build.md)
+gives builds a content-addressed cache and `--target` for cross
 compilation, which stage 0 does not have.
 
 **Status.** In stage 0.
@@ -973,7 +938,8 @@ compilation, which stage 0 does not have.
 `sisu sir` prints the program's SIR, the intermediate form that the
 interpreter runs and the native backend compiles, in its text form, with
 every drop placed and every `comptime` value computed. It prints the SIR
-of a program that the ownership checker rejects as well. `--tests`
+of a program that the ownership checker rejects as well; a program with
+other errors gets its diagnostics and D0132, as a build does. `--tests`
 includes the program's tests and benchmarks, and `--contracts` sets the
 contracts the SIR checks. The [SIR example](#running-serialised-sir---sir---from-sir-and---from-lir)
 shows the SIR of `hello.sisu`.
@@ -991,10 +957,10 @@ shows the SIR of `hello.sisu`.
 its doc comments, the properties its contracts imply, and the
 transcripts in the `tests/` directory beside the program. Each runs under the ownership
 monitor, with fresh fakes for the capabilities it names, and ends `ok`,
-`FAILED`, or `blocked by` a typed hole that it reached, whose closure,
-the bindings in scope there, is printed before the list (R0160). Tests
+`FAILED`, or `blocked by` a typed hole that it reached. Tests
 run in parallel and are reported in the order they are declared. Each
-failure is shown again after the list, with a replay token; the last
+failure is shown again after the list, with what the test printed
+(D0135; a test that passes prints nothing) and a replay token; the last
 line counts the outcomes. The program's warnings come before the list,
 as `sisu run` prints them, and a program with an error runs no test:
 `sisu test` prints its diagnostics and the line D0006, or D0021 for the
@@ -1035,8 +1001,6 @@ warning[W0001]: typed hole `halve` of type `int`
 6 |     return todo("halve")
   |            ^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("halve")`:
-  x = 42
 test "doubles a number" ... ok
 test "doubles (-1, -2)" ... ok
 test "doubles (-3, -5)" ... FAILED
@@ -1078,8 +1042,6 @@ warning[W0001]: typed hole `halve` of type `int`
 6 |     return todo("halve")
   |            ^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("halve")`:
-  x = 42
 test "doubles a number" ... ok
 test "doubles (-1, -2)" ... ok
 test "doubles (-3, -5)" ... FAILED
@@ -1142,6 +1104,11 @@ replay: sisu test --replay 1-ed778be29924c09d-0.0.1-t2-s0-r0 tests.sisu
 - `--std` runs the standard library's doc examples besides the
   program's tests; outside a package and without a file, it runs them
   alone.
+- `--native` compiles the tests into one executable and runs each in a
+  process of its own, and `--release` compiles them with the release
+  profile ([R15](testing.md#native-tests)); what only the interpreter
+  does, `--faults` and the schedulers `pct` and `exhaustive`, is D0134
+  or D0109.
 - `--defer-borrow` runs the tests of a program that the ownership
   checker rejected, as [`sisu run
   --defer-borrow`](#running-a-rejected-program---defer-borrow) does.
@@ -1235,12 +1202,17 @@ prototypes of the experiment (Q-49, D-070).
 
 ### sisu bench
 
-- `sisu bench [--iterations N] [PACKAGE OPTIONS] [FILE]`
+- `sisu bench [--iterations N] [--samples K] [PACKAGE OPTIONS] [FILE]`
 
-`sisu bench` runs the program's `bench` blocks, each the number of
-times `--iterations N` says (100 by default), and prints the time of one
-iteration; the last line counts the benchmarks and the failures. A
-benchmark that panics fails, with status 1.
+`sisu bench` runs each of the program's `bench` blocks once without
+timing it, to warm up, and then times `--samples K` samples (10 by
+default), each `--iterations N` turns of its loop (100 by default). Its
+line (D0057) gives the median time of one iteration over the samples,
+the 95% interval of the mean of the samples that are not outliers, by
+Student's t, and how many samples were outliers: further from the
+median than three scaled median absolute deviations (1.4826 times the
+MAD). The last line counts the benchmarks and the failures. A benchmark
+that panics fails, with status 1.
 
 <!-- file: examples/reference-sisu-command/bench.sisu -->
 ```sisu
@@ -1257,18 +1229,21 @@ bench "fib of 15"(b: Bench):
         black_box(fib(15))
 ```
 
-`sisu bench bench.sisu` prints a line like this one, with a time that
-differs from run to run:
+`sisu bench bench.sisu` prints a line like this one, with times that
+differ from run to run:
 
 <!-- unchecked: a benchmark's time differs on every run -->
 ```text
-bench "fib of 15" ... 100 iterations, 1.1 ms each
+bench "fib of 15" ... 1.8 ms an iteration, the median of 10 samples of 100 iterations (95% interval of the mean 1.7 ms to 2.0 ms, 3 outliers)
 1 benchmarks, 0 failed (stage 0 times the interpreter: compare benchmarks with each other, not with compiled code)
 ```
 
-**Stage 0 differs.** Stage 0 times the interpreter, and reports a mean.
-[17](../../proposal/17-testing.md) reports confidence intervals with
-outliers detected, in a stable JSON form that CI can follow.
+A wide interval, or many outliers, says that the machine was busy
+while it timed: run again with more samples before comparing.
+
+**Stage 0 differs.** Stage 0 times the interpreter, and has no
+`--native`. [17](../../proposal/17-testing.md) also reports the results
+in a stable JSON form that CI can follow, which is not begun.
 
 **Status.** In stage 0.
 
@@ -1716,7 +1691,7 @@ audit.sisu summary functions=2 median=1 max=1 uses=1 deepest=1 structs=0
 $ sisu audit --unsafe audit.sisu
 audit.sisu   no `unsafe`   a program of one file, which declares no level
   no unsafe code
-std (toolchain)   unsafe = "extern"   see `sisu1 audit --unsafe --std`
+std (toolchain)   unsafe = "extern"   see `sisu audit --unsafe --std`
 ```
 
 `audit.sisu` has no unsafe code, so its `--unsafe` report is its level
@@ -2013,7 +1988,7 @@ open as Q-63.
 
 ## Diagnostics of the command line
 
-The driver's messages have codes D0001 to D0131. These are the ones that
+The driver's messages have codes D0001 to D0135. These are the ones that
 a command line can produce, by what they report:
 
 | Codes | Report |
@@ -2021,8 +1996,8 @@ a command line can produce, by what they report:
 | D0001, D0013 | A file that cannot be read or written. |
 | D0002, [D0003](diagnostics.md#d0003), [D0004](diagnostics.md#d0004), [D0009](diagnostics.md#d0009), [D0023](diagnostics.md#d0023), [D0129](diagnostics.md#d0129), [D0130](diagnostics.md#d0130), [D0131](diagnostics.md#d0131) | The usage, an unknown command, a missing argument, an unknown option, a value that is not a number, the version. |
 | D0005, D0069 | A program without `main`; a library run as an application. |
-| [D0006](diagnostics.md#d0006), [D0021](diagnostics.md#d0021), D0114 | A program with errors that did not run, or was not documented. |
-| D0007, D0008, D0053, D0060 to D0063, [D0128](diagnostics.md#d0128) | The lines of `sisu test`: a test's outcome, the counts, the tests not selected, transcripts. |
+| [D0006](diagnostics.md#d0006), [D0021](diagnostics.md#d0021), D0114, [D0132](diagnostics.md#d0132) | A program with errors that did not run, was not documented, or was not compiled. |
+| D0007, D0008, D0053, D0060 to D0063, [D0128](diagnostics.md#d0128), [D0135](diagnostics.md#d0135) | The lines of `sisu test`: a test's outcome, the counts, the tests not selected, transcripts, what a failing test printed. |
 | [D0010](diagnostics.md#d0010), D0011 | `sisu explain`. |
 | D0012, D0076, D0118 | Internal errors (status 70). |
 | D0014 to D0020 | `sisu explain-borrow`. |
@@ -2040,7 +2015,7 @@ a command line can produce, by what they report:
 | D0079 to D0093 | `sisu repl` and `sisu ws`. |
 | D0094 | `--stats`. |
 | D0095 to D0102 | The language server's answers. |
-| D0103 to [D0111](diagnostics.md#d0111), D0119 to D0126 | The native backend, its lowering and the runtime in Sisu. |
+| D0103 to [D0111](diagnostics.md#d0111), D0119 to D0126, [D0134](diagnostics.md#d0134) | The native backend, its lowering, the runtime in Sisu, and `sisu test --native`. |
 | [D0113](diagnostics.md#d0113) | `sisu doc --std`. |
 | [D0115](diagnostics.md#d0115) to D0118 | The front end. |
 

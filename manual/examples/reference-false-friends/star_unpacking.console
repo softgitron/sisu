@@ -1,0 +1,7 @@
+$ sisu check star_unpacking.sisu
+error[E0900]: star unpacking in a `let`, `let first, *rest = xs`, is not implemented in stage 0 yet; it arrives with a later round; a `match` takes a list apart now, `case [first, *rest]:`
+  --> star_unpacking.sisu:3:9
+  |
+3 |     let first, *rest = ["Aino", "Eero", "Roni"]
+  |         ^^^^^^^^^^^^
+

@@ -23,17 +23,6 @@ warning[W0001]: typed hole `the move made `times` times` of type `Vector`
 29 |         return todo("the move made `times` times")
    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("the sum")`:
-  self = Vector(x=1, y=2)
-  other = Vector(x=3, y=-4)
-in scope at the typed hole `todo("the opposite move")`:
-  self = Vector(x=2, y=-3)
-in scope at the typed hole `todo("the move made `times` times")`:
-  self = Vector(x=1, y=-2)
-  times = 3
-in scope at the typed hole `todo("the move made `times` times")`:
-  self = Vector(x=1, y=0)
-  times = 2
 test "adding and taking away" ... blocked by todo("the sum")
 test "the opposite move" ... blocked by todo("the opposite move")
 test "a move made several times" ... blocked by todo("the move made `times` times")

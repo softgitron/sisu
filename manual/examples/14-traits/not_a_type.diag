@@ -1,4 +1,4 @@
 19:17-19:23 E0231 resolve.trait-as-type name="Priced"
-  fix resolve.add-dyn 19:17-19:17 "dyn "
+  fix resolve.add-ref-dyn 19:17-19:17 "ref dyn "
 19:28-19:34 E0231 resolve.trait-as-type name="Priced"
-  fix resolve.add-dyn 19:28-19:28 "dyn "
+  fix resolve.add-ref-dyn 19:28-19:28 "ref dyn "

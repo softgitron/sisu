@@ -11,18 +11,6 @@ warning[W0001]: typed hole `the error for an unknown code` of type `String ! Set
 24 |         return todo("the error for an unknown code")
    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("the code chosen, or a fallback")`:
-  user = {"language": "fi"}
-  team = {"language": "sv"}
-in scope at the typed hole `todo("the code chosen, or a fallback")`:
-  user = {}
-  team = {"language": "sv"}
-in scope at the typed hole `todo("the code chosen, or a fallback")`:
-  user = {}
-  team = {}
-in scope at the typed hole `todo("the code chosen, or a fallback")`:
-  user = {"language": "de"}
-  team = {}
 test "the user's own choice" ... blocked by todo("the code chosen, or a fallback")
 test "the team's choice" ... blocked by todo("the code chosen, or a fallback")
 test "no choice at all" ... blocked by todo("the code chosen, or a fallback")

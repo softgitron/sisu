@@ -1,0 +1,13 @@
+test "doubles two" ... ok
+test "doubles three" ... FAILED
+
+test "doubles three" ... FAILED
+what the test printed:
+  doubling 3
+panic: assertion failed: double(3) == 6
+  left:  5
+  right: 6
+  at test "doubles three" (printed.sisu:10:5)
+replay: sisu test --replay 1-4bca1e2d19a9943e-0.0.1-t1-s0-r0 printed.sisu
+
+1 passed, 1 failed, 0 blocked

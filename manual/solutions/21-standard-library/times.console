@@ -5,12 +5,6 @@ warning[W0001]: typed hole `the pattern` of type `str`
 14 |     let pattern = Regex.new(todo("the pattern"))?
    |                             ^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("the pattern")`:
-  text = "Sauna at 17:30, swim at 18:05."
-in scope at the typed hole `todo("the pattern")`:
-  text = "Tea at 9:15 and 21:00"
-in scope at the typed hole `todo("the pattern")`:
-  text = "no times here, and 12:3 has one digit"
 test "times with two digits" ... blocked by todo("the pattern")
 test "an hour of one digit" ... blocked by todo("the pattern")
 test "no time" ... blocked by todo("the pattern")

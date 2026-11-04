@@ -315,8 +315,7 @@ type is expected where it stands, so the code around it compiles
 (D-061). `sisu check` and `sisu run` report each as W0001 with its type
 ([R17](diagnostics.md#w0001)); a run that reaches one prints its closure,
 each binding in scope with its value (R0160), and stops there (R0013),
-and a test that reaches one is blocked rather than failed, after the
-same closure. A release build rejects a program with a hole (E0445), and
+and a test that reaches one is blocked rather than failed. A release build rejects a program with a hole (E0445), and
 `sisu publish` will.
 
 <!-- file: examples/reference-statements/holes.sisu -->
@@ -365,6 +364,7 @@ type, bindings and tests at once, is designed
 | `select:` | [R9](concurrency.md#waiting-for-the-first-of-several) |
 | `assert CONDITION` and `assert CONDITION, MESSAGE` | [R15](testing.md#assertions) |
 | `expect CONDITION`, which records its failure and lets a test go on | [R15](testing.md#assertions) |
+| `debug_assert CONDITION` and `debug_assert CONDITION, MESSAGE`, left out below the contract level `all` | [R15](testing.md#assertions), [R11](contracts.md#check-levels) |
 | `unsafe:` with a block | [R7](ownership.md#unsafe-code-and-raw-pointers) |
 | `pass`, the empty block | [R1](lexical-structure.md#indentation-and-blocks) |
 | an expression statement, such as a call | [R4](expressions.md) |

@@ -1,10 +1,8 @@
 $ sisu test --scheduler pct --depth 2 --explore 20 double_fixed.sisu
-info [task 1]: Aino finds 18:00 free
 test "an hour is booked once" ... ok
 1 passed, 0 failed, 0 blocked
 explored 20 schedules of a PCT scheduler of depth 2 per test (seeds 0 to 19)
 $ sisu test --scheduler exhaustive --depth 3 double_fixed.sisu
-info [task 1]: Aino finds 18:00 free
 test "an hour is booked once" ... ok
 1 passed, 0 failed, 0 blocked
 searched 37 schedules (preemption bound 3)

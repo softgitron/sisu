@@ -195,7 +195,7 @@ cenv 0.1.0   unsafe = "extern"   trusted in sisu.toml:10
     cenv/src/lib.sisu:6   extern block   # safety: the signature as <stdlib.h> declares it; it returns promptly.
     cenv/src/lib.sisu:20   unsafe block in lookup   # safety: writable, in_bounds: the block has room for the name and its NUL; valid: getenv reads only the bytes...
   foreign functions: getenv (called by lookup (takes `Env`))
-std (toolchain)   unsafe = "extern"   see `sisu1 audit --unsafe --std`
+std (toolchain)   unsafe = "extern"   see `sisu audit --unsafe --std`
 ```
 
 A C function that the interpreter does not know runs only natively,

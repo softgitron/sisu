@@ -17,15 +17,6 @@ warning[W0001]: typed hole `brighten` of type `Colour`
 28 |     return todo("brighten")
    |            ^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("pack")`:
-  colour = Colour(red=255, green=136, blue=0)
-in scope at the typed hole `todo("unpack")`:
-  packed = 16746496
-in scope at the typed hole `todo("pack")`:
-  colour = Colour(red=175, green=244, blue=79)
-in scope at the typed hole `todo("brighten")`:
-  colour = Colour(red=250, green=100, blue=0)
-  amount = 10
 test "packing" ... blocked by todo("pack")
 test "unpacking" ... blocked by todo("unpack")
 test "unpacking undoes packing" ... blocked by todo("pack")

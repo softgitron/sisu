@@ -1018,10 +1018,6 @@ warning[W0001]: typed hole `count_ones` of type `int`
 20 |     return todo("count_ones")
    |            ^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("ones_in")`:
-  byte = 0
-in scope at the typed hole `todo("count_ones")`:
-  data = b""
 test "the bits of a byte" ... blocked by todo("ones_in")
 test "the table" ... blocked by todo("a table worked out with `comptime`")
 test "counting the bits of data" ... blocked by todo("count_ones")
@@ -1121,10 +1117,6 @@ warning[W0001]: typed hole `form` of type `String`
 23 |         return todo("form")
    |                ^^^^^^^^^^^^
 
-in scope at the typed hole `todo("form")`:
-  self = Booking(name="Aino", hour=18, minutes=90)
-in scope at the typed hole `todo("form")`:
-  self = Stove(celsius=78.5, lit=True)
 test "a booking" ... blocked by todo("form")
 test "a stove" ... blocked by todo("form")
 0 passed, 0 failed, 2 blocked

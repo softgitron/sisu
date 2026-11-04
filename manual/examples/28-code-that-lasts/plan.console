@@ -11,10 +11,6 @@ warning[W0001]: typed hole `keep the slots that fit` of type `list[Slot]`
 20 |     return todo("keep the slots that fit")
    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("parse a slot")`:
-  line = "Aino 17:30 90"
-in scope at the typed hole `todo("keep the slots that fit")`:
-  text = "Aino 17:00 90\nEero 18:00 60\nRoni 18:30 30"
 test "slots that overlap" ... ok
 test "a slot from text" ... blocked by todo("parse a slot")
 test "the slots that fit" ... blocked by todo("keep the slots that fit")

@@ -403,6 +403,12 @@ A build checks the clauses its level names:
   (D0029, `cli.test-checks-contracts`).
 - The invariant check of a `Mutex` whose guard a panic drops ignores the
   level ([Invariants](#invariants)).
+- `debug_assert CONDITION[, MESSAGE]` follows the level: at `all` it is
+  checked as `assert` is, with the values of its parts; at
+  `preconditions` and `off` its condition is not evaluated
+  ([R15](testing.md#assertions);
+  [chapter 23](../tutorial/23-contracts.md#how-much-is-checked) shows
+  one in a release build).
 
 <!-- file: examples/reference-contracts/levels.sisu -->
 ```sisu

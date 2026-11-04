@@ -1,0 +1,1 @@
+3:9-3:21 E0900 stage0.unsupported construct="star unpacking in a `let`, `let first, *rest = xs`," phase="a later round; a `match` takes a list apart now, `case [first, *rest]:`"

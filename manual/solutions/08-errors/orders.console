@@ -17,18 +17,6 @@ warning[W0001]: typed hole `order_total` of type `int ! {LineError, PriceError}`
 32 |     return todo("order_total")
    |            ^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("parse_line")`:
-  line = "coffee 2"
-in scope at the typed hole `todo("parse_line")`:
-  line = "coffee"
-in scope at the typed hole `todo("parse_order")`:
-  text = "coffee 2\n\nbun 1\n"
-in scope at the typed hole `todo("order_total")`:
-  text = "coffee 2\nbun 1"
-  prices = {"coffee": 350, "tea": 300, "bun": 280}
-in scope at the typed hole `todo("order_total")`:
-  text = "tea 1\nbun"
-  prices = {"coffee": 350, "tea": 300, "bun": 280}
 test "one line" ... blocked by todo("parse_line")
 test "lines without a quantity" ... blocked by todo("parse_line")
 test "an order of several lines" ... blocked by todo("parse_order")

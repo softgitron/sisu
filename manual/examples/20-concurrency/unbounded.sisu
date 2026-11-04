@@ -1,0 +1,20 @@
+# An unbounded channel never makes its sender wait.
+
+## Sends each of `names`, then closes the channel.
+def send_all(
+    tx: Sender[String],
+    names: list[str],
+) -> ! {ChannelError, TaskError}:
+    for name in names:
+        tx.send(name.to_string())?
+        print("sent {name}")
+    tx.close()
+    return Ok(())
+
+def main():
+    let tx, rx = unbounded_channel[String]()
+    task.scope do s:
+        s.spawn(() -> send_all(tx, ["Aino", "Eero", "Roni", "Liisa"]))
+        for name in rx:
+            print("welcome, {name}")
+    print("everyone is in")

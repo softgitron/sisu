@@ -1,7 +1,8 @@
 $ sisu check conditional.sisu
-error[E0100]: expected `)`, found `if`
-  --> conditional.sisu:4:17
+error[E0115]: `a if c else b` is not Sisu; write `if c: a else: b`
+  --> conditional.sisu:4:11
   |
 4 |     print("big" if n > 2 else "small")
-  |                 ^^
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: write it as `if c: a else: b`: `if n > 2: "big" else: "small"`
 

@@ -1,0 +1,7 @@
+# An item imported from its module.
+from std.collections import Deque
+
+def main():
+    var queue = Deque.new()
+    queue.push_back("Aino")
+    print(len(queue))

@@ -5,12 +5,6 @@ warning[W0001]: typed hole `word_frequencies` of type `dict[str, int]`
 10 |     return todo("word_frequencies")
    |            ^^^^^^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("word_frequencies")`:
-  words = ["kuu", "kissa", "kala"]
-in scope at the typed hole `todo("word_frequencies")`:
-  words = ["a", "b", "a", "c", "a", "b"]
-in scope at the typed hole `todo("word_frequencies")`:
-  words = []
 test "every word once" ... blocked by todo("word_frequencies")
 test "repeated words" ... blocked by todo("word_frequencies")
 test "no words" ... blocked by todo("word_frequencies")

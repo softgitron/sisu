@@ -1,0 +1,12 @@
+$ sisu test steps.sisu
+test "a countdown from 2" ... ok
+test "no count at all" ... ok
+2 passed, 0 failed, 0 blocked
+$ sisu test --native steps.sisu
+test "a countdown from 2" ... ok
+test "no count at all" ... ok
+2 passed, 0 failed, 0 blocked
+$ sisu test --native --release steps.sisu
+test "a countdown from 2" ... ok
+test "no count at all" ... ok
+2 passed, 0 failed, 0 blocked

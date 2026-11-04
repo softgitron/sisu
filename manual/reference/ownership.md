@@ -732,11 +732,30 @@ Kemi is gone
 `sisu audit --ownership` counts the uses of these types and of
 `.copy()` in each file ([R16](sisu-command.md#sisu-audit)).
 
-**Stage 0 differs.** `==` between two `Shared` values, which compares
-the values they hold through the prelude's `Eq` for `Shared[T]`, gives
-`False` in stage 0 whatever they hold, two owners of one value
-included, though `a.eq(b)` compares the values; compare through the
-values themselves.
+`==` between two `Shared` values compares the values they hold, through
+the prelude's `impl[T: Eq] Eq for Shared[T]`, and a `Shared` hashes as
+its value (`impl[T: Hash] Hash for Shared[T]`), so two owners of equal
+values are one key of a dict or one element of a set; `Shared.same`
+is the question of identity:
+
+<!-- file: examples/reference-ownership/shared_equal.sisu -->
+```sisu
+# Two `Shared` values compare, and hash, as the values they hold.
+def main():
+    let north = Shared("north".to_string())
+    let copy = north.copy()
+    let other = Shared("north".to_string())
+    print("{north == copy} {north == other} {Shared.same(north, other)}")
+    var visits = {north: 1}
+    visits[other] += 1
+    print(visits)
+```
+
+<!-- output: examples/reference-ownership/shared_equal.out -->
+```text
+True True False
+{"north": 2}
+```
 
 **Status.** In stage 0 (D-005, D-043).
 

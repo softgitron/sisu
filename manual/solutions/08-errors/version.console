@@ -5,16 +5,6 @@ warning[W0001]: typed hole `parse_version` of type `Version ! VersionError`
 22 |     return todo("parse_version")
    |            ^^^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("parse_version")`:
-  text = "2.10.1"
-in scope at the typed hole `todo("parse_version")`:
-  text = ""
-in scope at the typed hole `todo("parse_version")`:
-  text = "1.2"
-in scope at the typed hole `todo("parse_version")`:
-  text = "1.x.3"
-in scope at the typed hole `todo("parse_version")`:
-  text = "1.9.0"
 test "versions" ... blocked by todo("parse_version")
 test "an empty text" ... blocked by todo("parse_version")
 test "the wrong number of parts" ... blocked by todo("parse_version")

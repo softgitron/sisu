@@ -488,15 +488,6 @@ warning[W0001]: typed hole `whether the line holds the word` of type `bool`
 15 |         if todo("whether the line holds the word"):
    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("the text of the file")`:
-  path = "poem.txt"
-  word = "warm"
-in scope at the typed hole `todo("the text of the file")`:
-  path = "poem.txt"
-  word = "snow"
-in scope at the typed hole `todo("the text of the file")`:
-  path = "song.txt"
-  word = "warm"
 test "lines that hold the word" ... blocked by todo("the text of the file")
 test "no line holds it" ... blocked by todo("the text of the file")
 test "a file that is not there" ... blocked by todo("the text of the file")
@@ -653,24 +644,6 @@ warning[W0001]: typed hole `main` of type `! {IoError, cli.Error}`
 47 |     return todo("main")
    |            ^^^^^^^^^^^^
 
-in scope at the typed hole `todo("count_words")`:
-  text = "a bb ccc bb"
-  min_length = 2
-in scope at the typed hole `todo("count_words")`:
-  text = "Hei hei HEI"
-  min_length = 1
-in scope at the typed hole `todo("count_words")`:
-  text = "Sauna, sauna. (SAUNA!)"
-  min_length = 1
-in scope at the typed hole `todo("count_words")`:
-  text = "a well-known 2-minute walk"
-  min_length = 2
-in scope at the typed hole `todo("top_words")`:
-  counts = {"kissa": 1, "koira": 3, "kala": 2}
-  n = 2
-in scope at the typed hole `todo("top_words")`:
-  counts = {"tuli": 1, "meni": 1, "kevät": 1}
-  n = 5
 test "part 1, a minimum length/short words are left out" ... blocked by todo("count_words")
 test "part 1, a minimum length/every word counts in lower case" ... blocked by todo("count_words")
 test "part 2, punctuation/punctuation around a word" ... blocked by todo("count_words")

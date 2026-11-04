@@ -73,24 +73,30 @@ test "both ways agree" ... ok
 
 ## 2. Run the benchmarks, and compare
 
-`sisu bench FILE` runs each benchmark and prints how long one turn of
-its loop took; `--iterations N` sets the number of turns, 100 unless you
-say. The times differ from run to run, so this output is an example
-rather than a check:
+`sisu bench FILE` runs each benchmark once to warm up, then times ten
+samples of 100 turns of its loop, and prints the median time of one
+turn with the 95% interval of the mean. `--samples K` sets the number
+of samples and `--iterations N` the turns in each. The times differ from
+run to run, so this output is an example rather than a check:
 
 <!-- unchecked: sisu bench prints times that differ on every run -->
 ```console
 $ sisu bench vowels.sisu
-bench "a list" ... 100 iterations, 153.2 µs each
-bench "a match" ... 100 iterations, 176.5 µs each
+bench "a list" ... 105.3 µs an iteration, the median of 10 samples of 100 iterations (95% interval of the mean 100.3 µs to 110.2 µs, 3 outliers)
+bench "a match" ... 70.2 µs an iteration, the median of 10 samples of 100 iterations (95% interval of the mean 64.2 µs to 79.5 µs)
 2 benchmarks, 0 failed (stage 0 times the interpreter: compare benchmarks with each other, not with compiled code)
 ```
 
+- Believe a difference when the two intervals do not overlap, as here:
+  the `match` is faster. When they overlap, the run cannot tell the two
+  apart; run again with more samples.
+- An outlier is a sample far from the median, set aside before the
+  interval is computed. Several outliers, or a wide interval, mean that
+  something else ran on the machine while it timed.
+- The interval is one run's. Two runs on a busy machine can still
+  disagree, so run the comparison more than once before acting on it.
 - Compare benchmarks of one run with each other. Stage 0 times its
   interpreter, so a time says little about the same code compiled.
-- Run more than once, with more iterations, before you believe a
-  difference: two runs of the same benchmark can differ by more than
-  two ways of writing it do.
 - Keep the benchmarks with the code, so that the comparison can be made
   again after a change.
 
@@ -117,7 +123,7 @@ a time: a function whose benchmark grows fastest with its input is
 where to look first.
 
 **Status.** `bench` blocks, `black_box` and `sisu bench` are in stage 0,
-timing the interpreter, with no statistics over the runs yet.
+timing the interpreter; 17's JSON report of the results is designed.
 `sisu run --profile` (D0009 in stage 0) and the warning of
 [06](../../proposal/06-concurrency-and-capabilities.md#data-parallelism)
 when a parallel loop is slower than its serial form are designed.

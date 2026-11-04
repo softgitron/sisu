@@ -5,12 +5,6 @@ warning[W0001]: typed hole `digit_sum` of type `int`
 14 |     return todo("digit_sum")
    |            ^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("digit_sum")`:
-  n = 7
-in scope at the typed hole `todo("digit_sum")`:
-  n = 9876543210
-in scope at the typed hole `todo("digit_sum")`:
-  n = 2026
 test "one digit" ... blocked by todo("digit_sum")
 test "many digits" ... blocked by todo("digit_sum")
 test "digit_sum (doc example)" ... blocked by todo("digit_sum")

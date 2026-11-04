@@ -11,16 +11,6 @@ warning[W0001]: typed hole `show_time` of type `String`
 16 |     return todo("show_time")
    |            ^^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("split_time")`:
-  total = 3725
-in scope at the typed hole `todo("split_time")`:
-  total = 59
-in scope at the typed hole `todo("show_time")`:
-  total = 3725
-  seconds = True
-in scope at the typed hole `todo("show_time")`:
-  total = 3725
-  seconds = False
 test "an hour, two minutes and five seconds" ... blocked by todo("split_time")
 test "less than a minute" ... blocked by todo("split_time")
 test "shown with seconds" ... blocked by todo("show_time")

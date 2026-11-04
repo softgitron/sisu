@@ -11,10 +11,6 @@ warning[W0001]: typed hole `fade` of type `()`
 22 |     todo("fade")
    |     ^^^^^^^^^^^^
 
-in scope at the typed hole `todo("mix")`:
-  gain = 0.5
-in scope at the typed hole `todo("mix")`:
-  gain = 1.0
 test "mixing a voice in" ... blocked by todo("mix")
 test "mixing keeps the samples in range" ... blocked by todo("mix")
 test "a fade to silence" ... blocked by todo("fade")

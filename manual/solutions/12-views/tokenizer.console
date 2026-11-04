@@ -5,12 +5,6 @@ warning[W0001]: typed hole `tokenize` of type `list[Token]`
 26 |     return todo("tokenize")
    |            ^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("tokenize")`:
-  source = "total = 12 + x"
-in scope at the typed hole `todo("tokenize")`:
-  source = "a = 1\n\nprint a"
-in scope at the typed hole `todo("tokenize")`:
-  source = "x = 2  # the start\n# a whole line\nx2"
 test "one line" ... blocked by todo("tokenize")
 test "lines are counted" ... blocked by todo("tokenize")
 test "comments give no tokens" ... blocked by todo("tokenize")

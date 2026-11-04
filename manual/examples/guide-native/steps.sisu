@@ -1,0 +1,15 @@
+# A countdown's lines, with tests that run compiled as well.
+
+## The lines of a countdown from `n` to *löyly*.
+def steps(n: int) -> list[String]:
+    var lines: list[String] = []
+    for k in range(n, 0, -1):
+        lines.push("{k}...")
+    lines.push("löyly!".to_string())
+    return lines
+
+test "a countdown from 2":
+    assert steps(2) == ["2...", "1...", "löyly!"]
+
+test "no count at all":
+    assert len(steps(0)) == 1

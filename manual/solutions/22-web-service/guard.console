@@ -23,27 +23,6 @@ warning[W0001]: typed hole `forecast` of type `String ! {TaskError, WeatherError
 68 |         return todo("forecast")
    |                ^^^^^^^^^^^^^^^^
 
-in scope at the typed hole `todo("Limiter.new")`:
-  limit = 2
-  window = Duration(nanos=10000000000)
-in scope at the typed hole `todo("Limiter.new")`:
-  limit = 1
-  window = Duration(nanos=10000000000)
-in scope at the typed hole `todo("Limiter.new")`:
-  limit = 2
-  window = Duration(nanos=10000000000)
-in scope at the typed hole `todo("Cache.new")`:
-  fresh = Duration(nanos=300000000000)
-in scope at the typed hole `todo("Cache.new")`:
-  fresh = Duration(nanos=300000000000)
-in scope at the typed hole `todo("Cache.new")`:
-  fresh = Duration(nanos=300000000000)
-in scope at the typed hole `todo("Cache.new")`:
-  fresh = Duration(nanos=300000000000)
-in scope at the typed hole `todo("Cache.new")`:
-  fresh = Duration(nanos=300000000000)
-in scope at the typed hole `todo("Cache.new")`:
-  fresh = Duration(nanos=1000000000)
 test "part 1, a limit for each client/two requests in a window" ... blocked by todo("Limiter.new")
 test "part 1, a limit for each client/a new window" ... blocked by todo("Limiter.new")
 test "part 1, a limit for each client/tasks share one limit" ... blocked by todo("Limiter.new")

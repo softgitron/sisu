@@ -128,6 +128,10 @@ An import binds names in the module that writes it:
 - An import that names nothing is E0220 for its first name, E0203 for
   a module further along the path, and E0204 for an item a module does
   not have; one of a package that is not a dependency is E0260.
+- `import` names a module and `from ... import` an item: an item named
+  as a module, `import atlas.geo.point.Point`, is E0223
+  (`resolve.not-a-module`), whose fix writes `from atlas.geo.point import
+  Point`.
 - Imports stand at the top level of a module, and the formatter sorts
   them and removes the ones nothing uses. An import inside a function
   is E0900 in stage 0.
@@ -136,6 +140,7 @@ An import binds names in the module that writes it:
 ```sisu
 # Imports that name nothing.
 import atlas.geo
+import atlas.geo.point.Point
 import atlas.roads
 from atlas.geo import Route
 from std.collections import *
@@ -148,36 +153,41 @@ def main():
 <!-- output: examples/reference-modules/imports.console -->
 ```console
 $ sisu check
-error[E0203]: there is no module `atlas.roads`
+error[E0223]: `atlas.geo.point.Point` is not a module
   --> src/main.sisu:3:8
   |
-3 | import atlas.roads
+3 | import atlas.geo.point.Point
+  |        ^^^^^^^^^^^^^^^^^^^^^
+  = fix: import the item from its module: `from atlas.geo.point import Point`
+
+error[E0203]: there is no module `atlas.roads`
+  --> src/main.sisu:4:8
+  |
+4 | import atlas.roads
   |        ^^^^^^^^^^^
 
 error[E0204]: module `atlas.geo` has no item `Route`
-  --> src/main.sisu:4:23
+  --> src/main.sisu:5:23
   |
-4 | from atlas.geo import Route
+5 | from atlas.geo import Route
   |                       ^^^^^
 
 error[E0128]: Sisu has no glob imports: name what the module gives, as in `from std.collections import Deque, Heap`, or import the module and write `collections.Deque`
-  --> src/main.sisu:5:29
+  --> src/main.sisu:6:29
   |
-5 | from std.collections import *
+6 | from std.collections import *
   |                             ^
 
 error[E0220]: cannot import `maps`: it names no module of this package, of a dependency in `sisu.toml`, or of the standard library
-  --> src/main.sisu:6:8
+  --> src/main.sisu:7:8
   |
-6 | import maps
+7 | import maps
   |        ^^^^
 
 ```
 
 **Stage 0 differs.** 09 warns about an import nothing uses; stage 0
-says nothing, and `sisu fmt` removes it. E0223 (`resolve.not-a-module`)
-is not given for an item named as a module, `import atlas.geo.point.Point`,
-which is E0203 instead.
+says nothing, and `sisu fmt` removes it.
 
 **Status.** In stage 0 (D-019).
 
@@ -381,12 +391,6 @@ unsafe = ["zlib"]
 <!-- output: examples/reference-modules/bad_manifest.console -->
 ```console
 $ sisu check
-error[E1002]: `[package]` needs `version`
-  --> sisu.toml:1:2
-  |
-1 | [package]
-  |  ^^^^^^^
-
 error[E1003]: `version` takes a version `MAJOR.MINOR.PATCH`, as in `"0.3.1"`, found `"1.0"`
   --> sisu.toml:3:11
   |
@@ -428,11 +432,9 @@ error[E1015]: `[trust] unsafe` names `zlib`, which is not a dependency of this p
 `json` is the name of a standard-library module, so no package of the
 program may take it, and neither dependency is a `path`.
 
-**Stage 0 differs.** A `version` that is not `MAJOR.MINOR.PATCH` gets
-both E1003 and E1002 ("needs `version`"), though the key is there. A
-dev-dependency can be imported by the package's own code, not only by
-its tests. The `[review]` table of [10](../../proposal/10-tooling.md) is
-accepted and ignored.
+**Stage 0 differs.** A dev-dependency can be imported by the package's
+own code, not only by its tests. The `[review]` table of
+[10](../../proposal/10-tooling.md) is accepted and ignored.
 
 **Status.** In stage 0 (D-063), with the differences noted.
 
@@ -763,7 +765,7 @@ C++ interop (Q-24).
 | Code | Identifier | Section |
 |---|---|---|
 | E1008, E1009, E1012 | `package.no-root-module`, `package.two-root-modules`, `package.module-name` | [The module tree](#the-module-tree) |
-| [E0100](diagnostics.md#e0100), [E0203](diagnostics.md#e0203), [E0204](diagnostics.md#e0204), [E0220](diagnostics.md#e0220), E0260 | `parse.expected`, `resolve.unknown-module`, `resolve.not-in-module`, `resolve.import-unknown`, `resolve.not-a-dependency` | [Imports](#imports) |
+| [E0100](diagnostics.md#e0100), [E0203](diagnostics.md#e0203), [E0204](diagnostics.md#e0204), [E0220](diagnostics.md#e0220), [E0223](diagnostics.md#e0223), E0260 | `parse.expected`, `resolve.unknown-module`, `resolve.not-in-module`, `resolve.import-unknown`, `resolve.not-a-module`, `resolve.not-a-dependency` | [Imports](#imports) |
 | W0016, E0701 | `resolve.shadow-prelude-set`, `cap.internal` | [Names every module sees](#names-every-module-sees) |
 | [E0255](diagnostics.md#e0255), [E0256](diagnostics.md#e0256), [E0258](diagnostics.md#e0258), [E0259](diagnostics.md#e0259), [E0130](diagnostics.md#e0130) | `resolve.private-item`, `resolve.package-item`, `resolve.private-field`, `resolve.private-method`, `parse.visibility-scope` | [Visibility](#visibility) |
 | E0257 | `resolve.not-reexported` | [Re-exports](#re-exports) |

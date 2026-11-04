@@ -173,8 +173,9 @@ error[D0006]: the program was not run: errors found (1)
 
 **Stage 0 differs.** Star unpacking, `let first, *rest = xs`, is
 designed in [02](../../proposal/02-syntax.md#declarations); stage 0
-reports it as E0326, E0329 and E0387, and the list pattern `[first,
-*rest]` works in `match` and in `let ... else`.
+reports it as E0900, whose message names the list pattern `[first,
+*rest]`, which works in `match` and in `let ... else`
+([R19](false-friends.md#first-rest--xs)).
 
 **Status.** In stage 0, except star unpacking.
 
@@ -470,9 +471,11 @@ def main():
 ["milk", "tea"]
 ```
 
-**Stage 0 differs.** A variadic parameter, `*prices: int`, stops stage 1
-with "beyond the slice: beyond the type checker's slice: variadic
-parameters", a message with no code.
+**Stage 0 differs.** A variadic parameter, `*prices: int`, which
+[02](../../proposal/02-syntax.md#declarations) gives and
+[14](../../proposal/14-non-goals.md) rules out, is E0900, whose message
+names that disagreement and a `Slice[T]` parameter as what takes a
+list meanwhile ([R19](false-friends.md#args)).
 
 **Status.** In stage 0, except variadic parameters.
 

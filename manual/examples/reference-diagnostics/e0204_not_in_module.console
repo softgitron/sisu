@@ -5,4 +5,11 @@ error[E0204]: module `std.collections` has no item `Stack`
 2 | from std.collections import Stack
   |                             ^^^^^
 
-error[D0006]: the program was not run: errors found (1)
+error[E0200]: cannot find `int` in this scope
+  --> e0204_not_in_module.sisu:5:23
+  |
+5 |     var stack = Stack[int]()
+  |                       ^^^
+  = note: Sisu converts with methods: text is read with `s.parse_int()` or `s.parse_float()`, which give an option, a number is made text with `n.to_string()` or `"{n}"`, and one number made another with `x.to_int()` or `n.to_f64()`
+
+error[D0006]: the program was not run: errors found (2)

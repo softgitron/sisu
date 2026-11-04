@@ -388,6 +388,7 @@ error[D0006]: the program was not run: errors found (1)
 ```text
 assert_stmt   := 'assert' expr (',' expr)? NEWLINE
 expect_stmt   := 'expect' expr NEWLINE
+debug_assert_stmt := 'debug_assert' expr (',' expr)? NEWLINE
 defer_stmt    := 'defer' (':' block | stmt)
 with_stmt     := 'with' expr 'as' name ':' block
 select_stmt   := 'select' ':' NEWLINE INDENT select_arm+ DEDENT
@@ -398,8 +399,9 @@ comptime_stmt := 'comptime' stmt
 contract_stmt := ('requires' | 'ensures' | 'invariant' | 'decreases') expr NEWLINE
 ```
 
-- `expect` is a statement when an expression follows it on its line,
-  and a name otherwise, as in `x.expect("...")`.
+- `expect` and `debug_assert` are statements when an expression
+  follows them on their line, and names otherwise, as in
+  `x.expect("...")`.
 - `requires`, `ensures`, `invariant` and `decreases` start a contract
   when an expression follows; followed by `=`, `.`, `,`, `[`, `?.`, an
   augmented assignment or the end of the line, each is a name
@@ -410,11 +412,7 @@ contract_stmt := ('requires' | 'ensures' | 'invariant' | 'decreases') expr NEWLI
 - `with` needs its `as NAME` (E0100 without it), and `select` is
   [R9](concurrency.md#waiting-for-the-first-of-several).
 
-**Stage 0 differs.** `debug_assert`, which
-[02](../../proposal/02-syntax.md#expressions-and-statements) gives as
-the assertion a release build strips, is no statement yet (E0117).
-
-**Status.** In stage 0, except `debug_assert`.
+**Status.** In stage 0.
 
 ## Expressions and precedence
 

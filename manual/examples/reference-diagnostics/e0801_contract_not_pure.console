@@ -4,5 +4,6 @@ error[E0801]: a contract only reads what it is given, and `all_different` is not
    |
 12 |     ensures all_different(hours)
    |             ^^^^^^^^^^^^^^^^^^^^
+  = fix: declare it `pure`, if it only reads what it is given: `pure `
 
 error[D0006]: the program was not run: errors found (1)

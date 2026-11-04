@@ -529,8 +529,11 @@ welcome, Roni
 everyone is in
 ```
 
-**Stage 0 differs.** 06 has an unbounded channel as a separate
-constructor; stage 0 has bounded ones only.
+`unbounded_channel[T]()`, 06's separate constructor, gives the same pair
+over a queue without a bound: `send` never waits, every value sent and
+not yet received is held, and `recv` waits while the queue is empty
+([chapter 20](../tutorial/20-concurrency.md#channels) shows the two side
+by side). Its `T` is `Send` and owned, as a bounded channel's is.
 
 **Status.** In stage 0.
 
