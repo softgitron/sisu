@@ -1555,3 +1555,16 @@ conformance diff.
 
 **What would settle it.** The owner's decision, then a round of stage 0 (the handles, their fakes, the log) and of the manual (chapter 18, R10, G28).
 
+### Q-77. When does `sisu run` stop running the interpreter?
+
+**Question.** D-089 keeps the Rust interpreter as an oracle until each of its roles has a replacement. By November 2026 a native run exists for every role but three: of the 274 runnable conformance cases, 258 run natively with the same output, 48 of them with their tests compiled (`sisu test --native`, decision 460), the seeded scheduler, PCT, the exhaustive search, faults and `sim.always` run natively (501 to 503), and what is left is unsafe code (the native checked memory model, two to three weeks), a property's statement budget (two days), the counterexample mode (`--defer-borrow`), the monitor and `--watch` ([`compiler/docs/port-debt.md`](compiler/docs/port-debt.md), "A native run as the default of `sisu run`"). A native run of a small program costs about a second (stage 1, stage 2, the link) where the interpreter starts in a third of that.
+
+**Options.**
+- *Native by default once unsafe code runs natively* (lean): `sisu run` builds and runs the program as `sisu run --native` does, and falls back to the interpreter only for `--defer-borrow`, `--watch` and the monitor, which say so; `sisu run --interpret` keeps the interpreter for anyone who wants it; the interpreter stays the oracle of the conformance suite's expectations.
+- *Native by default now, interpreter for unsafe code*: the same, falling back for a program that declares `unsafe` until the checked memory model exists natively.
+- *Interpreter by default until version 0.1*: nothing changes for users; the native run stays `--native`.
+
+**Current lean.** Native by default once unsafe code runs natively, since the owner wants the Rust parts retired as early as possible and a second of build time is what every compiled language costs; the fall-backs keep the three roles the interpreter alone has.
+
+**What would settle it.** The owner's decision, and the native checked memory model; the switch itself is a day of the driver's work and the manual's pages on running programs.
+
