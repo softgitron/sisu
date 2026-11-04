@@ -4,5 +4,6 @@ error[E0342]: `it` is the parameter of an implicit closure and exists only where
   |
 4 |     let next = it + 1
   |                ^^
+  = note: `it` makes a closure of a call's argument only; elsewhere, as for an item of a list of functions, write the closure with its parameter: `x -> ...`
 
 error[D0006]: the program was not run: errors found (1)

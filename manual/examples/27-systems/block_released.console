@@ -2,4 +2,7 @@ $ sisu run block_released.sisu
 panic: `ptr.read` of memory that was released (`valid`)
   at main (block_released.sisu:17:15)
 $ sisu run --native block_released.sisu
+panic: `ptr.read` of memory that was released (`valid`)
+  at main (block_released.sisu:17:15)
+$ sisu run --native --release block_released.sisu
 90

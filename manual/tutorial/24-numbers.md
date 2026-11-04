@@ -330,7 +330,7 @@ def factorial(n: int) -> BigInt:
 
 def main():
     print(factorial(25))
-    print(BigInt.of(2).pow(64) - BigInt.of(1))
+    print(BigInt.of(2).pow(64) - 1)
     let n = BigInt.parse("123456789012345678901234567890") ?? BigInt.of(0)
     print(n * n)
 ```
@@ -343,8 +343,10 @@ def main():
 ```
 
 - `var product: BigInt = 1` takes a literal with no suffix: where a
-  `BigInt` is expected, an integer literal is one.
-- `BigInt.of(k)` makes one from an `int`, and `BigInt.parse` from text
+  `BigInt` is expected, an integer literal is one, and so is a literal
+  beside a `BigInt` in arithmetic, as the `1` of `pow(64) - 1`.
+- `BigInt.of(k)` makes one from an `int` value, which never becomes a
+  `BigInt` by itself, and `BigInt.parse` from text
   of any length, as an optional value. The operators are exact, and
   `pow` raises to a power.
 - A `BigInt` allocates as it grows, which is why `int` stays fixed:
@@ -426,7 +428,7 @@ def main():
     print(price + price + price)
     let bill: Decimal = 100
     let share = bill.div(Decimal.of(3), 2, Rounding.HalfEven)
-    print("{share} each, {bill - share * Decimal.of(3)} left over")
+    print("{share} each, {bill - share * 3} left over")
     let tip: Decimal = 2.345
     for mode in [Rounding.HalfEven, Rounding.HalfUp, Rounding.Down]:
         print("{mode:?}: {tip.round(2, mode)}")
@@ -446,11 +448,13 @@ Down: 2.34
   them make `0.3`.
 - `div(other, places, mode)` divides to the places asked for, rounding
   by a named mode. A hundred split three ways is 33.33 each, with a cent
-  left over that the program can see and give to someone.
+  left over that the program can see and give to someone. The `3` of
+  `share * 3` is a `Decimal`, as a literal beside one is.
 - `round(places, mode)` rounds. `Rounding` has seven modes:
   `HalfEven` (a tie goes to the even neighbour, the banker's rounding),
   `HalfUp` (a tie goes away from zero), `HalfDown`, `Down` (toward
-  zero), `Up`, `Floor` and `Ceiling`.
+  zero), `Up`, `Floor` and `Ceiling`. Python's `decimal` has an eighth,
+  `ROUND_05UP`, which `Rounding` leaves out.
 
 `/` between two decimals, which 03 designs to give a `Ratio`, is not
 in the compiler yet: it is E0310, whose note names `div`, which says

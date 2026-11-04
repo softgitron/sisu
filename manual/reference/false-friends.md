@@ -208,7 +208,7 @@ maintainers.
 | `try:` `except:` | `T ! E`, `?`, `else` | [E0117](diagnostics.md#e0117) | yes, in a note |
 | `int(s)`, `str(n)` | `s.parse_int()`, `"{n}"` | [E0200](diagnostics.md#e0200) | yes, in a note |
 | `append`, `strip`, `upper` | `push`, `trim`, `to_uppercase` | [E0304](diagnostics.md#e0304) | yes, as a fix |
-| `d.get(k, default)` | `d.get(k) ?? default` | [E0305](diagnostics.md#e0305) | no |
+| `d.get(k, default)` | `d.get(k) ?? default` | [E0305](diagnostics.md#e0305) | yes, as a fix |
 | `enumerate(xs, start=1)` | `enumerate(xs)` and `i + 1` | [E0306](diagnostics.md#e0306) | yes, in a note |
 | `def f(*args)` | a `Slice[T]` parameter | [E0900](diagnostics.md#e0900) | yes, in the message |
 | `first, *rest = xs` | `case [first, *rest]:` | [E0900](diagnostics.md#e0900) | yes, in the message |
@@ -704,7 +704,8 @@ error[E0304]: `str` has no method `upper`
 
 ### `d.get(key, default)`
 
-`get` takes the key only and gives `V?`: `ages.get("Eero") ?? 0`. E0305.
+`get` takes the key only and gives `V?`: `ages.get("Eero") ?? 0`. E0305,
+whose fix writes it.
 
 <!-- file: examples/reference-false-friends/dict_get.sisu -->
 ```sisu
@@ -722,6 +723,7 @@ error[E0305]: wrong number of arguments to `get`: expected 1, found 2
   |
 4 |     print(ages.get("Eero", 0))
   |           ^^^^^^^^^^^^^^^^^^^
+  = fix: `get` gives an option, whose default `??` gives: `ages.get("Eero") ?? 0`
 
 ```
 

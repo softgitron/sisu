@@ -1,0 +1,9 @@
+$ sisu test ledger
+error[E0276]: cannot import `fixtures` here: `fixtures` is a dev-dependency of `ledger`, which its tests import and its code does not
+  --> src/lib.sisu:2:6
+  |
+2 | from fixtures import bookings
+  |      ^^^^^^^^
+  = note: a dev-dependency is for `test` blocks, benchmarks and the black-box tests of `tests/`: import it under `@cfg(test)`, or list it under `[dependencies]`
+
+error[D0006]: the program was not run: errors found (1)

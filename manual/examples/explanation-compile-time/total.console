@@ -1,7 +1,8 @@
 $ sisu check total.sisu
 error[E0310]: `+` cannot be applied to `int` and `String`
-  --> <total[Team]>/main.sisu:3:5
-  |
-3 |     sum_so_far += value.name
-  |     ^^^^^^^^^^^^^^^^^^^^^^^^
+  --> total.sisu:19:11
+   |
+19 |     print(total(Team(name="Owls", points=7)))
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = note: in the instance of `total[Team]` that this call makes: `sum_so_far += value.name`
 

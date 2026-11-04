@@ -10,6 +10,6 @@ def factorial(n: int) -> BigInt:
 
 def main():
     print(factorial(25))
-    print(BigInt.of(2).pow(64) - BigInt.of(1))
+    print(BigInt.of(2).pow(64) - 1)
     let n = BigInt.parse("123456789012345678901234567890") ?? BigInt.of(0)
     print(n * n)

@@ -1,0 +1,3 @@
+# A brace in a test's name is written twice.
+test "len({{3, 1}}) counts each item once":
+    assert len({3, 1, 3}) == 2

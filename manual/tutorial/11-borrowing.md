@@ -641,7 +641,7 @@ error[E0405]: `guests` is already borrowed on line 11, so it cannot be borrowed 
 11 |     for guest in guests:
    |                  ------ borrowed here
    |     ------------------- the borrow is still used here
-  = note: move this after line 12, where the borrow ends, or work on a copy made with `.copy()`
+  = note: the borrow lasts through the loop, which ends after line 12: change `guests` after the loop, or loop over a copy made with `.copy()`
 
 error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```
@@ -844,7 +844,7 @@ error[E0405]: `stock` is already borrowed on line 12, so it cannot be borrowed w
    |
 14 |             _ = stock.remove(name)
    |                 ------------------ the borrow is still used here
-  = note: move this after line 15, where the borrow ends, or work on a copy made with `.copy()`
+  = note: the borrow lasts through the loop, which ends after line 15: change `stock` after the loop, or loop over a copy made with `.copy()`
 
 error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```

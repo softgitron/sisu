@@ -8,6 +8,6 @@ error[E0405]: `bookings` is already borrowed on line 3, so it cannot be borrowed
 3 |     for name, hour in bookings.items():
   |                       -------- borrowed here
   |     ---------------------------------- the borrow is still used here
-  = note: move this after line 5, where the borrow ends, or work on a copy made with `.copy()`
+  = note: the borrow lasts through the loop, which ends after line 5: change `bookings` after the loop, or loop over a copy made with `.copy()`
 
 error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

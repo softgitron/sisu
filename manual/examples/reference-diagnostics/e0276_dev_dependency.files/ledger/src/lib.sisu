@@ -1,0 +1,13 @@
+##! A sauna's takings, whose code imports the tests' fixtures.
+from fixtures import bookings
+
+## The takings of some bookings, in euros.
+pub def takings(paid: list[int]) -> int:
+    return sum(paid)
+
+## The takings of the sample bookings.
+pub def sample() -> int:
+    return takings(bookings())
+
+test "three bookings":
+    assert takings(bookings()) == 36

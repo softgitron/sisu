@@ -1,4 +1,4 @@
-9:5-9:26 E0981 unsafe.call name="ptr_mut.write"
+9:5-9:26 E0981 unsafe.call name="(ptr mut T).write"
   label 9:5-9:26 unsafe.its-obligations obligations="`writable`, `aligned`"
-9:13-9:21 E0981 unsafe.call name="ptr_mut.read"
+9:13-9:21 E0981 unsafe.call name="(ptr mut T).read"
   label 9:13-9:21 unsafe.its-obligations obligations="`valid`, `aligned`"

@@ -1,0 +1,8 @@
+# An explicit discriminant gives a variant its number, for foreign code.
+@repr(u8)
+enum Light:
+    Red = 1
+    Green = 2
+
+def main():
+    print("{Light.Red:?}")

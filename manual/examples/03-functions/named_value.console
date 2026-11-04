@@ -1,0 +1,10 @@
+$ sisu run named_value.sisu
+error[E0306]: `clamp` has no parameter named `value`
+  --> named_value.sisu:6:17
+  |
+6 |     print(clamp(value=15, low=0, high=10))
+  |                 ^^^^^
+  = note: `value` is a positional-only parameter, which is passed without its name
+  = fix: pass it by position
+
+error[D0006]: the program was not run: errors found (1)

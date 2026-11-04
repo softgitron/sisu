@@ -1,0 +1,7 @@
+[package]
+name = "ledger"
+version = "0.1.0"
+edition = "2027"
+
+[dev-dependencies]
+fixtures = { path = "../fixtures" }

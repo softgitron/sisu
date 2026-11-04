@@ -43,7 +43,7 @@ error[E0405]: `bookings` is already borrowed on line 3, so it cannot be borrowed
 3 |     for name, hour in bookings.items():
   |                       -------- borrowed here
   |     ---------------------------------- the borrow is still used here
-  = note: move this after line 5, where the borrow ends, or work on a copy made with `.copy()`
+  = note: the borrow lasts through the loop, which ends after line 5: change `bookings` after the loop, or loop over a copy made with `.copy()`
 
 error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```
@@ -56,9 +56,9 @@ Read the parts in this order:
 - The `-` labels: where the other borrow starts ("borrowed here",
   under `bookings.items()`) and where it is still used ("the borrow is
   still used here", the `for` line, whose every step reads the dict).
-- The note: the two usual fixes, finishing with the borrow before the
-  change, or changing a copy. In a loop, "after line 5", the last line
-  of the loop's body, means after the loop.
+- The note: the two usual fixes. The borrow lasts through the loop,
+  whose body ends at line 5, so the change goes after the loop, or the
+  loop goes over a copy.
 
 These are the codes you meet most, and what fixes each most often:
 

@@ -1,0 +1,10 @@
+##! A sauna's takings, whose tests import their fixtures.
+@cfg(test)
+from fixtures import bookings
+
+## The takings of some bookings, in euros.
+pub def takings(paid: list[int]) -> int:
+    return sum(paid)
+
+test "three bookings":
+    assert takings(bookings()) == 36

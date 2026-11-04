@@ -24,3 +24,19 @@ panic: assertion failed: arrived[0] == "Aino"
     "Eero"
   at main (race.sisu:13:5)
 schedule 0.0.1.0.0.0 failed with exit status 101: run 5 of a bounded exhaustive search (preemption bound 2)
+$ sisu run --native --scheduler pct --explore 5 race.sisu
+["Eero", "Aino"]
+panic: assertion failed: arrived[0] == "Aino"
+    arrived[0] == "Aino"
+    │
+    "Eero"
+  at main (race.sisu:13:5)
+schedule seed 1 of 5 failed with exit status 101 under a PCT scheduler of depth 3; `--scheduler pct --depth 3 --schedule-seed 1` runs it again
+$ sisu run --native --scheduler exhaustive race.sisu
+["Eero", "Aino"]
+panic: assertion failed: arrived[0] == "Aino"
+    arrived[0] == "Aino"
+    │
+    "Eero"
+  at main (race.sisu:13:5)
+schedule 0.0.1.0.0.0 failed with exit status 101: run 5 of a bounded exhaustive search (preemption bound 2)

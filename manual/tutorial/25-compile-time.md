@@ -924,10 +924,11 @@ error[E0609]: making `to_csv[Booking]` stopped at compile time: a list is a comp
   = fix: unroll the loop at compile time with `comptime for`: `comptime `
 
 error[E0324]: the type of `f` cannot be inferred here; add a type annotation
-  --> <to_csv[int]>/main.sisu:4:20
-  |
-4 |         names.push(f.name.to_string())
-  |                    ^
+  --> csv.sisu:38:12
+   |
+38 |     assert to_csv([3, 1, 4]) == "value\n3\n1\n4"
+   |            ^^^^^^^^^^^^^^^^^
+  = note: in the instance of `to_csv[int]` that this call makes: `names.push(f.name.to_string())`
 
 error[D0006]: the program was not run: errors found (2)
 ```
@@ -1119,18 +1120,10 @@ test "a stove":
 ```console
 $ sisu test form.sisu
 warning[W0001]: typed hole `form` of type `String`
-  --> form.sisu:22:9
+  --> form.sisu:19:24
    |
-22 | @derive(Form)
-   |         ^^^^
-  = note: in the impl of `Form` that the derive writes for `Booking`: `return todo("form")`
-
-warning[W0001]: typed hole `form` of type `String`
-  --> form.sisu:29:9
-   |
-29 | @derive(Form)
-   |         ^^^^
-  = note: in the impl of `Form` that the derive writes for `Stove`: `return todo("form")`
+19 |                 return todo("form")
+   |                        ^^^^^^^^^^^^
 
 test "a booking" ... blocked by todo("form")
 test "a stove" ... blocked by todo("form")
@@ -1148,9 +1141,9 @@ what the test printed:
 0 passed, 0 failed, 2 blocked
 ```
 
-The warnings stand at each `@derive(Form)`, once for each struct, and
-their notes quote the line of the impl that the derive wrote: the hole
-is in the template, so each derived impl has one. Each test stops at
+The warning stands at the hole, once, in the template of the derive,
+though each struct that derives `Form` gets an impl with it. Each test
+stops at
 the hole with `self` in scope, the value whose form it makes, which its
 block after the list shows.
 

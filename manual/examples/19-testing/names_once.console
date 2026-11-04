@@ -1,0 +1,9 @@
+$ sisu test names_once.sisu
+error[E0132]: the name of a test, a suite or a benchmark is fixed text, and `{` starts no interpolation in it; a brace is written `{{` or `}}`
+  --> names_once.sisu:4:16
+  |
+4 | test "steps at {60, 80}":
+  |                ^^^^^^^^
+  = fix: write the braces as text: `{{60, 80}}`
+
+error[D0006]: the program was not run: errors found (1)

@@ -629,7 +629,14 @@ Rect(w=2.0, h=3.0) 6.0
 3 kinds
 ```
 
-**Status.** In stage 0 (D-043).
+A variant may give its discriminant, `Red = 1`, the number that
+foreign code sees, which [03](../../proposal/03-types-and-generics.md#algebraic-data-types)
+designs with `@repr` enums.
+
+**Stage 0 differs.** An explicit discriminant is E0900 until the
+layouts of `@repr` enums arrive ([R2](types.md#structs-and-enums)).
+
+**Status.** In stage 0 (D-043), with the differences noted.
 
 ## Error sets
 

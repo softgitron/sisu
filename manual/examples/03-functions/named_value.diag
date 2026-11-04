@@ -1,0 +1,2 @@
+6:17-6:22 E0306 type.unknown-keyword name="clamp" arg="value"
+  fix type.drop-name 6:17-6:23 ""

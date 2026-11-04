@@ -60,7 +60,7 @@ Then put it back, and read through `p` again after the `print`, in an
 <!-- output: examples/27-systems/pointer_bare.console -->
 ```console
 $ sisu run pointer_bare.sisu
-error[E0981]: `ptr_mut.write` is an `unsafe def`: call it inside an `unsafe:` block or an `unsafe` expression
+error[E0981]: `(ptr mut T).write` is an `unsafe def`: call it inside an `unsafe:` block or an `unsafe` expression
   --> pointer_bare.sisu:9:5
   |
 9 |     p.write(p.read() + 5)
@@ -68,7 +68,7 @@ error[E0981]: `ptr_mut.write` is an `unsafe def`: call it inside an `unsafe:` bl
   |     --------------------- its obligations: `writable`, `aligned`
   = note: write why they hold in a `# safety:` comment above the block, naming each obligation it discharges
 
-error[E0981]: `ptr_mut.read` is an `unsafe def`: call it inside an `unsafe:` block or an `unsafe` expression
+error[E0981]: `(ptr mut T).read` is an `unsafe def`: call it inside an `unsafe:` block or an `unsafe` expression
   --> pointer_bare.sisu:9:13
   |
 9 |     p.write(p.read() + 5)
@@ -232,7 +232,9 @@ block holds nothing until the loop writes three values, and after
 The interpreter keeps a model of raw memory: each block, its size, what
 each byte holds, and whether it is still alive. Every read, write and
 offset is checked against it, so a mistake in unsafe code stops the
-program where it happens instead of damaging memory.
+program where it happens instead of damaging memory. A native build in
+the debug profile keeps the same model for the blocks that `Global`
+gives out, and only the release profile runs unchecked.
 
 **Try it.** Write four values in place of three. Then put it back, and
 move the `print` after the `release`.
@@ -253,15 +255,20 @@ $ sisu run block_released.sisu
 panic: `ptr.read` of memory that was released (`valid`)
   at main (block_released.sisu:17:15)
 $ sisu run --native block_released.sisu
+panic: `ptr.read` of memory that was released (`valid`)
+  at main (block_released.sisu:17:15)
+$ sisu run --native --release block_released.sisu
 90
 ```
 
 Each panic names the operation, the obligation it broke and where.
-Compiled with `--native`, the program has no model to check against:
-the read after the release printed what the memory still happened to
-hold, which nothing promises. That is the undefined behaviour that
-unsafe code must never reach, and the reason to run it in the
-interpreter while you write it.
+A native debug build, `sisu run --native`, checks its raw memory against
+the same model and stops with the same panic. The release build,
+`--release`, leaves the checks out: the read after the release printed
+what the memory still happened to hold, which nothing promises. That is
+the undefined behaviour that unsafe code must never reach, and the
+reason to run it in the interpreter or a debug build while you write
+it, and to ship the release build only once its tests pass.
 
 </details>
 
@@ -706,7 +713,10 @@ E0304 today); `Region` exists, under `RawBuf`. The resource attributes
 The runtime profiles `full`, `single` and `freestanding`, targets and
 cross compilation (`--target`), and `panic = "abort"` in a profile,
 which the compiler ignores with W0005, wait for the runtime of
-[12](../../proposal/12-interop-and-targets.md). The exercises of this
+[12](../../proposal/12-interop-and-targets.md). A native debug build
+checks raw memory as the interpreter does, except where the interpreter
+alone knows enough: which borrow a pointer came from, whether the local
+it points to is still alive, and memory that C gave out. The exercises of this
 chapter practise the safe side of systems work: layouts, bytes and
 code that does not allocate.
 
@@ -1142,8 +1152,9 @@ When every test passes, compare your answer with
   names the obligations it discharges (W0007, W0010).
 - Raw pointers and raw memory are `std.mem`'s: `ptr.of_mut`, `read`,
   `write`, `offset`, `Global`, `Layout` and `RawBuf`. The interpreter
-  checks every access against a model of memory, and the monitor checks
-  the borrows behind the pointers.
+  and a native debug build check every access against a model of
+  memory, the release build does not, and the monitor checks the
+  borrows behind the pointers.
 - A safe type keeps its unsafe code behind methods that keep an
   invariant, and drops what it holds.
 - `@repr(c)` lays a struct out as C does, and `@derive(Plain)` with

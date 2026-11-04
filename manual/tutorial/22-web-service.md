@@ -130,7 +130,10 @@ impl http.Handler for Service:
   `409 Conflict` for a turn that is taken, and `201 Created` once the
   booking is saved. When saving fails, it takes the booking back and
   answers `503 Service Unavailable`, so a guest is never told that a
-  booking was kept when it was not.
+  booking was kept when it was not. `save` gives no value to keep, so
+  its error is handled with `if let Err(e) = ...`: `else as e` belongs
+  to a `let`, and after a bare call it is E0117, whose fix writes the
+  `if let`.
 - `log.info` records each booking on standard error.
 
 `handle` is an ordinary method: given a request, it gives a response,

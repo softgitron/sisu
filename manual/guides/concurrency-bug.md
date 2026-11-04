@@ -132,6 +132,10 @@ $ sisu test --scheduler exhaustive --depth 3 double_fixed.sisu
 test "an hour is booked once" ... ok
 1 passed, 0 failed, 0 blocked
 searched 37 schedules (preemption bound 3)
+$ sisu test --native --scheduler exhaustive --depth 3 double_fixed.sisu
+test "an hour is booked once" ... ok
+1 passed, 0 failed, 0 blocked
+searched 37 schedules (preemption bound 3)
 ```
 
 - `--scheduler pct --depth D` runs the PCT scheduler, which gives the
@@ -143,7 +147,11 @@ searched 37 schedules (preemption bound 3)
   orders with up to three switches.
 
 A test that passes under random seeds is evidence; one that passes the
-exhaustive search is a proof, up to its bound.
+exhaustive search is a proof, up to its bound. The last command runs
+the search on the compiled tests, which try the same 37 orders: the
+schedulers run natively with the interpreter's choices, for `sisu run
+--native` as for `sisu test --native`
+([G20](native.md#3-run-the-tests-natively)).
 
 ## 5. Add the failures of the world
 

@@ -3,7 +3,7 @@ test "doubles" ... FAILED
 test "doubles" ... FAILED
 what the test printed:
   after the expects
-panic: assertion failed: double(3) == 6
+expectation failed: double(3) == 6
   left:  5
   right: 6
   at test "doubles" (expect.sisu:7:5)

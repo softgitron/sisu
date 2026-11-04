@@ -1,17 +1,9 @@
 $ sisu test form.sisu
 warning[W0001]: typed hole `form` of type `String`
-  --> form.sisu:22:9
+  --> form.sisu:19:24
    |
-22 | @derive(Form)
-   |         ^^^^
-  = note: in the impl of `Form` that the derive writes for `Booking`: `return todo("form")`
-
-warning[W0001]: typed hole `form` of type `String`
-  --> form.sisu:29:9
-   |
-29 | @derive(Form)
-   |         ^^^^
-  = note: in the impl of `Form` that the derive writes for `Stove`: `return todo("form")`
+19 |                 return todo("form")
+   |                        ^^^^^^^^^^^^
 
 test "a booking" ... blocked by todo("form")
 test "a stove" ... blocked by todo("form")

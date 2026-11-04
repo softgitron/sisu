@@ -41,12 +41,14 @@ def main():
 ```text
 \d+:\d\d: 0 groups
 (\d+:\d\d: at 0, an unclosed group
-(\w+) \1: at 6, the escape `\1`
-(?i)sauna: at 2, `(?:`, the only group flag
+(\w+) \1: at 6, the back-reference `\1`, which a match in linear time leaves out
+(?i)sauna: at 2, a flag such as `(?i)`, which stage 0 leaves out: `(?:...)` is the one group flag
 ```
 
-The last two are features that the engine leaves out, as step 4 shows;
-the message names what it met.
+The last two are features that the engine leaves out, as step 4 shows,
+and the message says so: a back-reference for ever, since no match in
+linear time can have it, and a flag in stage 0, which has `(?:...)`
+alone.
 
 ## 2. Find matches and read their groups
 

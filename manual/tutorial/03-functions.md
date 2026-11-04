@@ -213,7 +213,8 @@ https://example.org:443
   `clamp(-3, low=0, high=10)` shows for `low` and `high`.
 
 **Try it.** In `keywords.sisu`, pass the port by position:
-`url("example.org", 443)`.
+`url("example.org", 443)`. Then name the value that `clamp` takes by
+position: `clamp(value=15, low=0, high=10)`.
 
 <details>
 <summary>What Sisu says</summary>
@@ -234,6 +235,23 @@ error[D0006]: the program was not run: errors found (1)
 E0305 (`type.argument-count`) counts only the parameters that take a
 position, and `url` has one, `host`. Its note says that `port` is
 keyword-only, and the fix is to name it, `port=443`.
+
+<!-- output: examples/03-functions/named_value.console -->
+```console
+$ sisu run named_value.sisu
+error[E0306]: `clamp` has no parameter named `value`
+  --> named_value.sisu:6:17
+  |
+6 |     print(clamp(value=15, low=0, high=10))
+  |                 ^^^^^
+  = note: `value` is a positional-only parameter, which is passed without its name
+  = fix: pass it by position
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+E0306 (`type.unknown-keyword`) is the other side of the same rule:
+`value` takes no name, as its note says, and the fix drops `value=`.
 
 </details>
 

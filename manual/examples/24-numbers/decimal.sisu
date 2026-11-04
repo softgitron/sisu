@@ -6,7 +6,7 @@ def main():
     print(price + price + price)
     let bill: Decimal = 100
     let share = bill.div(Decimal.of(3), 2, Rounding.HalfEven)
-    print("{share} each, {bill - share * Decimal.of(3)} left over")
+    print("{share} each, {bill - share * 3} left over")
     let tip: Decimal = 2.345
     for mode in [Rounding.HalfEven, Rounding.HalfUp, Rounding.Down]:
         print("{mode:?}: {tip.round(2, mode)}")

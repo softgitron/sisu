@@ -637,9 +637,13 @@ native backend, as `sisu build --native` does, and runs it.
 `--release` builds with the release profile, which leaves out the
 checks it can prove unnecessary; it goes with `--native` only (D0111),
 since the interpreter has no profiles. A native run takes the schedule
-options and `--stats` with no word after it; it does not combine with
-`--sir`, `--monitor`, `--defer-borrow`, `--watch`, `--record` or
-`--scheduler` (D0109).
+options, `--scheduler pct` and `--scheduler exhaustive` with `--depth`
+among them ([Choosing the schedule](#choosing-the-schedule)), and
+`--stats` with no word after it; it does not combine with `--sir`,
+`--monitor`, `--defer-borrow`, `--watch` or `--record` (D0109). A
+native debug build checks raw memory as the interpreter does, with the
+same panics; the release build does not
+([chapter 27](../tutorial/27-systems.md#raw-memory)).
 
 <!-- output: examples/reference-sisu-command/native.console -->
 ```console
@@ -797,10 +801,29 @@ panic: assertion failed: arrived[0] == "Aino"
     "Eero"
   at main (race.sisu:13:5)
 schedule 0.0.1.0.0.0 failed with exit status 101: run 5 of a bounded exhaustive search (preemption bound 2)
+$ sisu run --native --scheduler pct --explore 5 race.sisu
+["Eero", "Aino"]
+panic: assertion failed: arrived[0] == "Aino"
+    arrived[0] == "Aino"
+    │
+    "Eero"
+  at main (race.sisu:13:5)
+schedule seed 1 of 5 failed with exit status 101 under a PCT scheduler of depth 3; `--scheduler pct --depth 3 --schedule-seed 1` runs it again
+$ sisu run --native --scheduler exhaustive race.sisu
+["Eero", "Aino"]
+panic: assertion failed: arrived[0] == "Aino"
+    arrived[0] == "Aino"
+    │
+    "Eero"
+  at main (race.sisu:13:5)
+schedule 0.0.1.0.0.0 failed with exit status 101: run 5 of a bounded exhaustive search (preemption bound 2)
 ```
 
 Each failure names the options that run it again. `sisu run race.sisu`,
-with seed 0, fails at once.
+with seed 0, fails at once. A native run, `sisu run --native`, takes the
+same options and runs the executable under the same schedulers, so a
+seed or a schedule names the same order both ways, as the last two
+commands show.
 
 **Status.** In stage 0. PCT and the exhaustive search are tools of the
 experiment ([17](../../proposal/17-testing.md); 18, Phase 6).
@@ -1218,7 +1241,8 @@ prototypes of the experiment (Q-49, D-070).
 
 `sisu bench` runs each of the program's `bench` blocks once without
 timing it, to warm up, and then times `--samples K` samples (10 by
-default), each `--iterations N` turns of its loop (100 by default). Its
+default; fewer than 2 is D0136, since the interval needs two), each
+`--iterations N` turns of its loop (100 by default). Its
 line (D0057) gives the median time of one iteration over the samples,
 the 95% interval of the mean of the samples that are not outliers, by
 Student's t, and how many samples were outliers: further from the
@@ -2024,7 +2048,7 @@ a command line can produce, by what they report:
 | D0030 to D0040 | Replay tokens, capability logs and replays. |
 | D0051, [D0052](diagnostics.md#d0052) | `--faults`. |
 | D0054 to D0056 | Snapshots. |
-| D0057 to D0059 | `sisu bench`. |
+| D0057 to D0059, [D0136](diagnostics.md#d0136) | `sisu bench`. |
 | D0064 to D0067, D0112 | Packages, lockfiles, workspaces and features. |
 | D0070 to [D0073](diagnostics.md#d0073) | `sisu build` and `sisu new`. |
 | D0074, D0075, D0077 | `sisu fmt`. |

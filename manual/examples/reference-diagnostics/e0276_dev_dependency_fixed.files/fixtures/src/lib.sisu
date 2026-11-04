@@ -1,0 +1,5 @@
+##! Sauna bookings to test with.
+
+## Three bookings, in euros.
+pub def bookings() -> list[int]:
+    return [12, 15, 9]

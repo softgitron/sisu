@@ -744,7 +744,7 @@ a C enum ([03](../../proposal/03-types-and-generics.md#algebraic-data-types)).
 **Stage 0 differs.** Stage 0 lays out every struct as C does, with or
 without `@repr(c)`, and `Plain`'s derive accepts a struct with any
 `@repr`, `@repr(python)` included. `@repr(u8)` changes nothing, and a
-variant's value, `Red = 1`, is E0117 ([R2](types.md#structs-and-enums)).
+variant's value, `Red = 1`, is E0900 ([R2](types.md#structs-and-enums)).
 
 **Status.** `@repr(c)` on a struct in stage 0 for `std.mem`'s `Plain`
 (D-081; Q-71 open), with the differences noted; on an enum, and

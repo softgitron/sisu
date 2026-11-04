@@ -1,0 +1,2 @@
+test "{60: warm, 80: hot} has two steps" ... ok
+1 passed, 0 failed, 0 blocked

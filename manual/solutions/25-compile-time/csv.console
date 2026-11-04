@@ -10,9 +10,10 @@ error[E0609]: making `to_csv[Booking]` stopped at compile time: a list is a comp
   = fix: unroll the loop at compile time with `comptime for`: `comptime `
 
 error[E0324]: the type of `f` cannot be inferred here; add a type annotation
-  --> <to_csv[int]>/main.sisu:4:20
-  |
-4 |         names.push(f.name.to_string())
-  |                    ^
+  --> csv.sisu:38:12
+   |
+38 |     assert to_csv([3, 1, 4]) == "value\n3\n1\n4"
+   |            ^^^^^^^^^^^^^^^^^
+  = note: in the instance of `to_csv[int]` that this call makes: `names.push(f.name.to_string())`
 
 error[D0006]: the program was not run: errors found (2)

@@ -140,6 +140,14 @@ An import binds names in the module that writes it:
 - Imports stand at the top level of a module, and the formatter sorts
   them and removes the ones nothing uses. An import inside a function
   is E0900 in stage 0.
+- A child module is a name in its parent without a declaration, and it
+  gives way to an import of the same name there: the root module of
+  `bookings` may write `from bookings.clean import clean`, and `clean`
+  is then the function, the module still reached by its path. A
+  declaration named like a child module is E0202.
+- A local hides a module as it hides any item, so a parameter `fs: Fs`
+  beside `import std.fs` makes `fs.walk(...)` a method of `Fs`, E0304,
+  whose note says that the local hides the module.
 
 <!-- file: examples/reference-modules/imports.files/src/main.sisu -->
 ```sisu
@@ -338,8 +346,13 @@ Each key is a dependency's name, and its value a table:
 
 A dependency is named by its own `[package] name` (E1006 for another
 key), its directory has a manifest (E1005), and a dev-dependency is seen
-only by the package's tests and by the black-box tests of `tests/`
-([R15](testing.md#black-box-tests)). `NAME = "1.2"`, a version range alone, is
+only by the package's tests, its benchmarks and the black-box tests of
+`tests/` ([R15](testing.md#black-box-tests)): a package built as another
+one's dependency is built without its dev-dependencies, so its own code
+imports one only under `@cfg(test)`, which a build without the tests
+leaves out with the items that use it. Any other import of it is E0276
+([R17](diagnostics.md#e0276)), in every build, `sisu check` included;
+the black-box tests import it freely. `NAME = "1.2"`, a version range alone, is
 E1010 in stage 0 ([The registry](#the-registry)).
 
 ### `[features]`
@@ -438,8 +451,7 @@ error[E1015]: `[trust] unsafe` names `zlib`, which is not a dependency of this p
 `json` is the name of a standard-library module, so no package of the
 program may take it, and neither dependency is a `path`.
 
-**Stage 0 differs.** A dev-dependency can be imported by the package's
-own code, not only by its tests. The `[review]` table of
+**Stage 0 differs.** The `[review]` table of
 [10](../../proposal/10-tooling.md) is accepted and ignored.
 
 **Status.** In stage 0 (D-063), with the differences noted.
@@ -776,6 +788,7 @@ C++ interop (Q-24).
 | [E0255](diagnostics.md#e0255), [E0256](diagnostics.md#e0256), [E0258](diagnostics.md#e0258), [E0259](diagnostics.md#e0259), [E0130](diagnostics.md#e0130) | `resolve.private-item`, `resolve.package-item`, `resolve.private-field`, `resolve.private-method`, `parse.visibility-scope` | [Visibility](#visibility) |
 | E0257 | `resolve.not-reexported` | [Re-exports](#re-exports) |
 | E1000, E1001, [E1002](diagnostics.md#e1002), [E1003](diagnostics.md#e1003), E1004, E1005, E1006, [E1010](diagnostics.md#e1010), [E1017](diagnostics.md#e1017), [W0005](diagnostics.md#w0005) | `package.toml-syntax`, `package.toml-duplicate`, `package.missing-key`, `package.bad-value`, `package.bad-name`, `package.no-manifest`, `package.renamed-dependency`, `package.not-a-path`, `package.reserved-name`, `package.unknown-key` | [The manifest](#the-manifest) |
+| [E0276](diagnostics.md#e0276) | `resolve.dev-dependency` | [`[dependencies]` and `[dev-dependencies]`](#dependencies-and-dev-dependencies) |
 | [E1015](diagnostics.md#e1015), [E0703](diagnostics.md#e0703), [E1019](diagnostics.md#e1019), E1020, [E1021](diagnostics.md#e1021), E1022 | `package.trust-unknown`, `cap.untrusted`, `package.unsafe-undeclared`, `package.unsafe-level`, `package.unsafe-untrusted`, `package.unsafe-raised` | [`[trust]`](#trust) |
 | E1011, [E0275](diagnostics.md#e0275) | `package.bad-when`, `resolve.dependency-excluded` | [Target conditions](#target-conditions) |
 | W0006, E1018 | `resolve.unknown-feature`, `package.unknown-feature` | [Features](#features) |

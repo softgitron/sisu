@@ -820,11 +820,18 @@ $ sisu test --scheduler exhaustive --depth 2 lost_fixed.sisu
 test "two visits make two" ... ok
 1 passed, 0 failed, 0 blocked
 searched 32 schedules (preemption bound 2)
+$ sisu test --native --scheduler exhaustive --depth 2 lost_fixed.sisu
+test "two visits make two" ... ok
+1 passed, 0 failed, 0 blocked
+searched 32 schedules (preemption bound 2)
 ```
 
 The second task now waits at `lock` until the first lets go, and no
 order of the two loses an update: every one of the 32 orders with at
-most two switches was tried.
+most two switches was tried. With `--native` the same search runs on
+the compiled tests and tries the same 32 orders; `sisu run --native`
+takes the schedulers too, for a program's `main`
+([R16](../reference/sisu-command.md#choosing-the-schedule)).
 
 </details>
 

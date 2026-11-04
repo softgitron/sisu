@@ -69,6 +69,48 @@ test "feels/the edges of warm" ... ok
   slow` runs only those. `--filter TEXT` runs the tests whose names
   hold the text. The last line counts the tests left out.
 
+A name is fixed text, since runs choose and replay by it, so a brace in
+it is written twice:
+
+<!-- file: examples/19-testing/names.sisu -->
+```sisu
+# A test's name is fixed text: a brace in it is written twice.
+const STEPS: dict[int, str] = {60: "warm", 80: "hot"}
+
+test "{{60: warm, 80: hot}} has two steps":
+    assert len(STEPS) == 2
+```
+
+<!-- output: examples/19-testing/names.console -->
+```console
+$ sisu test names.sisu
+test "{60: warm, 80: hot} has two steps" ... ok
+1 passed, 0 failed, 0 blocked
+```
+
+**Try it.** Name the test `"steps at {60, 80}"`.
+
+<details>
+<summary>What Sisu says</summary>
+
+<!-- output: examples/19-testing/names_once.console -->
+```console
+$ sisu test names_once.sisu
+error[E0132]: the name of a test, a suite or a benchmark is fixed text, and `{` starts no interpolation in it; a brace is written `{{` or `}}`
+  --> names_once.sisu:4:16
+  |
+4 | test "steps at {60, 80}":
+  |                ^^^^^^^^
+  = fix: write the braces as text: `{{60, 80}}`
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+E0132 (`parse.interpolated-name`) points at the braces; a parametrised
+test, in the next section, is how a value reaches a name.
+
+</details>
+
 In a package, `sisu test` runs the tests of every module. The
 directory `tests/` beside the manifest holds tests from outside: each
 file `tests/NAME.sisu` is a program of its own that imports the
@@ -117,8 +159,6 @@ test "two throws" ... ok
   order of its name, each with its own list and counts.
 - An import of a private item, `from stove import step`, is E0255 in
   a file of `tests/`, as in any user of the library.
-- The directory also holds the transcripts of the section
-  "Transcripts".
 
 ## A test for each case
 
@@ -272,11 +312,11 @@ $ sisu test expects.sisu
 test "an average for each evening" ... FAILED
 
 test "an average for each evening" ... FAILED
-panic: assertion failed: average([70, 75]) == 73
+expectation failed: average([70, 75]) == 73
   left:  72
   right: 73
   at test "an average for each evening" (expects.sisu:12:5)
-panic: assertion failed: average([60, 61]) == 61
+expectation failed: average([60, 61]) == 61
   left:  60
   right: 61
   at test "an average for each evening" (expects.sisu:14:5)
@@ -285,16 +325,14 @@ replay: sisu test --replay 1-27b42691e342aea0-0.0.1-t0-s0-r0 expects.sisu
 0 passed, 1 failed, 0 blocked
 ```
 
-Both failures are reported, each with its two sides, under `panic:` as
-a failed `assert` would be, though nothing panicked, and the two checks
-that hold say nothing. Use `expect` for checks that do not depend on
+Both failures are reported under `expectation failed:`, with the sides
+a failed `assert` shows; the checks that hold say nothing. Use `expect` for checks that do not depend on
 each other, and `assert` where a failure makes the lines after it
 meaningless.
 
 What a test prints is kept with its result and shown only if it fails,
 under `what the test printed:` after the test's name, so a passing
-suite stays quiet and a failing test brings its own story
-([R15](../reference/testing.md#what-a-test-prints)).
+suite stays quiet ([R15](../reference/testing.md#what-a-test-prints)).
 
 ## Fixtures are values
 

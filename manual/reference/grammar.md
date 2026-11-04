@@ -215,8 +215,9 @@ packages ([R3](declarations.md#error-sets)). Any other line in a struct's
 body is E0126 (`parse.expected-member`), once for each body.
 
 **Stage 0 differs.** [03](../../proposal/03-types-and-generics.md#algebraic-data-types)
-lets an enum declare its variants' values, its discriminants, which no
-rule reads yet: `Red = 1` is E0117 ([R2](types.md#structs-and-enums)).
+lets an enum declare its variants' values, its discriminants, which
+stage 0 does not lower yet: the parser reads `Red = 1` and reports E0900
+([R2](types.md#structs-and-enums)).
 
 **Status.** In stage 0, except discriminants.
 

@@ -439,7 +439,7 @@ Shown in [chapter 2](../tutorial/02-values.md).
 
 ## Parsing
 
-Codes E0100 to E0131. The parser builds the syntax tree. Its errors name
+Codes E0100 to E0132. The parser builds the syntax tree. Its errors name
 what it expected and what it found, and several name a habit from
 another language and the Sisu way to write it.
 
@@ -1033,7 +1033,10 @@ the first token it did not expect, which often stands for a habit from
 another language: a Rust comment `//`, `lambda`, `println!`. Where it
 stops at such a habit, a fix writes Sisu's spelling (`#`, `x ->`,
 `print`) or a note says what Sisu has instead (`try:`, Go's `go f()`);
-[R19](false-friends.md) shows each.
+[R19](false-friends.md) shows each. An `else` after a call that is no
+`let`, `save(4) else as e:`, gets the note that `else` belongs to a
+`let`, and with `as e` the fix `if let Err(e) = save(4)`, the statement
+that handles the error alone.
 
 <!-- file: examples/reference-diagnostics/e0117_trailing.sisu -->
 ```sisu
@@ -1474,9 +1477,59 @@ True
 
 Shown in [R14](attributes.md#writing-an-attribute).
 
+### E0132
+
+`parse.interpolated-name`: the name of a test, a suite or a benchmark
+is fixed text, and `{` starts no interpolation in it; a brace is
+written `{{` or `}}`.
+
+A name is what `sisu test` reports, chooses by (`--filter`) and replays
+by, so no value of the running program can be part of it
+([R15](testing.md#the-forms-of-a-test)). Braces in a test's,
+a suite's or a benchmark's name start no interpolation, and what they
+hold is not read as an expression.
+
+<!-- file: examples/reference-diagnostics/e0132_interpolated_name.sisu -->
+```sisu
+# Braces in a test's name, as if it were interpolated.
+test "len({3, 1}) counts each item once":
+    assert len({3, 1, 3}) == 2
+```
+
+<!-- output: examples/reference-diagnostics/e0132_interpolated_name.console -->
+```console
+$ sisu test e0132_interpolated_name.sisu
+error[E0132]: the name of a test, a suite or a benchmark is fixed text, and `{` starts no interpolation in it; a brace is written `{{` or `}}`
+  --> e0132_interpolated_name.sisu:2:11
+  |
+2 | test "len({3, 1}) counts each item once":
+  |           ^^^^^^
+  = fix: write the braces as text: `{{3, 1}}`
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+The fix writes each brace twice, as text, which the name then shows
+once. An escaped quote, `\"`, is text in a name too.
+
+<!-- file: examples/reference-diagnostics/e0132_interpolated_name_fixed.sisu -->
+```sisu
+# A brace in a test's name is written twice.
+test "len({{3, 1}}) counts each item once":
+    assert len({3, 1, 3}) == 2
+```
+
+<!-- output: examples/reference-diagnostics/e0132_interpolated_name_fixed.test -->
+```text
+test "len({3, 1}) counts each item once" ... ok
+1 passed, 0 failed, 0 blocked
+```
+
+Shown in [chapter 19](../tutorial/19-testing.md#suites-tags-and-choosing-tests).
+
 ## Names and declarations
 
-Codes E0200 to E0275. Name resolution finds what each name means and
+Codes E0200 to E0276. Name resolution finds what each name means and
 checks declarations: undefined and duplicate names, imports and
 visibility, derives, traits and impls.
 
@@ -1556,7 +1609,9 @@ error[D0006]: the program was not run: errors found (1)
 ```
 
 Import the type from its module, as `from std.collections import Deque`,
-or correct its spelling. When an expression names the type too, as
+or correct its spelling. A standard module's error set named alone,
+`JsonError`, gets the fix `json.JsonError` when the module is imported,
+and otherwise a note that names its import. When an expression names the type too, as
 `Deque[str].new()`, that use gets E0200.
 
 <!-- file: examples/reference-diagnostics/e0201_undefined_type_fixed.sisu -->
@@ -3473,6 +3528,89 @@ $ sisu run sauna
 event log: the stove is on
 ```
 
+### E0276
+
+`resolve.dev-dependency`: cannot import `{name}` here: `{package}` is a
+dev-dependency of `{this}`, which its tests import and its code does
+not.
+
+A dev-dependency is for a package's `test` blocks, its benchmarks and
+the black-box tests of `tests/`
+([R13](modules.md#dependencies-and-dev-dependencies)). A package that
+another one depends on is built without its dev-dependencies, so its
+own code imports one only under `@cfg(test)`, which a build without the
+tests leaves out. The check is made in every build, `sisu check`
+included. Here the library `ledger` uses its test fixtures in a public
+function:
+
+<!-- file: examples/reference-diagnostics/e0276_dev_dependency.files/ledger/sisu.toml -->
+```toml
+[package]
+name = "ledger"
+version = "0.1.0"
+edition = "2027"
+
+[dev-dependencies]
+fixtures = { path = "../fixtures" }
+```
+
+<!-- file: examples/reference-diagnostics/e0276_dev_dependency.files/ledger/src/lib.sisu -->
+```sisu
+##! A sauna's takings, whose code imports the tests' fixtures.
+from fixtures import bookings
+
+## The takings of some bookings, in euros.
+pub def takings(paid: list[int]) -> int:
+    return sum(paid)
+
+## The takings of the sample bookings.
+pub def sample() -> int:
+    return takings(bookings())
+
+test "three bookings":
+    assert takings(bookings()) == 36
+```
+
+<!-- output: examples/reference-diagnostics/e0276_dev_dependency.console -->
+```console
+$ sisu test ledger
+error[E0276]: cannot import `fixtures` here: `fixtures` is a dev-dependency of `ledger`, which its tests import and its code does not
+  --> src/lib.sisu:2:6
+  |
+2 | from fixtures import bookings
+  |      ^^^^^^^^
+  = note: a dev-dependency is for `test` blocks, benchmarks and the black-box tests of `tests/`: import it under `@cfg(test)`, or list it under `[dependencies]`
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+The note gives the two fixes. A dependency that the code needs belongs
+under `[dependencies]`; one that only the tests need is imported under
+`@cfg(test)`, and the code that is no test does without it:
+
+<!-- file: examples/reference-diagnostics/e0276_dev_dependency_fixed.files/ledger/src/lib.sisu -->
+```sisu
+##! A sauna's takings, whose tests import their fixtures.
+@cfg(test)
+from fixtures import bookings
+
+## The takings of some bookings, in euros.
+pub def takings(paid: list[int]) -> int:
+    return sum(paid)
+
+test "three bookings":
+    assert takings(bookings()) == 36
+```
+
+<!-- output: examples/reference-diagnostics/e0276_dev_dependency_fixed.console -->
+```console
+$ sisu test ledger
+test "three bookings" ... ok
+1 passed, 0 failed, 0 blocked
+```
+
+[R13](modules.md#dependencies-and-dev-dependencies) states the rule.
+
 ## Types
 
 Codes E0300 to E0399. The type checker checks every expression's type:
@@ -3628,7 +3766,9 @@ Shown in [chapter 2](../tutorial/02-values.md).
 
 A method call names a method of the value's type or of a trait it
 implements. A note names the trait when another type has the method, as
-`join` of `Iterator`.
+`join` of `Iterator`, and says when the value is a local that hides a
+module of the same name, `fs: Fs` beside `import std.fs`
+([R13](modules.md#imports)).
 
 <!-- file: examples/reference-diagnostics/e0304_method.sisu -->
 ```sisu
@@ -3741,7 +3881,10 @@ error[E0306]: `greet` has no parameter named `formal`
 error[D0006]: the program was not run: errors found (1)
 ```
 
-Use the parameter's name as the function declares it.
+Use the parameter's name as the function declares it. A positional-only
+parameter, one before `/`, has a name that no call may give: E0306 for
+it has a note that says so and a fix that drops the name
+([chapter 3](../tutorial/03-functions.md#passing-arguments-by-name)).
 
 <!-- file: examples/reference-diagnostics/e0306_keyword_argument_fixed.sisu -->
 ```sisu
@@ -4894,12 +5037,13 @@ error[E0342]: `it` is the parameter of an implicit closure and exists only where
   |
 4 |     let next = it + 1
   |                ^^
+  = note: `it` makes a closure of a call's argument only; elsewhere, as for an item of a list of functions, write the closure with its parameter: `x -> ...`
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-Pass the expression where a function is expected, or write the closure
-with a named parameter, `x -> x + 1`. A method that a list lacks, such
+Pass the expression where a function is expected, or, as the note
+says, write the closure with a named parameter, `x -> x + 1`. A method that a list lacks, such
 as `map`, is reached through `iter()` first.
 
 <!-- file: examples/reference-diagnostics/e0342_it_outside_closure_fixed.sisu -->
@@ -5960,7 +6104,9 @@ error[D0021]: the program was not run: the ownership checker found errors (1); `
 ```
 
 Finish with the shared borrow first, as the note says, or copy what it
-reads.
+reads. When the change stands inside a loop over the value, the borrow
+lasts through the loop, and the note says so: change the value after
+the loop, or loop over a copy.
 
 <!-- file: examples/reference-diagnostics/e0405_mut_while_borrowed_fixed.sisu -->
 ```sisu
@@ -6731,8 +6877,9 @@ error[D0006]: the program was not run: errors found (1)
 The fix holds the values themselves, `list[String]`; then push copies,
 made with `.copy()`, or move the values in. A list of views, such as
 `list[str]`, holds borrows without references. `sorted` of a list whose
-items are not `Copy` makes a list of references too, so derive `Copy`
-for a small type, or sort the list in place with `sort()`.
+items are not `Copy` makes a list of references too, and its note says
+to sort the list in place with `sort()`; deriving `Copy` for a small
+type is the other way.
 
 <!-- file: examples/reference-diagnostics/e0438_ref_in_collection_fixed.sisu -->
 ```sisu
@@ -10649,6 +10796,21 @@ def main():
 ä
 ```
 
+### R0154
+
+`run.expect-failed`: expectation failed: {expr}.
+
+Not a panic: the report of a failed `expect` in a test, which records
+the failure and lets the test go on to its end, where it fails with
+every failure it recorded ([R15](testing.md#assertions)). The lines
+under it are those of a failed `assert`: the two sides of a comparison
+and the place. R0155 is the same report with the line `message:` of an
+`expect` that has one. Outside a test a failed `expect` is `assert`'s
+panic.
+
+Example: [R15](testing.md#assertions) and
+[chapter 19](../tutorial/19-testing.md#what-a-failing-assertion-shows).
+
 ### R0160
 
 `panic.hole-closure`: in scope at the typed hole {hole}:
@@ -10721,7 +10883,7 @@ Shown in [chapter 3](../tutorial/03-functions.md#leaving-a-hole).
 
 ## The driver
 
-Codes D0001 to D0135. The messages of the `sisu` command itself
+Codes D0001 to D0136. The messages of the `sisu` command itself
 ([R16](sisu-command.md)): usage errors, the lines of `sisu test` and
 `sisu bench`, replays, packages and the native backend.
 
@@ -11257,6 +11419,19 @@ nothing.
 
 Example: [R15](testing.md#what-a-test-prints).
 
+### D0136
+
+`cli.bench-samples`: `--samples` takes 2 or more, not {value}: the
+interval of the mean needs two samples.
+
+`sisu bench --samples K` was given a `K` below 2, from which no
+interval of the mean can be computed
+([R16](sisu-command.md#sisu-bench)). The status is 2.
+
+Give 2 or more; the default is 10.
+
+Example: [G27](../guides/bench.md#2-run-the-benchmarks-and-compare).
+
 ## Every code
 
 The tables list every code of the catalog in this version, by range, with
@@ -11321,6 +11496,7 @@ it. `sisu explain CODE` prints the same line.
 | [E0129](#e0129) | `parse.attribute-on-statement` | `@{name}` stands before a statement; an attribute stands on the line before a declaration (a function, a type, a constant, a test), and none applies to a statement |
 | [E0130](#e0130) | `parse.visibility-scope` | `pub({name})` is not Sisu's: an item is `pub` to every package, or `pub(package)` to the modules of its own |
 | [E0131](#e0131) | `parse.attribute-line` | an attribute stands on a line of its own, before its declaration |
+| [E0132](#e0132) | `parse.interpolated-name` | the name of a test, a suite or a benchmark is fixed text, and `{` starts no interpolation in it; a brace is written `{{` or `}}` |
 
 ### Names and declarations, every code
 
@@ -11400,6 +11576,7 @@ it. `sisu explain CODE` prints the same line.
 | [E0273](#e0273) | `resolve.const-or-method` | `{name}` is {what} of `{trait}`, and this impl gives it as {given} |
 | [E0274](#e0274) | `resolve.const-not-type` | `{name}` is a constant of `{trait}`, which bounds `{ty}`, not a type |
 | [E0275](#e0275) | `resolve.dependency-excluded` | cannot import `{name}`: the dependency `{package}` of `{this}` is not built for this target, which its `when` in that package's `sisu.toml` excludes |
+| [E0276](#e0276) | `resolve.dev-dependency` | cannot import `{name}` here: `{package}` is a dev-dependency of `{this}`, which its tests import and its code does not |
 
 ### Types, every code
 
@@ -11821,6 +11998,8 @@ it. `sisu explain CODE` prints the same line.
 | R0151 | `panic.foreign-overlap` | `memcpy` of {bytes} bytes from a range that overlaps the one it writes, which C's `memcpy` does not allow |
 | R0152 | `panic.foreign-fd` | `write` to the file descriptor {fd}, which the interpreter does not emulate; it emulates 1 and 2, the standard streams |
 | R0153 | `panic.machine-intrinsic` | `{name}` is a machine intrinsic of native code; the interpreter runs its tasks on a scheduler of its own |
+| [R0154](#r0154) | `run.expect-failed` | expectation failed: {expr} |
+| R0155 | `run.expect-failed-message` | expectation failed: {expr} message: {message} |
 | [R0160](#r0160) | `panic.hole-closure` | in scope at the typed hole {hole}: |
 
 ### The driver, every code
@@ -11960,4 +12139,5 @@ it. `sisu explain CODE` prints the same line.
 | [D0132](#d0132) | `cli.not-compiled` | the program was not compiled: errors found ({count}) |
 | [D0134](#d0134) | `native.test-unsupported` | `sisu test --native` does not run {what} yet; `sisu test` without `--native` runs it |
 | [D0135](#d0135) | `cli.test-output` | what the test printed: |
+| [D0136](#d0136) | `cli.bench-samples` | `--samples` takes 2 or more, not {value}: the interval of the mean needs two samples |
 

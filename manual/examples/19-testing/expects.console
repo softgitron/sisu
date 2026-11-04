@@ -2,11 +2,11 @@ $ sisu test expects.sisu
 test "an average for each evening" ... FAILED
 
 test "an average for each evening" ... FAILED
-panic: assertion failed: average([70, 75]) == 73
+expectation failed: average([70, 75]) == 73
   left:  72
   right: 73
   at test "an average for each evening" (expects.sisu:12:5)
-panic: assertion failed: average([60, 61]) == 61
+expectation failed: average([60, 61]) == 61
   left:  60
   right: 61
   at test "an average for each evening" (expects.sisu:14:5)

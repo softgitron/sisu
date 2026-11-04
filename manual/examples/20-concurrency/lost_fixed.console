@@ -6,3 +6,7 @@ $ sisu test --scheduler exhaustive --depth 2 lost_fixed.sisu
 test "two visits make two" ... ok
 1 passed, 0 failed, 0 blocked
 searched 32 schedules (preemption bound 2)
+$ sisu test --native --scheduler exhaustive --depth 2 lost_fixed.sisu
+test "two visits make two" ... ok
+1 passed, 0 failed, 0 blocked
+searched 32 schedules (preemption bound 2)

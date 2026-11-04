@@ -1,0 +1,6 @@
+# Arguments can be passed by name; `*` and `/` limit how.
+def clamp(value: int, /, low: int, high: int) -> int:
+    return max(low, min(value, high))
+
+def main():
+    print(clamp(value=15, low=0, high=10))

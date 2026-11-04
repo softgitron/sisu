@@ -95,6 +95,15 @@ bench "a match" ... 70.2 µs an iteration, the median of 10 samples of 100 itera
   something else ran on the machine while it timed.
 - The interval is one run's. Two runs on a busy machine can still
   disagree, so run the comparison more than once before acting on it.
+- An interval needs at least two samples, so `--samples` below 2 is
+  refused with D0136 (`cli.bench-samples`), status 2:
+
+<!-- output: examples/guide-bench/samples.console -->
+```console
+$ sisu bench --samples 1 vowels.sisu
+error[D0136]: `--samples` takes 2 or more, not 1: the interval of the mean needs two samples
+```
+
 - Compare benchmarks of one run with each other. Stage 0 times its
   interpreter, so a time says little about the same code compiled.
 - Keep the benchmarks with the code, so that the comparison can be made

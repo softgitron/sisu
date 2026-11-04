@@ -332,7 +332,7 @@ error[E0438]: `list[ref Version]` would hold references, and a collection holds 
    |
 10 |     print("{sorted([Version(1, 10), Version(0, 9), Version(1, 2)])}")
    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  = note: put copies in it, made with `.copy()` (or `.to_string()` for text), or views, such as `str` for a `String`; a reference is kept only in a `view struct`'s `ref` field
+  = note: `sorted` gives references to items that are not `Copy`, which a list does not hold: sort a list of its own in place instead, `xs.sort()`
 
 error[E0347]: `Version` does not implement `Hash`
   --> no_derive.sisu:11:17
@@ -349,7 +349,8 @@ Each line that needs an ability now names the trait it lacks: E0347
 (`type.not-ordered`) for `<`, each with the fix that writes the
 `@derive` line. E0438 comes from `sorted` without `Copy`, which hands
 out references to the items rather than the items, as chapter 11
-explains. Without `Copy`, the ownership check would report the move of
+explains; its note says that a list sorts itself in place with
+`xs.sort()`. Without `Copy`, the ownership check would report the move of
 `installed` as well, once these errors were fixed.
 
 </details>

@@ -473,7 +473,8 @@ partial order and panic on an unordered comparison; stage 0's take an
 They take ordinary literals with no suffix, through `FromLiteral`
 ([Literals that take the type expected](#literals-that-take-the-type-expected)):
 a literal reaches a `Decimal` as written, so `0.1` is exactly one tenth
-and `3.50` keeps its two places.
+and `3.50` keeps its two places, and a literal beside one of them in
+arithmetic takes its type, as `3` and `0.03` do in `price * 3 + 0.03`.
 Nothing rounds without being told how: `Rounding` names seven modes,
 `HalfEven`, `HalfUp`, `HalfDown`, `Down`, `Up`, `Floor` and `Ceiling`,
 and there is no hidden precision (Q-53). `int` stays 64 bits wide and
@@ -490,6 +491,7 @@ def main():
     let tenth: Decimal = 0.1
     print("{tenth + tenth + tenth} {0.1 + 0.1 + 0.1}")
     let price: Decimal = 19.99
+    print(price * 3 + 0.03)
     print(price.div(Decimal.of(3), 2, Rounding.HalfEven))
     print(Ratio.of(1, 3) + Ratio.of(1, 6))
 ```
@@ -498,6 +500,7 @@ def main():
 ```text
 729000000000000000000000000000
 0.3 0.30000000000000004
+60.00
 6.66
 1/2
 ```
@@ -709,8 +712,13 @@ Global]`, waits for allocators ([R7](ownership.md#allocators)).
 A literal whose expected type implements `FromLiteral[L]` becomes a
 value of that type, made at the literal by the type's `from_literal`.
 `L` is `int` for an integer literal, `f64` for a float literal and `str`
-for a string literal without interpolation. This is typing, not
-conversion: it applies to literals only, never to values already made.
+for a string literal without interpolation. A type is
+expected of a literal where one is given, as a binding's, a parameter's
+or a `return`'s, and beside a value of a type that is not a number in an
+arithmetic operator, `f * 2` with `f` a `BigInt`, when the operator has
+no impl for the literal as it is (an `impl Mul[int] for Vector` keeps
+the `int`). This is typing, not conversion: it applies to literals
+only, never to values already made.
 
 | Type | Takes |
 |---|---|
@@ -932,8 +940,43 @@ def main():
 An enum may be `@repr(u8)`, for foreign code, and may declare explicit
 discriminants; an enum with only unit variants is a C enum.
 
+Stage 0 reads an explicit discriminant and refuses it until the layouts
+of `@repr` enums arrive:
+
+<!-- file: examples/reference-types/discriminant.sisu -->
+```sisu
+# An explicit discriminant gives a variant its number, for foreign code.
+@repr(u8)
+enum Light:
+    Red = 1
+    Green = 2
+
+def main():
+    print("{Light.Red:?}")
+```
+
+<!-- output: examples/reference-types/discriminant.console -->
+```console
+$ sisu run discriminant.sisu
+error[E0900]: an explicit discriminant of an enum's variant is not implemented in stage 0 yet; it arrives with the layouts of `@repr` enums (03, 12)
+  --> discriminant.sisu:4:9
+  |
+4 |     Red = 1
+  |         ^^^
+
+error[E0900]: an explicit discriminant of an enum's variant is not implemented in stage 0 yet; it arrives with the layouts of `@repr` enums (03, 12)
+  --> discriminant.sisu:5:11
+  |
+5 |     Green = 2
+  |           ^^^
+
+error[D0006]: the program was not run: errors found (2)
+```
+
 **Stage 0 differs.** Stage 0 accepts `@repr(u8)` on an enum and changes
-nothing, and has no syntax for discriminants (`Red = 1` is E0117).
+nothing, and an explicit discriminant, `Red = 1`, is E0900
+([R17](diagnostics.md#e0900)), the code of what stage 0 does not
+implement yet.
 
 **Status.** In stage 0 (D-043); `@repr` and discriminants are designed
 ([12](../../proposal/12-interop-and-targets.md)).

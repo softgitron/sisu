@@ -1,0 +1,2 @@
+test "len({3, 1}) counts each item once" ... ok
+1 passed, 0 failed, 0 blocked

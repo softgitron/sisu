@@ -4,4 +4,5 @@ error[E0305]: wrong number of arguments to `get`: expected 1, found 2
   |
 4 |     print(ages.get("Eero", 0))
   |           ^^^^^^^^^^^^^^^^^^^
+  = fix: `get` gives an option, whose default `??` gives: `ages.get("Eero") ?? 0`
 

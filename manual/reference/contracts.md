@@ -111,7 +111,9 @@ at every exit, a `return`, a `?` that passes an error on, or the end of
 the body, after the result is made:
 
 - `result` is the value returned. In a function that returns a result,
-  `T ! E`, it is the whole result, `Ok` or `Err`; in one with a labelled
+  `T ! E`, it is the whole result, `Ok` or `Err`, so `ensures result >
+  0` is E0369, whose note says to compare with `Ok(...)` or ask
+  `.is_ok()`; in one with a labelled
   tuple, `-> (each: int, rest: int)`, the labels name its parts instead.
 - `old(EXPR)` is the value of `EXPR` on entry, which the compiler copies
   then; only an `ensures` asks for it (E0803, `contract.old-outside`),

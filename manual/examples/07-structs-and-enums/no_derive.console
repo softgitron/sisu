@@ -25,7 +25,7 @@ error[E0438]: `list[ref Version]` would hold references, and a collection holds 
    |
 10 |     print("{sorted([Version(1, 10), Version(0, 9), Version(1, 2)])}")
    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  = note: put copies in it, made with `.copy()` (or `.to_string()` for text), or views, such as `str` for a `String`; a reference is kept only in a `view struct`'s `ref` field
+  = note: `sorted` gives references to items that are not `Copy`, which a list does not hold: sort a list of its own in place instead, `xs.sort()`
 
 error[E0347]: `Version` does not implement `Hash`
   --> no_derive.sisu:11:17

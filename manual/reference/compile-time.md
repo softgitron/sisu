@@ -290,8 +290,18 @@ instance is checked on its own, for the types really used.
 - An instance that cannot be made is E0609
   (`comptime.instance-failed`), at the call in the program that first
   needed it, with a label where the template stopped.
-- Errors inside an instance are placed in a module the compiler writes,
-  `<NAME[ARGS]>/MODULE.sisu`, which holds the unrolled code.
+- An error inside an instance, a type's or an ownership's, is placed at
+  the call that made the instance, the first in a module the program
+  wrote, with a note that names the instance and quotes its line, such
+  as "in the instance of `total[Team]` that this call makes"; its labels
+  and fixes, which would point into the made code, are left out. Code
+  that `comptime for` unrolls is reported the same way. An `E0300` that
+  finds a reference where the instance gives a value on, as to
+  `reflect.construct`, adds a note that such a parameter is taken `own`.
+- A typed hole in a derive's template is reported once, at the hole,
+  however many types derive it.
+- An interpolated literal of compile-time values only, `var out =
+  "{reflect.name_of(T)}"`, stays the `String` it is in the template.
 - A template that calls itself with ever more types is E0610
   (`comptime.instances-unbounded`), and a template used as a value,
   rather than called, is E0611 (`comptime.template-value`), since only a

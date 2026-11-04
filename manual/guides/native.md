@@ -82,7 +82,10 @@ löyly!
 ```
 
 Test the debug build and the interpreter first, where the checks are
-on, and build for release once the tests pass. `--contracts=LEVEL`
+on, and build for release once the tests pass. The debug build checks
+the raw memory of unsafe code as the interpreter does, with the same
+panics, and the release build does not
+([chapter 27](../tutorial/27-systems.md#raw-memory)). `--contracts=LEVEL`
 chooses at build time which contracts the executable checks, as it does
 for `sisu run`.
 
@@ -173,8 +176,11 @@ searched 127 schedules (preemption bound 2)
 ```
 
 - What only the interpreter does is refused with D0134 (a test
-  parameter that no fake stands for); `sisu run --native` takes no
-  `--scheduler` (D0109). Run those without `--native`.
+  parameter that no fake stands for); run those without `--native`.
+  `sisu run --native` takes the schedulers too, `--scheduler pct` and
+  `--scheduler exhaustive` with `--depth`, and reports a failing seed or
+  schedule as `sisu run` does
+  ([R16](../reference/sisu-command.md#choosing-the-schedule)).
 
 ## 4. Choose a target
 

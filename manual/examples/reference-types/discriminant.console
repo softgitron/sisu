@@ -1,0 +1,14 @@
+$ sisu run discriminant.sisu
+error[E0900]: an explicit discriminant of an enum's variant is not implemented in stage 0 yet; it arrives with the layouts of `@repr` enums (03, 12)
+  --> discriminant.sisu:4:9
+  |
+4 |     Red = 1
+  |         ^^^
+
+error[E0900]: an explicit discriminant of an enum's variant is not implemented in stage 0 yet; it arrives with the layouts of `@repr` enums (03, 12)
+  --> discriminant.sisu:5:11
+  |
+5 |     Green = 2
+  |           ^^^
+
+error[D0006]: the program was not run: errors found (2)

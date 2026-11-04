@@ -6,3 +6,7 @@ $ sisu test --scheduler exhaustive --depth 3 double_fixed.sisu
 test "an hour is booked once" ... ok
 1 passed, 0 failed, 0 blocked
 searched 37 schedules (preemption bound 3)
+$ sisu test --native --scheduler exhaustive --depth 3 double_fixed.sisu
+test "an hour is booked once" ... ok
+1 passed, 0 failed, 0 blocked
+searched 37 schedules (preemption bound 3)

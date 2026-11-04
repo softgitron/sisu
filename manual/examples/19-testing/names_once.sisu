@@ -1,0 +1,5 @@
+# A test's name with braces written once, as if it were interpolated.
+const STEPS: dict[int, str] = {60: "warm", 80: "hot"}
+
+test "steps at {60, 80}":
+    assert len(STEPS) == 2

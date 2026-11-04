@@ -36,7 +36,10 @@ module, beside the code it tests ([R3](declarations.md#tests-suites-and-benchmar
 | `@tag("slow")` before a test or a suite | a tag that `--tag` and `--skip-tag` select by, which a suite gives each of its tests |
 
 A test returns nothing (E0381), takes nothing but capabilities (E0702)
-and has no contract (E0807). Beside the `test` blocks, `sisu test` runs
+and has no contract (E0807). The name of a test, a suite or a benchmark
+is fixed text, since runs report, select and replay by it: `{` starts no
+interpolation there (E0132, [R17](diagnostics.md#e0132)), and a brace is
+written `{{` or `}}`, an escaped quote `\"`. Beside the `test` blocks, `sisu test` runs
 the examples of doc comments ([Doc examples](#doc-examples)), the
 properties of `@refines` ([Refinement tests](#refinement-tests)) and the
 transcripts in `tests/` ([Transcripts](#transcripts)).
@@ -368,7 +371,8 @@ replay: sisu test --replay 1-c12c6afda705cec9-0.0.1-t0-s0-r0 failing.sisu
 ```
 
 `expect CONDITION` is the form that lets a test go on: a failed one is
-recorded, with the same report, and the test goes on. When the test
+recorded, with the same sides and place under the line `expectation
+failed:` (R0154), and the test goes on. When the test
 ends, or an `assert` or a panic stops it, it fails with every failure
 it recorded, in order, and then the one that stopped it:
 
@@ -394,7 +398,7 @@ test "doubles" ... FAILED
 test "doubles" ... FAILED
 what the test printed:
   after the expects
-panic: assertion failed: double(3) == 6
+expectation failed: double(3) == 6
   left:  5
   right: 6
   at test "doubles" (expect.sisu:7:5)
@@ -411,7 +415,7 @@ test "doubles" ... FAILED
 test "doubles" ... FAILED
 what the test printed:
   after the expects
-panic: assertion failed: double(3) == 6
+expectation failed: double(3) == 6
   left:  5
   right: 6
   at test "doubles" (expect.sisu:7:5)
@@ -427,7 +431,7 @@ replay: sisu test --replay 1-f194bbb30a1dcbdc-0.0.1-t0-s0-r0 expect.sisu
 A native test goes on after a failed `expect` in the same way, and
 reports the same failures ([Native tests](#native-tests)). Outside a
 test, in a program that `sisu run` runs, and at compile time, a failed
-`expect` stops the run as `assert` does, since no test is there
+`expect` stops the run with `assert`'s panic, since no test is there
 to fail at the end. `debug_assert CONDITION[, MESSAGE]` is the form
 that follows the contract level ([R11](contracts.md#check-levels)):
 checked as `assert` is wherever every contract is checked, `sisu test`
@@ -439,9 +443,8 @@ elsewhere. The message of `assert` is a string (E0379).
 **Stage 0 differs.** [17](../../proposal/17-testing.md#assertions) shows
 the value of every sub-expression, where stage 0 shows the two sides of
 a comparison (`left`, `right`) and nothing for a condition joined with
-`and`; `expect` takes no message, `expect CONDITION, MESSAGE` being
-E0117; a failure that `expect` records is reported as `panic: assertion
-failed`, as `assert`'s is.
+`and`; and `expect` takes no message, `expect CONDITION, MESSAGE` being
+E0117.
 
 **Status.** In stage 0, with the differences noted.
 
@@ -820,9 +823,9 @@ and the reports of coverage and mutation testing are designed
 
 | Code | Identifier | Section |
 |---|---|---|
-| E0381, E0702, [E0807](diagnostics.md#e0807) | `type.return-in-test`, `type.test-signature`, `contract.not-in-test` | [The forms of a test](#the-forms-of-a-test) |
+| E0381, E0702, [E0807](diagnostics.md#e0807), [E0132](diagnostics.md#e0132) | `type.return-in-test`, `type.test-signature`, `contract.not-in-test`, `parse.interpolated-name` | [The forms of a test](#the-forms-of-a-test) |
 | [E0255](diagnostics.md#e0255) | `resolve.private-item` | [Black-box tests](#black-box-tests) |
-| [R0006](diagnostics.md#r0006), E0379 | `panic.assert`, `type.assert-message` | [Assertions](#assertions) |
+| [R0006](diagnostics.md#r0006), [R0154](diagnostics.md#r0154), R0155, E0379 | `panic.assert`, `run.expect-failed`, `run.expect-failed-message`, `type.assert-message` | [Assertions](#assertions) |
 | E0820 | `test.no-generator` | [Property tests](#property-tests) |
 | E0821 | `test.refines-mismatch` | [Refinement tests](#refinement-tests) |
 | E0614 | `comptime.no-fake` | [Fakes of your own traits](#fakes-of-your-own-traits) |

@@ -1,0 +1,2 @@
+$ sisu bench --samples 1 vowels.sisu
+error[D0136]: `--samples` takes 2 or more, not 1: the interval of the mean needs two samples
