@@ -6,3 +6,5 @@ warning[W0015]: `case _` matches `Electric`, `Smoke` of `Stove`, an enum of this
    |              ^
   = fix: list them: `Electric | Smoke`
 
+$ sisu lint --help
+error[D0009]: unknown option `--help` for `sisu lint`

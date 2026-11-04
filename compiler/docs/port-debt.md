@@ -944,7 +944,7 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   without optimisations, and there is no AArch64, Mach-O or COFF. *Pay*:
   D-087's steps.
 - **The runtime in Sisu has its first pieces** (decisions 335, 336, 350
-  to 353, 358, 383, 385, 422, 423, 464, 469 and 506): `compiler/rt` holds `==` of two
+  to 353, 358, 383, 385, 422, 423, 464, 469, 506 and 542): `compiler/rt` holds `==` of two
   texts' bytes, the structural operations by a value's parts (equality,
   order, the hash of decision 256, a `Shared` followed to its value,
   `.copy()`, the drop, the count of a
@@ -960,10 +960,9 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   drop), a table's header the runtime in Rust reads only through its
   exports (decision 506). Still `sisu-rt`'s: the decoding of each
   intrinsic's call and its checks, whose panics its messages name (a
-  list's indices, a missing key), the making of the iterators its
-  intrinsics return (`iter::IterObj` still mirrors `iter.sisu`'s layout,
-  since the runtime in Rust writes a new object's words; a constructor
-  exported for each of the eleven kinds would end it, about a day), a generator's items and a receiver's values,
+  list's indices, a missing key), a generator's items and a receiver's
+  values (the iterators themselves are made by the runtime in Sisu's
+  exports, decision 542),
   the scheduler with its tasks, channels and mutexes, capabilities and the
   host, panics and their traces, allocation's count, the
   descriptor-driven dispatch of the intrinsics, the text of an arena, and
@@ -1039,8 +1038,8 @@ Nothing here switches the default.
   checks of a loop's pointer hoisted, decision 270's facts on offsets:
   a week). `foreign_unknown` stays the interpreter's: native code calls
   the C function. A program whose packages declare `unsafe` (its lockfile
-  has the level, decision 275) can now run natively by default in the
-  debug profile without losing the checks of `Global`'s blocks; the rule
+  has the level, decision 275) could now run natively by default in the
+  debug profile with the checks of `Global`'s blocks; the rule
   that keeps it in the interpreter is half a day, if the owner wants the
   provenance and the places checked first (Q-77).
 - **The time a run starts in**: both run stage 1 first (about 0.55 s for

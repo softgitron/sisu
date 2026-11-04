@@ -1599,11 +1599,14 @@ warning[W0015]: `case _` matches `Electric`, `Smoke` of `Stove`, an enum of this
    |              ^
   = fix: list them: `Electric | Smoke`
 
+$ sisu lint --help
+error[D0009]: unknown option `--help` for `sisu lint`
 ```
 
 `sisu check lint.sisu` prints nothing, and the program runs. Without a
 file, `sisu lint` works on the package of the current directory, D0064
-outside one.
+outside one. An option it does not take, `--help` among them, is D0009
+with status 2, as for the other commands; `sisu help` lists them.
 
 **Status.** In stage 0 (10), stage 1's alone (its decision 292 in the
 [architecture notes](../../compiler/docs/architecture.md)).
