@@ -8546,6 +8546,71 @@ and 9, and G32)
      a program of its own (`the_capability_audit_reads_a_package`). This
      changes no rule of the language.
 
+**Stage 1's sixth round** (stage 1's RULES.md, R56 to R64; a version, D0132, `debug_assert`, the findings' fixes)
+
+440. `sisu1 --version` (and `sisu1 version`) prints `sisu1 VERSION`, stage
+     1's version, one line, before it reads anything; its minor number is
+     the round of stage 1's rules that last changed what the driver may
+     rely on, 6 for the stage 1 whose `sir --tests` reports the program's
+     diagnostics, so that the driver may ask it rather than probe `sir
+     --tests --locked` (decision 424). Stage 1 decides it (RULES.md, R56).
+
+441. A build of a program with an error, `sisu build` (with or without
+     `--native`) and `sisu sir` of a program it has no SIR of, ends with
+     `D0132`, "the program was not compiled: errors found (N)", where it
+     ended with `D0006`, "the program was not run"; `sisu run` builds
+     with stage 1's `build --for-run`, which ends as before with `D0006`,
+     or `D0021` at the ownership checker's errors, and `sir --tests`
+     ends as `sisu test` does. Stage 1 decides it (RULES.md, R57).
+
+442. A typed hole's closure shows each `old(...)` value of its
+     function's contract once, by its text, however many clauses write
+     it, where it showed a line for each place. Stage 1 decides it
+     (RULES.md, R58).
+
+443. `debug_assert cond[, message]` is a statement, `assert`'s form that
+     a build checking fewer than all contracts strips (02, 07): checked
+     with every part shown where the build checks all of them (a debug
+     build, `sisu test`), not evaluated where it checks `preconditions`
+     or none (the release profile's default). `debug_assert` is a name,
+     the statement only before an expression. Stage 1 decides it
+     (RULES.md, R59).
+
+444. `import a.b.Item`, whose path but its last name is a module that has
+     no module `Item`, is `E0223` ("is not a module") with the fix that
+     writes `from a.b import Item`, and `E0204` where a std module
+     declares no such item, where it was `E0203` or `E0220`, which say
+     there is no module. Stage 1 decides it (RULES.md, R60).
+
+445. A `Slice` and `bytes` given to an `Iterable[T]` parameter are
+     iterated through their iterators, as a `for` loop iterates them; an
+     interpolation's `place ?? default` over an optional `String` reads
+     the place as an optional `str` (decision 295's reading); a scalar
+     type's name given as an argument is a type a `comptime def` taking
+     `T: type` takes, and `E0200` elsewhere. Stage 1 decides it (RULES.md,
+     R61).
+
+446. `@derive(Decode)` on an enum is `E0608` at the derive, since R36's
+     derive gives a struct's form only, where it was accepted and the
+     program's run stopped at an invalid SIR. Stage 1 decides it
+     (RULES.md, R62).
+
+447. The fixes and notes the manual's writers found missing: a closure
+     that passes a value, `x -> f(x)`, for a function given where its
+     argument is a reference; `enumerate`'s count from 0; `1.0` and `0.5`
+     for Python's `1.` and `.5`; `E0115` and `E0123` inside an
+     expression; `ref dyn T` and a generic parameter for a trait written
+     as a parameter's type; `pure def` for a contract's impure callee; no
+     `E1002` for a key written with a bad value. Stage 1 decides it
+     (RULES.md, R63).
+
+448. A variadic parameter is `E0900`, naming the disagreement between 02,
+     which gives it, and 14, which rules variadic functions out, where the
+     checker stopped without a code and `check` passed; star unpacking in
+     a `let` is one `E0900` that names the list pattern of a `match`,
+     where it was three errors of its pattern. Stage 1 decides it
+     (RULES.md, R64).
+
 **Stage 2: a program's tests run natively** (sections "Testing" and
 "Stage 2"; 17; D-089, port-debt.md's plan for a native `sisu run`)
 
