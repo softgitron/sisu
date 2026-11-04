@@ -466,10 +466,11 @@ def main():
 3 words, the first kiuas
 ```
 
-**Stage 0 differs.** A replay token's hash covers the source and not
-the files it embeds ([guide](../guides/embed.md)).
+A failing test's replay token covers the files the program embeds as
+well as its source, so a token made before one of them changed is
+refused ([guide](../guides/embed.md#4-know-what-the-build-records)).
 
-**Status.** In stage 0 (D-018), with the differences noted.
+**Status.** In stage 0 (D-018).
 
 ## The facts of the target
 

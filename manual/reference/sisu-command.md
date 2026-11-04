@@ -109,7 +109,9 @@ commands:
   explain <code>         describe a diagnostic code
   explain-borrow <file>:<line>  show every borrow live on a line
   audit --ownership <file>...  count the uses of `Shared`, `Weak`, `Cell`, `Arena`, `Key`, `.copy()` and `unsafe` in each file
-  audit --caps <file>...  the capability parameters of each function that does I/O, the depth from `main` of each use of a capability, and the structs bundling three or more
+  audit --caps [<file>...]  the capability parameters of each function that does I/O, the depth from `main` of each use of a capability, and the structs bundling three or more (without a file, of the package's program)
+  audit --unsafe [--std] [<path>]  every `unsafe` block and function of a program by module, with its `# safety:` reason, and its package's level
+  lint [<path>]          the lints beyond the compiler's warnings, with their fixes
 
 `run`, `check`, `build`, `doc`, `test` and `bench` take `--locked`, which keeps `sisu.lock` as it is, and `--features NAMES` (the package's features to turn on, separated by commas, `DEP/FEATURE` for a dependency's) and `--no-default-features`. `run` and `test` take `--schedule-seed N`, `--explore N` (N seeds), `--scheduler random|pct|exhaustive` and `--depth N`.
 
@@ -298,11 +300,14 @@ written in Sisu and compiled natively, which is the default for
 `check`, `sir`, `build`, `run`, `test`, `bench`, `fmt`, `doc`, `tokens`
 and `parse`, and the Rust front end, the oracle that stage 1 is checked
 against. `--front-end=rust` among a command's options, or
-`SISU_FRONT_END=rust` in the environment, chooses the Rust one. The
-other commands, and `run --watch` and `--defer-borrow`, `test --std`,
-`--defer-borrow` and `--features`, a program's transcripts (its tests
-run on stage 1, D0128), `check --diary` and `parse --shape`, use the
-Rust front end whichever you choose.
+`SISU_FRONT_END=rust` in the environment, chooses the Rust one. `sisu
+lint` and `sisu audit --unsafe` are stage 1's alone, and the Rust front
+end refuses them. The other commands, and `run --watch` and
+`--defer-borrow`, `test --std` and `--defer-borrow`, a program's
+transcripts (its tests run on stage 1, D0128), `check --diary` and
+`parse --shape`, use the Rust front end whichever you choose. `sisu
+test` and `sisu bench` run stage 1 once for each program, and print its
+warnings once, before the report.
 
 <!-- output: examples/reference-sisu-command/front_end.console -->
 ```console
@@ -766,7 +771,8 @@ the same seed takes the same schedule
   the first run that fails, naming its seed (D0025); a run of `sisu
   run` that exits as the first seed's did but prints other standard
   output stops it too (D0127, [R17](diagnostics.md#d0127)), since its
-  output depends on the schedule. When all succeed it says so (D0024).
+  output depends on the schedule; what is printed is that run's output.
+  When all succeed it says so (D0024).
   Under `sisu test` every test runs under each schedule (D0026, D0027),
   and a test that fails shows what it printed under the schedule that
   failed.
@@ -1568,6 +1574,53 @@ a long explanation with examples; stage 0 prints the catalog's line
 
 **Status.** In stage 0.
 
+### sisu lint
+
+- `sisu lint [--format=ids] [PATH]`
+
+`sisu lint` checks a program as `sisu check` does and prints its lints,
+the warnings that `sisu check` leaves out, each with its fix; a program
+with errors gets its errors instead, and status 1. Its one lint is
+W0015 (`lint.wildcard-own-enum`): a `case _` over an enum of the same
+package, which would hide a variant added later
+([R6](patterns.md)). The fix lists the variants the wildcard matches.
+
+<!-- file: examples/reference-sisu-command/lint.sisu -->
+```sisu
+# A `case _` over an enum of the program's own, which `sisu lint` names.
+enum Stove:
+    Wood
+    Electric
+    Smoke
+
+def heat(stove: Stove) -> int:
+    return match stove:
+        case Wood: 80
+        case _: 70
+
+def main():
+    print(heat(Stove.Smoke))
+```
+
+<!-- output: examples/reference-sisu-command/lint.console -->
+```console
+$ sisu lint lint.sisu
+warning[W0015]: `case _` matches `Electric`, `Smoke` of `Stove`, an enum of this package, so a variant added to `Stove` later is not an error here
+  --> lint.sisu:10:14
+   |
+10 |         case _: 70
+   |              ^
+  = fix: list them: `Electric | Smoke`
+
+```
+
+`sisu check lint.sisu` prints nothing, and the program runs. Without a
+file, `sisu lint` works on the package of the current directory, D0064
+outside one.
+
+**Status.** In stage 0 (10), stage 1's alone (its decision 292 in the
+[architecture notes](../../compiler/docs/architecture.md)).
+
 ### sisu explain-borrow
 
 - `sisu explain-borrow FILE:LINE`
@@ -1605,10 +1658,11 @@ no borrow is live on line 3 of borrows.sisu
 ### sisu audit
 
 - `sisu audit --ownership FILE...`
-- `sisu audit --caps FILE...`
+- `sisu audit --caps [FILE...]`
+- `sisu audit --unsafe [--std] [PATH]`
 
-`sisu audit` reports, as one line of data per item, the experiment's
-counts (18, Phases 3 and 6):
+`sisu audit --ownership` and `--caps` report, as one line of data per
+item, the experiment's counts (18, Phases 3 and 6):
 
 - `--ownership` counts, for each file, its lines and its uses of the
   ownership model's escape hatches: `Shared`, `Weak`, `Cell`, `Arena`,
@@ -1616,9 +1670,24 @@ counts (18, Phases 3 and 6):
 - `--caps` reads a program that checks and prints each function that
   does I/O, with the parameters that hold a capability and its fewest
   calls from `main`; each use of a capability's operation; each struct
-  that bundles three or more capability types; and a summary.
+  that bundles three or more capability types; and a summary. A file it
+  names is a program of its own; without a file, it audits the program
+  of the current directory's package, each member of a workspace in
+  turn, every module of it and what `main` reaches of its dependencies,
+  each line starting with `.`, the package's directory, as
+  [G24](../guides/audit.md#3-give-it-only-what-it-needs) shows.
 
-Without one of the two, `sisu audit` is D0022.
+`--unsafe` is the reviewer's list of a program's unsafe code: for each
+package its level and where the root consents to it, for each module
+its `unsafe` blocks, unsafe functions and `extern` blocks with the
+start of each `# safety:` reason, and the foreign functions with the
+safe functions that call them. The standard library is one line, its
+level, and `--std` audits it instead. A one-file program declares no
+level ([chapter 27](../tutorial/27-systems.md#packages-that-contain-unsafe-code)
+and [G19](../guides/c-library.md#4-test-it-and-run-it-in-the-interpreter-and-natively)
+show packages that do).
+
+Without one of the three, `sisu audit` is D0022.
 
 <!-- file: examples/reference-sisu-command/audit.sisu -->
 ```sisu
@@ -1644,11 +1713,24 @@ audit.sisu function main caps=1 io=calls depth=0
 audit.sisu function save caps=1 io=direct depth=1
 audit.sisu use save FsOps.write_text depth=1
 audit.sisu summary functions=2 median=1 max=1 uses=1 deepest=1 structs=0
+$ sisu audit --unsafe audit.sisu
+audit.sisu   no `unsafe`   a program of one file, which declares no level
+  no unsafe code
+std (toolchain)   unsafe = "extern"   see `sisu1 audit --unsafe --std`
 ```
 
-**Status.** In stage 0. The proposal's `sisu audit`, which lists trusted
-packages, `unsafe` blocks, the capability summary, holes and advisories,
-is [designed](#sisu-audits-other-reports).
+`audit.sisu` has no unsafe code, so its `--unsafe` report is its level
+and the standard library's.
+
+**Stage 0 differs.** The line of the standard library names `sisu1
+audit --unsafe --std`, stage 1's own command, where `sisu audit
+--unsafe --std` is the command to run.
+
+**Status.** In stage 0, with the difference noted; `--unsafe` is stage
+1's (its decision 425 in the [architecture
+notes](../../compiler/docs/architecture.md)). The proposal's `sisu
+audit`, which lists the capability summary, holes and advisories as
+well, is [designed](#sisu-audits-other-reports).
 
 ## Inspecting the front end
 
@@ -1766,8 +1848,6 @@ shows; when one lands, the session changes, and so does this section.
 ```console
 $ sisu check --holes hello.sisu
 error[D0009]: unknown option `--holes` for `sisu check`
-$ sisu lint hello.sisu
-error[D0003]: unknown command `lint`; run `sisu help`
 $ sisu add json
 error[D0003]: unknown command `add`; run `sisu help`
 $ sisu remove json
@@ -1776,8 +1856,6 @@ $ sisu update
 error[D0003]: unknown command `update`; run `sisu help`
 $ sisu publish
 error[D0003]: unknown command `publish`; run `sisu help`
-$ sisu audit --unsafe hello.sisu
-error[D0009]: unknown option `--unsafe` for `sisu audit`
 $ sisu review main..HEAD
 error[D0003]: unknown command `review`; run `sisu help`
 $ sisu fix --edition 2030
@@ -1815,13 +1893,6 @@ expressions that fit it, in a human form and a JSON form. `sisu build
 "AI-assisted development"). Stage 0 reports each hole as warning W0001,
 and `sisu test` reports a test that reaches one as blocked.
 
-### sisu lint
-
-`sisu lint` reports lints beyond the compiler's warnings, each with a
-fix.
-
-**Status.** Designed ([10](../../proposal/10-tooling.md)).
-
 ### sisu add and sisu remove
 
 `sisu add PACKAGE` and `sisu remove PACKAGE` edit the manifest and the
@@ -1855,8 +1926,7 @@ behavioural semver is a candidate of [19](../../proposal/19-novel-features.md).
 
 ### sisu audit's other reports
 
-`sisu audit` lists the trusted packages, the `unsafe` blocks
-(`--unsafe`), the capability summary and the pure label
+`sisu audit` lists the capability summary and the pure label
 (`--authority`), the typed holes and the security advisories of the
 dependencies; `sisu audit --panics f` lists the panic sites a function
 can reach.

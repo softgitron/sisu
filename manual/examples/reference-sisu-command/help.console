@@ -22,7 +22,9 @@ commands:
   explain <code>         describe a diagnostic code
   explain-borrow <file>:<line>  show every borrow live on a line
   audit --ownership <file>...  count the uses of `Shared`, `Weak`, `Cell`, `Arena`, `Key`, `.copy()` and `unsafe` in each file
-  audit --caps <file>...  the capability parameters of each function that does I/O, the depth from `main` of each use of a capability, and the structs bundling three or more
+  audit --caps [<file>...]  the capability parameters of each function that does I/O, the depth from `main` of each use of a capability, and the structs bundling three or more (without a file, of the package's program)
+  audit --unsafe [--std] [<path>]  every `unsafe` block and function of a program by module, with its `# safety:` reason, and its package's level
+  lint [<path>]          the lints beyond the compiler's warnings, with their fixes
 
 `run`, `check`, `build`, `doc`, `test` and `bench` take `--locked`, which keeps `sisu.lock` as it is, and `--features NAMES` (the package's features to turn on, separated by commas, `DEP/FEATURE` for a dependency's) and `--no-default-features`. `run` and `test` take `--schedule-seed N`, `--explore N` (N seeds), `--scheduler random|pct|exhaustive` and `--depth N`.
 

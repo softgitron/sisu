@@ -1,0 +1,8 @@
+$ sisu check const_through_param.sisu
+error[E0239]: `T` has no associated type `SIDES` among its bounds
+  --> const_through_param.sisu:5:47
+  |
+5 | def corners[T: Shape](shape: T) -> Array[int, T.SIDES]:
+  |                                               ^^^^^^^
+  = note: `SIDES` is a trait's constant, which each impl gives: through a type parameter it is a value of the instance, known where the function runs, and a type's constant argument is known where the type is written; take it as a `const` parameter, `[T: Shape, const N: int]`, which a caller gives as `Square.SIDES`
+

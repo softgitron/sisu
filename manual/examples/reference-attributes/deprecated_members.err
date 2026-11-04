@@ -1,0 +1,18 @@
+warning[W0023]: `Measured` is deprecated: use `Rated`
+  --> deprecated_members.sisu:11:6
+   |
+11 | impl Measured for Panel:
+   |      ^^^^^^^^
+
+warning[W0023]: `Panel.width` is deprecated: use `width_cm`
+  --> deprecated_members.sisu:16:23
+   |
+16 |     let panel = Panel(width=3, width_cm=30)
+   |                       ^^^^^
+
+warning[W0023]: `Panel.width` is deprecated: use `width_cm`
+  --> deprecated_members.sisu:17:19
+   |
+17 |     print("{panel.width} {panel.size()}")
+   |                   ^^^^^
+

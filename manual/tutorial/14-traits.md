@@ -745,6 +745,38 @@ value gets E0232, whose note writes the line to add, as for a missing
 method. A type can also have constants of its own, declared with `const`
 in its body.
 
+A constant read through a type is known before the program runs, so it
+can stand where a number of the type goes, such as the length of the
+`Array` of chapter 5:
+
+<!-- file: examples/14-traits/stove_racks.sisu -->
+```sisu
+# A type's constant is known before the program runs: it can size an
+# array.
+trait Stove:
+    const RACKS: int
+
+struct WoodStove:
+    logs: int
+
+impl Stove for WoodStove:
+    const RACKS: int = 3
+
+def main():
+    var stones: Array[int, WoodStove.RACKS] = Array.filled(0)
+    stones[^1] = 12
+    print("{len(stones)} racks: {stones}")
+```
+
+<!-- output: examples/14-traits/stove_racks.out -->
+```text
+3 racks: [0, 0, 12]
+```
+
+Read through a type parameter, `Array[int, T.RACKS]`, it cannot be: in
+a generic function `T.RACKS` is known only when the function runs
+(chapter 15 shows the parameter that carries such a number).
+
 **Try it.** Replace the last line of `main` with
 `print(Stove.MAX_HEAT)`, the constant read through the trait.
 

@@ -1,26 +1,15 @@
 $ sisu run placement.sisu
-error[E0117]: unexpected `struct` after the end of the statement
+error[E0131]: an attribute stands on a line of its own, before its declaration
   --> placement.sisu:2:13
   |
 2 | @derive(Eq) struct Point:
   |             ^^^^^^
+  = fix: put the declaration on the next line
 
-error[E0106]: expected a declaration, found an indented block
-  --> placement.sisu:3:1
-  |
-3 |     x: int
-  | ^
-
-warning[W0022]: `@unused` is not an attribute Sisu reads, and no compile-time code of the program reads attributes (`reflect.attributes_of`), so it means nothing here
-  --> placement.sisu:6:6
+error[E0129]: `@unused` stands before a statement; an attribute stands on the line before a declaration (a function, a type, a constant, a test), and none applies to a statement
+  --> placement.sisu:6:5
   |
 6 |     @unused
-  |      ^^^^^^
+  |     ^^^^^^^
 
-error[E0106]: expected a declaration, found `let`
-  --> placement.sisu:7:5
-  |
-7 |     let origin = Point(0)
-  |     ^^^
-
-error[D0006]: the program was not run: errors found (3)
+error[D0006]: the program was not run: errors found (2)

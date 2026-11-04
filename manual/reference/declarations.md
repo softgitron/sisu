@@ -771,6 +771,64 @@ sides 1, corners 0
 4 1
 ```
 
+A constant of a type, given by an impl or by the type's own body, is
+known when the program compiles, so it can be a type's constant
+argument, `Array[f64, Square.SIDES]`, wherever a type is written. A
+trait's constant read through a type parameter cannot: `T.SIDES` is a
+value of each instance, known only where the function runs. A function
+whose type needs it takes a `const` parameter instead, which a caller
+gives as `Square.SIDES`:
+
+<!-- file: examples/reference-declarations/const_argument.sisu -->
+```sisu
+# A type's constant as an array's length, and a `const` parameter that
+# carries one into a generic function.
+trait Shape:
+    const SIDES: int
+
+struct Square:
+    side: f64
+
+impl Shape for Square:
+    const SIDES: int = 4
+
+def corners[T: Shape, const N: int](shape: T) -> Array[int, N]:
+    return Array.filled(T.SIDES)
+
+def main():
+    let lengths: Array[f64, Square.SIDES] = Array.filled(2.0)
+    print(lengths)
+    print(corners[Square, Square.SIDES](Square(2.0)))
+```
+
+<!-- output: examples/reference-declarations/const_argument.out -->
+```text
+[2.0, 2.0, 2.0, 2.0]
+[4, 4, 4, 4]
+```
+
+<!-- file: examples/reference-declarations/const_through_param.sisu -->
+```sisu
+# A trait's constant through a type parameter, as an array's length.
+trait Shape:
+    const SIDES: int
+
+def corners[T: Shape](shape: T) -> Array[int, T.SIDES]:
+    return Array.filled(0)
+```
+
+<!-- output: examples/reference-declarations/const_through_param.console -->
+```console
+$ sisu check const_through_param.sisu
+error[E0239]: `T` has no associated type `SIDES` among its bounds
+  --> const_through_param.sisu:5:47
+  |
+5 | def corners[T: Shape](shape: T) -> Array[int, T.SIDES]:
+  |                                               ^^^^^^^
+  = note: `SIDES` is a trait's constant, which each impl gives: through a type parameter it is a value of the instance, known where the function runs, and a type's constant argument is known where the type is written; take it as a `const` parameter, `[T: Shape, const N: int]`, which a caller gives as `Square.SIDES`
+
+```
+
 **Status.** In stage 0 (03).
 
 ## Impls
@@ -1030,7 +1088,7 @@ their examples ([R1](lexical-structure.md#comments-and-doc-comments)).
 | [E0411](diagnostics.md#e0411) | `borrow.view-field-in-plain-struct` | [View structs](#view-structs) |
 | E0206, E0386 | `resolve.duplicate-variant`, `type.variant-needs-fields` | [Enums](#enums) |
 | E0356 | `type.open-set-needs-wildcard` | [Error sets](#error-sets) |
-| E0230, E0247, [E0449](diagnostics.md#e0449) | `resolve.not-a-trait`, `resolve.trait-cycle`, `type.trait-constant` | [Traits](#traits) |
+| E0230, E0247, [E0449](diagnostics.md#e0449), [E0239](diagnostics.md#e0239) | `resolve.not-a-trait`, `resolve.trait-cycle`, `type.trait-constant`, `resolve.no-assoc-type` | [Traits](#traits) |
 | [E0232](diagnostics.md#e0232), [E0233](diagnostics.md#e0233), E0234, [E0237](diagnostics.md#e0237), E0238, E0248, [E0271](diagnostics.md#e0271), [E0272](diagnostics.md#e0272), [E0273](diagnostics.md#e0273), [E0242](diagnostics.md#e0242), E0213, E0216 | `resolve.missing-trait-method`, `resolve.not-a-trait-method`, `resolve.method-signature`, `resolve.missing-assoc-type`, `resolve.unknown-assoc-type`, `resolve.assoc-outside-trait-impl`, `resolve.not-a-trait-constant`, `resolve.constant-type`, `resolve.const-or-method`, `resolve.supertrait-missing`, `resolve.drop-target`, `resolve.drop-signature` | [Impls](#impls) |
 | E0228 | `resolve.alias-cycle` | [Type declarations](#type-declarations) |
 | E0702, E0381, [E0807](diagnostics.md#e0807) | `type.test-signature`, `type.return-in-test`, `contract.not-in-test` | [Tests, suites and benchmarks](#tests-suites-and-benchmarks) |

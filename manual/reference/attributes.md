@@ -77,11 +77,14 @@ are data for a library or a tool to read
 program reads them, the run warns about each, W0022, and about the call
 of the deprecated `heat`, W0023, on standard error.
 
-An attribute on the line of its declaration is E0117
-([R17](diagnostics.md#e0117)), followed by E0106
-(`parse.expected-declaration`) for the declaration's body, and one
-before a statement, or at the end of a file, where no declaration
-follows, is E0106:
+An attribute on the line of its declaration is E0131
+(`parse.attribute-line`), whose fix breaks the line, and the
+declaration is read as if it had been broken. One before a statement is
+E0129 (`parse.attribute-on-statement`), which names it, and the
+statement is read as one; `@tile`, `@unroll` and `@vectorize` there get
+a note that they are directives planned for loops, not in the language
+yet. One at the end of a file, where no declaration follows, is E0106
+(`parse.expected-declaration`):
 
 <!-- file: examples/reference-attributes/placement.sisu -->
 ```sisu
@@ -98,36 +101,24 @@ def main():
 <!-- output: examples/reference-attributes/placement.console -->
 ```console
 $ sisu run placement.sisu
-error[E0117]: unexpected `struct` after the end of the statement
+error[E0131]: an attribute stands on a line of its own, before its declaration
   --> placement.sisu:2:13
   |
 2 | @derive(Eq) struct Point:
   |             ^^^^^^
+  = fix: put the declaration on the next line
 
-error[E0106]: expected a declaration, found an indented block
-  --> placement.sisu:3:1
-  |
-3 |     x: int
-  | ^
-
-warning[W0022]: `@unused` is not an attribute Sisu reads, and no compile-time code of the program reads attributes (`reflect.attributes_of`), so it means nothing here
-  --> placement.sisu:6:6
+error[E0129]: `@unused` stands before a statement; an attribute stands on the line before a declaration (a function, a type, a constant, a test), and none applies to a statement
+  --> placement.sisu:6:5
   |
 6 |     @unused
-  |      ^^^^^^
+  |     ^^^^^^^
 
-error[E0106]: expected a declaration, found `let`
-  --> placement.sisu:7:5
-  |
-7 |     let origin = Point(0)
-  |     ^^^
-
-error[D0006]: the program was not run: errors found (3)
+error[D0006]: the program was not run: errors found (2)
 ```
 
-Neither message says that an attribute stands on a line of its own:
-E0117 takes the attribute for a statement, after whose end `struct` is
-unexpected. `@unused`, a name that Sisu does not read, also gets W0022
+Each message says where an attribute stands. Since E0129 drops the
+attribute, `@unused`, a name that Sisu does not read, gets no W0022
 ([Where an attribute may stand](#where-an-attribute-may-stand)). An
 attribute on a parameter is E0100 ([R17](diagnostics.md#e0100)).
 
@@ -267,7 +258,7 @@ compile time cannot be written yet.
 | `@blocking` | a function of an `extern` block | says that a call may block ([Foreign functions that block](#foreign-functions-that-block)) | designed; checked in stage 0 |
 | `@no_alloc`, `@no_block`, `@stack(max=N)` | a function | limit what it may do ([Resource limits](#resource-limits)) | leaning |
 | `@float(fast)` | a function | allows fast floating point inside it ([Fast floating point](#fast-floating-point)) | in stage 0, as a permission it does not use |
-| `@deprecated("MESSAGE")`, `@fix_inline` | an item; a function | warn at each use, and migrate the uses ([Deprecation and migrations](#deprecation-and-migrations)) | `@deprecated` in stage 0; `@fix_inline` designed |
+| `@deprecated("MESSAGE")`, `@fix_inline` | an item, a field, a variant, a method; a function | warn at each use, and migrate the uses ([Deprecation and migrations](#deprecation-and-migrations)) | `@deprecated` in stage 0; `@fix_inline` designed |
 | `@preview("NAME")` | not designed yet | asks for a feature that is not stable ([Preview features](#preview-features)) | leaning |
 | `@diagnostic_name(f)` | a type made at compile time | says how diagnostics print it ([Names of types in diagnostics](#names-of-types-in-diagnostics)) | leaning |
 | `@intrinsic`, `@builtin`, `@structural`, `@keeps`, `@sealed`, `@marker`, `@internal` | the standard library's declarations | ([Attributes of the standard library](#attributes-of-the-standard-library)) | in stage 0 |
@@ -941,8 +932,9 @@ that depend on it with that body, moving borrows, `own` arguments and
 A use of a deprecated item is W0023 (`type.deprecated`) with the
 attribute's message, or W0025 (`type.deprecated-plain`) for an
 attribute without one ([R17](diagnostics.md#w0023)): a call of a
-function or a method, or its use as a value; a type named or built; a
-constant read; a variant built or matched. The item's own body may use
+function or a method, or its use as a value; a type or a trait named,
+or a type built; a constant read; a variant built or matched; a field
+read, changed, given or matched. The item's own body may use
 it without a word, and so may a type's own declaration and its impls:
 
 <!-- file: examples/reference-attributes/deprecated_items.sisu -->
@@ -989,6 +981,58 @@ warning[W0023]: `HOTTEST` is deprecated: use `MAX_HEAT`
    |                             ^^^^^^^
 
 80 of 110 Coal
+```
+
+A trait and a field warn in the same way. A deprecated trait warns where
+it is named: in a bound (`T: Measured`), an impl's header, a list of
+supertraits or a `dyn` type, but not in its own declaration. A
+deprecated field warns where it is read, changed, given a value (at its
+keyword) or matched, but not in its struct's own methods and impls, so
+the impl's `self.width` is silent here:
+
+<!-- file: examples/reference-attributes/deprecated_members.sisu -->
+```sisu
+# A deprecated trait and field warn where they are used.
+@deprecated("use `Rated`")
+trait Measured:
+    def size(self) -> int
+
+struct Panel:
+    @deprecated("use `width_cm`")
+    width: int
+    width_cm: int
+
+impl Measured for Panel:
+    def size(self) -> int:
+        return self.width
+
+def main():
+    let panel = Panel(width=3, width_cm=30)
+    print("{panel.width} {panel.size()}")
+```
+
+<!-- output: examples/reference-attributes/deprecated_members.console -->
+```console
+$ sisu run deprecated_members.sisu
+warning[W0023]: `Measured` is deprecated: use `Rated`
+  --> deprecated_members.sisu:11:6
+   |
+11 | impl Measured for Panel:
+   |      ^^^^^^^^
+
+warning[W0023]: `Panel.width` is deprecated: use `width_cm`
+  --> deprecated_members.sisu:16:23
+   |
+16 |     let panel = Panel(width=3, width_cm=30)
+   |                       ^^^^^
+
+warning[W0023]: `Panel.width` is deprecated: use `width_cm`
+  --> deprecated_members.sisu:17:19
+   |
+17 |     print("{panel.width} {panel.size()}")
+   |                   ^^^^^
+
+3 3
 ```
 
 **Stage 0 differs.** `@fix_inline` does nothing, since `sisu fix` is
@@ -1103,7 +1147,7 @@ idea for later, and `@inline` has no design.
 
 | Code | Identifier | Section |
 |---|---|---|
-| [E0117](diagnostics.md#e0117), [E0106](diagnostics.md#e0106), [E0100](diagnostics.md#e0100) | `parse.trailing-tokens`, `parse.expected-declaration`, `parse.expected` | [Writing an attribute](#writing-an-attribute) |
+| [E0131](diagnostics.md#e0131), [E0129](diagnostics.md#e0129), [E0106](diagnostics.md#e0106), [E0100](diagnostics.md#e0100) | `parse.attribute-line`, `parse.attribute-on-statement`, `parse.expected-declaration`, `parse.expected` | [Writing an attribute](#writing-an-attribute) |
 | [W0022](diagnostics.md#w0022), [W0024](diagnostics.md#w0024), [W0026](diagnostics.md#w0026) | `resolve.unknown-attribute`, `resolve.misspelt-attribute`, `resolve.misplaced-attribute` | [Where an attribute may stand](#where-an-attribute-may-stand) |
 | [E0243](diagnostics.md#e0243), [E0244](diagnostics.md#e0244), [E0242](diagnostics.md#e0242), [E0235](diagnostics.md#e0235) | `resolve.not-derivable`, `resolve.derive-field`, `resolve.supertrait-missing`, `resolve.overlapping-impl` | [Deriving traits](#deriving-traits) |
 | [E0608](diagnostics.md#e0608) | `comptime.derive-failed` | [Deriving traits](#deriving-traits), [The layout of a type](#the-layout-of-a-type) |

@@ -437,7 +437,7 @@ draft may end as it likes: `save` moves its text out of it.
 <!-- output: examples/13-sharing/forgotten_draft.console -->
 ```console
 $ sisu run forgotten_draft.sisu
-error[E0417]: `scrap` is never consumed: a `Draft` must be passed to an `own` parameter before it goes out of scope
+error[E0417]: `scrap` is never consumed: a value of `Draft` must be passed to an `own` parameter before it goes out of scope
   --> forgotten_draft.sisu:28:17
    |
 28 |     print(saved)

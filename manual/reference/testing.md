@@ -446,7 +446,10 @@ Each line that starts with `$ ` runs `main` with the words after the
 program's name as its arguments; the lines after it that start with `> `
 are its standard input, and the rest are what it prints, standard output
 and standard error as written, with ` (exit N)` on the last line of a
-run that fails. The runs of one file share a fake `System`: an
+run that fails. A failure's trace is left out: the frames after an
+`error:` or a `panic:` line are not compared, and `--update` does not
+write them, so a transcript does not change when the program's lines
+move. The runs of one file share a fake `System`: an
 in-memory `Fs` holding the files of `tests/NAME/`, a clock frozen at the
 epoch and `Rand.seeded(0)`, with no network. A difference fails with a
 diff (D0061); `sisu test --update` rewrites the file.
@@ -484,8 +487,7 @@ transcript "tests/greet.transcript" ... ok
 
 **Stage 0 differs.** The `.sisu` files of a package's `tests/`
 directory, 17's black-box tests, are not run; only its transcripts are.
-A failing run's line holds the error's trace when the error has one, so
-such a line changes when the program's lines move. The transcripts run
+The transcripts run
 on the Rust front end's build of the program, while its tests run on
 stage 1's, so a program that writes a form only stage 1 takes, such as
 `^` in a slice's bound, fails each transcript with D0128
@@ -507,8 +509,9 @@ and a missing snapshot fails showing what would be stored (R0108).
 ## Replay tokens
 
 Every failing test prints `replay: sisu test --replay TOKEN FILE`. The
-token is one word that holds the content hash of the file, the
-toolchain, the test's index, the scheduler's seed, the case's seed and,
+token is one word that holds the content hash of the file and of the
+files it embeds, the toolchain, the test's index, the scheduler's seed,
+the case's seed and,
 for a property, the choices of the shrunk case, so `--replay` runs that
 test exactly as it failed. A token for other code (D0033), another
 toolchain (D0034) or a test that is gone (D0035) is refused, as is a
@@ -524,7 +527,9 @@ command, not for reading.
 instead of the real one: a file system that keeps only what was synced
 when a node crashes, a network inside the process, the test clock and
 seeded fakes of the rest. `--faults P` makes each operation of those
-objects fail at that rate with an error from its own set. `std.sim` adds
+objects fail at that rate with an error from its own set, never
+`Revoked`, since nothing in the simulation is revoked unless a test
+revokes a caretaker of it. `std.sim` adds
 `Sim`, nodes on one network that crash, restart and are partitioned,
 `choose(n)`, a choice that the exhaustive scheduler enumerates, and
 `always(what, holds, body)`, an invariant checked at every switch

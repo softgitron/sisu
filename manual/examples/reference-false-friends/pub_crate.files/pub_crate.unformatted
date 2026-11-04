@@ -1,0 +1,1 @@
+Kept as written: `pub(crate)` is E0130, so `sisu fmt` refuses the file, though `sisu parse` reads it.

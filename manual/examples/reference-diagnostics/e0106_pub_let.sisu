@@ -1,0 +1,5 @@
+# A visibility before a line that declares nothing.
+pub let total = 3 + 4
+
+def main():
+    print(total)

@@ -393,10 +393,10 @@ error[E0314]: this `match` does not cover `Amber`, `Green`
 error[D0006]: the program was not run: errors found (1)
 ```
 
-**Stage 0 differs.** The linter of
-[03](../../proposal/03-types-and-generics.md) warns about `case _` on an
-enum of the same package, since a new variant should then be a compile
-error; stage 0 has no such warning.
+`sisu lint` warns about a `case _` on an enum of the same package, as
+[03](../../proposal/03-types-and-generics.md) asks, since a new variant
+should then be a compile error: W0015, whose fix lists the variants the
+wildcard matches ([R16](sisu-command.md#sisu-lint)).
 
 **Status.** In stage 0 (D-043).
 

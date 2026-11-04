@@ -1,2 +1,7 @@
 $ sisu run
 85
+$ sisu audit --unsafe
+sauna 0.1.0   unsafe = "memory"   the root package
+  sauna (src/main.sisu)   1 block, module hash 7374184f049a918b
+    src/main.sisu:9   unsafe block in main   # safety: valid, aligned, writable: p points to the live local celsius, which nothing else uses until the bloc...
+std (toolchain)   unsafe = "extern"   see `sisu1 audit --unsafe --std`

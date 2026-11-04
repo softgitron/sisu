@@ -4,10 +4,12 @@ error[E0100]: expected `:`, found `=`
   |
 5 |         case 1 => "one"
   |                ^
+  = fix: Sisu writes it `:`: `:`
 
 error[E0100]: expected `:`, found `=`
   --> match_arrow.sisu:6:16
   |
 6 |         case _ => "many"
   |                ^
+  = fix: Sisu writes it `:`: `:`
 

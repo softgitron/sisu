@@ -1,0 +1,13 @@
+# A `case _` over an enum of the program's own, which `sisu lint` names.
+enum Stove:
+    Wood
+    Electric
+    Smoke
+
+def heat(stove: Stove) -> int:
+    return match stove:
+        case Wood: 80
+        case _: 70
+
+def main():
+    print(heat(Stove.Smoke))

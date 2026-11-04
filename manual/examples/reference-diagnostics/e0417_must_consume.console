@@ -1,5 +1,5 @@
 $ sisu run e0417_must_consume.sisu
-error[E0417]: `note` is never consumed: a `Draft` must be passed to an `own` parameter before it goes out of scope
+error[E0417]: `note` is never consumed: a value of `Draft` must be passed to an `own` parameter before it goes out of scope
   --> e0417_must_consume.sisu:11:33
    |
 11 |     print("drafted {note.text}")

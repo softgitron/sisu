@@ -353,7 +353,7 @@ def main():
 <!-- output: examples/23-contracts/outside.console -->
 ```console
 $ sisu run outside.sisu
-error[E0806]: `today.closes` is part of a `Schedule`, whose invariant only its own methods may change and check again; change it through one of them
+error[E0806]: `today.closes` is part of a value of `Schedule`, whose invariant only its own methods may change and check again; change it through one of them
   --> outside.sisu:11:5
    |
 11 |     today.closes = 25
@@ -436,7 +436,7 @@ rely on it.
 <!-- output: examples/23-contracts/refinement_constant.console -->
 ```console
 $ sisu run refinement_constant.sisu
-error[E0810]: `135` is not a `Percent`: `0 <= self <= 100` is false for it
+error[E0810]: `135` is not of type `Percent`: `0 <= self <= 100` is false for it
   --> refinement_constant.sisu:13:32
    |
 13 |     let after_ladle: Percent = 135
@@ -867,7 +867,7 @@ test "water cannot cool it below zero":
 <!-- output: solutions/23-contracts/stove.console -->
 ```console
 $ sisu test stove.sisu
-error[E0806]: `stove.celsius` is part of a `Stove`, whose invariant only its own methods may change and check again; change it through one of them
+error[E0806]: `stove.celsius` is part of a value of `Stove`, whose invariant only its own methods may change and check again; change it through one of them
   --> stove.sisu:24:5
    |
 24 |     stove.celsius = max(stove.celsius - 15, 0)

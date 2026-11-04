@@ -131,15 +131,15 @@ attribute   := '@' name ('.' name)* ('(' args? ')')? NEWLINE
 visibility  := 'pub' ('(' 'package' ')')?
 ```
 
-An attribute stands on a line of its own ([R14](attributes.md#writing-an-attribute)).
-Attributes and a visibility before a line that holds no declaration are
-E0106 (`parse.expected-declaration`).
+An attribute stands on a line of its own ([R14](attributes.md#writing-an-attribute)):
+one on its declaration's line is E0131 (`parse.attribute-line`), and
+one before a statement inside a block E0129
+(`parse.attribute-on-statement`). Attributes and a visibility before a
+line that holds no declaration are E0106 (`parse.expected-declaration`).
+A name between the parentheses of `pub(...)` other than `package`,
+Rust's `pub(crate)`, is E0130 (`parse.visibility-scope`).
 
-**Stage 0 differs.** The parser takes any name between the parentheses
-of `pub(...)`, and every name but `package` makes the item `pub`: Rust's
-`pub(crate)` compiles, and makes the item visible to every package.
-
-**Status.** In stage 0, with the difference noted.
+**Status.** In stage 0.
 
 ## Functions and parameters
 
@@ -684,7 +684,7 @@ rather than as missing ([R3](declarations.md#bindings)).
 
 | Code | Identifier | Section |
 |---|---|---|
-| [E0107](diagnostics.md#e0107), [E0106](diagnostics.md#e0106) | `parse.top-level-statement`, `parse.expected-declaration` | [Files and items](#files-and-items) |
+| [E0107](diagnostics.md#e0107), [E0106](diagnostics.md#e0106), [E0129](diagnostics.md#e0129), [E0130](diagnostics.md#e0130), [E0131](diagnostics.md#e0131) | `parse.top-level-statement`, `parse.expected-declaration`, `parse.attribute-on-statement`, `parse.visibility-scope`, `parse.attribute-line` | [Files and items](#files-and-items) |
 | E0224 | `resolve.missing-body` | [Functions and parameters](#functions-and-parameters) |
 | E0126, [E0117](diagnostics.md#e0117) | `parse.expected-member`, `parse.trailing-tokens` | [Structs, enums and error sets](#structs-enums-and-error-sets) |
 | [E0100](diagnostics.md#e0100), [E0900](diagnostics.md#e0900) | `parse.expected`, `stage0.unsupported` | [Imports](#imports) |

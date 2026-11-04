@@ -1,0 +1,6 @@
+# Rust's `pub(crate)`.
+pub(crate) def total(prices: list[int]) -> int:
+    return sum(prices)
+
+def main():
+    print(total([3, 4]))

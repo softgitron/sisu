@@ -1,0 +1,8 @@
+$ sisu lint lint.sisu
+warning[W0015]: `case _` matches `Electric`, `Smoke` of `Stove`, an enum of this package, so a variant added to `Stove` later is not an error here
+  --> lint.sisu:10:14
+   |
+10 |         case _: 70
+   |              ^
+  = fix: list them: `Electric | Smoke`
+

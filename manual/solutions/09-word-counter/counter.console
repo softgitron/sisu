@@ -49,17 +49,14 @@ what the program printed differs from the transcript (`sisu test --update` accep
 -    6  the
 -    5  is
 -    3  lake
-+ panic: reached the typed hole `todo("main")`
-+   at main (counter.sisu:47:12) (exit 101)
++ panic: reached the typed hole `todo("main")` (exit 101)
   $ counter --top 2 --min-length 4 poem.txt
 -    3  lake
 -    3  sauna
-+ panic: reached the typed hole `todo("main")`
-+   at main (counter.sisu:47:12) (exit 101)
++ panic: reached the typed hole `todo("main")` (exit 101)
   $ counter --min-length 5 poem.txt
 -    3  sauna
 -    1  after
-+ panic: reached the typed hole `todo("main")`
-+   at main (counter.sisu:47:12) (exit 101)
++ panic: reached the typed hole `todo("main")` (exit 101)
 
 0 passed, 1 failed, 6 blocked

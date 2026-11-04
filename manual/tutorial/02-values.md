@@ -172,9 +172,8 @@ abs(-7)  # => 7
   function: one that every file can call without importing it.
 
 A worksheet puts `-7` in parentheses because a line that starts with an
-operator, `-` included, continues the line before it. Without them, the
-worksheet would read `7 % 2` and `-7 // 2` as one expression,
-`7 % 2 - 7 // 2`.
+operator, `-` included, continues the line before it: without them, it
+would read `7 % 2 - 7 // 2`.
 
 ## Dividing integers
 
@@ -264,7 +263,7 @@ The first `print` ran. The addition in the second stopped the program
 with a panic, which reports a bug: what went wrong and where, here line
 5, column 23. Nothing after a panic runs, and the program exits with
 status 101. Chapter 8 tells panics apart from the errors that a program
-expects and handles. Every build of a program checks for overflow, the
+expects and handles. Every build checks for overflow, the
 optimised one too.
 
 Some algorithms want arithmetic that wraps around, such as a hash
@@ -440,7 +439,7 @@ error[D0006]: the program was not run: errors found (1)
 ```
 
 Python would read the line as `(raining and have_umbrella) or
-have_coat`, which is easy to misread as the other grouping. Sisu asks
+have_coat`, which a reader can take for the other grouping. Sisu asks
 you to write the parentheses.
 
 </details>
@@ -603,10 +602,8 @@ style guide, and Sisu gives the case of its first letter a meaning:
   lowercase as in Python: `int`, `f64`, `bool`, `char`, `str`.
 - `SCREAMING_CASE` for constants.
 
-A name in a `let` that starts with a capital letter does not make a
-binding, because Sisu reads a capitalised name there as a constant or a
-variant to compare with, as chapter 7 explains. Keep binding names in
-lowercase.
+Keep binding names in lowercase: Sisu reads a capitalised name in a
+`let` as a constant or a variant to compare with (chapter 7).
 
 Sisu also reserves 47 keywords, which cannot be names. Many of them are
 keywords in Python too, such as `def`, `if` and `for`. A few are words
@@ -642,9 +639,7 @@ error[D0006]: the program was not run: errors found (2)
 E0105 (`parse.expected-pattern`) and E0103 (`parse.expected-expression`)
 say that the parser met the keyword `type` where it expected a name. The
 diagnostics do not say that the word is a keyword; the fix is another
-name, such as `kind` or `file_type`. Other keywords that are ordinary
-names in Python include `match`, `error`, `test`, `view`, `ref` and
-`own`.
+name, such as `kind` or `file_type`.
 
 **Try it.** Rename `type` to `Kind` in `keyword_name.sisu`, in both
 places, and run it.
@@ -660,6 +655,7 @@ error[E0327]: `str` has no variant `Kind`
   |
 3 |     let Kind = "csv"
   |         ^^^^
+  = fix: a binding's name starts with a lowercase letter: `kind`: `kind`
 
 error[E0329]: this pattern might not match; add `else:` with a block that leaves the scope
   --> capital_name.sisu:3:9
@@ -676,19 +672,18 @@ error[E0200]: cannot find `Kind` in this scope
 error[D0006]: the program was not run: errors found (3)
 ```
 
-The three diagnostics come from one cause. Because `Kind` starts with a
-capital letter, Sisu reads `let Kind = "csv"` as a comparison of
-`"csv"` with a variant named `Kind`, which a `str` does not have (E0327,
-`type.unknown-variant`), and which could fail to match anyway (E0329,
-`type.refutable-let`). No binding is made, so the next line cannot find
-`Kind` (E0200). None of the three says to write the name in lowercase,
-which is the fix.
+The three diagnostics have one cause. Sisu reads `let Kind = "csv"` as
+a comparison of `"csv"` with a variant named `Kind`, which a `str` does
+not have (E0327, `type.unknown-variant`) and which could fail to match
+(E0329, `type.refutable-let`). No binding is made, so the next line
+cannot find `Kind` (E0200). The fix of E0327 is the one to take: the
+name in lowercase, `kind`.
 
 </details>
 
-> **From Python.** `type`, `match` and `test` are ordinary names in
-> Python programs. In Sisu they are keywords, so a Python variable with
-> one of these names needs a new name when you port it.
+> **From Python.** `type`, `match`, `error`, `test`, `view`, `ref` and
+> `own` are ordinary names in Python and keywords in Sisu, so a port
+> renames them.
 
 ## Writing a type down
 
@@ -713,8 +708,7 @@ def main():
 ```
 
 - `year` has no annotation, so it is an `int`.
-- `ratio: f64` states what the value already is. An annotation like it
-  documents a binding for the reader.
+- `ratio: f64` states what the value already is, for the reader.
 - `level: u8` changes what the literal `200` becomes: a `u8` rather than
   an `int`. A literal takes the type that its place expects.
 
@@ -745,10 +739,9 @@ error[D0006]: the program was not run: errors found (1)
 E0374 (`type.literal-out-of-range`) says what the type holds, so the fix
 is a smaller value or a wider type.
 
-Inside a function, annotations are optional and Sisu infers the rest.
-Inference stays inside the function, though: the parameters and the
-result of a function are always written, as chapter 3 shows, so a
-function's first line tells you its types without reading its body.
+Inside a function, annotations are optional. The parameters and the
+result of a function are always written, as chapter 3 shows, so its
+first line tells you its types without reading its body.
 
 ## Converting numbers
 
@@ -794,6 +787,7 @@ error[E0300]: expected `u8`, found `int`
 4 |     let small: u8 = large
   |                     ^^^^^
   |                -- expected because of this
+  = note: an `int` narrows to `u8` through `.to_u8()`, which gives an option: `None` when the value does not fit
 
 error[D0006]: the program was not run: errors found (1)
 ```
@@ -801,7 +795,8 @@ error[D0006]: the program was not run: errors found (1)
 E0300 (`type.mismatch`) is the general diagnostic for a value of the
 wrong type. It names the type expected and the type found, and its
 label `--` marks what made Sisu expect that type, here the annotation.
-It has no fix line; the conversions in this section are the fix.
+Its note names the conversion, `.to_u8()`, which this section's last
+example shows.
 
 Integers and floats never mix in arithmetic, whatever their sizes:
 

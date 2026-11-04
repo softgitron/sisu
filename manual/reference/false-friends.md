@@ -199,7 +199,7 @@ maintainers.
 | `(n := f())` | `let n = f()`, `if let` | [E0123](diagnostics.md#e0123), [E0100](diagnostics.md#e0100) | outside brackets only |
 | `for ... else:` | `if let` on a search's result | [E0127](diagnostics.md#e0127) | yes, in the message |
 | `a < b > c` | one direction | [E0113](diagnostics.md#e0113) | yes, in the message |
-| `x is None` | `x == None`, `if let` | [E0100](diagnostics.md#e0100) | no |
+| `x is None` | `x.is_none()`, `if let` | [E0100](diagnostics.md#e0100) | yes, as a fix |
 | `lambda x: e` | `x -> e` | [E0117](diagnostics.md#e0117) | no |
 | `f"{x}"` | `"{x}"` | [E0100](diagnostics.md#e0100) | no |
 | `class`, `__init__` | `struct` | [E0107](diagnostics.md#e0107), [E0215](diagnostics.md#e0215) | no |
@@ -470,8 +470,9 @@ error[E0113]: a chained comparison must point one way; `<` and `>` do not
 
 ### `x is None`
 
-Sisu has no `is`; compare with `==`, or match the absent value with `if
-let` or `??`. E0100.
+Sisu has no `is`; compare with `==`, test with `.is_none()`, or match
+the absent value with `if let` or `??`. E0100, whose fix writes
+`.is_none()`, and `.is_some()` for `is not None`.
 
 <!-- file: examples/reference-false-friends/is_none.sisu -->
 ```sisu
@@ -490,6 +491,7 @@ error[E0100]: expected `:`, found `is`
   |
 4 |     if found is None:
   |              ^^
+  = fix: Sisu writes it `.is_none()`: `.is_none()`
 
 ```
 
@@ -838,26 +840,30 @@ panic: integer overflow: 4611686018427387904 + 4611686018427387904
 
 Sisu shares much of its meaning with Rust: `T?` and `Some`, `?` that
 returns early, `match` that covers every case, ownership and borrowing,
-traits. These Rust spellings are not Sisu, and each is an error.
+traits. These Rust spellings are not Sisu, and each is an error, most
+with a fix that writes the Sisu spelling.
 
-| Habit | Sisu | Code |
-|---|---|---|
-| `let mut x` | `var x` | [E0105](diagnostics.md#e0105) |
-| `a && b`, `a \|\| b`, `!a` | `a and b`, `a or b`, `not a` | [E0103](diagnostics.md#e0103) |
-| `x as f64` | `x.to_f64()` | [E0100](diagnostics.md#e0100) |
-| `// note` | `# note` | [E0117](diagnostics.md#e0117) |
-| `x.clone()` | `x.copy()` | [E0304](diagnostics.md#e0304) |
-| `1 => "one"` | `case 1: "one"` | [E0100](diagnostics.md#e0100) |
-| `f(&xs)` | `f(xs)` | [E0103](diagnostics.md#e0103) |
-| `0..3` | `range(3)` | [E0100](diagnostics.md#e0100) |
-| `Vec<T>` | `list[T]` | [E0117](diagnostics.md#e0117) |
-| `println!(...)` | `print(...)` | [E0117](diagnostics.md#e0117) |
-| `7 / 2` is 3 | `7 // 2` | [E0301](diagnostics.md#e0301) |
-| `-7 % 3` is -1 | 2, as in Python | none: FF-6 |
+| Habit | Sisu | Code | Names the Sisu way |
+|---|---|---|---|
+| `let mut x` | `var x` | [E0105](diagnostics.md#e0105) | yes, as a fix |
+| `a && b`, `a \|\| b`, `!a` | `a and b`, `a or b`, `not a` | [E0103](diagnostics.md#e0103) | yes, as a fix |
+| `i++`, `i--` | `i += 1`, `i -= 1` | [E0103](diagnostics.md#e0103) | yes, as a fix |
+| `x as f64` | `x.to_f64()` | [E0100](diagnostics.md#e0100), [E0117](diagnostics.md#e0117) | outside brackets only |
+| `// note` | `# note` | [E0117](diagnostics.md#e0117) | on a line of its own only |
+| `x.clone()` | `x.copy()` | [E0304](diagnostics.md#e0304) | yes, as a fix |
+| `1 => "one"` | `case 1: "one"` | [E0100](diagnostics.md#e0100) | yes, as a fix |
+| `f(&xs)` | `f(ref xs)`, or `f(xs)` | [E0103](diagnostics.md#e0103) | yes, as a fix |
+| `0..3` | `range(3)` | [E0100](diagnostics.md#e0100), [E0117](diagnostics.md#e0117) | in a `let` only |
+| `Vec<T>` | `list[T]` | [E0117](diagnostics.md#e0117) | yes, as a fix |
+| `println!(...)` | `print(...)` | [E0117](diagnostics.md#e0117) | yes, as a fix |
+| `pub(crate)` | `pub(package)` | [E0130](diagnostics.md#e0130) | yes, as a fix |
+| `7 / 2` is 3 | `7 // 2` | [E0301](diagnostics.md#e0301) | yes, as a fix |
+| `-7 % 3` is -1 | 2, as in Python | none: FF-6 | |
 
 ### `let mut`
 
-A binding that changes is declared with `var`. E0105.
+A binding that changes is declared with `var`. E0105, whose fix writes
+it.
 
 <!-- file: examples/reference-false-friends/let_mut.sisu -->
 ```sisu
@@ -876,13 +882,15 @@ error[E0105]: expected a pattern, found `mut`
   |
 3 |     let mut total = 1
   |         ^^^
+  = fix: Sisu writes it `var`: `var`
 
 ```
 
 ### `&&`, `||` and `!`
 
 The logical operators are the words `and`, `or` and `not` (D-025); `!`
-belongs to error sets. E0103.
+belongs to error sets. E0103, whose fix writes the word; `i++` gets the
+same code and the fix `i += 1`.
 
 <!-- file: examples/reference-false-friends/symbols.sisu -->
 ```sisu
@@ -901,13 +909,16 @@ error[E0103]: expected an expression, found `&`
   |
 5 |     print(warm && dry)
   |                 ^
+  = fix: Sisu writes it `and`: `and`
 
 ```
 
 ### `x as f64`
 
 A conversion is a method, `n.to_f64()`, and a lossy one says how:
-`round()`, `truncate_to_int()`. E0100.
+`round()`, `truncate_to_int()`. Inside a call's parentheses, as here,
+it is E0100 with no fix; after a value that ends a statement, `let x =
+n as f64`, it is E0117, whose fix writes `.to_f64()`.
 
 <!-- file: examples/reference-false-friends/as_cast.sisu -->
 ```sisu
@@ -931,7 +942,8 @@ error[E0100]: expected `)`, found `as`
 ### `//` for a comment
 
 A comment starts with `#`; `//` is integer division, as in Python. Here
-E0117 reports the comment's words.
+E0117 reports the comment's words, with no fix; a `//` comment on a line
+of its own gets E0117 with the fix that writes `#`.
 
 <!-- file: examples/reference-false-friends/slash_comment.sisu -->
 ```sisu
@@ -979,7 +991,7 @@ error[E0304]: `list[str]` has no method `clone`
 
 ### `=>` in a `match` arm
 
-A `case` arm is `case PATTERN: value`. E0100.
+A `case` arm is `case PATTERN: value`. E0100, whose fix writes the `:`.
 
 <!-- file: examples/reference-false-friends/match_arrow.sisu -->
 ```sisu
@@ -1000,19 +1012,22 @@ error[E0100]: expected `:`, found `=`
   |
 5 |         case 1 => "one"
   |                ^
+  = fix: Sisu writes it `:`: `:`
 
 error[E0100]: expected `:`, found `=`
   --> match_arrow.sisu:6:16
   |
 6 |         case _ => "many"
   |                ^
+  = fix: Sisu writes it `:`: `:`
 
 ```
 
 ### `&x` to borrow
 
 A plain parameter already borrows; an argument is written as it is, and
-`ref` and `mut` say the rest ([R7](ownership.md)). E0103.
+`ref` and `mut` say the rest ([R7](ownership.md)). E0103, whose fix
+writes `ref`, which compiles; `total(prices)` says the same.
 
 <!-- file: examples/reference-false-friends/borrow_sign.sisu -->
 ```sisu
@@ -1033,13 +1048,16 @@ error[E0103]: expected an expression, found `&`
   |
 7 |     print(total(&prices))
   |                 ^
+  = fix: Sisu writes it `ref`: `ref `
 
 ```
 
 ### `0..3` for a range
 
 A range is `range(3)` or `range(a, b)`; `..` is the rest of a pattern.
-E0100.
+In a `for` header, as here, it is E0100 with no fix; after a value
+that ends a statement, `let r = 0..3`, it is E0117, whose fix writes
+`range(0, 3)`.
 
 <!-- file: examples/reference-false-friends/dot_range.sisu -->
 ```sisu
@@ -1062,7 +1080,8 @@ error[E0100]: expected `:`, found `..`
 
 ### `Vec<T>`
 
-Type arguments go in square brackets, `list[str]`. E0117.
+Type arguments go in square brackets, `list[str]`. E0117, whose fix
+writes them.
 
 <!-- file: examples/reference-false-friends/angle_generics.sisu -->
 ```sisu
@@ -1080,12 +1099,14 @@ error[E0117]: unexpected `<` after the end of the statement
   |
 3 |     let names: Vec<str> = ["Aino"]
   |                   ^
+  = fix: Sisu writes it `list[str]`: `list[str]`
 
 ```
 
 ### `println!`
 
-Sisu has no macros; `print("{x}")` prints. E0117.
+Sisu has no macros; `print("{x}")` prints. E0117, whose fix writes
+`print`.
 
 <!-- file: examples/reference-false-friends/println.sisu -->
 ```sisu
@@ -1102,6 +1123,36 @@ error[E0117]: unexpected `!` after the end of the statement
   |
 3 |     println!("{}", 3)
   |            ^
+  = fix: Sisu writes it `print`: `print`
+
+```
+
+### `pub(crate)`
+
+An item is `pub` to every package or `pub(package)` to the modules of
+its own ([R13](modules.md#visibility)). Any other name between the
+parentheses is E0130 (`parse.visibility-scope`), whose fix writes
+`pub(package)`.
+
+<!-- file: examples/reference-false-friends/pub_crate.files/pub_crate.sisu -->
+```sisu
+# Rust's `pub(crate)`.
+pub(crate) def total(prices: list[int]) -> int:
+    return sum(prices)
+
+def main():
+    print(total([3, 4]))
+```
+
+<!-- output: examples/reference-false-friends/pub_crate.console -->
+```console
+$ sisu check pub_crate.sisu
+error[E0130]: `pub(crate)` is not Sisu's: an item is `pub` to every package, or `pub(package)` to the modules of its own
+  --> pub_crate.sisu:2:5
+  |
+2 | pub(crate) def total(prices: list[int]) -> int:
+  |     ^^^^^
+  = fix: make it visible to its package: `pub(package)`: `package`
 
 ```
 

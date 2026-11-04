@@ -1,9 +1,10 @@
 # Read and write files
 
-This guide reads a file, handles one that is missing, writes and adds
-to a file, walks a directory, and tests the code with a file system in
-memory. It assumes that you know how `main` receives its capabilities,
-from [chapter 9](../tutorial/09-word-counter.md) of the tutorial.
+This guide reads a file, handles one that is missing, writes, adds to
+and replaces a file, walks a directory, and tests the code with a file
+system in memory. It assumes that you know how `main` receives its
+capabilities, from [chapter 9](../tutorial/09-word-counter.md) of the
+tutorial.
 
 **See also:** [chapter 18](../tutorial/18-capabilities.md) (passing
 and narrowing capabilities) and
@@ -74,7 +75,7 @@ The other errors are `PermissionDenied`, `AlreadyExists`, `InvalidData`
 can be out of date by the time the file is read, so matching the error
 is the safer test.
 
-## 3. Write a file and add to it
+## 3. Write a file, add to it and replace it
 
 `write_text(path, text)` creates or replaces a file, and `write(path,
 data)` does the same with bytes. `create_dir` makes a directory and its
@@ -111,6 +112,45 @@ swim at seven
   the file when it is missing.
 - `list_dir` gives a directory's entries, sorted, as paths that start
   with the directory.
+
+A program that replaces a file a reader may open at any moment, such as
+a settings file, writes the new text beside it and then gives it the
+old name with `rename(source, target)`. The rename takes the place of
+the file already there at once, so a reader finds the old text or the
+new one, never part of either:
+
+<!-- file: examples/guide-read-files/save.sisu -->
+```sisu
+# Replaces a file whole: a reader finds the old text or the new one.
+
+## Writes `text` beside `path`, then renames it over `path`.
+def save(files: Fs, path: Path, text: str) -> ! IoError:
+    let part = Path.new("{path}.part")
+    files.write_text(part, text)?
+    files.sync(part)?
+    files.rename(part, path)?
+    return Ok(())
+
+test "the new text replaces the old":
+    let files = Fs.in_memory({"plan.txt": "sauna at six"})
+    assert save(files, "plan.txt", "sauna at seven") == Ok(())
+    assert files.read_to_string("plan.txt") == Ok("sauna at seven")
+    assert not files.exists("plan.txt.part")
+
+test "a rename of a file that is not there"(files: Fs):
+    assert files.rename("old.txt", "new.txt") == Err(NotFound("old.txt"))
+```
+
+<!-- output: examples/guide-read-files/save.test -->
+```text
+test "the new text replaces the old" ... ok
+test "a rename of a file that is not there" ... ok
+2 passed, 0 failed, 0 blocked
+```
+
+A failed rename names `source` when it is not there, as the second test
+shows, and `target` for most other failures. To make the new name
+survive a crash, sync its directory after the rename.
 
 ## 4. Walk a directory
 

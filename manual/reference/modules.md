@@ -121,7 +121,9 @@ An import binds names in the module that writes it:
 - A path is package-absolute: it starts with the name of the program's
   own package, of a dependency, or with `std` for the standard library
   (`import std.json`). There is no `super` and no relative path.
-- `import a.b` binds `b`, not `a`, unlike Python.
+- `import a.b` binds `b`, not `a`, unlike Python. An item is then
+  written after the module's name, its type arguments included:
+  `collections.Deque[int].new()`.
 - There are no glob imports: `from m import *` is E0128.
 - An import that names nothing is E0220 for its first name, E0203 for
   a module further along the path, and E0204 for an item a module does
@@ -223,6 +225,9 @@ them, unless they say otherwise (D-045):
 
 - A use from where an item is not seen is E0255, and of a
   `pub(package)` item from another package E0256.
+- No other name stands between the parentheses: Rust's `pub(crate)` is
+  E0130, whose fix writes `pub(package)`
+  ([R19](false-friends.md#pubcrate)).
 - A field is E0258 and a method E0259 in the same way. A struct with a
   private field can be built only where that field is seen, since its
   construction names every field.
@@ -760,7 +765,7 @@ C++ interop (Q-24).
 | E1008, E1009, E1012 | `package.no-root-module`, `package.two-root-modules`, `package.module-name` | [The module tree](#the-module-tree) |
 | [E0100](diagnostics.md#e0100), [E0203](diagnostics.md#e0203), [E0204](diagnostics.md#e0204), [E0220](diagnostics.md#e0220), E0260 | `parse.expected`, `resolve.unknown-module`, `resolve.not-in-module`, `resolve.import-unknown`, `resolve.not-a-dependency` | [Imports](#imports) |
 | W0016, E0701 | `resolve.shadow-prelude-set`, `cap.internal` | [Names every module sees](#names-every-module-sees) |
-| [E0255](diagnostics.md#e0255), [E0256](diagnostics.md#e0256), [E0258](diagnostics.md#e0258), [E0259](diagnostics.md#e0259) | `resolve.private-item`, `resolve.package-item`, `resolve.private-field`, `resolve.private-method` | [Visibility](#visibility) |
+| [E0255](diagnostics.md#e0255), [E0256](diagnostics.md#e0256), [E0258](diagnostics.md#e0258), [E0259](diagnostics.md#e0259), [E0130](diagnostics.md#e0130) | `resolve.private-item`, `resolve.package-item`, `resolve.private-field`, `resolve.private-method`, `parse.visibility-scope` | [Visibility](#visibility) |
 | E0257 | `resolve.not-reexported` | [Re-exports](#re-exports) |
 | E1000, E1001, [E1002](diagnostics.md#e1002), [E1003](diagnostics.md#e1003), E1004, E1005, E1006, [E1010](diagnostics.md#e1010), [E1017](diagnostics.md#e1017), [W0005](diagnostics.md#w0005) | `package.toml-syntax`, `package.toml-duplicate`, `package.missing-key`, `package.bad-value`, `package.bad-name`, `package.no-manifest`, `package.renamed-dependency`, `package.not-a-path`, `package.reserved-name`, `package.unknown-key` | [The manifest](#the-manifest) |
 | [E1015](diagnostics.md#e1015), [E0703](diagnostics.md#e0703), [E1019](diagnostics.md#e1019), E1020, [E1021](diagnostics.md#e1021), E1022 | `package.trust-unknown`, `cap.untrusted`, `package.unsafe-undeclared`, `package.unsafe-level`, `package.unsafe-untrusted`, `package.unsafe-raised` | [`[trust]`](#trust) |

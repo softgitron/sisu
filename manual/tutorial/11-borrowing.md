@@ -274,15 +274,16 @@ error[E0413]: `longer` returns `str`, which borrows, and has more than one borro
    |                               ^^^
    |            ------ `a` is a borrowed parameter
    |                    ------ `b` is a borrowed parameter
-  = fix: return owned text instead: `String`
   = fix: name `a, b` in the `from` clause: ` from a, b`
+  = fix: return owned text instead: `String`
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
 E0413 (`borrow.from-required`) marks the two borrowed parameters. Its
-second fix writes the clause back; the first, a `String` result, would
-copy text that `longer` only passes on. With the clause, the caller
+first fix writes the clause back, since `longer` returns one of them;
+the second, a `String` result, would copy text that `longer` only
+passes on, and is the one to take for text the function makes. With the clause, the caller
 knows that the result may borrow from either argument, and keeps both
 alive while it uses the result.
 

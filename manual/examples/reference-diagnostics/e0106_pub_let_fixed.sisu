@@ -1,0 +1,5 @@
+# A constant is what a module gives other modules as a value.
+pub const TOTAL: int = 3 + 4
+
+def main():
+    print(TOTAL)

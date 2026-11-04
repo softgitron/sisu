@@ -129,7 +129,7 @@ test "a saved note can be read back" ... FAILED
 
 test "a saved note can be read back" ... FAILED
 panic: assertion failed: fs.read_to_string("note.txt") == Ok("sisu")
-  left:  Err(Revoked)
+  left:  Err(PermissionDenied(path="note.txt"))
   right: Ok("sisu")
   at test "a saved note can be read back" (save.sisu:11:5)
 replay: sisu test --replay 1-fb87add2ea595989-0.0.1-t0-s0-r0-m700000 save.sisu
@@ -140,7 +140,7 @@ test "a saved note can be read back" ... FAILED
 
 test "a saved note can be read back" ... FAILED
 panic: assertion failed: fs.read_to_string("note.txt") == Ok("sisu")
-  left:  Err(Revoked)
+  left:  Err(PermissionDenied(path="note.txt"))
   right: Ok("sisu")
   at test "a saved note can be read back" (save.sisu:11:5)
 replay: sisu test --replay 1-fb87add2ea595989-0.0.1-t0-s0-r0-m700000 save.sisu
@@ -150,9 +150,12 @@ replay: sisu test --replay 1-fb87add2ea595989-0.0.1-t0-s0-r0-m700000 save.sisu
 
 `save` retries a write until it succeeds, and the test assumed that the
 read afterwards could not fail. Under the simulator the read failed with
-`Revoked`, one of the variants of `IoError`, which the signature of
-`read_to_string` declares, so the test met a failure that real code can
-meet and that the test had not considered. The line that starts
+`PermissionDenied`, one of the variants of `IoError`, which the
+signature of `read_to_string` declares, so the test met a failure that
+real code can meet and that the test had not considered. `Revoked`,
+which every I/O error set holds, is the one variant the simulator never
+draws: only a caretaker revokes a capability, and the simulator's own
+file system and network are never revoked. The line that starts
 `replay:` is for reproducing the failure: running it gives the same
 failure on any machine with the same code and toolchain, as the
 session's last command shows. It works because inside a test every
@@ -190,9 +193,10 @@ way to the world is a capability.
   not give.
 - **Faults are as broad as the error sets.** The simulator injects any
   declared error, so a set that declares more than can happen in
-  practice yields faults that cannot happen. The `Revoked` in the
-  session can occur only on a file system that someone revoked; the set
-  is shared, and so the simulator offers it everywhere.
+  practice yields faults that cannot happen. Every I/O error set holds
+  `Revoked`, which only a revoked caretaker gives; the simulator leaves
+  that one out, and a set that declares other variants a call cannot
+  meet would need the same care.
 - **The real world still needs its own tests.** A test that takes the
   real `System` runs alone, against the real world, with no token that
   replays it.

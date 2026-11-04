@@ -1,1 +1,2 @@
 4:14-4:16 E0100 parse.expected expected="`:`" found="`is`"
+  fix parse.sisu-spelling 4:13-4:21 ".is_none()"

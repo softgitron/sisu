@@ -5,5 +5,6 @@ error[E0300]: expected `u8`, found `int`
 4 |     let small: u8 = large
   |                     ^^^^^
   |                -- expected because of this
+  = note: an `int` narrows to `u8` through `.to_u8()`, which gives an option: `None` when the value does not fit
 
 error[D0006]: the program was not run: errors found (1)

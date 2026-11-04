@@ -1,5 +1,5 @@
 $ sisu test stove.sisu
-error[E0806]: `stove.celsius` is part of a `Stove`, whose invariant only its own methods may change and check again; change it through one of them
+error[E0806]: `stove.celsius` is part of a value of `Stove`, whose invariant only its own methods may change and check again; change it through one of them
   --> stove.sisu:24:5
    |
 24 |     stove.celsius = max(stove.celsius - 15, 0)

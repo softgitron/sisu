@@ -240,15 +240,17 @@ error[E0200]: cannot find `nil` in this scope
   |
 3 |     let best: str? = nil
   |                      ^^^
+  = fix: Sisu writes it `None`: `None`
 
 ```
 
-E0123 names the fix, `let` (or `var`, for a value that changes). The
-others do not: `go f()` is `s.spawn(() -> f())` in a scope, and `nil`
-is `None`, for an optional type `T?`; a type that is not optional has
-no `nil` at all. Some other differences: a name is exported with `pub`,
-not with a capital letter; a variable has no zero value, and one read
-before it is given a value is E0366; `for i := 0; i < n; i++` is `for i
-in range(n)`; and `defer` is Sisu's too, though it runs at the end of
-the block that holds it, a loop's body included, rather than of the
-function.
+E0123 names the fix, `let` (or `var`, for a value that changes), and
+E0200's fix writes `None` for `nil`, which is for an optional type
+`T?`; a type that is not optional has no `nil` at all. `go f()` gets
+no fix: it is `s.spawn(() -> f())` in a scope. Some other differences:
+a name is exported with `pub`, not with a capital letter; a variable
+has no zero value, and one read before it is given a value is E0366;
+`for i := 0; i < n; i++` is `for i in range(n)`, and a statement `i++`
+gets the fix `i += 1`; `switch` gets the fix `match`; and `defer` is
+Sisu's too, though it runs at the end of the block that holds it, a
+loop's body included, rather than of the function.

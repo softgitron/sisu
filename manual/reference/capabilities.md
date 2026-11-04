@@ -117,7 +117,7 @@ interceptor, implements the same trait:
 
 | Capability | Trait | Operations |
 |---|---|---|
-| `Fs` | `FsOps` | `read`, `write`, `read_to_string`, `write_text`, `exists`, `metadata`, `remove`, `list_dir`, `create_dir`, `sync`; failures are `IoError` |
+| `Fs` | `FsOps` | `read`, `write`, `read_to_string`, `write_text`, `exists`, `metadata`, `remove`, `rename`, `list_dir`, `create_dir`, `sync`; failures are `IoError` |
 | `Net` | `NetOps` | `connect(host, port)`, `listen(port)`, giving a `Conn` or a `Listener`; failures are `NetError` |
 | `Clock` | `ClockOps` | `now()`, `after(duration)`, a `Timer`, and `sleep(duration)` |
 | `Rand` | `RandOps` | `bits()`, and `between(lo, hi)`, `unit()`, `coin()` and `shuffle(xs)` built on it |

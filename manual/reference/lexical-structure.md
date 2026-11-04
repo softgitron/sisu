@@ -60,9 +60,9 @@ def main():
 maanantai sauna 7
 ```
 
-A keyword where a name should be is an error. Where a parameter's name
-should be, it is E0124 (`parse.keyword-as-name`); elsewhere, the parser
-reports what it expected:
+A keyword where a name should be is an error. Where a parameter's or a
+field's name should be, it is E0124 (`parse.keyword-as-name`), and the
+line declares nothing; elsewhere, the parser reports what it expected:
 
 <!-- file: examples/reference-lexical-structure/keyword_name.sisu -->
 ```sisu
@@ -116,8 +116,7 @@ error[D0006]: the program was not run: errors found (1)
 on by default in [02](../../proposal/02-syntax.md); stage 0 has neither,
 so a name that mixes Latin and Cyrillic letters that look alike
 compiles without a word. A keyword as a binding's name gets E0105 and
-E0103, and as a field's name E0100, where E0124 would say that the word
-is a keyword.
+E0103, where E0124 would say that the word is a keyword.
 
 **Status.** In stage 0; non-ASCII names are decided (D-048).
 
@@ -381,9 +380,9 @@ error[E0102]: a block starts on the next line, indented; nothing may follow `:` 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-**Stage 0 differs.** A one-line `if c: print(x)` is read as an `if`
-expression without its `else`, and gets E0116 where E0102 would say
-that the block starts on the next line.
+A one-line `if c: print(x)` is E0102 as well: Python's one-line `if`
+is a statement whose block is on its line, not an `if` expression
+without its `else` (E0116).
 
 **Status.** In stage 0 (D-027).
 

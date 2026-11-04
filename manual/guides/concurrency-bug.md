@@ -150,7 +150,9 @@ exhaustive search is a proof, up to its bound.
 
 `sisu test --sim --faults P` runs the tests on a simulated system whose
 capability calls fail now and then, at the rate `P`, each with an error
-of its own error set. This sauna keeps each booking in memory and in a
+of its own error set other than `Revoked`, which only a revoked
+caretaker gives and the simulator's own file system and network never
+are. This sauna keeps each booking in memory and in a
 file, and its test says that the two agree:
 
 <!-- file: examples/guide-concurrency-bug/disk.sisu -->

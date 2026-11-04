@@ -1,0 +1,18 @@
+# A type's constant as an array's length, and a `const` parameter that
+# carries one into a generic function.
+trait Shape:
+    const SIDES: int
+
+struct Square:
+    side: f64
+
+impl Shape for Square:
+    const SIDES: int = 4
+
+def corners[T: Shape, const N: int](shape: T) -> Array[int, N]:
+    return Array.filled(T.SIDES)
+
+def main():
+    let lengths: Array[f64, Square.SIDES] = Array.filled(2.0)
+    print(lengths)
+    print(corners[Square, Square.SIDES](Square(2.0)))

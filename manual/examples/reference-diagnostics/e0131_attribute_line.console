@@ -1,0 +1,9 @@
+$ sisu run e0131_attribute_line.sisu
+error[E0131]: an attribute stands on a line of its own, before its declaration
+  --> e0131_attribute_line.sisu:2:13
+  |
+2 | @derive(Eq) struct Point:
+  |             ^^^^^^
+  = fix: put the declaration on the next line
+
+error[D0006]: the program was not run: errors found (1)

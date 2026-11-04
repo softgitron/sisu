@@ -1,0 +1,6 @@
+# A trait's constant through a type parameter, as an array's length.
+trait Shape:
+    const SIDES: int
+
+def corners[T: Shape](shape: T) -> Array[int, T.SIDES]:
+    return Array.filled(0)

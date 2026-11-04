@@ -603,7 +603,17 @@ def main():
 ```console
 $ sisu run
 85
+$ sisu audit --unsafe
+sauna 0.1.0   unsafe = "memory"   the root package
+  sauna (src/main.sisu)   1 block, module hash 7374184f049a918b
+    src/main.sisu:9   unsafe block in main   # safety: valid, aligned, writable: p points to the live local celsius, which nothing else uses until the bloc...
+std (toolchain)   unsafe = "extern"   see `sisu1 audit --unsafe --std`
 ```
+
+`sisu audit --unsafe` lists the unsafe code a reviewer reads first: for
+each package its level, and for each module its unsafe blocks and
+functions, each with the start of its `# safety:` reason. The standard
+library is listed by its level only, and `--std` audits it.
 
 The lockfile records the level, so that an update of a dependency that
 raises it, from none to `memory` or from `memory` to `extern`, is
@@ -696,9 +706,7 @@ call with a panic, since only a native build makes it.
 ## What is still to come
 
 Much of systems programming in Sisu is designed and not in the
-compiler yet. `sisu audit --unsafe`, which lists every unsafe block of
-every package with its reason, is a command of the front end that the
-`sisu` command does not offer yet (D0009). Allocators for the
+compiler yet. Allocators for the
 collections, `list.with_allocator(Region.bump(n))` for memory released
 all at once and `try_push` for allocation that can fail, are designed in
 [04](../../proposal/04-memory-and-ownership.md#allocators) (E0351 and

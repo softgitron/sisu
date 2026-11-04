@@ -1,0 +1,15 @@
+# A type's constant is known before the program runs: it can size an
+# array.
+trait Stove:
+    const RACKS: int
+
+struct WoodStove:
+    logs: int
+
+impl Stove for WoodStove:
+    const RACKS: int = 3
+
+def main():
+    var stones: Array[int, WoodStove.RACKS] = Array.filled(0)
+    stones[^1] = 12
+    print("{len(stones)} racks: {stones}")

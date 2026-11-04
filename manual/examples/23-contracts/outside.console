@@ -1,5 +1,5 @@
 $ sisu run outside.sisu
-error[E0806]: `today.closes` is part of a `Schedule`, whose invariant only its own methods may change and check again; change it through one of them
+error[E0806]: `today.closes` is part of a value of `Schedule`, whose invariant only its own methods may change and check again; change it through one of them
   --> outside.sisu:11:5
    |
 11 |     today.closes = 25

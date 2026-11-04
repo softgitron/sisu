@@ -41,8 +41,10 @@ program compiles beyond `comptime` code, which does no I/O.
 
 Without unsafe code, a function reaches the world only through a
 capability it is given. `sisu audit --caps FILE` lists each function
-that does I/O with the number of capability parameters it takes, and
-each use of a capability's operation:
+of a file that does I/O with the number of capability parameters it
+takes, and each use of a capability's operation; with no file, it
+audits the program of the package you are in, its dependencies
+included. This is the library's one module:
 
 <!-- file: examples/guide-audit/app.pkg/forecast/src/lib.sisu -->
 ```sisu
@@ -74,23 +76,6 @@ pub def logged(
     let text = tomorrow(net, "weather.example", town)?
     return Ok("{clock.now()} {town}: {text}")
 ```
-
-<!-- output: examples/guide-audit/app.console -->
-```console
-$ sisu audit --caps forecast/src/lib.sisu
-forecast/src/lib.sisu function logged caps=2 io=direct depth=-
-forecast/src/lib.sisu function tomorrow caps=1 io=direct depth=-
-forecast/src/lib.sisu use logged ClockOps.now depth=-
-forecast/src/lib.sisu use tomorrow http.get depth=-
-forecast/src/lib.sisu summary functions=2 median=1.5 max=2 uses=2 deepest=- structs=0
-```
-
-- `tomorrow` takes one capability, a `Net`, and uses it through
-  `http.get`; `logged` takes two, and reads the clock itself.
-- `rain` is not listed: it takes no capability, so it can only compute,
-  whoever calls it.
-- `depth=-` says that no `main` in the file calls the function; in a
-  program, it is the fewest calls from `main` to the use.
 
 ## 3. Give it only what it needs
 
@@ -124,15 +109,42 @@ edition = "2027"
 forecast = { path = "forecast" }
 ```
 
+Audit the library's file, then your program:
+
+<!-- output: examples/guide-audit/app.console -->
+```console
+$ sisu audit --caps forecast/src/lib.sisu
+forecast/src/lib.sisu function logged caps=2 io=direct depth=-
+forecast/src/lib.sisu function tomorrow caps=1 io=direct depth=-
+forecast/src/lib.sisu use logged ClockOps.now depth=-
+forecast/src/lib.sisu use tomorrow http.get depth=-
+forecast/src/lib.sisu summary functions=2 median=1.5 max=2 uses=2 deepest=- structs=0
+$ sisu audit --caps
+. function forecast.tomorrow caps=1 io=direct depth=1
+. function main caps=1 io=direct depth=0
+. use forecast.tomorrow http.get depth=1
+. use main Net.only_hosts depth=0
+. summary functions=2 median=1 max=1 uses=2 deepest=1 structs=0
+```
+
+- `tomorrow` takes one capability, a `Net`, and uses it through
+  `http.get`; `logged` takes two, and reads the clock itself.
+- `rain` is not listed: it takes no capability, so it can only compute,
+  whoever calls it.
+- In the file, `depth=-` says that no `main` calls the function. In the
+  program, named by its directory, `.`, the depth is the fewest calls
+  from `main` to the use, and only what `main` reaches is listed:
+  `logged` and its clock are gone, and `Net.only_hosts` is your own.
+
 Read the signatures of the functions you call as you read the audit:
 a function whose parameters hold no capability touches nothing, and one
 that takes `sys: System` takes everything.
 
 **Status.** `sisu audit --caps` and the manifest's `unsafe` levels are
-in stage 0. `sisu audit` reads each file alone, so a file that imports
-a dependency, as the application's `main` imports `forecast`, or
-another module of its own package is reported as E0220, and a package
-cannot be audited as a whole. The capability summary that the registry shows for
-each published version, and admission's authority delta, which says
-what a new version of a dependency can reach that the old one could
-not (D-066), are designed and wait for the registry.
+in stage 0. A file that `sisu audit --caps FILE` names is read as a
+program of its own, so a module that imports a dependency or another
+module of its package is audited through the package instead. The
+capability summary that the registry shows for each published version,
+and admission's authority delta, which says what a new version of a
+dependency can reach that the old one could not (D-066), are designed
+and wait for the registry.

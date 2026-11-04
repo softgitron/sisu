@@ -6,7 +6,7 @@ test "a saved note can be read back" ... FAILED
 
 test "a saved note can be read back" ... FAILED
 panic: assertion failed: fs.read_to_string("note.txt") == Ok("sisu")
-  left:  Err(Revoked)
+  left:  Err(PermissionDenied(path="note.txt"))
   right: Ok("sisu")
   at test "a saved note can be read back" (save.sisu:11:5)
 replay: sisu test --replay 1-fb87add2ea595989-0.0.1-t0-s0-r0-m700000 save.sisu
@@ -17,7 +17,7 @@ test "a saved note can be read back" ... FAILED
 
 test "a saved note can be read back" ... FAILED
 panic: assertion failed: fs.read_to_string("note.txt") == Ok("sisu")
-  left:  Err(Revoked)
+  left:  Err(PermissionDenied(path="note.txt"))
   right: Ok("sisu")
   at test "a saved note can be read back" (save.sisu:11:5)
 replay: sisu test --replay 1-fb87add2ea595989-0.0.1-t0-s0-r0-m700000 save.sisu

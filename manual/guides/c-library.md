@@ -187,6 +187,15 @@ the path: /usr/bin:/bin
 $ sisu run --native
 Hei, stranger!
 the path: /usr/bin:/bin
+$ sisu audit --unsafe
+greeter 0.1.0   no `unsafe`   the root package
+  no unsafe code
+cenv 0.1.0   unsafe = "extern"   trusted in sisu.toml:10
+  cenv (cenv/src/lib.sisu)   1 block, 1 extern block, module hash 681dc5521d3043d4
+    cenv/src/lib.sisu:6   extern block   # safety: the signature as <stdlib.h> declares it; it returns promptly.
+    cenv/src/lib.sisu:20   unsafe block in lookup   # safety: writable, in_bounds: the block has room for the name and its NUL; valid: getenv reads only the bytes...
+  foreign functions: getenv (called by lookup (takes `Env`))
+std (toolchain)   unsafe = "extern"   see `sisu1 audit --unsafe --std`
 ```
 
 A C function that the interpreter does not know runs only natively,
@@ -195,9 +204,16 @@ emulates, so the test of `lookup` runs on the checked memory model, as a
 run does. Keep the logic that needs no C outside the wrapper anyway,
 where every test reaches it, and keep the wrapper thin.
 
+The session's last command, `sisu audit --unsafe`, is what a reviewer
+of the application reads: each package with its level and the line of
+`[trust]` that consents to it, each `extern` and `unsafe` block with the
+start of its `# safety:` reason, and the foreign functions with the safe
+functions that call them, `lookup` taking an `Env`
+([R16](../reference/sisu-command.md#sisu-audit)).
+
 **Status.** In stage 0 (22). Importing a C header, `import c
-"stdlib.h"`, which would write the `extern` block, is designed (E0900),
-and so is `sisu audit --unsafe` (D0009). `CString.new(name).as_ptr()`,
+"stdlib.h"`, which would write the `extern` block, is designed (E0900).
+`CString.new(name).as_ptr()`,
 the shorter way to pass text to C, stops the interpreter with a panic
 that the pointer's value no longer exists and does not compile natively
 yet, so the wrapper builds the C string in raw memory.

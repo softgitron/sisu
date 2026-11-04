@@ -11,7 +11,7 @@ test "tests/a turn is booked once" ... FAILED
 panic: assertion failed: got[0] == (201, "booked\n")
     got[0] == (201, "booked\n")
     │
-    (503, "Interrupted\n")
+    (503, "InvalidData(path=\"bookings.json\")\n")
   at test "tests/a turn is booked once" (src/tests.sisu:24:5)
 replay: sisu test --replay 1-0dcd89d9ab9c2483-0.0.1-t1-s0-r0-m100000 .
 
@@ -25,7 +25,7 @@ test "tests/a turn is booked once" ... FAILED
 panic: assertion failed: got[0] == (201, "booked\n")
     got[0] == (201, "booked\n")
     │
-    (503, "Interrupted\n")
+    (503, "InvalidData(path=\"bookings.json\")\n")
   at test "tests/a turn is booked once" (src/tests.sisu:24:5)
 replay: sisu test --replay 1-0dcd89d9ab9c2483-0.0.1-t1-s0-r0-m100000 .
 

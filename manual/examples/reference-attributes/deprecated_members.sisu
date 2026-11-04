@@ -1,0 +1,17 @@
+# A deprecated trait and field warn where they are used.
+@deprecated("use `Rated`")
+trait Measured:
+    def size(self) -> int
+
+struct Panel:
+    @deprecated("use `width_cm`")
+    width: int
+    width_cm: int
+
+impl Measured for Panel:
+    def size(self) -> int:
+        return self.width
+
+def main():
+    let panel = Panel(width=3, width_cm=30)
+    print("{panel.width} {panel.size()}")

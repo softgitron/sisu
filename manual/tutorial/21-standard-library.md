@@ -54,6 +54,11 @@ to buy: 7 things
   `fs.file_name`, `fs.join` and `fs.components` are the others.
 - `fs.read_lines` reads a file's lines, and `fs.append` adds bytes at
   the end of a file, making it when it is missing.
+- The capability itself renames: `sys.fs.rename(source, target)` gives
+  a file a new name in place of a file already there, at once, so a
+  program that writes a new version beside the old and renames it over
+  the old one never leaves half a file for a reader
+  ([G5](../guides/read-files.md#3-write-a-file-add-to-it-and-replace-it)).
 
 The module's functions take any form of a file system, as chapter 18's
 `[F: FsOps]` does, so a test passes them `Fs.in_memory`. Its source is

@@ -130,12 +130,10 @@ same source and the same files give the same program, and a change of
 the file is a change of the program: it is built again, and its tests
 run again. The text travels inside the program, into a native
 executable and into the log of `sisu run --record`, so neither needs
-the file where it runs.
+the file where it runs. A failing test's replay token covers the
+embedded files as well as the source, so a token made before a file
+changed is refused after it (D0033), as one made before the source
+changed is ([G15](replay.md)).
 
 Keep embedded files under version control with the source: they are
 source.
-
-**Status.** In stage 0, with one difference from
-[08](../../proposal/08-metaprogramming.md): a replay token's content
-hash covers the source and not the files it embeds, so a token made
-before a file changed is still accepted after.

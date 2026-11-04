@@ -6,3 +6,7 @@ audit.sisu function main caps=1 io=calls depth=0
 audit.sisu function save caps=1 io=direct depth=1
 audit.sisu use save FsOps.write_text depth=1
 audit.sisu summary functions=2 median=1 max=1 uses=1 deepest=1 structs=0
+$ sisu audit --unsafe audit.sisu
+audit.sisu   no `unsafe`   a program of one file, which declares no level
+  no unsafe code
+std (toolchain)   unsafe = "extern"   see `sisu1 audit --unsafe --std`

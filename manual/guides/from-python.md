@@ -323,7 +323,8 @@ Read E0301's fix with care. `//` floors, which is Python 2's meaning;
 for Python 3's, convert both sides to `f64`, as step 4 does.
 
 These are the habits, with the Sisu spelling of each. R19 shows the
-diagnostic that each one gets:
+diagnostic that each one gets, and which ones carry a fix that writes
+the Sisu spelling, `.is_none()` for `x is None` among them:
 
 | Python | Sisu |
 |---|---|
@@ -341,7 +342,7 @@ diagnostic that each one gets:
 | `", ".join(names)` | `names.join(", ")` |
 | `append`, `strip`, `upper` | `push`, `trim`, `to_uppercase` |
 | `d.get(k, default)` | `d.get(k) ?? default` |
-| `x or default`, `x is None` | `x ?? default`, `x == None` or `if let` |
+| `x or default`, `x is None` | `x ?? default`, `x.is_none()` or `if let` |
 | `enumerate(xs, start=1)` | `enumerate(xs)`, adding 1 where the number is used |
 | `lambda x: e` | `x -> e`, or `it` |
 | `:=`, `else` on a loop | `if let`, or a chained condition |

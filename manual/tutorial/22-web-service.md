@@ -434,7 +434,7 @@ test "tests/a turn is booked once" ... FAILED
 panic: assertion failed: got[0] == (201, "booked\n")
     got[0] == (201, "booked\n")
     │
-    (503, "Interrupted\n")
+    (503, "InvalidData(path=\"bookings.json\")\n")
   at test "tests/a turn is booked once" (src/tests.sisu:24:5)
 replay: sisu test --replay 1-0dcd89d9ab9c2483-0.0.1-t1-s0-r0-m100000 .
 
@@ -448,7 +448,7 @@ test "tests/a turn is booked once" ... FAILED
 panic: assertion failed: got[0] == (201, "booked\n")
     got[0] == (201, "booked\n")
     │
-    (503, "Interrupted\n")
+    (503, "InvalidData(path=\"bookings.json\")\n")
   at test "tests/a turn is booked once" (src/tests.sisu:24:5)
 replay: sisu test --replay 1-0dcd89d9ab9c2483-0.0.1-t1-s0-r0-m100000 .
 
@@ -456,11 +456,13 @@ replay: sisu test --replay 1-0dcd89d9ab9c2483-0.0.1-t1-s0-r0-m100000 .
 ```
 
 - Each call through a capability may fail with an error of its own
-  error set, and with nothing else: a disk write may give
-  `Interrupted`, as an `IoError` may, but never something the code
-  could not be written to handle.
+  error set, and with nothing else: a call to the file system may give
+  `InvalidData`, as an `IoError` may, but never something the code
+  could not be written to handle. `Revoked`, which every I/O error set
+  holds, is never drawn, since the simulator's file system and network
+  are never revoked.
 - The test of the first section assumed that every booking succeeds.
-  Here a disk write failed, the service answered `503`, as it was
+  Here a call to the disk failed, the service answered `503`, as it was
   written to, and the test, not the service, was wrong. The simulator
   test of the section "Two nodes and a crash" tries again after a
   `503`, and passes.

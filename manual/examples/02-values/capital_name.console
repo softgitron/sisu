@@ -4,6 +4,7 @@ error[E0327]: `str` has no variant `Kind`
   |
 3 |     let Kind = "csv"
   |         ^^^^
+  = fix: a binding's name starts with a lowercase letter: `kind`: `kind`
 
 error[E0329]: this pattern might not match; add `else:` with a block that leaves the scope
   --> capital_name.sisu:3:9

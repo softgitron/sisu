@@ -1,0 +1,2 @@
+2:13-2:19 E0131 parse.attribute-line
+  fix parse.attribute-new-line 2:12-2:13 "\n"

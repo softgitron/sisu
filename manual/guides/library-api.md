@@ -122,7 +122,8 @@ pub def load(
   capability as its first parameter and touches nothing else. `save`
   and `load` work on any `Fs`: the real one, one restricted to a
   directory, or `Fs.in_memory()`. A library that takes no capability at
-  all can only compute, which its signatures show at once.
+  all can only compute, which its signatures show at once, and which
+  `sisu audit --caps` in the package's directory lists (step 3).
 - **Specific error sets.** Name each way a call can fail, with the data
   that the caller needs to act on it: `Taken(hour)` and `Closed(hour)`
   for a booking, `BadLine(number, text)` for a file. The signature,
@@ -170,7 +171,21 @@ test "tests/a turn is booked once" ... ok
 test "tests/a ledger comes back from its file" ... ok
 test "tests/a line that is not a booking" ... ok
 3 passed, 0 failed, 0 blocked
+$ sisu audit --caps
+. function ledger.store.load caps=1 io=direct depth=-
+. function ledger.store.save caps=1 io=direct depth=-
+. function test#1 caps=1 io=calls depth=-
+. function test#2 caps=1 io=direct depth=-
+. use ledger.store.load FsOps.read_to_string depth=-
+. use ledger.store.save FsOps.write_text depth=-
+. use test#2 FsOps.write_text depth=-
+. summary functions=4 median=1 max=1 uses=3 deepest=- structs=0
 ```
+
+The audit of the package, the session's last command, lists every
+function that takes a capability, its tests among them by number: only
+`save` and `load` of the library do, each through one `Fs` operation,
+and `depth=-` says that a library has no `main` to reach them from.
 
 From another module a variant is named through its error set,
 `BookingError.Taken(18)`; `from ledger import Taken` is E0204, since a

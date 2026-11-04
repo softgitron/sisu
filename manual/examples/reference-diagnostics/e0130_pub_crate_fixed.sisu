@@ -1,0 +1,6 @@
+# `pub(package)` shows the function to its own package only.
+pub(package) def heat() -> int:
+    return 80
+
+def main():
+    print(heat())

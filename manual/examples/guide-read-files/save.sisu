@@ -1,0 +1,18 @@
+# Replaces a file whole: a reader finds the old text or the new one.
+
+## Writes `text` beside `path`, then renames it over `path`.
+def save(files: Fs, path: Path, text: str) -> ! IoError:
+    let part = Path.new("{path}.part")
+    files.write_text(part, text)?
+    files.sync(part)?
+    files.rename(part, path)?
+    return Ok(())
+
+test "the new text replaces the old":
+    let files = Fs.in_memory({"plan.txt": "sauna at six"})
+    assert save(files, "plan.txt", "sauna at seven") == Ok(())
+    assert files.read_to_string("plan.txt") == Ok("sauna at seven")
+    assert not files.exists("plan.txt.part")
+
+test "a rename of a file that is not there"(files: Fs):
+    assert files.rename("old.txt", "new.txt") == Err(NotFound("old.txt"))

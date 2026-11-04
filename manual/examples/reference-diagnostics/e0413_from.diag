@@ -1,5 +1,5 @@
 2:31-2:34 E0413 borrow.from-required name="longer" ret="str" params="a, b"
   label 2:12-2:18 borrow.borrowed-param name="a"
   label 2:20-2:26 borrow.borrowed-param name="b"
-  fix borrow.own-result 2:31-2:34 "String"
   fix borrow.add-from 2:34-2:34 " from a, b"
+  fix borrow.own-result 2:31-2:34 "String"

@@ -439,7 +439,7 @@ Shown in [chapter 2](../tutorial/02-values.md).
 
 ## Parsing
 
-Codes E0100 to E0128. The parser builds the syntax tree. Its errors name
+Codes E0100 to E0131. The parser builds the syntax tree. Its errors name
 what it expected and what it found, and several name a habit from
 another language and the Sisu way to write it.
 
@@ -636,60 +636,48 @@ Shown in [chapter 2](../tutorial/02-values.md).
 
 Attributes and a visibility, `@NAME` and `pub`, stand before a
 declaration; with none after them, the parser has nothing to attach
-them to. An attribute before a statement is the common case
-([R14](attributes.md#writing-an-attribute)).
+them to. A `pub` before a `let`, at the top level of a module, is the
+common case: a module gives other modules functions, types and
+constants, and a `let` is a statement of a function. An attribute before
+a statement inside a function is E0129.
 
-<!-- file: examples/reference-diagnostics/e0106_attribute_alone.sisu -->
+<!-- file: examples/reference-diagnostics/e0106_pub_let.sisu -->
 ```sisu
-# An attribute before a statement, where no declaration follows.
+# A visibility before a line that declares nothing.
+pub let total = 3 + 4
+
 def main():
-    @deprecated("use `total`")
-    let total = 3 + 4
     print(total)
 ```
 
-<!-- output: examples/reference-diagnostics/e0106_attribute_alone.console -->
+<!-- output: examples/reference-diagnostics/e0106_pub_let.console -->
 ```console
-$ sisu run e0106_attribute_alone.sisu
+$ sisu run e0106_pub_let.sisu
 error[E0106]: expected a declaration, found `let`
-  --> e0106_attribute_alone.sisu:4:5
+  --> e0106_pub_let.sisu:2:5
   |
-4 |     let total = 3 + 4
+2 | pub let total = 3 + 4
   |     ^^^
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-Put the attribute before a declaration, or leave it out: a statement
-takes none.
+Declare the value a constant, whose type is written and whose name is
+in capitals ([R3](declarations.md)):
 
-<!-- file: examples/reference-diagnostics/e0106_attribute_alone_fixed.sisu -->
+<!-- file: examples/reference-diagnostics/e0106_pub_let_fixed.sisu -->
 ```sisu
-# The attribute stands before a declaration.
-@deprecated("use `total`")
-def seven() -> int:
-    return 3 + 4
+# A constant is what a module gives other modules as a value.
+pub const TOTAL: int = 3 + 4
 
 def main():
-    print(seven())
+    print(TOTAL)
 ```
 
-<!-- output: examples/reference-diagnostics/e0106_attribute_alone_fixed.console -->
-```console
-$ sisu run e0106_attribute_alone_fixed.sisu
-warning[W0023]: `seven` is deprecated: use `total`
-  --> e0106_attribute_alone_fixed.sisu:7:11
-  |
-7 |     print(seven())
-  |           ^^^^^^^
-
+<!-- output: examples/reference-diagnostics/e0106_pub_let_fixed.out -->
+```text
 7
 ```
-
-The call of `seven` now warns (W0023), which is what the attribute is
-for.
-
-Shown in [R14](attributes.md#writing-an-attribute).
 
 ### E0107
 
@@ -1302,6 +1290,182 @@ def main():
 ```
 
 Shown in [R13](modules.md).
+
+### E0129
+
+`parse.attribute-on-statement`: `@{name}` stands before a statement; an
+attribute stands on the line before a declaration (a function, a type,
+a constant, a test), and none applies to a statement.
+
+An attribute stands before a declaration; inside a block, the line
+after it is a statement, which no attribute applies to. The parser
+names the attribute and reads the statement as it would without it.
+`@tile`, `@unroll` and `@vectorize` before a loop get a note: they are
+the checked directives that
+[19](../../proposal/19-novel-features.md) plans with the native
+backend, not in the language yet.
+
+<!-- file: examples/reference-diagnostics/e0129_statement_attribute.sisu -->
+```sisu
+# An attribute before a statement, which no attribute applies to.
+def main():
+    @deprecated("use `total`")
+    let total = 3 + 4
+    print(total)
+```
+
+<!-- output: examples/reference-diagnostics/e0129_statement_attribute.console -->
+```console
+$ sisu run e0129_statement_attribute.sisu
+error[E0129]: `@deprecated` stands before a statement; an attribute stands on the line before a declaration (a function, a type, a constant, a test), and none applies to a statement
+  --> e0129_statement_attribute.sisu:3:5
+  |
+3 |     @deprecated("use `total`")
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+Put the attribute before a declaration, or leave it out: a statement
+takes none.
+
+<!-- file: examples/reference-diagnostics/e0129_statement_attribute_fixed.sisu -->
+```sisu
+# The attribute stands before a declaration.
+@deprecated("use `total`")
+def seven() -> int:
+    return 3 + 4
+
+def main():
+    print(seven())
+```
+
+<!-- output: examples/reference-diagnostics/e0129_statement_attribute_fixed.console -->
+```console
+$ sisu run e0129_statement_attribute_fixed.sisu
+warning[W0023]: `seven` is deprecated: use `total`
+  --> e0129_statement_attribute_fixed.sisu:7:11
+  |
+7 |     print(seven())
+  |           ^^^^^^^
+
+7
+```
+
+The call of `seven` now warns (W0023), which is what the attribute is
+for.
+
+Shown in [R14](attributes.md#writing-an-attribute).
+
+### E0130
+
+`parse.visibility-scope`: `pub({name})` is not Sisu's: an item is `pub`
+to every package, or `pub(package)` to the modules of its own.
+
+`pub(package)` is the one name that stands between the parentheses of
+`pub` ([R13](modules.md#visibility)). Rust's `pub(crate)` would mean
+the same as `pub(package)`, and `pub(super)` and `pub(self)` have no
+meaning in Sisu, so each is an error rather than a guess.
+
+<!-- file: examples/reference-diagnostics/e0130_pub_crate.files/e0130_pub_crate.sisu -->
+```sisu
+# Rust's visibility of a crate.
+pub(crate) def heat() -> int:
+    return 80
+
+def main():
+    print(heat())
+```
+
+<!-- output: examples/reference-diagnostics/e0130_pub_crate.console -->
+```console
+$ sisu run e0130_pub_crate.sisu
+error[E0130]: `pub(crate)` is not Sisu's: an item is `pub` to every package, or `pub(package)` to the modules of its own
+  --> e0130_pub_crate.sisu:2:5
+  |
+2 | pub(crate) def heat() -> int:
+  |     ^^^^^
+  = fix: make it visible to its package: `pub(package)`: `package`
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+The fix writes `package` between the parentheses, which is what
+`pub(crate)` means in Rust; write `pub` for an item that other packages
+use.
+
+<!-- file: examples/reference-diagnostics/e0130_pub_crate_fixed.sisu -->
+```sisu
+# `pub(package)` shows the function to its own package only.
+pub(package) def heat() -> int:
+    return 80
+
+def main():
+    print(heat())
+```
+
+<!-- output: examples/reference-diagnostics/e0130_pub_crate_fixed.out -->
+```text
+80
+```
+
+Shown in [R19](false-friends.md#pubcrate).
+
+### E0131
+
+`parse.attribute-line`: an attribute stands on a line of its own, before
+its declaration.
+
+An attribute is a line of its own, so that a declaration's first line
+starts with its keyword wherever it has attributes
+([R14](attributes.md#writing-an-attribute)). The parser reads the
+declaration after the attribute as if the line were broken, so the
+program's other errors are still found.
+
+<!-- file: examples/reference-diagnostics/e0131_attribute_line.sisu -->
+```sisu
+# An attribute on the line of its declaration.
+@derive(Eq) struct Point:
+    x: int
+    y: int
+
+def main():
+    print(Point(1, 2) == Point(1, 2))
+```
+
+<!-- output: examples/reference-diagnostics/e0131_attribute_line.console -->
+```console
+$ sisu run e0131_attribute_line.sisu
+error[E0131]: an attribute stands on a line of its own, before its declaration
+  --> e0131_attribute_line.sisu:2:13
+  |
+2 | @derive(Eq) struct Point:
+  |             ^^^^^^
+  = fix: put the declaration on the next line
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+The fix breaks the line before the declaration.
+
+<!-- file: examples/reference-diagnostics/e0131_attribute_line_fixed.sisu -->
+```sisu
+# The attribute stands on the line before its declaration.
+@derive(Eq)
+struct Point:
+    x: int
+    y: int
+
+def main():
+    print(Point(1, 2) == Point(1, 2))
+```
+
+<!-- output: examples/reference-diagnostics/e0131_attribute_line_fixed.out -->
+```text
+True
+```
+
+Shown in [R14](attributes.md#writing-an-attribute).
 
 ## Names and declarations
 
@@ -2264,6 +2428,24 @@ Aino
 ```
 
 Shown in [chapter 14](../tutorial/14-traits.md).
+
+### E0239
+
+`resolve.no-assoc-type`: `{ty}` has no associated type `{name}` among its
+bounds.
+
+`T.NAME` names an associated type or constant of a trait that bounds
+`T`; none of `T`'s bounds declares `NAME`, or it is a constant used
+where a type's constant argument goes. A trait's constant read through
+a type parameter, `Array[int, T.SIDES]`, is a value of the instance,
+known where the function runs, while a type's constant argument is
+known where the type is written, so it gets the note
+`resolve.const-through-param`, which names the `const` parameter that
+carries the value instead. The message calls the constant an
+associated type.
+
+Example: [R3](declarations.md#traits) shows it, and the `const`
+parameter that is its fix.
 
 ### E0241
 
@@ -5965,17 +6147,18 @@ error[E0413]: `longer` returns `str`, which borrows, and has more than one borro
   |                               ^^^
   |            ------ `a` is a borrowed parameter
   |                    ------ `b` is a borrowed parameter
-  = fix: return owned text instead: `String`
   = fix: name `a, b` in the `from` clause: ` from a, b`
+  = fix: return owned text instead: `String`
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-The first fix makes the result owned text, a `String`, which is right
-when the result borrows from neither parameter, such as text the
-function reads or makes; here it would copy. The second names every
-borrowed parameter in `from`; name fewer when the result borrows from
-fewer.
+The fixes come in the order the body asks for. Here a `return` gives a
+borrowed parameter, so the first names every borrowed parameter in
+`from`; name fewer when the result borrows from fewer. The second makes
+the result owned text, a `String`, which is right when the result
+borrows from neither parameter, such as text the function reads or
+makes, and comes first for such a body; here it would copy.
 
 <!-- file: examples/reference-diagnostics/e0413_from_fixed.sisu -->
 ```sisu
@@ -5996,8 +6179,8 @@ Shown in [chapter 11](../tutorial/11-borrowing.md).
 
 ### E0417
 
-`borrow.must-consume`: `{name}` is never consumed: a `{ty}` must be
-passed to an `own` parameter before it goes out of scope.
+`borrow.must-consume`: `{name}` is never consumed: a value of `{ty}`
+must be passed to an `own` parameter before it goes out of scope.
 
 A `@must_consume` type cannot be dropped silently: each value is passed
 to an `own` parameter before it goes out of scope (D-054).
@@ -6020,7 +6203,7 @@ def main():
 <!-- output: examples/reference-diagnostics/e0417_must_consume.console -->
 ```console
 $ sisu run e0417_must_consume.sisu
-error[E0417]: `note` is never consumed: a `Draft` must be passed to an `own` parameter before it goes out of scope
+error[E0417]: `note` is never consumed: a value of `Draft` must be passed to an `own` parameter before it goes out of scope
   --> e0417_must_consume.sisu:11:33
    |
 11 |     print("drafted {note.text}")
@@ -7777,9 +7960,9 @@ Shown in [R11](contracts.md#where-clauses-stand).
 
 ### E0806
 
-`contract.invariant-field`: `{what}` is part of a `{ty}`, whose
-invariant only its own methods may change and check again; change it
-through one of them.
+`contract.invariant-field`: `{what}` is part of a value of `{ty}`,
+whose invariant only its own methods may change and check again; change
+it through one of them.
 
 An invariant holds for every value of its type that the program can see:
 construction checks it, and so does each return of a `mut self` method.
@@ -7804,7 +7987,7 @@ def main():
 <!-- output: examples/reference-diagnostics/e0806_invariant_field.console -->
 ```console
 $ sisu run e0806_invariant_field.sisu
-error[E0806]: `today.closes` is part of a `Schedule`, whose invariant only its own methods may change and check again; change it through one of them
+error[E0806]: `today.closes` is part of a value of `Schedule`, whose invariant only its own methods may change and check again; change it through one of them
   --> e0806_invariant_field.sisu:9:5
   |
 9 |     today.closes = 25
@@ -7895,8 +8078,8 @@ Shown in [R11](contracts.md#where-clauses-stand).
 
 ### E0810
 
-`refine.not-satisfied`: `{value}` is not a `{ty}`: `{predicate}` is
-false for it.
+`refine.not-satisfied`: `{value}` is not of type `{ty}`: `{predicate}`
+is false for it.
 
 A value whose type is a refinement satisfies its predicate. The compiler
 checks a constant while compiling, and a value it cannot know passes
@@ -7915,7 +8098,7 @@ def main():
 <!-- output: examples/reference-diagnostics/e0810_refinement_constant.console -->
 ```console
 $ sisu run e0810_refinement_constant.sisu
-error[E0810]: `135` is not a `Percent`: `0 <= self <= 100` is false for it
+error[E0810]: `135` is not of type `Percent`: `0 <= self <= 100` is false for it
   --> e0810_refinement_constant.sisu:5:32
   |
 5 |     let after_ladle: Percent = 135
@@ -9310,6 +9493,22 @@ $ sisu check w0014_ambient_authority_fixed.sisu
 ```
 
 Shown in [chapter 27](../tutorial/27-systems.md).
+
+### W0015
+
+`lint.wildcard-own-enum`: `case _` matches {variants} of `{ty}`, an enum
+of this package, so a variant added to `{ty}` later is not an error
+here.
+
+A lint, which `sisu lint` prints and `sisu check` does not
+([R16](sisu-command.md#sisu-lint)). A `match` over an enum of its own
+package should name every variant, so that a variant added later is an
+error at each `match` that has to handle it (D-043). The fix
+`lint.list-variants` writes the variants the wildcard matches in its
+place. A wildcard over an enum of another package, a wildcard nested in
+a pattern, and a binding such as `case other:` are not linted.
+
+Example: [R16](sisu-command.md#sisu-lint) shows it.
 
 ### W0021
 
@@ -10745,7 +10944,8 @@ $ sisu run --explore 5 d0127_explore_differs.sisu
 schedule seed 1 of 5 printed other output than seed 0, with the same exit status 0; `--schedule-seed 1` runs it again
 ```
 
-The output is the first seed's; `--schedule-seed 1` shows the other.
+The output is the reported seed's, seed 1's; seed 0 printed the names
+the other way round, as `--schedule-seed 0` shows.
 Make the output independent of the schedule, here by sorting the names,
 or make the order part of the program, by joining the tasks in turn:
 
@@ -10933,6 +11133,9 @@ it. `sisu explain CODE` prints the same line.
 | E0126 | `parse.expected-member` | a struct body holds fields, methods and `pass`; this line is none of them |
 | [E0127](#e0127) | `parse.loop-else` | a loop has no `else` in Sisu; keep what the loop finds in a variable and test it after the loop, as in `if let Some(i) = found:` |
 | [E0128](#e0128) | `parse.glob-import` | Sisu has no glob imports: name what the module gives, as in `from std.collections import Deque, Heap`, or import the module and write `collections.Deque` |
+| [E0129](#e0129) | `parse.attribute-on-statement` | `@{name}` stands before a statement; an attribute stands on the line before a declaration (a function, a type, a constant, a test), and none applies to a statement |
+| [E0130](#e0130) | `parse.visibility-scope` | `pub({name})` is not Sisu's: an item is `pub` to every package, or `pub(package)` to the modules of its own |
+| [E0131](#e0131) | `parse.attribute-line` | an attribute stands on a line of its own, before its declaration |
 
 ### Names and declarations, every code
 
@@ -10975,7 +11178,7 @@ it. `sisu explain CODE` prints the same line.
 | [E0236](#e0236) | `resolve.orphan-impl` | `{trait}` for `{ty}` can be implemented only in the package of the trait or of the type, or in the root package |
 | [E0237](#e0237) | `resolve.missing-assoc-type` | the impl of `{trait}` for `{ty}` does not say what `{name}` is; add `type {name} = ...` |
 | E0238 | `resolve.unknown-assoc-type` | `{trait}` has no associated type `{name}` |
-| E0239 | `resolve.no-assoc-type` | `{ty}` has no associated type `{name}` among its bounds |
+| [E0239](#e0239) | `resolve.no-assoc-type` | `{ty}` has no associated type `{name}` among its bounds |
 | E0240 | `resolve.sealed-trait` | `{trait}` is implemented only by the standard library, so `{ty}` cannot implement it |
 | [E0241](#e0241) | `resolve.not-object-safe` | `{trait}` cannot be used as `dyn {trait}`: its method `{method}` cannot be called through it, because {reason} |
 | [E0242](#e0242) | `resolve.supertrait-missing` | `{ty}` implements `{trait}`, which requires `{super}`, but `{ty}` does not implement `{super}` |
@@ -11129,7 +11332,7 @@ it. `sisu explain CODE` prints the same line.
 | E0414 | `borrow.from-not-a-parameter` | `{name}` in the `from` clause is not a borrowed parameter of `{function}` |
 | E0415 | `borrow.from-without-borrow` | `{function}` returns `{ty}`, which does not borrow, so it takes no `from` clause |
 | E0416 | `borrow.move-out-of-drop` | cannot move `{part}` out of `{name}`, because `{ty}` implements `Drop`, which needs the whole value |
-| [E0417](#e0417) | `borrow.must-consume` | `{name}` is never consumed: a `{ty}` must be passed to an `own` parameter before it goes out of scope |
+| [E0417](#e0417) | `borrow.must-consume` | `{name}` is never consumed: a value of `{ty}` must be passed to an `own` parameter before it goes out of scope |
 | [E0418](#e0418) | `borrow.must-consume-exit` | this leaves the scope with `{name}` unconsumed: a `{ty}` must be passed to an `own` parameter first |
 | E0419 | `borrow.move-out-of-place` | cannot move out of `{name}` through a reference or an index; copy it with `.copy()` |
 | E0420 | `borrow.must-consume-intrinsic` | `{callee}` may drop values that `{name}` holds, and a `{ty}` is must-consume: its values must be passed to an `own` parameter |
@@ -11204,9 +11407,9 @@ it. `sisu explain CODE` prints the same line.
 | [E0803](#e0803) | `contract.old-outside` | `old(...)` is a value as it was on entry, which only an `ensures` clause can ask for |
 | [E0804](#e0804) | `contract.old-arguments` | `old` takes one expression, as in `old(self.balance)` |
 | [E0805](#e0805) | `contract.generator-ensures` | a generator has no `ensures`: what it returns is its iterator |
-| [E0806](#e0806) | `contract.invariant-field` | `{what}` is part of a `{ty}`, whose invariant only its own methods may change and check again; change it through one of them |
+| [E0806](#e0806) | `contract.invariant-field` | `{what}` is part of a value of `{ty}`, whose invariant only its own methods may change and check again; change it through one of them |
 | [E0807](#e0807) | `contract.not-in-test` | a test has no contract; check what it needs with `assert` |
-| [E0810](#e0810) | `refine.not-satisfied` | `{value}` is not a `{ty}`: `{predicate}` is false for it |
+| [E0810](#e0810) | `refine.not-satisfied` | `{value}` is not of type `{ty}`: `{predicate}` is false for it |
 | [E0811](#e0811) | `refine.needs-try-from` | expected `{expected}`, found `{found}`; a value becomes a `{expected}` where its predicate is checked, with `{name}.try_from(...)` |
 | [E0812](#e0812) | `refine.change-through-base` | `{what}` is a `{ty}`, which a change through its base could take outside `{predicate}`; change a copy of the base and check it again with `try_from` |
 | [E0813](#e0813) | `refine.own-impl` | `{ty}` refines `{base}` and has its reading impls; it cannot have an impl of `{trait}` of its own |
@@ -11278,7 +11481,7 @@ it. `sisu explain CODE` prints the same line.
 | W0012 | `unsafe.level` | the package declares `unsafe = "{level}"`, {why} |
 | W0013 | `unsafe.auto-trait-bound` | `unsafe impl {trait}` claims `{trait}` for every `{param}`, which is not bounded by `{trait}` |
 | [W0014](#w0014) | `unsafe.ambient-authority` | `{name}` is public and safe and reaches the foreign function `{callee}` without taking a capability, so its callers need no authority for what the call does |
-| W0015 | `lint.wildcard-own-enum` | `case _` matches {variants} of `{ty}`, an enum of this package, so a variant added to `{ty}` later is not an error here |
+| [W0015](#w0015) | `lint.wildcard-own-enum` | `case _` matches {variants} of `{ty}`, an enum of this package, so a variant added to `{ty}` later is not an error here |
 | W0016 | `resolve.shadow-prelude-set` | the error set `{name}` hides the prelude's in this module, and the two are different sets: what the prelude's functions return is not this one |
 | [W0021](#w0021) | `contract.trait-elsewhere` | the contract of `{method}` binds this impl, and stage 1 does not have the syntax of the trait's module to check it in |
 | [W0022](#w0022) | `resolve.unknown-attribute` | `@{name}` is not an attribute Sisu reads, and no compile-time code of the program reads attributes (`reflect.attributes_of`), so it means nothing here |

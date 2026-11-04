@@ -1,7 +1,5 @@
 $ sisu check --holes hello.sisu
 error[D0009]: unknown option `--holes` for `sisu check`
-$ sisu lint hello.sisu
-error[D0003]: unknown command `lint`; run `sisu help`
 $ sisu add json
 error[D0003]: unknown command `add`; run `sisu help`
 $ sisu remove json
@@ -10,8 +8,6 @@ $ sisu update
 error[D0003]: unknown command `update`; run `sisu help`
 $ sisu publish
 error[D0003]: unknown command `publish`; run `sisu help`
-$ sisu audit --unsafe hello.sisu
-error[D0009]: unknown option `--unsafe` for `sisu audit`
 $ sisu review main..HEAD
 error[D0003]: unknown command `review`; run `sisu help`
 $ sisu fix --edition 2030

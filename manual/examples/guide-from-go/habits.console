@@ -17,4 +17,5 @@ error[E0200]: cannot find `nil` in this scope
   |
 3 |     let best: str? = nil
   |                      ^^^
+  = fix: Sisu writes it `None`: `None`
 

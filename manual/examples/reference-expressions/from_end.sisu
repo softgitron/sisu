@@ -1,0 +1,9 @@
+# `^` counts from the end of a `Slice` and of `bytes` as of a list.
+def ends(values: Slice[int]) -> String:
+    return "{values[^1]} {values[1:^1]}"
+
+def main():
+    let readings = [3, 5, 8, 2, 7]
+    print(ends(readings.as_slice()[1:]))
+    let magic = b"PNG\r\n"
+    print("{magic[^2]} {magic[:^2]}")

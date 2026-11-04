@@ -1,0 +1,8 @@
+$ sisu run e0129_statement_attribute.sisu
+error[E0129]: `@deprecated` stands before a statement; an attribute stands on the line before a declaration (a function, a type, a constant, a test), and none applies to a statement
+  --> e0129_statement_attribute.sisu:3:5
+  |
+3 |     @deprecated("use `total`")
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

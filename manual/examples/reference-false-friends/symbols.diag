@@ -1,1 +1,2 @@
 5:17-5:18 E0103 parse.expected-expression found="`&`"
+  fix parse.sisu-spelling 5:16-5:18 "and"

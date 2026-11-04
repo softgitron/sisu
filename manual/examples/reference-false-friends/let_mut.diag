@@ -1,1 +1,2 @@
 3:9-3:12 E0105 parse.expected-pattern found="`mut`"
+  fix parse.sisu-spelling 3:5-3:12 "var"

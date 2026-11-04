@@ -1,0 +1,8 @@
+$ sisu check pub_crate.sisu
+error[E0130]: `pub(crate)` is not Sisu's: an item is `pub` to every package, or `pub(package)` to the modules of its own
+  --> pub_crate.sisu:2:5
+  |
+2 | pub(crate) def total(prices: list[int]) -> int:
+  |     ^^^^^
+  = fix: make it visible to its package: `pub(package)`: `package`
+

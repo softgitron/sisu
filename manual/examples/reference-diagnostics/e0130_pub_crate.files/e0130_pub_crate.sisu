@@ -1,0 +1,6 @@
+# Rust's visibility of a crate.
+pub(crate) def heat() -> int:
+    return 80
+
+def main():
+    print(heat())

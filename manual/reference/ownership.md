@@ -632,7 +632,7 @@ def main():
 <!-- output: examples/reference-ownership/forgotten.console -->
 ```console
 $ sisu run forgotten.sisu
-error[E0417]: `scrap` is never consumed: a `Draft` must be passed to an `own` parameter before it goes out of scope
+error[E0417]: `scrap` is never consumed: a value of `Draft` must be passed to an `own` parameter before it goes out of scope
   --> forgotten.sisu:11:22
    |
 11 |     print(scrap.text)

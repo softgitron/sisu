@@ -154,6 +154,10 @@ def main():
 [-1, 2, 5, 4, 1]
 ```
 
+`^` counts from the end of every sequence that takes an index: the
+bytes of chapter 6 and the views of part of a list that chapter 12
+introduces read `b[^1]` and `xs[1:^1]` as a list does.
+
 ## Dicts
 
 A dict maps keys to values. Each key appears once, and looking a key up
