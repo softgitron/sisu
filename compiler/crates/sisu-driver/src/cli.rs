@@ -3766,7 +3766,25 @@ fn run_tests(
             }
             TestResult::Blocked(h) => {
                 blocked += 1;
-                format!("blocked by todo({})", sisu_diag::render::quote(h))
+                let outcome = format!("blocked by todo({})", sisu_diag::render::quote(h));
+                // A blocked test stops with its hole's closure (17; decision
+                // 340), which is what it printed: its block shows it, as a
+                // failed test's shows its output (decision 507).
+                if !report.out.is_empty() || !report.err.is_empty() {
+                    let mut printed = text(msg::CLI_TEST_OUTPUT, &[]);
+                    printed.push('\n');
+                    for line in report.out.lines().chain(report.err.lines()) {
+                        printed.push_str("  ");
+                        printed.push_str(line);
+                        printed.push('\n');
+                    }
+                    let head = text(
+                        msg::CLI_TEST_RESULT,
+                        &[("name", sisu_diag::render::quote(name)), ("outcome", outcome.clone())],
+                    );
+                    failures.push_str(&format!("\n{head}\n{printed}"));
+                }
+                outcome
             }
         };
         out.push_str(&text(

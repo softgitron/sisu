@@ -1017,9 +1017,9 @@ Nothing here switches the default.
   run in the interpreter checks every raw access (released, out of
   bounds, uninitialised, misaligned, of another type, two layouts, a leak
   at exit); natively such a program's fault is undefined behaviour. Of
-  the suite's 273 runnable cases (a run, or a `sisu test` run, to compare,
-  decision 460), 257 run natively (`native.list`, 47 of them their tests
-  too, decisions 500 to 504); 15 of the other 16 are `unsafe/` cases
+  the suite's 274 runnable cases (a run, or a `sisu test` run, to compare,
+  decision 460), 258 run natively (`native.list`, 48 of them their tests
+  too, decisions 500 to 507); 15 of the other 16 are `unsafe/` cases
   whose expectation is the model's report, and the last,
   `contracts/properties`, waits for a property's budget (below), as
   `contracts/checks`'s tests do. *Need*: a program whose packages declare `unsafe` (its

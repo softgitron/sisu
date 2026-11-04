@@ -620,7 +620,11 @@ pub(crate) fn abort(message: &str) -> ! {
         end_expect_copy(&newest_stack());
     }
     crate::sched::write_trail();
-    stderr(&format!("{message}\n"));
+    // A native test a hole blocked is blocked however its run ended: the
+    // deadlock it waits in is no output of its (decision 507).
+    if hole().is_none() || std::env::var_os("SISU_TEST_REPORT").is_none() {
+        stderr(&format!("{message}\n"));
+    }
     flush();
     std::process::exit(crate::entry::EXIT_ABORT)
 }

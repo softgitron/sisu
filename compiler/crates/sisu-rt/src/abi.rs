@@ -1352,7 +1352,8 @@ intrinsics! {
     // so that their numbers stay what they were.
     SharedSame = "Shared.same",
     // `expect`'s failures in a program built with its tests (17; decision
-    // 388), which no native build is: natively they are `assert`'s.
+    // 388): recorded under a native test (decision 500), `assert`'s
+    // elsewhere.
     ExpectFail = "expect.fail",
     ExpectFailCompare = "expect.fail_compare",
     ExpectFailParts = "expect.fail_parts",

@@ -48,13 +48,6 @@ fn text(id: msg::MsgId, params: &[(&str, String)]) -> String {
     s
 }
 
-/// Why the options ask for what a native run does not do, if they do:
-/// nothing since PCT, the exhaustive search and the faults run natively
-/// (decisions 501 and 502).
-pub(crate) fn refused(_options: &Options) -> Option<&'static str> {
-    None
-}
-
 /// The removal of the executables this process built.
 pub(crate) fn clean() {
     let mut b = BUILT.lock().unwrap_or_else(|p| p.into_inner());
@@ -498,10 +491,6 @@ pub(crate) fn run(
     which: &[usize],
     profile: Profile,
 ) -> Result<Vec<(String, TestResult, RunReport)>, i32> {
-    if let Some(what) = refused(options) {
-        host.stderr(&text(msg::NATIVE_TEST_UNSUPPORTED, &[("what", what.to_string())]));
-        return Err(1);
-    }
     let exe = executable(prog, options, profile, host)?;
     let real = |k: usize| {
         options.sim.is_none()

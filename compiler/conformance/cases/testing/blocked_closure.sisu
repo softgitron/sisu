@@ -1,0 +1,16 @@
+# A blocked test stops with its hole's closure (17; decisions 340 and 507):
+# what the hole printed, the closure, and what the test printed before it,
+# is the test's block, as a failed test's output is, where the capture of
+# decision 466 dropped it; a passing test's output stays hidden.
+
+def answer(x: int) -> int:
+    let y = x + 1
+    return todo("answer")
+
+test "waits for an answer":
+    print("asking")
+    assert answer(41) == 42
+
+test "passes quietly":
+    print("hidden")
+    assert 1 == 1

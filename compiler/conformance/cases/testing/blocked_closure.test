@@ -1,0 +1,11 @@
+test "waits for an answer" ... blocked by todo("answer")
+test "passes quietly" ... ok
+
+test "waits for an answer" ... blocked by todo("answer")
+what the test printed:
+  asking
+  in scope at the typed hole `todo("answer")`:
+    x = 41
+    y = 42
+
+1 passed, 0 failed, 1 blocked

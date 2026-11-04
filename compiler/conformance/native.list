@@ -229,6 +229,7 @@ syntax/continuation
 syntax/option_nested
 syntax/option_spaced
 syntax/option_sugar
+testing/blocked_closure
 testing/doc_examples
 testing/expect
 testing/explore_output

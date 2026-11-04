@@ -8915,3 +8915,25 @@ driver"; the manual's finding from G32)
      `#[repr(C)]` struct: `dict::Table` is opaque, and the header's layout
      is written once. A value's address costs a call where it was a field
      read. RT_SIZES_PLACEHOLDER This changes no rule of the language.
+
+**Two regressions of decision 466** (section "Testing"; 17; decisions 340
+and 466; the manual's round)
+
+507. A blocked test's block shows what it printed, where the capture of
+     decision 466 dropped it with a passing test's: a typed hole's closure
+     (`R0160`, "in scope at the typed hole ..."), which stage 1 makes the
+     program print where the hole is reached (R27), is the test's output,
+     so `sisu test` showed a blocked test with no closure, where 17 says it
+     stops with it and decision 340 printed it. After the summary's lines,
+     a blocked test that printed anything has a block of its own, its
+     header (`... blocked by todo("name")`) and what it printed under
+     `what the test printed:` (`D0135`), as a failed test's block shows
+     it, in the interpreter and natively; a passing test's output stays
+     hidden. And a diagnostic the test runner issues itself, a native
+     build's failure or `D0134`, goes to standard error rather than into
+     the capture, where `sisu test --native --sim` printed nothing and
+     exited 1. `testing/blocked_closure` holds the first, in
+     `native.list`, and `run/testing`'s expectation shows its closure
+     again. `sisu --version` prints Cargo's version of the driver, `sisu
+     0.0.1`, which is the toolchain's version replay tokens record; it is
+     left as it is. This changes no rule of the language.
