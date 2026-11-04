@@ -1,0 +1,10 @@
+# RULES.md, R67: the fix of R54 where the parse error expects a bracket or
+# a colon, inside a call and in a `for` header, and for a `//` comment at
+# the end of a line, which divides by its first word.
+def main():
+    let n = 3
+    print(n as f64)
+    for i in 0..3:
+        print(i)
+    let m = 4 // the count
+    print(m)

@@ -1864,9 +1864,14 @@ note; `parser.items.import_from`.
 proposal's `examples/ownership.sisu`), whose SIR now hashes the keys as
 the host does rather than through the derived impls, which print the
 same. The cases `cases/habits/forms.sisu` (the forms, which run: its
-`.out`), `refusals.sisu` and `glob_import.sisu` (their `.diag`).
+`.out`), `refusals.sisu` and `glob_import.sisu` (their `.diag`). The
+conformance suite's `run/shared_equality` (decision 464, stage 0's fifth
+round) writes `d.get(b) == Some(ref 1)`, the borrow of a temporary, which
+the frozen Rust front end refuses with `E0313` and stage 1 lowers; the
+case expects stage 1's run.
 
 - Differs: `compiler/conformance/cases/ownership/proposal_graph.sisu`: sir
+- Differs: `compiler/conformance/cases/run/shared_equality.sisu`: types, sir, ids, human, doc, doc-output
 - Differs: `compiler/stage1/cases/habits/forms.sisu`: tree, ids, human, fmt-check, doc, doc-output
 - Differs: `compiler/stage1/cases/habits/glob_import.sisu`: tree, ids, human, fmt-check, doc, doc-output
 - Differs: `compiler/stage1/cases/habits/refusals.sisu`: ids, human, doc, doc-output
@@ -2020,6 +2025,13 @@ whose `.err` gains it, `stage1/expected/conformance/cases/types/typed_hole.err`;
 `cases/holes/release.sisu` (its `.release` and `.diag`), `closure.sisu`
 (its `.out`, `.err` and `.status`: it runs, interpreted and natively),
 `blocked.sisu` and `failed.sisu` (their `.tests`).
+
+Since stage 0's decision 466 the runner captures what a test prints and
+shows it only with a failure, so a blocked test's closure, which the run
+time prints as the test's output, is dropped with that output: the two
+`.tests` are blessed again without it (stage 1's seventh round), and the
+closure of a blocked test waits for stage 0 to show a blocked test's
+captured output under its line, as it shows a failed one's.
 
 - Differs: `compiler/conformance/cases/run/testing.sisu`: sir, sir-tests
 - Differs: `compiler/conformance/cases/types/typed_hole.sisu`: sir, behaviour
@@ -3882,3 +3894,337 @@ case `cases/findings6/designed_missing.sisu` (its `.diag`).
      a `let` is one `E0900` that names the list pattern of a `match`,
      where it was three errors of its pattern. Stage 1 decides it
      (RULES.md, R64).
+
+## R65. A package's black-box tests: `tests/NAME.sisu` is a program whose dependency is the package (decision 480)
+
+**The rule** (17: "A `tests/` directory holds black-box tests that see
+only the public API"). A file directly in the `tests/` directory beside a
+package's manifest (`[package]`), not a script, is compiled by every
+command that takes a path (`check`, `sir`, `sir --tests`, `build`, `doc`,
+`lint`) as a program of one module, the file, whose dependencies are the
+package it tests, by the package's name, and the package's
+dev-dependencies, by theirs: it imports the package as any dependency,
+its `pub` items only (`from ledger import total` of a private `total` is
+`E0255`), and the package is built without its own tests, as a
+dependency is. The file has the package's features, each turning on the
+package's own of the same name, so that `--features` and
+`--no-default-features` mean what they mean for the package; the files'
+names are relative to the package's directory (`tests/balance.sisu`,
+`src/lib.sisu`); no lockfile is written for it, as for a file. A
+package's dev-dependencies are the black-box file's, not the package's
+code's.
+
+`sisu1 test PKG` (and a workspace's members) runs, after the package's
+own tests, each `tests/*.sisu` by name, a program each with its own
+report and summary line, its replay token naming the file; the status is
+the worst of them, as for a workspace's members.
+
+What `sir --tests tests/NAME.sisu` prints is what it prints of any program
+built with its tests (R46, R47): the SIR (`source 0 "tests/NAME.sisu"`,
+then the package's sources and the dev-dependencies'), the file's tests'
+lines (`test "NAME" test#K` with their tags) and its benchmarks, and none
+of the package's tests; the program's warnings on standard error; a
+program with an error is refused with its diagnostics and `D0006`.
+
+Stage 1's version is 0.7.0 (R56): the driver may rely on it.
+
+**Why.** port-debt.md, "A package's `tests/*.sisu` are not run" (the
+manual's finding from chapter 19): stage 1 had to compile such a file as
+it compiles a package's dependency before the driver can run it.
+
+**In stage 1.** `package.tested_package` and `package.load_black_box`
+(from `load_file_with`), the loader's `root` (whose dev-dependencies and
+`[trust]` count) and its dev-dependencies given to the black-box file;
+`main.test_command` and `main.black_box_files`; `main.VERSION`,
+`sisu.toml` and the lockfiles.
+
+**What it changes.** No program of the corpus has a `tests/` file. The
+case `cases/packages/black_box.pkg` (a library, its unit test, a
+dev-dependency and `tests/balance.sisu`; its `.tests`).
+
+**What the stage-0 side must do.** `sisu test` of a package (or of a
+workspace's members), after the package's own program: for each file of
+its `tests/` directory, `*.sisu` sorted by name, ask stage 1 `sir --tests
+PKG/tests/NAME.sisu` with the options it passes for the package
+(`--locked`, `--features`, `--no-default-features`, `--accept-unsafe`,
+`--contracts=...`), run that SIR as it runs the package's, and report it
+as a program of its own (its lines, failures and summary; a replay token
+naming the file); the status is the worst of the programs'. With
+`--native` the same SIR is built natively. port-debt.md's item then goes.
+
+**Decision 480**, for docs/architecture.md:
+
+480. A file directly in a package's `tests/` directory is a program of
+     one module whose dependencies are the package, by its name, and the
+     package's dev-dependencies (17's black-box tests): it sees the
+     package's `pub` items only, the package is built without its own
+     tests, the file has the package's features, and its files are named
+     relative to the package's directory. `sir --tests PKG/tests/NAME.sisu`
+     prints its SIR with its own tests' lines, which `sisu test` runs after
+     the package's own, a program each; `sisu1 test` does so, and stage
+     1's version is 0.7.0. Stage 1 decides it (RULES.md, R65).
+
+## R66. Stage 1's compile-time evaluator holds a `Shared` as its value (decision 481)
+
+**The rule** (decision 464; 04, rule 5). The evaluator of compile-time
+code holds a `Shared` value as the value it shares (`Shared.new`,
+`Shared(x)`, `Shared.get`, a field or method reached through it, a
+`copy` of it): `==` and `!=`, a set's element and a dict's key compare
+and hash what it holds, as decision 464 has the run time do, and `{x}`
+and `{x:?}` show it. Its identity, which a value has not, is beyond the
+evaluator (`Shared.same`, `Shared.count`, `Shared.downgrade`); a `Shared`
+a `comptime` expression would keep for run time is `E0604` ("a `Shared`
+made at compile time cannot be kept"), as stage 0 has it.
+
+**Why.** README "What is next", 10; it was "beyond the slice" at
+`Shared.new`, where stage 0 evaluates the same expression.
+
+**In stage 1.** `interp` (`SHARED`, the intrinsics `Shared.new` and
+`Shared.get`, a dereference through a `Shared`, its display, and the
+baker's refusal).
+
+**What it changes.** No program of the corpus evaluates a `Shared` at
+compile time. The case `cases/comptime/shared.sisu` (its `.out`, and its
+SIR, stage 0's).
+
+**Decision 481**, for docs/architecture.md:
+
+481. Stage 1's compile-time evaluator holds a `Shared` as the value it
+     shares, so `==`, `hash`, a set and a dict follow it to the value as
+     decision 464 has the run time do; its identity (`same`, `count`, a
+     `Weak`) is beyond the evaluator, and a `Shared` kept for run time is
+     `E0604`. Stage 1 decides it (RULES.md, R66).
+
+## R67. R54's spelling where the error expects a bracket or a colon, and a fix that names its replacement once (decision 482)
+
+**The rule** (the manual's findings of step 16, "Diagnostics without
+fixes"). R54's fix `parse.sisu-spelling` is given also where the parse
+error is `E0100`, expecting the bracket of a call or the colon of a
+header, at `as` or `..`: `print(n as f64)` gets `.to_f64()` and `for i in
+0..3:` `range(0, 3)`. A `//` comment at the end of a line, `let n = 3 //
+the count`, which divides by its first word and is `E0117` at its second,
+gets the fix `#`; a one-word one after a value, `print(n) // done`, is a
+division by a name, `E0200`, which gets the fix `#` when `//` follows a
+space and the name ends the line. And a fix's message does not name the
+replacement its edit shows: `parse.sisu-spelling` reads "Sisu writes it
+so: `.to_f64()`" and `type.lowercase-binding` "a binding's name starts with
+a lowercase letter: `kind`", where each named it twice.
+
+**Why.** The manual's findings ("The fix of R54 comes only where the parse
+error stops at the habit itself", "A fix whose message names its
+replacement shows it twice"; chapter 2, R19, G3, G4).
+
+**In stage 1.** `parser.habits` (`cast_or_range`, the comment's words),
+`resolve.slash_comment`; the catalog's two fix texts.
+
+**What it changes.** Nothing in the corpus, which writes none of these;
+the human form of R54's cases and of `E0327`'s fix. The cases
+`cases/findings7/spellings.sisu` and `slash_comment.sisu` (their `.diag`).
+
+- Differs: `compiler/stage1/cases/findings7/spellings.sisu`: tree, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/findings7/slash_comment.sisu`: names, ids, human, doc, doc-output
+
+**Documents to bring along:** the manual's transcripts that show
+`parse.sisu-spelling` or `type.lowercase-binding` (about a dozen under
+`manual/examples/`, the false friends' reference and the guides from Go
+and Rust).
+
+**Decision 482**, for docs/architecture.md:
+
+482. R54's spelling fix is given also where the parse error expects a
+     bracket or a colon (`print(n as f64)`, `for i in 0..3:`), and `#` for
+     a `//` comment at the end of a line, also where it is a division by
+     a name (`E0200`); a fix's message no longer names the replacement its
+     edit shows. Stage 1 decides it (RULES.md, R67).
+
+## R68. Messages without "a `{ty}`", and a trait's constant where a type goes (decision 483)
+
+**The rule.** `E0418`, `E0420`, `E0812`, `R0069` and `R0103` write the
+type without an article, as R55 has `E0417`, `E0806` and `E0810`: "a value
+of `Opening` must be passed to an `own` parameter first", "`x` is of type
+`Port`", "`0` is not of type `Port`". And a trait's constant read through a
+type parameter where a type goes, `Array[int, T.SIDES]`, whose bound
+declares the constant, is `E0274` (`resolve.const-not-type`, "`SIDES` is a
+constant of `Shape`, which bounds `T`, not a type"), with R50's note,
+where `E0239` said that `T` "has no associated type `SIDES`".
+
+**Why.** The manual's findings ("E0418, E0420, E0812, R0069 and R0103
+still write "a `{ty}`"", R17; "E0239 for a trait's constant ... says that
+`T` "has no associated type `SIDES`"", R3, R17).
+
+**In stage 1.** The catalog (shared with stage 0, whose front end and run
+time print the five messages too); `typeck.collect.bound_constant`.
+
+**What it changes.** The run time's `R0069` in four `.defer` expectations
+of the conformance suite (`traits/must_consume_generic`,
+`ownership/must_consume_dropped`, `must_consume_container` and
+`must_consume_try`), blessed again; the case
+`cases/traits/const_through_param.sisu` (its `.diag`, `E0274`).
+
+**Documents to bring along:** the manual's transcripts of the five
+messages (`e0418_left_unconsumed`, chapter 13's `drafts`, the diagnostics
+reference) and of `E0239`'s for a constant.
+
+**Decision 483**, for docs/architecture.md:
+
+483. `E0418`, `E0420`, `E0812`, `R0069` and `R0103` write the type without
+     an article ("a value of `T`", "of type `T`"); a trait's constant read
+     through a type parameter where a type goes is `E0274`, which calls it
+     a constant, where `E0239` called it an associated type. Stage 1
+     decides it (RULES.md, R68).
+
+## R69. `sisu lint`'s options, the audit of one file, and `fmt` of a file whose one error is `E0130` (decision 484)
+
+**The rule.** `sisu lint` answers an option it does not take, `--help`
+among them, with `D0009` ("unknown option `--help` for `sisu lint`") and
+status 2, as the driver's commands do, where it read the option as a path
+and stopped with `error: NotFound` and its trace. `sisu audit --unsafe` of
+a program of one file heads it "no level", "a program of one file, which
+may hold any unsafe code", where "no `unsafe`" read as if the file held
+none above the blocks it lists. And `E0130` (`pub(crate)`, R54) is no
+syntax error to the formatter: it is given of a tree the parser built
+whole, a name `pub(...)` does not take, which `check` reports; `sisu fmt`
+formats such a file as written, as it formats a file with any other error
+that is not of syntax, and `parse --shape` gives its shape, where `fmt`
+refused it (`D0075`) though it parses.
+
+**Why.** The manual's findings ("`sisu lint --help` ... stops with
+`error: NotFound`", R16; "a one-file program with an unsafe block is
+headed "no `unsafe`"", R16, chapter 27, G19; "A file whose one error is
+E0130 ... parses, and `sisu fmt` refuses it", R17, R19). The formatter
+refuses a text whose tree is not the file's (02, "an AST-equality
+self-check"); `E0130`'s is.
+
+**In stage 1.** `main` (`lint`'s options, `unknown_option`; the audit's
+file), `audit.unsafe_report`, `fmt.refuses` and `fmt.shape.shape`.
+
+**What it changes.** The case `cases/unsafe/operations.audit` (its first
+line). The formatter's verdict on `cases/findings5/parse_fixes.sisu` is
+unchanged: it has other syntax errors.
+
+**Decision 484**, for docs/architecture.md:
+
+484. `sisu lint` answers an option it does not take with `D0009` and
+     status 2; the audit heads a program of one file "no level"; a file
+     whose only parse diagnostic is `E0130` is formatted, its tree being
+     whole. Stage 1 decides it (RULES.md, R69).
+
+## R70. A derived impl's diagnostics at the derive, and the derives' messages (decision 485)
+
+**The rule.** A diagnostic in an impl that a derive writes (a trait's
+`comptime def derive`, or the prelude's), which stage 0 places in the
+module the compiler wrote, `<derive>/main.sisu`, is placed at the
+derive's argument that asked for the impl (`@derive(Csv)`'s `Csv`), with
+its message and parameters, the note `type.derived-code` ("in the impl of
+`Csv` that the derive writes for `Sauna`: `cells.push("{self.stove}")`")
+and neither the labels nor the fixes, which point into code the program
+does not have (E0347's `:?`). The derives' messages: `@derive(Encode)`
+(`Decode`, `Plain`) without its import is `E0243` with the note
+`resolve.derive-import` ("`Encode` is a trait of `std.json`, whose derive
+is known where it is imported: `from std.json import Encode`"); the fix
+"derive it" is not offered for a type that derives the trait already,
+`Pair[Plain]` of `@derive(Eq) struct Pair[T]`, but for the type argument
+that lacks it, `Plain`; and `E0347` for a type of the module without
+`Arbitrary` under a bound `T: Arbitrary` gets the fix `@derive(Arbitrary)`.
+
+**Why.** The manual's findings ("A diagnostic in a derived impl ... is
+placed in `<derive>/main.sisu` with no label at the `@derive`", chapter
+25, R14; "E0347 for a field type without `Display`, at
+`<derive>/main.sisu`, offers the fix `:?`", G21; "`@derive(Encode,
+Decode)` without `from std.json import ...` is E0243", G7; "E0347 for
+`Pair(Plain(1), Plain(2)) == ...` offers "derive it" for `Pair`", R14;
+"E0347 for a type without `Arbitrary` ... has no fix", G11); the sixth
+round's open item.
+
+**In stage 1.** `typeck.instances` (`DeriveOrigin`, recorded where each
+template is unfolded, and `E0243`'s note), `typeck.placed_at_derive` (where
+a program's files' diagnostics are gathered), `typeck.check.derive_fix`
+and `derive_edit`.
+
+**What it changes.** The cases `cases/findings7/derive_placed.sisu` and
+`derive_messages.sisu` (their `.diag`), and `cases/unsafe/comptime_written.sisu`
+(R5), whose `E0615` in the derived impl is now at `@derive(Named)` (its
+`.diag` blessed again; its differences are R5's).
+
+- Differs: `compiler/stage1/cases/findings7/derive_placed.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings7/derive_messages.sisu`: ids, human, doc, doc-output
+
+**Documents to bring along:** the manual's transcripts of a derive's
+diagnostics (`guide-derive/stove`, chapter 25's `derive_heater`).
+
+**Decision 485**, for docs/architecture.md:
+
+485. A diagnostic in an impl a derive writes is placed at the derive's
+     argument that asked for it, with a note giving the impl's line and
+     without the labels and fixes that point into the generated text;
+     `E0243` for a std module's derivable trait names its import; the fix
+     "derive it" goes to the type argument that lacks the trait when the
+     type derives it, and is offered for `Arbitrary`. Stage 1 decides it
+     (RULES.md, R70).
+
+## R71. A dependency that `when` excludes, and a call of a variadic function (decision 486)
+
+**The rule.** An import of a dependency whose `when` excludes the target
+is `E0275` (`resolve.dependency-excluded`, "cannot import `win`: the
+dependency `win` of `app` is not built for this target, which its `when`
+in that package's `sisu.toml` excludes"), where `E0260` asked to add to
+`[dependencies]` what is there. And a call of a function with a variadic
+parameter is not checked against the function's parameters, which R64's
+`E0900` refuses: one error, where `E0305` counted the arguments against
+the parameters before the variadic one.
+
+**Why.** The manual's findings ("An import of a dependency whose `when`
+excludes the target is E0260, whose message asks to add it to
+`[dependencies]`", R13); the sixth round's open item (R64).
+
+**In stage 1.** `main.layout_input` (each package's excluded
+dependencies), `typeck.collect` (`SourcePackage.excluded`,
+`PackageData.excluded`, the import's check; the variadic parameter's
+`header_broken`).
+
+**What it changes.** The cases `cases/packages/excluded_dependency.pkg`
+(its `.diag`) and `cases/findings7/variadic_call.sisu` (its `.diag`).
+
+- Differs: `compiler/stage1/cases/packages/excluded_dependency.pkg`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings7/variadic_call.sisu`: ids, human, doc, doc-output
+
+**Decision 486**, for docs/architecture.md:
+
+486. An import of a dependency whose `when` excludes the target is
+     `E0275`, which says so, where `E0260` asked to add it to
+     `[dependencies]`; a call of a function with a variadic parameter is
+     not checked against its parameters, so R64's `E0900` is its one
+     error. Stage 1 decides it (RULES.md, R71).
+
+## R72. Habits a parse error stops at: `lambda`, `f"..."`, `class`, `try:`, `go f()`, a keyword as a name (decision 487)
+
+**The rule.** Where a parse error stops at another language's spelling,
+R54's fix writes Sisu's, or a note says what Sisu has instead: Python's
+`lambda x: x + 1` (`E0117`) gets `x -> x + 1` (`(a, b) ->` for two
+parameters); `f"n is {n}"` (`E0100`) the string without the `f`, since
+every string interpolates; `class Point:` (`E0107`) `struct`; `try:`,
+`except:` and `finally:` (`E0117`) the note `parse.no-exceptions` ("Sisu
+has no `try`: an error is a value ..."); Go's `go f()` (`E0117`) the note
+`parse.go-task` ("a task starts in a scope ..."); and a keyword where a
+binding's name goes, `let type = "csv"` (`E0105`), the note
+`parse.keyword-name` ("`type` is a keyword, which names no binding").
+
+**Why.** The manual's findings ("Some habits still get a diagnostic that
+does not name the Sisu spelling: `lambda`, `f"..."`, `class`, `try:` ...
+and Go's `go f()`", R19, G3, G4; "A keyword used as a name ... gets E0105
+and E0103, neither saying that the word is a keyword", chapter 2).
+
+**In stage 1.** `parser.habits` (`with_habit`), `parser.items` (the
+top-level statement's diagnostic through it).
+
+**What it changes.** The case `cases/findings7/habits.sisu` (its `.diag`).
+
+- Differs: `compiler/stage1/cases/findings7/habits.sisu`: tree, ids, human, fmt-check, doc, doc-output
+
+**Decision 487**, for docs/architecture.md:
+
+487. A parse error at Python's `lambda`, `f"..."` or `class` gets the fix
+     that writes Sisu's spelling; at `try:`, `except:`, `finally:` and Go's
+     `go f()` a note that says what Sisu has instead; at a keyword where a
+     binding's name goes a note that it is a keyword. Stage 1 decides it
+     (RULES.md, R72).

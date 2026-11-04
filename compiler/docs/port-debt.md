@@ -557,10 +557,13 @@ days, and every `.sir` expectation that holds a `System`.
 **A package's `tests/*.sisu` are not run** (17's black-box tests; the
 manual's finding from chapter 19): only its transcripts are. *Pay*: the
 driver runs each file as a program of its own whose dependency is the
-package, its `pub` items only; stage 1 must compile such a file, as it
-compiles a package's dependency (its `sir --tests` of a file outside
-`src/` that imports the package by name), which it does not yet.
-*Estimate*: the driver's part half a day, once stage 1 has it.
+package, its `pub` items only. Stage 1 compiles such a file since its
+seventh round (its RULES.md, R65, decision 480): `sir --tests
+PKG/tests/NAME.sisu` prints the file's SIR, the package and its
+dev-dependencies its dependencies, with the file's tests' lines, and
+`sisu1 test PKG` runs them; the driver's `sisu test` is left, which asks
+for each file after the package's own program and reports it as a
+program of its own. *Estimate*: half a day.
 
 **A run-time message has no code.** A panic is printed as `panic:
 MESSAGE`, without the `R` code the catalog gives it, so a reader has

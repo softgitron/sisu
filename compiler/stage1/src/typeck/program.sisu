@@ -405,6 +405,8 @@ pub struct PackageData:
     pub deps: list[(String, int)]
     ## Its root module.
     pub root: ModuleId?
+    ## The dependencies whose `when` excludes the target (RULES.md, R71).
+    pub excluded: list[String]
 
 ## Definitions of the prelude that the checker refers to by role.
 pub struct WellKnown:

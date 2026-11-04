@@ -1,10 +1,10 @@
 # A refinement's check (07: constructing one checks its predicate,
 # statically when the value is a constant) lowers to `contract.fail` of
 # kind 3, which the run time reports as R0103 (`contract.refinement-failed`,
-# "`0` is not a `Port`: ..."): a `comptime` expression evaluated at compile
-# time, where its failure is E0810, and kept in the SIR `sisu sir` prints
-# of the program, as stage 0's does (the manual's finding R11; README,
-# "The sixth round").
+# "`0` is not of type `Port`: ..."): a `comptime` expression evaluated
+# at compile time, where its failure is E0810, and kept in the SIR that
+# `sisu sir` prints of the program, as stage 0's does (the manual's
+# finding R11; README, "The sixth round").
 
 type Port = int where 1 <= self <= 65535
 

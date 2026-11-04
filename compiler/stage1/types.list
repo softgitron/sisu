@@ -540,11 +540,13 @@ compiler/stage1/cases/checker_names/annotation_paths.sisu
 compiler/stage1/cases/checker_names/doc_example_names.sisu
 compiler/stage1/cases/checker_names/fake_signature_names.sisu
 compiler/stage1/cases/checker_names/template_names.sisu
+compiler/stage1/cases/packages/black_box.pkg
 compiler/stage1/cases/packages/doc_pages.pkg/shop
 compiler/stage1/cases/packages/names.pkg/app
 compiler/stage1/cases/packages/overlapping_impl.pkg
 compiler/stage1/cases/packages/template_elsewhere.pkg
 compiler/stage1/cases/comptime/evaluator.sisu
+compiler/stage1/cases/comptime/shared.sisu
 compiler/stage1/cases/comptime/sieve.sisu
 compiler/stage1/cases/testing/refused_ownership.sisu
 compiler/stage1/cases/testing/refused_comptime.sisu

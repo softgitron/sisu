@@ -1,0 +1,10 @@
+# A black-box test of the ledger (17): it imports the package by its name,
+# and the package's dev-dependency.
+from fixtures import entries
+from ledger import balance
+
+test "a balance adds the entries":
+    assert balance(entries()) == 6
+
+test "an empty ledger balances to nothing":
+    assert balance([]) == 0

@@ -1,0 +1,6 @@
+test "the unit test sees the private `total`" ... ok
+1 passed, 0 failed, 0 blocked
+test "a balance adds the entries" ... ok
+test "an empty ledger balances to nothing" ... ok
+2 passed, 0 failed, 0 blocked
+--- stderr

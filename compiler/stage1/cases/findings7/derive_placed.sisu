@@ -1,0 +1,25 @@
+# RULES.md, R70: a diagnostic in the impl a trait's derive writes is placed
+# at the derive's argument that asked for it, with a note that gives the
+# line of the impl, and without the fix, an edit of code the program does
+# not have.
+trait Csv:
+    def row(self) -> String
+
+    comptime def derive(T: type) -> impl Csv for T:
+        return impl Csv for T:
+            def row(self) -> String:
+                var cells: list[String] = []
+                comptime for f in reflect.fields_of(T):
+                    cells.push("{self.[f]}")
+                return cells.join(",")
+
+struct Stove:
+    kilowatts: int
+
+@derive(Csv)
+struct Sauna:
+    name: String
+    stove: Stove
+
+def main():
+    pass

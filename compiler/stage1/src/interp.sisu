@@ -96,6 +96,11 @@ pub error Stop:
     ## What stage 1's evaluator does not run.
     Beyond(why: String)
 
+## The type name of a `Shared` value, `Value.Adt(SHARED, 0, [value])`: the
+## evaluator holds a `Shared` as its value, which no program's type is
+## named.
+const SHARED: str = "<shared>"
+
 ## A value: a tree, each aggregate owning its parts.
 pub enum Value:
     Unit
@@ -705,6 +710,9 @@ impl Interp:
                     match self.read(ptr)?:
                         case Value.Ref(q):
                             ptr = q.copy()
+                        # A `Shared` holds its value as its one part.
+                        case Value.Adt(ty, _, _) if ty == SHARED:
+                            ptr.path.push(Step.Field(0))
                         case _:
                             return Err(
                                 Stop.Beyond("a dereference of a value that is not a reference")
@@ -977,6 +985,27 @@ impl Interp:
                         return Ok(Value.Range(cur=cur, stop=stop, step=step))
                     case _:
                         return Err(Stop.Beyond("an iterator over a value that is not a list"))
+            # A `Shared` is its value (RULES.md, R66): `==`, `hash` and a
+            # set's or a dict's lookup follow it to the value, as decision
+            # 464 has the run time do, and its identity (`Shared.same`,
+            # `Shared.count`, a `Weak`), which a value does not have, is
+            # beyond the evaluator.
+            case "Shared.new":
+                return Ok(Value.Adt(ty=SHARED.to_string(), variant=0, fields=[arg(args, 0)?]))
+            case "Shared.get":
+                let Value.Ref(first) = arg(args, 0)? else:
+                    return Err(Stop.Beyond("a `Shared` that is not a place"))
+                var p = first.copy()
+                for _ in range(64):
+                    match self.read(p)?:
+                        case Value.Ref(q):
+                            p = q.copy()
+                        case Value.Adt(ty, _, _) if ty == SHARED:
+                            p.path.push(Step.Field(0))
+                            return Ok(Value.Ref(p))
+                        case _:
+                            return Err(Stop.Beyond("a `Shared` that is not a place"))
+                return Err(Stop.Beyond("a chain of references"))
             case "Iter.next":
                 let Value.Ref(p) = arg(args, 0)? else:
                     return Err(Stop.Beyond("an iterator that is not a range"))
@@ -2030,6 +2059,9 @@ impl Interp:
                     case Err(_):
                         out.push("<dangling>")
             # std's `Contextual` (prelude): `message: cause`.
+            # A `Shared` shows its value (its `Display`, the prelude's).
+            case Value.Adt(ty, _, fields) if ty == SHARED and len(fields) == 1:
+                self.display_into(prog, fields[0], mut out)?
             case Value.Adt(ty, _, fields):
                 if ty == "Contextual" and len(fields) == 2:
                     self.display_into(prog, fields[0], mut out)?
@@ -2071,6 +2103,8 @@ impl Interp:
                 out.push("[")
                 self.debug_list(prog, xs, mut out)?
                 out.push("]")
+            case Value.Adt(ty, _, fields) if ty == SHARED and len(fields) == 1:
+                self.debug_into(prog, fields[0], mut out)?
             case Value.Adt(ty, variant, fields):
                 var is_struct = True
                 if ty == "Option" or ty == "Result":
@@ -2265,6 +2299,8 @@ impl Baker:
                     ops.push(self.part(decls, k, type_arg(ty, 0))?)
                     ops.push(self.part(decls, x, type_arg(ty, 1))?)
                 self.assign(dest.copy(), Rvalue.Aggregate(kind=Aggregate.Dict, operands=ops))
+            case Value.Adt(name, _, _) if name == SHARED:
+                return Err(Stop.NotKept("a `Shared`"))
             case Value.Adt(name, variant, fields):
                 var is_struct = False
                 if let Some(TypeDecl.Struct(_, _, _, _, _, _)) = decls.get(name):

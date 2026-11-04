@@ -1413,6 +1413,12 @@ impl Resolver:
             let param = Param(name="text".to_string(), value="None".to_string())
             let edit = Edit(start=token.start, end=token.end, text="None".to_string())
             d = d.fix_params(Msg.ParseSisuSpelling, [param], [edit])
+        elif let Some(at) = slash_comment(self.text, token.start, token.end):
+            # `print(n) // done`: a one-word comment written `//` after a
+            # value divides it by a name (RULES.md, R67).
+            let param = Param(name="text".to_string(), value="#".to_string())
+            let edit = Edit(start=at, end=at + 2, text="#".to_string())
+            d = d.fix_params(Msg.ParseSisuSpelling, [param], [edit])
         elif let Some(similar) = self.similar_name(name):
             d = d.fix(Msg.ResolveSimilarName, "name", similar, token.start, token.end, similar)
         # Python's `open(path)`: files are the capability `Fs`'s (R16).
@@ -2924,6 +2930,25 @@ pure def is_pattern_kind(kind: SyntaxKind) -> bool:
         case IdentPat | WildcardPat | LiteralPat | CtorPat | RestPat | TuplePat | ParenPat | ListPat: True
         case StarPat | OrPat: True
         case _: False
+
+## Where `//` starts, when the name from `start` to `end` is the last word
+## of its line and a `//` after a space comes just before it: a line
+## comment of another language, `print(n) // done`, that Sisu reads as a
+## division (RULES.md, R67).
+pure def slash_comment(text: str, start: int, end: int) -> int?:
+    var e = end
+    while e < text.byte_len() and (text.byte_at(e) == 32 or text.byte_at(e) == 9):
+        e += 1
+    if e < text.byte_len() and text.byte_at(e) != 10 and text.byte_at(e) != 13:
+        return None
+    var s = start
+    while s > 0 and text.byte_at(s - 1) == 32:
+        s -= 1
+    if s == start or s < 3:
+        return None
+    if text.byte_at(s - 1) != 47 or text.byte_at(s - 2) != 47 or text.byte_at(s - 3) != 32:
+        return None
+    return Some(s - 2)
 
 # ------------------------------------------------------------------ tests
 

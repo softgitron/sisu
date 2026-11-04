@@ -1,6 +1,6 @@
 # RULES.md, R50: a trait's constant read through a type parameter is a
 # value of the instance, computed where the function runs (R37), and a
-# type's constant argument is known where the type is written: `E0239`,
+# type's constant argument is known where the type is written: `E0274`,
 # whose note names the `const` parameter that carries the value.
 
 trait Shape:

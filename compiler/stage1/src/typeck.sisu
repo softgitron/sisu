@@ -48,6 +48,7 @@ from stage1.typeck.check import Checker, Cx, Finished, RetCtx
 from stage1.typeck.collect import Resolver, SourceModule, SourcePackage
 from stage1.typeck.contracts import contract_only, leading_contracts
 from stage1.typeck.generic_asserts import Assert, ConstCall, failures
+from stage1.typeck.instances import DeriveOrigin
 from stage1.typeck.program import (
     Answer,
     DefKind,
@@ -486,7 +487,7 @@ pub pure def check_file(
     keep: bool,
 ) -> Checked:
     let module = InputModule(path=[], file=String.new(), text=text.to_string(), package=0)
-    let package = SourcePackage(name=String.new(), deps=[], trusted=True)
+    let package = SourcePackage(name=String.new(), deps=[], trusted=True, excluded=[])
     let features = [Features.none()]
     return check_program(
         base, [module], [package], catalog, name_error, [], embedded, keep, False, True, features
@@ -507,7 +508,7 @@ pub pure def resolve_file(base: Base, text: str, catalog: Catalog) -> Program:
             sources.push(source_of(module, text))
     var r = base.resolver.copy()
     r.tests = True
-    let package = SourcePackage(name=String.new(), deps=[], trusted=True)
+    let package = SourcePackage(name=String.new(), deps=[], trusted=True, excluded=[])
     r.add_program(sources, [package], base.templates)
     return r.prog
 
@@ -1209,6 +1210,38 @@ pure def finish_file(
             ds = b.diags.copy()
         sort_unique(mut ds, catalog)
         files.push((t.copy(), ds))
+    # A diagnostic in a derived impl goes to the derive that asked for it
+    # (RULES.md, R70).
+    for k in range(len(files)):
+        if k >= len(file_modules):
+            continue
+        let origins = r.derive_origins.get(file_modules[k]) else:
+            continue
+        let parent = r.prog.modules[file_modules[k].index].parent else:
+            continue
+        var stay: list[Diagnostic] = []
+        var moved: list[Diagnostic] = []
+        for d in files[k].1:
+            match placed_at_derive(d, origins, files[k].0):
+                case Some(x):
+                    moved.push(x)
+                case None:
+                    stay.push(d.copy())
+        if moved.is_empty():
+            continue
+        files[k].1 = stay
+        if parent == r.prog.root:
+            for x in moved:
+                kept.push(x.copy())
+            sort_unique(mut kept, catalog)
+        else:
+            for j in range(len(files)):
+                if j < len(file_modules) and file_modules[j] == parent:
+                    var ds = files[j].1.copy()
+                    for x in moved:
+                        ds.push(x.copy())
+                    sort_unique(mut ds, catalog)
+                    files[j].1 = ds
     var file_names: list[String] = []
     for m in file_modules:
         file_names.push(file_name_of(r, m))
@@ -1243,6 +1276,33 @@ pure def finish_file(
         typed=None,
         lints=lints,
     )
+
+## A diagnostic of a derived impl, at `d.start` of the text the compiler
+## wrote for a module's derives, placed at the derive's argument that asked
+## for the impl (RULES.md, R70): its message and parameters, a note with
+## the line of the impl it is about, and neither its labels nor its fixes,
+## which point into code the program does not have. `None` for one outside
+## every impl, or at an implicit `Debug`, which nothing asked for.
+pure def placed_at_derive(d: Diagnostic, origins: list[DeriveOrigin], text: str) -> Diagnostic?:
+    for o in origins:
+        if d.start < o.start or d.start >= o.end or o.asked.start == o.asked.end:
+            continue
+        var line_start = d.start
+        while line_start > 0 and text.byte_at(line_start - 1) != 10:
+            line_start -= 1
+        var line_end = d.start
+        while line_end < text.byte_len() and text.byte_at(line_end) != 10:
+            line_end += 1
+        let line = text.byte_slice(line_start, line_end).trim()
+        var x = Diagnostic.new(d.msg, o.asked.start, o.asked.end)
+        x.params = d.params.copy()
+        let params = [
+            Param(name="trait".to_string(), value=o.trait_name.copy()),
+            Param(name="ty".to_string(), value=o.ty.copy()),
+            Param(name="code".to_string(), value=line.to_string()),
+        ]
+        return Some(x.note_params(Msg.TypeDerivedCode, params))
+    return None
 
 ## Whether a message is one of `sisu lint`'s (R11).
 pub pure def is_lint(m: Msg) -> bool:

@@ -735,6 +735,12 @@ impl Checker:
             wanted = [wk.eq, wk.hash]
         elif Some(tr) == wk.eq or Some(tr) == wk.partial_ord or Some(tr) == wk.copy:
             wanted = [Some(tr)]
+        elif cx.prog.defs[tr.index].name == "Arbitrary":
+            # A property test's generator (RULES.md, R41, R70), which the
+            # derive writes from its fields' generators: it says which
+            # field has none.
+            fields = []
+            wanted = [Some(tr)]
         else:
             return d
         var names: list[String] = []
@@ -754,6 +760,14 @@ impl Checker:
         if names.is_empty():
             return d
         let edit = derive_edit(cx.source, cx.prog.defs[def_.index].span.start, names) else:
+            # The type derives them already: what lacks the trait is a type
+            # argument, `Plain` of `Pair[Plain]`, whose derive is the fix
+            # (RULES.md, R70).
+            if let TyData.Adt(_, args) = self.types.data(t).copy():
+                for a in args:
+                    if cx.prog.implements(mut self.types, a, TraitRef(def_=tr, args=[]), self.env)
+                            == Answer.No:
+                        return self.derive_fix(cx, d, a, tr)
             return d
         return d.fix_edits(Msg.TypeDeriveTrait, [edit])
 
@@ -2527,9 +2541,14 @@ pub pure def derive_edit(text: str, at: int, names: list[String]) -> Edit?:
             for part in inside.split(","):
                 if not part.trim().is_empty():
                     all.push(part.trim().to_string())
+            var added = False
             for n in names:
                 if not all.contains(n.copy()):
                     all.push(n.copy())
+                    added = True
+            # A derive that is written already is no fix (RULES.md, R70).
+            if not added:
+                return None
             var start = prev
             while text.byte_at(start) == 32:
                 start += 1

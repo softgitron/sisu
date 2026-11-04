@@ -1,0 +1,22 @@
+# RULES.md, R70: the derives' messages. `Encode`, which `std.json` gives, is
+# `E0243` with a note that names its import; a type that derives `Eq`
+# already gets no fix, and the type argument without it does; a type
+# without `Arbitrary` under the bound gets `@derive(Arbitrary)`.
+@derive(Encode)
+struct Plain:
+    n: int
+
+@derive(Eq)
+struct Pair[T]:
+    a: T
+    b: T
+
+struct Money:
+    cents: int
+
+def first[T: Arbitrary]() -> int:
+    return 0
+
+def main():
+    print(Pair(a=Plain(n=1), b=Plain(n=2)) == Pair(a=Plain(n=1), b=Plain(n=2)))
+    print(first[Money]())

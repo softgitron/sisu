@@ -1,7 +1,7 @@
 3
 --- stderr
 counterexample run: the ownership checker rejected this program; its errors are deferred to the monitor
-ownership violation: `receipts` was dropped holding a `Receipt`, which must be passed to an `own` parameter
+ownership violation: `receipts` was dropped holding a value of `Receipt`, which must be passed to an `own` parameter
   used at: must_consume_container.sisu:20:27 (`drop _1`)
   at main (must_consume_container.sisu:20:27)
 SIR of `main`, its blocks that the conflict passes through:

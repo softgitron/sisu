@@ -1,0 +1,4 @@
+import win
+
+def main():
+    win.hello()

@@ -1,0 +1,10 @@
+4:1-4:6 E0107 parse.top-level-statement
+  fix parse.sisu-spelling 4:1-4:6 "struct"
+11:20-11:21 E0117 parse.trailing-tokens found="`x`"
+  fix parse.sisu-spelling 11:13-11:22 "x ->"
+13:12-13:13 E0100 parse.expected expected="`)`" found="a string"
+  fix parse.sisu-spelling 13:11-13:22 "\"n is {n}\""
+14:8-14:9 E0117 parse.trailing-tokens found="`:`"
+16:11-16:12 E0117 parse.trailing-tokens found="`:`"
+18:8-18:12 E0117 parse.trailing-tokens found="`work`"
+19:9-19:13 E0105 parse.expected-pattern found="`type`"
