@@ -8914,7 +8914,13 @@ driver"; the manual's finding from G32)
      `sisu-rt/src/dict.rs` mirrored `table.sisu`'s nine-word header as a
      `#[repr(C)]` struct: `dict::Table` is opaque, and the header's layout
      is written once. A value's address costs a call where it was a field
-     read. RT_SIZES_PLACEHOLDER This changes no rule of the language.
+     read. The runtime's seed grows from 570 450 to 572 380 bytes of SIR
+     and its object from 584 912 to 591 240 bytes (`target/rt/rt.o`), and
+     as the fixed point builds it with the Sisu backend from 1 099 920 to
+     1 106 688 bytes; the fixed point holds (rt-A.o and rt-B.o the same
+     bytes, as sisu2-A and sisu2-B, 29 170 464, and stage1-A and stage1-B,
+     57 638 096, which carry decisions 500 to 504 too). This changes no
+     rule of the language.
 
 **Two regressions of decision 466** (section "Testing"; 17; decisions 340
 and 466; the manual's round)
@@ -8937,3 +8943,23 @@ and 466; the manual's round)
      again. `sisu --version` prints Cargo's version of the driver, `sisu
      0.0.1`, which is the toolchain's version replay tokens record; it is
      left as it is. This changes no rule of the language.
+
+**The driver: a package's black-box tests** (section "Testing" and "The
+query layer and the driver"; 17; stage 1's seventh round, R65, decision
+480)
+
+508. `sisu test` of a package (each member of a workspace's) runs, after
+     the package's own program, each file of its `tests/` directory,
+     `*.sisu` sorted by name, as a program of its own: stage 1's `sir
+     --tests PKG/tests/NAME.sisu` with the options it is given for the
+     package (`--locked`, `--features`, `--no-default-features`,
+     `--accept-unsafe`, `--contracts=`), whose SIR is run (natively under
+     `--native`) and reported as any program's, its lines, failures and
+     summary, a replay token naming the file (so `sisu test --replay
+     TOKEN tests/NAME.sisu` runs it alone, and a replay of the package
+     runs none); the status is the worst of the programs', a blocked
+     one's yielding to a failure (decision 380). The driver does so for a
+     stage 1 that says it is `sisu1 0.7.0` or later
+     (`Stage1::black_box_tests`; `SISU_STAGE1_BLACK_BOX` decides first),
+     where a file of `tests/` was never run. This changes no rule of the
+     language.

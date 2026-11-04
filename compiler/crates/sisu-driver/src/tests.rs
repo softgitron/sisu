@@ -509,3 +509,19 @@ fn benchmark_samples_give_a_median_an_interval_and_outliers() {
     let same = crate::cli::sample_stats(&[5.0, 5.0, 5.0]);
     assert_eq!((same.median, same.low, same.high, same.outliers), (5.0, 5.0, 5.0, 0));
 }
+
+/// A package's black-box test files are its `tests/*.sisu`, by name
+/// (decision 508).
+#[test]
+fn black_box_files_are_the_tests_directory_by_name() {
+    let dir = std::env::temp_dir().join(format!("sisu-black-box-{}", std::process::id()));
+    let tests = dir.join("tests");
+    std::fs::create_dir_all(tests.join("data.sisu")).unwrap_or_default();
+    for f in ["zeta.sisu", "alpha.sisu", "notes.txt"] {
+        std::fs::write(tests.join(f), "").unwrap_or_default();
+    }
+    let shown = dir.display().to_string();
+    let files = crate::cli::black_box_files(&shown);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(files, vec![format!("{shown}/tests/alpha.sisu"), format!("{shown}/tests/zeta.sisu")]);
+}

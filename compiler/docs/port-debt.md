@@ -556,14 +556,6 @@ records of output; `print` stays, as the ambient form of `sys.stdout`
 that 06 does not forbid in a program's `main`. *Estimate*: two to three
 days, and every `.sir` expectation that holds a `System`.
 
-**A package's `tests/*.sisu` are not run** (17's black-box tests; the
-manual's finding from chapter 19): only its transcripts are. *Pay*: the
-driver runs each file as a program of its own whose dependency is the
-package, its `pub` items only; stage 1 must compile such a file, as it
-compiles a package's dependency (its `sir --tests` of a file outside
-`src/` that imports the package by name), which it does not yet.
-*Estimate*: the driver's part half a day, once stage 1 has it.
-
 **A run-time message has no code.** A panic is printed as `panic:
 MESSAGE`, without the `R` code the catalog gives it, so a reader has
 nothing to give `sisu explain` (the manual's finding from R17). *Pay*: a

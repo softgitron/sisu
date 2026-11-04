@@ -1205,6 +1205,28 @@ fn from_sir(
 /// gives its replay tokens, its test cache and the check that a `sim` build
 /// escapes nothing. What only the Rust front end gives (the ownership
 /// checker's deferral, the transcripts) is left out.
+/// The black-box test files of the package in `dir` (17: `tests/*.sisu`),
+/// by name, as a command line names them (decision 508).
+pub(crate) fn black_box_files(dir: &str) -> Vec<String> {
+    let tests = std::path::Path::new(dir).join("tests");
+    let Ok(entries) = std::fs::read_dir(&tests) else { return Vec::new() };
+    let mut names: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_file())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".sisu"))
+        .collect();
+    names.sort();
+    names
+        .into_iter()
+        .map(|n| {
+            let p = tests.join(n);
+            let p = p.strip_prefix(".").map(std::path::Path::to_path_buf).unwrap_or(p);
+            p.display().to_string()
+        })
+        .collect()
+}
+
 fn test_from_sir(
     prog: &sisu_sir::Program,
     flags: &[&str],
@@ -1716,33 +1738,41 @@ fn stage1_command(
             // `--locked` is run once for each program (decision 424); else its
             // `check` reports them after (decision 380).
             let once = stage1.sir_reports() && !has_ids(&p.flags);
+            // A package's black-box tests (17; stage 1's R65, decision 508):
+            // each `tests/*.sisu`, after the package's own program, a program
+            // of its own, with the package's options; a replay token names
+            // its file, so a replay runs that file alone.
+            let black_box = cmd == "test" && once && opts.token.is_none() && stage1.black_box_tests();
+            let sir_words = |path: &str| {
+                let mut words = vec!["sir".to_string(), "--tests".to_string()];
+                words.extend(contracts.clone());
+                if locked {
+                    words.push("--locked".into());
+                }
+                if accept {
+                    words.push("--accept-unsafe".into());
+                }
+                if !features.names.is_empty() {
+                    words.push("--features".into());
+                    words.push(features.names.join(","));
+                }
+                if features.no_default {
+                    words.push("--no-default-features".into());
+                }
+                words.push(path.to_string());
+                words
+            };
             let mut status = exit::OK;
             for input in &inputs {
                 let code = if once {
-                    let mut words = vec!["sir".to_string(), "--tests".to_string()];
-                    words.extend(contracts.clone());
-                    if locked {
-                        words.push("--locked".into());
-                    }
-                    if accept {
-                        words.push("--accept-unsafe".into());
-                    }
-                    if !features.names.is_empty() {
-                        words.push("--features".into());
-                        words.push(features.names.join(","));
-                    }
-                    if features.no_default {
-                        words.push("--no-default-features".into());
-                    }
-                    words.push(input.shown.clone());
-                    let r = match run(host, &words, Backend::Unused) {
+                    let r = match run(host, &sir_words(&input.shown), Backend::Unused) {
                         Ok(r) => r,
                         Err(code) => return code,
                     };
                     // Its diagnostics, and the line `sisu run` ends with when
                     // it fails; its warnings before the report.
                     host.stderr(&r.stderr);
-                    if r.status != exit::OK || r.stdout.is_empty() {
+                    let mut code = if r.status != exit::OK || r.stdout.is_empty() {
                         r.status.max(exit::ERROR)
                     } else {
                         match read_sir(&r.stdout, host) {
@@ -1750,7 +1780,28 @@ fn stage1_command(
                             Ok(prog) => test_from_sir(&prog, &p.flags, opts, input, true, host),
                             Err(code) => code,
                         }
+                    };
+                    if black_box && input.package.is_some() {
+                        for path in black_box_files(&input.shown) {
+                            let Ok(source) = std::fs::read_to_string(&path) else { continue };
+                            let file = Input::single(&path, source);
+                            let r = match run(host, &sir_words(&path), Backend::Unused) {
+                                Ok(r) => r,
+                                Err(c) => return c,
+                            };
+                            host.stderr(&r.stderr);
+                            let c = if r.status != exit::OK || r.stdout.is_empty() {
+                                r.status.max(exit::ERROR)
+                            } else {
+                                match read_sir(&r.stdout, host) {
+                                    Ok(prog) => test_from_sir(&prog, &p.flags, opts, &file, true, host),
+                                    Err(c) => c,
+                                }
+                            };
+                            code = worse(code, c);
+                        }
                     }
+                    code
                 } else {
                     // Stage 1's `sir` takes `--accept-unsafe` and the path;
                     // its `check` `--locked` too (a run with features stays

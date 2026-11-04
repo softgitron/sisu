@@ -366,6 +366,27 @@ impl Stage1 {
     /// by `sir --tests --locked` of an empty directory: a stage 1 whose
     /// `sir` takes no `--locked` stops at its usage, in about 50 ms, before
     /// it reads anything, and one that takes it finds no package there.
+    /// Whether this stage 1's `sir --tests PKG/tests/NAME.sisu` compiles a
+    /// package's black-box test file, whose dependency is the package
+    /// (stage 1's R65): `sisu1 0.7.0` and later (decision 508), asked once
+    /// in this process. [`BLACK_BOX_VAR`] decides when it is set.
+    pub fn black_box_tests(&self) -> bool {
+        if let Ok(v) = std::env::var(BLACK_BOX_VAR) {
+            return v == "1";
+        }
+        static ANSWER: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ANSWER.get_or_init(|| {
+            std::process::Command::new(&self.exe)
+                .arg("--version")
+                .stdin(std::process::Stdio::null())
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .and_then(|o| stage1_version(&String::from_utf8_lossy(&o.stdout)))
+                .is_some_and(|v| v >= BLACK_BOX_SINCE)
+        })
+    }
+
     pub fn sir_reports(&self) -> bool {
         if let Ok(v) = std::env::var(SIR_REPORTS_VAR) {
             return v == "1";
@@ -925,6 +946,14 @@ mod tests {
 /// diagnostics and takes `--locked` and the features (decision 470).
 const SIR_REPORTS_SINCE: (u32, u32, u32) = (0, 6, 0);
 
+/// The version from which stage 1 compiles a package's black-box test file
+/// (its R65, decision 508).
+const BLACK_BOX_SINCE: (u32, u32, u32) = (0, 7, 0);
+
+/// `SISU_STAGE1_BLACK_BOX=1` (or `0`): whether stage 1 compiles black-box
+/// test files, whatever its version says.
+pub const BLACK_BOX_VAR: &str = "SISU_STAGE1_BLACK_BOX";
+
 /// The version `sisu1 --version` printed (`sisu1 0.6.0`), if it is one.
 pub(crate) fn stage1_version(printed: &str) -> Option<(u32, u32, u32)> {
     let v = printed.lines().next()?.trim().strip_prefix("sisu1 ")?;
@@ -944,6 +973,8 @@ mod version_tests {
         assert_eq!(super::stage1_version("sisu1 1.10.2"), Some((1, 10, 2)));
         assert!(super::stage1_version("sisu1 0.6.0") >= Some(super::SIR_REPORTS_SINCE));
         assert!(super::stage1_version("sisu1 0.5.9") < Some(super::SIR_REPORTS_SINCE));
+        assert!(super::stage1_version("sisu1 0.7.0") >= Some(super::BLACK_BOX_SINCE));
+        assert!(super::stage1_version("sisu1 0.6.0") < Some(super::BLACK_BOX_SINCE));
         assert_eq!(super::stage1_version("error: Usage(\"--version\")"), None);
         assert_eq!(super::stage1_version("sisu 0.0.1"), None);
     }

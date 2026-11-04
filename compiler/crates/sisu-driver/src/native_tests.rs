@@ -29,10 +29,11 @@ const SYSTEM_FIELDS: [&str; 7] = ["Fs", "Net", "Clock", "Rand", "Env", "Proc", "
 /// Whether `sisu test` runs its tests natively, and in which profile.
 static NATIVE: Mutex<Option<Profile>> = Mutex::new(None);
 
-/// The executables built in this process, by what their dispatcher holds
-/// (the case seed and the profile of `sim`), and the directory they are in.
+/// The executables built in this process, by their program and what their
+/// dispatcher holds (the case seed and the profile of `sim`), and the
+/// directory they are in.
 #[allow(clippy::type_complexity)]
-static BUILT: Mutex<(Option<PathBuf>, Vec<((u64, bool), PathBuf)>)> = Mutex::new((None, Vec::new()));
+static BUILT: Mutex<(Option<PathBuf>, Vec<((u64, u64, bool), PathBuf)>)> = Mutex::new((None, Vec::new()));
 
 pub(crate) fn set(profile: Option<Profile>) {
     *NATIVE.lock().unwrap_or_else(|p| p.into_inner()) = profile;
@@ -357,7 +358,10 @@ fn executable(
     profile: Profile,
     host: &mut dyn Host,
 ) -> Result<PathBuf, i32> {
-    let key = (options.case_seed, options.sim.is_some());
+    // The program too: a package's black-box files are programs of their
+    // own run in the same process (decision 508).
+    let code = sisu_interp::record::content_hash(sir::write::write(prog).as_bytes());
+    let key = (code, options.case_seed, options.sim.is_some());
     let mut b = BUILT.lock().unwrap_or_else(|p| p.into_inner());
     if let Some((_, exe)) = b.1.iter().find(|(k, _)| *k == key) {
         return Ok(exe.clone());
