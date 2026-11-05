@@ -221,7 +221,13 @@ environment holding only `SISU_RT_ALLOCS=1`), and compares:
   program that aborts (status 134) ends without one.
 
 The expectations are the interpreter's: the native mode reads no file of
-its own and does not bless, except `NAME.release` (below). A native build lowers SIR through stage 2, the
+its own and does not bless, except `NAME.release` (below) and
+`NAME.native-out`: a program built from its source is built for the
+native runtime, so `target.runtime` is `native` to its compile-time code
+(decision 721), and its standard output is compared with
+`NAME.native-out` where the case has one (`reflect/target`); a program
+built from `sisu sir`'s SIR was built for the interpreter, and is compared
+with `NAME.out`. A native build lowers SIR through stage 2, the
 lowering written in Sisu, and through nothing else unless `--lower=rust`
 asks for the Rust lowering, the oracle (decisions 304 and 305), and a debug
 build's LIR is compiled by the x86-64 backend written in Sisu, a release

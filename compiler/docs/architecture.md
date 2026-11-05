@@ -2552,9 +2552,11 @@ blocked by a typed hole (decisions 340 and 380).
   fake `System` that persists between the runs of one file: an in-memory
   `Fs` with the files of `tests/NAME/`, a clock frozen at the epoch,
   `Rand.seeded(0)` and no network (`transcript_world` and
-  `transcript_system` in the prelude, which the Rust front end's lowering
-  keeps for this run only, so the transcripts run on its SIR of the
-  program while the tests run on stage 1's, decision 380). A difference
+  `transcript_system` in the prelude, which stage 1's `sir --tests` of
+  0.11.0 and later keeps for a program that has transcripts, so the
+  transcripts run on the SIR the tests run, decision 722; for an older
+  stage 1 the Rust front end's lowering keeps them for this run only, so
+  the transcripts run on its SIR of the program, decision 380). A difference
   fails with a diff (`D0061`); `--update` rewrites the file.
 - **Benchmarks**: `bench "name"(b: Bench):` is checked like a test and
   run by `sisu bench FILE [--iterations N] [--samples K]`, which times
@@ -2953,7 +2955,10 @@ parse --tree` (decision 621). A stage 1 of 0.9.0 and later (or
 `--dir` (the working directory for a session, the worksheet's own
 directory for a worksheet), and, for `sisu repl FILE`, what to call it,
 `--name`; and `:why` reads its `parse --bindings` instead of the tree
-(decision 640). An older stage 1 and `--front-end=rust`
+(decision 640). A stage 1 of 0.10.0 and later serves them from one
+process for the session, `sir --repl-serve`, which makes the standard
+library's base once (`SISU_STAGE1_REPL_SERVE=0` runs a process for each
+command again; decision 720). An older stage 1 and `--front-end=rust`
 leave them to the Rust front end, which builds the same programs, as the
 language server's worksheets are.
 
@@ -3618,7 +3623,7 @@ when the program ends, so the two interleave as the interpreter's do.
 ### The runtime in Sisu
 
 The runtime is being written in Sisu, piece by piece, as D-086 orders
-(decisions 335, 336, 350 to 352, 358, 383, 385, 422, 423, 506, 542, 562, 625, 645, 646, 680 and 681). `compiler/rt` is a Sisu package
+(decisions 335, 336, 350 to 352, 358, 383, 385, 422, 423, 506, 542, 562, 625, 645, 646, 680, 681 and 724). `compiler/rt` is a Sisu package
 (`unsafe = "extern"`) whose root module's `export_NAME` functions are the
 runtime's symbols `sisu_rt_NAME`, of Sisu's convention (decision 189),
 which the generated code and the runtime in Rust call as any function is
@@ -3651,6 +3656,7 @@ What is in Sisu (port-debt.md, "The runtime in Sisu", has what is not):
 | the intrinsics of lists, dicts, sets and slices, their descriptors decoded (`sisu_rt_collection`), `in` as an operator (`sisu_rt_contains`), a table's literal and the inline lookups (`sisu_rt_table_literal`, `_inline_find`) | `dispatch.sisu` over `list.sisu`, `table.sisu` and `iter.sisu` | the runtime in Rust, which reads the intrinsic's number alone and hands the call over, and whose entries `sisu_rt_binary`, `sisu_rt_table` and `sisu_rt_table_find` call the others (decisions 625 and 646) |
 | the scheduler's queues: the run queue, the waiters under their keys and the timers (`sisu_rt_queue_*`) | `queue.sisu` over `list.sisu` | the runtime in Rust's scheduler (`sched.rs`), which keeps their addresses (decision 645) |
 | the channels' buffers: the values sent and not received, in a ring of slots of the value's size (`sisu_rt_channel_*`) | `channel.sisu` | the runtime in Rust's channels (`tasks.rs`, `queue::ChanBuf`), which keep their addresses (decision 680) |
+| the scheduler's seeded generator and, under the default strategy, the choice of the next task (`sisu_rt_draw_*`) | `draw.sisu` over `queue.sisu` | the runtime in Rust's scheduler, `select` and the faults of `sim` (`queue::Rng`), which keep the generator's word (decision 724) |
 | a list's growth and moves, a slice's copies, the sort, `in` and `join` (`sisu_rt_list_*`) | `list.sisu` | `dispatch.sisu`, the runtime in Rust for every list it builds, `sorted`, `reversed` and a slice's copies, and the generated code's `sisu_rt_list_reserve` (decision 385) |
 | the tables of dicts and sets: a new one, a key looked up, an entry appended and one taken out, and a whole table copied, compared, shown and dropped; `d{k}`'s slot (`sisu_rt_table_slot`) | `table.sisu`, `dispatch.sisu` | `dispatch.sisu`, the runtime in Rust's `sisu_rt_dict_slot`, which the generated code calls for `d{k}` (decision 681), and `value.sisu` and `show.sisu` (decision 422) |
 | iterators: the next item, the iterator of an `Iterable[T]` argument, every item left, the drop, a new iterator of each of the eleven kinds and what one may wait for (`sisu_rt_iter_next`, `_iterable`, `_collect`, `_drop`, `_range` and its kin, `_waits`) | `iter.sisu` | the runtime in Rust, for `Iter.next` of what does not wait, every iterator it takes items from or makes, and `value.sisu` (decisions 423 and 542) |
@@ -10225,3 +10231,154 @@ standard library")
 708. `E0220` for a file's import of a module beside it notes that only a
      package makes them one program; a directory without a manifest is no
      package. Stage 1 decides it (RULES.md, R119).
+
+**Stage 0's twelfth round: the driver on stage 1's 0.10.0 and 0.11.0, the
+scheduler's generator in Sisu, the runtime profile's line, and what was
+left** (sections "The REPL and worksheets", "Testing", "SIR", "Stage 2",
+"The runtime in Sisu"; D-086; 06, 10, 12, 17; stage 1's R112, R113, R116,
+R120 and R122)
+
+720. `sisu repl` and `sisu ws` keep one process of stage 1 for the
+     session, `sir --repl-serve` (stage 1's R112), when `sisu1 --version`
+     is 0.10.0 or later (`Stage1::serves_repl_server`, or
+     `SISU_STAGE1_REPL_SERVE=1` or `0` whatever the version says): it is
+     started at the session's first command (`front::Server`), each
+     `sir --repl`, `sir --worksheet` and `parse --bindings` is a line of
+     its arguments separated by tabs, and the answer, `answer STATUS OUT
+     ERR` and the bytes on its standard error, is read as a run of its
+     own is (`settle`), so nothing after it changes; an empty line ends
+     it when the session ends. A server that goes away or answers out of
+     its frame is given up for the session, and that command and the
+     ones after it run as a process each, which reports what went wrong;
+     a stage 1 older than 0.10.0, one without 0.9.0's options, and
+     `--front-end=rust` keep decision 640's path. The suite's session
+     (`live/session.sisu` loaded, `live/session.stdin`'s fourteen lines,
+     two of them `:why`) takes 0.91 to 1.08 s served where it takes 6.38
+     to 6.75 s with a process for each command, measured one after the
+     other on the same machine at a load of 3 to 4 on four cores, about
+     0.06 s an input where it was 0.43 s (decision 641 measured 0.41 s);
+     the outputs are byte for byte the same, which
+     `repl_and_worksheets_run_on_stage_1` holds both ways for the suite's
+     sessions and worksheet. A worksheet is one command either way. This
+     changes no rule of the language.
+
+721. A native build is built for the native runtime: the driver passes
+     stage 1 `--target-runtime native` (its R116) for `sisu run --native`,
+     `sisu build --native`, `sisu test --native` and `sisu bench
+     --native`, when stage 1 is 0.10.0 or later
+     (`Stage1::takes_target_runtime`), so `target.runtime` is `native` to
+     their compile-time code, where it was `interpreter`; `sisu run`,
+     `sisu sir` and `sisu check` pass nothing, and stage 1's default stays
+     `interpreter`. A program built from `sisu sir`'s SIR was compiled for
+     the interpreter, so the native runner compares the standard output
+     of a case built from its source with `NAME.native-out` where the
+     case has one, and `NAME.out` otherwise and for the modes built from
+     SIR: `reflect/target.native-out` holds `native`. This changes no rule
+     of the language.
+
+722. A program's transcripts run from the SIR its tests run from when
+     stage 1 keeps the world of transcripts there (`sir --tests` of
+     `sisu1 0.11.0` and later, its R120; `Stage1::keeps_transcripts`, or
+     `SISU_STAGE1_TRANSCRIPTS=1` or `0`), so a transcript runs the program
+     stage 1 built, and a form only stage 1 has no longer fails it: a
+     program that looks a `dict[String, V]` up by a `str` (R113), which
+     the Rust front end refuses, passes its transcript. An older stage 1,
+     an SIR without `transcript_world` and `transcript_system`, and
+     `--front-end=rust` keep the Rust front end's build of decision 687.
+     `SISU_STAGE1=PATH` runs the stage 1 at `PATH` as it is, neither built
+     nor checked against its sources, as `SISU_STAGE2` gives stage 2; the
+     round checked the change against stage 1's thirteenth round's
+     `sisu1 0.11.0` so. The test
+     `transcripts_run_from_stage_1s_sir_when_it_keeps_their_world` holds
+     both readings, by the version of the stage 1 it finds. This changes
+     no rule of the language.
+
+723. The SIR's line `runtime NAME`, after the entry and before the
+     `export` lines, which stage 1 writes for a package whose manifest
+     chooses `single` (its R122; `full`, the default, writes none), is
+     read: `sisu-sir` reads and writes it (`Program::runtime`, `full` or
+     `single`, any other name refused), so the interpreter and the Rust
+     lowering read it, and stage 2 reads it beside stage 1's
+     `sir.Program` (`read.runtime`) and writes it back with the `export`
+     lines (`read.export_lines`), as decision 683 reads those. Both
+     profiles run alike: stage 0's scheduler is one thread with its tasks
+     as coroutines, `single`'s (decision 694). What `single` would change
+     is `std.par.map`'s pool of worker threads, which a program of that
+     profile should not have; telling the executable which profile it was
+     built for is a symbol of the program's, in both lowerings and
+     byte-identical, and is not this round's. The Rust front end, which
+     reads no `runtime` key, writes no line. Stage 1's
+     `packages/runtime_single.pkg` reads and runs in the interpreter,
+     natively and through `sisu2 sir`'s round trip, which gives the same
+     text. This changes no rule of the language.
+
+724. The scheduler's seeded generator is the runtime in Sisu's
+     (`rt/src/draw.sisu`, exports `sisu_rt_draw_*`): the interpreter's
+     SplitMix64 with its seeding (`seeded`, `next`), a number below a
+     bound by the unsigned remainder (`below`), and, under the default
+     strategy, the choice of the next task among the ready ones, taken
+     out of the run queue as decision 645's run queue takes it (`pick`),
+     so a seed names the schedule it named (`sisu-driver/tests/schedules`
+     and the concurrency cases give the interpreter's output natively).
+     The generator's state is a word the runtime in Rust keeps
+     (`queue::Rng`), for the scheduler, `select`'s ready arms, PCT's
+     priorities and change points and the faults of `sim`. Deleted from
+     the runtime in Rust: the generator's arithmetic and seeding, its
+     `below`, and the default strategy's draw and removal in `pick`. A
+     task's record, its parking and waking, PCT's and the exhaustive
+     search's choices stay the runtime in Rust's: the records hold the
+     coroutine and its context. 20 000 values sent through a channel of
+     capacity 1 take 176.1 million instructions where they took 173.9
+     million (callgrind, the release profile), 1.3 % more, a call of
+     Sisu's convention for each draw. The seed grows from 699 352 to
+     703 530 bytes of SIR and the runtime's object to 785 920 bytes. This
+     changes no rule of the language.
+
+725. The rest of D-086's order for the scheduler is not this round's: a
+     task's record (its state, the wait a deadlock reports, its scope,
+     outcome and stack limits) holds the coroutine, its context and the
+     values moved aside, which are Rust objects that Sisu code cannot
+     hold, so the record in Sisu comes with the switch's own record of
+     the coroutine (a handle the runtime in Rust keeps beside it); then
+     `IterRef` and `IterMut`, whose iterators borrow a value the runtime
+     in Rust reaches through `iter`; then the decoding of the other
+     intrinsics, family by family. The round spent its time on 720 to
+     724. This changes no rule of the language.
+
+726. Tagged-pointer provenance in the debug profile is not this round's
+     either: it is decision 686's change to every inline use of a
+     pointer's word in both lowerings and the Cranelift path at once, a
+     week by port-debt.md's measure, which leaves no half state only
+     when it is done whole; the cases of chapter 27's finding still pass
+     natively where the interpreter stops them. This changes no rule of
+     the language.
+
+727. `@export` with C's own convention over plain values and a
+     `CString.as_ptr()` that stays valid across a foreign call are not
+     this round's: the first is a wrapper of each exported function in
+     both lowerings, byte-identical (its arguments and result in
+     registers as C passes them, the status turned into an abort), for
+     the types stage 1's `E0991` admits (its R118); the second is a slice
+     that views its list in place (decision 688), in the interpreter and
+     both lowerings, with `mem.slice.as_ptr` of a `u8` compiled
+     natively. Decision 683's convention, the C calling convention over
+     addresses, stays what a C caller writes to. This changes no rule of
+     the language.
+
+728. A test that takes the real `System` still gets the simulated one
+     under `--sim`, as decision 692 left it: changing it takes the cases
+     of `sim/` that declare a `System` to get a simulated one
+     (`sim/faults`, `sim/no_revoked`) to name their capabilities instead,
+     whose fakes `--sim` makes, and a message that says why the token
+     cannot replay such a test; it is the next round's with those
+     cases. This changes no rule of the language.
+
+729. A lookup by a `str` in a `dict[String, V]` or a `set[String]` still
+     allocates the `String` that `str.Lookup.lookup_key` makes (stage 1's
+     R113): the SIR calls it and passes the `String` to `dict.get`,
+     `dict.remove` and the index, so the runtime is given
+     a key it cannot tell from any other. Looking the text up in place is
+     the front end's lowering first: the SIR passes the `str` to the
+     lookup, which the interpreter and the runtime in Sisu then compare
+     with the `String` keys by their bytes, as `in` and `dict.contains`
+     already do. This changes no rule of the language.

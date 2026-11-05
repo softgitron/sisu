@@ -969,7 +969,7 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   without optimisations, and there is no AArch64, Mach-O or COFF. *Pay*:
   D-087's steps.
 - **The runtime in Sisu has its first pieces** (decisions 335, 336, 350
-  to 353, 358, 383, 385, 422, 423, 464, 469, 506, 542, 562, 625, 645, 646, 680 and 681): `compiler/rt` holds `==` of two
+  to 353, 358, 383, 385, 422, 423, 464, 469, 506, 542, 562, 625, 645, 646, 680, 681 and 724): `compiler/rt` holds `==` of two
   texts' bytes, the structural operations by a value's parts (equality,
   order, the hash of decision 256, a `Shared` followed to its value,
   `.copy()`, the drop, the count of a
@@ -992,14 +992,17 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   of the runtime in Rust (decision 625), `in` as an operator, a table's
   literal and the generated code's inline lookups (decision 646), and the
   scheduler's queues: the run queue, the waiters and the timers
-  (decision 645), the channels' buffers (decision 680) and `d{k}`'s
-  slot (decision 681). Still `sisu-rt`'s: the decoding of every other
+  (decision 645), the channels' buffers (decision 680), `d{k}`'s
+  slot (decision 681), and the scheduler's seeded generator with the
+  default strategy's choice of the next task (decision 724). Still
+  `sisu-rt`'s: the decoding of every other
   intrinsic's call (four words and two slices) and the other checks,
   whose panics its messages name (a missing key), an iterator of a
   borrowed value reached by `iter`, a generator's items
   and a receiver's values (the iterators themselves are made by the
-  runtime in Sisu's exports, decision 542), the scheduler's choice of
-  the next task, a task's parking and waking and its records,
+  runtime in Sisu's exports, decision 542), PCT's and the exhaustive
+  search's choice of the next task, a task's parking and waking and its
+  records (decision 725),
   mutexes, capabilities and the
   host, panics and their traces, allocation's count, the
   descriptor-driven dispatch of the intrinsics, the text of an arena, and
@@ -1016,9 +1019,9 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   the runtime in Rust's index on stage 2's lowering of `wordcount`
   (decision 423). *Pay*: the pieces in D-086's order, each deleting its
   Rust counterpart: the rest of the scheduler next (a task's record,
-  parking and waking, and the choice of the next task by the seeded
-  generator, whose records hold the coroutine and its context, which
-  the runtime in Rust keeps; then an iterator of a borrowed value
+  parking and waking, whose records hold the coroutine and its context,
+  which the runtime in Rust keeps, so a handle of the switch's beside
+  them, decision 725; then an iterator of a borrowed value
   reached by `iter`; then the dispatch of the other intrinsics follows its
   objects, each family's descriptor read by Sisu code as decision 625
   reads a collection's); text constants for the runtime's code (its data in
@@ -1064,8 +1067,8 @@ Nothing here switches the default.
   its place's frame, stripped at each access and at a foreign call, where
   decision 560's addresses miss a returned frame that a call of the same
   depth covers and a shared pointer to a place a mutable one also
-  reaches: a week, both lowerings and the C calls; stage 0's tenth and eleventh rounds
-  did not start it, for the size of what each lowering must change in
+  reaches: a week, both lowerings and the C calls; stage 0's tenth to twelfth rounds
+  did not start it (decision 726), for the size of what each lowering must change in
   the debug profile at once: `ptr.of` and `ptr.of_mut` give a tagged word
   (a call of the runtime where they are a copy of an address now), and
   every operation that reads a pointer's word inline strips the tag or
