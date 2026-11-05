@@ -129,6 +129,22 @@ def main():
 <!-- output: examples/reference-lexical-structure/lookalikes.console -->
 ```console
 $ sisu run lookalikes.sisu
+warning[W0031]: `pаrt` mixes letters of the Latin and Cyrillic scripts
+  --> lookalikes.sisu:6:9
+  |
+6 |     let pаrt = 2
+  |         ^^^^
+
+warning[W0032]: `pаrt` looks like `part`, another name in scope
+  --> lookalikes.sisu:6:9
+  |
+6 |     let pаrt = 2
+  |         ^^^^
+  |
+2 | def part() -> int:
+  |     ---- `part` is declared here
+
+3
 ```
 
 A keyword where a name should be is an error. Where a function's, a

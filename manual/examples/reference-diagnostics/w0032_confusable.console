@@ -1,1 +1,14 @@
 $ sisu run w0032_confusable.sisu
+warning[W0031]: `tοtal` mixes letters of the Latin and Greek scripts
+  --> w0032_confusable.sisu:4:9
+  |
+4 |     let tοtal = total + 1
+  |         ^^^^^
+
+warning[W0032]: `tοtal` looks like `total`, another name in scope
+  --> w0032_confusable.sisu:4:9
+  |
+4 |     let tοtal = total + 1
+  |         ^^^^^
+
+5

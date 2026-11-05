@@ -1,1 +1,8 @@
 $ sisu run w0031_mixed_script.sisu
+warning[W0031]: `sаuna_heat` mixes letters of the Latin and Cyrillic scripts
+  --> w0031_mixed_script.sisu:3:9
+  |
+3 |     let sаuna_heat = 80
+  |         ^^^^^^^^^^
+
+80

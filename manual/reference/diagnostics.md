@@ -10877,6 +10877,13 @@ def main():
 <!-- output: examples/reference-diagnostics/w0031_mixed_script.console -->
 ```console
 $ sisu run w0031_mixed_script.sisu
+warning[W0031]: `sаuna_heat` mixes letters of the Latin and Cyrillic scripts
+  --> w0031_mixed_script.sisu:3:9
+  |
+3 |     let sаuna_heat = 80
+  |         ^^^^^^^^^^
+
+80
 ```
 
 Retype the name in one script. The two names look the same, so the
@@ -10921,6 +10928,19 @@ def main():
 <!-- output: examples/reference-diagnostics/w0032_confusable.console -->
 ```console
 $ sisu run w0032_confusable.sisu
+warning[W0031]: `tοtal` mixes letters of the Latin and Greek scripts
+  --> w0032_confusable.sisu:4:9
+  |
+4 |     let tοtal = total + 1
+  |         ^^^^^
+
+warning[W0032]: `tοtal` looks like `total`, another name in scope
+  --> w0032_confusable.sisu:4:9
+  |
+4 |     let tοtal = total + 1
+  |         ^^^^^
+
+5
 ```
 
 Give the new value a name of its own, which a reader can tell apart:
