@@ -185,6 +185,7 @@ impl Resolver:
             var gps: list[GenericParam] = []
             var field_tys: list[TypeExprId] = []
             var field_names: list[String] = []
+            var field_docs: list[String] = []
             var body = Body.Struct([])
             var is_struct = False
             match item.kind:
@@ -195,6 +196,7 @@ impl Resolver:
                     for f in s.fields:
                         field_tys.push(f.ty)
                         field_names.push(f.name.text.copy())
+                        field_docs.push(self.doc_in(module, f.range.start))
                         fields.push((f.name.text.copy(), f.default.is_some()))
                     body = Body.Struct(fields)
                     is_struct = True
@@ -345,6 +347,7 @@ impl Resolver:
                     body=body.copy(),
                     attrs=attrs,
                     field_types=field_types,
+                    field_docs=field_docs.copy(),
                 )
                 var unfolded: String? = None
                 # Where the template stopped, in its module, and why.
@@ -1111,7 +1114,12 @@ impl Resolver:
                         let ft = self.types.subst(f.ty, a)
                         let shape = self.shape(ft, "{written}_f{k}", depth + 1, mut aliases)
                         s.fields.push(
-                            FieldShape(name=f.name.copy(), ty=[shape], default=f.default.is_some())
+                            FieldShape(
+                                name=f.name.copy(),
+                                ty=[shape],
+                                default=f.default.is_some(),
+                                doc=f.doc.copy(),
+                            )
                         )
                         k += 1
                 return Kind.Struct

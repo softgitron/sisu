@@ -1,0 +1,19 @@
+# A `dict` and a `set` of `String` keys are looked up by a `str`, which
+# implements `Lookup[String]`: `get`, `contains`, `remove` and indexing take
+# it where a `String` goes, as `in` does (RULES.md, R113; chapters 10, 19
+# and 20, G2).
+def price_of(prices: dict[String, int], dish: str) -> int:
+    return prices.get(dish).copied() ?? 0
+
+def main():
+    var prices: dict[String, int] = {"bun": 280, "tea": 150}
+    var seen: set[String] = set()
+    _ = seen.add("bun".to_string())
+    for dish in ["bun", "tea", "pie"]:
+        let found = prices.contains(dish)
+        print("{dish}: {price_of(prices, dish)} {found} {seen.contains(dish)} {dish in seen}")
+    let dish: str = "tea"
+    print(prices[dish])
+    print(prices.get(dish).copied() == Some(150))
+    print("{seen.remove("bun")} {prices.remove(dish)}")
+    print("{prices} {seen}")

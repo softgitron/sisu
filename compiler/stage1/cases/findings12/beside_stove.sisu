@@ -1,0 +1,7 @@
+# The module beside `beside_module.sisu`, which only a package would let it
+# import (RULES.md, R119).
+pub def heat() -> int:
+    return 80
+
+def main():
+    print(heat())

@@ -10179,3 +10179,49 @@ standard library")
      until there is a runtime without the scheduler. Reading the key, and
      `target.runtime` naming the profile, are stage 1's manifest and
      compile-time facts. It names the key 12 leaves unnamed.
+
+**Stage 1's twelfth round** (stage 1's RULES.md, R111 to R119; a prelude type's constants' names, `sir --repl-serve`, lookups by `str`, `E0343` for a `Shared` field, `@preview`, an exact `truncate_to`, `--target-runtime`, a field's `##` in reflection, the `@export` boundary, a module beside a file)
+
+700. A prelude type's associated constant is named in the SIR by the
+     type, `u8.MAX`, as its methods are. Stage 1 decides it (RULES.md,
+     R111).
+
+701. `sisu1 sir --repl-serve` serves `sir --repl`, `sir --worksheet` and
+     `parse --bindings` from one process that makes the standard
+     library's base once: each line of standard input is a request, the
+     command's arguments separated by tabs, and each answer, on standard
+     error, is `answer STATUS OUT ERR` and then the bytes the command alone
+     prints on standard output and on standard error; an empty line or the
+     end of the input ends it. An input costs 0.04 s served where it cost
+     0.8 s as a process. `sisu1 --version` is 0.10.0. Stage 1 decides it
+     (RULES.md, R112).
+
+702. A lookup in a `dict` or a `set` (`get`, `contains`, `remove`, an
+     index) takes a value of a type that implements the prelude's
+     `Lookup[K]`, a `str` for `String` keys, and borrows the key it gives;
+     `E0300` for an optional reference compared with an optional value has
+     the fix `.copied()`. Stage 1 decides it (RULES.md, R113).
+
+703. A change of what a `Shared` holds is `E0343`, which says so whether
+     the binding is a `var` or not. Stage 1 decides it (RULES.md, R114).
+
+704. A use of an item marked `@preview` warns (`W0028`, `W0029`), as a
+     use of a deprecated one does; `truncate_to` of a value outside
+     `int`'s range to a type of 128 bits is exact. Stage 1 decides it
+     (RULES.md, R115).
+
+705. Stage 1 takes `--target-runtime native|interpreter`, which
+     `target.runtime` gives compile-time code; the driver passes `native`
+     for a native build. Stage 1 decides it (RULES.md, R116).
+
+706. A field has `doc`, its `##` comment, to compile-time code, and
+     `cli.help_text` prints it under each option. Stage 1 decides it
+     (RULES.md, R117).
+
+707. An exported function's signature holds numbers, `bool`, `char`, raw
+     pointers and `@repr(c)` types; any other is `E0991`. Stage 1 decides
+     it (RULES.md, R118).
+
+708. `E0220` for a file's import of a module beside it notes that only a
+     package makes them one program; a directory without a manifest is no
+     package. Stage 1 decides it (RULES.md, R119).

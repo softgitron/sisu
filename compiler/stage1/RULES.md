@@ -5827,3 +5827,373 @@ method that asks `reflect`), which stage 0's `truncate_to` will be.
 666. A generic method of the standard library may ask `reflect` of its
      type parameters; `json.decode`'s `Mismatch` names the expected type
      without an article. Stage 1 decides it (RULES.md, R110).
+
+## R111. The merge's differences: the prelude's constants are named as its methods are (decision 700)
+
+**The rule.** An associated constant of a type the prelude declares is
+named in the SIR by the type, `u8.MAX` and `i128.MIN`, as the type's
+methods are (`u8.truncate_to`) and as stage 0 names it, where stage 1 wrote
+`prelude.u8.MAX`: while the base is made the prelude is the root module,
+and the name of a root item that the prelude also declares was qualified
+by its module, which is right only for a program's own item that hides
+the prelude's.
+
+**The merge's other difference** is R87's: `std/instant_monotonic`
+imports `std.cap` and uses only the names `from std.cap import` binds, an
+import the Rust formatter removes and stage 1's keeps (R87), so its four
+formatter classes differ as that rule lists (the deformed copies of a
+file follow its `fmt-check`).
+
+**Why.** The merge of stage 0's tenth round (decision 642: `MIN`, `MAX`
+and `truncate_to` in the prelude's last block; decision 643's case).
+
+**In stage 1.** `typeck.program.qualified_name`.
+
+**What it changes.** The SIR of every program that reads a sized type's
+`MIN` or `MAX`, which stage 0's is again: `std/int_bounds` matches.
+
+- Differs: `compiler/conformance/cases/std/instant_monotonic.sisu`: fmt, fmt-check
+
+**Decision 700**, for docs/architecture.md:
+
+700. A prelude type's associated constant is named in the SIR by the
+     type, `u8.MAX`, as its methods are. Stage 1 decides it (RULES.md,
+     R111).
+
+## R112. `sir --repl-serve`: the REPL's commands served by one process that keeps the base (decision 701)
+
+**The rule.** `sisu1 sir --repl-serve` (with `--home DIR` and `--catalog
+PATH` as every command takes them) makes the standard library's base once
+and then serves requests, so that an input costs its own check and
+lowering and not the base (decision 641). The protocol, which the driver
+may rely on from 0.10.0:
+
+- A **request** is one line of standard input: the arguments of one
+  command, separated by tab characters (U+0009), exactly as they would
+  follow `sisu1` on a command line (without `--home` or `--catalog`):
+  `sir`, `--repl`, `SESSION`, `INPUT`, `--kept`, `OUT`, and `--load`,
+  `--dir DIR`, `--name NAME` as R79 and R95 give them; or `sir`,
+  `--worksheet`, `FILE`, `--dir DIR`, `--name NAME`; or `parse`,
+  `--bindings`, `INPUT`. An argument holds no tab and no line break. An
+  empty line, or the end of standard input, ends the server, status 0.
+- An **answer** is written to **standard error**, one for each request in
+  order: a line `answer STATUS OUT ERR`, where `STATUS` is the exit status
+  the command gives when run alone (0 or 1) and `OUT` and `ERR` are
+  lengths in bytes, then exactly `OUT` bytes, what the command alone
+  prints on standard output (the SIR, or `parse --bindings`' lines), then
+  exactly `ERR` bytes, what it prints on standard error: its diagnostics,
+  ending with the line the run time prints when it fails, `error: Failed`
+  (`error: Usage(...)` for arguments it does not take). An I/O error is
+  `answer 1 0 N` with `error: ` and the error's `Debug` form, without the
+  run time's line of the source. The files SESSION, INPUT, FILE and OUT are
+  read and written as the command alone reads and writes them, so `OUT`
+  holds the kept session when `STATUS` is 0.
+- Standard output carries nothing. The answers go to standard error
+  because the native run time writes it at once, where it keeps standard
+  output until 64 KB are waiting or the program ends (`rt::stdout`); a run
+  time that wrote standard output before a read of standard input would
+  let a later version answer there.
+
+The answers are byte for byte what the commands print alone (the
+session of `cases/repl/session.repl`, its twelve inputs three times, gave
+the same 36 answers both ways). `sisu1 --version` is 0.10.0: the driver
+may rely on `sir --repl-serve` and on R116's `--target-runtime`.
+
+**Why.** Decision 641 (stage 0's report): `sir --repl` costs 0.41 s per
+input, 90 % of it `base_of`. Measured here on a machine with a load of 11
+on four cores: 0.83 to 0.91 s per input as one process each (the session
+above, natively), 0.041 s per input served, the first answer 1.46 s with
+the base.
+
+**In stage 1.** `main` (`repl_serve`, `Answer`, `Ending`, `answered`,
+`repl_answer`, `worksheet_answer`, `bindings_answer`; `held_build` takes the
+base).
+
+**What it changes.** No output of the corpus; `main`'s unit test of the
+frame.
+
+**Decision 701**, for docs/architecture.md:
+
+701. `sisu1 sir --repl-serve` serves `sir --repl`, `sir --worksheet` and
+     `parse --bindings` from one process that makes the standard
+     library's base once: each line of standard input is a request, the
+     command's arguments separated by tabs, and each answer, on standard
+     error, is `answer STATUS OUT ERR` and then the bytes the command alone
+     prints on standard output and on standard error; an empty line or the
+     end of the input ends it. An input costs 0.04 s served where it cost
+     0.8 s as a process. `sisu1 --version` is 0.10.0. Stage 1 decides it
+     (RULES.md, R112).
+
+## R113. A `String` key is looked up by a `str`; an optional reference compared with an optional value (decision 702)
+
+**The rule.**
+
+- The prelude has `trait Lookup[K]` with `lookup_key(self) -> K`, and
+  `impl Lookup[String] for str`. Where a lookup takes its key, the key
+  parameter of `get`, `contains` and `remove` of a `dict` and of
+  `contains` and `remove` of a `set`, and a `dict`'s index, a value whose
+  type is not the key's but implements `Lookup[K]` is accepted, and the
+  lookup borrows the key it gives: `recipes.get(dish)`, `prices[dish]`
+  and `seen.remove(word)` with a `str` and `String` keys. `in` compared
+  the text already. The key a `str` gives is a `String` made for the
+  lookup and dropped after it, the allocation the `.to_string()` the user
+  wrote made; the lookup without it is the runtime's (`in` and
+  `dict.contains` already compare a `str` with the `String` keys there).
+- `E0300` for an optional value compared with an optional reference to a
+  `Copy` value, `prices.get("bun") == Some(280)`, has the fix
+  `type.copy-optional`, `.copied()` after the left operand, in
+  parentheses when it is not a name or a call chain.
+
+**Why.** The manual's findings under "The standard library" (chapters
+10, 19 and 20, G2). 03 and 11 say nothing of a key's type beyond `Eq` and
+`Hash`; a lookup trait of the library that the checker consults, rather
+than an implicit conversion everywhere a `String` is expected, keeps
+D-016's "no implicit lossy conversions" whole, since the conversion is the
+library's and named.
+
+**In stage 1.** `typeck.call` (`is_lookup_key`, `lookup_arg`),
+`typeck.expr` (`key_of`, `copied_fix`, the index of a `dict`);
+`std/prelude.sisu` (`Lookup`, with its doc example).
+
+**What it changes.** The cases `cases/findings12/str_lookup.sisu` (its
+`.out`) and `copied_compare.sisu` (its `.diag`); `cases/habits/fixes.diag`
+is blessed again (its `recipes.get(dish)` with a `str` is no longer
+`E0300`), and so is the conformance suite's `std/doc_examples.select`,
+which runs `Lookup`'s doc example.
+
+- Differs: `compiler/stage1/cases/findings12/str_lookup.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings12/copied_compare.sisu`: ids, human, doc, doc-output
+
+**Decision 702**, for docs/architecture.md:
+
+702. A lookup in a `dict` or a `set` (`get`, `contains`, `remove`, an
+     index) takes a value of a type that implements the prelude's
+     `Lookup[K]`, a `str` for `String` keys, and borrows the key it gives;
+     `E0300` for an optional reference compared with an optional value has
+     the fix `.copied()`. Stage 1 decides it (RULES.md, R113).
+
+## R114. The ownership checker's findings: `E0343` for a change through a `Shared` (decision 703)
+
+**The rule.** A field assigned through a `Shared`, `c.n = 2`, is `E0343`
+(`type.shared-not-mutable`, "cannot modify `c.n`: a `Shared` holds it,
+and a shared value is not changed in place, even through a `var`"), with
+the note `type.shared-changes` as before and without the fix that takes a
+parameter with `mut`, where `E0341` said "it is not declared with `var`"
+also of a `var`.
+
+**Decided against:**
+
+- `[p for p in zip([1, 2], ["a", "b"])]` (`E0406` for the temporaries),
+  as the eighth round decided: 04 ends a temporary with its statement and
+  `zip` borrows what it is given, and the `str` items of the list are
+  views the checker ties to the list. Accepting it would take a view's
+  origin through a collection: a `str` read out of a `list[str]` borrows
+  what the list's items borrow (here nothing but literals), not the list,
+  a change of 04's loans for views, which is the owner's.
+- A loop over a `mut` parameter whose body reads it (known over-rejection
+  15): the monitor of stage 0 agrees with the checker on the SIR both
+  front ends write, where a read of the parameter passes the `ref mut` on
+  as a copy, a `mut` reborrow (`len(copy _1)`). Accepting it takes the
+  lowering the over-rejection names, a read as a shared reborrow
+  (`ref (*_1)`), which changes the SIR of every function that reads a
+  `mut` parameter as a whole, stage 1's own among them (`prog.display(types,
+  t)` with `mut types`), so the fixed point would need stage 0's lowering
+  to change too, or a fixed point that compares the two SIRs modulo the
+  rule: the coordinator's to decide, with stage 0's frozen front end.
+
+**Why.** The manual's "Ownership" (chapters 5 and 13).
+
+**In stage 1.** `typeck.check` (`BehindSharedRef`).
+
+**What it changes.** The case `cases/findings12/shared_field.sisu` (its
+`.diag`); `cases/findings4/fixes.diag` and the conformance suite's
+`ownership/shared_immutable.diag` are blessed again (`E0343` for `E0341`).
+
+- Differs: `compiler/stage1/cases/findings12/shared_field.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/ownership/shared_immutable.sisu`: types, ids
+
+**Decision 703**, for docs/architecture.md:
+
+703. A change of what a `Shared` holds is `E0343`, which says so whether
+     the binding is a `var` or not. Stage 1 decides it (RULES.md, R114).
+
+## R115. `@preview` warns at a use; `truncate_to` to 128 bits is exact (decision 704)
+
+**The rule.**
+
+- A use of a function, a type or a constant marked `@preview("...")` is
+  `W0028` (`type.preview`, "`schedule` is a preview, which may change or
+  be removed before it is stable: TEXT"), or `W0029` without a text, where
+  `@deprecated`'s `W0023` and `W0025` stand (R30, R40), but in the item's
+  own declaration.
+- `truncate_to[T]()` of a `u64`, `u128` or `i128` outside `int`'s range
+  to a type of 128 bits is the value's bits read as that type's, exact
+  (`u64.MAX.truncate_to[i128]()` is 18446744073709551615, `u128.MAX.
+  truncate_to[i128]()` is -1), where it gave the value of its low 64 bits:
+  the prelude's three bodies ask `reflect.name_of(T)`, which R110 lets a
+  generic method of the prelude do, so they are templates, made for each
+  type argument (`u64.truncate_to#u32`) as a program's are.
+
+**Left open:** a label at the template's line that `comptime for` unrolls
+(X7): the instance's text is made from the template's and not mapped back
+to its lines, which would take an origin for each unrolled line; and
+statements before a derive's `return impl` (E0607): 08 makes a derive a
+`comptime` function and neither gives nor rules them out, and the
+template engine unfolds the `return impl` alone, so a statement would need
+the compile-time evaluator inside the unfolding (a check of the type's
+shape would then stop the derive with its message, the lean).
+
+**Why.** The eleventh round's open items (the manual's findings under
+"Metaprogramming", chapter 28, X11, R14; and decision 642).
+
+**In stage 1.** `typeck.collect` (`previews`, `preview_warning`,
+`deprecated_type_use`), `typeck` (the uses of functions and items);
+`std/prelude.sisu`'s last block (`truncate_to` of `u64`, `u128` and
+`i128`, whose doc comments say it; the exact values are the case's, since
+`sisu test --std` runs the doc examples on the Rust front end).
+
+**What it changes.** The cases `cases/findings12/preview_use.sisu` (its
+`.diag`) and `truncate_wide.sisu` (its `.out`).
+
+- Differs: `compiler/stage1/cases/findings12/preview_use.sisu`: ids, human
+
+**Decision 704**, for docs/architecture.md:
+
+704. A use of an item marked `@preview` warns (`W0028`, `W0029`), as a
+     use of a deprecated one does; `truncate_to` of a value outside
+     `int`'s range to a type of 128 bits is exact. Stage 1 decides it
+     (RULES.md, R115).
+
+## R116. `--target-runtime`: the runtime a program is built for (decision 705)
+
+**The rule.** Every command of stage 1 takes `--target-runtime native` or
+`--target-runtime interpreter` (anything else is a usage error), the
+runtime the program is built for, which `target.runtime` is to the
+program's compile-time code: `if comptime target.runtime == "native":` is
+decided by it. Without it the runtime is `interpreter`, as before, so the
+driver passes `--target-runtime native` to `sir` and `build` for a native
+build (`sisu run --native`, `sisu build --native`), which it may rely on
+from 0.10.0. The base's cache does not depend on it. `@cfg` on an import
+and a dependency's `when` still read stage 0's facts (`interpreter`):
+open, since they are read before the build's options reach them.
+
+**Why.** The manual's finding under "Metaprogramming" (chapter 25):
+`target.runtime` is `interpreter` in a native build too. 12 names the
+runtime profiles (`single`, `multi`); `target.runtime` names how the
+program runs, as 08's facts do, and `native` is what the driver's builds
+are.
+
+**In stage 1.** `main` (`target_runtime`, `std_texts`, `base_cache_key`),
+`typeck.std_sources.target_for`, `typeck.collect` and `typeck.base`.
+
+**What it changes.** No output of the corpus (`check.sh` builds for the
+interpreter); `std_sources`' unit test.
+
+**Decision 705**, for docs/architecture.md:
+
+705. Stage 1 takes `--target-runtime native|interpreter`, which
+     `target.runtime` gives compile-time code; the driver passes `native`
+     for a native build. Stage 1 decides it (RULES.md, R116).
+
+## R117. A field's `##` comment is `f.doc`; `cli.help_text` prints it (decision 706)
+
+**The rule.** A field that reflection gives, in a derive's template and in
+a generic function that reflects (`reflect.fields_of(T)`), has `doc`: its
+`##` comment, the lines above it without `##` and the space after it,
+joined by line breaks, its attributes passed over; empty without one (a
+variant's fields have none yet). `cli.help_text[T]()` writes each line of
+a field's comment under its option, indented by six spaces, and under the
+positional arguments.
+
+**Why.** G6's finding under "The standard library": a tool's help said
+what kind of value an option takes and not what it is for. 08: reflection
+"exposes ... the documentation of items, as values"; an item's own
+comment (`reflect.doc_of(T)`) is left for when a program asks for it.
+
+**In stage 1.** `typeck.collect` (`doc_in`, `FieldInfo.doc`),
+`typeck.instances`, `typeck.template` (`FieldShape.doc`, `Value.Field`'s
+`doc`, `Target.field_docs`); `std/cli.sisu`.
+
+**What it changes.** The case `cases/findings12/field_docs.sisu` (its
+`.out`; its field's attribute is R51's, which the Rust AST does not
+keep). The Rust front end has no `f.doc`, so it refuses `std.cli`'s
+`help_text`, and the programs that call it differ as listed.
+
+- Differs: `compiler/stage1/cases/findings12/field_docs.sisu`: ast, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/reflect/cli.sisu`: sir, contracts-off, contracts-preconditions, ids, human, doc, doc-output
+- Differs: `compiler/conformance/cases/testing/proposal_testing.sisu`: ids, human
+
+**Decision 706**, for docs/architecture.md:
+
+706. A field has `doc`, its `##` comment, to compile-time code, and
+     `cli.help_text` prints it under each option. Stage 1 decides it
+     (RULES.md, R117).
+
+## R118. `@export` asks for types C has a layout for (decision 707)
+
+**The rule.** An exported function's parameters and result are numbers of
+a width C has (`int`, `f64`, `u8` to `u64`, `i8` to `i32`, `f32`), `bool`,
+`char`, nothing (`()`), raw pointers (`ptr[T]`, `ptr mut T`) or types
+declared `@repr(c)`; any other is `E0991` (`unsafe.export-not-c`, at the
+parameter or the result), after `E0989`, which a type that holds a
+reference, a view, a `Shared`, a closure or a capability gets instead.
+
+**Why.** R14's finding under "Metaprogramming", and 12 ("C interop"):
+"`@export` requires `@repr(c)` types at the boundary; the compiler
+reports what is not representable." Stage 0's round makes the exported
+function a global symbol.
+
+**In stage 1.** `typeck.collect` (`check_export_blocking`,
+`c_representable`, the `@repr(c)` types in `Program.c_layout`).
+
+**What it changes.** The case `cases/findings12/export_boundary.sisu`
+(its `.diag`; it imports `std.mem`, which only stage 1 reads, R4).
+
+- Differs: `compiler/stage1/cases/findings12/export_boundary.sisu`: names, ids, human, doc, doc-output
+
+**Decision 707**, for docs/architecture.md:
+
+707. An exported function's signature holds numbers, `bool`, `char`, raw
+     pointers and `@repr(c)` types; any other is `E0991`. Stage 1 decides
+     it (RULES.md, R118).
+
+## R119. A file run alone does not import the module beside it: `E0220` says why (decision 708)
+
+**The rule.** A program of one file is one module: `E0220` for its import
+of a module whose file (`NAME.sisu`) or directory stands beside it has the
+note `resolve.module-beside`, which says that a package (a directory with
+a `sisu.toml` and the files in `src/`) makes them one program.
+
+**Decided against:** the directory of a file run alone as a package
+without a manifest. 09 makes a package a directory with a `sisu.toml` and
+a `src/` tree and a file a module of one, so a directory of loose files
+would be a third kind of program, whose name, dependencies and edition
+come from nowhere. A fix that writes the manifest is no edit of the file
+the diagnostic stands in, which is all a fix is; `sisu new` (10) is the
+tool's. `sisu test FILE` compiling the file alone in a package's
+directory is the driver's.
+
+**Why.** Chapter 17's finding under "Tooling and the driver".
+
+**In stage 1.** `main` (`beside_notes`, in `file_input`).
+
+**What it changes.** The case `cases/findings12/beside_module.sisu` (its
+`.diag`, and the note in its human form) and `beside_stove.sisu`, the
+module beside it.
+
+- Differs: `compiler/stage1/cases/findings12/beside_module.sisu`: human, doc, doc-output
+
+**Decision 708**, for docs/architecture.md:
+
+708. `E0220` for a file's import of a module beside it notes that only a
+     package makes them one program; a directory without a manifest is no
+     package. Stage 1 decides it (RULES.md, R119).
+
+## Decided against, the twelfth round
+
+- `Decimal` as `Copy` (G31): 03 makes a `Decimal` a scaled `BigInt`, of
+  any size, which allocates, so it is no more `Copy` than a `BigInt` is;
+  `E0400`'s fix `.copy()` stands. A question for the owner, with that
+  lean: a fixed-size decimal type would be another type of `std.num`.
+- The `zip` temporaries and known over-rejection 15 (R114), and the
+  directory as a package (R119).

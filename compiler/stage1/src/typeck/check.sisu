@@ -2118,11 +2118,16 @@ impl Checker:
                             walking = False
                 if read_guard:
                     d = d.note(Msg.TypeReadGuardValue)
+                # What a `Shared` holds is not the binding's to change,
+                # whether it is a `var` or not (RULES.md, R114).
+                if shared:
+                    d = self.error(cx, Msg.TypeSharedNotMutable, range).with("what", what)
                 if let Some(root) = self.place_root(base):
                     if let Some(f) = cx.prog.fn_info(self.def_):
                         var at: (TextRange, String)? = None
                         for p in f.params:
                             if at.is_none()
+                                    and not shared
                                     and p.span == self.locals[root].span
                                     and p.mode == Mode.Borrow:
                                 at = Some((p.span, p.name.copy()))

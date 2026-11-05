@@ -2158,6 +2158,26 @@ impl[T] set[T]:
     @intrinsic("set.iter")
     pure def iter(self) -> Iter[ref T]
 
+## A key that a `dict[K, V]` or a `set[K]` is looked up by where a `K` is
+## taken: `get`, `contains`, `remove` and indexing take a value of a type
+## that implements `Lookup[K]` too, and look up the `K` it gives, so a
+## `str` looks up a `String` key, `recipes.get(dish)` (`in` compares the
+## text already).
+##
+## ```
+## let prices: dict[String, int] = {"bun": 280}
+## let dish: str = "bun"
+## assert dish.lookup_key() == "bun"
+## assert prices.contains(dish.lookup_key())
+## ```
+trait Lookup[K]:
+    ## The key to look up.
+    pure def lookup_key(self) -> K
+
+impl Lookup[String] for str:
+    pure def lookup_key(self) -> String:
+        return self.to_string()
+
 impl[T] Iter[T]:
     ## The next item, or `None` at the end.
     @intrinsic("Iter.next")
@@ -5122,10 +5142,8 @@ impl u64:
     const MAX: u64 = 18446744073709551615u64
     ## The value reduced to `T`'s width, as two's complement wrapping does,
     ## as `int.truncate_to` reduces an `int`.
-    ## `T` is narrower than the value's type, or as wide: a value above
-    ## `int.MAX` taken to a type of 128 bits gives its bits as an `int`'s,
-    ## since `Integer` makes a value from an `int` alone; widening (`into`)
-    ## is the conversion to a wider type.
+    ## A type of 128 bits holds every `u64`, so the value is kept whole
+    ## there, as widening (`into`) keeps it.
     ##
     ## ```
     ## assert u64.MAX.truncate_to[u32]() == u32.MAX
@@ -5136,6 +5154,14 @@ impl u64:
             case Some(n):
                 return T.wrapping_from(n)
             case None:
+                # Above `int.MAX`: whole in a type of 128 bits, which
+                # `reflect` names (RULES.md, R115).
+                if comptime reflect.name_of(T) == "u128":
+                    let whole: u128 = self
+                    return whole
+                if comptime reflect.name_of(T) == "i128":
+                    let whole: i128 = self
+                    return whole
                 return T.wrapping_from(int.from_bits(self))
 
 impl u128:
@@ -5145,14 +5171,19 @@ impl u128:
     const MAX: u128 = 340282366920938463463374607431768211455u128
     ## The value reduced to `T`'s width, as two's complement wrapping does,
     ## as `int.truncate_to` reduces an `int`.
-    ## A value outside `int`'s range taken to a type of 128 bits gives its
-    ## low 64 bits as an `int`'s, since `Integer` makes a value from an `int`
-    ## alone; `to_bits` and `from_bits` convert between `i128` and `u128`.
+    ## A value outside `int`'s range taken to a type of 128 bits is its
+    ## bits read as that type's, as `i128.from_bits` reads them.
     pure def truncate_to[T: Integer](self) -> T:
         match self.to_int():
             case Some(n):
                 return T.wrapping_from(n)
             case None:
+                # Outside `int`'s range: exact in a type of 128 bits, which
+                # `reflect` names (RULES.md, R115).
+                if comptime reflect.name_of(T) == "u128":
+                    return self
+                if comptime reflect.name_of(T) == "i128":
+                    return i128.from_bits(self)
                 let bits = self
                 let high = ((bits >> 32u128) & 4294967295u128).to_int().expect("32 bits")
                 let low = (bits & 4294967295u128).to_int().expect("32 bits")
@@ -5203,14 +5234,19 @@ impl i128:
     const MAX: i128 = 170141183460469231731687303715884105727i128
     ## The value reduced to `T`'s width, as two's complement wrapping does,
     ## as `int.truncate_to` reduces an `int`.
-    ## A value outside `int`'s range taken to a type of 128 bits gives its
-    ## low 64 bits as an `int`'s, since `Integer` makes a value from an `int`
-    ## alone; `to_bits` and `from_bits` convert between `i128` and `u128`.
+    ## A value outside `int`'s range taken to a type of 128 bits is its
+    ## bits read as that type's, as `to_bits` reads them.
     pure def truncate_to[T: Integer](self) -> T:
         match self.to_int():
             case Some(n):
                 return T.wrapping_from(n)
             case None:
+                # Outside `int`'s range: exact in a type of 128 bits, which
+                # `reflect` names (RULES.md, R115).
+                if comptime reflect.name_of(T) == "i128":
+                    return self
+                if comptime reflect.name_of(T) == "u128":
+                    return self.to_bits()
                 let bits = self.to_bits()
                 let high = ((bits >> 32u128) & 4294967295u128).to_int().expect("32 bits")
                 let low = (bits & 4294967295u128).to_int().expect("32 bits")

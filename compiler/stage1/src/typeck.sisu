@@ -45,7 +45,7 @@ from stage1.syntax.ast import Ast, Block, ExprId, ExprKind, Mode, Module
 from stage1.syntax.ast import build
 from stage1.syntax.ast import visit
 from stage1.typeck.check import Checker, Cx, Finished, PASSED, RetCtx
-from stage1.typeck.collect import Resolver, SourceModule, SourcePackage
+from stage1.typeck.collect import Resolver, SourceModule, SourcePackage, preview_warning
 from stage1.typeck.contracts import contract_only, leading_contracts
 from stage1.typeck.generic_asserts import Assert, ConstCall, failures
 from stage1.typeck.instances import DeriveOrigin
@@ -127,7 +127,8 @@ pub pure def base(texts: dict[String, String], catalog: Catalog) -> Base:
         if not r.is_loaded(name):
             _ = imported.insert(name.copy(), text.copy())
     r.std_derived = imported
-    _ = all.insert("target".to_string(), target())
+    if not all.contains("target"):
+        _ = all.insert("target".to_string(), target())
     _ = all.insert("builtin_impls".to_string(), builtin_impls())
     return Base(
         resolver=r,
@@ -181,7 +182,8 @@ pub pure def base_cached(texts: dict[String, String], catalog: Catalog, cache: B
         if not r.is_loaded(name):
             _ = imported.insert(name.copy(), text.copy())
     r.std_derived = imported
-    _ = all.insert("target".to_string(), target())
+    if not all.contains("target"):
+        _ = all.insert("target".to_string(), target())
     _ = all.insert("builtin_impls".to_string(), builtin_impls())
     return Base(
         resolver=r,
@@ -2041,6 +2043,8 @@ pure def is_warning(m: Msg) -> bool:
         or m == Msg.TypeUnreachableArm
         or m == Msg.TypeDeprecated
         or m == Msg.TypeDeprecatedPlain
+        or m == Msg.TypePreview
+        or m == Msg.TypePreviewPlain
 
 ## Where `pure ` is written before a function's name on its line: the
 ## edit that removes it.
@@ -2267,12 +2271,15 @@ impl Checker:
                 continue
             let f = cx.prog.fn_info(d) else:
                 continue
-            let why = f.deprecated.copy() else:
-                continue
             var name = cx.prog.defs[d.index].name.copy()
             if let Some(o) = f.owner:
                 name = "{cx.prog.display(self.types, o)}.{name}"
             let span = self.span_of(e)
+            # A preview function warns at each use (RULES.md, R115).
+            if let Some(p) = cx.prog.previews.get(d):
+                self.report(preview_warning(name, p, span))
+            let why = f.deprecated.copy() else:
+                continue
             if why.is_empty():
                 let diag = Diagnostic.new(Msg.TypeDeprecatedPlain, span.start, span.end)
                 self.report(diag.with("name", name))
@@ -2284,9 +2291,11 @@ impl Checker:
     ## constant `d` (RULES.md, R40), but in its own declaration: the
     ## constant's value, or the type's methods and impls.
     pub pure def deprecated_item_use(mut self, cx: Cx, d: DefId, span_in: TextRange):
-        let why = cx.prog.deprecated.get(d) else:
-            return
         if d == self.def_ or self.declared_by(cx, d):
+            return
+        let preview = cx.prog.previews.get(d)
+        let deprecated = cx.prog.deprecated.get(d)
+        if preview.is_none() and deprecated.is_none():
             return
         # A construction, `Point(x=1, y=2)`, is reported at the type's name.
         let name = cx.prog.defs[d.index].name.copy()
@@ -2295,7 +2304,11 @@ impl Checker:
         let start = min(span.start, end)
         if cx.source.byte_slice(start, end).starts_with("{name}("):
             span = TextRange.new(start, start + name.byte_len())
-        self.report_deprecated(name, why, span)
+        # A preview type or constant (RULES.md, R115).
+        if let Some(p) = preview:
+            self.report(preview_warning(name, p, span))
+        if let Some(why) = deprecated:
+            self.report_deprecated(name, why, span)
 
     ## The same for the field `k` of the struct `d` (RULES.md, R51), used at
     ## `span`: read or changed, at its name; given a value or matched,

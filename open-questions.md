@@ -1581,3 +1581,16 @@ conformance diff.
 **Current lean.** The first: it closes the case the manual found at the cost of one more exit in 07's list, and a postcondition stays available for what it does not cover.
 
 **What would settle it.** The owner's decision; the change is one sentence of 07, one rule of stage 1's checker and the manual's contracts page.
+
+### Q-79. Is `Decimal` a `Copy` type?
+
+**Question.** [03](proposal/03-types-and-generics.md) makes a `Decimal` a scaled `BigInt`, of any size, which allocates, so it is no more `Copy` than a `BigInt` is: a loop that pushes the same share needs `.copy()`, which `E0400`'s fix offers, and a reader who thinks of it as a number does not expect (the manual's finding from its money guide, G31; stage 1's twelfth round, "Decided against").
+
+**Options.**
+- *Keep it* (lean): `Decimal` stays a value of any size, copied where a `BigInt` is, and the manual says so where money is taught; a fixed-size decimal type, `Decimal64` or `Decimal128` as 11 could list it, would be another type of `std.num`, `Copy` like `f64`, for programs that want one.
+- *Make `Decimal` fixed-size and `Copy`*: a 128-bit scaled integer (28 to 34 digits) with overflow a panic or an error, as most money libraries have it; the arbitrary size moves to another type.
+- *Make `Decimal` `Copy` by copying its allocation*: `Copy` would then allocate, which 04 keeps it from meaning.
+
+**Current lean.** Keep it: 03's `Decimal` is exact at any size, which is what the type promises, and a fixed-size type beside it is additive.
+
+**What would settle it.** The owner's decision; a fixed-size type is a module of the standard library and a chapter's paragraph, a change of `Decimal` itself a change of 03 and 11 and of every expectation that prints one.

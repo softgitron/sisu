@@ -45,7 +45,8 @@ def parse[T](args: list[str]) -> T ! Error:
     )
 
 ## The options `parse[T]` reads, one line each: the option, the kind of
-## value it takes and its default, then the positional arguments.
+## value it takes and its default, with the field's `##` comment under it,
+## then the positional arguments.
 def help_text[T]() -> String:
     comptime if not reflect.is_struct(T):
         comptime panic("`cli.help_text` describes a struct, not `{reflect.name_of(T)}`")
@@ -61,9 +62,15 @@ def help_text[T]() -> String:
             )
         else:
             lines.push("  {option(f.name)} <{reflect.name_of(f.ty)}>")
+        # What the field is for, its `##` comment (RULES.md, R117).
+        comptime if not reflect.is_list(f.ty):
+            for line in f.doc.lines():
+                lines.push("      {line}")
     comptime for f in reflect.fields_of(T):
         comptime if reflect.is_list(f.ty):
             lines.push("  {f.name}...  ({reflect.name_of(reflect.elem_of(f.ty))})")
+            for line in f.doc.lines():
+                lines.push("      {line}")
     return lines.join("\n")
 
 ## `--min-length` for the field `min_length`.

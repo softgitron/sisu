@@ -1,0 +1,3 @@
+16:11-16:22 W0028 type.preview name="schedule" reason="the sauna's schedule may change shape before 1.0"
+17:13-17:18 W0029 type.preview-plain name="Loyly"
+17:25-17:29 W0028 type.preview name="RISE" reason="a constant of the preview"

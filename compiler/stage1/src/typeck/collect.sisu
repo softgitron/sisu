@@ -496,7 +496,9 @@ impl Resolver:
             _ = r.prog.modules[prelude.index].items.insert(name.to_string(), d)
         _ = names.items.add("target".to_string())
         r.environment = Some(Environment(prelude=names, std=ambient_names))
-        let t = r.load_std("target", target(), templates)
+        # The build's target, which a native build names (RULES.md, R116).
+        let target_text = if texts.contains("target"): text_of(texts, "target") else: target()
+        let t = r.load_std("target", target_text, templates)
         let td = r.new_def(prelude, "target", TextRange.empty(0), Vis.Pub, DefKind.Module(t))
         _ = r.prog.modules[prelude.index].items.insert("target".to_string(), td)
         _ = r.load_std("builtin_impls", builtin_impls(), templates)
@@ -793,6 +795,15 @@ impl Resolver:
         return name.starts_with("<") and not name.starts_with("<doc>/")
 
     ## The text at `range` of a module's text.
+    ## The `##` comment above what starts at `at` in `module` (RULES.md,
+    ## R117): none for a std module, whose text the base does not keep.
+    pub pure def doc_in(self, module: ModuleId, at: int) -> String:
+        if let Some(t) = self.module_texts.get(module):
+            return doc_above(t, at).join("\n")
+        if self.is_std(module):
+            return String.new()
+        return doc_above(self.root_text, at).join("\n")
+
     pub pure def text_in(self, module: ModuleId, range: TextRange) -> String:
         if let Some(t) = self.module_texts.get(module):
             return slice_text(t, range)
@@ -1978,16 +1989,30 @@ impl Resolver:
         if has_attr(attrs, "deprecated"):
             let why = self.builtin_attr(module, attrs, "deprecated") ?? String.new()
             _ = self.prog.deprecated.insert(def_, why)
+        if has_attr(attrs, "preview"):
+            let why = self.builtin_attr(module, attrs, "preview") ?? String.new()
+            _ = self.prog.previews.insert(def_, why)
+        # `@repr(c)`, a layout C shares (RULES.md, R118).
+        for a in attrs:
+            if a.name == "repr":
+                if let Some(arg) = a.args.first():
+                    if let ExprKind.Name(n) = self.ast(module).expr(arg.value).kind:
+                        if n == "c":
+                            _ = self.prog.c_layout.add(def_)
 
     ## `W0023` (or `W0025`) for a use at `at` in `module` of the deprecated
     ## type `d` (RULES.md, R40), but in the type's own declaration (its
     ## fields, its methods, its impls), which `decl_owner` names.
     pure def deprecated_type_use(mut self, d: DefId, module: ModuleId, at: TextRange):
-        let why = self.prog.deprecated.get(d) else:
-            return
         if self.decl_owner == Some(d) or self.quiet_deprecation or not self.lints_in(module):
             return
         let name = self.prog.defs[d.index].name.copy()
+        # A preview type (RULES.md, R115).
+        if let Some(p) = self.prog.previews.get(d):
+            let preview = preview_warning(name, p, at)
+            self.warn_in(module, preview)
+        let why = self.prog.deprecated.get(d) else:
+            return
         if why.is_empty():
             let diag = Diagnostic.new(Msg.TypeDeprecatedPlain, at.start, at.end)
             self.warn_in(module, diag.with("name", name))
@@ -2335,6 +2360,8 @@ impl Resolver:
             if has_attr(f.attrs, "deprecated"):
                 let why = self.builtin_attr(module, f.attrs, "deprecated") ?? String.new()
                 _ = self.prog.deprecated_fields.insert((def_, len(fields)), why)
+            # Its `##` comment, which reflection gives (RULES.md, R117).
+            let doc = self.doc_in(module, f.range.start)
             fields.push(
                 FieldInfo(
                     name=f.name.text.copy(),
@@ -2343,6 +2370,7 @@ impl Resolver:
                     default_module=None,
                     span=f.range,
                     vis=f.vis,
+                    doc=doc,
                 )
             )
         if not s.unsupported.is_empty():
@@ -2610,6 +2638,11 @@ impl Resolver:
         info.assoc_const = has_attr(f.attrs, ASSOC_CONST_ATTR)
         if has_attr(f.attrs, "deprecated"):
             info.deprecated = Some(self.builtin_attr(module, f.attrs, "deprecated") ?? String.new())
+        # A preview warns where it is used, as a deprecated function does
+        # (RULES.md, R115).
+        if has_attr(f.attrs, "preview"):
+            let why = self.builtin_attr(module, f.attrs, "preview") ?? String.new()
+            _ = self.prog.previews.insert(def_, why)
         if self.is_root(module):
             info.contracts = not f.contracts(self.ast(module)).is_empty()
             if has_attr(f.attrs, "structural") or has_attr(f.attrs, "keeps"):
@@ -2861,6 +2894,32 @@ impl Resolver:
                 let shown = self.prog.display(self.types, ty)
                 var d = Diagnostic.new(Msg.UnsafeExportSignature, at.start, at.end)
                 self.report_other(module, d.with("name", f.name.text).with("ty", shown))
+            elif not self.c_representable(ty):
+                # A type C has no layout for (12, "C interop"; RULES.md,
+                # R118).
+                let shown = self.prog.display(self.types, ty)
+                var d = Diagnostic.new(Msg.UnsafeExportNotC, at.start, at.end)
+                self.report_other(module, d.with("name", f.name.text).with("ty", shown))
+
+    ## Whether a type has a layout C shares, as 12 asks of an exported
+    ## function's signature (RULES.md, R118): a number of a width C has
+    ## (`int`, `f64`, the sized integers to 64 bits, `f32`), `bool`,
+    ## `char`, nothing (`()`), a raw pointer, or a struct or enum declared
+    ## `@repr(c)`.
+    pure def c_representable(mut self, ty: Ty) -> bool:
+        match self.types.data(ty).copy():
+            case TyData.Int | TyData.Float | TyData.Bool | TyData.Char | TyData.Unit:
+                return True
+            case TyData.Adt(d, _):
+                if self.prog.c_layout.contains(d):
+                    return True
+                let b = self.prog.builtin(d) else:
+                    return False
+                return [
+                    "u8", "u16", "u32", "u64", "i8", "i16", "i32", "f32", "ptr", "ptr_mut"
+                ].contains(b.copy())
+            case _:
+                return False
 
     ## Whether a type holds a reference, a view, a `Shared`, a closure or a
     ## capability.
@@ -6238,3 +6297,12 @@ pure def is_screaming(name: str) -> bool:
         if c.is_alphabetic():
             letter = True
     return letter
+
+## `W0028` (`W0029` without a text) for a use at `at` of the preview item
+## `name` (13, D-072; RULES.md, R115): it may change or go before it is
+## stable, as the attribute's text says.
+pub pure def preview_warning(name: str, why: str, at: TextRange) -> Diagnostic:
+    if why.is_empty():
+        return Diagnostic.new(Msg.TypePreviewPlain, at.start, at.end).with("name", name)
+    let d = Diagnostic.new(Msg.TypePreview, at.start, at.end).with("name", name)
+    return d.with("reason", why)

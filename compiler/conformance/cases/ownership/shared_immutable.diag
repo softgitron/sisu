@@ -1,1 +1,1 @@
-9:5-9:16 E0341 type.not-mutable what="cfg.retries"
+9:5-9:16 E0343 type.shared-not-mutable what="cfg.retries"

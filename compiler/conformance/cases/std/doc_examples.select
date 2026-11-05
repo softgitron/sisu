@@ -19,6 +19,7 @@ test "std.core/str.split (doc example)" ... ok
 test "std.core/str.find (doc example)" ... ok
 test "std.core/str.parse_int (doc example)" ... ok
 test "std.core/Array.filled (doc example)" ... ok
+test "std.core/Lookup (doc example)" ... ok
 test "std.core/Shared.same (doc example)" ... ok
 test "std.core/Duration.seconds (doc example)" ... ok
 test "std.core/DateTime.year (doc example)" ... ok
@@ -182,4 +183,4 @@ test "std.time/Ticker (doc example)" ... ok
 test "std.time/Timeline (doc example)" ... ok
 test "std.time/Instant (doc example)" ... ok
 test "std.time/Zone (doc example)" ... ok
-184 passed, 0 failed, 0 blocked
+185 passed, 0 failed, 0 blocked

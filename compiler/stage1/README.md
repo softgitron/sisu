@@ -2397,6 +2397,53 @@ reads package cases. Blessed again: `cases/json/decode_validates.out`
 `types/integer_division.diag`, `run/stopped_by_errors.diag` and `.err`
 (R104) and `std/doc_examples.select` (R108's doc examples).
 
+### The twelfth round: the merge's differences, the REPL served, lookups by `str`, the open items
+
+This round took the differences the merge of stage 0's tenth round left,
+the REPL's cost per input (decision 641), the manual's findings that were
+stage 1's, and the eleventh round's open items. RULES.md has the rules
+(R111 to R119, decisions 700 to 708) and their decision texts:
+
+- **The merge's differences** (R111): a prelude type's constants are
+  named `u8.MAX` in the SIR, as stage 0 names them, where stage 1 wrote
+  `prelude.u8.MAX` (`std/int_bounds`'s `sir`); `std/instant_monotonic`'s
+  four formatter classes are R87's, an import the Rust formatter removes.
+- **The REPL served** (R112): `sir --repl-serve` makes the base once and
+  answers each request, a command's arguments separated by tabs on a
+  line, on standard error, framed by the lengths of what the command alone
+  prints. An input took 0.83 to 0.91 s as a process of its own and takes
+  0.041 s served (the session of `cases/repl/session.repl`, natively, on
+  four busy cores); the answers are the commands' byte for byte.
+- **Lookups by `str`** (R113): the prelude's `Lookup[K]`, which `str`
+  implements for `String` keys, lets `get`, `contains`, `remove` and a
+  `dict`'s index take a `str`; `E0300` of an optional reference compared
+  with an optional value offers `.copied()`.
+- **The ownership checker's findings** (R114): `E0343` for a change
+  through a `Shared`; the `zip` temporaries and known over-rejection 15
+  decided against, with what each would take.
+- **The eleventh round's open items** (R115): `@preview` warns at a use;
+  `truncate_to` to 128 bits is exact.
+- **`target.runtime`** (R116): `--target-runtime native|interpreter`.
+- **A field's documentation** (R117): `f.doc`, which `cli.help_text`
+  prints under each option.
+- **`@export` at the boundary** (R118): `E0991` for a type C has no
+  layout for.
+- **A file beside its modules** (R119): `E0220`'s note says that a
+  package makes them one program.
+
+Decided against: the `zip` temporaries and over-rejection 15 (R114), a
+directory without a manifest as a package (R119), and `Decimal` as
+`Copy` (03 makes it a scaled `BigInt`), a question for the owner.
+
+Open: the label at the template's line that `comptime for` unrolls,
+statements before `return impl` (R115), `@cfg` on an import and `when`
+under `--target-runtime` (R116), an item's own `##` text to reflection
+(R117), and the lookup by `str` without its `String`, the runtime's.
+
+Stage 1's version is 0.10.0: the driver may rely on `sir --repl-serve`
+and `--target-runtime` (RULES.md, R112 and R116). The new cases are in
+`cases/findings12/`.
+
 ## Module layout
 
 | Module | Lines | What | Stage 0 original |
@@ -3245,10 +3292,15 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     coherence through a trait's arguments (R105), conditional imports
     and an import in a body (R106), `arbitrary[T]` under a bound
     (R107), most of "Types and traits" (R108) and `E0235` at a derive
-    (R109); left: a padded `@repr(c)` struct under `Plain`, the label at
-    an unrolled template's line, `@preview`'s warning, statements before
-    `return impl`, and the invariant of a method that returns `Self`,
-    the owner's. The tenth round took a variant's
+    (R109); left: a padded `@repr(c)` struct under `Plain` and the
+    invariant of a method that returns `Self`, the owner's. The twelfth
+    round took the lookups by `str` and `.copied()` (R113), `E0343` for a
+    `Shared` (R114; the `zip` temporaries and over-rejection 15 decided
+    against), `@preview`'s warning and the exact `truncate_to` (R115),
+    `target.runtime` in a native build (R116), `f.doc` for
+    `cli.help_text` (R117), the `@export` boundary (R118) and `E0220`
+    beside a module (R119); left: the label at an unrolled template's
+    line and statements before `return impl`. The tenth round took a variant's
     fields' `ty` and the program's kinds in a derive (R96), `E0203`'s and
     `E0271`'s similar names (R97), `E0310` of sized integers (R98),
     `E0812`'s copy (R99), `E0005`'s invisible characters (R100), most of

@@ -1,0 +1,27 @@
+# An `@export`ed function's parameters and result have a layout C shares:
+# numbers, `bool`, `char`, raw pointers and types declared `@repr(c)`;
+# any other type is `E0991` (12, "C interop"; RULES.md, R118; R14).
+from std.mem import ptr
+
+@repr(c)
+struct Reading:
+    celsius: f64
+    bench: u8
+
+struct Loose:
+    celsius: f64
+
+enum Level:
+    Low
+    High
+
+@export("sauna_heat")
+def heat(r: Reading, at: ptr[u8], level: i32) -> f64:
+    return r.celsius + level.to_int().to_f64()
+
+@export("sauna_loose")
+def loose(l: Loose, level: Level, total: u128) -> String:
+    return "{l.celsius}"
+
+def main():
+    print(loose(Loose(celsius=80.0), Level.Low, 3u128))
