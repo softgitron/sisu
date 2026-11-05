@@ -1594,3 +1594,16 @@ conformance diff.
 **Current lean.** Keep it: 03's `Decimal` is exact at any size, which is what the type promises, and a fixed-size type beside it is additive.
 
 **What would settle it.** The owner's decision; a fixed-size type is a module of the standard library and a chapter's paragraph, a change of `Decimal` itself a change of 03 and 11 and of every expectation that prints one.
+
+### Q-80. What do `@derive(Into)` and `@derive(From)` write for a newtype?
+
+**Question.** [03](proposal/03-types-and-generics.md) ("Type aliases and newtypes") names `@derive(Into, From)` as what makes a one-field struct cheap to use, and [11](proposal/11-stdlib.md) lists `Into` and `From` among the prelude's traits, but neither says what the two derives write. The prelude has `Into[T]` alone, documented as a conversion that loses nothing (each sized integer into every wider one), and no `From`; a newtype's conversion into its field loses nothing, while the field's conversion into the newtype can (a `Port` refined to `1..65535` from an `int`). A derive's template is `comptime def derive(T: type) -> impl Trait for T` with no argument of the trait (08, decision 251), while `Into[F]` needs `F`, the field's type (the manual's "missing beside 03" finding; stage 1's sixteenth round, R148, decided against for now).
+
+**Options.**
+- *`From` as the fallible direction, `Into` as the lossless one* (lean): `impl Into[F] for Newtype` writes `.into()` as the field, and `impl From[F] for Newtype` writes `from(f) -> Newtype ! Refused`, checking the newtype's invariant and refinements as construction does; both derives take the field's type from the struct's one field, so the template form gains no argument.
+- *Both infallible, `From` panicking on an invalid value*: Rust's shape; simpler, and against 05's rule that an expected failure is a value.
+- *Neither derive*: `@delegate`, the constructor and `.value` give a newtype both directions today; the sentence of 03 goes.
+
+**Current lean.** The first: it keeps `Into`'s promise, gives `From` the error that 05 asks for, and needs no new template form because a newtype has one field.
+
+**What would settle it.** The owner's decision; the work is a trait in the prelude, two derive templates, a paragraph of 03 and 11 and a chapter's example.
