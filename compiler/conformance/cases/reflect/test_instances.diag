@@ -1,2 +1,4 @@
 12:6-12:18 E0807 contract.not-in-test
+  label 13:5-13:18 type.instance-line
 19:6-19:24 E0381 type.return-in-test
+  label 23:5-24:17 type.instance-line

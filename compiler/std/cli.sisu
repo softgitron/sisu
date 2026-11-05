@@ -44,20 +44,20 @@ def parse[T](args: list[str]) -> T ! Error:
         )
     )
 
+## What the options of `T` are for: the struct's own `##` comment, which a
+## tool prints before `help_text[T]()`; empty without one (RULES.md, R129).
+def about[T]() -> String:
+    comptime if not reflect.is_struct(T):
+        comptime panic("`cli.about` describes a struct, not `{reflect.name_of(T)}`")
+    return reflect.doc_of(T)
+
 ## The options `parse[T]` reads, one line each: the option, the kind of
 ## value it takes and its default, with the field's `##` comment under it,
-## then the positional arguments; first the struct's own `##` comment and
-## an empty line, when it has one.
+## then the positional arguments.
 def help_text[T]() -> String:
     comptime if not reflect.is_struct(T):
         comptime panic("`cli.help_text` describes a struct, not `{reflect.name_of(T)}`")
     var lines: list[String] = []
-    # What the options are for, the struct's own comment (RULES.md, R129).
-    let about = reflect.doc_of(T)
-    if not about.is_empty():
-        for line in about.lines():
-            lines.push(line.to_string())
-        lines.push(String.new())
     comptime for f in reflect.fields_of(T):
         comptime if reflect.is_list(f.ty):
             pass

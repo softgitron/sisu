@@ -6676,7 +6676,7 @@ native` run from SIR) prints `native`; no other output of the corpus.
      a native build reaches a dependency for the native runtime. Stage 1
      decides it (RULES.md, R128).
 
-## R129. An item's own `##` is `reflect.doc_of(T)`, and a variant's field's is `f.doc` (decision 762)
+## R129. An item's own `##` is `reflect.doc_of(T)`, a variant's field's is `f.doc`, and `cli.about` gives a struct's (decision 762)
 
 **The rule.**
 
@@ -6692,35 +6692,34 @@ native` run from SIR) prints `native`; no other output of the corpus.
   struct's field has since R117; a field on the variant's own line,
   `Guessed(int)`, has none, since the comment above that line is the
   variant's.
-- `cli.help_text[T]()` writes the struct's own comment first, each line
-  of it, and an empty line, when it has one.
+- `cli.about[T]()` is the struct's own comment, which a tool prints
+  before `cli.help_text[T]()`; `help_text` prints what it printed, so that
+  the snapshots of its text stay (the conformance suite's
+  `testing/proposal_testing` holds one of a struct with a comment).
 
 **Why.** The manual's finding under "The standard library" (R12):
 reflection gave a struct's fields their comment but not an item's own or
 a variant's fields'; 08 has reflection expose "the documentation of
 items, as values". R117 left `reflect.doc_of(T)` for when a program asked
-for it, and `cli.help_text` is the program.
+for it, and a tool's help is the program.
 
 **In stage 1.** `typeck.template` (`TypeShape.doc`, `VariantShape.docs`,
 `Target.doc`, `reflect`'s `doc_of`, `variants_of`), `typeck.instances`
 (a derive's target and a reflected type's shape), `typeck.collect`
 (`variant_field_doc`, `own_line_doc`), `typeck.program`
-(`VariantInfo.docs`); `std/cli.sisu` (`help_text`).
+(`VariantInfo.docs`); `std/cli.sisu` (`about`, added).
 
 **What it changes.** The case `cases/findings14/item_docs.sisu` (its
 `.out`), which the Rust front end refuses (it has no `reflect.doc_of`);
-`cases/findings12/field_docs.out` is blessed again, since its `Opts` has a
-comment that `help_text` now prints first. The conformance suite's
-`reflect/cli.sisu`, whose struct has none, prints what it printed.
+no other output of the corpus.
 
 - Differs: `compiler/stage1/cases/findings14/item_docs.sisu`: ids, human, doc, doc-output
 
 **Decision 762**, for docs/architecture.md:
 
 762. `reflect.doc_of(T)` is the `##` comment of `T`'s declaration, a
-     variant's field on a line of its own has `f.doc`, and
-     `cli.help_text` writes the struct's own comment first. Stage 1
-     decides it (RULES.md, R129).
+     variant's field on a line of its own has `f.doc`, and `cli.about[T]()`
+     gives a struct's own comment. Stage 1 decides it (RULES.md, R129).
 
 ## R130. A derive's template may check the type before its `return impl` (decision 763)
 
@@ -6767,7 +6766,7 @@ it produces none.
 both of which the Rust front end refuses with `E0607`.
 
 - Differs: `compiler/stage1/cases/findings14/derive_checks.sisu`: ids, human, doc, doc-output
-- Differs: `compiler/stage1/cases/findings14/derive_checks_refused.sisu`: ids, human
+- Differs: `compiler/stage1/cases/findings14/derive_checks_refused.sisu`: ids, human, doc, doc-output
 
 **Decision 763**, for docs/architecture.md:
 
@@ -6817,9 +6816,12 @@ the call); the catalog's `type.instance-line`.
 
 **What it changes.** The case `cases/findings14/unrolled_line.sisu` (its
 `.diag`), and every program whose instance has an error placed at its
-call, which now has the label.
+call, which now has the label: the `.diag` files of
+`cases/findings8/instances.sisu`, `cases/findings11/compound_operator.sisu`
+and the conformance suite's `reflect/test_instances.sisu` are blessed
+again (each differed from stage 0 already, as R77 and R104 list).
 
-- Differs: `compiler/stage1/cases/findings14/unrolled_line.sisu`: ids, human
+- Differs: `compiler/stage1/cases/findings14/unrolled_line.sisu`: ids, human, doc, doc-output
 
 **Decision 764**, for docs/architecture.md:
 

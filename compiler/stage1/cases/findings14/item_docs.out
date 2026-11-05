@@ -1,3 +1,7 @@
+The bath's settings.
+Read from the command line.
+  --heat <int>  (default: 80)
+      How hot, in degrees.
 How warm the sauna is.
 Measured.degrees: [Degrees Celsius.]
 Measured.place: [Where the thermometer hangs.]
