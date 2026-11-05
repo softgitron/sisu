@@ -5253,3 +5253,476 @@ impl i128:
                 return T.wrapping_from(
                     int.from_bits((high.truncate_to[u64]() << 32u64) | low.truncate_to[u64]())
                 )
+
+# ------------------------------------------------------------------ checked arithmetic and fallible chains
+
+# The checked arithmetic of the sized integers and `int`'s `checked_pow`
+# (03: checked operations are spelled as methods, `.checked_add()`), and
+# `Result.or_else`, `Iter.try_map` and `try_collect` (05, "Handling" and
+# "Propagation"): written in Sisu, at the end of the prelude so that the
+# lines of the functions before them do not move (stage 1's RULES.md,
+# R137).
+
+impl int:
+    ## `self` to the power `exp` (not negative), or `None` where `pow`
+    ## would overflow, as `num.checked_pow` gives it.
+    ##
+    ## ```
+    ## assert 3.checked_pow(4) == Some(81)
+    ## assert 2.checked_pow(63) == None
+    ## ```
+    pure def checked_pow(self, exp: int) -> int?:
+        requires exp >= 0
+        var result = 1
+        var b = self
+        var e = exp
+        while e > 0:
+            if e % 2 == 1:
+                result = result.checked_mul(b)?
+            e = e // 2
+            if e > 0:
+                b = b.checked_mul(b)?
+        return Some(result)
+
+impl u8:
+    ## `self + other`, or `None` where it overflows `u8`.
+    ##
+    ## ```
+    ## assert 200u8.checked_add(55u8) == Some(255u8)
+    ## assert 200u8.checked_add(56u8) == None
+    ## assert 3u8.checked_sub(4u8) == None
+    ## assert 16u8.checked_mul(16u8) == None
+    ## assert 2u8.checked_pow(7) == Some(128u8)
+    ## ```
+    pure def checked_add(self, other: u8) -> u8?:
+        if other > u8.MAX - self:
+            return None
+        return Some(self + other)
+    ## `self - other`, or `None` where it is below 0.
+    pure def checked_sub(self, other: u8) -> u8?:
+        if other > self:
+            return None
+        return Some(self - other)
+    ## `self * other`, or `None` where it overflows `u8`.
+    pure def checked_mul(self, other: u8) -> u8?:
+        if self == 0u8 or other == 0u8:
+            return Some(0u8)
+        if other > u8.MAX // self:
+            return None
+        return Some(self * other)
+    ## `self` to the power `exp` (not negative), or `None` where it
+    ## overflows `u8`.
+    pure def checked_pow(self, exp: int) -> u8?:
+        requires exp >= 0
+        var result = 1u8
+        var b = self
+        var e = exp
+        while e > 0:
+            if e % 2 == 1:
+                result = result.checked_mul(b)?
+            e = e // 2
+            if e > 0:
+                b = b.checked_mul(b)?
+        return Some(result)
+
+impl u16:
+    ## `self + other`, or `None` where it overflows `u16`.
+    pure def checked_add(self, other: u16) -> u16?:
+        if other > u16.MAX - self:
+            return None
+        return Some(self + other)
+    ## `self - other`, or `None` where it is below 0.
+    pure def checked_sub(self, other: u16) -> u16?:
+        if other > self:
+            return None
+        return Some(self - other)
+    ## `self * other`, or `None` where it overflows `u16`.
+    pure def checked_mul(self, other: u16) -> u16?:
+        if self == 0u16 or other == 0u16:
+            return Some(0u16)
+        if other > u16.MAX // self:
+            return None
+        return Some(self * other)
+    ## `self` to the power `exp` (not negative), or `None` where it
+    ## overflows `u16`.
+    pure def checked_pow(self, exp: int) -> u16?:
+        requires exp >= 0
+        var result = 1u16
+        var b = self
+        var e = exp
+        while e > 0:
+            if e % 2 == 1:
+                result = result.checked_mul(b)?
+            e = e // 2
+            if e > 0:
+                b = b.checked_mul(b)?
+        return Some(result)
+
+impl u32:
+    ## `self + other`, or `None` where it overflows `u32`.
+    pure def checked_add(self, other: u32) -> u32?:
+        if other > u32.MAX - self:
+            return None
+        return Some(self + other)
+    ## `self - other`, or `None` where it is below 0.
+    pure def checked_sub(self, other: u32) -> u32?:
+        if other > self:
+            return None
+        return Some(self - other)
+    ## `self * other`, or `None` where it overflows `u32`.
+    pure def checked_mul(self, other: u32) -> u32?:
+        if self == 0u32 or other == 0u32:
+            return Some(0u32)
+        if other > u32.MAX // self:
+            return None
+        return Some(self * other)
+    ## `self` to the power `exp` (not negative), or `None` where it
+    ## overflows `u32`.
+    pure def checked_pow(self, exp: int) -> u32?:
+        requires exp >= 0
+        var result = 1u32
+        var b = self
+        var e = exp
+        while e > 0:
+            if e % 2 == 1:
+                result = result.checked_mul(b)?
+            e = e // 2
+            if e > 0:
+                b = b.checked_mul(b)?
+        return Some(result)
+
+impl u64:
+    ## `self + other`, or `None` where it overflows `u64`.
+    pure def checked_add(self, other: u64) -> u64?:
+        if other > u64.MAX - self:
+            return None
+        return Some(self + other)
+    ## `self - other`, or `None` where it is below 0.
+    pure def checked_sub(self, other: u64) -> u64?:
+        if other > self:
+            return None
+        return Some(self - other)
+    ## `self * other`, or `None` where it overflows `u64`.
+    pure def checked_mul(self, other: u64) -> u64?:
+        if self == 0u64 or other == 0u64:
+            return Some(0u64)
+        if other > u64.MAX // self:
+            return None
+        return Some(self * other)
+    ## `self` to the power `exp` (not negative), or `None` where it
+    ## overflows `u64`.
+    pure def checked_pow(self, exp: int) -> u64?:
+        requires exp >= 0
+        var result = 1u64
+        var b = self
+        var e = exp
+        while e > 0:
+            if e % 2 == 1:
+                result = result.checked_mul(b)?
+            e = e // 2
+            if e > 0:
+                b = b.checked_mul(b)?
+        return Some(result)
+
+impl u128:
+    ## `self + other`, or `None` where it overflows `u128`.
+    pure def checked_add(self, other: u128) -> u128?:
+        if other > u128.MAX - self:
+            return None
+        return Some(self + other)
+    ## `self - other`, or `None` where it is below 0.
+    pure def checked_sub(self, other: u128) -> u128?:
+        if other > self:
+            return None
+        return Some(self - other)
+    ## `self * other`, or `None` where it overflows `u128`.
+    pure def checked_mul(self, other: u128) -> u128?:
+        if self == 0u128 or other == 0u128:
+            return Some(0u128)
+        if other > u128.MAX // self:
+            return None
+        return Some(self * other)
+    ## `self` to the power `exp` (not negative), or `None` where it
+    ## overflows `u128`.
+    pure def checked_pow(self, exp: int) -> u128?:
+        requires exp >= 0
+        var result = 1u128
+        var b = self
+        var e = exp
+        while e > 0:
+            if e % 2 == 1:
+                result = result.checked_mul(b)?
+            e = e // 2
+            if e > 0:
+                b = b.checked_mul(b)?
+        return Some(result)
+
+impl i8:
+    ## `self + other`, or `None` where it overflows `i8`.
+    ##
+    ## ```
+    ## assert 100i8.checked_add(27i8) == Some(127i8)
+    ## assert 100i8.checked_add(28i8) == None
+    ## assert (-100i8).checked_sub(29i8) == None
+    ## assert (-16i8).checked_mul(8i8) == Some(-128i8)
+    ## assert (-2i8).checked_pow(7) == Some(-128i8)
+    ## ```
+    pure def checked_add(self, other: i8) -> i8?:
+        if other > 0i8 and self > i8.MAX - other:
+            return None
+        if other < 0i8 and self < i8.MIN - other:
+            return None
+        return Some(self + other)
+    ## `self - other`, or `None` where it overflows `i8`.
+    pure def checked_sub(self, other: i8) -> i8?:
+        if other < 0i8 and self > i8.MAX + other:
+            return None
+        if other > 0i8 and self < i8.MIN + other:
+            return None
+        return Some(self - other)
+    ## `self * other`, or `None` where it overflows `i8`.
+    pure def checked_mul(self, other: i8) -> i8?:
+        if self == 0i8 or other == 0i8:
+            return Some(0i8)
+        # The least value has no magnitude of its own: only a factor of 1
+        # keeps it.
+        if self == i8.MIN or other == i8.MIN:
+            let rest = if self == i8.MIN: other else: self
+            if rest == 1i8:
+                return Some(i8.MIN)
+            return None
+        let a = if self < 0i8: -self else: self
+        let b = if other < 0i8: -other else: other
+        # The largest magnitude `b` may multiply: one more below zero, which
+        # reaches the least value, when `b` divides it.
+        var bound = i8.MAX // b
+        if (self < 0i8) != (other < 0i8) and i8.MAX % b == b - 1i8:
+            bound += 1i8
+        if a > bound:
+            return None
+        return Some(self * other)
+    ## `self` to the power `exp` (not negative), or `None` where it
+    ## overflows `i8`.
+    pure def checked_pow(self, exp: int) -> i8?:
+        requires exp >= 0
+        var result = 1i8
+        var b = self
+        var e = exp
+        while e > 0:
+            if e % 2 == 1:
+                result = result.checked_mul(b)?
+            e = e // 2
+            if e > 0:
+                b = b.checked_mul(b)?
+        return Some(result)
+
+impl i16:
+    ## `self + other`, or `None` where it overflows `i16`.
+    pure def checked_add(self, other: i16) -> i16?:
+        if other > 0i16 and self > i16.MAX - other:
+            return None
+        if other < 0i16 and self < i16.MIN - other:
+            return None
+        return Some(self + other)
+    ## `self - other`, or `None` where it overflows `i16`.
+    pure def checked_sub(self, other: i16) -> i16?:
+        if other < 0i16 and self > i16.MAX + other:
+            return None
+        if other > 0i16 and self < i16.MIN + other:
+            return None
+        return Some(self - other)
+    ## `self * other`, or `None` where it overflows `i16`.
+    pure def checked_mul(self, other: i16) -> i16?:
+        if self == 0i16 or other == 0i16:
+            return Some(0i16)
+        # The least value has no magnitude of its own: only a factor of 1
+        # keeps it.
+        if self == i16.MIN or other == i16.MIN:
+            let rest = if self == i16.MIN: other else: self
+            if rest == 1i16:
+                return Some(i16.MIN)
+            return None
+        let a = if self < 0i16: -self else: self
+        let b = if other < 0i16: -other else: other
+        # The largest magnitude `b` may multiply: one more below zero, which
+        # reaches the least value, when `b` divides it.
+        var bound = i16.MAX // b
+        if (self < 0i16) != (other < 0i16) and i16.MAX % b == b - 1i16:
+            bound += 1i16
+        if a > bound:
+            return None
+        return Some(self * other)
+    ## `self` to the power `exp` (not negative), or `None` where it
+    ## overflows `i16`.
+    pure def checked_pow(self, exp: int) -> i16?:
+        requires exp >= 0
+        var result = 1i16
+        var b = self
+        var e = exp
+        while e > 0:
+            if e % 2 == 1:
+                result = result.checked_mul(b)?
+            e = e // 2
+            if e > 0:
+                b = b.checked_mul(b)?
+        return Some(result)
+
+impl i32:
+    ## `self + other`, or `None` where it overflows `i32`.
+    pure def checked_add(self, other: i32) -> i32?:
+        if other > 0i32 and self > i32.MAX - other:
+            return None
+        if other < 0i32 and self < i32.MIN - other:
+            return None
+        return Some(self + other)
+    ## `self - other`, or `None` where it overflows `i32`.
+    pure def checked_sub(self, other: i32) -> i32?:
+        if other < 0i32 and self > i32.MAX + other:
+            return None
+        if other > 0i32 and self < i32.MIN + other:
+            return None
+        return Some(self - other)
+    ## `self * other`, or `None` where it overflows `i32`.
+    pure def checked_mul(self, other: i32) -> i32?:
+        if self == 0i32 or other == 0i32:
+            return Some(0i32)
+        # The least value has no magnitude of its own: only a factor of 1
+        # keeps it.
+        if self == i32.MIN or other == i32.MIN:
+            let rest = if self == i32.MIN: other else: self
+            if rest == 1i32:
+                return Some(i32.MIN)
+            return None
+        let a = if self < 0i32: -self else: self
+        let b = if other < 0i32: -other else: other
+        # The largest magnitude `b` may multiply: one more below zero, which
+        # reaches the least value, when `b` divides it.
+        var bound = i32.MAX // b
+        if (self < 0i32) != (other < 0i32) and i32.MAX % b == b - 1i32:
+            bound += 1i32
+        if a > bound:
+            return None
+        return Some(self * other)
+    ## `self` to the power `exp` (not negative), or `None` where it
+    ## overflows `i32`.
+    pure def checked_pow(self, exp: int) -> i32?:
+        requires exp >= 0
+        var result = 1i32
+        var b = self
+        var e = exp
+        while e > 0:
+            if e % 2 == 1:
+                result = result.checked_mul(b)?
+            e = e // 2
+            if e > 0:
+                b = b.checked_mul(b)?
+        return Some(result)
+
+impl i128:
+    ## `self + other`, or `None` where it overflows `i128`.
+    pure def checked_add(self, other: i128) -> i128?:
+        if other > 0i128 and self > i128.MAX - other:
+            return None
+        if other < 0i128 and self < i128.MIN - other:
+            return None
+        return Some(self + other)
+    ## `self - other`, or `None` where it overflows `i128`.
+    pure def checked_sub(self, other: i128) -> i128?:
+        if other < 0i128 and self > i128.MAX + other:
+            return None
+        if other > 0i128 and self < i128.MIN + other:
+            return None
+        return Some(self - other)
+    ## `self * other`, or `None` where it overflows `i128`.
+    pure def checked_mul(self, other: i128) -> i128?:
+        if self == 0i128 or other == 0i128:
+            return Some(0i128)
+        # The least value has no magnitude of its own: only a factor of 1
+        # keeps it.
+        if self == i128.MIN or other == i128.MIN:
+            let rest = if self == i128.MIN: other else: self
+            if rest == 1i128:
+                return Some(i128.MIN)
+            return None
+        let a = if self < 0i128: -self else: self
+        let b = if other < 0i128: -other else: other
+        # The largest magnitude `b` may multiply: one more below zero, which
+        # reaches the least value, when `b` divides it.
+        var bound = i128.MAX // b
+        if (self < 0i128) != (other < 0i128) and i128.MAX % b == b - 1i128:
+            bound += 1i128
+        if a > bound:
+            return None
+        return Some(self * other)
+    ## `self` to the power `exp` (not negative), or `None` where it
+    ## overflows `i128`.
+    pure def checked_pow(self, exp: int) -> i128?:
+        requires exp >= 0
+        var result = 1i128
+        var b = self
+        var e = exp
+        while e > 0:
+            if e % 2 == 1:
+                result = result.checked_mul(b)?
+            e = e // 2
+            if e > 0:
+                b = b.checked_mul(b)?
+        return Some(result)
+
+impl[T, E] Result[T, E]:
+    ## The value, or `f` of the error: the fallback that needs the error
+    ## (05, "Handling").
+    ##
+    ## ```
+    ## let lost: Result[int, String] = Err("lost".to_string())
+    ## assert lost.or_else(e -> e.byte_len()) == 4
+    ## let found: Result[int, String] = Ok(7)
+    ## assert found.or_else(e -> 0) == 7
+    ## ```
+    def or_else(own self, f: (E) -> T) -> T:
+        if self.is_ok():
+            return self.expect("a value")
+        return f(self.err().expect("an error"))
+
+impl[T] Iter[T]:
+    ## `f` of each item, in a list, or the first error `f` gives, after which
+    ## no item is taken: the map of a chain that can fail, since a `?` in a
+    ## closure returns from the closure (05, "Propagation").
+    ##
+    ## ```
+    ## let halves: Result[list[int], String] = [2, 4].iter().try_map(
+    ##     n -> if n % 2 == 0: Ok(n // 2) else: Err("odd")
+    ## )
+    ## assert halves == Ok([1, 2])
+    ## let odd: Result[list[int], String] = [2, 3].iter().try_map(
+    ##     n -> if n % 2 == 0: Ok(n // 2) else: Err("odd")
+    ## )
+    ## assert odd.is_err()
+    ## ```
+    def try_map[U, E](own self, f: (T) -> Result[U, E]) -> Result[list[U], E]:
+        var out: list[U] = []
+        for x in self:
+            match f(x):
+                case Ok(v):
+                    out.push(v)
+                case Err(e):
+                    return Err(e)
+        return Ok(out)
+
+impl[T, E] list[Result[T, E]]:
+    ## The values of the results, in a list, or the first error among them:
+    ## the collection of a chain that can fail (05, "Propagation").
+    ##
+    ## ```
+    ## let all: list[Result[int, String]] = [Ok(4), Ok(5)]
+    ## assert all.try_collect() == Ok([4, 5])
+    ## let one: list[Result[int, String]] = [Ok(4), Err("lost"), Err("late")]
+    ## assert one.try_collect() == Err("lost")
+    ## ```
+    pure def try_collect(own self) -> Result[list[T], E]:
+        var out: list[T] = []
+        for x in own self:
+            if x.is_err():
+                return Err(x.err().expect("an error"))
+            out.push(x.expect("a value"))
+        return Ok(out)

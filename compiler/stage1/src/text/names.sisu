@@ -1,0 +1,231 @@
+##! Names beyond ASCII (02, "Lexical structure"; D-048; RULES.md, R136): a
+##! name is read in NFC, its letters' scripts tell a name that mixes them,
+##! and its skeleton, each letter as the ASCII letter it reads as, tells two
+##! names a reader may take for one. The tables are `unicode_tables`',
+##! generated from Unicode's data; a lookup is a binary search over a
+##! table's records.
+
+from stage1.text import char_at
+from stage1.unicode_tables import (
+    SCRIPTS,
+    combining_classes,
+    compositions,
+    confusables,
+    decompositions,
+    scripts,
+)
+
+## Whether every byte of `text` is ASCII.
+pub pure def is_ascii(text: str) -> bool:
+    let n = text.byte_len()
+    var i = 0
+    while i < n:
+        if text.byte_at(i).to_int() >= 128:
+            return False
+        i += 1
+    return True
+
+## The `digits` hexadecimal digits at byte `at` of `table`.
+pure def hex_at(table: str, at: int, digits: int) -> int:
+    var value = 0
+    for i in range(at, at + digits):
+        let b = table.byte_at(i).to_int()
+        value = value * 16 + (if b <= 57: b - 48 else: b - 87)
+    return value
+
+## The record of `table`, of `width` bytes and a separator each, whose
+## range `LLLLLL-HHHHHH` holds `n`.
+pure def range_record(table: str, width: int, n: int) -> int?:
+    var lo = 0
+    var hi = table.byte_len() // (width + 1) - 1
+    while lo <= hi:
+        let mid = (lo + hi) // 2
+        let at = mid * (width + 1)
+        if n < hex_at(table, at, 6):
+            hi = mid - 1
+        elif n > hex_at(table, at + 7, 6):
+            lo = mid + 1
+        else:
+            return Some(at)
+    return None
+
+## The canonical combining class of the code point `n`.
+pub pure def combining_class(n: int) -> int:
+    if n < 0x300:
+        return 0
+    let table = combining_classes()
+    let at = range_record(table, 16, n) else:
+        return 0
+    return hex_at(table, at + 14, 2)
+
+## Whether `c` is a mark that combines with the letter before it, which a
+## name takes after its letters.
+pub pure def is_combining(c: char) -> bool:
+    return combining_class(c.code()) > 0
+
+## The script of the letter `n`, an index of `SCRIPTS`, or `None` for a
+## character of no script (a digit, `_`, a mathematical letter).
+pub pure def script_of(n: int) -> int?:
+    if n < 0x80:
+        if (65 <= n <= 90) or (97 <= n <= 122):
+            return latin()
+        return None
+    let table = scripts()
+    let at = range_record(table, 16, n) else:
+        return None
+    return Some(hex_at(table, at + 14, 2))
+
+## The index of the Latin script in `SCRIPTS`.
+pure def latin() -> int?:
+    for i in range(len(SCRIPTS)):
+        if SCRIPTS[i] == "LATIN":
+            return Some(i)
+    return None
+
+## The ASCII letter or digit the code point `n` reads as, or `n` itself.
+pub pure def prototype(n: int) -> int:
+    if n < 0x80:
+        return n
+    let table = confusables()
+    let at = range_record(table, 20, n) else:
+        return n
+    return hex_at(table, at + 14, 6) + (n - hex_at(table, at, 6))
+
+## The canonical decomposition of `n` into one or two code points (the
+## second 0 for one), and whether NFC composes it again.
+pure def decomposition(n: int) -> (int, int, bool)?:
+    if n < 0xC0:
+        return None
+    let table = decompositions()
+    let width = 23
+    var lo = 0
+    var hi = table.byte_len() // width - 1
+    while lo <= hi:
+        let mid = (lo + hi) // 2
+        let at = mid * width
+        let c = hex_at(table, at, 6)
+        if n < c:
+            hi = mid - 1
+        elif n > c:
+            lo = mid + 1
+        else:
+            return Some(
+                (
+                    hex_at(table, at + 7, 6),
+                    hex_at(table, at + 14, 6),
+                    hex_at(table, at + 21, 1) == 1,
+                )
+            )
+    return None
+
+## The letter NFC composes of `base` and the mark `mark` after it.
+pure def composition(base: int, mark: int) -> int?:
+    let table = compositions()
+    let width = 21
+    var lo = 0
+    var hi = table.byte_len() // width - 1
+    while lo <= hi:
+        let mid = (lo + hi) // 2
+        let at = mid * width
+        let b = hex_at(table, at, 6)
+        let m = hex_at(table, at + 7, 6)
+        if base < b or (base == b and mark < m):
+            hi = mid - 1
+        elif base > b or (base == b and mark > m):
+            lo = mid + 1
+        else:
+            return Some(hex_at(table, at + 14, 6))
+    return None
+
+## Appends the full canonical decomposition of `n` to `out`.
+pure def decompose_into(n: int, mut out: list[int]):
+    if let Some((b, m, _)) = decomposition(n):
+        decompose_into(b, mut out)
+        if m != 0:
+            decompose_into(m, mut out)
+        return
+    out.push(n)
+
+## `name` in NFC (UAX 15): each character decomposed, the marks after a
+## letter put in their canonical order, and each mark composed with the
+## letter before it where nothing blocks it. A name of ASCII is itself.
+pub pure def nfc(name: str) -> String:
+    if is_ascii(name):
+        return name.to_string()
+    var codes: list[int] = []
+    for c in name.chars():
+        decompose_into(c.code(), mut codes)
+    # The canonical order: a run of marks sorted by their classes, stably.
+    var classes: list[int] = []
+    for n in codes:
+        classes.push(combining_class(n))
+    for i in range(1, len(codes)):
+        var j = i
+        while j > 0 and classes[j] != 0 and classes[j - 1] > classes[j]:
+            codes.swap(j - 1, j)
+            classes.swap(j - 1, j)
+            j -= 1
+    # The composition: a mark joins the last starter when no character
+    # between them has a class of zero or of its own or more.
+    var out: list[int] = []
+    var out_classes: list[int] = []
+    var starter: int? = None
+    for i in range(len(codes)):
+        let n = codes[i]
+        let k = classes[i]
+        if let Some(s) = starter:
+            let last = out_classes[len(out_classes) - 1]
+            let blocked = len(out) - 1 > s and (last == 0 or last >= k)
+            if not blocked:
+                if let Some(c) = composition(out[s], n):
+                    out[s] = c
+                    continue
+        if k == 0:
+            starter = Some(len(out))
+        out.push(n)
+        out_classes.push(k)
+    var text = String.new()
+    for n in out:
+        text.push_char(char.from_code(n) ?? '\u{FFFD}')
+    return text
+
+## The scripts of the letters of `name`, each once, in the order the name
+## first uses them; a digit, `_` and a letter of no script have none.
+pub pure def scripts_of(name: str) -> list[str]:
+    var seen: list[int] = []
+    for c in name.chars():
+        if let Some(s) = script_of(c.code()):
+            if not seen.contains(s):
+                seen.push(s)
+    var out: list[str] = []
+    for s in seen:
+        out.push(SCRIPTS[s])
+    return out
+
+## `name` with each letter written as the ASCII letter or digit it reads as:
+## two names with one skeleton are confusable.
+pub pure def skeleton(name: str) -> String:
+    var text = String.new()
+    for c in nfc(name).chars():
+        text.push_char(char.from_code(prototype(c.code())) ?? c)
+    return text
+
+test "a name is read in NFC":
+    # `e` and a combining acute accent is `é`; the marks below and above
+    # are put in their order before they compose.
+    assert nfc("cafe\u{301}") == "caf\u{E9}"
+    assert nfc("caf\u{E9}") == "caf\u{E9}"
+    assert nfc("a\u{323}\u{302}") == "\u{1EAD}"
+    assert nfc("a\u{302}\u{323}") == "\u{1EAD}"
+    assert nfc("\u{212B}") == "\u{C5}"
+    assert nfc("plain_name") == "plain_name"
+
+test "a name's scripts and skeleton":
+    assert scripts_of("p\u{430}rt") == ["LATIN", "CYRILLIC"]
+    assert scripts_of("l\u{F6}yly_2") == ["LATIN"]
+    assert scripts_of("\u{3B1}\u{3B2}") == ["GREEK"]
+    assert skeleton("p\u{430}rt") == "part"
+    assert skeleton("\u{FF41}b") == "ab"
+    assert skeleton("l\u{F6}yly") == "l\u{F6}yly"
+    assert is_combining('\u{301}')
+    assert not is_combining('e')

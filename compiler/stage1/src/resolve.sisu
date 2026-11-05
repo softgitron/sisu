@@ -37,6 +37,7 @@ from stage1.syntax.ast import ItemKind, Module, TypeKind, build
 from stage1.syntax.kinds import SyntaxKind
 from stage1.syntax.tree import Element, Tree, is_item
 from stage1.text import char_at
+from stage1.text.names import is_ascii, nfc, scripts_of, skeleton
 from stage1.typeck.folding import Term, TermKind, terms
 
 ## A method's signature as written: what `E0234` compares and prints.
@@ -93,7 +94,7 @@ impl ModuleNames:
         if not declares_name(kind):
             return
         if let Some((start, end)) = item_name(tree, n):
-            let name = text.byte_slice(start, end).to_string()
+            let name = nfc(text.byte_slice(start, end))
             if declares_type(kind):
                 _ = self.types.add(name.copy())
             if kind == SyntaxKind.TraitDef:
@@ -107,7 +108,7 @@ impl ModuleNames:
                     for v in child_nodes(tree, b):
                         if tree.nodes[v].kind == SyntaxKind.VariantDef:
                             if let Some(t) = first_token(tree, v, SyntaxKind.Ident):
-                                _ = self.variants.add(token_text(text, tree, t).to_string())
+                                _ = self.variants.add(nfc(token_text(text, tree, t)))
 
 ## What every module sees besides its own declarations: the prelude, and
 ## the std modules an import may name, by the name they are loaded under.
@@ -334,6 +335,16 @@ view struct Resolver:
     foreign: bool
     ## The body of the function being resolved.
     body_node: int?
+    ## Whether a name beyond ASCII was declared, after which each name
+    ## declared is compared with those in scope (`W0032`; RULES.md, R136).
+    unicode: bool
+    ## The names written in the `ERROR` nodes of the bodies being resolved,
+    ## which a statement that did not parse may have declared: none of them
+    ## is reported as unknown (RULES.md, R138).
+    broken: set[String]
+    ## Whether the body being resolved has an `ERROR` node, so that each of
+    ## its statements is looked at for one (R138).
+    broken_body: bool
 
 ## The name diagnostics of the module whose tree is `tree`, sorted, without
 ## those on a line that has one of the syntax diagnostics `syntax`.
@@ -774,7 +785,7 @@ pub pure def trait_methods(text: str, tree: Tree, n: int) -> dict[String, Signat
         for m in child_nodes(tree, b):
             if tree.nodes[m].kind == SyntaxKind.FnDef:
                 if let Some((start, end)) = item_name(tree, m):
-                    let name = text.byte_slice(start, end).to_string()
+                    let name = nfc(text.byte_slice(start, end))
                     _ = out.insert(name, signature(text, tree, m))
     return out
 
@@ -805,7 +816,7 @@ pub pure def signature(text: str, tree: Tree, n: int) -> Signature:
                 continue
             var name = String.new()
             if let Some(t) = first_token(tree, p, SyntaxKind.Ident):
-                name = token_text(text, tree, t).to_string()
+                name = nfc(token_text(text, tree, t))
             var ty = String.new()
             for c in child_nodes(tree, p):
                 if is_type_kind(tree.nodes[c].kind):
@@ -943,7 +954,7 @@ impl Resolver:
     ## The text of token `t`, owned, so that it outlives changes to the
     ## resolver.
     pure def text_of(self, t: int) -> String:
-        return token_text(self.text, self.tree, t).to_string()
+        return nfc(token_text(self.text, self.tree, t))
 
     ## The children of `n`, copied, for loops that change the resolver.
     pure def elements(self, n: int) -> list[Element]:
@@ -989,6 +1000,9 @@ impl Resolver:
             naming_kind="a variable".to_string(),
             foreign=False,
             body_node=None,
+            unicode=False,
+            broken=set(),
+            broken_body=False,
         )
 
     ## Declares every item of the module, as stage 0's `declare_items`,
@@ -1074,7 +1088,7 @@ impl Resolver:
                 self.bind_item(n)
                 if first_token(self.tree, n, SyntaxKind.WhereKw) != None:
                     if let Some((start, end)) = item_name(self.tree, n):
-                        let name = self.text.byte_slice(start, end).to_string()
+                        let name = nfc(self.text.byte_slice(start, end))
                         _ = self.module.refinements.add(name)
             case _ if declares_name(kind):
                 self.bind_item(n)
@@ -1083,7 +1097,7 @@ impl Resolver:
 
     pure def bind_item(mut self, n: int):
         if let Some((start, end)) = item_name(self.tree, n):
-            let name = self.text.byte_slice(start, end).to_string()
+            let name = nfc(self.text.byte_slice(start, end))
             if declares_type(self.kind(n)):
                 _ = self.module.types.add(name.copy())
             let identity = "item {self.index}.{name}"
@@ -1099,6 +1113,7 @@ impl Resolver:
             self.report(labelled.note(Msg.ResolveRenameDuplicate))
             return
         _ = self.module.identity.insert(name.copy(), identity)
+        self.check_confusable(name, start, end)
         _ = self.module.items.insert(name, (start, end))
 
     ## Records that an import bound `name` (stage 0's `bind_import`):
@@ -1370,7 +1385,40 @@ impl Resolver:
                 let token = self.tree.tokens[t]
                 let d = Diagnostic.new(Msg.ResolveShadowOuter, token.start, token.end)
                 self.report(d.with("name", name))
+        let token = self.tree.tokens[t]
+        self.check_confusable(name, token.start, token.end)
         self.locals[depth - 1].push(name.to_string())
+
+    ## `W0032` for a name declared at `start..end` that reads as another
+    ## name in scope (D-048; RULES.md, R136): one of the two beyond ASCII,
+    ## with one skeleton. Nothing is compared until a name beyond ASCII is
+    ## declared.
+    pure def check_confusable(mut self, name: str, start: int, end: int):
+        if not self.unicode:
+            if is_ascii(name):
+                return
+            self.unicode = True
+        if self.foreign or self.quiet or start >= end:
+            return
+        let ascii = is_ascii(name)
+        let shape = skeleton(name)
+        var found: (String, (int, int)?)? = None
+        for depth in range(len(self.locals)):
+            for other in self.locals[depth]:
+                if found.is_none() and confusable(name, ascii, shape, other):
+                    found = Some((other.copy(), None))
+        if found.is_none():
+            for (other, at) in self.module.items.items():
+                if found.is_none() and confusable(name, ascii, shape, other):
+                    found = Some((other.copy(), Some((at.0, at.1))))
+        let (other, at) = found else:
+            return
+        var d = Diagnostic.new(Msg.ResolveConfusable, start, end).with("name", name)
+        d = d.with("other", other.copy())
+        if let Some((s, e)) = at:
+            if s < e:
+                d = d.label_with(Msg.ResolveConfusableHere, s, e, "other", other)
+        self.report(d)
 
     ## A declared name not written in its kind's style (02; R12): `E0267`,
     ## `E0268` or `E0269`, with the name written so as the fix. A foreign
@@ -1380,6 +1428,16 @@ impl Resolver:
         if self.foreign or self.quiet or start >= end:
             return
         let name = self.text.byte_slice(start, end)
+        # A name of letters of several scripts (D-048; RULES.md, R136).
+        if not is_ascii(name):
+            let written = nfc(name)
+            let used = scripts_of(written)
+            if len(used) > 1:
+                var shown: list[String] = []
+                for u in used:
+                    shown.push(script_name(u))
+                let d = Diagnostic.new(Msg.ResolveMixedScript, start, end).with("name", written)
+                self.report(d.with("scripts", and_list(shown)))
         let fixed = problem(name, style) else:
             return
         let m = match style:
@@ -1401,7 +1459,7 @@ impl Resolver:
     pure def shadowed_set(mut self, n: int):
         let (start, end) = item_name(self.tree, n) else:
             return
-        let name = self.text.byte_slice(start, end).to_string()
+        let name = nfc(self.text.byte_slice(start, end))
         if self.env.prelude.error_sets.contains(name.copy()):
             self.report(Diagnostic.new(Msg.ResolveShadowPreludeSet, start, end).with("name", name))
 
@@ -1437,10 +1495,32 @@ impl Resolver:
         let key = name.to_string()
         return self.module.items.contains(key.copy()) or self.env.prelude.items.contains(key)
 
+    ## Adds the names the `ERROR` nodes of `body` write to `broken`, and
+    ## gives back what it held before (RULES.md, R138).
+    pure def broken_in(mut self, body: int) -> (set[String], bool):
+        let saved = (self.broken.copy(), self.broken_body)
+        if has_error(self.tree, body):
+            self.error_names(body, False)
+            self.broken_body = True
+        return saved
+
+    ## The names of `n`'s subtree that are inside an `ERROR` node, or all of
+    ## them when `inside`, added to `broken`.
+    pure def error_names(mut self, n: int, inside: bool):
+        for e in self.elements(n):
+            match e:
+                case Leaf(t):
+                    if inside and self.tree.tokens[t].kind == SyntaxKind.Ident:
+                        _ = self.broken.add(self.text_of(t))
+                case Node(c):
+                    self.error_names(c, inside or self.kind(c) == SyntaxKind.Error)
+
     ## A value name at token `t`, reported when nothing declares it.
     pure def use_name(mut self, t: int):
         let name = self.text_of(t)
         if self.knows_value(name) or self.quiet or self.module.poisoned.contains(name.to_string()):
+            return
+        if self.broken.contains(name.copy()):
             return
         let token = self.tree.tokens[t]
         var d = Diagnostic.new(Msg.ResolveUndefinedName, token.start, token.end).with("name", name)
@@ -1655,7 +1735,7 @@ impl Resolver:
         let t = first_token(self.tree, n, SyntaxKind.Ident) else:
             return
         let token = self.tree.tokens[t]
-        let name = self.text.byte_slice(token.start, token.end).to_string()
+        let name = nfc(self.text.byte_slice(token.start, token.end))
         # An attribute Sisu reads where it means nothing (RULES.md, R40):
         # `@derive` on a function, `@export` on a struct.
         if let Some((places, where_)) = attribute_places(name):
@@ -1978,7 +2058,7 @@ impl Resolver:
                 continue
             let (start, end) = item_name(self.tree, m) else:
                 continue
-            let name = self.text.byte_slice(start, end).to_string()
+            let name = nfc(self.text.byte_slice(start, end))
             let expected = methods.get(name.copy()) else:
                 continue
             let found = signature(self.text, self.tree, m)
@@ -2062,8 +2142,9 @@ impl Resolver:
         self.pop_scope()
 
     ## A function: its generic parameters, parameters and result type are
-    ## in scope in its body. A header or body with a syntax error reports
-    ## no unknown names in the body.
+    ## in scope in its body. A header with a syntax error reports no unknown
+    ## names in the body; a body with one reports those outside its `ERROR`
+    ## nodes but the names they write (RULES.md, R138).
     pure def function(mut self, n: int, method: bool):
         let saved_generics = len(self.generics)
         let saved_consts = len(self.const_generics)
@@ -2097,7 +2178,8 @@ impl Resolver:
                 case _:
                     pass
         if let Some(body) = first_child(self.tree, n, SyntaxKind.Block):
-            self.quiet = saved_quiet or header_broken or has_error(self.tree, body)
+            self.quiet = saved_quiet or header_broken
+            let saved_broken = self.broken_in(body)
             # The body shares the parameters' scope: a `let` there that
             # rebinds a parameter does not shadow it.
             let saved_body = self.in_body
@@ -2107,6 +2189,7 @@ impl Resolver:
             self.statements_of(body)
             self.in_body = saved_body
             self.body_node = saved_node
+            (self.broken, self.broken_body) = saved_broken
         self.pop_scope()
         self.result_labels = saved_labels
         self.quiet = saved_quiet
@@ -2194,13 +2277,13 @@ impl Resolver:
         if let Some(body) = first_child(self.tree, n, SyntaxKind.Block):
             let saved_quiet = self.quiet
             let saved_body = self.in_body
-            self.quiet = saved_quiet
-                or error_outside_block(self.tree, n)
-                or has_error(self.tree, body)
+            self.quiet = saved_quiet or error_outside_block(self.tree, n)
+            let saved_broken = self.broken_in(body)
             self.in_body = True
             self.statements_of(body)
             self.quiet = saved_quiet
             self.in_body = saved_body
+            (self.broken, self.broken_body) = saved_broken
         self.pop_scope()
 
     # ------------------------------------------------------------------ statements
@@ -2218,6 +2301,12 @@ impl Resolver:
             self.statement(s)
 
     pure def statement(mut self, n: int):
+        # A statement with an `ERROR` node outside its blocks has a shape
+        # that cannot be trusted: none of its names is reported, and every
+        # name it writes may be one it declares (RULES.md, R138).
+        if self.broken_body and error_outside_block(self.tree, n):
+            self.error_names(n, True)
+            return
         match self.kind(n):
             # An import in a body is the type checker's `E0277`; the names
             # it would bind are not reported again (RULES.md, R106).
@@ -3086,3 +3175,38 @@ pure def screaming(name: str) -> bool:
         if b >= 65 and b <= 90:
             letter = True
     return letter
+
+## Whether `other`, a name in scope, reads as `name`, whose skeleton is
+## `shape`: a different name with the same skeleton, one of the two beyond
+## ASCII (RULES.md, R136).
+pure def confusable(name: str, ascii: bool, shape: str, other: str) -> bool:
+    if other == name or other.is_empty():
+        return False
+    let other_ascii = is_ascii(other)
+    if ascii and other_ascii:
+        return False
+    if other_ascii:
+        return other == shape
+    return skeleton(other) == shape
+
+## A script's name as a message writes it: `LATIN` as `Latin`.
+pure def script_name(script: str) -> String:
+    if script == "CJK":
+        return "CJK".to_string()
+    var out = String.new()
+    var first = True
+    for b in script.bytes():
+        let n = b.to_int()
+        let lower = if not first and 65 <= n <= 90: n + 32 else: n
+        out.push_char(char.from_code(lower) ?? '?')
+        first = n == 32 or n == 45
+    return out
+
+## The names joined as a sentence lists them: `A`, `A and B`, `A, B and C`.
+pure def and_list(names: list[String]) -> String:
+    var out = String.new()
+    for i in range(len(names)):
+        if i > 0:
+            out.push(if i == len(names) - 1: " and " else: ", ")
+        out.push(names[i])
+    return out

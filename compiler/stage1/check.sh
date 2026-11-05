@@ -251,6 +251,13 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+# The Unicode tables of names are what `tools/unicode_tables.py` writes from
+# Python's `unicodedata` (RULES.md, R136): a stale file fails the run.
+if ! python3 -I "$here/tools/unicode_tables.py" --check; then
+    echo "check.sh: src/unicode_tables.sisu is stale (python3 tools/unicode_tables.py)" >&2
+    exit 1
+fi
+
 echo "building stage 0 (cargo build --release)"
 if ! (cd "$compiler" && cargo build --release --quiet); then
     echo "check.sh: stage 0 does not build" >&2

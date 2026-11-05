@@ -72,6 +72,7 @@ from stage1.syntax.ast import (
 from stage1.syntax.kinds import SyntaxKind
 from stage1.syntax.tree import Element, Tree, is_item
 from stage1.text import char_at
+from stage1.text.names import nfc
 
 ## Builds the AST of a whole file.
 pub pure def module(tree: Tree) -> Module:
@@ -204,7 +205,7 @@ impl B:
         return self.source.byte_slice(node.start, node.end)
 
     pure def name(self, t: int) -> Name:
-        return Name(text=self.text(t).to_string(), range=self.token_range(t))
+        return Name(text=nfc(self.text(t)), range=self.token_range(t))
 
     pure def has(self, n: int, k: SyntaxKind) -> bool:
         for t in self.tokens(n):
@@ -1268,7 +1269,7 @@ impl B:
         return match self.token_kind(toks[0]):
             case SelfKw: ExprKind.SelfValue
             case SelfTypeKw: ExprKind.SelfType
-            case _: ExprKind.Name(self.text(toks[0]).to_string())
+            case _: ExprKind.Name(nfc(self.text(toks[0])))
 
     pure def dict_entries(mut self, n: int) -> list[(ExprId, ExprId)]:
         var out: list[(ExprId, ExprId)] = []

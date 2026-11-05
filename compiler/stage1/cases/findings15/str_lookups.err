@@ -1,0 +1,2 @@
+panic: the key "pie" is not in the dict
+  at main (str_lookups.sisu:26:11)

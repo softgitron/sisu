@@ -1,0 +1,5 @@
+8:9-8:13 W0031 resolve.mixed-script name="pаrt" scripts="Latin and Cyrillic"
+8:9-8:13 W0032 resolve.confusable name="pаrt" other="part"
+  label 4:5-4:9 resolve.confusable-here other="part"
+9:9-9:12 W0031 resolve.mixed-script name="οne" scripts="Greek and Latin"
+10:9-10:12 W0032 resolve.confusable name="one" other="οne"

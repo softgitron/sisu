@@ -1124,14 +1124,16 @@ impl Interp:
                 return Ok(Value.Set([]))
             case "dict.new":
                 return Ok(Value.Dict([]))
-            case "set.add" | "set.remove" | "set.contains":
+            # A lookup by a `str` finds the `String` of the same text, as
+            # `equal` compares them (decision 784; RULES.md, R134).
+            case "set.add" | "set.remove" | "set.contains" | "set.remove_str" | "set.contains_str":
                 let Value.Ref(p) = arg(args, 0)? else:
                     return Err(Stop.Beyond("a set method on a value that is not a set"))
                 let Value.Set(xs) = self.read(p)? else:
                     return Err(Stop.Beyond("a set method on a value that is not a set"))
                 let x = self.target(arg(args, 1)?)?
                 let at = index_of(xs, x)?
-                if name == "set.contains":
+                if name == "set.contains" or name == "set.contains_str":
                     return Ok(Value.Bool(at.is_some()))
                 var ys = xs
                 if name == "set.add":
@@ -1156,7 +1158,7 @@ impl Interp:
                 if let Some(v) = old:
                     return Ok(some(v.copy()))
                 return Ok(none())
-            case "dict.get" | "dict.contains" | "dict.remove":
+            case "dict.get" | "dict.contains" | "dict.remove" | "dict.get_str" | "dict.remove_str":
                 let Value.Ref(p) = arg(args, 0)? else:
                     return Err(Stop.Beyond("a dict method on a value that is not a dict"))
                 let Value.Dict(es) = self.read(p)? else:
@@ -1166,7 +1168,7 @@ impl Interp:
                     return Ok(Value.Bool(at.is_some()))
                 let i = at else:
                     return Ok(none())
-                if name == "dict.get":
+                if name == "dict.get" or name == "dict.get_str":
                     var v = p.copy()
                     v.path.push(Step.Entry(i))
                     return Ok(some(Value.Ref(v)))
@@ -1174,6 +1176,17 @@ impl Interp:
                 let (_, v) = rest.remove(i)
                 self.write(p, Value.Dict(rest))?
                 return Ok(some(v))
+            case "dict.index_str":
+                let Value.Ref(p) = arg(args, 0)? else:
+                    return Err(Stop.Beyond("a dict method on a value that is not a dict"))
+                let Value.Dict(es) = self.read(p)? else:
+                    return Err(Stop.Beyond("a dict method on a value that is not a dict"))
+                let key = self.target(arg(args, 1)?)?
+                let i = entry_index(es, key)? else:
+                    return Err(self.panicked("panic.missing-key", [param("key", key_text(key))]))
+                var v = p.copy()
+                v.path.push(Step.Entry(i))
+                return Ok(Value.Ref(v))
             case "dict.items" | "dict.keys" | "dict.values":
                 let Value.Ref(p) = arg(args, 0)? else:
                     return Err(Stop.Beyond("a dict method on a value that is not a dict"))

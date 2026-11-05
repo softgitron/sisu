@@ -712,11 +712,19 @@ pure def intrinsic_decls(
             if let Some(f) = prog.fn_info(d):
                 out.push(decl_of(prog, mut types, name, f))
                 continue
+        # A lookup by a `str` has the facts of its `String` form (decision
+        # 784; RULES.md, R134).
+        if name.ends_with("_str"):
+            let base = name.byte_slice(0, name.byte_len() - 4).to_string()
+            if let Some(d) = by_name.get(base).copied():
+                if let Some(f) = prog.fn_info(d):
+                    out.push(decl_of(prog, mut types, name, f))
+                    continue
         var from_: list[int] = []
         var inner: list[int] = []
         let ns: str = name
         match ns:
-            case "iter.ref" | "iter.mut" | "iter.own" | "gen.new":
+            case "iter.ref" | "iter.mut" | "iter.own" | "gen.new" | "dict.index_str":
                 from_ = [0]
             case "list.slice" | "list.slice_middle":
                 inner = [0]

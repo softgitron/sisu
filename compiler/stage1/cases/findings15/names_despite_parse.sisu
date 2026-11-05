@@ -1,0 +1,13 @@
+# A body with a syntax error still reports the names it does not know
+# outside the statement that did not parse (RULES.md, R138; G4's finding):
+# Go's `go f()` and `nil` are both reported, where the `nil` waited for the
+# parse to be fixed. A name the broken statement writes, `total` here, is
+# not reported where a later statement uses it.
+def work():
+    pass
+
+def main():
+    go work()
+    let total = (1 +) * 2
+    let result = nil
+    print("{result} {total}")
