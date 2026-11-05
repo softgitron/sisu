@@ -1225,11 +1225,12 @@ fn an_exported_function_is_a_global_symbol_that_c_calls() {
         .output()
         .expect("sisu runs");
     assert!(sir.status.success(), "{}", String::from_utf8_lossy(&sir.stderr));
-    let sir = String::from_utf8_lossy(&sir.stdout).replacen(
-        "entry main\n",
-        "entry main\nexport \"sauna_heat\" heat\n",
-        1,
-    );
+    // Stage 1 writes the `export` line itself since its 0.11.0 (decision
+    // 740); an older stage 1 leaves it to the test.
+    let mut sir = String::from_utf8_lossy(&sir.stdout).into_owned();
+    if !sir.contains("export \"sauna_heat\"") {
+        sir = sir.replacen("entry main\n", "entry main\nexport \"sauna_heat\" heat\n", 1);
+    }
     std::fs::write(dir.join("sauna.sir"), sir).expect("the SIR");
     // The driver's link has no C caller: it fails, keeping the object.
     let built = sisu_in(
