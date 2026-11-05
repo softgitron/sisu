@@ -1,0 +1,11 @@
+sir 0
+source 0 "src/main.sisu"
+source 1 "<std>/prelude.sisu"
+source 2 "src/heat.sisu"
+source 3 "<std>/test.sisu"
+entry main
+test "the main module's test" test#0 in "src/main.sisu"
+test "heat/levels/eighty is hot" test#1 in "src/heat.sisu" tags "slow"
+test "heat/levels/sixty is warm" test#2 in "src/heat.sisu" tags "slow"
+bench "heat/a level" bench#0 in "src/heat.sisu"
+

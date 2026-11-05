@@ -1,0 +1,6 @@
+reading 80
+reading 75
+Ok([80, 75])
+reading 80
+reading hot
+Err("not a number: hot")

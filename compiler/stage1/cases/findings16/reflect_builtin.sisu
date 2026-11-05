@@ -1,0 +1,18 @@
+# Reflection on a type the prelude declares, in a function that takes no
+# type parameter (RULES.md, R143; R12's finding): `int`, `str` and the
+# others are types compile time knows, as a struct of the program is, where
+# `int` was `E0900` with an `E0200` in a file the program does not have.
+
+## A point on the sauna's floor plan.
+struct Point:
+    x: int
+    y: int
+
+def main():
+    print(comptime reflect.name_of(int))
+    print(comptime reflect.name_of(str))
+    print(comptime reflect.is_int(int))
+    print(comptime reflect.is_float(f64))
+    print(comptime reflect.name_of(u8))
+    print(comptime reflect.name_of(Point))
+    print(comptime reflect.doc_of(Point))

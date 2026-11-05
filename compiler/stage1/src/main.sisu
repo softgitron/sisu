@@ -143,7 +143,7 @@ error CommandError:
 ## prints as `sisu1 VERSION`: its minor number is the round of RULES.md
 ## that last changed what the driver may rely on (R56), so that the driver
 ## asks it rather than probing a command (decision 424).
-const VERSION: str = "0.11.0"
+const VERSION: str = "0.12.0"
 
 def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     var args = sys.env.args()
@@ -377,6 +377,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             "--partial",
             "--accept-unsafe",
             "--tests",
+            "--modules",
             "--locked",
             "--no-default-features",
             "--format=ids",
@@ -425,7 +426,10 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             var built = input.copy()
             built.contracts = level
             built.roots = transcript_roots(sys, built.disk, True)
-            let (r, sir) = report_with(base, built, path, catalog, mut kept, True)
+            # `--modules`: each test's and benchmark's module beside it
+            # (RULES.md, R142), which the driver reads to run one module's.
+            let modules = words.contains("--modules")
+            let (r, sir) = report_with(base, built, path, catalog, mut kept, True, modules)
             if let Some(why) = refusal(r, catalog, ids):
                 emit("", why)
                 return Err(Failed)
@@ -2090,16 +2094,22 @@ pure def problems_report(layout: Layout, catalog: Catalog) -> Report:
 pure def report_of(
     base: typeck.Base, input: Input, name: str, catalog: Catalog, mut kept: Kept
 ) -> Report:
-    let (r, _) = report_with(base, input, name, catalog, mut kept, False)
+    let (r, _) = report_with(base, input, name, catalog, mut kept, False, False)
     return r
 
 ## `report_of`'s report, and with `sir` the SIR of the program it checked
 ## when it has no error and is within the slice (empty otherwise): the
 ## program after the ownership checker's drops, its `comptime` values and
 ## its holes' closures, as `sir` prints it, from the one check (RULES.md,
-## R47).
+## R47), with each test's module when `modules` is set (R142).
 pure def report_with(
-    base: typeck.Base, input: Input, name: str, catalog: Catalog, mut kept: Kept, sir: bool
+    base: typeck.Base,
+    input: Input,
+    name: str,
+    catalog: Catalog,
+    mut kept: Kept,
+    sir: bool,
+    modules: bool,
 ) -> (Report, String):
     let checked = check_input(base, input, catalog, True)
     var report = front_report(input, checked, name, catalog)
@@ -2164,7 +2174,7 @@ pure def report_with(
         holes.close(mut done.program, catalog.render("panic.hole-closure", [hole]))
         if not input.regions.is_empty():
             session.name_regions(mut done.program, input.regions)
-        text = write.write(done.program)
+        text = write.write_as(done.program, modules)
     return (report, text)
 
 ## The front end's part of what `check` prints of a checked program
@@ -2709,7 +2719,7 @@ def held_build(
     var built = inputs[0].copy()
     built.contracts = CONTRACTS_ALL
     built.regions = regions.copy()
-    let (r, sir) = report_with(base, built, name, catalog, mut kept, True)
+    let (r, sir) = report_with(base, built, name, catalog, mut kept, True, False)
     let front = r.front(catalog, None)
     if front.errors(catalog) > 0:
         return Ok(Built.Stopped(front))
@@ -3150,7 +3160,7 @@ def test_program(
 ) -> (int, bool) ! IoError:
     var built = input.copy()
     built.contracts = CONTRACTS_ALL
-    let (r, sir) = report_with(base, built, path, catalog, mut kept, True)
+    let (r, sir) = report_with(base, built, path, catalog, mut kept, True, False)
     if let Some(why) = refusal(r, catalog, False):
         emit("", why)
         return Ok((1, False))

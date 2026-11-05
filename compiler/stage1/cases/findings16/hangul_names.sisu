@@ -1,0 +1,6 @@
+# A name written with Hangul jamo is the name written with the syllable
+# they compose (RULES.md, R148; UAX 15 composes Hangul by rule, which R136
+# left out): `각` and `각` are one variable.
+def main():
+    let 각 = "a corner of the sauna"
+    print(각)

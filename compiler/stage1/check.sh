@@ -1388,8 +1388,32 @@ while read -r f; do
         report="$report\n  UNLISTED: ${f#"$repo"/}: expected tests (the case's ${base##*/}.tests against stage 1 in $box/all)"
     fi
 done < <(grep -F "$here/cases/" "$work/cases-check.list"; grep -F "$here/cases/packages/" "$work/packages.list")
+# And the lines before the first declaration of what `sir --tests
+# --modules` prints of each case with a `NAME.sir-modules` (RULES.md, R142:
+# each test's and benchmark's module, which the driver reads), a package
+# case's from its directory as `NAME.pkg.sir-modules`, with the directory
+# taken off the paths.
+mkdir -p "$work/sir-modules-expected"
+k=0
+while read -r f; do
+    base="${f%.sisu}"
+    [ -f "$base.sir-modules" ] || continue
+    k=$((k + 1)); n=$((n + 1))
+    dir=$(dirname "$f" | sed 's/[.[\*^$|]/\\&/g')
+    given="$work/sir-modules-expected/$k"
+    had_lock=0
+    [ -f "$f/sisu.lock" ] && had_lock=1
+    stage1 sir --tests --modules "$f" 2> /dev/null | sed '/^$/q' | sed "s|$dir/||g" > "$given.out"
+    [ "$had_lock" = 1 ] || rm -f "$f/sisu.lock"
+    if cmp -s "$base.sir-modules" "$given.out"; then
+        same=$((same + 1))
+    else
+        class_unlisted=$((class_unlisted + 1))
+        report="$report\n  UNLISTED: ${f#"$repo"/}: expected sir-modules (the case's ${base##*/}.sir-modules against stage 1 in $given.out)"
+    fi
+done < <(grep -F "$here/cases/" "$work/cases-check.list"; grep -F "$here/cases/packages/" "$work/packages.list")
 total=$((total + n)); identical=$((identical + same)); unlisted=$((unlisted + class_unlisted))
-check_summary="$check_summary\n$(printf '  %-12s %4d files, %4d as their .diag, .audit, .lint, .sir, .sir-tests, .release or .tests expects, %3d otherwise' expected "$n" "$same" "$class_unlisted")"
+check_summary="$check_summary\n$(printf '  %-12s %4d files, %4d as their .diag, .audit, .lint, .sir, .sir-tests, .sir-modules, .release or .tests expects, %3d otherwise' expected "$n" "$same" "$class_unlisted")"
 
 # The formatter: the text `sisu fmt` leaves of each file, what `sisu fmt
 # --check` prints of it and its status, against stage 1's `fmt-batch`; and

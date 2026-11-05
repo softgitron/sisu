@@ -261,6 +261,10 @@ impl Resolver:
                         # Written with the generators of property tests
                         # (`typeck.arbitrary`; RULES.md, R41).
                         pass
+                    elif self.prog.refused_derives.contains(written):
+                        # A trait whose template `E0607` refused: that is
+                        # the one error (RULES.md, R144).
+                        _ = self.prog.refused_derived.add(ty)
                     elif not written.is_empty()
                             and (
                                 derivable(written)
@@ -501,7 +505,12 @@ impl Resolver:
             let plain = self.is_plain_trait(td)
             let structural = derivable(c.trait_name) or c.field.is_some() or default or plain
             var found: DefId? = None
-            for i in self.prog.impls:
+            # The trait's impls, in the order they were declared, which are
+            # the program's impls of it (RULES.md, R147: not every impl).
+            var candidates: list[DefId] = []
+            if let Some(of_trait) = self.prog.impls_of.get(td):
+                candidates = of_trait.copy()
+            for i in candidates:
                 if found.is_some():
                     break
                 # An impl made before the type cannot be of it: the base's
@@ -510,14 +519,15 @@ impl Resolver:
                     continue
                 let info = self.prog.impl_info(i) else:
                     continue
-                let module_name = ref self.prog.modules[self.prog.defs[i.index].module.index].name
-                let generated = module_name.starts_with("<derive>/")
-                    or module_name.starts_with("<delegate>/")
-                if not generated or info.trait_ref.def_ != td:
+                if info.trait_ref.def_ != td:
                     continue
-                if let TyData.Adt(d, _) = self.types.data(info.self_ty):
-                    if d == c.ty:
-                        found = Some(i)
+                let TyData.Adt(d, _) = self.types.data(info.self_ty) else:
+                    continue
+                if d != c.ty:
+                    continue
+                let module_name = ref self.prog.modules[self.prog.defs[i.index].module.index].name
+                if module_name.starts_with("<derive>/") or module_name.starts_with("<delegate>/"):
+                    found = Some(i)
             let imp = found else:
                 continue
             let found_info = self.prog.impl_info(imp) else:
@@ -754,6 +764,8 @@ impl Resolver:
                 types.push((n.copy(), shape))
             elif let Some(shape) = self.named_trait(module, n):
                 types.push((n.copy(), shape))
+            elif let Some(shape) = self.named_module(module, n):
+                types.push((n.copy(), shape))
         self.shape_names = []
         let inst = "__instance_{self.instances_declared}"
         var source = self.text_of_module(module)
@@ -867,6 +879,8 @@ impl Resolver:
                 types.push((n.copy(), written_plainly(shape, n)))
             elif let Some(shape) = self.named_trait(module, n):
                 types.push((n.copy(), shape))
+            elif let Some(shape) = self.named_module(module, n):
+                types.push((n.copy(), shape))
         var unfolded: String? = None
         var failed: (TextRange, String)? = None
         if module.index < len(self.sources):
@@ -950,10 +964,18 @@ impl Resolver:
                 self.record_instance(d, template, args, site)
 
     ## The type `name` names in `module`, when it is a type without type
-    ## parameters: a struct, an enum, an error set or an alias.
+    ## parameters: a struct, an enum, an error set or an alias, or a
+    ## primitive type (`int`, `f64`, `bool`, `char`, `str`), which a function
+    ## that takes no type may reflect on too (RULES.md, R143).
     pure def named_type(mut self, module: ModuleId, name: str) -> Ty?:
         let d = self.prog.lookup(module, name) else:
-            return None
+            return match name:
+                case "int": Some(Ty.int())
+                case "f64": Some(Ty.float())
+                case "bool": Some(Ty.bool())
+                case "char": Some(Ty.char())
+                case "str": Some(Ty.str())
+                case _: None
         match self.prog.defs[d.index].kind():
             case DefKind.Struct(_) | DefKind.Enum(_) | DefKind.ErrorSet(_):
                 if self.prog.type_generics(d).is_empty():
@@ -981,6 +1003,42 @@ impl Resolver:
                 s.methods.push(shape)
         return Some(s)
 
+    ## The module of the program `name` names in `module`, as reflection
+    ## sees it (`reflect.functions_of`, RULES.md, R145): its functions in
+    ## the order they are declared, but its `comptime def`s and generic
+    ## functions, each with its signature, attributes and `##` comment; of
+    ## another module, its public ones. A module of the standard library is
+    ## none.
+    pure def named_module(mut self, module: ModuleId, name: str) -> TypeShape?:
+        let d = self.prog.lookup(module, name) else:
+            return None
+        let DefKind.Module(m) = self.prog.defs[d.index].kind() else:
+            return None
+        if self.is_std(m) or m.index >= len(self.sources):
+            return None
+        var s = TypeShape.named(name, name, Kind.Module)
+        let items = self.sources[m.index].items.copy()
+        for id in items:
+            let item = self.sources[m.index].ast.item(id).copy()
+            let ItemKind.Fn(f) = item.kind else:
+                continue
+            if f.is_comptime or not f.generics.is_empty():
+                continue
+            if m != module and item.vis == Vis.Private:
+                continue
+            let fd = self.prog.lookup_in(m, f.name.text) else:
+                continue
+            var shape = self.method_shape(fd, []) else:
+                continue
+            for a in item.attrs:
+                var args: list[String] = []
+                for x in a.args:
+                    args.push(self.text_in(m, x.range))
+                shape.attrs.push((a.name.copy(), args))
+            shape.doc = self.doc_in(m, f.name.range.start)
+            s.methods.push(shape)
+        return Some(s)
+
     ## What reflection sees of the method `m`, its types shown with `names`
     ## for the generic parameters in scope.
     pure def method_shape(mut self, m: DefId, names: list[String]) -> MethodShape?:
@@ -1005,6 +1063,8 @@ impl Resolver:
                 params=params,
                 ret=[self.signature_shape(f.ret, names)],
                 provided=f.body.is_some(),
+                attrs=[],
+                doc=String.new(),
             )
         )
 

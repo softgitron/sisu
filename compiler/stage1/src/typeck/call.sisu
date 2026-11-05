@@ -426,6 +426,12 @@ impl Checker:
                     if let Some(a) = args:
                         self.check_args_loosely(cx, a)
                     return self.error_expr(at)
+                # A function a refused derive would have written (RULES.md,
+                # R144): its template's `E0607` is the error.
+                if self.refused_derive_of(cx, ty):
+                    if let Some(a) = args:
+                        self.check_args_loosely(cx, a)
+                    return self.error_expr(at)
                 let diag = self.error(cx, Msg.TypeUnknownAssociated, name.range).with("ty", shown)
                 self.report(diag.with("name", name.text))
                 if let Some(a) = args:
@@ -438,6 +444,13 @@ impl Checker:
                 let diag = self.error(cx, Msg.TypeUnknownField, name.range).with("ty", owner)
                 self.report(diag.with("name", name.text))
                 return self.error_expr(at)
+
+    ## Whether `ty` is a type whose `@derive` names a trait whose template
+    ## `E0607` refused (RULES.md, R144).
+    pure def refused_derive_of(self, cx: Cx, ty: Ty) -> bool:
+        if let TyData.Adt(d, _) = self.types.data(ty):
+            return cx.prog.refused_derived.contains(d)
+        return False
 
     ## `E0327` for `Light.Blue`, a CamelCase name after an enum or an error
     ## set that has no such variant (RULES.md, R45), with the variant closest
@@ -1913,6 +1926,10 @@ impl Checker:
                     if has_field:
                         let fv = self.field_of(cx, recv, name, at)
                         return self.call_value(cx, fv, args, trailing, at)
+            # A method a refused derive would have written (RULES.md, R144).
+            if self.refused_derive_of(cx, base):
+                self.check_args_loosely(cx, args)
+                return self.error_expr(at)
             let shown = self.show(cx, base)
             var d = self.error(cx, Msg.TypeUnknownMethod, name.range)
             d = d.with("ty", shown).with("name", name.text)

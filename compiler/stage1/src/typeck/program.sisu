@@ -615,6 +615,11 @@ pub struct Program:
     pub impls_of: dict[DefId, list[DefId]]
     ## Names in top-level code of the root module that failed to parse.
     pub poisoned: set[String]
+    ## The traits whose `comptime def derive` `E0607` refused, by name, and
+    ## the types whose `@derive` names one: the one mistake is reported
+    ## once, at the template (RULES.md, R144).
+    pub refused_derives: set[String]
+    pub refused_derived: set[DefId]
     ## Associated constants by type and name (`Money.ZERO`).
     pub assoc_consts: dict[(TyKey, String), DefId]
     ## The types written in `arbitrary[T]` and `exhaustive[T](...)`, by
@@ -686,6 +691,8 @@ impl Program:
             impls=[],
             impls_of={},
             poisoned=set(),
+            refused_derives=set(),
+            refused_derived=set(),
             assoc_consts={},
             generator_sites={},
             generator_failures={},

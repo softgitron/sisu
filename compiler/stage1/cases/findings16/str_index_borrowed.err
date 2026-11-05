@@ -1,0 +1,2 @@
+panic: the key "pier" is not in the dict
+  at main (str_index_borrowed.sisu:17:11)

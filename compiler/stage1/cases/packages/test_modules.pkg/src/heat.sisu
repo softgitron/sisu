@@ -1,0 +1,19 @@
+from std.test import Bench, black_box
+
+## How hot a sauna at `degrees` is.
+pub def level(degrees: int) -> String:
+    if degrees >= 80:
+        return "hot".to_string()
+    return "warm".to_string()
+
+@tag("slow")
+suite "levels":
+    test "eighty is hot":
+        assert level(80) == "hot"
+
+    test "sixty is warm":
+        assert level(60) == "warm"
+
+bench "a level"(b: Bench):
+    for _ in b.loop():
+        black_box(level(75))

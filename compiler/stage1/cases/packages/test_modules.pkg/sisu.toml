@@ -1,0 +1,6 @@
+# RULES.md, R142: `sir --tests --modules` names each test's and benchmark's
+# module, the file its function is declared in, so that the driver can run
+# one module's tests (`sisu test src/MODULE.sisu`, decision 828).
+[package]
+name = "sauna"
+version = "0.1.0"

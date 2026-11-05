@@ -1,0 +1,6 @@
+a wood-fired sauna by the lake
+the front page
+no page at /sauna
+index(0) -> String: The front page.
+about(0) -> String: What the sauna is.
+hours(1) -> String: When it is warm, which no route serves.

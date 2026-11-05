@@ -1,0 +1,10 @@
+# `reflect.functions_of` takes a module the code imports (RULES.md, R145): a
+# type is refused, and a function's descriptor answers `name_of`, `doc_of`
+# and `attributes_of` but no query of a type.
+
+struct Point:
+    x: int
+
+def main():
+    comptime for f in reflect.functions_of(Point):
+        print(comptime f.name)

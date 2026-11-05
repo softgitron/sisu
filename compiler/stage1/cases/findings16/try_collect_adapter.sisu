@@ -1,0 +1,16 @@
+# `try_collect` after an adapter's `map` (RULES.md, R146; 05,
+# "Propagation"): the values the map gives, or the first error, after
+# which no item is taken.
+
+def reading(word: str) -> Result[int, String]:
+    print("reading {word}")
+    if let Some(n) = word.parse_int():
+        return Ok(n)
+    return Err("not a number: {word}")
+
+def readings(words: list[str]) -> Result[list[int], String]:
+    return words.iter().map(w -> reading(w)).try_collect()
+
+def main():
+    print(readings(["80", "75"]))
+    print(readings(["80", "hot", "cold"]))

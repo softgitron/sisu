@@ -1,0 +1,16 @@
+## The front page.
+@route("/")
+pub def index() -> String:
+    return "the front page".to_string()
+
+## What the sauna is.
+@route("/about")
+pub def about() -> String:
+    return "a wood-fired sauna by the lake".to_string()
+
+## When it is warm, which no route serves.
+pub def hours(day: int) -> String:
+    return "day {day}: from six".to_string()
+
+def private_helper() -> String:
+    return "not seen from another module".to_string()
