@@ -1286,7 +1286,7 @@ mod tests {
         let dump = sisu_parser::parse(super::FileId(0), &text).tree.dump(false);
         let tree = super::Syntax::read(text.clone(), &dump).expect("a tree");
         let from_tree = super::Outline::of(&tree);
-        let printed = "let 20 42\n  binds a b\n  initialiser 33 42\n  reads f x\n  changes\n\
+        let printed = "let 20 43\n  binds a b\n  initialiser 33 42\n  reads f x\n  changes\n\
                        expr 43 55\n  binds\n  reads\n  changes seen\nitem 56 72\n";
         let read = super::Outline::read(text, printed).expect("an outline");
         assert_eq!(read.stmts.len(), 3);
