@@ -1,0 +1,15 @@
+Some(5)
+None
+None
+Some(-42)
+None
+Some(-9223372036854775808)
+None
+Some(-9223372036854775808)
+3
+-3
+200
+[TotalF64(value=-1.0), TotalF64(value=-0.0), TotalF64(value=0.0), TotalF64(value=2.5), TotalF64(value=NaN)]
+Some(9.0)
+Some(2.5)
+Some("bbb")

@@ -1,0 +1,11 @@
+@cfg(target.os == "windows")
+import win
+
+def greet():
+    if comptime target.os == "windows":
+        win.hello()
+    else:
+        print("not windows")
+
+def main():
+    greet()

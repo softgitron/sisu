@@ -1631,7 +1631,18 @@ impl Analysis:
             # In a loop that the borrow lasts through, the line it ends on
             # is the loop's last, so the change goes after the loop
             # (RULES.md, R77).
-            if self.in_loop_of(f, b, y):
+            # A binding the loop makes anew, its variable or a `let` of its
+            # body, while a borrow of the one before is still used: what
+            # is kept is a copy that owns its value (RULES.md, R104).
+            var anew = False
+            if acc == Access.Write and is_named(f, name_place.local) and len(name_place.proj) == 0:
+                if let Some(at) = s.loc:
+                    if let Some(decl) = f.locals[name_place.local.index].loc:
+                        anew = decl.line == at.line and decl.col == at.col
+            if anew:
+                let shown = place_name(types, f, shorten(name_place))
+                fd = fd.note(Msg.BorrowBoundAnew, [param("name", shown), text("end", end)])
+            elif self.in_loop_of(f, b, y):
                 let shown = place_name(types, f, shorten(name_place))
                 fd = fd.note(Msg.BorrowLoopEnds, [param("name", shown), text("end", end)])
             else:

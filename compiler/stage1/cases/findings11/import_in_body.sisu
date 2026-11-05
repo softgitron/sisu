@@ -1,0 +1,7 @@
+# An import in a function's body is `E0277`, which says where imports stand,
+# with the fix that moves it there (RULES.md, R106; R13).
+
+def main():
+    let x = 4.0
+    import math
+    print(math.sqrt(x))

@@ -1,0 +1,6 @@
+from atlas.geo.point import Point
+from atlas.geo.ledger import Taken
+
+def main():
+    let oulu = Point(65.0, 25.5)
+    print(oulu.lat)

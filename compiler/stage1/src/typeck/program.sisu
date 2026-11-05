@@ -612,6 +612,11 @@ pub struct Program:
     ## The call that stands for each such site, by the site's module and
     ## expression.
     pub generator_calls: dict[(int, int), ExprId]
+    ## For a site whose type is a bare name without a generator, `T` in
+    ## `arbitrary[T]`: the call `Gen.of(d -> T.arbitrary(d))`, which stands
+    ## for it where `T` is a type parameter bounded by `Arbitrary` (RULES.md,
+    ## R107).
+    pub generator_bounds: dict[(int, int), ExprId]
     ## The `@refines` attribute each test the compiler writes for one stands
     ## for, by the test's name: its module and range (RULES.md, R83).
     pub refines_at: dict[String, (ModuleId, TextRange)]
@@ -667,6 +672,7 @@ impl Program:
             generator_sites={},
             generator_failures={},
             generator_calls={},
+            generator_bounds={},
             refines_at={},
             comptime_budgets={},
             embedded={},

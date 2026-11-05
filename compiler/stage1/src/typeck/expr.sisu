@@ -467,6 +467,32 @@ impl Checker:
                     if cx.prog.implements(mut self.types, concrete, traits, self.env) != Answer.No:
                         let word = if m: "mut " else: "ref "
                         return d.fix_at(Msg.TypeLendIt, r.start, r.start, word)
+        # A capability, a test's `TestClock` among them, where a whole
+        # `System` is expected: the parameter narrowed to the capability
+        # takes it (RULES.md, R104).
+        if self.is_builtin(cx, exp, "System") and not self.types.contains_error(actual):
+            let concrete = self.resolved(self.types.strip_ref(actual))
+            let wk = ref cx.prog.wk
+            let caps = [
+                ("Clock", "clock", wk.clock_ops),
+                ("Fs", "fs", wk.fs_ops),
+                ("Net", "net", wk.net_ops),
+                ("Rand", "rand", wk.rand_ops),
+                ("Env", "env", wk.env_ops),
+                ("Stdin", "stdin", wk.stdin_ops),
+            ]
+            if let TyData.Adt(_, _) = self.data(concrete):
+                for (cap, field, ops) in caps:
+                    let t = ops else:
+                        continue
+                    let tr = TraitRef(def_=t, args=[])
+                    if let Answer.Yes(_) = cx.prog.implements(mut self.types, concrete, tr, self.env):
+                        let ps = [
+                            Param(name="found".to_string(), value=self.show(cx, concrete)),
+                            Param(name="cap".to_string(), value=cap.to_string()),
+                            Param(name="field".to_string(), value=field.to_string()),
+                        ]
+                        return d.note_params(Msg.TypeNarrowCapability, ps)
         # Text where a `Path` is expected: `Path.new` makes one (R16).
         if self.is_builtin(cx, exp, "Path") and self.is_text(cx, self.types.strip_ref(actual)):
             let edits = [
@@ -716,6 +742,15 @@ impl Checker:
             if let TExprKind.Index(base, index, kind) = self.exprs[x.index].kind:
                 if kind == IndexKind.List and self.is_place(base):
                     if let TExprKind.Local(l) = self.exprs[base.index].kind:
+                        # The list is the function's own, not borrowed: the
+                        # item stays in it, which lends it (RULES.md, R104).
+                        if let TyData.Adt(_, _) = self.data(self.ty_of(base)):
+                            let lr = self.span_of(base)
+                            let ps = [
+                                Param(name="list".to_string(), value=self.source_text(cx, lr)),
+                                Param(name="what".to_string(), value=what.copy()),
+                            ]
+                            d = d.note_params(Msg.TypeItemStaysInList, ps)
                         if self.locals[l].mutable:
                             let br = self.span_of(base)
                             let ir = self.span_of(index)
@@ -1848,7 +1883,18 @@ impl Checker:
         if op == BinOp.Div and both_int:
             let at = self.op_span(cx, l, r, "/")
             let d = self.error(cx, Msg.TypeIntegerDivision, range)
-            self.report(d.fix_at(Msg.TypeUseFloorDivision, at.start, at.end, "//"))
+            var fixed = d.fix_at(Msg.TypeUseFloorDivision, at.start, at.end, "//")
+            # Or the float division 03 spells, both sides made `f64`
+            # (RULES.md, R104).
+            var edits = self.float_operand_edits(cx, l)
+            for e in self.float_operand_edits(cx, r):
+                edits.push(e.copy())
+            var compound = False
+            if let TExprKind.Error = self.exprs[l.index].kind:
+                compound = True
+            if len(edits) >= 2 and not compound:
+                fixed = fixed.fix_edits(Msg.TypeFloatDivision, edits)
+            self.report(fixed)
             return (Ty.int(), False)
         if op == BinOp.FloorDiv and both_float:
             let d = self.error(cx, Msg.TypeFloatFloorDivision, range)
@@ -2024,6 +2070,21 @@ impl Checker:
             Edit(start=r.start, end=r.start, text="(".to_string()),
             Edit(start=r.end, end=r.end, text=").to_{kind}()"),
         ]
+
+    ## The edits that make an `int` operand an `f64`: a literal gets its
+    ## `.0`, anything else `.to_f64()`; none for an operand without text.
+    pure def float_operand_edits(self, cx: Cx, x: TExprId) -> list[Edit]:
+        let r = self.span_of(x)
+        if r.start < 0 or r.end > cx.source.byte_len() or r.start >= r.end:
+            return []
+        let text = cx.source.byte_slice(r.start, r.end)
+        var digits = True
+        for b in text.bytes():
+            if not (is_digit(b) or b == 95):
+                digits = False
+        if digits:
+            return [Edit(start=r.end, end=r.end, text=".0".to_string())]
+        return self.method_edits(cx, x, "to_f64")
 
     ## The edits that call `method` on an operand: after a name, a call or
     ## a parenthesised expression, around anything else parenthesised

@@ -1,0 +1,10 @@
+#!/usr/bin/env sisu
+# /// script
+# [dependencies]
+# stove = "1.2"
+# ///
+# A script whose dependency is named by version is `E1010` alone, without
+# `E0220` for its import (RULES.md, R104; G29).
+import stove
+
+print(stove.heating_minutes(9, 12))

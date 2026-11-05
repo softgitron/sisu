@@ -1,0 +1,9 @@
+# RULES.md, R105: a library gives `2.0 * v` to its users with `impl
+# Mul[Vector] for f64`, an impl of a trait it does not own for a type it
+# does not own, which is its own because `Vector`, a trait argument, is.
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies]
+vec = { path = "vec" }

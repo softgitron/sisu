@@ -32,7 +32,9 @@ from stage1.syntax.ast import (
     Ast,
     Attr,
     BinOp,
+    Closure,
     ClosureBody,
+    ClosureParam,
     CmpOp,
     ContractKind,
     Expr,
@@ -895,6 +897,10 @@ impl Resolver:
                 if let Some(n) = entry:
                     site = n.copy()
             if site.is_empty():
+                # A bare name, which may be a type parameter bounded by
+                # `Arbitrary` (RULES.md, R107).
+                if kind == "arbitrary" and is_bare_name(key):
+                    self.write_bound_call(module, e, key)
                 continue
             var call_args: list[Arg]? = None
             if let Some(c) = calls.get(e.index):
@@ -1016,6 +1022,47 @@ impl Resolver:
         let call = Expr(node=node, range=at, kind=ExprKind.Call(callee=f, args=args, trailing=None))
         let made = self.sources[module.index].ast.add_expr(call)
         _ = self.prog.generator_calls.insert((module.index, e.index), made)
+
+    ## The call `Gen.of(d -> T.arbitrary(d))` that stands for the site `e`
+    ## of `module`, `arbitrary[T]`, where `T` is a type parameter bounded by
+    ## `Arbitrary`, whose impl draws it (RULES.md, R107).
+    pure def write_bound_call(mut self, module: ModuleId, e: ExprId, ty: str):
+        let at = self.ast(module).expr(e).range
+        let node = self.ast(module).expr(e).node
+        let t = self.add_name_expr(module, node, at, ty)
+        let method = Expr(
+            node=node,
+            range=at,
+            kind=ExprKind.Field(base=t, name=Name(text="arbitrary".to_string(), range=at)),
+        )
+        let m = self.sources[module.index].ast.add_expr(method)
+        let d = self.add_name_expr(module, node, at, "__draws")
+        let arg = Arg(node=node, range=at, name=None, mutable=False, value=d)
+        let drawn = Expr(node=node, range=at, kind=ExprKind.Call(callee=m, args=[arg], trailing=None))
+        let body = self.sources[module.index].ast.add_expr(drawn)
+        let param = ClosureParam(name=Name(text="__draws".to_string(), range=at), ty=None)
+        let closure = Closure(
+            node=node,
+            range=at,
+            own_=False,
+            params=[param],
+            implicit_param=False,
+            body=ClosureBody.Expr(body),
+        )
+        let c = self.sources[module.index].ast.add_expr(
+            Expr(node=node, range=at, kind=ExprKind.Closure(closure))
+        )
+        let gen = self.add_name_expr(module, node, at, "Gen")
+        let field = Expr(
+            node=node,
+            range=at,
+            kind=ExprKind.Field(base=gen, name=Name(text="of".to_string(), range=at)),
+        )
+        let f = self.sources[module.index].ast.add_expr(field)
+        let made_arg = Arg(node=node, range=at, name=None, mutable=False, value=c)
+        let call = Expr(node=node, range=at, kind=ExprKind.Call(callee=f, args=[made_arg], trailing=None))
+        let made = self.sources[module.index].ast.add_expr(call)
+        _ = self.prog.generator_bounds.insert((module.index, e.index), made)
 
     ## `@refines(reference)` (17, D-070): the function must give what its
     ## reference gives on every case, within the tolerance; its cases go to
@@ -1583,3 +1630,12 @@ pub pure def type_text(ast: Ast, t: TypeExprId) -> String:
             return "dyn {type_text(ast, i)}"
         case _:
             return "()"
+
+## Whether `key` is one name, as a type parameter is written.
+pure def is_bare_name(key: str) -> bool:
+    if key.is_empty():
+        return False
+    for c in key.chars():
+        if not (is_alphanumeric(c) or c == '_'):
+            return False
+    return True

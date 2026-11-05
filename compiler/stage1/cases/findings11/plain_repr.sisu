@@ -1,0 +1,18 @@
+# `@derive(Plain)` asks for `@repr(c)` itself, not any attribute named
+# `repr` (RULES.md, R108; chapter 27, R14).
+from std.mem import Plain
+
+@repr(python)
+@derive(Plain, Copy)
+struct Odd:
+    a: u32
+    b: u32
+
+@repr(c)
+@derive(Plain, Copy)
+struct Even:
+    a: u32
+    b: u32
+
+def main():
+    print(Even(a=1, b=2).plain_size())

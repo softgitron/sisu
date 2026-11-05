@@ -1,0 +1,11 @@
+# `E0421` for a lent capability kept in a field names what keeps one
+# (RULES.md, R104; chapter 18).
+struct Reader:
+    fs: Fs
+
+def keep(fs: Lent[Fs]) -> Reader:
+    return Reader(fs=fs)
+
+def main(sys: System):
+    let reader = keep(sys.fs.lend())
+    print(reader.fs.exists("a.txt"))

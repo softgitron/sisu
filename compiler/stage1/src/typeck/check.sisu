@@ -83,7 +83,7 @@ from stage1.typeck.thir import (
     TStmt,
     Unwrap,
 )
-from stage1.typeck.ty import DefId, TraitRef, Ty, TyData, Types
+from stage1.typeck.ty import DefId, TraitRef, Ty, TyData, TyKey, Types
 
 ## The spaces before `at` on its line, the indentation of what starts
 ## there.
@@ -700,6 +700,10 @@ impl Checker:
             return d
         let key = self.types.key(ty) else:
             return d
+        # A float has no `Ord` a library may give it: its total order is
+        # `total_order()`'s (03; RULES.md, R108).
+        if key == TyKey.Float and Some(tr.def_) == cx.prog.lookup_in(cx.prog.prelude, "Ord"):
+            return d.note(Msg.TypeTotalOrder)
         if info.methods.is_empty():
             return d
         for m in info.methods:
@@ -1664,6 +1668,21 @@ impl Checker:
                 out.push(TStmt.Block(self.new_block(stmts, span)))
             case StmtKind.Item(it):
                 let item = cx.ast.item(it)
+                # An import in a body: where imports stand, and the fix
+                # that moves it there (RULES.md, R106).
+                var import_ = False
+                match item.kind:
+                    case ItemKind.Import(_) | ItemKind.FromImport(_):
+                        import_ = True
+                    case _:
+                        pass
+                if import_:
+                    var d = self.error(cx, Msg.ResolveImportInBody, item.range)
+                    if let Some(edits) = move_import_edits(cx.source, item.range):
+                        d = d.fix_edits(Msg.ResolveMoveImport, edits)
+                    self.report_other(d)
+                    out.push(TStmt.Error(span))
+                    return
                 let what = match item.kind:
                     case ItemKind.Fn(_): "a nested `def`"
                     case ItemKind.Const(_): "a local `const`"
@@ -1978,7 +1997,19 @@ impl Checker:
                     let c = self.coerce(cx, call, pty)
                     return TStmt.Assign(place=place, value=c, span=span)
                 let lhs = self.add(TExprKind.Error, pty, self.span_of(place))
+                let before = len(self.diags)
                 let (result, _) = self.binary_result(cx, o, lhs, v, range)
+                # The operator written is the compound one, `+=` (RULES.md,
+                # R104).
+                var k = before
+                while k < len(self.diags):
+                    if self.diags[k].msg == Msg.TypeBinaryOperator:
+                        var j = 0
+                        while j < len(self.diags[k].params):
+                            if self.diags[k].params[j].name == "op":
+                                self.diags[k].params[j].value = "{o.text()}=".to_string()
+                            j += 1
+                    k += 1
                 if result != Ty.error():
                     let shown_place = self.show(cx, pty)
                     let shown_result = self.show(cx, result)
@@ -2527,6 +2558,42 @@ pub pure def pattern_is_refutable(ast: Ast, p: PatternId) -> bool:
 ## A condition whose first operand is `comptime x`: the `comptime` node and
 ## the `x` it stands for, so that the whole condition is checked as
 ## `comptime` with `x` in its place.
+## The edits that move the import at `r` of a body to the top of the
+## module: before the first line that is neither blank nor a comment, and
+## its own line taken out (RULES.md, R106).
+pub pure def move_import_edits(text: str, r: TextRange) -> list[Edit]?:
+    if r.start < 0 or r.end > text.byte_len() or r.start >= r.end:
+        return None
+    var line_start = r.start
+    while line_start > 0 and text.byte_at(line_start - 1) != 10:
+        line_start -= 1
+    var line_end = r.end
+    while line_end > r.start and is_space(text.byte_at(line_end - 1)):
+        line_end -= 1
+    let written_end = line_end
+    while line_end < text.byte_len() and text.byte_at(line_end) != 10:
+        line_end += 1
+    if line_end < text.byte_len():
+        line_end += 1
+    var top = 0
+    while top < line_start:
+        var end = top
+        while end < text.byte_len() and text.byte_at(end) != 10:
+            end += 1
+        let line = text.byte_slice(top, end).trim()
+        if not line.is_empty() and not line.starts_with("#"):
+            break
+        top = end + 1
+    if top >= line_start:
+        return None
+    let written = text.byte_slice(r.start, written_end).trim()
+    return Some(
+        [
+            Edit(start=top, end=top, text="{written}\n"),
+            Edit(start=line_start, end=line_end, text=String.new()),
+        ]
+    )
+
 pub pure def whole_comptime(ast: Ast, e: ExprId) -> (ExprId, ExprId)?:
     if let ExprKind.Comptime(_) = ast.expr(e).kind:
         return None

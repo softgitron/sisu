@@ -1,0 +1,10 @@
+# RULES.md, R104: a dependency that declares its unsafe level, which
+# `[trust]` leaves out, is `E1021` alone, which names the fix, without an
+# `E0703` at each of its `extern` and `unsafe` blocks.
+[package]
+name = "greeter"
+version = "0.1.0"
+edition = "2027"
+
+[dependencies]
+cenv = { path = "cenv" }

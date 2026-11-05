@@ -1,0 +1,9 @@
+## A point whose longitude is private to its module.
+pub struct Point:
+    pub lat: f64
+    lon: f64
+
+impl Point:
+    ## A point at `lat` on the meridian of Greenwich.
+    pub def on_meridian(lat: f64) -> Point:
+        return Point(lat=lat, lon=0.0)

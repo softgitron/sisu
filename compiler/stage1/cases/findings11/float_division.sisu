@@ -1,0 +1,10 @@
+# `E0301` offers the float division 03 spells beside `//` (RULES.md, R104;
+# G2, X8).
+def mean(points: list[int]) -> int:
+    let average = sum(points) / len(points)
+    return average
+
+def main():
+    let pieces = 7
+    print(pieces / 2)
+    print(mean([1, 2]))

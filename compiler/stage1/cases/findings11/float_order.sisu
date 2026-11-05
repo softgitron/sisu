@@ -1,0 +1,5 @@
+# `sorted` of a list of floats is `E0347`, whose note names `total_order()`
+# (RULES.md, R108; chapter 14).
+def main():
+    let times = [12.5, 9.75, 11.0]
+    print(sorted(times))

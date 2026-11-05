@@ -1,0 +1,2 @@
+pub def hello():
+    print("hi")

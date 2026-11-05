@@ -401,7 +401,7 @@ pub def from_json[T](j: Json, path: str) -> T ! JsonError:
         let base = from_json[reflect.base_of(T)](j, path)?
         if let Ok(value) = T.try_from(base):
             return Ok(value)
-        let what = String.new("a `{reflect.name_of(T)}`")
+        let what = String.new("`{reflect.name_of(T)}`")
         return Err(Mismatch(path=String.new(path), expected=what))
     elif comptime reflect.is_bool(T):
         if let Bool(value) = j:
@@ -463,7 +463,7 @@ pub def decode_struct[T](j: Json, path: str) -> T ! JsonError:
             # construction does not check it, and the decoder says where.
             if comptime reflect.has_invariant(T):
                 if not value.__invariant():
-                    let what = String.new("a `{reflect.name_of(T)}` whose invariant holds")
+                    let what = String.new("`{reflect.name_of(T)}` whose invariant holds")
                     return Err(Mismatch(path=String.new(path), expected=what))
             return Ok(value)
         return Err(Mismatch(path=String.new(path), expected=String.new("an object")))

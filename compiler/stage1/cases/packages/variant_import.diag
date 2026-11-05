@@ -1,0 +1,2 @@
+src/main.sisu:2:30-2:35 E0204 resolve.not-in-module module="atlas.geo.ledger" name="Taken"
+src/main.sisu:5:16-5:33 E0258 resolve.private-field field="lon" ty="Point" module="atlas.geo.point"

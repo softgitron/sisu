@@ -1,0 +1,9 @@
+# RULES.md, R106: code that builds on every target reaches a dependency
+# that `when` builds for one: its import tests the target with `@cfg`, and
+# a use outside an `if comptime` branch on the same fact is `E0200`, which names the `@cfg`.
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies]
+win = { path = "win", when = { os = "windows" } }

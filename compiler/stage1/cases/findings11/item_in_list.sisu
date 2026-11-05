@@ -1,0 +1,6 @@
+# `E0338` for an item of a list the function owns notes that the list keeps
+# the item and lends it (RULES.md, R104; chapter 10).
+def main():
+    let queue: list[String] = ["Aino", "Eero"]
+    let first = queue[0]
+    print("{first} is first of {len(queue)}")

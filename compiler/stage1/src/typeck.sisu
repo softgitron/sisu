@@ -1418,6 +1418,11 @@ pure def placed_at_derive(d: Diagnostic, origins: list[DeriveOrigin], text: str)
         let line = text.byte_slice(line_start, line_end).trim()
         var x = Diagnostic.new(d.msg, o.asked.start, o.asked.end)
         x.params = d.params.copy()
+        # A label in a file of the program's own stays: the written impl an
+        # `E0235` at the derive overlaps (RULES.md, R109).
+        for l in d.labels:
+            if l.file >= 0:
+                x.labels.push(l.copy())
         let params = [
             Param(name="trait".to_string(), value=o.trait_name.copy()),
             Param(name="ty".to_string(), value=o.ty.copy()),

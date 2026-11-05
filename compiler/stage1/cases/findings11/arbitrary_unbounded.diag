@@ -1,0 +1,1 @@
+4:22-4:23 E0820 test.no-generator ty="T" why="a type parameter has the generator of its bound, `T: Arbitrary`"

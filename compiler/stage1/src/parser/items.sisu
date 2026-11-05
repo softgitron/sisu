@@ -357,6 +357,18 @@ impl Parser:
             self.start(SyntaxKind.GenericParam)
             _ = self.eat(SyntaxKind.ConstKw)
             _ = self.expect_name()
+            # `F[_]`, which 03 reserves for higher-kinded types: refused,
+            # with a note that says so, and passed over (RULES.md, R108).
+            if self.at(SyntaxKind.LBracket):
+                let (start, end) = self.error_span()
+                let expected = SyntaxKind.RBracket.describe()
+                var d = Diagnostic.new(Msg.ParseExpected, start, end).with("expected", expected)
+                self.report(d.with("found", self.found()).note(Msg.ParseHigherKinded))
+                self.bump()
+                while not self.at(SyntaxKind.RBracket) and not self.at(SyntaxKind.Newline)
+                        and not self.at(SyntaxKind.Eof):
+                    self.bump()
+                _ = self.eat(SyntaxKind.RBracket)
             if self.eat(SyntaxKind.Colon):
                 self.type_()
                 while self.eat(SyntaxKind.Plus):

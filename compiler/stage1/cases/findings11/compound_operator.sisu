@@ -1,0 +1,16 @@
+# `E0310` of a compound assignment names its operator, `+=`, in code that
+# `comptime for` unrolls too (RULES.md, R104; X7).
+def total[T](value: T) -> int:
+    var sum_so_far = 0
+    comptime for f in reflect.fields_of(T):
+        sum_so_far += value.[f]
+    return sum_so_far
+
+struct Team:
+    name: String
+    points: int
+
+def main():
+    var count = 0
+    count += "one".to_string()
+    print(total(Team(name="Owls", points=7)))

@@ -409,7 +409,25 @@ impl Checker:
                 let shown = self.show(cx, t)
                 let d = Diagnostic.new(Msg.BorrowViewInOwner, span.start, span.end)
                 let found = d.with("ty", shown).with("owner", owner)
-                self.report_other(found.note(Msg.BorrowOwnInstead))
+                # A lent capability is not text: what is kept is the
+                # capability itself, or the work is done in the call
+                # (RULES.md, R104).
+                var lent: String? = None
+                var arg: Ty? = None
+                if let TyData.Adt(l, largs) = self.types.data(t):
+                    if cx.prog.builtin(l) == Some("Lent") and len(largs) == 1:
+                        arg = Some(largs[0])
+                if let Some(a) = arg:
+                    lent = Some(self.show(cx, a))
+                match lent:
+                    case Some(cap):
+                        let ps = [
+                            MsgParam(name="ty".to_string(), value=shown.copy()),
+                            MsgParam(name="cap".to_string(), value=cap.copy()),
+                        ]
+                        self.report_other(found.note_params(Msg.BorrowLentCapability, ps))
+                    case None:
+                        self.report_other(found.note(Msg.BorrowOwnInstead))
             elif cx.prog.must_consume_ty(mut self.types, t, 0):
                 let shown = self.show(cx, t)
                 let d = Diagnostic.new(Msg.BorrowMustConsumeInOwner, span.start, span.end)

@@ -1,0 +1,7 @@
+# `F[_]`, which 03 reserves for higher-kinded types, is `E0100` with a note
+# that says so (RULES.md, R108; R2).
+trait Functor[F[_]]:
+    def size(self) -> int
+
+def main():
+    pass

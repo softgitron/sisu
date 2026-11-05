@@ -1,0 +1,5 @@
+from vec import Vector
+
+def main():
+    let step = Vector(1.0, 2.0)
+    print("{2.0 * step:?} {step * 3.0:?}")

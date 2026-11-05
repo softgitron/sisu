@@ -1018,25 +1018,36 @@ trait Iterator:
             out.push(x)
         return out
 
-    ## The item with the largest `key`; the first of equal ones.
-    def max_by[K: Ord](own self, key: (ref Item) -> K) -> Item?:
+    ## The item with the largest `key`; the first of equal ones. A key
+    ## that is only partially ordered, an `f64`, is taken too (03); two
+    ## keys that are not ordered, a NaN and another, panic.
+    ##
+    ## ```
+    ## assert [2.5, 9.0, 4.0].iter().max_by(it) == Some(9.0)
+    ## ```
+    def max_by[K: PartialOrd](own self, key: (ref Item) -> K) -> Item?:
         var best: Item? = None
         for x in self:
             # The key may borrow from its item, so the best one's is
             # computed again rather than kept.
             let better = match best:
-                case Some(b): key(ref x) > key(b)
+                case Some(b): ordered_keys(key(ref x).partial_cmp(key(b))) == Ordering.Greater
                 case None: True
             if better:
                 best = Some(x)
         return best
 
-    ## The item with the smallest `key`; the first of equal ones.
-    def min_by[K: Ord](own self, key: (ref Item) -> K) -> Item?:
+    ## The item with the smallest `key`; the first of equal ones. A key
+    ## that is only partially ordered is taken too, as `max_by` takes it.
+    ##
+    ## ```
+    ## assert [2.5, 9.0, 4.0].iter().min_by(it) == Some(2.5)
+    ## ```
+    def min_by[K: PartialOrd](own self, key: (ref Item) -> K) -> Item?:
         var best: Item? = None
         for x in self:
             let better = match best:
-                case Some(b): key(ref x) < key(b)
+                case Some(b): ordered_keys(key(ref x).partial_cmp(key(b))) == Ordering.Less
                 case None: True
             if better:
                 best = Some(x)
@@ -1332,6 +1343,68 @@ impl int:
     @intrinsic("int.pow")
     pure def pow(self, exp: int) -> int
 
+## The order of two keys of `max_by` and `min_by`, which panics where
+## they are not ordered (03).
+pure def ordered_keys(o: Ordering?) -> Ordering:
+    let found = o else:
+        panic("max_by or min_by compared two keys that are not ordered, such as a NaN")
+    return found
+
+impl int:
+    ## `self + other`, or `None` where it overflows `int` (03: checked
+    ## arithmetic is spelled as a method).
+    ##
+    ## ```
+    ## assert 2.checked_add(3) == Some(5)
+    ## assert 9223372036854775807.checked_add(1) == None
+    ## ```
+    pure def checked_add(self, other: int) -> int?:
+        if other > 0 and self > 9223372036854775807 - other:
+            return None
+        if other < 0 and self < -9223372036854775807 - 1 - other:
+            return None
+        return Some(self + other)
+    ## `self - other`, or `None` where it overflows `int`.
+    ##
+    ## ```
+    ## assert 2.checked_sub(3) == Some(-1)
+    ## assert (-9223372036854775807).checked_sub(2) == None
+    ## ```
+    pure def checked_sub(self, other: int) -> int?:
+        if other < 0 and self > 9223372036854775807 + other:
+            return None
+        if other > 0 and self < -9223372036854775807 - 1 + other:
+            return None
+        return Some(self - other)
+    ## `self * other`, or `None` where it overflows `int`.
+    ##
+    ## ```
+    ## assert 6.checked_mul(-7) == Some(-42)
+    ## assert 4611686018427387904.checked_mul(2) == None
+    ## ```
+    pure def checked_mul(self, other: int) -> int?:
+        if self == 0 or other == 0:
+            return Some(0)
+        let largest = 9223372036854775807
+        let smallest = -largest - 1
+        # The smallest `int` has no magnitude of its own: only a factor of
+        # 1 keeps it.
+        if self == smallest or other == smallest:
+            let rest = if self == smallest: other else: self
+            if rest == 1:
+                return Some(smallest)
+            return None
+        let a = if self < 0: -self else: self
+        let b = if other < 0: -other else: other
+        # The largest magnitude `b` may multiply: one more below zero,
+        # which reaches `-largest - 1`, when `b` divides it.
+        var bound = largest // b
+        if (self < 0) != (other < 0) and largest % b == b - 1:
+            bound += 1
+        if a > bound:
+            return None
+        return Some(self * other)
+
 impl f64:
     ## `Less`, `Equal` or `Greater`; panics if either is NaN.
     @intrinsic("f64.cmp")
@@ -1359,6 +1432,72 @@ impl f64:
     ## to get one, since `self * a + b` rounds twice everywhere (D-074).
     @intrinsic("f64.mul_add")
     pure def mul_add(self, a: f64, b: f64) -> f64
+
+impl f64:
+    ## The value in a total order (03), which `sorted`, a `dict`'s key and
+    ## `max_by` take where an `f64`, ordered only partially, is refused:
+    ## the numbers in order, `-0.0` before `0.0`, and NaN after every
+    ## number, every NaN equal to every other.
+    ##
+    ## ```
+    ## let xs = sorted([2.5, -1.0, 0.0].iter().map(x -> x.total_order()))
+    ## assert xs[0].value == -1.0
+    ## assert (0.0 / 0.0).total_order() > 1.0e300.total_order()
+    ## ```
+    pure def total_order(self) -> TotalF64:
+        return TotalF64(value=self)
+    ## The nearest value of the integer type `T`, halves away from zero,
+    ## as `round()` then `truncate_to_int()` give it, made a `T` as
+    ## `truncate_to[T]()` makes it; panics where it is NaN or beyond `int`.
+    ##
+    ## ```
+    ## assert 2.5.round_to[int]() == 3
+    ## assert (-2.5).round_to[int]() == -3
+    ## assert 200.4.round_to[u8]() == 200u8
+    ## ```
+    pure def round_to[T: Integer](self) -> T:
+        return T.wrapping_from(self.round().truncate_to_int())
+
+## An `f64` in a total order (`f64.total_order()`, 03): the numbers in
+## order, `-0.0` before `0.0`, and NaN after every number.
+@derive(Copy, Debug)
+struct TotalF64:
+    value: f64
+
+impl TotalF64:
+    ## Where the value stands: 0 for the numbers, 1 for NaN.
+    pure def class(self) -> int:
+        if self.value.is_nan():
+            return 1
+        return 0
+    ## Whether the value is `-0.0`, which `==` does not tell from `0.0`:
+    ## the sign bit of its `f32`, which keeps it.
+    pure def negative_zero(self) -> bool:
+        return self.value == 0.0 and self.value.to_f32().to_bits() >= 2147483648u32
+
+impl Eq for TotalF64:
+    pure def eq(self, other: TotalF64) -> bool:
+        return self.cmp(other) == Ordering.Equal
+
+impl PartialOrd for TotalF64:
+    pure def partial_cmp(self, other: TotalF64) -> Ordering?:
+        return Some(self.cmp(other))
+
+impl Ord for TotalF64:
+    pure def cmp(self, other: TotalF64) -> Ordering:
+        if self.class() != other.class():
+            return self.class().cmp(other.class())
+        if self.class() == 1:
+            return Ordering.Equal
+        if self.value < other.value:
+            return Ordering.Less
+        if self.value > other.value:
+            return Ordering.Greater
+        if self.negative_zero() and not other.negative_zero():
+            return Ordering.Less
+        if other.negative_zero() and not self.negative_zero():
+            return Ordering.Greater
+        return Ordering.Equal
 
 ## IEEE 754 binary32. `+`, `-`, `*`, `/` and `sqrt` round the exact result
 ## once to `f32`; `%` and `**` are `f64`'s on the two values, rounded once

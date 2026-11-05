@@ -1,0 +1,12 @@
+# `E0235` at a derive's trait labels the impl written beside it (RULES.md,
+# R109; R14, R17).
+@derive(Eq)
+struct Money:
+    cents: int
+
+impl Eq for Money:
+    def eq(self, other: Money) -> bool:
+        return self.cents == other.cents
+
+def main():
+    print(Money(1) == Money(1))

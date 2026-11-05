@@ -1,0 +1,8 @@
+## A vector of the plane.
+pub struct Vector:
+    pub x: f64
+    pub y: f64
+
+impl Mul[int] for f64:
+    def mul(self, k: int) -> f64:
+        return self * k.to_f64()

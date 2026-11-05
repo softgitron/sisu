@@ -105,6 +105,8 @@ E0132 error   parse.interpolated-name     the name of a test, a suite or a bench
 -     fix     parse.name-braces           write the braces as text
 # Stage 1's (RULES.md, R76): `else` after a statement that is no `let`.
 -     note    parse.else-needs-let        `else` belongs to a `let`, `let value = f() else as e:`; a statement whose error alone is handled is `if let Err(e) = f():`
+# Stage 1's (RULES.md, R108): the syntax 03 reserves.
+-     note    parse.higher-kinded         `F[_]` is reserved for higher-kinded types, which Sisu does not have in its first version (03): a generic parameter is a type, `F`
 
 # ---------------------------------------------------------------- names and declarations
 E0200 error   resolve.undefined-name      cannot find `{name}` in this scope
@@ -216,6 +218,15 @@ E0276 error   resolve.dev-dependency      cannot import `{name}` here: `{package
 # Stage 1's (RULES.md, R76): a std module's error set written alone.
 -     fix     resolve.qualify-type        name it through its module
 -     note    resolve.std-type-import     `{name}` is a type of `{module}`, known where it is imported: `from {module} import {name}`
+# Stage 1's (RULES.md, R104): the notes and fixes the manual's writers found missing, the eleventh round.
+-     note    resolve.variant-of-type     `{name}` is a variant of `{ty}`, and a module's items are its types and functions: import `{ty}` and name the variant through it, `{ty}.{name}`
+-     note    resolve.made-by             `{maker}` makes a `{ty}` from another module, with the private fields its module sets
+# Stage 1's (RULES.md, R105): coherence through the trait's type arguments.
+-     note    resolve.orphan-local-type   the impl is this package's when `{ty}` is a type of this package, `{trait}` a trait of it, or one of the trait's type arguments a type of its own, as `Vector` in `impl Mul[Vector] for f64`
+# Stage 1's (RULES.md, R106): an import on the target, and an import in a body.
+-     note    resolve.cfg-import-absent   `{name}` is imported under `@cfg({cfg})`, which this build leaves out: use it inside `if comptime {cfg}:`, a branch that is built only where the import is
+E0277 error   resolve.import-in-body      an import stands at the top level of a module, before its declarations, and its names are the whole module's; a function's body holds none
+-     fix     resolve.move-import         move it to the top of the module
 
 # ---------------------------------------------------------------- types
 E0300 error   type.mismatch               expected `{expected}`, found `{found}`
@@ -330,7 +341,7 @@ E0399 error   type.bad-format-spec        `{spec}` is not a format spec; it is `
 -     note    type.pure-adapter           `{callee}` takes any function, which its iterator calls, so it is not pure, whatever the function given: a `pure` function folds the items with a `pure` function, `fold(0, (total, x) -> total + f(x))`, or loops over them
 -     note    resolve.const-as-method     a name in capitals is a constant's: a trait's constant is given as `const {name}: T = ...`
 -     fix     type.derive-trait-for       derive it for `{ty}`
--     note    type.operator-trait-left    `{op}` with `{ty}` on the left is the method of `{trait}` that `{ty}` implements: an `impl {trait}[{rhs}] for {ty}` gives it, which only the root package may write; or write the `{rhs}` first
+-     note    type.operator-trait-left    `{op}` with `{ty}` on the left is the method of `{trait}` that `{ty}` implements: an `impl {trait}[{rhs}] for {ty}` gives it, which the package that declares `{rhs}` may write; or write the `{rhs}` first
 -     note    type.bigint-literal         a larger integer is a `BigInt` (`from std.num import BigInt`): `BigInt.parse("{text}")`, or the literal beside a `BigInt`, which it becomes
 -     fix     type.lend-it                lend it
 -     fix     type.convert-to-int         make the `{ty}` an `int`, which holds the values of both
@@ -412,6 +423,12 @@ E0449 error   type.trait-constant         each impl of `{trait}` gives its own `
 -     note    type.instance-owns          what the instance gives on is borrowed there: a template's parameter that it gives on, as to `reflect.construct`, is taken `own`
 -     note    type.compare-result         a `T ! E` holds a value or an error: compare it with `Ok(...)` or `Err(...)`, or ask `.is_ok()`; in `ensures`, `result` is the whole result of a function that returns one
 -     note    type.it-argument-only       `it` makes a closure of a call's argument only; elsewhere, as for an item of a list of functions, write the closure with its parameter: `x -> ...`
+# Stage 1's (RULES.md, R104): the notes and fixes the manual's writers found missing, the eleventh round.
+-     note    type.item-stays-in-list     `{list}` owns its list, which keeps the item `{what}` reads and only lends it: copy the item, or take it out of the list
+-     note    type.narrow-capability      a `{found}` is a `{cap}`, which a parameter `{field}: {cap}` takes where a whole `System` is taken now; a caller that has a `System` passes `sys.{field}`
+-     fix     type.float-division         divide them as floats
+# Stage 1's (RULES.md, R108): a float's total order.
+-     note    type.total-order            an `f64` is ordered only partially, a NaN with nothing: `x.total_order()` gives the total order, as in `sorted(xs.iter().map(x -> x.total_order()))`, and `max_by` and `min_by` take the `f64` itself
 
 # ---------------------------------------------------------------- ownership
 # The signature rules (E0411-E0415) are the resolver's; the rest are the
@@ -536,6 +553,9 @@ E0436 error   type.generator-result       `{name}` yields, so it must return `It
 # Stage 1's (RULES.md, R77): where the borrow of a loop or of `sorted` ends.
 -     note    borrow.loop-ends            the borrow lasts through the loop, which ends after line {end}: change `{name}` after the loop, or loop over a copy made with `.copy()`
 -     note    borrow.sorted-refs          `sorted` gives references to items that are not `Copy`, which a list does not hold: sort a list of its own in place instead, `xs.sort()`
+# Stage 1's (RULES.md, R104): a lent capability, and a binding a loop makes anew.
+-     note    borrow.lent-capability      `{ty}` lasts for the call it is lent to, so nothing keeps it: keep the `{cap}` itself, taken as a parameter of type `{cap}`, or do the work inside the call
+-     note    borrow.bound-anew           `{name}` is bound anew at each step of the loop, while a borrow of the one before is still used on line {end}: keep a copy of what is borrowed, made with `.copy()`, in a value that owns it, such as a `String`
 
 # ---------------------------------------------------------------- lowering and SIR
 E0500 error   sir.parse                   SIR: {detail}
@@ -589,6 +609,9 @@ E0814 error   refine.predicate-type       the predicate of `{ty}` must be a `boo
 -     note    refine.copy-as-base         a copy of `{name}` is a `{ty}` too: change a copy typed as the base, `var copy: {base} = {name}.copy()`, and check it again with `{ty}.try_from(copy)`
 E0820 error   test.no-generator           `{ty}` has no generator for property tests: {why}
 E0821 error   test.refines-mismatch       `@refines({reference})` on `{name}` cannot be checked: {why}
+# Stage 1's (RULES.md, R104): the methods that change a value with an invariant.
+-     note    contract.invariant-methods  the methods of `{ty}` that take `mut self` change it and check the invariant again: {methods}
+-     note    contract.invariant-method   give `{ty}` a method that makes the change, `def NAME(mut self, ...)`, which checks the invariant when it returns, and call it
 
 # ---------------------------------------------------------------- stage-0 limits and internal errors
 E0900 error   stage0.unsupported          {construct} is not implemented in stage 0 yet; it arrives with {phase}

@@ -1,0 +1,2 @@
+3:9-3:11 E0235 resolve.overlapping-impl trait="Eq" ty="Money"
+  label 7:1-7:18 resolve.first-impl
