@@ -27,9 +27,13 @@ and the outputs among `tokens`, `tree`, `trivia-tree`, `ast`, `names`,
 `types`, `sir`, `ownership`, `sir-tests`, `contracts-off`,
 `contracts-preconditions`, `ids` (all of what `sisu check --format=ids`
 prints), `human` (what `sisu check` prints), `fmt`, `fmt-check`, `doc`
-and `doc-output`, `ws` (a worksheet as `sisu ws` shows it, R79), and
+and `doc-output`, `ws` (a worksheet as `sisu ws` shows it, R79),
 `behaviour` for a runnable case a rule refuses (R21 on), which
-`check.sh` then does not run. Any other difference fails the
+`check.sh` then does not run, and, for stage 1's own package, `self` for
+a module's SIR (the path of its file) and `fixed-sir0` for the fixed
+point's comparisons with stage 0 (the path `compiler/stage1`, R124), and
+`build` for the executable `check.sh`'s class `build` makes of a case
+(R124). Any other difference fails the
 check. What a program
 does is checked against the conformance suite's expectations instead, by
 the class `behaviour`, the primary oracle: every runnable program of the
@@ -1449,6 +1453,11 @@ what they print does not (the class `behaviour`). The case
 - Differs: `compiler/stage1/cases/generator_in_template.sisu`: sir-tests
 - Differs: `proposal/examples/ownership.sisu`: sir
 - Differs: `proposal/examples/traits.sisu`: sir
+
+The merge of stage 0's eleventh round gives `Zone` a `Debug` form that
+writes a float (decision 684), which `std/time_zones` now reaches:
+
+- Differs: `compiler/conformance/cases/std/time_zones.sisu`: sir
 
 **Decision 313**, for docs/architecture.md:
 
@@ -6189,7 +6198,7 @@ module beside it.
      package makes them one program; a directory without a manifest is no
      package. Stage 1 decides it (RULES.md, R119).
 
-## Decided against, the twelfth round
+**Decided against, the twelfth round:**
 
 - `Decimal` as `Copy` (G31): 03 makes a `Decimal` a scaled `BigInt`, of
   any size, which allocates, so it is no more `Copy` than a `BigInt` is;
@@ -6197,3 +6206,372 @@ module beside it.
   lean: a fixed-size decimal type would be another type of `std.num`.
 - The `zip` temporaries and known over-rejection 15 (R114), and the
   directory as a package (R119).
+
+## R120. `@export` in the SIR, and the world of transcripts in `sir --tests` (decision 740)
+
+**The rule.**
+
+- `sir` writes a line `export "SYMBOL" FUNCTION` after the `entry` line
+  for each function marked `@export("SYMBOL")`, in the order of their
+  bodies, as the Rust lowering writes them (`Program::exports`, decision
+  683), and keeps each such function, and what it reaches, as a root of
+  what it lowers, after the entry and before the tests, whether or not
+  `main` calls it.
+- `sir --tests` of a program that has transcripts (a `.transcript` file
+  in the directory `tests/` beside its root module's file, where the
+  driver finds them) keeps `transcript_world` and `transcript_system` as
+  roots after its tests, as the Rust front end's `sir_with` does for the
+  build its transcripts run (decision 687), so that the driver can run
+  the transcripts from the SIR its tests run from. Other commands, `check`
+  among them, do not lower them.
+
+**Why.** Stage 0's eleventh round (decisions 683 and 687): the symbol is
+the backend's to make, from the SIR's line, and the transcripts waited
+for stage 1's `sir --tests` to keep their world.
+
+**In stage 1.** `typeck.collect` (`Program.exports`), `lower.lower` (the
+exports and `extra` roots), `sir.Program.exports`, `sir.write`; `main`
+(`transcript_roots`, `Input.roots`, `lower_of`); stage 2's `read.read`
+gives the two new fields of `sir.Program` (stage 2 reads the `export`
+lines beside it, as before).
+
+**What it changes.** The case `cases/findings13/export_roots.sisu` (its
+`.sir` and `.out`), whose `export` line is stage 0's too; a program of
+several modules whose exported function is outside the root module and
+not called, now lowered; and `sir --tests` of the conformance suite's
+`testing/shop`, which has transcripts.
+
+**Decision 740**, for docs/architecture.md:
+
+740. Stage 1's `sir` writes `export "SYMBOL" FUNCTION` after the entry
+     for each `@export`ed function and lowers it as a root; `sir --tests`
+     of a program with transcripts keeps `transcript_world` and
+     `transcript_system`, so that the driver runs its transcripts from that
+     SIR. Stage 1 decides it (RULES.md, R120).
+
+## R121. `@no_alloc`, `@no_block` and `@stack` warn that nothing checks them yet (decision 741)
+
+**The rule.** A function marked `@no_alloc`, `@no_block` or `@stack(...)`
+compiles as before, and each attribute is `W0030`
+(`resolve.unchecked-attribute`, "`@no_alloc` is accepted and checked by
+nothing yet, so nothing ensures that the function does not allocate"; "...
+does not block"; "... the function's bound on its stack"), at its name,
+where decision 343's warnings stand for an attribute nothing reads. On
+another declaration the attribute is still R40's `W0026`. `@no_panic`,
+which D-059 puts after 0.1, is not among them.
+
+**Why.** Decision 693 (stage 0's eleventh round): the three attributes
+compiled without a word and checked nothing; D-059 puts the first two in
+v1 and `@stack` with the native backend, so a program that writes them
+expects a check it does not get.
+
+**In stage 1.** `resolve` (`unchecked_promise`, `Resolver.attribute`);
+the catalog's `W0030`.
+
+**What it changes.** The case `cases/findings13/unchecked_attributes.sisu`
+(its `.diag` and `.out`). The manual's chapter 27 (`mixer.sisu`) and its
+reference page of attributes, whose programs write `@no_alloc`, now show
+the warning.
+
+- Differs: `compiler/stage1/cases/findings13/unchecked_attributes.sisu`: names, ids, human
+
+**Decision 741**, for docs/architecture.md:
+
+741. `@no_alloc`, `@no_block` and `@stack(...)` on a function warn
+     (`W0030`) that they are accepted and checked by nothing yet. Stage 1
+     decides it (RULES.md, R121).
+
+## R122. The manifest's `runtime`: `full`, `single`, and `freestanding` refused (decision 742)
+
+**The rule.**
+
+- `[package] runtime` takes `"full"` (the default), `"single"` or
+  `"freestanding"`, 12's three profiles; any other value is `E1003`
+  (`package.bad-value`, "`runtime` takes `"full"`, `"single"` or
+  `"freestanding"`"), and `"freestanding"` is `E1023`
+  (`package.freestanding`, "the runtime profile `freestanding` has no
+  runtime yet: this compiler's runtime schedules tasks, so a program is
+  built for `full` or `single`"), at the value.
+- The root package's profile, when it is not `full`, is written to the
+  SIR as the line `runtime single` right after the `entry` line, before
+  the `export` lines (R120), which stage 0's twelfth round reads.
+- `target.runtime_profile` is the profile to compile-time code, `"full"`
+  or `"single"` (12 names no fact; `target.runtime` already names how the
+  program runs, R116). It is read from the manifest of the package the
+  command works on (the directory an argument names, or the nearest
+  package at or above the working directory when none does; a file alone
+  is `full`) before the base is made, as R116's runtime is; the base's
+  cache does not depend on it.
+
+What the driver may rely on from 0.11.0: the `runtime` line of the SIR,
+and R120's `export` lines and transcript roots.
+
+**Why.** Decision 694 and 12, "Runtime profiles": a package chooses its
+profile in its manifest; stage 0's scheduler is `single`'s, so `full`
+and `single` build the same runtime, and `freestanding` waits for a
+runtime without the scheduler.
+
+**In stage 1.** `manifest` (`PackageInfo.runtime`), `package`
+(`Package.runtime`), `main` (`Input.runtime`, `lower_of`,
+`runtime_profile`, `profile_of`), `sir.Program.runtime`, `sir.write`,
+`typeck.std_sources.target_for`; the catalog's `E1023`.
+
+**What it changes.** The cases `cases/packages/runtime_single.pkg` (its
+SIR has the line; stage 0's reader does not read it yet, so the case has
+no `.out`) and `cases/packages/runtime_freestanding.pkg` (its `.diag`);
+stage 0 warns of the unknown key (`W0005`).
+
+- Differs: `compiler/stage1/cases/packages/runtime_freestanding.pkg`: sir, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/packages/runtime_single.pkg`: sir, ids, human, doc, doc-output
+
+**Decision 742**, for docs/architecture.md:
+
+742. `[package] runtime` is `full`, `single` or `freestanding`; the last
+     is `E1023` until there is a runtime without the scheduler; `single`
+     is written to the SIR as `runtime single` after the entry, and
+     `target.runtime_profile` names the profile. `sisu1 --version` is
+     0.11.0. Stage 1 decides it (RULES.md, R122).
+
+## R123. A REPL session's SIR names each input's lines as the input's own (decision 743)
+
+**The rule.** `sir --repl` writes the session's program with each input
+it holds as a source of its own: a function the loaded file declares
+(`sisu repl FILE`) has the file's name and the file's own lines, a
+function a typed input declares has `<input>` and the input's lines, and
+`main`, whose statements are every input's, has the last input's source,
+the input whose run the session adds, each of its statements at its own
+input's lines. The session's other lines (its `#!` line, the trailer that
+shows a value) stay `<repl>`'s. A panic in `sisu repl FILE` is then at the
+file's line (`at scaled (load.sisu:8:5)`) and one in a typed input at
+`<input>:1`, as the input's diagnostics are; the column of an expression
+that is shown is its own, without the `__repl_show(` before it.
+
+The session's program records where each input stands in its last lines,
+`# sisu-repl-input: FIRST LAST SHIFT PREFIX NAME`, after the inputs and
+before the trailer, so that no line of an input moves; the driver keeps
+the session's text as `--kept` gives it, as before.
+
+**Why.** Decision 690: the session's one source put the loaded file's
+lines one below their own and a typed input's after them.
+
+**In stage 1.** `session` (`Region`, `regions_of`, `region_lines`,
+`name_regions`), `main` (`repl_answer`, `held_build`, `Input.regions`,
+`report_with`).
+
+**What it changes.** The case `cases/repl/loaded_panic.repl` (its
+`.out`); `cases/repl/session.repl.out` is blessed again (a panic in `main`
+is at `<input>:1:1` where it was `<repl>:14:1`), and so is the
+conformance suite's `live/session.repl`, which `sisu repl` runs on stage
+1 (`at main (<input>:1:1)` where it was `session.sisu:19:1`). The manual's REPL
+transcripts that show a panic's line change the same way.
+
+**Decision 743**, for docs/architecture.md:
+
+743. `sir --repl` names a loaded file's functions by the file at its own
+     lines and a typed input's by `<input>` at the input's, `main` by the
+     last input. Stage 1 decides it (RULES.md, R123).
+
+## R124. A read of a `mut` parameter is a shared reborrow; stage 0's SIR of the package is a report (decision 744)
+
+**The rule.** Where a place that is a `mut` reference (a `mut`
+parameter, `_1: ref mut list[int]`) is read through a shared reference,
+as an argument of a borrowed parameter, a receiver taken by `self`, or an
+operand that compares, formats or measures, lowering passes a shared
+reborrow of what it refers to, `_4 = ref _1.*`, where it passed the
+reference on as a copy, which decision 40 makes a `mut` reborrow that
+ends every loan of it. So a loop over a `mut` parameter may read it, and
+a method call on it may take its length:
+
+```sisu
+def walk(mut path: list[int]) -> int:
+    var total = 0
+    for i, k in enumerate(path):
+        total += (i + k) * len(path)
+    path.push(total)
+    return total
+
+def add(mut xs: list[int]):
+    xs.push(len(xs))
+```
+
+Both were `E0405` (known over-rejection 15); a `mut` argument and a
+`mut self` receiver still pass the reference on.
+
+`bootstrap.sh` no longer fails when `A.sir` differs from what stage 0
+prints of the package: it prints the sizes and digests of both and says
+"differs from stage 0, as the rules list". The fixed point is D-078's,
+`B.sir` equal to `A.sir` and stage1-B equal to stage1-A; the Rust front
+end is an oracle that falls behind (decision 268), whose SIR of every
+function that reads a `mut` parameter is now the old one. `check.sh`'s
+class `fixed` accepts the pair `fixed-sir0` when this rule lists it, and
+its class `self` accepts a module's SIR when this rule lists it (``-
+Differs: `compiler/stage1/src/...`: self``), as any other class accepts a
+listed difference. Since stage1-A is built from stage 0's SIR and
+stage1-B from `A.sir`, the two executables are the same bytes only when
+those SIRs are: both scripts compare them as a verdict then, and report
+them otherwise (`fixed-exe`, listed here). The class `build` accepts an
+executable of a case whose SIR a rule changes when the rule lists the
+case's output `build`: `contracts/checks.sisu`, whose release build with
+every contract reads a `mut` parameter.
+
+**Why.** Known over-rejection 15 (docs/architecture.md, decision 263's
+corpus found it) names this lowering as the fix; the twelfth round left
+the choice to the coordinator, since stage 1's own SIR changes, and the
+coordinator chose it.
+
+**In stage 1.** `lower.exprs` (`shared_reborrow`, `ref_operand`,
+`arg_operand`, `arg_operand_for`'s `lent`, `lent_params`); `bootstrap.sh`
+and `check.sh` (`fixed_pair`, the class `self`).
+
+**What it changes.** The case `cases/findings13/mut_param_loop.sisu` (its
+`.out`), which stage 0's front end refuses; the SIR of every program that
+reads a `mut` parameter (or a `mut` binding of a pattern) whole, listed
+below, and of stage 1's own package, module by module.
+
+- Differs: `compiler/conformance/cases/examples/concurrency.sisu`: sir
+- Differs: `compiler/conformance/cases/examples/wordcount.sisu`: sir, sir-tests
+- Differs: `compiler/conformance/cases/ownership/borrowed_results.sisu`: sir
+- Differs: `compiler/conformance/cases/ownership/dict_entries.sisu`: sir
+- Differs: `compiler/conformance/cases/ownership/reference_params.sisu`: sir
+- Differs: `compiler/conformance/cases/ownership/shared_param_passed_on.sisu`: sir, sir-tests
+- Differs: `compiler/conformance/cases/run/closures.sisu`: sir
+- Differs: `compiler/conformance/cases/std/ord_impls.sisu`: sir
+- Differs: `compiler/conformance/cases/std/regex.sisu`: sir
+- Differs: `compiler/conformance/cases/std/sort.sisu`: sir
+- Differs: `compiler/conformance/cases/wrong/store_view_into_caller.sisu`: sir
+- Differs: `proposal/examples/wordcount.sisu`: sir, sir-tests
+- Differs: `compiler/stage1/cases/findings13/mut_param_loop.sisu`: ids, human
+- Differs: `compiler/stage1/<std>/prelude.sisu`: self
+- Differs: `compiler/stage1/src/borrowck/consume.sisu`: self
+- Differs: `compiler/stage1/src/borrowck/elaborate.sisu`: self
+- Differs: `compiler/stage1/src/borrowck/holes.sisu`: self
+- Differs: `compiler/stage1/src/borrowck/loans.sisu`: self
+- Differs: `compiler/stage1/src/borrowck/shared.sisu`: self
+- Differs: `compiler/stage1/src/borrowck/types.sisu`: self
+- Differs: `compiler/stage1/src/cfg.sisu`: self
+- Differs: `compiler/stage1/src/diff.sisu`: self
+- Differs: `compiler/stage1/src/fmt/doc.sisu`: self
+- Differs: `compiler/stage1/src/fmt/lines.sisu`: self
+- Differs: `compiler/stage1/src/interp.sisu`: self
+- Differs: `compiler/stage1/src/lexer/layout.sisu`: self
+- Differs: `compiler/stage1/src/lower.sisu`: self
+- Differs: `compiler/stage1/src/lower/contracts.sisu`: self
+- Differs: `compiler/stage1/src/main.sisu`: self
+- Differs: `compiler/stage1/src/package.sisu`: self
+- Differs: `compiler/stage1/src/sir/simplify.sisu`: self
+- Differs: `compiler/stage1/src/typeck.sisu`: self
+- Differs: `compiler/stage1/src/typeck/arbitrary.sisu`: self
+- Differs: `compiler/stage1/src/typeck/borrows.sisu`: self
+- Differs: `compiler/stage1/src/typeck/collect.sisu`: self
+- Differs: `compiler/stage1/src/typeck/exhaustive.sisu`: self
+- Differs: `compiler/stage1/src/typeck/folding.sisu`: self
+- Differs: `compiler/stage1/src/typeck/infer.sisu`: self
+- Differs: `compiler/stage1/src/typeck/program.sisu`: self
+- Differs: `compiler/stage1`: fixed-sir0, fixed-exe
+- Differs: `compiler/conformance/cases/contracts/checks.sisu`: build
+
+**Decision 744**, for docs/architecture.md:
+
+744. A read of a `mut` reference through a shared one is lowered as a
+     shared reborrow, `ref _1.*`, so a loop over a `mut` parameter may
+     read it (known over-rejection 15 is gone from stage 1); the
+     bootstrap's comparison of stage 1's SIR with stage 0's is a report,
+     the fixed point `B.sir` equal to `A.sir`. Stage 1 decides it
+     (RULES.md, R124).
+
+## R125. The base cache keeps what collecting the base found of the std texts (decision 745)
+
+**The rule.** The base cache's form is 2: besides the derived impls and
+the promotions, it keeps which std modules a program may import hold
+templates (`reflect.`) and `unsafe` code (`StdMarks`), which a base made
+from the cache reads rather than searching every module's text again. A
+base made from the cache finds the lines of a std text when lowering
+first reaches a body of it (`std_lines`), not of every text at once (a
+batch, whose base is made whole, and `sir --repl-serve`, which serves
+many inputs, find them all once); the message catalog's lines are read
+by their first four words, not split whole; the lexer looks punctuation
+up by its bytes, not by a text made for each try. Nothing a command
+prints changes; the write stays atomic (`Fs.rename`) and the key is the
+same (the std texts' names, sizes and times, and the executable's).
+
+**Measured** (callgrind, `sisu1 check` of a two-line program with the
+cache): 4.64 G instructions before, 4.15 G after (−10.6 %); `base_of`
+4.11 G before, 3.79 G after. What dominates is not the collecting but the
+parsing of what the base declares: lexing and parsing the prelude, the
+ambient modules, `target`, `builtin_impls` and the derived impls' text,
+1.94 G (the lexer 1.03 G, about 3,500 instructions a byte of the 250 KB),
+and building their ASTs, 0.56 G; then resolving them (0.37 G) and
+checking the traits (0.15 G), with the copies and drops of the values
+they make throughout.
+
+**Decided against:** a cache of the collected items themselves, the
+resolver's program and types and the ASTs of the base modules, written
+and read back. Lowering reaches the std bodies through their ASTs, so the
+cache would hold the whole syntax of the prelude and `cap` as well as
+every definition and type the resolver made, a reader and writer for each
+of the AST's and the resolver's types (about a hundred, with the
+interner's numbering to keep), at a cost out of proportion to one round
+beside the rest, and a text reader in Sisu at its present speed would
+take back a part of what the parse costs. The saving is the parse, about
+half of a command's start; the lexer's speed (3,500 instructions a byte)
+is the cheaper half of it, and the next round's.
+
+**In stage 1.** `main` (`BASE_CACHE_FORM`, `base_cache_text`,
+`read_base_cache`, `repl_serve`), `typeck` (`BaseCache.marked`,
+`base_cached`, `with_lines`), `typeck.collect` (`StdMarks`,
+`Resolver.base_core`), `diag` (`first_words`), `lexer.scan`
+(`spelling_key`).
+
+**What it changes.** No output of the corpus.
+
+**Decision 745**, for docs/architecture.md:
+
+745. The base cache keeps which importable std modules hold templates and
+     `unsafe` code, and a base made from it finds a std text's lines when
+     lowering first reaches it: a command's start is 10 % shorter; the
+     parse of the base modules, half of it, stays. Stage 1 decides it
+     (RULES.md, R125).
+
+## R126. The twelfth round's open items: `E0258` alone for a private field (decision 746)
+
+**The rule.** A struct of another module built with a private field left
+out, `Ledger(owner="me")` for `struct Ledger` with `bookings` private and
+without a default, is `E0258` alone, whose note names the function that
+makes one (`Ledger.new(owner)`, R104), where `E0337` followed it with the
+fix that passes `bookings=todo("bookings")`, which `E0258` refuses again.
+A public field left out is `E0337` as before.
+
+**Decided against:**
+
+- `TotalF64` as `Hash`, a key of a `dict` or a `set`: the runtime hashes
+  and compares a key structurally (decision 256), so a key whose `Eq` is
+  its own, as `TotalF64`'s is (every NaN equal), is `E0398`; an impl of
+  `Hash` would make it that, not a key. The key waits for a runtime whose
+  dict calls a key's impls, which is stage 0's.
+- `Lookup`'s doc example with a lookup by `str` (`prices.get(dish)`):
+  `sisu test --std` runs the prelude's doc examples on the Rust front end,
+  which has no `Lookup` (R115), so the example calls `lookup_key()`.
+
+**Left open:** the label at the template line that `comptime for`
+unrolls (the instance's text is made whole, without an origin for each
+unrolled line, R115); an item's own `##` text in reflection (`f.doc` of
+a field is R117's; `reflect.doc_of(T)` waits for a program that asks);
+`@cfg` on an import and a dependency's `when` under `--target-runtime
+native`, which the package loader and the name pass read from
+`manifest.target_facts()` before the build's options reach them (R116).
+
+**Why.** The manual's finding under "Types and traits" and "Diagnostics"
+(G32, R2 and chapter 24), and the twelfth round's open items.
+
+**In stage 1.** `typeck.call` (the struct's fields in `check_struct`).
+
+**What it changes.** The case `cases/packages/private_field_hole.pkg`
+(its `.diag`).
+
+- Differs: `compiler/stage1/cases/packages/private_field_hole.pkg`: types, ids, human, doc, doc-output
+
+**Decision 746**, for docs/architecture.md:
+
+746. A struct of another module built without a private field is
+     `E0258` alone; `TotalF64` stays no key, since the runtime hashes keys
+     structurally. Stage 1 decides it (RULES.md, R126).

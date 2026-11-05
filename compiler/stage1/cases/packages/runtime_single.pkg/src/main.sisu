@@ -1,0 +1,9 @@
+# RULES.md, R122: `[package] runtime = "single"` is written to the SIR as
+# `runtime single` after the entry, and `target.runtime_profile` names it
+# to compile-time code (decision 694).
+
+def main():
+    if comptime target.runtime_profile == "single":
+        print("one thread")
+    else:
+        print("many threads")

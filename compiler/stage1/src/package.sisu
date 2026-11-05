@@ -55,6 +55,9 @@ pub struct Package:
     ## Its manifest's `[package] unsafe` (22, D-082): `memory` or `extern`,
     ## and where the value is written in the manifest.
     pub unsafe_level: (String, TextRange)?
+    ## Its manifest's `[package] runtime`, the runtime profile: `full` or
+    ## `single` (12; RULES.md, R122).
+    pub runtime: String
 
 ## What a dependency entry asks of the package it names (09).
 pub struct Want:
@@ -403,6 +406,7 @@ impl Loader:
                 locked_deps=locked_deps(m.dependencies),
                 release_contracts=m.release_contracts.copy(),
                 unsafe_level=info.unsafe_level.copy(),
+                runtime=info.runtime.copy(),
             )
         )
         self.dirs.push(canon.copy())
@@ -588,6 +592,7 @@ pub def load_file_with(fs: Fs, name: str, disk: str, text: str, request: Feature
             locked_deps=[],
             release_contracts=None,
             unsafe_level=None,
+            runtime="full".to_string(),
         )
     )
     layout.modules.push(
@@ -681,6 +686,7 @@ pub def load_black_box(fs: Fs, disk: str, dir: str, request: FeatureRequest) -> 
             locked_deps=[],
             release_contracts=None,
             unsafe_level=None,
+            runtime="full".to_string(),
         )
     )
     layout.modules.push(ModuleFile(path=[], name=shown, disk=disk.to_string(), package=0))

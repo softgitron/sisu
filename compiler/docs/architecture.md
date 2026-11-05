@@ -10386,3 +10386,42 @@ R120 and R122)
      lookup, which the interpreter and the runtime in Sisu then compare
      with the `String` keys by their bytes, as `in` and `dict.contains`
      already do. This changes no rule of the language.
+
+**Stage 1's thirteenth round** (stage 1's RULES.md, R120 to R126; the SIR's `export` and `runtime` lines, transcripts kept in `sir --tests`, `W0030` for unchecked attributes, the manifest's `runtime` key, the REPL's `<input>` sources, over-rejection 15 and the bootstrap's report, the base cache's second form, `E0258` alone)
+
+740. Stage 1's `sir` writes `export "SYMBOL" FUNCTION` after the entry
+     for each `@export`ed function and lowers it as a root; `sir --tests`
+     of a program with transcripts keeps `transcript_world` and
+     `transcript_system`, so that the driver runs its transcripts from that
+     SIR. Stage 1 decides it (RULES.md, R120).
+
+741. `@no_alloc`, `@no_block` and `@stack(...)` on a function warn
+     (`W0030`) that they are accepted and checked by nothing yet. Stage 1
+     decides it (RULES.md, R121).
+
+742. `[package] runtime` is `full`, `single` or `freestanding`; the last
+     is `E1023` until there is a runtime without the scheduler; `single`
+     is written to the SIR as `runtime single` after the entry, and
+     `target.runtime_profile` names the profile. `sisu1 --version` is
+     0.11.0. Stage 1 decides it (RULES.md, R122).
+
+743. `sir --repl` names a loaded file's functions by the file at its own
+     lines and a typed input's by `<input>` at the input's, `main` by the
+     last input. Stage 1 decides it (RULES.md, R123).
+
+744. A read of a `mut` reference through a shared one is lowered as a
+     shared reborrow, `ref _1.*`, so a loop over a `mut` parameter may
+     read it (known over-rejection 15 is gone from stage 1); the
+     bootstrap's comparison of stage 1's SIR with stage 0's is a report,
+     the fixed point `B.sir` equal to `A.sir`. Stage 1 decides it
+     (RULES.md, R124).
+
+745. The base cache keeps which importable std modules hold templates and
+     `unsafe` code, and a base made from it finds a std text's lines when
+     lowering first reaches it: a command's start is 10 % shorter; the
+     parse of the base modules, half of it, stays. Stage 1 decides it
+     (RULES.md, R125).
+
+746. A struct of another module built without a private field is
+     `E0258` alone; `TotalF64` stays no key, since the runtime hashes keys
+     structurally. Stage 1 decides it (RULES.md, R126).

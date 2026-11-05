@@ -14,6 +14,7 @@
 
 from stage1.diag import Catalog
 from stage1.parser import parse
+from stage1.sir import Loc, Program
 from stage1.syntax.kinds import SyntaxKind
 from stage1.syntax.tree import Element, Tree, is_item
 
@@ -29,6 +30,155 @@ pub const TRAILER: str = "pass\n\ndef __repl_show[T](value: T):\n    if comptime
 ## functions, and a function that keeps `System.fake` in the program, which
 ## the driver calls for the fake `System` a worksheet runs against.
 pub const WS_HELPERS: str = "\ndef __ws_at(line: int):\n    print(\"\\u{{1}}{{line}}\")\n\ndef __ws_show[T](line: int, value: T):\n    if comptime reflect.name_of(T) != \"()\":\n        print(\"\\u{{2}}{{line}} {{value:?}}\")\n\ndef __ws_fake() -> System:\n    return System.fake(0)\n"
+
+## The lines of one input the session's program holds (decision 690;
+## RULES.md, R123): its first and last line there, what makes a line there
+## the input's own (`shift`, added), the bytes before the input's text on
+## its first line (`__repl_show(` of an expression shown), and the input's
+## name, the loaded file's or `<input>`. The session's program records
+## them in its last lines, `# sisu-repl-input: FIRST LAST SHIFT PREFIX
+## NAME`, after the inputs and before the trailer, so that no input's line
+## moves.
+pub struct Region:
+    pub first: int
+    pub last: int
+    pub shift: int
+    pub prefix: int
+    pub name: String
+
+## What starts a line that records a region.
+const REGION_LINE: str = "# sisu-repl-input: "
+
+## The lines of `text`: each line break ends one, and a last line without
+## one counts too.
+pub pure def line_count(text: str) -> int:
+    var n = 0
+    for i in range(text.byte_len()):
+        if text.byte_at(i) == 10:
+            n += 1
+    if text.byte_len() > 0 and text.byte_at(text.byte_len() - 1) != 10:
+        n += 1
+    return n
+
+## A session's text without the lines that record its regions, its last,
+## and the regions they record, in order.
+pub pure def regions_of(text: str) -> (String, list[Region]):
+    # Where the last lines that record regions start.
+    var at = text.byte_len()
+    while at > 0:
+        var start = at - 1
+        while start > 0 and text.byte_at(start - 1) != 10:
+            start -= 1
+        if not text.byte_slice(start, at).starts_with(REGION_LINE):
+            break
+        at = start
+    var regions: list[Region] = []
+    for line in text.byte_slice(at, text.byte_len()).lines():
+        if let Some(r) = region_of(line.byte_slice(REGION_LINE.byte_len(), line.byte_len())):
+            regions.push(r)
+    return (text.byte_slice(0, at).to_string(), regions)
+
+## A region from what its line records after `REGION_LINE`.
+pure def region_of(rest: str) -> Region?:
+    let (a, more) = rest.split_once(" ")?
+    let (b, more2) = more.split_once(" ")?
+    let (c, more3) = more2.split_once(" ")?
+    let (d, name) = more3.split_once(" ")?
+    return Some(
+        Region(
+            first=a.parse_int()?,
+            last=b.parse_int()?,
+            shift=c.parse_int()?,
+            prefix=d.parse_int()?,
+            name=name.to_string(),
+        )
+    )
+
+## The regions with their lines moved down by `n`, where their text moved.
+pub pure def moved(regions: list[Region], n: int) -> list[Region]:
+    var out: list[Region] = []
+    for r in regions:
+        out.push(
+            Region(
+                first=r.first + n,
+                last=r.last + n,
+                shift=r.shift - n,
+                prefix=r.prefix,
+                name=r.name.copy(),
+            )
+        )
+    return out
+
+## The lines that record `regions`.
+pub pure def region_lines(regions: list[Region]) -> String:
+    var out = String.new()
+    for r in regions:
+        out.push("{REGION_LINE}{r.first} {r.last} {r.shift} {r.prefix} {r.name}\n")
+    return out
+
+## The region holding the line `line`, the last of them that does.
+pure def region_at(regions: list[Region], line: int) -> int?:
+    var found: int? = None
+    for k in range(len(regions)):
+        if regions[k].first <= line and line <= regions[k].last:
+            found = Some(k)
+    return found
+
+## `loc` moved to the lines and columns of its region's own, or of
+## `fallback`'s when it is in none, never before the first.
+pure def own_loc(regions: list[Region], fallback: int, loc: Loc) -> Loc:
+    let r = ref regions[region_at(regions, loc.line) ?? fallback]
+    var out = Loc(line=max(loc.line + r.shift, 1), col=loc.col, end_line=0, end_col=loc.end_col)
+    if loc.line == r.first:
+        out.col = max(loc.col - r.prefix, 1)
+    if loc.has_end():
+        out.end_line = max(loc.end_line + r.shift, 1)
+        if loc.end_line == r.first:
+            out.end_col = max(loc.end_col - r.prefix, 1)
+    return out
+
+## The SIR of a session's program with each function of the session that
+## an input declares named by that input and numbered by its own lines
+## (decision 690; RULES.md, R123): a function of the loaded file is the
+## file's, at the file's lines, one of a typed input `<input>`'s, at the
+## input's; the entry, whose statements are every input's, is the last
+## input's, which is what a run of it adds to the session. The session's
+## other lines (its `#!` line, the trailer) stay its own.
+pub pure def name_regions(mut p: Program, regions: list[Region]):
+    if regions.is_empty() or p.sources.is_empty():
+        return
+    var entry = String.new()
+    if let Some(e) = p.entry:
+        entry = e.function.copy()
+    for i in range(len(p.functions)):
+        if p.functions[i].source != 0:
+            continue
+        var k = len(regions) - 1
+        if p.functions[i].name != entry:
+            let at = p.functions[i].loc else:
+                continue
+            let found = region_at(regions, at.line) else:
+                continue
+            k = found
+        var source = -1
+        for j in range(len(p.sources)):
+            if p.sources[j] == regions[k].name and j != 0:
+                source = j
+        if source < 0:
+            p.sources.push(regions[k].name.copy())
+            source = len(p.sources) - 1
+        p.functions[i].source = source
+        if let Some(at) = p.functions[i].loc:
+            p.functions[i].loc = Some(own_loc(regions, k, at))
+        for b in range(len(p.functions[i].blocks)):
+            if let Some(at) = p.functions[i].blocks[b].loc:
+                p.functions[i].blocks[b].loc = Some(own_loc(regions, k, at))
+            for t in range(len(p.functions[i].blocks[b].stmts)):
+                if let Some(at) = p.functions[i].blocks[b].stmts[t].loc:
+                    p.functions[i].blocks[b].stmts[t].loc = Some(own_loc(regions, k, at))
+        for l in range(len(p.functions[i].locals)):
+            if let Some(at) = p.functions[i].locals[l].loc:
+                p.functions[i].locals[l].loc = Some(own_loc(regions, k, at))
 
 ## One input as the session's program holds it: its text there, where the
 ## input's own text starts in it, and how long that text is.
@@ -327,3 +477,15 @@ def test_catalog(sys: System) -> Catalog:
     let text = sys.fs.read_to_string(Path.new("../catalog/messages.catalog")) else:
         panic("the tests read the catalog at ../catalog/messages.catalog")
     return Catalog.parse(text)
+
+test "a session records the lines of its inputs in its last lines":
+    let regions = [Region(first=2, last=3, shift=-1, prefix=0, name="<input>".to_string())]
+    let body = "#!/usr/bin/env sisu\nlet x = 1\nprint(x)\n"
+    let (text, back) = regions_of("{body}{region_lines(regions)}")
+    assert text == body
+    assert len(back) == 1 and back[0].first == 2 and back[0].last == 3
+    assert back[0].shift == -1 and back[0].name == "<input>"
+    let (same, none) = regions_of(body)
+    assert same == body and none.is_empty()
+    assert moved(back, 2)[0].first == 4 and moved(back, 2)[0].shift == -3
+    assert line_count("a\nb") == 2 and line_count("a\n") == 1

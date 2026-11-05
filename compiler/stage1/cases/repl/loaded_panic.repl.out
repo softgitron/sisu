@@ -1,0 +1,17 @@
+## load
+loaded
+## 1
+## 2
+panic: assertion failed: n >= 0
+  message: a negative count
+    n >= 0
+    │
+    -1
+  at scaled (cases/repl/loaded_panic.repl/load.sisu:8:5)
+  at main (<input>:1:1)
+(not kept)
+## 3
+panic: division by zero
+  at half (<input>:2:12)
+  at main (<input>:1:1)
+(not kept)

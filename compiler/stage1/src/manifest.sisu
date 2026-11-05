@@ -81,6 +81,10 @@ pub struct PackageInfo:
     ## code the package may contain, raw memory only or foreign calls too,
     ## and where the value is written.
     pub unsafe_level: (String, TextRange)?
+    ## `runtime = "full"`, `"single"` or `"freestanding"` (12, "Runtime
+    ## profiles"; RULES.md, R122): the runtime profile the package is built
+    ## for, `full` when it is left out.
+    pub runtime: String
 
 pub struct Manifest:
     ## `[package]`; a workspace's own manifest may have none.
@@ -198,6 +202,7 @@ impl Reader:
             description=None,
             license=None,
             unsafe_level=None,
+            runtime="full".to_string(),
         )
         var name = False
         var version = False
@@ -241,6 +246,20 @@ impl Reader:
                             info.unsafe_level = Some((s, v.range))
                         else:
                             self.bad("unsafe", v, "`\"memory\"` or `\"extern\"`")
+                case "runtime":
+                    if let Some(s) = self.string("runtime", v):
+                        if s == "full" or s == "single":
+                            info.runtime = s
+                        elif s == "freestanding":
+                            # 12's third profile, which no runtime has yet
+                            # (decision 694).
+                            let d = Diagnostic.new(
+                                Msg.PackageFreestanding, v.range.start, v.range.end
+                            )
+                            self.diags.push(d)
+                        else:
+                            let expected = "`\"full\"`, `\"single\"` or `\"freestanding\"`"
+                            self.bad("runtime", v, expected)
                 # Recorded by `sisu publish` in a later stage.
                 case "authors" | "repository" | "readme" | "keywords" | "profile":
                     pass

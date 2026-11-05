@@ -120,7 +120,7 @@ from stage1.syntax.ast.dump import module_debug
 from stage1.syntax.kinds import KindNames
 from stage1.syntax.kinds import SyntaxKind
 from stage1.syntax.tree import Tree
-from stage1.typeck.collect import SourcePackage
+from stage1.typeck.collect import SourcePackage, StdMarks
 from stage1.typeck.program import DefKind, Embedded, ModuleId, Program
 from stage1.typeck.std_sources import display_path, documented, importable, std_file, target_for
 from stage1.typeck.ty import TyKey
@@ -143,7 +143,7 @@ error CommandError:
 ## prints as `sisu1 VERSION`: its minor number is the round of RULES.md
 ## that last changed what the driver may rely on (R56), so that the driver
 ## asks it rather than probing a command (decision 424).
-const VERSION: str = "0.10.0"
+const VERSION: str = "0.11.0"
 
 def main(sys: System) -> ! {IoError, UsageError, CommandError}:
     var args = sys.env.args()
@@ -424,6 +424,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
                 return Ok(())
             var built = input.copy()
             built.contracts = level
+            built.roots = transcript_roots(sys, built.disk, True)
             let (r, sir) = report_with(base, built, path, catalog, mut kept, True)
             if let Some(why) = refusal(r, catalog, ids):
                 emit("", why)
@@ -994,6 +995,16 @@ struct Input:
     own_modules: int
     release_contracts: String?
     contracts: int
+    ## The root package's runtime profile (12; RULES.md, R122): `full`, or
+    ## `single`, which the SIR names.
+    runtime: String
+    ## The functions lowering keeps besides what the entry, the exports and
+    ## the tests reach: for `sir --tests` of a program that has transcripts,
+    ## the world they run against (decision 687; RULES.md, R120).
+    roots: list[String]
+    ## For a REPL session's program, the lines of each input it holds, which
+    ## its SIR names and numbers as the input's own (RULES.md, R123).
+    regions: list[session.Region]
 
 ## The programs the argument names, read: a file's, or each layout's that
 ## has modules (stage 0 reports the others' problems and checks nothing).
@@ -1058,6 +1069,9 @@ def file_input(
             own_modules=1,
             release_contracts=None,
             contracts=CONTRACTS_ALL,
+            runtime="full".to_string(),
+            roots=[],
+            regions=[],
         )
     )
 
@@ -1186,10 +1200,12 @@ def held_layout_input(
     var package_name = String.new()
     var package_version = String.new()
     var release_contracts: String? = None
+    var runtime = "full".to_string()
     if let Some(root) = layout.packages.first():
         package_name = root.name.copy()
         package_version = root.version.copy()
         release_contracts = root.release_contracts.copy()
+        runtime = root.runtime.copy()
     var own_modules = 0
     for m in layout.modules:
         if m.package == 0:
@@ -1220,6 +1236,9 @@ def held_layout_input(
             own_modules=own_modules,
             release_contracts=release_contracts,
             contracts=CONTRACTS_ALL,
+            runtime=runtime,
+            roots=[],
+            regions=[],
         )
     )
 
@@ -1631,9 +1650,7 @@ pure def ownership_types(
 ) -> list[list[Diagnostic]]?:
     let checked = check_input(base, input, catalog, True)
     let files = program_files(input, checked)
-    let lowered = lower_of(
-        checked, base, input.modules[0].file, input.contracts, catalog, mut kept
-    ) else:
+    let lowered = lower_of(checked, base, input, catalog, mut kept) else:
         return None
     if not lowered.beyond.is_empty():
         return None
@@ -1789,9 +1806,7 @@ def sir_of(
         return done
     # The program's files, for the ownership checker's diagnostics.
     let files = program_files(input, checked)
-    let lowered = lower_of(
-        checked, base, input.modules[0].file, input.contracts, catalog, mut kept
-    ) else:
+    let lowered = lower_of(checked, base, input, catalog, mut kept) else:
         return Lowering(
             sir=String.new(),
             ownership=String.new(),
@@ -1813,22 +1828,42 @@ struct ProgramFile:
     text: String
 
 ## Lowering's part, for a program the front end checked whole, with the
-## contracts `level` checks.
+## contracts the input's build checks, the functions it keeps besides what
+## its entry and tests reach, and its runtime profile when that is not
+## `full` (RULES.md, R120 and R122).
 pure def lower_of(
-    own checked: typeck.Checked,
-    base: typeck.Base,
-    path: str,
-    level: int,
-    catalog: Catalog,
-    mut kept: Kept,
+    own checked: typeck.Checked, base: typeck.Base, input: Input, catalog: Catalog, mut kept: Kept
 ) -> lower.Lowered?:
     let typed = checked.typed else:
         return None
-    return Some(
-        lower.lower(
-            typed, base, path, level, catalog, mut kept.bodies, mut kept.lowered, mut kept.slots
-        )
+    var lowered = lower.lower(
+        typed,
+        base,
+        input.modules[0].file,
+        input.contracts,
+        catalog,
+        mut kept.bodies,
+        mut kept.lowered,
+        mut kept.slots,
+        input.roots,
     )
+    if input.runtime != "full":
+        lowered.program.runtime = Some(input.runtime.copy())
+    return Some(lowered)
+
+## The world of transcripts (`transcript_world`, `transcript_system`),
+## which `sir --tests` of a program keeps when it has transcripts: a
+## `.transcript` file in the directory `tests/` beside its root module's
+## file `disk`, as the driver finds them (17; decision 687; RULES.md, R120).
+def transcript_roots(sys: System, disk: str, tests: bool) -> list[String]:
+    if not tests:
+        return []
+    let entries = sys.fs.list_dir(Path.new("{parent(disk)}/tests")) else:
+        return []
+    for p in entries:
+        if "{p}".ends_with(".transcript"):
+            return ["transcript_world".to_string(), "transcript_system".to_string()]
+    return []
 
 ## What `sir_of` gives when the front end ends it: beyond the type
 ## checker's slice, or a front-end error.
@@ -2072,9 +2107,7 @@ pure def report_with(
     var consuming: dict[String, String] = {}
     if let Some(typed) = checked.typed:
         consuming = consuming_methods(typed.prog)
-    let lowered = lower_of(
-        checked, base, input.modules[0].file, input.contracts, catalog, mut kept
-    ) else:
+    let lowered = lower_of(checked, base, input, catalog, mut kept) else:
         return (report, String.new())
     if not lowered.beyond.is_empty():
         for b in lowered.beyond:
@@ -2126,6 +2159,8 @@ pure def report_with(
         # (RULES.md, R27), once the checker is done with the program.
         let hole = Param(name="hole".to_string(), value="{{hole}}".to_string())
         holes.close(mut done.program, catalog.render("panic.hole-closure", [hole]))
+        if not input.regions.is_empty():
+            session.name_regions(mut done.program, input.regions)
         text = write.write(done.program)
     return (report, text)
 
@@ -2607,7 +2642,9 @@ def answered(a: Answer) -> ! {UsageError, CommandError}:
 ## 0. Standard error, because the native run time writes it at once and
 ## keeps standard output until it holds 64 KB or the program ends.
 def repl_serve(sys: System, home: str, catalog: Catalog) -> ! IoError:
-    let base = base_of(sys, home, std_texts(sys, home)?, catalog)
+    # The lines of every std text, found once for all its inputs (RULES.md,
+    # R125).
+    let base = typeck.with_lines(base_of(sys, home, std_texts(sys, home)?, catalog))
     while let Some(line) = sys.stdin.read_line():
         if line.is_empty():
             break
@@ -2641,7 +2678,14 @@ def bindings_answer(sys: System, path: str, catalog: Catalog) -> Answer ! IoErro
 ## metadata's paths are relative to) and named `name` in its diagnostics,
 ## built (RULES.md, R79).
 def held_build(
-    sys: System, home: str, base: typeck.Base, name: str, disk: str, text: str, catalog: Catalog
+    sys: System,
+    home: str,
+    base: typeck.Base,
+    name: str,
+    disk: str,
+    text: str,
+    catalog: Catalog,
+    regions: list[session.Region],
 ) -> Built ! IoError:
     var kept = Kept.new()
     var env = base.environment()
@@ -2661,6 +2705,7 @@ def held_build(
         inputs.push(held_layout_input(sys, home, layout, False, mut env, catalog, held)?)
     var built = inputs[0].copy()
     built.contracts = CONTRACTS_ALL
+    built.regions = regions.copy()
     let (r, sir) = report_with(base, built, name, catalog, mut kept, True)
     let front = r.front(catalog, None)
     if front.errors(catalog) > 0:
@@ -2727,8 +2772,12 @@ def repl_answer(
         k += 1
     if len(files) != 2 or kept_path.is_empty():
         return Ok(Answer.misused())
-    let session_text = sys.fs.read_to_string(Path.new(files[0]))?
+    let held_text = sys.fs.read_to_string(Path.new(files[0]))?
     let input_text = sys.fs.read_to_string(Path.new(files[1]))?
+    # The lines of the inputs it kept, which its last lines record
+    # (`session.Region`), each named and numbered as its own (decision 690;
+    # RULES.md, R123).
+    let (session_text, held_regions) = session.regions_of(held_text)
     var head = session_text.copy()
     var entry = session.entry_of(input_text, catalog)
     var shown_name = "<input>".to_string()
@@ -2749,13 +2798,26 @@ def repl_answer(
     elif not head.starts_with("#!"):
         head = "{session.SHEBANG}{head}"
     let at = head.byte_len() + entry.prefix
-    let kept = "{head}{entry.source}"
+    # The kept inputs' lines, where the head holds them now, and the new
+    # input's: the loaded file's numbered from where its body starts in it.
+    let moved = session.line_count(head) - session.line_count(session_text)
+    var regions = session.moved(held_regions, moved)
+    let first = session.line_count(head) + 1
+    var own_first = 1
+    if load:
+        own_first = session.line_count(input_text.byte_slice(0, delta)) + 1
+    let last = first + session.line_count(entry.source) - 1
+    let region = session.Region(
+        first=first, last=last, shift=own_first - first, prefix=entry.prefix, name=shown_name.copy()
+    )
+    regions.push(region)
+    let kept = "{head}{entry.source}{session.region_lines(regions)}"
     let program = "{kept}{session.TRAILER}"
     # The program stands in DIR, the working directory by default, which
     # `embed` and the inline metadata's paths are relative to, and is named
     # NAME, `<repl>` by default (RULES.md, R95).
     let disk = standing(sys, dir, name)
-    match held_build(sys, home, base, name, disk, program, catalog)?:
+    match held_build(sys, home, base, name, disk, program, catalog, regions)?:
         case Sir(sir):
             sys.fs.write_text(Path.new(kept_path), kept)?
             return Ok(Answer.done(sir))
@@ -2817,7 +2879,7 @@ def worksheet_answer(
     var disk = absolute(sys, files[0])
     if dir.is_some():
         disk = standing(sys, dir, base_name(file))
-    match held_build(sys, home, base, file, disk, sheet, catalog)?:
+    match held_build(sys, home, base, file, disk, sheet, catalog, [])?:
         case Sir(_):
             pass
         case Stopped(r):
@@ -2844,7 +2906,7 @@ def worksheet_answer(
         case Refused(why):
             return Ok(Answer.failed(why))
     let instrumented = session.instrument(sheet, shift, catalog)
-    match held_build(sys, home, base, file, disk, instrumented, catalog)?:
+    match held_build(sys, home, base, file, disk, instrumented, catalog, [])?:
         case Sir(sir):
             return Ok(Answer.done(sir))
         case Stopped(r):
@@ -3466,7 +3528,7 @@ def base_of(sys: System, home: str, texts: dict[String, String], catalog: Catalo
     return base
 
 ## The version of the base cache's form.
-const BASE_CACHE_FORM: int = 1
+const BASE_CACHE_FORM: int = 2
 
 ## Where the cache of the base goes, and what tells the executable: in the
 ## directory of the native stage-1 executable, `target/stage1/` under the
@@ -3509,8 +3571,9 @@ def base_cache_key(sys: System, home: str, texts: dict[String, String], exe: str
     return Some(module_hash(all))
 
 ## The cache's text: its form and key, each std module's derived impls
-## with their length in bytes, the promotions of each module, and the key
-## again, which a reader finds last only in a file written whole.
+## with their length in bytes, the promotions of each module, the modules
+## that hold templates and `unsafe` code, and the key again, which a
+## reader finds last only in a file written whole.
 pure def base_cache_text(key: str, cache: typeck.BaseCache) -> String:
     var out = String.new()
     out.push("sisu1 base cache {BASE_CACHE_FORM}\nkey {key}\n")
@@ -3538,6 +3601,15 @@ pure def base_cache_text(key: str, cache: typeck.BaseCache) -> String:
         out.push("{name} {len(fs)}\n")
         for f in fs:
             out.push("{f}\n")
+    # The importable modules that hold templates, and `unsafe` code
+    # (RULES.md, R125).
+    let marks = [
+        ("reflecting", cache.marked.reflecting.copy()), ("unsafe", cache.marked.unsafe_code.copy())
+    ]
+    for (word, names) in marks:
+        out.push("{word} {len(names)}\n")
+        for name in names:
+            out.push("{name}\n")
     out.push("end {key}\n")
     return out
 
@@ -3569,9 +3641,20 @@ pure def read_base_cache(text: str, key: str) -> typeck.BaseCache?:
             let f = r.line()?
             fs.push(f.to_string())
         _ = promoted.insert(name.to_string(), fs)
+    var marks: list[list[String]] = []
+    for expected in ["reflecting", "unsafe"]:
+        let (word3, n) = r.counted()?
+        if word3 != expected:
+            return None
+        var names: list[String] = []
+        for _ in range(n):
+            let name = r.line()?
+            names.push(name.to_string())
+        marks.push(names)
     if r.line()? != "end {key}" or r.at != text.byte_len():
         return None
-    return Some(typeck.BaseCache(derived=derived, promoted=promoted))
+    let marked = StdMarks(reflecting=marks[0].copy(), unsafe_code=marks[1].copy())
+    return Some(typeck.BaseCache(derived=derived, promoted=promoted, marked=marked))
 
 ## Writes the cache aside, `base-ID.cache.N.aside` with `N` drawn at
 ## random, and renames it over the old one (`Fs.rename`, decision 420), so
@@ -3637,12 +3720,70 @@ def std_texts(sys: System, home: str) -> dict[String, String] ! IoError:
         names.push(name)
     for name in names:
         _ = texts.insert(name.to_string(), sys.fs.read_to_string(Path.new(std_file(home, name)))?)
-    # A build for another runtime than the interpreter has its `target`
-    # (RULES.md, R116).
+    # A build for another runtime than the interpreter, or of a package for
+    # another runtime profile than `full`, has its `target` (RULES.md, R116
+    # and R122).
     let runtime = target_runtime(sys)
-    if runtime != "interpreter":
-        _ = texts.insert("target".to_string(), target_for(runtime))
+    let profile = runtime_profile(sys)
+    if runtime != "interpreter" or profile != "full":
+        _ = texts.insert("target".to_string(), target_for(runtime, profile))
     return Ok(texts)
+
+## The runtime profile of the package the command works on (12, "Runtime
+## profiles"; RULES.md, R122), which `target.runtime_profile` gives
+## compile-time code: its manifest's `[package] runtime`, read before the
+## base is made, `full` without one. The package is the directory an
+## argument after the command names, or, when no argument names a file or
+## a directory, the nearest one at or above the working directory; a file
+## is a program of its own, `full`.
+def runtime_profile(sys: System) -> String:
+    let args = sys.env.args()
+    var named = False
+    for i in range(len(args)):
+        let a = args[i]
+        if i == 0 or a.starts_with("-") or (i > 0 and valued(args[i - 1])):
+            continue
+        let p = Path.new(a)
+        if a.ends_with(".sisu") and sys.fs.exists(p):
+            return "full".to_string()
+        let manifest = package.join(a, package.MANIFEST)
+        if package.is_file(sys.fs, manifest):
+            return profile_of(sys, manifest)
+        if sys.fs.exists(p):
+            named = True
+    if named:
+        return "full".to_string()
+    var dir = absolute(sys, ".")
+    while True:
+        let manifest = package.join(dir, package.MANIFEST)
+        if package.is_file(sys.fs, manifest):
+            return profile_of(sys, manifest)
+        if dir == "/":
+            break
+        dir = package.parent(dir)
+    return "full".to_string()
+
+## Whether a command's option takes the argument after it as its value: a
+## directory or file that is not the program's.
+pure def valued(option: str) -> bool:
+    return option == "--home"
+        or option == "--catalog"
+        or option == "--dir"
+        or option == "--kept"
+        or option == "--output"
+        or option == "--name"
+        or option == "--target-runtime"
+
+## The runtime profile a manifest's `[package]` names, `full` when it names
+## none or cannot be read.
+def profile_of(sys: System, manifest: str) -> String:
+    let text = sys.fs.read_to_string(Path.new(manifest)) else:
+        return "full".to_string()
+    let (m, _) = manifest_read(text)
+    if let Some(found) = m:
+        if let Some(info) = found.package:
+            return info.runtime.copy()
+    return "full".to_string()
 
 ## The runtime the program is built for (RULES.md, R116): what
 ## `--target-runtime` names, `interpreter` without it, as `target.runtime`

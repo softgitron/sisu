@@ -893,6 +893,11 @@ impl Checker:
                 case None:
                     if f.default.is_some():
                         fields.push(FieldInit.Default(i))
+                    elif not cx.prog.vis_allows(f.vis, home, self.module):
+                        # A private field of another module's struct, which
+                        # `E0258` above says this module cannot set: a hole
+                        # for it would be refused again (RULES.md, R126).
+                        fields.push(FieldInit.Value(self.error_expr(at)))
                     else:
                         var d = self.error(cx, Msg.TypeMissingField, at)
                         d = d.with("field", f.name).with("ty", tyname)

@@ -46,9 +46,10 @@ view struct Scanner:
     modes: list[Mode]
     diags: list[Diagnostic]
     last_significant: SyntaxKind
-    ## `KEYWORDS` and `PUNCTUATION` as lookups.
+    ## `KEYWORDS` and `PUNCTUATION` as lookups, the second by the bytes of
+    ## a spelling and its length (`spelling_key`), which needs no text made.
     keywords: dict[String, SyntaxKind]
-    punctuation: dict[String, SyntaxKind]
+    punctuation: dict[int, SyntaxKind]
 
 ## Scans `text` into raw tokens, appending its diagnostics to `diags`.
 pub pure def scan(text: str, mut diags: list[Diagnostic]) -> list[Token]:
@@ -88,9 +89,9 @@ impl Scanner:
         var keywords: dict[String, SyntaxKind] = {}
         for (word, kind) in KEYWORDS:
             _ = keywords.insert(word.to_string(), kind)
-        var punctuation: dict[String, SyntaxKind] = {}
+        var punctuation: dict[int, SyntaxKind] = {}
         for (spelling, kind) in PUNCTUATION:
-            _ = punctuation.insert(spelling.to_string(), kind)
+            _ = punctuation.insert(spelling_key(spelling, 0, spelling.byte_len()), kind)
         return Scanner(
             text=text,
             n=text.byte_len(),
@@ -543,10 +544,17 @@ impl Scanner:
         for j in range(length):
             if self.byte(self.pos + j) >= 128:
                 return None
-        let spelling = self.text.byte_slice(self.pos, self.pos + length).to_string()
-        return match self.punctuation.get(spelling):
+        return match self.punctuation.get(spelling_key(self.text, self.pos, length)):
             case Some(kind): Some(kind)
             case None: None
+
+## The `length` bytes of `text` at `at` as one number with their length,
+## the key of a spelling in the scanner's lookup of punctuation.
+pure def spelling_key(text: str, at: int, length: int) -> int:
+    var key = 0
+    for j in range(length):
+        key = key * 256 + text.byte_at(at + j).to_int()
+    return key * 4 + length
 
 pure def is_ascii_digit(b: int) -> bool:
     return 48 <= b <= 57

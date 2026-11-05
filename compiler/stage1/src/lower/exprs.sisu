@@ -422,8 +422,11 @@ impl FnLower:
     ## An argument as the callee takes it; `by_value` when the callee takes
     ## by value what the call passes by reference (a trait method resolved
     ## to the impl of a `Copy` type). `owned`: the parameter is taken with
-    ## `own`.
-    pub pure def arg_operand_for(mut self, cx: Cx, a: TArg, by_value: bool, owned: bool) -> Operand:
+    ## `own`; `lent`: the parameter is borrowed, neither `own` nor `mut`, so
+    ## that a `mut` reference given on is a shared reborrow (RULES.md, R124).
+    pub pure def arg_operand_for(
+        mut self, cx: Cx, a: TArg, by_value: bool, owned: bool, lent: bool
+    ) -> Operand:
         if by_value and (a.mode == ArgMode.Ref or a.mode == ArgMode.Value):
             if let TyData.Ref(_, _) = self.types.data(self.ty_of(cx, a.expr)):
                 let p = self.place_of(cx, a.expr).project(Proj.Deref)
@@ -431,10 +434,25 @@ impl FnLower:
             if owned:
                 return self.operand(cx, a.expr)
             return self.lent_copy(cx, a.expr)
+        if a.mode == ArgMode.Value and lent:
+            if let Some(o) = self.shared_reborrow(cx, a.expr):
+                return o
         if a.mode == ArgMode.Value and not owned:
             if cx.prog.is_copy_in(mut self.types, self.ty_of(cx, a.expr), self.bounds):
                 return self.lent_copy(cx, a.expr)
         return self.arg_operand(cx, a)
+
+    ## Whether each parameter of a function (`self` first) is borrowed:
+    ## taken neither with `own` nor with `mut`.
+    pub pure def lent_params(self, cx: Cx, def_: DefId) -> list[bool]:
+        var out: list[bool] = []
+        let f = cx.prog.fn_info(def_) else:
+            return out
+        if let Some(m) = f.self_mode:
+            out.push(m == Mode.Borrow)
+        for p in f.params:
+            out.push(p.mode == Mode.Borrow)
+        return out
 
     ## Whether each parameter of a function (`self` first) is taken with
     ## `own`.
@@ -460,9 +478,29 @@ impl FnLower:
     ## A reference to the value of an expression: the expression itself
     ## when it is one, a borrow of its place otherwise.
     pub pure def ref_operand(mut self, cx: Cx, e: TExprId) -> Operand:
+        if let Some(o) = self.shared_reborrow(cx, e):
+            return o
         if let TyData.Ref(_, _) = self.types.data(self.ty_of(cx, e)):
             return self.operand(cx, e)
         return self.borrow_operand(cx, e, False)
+
+    ## A place that is a `mut` reference (a `mut` parameter) read where a
+    ## shared reference is taken: a shared reborrow of what it refers to,
+    ## `ref _1.*`, rather than the reference passed on as a copy, which is a
+    ## `mut` reborrow (decision 40) that ends every loan of it, so that a
+    ## loop over a `mut` parameter may read it (known over-rejection 15;
+    ## RULES.md, R124). `None` for anything else.
+    pure def shared_reborrow(mut self, cx: Cx, e: TExprId) -> Operand?:
+        let TyData.Ref(inner, True) = self.types.data(self.ty_of(cx, e)).copy() else:
+            return None
+        if not self.is_place(cx, e):
+            return None
+        let p = self.place_of(cx, e).project(Proj.Deref)
+        let it = self.ty(cx, inner)
+        let t = self.temp_sir(Type.Ref(inner=[it], mutable=False))
+        let loc = cx.loc(self.span_of(cx, e))
+        self.assign(cx, Place.local(t), Rvalue.Ref(place=p, mutable=False), loc)
+        return Some(Operand.Copy(Place.local(t)))
 
     pure def arg_operand(mut self, cx: Cx, a: TArg) -> Operand:
         let ety = self.ty_of(cx, a.expr)
@@ -472,6 +510,8 @@ impl FnLower:
             case ArgMode.Value:
                 return self.operand(cx, a.expr)
             case ArgMode.Borrow:
+                if let Some(o) = self.shared_reborrow(cx, a.expr):
+                    return o
                 if self.copies(cx, ety):
                     return self.lent_copy(cx, a.expr)
                 return self.borrow_operand(cx, a.expr, False)
@@ -578,12 +618,14 @@ impl FnLower:
                 var by_value: list[bool] = []
                 # A function value takes its arguments as its own.
                 var owned: list[bool] = []
+                var lent: list[bool] = []
                 match callee:
                     case TCallee.Fn(def_, type_args):
                         let (cc, bv) = self.callee_for(cx, def_, type_args)
                         c = cc
                         by_value = bv
                         owned = self.owned_params(cx, def_)
+                        lent = self.lent_params(cx, def_)
                     case TCallee.Value(f):
                         c = Callee.Value(self.operand(cx, f))
                         for _ in args:
@@ -597,8 +639,9 @@ impl FnLower:
                 for i in range(len(args)):
                     let bv = if i < len(by_value): by_value[i] else: False
                     let own_ = if i < len(owned): owned[i] else: True
+                    let lent_ = i < len(lent) and lent[i]
                     let mark = len(self.locals)
-                    let o = self.arg_operand_for(cx, args[i], bv, own_)
+                    let o = self.arg_operand_for(cx, args[i], bv, own_, lent_)
                     if later[i]:
                         self.hold(cx, o, mark, self.ty_of(cx, args[i].expr), mut held)
                     ops.push(o)

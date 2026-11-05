@@ -245,7 +245,8 @@ pub struct Lowered:
 ## Lowers a checked program (stage 0's `lower_reaching` for `sisu sir`):
 ## what the entry, the tests and the root module's functions and constants
 ## reach, with the contracts `level` checks (`CONTRACTS_ALL` but for a
-## build that asks for fewer). `path` is the program's file as given.
+## build that asks for fewer), and the functions `extra` names (the world
+## of transcripts, RULES.md, R120). `path` is the program's file as given.
 pub pure def lower(
     own typed: Typed,
     base: Base,
@@ -255,6 +256,7 @@ pub pure def lower(
     mut kept: StdBodies,
     mut kept_lowered: StdLowered,
     mut kept_slots: StdSlots,
+    extra: list[String],
 ) -> Lowered:
     let prog = ref typed.prog
     var types = typed.types.copy()
@@ -367,11 +369,31 @@ pub pure def lower(
         if let Some(f) = prog.fn_info(d):
             if f.body.is_some():
                 benches.push((prog.defs[d.index].name.copy(), ctx.fn_name(prog, types, d)))
-    # Keep what the entry, the tests and the root module's functions reach.
+    # The functions `@export("name")` gives a global symbol, in the order
+    # of their bodies (decision 683; RULES.md, R120).
+    var exports: list[(String, String)] = []
+    for b in typed.bodies:
+        if b.kind != BodyKind.Fn:
+            continue
+        let symbol = prog.exports.get(b.def_) else:
+            continue
+        let name = ctx.body_name(prog, types, b)
+        var seen = False
+        for (_, f) in exports:
+            if f == name:
+                seen = True
+        if not seen:
+            exports.push((symbol.copy(), name))
+    # Keep what the entry, the exports, the tests, the world of transcripts
+    # and the root module's functions reach.
     var roots: list[String] = []
     if let Some(e) = entry:
         roots.push(e.function.copy())
+    for (_, f) in exports:
+        roots.push(f.copy())
     for (_, f) in tests:
+        roots.push(f.copy())
+    for f in extra:
         roots.push(f.copy())
     # A test that declares a `System` gets `System.sim` in the `sim`
     # profile, which the run time calls (17); one that names capabilities
@@ -450,6 +472,8 @@ pub pure def lower(
     let program = Program(
         sources=sources,
         entry=entry,
+        exports=exports,
+        runtime=None,
         types=decls,
         intrinsics=intrinsics,
         functions=functions,
@@ -1322,6 +1346,7 @@ pure def beyond_of(program: str) -> list[String]:
         mut kept,
         mut kept_lowered,
         mut kept_slots,
+        [],
     ).beyond
 
 test "comptime expressions and contracts are within the slice of lowering":
@@ -1356,6 +1381,7 @@ pure def lowered_in_turn(prelude: str, programs: list[String]) -> list[String]:
             mut kept,
             mut kept_lowered,
             mut kept_slots,
+            [],
         )
         if lowered.beyond.is_empty():
             out.push(write.write(lowered.program))

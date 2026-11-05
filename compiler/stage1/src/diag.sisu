@@ -500,6 +500,7 @@ pub enum Msg:
     PackageUnsafeLevel
     PackageUnsafeUntrusted
     PackageUnsafeRaised
+    PackageFreestanding
     PackageTrustToConsent
     UnsafeNoSafetyComment
     UnsafeNoSafetyList
@@ -583,6 +584,7 @@ pub enum Msg:
     ResolveUnknownAttribute
     ResolveMisspeltAttribute
     ResolveMisplacedAttribute
+    ResolveUncheckedAttribute
     ResolveSimilarAttribute
     TypeDeprecated
     TypeDeprecatedPlain
@@ -1095,6 +1097,7 @@ impl Msg:
             case PackageUnsafeLevel: "package.unsafe-level"
             case PackageUnsafeUntrusted: "package.unsafe-untrusted"
             case PackageUnsafeRaised: "package.unsafe-raised"
+            case PackageFreestanding: "package.freestanding"
             case PackageTrustToConsent: "package.trust-to-consent"
             case UnsafeNoSafetyComment: "unsafe.no-safety-comment"
             case UnsafeNoSafetyList: "unsafe.no-safety-list"
@@ -1174,6 +1177,7 @@ impl Msg:
             case ResolveUnknownAttribute: "resolve.unknown-attribute"
             case ResolveMisspeltAttribute: "resolve.misspelt-attribute"
             case ResolveMisplacedAttribute: "resolve.misplaced-attribute"
+            case ResolveUncheckedAttribute: "resolve.unchecked-attribute"
             case ResolveSimilarAttribute: "resolve.similar-attribute"
             case TypeDeprecated: "type.deprecated"
             case TypeDeprecatedPlain: "type.deprecated-plain"
@@ -1374,6 +1378,23 @@ pub struct Catalog:
     kinds: dict[String, String]
     templates: dict[String, String]
 
+## The first `n` words of a line, or fewer when it has fewer: what the
+## catalog reads of a line before its template, without splitting the
+## template's words too (RULES.md, R125).
+pure def first_words(line: str, n: int) -> list[String]:
+    var out: list[String] = []
+    let end = line.byte_len()
+    var i = 0
+    while i < end and len(out) < n:
+        while i < end and (line.byte_at(i) == 32 or line.byte_at(i) == 9):
+            i += 1
+        let start = i
+        while i < end and line.byte_at(i) != 32 and line.byte_at(i) != 9:
+            i += 1
+        if i > start:
+            out.push(line.byte_slice(start, i).to_string())
+    return out
+
 impl Catalog:
     ## Reads the catalog's line format: `CODE KIND IDENTIFIER TEMPLATE...`,
     ## with blank lines and `#` comments. A line with fewer fields is
@@ -1384,9 +1405,7 @@ impl Catalog:
             let line = raw.trim()
             if line.is_empty() or line.starts_with("#"):
                 continue
-            var fields: list[String] = []
-            for word in line.split_whitespace():
-                fields.push(word.to_string())
+            let fields = first_words(line, 4)
             if len(fields) < 4 or catalog.codes.contains(fields[2].copy()):
                 continue
             _ = catalog.codes.insert(fields[2].copy(), fields[0].copy())

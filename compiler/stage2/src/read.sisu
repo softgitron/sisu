@@ -636,6 +636,10 @@ pub pure def read(text: str) -> Program ! ReadError:
     var p = Program(
         sources=[],
         entry=None,
+        # The `@export`s are read beside it (`exports`), and written back by
+        # `export_lines`; a runtime profile (stage 1's R122) is not read yet.
+        exports=[],
+        runtime=None,
         types=[],
         intrinsics=[],
         functions=[],

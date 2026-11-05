@@ -1,0 +1,7 @@
+pub struct Ledger:
+    pub owner: String
+    bookings: list[int]
+
+impl Ledger:
+    pub def new(own owner: String) -> Ledger:
+        return Ledger(owner=owner, bookings=[])

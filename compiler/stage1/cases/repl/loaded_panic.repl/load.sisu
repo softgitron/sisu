@@ -1,0 +1,11 @@
+#!/usr/bin/env sisu
+# RULES.md, R123: a panic in a function of the loaded file names the
+# file's own line; one in a typed input names `<input>` and its own line
+# (decision 690).
+const BASE: int = 10
+
+def scaled(n: int) -> int:
+    assert n >= 0, "a negative count"
+    return n * BASE
+
+print("loaded")
