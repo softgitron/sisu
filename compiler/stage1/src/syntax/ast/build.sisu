@@ -98,7 +98,7 @@ pub pure def module(tree: Tree) -> Module:
                 if tree.tokens[t].kind == SyntaxKind.ModuleDocComment:
                     docs.push(doc_text(b.text(t), "##!"))
     broken_names.sort()
-    return Module(ast=b.ast, items=items, docs=docs, broken_names=dedup(broken_names))
+    return Module(ast=b.ast, items=items, docs=docs, broken_names=dedup(broken_names), left_out=[])
 
 ## The list without the repeats of each element (it is sorted).
 pure def dedup(own xs: list[String]) -> list[String]:
@@ -906,7 +906,7 @@ impl B:
             case WhileStmt: self.while_stmt(n, range)
             case ForStmt: self.for_stmt(n, range)
             case AssertStmt: self.assert_stmt(n)
-            case ExpectStmt: StmtKind.Expect(self.first_expr(n))
+            case ExpectStmt: self.expect_stmt(n)
             case DeferStmt: self.defer_stmt(n, range)
             case WithStmt: self.with_stmt(n)
             case UnsafeBlock: StmtKind.Unsafe(self.block_or_empty(n))
@@ -1013,6 +1013,14 @@ impl B:
             message = Some(self.expr(exprs[1]))
         let c = cond ?? self.error_expr(n)
         return StmtKind.Assert(cond=c, message=message)
+
+    ## `expect cond[, message]`: its message, as `assert`'s (RULES.md, R81).
+    pure def expect_stmt(mut self, n: int) -> StmtKind:
+        let exprs = self.expr_nodes(n)
+        var message: ExprId? = None
+        if len(exprs) >= 2:
+            message = Some(self.expr(exprs[1]))
+        return StmtKind.Expect(cond=self.first_expr(n), message=message)
 
     pure def defer_stmt(mut self, n: int, range: TextRange) -> StmtKind:
         if let Some(b) = self.child(n, SyntaxKind.Block):

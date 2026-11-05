@@ -612,6 +612,9 @@ pub struct Program:
     ## The call that stands for each such site, by the site's module and
     ## expression.
     pub generator_calls: dict[(int, int), ExprId]
+    ## The `@refines` attribute each test the compiler writes for one stands
+    ## for, by the test's name: its module and range (RULES.md, R83).
+    pub refines_at: dict[String, (ModuleId, TextRange)]
     ## The budget of steps of the `comptime` expressions of each item with
     ## `@comptime_budget(steps=N)` (08).
     pub comptime_budgets: dict[DefId, int]
@@ -664,6 +667,7 @@ impl Program:
             generator_sites={},
             generator_failures={},
             generator_calls={},
+            refines_at={},
             comptime_budgets={},
             embedded={},
             fakes={},

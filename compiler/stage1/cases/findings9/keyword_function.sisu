@@ -1,0 +1,8 @@
+# A function named `type`, which starts a type where an expression goes, is
+# E0124 as a parameter of that name is (RULES.md, R93), where it compiled
+# and each call was E0103.
+def type() -> int:
+    return 1
+
+def main():
+    pass

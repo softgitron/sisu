@@ -241,6 +241,55 @@ impl FnLower:
     pure def foreign_loc(self, cx: Cx) -> Loc?:
         return cx.loc(cx.prog.defs[cx.body.def_.index].span)
 
+    ## For a condition that calls a function or method whose arguments call
+    ## others (`temps.contains(average(temps))`), which cannot be evaluated
+    ## again: each such argument whose type has no drop evaluated once into
+    ## a temporary, which the call and the failure's parts then read; whether
+    ## there was one (RULES.md, R82).
+    pub pure def evaluate_once(mut self, cx: Cx, cond: TExprId) -> bool:
+        let TExprKind.Call(TCallee.Fn(_, _), args) = self.ex(cx, cond).kind.copy() else:
+            return False
+        var any = False
+        for a in args:
+            let e = a.expr
+            if self.is_place(cx, e) or not self.calls_in(cx, e):
+                continue
+            let ty = self.ty_of(cx, e)
+            if self.needs_drop(cx, ty):
+                continue
+            match self.types.data(ty):
+                case TyData.Fn(_, _, _) | TyData.Never | TyData.Unit | TyData.Error:
+                    continue
+                case TyData.Ref(_, _):
+                    continue
+                case _:
+                    pass
+            let t = self.temp(cx, ty)
+            self.into(cx, Place.local(t), e)
+            _ = self.evaluated.insert(e.index, t)
+            any = True
+        return any
+
+    ## Whether an expression calls a function.
+    pure def calls_in(self, cx: Cx, e: TExprId) -> bool:
+        return match self.ex(cx, e).kind:
+            case TExprKind.Call(_, _): True
+            case TExprKind.Coerce(inner, _): self.calls_in(cx, inner)
+            case TExprKind.Binary(_, l, r): self.calls_in(cx, l) or self.calls_in(cx, r)
+            case TExprKind.Unary(_, x): self.calls_in(cx, x)
+            case _: False
+
+    ## Whether a part of a failed assertion's condition may be read again
+    ## to show it: one evaluated once, or a local or a field of one.
+    pure def read_again(self, cx: Cx, e: TExprId) -> bool:
+        if self.evaluated.contains(e.index):
+            return True
+        return match self.ex(cx, e).kind:
+            case TExprKind.Local(_): True
+            case TExprKind.Field(base, _): self.read_again(cx, base)
+            case TExprKind.Coerce(inner, _) | TExprKind.Deref(inner): self.read_again(cx, inner)
+            case _: False
+
     ## Whether a failed `assert` of `cond` can show its parts: it fits on
     ## one line and has a part to show.
     pub pure def can_show_parts(self, cx: Cx, cond: TExprId) -> bool:
@@ -252,7 +301,13 @@ impl FnLower:
     ## cond`, which `goes_on` in a program built with its tests: RULES.md,
     ## R38).
     pub pure def assert_showing_parts(
-        mut self, cx: Cx, cond: TExprId, message: TExprId?, span: TextRange, goes_on: bool
+        mut self,
+        cx: Cx,
+        cond: TExprId,
+        message: TExprId?,
+        span: TextRange,
+        goes_on: bool,
+        once: bool,
     ):
         let loc = cx.loc(span)
         let v = self.operand(cx, cond)
@@ -264,7 +319,13 @@ impl FnLower:
         var m = Operand.Const(Const.Str(String.new()))
         if let Some(x) = message:
             m = self.str_operand(cx, x)
-        let shown = self.parts_to_show(cx, cond)
+        var shown = self.parts_to_show(cx, cond)
+        if once:
+            var kept: list[(int, TExprId)] = []
+            for (c, e) in shown:
+                if self.read_again(cx, e):
+                    kept.push((c, e))
+            shown = kept
         let list = self.rendered_parts(cx, shown, loc)
         let text = self.source_of(cx, self.span_of(cx, cond))
         let u = self.temp_sir(if goes_on: Type.Unit else: Type.Never)

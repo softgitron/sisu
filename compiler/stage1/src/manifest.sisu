@@ -223,8 +223,12 @@ impl Reader:
                             self.bad("version", v, expected)
                 case "edition":
                     if let Some(s) = self.string("edition", v):
-                        if s.byte_len() == 4 and all_digits(s):
+                        # An edition the compiler knows (13: a new one may
+                        # come every three years; RULES.md, R86).
+                        if is_edition(s):
                             info.edition = Some(s)
+                        elif s.byte_len() == 4 and all_digits(s):
+                            self.bad("edition", v, "an edition this compiler knows, `\"2027\"`")
                         else:
                             self.bad("edition", v, "a year, as in `\"2027\"`")
                 case "description":
@@ -347,6 +351,16 @@ impl Reader:
 
     pure def bad_when(mut self, v: Spanned[Value]):
         self.diags.push(Diagnostic.new(Msg.PackageBadWhen, v.range.start, v.range.end))
+
+## The editions this compiler knows (13, "Editions"): the first, which
+## 09's manifest names.
+pub const EDITIONS: list[str] = ["2027"]
+
+pure def is_edition(s: str) -> bool:
+    for e in EDITIONS:
+        if e == s:
+            return True
+    return False
 
 pure def is_version(s: str) -> bool:
     var parts: list[str] = []

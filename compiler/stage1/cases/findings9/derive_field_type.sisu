@@ -1,0 +1,27 @@
+# A field's `ty` in a derive's template (08, "Reflection"; RULES.md, R92):
+# the type as the field's declaration writes it, so that a derive chooses a
+# form field by field, where it stopped with E0608, "a field has no `ty`".
+trait Show:
+    def show(self) -> String
+
+    comptime def derive(T: type) -> impl Show for T:
+        return impl Show for T:
+            def show(self) -> String:
+                var parts = list()
+                comptime for f in reflect.fields_of(T):
+                    if comptime reflect.is_str(f.ty):
+                        parts.push("{f.name}={self.[f]}")
+                    elif comptime reflect.is_list(f.ty):
+                        parts.push("{f.name}: {reflect.name_of(f.ty)} of {len(self.[f])}")
+                    else:
+                        parts.push("{f.name}={self.[f]:?}")
+                return parts.join(", ")
+
+@derive(Show)
+struct Reading:
+    place: String
+    celsius: int
+    hours: list[int]
+
+def main():
+    print(Reading(place="Oulu".to_string(), celsius=-4, hours=[6, 12]).show())

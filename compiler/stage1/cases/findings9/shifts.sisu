@@ -1,0 +1,30 @@
+# A sized integer shifted by an amount of any integer type keeps its type
+# (03: "Shifts by more than the width trap"; RULES.md, R80): the amount is
+# a count of bits, where `u64 << k` with `k` an `int` was E0310 and a `u32`
+# shifted so widened to an `int`.
+def high_bit(x: u64, width: int) -> u64:
+    return (x >> (width - 1)) & 1
+
+def rotate_left(x: u32, k: int) -> u32:
+    let n = k % 32
+    if n == 0:
+        return x
+    return (x << n) | (x >> (32 - n))
+
+def main():
+    let x: u64 = 0x8000_0000_0000_0001
+    print("{high_bit(x, 64)} {x >> 63} {x << 0}")
+    var flags: u8 = 1
+    var k = 3
+    flags <<= k
+    print("{flags}")
+    print("{rotate_left(0x8000_0001, 1)}")
+    let wide: u128 = 1
+    let signed: i128 = -8
+    print("{wide << 100} {signed >> 2}")
+    let one: u32 = 1
+    let shifted = one << 31
+    print("{shifted}")
+    # A literal on the left keeps its own type: an `int`.
+    let amount: u8 = 40
+    print("{1 << amount}")

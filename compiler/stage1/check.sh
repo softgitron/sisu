@@ -141,6 +141,21 @@
 #   doc-output   `sisu doc --output DIR`: the pages it writes into DIR, file
 #                for file, what it prints and its exit status, for the same
 #
+# Then what `sisu repl` and `sisu ws` run (RULES.md, R79), from stage 1's
+# `sir --repl` and `sir --worksheet`, run by stage 0's interpreter (`sisu
+# run --from-sir`):
+#
+#   repl         each session of cases/repl/NAME.repl/, its inputs 1.in,
+#                2.in, ... in order (a `load.sisu` loaded first, as `sisu
+#                repl FILE` loads it): what each input shows, its
+#                diagnostics, or what its run adds to the output of the run
+#                before it (an input whose run fails is not kept), against
+#                NAME.repl.out
+#   ws           each worksheet cases/repl/NAME.ws.sisu rendered as the
+#                driver renders it (`repl.rs`: each line with its values,
+#                and what it printed under it), with its standard error and
+#                status, against what `sisu ws FILE` prints of it
+#
 # A difference listed in RULES.md or DISCREPANCIES.md ("- Differs: `path`:
 # outputs", under the rule or the discrepancy that makes it) is expected;
 # any other fails the check, and so does any program of `behaviour` that
@@ -406,7 +421,9 @@ cat "$here/DISCREPANCIES.md" "$here/RULES.md" | sed -n 's/^- Differs: `\([^`]*\)
 find "$compiler/conformance/cases" -name '*.sisu' | sort > "$work/conformance.list"
 { find "$compiler/std" -name '*.sisu'; find "$here/std" -name '*.sisu'; } | sort > "$work/std.list"
 find "$repo/proposal/examples" -name '*.sisu' | sort > "$work/examples.list"
-find "$here/cases" -name '*.sisu' | sort > "$work/cases.list"
+# Not cases/repl/, whose sessions and worksheets the classes `repl` and `ws`
+# take (RULES.md, R79).
+find "$here/cases" -name '*.sisu' -not -path "$here/cases/repl/*" | sort > "$work/cases.list"
 # The programs of several modules and packages (09): each package case of
 # the conformance suite and of stage 1's own, a directory `NAME.pkg` (or the
 # one `NAME.cwd` names inside it), which stage 0 checks from inside it, and
@@ -947,7 +964,7 @@ behaviour_one() {
 }
 export -f behaviour_box behaviour_one
 {
-    find "$compiler/conformance/cases" "$here/cases" -name '*.sisu' | grep -v '\.pkg/' | grep -v '\.files/' | sort |
+    find "$compiler/conformance/cases" "$here/cases" -name '*.sisu' | grep -v '\.pkg/' | grep -v '\.files/' | grep -v "^$here/cases/repl/" | sort |
         while read -r f; do
             b="${f%.sisu}"
             if [ -e "$b.out" ] || [ -e "$b.err" ] || [ -e "$b.status" ]; then echo "$f"; fi
@@ -1728,6 +1745,103 @@ if [ "$self_check" = 1 ]; then
     fixed_summary="$fixed_summary\n$(printf '  stage1-A %ss, the backend %ss, stage1-B %ss' "$took_a" "$took_backend" "$took_b")"
 fi
 
+# What `sisu repl` and `sisu ws` run (RULES.md, R79).
+repl_summary=""
+repl_session() {
+    # repl_session DIR OUT: the session of DIR's inputs, transcribed to OUT.
+    local dir="$1" transcript="$2" k=1 at
+    : > "$work/repl.session"; : > "$work/repl.prev"; : > "$transcript"
+    local steps=()
+    [ -f "$dir/load.sisu" ] && steps+=(load)
+    while [ -f "$dir/$k.in" ]; do steps+=("$k"); k=$((k + 1)); done
+    for step in "${steps[@]}"; do
+        echo "## $step" >> "$transcript"
+        if [ "$step" = load ]; then
+            set -- sir --repl "$work/repl.session" "${dir#"$here"/}/load.sisu" --kept "$work/repl.next" --load
+        else
+            set -- sir --repl "$work/repl.session" "$dir/$step.in" --kept "$work/repl.next"
+        fi
+        if stage1 "$@" > "$work/repl.sir" 2> "$work/repl.err"; then
+            at=$(($(wc -c < "$work/repl.prev") + 1))
+            if (cd "$dir" && "$sisu" run --from-sir "$work/repl.sir") > "$work/repl.run" 2> "$work/repl.run.err"; then
+                tail -c +"$at" "$work/repl.run" >> "$transcript"
+                cp "$work/repl.next" "$work/repl.session"
+                cp "$work/repl.run" "$work/repl.prev"
+            else
+                tail -c +"$at" "$work/repl.run" >> "$transcript"
+                cat "$work/repl.run.err" >> "$transcript"
+                echo "(not kept)" >> "$transcript"
+            fi
+        else
+            grep -vx 'error: Failed' "$work/repl.err" >> "$transcript"
+        fi
+    done
+}
+ws_render() {
+    # ws_render SOURCE RUN: the worksheet SOURCE with the values and output
+    # of its run RUN, as the driver writes them.
+    awk -v src="$1" '
+        substr($0, 1, 1) == "\001" { cur = substr($0, 2) + 0; next }
+        substr($0, 1, 1) == "\002" {
+            rest = substr($0, 2); i = index(rest, " ")
+            n = (i ? substr(rest, 1, i - 1) : rest) + 0; v = (i ? substr(rest, i + 1) : "")
+            if (n in vals) vals[n] = vals[n] ", " v; else vals[n] = v
+            next
+        }
+        { outs[cur] = outs[cur] "# | " $0 "\n" }
+        END {
+            n = 0
+            while ((getline line < src) > 0) {
+                n++; printf "%s", line
+                if (n in vals) printf "  # => %s", vals[n]
+                printf "\n"
+                if (n in outs) printf "%s", outs[n]
+            }
+        }' "$2"
+}
+same=0; class_listed=0; class_unlisted=0; n=0
+for d in "$here"/cases/repl/*.repl; do
+    [ -d "$d" ] || continue
+    n=$((n + 1))
+    rel="${d#"$repo"/}"
+    repl_session "$d" "$work/repl.transcript"
+    if cmp -s "$work/repl.transcript" "${d}.out"; then
+        same=$((same + 1))
+    else
+        class_unlisted=$((class_unlisted + 1))
+        cp "$work/repl.transcript" "$work/$(basename "$d").transcript"
+        report="$report\n  UNLISTED: $rel: repl (expected ${d}.out, stage 1 in $work/$(basename "$d").transcript)"
+    fi
+done
+total=$((total + n)); identical=$((identical + same)); unlisted=$((unlisted + class_unlisted))
+repl_summary="$repl_summary\n$(printf '  %-24s %4d sessions, %4d as expected, %3d otherwise' repl "$n" "$same" "$class_unlisted")"
+same=0; class_listed=0; class_unlisted=0; n=0
+for f in "$here"/cases/repl/*.ws.sisu; do
+    [ -f "$f" ] || continue
+    n=$((n + 1))
+    rel="${f#"$repo"/}"
+    base="$work/ws.$(basename "$f")"
+    (cd "$(dirname "$f")" && "$sisu" ws "$(basename "$f")" > "$base.stage0" 2>&1; echo "status $?" >> "$base.stage0")
+    if (cd "$(dirname "$f")" && stage1 sir --worksheet "$f" > "$base.sir" 2> "$base.err"); then
+        { (cd "$(dirname "$f")" && "$sisu" run --from-sir "$base.sir" > "$base.run" 2> "$base.run.err"; echo "status $?" > "$base.status")
+          ws_render "$f" "$base.run"; cat "$base.run.err" "$base.status"; } > "$base.stage1"
+    else
+        { grep -vx 'error: Failed' "$base.err" | sed "s|$f|$(basename "$f")|g"; echo "status 1"; } > "$base.stage1"
+    fi
+    if cmp -s "$base.stage0" "$base.stage1"; then
+        same=$((same + 1))
+    elif grep -qxF -e "$rel ws" "$allowed"; then
+        class_listed=$((class_listed + 1))
+        report="$report\n  listed:   $rel: ws"
+    else
+        class_unlisted=$((class_unlisted + 1))
+        report="$report\n  UNLISTED: $rel: ws (stage 0 in $base.stage0, stage 1 in $base.stage1)"
+    fi
+done
+total=$((total + n)); identical=$((identical + same))
+listed=$((listed + class_listed)); unlisted=$((unlisted + class_unlisted))
+repl_summary="$repl_summary\n$(printf '  %-24s %4d worksheets, %4d identical, %3d differing as listed, %3d otherwise' ws "$n" "$same" "$class_listed" "$class_unlisted")"
+
 echo "stage 1 against stage 0 (tokens, tree, trivia-tree, print, ast):"
 printf "%b\n" "${summary#\\n}"
 echo "stage 1's name resolution against stage 0's (names):"
@@ -1750,6 +1864,8 @@ echo "stage 1's formatter against stage 0's (fmt: the text \`sisu fmt\` leaves, 
 printf "%b\n" "${fmt_summary#\\n}"
 echo "stage 1's documentation against stage 0's (doc: what \`sisu doc\` prints and its status, and the pages \`--output\` writes):"
 printf "%b\n" "${doc_summary#\\n}"
+echo "stage 1's programs of \`sisu repl\` and \`sisu ws\` (repl against the cases' transcripts, ws against \`sisu ws\`):"
+printf "%b\n" "${repl_summary#\\n}"
 if [ -n "$build_summary" ]; then
     echo "stage 1's build against stage 0's (build: the executables, the lockfile and what each prints):"
     printf "%b\n" "$build_summary"

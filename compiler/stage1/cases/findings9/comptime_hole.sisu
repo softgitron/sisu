@@ -1,0 +1,17 @@
+# A typed hole reached at compile time leaves the expression to run time
+# (D-061; RULES.md, R84): the build warns of the hole, and a test that uses
+# the constant is blocked by it, where the compile-time evaluation's panic
+# was E0602 and nothing ran.
+pure def limit() -> int:
+    return todo("limit")
+
+const LIMIT: int = comptime limit()
+
+pure def doubled() -> int:
+    return comptime limit() * 2
+
+test "the limit is positive":
+    assert LIMIT > 0
+
+test "a test that does not use it":
+    assert 1 + 1 == 2

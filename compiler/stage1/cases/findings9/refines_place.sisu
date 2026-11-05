@@ -1,0 +1,12 @@
+# The test that `@refines` makes fails at the attribute, in the file of the
+# function it checks (RULES.md, R83), where it named the module the
+# compiler writes, `<arbitrary>/main.sisu`.
+pure def count_ref(xs: list[int]) -> int:
+    return len(xs)
+
+## A fast path with a bug past three elements.
+@refines(count_ref)
+pure def count(xs: list[int]) -> int:
+    if len(xs) > 3:
+        return 3
+    return len(xs)

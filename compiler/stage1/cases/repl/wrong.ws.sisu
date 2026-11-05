@@ -1,0 +1,3 @@
+# A worksheet that does not check: its diagnostics in the file as written.
+let x = 3
+x + "a"

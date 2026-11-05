@@ -1,0 +1,11 @@
+test "the limit is positive" ... blocked by todo("limit")
+test "a test that does not use it" ... ok
+1 passed, 0 failed, 1 blocked
+--- stderr
+warning[W0001]: typed hole `limit` of type `int`
+  --> comptime_hole.sisu:6:12
+  |
+6 |     return todo("limit")
+  |            ^^^^^^^^^^^^^
+
+error: Exit(status=3)

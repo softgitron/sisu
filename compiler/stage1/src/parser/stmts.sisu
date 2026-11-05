@@ -159,9 +159,13 @@ impl Parser:
             case Ident if self.current_text() == "debug_assert" and self.expect_stmt_follows():
                 self.assert_stmt()
             case Ident if self.current_text() == "expect" and self.expect_stmt_follows():
+                # `expect cond[, message]`, as `assert` takes its message
+                # (17; RULES.md, R81).
                 self.start(SyntaxKind.ExpectStmt)
                 self.bump()
                 _ = self.expr()
+                if self.eat(SyntaxKind.Comma):
+                    _ = self.expr()
                 self.end_stmt()
                 self.finish_node()
             case _ if self.at_item_start():

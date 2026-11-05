@@ -84,6 +84,8 @@ pub struct Error:
 pub error Stop:
     ## A panic, with its message.
     Panicked(message: String)
+    ## A typed hole was reached (RULES.md, R84).
+    Hole(message: String)
     ## A refinement's predicate was false for a constant: the type, the
     ## value and the predicate.
     Refinement(ty: String, value: String, predicate: String)
@@ -249,6 +251,13 @@ pure def visit(
             for n in intrinsics:
                 declare_intrinsic(mut prog, n)
             _ = state.insert(name.to_string(), State.Done)
+        case Err(Hole(_)):
+            # A typed hole has no value to bake: the expression is left to
+            # run time, where reaching the hole blocks the test or the run
+            # it is in (D-061; RULES.md, R84), and the hole's own warning
+            # stands. An expression that uses it reaches it too.
+            prog.functions[at].kind = FnKind.Value
+            _ = state.insert(name.to_string(), State.Done)
         case Err(stop):
             _ = state.insert(name.to_string(), State.Failed)
             var failure = Failure.Budget(budget)
@@ -258,7 +267,7 @@ pure def visit(
                     if not out.beyond.contains(reason):
                         out.beyond.push(reason)
                     return
-                case Panicked(m):
+                case Panicked(m) | Hole(m):
                     failure = Failure.Panicked(m.copy())
                 case Refinement(ty, value, predicate):
                     failure = Failure.Refinement(
@@ -932,7 +941,7 @@ impl Interp:
                 var shown = "`todo()`".to_string()
                 if not n.is_empty():
                     shown = "`todo({quote_str(n)})`"
-                return Err(self.panicked("panic.hole", [param("hole", shown)]))
+                return Err(Stop.Hole(render(self.catalog, "panic.hole", [param("hole", shown)])))
             case "unreachable":
                 let m = self.text(args, 0)?
                 if m.is_empty():

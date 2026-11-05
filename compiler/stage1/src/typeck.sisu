@@ -44,7 +44,7 @@ from stage1.resolve import Environment, ModuleNames
 from stage1.syntax.ast import Ast, Block, ExprId, ExprKind, Mode, Module
 from stage1.syntax.ast import build
 from stage1.syntax.ast import visit
-from stage1.typeck.check import Checker, Cx, Finished, RetCtx
+from stage1.typeck.check import Checker, Cx, Finished, PASSED, RetCtx
 from stage1.typeck.collect import Resolver, SourceModule, SourcePackage
 from stage1.typeck.contracts import contract_only, leading_contracts
 from stage1.typeck.generic_asserts import Assert, ConstCall, failures
@@ -387,6 +387,7 @@ struct BodyResult:
     typed: TBody?
     asserts: list[Assert]
     const_calls: list[ConstCall]
+    impure: (String, DefId?)?
 
 pure def result_of(done: Finished) -> BodyResult:
     return BodyResult(
@@ -400,6 +401,7 @@ pure def result_of(done: Finished) -> BodyResult:
         typed=done.typed.copy(),
         asserts=done.asserts.copy(),
         const_calls=done.const_calls.copy(),
+        impure=done.impure.copy(),
     )
 
 ## What checking the bodies of one file gave: the diagnostics, why bodies
@@ -810,6 +812,7 @@ pure def check_round(
     var calls: list[(int, ConstCall)] = []
     var requests: list[Request] = []
     var typed: list[TBody] = []
+    var impure_of: dict[int, (String, DefId?)] = {}
     for d in fns:
         var result: BodyResult? = None
         if let Some(x) = memo.get(d):
@@ -823,6 +826,8 @@ pure def check_round(
             _ = memo.insert(d, x.copy())
             result = Some(x)
         let x = result ?? continue_never()
+        if let Some(i) = x.impure:
+            _ = impure_of.insert(d.index, i.copy())
         let at = at_module.get(prog.defs[d.index].module) ?? 0
         if reporting.contains(prog.defs[d.index].module):
             files[at].add(x, r.quiet_fns.contains(d))
@@ -964,6 +969,11 @@ pure def check_round(
                 main.diags.push(d)
             elif let Some(at) = at_module.get(m):
                 files[at].diags.push(d.copy())
+    # Each `E0335` names the operation responsible for the impurity of the
+    # function it is about (RULES.md, R90).
+    main.diags = responsible(prog, main.diags, impure_of)
+    for i in range(len(files)):
+        files[i].diags = responsible(prog, files[i].diags, impure_of)
     # The root module's bodies are the file's; the others are files of
     # their own.
     main.absorb(files[0])
@@ -991,6 +1001,59 @@ pure def check_round(
         const_calls=calls,
     )
 
+## The diagnostics, each `E0335` about a function passed where a `pure` one
+## is required naming the operation responsible (03): the first impure call
+## of its body, followed through the program's functions it calls to the
+## first that is not one, with a note giving the way when it is longer
+## than one call (RULES.md, R90).
+pure def responsible(
+    prog: Program, diags: list[Diagnostic], impure_of: dict[int, (String, DefId?)]
+) -> list[Diagnostic]:
+    var out: list[Diagnostic] = []
+    for d in diags:
+        let at = d.param(PASSED) else:
+            out.push(d.copy())
+            continue
+        var fixed = d.copy()
+        var kept: list[Param] = []
+        for p in d.params:
+            if p.name != PASSED:
+                kept.push(p.copy())
+        fixed.params = kept
+        let start = at.parse_int() ?? -1
+        var way: list[String] = []
+        var cur = start
+        var seen: list[int] = []
+        while cur >= 0 and not seen.contains(cur) and len(way) < 8:
+            seen.push(cur)
+            let found = impure_of.get(cur) else:
+                break
+            let (name, next) = found.copy()
+            way.push(name.copy())
+            cur = -1
+            if let Some(n) = next:
+                if impure_of.contains(n.index):
+                    cur = n.index
+        if let Some(last) = way.last():
+            var ps: list[Param] = []
+            for p in fixed.params:
+                if p.name == "callee":
+                    ps.push(Param(name="callee".to_string(), value=last.copy()))
+                else:
+                    ps.push(p.copy())
+            fixed.params = ps
+            if len(way) > 1 and start >= 0 and start < len(prog.defs):
+                var shown: list[String] = []
+                for w in way:
+                    shown.push("`{w}`")
+                let ps2 = [
+                    Param(name="function".to_string(), value=prog.defs[start].name.copy()),
+                    Param(name="path".to_string(), value=shown.join(", which calls ")),
+                ]
+                fixed = fixed.note_params(Msg.TypeImpurePath, ps2)
+        out.push(fixed)
+    return out
+
 ## Never called: the `else` of a `let` whose value is always there.
 pure def continue_never() -> BodyResult:
     return BodyResult(
@@ -1004,6 +1067,7 @@ pure def continue_never() -> BodyResult:
         typed=None,
         asserts=[],
         const_calls=[],
+        impure=None,
     )
 
 ## The syntax and the text a definition's body is checked with: its
@@ -1387,6 +1451,57 @@ pure def once_at_template_hole(moved: list[Diagnostic], text: str) -> list[Diagn
         out.push(placed)
     return out
 
+## A line of a template's instance with the names it gives its type
+## arguments (`__T0`, `__T1`, ...) written as the instance's name writes
+## them, `make[User]`'s `User` (RULES.md, R94).
+pure def as_written(line: str, instance: str) -> String:
+    var args: list[String] = []
+    let open = instance.find("[") else:
+        return line.to_string()
+    var depth = 0
+    var part = String.new()
+    var i = open + 1
+    while i < instance.byte_len():
+        let c = instance.byte_at(i)
+        if c == 91:
+            depth += 1
+        elif c == 93:
+            if depth == 0:
+                break
+            depth -= 1
+        if c == 44 and depth == 0:
+            args.push(part.trim().to_string())
+            part = String.new()
+        else:
+            part.push(instance.byte_slice(i, i + 1))
+        i += 1
+    args.push(part.trim().to_string())
+    var out = String.new()
+    var k = 0
+    while k < line.byte_len():
+        if line.byte_slice(k, line.byte_len()).starts_with("__T"):
+            var j = k + 3
+            while j < line.byte_len() and line.byte_at(j) >= 48 and line.byte_at(j) <= 57:
+                j += 1
+            let more = j < line.byte_len()
+                and (line.byte_at(j) == 95 or is_word_byte(line.byte_at(j)))
+            if j > k + 3 and not more:
+                let n = line.byte_slice(k + 3, j).parse_int() ?? -1
+                if n >= 0 and n < len(args):
+                    out.push(args[n])
+                    k = j
+                    continue
+        out.push(line.byte_slice(k, k + 1))
+        k += 1
+    return out
+
+pure def is_word_byte(b: u8) -> bool:
+    return (b >= 48 and b <= 57) or (b >= 65 and b <= 90) or (b >= 97 and b <= 122) or b == 95
+
+test "an instance's line names its type arguments as written":
+    assert as_written("return __T0(name=name)", "make[User]") == "return User(name=name)"
+    assert as_written("x: __T1 = __T0_e", "pair[int, list[str]]") == "x: list[str] = __T0_e"
+
 ## A diagnostic of a template's instance, at `d.start` of the text the
 ## compiler wrote for it, placed at the call `at` that made the instance
 ## `name` (RULES.md, R77): its message and parameters, a note with the line
@@ -1404,7 +1519,7 @@ pure def placed_at_call(d: Diagnostic, at: TextRange, name: str, text: str) -> D
     x.params = d.params.copy()
     let params = [
         Param(name="name".to_string(), value=name.to_string()),
-        Param(name="code".to_string(), value=line.to_string()),
+        Param(name="code".to_string(), value=as_written(line, name)),
     ]
     x = x.note_params(Msg.TypeInstanceCode, params)
     # A borrowed parameter given on where a value is owned, as by
@@ -1508,12 +1623,14 @@ pure def check_one(
     c.check_fn(cx, tcx)
     c.unsafe_lints(cx)
     c.requests = c.template_requests(cx)
+    let impure = c.body_impure(cx)
     var typed: TBody? = None
     if keep:
         let span = prog.defs[d.index].span
         typed = Some(c.typed_body(cx, BodyKind.Fn, span))
     var done = c.finish()
     done.typed = typed
+    done.impure = impure
     return done
 
 ## Checks a default value or a constant as a body returning it.

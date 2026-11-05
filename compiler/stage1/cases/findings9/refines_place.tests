@@ -1,0 +1,11 @@
+test "count refines count_ref" ... FAILED
+
+test "count refines count_ref" ... FAILED
+panic: the property failed for ([0, 0, 0, 0],) (case 3, shrunk 12 times)
+  the property returned False
+  at test "count refines count_ref" (refines_place.sisu:8:1)
+replay: sisu test --replay 1-HASH-0.0.1-t0-s0-r0-c1.0.0.1.0.0.1.0.0.1.0.0.0 refines_place.sisu
+
+0 passed, 1 failed, 0 blocked
+--- stderr
+error: Exit(status=1)

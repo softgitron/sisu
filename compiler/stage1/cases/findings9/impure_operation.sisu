@@ -1,0 +1,16 @@
+# E0335 names the operation responsible for a function's impurity (03),
+# followed through the program's functions it calls, with a note giving
+# the way (RULES.md, R90).
+def noisy_square(x: int) -> int:
+    print("squaring {x}")
+    return x * x
+
+def helper(x: int) -> int:
+    return noisy_square(x) + 1
+
+pure def apply(f: pure (int) -> int, x: int) -> int:
+    return f(x)
+
+def main():
+    print("{apply(noisy_square, 3)}")
+    print("{apply(helper, 3)}")

@@ -145,6 +145,10 @@ pub struct EnsuresCtx:
 ## What checking a body leaves: the table of types, the diagnostics, why
 ## the body is beyond the slice, and whether stage 0 reports an error here
 ## that is not one of the type checker's own.
+## The parameter that names, by its index, the function an `E0335` is
+## about until its operation responsible is found (RULES.md, R90).
+pub const PASSED: str = "passed#"
+
 pub struct Finished:
     pub types: Types
     pub diags: list[Diagnostic]
@@ -166,6 +170,9 @@ pub struct Finished:
     ## Its asserts on `const` generic parameters, and its calls with
     ## constant type arguments, which decide them.
     pub asserts: list[Assert]
+    ## The first impure call of a function's body: the callee's name, and
+    ## its definition when it is a function (RULES.md, R90).
+    pub impure: (String, DefId?)?
     pub const_calls: list[ConstCall]
 
 ## An unsafe operation of a body (22, "The unsafe operations"): a call of
@@ -420,6 +427,7 @@ impl Checker:
             typed=None,
             asserts=asserts,
             const_calls=calls,
+            impure=None,
         )
 
     ## The body as lowering reads it (stage 0's `Body` once `zonk.rs` has
@@ -1598,14 +1606,17 @@ impl Checker:
                 )
             # `expect` is `assert`'s non-fatal form (17): a test records
             # its failure and goes on (RULES.md, R38).
-            case StmtKind.Expect(cond):
+            case StmtKind.Expect(cond, message):
                 let c = self.check_condition_expr(cx, cond)
+                var m: TExprId? = None
+                if let Some(msg) = message:
+                    m = Some(self.assert_message(cx, msg))
                 let text = self.source_text(cx, cx.ast.expr(cond).range)
                 let replay = self.only_reads(cx, c, False)
                 out.push(
                     TStmt.Assert(
                         cond=c,
-                        message=None,
+                        message=m,
                         text=text,
                         span=span,
                         replay=replay,

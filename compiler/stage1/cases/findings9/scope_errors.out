@@ -1,0 +1,3 @@
+Ok(24)
+Err(Down)
+Err(Bad(text="x"))

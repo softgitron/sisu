@@ -652,8 +652,15 @@ impl FnLower:
         # A condition that only reads shows every part's value when it fails
         # (17, "Assertions").
         if replay and self.can_show_parts(cx, cond):
-            self.assert_showing_parts(cx, cond, message, span, goes_on)
+            self.assert_showing_parts(cx, cond, message, span, goes_on, False)
             return
+        # One that calls a function as an argument of its call evaluates
+        # those arguments once, and shows them and the parts that only read
+        # (RULES.md, R82).
+        if not replay and self.evaluate_once(cx, cond):
+            if self.can_show_parts(cx, cond):
+                self.assert_showing_parts(cx, cond, message, span, goes_on, True)
+                return
         # `assert a == b` shows both sides when it fails.
         if let TExprKind.Compare(first, rest) = cx.body.exprs[cond.index].kind:
             if len(rest) == 1:

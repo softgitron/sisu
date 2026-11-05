@@ -7,7 +7,6 @@
 ##! prints it, so the conformance runner can check any implementation's
 ##! formatter.
 
-import stage1.fmt.prune
 from stage1.diag import Catalog, Msg
 from stage1.fmt.lines import Src, option_sugar, result_parts
 from stage1.parser import parse
@@ -28,11 +27,11 @@ pub pure def shape(text: str, catalog: Catalog) -> String?:
 pub pure def shape_of(tree: Tree) -> String:
     let text: str = tree.text
     let src = Src(tree=tree, text=text)
-    return shape_pruned(src, prune.unused(src))
+    let none: set[int] = set()
+    return shape_pruned(src, none)
 
 ## The shape of the tree `src` reads, the imports `pruned` names left out
-## (`prune.unused` of the tree, which the formatter has found already for
-## the tree it formats).
+## (none since the formatter keeps unused imports: RULES.md, R87).
 pub pure def shape_pruned(src: Src, pruned: set[int]) -> String:
     var out = String.new()
     var names = KindNames.new()
@@ -213,3 +212,11 @@ pure def is_import(k: SyntaxKind?) -> bool:
     return match k:
         case Some(ImportItem) | Some(FromImport): True
         case _: False
+
+test "a test's name that interpolates has no shape, as `fmt` refuses it"(sys: System):
+    let text = sys.fs.read_to_string(Path.new("../catalog/messages.catalog")) else:
+        panic("the tests read the catalog at ../catalog/messages.catalog")
+    let catalog = Catalog.parse(text)
+    assert shape("test \"n {{N}}\":\n    pass\n", catalog).is_none()
+    assert shape("test \"n {{len(xs)}}\":\n    pass\n", catalog).is_none()
+    assert shape("test \"n {{{{N}}}}\":\n    pass\n", catalog).is_some()

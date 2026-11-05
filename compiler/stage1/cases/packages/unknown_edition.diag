@@ -1,0 +1,1 @@
+sisu.toml:5:11-5:17 E1003 package.bad-value key="edition" expected="an edition this compiler knows, `\"2027\"`" found="`\"1999\"`"

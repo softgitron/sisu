@@ -625,6 +625,11 @@ label is in another file than the error among them (below).
 ```text
 sisu1 check [--format=ids] [--locked] [FEATURES] [PATH]  every diagnostic, as `sisu check` prints them
 sisu1 sir [--contracts=LEVEL] [--tests] [PATH]  the whole program's SIR, as `sisu sir` prints it
+sisu1 sir --repl SESSION INPUT --kept OUT [--load]
+                                              the SIR of a REPL session's program with one more
+                                              input, or that input's diagnostics (R79)
+sisu1 sir --worksheet FILE                    the SIR of a worksheet, each statement marked and
+                                              shown, or its diagnostics (R79)
 sisu1 build [--release] [--contracts=LEVEL] [--locked] [FEATURES] [PATH] [--output OUT]
                                               what `sisu build --native` makes, and where
 sisu1 run [FEATURES] [PATH] [-- ARGS...]      the program built into a temporary directory and run
@@ -2201,6 +2206,69 @@ to be recorded per module); a field's `ty` in a derive's template
 (`E0608`), which needs the derive's template to see the fields' types as
 a generic function's reflection does.
 
+### The ninth round: the REPL and worksheets, the stage 0 round's items, the open items
+
+This round took what the REPL and worksheets need of stage 1, the items
+the stage 0 round assigned to stage 1, the eighth round's open items and
+the manual's findings that were stage 1's. RULES.md has the rules (R79 to
+R94, decisions 580 to 595) and their decision texts:
+
+- **The REPL and worksheets** (R79): `sir --repl SESSION INPUT --kept OUT
+  [--load]` builds a session's program with one more input, as the
+  driver's `repl.rs` writes it (an expression alone shown through
+  `__repl_show`), and prints its SIR, writing the session with the input
+  kept to OUT, or the diagnostics of the phase that stopped it, those in
+  the input drawn in its text as `<input>`; `sir --worksheet FILE`
+  builds the worksheet with each statement marked by the line it ends on
+  in the file as written and its values shown, keeping `System.fake`. The
+  classes `repl` and `ws` of `check.sh` run them (`cases/repl/`), the
+  worksheets against `sisu ws` itself. Stage 1's version is 0.8.0: the
+  driver may rely on both.
+- **The stage 0 round's items**: a sized integer shifted by an amount of
+  any integer type keeps its type (R80), which reverses the sixth round's
+  widening of `u32 << int`, so that std can write `rotate_left` and the
+  other bit methods; `expect cond, "message"` (R81); an assertion whose
+  call takes a call shows its values, evaluated once (R82); the
+  `@refines` test at the attribute (R83); a typed hole reached at compile
+  time left to run time, which blocks what reaches it (R84); `E1022`
+  followed by `D0006` or `D0132` (R85); an `edition` the compiler knows
+  (R86); `sisu fmt` keeps an unused import, which `sisu lint` reports as
+  `W0027` with the fix that removes it (R87: a formatter changes no
+  meaning, 10); `E0402` of tasks a loop spawns that change a captured
+  value and `E0428`'s note (R88); a `?` in a scope's body that a `T !`
+  function returns (R89).
+- **The eighth round's open items**: `E0335` names the operation
+  responsible (R90), `E0204` the `@cfg` that left an item out (R91), and
+  a derive's template sees a struct field's `ty` as written (R92).
+- **The manual's findings**: a function named `type` (R93).
+
+Decided against this round: removing unused imports in the formatter (09's
+table says it does; 10 makes the formatter change the layout only, and the
+lint's fix removes them where the writer asks); a warning of `check` for
+an unused import (every program that imports what it does not use yet
+would warn; `sisu lint` has it); giving a derive the resolved types of
+fields (a derive runs before the types are resolved, R92 reads them as
+written); `E0241`'s wording for a trait's constant ("its method `SIDES`"),
+whose message is the catalog's, which the Rust front end and the manual's
+transcripts share: the catalog's text is the owner's to change, `its
+`{method}` cannot be used through it` being the proposal.
+
+Open: `:why NAME` in the REPL (above, "What is next", 12); the bit
+methods themselves (`count_ones`, `leading_zeros`, `rotate_left`), std's,
+which the standard library writes once the Rust front end no longer
+checks it (the Rust front end refuses `u64 << int`); the rest of the
+manual's "Diagnostics without fixes" (`E0203`'s and `E0271`'s similar
+names, `E0310` of an `i16` and a `u32`, `E0812`'s copy, and the others the
+list names) and `E0005`'s invisible characters.
+
+The conformance suite's `testing/refines.test` is blessed again, with R83:
+its two failures stand at the `@refines` lines; and stage 1's
+`cases/testing/expect.sir-tests`, with R82. Two items of the manual round
+came late and are R94: `parse --shape` refuses what `fmt` refuses (a test's
+name that interpolates, `E0132`), for the driver to route `parse --shape`
+to stage 1, and the note of a template instance's diagnostic writes the
+type arguments as the source does (`User`, not `__T0`).
+
 ## Module layout
 
 | Module | Lines | What | Stage 0 original |
@@ -2244,12 +2312,13 @@ a generic function's reflection does.
 | `borrowck`, `borrowck.paths`, `.init`, `.elaborate`, `.loans`, `.consume`, `.purity`, `.shared`, `.names`, `.types`, `.bitset`, `.finding` | 6541 | the ownership checker: move paths, initialisation and moves, drop placement (the standard library's kept once per process), loans, must-consume, purity, the `Shared` escape analysis, places in source terms, and the findings as diagnostics | `sisu-borrowck` (but `explain.rs`) |
 | `borrowck.holes` | 360 | the closure of a typed hole, written into the checked SIR (R27) | stage 1's own (10, 17) |
 | `interp` | 2466 | compile-time evaluation: the `comptime` functions run on SIR and their values baked into it, or their failures, with the panics' messages | `sisu-interp/src/comptime.rs`, with what it needs of `exec.rs`, `place.rs`, `ops.rs`, `dispatch.rs`, `intrinsics.rs`, `sized.rs` and `format.rs` |
-| `fmt`, `fmt.doc`, `fmt.lines`, `fmt.prune`, `fmt.shape`, `fmt.space` | 2142 | the formatter: logical lines with the comments and blank lines between them, sorted and pruned imports, the printer of groups, the spaces between tokens, and the shape its self-check compares | `sisu-fmt` (`lib.rs`, `doc.rs`, `lines.rs`, `prune.rs`, `shape.rs`, `space.rs`, `tests.rs`) |
+| `fmt`, `fmt.doc`, `fmt.lines`, `fmt.prune`, `fmt.shape`, `fmt.space` | 2190 | the formatter: logical lines with the comments and blank lines between them, sorted imports (the unused ones `sisu lint` reports, R87), the printer of groups, the spaces between tokens, and the shape its self-check compares | `sisu-fmt` (`lib.rs`, `doc.rs`, `lines.rs`, `prune.rs`, `shape.rs`, `space.rs`, `tests.rs`) |
 | `format` | 57 | the formatter with the names it needs: which written types name error sets, in a file resolved alone | `sisu-driver/src/format.rs` |
 | `doc` | 1171 | `sisu doc`: a Markdown page per module of a program or of the standard library, from the modules' syntax, the resolved names and the inferred error sets, and its tests | `sisu-driver/src/doc.rs` |
 | `diff` | 278 | line diffs: the hunks `fmt --check` prints and the change `--locked` prints, from the longest common subsequence's table kept as rows of bits | `sisu-interp/src/diff.rs` |
 | `mutants` | 204 | a seeded generator and the mutations of stage 0's robustness test; the files laid out otherwise that the formatters are compared on | `sisu-driver/src/tests.rs` |
 | `main` | 3761 | the command line, and the driver: `check` in both forms, the SIR of a whole program (with its tests, `--tests`), `build --native` through stage 0's backend, `fmt`, `doc`, `audit --unsafe`, `lint` (R11), the packages' `unsafe` levels (R6), and the cache of the base beside the native executable | `sisu-driver/src/cli.rs`, `tokens`, `parse`, `check`, `sir`, `build`, `fmt` and `doc` |
+| `session` | 188 | the programs of `sisu repl` and `sisu ws` (R79): an input wrapped to be shown, a loaded file's preamble, a worksheet's markers | `sisu-driver/src/repl.rs`'s `Entry`, `split_preamble` and `evaluate_sheet` |
 | `naming` | 107 | the case each kind of name is written in, and a name written so (R12) | stage 1's own (02) |
 | `audit` | 420 | `audit --unsafe` (R7): the unsafe code of a program by package and module, with the modules' hashes | stage 1's own (22) |
 | `stage1/std/mem`, `ffi`, `rt` | 1023 | `std.mem`, `std.ffi` and `std.rt` (R4, R8), the standard library's modules only stage 1 reads, and the runtime's first slice in Sisu (R9) | stage 1's own (22) |
@@ -3028,22 +3097,28 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     one argument, `sum(x for x in xs)`, which 02's parentheses rule out;
     a trait's constant through a type parameter as a constant argument
     (R50 decides against it); the loop directives (R53, 19's N-22).
-11. **The manual's findings left** (after R54 to R78), of the front end:
+11. **The manual's findings left** (after R54 to R93), of the front end:
     lowering a variadic parameter and star unpacking (R64 refuses them
     with `E0900`, the first waiting for the owner, since 02 and 14
     disagree), explicit discriminants (R78 refuses them with `E0900`
-    until the layouts of `@repr` enums are lowered); and of "Diagnostics
-    without fixes" `E0335` naming the operation and `E0204` naming the
-    feature, and a field's `ty` in a derive's template (above, "The
-    eighth round", open). The eighth round took a test's name (R73), a
-    function named like its module and a parameter that hides a module
-    (R74), a dev-dependency imported by the package's code (R75), `else
-    as e`, `d.get(k, default)`, a positional-only parameter passed by
-    name, `JsonError` alone and `E0981`'s name (R76), an error in a
-    template's instance or in unrolled code, `reflect.construct` of a
-    plain parameter, a derive's hole, a template's interpolated literal,
-    `it` in a list, `result` in `ensures`, `sorted`'s note and `E0405`'s
-    note (R77), a literal beside a `BigInt` or a `Decimal` (R78).
-    Decided against: a `u32` shifted by an `int` keeps D-016's widening
-    (above, "The sixth round"); `it` outside a call's argument, the `own
-    self` method and `zip`'s temporaries (above, "The eighth round").
+    until the layouts of `@repr` enums are lowered); a variant's fields'
+    `ty` in a derive and the kinds of the program's own types there (R92
+    gives a struct's fields the prelude's kinds); and the rest of
+    "Diagnostics without fixes" and "Types and traits" that the ninth
+    round left (below). The ninth round took the REPL's and the
+    worksheets' programs (R79), a sized integer shifted by an `int`
+    (R80), `expect`'s message (R81), an assertion's call in a call
+    (R82), the `@refines` test's place (R83), a hole reached at compile
+    time (R84), `E1022`'s line (R85), the manifest's `edition` (R86),
+    the formatter's unused imports (R87), `E0402` and `E0428` of tasks
+    (R88), a `?` in a scope's body of a `T !` function (R89), `E0335`'s
+    operation (R90), `E0204`'s `@cfg` (R91), a field's `ty` in a derive
+    (R92) and a function named `type` (R93). Decided against: `it`
+    outside a call's argument, the `own self` method and `zip`'s
+    temporaries (above, "The eighth round").
+12. **The driver's `sisu repl` and `sisu ws` on stage 1** (R79), which is
+    stage 0's: the driver may route them to `sir --repl` and `sir
+    --worksheet` now; `:why NAME`'s reading of the kept inputs is still
+    the driver's own, from a parse of each input (`sisu1 parse --tree`
+    gives it), and the language server's inline values of a worksheet
+    (`evaluate_sheet`) can take the same SIR.

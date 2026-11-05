@@ -43,10 +43,10 @@
 ##! - A run of `import` and `from ... import` lines, with no comment or
 ##!   blank line between them, is sorted: `import`s first, each kind by
 ##!   module path; the names a `from` imports are sorted too. An unused
-##!   import is removed (`prune` says which are).
+##!   import stays (RULES.md, R87): `format_pruned` leaves out only what its
+##!   caller says.
 
 import stage1.fmt.doc
-import stage1.fmt.prune
 import stage1.fmt.space
 from stage1.fmt import INDENT, WIDTH
 from stage1.fmt.doc import Doc, Docs
@@ -994,10 +994,12 @@ pure def sort_imports(mut lines: list[Line]):
 pub pure def format_tree(tree: Tree, error_sets: set[String]) -> String:
     let text: str = tree.text
     let src = Src(tree=tree, text=text)
-    return format_pruned(src, error_sets, prune.unused(src))
+    let none: set[int] = set()
+    return format_pruned(src, error_sets, none)
 
 ## The formatted text of the parsed file `src` reads, without the imports
-## `pruned` names (`prune.unused` of the tree).
+## `pruned` names (none since the formatter keeps unused imports: RULES.md,
+## R87).
 pub pure def format_pruned(src: Src, error_sets: set[String], pruned: set[int]) -> String:
     var w = Walker(
         src=Src(tree=src.tree, text=src.text),

@@ -1,0 +1,2 @@
+src/main.sisu:3:23-3:28 E0204 resolve.not-in-module module="app.tools" name="quick"
+src/main.sisu:6:13-6:18 E0200 resolve.undefined-name name="quick"

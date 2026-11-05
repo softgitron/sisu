@@ -4,7 +4,6 @@ entry main
 test "every expectation that fails is reported" test#0
 
 intrinsic assert.fail_compare pure
-intrinsic expect.fail pure
 intrinsic expect.fail_compare pure
 intrinsic expect.fail_parts pure
 intrinsic fmt.debug pure
@@ -42,13 +41,19 @@ fn test#0(0) test source 0 @12:6-12:48 {
     let _9: (int, String)
     let _10: list[(int, String)]
     let _11: ()
-    let _12: bool
+    let _12: int
     let _13: int
-    let _14: int
-    let _15: ()
-    let _16: int
-    let _17: bool
-    let _18: Never
+    let _14: bool
+    let _15: int
+    let _16: String
+    let _17: ref mut String
+    let _18: int
+    let _19: (int, String)
+    let _20: list[(int, String)]
+    let _21: ()
+    let _22: int
+    let _23: bool
+    let _24: Never
   bb0:
     _1 = call fn double(const 2) @13:16-13:25
     _2 = call fn double(const 2) @14:12-14:21
@@ -61,10 +66,11 @@ fn test#0(0) test source 0 @12:6-12:48 {
     _4 = call intrinsic expect.fail_compare(const "double(2) == 5", const "", copy _2, const 5) @14:5-14:26
     goto bb1
   bb3:
-    _14 = call fn double(const 3) @16:17-16:26
-    _13 = add copy _14, const 1 @16:17-16:30
-    _12 = call fn even(copy _13) @16:12-16:31
-    switch copy _12 [0: bb9, else: bb8] @16:5-16:31
+    _13 = call fn double(const 3) @16:17-16:26
+    _12 = add copy _13, const 1 @16:17-16:30
+    _15 = copy _12 @16:17-16:30
+    _14 = call fn even(copy _15) @16:12-16:31
+    switch copy _14 [0: bb9, else: bb8] @16:5-16:31
   bb4:
     _6 = call intrinsic fmt.new() @15:12-15:16
     _7 = ref mut _6 @15:12-15:16
@@ -81,17 +87,28 @@ fn test#0(0) test source 0 @12:6-12:48 {
     dead _6 @15:20-15:20
     goto bb3
   bb8:
-    _16 = call fn double(const 1) @17:12-17:21
-    _17 = eq copy _16, const 2 @17:5-17:26
-    switch copy _17 [0: bb11, else: bb10] @17:5-17:26
+    _22 = call fn double(const 1) @17:12-17:21
+    _23 = eq copy _22, const 2 @17:5-17:26
+    switch copy _23 [0: bb13, else: bb12] @17:5-17:26
   bb9:
-    _15 = call intrinsic expect.fail(const "even(double(3) + 1)", const "") @16:5-16:31
+    _16 = call intrinsic fmt.new() @16:17-16:30
+    _17 = ref mut _16 @16:17-16:30
+    _18 = copy _12 @16:17-16:30
+    _8 = call intrinsic fmt.debug(copy _17, copy _18, const "") @16:17-16:30
+    goto bb10
+  bb10 (unwind bb6):
+    _19 = tuple(const 15, move _16) @16:5-16:31
+    _20 = list(move _19) @16:5-16:31
+    _21 = call intrinsic expect.fail_parts(const "even(double(3) + 1)", const "", move _20) @16:5-16:31
+    goto bb11
+  bb11:
+    dead _16 @16:31-16:31
     goto bb8
-  bb10:
+  bb12:
     _0 = const ()
     return
-  bb11:
-    _18 = call intrinsic assert.fail_compare(const "double(1) == 2", const "", copy _16, const 2) @17:5-17:26
+  bb13:
+    _24 = call intrinsic assert.fail_compare(const "double(1) == 2", const "", copy _22, const 2) @17:5-17:26
     unreachable @17:5-17:26
 }
 
