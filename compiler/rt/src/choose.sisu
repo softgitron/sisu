@@ -131,7 +131,12 @@ pub(package) def pct_pick(state: ptr mut int, prios: ptr mut u8, ready: ptr mut 
 ## - `queue`: `prefix` holds a live queue of one word a record and `trail`
 ##   one of three
 pub(package) def choose(
-    state: ptr mut int, prefix: ptr mut u8, trail: ptr mut u8, searching: bool, options: int, at_yield: bool
+    state: ptr mut int,
+    prefix: ptr mut u8,
+    trail: ptr mut u8,
+    searching: bool,
+    options: int,
+    at_yield: bool,
 ) -> int:
     if options <= 1:
         return 0

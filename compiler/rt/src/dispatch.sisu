@@ -776,8 +776,8 @@ def iter_call(c: Call, id: int) -> int:
             st = iter.next(ts, first, room, c.mode)
             if st != OK:
                 break
-            # safety: valid, aligned: the room holds an option's tag and a
-            #   `bool`'s word.
+            # safety: in_bounds, valid, aligned: the room holds an option's
+            #   tag and a `bool`'s word.
             let (tag, b) = unsafe (room.cast[int]().read(), room.cast[int]().offset(1).read())
             if tag != 0:
                 c.set_bool(not want)
