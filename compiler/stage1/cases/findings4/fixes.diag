@@ -23,5 +23,5 @@
 44:17-44:25 E0338 type.move-out-of-borrow what="queue[0]"
   fix type.add-copy 44:25-44:25 ".copy()"
   fix type.take-out 44:17-44:25 "queue.remove(0)"
-46:5-46:12 E0341 type.not-mutable what="c.cents"
+46:5-46:12 E0343 type.shared-not-mutable what="c.cents"
 48:13-48:28 E0423 type.own-closure-capture name="names" ty="list[str]"
