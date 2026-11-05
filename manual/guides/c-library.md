@@ -218,5 +218,6 @@ makes the function the global symbol `NAME` of C's own convention,
 whether or not the program calls it, so a C caller declares `int32_t
 sauna_heat(int32_t minutes);` and calls it; E0991 refuses a type C has
 no layout for, a `@repr(c)` struct goes by a pointer to it (by value it
-is D0103), and a panic that leaves the function ends the program with
+is D0103, and so it is by a pointer natively when a field is narrower
+than a word, an `i32` or a `u8`), and a panic that leaves the function ends the program with
 status 134 ([R14](../reference/attributes.md#exported-functions)).

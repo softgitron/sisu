@@ -2,4 +2,4 @@ $ sisu run cstring.sisu
 6
 6
 $ sisu run --native cstring.sisu
-the native backend does not compile `mem.slice.as_ptr` of a `u8`, which raw memory holds otherwise than a value of it yet (in `ffi.CString.as_ptr`); `sisu run` without `--native` runs the program
+error[D0103]: the native backend does not compile `mem.slice.as_ptr` of a `u8`, which raw memory holds otherwise than a value of it yet (in `ffi.CString.as_ptr`); `sisu run` without `--native` runs the program

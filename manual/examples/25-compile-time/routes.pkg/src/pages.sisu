@@ -1,0 +1,15 @@
+# The module `sauna_site.pages`: each page a function, with a `@route`.
+
+## The front page.
+@route("/")
+pub def front() -> String:
+    return "Welcome to the lakeside sauna".to_string()
+
+## When the sauna is warm.
+@route("/hours")
+pub def hours() -> String:
+    return "Warm from six until ten".to_string()
+
+## A helper that no route serves.
+pub def footer() -> String:
+    return "Kiitos, thank you".to_string()

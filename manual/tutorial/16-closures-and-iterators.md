@@ -545,8 +545,8 @@ Ok([24, 14])
 `try_map` stops a pipeline at its first error the way the loop does
 ([05](../../proposal/05-errors.md#propagation)): it gives `Ok` of a
 list of the closure's values, or the first `Err` the closure returns,
-after which no item is taken. `try_collect` does the same for a list of
-results that is already made:
+after which no item is taken. `try_collect` after a `map` does the same
+for a closure that only returns results, with no `?` of its own:
 
 <!-- file: examples/16-closures-and-iterators/try_map.sisu -->
 ```sisu
@@ -563,8 +563,8 @@ def main():
     let lines = ["12", " 7", "x"]
     print(lines.iter().try_map(line -> Ok(number(line)? * 2)))
     print(lines[:2].iter().try_map(line -> Ok(number(line)? * 2)))
-    let results = lines.iter().map(line -> number(line)).collect()
-    print(results.try_collect())
+    print(lines.iter().map(line -> number(line)).try_collect())
+    print(lines[:2].iter().map(line -> number(line)).try_collect())
 ```
 
 <!-- output: examples/16-closures-and-iterators/try_map.out -->
@@ -572,11 +572,13 @@ def main():
 Err(NotANumber(text="x"))
 Ok([24, 14])
 Err(NotANumber(text="x"))
+Ok([12, 7])
 ```
 
-`try_collect` is a method of a list of results, not of an iterator yet,
-so a pipeline collects first, `.map(f).collect().try_collect()`; written
-straight after `map`, it is E0304.
+`try_collect` follows a `map` directly, and it is a method of a list
+of results too. After another adapter, a `filter` or a `take`, it is
+not there yet (E0304), so such a pipeline collects first,
+`.filter(f).collect().try_collect()`, or ends with `try_map`.
 
 ## Exercise 16.1: predict the pipelines
 

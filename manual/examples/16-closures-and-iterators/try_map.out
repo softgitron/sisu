@@ -1,3 +1,4 @@
 Err(NotANumber(text="x"))
 Ok([24, 14])
 Err(NotANumber(text="x"))
+Ok([12, 7])

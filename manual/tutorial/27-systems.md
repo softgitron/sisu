@@ -527,8 +527,11 @@ a `strlen` of text without its NUL stops the program.
   pointer or a `@repr(c)` type (E0991, `unsafe.export-not-c`). C calls
   it with its own convention, `int32_t sauna_heat(int32_t minutes)`
   for a function of an `i32`, and passes a `@repr(c)` struct by a
-  pointer to it. A panic cannot unwind into C, so one that leaves the
-  function prints its report and ends the program with status 134, as
+  pointer to it, which a native build compiles when the struct's
+  fields are words, `int`, `f64` or raw pointers, and refuses with
+  D0103 (`native.unsupported`) for a narrower field until the layouts
+  are chosen for each type. A panic cannot unwind into C, so one that
+  leaves the function prints its report and ends the program with status 134, as
   [R14](../reference/attributes.md#exported-functions) shows.
 - Importing a C header, `import c "zlib.h"`, which would write the
   `extern` block from the header, is designed in
@@ -630,13 +633,13 @@ $ sisu run cstring.sisu
 6
 6
 $ sisu run --native cstring.sisu
-the native backend does not compile `mem.slice.as_ptr` of a `u8`, which raw memory holds otherwise than a value of it yet (in `ffi.CString.as_ptr`); `sisu run` without `--native` runs the program
+error[D0103]: the native backend does not compile `mem.slice.as_ptr` of a `u8`, which raw memory holds otherwise than a value of it yet (in `ffi.CString.as_ptr`); `sisu run` without `--native` runs the program
 ```
 
 `löyly`, the steam of a sauna, is five letters and six bytes, since
 `ö` takes two. The native backend does not compile `as_ptr` of a
-`CString` yet (D0103), so such a program runs in the interpreter
-only.
+`CString` yet (D0103), since its bytes are narrower than a word, so
+such a program runs in the interpreter only.
 
 **Try it.** Give `is_set` a first parameter `env: Env`.
 

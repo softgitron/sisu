@@ -1,4 +1,4 @@
 $ sisu run export_struct.sisu
 800
 $ sisu build --native export_struct.sisu
-the native backend does not compile a parameter of the exported function `sauna_load`, a `ref Reading` yet (in ``); `sisu run` without `--native` runs the program
+error[D0103]: the native backend does not compile a `Reading` by value (a parameter of the exported function `sauna_load`) yet (in `load`); `sisu run` without `--native` runs the program

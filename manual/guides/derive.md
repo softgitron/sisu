@@ -101,6 +101,9 @@ type. Only such checks may come before the `return impl`; anything else
 there, a `let` among them, is E0607 (`comptime.derive-template`), whose
 note says what may come first, so a value the methods need is computed
 inside them ([R12](../reference/compile-time.md#the-derive-protocol)).
+E0607 is reported once, at the template: the types that derive the
+trait and the code that calls what it would write get no error of
+their own, so fix the template first.
 Asked for an enum, the derive of step 1 says:
 
 <!-- output: examples/guide-derive/enum.console -->

@@ -313,7 +313,9 @@ function ends the program with status 134, since C cannot unwind
 ([R14](attributes.md#exported-functions)).
 
 **Stage 0 differs.** A `@repr(c)` struct passed by value is D0103 in a
-native build ([R17](diagnostics.md#d0103)).
+native build ([R17](diagnostics.md#d0103)), and so is one by a pointer
+when a field is narrower than a word, an `i32` or a `u8`; a struct of
+`int`, `f64` and raw pointers goes by a pointer.
 
 **Status.** Decided (D-039, Q-31), with the difference noted.
 

@@ -232,12 +232,21 @@ def main():
 Booking @table ["bookings"] @index [hour] [unique=True]
 ```
 
-**Stage 0 differs.** `reflect.attributes_of` takes a struct, an enum or
-an error set, and gives an empty list for a type of the standard
-library. The attributes of a function, a field, a method or a variant
-reach no compile-time code, and no query lists the functions of a
-package, so the framework of 08 that collects its routed functions at
-compile time cannot be written yet.
+A function's attributes are data too: `reflect.functions_of(m)` lists
+the functions of a module `m` that the code imports, and
+`reflect.attributes_of(f)` of each gives its attributes in the same
+form, so a framework collects its routed functions into a table at
+compile time, as 08 has it do. [Chapter
+25](../tutorial/25-compile-time.md#attributes-are-data) builds such a
+table of routes, and [R12](compile-time.md#reflection) lists what a
+function's descriptor holds.
+
+**Stage 0 differs.** `reflect.attributes_of` takes a struct, an enum,
+an error set or a function that `reflect.functions_of` gives, and gives
+an empty list for a type of the standard library. The attributes of a
+field, a method or a variant reach no compile-time code. An argument is
+its text as written, quotes included, not a value, so a route is
+compared with `"\"/hours\""`.
 
 **Status.** In stage 0 (D-046, D-018), with the differences noted.
 
@@ -254,7 +263,7 @@ compile time cannot be written yet.
 | `@refines(REFERENCE)` | a function | tests it against a reference ([Refinement tests](#refinement-tests)) | in stage 0; leaning |
 | `@fixture(scope="...")` | a function | makes a value for the tests that name it ([Fixtures](#fixtures)) | designed |
 | `@repr(c)`, `@repr(u8)` | a struct, an enum | fixes the layout ([The layout of a type](#the-layout-of-a-type)) | partly in stage 0 |
-| `@export("NAME")` | a function | makes it callable from C ([Exported functions](#exported-functions)) | in stage 0, natively, but for a struct by value |
+| `@export("NAME")` | a function | makes it callable from C ([Exported functions](#exported-functions)) | in stage 0, natively, but for a struct by value and one of narrow fields by a pointer |
 | `@blocking` | a function of an `extern` block | says that a call may block ([Foreign functions that block](#foreign-functions-that-block)) | designed; checked in stage 0 |
 | `@no_alloc`, `@no_block`, `@stack(max=N)` | a function | limit what it may do ([Resource limits](#resource-limits)) | leaning; accepted with W0030 and not checked in stage 0 |
 | `@float(fast)` | a function | allows fast floating point inside it ([Fast floating point](#fast-floating-point)) | in stage 0, as a permission it does not use |
@@ -376,7 +385,8 @@ that does not, `Pair[Plain]`, goes to the argument, `Plain`.
 
 **Stage 0 differs.** `@derive(Into, From)`, which
 [03](../../proposal/03-types-and-generics.md#type-aliases-and-newtypes)
-gives newtypes, are E0243.
+gives newtypes, are E0243, since what they write is the owner's
+question Q-80.
 
 **Status.** In stage 0 (D-018), except `Into` and `From`.
 
@@ -860,10 +870,44 @@ The interpreter calls no foreign function but the six it emulates
 ([R3](declarations.md#foreign-functions)), so this program runs
 natively only.
 
+A struct of words, whose fields are `int`, `f64`, raw pointers and
+structs of them, goes by a pointer natively too: `ptr.of(ref reading)`
+is the address of the place that holds it, laid out as C lays it out,
+so a program hands its own export the `ptr[Reading]` that C passes:
+
+<!-- file: examples/reference-attributes/export_pointer.sisu -->
+```sisu
+# An exported function takes a `@repr(c)` struct by a pointer to it.
+from std.mem import ptr
+
+@repr(c)
+struct Reading:
+    celsius: int
+    minutes: int
+    humidity: f64
+
+@export("sauna_load")
+def load(reading: ptr[Reading]) -> int:
+    # safety: valid, aligned: `reading` points to a live `Reading` that
+    #   nothing changes while the reference lives.
+    let r = unsafe reading.as_ref()
+    return r.celsius * r.minutes
+
+def main():
+    let reading = Reading(celsius=80, minutes=10, humidity=0.2)
+    print(load(ptr.of(ref reading)))
+```
+
+<!-- output: examples/reference-attributes/export_pointer.console -->
+```console
+$ sisu run --native export_pointer.sisu
+800
+```
+
 **Stage 0 differs.** A `@repr(c)` struct passed by value has no C
 classification yet, so the native build refuses it with D0103
-(`native.unsupported`, [R17](diagnostics.md#d0103)), whose text calls
-the parameter a `ref` and leaves the function's name empty; the
+(`native.unsupported`, [R17](diagnostics.md#d0103)), which names the
+struct by value as the program wrote it and the function it is in; the
 interpreter runs the program:
 
 <!-- file: examples/reference-attributes/export_struct.files/export_struct.sisu -->
@@ -887,10 +931,15 @@ def main():
 $ sisu run export_struct.sisu
 800
 $ sisu build --native export_struct.sisu
-the native backend does not compile a parameter of the exported function `sauna_load`, a `ref Reading` yet (in ``); `sisu run` without `--native` runs the program
+error[D0103]: the native backend does not compile a `Reading` by value (a parameter of the exported function `sauna_load`) yet (in `load`); `sisu run` without `--native` runs the program
 ```
 
-Pass a `ptr[Reading]` instead.
+Pass a `ptr[Reading]` instead. A struct with a field narrower than a
+word, as this `Reading`'s `i32`s are, is D0103 by a pointer too
+(`ptr.of`, `ptr.of_mut` and `as_ref` of it), since the native backend
+keeps each field of a place in a word of its own where C packs it at
+its width; it waits for layouts chosen for each type (D-086). Make its
+fields words, or run it in the interpreter.
 
 **Status.** In stage 0 ([12](../../proposal/12-interop-and-targets.md),
 [22](../../proposal/22-unsafe.md); D-080), with the difference noted.

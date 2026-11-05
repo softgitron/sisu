@@ -1,0 +1,13 @@
+# The module `sauna.stove`, whose functions `main` lists.
+
+## The heat after `minutes` of firing, from `start`.
+@unit("celsius")
+pub def heat(start: int, minutes: int) -> int:
+    return start + minutes * 2
+
+## Whether the stove is ready for the first turn.
+pub def ready(celsius: int) -> bool:
+    return celsius >= 70
+
+def private_note() -> String:
+    return "seen from this module only".to_string()

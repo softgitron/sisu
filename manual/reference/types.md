@@ -1717,7 +1717,11 @@ error[D0006]: the program was not run: errors found (1)
 ```
 
 **Stage 0 differs.** `@derive(Into, From)`, which 03 gives newtypes for
-converting to and from the field, is not in stage 0 (E0243).
+converting to and from the field, is not in stage 0 (E0243): the
+prelude has no `From`, and what the two derives write waits for the
+owner's question Q-80. A newtype's constructor and its field convert
+both ways meanwhile, and `@delegate` forwards a trait to the field
+([R14](attributes.md#delegating-traits-to-a-field)).
 
 **Status.** In stage 0, except `@derive(Into, From)`.
 

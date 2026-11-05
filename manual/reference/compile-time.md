@@ -184,6 +184,7 @@ function asks about its type parameters ([Templates](#templates)).
 | `reflect.elem_of(T)` | the element type of a list or an optional value |
 | `reflect.methods_of(T)` | a trait's methods or a type's own, each with `name`, `index`, `receiver`, `params` (each with `name`, `index`, `mode` and `ty`), `ret` and `provided` |
 | `reflect.attributes_of(T)` | the attributes on the type's declaration, each with `name` and `args` ([R14](attributes.md#attributes-are-data)) |
+| `reflect.functions_of(m)` | the functions of a module `m` that the code imports, in the order declared ([A module's functions](#a-modules-functions)) |
 | `reflect.implements(T, "Trait")` | whether the type has an impl of the trait |
 | `reflect.default_of(f)` | the default of the field `f`, evaluated where it is written |
 | `reflect.construct(T, {NAME: VALUE, ...})` | the struct built from the fields given, each field without a default given, its invariant checked |
@@ -318,8 +319,30 @@ Heater: How a sauna is heated.
   Electric.phases: The number of phases it draws on.
 ```
 
-A builtin type, `bool` or `int`, is a type argument as a type of the
-program is:
+A type of the prelude, `int`, `f64`, `bool`, `char` or `str`, is a
+type compile time knows in any function, as a type of the program is:
+
+<!-- file: examples/reference-compile-time/builtin_types.sisu -->
+```sisu
+# Reflection on the prelude's types where no type parameter is in scope.
+def main():
+    print(comptime reflect.name_of(int))
+    print(comptime reflect.name_of(str))
+    print(comptime reflect.is_float(f64))
+    print(comptime reflect.is_int(char))
+    print(comptime len(reflect.fields_of(bool)))
+```
+
+<!-- output: examples/reference-compile-time/builtin_types.out -->
+```text
+int
+str
+True
+False
+0
+```
+
+It is a type argument too:
 
 <!-- file: examples/reference-compile-time/type_argument.sisu -->
 ```sisu
@@ -339,12 +362,117 @@ String
 bool
 ```
 
+A query takes a type, a type parameter or a type or trait in scope,
+and a module for `functions_of`. Given anything else, a run-time value
+or a name of nothing, it is E0609 at the function, whose reason says
+what the query takes, with a label at the argument:
+
+<!-- file: examples/reference-compile-time/not_a_type.sisu -->
+```sisu
+# A reflection query given a run-time value, where it takes a type.
+def main():
+    let degrees = 80
+    print(comptime reflect.name_of(degrees))
+```
+
+<!-- output: examples/reference-compile-time/not_a_type.console -->
+```console
+$ sisu run not_a_type.sisu
+error[E0609]: making `main` stopped at compile time: `reflect.name_of` takes a type (a type parameter, or a type or trait in scope), and compile time knows no type `degrees`
+  --> not_a_type.sisu:2:5
+  |
+2 | def main():
+  |     ^^^^
+  |
+4 |     print(comptime reflect.name_of(degrees))
+  |                                    ------- the template, where it stopped
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+`main` takes no type parameter, so "making `main`" and "the template"
+stand for the function itself. Give the query the type, `int` here,
+or a type parameter of a generic function that takes the value.
+
+### A module's functions
+
+`reflect.functions_of(m)` lists the functions of a module that the code
+imports by name, `from sauna import stove`: its `def`s, but not its
+`comptime def`s or generic functions, and of another module its public
+ones only. Each is a descriptor with `name`, `params` (each with
+`name`, `index`, `mode` and `ty`, as a method's) and `ret`, its result
+type, and `reflect.name_of(f)`, `reflect.doc_of(f)` (its `##` comment)
+and `reflect.attributes_of(f)` answer for it. In code that runs, the
+descriptor is the function itself: `f(...)` calls it, and a list of
+them is a table of function values, as the routes of [chapter
+25](../tutorial/25-compile-time.md#attributes-are-data) are. A type
+given to `functions_of`, or a type's query given a function, is E0609,
+and so is a module of the standard library.
+
+<!-- file: examples/reference-compile-time/functions.pkg/src/stove.sisu -->
+```sisu
+# The module `sauna.stove`, whose functions `main` lists.
+
+## The heat after `minutes` of firing, from `start`.
+@unit("celsius")
+pub def heat(start: int, minutes: int) -> int:
+    return start + minutes * 2
+
+## Whether the stove is ready for the first turn.
+pub def ready(celsius: int) -> bool:
+    return celsius >= 70
+
+def private_note() -> String:
+    return "seen from this module only".to_string()
+```
+
+<!-- file: examples/reference-compile-time/functions.pkg/src/main.sisu -->
+```sisu
+# `reflect.functions_of` lists a module's functions while compiling.
+from sauna import stove
+
+def main():
+    comptime for f in reflect.functions_of(stove):
+        var params = String.new("")
+        var comma = ""
+        comptime for p in f.params:
+            params = "{params}{comma}{p.name}: {reflect.name_of(p.ty)}"
+            comma = ", "
+        print("{f.name}({params}) -> {reflect.name_of(f.ret)}")
+        print("  {reflect.doc_of(f)}")
+        comptime for a in reflect.attributes_of(f):
+            print("  @{a.name}({a.args[0]})")
+    let warm = stove.heat(20, 30)
+    print("{warm} {stove.ready(warm)}")
+```
+
+<!-- output: examples/reference-compile-time/functions.console -->
+```console
+$ sisu run
+heat(start: int, minutes: int) -> int
+  The heat after `minutes` of firing, from `start`.
+  @unit("celsius")
+ready(celsius: int) -> bool
+  Whether the stove is ready for the first turn.
+80 True
+```
+
+A table built from the descriptors, `[(a.args[0], f) for f in
+reflect.functions_of(m) for a in reflect.attributes_of(f)]`, is
+unrolled into the list of pairs it holds, and is written without
+`comptime`: the evaluator keeps no function values, and `comptime
+[...]` around such a table stops the build with a line that has no
+code, ``beyond the slice: a failed `comptime` expression in a file of
+the standard library or one the compiler wrote``, and `sisu check` of
+it exits with 0.
+
 **Stage 0 differs.** Of the documentation of items, which
 [08](../../proposal/08-metaprogramming.md#reflection) lists among what
-reflection exposes, a type's own comment and its fields' have theirs,
-but a function's, a method's and a variant's own have no query, and
-the attributes of a function or a field none either
-([R14](attributes.md#attributes-are-data)). The front end written in
+reflection exposes, a type's, its fields', a variant's fields' and a
+function's have theirs, but a method's and a variant's own have no
+query, and the attributes of a field none
+([R14](attributes.md#attributes-are-data)); an attribute's argument is
+its text as written, not a value. The front end written in
 Rust has neither `doc` nor `reflect.doc_of`, so the standard library's
 doc examples, which `sisu test --std` runs on it, read neither.
 Reflection in a refinement's `where` clause or an `invariant` is E0900.
@@ -524,7 +652,9 @@ def main():
 ```
 
 A `let` before the `return impl` is E0607, whose note says what may
-stand there ([R17](diagnostics.md#e0607)):
+stand there ([R17](diagnostics.md#e0607)). It is the one error: the
+`@derive` of the trait and the use of `Booking.width()`, which the
+derive would have written, report nothing more:
 
 <!-- output: examples/reference-diagnostics/e0607_derive_template.console -->
 ```console

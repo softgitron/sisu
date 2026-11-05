@@ -690,7 +690,10 @@ several statements at once.
 The dict owns its keys, each a `String`, and `rooms.get(guest)` looks
 one up by the `str` it is given: a lookup only reads its key, so you
 write no `.to_string()`. The `str` is compared with the keys as it is,
-so the lookup makes no `String` either.
+so the lookup makes no `String` either, and a native build runs it in
+place, faster than a lookup that copies the key. The same holds for an
+index that is only read, such as `notes[guest].byte_len()` of a
+`dict[String, String]`.
 
 A block's drops and `defer`s run together, in the reverse of the order
 in which they appear in the code: a `defer` runs where a value declared

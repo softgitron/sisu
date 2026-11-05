@@ -535,8 +535,73 @@ SELECT name, hour FROM bookings
 `reflect.attributes_of(T)` gives each attribute on `T`'s declaration,
 with its `name` and `args`, the text of each argument. `select_all`
 reads the table's name from `@table`, or makes one from the type's
-name, and writes the query once, while compiling. A web framework can
-collect its routes the same way, from attributes on its handlers.
+name, and writes the query once, while compiling.
+
+A web framework collects its routes the same way, from the attributes
+on its handlers. `reflect.functions_of(pages)` is the list of the
+functions of the module `pages`, which the code imports, and each
+function has its attributes too. Here is a package of two modules, the
+pages and the server:
+
+<!-- file: examples/25-compile-time/routes.pkg/src/pages.sisu -->
+```sisu
+# The module `sauna_site.pages`: each page a function, with a `@route`.
+
+## The front page.
+@route("/")
+pub def front() -> String:
+    return "Welcome to the lakeside sauna".to_string()
+
+## When the sauna is warm.
+@route("/hours")
+pub def hours() -> String:
+    return "Warm from six until ten".to_string()
+
+## A helper that no route serves.
+pub def footer() -> String:
+    return "Kiitos, thank you".to_string()
+```
+
+<!-- file: examples/25-compile-time/routes.pkg/src/main.sisu -->
+```sisu
+# A table of routes, made from the attributes of a module's functions.
+from sauna_site import pages
+
+## The page at `path`, from the routes that `pages` declares.
+def serve(path: str) -> String:
+    let routes: list[(str, () -> String)] = [
+        (a.args[0], f)
+        for f in reflect.functions_of(pages)
+        for a in reflect.attributes_of(f)
+        if a.name == "route"
+    ]
+    for (route, page) in routes:
+        if route == "\"{path}\"":
+            return page()
+    return "no page at {path}"
+
+def main():
+    print(serve("/"))
+    print(serve("/hours"))
+    print(serve("/menu"))
+```
+
+<!-- output: examples/25-compile-time/routes.console -->
+```console
+$ sisu run
+Welcome to the lakeside sauna
+Warm from six until ten
+no page at /menu
+```
+
+- The comprehension in `serve` runs over compile-time lists, so the
+  compiler unrolls it into the list of pairs it makes: the text of each
+  `@route` and the function it stands on. `footer` has no `@route`, so
+  no pair holds it.
+- In code that runs, `f` is the function itself, so the table is a
+  list of function values, `() -> String`, and `page()` calls one.
+- An argument's text is as it was written, quotes and all, which is why
+  `serve` compares the route with `"\"{path}\""`.
 
 ## A file in the program
 
@@ -1213,7 +1278,9 @@ When every test passes, compare your answer with
   for each type it is called with (E0609 when one cannot be made).
 - A trait's `comptime def derive` returns `impl Trait for T:`, which
   `@derive(Trait)` writes for a type and the compiler checks.
-- Attributes are data that `reflect.attributes_of` reads; `embed`
+- Attributes are data that `reflect.attributes_of` reads, a type's
+  and a function's, and `reflect.functions_of` lists a module's
+  functions, so a table of routes is made while compiling; `embed`
   makes a file part of the program; `target`, `if comptime` and `@cfg`
   choose code for a target, for the tests or for a feature.
 

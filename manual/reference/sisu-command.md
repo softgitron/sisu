@@ -916,7 +916,10 @@ error[E0200]: cannot find `totl` in this scope
 **Stage 0 differs.** [10](../../proposal/10-tooling.md) sets a target
 of under 300 ms for `sisu check` after an edit of one function in a
 package of 100,000 lines. Stage 0 checks from nothing each time it is
-started; the language server, `--watch` and the REPL keep what they
+started, with stage 1 built in the release profile, every contract
+checked, as the front end of every command, which makes a `sisu check`
+of a two-line program about 12 % cheaper than the debug build did; the
+language server, `--watch` and the REPL keep what they
 checked, and recheck such an edit within the target.
 
 **Status.** In stage 0.
@@ -1356,7 +1359,7 @@ test "std.time/Timeline (doc example)" ... ok
 test "std.time/Instant (doc example)" ... ok
 test "std.time/Zone (doc example)" ... ok
 4 passed, 0 failed, 0 blocked
-188 not selected
+189 not selected
 ```
 
 The [package example](#what-a-command-works-on) shows the page of a

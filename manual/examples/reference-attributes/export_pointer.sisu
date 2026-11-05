@@ -1,0 +1,19 @@
+# An exported function takes a `@repr(c)` struct by a pointer to it.
+from std.mem import ptr
+
+@repr(c)
+struct Reading:
+    celsius: int
+    minutes: int
+    humidity: f64
+
+@export("sauna_load")
+def load(reading: ptr[Reading]) -> int:
+    # safety: valid, aligned: `reading` points to a live `Reading` that
+    #   nothing changes while the reference lives.
+    let r = unsafe reading.as_ref()
+    return r.celsius * r.minutes
+
+def main():
+    let reading = Reading(celsius=80, minutes=10, humidity=0.2)
+    print(load(ptr.of(ref reading)))

@@ -104,14 +104,15 @@ closure.
 
 An iterator's pipeline passes an error out with `try_map(f)`, `Ok` of
 the values of `f` in a list or the first `Err` that `f` returns, after
-which no item is taken, and a list of results with `try_collect()`, the
-values or the first error
+which no item is taken, and the results of a `map`, or a list of
+results, with `try_collect()`, the values or the first error
 ([chapter 16](../tutorial/16-closures-and-iterators.md#errors-inside-a-pipeline)).
 
 **Stage 0 differs.** [05](../../proposal/05-errors.md#propagation) has
-`try_collect` end a chain of adapters; in stage 0 it is a method of
-`list[Result[T, E]]`, so `xs.iter().map(f).try_collect()` is E0304 and
-is written `xs.iter().map(f).collect().try_collect()`.
+`try_collect` end a chain of adapters; in stage 0 it is a method of a
+`map`'s iterator and of `list[Result[T, E]]`, so after another adapter,
+`xs.iter().map(f).filter(g).try_collect()`, it is E0304 and is written
+`xs.iter().map(f).filter(g).collect().try_collect()`.
 
 **Status.** In stage 0 (D-042), with the differences noted.
 

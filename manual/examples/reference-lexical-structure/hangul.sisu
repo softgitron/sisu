@@ -1,0 +1,4 @@
+# One name, spelt with the jamo ᄀ ᅡ ᆨ, then with the syllable 각.
+def main():
+    let 각 = "a corner of the sauna"
+    print(각)

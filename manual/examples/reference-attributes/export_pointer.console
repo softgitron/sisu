@@ -1,0 +1,2 @@
+$ sisu run --native export_pointer.sisu
+800

@@ -256,10 +256,14 @@ as `xs[1:^1]` does.
   implements the prelude's `Lookup[K]` for it: a `str` looks up a
   `String` key, with no `.to_string()`, and `get`, `remove` and the
   index of a `dict[String, V]` and `contains` and `remove` of a
-  `set[String]` make no `String` of it. The panic of an index by a
-  `str` that is missing stands at the index (`ages[name]`), where that
-  of an index by a string literal, which the type checker makes a
-  `String`, stands at its statement.
+  `set[String]` make no `String` of it, nor does an index that is only
+  read through a reference, a method's receiver (`rooms[room].byte_len()`)
+  or a `str` view of the value; an index changed through it
+  (`counts[name].n += 1`) makes one. Natively these lookups run in
+  place, faster than a lookup that makes a `String` for each key. The
+  panic of an index by a `str` that is missing stands at the index
+  (`ages[name]`), where that of an index by a string literal, which the
+  type checker makes a `String`, stands at its statement.
 - A constant negative index, Python's `xs[-1]`, does not compile
   (E0344, with the fix `^1`), since it would mean the other end in
   Python; a negative index computed while the program runs panics

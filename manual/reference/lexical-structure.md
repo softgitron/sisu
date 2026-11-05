@@ -104,6 +104,23 @@ def main():
 kahvila
 ```
 
+Korean is composed by Unicode's rule for Hangul: a leading consonant,
+a vowel and a trailing consonant written as three jamo name the same
+binding as the one syllable they make:
+
+<!-- file: examples/reference-lexical-structure/hangul.sisu -->
+```sisu
+# One name, spelt with the jamo ᄀ ᅡ ᆨ, then with the syllable 각.
+def main():
+    let 각 = "a corner of the sauna"
+    print(각)
+```
+
+<!-- output: examples/reference-lexical-structure/hangul.out -->
+```text
+a corner of the sauna
+```
+
 Two lints, on by default, catch a name that is not what it looks like.
 W0031 (`resolve.mixed-script`) warns of a declared name whose letters
 come from more than one script, Latin and Cyrillic, say; digits, `_`
@@ -205,8 +222,7 @@ a letter's script comes from its character name, an approximation of
 Unicode's script property, and the confusable letters are a subset of
 Unicode's list (those whose compatibility form is one ASCII letter or
 digit, and the common Cyrillic, Greek and Latin look-alikes), so some
-look-alikes go unreported. A Hangul syllable written as its parts is
-not composed. A keyword as a binding's name gets E0105, whose
+look-alikes go unreported. A keyword as a binding's name gets E0105, whose
 note `parse.keyword-name` says that the word is a keyword, and each use
 of it E0103, where E0124 reports the declaration alone.
 

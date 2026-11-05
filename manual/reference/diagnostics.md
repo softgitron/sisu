@@ -2820,7 +2820,8 @@ declares one.
 
 `@derive` takes `Copy` and the traits that declare a `comptime def
 derive`; the message lists them. `Display` has none, since only you know
-how your type should read.
+how your type should read. A trait whose derive [E0607](#e0607) refuses
+declares one, so its `@derive`s are not this error.
 
 <!-- file: examples/reference-diagnostics/e0243_not_derivable.sisu -->
 ```sisu
@@ -5513,7 +5514,8 @@ Shown in [chapter 7](../tutorial/07-structs-and-enums.md).
 `Type.name(...)` calls an associated function: a function of the type's
 body, or of an impl of it, without `self`. A name that the type has
 neither as an associated function nor as a constant is this error
-([R3](declarations.md)).
+([R3](declarations.md)), except one that a derive refused by
+[E0607](#e0607) would have written, which that error stands for.
 
 <!-- file: examples/reference-diagnostics/e0351_unknown_associated.sisu -->
 ```sisu
@@ -7864,11 +7866,14 @@ body is the `return impl` after checks of the type, if any: `comptime
 assert`, `comptime panic`, and `comptime if` whose branches hold only
 checks. Any other statement there is the error, and when the body has a
 `return impl`, the note `comptime.derive-checks` says what may come
-before it ([R12](compile-time.md#the-derive-protocol)):
+before it ([R12](compile-time.md#the-derive-protocol)). It is the one
+error of the mistake: a `@derive` of the trait is not [E0243](#e0243),
+and a use of what the derive would have written, `Booking.width()`
+here, is not [E0351](#e0351) or [E0304](#e0304):
 
 <!-- file: examples/reference-diagnostics/e0607_derive_template.sisu -->
 ```sisu
-# A derive that computes a value before its `return impl`.
+# A derive that computes a value before its `return impl`, and its use.
 trait Columns:
     ## The number of the type's fields.
     def width() -> int
@@ -7878,6 +7883,14 @@ trait Columns:
         return impl Columns for T:
             def width() -> int:
                 return count
+
+@derive(Columns)
+struct Booking:
+    name: String
+    hour: int
+
+def main():
+    print(Booking.width())
 ```
 
 <!-- output: examples/reference-diagnostics/e0607_derive_template.console -->
@@ -8033,6 +8046,11 @@ at the call that needed it, with a label where the template stopped.
 When it stopped at a plain `for` over a list that only compile time
 has, such as `reflect.fields_of(T)`, the fix writes `comptime` before
 the `for`, which unrolls it ([chapter 25](../tutorial/25-compile-time.md)).
+A reflection query given what compile time knows no type by, a
+run-time value or a name of nothing, is this error too, at the function
+that holds it, with a reason that says what the query takes and a label
+at its argument ([R12](compile-time.md#reflection)); a type of the
+prelude, `int` or `str`, is a type it takes.
 
 <!-- file: examples/reference-diagnostics/e0609_instance_failed.sisu -->
 ```sisu
@@ -12019,15 +12037,20 @@ Example: [R16](sisu-command.md#sisu-new).
 (in `{function}`); `sisu run` without `--native` runs the program.
 
 The program is valid, and the interpreter runs it, but the native
-backend has no lowering yet for a part of it, which the message names:
-a `@repr(c)` struct passed by value to an exported function, a raw
-pointer to a struct, or the pointer of a `CString`, `as_ptr`, which
-the interpreter gives. The message is printed without the `error[D0103]`
-heading of other diagnostics, and for an exported function's parameter
-it calls the parameter a `ref` and leaves the function's name empty.
+backend has no lowering yet for a part of it, which the message names,
+with the function it is in: a `@repr(c)` struct passed by value to an
+exported function, "a `Reading` by value (a parameter of the exported
+function `sauna_load`)", a raw pointer to a struct with a field
+narrower than a word, such as an `i32` or a `u8`, or the pointer of a
+`CString`, `as_ptr`, which the interpreter gives. The native backend
+keeps each field of a value in a word of its own, where C packs a
+narrow field at its width, so these wait for layouts chosen for each
+type (D-086).
 
 Run the program without `--native`, or change it to what the backend
-compiles: pass a struct to an exported function by a pointer.
+compiles: pass a struct to an exported function by a pointer, and give
+a struct that goes by a pointer fields of words, `int`, `f64` and raw
+pointers, as [R14](attributes.md#exported-functions) shows.
 
 Example: [R14](attributes.md#exported-functions), [chapter
 27](../tutorial/27-systems.md#no-authority-without-a-capability).

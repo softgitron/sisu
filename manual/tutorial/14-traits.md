@@ -391,9 +391,9 @@ have a derive too, written in Sisu, which chapter 25 shows.
 </details>
 
 `@derive(Into, From)`, which converts a one-field struct to and from
-the value it wraps, is designed in
-[03](../../proposal/03-types-and-generics.md#type-aliases-and-newtypes)
-and is not in the compiler yet.
+the value it wraps, is named in
+[03](../../proposal/03-types-and-generics.md#type-aliases-and-newtypes);
+what it writes is the open question Q-80.
 
 ## Operators are traits
 

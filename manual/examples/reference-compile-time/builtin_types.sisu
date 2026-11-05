@@ -1,0 +1,7 @@
+# Reflection on the prelude's types where no type parameter is in scope.
+def main():
+    print(comptime reflect.name_of(int))
+    print(comptime reflect.name_of(str))
+    print(comptime reflect.is_float(f64))
+    print(comptime reflect.is_int(char))
+    print(comptime len(reflect.fields_of(bool)))

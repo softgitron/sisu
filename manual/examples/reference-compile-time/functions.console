@@ -1,0 +1,7 @@
+$ sisu run
+heat(start: int, minutes: int) -> int
+  The heat after `minutes` of firing, from `start`.
+  @unit("celsius")
+ready(celsius: int) -> bool
+  Whether the stove is ready for the first turn.
+80 True

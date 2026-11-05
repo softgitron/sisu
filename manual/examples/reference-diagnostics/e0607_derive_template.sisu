@@ -1,4 +1,4 @@
-# A derive that computes a value before its `return impl`.
+# A derive that computes a value before its `return impl`, and its use.
 trait Columns:
     ## The number of the type's fields.
     def width() -> int
@@ -8,3 +8,11 @@ trait Columns:
         return impl Columns for T:
             def width() -> int:
                 return count
+
+@derive(Columns)
+struct Booking:
+    name: String
+    hour: int
+
+def main():
+    print(Booking.width())

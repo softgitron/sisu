@@ -11,5 +11,5 @@ def main():
     let lines = ["12", " 7", "x"]
     print(lines.iter().try_map(line -> Ok(number(line)? * 2)))
     print(lines[:2].iter().try_map(line -> Ok(number(line)? * 2)))
-    let results = lines.iter().map(line -> number(line)).collect()
-    print(results.try_collect())
+    print(lines.iter().map(line -> number(line)).try_collect())
+    print(lines[:2].iter().map(line -> number(line)).try_collect())

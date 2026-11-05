@@ -1,0 +1,16 @@
+# `reflect.functions_of` lists a module's functions while compiling.
+from sauna import stove
+
+def main():
+    comptime for f in reflect.functions_of(stove):
+        var params = String.new("")
+        var comma = ""
+        comptime for p in f.params:
+            params = "{params}{comma}{p.name}: {reflect.name_of(p.ty)}"
+            comma = ", "
+        print("{f.name}({params}) -> {reflect.name_of(f.ret)}")
+        print("  {reflect.doc_of(f)}")
+        comptime for a in reflect.attributes_of(f):
+            print("  @{a.name}({a.args[0]})")
+    let warm = stove.heat(20, 30)
+    print("{warm} {stove.ready(warm)}")

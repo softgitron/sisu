@@ -10,4 +10,4 @@ test "std.time/Timeline (doc example)" ... ok
 test "std.time/Instant (doc example)" ... ok
 test "std.time/Zone (doc example)" ... ok
 4 passed, 0 failed, 0 blocked
-188 not selected
+189 not selected

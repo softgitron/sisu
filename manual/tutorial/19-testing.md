@@ -565,8 +565,8 @@ once, on the shrunk case.
 
 A token fits in a bug report: whoever has the same code can run the
 failure again on any machine, since in a test every source of chance
-is a fake or the seeded scheduler. A token for other code, or
-another version of the toolchain, is refused. A test that takes the real `System` gets it even under
+is a fake or the seeded scheduler. A token is refused for other code
+or another toolchain. A test that takes the real `System` gets it even under
 `--sim`, and has no token.
 
 ## Every small case
@@ -1034,8 +1034,7 @@ test "the vowels of a short word" ... ok
 A test that passed is not run again while the code is the same: `sisu test` keeps the results in a file beside the
 program, `NAME.test-cache`. `--no-cache` runs everything. `sisu test
 --native` runs the same tests compiled, each in a process of its own
-([G20](../guides/native.md)). A machine-readable report of the
-results in JSON, coverage (`--cover`), mutation testing (`--mutate`)
+([G20](../guides/native.md)). A JSON report, coverage (`--cover`), mutation testing (`--mutate`)
 and fuzzing (`--fuzz`) are designed in
 [17](../../proposal/17-testing.md) and not in the compiler.
 
