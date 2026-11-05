@@ -7,10 +7,10 @@ trait Csv:
     def row(self) -> String
 
     comptime def derive(T: type) -> impl Csv for T:
+        comptime if not reflect.is_struct(T):
+            comptime panic("`{reflect.name_of(T)}` is not a struct")
         return impl Csv for T:
             def header() -> String:
-                comptime if not reflect.is_struct(T):
-                    comptime panic("`{reflect.name_of(T)}` is not a struct")
                 var names: list[String] = []
                 comptime for f in reflect.fields_of(T):
                     names.push(f.name.to_string())

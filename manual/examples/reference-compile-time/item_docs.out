@@ -1,0 +1,3 @@
+Heater: How a sauna is heated.
+  Electric.kilowatts: The power of the stove, in kilowatts.
+  Electric.phases: The number of phases it draws on.

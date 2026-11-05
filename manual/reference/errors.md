@@ -258,7 +258,9 @@ A must-consume value need not be consumed while unwinding
 A panic during unwinding, such as one in a `Drop` that unwinding runs,
 aborts the program at once, with no more drops (R0014), and the status
 is 134. A build with `panic = abort` aborts at the first panic instead
-of unwinding.
+of unwinding, and so does a panic that leaves a function C called
+through `@export`, since C has no unwinding
+([R14](attributes.md#exported-functions)).
 
 <!-- file: examples/reference-errors/double_panic.sisu -->
 ```sisu
@@ -296,7 +298,7 @@ panic while unwinding: the cup broke while being put away
 | 1 | `main` returned `Err(e)`, or the program did not compile ([D0006](diagnostics.md#d0006), [D0021](diagnostics.md#d0021)) |
 | 2 | a usage error of the command line ([R16](sisu-command.md#exit-statuses)) |
 | 101 | a panic that unwound out of `main` |
-| 134 | an abort: a panic during unwinding, or a deadlock ([R9](concurrency.md#the-scheduler)) |
+| 134 | an abort: a panic during unwinding, a deadlock ([R9](concurrency.md#the-scheduler)), or a panic that leaves an exported function, which C cannot unwind ([R14](attributes.md#exported-functions)) |
 
 **Status.** In stage 0.
 

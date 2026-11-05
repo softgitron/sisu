@@ -1,3 +1,3 @@
 15:9-15:16 E0608 comptime.derive-failed trait="Columns" ty="Heater" reason="`Heater` is not a struct"
-  label 9:30-9:77 comptime.derive-here
+  label 7:22-7:69 comptime.derive-here
 21:18-21:25 E0351 type.unknown-associated ty="Heater" name="columns"

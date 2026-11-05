@@ -5,8 +5,8 @@ error[E0608]: deriving `Columns` for `Heater` stopped at compile time: `Heater` 
 15 | @derive(Columns)
    |         ^^^^^^^
    |
- 9 |                     comptime panic("`{reflect.name_of(T)}` is not a struct")
-   |                              ----------------------------------------------- the derive's template, where it stopped
+ 7 |             comptime panic("`{reflect.name_of(T)}` is not a struct")
+   |                      ----------------------------------------------- the derive's template, where it stopped
 
 error[E0351]: `Heater` has no associated function `columns`
   --> e0608_derive_failed.sisu:21:18

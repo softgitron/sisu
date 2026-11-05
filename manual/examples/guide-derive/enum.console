@@ -5,6 +5,6 @@ error[E0608]: deriving `Csv` for `Heater` stopped at compile time: `Heater` is n
 26 | @derive(Csv)
    |         ^^^
    |
-13 |                     comptime panic("`{reflect.name_of(T)}` is not a struct")
-   |                              ----------------------------------------------- the derive's template, where it stopped
+11 |             comptime panic("`{reflect.name_of(T)}` is not a struct")
+   |                      ----------------------------------------------- the derive's template, where it stopped
 

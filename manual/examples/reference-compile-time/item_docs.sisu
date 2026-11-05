@@ -1,0 +1,20 @@
+# A type's own `##` comment, and a variant's fields', from reflection.
+## How a sauna is heated.
+enum Heater:
+    Wood
+    Electric(
+        ## The power of the stove, in kilowatts.
+        kilowatts: int,
+        ## The number of phases it draws on.
+        phases: int
+    )
+
+def describe[T]() -> String:
+    var out = "{reflect.name_of(T)}: {reflect.doc_of(T)}"
+    comptime for v in reflect.variants_of(T):
+        comptime for f in v.fields:
+            out = "{out}\n  {v.name}.{f.name}: {f.doc}"
+    return out
+
+def main():
+    print(describe[Heater]())

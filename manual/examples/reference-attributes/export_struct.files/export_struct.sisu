@@ -1,0 +1,12 @@
+# A `@repr(c)` struct passed to an exported function by value.
+@repr(c)
+struct Reading:
+    celsius: i32
+    minutes: i32
+
+@export("sauna_load")
+def load(reading: Reading) -> i32:
+    return reading.celsius * reading.minutes
+
+def main():
+    print(load(Reading(celsius=80, minutes=10)))

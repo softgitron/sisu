@@ -185,8 +185,10 @@ grain 1024: 0.0
 ```
 
 **Status.** Stage 0 runs the chunks one after another, in the tree's
-order, on the task that asks: it has no pool of workers yet (Q-6), so
-a parallel reduction gives the right answer and no speed-up.
+order, on the task that asks: only `par.map` has a pool of workers,
+natively and not under `runtime = "single"`
+([R22](../reference/targets.md#runtime-profiles)), so a parallel
+reduction gives the right answer and no speed-up.
 [06](../../proposal/06-concurrency-and-capabilities.md#data-parallelism)
 spells the parallel loop `xs.par_iter()`, which is E0304 in stage 0,
 and `par_iter_mut()`, which is missing; stage 0's `par.iter(xs)` gives

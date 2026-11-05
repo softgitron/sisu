@@ -1,0 +1,8 @@
+$ sisu run --native export_c.sisu
+80 80
+panic: assertion failed: minutes <= 30
+  message: nobody stays that long
+    minutes <= 30
+    │
+    45
+  at heat (export_c.sisu:4:5)

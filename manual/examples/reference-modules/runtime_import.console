@@ -1,0 +1,4 @@
+$ sisu run
+heated by the interpreter
+$ sisu run --native
+heated by the native build's library

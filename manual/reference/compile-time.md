@@ -179,7 +179,8 @@ function asks about its type parameters ([Templates](#templates)).
 | `reflect.name_of(T)` | the type's name |
 | `reflect.is_struct(T)`, `is_enum`, `is_trait`, `is_int`, `is_float`, `is_bool`, `is_char`, `is_str` (`str` or `String`), `is_list`, `is_option`, `is_tuple` | whether the type is of that kind |
 | `reflect.fields_of(T)` | a struct's fields, each with `name`, `index`, `named`, `ty`, `default`, whether it has a default, and `doc`, its `##` comment (empty without one); an empty list for a type declared without fields, such as `int` |
-| `reflect.variants_of(T)` | an enum's variants, each with `name`, `index` and `fields` |
+| `reflect.variants_of(T)` | an enum's variants, each with `name`, `index` and `fields`, whose fields have a `name`, a `ty` and a `doc` |
+| `reflect.doc_of(T)` | the `##` comment of the type's declaration, a struct's, an enum's or an error set's, its attributes passed over; empty without one, and for a type of the standard library |
 | `reflect.elem_of(T)` | the element type of a list or an optional value |
 | `reflect.methods_of(T)` | a trait's methods or a type's own, each with `name`, `index`, `receiver`, `params` (each with `name`, `index`, `mode` and `ty`), `ret` and `provided` |
 | `reflect.attributes_of(T)` | the attributes on the type's declaration, each with `name` and `args` ([R14](attributes.md#attributes-are-data)) |
@@ -279,6 +280,44 @@ Booking
   hour: The hour of the turn, from 16 to 21.
 ```
 
+`reflect.doc_of(T)` is the type's own comment, read the same way, and
+a variant's field that starts a line of its own has its `doc` too; a
+field on the variant's own line, as in `Guessed(int)`, has none, since
+the comment above that line is the variant's. `std.x.cli`'s
+`cli.about[T]()` prints a struct's own comment
+([G6](../guides/command-line.md#2-print-a-help-text)):
+
+<!-- file: examples/reference-compile-time/item_docs.sisu -->
+```sisu
+# A type's own `##` comment, and a variant's fields', from reflection.
+## How a sauna is heated.
+enum Heater:
+    Wood
+    Electric(
+        ## The power of the stove, in kilowatts.
+        kilowatts: int,
+        ## The number of phases it draws on.
+        phases: int
+    )
+
+def describe[T]() -> String:
+    var out = "{reflect.name_of(T)}: {reflect.doc_of(T)}"
+    comptime for v in reflect.variants_of(T):
+        comptime for f in v.fields:
+            out = "{out}\n  {v.name}.{f.name}: {f.doc}"
+    return out
+
+def main():
+    print(describe[Heater]())
+```
+
+<!-- output: examples/reference-compile-time/item_docs.out -->
+```text
+Heater: How a sauna is heated.
+  Electric.kilowatts: The power of the stove, in kilowatts.
+  Electric.phases: The number of phases it draws on.
+```
+
 A builtin type, `bool` or `int`, is a type argument as a type of the
 program is:
 
@@ -302,12 +341,12 @@ bool
 
 **Stage 0 differs.** Of the documentation of items, which
 [08](../../proposal/08-metaprogramming.md#reflection) lists among what
-reflection exposes, only a struct's fields have theirs, as `doc`: an
-item's own `##` comment and a variant's fields' have no query, and the
-attributes of a function or a field none either
+reflection exposes, a type's own comment and its fields' have theirs,
+but a function's, a method's and a variant's own have no query, and
+the attributes of a function or a field none either
 ([R14](attributes.md#attributes-are-data)). The front end written in
-Rust has no `doc`, so the standard library's doc examples, which
-`sisu test --std` runs on it, do not read one.
+Rust has neither `doc` nor `reflect.doc_of`, so the standard library's
+doc examples, which `sisu test --std` runs on it, read neither.
 Reflection in a refinement's `where` clause or an `invariant` is E0900.
 
 **Status.** In stage 0 (D-018), with the differences noted.
@@ -331,9 +370,14 @@ instance is checked on its own, for the types really used.
 - An error inside an instance, a type's or an ownership's, is placed at
   the call that made the instance, the first in a module the program
   wrote, with a note that names the instance and quotes its line, such
-  as "in the instance of `total[Team]` that this call makes"; its labels
-  and fixes, which would point into the made code, are left out. Code
-  that `comptime for` unrolls is reported the same way. An `E0300` that
+  as "in the instance of `total[Team]` that this call makes", and the
+  label `type.instance-line`, "the template's line that wrote it", at the
+  statement of the template that wrote that line, the innermost: the
+  body of the `comptime for` that unrolled it, or the branch of the `if
+  comptime` that chose it. The error's own labels and fixes, which would
+  point into the made code, are left out. A template of the standard
+  library gets no such label, since a program's diagnostics show none of
+  its text. An `E0300` that
   finds a reference where the instance gives a value on, as to
   `reflect.construct`, adds a note that such a parameter is taken `own`.
 - A typed hole in a derive's template is reported once, at the hole,
@@ -428,17 +472,22 @@ A trait makes itself derivable by declaring
 `comptime def derive(T: type) -> impl Trait for T`
 
 whose body is `return impl Trait for T:` with the impl's methods,
-nothing else (E0607, `comptime.derive-template`). `@derive(Trait)` on a
-type runs it for that type: the compile-time code in the methods is
-evaluated, and what is left becomes the source of an impl declared
-beside the type and checked like an impl written by hand.
+after checks of the type, if any: `comptime assert CONDITION,
+"MESSAGE"`, `comptime panic(MESSAGE)`, and `comptime if` or `if
+comptime` whose branches hold only checks. Anything else before or after
+the `return impl` is E0607 (`comptime.derive-template`), with the note
+`comptime.derive-checks`, which says what may come first.
+`@derive(Trait)` on a type runs it for that type: the checks run first
+and write no code, the compile-time code in the methods is evaluated,
+and what is left becomes the source of an impl declared beside the type
+and checked like an impl written by hand.
 
 - A derive writes only an impl of its own trait for the type it is
   given, so coherence holds ([R2](types.md#one-impl-for-each-type-and-trait)).
 - The impl of a generic type bounds each type parameter that a field
   uses by the trait, as `impl[T: Eq] Eq for Pair[T]`.
-- A derive that stops, by `comptime panic` or a query that does not
-  apply, is E0608 (`comptime.derive-failed`), at the `@derive` with a
+- A derive that stops, by a failing check, `comptime panic` or a query
+  that does not apply, is E0608 (`comptime.derive-failed`), at the `@derive` with a
   label where the template stopped; an error in the code it wrote is
   placed at the derive's argument, with a note that quotes the line of
   the impl it wrote.
@@ -472,6 +521,53 @@ def main():
 <!-- output: examples/reference-compile-time/derive.out -->
 ```text
 ["NAME", "HOUR"]
+```
+
+A `let` before the `return impl` is E0607, whose note says what may
+stand there ([R17](diagnostics.md#e0607)):
+
+<!-- output: examples/reference-diagnostics/e0607_derive_template.console -->
+```console
+$ sisu check e0607_derive_template.sisu
+error[E0607]: a trait's derive is `comptime def derive(T: type) -> impl Columns for T`, whose body is `return impl Columns for T:` with the impl's methods
+  --> e0607_derive_template.sisu:6:18
+  |
+6 |     comptime def derive(T: type) -> impl Columns for T:
+  |                  ^^^^^^
+  = note: only checks of the type may come before the `return impl`: `comptime assert`, and `comptime panic` and `comptime if` of them, which write no code
+
+```
+
+A value the methods need is computed inside them, at compile time,
+since a name bound before the `return impl` would be a variable of
+every method the engine writes as text; a check is the one statement
+that may come first:
+
+<!-- file: examples/reference-diagnostics/e0607_derive_template_fixed.sisu -->
+```sisu
+# The method counts the fields itself, at compile time.
+trait Columns:
+    ## The number of the type's fields.
+    def width() -> int
+
+    comptime def derive(T: type) -> impl Columns for T:
+        comptime assert reflect.is_struct(T), "columns are a struct's"
+        return impl Columns for T:
+            def width() -> int:
+                return comptime len(reflect.fields_of(T))
+
+@derive(Columns)
+struct Booking:
+    name: String
+    hour: int
+
+def main():
+    print(Booking.width())
+```
+
+<!-- output: examples/reference-diagnostics/e0607_derive_template_fixed.out -->
+```text
+2
 ```
 
 A variant's fields have a `ty` as a struct's fields do, so a derive
@@ -585,13 +681,12 @@ otherwise, and `target.runtime_profile` is the runtime profile of the
 package's manifest, `"full"` or `"single"`
 ([R22](targets.md#runtime-profiles)).
 
-**Stage 0 differs.** An import under `@cfg(target.runtime ==
-"native")`, and a dependency whose `when` names the runtime, read
-`interpreter` in a native build too, since the packages and the imports
-are read before the build's options reach them; a body's `if comptime
-target.runtime == "native":` reads `native`.
+An import under `@cfg(target.runtime == "native")`, and a dependency
+whose `when` names the runtime, read the same runtime as a body's `if
+comptime`, so a native build imports what its `native` branch uses
+([R13](modules.md#target-conditions)).
 
-**Status.** In stage 0, with the difference noted.
+**Status.** In stage 0.
 
 ## Conditional compilation and features
 
@@ -656,6 +751,6 @@ inside the literal.
 | [E0603](diagnostics.md#e0603), [E0606](diagnostics.md#e0606) | `comptime.budget`, `comptime.budget-attribute` | [Budgets](#budgets) |
 | [E0200](diagnostics.md#e0200), [E0900](diagnostics.md#e0900) | `resolve.undefined-name`, `stage0.unsupported` | [Reflection](#reflection) |
 | [E0609](diagnostics.md#e0609), E0610, E0611 | `comptime.instance-failed`, `comptime.instances-unbounded`, `comptime.template-value` | [Templates](#templates) |
-| E0607, [E0608](diagnostics.md#e0608) | `comptime.derive-template`, `comptime.derive-failed` | [The derive protocol](#the-derive-protocol) |
+| [E0607](diagnostics.md#e0607), [E0608](diagnostics.md#e0608) | `comptime.derive-template`, `comptime.derive-failed` | [The derive protocol](#the-derive-protocol) |
 | [E0612](diagnostics.md#e0612), [E0613](diagnostics.md#e0613) | `comptime.embed-failed`, `comptime.embed-path` | [Embedding a file](#embedding-a-file) |
 | [D0003](diagnostics.md#d0003) | `cli.unknown-command` | [Configuration files](#configuration-files) |

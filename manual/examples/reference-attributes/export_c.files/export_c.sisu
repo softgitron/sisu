@@ -1,0 +1,17 @@
+# The program calls its own exported function as C calls it.
+@export("sauna_heat")
+def heat(minutes: i32) -> i32:
+    assert minutes <= 30, "nobody stays that long"
+    return 60 + minutes * 2
+
+# safety: `sauna_heat` is the export above, of C's convention.
+extern "C":
+    def sauna_heat(minutes: i32) -> i32
+
+def main():
+    # safety: the export takes an `i32` and returns one.
+    let short = unsafe sauna_heat(10)
+    print("{heat(10)} {short}")
+    # safety: as above.
+    let long = unsafe sauna_heat(45)
+    print("{long}")

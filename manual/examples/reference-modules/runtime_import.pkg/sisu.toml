@@ -1,0 +1,7 @@
+[package]
+name = "stove"
+version = "0.1.0"
+edition = "2027"
+
+[dependencies]
+fast = { path = "fast", when = { runtime = "native" } }

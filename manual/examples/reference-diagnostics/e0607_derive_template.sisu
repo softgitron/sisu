@@ -1,0 +1,10 @@
+# A derive that computes a value before its `return impl`.
+trait Columns:
+    ## The number of the type's fields.
+    def width() -> int
+
+    comptime def derive(T: type) -> impl Columns for T:
+        let count = len(reflect.fields_of(T))
+        return impl Columns for T:
+            def width() -> int:
+                return count

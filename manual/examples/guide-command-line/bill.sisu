@@ -1,7 +1,7 @@
 # Splits a bill: the options are the fields of a struct.
 import cli
 
-## What the command line can say.
+## Splits a bill between the names it is given.
 struct Options:
     ## The bill, before the tip.
     total: f64
@@ -16,6 +16,7 @@ def main(sys: System) -> ! cli.Error:
     let args = sys.env.args()
     if "--help" in args:
         print("usage: bill [OPTIONS] NAME...")
+        print(cli.about[Options]())
         print(cli.help_text[Options]())
         return Ok(())
     let options = cli.parse[Options](args) else as e:

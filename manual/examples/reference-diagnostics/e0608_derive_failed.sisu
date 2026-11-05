@@ -3,10 +3,10 @@ trait Columns:
     def columns() -> String
 
     comptime def derive(T: type) -> impl Columns for T:
+        comptime if not reflect.is_struct(T):
+            comptime panic("`{reflect.name_of(T)}` is not a struct")
         return impl Columns for T:
             def columns() -> String:
-                comptime if not reflect.is_struct(T):
-                    comptime panic("`{reflect.name_of(T)}` is not a struct")
                 var names: list[String] = []
                 comptime for f in reflect.fields_of(T):
                     names.push(f.name.to_string())

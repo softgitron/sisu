@@ -165,8 +165,12 @@ simulation, which only an `extern` call with no simulation model can
 the profile as `target.runtime_profile`, but both profiles get the same
 runtime: the interpreter and the native runtime run every task on one
 thread, one at a time, under the seeded scheduler, which is `single`'s
-runtime. Only `std.par`'s worker threads ([R9](concurrency.md#parallel-computation-over-data))
-are still started under `single`. `sim` is the profile of `sisu test
+runtime. What differs is `std.par.map` natively
+([R9](concurrency.md#parallel-computation-over-data)): under `full` it
+runs its bodies on a pool of worker threads, one for each processor,
+and under `single` on the thread that asks, one after another, so the
+executable starts no thread of its own; the interpreter, which has no
+workers, runs both alike. `sim` is the profile of `sisu test
 --sim` only. The `panic` key and the `release-size` profile are W0005
 (`package.unknown-key`):
 
@@ -300,13 +304,18 @@ unstable for now). The C ABI is the stable interface: `@repr(c)` gives a
 type C's layout, and `@export` makes a function callable from C
 ([R14](attributes.md#exported-functions)).
 
-**Stage 0 differs.** A native build makes an exported function a
-global symbol under its C name, whether or not the program calls it,
-called with Sisu's convention, the
-addresses of the result and of each argument and a status byte, rather
-than with C's values ([R14](attributes.md#exported-functions)).
+A native build makes an exported function a global symbol under its C
+name, whether or not the program calls it, called with C's own
+convention over plain values: the integers and floats at their width,
+a `bool` a byte, a `char` a 32-bit code, a raw pointer an address, and
+a `@repr(c)` struct by a pointer to it. A panic that leaves an exported
+function ends the program with status 134, since C cannot unwind
+([R14](attributes.md#exported-functions)).
 
-**Status.** Decided (D-039, Q-31).
+**Stage 0 differs.** A `@repr(c)` struct passed by value is D0103 in a
+native build ([R17](diagnostics.md#d0103)).
+
+**Status.** Decided (D-039, Q-31), with the difference noted.
 
 ## Other languages
 

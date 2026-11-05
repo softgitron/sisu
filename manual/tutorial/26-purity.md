@@ -596,8 +596,12 @@ that reads two fields of a million particles reads two runs of memory
 rather than a million scattered structs. None of the three is in the
 compiler yet.
 Stage 0 spells the loop `for x in par.iter(xs):`, as the section "A
-parallel loop" does, and runs its bodies one after another. A pool of
-workers to run the chunks, and
+parallel loop" does, and runs its bodies one after another. Of the
+functions of `std.par`, only `par.map` runs on a pool of workers, and
+only natively: one for each processor, or none in a program whose
+manifest asks for `runtime = "single"`
+([R22](../reference/targets.md#runtime-profiles)), where the bodies run
+on the thread that asks. Workers for the other functions, and
 `sisu bench` warning when a parallel loop is slower than its serial
 form, wait for the runtime of [06](../../proposal/06-concurrency-and-capabilities.md#data-parallelism).
 

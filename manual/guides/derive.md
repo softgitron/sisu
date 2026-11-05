@@ -31,10 +31,10 @@ trait Csv:
     def row(self) -> String
 
     comptime def derive(T: type) -> impl Csv for T:
+        comptime if not reflect.is_struct(T):
+            comptime panic("`{reflect.name_of(T)}` is not a struct")
         return impl Csv for T:
             def header() -> String:
-                comptime if not reflect.is_struct(T):
-                    comptime panic("`{reflect.name_of(T)}` is not a struct")
                 var names: list[String] = []
                 comptime for f in reflect.fields_of(T):
                     names.push(f.name.to_string())
@@ -93,10 +93,14 @@ test "a booking and a reading as lines" ... ok
 
 ## 4. Refuse the types it cannot handle
 
-A derive's body is the `return impl` and nothing else (E0607 says so),
-so put the check of the type's shape at the top of a method:
-`comptime if not reflect.is_struct(T):` with `comptime panic(message)`
-stops the compilation where `@derive` asks for the wrong kind of type.
+Check the type's shape before the `return impl`: `comptime if not
+reflect.is_struct(T):` with `comptime panic(message)`, or `comptime
+assert CONDITION, "MESSAGE"`, runs first for each type, writes no code,
+and stops the compilation where `@derive` asks for the wrong kind of
+type. Only such checks may come before the `return impl`; anything else
+there, a `let` among them, is E0607 (`comptime.derive-template`), whose
+note says what may come first, so a value the methods need is computed
+inside them ([R12](../reference/compile-time.md#the-derive-protocol)).
 Asked for an enum, the derive of step 1 says:
 
 <!-- output: examples/guide-derive/enum.console -->
@@ -108,8 +112,8 @@ error[E0608]: deriving `Csv` for `Heater` stopped at compile time: `Heater` is n
 26 | @derive(Csv)
    |         ^^^
    |
-13 |                     comptime panic("`{reflect.name_of(T)}` is not a struct")
-   |                              ----------------------------------------------- the derive's template, where it stopped
+11 |             comptime panic("`{reflect.name_of(T)}` is not a struct")
+   |                      ----------------------------------------------- the derive's template, where it stopped
 
 ```
 

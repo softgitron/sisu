@@ -1,0 +1,12 @@
+# The import tests the runtime, as the dependency's `when` does.
+@cfg(target.runtime == "native")
+import fast
+
+def describe() -> str:
+    if comptime target.runtime == "native":
+        return fast.heat_up()
+    else:
+        return "heated by the interpreter"
+
+def main():
+    print(describe())

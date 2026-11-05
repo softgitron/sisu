@@ -938,6 +938,9 @@ error[E0324]: the type of `f` cannot be inferred here; add a type annotation
    |
 38 |     assert to_csv([3, 1, 4]) == "value\n3\n1\n4"
    |            ^^^^^^^^^^^^^^^^^
+   |
+20 |         names.push(f.name.to_string())
+   |         ------------------------------ the template's line that wrote it
   = note: in the instance of `to_csv[int]` that this call makes: `names.push(f.name.to_string())`
 
 error[D0006]: the program was not run: errors found (2)

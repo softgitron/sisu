@@ -1,0 +1,18 @@
+# The method counts the fields itself, at compile time.
+trait Columns:
+    ## The number of the type's fields.
+    def width() -> int
+
+    comptime def derive(T: type) -> impl Columns for T:
+        comptime assert reflect.is_struct(T), "columns are a struct's"
+        return impl Columns for T:
+            def width() -> int:
+                return comptime len(reflect.fields_of(T))
+
+@derive(Columns)
+struct Booking:
+    name: String
+    hour: int
+
+def main():
+    print(Booking.width())

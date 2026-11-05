@@ -212,9 +212,9 @@ that the pointer's value no longer exists and does not compile natively
 yet, since its slice copies the bytes into a temporary that ends when
 `as_ptr` returns, so the wrapper builds the C string in raw memory. The
 other direction, C calling Sisu, is `@export("NAME")`: a native build
-makes the function the global symbol `NAME`, whether or not the
-program calls it, which the compiler's own test links with a C caller,
-and E0991 refuses a type C has no layout
-for; for now the symbol takes the addresses of its result and arguments
-and returns a status byte, not C's values
-([R14](../reference/attributes.md#exported-functions)).
+makes the function the global symbol `NAME` of C's own convention,
+whether or not the program calls it, so a C caller declares `int32_t
+sauna_heat(int32_t minutes);` and calls it; E0991 refuses a type C has
+no layout for, a `@repr(c)` struct goes by a pointer to it (by value it
+is D0103), and a panic that leaves the function ends the program with
+status 134 ([R14](../reference/attributes.md#exported-functions)).

@@ -515,17 +515,57 @@ $ sisu run sauna
 the stove is on
 ```
 
-**Stage 0 differs.** The packages and the imports are read before the
-build's options reach them, so in a native build a `when` on `runtime`
-and an import's `@cfg` on `target.runtime` read `interpreter`, while a
-body's `if comptime` reads `native` ([R22](targets.md#the-facts-of-the-target)).
-An import under `@cfg(target.runtime == "native")` is then left out of
-a native build whose `native` branch uses it, and the build is not
-refused: the use stops the program with a panic, "entered unreachable
-code". Test `os` and `arch`, which both read alike, in an import's
-condition.
+The runtime is a fact of the target as the system is: a build for the
+native runtime (`sisu run --native` and the other commands with
+`--native`) reads `runtime` as `native` in a dependency's `when` and in
+an import's `@cfg`, as a body's `if comptime` does, and every other
+build reads `interpreter` ([R22](targets.md#the-facts-of-the-target)).
+Here the package `stove` depends on `fast` with `when = { runtime =
+"native" }`:
 
-**Status.** In stage 0 (D-063), with the difference noted.
+<!-- file: examples/reference-modules/runtime_import.pkg/sisu.toml -->
+```toml
+[package]
+name = "stove"
+version = "0.1.0"
+edition = "2027"
+
+[dependencies]
+fast = { path = "fast", when = { runtime = "native" } }
+```
+
+<!-- file: examples/reference-modules/runtime_import.pkg/src/main.sisu -->
+```sisu
+# The import tests the runtime, as the dependency's `when` does.
+@cfg(target.runtime == "native")
+import fast
+
+def describe() -> str:
+    if comptime target.runtime == "native":
+        return fast.heat_up()
+    else:
+        return "heated by the interpreter"
+
+def main():
+    print(describe())
+```
+
+<!-- file: examples/reference-modules/runtime_import.pkg/fast/src/lib.sisu -->
+```sisu
+# A library that the native build of `stove` depends on.
+pub def heat_up() -> str:
+    return "heated by the native build's library"
+```
+
+<!-- output: examples/reference-modules/runtime_import.console -->
+```console
+$ sisu run
+heated by the interpreter
+$ sisu run --native
+heated by the native build's library
+```
+
+**Status.** In stage 0 (D-063).
 
 ## Features
 

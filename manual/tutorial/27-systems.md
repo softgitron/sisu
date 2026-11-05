@@ -524,9 +524,11 @@ a `strlen` of text without its NUL stops the program.
   reference, view, `Shared`, closure or capability, which C could not
   keep alive (E0989, `unsafe.export-signature`), and each of its types
   must be one C has a layout for, a number, `bool`, `char`, a raw
-  pointer or a `@repr(c)` type (E0991, `unsafe.export-not-c`). For now
-  C calls it with the addresses of the result and the arguments and
-  reads a status byte, as
+  pointer or a `@repr(c)` type (E0991, `unsafe.export-not-c`). C calls
+  it with its own convention, `int32_t sauna_heat(int32_t minutes)`
+  for a function of an `i32`, and passes a `@repr(c)` struct by a
+  pointer to it. A panic cannot unwind into C, so one that leaves the
+  function prints its report and ends the program with status 134, as
   [R14](../reference/attributes.md#exported-functions) shows.
 - Importing a C header, `import c "zlib.h"`, which would write the
   `extern` block from the header, is designed in

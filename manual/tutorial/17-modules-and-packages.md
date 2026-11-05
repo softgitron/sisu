@@ -456,6 +456,11 @@ On any other system the import binds nothing and the first branch is
 left out of the build, so the program prints its own line. A use of `winlog`
 outside such a branch is E0200, whose note names the `@cfg` and the
 `if comptime` to write ([R13](../reference/modules.md#target-conditions)).
+The runtime is a fact of the same kind: `when = { runtime = "native" }`
+and `@cfg(target.runtime == "native")` hold in a build for the native
+runtime, such as `sisu run --native`, so a library that only native
+code needs is built and imported there alone
+([R13](../reference/modules.md#target-conditions) shows one).
 
 ## Documentation for a library's users
 

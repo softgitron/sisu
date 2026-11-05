@@ -723,9 +723,14 @@ every square checked
 
 **Stage 0 differs.** D-069 spells the parallel loop `xs.par_iter()` and
 has `par_iter_mut()`; stage 0 has `par.iter(xs)` and `par.map` and no
-`par_iter_mut`. It runs the chunks one after another on the task that
-asks, with no worker pool (Q-6 is open), which a `pure` body cannot
-tell apart.
+`par_iter_mut`. Natively, `par.map` runs its bodies on a pool of
+worker threads, one for each processor unless the environment variable
+`SISU_PAR_THREADS` of the run gives another number, except in a
+program of the runtime profile `single`, which starts no worker
+([R22](targets.md#runtime-profiles)); `par.iter`, `par.reduce` and
+`par.join`, and every call in the interpreter, run the chunks one after
+another on the task that asks. A `pure` body cannot tell the two
+apart.
 
 **Status.** In stage 0, with the differences noted (D-069).
 

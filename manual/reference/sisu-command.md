@@ -243,7 +243,7 @@ Every command ends with one of these statuses:
 | 3 | `sisu test` found no failure, and a test is blocked by a typed hole (D-061). |
 | 70 | An internal compiler error (D0012, D0076, D0118): a bug in `sisu`, never in your program. |
 | 101 | The program panicked. |
-| 134 | The program aborted: a panic while unwinding from a panic, or the ownership monitor stopping a run at a conflict. |
+| 134 | The program aborted: a panic while unwinding from a panic, a panic leaving a function that C called through `@export`, or the ownership monitor stopping a run at a conflict. |
 
 A program that panics prints the panic to standard error and ends
 with status 101. This one prints its first line, then the panic:

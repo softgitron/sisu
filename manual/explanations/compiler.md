@@ -175,7 +175,14 @@ information itself; the runtime moves to Sisu under `unsafe`; and
 release builds go to LLVM, reached by writing its bitcode and running it
 as a separate program, so that no C++ and no link-time dependency on
 LLVM enters the toolchain (D-088). The x86-64 backend in Sisu already
-compiles programs, chosen with `--backend=sisu`.
+compiles programs, chosen with `--backend=sisu`. The runtime's move has
+begun too: `compiler/rt`, Sisu code compiled once into every executable,
+decodes the collections' operations, holds the run queues and, since
+stage 0's thirteenth round, a task's record, its parking and its waking,
+in the order the interpreter wakes tasks, so that a seed names the same
+schedule natively; each task's coroutine, its outcome and its trace
+stay in Rust beside the record, under the same number (decision 780 of
+the [architecture notes](../../compiler/docs/architecture.md)).
 
 The split follows the evidence. Zig's own x86-64 backend, its default
 for debug builds since 2025, builds the Zig compiler in 20 seconds where

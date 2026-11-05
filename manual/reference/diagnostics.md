@@ -7853,6 +7853,79 @@ def main():
 
 Shown in [R14](attributes.md#compile-time-budgets).
 
+### E0607
+
+`comptime.derive-template`: a trait's derive is `comptime def
+derive(T: type) -> impl {trait} for T`, whose body is `return impl
+{trait} for T:` with the impl's methods.
+
+A derive writes one declaration, the impl, as text for each type, so its
+body is the `return impl` after checks of the type, if any: `comptime
+assert`, `comptime panic`, and `comptime if` whose branches hold only
+checks. Any other statement there is the error, and when the body has a
+`return impl`, the note `comptime.derive-checks` says what may come
+before it ([R12](compile-time.md#the-derive-protocol)):
+
+<!-- file: examples/reference-diagnostics/e0607_derive_template.sisu -->
+```sisu
+# A derive that computes a value before its `return impl`.
+trait Columns:
+    ## The number of the type's fields.
+    def width() -> int
+
+    comptime def derive(T: type) -> impl Columns for T:
+        let count = len(reflect.fields_of(T))
+        return impl Columns for T:
+            def width() -> int:
+                return count
+```
+
+<!-- output: examples/reference-diagnostics/e0607_derive_template.console -->
+```console
+$ sisu check e0607_derive_template.sisu
+error[E0607]: a trait's derive is `comptime def derive(T: type) -> impl Columns for T`, whose body is `return impl Columns for T:` with the impl's methods
+  --> e0607_derive_template.sisu:6:18
+  |
+6 |     comptime def derive(T: type) -> impl Columns for T:
+  |                  ^^^^^^
+  = note: only checks of the type may come before the `return impl`: `comptime assert`, and `comptime panic` and `comptime if` of them, which write no code
+
+```
+
+A `let` before the `return impl` would be a variable of every method
+the derive writes, which the engine has only for the variable of a
+`comptime for`. Compute the value inside the method that needs it, at
+compile time, and keep only checks before the `return impl`:
+
+<!-- file: examples/reference-diagnostics/e0607_derive_template_fixed.sisu -->
+```sisu
+# The method counts the fields itself, at compile time.
+trait Columns:
+    ## The number of the type's fields.
+    def width() -> int
+
+    comptime def derive(T: type) -> impl Columns for T:
+        comptime assert reflect.is_struct(T), "columns are a struct's"
+        return impl Columns for T:
+            def width() -> int:
+                return comptime len(reflect.fields_of(T))
+
+@derive(Columns)
+struct Booking:
+    name: String
+    hour: int
+
+def main():
+    print(Booking.width())
+```
+
+<!-- output: examples/reference-diagnostics/e0607_derive_template_fixed.out -->
+```text
+2
+```
+
+Shown in [R12](compile-time.md#the-derive-protocol).
+
 ### E0608
 
 `comptime.derive-failed`: deriving `{trait}` for `{ty}` stopped at
@@ -7871,10 +7944,10 @@ trait Columns:
     def columns() -> String
 
     comptime def derive(T: type) -> impl Columns for T:
+        comptime if not reflect.is_struct(T):
+            comptime panic("`{reflect.name_of(T)}` is not a struct")
         return impl Columns for T:
             def columns() -> String:
-                comptime if not reflect.is_struct(T):
-                    comptime panic("`{reflect.name_of(T)}` is not a struct")
                 var names: list[String] = []
                 comptime for f in reflect.fields_of(T):
                     names.push(f.name.to_string())
@@ -7898,8 +7971,8 @@ error[E0608]: deriving `Columns` for `Heater` stopped at compile time: `Heater` 
 15 | @derive(Columns)
    |         ^^^^^^^
    |
- 9 |                     comptime panic("`{reflect.name_of(T)}` is not a struct")
-   |                              ----------------------------------------------- the derive's template, where it stopped
+ 7 |             comptime panic("`{reflect.name_of(T)}` is not a struct")
+   |                      ----------------------------------------------- the derive's template, where it stopped
 
 error[E0351]: `Heater` has no associated function `columns`
   --> e0608_derive_failed.sisu:21:18
@@ -7924,10 +7997,10 @@ trait Columns:
     def columns() -> String
 
     comptime def derive(T: type) -> impl Columns for T:
+        comptime if not reflect.is_struct(T):
+            comptime panic("`{reflect.name_of(T)}` is not a struct")
         return impl Columns for T:
             def columns() -> String:
-                comptime if not reflect.is_struct(T):
-                    comptime panic("`{reflect.name_of(T)}` is not a struct")
                 var names: list[String] = []
                 comptime for f in reflect.fields_of(T):
                     names.push(f.name.to_string())
@@ -11834,6 +11907,23 @@ Choose another name, or remove the directory first.
 
 Example: [R16](sisu-command.md#sisu-new).
 
+### D0103
+
+`native.unsupported`: the native backend does not compile {what} yet
+(in `{function}`); `sisu run` without `--native` runs the program.
+
+The program is valid, and the interpreter runs it, but the native
+backend has no lowering yet for a part of it, which the message names:
+a `@repr(c)` struct passed by value to an exported function, or a raw
+pointer to a struct. The message is printed without the `error[D0103]`
+heading of other diagnostics, and for an exported function's parameter
+it calls the parameter a `ref` and leaves the function's name empty.
+
+Run the program without `--native`, or change it to what the backend
+compiles: pass a struct to an exported function by a pointer.
+
+Example: [R14](attributes.md#exported-functions).
+
 ### D0111
 
 `native.release`: `--release` builds with the native backend's release
@@ -12409,7 +12499,7 @@ it. `sisu explain CODE` prints the same line.
 | [E0604](#e0604) | `comptime.not-kept` | {what} made at compile time cannot be kept for run time; numbers, text, booleans, characters, and lists, sets, dicts, tuples, options, results, structs and enums of them can |
 | [E0605](#e0605) | `comptime.only` | `{name}` is a `comptime def`: it can be called only at compile time, inside `comptime` |
 | [E0606](#e0606) | `comptime.budget-attribute` | `@comptime_budget` takes `steps=N`, a positive number of steps |
-| E0607 | `comptime.derive-template` | a trait's derive is `comptime def derive(T: type) -> impl {trait} for T`, whose body is `return impl {trait} for T:` with the impl's methods |
+| [E0607](#e0607) | `comptime.derive-template` | a trait's derive is `comptime def derive(T: type) -> impl {trait} for T`, whose body is `return impl {trait} for T:` with the impl's methods |
 | [E0608](#e0608) | `comptime.derive-failed` | deriving `{trait}` for `{ty}` stopped at compile time: {reason} |
 | [E0609](#e0609) | `comptime.instance-failed` | making `{name}` stopped at compile time: {reason} |
 | E0610 | `comptime.instances-unbounded` | `{name}` needs more than {count} instances: its instances call it with ever more types |
@@ -12780,7 +12870,7 @@ it. `sisu explain CODE` prints the same line.
 | D0100 | `lsp.not-analysed` | the document is not analysed |
 | D0101 | `lsp.has-errors` | the program has errors: fix them to see its borrows |
 | D0102 | `lsp.keyword` | keyword |
-| D0103 | `native.unsupported` | the native backend does not compile {what} yet (in `{function}`); `sisu run` without `--native` runs the program |
+| [D0103](#d0103) | `native.unsupported` | the native backend does not compile {what} yet (in `{function}`); `sisu run` without `--native` runs the program |
 | D0104 | `native.no-runtime` | the native runtime `libsisu_rt.a` is not beside `sisu` (in `{dir}`); `cargo build` in `compiler/` builds it |
 | D0105 | `native.link-failed` | linking `{output}` failed: {detail} |
 | D0106 | `native.built` | built `{output}` |

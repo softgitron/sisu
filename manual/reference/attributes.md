@@ -254,7 +254,7 @@ compile time cannot be written yet.
 | `@refines(REFERENCE)` | a function | tests it against a reference ([Refinement tests](#refinement-tests)) | in stage 0; leaning |
 | `@fixture(scope="...")` | a function | makes a value for the tests that name it ([Fixtures](#fixtures)) | designed |
 | `@repr(c)`, `@repr(u8)` | a struct, an enum | fixes the layout ([The layout of a type](#the-layout-of-a-type)) | partly in stage 0 |
-| `@export("NAME")` | a function | makes it callable from C ([Exported functions](#exported-functions)) | designed; checked, and a symbol of Sisu's convention, in stage 0 |
+| `@export("NAME")` | a function | makes it callable from C ([Exported functions](#exported-functions)) | in stage 0, natively, but for a struct by value |
 | `@blocking` | a function of an `extern` block | says that a call may block ([Foreign functions that block](#foreign-functions-that-block)) | designed; checked in stage 0 |
 | `@no_alloc`, `@no_block`, `@stack(max=N)` | a function | limit what it may do ([Resource limits](#resource-limits)) | leaning; accepted with W0030 and not checked in stage 0 |
 | `@float(fast)` | a function | allows fast floating point inside it ([Fast floating point](#fast-floating-point)) | in stage 0, as a permission it does not use |
@@ -805,21 +805,93 @@ type declared `@repr(c)`; any other is E0991
 (`unsafe.export-not-c`), so a parameter of a struct with a `String` in
 it is refused ([R17](diagnostics.md#e0991)).
 
-**Stage 0 differs.** A native build makes the function the global
-symbol `NAME`, which a C program linked with it calls, but with Sisu's
-own convention rather than C's: C declares `uint8_t NAME(R *result,
-const P1 *a1, ...)`, passing the address of the result and of each
-argument, each in memory of its layout (an `i32` takes a word, as every
-sized integer does), and reads the status it returns, 0, or 1 when a
-panic left the function, after which it must not call Sisu code again.
-The program's SIR names each exported function on a line `export
-"NAME" FUNCTION` after its entry, and the function is compiled whether
-or not `main` calls it, so the symbol is in every native build. A
-symbol that takes and gives C's values directly is the next step.
+A native build makes the function the global symbol `NAME` of C's own
+convention over plain values, whether or not `main` calls it: the
+integers and floats at their width, a `bool` a byte, a `char` a 32-bit
+code, a raw pointer an address and `()` no result. A C program linked
+with it declares `int32_t sauna_heat(int32_t celsius, int32_t
+minutes);` and calls it. A `@repr(c)` struct goes by a pointer to it,
+`ptr[Reading]`. The program's SIR names each exported function on a
+line `export "NAME" FUNCTION` after its entry.
 
-**Status.** Designed ([12](../../proposal/12-interop-and-targets.md),
-[22](../../proposal/22-unsafe.md); D-080), with its checks and the
-symbol in stage 0, with the differences noted.
+A panic cannot unwind into C, so a panic that leaves an exported
+function prints its report and ends the program with status 134
+([R8](errors.md#aborts)). A program can call its own export through
+an `extern` block, as C would, which `sisu run --native` shows: the
+first call returns, and the second fails the function's `assert` and
+ends the run:
+
+<!-- file: examples/reference-attributes/export_c.files/export_c.sisu -->
+```sisu
+# The program calls its own exported function as C calls it.
+@export("sauna_heat")
+def heat(minutes: i32) -> i32:
+    assert minutes <= 30, "nobody stays that long"
+    return 60 + minutes * 2
+
+# safety: `sauna_heat` is the export above, of C's convention.
+extern "C":
+    def sauna_heat(minutes: i32) -> i32
+
+def main():
+    # safety: the export takes an `i32` and returns one.
+    let short = unsafe sauna_heat(10)
+    print("{heat(10)} {short}")
+    # safety: as above.
+    let long = unsafe sauna_heat(45)
+    print("{long}")
+```
+
+<!-- output: examples/reference-attributes/export_c.console -->
+```console
+$ sisu run --native export_c.sisu
+80 80
+panic: assertion failed: minutes <= 30
+  message: nobody stays that long
+    minutes <= 30
+    │
+    45
+  at heat (export_c.sisu:4:5)
+```
+
+The interpreter calls no foreign function but the six it emulates
+([R3](declarations.md#foreign-functions)), so this program runs
+natively only.
+
+**Stage 0 differs.** A `@repr(c)` struct passed by value has no C
+classification yet, so the native build refuses it with D0103
+(`native.unsupported`, [R17](diagnostics.md#d0103)), whose text calls
+the parameter a `ref` and leaves the function's name empty; the
+interpreter runs the program:
+
+<!-- file: examples/reference-attributes/export_struct.files/export_struct.sisu -->
+```sisu
+# A `@repr(c)` struct passed to an exported function by value.
+@repr(c)
+struct Reading:
+    celsius: i32
+    minutes: i32
+
+@export("sauna_load")
+def load(reading: Reading) -> i32:
+    return reading.celsius * reading.minutes
+
+def main():
+    print(load(Reading(celsius=80, minutes=10)))
+```
+
+<!-- output: examples/reference-attributes/export_struct.console -->
+```console
+$ sisu run export_struct.sisu
+800
+$ sisu build --native export_struct.sisu
+the native backend does not compile a parameter of the exported function `sauna_load`, a `ref Reading` yet (in ``); `sisu run` without `--native` runs the program
+```
+
+Pass a `ptr[Reading]` instead.
+
+**Status.** In stage 0 ([12](../../proposal/12-interop-and-targets.md),
+[22](../../proposal/22-unsafe.md); D-080), with the difference noted.
 
 ## Foreign functions that block
 
@@ -1255,7 +1327,7 @@ idea for later, and `@inline` has no design.
 | [E0603](diagnostics.md#e0603), [E0606](diagnostics.md#e0606) | `comptime.budget`, `comptime.budget-attribute` | [Compile-time budgets](#compile-time-budgets) |
 | E0821 | `test.refines-mismatch` | [Refinement tests](#refinement-tests) |
 | E0702 | `type.test-signature` | [Fixtures](#fixtures) |
-| [E0989](diagnostics.md#e0989), [E0991](diagnostics.md#e0991) | `unsafe.export-signature`, `unsafe.export-not-c` | [Exported functions](#exported-functions) |
+| [E0989](diagnostics.md#e0989), [E0991](diagnostics.md#e0991), [D0103](diagnostics.md#d0103) | `unsafe.export-signature`, `unsafe.export-not-c`, `native.unsupported` | [Exported functions](#exported-functions) |
 | [E0990](diagnostics.md#e0990) | `unsafe.blocking-not-foreign` | [Foreign functions that block](#foreign-functions-that-block) |
 | [W0030](diagnostics.md#w0030) | `resolve.unchecked-attribute` | [Resource limits](#resource-limits) |
 | [E0448](diagnostics.md#e0448) | `resolve.float-attribute` | [Fast floating point](#fast-floating-point) |

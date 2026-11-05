@@ -8,6 +8,7 @@ Eero pays 29.00
 Roni pays 29.00
 $ bill --help
 usage: bill [OPTIONS] NAME...
+Splits a bill between the names it is given.
   --total <f64>
       The bill, before the tip.
   --tip <int>  (default: 10)

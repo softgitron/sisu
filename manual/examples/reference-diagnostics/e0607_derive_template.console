@@ -1,0 +1,8 @@
+$ sisu check e0607_derive_template.sisu
+error[E0607]: a trait's derive is `comptime def derive(T: type) -> impl Columns for T`, whose body is `return impl Columns for T:` with the impl's methods
+  --> e0607_derive_template.sisu:6:18
+  |
+6 |     comptime def derive(T: type) -> impl Columns for T:
+  |                  ^^^^^^
+  = note: only checks of the type may come before the `return impl`: `comptime assert`, and `comptime panic` and `comptime if` of them, which write no code
+

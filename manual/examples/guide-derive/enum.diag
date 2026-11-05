@@ -1,2 +1,2 @@
 26:9-26:12 E0608 comptime.derive-failed trait="Csv" ty="Heater" reason="`Heater` is not a struct"
-  label 13:30-13:77 comptime.derive-here
+  label 11:22-11:69 comptime.derive-here

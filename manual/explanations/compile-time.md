@@ -190,6 +190,9 @@ error[E0310]: `+=` cannot be applied to `int` and `String`
    |
 19 |     print(total(Team(name="Owls", points=7)))
    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+ 6 |         sum_so_far += value.[f]
+   |         ----------------------- the template's line that wrote it
   = note: in the instance of `total[Team]` that this call makes: `sum_so_far += value.name`
 
 ```
@@ -197,11 +200,14 @@ error[E0310]: `+=` cannot be applied to `int` and `String`
 E0310 (`type.binary-operator`) is right that a `String` cannot be added
 to an `int`. It stands at line 19, the call that asked for `Team`, and
 its note quotes the line that the compiler wrote by unrolling the loop
-for `Team`, since that line exists only in the instance. Nothing points
-at line 6, the loop in the template that adds the fields: the reader
-works back from the instance's line, whose `+=` the message names, to
-the template. That is the price of checking
-at instantiation, and the plan's findings record what is still missing.
+for `Team`, since that line exists only in the instance. A label
+points at line 6, the statement of the loop that wrote it, "the
+template's line that wrote it" (`type.instance-line`), so the reader
+sees both the line that failed and the line to change. What the error
+cannot say is which struct the template's author meant to refuse:
+`total` promised nothing about `T`, so `Team` reaches the loop, and the
+error is found at the call, for the type, rather than at the template's
+signature. That is the price of checking at instantiation.
 
 There are other costs. Compile-time code runs at every build that needs
 its result, and a budget bounds it but does not make it free. Some

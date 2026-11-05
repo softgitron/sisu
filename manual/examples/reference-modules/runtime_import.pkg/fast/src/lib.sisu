@@ -1,0 +1,3 @@
+# A library that the native build of `stove` depends on.
+pub def heat_up() -> str:
+    return "heated by the native build's library"

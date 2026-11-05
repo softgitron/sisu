@@ -25,7 +25,7 @@ between the names it is given:
 # Splits a bill: the options are the fields of a struct.
 import cli
 
-## What the command line can say.
+## Splits a bill between the names it is given.
 struct Options:
     ## The bill, before the tip.
     total: f64
@@ -40,6 +40,7 @@ def main(sys: System) -> ! cli.Error:
     let args = sys.env.args()
     if "--help" in args:
         print("usage: bill [OPTIONS] NAME...")
+        print(cli.about[Options]())
         print(cli.help_text[Options]())
         return Ok(())
     let options = cli.parse[Options](args) else as e:
@@ -87,13 +88,17 @@ Roni pays 29.00
 of value it takes and its default, and a line for the positional
 arguments, each with the field's `##` comment under it, which
 reflection gives the library as the field's `doc`
-([R12](../reference/compile-time.md#reflection)). `main` tests for `--help` before it parses, since a help
-request without the required `--total` would otherwise be an error:
+([R12](../reference/compile-time.md#reflection)). `cli.about[Options]()`
+gives the struct's own `##` comment, which `main` prints between its
+usage line and the options. `main` tests for `--help` before it parses,
+since a help request without the required `--total` would otherwise be
+an error:
 
 <!-- output: examples/guide-command-line/help.console -->
 ```console
 $ sisu run bill.sisu --help
 usage: bill [OPTIONS] NAME...
+Splits a bill between the names it is given.
   --total <f64>
       The bill, before the tip.
   --tip <int>  (default: 10)
@@ -150,6 +155,7 @@ Eero pays 29.00
 Roni pays 29.00
 $ bill --help
 usage: bill [OPTIONS] NAME...
+Splits a bill between the names it is given.
   --total <f64>
       The bill, before the tip.
   --tip <int>  (default: 10)
@@ -173,8 +179,8 @@ transcript "tests/bill.transcript" ... ok
 ```
 
 A transcript runs the program that the tests run, built by the same
-front end as `sisu run`'s, so `cli.help_text` and the fields' `doc` work
-in it as they do in a run. You need not write the expected lines by hand. Write the `$` lines, run `sisu
+front end as `sisu run`'s, so `cli.about`, `cli.help_text` and the
+fields' `doc` work in it as they do in a run. You need not write the expected lines by hand. Write the `$` lines, run `sisu
 test --update`, and read what it stored before you keep it;
 [Test a command-line tool](test-tool.md#4-review-a-change) shows the
 review.
