@@ -908,7 +908,7 @@ Sunday) of `month`, week 5 being the last, at `seconds` of local time.
 ## `Zone`
 
 ```sisu
-@derive(Eq, Debug)
+@derive(Eq)
 pub struct Zone
     ## The zone's name, as `Europe/Helsinki`, or `UTC+05:30` for a fixed one.
     pub name: String
@@ -917,6 +917,11 @@ pub struct Zone
     daylight: String
     daylight_offset: int
     rules: (Change, Change)?
+
+## A zone as the code that makes it writes it (decision 684):
+## `Zone.named("Europe/Helsinki")`, `Zone.utc()` or `Zone.fixed(19800)`,
+## and not its private fields, its rules among them.
+impl Debug for Zone
 ```
 
 A time zone (11, `std.time`): the offset from UTC of its standard time
