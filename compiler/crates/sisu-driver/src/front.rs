@@ -356,6 +356,54 @@ impl Stage1 {
         Ok(Stage1 { exe, compiler })
     }
 
+    /// Whether this stage 1's `sir --tests PKG/tests/NAME.sisu` compiles a
+    /// package's black-box test file, whose dependency is the package
+    /// (stage 1's R65): `sisu1 0.7.0` and later (decision 508), asked once
+    /// in this process. [`BLACK_BOX_VAR`] decides when it is set.
+    pub fn black_box_tests(&self) -> bool {
+        if let Ok(v) = std::env::var(BLACK_BOX_VAR) {
+            return v == "1";
+        }
+        self.version().is_some_and(|v| v >= BLACK_BOX_SINCE)
+    }
+
+    /// The version `sisu1 --version` prints, asked once in this process
+    /// (none for a stage 1 older than 0.6.0, which names none).
+    pub fn version(&self) -> Option<(u32, u32, u32)> {
+        static ANSWER: std::sync::OnceLock<Option<(u32, u32, u32)>> = std::sync::OnceLock::new();
+        *ANSWER.get_or_init(|| {
+            std::process::Command::new(&self.exe)
+                .arg("--version")
+                .stdin(std::process::Stdio::null())
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .and_then(|o| stage1_version(&String::from_utf8_lossy(&o.stdout)))
+        })
+    }
+
+    /// Whether `sisu repl` and `sisu ws` check and lower their programs
+    /// through this stage 1 (decision 563): `sisu1 0.8.0` and later, whose
+    /// round offers what a session's program needs. [`REPL_VAR`] decides
+    /// when it is set.
+    pub fn serves_repl(&self) -> bool {
+        if let Ok(v) = std::env::var(REPL_VAR) {
+            return v == "1";
+        }
+        self.version().is_some_and(|v| v >= REPL_SINCE)
+    }
+
+    /// Whether this stage 1's `sir --repl` and `sir --worksheet` take
+    /// `--dir DIR` and `--name NAME`, and its `parse` takes `--bindings`
+    /// (`sisu1 0.9.0` and later, decision 640). [`REPL_OPTIONS_VAR`]
+    /// decides when it is set.
+    pub fn serves_repl_options(&self) -> bool {
+        if let Ok(v) = std::env::var(REPL_OPTIONS_VAR) {
+            return v == "1";
+        }
+        self.version().is_some_and(|v| v >= REPL_OPTIONS_SINCE)
+    }
+
     /// Whether this stage 1's `sir --tests` reports a program's diagnostics
     /// itself, its warnings among them, and takes `--features`,
     /// `--no-default-features` and `--locked`, so that `sisu test` and
@@ -366,48 +414,6 @@ impl Stage1 {
     /// by `sir --tests --locked` of an empty directory: a stage 1 whose
     /// `sir` takes no `--locked` stops at its usage, in about 50 ms, before
     /// it reads anything, and one that takes it finds no package there.
-    /// Whether this stage 1's `sir --tests PKG/tests/NAME.sisu` compiles a
-    /// package's black-box test file, whose dependency is the package
-    /// (stage 1's R65): `sisu1 0.7.0` and later (decision 508), asked once
-    /// in this process. [`BLACK_BOX_VAR`] decides when it is set.
-    pub fn black_box_tests(&self) -> bool {
-        if let Ok(v) = std::env::var(BLACK_BOX_VAR) {
-            return v == "1";
-        }
-        static ANSWER: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        *ANSWER.get_or_init(|| {
-            std::process::Command::new(&self.exe)
-                .arg("--version")
-                .stdin(std::process::Stdio::null())
-                .output()
-                .ok()
-                .filter(|o| o.status.success())
-                .and_then(|o| stage1_version(&String::from_utf8_lossy(&o.stdout)))
-                .is_some_and(|v| v >= BLACK_BOX_SINCE)
-        })
-    }
-
-    /// Whether `sisu repl` and `sisu ws` check and lower their programs
-    /// through this stage 1 (decision 563): `sisu1 0.8.0` and later, whose
-    /// round offers what a session's program needs, asked once in this
-    /// process. [`REPL_VAR`] decides when it is set.
-    pub fn serves_repl(&self) -> bool {
-        if let Ok(v) = std::env::var(REPL_VAR) {
-            return v == "1";
-        }
-        static ANSWER: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        *ANSWER.get_or_init(|| {
-            std::process::Command::new(&self.exe)
-                .arg("--version")
-                .stdin(std::process::Stdio::null())
-                .output()
-                .ok()
-                .filter(|o| o.status.success())
-                .and_then(|o| stage1_version(&String::from_utf8_lossy(&o.stdout)))
-                .is_some_and(|v| v >= REPL_SINCE)
-        })
-    }
-
     pub fn sir_reports(&self) -> bool {
         if let Ok(v) = std::env::var(SIR_REPORTS_VAR) {
             return v == "1";
@@ -974,6 +980,14 @@ const BLACK_BOX_SINCE: (u32, u32, u32) = (0, 7, 0);
 /// The first stage 1 that `sisu repl` and `sisu ws` run on (decision 563).
 const REPL_SINCE: (u32, u32, u32) = (0, 8, 0);
 
+/// The first stage 1 whose `sir --repl` and `sir --worksheet` take `--dir`
+/// and `--name`, and whose `parse` takes `--bindings` (decision 640).
+const REPL_OPTIONS_SINCE: (u32, u32, u32) = (0, 9, 0);
+
+/// `SISU_STAGE1_REPL_OPTIONS=1` (or `0`): whether the driver gives stage 1
+/// `--dir`, `--name` and `parse --bindings`, whatever its version says.
+pub const REPL_OPTIONS_VAR: &str = "SISU_STAGE1_REPL_OPTIONS";
+
 /// `SISU_STAGE1_REPL=1` (or `0`): whether `sisu repl` and `sisu ws` check
 /// and lower their programs through stage 1, whatever its version says.
 pub const REPL_VAR: &str = "SISU_STAGE1_REPL";
@@ -1005,6 +1019,8 @@ mod version_tests {
         assert!(super::stage1_version("sisu1 0.6.0") < Some(super::BLACK_BOX_SINCE));
         assert!(super::stage1_version("sisu1 0.8.0") >= Some(super::REPL_SINCE));
         assert!(super::stage1_version("sisu1 0.7.0") < Some(super::REPL_SINCE));
+        assert!(super::stage1_version("sisu1 0.9.0") >= Some(super::REPL_OPTIONS_SINCE));
+        assert!(super::stage1_version("sisu1 0.8.0") < Some(super::REPL_OPTIONS_SINCE));
         assert_eq!(super::stage1_version("error: Usage(\"--version\")"), None);
         assert_eq!(super::stage1_version("sisu 0.0.1"), None);
     }

@@ -75,7 +75,39 @@ fn line(id: MsgId, params: &[(&str, String)]) -> String {
 /// Rust front end.
 pub(crate) enum Checker {
     Rust,
-    Stage1 { stage1: crate::front::Stage1, dir: std::path::PathBuf },
+    Stage1 {
+        stage1: crate::front::Stage1,
+        dir: std::path::PathBuf,
+        /// Stage 1 takes `--dir`, `--name` and `parse --bindings`
+        /// (`sisu1 0.9.0`, decision 640).
+        options: bool,
+    },
+}
+
+/// Where a session's program, or a worksheet, stands for stage 1 (`--dir`,
+/// which its `embed` and its inline metadata's paths resolve in), and
+/// what its diagnostics and its SIR call it (`--name`), when stage 1 takes
+/// them (decision 640).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Place {
+    pub dir: Option<std::path::PathBuf>,
+    pub name: Option<String>,
+}
+
+impl Place {
+    /// The options of stage 1 that say it.
+    fn words(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        if let Some(d) = &self.dir {
+            out.push("--dir".to_string());
+            out.push(d.display().to_string());
+        }
+        if let Some(n) = &self.name {
+            out.push("--name".to_string());
+            out.push(n.clone());
+        }
+        out
+    }
 }
 
 /// A program built for a session, or why not: its SIR and, from stage 1,
@@ -99,15 +131,16 @@ impl Checker {
         if std::fs::create_dir_all(&dir).is_err() {
             return Checker::Rust;
         }
-        Checker::Stage1 { stage1, dir }
+        let options = stage1.serves_repl_options();
+        Checker::Stage1 { stage1, dir, options }
     }
 
     /// Stage 1's `sir --repl SESSION INPUT --kept OUT` (RULES.md, R79): the
     /// session's program `session` with `input` after it, or with the file
     /// `load` loaded into it (`--load`): the SIR and OUT, or the
     /// diagnostics stage 1 drew, the input's in its text.
-    fn repl(&self, session: &str, input: &str, load: Option<&str>, host: &mut dyn Host) -> Built {
-        let Checker::Stage1 { stage1, dir } = self else { return Err(String::new()) };
+    fn repl(&self, session: &str, input: &str, load: Option<&str>, place: &Place, host: &mut dyn Host) -> Built {
+        let Checker::Stage1 { stage1, dir, options } = self else { return Err(String::new()) };
         let written = |name: &str, text: &str| -> Result<String, String> {
             let path = dir.join(name);
             std::fs::write(&path, text).map_err(|e| format!("{}\n", text_of_io(&path, &e)))?;
@@ -126,6 +159,9 @@ impl Checker {
         if load.is_some() {
             words.push("--load".into());
         }
+        if *options {
+            words.extend(place.words());
+        }
         let ran = stage1.run(&words, crate::front::Backend::Unused, host).map_err(|_| String::new())?;
         if ran.status != exit::OK {
             return Err(ran.stderr);
@@ -137,9 +173,12 @@ impl Checker {
 
     /// Stage 1's `sir --worksheet FILE`: the worksheet's SIR with its
     /// statements marked, or its diagnostics in the file as written.
-    fn worksheet(&self, file: &str, host: &mut dyn Host) -> Result<sisu_sir::Program, String> {
-        let Checker::Stage1 { stage1, .. } = self else { return Err(String::new()) };
-        let words = vec!["sir".to_string(), "--worksheet".to_string(), file.to_string()];
+    fn worksheet(&self, file: &str, place: &Place, host: &mut dyn Host) -> Result<sisu_sir::Program, String> {
+        let Checker::Stage1 { stage1, options, .. } = self else { return Err(String::new()) };
+        let mut words = vec!["sir".to_string(), "--worksheet".to_string(), file.to_string()];
+        if *options {
+            words.extend(place.words());
+        }
         let ran = stage1.run(&words, crate::front::Backend::Unused, host).map_err(|_| String::new())?;
         if ran.status != exit::OK {
             return Err(ran.stderr);
@@ -147,20 +186,27 @@ impl Checker {
         read_sir(&ran.stdout)
     }
 
-    /// The tree of an input as the statements of a script, from stage 1's
-    /// `parse --tree` or the Rust parser's.
-    fn syntax(&self, input: &str, host: &mut dyn Host) -> Option<Syntax> {
+    /// What `:why` reads of an input as the statements of a script: from
+    /// stage 1's `parse --bindings` (decision 640), or from the tree of its
+    /// `parse --tree` or of the Rust parser (decision 621).
+    fn outline(&self, input: &str, host: &mut dyn Host) -> Option<Outline> {
         let text = format!("{SHEBANG}{input}\n");
-        let dump = match self {
-            Checker::Rust => sisu_parser::parse(FileId(0), &text).tree.dump(false),
-            Checker::Stage1 { stage1, dir } => {
+        match self {
+            Checker::Rust => Syntax::read(text.clone(), &sisu_parser::parse(FileId(0), &text).tree.dump(false))
+                .map(|t| Outline::of(&t)),
+            Checker::Stage1 { stage1, dir, options } => {
                 let path = dir.join("tree.sisu");
                 std::fs::write(&path, &text).ok()?;
-                let words = vec!["parse".to_string(), "--tree".to_string(), path.display().to_string()];
-                stage1.run(&words, crate::front::Backend::Unused, host).ok()?.stdout
+                let how = if *options { "--bindings" } else { "--tree" };
+                let words = vec!["parse".to_string(), how.to_string(), path.display().to_string()];
+                let printed = stage1.run(&words, crate::front::Backend::Unused, host).ok()?.stdout;
+                if *options {
+                    Outline::read(text, &printed)
+                } else {
+                    Syntax::read(text, &printed).map(|t| Outline::of(&t))
+                }
             }
-        };
-        Syntax::read(text, &dump)
+        }
     }
 }
 
@@ -332,11 +378,6 @@ impl Syntax {
         out
     }
 
-    /// Whether a top-level statement binds `name`.
-    fn binds(&self, name: &str) -> bool {
-        self.top_level().into_iter().any(|s| self.bound_names(s).iter().any(|b| b == name))
-    }
-
     /// The initialiser of a `let`: its expression's node.
     fn initialiser(&self, stmt: usize) -> Option<usize> {
         let at = self.nodes[self.first_token(stmt, "EQ")?].end;
@@ -359,9 +400,9 @@ impl Syntax {
         out
     }
 
-    /// Whether a statement may change `name`: assigns to it (or into it),
-    /// or calls a method on it.
-    fn changes(&self, stmt: usize, name: &str) -> bool {
+    /// The names a statement may change: what it assigns to (or into), and
+    /// what it calls a method on.
+    fn changed(&self, stmt: usize) -> Vec<String> {
         let root_name = |n: usize| -> Option<String> {
             let mut cur = n;
             loop {
@@ -372,21 +413,137 @@ impl Syntax {
                 }
             }
         };
+        let mut out: Vec<String> = Vec::new();
         match self.kind(stmt) {
-            "ASSIGN_STMT" => self.child_nodes(stmt).next().and_then(root_name).as_deref() == Some(name),
-            "EXPR_STMT" => self.preorder(stmt).into_iter().any(|c| {
-                self.kind(c) == "CALL_EXPR"
-                    && self
+            "ASSIGN_STMT" => out.extend(self.child_nodes(stmt).next().and_then(root_name)),
+            "EXPR_STMT" => {
+                for c in self.preorder(stmt) {
+                    if self.kind(c) != "CALL_EXPR" {
+                        continue;
+                    }
+                    let receiver = self
                         .child_nodes(c)
                         .next()
                         .filter(|&f| self.kind(f) == "FIELD_EXPR")
                         .and_then(|f| self.child_nodes(f).next())
-                        .and_then(root_name)
-                        .as_deref()
-                        == Some(name)
-            }),
-            _ => false,
+                        .and_then(root_name);
+                    if let Some(r) = receiver
+                        && !out.contains(&r)
+                    {
+                        out.push(r);
+                    }
+                }
+            }
+            _ => {}
         }
+        out
+    }
+}
+
+/// What `:why` reads of an input: for each top-level statement or item its
+/// kind (`let`, `assign`, `expr`, `item` or `other`) and range, the names
+/// it binds, its initialiser's range, the names that reads, and the names
+/// it may change. Stage 1's `parse --bindings` prints it (decision 640);
+/// for an older stage 1 and the Rust front end it is read off the tree.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Outline {
+    text: String,
+    stmts: Vec<Bindings>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Bindings {
+    kind: String,
+    start: usize,
+    end: usize,
+    binds: Vec<String>,
+    initialiser: Option<(usize, usize)>,
+    reads: Vec<String>,
+    changes: Vec<String>,
+}
+
+impl Outline {
+    /// What `parse --bindings` prints of `text`: a line `KIND START END`
+    /// for each top-level node, then indented lines `binds N...`,
+    /// `initialiser START END`, `reads N...` and `changes N...`.
+    fn read(text: String, printed: &str) -> Option<Outline> {
+        let mut stmts: Vec<Bindings> = Vec::new();
+        for l in printed.lines() {
+            if l.trim().is_empty() {
+                continue;
+            }
+            let indented = l.starts_with(' ');
+            let mut words = l.split_whitespace();
+            let head = words.next()?;
+            let names = |w: std::str::SplitWhitespace| w.map(str::to_string).collect::<Vec<_>>();
+            if !indented {
+                let start = words.next()?.parse().ok()?;
+                let end = words.next()?.parse().ok()?;
+                stmts.push(Bindings { kind: head.to_string(), start, end, ..Bindings::default() });
+                continue;
+            }
+            let b = stmts.last_mut()?;
+            match head {
+                "binds" => b.binds = names(words),
+                "reads" => b.reads = names(words),
+                "changes" => b.changes = names(words),
+                "initialiser" => {
+                    let start = words.next()?.parse().ok()?;
+                    let end = words.next()?.parse().ok()?;
+                    b.initialiser = Some((start, end));
+                }
+                _ => {}
+            }
+        }
+        Some(Outline { text, stmts })
+    }
+
+    /// The same, read off an input's tree (decision 621).
+    fn of(t: &Syntax) -> Outline {
+        let stmts = t
+            .top_level()
+            .into_iter()
+            .map(|s| {
+                let kind = match t.kind(s) {
+                    "LET_STMT" => "let",
+                    "ASSIGN_STMT" => "assign",
+                    "EXPR_STMT" => "expr",
+                    k if ITEM_KINDS.contains(&k) => "item",
+                    _ => "other",
+                };
+                let init = t.initialiser(s);
+                Bindings {
+                    kind: kind.to_string(),
+                    start: t.nodes[s].start,
+                    end: t.nodes[s].end,
+                    binds: t.bound_names(s),
+                    initialiser: init.map(|i| (t.nodes[i].start, t.nodes[i].end)),
+                    reads: init.map(|i| t.names_read(i)).unwrap_or_default(),
+                    changes: t.changed(s),
+                }
+            })
+            .collect();
+        Outline { text: t.text.clone(), stmts }
+    }
+
+    /// Whether a top-level statement binds `name`.
+    fn binds(&self, name: &str) -> bool {
+        self.binder(name).is_some()
+    }
+
+    /// The statement that binds `name`.
+    fn binder(&self, name: &str) -> Option<&Bindings> {
+        self.stmts.iter().find(|b| b.binds.iter().any(|n| n == name))
+    }
+
+    /// Whether a statement may change `name`.
+    fn changes(&self, name: &str) -> bool {
+        self.stmts.iter().any(|b| b.changes.iter().any(|n| n == name))
+    }
+
+    /// The text of an initialiser.
+    fn text_of(&self, (start, end): (usize, usize)) -> &str {
+        self.text.get(start..end).unwrap_or("")
     }
 }
 
@@ -411,8 +568,8 @@ struct Entry {
     shown: (String, String, usize),
     /// From stage 1: the session's program that keeps the input.
     kept: String,
-    /// The input's tree, read when `:why` asks.
-    syntax: std::cell::OnceCell<Option<Syntax>>,
+    /// What `:why` reads of the input, read when it asks.
+    outline: std::cell::OnceCell<Option<Outline>>,
 }
 
 impl Entry {
@@ -427,7 +584,7 @@ impl Entry {
             prefix: 0,
             shown,
             kept: String::new(),
-            syntax: Default::default(),
+            outline: Default::default(),
         };
         let expression = rust
             && rust_syntax(&format!("{SHEBANG}{input}\n")).is_some_and(|t| {
@@ -477,7 +634,7 @@ fn split_preamble(file: &str, text: &str) -> (String, Entry) {
         prefix: 0,
         shown: (file.to_string(), text.to_string(), end),
         kept: String::new(),
-        syntax: Default::default(),
+        outline: Default::default(),
     };
     (preamble, entry)
 }
@@ -546,6 +703,9 @@ struct Session {
     package: Option<(String, std::path::PathBuf)>,
     cwd: std::path::PathBuf,
     checker: Checker,
+    /// Where the session's program stands and what it is called, for a
+    /// stage 1 that takes them (decision 640).
+    place: Place,
 }
 
 impl Session {
@@ -590,7 +750,7 @@ impl Session {
     /// The session's first `upto` inputs with `entry` after them, built.
     fn build(&self, upto: usize, entry: &Entry, host: &mut dyn Host) -> Built {
         if !self.rust() {
-            return self.checker.repl(&self.kept(upto), &entry.text, entry.load.as_deref(), host);
+            return self.checker.repl(&self.kept(upto), &entry.text, entry.load.as_deref(), &self.place, host);
         }
         let (program, at) = self.program(upto, Some(&entry.source));
         match rust_compile(SESSION, &program, &self.cwd, &[], host) {
@@ -664,15 +824,15 @@ impl Session {
         if out.is_empty() { "?".into() } else { out }
     }
 
-    /// The tree of the input `k` kept, read once.
-    fn syntax(&self, k: usize, host: &mut dyn Host) -> Option<&Syntax> {
+    /// What `:why` reads of the input `k` kept, read once.
+    fn outline(&self, k: usize, host: &mut dyn Host) -> Option<&Outline> {
         let e = &self.entries[k];
-        e.syntax.get_or_init(|| self.checker.syntax(&e.text, host)).as_ref()
+        e.outline.get_or_init(|| self.checker.outline(&e.text, host)).as_ref()
     }
 
     /// The last of the first `upto` inputs that binds `name`.
     fn binder(&self, upto: usize, name: &str, host: &mut dyn Host) -> Option<usize> {
-        (0..upto).rev().find(|&k| self.syntax(k, host).is_some_and(|t| t.binds(name)))
+        (0..upto).rev().find(|&k| self.outline(k, host).is_some_and(|t| t.binds(name)))
     }
 
     /// `:why NAME`.
@@ -697,9 +857,9 @@ impl Session {
     ) {
         seen.push(name.to_string());
         let pad = "  ".repeat(depth);
-        let tree = self.syntax(k, host).cloned();
-        let stmt = tree.as_ref().and_then(|t| t.top_level().into_iter().find(|&s| t.binds_at(s, name)));
-        let init = tree.as_ref().zip(stmt).and_then(|(t, s)| t.initialiser(s));
+        let tree = self.outline(k, host).cloned();
+        let stmt = tree.as_ref().and_then(|t| t.binder(name)).cloned();
+        let init = stmt.as_ref().and_then(|s| s.initialiser);
         let expr = tree.as_ref().zip(init).map(|(t, i)| t.text_of(i).trim().to_string()).unwrap_or_default();
         host.stdout(&format!(
             "{pad}{}",
@@ -727,8 +887,8 @@ impl Session {
             }
         }
         // The session's values it was computed from, as they were then.
-        if let (Some(t), Some(i)) = (&tree, init) {
-            for dep in t.names_read(i) {
+        if let Some(s) = stmt.as_ref().filter(|s| s.initialiser.is_some()) {
+            for dep in s.reads.clone() {
                 if seen.contains(&dep) {
                     continue;
                 }
@@ -740,8 +900,7 @@ impl Session {
         }
         // The inputs that changed it since.
         for j in k + 1..self.entries.len() {
-            let changed =
-                self.syntax(j, host).is_some_and(|t| t.top_level().into_iter().any(|s| t.changes(s, name)));
+            let changed = self.outline(j, host).is_some_and(|t| t.changes(name));
             if changed {
                 host.stdout(&format!(
                     "{pad}  {}",
@@ -752,13 +911,6 @@ impl Session {
                 ));
             }
         }
-    }
-}
-
-impl Syntax {
-    /// Whether the statement `stmt` binds `name`.
-    fn binds_at(&self, stmt: usize, name: &str) -> bool {
-        self.bound_names(stmt).iter().any(|b| b == name)
     }
 }
 
@@ -826,6 +978,9 @@ pub(crate) fn repl(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32
     if let Some((name, _)) = &package {
         host.stderr(&line(msg::CLI_REPL_LOADED, &[("name", name.clone())]));
     }
+    // A session stands in the working directory, and one that loads a
+    // file is called by it (decision 640).
+    let place = Place { dir: Some(cwd.clone()), name: loaded.as_ref().and_then(|(_, e)| e.load.clone()) };
     let mut s = Session {
         preamble: SHEBANG.into(),
         entries: Vec::new(),
@@ -833,6 +988,7 @@ pub(crate) fn repl(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32
         package,
         cwd,
         checker: Checker::choose(front, host),
+        place,
     };
     if let Some((preamble, first)) = loaded {
         s.preamble = preamble;
@@ -989,7 +1145,11 @@ pub(crate) fn evaluate_sheet(
     host: &mut dyn Host,
 ) -> Result<Sheet, String> {
     let (prog, spans) = match checker {
-        Checker::Stage1 { .. } => (checker.worksheet(file, host)?, None),
+        Checker::Stage1 { .. } => {
+            // A worksheet stands in its file's directory (decision 640).
+            let dir = std::path::Path::new(file).parent().map(|d| cwd.join(d));
+            (checker.worksheet(file, &Place { dir, name: None }, host)?, None)
+        }
         Checker::Rust => {
             let (prog, spans) = rust_sheet(file, source, cwd, host)?;
             (prog, Some(spans))
@@ -1114,8 +1274,27 @@ mod tests {
         let init = t.initialiser(stmts[0]).expect("an initialiser");
         assert_eq!(t.text_of(init), "(f(x), 2)");
         assert_eq!(t.names_read(init), vec!["f".to_string(), "x".to_string()]);
-        assert!(t.changes(stmts[1], "seen"));
-        assert!(!t.changes(stmts[1], "a"));
+        assert_eq!(t.changed(stmts[1]), vec!["seen".to_string()]);
         assert!(super::Syntax::read(String::new(), "A 0..1\nB 0..1\n").is_none());
+    }
+
+    /// What `parse --bindings` prints is read as the tree gives it (decision
+    /// 640): the same outline either way.
+    #[test]
+    fn printed_bindings_are_read_as_the_tree_gives_them() {
+        let text = "#!/usr/bin/env sisu\nlet (a, b) = (f(x), 2)\nseen.push(a)\ndef g():\n    pass\n".to_string();
+        let dump = sisu_parser::parse(super::FileId(0), &text).tree.dump(false);
+        let tree = super::Syntax::read(text.clone(), &dump).expect("a tree");
+        let from_tree = super::Outline::of(&tree);
+        let printed = "let 20 42\n  binds a b\n  initialiser 33 42\n  reads f x\n  changes\n\
+                       expr 43 55\n  binds\n  reads\n  changes seen\nitem 56 72\n";
+        let read = super::Outline::read(text, printed).expect("an outline");
+        assert_eq!(read.stmts.len(), 3);
+        assert_eq!(read.stmts[0], from_tree.stmts[0]);
+        assert_eq!(read.stmts[1].changes, from_tree.stmts[1].changes);
+        assert_eq!(read.stmts[2].kind, from_tree.stmts[2].kind);
+        assert_eq!(read.text_of(read.stmts[0].initialiser.expect("one")), "(f(x), 2)");
+        assert!(read.binds("b") && !read.binds("seen"));
+        assert!(read.changes("seen") && !read.changes("a"));
     }
 }
