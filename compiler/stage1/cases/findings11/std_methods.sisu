@@ -1,0 +1,20 @@
+# The methods of 03 the standard library adds (RULES.md, R108): checked
+# arithmetic as methods, `round_to`, `f64.total_order()`, and `max_by` and
+# `min_by` over a partially ordered key.
+def main():
+    print(2.checked_add(3))
+    print(9223372036854775807.checked_add(1))
+    print((-9223372036854775807 - 1).checked_sub(1))
+    print(6.checked_mul(-7))
+    print(4611686018427387904.checked_mul(2))
+    print((-4611686018427387904).checked_mul(2))
+    print(3037000500.checked_mul(3037000500))
+    print((-9223372036854775807 - 1).checked_mul(1))
+    print(2.5.round_to[int]())
+    print((-2.5).round_to[int]())
+    print(200.4.round_to[u8]())
+    let ordered = sorted([2.5, -1.0, 0.0, -0.0, 0.0 / 0.0].iter().map(x -> x.total_order()))
+    print(ordered)
+    print([2.5, 9.0, 4.0].iter().max_by(it))
+    print([2.5, 9.0, 4.0].iter().min_by(it))
+    print(["a", "bbb", "cc"].iter().max_by(len(it)))

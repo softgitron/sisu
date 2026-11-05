@@ -1,0 +1,2 @@
+6:5-6:16 E0277 resolve.import-in-body
+  fix resolve.move-import 4:1-4:1 "import math\n" 6:1-7:1 ""

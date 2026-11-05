@@ -1,0 +1,7 @@
+# `arbitrary[T]` of a type parameter without the bound says which bound
+# gives the generator (RULES.md, R107).
+def cases[T]() -> Gen[T]:
+    return arbitrary[T]
+
+def main():
+    pass

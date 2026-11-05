@@ -1,0 +1,10 @@
+## Why a booking failed.
+pub error BookingError:
+    Taken(hour: int)
+    Closed
+
+## The hour booked, or why not.
+pub def book(hour: int) -> int ! BookingError:
+    if hour > 20:
+        return Err(BookingError.Closed)
+    return Ok(hour)

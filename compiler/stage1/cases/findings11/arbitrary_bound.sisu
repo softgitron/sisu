@@ -1,0 +1,21 @@
+# `arbitrary[T]` of a type parameter bounded by `Arbitrary` draws through
+# the bound's impl (RULES.md, R107; G11).
+@derive(Arbitrary, Debug, Eq, Copy)
+struct Pair:
+    a: int
+    b: bool
+
+## The cases of `T`, whatever type it is, through its impl.
+def cases[T: Arbitrary]() -> Gen[T]:
+    return arbitrary[T]
+
+## Whether a value equals itself.
+def same[T: Eq](x: T) -> bool:
+    return x == x
+
+test "a property over any type with a generator":
+    check(cases[Pair]()) do p:
+        return same(p)
+
+def main():
+    print(same(Pair(a=1, b=True)))

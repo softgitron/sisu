@@ -114,6 +114,21 @@ pub enum Msg:
     TypeBigIntLiteral
     TypeLendIt
     TypeConvertToInt
+    ResolveVariantOfType
+    ResolveMadeBy
+    TypeItemStaysInList
+    TypeNarrowCapability
+    TypeFloatDivision
+    BorrowLentCapability
+    BorrowBoundAnew
+    ContractInvariantMethods
+    ContractInvariantMethod
+    ResolveOrphanLocalType
+    ResolveCfgImportAbsent
+    ResolveImportInBody
+    ResolveMoveImport
+    ParseHigherKinded
+    TypeTotalOrder
     TypeBinaryOperator
     TypeInterpolate
     TypeUnaryOperator
@@ -695,6 +710,21 @@ impl Msg:
             case TypeBigIntLiteral: "type.bigint-literal"
             case TypeLendIt: "type.lend-it"
             case TypeConvertToInt: "type.convert-to-int"
+            case ResolveVariantOfType: "resolve.variant-of-type"
+            case ResolveMadeBy: "resolve.made-by"
+            case TypeItemStaysInList: "type.item-stays-in-list"
+            case TypeNarrowCapability: "type.narrow-capability"
+            case TypeFloatDivision: "type.float-division"
+            case BorrowLentCapability: "borrow.lent-capability"
+            case BorrowBoundAnew: "borrow.bound-anew"
+            case ContractInvariantMethods: "contract.invariant-methods"
+            case ContractInvariantMethod: "contract.invariant-method"
+            case ResolveOrphanLocalType: "resolve.orphan-local-type"
+            case ResolveCfgImportAbsent: "resolve.cfg-import-absent"
+            case ResolveImportInBody: "resolve.import-in-body"
+            case ResolveMoveImport: "resolve.move-import"
+            case ParseHigherKinded: "parse.higher-kinded"
+            case TypeTotalOrder: "type.total-order"
             case TypeBinaryOperator: "type.binary-operator"
             case TypeInterpolate: "type.interpolate"
             case TypeUnaryOperator: "type.unary-operator"

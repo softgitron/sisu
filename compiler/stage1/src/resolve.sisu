@@ -377,6 +377,11 @@ pub struct NamedModule:
     pub syntax: list[Diagnostic]
     pub path: list[String]
     pub package: int
+    ## The names an import on the target that the build leaves out would
+    ## bind, with its condition, and the `if comptime` branches on the
+    ## target that the build leaves out (RULES.md, R106).
+    pub absent: list[(String, String)]
+    pub discarded: list[TextRange]
 
 ## The name diagnostics of each module of a program of several modules (09),
 ## in the modules' order, as stage 0's resolver and type checker find them:
@@ -2197,6 +2202,10 @@ impl Resolver:
 
     pure def statement(mut self, n: int):
         match self.kind(n):
+            # An import in a body is the type checker's `E0277`; the names
+            # it would bind are not reported again (RULES.md, R106).
+            case ImportItem | FromImport:
+                self.poison(n)
             case LetStmt:
                 self.let_stmt(n)
             case IfStmt:

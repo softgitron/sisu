@@ -1,0 +1,14 @@
+# A test's clock where a whole `System` is taken: `E0300` notes the
+# parameter narrowed to `Clock` (RULES.md, R104; chapter 18).
+def days_left(sys: System, due: DateTime) -> int:
+    let left = due - sys.clock.now()
+    if left < Duration.seconds(0):
+        return 0
+    return left.as_seconds() // 86400
+
+def at(text: str) -> DateTime:
+    return DateTime.parse(text).expect("a time")
+
+test "a book due in three days":
+    let clock = Clock.frozen_at(at("2026-11-03T12:00:00Z"))
+    assert days_left(clock, at("2026-11-06T12:00:00Z")) == 3

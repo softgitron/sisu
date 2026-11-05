@@ -518,6 +518,11 @@ impl Resolver:
                 _ = r.std_texts.insert(name.to_string(), text.to_string())
             if text.contains("unsafe "):
                 _ = safety_texts.insert(name.to_string(), text.to_string())
+        # The prelude's text too, for the instances of its generic methods
+        # that ask `reflect` of their type parameters: the base keeps no
+        # std module's syntax (RULES.md, R110).
+        let prelude_name = r.prog.modules[r.prog.prelude.index].name.copy()
+        _ = r.std_texts.insert(prelude_name, prelude_text.copy())
         r.std_safety_texts = Shared(safety_texts)
         return (r, templates)
 
@@ -623,6 +628,14 @@ impl Resolver:
         if let Some(m) = modules.first():
             for n in m.syntax.broken_names:
                 _ = self.prog.poisoned.add(n.copy())
+        # The names an import on the target, which this build leaves out,
+        # would bind: the name pass reports a use outside an `if comptime`
+        # branch on the target, and one inside such a branch the build
+        # leaves out is not checked (RULES.md, R106).
+        for m in modules:
+            for (n, c) in m.syntax.left_out:
+                if c.starts_with("target."):
+                    _ = self.prog.poisoned.add(n.copy())
         for i in range(len(modules)):
             self.link_module(ids[i], modules[i].path, modules[i].package, modules[i].file)
         # Every module's items, then the imports between them.
@@ -3699,7 +3712,54 @@ impl Resolver:
                                 ]
                                 d = d.note_params(Msg.ResolveCfgLeftOut, ps)
                                 break
+                    # A variant of one of the module's enums or error sets
+                    # is named through its type (RULES.md, R104).
+                    if let Some(owner) = self.variant_owner(m, n.text):
+                        let ps = [
+                            MsgParam(name="name".to_string(), value=n.text.copy()),
+                            MsgParam(name="ty".to_string(), value=owner),
+                        ]
+                        d = d.note_params(Msg.ResolveVariantOfType, ps)
                     self.report_other(module, d)
+
+    ## Whether an impl of a trait of another package for a type of another
+    ## package is `package`'s own all the same (RULES.md, R105): one of the
+    ## trait's type arguments is a type of `package`, `impl Mul[Vector] for
+    ## f64` in the package that declares `Vector`, and no type parameter of
+    ## the impl stands bare before it, the type implementing it first (the
+    ## first local type, as Rust's rule has it), so that no other package's
+    ## impl can be the same one.
+    pure def local_argument(self, package: int, self_ty: Ty, trait_args: list[Ty]) -> bool:
+        var order = [self_ty]
+        for a in trait_args:
+            order.push(a)
+        for t in order:
+            match self.types.data(t):
+                case TyData.Param(_):
+                    return False
+                case TyData.Adt(d, _):
+                    if self.prog.package_of(self.prog.defs[d.index].module) == package:
+                        return True
+                case _:
+                    pass
+        return False
+
+    ## The enum or error set of module `m`, visible outside it, with a
+    ## variant `name`.
+    pure def variant_owner(self, m: ModuleId, name: str) -> String?:
+        if m.index >= len(self.sources):
+            return None
+        for item in self.ast(m).items:
+            if item.vis == Vis.Private:
+                continue
+            match item.kind:
+                case ItemKind.Enum(e) | ItemKind.ErrorSet(e):
+                    for v in e.variants:
+                        if v.name.text == name:
+                            return Some(e.name.text.copy())
+                case _:
+                    pass
+        return None
 
     # ---------------------------------------------------------------- scripts
 
@@ -4417,9 +4477,18 @@ impl Resolver:
                 var type_pkg = -1
                 if let TyData.Adt(d, _) = self.types.data(self_ty):
                     type_pkg = self.prog.package_of(self.prog.defs[d.index].module)
-                if trait_pkg != package and type_pkg != package:
+                if trait_pkg != package
+                        and type_pkg != package
+                        and not self.local_argument(package, self_ty, trait_args):
                     var d = Diagnostic.new(Msg.ResolveOrphanImpl, span.start, span.end)
-                    self.report_other(module, d.with("trait", trait_name).with("ty", ty_name))
+                    d = d.with("trait", trait_name).with("ty", ty_name)
+                    let ps = [
+                        MsgParam(
+                            name="trait".to_string(), value=self.prog.defs[tr.index].name.copy()
+                        ),
+                        MsgParam(name="ty".to_string(), value=ty_name.copy()),
+                    ]
+                    self.report_other(module, d.note_params(Msg.ResolveOrphanLocalType, ps))
             # An associated type the impl does not bind is reported below;
             # the signatures that name it would only repeat that.
             var assoc_missing = False
@@ -4502,6 +4571,12 @@ impl Resolver:
                     var d = Diagnostic.new(Msg.ResolveMissingAssocType, span.start, span.end)
                     d = d.with("trait", trait_name).with("ty", ty_name).with("name", a.name)
                     self.report_other(module, d)
+                    # The type is the error's from here on, so that a use of
+                    # it is not reported again (RULES.md, R104).
+                    var kind_now = self.prog.defs[i.index].kind().copy()
+                    if let DefKind.Impl(ii) = ref mut kind_now:
+                        ii.assoc.push((a.name.copy(), Ty.error()))
+                    self.prog.defs[i.index].set_kind(kind_now)
             # Implementing `Container(Len)` needs `Len` too
             # (`resolve.supertrait-missing`).
             var targs = [self_ty]

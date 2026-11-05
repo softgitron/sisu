@@ -1,0 +1,1 @@
+vec/src/lib.sisu:6:1-6:22 E0236 resolve.orphan-impl trait="Mul[int]" ty="f64"

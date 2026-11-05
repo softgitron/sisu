@@ -1106,7 +1106,12 @@ def held_layout_input(
     # the module trees' problems, a name that names nothing, and `unsafe` or
     # `extern` in a dependency `[trust]` does not list (`cap.untrusted`).
     var other = layout.has_errors(catalog)
-    let found = resolve.resolve_program(named, packages_of(layout), env, catalog)
+    let found = modules_with_absences(
+        without_unreachable(
+            resolve.resolve_program(named, packages_of(layout), env, catalog), layout
+        ),
+        named,
+    )
     var name_errors: list[(int, int)] = []
     for i in range(len(found)):
         for d in found[i]:
@@ -1122,10 +1127,19 @@ def held_layout_input(
         for f in p.features:
             declared.push(f.name.copy())
         features.push(Features(declared=declared, on=p.on.copy()))
+    # A dependency that declares its level and that `[trust]` does not
+    # list is `E1021`, which names the fix: its `unsafe` and `extern` are
+    # not reported again (RULES.md, R104).
+    let levels = unsafe_levels(layout, named)
+    var consent: list[String] = []
+    for (_, d) in levels:
+        if d.diag.msg == Msg.PackageUnsafeUntrusted:
+            if let Some(n) = d.diag.param("name"):
+                consent.push(n)
     var untrusted: list[(int, Diagnostic)] = []
     for i in range(len(layout.modules)):
         let k = layout.modules[i].package
-        if k == 0 or layout.packages[k].trusted:
+        if k == 0 or layout.packages[k].trusted or consent.contains(layout.packages[k].name):
             continue
         for t in lex(named[i].text).tokens:
             var what = String.new()
@@ -1143,7 +1157,7 @@ def held_layout_input(
     # declaration above the code a warning; a dependency that declares one
     # needs the root's consent.
     var problems = layout.problems.copy()
-    for (i, d) in unsafe_levels(layout, named):
+    for (i, d) in levels:
         if catalog.is_error(d.diag.msg):
             other = True
         if i >= 0:
@@ -1195,6 +1209,98 @@ def held_layout_input(
             contracts=CONTRACTS_ALL,
         )
     )
+
+## The name diagnostics without an import of a dependency the build cannot
+## reach, one that is not a `path` dependency (`E1010`): the manifest's error
+## is the one that says what to write, so `E0220` does not precede it
+## (RULES.md, R104).
+pure def without_unreachable(
+    own found: list[list[Diagnostic]], layout: Layout
+) -> list[list[Diagnostic]]:
+    var refused: list[String] = []
+    for p in layout.problems:
+        if p.diag.msg == Msg.PackageNotAPath:
+            if let Some(n) = p.diag.param("name"):
+                refused.push(n)
+    if refused.is_empty():
+        return found
+    var out: list[list[Diagnostic]] = []
+    for ds in found:
+        var kept: list[Diagnostic] = []
+        for d in ds:
+            var drop = False
+            if d.msg == Msg.ResolveImportUnknown:
+                if let Some(n) = d.param("name"):
+                    var first = n.copy()
+                    if let Some((a, _)) = n.split_once("."):
+                        first = a.to_string()
+                    drop = refused.contains(first)
+            if not drop:
+                kept.push(d.copy())
+        out.push(kept)
+    return out
+
+## The names an import that tests the target would bind, which this build
+## leaves out, each with its condition, and the `if comptime` branches on
+## the target that the build leaves out (RULES.md, R106).
+pure def target_absences(text: str, tree: Tree) -> (list[(String, String)], list[TextRange]):
+    if not text.contains("target."):
+        return ([], [])
+    let m = build.module(tree)
+    var names: list[(String, String)] = []
+    if let Some(f) = cfg.filter(m, True, None).module:
+        for (n, c) in f.left_out:
+            if c.starts_with("target."):
+                names.push((n.copy(), c.copy()))
+    return (names, cfg.discarded_branches(m.ast))
+
+## The name diagnostics of a module without `E0200` for a name an import on
+## the target left out, where an `if comptime` branch on the target that
+## the build leaves out uses it; elsewhere, the `E0200` names the import's
+## condition (RULES.md, R106).
+pure def with_absences(
+    own diags: list[Diagnostic], absent: list[(String, String)], discarded: list[TextRange]
+) -> list[Diagnostic]:
+    if absent.is_empty():
+        return diags
+    var out: list[Diagnostic] = []
+    for d in diags:
+        var cond: String? = None
+        if d.msg == Msg.ResolveUndefinedName:
+            if let Some(n) = d.param("name"):
+                for (a, c) in absent:
+                    if a == n:
+                        cond = Some(c.copy())
+        match cond:
+            case Some(c):
+                var inside = False
+                for r in discarded:
+                    if r.start <= d.start and d.end <= r.end:
+                        inside = True
+                if not inside:
+                    let ps = [
+                        Param(name="name".to_string(), value=d.param("name") ?? String.new()),
+                        Param(name="cfg".to_string(), value=c.copy()),
+                    ]
+                    # The note says what to write; a similar name does not.
+                    var noted = d.copy()
+                    noted.fixes = []
+                    out.push(noted.note_params(Msg.ResolveCfgImportAbsent, ps))
+            case None:
+                out.push(d.copy())
+    return out
+
+## Each module's name diagnostics `with_absences`.
+pure def modules_with_absences(
+    own found: list[list[Diagnostic]], named: list[NamedModule]
+) -> list[list[Diagnostic]]:
+    var out: list[list[Diagnostic]] = []
+    for i in range(len(found)):
+        if i < len(named):
+            out.push(with_absences(found[i].copy(), named[i].absent, named[i].discarded))
+        else:
+            out.push(found[i].copy())
+    return out
 
 ## What `E1019` and `E1020` call the code that needs `unsafe = "extern"`.
 const FOREIGN_CODE: str = "foreign code (an `extern` block or a header import)"
@@ -3459,7 +3565,10 @@ def name_diagnostics(
             let source = sys.fs.read_to_string(Path.new(std_file(home, module)))?
             let names = ModuleNames.of(source, parse(source, catalog).tree)
             _ = env.std.insert(module.copy(), names)
-    let found = resolve.resolve(text, tree, parsed.diagnostics, env, catalog)
+    let (absent, discarded) = target_absences(text, parsed.tree)
+    let found = with_absences(
+        resolve.resolve(text, tree, parsed.diagnostics, env, catalog), absent, discarded
+    )
     return Ok((parsed.diagnostics.copy(), found, cfg_diags))
 
 ## A module's syntax tree as a build with or without its tests compiles it
@@ -3626,6 +3735,7 @@ def held_named_modules(
                 let source = sys.fs.read_to_string(Path.new(std_file(home, module)))?
                 let names = ModuleNames.of(source, parse(source, catalog).tree)
                 _ = env.std.insert(module.copy(), names)
+        let (absent, discarded) = target_absences(text, parsed.tree)
         out.push(
             NamedModule(
                 text=text.copy(),
@@ -3633,6 +3743,8 @@ def held_named_modules(
                 syntax=parsed.diagnostics,
                 path=m.path.copy(),
                 package=m.package,
+                absent=absent,
+                discarded=discarded,
             )
         )
     return Ok((out, problems))
@@ -3656,7 +3768,12 @@ def names_of(
     var out = String.new()
     for layout in layouts:
         let (modules, _) = named_modules(sys, home, layout, True, mut env, catalog)?
-        let found = resolve.resolve_program(modules, packages_of(layout), env, catalog)
+        let found = modules_with_absences(
+            without_unreachable(
+                resolve.resolve_program(modules, packages_of(layout), env, catalog), layout
+            ),
+            modules,
+        )
         for i in range(len(found)):
             out.push(render_ids_in(layout.modules[i].name, modules[i].text, found[i], catalog))
     return Ok(out)

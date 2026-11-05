@@ -44,7 +44,7 @@ from stage1.typeck.thir import (
     TExprKind,
     TStmt,
 )
-from stage1.typeck.ty import DefId, Ty, TyData
+from stage1.typeck.ty import DefId, Ty, TyData, TyKey
 
 ## A clause of a function's contract as written: its keyword, its
 ## condition and the whole clause.
@@ -530,7 +530,24 @@ impl Checker:
     pure def invariant_field(mut self, cx: Cx, owner: Ty, range: TextRange):
         let what = self.source_text(cx, range)
         let shown = self.show(cx, owner)
-        let d = self.error(cx, Msg.ContractInvariantField, range).with("what", what)
+        var d = self.error(cx, Msg.ContractInvariantField, range).with("what", what)
+        # The methods that may make the change, or the one to write
+        # (RULES.md, R104).
+        var methods: list[String] = []
+        if let TyData.Adt(o, _) = self.types.data(owner):
+            for (k, m) in cx.prog.methods:
+                if k.0 != TyKey.Adt(o) or not cx.prog.visible_from(m, self.module):
+                    continue
+                if let Some(f) = cx.prog.fn_info(m):
+                    if f.self_mode == Some(Mode.Mut):
+                        methods.push("`{k.1}`")
+        methods.sort()
+        let ty = Param(name="ty".to_string(), value=shown.copy())
+        if methods.is_empty():
+            d = d.note_params(Msg.ContractInvariantMethod, [ty])
+        else:
+            let listed = Param(name="methods".to_string(), value=listing(methods))
+            d = d.note_params(Msg.ContractInvariantMethods, [listed, ty])
         self.report_other(d.with("ty", shown))
 
     ## Whether `base` names std's `arbitrary` or `exhaustive` (17): which.
@@ -592,7 +609,14 @@ impl Checker:
         var found = False
         if let Some(entry) = cx.prog.generator_sites.get(key.copy()):
             found = entry.is_some()
-        let replacement = cx.prog.generator_calls.get((self.module.index, site.index))
+        var replacement = cx.prog.generator_calls.get((self.module.index, site.index))
+        # A type parameter bounded by `Arbitrary`: drawn through its impl
+        # (RULES.md, R107).
+        if not found and replacement.is_none() and kind == "arbitrary":
+            if let Some(bound) = cx.prog.generator_bounds.get((self.module.index, site.index)):
+                if self.bounded_by_arbitrary(cx, t):
+                    replacement = Some(bound)
+                    found = True
         if not found or replacement.is_none():
             # `test.no-generator`: a `Gen` of nothing known, so what uses its
             # cases is not reported again.
@@ -602,8 +626,12 @@ impl Checker:
                 self.other("test.no-generator")
             else:
                 var why = "the compiler writes generators only for the program's own module".to_string()
-                if let Some(w) = cx.prog.generator_failures.get(key):
+                if let Some(w) = cx.prog.generator_failures.get(key.copy()):
                     why = w.copy()
+                # A type parameter has the generator its bound gives
+                # (RULES.md, R107).
+                if self.is_type_param(cx, t):
+                    why = "a type parameter has the generator of its bound, `{key}: Arbitrary`".to_string()
                 let written = cx.ast.expr(t).range
                 let shown = self.source_text(cx, written)
                 let d = self.error(cx, Msg.TestNoGenerator, written).with("ty", shown)
@@ -623,6 +651,32 @@ impl Checker:
         if let Some(r) = replacement:
             call_expr = r
         return self.infer_expr(cx, call_expr, expected)
+
+    ## Whether the type argument `t` of a site names a type parameter in
+    ## scope that is bounded by `Arbitrary`.
+    pure def bounded_by_arbitrary(mut self, cx: Cx, t: ExprId) -> bool:
+        let ExprKind.Name(n) = cx.ast.expr(t).kind.copy() else:
+            return False
+        let arb = cx.prog.lookup_in(cx.prog.prelude, "Arbitrary") else:
+            return False
+        for p in self.env:
+            if p.bound.def_ != arb:
+                continue
+            if let TyData.Param(i) = self.types.data(p.ty):
+                if let Some(f) = cx.prog.fn_info(self.def_):
+                    if i < len(f.generics) and f.generics[i].name == n:
+                        return True
+        return False
+
+    ## Whether `t` names a type parameter of the function checked.
+    pure def is_type_param(self, cx: Cx, t: ExprId) -> bool:
+        let ExprKind.Name(n) = cx.ast.expr(t).kind.copy() else:
+            return False
+        if let Some(f) = cx.prog.fn_info(self.def_):
+            for g in f.generics:
+                if g.name == n:
+                    return True
+        return False
 
     ## `embed("path")` (08): the text of the file, read by the driver at
     ## compile time, as a literal; a path that is not one plain string, or
@@ -707,3 +761,15 @@ impl Checker:
                 return True
             case _:
                 return False
+
+## Names joined as a sentence lists them: `a`, `a and b`, `a, b and c`.
+pure def listing(names: list[String]) -> String:
+    var out = String.new()
+    for i in range(len(names)):
+        if i > 0:
+            if i == len(names) - 1:
+                out.push(" and ")
+            else:
+                out.push(", ")
+        out.push(names[i])
+    return out

@@ -1,2 +1,3 @@
 8:12-8:29 E0301 type.integer-division
   fix type.use-floor-division 8:20-8:21 "//"
+  fix type.float-division 8:19-8:19 ".to_f64()" 8:29-8:29 ".to_f64()"

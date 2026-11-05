@@ -1,8 +1,15 @@
+test "std.core/Iterator.max_by (doc example)" ... ok
+test "std.core/Iterator.min_by (doc example)" ... ok
 test "std.core/zip (doc example)" ... ok
 test "std.core/sorted (doc example)" ... ok
 test "std.core/max (doc example)" ... ok
 test "std.core/max_of (doc example)" ... ok
 test "std.core/min_of (doc example)" ... ok
+test "std.core/int.checked_add (doc example)" ... ok
+test "std.core/int.checked_sub (doc example)" ... ok
+test "std.core/int.checked_mul (doc example)" ... ok
+test "std.core/f64.total_order (doc example)" ... ok
+test "std.core/f64.round_to (doc example)" ... ok
 test "std.core/char.len_utf8 (doc example)" ... ok
 test "std.core/str.byte_slice (doc example)" ... ok
 test "std.core/str.byte_find (doc example)" ... ok
@@ -175,4 +182,4 @@ test "std.time/Ticker (doc example)" ... ok
 test "std.time/Timeline (doc example)" ... ok
 test "std.time/Instant (doc example)" ... ok
 test "std.time/Zone (doc example)" ... ok
-177 passed, 0 failed, 0 blocked
+184 passed, 0 failed, 0 blocked

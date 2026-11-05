@@ -1568,3 +1568,16 @@ conformance diff.
 
 **What would settle it.** The owner's decision, and the native checked memory model; the switch itself is a day of the driver's work and the manual's pages on running programs.
 
+
+### Q-78. Does a method that returns `Self` check the type's invariant?
+
+**Question.** [07](proposal/07-contracts.md) checks a struct's `invariant` after construction and after every `mut self` method returns, and keeps the fields from being assigned outside the type's `impl`. A method that takes `own self`, changes a copy of its value and returns it is none of these exits, so `Gauge(level=4).filled(20)` gives a level of 24 under `invariant 0 <= self.level <= 10` without a check (the manual's finding from its reference page on contracts, R11; stage 1's rules, R108, "Decided against, or left"). The gap is the design's as much as the compiler's: 07 names the exits it names.
+
+**Options.**
+- *Every method of the type that returns `Self` checks the invariant on what it returns* (lean): construction and `mut self` methods keep their checks, and a value built from `own self` and given back is checked as a constructed one is, so no value of the type leaves the `impl` unchecked; a method that returns `Self` from a different path (`Gauge.zero()`) is checked the same way.
+- *Every exit of the `impl` that gives out a value of the type*: the lean plus functions returning `list[Self]`, `Self?` and the like, by walking the returned value; complete, costlier to specify and to check.
+- *Leave 07 as it is*: a method with `own self` is the author's to check with a postcondition (`ensures 0 <= result.level <= 10`), and the manual says so.
+
+**Current lean.** The first: it closes the case the manual found at the cost of one more exit in 07's list, and a postcondition stays available for what it does not cover.
+
+**What would settle it.** The owner's decision; the change is one sentence of 07, one rule of stage 1's checker and the manual's contracts page.

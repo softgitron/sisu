@@ -1,0 +1,6 @@
+# RULES.md, R104: `E0204` for a variant imported by name notes that it is
+# reached through its type, and `E0258` for a struct built from another
+# module names the associated function that gives one.
+[package]
+name = "atlas"
+version = "0.1.0"

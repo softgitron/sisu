@@ -1,0 +1,6 @@
+4:19-4:44 E0301 type.integer-division
+  fix type.use-floor-division 4:31-4:32 "//"
+  fix type.float-division 4:30-4:30 ".to_f64()" 4:44-4:44 ".to_f64()"
+9:11-9:21 E0301 type.integer-division
+  fix type.use-floor-division 9:18-9:19 "//"
+  fix type.float-division 9:17-9:17 ".to_f64()" 9:21-9:21 ".0"

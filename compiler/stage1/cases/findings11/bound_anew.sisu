@@ -1,0 +1,18 @@
+# `E0402` at a loop's variable, which the loop binds anew while a borrow of
+# the one before is still used, says so (RULES.md, R104; G26).
+struct Turn:
+    name: String
+    hour: int
+
+def schedule(turns: list[Turn]) -> list[String]:
+    var lines: list[String] = []
+    for hour in range(17, 21):
+        var who: str = "free"
+        for turn in turns:
+            if turn.hour == hour:
+                who = turn.name
+        lines.push("{hour}:00 {who}")
+    return lines
+
+def main():
+    print(schedule([Turn("Aino", 18)]))

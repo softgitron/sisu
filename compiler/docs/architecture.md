@@ -9918,3 +9918,49 @@ and sets, `in`, a slice's intrinsics and a table's literal** (section
      standard library's changes of decisions 642 and 643 and stage 2's
      table of decision 643's intrinsic too). This changes no rule of the
      language.
+
+**Stage 1's eleventh round** (stage 1's RULES.md, R104 to R110; the findings' fixes and notes, coherence by a trait's type argument, imports that test the target, `arbitrary[T]` through its bound, a float's total order and the methods of 03, `E0235` at a derive, `reflect` in a std template)
+
+660. Stage 1 gives the fixes and notes the manual found missing in its
+     eleventh round: a local list's item for `E0338`, a lent capability
+     for `E0421`, the parameter narrowed to the capability a test gives,
+     the methods `E0806` points to, `E1010` without `E0220`, `E0237`
+     without its `E0347`s, the float division for `E0301`, a binding a
+     loop makes anew for `E0402`, the associated function for `E0258`,
+     a variant reached through its type for `E0204`, `E1021` without the
+     `E0703`s, and `+=` named by `E0310`. Stage 1 decides it (RULES.md,
+     R104).
+
+661. An impl of a foreign trait for a foreign type is the package's own
+     when one of the trait's type arguments is a type of the package and
+     no type parameter of the impl stands bare before it, `impl
+     Mul[Vector] for f64` beside `Vector`; any other is `E0236`, whose
+     note says which type would make it the package's. Stage 1 decides
+     it (RULES.md, R105).
+
+662. An import's `@cfg` may test the target, `@cfg(target.os ==
+     "windows")`, and binds its names only where the condition holds; a
+     use of one is not reported in an `if comptime` branch on the target
+     the build leaves out, and is `E0200` naming the `@cfg` elsewhere.
+     An import in a function's body is `E0277`, with the fix that moves
+     it to the top of the module. 08 asks both branches of an `if
+     comptime` to type-check; the names a target-gated import leaves
+     out are the one exception. Stage 1 decides it (RULES.md, R106).
+
+663. `arbitrary[T]` of a type parameter bounded by `Arbitrary` is the
+     generator its bound gives; without the bound `E0820` names it.
+     Stage 1 decides it (RULES.md, R107).
+
+664. `F[_]` is `E0100` with a note that 03 reserves it; the standard
+     library has checked arithmetic as methods, `round_to`,
+     `f64.total_order()` and `max_by` and `min_by` over a partially
+     ordered key, which `E0347` for a float names; `@derive(Plain)` asks
+     for `@repr(c)` itself; `@repr(u8)` without discriminants is kept.
+     Stage 1 decides it (RULES.md, R108).
+
+665. `E0235` at a derive labels the impl written beside it. Stage 1
+     decides it (RULES.md, R109).
+
+666. A generic method of the standard library may ask `reflect` of its
+     type parameters; `json.decode`'s `Mismatch` names the expected type
+     without an article. Stage 1 decides it (RULES.md, R110).

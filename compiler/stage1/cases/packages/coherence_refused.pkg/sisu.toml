@@ -1,0 +1,9 @@
+# RULES.md, R105: an impl of a trait the library does not own for a type it
+# does not own, none of whose trait arguments is its own, is `E0236`,
+# whose note says which type would make it the library's.
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies]
+vec = { path = "vec" }
