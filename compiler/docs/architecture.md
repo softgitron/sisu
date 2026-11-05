@@ -10964,3 +10964,52 @@ machine intrinsics"; D-086; 10, 12, 17; decisions 232, 265, 331, 784, 785,
      waits for the per-type layouts of `list[u8]` and `Slice[u8]` (D-086),
      the second is the round of its own that port-debt.md describes. This
      changes no rule of the language.
+
+**Stage 1's sixteenth round** (stage 1's RULES.md, R142 to R149; a test's module in `sir --tests --modules`, reflection on builtin types and one `E0609`, `E0607` alone, `reflect.functions_of`, `try_collect` after `map`, the trait check's cost, Hangul names, the `cstring` case's differences)
+
+840. Stage 1's `sir --tests --modules` writes ` in "FILE"` on each `test`
+     and `bench` line after its function, FILE the source of the module
+     that declares it, so that the driver can run one module's tests
+     (`sisu test src/MODULE.sisu`, decision 828); `sir --tests` alone is
+     unchanged, since stage 0's SIR reader drops the tags after a word it
+     does not know. `sisu1 --version` says 0.12.0. Stage 1 decides it
+     (RULES.md, R142).
+
+841. A `reflect` query may name the prelude's scalar types (`int`, `f64`,
+     `bool`, `char`, `str`) in any function, and a query given what
+     compile time knows no type by is one `E0609` at its argument, saying
+     what reflection takes, where it was `E0900` with an `E0200` in the
+     instance's own module. Stage 1 decides it (RULES.md, R143).
+
+842. A derive template that `E0607` refuses is the one error: a `@derive`
+     of its trait is not `E0243`, and the functions and methods the derive
+     would have written are not `E0351` or `E0304` where a type that
+     derives it uses them. Stage 1 decides it (RULES.md, R144).
+
+843. `reflect.functions_of(m)` gives the functions of a module the code
+     imports, each with its name, parameters, result type, attributes and
+     comment, and stands in run-time code for the function itself, so a
+     framework collects its routed functions into a table at compile time
+     (08). Stage 1 decides it (RULES.md, R145).
+
+844. `Map[I, Result[T, E]]` has `try_collect`, appended to the prelude,
+     and a `dict`'s index by a `str` that is only borrowed (a method's
+     receiver, a `str` view) reads through `dict.index_str` with no
+     `String` made. Stage 1 decides it (RULES.md, R146).
+
+845. Stage 1's trait check finds a derived impl among its trait's impls
+     and the resolver keeps each trait's impls in place: a two-line
+     `check` takes 3.34 G instructions where it took 3.39 G, the trait
+     check 0.10 G where it took 0.15 G, resolving 0.38 G as before, its
+     cost spread over the base's signatures. Stage 1 decides it
+     (RULES.md, R147).
+
+846. A name's NFC composes Hangul jamo into syllables by UAX 15's rule;
+     `@derive(Into, From)` waits for the owner, since the prelude has no
+     `From`, `Into` promises a lossless conversion, and a derive's
+     template takes no trait argument. Stage 1 decides it (RULES.md,
+     R148).
+
+847. The conformance suite's `unsafe/cstring` differs from stage 0's front
+     end as the other cases of `unsafe/` do (R4). Stage 1 decides it
+     (RULES.md, R149).

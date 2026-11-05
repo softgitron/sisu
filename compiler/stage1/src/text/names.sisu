@@ -119,6 +119,8 @@ pure def decomposition(n: int) -> (int, int, bool)?:
 
 ## The letter NFC composes of `base` and the mark `mark` after it.
 pure def composition(base: int, mark: int) -> int?:
+    if let Some(c) = hangul_composition(base, mark):
+        return Some(c)
     let table = compositions()
     let width = 21
     var lo = 0
@@ -136,8 +138,42 @@ pure def composition(base: int, mark: int) -> int?:
             return Some(hex_at(table, at + 14, 6))
     return None
 
+## Hangul syllables, which Unicode composes and decomposes by rule rather
+## than by table (UAX 15, "Hangul"; RULES.md, R148): a leading consonant and
+## a vowel make an LV syllable, and an LV syllable and a trailing consonant
+## an LVT one.
+const HANGUL_S: int = 0xAC00
+const HANGUL_L: int = 0x1100
+const HANGUL_V: int = 0x1161
+const HANGUL_T: int = 0x11A7
+const HANGUL_L_COUNT: int = 19
+const HANGUL_V_COUNT: int = 21
+const HANGUL_T_COUNT: int = 28
+const HANGUL_N_COUNT: int = 588
+const HANGUL_S_COUNT: int = 11172
+
+## The syllable `base` and `mark` make, when they are jamo that compose.
+pure def hangul_composition(base: int, mark: int) -> int?:
+    let l = base - HANGUL_L
+    let v = mark - HANGUL_V
+    if l >= 0 and l < HANGUL_L_COUNT and v >= 0 and v < HANGUL_V_COUNT:
+        return Some(HANGUL_S + (l * HANGUL_V_COUNT + v) * HANGUL_T_COUNT)
+    let s = base - HANGUL_S
+    let t = mark - HANGUL_T
+    if s >= 0 and s < HANGUL_S_COUNT and s % HANGUL_T_COUNT == 0:
+        if t > 0 and t < HANGUL_T_COUNT:
+            return Some(base + t)
+    return None
+
 ## Appends the full canonical decomposition of `n` to `out`.
 pure def decompose_into(n: int, mut out: list[int]):
+    let s = n - HANGUL_S
+    if s >= 0 and s < HANGUL_S_COUNT:
+        out.push(HANGUL_L + s // HANGUL_N_COUNT)
+        out.push(HANGUL_V + s % HANGUL_N_COUNT // HANGUL_T_COUNT)
+        if s % HANGUL_T_COUNT != 0:
+            out.push(HANGUL_T + s % HANGUL_T_COUNT)
+        return
     if let Some((b, m, _)) = decomposition(n):
         decompose_into(b, mut out)
         if m != 0:
@@ -218,6 +254,12 @@ test "a name is read in NFC":
     assert nfc("a\u{302}\u{323}") == "\u{1EAD}"
     assert nfc("\u{212B}") == "\u{C5}"
     assert nfc("plain_name") == "plain_name"
+    # Hangul jamo compose by rule (RULES.md, R148): `ᄀ` and `ᅡ` are `가`,
+    # and with `ᆨ` after them `각`.
+    assert nfc("\u{1100}\u{1161}") == "\u{AC00}"
+    assert nfc("\u{1100}\u{1161}\u{11A8}") == "\u{AC01}"
+    assert nfc("\u{AC01}") == "\u{AC01}"
+    assert nfc("\u{D7A3}") == "\u{D7A3}"
 
 test "a name's scripts and skeleton":
     assert scripts_of("p\u{430}rt") == ["LATIN", "CYRILLIC"]

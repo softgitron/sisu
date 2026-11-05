@@ -27,6 +27,16 @@ from stage1.sir import (
 )
 
 pub pure def write(p: Program) -> String:
+    return write_as(p, False)
+
+## The text form with, when `modules` is set, each test's and benchmark's
+## module after its function, `in "FILE"`, the file as the function's
+## `source` line names it (`sir --tests --modules`; RULES.md, R142).
+pub pure def write_as(p: Program, modules: bool) -> String:
+    var files: dict[String, int] = {}
+    if modules:
+        for f in p.functions:
+            _ = files.insert(f.name.copy(), f.source)
     var out = String.new("sir {VERSION}\n")
     for i in range(len(p.sources)):
         out.push("source {i} {quote(p.sources[i])}\n")
@@ -46,6 +56,8 @@ pub pure def write(p: Program) -> String:
     for k in range(len(p.tests)):
         let (name, f) = p.tests[k].copy()
         out.push("test {quote(name)} {f}")
+        if modules:
+            out.push(module_word(p, files, f))
         # The test's `@tag`s, when it has any (decision 285).
         if k < len(p.test_tags) and not p.test_tags[k].is_empty():
             out.push(" tags")
@@ -53,7 +65,10 @@ pub pure def write(p: Program) -> String:
                 out.push(" {quote(t)}")
         out.push("\n")
     for (name, f) in p.benches:
-        out.push("bench {quote(name)} {f}\n")
+        out.push("bench {quote(name)} {f}")
+        if modules:
+            out.push(module_word(p, files, f))
+        out.push("\n")
     for t in p.types:
         out.push("\n")
         write_type_decl(mut out, t)
@@ -73,6 +88,15 @@ pub pure def write(p: Program) -> String:
         out.push("\n")
         write_function(mut out, f)
     return out
+
+## ` in "FILE"`: the file of the function `f`'s source, or nothing for a
+## function the program does not hold.
+pure def module_word(p: Program, files: dict[String, int], f: str) -> String:
+    let k = files.get(f.to_string()) else:
+        return String.new()
+    if k < 0 or k >= len(p.sources):
+        return String.new()
+    return " in {quote(p.sources[k])}"
 
 ## Text in double quotes, with `\"`, `\\`, `\n`, `\t`, `\r`, `\0` and the
 ## other control characters as `\u{hex}`.

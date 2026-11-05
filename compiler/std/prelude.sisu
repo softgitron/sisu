@@ -5730,3 +5730,29 @@ impl[T, E] list[Result[T, E]]:
                 return Err(x.err().expect("an error"))
             out.push(x.expect("a value"))
         return Ok(out)
+
+# `try_collect` after an adapter's `map` (05, "Propagation"; 11 puts it on
+# the iterators), appended as R137's were (stage 1's RULES.md, R146).
+
+impl[I: Iterator, T, E] Map[I, Result[T, E]]:
+    ## The values the map gives, in a list, or the first error among them,
+    ## after which no item is taken: the collection of a chain that can
+    ## fail, `xs.iter().map(f).try_collect()`.
+    ##
+    ## ```
+    ## let halves: Result[list[int], String] = [2, 4].iter().map(
+    ##     n -> if n % 2 == 0: Ok(n // 2) else: Err("odd: {n}")
+    ## ).try_collect()
+    ## assert halves == Ok([1, 2])
+    ## let odd: Result[list[int], String] = [2, 3, 5].iter().map(
+    ##     n -> if n % 2 == 0: Ok(n // 2) else: Err("odd: {n}")
+    ## ).try_collect()
+    ## assert odd == Err("odd: 3")
+    ## ```
+    def try_collect(own self) -> Result[list[T], E]:
+        var out: list[T] = []
+        for x in self:
+            if x.is_err():
+                return Err(x.err().expect("an error"))
+            out.push(x.expect("a value"))
+        return Ok(out)

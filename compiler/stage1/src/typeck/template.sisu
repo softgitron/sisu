@@ -26,8 +26,12 @@
 ##! `is_option` and `is_tuple` of a type, `elem_of(T)` (a list's or an
 ##! option's element type), `fields_of(T)` (a struct's fields),
 ##! `variants_of(T)` (an enum's variants), `attributes_of(T)` (the
-##! attributes written on its declaration, as data) and `implements(T,
-##! "Trait")` (whether it has an impl of the trait). A field has `name` (for
+##! attributes written on its declaration, as data), `implements(T,
+##! "Trait")` (whether it has an impl of the trait) and `functions_of(m)`
+##! (the functions of a module `m` the code imports, each with `name`,
+##! `params` and `ret`, and the `name_of`, `doc_of` and `attributes_of` of
+##! its own, written in run-time code as the call `m.NAME`; RULES.md, R145).
+##! A field has `name` (for
 ##! a positional variant field, its position), `index`, `named`, `ty` (its
 ##! type, when known) and `default` (whether it has a default); a variant
 ##! has `name`, `index` and `fields`; an attribute has `name` and `args`
@@ -128,6 +132,9 @@ pub enum Kind:
     ## A type parameter that stays one (a generic trait impl's, in its
     ## method made once, decision 251): only its name is known.
     Param
+    ## A module of the program, which reflection sees for its functions
+    ## (`reflect.functions_of`, RULES.md, R145).
+    Module
     Other
 
 ## What reflection sees of a type: an instance's type argument, the type a
@@ -168,6 +175,10 @@ pub struct MethodShape:
     pub params: list[(String, String, list[TypeShape])]
     pub ret: list[TypeShape]
     pub provided: bool
+    ## A module's function's attributes, each name and its arguments' text,
+    ## and its `##` comment (RULES.md, R145); a method's are empty.
+    pub attrs: list[(String, list[String])]
+    pub doc: String
 
 pub struct FieldShape:
     pub name: String
@@ -383,6 +394,18 @@ pub enum Value:
     ## A method's parameter: its name, its mode (empty, `mut`, `own`) and
     ## its type (a list of one).
     Param(name: String, index: int, mode: String, ty: list[TypeShape])
+    ## A module's function (`reflect.functions_of`, RULES.md, R145): its
+    ## name, how the unfolded code writes it (`routes.index`), its
+    ## parameters, its result type (a list of one), its attributes and its
+    ## `##` comment.
+    Function(
+        name: String,
+        path: String,
+        params: list[Value],
+        ret: list[TypeShape],
+        attrs: list[(String, list[String])],
+        doc: String
+    )
     Variant(name: String, index: int, fields: list[Value])
     Str(String)
     Int(int)
@@ -419,6 +442,9 @@ pure def same_value(a: Value, b: Value) -> bool:
         case Value.Param(n1, i1, m1, t1):
             if let Value.Param(n2, i2, m2, t2) = b:
                 return n1 == n2 and i1 == i2 and m1 == m2 and same_shapes(t1, t2)
+        case Value.Function(n1, p1, _, _, _, _):
+            if let Value.Function(n2, p2, _, _, _, _) = b:
+                return n1 == n2 and p1 == p2
         case Value.Variant(n1, i1, f1):
             if let Value.Variant(n2, i2, f2) = b:
                 return n1 == n2 and i1 == i2 and same_values(f1, f2)
@@ -825,6 +851,9 @@ pure def literal(v: Value) -> String?:
             return Some(if b: "True".to_string() else: "False".to_string())
         case Value.Type(t):
             return Some(t.written.copy())
+        # A function, as a value the run-time code calls (RULES.md, R145).
+        case Value.Function(_, path, _, _, _, _):
+            return Some(path.copy())
         case Value.List(xs):
             var parts: list[String] = []
             for x in xs:
@@ -910,6 +939,7 @@ pure def describe(v: Value) -> str:
         case Value.Attr(_, _): "an attribute"
         case Value.Method(_, _, _, _, _, _): "a method"
         case Value.Param(_, _, _, _): "a parameter"
+        case Value.Function(_, _, _, _, _, _): "a function"
         case Value.Field(_, _, _, _, _, _, _, _): "a field"
         case Value.Variant(_, _, _): "a variant"
         case Value.Str(_): "text"
@@ -1100,6 +1130,15 @@ impl Unfold:
             case _:
                 return False
 
+    ## The `reflect` query `callee` names (`reflect.name_of`), when it names
+    ## one that gives a compile-time value rather than code.
+    pure def query_of(self, src: Src, callee: ExprId) -> String?:
+        if let ExprKind.Field(base, name) = src.ast.expr(callee).kind:
+            if let ExprKind.Name(n) = src.ast.expr(base).kind:
+                if n == "reflect" and not self.bound(n) and not is_code_maker(name.text):
+                    return Some(name.text.copy())
+        return None
+
     ## Whether `e` is a name bound to a type (`T`, `Self`).
     pure def names_type(self, src: Src, e: ExprId) -> bool:
         var v: Value? = None
@@ -1256,6 +1295,19 @@ impl Unfold:
                                     got = Some(Value.Type(t.copy()))
                             case _:
                                 pass
+                    case Value.Function(n, _, params, ret, _, doc):
+                        match name.text:
+                            case "name":
+                                got = Some(Value.Str(n.copy()))
+                            case "params":
+                                got = Some(Value.List(params.copy()))
+                            case "ret":
+                                if let Some(t) = ret.first():
+                                    got = Some(Value.Type(t.copy()))
+                            case "doc":
+                                got = Some(Value.Str(doc.copy()))
+                            case _:
+                                pass
                     case Value.Attr(n, args):
                         match name.text:
                             case "name":
@@ -1282,8 +1334,33 @@ impl Unfold:
                         match vals.first():
                             case Some(Value.Type(x)):
                                 t = x.copy()
+                            # A module's function's name, attributes and
+                            # comment (RULES.md, R145).
+                            case Some(Value.Function(n, _, _, _, attrs, doc)):
+                                if len(vals) != 1:
+                                    return fail(here, "`reflect.{name.text}` takes one function")
+                                match name.text:
+                                    case "name_of":
+                                        return Ok(Value.Str(n.copy()))
+                                    case "doc_of":
+                                        return Ok(Value.Str(doc.copy()))
+                                    case "attributes_of":
+                                        var out: list[Value] = []
+                                        for (an, args) in attrs:
+                                            out.push(Value.Attr(name=an.copy(), args=args.copy()))
+                                        return Ok(Value.List(out))
+                                    case _:
+                                        return fail(
+                                            here,
+                                            "`reflect.{name.text}` takes a type, and `{n}` is a function",
+                                        )
                             case _:
                                 return fail(here, "`reflect.{name.text}` takes a type")
+                        if name.text == "functions_of" and t.kind != Kind.Module:
+                            return fail(
+                                here,
+                                "`reflect.functions_of` takes a module the code imports, and `{t.name}` is a type",
+                            )
                         # A type parameter that stays one is known by its
                         # name alone (decision 251).
                         if t.kind == Kind.Param and name.text != "name_of":
@@ -1504,6 +1581,21 @@ impl Unfold:
             out.push((here, lit))
             return Ok(())
         match src.ast.expr(e).kind:
+            # A query whose argument compile time does not know, a value or
+            # a name of no type (RULES.md, R143): what it takes, at the
+            # argument, where the instance would be left with `reflect`.
+            case ExprKind.Call(callee, args, _) if self.query_of(src, callee).is_some():
+                let q = self.query_of(src, callee) ?? String.new()
+                for a in args:
+                    if not self.is_static(src, a.value):
+                        let at = src.ast.expr(a.value).range
+                        let written_arg = slice(src.source, at)
+                        return fail(
+                            at,
+                            "`reflect.{q}` takes a type (a type parameter, or a type or trait in scope), and compile time knows no type `{written_arg}`",
+                        )
+                for k in children(src, e):
+                    self.replacements(src, k, mut out)?
             case ExprKind.FieldOf(base, field):
                 let f = self.eval(src, field)?
                 let base_text = self.text(src, base)?
@@ -2243,6 +2335,29 @@ pure def reflect(f: str, t: TypeShape) -> Value?:
             var out: list[Value] = []
             for (name, args) in t.attrs:
                 out.push(Value.Attr(name=name.copy(), args=args.copy()))
+            return Some(Value.List(out))
+        # A module's functions, in the order they are declared (RULES.md,
+        # R145), each called as the unfolded code writes it.
+        case "functions_of":
+            var out: list[Value] = []
+            for m in t.methods:
+                var params: list[Value] = []
+                var pi = 0
+                for (n, mode, ty) in m.params:
+                    params.push(
+                        Value.Param(name=n.copy(), index=pi, mode=mode.copy(), ty=ty.copy())
+                    )
+                    pi += 1
+                out.push(
+                    Value.Function(
+                        name=m.name.copy(),
+                        path="{t.written}.{m.name}",
+                        params=params,
+                        ret=m.ret.copy(),
+                        attrs=m.attrs.copy(),
+                        doc=m.doc.copy(),
+                    )
+                )
             return Some(Value.List(out))
         case "methods_of":
             var out: list[Value] = []

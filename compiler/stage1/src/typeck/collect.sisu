@@ -1555,6 +1555,10 @@ impl Resolver:
                             if returns_impl(src, m):
                                 d = d.note(Msg.ComptimeDeriveChecks)
                             self.report_other(module, d)
+                            # Its `@derive`s and the uses of what it would
+                            # have written are not reported again (RULES.md,
+                            # R144).
+                            _ = self.prog.refused_derives.add(t.name.text.copy())
                     self.pending.push(
                         Pending.Trait(
                             def_=def_, module=module, ast=t.copy(), attrs=item.attrs.copy()
@@ -1682,23 +1686,30 @@ impl Resolver:
         self_ty: Ty,
         names: list[String],
     ):
+        # The two signatures are copied only for what follows a mismatch
+        # (RULES.md, R147).
         let expected_info = self.prog.fn_info(tm) else:
             return
-        let expected = expected_info.copy()
+        let expected_unsafe = expected_info.unsafe_
         let found_info = self.prog.fn_info(m) else:
             return
-        let found = found_info.copy()
+        let found_unsafe = found_info.unsafe_
         # The impl's method without a `Safety:` list of its own has the
         # trait's obligations, which its callers discharge.
-        if expected.unsafe_ and found.unsafe_ and found.obligations.is_none():
+        if expected_unsafe and found_unsafe and found_info.obligations.is_none():
+            let obligations = expected_info.obligations.copy()
             var kind_now = self.prog.defs[m.index].kind().copy()
             if let DefKind.Fn(fi) = ref mut kind_now:
-                fi.obligations = expected.obligations.copy()
+                fi.obligations = obligations
             self.prog.defs[m.index].set_kind(kind_now)
-        if not self.lints_in(module):
+        if expected_unsafe == found_unsafe or not self.lints_in(module):
             return
-        if expected.unsafe_ == found.unsafe_:
+        let expected_again = self.prog.fn_info(tm) else:
             return
+        let expected = expected_again.copy()
+        let found_again = self.prog.fn_info(m) else:
+            return
+        let found = found_again.copy()
         var args = [self_ty]
         for a in trait_ref.args:
             args.push(a)
@@ -3380,11 +3391,12 @@ impl Resolver:
             module, "impl {shown_trait} for {shown_ty}", range, Vis.Pub, DefKind.Impl(info)
         )
         self.prog.impls.push(def_)
-        var of_trait: list[DefId] = []
-        if let Some(x) = self.prog.impls_of.get(trait_ref.def_):
-            of_trait = x.copy()
-        of_trait.push(def_)
-        _ = self.prog.impls_of.insert(trait_ref.def_, of_trait)
+        # In place, where the list was copied and put back for each impl
+        # (RULES.md, R147).
+        if self.prog.impls_of.contains(trait_ref.def_):
+            self.prog.impls_of[trait_ref.def_].push(def_)
+        else:
+            _ = self.prog.impls_of.insert(trait_ref.def_, [def_])
         if Some(trait_ref.def_) == self.prog.wk.drop:
             if let TyData.Adt(d, _) = self.types.data(self_ty):
                 _ = self.prog.drop_types.add(d)

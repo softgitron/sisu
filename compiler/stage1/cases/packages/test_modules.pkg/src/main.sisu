@@ -1,0 +1,7 @@
+from sauna.heat import level
+
+def main():
+    print(level(80))
+
+test "the main module's test":
+    assert level(70) == "warm"

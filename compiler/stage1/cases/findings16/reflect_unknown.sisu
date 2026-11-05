@@ -1,0 +1,11 @@
+# A reflection query given what compile time knows no type by, a run-time
+# value or a name of nothing, is one error at that argument, saying what
+# reflection takes (RULES.md, R143), where it was `E0900` for `reflect`
+# with an `E0600` or an `E0200` in a file the program does not have.
+
+def main():
+    let degrees = 80
+    print(comptime reflect.name_of(degrees))
+
+def other():
+    print(comptime reflect.fields_of(Sauna))

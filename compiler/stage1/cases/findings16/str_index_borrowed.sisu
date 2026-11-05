@@ -1,0 +1,17 @@
+# A `dict`'s index by a `str` that is borrowed, a method's receiver
+# (`d[k].byte_len()`) or a `str` view of it, reads the value through
+# `dict.index_str`'s reference, with no `String` made for the key (RULES.md,
+# R146), as R134's read of the index does. A missing key panics at the index.
+def main():
+    var rooms: dict[String, String] = {}
+    rooms["sauna"] = "hot"
+    rooms["lake"] = "cold"
+    let room: str = "sauna"
+    print(rooms[room].byte_len())
+    print(rooms[room].to_uppercase())
+    var letters = 0
+    for name in ["lake", "sauna"]:
+        letters += rooms[name].byte_len()
+    print(letters)
+    let pier: str = "pier"
+    print(rooms[pier].byte_len())

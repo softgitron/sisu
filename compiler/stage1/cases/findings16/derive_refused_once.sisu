@@ -1,0 +1,34 @@
+# A derive whose template `E0607` refuses is that one error: its `@derive`s
+# are not `E0243` (the trait declares a derive), and the functions and
+# methods it would have written are not `E0351` or `E0304` where they are
+# used (RULES.md, R144; R12's finding).
+
+trait Columns:
+    def columns() -> list[String]
+    def width(self) -> int
+
+    comptime def derive(T: type) -> impl Columns for T:
+        let names = [f.name for f in reflect.fields_of(T)]
+        return impl Columns for T:
+            def columns() -> list[String]:
+                return []
+
+            def width(self) -> int:
+                return 0
+
+@derive(Columns)
+struct Point:
+    x: int
+    y: int
+
+@derive(Eq, Columns)
+struct Size:
+    w: int
+
+def widest(p: Point, s: Size) -> int:
+    return max(p.width(), s.width())
+
+def main():
+    print(Point.columns())
+    print(Size.columns())
+    print(widest(Point(x=1, y=2), Size(w=3)))

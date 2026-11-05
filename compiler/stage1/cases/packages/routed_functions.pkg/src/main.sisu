@@ -1,0 +1,29 @@
+from sauna_web import routes
+
+## The routed functions of `routes` by their paths: a table made at compile
+## time from each function's `@route`, whose argument is its text as
+## written, quotes and all.
+def serve(path: str) -> String:
+    let table: list[(str, () -> String)] = [
+        (a.args[0], f)
+        for f in reflect.functions_of(routes)
+        for a in reflect.attributes_of(f)
+        if a.name == "route"
+    ]
+    for (p, f) in table:
+        if p == "\"{path}\"":
+            return f()
+    return "no page at {path}".to_string()
+
+## Each function of `routes` with its signature and comment.
+def describe():
+    comptime for f in reflect.functions_of(routes):
+        print(
+            "{comptime f.name}({comptime len(f.params)}) -> {comptime reflect.name_of(f.ret)}: {comptime reflect.doc_of(f)}"
+        )
+
+def main():
+    print(serve("/about"))
+    print(serve("/"))
+    print(serve("/sauna"))
+    describe()

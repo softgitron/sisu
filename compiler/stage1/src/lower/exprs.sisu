@@ -434,9 +434,11 @@ impl FnLower:
             return Operand.Move(Place.local(t))
         return Operand.Copy(Place.local(t))
 
-    ## A reference to the expression's place (or to a temporary).
+    ## A reference to the expression's place (or to a temporary); a shared
+    ## one only reads it, so a `dict`'s index by a `str` is the reference
+    ## `dict.index_str` gives (RULES.md, R146).
     pub pure def borrow_operand(mut self, cx: Cx, e: TExprId, mutable: bool) -> Operand:
-        let p = self.place_of(cx, e)
+        let p = if mutable: self.place_of(cx, e) else: self.read_place_of(cx, e)
         let et = self.ty(cx, self.ty_of(cx, e))
         let t = self.temp_sir(Type.Ref(inner=[et], mutable=mutable))
         let loc = cx.loc(self.span_of(cx, e))
@@ -463,7 +465,8 @@ impl FnLower:
             let t = self.temp_sir(Type.Str)
             self.assign(cx, Place.local(t), Rvalue.StrView(p), loc)
             return Operand.Copy(Place.local(t))
-        let p = self.place_of(cx, e)
+        # A view only reads its place (RULES.md, R146).
+        let p = self.read_place_of(cx, e)
         let t = self.temp_sir(Type.Str)
         self.assign(cx, Place.local(t), Rvalue.StrView(p), loc)
         return Operand.Copy(Place.local(t))
@@ -818,7 +821,10 @@ impl FnLower:
                         h = self.from_end(cx, b.copy(), h, loc)
                 self.intrinsic_call(cx, dest, "list.slice", [], [b, l, h], loc)
             case TExprKind.Borrow(place, mutable):
-                let p = self.place_of(cx, place)
+                # A shared borrow only reads its place: a `dict`'s index by a
+                # `str`, a method's receiver `d[k].byte_len()`, is the
+                # reference `dict.index_str` gives (RULES.md, R146).
+                let p = if mutable: self.place_of(cx, place) else: self.read_place_of(cx, place)
                 self.assign(cx, dest, Rvalue.Ref(place=p, mutable=mutable), loc)
             case TExprKind.Float(f):
                 # An `f32` literal (the others are constants) travels as the
@@ -1314,7 +1320,9 @@ impl FnLower:
     ):
         match kind:
             case Coercion.StrView:
-                let p = self.place_of(cx, inner)
+                # A view only reads its place: a `dict`'s index by a `str`
+                # is the reference `dict.index_str` gives (RULES.md, R146).
+                let p = self.read_place_of(cx, inner)
                 self.assign(cx, dest, Rvalue.StrView(p), loc)
             case Coercion.RefStrView:
                 let p = self.place_of(cx, inner).project(Proj.Deref)

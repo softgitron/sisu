@@ -1,0 +1,8 @@
+# RULES.md, R145 (08: "a framework collects routed functions by scanning
+# its own package at compile time"): `reflect.functions_of(routes)` gives
+# the functions of a module the code imports, each with its name,
+# attributes, signature and comment, and the unfolded code calls one as
+# `routes.NAME`, so a table of the routed functions is made at compile time.
+[package]
+name = "sauna_web"
+version = "0.1.0"
