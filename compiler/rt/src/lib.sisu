@@ -14,6 +14,7 @@
 
 import rt.channel
 import rt.dispatch
+import rt.draw
 import rt.floats
 import rt.iter
 import rt.list
@@ -523,6 +524,35 @@ def export_queue_position(q: ptr mut u8, j: int, x: int) -> int:
 ##   live queue
 def export_queue_take_key(q: ptr mut u8, key: int, out: ptr mut u8):
     queue.take_key(q, key, out)
+
+## The state the scheduler's generator starts in for the seed `seed`, as
+## the interpreter seeds it (decision 724).
+def export_draw_seeded(seed: int) -> int:
+    return draw.seeded(seed)
+
+## The next number the scheduler's generator at `state` draws, as 64 bits.
+##
+## Requires:
+## - `state`: `state` points to the generator's word
+def export_draw_next(state: ptr mut int) -> int:
+    return draw.next(state)
+
+## A number below `n` the scheduler's generator at `state` draws, 0 for `n`
+## of 1 or less without a draw.
+##
+## Requires:
+## - `state`: `state` points to the generator's word
+def export_draw_below(state: ptr mut int, n: int) -> int:
+    return draw.below(state, n)
+
+## The next task, drawn among the ready ones in the run queue `q` and taken
+## out of it, the last moving into its slot; -1 when none is ready.
+##
+## Requires:
+## - `state`: `state` points to the generator's word
+## - `queue`: `q` holds a live queue of one word a record
+def export_draw_pick(state: ptr mut int, q: ptr mut u8) -> int:
+    return draw.pick(state, q)
 
 ## Makes the five words at `c` an empty buffer of a channel's values of
 ## `size` bytes, its slots at `slots`, `room` of them (decision 680).

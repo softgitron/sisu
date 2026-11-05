@@ -55,27 +55,9 @@ const BUDGET_MAX: u64 = 8;
 /// ready: no yield point reaches the scheduler until one is.
 const STARVED: i64 = i64::MAX / 4;
 
-/// The seeded generator behind every scheduling choice: the interpreter's
-/// SplitMix64, with its seeding, so the same seed draws the same numbers.
-pub(crate) struct Rng(u64);
-
-impl Rng {
-    pub(crate) fn new(seed: u64) -> Rng {
-        Rng(seed.wrapping_mul(0x2545_F491_4F6C_DD1D) ^ 0x9E37_79B9_7F4A_7C15)
-    }
-
-    pub(crate) fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^ (z >> 31)
-    }
-
-    pub(crate) fn below(&mut self, n: usize) -> usize {
-        if n <= 1 { 0 } else { (self.next() % n as u64) as usize }
-    }
-}
+/// The seeded generator behind every scheduling choice, the runtime in
+/// Sisu's (`compiler/rt/src/draw.sisu`, decision 724).
+pub(crate) use crate::queue::Rng;
 
 /// Why a task's coroutine handed control back to the loop.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1279,7 +1261,12 @@ impl Sched {
         let next = loop {
             if !self.ready.is_empty() {
                 let i = match self.strategy {
-                    Strategy::Random => self.rng.below(self.ready.len()),
+                    // The runtime in Sisu draws the task and takes it out
+                    // (decision 724).
+                    Strategy::Random => match self.rng.pick(&mut self.ready) {
+                        Some(t) => break t as u32,
+                        None => continue,
+                    },
                     Strategy::Pct { .. } => {
                         let ready = self.ready_list();
                         let (mut best, mut top) = (0, None);

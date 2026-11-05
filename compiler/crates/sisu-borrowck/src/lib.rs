@@ -282,6 +282,7 @@ pub fn check_with(p: &sir::Program, opts: &Options, mut memo: Option<(&mut FnCac
         sources: p.sources.clone(),
         entry: p.entry.clone(),
         exports: p.exports.clone(),
+        runtime: p.runtime.clone(),
         types: p.types.clone(),
         intrinsics: p.intrinsics.clone(),
         functions,

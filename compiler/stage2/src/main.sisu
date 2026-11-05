@@ -152,8 +152,15 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         return Err(Failed)
     let Ok(exports) = ex else:
         return Err(Failed)
+    # The runtime profile, which it has no place for either (decision 723).
+    let rp = read.runtime(text)
+    if let Err(ReadError.Bad(line, message)) = rp:
+        print_err("{path}:{line}: {message}")
+        return Err(Failed)
+    let Ok(profile) = rp else:
+        return Err(Failed)
     if command == "sir":
-        emit(read.export_lines(write.write(read_prog), exports))
+        emit(read.export_lines(write.write(read_prog), profile, exports))
         return Ok(())
     var prog = read_prog
     # The library has no std.par to give its native body (decision 353).

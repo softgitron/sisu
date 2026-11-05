@@ -47,6 +47,12 @@ pub struct Program {
     /// order the program declares them. A native build compiles each, as
     /// it compiles what `main` reaches, under that symbol.
     pub exports: Vec<(String, String)>,
+    /// The runtime profile the package chose (`[package] runtime`, 12's
+    /// "Runtime profiles"; decision 694), when it is not `full`: the line
+    /// `runtime NAME` after the entry, which stage 1 writes for `single`
+    /// (its R122; decision 723). Stage 0's scheduler is one thread with its
+    /// tasks as coroutines, which is `single`'s, so both profiles run alike.
+    pub runtime: Option<String>,
     pub types: Vec<TypeDecl>,
     /// The host intrinsics the functions call, with the facts the SIR
     /// checkers need about each (purity, which arguments the result

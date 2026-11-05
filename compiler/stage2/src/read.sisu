@@ -702,6 +702,41 @@ pub pure def exports(text: str) -> list[(String, String)] ! ReadError:
             out.push(pair.copy())
     return Ok(out)
 
+## The runtime profile of the program the text spells (decision 723): the
+## line `runtime NAME` before the functions, which stage 1 writes after the
+## entry for a package whose manifest chose `single` (its R122), or none.
+## Stage 1's `sir.Program` has no field for it, so it is read here, beside
+## `read`, and written back by `export_lines`.
+pub pure def runtime(text: str) -> String? ! ReadError:
+    var pos = 0
+    var line_no = 0
+    let n = text.byte_len()
+    while pos < n:
+        let (start, end, next) = line_at(text, pos)
+        pos = next
+        line_no += 1
+        let (s, e) = trimmed(text, start, end)
+        if starts_at(text, s, e, "fn "):
+            return Ok(None)
+        if not starts_at(text, s, e, "runtime "):
+            continue
+        var c = Cur(s=text, pos=s + 8, end=e)
+        let r = runtime_line(mut c)
+        if let Err(Wrong(message)) = r:
+            return Err(Bad(line=line_no, message=message.copy()))
+        if let Ok(name) = r:
+            return Ok(Some(name.copy()))
+    return Ok(None)
+
+## A line's profile, after its `runtime `: `full` or `single`.
+pure def runtime_line(mut c: Cur) -> String ! LineError:
+    let name = c.name()?
+    if not c.at_end():
+        return wrong("unexpected `{c.rest()}`")
+    if name != "full" and name != "single":
+        return wrong("unknown runtime profile `{name}`")
+    return Ok(name)
+
 ## A line's symbol and function, after its `export `.
 pure def export_line(mut c: Cur) -> (String, String) ! LineError:
     let symbol = c.string()?
@@ -710,12 +745,15 @@ pure def export_line(mut c: Cur) -> (String, String) ! LineError:
         return wrong("unexpected `{c.rest()}`")
     return Ok((symbol, f))
 
-## `text`, SIR that stage 1's writer wrote, with the lines of `exports`
-## after its entry's, where `sisu-sir`'s writer puts them.
-pub pure def export_lines(text: str, exports: list[(String, String)]) -> String:
-    if exports.is_empty():
+## `text`, SIR that stage 1's writer wrote, with the line of the runtime
+## profile `profile` and the lines of `exports` after its entry's, where
+## `sisu-sir`'s writer puts them.
+pub pure def export_lines(text: str, profile: String?, exports: list[(String, String)]) -> String:
+    if exports.is_empty() and profile == None:
         return text.to_string()
     var lines = String.new()
+    if let Some(r) = profile:
+        lines.push("runtime {r}\n")
     for (symbol, f) in exports:
         lines.push("export {write.quote(symbol)} {f}\n")
     var out = String.new()
@@ -797,6 +835,10 @@ pure def header_line(
     if c.eat("export "):
         # An `@export` (decision 683), which `exports` reads: stage 1's
         # `sir.Program` has no place for it.
+        return Ok(())
+    if c.eat("runtime "):
+        # The runtime profile (decision 723), which `runtime` reads, as
+        # `exports` does an `@export`.
         return Ok(())
     if c.eat("test "):
         let name = c.string()?

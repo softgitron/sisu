@@ -240,6 +240,7 @@ impl<'p> Interp<'p, '_> {
             sources: old.sources.clone(),
             entry: old.entry.clone(),
             exports: old.exports.clone(),
+            runtime: old.runtime.clone(),
             types: old.types.clone(),
             intrinsics: old.intrinsics.clone(),
             functions: Vec::new(),

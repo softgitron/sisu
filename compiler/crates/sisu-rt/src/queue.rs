@@ -40,6 +40,55 @@ unsafe extern "C" {
     fn sisu_rt_channel_len(ret: *mut i64, c: *const *mut u8) -> u8;
     fn sisu_rt_channel_push(ret: *mut u64, c: *const *mut u8, src: *const *const u8, size: *const i64) -> u8;
     fn sisu_rt_channel_pop(ret: *mut u64, c: *const *mut u8, dst: *const *mut u8, size: *const i64) -> u8;
+    fn sisu_rt_draw_seeded(ret: *mut i64, seed: *const i64) -> u8;
+    fn sisu_rt_draw_next(ret: *mut i64, state: *const *mut i64) -> u8;
+    fn sisu_rt_draw_below(ret: *mut i64, state: *const *mut i64, n: *const i64) -> u8;
+    fn sisu_rt_draw_pick(ret: *mut i64, state: *const *mut i64, q: *const *mut u8) -> u8;
+}
+
+/// The seeded generator behind every scheduling choice and the faults of
+/// `sim`: the interpreter's SplitMix64, with its seeding, so the same seed
+/// draws the same numbers. Its state is the word kept here, which the
+/// runtime in Sisu draws from (`compiler/rt/src/draw.sisu`, decision 724).
+pub(crate) struct Rng(i64);
+
+impl Rng {
+    pub(crate) fn new(seed: u64) -> Rng {
+        let mut state = 0i64;
+        let seed = seed as i64;
+        // SAFETY: the export reads the seed and writes the result's word.
+        unprobed(|| unsafe { sisu_rt_draw_seeded(&mut state, &seed) });
+        Rng(state)
+    }
+
+    pub(crate) fn next(&mut self) -> u64 {
+        let mut drawn = 0i64;
+        let state: *mut i64 = &mut self.0;
+        // SAFETY: `state` is the generator's word, as the export requires.
+        unprobed(|| unsafe { sisu_rt_draw_next(&mut drawn, &state) });
+        drawn as u64
+    }
+
+    pub(crate) fn below(&mut self, n: usize) -> usize {
+        let mut drawn = 0i64;
+        let state: *mut i64 = &mut self.0;
+        let n = n as i64;
+        // SAFETY: as in `next`.
+        unprobed(|| unsafe { sisu_rt_draw_below(&mut drawn, &state, &n) });
+        drawn as usize
+    }
+
+    /// The next task, drawn among the ready ones in the run queue `q` and
+    /// taken out of it, the last moving into its slot, as the interpreter's
+    /// `switch` takes it; none when none is ready.
+    pub(crate) fn pick(&mut self, q: &mut Queue) -> Option<i64> {
+        let mut task = 0i64;
+        let state: *mut i64 = &mut self.0;
+        // SAFETY: `state` is the generator's word and `q.0` a live queue of
+        // one word a record, the run queue's.
+        unprobed(|| unsafe { sisu_rt_draw_pick(&mut task, &state, &q.0) });
+        (task >= 0).then_some(task)
+    }
 }
 
 /// The records a queue has room for before it first grows.

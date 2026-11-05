@@ -6,6 +6,7 @@ fn sample() -> Program {
         sources: vec!["t.sisu".into()],
         entry: Some(Entry { function: "main".into(), takes_system: false, returns_result: false }),
         exports: Vec::new(),
+        runtime: None,
         types: vec![
             TypeDecl::Struct {
                 name: "Point".into(),
@@ -477,4 +478,16 @@ fn an_impl_method_is_named_by_its_trait_and_type() {
     assert_eq!(shown("kiuas.meter.Dial.read"), "kiuas.meter.Dial.read");
     assert_eq!(shown("kiuas.meter.helper"), "kiuas.meter.helper");
     assert_eq!(shown("Nowhere.Display.fmt"), "Nowhere.Display.fmt");
+}
+
+#[test]
+fn the_runtime_profile_is_read_after_the_entry_and_written_back() {
+    // Stage 1's line for `[package] runtime = "single"` (its R122;
+    // decision 723), before the `export` lines of decision 683.
+    let text = "sir 0\nsource 0 \"t.sisu\"\nentry main\nruntime single\nexport \"tick\" tick\n\n\
+                fn main(0) source 0 {\nbb0:\n    return\n}\n\nfn tick(0) source 0 {\nbb0:\n    return\n}\n";
+    let p = read(text).expect("it reads");
+    assert_eq!(p.runtime.as_deref(), Some("single"));
+    assert!(write(&p).contains("entry main\nruntime single\nexport \"tick\" tick\n"), "{}", write(&p));
+    assert!(read(&text.replace("runtime single", "runtime multi")).is_err());
 }

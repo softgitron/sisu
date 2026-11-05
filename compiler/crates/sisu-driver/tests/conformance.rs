@@ -444,7 +444,9 @@ fn the_capability_audit_reads_a_package() {
 /// `sisu repl` and `sisu ws` check and lower their programs through stage 1
 /// when it serves them (decision 563): the suite's sessions and worksheet,
 /// run with stage 1 asked for whatever its version says, print what their
-/// expectations hold, which the Rust front end's runs meet too.
+/// expectations hold, which the Rust front end's runs meet too, both with
+/// one process of stage 1 serving the session (`sir --repl-serve`,
+/// decision 720) and with a process for each input.
 #[test]
 fn repl_and_worksheets_run_on_stage_1() {
     let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
@@ -453,10 +455,13 @@ fn repl_and_worksheets_run_on_stage_1() {
     let copy = |from: &std::path::Path, to: &std::path::Path| {
         let _ = std::process::Command::new("cp").arg("-r").arg(from).arg(to).status();
     };
-    for (case, cmd, file) in [
-        ("live/session", "repl", Some("session.sisu")),
-        ("live/worksheet", "ws", Some("worksheet.sisu")),
-        ("packages/repl", "repl", None),
+    for (case, cmd, file, serve) in [
+        ("live/session", "repl", Some("session.sisu"), "1"),
+        ("live/session", "repl", Some("session.sisu"), "0"),
+        ("live/worksheet", "ws", Some("worksheet.sisu"), "1"),
+        ("live/worksheet", "ws", Some("worksheet.sisu"), "0"),
+        ("packages/repl", "repl", None, "1"),
+        ("packages/repl", "repl", None, "0"),
     ] {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("a directory");
@@ -485,6 +490,7 @@ fn repl_and_worksheets_run_on_stage_1() {
             .args(file)
             .current_dir(&run_dir)
             .env("SISU_STAGE1_REPL", "1")
+            .env("SISU_STAGE1_REPL_SERVE", serve)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -501,7 +507,7 @@ fn repl_and_worksheets_run_on_stage_1() {
         );
         let expected =
             std::fs::read_to_string(parent.join(format!("{stem}.{cmd}"))).expect("its expectation");
-        assert_eq!(shown, expected, "{case}");
+        assert_eq!(shown, expected, "{case}, served: {serve}");
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -534,5 +540,55 @@ fn the_repl_echoes_its_inputs_when_asked() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A program's transcripts run from the SIR its tests run from when stage 1
+/// keeps the world of transcripts there (`sisu1 0.11.0`, decision 722), so
+/// a program that looks a `dict[String, V]` up by a `str` (stage 1's R113),
+/// which the Rust front end refuses, passes its transcript; with an older
+/// stage 1 the transcript runs on the Rust front end's build and says why it
+/// cannot.
+#[test]
+fn transcripts_run_from_stage_1s_sir_when_it_keeps_their_world() {
+    let sisu = PathBuf::from(env!("CARGO_BIN_EXE_sisu"));
+    let stage1 = std::env::var_os("SISU_STAGE1")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/stage1/sisu1"));
+    let version = std::process::Command::new(&stage1)
+        .arg("--version")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    let keeps = version
+        .strip_prefix("sisu1 ")
+        .map(|v| v.split('.').map(|n| n.parse::<u32>().unwrap_or(0)).collect::<Vec<_>>())
+        .is_some_and(|v| v >= vec![0, 11, 0]);
+    let dir = std::env::temp_dir().join(format!("sisu-transcript-stage1-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("tests")).expect("a directory");
+    std::fs::write(
+        dir.join("menu.sisu"),
+        "def price(prices: dict[String, int], dish: str) -> int:\n    return prices.get(dish) ?? 0\n\n\
+         def main(sys: System):\n    var prices: dict[String, int] = {}\n    \
+         _ = prices.insert(\"soup\".to_string(), 7)\n    for a in sys.env.args():\n        \
+         print(\"{a}: {price(prices, a)}\")\n",
+    )
+    .expect("the program");
+    std::fs::write(dir.join("tests/menu.transcript"), "$ menu soup tea\nsoup: 7\ntea: 0\n")
+        .expect("its transcript");
+    let out = std::process::Command::new(&sisu)
+        .args(["test", "menu.sisu"])
+        .current_dir(&dir)
+        .output()
+        .expect("sisu runs");
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    if keeps {
+        assert!(stdout.contains("transcript \"tests/menu.transcript\" ... ok"), "{stdout}");
+        assert_eq!(out.status.code(), Some(0), "{stdout}");
+    } else {
+        assert!(stdout.contains("transcript runs on the Rust front end's build"), "{stdout}");
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }

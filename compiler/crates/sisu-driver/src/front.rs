@@ -297,11 +297,32 @@ pub fn stage1_sir_reports() -> bool {
         return v == "1";
     }
     let compiler = compiler_dir();
+    if let Some(given) = std::env::var_os(STAGE1_VAR).filter(|p| !p.is_empty()) {
+        return Stage1 { exe: PathBuf::from(given), compiler }.sir_reports();
+    }
     let exe = stage1_exe(&compiler);
     if stale(&exe, &compiler.join("stage1").join("src")) {
         return false;
     }
     Stage1 { exe, compiler }.sir_reports()
+}
+
+/// [`Stage1::keeps_transcripts`] of the stage-1 executable as it is,
+/// without building it: false when it is missing or a source of stage 1 is
+/// newer.
+pub fn stage1_keeps_transcripts() -> bool {
+    if let Ok(v) = std::env::var(TRANSCRIPTS_VAR) {
+        return v == "1";
+    }
+    let compiler = compiler_dir();
+    if let Some(given) = std::env::var_os(STAGE1_VAR).filter(|p| !p.is_empty()) {
+        return Stage1 { exe: PathBuf::from(given), compiler }.keeps_transcripts();
+    }
+    let exe = stage1_exe(&compiler);
+    if stale(&exe, &compiler.join("stage1").join("src")) {
+        return false;
+    }
+    Stage1 { exe, compiler }.keeps_transcripts()
 }
 
 /// The stage-1 front end, built and ready to run.

@@ -642,7 +642,7 @@ fn native_case(
     }
     if mode == Mode::FromLir {
         r.build = start.elapsed();
-        run_and_compare(case, &exe, &cwd, warned_by_sir, false, &mut r);
+        run_and_compare(case, &exe, &cwd, warned_by_sir, false, false, &mut r);
         return r;
     }
     // The build reports its steps, and must say that stage 2 lowered the
@@ -690,7 +690,7 @@ fn native_case(
     if unchecked {
         return r;
     }
-    run_and_compare(case, &exe, &cwd, warned_by_sir, !built.stderr.is_empty(), &mut r);
+    run_and_compare(case, &exe, &cwd, warned_by_sir, !built.stderr.is_empty(), !from_sir, &mut r);
     r
 }
 
@@ -852,13 +852,18 @@ fn report_status(out: &Output) -> Option<i32> {
 
 /// Runs a case's executable and compares the run with its expectations:
 /// `built_warned` says whether the build printed warnings, which a `sisu
-/// run` prints before the program's own standard error.
+/// run` prints before the program's own standard error. A program built
+/// from its source is built for the native runtime, which `target.runtime`
+/// names (decision 721): its standard output is `NAME.native-out` where
+/// the case has one; one built from `sisu sir`'s SIR was built for the
+/// interpreter's, and is compared with `NAME.out`.
 fn run_and_compare(
     case: &Case,
     exe: &Path,
     cwd: &Path,
     warned_by_sir: bool,
     built_warned: bool,
+    from_source: bool,
     r: &mut CaseResult,
 ) {
     let mut fail = |check: &str, detail: String| {
@@ -877,7 +882,8 @@ fn run_and_compare(
         None if ran.status == ABORTED => {}
         None => fail("allocations", "the run did not report its live allocations".into()),
     }
-    let expected = case.expected("out").unwrap_or_default();
+    let native_out = if from_source { case.expected("native-out") } else { None };
+    let expected = native_out.or_else(|| case.expected("out")).unwrap_or_default();
     if expected != ran.stdout {
         fail("stdout", diff::diff(&expected, &ran.stdout));
     }

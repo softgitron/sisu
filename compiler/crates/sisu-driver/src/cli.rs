@@ -1383,8 +1383,9 @@ fn test_from_sir(
         (path, salt)
     });
     // The transcripts beside the program, when every test runs: they run
-    // against the world of transcripts, which only the Rust front end
-    // writes into the SIR, so on its build of the program (decision 380).
+    // against the world of transcripts, from the SIR the tests run when
+    // stage 1 keeps it there (`sisu1 0.11.0`, decision 722), else on the
+    // Rust front end's build of the program (decisions 380 and 687).
     let mut transcripts = Vec::new();
     let found = if sources && opts.select.is_all() {
         crate::transcript::find(&input.disk.display().to_string())
@@ -1392,7 +1393,11 @@ fn test_from_sir(
         Vec::new()
     };
     if !found.is_empty() {
+        let kept = ["transcript_world", "transcript_system"]
+            .iter()
+            .all(|w| prog.functions.iter().any(|f| f.name == *w));
         let world = match prog.entry {
+            Some(_) if kept && crate::front::stage1_keeps_transcripts() => Ok(prog.clone()),
             Some(_) => transcript_sir(input, opts.level),
             None => Err(text(msg::CLI_TRANSCRIPT_NO_MAIN, &[("file", file.to_string())])),
         };
@@ -1663,10 +1668,24 @@ fn stage1_command(
         Ok(s) => s,
         Err(code) => return code,
     };
-    // The options every program command passes on: the lockfile and the
-    // features (decision 250), then the path.
+    // A native build is built for the native runtime, which
+    // `target.runtime` names to compile-time code (stage 1's R116,
+    // decision 721): `sisu run --native`, `sisu build --native` and `sisu
+    // test --native`.
+    let native_runtime = (has("--native") || crate::native_tests::chosen().is_some())
+        && matches!(cmd, "run" | "build" | "test" | "bench")
+        && stage1.takes_target_runtime();
+    let runtime_words = |words: &mut Vec<String>| {
+        if native_runtime {
+            words.push("--target-runtime".into());
+            words.push("native".into());
+        }
+    };
+    // The options every program command passes on: the runtime, the
+    // lockfile and the features (decision 250), then the path.
     let accept = has("--accept-unsafe");
     let program = |words: &mut Vec<String>| {
+        runtime_words(words);
         if locked {
             words.push("--locked".into());
         }
@@ -1760,6 +1779,7 @@ fn stage1_command(
             let black_box = cmd == "test" && once && opts.token.is_none() && stage1.black_box_tests();
             let sir_words = |path: &str| {
                 let mut words = vec!["sir".to_string(), "--tests".to_string()];
+                runtime_words(&mut words);
                 words.extend(contracts.clone());
                 if locked {
                     words.push("--locked".into());
@@ -1880,6 +1900,7 @@ fn stage1_command(
                     // `sisu test` says of it, and fails (decision 370), which
                     // is shown as it is (decision 380).
                     let mut words = vec!["sir".to_string(), "--tests".to_string()];
+                    runtime_words(&mut words);
                     words.extend(contracts.clone());
                     words.extend(common.iter().cloned());
                     let r = match run(host, &words, Backend::Unused) {

@@ -544,6 +544,9 @@ fn lower_reaching(
         sources,
         entry,
         exports,
+        // The Rust front end reads no manifest key of the runtime; stage 1
+        // writes it (decision 723).
+        runtime: None,
         types,
         intrinsics,
         functions,

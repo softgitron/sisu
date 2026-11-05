@@ -1,0 +1,62 @@
+##! The scheduler's seeded choices (D-086's order; decision 724): the
+##! generator behind every one of them, the interpreter's SplitMix64 with
+##! its seeding, so that the same seed draws the same numbers, and the
+##! choice of the next task among the ready ones, which takes it out of
+##! the run queue (`queue.sisu`) as the interpreter's run queue does. The
+##! generator's state is one word, which the runtime in Rust's scheduler
+##! (`crates/sisu-rt/src/sched.rs`) keeps and hands to each call.
+
+import rt.queue
+from std.mem import ptr
+
+## The state a seed starts the generator in, as the interpreter seeds it:
+## the seed times 0x2545F4914F6CDD1D, as a 64-bit pattern, with
+## 0x9E3779B97F4A7C15's bits flipped in.
+pub(package) pure def seeded(seed: int) -> int:
+    return (seed *% 2685821657736338717) ^ -7046029254386353131
+
+## The next number the generator at `state` draws, as 64 bits: SplitMix64.
+## `>>` shifts the sign in, so each logical shift masks it off.
+##
+## Requires:
+## - `state`: `state` points to the generator's word
+pub(package) def next(state: ptr mut int) -> int:
+    # safety: in_bounds, valid, aligned, writable: the generator's word,
+    #   by `state`.
+    unsafe:
+        let s = state.read() +% -7046029254386353131
+        state.write(s)
+        var z = s
+        z = (z ^ ((z >> 30) & 17179869183)) *% -4658895280553007687
+        z = (z ^ ((z >> 27) & 137438953471)) *% -7723592293110705685
+        return z ^ ((z >> 31) & 8589934591)
+
+## The 64 bits `z` read as an unsigned number, modulo `n` (`n > 0`): the
+## number is twice its high 63 bits and its low bit, each of which is
+## taken modulo `n` without overflowing an `int`.
+pub(package) pure def unsigned_mod(z: int, n: int) -> int:
+    let high = (z >> 1) & 9223372036854775807
+    return ((high % n) * 2 + (z & 1)) % n
+
+## A number below `n` drawn from the generator at `state`, 0 for `n` of 1
+## or less without a draw, as the interpreter's `below` draws it.
+##
+## Requires:
+## - `state`: `state` points to the generator's word
+pub(package) def below(state: ptr mut int, n: int) -> int:
+    if n <= 1:
+        return 0
+    return unsigned_mod(next(state), n)
+
+## The next task, drawn among the ready ones in the run queue `q` by the
+## generator at `state` and taken out of it, the last moving into its
+## slot, as the interpreter's `switch` takes it; -1 when none is ready.
+##
+## Requires:
+## - `state`: `state` points to the generator's word
+## - `queue`: `q` holds a live queue of one word a record
+pub(package) def pick(state: ptr mut int, q: ptr mut u8) -> int:
+    let n = queue.count(q)
+    if n == 0:
+        return -1
+    return queue.swap_remove(q, below(state, n))

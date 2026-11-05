@@ -520,6 +520,7 @@ pub fn read(text: &str) -> Result<Program, ReadError> {
         sources: Vec::new(),
         entry: None,
         exports: Vec::new(),
+        runtime: None,
         types: Vec::new(),
         intrinsics: Vec::new(),
         functions: Vec::new(),
@@ -566,6 +567,16 @@ pub fn read(text: &str) -> Result<Program, ReadError> {
                     }
                 }
                 p.entry = Some(e);
+            } else if c.eat("runtime ") {
+                // The package's runtime profile (decision 723).
+                let r = c.name()?;
+                if !c.at_end() {
+                    return Err(format!("unexpected `{}`", c.rest()));
+                }
+                if !matches!(r.as_str(), "full" | "single") {
+                    return Err(format!("unknown runtime profile `{r}`"));
+                }
+                p.runtime = Some(r);
             } else if c.eat("export ") {
                 // `@export("name")` (decision 683).
                 let symbol = c.string()?;

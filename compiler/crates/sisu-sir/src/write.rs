@@ -20,6 +20,9 @@ pub fn write(p: &Program) -> String {
         }
         out.push('\n');
     }
+    if let Some(r) = &p.runtime {
+        let _ = writeln!(out, "runtime {r}");
+    }
     for (symbol, f) in &p.exports {
         let _ = writeln!(out, "export {} {f}", quote(symbol));
     }
