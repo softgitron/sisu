@@ -340,6 +340,12 @@ impl Stage1 {
     /// printed, and gives the exit status.
     pub fn ready(host: &mut dyn Host) -> Result<Stage1, i32> {
         let compiler = compiler_dir();
+        // A stage 1 the caller built (decision 722), neither built nor
+        // checked here, as `SISU_STAGE2` gives stage 2.
+        if let Some(given) = std::env::var_os(STAGE1_VAR).filter(|p| !p.is_empty()) {
+            let given = PathBuf::from(given);
+            return Ok(Stage1 { exe: std::fs::canonicalize(&given).unwrap_or(given), compiler });
+        }
         let exe = stage1_exe(&compiler);
         let package = compiler.join("stage1");
         let src = package.join("src");
@@ -402,6 +408,73 @@ impl Stage1 {
             return v == "1";
         }
         self.version().is_some_and(|v| v >= REPL_OPTIONS_SINCE)
+    }
+
+    /// Whether `sisu repl` and `sisu ws` keep one process of this stage 1
+    /// for the session, `sir --repl-serve` (`sisu1 0.10.0` and later, its
+    /// R112; decision 720). [`REPL_SERVE_VAR`] decides when it is set.
+    pub fn serves_repl_server(&self) -> bool {
+        if let Ok(v) = std::env::var(REPL_SERVE_VAR) {
+            return v == "1";
+        }
+        self.version().is_some_and(|v| v >= REPL_SERVE_SINCE)
+    }
+
+    /// Whether this stage 1 takes `--target-runtime native|interpreter`,
+    /// which `target.runtime` gives compile-time code (`sisu1 0.10.0` and
+    /// later, its R116; decision 721).
+    pub fn takes_target_runtime(&self) -> bool {
+        self.version().is_some_and(|v| v >= REPL_SERVE_SINCE)
+    }
+
+    /// Whether this stage 1's `sir --tests` keeps the world of transcripts,
+    /// `transcript_world` and `transcript_system`, for a program that has
+    /// transcripts (`sisu1 0.11.0` and later, its R120; decision 722).
+    /// [`TRANSCRIPTS_VAR`] decides when it is set.
+    pub fn keeps_transcripts(&self) -> bool {
+        if let Ok(v) = std::env::var(TRANSCRIPTS_VAR) {
+            return v == "1";
+        }
+        self.version().is_some_and(|v| v >= TRANSCRIPTS_SINCE)
+    }
+
+    /// `sir --repl-serve` started in the working directory, or none when it
+    /// cannot be: one process of this stage 1 that makes the standard
+    /// library's base once and answers the REPL's commands (decision 720).
+    pub fn serve(&self) -> Option<Server> {
+        let mut cmd = std::process::Command::new(&self.exe);
+        cmd.arg("--home").arg(&self.compiler).args(["sir", "--repl-serve"]);
+        self.environment(&mut cmd, Backend::Unused);
+        cmd.stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped());
+        let mut child = cmd.spawn().ok()?;
+        let requests = child.stdin.take();
+        let answers = std::io::BufReader::new(child.stderr.take()?);
+        Some(Server { child, requests, answers, lost: false })
+    }
+
+    /// The environment a run of stage 1 gets: none of the runtime's or the
+    /// driver's own switches, the lowering and backend the command chose,
+    /// and the working directory as the shell's `PWD`.
+    fn environment(&self, cmd: &mut std::process::Command, backend: Backend) {
+        for v in RUNTIME_VARS.iter().chain([&FRONT_END_VAR, &KEEP_SIR]) {
+            cmd.env_remove(v);
+        }
+        if backend == Backend::KeepSir {
+            cmd.env(KEEP_SIR, "1");
+        }
+        // The backend stage 1 hands the SIR to lowers as the command chose
+        // (decision 304).
+        cmd.env(LOWER_VAR, crate::native::lowering().name());
+        match crate::native::chosen_backend() {
+            Some(b) => cmd.env(BACKEND_VAR, b.name()),
+            None => cmd.env_remove(BACKEND_VAR),
+        };
+        // Stage 1 knows the working directory by the shell's `PWD`.
+        if let Ok(cwd) = std::env::current_dir() {
+            cmd.env("PWD", cwd);
+        }
     }
 
     /// Whether this stage 1's `sir --tests` reports a program's diagnostics
@@ -488,23 +561,7 @@ impl Stage1 {
         let mut cmd = std::process::Command::new(&self.exe);
         cmd.arg("--home").arg(&home_dir).args(args);
         cmd.stdin(std::process::Stdio::null());
-        for v in RUNTIME_VARS.iter().chain([&FRONT_END_VAR, &KEEP_SIR]) {
-            cmd.env_remove(v);
-        }
-        if backend == Backend::KeepSir {
-            cmd.env(KEEP_SIR, "1");
-        }
-        // The backend stage 1 hands the SIR to lowers as the command chose
-        // (decision 304).
-        cmd.env(LOWER_VAR, crate::native::lowering().name());
-        match crate::native::chosen_backend() {
-            Some(b) => cmd.env(BACKEND_VAR, b.name()),
-            None => cmd.env_remove(BACKEND_VAR),
-        };
-        // Stage 1 knows the working directory by the shell's `PWD`.
-        if let Ok(cwd) = std::env::current_dir() {
-            cmd.env("PWD", cwd);
-        }
+        self.environment(&mut cmd, backend);
         let out = match cmd.output() {
             Ok(o) => o,
             Err(e) => {
@@ -535,6 +592,88 @@ impl Stage1 {
         }
         Ok(settle(stdout, stderr, status))
     }
+}
+
+/// One process of stage 1 serving the REPL's commands (`sisu1 sir
+/// --repl-serve`, its RULES.md R112; decision 720), which makes the
+/// standard library's base once and keeps it: each request is a line of
+/// the command's arguments separated by tabs, and each answer, on its
+/// standard error, the line `answer STATUS OUT ERR` and then the bytes the
+/// command alone prints on standard output and on standard error.
+pub struct Server {
+    child: std::process::Child,
+    requests: Option<std::process::ChildStdin>,
+    answers: std::io::BufReader<std::process::ChildStderr>,
+    /// The server answered out of its frame or went away: it is killed
+    /// rather than asked to end.
+    lost: bool,
+}
+
+impl Server {
+    /// What `args` print and give as a command of their own, as
+    /// [`Stage1::run`] gives it; none when an argument cannot be put in a
+    /// request (a tab or a line break in it), or when the server went away
+    /// or answered out of its frame, after which it is asked nothing more.
+    pub fn ask(&mut self, args: &[String]) -> Option<Ran> {
+        use std::io::{BufRead as _, Read as _, Write as _};
+        if self.lost || args.is_empty() || args.iter().any(|a| a.contains(['\t', '\n', '\r'])) {
+            return None;
+        }
+        let answered = (|| {
+            let requests = self.requests.as_mut()?;
+            let mut line = args.join("\t");
+            line.push('\n');
+            requests.write_all(line.as_bytes()).ok()?;
+            requests.flush().ok()?;
+            let mut head = String::new();
+            self.answers.read_line(&mut head).ok()?;
+            let (status, out, err) = answer_head(&head)?;
+            let mut stdout = vec![0; out];
+            self.answers.read_exact(&mut stdout).ok()?;
+            let mut stderr = vec![0; err];
+            self.answers.read_exact(&mut stderr).ok()?;
+            Some(settle(
+                String::from_utf8_lossy(&stdout).into_owned(),
+                String::from_utf8_lossy(&stderr).into_owned(),
+                status,
+            ))
+        })();
+        self.lost = answered.is_none();
+        answered
+    }
+}
+
+impl Server {
+    /// Whether the server went away or answered out of its frame.
+    pub fn is_lost(&self) -> bool {
+        self.lost
+    }
+}
+
+impl Drop for Server {
+    fn drop(&mut self) {
+        use std::io::Write as _;
+        // An empty line ends a server, as the end of its input does.
+        if let Some(mut r) = self.requests.take()
+            && !self.lost
+        {
+            let _ = r.write_all(b"\n");
+        }
+        if self.lost {
+            let _ = self.child.kill();
+        }
+        let _ = self.child.wait();
+    }
+}
+
+/// The line that starts an answer of `sir --repl-serve`, `answer STATUS
+/// OUT ERR`: the status and the two lengths in bytes.
+fn answer_head(line: &str) -> Option<(i32, usize, usize)> {
+    let mut words = line.strip_suffix('\n')?.strip_prefix("answer ")?.split(' ');
+    let status = words.next()?.parse().ok()?;
+    let out = words.next()?.parse().ok()?;
+    let err = words.next()?.parse().ok()?;
+    words.next().is_none().then_some((status, out, err))
 }
 
 /// Stage 1's output with the line its `main` printed for the error it
@@ -983,6 +1122,27 @@ const REPL_SINCE: (u32, u32, u32) = (0, 8, 0);
 /// The first stage 1 whose `sir --repl` and `sir --worksheet` take `--dir`
 /// and `--name`, and whose `parse` takes `--bindings` (decision 640).
 const REPL_OPTIONS_SINCE: (u32, u32, u32) = (0, 9, 0);
+
+/// The first stage 1 that serves `sir --repl-serve` and takes
+/// `--target-runtime` (decisions 720 and 721).
+const REPL_SERVE_SINCE: (u32, u32, u32) = (0, 10, 0);
+
+/// The first stage 1 whose `sir --tests` keeps the world of transcripts
+/// (decision 722).
+const TRANSCRIPTS_SINCE: (u32, u32, u32) = (0, 11, 0);
+
+/// `SISU_STAGE1_REPL_SERVE=1` (or `0`): whether `sisu repl` and `sisu ws`
+/// keep one process of stage 1 for the session, whatever its version says.
+pub const REPL_SERVE_VAR: &str = "SISU_STAGE1_REPL_SERVE";
+
+/// `SISU_STAGE1_TRANSCRIPTS=1` (or `0`): whether a program's transcripts
+/// run from stage 1's SIR when it keeps their world, whatever its version
+/// says.
+pub const TRANSCRIPTS_VAR: &str = "SISU_STAGE1_TRANSCRIPTS";
+
+/// `SISU_STAGE1=PATH`: the stage-1 executable to run, as it is, neither
+/// built nor checked against its sources.
+pub const STAGE1_VAR: &str = "SISU_STAGE1";
 
 /// `SISU_STAGE1_REPL_OPTIONS=1` (or `0`): whether the driver gives stage 1
 /// `--dir`, `--name` and `parse --bindings`, whatever its version says.

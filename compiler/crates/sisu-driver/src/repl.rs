@@ -84,7 +84,20 @@ pub(crate) enum Checker {
         /// Stage 1 takes `--dir`, `--name` and `parse --bindings`
         /// (`sisu1 0.9.0`, decision 640).
         options: bool,
+        /// The process of stage 1 that serves the session's commands
+        /// (`sir --repl-serve`, `sisu1 0.10.0`, decision 720), started at
+        /// the first.
+        server: std::cell::RefCell<Served>,
     },
+}
+
+/// Where a session's commands of stage 1 go: to a server not started yet,
+/// to the one started, or to a process of their own each (a stage 1 older
+/// than 0.10.0, `SISU_STAGE1_REPL_SERVE=0`, or a server that went away).
+pub(crate) enum Served {
+    Unstarted,
+    Running(crate::front::Server),
+    Off,
 }
 
 /// Where a session's program, or a worksheet, stands for stage 1 (`--dir`,
@@ -135,7 +148,31 @@ impl Checker {
             return Checker::Rust;
         }
         let options = stage1.serves_repl_options();
-        Checker::Stage1 { stage1, dir, options }
+        let served = if options && stage1.serves_repl_server() { Served::Unstarted } else { Served::Off };
+        Checker::Stage1 { stage1, dir, options, server: std::cell::RefCell::new(served) }
+    }
+
+    /// Runs the stage-1 command `words`: through the session's server when
+    /// there is one, started at the first command, or as a process of its
+    /// own. A server that cannot answer is given up for the session, and
+    /// the command runs alone, which reports what went wrong.
+    fn stage1_run(&self, words: &[String], host: &mut dyn Host) -> Result<crate::front::Ran, i32> {
+        let Checker::Stage1 { stage1, server, .. } = self else { return Err(exit::ERROR) };
+        {
+            let mut served = server.borrow_mut();
+            if matches!(*served, Served::Unstarted) {
+                *served = stage1.serve().map_or(Served::Off, Served::Running);
+            }
+            if let Served::Running(s) = &mut *served {
+                if let Some(ran) = s.ask(words) {
+                    return Ok(ran);
+                }
+                if s.is_lost() {
+                    *served = Served::Off;
+                }
+            }
+        }
+        stage1.run(words, crate::front::Backend::Unused, host)
     }
 
     /// Stage 1's `sir --repl SESSION INPUT --kept OUT` (RULES.md, R79): the
@@ -150,7 +187,7 @@ impl Checker {
         place: &Place,
         host: &mut dyn Host,
     ) -> Built {
-        let Checker::Stage1 { stage1, dir, options } = self else { return Err(String::new()) };
+        let Checker::Stage1 { dir, options, .. } = self else { return Err(String::new()) };
         let written = |name: &str, text: &str| -> Result<String, String> {
             let path = dir.join(name);
             std::fs::write(&path, text).map_err(|e| format!("{}\n", text_of_io(&path, &e)))?;
@@ -172,7 +209,7 @@ impl Checker {
         if *options {
             words.extend(place.words());
         }
-        let ran = stage1.run(&words, crate::front::Backend::Unused, host).map_err(|_| String::new())?;
+        let ran = self.stage1_run(&words, host).map_err(|_| String::new())?;
         if ran.status != exit::OK {
             return Err(ran.stderr);
         }
@@ -184,12 +221,12 @@ impl Checker {
     /// Stage 1's `sir --worksheet FILE`: the worksheet's SIR with its
     /// statements marked, or its diagnostics in the file as written.
     fn worksheet(&self, file: &str, place: &Place, host: &mut dyn Host) -> Result<sisu_sir::Program, String> {
-        let Checker::Stage1 { stage1, options, .. } = self else { return Err(String::new()) };
+        let Checker::Stage1 { options, .. } = self else { return Err(String::new()) };
         let mut words = vec!["sir".to_string(), "--worksheet".to_string(), file.to_string()];
         if *options {
             words.extend(place.words());
         }
-        let ran = stage1.run(&words, crate::front::Backend::Unused, host).map_err(|_| String::new())?;
+        let ran = self.stage1_run(&words, host).map_err(|_| String::new())?;
         if ran.status != exit::OK {
             return Err(ran.stderr);
         }
@@ -206,12 +243,12 @@ impl Checker {
                 Syntax::read(text.clone(), &sisu_parser::parse(FileId(0), &text).tree.dump(false))
                     .map(|t| Outline::of(&t))
             }
-            Checker::Stage1 { stage1, dir, options } => {
+            Checker::Stage1 { dir, options, .. } => {
                 let path = dir.join("tree.sisu");
                 std::fs::write(&path, &text).ok()?;
                 let how = if *options { "--bindings" } else { "--tree" };
                 let words = vec!["parse".to_string(), how.to_string(), path.display().to_string()];
-                let printed = stage1.run(&words, crate::front::Backend::Unused, host).ok()?.stdout;
+                let printed = self.stage1_run(&words, host).ok()?.stdout;
                 if *options {
                     Outline::read(text, &printed)
                 } else {
