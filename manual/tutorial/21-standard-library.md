@@ -237,10 +237,11 @@ test "two readings, and the time between them" ... ok
   readings, each a `Duration`.
 - Instants are ordered, and `+` and `-` move one by a `Duration`. An
   instant is not a time of day: it prints as its nanoseconds.
-- On the test clock the readings are the same on every run, and a
-  recorded run replays them. On `sys.clock` they are the system's time,
-  so a change of the computer's clock moves them; stage 0 has no
-  monotonic clock that only goes forward.
+- An instant reads the clock's monotonic time, which only goes
+  forward: on `sys.clock` a change of the computer's clock does not
+  move it, and on the test clock it is the test clock's own time,
+  which moves only when the test advances it. The readings are the same
+  on every run of a test, and a recorded run replays them.
 
 A `DateTime` is in UTC. A `Zone` of `std.time` gives the time that the
 clocks of a place show:

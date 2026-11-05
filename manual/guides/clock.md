@@ -181,6 +181,8 @@ that passed and waits for the third.
 Code that measures how long its work took reads an `Instant` from the
 clock it was given, `Instant.now(clock)` of `std.time`, and asks its
 `elapsed(clock)` at the end
-([chapter 21](../tutorial/21-standard-library.md#time)). Under the test
-clock the time it measures is what the test advanced, the same on every
-run.
+([chapter 21](../tutorial/21-standard-library.md#time)). An `Instant`
+reads the clock's monotonic time, which only goes forward, so on the
+real clock a change of the computer's time does not move it. Under the
+test clock the time it measures is what the test advanced, the same on
+every run.

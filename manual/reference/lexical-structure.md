@@ -28,7 +28,35 @@ A source file is UTF-8 text, and a line ends with a line feed or a
 carriage return and line feed. Outside strings and comments, a
 character that no token uses is E0005 (`lex.unknown-character`): a
 control character, a symbol such as `$`, a byte-order mark at the start
-of the file, or a no-break space.
+of the file, or a no-break space. A character that shows as a space or
+as nothing (a no-break space, a zero-width space, a soft hyphen, the
+marks of the text's direction, a byte-order mark) is written as its
+escape, with a note that names it and a fix that writes a space or
+removes it:
+
+<!-- file: examples/reference-lexical-structure/no_break_space.sisu -->
+```sisu
+# A no-break space, pasted from a web page, between `=` and the value.
+def main():
+    let heat = 80
+    print(heat)
+```
+
+<!-- output: examples/reference-lexical-structure/no_break_space.console -->
+```console
+$ sisu check no_break_space.sisu
+error[E0005]: `\u{a0}` cannot appear in Sisu source outside a string or comment
+  --> no_break_space.sisu:3:15
+  |
+3 |     let heat = 80
+  |               ^
+  = note: it is a no-break space, which looks like a space
+  = fix: write a space: ` `
+
+```
+
+The line in the message looks right, since the character looks like a
+space; the escape `\u{a0}` and the note say what it is.
 
 **Stage 0 differs.** [02](../../proposal/02-syntax.md) normalises names
 to NFC, so a letter written as a base and a combining mark is the same
@@ -713,7 +741,7 @@ lint` names it, with the fix that removes it
 | [E0002](diagnostics.md#e0002) | `lex.inconsistent-dedent` | [Indentation and blocks](#indentation-and-blocks) |
 | [E0003](diagnostics.md#e0003) | `lex.unterminated-string` | [String literals](#string-literals) |
 | E0004 | `lex.unterminated-block-string` | [String literals](#string-literals) |
-| E0005 | `lex.unknown-character` | [Source text](#source-text) |
+| [E0005](diagnostics.md#e0005) | `lex.unknown-character` | [Source text](#source-text) |
 | E0006 | `lex.unterminated-char` | [Character literals](#character-literals) |
 | E0007 | `lex.invalid-escape` | [Character literals](#character-literals) |
 | E0008, E0009, E0010 | `lex.unmatched-close`, `lex.unclosed-bracket`, `lex.mismatched-bracket` | [Lines and statements](#lines-and-statements) |

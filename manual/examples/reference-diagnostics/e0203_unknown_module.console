@@ -4,5 +4,6 @@ error[E0203]: there is no module `atlas.geo.points`
   |
 2 | from atlas.geo.points import Point
   |      ^^^^^^^^^^^^^^^^
+  = fix: a module with a similar name exists: `atlas.geo.point`
 
 error[D0006]: the program was not run: errors found (1)

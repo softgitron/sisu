@@ -7,6 +7,6 @@ error[E0411]: `Program` holds `tokens: list[Token]`, which borrows; only a `view
   |
 6 | struct Program:
   |        ------- `Program` is declared here
-  = fix: declare it `view struct Program`: `view `
+  = fix: declare it a view: `view `
 
 error[D0006]: the program was not run: errors found (1)

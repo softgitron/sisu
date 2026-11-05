@@ -209,9 +209,13 @@ error[D0006]: the program was not run: errors found (1)
 gives foreign code `ptrsize` and `uptrsize`, the integers as wide as a
 pointer; stage 0 has neither (E0201), and `std.ffi`'s C types, such as
 `c_size`, serve instead. 03 names no bit methods, and stage 0's take
-Rust's names. A type's limits, `u8.MAX` and `u8.MIN`, are E0351, and
-`truncate_to` is a method of `int` alone (E0304 on a sized type), so a
-`u32` is narrowed through `to_int()` first.
+Rust's names. Every integer type has its limits, `u8.MAX` and
+`i128.MIN`, and `truncate_to[T]()`; a value beyond `int`'s range taken
+to an `i128` or a `u128` gives, for now, the value of its low 64 bits
+read as an `int` (`u64.MAX.truncate_to[i128]()` is -1), where widening
+gives the value itself. The narrowing methods of 03 other than
+`truncate_to` are missing on the sized types, which narrow with
+`to_int()` and `int`'s `to_u8()` and its siblings.
 
 **Status.** In stage 0 (D-035).
 
@@ -375,7 +379,7 @@ error[E0373]: `*` cannot mix `int` and `f64`; convert one of them explicitly
   |
 5 |     print(count * price)
   |           ^^^^^^^^^^^^^
-  = fix: make the `int` an `f64`: `.to_f64()`
+  = fix: convert the `int`: `.to_f64()`
 
 error[D0006]: the program was not run: errors found (1)
 ```
@@ -525,7 +529,7 @@ def main():
 **Stage 0 differs.** A `BigInt` literal must fit in an `int` (E0374);
 [03](../../proposal/03-types-and-generics.md#numbers) takes a literal of
 any length and checks it at compile time, and stage 0 reads a longer one
-with `BigInt.parse`. A `Decimal` has no `/` (E0310, whose note names
+with `BigInt.parse`, which E0374's note names. A `Decimal` has no `/` (E0310, whose note names
 `div` and `to_ratio`), where 03 makes the quotient a `Ratio`; `div` with
 a number of places and a `Rounding` is the division stage 0 has.
 

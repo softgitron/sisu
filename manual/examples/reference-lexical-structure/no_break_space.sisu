@@ -1,0 +1,4 @@
+# A no-break space, pasted from a web page, between `=` and the value.
+def main():
+    let heat = 80
+    print(heat)

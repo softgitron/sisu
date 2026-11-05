@@ -1,0 +1,9 @@
+# An adapter such as `filter` is not `pure`, whatever function it takes.
+pure def is_long(word: str) -> bool:
+    return len(word) > 4
+
+pure def long_words(text: str) -> int:
+    return text.split_whitespace().filter(w -> is_long(w)).count()
+
+def main():
+    print(long_words("hei kaunis maailma"))

@@ -1,0 +1,34 @@
+# A derive reads the types of the fields of an enum's variants.
+trait Schema:
+    ## Each variant with the types of its fields.
+    def schema() -> list[String]
+
+    comptime def derive(T: type) -> impl Schema for T:
+        return impl Schema for T:
+            def schema() -> list[String]:
+                var lines: list[String] = []
+                comptime for v in reflect.variants_of(T):
+                    var types: list[String] = []
+                    comptime for f in v.fields:
+                        let name = reflect.name_of(f.ty)
+                        if comptime reflect.is_struct(f.ty):
+                            types.push("{name} (a struct)")
+                        else:
+                            types.push(name.to_string())
+                    lines.push("{v.name}: {types.join(", ")}")
+                return lines
+
+## A volume of water.
+struct Litres:
+    amount: f64
+
+## How a sauna is heated.
+@derive(Schema)
+enum Heater:
+    Wood(logs: int)
+    Electric(kilowatts: f64, phase: String)
+    Water(tank: Litres)
+
+def main():
+    for line in Heater.schema():
+        print(line)

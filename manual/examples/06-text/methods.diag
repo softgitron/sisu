@@ -1,0 +1,4 @@
+8:1-8:15 E0318 type.unused-result ty="int?"
+  fix type.discard 8:1-8:1 "_ = "
+9:1-9:15 E0318 type.unused-result ty="int?"
+  fix type.discard 9:1-9:1 "_ = "

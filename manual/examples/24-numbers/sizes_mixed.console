@@ -4,5 +4,6 @@ error[E0310]: `+` cannot be applied to `i16` and `u32`
   |
 9 |     let total = sample + colour
   |                 ^^^^^^^^^^^^^^^
+  = fix: make the `i16` an `int`, which holds the values of both: `.to_int()`
 
 error[D0006]: the program was not run: errors found (1)

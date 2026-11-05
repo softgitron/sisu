@@ -4,7 +4,7 @@ error[E0268]: the name of a method is written in snake_case, and `MAX_HEAT` is n
   |
 9 |     def MAX_HEAT(self) -> int:
   |         ^^^^^^^^
-  = fix: rename it: `max_heat`
+  = note: a name in capitals is a constant's: a trait's constant is given as `const MAX_HEAT: T = ...`
 
 error[E0273]: `MAX_HEAT` is a constant of `Stove`, and this impl gives it as a method
   --> e0273_const_or_method.sisu:9:9

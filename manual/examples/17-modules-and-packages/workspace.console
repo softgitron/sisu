@@ -1,7 +1,9 @@
 $ sisu test
+tests of `wordcount`:
 test "a tally of words" ... ok
 test "text/words (doc example)" ... ok
 2 passed, 0 failed, 0 blocked
+tests of `app`:
 0 passed, 0 failed, 0 blocked
 $ sisu run app -- poem.txt
    4  the

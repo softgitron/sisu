@@ -4,6 +4,6 @@ error[E0130]: `pub(crate)` is not Sisu's: an item is `pub` to every package, or 
   |
 2 | pub(crate) def heat() -> int:
   |     ^^^^^
-  = fix: make it visible to its package: `pub(package)`: `package`
+  = fix: make it visible to its package: `package`
 
 error[D0006]: the program was not run: errors found (1)

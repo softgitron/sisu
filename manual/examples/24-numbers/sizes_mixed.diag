@@ -1,1 +1,2 @@
 9:17-9:32 E0310 type.binary-operator op="+" lhs="i16" rhs="u32"
+  fix type.convert-to-int 9:23-9:23 ".to_int()"

@@ -819,7 +819,7 @@ error[E0373]: `*` cannot mix `f64` and `int`; convert one of them explicitly
   |
 5 |     print("total: {price * count}")
   |                    ^^^^^^^^^^^^^
-  = fix: make the `int` an `f64`: `.to_f64()`
+  = fix: convert the `int`: `.to_f64()`
 
 error[D0006]: the program was not run: errors found (1)
 ```
@@ -1123,7 +1123,7 @@ error[E0300]: expected `f64`, found `int`
    |
 18 |     return total / count
    |            ^^^^^^^^^^^^^
-  = fix: make the `int` an `f64`: `(`, `).to_f64()`
+  = fix: convert the `int`: `(`, `).to_f64()`
 
 error[E0301]: `/` divides floats; for integers use `//`, or convert to `f64` first
   --> split_bill.sisu:18:12

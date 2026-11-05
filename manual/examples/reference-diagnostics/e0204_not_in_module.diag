@@ -1,2 +1,1 @@
 2:29-2:34 E0204 resolve.not-in-module module="std.collections" name="Stack"
-5:23-5:26 E0200 resolve.undefined-name name="int"

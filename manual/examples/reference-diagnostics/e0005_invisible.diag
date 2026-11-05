@@ -1,0 +1,2 @@
+3:14-3:15 E0005 lex.unknown-character char="\\u{200b}"
+  fix lex.remove-character 3:14-3:15 ""

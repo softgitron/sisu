@@ -1,0 +1,4 @@
+# The name without the character that showed as nothing.
+def main():
+    let sauna = 80
+    print(sauna)

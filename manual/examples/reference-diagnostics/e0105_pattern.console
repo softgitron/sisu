@@ -4,6 +4,6 @@ error[E0105]: expected a pattern, found `not`
   |
 5 |         case not 0: "other"
   |              ^^^
-  = note: `not` is a keyword, which names no binding: give it another name
+  = note: a pattern says what a value is, not what it is not: write the case it is first (`case 0:`), then the rest with `case _:`, or test it in a guard, `case n if n != 0:`
 
 error[D0006]: the program was not run: errors found (1)

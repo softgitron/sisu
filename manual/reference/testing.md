@@ -97,8 +97,11 @@ names are relative to the package's directory.
 
 `sisu test` of a package runs its own tests, then each file of
 `tests/`, in the order of their names, as a program each, with its own
-list, failures and counts; a workspace does so for each member. A
-failure's replay token names the file, and `sisu test --replay TOKEN
+list, failures and counts; a workspace does so for each member. When
+a run holds more than one program, each list starts with the line
+``tests of `NAME`:`` (D0137), `NAME` the package or the member by its
+name and a file of `tests/` by its path; a run of one program prints
+its list alone. A failure's replay token names the file, and `sisu test --replay TOKEN
 tests/NAME.sisu` runs that test alone. The status is the worst of the
 programs', a failure outweighing a blocked test.
 
@@ -132,8 +135,10 @@ test "more used than there was":
 <!-- output: examples/reference-testing/levels.console -->
 ```console
 $ sisu test
+tests of `levels`:
 test "clamp keeps zero" ... ok
 1 passed, 0 failed, 0 blocked
+tests of `tests/tank.sisu`:
 test "a full tank" ... ok
 test "more used than there was" ... ok
 2 passed, 0 failed, 0 blocked
@@ -160,8 +165,10 @@ test "clamp keeps zero":
 <!-- output: examples/reference-testing/levels_bug.console -->
 ```console
 $ sisu test
+tests of `levels`:
 test "clamp keeps zero" ... ok
 1 passed, 0 failed, 0 blocked
+tests of `tests/tank.sisu`:
 test "a full tank" ... ok
 test "more used than there was" ... FAILED
 

@@ -4,5 +4,6 @@ error[E0271]: `WARMUP` is not a constant of `Stove`
    |
 11 |     const WARMUP: int = 60
    |           ^^^^^^
+  = fix: a similar name is in scope: `WARM_UP`
 
 error[D0006]: the program was not run: errors found (1)

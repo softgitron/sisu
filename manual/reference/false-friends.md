@@ -530,8 +530,7 @@ error[E0117]: unexpected `n` after the end of the statement
 Every string literal interpolates, so there is no prefix
 ([R1](lexical-structure.md#string-literals)). E0100, whose fix writes
 the string without the `f`. After `=`, `let s = f"n is {n}"`, it is
-E0117 with no fix, which the plan lists for the compiler's
-maintainers.
+E0117, with the same fix.
 
 <!-- file: examples/reference-false-friends/f_string.sisu -->
 ```sisu
@@ -1235,7 +1234,7 @@ error[E0130]: `pub(crate)` is not Sisu's: an item is `pub` to every package, or 
   |
 2 | pub(crate) def total(prices: list[int]) -> int:
   |     ^^^^^
-  = fix: make it visible to its package: `pub(package)`: `package`
+  = fix: make it visible to its package: `package`
 
 ```
 

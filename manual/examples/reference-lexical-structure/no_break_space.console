@@ -1,0 +1,9 @@
+$ sisu check no_break_space.sisu
+error[E0005]: `\u{a0}` cannot appear in Sisu source outside a string or comment
+  --> no_break_space.sisu:3:15
+  |
+3 |     let heat = 80
+  |               ^
+  = note: it is a no-break space, which looks like a space
+  = fix: write a space: ` `
+

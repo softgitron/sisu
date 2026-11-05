@@ -132,7 +132,8 @@ An import binds names in the module that writes it:
 - There are no glob imports: `from m import *` is E0128.
 - An import that names nothing is E0220 for its first name, E0203 for
   a module further along the path, and E0204 for an item a module does
-  not have; one of a package that is not a dependency is E0260.
+  not have; one of a package that is not a dependency is E0260. E0220
+  and E0203 offer a module of a similar name when one exists.
 - `import` names a module and `from ... import` an item: an item named
   as a module, `import atlas.geo.point.Point`, is E0223
   (`resolve.not-a-module`), whose fix writes `from atlas.geo.point import

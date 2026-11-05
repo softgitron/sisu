@@ -533,9 +533,85 @@ says so.
 `pure` function can call only `pure` functions. So are the other
 methods that use up an iterator without taking a function, `nth`,
 `collect`, `sum` and `join`. The adapters of chapter 16 that take one,
-`map` and `filter` among them, are not marked `pure` in the compiler
-yet, so a `pure` function that needs them writes a loop or a
-comprehension.
+`map` and `filter` among them, are not `pure`, whatever the function
+you give them: an adapter's type takes any function, and the checker
+cannot see which one a call will pass. This program gives `filter` a
+function that is `pure` all the same:
+
+<!-- file: examples/18-capabilities/pure_filter.sisu -->
+```sisu
+# An adapter such as `filter` is not `pure`, whatever function it takes.
+pure def is_long(word: str) -> bool:
+    return len(word) > 4
+
+pure def long_words(text: str) -> int:
+    return text.split_whitespace().filter(w -> is_long(w)).count()
+
+def main():
+    print(long_words("hei kaunis maailma"))
+```
+
+<!-- output: examples/18-capabilities/pure_filter.console -->
+```console
+$ sisu check pure_filter.sisu
+error[E0333]: `filter` is not pure, so the pure function `long_words` cannot call it
+  --> pure_filter.sisu:6:12
+  |
+6 |     return text.split_whitespace().filter(w -> is_long(w)).count()
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+5 | pure def long_words(text: str) -> int:
+  |          ---------- `long_words` is declared `pure` here
+  = note: `filter` takes any function, which its iterator calls, so it is not pure, whatever the function given: a `pure` function folds the items with a `pure` function, `fold(0, (total, x) -> total + f(x))`, or loops over them
+
+error[E0333]: `count` is not pure, so the pure function `long_words` cannot call it
+  --> pure_filter.sisu:6:12
+  |
+6 |     return text.split_whitespace().filter(w -> is_long(w)).count()
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+5 | pure def long_words(text: str) -> int:
+  |          ---------- `long_words` is declared `pure` here
+
+```
+
+E0333 (`type.impure-call`) stands at the call of `filter`, and its
+note says why and what to write instead. The `count()` after it is
+E0333 too, since counting a filtered iterator calls the filter's
+function for each item. A `pure` function folds the items with a
+`pure` function, or loops over them:
+
+<!-- file: examples/18-capabilities/pure_count.sisu -->
+```sisu
+# A `pure` function counts with `fold` or a loop, not with `filter`.
+pure def add_if_long(count: int, word: str) -> int:
+    if len(word) > 4:
+        return count + 1
+    return count
+
+pure def long_words(text: str) -> int:
+    return text.split_whitespace().fold(0, add_if_long)
+
+pure def long_words_loop(text: str) -> int:
+    var count = 0
+    for word in text.split_whitespace():
+        count = add_if_long(count, word)
+    return count
+
+def main():
+    print(long_words("hei kaunis maailma"))
+    print(long_words_loop("hei kaunis maailma"))
+```
+
+<!-- output: examples/18-capabilities/pure_count.out -->
+```text
+2
+2
+```
+
+`fold(0, add_if_long)` starts from 0 and hands each word, with the
+count so far, to `add_if_long`, which is `pure`, so `fold` is too. The
+loop does the same work in the shape chapter 4 taught.
 
 ## Counting a program's capabilities
 

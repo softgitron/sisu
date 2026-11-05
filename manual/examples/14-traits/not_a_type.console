@@ -5,7 +5,7 @@ error[E0231]: `Priced` is a trait, not a type; a value of a type that implements
 19 | def together(a: Priced, b: Priced) -> int:
    |                 ^^^^^^
   = note: a function that takes a value of any type implementing `Priced` is generic: `def f[T: Priced](x: T)`, made for each type it is called with
-  = fix: write `ref dyn Priced`: `ref dyn `
+  = fix: use the trait through a reference: `ref dyn `
 
 error[E0231]: `Priced` is a trait, not a type; a value of a type that implements it is `dyn Priced`
   --> not_a_type.sisu:19:28
@@ -13,6 +13,6 @@ error[E0231]: `Priced` is a trait, not a type; a value of a type that implements
 19 | def together(a: Priced, b: Priced) -> int:
    |                            ^^^^^^
   = note: a function that takes a value of any type implementing `Priced` is generic: `def f[T: Priced](x: T)`, made for each type it is called with
-  = fix: write `ref dyn Priced`: `ref dyn `
+  = fix: use the trait through a reference: `ref dyn `
 
 error[D0006]: the program was not run: errors found (2)

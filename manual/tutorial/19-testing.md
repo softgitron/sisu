@@ -148,15 +148,18 @@ test "two throws":
 <!-- output: examples/19-testing/stove.console -->
 ```console
 $ sisu test
+tests of `stove`:
 test "a throw adds three degrees" ... ok
 1 passed, 0 failed, 0 blocked
+tests of `tests/public.sisu`:
 test "no throw keeps the heat" ... ok
 test "two throws" ... ok
 2 passed, 0 failed, 0 blocked
 ```
 
 - The package's own tests run first, then each file of `tests/` in the
-  order of its name, each with its own list and counts.
+  order of its name, each with its own list and counts under a line
+  that names it: the package by its name, a file by its path.
 - An import of a private item, `from stove import step`, is E0255 in
   a file of `tests/`, as in any user of the library.
 

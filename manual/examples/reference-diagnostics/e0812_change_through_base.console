@@ -4,5 +4,6 @@ error[E0812]: `picks` is of type `Short`, which a change through its base could 
   |
 6 |     picks.push(3)
   |     ^^^^^
+  = note: a copy of `picks` is a `Short` too: change a copy typed as the base, `var copy: list[int] = picks.copy()`, and check it again with `Short.try_from(copy)`
 
 error[D0006]: the program was not run: errors found (1)

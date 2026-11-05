@@ -4,5 +4,5 @@ error[E0130]: `pub(crate)` is not Sisu's: an item is `pub` to every package, or 
   |
 2 | pub(crate) def total(prices: list[int]) -> int:
   |     ^^^^^
-  = fix: make it visible to its package: `pub(package)`: `package`
+  = fix: make it visible to its package: `package`
 

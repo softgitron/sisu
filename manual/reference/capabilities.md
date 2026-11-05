@@ -119,7 +119,7 @@ interceptor, implements the same trait:
 |---|---|---|
 | `Fs` | `FsOps` | `read`, `write`, `read_to_string`, `write_text`, `exists`, `metadata`, `remove`, `rename`, `list_dir`, `create_dir`, `sync`; failures are `IoError` |
 | `Net` | `NetOps` | `connect(host, port)`, `listen(port)`, giving a `Conn` or a `Listener`; failures are `NetError` |
-| `Clock` | `ClockOps` | `now()`, `after(duration)`, a `Timer`, and `sleep(duration)` |
+| `Clock` | `ClockOps` | `now()`, `monotonic()`, the time since the clock's own origin, which only moves forward, `after(duration)`, a `Timer`, and `sleep(duration)` |
 | `Rand` | `RandOps` | `bits()`, and `between(lo, hi)`, `unit()`, `coin()` and `shuffle(xs)` built on it |
 | `Env` | `EnvOps` | `args()`, `get(name)` |
 | `Proc` | `ProcOps` | `run(program, args)`, giving a `ProcOutput`; failures are `ProcError` |
@@ -137,7 +137,9 @@ and their failures are `HttpError`: `Network(cause)` holds the
 wait that was cancelled, `Malformed(detail)` an answer that is not
 HTTP and `Status(code)` a status other than `2xx`
 ([G10](../guides/network.md)). `std.time`'s `Instant.now(clock)` is the
-`now()` of the `Clock` it is given, so a test clock makes it
+`monotonic()` of the `Clock` it is given, so a change of the system's
+time does not move it on the real clock, a recorded run replays it, and
+a test clock, whose monotonic time is its own time, makes it
 deterministic ([chapter 21](../tutorial/21-standard-library.md#time)).
 
 **Status.** In stage 0 (Q-51).

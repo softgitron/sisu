@@ -520,7 +520,8 @@ Anything else is E0266 (`resolve.bad-cfg`), and its declaration is kept;
 a feature that the package does not declare is W0006
 (`resolve.unknown-feature`). A condition on the target is written in a
 body with `if comptime target.os == "linux":`, whose branches are both
-checked ([R12](compile-time.md#the-facts-of-the-target)):
+checked ([R12](compile-time.md#the-facts-of-the-target)), and E0266's
+note `resolve.cfg-target` names that form:
 
 <!-- file: examples/reference-attributes/cfg_condition.sisu -->
 ```sisu
@@ -541,6 +542,7 @@ error[E0266]: `@cfg` takes a condition: `test`, `feature="NAME"`, `not` and a co
   |
 2 | @cfg(target.os == "linux")
   |      ^^^^^^^^^^^^^^^^^^^^
+  = note: a body tests the target with `if comptime target.os == "linux":`, whose other branch is left out of the build
 
 error[D0006]: the program was not run: errors found (1)
 ```

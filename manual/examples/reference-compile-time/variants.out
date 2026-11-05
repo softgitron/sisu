@@ -1,0 +1,3 @@
+Wood: int
+Electric: f64, String
+Water: Litres (a struct)

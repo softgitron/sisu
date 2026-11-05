@@ -65,14 +65,17 @@ error[E0310]: `+` cannot be applied to `i16` and `u32`
   |
 9 |     let total = sample + colour
   |                 ^^^^^^^^^^^^^^^
+  = fix: make the `i16` an `int`, which holds the values of both: `.to_int()`
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
 E0310 (`type.binary-operator`) refuses the sum. An `i16` can be
 negative and a `u32` cannot, so neither holds all of the other's
-values, and Sisu does not pick one. Convert one of them, as the section
-"Conversions that can lose information" shows. E0310 offers no fix.
+values, and Sisu does not pick one. An `int` holds the values of both,
+so the fix makes the `i16` an `int` with `.to_int()`, and the `u32`
+widens beside it. To keep a sized result, convert one of them, as the
+section "Conversions that can lose information" shows.
 
 </details>
 
@@ -228,8 +231,8 @@ what happens to a value that does not fit:
 def main():
     let reading = -5
     print("{reading.to_u8()} {reading.truncate_to[u8]()}")
-    let largest: u64 = 18_446_744_073_709_551_615
-    print(largest.to_int())
+    let largest = u64.MAX
+    print("{largest.to_int()} {largest.truncate_to[u32]()}")
     let odd = 9_007_199_254_740_993
     print(odd.to_f64())
     print("{2.9.truncate_to_int()} {(-2.9).truncate_to_int()}")
@@ -240,7 +243,7 @@ def main():
 ```console
 $ sisu run lossy.sisu
 None 251
-None
+None 4294967295
 9007199254740992.0
 2 -2
 panic: cannot convert 1e30 to `int`
@@ -250,10 +253,15 @@ panic: cannot convert 1e30 to `int`
 - `to_u8()` and its siblings give `None` for a value that does not fit,
   here a negative reading. `truncate_to[u8]()` keeps the lowest bits,
   as `+%` does: -5 becomes 251.
-- `to_int()` of a `u64`, a `u128` or an `i128` gives an optional `int`,
-  since their largest values do not fit; of a smaller type it gives an
-  `int`. A sized integer narrows to another through `to_int()`:
-  `x.to_int().truncate_to[u8]()`.
+- Every integer type has its limits as constants, `u64.MAX` and
+  `i8.MIN` among them. `to_int()` of a `u64`, a `u128` or an `i128`
+  gives an optional `int`, since their largest values do not fit; of a
+  smaller type it gives an `int`. Every integer type has
+  `truncate_to`, so `u64.MAX.truncate_to[u32]()` keeps the low 32
+  bits, `u32.MAX`. For now, a value beyond `int`'s range taken to an
+  `i128` or a `u128` gives the value of its low 64 bits read as an
+  `int`: `u64.MAX.truncate_to[i128]()` is -1. Widen to a wider type
+  instead, with a `let` that names it.
 - `to_f64()` gives the nearest `f64`, which is exact up to 2 to the
   power 53: 9007199254740993 is one more, and becomes its even
   neighbour.
@@ -414,14 +422,17 @@ error[E0374]: `123456789012345678901234567890` does not fit in `int`
 14 |     let n: BigInt = 123456789012345678901234567890
    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   = note: `int` holds -9223372036854775808 to 9223372036854775807
+  = note: a larger integer is a `BigInt` (`from std.num import BigInt`): `BigInt.parse("123456789012345678901234567890")`, or the literal beside a `BigInt`, which it becomes
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
 The proposal checks such a literal at compile time and makes a
 `BigInt` of it. The compiler reads every integer literal as an `int`
-first, so a literal beyond `int` gets E0374, whose note gives `int`'s
-range. Until it does, `BigInt.parse` reads one from text.
+first, so a literal beyond `int` gets E0374, whose first note gives
+`int`'s range. Its second note says what to write until the compiler
+does it: `BigInt.parse` reads the number from text, and a literal
+beside a `BigInt` becomes one, as this section showed.
 
 </details>
 
@@ -836,8 +847,8 @@ byte a `u32` first, which a `let` with a type does by widening.
 <summary>Hint 2</summary>
 
 To unpack, shift the part you want down to the lowest bits. A `u32`
-becomes a `u8` through `to_int()` and a conversion that keeps the
-lowest bits, which also drops everything above the byte.
+becomes a `u8` through the conversion that keeps the lowest bits, which
+also drops everything above the byte.
 
 </details>
 

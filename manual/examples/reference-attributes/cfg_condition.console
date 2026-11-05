@@ -4,5 +4,6 @@ error[E0266]: `@cfg` takes a condition: `test`, `feature="NAME"`, `not` and a co
   |
 2 | @cfg(target.os == "linux")
   |      ^^^^^^^^^^^^^^^^^^^^
+  = note: a body tests the target with `if comptime target.os == "linux":`, whose other branch is left out of the build
 
 error[D0006]: the program was not run: errors found (1)

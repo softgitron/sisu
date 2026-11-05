@@ -75,7 +75,7 @@ error[E0231]: `Priced` is a trait, not a type; a value of a type that implements
 19 | def together(a: Priced, b: Priced) -> int:
    |                 ^^^^^^
   = note: a function that takes a value of any type implementing `Priced` is generic: `def f[T: Priced](x: T)`, made for each type it is called with
-  = fix: write `ref dyn Priced`: `ref dyn `
+  = fix: use the trait through a reference: `ref dyn `
 
 error[E0231]: `Priced` is a trait, not a type; a value of a type that implements it is `dyn Priced`
   --> not_a_type.sisu:19:28
@@ -83,7 +83,7 @@ error[E0231]: `Priced` is a trait, not a type; a value of a type that implements
 19 | def together(a: Priced, b: Priced) -> int:
    |                            ^^^^^^
   = note: a function that takes a value of any type implementing `Priced` is generic: `def f[T: Priced](x: T)`, made for each type it is called with
-  = fix: write `ref dyn Priced`: `ref dyn `
+  = fix: use the trait through a reference: `ref dyn `
 
 error[D0006]: the program was not run: errors found (2)
 ```
@@ -451,7 +451,8 @@ Vector(x=3.0, y=6.0)
 
 The left operand decides which impl runs, so `3.0 * step` asks `f64`
 for a `*` that takes a vector, which no impl gives here: it is E0310
-(`type.binary-operator`). Write the vector first, or give `f64` the
+(`type.binary-operator`), whose note names both ways out. Write the
+vector first, or give `f64` the
 operator with `impl Mul[Vector] for f64:`, which only the root package
 may write, as the section "One impl for each type and trait" explains.
 
@@ -1586,7 +1587,7 @@ error[E0338]: cannot move `run.distance` out of a borrowed value; copy it with `
    |
 43 |             best = run.distance
    |                    ^^^^^^^^^^^^
-  = fix: copy it with `.copy()`: `.copy()`
+  = fix: copy it: `.copy()`
 
 error[E0347]: `Metres` does not implement `Display`
   --> training.sisu:49:32

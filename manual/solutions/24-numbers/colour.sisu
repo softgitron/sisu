@@ -24,9 +24,9 @@ def pack(colour: Colour) -> u32:
 ## The colour that the lowest 24 bits of `packed` hold.
 def unpack(packed: u32) -> Colour:
     return Colour(
-        red=(packed >> 16).to_int().truncate_to[u8](),
-        green=(packed >> 8).to_int().truncate_to[u8](),
-        blue=packed.to_int().truncate_to[u8](),
+        red=(packed >> 16).truncate_to[u8](),
+        green=(packed >> 8).truncate_to[u8](),
+        blue=packed.truncate_to[u8](),
     )
 
 ## `colour` with each of its parts made brighter by `amount`, to 255 at

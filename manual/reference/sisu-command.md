@@ -138,7 +138,8 @@ A command works on one of these:
   Where there is no `sisu.toml`, the command stops with D0064 and status
   2.
 - **A workspace.** In a workspace, `sisu check`, `build` and `test` work
-  on every member in turn and end with the worst status of the members,
+  on every member in turn (`sisu test` names each before its list,
+  D0137) and end with the worst status of the members,
   where a member's failure outweighs another's blocked tests (3);
   `sisu run`, `sir` and `bench` work on the one member that is an
   application, and stop with D0067 when there is more than one.
@@ -1343,7 +1344,7 @@ test "std.time/Timeline (doc example)" ... ok
 test "std.time/Instant (doc example)" ... ok
 test "std.time/Zone (doc example)" ... ok
 4 passed, 0 failed, 0 blocked
-172 not selected
+174 not selected
 ```
 
 The [package example](#what-a-command-works-on) shows the page of a
@@ -1429,9 +1430,15 @@ drawn as `<input>` and a place in the session's program, the inputs
 kept before it, as `<repl>`; a file the session starts from is drawn
 under its own name. A panic names the line of the session's program,
 `<repl>:LINE`, in which each expression that shows its value, the one
-that panics among them, takes a line more than it was typed in. `:why` reads the inputs' syntax trees from
-stage 1 too. `--front-end=rust` runs the session on the Rust front end
-instead, which gives the same transcript.
+that panics among them, takes a line more than it was typed in; a
+session started from a file calls its program by the file's name
+instead, `repl.sisu:LINE`, with the lines still the session
+program's. The program stands in the working directory, so an input's
+`embed("notes.txt")` and a script's inline metadata name their files
+from where the session runs. `:why` asks stage 1 what each input binds,
+reads and changes (its own command `parse --bindings`, which `sisu
+parse` does not take). `--front-end=rust` runs the session on the
+Rust front end instead, which gives the same transcript.
 
 Given this file and these inputs on standard input:
 
@@ -1518,7 +1525,10 @@ language server shows as values beside the lines; stage 0 has it now,
 on the command line and in the language server. `sisu ws` checks and
 lowers the worksheet with stage 1, in one run of it, so it takes every
 form `sisu run` takes, `^` in a slice's bound and a generator
-expression among them, and shows stage 1's diagnostics as they are;
+expression among them, and shows stage 1's diagnostics as they are. A top-level expression
+whose value is an optional value or a result is shown too, `Some(7)` or
+`Err(Negative)`, where a program, the same file under `sisu run`
+among them, refuses it as unused (E0318);
 the language server's worksheets still run on the Rust front end
 ([Choosing the front end](#choosing-the-front-end)).
 
@@ -1620,7 +1630,11 @@ package, which would hide a variant added later
 W0027 (`lint.unused-import`) is an import whose name the file does not
 use ([R13](modules.md#imports)); its fix removes the import, or the
 name and its comma from a `from` that keeps others. `sisu fmt` keeps
-such an import, so a file can import what it does not use yet.
+such an import, so a file can import what it does not use yet. An
+import that does not resolve, a name its module lacks (E0204) or a path
+that names no module, is reported by its error alone, not as unused
+too; the other names of a `from` beside it are still W0027 when the
+file does not use them.
 
 <!-- file: examples/reference-sisu-command/lint.sisu -->
 ```sisu
@@ -2091,7 +2105,7 @@ a command line can produce, by what they report:
 | D0002, [D0003](diagnostics.md#d0003), [D0004](diagnostics.md#d0004), [D0009](diagnostics.md#d0009), [D0023](diagnostics.md#d0023), [D0129](diagnostics.md#d0129), [D0130](diagnostics.md#d0130), [D0131](diagnostics.md#d0131) | The usage, an unknown command, a missing argument, an unknown option, a value that is not a number, the version. |
 | D0005, D0069 | A program without `main`; a library run as an application. |
 | [D0006](diagnostics.md#d0006), [D0021](diagnostics.md#d0021), D0114, [D0132](diagnostics.md#d0132) | A program with errors that did not run, was not documented, or was not compiled. |
-| D0007, D0008, D0053, D0060 to D0063, [D0128](diagnostics.md#d0128), [D0135](diagnostics.md#d0135) | The lines of `sisu test`: a test's outcome, the counts, the tests not selected, transcripts, what a failing test printed. |
+| D0007, D0008, D0053, D0060 to D0063, [D0128](diagnostics.md#d0128), [D0135](diagnostics.md#d0135), [D0137](diagnostics.md#d0137) | The lines of `sisu test`: a test's outcome, the counts, the tests not selected, transcripts, what a failing test printed, the program a list is of. |
 | [D0010](diagnostics.md#d0010), D0011 | `sisu explain`. |
 | D0012, D0076, D0118 | Internal errors (status 70). |
 | D0014 to D0020 | `sisu explain-borrow`. |

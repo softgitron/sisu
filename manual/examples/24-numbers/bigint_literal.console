@@ -5,5 +5,6 @@ error[E0374]: `123456789012345678901234567890` does not fit in `int`
 14 |     let n: BigInt = 123456789012345678901234567890
    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   = note: `int` holds -9223372036854775808 to 9223372036854775807
+  = note: a larger integer is a `BigInt` (`from std.num import BigInt`): `BigInt.parse("123456789012345678901234567890")`, or the literal beside a `BigInt`, which it becomes
 
 error[D0006]: the program was not run: errors found (1)

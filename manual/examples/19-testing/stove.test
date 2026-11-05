@@ -1,5 +1,7 @@
+tests of `stove`:
 test "a throw adds three degrees" ... ok
 1 passed, 0 failed, 0 blocked
+tests of `tests/public.sisu`:
 test "no throw keeps the heat" ... ok
 test "two throws" ... ok
 2 passed, 0 failed, 0 blocked

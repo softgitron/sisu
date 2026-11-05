@@ -486,12 +486,15 @@ error[E0100]: expected `)`, found `for`
   |
 5 |     print(sum(p * p for p in primes))
   |                     ^^^
+  = note: a generator expression keeps its own parentheses, also as a call's only argument
+  = fix: Sisu writes it so: `(p * p for p in primes)`
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-E0100 (`parse.expected`) reads the `for` as the end of the call, and
-says nothing about the parentheses.
+E0100 (`parse.expected`) reads the `for` as the end of the call. Its
+note says why, and its fix adds the generator expression's own
+parentheses.
 
 </details>
 

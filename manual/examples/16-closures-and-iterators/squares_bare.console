@@ -4,5 +4,7 @@ error[E0100]: expected `)`, found `for`
   |
 5 |     print(sum(p * p for p in primes))
   |                     ^^^
+  = note: a generator expression keeps its own parentheses, also as a call's only argument
+  = fix: Sisu writes it so: `(p * p for p in primes)`
 
 error[D0006]: the program was not run: errors found (1)

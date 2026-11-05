@@ -440,14 +440,64 @@ def main():
 ["NAME", "HOUR"]
 ```
 
+A variant's fields have a `ty` as a struct's fields do, so a derive
+over an enum reads them inside `comptime for v in
+reflect.variants_of(T)`:
+
+<!-- file: examples/reference-compile-time/variants.sisu -->
+```sisu
+# A derive reads the types of the fields of an enum's variants.
+trait Schema:
+    ## Each variant with the types of its fields.
+    def schema() -> list[String]
+
+    comptime def derive(T: type) -> impl Schema for T:
+        return impl Schema for T:
+            def schema() -> list[String]:
+                var lines: list[String] = []
+                comptime for v in reflect.variants_of(T):
+                    var types: list[String] = []
+                    comptime for f in v.fields:
+                        let name = reflect.name_of(f.ty)
+                        if comptime reflect.is_struct(f.ty):
+                            types.push("{name} (a struct)")
+                        else:
+                            types.push(name.to_string())
+                    lines.push("{v.name}: {types.join(", ")}")
+                return lines
+
+## A volume of water.
+struct Litres:
+    amount: f64
+
+## How a sauna is heated.
+@derive(Schema)
+enum Heater:
+    Wood(logs: int)
+    Electric(kilowatts: f64, phase: String)
+    Water(tank: Litres)
+
+def main():
+    for line in Heater.schema():
+        print(line)
+```
+
+<!-- output: examples/reference-compile-time/variants.out -->
+```text
+Wood: int
+Electric: f64, String
+Water: Litres (a struct)
+```
+
 **Stage 0 differs.** Inside a derive's template, which runs before the
-types are resolved, a struct field's `ty` is the type as its
-declaration writes it: `reflect.name_of(f.ty)` is that text, and
-`reflect.is_str`, `is_list` and the other kinds are known for the
-prelude's types (`int`, `f64`, `bool`, `char`, `str`, `String`, a
-list, an optional value and a tuple of them), so a derive can choose a
-form field by field; any other type's kind is not known there. A
-variant's fields have no `ty` yet (E0608).
+types are resolved, a field's `ty`, of a struct or of a variant, is the
+type as its declaration writes it: `reflect.name_of(f.ty)` is that
+text, and `reflect.is_str`, `is_list` and the other kinds are known for
+the prelude's types (`int`, `f64`, `bool`, `char`, `str`, `String`, a
+list, an optional value and a tuple of them) and for the structs and
+enums the module declares or imports by name, so a derive can choose a
+form field by field. What a type implements is not known there, and
+the fields of a program's own type are not looked into.
 
 **Status.** In stage 0 (D-018).
 

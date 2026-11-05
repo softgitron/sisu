@@ -523,14 +523,17 @@ def main(sys: System) -> ! {IoError, cli.Error}:
 ```
 
 `sisu test` in the workspace's directory runs the tests of every
-member, the library's first, and `sisu run app` runs the program:
+member, the library's first, each list under a line that names its
+package, and `sisu run app` runs the program:
 
 <!-- output: examples/17-modules-and-packages/workspace.console -->
 ```console
 $ sisu test
+tests of `wordcount`:
 test "a tally of words" ... ok
 test "text/words (doc example)" ... ok
 2 passed, 0 failed, 0 blocked
+tests of `app`:
 0 passed, 0 failed, 0 blocked
 $ sisu run app -- poem.txt
    4  the

@@ -788,7 +788,7 @@ error[E0300]: expected `T`, found `ref T`
    |
 21 |             best = Some(item)
    |                         ^^^^
-  = fix: copy it with `.copy()`: `.copy()`
+  = fix: copy it: `.copy()`
 
 error[D0006]: the program was not run: errors found (2)
 ```

@@ -406,7 +406,7 @@ error[E0338]: cannot move `queue[0]` out of a borrowed value; copy it with `.cop
   |
 4 |     let first = queue[0]
   |                 ^^^^^^^^
-  = fix: copy it with `.copy()`: `.copy()`
+  = fix: copy it: `.copy()`
 
 error[D0006]: the program was not run: errors found (1)
 ```

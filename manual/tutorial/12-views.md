@@ -267,7 +267,7 @@ error[E0411]: `Program` holds `tokens: list[Token]`, which borrows; only a `view
   |
 6 | struct Program:
   |        ------- `Program` is declared here
-  = fix: declare it `view struct Program`: `view `
+  = fix: declare it a view: `view `
 
 error[D0006]: the program was not run: errors found (1)
 ```
@@ -579,7 +579,7 @@ error[E0411]: `Contact` holds `name: str`, which borrows; only a `view struct` m
 10 | struct Contact:
    |        ------- `Contact` is declared here
   = fix: own the text instead: `String`
-  = fix: declare it `view struct Contact`: `view `
+  = fix: declare it a view: `view `
 
 error[E0411]: `Contact` holds `email: str`, which borrows; only a `view struct` may hold a borrow
   --> address_book.sisu:12:5
@@ -590,7 +590,7 @@ error[E0411]: `Contact` holds `email: str`, which borrows; only a `view struct` 
 10 | struct Contact:
    |        ------- `Contact` is declared here
   = fix: own the text instead: `String`
-  = fix: declare it `view struct Contact`: `view `
+  = fix: declare it a view: `view `
 
 error[D0006]: the program was not run: errors found (2)
 ```

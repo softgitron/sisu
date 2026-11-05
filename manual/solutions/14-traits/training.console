@@ -25,7 +25,7 @@ error[E0338]: cannot move `run.distance` out of a borrowed value; copy it with `
    |
 43 |             best = run.distance
    |                    ^^^^^^^^^^^^
-  = fix: copy it with `.copy()`: `.copy()`
+  = fix: copy it: `.copy()`
 
 error[E0347]: `Metres` does not implement `Display`
   --> training.sisu:49:32

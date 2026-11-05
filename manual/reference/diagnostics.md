@@ -259,6 +259,59 @@ Hei, maailma!
 
 Shown in [chapter 1](../tutorial/01-hello.md).
 
+### E0005
+
+`lex.unknown-character`: `{char}` cannot appear in Sisu source outside
+a string or comment.
+
+Outside strings and comments, a source file holds only the characters
+its tokens use ([R1](lexical-structure.md#source-text)). A character
+that shows as a space or as nothing, often pasted from a web page or a
+word processor, is written as its escape, with the note
+`lex.invisible-character` that names it, and a fix that writes a space
+(`lex.write-space`) or removes it (`lex.remove-character`). A
+byte-order mark at the start of a file is named as one.
+
+<!-- file: examples/reference-diagnostics/e0005_invisible.sisu -->
+```sisu
+# A zero-width space after a name, invisible in an editor.
+def main():
+    let sauna​ = 80
+    print(sauna)
+```
+
+<!-- output: examples/reference-diagnostics/e0005_invisible.console -->
+```console
+$ sisu run e0005_invisible.sisu
+error[E0005]: `\u{200b}` cannot appear in Sisu source outside a string or comment
+  --> e0005_invisible.sisu:3:14
+  |
+3 |     let sauna​ = 80
+  |              ^
+  = note: it is a zero-width space, which shows as nothing
+  = fix: remove it
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+The line looks right, since the character shows as nothing; the escape
+`\u{200b}` and the note say what is there. Remove it, as the fix does.
+
+<!-- file: examples/reference-diagnostics/e0005_invisible_fixed.sisu -->
+```sisu
+# The name without the character that showed as nothing.
+def main():
+    let sauna = 80
+    print(sauna)
+```
+
+<!-- output: examples/reference-diagnostics/e0005_invisible_fixed.out -->
+```text
+80
+```
+
+Shown in [R1](lexical-structure.md#source-text).
+
 ### E0011
 
 `lex.semicolon`: Sisu has no semicolons; put each statement on its own
@@ -471,7 +524,10 @@ error[D0006]: the program was not run: errors found (1)
 ```
 
 The fix writes the missing token where the parser expected it, the `:`
-that opens the body here.
+that opens the body here. A generator expression as a call's only
+argument without parentheses of its own, Python's `sum(p * p for p in
+primes)`, gets the note `parse.generator-parens` and the fix that adds
+them ([chapter 16](../tutorial/16-closures-and-iterators.md)).
 
 <!-- file: examples/reference-diagnostics/e0100_no_colon_fixed.sisu -->
 ```sisu
@@ -604,16 +660,16 @@ error[E0105]: expected a pattern, found `not`
   |
 5 |         case not 0: "other"
   |              ^^^
-  = note: `not` is a keyword, which names no binding: give it another name
+  = note: a pattern says what a value is, not what it is not: write the case it is first (`case 0:`), then the rest with `case _:`, or test it in a guard, `case n if n != 0:`
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-The note `parse.keyword-name` is written for a keyword used as a
-binding's name, `let type = "csv"` ([R1](lexical-structure.md#names));
-here it misleads, since `not` was meant as an operator, and no other
-name helps. Write the case as a pattern; a `case _` arm, or a guard
-`case n if n != 0`, says "any other value".
+The note `parse.pattern-not` says what a pattern is: what a value is,
+never what it is not. Write the case as a pattern; a `case _` arm, or a
+guard `case n if n != 0`, says "any other value". A keyword used as a
+binding's name, `let type = "csv"`, gets the note `parse.keyword-name`
+instead ([R1](lexical-structure.md#names)).
 
 <!-- file: examples/reference-diagnostics/e0105_pattern_fixed.sisu -->
 ```sisu
@@ -1036,7 +1092,8 @@ stops at such a habit, a fix writes Sisu's spelling (`#`, `x ->`,
 [R19](false-friends.md) shows each. An `else` after a call that is no
 `let`, `save(4) else as e:`, gets the note that `else` belongs to a
 `let`, and with `as e` the fix `if let Err(e) = save(4)`, the statement
-that handles the error alone.
+that handles the error alone. Python's `f"..."` gets the fix that drops
+the `f` both as a call's argument and after `=`, `let s = f"n is {n}"`.
 
 <!-- file: examples/reference-diagnostics/e0117_trailing.sisu -->
 ```sisu
@@ -1395,7 +1452,7 @@ error[E0130]: `pub(crate)` is not Sisu's: an item is `pub` to every package, or 
   |
 2 | pub(crate) def heat() -> int:
   |     ^^^^^
-  = fix: make it visible to its package: `pub(package)`: `package`
+  = fix: make it visible to its package: `package`
 
 error[D0006]: the program was not run: errors found (1)
 ```
@@ -1562,7 +1619,10 @@ error[D0006]: the program was not run: errors found (1)
 ```
 
 When a name in scope is spelt alike, the fix offers it. When the name is
-new, declare it with `let` (or `var`) before its first use.
+new, declare it with `let` (or `var`) before its first use. A type that
+nothing declares, called with type arguments, `Deque[int]()` without
+its import, is one E0200, for `Deque`: its arguments are not read as
+values.
 
 <!-- file: examples/reference-diagnostics/e0200_misspelt_fixed.sisu -->
 ```sisu
@@ -1722,13 +1782,15 @@ error[E0203]: there is no module `atlas.geo.points`
   |
 2 | from atlas.geo.points import Point
   |      ^^^^^^^^^^^^^^^^
+  = fix: a module with a similar name exists: `atlas.geo.point`
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-Name the module by its file's path, here `src/geo/point.sisu`. The
-diagnostic has no fix that names the similar module, which E0220 has
-for a package's own name.
+Name the module by its file's path, here `src/geo/point.sisu`. When a
+module of the package has a similar name, the fix
+`resolve.similar-module` writes the path with it, as E0220 does for a
+package's own name.
 
 <!-- file: examples/reference-diagnostics/e0203_unknown_module_fixed.files/src/main.sisu -->
 ```sisu
@@ -1779,20 +1841,13 @@ error[E0204]: module `std.collections` has no item `Stack`
 2 | from std.collections import Stack
   |                             ^^^^^
 
-error[E0200]: cannot find `int` in this scope
-  --> e0204_not_in_module.sisu:5:23
-  |
-5 |     var stack = Stack[int]()
-  |                       ^^^
-  = note: Sisu converts with methods: text is read with `s.parse_int()` or `s.parse_float()`, which give an option, a number is made text with `n.to_string()` or `"{n}"`, and one number made another with `x.to_int()` or `n.to_f64()`
-
-error[D0006]: the program was not run: errors found (2)
+error[D0006]: the program was not run: errors found (1)
 ```
 
 Check the module's items with `sisu doc --std std.collections`, or in
 its source; the diagnostic offers no similar name. The use of the item
-that the import did not bind, `Stack[int]()`, adds an E0200 for `int`,
-with a note on Python's conversions that does not apply.
+that the import did not bind, `Stack[int]()`, adds no error of its
+own: its type argument is not read as a value.
 
 <!-- file: examples/reference-diagnostics/e0204_not_in_module_fixed.sisu -->
 ```sisu
@@ -2184,7 +2239,7 @@ error[E0231]: `Priced` is a trait, not a type; a value of a type that implements
 12 | def show(item: Priced) -> String:
    |                ^^^^^^
   = note: a function that takes a value of any type implementing `Priced` is generic: `def f[T: Priced](x: T)`, made for each type it is called with
-  = fix: write `ref dyn Priced`: `ref dyn `
+  = fix: use the trait through a reference: `ref dyn `
 
 error[D0006]: the program was not run: errors found (1)
 ```
@@ -3204,8 +3259,8 @@ is none of them.
 
 `@cfg` reads conditions on the build, not expressions, and keeps its
 declaration when the condition is none of those. A test of the target
-is written in a body, with `if comptime`, whose branches are both
-checked; the message does not say so.
+is written in a body, with `if comptime`, which the note
+`resolve.cfg-target` names.
 
 <!-- file: examples/reference-diagnostics/e0266_bad_cfg.sisu -->
 ```sisu
@@ -3226,6 +3281,7 @@ error[E0266]: `@cfg` takes a condition: `test`, `feature="NAME"`, `not` and a co
   |
 2 | @cfg(target.os == "linux")
   |      ^^^^^^^^^^^^^^^^^^^^
+  = note: a body tests the target with `if comptime target.os == "linux":`, whose other branch is left out of the build
 
 error[D0006]: the program was not run: errors found (1)
 ```
@@ -3282,12 +3338,14 @@ error[E0271]: `WARMUP` is not a constant of `Stove`
    |
 11 |     const WARMUP: int = 60
    |           ^^^^^^
+  = fix: a similar name is in scope: `WARM_UP`
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-Spell the constant as the trait does. A constant that belongs to the
-type alone goes in the type's body or in an `impl WoodStove:`, outside
+Spell the constant as the trait does: when the trait declares one of a
+similar name, the fix `resolve.similar-name` writes it. A constant that
+belongs to the type alone goes in the type's body or in an `impl WoodStove:`, outside
 the trait's impl.
 
 <!-- file: examples/reference-diagnostics/e0271_not_trait_constant_fixed.sisu -->
@@ -3386,8 +3444,9 @@ A trait's constant is given as a constant, and its method as a method
 ([R3](declarations.md#impls)): a constant has one value for the type,
 where a method works one out for each value. This impl writes the
 constant `MAX_HEAT` as a method that reads a field, which E0268 refuses
-for its name as well; E0268's fix, a snake_case name, would leave the
-constant missing.
+for its name as well. E0268 offers no rename here, which would leave
+the constant missing: its note `resolve.const-as-method` says how a
+trait's constant is given.
 
 <!-- file: examples/reference-diagnostics/e0273_const_or_method.sisu -->
 ```sisu
@@ -3414,7 +3473,7 @@ error[E0268]: the name of a method is written in snake_case, and `MAX_HEAT` is n
   |
 9 |     def MAX_HEAT(self) -> int:
   |         ^^^^^^^^
-  = fix: rename it: `max_heat`
+  = note: a name in capitals is a constant's: a trait's constant is given as `const MAX_HEAT: T = ...`
 
 error[E0273]: `MAX_HEAT` is a constant of `Stove`, and this impl gives it as a method
   --> e0273_const_or_method.sisu:9:9
@@ -3651,7 +3710,10 @@ error[D0006]: the program was not run: errors found (1)
 
 The fix depends on the types; here it writes the number without its
 quotes. Where text must become a number, `parse_int()` converts it and
-says when it cannot.
+says when it cannot. A value given to a `ref dyn Trait` parameter whose
+trait its type implements, `total(bun)`, gets the fix `type.lend-it`,
+which writes `ref ` before it (`mut ` for a `mut dyn` parameter)
+([chapter 15](../tutorial/15-generics.md)).
 
 <!-- file: examples/reference-diagnostics/e0300_mismatch_fixed.sisu -->
 ```sisu
@@ -3980,7 +4042,15 @@ error[D0006]: the program was not run: errors found (1)
 ```
 
 For a text and a value, the fix writes the value into the text by
-interpolation.
+interpolation. Two sized integers neither of which holds the other's
+values, an `i16` and a `u32`, get the fix `type.convert-to-int`, which
+makes the left one an `int`, beside which the other widens
+([chapter 24](../tutorial/24-numbers.md#integers-of-every-size)). A
+number on the left of a type of the program's own, `3.0 * step`, gets
+the note `type.operator-trait-left`, which names the impl the operator
+needs, `impl Mul[Step] for f64`, which only the root package may write,
+and the order that needs none, `step * 3.0`
+([chapter 14](../tutorial/14-traits.md)).
 
 <!-- file: examples/reference-diagnostics/e0310_operator_fixed.sisu -->
 ```sisu
@@ -4588,8 +4658,12 @@ A `pure` function gives the same result for the same arguments and does
 nothing else, so it calls only `pure` functions. `print` writes to
 standard output, which is not `pure`, and every method of an `Atomic`
 but its construction observes the schedule, which a note then says
-([R9](concurrency.md#atomics-and-orderings)). The ownership checker
-reports it, so the run ends with D0021.
+([R9](concurrency.md#atomics-and-orderings)). An adapter of an
+iterator that takes a function, `map` or `filter`, is not `pure`,
+whatever the function given, and E0333 at one has the note
+`type.pure-adapter`, which names `fold` with a `pure` function and the
+loop ([chapter 18](../tutorial/18-capabilities.md#code-that-takes-no-capability)).
+The ownership checker reports it, so the run ends with D0021.
 
 <!-- file: examples/reference-diagnostics/e0333_impure_call.sisu -->
 ```sisu
@@ -4831,7 +4905,7 @@ error[E0338]: cannot move `queue[0]` out of a borrowed value; copy it with `.cop
   |
 4 |     let first = queue[0]
   |                 ^^^^^^^^
-  = fix: copy it with `.copy()`: `.copy()`
+  = fix: copy it: `.copy()`
 
 error[D0006]: the program was not run: errors found (1)
 ```
@@ -5199,7 +5273,10 @@ it. In code that a derive wrote, E0347 stands at the derive's argument
 that asked for the impl, with the note `type.derived-code`, which
 quotes the line of the derived impl, and without a fix, since that line
 is not in the program ([chapter 25](../tutorial/25-compile-time.md)
-shows it).
+shows it). Where a derived impl needs the trait of a type argument,
+`==` of a `Pair[Plain]` whose `Pair` derives `Eq`, the fix
+`type.derive-trait-for` derives it for that type: "derive it for
+`Plain`".
 
 <!-- file: examples/reference-diagnostics/e0347_bound_fixed.sisu -->
 ```sisu
@@ -5358,7 +5435,7 @@ error[E0373]: `*` cannot mix `int` and `f64`; convert one of them explicitly
   |
 4 |     print(price * 1.5)
   |           ^^^^^^^^^^^
-  = fix: make the `int` an `f64`: `.to_f64()`
+  = fix: convert the `int`: `.to_f64()`
 
 error[D0006]: the program was not run: errors found (1)
 ```
@@ -5386,7 +5463,9 @@ Shown in [chapter 2](../tutorial/02-values.md).
 `type.literal-out-of-range`: `{text}` does not fit in `{ty}`.
 
 An integer literal fits in the type it gets. The note gives the type's
-range.
+range. For a literal beyond `int`, a second note, `type.bigint-literal`,
+names `BigInt.parse` and the literal beside a `BigInt`, which becomes
+one ([chapter 24](../tutorial/24-numbers.md#integers-of-any-size)).
 
 <!-- file: examples/reference-diagnostics/e0374_out_of_range.sisu -->
 ```sisu
@@ -6332,7 +6411,7 @@ error[E0411]: `Order` holds `item: str`, which borrows; only a `view struct` may
 2 | struct Order:
   |        ----- `Order` is declared here
   = fix: own the text instead: `String`
-  = fix: declare it `view struct Order`: `view `
+  = fix: declare it a view: `view `
 
 error[D0006]: the program was not run: errors found (1)
 ```
@@ -8468,7 +8547,9 @@ error[D0006]: the program was not run: errors found (1)
 ```
 
 Call `Percent.try_from(n)`, as the message says, and decide what to do
-with a value outside the predicate, here with `else`.
+with a value outside the predicate, here with `else`. A reference to
+the base where the refinement goes, the `ref int` of a loop over a
+`list[int]`, is E0811 too, with the same note.
 
 <!-- file: examples/reference-diagnostics/e0811_needs_try_from_fixed.sisu -->
 ```sisu
@@ -8522,12 +8603,14 @@ error[E0812]: `picks` is of type `Short`, which a change through its base could 
   |
 6 |     picks.push(3)
   |     ^^^^^
+  = note: a copy of `picks` is a `Short` too: change a copy typed as the base, `var copy: list[int] = picks.copy()`, and check it again with `Short.try_from(copy)`
 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-Change a copy typed as the base, and check it again. A copy made with
-`.copy()` alone is still a `Short`, and gets E0812 too.
+Change a copy typed as the base, and check it again, as the note
+`refine.copy-as-base` says. A copy made with `.copy()` alone is still a
+`Short`, and gets E0812 too.
 
 <!-- file: examples/reference-diagnostics/e0812_change_through_base_fixed.sisu -->
 ```sisu
@@ -10948,7 +11031,7 @@ Shown in [chapter 3](../tutorial/03-functions.md#leaving-a-hole).
 
 ## The driver
 
-Codes D0001 to D0136. The messages of the `sisu` command itself
+Codes D0001 to D0137. The messages of the `sisu` command itself
 ([R16](sisu-command.md)): usage errors, the lines of `sisu test` and
 `sisu bench`, replays, packages and the native backend.
 
@@ -11497,6 +11580,20 @@ Give 2 or more; the default is 10.
 
 Example: [G27](../guides/bench.md#2-run-the-benchmarks-and-compare).
 
+### D0137
+
+`cli.test-program`: tests of `{program}`:.
+
+`sisu test` ran more than one program, the members of a workspace or a
+package and the files of its `tests/`, and this line names the program
+whose list follows it: a package or a member by its name, a file of
+`tests/` by its path ([R15](testing.md#black-box-tests)). It is no
+error: the status is the worst of the programs'. A run of one program
+has no such line.
+
+Example: [R15](testing.md#black-box-tests), [chapter
+19](../tutorial/19-testing.md#suites-tags-and-choosing-tests).
+
 ## Every code
 
 The tables list every code of the catalog in this version, by range, with
@@ -11512,7 +11609,7 @@ it. `sisu explain CODE` prints the same line.
 | [E0002](#e0002) | `lex.inconsistent-dedent` | this line's indentation matches no enclosing block; the enclosing blocks start at column {columns} |
 | [E0003](#e0003) | `lex.unterminated-string` | this string literal is not closed before the end of the line |
 | E0004 | `lex.unterminated-block-string` | this multi-line string literal is never closed |
-| E0005 | `lex.unknown-character` | `{char}` cannot appear in Sisu source outside a string or comment |
+| [E0005](#e0005) | `lex.unknown-character` | `{char}` cannot appear in Sisu source outside a string or comment |
 | E0006 | `lex.unterminated-char` | this character literal is not closed |
 | E0007 | `lex.invalid-escape` | `\{escape}` is not an escape sequence; write `\\` for a backslash |
 | E0008 | `lex.unmatched-close` | `{close}` closes nothing |
@@ -12206,4 +12303,5 @@ it. `sisu explain CODE` prints the same line.
 | [D0134](#d0134) | `native.test-unsupported` | `sisu test --native` does not run {what} yet; `sisu test` without `--native` runs it |
 | [D0135](#d0135) | `cli.test-output` | what the test printed: |
 | [D0136](#d0136) | `cli.bench-samples` | `--samples` takes 2 or more, not {value}: the interval of the mean needs two samples |
+| [D0137](#d0137) | `cli.test-program` | tests of `{program}`: |
 

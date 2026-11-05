@@ -1,0 +1,2 @@
+3:15-3:16 E0005 lex.unknown-character char="\\u{a0}"
+  fix lex.write-space 3:15-3:16 " "

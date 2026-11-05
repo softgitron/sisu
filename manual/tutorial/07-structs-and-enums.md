@@ -111,7 +111,7 @@ error[E0411]: `Order` holds `item: str`, which borrows; only a `view struct` may
 2 | struct Order:
   |        ----- `Order` is declared here
   = fix: own the text instead: `String`
-  = fix: declare it `view struct Order`: `view `
+  = fix: declare it a view: `view `
 
 error[D0006]: the program was not run: errors found (1)
 ```

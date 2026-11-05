@@ -144,8 +144,12 @@ type must implement, so that the error is no surprise.
 
 **Status.** In stage 0 (D-018). A derive's template runs before the
 types are resolved, so a field's `f.ty` is the type as the field
-writes it: the kinds of the prelude's types are known
-(`reflect.is_str(f.ty)` chooses text), but not what a type implements,
+writes it, for a struct's fields and a variant's alike: the kinds of
+the prelude's types are known (`reflect.is_str(f.ty)` chooses text),
+and so are those of the structs and enums the module declares or
+imports (`reflect.is_struct(f.ty)`;
+[R12](../reference/compile-time.md#the-derive-protocol) has a derive
+over an enum's variants), but not what a type implements,
 and `reflect.implements(f.ty, "Display")`, which a generic function
 that reflects on its type parameter can ask, is `False` there for every
 field, a `String` included.

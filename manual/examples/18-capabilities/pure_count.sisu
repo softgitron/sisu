@@ -1,0 +1,18 @@
+# A `pure` function counts with `fold` or a loop, not with `filter`.
+pure def add_if_long(count: int, word: str) -> int:
+    if len(word) > 4:
+        return count + 1
+    return count
+
+pure def long_words(text: str) -> int:
+    return text.split_whitespace().fold(0, add_if_long)
+
+pure def long_words_loop(text: str) -> int:
+    var count = 0
+    for word in text.split_whitespace():
+        count = add_if_long(count, word)
+    return count
+
+def main():
+    print(long_words("hei kaunis maailma"))
+    print(long_words_loop("hei kaunis maailma"))

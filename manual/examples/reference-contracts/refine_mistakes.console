@@ -16,5 +16,6 @@ error[E0812]: `xs` is of type `Short`, which a change through its base could tak
    |
 12 |     xs.push(3)
    |     ^^
+  = note: a copy of `xs` is a `Short` too: change a copy typed as the base, `var copy: list[int] = xs.copy()`, and check it again with `Short.try_from(copy)`
 
 error[D0006]: the program was not run: errors found (3)

@@ -1,0 +1,10 @@
+$ sisu run e0005_invisible.sisu
+error[E0005]: `\u{200b}` cannot appear in Sisu source outside a string or comment
+  --> e0005_invisible.sisu:3:14
+  |
+3 |     let sauna​ = 80
+  |              ^
+  = note: it is a zero-width space, which shows as nothing
+  = fix: remove it
+
+error[D0006]: the program was not run: errors found (1)

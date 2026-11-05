@@ -144,8 +144,8 @@ line.trim()
 line.trim().to_lowercase()
 line.trim().starts_with("Hei")
 line.trim().replace("Maailma", "Aino")
-let at = line.find("M")
-let missing = line.find("x")
+line.find("M")
+line.find("x")
 "v1.2.0".strip_prefix("v")
 [part for part in "red,green,,blue".split(",")]
 [word for word in "one two\tthree".split_whitespace()]
@@ -161,8 +161,8 @@ line.trim()  # => "Hei, Maailma!"
 line.trim().to_lowercase()  # => "hei, maailma!"
 line.trim().starts_with("Hei")  # => True
 line.trim().replace("Maailma", "Aino")  # => "Hei, Aino!"
-let at = line.find("M")  # => Some(7)
-let missing = line.find("x")  # => None
+line.find("M")  # => Some(7)
+line.find("x")  # => None
 "v1.2.0".strip_prefix("v")  # => "1.2.0"
 [part for part in "red,green,,blue".split(",")]  # => ["red", "green", "", "blue"]
 [word for word in "one two\tthree".split_whitespace()]  # => ["one", "two", "three"]
@@ -178,8 +178,9 @@ let missing = line.find("x")  # => None
 - `replace` replaces every occurrence of a piece of text.
 - `find` gives the position, counted in characters, where a piece of
   text starts, as an optional value: `None` when it is not there.
-  Chapter 8 shows how to use one; a worksheet shows an optional value
-  only in a `let`.
+  Chapter 8 shows how to use one. A worksheet shows it as it is,
+  `Some(7)` or `None`; run as a script, the same line is an error,
+  since a program must use an optional value.
 - `split(",")` cuts at every comma, `split_whitespace` at every run of
   spaces, tabs and line breaks, and `lines` at every line break. Each
   gives its pieces one at a time to a `for` loop or a comprehension.

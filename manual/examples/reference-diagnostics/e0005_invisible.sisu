@@ -1,0 +1,4 @@
+# A zero-width space after a name, invisible in an editor.
+def main():
+    let sauna​ = 80
+    print(sauna)
