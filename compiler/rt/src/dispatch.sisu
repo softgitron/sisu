@@ -27,9 +27,14 @@ from rt.host import sisu_rt_list_view
 from rt.host import sisu_rt_missing_key
 from rt.host import sisu_rt_range_step
 from rt.host import sisu_rt_slice_bounds
+from rt.host import sisu_rt_sum_overflow
 from rt.host import sisu_rt_unordered
+from rt.types import A
 from rt.types import CHAR
 from rt.types import DICT
+from rt.types import DYN
+from rt.types import F32
+from rt.types import FLOAT
 from rt.types import ITER
 from rt.types import LIST
 from rt.types import PATH
@@ -38,6 +43,7 @@ from rt.types import SET
 from rt.types import STR
 from rt.types import STRING
 from rt.types import Types
+from rt.types import WORDS
 from std.mem import ptr
 
 # The intrinsics this module does, by their numbers in the runtime in
@@ -58,6 +64,8 @@ pub(package) const REVERSED: int = 13
 pub(package) const ITERABLE_LIST: int = 14
 ## `sorted`
 pub(package) const SORTED: int = 15
+## `sum`
+pub(package) const SUM: int = 16
 ## `any`
 pub(package) const ANY: int = 17
 ## `all`
@@ -177,6 +185,9 @@ const OK: int = 0
 ## A bound of `Slice.slice` left out: `int`'s least value.
 const OPEN: int = -9223372036854775807 - 1
 
+## `int`'s greatest value.
+const MOST: int = 9223372036854775807
+
 ## The most room `list.with_capacity` asks for at once, in elements.
 const MOST_ROOM: int = 1048576
 
@@ -239,9 +250,17 @@ impl Call:
     def ret_ty(self) -> int:
         return self.rty
 
-    ## The type of argument `i`.
+    ## The type of argument `i`, the first two's from the words read when
+    ## the call was made, with no call (decision 902).
+    ##
+    ## Requires:
+    ## - `call`: as `word`
     def ty(self, i: int) -> int:
-        return self.after_head(4 + i)
+        if i == 0:
+            return self.w4
+        if i == 1:
+            return self.w5
+        return self.word(4 + i)
 
     ## Type argument `k`, which the call has.
     def targ(self, k: int) -> int:
@@ -263,9 +282,30 @@ impl Call:
         #   address of each argument, which the call may change, by `call`.
         return unsafe self.args.cast[ptr[u8]]().offset(i).read().cast_mut()
 
-    ## The value argument `i` is, or refers to, and its type.
+    ## The value argument `i` is, or refers to, and its type: a value that
+    ## is neither a reference nor a `dyn`, and a reference to one, found
+    ## here from the type table's words, the others by `value.target`.
+    ##
+    ## Requires:
+    ## - `call`: the call has argument `i`
     def place(self, i: int) -> (ptr mut u8, int):
-        return value.target(self.ts, self.arg(i), self.ty(i))
+        let t = self.ty(i)
+        # safety: in_bounds, valid, aligned: the block holds the address of
+        #   each argument, by `call`; the table has a header of `WORDS` words
+        #   for each type, and a reference's word is the address of its
+        #   target.
+        unsafe:
+            let p = self.args.cast[ptr[u8]]().offset(i).read().cast_mut()
+            let words = self.ts.words
+            let k = words.offset(t * WORDS).read()
+            if k == REF:
+                let inner = words.offset(t * WORDS + A).read()
+                let under = words.offset(inner * WORDS).read()
+                if under != REF and under != DYN:
+                    return (p.cast[ptr[u8]]().read().cast_mut(), inner)
+            elif k != DYN:
+                return (p, t)
+            return value.target(self.ts, p, t)
 
     ## The first word of the value argument `i` is or refers to: a dict's or
     ## a set's table, an `int`.
@@ -747,6 +787,75 @@ def slice_call(c: Call, id: int) -> int:
 ##
 ## Requires:
 ## - `call`: `c` is a call of one of the iterators' intrinsics above
+## `sum` (decision 903): every item taken, first to last, then added as
+## the runtime in Rust added them, floats pairwise in a fixed shape (D-074)
+## and integers with their overflow checked, whose panic names the sum so
+## far and the item; its status.
+def sum_call(c: Call) -> int:
+    let ts = c.ts
+    let rt = c.ret_ty()
+    let size = ts.size(rt)
+    let items = scratch(24)
+    var st = iter.collect(ts, iter.iterable(ts, c.arg(0), c.ty(0), c.item(0)), c.item(0), items, c.mode)
+    let n = list.length(items)
+    let b = list.buffer(items)
+    let k = ts.kind(rt)
+    if st == OK and (k == FLOAT or k == F32) and n == 0:
+        # No item: 0.0, whose bits are 0.
+        c.set(0, 0)
+    elif st == OK and k == FLOAT:
+        # safety: aligned, writable: the result is an `f64`.
+        unsafe c.ret.cast[f64]().write(pairwise(b, size, 0, n))
+    elif st == OK and k == F32:
+        c.set(0, 0)
+        # safety: aligned, writable: the result is an `f32`, in its word.
+        unsafe c.ret.cast[f32]().write(pairwise32(b, size, 0, n))
+    elif st == OK:
+        var total = 0
+        var i = 0
+        while i < n:
+            # safety: in_bounds, valid, aligned: item `i` of the list, an
+            #   integer in its first word.
+            let v = unsafe b.offset(i * size).cast[int]().read()
+            if (v > 0 and total > MOST - v) or (v < 0 and total < OPEN - v):
+                # safety: returns_promptly: the runtime in Rust raises the
+                #   panic.
+                st = unsafe sisu_rt_sum_overflow(total, v).to_int()
+                break
+            total += v
+            i += 1
+        if st == OK:
+            c.set(0, total)
+    # safety: valid, aligned: a list's first word is its buffer's address,
+    #   0 for none.
+    if unsafe items.cast[int]().read() != 0:
+        free(b)
+    free(items)
+    return st
+
+## The sum of the `n` `f64`s from item `lo` of the items at `b`, `size`
+## bytes each: the two halves' sums, the first half the smaller, added.
+##
+## Requires:
+## - `items`: `b` holds items `lo` to `lo + n - 1`, at least one
+def pairwise(b: ptr mut u8, size: int, lo: int, n: int) -> f64:
+    if n == 1:
+        # safety: in_bounds, valid, aligned: by `items`.
+        return unsafe b.offset(lo * size).cast[f64]().read()
+    let half = n // 2
+    return pairwise(b, size, lo, half) + pairwise(b, size, lo + half, n - half)
+
+## `pairwise` of `f32`s, each in the low half of its item's word.
+##
+## Requires:
+## - `items`: as `pairwise`
+def pairwise32(b: ptr mut u8, size: int, lo: int, n: int) -> f32:
+    if n == 1:
+        # safety: in_bounds, valid, aligned: by `items`.
+        return unsafe b.offset(lo * size).cast[f32]().read()
+    let half = n // 2
+    return pairwise32(b, size, lo, half) + pairwise32(b, size, lo + half, n - half)
+
 def iter_call(c: Call, id: int) -> int:
     let ts = c.ts
     if id == RANGE:
@@ -781,6 +890,8 @@ def iter_call(c: Call, id: int) -> int:
         let item = if ts.kind(rt) == ITER: ts.a(rt) else: -1
         c.set(0, iter.iterable(ts, c.arg(0), c.ty(0), item).addr())
         return OK
+    if id == SUM:
+        return sum_call(c)
     let first = iter.iterable(ts, c.arg(0), c.ty(0), c.item(0))
     if id == ENUMERATE:
         c.set(0, iter.new_enumerate(first).addr())

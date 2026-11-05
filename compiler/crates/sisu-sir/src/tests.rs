@@ -491,3 +491,26 @@ fn the_runtime_profile_is_read_after_the_entry_and_written_back() {
     assert!(write(&p).contains("entry main\nruntime single\nexport \"tick\" tick\n"), "{}", write(&p));
     assert!(read(&text.replace("runtime single", "runtime multi")).is_err());
 }
+
+#[test]
+fn a_tests_module_is_read_before_its_tags() {
+    // What stage 1's `sir --tests --modules` writes (its R142; decision
+    // 900): ` in "FILE"` after the function, before `tags`, which the
+    // reader still reads.
+    let text = "sir 0\nsource 0 \"src/main.sisu\"\nsource 1 \"src/heat.sisu\"\nentry main\n\
+                test \"main's\" test#0 in \"src/main.sisu\"\n\
+                test \"heat/hot\" test#1 in \"src/heat.sisu\" tags \"slow\"\n\
+                test \"plain\" test#1\n\
+                bench \"heat/a level\" test#1 in \"src/heat.sisu\"\n\n\
+                fn main(0) source 0 {\nbb0:\n    return\n}\n\n\
+                fn test#0(0) source 0 {\nbb0:\n    return\n}\n\n\
+                fn test#1(0) source 1 {\nbb0:\n    return\n}\n";
+    let p = read(text).expect("it reads");
+    assert_eq!(p.tests.len(), 3);
+    assert_eq!(p.test_tags, vec![Vec::<String>::new(), vec!["slow".to_string()]]);
+    assert_eq!(p.benches, vec![("heat/a level".to_string(), "test#1".to_string())]);
+    assert_eq!(
+        read::test_files(text),
+        vec![Some("src/main.sisu".to_string()), Some("src/heat.sisu".to_string()), None]
+    );
+}

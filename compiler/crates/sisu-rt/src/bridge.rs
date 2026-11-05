@@ -1023,6 +1023,7 @@ pub(crate) fn collects(id: u32) -> bool {
                 | I::Reversed
                 | I::IterableList
                 | I::Sorted
+                | I::Sum
                 | I::Any
                 | I::All
                 | I::IterRef
@@ -1113,6 +1114,13 @@ extern "C" fn sisu_rt_slice_bounds(start: i64, end: i64) -> u8 {
 #[unsafe(no_mangle)]
 extern "C" fn sisu_rt_range_step() -> u8 {
     rt::raise_msg(sisu_diag::msg::PANIC_RANGE_STEP, &[])
+}
+
+/// `sum`'s integer overflow (decision 903): the panic raised, naming the
+/// sum so far and the item, and its status.
+#[unsafe(no_mangle)]
+extern "C" fn sisu_rt_sum_overflow(total: i64, item: i64) -> u8 {
+    rt::raise_msg(sisu_diag::msg::PANIC_OVERFLOW, &[("expr", format!("{total} + {item}"))])
 }
 
 /// A sort that met two elements without an order: the panic raised, and its

@@ -733,6 +733,13 @@ fn native_tests(sisu: &Sisu, case: &Case, dir: &Path, mode: Mode, r: &mut CaseRe
         a.extend(line.trim()[marker.len()..].split_whitespace().map(str::to_string));
         runs.push((a, case.expected(ext).unwrap_or_default()));
     }
+    // A package's `NAME.select`: `sisu test` with the lines of
+    // `NAME.select-args` (decision 900).
+    if case.package
+        && let Some(expected) = case.expected("select")
+    {
+        runs.push((case.expected("select-args").unwrap_or_default().lines().map(str::to_string).collect(), expected));
+    }
     let explore = source
         .lines()
         .find_map(|l| l.trim().strip_prefix("# explore ").and_then(|n| n.trim().parse::<u64>().ok()));

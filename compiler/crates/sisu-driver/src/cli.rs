@@ -286,6 +286,10 @@ pub(crate) struct Input {
     /// module's name, as stage 1 reads them (its R31): a package's root, a
     /// single file's own directory. None for a program a log holds.
     embed_dirs: Vec<(String, std::path::PathBuf)>,
+    /// For `sisu test src/MODULE.sisu` of a package's module, the module's
+    /// file from the package's root, whose tests alone run (decision 900):
+    /// its replay tokens name it in their hash.
+    module: Option<String>,
 }
 
 impl Input {
@@ -305,6 +309,7 @@ impl Input {
                 file.to_string(),
                 std::path::Path::new(file).parent().map(std::path::Path::to_path_buf).unwrap_or_default(),
             )],
+            module: None,
         }
     }
 
@@ -360,10 +365,15 @@ impl Input {
     /// were.
     fn token_hash(&self) -> u64 {
         let embedded = self.embedded();
-        if embedded.is_empty() {
+        // A module's run numbers its own tests (decision 900), so its tokens
+        // are not the whole package's.
+        if embedded.is_empty() && self.module.is_none() {
             return self.hash();
         }
         let mut all = format!("{:016x}", self.hash());
+        if let Some(m) = &self.module {
+            all.push_str(&format!("\nmodule {m}"));
+        }
         for (path, read) in &embedded {
             match read {
                 Ok(text) => all.push_str(&format!("\nembed {path}\n{text}")),
@@ -1219,6 +1229,50 @@ fn from_sir(
 /// checker's deferral, the transcripts) is left out.
 /// The black-box test files of the package in `dir` (17: `tests/*.sisu`),
 /// by name, as a command line names them (decision 508).
+/// The package a file names a module of, for `sisu test src/MODULE.sisu`
+/// (decision 900): the directory of the nearest package's manifest above
+/// the file, relative to the working directory, and the file relative to
+/// that directory, when the file is under its `src/`; none for any other
+/// file, a black-box test file under `tests/` among them.
+fn package_module(file: &str) -> Option<(String, String)> {
+    let cwd = std::env::current_dir().ok()?;
+    let cwd = std::fs::canonicalize(&cwd).unwrap_or(cwd);
+    let disk = std::fs::canonicalize(cwd.join(file)).ok()?;
+    if !disk.is_file() {
+        return None;
+    }
+    let mut dir = disk.parent();
+    while let Some(d) = dir {
+        if d.join(crate::package::MANIFEST).is_file() {
+            let shown = crate::package::relative(&cwd, d);
+            return match crate::package::locate(Some(&shown), &cwd) {
+                Some(crate::package::Target::Package(_)) if disk.starts_with(d.join("src")) => {
+                    Some((shown, crate::package::relative(d, &disk)))
+                }
+                _ => None,
+            };
+        }
+        dir = d.parent();
+    }
+    None
+}
+
+/// Keeps the tests of the module `file` alone, with their tags, by the
+/// ` in "FILE"` stage 1's `sir --tests --modules` wrote on each `test`
+/// line of `text` (its R142; decision 900).
+fn keep_module_tests(prog: &mut sisu_sir::Program, text: &str, file: &str) {
+    let files = sisu_sir::read::test_files(text);
+    let keep: Vec<bool> = (0..prog.tests.len()).map(|k| files.get(k).is_some_and(|f| f.as_deref() == Some(file))).collect();
+    let mut k = 0;
+    prog.tests.retain(|_| {
+        k += 1;
+        keep[k - 1]
+    });
+    let tags = std::mem::take(&mut prog.test_tags);
+    prog.test_tags =
+        tags.into_iter().enumerate().filter(|(k, _)| keep.get(*k).copied().unwrap_or(false)).map(|(_, t)| t).collect();
+}
+
 pub(crate) fn black_box_files(dir: &str) -> Vec<String> {
     let tests = std::path::Path::new(dir).join("tests");
     let Ok(entries) = std::fs::read_dir(&tests) else { return Vec::new() };
@@ -1762,23 +1816,48 @@ fn stage1_command(
             // runs them; the worst status wins.
             // The programs, as the Rust front end finds them, for their
             // files; stage 1's `check` writes the lockfile (decision 380).
-            let inputs =
-                match inputs_for(cmd, target.path.as_deref(), Lock::Stage1, false, false, features, host) {
-                    Ok(i) => i,
-                    Err(code) => return code,
-                };
             // A stage 1 whose `sir --tests` reports the program's diagnostics
             // itself, its warnings among them, and takes the features and
             // `--locked` is run once for each program (decision 424); else its
             // `check` reports them after (decision 380).
             let once = stage1.sir_reports() && !has_ids(&p.flags);
+            // `sisu test src/MODULE.sisu` of a module of a package (decisions
+            // 828 and 900): the package's program, compiled as the package,
+            // and the tests its module declares, which a stage 1 that names
+            // each test's module tells (`sisu1 0.12.0`, its R142); an older
+            // one runs the file alone, as before.
+            let module = target
+                .path
+                .as_deref()
+                .filter(|_| cmd == "test" && once)
+                .and_then(package_module)
+                .filter(|_| stage1.names_test_modules());
+            let program_path = match &module {
+                Some((dir, _)) => Some(dir.clone()),
+                None => target.path.clone(),
+            };
+            let mut inputs =
+                match inputs_for(cmd, program_path.as_deref(), Lock::Stage1, false, false, features, host) {
+                    Ok(i) => i,
+                    Err(code) => return code,
+                };
+            if let (Some((_, file)), Some(given)) = (&module, &target.path) {
+                for input in &mut inputs {
+                    input.shown = given.clone();
+                    input.module = Some(file.clone());
+                }
+            }
             // A package's black-box tests (17; stage 1's R65, decision 508):
             // each `tests/*.sisu`, after the package's own program, a program
             // of its own, with the package's options; a replay token names
             // its file, so a replay runs that file alone.
-            let black_box = cmd == "test" && once && opts.token.is_none() && stage1.black_box_tests();
+            let black_box =
+                cmd == "test" && once && opts.token.is_none() && module.is_none() && stage1.black_box_tests();
             let sir_words = |path: &str| {
                 let mut words = vec!["sir".to_string(), "--tests".to_string()];
+                if module.is_some() {
+                    words.push("--modules".into());
+                }
                 runtime_words(&mut words);
                 words.extend(contracts.clone());
                 if locked {
@@ -1818,7 +1897,8 @@ fn stage1_command(
             for input in &inputs {
                 heading(input.package.as_ref().map_or(input.shown.as_str(), |(n, _)| n.as_str()), host);
                 let code = if once {
-                    let r = match run(host, &sir_words(&input.shown), Backend::Unused) {
+                    let program = module.as_ref().map_or(input.shown.as_str(), |(dir, _)| dir.as_str());
+                    let r = match run(host, &sir_words(program), Backend::Unused) {
                         Ok(r) => r,
                         Err(code) => return code,
                     };
@@ -1830,7 +1910,12 @@ fn stage1_command(
                     } else {
                         match read_sir(&r.stdout, host) {
                             Ok(prog) if cmd == "bench" => bench_from_sir(&prog, opts, host),
-                            Ok(prog) => test_from_sir(&prog, &p.flags, opts, input, true, host),
+                            Ok(mut prog) => {
+                                if let Some((_, file)) = &module {
+                                    keep_module_tests(&mut prog, &r.stdout, file);
+                                }
+                                test_from_sir(&prog, &p.flags, opts, input, true, host)
+                            }
                             Err(code) => code,
                         }
                     };
@@ -2433,6 +2518,7 @@ pub(crate) fn input_with_root(
                 (m.name.clone(), dir)
             })
             .collect(),
+        module: None,
     })
 }
 
@@ -4539,6 +4625,7 @@ fn replay(args: &[String], host: &mut dyn Host) -> i32 {
                 build_root: None,
                 release_contracts: None,
                 embed_dirs: Vec::new(),
+                module: None,
             }
         }
         None => Input::single(&file, source.clone()),

@@ -1005,6 +1005,16 @@ impl Runner<'_> {
                 &one.stdout,
             );
         }
+        // `NAME.select`: `sisu test ARGS`, the arguments the lines of
+        // `NAME.select-args` give (a module's file, decision 900).
+        if let Some(expected) = case.expected("select") {
+            let mut a = s(&["test"]);
+            a.extend(case.expected("select-args").unwrap_or_default().lines().map(str::to_string));
+            let out = invoke(self.sisu, &cwd, &a);
+            self.compare(case, &format!("sisu {}", a.join(" ")), Some("select"), &expected, &out.stdout);
+            self.test_status(case, &format!("sisu {}", a.join(" ")), &out);
+            self.replay_tokens_in(case, &cwd, &out.stdout);
+        }
         let args: Vec<String> =
             case.expected("args").map(|a| a.lines().map(str::to_string).collect()).unwrap_or_default();
         let input = case.expected("stdin");

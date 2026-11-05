@@ -77,6 +77,9 @@ extern "C":
     ## Raises the panic of a range whose step is 0 (decision 820): its
     ## status.
     pub def sisu_rt_range_step() -> u8
+    ## Raises the panic of `sum`'s overflow, the sum so far `total` and the
+    ## item `item` (decision 903): its status.
+    pub def sisu_rt_sum_overflow(total: int, item: int) -> u8
     ## Drops the value at `p` of type `t`, running its glue on the task's
     ## stack where it needs it: the status.
     pub def sisu_rt_drop_value(p: ptr mut u8, t: int) -> u8

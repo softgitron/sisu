@@ -234,7 +234,6 @@ unsafe fn dispatch(i: Intrinsic, c: &Call<'_>) -> u8 {
                 }
             }
             I::Min | I::Max => return min_max(c, i == I::Min),
-            I::Sum => return sum(c),
             I::IterNext => {
                 let (p, _) = c.place(0);
                 let obj = mem::word(p, 0) as *mut iter::IterObj;
@@ -1121,67 +1120,6 @@ unsafe fn min_max(c: &Call<'_>, min: bool) -> u8 {
             mem::copy(c.ret, c.arg(keep), ty(c.ret_ty).size as usize);
             value::drop_value(c.arg(other), c.ty(other))
         }
-    }
-}
-
-/// `sum`: floats pairwise in a fixed shape (D-074), integers with
-/// overflow checked.
-///
-/// # Safety
-/// As [`call`].
-unsafe fn sum(c: &Call<'_>) -> u8 {
-    // SAFETY: the arguments are of their types.
-    unsafe {
-        let it = iter::iterable(c.arg(0), c.ty(0), c.item(0));
-        // The items are the result's numbers.
-        let size = ty(c.ret_ty).size;
-        let items = match iter::collect_all(it, c.item(0)) {
-            Ok(l) => l,
-            Err(s) => return s,
-        };
-        let words: Vec<u64> = (0..items.len).map(|k| mem::word(items.at(k, size), 0)).collect();
-        mem::release(items.ptr);
-        match ty(c.ret_ty).kind {
-            Kind::Float => {
-                let xs: Vec<f64> = words.iter().map(|w| f64::from_bits(*w)).collect();
-                c.set_word(pairwise(&xs).to_bits());
-            }
-            Kind::F32 => {
-                let xs: Vec<f32> = words.iter().map(|w| f32::from_bits(*w as u32)).collect();
-                mem::set_word(c.ret, 0, 0);
-                (c.ret as *mut f32).write(pairwise32(&xs));
-            }
-            _ => {
-                let mut total = 0i64;
-                for w in words {
-                    let v = w as i64;
-                    match total.checked_add(v) {
-                        Some(t) => total = t,
-                        None => {
-                            return rt::raise_msg(msg::PANIC_OVERFLOW, &[("expr", format!("{total} + {v}"))]);
-                        }
-                    }
-                }
-                c.set_word(total as u64);
-            }
-        }
-        abi::OK
-    }
-}
-
-fn pairwise(xs: &[f64]) -> f64 {
-    match xs.len() {
-        0 => 0.0,
-        1 => xs[0],
-        n => pairwise(&xs[..n / 2]) + pairwise(&xs[n / 2..]),
-    }
-}
-
-fn pairwise32(xs: &[f32]) -> f32 {
-    match xs.len() {
-        0 => 0.0,
-        1 => xs[0],
-        n => pairwise32(&xs[..n / 2]) + pairwise32(&xs[n / 2..]),
     }
 }
 

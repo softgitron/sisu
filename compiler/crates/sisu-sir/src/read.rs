@@ -514,6 +514,27 @@ fn split_loc(line: &str) -> (&str, Option<Loc>) {
     (line, None)
 }
 
+/// The file of the module that declares each test, by the test's place
+/// in [`Program::tests`]: the ` in "FILE"` that stage 1's `sir --tests
+/// --modules` writes on each `test` line after its function (its R142;
+/// decision 900), none where the line has none.
+pub fn test_files(text: &str) -> Vec<Option<String>> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let mut c = Cur::new(line.trim_end());
+        if !line.starts_with("test ") || !c.eat("test ") {
+            continue;
+        }
+        let file = (|| -> R<Option<String>> {
+            c.string()?;
+            c.name()?;
+            if c.eat("in ") { Ok(Some(c.string()?)) } else { Ok(None) }
+        })();
+        out.push(file.ok().flatten());
+    }
+    out
+}
+
 pub fn read(text: &str) -> Result<Program, ReadError> {
     let lines: Vec<&str> = text.lines().collect();
     let mut p = Program {
@@ -588,6 +609,11 @@ pub fn read(text: &str) -> Result<Program, ReadError> {
             } else if c.eat("test ") {
                 let name = c.string()?;
                 let f = c.name()?;
+                // The module that declares it, which `sir --tests --modules`
+                // writes (stage 1's R142; decision 900): `test_files` reads it.
+                if c.eat("in ") {
+                    c.string()?;
+                }
                 let mut tags = Vec::new();
                 if c.eat("tags") {
                     while !c.at_end() {

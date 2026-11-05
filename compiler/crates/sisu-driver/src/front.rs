@@ -460,6 +460,14 @@ impl Stage1 {
         self.version().is_some_and(|v| v >= TRANSCRIPTS_SINCE)
     }
 
+    /// Whether this stage 1's `sir --tests --modules` names each test's
+    /// module (`sisu1 0.12.0` and later, its R142), so that `sisu test
+    /// src/MODULE.sisu` runs that module's tests of its package (decision
+    /// 900).
+    pub fn names_test_modules(&self) -> bool {
+        self.version().is_some_and(|v| v >= MODULES_SINCE)
+    }
+
     /// `sir --repl-serve` started in the working directory, or none when it
     /// cannot be: one process of this stage 1 that makes the standard
     /// library's base once and answers the REPL's commands (decision 720).
@@ -1163,6 +1171,10 @@ const REPL_SERVE_SINCE: (u32, u32, u32) = (0, 10, 0);
 /// (decision 722).
 const TRANSCRIPTS_SINCE: (u32, u32, u32) = (0, 11, 0);
 
+/// The first stage 1 whose `sir --tests --modules` writes each test's
+/// module (its R142; decision 900).
+const MODULES_SINCE: (u32, u32, u32) = (0, 12, 0);
+
 /// `SISU_STAGE1_REPL_SERVE=1` (or `0`): whether `sisu repl` and `sisu ws`
 /// keep one process of stage 1 for the session, whatever its version says.
 pub const REPL_SERVE_VAR: &str = "SISU_STAGE1_REPL_SERVE";
@@ -1243,6 +1255,8 @@ mod version_tests {
         assert!(super::stage1_version("sisu1 0.7.0") >= Some(super::BLACK_BOX_SINCE));
         assert!(super::stage1_version("sisu1 0.6.0") < Some(super::BLACK_BOX_SINCE));
         assert!(super::stage1_version("sisu1 0.8.0") >= Some(super::REPL_SINCE));
+        assert!(super::stage1_version("sisu1 0.12.0") >= Some(super::MODULES_SINCE));
+        assert!(super::stage1_version("sisu1 0.11.0") < Some(super::MODULES_SINCE));
         assert!(super::stage1_version("sisu1 0.7.0") < Some(super::REPL_SINCE));
         assert!(super::stage1_version("sisu1 0.9.0") >= Some(super::REPL_OPTIONS_SINCE));
         assert!(super::stage1_version("sisu1 0.8.0") < Some(super::REPL_OPTIONS_SINCE));
