@@ -696,6 +696,16 @@ under the test clock.
 
 - [`Ticker`](#Ticker): A periodic ticker that does not drift (N-35): its `n`-th tick is at `start + n * period` whatever each iteration took, so a slow iteration does not push the ticks after it back. A tick that passes while the loop is busy is skipped, not fired late, and counted in `missed`.
 - [`Timeline`](#Timeline): Virtual time (Sonic Pi's model, N-35): `sleep(d)` moves the timeline's own time on by exactly `d` and then waits for the clock to reach it, so the time spent between sleeps does not accumulate as drift.
+- [`Instant`](#Instant): A point on a clock's time line, to measure how long something took (11, `std.time`): `Instant.now(clock)` reads the clock, `elapsed` is the time since, and the difference of two is a `Duration`; an instant is ordered but is not a civil time, and shows as its nanoseconds on its clock. Its readings are the clock's own (`ClockOps.now`), so the test clock makes them deterministic and a recorded run replays them; on the host's clock they are the system's time, which a change of the system's clock moves, since stage 0's `Clock` reads no monotonic time of its own (decision 627).
+- [`ZONES`](#ZONES): The zones whose rules `Zone.named` knows, each name with its rule as POSIX writes a `TZ` variable: the abbreviation and the offset west of UTC of its standard time, and of its daylight time with the rules of its start and its end (`M` month `.` week `.` weekday, `/` the local time), as the zones' rules stand since 2007 (decision 627).
+- [`Change`](#Change): A day a zone's rule changes its offset on: the `week`-th `weekday` (0 for Sunday) of `month`, week 5 being the last, at `seconds` of local time.
+- [`Zone`](#Zone): A time zone (11, `std.time`): the offset from UTC of its standard time and, when it has one, of its daylight time with the days that start and end it, each with the abbreviation it is shown with. `Zone.named` gives the zones of the table above by their names in the tz database; a time before the rules came into force is given today's rules (decision 627).
+- [`change_seconds`](#change_seconds): The seconds since the epoch, as if UTC, of the local time a change gives in `year`.
+- [`offset_text`](#offset_text): An offset east of UTC as RFC 3339 writes it: `+05:30`, `-03:00`.
+- [`parse_rule`](#parse_rule): A rule as POSIX writes a `TZ` variable (the table's), or `None`.
+- [`rule_name`](#rule_name): An abbreviation from `at`: letters, or any text inside `<` and `>`; and where it ends.
+- [`rule_seconds`](#rule_seconds): A signed `hh[:mm[:ss]]` from `at`, in seconds; and where it ends.
+- [`rule_change`](#rule_change): A change `Mm.w.d[/time]` from `at`, its time 02:00 when it gives none; and where it ends.
 
 <a id="Ticker"></a>
 ## `Ticker`
@@ -800,3 +810,272 @@ pub def sleep(mut self, d: Duration) -> ! TaskError
 Moves the timeline on by `d`, and waits until the clock is there.
 
 Capabilities: `self` (`Clock`).
+
+<a id="Instant"></a>
+## `Instant`
+
+```sisu
+@derive(Copy, Eq, Ord, Hash, Debug)
+pub struct Instant
+    nanos: int
+
+impl Add[Duration] for Instant
+impl Sub[Duration] for Instant
+impl Display for Instant
+```
+
+A point on a clock's time line, to measure how long something took (11,
+`std.time`): `Instant.now(clock)` reads the clock, `elapsed` is the time
+since, and the difference of two is a `Duration`; an instant is ordered
+but is not a civil time, and shows as its nanoseconds on its clock. Its
+readings are the clock's own (`ClockOps.now`), so the test clock makes
+them deterministic and a recorded run replays them; on the host's clock
+they are the system's time, which a change of the system's clock moves,
+since stage 0's `Clock` reads no monotonic time of its own (decision
+627).
+
+```sisu
+let clock = Clock.frozen_at(DateTime.parse("2026-01-01T00:00:00Z").expect("a time"))
+let start = Instant.now(clock)
+clock.advance(Duration.millis(1500))
+assert start.elapsed(clock) == Duration.millis(1500)
+let later = Instant.now(clock)
+assert later > start and later.since(start) == Duration.millis(1500)
+assert start + Duration.seconds(2) > later
+```
+
+<a id="Instant.now"></a>
+### `Instant.now`
+
+```sisu
+pub def now(clock: Clock) -> Instant
+```
+
+The clock's time now.
+
+Capabilities: `clock` (`Clock`).
+
+<a id="Instant.elapsed"></a>
+### `Instant.elapsed`
+
+```sisu
+pub def elapsed(self, clock: Clock) -> Duration
+```
+
+The time from this instant to the clock's time now.
+
+Capabilities: `clock` (`Clock`).
+
+<a id="Instant.since"></a>
+### `Instant.since`
+
+```sisu
+pub pure def since(self, earlier: Instant) -> Duration
+```
+
+The time from `earlier` to this instant, negative when `earlier` is
+the later one.
+
+<a id="ZONES"></a>
+## `ZONES`
+
+```sisu
+const ZONES: list[(str, str)]
+```
+
+The zones whose rules `Zone.named` knows, each name with its rule as
+POSIX writes a `TZ` variable: the abbreviation and the offset west of
+UTC of its standard time, and of its daylight time with the rules of
+its start and its end (`M` month `.` week `.` weekday, `/` the local
+time), as the zones' rules stand since 2007 (decision 627).
+
+<a id="Change"></a>
+## `Change`
+
+```sisu
+@derive(Copy, Eq, Debug)
+struct Change
+    month: int
+    week: int
+    weekday: int
+    seconds: int
+```
+
+A day a zone's rule changes its offset on: the `week`-th `weekday` (0 for
+Sunday) of `month`, week 5 being the last, at `seconds` of local time.
+
+<a id="Zone"></a>
+## `Zone`
+
+```sisu
+@derive(Eq, Debug)
+pub struct Zone
+    ## The zone's name, as `Europe/Helsinki`, or `UTC+05:30` for a fixed one.
+    pub name: String
+    standard: String
+    standard_offset: int
+    daylight: String
+    daylight_offset: int
+    rules: (Change, Change)?
+```
+
+A time zone (11, `std.time`): the offset from UTC of its standard time
+and, when it has one, of its daylight time with the days that start and
+end it, each with the abbreviation it is shown with. `Zone.named` gives
+the zones of the table above by their names in the tz database; a time
+before the rules came into force is given today's rules (decision 627).
+
+```sisu
+let helsinki = Zone.named("Europe/Helsinki").expect("a zone")
+let summer = DateTime.parse("2026-07-01T12:00:00Z").expect("a time")
+let winter = DateTime.parse("2026-01-15T12:00:00Z").expect("a time")
+assert helsinki.offset_at(summer) == Duration.hours(3)
+assert helsinki.abbreviation_at(winter) == "EET"
+assert helsinki.format(summer) == "2026-07-01T15:00:00+03:00"
+assert helsinki.local(summer).hour() == 15
+assert Zone.named("Mars/Olympus").is_err()
+```
+
+<a id="Zone.utc"></a>
+### `Zone.utc`
+
+```sisu
+pub pure def utc() -> Zone
+```
+
+UTC itself.
+
+<a id="Zone.fixed"></a>
+### `Zone.fixed`
+
+```sisu
+pub pure def fixed(seconds: int) -> Zone
+```
+
+A zone of one offset, `seconds` east of UTC, named `UTC+HH:MM`.
+
+<a id="Zone.named"></a>
+### `Zone.named`
+
+```sisu
+pub pure def named(name: str) -> Zone ! TimeError
+```
+
+The zone named `name` in the tz database, of the ones the table
+knows; `InvalidTime` for another name.
+
+<a id="Zone.offset_at"></a>
+### `Zone.offset_at`
+
+```sisu
+pub pure def offset_at(self, t: DateTime) -> Duration
+```
+
+The offset from UTC the zone's clocks show at `t`.
+
+<a id="Zone.abbreviation_at"></a>
+### `Zone.abbreviation_at`
+
+```sisu
+pub pure def abbreviation_at(self, t: DateTime) -> String
+```
+
+The abbreviation the zone's time is shown with at `t`, as `EEST`.
+
+<a id="Zone.local"></a>
+### `Zone.local`
+
+```sisu
+pub pure def local(self, t: DateTime) -> DateTime
+```
+
+The zone's wall-clock time at `t`, as a `DateTime` whose parts
+(`hour`, `day`, ...) are the local ones: `t` moved by its offset.
+
+<a id="Zone.format"></a>
+### `Zone.format`
+
+```sisu
+pub pure def format(self, t: DateTime) -> String
+```
+
+`t` as RFC 3339 writes it in the zone, its local time and offset:
+`2026-07-01T15:00:00+03:00`.
+
+<a id="Zone.seconds_at"></a>
+### `Zone.seconds_at`
+
+```sisu
+pure def seconds_at(self, t: DateTime) -> int
+```
+
+The offset at `t`, in seconds east of UTC.
+
+<a id="Zone.daylight_at"></a>
+### `Zone.daylight_at`
+
+```sisu
+pure def daylight_at(self, t: DateTime) -> bool
+```
+
+Whether daylight time is in force at `t`: from its start, a local
+standard time, to its end, a local daylight time, of the year `t`
+falls in locally; the end comes first in a year of the southern
+hemisphere.
+
+<a id="change_seconds"></a>
+## `change_seconds`
+
+```sisu
+pure def change_seconds(year: int, c: Change) -> int
+```
+
+The seconds since the epoch, as if UTC, of the local time a change gives
+in `year`.
+
+<a id="offset_text"></a>
+## `offset_text`
+
+```sisu
+pure def offset_text(seconds: int) -> String
+```
+
+An offset east of UTC as RFC 3339 writes it: `+05:30`, `-03:00`.
+
+<a id="parse_rule"></a>
+## `parse_rule`
+
+```sisu
+pure def parse_rule(rule: str) -> Zone?
+```
+
+A rule as POSIX writes a `TZ` variable (the table's), or `None`.
+
+<a id="rule_name"></a>
+## `rule_name`
+
+```sisu
+pure def rule_name(cs: list[char], at: int) -> (String, int)?
+```
+
+An abbreviation from `at`: letters, or any text inside `<` and `>`; and
+where it ends.
+
+<a id="rule_seconds"></a>
+## `rule_seconds`
+
+```sisu
+pure def rule_seconds(cs: list[char], at: int) -> (int, int)?
+```
+
+A signed `hh[:mm[:ss]]` from `at`, in seconds; and where it ends.
+
+<a id="rule_change"></a>
+## `rule_change`
+
+```sisu
+pure def rule_change(cs: list[char], at: int) -> (Change, int)?
+```
+
+A change `Mm.w.d[/time]` from `at`, its time 02:00 when it gives none;
+and where it ends.

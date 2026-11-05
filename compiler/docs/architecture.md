@@ -9563,8 +9563,9 @@ replace")
      check, which asks `parse --shape` whether a file parses and then `sisu
      fmt` to format it, sees the two agree; the Rust front end's, which
      prunes an unused import from the shape where stage 1's keeps it
-     (decision 588), answers under `--front-end=rust`. This changes no
-     rule of the language.
+     (decision 588), answers under `--front-end=rust`. `sisu help` names
+     `parse --shape`, `repl` and `ws` among the commands stage 1 serves.
+     This changes no rule of the language.
 
 **What the manual found: the bits of the integers, `HttpError` and time
 zones** (sections "Numbers, bytes and slices", "Capabilities"; 03, 11; the
