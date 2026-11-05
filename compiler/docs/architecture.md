@@ -3197,7 +3197,9 @@ otherwise).
 **The front end** of `check`, `sir`, `build`, `run`, `test`, `bench`,
 `fmt`, `doc`, `tokens` and `parse` is stage 1, the front end written in
 Sisu, compiled natively (`compiler/target/stage1/sisu1`, built from
-`compiler/stage1` when a source of it is newer): they run its commands and
+`compiler/stage1` in the release profile with every contract checked when
+a source of it is newer, `SISU_STAGE1_PROFILE=debug` for the debug one,
+decision 860): they run its commands and
 print what it prints, and a program runs from the SIR it serialised, in
 the interpreter or natively, as its tests and benchmarks do (decisions 268
 and 357). `--front-end=rust`, among a command's options, or
@@ -3574,7 +3576,8 @@ The runtime's entry points (`abi::sym`) are the boundary:
 | `sisu_rt_list_reserve(l, size)` | room for one more element of `size` bytes in the list at `l` (decision 265) |
 | `sisu_rt_intrinsic(desc, ret, args) -> u8` | a call of an intrinsic |
 | `sisu_rt_sized(kind, op, flags, x, y, out) -> u8`, `sisu_rt_wide(kind, op, x, x_ty, y, y_ty, out) -> u8` | an operation of a sized integer type, of one word or of 128 bits |
-| `sisu_rt_table(ty, items, n, out) -> u8`, `sisu_rt_dict_slot(dict, key, key_ty, mode, out) -> u8` | a dict or set literal; a dict's value for a key |
+| `sisu_rt_table(ty, items, n, out) -> u8`, `sisu_rt_dict_slot(dict, key, key_ty, mode, out) -> u8` | a dict or set literal; a dict's value for a key, and `dict.index_str`'s (decision 861) |
+| `sisu_rt_table_take(table, key, key_ty, value, out) -> u8` | `dict.remove_str` (the option of the value) and `set.remove_str` (whether it was there) in place, the key the table held dropped, by the runtime in Sisu (decision 861) |
 | `sisu_rt_arena_slot(arena, key, mode, out) -> u8` | the address of the value an arena holds for a key; a stale key panics (`R0072`), but for a drop, which does nothing |
 | `sisu_rt_shared_touch(value)` | a `Shared`'s cell reached through `*`: counts it for `--stats` when another task than its maker reaches it |
 | `sisu_rt_flush()` | writes what the program printed so far, before a foreign call (decision 302) |
@@ -3659,7 +3662,7 @@ What is in Sisu (port-debt.md, "The runtime in Sisu", has what is not):
 | text search by Two-Way, and a prefix or suffix (`sisu_rt_find`, `sisu_rt_has_edge`) | `search.sisu` | the runtime in Rust, for `in` on texts and `bytes.find`, `starts_with` and `ends_with` (decision 352) |
 | a float's text: the shortest that reads back as the same `f64` or `f32`, the fixed form and the form with an exponent (`sisu_rt_float_digits`) | `floats.sisu` | the runtime in Rust, for `Display` and `Debug` of floats, `fmt.float_digits` and `fmt.float32_digits` (decision 358) |
 | `Display` and `Debug` of a value by its type (`sisu_rt_value_display`, `_debug`) | `show.sisu` | the runtime in Rust, for `fmt.display`, `fmt.debug`, `print`, `list.join`, a failed `assert`'s sides and the error `main` returns (decision 383) |
-| the intrinsics of lists, dicts, sets and slices, the lookups by a `str` among them (decision 784), and the thirteen that make an iterator or take every item of one (`range`, `enumerate`, `zip`, `zip_shortest`, `reversed`, `iterable_list`, `sorted`, `any`, `all`, `iter.ref`, `iter.mut`, `iter.own`, `Iter.of`; decision 820), their descriptors decoded (`sisu_rt_collection`), `in` as an operator (`sisu_rt_contains`), a table's literal and the inline lookups (`sisu_rt_table_literal`, `_inline_find`) | `dispatch.sisu` over `list.sisu`, `table.sisu` and `iter.sisu` | the runtime in Rust, which reads the intrinsic's number alone and hands the call over, and whose entries `sisu_rt_binary`, `sisu_rt_table` and `sisu_rt_table_find` call the others (decisions 625, 646 and 820) |
+| the intrinsics of lists, dicts, sets and slices, the lookups by a `str` among them (decision 784), and the thirteen that make an iterator or take every item of one (`range`, `enumerate`, `zip`, `zip_shortest`, `reversed`, `iterable_list`, `sorted`, `any`, `all`, `iter.ref`, `iter.mut`, `iter.own`, `Iter.of`; decision 820), their descriptors decoded (`sisu_rt_collection`, the first six words read once, decision 862), `in` as an operator (`sisu_rt_contains`), a table's literal and the inline lookups and removals, the five by a `str` among them (`sisu_rt_table_literal`, `_inline_find`, `_inline_take`; decision 861) | `dispatch.sisu` over `list.sisu`, `table.sisu` and `iter.sisu` | the runtime in Rust, which reads the intrinsic's number alone and hands the call over, and whose entries `sisu_rt_binary`, `sisu_rt_table` and `sisu_rt_table_find` call the others (decisions 625, 646 and 820) |
 | the scheduler's queues: the run queue, the waiters under their keys and the timers (`sisu_rt_queue_*`) | `queue.sisu` over `list.sisu` | the runtime in Rust's scheduler (`sched.rs`), which keeps their addresses (decision 645) |
 | the channels' buffers: the values sent and not received, in a ring of slots of the value's size (`sisu_rt_channel_*`) | `channel.sisu` | the runtime in Rust's channels (`tasks.rs`, `queue::ChanBuf`), which keep their addresses (decision 680) |
 | the scheduler's seeded generator and, under the default strategy, the choice of the next task (`sisu_rt_draw_*`) | `draw.sisu` over `queue.sisu` | the runtime in Rust's scheduler, `select` and the faults of `sim` (`queue::Rng`), which keep the generator's word (decision 724) |
@@ -10832,3 +10835,128 @@ replay", "The checked memory model"; D-085, D-086; 06, 12, 17; decisions
      a package of a runtime profile other than `full` by the single command,
      whose base is of its profile, where a batch's base is `full`. Stage 1
      decides it (RULES.md, R141).
+
+**Stage 0's fifteenth round: stage 1 in the release profile for the
+driver, the lookups by `str` in place, the descriptors read once, the
+export boundary's `D0103`, and what was left** (sections "The query layer
+and the driver", "The runtime in Sisu", "Raw memory, foreign calls and the
+machine intrinsics"; D-086; 10, 12, 17; decisions 232, 265, 331, 784, 785,
+820 and 823 to 828; stage 1's R134 and R142)
+
+860. The stage 1 that the driver builds and every `sisu` command runs
+     (`compiler/target/stage1/sisu1`) is built in the release profile with
+     every contract checked (`sisu build --native --release
+     --contracts=all`, decision 232), Cranelift's `speed` level where the
+     debug profile's Cranelift build was `none`;
+     `SISU_STAGE1_PROFILE=debug` builds the debug one, and the driver
+     writes the profile, with the executable's size and time, to
+     `target/stage1/profile`, so that an executable built otherwise (in
+     the other profile, or by `stage1/sisu1`, whose build is the debug
+     profile's with the Sisu backend) is built again at the next command.
+     The fixed points build their own stage 1 as they did
+     (`stage1/bootstrap.sh`, `stage2/bootstrap.sh`, `check.sh`'s `self`
+     and `fixed`), and the SIR stage 1 prints does not depend on its
+     profile (the runtime's seed printed by both is the same file). On the
+     round's machine (four cores, at a load of 7 to 17 from the other
+     work): the build takes 43.4 s where the debug one took 39.2 s (code
+     generation 21.7 s where it was 15.8 s), so CI's warm-up step, `sisu
+     tokens std/prelude.sisu`, pays about 4 s more; a parse of the prelude
+     (`sisu1 parse --print`) takes 356.7 million instructions where it
+     took 450.9 million (callgrind), 20.9 % fewer, and a `sisu check` of a
+     two-line program, the driver and stage 1 together, 3.706 G where it
+     took 4.191 G, 11.6 % fewer, `--contracts=all` costing nothing
+     measurable against the release profile's default preconditions;
+     the conformance suite (`sisu-conformance conformance/cases`, 570
+     cases, the release driver) takes 507 s where it took 513 s, within
+     the load's noise, since most of its time is the programs' runs in the
+     interpreter and the runner's own. This changes no rule of the
+     language.
+
+861. The five lookups by a `str` of decision 784 run inline, as
+     `dict.get`, `dict.contains` and `set.contains` do (decision 265), in
+     both lowerings byte for byte: `dict.get_str` and `set.contains_str`
+     through `sisu_rt_table_find`, the text's type given as the key's;
+     `dict.index_str` through `d{k}`'s slot read (`sisu_rt_dict_slot`,
+     `SLOT_READ`), whose missing key panics naming it at the index; and
+     `dict.remove_str` and `set.remove_str` through a new entry,
+     `sisu_rt_table_take(table, key, key_ty, value, out)`, which the
+     runtime in Sisu does (`dispatch.take`, exported as
+     `sisu_rt_table_inline_take`): the key taken out of the table as
+     `remove` takes it, the option of its value or whether it was there
+     written at the result, the key the table held dropped. A loop of
+     28 333 lookups by a `str` (`get`, `contains` and an index, stage 1
+     lowering them, R134) takes 66.6 million instructions natively where it
+     took 121.6 million through the runtime's dispatch, 45 % fewer, and the
+     same loop that makes a `String` for each key 92.8 million (callgrind,
+     the release profile, the Rust lowering). The test
+     `lookups_by_a_str_run_interpreted_and_natively` holds all five to the
+     interpreter's output in both lowerings and both profiles, with no
+     allocation left. This changes no rule of the language.
+
+862. The runtime in Sisu reads a descriptor's first six words once, when
+     a call is made (`dispatch.Call`: the intrinsic's number, its numbers
+     of arguments and type arguments, its result's type and the first two
+     argument types), two to a word of eight bytes, and both lowerings give
+     a descriptor of an odd number of words a word of 0 after them, so
+     that no word is read a byte at a time (`Codegen::desc`, stage 2's
+     `Cg.desc`), byte for byte alike; the runtime in Rust reads a
+     descriptor by its counts and ignores the word. The 150 000 calls of
+     decision 820 (50 000 loops over a borrowed list, dict and set) take
+     770.0 million instructions where they took 812.2 million, 5.2 %
+     fewer, `sisu_rt_collection` 234.8 million where it took 277.0 million
+     for its 100 000 calls (the list's iterator is made inline), about 420
+     instructions less a call, of the 950 decision 820 measured. What is
+     left of the difference is the following of the argument's references
+     (`Call.place`, 543 instructions a call, half of it in calls of Sisu's
+     convention) and the iterator's allocation, which the runtime in Rust
+     gives. The seed grows from 755 222 to 759 359 bytes with 861 and 862,
+     the runtime's object to 866 320 bytes (`target/rt/rt.o`); FIXED_LINE.
+     This changes no rule of the language.
+
+863. The rest of the intrinsics' decoding (decision 820's 265 of 328,
+     `sum`, the formatting, the characters', the floats', the texts' and
+     the bytes' families first) is not this round's: each family moves
+     with its panics' messages, which the runtime in Rust raises with
+     their parameters (`sum`'s overflow names its two sides), and the
+     round spent its time on 860 to 862 and 864; 862 makes each move cost
+     about 420 instructions a call less than 820's did. This changes no
+     rule of the language.
+
+864. `D0103` has its heading, `error[D0103]: the native backend does not
+     compile ...`, as the driver's other errors of a build do, and its
+     text names a `@repr(c)` struct that an exported function takes or
+     gives by value as the program wrote it, `a `Reading` by value (a
+     parameter of the exported function `sauna_load`)`, where it named the
+     reference the SIR passes it by (`a `ref Reading``), and the function
+     it is in, `load`, where it left it empty; both lowerings give the
+     same text (the manual's finding from R14). A raw pointer to a struct
+     of words (`int`, `f64`, raw pointers, and structs of them) compiles
+     natively as the address of its place, as `ptr.of` of an `int` does,
+     since a place holds such a struct as raw memory does, so a program
+     hands its own export the `ptr[Reading]` that C passes
+     (`unsafe/export_by_pointer`, in `native.list`). A struct with a
+     narrower field (an `i32`, a `u8`) stays `D0103` under `ptr.of`,
+     `ptr.of_mut` and `as_ref`: a place holds each of its fields in a word
+     (the layout of a place, port-debt.md) where raw memory holds it at its
+     C offset and width, so the address of the place is not a pointer to
+     the struct C lays out, and a copy converted for the call would not
+     see a write through `ptr.of_mut`; it waits for the layouts to be per
+     type (D-086), as `mem.slice.as_ptr` of a `u8` does (decision 823).
+     This changes no rule of the language.
+
+865. `sisu test src/MODULE.sisu` of a package's module (decision 828) is
+     not this round's in the driver: stage 1's sixteenth round gives
+     `sir --tests --modules`, which writes ` in "FILE"` on each `test` and
+     `bench` line (its R142, `sisu1 0.12.0`), but in its own tree, and the
+     stage 1 of this one is 0.11.0, whose `sir` takes no `--modules`; the
+     driver, when `sisu1 --version` says 0.12.0, is to run the package's
+     `sir --tests --modules` for a file under its `src/`, keep the `test`
+     lines whose FILE is that module's path from the package's root, and
+     take the words out before stage 0's SIR reader reads the text. This
+     changes no rule of the language.
+
+866. A native `CString.as_ptr()` (decision 823) and tagged-pointer
+     provenance (decision 825) are not this round's either: the first
+     waits for the per-type layouts of `list[u8]` and `Slice[u8]` (D-086),
+     the second is the round of its own that port-debt.md describes. This
+     changes no rule of the language.

@@ -84,7 +84,8 @@ jobs:
         # `sisu` runs stage 1, the front end written in Sisu, for `check`,
         # `sir`, `build`, `run`, `fmt`, `doc`, `tokens` and `parse`
         # (decision 268); the first command builds it from compiler/stage1
-        # with the Rust front end into target/stage1/sisu1.
+        # with the Rust front end into target/stage1/sisu1, in the release
+        # profile (decision 860).
         run: ./target/debug/sisu tokens std/prelude.sisu > /dev/null
       - name: sisu fmt --check (std and the canonical conformance cases)
         # Stage 1's formatter, over every case file that parses, unless

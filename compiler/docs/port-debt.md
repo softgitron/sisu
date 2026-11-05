@@ -1007,7 +1007,8 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   slot (decision 681), the scheduler's seeded generator with the
   default strategy's choice of the next task (decision 724), the tasks'
   records with their parking and waking (decision 780), the lookups
-  by a `str` that no front end lowers to yet (decision 784), the
+  by a `str` (decision 784), which the generated code makes in place
+  (decision 861), the
   thirteen intrinsics that make an iterator or take every item of one,
   an iterator of a borrowed value reached by `iter` among them (decision
   820), and PCT's and the exhaustive search's choices (decision 821).
@@ -1015,7 +1016,8 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   words and two slices; `sum`, the formatting, the characters', the
   floats', the texts' and bytes', the errors', the assertions', the
   capabilities' and the host's, the tasks' and raw memory's families,
-  265 of the 328, where the runtime in Sisu decodes 63) and the other checks, whose panics its messages
+  265 of the 328, where the runtime in Sisu decodes 63, reading a
+  descriptor's first six words once, decision 862) and the other checks, whose panics its messages
   name (a missing key, a range of step 0), a generator's items and a
   receiver's values, the trail's text a search's driver reads, what a
   task's record does not hold
