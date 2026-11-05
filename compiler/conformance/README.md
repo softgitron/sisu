@@ -111,6 +111,8 @@ package loaded), and these:
 | `NAME.lock` | the `sisu.lock` that `sisu check` wrote, beside the package's manifest or its workspace's |
 | `NAME.build` | `sisu build`: standard output, then `--- stderr`, standard error, and `--- status N` |
 | `NAME.cwd` | not compared: where the commands run |
+| `NAME.select` | `sisu test ARGS`, natively too when the case is in `native.list`, its failures replayed from their tokens |
+| `NAME.select-args` | not compared: the arguments of `NAME.select`'s run, one per line (a module's file, `src/heat.sisu`, whose tests alone run, decision 900) |
 
 The program's arguments follow `--` (`sisu run -- ARGS...`). The checks
 below apply to every `.sisu` file of the package.

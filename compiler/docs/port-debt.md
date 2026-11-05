@@ -777,8 +777,10 @@ What the unsafe round (decisions 301 and 302) leaves natively:
   import, a `@repr(c)` struct by value at the boundary (its System V
   classification, an `INTEGER` or `SSE` eightbyte each or memory, in
   both lowerings byte-identically, and AArch64's), a `Slice[u8]` and a
-  `list[u8]` laid out a byte an element (D-086's layouts per type), after
-  which a native slice can view its list in place (decision 823); the
+  `list[u8]` laid out a byte an element (D-086's layouts per type), and a
+  native slice that views what it was made from in place where it holds a
+  copy now (decision 901), after which `CString.as_ptr()` is valid
+  natively (decision 823); the
   runtime in Sisu (D-086) over the switch.
 
 What round 2 (tasks, decisions 203 to 206; the rest of the suite,
@@ -1011,13 +1013,15 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   (decision 861), the
   thirteen intrinsics that make an iterator or take every item of one,
   an iterator of a borrowed value reached by `iter` among them (decision
-  820), and PCT's and the exhaustive search's choices (decision 821).
+  820), `sum` (decision 903), and PCT's and the exhaustive search's
+  choices (decision 821).
   Still `sisu-rt`'s: the decoding of every other intrinsic's call (four
-  words and two slices; `sum`, the formatting, the characters', the
+  words and two slices; the formatting, the characters', the
   floats', the texts' and bytes', the errors', the assertions', the
   capabilities' and the host's, the tasks' and raw memory's families,
-  265 of the 328, where the runtime in Sisu decodes 63, reading a
-  descriptor's first six words once, decision 862) and the other checks, whose panics its messages
+  264 of the 328, where the runtime in Sisu decodes 64, reading a
+  descriptor's first six words once, decision 862, and an argument's
+  place without a call, decision 902) and the other checks, whose panics its messages
   name (a missing key, a range of step 0), a generator's items and a
   receiver's values, the trail's text a search's driver reads, what a
   task's record does not hold
@@ -1040,7 +1044,7 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   (decision 423). *Pay*: the pieces in D-086's order, each deleting its
   Rust counterpart: the dispatch of the other intrinsics, family by
   family, each family's descriptor read by Sisu code as decisions 625 and
-  820 read theirs, `sum` and the characters' next (decision 820 measured
+  820 read theirs, the formatting and the characters' next (decision 820 measured
   a call's decoding at about 950 instructions more than the Rust's, so a
   family called in a loop wants the descriptor's words read once and the
   value's references followed once); text constants for the runtime's code (its data in

@@ -2529,7 +2529,10 @@ code is the same (`PROGRAM.test-cache` beside the program, or
 `build/debug/test-cache` in a package; `--no-cache` runs everything;
 decision 242): it prints what it printed when it ran. The run exits with 0 when
 every test passed, 1 when one failed, and 3 when none failed and one is
-blocked by a typed hole (decisions 340 and 380).
+blocked by a typed hole (decisions 340 and 380). `sisu test
+src/MODULE.sisu` of a module of a package runs the tests that module
+declares, the package compiled as `sisu test` compiles it, which stage 1's
+`sir --tests --modules` tells (decision 900).
 
 - **Parametrised tests**: `test "name" for x, y in [(1, 2), (3, 4)]:` over
   a list written out is a test per element, named `name (1, 2)`, whose
@@ -3632,7 +3635,7 @@ when the program ends, so the two interleave as the interpreter's do.
 ### The runtime in Sisu
 
 The runtime is being written in Sisu, piece by piece, as D-086 orders
-(decisions 335, 336, 350 to 352, 358, 383, 385, 422, 423, 506, 542, 562, 625, 645, 646, 680, 681, 724, 780, 784, 820 and 821). `compiler/rt` is a Sisu package
+(decisions 335, 336, 350 to 352, 358, 383, 385, 422, 423, 506, 542, 562, 625, 645, 646, 680, 681, 724, 780, 784, 820, 821, 902 and 903). `compiler/rt` is a Sisu package
 (`unsafe = "extern"`) whose root module's `export_NAME` functions are the
 runtime's symbols `sisu_rt_NAME`, of Sisu's convention (decision 189),
 which the generated code and the runtime in Rust call as any function is
@@ -3662,7 +3665,7 @@ What is in Sisu (port-debt.md, "The runtime in Sisu", has what is not):
 | text search by Two-Way, and a prefix or suffix (`sisu_rt_find`, `sisu_rt_has_edge`) | `search.sisu` | the runtime in Rust, for `in` on texts and `bytes.find`, `starts_with` and `ends_with` (decision 352) |
 | a float's text: the shortest that reads back as the same `f64` or `f32`, the fixed form and the form with an exponent (`sisu_rt_float_digits`) | `floats.sisu` | the runtime in Rust, for `Display` and `Debug` of floats, `fmt.float_digits` and `fmt.float32_digits` (decision 358) |
 | `Display` and `Debug` of a value by its type (`sisu_rt_value_display`, `_debug`) | `show.sisu` | the runtime in Rust, for `fmt.display`, `fmt.debug`, `print`, `list.join`, a failed `assert`'s sides and the error `main` returns (decision 383) |
-| the intrinsics of lists, dicts, sets and slices, the lookups by a `str` among them (decision 784), and the thirteen that make an iterator or take every item of one (`range`, `enumerate`, `zip`, `zip_shortest`, `reversed`, `iterable_list`, `sorted`, `any`, `all`, `iter.ref`, `iter.mut`, `iter.own`, `Iter.of`; decision 820), their descriptors decoded (`sisu_rt_collection`, the first six words read once, decision 862), `in` as an operator (`sisu_rt_contains`), a table's literal and the inline lookups and removals, the five by a `str` among them (`sisu_rt_table_literal`, `_inline_find`, `_inline_take`; decision 861) | `dispatch.sisu` over `list.sisu`, `table.sisu` and `iter.sisu` | the runtime in Rust, which reads the intrinsic's number alone and hands the call over, and whose entries `sisu_rt_binary`, `sisu_rt_table` and `sisu_rt_table_find` call the others (decisions 625, 646 and 820) |
+| the intrinsics of lists, dicts, sets and slices, the lookups by a `str` among them (decision 784), the thirteen that make an iterator or take every item of one (`range`, `enumerate`, `zip`, `zip_shortest`, `reversed`, `iterable_list`, `sorted`, `any`, `all`, `iter.ref`, `iter.mut`, `iter.own`, `Iter.of`; decision 820), and `sum` (decision 903), their descriptors decoded (`sisu_rt_collection`, the first six words read once, decision 862, an argument's place found without a call, decision 902), `in` as an operator (`sisu_rt_contains`), a table's literal and the inline lookups and removals, the five by a `str` among them (`sisu_rt_table_literal`, `_inline_find`, `_inline_take`; decision 861) | `dispatch.sisu` over `list.sisu`, `table.sisu` and `iter.sisu` | the runtime in Rust, which reads the intrinsic's number alone and hands the call over, and whose entries `sisu_rt_binary`, `sisu_rt_table` and `sisu_rt_table_find` call the others (decisions 625, 646 and 820) |
 | the scheduler's queues: the run queue, the waiters under their keys and the timers (`sisu_rt_queue_*`) | `queue.sisu` over `list.sisu` | the runtime in Rust's scheduler (`sched.rs`), which keeps their addresses (decision 645) |
 | the channels' buffers: the values sent and not received, in a ring of slots of the value's size (`sisu_rt_channel_*`) | `channel.sisu` | the runtime in Rust's channels (`tasks.rs`, `queue::ChanBuf`), which keep their addresses (decision 680) |
 | the scheduler's seeded generator and, under the default strategy, the choice of the next task (`sisu_rt_draw_*`) | `draw.sisu` over `queue.sisu` | the runtime in Rust's scheduler, `select` and the faults of `sim` (`queue::Rng`), which keep the generator's word (decision 724) |
@@ -11013,3 +11016,123 @@ machine intrinsics"; D-086; 10, 12, 17; decisions 232, 265, 331, 784, 785,
 847. The conformance suite's `unsafe/cstring` differs from stage 0's front
      end as the other cases of `unsafe/` do (R4). Stage 1 decides it
      (RULES.md, R149).
+
+**Stage 0's sixteenth round: one module's tests, an argument's place
+without a call, `sum` in Sisu, and what was left** (sections "Testing",
+"The runtime in Sisu", "Raw memory, foreign calls and the machine
+intrinsics"; D-085, D-086; 12, 17, 22; decisions 686, 726, 787, 820, 823,
+825, 828, 840, 862 to 866; stage 1's R142)
+
+900. `sisu test src/MODULE.sisu` of a module of a package (a file under
+     the `src/` of the nearest package's manifest above it) runs the tests
+     that module declares, the package compiled as `sisu test` compiles it,
+     its imports resolved as the package's, where it compiled the file
+     alone, and an import of a module beside it was `E0220` (decision 828,
+     the manual's finding from chapter 17): when `sisu1 --version` says
+     0.12.0 or later, the driver asks stage 1 for the package's `sir
+     --tests --modules` (its R142, decision 840) and keeps the `test` lines
+     whose ` in "FILE"` is the module's path from the package's root, with
+     their tags; an older stage 1, the Rust front end, a black-box file
+     under `tests/` and any other file keep what they did. Stage 0's SIR
+     reader reads the words before `tags` and drops them, and
+     `sisu_sir::read::test_files` gives each test's file. A test's frame is
+     named by the test whose function it is, in `display_fn_name` and stage
+     2's alike, where it was named by its function's number, which a
+     program of one module's tests no longer keeps; nothing else prints
+     differently. The run's replay line names the module's file, and its
+     tokens hash the module's path with the package's code, so that a token
+     of the whole package's run is refused for the module's and the other
+     way round (`D0033`), the numbers of their tests differing; a run with
+     `--filter` or `--tag` selects among the module's tests, and its `not
+     selected` counts only those. `sisu test` of the package is unchanged.
+     `packages/test_modules` has three modules, a suite with a tag, and a test
+     that calls a sibling module, its `.test` the package's
+     five tests and its `.select` the three of `src/heat.sisu`, which the
+     conformance runner gives a package case as `sisu test` with the lines
+     of `NAME.select-args`; both run in the interpreter and natively. This
+     changes no rule of the language.
+
+901. The per-type layouts of `list[u8]` and `Slice[u8]` (decisions 823,
+     864 and 866) are not this round's: a byte to an element would not
+     alone give a native `CString.as_ptr()` its pointer, since a native
+     `Slice` is a copy in a list's three words (decision 225, `bytes.as_slice`
+     copying each byte into a word), so `as_ptr` of
+     `self.data.as_slice()` in stage 1's std.ffi would point to a temporary
+     dropped before the foreign call; the slice must also view what it was
+     made from in place, as the interpreter's does since decision 823, with
+     a drop that frees nothing, in both lowerings, the runtime in Rust's
+     slice constructors and the runtime in Sisu's `Slice` intrinsics.
+     The width of an element is a word for every type wherever a list's
+     element is reached: the generated code's inline index and iteration
+     and the descriptors' element sizes in both lowerings, and in the
+     runtime in Sisu each read of a type's size that steps through a
+     list, an iterator, a table or a slice, and the walks of `value.sisu`
+     and `show.sisu`, which read a `u8` as a word, each to be held byte for
+     byte between the SIR and LIR paths and the interpreter's checked
+     model. Done whole it is a round of its own, which port-debt.md
+     describes; a pointer to a struct with a narrower field stays `D0103`
+     with it (decision 864), and `unsafe/cstring` stays out of
+     `native.list`. This changes no rule of the language.
+
+902. The runtime in Sisu finds the place an intrinsic's argument is, or
+     refers to, without a call (`dispatch.Call.place`): the argument's type
+     from the descriptor's words read when the call was made, and a value
+     that is neither a reference nor a `dyn`, or a reference to one, from
+     the type table's words in place, `value.target` called only for the
+     others; `Call.ty` reads the first two types without `after_head`
+     (decision 862). The loop of decision 820 (50 000 calls over a borrowed
+     list, dict and set, of which the dict's and the set's 100 000
+     iterators are made through the dispatch) takes 573.2 million
+     instructions where it took 606.9 million, 5.6 % fewer,
+     `sisu_rt_collection` 201.1 million where it took 234.8 million, and
+     `Call.place` 202 instructions a call where it took 543 (callgrind, the
+     release profile, the Rust lowering). What is left of a call's cost is
+     the iterator's allocation (`iter.table_part`, 1 145 instructions a
+     call) and the calls of Sisu's convention, each about a hundred. The
+     safety comments of `dispatch.take` (decision 861) name the obligations
+     stage 1's `check` asks for, so the package checks with no warning.
+     This changes no rule of the language.
+
+903. `sum` is the runtime in Sisu's (`dispatch.sum_call`, decision 863's
+     first family): every item taken, first to last, by `iter.iterable` and
+     `iter.collect` as the runtime in Rust took them through its bridge,
+     then the integers added with their overflow checked, whose panic
+     (`sisu_rt_sum_overflow`) names the sum so far and the item as before,
+     the `f64`s added pairwise in the fixed shape of D-074, and the `f32`s
+     pairwise too, each addition of two by the runtime in Rust
+     (`sisu_rt_f32_add`), since raw memory holds no `f32` that the
+     runtime's code reads inline (the backend's raw access is of words and
+     bytes, decision 335); the sum of no float is 0.0, whose bits are 0. Deleted from the
+     runtime in Rust: `intrinsics::sum`, `pairwise` and `pairwise32`, the
+     bridge's `iter_iterable` and `iter_collect` with their imports,
+     `iter::iterable`, `iter::collect_all` and `Call::item`, which only it
+     used, and the runtime in Sisu's exports that only they called
+     (`sisu_rt_iter_iterable`, `sisu_rt_iter_collect`): the Rust of the
+     runtime is 15 294 lines (573 078 bytes) where it was 15 421 (577 573),
+     264 of the 328 intrinsics decoded there. `std/sum` holds every kind
+     to the interpreter's output (integers, an overflow, `f64`s whose
+     pairwise sum differs from a running one, `f32`s, none, a range and
+     an iterator that prints as it goes), in `native.list`. 20 000 sums of
+     a list of three `int`s and of three `f64`s natively take 583.5
+     million instructions, 96 % of them the iterator made of the argument
+     (4 950 a call) and its items collected (6 990), which were the
+     runtime in Sisu's before too, through the bridge, so a call costs what
+     it did but for the decoding. The runtime in Sisu is 7 483 lines where
+     it was 7 379, its seed 772 518 bytes where it was 759 359, and its
+     object 879 872 where it was 866 320 (`target/rt/rt.o`), and as the
+     fixed point builds it with the Sisu backend 1 535 712 where it was
+     1 508 224; the fixed point holds (rt-A.o and rt-B.o the same bytes,
+     as sisu2-A and sisu2-B, 31 109 272, and stage1-A and stage1-B,
+     63 942 768). The
+     formatting, the characters', the floats', the texts' and the bytes'
+     families are not this round's (decision 863). This changes no rule of
+     the language.
+
+904. Tagged-pointer provenance (decisions 686, 726, 787, 825 and 866) is
+     not this round's either: port-debt.md puts it at a week, the runtime's
+     `checked.rs` first and then each inline use of a pointer's word in
+     both lowerings behind a switch, and this round spent its time on 900,
+     902 and 903; a `checked.rs` that keeps a tag's borrow and frame with
+     no lowering writing a tag yet would be code that nothing runs, so the
+     round leaves it to the round that starts the lowerings with it. This
+     changes no rule of the language.
