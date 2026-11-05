@@ -23,7 +23,7 @@ error[E0300]: expected `int`, found `str`
   |            --- expected because of this
 
 panic: index out of bounds: the length is 2 but the index is 5
-  at main (<repl>:19:1)
+  at main (session.sisu:19:1)
 the input did not run to its end, so the session is as it was before it
 there are not that many inputs to forget; the session has 6
 `:frob` is not a command of the REPL; the commands are `:back N`, `:why NAME` and `:quit`
