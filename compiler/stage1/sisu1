@@ -6,7 +6,8 @@
 #
 #   sisu1 check [--format=ids] [PATH]            every diagnostic, as `sisu check` prints them
 #   sisu1 sir [--tests] [PATH]                   the whole program's SIR, as `sisu sir` prints it
-#                                                (with its tests, `--tests`, decision 285)
+#                                                (with its tests, `--tests`, decision 285, and
+#                                                each test's module, `--modules`, RULES.md, R142)
 #   sisu1 sir --repl SESSION INPUT --kept OUT [--load] [--dir DIR] [--name NAME]
 #                                                a REPL session's program with one more input,
 #                                                and `sir --worksheet FILE [--dir DIR] [--name

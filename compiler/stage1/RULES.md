@@ -7274,3 +7274,365 @@ each profile is open.
      a package of a runtime profile other than `full` by the single command,
      whose base is of its profile, where a batch's base is `full`. Stage 1
      decides it (RULES.md, R141).
+
+## R142. `sir --tests --modules` names each test's module, for `sisu test src/MODULE.sisu` (decision 840)
+
+**The rule.** `sir --tests --modules` writes, on each `test` line and each
+`bench` line, after the function the line names, the word `in` and the
+file of the module the test or benchmark is declared in, quoted as the
+`source` lines quote it (the path from the package's root, or the file's
+name for a program of one file):
+
+```text
+test "the main module's test" test#0 in "src/main.sisu"
+test "heat/levels/eighty is hot" test#1 in "src/heat.sisu" tags "slow"
+bench "heat/a level" bench#0 in "src/heat.sisu"
+```
+
+The file is the `source` of the function the line names, so a suite's
+tests are their suite's module's and a parametrised test's cases its
+own. Without `--modules` nothing changes: `sir --tests` writes the lines
+it wrote, byte for byte, and `--modules` without `--tests` changes
+nothing. Stage 1's version is 0.12.0.
+
+**What the driver may rely on**, from `sisu1 0.12.0` on: `sisu1 sir
+--tests --modules [OPTIONS] [PATH]` takes every option `sir --tests`
+takes and prints the same SIR, but that each `test` and `bench` line
+between the `entry` line and the first declaration has ` in "FILE"` right
+after its function's name, before `tags`; FILE is quoted and escaped as a
+`source` line's text is, and it is one of the `source` lines' texts. A
+driver that runs one module's tests keeps the `test` lines whose FILE is
+that module's path, relative to the package's root, and takes the words
+out (or reads them) before stage 0's SIR reader reads the text, since
+that reader drops a `test` line's `tags` after an unknown word.
+
+**Why the option.** Decision 828 asks for each test's module in `sir
+--tests`. The reader of stage 0 in this tree (`sisu-sir`'s `read.rs`)
+refuses a line it does not know (`unknown line`) and reads the `tags` of a
+`test` line only right after its function, so neither a line of its own
+(`test FN FILE`, the lean) nor a word on the `test` line can be written by
+default without breaking every `sisu test` of a program with tagged tests
+that the driver runs through stage 1 today. Under the option, the SIR the
+driver already reads is unchanged, and the driver asks for the words when
+`sisu1 --version` says 0.12.0 and it has learnt to read them: the
+reader's `test` arm takes ` in "FILE"` before `tags` (a line of the
+reader's code), as the stage 2 reader would if it read tests.
+
+**In stage 1.** `sir.write` (`write_as`, `module_word`), `main` (`sir
+--tests --modules`, `report_with`, `VERSION`), `sisu.toml` and
+`sisu.lock`; `check.sh` (`NAME.sir-modules`: the lines before the first
+declaration of what `sir --tests --modules` prints of a case, a package
+case's as `NAME.pkg.sir-modules`).
+
+**What it changes.** No output of the corpus. The package case
+`cases/packages/test_modules.pkg` (two modules, a suite with a tag, a
+benchmark; its `.out` and its `.pkg.sir-modules`).
+
+**Decision 840**, for docs/architecture.md:
+
+840. Stage 1's `sir --tests --modules` writes ` in "FILE"` on each `test`
+     and `bench` line after its function, FILE the source of the module
+     that declares it, so that the driver can run one module's tests
+     (`sisu test src/MODULE.sisu`, decision 828); `sir --tests` alone is
+     unchanged, since stage 0's SIR reader drops the tags after a word it
+     does not know. `sisu1 --version` says 0.12.0. Stage 1 decides it
+     (RULES.md, R142).
+
+## R143. Reflection on a type the prelude declares, and one error for what reflection cannot take (decision 841)
+
+**The rule.**
+
+- A `reflect` query in a function that takes no type parameter may name
+  `int`, `f64`, `bool`, `char` and `str` (and, as before, `String`, the
+  sized integers and the program's own types and traits):
+  `comptime reflect.name_of(int)` is `"int"`, `reflect.is_int(int)` is
+  `True`, `reflect.doc_of(int)` is empty. They were `E0900` ("`reflect` in
+  this function is not implemented") and an `E0200` for `int` in
+  `<main>/main.sisu`, the instance's module, which the program has no file
+  for, with the note on converting numbers.
+- A query whose argument compile time knows no type by, a run-time value
+  (`reflect.name_of(degrees)`) or a name of nothing
+  (`reflect.fields_of(Sauna)`), is one `E0609` at the function, whose
+  reason says what reflection takes: "`reflect.name_of` takes a type (a
+  type parameter, or a type or trait in scope), and compile time knows no
+  type `degrees`", labelled at the argument in the program's own file. It
+  was `E0900` with an `E0600` or an `E0200` in `<main>/main.sisu`.
+
+**Why.** R12's finding under "Metaprogramming" (the manual's fourteenth
+round): one diagnostic, in the right file, that says what reflection
+takes; through a `comptime def` that takes the type it already worked.
+
+**In stage 1.** `typeck.instances` (`named_type`: the primitive types),
+`typeck.template` (`replacements`: a query whose argument is not known,
+`query_of`).
+
+**What it changes.** The cases `cases/findings16/reflect_builtin.sisu`
+(its `.out`) and `cases/findings16/reflect_unknown.sisu` (its `.diag`).
+
+- Differs: `compiler/stage1/cases/findings16/reflect_builtin.sisu`: ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings16/reflect_unknown.sisu`: names, ids, human, doc, doc-output
+
+**Decision 841**, for docs/architecture.md:
+
+841. A `reflect` query may name the prelude's scalar types (`int`, `f64`,
+     `bool`, `char`, `str`) in any function, and a query given what
+     compile time knows no type by is one `E0609` at its argument, saying
+     what reflection takes, where it was `E0900` with an `E0200` in the
+     instance's own module. Stage 1 decides it (RULES.md, R143).
+
+## R144. A derive that `E0607` refuses is that one error (decision 842)
+
+**The rule.** A trait whose `comptime def derive` is not the form `E0607`
+names is that error, at the template, alone: a `@derive` of it is not
+`E0243` ("cannot be derived", though the trait declares a derive), and a
+type that names it in a `@derive` has no `E0351` for an associated
+function (`Point.columns()`) or `E0304` for a method (`p.width()`) that a
+derive of the trait would have written; their arguments are still
+checked. The trait's own functions called through it, and a type that
+does not name the derive, are reported as before.
+
+**Why.** R12's finding under "Metaprogramming": one `E0607` mistake made
+three errors and more, one at each `@derive` and each use.
+
+**In stage 1.** `typeck.program` (`Program.refused_derives`,
+`refused_derived`), `typeck.collect` (the trait's `E0607`),
+`typeck.instances` (a `@derive` of a refused template), `typeck.call`
+(`refused_derive_of`, at `E0351` and `E0304`).
+
+**What it changes.** The case `cases/findings16/derive_refused_once.sisu`
+(its `.diag`).
+
+- Differs: `compiler/stage1/cases/findings16/derive_refused_once.sisu`: ids, human, doc, doc-output
+
+**Decision 842**, for docs/architecture.md:
+
+842. A derive template that `E0607` refuses is the one error: a `@derive`
+     of its trait is not `E0243`, and the functions and methods the derive
+     would have written are not `E0351` or `E0304` where a type that
+     derives it uses them. Stage 1 decides it (RULES.md, R144).
+
+## R145. `reflect.functions_of(module)`: a module's functions with their names, attributes and signatures (decision 843)
+
+**The rule.** `reflect.functions_of(m)`, where `m` is a module of the
+program that the code imports by name (`from web import routes`), is the
+list of `m`'s functions in the order they are declared: its `def`s but
+its `comptime def`s and generic functions, and of a module other than the
+one the code is in, its public ones. Each is a descriptor with `name`,
+`params` (each with `name`, `index`, `mode` and `ty`, as a method's) and
+`ret` (its result type, a type compile time knows by its name), and the
+queries `reflect.name_of(f)`, `reflect.doc_of(f)` (its `##` comment) and
+`reflect.attributes_of(f)` (its attributes, each with `name` and `args`,
+the text of each argument as written, quotes and all); in run-time code
+the descriptor is the function itself, written `routes.NAME`, so
+`f()` calls it and a list of them is a table of function values. A type
+given to `functions_of` is `E0609` ("takes a module the code imports"),
+as is a query of a type given a function. A module of the standard
+library is none (`E0609` at the argument, R143).
+
+```sisu
+let table: list[(str, () -> String)] = [
+    (a.args[0], f)
+    for f in reflect.functions_of(routes)
+    for a in reflect.attributes_of(f)
+    if a.name == "route"
+]
+```
+
+The table above is unfolded at compile time into the list of pairs it
+holds; written `comptime [...]`, the list would be evaluated by the
+compile-time evaluator after lowering, which keeps no function values,
+so it is written without `comptime`.
+
+**Why.** R14's finding under "Metaprogramming", and 08's table ("a
+framework collects routed functions by scanning its own package at
+compile time"): `reflect.attributes_of` reached a struct's, an enum's and
+an error set's attributes only, and nothing listed a module's functions.
+
+**In stage 1.** `typeck.template` (`Kind.Module`, `MethodShape.attrs` and
+`doc`, `Value.Function`, `functions_of`, a function's fields and
+queries, its literal), `typeck.instances` (`named_module`, beside
+`named_type` and `named_trait` for an instance and a value).
+
+**What it changes.** The package case
+`cases/packages/routed_functions.pkg` (its `.out`), whose SIR and
+diagnostics differ from stage 0's, which has no `functions_of`, and the
+case `cases/findings16/functions_of_refused.sisu` (its `.diag`).
+
+- Differs: `compiler/stage1/cases/packages/routed_functions.pkg`: types, sir, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings16/functions_of_refused.sisu`: ids, human, doc, doc-output
+
+**Decision 843**, for docs/architecture.md:
+
+843. `reflect.functions_of(m)` gives the functions of a module the code
+     imports, each with its name, parameters, result type, attributes and
+     comment, and stands in run-time code for the function itself, so a
+     framework collects its routed functions into a table at compile time
+     (08). Stage 1 decides it (RULES.md, R145).
+
+## R146. `try_collect` after a `map`, and a borrowed index by a `str` through `dict.index_str` (decision 844)
+
+**The rule.**
+
+- The prelude has, appended at its end, `try_collect` of
+  `Map[I, Result[T, E]]`, the result of an iterator's `map` to results:
+  `xs.iter().map(f).try_collect()` is the values or the first error, after
+  which no item is taken, where R137 had the chain collect first. 11 puts
+  `try_collect` on the iterators; `Map` is the adapter of a chain that can
+  fail, and the other adapters' items (`Filter`'s, `Take`'s) are their
+  inner iterator's `Item`, which an inherent impl cannot ask to be a
+  `Result` (a bound on an associated type's value is not in the language),
+  so they collect first or map with `try_map` as before.
+- A `dict[String, V]`'s index by a `str` that is only read through a
+  reference, a method's receiver (`d[k].byte_len()`, `d[k].to_uppercase()`)
+  or a `str` view of it, lowers to `dict.index_str` and reads the value
+  through its reference, as R134's read of the index does: no `String` is
+  made for the key, and a missing key's panic stands at the index. An
+  index changed through it (`d[k].n += 1`, a `mut` receiver) keeps the
+  `String` form.
+
+`Map.try_collect` has a doc example, which `sisu test --std` runs (with
+stage 1 as the front end; the Rust front end finds no `try_collect` on
+`Map` and names no item for the impl, so its own run keeps 191).
+
+**Why.** R137's and R134's open items.
+
+**In stage 1.** `std/prelude.sisu` (appended), `lower.exprs`
+(`borrow_operand`, a shared `Borrow`, `str_operand` and
+`Coercion.StrView` read their place by `read_place_of`).
+
+**What it changes.** The conformance suite's `std/doc_examples.select`
+is blessed again (one doc example more, 192 where there were 191). The
+cases `cases/findings16/try_collect_adapter.sisu`
+(its `.out`) and `cases/findings16/str_index_borrowed.sisu` (its `.out`,
+`.err` and `.status`), and the SIR of a program that borrows a `dict`'s
+index by a `str` (none of `sir.list`'s, whose outputs are the same file
+for file).
+
+- Differs: `compiler/stage1/cases/findings16/str_index_borrowed.sisu`: ids, human, doc, doc-output
+
+**Decision 844**, for docs/architecture.md:
+
+844. `Map[I, Result[T, E]]` has `try_collect`, appended to the prelude,
+     and a `dict`'s index by a `str` that is only borrowed (a method's
+     receiver, a `str` view) reads through `dict.index_str` with no
+     `String` made. Stage 1 decides it (RULES.md, R146).
+
+## R147. The resolver's and the trait check's cost: the derives found among their trait's impls (decision 845)
+
+**The rule.** Nothing a command prints changes; the SIR of every program
+is the same file for file. What changes is how the resolver does its
+work:
+
+- `check_derives` looks for a derived impl among the impls of its trait
+  (`Program.impls_of`), in their order, where it walked every impl of the
+  program for each derive and compared two module names' prefixes first:
+  quadratic in the base's 508 impls.
+- `resolve_impl` pushes an impl onto its trait's list in place, where it
+  copied the list and put it back for each impl.
+- `check_unsafe_method` reads the two methods' `unsafe` flags through
+  references, and copies their signatures only for the lint's message.
+
+**Measured** (callgrind, natively, a cached `sisu1 check --format=ids` of
+a two-line program, the cache written under valgrind first; this round's
+stage 1 before and after these changes, built by the same stage 0): the
+command 3.392 G instructions before, 3.341 G after (−1.5 %); the trait
+check (`check_traits`) 150.2 M before, 102.1 M after (−32 %), its
+`check_derives` 87.7 M before and 62.7 M after (the rest of it the
+supertraits' `implements`, 46 M); resolving (`resolve_pending`) 383.7 M
+before and 381.1 M after. What remains of resolving is spread over the
+base's 1,323 functions' and 622 impls' signatures (155,000 instructions a
+function: its types resolved at 37,000 each through `def_as_type` and
+`Types.adt`'s key, `unfolds`' walk of its body, 27 M in all, and the copy
+of its `FnInfo` for `Def.set_kind`), with no site above 3 % of the
+command; the parse of the base's modules (the parser 0.70 G, the lexer
+0.53 G, the AST builder 0.54 G, and 0.21 G for the cached text of the
+derived impls) and the copies and drops of the values throughout are
+the rest. R125's figures, 0.37 G and 0.15 G, were this round's 0.38 G and 0.15 G
+before the change; the base grew by the prelude's appended helpers.
+
+**Why.** Item 5 of the round (R125 and R135): what dominated after the
+lexer and the parser.
+
+**In stage 1.** `typeck.instances` (`check_derives`), `typeck.collect`
+(`resolve_impl`, `check_unsafe_method`).
+
+**What it changes.** No output of the corpus.
+
+**Decision 845**, for docs/architecture.md:
+
+845. Stage 1's trait check finds a derived impl among its trait's impls
+     and the resolver keeps each trait's impls in place: a two-line
+     `check` takes 3.34 G instructions where it took 3.39 G, the trait
+     check 0.10 G where it took 0.15 G, resolving 0.38 G as before, its
+     cost spread over the base's signatures. Stage 1 decides it
+     (RULES.md, R147).
+
+## R148. Hangul composition in names; `@derive(Into, From)` decided against (decision 846)
+
+**The rule.**
+
+- A name is read in NFC with Hangul composed and decomposed by rule
+  (UAX 15, "Hangul"), which R136's tables leave out because Python's
+  `unicodedata` gives syllables no decomposition: a leading consonant and
+  a vowel jamo are the LV syllable, and an LV syllable and a trailing
+  consonant the LVT one, so a name written `ᄀ` `ᅡ` `ᆨ` and the name `각`
+  are one name. The arithmetic is twenty lines of `text.names`
+  (`hangul_composition`, `decompose_into`); the generated tables are
+  unchanged.
+- **Decided against**, with the text that rules it out: `@derive(Into,
+  From)`. 03 ("Type aliases and newtypes") names it as what makes a
+  one-field struct cheaper, and 11 lists `Into`/`From` among the
+  prelude's traits, but neither says what the derive writes, and the
+  prelude has `Into[T]` only, documented as "a conversion that loses
+  nothing", each sized integer into every wider one: there is no `From`
+  to derive, and a newtype's `into` its field is not that trait's promise
+  either way (a `Port` refined to `1..65535` into `int` loses nothing; an
+  `int` into a `Port` can). A derive's template is `comptime def
+  derive(T: type) -> impl Trait for T` (08, decision 251, `E0607`), with
+  no argument of the trait, while `Into[F]` needs `F`, the field's type,
+  computed at compile time; that is a new template form. With `@delegate`
+  (which forwards a trait to the field) and the constructor and `.value`
+  of the field, a newtype has both directions now. It waits for the
+  owner to define `From` and what the two derives write.
+
+**Why.** The manual's narrowed "missing beside 03" item, and R136's
+Hangul left out.
+
+**In stage 1.** `text.names` (`hangul_composition`, `decompose_into`, the
+test "a name is read in NFC").
+
+**What it changes.** The case `cases/findings16/hangul_names.sisu` (its
+`.out`), whose two spellings stage 0 reads as two names.
+
+- Differs: `compiler/stage1/cases/findings16/hangul_names.sisu`: ast, names, ids, human, doc, doc-output
+
+**Decision 846**, for docs/architecture.md:
+
+846. A name's NFC composes Hangul jamo into syllables by UAX 15's rule;
+     `@derive(Into, From)` waits for the owner, since the prelude has no
+     `From`, `Into` promises a lossless conversion, and a derive's
+     template takes no trait argument. Stage 1 decides it (RULES.md,
+     R148).
+
+## R149. The merge's differences: the conformance suite's `unsafe/cstring` (decision 847)
+
+**The rule.** Nothing a command prints changes. Stage 0's fourteenth round
+added the conformance case `unsafe/cstring.sisu` (decision 823), a
+`CString` handed to C's `strlen`, whose `unsafe` code and `extern` block
+stage 1 checks as R2 to R9 have it and the Rust front end does not, so its
+AST, names, SIR, diagnostics and pages differ from stage 0's as those of
+the other cases of `unsafe/` do (R4 lists them). What it does is what its
+`.out` says, from stage 1's SIR (`behaviour`).
+
+**Why.** The merge of stage 0's fourteenth round brought the case, and
+`check.sh` found what it changes.
+
+**What it changes.** Nothing.
+
+- Differs: `compiler/conformance/cases/unsafe/cstring.sisu`: ast, names, sir, ids, human, doc, doc-output
+
+**Decision 847**, for docs/architecture.md:
+
+847. The conformance suite's `unsafe/cstring` differs from stage 0's front
+     end as the other cases of `unsafe/` do (R4). Stage 1 decides it
+     (RULES.md, R149).

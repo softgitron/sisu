@@ -161,7 +161,7 @@ sisu run -- batch OUT LIST                  # tokens, trees and ASTs for every f
 sisu run -- ast-batch OUT LIST              # the AST of every file LIST names, into OUT
 sisu run -- names-batch OUT LIST            # the name diagnostics of every file LIST names, into OUT
 sisu run -- types-batch OUT LIST            # the type diagnostics of every file LIST names, into OUT
-sisu run -- sir [--partial] [--contracts=LEVEL] [--tests [--format=ids]] [--locked] [--features NAMES] [--no-default-features] [PATH]  # what `sisu sir [--contracts=LEVEL] [--tests] [PATH]` prints: the whole program's SIR (with `--tests`, its warnings on standard error, R47)
+sisu run -- sir [--partial] [--contracts=LEVEL] [--tests [--format=ids] [--modules]] [--locked] [--features NAMES] [--no-default-features] [PATH]  # what `sisu sir [--contracts=LEVEL] [--tests] [PATH]` prints: the whole program's SIR (with `--tests`, its warnings on standard error, R47)
 sisu run -- ownership FILE                  # the ownership checker's diagnostics of `sisu check --format=ids FILE`
 sisu run -- sir-batch OUT LIST [--contracts=LEVEL | --tests]  # both, for every file LIST names, into OUT (with a level or `--tests`, the SIR alone)
 sisu run -- check [--format=ids] [--locked] [--features NAMES] [--no-default-features] [PATH]  # what `sisu check` prints: every diagnostic
@@ -2587,6 +2587,59 @@ prelude in 373 M instructions, the debug profile in 988 M).
 Stage 1's version stays 0.11.0: the driver relies on no new form. The new
 cases are in `cases/findings15/`.
 
+### The sixteenth round: a test's module, reflection's errors and functions, `try_collect` after `map`, the resolver's cost, Hangul
+
+This round took decision 828's request (each test's module in `sir
+--tests`), the manual's fourteenth round's findings of reflection and of
+`E0607`, the framework of 08's reflection, R137's and R134's open items,
+the resolver's and the trait check's cost, and the derives of 03 with
+R136's Hangul. RULES.md has the rules (R142 to R149, decisions 840 to
+847) and their decision texts:
+
+- **A test's module** (R142): `sir --tests --modules` writes ` in
+  "FILE"` on each `test` and `bench` line after its function, so that the
+  driver can run one module's tests (`sisu test src/MODULE.sisu`); `sir
+  --tests` alone is unchanged, since stage 0's SIR reader drops a `test`
+  line's tags after a word it does not know. Stage 1's version is 0.12.0.
+- **Reflection's errors** (R143): `reflect.name_of(int)` and the other
+  scalar types in a function that takes no type parameter, and one
+  `E0609` at a query's argument that compile time knows no type by, where
+  it was `E0900` with an `E0200` in the instance's module.
+- **`E0607` alone** (R144): no `E0243` at its `@derive`s, no `E0351` or
+  `E0304` where the functions it would have written are used.
+- **The framework's reflection** (R145): `reflect.functions_of(module)`,
+  each function with its name, parameters, result type, attributes and
+  comment, written in run-time code as the function itself, so a table of
+  routed functions is made at compile time.
+- **`try_collect` and the borrowed index** (R146): `Map[I, Result[T,
+  E]].try_collect`, appended to the prelude, and a `dict`'s index by a
+  `str` that is only borrowed read through `dict.index_str`.
+- **The resolver's cost** (R147): a derived impl found among its trait's
+  impls, and each trait's impls kept in place. A cached two-line `check`
+  takes 3.34 G instructions where it took 3.39 G, the trait check 0.10 G
+  where it took 0.15 G; resolving stays 0.38 G, spread over the base's
+  signatures with no site above 3 % of the command.
+- **Hangul, and `@derive(Into, From)`** (R148): jamo compose into
+  syllables in a name's NFC; the derives decided against, since the
+  prelude has no `From`, `Into` promises a lossless conversion and a
+  derive's template takes no trait argument.
+- **The merge's differences** (R149): the conformance suite's
+  `unsafe/cstring`, which differs from the Rust front end as the other
+  cases of `unsafe/` do.
+
+Decided against: `@derive(Into, From)` (R148), and a `test` line's
+module written by default (R142). Open: `try_collect` after `Filter`,
+`Take` and the other adapters, whose items are their inner iterator's
+(R146); a compile-time table of function values written `comptime
+[...]`, which the evaluator after lowering cannot keep (R145); an
+attribute's arguments as values rather than their text (R145); the
+resolver's spread cost (R147, below, "Starting up"); and the driver's
+reading of ` in "FILE"` and the reader's (stage 0's, R142).
+
+Stage 1's version is 0.12.0: the driver may rely on `sir --tests
+--modules` (RULES.md, R142). The new cases are in `cases/findings16/`,
+`cases/packages/test_modules.pkg` and `cases/packages/routed_functions.pkg`.
+
 ## Module layout
 
 | Module | Lines | What | Stage 0 original |
@@ -3359,6 +3412,23 @@ builder's 0.54 G, and the code of the debug profile, in which `sisu1` and
 instructions, 2.6 times fewer, which makes the profile the larger lever
 (the driver's and `sisu1`'s to choose).
 
+The sixteenth round profiled resolving and the trait check of the same
+cached `check` (3.392 G instructions, the base 3.03 G of it): resolving
+the base's declarations (`resolve_pending`) took 0.38 G and checking its
+traits (`check_traits`) 0.15 G. The trait check looked for each derive's
+impl among every impl of the program, comparing two module names'
+prefixes for each, quadratic in the base's 508 impls (`check_derives`,
+88 M), and `resolve_impl` copied each trait's list of impls to add one.
+R147 searches the trait's own impls and adds in place: the trait check
+takes 0.10 G, the command 3.34 G. Resolving itself has no site above 3 %
+of the command: 1,323 functions and 622 impls at about 155,000
+instructions each, their types resolved at about 37,000 each
+(`def_as_type` and the interning key of `Types.adt`), the walk of each
+body for compile-time code (`unfolds`, 27 M) and the copies of `FnInfo`
+in `Def.set_kind`, so what would cut it is a base whose resolved
+declarations are kept rather than made again, the cache R125 decided
+against.
+
 ### The compile-time evaluator
 
 A sieve of 20,000 numbers at compile time took 90 s, a round ago: the
@@ -3530,7 +3600,13 @@ Every part of 18's stage table for stage 1 exists, `sisu doc` the last
     fifteenth round took NFC names and the lints (R136), the planned helpers
     (R137), names despite a parse error (R138) and a public type's `Debug`
     (R140, every type keeps it); decided against for the round: `sisu
-    doc`'s values (R139). The tenth round took a variant's
+    doc`'s values (R139). The sixteenth round took reflection on the
+    scalar types and its one error (R143), `E0607` alone (R144),
+    `reflect.functions_of` (R145), `try_collect` after `map` and the
+    borrowed index by a `str` (R146) and Hangul names (R148); decided
+    against: `@derive(Into, From)` (R148); left: `try_collect` after the
+    other adapters and a compile-time table of function values written
+    `comptime`. The tenth round took a variant's
     fields' `ty` and the program's kinds in a derive (R96), `E0203`'s and
     `E0271`'s similar names (R97), `E0310` of sized integers (R98),
     `E0812`'s copy (R99), `E0005`'s invisible characters (R100), most of
