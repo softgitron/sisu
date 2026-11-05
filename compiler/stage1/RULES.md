@@ -7636,3 +7636,339 @@ the other cases of `unsafe/` do (R4 lists them). What it does is what its
 847. The conformance suite's `unsafe/cstring` differs from stage 0's front
      end as the other cases of `unsafe/` do (R4). Stage 1 decides it
      (RULES.md, R149).
+
+## R150. Stage 1's own builds in the release profile: `sisu1` and `check.sh` run the driver's (decision 880)
+
+**The rule.** Nothing a command prints changes. `sisu1` no longer builds
+`target/stage1/sisu1` itself: it runs the executable the driver builds
+for every `sisu` command (decision 860: `sisu build --native --release
+--contracts=all`, with the stamp `target/stage1/profile`), and when the
+stamp does not name what is there (the profile, the executable's size and
+its time), or a source of stage 1 is newer, it asks the driver for it by
+starting a command that stage 1 serves (`sisu tokens` of a small std
+file, with `SISU_STAGE1` and `SISU_FRONT_END` unset), under the driver's
+lock. `SISU_STAGE1_PROFILE=debug` asks for the debug build, as the driver
+takes it. So `sisu1` and `sisu` no longer build over each other's
+executable: the driver rebuilt the debug build `sisu1` made at its next
+command, and `sisu1` rebuilt the driver's whenever a source changed.
+
+`check.sh --native` runs that build, copied into its work directory, for
+every batch and the class `build`, and builds stage1-A, the debug build
+of the fixed point (`sisu build --native`), once for the classes `self`
+and `fixed`, which the fixed point is about (`stage1-B` is built from
+stage1-A's SIR, and must be stage1-A byte for byte). Without `--native`,
+`--self` builds stage1-A as before.
+
+**Measured** (`check.sh --native --names --types --sir`, the round's
+stage 1 before and after this change, on four cores that the other
+agents' builds and conformance runs kept at a load of 10 to 30, so a
+class's time varies by a third from run to run): the whole run took
+1990 s before and 955 s after, `types` 10.6 s and 4.9 s, `corpus-types`
+12.0 s and 5.8 s, `sir` 32.6 s and 17.2 s, `corpus-sir` 36.3 s and
+19.1 s, `corpus-check` 23.7 s and 17.3 s, `doc` 58.2 s and 30.3 s,
+`fmt-joined` 18.5 s and 10.3 s, `build` 34.2 s and 10.4 s, and `self-sir`,
+the debug build in both, 75.0 s and 66.9 s; but the load fell between the
+two runs (the behaviour class's runs, stage 0's, took 61.8 s and 29.9 s),
+so most of that halving is the machine's. One build against the other on
+the same, quieter machine (a load of 2 to 3, each batch run in turn,
+twice): `types-batch` of `types.list`'s 549 programs takes 7.3 s and
+7.9 s in the debug build, 5.2 s and 5.9 s in the release one (about a
+quarter less), and `sir-batch` of `sir.list`'s 549 22.9 s and 23.9 s
+against 17.5 s and 18.6 s (about a fifth less). The executable is 28.7 MB
+where the debug one is 48.8 MB, and the driver builds it in its own time
+(decision 860: 43 s where the debug one took 39 s), once a change of
+stage 1's sources, rather than `check.sh` building one of its own; the
+run builds stage1-A once, as it did.
+
+**Why.** Decision 860's notes for stage 1, and R135's open item: the
+release profile parses the prelude in 373 M instructions where the debug
+one takes 988 M.
+
+**In stage 1.** `sisu1` (`stamped`, the driver's build), `check.sh`
+(`stage1_exe` the driver's build, `debug_stage1` and `stage1_debug` for
+`self` and `fixed`).
+
+**What it changes.** No output of the corpus; the batches' times.
+
+**Decision 880**, for docs/architecture.md:
+
+880. `stage1/sisu1` runs the stage 1 the driver builds (decision 860, the
+     release profile with every contract checked, the stamp
+     `target/stage1/profile`) and asks the driver to build it, so the two
+     no longer build over each other's executable; `check.sh --native`
+     runs it for its batches, and the classes `self` and `fixed` a debug
+     stage1-A of their own. Stage 1 decides it (RULES.md, R150).
+
+## R151. Compile-time tables of function values, and an attribute's arguments as values (decision 881)
+
+**The rule.**
+
+- A compile-time value that is a function, `routes.index` of
+  `reflect.functions_of` (R145) or a function named in compile-time
+  code, is kept in the result of a `comptime` expression evaluated after
+  lowering as the constant that names it (`const fn
+  sauna_web.routes.index`), so a table of routed functions written
+  `comptime [...]` is evaluated by the compiler, where it was beyond the
+  slice ("a failed `comptime` expression in a file of the standard
+  library or one the compiler wrote"). A closure is still not kept; its
+  error is the evaluator's, at the expression.
+- `reflect.attributes_of`'s attributes give their arguments as values
+  (08: "attributes are data"): `a.args` holds each argument's value, a
+  string literal without interpolation its text without its quotes and
+  escapes (`@route("/x")` gives `/x`), an integer literal its number,
+  `True` and `False` booleans, and any other argument, a name among them
+  (`@index(hour)`), the text written; a keyword argument gives the value
+  after its `=`, and the new `a.keys` gives each argument's keyword, empty
+  for one given by position (`@index(hour, unique=True)`: `args` is
+  `[hour, True]`, `keys` is `["", "unique"]`). Where R145 gave the text as
+  written, quotes and all, a framework compares a route with `p == path`
+  rather than `"\"{path}\""`.
+- An element of `a.args` or `a.keys` at a compile-time index,
+  `a.args[0]`, is that value in the unfolded code, whatever the types of
+  the others (`["bookings", 3][0]` was written before, which no list
+  type holds).
+
+**Why.** The sixteenth round's two open items (R145) and 08's framework
+example; the manual's reference (R14, "Attributes are data") shows the
+text form, which this changes.
+
+**In stage 1.** `interp` (`scalar`: `Value.Fn` is `Const.Fn`),
+`typeck.template` (`argument_value`, `argument_key`, `keyword_split`,
+the fields `args` and `keys` of an attribute, `is_static` and `eval` of
+an index of them).
+
+**What it changes.** The conformance suite's `reflect/queries.out` is
+blessed again (`route[/boxes, GET]` where it printed
+`route["/boxes", method="GET"]`); `cases/packages/routed_functions.pkg`
+compares a route by its text (its `.out` is the same); the new package
+case `cases/packages/routed_comptime.pkg` (its `.out`), the table written
+`comptime [...]`; and `cases/findings17/attribute_values.sisu` (its
+`.out`).
+
+- Differs: `compiler/conformance/cases/reflect/queries.sisu`: sir, contracts-off, contracts-preconditions
+- Differs: `compiler/stage1/cases/packages/routed_comptime.pkg`: types, sir, ids, human, doc, doc-output
+- Differs: `compiler/stage1/cases/findings17/attribute_values.sisu`: ids, human, doc, doc-output
+
+**Decision 881**, for docs/architecture.md:
+
+881. A `comptime` expression's function values are kept as the constants
+     that name them, so a table of routed functions is evaluated at
+     compile time, and an attribute's arguments are values (a string
+     literal's text, an integer, a boolean, a name's text) with their
+     keywords in `keys`, where they were their source text. Stage 1
+     decides it (RULES.md, R151).
+
+## R152. A missing key's panic stands at the index, whatever the key (decision 882)
+
+**The rule.** A `dict`'s entry read by value inside a larger expression
+(an argument, an operand, an interpolation) is read into a temporary at
+the index's own position, so that a missing key's panic names the index
+(`at main (missing_key.sisu:4:11)`), as R134's `dict.index_str` does for
+a `str` key of `String` keys, where it named the start of the statement
+that read it (`4:5`). A read that is the whole value of its statement
+(`let x = d[k]`) was at the index already; a borrowed entry and an entry
+changed through it are unchanged. What a program prints is the same; its
+SIR reads such an entry one statement earlier.
+
+**Why.** The manual's fifteenth round ("A missing key of a `dict[String,
+V]` indexed by a string literal ... panics at the start of its
+statement"), whose example is a `dict` of `str` keys: one place for both,
+the index.
+
+**In stage 1.** `lower.exprs` (`operand`, `keyed`).
+
+**What it changes.** The conformance suite's `run/missing_key.err` is
+blessed again (`4:11`); the case `cases/findings17/missing_key_literal.sisu`
+(its `.out`, `.err` and `.status`); and the SIR of every program that reads
+a `dict`'s entry inside an expression, listed below.
+
+- Differs: `compiler/conformance/cases/run/collections.sisu`: sir
+- Differs: `compiler/conformance/cases/run/list_keys.sisu`: sir
+- Differs: `compiler/conformance/cases/run/missing_key.sisu`: sir
+- Differs: `compiler/conformance/cases/std/modules.sisu`: sir
+- Differs: `compiler/conformance/cases/wrong/dict_changed_while_iterating.sisu`: sir
+- Differs: `compiler/stage1/cases/comptime/evaluator.sisu`: sir
+- Differs: `compiler/stage1/cases/comptime/shared.sisu`: sir
+
+**Decision 882**, for docs/architecture.md:
+
+882. A `dict`'s entry read inside an expression is read at the index, so
+     a missing key's panic names the index whether the key is a literal,
+     a `str` or a `String`. Stage 1 decides it (RULES.md, R152).
+
+## R153. The small types of 03: `ptrsize`, `uptrsize`, `Sized`, a list literal as an `Array`, a `Url` literal (decision 883)
+
+**The rule.** Each is additive, appended where its item lives:
+
+- `ptrsize` and `uptrsize`, the prelude's aliases of `i64` and `u64` (03:
+  "`isize`/`usize` equivalents exist as `ptrsize`/`uptrsize` for FFI
+  only"), the width of an address on every target Sisu builds for now.
+- `Sized`, a marker trait of the prelude, which every type implements but
+  a `dyn` one (03: "`dyn Display` is a type, unsized, used behind `ref` or
+  `Box`"); since `E0395` keeps a `dyn` out of every other place, a bound
+  `T: Sized` is met by every type argument, and an `unsafe impl` of it
+  is `E0986` ("is never asserted"), as one of `Copy` or `Escapable` is.
+- A list literal of `N` elements where an `Array[T, N]` is expected is
+  that array (03, "Type inference": `let xs: Array[int, 3] = [1, 2, 3]`):
+  lowered as `Array.filled` of the first element and the others stored in
+  their places, as `a[i] = v` stores them. A literal of another length
+  stays `E0300` (expected `Array[int, 3]`, found `list[int]`), as does
+  `[]`.
+- `FromLiteral[str] for Url` in `std.net` (11's `FromLiteral` for `Path`
+  and `Url`): a string literal where a `Url` is expected is
+  `Url.parse` of it; one that is not of the form stops the program with
+  `expect`'s panic, naming the form.
+
+**Why.** The manual's narrowed "missing beside 03" item (R2, chapters 5,
+6 and 24).
+
+**In stage 1.** `std/prelude.sisu` and `std/net.sisu` (appended),
+`typeck.program` (`implements`: `Sized`), `typeck.collect` (`wk.sized`),
+`typeck.expr` (the list literal), `lower.exprs` (`into` of the literal).
+
+**What it changes.** The case `cases/findings17/small_types.sisu` (its
+`.out`), which stage 0 refuses, and the conformance suite's
+`std/doc_examples.select`, blessed again: `Url.from_literal`'s doc example
+runs where `std.net`'s examples do, 194 where there were 192.
+
+- Differs: `compiler/stage1/cases/findings17/small_types.sisu`: ids, human, doc, doc-output
+
+**Decision 883**, for docs/architecture.md:
+
+883. The prelude has `ptrsize` and `uptrsize` (`i64` and `u64` on every
+     target now) and the marker trait `Sized`, which every type but a
+     `dyn` one implements; a list literal of `N` elements where an
+     `Array[T, N]` is expected is that array; and `std.net` has
+     `FromLiteral[str] for Url`. Stage 1 decides it (RULES.md, R153).
+
+## R154. `try_collect` after every adapter: decided against, with the spelling that works (decision 884)
+
+**The rule.** Nothing changes. **Decided against**: `try_collect` on
+`Filter`, `Take`, `Skip` and the other adapters whose item is their
+inner iterator's `Item`. The forms tried, and why each fails:
+
+- an inherent impl on `Filter[I]` for an `I` whose `Item` is a
+  `Result[T, E]`: no bound says what an associated type is (03 has
+  `where T: Bound`, never `I.Item == Result[T, E]`);
+- a provided method of `Iterator` with a bound on `Item`, as `sum` has
+  `where Item: Num`, through a trait of results with the value's and the
+  error's types as its associated types (`Item.Value`): the checker
+  resolves no associated type of an associated type (`E0201` "cannot find
+  a type named `I.Item.Value`"), and a trait's associated type given as a
+  `Result`'s parameter in its impl is `E0234` against its declaration, so
+  both are type-system work of their own, and the method would sit in
+  the middle of the prelude, which stays appended;
+- impls for each adapter over each inner iterator (`Filter[Map[I,
+  Result[T, E]]]`, `Take[...]`, ...) cover one depth of chain each and
+  multiply with the adapters.
+
+The spelling that works ends the chain in the `map` that makes the
+results, `xs.iter().filter(p).map(f).try_collect()`, or in `map(r -> r)`
+after the adapter, `xs.iter().map(f).take(2).map(r -> r).try_collect()`,
+which is `Map[I, Result[T, E]]`'s `try_collect` (R146); `try_map` takes
+the function itself.
+
+**Why.** R146's open item.
+
+**What it changes.** The case `cases/findings17/try_collect_spelling.sisu`
+(its `.out`), both spellings.
+
+**Decision 884**, for docs/architecture.md:
+
+884. `try_collect` after an adapter whose item is its inner iterator's is
+     decided against until the type system has a bound on an associated
+     type's value or associated types of associated types; the chain ends
+     in its `map`, or in `map(r -> r)`. Stage 1 decides it (RULES.md,
+     R154).
+
+## R155. Compile-time types: the first step, planned (decision 885)
+
+**The rule.** Nothing changes; this round records the plan. 08 says that
+reflection "exposes types ... as values" and that compile-time code
+"can only produce values and types for use in expressions", never a
+declaration; D-065 puts `@diagnostic_name(f)` after Q-27's type
+construction, and `sisu eval` (08, "Configuration files") renders a
+module's `const` items, which needs no new type but the evaluator over
+the whole module. Today a `comptime def pick(wide: bool) -> type` is
+`E0201` ("cannot find a type named `type`"), its `return i64` `E0350`, and
+`let x: pick(True) = 3` a syntax error (`E0117`), since a type position
+takes a path with its arguments only.
+
+The first step is a type a `comptime` function returns:
+
+1. `type` as the result type of a `comptime def`, whose body the
+   template engine runs, as it runs a derive's (`Value.Type`, with
+   `if`, `match` and the `reflect` queries on its parameters), returning a
+   type a name, a type argument or a `reflect` query gives
+   (`reflect.elem_of(T)`, `i64`);
+2. a type position that is such a call, `comptime pick(True)`, written as
+   a constant argument is (`Array[T, comptime n()]`): the parser's type
+   grammar takes `comptime` and a call (02 has no such form, so the
+   syntax is the owner's to confirm), the resolver evaluates it before the
+   declaration that holds it is collected, and the checker sees the type
+   it names, with an error at the call when it names none;
+3. `@diagnostic_name(f)`, whose `f` is then a `comptime` function from a
+   type to the name its diagnostics use.
+
+The round left it: each of the three is a change of the parser, the
+resolver's order and the template engine at once, larger than a round's
+item, and its syntax waits for the owner.
+
+**Why.** Item 6 of the round.
+
+**What it changes.** Nothing.
+
+**Decision 885**, for docs/architecture.md:
+
+885. Compile-time code that makes types starts with a `comptime def ... ->
+     type` that the template engine runs and a type position written
+     `comptime f(args)`, whose syntax is the owner's; `@diagnostic_name`
+     follows it, and `E0900` stays until then. Stage 1 decides it
+     (RULES.md, R155).
+
+## R156. `Decimal`'s `/` giving a `Ratio`: decided against for the round (decision 886)
+
+**The rule.** Nothing changes. **Decided against**, with the text: 03
+says of `Decimal` that "division yields a `Ratio`", and 11 that it
+returns one, but `std.num`'s `Ratio` holds an `int` numerator and
+denominator, so the quotient of two decimals of more digits than an
+`int` holds has no `Ratio` (`Decimal.to_ratio()` gives `None` there),
+and an `impl Div for Decimal` with `Output = Ratio` would panic where 03
+promises an exact value. It waits for a `Ratio` of `BigInt`s, additive in
+`std.num`; until then `a / b` between `Decimal`s is `E0310` with the note
+`type.decimal-quotient`, which names `a.div(b, places, mode)` and
+`a.to_ratio()` (R108).
+
+**Why.** Item 7 of the round.
+
+**What it changes.** Nothing.
+
+**Decision 886**, for docs/architecture.md:
+
+886. `Decimal`'s `/` giving a `Ratio` waits for a `Ratio` of `BigInt`s,
+     since today's `Ratio` of `int`s cannot hold every quotient 03
+     promises exactly. Stage 1 decides it (RULES.md, R156).
+
+## R157. The merge's differences: the conformance suite's `unsafe/export_by_pointer` (decision 887)
+
+**The rule.** Nothing a command prints changes. Stage 0's fifteenth round
+added the conformance case `unsafe/export_by_pointer.sisu` (decision
+864), a raw pointer to a `@repr(c)` struct handed to the program's own
+export, whose `unsafe` code and `extern` block stage 1 checks as R2 to R9
+have it and the Rust front end does not, so its AST, names, SIR,
+diagnostics and pages differ from stage 0's as those of the other cases
+of `unsafe/` do (R4, R149). What it does is what its `.out` says, from
+stage 1's SIR (`behaviour`).
+
+**Why.** The merge of stage 0's fifteenth round brought the case, and
+`check.sh` found what it changes.
+
+**What it changes.** Nothing.
+
+- Differs: `compiler/conformance/cases/unsafe/export_by_pointer.sisu`: ast, names, sir, ids, human, doc, doc-output
+
+**Decision 887**, for docs/architecture.md:
+
+887. The conformance suite's `unsafe/export_by_pointer` differs from stage
+     0's front end as the other cases of `unsafe/` do (R4). Stage 1
+     decides it (RULES.md, R157).
