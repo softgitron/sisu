@@ -78,8 +78,12 @@ as for literals.
 **Civil time.** `DateTime` is nanoseconds since the epoch in UTC, in an
 `i64` (the years 1678 to 2261); its RFC 3339 parser and its parts in
 UTC (decision 565) are Sisu, its `Display` and `strftime` (a fixed
-subset) are the host's (`format.rs`). *Pay*: the time module of `std`
-replaces them; `Instant` and time zones are its problem.
+subset) are the host's (`format.rs`). `Instant` reads the clock's `now`
+and a `Zone` comes from a table of 52 zones' current rules embedded in
+`std.time` (decision 627). *Pay*: the time module of `std` replaces the
+host's text; a monotonic reading of the host's clock (an operation of
+`ClockOps`, logged and faked); the tz database's history
+(`std.x.tzdata`).
 
 ## Shortcuts in the interpreter
 
@@ -592,14 +596,14 @@ branches of `cli.rs` go with it:
   a plain run are stage 1's, the log holding the SIR that ran, decision
   303.) *Pay*: stage 1 as a library of the tools, or a server of its
   queries the tools ask. **The REPL** (`sisu repl`) and **worksheets**
-  (`sisu ws`) check and lower each program through stage 1's `sir` and
-  `check` when stage 1 says it serves them (`sisu1 0.8.0` and later,
-  decision 563); with `sisu1 0.7.0` they stay the Rust front end's
-  unless `SISU_STAGE1_REPL=1` asks, which the suite's sessions and
-  worksheet pass. *Pay*: nothing but stage 1's version once its round
-  lands, and the Rust branch of `repl.rs` deleted with the front end; each
-  input costs a run of stage 1 (about 0.5 s; `:why` one for each value it
-  shows), which its base kept between commands would cut; and a file the
+  (`sisu ws`) build each program with stage 1's `sir --repl` and `sir
+  --worksheet` (`sisu1 0.8.0` and later, decisions 563 and 620), and
+  `:why` reads the inputs' trees from its `parse --tree` (decision 621);
+  with an older stage 1 they stay the Rust front end's. *Pay*: the Rust
+  branch of `repl.rs` (its wrapping, its instrumenting and its parse of
+  an input) deleted with the front end; each input costs a run of stage 1
+  (about 0.35 s; `:why` one for each value it shows), which its base kept
+  between commands would cut; and a file the
   program embeds (`embed("path")`) is looked for beside the program's
   copy, since stage 1 reads it from its file's directory, where the Rust
   front end reads it from the working directory: stage 1 told the
@@ -625,10 +629,9 @@ branches of `cli.rs` go with it:
 - **`sisu run --defer-borrow`** (the counterexample mode: the ownership
   checker's findings beside the monitored run), **`sisu check --diary`**
   (the diagnostics as data, with their bytes), **`sisu explain-borrow`**
-  (stage 1 has the checker but not `explain.rs`), **`sisu audit`** and
-  **`sisu parse --shape`** (what formatting keeps, which stage 1's
-  formatter computes but no command prints). *Pay*: each as a command of
-  stage 1, or its output in a form the driver reads.
+  (stage 1 has the checker but not `explain.rs`) and **`sisu audit`**.
+  (`sisu parse --shape` is stage 1's, decision 622.) *Pay*: each as a
+  command of stage 1, or its output in a form the driver reads.
 - **Building stage 1** the first time and after a source of it changed:
   `compiler/target/stage1/sisu1` is built by the Rust front end (`sisu
   build --native` in `compiler/stage1`), so stage 1's own sources must stay
@@ -695,7 +698,7 @@ What the driver does around stage 1, because of what its commands are:
 ## Stage 2: what the native backend leaves out
 
 The native debug backend (architecture.md, "Stage 2") compiles every
-program the conformance suite runs (`conformance/native.list`, 280
+program the conformance suite runs (`conformance/native.list`, 282
 cases, 51 of which run their tests natively too, decisions 460 and 540),
 with the
 debug profile and the release one (decision 232), and every one of those
@@ -739,12 +742,13 @@ What the unsafe round (decisions 301 and 302) leaves natively:
   call of `sisu_rt_intrinsic` with a descriptor, and a value whose layout
   in raw memory is not its value's is converted part by part at each
   access. The debug profile's checks take a lock and a lookup in an
-  ordered map of each block's values (two million reads and writes in
-  2.3 s, 0.03 s in the release profile, 7.1 s in the interpreter).
-  *Pay* for the checks: a shadow of a block's slots as an array beside it
-  and no lock outside `std.par`'s workers (a tenth of the time); the
-  reads and writes of the debug profile that the facts prove (decision
-  270) inline, as the release profile's. *Pay*: the other widths and structs inline, and one layout for
+  ordered map of each block's values, the block found last remembered and
+  a plain value written over its own type left as it was (decision 626:
+  two million reads and writes in 0.52 s where they took 1.15 s, 0.010 s
+  in the release profile). *Pay* for the checks: a shadow of a block's
+  slots as an array beside it and no lock outside `std.par`'s workers (a
+  tenth of the time); the reads and writes of the debug profile that the
+  facts prove (decision 270) inline, as the release profile's. *Pay*: the other widths and structs inline, and one layout for
   values and raw memory in the backend in Sisu (each part at its own
   width), when it replaces decision 188's.
 - **A pointer to a place, and a reference from a pointer, of a type whose
@@ -958,7 +962,7 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   without optimisations, and there is no AArch64, Mach-O or COFF. *Pay*:
   D-087's steps.
 - **The runtime in Sisu has its first pieces** (decisions 335, 336, 350
-  to 353, 358, 383, 385, 422, 423, 464, 469, 506, 542 and 562): `compiler/rt` holds `==` of two
+  to 353, 358, 383, 385, 422, 423, 464, 469, 506, 542, 562 and 625): `compiler/rt` holds `==` of two
   texts' bytes, the structural operations by a value's parts (equality,
   order, the hash of decision 256, a `Shared` followed to its value,
   `.copy()`, the drop, the count of a
@@ -974,10 +978,13 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   (the next item of every state but a generator's and a receiver's, the
   iterator of an `Iterable[T]` argument, collecting what is left, the
   drop), a table's header the runtime in Rust reads only through its
-  exports (decision 506). Still `sisu-rt`'s: the decoding of each
-  intrinsic's call (four words and two slices, which move with the
-  dispatch they feed) and the other checks, whose panics its messages
-  name (a slice's bounds, a missing key), a generator's items and a receiver's
+  exports (decision 506), and the decoding and dispatch of the 35
+  intrinsics of lists, dicts and sets, their descriptors read by Sisu
+  code and their panics, drops and views asked of the runtime in Rust
+  (decision 625). Still `sisu-rt`'s: the decoding of every other
+  intrinsic's call (four words and two slices) and the other checks,
+  whose panics its messages name (a slice's bounds, a missing key), a
+  list's and a set's iterators, `in` as an operator, a generator's items and a receiver's
   values (the iterators themselves are made by the runtime in Sisu's
   exports, decision 542),
   the scheduler with its tasks, channels and mutexes, capabilities and the
@@ -995,11 +1002,9 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   type to hash it and again to compare it, 1.024 times the instructions of
   the runtime in Rust's index on stage 2's lowering of `wordcount`
   (decision 423). *Pay*: the pieces in D-086's order, each deleting its
-  Rust counterpart: the dispatch of a list's and a table's intrinsics by
-  Sisu code next, which reads the descriptor, their panics raised through
-  entries of the runtime in Rust, since a message is the catalog's (about
-  three days), then the
-  scheduler's queues; text constants for the runtime's code (its data in
+  Rust counterpart: the scheduler's queues next (the dispatch of the
+  other intrinsics follows its objects, each family's descriptor read by
+  Sisu code as decision 625 reads a collection's); text constants for the runtime's code (its data in
   the library mode); smaller frames for the walk (the arguments of a call
   in registers, or the backend's own frames for the runtime's code), after
   which a glue's drop can stay in Sisu; a key hashed and compared by code
@@ -1034,7 +1039,7 @@ Nothing here switches the default.
   were made to by their addresses, with the interpreter's panics
   (decisions 543, 544, 560 and 561), the release profile nothing. Of the
   suite's runnable cases (a run, or a `sisu test` run, to compare,
-  decision 460), 280 run natively (`native.list`, 51 of them their tests
+  decision 460), 282 run natively (`native.list`, 51 of them their tests
   too), 17 of them `unsafe/` refusals marked `checked`; the 2 left out are
   `reference_behind` and `foreign_unknown`. *Need*, in the order of their
   worth: a pointer's provenance, the sound form of `R0135` and `R0139`
@@ -1050,7 +1055,9 @@ Nothing here switches the default.
   debug build that runs raw memory as fast as the release profile's where
   the facts prove an access (the checks of a loop's pointer hoisted,
   decision 270's facts on offsets, and a shadow of a block's slots as an
-  array beside it without the lock: a week). The memory of other C
+  array beside it without the lock: a week, of which decision 626's
+  remembered block and plain overwrite took the first half of the
+  time). The memory of other C
   functions than the emulated six is foreign and unchecked, and
   `foreign_unknown` stays the interpreter's: native code calls the C
   function. A program whose packages declare `unsafe` (its lockfile has
@@ -1239,8 +1246,8 @@ From Phase 4 (18, "Phase 4: traits, generics, std in Sisu"):
   graphemes and normalisation forms (Unicode's tables), `std.math`'s
   elementary functions (Q-23), pipes, signals and the working directory
   in `std.process` and `std.env` (the host contract runs a program
-  without input and has no current directory), time zones in
-  `std.time`, decoding an enum in `std.json` (reflection makes no
+  without input and has no current directory), the tz database's
+  history in `std.time` (decision 627 embeds current rules), decoding an enum in `std.json` (reflection makes no
   variant), and a `BigInt` literal beyond `int` (03: checked at compile
   time; a literal reaches `FromLiteral[int]` only). The frozen Rust front
   end reads a float literal of a `Decimal` from its shortest digits, so one

@@ -1,0 +1,44 @@
+# `Instant` and time zones (11, `std.time`; decision 627; the manual's
+# finding from guide G9): an instant read from the test clock and the time
+# elapsed since; a zone of the table by its tz name, its offset and its
+# abbreviation on either side of each change of the year, in Helsinki, New
+# York and Sydney, whose daylight time spans the new year, and Kathmandu's
+# offset of 5:45; a fixed zone; and a name the table does not know.
+
+from std.time import Instant, Zone
+
+def main():
+    let clock = Clock.frozen_at(DateTime.parse("2026-01-01T00:00:00Z").expect("a time"))
+    let start = Instant.now(clock)
+    clock.advance(Duration.millis(1500))
+    print("{start.elapsed(clock)} {start}")
+    let h = Zone.named("Europe/Helsinki").expect("a zone")
+    for text in [
+        "2026-03-29T00:59:59Z",
+        "2026-03-29T01:00:00Z",
+        "2026-10-25T00:59:59Z",
+        "2026-10-25T01:00:00Z",
+    ]:
+        let t = DateTime.parse(text).expect("a time")
+        print("{text} {h.format(t)} {h.abbreviation_at(t)}")
+    let ny = Zone.named("America/New_York").expect("a zone")
+    let syd = Zone.named("Australia/Sydney").expect("a zone")
+    let kat = Zone.named("Asia/Kathmandu").expect("a zone")
+    for text in [
+        "2026-03-08T06:59:59Z",
+        "2026-03-08T07:00:00Z",
+        "2026-11-01T05:59:59Z",
+        "2026-11-01T06:00:00Z",
+        "2026-04-04T15:59:59Z",
+        "2026-04-04T16:00:00Z",
+        "2026-10-03T15:59:59Z",
+        "2026-10-03T16:00:00Z",
+    ]:
+        let t = DateTime.parse(text).expect("a time")
+        print(
+            "{text} NY {ny.format(t)} {ny.abbreviation_at(t)} SYD {syd.format(t)} {syd.abbreviation_at(t)} KTM {kat.format(t)}"
+        )
+    print(
+        "{Zone.fixed(-12600).format(DateTime.epoch())} {Zone.utc().format(DateTime.epoch())} {Zone.named("Mars"):?}"
+    )
+    print("{Zone.named("UTC").expect("utc").name}")

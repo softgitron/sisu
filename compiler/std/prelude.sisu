@@ -1137,13 +1137,15 @@ error NetError:
     Revoked
     Other(message: String)
 
-## The errors of std.x.http's exchanges (11): the connection failed
-## (refused, not allowed, closed early, or the wait for it cancelled); the
-## other end did not speak HTTP/1.1 as the module reads it; a `get` was
-## answered with a status that is not 2xx. In the prelude, so a program
-## that imports `http` names it bare.
+## The errors of std.x.http's exchanges (11): the connection failed, with
+## the network's error (refused, not allowed, closed early, revoked); the
+## wait for it was cancelled or its task panicked; the other end did not
+## speak HTTP/1.1 as the module reads it; a `get` was answered with a
+## status that is not 2xx. In the prelude, so a program that imports `http`
+## names it bare.
 error HttpError:
-    Network(message: String)
+    Network(cause: NetError)
+    Interrupted(cause: TaskError)
     Malformed(detail: String)
     Status(code: int)
 
@@ -4358,3 +4360,562 @@ impl[T0: Default, T1: Default, T2: Default] Default for (T0, T1, T2):
 impl[T0: Default, T1: Default, T2: Default, T3: Default] Default for (T0, T1, T2, T3):
     pure def default() -> (T0, T1, T2, T3):
         return (T0.default(), T1.default(), T2.default(), T3.default())
+
+# ------------------------------------------------------------------ the bits of the integers
+
+# The bit methods of the sized integers and `int` (decision 622): written
+# in Sisu with the shift amounts of the integer's own type, which both
+# front ends type the same (stage 1 keeps a sized type under a shift by an
+# `int`, RULES.md R80, the frozen Rust front end widens it). A signed
+# type's are its two's complement's, through `to_bits` and `from_bits`.
+
+impl u8:
+    ## The number of bits that are 1.
+    pure def count_ones(self) -> int:
+        var x = self
+        var n = 0
+        while x != 0u8:
+            x = x & (x - 1u8)
+            n += 1
+        return n
+    ## The number of bits that are 0, of the 8.
+    pure def count_zeros(self) -> int:
+        return 8 - self.count_ones()
+    ## The number of 0 bits above the highest 1, 8 for 0.
+    pure def leading_zeros(self) -> int:
+        var x = self
+        var n = 8
+        while x != 0u8:
+            x = x >> 1u8
+            n -= 1
+        return n
+    ## The number of 0 bits below the lowest 1, 8 for 0.
+    pure def trailing_zeros(self) -> int:
+        if self == 0u8:
+            return 8
+        var x = self
+        var n = 0
+        while (x & 1u8) == 0u8:
+            x = x >> 1u8
+            n += 1
+        return n
+    ## The bits moved `n` places towards the highest, those that leave
+    ## at the top coming back at the bottom; `n` is taken modulo 8, a
+    ## negative one rotating the other way.
+    pure def rotate_left(self, n: int) -> u8:
+        var k = n % 8
+        if k < 0:
+            k += 8
+        if k == 0:
+            return self
+        let a = k.truncate_to[u8]()
+        return (self << a) | (self >> (8u8 - a))
+    ## The bits moved `n` places towards the lowest, as `rotate_left(-n)`.
+    pure def rotate_right(self, n: int) -> u8:
+        return self.rotate_left(8 - n % 8)
+    ## The bytes in the opposite order: a `u8` is one byte, itself.
+    pure def swap_bytes(self) -> u8:
+        return self
+    ## The value with its bytes in big-endian order in memory: the
+    ## bytes swapped, since every target of stage 0 is little-endian.
+    pure def to_be(self) -> u8:
+        return self.swap_bytes()
+    ## The value with its bytes in little-endian order in memory: itself
+    ## on every target of stage 0.
+    pure def to_le(self) -> u8:
+        return self
+
+impl u16:
+    ## The number of bits that are 1.
+    pure def count_ones(self) -> int:
+        var x = self
+        var n = 0
+        while x != 0u16:
+            x = x & (x - 1u16)
+            n += 1
+        return n
+    ## The number of bits that are 0, of the 16.
+    pure def count_zeros(self) -> int:
+        return 16 - self.count_ones()
+    ## The number of 0 bits above the highest 1, 16 for 0.
+    pure def leading_zeros(self) -> int:
+        var x = self
+        var n = 16
+        while x != 0u16:
+            x = x >> 1u16
+            n -= 1
+        return n
+    ## The number of 0 bits below the lowest 1, 16 for 0.
+    pure def trailing_zeros(self) -> int:
+        if self == 0u16:
+            return 16
+        var x = self
+        var n = 0
+        while (x & 1u16) == 0u16:
+            x = x >> 1u16
+            n += 1
+        return n
+    ## The bits moved `n` places towards the highest, those that leave
+    ## at the top coming back at the bottom; `n` is taken modulo 16, a
+    ## negative one rotating the other way.
+    pure def rotate_left(self, n: int) -> u16:
+        var k = n % 16
+        if k < 0:
+            k += 16
+        if k == 0:
+            return self
+        let a = k.truncate_to[u16]()
+        return (self << a) | (self >> (16u16 - a))
+    ## The bits moved `n` places towards the lowest, as `rotate_left(-n)`.
+    pure def rotate_right(self, n: int) -> u16:
+        return self.rotate_left(16 - n % 16)
+    ## The bytes in the opposite order.
+    pure def swap_bytes(self) -> u16:
+        var x = self
+        var out = 0u16
+        for _ in range(2):
+            out = (out << 8u16) | (x & 255u16)
+            x = x >> 8u16
+        return out
+    ## The value with its bytes in big-endian order in memory: the
+    ## bytes swapped, since every target of stage 0 is little-endian.
+    pure def to_be(self) -> u16:
+        return self.swap_bytes()
+    ## The value with its bytes in little-endian order in memory: itself
+    ## on every target of stage 0.
+    pure def to_le(self) -> u16:
+        return self
+
+impl u32:
+    ## The number of bits that are 1.
+    ##
+    ## ```
+    ## assert 0b1011u32.count_ones() == 3
+    ## assert 0u32.count_ones() == 0
+    ## ```
+    pure def count_ones(self) -> int:
+        var x = self
+        var n = 0
+        while x != 0u32:
+            x = x & (x - 1u32)
+            n += 1
+        return n
+    ## The number of bits that are 0, of the 32.
+    pure def count_zeros(self) -> int:
+        return 32 - self.count_ones()
+    ## The number of 0 bits above the highest 1, 32 for 0.
+    ##
+    ## ```
+    ## assert 1u32.leading_zeros() == 31
+    ## assert 0u32.leading_zeros() == 32
+    ## ```
+    pure def leading_zeros(self) -> int:
+        var x = self
+        var n = 32
+        while x != 0u32:
+            x = x >> 1u32
+            n -= 1
+        return n
+    ## The number of 0 bits below the lowest 1, 32 for 0.
+    ##
+    ## ```
+    ## assert 8u32.trailing_zeros() == 3
+    ## assert 0u32.trailing_zeros() == 32
+    ## ```
+    pure def trailing_zeros(self) -> int:
+        if self == 0u32:
+            return 32
+        var x = self
+        var n = 0
+        while (x & 1u32) == 0u32:
+            x = x >> 1u32
+            n += 1
+        return n
+    ## The bits moved `n` places towards the highest, those that leave
+    ## at the top coming back at the bottom; `n` is taken modulo 32, a
+    ## negative one rotating the other way.
+    ##
+    ## ```
+    ## assert 0x80000001u32.rotate_left(4) == 0x18u32
+    ## assert 1u32.rotate_left(-1) == 0x80000000u32
+    ## ```
+    pure def rotate_left(self, n: int) -> u32:
+        var k = n % 32
+        if k < 0:
+            k += 32
+        if k == 0:
+            return self
+        let a = k.truncate_to[u32]()
+        return (self << a) | (self >> (32u32 - a))
+    ## The bits moved `n` places towards the lowest, as `rotate_left(-n)`.
+    ##
+    ## ```
+    ## assert 0x18u32.rotate_right(4) == 0x80000001u32
+    ## ```
+    pure def rotate_right(self, n: int) -> u32:
+        return self.rotate_left(32 - n % 32)
+    ## The bytes in the opposite order.
+    ##
+    ## ```
+    ## assert 0x12345678u32.swap_bytes() == 0x78563412u32
+    ## ```
+    pure def swap_bytes(self) -> u32:
+        var x = self
+        var out = 0u32
+        for _ in range(4):
+            out = (out << 8u32) | (x & 255u32)
+            x = x >> 8u32
+        return out
+    ## The value with its bytes in big-endian order in memory: the
+    ## bytes swapped, since every target of stage 0 is little-endian.
+    ##
+    ## ```
+    ## assert 1u32.to_be() == 0x01000000u32
+    ## ```
+    pure def to_be(self) -> u32:
+        return self.swap_bytes()
+    ## The value with its bytes in little-endian order in memory: itself
+    ## on every target of stage 0.
+    pure def to_le(self) -> u32:
+        return self
+
+impl u64:
+    ## The number of bits that are 1.
+    pure def count_ones(self) -> int:
+        var x = self
+        var n = 0
+        while x != 0u64:
+            x = x & (x - 1u64)
+            n += 1
+        return n
+    ## The number of bits that are 0, of the 64.
+    pure def count_zeros(self) -> int:
+        return 64 - self.count_ones()
+    ## The number of 0 bits above the highest 1, 64 for 0.
+    pure def leading_zeros(self) -> int:
+        var x = self
+        var n = 64
+        while x != 0u64:
+            x = x >> 1u64
+            n -= 1
+        return n
+    ## The number of 0 bits below the lowest 1, 64 for 0.
+    pure def trailing_zeros(self) -> int:
+        if self == 0u64:
+            return 64
+        var x = self
+        var n = 0
+        while (x & 1u64) == 0u64:
+            x = x >> 1u64
+            n += 1
+        return n
+    ## The bits moved `n` places towards the highest, those that leave
+    ## at the top coming back at the bottom; `n` is taken modulo 64, a
+    ## negative one rotating the other way.
+    pure def rotate_left(self, n: int) -> u64:
+        var k = n % 64
+        if k < 0:
+            k += 64
+        if k == 0:
+            return self
+        let a = k.truncate_to[u64]()
+        return (self << a) | (self >> (64u64 - a))
+    ## The bits moved `n` places towards the lowest, as `rotate_left(-n)`.
+    pure def rotate_right(self, n: int) -> u64:
+        return self.rotate_left(64 - n % 64)
+    ## The bytes in the opposite order.
+    pure def swap_bytes(self) -> u64:
+        var x = self
+        var out = 0u64
+        for _ in range(8):
+            out = (out << 8u64) | (x & 255u64)
+            x = x >> 8u64
+        return out
+    ## The value with its bytes in big-endian order in memory: the
+    ## bytes swapped, since every target of stage 0 is little-endian.
+    pure def to_be(self) -> u64:
+        return self.swap_bytes()
+    ## The value with its bytes in little-endian order in memory: itself
+    ## on every target of stage 0.
+    pure def to_le(self) -> u64:
+        return self
+
+impl u128:
+    ## The number of bits that are 1.
+    pure def count_ones(self) -> int:
+        var x = self
+        var n = 0
+        while x != 0u128:
+            x = x & (x - 1u128)
+            n += 1
+        return n
+    ## The number of bits that are 0, of the 128.
+    pure def count_zeros(self) -> int:
+        return 128 - self.count_ones()
+    ## The number of 0 bits above the highest 1, 128 for 0.
+    pure def leading_zeros(self) -> int:
+        var x = self
+        var n = 128
+        while x != 0u128:
+            x = x >> 1u128
+            n -= 1
+        return n
+    ## The number of 0 bits below the lowest 1, 128 for 0.
+    pure def trailing_zeros(self) -> int:
+        if self == 0u128:
+            return 128
+        var x = self
+        var n = 0
+        while (x & 1u128) == 0u128:
+            x = x >> 1u128
+            n += 1
+        return n
+    ## The bits moved `n` places towards the highest, those that leave
+    ## at the top coming back at the bottom; `n` is taken modulo 128, a
+    ## negative one rotating the other way.
+    pure def rotate_left(self, n: int) -> u128:
+        var k = n % 128
+        if k < 0:
+            k += 128
+        if k == 0:
+            return self
+        let a = k.truncate_to[u128]()
+        return (self << a) | (self >> (128u128 - a))
+    ## The bits moved `n` places towards the lowest, as `rotate_left(-n)`.
+    pure def rotate_right(self, n: int) -> u128:
+        return self.rotate_left(128 - n % 128)
+    ## The bytes in the opposite order.
+    pure def swap_bytes(self) -> u128:
+        var x = self
+        var out = 0u128
+        for _ in range(16):
+            out = (out << 8u128) | (x & 255u128)
+            x = x >> 8u128
+        return out
+    ## The value with its bytes in big-endian order in memory: the
+    ## bytes swapped, since every target of stage 0 is little-endian.
+    pure def to_be(self) -> u128:
+        return self.swap_bytes()
+    ## The value with its bytes in little-endian order in memory: itself
+    ## on every target of stage 0.
+    pure def to_le(self) -> u128:
+        return self
+
+impl i8:
+    ## The value's 8 bits, two's complement, as a `u8`.
+    ##
+    ## ```
+    ## assert (-1i8).to_bits() == 255u8
+    ## assert i8.from_bits(128u8) == -128i8
+    ## ```
+    pure def to_bits(self) -> u8:
+        return self.to_int().truncate_to[u8]()
+    ## The `i8` whose two's complement bits are `bits`.
+    pure def from_bits(bits: u8) -> i8:
+        return bits.to_int().truncate_to[i8]()
+    ## The number of bits that are 1, of the two's complement.
+    ##
+    ## ```
+    ## assert (-1i8).count_ones() == 8
+    ## ```
+    pure def count_ones(self) -> int:
+        return self.to_bits().count_ones()
+    ## The number of bits that are 0, of the two's complement.
+    pure def count_zeros(self) -> int:
+        return self.to_bits().count_zeros()
+    ## The number of 0 bits above the highest 1: 0 for a negative value.
+    pure def leading_zeros(self) -> int:
+        return self.to_bits().leading_zeros()
+    ## The number of 0 bits below the lowest 1, 8 for 0.
+    pure def trailing_zeros(self) -> int:
+        return self.to_bits().trailing_zeros()
+    ## The two's complement bits rotated as `u8.rotate_left` rotates them.
+    pure def rotate_left(self, n: int) -> i8:
+        return i8.from_bits(self.to_bits().rotate_left(n))
+    ## The two's complement bits rotated as `u8.rotate_right` rotates them.
+    pure def rotate_right(self, n: int) -> i8:
+        return i8.from_bits(self.to_bits().rotate_right(n))
+    ## The bytes of the two's complement in the opposite order.
+    pure def swap_bytes(self) -> i8:
+        return i8.from_bits(self.to_bits().swap_bytes())
+    ## The value with its bytes in big-endian order in memory.
+    pure def to_be(self) -> i8:
+        return i8.from_bits(self.to_bits().to_be())
+    ## The value with its bytes in little-endian order in memory: itself.
+    pure def to_le(self) -> i8:
+        return i8.from_bits(self.to_bits().to_le())
+
+impl i16:
+    ## The value's 16 bits, two's complement, as a `u16`.
+    pure def to_bits(self) -> u16:
+        return self.to_int().truncate_to[u16]()
+    ## The `i16` whose two's complement bits are `bits`.
+    pure def from_bits(bits: u16) -> i16:
+        return bits.to_int().truncate_to[i16]()
+    ## The number of bits that are 1, of the two's complement.
+    pure def count_ones(self) -> int:
+        return self.to_bits().count_ones()
+    ## The number of bits that are 0, of the two's complement.
+    pure def count_zeros(self) -> int:
+        return self.to_bits().count_zeros()
+    ## The number of 0 bits above the highest 1: 0 for a negative value.
+    pure def leading_zeros(self) -> int:
+        return self.to_bits().leading_zeros()
+    ## The number of 0 bits below the lowest 1, 16 for 0.
+    pure def trailing_zeros(self) -> int:
+        return self.to_bits().trailing_zeros()
+    ## The two's complement bits rotated as `u16.rotate_left` rotates them.
+    pure def rotate_left(self, n: int) -> i16:
+        return i16.from_bits(self.to_bits().rotate_left(n))
+    ## The two's complement bits rotated as `u16.rotate_right` rotates them.
+    pure def rotate_right(self, n: int) -> i16:
+        return i16.from_bits(self.to_bits().rotate_right(n))
+    ## The bytes of the two's complement in the opposite order.
+    pure def swap_bytes(self) -> i16:
+        return i16.from_bits(self.to_bits().swap_bytes())
+    ## The value with its bytes in big-endian order in memory.
+    pure def to_be(self) -> i16:
+        return i16.from_bits(self.to_bits().to_be())
+    ## The value with its bytes in little-endian order in memory: itself.
+    pure def to_le(self) -> i16:
+        return i16.from_bits(self.to_bits().to_le())
+
+impl i32:
+    ## The value's 32 bits, two's complement, as a `u32`.
+    pure def to_bits(self) -> u32:
+        return self.to_int().truncate_to[u32]()
+    ## The `i32` whose two's complement bits are `bits`.
+    pure def from_bits(bits: u32) -> i32:
+        return bits.to_int().truncate_to[i32]()
+    ## The number of bits that are 1, of the two's complement.
+    pure def count_ones(self) -> int:
+        return self.to_bits().count_ones()
+    ## The number of bits that are 0, of the two's complement.
+    pure def count_zeros(self) -> int:
+        return self.to_bits().count_zeros()
+    ## The number of 0 bits above the highest 1: 0 for a negative value.
+    pure def leading_zeros(self) -> int:
+        return self.to_bits().leading_zeros()
+    ## The number of 0 bits below the lowest 1, 32 for 0.
+    pure def trailing_zeros(self) -> int:
+        return self.to_bits().trailing_zeros()
+    ## The two's complement bits rotated as `u32.rotate_left` rotates them.
+    pure def rotate_left(self, n: int) -> i32:
+        return i32.from_bits(self.to_bits().rotate_left(n))
+    ## The two's complement bits rotated as `u32.rotate_right` rotates them.
+    pure def rotate_right(self, n: int) -> i32:
+        return i32.from_bits(self.to_bits().rotate_right(n))
+    ## The bytes of the two's complement in the opposite order.
+    pure def swap_bytes(self) -> i32:
+        return i32.from_bits(self.to_bits().swap_bytes())
+    ## The value with its bytes in big-endian order in memory.
+    pure def to_be(self) -> i32:
+        return i32.from_bits(self.to_bits().to_be())
+    ## The value with its bytes in little-endian order in memory: itself.
+    pure def to_le(self) -> i32:
+        return i32.from_bits(self.to_bits().to_le())
+
+impl int:
+    ## The value's 64 bits, two's complement, as a `u64`: `-1.to_bits()`
+    ## is `u64`'s largest.
+    ##
+    ## ```
+    ## assert (-1).to_bits() == 18446744073709551615u64
+    ## assert int.from_bits((-5).to_bits()) == -5
+    ## ```
+    pure def to_bits(self) -> u64:
+        return self.truncate_to[u64]()
+    ## The `int` whose two's complement bits are `bits`.
+    pure def from_bits(bits: u64) -> int:
+        match bits.to_int():
+            case Some(n):
+                return n
+            case None:
+                return (bits - 9223372036854775808u64).to_int().expect("below 2**63")
+                    + (-9223372036854775807 - 1)
+    ## The number of bits that are 1, of the two's complement.
+    ##
+    ## ```
+    ## assert (-1).count_ones() == 64
+    ## ```
+    pure def count_ones(self) -> int:
+        return self.to_bits().count_ones()
+    ## The number of bits that are 0, of the two's complement.
+    pure def count_zeros(self) -> int:
+        return self.to_bits().count_zeros()
+    ## The number of 0 bits above the highest 1: 0 for a negative value.
+    pure def leading_zeros(self) -> int:
+        return self.to_bits().leading_zeros()
+    ## The number of 0 bits below the lowest 1, 64 for 0.
+    pure def trailing_zeros(self) -> int:
+        return self.to_bits().trailing_zeros()
+    ## The two's complement bits rotated as `u64.rotate_left` rotates them.
+    pure def rotate_left(self, n: int) -> int:
+        return int.from_bits(self.to_bits().rotate_left(n))
+    ## The two's complement bits rotated as `u64.rotate_right` rotates them.
+    pure def rotate_right(self, n: int) -> int:
+        return int.from_bits(self.to_bits().rotate_right(n))
+    ## The bytes of the two's complement in the opposite order.
+    pure def swap_bytes(self) -> int:
+        return int.from_bits(self.to_bits().swap_bytes())
+    ## The value with its bytes in big-endian order in memory.
+    pure def to_be(self) -> int:
+        return int.from_bits(self.to_bits().to_be())
+    ## The value with its bytes in little-endian order in memory: itself.
+    pure def to_le(self) -> int:
+        return int.from_bits(self.to_bits().to_le())
+
+impl i128:
+    ## The value's 128 bits, two's complement, as a `u128`.
+    pure def to_bits(self) -> u128:
+        if self < 0i128:
+            return ~(-(self + 1i128)).to_bits()
+        var out = 0u128
+        var y = self
+        var shift = 0u128
+        while y != 0i128:
+            let part = (y % 4294967296i128).to_int().expect("32 bits")
+            out = out | (part.truncate_to[u128]() << shift)
+            y = y // 4294967296i128
+            shift = shift + 32u128
+        return out
+    ## The `i128` whose two's complement bits are `bits`.
+    pure def from_bits(bits: u128) -> i128:
+        if bits.leading_zeros() == 0:
+            return -i128.from_bits(~bits) - 1i128
+        var out = 0i128
+        var y = bits
+        var shift = 0i128
+        while y != 0u128:
+            let part: i128 = (y & 4294967295u128).to_int().expect("32 bits")
+            out = out | (part << shift)
+            y = y >> 32u128
+            shift = shift + 32i128
+        return out
+    ## The number of bits that are 1, of the two's complement.
+    pure def count_ones(self) -> int:
+        return self.to_bits().count_ones()
+    ## The number of bits that are 0, of the two's complement.
+    pure def count_zeros(self) -> int:
+        return self.to_bits().count_zeros()
+    ## The number of 0 bits above the highest 1: 0 for a negative value.
+    pure def leading_zeros(self) -> int:
+        return self.to_bits().leading_zeros()
+    ## The number of 0 bits below the lowest 1, 128 for 0.
+    pure def trailing_zeros(self) -> int:
+        return self.to_bits().trailing_zeros()
+    ## The two's complement bits rotated as `u128.rotate_left` rotates them.
+    pure def rotate_left(self, n: int) -> i128:
+        return i128.from_bits(self.to_bits().rotate_left(n))
+    ## The two's complement bits rotated as `u128.rotate_right` rotates them.
+    pure def rotate_right(self, n: int) -> i128:
+        return i128.from_bits(self.to_bits().rotate_right(n))
+    ## The bytes of the two's complement in the opposite order.
+    pure def swap_bytes(self) -> i128:
+        return i128.from_bits(self.to_bits().swap_bytes())
+    ## The value with its bytes in big-endian order in memory.
+    pure def to_be(self) -> i128:
+        return i128.from_bits(self.to_bits().to_be())
+    ## The value with its bytes in little-endian order in memory: itself.
+    pure def to_le(self) -> i128:
+        return i128.from_bits(self.to_bits().to_le())

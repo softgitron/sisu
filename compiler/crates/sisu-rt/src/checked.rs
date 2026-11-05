@@ -27,6 +27,7 @@
 use crate::abi::Kind;
 use crate::rt::{self, ty};
 use sisu_diag::msg;
+use std::cell::Cell;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
@@ -104,6 +105,10 @@ struct Shadow {
     /// they were first seen in, the oldest first.
     places: BTreeMap<u64, Place>,
     place_order: VecDeque<u64>,
+    /// The block [`find`] found last, its address and size, which the next
+    /// access most often falls in again (decision 626): forgotten when a
+    /// block's record goes.
+    last: Cell<(u64, u64)>,
 }
 
 static SHADOW: Mutex<Shadow> = Mutex::new(Shadow {
@@ -111,6 +116,7 @@ static SHADOW: Mutex<Shadow> = Mutex::new(Shadow {
     released: VecDeque::new(),
     places: BTreeMap::new(),
     place_order: VecDeque::new(),
+    last: Cell::new((0, 0)),
 });
 
 /// How many places the model remembers before it forgets the oldest.
@@ -217,10 +223,21 @@ fn op_params(op: &str, obligation: &str) -> Vec<(&'static str, String)> {
     vec![("op", format!("ptr.{op}")), ("obligation", obligation.to_string())]
 }
 
-/// The block an address points into or at the end of, and the offset.
+/// The block an address points into or at the end of, and the offset. An
+/// address inside the block found last is that block's without a lookup;
+/// one at its end may be the start of the next block, which the lookup
+/// prefers.
 fn find(s: &Shadow, p: u64) -> Option<(u64, u64)> {
-    let (&base, b) = s.blocks.range(..=p).next_back()?;
-    (p - base <= b.size).then_some((base, p - base))
+    let (b, n) = s.last.get();
+    if p >= b && p - b < n {
+        return Some((b, p - b));
+    }
+    let (&base, block) = s.blocks.range(..=p).next_back()?;
+    if p - base > block.size {
+        return None;
+    }
+    s.last.set((base, block.size));
+    Some((base, p - base))
 }
 
 /// `Global.acquire` gave out the block at `base`.
@@ -229,6 +246,7 @@ pub(crate) fn acquired(base: *mut u8, size: u64, align: u64) {
         return;
     }
     shadow(|s| {
+        s.last.set((0, 0));
         s.blocks.insert(
             base as u64,
             Block { origin: Origin::Global, size, align, live: true, exposed: false, items: BTreeMap::new() },
@@ -306,6 +324,7 @@ fn let_out(p: *mut u8, layout: Option<(i64, i64)>) -> Result<bool, Refused> {
             && let Some(old) = s.released.pop_front()
             && let Some(b) = s.blocks.remove(&old)
         {
+            s.last.set((0, 0));
             freed = Some((old, b.origin));
         }
         Ok(freed)
@@ -356,6 +375,7 @@ pub(crate) fn let_go() {
             })
             .collect();
         s.blocks.clear();
+        s.last.set((0, 0));
         s.released.clear();
         s.places.clear();
         s.place_order.clear();
@@ -853,6 +873,15 @@ pub(crate) fn write(p: u64, t: u32, present: bool, op: &str) -> Result<(), Refus
     shadow(|s| {
         let Some((base, off)) = access(s, p, l.size, l.align, t, op, "writable")? else { return Ok(()) };
         let Some(block) = s.blocks.get_mut(&base) else { rt::internal("a block of `Global` that went") };
+        // A plain value written over one of its type leaves the record as
+        // it was (decision 626): the commonest write, a loop's.
+        if present
+            && l.size > 0
+            && matches!(block.items.get(&off), Some(Item::Value(held)) if *held == t)
+            && !rt::needs_drop(t)
+        {
+            return Ok(());
+        }
         clear(block, off, l.size, op, None)?;
         if present && l.size > 0 {
             block.items.insert(off, Item::Value(t));
@@ -1025,6 +1054,7 @@ extern "C" fn sisu_rt_c_malloc(n: u64) -> *mut u8 {
     let p = unsafe { libc::malloc(n as usize) } as *mut u8;
     if on() && !p.is_null() {
         shadow(|s| {
+            s.last.set((0, 0));
             s.blocks.insert(
                 p as u64,
                 Block {
@@ -1074,6 +1104,7 @@ unsafe extern "C" fn sisu_rt_c_getenv(name: *const libc::c_char) -> *const libc:
         // SAFETY: `getenv` gives a C string.
         let len = unsafe { libc::strlen(v) } as u64 + 1;
         shadow(|s| {
+            s.last.set((0, 0));
             s.blocks.insert(
                 v as u64,
                 Block {

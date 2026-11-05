@@ -1501,9 +1501,10 @@ fn from_lir(
 /// front end than its output: `run --watch` (the front end again at each
 /// save), `run --defer-borrow` and `test --defer-borrow` (the ownership
 /// checker's findings beside the run), `check --diary` (the diagnostics as
-/// data) and `parse --shape`. `run --record` is stage 1's, its log holding the SIR
-/// that `sisu replay` runs (decision 303). A file of SIR needs no front end
-/// at all.
+/// data). `run --record` is stage 1's, its log holding the SIR that `sisu
+/// replay` runs (decision 303), and so is `parse --shape`, which refuses
+/// what stage 1's `fmt` refuses (decision 621). A file of SIR needs no
+/// front end at all.
 fn stage1_serves(cmd: &str, p: &Parsed<'_>) -> bool {
     let value = |k: &str| p.values.iter().any(|(v, _)| *v == k);
     match cmd {
@@ -1528,7 +1529,7 @@ fn stage1_serves(cmd: &str, p: &Parsed<'_>) -> bool {
                 && !value("--from-sir")
                 && !value("--from-lir")
         }
-        "parse" => !p.flags.contains(&"--shape"),
+        "parse" => true,
         _ => false,
     }
 }

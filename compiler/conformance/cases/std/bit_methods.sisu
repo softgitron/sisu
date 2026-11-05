@@ -1,0 +1,47 @@
+# The sized integers' bit methods (decision 622; the manual's finding from
+# chapter 24): the bits that are 1 and 0, the zeros above the highest 1
+# and below the lowest, rotations by any `int` amount (negative ones and
+# ones beyond the width among them), the bytes swapped and in big-endian
+# order, on each width; a signed type's are its two's complement's.
+
+## CRC-32's table entry for `n`, the checksum the finding reached for.
+def crc_entry(n: u32) -> u32:
+    var c = n
+    for _ in range(8):
+        if c.trailing_zeros() == 0:
+            c = 0xedb88320u32 ^ (c >> 1u32)
+        else:
+            c = c >> 1u32
+    return c
+
+def main():
+    let x = 0x80000001u32
+    print(
+        "u32 {x}: ones {x.count_ones()}, zeros {x.count_zeros()}, leading {x.leading_zeros()}, trailing {x.trailing_zeros()}"
+    )
+    print(
+        "  rotated {x.rotate_left(4)} {x.rotate_right(4)} {x.rotate_left(36)} {x.rotate_left(-4)}, swapped {x.swap_bytes()}, big-endian {x.to_be()}, little {x.to_le()}"
+    )
+    let w = 0xF0u64
+    print(
+        "u64 {w}: {w.count_ones()} {w.leading_zeros()} {w.trailing_zeros()} {w.rotate_left(60)} {w.swap_bytes()}"
+    )
+    print(
+        "u8 {0x81u8.rotate_left(1)} {0u8.leading_zeros()} {0u8.trailing_zeros()} {255u8.count_ones()} {0x12u8.swap_bytes()}"
+    )
+    print("u16 {0x1234u16.swap_bytes()} {1u16.rotate_right(1)} {0x0100u16.leading_zeros()}")
+    let big = 1u128 << 100u128
+    print(
+        "u128 {big.trailing_zeros()} {big.leading_zeros()} {big.rotate_left(28)} {big.swap_bytes().trailing_zeros()}"
+    )
+    print(
+        "int {(-1).count_ones()} {(-1).leading_zeros()} {8.trailing_zeros()} {(-2).rotate_left(1)} {1.rotate_right(1)} {1.swap_bytes()} {(-1).to_bits()} {int.from_bits(9223372036854775808u64)}"
+    )
+    print(
+        "i8 {(-1i8).to_bits()} {i8.from_bits(128u8)} {(-128i8).rotate_left(1)} {(-1i8).leading_zeros()} {64i8.leading_zeros()}"
+    )
+    print("i32 {(-5i32).swap_bytes()} {(-5i32).count_ones()} {i32.from_bits((-7i32).to_bits())}")
+    print(
+        "i128 {(-1i128).count_ones()} {i128.from_bits((-12345i128).to_bits())} {(-1i128).to_bits() == ~0u128} {i128.from_bits(1u128 << 127u128)}"
+    )
+    print("crc32 entries {crc_entry(1u32)} {crc_entry(255u32)}")

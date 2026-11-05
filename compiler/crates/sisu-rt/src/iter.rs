@@ -57,7 +57,6 @@ pub(crate) fn generator(task: u32, item_size: u32) -> *mut IterObj {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Part {
     Keys = 0,
-    Values = 1,
     Items = 2,
 }
 

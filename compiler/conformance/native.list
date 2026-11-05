@@ -213,6 +213,7 @@ sir/drop_flags
 sir/match_lowering
 sir/straight_line
 sir/try_operator
+std/bit_methods
 std/decimal_literals
 std/doc_examples
 std/encoding
@@ -234,6 +235,7 @@ std/search
 std/sort
 std/text_math
 std/time_parts
+std/time_zones
 syntax/comments
 syntax/continuation
 syntax/option_nested

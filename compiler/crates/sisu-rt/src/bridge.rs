@@ -117,36 +117,7 @@ unsafe extern "C" {
         t: *const i64,
     ) -> u8;
     fn sisu_rt_list_grow(ret: *mut u64, l: *const *mut u8, extra: *const i64, size: *const i64) -> u8;
-    fn sisu_rt_list_pop(
-        ret: *mut u64,
-        types: *const *const u64,
-        l: *const *mut u8,
-        e: *const i64,
-        out: *const *mut u8,
-    ) -> u8;
-    fn sisu_rt_list_insert(
-        ret: *mut u64,
-        l: *const *mut u8,
-        k: *const i64,
-        value: *const *mut u8,
-        size: *const i64,
-    ) -> u8;
-    fn sisu_rt_list_remove(
-        ret: *mut u64,
-        l: *const *mut u8,
-        k: *const i64,
-        out: *const *mut u8,
-        size: *const i64,
-    ) -> u8;
-    fn sisu_rt_list_extend(ret: *mut u64, l: *const *mut u8, other: *const *mut u8, size: *const i64) -> u8;
     fn sisu_rt_list_reverse(ret: *mut u64, l: *const *mut u8, size: *const i64) -> u8;
-    fn sisu_rt_list_swap(
-        ret: *mut u64,
-        l: *const *mut u8,
-        i: *const i64,
-        j: *const i64,
-        size: *const i64,
-    ) -> u8;
     fn sisu_rt_list_copies(
         ret: *mut u64,
         types: *const *const u64,
@@ -164,16 +135,14 @@ unsafe extern "C" {
         x: *const *mut u8,
         tx: *const i64,
     ) -> u8;
-    fn sisu_rt_list_join(
-        ret: *mut u64,
-        types: *const *const u64,
-        out: *const *mut u8,
-        l: *const *mut u8,
-        e: *const i64,
-        sep: *const *const u8,
-        n: *const i64,
-    ) -> u8;
     fn sisu_rt_list_sort(ret: *mut u64, types: *const *const u64, l: *const *mut u8, e: *const i64) -> u8;
+    fn sisu_rt_collection(
+        ret: *mut i64,
+        types: *const *const u64,
+        desc: *const *const u32,
+        result: *const *mut u8,
+        args: *const *const *mut u8,
+    ) -> u8;
     fn sisu_rt_table_new(ret: *mut *mut u8, types: *const *const u64, key: *const i64, val: *const i64)
     -> u8;
     fn sisu_rt_table_lookup(
@@ -189,8 +158,6 @@ unsafe extern "C" {
         tb: *const *mut u8,
         k: *const *mut u8,
     ) -> u8;
-    fn sisu_rt_table_remove(ret: *mut u64, tb: *const *mut u8, i: *const i64, out: *const *mut u8) -> u8;
-    fn sisu_rt_table_key_type(ret: *mut i64, tb: *const *mut u8) -> u8;
     fn sisu_rt_table_len(ret: *mut i64, tb: *const *mut u8) -> u8;
     fn sisu_rt_table_key_bytes(ret: *mut i64, tb: *const *mut u8) -> u8;
     fn sisu_rt_table_value_bytes(ret: *mut i64, tb: *const *mut u8) -> u8;
@@ -451,69 +418,6 @@ pub(crate) unsafe fn list_grow(l: *mut u8, extra: u64, size: u32) {
     }
 }
 
-/// The last element of the list at `l`, of type `e`, moved out into the
-/// option at `out`.
-///
-/// # Safety
-/// `l` must hold a list of elements of type `e`, and `out` have room for
-/// an option of one.
-pub(crate) unsafe fn list_pop(l: *mut u8, e: u32, out: *mut u8) {
-    let types = crate::desc::base();
-    let e = i64::from(e);
-    let mut ret = 0u64;
-    // SAFETY: as for [`equal`].
-    if unsafe { sisu_rt_list_pop(&mut ret, &types, &l, &e, &out) } != abi::OK {
-        failed("list's pop");
-    }
-}
-
-/// The element at `value` moved into the list at `l` at index `k`, or the
-/// panic of an index past its end raised, the element left in place: the
-/// status (decision 562).
-///
-/// # Safety
-/// `l` must hold a list of elements of `size` bytes, and `value` one, which
-/// moves in.
-pub(crate) unsafe fn list_insert(l: *mut u8, k: i64, value: *mut u8, size: u32) -> u8 {
-    let size = i64::from(size);
-    let mut ret = 0u64;
-    // SAFETY: as for [`equal`].
-    if unsafe { sisu_rt_list_insert(&mut ret, &l, &k, &value, &size) } != abi::OK {
-        failed("list's insert");
-    }
-    ret as u8
-}
-
-/// Element `k` of the list at `l` moved out to `out`, or the panic of an
-/// index out of its bounds raised: the status (decision 562).
-///
-/// # Safety
-/// `l` must hold a list of elements of `size` bytes, and `out` have room
-/// for one.
-pub(crate) unsafe fn list_remove(l: *mut u8, k: i64, out: *mut u8, size: u32) -> u8 {
-    let size = i64::from(size);
-    let mut ret = 0u64;
-    // SAFETY: as for [`equal`].
-    if unsafe { sisu_rt_list_remove(&mut ret, &l, &k, &out, &size) } != abi::OK {
-        failed("list's remove");
-    }
-    ret as u8
-}
-
-/// The elements of the list at `other` moved to the end of the one at `l`.
-///
-/// # Safety
-/// `l` and `other` must hold lists of elements of `size` bytes, and
-/// `other` not be used again.
-pub(crate) unsafe fn list_extend(l: *mut u8, other: *mut u8, size: u32) {
-    let size = i64::from(size);
-    let mut ret = 0u64;
-    // SAFETY: as for [`equal`].
-    if unsafe { sisu_rt_list_extend(&mut ret, &l, &other, &size) } != abi::OK {
-        failed("list's extend");
-    }
-}
-
 /// The elements of the list at `l` in the reverse order.
 ///
 /// # Safety
@@ -525,21 +429,6 @@ pub(crate) unsafe fn list_reverse(l: *mut u8, size: u32) {
     if unsafe { sisu_rt_list_reverse(&mut ret, &l, &size) } != abi::OK {
         failed("list's reverse");
     }
-}
-
-/// Elements `i` and `j` of the list at `l` swapped, or the panic of the
-/// first out of its bounds raised: the status (decision 562).
-///
-/// # Safety
-/// `l` must hold a list of elements of `size` bytes.
-pub(crate) unsafe fn list_swap(l: *mut u8, i: i64, j: i64, size: u32) -> u8 {
-    let size = i64::from(size);
-    let mut ret = 0u64;
-    // SAFETY: as for [`equal`].
-    if unsafe { sisu_rt_list_swap(&mut ret, &l, &i, &j, &size) } != abi::OK {
-        failed("list's swap");
-    }
-    ret as u8
 }
 
 /// Writes at `dst` a new list of copies of the elements from `lo` to `hi`
@@ -573,24 +462,6 @@ pub(crate) unsafe fn list_contains(l: *mut u8, e: u32, x: *mut u8, tx: u32) -> b
         failed("list's `in`");
     }
     ret != 0
-}
-
-/// Writes at `dst` a new `String` of each element's `Display` text of the
-/// list at `l`, of type `e`, `sep` between them.
-///
-/// # Safety
-/// `l` must hold a list of elements of type `e`, and `dst` have room for a
-/// `String`.
-pub(crate) unsafe fn list_join(dst: *mut u8, l: *mut u8, e: u32, sep: &[u8]) {
-    let types = crate::desc::base();
-    // SAFETY: `dst` has room for a `String`.
-    unsafe { (dst as *mut mem::Text).write(mem::Text::empty()) };
-    let (e, b, n) = (i64::from(e), sep.as_ptr(), sep.len() as i64);
-    let mut ret = 0u64;
-    // SAFETY: as for [`equal`]; `sep` lives for the call.
-    if unsafe { sisu_rt_list_join(&mut ret, &types, &dst, &l, &e, &b, &n) } != abi::OK {
-        failed("list's join");
-    }
 }
 
 /// Sorts the list at `l`, of type `e`, stably by its elements' order;
@@ -933,23 +804,9 @@ pub(crate) unsafe fn table_push(tb: *mut u8, k: *mut u8) -> u64 {
     ret as u64
 }
 
-/// Moves entry `i` of the table at `tb` out to `out`, key then value.
-///
-/// # Safety
-/// `tb` must be a table of more than `i` entries, and `out` have room for
-/// a key and a value.
-pub(crate) unsafe fn table_remove(tb: *mut u8, i: u64, out: *mut u8) {
-    let i = i as i64;
-    let mut ret = 0u64;
-    // SAFETY: as for [`equal`].
-    if unsafe { sisu_rt_table_remove(&mut ret, &tb, &i, &out) } != abi::OK {
-        failed("table's remove");
-    }
-}
-
 /// The parts of the table at `tb`'s header the runtime in Rust reads,
-/// through the runtime in Sisu's exports (decision 506): its key's type,
-/// its number of entries, and the bytes of a key and of a value.
+/// through the runtime in Sisu's exports (decision 506): its number of
+/// entries, and the bytes of a key and of a value.
 ///
 /// # Safety
 /// `tb` must be the address of a live table.
@@ -958,7 +815,6 @@ pub(crate) unsafe fn table_word(tb: *mut u8, part: TablePart) -> u64 {
     // SAFETY: as for [`equal`].
     let status = unsafe {
         match part {
-            TablePart::KeyType => sisu_rt_table_key_type(&mut ret, &tb),
             TablePart::Len => sisu_rt_table_len(&mut ret, &tb),
             TablePart::KeyBytes => sisu_rt_table_key_bytes(&mut ret, &tb),
             TablePart::ValueBytes => sisu_rt_table_value_bytes(&mut ret, &tb),
@@ -973,7 +829,6 @@ pub(crate) unsafe fn table_word(tb: *mut u8, part: TablePart) -> u64 {
 /// What [`table_word`] reads.
 #[derive(Clone, Copy)]
 pub(crate) enum TablePart {
-    KeyType,
     Len,
     KeyBytes,
     ValueBytes,
@@ -1208,5 +1063,134 @@ extern "C" fn sisu_rt_list_bounds(insert: bool, index: i64, len: i64) -> u8 {
         rt::raise_msg(sisu_diag::msg::PANIC_INSERT_OUT_OF_BOUNDS, &[("index", index), ("len", len)])
     } else {
         rt::raise_msg(sisu_diag::msg::PANIC_INDEX_OUT_OF_BOUNDS, &[("len", len), ("index", index)])
+    }
+}
+
+/// Whether the intrinsic numbered `id` is a list's, a dict's or a set's,
+/// whose call the runtime in Sisu decodes and does (decision 625).
+pub(crate) fn collects(id: u32) -> bool {
+    use abi::Intrinsic as I;
+    matches!(
+        abi::Intrinsic::from_id(id),
+        Some(
+            I::ListNew
+                | I::ListWithCapacity
+                | I::ListPush
+                | I::ListPop
+                | I::ListLast
+                | I::ListFirst
+                | I::ListGet
+                | I::ListIsEmpty
+                | I::ListInsert
+                | I::ListRemove
+                | I::ListExtend
+                | I::ListReverse
+                | I::ListSwap
+                | I::ListClear
+                | I::ListSlice
+                | I::ListSliceMiddle
+                | I::ListContains
+                | I::ListJoin
+                | I::ListSort
+                | I::DictNew
+                | I::DictGet
+                | I::DictContains
+                | I::DictIsEmpty
+                | I::DictInsert
+                | I::DictRemove
+                | I::DictEntry
+                | I::DictKeys
+                | I::DictValues
+                | I::DictItems
+                | I::EntryOrInsert
+                | I::SetNew
+                | I::SetAdd
+                | I::SetRemove
+                | I::SetContains
+                | I::SetIsEmpty
+        )
+    )
+}
+
+/// A call of a list's, a dict's or a set's intrinsic, which the runtime in
+/// Sisu decodes from its descriptor and does (`dispatch.sisu`, decision
+/// 625): its status.
+///
+/// # Safety
+/// As `sisu_rt_intrinsic`, of an intrinsic [`collects`] names.
+pub(crate) unsafe fn collection(desc: *const u32, ret: *mut u8, args: *const *mut u8) -> u8 {
+    let types = crate::desc::base();
+    let mut status = 0i64;
+    // SAFETY: as the caller guarantees.
+    if unsafe { sisu_rt_collection(&mut status, &types, &desc, &ret, &args) } != abi::OK {
+        failed("intrinsic of a collection");
+    }
+    status as u8
+}
+
+/// A slice's bounds below 0 (decision 625): the panic raised, and its
+/// status.
+#[unsafe(no_mangle)]
+extern "C" fn sisu_rt_slice_bounds(start: i64, end: i64) -> u8 {
+    rt::raise_msg(
+        sisu_diag::msg::PANIC_SLICE_BOUNDS,
+        &[("start", start.to_string()), ("end", end.to_string())],
+    )
+}
+
+/// A sort that met two elements without an order: the panic raised, and its
+/// status.
+#[unsafe(no_mangle)]
+extern "C" fn sisu_rt_unordered() -> u8 {
+    rt::raise_msg(sisu_diag::msg::PANIC_UNORDERED, &[])
+}
+
+/// The drop of the value at `p` of type `t`, as the runtime in Rust drops
+/// one (`value::drop_value`): its status.
+///
+/// # Safety
+/// `p` must hold a value of type `t`, dead afterwards.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_drop_value(p: *mut u8, t: i64) -> u8 {
+    // SAFETY: as the caller guarantees.
+    unsafe { crate::value::drop_value(p, t as u32) }
+}
+
+/// A view of the elements `lo` to `hi`, `size` bytes each, of the list at
+/// `l`: a `*rest` binding (decision 214).
+///
+/// # Safety
+/// `l` must hold a list of elements of `size` bytes, and `lo <= hi <= len`.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_list_view(l: *mut u8, size: i64, lo: i64, hi: i64) -> *mut u8 {
+    // SAFETY: as the caller guarantees.
+    unsafe { crate::views::view(l, size as u32, lo as u64, hi as u64) }
+}
+
+#[cfg(test)]
+mod tests {
+    /// The numbers `dispatch.sisu` gives the intrinsics it does are the
+    /// runtime's, and they are the ones [`super::collects`] hands it
+    /// (decision 625).
+    #[test]
+    fn the_collections_numbers_are_the_runtimes() {
+        let text = include_str!("../../../rt/src/dispatch.sisu");
+        let mut seen = Vec::new();
+        let mut name = None;
+        for line in text.lines() {
+            if let Some(n) = line.strip_prefix("## `").and_then(|l| l.strip_suffix('`')) {
+                name = Some(n.to_string());
+            } else if let Some(rest) = line.strip_prefix("pub(package) const ")
+                && let Some(n) = name.take()
+            {
+                let id: u32 = rest.rsplit(' ').next().and_then(|v| v.parse().ok()).expect("a number");
+                let i = super::abi::Intrinsic::from_name(&n).expect("an intrinsic");
+                assert_eq!(i as u32, id, "{n}");
+                assert!(super::collects(id), "{n}");
+                seen.push(id);
+            }
+        }
+        let all = (0..super::abi::Intrinsic::ALL.len() as u32).filter(|&id| super::collects(id)).count();
+        assert_eq!(seen.len(), all);
     }
 }

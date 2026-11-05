@@ -23,14 +23,15 @@
 //! session depends on the package, as a script's inline metadata would,
 //! so it imports the package's modules by their paths.
 //!
-//! The session's program, and a worksheet's, is checked and lowered by
-//! stage 1 when it serves them (`sisu1 0.8.0` and later, decision 563):
-//! the program is written to a file of a directory of its own, stage 1's
-//! `sir` gives its SIR, which the interpreter runs as it runs the Rust
-//! front end's, and a program that does not check is reported by stage
-//! 1's `check`, its places moved into the input as the Rust front end's
-//! are. An older stage 1, or `--front-end=rust`, leaves them to the Rust
-//! front end.
+//! The session's program, and a worksheet's, is built by stage 1 when it
+//! serves them (`sisu1 0.8.0` and later, decisions 563 and 620): `sir
+//! --repl SESSION INPUT --kept OUT` gives the SIR of the session with an
+//! input after it and the session's program that keeps it, or the
+//! diagnostics with the input's places drawn in it; `sir --worksheet
+//! FILE` the worksheet's SIR with its statements marked. One run of stage
+//! 1 for each input. `:why NAME` reads the inputs' trees from stage 1's
+//! `parse --tree`. An older stage 1, or `--front-end=rust`, leaves them to
+//! the Rust front end, which builds the same programs.
 //!
 //! A worksheet (`sisu ws FILE`, Q-48) is a script run top to bottom, with
 //! each top-level statement's value and printed output written after it
@@ -45,15 +46,14 @@ use crate::front::FrontEnd;
 use sisu_diag::{Diagnostic, FileId, MsgId, SourceMap, Span, TextRange, msg};
 use sisu_interp::record::{Header, Log, Recorder, Resume};
 use sisu_interp::{Host, Options, exit};
-use sisu_syntax::SyntaxKind::{self, *};
-use sisu_syntax::{NodeId, Tree};
 
 /// How diagnostics name the session's program and an input.
 const SESSION: &str = "<repl>";
 const INPUT: &str = "<input>";
 
-/// What the session's program adds after its inputs: the function that
-/// shows an expression's value.
+/// What the session's program adds after its inputs, for the Rust front
+/// end: the function that shows an expression's value. Stage 1 adds its
+/// own (RULES.md, R79).
 const SHOW: &str = "\ndef __repl_show[T](value: T):\n    if comptime reflect.name_of(T) != \"()\":\n        print(\"{value:?}\")\n";
 
 /// The worksheet's markers on standard output: a statement starts, and a
@@ -62,21 +62,25 @@ const AT: char = '\u{1}';
 const VALUE: char = '\u{2}';
 const WS_HELPERS: &str = "\ndef __ws_at(line: int):\n    print(\"\\u{1}{line}\")\n\ndef __ws_show[T](line: int, value: T):\n    if comptime reflect.name_of(T) != \"()\":\n        print(\"\\u{2}{line} {value:?}\")\n";
 
-/// A function of the worksheet's program that reaches the fake `System`
-/// it runs against, which stage 1 otherwise leaves out of the SIR.
-const WS_FAKE: &str = "\ndef __ws_fake() -> System:\n    return System.fake(0)\n";
+/// The `#!` line a session's program, and a worksheet without one, starts
+/// with.
+const SHEBANG: &str = "#!/usr/bin/env sisu\n";
 
 fn line(id: MsgId, params: &[(&str, String)]) -> String {
     format!("{}\n", text(id, params))
 }
 
-/// What checks and lowers a session's program, or a worksheet's: stage 1
-/// (decision 563), with the directory its programs are written to, or
-/// the Rust front end.
+/// What builds a session's program, or a worksheet's: stage 1 (decisions
+/// 563 and 620), with the directory its inputs are written to, or the
+/// Rust front end.
 pub(crate) enum Checker {
     Rust,
     Stage1 { stage1: crate::front::Stage1, dir: std::path::PathBuf },
 }
+
+/// A program built for a session, or why not: its SIR and, from stage 1,
+/// the session's program that keeps the input; or the report to show.
+type Built = Result<(sisu_sir::Program, String), String>;
 
 impl Checker {
     /// Stage 1 when it is the front end and serves the REPL; else the Rust
@@ -98,56 +102,65 @@ impl Checker {
         Checker::Stage1 { stage1, dir }
     }
 
-    /// The program `text`, named `name` in what is shown of it, checked and
-    /// lowered with the functions `keep` named kept, or why it does not
-    /// run: the Rust front end's diagnostics, or stage 1's report, the
-    /// program named `name` in it.
-    fn compile(
-        &self,
-        name: &str,
-        text: &str,
-        cwd: &std::path::Path,
-        keep: &[&str],
-        host: &mut dyn Host,
-    ) -> Result<sisu_sir::Program, NotRun> {
-        let (stage1, dir) = match self {
-            Checker::Rust => return rust_compile(name, text, cwd, keep, host),
-            Checker::Stage1 { stage1, dir } => (stage1, dir),
+    /// Stage 1's `sir --repl SESSION INPUT --kept OUT` (RULES.md, R79): the
+    /// session's program `session` with `input` after it, or with the file
+    /// `load` loaded into it (`--load`): the SIR and OUT, or the
+    /// diagnostics stage 1 drew, the input's in its text.
+    fn repl(&self, session: &str, input: &str, load: Option<&str>, host: &mut dyn Host) -> Built {
+        let Checker::Stage1 { stage1, dir } = self else { return Err(String::new()) };
+        let written = |name: &str, text: &str| -> Result<String, String> {
+            let path = dir.join(name);
+            std::fs::write(&path, text).map_err(|e| format!("{}\n", text_of_io(&path, &e)))?;
+            Ok(path.display().to_string())
         };
-        use crate::front::Backend;
-        let base = std::path::Path::new(name)
-            .file_name()
-            .and_then(|f| f.to_str())
-            .filter(|f| f.ends_with(".sisu"))
-            .unwrap_or("session.sisu");
-        let path = dir.join(base);
-        if let Err(e) = std::fs::write(&path, text) {
-            return Err(NotRun::Message(format!("{}\n", text_of_io(&path, &e))));
+        let session_file = written("session.sisu", session)?;
+        let input_file = match load {
+            Some(f) => f.to_string(),
+            None => written("input.sisu", input)?,
+        };
+        let kept = dir.join("kept.sisu");
+        let _ = std::fs::remove_file(&kept);
+        let mut words: Vec<String> =
+            ["sir", "--repl", &session_file, &input_file, "--kept"].iter().map(|w| w.to_string()).collect();
+        words.push(kept.display().to_string());
+        if load.is_some() {
+            words.push("--load".into());
         }
-        let shown = path.display().to_string();
-        let words = vec!["sir".to_string(), shown.clone()];
-        let ran = stage1.run(&words, Backend::Unused, host).map_err(|_| NotRun::Message(String::new()))?;
-        if ran.status == exit::OK && !ran.stdout.is_empty() {
-            // The program's name, where its sources and the places its
-            // errors record name it.
-            let sir = ran.stdout.replace(&shown, name);
-            return sisu_sir::read(&sir).map_err(|e| {
-                NotRun::Message(line(
-                    msg::SIR_PARSE,
-                    &[("detail", format!("line {}: {}", e.line, e.message))],
-                ))
-            });
+        let ran = stage1.run(&words, crate::front::Backend::Unused, host).map_err(|_| String::new())?;
+        if ran.status != exit::OK {
+            return Err(ran.stderr);
         }
-        // Stage 1's `sir` prints nothing for a program that does not check;
-        // its `check` says why.
-        let mut report = ran.stderr;
-        if report.trim().is_empty() {
-            let words = vec!["check".to_string(), shown.clone()];
-            if let Ok(r) = stage1.run(&words, Backend::Unused, host) {
-                report = r.stderr;
+        let prog = read_sir(&ran.stdout)?;
+        let kept = std::fs::read_to_string(&kept).map_err(|e| format!("{}\n", text_of_io(&kept, &e)))?;
+        Ok((prog, kept))
+    }
+
+    /// Stage 1's `sir --worksheet FILE`: the worksheet's SIR with its
+    /// statements marked, or its diagnostics in the file as written.
+    fn worksheet(&self, file: &str, host: &mut dyn Host) -> Result<sisu_sir::Program, String> {
+        let Checker::Stage1 { stage1, .. } = self else { return Err(String::new()) };
+        let words = vec!["sir".to_string(), "--worksheet".to_string(), file.to_string()];
+        let ran = stage1.run(&words, crate::front::Backend::Unused, host).map_err(|_| String::new())?;
+        if ran.status != exit::OK {
+            return Err(ran.stderr);
+        }
+        read_sir(&ran.stdout)
+    }
+
+    /// The tree of an input as the statements of a script, from stage 1's
+    /// `parse --tree` or the Rust parser's.
+    fn syntax(&self, input: &str, host: &mut dyn Host) -> Option<Syntax> {
+        let text = format!("{SHEBANG}{input}\n");
+        let dump = match self {
+            Checker::Rust => sisu_parser::parse(FileId(0), &text).tree.dump(false),
+            Checker::Stage1 { stage1, dir } => {
+                let path = dir.join("tree.sisu");
+                std::fs::write(&path, &text).ok()?;
+                let words = vec!["parse".to_string(), "--tree".to_string(), path.display().to_string()];
+                stage1.run(&words, crate::front::Backend::Unused, host).ok()?.stdout
             }
-        }
-        Err(NotRun::Message(report.replace(&shown, name)))
+        };
+        Syntax::read(text, &dump)
     }
 }
 
@@ -157,6 +170,11 @@ impl Drop for Checker {
             let _ = std::fs::remove_dir_all(dir);
         }
     }
+}
+
+fn read_sir(sir: &str) -> Result<sisu_sir::Program, String> {
+    sisu_sir::read(sir)
+        .map_err(|e| line(msg::SIR_PARSE, &[("detail", format!("line {}: {}", e.line, e.message))]))
 }
 
 fn text_of_io(path: &std::path::Path, e: &std::io::Error) -> String {
@@ -189,111 +207,241 @@ fn rust_compile(
     check_to_run(&mut db, name, keep)
 }
 
-/// A report stage 1 rendered for the program `name`, with the places in
-/// its lines `first` to `last` moved to the text it shows them in, named
-/// `shown`, whose line `shown_first` is the program's line `first`: each
-/// `--> name:LINE:COL` and the line numbers of the gutter beside it, the
-/// gutter as wide as its numbers then are. A diagnostic of another part
-/// of the program is left as it is.
-fn relocate(report: &str, name: &str, first: usize, last: usize, shown: &str, shown_first: usize) -> String {
-    let moved = |l: usize| l - first + shown_first;
-    let mut out = String::new();
-    let lines: Vec<&str> = report.split_inclusive('\n').collect();
-    let mut i = 0;
-    while i < lines.len() {
-        // A diagnostic: its header and the lines after it, which start
-        // with a space or a gutter's number.
-        let mut j = i + 1;
-        while j < lines.len() && !lines[j].starts_with(|c: char| c.is_alphabetic()) {
-            j += 1;
-        }
-        let block = &lines[i..j];
-        i = j;
-        let at = |l: &str| -> Option<(usize, usize)> {
-            let rest = l.trim_start().strip_prefix("--> ")?.trim_end();
-            let (file, pos) = rest.rsplit_once(':').and_then(|(a, col)| {
-                let (file, line) = a.rsplit_once(':')?;
-                Some((file, (line.parse::<usize>().ok()?, col.parse::<usize>().ok()?)))
-            })?;
-            (file == name).then_some(pos)
-        };
-        let inside = block.iter().filter_map(|l| at(l)).any(|(l, _)| (first..=last).contains(&l));
-        if !inside {
-            block.iter().for_each(|l| out.push_str(l));
-            continue;
-        }
-        // The gutter: its bar's column, from the first line that is a bar
-        // alone.
-        let bar = block.iter().find_map(|l| {
-            let t = l.trim_end();
-            (t.ends_with('|') && t[..t.len() - 1].chars().all(|c| c == ' ')).then(|| t.len() - 1)
-        });
-        let number = |l: &str| -> Option<(usize, String)> {
-            let b = bar?;
-            let head = l.get(..b)?;
-            let n: usize = head.trim().parse().ok()?;
-            l.get(b..)?.starts_with('|').then(|| (n, l[b..].to_string()))
-        };
-        let width = block
-            .iter()
-            .filter_map(|l| number(l))
-            .map(|(n, _)| if (first..=last).contains(&n) { moved(n) } else { n })
-            .max()
-            .map_or(0, |n| n.to_string().len());
-        for l in block {
-            if let Some((n, c)) = at(l) {
-                let indent = &l[..l.len() - l.trim_start().len()];
-                let n = if (first..=last).contains(&n) { moved(n) } else { n };
-                out.push_str(&format!("{indent}--> {shown}:{n}:{c}\n"));
-            } else if let Some((n, rest)) = number(l) {
-                let n = if (first..=last).contains(&n) { moved(n) } else { n };
-                out.push_str(&format!("{n:>width$} {rest}"));
-            } else if let Some(b) = bar
-                && l.len() > b
-                && l[..b].chars().all(|c| c == ' ')
-                && matches!(l.as_bytes()[b], b'|' | b'=')
-            {
-                out.push_str(&format!("{:width$} {}", "", &l[b..]));
-            } else {
-                out.push_str(l);
+/// A syntax tree as `sisu parse --tree` prints it, over the text parsed:
+/// each node's kind and byte range, its tokens (those with text) beside
+/// its nodes. What `:why` and the Rust front end's programs read of an
+/// input.
+#[derive(Clone, Debug)]
+struct Syntax {
+    text: String,
+    nodes: Vec<SyntaxNode>,
+}
+
+#[derive(Clone, Debug)]
+struct SyntaxNode {
+    kind: String,
+    start: usize,
+    end: usize,
+    token: bool,
+    children: Vec<usize>,
+}
+
+/// The kinds of the items of a module, which a worksheet does not show.
+const ITEM_KINDS: &[&str] = &[
+    "FN_DEF",
+    "STRUCT_DEF",
+    "ENUM_DEF",
+    "ERROR_DEF",
+    "IMPL_DEF",
+    "TRAIT_DEF",
+    "IMPORT_ITEM",
+    "FROM_IMPORT",
+    "TEST_DEF",
+    "SUITE_DEF",
+    "BENCH_DEF",
+    "CONST_DEF",
+    "TYPE_ALIAS",
+    "EXTERN_BLOCK",
+];
+
+impl Syntax {
+    /// The tree `dump` prints of `text`: a line for each node and token, two
+    /// spaces deeper than its parent, `KIND START..END`, a token's text
+    /// after it.
+    fn read(text: String, dump: &str) -> Option<Syntax> {
+        let mut nodes: Vec<SyntaxNode> = Vec::new();
+        let mut open: Vec<(usize, usize)> = Vec::new();
+        for l in dump.lines() {
+            let rest = l.trim_start_matches(' ');
+            let depth = (l.len() - rest.len()) / 2;
+            let mut words = rest.splitn(3, ' ');
+            let kind = words.next()?.to_string();
+            let (a, b) = words.next()?.split_once("..")?;
+            let (start, end) = (a.parse().ok()?, b.parse().ok()?);
+            let token = words.next().is_some();
+            while open.last().is_some_and(|&(d, _)| d >= depth) {
+                open.pop();
+            }
+            let id = nodes.len();
+            if let Some(&(_, parent)) = open.last() {
+                nodes[parent].children.push(id);
+            } else if id != 0 {
+                return None;
+            }
+            nodes.push(SyntaxNode { kind, start, end, token, children: Vec::new() });
+            if !token {
+                open.push((depth, id));
             }
         }
+        (!nodes.is_empty()).then_some(Syntax { text, nodes })
     }
-    out
+
+    fn kind(&self, n: usize) -> &str {
+        &self.nodes[n].kind
+    }
+
+    /// The node's text.
+    fn text_of(&self, n: usize) -> &str {
+        self.text.get(self.nodes[n].start..self.nodes[n].end).unwrap_or("")
+    }
+
+    /// The node's child nodes, not its tokens.
+    fn child_nodes(&self, n: usize) -> impl Iterator<Item = usize> + '_ {
+        self.nodes[n].children.iter().copied().filter(|&c| !self.nodes[c].token)
+    }
+
+    fn first_token(&self, n: usize, kind: &str) -> Option<usize> {
+        self.nodes[n].children.iter().copied().find(|&c| self.nodes[c].token && self.nodes[c].kind == kind)
+    }
+
+    /// The node and the nodes under it, in order.
+    fn preorder(&self, n: usize) -> Vec<usize> {
+        let mut out = vec![n];
+        let mut i = 0;
+        while i < out.len() {
+            let at = out[i];
+            let kids: Vec<usize> = self.child_nodes(at).collect();
+            out.splice(i + 1..i + 1, kids);
+            i += 1;
+        }
+        out
+    }
+
+    /// The top-level statements and items.
+    fn top_level(&self) -> Vec<usize> {
+        self.child_nodes(0).collect()
+    }
+
+    /// The names a `let` or `var` binds.
+    fn bound_names(&self, stmt: usize) -> Vec<String> {
+        if self.kind(stmt) != "LET_STMT" {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for c in self.child_nodes(stmt) {
+            if matches!(self.kind(c), "IDENT_PAT" | "TUPLE_PAT") {
+                for n in self.preorder(c) {
+                    if self.kind(n) == "IDENT_PAT"
+                        && let Some(t) = self.first_token(n, "IDENT")
+                    {
+                        out.push(self.text_of(t).to_string());
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Whether a top-level statement binds `name`.
+    fn binds(&self, name: &str) -> bool {
+        self.top_level().into_iter().any(|s| self.bound_names(s).iter().any(|b| b == name))
+    }
+
+    /// The initialiser of a `let`: its expression's node.
+    fn initialiser(&self, stmt: usize) -> Option<usize> {
+        let at = self.nodes[self.first_token(stmt, "EQ")?].end;
+        self.child_nodes(stmt).find(|&c| self.nodes[c].start >= at)
+    }
+
+    /// The names an expression reads.
+    fn names_read(&self, n: usize) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for c in self.preorder(n) {
+            if self.kind(c) == "NAME_REF"
+                && let Some(t) = self.first_token(c, "IDENT")
+            {
+                let name = self.text_of(t).to_string();
+                if !out.contains(&name) {
+                    out.push(name);
+                }
+            }
+        }
+        out
+    }
+
+    /// Whether a statement may change `name`: assigns to it (or into it),
+    /// or calls a method on it.
+    fn changes(&self, stmt: usize, name: &str) -> bool {
+        let root_name = |n: usize| -> Option<String> {
+            let mut cur = n;
+            loop {
+                match self.kind(cur) {
+                    "NAME_REF" => return self.first_token(cur, "IDENT").map(|t| self.text_of(t).to_string()),
+                    "FIELD_EXPR" | "INDEX_EXPR" => cur = self.child_nodes(cur).next()?,
+                    _ => return None,
+                }
+            }
+        };
+        match self.kind(stmt) {
+            "ASSIGN_STMT" => self.child_nodes(stmt).next().and_then(root_name).as_deref() == Some(name),
+            "EXPR_STMT" => self.preorder(stmt).into_iter().any(|c| {
+                self.kind(c) == "CALL_EXPR"
+                    && self
+                        .child_nodes(c)
+                        .next()
+                        .filter(|&f| self.kind(f) == "FIELD_EXPR")
+                        .and_then(|f| self.child_nodes(f).next())
+                        .and_then(root_name)
+                        .as_deref()
+                        == Some(name)
+            }),
+            _ => false,
+        }
+    }
+}
+
+/// The Rust parser's tree of a text.
+fn rust_syntax(text: &str) -> Option<Syntax> {
+    Syntax::read(text.to_string(), &sisu_parser::parse(FileId(0), text).tree.dump(false))
 }
 
 /// One input the session kept.
 #[derive(Clone, Debug)]
 struct Entry {
-    /// The input as typed.
+    /// The input as typed (a loaded file's text after its preamble).
     text: String,
-    /// The input as the session's program holds it: an expression is
-    /// wrapped to be shown, so its text starts `prefix` bytes in.
+    /// The file loaded into the session, which stage 1 reads itself.
+    load: Option<String>,
+    /// For the Rust front end: the input as the session's program holds
+    /// it (an expression is wrapped to be shown, so its text starts
+    /// `prefix` bytes in), and how its diagnostics show it: the name, the
+    /// text they point into, and where the input starts in that text.
     source: String,
     prefix: usize,
-    /// How its diagnostics show it: the name, the text they point into,
-    /// and where the input starts in that text.
     shown: (String, String, usize),
+    /// From stage 1: the session's program that keeps the input.
+    kept: String,
+    /// The input's tree, read when `:why` asks.
+    syntax: std::cell::OnceCell<Option<Syntax>>,
 }
 
 impl Entry {
-    fn of(input: &str) -> Entry {
-        let (tree, _) = parse_script(input);
-        let stmts: Vec<NodeId> = top_level(&tree);
-        let expression = stmts.len() == 1 && tree.kind(stmts[0]) == EXPR_STMT;
+    /// An input as typed; `rust` when the Rust front end builds it, which
+    /// the session wraps itself.
+    fn of(input: &str, rust: bool) -> Entry {
         let shown = (INPUT.to_string(), input.trim_end().to_string(), 0);
+        let mut entry = Entry {
+            text: input.to_string(),
+            load: None,
+            source: format!("{}\n", input.trim_end()),
+            prefix: 0,
+            shown,
+            kept: String::new(),
+            syntax: Default::default(),
+        };
+        let expression = rust
+            && rust_syntax(&format!("{SHEBANG}{input}\n")).is_some_and(|t| {
+                let stmts = t.top_level();
+                stmts.len() == 1 && t.kind(stmts[0]) == "EXPR_STMT"
+            });
         if expression {
-            // The call on a line of its own, so that the input keeps its
-            // lines and columns in the session's program.
-            let prefix = "__repl_show(\n";
-            return Entry {
-                text: input.to_string(),
-                source: format!("{prefix}{}\n)\n", input.trim_end()),
-                prefix: prefix.len(),
-                shown,
-            };
+            // As stage 1 wraps it (RULES.md, R79): the call's `)` on a line
+            // of its own, after any comment the input ends with.
+            let prefix = "__repl_show(";
+            entry.source = format!("{prefix}{}\n)\n", input.trim_end());
+            entry.prefix = prefix.len();
         }
-        Entry { text: input.to_string(), source: format!("{}\n", input.trim_end()), prefix: 0, shown }
+        entry
     }
 }
 
@@ -319,102 +467,19 @@ fn split_preamble(file: &str, text: &str) -> (String, Entry) {
     }
     let mut preamble = text[..end].to_string();
     if !preamble.starts_with("#!") {
-        preamble.insert_str(0, "#!/usr/bin/env sisu\n");
+        preamble.insert_str(0, SHEBANG);
     }
     let body = text[end..].to_string();
     let entry = Entry {
         source: if body.ends_with('\n') || body.is_empty() { body.clone() } else { format!("{body}\n") },
         text: body,
+        load: Some(file.to_string()),
         prefix: 0,
         shown: (file.to_string(), text.to_string(), end),
+        kept: String::new(),
+        syntax: Default::default(),
     };
     (preamble, entry)
-}
-
-/// An input parsed as the statements of a script, and the text parsed
-/// (with the `#!` line in front).
-fn parse_script(input: &str) -> (Tree, String) {
-    let text = format!("#!/usr/bin/env sisu\n{input}\n");
-    let parse = sisu_parser::parse(FileId(0), &text);
-    (parse.tree, text)
-}
-
-/// The top-level statements and items of a parsed script.
-fn top_level(tree: &Tree) -> Vec<NodeId> {
-    tree.child_nodes(tree.root()).collect()
-}
-
-/// The names a `let` or `var` binds.
-fn bound_names(tree: &Tree, stmt: NodeId) -> Vec<String> {
-    if tree.kind(stmt) != LET_STMT {
-        return Vec::new();
-    }
-    let mut out = Vec::new();
-    for c in tree.child_nodes(stmt) {
-        if matches!(tree.kind(c), IDENT_PAT | TUPLE_PAT) {
-            for n in tree.preorder(c) {
-                if tree.kind(n) == IDENT_PAT
-                    && let Some(t) = tree.first_token(n, IDENT)
-                {
-                    out.push(tree.token_text(t).to_string());
-                }
-            }
-        }
-    }
-    out
-}
-
-/// The initialiser of a `let`: its expression's node.
-fn initialiser(tree: &Tree, stmt: NodeId) -> Option<NodeId> {
-    let eq = tree.first_token(stmt, EQ)?;
-    let at = tree.token_range(eq).end;
-    tree.child_nodes(stmt).find(|&c| tree.range(c).start >= at)
-}
-
-/// The names an expression reads.
-fn names_read(tree: &Tree, n: NodeId) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for c in tree.preorder(n) {
-        if tree.kind(c) == NAME_REF
-            && let Some(t) = tree.first_token(c, IDENT)
-        {
-            let name = tree.token_text(t).to_string();
-            if !out.contains(&name) {
-                out.push(name);
-            }
-        }
-    }
-    out
-}
-
-/// Whether a statement may change `name`: assigns to it (or into it), or
-/// calls a method on it.
-fn changes(tree: &Tree, stmt: NodeId, name: &str) -> bool {
-    let root_name = |n: NodeId| -> Option<String> {
-        let mut cur = n;
-        loop {
-            match tree.kind(cur) {
-                NAME_REF => return tree.first_token(cur, IDENT).map(|t| tree.token_text(t).to_string()),
-                FIELD_EXPR | INDEX_EXPR => cur = tree.child_nodes(cur).next()?,
-                _ => return None,
-            }
-        }
-    };
-    match tree.kind(stmt) {
-        ASSIGN_STMT => tree.child_nodes(stmt).next().and_then(root_name).as_deref() == Some(name),
-        EXPR_STMT => tree.preorder(stmt).into_iter().any(|c| {
-            tree.kind(c) == CALL_EXPR
-                && tree
-                    .child_nodes(c)
-                    .next()
-                    .filter(|&f| tree.kind(f) == FIELD_EXPR)
-                    .and_then(|f| tree.child_nodes(f).next())
-                    .and_then(root_name)
-                    .as_deref()
-                    == Some(name)
-        }),
-        _ => false,
-    }
 }
 
 /// Whether more lines belong to an input: it opens a block, starts with
@@ -432,7 +497,6 @@ fn needs_more(input: &str) -> bool {
             '"' if prev != '\\' => in_str = !in_str,
             '(' | '[' | '{' if !in_str => depth += 1,
             ')' | ']' | '}' if !in_str => depth -= 1,
-            '#' if !in_str => {}
             _ => {}
         }
         prev = c;
@@ -463,10 +527,17 @@ fn rebase(d: &Diagnostic, root: FileId, start: u32, len: u32, delta: u32) -> Opt
     Some(d)
 }
 
+/// The inline metadata that makes a session depend on the package in
+/// `dir`, named `name`.
+fn package_metadata(name: &str, dir: &std::path::Path) -> String {
+    let path = dir.display().to_string().replace('\\', "\\\\").replace('"', "\\\"");
+    format!("# /// script\n# [dependencies]\n# {name} = {{ path = \"{path}\" }}\n# ///\n")
+}
+
 /// A REPL session: the inputs it kept and the log of each evaluation.
 struct Session {
-    /// What leads the session's program: its `#!` line, and the inline
-    /// metadata of a file loaded into it.
+    /// What leads the session's program: its `#!` line, the inline
+    /// metadata of a package or of a file loaded into it.
     preamble: String,
     entries: Vec<Entry>,
     /// `logs[k]`: the log of the evaluation that kept `entries[k]`.
@@ -478,15 +549,17 @@ struct Session {
 }
 
 impl Session {
-    /// The session's program: its first `upto` inputs, then `extra`.
-    /// Returns the text and where `extra` starts in it.
+    fn rust(&self) -> bool {
+        matches!(self.checker, Checker::Rust)
+    }
+
+    /// The Rust front end's program of the session: its first `upto`
+    /// inputs, then `extra`. Returns the text and where `extra` starts in
+    /// it.
     fn program(&self, upto: usize, extra: Option<&str>) -> (String, u32) {
         let mut text = self.preamble.clone();
         if let Some((name, dir)) = &self.package {
-            let path = dir.display().to_string().replace('\\', "\\\\").replace('"', "\\\"");
-            text.push_str(&format!(
-                "# /// script\n# [dependencies]\n# {name} = {{ path = \"{path}\" }}\n# ///\n"
-            ));
+            text.push_str(&package_metadata(name, dir));
         }
         for e in &self.entries[..upto] {
             text.push_str(&e.source);
@@ -501,23 +574,36 @@ impl Session {
         (text, at)
     }
 
-    fn compile(&self, program: &str, host: &mut dyn Host) -> Result<sisu_sir::Program, NotRun> {
-        self.checker.compile(SESSION, program, &self.cwd, &[], host)
+    /// Stage 1's SESSION after the first `upto` inputs: what the input
+    /// that kept the last of them left, or the package's metadata for a
+    /// session that loads one.
+    fn kept(&self, upto: usize) -> String {
+        match upto.checked_sub(1).and_then(|k| self.entries.get(k)) {
+            Some(e) => e.kept.clone(),
+            None => match &self.package {
+                Some((name, dir)) => format!("{SHEBANG}{}", package_metadata(name, dir)),
+                None => String::new(),
+            },
+        }
+    }
+
+    /// The session's first `upto` inputs with `entry` after them, built.
+    fn build(&self, upto: usize, entry: &Entry, host: &mut dyn Host) -> Built {
+        if !self.rust() {
+            return self.checker.repl(&self.kept(upto), &entry.text, entry.load.as_deref(), host);
+        }
+        let (program, at) = self.program(upto, Some(&entry.source));
+        match rust_compile(SESSION, &program, &self.cwd, &[], host) {
+            Ok(p) => Ok((p, String::new())),
+            Err(e) => Err(self.explain(e, at, entry)),
+        }
     }
 
     /// Why an input was not kept, as the input's own diagnostics where
     /// they point into it.
-    fn explain(&self, why: NotRun, program: &str, at: u32, entry: &Entry) -> String {
+    fn explain(&self, why: NotRun, at: u32, entry: &Entry) -> String {
         match why {
-            // Stage 1's report, its places in the input moved there.
-            NotRun::Message(m) => {
-                let start = (at as usize + entry.prefix).min(program.len());
-                let first = program[..start].matches('\n').count() + 1;
-                let last = first + entry.text.trim_end().lines().count().max(1) - 1;
-                let (name, shown, delta) = &entry.shown;
-                let shown_first = shown[..(*delta).min(shown.len())].matches('\n').count() + 1;
-                relocate(&m, SESSION, first, last, name, shown_first)
-            }
+            NotRun::Message(m) => m,
             NotRun::Diagnostics(map, diags) => {
                 let root =
                     map.files().iter().find(|f| f.name == SESSION).map(|f| f.id).unwrap_or(FileId(u32::MAX));
@@ -544,13 +630,11 @@ impl Session {
 
     /// Runs the session with `entry` after its inputs, and keeps it if it
     /// ran to the end.
-    fn evaluate(&mut self, entry: Entry, host: &mut dyn Host) {
+    fn evaluate(&mut self, mut entry: Entry, host: &mut dyn Host) {
         let n = self.entries.len();
-        let (program, at) = self.program(n, Some(&entry.source));
-        let prog = match self.compile(&program, host) {
+        let (prog, kept) = match self.build(n, &entry, host) {
             Ok(p) => p,
-            Err(e) => {
-                let shown = self.explain(e, &program, at, &entry);
+            Err(shown) => {
                 host.stderr(&shown);
                 return;
             }
@@ -561,6 +645,7 @@ impl Session {
         }
         match log {
             Some(log) if status == exit::OK => {
+                entry.kept = kept;
                 self.entries.push(entry);
                 self.logs.push(log);
             }
@@ -570,9 +655,8 @@ impl Session {
 
     /// The `Debug` rendering of `name` after the first `upto` inputs.
     fn value_after(&self, upto: usize, name: &str, host: &mut dyn Host) -> String {
-        let show = format!("__repl_show({name})\n");
-        let (program, _) = self.program(upto, Some(&show));
-        let Ok(prog) = self.compile(&program, host) else { return "?".into() };
+        let shown = Entry::of(name, self.rust());
+        let Ok((prog, _)) = self.build(upto, &shown, host) else { return "?".into() };
         let earlier = upto.checked_sub(1).and_then(|k| self.logs.get(k));
         let mut cap = Captured { inner: &mut *host, out: String::new(), err: String::new() };
         let _ = run(&prog, earlier, &mut cap);
@@ -580,14 +664,21 @@ impl Session {
         if out.is_empty() { "?".into() } else { out }
     }
 
+    /// The tree of the input `k` kept, read once.
+    fn syntax(&self, k: usize, host: &mut dyn Host) -> Option<&Syntax> {
+        let e = &self.entries[k];
+        e.syntax.get_or_init(|| self.checker.syntax(&e.text, host)).as_ref()
+    }
+
+    /// The last of the first `upto` inputs that binds `name`.
+    fn binder(&self, upto: usize, name: &str, host: &mut dyn Host) -> Option<usize> {
+        (0..upto).rev().find(|&k| self.syntax(k, host).is_some_and(|t| t.binds(name)))
+    }
+
     /// `:why NAME`.
     fn why(&self, name: &str, host: &mut dyn Host) {
         let mut seen = Vec::new();
-        let found = self.entries.iter().rposition(|e| {
-            let (tree, _) = parse_script(&e.text);
-            top_level(&tree).into_iter().any(|s| bound_names(&tree, s).iter().any(|b| b == name))
-        });
-        let Some(k) = found else {
+        let Some(k) = self.binder(self.entries.len(), name, host) else {
             host.stdout(&line(msg::CLI_REPL_WHY_UNBOUND, &[("name", name.to_string())]));
             return;
         };
@@ -606,10 +697,10 @@ impl Session {
     ) {
         seen.push(name.to_string());
         let pad = "  ".repeat(depth);
-        let (tree, _) = parse_script(&self.entries[k].text);
-        let stmt = top_level(&tree).into_iter().find(|&s| bound_names(&tree, s).iter().any(|b| b == name));
-        let init = stmt.and_then(|s| initialiser(&tree, s));
-        let expr = init.map(|i| tree.node_text(i).trim().to_string()).unwrap_or_default();
+        let tree = self.syntax(k, host).cloned();
+        let stmt = tree.as_ref().and_then(|t| t.top_level().into_iter().find(|&s| t.binds_at(s, name)));
+        let init = tree.as_ref().zip(stmt).and_then(|(t, s)| t.initialiser(s));
+        let expr = tree.as_ref().zip(init).map(|(t, i)| t.text_of(i).trim().to_string()).unwrap_or_default();
         host.stdout(&format!(
             "{pad}{}",
             line(
@@ -636,34 +727,38 @@ impl Session {
             }
         }
         // The session's values it was computed from, as they were then.
-        if let Some(i) = init {
-            for dep in names_read(&tree, i) {
+        if let (Some(t), Some(i)) = (&tree, init) {
+            for dep in t.names_read(i) {
                 if seen.contains(&dep) {
                     continue;
                 }
-                let binder = self.entries[..k].iter().rposition(|e| {
-                    let (t, _) = parse_script(&e.text);
-                    top_level(&t).into_iter().any(|s| bound_names(&t, s).contains(&dep))
-                });
-                if let Some(j) = binder {
+                if let Some(j) = self.binder(k, &dep, host) {
                     let v = self.value_after(k, &dep, host);
                     self.why_at(j, &dep, v, depth + 1, seen, host);
                 }
             }
         }
         // The inputs that changed it since.
-        for (j, e) in self.entries.iter().enumerate().skip(k + 1) {
-            let (t, _) = parse_script(&e.text);
-            if top_level(&t).into_iter().any(|s| changes(&t, s, name)) {
+        for j in k + 1..self.entries.len() {
+            let changed =
+                self.syntax(j, host).is_some_and(|t| t.top_level().into_iter().any(|s| t.changes(s, name)));
+            if changed {
                 host.stdout(&format!(
                     "{pad}  {}",
                     line(
                         msg::CLI_REPL_WHY_CHANGE,
-                        &[("text", e.text.trim().to_string()), ("input", (j + 1).to_string())]
+                        &[("text", self.entries[j].text.trim().to_string()), ("input", (j + 1).to_string())]
                     )
                 ));
             }
         }
+    }
+}
+
+impl Syntax {
+    /// Whether the statement `stmt` binds `name`.
+    fn binds_at(&self, stmt: usize, name: &str) -> bool {
+        self.bound_names(stmt).iter().any(|b| b == name)
     }
 }
 
@@ -732,7 +827,7 @@ pub(crate) fn repl(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32
         host.stderr(&line(msg::CLI_REPL_LOADED, &[("name", name.clone())]));
     }
     let mut s = Session {
-        preamble: "#!/usr/bin/env sisu\n".into(),
+        preamble: SHEBANG.into(),
         entries: Vec::new(),
         logs: Vec::new(),
         package,
@@ -802,7 +897,8 @@ pub(crate) fn repl(args: &[String], front: FrontEnd, host: &mut dyn Host) -> i32
                 }
             }
         }
-        s.evaluate(Entry::of(&input), host);
+        let rust = s.rust();
+        s.evaluate(Entry::of(&input, rust), host);
     }
 }
 
@@ -879,7 +975,10 @@ pub(crate) struct Sheet {
 
 /// Runs a worksheet (Q-48) against a test's fake `System`, or the real one
 /// when `real`, for at most `fuel` statements when given: its text must
-/// check, or the diagnostics are the error.
+/// check, or the diagnostics are the error. Stage 1 marks the statements
+/// (`sir --worksheet`, RULES.md R79) by the line each ends on in the file
+/// as written; for the Rust front end the driver marks them by their
+/// first line in the program, then moves each to its last in the file.
 pub(crate) fn evaluate_sheet(
     file: &str,
     source: &str,
@@ -889,65 +988,13 @@ pub(crate) fn evaluate_sheet(
     checker: &Checker,
     host: &mut dyn Host,
 ) -> Result<Sheet, String> {
-    // A worksheet is a script; one without its `#!` line gets one.
-    let (sheet, shift) = if source.starts_with("#!") {
-        (source.to_string(), 0)
-    } else {
-        (format!("#!/usr/bin/env sisu\n{source}"), 1)
+    let (prog, spans) = match checker {
+        Checker::Stage1 { .. } => (checker.worksheet(file, host)?, None),
+        Checker::Rust => {
+            let (prog, spans) = rust_sheet(file, source, cwd, host)?;
+            (prog, Some(spans))
+        }
     };
-    let compile =
-        |text: &str, keep: &[&str], host: &mut dyn Host| checker.compile(file, text, cwd, keep, host);
-    let show = |e: NotRun| match e {
-        NotRun::Diagnostics(map, diags) => sisu_diag::render::render_human(&map, &diags),
-        // Stage 1's report, of the worksheet with its `#!` line.
-        NotRun::Message(m) if shift > 0 => relocate(&m, file, 2, usize::MAX - 1, file, 1),
-        NotRun::Message(m) => m,
-    };
-    // The worksheet as written must check; its instrumented form then does.
-    compile(&sheet, &[], host).map_err(show)?;
-    let parse = sisu_parser::parse(FileId(0), &sheet);
-    let tree = &parse.tree;
-    let line_of = |pos: u32| sheet[..pos as usize].matches('\n').count() + 1;
-    let is_stmt = |k: SyntaxKind| !Tree::is_item_kind(k) && !matches!(k, ATTRIBUTE | ERROR);
-    // Each statement: its first and last line, and the instrumented text.
-    let mut spans: Vec<(usize, usize)> = Vec::new();
-    let mut out = String::new();
-    let mut last = 0usize;
-    for n in top_level(tree) {
-        let k = tree.kind(n);
-        if !is_stmt(k) {
-            continue;
-        }
-        let r = tree.range(n);
-        let (start, end) = (r.start as usize, r.end as usize);
-        let body = sheet[start..end].trim_end();
-        let first = line_of(r.start);
-        let last_line = first + body.matches('\n').count();
-        spans.push((first, last_line));
-        out.push_str(&sheet[last..start]);
-        out.push_str(&format!("__ws_at({first})\n"));
-        if k == EXPR_STMT {
-            out.push_str(&format!("__ws_show({first}, {body})\n"));
-        } else {
-            out.push_str(body);
-            out.push('\n');
-            for name in bound_names(tree, n) {
-                out.push_str(&format!("__ws_show({first}, {name})\n"));
-            }
-        }
-        last = start + body.len();
-        // The line break the statement ended with is the one written.
-        if sheet[last..].starts_with('\n') {
-            last += 1;
-        }
-    }
-    out.push_str(&sheet[last..]);
-    out.push_str(WS_HELPERS);
-    // Stage 1 keeps what the program's own functions reach: the fakes too.
-    if matches!(checker, Checker::Stage1 { .. }) {
-        out.push_str(WS_FAKE);
-    }
-    let prog = compile(&out, &["System.fake"], host).map_err(show)?;
     let mut cap = Captured { inner: &mut *host, out: String::new(), err: String::new() };
     let report = {
         let mut live = WithArgs { inner: &mut cap, args: Vec::new(), watch: Vec::new() };
@@ -959,7 +1006,7 @@ pub(crate) fn evaluate_sheet(
         }
     };
     let (printed, errors) = (cap.out, cap.err);
-    // What each statement printed and its values, by its first line.
+    // What each statement printed and its values, by its marker's line.
     let mut values: std::collections::BTreeMap<usize, Vec<String>> = Default::default();
     let mut outputs: std::collections::BTreeMap<usize, Vec<String>> = Default::default();
     let mut current = 0usize;
@@ -973,6 +1020,9 @@ pub(crate) fn evaluate_sheet(
             outputs.entry(current).or_default().push(l.to_string());
         }
     }
+    let Some((spans, shift)) = spans else {
+        return Ok(Sheet { values, outputs, errors, status: report.status });
+    };
     // By each statement's last line, in the file as written.
     let mut sheet_out =
         Sheet { values: Default::default(), outputs: Default::default(), errors, status: report.status };
@@ -988,17 +1038,84 @@ pub(crate) fn evaluate_sheet(
     Ok(sheet_out)
 }
 
+/// Each statement's first and last line in the Rust front end's worksheet
+/// program, and the lines its `#!` line added.
+type Marks = (Vec<(usize, usize)>, usize);
+
+/// The Rust front end's worksheet: the program with each statement marked
+/// by its first line, and each statement's first and last line in it,
+/// with the lines its `#!` line added (0 or 1).
+fn rust_sheet(
+    file: &str,
+    source: &str,
+    cwd: &std::path::Path,
+    host: &mut dyn Host,
+) -> Result<(sisu_sir::Program, Marks), String> {
+    // A worksheet is a script; one without its `#!` line gets one.
+    let (sheet, shift) =
+        if source.starts_with("#!") { (source.to_string(), 0) } else { (format!("{SHEBANG}{source}"), 1) };
+    let show = |e: NotRun| match e {
+        NotRun::Diagnostics(map, diags) => sisu_diag::render::render_human(&map, &diags),
+        NotRun::Message(m) => m,
+    };
+    // The worksheet as written must check; its instrumented form then does.
+    rust_compile(file, &sheet, cwd, &[], host).map_err(show)?;
+    let tree = rust_syntax(&sheet).ok_or_else(String::new)?;
+    let line_of = |pos: usize| sheet[..pos].matches('\n').count() + 1;
+    let is_stmt = |k: &str| !ITEM_KINDS.contains(&k) && !matches!(k, "ATTRIBUTE" | "ERROR");
+    // Each statement: its first and last line, and the instrumented text.
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    let mut out = String::new();
+    let mut last = 0usize;
+    for n in tree.top_level() {
+        if !is_stmt(tree.kind(n)) {
+            continue;
+        }
+        let (start, end) = (tree.nodes[n].start, tree.nodes[n].end);
+        let body = sheet[start..end].trim_end();
+        let first = line_of(start);
+        let last_line = first + body.matches('\n').count();
+        spans.push((first, last_line));
+        out.push_str(&sheet[last..start]);
+        out.push_str(&format!("__ws_at({first})\n"));
+        if tree.kind(n) == "EXPR_STMT" {
+            out.push_str(&format!("__ws_show({first}, {body})\n"));
+        } else {
+            out.push_str(body);
+            out.push('\n');
+            for name in tree.bound_names(n) {
+                out.push_str(&format!("__ws_show({first}, {name})\n"));
+            }
+        }
+        last = start + body.len();
+        // The line break the statement ended with is the one written.
+        if sheet[last..].starts_with('\n') {
+            last += 1;
+        }
+    }
+    out.push_str(&sheet[last..]);
+    out.push_str(WS_HELPERS);
+    let prog = rust_compile(file, &out, cwd, &["System.fake"], host).map_err(show)?;
+    Ok((prog, (spans, shift)))
+}
+
 #[cfg(test)]
 mod tests {
-    /// Stage 1's report of a session's program is moved into the input:
-    /// the place, the gutter's numbers and its width (decision 563).
+    /// The tree `sisu parse --tree` prints is read back: its nodes, their
+    /// tokens, and what `:why` asks of them (decision 620).
     #[test]
-    fn a_report_of_stage_1_is_moved_into_the_input() {
-        let report = "error[E0300]: expected `str`, found `int`\n  --> <repl>:14:14\n   |\n14 | let y: str = 3\n   |              ^\n   |        --- expected because of this\n\nerror: elsewhere\n  --> <repl>:2:1\n  |\n2 | x\n  | ^\n";
-        let moved = super::relocate(report, "<repl>", 14, 14, "<input>", 1);
-        assert_eq!(
-            moved,
-            "error[E0300]: expected `str`, found `int`\n  --> <input>:1:14\n  |\n1 | let y: str = 3\n  |              ^\n  |        --- expected because of this\n\nerror: elsewhere\n  --> <repl>:2:1\n  |\n2 | x\n  | ^\n"
-        );
+    fn a_printed_tree_is_read_back() {
+        let text = "#!/usr/bin/env sisu\nlet (a, b) = (f(x), 2)\nseen.push(a)\n".to_string();
+        let dump = sisu_parser::parse(super::FileId(0), &text).tree.dump(false);
+        let t = super::Syntax::read(text, &dump).expect("a tree");
+        let stmts = t.top_level();
+        assert_eq!(stmts.len(), 2);
+        assert_eq!(t.bound_names(stmts[0]), vec!["a".to_string(), "b".to_string()]);
+        let init = t.initialiser(stmts[0]).expect("an initialiser");
+        assert_eq!(t.text_of(init), "(f(x), 2)");
+        assert_eq!(t.names_read(init), vec!["f".to_string(), "x".to_string()]);
+        assert!(t.changes(stmts[1], "seen"));
+        assert!(!t.changes(stmts[1], "a"));
+        assert!(super::Syntax::read(String::new(), "A 0..1\nB 0..1\n").is_none());
     }
 }

@@ -79,3 +79,348 @@ pub struct Timeline:
         if real < self.now:
             self.clock.after(self.now - real).wait()?
         return Ok(())
+
+## A point on a clock's time line, to measure how long something took (11,
+## `std.time`): `Instant.now(clock)` reads the clock, `elapsed` is the time
+## since, and the difference of two is a `Duration`; an instant is ordered
+## but is not a civil time, and shows as its nanoseconds on its clock. Its
+## readings are the clock's own (`ClockOps.now`), so the test clock makes
+## them deterministic and a recorded run replays them; on the host's clock
+## they are the system's time, which a change of the system's clock moves,
+## since stage 0's `Clock` reads no monotonic time of its own (decision
+## 627).
+##
+## ```
+## let clock = Clock.frozen_at(DateTime.parse("2026-01-01T00:00:00Z").expect("a time"))
+## let start = Instant.now(clock)
+## clock.advance(Duration.millis(1500))
+## assert start.elapsed(clock) == Duration.millis(1500)
+## let later = Instant.now(clock)
+## assert later > start and later.since(start) == Duration.millis(1500)
+## assert start + Duration.seconds(2) > later
+## ```
+@derive(Copy, Eq, Ord, Hash, Debug)
+pub struct Instant:
+    nanos: int
+
+    ## The clock's time now.
+    pub def now(clock: Clock) -> Instant:
+        return Instant(nanos=clock.now().unix_nanos())
+
+    ## The time from this instant to the clock's time now.
+    pub def elapsed(self, clock: Clock) -> Duration:
+        return Instant.now(clock).since(self)
+
+    ## The time from `earlier` to this instant, negative when `earlier` is
+    ## the later one.
+    pub pure def since(self, earlier: Instant) -> Duration:
+        return DateTime.from_unix_nanos(self.nanos) - DateTime.from_unix_nanos(earlier.nanos)
+
+impl Add[Duration] for Instant:
+    pure def add(self, d: Duration) -> Instant:
+        return Instant(nanos=(DateTime.from_unix_nanos(self.nanos) + d).unix_nanos())
+
+impl Sub[Duration] for Instant:
+    pure def sub(self, d: Duration) -> Instant:
+        return Instant(nanos=(DateTime.from_unix_nanos(self.nanos) - d).unix_nanos())
+
+impl Display for Instant:
+    ## The nanoseconds on its clock, as `Instant(1767225600000000000ns)`.
+    pure def fmt(self, mut f: Formatter):
+        f.write("Instant({self.nanos}ns)")
+
+# ------------------------------------------------------------------ time zones
+
+## The zones whose rules `Zone.named` knows, each name with its rule as
+## POSIX writes a `TZ` variable: the abbreviation and the offset west of
+## UTC of its standard time, and of its daylight time with the rules of
+## its start and its end (`M` month `.` week `.` weekday, `/` the local
+## time), as the zones' rules stand since 2007 (decision 627).
+const ZONES: list[(str, str)] = [
+    ("UTC", "UTC0"),
+    ("Etc/UTC", "UTC0"),
+    ("Africa/Cairo", "EET-2EEST,M4.5.5/0,M10.5.4/24"),
+    ("Africa/Johannesburg", "SAST-2"),
+    ("Africa/Lagos", "WAT-1"),
+    ("Africa/Nairobi", "EAT-3"),
+    ("America/Anchorage", "AKST9AKDT,M3.2.0,M11.1.0"),
+    ("America/Argentina/Buenos_Aires", "<-03>3"),
+    ("America/Chicago", "CST6CDT,M3.2.0,M11.1.0"),
+    ("America/Denver", "MST7MDT,M3.2.0,M11.1.0"),
+    ("America/Halifax", "AST4ADT,M3.2.0,M11.1.0"),
+    ("America/Los_Angeles", "PST8PDT,M3.2.0,M11.1.0"),
+    ("America/Mexico_City", "CST6"),
+    ("America/New_York", "EST5EDT,M3.2.0,M11.1.0"),
+    ("America/Phoenix", "MST7"),
+    ("America/Sao_Paulo", "<-03>3"),
+    ("America/St_Johns", "NST3:30NDT,M3.2.0,M11.1.0"),
+    ("America/Toronto", "EST5EDT,M3.2.0,M11.1.0"),
+    ("Asia/Dubai", "<+04>-4"),
+    ("Asia/Hong_Kong", "HKT-8"),
+    ("Asia/Jakarta", "WIB-7"),
+    ("Asia/Kathmandu", "<+0545>-5:45"),
+    ("Asia/Kolkata", "IST-5:30"),
+    ("Asia/Seoul", "KST-9"),
+    ("Asia/Shanghai", "CST-8"),
+    ("Asia/Singapore", "<+08>-8"),
+    ("Asia/Tokyo", "JST-9"),
+    ("Atlantic/Reykjavik", "GMT0"),
+    ("Australia/Adelaide", "ACST-9:30ACDT,M10.1.0,M4.1.0/3"),
+    ("Australia/Brisbane", "AEST-10"),
+    ("Australia/Perth", "AWST-8"),
+    ("Australia/Sydney", "AEST-10AEDT,M10.1.0,M4.1.0/3"),
+    ("Europe/Amsterdam", "CET-1CEST,M3.5.0,M10.5.0/3"),
+    ("Europe/Athens", "EET-2EEST,M3.5.0/3,M10.5.0/4"),
+    ("Europe/Berlin", "CET-1CEST,M3.5.0,M10.5.0/3"),
+    ("Europe/Dublin", "GMT0IST,M3.5.0/1,M10.5.0"),
+    ("Europe/Helsinki", "EET-2EEST,M3.5.0/3,M10.5.0/4"),
+    ("Europe/Istanbul", "<+03>-3"),
+    ("Europe/Kyiv", "EET-2EEST,M3.5.0/3,M10.5.0/4"),
+    ("Europe/Lisbon", "WET0WEST,M3.5.0/1,M10.5.0"),
+    ("Europe/London", "GMT0BST,M3.5.0/1,M10.5.0"),
+    ("Europe/Madrid", "CET-1CEST,M3.5.0,M10.5.0/3"),
+    ("Europe/Moscow", "MSK-3"),
+    ("Europe/Oslo", "CET-1CEST,M3.5.0,M10.5.0/3"),
+    ("Europe/Paris", "CET-1CEST,M3.5.0,M10.5.0/3"),
+    ("Europe/Rome", "CET-1CEST,M3.5.0,M10.5.0/3"),
+    ("Europe/Stockholm", "CET-1CEST,M3.5.0,M10.5.0/3"),
+    ("Europe/Tallinn", "EET-2EEST,M3.5.0/3,M10.5.0/4"),
+    ("Europe/Warsaw", "CET-1CEST,M3.5.0,M10.5.0/3"),
+    ("Europe/Zurich", "CET-1CEST,M3.5.0,M10.5.0/3"),
+    ("Pacific/Auckland", "NZST-12NZDT,M9.5.0,M4.1.0/3"),
+    ("Pacific/Honolulu", "HST10"),
+]
+
+## A day a zone's rule changes its offset on: the `week`-th `weekday` (0 for
+## Sunday) of `month`, week 5 being the last, at `seconds` of local time.
+@derive(Copy, Eq, Debug)
+struct Change:
+    month: int
+    week: int
+    weekday: int
+    seconds: int
+
+## A time zone (11, `std.time`): the offset from UTC of its standard time
+## and, when it has one, of its daylight time with the days that start and
+## end it, each with the abbreviation it is shown with. `Zone.named` gives
+## the zones of the table above by their names in the tz database; a time
+## before the rules came into force is given today's rules (decision 627).
+##
+## ```
+## let helsinki = Zone.named("Europe/Helsinki").expect("a zone")
+## let summer = DateTime.parse("2026-07-01T12:00:00Z").expect("a time")
+## let winter = DateTime.parse("2026-01-15T12:00:00Z").expect("a time")
+## assert helsinki.offset_at(summer) == Duration.hours(3)
+## assert helsinki.abbreviation_at(winter) == "EET"
+## assert helsinki.format(summer) == "2026-07-01T15:00:00+03:00"
+## assert helsinki.local(summer).hour() == 15
+## assert Zone.named("Mars/Olympus").is_err()
+## ```
+@derive(Eq, Debug)
+pub struct Zone:
+    ## The zone's name, as `Europe/Helsinki`, or `UTC+05:30` for a fixed one.
+    pub name: String
+    standard: String
+    standard_offset: int
+    daylight: String
+    daylight_offset: int
+    rules: (Change, Change)?
+
+    ## UTC itself.
+    pub pure def utc() -> Zone:
+        return Zone.fixed(0)
+
+    ## A zone of one offset, `seconds` east of UTC, named `UTC+HH:MM`.
+    pub pure def fixed(seconds: int) -> Zone:
+        let name = if seconds == 0: "UTC".to_string() else: "UTC{offset_text(seconds)}"
+        return Zone(
+            name=name.copy(),
+            standard=name.copy(),
+            standard_offset=seconds,
+            daylight=name,
+            daylight_offset=seconds,
+            rules=None,
+        )
+
+    ## The zone named `name` in the tz database, of the ones the table
+    ## knows; `InvalidTime` for another name.
+    pub pure def named(name: str) -> Zone ! TimeError:
+        for (n, rule) in ZONES:
+            if n == name:
+                let z = parse_rule(rule) else:
+                    return Err(InvalidTime(text=name.to_string()))
+                var zone = z
+                zone.name = name.to_string()
+                return Ok(zone)
+        return Err(InvalidTime(text=name.to_string()))
+
+    ## The offset from UTC the zone's clocks show at `t`.
+    pub pure def offset_at(self, t: DateTime) -> Duration:
+        return Duration.seconds(self.seconds_at(t))
+
+    ## The abbreviation the zone's time is shown with at `t`, as `EEST`.
+    pub pure def abbreviation_at(self, t: DateTime) -> String:
+        if self.daylight_at(t):
+            return self.daylight.copy()
+        return self.standard.copy()
+
+    ## The zone's wall-clock time at `t`, as a `DateTime` whose parts
+    ## (`hour`, `day`, ...) are the local ones: `t` moved by its offset.
+    pub pure def local(self, t: DateTime) -> DateTime:
+        return t + self.offset_at(t)
+
+    ## `t` as RFC 3339 writes it in the zone, its local time and offset:
+    ## `2026-07-01T15:00:00+03:00`.
+    pub pure def format(self, t: DateTime) -> String:
+        let shown = "{self.local(t)}"
+        let local = shown.byte_slice(0, shown.byte_len() - 1)
+        let s = self.seconds_at(t)
+        if s == 0:
+            return "{local}Z"
+        return "{local}{offset_text(s)}"
+
+    ## The offset at `t`, in seconds east of UTC.
+    pure def seconds_at(self, t: DateTime) -> int:
+        if self.daylight_at(t):
+            return self.daylight_offset
+        return self.standard_offset
+
+    ## Whether daylight time is in force at `t`: from its start, a local
+    ## standard time, to its end, a local daylight time, of the year `t`
+    ## falls in locally; the end comes first in a year of the southern
+    ## hemisphere.
+    pure def daylight_at(self, t: DateTime) -> bool:
+        let (start, end) = self.rules else:
+            return False
+        let at = t.unix_seconds()
+        let year = DateTime.from_unix(at + self.standard_offset).year()
+        let on = change_seconds(year, start) - self.standard_offset
+        let off = change_seconds(year, end) - self.daylight_offset
+        if on < off:
+            return at >= on and at < off
+        return at >= on or at < off
+
+## The seconds since the epoch, as if UTC, of the local time a change gives
+## in `year`.
+pure def change_seconds(year: int, c: Change) -> int:
+    let first = days_from_civil(year, c.month, 1)
+    # 1970-01-01, day 0, was a Thursday: weekday 4 counting from Sunday.
+    let first_weekday = (first % 7 + 7 + 4) % 7
+    var day = 1 + (c.weekday - first_weekday + 7) % 7 + (c.week - 1) * 7
+    while day > days_in_month(year, c.month):
+        day -= 7
+    return (first + day - 1) * 86400 + c.seconds
+
+## An offset east of UTC as RFC 3339 writes it: `+05:30`, `-03:00`.
+pure def offset_text(seconds: int) -> String:
+    let sign = if seconds < 0: "-" else: "+"
+    let m = abs(seconds) // 60
+    let (h, mm) = (m // 60, m % 60)
+    let hh = if h < 10: "0{h}" else: "{h}"
+    let ms = if mm < 10: "0{mm}" else: "{mm}"
+    return "{sign}{hh}:{ms}"
+
+## A rule as POSIX writes a `TZ` variable (the table's), or `None`.
+pure def parse_rule(rule: str) -> Zone?:
+    var cs: list[char] = []
+    for c in rule.chars():
+        cs.push(c)
+    var at = 0
+    let (standard, a) = rule_name(cs, at)?
+    let (west, b) = rule_seconds(cs, a)?
+    at = b
+    var zone = Zone.fixed(-west)
+    zone.standard = standard.copy()
+    zone.daylight = standard
+    if at == len(cs):
+        return Some(zone)
+    let (daylight, c) = rule_name(cs, at)?
+    at = c
+    zone.daylight = daylight
+    zone.daylight_offset = zone.standard_offset + 3600
+    if at < len(cs) and cs[at] != ',':
+        let (dwest, d) = rule_seconds(cs, at)?
+        zone.daylight_offset = -dwest
+        at = d
+    if at >= len(cs) or cs[at] != ',':
+        return None
+    let (start, e) = rule_change(cs, at + 1)?
+    if e >= len(cs) or cs[e] != ',':
+        return None
+    let (end, f) = rule_change(cs, e + 1)?
+    if f != len(cs):
+        return None
+    zone.rules = Some((start, end))
+    return Some(zone)
+
+## An abbreviation from `at`: letters, or any text inside `<` and `>`; and
+## where it ends.
+pure def rule_name(cs: list[char], at: int) -> (String, int)?:
+    var name = String.new()
+    var k = at
+    if k < len(cs) and cs[k] == '<':
+        k += 1
+        while k < len(cs) and cs[k] != '>':
+            name.push_char(cs[k])
+            k += 1
+        if k >= len(cs):
+            return None
+        return Some((name, k + 1))
+    while k < len(cs) and cs[k].is_alphabetic():
+        name.push_char(cs[k])
+        k += 1
+    if name.is_empty():
+        return None
+    return Some((name, k))
+
+## A signed `hh[:mm[:ss]]` from `at`, in seconds; and where it ends.
+pure def rule_seconds(cs: list[char], at: int) -> (int, int)?:
+    var k = at
+    var sign = 1
+    if k < len(cs) and (cs[k] == '+' or cs[k] == '-'):
+        if cs[k] == '-':
+            sign = -1
+        k += 1
+    var total = 0
+    var unit = 3600
+    while unit >= 1:
+        var n = 0
+        let start = k
+        while k < len(cs) and cs[k].is_digit():
+            n = n * 10 + (cs[k].to_digit() ?? 0)
+            k += 1
+        if k == start:
+            return None
+        total += n * unit
+        if unit == 1 or k >= len(cs) or cs[k] != ':':
+            break
+        k += 1
+        unit = unit // 60
+    return Some((sign * total, k))
+
+## A change `Mm.w.d[/time]` from `at`, its time 02:00 when it gives none;
+## and where it ends.
+pure def rule_change(cs: list[char], at: int) -> (Change, int)?:
+    if at >= len(cs) or cs[at] != 'M':
+        return None
+    var parts: list[int] = []
+    var k = at + 1
+    for i in range(3):
+        if i > 0:
+            if k >= len(cs) or cs[k] != '.':
+                return None
+            k += 1
+        var n = 0
+        let start = k
+        while k < len(cs) and cs[k].is_digit():
+            n = n * 10 + (cs[k].to_digit() ?? 0)
+            k += 1
+        if k == start:
+            return None
+        parts.push(n)
+    var seconds = 7200
+    if k < len(cs) and cs[k] == '/':
+        let (s, e) = rule_seconds(cs, k + 1)?
+        seconds = s
+        k = e
+    return Some((Change(month=parts[0], week=parts[1], weekday=parts[2], seconds=seconds), k))

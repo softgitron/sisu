@@ -2821,7 +2821,8 @@ comment, whose examples are tests; a re-export is kept).
 formatter changes on purpose (trailing commas, `T?` and `Option[T]`, `T
 ! E` and `Result[T, E]`, unused imports, the order of imports): otherwise it is refused as an
 internal error (`D0076`) and the file left alone. `sisu parse --shape`
-prints the shape, so the conformance suite checks any implementation's
+prints the shape (stage 1's, which refuses what its `fmt` refuses,
+decision 622), so the conformance suite checks any implementation's
 formatter: every case that parses keeps its shape and formats to a fixed
 point (`fmt(fmt(x)) == fmt(x)`), a crash of `sisu parse --shape` counting
 as a failure rather than as a syntax error, and every case without a
@@ -2939,13 +2940,16 @@ file is not changed. It runs against a test's fake `System` (files in
 memory, no network, the test clock, seeded random numbers) unless
 `--run` asks for the real one.
 
-Both check and lower their programs through stage 1 when it serves them
-(`sisu1 0.8.0` and later, or `SISU_STAGE1_REPL=1`; decision 563): the
-program is written to a directory of its own, stage 1's `sir` gives its
-SIR and its `check` the report of one that does not check, whose places
-in the input are moved there; an older stage 1 and `--front-end=rust`
-leave them to the Rust front end, as the language server's worksheets
-are.
+Both build their programs through stage 1 when it serves them (`sisu1
+0.8.0` and later, or `SISU_STAGE1_REPL=1`; decisions 563 and 620), one
+run for each input: `sir --repl SESSION INPUT --kept OUT` gives the SIR
+of the session with the input after it and the session's program that
+keeps it, or the diagnostics with the input's places drawn as `<input>`;
+`sir --worksheet FILE` gives the worksheet's SIR with each statement
+marked by the line it ends on. `:why` reads the inputs' trees from `sisu1
+parse --tree` (decision 621). An older stage 1 and `--front-end=rust`
+leave them to the Rust front end, which builds the same programs, as the
+language server's worksheets are.
 
 ## The language server
 
@@ -3608,7 +3612,7 @@ when the program ends, so the two interleave as the interpreter's do.
 ### The runtime in Sisu
 
 The runtime is being written in Sisu, piece by piece, as D-086 orders
-(decisions 335, 336, 350 to 352, 358, 383, 385, 422, 423, 506 and 542). `compiler/rt` is a Sisu package
+(decisions 335, 336, 350 to 352, 358, 383, 385, 422, 423, 506, 542, 562 and 625). `compiler/rt` is a Sisu package
 (`unsafe = "extern"`) whose root module's `export_NAME` functions are the
 runtime's symbols `sisu_rt_NAME`, of Sisu's convention (decision 189),
 which the generated code and the runtime in Rust call as any function is
@@ -3638,8 +3642,9 @@ What is in Sisu (port-debt.md, "The runtime in Sisu", has what is not):
 | text search by Two-Way, and a prefix or suffix (`sisu_rt_find`, `sisu_rt_has_edge`) | `search.sisu` | the runtime in Rust, for `in` on texts and `bytes.find`, `starts_with` and `ends_with` (decision 352) |
 | a float's text: the shortest that reads back as the same `f64` or `f32`, the fixed form and the form with an exponent (`sisu_rt_float_digits`) | `floats.sisu` | the runtime in Rust, for `Display` and `Debug` of floats, `fmt.float_digits` and `fmt.float32_digits` (decision 358) |
 | `Display` and `Debug` of a value by its type (`sisu_rt_value_display`, `_debug`) | `show.sisu` | the runtime in Rust, for `fmt.display`, `fmt.debug`, `print`, `list.join`, a failed `assert`'s sides and the error `main` returns (decision 383) |
-| a list's growth and moves, a slice's copies, the sort, `in` and `join` (`sisu_rt_list_*`) | `list.sisu` | the runtime in Rust, for the list intrinsics and every list it builds, and the generated code's `sisu_rt_list_reserve` (decision 385) |
-| the tables of dicts and sets: a new one, a key looked up, an entry appended and one taken out (`sisu_rt_table_new`, `_lookup`, `_push`, `_remove`), and a whole table copied, compared, shown and dropped | `table.sisu` | the runtime in Rust, for the dict and set intrinsics, a table literal and `d{k}` (`sisu_rt_table`, `sisu_rt_table_find`, `sisu_rt_dict_slot`), and `value.sisu` and `show.sisu` (decision 422) |
+| the intrinsics of lists, dicts and sets, their descriptors decoded (`sisu_rt_collection`) | `dispatch.sisu` over `list.sisu` and `table.sisu` | the runtime in Rust, which reads the intrinsic's number alone and hands the call over (decision 625) |
+| a list's growth and moves, a slice's copies, the sort, `in` and `join` (`sisu_rt_list_*`) | `list.sisu` | `dispatch.sisu`, the runtime in Rust for every list it builds, `sorted`, `reversed` and a slice's copies, and the generated code's `sisu_rt_list_reserve` (decision 385) |
+| the tables of dicts and sets: a new one, a key looked up, an entry appended and one taken out, and a whole table copied, compared, shown and dropped (`sisu_rt_table_new`, `_lookup`, `_push`) | `table.sisu` | `dispatch.sisu`, the runtime in Rust for a table literal, an iterator and `d{k}` (`sisu_rt_table`, `sisu_rt_table_find`, `sisu_rt_dict_slot`), and `value.sisu` and `show.sisu` (decision 422) |
 | iterators: the next item, the iterator of an `Iterable[T]` argument, every item left, the drop, a new iterator of each of the eleven kinds and what one may wait for (`sisu_rt_iter_next`, `_iterable`, `_collect`, `_drop`, `_range` and its kin, `_waits`) | `iter.sisu` | the runtime in Rust, for `Iter.next` of what does not wait, every iterator it takes items from or makes, and `value.sisu` (decisions 423 and 542) |
 
 The structural operations walk a value by the program's type table, which
@@ -9510,3 +9515,170 @@ findings from chapter 18 and guides G9, G10 and G28)
      still write every level, since the facade is ambient and a setting of
      the process would be state no program declares. `std/log_levels`
      holds it. This changes no rule of the language.
+
+**The driver: the REPL and worksheets on stage 1's own programs** (section
+"The REPL and worksheets", "The query layer and the driver"; 10; stage 1's
+RULES.md, R79 and R94; port-debt.md, "The Rust front end's roles still to
+replace")
+
+620. `sisu repl` and `sisu ws` build their programs with stage 1's `sir
+     --repl SESSION INPUT --kept OUT [--load]` and `sir --worksheet FILE`
+     (decision 580), one run of stage 1 for each input, where decision 563
+     ran `sir` and then `check` on a file the driver had wrapped or
+     instrumented: the session's program is the OUT of the last input
+     kept (or, for a session that loads a package, the `#!` line and the
+     package's inline metadata), each input is written as typed and its
+     diagnostics come on stage 1's standard error with the input's places
+     drawn in it as `<input>` and the session's as `<repl>`, which the
+     driver shows as they are (`relocate` is gone); a file loaded into a
+     session (`sisu repl FILE`) is given with `--load`, its diagnostics
+     drawn in the whole file under the name given. A worksheet's SIR marks
+     each statement by the line it ends on in the file as written
+     (`__ws_at`, `__ws_show`) and keeps `System.fake`, so the driver runs
+     it as it is and no longer needs the statements' spans nor its own
+     instrumenting. An expression is shown by `__repl_show(INPUT\n)`, its
+     `)` on a line of its own, so a panic in a session names the
+     program's line one later for each expression before it, as before
+     decision 563 (`live/session` says `<repl>:19:1` again); the Rust
+     front end, the fallback for a stage 1 older than 0.8.0 and under
+     `--front-end=rust`, wraps an expression the same way, so both give
+     the same transcript. A session's input costs one run of stage 1
+     (about 0.35 s for a small one), and a worksheet one (0.8 s for
+     `live/worksheet`). This changes no rule of the language.
+
+621. `:why NAME` reads the inputs it follows from the tree `sisu1 parse
+     --tree` prints of each (the input after a `#!` line, read once and
+     kept with the input), through a reader of that printed form
+     (`repl::Syntax`: each node's kind, range and tokens), where it parsed
+     each input with the Rust parser at each question; under the Rust
+     front end the tree is its parser's `dump`, the same text, so the
+     bindings an input makes, what an initialiser reads and which later
+     input changes a value are found by one code. A value `:why` shows is
+     still a run of the session's program with the name as the input,
+     now one run of stage 1 each. This changes no rule of the language.
+
+622. `sisu parse --shape` is stage 1's (`stage1_serves`), as `parse
+     --tree` is: it refuses what `sisu fmt` refuses, a test's name that
+     interpolates (`E0132`) among it, so the conformance runner's format
+     check, which asks `parse --shape` whether a file parses and then `sisu
+     fmt` to format it, sees the two agree; the Rust front end's, which
+     prunes an unused import from the shape where stage 1's keeps it
+     (decision 588), answers under `--front-end=rust`. This changes no
+     rule of the language.
+
+**What the manual found: the bits of the integers, `HttpError` and time
+zones** (sections "Numbers, bytes and slices", "Capabilities"; 03, 11; the
+manual's findings from chapter 24 and guides G9 and G10)
+
+623. The sized integers and `int` have bit methods in the prelude, written
+     in Sisu: `count_ones`, `count_zeros`, `leading_zeros` and
+     `trailing_zeros` (an `int`; the width for 0), `rotate_left(n)` and
+     `rotate_right(n)` by any `int` amount (taken modulo the width, a
+     negative one rotating the other way), `swap_bytes`, `to_be` (the bytes
+     swapped, every target of stage 0 being little-endian) and `to_le`;
+     and a signed type's `to_bits` and `from_bits`, its two's complement as
+     the unsigned type of its width (`(-1i8).to_bits() == 255u8`,
+     `int.from_bits(u64)`), through which its bit methods are its
+     two's complement's. The names are Rust's, since 03 names none. The
+     bodies shift by amounts of the integer's own type (`x >> 1u32`,
+     `k.truncate_to[u32]()`), which both front ends type the same: stage 1
+     keeps a sized type under a shift by an `int` (decision 581), the
+     frozen Rust front end, which checks std, widens `u64 << int` to
+     `int` and refuses it (`E0310`), so no method needed a form only one
+     of them takes. An `i128`'s bits are built from parts of 32 bits,
+     since no conversion between `i128` and `u128` exists. They are loops
+     over the bits, not the machine's `popcnt` or `bswap`, which an
+     intrinsic in the interpreter and both backends would give. The block
+     stands at the end of the prelude, so the lines of the functions
+     before it, which a program's SIR records, do not move. Doc examples
+     (11 of them, `sisu test --std`) and `std/bit_methods` hold it,
+     natively too. This changes no rule of the language.
+
+624. `HttpError.Network` holds the network's error, `Network(cause:
+     NetError)`, where it held its text, so a client tells a refused
+     connection (`Refused(address)`) from one closed early (`Closed`); a
+     wait cancelled or a task that panicked, the `TaskError` half of what
+     `Net`'s operations return, is the new variant `Interrupted(cause:
+     TaskError)`. `std.x.http`'s `over_net` lifts a result of `{NetError,
+     TaskError}` into `HttpError` (a union of error sets is a type only
+     after `!`, so the lift matches a result). `http/server` and
+     `sim/http_faults` show it. This changes no rule of the language.
+
+**The runtime in Sisu: a list's and a table's intrinsics** (section
+"Stage 2", "The runtime in Sisu"; D-086; decision 562)
+
+625. The intrinsics of lists, dicts and sets that the generated code calls
+     through `sisu_rt_intrinsic` (35 of them: `list.new` to `list.sort`,
+     `dict.new` to `dict.items`, `Entry.or_insert`, `set.new` to
+     `set.is_empty`) are decoded and done by the runtime in Sisu
+     (`rt/src/dispatch.sisu`, the export `sisu_rt_collection`): the runtime
+     in Rust reads the descriptor's first word, the intrinsic's number,
+     and hands the descriptor and the addresses to it on the system stack;
+     it reads the types of the result and the arguments from the
+     descriptor (a byte at a time, the runtime's code reading no `u32` of
+     its own), finds the values behind references and `dyn`s, checks the
+     indices and does the call by `list.sisu` and `table.sisu`, and asks
+     the runtime in Rust for what is that runtime's own through four
+     entries: a slice's bounds below 0 and a sort without an order raise
+     their panics (`sisu_rt_slice_bounds`, `sisu_rt_unordered`, beside
+     decision 562's `sisu_rt_list_bounds`), a drop, which may run a
+     program's glue on the task's stack (`sisu_rt_drop_value`), and a
+     `*rest` binding's view, an object it keeps (`sisu_rt_list_view`).
+     The numbers are the runtime in Rust's (`abi::Intrinsic`), which a test
+     of `sisu-rt` holds `dispatch.sisu`'s constants to. Deleted from the
+     runtime in Rust: the 27 arms of its dispatch that did them, the
+     wrappers of the exports they called (`list_pop`, `list_insert`,
+     `list_remove`, `list_extend`, `list_swap`, `list_join`,
+     `table_remove`, a table's key type) and those exports themselves in
+     the runtime in Sisu. Still the runtime in Rust's: the iterators of a
+     list and a set (`list.iter`, `set.iter`, which share their arm with a
+     receiver's), `in` as an operator (`ValueOp::In`), a slice's
+     intrinsics, a literal's table and the inline lookups' entry
+     (`sisu_rt_table_find`). The seed grows from 589 082 to 649 669 bytes
+     of SIR and the runtime's object from 619 984 to 686 800 bytes
+     (`target/rt/rt.o`), and as the fixed point builds it with the Sisu
+     backend from 1 151 544 to 1 269 416 bytes; the fixed point holds
+     (rt-A.o and rt-B.o the same bytes, as sisu2-A and sisu2-B, 32 323 848,
+     and stage1-A and stage1-B, 63 243 656, which carry the standard
+     library's changes of decisions 623, 624 and 627 too). This changes no
+     rule of the language.
+
+**The native checked memory model: faster checks** (sections "The checked
+memory model"; 22; D-085; decision 543)
+
+626. A raw read or write in the debug profile takes half the time it took:
+     the model remembers the block it found last (its address and size,
+     forgotten when a block's record goes or comes), so an access inside
+     it needs no lookup in the ordered map of blocks, and a write of a
+     plain value over one of its own type at the same offset, a loop's
+     commonest write, leaves the block's record as it was rather than
+     clearing the range and recording the value again. Two million reads
+     and writes through a block of `Global`'s take 0.52 s in the debug
+     profile, where they took 1.15 s on the same machine (2.3 s in the
+     last round's measurement), and 0.010 s in the release profile;
+     callgrind counts 2 100 instructions for each, where it counted 4 300.
+     The lock, the call of the runtime and its descriptor stay; the
+     hoisting of a loop's checks by the release facts (decision 270) and a
+     pointer's provenance (tagged pointers, the sound form of `R0135` and
+     `R0139`) are not done. This changes no rule of the language.
+
+627. `std.time` has `Instant` and time zones (11). An `Instant` is a
+     reading of a clock (`Instant.now(clock)`, `elapsed(clock)`,
+     `since(earlier)`, `+` and `-` a `Duration`), ordered and shown as
+     its nanoseconds; its readings are the clock's `now`, so the test clock
+     makes them deterministic and a recorded run replays them, and on the
+     host's clock they are the system's time, which a change of the
+     system's clock moves: a monotonic reading would be an operation of
+     `ClockOps` with its log and fakes. A `Zone` is a standard offset and
+     abbreviation and, when it has daylight time, a second pair with the
+     rules of its start and end; `Zone.named` gives the 52 zones of a
+     table embedded in the module by their tz names, each as POSIX writes
+     a `TZ` variable (`EET-2EEST,M3.5.0/3,M10.5.0/4`), as their rules
+     stand since 2007, a time before a zone's rules came into force taking
+     today's; `Zone.utc()` and `Zone.fixed(seconds)` make one offset.
+     `offset_at(t)`, `abbreviation_at(t)`, `local(t)`, a `DateTime` whose
+     parts are the zone's wall clock's, and `format(t)`, RFC 3339 with
+     the offset (`2026-07-01T15:00:00+03:00`). The tz database itself,
+     with each zone's history, is `std.x.tzdata`'s, which is not written.
+     `std/time_zones` holds it, natively too. This changes no rule of the
+     language.

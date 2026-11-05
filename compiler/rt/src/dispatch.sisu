@@ -1,0 +1,572 @@
+##! The intrinsics of lists, dicts and sets, decoded and done here (D-086;
+##! decision 625). A call of an intrinsic gives the runtime in Rust its
+##! descriptor, `u32` words: the intrinsic's number, the number of its
+##! arguments and of its type arguments, the type of its result, of each
+##! argument and each type argument; and the addresses of its result and
+##! of each argument. For the intrinsics numbered here the runtime in Rust
+##! reads the number alone and hands the rest to `export_collection`, which
+##! reads the types, finds the values behind references, checks what the
+##! call asks and does it, by `list.sisu` and `table.sisu`; it asks the
+##! runtime in Rust for what is that runtime's own: a panic, whose message
+##! its catalog names, the drop of a value, which may run a program's glue
+##! on the task's stack, and a view of a list's elements, an object it
+##! keeps.
+
+import rt.iter
+import rt.list
+import rt.search
+import rt.table
+import rt.value
+from rt.host import memmove
+from rt.host import sisu_rt_alloc
+from rt.host import sisu_rt_drop_value
+from rt.host import sisu_rt_free
+from rt.host import sisu_rt_list_bounds
+from rt.host import sisu_rt_list_view
+from rt.host import sisu_rt_slice_bounds
+from rt.host import sisu_rt_unordered
+from rt.types import CHAR
+from rt.types import DICT
+from rt.types import LIST
+from rt.types import PATH
+from rt.types import REF
+from rt.types import SET
+from rt.types import STR
+from rt.types import STRING
+from rt.types import Types
+from std.mem import ptr
+
+# The intrinsics this module does, by their numbers in the runtime in
+# Rust's `abi::Intrinsic`, each after its name (`sisu-rt`'s test
+# `the_collections_numbers_are_the_runtimes` holds them to it).
+
+## `list.new`
+pub(package) const LIST_NEW: int = 85
+## `list.with_capacity`
+pub(package) const LIST_WITH_CAPACITY: int = 86
+## `list.push`
+pub(package) const LIST_PUSH: int = 87
+## `list.pop`
+pub(package) const LIST_POP: int = 88
+## `list.last`
+pub(package) const LIST_LAST: int = 89
+## `list.first`
+pub(package) const LIST_FIRST: int = 90
+## `list.get`
+pub(package) const LIST_GET: int = 91
+## `list.is_empty`
+pub(package) const LIST_IS_EMPTY: int = 92
+## `list.insert`
+pub(package) const LIST_INSERT: int = 93
+## `list.remove`
+pub(package) const LIST_REMOVE: int = 94
+## `list.extend`
+pub(package) const LIST_EXTEND: int = 95
+## `list.reverse`
+pub(package) const LIST_REVERSE: int = 96
+## `list.swap`
+pub(package) const LIST_SWAP: int = 97
+## `list.clear`
+pub(package) const LIST_CLEAR: int = 98
+## `list.slice`
+pub(package) const LIST_SLICE: int = 99
+## `list.slice_middle`
+pub(package) const LIST_SLICE_MIDDLE: int = 100
+## `list.contains`
+pub(package) const LIST_CONTAINS: int = 101
+## `list.join`
+pub(package) const LIST_JOIN: int = 103
+## `list.sort`
+pub(package) const LIST_SORT: int = 104
+## `dict.new`
+pub(package) const DICT_NEW: int = 149
+## `dict.get`
+pub(package) const DICT_GET: int = 150
+## `dict.contains`
+pub(package) const DICT_CONTAINS: int = 151
+## `dict.is_empty`
+pub(package) const DICT_IS_EMPTY: int = 152
+## `dict.insert`
+pub(package) const DICT_INSERT: int = 153
+## `dict.remove`
+pub(package) const DICT_REMOVE: int = 154
+## `dict.entry`
+pub(package) const DICT_ENTRY: int = 155
+## `dict.keys`
+pub(package) const DICT_KEYS: int = 156
+## `dict.values`
+pub(package) const DICT_VALUES: int = 157
+## `dict.items`
+pub(package) const DICT_ITEMS: int = 158
+## `Entry.or_insert`
+pub(package) const ENTRY_OR_INSERT: int = 159
+## `set.new`
+pub(package) const SET_NEW: int = 160
+## `set.add`
+pub(package) const SET_ADD: int = 161
+## `set.remove`
+pub(package) const SET_REMOVE: int = 162
+## `set.contains`
+pub(package) const SET_CONTAINS: int = 163
+## `set.is_empty`
+pub(package) const SET_IS_EMPTY: int = 164
+
+## The status of a call that did what it asked.
+const OK: int = 0
+
+## The most room `list.with_capacity` asks for at once, in elements.
+const MOST_ROOM: int = 1048576
+
+## A call of an intrinsic: the program's types, its descriptor, the
+## address of its result and the block of its arguments' addresses.
+@derive(Copy)
+struct Call:
+    ts: Types
+    desc: ptr[u8]
+    ret: ptr mut u8
+    args: ptr mut u8
+
+impl Call:
+    ## Word `k` of the descriptor, a `u32` read a byte at a time, the lowest
+    ## first, as the runtime's code reads no `u32` of its own.
+    ##
+    ## Requires:
+    ## - `call`: the call is the generated code's, whose descriptor has
+    ##   word `k`
+    def word(self, k: int) -> int:
+        # safety: in_bounds, valid: the descriptor holds its four words and a
+        #   type for each argument and type argument, by `call`; a byte needs
+        #   no alignment.
+        unsafe:
+            let b = self.desc.offset(4 * k)
+            let low = b.read().to_int() + b.offset(1).read().to_int() * 256
+            return low
+                + b.offset(2).read().to_int() * 65536
+                + b.offset(3).read().to_int() * 16777216
+
+    ## The type of the call's result.
+    def ret_ty(self) -> int:
+        return self.word(3)
+
+    ## The type of argument `i`.
+    def ty(self, i: int) -> int:
+        return self.word(4 + i)
+
+    ## The address argument `i` is at.
+    ##
+    ## Requires:
+    ## - `call`: the call has argument `i`
+    def arg(self, i: int) -> ptr mut u8:
+        # safety: in_bounds, valid, aligned, writable: the block holds the
+        #   address of each argument, which the call may change, by `call`.
+        return unsafe self.args.cast[ptr[u8]]().offset(i).read().cast_mut()
+
+    ## The value argument `i` is, or refers to, and its type.
+    def place(self, i: int) -> (ptr mut u8, int):
+        return value.target(self.ts, self.arg(i), self.ty(i))
+
+    ## The first word of the value argument `i` is or refers to: a dict's or
+    ## a set's table, an `int`.
+    def first(self, i: int) -> int:
+        let (p, _) = self.place(i)
+        # safety: valid, aligned: every argument read so is at least a word.
+        return unsafe p.cast[int]().read()
+
+    ## The table of the dict or set argument `i` is or refers to.
+    def table(self, i: int) -> ptr mut u8:
+        let (p, _) = self.place(i)
+        # safety: valid, aligned, writable: a dict's and a set's value is its
+        #   table's address, which the call may change.
+        return unsafe p.cast[ptr[u8]]().read().cast_mut()
+
+    ## Word `k` of the result.
+    ##
+    ## Requires:
+    ## - `room`: the result has room for `k + 1` words
+    def set(self, k: int, w: int):
+        # safety: in_bounds, aligned, writable: by `room`.
+        unsafe self.ret.cast[int]().offset(k).write(w)
+
+    ## An option's `None` as the result.
+    def none(self):
+        self.set(0, 1)
+
+    ## An option's `Some` of a word as the result.
+    def some(self, w: int):
+        self.set(0, 0)
+        self.set(1, w)
+
+    ## A `bool` as the result.
+    def set_bool(self, b: bool):
+        self.set(0, if b: 1 else: 0)
+
+## The drop of the value at `p` of type `t`, by the runtime in Rust: its
+## status.
+##
+## Requires:
+## - `typed`: `p` holds a live value of type `t`, dead afterwards
+def dropped(p: ptr mut u8, t: int) -> int:
+    # safety: returns_promptly: the runtime in Rust drops it, running its glue
+    #   where the task's stack is needed.
+    return unsafe sisu_rt_drop_value(p, t).to_int()
+
+## A block of `n` bytes of scratch room, at least a word.
+def scratch(n: int) -> ptr mut u8:
+    # safety: returns_promptly: the runtime in Rust gives the block.
+    return unsafe sisu_rt_alloc(max(n, 8))
+
+## Frees a block of `scratch`.
+def free(p: ptr mut u8):
+    # safety: returns_promptly: the runtime in Rust frees the block.
+    unsafe sisu_rt_free(p)
+
+## Writes an empty list, or an empty `String`, at `p`: three words of 0.
+##
+## Requires:
+## - `room`: `p` has room for three words
+def empty(p: ptr mut u8):
+    # safety: in_bounds, aligned, writable: by `room`.
+    unsafe:
+        let w = p.cast[int]()
+        w.write(0)
+        w.offset(1).write(0)
+        w.offset(2).write(0)
+
+## The bytes of the text at `p` of type `t`, behind any references: their
+## address and their number, none for a value that is not a text.
+##
+## Requires:
+## - `typed`: `p` holds a live value of type `t`
+def text_of(ts: Types, p: ptr mut u8, t: int) -> (ptr mut u8, int):
+    let (q, u) = value.target(ts, p, t)
+    let k = ts.kind(u)
+    if k != STR and k != STRING and k != PATH:
+        return (q, 0)
+    # safety: in_bounds, valid, aligned, writable: a text's first two words
+    #   are the address of its bytes and their number, which are only read.
+    unsafe:
+        return (q.cast[ptr[u8]]().read().cast_mut(), q.cast[int]().offset(1).read())
+
+## Writes the UTF-8 bytes of the character `c` at `out`: their number.
+##
+## Requires:
+## - `room`: `out` has room for four bytes
+def utf8(c: int, out: ptr mut u8) -> int:
+    # safety: in_bounds, writable: by `room`; a byte needs no alignment.
+    unsafe:
+        if c < 128:
+            out.write(u8.wrapping_from(c))
+            return 1
+        if c < 2048:
+            out.write(u8.wrapping_from(192 + c // 64))
+            out.offset(1).write(u8.wrapping_from(128 + c % 64))
+            return 2
+        if c < 65536:
+            out.write(u8.wrapping_from(224 + c // 4096))
+            out.offset(1).write(u8.wrapping_from(128 + (c // 64) % 64))
+            out.offset(2).write(u8.wrapping_from(128 + c % 64))
+            return 3
+        out.write(u8.wrapping_from(240 + c // 262144))
+        out.offset(1).write(u8.wrapping_from(128 + (c // 4096) % 64))
+        out.offset(2).write(u8.wrapping_from(128 + (c // 64) % 64))
+        out.offset(3).write(u8.wrapping_from(128 + c % 64))
+        return 4
+
+## `item in container`: an element of a list, a key of a dict or a set, or
+## a piece of a text, a character or a text (`list.contains`, which `in`
+## lowers to).
+##
+## Requires:
+## - `typed`: `c` holds a live value of type `ct`, and `x` one of type `xt`
+def contains(ts: Types, c: ptr mut u8, ct: int, x: ptr mut u8, xt: int) -> bool:
+    let (p, t) = value.target(ts, c, ct)
+    let k = ts.kind(t)
+    if k == LIST:
+        return list.contains(ts, p, ts.a(t), x, xt)
+    if k == DICT or k == SET:
+        # safety: valid, aligned, writable: a dict's and a set's value is its
+        #   table's address, which a lookup only reads.
+        return table.find(ts, unsafe p.cast[ptr[u8]]().read().cast_mut(), x, xt) >= 0
+    if k != STR and k != STRING and k != PATH:
+        return False
+    let (hay, n) = text_of(ts, p, t)
+    let (q, u) = value.target(ts, x, xt)
+    if ts.kind(u) == CHAR:
+        let buf = scratch(8)
+        # safety: valid, aligned: a character is the word of its code.
+        let m = utf8(unsafe q.cast[int]().read(), buf)
+        let found = search.find(hay.as_const(), n, buf.as_const(), m) >= 0
+        free(buf)
+        return found
+    let (needle, m) = text_of(ts, q, u)
+    return search.find(hay.as_const(), n, needle.as_const(), m) >= 0
+
+## The list intrinsics: the status.
+##
+## Requires:
+## - `call`: `c` is a call of one of the list intrinsics above
+def list_call(c: Call, id: int) -> int:
+    let ts = c.ts
+    if id == LIST_NEW:
+        empty(c.ret)
+        return OK
+    if id == LIST_WITH_CAPACITY:
+        empty(c.ret)
+        let rt = c.ret_ty()
+        if ts.kind(rt) == LIST:
+            let room = min(max(c.first(0), 0), MOST_ROOM)
+            list.reserve(c.ret, room, ts.size(ts.a(rt)))
+        return OK
+    if id == LIST_CONTAINS:
+        # The container may be a text, a dict or a set too.
+        c.set_bool(contains(ts, c.arg(0), c.ty(0), c.arg(1), c.ty(1)))
+        return OK
+    let (l, lt) = c.place(0)
+    let e = ts.a(lt)
+    let size = ts.size(e)
+    let n = list.length(l)
+    if id == LIST_PUSH:
+        list.reserve(l, 1, size)
+        # safety: in_bounds, writable: the buffer has room for one more
+        #   element; returns_promptly: memmove moves its bytes in.
+        unsafe:
+            _ = memmove(list.buffer(l).offset(n * size), c.arg(1).as_const(), size)
+        list.set_length(l, n + 1)
+        return OK
+    if id == LIST_POP:
+        list.pop(ts, l, e, c.ret)
+        return OK
+    if id == LIST_GET or id == LIST_FIRST or id == LIST_LAST:
+        var k = n - 1
+        if id == LIST_GET:
+            k = c.first(1)
+        elif id == LIST_FIRST:
+            k = 0
+        if k >= 0 and k < n:
+            # safety: in_bounds: `k` is an element of the buffer.
+            c.some(unsafe list.buffer(l).offset(k * size).addr())
+        else:
+            c.none()
+        return OK
+    if id == LIST_IS_EMPTY:
+        c.set_bool(n == 0)
+        return OK
+    if id == LIST_INSERT:
+        let k = c.first(1)
+        if k < 0 or k > n:
+            # safety: returns_promptly: the runtime in Rust raises the panic.
+            let st = unsafe sisu_rt_list_bounds(True, k, n).to_int()
+            return value.after_part(st, dropped(c.arg(2), e))
+        list.insert(l, k, c.arg(2), size)
+        return OK
+    if id == LIST_REMOVE:
+        let k = c.first(1)
+        if k < 0 or k >= n:
+            # safety: as above.
+            return unsafe sisu_rt_list_bounds(False, k, n).to_int()
+        list.remove(l, k, c.ret, size)
+        return OK
+    if id == LIST_EXTEND:
+        list.extend(l, c.arg(1), size)
+        return OK
+    if id == LIST_REVERSE:
+        list.reverse(l, size)
+        return OK
+    if id == LIST_SWAP:
+        let (i, j) = (c.first(1), c.first(2))
+        if i < 0 or i >= n:
+            # safety: as above.
+            return unsafe sisu_rt_list_bounds(False, i, n).to_int()
+        if j < 0 or j >= n:
+            # safety: as above.
+            return unsafe sisu_rt_list_bounds(False, j, n).to_int()
+        list.swap(l, i, j, size)
+        return OK
+    if id == LIST_CLEAR:
+        # The list is empty before its old elements are dropped.
+        let old = scratch(24)
+        # safety: valid, writable: a list is three words; returns_promptly:
+        #   memmove moves them aside.
+        unsafe:
+            _ = memmove(old, l.as_const(), 24)
+        empty(l)
+        let st = dropped(old, lt)
+        free(old)
+        return st
+    if id == LIST_SLICE or id == LIST_SLICE_MIDDLE:
+        var lo = 0
+        var hi = 0
+        let (a, b) = (c.first(1), c.first(2))
+        if id == LIST_SLICE:
+            if a < 0 or b < 0:
+                # safety: returns_promptly: the runtime in Rust raises the
+                #   panic.
+                return unsafe sisu_rt_slice_bounds(a, b).to_int()
+            lo = min(a, n)
+            hi = max(min(b, n), lo)
+        else:
+            lo = min(a, n)
+            hi = max(n - min(b, n), lo)
+        if ts.kind(c.ret_ty()) == REF:
+            # A `*rest` binding views the elements in place (decision 214).
+            # safety: returns_promptly: the runtime in Rust makes the view.
+            c.set(0, unsafe sisu_rt_list_view(l, size, lo, hi).addr())
+        else:
+            list.copies(ts, c.ret, l, e, lo, hi)
+        return OK
+    if id == LIST_JOIN:
+        let (sep, m) = text_of(ts, c.arg(1), c.ty(1))
+        empty(c.ret)
+        list.join(ts, c.ret, l, e, sep, m)
+        return OK
+    if id == LIST_SORT:
+        if not list.sort(ts, l, e):
+            # safety: returns_promptly: the runtime in Rust raises the panic.
+            return unsafe sisu_rt_unordered().to_int()
+        return OK
+    return OK
+
+## The table of the entry at `e`: its first word.
+##
+## Requires:
+## - `entry`: `e` holds a live `Entry`, its table's address and its key
+def entry_table(e: ptr mut u8) -> ptr mut u8:
+    # safety: valid, aligned, writable: by `entry`; the table is the dict's.
+    return unsafe e.cast[ptr[u8]]().read().cast_mut()
+
+## The key of the entry at `e`, after its table's address.
+##
+## Requires:
+## - `entry`: as `entry_table`
+def entry_key(e: ptr mut u8) -> ptr mut u8:
+    # safety: in_bounds: by `entry`.
+    return unsafe e.offset(8)
+
+## The dict and set intrinsics: the status.
+##
+## Requires:
+## - `call`: `c` is a call of one of the dict and set intrinsics above
+def table_call(c: Call, id: int) -> int:
+    let ts = c.ts
+    if id == DICT_NEW or id == SET_NEW:
+        let rt = c.ret_ty()
+        var val = -1
+        if ts.kind(rt) == DICT:
+            val = ts.header(rt).b
+        c.set(0, table.new(ts, ts.a(rt), val).addr())
+        return OK
+    if id == ENTRY_OR_INSERT:
+        # The entry is the dict's table and the key, moved in.
+        let e = c.arg(0)
+        let tb = entry_table(e)
+        let key = entry_key(e)
+        let kt = table.key_type(tb)
+        let i = table.find(ts, tb, key, kt)
+        if i >= 0:
+            c.set(0, table.value_at(tb, i).addr())
+            return value.after_part(dropped(c.arg(1), c.ty(1)), dropped(key, kt))
+        let k = table.push(ts, tb, key)
+        # safety: returns_promptly: memmove moves the value in.
+        unsafe:
+            _ = memmove(table.value_at(tb, k), c.arg(1).as_const(), table.value_size(tb))
+        c.set(0, table.value_at(tb, k).addr())
+        return OK
+    let tb = c.table(0)
+    if id == DICT_KEYS or id == DICT_VALUES or id == DICT_ITEMS:
+        var part = 2
+        if id == DICT_KEYS:
+            part = 0
+        elif id == DICT_VALUES:
+            part = 1
+        c.set(0, iter.table_part(tb, part).addr())
+        return OK
+    if id == DICT_IS_EMPTY or id == SET_IS_EMPTY:
+        c.set_bool(table.length(tb) == 0)
+        return OK
+    if id == DICT_ENTRY:
+        c.set(0, tb.addr())
+        # safety: in_bounds, writable: an entry has room for the key after its
+        #   table's address; returns_promptly: memmove moves the key in.
+        unsafe:
+            _ = memmove(c.ret.offset(8), c.arg(1).as_const(), table.key_size(tb))
+        return OK
+    let i = table.find(ts, tb, c.arg(1), c.ty(1))
+    if id == DICT_GET:
+        if i >= 0:
+            c.some(table.value_at(tb, i).addr())
+        else:
+            c.none()
+        return OK
+    if id == DICT_CONTAINS or id == SET_CONTAINS:
+        c.set_bool(i >= 0)
+        return OK
+    let (ksize, vsize) = (table.key_size(tb), table.value_size(tb))
+    if id == DICT_INSERT:
+        # Replaces the value of a key that is there, keeping its key and
+        # dropping the one given, and gives the old value.
+        if i >= 0:
+            c.set(0, 0)
+            # safety: in_bounds, writable: the result is an option of a value;
+            #   returns_promptly: memmove moves the values.
+            unsafe:
+                _ = memmove(c.ret.offset(8), table.value_at(tb, i).as_const(), vsize)
+                _ = memmove(table.value_at(tb, i), c.arg(2).as_const(), vsize)
+            return dropped(c.arg(1), c.ty(1))
+        let k = table.push(ts, tb, c.arg(1))
+        # safety: returns_promptly: memmove moves the value in.
+        unsafe:
+            _ = memmove(table.value_at(tb, k), c.arg(2).as_const(), vsize)
+        c.none()
+        return OK
+    if id == DICT_REMOVE or id == SET_REMOVE:
+        if i < 0:
+            if id == DICT_REMOVE:
+                c.none()
+            else:
+                c.set_bool(False)
+            return OK
+        let out = scratch(ksize + vsize)
+        table.remove(tb, i, out)
+        if id == DICT_REMOVE:
+            c.set(0, 0)
+            # safety: in_bounds, writable: the result is an option of a value;
+            #   returns_promptly: memmove moves it out.
+            unsafe:
+                _ = memmove(c.ret.offset(8), out.offset(ksize).as_const(), vsize)
+        else:
+            c.set_bool(True)
+        let st = dropped(out, table.key_type(tb))
+        free(out)
+        return st
+    if id == SET_ADD:
+        if i >= 0:
+            c.set_bool(False)
+            return dropped(c.arg(1), c.ty(1))
+        # The key is copied in as the set's key type, and the one given
+        # dropped.
+        let key = scratch(ksize)
+        let (p, t) = c.place(1)
+        value.copy(ts, key, p, t)
+        _ = table.push(ts, tb, key)
+        free(key)
+        c.set_bool(True)
+        return dropped(c.arg(1), c.ty(1))
+    return OK
+
+## A call of one of the intrinsics above: `desc` its descriptor, `ret` the
+## address of its result and `args` the block of its arguments' addresses,
+## the types those of the table at `types`. Its status: 0, or that of the
+## panic it raised.
+##
+## Requires:
+## - `call`: `desc`, `ret` and `args` are a call of the generated code of an
+##   intrinsic numbered above, whose arguments are live values of the types
+##   its descriptor gives
+pub(package) def collection(
+    types: ptr[int], desc: ptr[u8], ret: ptr mut u8, args: ptr mut u8
+) -> int:
+    let c = Call(ts=Types(words=types), desc=desc, ret=ret, args=args)
+    let id = c.word(0)
+    if id >= LIST_NEW and id <= LIST_SORT:
+        return list_call(c, id)
+    return table_call(c, id)

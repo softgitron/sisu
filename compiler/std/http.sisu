@@ -50,6 +50,31 @@ pure def find_header(headers: list[(String, String)], name: str) -> String?:
             return Some(h.1.copy())
     return None
 
+## What the network gave, its error as the `HttpError` that holds it: a
+## `NetError` as `Network`, so that a client tells a refused connection
+## from a closed one, and the `TaskError` of a wait cancelled or of a task
+## that panicked as `Interrupted` (decision 624).
+def over_net[T](own r: T ! {NetError, TaskError}) -> T ! HttpError:
+    if r.is_ok():
+        return Ok(r.unwrap())
+    match r:
+        case Ok(_):
+            unreachable()
+        case Err(Refused(address=a)):
+            return Err(Network(cause=Refused(address=a.copy())))
+        case Err(NotAllowed(address=a)):
+            return Err(Network(cause=NotAllowed(address=a.copy())))
+        case Err(Closed):
+            return Err(Network(cause=Closed))
+        case Err(Revoked):
+            return Err(Network(cause=Revoked))
+        case Err(Other(message=m)):
+            return Err(Network(cause=Other(message=m.copy())))
+        case Err(Cancelled):
+            return Err(Interrupted(cause=Cancelled))
+        case Err(TaskPanicked(message=m, trace=t)):
+            return Err(Interrupted(cause=TaskPanicked(message=m.copy(), trace=t.copy())))
+
 ## Reads a message from a connection: what it read past the last message
 ## stays in `buf`.
 struct Reader:
@@ -68,7 +93,7 @@ impl Reader:
                 return Ok(head)
             if len(self.buf) > limit:
                 return Err(Malformed(detail="a header longer than {limit} bytes"))
-            let chunk = self.conn.read(65536).map_err((e) -> Network(message="{e}"))?
+            let chunk = over_net(self.conn.read(65536))?
             if chunk.is_empty():
                 return Err(Malformed(detail="the stream ended inside a header"))
             self.buf = self.buf + chunk
@@ -76,7 +101,7 @@ impl Reader:
     ## Exactly `n` bytes.
     def exactly(mut self, n: int) -> bytes ! HttpError:
         while len(self.buf) < n:
-            let chunk = self.conn.read(65536).map_err((e) -> Network(message="{e}"))?
+            let chunk = over_net(self.conn.read(65536))?
             if chunk.is_empty():
                 return Err(Malformed(detail="the stream ended inside a body"))
             self.buf = self.buf + chunk
@@ -89,7 +114,7 @@ impl Reader:
         var out = self.buf.copy()
         self.buf = bytes.new()
         while True:
-            let chunk = self.conn.read(65536).map_err((e) -> Network(message="{e}"))?
+            let chunk = over_net(self.conn.read(65536))?
             if chunk.is_empty():
                 return Ok(out)
             out = out + chunk
@@ -142,11 +167,9 @@ pure def message(first: str, headers: list[(String, String)], body: bytes) -> by
 
 ## Sends `method` for `url`, with `body`, and reads the response.
 def request(net: Net, method: str, url: Url, body: bytes = b"") -> Response ! HttpError:
-    var conn = net.connect(url.host, url.port).map_err((e) -> Network(message="{e}"))?
+    var conn = over_net(net.connect(url.host, url.port))?
     let headers = [("Host".to_string(), url.host.copy())]
-    conn.write(message("{method} {url.target()} HTTP/1.1", headers, body)).map_err(
-        (e) -> Network(message="{e}")
-    )?
+    over_net(conn.write(message("{method} {url.target()} HTTP/1.1", headers, body)))?
     var r = Reader(conn=conn, buf=bytes.new())
     let head = parse_head(r.until(b"\r\n\r\n", 65536)?)?
     let parts: list[str] = head.line.split(" ").collect()

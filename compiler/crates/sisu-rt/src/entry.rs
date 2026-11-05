@@ -668,6 +668,16 @@ unsafe extern "C" fn sisu_rt_intrinsic(desc: *const u32, ret: *mut u8, args: *co
 /// # Safety
 /// The descriptor and the addresses are the generated code's.
 unsafe extern "C" fn intrinsic_call(desc: *const u32, ret: *mut u8, args: *const *mut u8) -> u8 {
+    // A list's, a dict's and a set's intrinsics are the runtime in Sisu's,
+    // which reads their descriptors itself (decision 625).
+    // SAFETY: the descriptor's first word is the intrinsic's number.
+    if crate::bridge::collects(unsafe { *desc }) {
+        let (desc, ret, args) = (desc as usize, ret as usize, args as usize);
+        // SAFETY: as the caller guarantees.
+        return system_status(|| unsafe {
+            crate::bridge::collection(desc as *const u32, ret as *mut u8, args as *const *mut u8)
+        });
+    }
     // SAFETY: as the caller guarantees.
     let (i, c) = unsafe { crate::intrinsics::decode(desc, ret, args) };
     // std.par's bodies are Sisu code, run on the workers or on this stack

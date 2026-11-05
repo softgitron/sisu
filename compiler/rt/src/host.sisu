@@ -65,6 +65,18 @@ extern "C":
     ## Raises the panic of an index `index` outside a list of `len`
     ## elements, of `insert` when `insert` (decision 562): its status.
     pub def sisu_rt_list_bounds(insert: bool, index: int, len: int) -> u8
+    ## Raises the panic of a slice whose bounds `start` and `end` are not
+    ## both at least 0 (decision 625): its status.
+    pub def sisu_rt_slice_bounds(start: int, end: int) -> u8
+    ## Raises the panic of a sort that met two elements without an order:
+    ## its status.
+    pub def sisu_rt_unordered() -> u8
+    ## Drops the value at `p` of type `t`, running its glue on the task's
+    ## stack where it needs it: the status.
+    pub def sisu_rt_drop_value(p: ptr mut u8, t: int) -> u8
+    ## A view of the elements `lo` to `hi`, `size` bytes each, of the list at
+    ## `l` (a `*rest` binding, decision 214): the address of its header.
+    pub def sisu_rt_list_view(l: ptr mut u8, size: int, lo: int, hi: int) -> ptr mut u8
     ## Copies `n` bytes from `src` to `dst`; the regions may overlap.
     pub def memmove(dst: ptr mut u8, src: ptr[u8], n: int) -> ptr mut u8
     ## The order of the `n` bytes at `a` and at `b`: 0 when they are the same.

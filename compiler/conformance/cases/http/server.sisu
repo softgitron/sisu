@@ -52,8 +52,8 @@ test "clients on many tasks each get their own answer":
 test "nothing listens: the client is refused":
     let net = Net.fake()
     match http.get(net, url("http://localhost:9/")):
-        case Err(Network(message)):
-            assert message == "Refused(address=\"localhost:9\")"
+        case Err(Network(cause=Refused(address=a))):
+            assert a == "localhost:9"
         case other:
             assert False, "expected a refusal, got {other}"
 

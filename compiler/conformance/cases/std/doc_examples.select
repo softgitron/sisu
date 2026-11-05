@@ -18,6 +18,17 @@ test "std.core/DateTime.year (doc example)" ... ok
 test "std.core/DateTime.parse (doc example)" ... ok
 test "std.core/Option.copied (doc example)" ... ok
 test "std.core/Fs.read_only (doc example)" ... ok
+test "std.core/u32.count_ones (doc example)" ... ok
+test "std.core/u32.leading_zeros (doc example)" ... ok
+test "std.core/u32.trailing_zeros (doc example)" ... ok
+test "std.core/u32.rotate_left (doc example)" ... ok
+test "std.core/u32.rotate_right (doc example)" ... ok
+test "std.core/u32.swap_bytes (doc example)" ... ok
+test "std.core/u32.to_be (doc example)" ... ok
+test "std.core/i8.to_bits (doc example)" ... ok
+test "std.core/i8.count_ones (doc example)" ... ok
+test "std.core/int.to_bits (doc example)" ... ok
+test "std.core/int.count_ones (doc example)" ... ok
 test "std.collections/Deque (doc example)" ... ok
 test "std.collections/Deque.pop_back (doc example)" ... ok
 test "std.collections/Deque.get (doc example)" ... ok
@@ -160,4 +171,4 @@ test "std.task/Once (doc example)" ... ok
 test "std.test/Bench (doc example)" ... ok
 test "std.time/Ticker (doc example)" ... ok
 test "std.time/Timeline (doc example)" ... ok
-162 passed, 0 failed, 0 blocked
+173 passed, 0 failed, 0 blocked

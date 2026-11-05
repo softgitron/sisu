@@ -19,18 +19,19 @@ cargo run -p sisu-conformance -- --sisu path/to/sisu --front-end=rust conformanc
 written in Sisu, compiled natively (`compiler/target/stage1/sisu1`, built
 from `compiler/stage1` by the Rust front end when a source of it is newer),
 for `check`, `sir`, `build`, `run`, `test`, `bench`, `fmt`, `doc`,
-`tokens` and `parse`: their diagnostics, SIR and pages are stage 1's, and
+`tokens` and `parse` (`--shape` too, decision 622): their diagnostics,
+SIR and pages are stage 1's, and
 a program runs from the SIR stage 1 serialised, in the interpreter or
 natively, as its tests and benchmarks do
 ([architecture.md](../docs/architecture.md), decisions 268 and 357). The
 commands stage 1 does not serve yet run on the Rust front end: `test
 --std`, `test --defer-borrow`, the tests of a program with transcripts,
-`run --watch`, `run --record`, `replay`, `run --defer-borrow`,
-`explain-borrow` and `parse --shape`
-([port-debt.md](../docs/port-debt.md), "The Rust front end's roles");
-`repl` and `ws` run on stage 1 once it says it serves them (`sisu1 0.8.0`,
-decision 563), and `cargo test` runs the suite's sessions and worksheet
-through stage 1 too, with `SISU_STAGE1_REPL=1`.
+`run --watch`, `run --record`, `replay`, `run --defer-borrow` and
+`explain-borrow` ([port-debt.md](../docs/port-debt.md), "The Rust front
+end's roles"); `repl` and `ws` build their programs with stage 1's `sir
+--repl` and `sir --worksheet` once it says it serves them (`sisu1 0.8.0`,
+decisions 563 and 620), and `cargo test` runs the suite's sessions and
+worksheet through stage 1 too, with `SISU_STAGE1_REPL=1`.
 `cargo test` runs the suite so, with stage 1 as the front end.
 `--front-end=stage1` or `--front-end=rust` asks the executable for that
 front end, through `SISU_FRONT_END` in the empty environment the runner
@@ -448,8 +449,10 @@ and the time spent building and running them.
   (each digest against its reference), `sort`, `search`, `process_env`,
   `json_decode`, `regex` (and its rejected patterns) and `text_math`
   (`Builder`, `std.math`, `SortedSet`); a `DateTime`'s parts
-  (`time_parts`), the `pure` consumers of `Iter[T]` (`pure_iterators`)
-  and std.log's levels and fields (`log_levels`).
+  (`time_parts`), `Instant` and time zones (`time_zones`), the `pure`
+  consumers of `Iter[T]` (`pure_iterators`), std.log's levels and fields
+  (`log_levels`), and the bit methods of the sized integers and `int`
+  (`bit_methods`).
 - `concurrency/` is tasks (18, Phase 6), most cases under several
   schedules: joins and their error sets, failures and the scope's result,
   panics in tasks, a task's stack overflow (`stack_overflow`),
@@ -478,8 +481,9 @@ and the time spent building and running them.
   values whose `own` closures hold them (`closure_drops`), and what the
   capability rules reject.
 - `http/` is std.x.http over the in-process network, under several
-  schedules (a test of the driver runs it under a thousand), and a
-  `FakeNet` that scripts any response and a slow one (`scripted`).
+  schedules (a test of the driver runs it under a thousand), with the
+  network's error a refusal gives (`Network(cause)`), and a `FakeNet`
+  that scripts any response and a slow one (`scripted`).
 - `ownership/` is the ownership checker (18, Phase 3). Accepted programs
   run (and so run again under the monitor): moves and partial moves, drop
   placement on every path (`drop_torture` is the drop-order torture

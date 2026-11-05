@@ -7,7 +7,7 @@ panic: assertion failed: body == Ok(b"/one\n")
     body == Ok(b"/one\n")
     │       │
     │       Ok(b"/one\n")
-    Err(Network(message="Other(message=\"a fault the simulation made\")"))
+    Err(Network(cause=Other(message="a fault the simulation made")))
   at test "a client that does not retry" (http_faults.sisu:65:5)
 replay: sisu test --replay 1-66da16fbfe5b5010-0.0.1-t1-s5-r0-m300000 http_faults.sisu
 

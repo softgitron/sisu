@@ -5,9 +5,11 @@
 //! `Set`). A value of either type is a word holding its table's address.
 //! Here are the table's header as the runtime in Rust reads it, the
 //! addresses of its entries, and the calls of the exports that make a
-//! table, look a key up, append an entry, take one out and drop what is
-//! left; the runtime in Sisu's `value.sisu` copies, compares, shows and
-//! drops a whole table itself.
+//! table, look a key up and append an entry, for a literal, an iterator and
+//! the generated code's lookups; the intrinsics of dicts and sets are the
+//! runtime in Sisu's, which decodes their calls (`dispatch.sisu`, decision
+//! 625), and its `value.sisu` copies, compares, shows and drops a whole
+//! table itself.
 
 use crate::bridge::TablePart;
 use crate::value::{self, target};
@@ -34,11 +36,6 @@ impl Table {
     fn part(&self, part: TablePart) -> u64 {
         // SAFETY: a `Table` is a live table's address.
         unsafe { crate::bridge::table_word(self.addr(), part) }
-    }
-
-    /// The type of its keys.
-    pub(crate) fn key(&self) -> u32 {
-        self.part(TablePart::KeyType) as u32
     }
 
     pub(crate) fn len(&self) -> u64 {
@@ -81,16 +78,6 @@ impl Table {
     pub(crate) unsafe fn push_key(&mut self, k: *const u8) -> u64 {
         // SAFETY: as the caller guarantees.
         unsafe { crate::bridge::table_push((self as *mut Table).cast(), k.cast_mut()) }
-    }
-
-    /// Removes entry `i`, moving its key and value to `out` (key then
-    /// value), and keeps the order of the others.
-    ///
-    /// # Safety
-    /// `out` must have room for an entry's key and value.
-    pub(crate) unsafe fn remove(&mut self, i: u64, out: *mut u8) {
-        // SAFETY: as the caller guarantees.
-        unsafe { crate::bridge::table_remove((self as *mut Table).cast(), i, out) }
     }
 }
 
