@@ -10486,8 +10486,12 @@ intrinsics"; D-086; 06, 12, 17; stage 1's R113, R118, R120 and R122)
      called `queue.sisu`'s for each word, took 271.3 million, so each
      function reads the records' block in place. The seed grows from
      703 530 to 720 405 bytes with 780 and 784, the runtime's object from
-     785 920 to 809 912 bytes (`target/rt/rt.o`). This changes no rule of
-     the language.
+     785 920 to 809 912 bytes (`target/rt/rt.o`), and as the fixed point
+     builds it with the Sisu backend from 1 372 016 to 1 404 672; the
+     fixed point holds (rt-A.o and rt-B.o the same bytes, as sisu2-A and
+     sisu2-B, 31 374 768, and stage1-A and stage1-B, 63 522 752, which
+     carry stage 1's thirteenth round too). This changes no rule of the
+     language.
 
 781. The rest of D-086's order for the scheduler is not this round's: an
      iterator of a borrowed value reached by `iter` (`IterRef`,
