@@ -212,6 +212,13 @@ pub struct Program:
     pub sources: list[String]
     ## The entry function and whether it takes `System`.
     pub entry: Entry?
+    ## The functions `@export("name")` makes global symbols, by the symbol
+    ## (decision 683; RULES.md, R120).
+    pub exports: list[(String, String)]
+    ## The runtime profile the program is built for when it is not `full`:
+    ## `single`, written `runtime single` after the entry (12; RULES.md,
+    ## R122).
+    pub runtime: String?
     pub types: list[TypeDecl]
     ## The host intrinsics the functions call, with the facts the SIR
     ## checkers need about each.

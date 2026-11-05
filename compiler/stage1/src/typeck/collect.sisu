@@ -160,6 +160,26 @@ impl TyCtx:
             impl_assoc=[],
         )
 
+## Which std modules a program may import hold templates (`reflect.`)
+## and `unsafe` code, by name, which the base keeps the texts of (RULES.md,
+## R125: a base made from its cache reads them from it).
+pub struct StdMarks:
+    pub reflecting: list[String]
+    pub unsafe_code: list[String]
+
+impl StdMarks:
+    ## What a resolver's base found.
+    pub pure def of(r: Resolver) -> StdMarks:
+        var reflecting: list[String] = []
+        for (name, _) in r.std_texts.items():
+            reflecting.push(name.copy())
+        var unsafe_code: list[String] = []
+        for (name, _) in Shared.get(r.std_safety_texts).items():
+            unsafe_code.push(name.copy())
+        reflecting.sort()
+        unsafe_code.sort()
+        return StdMarks(reflecting=reflecting, unsafe_code=unsafe_code)
+
 pub struct Resolver:
     pub prog: Program
     pub types: Types
@@ -416,7 +436,7 @@ impl Resolver:
     ## `base`, and a copy of it that loads every std module a program may
     ## import besides, which the base makes their derived impls on.
     pub pure def base_with_all(texts: dict[String, String]) -> (Resolver, Resolver):
-        var (r, templates) = Resolver.base_core(texts, {})
+        var (r, templates) = Resolver.base_core(texts, {}, None)
         # The std modules a program may import, parsed once.
         var parsed: dict[String, Module] = {}
         for name in importable():
@@ -447,9 +467,9 @@ impl Resolver:
     ## impls of every std module by name (`main.base_of`'s cache): the
     ## modules a program may import are parsed when one imports them.
     pub pure def base_cached(
-        texts: dict[String, String], derived: dict[String, String]
+        texts: dict[String, String], derived: dict[String, String], marked: StdMarks
     ) -> Resolver:
-        var (r, templates) = Resolver.base_core(texts, derived)
+        var (r, templates) = Resolver.base_core(texts, derived, Some(marked.copy()))
         var sources: dict[String, String] = {}
         for name in importable():
             let text = text_of(texts, name)
@@ -466,8 +486,11 @@ impl Resolver:
     ## loaded and resolved, with the prelude's derive templates; a module
     ## whose derived impls `derived` holds declares that text rather than
     ## unfolding it again, as a module a program imports does.
+    ## `marked`: which std modules a program may import hold templates and
+    ## `unsafe` code, as a base made whole found them, read from its cache
+    ## rather than searched for in their texts again (RULES.md, R125).
     pure def base_core(
-        texts: dict[String, String], derived: dict[String, String]
+        texts: dict[String, String], derived: dict[String, String], marked: StdMarks?
     ) -> (Resolver, Templates):
         var r = Resolver.new()
         r.std_derived = derived.copy()
@@ -516,9 +539,18 @@ impl Resolver:
         var safety_texts: dict[String, String] = {}
         for name in importable():
             let text = text_of(texts, name)
-            if text.contains("reflect."):
+            var reflects = False
+            var unsafe_ = False
+            match marked:
+                case Some(m):
+                    reflects = m.reflecting.contains(name.to_string())
+                    unsafe_ = m.unsafe_code.contains(name.to_string())
+                case None:
+                    reflects = text.contains("reflect.")
+                    unsafe_ = text.contains("unsafe ")
+            if reflects:
                 _ = r.std_texts.insert(name.to_string(), text.to_string())
-            if text.contains("unsafe "):
+            if unsafe_:
                 _ = safety_texts.insert(name.to_string(), text.to_string())
         # The prelude's text too, for the instances of its generic methods
         # that ask `reflect` of their type parameters: the base keeps no
@@ -2643,6 +2675,10 @@ impl Resolver:
         if has_attr(f.attrs, "preview"):
             let why = self.builtin_attr(module, f.attrs, "preview") ?? String.new()
             _ = self.prog.previews.insert(def_, why)
+        # The global symbol a native build gives it (decision 683; RULES.md,
+        # R120).
+        if let Some(symbol) = self.builtin_attr(module, f.attrs, "export"):
+            _ = self.prog.exports.insert(def_, symbol)
         if self.is_root(module):
             info.contracts = not f.contracts(self.ast(module)).is_empty()
             if has_attr(f.attrs, "structural") or has_attr(f.attrs, "keeps"):

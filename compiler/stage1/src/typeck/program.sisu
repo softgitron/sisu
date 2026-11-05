@@ -590,6 +590,10 @@ pub struct Program:
     ## The types declared `@repr(c)`, which an exported function's
     ## signature may hold (12, "C interop"; RULES.md, R118).
     pub c_layout: set[DefId]
+    ## The functions marked `@export("name")`, with the symbol, which
+    ## lowering writes as the SIR's `export` lines and keeps as roots
+    ## (decision 683; RULES.md, R120).
+    pub exports: dict[DefId, String]
     ## The constants of a type the program gives a value folding computes,
     ## by the type and the name, for a type's constant argument written
     ## `Square.SIDES` (RULES.md, R50).
@@ -671,6 +675,7 @@ impl Program:
             deprecated_fields={},
             previews={},
             c_layout=set(),
+            exports={},
             const_args={},
             with_tests=False,
             test_tags={},

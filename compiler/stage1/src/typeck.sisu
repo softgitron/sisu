@@ -45,7 +45,7 @@ from stage1.syntax.ast import Ast, Block, ExprId, ExprKind, Mode, Module
 from stage1.syntax.ast import build
 from stage1.syntax.ast import visit
 from stage1.typeck.check import Checker, Cx, Finished, PASSED, RetCtx
-from stage1.typeck.collect import Resolver, SourceModule, SourcePackage, preview_warning
+from stage1.typeck.collect import Resolver, SourceModule, SourcePackage, StdMarks, preview_warning
 from stage1.typeck.contracts import contract_only, leading_contracts
 from stage1.typeck.generic_asserts import Assert, ConstCall, failures
 from stage1.typeck.instances import DeriveOrigin
@@ -155,6 +155,9 @@ impl Base:
 pub struct BaseCache:
     pub derived: dict[String, String]
     pub promoted: dict[String, list[String]]
+    ## Which importable modules hold templates and `unsafe` code (RULES.md,
+    ## R125).
+    pub marked: StdMarks
 
 ## The cache of a base made whole: its derived impls are its texts named
 ## `<derive>/NAME.sisu`.
@@ -164,12 +167,14 @@ pub pure def cache_of(base: Base) -> BaseCache:
         if name.starts_with("<derive>/") and name.ends_with(".sisu"):
             let module = name.byte_slice(9, name.byte_len() - 5)
             _ = derived.insert(module.to_string(), text.copy())
-    return BaseCache(derived=derived, promoted=base.std_promoted.copy())
+    return BaseCache(
+        derived=derived, promoted=base.std_promoted.copy(), marked=StdMarks.of(base.resolver)
+    )
 
 ## `base` from a cache of one made whole: the same base, with the modules
 ## a program may import parsed when one imports them.
 pub pure def base_cached(texts: dict[String, String], catalog: Catalog, cache: BaseCache) -> Base:
-    var r = Resolver.base_cached(texts, cache.derived)
+    var r = Resolver.base_cached(texts, cache.derived, cache.marked)
     r.catalog = Shared(catalog.copy())
     let templates = r.std_derives.copy()
     r.std_derives = Templates.none()
@@ -185,12 +190,16 @@ pub pure def base_cached(texts: dict[String, String], catalog: Catalog, cache: B
     if not all.contains("target"):
         _ = all.insert("target".to_string(), target())
     _ = all.insert("builtin_impls".to_string(), builtin_impls())
+    # The lines of a std module's text are found when lowering first
+    # reaches a body of it (`std_lines`), which a command of one program
+    # does for a few modules and `check` for none (RULES.md, R125); a batch,
+    # whose base is made whole, finds them once for all its programs.
     return Base(
         resolver=r,
         templates=templates,
         std_syntax=std_syntax,
         texts=all,
-        lines=lines_of(all),
+        lines={},
         std_promoted=cache.promoted.copy(),
     )
 
@@ -262,6 +271,13 @@ pure def std_promotion_requests(base: Base, r: Resolver) -> list[Request]:
         for f in fs:
             if let Some(d) = r.prog.lookup_in(m, f):
                 out.push(Request.Promote(d))
+    return out
+
+## The base with the lines of each of its texts found, for a process that
+## lowers many programs against it (`sir --repl-serve`; RULES.md, R125).
+pub pure def with_lines(own base: Base) -> Base:
+    var out = base
+    out.lines = lines_of(out.texts)
     return out
 
 ## Where the lines of each text start.

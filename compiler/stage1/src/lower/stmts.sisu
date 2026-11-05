@@ -759,7 +759,7 @@ impl FnLower:
                     let x = args[i]
                     let bv = if i < len(by_value): by_value[i] else: False
                     let own_ = if i < len(owned): owned[i] else: True
-                    let o = self.arg_operand_for(cx, x, bv, own_)
+                    let o = self.arg_operand_for(cx, x, bv, own_, False)
                     # Each operand in a temporary, so it is evaluated once.
                     if let Operand.Copy(p) = o:
                         if not p.proj.is_empty():

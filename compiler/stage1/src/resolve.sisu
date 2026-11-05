@@ -691,6 +691,15 @@ pure def attribute_places(name: str) -> (list[SyntaxKind], str)?:
         case _:
             return None
 
+## What an attribute that nothing checks yet promises of its function, as
+## `W0030` names it (D-059; RULES.md, R121); `None` for any other.
+pure def unchecked_promise(name: str) -> str?:
+    return match name:
+        case "no_alloc": Some("that the function does not allocate")
+        case "no_block": Some("that the function does not block")
+        case "stack": Some("the function's bound on its stack")
+        case _: None
+
 ## A declaration of the kind `k`, as a message names it; `None` for what
 ## is no declaration.
 pure def declaration_kind(k: SyntaxKind) -> str?:
@@ -1657,6 +1666,14 @@ impl Resolver:
                     d = d.with("name", name).with("places", where_)
                     self.report(d.with("what", what))
                     return
+        # `@no_alloc`, `@no_block` and `@stack(...)` (D-059) are accepted and
+        # checked by nothing yet, which a function that has one is told
+        # (decision 693; RULES.md, R121).
+        if let Some(what) = unchecked_promise(name):
+            if on == SyntaxKind.FnDef:
+                let d = Diagnostic.new(Msg.ResolveUncheckedAttribute, token.start, token.end)
+                self.report(d.with("name", name).with("what", what))
+                return
         # `@float(fast)` permits contraction and reassociation in the
         # function (03), which strict floating point satisfies; it takes
         # `fast` only. `@diagnostic_name` waits for compile-time type

@@ -37,6 +37,12 @@ pub pure def write(p: Program) -> String:
         if e.returns_result:
             out.push(" result")
         out.push("\n")
+    # The runtime profile, when it is not `full` (RULES.md, R122).
+    if let Some(r) = p.runtime:
+        out.push("runtime {r}\n")
+    # The exported functions (decision 683; RULES.md, R120).
+    for (symbol, f) in p.exports:
+        out.push("export {quote(symbol)} {f}\n")
     for k in range(len(p.tests)):
         let (name, f) = p.tests[k].copy()
         out.push("test {quote(name)} {f}")

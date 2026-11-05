@@ -175,7 +175,9 @@
 #
 #   fixed        stage 1 built by stage 0 (`sisu build --native`, stage1-A)
 #                prints the SIR of its own package (`sir`), which must be
-#                what `sisu sir` prints of it, the whole file; stage 0's
+#                what `sisu sir` prints of it, the whole file, but as
+#                RULES.md lists (R124: the Rust front end, an oracle that
+#                falls behind, decides nothing of the fixed point); stage 0's
 #                backend alone builds that SIR into stage1-B (`sisu build
 #                --native --from-sir`); stage1-B prints the SIR of the
 #                package again, which must be stage1-A's; and since the
@@ -1663,12 +1665,17 @@ SPLIT
             self_summary="$self_summary\n$(printf '  %-12s differing' "self-$output")"
         fi
     done
-    n=0; same=0; beyond=0; differing=0
+    n=0; same=0; beyond=0; differing=0; self_listed=0
     for f in $( (ls "$work/self.stage0"; ls "$work/self.stage1") | sort -u); do
         n=$((n + 1))
         shown=$(printf '%s' "$f" | tr '%' '/')
         if cmp -s "$work/self.stage0/$f" "$work/self.stage1/$f"; then
             same=$((same + 1))
+        elif grep -qxF -e "compiler/stage1/$shown self" "$allowed"; then
+            # A module whose SIR a rule changes (RULES.md, R124: "- Differs:
+            # `compiler/stage1/src/...`: self").
+            self_listed=$((self_listed + 1))
+            report="$report\n  listed:   self: $shown"
         elif [ -n "$why" ]; then
             beyond=$((beyond + 1))
             report="$report\n  beyond:   self: $shown (stage 1 is beyond the slice of lowering: $why)"
@@ -1678,9 +1685,9 @@ SPLIT
         fi
     done
     total=$((total + n)); identical=$((identical + same)); lowered_beyond=$((lowered_beyond + beyond))
-    unlisted=$((unlisted + differing))
-    self_summary="$self_summary\n$(printf '  %-12s %4d files, %4d identical, %3d beyond the slice, %3d otherwise; stage 1 %6ss' \
-        self-sir "$n" "$same" "$beyond" "$differing" "$seconds")"
+    unlisted=$((unlisted + differing)); listed=$((listed + self_listed))
+    self_summary="$self_summary\n$(printf '  %-12s %4d files, %4d identical, %3d differing as listed, %3d beyond the slice, %3d otherwise; stage 1 %6ss' \
+        self-sir "$n" "$same" "$self_listed" "$beyond" "$differing" "$seconds")"
 fi
 
 # The fixed point (D-078): stage1-A, stage 1 as stage 0 builds it (the
@@ -1733,6 +1740,13 @@ if [ "$self_check" = 1 ]; then
         if [ -s "$2" ] && cmp -s "$2" "$3"; then
             identical=$((identical + 1))
             fixed_summary="$fixed_summary\n$(printf '  %-12s identical: %s (%s bytes)' "$1" "$4" "$(size "$2")")"
+        elif [ -s "$2" ] && grep -qxF -e "compiler/stage1 $1" "$allowed"; then
+            # Stage 0's SIR of the package, which decides nothing of the
+            # fixed point (RULES.md, R124: "- Differs: `compiler/stage1`:
+            # fixed-sir0").
+            listed=$((listed + 1))
+            report="$report\n  listed:   fixed: $1, $4"
+            fixed_summary="$fixed_summary\n$(printf '  %-12s differing as listed: %s' "$1" "$4")"
         else
             unlisted=$((unlisted + 1))
             report="$report\n  UNLISTED: fixed: $1, $4 ($2 against $3)"

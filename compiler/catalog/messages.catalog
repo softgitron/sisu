@@ -681,6 +681,9 @@ E1020 error   package.unsafe-level        the package `{package}` declares `unsa
 E1021 error   package.unsafe-untrusted    the dependency `{name}` declares `unsafe = "{level}"`, and `[trust] unsafe` in the root package's `sisu.toml` does not list it
 E1022 error   package.unsafe-raised       `sisu.lock` records `{name}` with {old}, and it now declares `unsafe = "{level}"`: accept the change with `--accept-unsafe`
 -     help    package.trust-to-consent    the root package consents by listing it: `[trust] unsafe = ["{name}"]`
+# Stage 1's (RULES.md, R122; 12, "Runtime profiles", and decision 694):
+# the profile with no scheduler, which no runtime has yet.
+E1023 error   package.freestanding        the runtime profile `freestanding` has no runtime yet: this compiler's runtime schedules tasks, so a program is built for `full` or `single`
 
 # ---------------------------------------------------------------- warnings
 W0001 warning type.hole                   typed hole `{name}` of type `{ty}`
@@ -720,6 +723,9 @@ W0025 warning type.deprecated-plain       `{name}` is deprecated
 # Stage 1's (RULES.md, R40; D-046): an attribute Sisu reads, standing where
 # it means nothing.
 W0026 warning resolve.misplaced-attribute  `@{name}` means something on {places}, so on {what} it does nothing
+# Stage 1's (RULES.md, R121; D-059 and decision 693): an attribute the
+# compiler accepts and nothing checks yet.
+W0030 warning resolve.unchecked-attribute  `@{name}` is accepted and checked by nothing yet, so nothing ensures {what}
 # Stage 1's (RULES.md, R115; 13 and D-072): a use of a preview item, as of
 # a deprecated one.
 W0028 warning type.preview                `{name}` is a preview, which may change or be removed before it is stable: {reason}

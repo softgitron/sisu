@@ -144,6 +144,8 @@ pub pure def check_with(p: Program, findings_too: bool, mut placed: Placed) -> C
     var program = Program(
         sources=p.sources.copy(),
         entry=p.entry.copy(),
+        exports=p.exports.copy(),
+        runtime=p.runtime.copy(),
         types=p.types.copy(),
         intrinsics=p.intrinsics.copy(),
         functions=functions,
@@ -233,7 +235,7 @@ pure def function_text(program: str, name: str) -> String:
     var kept_slots = lower.StdSlots.new()
     let all = CONTRACTS_ALL
     let lowered = lower.lower(
-        typed, base, "main.sisu", all, catalog, mut kept, mut kept_lowered, mut kept_slots
+        typed, base, "main.sisu", all, catalog, mut kept, mut kept_lowered, mut kept_slots, []
     )
     if not lowered.beyond.is_empty():
         return lowered.beyond.join("\n")
@@ -273,7 +275,7 @@ pure def ownership_of(program: str) -> String:
     var kept_slots = lower.StdSlots.new()
     let all = CONTRACTS_ALL
     let lowered = lower.lower(
-        typed, base, "main.sisu", all, catalog, mut kept, mut kept_lowered, mut kept_slots
+        typed, base, "main.sisu", all, catalog, mut kept, mut kept_lowered, mut kept_slots, []
     )
     if not lowered.beyond.is_empty():
         return lowered.beyond.join("\n")
