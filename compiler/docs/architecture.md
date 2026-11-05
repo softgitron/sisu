@@ -1309,6 +1309,7 @@ contracts:
 | `bytes.from_hex(text)` | the bytes the hex digits spell (a `b"..."` literal) |
 | `select.wait(kind, subject, ...)` | the index of the `select` arm to take (06, "Channels and select"; "Tasks and the scheduler") |
 | `gen.new(own body)`, `gen.yield(own item)` | a generator's iterator; giving an item to its consumer |
+| `dict.get_str(ref d, k: str)`, `dict.remove_str(ref mut d, k: str)`, `dict.index_str(ref d, k: str)`, `set.contains_str(ref s, k: str)`, `set.remove_str(ref mut s, k: str)` | a lookup of a `dict[String, V]` or a `set[String]` by the text `k`, compared with the keys' bytes without a `String` made: `dict.get`'s, `dict.remove`'s, `d[k]`'s (a reference to the value; a missing key panics, `R0010`), `set.contains`'s and `set.remove`'s results (decision 784); no front end lowers to them yet |
 
 A call through the trait of a capability handle (`cap.forward` in the
 prelude) is a `call trait` whose `Self` the dispatcher replaces by the
@@ -3553,9 +3554,10 @@ The runtime's entry points (`abi::sym`) are the boundary:
 
 | Entry point | What it does |
 |---|---|
-| `sisu_rt_start(argc, argv, entry, flags, ret_ty, types, types_len, fns, fns_len, unprobed) -> i32` | decodes the type table, keeps the function table, starts the scheduler (the probe reserve holds `unprobed`, the most a call may write below a probe limit before a probe sees it), runs `main` on its thread (with a `System` when `flags` says so) and gives the exit status |
+| `sisu_rt_start(argc, argv, entry, flags, ret_ty, types, types_len, fns, fns_len, unprobed) -> i32` | decodes the type table, keeps the function table, starts the scheduler (the probe reserve holds `unprobed`, the most a call may write below a probe limit before a probe sees it), runs `main` on its thread (with a `System` when `flags` says so; with no workers for `std.par` under the profile `single`, decision 783) and gives the exit status |
 | `sisu_rt_frame(name, len, file, len, line, col)` | adds a line to the stack trace of the panic in flight |
 | `sisu_rt_abort_unwind()` | a panic reached a frame running cleanup: abort |
+| `sisu_rt_export_panic()` | a panic left an exported function of C's convention: its report, and status 134 (decision 785) |
 | `sisu_rt_panic_overflow`, `_index`, `_stack`, `_unreachable` | raise those panics |
 | `sisu_rt_int_op(op, x, y, out) -> u8`, `sisu_rt_float_op(op, x, y) -> f64` | the arithmetic that is not one instruction |
 | `sisu_rt_alloc(bytes) -> ptr` | heap memory for a list or a box |
@@ -3623,7 +3625,7 @@ when the program ends, so the two interleave as the interpreter's do.
 ### The runtime in Sisu
 
 The runtime is being written in Sisu, piece by piece, as D-086 orders
-(decisions 335, 336, 350 to 352, 358, 383, 385, 422, 423, 506, 542, 562, 625, 645, 646, 680, 681 and 724). `compiler/rt` is a Sisu package
+(decisions 335, 336, 350 to 352, 358, 383, 385, 422, 423, 506, 542, 562, 625, 645, 646, 680, 681, 724, 780 and 784). `compiler/rt` is a Sisu package
 (`unsafe = "extern"`) whose root module's `export_NAME` functions are the
 runtime's symbols `sisu_rt_NAME`, of Sisu's convention (decision 189),
 which the generated code and the runtime in Rust call as any function is
@@ -3653,10 +3655,11 @@ What is in Sisu (port-debt.md, "The runtime in Sisu", has what is not):
 | text search by Two-Way, and a prefix or suffix (`sisu_rt_find`, `sisu_rt_has_edge`) | `search.sisu` | the runtime in Rust, for `in` on texts and `bytes.find`, `starts_with` and `ends_with` (decision 352) |
 | a float's text: the shortest that reads back as the same `f64` or `f32`, the fixed form and the form with an exponent (`sisu_rt_float_digits`) | `floats.sisu` | the runtime in Rust, for `Display` and `Debug` of floats, `fmt.float_digits` and `fmt.float32_digits` (decision 358) |
 | `Display` and `Debug` of a value by its type (`sisu_rt_value_display`, `_debug`) | `show.sisu` | the runtime in Rust, for `fmt.display`, `fmt.debug`, `print`, `list.join`, a failed `assert`'s sides and the error `main` returns (decision 383) |
-| the intrinsics of lists, dicts, sets and slices, their descriptors decoded (`sisu_rt_collection`), `in` as an operator (`sisu_rt_contains`), a table's literal and the inline lookups (`sisu_rt_table_literal`, `_inline_find`) | `dispatch.sisu` over `list.sisu`, `table.sisu` and `iter.sisu` | the runtime in Rust, which reads the intrinsic's number alone and hands the call over, and whose entries `sisu_rt_binary`, `sisu_rt_table` and `sisu_rt_table_find` call the others (decisions 625 and 646) |
+| the intrinsics of lists, dicts, sets and slices, the lookups by a `str` among them (decision 784), their descriptors decoded (`sisu_rt_collection`), `in` as an operator (`sisu_rt_contains`), a table's literal and the inline lookups (`sisu_rt_table_literal`, `_inline_find`) | `dispatch.sisu` over `list.sisu`, `table.sisu` and `iter.sisu` | the runtime in Rust, which reads the intrinsic's number alone and hands the call over, and whose entries `sisu_rt_binary`, `sisu_rt_table` and `sisu_rt_table_find` call the others (decisions 625 and 646) |
 | the scheduler's queues: the run queue, the waiters under their keys and the timers (`sisu_rt_queue_*`) | `queue.sisu` over `list.sisu` | the runtime in Rust's scheduler (`sched.rs`), which keeps their addresses (decision 645) |
 | the channels' buffers: the values sent and not received, in a ring of slots of the value's size (`sisu_rt_channel_*`) | `channel.sisu` | the runtime in Rust's channels (`tasks.rs`, `queue::ChanBuf`), which keep their addresses (decision 680) |
 | the scheduler's seeded generator and, under the default strategy, the choice of the next task (`sisu_rt_draw_*`) | `draw.sisu` over `queue.sisu` | the runtime in Rust's scheduler, `select` and the faults of `sim` (`queue::Rng`), which keep the generator's word (decision 724) |
+| the tasks' records (a task's state, what it waits for, whether it is a generator), a task parked under its keys, and the tasks a key or a cancellation wakes put in the run queue (`sisu_rt_task_*`) | `tasks.sisu` over `queue.sisu` | the runtime in Rust's scheduler (`queue::Records`), which keeps beside each record, under the task's number, its coroutine, context and outcome (decision 780) |
 | a list's growth and moves, a slice's copies, the sort, `in` and `join` (`sisu_rt_list_*`) | `list.sisu` | `dispatch.sisu`, the runtime in Rust for every list it builds, `sorted`, `reversed` and a slice's copies, and the generated code's `sisu_rt_list_reserve` (decision 385) |
 | the tables of dicts and sets: a new one, a key looked up, an entry appended and one taken out, and a whole table copied, compared, shown and dropped; `d{k}`'s slot (`sisu_rt_table_slot`) | `table.sisu`, `dispatch.sisu` | `dispatch.sisu`, the runtime in Rust's `sisu_rt_dict_slot`, which the generated code calls for `d{k}` (decision 681), and `value.sisu` and `show.sisu` (decision 422) |
 | iterators: the next item, the iterator of an `Iterable[T]` argument, every item left, the drop, a new iterator of each of the eleven kinds and what one may wait for (`sisu_rt_iter_next`, `_iterable`, `_collect`, `_drop`, `_range` and its kin, `_waits`) | `iter.sisu` | the runtime in Rust, for `Iter.next` of what does not wait, every iterator it takes items from or makes, and `value.sisu` (decisions 423 and 542) |
@@ -3807,7 +3810,12 @@ limits and budget (decision 332), the latter never spent, and a scheduler
 of its own for the generators a body drives. The lowest index's panic is
 the call's, after the results before it are dropped; a call on a worker
 runs its bodies there in order. The interpreter runs `map` as written, on
-the asking task, whose budget its bodies spend (port-debt.md).
+the asking task, whose budget its bodies spend (port-debt.md). A program
+whose SIR says `runtime single` (12's profile, decisions 694 and 723) has
+no workers: both lowerings set `ENTRY_SINGLE` in `main`'s flags, and every
+call of `map` runs its bodies on the asking thread, one after another, as
+a call on a worker does, so the executable starts no thread for it, as
+the interpreter starts none (decision 783).
 
 ### Raw memory, foreign calls and the machine intrinsics
 
@@ -3879,6 +3887,22 @@ an option's tag), as `call_foreign` and `c_argument` in `func.rs` do
 of `sisu_rt_thread_slot` and `sisu_rt_switch`), as `machine_intrinsic`
 does. LIR gained two words for them: the conversion `sextend` and the type
 `i16`, a C `short`'s.
+
+An `@export("name")` of a program is the global symbol `name` of C's own
+convention over plain values (decision 785): a wrapper, `unprobed`,
+declared `export` with the C signature of the function's parameters and
+result (an integer or float of its width, a `bool` as a byte, a `char` as
+a 32-bit code, a raw pointer as an address; stage 1's `E0991` admits the
+rest, a `@repr(c)` struct, which C passes as a pointer to it), that
+writes each argument widened to its word in a slot of its frame, calls the
+function, compiled under a local symbol of Sisu's convention as any other
+and called by `main` directly, and narrows its result back, as a foreign
+call's arguments and result are converted the other way; a status other
+than 0, a panic that left the function, calls `sisu_rt_export_panic`,
+which writes the panic's report and stops the program with status 134,
+since no C caller can unwind. Both lowerings write it alike
+(`Codegen::export_c`, stage 2's `Cg.export_c`) and give the same object.
+A runtime library's exports stay of Sisu's convention.
 
 ### Linking
 
@@ -10425,3 +10449,140 @@ R120 and R122)
 746. A struct of another module built without a private field is
      `E0258` alone; `TotalF64` stays no key, since the runtime hashes keys
      structurally. Stage 1 decides it (RULES.md, R126).
+
+**Stage 0's thirteenth round: the tasks' records in Sisu, the profile
+`single`, stage 2's runtime line, lookups by `str`, the C boundary, and
+what was left** (sections "Stage 2", "The runtime in Sisu", "Tasks",
+"Raw memory, foreign calls and the machine intrinsics", "Lowering-only
+intrinsics"; D-086; 06, 12, 17; stage 1's R113, R118, R120 and R122)
+
+780. A task's record, its parking and its waking are the runtime in
+     Sisu's (`rt/src/tasks.sisu`, exports `sisu_rt_task_*`): the records
+     are a queue of three words a record (decision 645's `queue.sisu`),
+     the record `t` the task `t`'s, holding its state (ready, running,
+     waiting, done), what it waits for (a word of the runtime in Rust's,
+     the kind of the wait above its subject, which the deadlock report
+     reads back) and its flags (a generator); a task parks under the keys
+     of what wakes it, registered in the waiters' queue in order, and a
+     key wakes the tasks waiting under it in the order they parked, a
+     cancellation every waiting task but generators in the order of
+     their numbers, each put at the end of the run queue as the
+     interpreter's `wake` puts it, so that a seed names the schedule it
+     named (`sisu-driver/tests/schedules` and the cases of
+     `concurrency/`, `sim/` and `time/` give the interpreter's output
+     natively). What the record does not hold, the coroutine, its
+     context, the values moved aside, the outcome, the anchors and the
+     trace's path, stays beside it in the runtime in Rust's `Task`, under
+     the same number: the handle 725 asked for is the number itself.
+     Deleted from the runtime in Rust: `Task`'s state and generator flag,
+     the scheduler's `wake` and `wake_key` loops, `Queue::take_key` and
+     the exports `sisu_rt_queue_clear` and `_take_key`, which only it
+     called. 20 000 values sent through a channel of capacity 1 take
+     194.4 million instructions where they took 176.1 million
+     (callgrind, the release profile, built from the same SIR by the Rust
+     lowering), 10.4 % more: each value parks a task and wakes one, and a
+     state read or set from the runtime in Rust is a call of Sisu's
+     convention where it was a field; a first version, whose functions
+     called `queue.sisu`'s for each word, took 271.3 million, so each
+     function reads the records' block in place. The seed grows from
+     703 530 to 720 405 bytes with 780 and 784, the runtime's object from
+     785 920 to 809 912 bytes (`target/rt/rt.o`). This changes no rule of
+     the language.
+
+781. The rest of D-086's order for the scheduler is not this round's: an
+     iterator of a borrowed value reached by `iter` (`IterRef`,
+     `IterMut`), whose object borrows a value the runtime in Rust reaches
+     through a `Pointer` of its own, and the decoding of the intrinsics
+     other than the collections', family by family, each with its
+     descriptor read by Sisu code as decision 625 reads a collection's;
+     PCT's and the exhaustive search's choices stay the runtime in
+     Rust's. The round spent its time on 780 and 782 to 785. This changes
+     no rule of the language.
+
+782. Stage 2 reads the SIR's `runtime NAME` line into stage 1's
+     `sir.Program.runtime` (`read.read`, where it set `None`), and stage
+     1's writer writes it back, so `sisu2 sir` gives back the text it read
+     with the line where it was; `read.runtime`, which read it beside the
+     program, is deleted, and `read.export_lines`, which still writes the
+     `export` lines that `read.exports` reads beside it, takes no profile
+     and puts them after the runtime line. Stage 2's lowering reads the
+     profile from the program (783). The fixed point and the round trip
+     of `packages/runtime_single` hold byte for byte. This changes no rule
+     of the language.
+
+783. A program of the runtime profile `single` (12; decisions 694 and
+     723) starts no worker thread: both lowerings set `ENTRY_SINGLE` (8)
+     in the flags `main` gives `sisu_rt_start` when the SIR says `runtime
+     single`, byte-identically, and the runtime's entry records it, after
+     which every call of `std.par.map` runs its bodies on the asking
+     thread, one after another, as a call on a worker does and as the
+     interpreter runs them; its scheduler was one thread already. The
+     interpreter, which has no workers, runs both profiles alike, and
+     `target.runtime_profile` names `single` to compile-time code (stage
+     1's R122). The case `packages/runtime_single` counts the threads of
+     the process (Linux's `/proc/self/status`) before and after a call of
+     `par.map` and prints 0 for the threads it started, interpreted and
+     natively, where the same program of the profile `full` starts one a
+     processor natively (4 on the round's machine). This changes no rule
+     of the language.
+
+784. The lookups by a `str` of a `dict[String, V]`'s or a `set[String]`'s
+     keys are intrinsics of their own, for stage 1 to lower
+     `str.Lookup`'s calls to (decision 729): `dict.get_str`,
+     `dict.remove_str`, `dict.index_str` (a reference to the value; a
+     missing key panics, `R0010`, naming it), `set.contains_str` and
+     `set.remove_str`, each taking the dict or set and the `str` itself,
+     whose bytes are hashed and compared with the keys' as a `String`'s
+     are and as `in` compares them, so no `String` is made. The interpreter looks
+     the text up as it looks up a `String`, whose key is the same; the
+     runtime in Sisu decodes them with the collections' (`dispatch.sisu`,
+     numbers 323 to 327 of `abi::Intrinsic`, after the others so that
+     theirs stay what they were), each the lookup of its `String` form
+     but for the key given, and `dict.index_str`'s panic is the runtime in
+     Rust's (`sisu_rt_missing_key`, which `d{k}`'s slot now calls too);
+     stage 2 names them in its table. No front end lowers to them yet, so
+     the SIR of `sisu-driver/tests/lookups` calls them, and the test
+     `lookups_by_a_str_run_interpreted_and_natively` holds the
+     interpreter's output, that of both lowerings and both profiles, and
+     no allocation left. This changes no rule of the language.
+
+785. `@export("name")` gives a program's function the global symbol
+     `name` of C's own convention over plain values (12, "Interop"),
+     replacing decision 683's convention over addresses: a wrapper of the
+     function, declared `export` with the C signature of its parameters
+     and result (the integers and floats at their width, a `bool` a
+     byte, a `char` a 32-bit code, a raw pointer an address, `()` no
+     result), writes each argument widened to its word, calls the
+     function, compiled as any other under a local symbol that `main`'s
+     calls call, and gives back its result narrowed as C reads it; a panic
+     that leaves the function calls `sisu_rt_export_panic`, which writes
+     the panic's report and stops the program with status 134, since no C
+     caller can unwind. Both lowerings write the wrapper alike
+     (`Codegen::export_c`, stage 2's `Cg.export_c`), so the two give the
+     same object, which the driver's test
+     `an_exported_function_is_a_global_symbol_that_c_calls` checks with a
+     C caller that calls three exported functions the C way (an `i32`; an
+     `f64`, a `bool`, a `char`, a `u8` and an `f32` to an `f64`; one that
+     panics), stage 1's SIR naming them (its R120). A `@repr(c)` struct,
+     which `E0991` admits, is passed by a pointer to it; by value its C
+     classification is not done, and it is `D0103`. A runtime library's
+     exports stay of Sisu's convention. `CString.as_ptr()` valid across
+     a foreign call, the other half of decision 727, is not this round's:
+     it is a slice that views its list in place in the interpreter's
+     checked memory model and both lowerings, with `mem.slice.as_ptr` of
+     a `u8` compiled natively. This changes no rule of the language.
+
+786. A test that takes the real `System` still gets the simulated one
+     under `--sim`, as decisions 692 and 728 left it: the change is the
+     test runner's choice of a `System`, a catalog message for the token
+     of a test that can be neither simulated nor replayed, and
+     `sim/faults` and `sim/no_revoked` rewritten to name the capabilities
+     whose fakes `--sim` makes, which the round did not reach after 780
+     to 785. This changes no rule of the language.
+
+787. Tagged-pointer provenance in the debug profile is not this round's
+     either (decisions 686 and 726): it is a change to every inline use
+     of a pointer's word in both lowerings and the Cranelift path at once,
+     to which 785's wrapper adds that a pointer handed to C must be
+     stripped, and it leaves no half state only when done whole. This
+     changes no rule of the language.

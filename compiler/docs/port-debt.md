@@ -762,14 +762,16 @@ What the unsafe round (decisions 301 and 302) leaves natively:
   operands and result, `@blocking` does not move a call off the task's
   thread, there is no header import (`import c`), and a struct is not
   passed by value; `@export("name")` gives the function the global
-  symbol `name` of Sisu's convention, over addresses (decision 683),
-  from SIR that the Rust front end writes and stage 1 does not yet.
+  symbol `name` of C's own convention over plain values (decision 785),
+  a `@repr(c)` struct by a pointer to it and not by value, and a
+  `CString`'s `as_ptr()` is not valid across a foreign call (decision
+  688).
   `rt.switch` has instructions for x86-64
   and AArch64 Linux only, and nothing makes a context for a new stack yet
   (the stack pool's `Context.start`). *Pay*: 22's `@blocking`, header
-  import, and `@export` of C's own convention over plain values, with
-  stage 1's line in the SIR and its `@repr(c)` check at the boundary;
-  the runtime in Sisu (D-086) over the switch.
+  import, a `@repr(c)` struct by value at the boundary (its C
+  classification), a slice that views its list in place for `as_ptr()`
+  (decision 785); the runtime in Sisu (D-086) over the switch.
 
 What round 2 (tasks, decisions 203 to 206; the rest of the suite,
 decisions 207 to 211) leaves:
@@ -945,7 +947,8 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   until they are written. *Pay*: the lowering handing the backend each
   function's operations rather than text, placement overlapping the next
   batch, and the code's bytes kept as bytes.
-- **`std.par` natively** (decision 333): only `map` runs on the workers;
+- **`std.par` natively** (decision 333): only `map` runs on the workers,
+  and none in a program of the runtime profile `single` (decision 783);
   `join`, `join_all` and `reduce` run their bodies one after another on the
   asking task, as stage 0 has them. A worker's body spends no yield point of
   the asking task's budget, where the interpreter's elision spends them, so
@@ -969,7 +972,7 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   without optimisations, and there is no AArch64, Mach-O or COFF. *Pay*:
   D-087's steps.
 - **The runtime in Sisu has its first pieces** (decisions 335, 336, 350
-  to 353, 358, 383, 385, 422, 423, 464, 469, 506, 542, 562, 625, 645, 646, 680, 681 and 724): `compiler/rt` holds `==` of two
+  to 353, 358, 383, 385, 422, 423, 464, 469, 506, 542, 562, 625, 645, 646, 680, 681, 724, 780 and 784): `compiler/rt` holds `==` of two
   texts' bytes, the structural operations by a value's parts (equality,
   order, the hash of decision 256, a `Shared` followed to its value,
   `.copy()`, the drop, the count of a
@@ -993,16 +996,19 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   literal and the generated code's inline lookups (decision 646), and the
   scheduler's queues: the run queue, the waiters and the timers
   (decision 645), the channels' buffers (decision 680), `d{k}`'s
-  slot (decision 681), and the scheduler's seeded generator with the
-  default strategy's choice of the next task (decision 724). Still
+  slot (decision 681), the scheduler's seeded generator with the
+  default strategy's choice of the next task (decision 724), the tasks'
+  records with their parking and waking (decision 780), and the lookups
+  by a `str` that no front end lowers to yet (decision 784). Still
   `sisu-rt`'s: the decoding of every other
   intrinsic's call (four words and two slices) and the other checks,
   whose panics its messages name (a missing key), an iterator of a
   borrowed value reached by `iter`, a generator's items
   and a receiver's values (the iterators themselves are made by the
   runtime in Sisu's exports, decision 542), PCT's and the exhaustive
-  search's choice of the next task, a task's parking and waking and its
-  records (decision 725),
+  search's choice of the next task, what a task's record does not hold
+  (its coroutine, context, outcome and anchors, beside the record under
+  its number, decision 780),
   mutexes, capabilities and the
   host, panics and their traces, allocation's count, the
   descriptor-driven dispatch of the intrinsics, the text of an arena, and
@@ -1018,11 +1024,8 @@ both profiles (architecture.md, "LIR"; decisions 281 to 284 and 305), and
   type to hash it and again to compare it, 1.024 times the instructions of
   the runtime in Rust's index on stage 2's lowering of `wordcount`
   (decision 423). *Pay*: the pieces in D-086's order, each deleting its
-  Rust counterpart: the rest of the scheduler next (a task's record,
-  parking and waking, whose records hold the coroutine and its context,
-  which the runtime in Rust keeps, so a handle of the switch's beside
-  them, decision 725; then an iterator of a borrowed value
-  reached by `iter`; then the dispatch of the other intrinsics follows its
+  Rust counterpart: an iterator of a borrowed value reached by `iter`
+  next (decision 781); then the dispatch of the other intrinsics follows its
   objects, each family's descriptor read by Sisu code as decision 625
   reads a collection's); text constants for the runtime's code (its data in
   the library mode); smaller frames for the walk (the arguments of a call
