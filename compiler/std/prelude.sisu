@@ -4941,7 +4941,6 @@ impl i128:
 # (decision 642): written in Sisu, at the end of the prelude so that the
 # lines of the functions before them do not move.
 
-
 impl u8:
     ## The least `u8`, 0.
     const MIN: u8 = 0u8
@@ -5018,7 +5017,9 @@ impl u128:
                 let bits = self
                 let high = ((bits >> 32u128) & 4294967295u128).to_int().expect("32 bits")
                 let low = (bits & 4294967295u128).to_int().expect("32 bits")
-                return T.wrapping_from(int.from_bits((high.truncate_to[u64]() << 32u64) | low.truncate_to[u64]()))
+                return T.wrapping_from(
+                    int.from_bits((high.truncate_to[u64]() << 32u64) | low.truncate_to[u64]())
+                )
 
 impl i8:
     ## The least `i8`, -128.
@@ -5074,4 +5075,6 @@ impl i128:
                 let bits = self.to_bits()
                 let high = ((bits >> 32u128) & 4294967295u128).to_int().expect("32 bits")
                 let low = (bits & 4294967295u128).to_int().expect("32 bits")
-                return T.wrapping_from(int.from_bits((high.truncate_to[u64]() << 32u64) | low.truncate_to[u64]()))
+                return T.wrapping_from(
+                    int.from_bits((high.truncate_to[u64]() << 32u64) | low.truncate_to[u64]())
+                )

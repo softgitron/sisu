@@ -1049,7 +1049,9 @@ impl[T: ClockOps, I: Interceptor] ClockOps for Wrap[T, I]:
         self.hook.after(c, "{r:?}")
         return r
     def monotonic(self) -> Duration:
-        let c = Call(capability="Clock".to_string(), method="monotonic".to_string(), args=String.new())
+        let c = Call(
+            capability="Clock".to_string(), method="monotonic".to_string(), args=String.new()
+        )
         self.hook.before(c.copy())
         let r = self.inner.monotonic()
         self.hook.after(c, "{r:?}")
