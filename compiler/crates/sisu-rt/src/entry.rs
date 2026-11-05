@@ -740,6 +740,25 @@ unsafe fn dict_slot(d: *mut u8, key: *mut u8, key_ty: u32, mode: u32, out: *mut 
     abi::OK
 }
 
+/// The key at `key`, of type `key_ty`, taken out of the dict or set at `t`
+/// (decision 861): for a dict (`value`) the option of its value written at
+/// `out`, for a set whether it was there; the key the table held dropped.
+///
+/// # Safety
+/// `t` must hold a dict or a set, `key` a key of type `key_ty`, and `out`
+/// have room for the result.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn sisu_rt_table_take(
+    t: *mut u8,
+    key: *mut u8,
+    key_ty: u32,
+    value: u32,
+    out: *mut u8,
+) -> u8 {
+    // SAFETY: as the caller guarantees.
+    system_status(|| unsafe { crate::bridge::table_take(t, key, key_ty, value != 0, out) })
+}
+
 /// A panic left an exported function of C's own convention (decision
 /// 785): its C caller cannot unwind, so the program stops with the panic's
 /// report on standard error and status 134, as an abort does.

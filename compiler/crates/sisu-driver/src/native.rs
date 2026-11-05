@@ -582,8 +582,12 @@ fn link(
 
 fn report(e: sisu_codegen::Error, output: &Path, host: &mut dyn Host) -> i32 {
     match e {
+        // With its heading, as the driver's other errors are (decision 864).
         sisu_codegen::Error::Unsupported { what, function } => {
-            host.stderr(&text(msg::NATIVE_UNSUPPORTED, &[("what", what), ("function", function)]));
+            host.stderr(&crate::cli::plain_error(
+                msg::NATIVE_UNSUPPORTED,
+                &[("what", what), ("function", function)],
+            ));
             EXIT_ERROR
         }
         sisu_codegen::Error::NoRuntime(dir) => {

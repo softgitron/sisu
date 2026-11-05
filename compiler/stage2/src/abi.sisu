@@ -43,6 +43,7 @@ pub const SYM_SIZED: str = "sisu_rt_sized"
 pub const SYM_WIDE: str = "sisu_rt_wide"
 pub const SYM_TABLE: str = "sisu_rt_table"
 pub const SYM_DICT_SLOT: str = "sisu_rt_dict_slot"
+pub const SYM_TABLE_TAKE: str = "sisu_rt_table_take"
 pub const SYM_DEPTH: str = "SISU_RT_DEPTH"
 pub const SYM_YIELD: str = "sisu_rt_yield"
 pub const SYM_BUDGET: str = "SISU_RT_BUDGET"
@@ -824,6 +825,11 @@ pub const I_HOST_NET_CLOSE: int = 273
 pub const I_HOST_PROC_RUN: int = 274
 pub const I_LIVE_BOUNDARY: int = 275
 pub const I_LIVE_EPOCH: int = 276
+pub const I_DICT_GET_STR: int = 323
+pub const I_DICT_REMOVE_STR: int = 324
+pub const I_DICT_INDEX_STR: int = 325
+pub const I_SET_CONTAINS_STR: int = 326
+pub const I_SET_REMOVE_STR: int = 327
 
 ## The intrinsics' names, by number (`sisu_rt::abi::Intrinsic`).
 pub pure def intrinsic_names() -> list[str]:

@@ -843,8 +843,11 @@ impl Cg:
                 _ = self.rt_sisu(abi.SYM_TEXT_FROM, [d, ptr, len])?
                 return Ok(Fast.Done)
             return Ok(Fast.No)
-        if (i == abi.I_DICT_GET or i == abi.I_DICT_CONTAINS or i == abi.I_SET_CONTAINS)
-                and named_in(bt, ["dict", "set"]):
+        # A `str` looked up among `String` keys (decision 784) is hashed and
+        # compared as one of them (decision 861).
+        let get = i == abi.I_DICT_GET or i == abi.I_DICT_GET_STR
+        let has = i == abi.I_DICT_CONTAINS or i == abi.I_SET_CONTAINS or i == abi.I_SET_CONTAINS_STR
+        if (get or has) and named_in(bt, ["dict", "set"]):
             if len(argv) < 2:
                 return Ok(Fast.No)
             let (a1, t1) = argv[1].copy()
@@ -852,10 +855,10 @@ impl Cg:
                 return Ok(Fast.No)
             let kt = self.type_id(t1)?
             let ktv = self.i32const(kt)
-            let value = self.i32const(if i == abi.I_DICT_GET: 1 else: 0)
+            let value = self.i32const(if get: 1 else: 0)
             let found = self.rt_status(abi.SYM_TABLE_FIND, [b, a1, ktv, value])?
             let (d, _) = self.place(p, dest, None)?
-            if i == abi.I_DICT_GET:
+            if get:
                 # `Some` (tag 0) of the value's address, or `None` (1).
                 let none = self.b.icmp_imm("eq", found, 0)
                 let tag = self.b.convert("uextend", "i64", none)
@@ -863,6 +866,41 @@ impl Cg:
                 self.store_word(found, d, 8)
             else:
                 self.store_word(found, d, 0)
+            return Ok(Fast.Done)
+        # `d[k]` of a `str` among `String` keys (decision 861): the value's
+        # address from `d{k}`'s slot, whose read of a missing key panics.
+        if i == abi.I_DICT_INDEX_STR and named_in(bt, ["dict"]):
+            if len(argv) < 2:
+                return Ok(Fast.No)
+            let (a1, t1) = argv[1].copy()
+            if not self.read_in_place(t1)?:
+                return Ok(Fast.No)
+            let kt = self.type_id(t1)?
+            let kv = self.i32const(kt)
+            let mv = self.i32const(abi.SLOT_READ)
+            let out = self.slot(8)
+            let st = self.rt_status(abi.SYM_DICT_SLOT, [b, a1, kv, mv, out])?
+            self.check(st)
+            let at = self.load(out, 0)
+            let (d, _) = self.place(p, dest, None)?
+            self.store_word(at, d, 0)
+            return Ok(Fast.Done)
+        # A `str`'s key taken out of a dict or a set of `String` keys
+        # (decision 861): the runtime's entry writes the option of the value,
+        # or whether it was there.
+        let take = i == abi.I_DICT_REMOVE_STR or i == abi.I_SET_REMOVE_STR
+        if take and named_in(bt, ["dict", "set"]):
+            if len(argv) < 2:
+                return Ok(Fast.No)
+            let (a1, t1) = argv[1].copy()
+            if not self.read_in_place(t1)?:
+                return Ok(Fast.No)
+            let kt = self.type_id(t1)?
+            let kv = self.i32const(kt)
+            let value = self.i32const(if i == abi.I_DICT_REMOVE_STR: 1 else: 0)
+            let (d, _) = self.place(p, dest, None)?
+            let st = self.rt_status(abi.SYM_TABLE_TAKE, [b, a1, kv, value, d])?
+            self.check(st)
             return Ok(Fast.Done)
         if i == abi.I_LIST_IS_EMPTY and named_in(bt, ["list"]):
             let len = self.load(b, 8)

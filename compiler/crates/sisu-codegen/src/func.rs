@@ -3050,18 +3050,23 @@ impl<'a, 'p> Cx<'a, 'p> {
             }
             // A key looked up in a dict or a set by the runtime's own entry
             // rather than the descriptor (decision 265): the address of its
-            // value, or whether it is there. The key is read in place.
-            I::DictGet | I::DictContains | I::SetContains if named(&bt, &["dict", "set"]) => {
+            // value, or whether it is there. The key is read in place; a
+            // `str` looked up among `String` keys (decision 784) is hashed
+            // and compared as one of them (decision 861).
+            I::DictGet | I::DictContains | I::SetContains | I::DictGetStr | I::SetContainsStr
+                if named(&bt, &["dict", "set"]) =>
+            {
                 let Some((a1, t1)) = argv.get(1).cloned() else { return Ok(Fast::No) };
                 if !matches!(t1, Type::Ref(..) | Type::Str) && self.cg.types.needs_drop(&t1)? {
                     return Ok(Fast::No);
                 }
                 let kt = self.type_id(&t1)?;
                 let kt = self.i32const(kt);
-                let value = self.i32const(u32::from(i == I::DictGet));
+                let get = i == I::DictGet || i == I::DictGetStr;
+                let value = self.i32const(u32::from(get));
                 let found = self.rt_status(sym::TABLE_FIND, &[b, a1, kt, value])?;
                 let (d, _) = self.place(dest, None)?;
-                if i == I::DictGet {
+                if get {
                     // `Some` (tag 0) of the value's address, or `None` (1).
                     let none = self.b.ins().icmp_imm(IntCC::Equal, found, 0);
                     let tag = self.b.ins().uextend(types::I64, none);
@@ -3070,6 +3075,40 @@ impl<'a, 'p> Cx<'a, 'p> {
                 } else {
                     self.store_word(found, d, 0);
                 }
+                Ok(Fast::Done)
+            }
+            // `d[k]` of a `str` among `String` keys (decision 861): the
+            // value's address from `d{k}`'s slot, whose read of a missing key
+            // panics naming it.
+            I::DictIndexStr if named(&bt, &["dict"]) => {
+                let Some((a1, t1)) = argv.get(1).cloned() else { return Ok(Fast::No) };
+                if !matches!(t1, Type::Ref(..) | Type::Str) && self.cg.types.needs_drop(&t1)? {
+                    return Ok(Fast::No);
+                }
+                let kt = self.type_id(&t1)?;
+                let (kv, mv) = (self.i32const(kt), self.i32const(abi::SLOT_READ));
+                let out = self.slot(8);
+                let st = self.rt_status(sym::DICT_SLOT, &[b, a1, kv, mv, out])?;
+                self.check(st);
+                let at = self.load(out, 0);
+                let (d, _) = self.place(dest, None)?;
+                self.store_word(at, d, 0);
+                Ok(Fast::Done)
+            }
+            // A `str`'s key taken out of a dict or a set of `String` keys
+            // (decision 861): the runtime's entry writes the option of the
+            // value, or whether it was there, and drops the key it held.
+            I::DictRemoveStr | I::SetRemoveStr if named(&bt, &["dict", "set"]) => {
+                let Some((a1, t1)) = argv.get(1).cloned() else { return Ok(Fast::No) };
+                if !matches!(t1, Type::Ref(..) | Type::Str) && self.cg.types.needs_drop(&t1)? {
+                    return Ok(Fast::No);
+                }
+                let kt = self.type_id(&t1)?;
+                let kv = self.i32const(kt);
+                let value = self.i32const(u32::from(i == I::DictRemoveStr));
+                let (d, _) = self.place(dest, None)?;
+                let st = self.rt_status(sym::TABLE_TAKE, &[b, a1, kv, value, d])?;
+                self.check(st);
                 Ok(Fast::Done)
             }
             I::ListIsEmpty if named(&bt, &["list"]) => {

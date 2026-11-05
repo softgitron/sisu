@@ -274,6 +274,7 @@ traits/static_methods
 traits/supertraits
 types/typed_hole
 unsafe/bit_cast_sizes
+unsafe/export_by_pointer
 unsafe/foreign
 unsafe/free_twice checked
 unsafe/gone checked

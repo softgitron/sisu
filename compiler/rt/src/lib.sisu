@@ -287,6 +287,19 @@ def export_table_inline_find(
 ) -> int:
     return dispatch.find(Types(words=types), p, key, kt, want_value)
 
+## The generated code's inline removal of the key at `key`, of type `kt`,
+## from the dict or set at `p` (`dispatch.take`, decision 861): the option
+## of its value written at `out` for `dict.remove_str` (`want_value`), else
+## whether it was there; the status of the drop of the key the table held.
+##
+## Requires:
+## - `typed`: `types` is the program's table, `p` holds a live dict or set,
+##   `key` a live value of type `kt` and `out` room for the result
+def export_table_inline_take(
+    types: ptr[int], p: ptr mut u8, key: ptr mut u8, kt: int, want_value: bool, out: ptr mut u8
+) -> int:
+    return dispatch.take(Types(words=types), p, key, kt, want_value, out)
+
 ## `item in container`, the operator (decision 646): whether the value at
 ## `c` of type `ct`, behind any references, holds the value at `x` of type
 ## `xt`: an element of a list, a key of a dict or a set, a piece of a text

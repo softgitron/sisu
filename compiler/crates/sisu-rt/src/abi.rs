@@ -112,6 +112,12 @@ pub mod sym {
     /// of the value a dict holds for a key (`d{k}`), by [`super::SLOT_READ`]
     /// and the other modes.
     pub const DICT_SLOT: &str = "sisu_rt_dict_slot";
+    /// `sisu_rt_table_take(table, key, key_ty, value, out) -> status`: the
+    /// key at `key` taken out of the dict or set at `table`, the generated
+    /// code's `dict.remove_str` (`value`, the option of the value written at
+    /// `out`) and `set.remove_str` (whether it was there), the key the table
+    /// held dropped (decision 861).
+    pub const TABLE_TAKE: &str = "sisu_rt_table_take";
     /// A 64-bit counter of the nested calls of the program.
     pub const DEPTH: &str = "SISU_RT_DEPTH";
     /// `sisu_rt_yield()`: a yield point found the budget of the running

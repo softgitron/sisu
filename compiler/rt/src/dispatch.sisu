@@ -182,8 +182,8 @@ const MOST_ROOM: int = 1048576
 
 ## A call of an intrinsic: the program's types, its descriptor, the
 ## address of its result, the block of its arguments' addresses, how what
-## it drops is dropped (`value.drop`'s mode), and the descriptor's length,
-## read once.
+## it drops is dropped (`value.drop`'s mode), and the descriptor's first
+## six words, read once when the call is made (decision 862).
 @derive(Copy)
 struct Call:
     ts: Types
@@ -194,28 +194,28 @@ struct Call:
     ## The descriptor's number of words: 4, and one for each argument and
     ## each type argument.
     words: int
+    ## Its words 0 to 3: the intrinsic's number, its numbers of arguments
+    ## and of type arguments, and the type of its result.
+    id: int
+    nargs: int
+    ntargs: int
+    rty: int
+    ## Its words 4 and 5, the types of the first two arguments (or the
+    ## first type arguments), -1 past its end.
+    w4: int
+    w5: int
 
 impl Call:
     ## Word `k` of the descriptor, a `u32`: half of the word of eight bytes
     ## it is in, the lower half for an even `k`, as both backends align a
-    ## descriptor to eight bytes and lay it out little-endian, and the
-    ## runtime's code reads no `u32` of its own (decision 646); the last
-    ## word of a descriptor of an odd number of words, which has no word
-    ## after it to read with it, is read a byte at a time.
+    ## descriptor to eight bytes, lay it out little-endian and give one of
+    ## an odd number of words a word of 0 after them (decision 862), and the
+    ## runtime's code reads no `u32` of its own (decision 646).
     ##
     ## Requires:
     ## - `call`: the call is the generated code's, whose descriptor has
     ##   word `k` and is aligned to eight bytes
     def word(self, k: int) -> int:
-        if k % 2 == 0 and k + 1 >= self.words:
-            # safety: in_bounds, valid: the descriptor's word `k`, by `call`;
-            #   a byte needs no alignment.
-            unsafe:
-                let b = self.desc.offset(4 * k)
-                let low = b.read().to_int() + b.offset(1).read().to_int() * 256
-                return low
-                    + b.offset(2).read().to_int() * 65536
-                    + b.offset(3).read().to_int() * 16777216
         # safety: in_bounds, valid, aligned: the descriptor's words `k` and
         #   the one beside it in the same word of eight bytes, by `call`.
         let w = unsafe self.desc.offset(8 * (k // 2)).cast[int]().read()
@@ -223,22 +223,34 @@ impl Call:
             return w & 4294967295
         return (w >> 32) & 4294967295
 
+    ## Word `k` of the descriptor after its first four, from those read
+    ## when the call was made when it is one of them.
+    ##
+    ## Requires:
+    ## - `call`: as `word`
+    def after_head(self, k: int) -> int:
+        if k == 4:
+            return self.w4
+        if k == 5:
+            return self.w5
+        return self.word(k)
+
     ## The type of the call's result.
     def ret_ty(self) -> int:
-        return self.word(3)
+        return self.rty
 
     ## The type of argument `i`.
     def ty(self, i: int) -> int:
-        return self.word(4 + i)
+        return self.after_head(4 + i)
 
     ## Type argument `k`, which the call has.
     def targ(self, k: int) -> int:
-        return self.word(4 + self.word(1) + k)
+        return self.after_head(4 + self.nargs + k)
 
     ## The item type of the `Iterable[T]` argument `k`: its type argument
     ## `k`, -1 when the call gives none.
     def item(self, k: int) -> int:
-        if k < self.word(2):
+        if k < self.ntargs:
             return self.targ(k)
         return -1
 
@@ -877,6 +889,45 @@ pub(package) def find(ts: Types, p: ptr mut u8, key: ptr mut u8, kt: int, want_v
         return table.value_at(tb, i).addr()
     return 1
 
+## The generated code's inline removal of the key at `key`, of type `kt`,
+## from the dict or set at `p` (decision 861), as `dict.remove` and
+## `set.remove` take it out: for a dict (`want_value`) the option of its
+## value written at `out`, for a set whether it was there; the key the
+## table held is dropped. The status of that drop.
+##
+## Requires:
+## - `typed`: `p` holds a live dict or set, `key` a live value of type `kt`
+##   and `out` room for the result
+pub(package) def take(
+    ts: Types, p: ptr mut u8, key: ptr mut u8, kt: int, want_value: bool, out: ptr mut u8
+) -> int:
+    # safety: valid, aligned, writable: a dict's and a set's value is its
+    #   table's address.
+    let tb = unsafe p.cast[ptr[u8]]().read().cast_mut()
+    let i = table.find(ts, tb, key, kt)
+    # safety: in_bounds, aligned, writable: by `typed`, the result's first
+    #   word is an option's tag or a `bool`.
+    let w = unsafe out.cast[int]()
+    if i < 0:
+        # safety: as above.
+        unsafe w.write(if want_value: 1 else: 0)
+        return OK
+    let (ksize, vsize) = (table.key_size(tb), table.value_size(tb))
+    let room = scratch(ksize + vsize)
+    table.remove(tb, i, room)
+    if want_value:
+        # safety: in_bounds, writable: the result is an option of a value;
+        #   returns_promptly: memmove moves it out.
+        unsafe:
+            w.write(0)
+            _ = memmove(out.offset(8), room.offset(ksize).as_const(), vsize)
+    else:
+        # safety: as above.
+        unsafe w.write(1)
+    let st = dropped(room, table.key_type(tb))
+    free(room)
+    return st
+
 ## `sisu_rt_dict_slot`'s modes (`abi::SLOT_READ` and its kin): a missing
 ## key panics, is inserted, or is nothing to drop.
 const SLOT_WRITE: int = 1
@@ -915,9 +966,34 @@ pub(package) def slot(ts: Types, p: ptr mut u8, key: ptr mut u8, kt: int, mode: 
 pub(package) def collection(
     types: ptr[int], desc: ptr[u8], ret: ptr mut u8, args: ptr mut u8, mode: int
 ) -> int:
-    var c = Call(ts=Types(words=types), desc=desc, ret=ret, args=args, mode=mode, words=4)
-    c.words = 4 + c.word(1) + c.word(2)
-    let id = c.word(0)
+    # The descriptor's first words, two to a word of eight bytes, read
+    # once (decision 862).
+    # safety: in_bounds, valid, aligned: a descriptor has its four words
+    #   and is aligned to eight bytes, by `call`.
+    let (head, counts) = unsafe (desc.cast[int]().read(), desc.offset(8).cast[int]().read())
+    let words = 4 + ((head >> 32) & 4294967295) + (counts & 4294967295)
+    var c = Call(
+        ts=Types(words=types),
+        desc=desc,
+        ret=ret,
+        args=args,
+        mode=mode,
+        words=words,
+        id=head & 4294967295,
+        nargs=(head >> 32) & 4294967295,
+        ntargs=counts & 4294967295,
+        rty=(counts >> 32) & 4294967295,
+        w4=-1,
+        w5=-1,
+    )
+    if words >= 5:
+        # safety: in_bounds, valid, aligned: words 4 and 5 (or the 0 after
+        #   word 4), in the third word of eight bytes, by `call`.
+        let pair = unsafe desc.offset(16).cast[int]().read()
+        c.w4 = pair & 4294967295
+        if words >= 6:
+            c.w5 = (pair >> 32) & 4294967295
+    let id = c.id
     if id <= ITER_OF:
         return iter_call(c, id)
     if id >= LIST_NEW and id <= LIST_SORT:

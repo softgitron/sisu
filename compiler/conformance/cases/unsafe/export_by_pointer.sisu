@@ -1,0 +1,33 @@
+# A program hands its own exported function a pointer to a `@repr(c)`
+# struct, as a C caller does (decisions 785 and 864): a struct of words is
+# laid out in a place as raw memory holds it, so `ptr.of` and `ptr.of_mut`
+# of it compile natively too.
+from std.mem import ptr
+
+@repr(c)
+struct Reading:
+    celsius: int
+    minutes: int
+    ratio: f64
+
+@export("sauna_load")
+def load(reading: ptr[Reading]) -> int:
+    # safety: valid, aligned: `reading` points to a live `Reading` that
+    #   nothing changes while the reference lives.
+    let r = unsafe reading.as_ref()
+    return r.celsius * r.minutes
+
+def warm(reading: ptr mut Reading, by: int):
+    # safety: valid, aligned, writable: `reading` points to a live `Reading`
+    #   that nothing else reaches meanwhile.
+    unsafe:
+        let r = reading.as_mut()
+        r.celsius += by
+        r.ratio *= 2.0
+
+def main():
+    var reading = Reading(celsius=80, minutes=10, ratio=0.25)
+    print(load(ptr.of(ref reading)))
+    warm(ptr.of_mut(mut reading), 5)
+    print(load(ptr.of(ref reading)))
+    print("{reading.celsius} {reading.ratio}")

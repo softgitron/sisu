@@ -377,8 +377,9 @@ impl Stage1 {
             ));
             return Err(sisu_interp::exit::ERROR);
         }
-        if stale(&exe, &src) {
-            build(&exe, &package, &src, host)?;
+        let profile = stage1_profile();
+        if stale(&exe, &src) || !built_in(&exe, profile) {
+            build(&exe, &package, &src, profile, host)?;
         }
         Ok(Stage1 { exe, compiler })
     }
@@ -723,7 +724,7 @@ fn settle(stdout: String, mut stderr: String, status: i32) -> Ran {
 /// build --native --output EXE` in `compiler/stage1`), under a lock, so
 /// that the commands that start at once build it once: each waits for the
 /// lock and then finds it built.
-fn build(exe: &Path, package: &Path, src: &Path, host: &mut dyn Host) -> Result<(), i32> {
+fn build(exe: &Path, package: &Path, src: &Path, profile: &str, host: &mut dyn Host) -> Result<(), i32> {
     let dir = exe.parent().map(Path::to_path_buf).unwrap_or_default();
     let fail = |host: &mut dyn Host, detail: String| {
         host.stderr(&crate::cli::plain_error(
@@ -747,7 +748,7 @@ fn build(exe: &Path, package: &Path, src: &Path, host: &mut dyn Host) -> Result<
     if let Err(e) = lock.lock() {
         return Err(fail(host, e.to_string()));
     }
-    if !stale(exe, src) {
+    if !stale(exe, src) && built_in(exe, profile) {
         return Ok(());
     }
     let me = match std::env::current_exe() {
@@ -757,6 +758,11 @@ fn build(exe: &Path, package: &Path, src: &Path, host: &mut dyn Host) -> Result<
     let part = dir.join(format!("sisu1.part-{}", std::process::id()));
     let mut cmd = std::process::Command::new(me);
     cmd.args(["build", "--native", "--output"]).arg(&part).current_dir(package);
+    // In the release profile, every contract checked, unless asked for the
+    // debug one (decision 860); the fixed points build their own.
+    if profile == "release" {
+        cmd.args(["--release", "--contracts=all"]);
+    }
     // Stage 1 is built with the Rust lowering, since stage 2 is built with
     // stage 1 (decision 304).
     cmd.env(FRONT_END_VAR, "rust").env(LOWER_VAR, "rust").env(BACKEND_VAR, "cranelift").env_remove(KEEP_SIR);
@@ -776,6 +782,11 @@ fn build(exe: &Path, package: &Path, src: &Path, host: &mut dyn Host) -> Result<
     }
     if let Err(e) = std::fs::rename(&part, exe) {
         let _ = std::fs::remove_file(&part);
+        return Err(fail(host, e.to_string()));
+    }
+    if let Some(stamp) = profile_stamp(exe, profile)
+        && let Err(e) = std::fs::write(exe.with_file_name("profile"), stamp + "\n")
+    {
         return Err(fail(host, e.to_string()));
     }
     drop(lock);
@@ -1164,6 +1175,39 @@ pub const TRANSCRIPTS_VAR: &str = "SISU_STAGE1_TRANSCRIPTS";
 /// `SISU_STAGE1=PATH`: the stage-1 executable to run, as it is, neither
 /// built nor checked against its sources.
 pub const STAGE1_VAR: &str = "SISU_STAGE1";
+
+/// `SISU_STAGE1_PROFILE=release` (or `debug`): the profile the driver
+/// builds stage 1 with, the release one without it (decision 860).
+pub const STAGE1_PROFILE_VAR: &str = "SISU_STAGE1_PROFILE";
+
+/// The profile the driver builds stage 1 with (decision 860): the release
+/// one (Cranelift's `speed` level, every contract checked), unless
+/// [`STAGE1_PROFILE_VAR`] says `debug`.
+pub(crate) fn stage1_profile() -> &'static str {
+    match std::env::var(STAGE1_PROFILE_VAR).as_deref() {
+        Ok("debug") => "debug",
+        _ => "release",
+    }
+}
+
+/// The line the driver writes beside a stage 1 it built
+/// (`target/stage1/profile`): the profile, the executable's size and its
+/// time, so that an executable built otherwise, by `stage1/sisu1` or in the
+/// other profile, is built again.
+fn profile_stamp(exe: &Path, profile: &str) -> Option<String> {
+    let meta = std::fs::metadata(exe).ok()?;
+    let time = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?;
+    Some(format!("{profile} {} {}", meta.len(), time.as_nanos()))
+}
+
+/// Whether the stage 1 at `exe` is the driver's build of it in `profile`.
+fn built_in(exe: &Path, profile: &str) -> bool {
+    let stamp = exe.with_file_name("profile");
+    match (std::fs::read_to_string(stamp), profile_stamp(exe, profile)) {
+        (Ok(kept), Some(now)) => kept.trim_end() == now,
+        _ => false,
+    }
+}
 
 /// `SISU_STAGE1_REPL_OPTIONS=1` (or `0`): whether the driver gives stage 1
 /// `--dir`, `--name` and `parse --bindings`, whatever its version says.

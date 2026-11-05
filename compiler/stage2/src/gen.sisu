@@ -374,20 +374,19 @@ impl Cg:
             return internal("the program has no function `{name}`")
         let f = ref p.functions[fi]
         var params: list[(String, int)] = []
+        # A value the function takes by value, which the SIR passes by a
+        # reference to it, is named as the program wrote it, and the error
+        # names the function (decision 864).
         for k in range(f.param_count):
             let t = f.locals[k + 1].ty.copy()
             let plain = export_type(t) else:
-                return unsupported(
-                    "a parameter of the exported function `{symbol}`, a `{write.ty(t)}`"
-                )
+                return Err(in_function(by_value(t, "a parameter", symbol), name))
             params.push(plain)
         var ret: (String, int)? = None
         let rt = f.locals[0].ty.copy()
         if rt != Type.Unit:
             let plain = export_type(rt) else:
-                return unsupported(
-                    "the result of the exported function `{symbol}`, a `{write.ty(rt)}`"
-                )
+                return Err(in_function(by_value(rt, "the result", symbol), name))
             ret = Some(plain)
         let inner = self.instance(p, name, [])?
         var sig = String.new("(")
@@ -851,7 +850,10 @@ impl Cg:
             return d
         let d = self.data_count
         self.data_count += 1
-        self.items.push(Item.Line("data d{d} align 8 u32{text}"))
+        # A word of 0 after an odd number of them, so that the runtime in
+        # Sisu reads every word two at a time (decision 862).
+        let pad = if len(words) % 2 == 1: " 0" else: ""
+        self.items.push(Item.Line("data d{d} align 8 u32{text}{pad}"))
         _ = self.descs.insert(text, d)
         return d
 
@@ -1212,6 +1214,16 @@ pure def par_map(f: Function) -> Function:
         shown=[],
     )
 
+## The error of a value of type `t` that an exported function takes or
+## gives by value (`what`, of the function `symbol`) and C's convention does
+## not pass yet, named as the program wrote it (decision 864).
+pure def by_value(t: Type, what: str, symbol: str) -> LirError:
+    var shown = t.copy()
+    if let Type.Ref(inner, _) = t:
+        shown = inner[0].copy()
+    let text = "a `{write.ty(shown)}` by value ({what} of the exported function `{symbol}`)"
+    return LirError.Unsupported(what=text.to_string(), function=String.new())
+
 ## How a plain value of an exported function's signature goes between C's
 ## register and the word Sisu's convention keeps it in (decision 785): a
 ## word as it is, a narrower signed integer sign-extended, a `bool`, a
@@ -1293,7 +1305,7 @@ pub pure def runtime_signature(name: str) -> str?:
         case "sisu_rt_sized": Some("(i32, i32, i32, i64, i64, i64) -> (i8)")
         case "sisu_rt_wide": Some("(i32, i32, i64, i32, i64, i32, i64) -> (i8)")
         case "sisu_rt_table": Some("(i32, i64, i64, i64) -> (i8)")
-        case "sisu_rt_dict_slot": Some("(i64, i64, i32, i32, i64) -> (i8)")
+        case "sisu_rt_dict_slot" | "sisu_rt_table_take": Some("(i64, i64, i32, i32, i64) -> (i8)")
         case "sisu_rt_flush": Some("() -> ()")
         case "sisu_rt_c_checked": Some("() -> (i8)")
         case "sisu_rt_thread_slot": Some("() -> (i64)")

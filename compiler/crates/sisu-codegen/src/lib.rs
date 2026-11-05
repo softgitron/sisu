@@ -720,12 +720,20 @@ impl<'p> Codegen<'p> {
         let f = self
             .function(name)
             .ok_or_else(|| Error::internal(format!("the program has no function `{name}`")))?;
+        // A value the function takes by value, which the SIR passes by a
+        // reference to it, is named as the program wrote it, and the error
+        // names the function (decision 864).
         let plain = |t: &Type, what: &str| {
             export_type(t).ok_or_else(|| {
+                let shown = match t {
+                    Type::Ref(inner, _) => inner,
+                    t => t,
+                };
                 Error::unsupported(format!(
-                    "{what} of the exported function `{symbol}`, a `{}`",
-                    sir::write::ty(t)
+                    "a `{}` by value ({what} of the exported function `{symbol}`)",
+                    sir::write::ty(shown)
                 ))
+                .in_function(name)
             })
         };
         let mut params = Vec::new();
@@ -1377,7 +1385,7 @@ impl<'p> Codegen<'p> {
             sym::SIZED => (&[i32_, i32_, i32_, i64_, i64_, i64_], &[i8_]),
             sym::WIDE => (&[i32_, i32_, i64_, i32_, i64_, i32_, i64_], &[i8_]),
             sym::TABLE => (&[i32_, i64_, i64_, i64_], &[i8_]),
-            sym::DICT_SLOT => (&[i64_, i64_, i32_, i32_, i64_], &[i8_]),
+            sym::DICT_SLOT | sym::TABLE_TAKE => (&[i64_, i64_, i32_, i32_, i64_], &[i8_]),
             sym::FLUSH => (&[], &[]),
             sym::C_CHECKED => (&[], &[i8_]),
             sym::THREAD_SLOT => (&[], &[i64_]),
@@ -1450,7 +1458,12 @@ impl<'p> Codegen<'p> {
         let id =
             self.module.declare_anonymous_data(false, false).map_err(|e| Error::internal(e.to_string()))?;
         let mut d = DataDescription::new();
-        let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
+        let mut bytes: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
+        // A word of 0 after an odd number of them, so that the runtime in
+        // Sisu reads every word two at a time (decision 862).
+        if words.len() % 2 == 1 {
+            bytes.extend_from_slice(&[0; 4]);
+        }
         d.define(bytes.into_boxed_slice());
         d.set_align(8);
         self.module.define_data(id, &d).map_err(|e| Error::internal(e.to_string()))?;

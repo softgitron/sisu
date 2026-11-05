@@ -133,6 +133,15 @@ unsafe extern "C" {
         kt: *const i64,
         want_value: *const u64,
     ) -> u8;
+    fn sisu_rt_table_inline_take(
+        ret: *mut i64,
+        types: *const *const u64,
+        p: *const *mut u8,
+        key: *const *mut u8,
+        kt: *const i64,
+        want_value: *const u64,
+        out: *const *mut u8,
+    ) -> u8;
     fn sisu_rt_contains(
         ret: *mut u64,
         types: *const *const u64,
@@ -434,6 +443,26 @@ pub(crate) unsafe fn table_find(t: *mut u8, key: *mut u8, kt: u32, value: bool) 
         failed("a table's lookup");
     }
     ret
+}
+
+/// The generated code's inline removal of the key at `key`, of type `kt`,
+/// from the dict or set at `t` (decision 861): the option of its value
+/// written at `out` for a `dict.remove_str` (`value`), else whether it was
+/// there, and the status of the drop of the key the table held (the runtime
+/// in Sisu's).
+///
+/// # Safety
+/// `t` must hold a dict or a set, `key` a value of type `kt`, and `out` have
+/// room for the result.
+pub(crate) unsafe fn table_take(t: *mut u8, key: *mut u8, kt: u32, value: bool, out: *mut u8) -> u8 {
+    let types = crate::desc::base();
+    let (kt, value) = (i64::from(kt), u64::from(value));
+    let mut status = 0i64;
+    // SAFETY: as the caller guarantees.
+    if unsafe { sisu_rt_table_inline_take(&mut status, &types, &t, &key, &kt, &value, &out) } != abi::OK {
+        failed("a table's removal");
+    }
+    status as u8
 }
 
 /// `item in container`, the operator: whether the value at `c` of type
