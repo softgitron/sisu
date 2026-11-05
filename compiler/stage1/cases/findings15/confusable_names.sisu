@@ -1,0 +1,11 @@
+# D-048's lints (RULES.md, R136): a name that mixes the letters of two
+# scripts (`W0031`), and a name that reads as another name in scope
+# (`W0032`), here `pаrt` with a Cyrillic `а` beside `part`.
+def part() -> int:
+    return 1
+
+def main():
+    let pаrt = 2
+    let οne = 3
+    let one = 4
+    print(pаrt + part() + οne + one)

@@ -308,8 +308,9 @@ DWARF output with full type information; the debug backend emits code that
 single-steps predictably. `sisu run --profile` samples with the platform
 profiler and attributes to Sisu source including monomorphised instances.
 Panics and error return traces are symbolised without a separate tool.
-A `Debug` rendering exists for every type (derived by default for private
-types, opt-in for public ones).
+A `Debug` rendering exists for every type, derived by default for public
+and private types alike; a type that hides its fields writes its own `impl
+Debug` (decision 806).
 
 `sisu run --record` writes the run to a log, and `sisu replay` re-executes it
 with the log standing in for the world. In the interpreter every source of

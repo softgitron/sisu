@@ -222,6 +222,55 @@ impl FnLower:
                     self.split(cx)
                 return Place.local(t)
 
+    ## The place of an expression that is only read: `place_of`'s, but
+    ## that a `dict`'s index by a `str` of `String` keys is the reference
+    ## `dict.index_str` gives, with no `String` made (RULES.md, R134).
+    pub pure def read_place_of(mut self, cx: Cx, e: TExprId) -> Place:
+        if self.evaluated.get(e.index).is_some():
+            return self.place_of(cx, e)
+        let x = self.ex(cx, e)
+        match x.kind:
+            case TExprKind.Field(base, index):
+                return self.read_place_of(cx, base).project(Proj.Field(index))
+            case TExprKind.Index(base, index, IndexKind.Dict):
+                let k = self.str_key(cx, index) else:
+                    return self.place_of(cx, e)
+                let b = self.place_of(cx, base)
+                let dt = self.ty(cx, self.ty_of(cx, base))
+                let d = self.temp_sir(Type.Ref(inner=[dt], mutable=False))
+                let loc = cx.loc(x.span)
+                self.assign(cx, Place.local(d), Rvalue.Ref(place=b, mutable=False), loc)
+                let key = self.str_operand(cx, k)
+                let vt = self.ty(cx, x.ty)
+                let r = self.temp_sir(Type.Ref(inner=[vt], mutable=False))
+                let args = [Operand.Copy(Place.local(d)), key]
+                self.intrinsic_call(cx, Place.local(r), "dict.index_str", [], args, loc)
+                return Place.local(r).project(Proj.Deref)
+            case _:
+                return self.place_of(cx, e)
+
+    ## The `str` a lookup's key was made from, when the key is the `String`
+    ## that `str`'s `Lookup.lookup_key()` gives (RULES.md, R113): the
+    ## lookup takes the `str` itself (R134).
+    pub pure def str_key(mut self, cx: Cx, e: TExprId) -> TExprId?:
+        let x = self.ex(cx, e)
+        let TExprKind.Call(TCallee.Fn(def_, _), args) = x.kind else:
+            return None
+        if len(args) != 1:
+            return None
+        let tdef = cx.prog.lookup_in(cx.prog.prelude, "Lookup") else:
+            return None
+        if cx.prog.trait_method(tdef, "lookup_key") != Some(def_):
+            return None
+        let TyData.Adt(d, _) = self.types.data(x.ty) else:
+            return None
+        if cx.prog.builtin(d) != Some("String".to_string()):
+            return None
+        let k = args[0].expr
+        if self.types.strip_ref(self.ty_of(cx, k)) != Ty.str():
+            return None
+        return Some(k)
+
     ## Whether a value of the type is copied: `Copy`, or a reference.
     pub pure def copies(mut self, cx: Cx, ty: Ty) -> bool:
         if let TyData.Ref(_, _) = self.types.data(ty):
@@ -375,7 +424,7 @@ impl FnLower:
         if let Some(c) = self.literal(cx, x):
             return Operand.Const(c)
         if self.is_place(cx, e):
-            let p = self.place_of(cx, e)
+            let p = self.read_place_of(cx, e)
             return self.copy_or_move(cx, p, x.ty)
         let t = self.temp(cx, x.ty)
         self.into(cx, Place.local(t), e)
@@ -596,7 +645,7 @@ impl FnLower:
             case TExprKind.Local(_) | TExprKind.Field(_, _) | TExprKind.Index(
                 _, _, _
             ) | TExprKind.Deref(_):
-                let p = self.place_of(cx, e)
+                let p = self.read_place_of(cx, e)
                 let v = self.copy_or_move(cx, p, x.ty)
                 self.assign(cx, dest, Rvalue.Use(v), loc)
             case TExprKind.Const(d):
@@ -630,6 +679,15 @@ impl FnLower:
                         c = Callee.Value(self.operand(cx, f))
                         for _ in args:
                             owned.push(True)
+                # A lookup by a `str` of `String` keys passes the `str`
+                # itself to the intrinsic that takes it (RULES.md, R134).
+                var by_str: TExprId? = None
+                if let Callee.Intrinsic(n, tys) = c.copy():
+                    if let Some(s) = str_lookup(n):
+                        if len(args) == 2:
+                            if let Some(k) = self.str_key(cx, args[1].expr):
+                                c = Callee.Intrinsic(name=s, args=tys)
+                                by_str = Some(k)
                 var may: list[bool] = []
                 for a in args:
                     may.push(self.may_leave(cx, a.expr))
@@ -641,7 +699,12 @@ impl FnLower:
                     let own_ = if i < len(owned): owned[i] else: True
                     let lent_ = i < len(lent) and lent[i]
                     let mark = len(self.locals)
-                    let o = self.arg_operand_for(cx, args[i], bv, own_, lent_)
+                    var o = Operand.Const(Const.Unit)
+                    match by_str:
+                        case Some(k) if i == 1:
+                            o = self.str_operand(cx, k)
+                        case _:
+                            o = self.arg_operand_for(cx, args[i], bv, own_, lent_)
                     if later[i]:
                         self.hold(cx, o, mark, self.ty_of(cx, args[i].expr), mut held)
                     ops.push(o)
@@ -1751,3 +1814,13 @@ pure def signed_text(bits: u128) -> String:
     let most: u128 = 340282366920938463463374607431768211455
     let magnitude = (most - bits) + 1
     return "-{magnitude}"
+
+## The intrinsic that looks a `str` up where `name` looks up a `String`
+## key (decision 784; RULES.md, R134).
+pub pure def str_lookup(name: str) -> String?:
+    return match name:
+        case "dict.get": Some("dict.get_str".to_string())
+        case "dict.remove": Some("dict.remove_str".to_string())
+        case "set.contains": Some("set.contains_str".to_string())
+        case "set.remove": Some("set.remove_str".to_string())
+        case _: None

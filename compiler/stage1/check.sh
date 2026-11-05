@@ -251,6 +251,13 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+# The Unicode tables of names are what `tools/unicode_tables.py` writes from
+# Python's `unicodedata` (RULES.md, R136): a stale file fails the run.
+if ! python3 -I "$here/tools/unicode_tables.py" --check; then
+    echo "check.sh: src/unicode_tables.sisu is stale (python3 tools/unicode_tables.py)" >&2
+    exit 1
+fi
+
 echo "building stage 0 (cargo build --release)"
 if ! (cd "$compiler" && cargo build --release --quiet); then
     echo "check.sh: stage 0 does not build" >&2
@@ -1066,6 +1073,16 @@ if ! stage1 sir-batch "$work/behaviour.sir" "$work/behaviour.sandboxes" > "$work
     echo "check.sh: stage 1 failed lowering the $class programs" >&2
     exit 1
 fi
+# A batch makes one base, of the runtime profile `full`; a package of
+# another profile (its manifest's `runtime`, RULES.md R122) is lowered by
+# the single command in its directory, as the driver lowers it (R141).
+for k in $(seq 1 "$n"); do
+    prog=$(sed -n "${k}p" "$work/behaviour.sandboxes")
+    if [ -d "$prog" ] && [ -f "$prog/sisu.toml" ] &&
+        grep -Eq '^runtime *= *"(single|freestanding)"' "$prog/sisu.toml"; then
+        stage1 sir "$prog" > "$work/behaviour.sir/$k.sir" 2> /dev/null
+    fi
+done
 middle=$(date +%s.%N)
 parallel behaviour_one "$list" "$work/behaviour"
 end=$(date +%s.%N)

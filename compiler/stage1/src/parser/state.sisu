@@ -48,10 +48,29 @@ impl Parser:
     pub pure def new(text: str, own tokens: list[Token], own lex_errors: list[int]) -> Parser:
         var sig: list[Token] = []
         var sig_index: list[int] = []
+        # The lines start after each line break, which only these tokens
+        # hold: they are found from the tokens rather than from every byte
+        # of the text (RULES.md, R135).
+        var starts = [0]
         for i in range(len(tokens)):
-            if not tokens[i].kind.is_trivia():
-                sig.push(tokens[i])
-                sig_index.push(i)
+            let t = tokens[i]
+            match t.kind:
+                case Whitespace | Comment | DocComment | ModuleDocComment:
+                    continue
+                case LineBreak:
+                    if text.byte_at(t.end - 1) == 10:
+                        starts.push(t.end)
+                    continue
+                case Newline | StringText | RawString | ByteString | ErrorToken | CharLit | FormatSpec:
+                    var k = t.start
+                    while k < t.end:
+                        if text.byte_at(k) == 10:
+                            starts.push(k + 1)
+                        k += 1
+                case _:
+                    pass
+            sig.push(t)
+            sig_index.push(i)
         let count = len(tokens)
         return Parser(
             text=text,
@@ -71,7 +90,7 @@ impl Parser:
             quiet=0,
             attempts=0,
             last_expr=None,
-            lines=Lines.of(text),
+            lines=Lines.of_starts(starts),
         )
 
     ## The tree, the parser's diagnostics, and the lines of the text.
@@ -88,11 +107,17 @@ impl Parser:
             return self.sig[i].kind
         return SyntaxKind.Eof
 
+    # `current` and `at` read the token themselves: they are the parser's
+    # most frequent calls (RULES.md, R135).
     pub(package) pure def current(self) -> SyntaxKind:
-        return self.nth(0)
+        if self.pos < len(self.sig):
+            return self.sig[self.pos].kind
+        return SyntaxKind.Eof
 
     pub(package) pure def at(self, kind: SyntaxKind) -> bool:
-        return self.nth(0) == kind
+        if self.pos < len(self.sig):
+            return self.sig[self.pos].kind == kind
+        return kind == SyntaxKind.Eof
 
     ## Whether the current token is `close`, a line end or the end of the
     ## file: where a bracketed list stops.
@@ -188,8 +213,7 @@ impl Parser:
         var target = self.token_count
         if self.pos < len(self.sig_index):
             target = self.sig_index[self.pos]
-        while self.builder.tokens_attached() < target:
-            self.builder.token()
+        self.builder.tokens_until(target)
 
     pub(package) pure def start(mut self, kind: SyntaxKind):
         self.flush_trivia()
@@ -214,18 +238,18 @@ impl Parser:
     pub(package) pure def bump(mut self):
         if self.pos >= len(self.sig):
             return
-        if self.current() == SyntaxKind.Eof:
+        if self.sig[self.pos].kind == SyntaxKind.Eof:
             # EOF is attached once, by `source_file`.
             return
-        self.flush_trivia()
-        self.builder.token()
+        # The trivia before the token, and the token, in one call (RULES.md,
+        # R135).
+        self.builder.tokens_until(self.sig_index[self.pos] + 1)
         self.pos += 1
         self.ended_with_block = False
 
     ## Attaches the EOF token and everything before it.
     pub(package) pure def bump_eof(mut self):
-        while self.builder.tokens_attached() < self.token_count:
-            self.builder.token()
+        self.builder.tokens_until(self.token_count)
         self.pos = len(self.sig)
 
     pub(package) pure def eat(mut self, kind: SyntaxKind) -> bool:

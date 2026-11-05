@@ -1,0 +1,8 @@
+# A name is read in NFC (02, "Lexical structure"; D-048; RULES.md, R136):
+# `cafe` and a combining acute accent is the name `café` written with
+# one letter, so the two spellings name one variable.
+def main():
+    let café = "kahvila"
+    print(café)
+    let löyly = 80
+    print(löyly + 1)

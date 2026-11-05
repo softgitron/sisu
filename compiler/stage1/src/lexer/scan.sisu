@@ -9,6 +9,7 @@ from stage1.diag import Diagnostic, Edit, Msg
 from stage1.syntax.kinds import SyntaxKind
 from stage1.syntax.tree import Token
 from stage1.text import char_at, hex, is_alphanumeric
+from stage1.text.names import is_combining
 
 ## Where the scanner is.
 @derive(Eq, Debug, Copy)
@@ -207,8 +208,13 @@ impl Scanner:
             let b = self.text.byte_at(self.pos).to_int()
             if (97 <= b <= 122) or (65 <= b <= 90) or (48 <= b <= 57) or b == 95:
                 self.pos += 1
-            elif b >= 128 and is_alphanumeric(char_at(self.text, self.pos)):
-                self.pos += char_at(self.text, self.pos).len_utf8()
+            elif b >= 128:
+                # A letter beyond ASCII, or a mark that combines with the
+                # letter before it, which NFC composes (RULES.md, R136).
+                let c = char_at(self.text, self.pos)
+                if not is_alphanumeric(c) and not is_combining(c):
+                    break
+                self.pos += c.len_utf8()
             else:
                 break
         let length = self.pos - start

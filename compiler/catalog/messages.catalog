@@ -731,6 +731,11 @@ W0026 warning resolve.misplaced-attribute  `@{name}` means something on {places}
 # Stage 1's (RULES.md, R121; D-059 and decision 693): an attribute the
 # compiler accepts and nothing checks yet.
 W0030 warning resolve.unchecked-attribute  `@{name}` is accepted and checked by nothing yet, so nothing ensures {what}
+# Stage 1's (RULES.md, R136; D-048): a name whose letters are of several
+# scripts, and a name a reader may take for another in scope.
+W0031 warning resolve.mixed-script        `{name}` mixes letters of the {scripts} scripts
+W0032 warning resolve.confusable          `{name}` looks like `{other}`, another name in scope
+-     label   resolve.confusable-here     `{other}` is declared here
 # Stage 1's (RULES.md, R115; 13 and D-072): a use of a preview item, as of
 # a deprecated one.
 W0028 warning type.preview                `{name}` is a preview, which may change or be removed before it is stable: {reason}

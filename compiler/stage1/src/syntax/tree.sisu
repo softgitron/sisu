@@ -260,6 +260,16 @@ impl TreeBuilder:
         self.children.push(Element.Leaf(self.next_token))
         self.next_token += 1
 
+    ## Attaches the lexer's tokens up to the one at index `target`.
+    pub pure def tokens_until(mut self, target: int):
+        var end = target
+        if end > len(self.tokens):
+            end = len(self.tokens)
+        while self.next_token < end:
+            self.pos = self.tokens[self.next_token].end
+            self.children.push(Element.Leaf(self.next_token))
+            self.next_token += 1
+
     ## The number of tokens attached so far.
     pub pure def tokens_attached(self) -> int:
         return self.next_token
@@ -267,15 +277,14 @@ impl TreeBuilder:
     pub pure def finish_node(mut self):
         let (kind, start) = self.stack.pop() else:
             return
+        # The children are taken in one pass (RULES.md, R135).
+        let end = len(self.children)
         var kids: list[Element] = []
-        for i in range(start, len(self.children)):
-            kids.push(self.children[i])
-        while len(self.children) > start:
-            _ = self.children.pop()
         let id = len(self.nodes)
         var lo = -1
         var hi = -1
-        for e in kids:
+        for i in range(start, end):
+            let e = self.children[i]
             var s = 0
             var t = 0
             match e:
@@ -291,6 +300,9 @@ impl TreeBuilder:
                 lo = s
             if hi < 0 or t > hi:
                 hi = t
+            kids.push(e)
+        while len(self.children) > start:
+            _ = self.children.pop()
         if lo < 0:
             lo = self.pos
             hi = self.pos

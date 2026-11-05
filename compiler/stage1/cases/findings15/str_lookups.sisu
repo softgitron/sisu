@@ -1,0 +1,26 @@
+# A lookup by a `str` of `String` keys passes the `str` itself to the
+# lookup, so no `String` is made for it: `get`, `remove` and the index of a
+# `dict`, `contains` and `remove` of a `set` (RULES.md, R134; decisions 729
+# and 784). A missing key's index panics, naming the key, as before.
+def total(prices: dict[String, int], menu: set[String], dishes: list[str]) -> int:
+    var n = 0
+    for dish in dishes:
+        if menu.contains(dish):
+            n += prices[dish]
+        n += prices.get(dish).copied() ?? 0
+    return n
+
+def main():
+    var prices: dict[String, int] = {"bun": 280, "tea": 150}
+    var menu: set[String] = {"bun".to_string(), "tea".to_string()}
+    let dishes: list[str] = ["bun", "pie", "tea"]
+    print(total(prices, menu, dishes))
+    let dish: str = "tea"
+    print(prices.get(dish))
+    print(prices.remove(dish))
+    print(prices.remove(dish))
+    print(menu.remove(dish))
+    print(menu.contains(dish))
+    print("{prices} {menu}")
+    let gone: str = "pie"
+    print(prices[gone])

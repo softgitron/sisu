@@ -6904,3 +6904,373 @@ they "wait for the lexer's Unicode tables", which do not exist yet.
      for generated Unicode tables (1,251 compositions; the confusables of
      the identifier scripts and their script ranges): not this round.
      Stage 1 decides it (RULES.md, R133).
+
+## R134. A lookup by a `str` passes the `str` itself: no `String` is made for it (decision 800)
+
+**The rule.** `get` and `remove` of a `dict[String, V]`, its index read as
+a value, and `contains` and `remove` of a `set[String]`, given a `str`
+(R113), lower to the intrinsics of decision 784 that take the `str`
+itself, `dict.get_str`, `dict.remove_str`, `dict.index_str`,
+`set.contains_str` and `set.remove_str`, where they lowered to the
+`String` forms with the key `str.Lookup.lookup_key()` made, which a
+program no longer calls (and whose function the SIR no longer holds). Each
+`_str` intrinsic is declared with the facts of its `String` form
+(`dict.get_str pure from 0`, `dict.remove_str pure inner 0 keeps 0`), and
+`dict.index_str pure from 0`, whose reference is read as the index was.
+What a program prints is what it printed, interpreted and natively, but
+that a missing key's panic now stands at the index (`at main
+(str_lookups.sisu:26:11)`), as decision 784's test has it, where it stood
+at the statement that read the index (`26:5`). The compile-time evaluator
+knows the five intrinsics (`interp`), as the interpreter does.
+
+A string literal where a `String` key goes is still the `String` the type
+checker makes of it (`String.new`), and `dict.contains` given a `str`
+still takes the `String` `lookup_key` gives: `k in d`, which compared the
+text already, is the form without one. A `d[k] = v` by a `str` needs the
+`String` it inserts, and an index that is borrowed, the receiver of a
+method (`d[k].byte_len()`) or a place changed through it (`d[k].n += 1`),
+keeps the `String` form; the borrow by `dict.index_str`'s reference is
+open.
+
+**Measured** (callgrind; `compiler/target/s15/bench.sisu`, 10,000 each of
+a `get`, an index and a `set`'s `contains` by a `str`, built by the
+round's starting stage 1 and by this one): on the interpreter (`sisu run
+--from-sir`) 370.0 M instructions before, 259.8 M after (−30 %); natively
+(`sisu build --native --release`) 30,031 allocations before and 31 after,
+but 97.8 M instructions before and 123.8 M after (+27 %): the backend
+lowers `dict.get`, `dict.contains` and `set.contains` in place
+(`sisu-codegen`'s `I::DictGet | I::DictContains | I::SetContains`), while
+the `_str` intrinsics go through the runtime's dispatch
+(`rt_dispatch_Call_word`, 22.4 M of the run, a chain of comparisons to
+numbers 323 to 327); the same in-place lowering of the five is stage 0's
+to add, after which the native run loses what the interpreter did.
+
+**Why.** Decision 729: the lookup without its `String` is the front end's
+lowering first; stage 0's thirteenth round gave the intrinsics (decision
+784).
+
+**In stage 1.** `lower.exprs` (`str_lookup`, `str_key`, `read_place_of`,
+the call of an intrinsic, `operand`), `lower` (`intrinsic_decls`: the
+facts of a `_str` intrinsic), `interp` (the five intrinsics).
+
+**What it changes.** The SIR of a program that looks a `str` up (no
+program of `sir.list`, whose 549 outputs are the same file for file); the
+case `cases/findings15/str_lookups.sisu` (its `.out`, `.err` and
+`.status`).
+
+- Differs: `compiler/stage1/cases/findings15/str_lookups.sisu`: ids, human, doc, doc-output
+
+**Decision 800**, for docs/architecture.md:
+
+800. Stage 1 lowers `get`, `remove` and the read of an index of a
+     `dict[String, V]`, and `contains` and `remove` of a `set[String]`,
+     given a `str`, to decision 784's intrinsics that take the `str`, so
+     that no `String` is made for the key; a missing key's panic stands at
+     the index. On the interpreter a loop of 30,000 lookups takes 30 % fewer
+     instructions; natively it allocates nothing but runs through the
+     runtime's dispatch, 27 % more, until the backend lowers the five in
+     place as it does `dict.get`. Stage 1 decides it (RULES.md, R134).
+
+## R135. The parser makes its table of lines from its tokens and calls less per token (decision 801)
+
+**The rule.** Nothing a command prints changes; every tree is the same,
+byte for byte (`check.sh`'s `tree`, `trivia-tree` and `print` classes, and
+3,000 mutants of the corpus and stage 1's cases compared by a check built
+into a trial build, below). What changes is how the parser does its work:
+
+- `Parser.new` finds where the lines start from the tokens that hold a
+  line break (`LineBreak`, `Newline` and the texts of strings, raw and
+  byte strings, characters, format specs and error tokens), as it walks
+  them for the significant ones, where `Lines.of` read every byte of the
+  text a second time after the lexer; `Lines.of_starts` makes the table,
+  with no line known to be ASCII, so that `line_col` (which the parser's
+  table never serves) counts characters.
+- `current` and `at` read the token themselves, where each called `nth`;
+  `bump` attaches the trivia before a token and the token in one call
+  (`TreeBuilder.tokens_until`), where it called `flush_trivia`,
+  `tokens_attached` for each trivia token, and `token`;
+  `TreeBuilder.finish_node` takes a node's children in one pass.
+- `render_ids_in` of no diagnostic makes no table of lines.
+
+Two trials were left out: `list.with_capacity` for a node's children,
+which goes through the runtime's dispatch natively and cost 73 M of the
+prelude's parse where the growth it saves cost 18 M; and reading the
+lines' bytes through `str.bytes()`, five times the cost of `byte_at`.
+
+**Measured** (callgrind, natively, the round's starting stage 1 and this
+one built by the same stage 0): `sisu1 parse --print std/prelude.sisu`
+executes 988.3 M instructions before, 832.2 M after (−15.8 %), the parse
+(`parse_lexed`) 463.6 M before and 352.9 M after (−23.9 %); a cached `sisu1
+check --format=ids` of a two-line program 3.432 G before and 3.228 G after
+(−5.9 %), the parser itself 0.908 G before (R127's 0.91 G) and 0.704 G
+after (−22.5 %), the lexer 0.531 G as before. The batches (the better of
+two runs each, at a load of 13 to 14 on four cores): `types-batch` of
+`types.list` 7.33 s of user time before and 7.08 s after, `sir-batch` of
+`sir.list` 25.3 s before and 26.3 s after (the front end 9.4 s and 9.6 s),
+which the load's noise covers; their outputs are the same file for file.
+The release profile of the native build was measured beside them, and is
+not this round's: `sisu build --native --release` of stage 1 parses the
+prelude in 373 M instructions where the debug profile, which `sisu1` and
+`check.sh` build, takes 988 M; the profile stage 1 is built with is the
+driver's and `sisu1`'s to choose.
+
+**Why.** R127 left the parser itself at 0.91 G of the two-line `check`'s
+3.42 G; the profile put a tenth of the prelude's parse in the second scan
+of its bytes and most of the rest in calls of a few instructions each
+(about 100 instructions a call in the native code of the debug profile).
+
+**In stage 1.** `parser.state` (`Parser.new`, `current`, `at`, `bump`,
+`flush_trivia`, `bump_eof`), `syntax.tree` (`TreeBuilder.tokens_until`,
+`finish_node`), `diag` (`Lines.of_starts`, `render_ids_in`).
+
+**What it changes.** No output of the corpus.
+
+**Decision 801**, for docs/architecture.md:
+
+801. Stage 1's parser finds the starts of lines from its tokens and calls
+     less per token: a parse of the prelude takes 24 % fewer instructions
+     and a two-line `check` 6 % fewer (3.43 G to 3.23 G, the parser 0.91 G
+     to 0.70 G), with the same trees. Stage 1 decides it (RULES.md, R135).
+
+## R136. Unicode names: NFC, the mixed-script lint `W0031` and the confusable lint `W0032` (decision 802)
+
+**The rule.**
+
+- A name may hold, after its letters, a mark that combines with the
+  letter before it (a canonical combining class other than 0), where the
+  mark was `E0005`; the token is the name as written.
+- A name is read in NFC (02, "Lexical structure"): the AST's names
+  (`Name`, a name expression) and the name pass's (`resolve`) are the
+  name's characters decomposed, its marks put in their canonical order and
+  composed again (UAX 15), so `cafe` with a combining acute accent and
+  `café` written with one letter are one name. A name of ASCII is itself,
+  at the cost of a look at its bytes. The formatter and the tree keep the
+  text as written; a label stands at the token's bytes.
+- `W0031` (`resolve.mixed-script`): a declared name whose letters are of
+  more than one script, `pаrt` with a Cyrillic `а`, naming the scripts in
+  the order the name uses them ("Latin and Cyrillic"). Digits, `_` and
+  letters of no script (the mathematical alphabets) count for none, and
+  the scripts of Chinese, Japanese and Korean names count as one.
+- `W0032` (`resolve.confusable`): a declared name that reads as another
+  name in scope (a module's item, a local or parameter of an enclosing
+  scope), the two different, one of them beyond ASCII, and their skeletons
+  the same: each letter written as the ASCII letter or digit it reads as.
+  The label `resolve.confusable-here` stands at the other's declaration
+  when it is the module's. Nothing is compared until a module declares a
+  name beyond ASCII, so a program of ASCII names pays nothing more.
+
+The tables are generated: `tools/unicode_tables.py` writes
+`src/unicode_tables.sisu` from Python's `unicodedata` (Unicode 15.1.0),
+821 lines: 1,251 compositions, 1,382 decompositions (the compatibility
+ideographs left out, which a name keeps), 388 ranges of combining classes,
+639 ranges of letters' scripts (a letter's script the first word of its
+name, with the words of no script and the aliases the script lists) and
+179 ranges of confusables (the letters whose NFKC form is one ASCII letter
+or digit, and the usual Cyrillic, Greek and Latin look-alikes, a table in
+the script). `check.sh` fails when the file is not what the script writes
+(`python3 -I tools/unicode_tables.py --check`). The lookups are binary
+searches over the tables' records, as `text.unicode`'s (`text.names`), on
+the rare path of a character beyond ASCII. The scripts are an
+approximation of Unicode's `Scripts.txt` from the characters' names, and
+the confusables a subset of `confusables.txt`, as R133 expected; Hangul
+syllables, which `unicodedata` decomposes by rule, are not composed.
+
+**Why.** D-048 and 02 make names NFC with the two lints on by default; R133
+said what they wait for, the generated tables, which are 821 lines.
+
+**In stage 1.** `tools/unicode_tables.py`, `unicode_tables` (generated),
+`text.names` (`nfc`, `scripts_of`, `skeleton`, `is_combining`, with the
+tests "a name is read in NFC" and "a name's scripts and skeleton"),
+`lexer.scan` (`ident`), `syntax.ast.build` (`name`, a name expression),
+`resolve` (the names it reads, `check_style`, `check_confusable`,
+`confusable`, `Resolver.unicode`), `diag` (`ResolveMixedScript`,
+`ResolveConfusable`, `ResolveConfusableHere`); `check.sh` (the stale
+check); the catalog's `W0031`, `W0032` and `resolve.confusable-here`.
+
+**What it changes.** The cases `cases/findings15/nfc_names.sisu` (its
+`.out`; the Rust lexer refuses the combining mark with `E0005`) and
+`cases/findings15/confusable_names.sisu` (its `.diag` and `.out`); no
+other output of the corpus.
+The case `cases/unicode_names.sisu`, whose `café` with a combining accent
+was a name and an `E0005`, is one name now, as in the tree.
+
+- Differs: `compiler/stage1/cases/findings15/nfc_names.sisu`: tokens, tree, trivia-tree, ast, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/findings15/confusable_names.sisu`: names, ids, human
+- Differs: `compiler/stage1/cases/unicode_names.sisu`: tokens, tree, trivia-tree, ast, ids, human, fmt-check, doc, doc-output
+
+**Decision 802**, for docs/architecture.md:
+
+802. A name may hold combining marks after its letters and is read in NFC;
+     `W0031` warns of a name whose letters are of several scripts and
+     `W0032` of a name that reads as another in scope, by generated tables
+     (`tools/unicode_tables.py`, Unicode 15.1) that `check.sh` keeps
+     fresh. Stage 1 decides it (RULES.md, R136; D-048).
+
+## R137. The library's planned helpers: checked arithmetic of every integer, `or_else`, `try_map`, `try_collect` (decision 803)
+
+**The rule.** The prelude has, appended at its end so that no function
+before them moves:
+
+- `checked_add`, `checked_sub` and `checked_mul` of each sized integer
+  (`u8` to `u128`, `i8` to `i128`), `None` where the operation would trap,
+  and `checked_pow(exp: int)` of `int` and of each sized integer
+  (`requires exp >= 0`, as `num.checked_pow`); `u8.checked_add` was
+  `E0304`.
+- `Result.or_else(f)`: the value, or `f` of the error, 05's form
+  `fallible().or_else(e -> recover(e))`, beside `or(default)`.
+- `Iter.try_map(f)`: `f` of each item in a list, or the first error `f`
+  gives (`Result[list[U], E]`), and `list[Result[T, E]].try_collect()`:
+  the values, or the first error. 05 names them for chains that can fail,
+  without their forms; an adapter's `map` is `Iterator`'s, whose trait a
+  method appended at the prelude's end cannot join, so a chain collects
+  first, `xs.iter().map(f).collect().try_collect()`, or maps with
+  `try_map`.
+
+Each has a doc example, which the Rust front end checks and runs (`u8`'s,
+`i8`'s and `int`'s for the families).
+
+**Why.** The manual's findings "as planned" under "Errors" (chapters 8 and
+16) and "The standard library" (the checked methods of the sized
+integers, `checked_pow` `std.num`'s function only).
+
+**In stage 1.** Nothing but `std/prelude.sisu`.
+
+**What it changes.** The conformance suite's `std/doc_examples.select` is
+blessed again (six doc examples more, 191 where there were 185); no other
+output of the corpus.
+
+**Decision 803**, for docs/architecture.md:
+
+803. The sized integers have `checked_add`, `checked_sub`, `checked_mul`
+     and `checked_pow`, and `int` has `checked_pow`; `Result.or_else`,
+     `Iter.try_map` and `list[Result[T, E]].try_collect` are the prelude's.
+     Stage 1 decides it (RULES.md, R137).
+
+## R138. A body with a syntax error reports the names outside its broken statements (decision 804)
+
+**The rule.** A function's or a closure's body with an `ERROR` node is
+resolved, where nothing in it was reported: a statement with an `ERROR`
+node outside its blocks is passed over, none of its names reported, and
+every name written in such a statement or in an `ERROR` node of the body
+is taken as one the broken code may declare (`Resolver.broken`), never
+reported as unknown where a later statement uses it, so the cascade stays
+out. A header with a syntax error still leaves its body unreported, and
+no diagnostic is kept on a line with a syntax error, as before. `go f()`
+and `nil` in one body are now both reported (`E0117`, then `E0200` with
+the fix `None`).
+
+**Why.** G4's finding under "Diagnostics without fixes": a body with a
+parse error reported nothing of its names, so the `nil` of a body that
+also holds `go f()` went unreported until the parse was fixed.
+
+**In stage 1.** `resolve` (`function`, the body of a closure or lambda,
+`broken_in`, `error_names`, `statement`, `use_name`).
+
+**What it changes.** The case `cases/findings15/names_despite_parse.sisu`
+(its `.diag`), and the names of any body with a syntax error, as listed
+below.
+The name class of three of stage 1's cases of syntax errors reports the
+names they do not know outside their broken statements, which `check`
+then drops, each on a line with a syntax error (`ready`, `xs`, `open`).
+
+- Differs: `compiler/stage1/cases/findings15/names_despite_parse.sisu`: names, ids, human, fmt-check, doc, doc-output
+- Differs: `compiler/stage1/cases/expected_block_labels.sisu`: names
+- Differs: `compiler/stage1/cases/expression_mistakes.sisu`: names
+- Differs: `compiler/stage1/cases/statement_mistakes.sisu`: names
+
+**Decision 804**, for docs/architecture.md:
+
+804. A body with a syntax error has its names resolved but for the
+     statements whose shape the error broke: none of their names is
+     reported, and none of the names they write is reported later. Stage 1
+     decides it (RULES.md, R138).
+
+## R139. `sisu doc`'s values of an example: decided against for this round (decision 805)
+
+**The rule.** Nothing changes: a doc example is shown as written.
+
+**Decided against**, for this round, with what it would take: 10 has
+`sisu doc` render each expression statement of an example with its value.
+`sisu doc` is a `pure` function of the syntax trees, the resolved names
+and the inferred error sets (decision 258); a value needs the example
+type-checked and lowered as a function of its module's program, as `sisu
+test` builds it, and then run. The compile-time evaluator (`interp`) runs
+the `pure` code compile time needs, while examples call `print` and take
+capabilities (`Fs.read_only`, `System.fake`), so most values would be left
+as text; and the pages of every program with such an example would differ
+from stage 0's `sisu doc`, which renders none, for the doc classes to
+list. It is the worksheet's machinery (`sir --worksheet`'s `__ws_show`),
+run by the interpreter, that would give each line its value, which makes
+it a round of its own with the driver's `sisu doc`.
+
+**What it changes.** Nothing.
+
+**Decision 805**, for docs/architecture.md:
+
+805. `sisu doc`'s rendering of an example's values waits for the example
+     to be built and run as a worksheet is, which the compile-time
+     evaluator cannot do for examples that print or take capabilities.
+     Stage 1 decides it (RULES.md, R139).
+
+## R140. Every type has its `Debug`, a public one too (decision 806)
+
+**The rule.** Nothing changes in stage 1: every type, public or private,
+has its `Debug` form without asking (the structural rendering), as both
+front ends have always given it. A type that keeps its fields from a
+reader writes its own `impl Debug`.
+
+**Why.** Chapter 7's finding under "Types and traits": 10 makes `Debug`
+opt-in for public types. The worksheet, the REPL, `sisu test`'s values
+beside a failing `assert`, error return traces and the debugger show
+values by their `Debug` form; a public type without one would show
+nothing there, and a library's types are the ones a user's tests and
+sessions meet most. The cost the opt-in avoided, a public type's fields
+in output, is the impl a type that hides them writes.
+
+**The sentence of 10** ("Debugging and profiling") the coordinator carries:
+"A `Debug` rendering exists for every type (derived by default for private
+types, opt-in for public ones)." becomes "A `Debug` rendering exists for
+every type, derived by default for public and private types alike; a type
+that hides its fields writes its own `impl Debug`."
+
+**What it changes.** Nothing.
+
+**Decision 806**, for docs/architecture.md:
+
+806. Every type has a `Debug` form without asking, a public one too, and a
+     type that hides its fields writes its own impl; 10's opt-in for
+     public types is withdrawn. Stage 1 decides it (RULES.md, R140).
+
+## R141. The merge's differences: the conformance suite's `runtime_single`, and a batch's runtime profile (decision 807)
+
+**The rule.** Nothing a command prints changes. Stage 0's thirteenth round
+added the conformance case `packages/runtime_single.pkg` (decision 783), a
+copy of stage 1's own `cases/packages/runtime_single.pkg`, which R122
+lists: the Rust front end refuses the manifest's `runtime` key (`W0005`)
+and `target.runtime_profile` (`E0204`), so its SIR, diagnostics and pages
+differ from stage 0's as those of stage 1's copy do. `check.sh`'s
+`behaviour` class lowered it with `sir-batch`, whose one base is of the
+profile `full` for every program of the batch (`main.runtime_profile`
+reads the profile from a command's own path), so the batch's program
+printed `profile: full` where the case expects `profile: single`; the
+class now lowers a package whose manifest names another profile by the
+single command, `sir PATH`, as the driver lowers it, and the program
+prints `profile: single`, interpreted and natively. A batch's base for
+each profile is open.
+
+**Why.** The merge of stage 0's thirteenth round brought the case, and
+`check.sh` found what it changes.
+
+**In stage 1.** `check.sh` (the `behaviour` class).
+
+**What it changes.** Nothing.
+
+- Differs: `compiler/conformance/cases/packages/runtime_single.pkg`: sir, ids, human, doc, doc-output
+
+**Decision 807**, for docs/architecture.md:
+
+807. The conformance suite's `packages/runtime_single.pkg` differs from
+     stage 0 as stage 1's own copy of it does (R122), and `check.sh` lowers
+     a package of a runtime profile other than `full` by the single command,
+     whose base is of its profile, where a batch's base is `full`. Stage 1
+     decides it (RULES.md, R141).

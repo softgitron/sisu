@@ -613,6 +613,10 @@ pub enum Msg:
     BorrowSortedRefs
     TypeInstanceOwns
     TypeInstanceLine
+    # Stage 1's fifteenth round (RULES.md, R134 on).
+    ResolveMixedScript
+    ResolveConfusable
+    ResolveConfusableHere
 
 impl Msg:
     ## The catalog identifier.
@@ -1207,6 +1211,9 @@ impl Msg:
             case BorrowSortedRefs: "borrow.sorted-refs"
             case TypeInstanceOwns: "type.instance-owns"
             case TypeInstanceLine: "type.instance-line"
+            case ResolveMixedScript: "resolve.mixed-script"
+            case ResolveConfusable: "resolve.confusable"
+            case ResolveConfusableHere: "resolve.confusable-here"
 
 ## A byte range of a text: from `start` up to, not including, `end`.
 @derive(Eq, Hash, Debug, Copy)
@@ -1576,6 +1583,15 @@ impl Lines:
         ascii.push(plain)
         return Lines(starts=starts, ascii=ascii)
 
+    ## The lines that start at `starts`, which a parser found from its
+    ## tokens; none is known to be ASCII, so `line_col` counts each one's
+    ## characters (RULES.md, R135).
+    pub pure def of_starts(own starts: list[int]) -> Lines:
+        var ascii: list[bool] = []
+        for _ in starts:
+            ascii.push(False)
+        return Lines(starts=starts, ascii=ascii)
+
     ## Where the line of 0-based index `index` starts, or `None` past the
     ## last line.
     pub pure def start_of(self, index: int) -> int?:
@@ -1695,6 +1711,9 @@ pub pure def render_ids(text: str, diags: list[Diagnostic], catalog: Catalog) ->
 pub pure def render_ids_in(
     name: str, text: str, diags: list[Diagnostic], catalog: Catalog
 ) -> String:
+    # No diagnostic needs no lines (RULES.md, R135).
+    if diags.is_empty():
+        return String.new()
     let lines = Lines.of(text)
     var file = String.new()
     if not name.is_empty():

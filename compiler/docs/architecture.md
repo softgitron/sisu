@@ -10785,3 +10785,50 @@ replay", "The checked memory model"; D-085, D-086; 06, 12, 17; decisions
      round's: it needs stage 1's `sir --tests` to name each test's module
      so that the driver selects them, which a round of stage 1's gives.
      This changes no rule of the language.
+
+**Stage 1's fifteenth round** (stage 1's RULES.md, R134 to R141; lookups by `str` to the intrinsics, the parser's cost, Unicode names with generated tables and the lints `W0031` and `W0032`, the library's planned helpers, names despite a parse error, `sisu doc` values decided against, every type's `Debug`, the `runtime_single` package's differences)
+
+800. Stage 1 lowers `get`, `remove` and the read of an index of a
+     `dict[String, V]`, and `contains` and `remove` of a `set[String]`,
+     given a `str`, to decision 784's intrinsics that take the `str`, so
+     that no `String` is made for the key; a missing key's panic stands at
+     the index. On the interpreter a loop of 30,000 lookups takes 30 % fewer
+     instructions; natively it allocates nothing but runs through the
+     runtime's dispatch, 27 % more, until the backend lowers the five in
+     place as it does `dict.get`. Stage 1 decides it (RULES.md, R134).
+
+801. Stage 1's parser finds the starts of lines from its tokens and calls
+     less per token: a parse of the prelude takes 24 % fewer instructions
+     and a two-line `check` 6 % fewer (3.43 G to 3.23 G, the parser 0.91 G
+     to 0.70 G), with the same trees. Stage 1 decides it (RULES.md, R135).
+
+802. A name may hold combining marks after its letters and is read in NFC;
+     `W0031` warns of a name whose letters are of several scripts and
+     `W0032` of a name that reads as another in scope, by generated tables
+     (`tools/unicode_tables.py`, Unicode 15.1) that `check.sh` keeps
+     fresh. Stage 1 decides it (RULES.md, R136; D-048).
+
+803. The sized integers have `checked_add`, `checked_sub`, `checked_mul`
+     and `checked_pow`, and `int` has `checked_pow`; `Result.or_else`,
+     `Iter.try_map` and `list[Result[T, E]].try_collect` are the prelude's.
+     Stage 1 decides it (RULES.md, R137).
+
+804. A body with a syntax error has its names resolved but for the
+     statements whose shape the error broke: none of their names is
+     reported, and none of the names they write is reported later. Stage 1
+     decides it (RULES.md, R138).
+
+805. `sisu doc`'s rendering of an example's values waits for the example
+     to be built and run as a worksheet is, which the compile-time
+     evaluator cannot do for examples that print or take capabilities.
+     Stage 1 decides it (RULES.md, R139).
+
+806. Every type has a `Debug` form without asking, a public one too, and a
+     type that hides its fields writes its own impl; 10's opt-in for
+     public types is withdrawn. Stage 1 decides it (RULES.md, R140).
+
+807. The conformance suite's `packages/runtime_single.pkg` differs from
+     stage 0 as stage 1's own copy of it does (R122), and `check.sh` lowers
+     a package of a runtime profile other than `full` by the single command,
+     whose base is of its profile, where a batch's base is `full`. Stage 1
+     decides it (RULES.md, R141).
