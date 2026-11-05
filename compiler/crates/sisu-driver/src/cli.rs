@@ -1784,10 +1784,15 @@ fn stage1_command(
             let several = cmd == "test"
                 && (inputs.len() > 1
                     || (black_box
-                        && inputs.iter().any(|i| i.package.is_some() && !black_box_files(&i.shown).is_empty())));
+                        && inputs
+                            .iter()
+                            .any(|i| i.package.is_some() && !black_box_files(&i.shown).is_empty())));
             let heading = |name: &str, host: &mut dyn Host| {
                 if several {
-                    host.stdout(&format!("{}\n", text(msg::CLI_TEST_PROGRAM, &[("program", name.to_string())])));
+                    host.stdout(&format!(
+                        "{}\n",
+                        text(msg::CLI_TEST_PROGRAM, &[("program", name.to_string())])
+                    ));
                 }
             };
             for input in &inputs {

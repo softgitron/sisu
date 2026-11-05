@@ -9822,8 +9822,17 @@ and sets, `in`, a slice's intrinsics and a table's literal** (section
      it said. The parking and waking of a task (its state, the wait it
      reports in a deadlock) and the choice of the next one stay the
      runtime in Rust's, as do the channels' buffers, whose values have a
-     size of their own: the next pieces of D-086's order. XXXCOST This
-     changes no rule of the language.
+     size of their own: the next pieces of D-086's order. The scheduler's switches cost
+     more: 20 000 values sent through a channel of capacity 1 and received
+     take 196.7 million instructions (callgrind, the release profile, the
+     runtime's object as the driver builds it) where they took 144.6
+     million, 36 % more, about 2 600 instructions a value of its two
+     switches: a call of Sisu's convention costs a hundred instructions
+     and more where a `Vec`'s push cost ten, and each call lifts the
+     running task's stack probe (`queue::unprobed`), since the scheduler
+     calls from the root task's stack while another task's limits are
+     loaded, which a run under valgrind, whose stacks lie elsewhere, showed
+     failing. This changes no rule of the language.
 
 646. The intrinsics the generated code calls for a list's and a set's
      iterator (`list.iter`, `set.iter`), a slice (`list.as_slice`,
@@ -9845,5 +9854,21 @@ and sets, `in`, a slice's intrinsics and a table's literal** (section
      `_table_value_bytes`, whose exports are deleted from the runtime in
      Sisu. Still the runtime in Rust's: an iterator of a borrowed value
      reached by `iter` (`IterRef`, `IterMut`), the decoding of the other
-     intrinsics, and `d{k}`'s slot (`sisu_rt_dict_slot`). XXXCOST2 This
-     changes no rule of the language.
+     intrinsics, and `d{k}`'s slot (`sisu_rt_dict_slot`). A descriptor's word is read as half
+     of the aligned word of eight bytes it is in (both backends align a
+     descriptor to eight), where it was read a byte at a time, which
+     every intrinsic of `sisu_rt_collection` pays. They cost more than the
+     runtime in Rust's arms: 30 000 rounds of `in` on a list, a set's
+     iterator, a dict's literal and a slice's `as_slice`, `slice` and
+     `to_list` take 976.5 million instructions where they took 762.7
+     million (28 % more), the descriptor read and the walk to a value
+     behind its references for each argument most of it. The seed grows
+     from 649 669 to 685 014 bytes of SIR with decision 645's queues and
+     the runtime's object from 686 800 to 727 128 bytes
+     (`target/rt/rt.o`), and as the fixed point builds it with the Sisu
+     backend from 1 269 416 to 1 335 224 bytes; the fixed point holds
+     (rt-A.o and rt-B.o the same bytes, as sisu2-A and sisu2-B,
+     32 351 432, and stage1-A and stage1-B, 63 271 168, which carry the
+     standard library's changes of decisions 642 and 643 and stage 2's
+     table of decision 643's intrinsic too). This changes no rule of the
+     language.

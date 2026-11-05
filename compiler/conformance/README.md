@@ -30,7 +30,9 @@ commands stage 1 does not serve yet run on the Rust front end: `test
 `explain-borrow` ([port-debt.md](../docs/port-debt.md), "The Rust front
 end's roles"); `repl` and `ws` build their programs with stage 1's `sir
 --repl` and `sir --worksheet` once it says it serves them (`sisu1 0.8.0`,
-decisions 563 and 620), and `cargo test` runs the suite's sessions and
+decisions 563 and 620; from `sisu1 0.9.0` with `--dir` and `--name`, and
+`:why` from `parse --bindings`, decision 640), and `cargo test` runs the
+suite's sessions and
 worksheet through stage 1 too, with `SISU_STAGE1_REPL=1`.
 `cargo test` runs the suite so, with stage 1 as the front end.
 `--front-end=stage1` or `--front-end=rust` asks the executable for that
