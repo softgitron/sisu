@@ -9354,8 +9354,13 @@ in Sisu"; D-086)
      through entries of the runtime in Rust, since a message is the
      catalog's and the runtime's code has no text of its own; about three
      days). The seed grows from 586 692 to 589 082 bytes of SIR and the
-     runtime's object from 617 856 to 619 984 bytes (`target/rt/rt.o`).
-     This changes no rule of the language.
+     runtime's object from 617 856 to 619 984 bytes (`target/rt/rt.o`),
+     and as the fixed point builds it with the Sisu backend from 1 147 096
+     to 1 151 544 bytes; the fixed point holds (rt-A.o and rt-B.o the same
+     bytes, as sisu2-A and sisu2-B, 32 221 112, and stage1-A and stage1-B,
+     62 490 080, which carry decision 561's lowering and the standard
+     library's changes of decisions 564 to 567 too). This changes no rule
+     of the language.
 
 **The driver: the REPL and worksheets on stage 1** (section "The REPL and
 worksheets"; 10; port-debt.md, "The Rust front end's roles still to

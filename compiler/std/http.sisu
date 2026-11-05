@@ -257,7 +257,9 @@ impl FakeNet:
     ## The network with each `method` request of `url` answered by
     ## `response` once `delay` has passed on the run's test clock: a slow
     ## answer, which the client waits for at its first read.
-    def respond_after(self, method: str, url: str, own response: Response, delay: Duration) -> FakeNet:
+    def respond_after(
+        self, method: str, url: str, own response: Response, delay: Duration
+    ) -> FakeNet:
         let key = route_key(method, url)
         var g = self.state.get().lock()
         _ = g.value.routes.insert(key, (response, delay))

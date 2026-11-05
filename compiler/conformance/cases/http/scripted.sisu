@@ -9,10 +9,10 @@ from std.net import Url
 test "a 503, a slow answer and a 404":
     let busy = http.Response.text(503, "Service Unavailable", "busy")
     let late = http.Response.ok(b"late")
-    let net = http.FakeNet()
-        .respond("POST", "http://api.test/jobs", busy)
-        .respond_after("GET", "http://api.test/slow", late, Duration.seconds(30))
-        .respond_to("https://api.example.com/v1/data", b"from net")
+    let wait = Duration.seconds(30)
+    let net = http.FakeNet().respond("POST", "http://api.test/jobs", busy)
+    _ = net.respond_after("GET", "http://api.test/slow", late, wait)
+    _ = net.respond_to("https://api.example.com/v1/data", b"from net")
     let jobs = Url.parse("http://api.test/jobs").expect("a URL")
     let r = http.request(net, "POST", jobs).expect("an answer")
     assert r.status == 503
@@ -23,7 +23,7 @@ test "a 503, a slow answer and a 404":
     let before = clock.now()
     let slow = Url.parse("http://api.test/slow").expect("a URL")
     assert http.get(net, slow).expect("an answer") == b"late"
-    assert clock.now() - before == Duration.seconds(30)
+    assert clock.now() - before == wait
     let data = Url.parse("https://api.example.com/v1/data").expect("a URL")
     assert http.get(net, data).expect("an answer") == b"from net"
     assert net.request_count() == 4
