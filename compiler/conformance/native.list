@@ -124,6 +124,7 @@ packages/modules
 packages/path_dependency
 packages/runtime_single
 packages/script
+packages/test_modules
 packages/workspace
 reflect/cli
 reflect/closures
@@ -237,6 +238,7 @@ std/rand
 std/regex
 std/search
 std/sort
+std/sum
 std/text_math
 std/time_parts
 std/time_zones

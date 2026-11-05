@@ -1,0 +1,2 @@
+panic: integer overflow: 9223372036854775807 + 1
+  at main (sum.sisu:24:11)

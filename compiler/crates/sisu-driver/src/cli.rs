@@ -1262,15 +1262,20 @@ fn package_module(file: &str) -> Option<(String, String)> {
 /// line of `text` (its R142; decision 900).
 fn keep_module_tests(prog: &mut sisu_sir::Program, text: &str, file: &str) {
     let files = sisu_sir::read::test_files(text);
-    let keep: Vec<bool> = (0..prog.tests.len()).map(|k| files.get(k).is_some_and(|f| f.as_deref() == Some(file))).collect();
+    let keep: Vec<bool> =
+        (0..prog.tests.len()).map(|k| files.get(k).is_some_and(|f| f.as_deref() == Some(file))).collect();
     let mut k = 0;
     prog.tests.retain(|_| {
         k += 1;
         keep[k - 1]
     });
     let tags = std::mem::take(&mut prog.test_tags);
-    prog.test_tags =
-        tags.into_iter().enumerate().filter(|(k, _)| keep.get(*k).copied().unwrap_or(false)).map(|(_, t)| t).collect();
+    prog.test_tags = tags
+        .into_iter()
+        .enumerate()
+        .filter(|(k, _)| keep.get(*k).copied().unwrap_or(false))
+        .map(|(_, t)| t)
+        .collect();
 }
 
 pub(crate) fn black_box_files(dir: &str) -> Vec<String> {

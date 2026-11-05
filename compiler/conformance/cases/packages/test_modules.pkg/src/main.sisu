@@ -1,0 +1,8 @@
+from sauna.heat import level
+from sauna.steam import ladles
+
+def main():
+    print("{level(80)}, {ladles(3)}")
+
+test "the main module's test":
+    assert level(70) == "warm"

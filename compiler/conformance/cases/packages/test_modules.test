@@ -1,0 +1,6 @@
+test "the main module's test" ... ok
+test "heat/levels/eighty is hot" ... ok
+test "heat/levels/sixty is warm" ... ok
+test "heat/steam from a sibling module" ... ok
+test "steam/one ladle" ... ok
+5 passed, 0 failed, 0 blocked

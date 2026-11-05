@@ -21,6 +21,7 @@ import rt.value
 from rt.host import memmove
 from rt.host import sisu_rt_alloc
 from rt.host import sisu_rt_drop_value
+from rt.host import sisu_rt_f32_add
 from rt.host import sisu_rt_free
 from rt.host import sisu_rt_list_bounds
 from rt.host import sisu_rt_list_view
@@ -289,9 +290,14 @@ impl Call:
     ## Requires:
     ## - `call`: the call has argument `i`
     def place(self, i: int) -> (ptr mut u8, int):
-        let t = self.ty(i)
-        # safety: in_bounds, valid, aligned: the block holds the address of
-        #   each argument, by `call`; the table has a header of `WORDS` words
+        # `ty`, written out: a call of Sisu's convention costs more than it.
+        var t = self.w4
+        if i == 1:
+            t = self.w5
+        elif i > 1:
+            t = self.word(4 + i)
+        # safety: in_bounds, valid, aligned, writable: the block holds the
+        #   address of each argument, which the call may change, by `call`; the table has a header of `WORDS` words
         #   for each type, and a reference's word is the address of its
         #   target.
         unsafe:
@@ -796,7 +802,9 @@ def sum_call(c: Call) -> int:
     let rt = c.ret_ty()
     let size = ts.size(rt)
     let items = scratch(24)
-    var st = iter.collect(ts, iter.iterable(ts, c.arg(0), c.ty(0), c.item(0)), c.item(0), items, c.mode)
+    var st = iter.collect(
+        ts, iter.iterable(ts, c.arg(0), c.ty(0), c.item(0)), c.item(0), items, c.mode
+    )
     let n = list.length(items)
     let b = list.buffer(items)
     let k = ts.kind(rt)
@@ -807,9 +815,7 @@ def sum_call(c: Call) -> int:
         # safety: aligned, writable: the result is an `f64`.
         unsafe c.ret.cast[f64]().write(pairwise(b, size, 0, n))
     elif st == OK and k == F32:
-        c.set(0, 0)
-        # safety: aligned, writable: the result is an `f32`, in its word.
-        unsafe c.ret.cast[f32]().write(pairwise32(b, size, 0, n))
+        c.set(0, pairwise32(b, size, 0, n))
     elif st == OK:
         var total = 0
         var i = 0
@@ -845,16 +851,20 @@ def pairwise(b: ptr mut u8, size: int, lo: int, n: int) -> f64:
     let half = n // 2
     return pairwise(b, size, lo, half) + pairwise(b, size, lo + half, n - half)
 
-## `pairwise` of `f32`s, each in the low half of its item's word.
+## `pairwise` of `f32`s, each in the low half of its item's word: the bits
+## of their sum, added by the runtime in Rust, since raw memory holds no
+## `f32` that this code reads as one.
 ##
 ## Requires:
 ## - `items`: as `pairwise`
-def pairwise32(b: ptr mut u8, size: int, lo: int, n: int) -> f32:
+def pairwise32(b: ptr mut u8, size: int, lo: int, n: int) -> int:
     if n == 1:
         # safety: in_bounds, valid, aligned: by `items`.
-        return unsafe b.offset(lo * size).cast[f32]().read()
+        return unsafe b.offset(lo * size).cast[int]().read() & 4294967295
     let half = n // 2
-    return pairwise32(b, size, lo, half) + pairwise32(b, size, lo + half, n - half)
+    let (x, y) = (pairwise32(b, size, lo, half), pairwise32(b, size, lo + half, n - half))
+    # safety: returns_promptly: the runtime in Rust adds them.
+    return unsafe sisu_rt_f32_add(x, y)
 
 def iter_call(c: Call, id: int) -> int:
     let ts = c.ts
@@ -1016,11 +1026,10 @@ pub(package) def take(
     #   table's address.
     let tb = unsafe p.cast[ptr[u8]]().read().cast_mut()
     let i = table.find(ts, tb, key, kt)
-    # safety: in_bounds, aligned, writable: by `typed`, the result's first
-    #   word is an option's tag or a `bool`.
-    let w = unsafe out.cast[int]()
+    let w = out.cast[int]()
     if i < 0:
-        # safety: as above.
+        # safety: aligned, writable: by `typed`, the result's first word is
+        #   an option's tag or a `bool`.
         unsafe w.write(if want_value: 1 else: 0)
         return OK
     let (ksize, vsize) = (table.key_size(tb), table.value_size(tb))
@@ -1033,7 +1042,7 @@ pub(package) def take(
             w.write(0)
             _ = memmove(out.offset(8), room.offset(ksize).as_const(), vsize)
     else:
-        # safety: as above.
+        # safety: aligned, writable: the result's first word is a `bool`.
         unsafe w.write(1)
     let st = dropped(room, table.key_type(tb))
     free(room)

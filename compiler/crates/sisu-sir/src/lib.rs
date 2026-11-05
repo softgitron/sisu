@@ -617,8 +617,15 @@ pub fn value_wrapper(f: &Function, takes: &[Type]) -> Function {
 /// (stage 2's `gen.sisu` has the same): a test by its name, an invariant's
 /// check by its type, a closure by the function it is in, and a method of
 /// a trait's impl as `Trait.method for Type` (decision 504), where its SIR
-/// name is `Type.Trait.method`, the type's path and the trait's in it.
+/// name is `Type.Trait.method`, the type's path and the trait's in it. A
+/// test is the one whose function it is, which is the test of its number
+/// but in a program that keeps one module's tests (decision 900).
 pub fn display_fn_name(name: &str, prog: &Program) -> String {
+    if name.starts_with("test#")
+        && let Some((t, _)) = prog.tests.iter().find(|(_, f)| f == name)
+    {
+        return format!("test {}", write::quote(t));
+    }
     if let Some(i) = name.strip_prefix("test#").and_then(|n| n.parse::<usize>().ok())
         && let Some((t, _)) = prog.tests.get(i)
     {

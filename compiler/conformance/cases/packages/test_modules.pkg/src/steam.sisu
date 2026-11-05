@@ -1,0 +1,6 @@
+## The water thrown on the stones, as said.
+pub def ladles(n: int) -> String:
+    return "{n} ladles"
+
+test "one ladle":
+    assert ladles(1) == "1 ladles"

@@ -11,7 +11,6 @@
 //! list's elements keep their state there, so that a loop over one steps
 //! without calling the runtime.
 
-use crate::abi;
 use crate::bridge::{self, NewIter};
 use crate::mem::{List, Str};
 
@@ -72,18 +71,6 @@ pub(crate) fn owned_bytes(data: Vec<u8>) -> *mut IterObj {
     made(NewIter::OwnedBytes(&data))
 }
 
-/// The items of an `Iterable[T]` argument (`p`, of type `arg`): a
-/// borrowed or owned list, dict or set, a receiver, or an iterator. When
-/// `T` (`item`) is not a reference, or not given, the items of a borrowed
-/// collection are copies.
-///
-/// # Safety
-/// `p` must hold a value of type `arg`; an owned one is moved in.
-pub(crate) unsafe fn iterable(p: *mut u8, arg: u32, item: Option<u32>) -> *mut IterObj {
-    // SAFETY: as the caller guarantees.
-    unsafe { crate::bridge::iter_iterable(p, arg, item).cast::<IterObj>() }
-}
-
 /// Writes the next item as an option at `out` (a tag word, then the item).
 ///
 /// # Safety
@@ -92,18 +79,4 @@ pub(crate) unsafe fn iterable(p: *mut u8, arg: u32, item: Option<u32>) -> *mut I
 pub(crate) unsafe fn next(obj: *mut IterObj, out: *mut u8) -> u8 {
     // SAFETY: as the caller guarantees.
     unsafe { crate::bridge::iter_next(obj.cast(), out) }
-}
-
-/// Every remaining item of an iterator an intrinsic owns (an `Iterable[T]`
-/// argument), of type `item` when the call says, in a new buffer; the
-/// iterator is dropped after, and when a panic stops it, with what it has
-/// left, and so are the items taken by then (decision 235).
-///
-/// # Safety
-/// As [`next`]; the items are of type `item`.
-pub(crate) unsafe fn collect_all(obj: *mut IterObj, item: Option<u32>) -> Result<List, u8> {
-    let mut out = List::empty();
-    // SAFETY: as the caller guarantees; `out` has room for a list.
-    let st = unsafe { crate::bridge::iter_collect(obj.cast(), item, (&raw mut out).cast()) };
-    if st == abi::OK { Ok(out) } else { Err(st) }
 }

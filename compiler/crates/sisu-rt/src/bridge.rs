@@ -174,13 +174,6 @@ unsafe extern "C" {
         out: *const *mut u8,
         mode: *const i64,
     ) -> u8;
-    fn sisu_rt_iter_iterable(
-        ret: *mut *mut u8,
-        types: *const *const u64,
-        p: *const *mut u8,
-        arg: *const i64,
-        item: *const i64,
-    ) -> u8;
     fn sisu_rt_iter_items(
         ret: *mut *mut u8,
         types: *const *const u64,
@@ -192,14 +185,6 @@ unsafe extern "C" {
     fn sisu_rt_iter_owned_bytes(ret: *mut *mut u8, b: *const *const u8, n: *const i64) -> u8;
     fn sisu_rt_iter_generator(ret: *mut *mut u8, task: *const i64, size: *const i64) -> u8;
     fn sisu_rt_iter_waits(ret: *mut i64, it: *const *mut u8, out: *const *mut u8) -> u8;
-    fn sisu_rt_iter_collect(
-        ret: *mut i64,
-        types: *const *const u64,
-        it: *const *mut u8,
-        item: *const i64,
-        out: *const *mut u8,
-        mode: *const i64,
-    ) -> u8;
 }
 
 /// `mode` of a drop: it forgets (decision 223), or it defers what would run
@@ -832,40 +817,6 @@ pub(crate) unsafe fn iter_next(it: *mut u8, out: *mut u8) -> u8 {
     status_of(ret)
 }
 
-/// The iterator of the items of an `Iterable[T]` argument at `p`, of type
-/// `arg`, whose items are `item` when the call says.
-///
-/// # Safety
-/// `p` must hold a value of type `arg`; an owned one is moved in.
-pub(crate) unsafe fn iter_iterable(p: *mut u8, arg: u32, item: Option<u32>) -> *mut u8 {
-    let types = crate::desc::base();
-    let (arg, item) = (i64::from(arg), item.filter(|&t| known(t)).map_or(-1, i64::from));
-    let mut ret = std::ptr::null_mut();
-    // SAFETY: as for [`equal`].
-    if unsafe { sisu_rt_iter_iterable(&mut ret, &types, &p, &arg, &item) } != abi::OK {
-        failed("iterator of an argument");
-    }
-    ret
-}
-
-/// Every item the iterator at `it` has left, of type `item` when the call
-/// says, moved into a new list at `out`; the iterator dropped after. Its
-/// status: when a panic stopped it, the list is empty.
-///
-/// # Safety
-/// `it` must be an iterator's object, dead afterwards, and `out` have room
-/// for a list.
-pub(crate) unsafe fn iter_collect(it: *mut u8, item: Option<u32>, out: *mut u8) -> u8 {
-    let types = crate::desc::base();
-    let (item, mode) = (item.filter(|&t| known(t)).map_or(-1, i64::from), mode());
-    let mut ret = 0i64;
-    // SAFETY: as for [`equal`].
-    if unsafe { sisu_rt_iter_collect(&mut ret, &types, &it, &item, &out, &mode) } != abi::OK {
-        failed("iterator's items");
-    }
-    status_of(ret)
-}
-
 /// A new iterator's object, made by the runtime in Sisu (decision 542),
 /// whose layout is `iter.sisu`'s alone: the kinds the runtime in Rust
 /// makes; the intrinsics that make the others are the runtime in Sisu's
@@ -1121,6 +1072,14 @@ extern "C" fn sisu_rt_range_step() -> u8 {
 #[unsafe(no_mangle)]
 extern "C" fn sisu_rt_sum_overflow(total: i64, item: i64) -> u8 {
     rt::raise_msg(sisu_diag::msg::PANIC_OVERFLOW, &[("expr", format!("{total} + {item}"))])
+}
+
+/// The bits of the sum of two `f32`s given by their bits, in the low halves
+/// of `x` and `y`, for `sum` (decision 903): the runtime in Sisu reads no
+/// `f32` from raw memory.
+#[unsafe(no_mangle)]
+extern "C" fn sisu_rt_f32_add(x: i64, y: i64) -> i64 {
+    i64::from((f32::from_bits(x as u32) + f32::from_bits(y as u32)).to_bits())
 }
 
 /// A sort that met two elements without an order: the panic raised, and its

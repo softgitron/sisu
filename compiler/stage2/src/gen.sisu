@@ -1450,9 +1450,16 @@ pub pure def returned_constant(f: Function) -> Const?:
                 return Some(c.copy())
     return None
 
-## The source-level name of a SIR function, for stack traces.
+## The source-level name of a SIR function, for stack traces: a test the
+## one whose function it is, which is the test of its number but in a
+## program that keeps one module's tests (decision 900).
 pub pure def display_fn_name(name: str, p: Program) -> String:
     if name.starts_with("test#"):
+        var k = 0
+        while k < len(p.tests):
+            if p.tests[k].1 == name:
+                return "test {write.quote(p.tests[k].0)}"
+            k += 1
         if let Some(i) = name.byte_slice(5, name.byte_len()).parse_int():
             if i >= 0 and i < len(p.tests):
                 return "test {write.quote(p.tests[i].0)}"

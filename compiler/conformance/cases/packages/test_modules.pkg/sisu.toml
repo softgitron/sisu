@@ -1,0 +1,6 @@
+# `sisu test src/MODULE.sisu` of a package's module (17; decisions 828
+# and 900): the package's tests that the module declares, compiled as the
+# package, its imports resolved as the package's; `sisu test` runs all.
+[package]
+name = "sauna"
+version = "0.1.0"

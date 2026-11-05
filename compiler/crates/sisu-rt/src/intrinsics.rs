@@ -36,11 +36,6 @@ impl Call<'_> {
         self.targs.get(i).copied().unwrap_or_else(|| rt::internal("an intrinsic missing a type argument"))
     }
 
-    /// The item type of an `Iterable[T]` argument, when the call gives it.
-    fn item(&self, i: usize) -> Option<u32> {
-        self.targs.get(i).copied()
-    }
-
     /// The value argument `i` is or refers to, and its type.
     pub(crate) unsafe fn place(&self, i: usize) -> (*mut u8, u32) {
         // SAFETY: the argument holds a value of its type.

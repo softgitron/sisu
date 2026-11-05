@@ -1,0 +1,4 @@
+test "heat/levels/eighty is hot" ... ok
+test "heat/levels/sixty is warm" ... ok
+test "heat/steam from a sibling module" ... ok
+3 passed, 0 failed, 0 blocked

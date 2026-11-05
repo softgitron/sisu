@@ -345,16 +345,6 @@ def export_table_len(tb: ptr mut u8) -> int:
 def export_iter_next(types: ptr[int], it: ptr mut u8, out: ptr mut u8, mode: int) -> int:
     return iter.next(Types(words=types), it, out, mode)
 
-## The iterator of the items of an `Iterable[T]` argument at `p` of type
-## `arg`, whose items are of type `item` (-1 when the call does not say;
-## `iter.iterable`).
-##
-## Requires:
-## - `typed`: `types` is the program's table, and `p` holds a live value of
-##   type `arg`; an owned one moves in
-def export_iter_iterable(types: ptr[int], p: ptr mut u8, arg: int, item: int) -> ptr mut u8:
-    return iter.iterable(Types(words=types), p, arg, item)
-
 ## The iterator that owns the elements, of type `elem`, of the list at `xs`
 ## (`iter.new_items`): the runtime in Rust makes the iterators it makes
 ## through these exports (decision 542), and the object's layout is this
@@ -398,18 +388,6 @@ def export_iter_generator(task: int, size: int) -> ptr mut u8:
 ##   has room for two words
 def export_iter_waits(it: ptr mut u8, out: ptr mut u8) -> int:
     return iter.waits(it, out)
-
-## Every item the iterator at `it` has left, of type `item` (-1 when the
-## call does not say), moved into a new list at `out`, the iterator dropped
-## after (`iter.collect`): its status.
-##
-## Requires:
-## - `typed`: `types` is the program's table, `it` the address of a live
-##   iterator's object, dead afterwards, and `out` has room for a list
-def export_iter_collect(
-    types: ptr[int], it: ptr mut u8, item: int, out: ptr mut u8, mode: int
-) -> int:
-    return iter.collect(Types(words=types), it, item, out, mode)
 
 ## PCT's state for a run of depth `depth` in the empty queue `st`, its
 ## change points drawn from the generator at `state` (`choose.pct_start`,

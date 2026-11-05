@@ -738,7 +738,10 @@ fn native_tests(sisu: &Sisu, case: &Case, dir: &Path, mode: Mode, r: &mut CaseRe
     if case.package
         && let Some(expected) = case.expected("select")
     {
-        runs.push((case.expected("select-args").unwrap_or_default().lines().map(str::to_string).collect(), expected));
+        runs.push((
+            case.expected("select-args").unwrap_or_default().lines().map(str::to_string).collect(),
+            expected,
+        ));
     }
     let explore = source
         .lines()

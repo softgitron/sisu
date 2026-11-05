@@ -80,6 +80,9 @@ extern "C":
     ## Raises the panic of `sum`'s overflow, the sum so far `total` and the
     ## item `item` (decision 903): its status.
     pub def sisu_rt_sum_overflow(total: int, item: int) -> u8
+    ## The bits of the sum of two `f32`s given by their bits, in the low
+    ## halves (`sum`, decision 903).
+    pub def sisu_rt_f32_add(x: int, y: int) -> int
     ## Drops the value at `p` of type `t`, running its glue on the task's
     ## stack where it needs it: the status.
     pub def sisu_rt_drop_value(p: ptr mut u8, t: int) -> u8
