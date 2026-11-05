@@ -1,0 +1,14 @@
+$ sisu run preview.sisu
+warning[W0028]: `turns` is a preview, which may change or be removed before it is stable: the turns may come to depend on the stove
+  --> preview.sisu:13:13
+   |
+13 |     print("{turns(2)} at {HEAT} degrees")
+   |             ^^^^^^^^
+
+warning[W0029]: `HEAT` is a preview, which may change or be removed before it is stable
+  --> preview.sisu:13:27
+   |
+13 |     print("{turns(2)} at {HEAT} degrees")
+   |                           ^^^^
+
+[20, 20] at 80 degrees

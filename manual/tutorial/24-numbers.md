@@ -230,6 +230,7 @@ def main():
     print("{reading.to_u8()} {reading.truncate_to[u8]()}")
     let largest = u64.MAX
     print("{largest.to_int()} {largest.truncate_to[u32]()}")
+    print("{largest.truncate_to[i128]()} {u128.MAX.truncate_to[i128]()}")
     let odd = 9_007_199_254_740_993
     print(odd.to_f64())
     print("{2.9.truncate_to_int()} {(-2.9).truncate_to_int()}")
@@ -243,12 +244,13 @@ def main():
 $ sisu run lossy.sisu
 None 251
 None 4294967295
+18446744073709551615 -1
 9007199254740992.0
 2 -2
 3 -3
 200
 panic: cannot convert 1e30 to `int`
-  at main (lossy.sisu:12:11)
+  at main (lossy.sisu:13:11)
 ```
 
 - `to_u8()` and its siblings give `None` for a value that does not fit,
@@ -259,10 +261,9 @@ panic: cannot convert 1e30 to `int`
   gives an optional `int`, since their largest values do not fit; of a
   smaller type it gives an `int`. Every integer type has
   `truncate_to`, so `u64.MAX.truncate_to[u32]()` keeps the low 32
-  bits, `u32.MAX`. For now, a value beyond `int`'s range taken to an
-  `i128` or a `u128` gives the value of its low 64 bits read as an
-  `int`: `u64.MAX.truncate_to[i128]()` is -1. Widen to a wider type
-  instead, with a `let` that names it.
+  bits, `u32.MAX`. Taken to a type of 128 bits, a value keeps its bits
+  read as that type's, so `u64.MAX.truncate_to[i128]()` is `u64.MAX`
+  itself and `u128.MAX.truncate_to[i128]()` is -1.
 - `to_f64()` gives the nearest `f64`, which is exact up to 2 to the
   power 53: 9007199254740993 is one more, and becomes its even
   neighbour.

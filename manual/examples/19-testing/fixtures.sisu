@@ -19,7 +19,7 @@ test "every line is a price":
 
 test "a price in cents":
     let prices = load_prices(cafe()).expect("the menu is there")
-    assert prices["bun"] == 280
+    assert prices.get("bun").copied() == Some(280)
 
 test "a test's own file system starts empty"(fs: Fs):
     assert load_prices(fs) == Err(NotFound("menu.txt"))

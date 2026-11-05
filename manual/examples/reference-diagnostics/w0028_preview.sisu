@@ -1,0 +1,9 @@
+# A call of a function that is a preview, with the attribute's text.
+
+## The minutes of each sauna turn for `guests` guests.
+@preview("the turns may come to depend on the stove")
+def turns(guests: int) -> list[int]:
+    return [20 for _ in range(guests)]
+
+def main():
+    print(turns(3))

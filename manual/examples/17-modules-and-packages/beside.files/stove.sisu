@@ -1,0 +1,3 @@
+## The heat of a stove.
+pub def heat() -> int:
+    return 80

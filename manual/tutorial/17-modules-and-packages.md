@@ -72,6 +72,27 @@ $ sisu run
 A package whose root module is `src/lib.sisu` instead is a library: it
 has no `main`, and other packages use its items.
 
+Only a package makes several files one program. A file run alone is a
+module of its own, so `sauna.sisu`, which imports `stove` from the file
+`stove.sisu` beside it, does not compile:
+
+<!-- output: examples/17-modules-and-packages/beside.console -->
+```console
+$ sisu run sauna.sisu
+error[E0220]: cannot import `stove`: it names no module of this package, of a dependency in `sisu.toml`, or of the standard library
+  --> sauna.sisu:2:8
+  |
+2 | import stove
+  |        ^^^^^
+  = note: `stove` beside this file is a module of a package only: a package is a directory with a `sisu.toml` and the files in `src/`, which makes them one program (09)
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+E0220's note says why. Move both files into the `src/` of a package,
+which `sisu new` makes, and import the module by the package's name,
+as `import trip.distance` does.
+
 ## Private unless pub
 
 An item is private to its module unless it is declared `pub` (D-045).

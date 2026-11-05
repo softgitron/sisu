@@ -143,7 +143,9 @@ test "every split adds up" ... ok
 ```
 
 A `Decimal` is not `Copy`, since it holds a number of any size, so the
-loop pushes `share.copy()`.
+loop pushes `share.copy()`. Whether a fixed-size decimal type that is
+`Copy` should stand beside it is a question for the language's owner,
+[Q-79](../../open-questions.md#q-79-is-decimal-a-copy-type).
 
 ## 4. Keep a fraction exact with Ratio
 

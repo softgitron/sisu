@@ -345,6 +345,7 @@ x:` and `struct` for `class` among them, or a note, as `try:` does:
 | `", ".join(names)` | `names.join(", ")` |
 | `append`, `strip`, `upper` | `push`, `trim`, `to_uppercase` |
 | `d.get(k, default)` | `d.get(k) ?? default` |
+| `d.get(k) == v` | `d.get(k).copied() == Some(v)`, since `get` gives a reference; a `str` looks up a `String` key |
 | `x or default`, `x is None` | `x ?? default`, `x.is_none()` or `if let` |
 | `enumerate(xs, start=1)` | `enumerate(xs)`, adding 1 where the number is used |
 | `lambda x: e` | `x -> e`, or `it` |

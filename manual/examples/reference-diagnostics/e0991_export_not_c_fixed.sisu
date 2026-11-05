@@ -1,0 +1,12 @@
+# A struct laid out as C lays it out crosses the boundary.
+@repr(c)
+struct Reading:
+    stove: i32
+    celsius: i32
+
+@export("sauna_reading_heat")
+def reading_heat(reading: Reading) -> i32:
+    return reading.celsius
+
+def main():
+    print(reading_heat(Reading(1, 80)))

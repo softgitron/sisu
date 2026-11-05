@@ -1,0 +1,19 @@
+$ sisu repl --echo < inputs.txt
+sisu repl: each input runs as the next line of a script; `:back N` forgets the last N inputs, `:why NAME` shows where a value came from, `:quit` ends
+sisu> let name = "Aino"
+sisu> let greeting = "Hei, {name}!"
+sisu> print(greeting)
+Hei, Aino!
+sisu> len(greeting)
+10
+sisu> greeting.to_uppercase()
+"HEI, AINO!"
+sisu> len(greeting) + "!"
+error[E0310]: `+` cannot be applied to `int` and `str`
+  --> <input>:1:1
+  |
+1 | len(greeting) + "!"
+  | ^^^^^^^^^^^^^^^^^^^
+  = fix: write the value into the text: `"{len(greeting)}!"`
+
+sisu> :quit

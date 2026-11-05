@@ -1,0 +1,8 @@
+# The function is stable now, so it has no `@preview` and no warning.
+
+## The minutes of each sauna turn for `guests` guests.
+def turns(guests: int) -> list[int]:
+    return [20 for _ in range(guests)]
+
+def main():
+    print(turns(3))

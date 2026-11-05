@@ -351,8 +351,38 @@ shows what the line printed. The file itself does not change. A
 worksheet runs against a pretend file system and a pretend clock, so
 nothing it does reaches your files; chapter 18 explains how Sisu can
 promise that. `sisu run worksheet.sisu` runs the same file as an
-ordinary script, and `sisu repl` offers the same thing one line at a
-time.
+ordinary script.
+
+`sisu repl` offers the same thing one line at a time: you type a line
+after the prompt `sisu>`, and it shows the line's value. In this
+session the lines come from a file, `inputs.txt`, and `--echo` writes
+each one after its prompt, so the session reads as a terminal shows it:
+
+<!-- output: examples/01-hello/repl.console -->
+```console
+$ sisu repl --echo < inputs.txt
+sisu repl: each input runs as the next line of a script; `:back N` forgets the last N inputs, `:why NAME` shows where a value came from, `:quit` ends
+sisu> let name = "Aino"
+sisu> let greeting = "Hei, {name}!"
+sisu> print(greeting)
+Hei, Aino!
+sisu> len(greeting)
+10
+sisu> greeting.to_uppercase()
+"HEI, AINO!"
+sisu> len(greeting) + "!"
+error[E0310]: `+` cannot be applied to `int` and `str`
+  --> <input>:1:1
+  |
+1 | len(greeting) + "!"
+  | ^^^^^^^^^^^^^^^^^^^
+  = fix: write the value into the text: `"{len(greeting)}!"`
+
+sisu> :quit
+```
+
+A line that does not compile gets its diagnostic, and the session goes
+on as it was before the line. `:quit` ends it.
 
 Use worksheets to try things out. Programs you keep go in files with a
 `main`.
@@ -555,8 +585,8 @@ When both tests pass, compare your answer with
 - A diagnostic has a stable code, a message, a place and often a fix.
   `sisu explain CODE` describes a code.
 - `let` names a value. Braces in a string put values into the text.
-- `sisu ws FILE` runs a worksheet and shows each line's value, `sisu fmt`
-  writes the one layout, and `sisu test FILE` runs a file's tests, each
+- `sisu ws FILE` runs a worksheet and shows each line's value, `sisu
+  repl` does the same a line at a time, `sisu fmt` writes the one layout, and `sisu test FILE` runs a file's tests, each
   of which is blocked, failed or ok.
 
 Chapter 2 introduces numbers, truth values and the other basic types,

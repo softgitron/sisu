@@ -1,0 +1,11 @@
+# A type that is a preview, without a text, used by the program.
+
+## A booking of the sauna, whose fields may still change.
+@preview
+struct Booking:
+    guest: String
+    hour: int
+
+def main():
+    let booking = Booking("Aino", 18)
+    print("{booking.guest} at {booking.hour}")

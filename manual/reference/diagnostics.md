@@ -2114,7 +2114,11 @@ error[D0006]: the program was not run: errors found (1)
 
 The fix writes the module with the most similar name, when there is one.
 For a dependency, add it to `sisu.toml` first
-([R13](modules.md#the-manifest)).
+([R13](modules.md#the-manifest)). For a module whose file or directory
+stands beside the file, the note `resolve.module-beside` says that only
+a package makes them one program, as
+[chapter 17](../tutorial/17-modules-and-packages.md#a-module-for-each-file)
+shows.
 
 <!-- file: examples/reference-diagnostics/e0220_import_unknown_fixed.sisu -->
 ```sisu
@@ -5282,6 +5286,65 @@ def main():
 ```
 
 Shown in [chapter 16](../tutorial/16-closures-and-iterators.md).
+
+### E0343
+
+`type.shared-not-mutable`: cannot modify `{what}`: a `Shared` holds it,
+and a shared value is not changed in place, even through a `var`.
+
+Every owner of a `Shared` sees the value it holds, so none of them
+changes it in place: a field assigned through a `Shared` is E0343,
+whether the binding is a `let` or a `var`
+([R7](ownership.md#sharing-cells-and-graphs)).
+
+<!-- file: examples/reference-diagnostics/e0343_shared_not_mutable.sisu -->
+```sisu
+# A change to a field of a value that a `Shared` holds.
+struct Stove:
+    celsius: int
+
+def main():
+    var stove = Shared(Stove(60))
+    stove.celsius = 80
+    print(stove.celsius)
+```
+
+<!-- output: examples/reference-diagnostics/e0343_shared_not_mutable.console -->
+```console
+$ sisu run e0343_shared_not_mutable.sisu
+error[E0343]: cannot modify `stove.celsius`: a `Shared` holds it, and a shared value is not changed in place, even through a `var`
+  --> e0343_shared_not_mutable.sisu:7:5
+  |
+7 |     stove.celsius = 80
+  |     ^^^^^^^^^^^^^
+  = note: what a `Shared` holds is shared, so it is not changed in place: put the part that changes in a `Cell` or a `Mutex` inside it, and change it through that
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+The note `type.shared-changes` names the way out: the part that changes
+goes in a `Cell`, or a `Mutex` when tasks share it, and every owner
+changes it through that and sees the change.
+
+<!-- file: examples/reference-diagnostics/e0343_shared_not_mutable_fixed.sisu -->
+```sisu
+# The part that changes is a `Cell` inside the `Shared`.
+struct Stove:
+    celsius: Cell[int]
+
+def main():
+    let stove = Shared(Stove(Cell(60)))
+    let other = stove.copy()
+    other.celsius.set(80)
+    print(stove.celsius.get())
+```
+
+<!-- output: examples/reference-diagnostics/e0343_shared_not_mutable_fixed.out -->
+```text
+80
+```
+
+Shown in [chapter 13](../tutorial/13-sharing.md#values-with-several-owners).
 
 ### E0344
 
@@ -8895,7 +8958,7 @@ Shown in [R11](contracts.md#refinement-types).
 
 ## Stage 0's limits
 
-Codes E0900 to E0990. What stage 0 does not implement yet, its internal
+Codes E0900 to E0991. What stage 0 does not implement yet, its internal
 errors, the check that a `sim` build cannot escape, and the rules of
 unsafe code and foreign functions
 ([R7](ownership.md#unsafe-code-and-raw-pointers)).
@@ -9143,6 +9206,73 @@ def main():
 ```
 
 Shown in [R14](attributes.md#foreign-functions-that-block).
+
+### E0991
+
+`unsafe.export-not-c`: `{name}` is `@export`ed, and `{ty}` has no layout
+C shares: an exported function takes and returns numbers, `bool`,
+`char`, raw pointers and types declared `@repr(c)`.
+
+C calls an exported function with values laid out as C lays them out, so
+each parameter and the result is a number of a width C has (`int`,
+`f64`, `f32`, `u8` to `u64`, `i8` to `i32`), `bool`, `char`, nothing,
+a raw pointer, or a type declared `@repr(c)`
+([12](../../proposal/12-interop-and-targets.md#c-interop)). A type that
+holds a reference, a view, a `Shared`, a closure or a capability is
+E0989 instead.
+
+<!-- file: examples/reference-diagnostics/e0991_export_not_c.sisu -->
+```sisu
+# An exported function that takes a struct C has no layout for.
+struct Reading:
+    stove: String
+    celsius: i32
+
+@export("sauna_reading_heat")
+def reading_heat(reading: Reading) -> i32:
+    return reading.celsius
+
+def main():
+    print(reading_heat(Reading("Kotiharju", 80)))
+```
+
+<!-- output: examples/reference-diagnostics/e0991_export_not_c.console -->
+```console
+$ sisu run e0991_export_not_c.sisu
+error[E0991]: `reading_heat` is `@export`ed, and `Reading` has no layout C shares: an exported function takes and returns numbers, `bool`, `char`, raw pointers and types declared `@repr(c)`
+  --> e0991_export_not_c.sisu:7:18
+  |
+7 | def reading_heat(reading: Reading) -> i32:
+  |                  ^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+The fix declares the struct `@repr(c)`, which asks its fields to be
+plain values too: a `String` is not, so the stove is named by a number.
+
+<!-- file: examples/reference-diagnostics/e0991_export_not_c_fixed.sisu -->
+```sisu
+# A struct laid out as C lays it out crosses the boundary.
+@repr(c)
+struct Reading:
+    stove: i32
+    celsius: i32
+
+@export("sauna_reading_heat")
+def reading_heat(reading: Reading) -> i32:
+    return reading.celsius
+
+def main():
+    print(reading_heat(Reading(1, 80)))
+```
+
+<!-- output: examples/reference-diagnostics/e0991_export_not_c_fixed.out -->
+```text
+80
+```
+
+Shown in [R14](attributes.md#exported-functions).
 
 ## Packages and manifests
 
@@ -9599,7 +9729,7 @@ Shown in the guide [Call a C library](../guides/c-library.md).
 
 ## Warnings
 
-Codes W0001 to W0027. A warning does not stop a program: `sisu run`
+Codes W0001 to W0029. A warning does not stop a program: `sisu run`
 prints it and runs.
 
 ### W0001
@@ -10420,6 +10550,120 @@ def main():
 
 Shown in [R16](sisu-command.md#sisu-lint) and
 [R1](lexical-structure.md#the-formatters-layout).
+
+### W0028
+
+`type.preview`: `{name}` is a preview, which may change or be removed
+before it is stable: {reason}.
+
+A use of an item marked `@preview("...")` warns with the attribute's
+text, as a use of a deprecated item does (W0023): a call of a function,
+a type named or built, a constant read
+([R14](attributes.md#preview-features)). The item's own declaration
+uses it without a word.
+
+<!-- file: examples/reference-diagnostics/w0028_preview.sisu -->
+```sisu
+# A call of a function that is a preview, with the attribute's text.
+
+## The minutes of each sauna turn for `guests` guests.
+@preview("the turns may come to depend on the stove")
+def turns(guests: int) -> list[int]:
+    return [20 for _ in range(guests)]
+
+def main():
+    print(turns(3))
+```
+
+<!-- output: examples/reference-diagnostics/w0028_preview.console -->
+```console
+$ sisu run w0028_preview.sisu
+warning[W0028]: `turns` is a preview, which may change or be removed before it is stable: the turns may come to depend on the stove
+  --> w0028_preview.sisu:9:11
+  |
+9 |     print(turns(3))
+  |           ^^^^^^^^
+
+[20, 20, 20]
+```
+
+The warning goes once the item is stable: its library takes the
+attribute away, and the same call says nothing.
+
+<!-- file: examples/reference-diagnostics/w0028_preview_fixed.sisu -->
+```sisu
+# The function is stable now, so it has no `@preview` and no warning.
+
+## The minutes of each sauna turn for `guests` guests.
+def turns(guests: int) -> list[int]:
+    return [20 for _ in range(guests)]
+
+def main():
+    print(turns(3))
+```
+
+<!-- output: examples/reference-diagnostics/w0028_preview_fixed.out -->
+```text
+[20, 20, 20]
+```
+
+Shown in [chapter 28](../tutorial/28-code-that-lasts.md#marking-what-may-still-change).
+
+### W0029
+
+`type.preview-plain`: `{name}` is a preview, which may change or be
+removed before it is stable.
+
+A use of an item marked `@preview` without a text warns without saying
+what may change.
+
+<!-- file: examples/reference-diagnostics/w0029_preview_plain.sisu -->
+```sisu
+# A type that is a preview, without a text, used by the program.
+
+## A booking of the sauna, whose fields may still change.
+@preview
+struct Booking:
+    guest: String
+    hour: int
+
+def main():
+    let booking = Booking("Aino", 18)
+    print("{booking.guest} at {booking.hour}")
+```
+
+<!-- output: examples/reference-diagnostics/w0029_preview_plain.console -->
+```console
+$ sisu run w0029_preview_plain.sisu
+warning[W0029]: `Booking` is a preview, which may change or be removed before it is stable
+  --> w0029_preview_plain.sisu:10:19
+   |
+10 |     let booking = Booking("Aino", 18)
+   |                   ^^^^^^^
+
+Aino at 18
+```
+
+<!-- file: examples/reference-diagnostics/w0029_preview_plain_fixed.sisu -->
+```sisu
+# The type is stable now, so it has no `@preview` and no warning.
+
+## A booking of the sauna.
+struct Booking:
+    guest: String
+    hour: int
+
+def main():
+    let booking = Booking("Aino", 18)
+    print("{booking.guest} at {booking.hour}")
+```
+
+<!-- output: examples/reference-diagnostics/w0029_preview_plain_fixed.out -->
+```text
+Aino at 18
+```
+
+Shown in [R14](attributes.md#preview-features).
 
 ## Run time
 
@@ -11935,6 +12179,7 @@ it. `sisu explain CODE` prints the same line.
 | [E0340](#e0340) | `type.mut-argument-unexpected` | `{param}` is not a `mut` parameter, so the argument takes no `mut` |
 | [E0341](#e0341) | `type.not-mutable` | cannot modify `{what}`; it is not declared with `var` |
 | [E0342](#e0342) | `type.it-outside-closure` | `it` is the parameter of an implicit closure and exists only where a one-parameter function is expected |
+| [E0343](#e0343) | `type.shared-not-mutable` | cannot modify `{what}`: a `Shared` holds it, and a shared value is not changed in place, even through a `var` |
 | [E0344](#e0344) | `type.constant-negative-index` | a constant negative index does not compile; count from the end with `^`: `{fix}` |
 | [E0345](#e0345) | `type.str-not-indexable` | `{ty}` cannot be indexed by position; use `.chars()`, `.bytes()` or `.byte_slice(a, b)` |
 | [E0347](#e0347) | `type.bound-not-satisfied` | `{ty}` does not implement `{bound}` |
@@ -12109,6 +12354,7 @@ it. `sisu explain CODE` prints the same line.
 | E0988 | `unsafe.in-contract` | a contract holds no `unsafe`: it may call safe functions built on unsafe code, and unsafe code relies on no contract |
 | [E0989](#e0989) | `unsafe.export-signature` | `{name}` is `@export`ed, and foreign code that calls it cannot keep `{ty}` alive: an exported function's signature holds no reference, view, `Shared`, closure or capability |
 | [E0990](#e0990) | `unsafe.blocking-not-foreign` | `@blocking` marks a foreign function whose call may block its thread, and `{name}` is not a foreign function |
+| [E0991](#e0991) | `unsafe.export-not-c` | `{name}` is `@export`ed, and `{ty}` has no layout C shares: an exported function takes and returns numbers, `bool`, `char`, raw pointers and types declared `@repr(c)` |
 
 ### Packages and manifests, every code
 
@@ -12165,6 +12411,8 @@ it. `sisu explain CODE` prints the same line.
 | [W0025](#w0025) | `type.deprecated-plain` | `{name}` is deprecated |
 | [W0026](#w0026) | `resolve.misplaced-attribute` | `@{name}` means something on {places}, so on {what} it does nothing |
 | [W0027](#w0027) | `lint.unused-import` | `{name}` is imported and not used in this file |
+| [W0028](#w0028) | `type.preview` | `{name}` is a preview, which may change or be removed before it is stable: {reason} |
+| [W0029](#w0029) | `type.preview-plain` | `{name}` is a preview, which may change or be removed before it is stable |
 
 ### Run time, every code
 

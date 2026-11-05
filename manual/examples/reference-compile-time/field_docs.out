@@ -1,0 +1,3 @@
+Booking
+  name: Who booked the sauna.
+  hour: The hour of the turn, from 16 to 21.

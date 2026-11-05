@@ -100,7 +100,7 @@ commands:
   bench [<file>]         run the benchmarks (`--iterations N`, `--samples K` times each after a run not timed, `--from-sir FILE` those of a file `sisu sir --tests` printed)
   replay <log>           run a recorded program again against its capability log
   fmt [<path>...]        format files in place (`--check` reports what would change)
-  repl [<file>|<dir>]    an interactive session, with a package loaded from its directory
+  repl [<file>|<dir>]    an interactive session, with a package loaded from its directory (`--echo` writes each input after its prompt, for a session read from a pipe)
   ws <file>              run a worksheet, showing each statement's value (`--run` with the real `System`)
   lsp                    the language server, over standard input and output
   new <name>             create a package (`--lib` for a library)
@@ -1344,7 +1344,7 @@ test "std.time/Timeline (doc example)" ... ok
 test "std.time/Instant (doc example)" ... ok
 test "std.time/Zone (doc example)" ... ok
 4 passed, 0 failed, 0 blocked
-181 not selected
+182 not selected
 ```
 
 The [package example](#what-a-command-works-on) shows the page of a
@@ -1408,7 +1408,7 @@ another program is left as it is, and is an internal error (D0076, status
 
 ### sisu repl
 
-- `sisu repl [FILE | DIR]`
+- `sisu repl [--echo] [FILE | DIR]`
 
 `sisu repl` starts a session: each input is the next line of a script,
 an expression shows its value, and a declaration stays for the inputs
@@ -1480,6 +1480,41 @@ sisu>
 The input `let wrong: int = "text"` does not check, so its E0300 goes to
 standard error, at `<input>:1:18`, and the session is as it was before
 it.
+
+A terminal shows what you type after each prompt, and a session read
+from a pipe does not. `--echo` writes each input after its prompt, and
+a line of continuation after its `...`, so that the same inputs read as
+a terminal session, standard error in its place among them:
+
+<!-- output: examples/reference-sisu-command/repl_echo.console -->
+```console
+$ sisu repl --echo repl.sisu < repl.stdin
+sisu repl: each input runs as the next line of a script; `:back N` forgets the last N inputs, `:why NAME` shows where a value came from, `:quit` ends
+sisu> let side = 4
+sisu> area(side, 3)
+12
+sisu> let wrong: int = "text"
+error[E0300]: expected `int`, found `str`
+  --> <input>:1:18
+  |
+1 | let wrong: int = "text"
+  |                  ^^^^^^
+  |            --- expected because of this
+
+sisu> var sizes = [side]
+sisu> sizes.push(area(2, 5))
+sisu> sizes
+[4, 10]
+sisu> :why sizes
+sizes = [4, 10]  <- [side]  (input 4)
+  side = 4  <- 4  (input 2)
+  then sizes.push(area(2, 5))  (input 5)
+sisu> :back 1
+forgot the last inputs (1); the session keeps 5
+sisu> sizes
+[4, 10]
+sisu> 
+```
 
 **Status.** In stage 0 ([10](../../proposal/10-tooling.md), "REPL and
 scripts").

@@ -59,7 +59,7 @@ struct Graph:
 
     ## The key of the package `name`, added with no needs if it is new.
     def key(mut self, name: str) -> Key[Package]:
-        if let Some(key) = self.keys.get(name.to_string()):
+        if let Some(key) = self.keys.get(name):
             return key
         let key = self.packages.insert(Package(name.to_string(), []))
         self.keys[name.to_string()] = key

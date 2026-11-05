@@ -746,7 +746,11 @@ The transcripts run
 on the Rust front end's build of the program, while its tests run on
 stage 1's, so a program that writes a form only stage 1 takes, such as
 `^` in a slice's bound, fails each transcript with D0128
-([R17](diagnostics.md#d0128)).
+([R17](diagnostics.md#d0128)), and one that calls `cli.help_text`, which
+reads its fields' `doc`, fails each with E0609
+([G6](../guides/command-line.md#4-test-the-command-line-with-a-transcript)).
+They move to stage 1's build once its `sir --tests` keeps the functions
+that only transcripts reach.
 
 **Status.** In stage 0.
 

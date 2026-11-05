@@ -1,0 +1,9 @@
+$ sisu run e0343_shared_not_mutable.sisu
+error[E0343]: cannot modify `stove.celsius`: a `Shared` holds it, and a shared value is not changed in place, even through a `var`
+  --> e0343_shared_not_mutable.sisu:7:5
+  |
+7 |     stove.celsius = 80
+  |     ^^^^^^^^^^^^^
+  = note: what a `Shared` holds is shared, so it is not changed in place: put the part that changes in a `Cell` or a `Mutex` inside it, and change it through that
+
+error[D0006]: the program was not run: errors found (1)

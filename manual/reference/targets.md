@@ -101,7 +101,9 @@ home/aino
 ```
 
 **Stage 0 differs.** `target.runtime` is `interpreter` in a native
-build too, and no fact names the runtime profile.
+build too, and no fact names the runtime profile. Stage 1 takes
+`--target-runtime native` for a native build, which `target.runtime`
+then gives, and the `sisu` command passes it from its next round.
 
 **Status.** In stage 0 ([08](../../proposal/08-metaprogramming.md#conditional-compilation)),
 with the difference noted.
@@ -129,7 +131,10 @@ error[D0009]: unknown option `--target` for `sisu build`
 
 The runtime is what makes tasks and capabilities work, and it is what
 embedded and kernel code cannot afford, so it comes in profiles, chosen
-in the manifest:
+in the manifest by the key `runtime` of `[package]`, `"full"` when it is
+left out (decision 694 in the [architecture
+notes](../../compiler/docs/architecture.md) names the key, which 12
+leaves unnamed):
 
 | Profile | The runtime gives |
 |---|---|
@@ -147,11 +152,14 @@ simulation, which only an `extern` call with no simulation model can
 (E0971, `sim.unmodelled-extern`); the simulation itself is
 [R15](testing.md#simulation).
 
-**Stage 0 differs.** No profile can be chosen: the manifest has no key
-for it, so `runtime = "single"` is W0005 (`package.unknown-key`), and
-the interpreter and the native runtime both run every task on one
-thread, one at a time, under the seeded scheduler. `sim` is the profile
-of `sisu test --sim` only:
+**Stage 0 differs.** No profile can be chosen yet: the key is named,
+and stage 1 reads it from its thirteenth round, so for now
+`runtime = "single"` is W0005 (`package.unknown-key`). The interpreter
+and the native runtime both run every task on one thread, one at a time,
+under the seeded scheduler, which is `single`'s runtime, so a native
+build that asks for `full` or `single` will get that runtime, and
+`freestanding` will be refused until a runtime without the scheduler
+exists. `sim` is the profile of `sisu test --sim` only:
 
 <!-- file: examples/reference-targets/profiles.pkg/sisu.toml -->
 ```toml
@@ -264,8 +272,10 @@ unstable for now). The C ABI is the stable interface: `@repr(c)` gives a
 type C's layout, and `@export` makes a function callable from C
 ([R14](attributes.md#exported-functions)).
 
-**Stage 0 differs.** A native build gives an exported function no
-symbol under its C name ([R14](attributes.md#exported-functions)).
+**Stage 0 differs.** A native build makes an exported function a
+global symbol under its C name, called with Sisu's convention, the
+addresses of the result and of each argument and a status byte, rather
+than with C's values ([R14](attributes.md#exported-functions)).
 
 **Status.** Decided (D-039, Q-31).
 
@@ -293,10 +303,20 @@ symbol under its C name ([R14](attributes.md#exported-functions)).
   are no global constructors, a `const` is computed while compiling,
   and a value made the first time it is used is an explicit `Lazy[T]`.
 
-**Stage 0 differs.** An executable links dynamically to the C library,
-`libm` and `libgcc_s`, keeps its debug information, and leaves no code
-out: a ten-line program is about 18 MB in either profile. `Lazy[T]` is
-E0201 (`resolve.undefined-type`).
+**Stage 0 differs.** Code that nothing reaches from `main` is left
+out, function by function, the runtime's included, but an executable
+links dynamically to the C library and `libgcc_s` (`libm` only when it
+is needed) and keeps its debug information. A ten-line program is
+6.25 MB in either build profile when the `sisu` command is a release
+build (21 MB when it is a debug build, whose runtime is not optimised),
+and 1.74 MB stripped. What is left is the runtime: 0.45 MB of the
+runtime written in Sisu, 0.50 MB of the runtime written in Rust and
+0.37 MB of Rust's standard library, 3.8 MB of their debug information,
+which a debugger and a panic's lines need, and 0.4 MB of symbols; the
+program's own code is a few kilobytes. Static linking and the
+`release-size` profile, stripped and with the runtime's debug
+information left out, are still to come. `Lazy[T]` is E0201
+(`resolve.undefined-type`).
 
 **Status.** Designed ([12](../../proposal/12-interop-and-targets.md#binary-size-and-startup)).
 

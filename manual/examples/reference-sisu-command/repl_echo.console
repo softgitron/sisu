@@ -1,0 +1,26 @@
+$ sisu repl --echo repl.sisu < repl.stdin
+sisu repl: each input runs as the next line of a script; `:back N` forgets the last N inputs, `:why NAME` shows where a value came from, `:quit` ends
+sisu> let side = 4
+sisu> area(side, 3)
+12
+sisu> let wrong: int = "text"
+error[E0300]: expected `int`, found `str`
+  --> <input>:1:18
+  |
+1 | let wrong: int = "text"
+  |                  ^^^^^^
+  |            --- expected because of this
+
+sisu> var sizes = [side]
+sisu> sizes.push(area(2, 5))
+sisu> sizes
+[4, 10]
+sisu> :why sizes
+sizes = [4, 10]  <- [side]  (input 4)
+  side = 4  <- 4  (input 2)
+  then sizes.push(area(2, 5))  (input 5)
+sisu> :back 1
+forgot the last inputs (1); the session keeps 5
+sisu> sizes
+[4, 10]
+sisu> 

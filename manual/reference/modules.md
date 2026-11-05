@@ -133,7 +133,10 @@ An import binds names in the module that writes it:
 - An import that names nothing is E0220 for its first name, E0203 for
   a module further along the path, and E0204 for an item a module does
   not have; one of a package that is not a dependency is E0260. E0220
-  and E0203 offer a module of a similar name when one exists.
+  and E0203 offer a module of a similar name when one exists. A file
+  run alone is a module of its own, so its import of a file beside it is
+  E0220, whose note says that only a package makes them one program; a
+  directory without a `sisu.toml` is no package.
 - `import` names a module and `from ... import` an item: an item named
   as a module, `import atlas.geo.point.Point`, is E0223
   (`resolve.not-a-module`), whose fix writes `from atlas.geo.point import
@@ -771,8 +774,10 @@ and each preview is stabilised or removed within four releases (D-072).
 
 **Stage 0 differs.** Stage 0 knows one edition, `"2027"`: another
 year is E1003 (`package.bad-value`), "`edition` takes an edition this
-compiler knows". `sisu fix`
-and `@preview` are designed ([R16](sisu-command.md#sisu-fix)).
+compiler knows". `sisu fix` is designed
+([R16](sisu-command.md#sisu-fix)), and stage 0 has no previews of the
+language: its `@preview` marks a library's item, whose uses warn
+([R14](attributes.md#preview-features)).
 
 **Status.** Designed (D-036; D-072 leans).
 

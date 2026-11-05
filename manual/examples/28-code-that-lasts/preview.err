@@ -1,0 +1,6 @@
+warning[W0028]: `evening_price` is a preview, which may change or be removed before it is stable: the evening hours may change in version 3
+  --> preview.sisu:14:11
+   |
+14 |     print(evening_price(60))
+   |           ^^^^^^^^^^^^^^^^^
+

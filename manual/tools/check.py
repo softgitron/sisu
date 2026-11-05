@@ -21,8 +21,9 @@ manual is checked"). This script checks the rest:
    directory holding the files beside the session (for a session under
    solutions/, the exercise's start state instead; for a session beside
    a package case NAME.pkg/, the package's files instead) and the
-   contents of NAME.files/, with an empty environment. --bless rewrites
-   the output.
+   contents of NAME.files/, with an empty environment and empty standard
+   input; a command that ends `< FILE` reads FILE instead, as a shell's
+   redirection does. --bless rewrites the output.
 3. Exercises. The first line of exercises/CHAPTER/NAME.sisu reads
    "##! Exercise N.M, TITLE. Kind: KIND. Level: L."; the solution
    solutions/CHAPTER/NAME.sisu has the same `test` and `suite` blocks
@@ -92,10 +93,21 @@ def walk(top, suffix):
 
 
 def run(sisu, args, cwd):
-    """Run sisu with ARGS in CWD; return (status, stdout and stderr)."""
+    """Run sisu with ARGS in CWD; return (status, stdout and stderr). ARGS
+    that end `< FILE` read standard input from FILE in CWD, as a shell's
+    redirection does; otherwise standard input is empty."""
     env = {"PATH": "/usr/bin:/bin"}
-    p = subprocess.run([sisu] + args, cwd=cwd, env=env, timeout=120,
-                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    stdin = subprocess.DEVNULL
+    if len(args) >= 2 and args[-2] == "<":
+        stdin = open(os.path.join(cwd, args[-1]), "rb")
+        args = args[:-2]
+    try:
+        p = subprocess.run([sisu] + args, cwd=cwd, env=env, timeout=120,
+                           stdin=stdin, stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT)
+    finally:
+        if stdin is not subprocess.DEVNULL:
+            stdin.close()
     return p.returncode, p.stdout.decode("utf-8", "replace")
 
 

@@ -9,9 +9,13 @@ Roni pays 29.00
 $ bill --help
 usage: bill [OPTIONS] NAME...
   --total <f64>
+      The bill, before the tip.
   --tip <int>  (default: 10)
+      The tip, in percent of the bill.
   --round
+      Round each share up to a whole euro.
   names...  (String)
+      The people who share the bill.
 $ bill --total lots Aino
 usage: bill [OPTIONS] NAME...; `bill --help` lists them
 error: InvalidValue(name="--total", value="lots") (exit 1)

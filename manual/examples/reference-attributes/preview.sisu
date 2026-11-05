@@ -1,0 +1,13 @@
+# Items marked as previews warn at each use, not where they are declared.
+
+## The minutes of each sauna turn for `guests` guests.
+@preview("the turns may come to depend on the stove")
+def turns(guests: int) -> list[int]:
+    return [20 for _ in range(guests)]
+
+## The heat of the stove, which may move to another module.
+@preview
+const HEAT: int = 80
+
+def main():
+    print("{turns(2)} at {HEAT} degrees")

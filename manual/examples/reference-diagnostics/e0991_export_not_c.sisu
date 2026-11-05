@@ -1,0 +1,11 @@
+# An exported function that takes a struct C has no layout for.
+struct Reading:
+    stove: String
+    celsius: i32
+
+@export("sauna_reading_heat")
+def reading_heat(reading: Reading) -> i32:
+    return reading.celsius
+
+def main():
+    print(reading_heat(Reading("Kotiharju", 80)))

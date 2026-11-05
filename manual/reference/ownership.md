@@ -679,8 +679,9 @@ the standard library's types, each visible in the program's types:
 | `Arena[T]` and `Key[T]` | the nodes of a graph, named by keys that are checked at use: a removed node's key finds nothing | a check of the key's generation |
 
 A `Shared` value is read through, and changed only through a `Cell`, a
-`Mutex` or an `Atomic` inside it, so that the `Send` and `Sync` rules can
-tell which is right, and it prints as the value it holds, with `{s}` and
+`Mutex` or an `Atomic` inside it (a field assigned through the `Shared`
+is E0343, `type.shared-not-mutable`, `var` or not), so that the `Send`
+and `Sync` rules can tell which is right, and it prints as the value it holds, with `{s}` and
 with `{s:?}` ([chapter 13](../tutorial/13-sharing.md#values-with-several-owners)).
 There is no cycle collector: a cycle of `Shared` values leaks unless a
 `Weak` breaks it.
@@ -814,6 +815,7 @@ stage 0 yet.
 | [E0338](diagnostics.md#e0338) | `type.move-out-of-borrow` | [Moving out of part of a value](#moving-out-of-part-of-a-value) |
 | [E0339](diagnostics.md#e0339), [E0340](diagnostics.md#e0340) | `type.mut-argument-missing`, `type.mut-argument-unexpected` | [Parameter conventions](#parameter-conventions) |
 | [E0341](diagnostics.md#e0341), [E0312](diagnostics.md#e0312) | `type.not-mutable`, `type.assign-immutable` | [Parameter conventions](#parameter-conventions) |
+| [E0343](diagnostics.md#e0343) | `type.shared-not-mutable` | [Sharing, cells and graphs](#sharing-cells-and-graphs) |
 | [E0400](diagnostics.md#e0400) | `borrow.use-after-move` | [Every value has one owner](#every-value-has-one-owner) |
 | [E0401](diagnostics.md#e0401) | `borrow.use-after-partial-move` | [Moving out of part of a value](#moving-out-of-part-of-a-value) |
 | [E0402](diagnostics.md#e0402), [E0403](diagnostics.md#e0403), [E0404](diagnostics.md#e0404), [E0405](diagnostics.md#e0405) | `borrow.modify-while-borrowed`, `borrow.use-while-mut-borrowed`, `borrow.move-while-borrowed`, `borrow.mut-while-borrowed` | [One mutable borrow or many shared ones](#one-mutable-borrow-or-many-shared-ones) |

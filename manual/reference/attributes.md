@@ -254,12 +254,12 @@ compile time cannot be written yet.
 | `@refines(REFERENCE)` | a function | tests it against a reference ([Refinement tests](#refinement-tests)) | in stage 0; leaning |
 | `@fixture(scope="...")` | a function | makes a value for the tests that name it ([Fixtures](#fixtures)) | designed |
 | `@repr(c)`, `@repr(u8)` | a struct, an enum | fixes the layout ([The layout of a type](#the-layout-of-a-type)) | partly in stage 0 |
-| `@export("NAME")` | a function | makes it callable from C ([Exported functions](#exported-functions)) | designed; checked in stage 0 |
+| `@export("NAME")` | a function | makes it callable from C ([Exported functions](#exported-functions)) | designed; checked, and a symbol of Sisu's convention, in stage 0 |
 | `@blocking` | a function of an `extern` block | says that a call may block ([Foreign functions that block](#foreign-functions-that-block)) | designed; checked in stage 0 |
 | `@no_alloc`, `@no_block`, `@stack(max=N)` | a function | limit what it may do ([Resource limits](#resource-limits)) | leaning |
 | `@float(fast)` | a function | allows fast floating point inside it ([Fast floating point](#fast-floating-point)) | in stage 0, as a permission it does not use |
 | `@deprecated("MESSAGE")`, `@fix_inline` | an item, a field, a variant, a method; a function | warn at each use, and migrate the uses ([Deprecation and migrations](#deprecation-and-migrations)) | `@deprecated` in stage 0; `@fix_inline` designed |
-| `@preview("NAME")` | not designed yet | asks for a feature that is not stable ([Preview features](#preview-features)) | leaning |
+| `@preview("NAME")` | not designed yet; in stage 0 a function, a type, a constant | asks for a feature that is not stable; in stage 0 warns at each use of the item ([Preview features](#preview-features)) | leaning; the item's warning in stage 0 |
 | `@diagnostic_name(f)` | a type made at compile time | says how diagnostics print it ([Names of types in diagnostics](#names-of-types-in-diagnostics)) | leaning |
 | `@intrinsic`, `@builtin`, `@structural`, `@keeps`, `@sealed`, `@marker`, `@internal` | the standard library's declarations | ([Attributes of the standard library](#attributes-of-the-standard-library)) | in stage 0 |
 
@@ -799,13 +799,26 @@ error[E0989]: `name_length` is `@export`ed, and foreign code that calls it canno
 error[D0006]: the program was not run: errors found (1)
 ```
 
-**Stage 0 differs.** Stage 0 checks the signature and does nothing
-more: a native build gives the function no symbol named `NAME`, and the
-rule of 12 that the types at the boundary are `@repr(c)` is not
-checked, so a parameter of a struct with a `String` in it passes.
+Each parameter and the result is also a type that C has a layout for:
+a number of a width C has, `bool`, `char`, nothing, a raw pointer, or a
+type declared `@repr(c)`; any other is E0991
+(`unsafe.export-not-c`), so a parameter of a struct with a `String` in
+it is refused ([R17](diagnostics.md#e0991)).
+
+**Stage 0 differs.** A native build makes the function the global
+symbol `NAME`, which a C program linked with it calls, but with Sisu's
+own convention rather than C's: C declares `uint8_t NAME(R *result,
+const P1 *a1, ...)`, passing the address of the result and of each
+argument, each in memory of its layout (an `i32` takes a word, as every
+sized integer does), and reads the status it returns, 0, or 1 when a
+panic left the function, after which it must not call Sisu code again.
+A symbol that takes and gives C's values directly is the next step.
+`sisu sir` of stage 1 does not name the exported function yet; its
+thirteenth round writes the line.
 
 **Status.** Designed ([12](../../proposal/12-interop-and-targets.md),
-[22](../../proposal/22-unsafe.md); D-080), with its check in stage 0.
+[22](../../proposal/22-unsafe.md); D-080), with its checks and the
+symbol in stage 0, with the differences noted.
 
 ## Foreign functions that block
 
@@ -1066,10 +1079,49 @@ change or go while it is one, and is made stable or removed within four
 releases, two years ([13](../../proposal/13-evolution-and-governance.md#release-cadence),
 D-072). Where the attribute stands is not designed yet.
 
-**Stage 0 differs.** Stage 0 has no previews, and accepts the attribute
-without a word.
+**Stage 0 differs.** Stage 0 has no previews of the language. The
+attribute marks an item of a program or a library instead, a function,
+a type or a constant, whose every use warns, as a use of a deprecated
+item does: W0028 (`type.preview`) with the attribute's text, W0029
+(`type.preview-plain`) without one. The item's own declaration uses it
+without a word:
 
-**Status.** Leaning (D-072).
+<!-- file: examples/reference-attributes/preview.sisu -->
+```sisu
+# Items marked as previews warn at each use, not where they are declared.
+
+## The minutes of each sauna turn for `guests` guests.
+@preview("the turns may come to depend on the stove")
+def turns(guests: int) -> list[int]:
+    return [20 for _ in range(guests)]
+
+## The heat of the stove, which may move to another module.
+@preview
+const HEAT: int = 80
+
+def main():
+    print("{turns(2)} at {HEAT} degrees")
+```
+
+<!-- output: examples/reference-attributes/preview.console -->
+```console
+$ sisu run preview.sisu
+warning[W0028]: `turns` is a preview, which may change or be removed before it is stable: the turns may come to depend on the stove
+  --> preview.sisu:13:13
+   |
+13 |     print("{turns(2)} at {HEAT} degrees")
+   |             ^^^^^^^^
+
+warning[W0029]: `HEAT` is a preview, which may change or be removed before it is stable
+  --> preview.sisu:13:27
+   |
+13 |     print("{turns(2)} at {HEAT} degrees")
+   |                           ^^^^
+
+[20, 20] at 80 degrees
+```
+
+**Status.** Leaning (D-072), with the differences noted.
 
 ## Names of types in diagnostics
 
@@ -1173,9 +1225,10 @@ idea for later, and `@inline` has no design.
 | [E0603](diagnostics.md#e0603), [E0606](diagnostics.md#e0606) | `comptime.budget`, `comptime.budget-attribute` | [Compile-time budgets](#compile-time-budgets) |
 | E0821 | `test.refines-mismatch` | [Refinement tests](#refinement-tests) |
 | E0702 | `type.test-signature` | [Fixtures](#fixtures) |
-| [E0989](diagnostics.md#e0989) | `unsafe.export-signature` | [Exported functions](#exported-functions) |
+| [E0989](diagnostics.md#e0989), [E0991](diagnostics.md#e0991) | `unsafe.export-signature`, `unsafe.export-not-c` | [Exported functions](#exported-functions) |
 | [E0990](diagnostics.md#e0990) | `unsafe.blocking-not-foreign` | [Foreign functions that block](#foreign-functions-that-block) |
 | [E0448](diagnostics.md#e0448) | `resolve.float-attribute` | [Fast floating point](#fast-floating-point) |
 | [W0023](diagnostics.md#w0023), [W0025](diagnostics.md#w0025) | `type.deprecated`, `type.deprecated-plain` | [Deprecation and migrations](#deprecation-and-migrations) |
+| [W0028](diagnostics.md#w0028), [W0029](diagnostics.md#w0029) | `type.preview`, `type.preview-plain` | [Preview features](#preview-features) |
 | [E0900](diagnostics.md#e0900) | `stage0.unsupported` | [Names of types in diagnostics](#names-of-types-in-diagnostics) |
 | [E0225](diagnostics.md#e0225), E0240, E0701 | `resolve.std-only-attribute`, `resolve.sealed-trait`, `cap.internal` | [Attributes of the standard library](#attributes-of-the-standard-library) |

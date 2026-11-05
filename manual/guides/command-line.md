@@ -27,9 +27,13 @@ import cli
 
 ## What the command line can say.
 struct Options:
+    ## The bill, before the tip.
     total: f64
+    ## The tip, in percent of the bill.
     tip: int = 10
+    ## Round each share up to a whole euro.
     round: bool
+    ## The people who share the bill.
     names: list[String]
 
 def main(sys: System) -> ! cli.Error:
@@ -81,7 +85,9 @@ Roni pays 29.00
 
 `cli.help_text[Options]()` gives a line for each option, with the kind
 of value it takes and its default, and a line for the positional
-arguments. `main` tests for `--help` before it parses, since a help
+arguments, each with the field's `##` comment under it, which
+reflection gives the library as the field's `doc`
+([R12](../reference/compile-time.md#reflection)). `main` tests for `--help` before it parses, since a help
 request without the required `--total` would otherwise be an error:
 
 <!-- output: examples/guide-command-line/help.console -->
@@ -89,9 +95,13 @@ request without the required `--total` would otherwise be an error:
 $ sisu run bill.sisu --help
 usage: bill [OPTIONS] NAME...
   --total <f64>
+      The bill, before the tip.
   --tip <int>  (default: 10)
+      The tip, in percent of the bill.
   --round
+      Round each share up to a whole euro.
   names...  (String)
+      The people who share the bill.
 ```
 
 ## 3. Report arguments that do not fit
@@ -141,29 +151,49 @@ Roni pays 29.00
 $ bill --help
 usage: bill [OPTIONS] NAME...
   --total <f64>
+      The bill, before the tip.
   --tip <int>  (default: 10)
+      The tip, in percent of the bill.
   --round
+      Round each share up to a whole euro.
   names...  (String)
+      The people who share the bill.
 $ bill --total lots Aino
 usage: bill [OPTIONS] NAME...; `bill --help` lists them
 error: InvalidValue(name="--total", value="lots") (exit 1)
 ```
 
-`sisu test` runs it:
+`sisu test` runs it. For now it fails: a transcript runs on the build
+of the program that the compiler's front end written in Rust makes,
+which cannot make `cli.help_text` since the fields' `doc` came, and so
+stops at E0609 before any line runs:
 
 <!-- output: examples/guide-command-line/bill.console -->
 ```console
 $ sisu test bill.sisu
-transcript "tests/bill.transcript" ... ok
-1 passed, 0 failed, 0 blocked
+transcript "tests/bill.transcript" ... FAILED
+
+transcript "tests/bill.transcript" ... FAILED
+a transcript runs on the Rust front end's build of the program, which stops at errors stage 1 does not report:
+error[E0609]: making `help_text[Options]` stopped at compile time: a field is a compile-time value with no run-time form
+  --> bill.sisu:19:15
+   |
+19 |         print(cli.help_text[Options]())
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^
+
+0 passed, 1 failed, 0 blocked
 ```
 
-You need not write the expected lines by hand. Write the `$` lines,
-run `sisu test --update`, and read what it stored before you keep it;
+The transcript is right, and passes once transcripts run on the build
+that `sisu run` uses, the next round of the `sisu` command's. A program
+that does not call `cli.help_text` runs its transcripts today. You need
+not write the expected lines by hand. Write the `$` lines, run `sisu
+test --update`, and read what it stored before you keep it;
 [Test a command-line tool](test-tool.md#4-review-a-change) shows the
 review.
 
 **Status.** In stage 0, as `std.x.cli`, which reads the struct by
-reflection where [11](../../proposal/11-stdlib.md) plans a derive. The
-help text leaves out the fields' `##` comments, so it says what kind of
-value an option takes and not what it is for.
+reflection where [11](../../proposal/11-stdlib.md) plans a derive. A
+transcript of a program that calls `cli.help_text` fails with E0609
+until transcripts run on the build of stage 1, the front end written in
+Sisu.

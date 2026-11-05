@@ -4,6 +4,7 @@ def main():
     print("{reading.to_u8()} {reading.truncate_to[u8]()}")
     let largest = u64.MAX
     print("{largest.to_int()} {largest.truncate_to[u32]()}")
+    print("{largest.truncate_to[i128]()} {u128.MAX.truncate_to[i128]()}")
     let odd = 9_007_199_254_740_993
     print(odd.to_f64())
     print("{2.9.truncate_to_int()} {(-2.9).truncate_to_int()}")

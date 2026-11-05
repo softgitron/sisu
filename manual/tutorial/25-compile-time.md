@@ -628,6 +628,10 @@ test "a test has its own greeting" ... ok
 - `@cfg(test)` keeps a declaration in the builds that run the tests,
   and `@cfg(not test)` in the others: `sisu run` builds the program
   without its tests, so it gets the second `greeting`.
+- `target.runtime` is `interpreter` under `sisu run`, and for now in a
+  native build too: the front end already takes the runtime as an
+  option, and the `sisu` command passes `native` to it from its next
+  round.
 - `all(...)` and `any(...)` combine conditions, and `feature="NAME"`
   holds when a feature of the package is on, as chapter 17 showed.
 - An item that `@cfg` leaves out is not in the program at all, and

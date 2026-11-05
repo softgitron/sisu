@@ -329,9 +329,8 @@ replay: sisu test --replay 1-8d28ef2a938b01d6-0.0.1-t0-s0-r0 expects.sisu
 0 passed, 1 failed, 0 blocked
 ```
 
-Both failures are reported under `expectation failed:`, with the sides
-a failed `assert` shows; the checks that hold say nothing. An `expect`
-takes a message, as `assert` does. Use `expect` for checks that do not
+Both failures are reported, with the sides a failed `assert` shows;
+the checks that hold say nothing. An `expect` takes a message too. Use `expect` for checks that do not
 depend on each other, and `assert` where a failure makes the lines
 after it meaningless.
 
@@ -370,7 +369,7 @@ test "every line is a price":
 
 test "a price in cents":
     let prices = load_prices(cafe()).expect("the menu is there")
-    assert prices["bun"] == 280
+    assert prices.get("bun").copied() == Some(280)
 
 test "a test's own file system starts empty"(fs: Fs):
     assert load_prices(fs) == Err(NotFound("menu.txt"))
@@ -395,12 +394,35 @@ test "a test's own file system starts empty" ... ok
 - `System.fake(seed)` makes a whole set of fakes in the shape of a
   `System`, for code that takes one.
 
+`get` takes a `str` for a `String` key and gives an optional
+reference, which `.copied()` makes an optional `int` to compare.
+
+**Try it.** Leave `.copied()` out, and run the tests.
+
+<details>
+<summary>What Sisu says</summary>
+
+<!-- output: examples/19-testing/compare_ref.console -->
+```console
+$ sisu test fixtures.sisu
+error[E0300]: expected `ref int`, found `int`
+  --> fixtures.sisu:22:38
+   |
+22 |     assert prices.get("bun") == Some(280)
+   |                                      ^^^
+  = fix: make the optional reference an optional value to compare them: `.copied()`
+
+error[D0006]: the program was not run: errors found (1)
+```
+
+</details>
+
 Each test runs in an interpreter of its own, with its own fakes, and
 the tests run side by side, on up to 8 threads (`--jobs N`). Their
 output is still written in the order of the file. A test that declares
 `sys: System` receives the real one instead: it runs alone, after the
-others, and it is the one kind of test that cannot be repeated exactly,
-since the world it touched may have changed. A fixture shared by many
+others, and cannot be repeated exactly, since the world it touched may
+have changed. A fixture shared by many
 tests through a parameter, `@fixture`, is designed in
 [17](../../proposal/17-testing.md#fixtures) and not in the compiler.
 
@@ -449,8 +471,7 @@ the clock moves four minutes in all: when both wait, it jumps to three
 minutes, the tea task finishes, and when the coffee task is the only
 one left waiting, it jumps to four. The second test brews one pot after
 the other, and the clock moves seven minutes. Neither test takes any
-real time. Chapter 20 is about tasks; what matters here is that the
-waits of several tasks overlap on the test clock as they would on a
+real time: the waits of several tasks overlap on the test clock as on a
 real one.
 
 ## Properties instead of examples
@@ -910,9 +931,8 @@ transcript "tests/sauna.transcript" ... ok
 - The program runs on a fake `System`: an in-memory file system that
   starts with the files of `tests/sauna/`, here a `bookings.txt` that
   books 17:00 for Roni; a clock frozen at the start of 1970; a seeded
-  `Rand`; and no network. The fakes last from one `$` line to the next
-  in the same file, so the booking of the second run is there for the
-  last.
+  `Rand`; and no network. The fakes last from one `$` line to the next,
+  so the second run's booking is there for the last.
 
 **Try it.** Change the message of a booking to `"{name} has the sauna
 at {h}:00"`, run the tests, and accept the change with `--update`.
@@ -1004,9 +1024,9 @@ test "the vowels of a short word" ... ok
 - `sisu test` checks a benchmark and does not run it. `sisu bench
   bench.sisu` runs each one once to warm up, times ten samples of its
   loop, and prints the median time of one turn with a 95% interval.
-  The times differ from run to run; two benchmarks differ when their
-  intervals do not overlap. The compiler times its interpreter, so
-  compare benchmarks with each other, not with compiled code. *Lentokonesuihkuturbiinimoottoriapumekaanikko* is a Finnish
+  Two benchmarks differ when their intervals do not overlap. The
+  compiler times its interpreter, so compare benchmarks with each
+  other, not with compiled code. *Lentokonesuihkuturbiinimoottoriapumekaanikko* is a Finnish
   word for an assistant mechanic of jet engines.
 
 ## What sisu test remembers

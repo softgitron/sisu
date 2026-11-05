@@ -60,8 +60,13 @@ löyly!
   the executable at `PATH` instead.
 
 The executable needs no `sisu` and no source: copy the one file to
-where it runs. It receives the real `System`, so it reads files and the
-network with the same capabilities that `main` declares.
+where it runs, with the C library and `libgcc_s`, which it links
+dynamically, on that machine. It receives the real `System`, so it reads
+files and the network with the same capabilities that `main` declares.
+The link leaves out the code that nothing reaches from `main`, so a
+ten-line program is 6.25 MB, nearly all of it the runtime's code and
+its debug information, and 1.74 MB once `strip` takes the debug
+information out ([R22](../reference/targets.md#binary-size-and-startup)).
 
 ## 2. Build for release
 

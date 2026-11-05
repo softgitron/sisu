@@ -1,0 +1,9 @@
+$ sisu test fixtures.sisu
+error[E0300]: expected `ref int`, found `int`
+  --> fixtures.sisu:22:38
+   |
+22 |     assert prices.get("bun") == Some(280)
+   |                                      ^^^
+  = fix: make the optional reference an optional value to compare them: `.copied()`
+
+error[D0006]: the program was not run: errors found (1)

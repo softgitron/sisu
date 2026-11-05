@@ -827,7 +827,8 @@ The fixed list of names that every module sees without an import.
 ### Preview
 
 A feature that is not stable yet, which a program asks for by name with
-`@preview`. Leaning. [Chapter 28](../tutorial/28-code-that-lasts.md);
+`@preview`. Leaning; in stage 0 the attribute marks an item that may
+still change, whose uses warn (W0028). [Chapter 28](../tutorial/28-code-that-lasts.md#marking-what-may-still-change);
 [R14](attributes.md#preview-features).
 
 ### Property test

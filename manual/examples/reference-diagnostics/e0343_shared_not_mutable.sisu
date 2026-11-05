@@ -1,0 +1,8 @@
+# A change to a field of a value that a `Shared` holds.
+struct Stove:
+    celsius: int
+
+def main():
+    var stove = Shared(Stove(60))
+    stove.celsius = 80
+    print(stove.celsius)

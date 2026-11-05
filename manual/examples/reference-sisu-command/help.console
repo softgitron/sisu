@@ -12,7 +12,7 @@ commands:
   bench [<file>]         run the benchmarks (`--iterations N`, `--samples K` times each after a run not timed, `--from-sir FILE` those of a file `sisu sir --tests` printed)
   replay <log>           run a recorded program again against its capability log
   fmt [<path>...]        format files in place (`--check` reports what would change)
-  repl [<file>|<dir>]    an interactive session, with a package loaded from its directory
+  repl [<file>|<dir>]    an interactive session, with a package loaded from its directory (`--echo` writes each input after its prompt, for a session read from a pipe)
   ws <file>              run a worksheet, showing each statement's value (`--run` with the real `System`)
   lsp                    the language server, over standard input and output
   new <name>             create a package (`--lib` for a library)

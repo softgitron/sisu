@@ -149,7 +149,7 @@ run the program.
 <!-- output: examples/13-sharing/change_shared.console -->
 ```console
 $ sisu run change_shared.sisu
-error[E0341]: cannot modify `web.config.retries`; it is not declared with `var`
+error[E0343]: cannot modify `web.config.retries`: a `Shared` holds it, and a shared value is not changed in place, even through a `var`
   --> change_shared.sisu:14:5
    |
 14 |     web.config.retries = 5
@@ -160,10 +160,11 @@ error[D0006]: the program was not run: errors found (1)
 ```
 
 Nothing changes a value through a `Shared`, since every other owner
-would see the change without asking for it. E0341's message speaks of
-`var`, which does not help: declaring `web` with `var` gets the same
-error. Its note says what does: a shared value that must change holds
-a `Cell` or a `Mutex`, which the next section and chapter 20 show.
+would see the change without asking for it. E0343
+(`type.shared-not-mutable`) says that a `Shared` holds the field, so
+declaring `web` with `var` would not help. Its note says what does: a
+shared value that must change holds a `Cell` or a `Mutex`, which the
+next section and chapter 20 show.
 
 </details>
 

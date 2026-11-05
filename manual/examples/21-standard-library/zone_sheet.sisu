@@ -1,0 +1,8 @@
+#!/usr/bin/env sisu
+# A worksheet shows a `Zone` as the code that makes it.
+from std.time import Zone
+let helsinki = Zone.named("Europe/Helsinki").expect("a zone")
+let india = Zone.fixed(19800)
+let noon = DateTime.parse("2026-07-01T12:00:00Z").expect("a time")
+india.format(noon)
+helsinki.abbreviation_at(noon)

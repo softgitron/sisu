@@ -153,7 +153,7 @@ struct Cache:
     ## The service's answer for `town`, which it is asked for once.
     def weather(mut self, town: str) -> String ! {UrlError, HttpError}:
         if town in self.answers:
-            return Ok(self.answers[town.to_string()].copy())
+            return Ok(self.answers[town].copy())
         let url = Url.parse("http://weather.example/{town}")?
         let body = http.get(self.net, url)?
         let text = body.decode().or(String())

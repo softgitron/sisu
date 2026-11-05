@@ -1,0 +1,6 @@
+warning[W0028]: `turns` is a preview, which may change or be removed before it is stable: the turns may come to depend on the stove
+  --> w0028_preview.sisu:9:11
+  |
+9 |     print(turns(3))
+  |           ^^^^^^^^
+

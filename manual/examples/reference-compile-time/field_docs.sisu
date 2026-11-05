@@ -1,0 +1,15 @@
+# A field's `##` comment is its `doc`, which reflection gives.
+struct Booking:
+    ## Who booked the sauna.
+    name: String
+    ## The hour of the turn, from 16 to 21.
+    hour: int = 18
+
+def describe[T]() -> String:
+    var out = String.new(reflect.name_of(T))
+    comptime for f in reflect.fields_of(T):
+        out = "{out}\n  {f.name}: {f.doc}"
+    return out
+
+def main():
+    print(describe[Booking]())

@@ -1,0 +1,9 @@
+$ sisu run sauna.sisu
+error[E0220]: cannot import `stove`: it names no module of this package, of a dependency in `sisu.toml`, or of the standard library
+  --> sauna.sisu:2:8
+  |
+2 | import stove
+  |        ^^^^^
+  = note: `stove` beside this file is a module of a package only: a package is a directory with a `sisu.toml` and the files in `src/`, which makes them one program (09)
+
+error[D0006]: the program was not run: errors found (1)

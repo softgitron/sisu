@@ -178,7 +178,7 @@ function asks about its type parameters ([Templates](#templates)).
 |---|---|
 | `reflect.name_of(T)` | the type's name |
 | `reflect.is_struct(T)`, `is_enum`, `is_trait`, `is_int`, `is_float`, `is_bool`, `is_char`, `is_str` (`str` or `String`), `is_list`, `is_option`, `is_tuple` | whether the type is of that kind |
-| `reflect.fields_of(T)` | a struct's fields, each with `name`, `index`, `named`, `ty` and `default`, whether it has a default; an empty list for a type declared without fields, such as `int` |
+| `reflect.fields_of(T)` | a struct's fields, each with `name`, `index`, `named`, `ty`, `default`, whether it has a default, and `doc`, its `##` comment (empty without one); an empty list for a type declared without fields, such as `int` |
 | `reflect.variants_of(T)` | an enum's variants, each with `name`, `index` and `fields` |
 | `reflect.elem_of(T)` | the element type of a list or an optional value |
 | `reflect.methods_of(T)` | a trait's methods or a type's own, each with `name`, `index`, `receiver`, `params` (each with `name`, `index`, `mode` and `ty`), `ret` and `provided` |
@@ -249,6 +249,36 @@ Heater, variant Wood of 0 fields, variant Electric of 1 fields
 True
 ```
 
+A field's `doc` is the text of its `##` lines, without the `##` and the
+space after it, the lines joined by line breaks; `std.x.cli`'s help text
+prints it under each option ([G6](../guides/command-line.md#2-print-a-help-text)):
+
+<!-- file: examples/reference-compile-time/field_docs.sisu -->
+```sisu
+# A field's `##` comment is its `doc`, which reflection gives.
+struct Booking:
+    ## Who booked the sauna.
+    name: String
+    ## The hour of the turn, from 16 to 21.
+    hour: int = 18
+
+def describe[T]() -> String:
+    var out = String.new(reflect.name_of(T))
+    comptime for f in reflect.fields_of(T):
+        out = "{out}\n  {f.name}: {f.doc}"
+    return out
+
+def main():
+    print(describe[Booking]())
+```
+
+<!-- output: examples/reference-compile-time/field_docs.out -->
+```text
+Booking
+  name: Who booked the sauna.
+  hour: The hour of the turn, from 16 to 21.
+```
+
 A builtin type, `bool` or `int`, is a type argument as a type of the
 program is:
 
@@ -270,10 +300,14 @@ String
 bool
 ```
 
-**Stage 0 differs.** The documentation of items, which
+**Stage 0 differs.** Of the documentation of items, which
 [08](../../proposal/08-metaprogramming.md#reflection) lists among what
-reflection exposes, has no query, and the attributes of a function or a
-field none either ([R14](attributes.md#attributes-are-data)).
+reflection exposes, only a struct's fields have theirs, as `doc`: an
+item's own `##` comment and a variant's fields' have no query, and the
+attributes of a function or a field none either
+([R14](attributes.md#attributes-are-data)). The front end written in
+Rust has no `doc`, so a transcript, which runs on its build, fails for
+a program that reads one ([R15](testing.md#transcripts)).
 Reflection in a refinement's `where` clause or an `invariant` is E0900.
 
 **Status.** In stage 0 (D-018), with the differences noted.
@@ -547,7 +581,9 @@ is not checked for it, since the build has no such name
 ([R13](modules.md#target-conditions)).
 
 **Status.** In stage 0; `target.runtime` is `interpreter` in every
-build.
+build. Stage 1 takes `--target-runtime native` for a native build, and
+the `sisu` command passes it from its next round
+([R22](targets.md#the-facts-of-the-target)).
 
 ## Conditional compilation and features
 

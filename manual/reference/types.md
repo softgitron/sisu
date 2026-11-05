@@ -210,10 +210,10 @@ gives foreign code `ptrsize` and `uptrsize`, the integers as wide as a
 pointer; stage 0 has neither (E0201), and `std.ffi`'s C types, such as
 `c_size`, serve instead. 03 names no bit methods, and stage 0's take
 Rust's names. Every integer type has its limits, `u8.MAX` and
-`i128.MIN`, and `truncate_to[T]()`; a value beyond `int`'s range taken
-to an `i128` or a `u128` gives, for now, the value of its low 64 bits
-read as an `int` (`u64.MAX.truncate_to[i128]()` is -1), where widening
-gives the value itself. The narrowing methods of 03 other than
+`i128.MIN`, and `truncate_to[T]()`, which keeps the bits that fit,
+read as `T`'s, also for a type of 128 bits
+(`u64.MAX.truncate_to[i128]()` is 18446744073709551615,
+`u128.MAX.truncate_to[i128]()` is -1). The narrowing methods of 03 other than
 `truncate_to` are missing on the sized types, which narrow with
 `to_int()` and `int`'s `to_u8()` and its siblings.
 

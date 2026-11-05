@@ -172,7 +172,11 @@ and were then withdrawn; Nix's flakes have been experimental since
 November 2021 and are at the centre of a split in its ecosystem (finding
 4). Releases come every six months, each supported for a year, with
 every fourth a release supported for three, the cadence that the
-research on Java credits with reviving the language.
+research on Java credits with reviving the language. Stage 0 has no
+previews of the language yet; it uses the attribute for a library's
+items, a function or a type that may still change, whose every use
+warns with the attribute's text, so a library can try a new API in
+public without promising it.
 
 A written specification exists before 1.0, changes with every change to
 the language, and decides when the compiler and the document disagree.

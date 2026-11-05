@@ -658,7 +658,7 @@ needs it is done.
 <!-- file: examples/10-ownership/rooms.sisu -->
 ```sisu
 # `defer` runs a statement at the end of its block, however it ends.
-def room_of(guest: str, rooms: dict[str, int]) -> String:
+def room_of(guest: str, rooms: dict[String, int]) -> String:
     print("looking up {guest}")
     defer print("done with {guest}")
     let room = rooms.get(guest) else:
@@ -666,7 +666,7 @@ def room_of(guest: str, rooms: dict[str, int]) -> String:
     return "{guest} sleeps in room {room}"
 
 def main():
-    let rooms = {"Aino": 12, "Eero": 7}
+    let rooms: dict[String, int] = {"Aino": 12, "Eero": 7}
     print(room_of("Aino", rooms))
     print(room_of("Roni", rooms))
 ```
@@ -686,6 +686,11 @@ when it finds a room and when `return` leaves early from the `else`
 block. It runs as well when `?` passes an error on, and when a panic
 unwinds the function. `defer:` followed by an indented block defers
 several statements at once.
+
+The dict owns its keys, each a `String`, and `rooms.get(guest)` looks
+one up by the `str` it is given: a lookup only reads its key, so you
+write no `.to_string()`. For now the lookup makes a `String` of the
+`str` itself and drops it as soon as it is done.
 
 A block's drops and `defer`s run together, in the reverse of the order
 in which they appear in the code: a `defer` runs where a value declared

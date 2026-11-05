@@ -209,4 +209,11 @@ functions that call them, `lookup` taking an `Env`
 `CString.new(name).as_ptr()`,
 the shorter way to pass text to C, stops the interpreter with a panic
 that the pointer's value no longer exists and does not compile natively
-yet, so the wrapper builds the C string in raw memory.
+yet, since its slice copies the bytes into a temporary that ends when
+`as_ptr` returns, so the wrapper builds the C string in raw memory. The
+other direction, C calling Sisu, is `@export("NAME")`: a native build
+makes the function the global symbol `NAME`, which the compiler's own
+test links with a C caller, and E0991 refuses a type C has no layout
+for; for now the symbol takes the addresses of its result and arguments
+and returns a status byte, not C's values
+([R14](../reference/attributes.md#exported-functions)).

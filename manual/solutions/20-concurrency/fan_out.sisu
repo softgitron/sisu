@@ -24,7 +24,7 @@ struct SlowWeather:
 impl Weather for SlowWeather:
     def forecast(self, town: str) -> String ! {WeatherError, TaskError}:
         self.clock.sleep(self.delay)?
-        let answer = self.known.get(town.to_string()) else:
+        let answer = self.known.get(town) else:
             return Err(UnknownTown(town.to_string()))
         return Ok(answer.copy())
 

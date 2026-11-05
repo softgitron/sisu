@@ -1,0 +1,2 @@
+13:13-13:21 W0028 type.preview name="turns" reason="the turns may come to depend on the stove"
+13:27-13:31 W0029 type.preview-plain name="HEAT"

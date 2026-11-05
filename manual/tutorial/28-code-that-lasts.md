@@ -5,7 +5,7 @@ features, its names get better, its data takes new shapes. Each change
 can break a program that depends on it. In this chapter you change a
 library's functions and errors in ways that keep its users working, see
 which changes break them and how the compiler shows it, keep an old
-name alive beside a new one, and plan a change with typed holes. You
+name alive beside a new one, mark what may still change, and plan a change with typed holes. You
 also see the habits from other languages that the compiler stops, and
 what Sisu designs for editions, migrations and published packages. Last
 comes the tutorial's final challenge. You need about an hour and a
@@ -329,6 +329,53 @@ program still runs. A library will also mark such a wrapper
 the new function itself (D-067); until `sisu fix` exists, the warning
 tells each caller what to change.
 
+## Marking what may still change
+
+A new function is easier to get right after people have used it. Until
+then, a library can mark it `@preview("...")`, with a text that says
+what may change, so that each caller knows it is relying on something
+that is not promised yet:
+
+<!-- file: examples/28-code-that-lasts/preview.sisu -->
+```sisu
+# A new function that may still change is marked as a preview.
+
+## The price in cents of a turn of `minutes` at the evening rate.
+@preview("the evening hours may change in version 3")
+pub def evening_price(minutes: int) -> int:
+    return minutes * 6
+
+## The price in cents of a turn of `minutes`.
+pub def price(minutes: int) -> int:
+    return minutes * 5
+
+def main():
+    print(price(60))
+    print(evening_price(60))
+```
+
+<!-- output: examples/28-code-that-lasts/preview.console -->
+```console
+$ sisu run preview.sisu
+warning[W0028]: `evening_price` is a preview, which may change or be removed before it is stable: the evening hours may change in version 3
+  --> preview.sisu:14:11
+   |
+14 |     print(evening_price(60))
+   |           ^^^^^^^^^^^^^^^^^
+
+300
+360
+```
+
+Each use of the item gets W0028 (`type.preview`) with the attribute's
+text, or W0029 without one, and the program still runs. When the
+function is stable, the library takes the attribute away, and the
+warning goes with it. The design of
+[13](../../proposal/13-evolution-and-governance.md) uses the same
+attribute for features of the language, each stable or removed within
+four releases (D-072); stage 0 has no such features, so the attribute
+marks items only.
+
 ## Habits the compiler stops
 
 Some spellings mean one thing in Python and another in Sisu, or nothing
@@ -498,8 +545,9 @@ edition compiling together, and `sisu fix --edition`, which moves a
 package to the next one, are the compatibility promise of D-036; the
 compiler knows one edition so far, and a manifest's `edition` of
 another year is an error.
-`@preview` features, which a program asks for by name and which become
-stable or are removed within four releases, are D-072's. `sisu publish`
+Previews of the language's own features, which a program asks for by
+name and which become stable or are removed within four releases, are
+D-072's. `sisu publish`
 will compare a package's public API with the version before it and
 refuse a breaking change without a new major version, counting changes
 of behaviour, such as a stronger precondition, too (D-031); `sisu
@@ -962,6 +1010,8 @@ When every test passes, compare your answer with
 - An old name can stay as a wrapper over the new one; `@deprecated`
   makes each call warn with its message (W0023), and `@fix_inline` will
   let `sisu fix` rewrite the callers.
+- `@preview("...")` marks an item that may still change, and each use
+  warns with its text (W0028, or W0029 without one).
 - Habits from Python that would mean something else do not compile, and
   the diagnostics name the Sisu spelling (E0344, E0115, E0127).
 - Typed holes plan a change: the program compiles, W0001 lists what is

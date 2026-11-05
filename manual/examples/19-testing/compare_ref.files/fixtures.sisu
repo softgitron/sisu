@@ -1,0 +1,25 @@
+# A fixture is a value that a test makes; fakes are the commonest.
+
+## The prices in cents of the lines `name = cents` of `menu.txt`.
+def load_prices(fs: Fs) -> dict[String, int] ! IoError:
+    var prices: dict[String, int] = {}
+    let text = fs.read_to_string("menu.txt")?
+    for line in text.lines():
+        if let Some((name, cents)) = line.split_once(" = "):
+            _ = prices.insert(name.to_string(), cents.parse_int() ?? 0)
+    return Ok(prices)
+
+## A file system with a menu of three items, for the tests.
+def cafe() -> Fs:
+    return Fs.in_memory({"menu.txt": "coffee = 350\ntea = 300\nbun = 280"})
+
+test "every line is a price":
+    let prices = load_prices(cafe()).expect("the menu is there")
+    assert len(prices) == 3
+
+test "a price in cents":
+    let prices = load_prices(cafe()).expect("the menu is there")
+    assert prices.get("bun") == Some(280)
+
+test "a test's own file system starts empty"(fs: Fs):
+    assert load_prices(fs) == Err(NotFound("menu.txt"))

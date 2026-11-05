@@ -1,0 +1,9 @@
+# The part that changes is a `Cell` inside the `Shared`.
+struct Stove:
+    celsius: Cell[int]
+
+def main():
+    let stove = Shared(Stove(Cell(60)))
+    let other = stove.copy()
+    other.celsius.set(80)
+    print(stove.celsius.get())

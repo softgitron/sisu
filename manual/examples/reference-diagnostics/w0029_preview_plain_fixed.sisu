@@ -1,0 +1,10 @@
+# The type is stable now, so it has no `@preview` and no warning.
+
+## A booking of the sauna.
+struct Booking:
+    guest: String
+    hour: int
+
+def main():
+    let booking = Booking("Aino", 18)
+    print("{booking.guest} at {booking.hour}")

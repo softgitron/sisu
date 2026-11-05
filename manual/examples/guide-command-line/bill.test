@@ -1,2 +1,11 @@
-transcript "tests/bill.transcript" ... ok
-1 passed, 0 failed, 0 blocked
+transcript "tests/bill.transcript" ... FAILED
+
+transcript "tests/bill.transcript" ... FAILED
+a transcript runs on the Rust front end's build of the program, which stops at errors stage 1 does not report:
+error[E0609]: making `help_text[Options]` stopped at compile time: a field is a compile-time value with no run-time form
+  --> bill.sisu:19:15
+   |
+19 |         print(cli.help_text[Options]())
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^
+
+0 passed, 1 failed, 0 blocked

@@ -83,7 +83,7 @@ impl SlowWeather:
 
     ## How many requests for `town` the service got.
     def requests(self, town: str) -> int:
-        return self.asked.lock().value.get(town.to_string()) ?? 0
+        return self.asked.lock().value.get(town) ?? 0
 
 impl Weather for SlowWeather:
     def forecast(self, town: str) -> String ! {WeatherError, TaskError}:
@@ -91,7 +91,7 @@ impl Weather for SlowWeather:
         if not self.flying.lock().value.add(town.to_string()):
             self.overlapped.store(True)
         let slept = self.clock.sleep(Duration.seconds(2))
-        _ = self.flying.lock().value.remove(town.to_string())
+        _ = self.flying.lock().value.remove(town)
         slept?
         match town:
             case "Oulu":

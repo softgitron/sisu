@@ -1,0 +1,7 @@
+let name = "Aino"
+let greeting = "Hei, {name}!"
+print(greeting)
+len(greeting)
+greeting.to_uppercase()
+len(greeting) + "!"
+:quit

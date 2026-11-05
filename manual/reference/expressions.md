@@ -247,7 +247,14 @@ at the key `k`. `xs[i:j]` is a new list of the elements from `i` up to
 as `xs[1:^1]` does.
 
 - An index is checked: one past the end panics (R0002), and so does a
-  key a `dict` does not have (R0010), where `d.get(k)` gives a `V?`.
+  key a `dict` does not have (R0010), where `d.get(k)` gives an
+  optional reference to the value, which `.copied()` makes a `V?` of a
+  `Copy` value: `ages.get("Aino") == Some(7)` is E0300, with the fix
+  `.copied()`.
+- A lookup, `d[k]`, `get`, `contains` and `remove` of a `dict` and
+  `contains` and `remove` of a `set`, takes the key's type or one that
+  implements the prelude's `Lookup[K]` for it: a `str` looks up a
+  `String` key, with no `.to_string()`.
 - A constant negative index, Python's `xs[-1]`, does not compile
   (E0344, with the fix `^1`), since it would mean the other end in
   Python; a negative index computed while the program runs panics
@@ -265,8 +272,9 @@ def main():
     print("{xs[0]} {xs[^1]} {xs[^2]}")
     print("{xs[1:3]} {xs[2:]} {xs[:2]} {xs[:]}")
     print("{xs[1:^1]} {xs[^3:]} {xs[:^3]}")
-    let ages = {"Aino": 7}
+    let ages: dict[String, int] = {"Aino": 7}
     print("{ages["Aino"]} {ages.get("Eero")}")
+    print(ages.get("Aino").copied() == Some(7))
     var grid = [[0, 0], [0, 0]]
     grid[1][0] = 5
     print(grid)
@@ -278,6 +286,7 @@ def main():
 [20, 30] [30, 40] [10, 20] [10, 20, 30, 40]
 [20, 30] [20, 30, 40] [10]
 7 None
+True
 [[0, 0], [5, 0]]
 ```
 

@@ -518,9 +518,15 @@ a `strlen` of text without its NUL stops the program.
   thread for a long time, such as a read from a socket, so that the
   scheduler moves the call off the threads that run tasks. On anything
   but a foreign function it is E0990 (`unsafe.blocking-not-foreign`).
-- `@export` makes a Sisu function callable from C. Its signature may
-  hold no reference, view, `Shared`, closure or capability, which C
-  could not keep alive (E0989, `unsafe.export-signature`).
+- `@export("NAME")` makes a Sisu function callable from C: a native
+  build gives it the global symbol `NAME`. Its signature may hold no
+  reference, view, `Shared`, closure or capability, which C could not
+  keep alive (E0989, `unsafe.export-signature`), and each of its types
+  must be one C has a layout for, a number, `bool`, `char`, a raw
+  pointer or a `@repr(c)` type (E0991, `unsafe.export-not-c`). For now
+  C calls it with the addresses of the result and the arguments and
+  reads a status byte, as
+  [R14](../reference/attributes.md#exported-functions) shows.
 - Importing a C header, `import c "zlib.h"`, which would write the
   `extern` block from the header, is designed in
   [22](../../proposal/22-unsafe.md#foreign-calls) and not in the
@@ -757,7 +763,11 @@ E0304 today); `Region` exists, under `RawBuf`. The resource attributes
 The runtime profiles `full`, `single` and `freestanding`, targets and
 cross compilation (`--target`), and `panic = "abort"` in a profile,
 which the compiler ignores with W0005, wait for the runtime of
-[12](../../proposal/12-interop-and-targets.md). A native debug build
+[12](../../proposal/12-interop-and-targets.md). A native executable
+leaves out the code that nothing reaches, but links the C library
+dynamically and keeps its debug information: a ten-line program is
+6.25 MB, 1.74 MB stripped, nearly all of it the runtime
+([R22](../reference/targets.md#binary-size-and-startup)). A native debug build
 checks raw memory as the interpreter does, the memory C gives out
 included, except where the interpreter alone knows enough: which
 borrow a pointer came from, which it checks only by address. The

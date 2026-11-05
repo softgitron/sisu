@@ -1,0 +1,8 @@
+$ sisu run e0991_export_not_c.sisu
+error[E0991]: `reading_heat` is `@export`ed, and `Reading` has no layout C shares: an exported function takes and returns numbers, `bool`, `char`, raw pointers and types declared `@repr(c)`
+  --> e0991_export_not_c.sisu:7:18
+  |
+7 | def reading_heat(reading: Reading) -> i32:
+  |                  ^^^^^^^^^^^^^^^^
+
+error[D0006]: the program was not run: errors found (1)

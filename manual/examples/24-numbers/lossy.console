@@ -1,9 +1,10 @@
 $ sisu run lossy.sisu
 None 251
 None 4294967295
+18446744073709551615 -1
 9007199254740992.0
 2 -2
 3 -3
 200
 panic: cannot convert 1e30 to `int`
-  at main (lossy.sisu:12:11)
+  at main (lossy.sisu:13:11)

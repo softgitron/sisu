@@ -1,0 +1,14 @@
+# A new function that may still change is marked as a preview.
+
+## The price in cents of a turn of `minutes` at the evening rate.
+@preview("the evening hours may change in version 3")
+pub def evening_price(minutes: int) -> int:
+    return minutes * 6
+
+## The price in cents of a turn of `minutes`.
+pub def price(minutes: int) -> int:
+    return minutes * 5
+
+def main():
+    print(price(60))
+    print(evening_price(60))

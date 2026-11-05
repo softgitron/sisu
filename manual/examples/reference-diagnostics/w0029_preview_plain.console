@@ -1,0 +1,8 @@
+$ sisu run w0029_preview_plain.sisu
+warning[W0029]: `Booking` is a preview, which may change or be removed before it is stable
+  --> w0029_preview_plain.sisu:10:19
+   |
+10 |     let booking = Booking("Aino", 18)
+   |                   ^^^^^^^
+
+Aino at 18

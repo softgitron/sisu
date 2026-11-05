@@ -1,0 +1,5 @@
+# A file that imports the module beside it.
+import stove
+
+def main():
+    print(stove.heat())

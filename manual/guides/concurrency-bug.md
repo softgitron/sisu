@@ -209,6 +209,14 @@ replay: sisu test --replay 1-0df33217e863cf48-0.0.1-t0-s0-r0-m200000 disk.sisu
 0 passed, 1 failed, 0 blocked
 ```
 
+The scope's body joins both tasks and returns what they gave, so a
+booking whose write fails reaches the test as a value, and the test
+goes on to look at what the tasks left. A body that joined neither
+would stop the test with R0079 (`panic.unobserved-error`) at the first
+failure, since a failure that nobody joins becomes the scope's result,
+and a scope whose result has no room for it panics
+([R9](../reference/concurrency.md#a-scopes-result-and-its-failures)).
+
 The write failed after the booking was kept in memory, so the program
 believes a booking that its disk has lost. Write first, and keep the
 booking only once the write has succeeded. Then search orders and

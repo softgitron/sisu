@@ -3,9 +3,13 @@ import cli
 
 ## What the command line can say.
 struct Options:
+    ## The bill, before the tip.
     total: f64
+    ## The tip, in percent of the bill.
     tip: int = 10
+    ## Round each share up to a whole euro.
     round: bool
+    ## The people who share the bill.
     names: list[String]
 
 def main(sys: System) -> ! cli.Error:
