@@ -161,6 +161,12 @@ jobs:
             native-${{ runner.os }}-rust-1.97.0-
       - name: Build the compiler, the runtime and the runner
         run: cargo build
+      - name: Stage 1, the front end of `sisu` (built natively on first use)
+        # Built once here, before the cases' parallel builds: a case's build
+        # that waits for stage 1's own would otherwise hit the runner's
+        # 60-second limit when the cache holds a stage 1 older than its
+        # sources.
+        run: ./target/debug/sisu tokens std/prelude.sisu > /dev/null
       - name: Native conformance (conformance/native.list)
         # Each case built by `sisu build --native`, its front end stage 1's
         # (decision 268), its LIR compiled by the x86-64 backend written in
