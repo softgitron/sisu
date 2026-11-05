@@ -10910,7 +10910,11 @@ machine intrinsics"; D-086; 10, 12, 17; decisions 232, 265, 331, 784, 785,
      (`Call.place`, 543 instructions a call, half of it in calls of Sisu's
      convention) and the iterator's allocation, which the runtime in Rust
      gives. The seed grows from 755 222 to 759 359 bytes with 861 and 862,
-     the runtime's object to 866 320 bytes (`target/rt/rt.o`); FIXED_LINE.
+     the runtime's object from 851 480 to 866 320 bytes (`target/rt/rt.o`),
+     and as the fixed point builds it with the Sisu backend from 1 478 176
+     to 1 508 224; the fixed point holds (rt-A.o and rt-B.o the same bytes,
+     as sisu2-A and sisu2-B, 31 174 752, and stage1-A and stage1-B,
+     63 849 072).
      This changes no rule of the language.
 
 863. The rest of the intrinsics' decoding (decision 820's 265 of 328,
