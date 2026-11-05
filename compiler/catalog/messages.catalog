@@ -428,6 +428,9 @@ E0449 error   type.trait-constant         each impl of `{trait}` gives its own `
 -     fix     type.get-default            `get` gives an option, whose default `??` gives
 -     note    type.instance-code          in the instance of `{name}` that this call makes: `{code}`
 -     note    type.instance-owns          what the instance gives on is borrowed there: a template's parameter that it gives on, as to `reflect.construct`, is taken `own`
+# Stage 1's (RULES.md, R131; X7): the template's line that wrote the
+# instance's.
+-     label   type.instance-line          the template's line that wrote it
 -     note    type.compare-result         a `T ! E` holds a value or an error: compare it with `Ok(...)` or `Err(...)`, or ask `.is_ok()`; in `ensures`, `result` is the whole result of a function that returns one
 -     note    type.it-argument-only       `it` makes a closure of a call's argument only; elsewhere, as for an item of a list of functions, write the closure with its parameter: `x -> ...`
 # Stage 1's (RULES.md, R104): the notes and fixes the manual's writers found missing, the eleventh round.
@@ -577,6 +580,8 @@ E0604 error   comptime.not-kept           {what} made at compile time cannot be 
 E0605 error   comptime.only               `{name}` is a `comptime def`: it can be called only at compile time, inside `comptime`
 E0606 error   comptime.budget-attribute   `@comptime_budget` takes `steps=N`, a positive number of steps
 E0607 error   comptime.derive-template    a trait's derive is `comptime def derive(T: type) -> impl {trait} for T`, whose body is `return impl {trait} for T:` with the impl's methods
+# Stage 1's (RULES.md, R130; 08, G21): what may come before the `return impl`.
+-     note    comptime.derive-checks      only checks of the type may come before the `return impl`: `comptime assert`, and `comptime panic` and `comptime if` of them, which write no code
 E0608 error   comptime.derive-failed      deriving `{trait}` for `{ty}` stopped at compile time: {reason}
 -     label   comptime.derive-here        the derive's template, where it stopped
 E0609 error   comptime.instance-failed    making `{name}` stopped at compile time: {reason}

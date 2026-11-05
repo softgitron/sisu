@@ -455,6 +455,7 @@ pub enum Msg:
     BorrowRemoveFrom
     BorrowResultCannotBorrow
     ComptimeDeriveHere
+    ComptimeDeriveChecks
     ComptimeInstanceHere
     ResolveAddDyn
     ResolveFirstImpl
@@ -611,6 +612,7 @@ pub enum Msg:
     BorrowLoopEnds
     BorrowSortedRefs
     TypeInstanceOwns
+    TypeInstanceLine
 
 impl Msg:
     ## The catalog identifier.
@@ -1055,6 +1057,7 @@ impl Msg:
             case BorrowRemoveFrom: "borrow.remove-from"
             case BorrowResultCannotBorrow: "borrow.result-cannot-borrow"
             case ComptimeDeriveHere: "comptime.derive-here"
+            case ComptimeDeriveChecks: "comptime.derive-checks"
             case ComptimeInstanceHere: "comptime.instance-here"
             case ResolveAddDyn: "resolve.add-dyn"
             case ResolveFirstImpl: "resolve.first-impl"
@@ -1203,6 +1206,7 @@ impl Msg:
             case BorrowLoopEnds: "borrow.loop-ends"
             case BorrowSortedRefs: "borrow.sorted-refs"
             case TypeInstanceOwns: "type.instance-owns"
+            case TypeInstanceLine: "type.instance-line"
 
 ## A byte range of a text: from `start` up to, not including, `end`.
 @derive(Eq, Hash, Debug, Copy)

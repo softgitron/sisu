@@ -194,9 +194,12 @@ pure def split_lines(raw: list[Token]) -> list[Line]:
     var lines: list[Line] = []
     var start = 0
     for i in range(len(raw)):
-        if raw[i].kind == SyntaxKind.LineBreak:
-            lines.push(Line(start=start, end=i + 1, has_break=True))
-            start = i + 1
+        match raw[i].kind:
+            case LineBreak:
+                lines.push(Line(start=start, end=i + 1, has_break=True))
+                start = i + 1
+            case _:
+                pass
     if start < len(raw):
         lines.push(Line(start=start, end=len(raw), has_break=False))
     return lines
@@ -295,6 +298,11 @@ pure def indentation_width(
             continue
         var at = t.start
         while at < t.end:
+            if text.byte_at(at).to_int() == 32:
+                # A space, the indentation's one character: no character to decode.
+                width += 1
+                at += 1
+                continue
             let c = char_at(text, at)
             width += 1
             if c == '\t':

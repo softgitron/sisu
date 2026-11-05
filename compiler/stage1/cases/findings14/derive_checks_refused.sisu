@@ -1,0 +1,31 @@
+# The checks before a derive's `return impl` stop it for a type they do
+# not fit, at the `@derive` (E0608), with the template's line where it
+# stopped (RULES.md, R130); a statement that would write code there is
+# still E0607.
+
+trait Tabled:
+    def row(self) -> String
+
+    comptime def derive(T: type) -> impl Tabled for T:
+        comptime if not reflect.is_struct(T):
+            comptime panic("a table's row is a struct's fields")
+        return impl Tabled for T:
+            def row(self) -> String:
+                return ""
+
+trait Counted:
+    def count(self) -> int
+
+    comptime def derive(T: type) -> impl Counted for T:
+        let n = len(reflect.fields_of(T))
+        return impl Counted for T:
+            def count(self) -> int:
+                return 0
+
+@derive(Tabled)
+enum Bench:
+    Top
+    Bottom
+
+def main():
+    pass

@@ -70,7 +70,18 @@
 #                line with its tags and each benchmark's line, and the
 #                functions they reach
 #
-# each of which must match. Then what the programs do:
+# each of which must match. Then the transcripts' roots (RULES.md, R120
+# and R132), for each program of the conformance suite whose `NAME.files`
+# holds `tests/*.transcript`, in a sandbox as the runner makes one:
+#
+#   transcripts  `sisu sir --tests NAME.sisu` there, standard output,
+#                against stage 1's, which must keep `transcript_world` and
+#                `transcript_system` as functions; and `sisu test
+#                NAME.sisu`, which runs its tests and its transcripts from
+#                stage 1's SIR (decision 722), its standard output against
+#                the case's `NAME.test`
+#
+# each of which must match or differ as listed. Then what the programs do:
 #
 #   behaviour    every runnable program of the corpus and of stage 1's own
 #                cases (one with an `.out`, `.err` or `.status`), lowered
@@ -833,6 +844,71 @@ done < "$list"
 total=$((total + n)); identical=$((identical + same))
 listed=$((listed + class_listed)); unlisted=$((unlisted + class_unlisted))
 tests_summary="$(printf '  %-24s %4d files, %4d identical, %3d differing as listed, %3d otherwise; stage 1 %6ss' \
+    "$class" "$n" "$same" "$class_listed" "$class_unlisted" "$seconds")"
+
+# The transcripts' roots (RULES.md, R120 and R132): each program of the
+# conformance suite with transcripts, `NAME.files/tests/*.transcript`, in a
+# sandbox as the runner makes one (the file and what its `.files/` holds).
+# Its SIR built with its tests, stage 0's `sisu sir --tests` against stage
+# 1's, which must hold `transcript_world` and `transcript_system`, so that
+# the driver runs the transcripts from it (decision 722); and the driver's
+# `sisu test` there, on stage 1 (`SISU_STAGE1_TRANSCRIPTS=1`, and with
+# `--native` the executable this run built), whose standard output must be
+# the case's `NAME.test`: the transcripts run from stage 1's SIR on every
+# run, where R120 checked them by hand.
+class=transcripts
+find "$compiler/conformance/cases" -path '*.files/tests/*.transcript' | sed 's|\.files/tests/.*||' | sort -u |
+    while read -r b; do [ -f "$b.sisu" ] && [ -f "$b.test" ] && echo "$b.sisu"; done > "$work/$class.list"
+list="$work/$class.list"
+n=$(wc -l < "$list" | tr -d ' ')
+same=0; class_listed=0; class_unlisted=0
+start=$(date +%s.%N)
+i=0
+while read -r f; do
+    i=$((i + 1))
+    rel="${f#"$repo"/}"
+    name=$(basename "$f")
+    box="$work/$class/$i"
+    mkdir -p "$box"
+    cp "$f" "$box/"
+    cp -r "${f%.sisu}.files/." "$box/"
+    (cd "$box" && "$sisu" sir --tests "$name" > stage0.sir 2> /dev/null)
+    boxed=$(printf '%s' "$box" | sed 's/[.[\*^$|]/\\&/g')
+    stage1 sir --tests "$box/$name" 2> "$box/stage1.err" | sed "s|$boxed/||g" > "$box/stage1.sir"
+    roots=0
+    grep -qE '^fn transcript_world\(' "$box/stage1.sir" && grep -qE '^fn transcript_system\(' "$box/stage1.sir" && roots=1
+    if [ "$roots" = 0 ]; then
+        class_unlisted=$((class_unlisted + 1))
+        report="$report\n  UNLISTED: $rel: $class (stage 1's SIR in $box/stage1.sir keeps no transcript_world and transcript_system)"
+    elif cmp -s "$box/stage0.sir" "$box/stage1.sir"; then
+        same=$((same + 1))
+    elif grep -qxF -e "$rel $class" "$allowed"; then
+        class_listed=$((class_listed + 1))
+        report="$report\n  listed:   $rel: $class"
+    else
+        class_unlisted=$((class_unlisted + 1))
+        report="$report\n  UNLISTED: $rel: $class (stage 0 in $box/stage0.sir, stage 1 in $box/stage1.sir)"
+    fi
+    if [ -n "$stage1_exe" ]; then
+        (cd "$box" && env -u SISU_FRONT_END SISU_STAGE1="$stage1_exe" SISU_STAGE1_TRANSCRIPTS=1 \
+            "$sisu" test --no-cache "$name" > test.out 2> test.err)
+    else
+        (cd "$box" && env -u SISU_FRONT_END SISU_STAGE1_TRANSCRIPTS=1 \
+            "$sisu" test --no-cache "$name" > test.out 2> test.err)
+    fi
+    if cmp -s "${f%.sisu}.test" "$box/test.out"; then
+        same=$((same + 1))
+    else
+        class_unlisted=$((class_unlisted + 1))
+        report="$report\n  UNLISTED: $rel: $class (sisu test on stage 1 in $box/test.out against ${name%.sisu}.test)"
+    fi
+done < "$list"
+end=$(date +%s.%N)
+seconds=$(awk "BEGIN { printf \"%.1f\", $end - $start }")
+n=$((2 * $(wc -l < "$list" | tr -d ' ')))
+total=$((total + n)); identical=$((identical + same))
+listed=$((listed + class_listed)); unlisted=$((unlisted + class_unlisted))
+transcripts_summary="$(printf '  %-24s %4d runs,  %4d identical, %3d differing as listed, %3d otherwise; %6ss' \
     "$class" "$n" "$same" "$class_listed" "$class_unlisted" "$seconds")"
 
 # The behaviour of stage 1's SIR, the primary oracle since the Rust front
@@ -1880,6 +1956,8 @@ echo "stage 1's lowering at the contract levels of a build against stage 0's (co
 printf "%b\n" "${contracts_summary#\\n}"
 echo "stage 1's lowering of the programs built with their tests against stage 0's (sir-tests):"
 printf "%b\n" "$tests_summary"
+echo "stage 1's SIR of the programs with transcripts against stage 0's, and their transcripts run from it (transcripts):"
+printf "%b\n" "$transcripts_summary"
 echo "stage 1's SIR run against the cases' expectations (behaviour: interpreted and native, from \`sisu sir\` as stage 1 prints it):"
 printf "%b\n" "$behaviour_summary"
 echo "stage 1's check against stage 0's (every diagnostic, in the human and the conformance form):"

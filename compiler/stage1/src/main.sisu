@@ -313,7 +313,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         var env = base.environment()
         var out = String.new()
         var why = String.new()
-        let request = FeatureRequest.none()
+        let request = build_request(sys)
         for input in inputs_of(sys, home, rest[1], False, True, request, mut env, catalog)?:
             let checked = types_of(base, input, catalog, mut kept)
             out.push(typeck.render(input.modules[0].text, checked, catalog))
@@ -334,7 +334,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             n += 1
             var out = String.new()
             var why = String.new()
-            let request = FeatureRequest.none()
+            let request = build_request(sys)
             for input in inputs_of(sys, home, path, False, True, request, mut env, catalog)?:
                 let checked = types_of(base, input, catalog, mut kept)
                 out.push(typeck.render(input.modules[0].text, checked, catalog))
@@ -360,7 +360,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         # `--features NAMES`, `--no-default-features` and `--locked` choose
         # the root package's features and keep the lockfile, as `check`
         # takes them (decision 250; RULES.md, R47).
-        let (request, given) = feature_request(rest)
+        let (request, given) = feature_request(rest, target_runtime(sys))
         var level = CONTRACTS_ALL
         var words: list[String] = []
         for w in given:
@@ -471,7 +471,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             None,
             True,
             False,
-            FeatureRequest.none(),
+            build_request(sys),
             mut kept,
         )?
         var errs = String.new()
@@ -513,7 +513,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
                 Some(level ?? CONTRACTS_ALL),
                 level.is_none() and not tests,
                 tests,
-                FeatureRequest.none(),
+                build_request(sys),
                 mut kept,
             )?
             var reasons = String.new()
@@ -533,7 +533,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         # `--features NAMES` and `--no-default-features` choose the root
         # package's features (decision 250).
         let ids = rest.contains("--format=ids")
-        let (request, words) = feature_request(rest)
+        let (request, words) = feature_request(rest, target_runtime(sys))
         let flags = [
             "--format=ids", "--format=human", "--locked", "--no-default-features", "--accept-unsafe"
         ]
@@ -583,7 +583,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         # checks, in either form; a program with errors has them reported
         # as `check` reports them, and fails.
         let ids = rest.contains("--format=ids")
-        let (request, words) = feature_request(rest)
+        let (request, words) = feature_request(rest, target_runtime(sys))
         let flags = [
             "--format=ids", "--format=human", "--locked", "--no-default-features", "--accept-unsafe"
         ]
@@ -661,7 +661,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
             # 0 names it when run in the file's directory.
             let name = package.file_name(path)
             let reports = reports_of(
-                sys, home, path, name, True, FeatureRequest.none(), base, mut env, catalog, mut kept
+                sys, home, path, name, True, build_request(sys), base, mut env, catalog, mut kept
             )?
             var ids = String.new()
             var human = String.new()
@@ -683,7 +683,7 @@ def main(sys: System) -> ! {IoError, UsageError, CommandError}:
         # `--release`, decision 232).
         var output: String? = None
         var contracts: String? = None
-        let (request, given) = feature_request(rest)
+        let (request, given) = feature_request(rest, target_runtime(sys))
         var words: list[String] = []
         var k = 0
         while k < len(given):
@@ -1033,7 +1033,8 @@ def inputs_of(
 def file_input(
     sys: System, home: str, arg: str, text: str, tests: bool, mut env: Environment, catalog: Catalog
 ) -> Input ! IoError:
-    let built = name_diagnostics(sys, home, text, tests, Features.none(), mut env, catalog)?
+    let features = Features.for_runtime(target_runtime(sys))
+    let built = name_diagnostics(sys, home, text, tests, features.copy(), mut env, catalog)?
     let (syntax, found_names, cfg_diags) = built
     let names = beside_notes(sys, arg, found_names)
     var named = False
@@ -1055,7 +1056,7 @@ def file_input(
             embedded=embedded_files(sys, arg, None, text, catalog),
             multi=False,
             tests=tests,
-            features=[Features.none()],
+            features=[features],
             cfg=[cfg_diags],
             syntax=[syntax],
             names=[names],
@@ -1153,7 +1154,7 @@ def held_layout_input(
         var declared: list[String] = []
         for f in p.features:
             declared.push(f.name.copy())
-        features.push(Features(declared=declared, on=p.on.copy()))
+        features.push(Features(declared=declared, on=p.on.copy(), runtime=layout.runtime.copy()))
     # A dependency that declares its level and that `[trust]` does not
     # list is `E1021`, which names the fix: its `unsafe` and `extern` are
     # not reported again (RULES.md, R104).
@@ -1298,16 +1299,18 @@ def beside_notes(sys: System, path: str, own found: list[Diagnostic]) -> list[Di
 ## The names an import that tests the target would bind, which this build
 ## leaves out, each with its condition, and the `if comptime` branches on
 ## the target that the build leaves out (RULES.md, R106).
-pure def target_absences(text: str, tree: Tree) -> (list[(String, String)], list[TextRange]):
+pure def target_absences(
+    text: str, tree: Tree, features: Features
+) -> (list[(String, String)], list[TextRange]):
     if not text.contains("target."):
         return ([], [])
     let m = build.module(tree)
     var names: list[(String, String)] = []
-    if let Some(f) = cfg.filter(m, True, None).module:
+    if let Some(f) = cfg.filter(m, True, Some(features.copy())).module:
         for (n, c) in f.left_out:
             if c.starts_with("target."):
                 names.push((n.copy(), c.copy()))
-    return (names, cfg.discarded_branches(m.ast))
+    return (names, cfg.discarded_branches(m.ast, features.facts()))
 
 ## The name diagnostics of a module without `E0200` for a name an import on
 ## the target left out, where an `if comptime` branch on the target that
@@ -1492,7 +1495,7 @@ def audit_command(
         let found = nearest_package(sys, "audit", catalog) else:
             return Err(Failed)
         path = found
-    match layouts_of(sys, path, False, FeatureRequest.none()):
+    match layouts_of(sys, path, False, build_request(sys)):
         case Some(layouts):
             for layout in layouts:
                 let first = len(packages)
@@ -1541,7 +1544,7 @@ def audit_command(
     var kept = Kept.new()
     var env = base.environment()
     let reports = reports_of(
-        sys, home, path, path, True, FeatureRequest.none(), base, mut env, catalog, mut kept
+        sys, home, path, path, True, build_request(sys), base, mut env, catalog, mut kept
     )?
     var lints: list[String] = []
     for r in reports:
@@ -1722,7 +1725,7 @@ def lowering_of(
     )
     var checks: list[Input] = []
     if ownership:
-        checks = inputs_of(sys, home, arg, False, True, FeatureRequest.none(), mut env, catalog)?
+        checks = inputs_of(sys, home, arg, False, True, build_request(sys), mut env, catalog)?
     let level = sir ?? CONTRACTS_ALL
     var sir_done = sir.is_none()
     for input in checks:
@@ -2689,7 +2692,7 @@ def held_build(
 ) -> Built ! IoError:
     var kept = Kept.new()
     var env = base.environment()
-    let layout = package.load_file_with(sys.fs, name, disk, text, FeatureRequest.none())
+    let layout = package.load_file_with(sys.fs, name, disk, text, build_request(sys))
     var inputs: list[Input] = []
     if len(layout.packages) == 1 and layout.problems.is_empty():
         var input = file_input(sys, home, name, text, False, mut env, catalog)?
@@ -3025,7 +3028,7 @@ pure def runner_flag(w: str) -> bool:
 ## and a test is blocked by a typed hole, 0 when every test passed (or the
 ## runner's own, for its usage errors).
 def test_command(sys: System, home: str, rest: list[String], catalog: Catalog) -> int ! IoError:
-    let (request, given) = feature_request(rest)
+    let (request, given) = feature_request(rest, target_runtime(sys))
     var runner: list[String] = []
     var words: list[String] = []
     var k = 0
@@ -3880,7 +3883,7 @@ def name_diagnostics(
             let source = sys.fs.read_to_string(Path.new(std_file(home, module)))?
             let names = ModuleNames.of(source, parse(source, catalog).tree)
             _ = env.std.insert(module.copy(), names)
-    let (absent, discarded) = target_absences(text, parsed.tree)
+    let (absent, discarded) = target_absences(text, parsed.tree, features)
     let found = with_absences(
         resolve.resolve(text, tree, parsed.diagnostics, env, catalog), absent, discarded
     )
@@ -3946,12 +3949,17 @@ def layouts_of(sys: System, arg: str, sir: bool, request: FeatureRequest) -> lis
         return Some([layout])
     return Some(package.load_target(sys.fs, target, sir, request))
 
+## What a command line that names no feature asks for, in a build for the
+## runtime `--target-runtime` names (RULES.md, R128).
+def build_request(sys: System) -> FeatureRequest:
+    return FeatureRequest.none().for_runtime(target_runtime(sys))
+
 ## The features the words of a command line ask for (`--features NAMES`,
 ## any number of times, the names separated by commas or spaces;
 ## `--no-default-features`; decision 250), and the words without
 ## `--features` and its value.
-pure def feature_request(rest: list[String]) -> (FeatureRequest, list[String]):
-    var request = FeatureRequest.none()
+pure def feature_request(rest: list[String], runtime: str) -> (FeatureRequest, list[String]):
+    var request = FeatureRequest.none().for_runtime(runtime)
     var words: list[String] = []
     var k = 0
     while k < len(rest):
@@ -4037,7 +4045,7 @@ def held_named_modules(
             case None:
                 text = sys.fs.read_to_string(Path.new(m.disk))?
         let parsed = parse(text, catalog)
-        var features = Features.none()
+        var features = Features.for_runtime(layout.runtime)
         if m.package < len(layout.packages):
             let p = ref layout.packages[m.package]
             for f in p.features:
@@ -4050,7 +4058,7 @@ def held_named_modules(
                 let source = sys.fs.read_to_string(Path.new(std_file(home, module)))?
                 let names = ModuleNames.of(source, parse(source, catalog).tree)
                 _ = env.std.insert(module.copy(), names)
-        let (absent, discarded) = target_absences(text, parsed.tree)
+        let (absent, discarded) = target_absences(text, parsed.tree, features)
         out.push(
             NamedModule(
                 text=text.copy(),
@@ -4077,7 +4085,7 @@ pure def packages_of(layout: Layout) -> list[(String, list[(String, int)])]:
 def names_of(
     sys: System, home: str, arg: str, mut env: Environment, catalog: Catalog
 ) -> String ! IoError:
-    let layouts = layouts_of(sys, arg, False, FeatureRequest.none()) else:
+    let layouts = layouts_of(sys, arg, False, build_request(sys)) else:
         let text = sys.fs.read_to_string(Path.new(arg))?
         return names(sys, home, text, mut env, catalog)
     var out = String.new()
@@ -4098,7 +4106,8 @@ def names_of(
 def names(
     sys: System, home: str, text: str, mut env: Environment, catalog: Catalog
 ) -> String ! IoError:
-    let (_, diags, _) = name_diagnostics(sys, home, text, True, Features.none(), mut env, catalog)?
+    let features = Features.for_runtime(target_runtime(sys))
+    let (_, diags, _) = name_diagnostics(sys, home, text, True, features, mut env, catalog)?
     return Ok(render_ids(text, diags, catalog))
 
 ## The one path a command names after its name, but for the options

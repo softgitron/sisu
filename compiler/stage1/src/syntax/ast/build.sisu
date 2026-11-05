@@ -76,7 +76,15 @@ from stage1.text import char_at
 ## Builds the AST of a whole file.
 pub pure def module(tree: Tree) -> Module:
     let text: str = tree.text
-    var b = B(t=tree, source=text, ast=Ast.new())
+    var errors = False
+    for node in tree.nodes:
+        match node.kind:
+            case Error:
+                errors = True
+                break
+            case _:
+                pass
+    var b = B(t=tree, source=text, ast=Ast.new(), errors=errors)
     let root = tree.root
     var items: list[ItemId] = []
     var docs: list[String] = []
@@ -149,6 +157,10 @@ view struct B:
     t: ref Tree
     source: str
     ast: Ast
+    ## Whether the tree has an `ERROR` node at all: most have none, and
+    ## `has_error` and `error_outside_block` then need no walk (RULES.md,
+    ## R127).
+    errors: bool
 
 impl B:
     pure def kind(self, n: int) -> SyntaxKind:
@@ -274,15 +286,39 @@ impl B:
                 )
                 out.push(self.ast.add_item(item))
 
+    ## Where an element of the tree starts.
+    pure def element_start(self, e: Element) -> int:
+        return match e:
+            case Leaf(t): self.t.tokens[t].start
+            case Node(c): self.t.nodes[c].start
+
+    ## The index of the child node `n` among `kids`, from `first` on, or -1.
+    pure def child_index(self, kids: ref list[Element], n: int, first: int) -> int:
+        for i in range(first, len(kids)):
+            if let Node(c) = kids[i], c == n:
+                return i
+        return -1
+
     pure def docs_before(self, n: int) -> list[String]:
         let parent = self.t.nodes[n].parent else:
             return []
         let kids = ref self.t.nodes[parent].children
-        var pos = -1
-        for i in range(len(kids)):
-            if kids[i] == Element.Node(n):
-                pos = i
-                break
+        # The children are in the text's order: the node is among those
+        # from the first that starts where it does, which a binary search
+        # finds, where a walk from the first child made a block of many
+        # items quadratic (RULES.md, R127).
+        let at = self.t.nodes[n].start
+        var lo = 0
+        var hi = len(kids)
+        while lo < hi:
+            let mid = (lo + hi) // 2
+            if self.element_start(kids[mid]) < at:
+                lo = mid + 1
+            else:
+                hi = mid
+        var pos = self.child_index(kids, n, lo)
+        if pos < 0:
+            pos = self.child_index(kids, n, 0)
         if pos < 0:
             return []
         var docs: list[String] = []
@@ -560,6 +596,8 @@ impl B:
 
     ## Whether a node has an `ERROR` node anywhere inside it.
     pure def has_error(self, n: int) -> bool:
+        if not self.errors:
+            return False
         for c in self.nodes(n):
             if self.kind(c) == SyntaxKind.Error or self.has_error(c):
                 return True
@@ -567,6 +605,8 @@ impl B:
 
     ## Whether a node has an `ERROR` node anywhere except inside its block.
     pure def error_outside_block(self, n: int) -> bool:
+        if not self.errors:
+            return False
         for c in self.nodes(n):
             match self.kind(c):
                 case Error:

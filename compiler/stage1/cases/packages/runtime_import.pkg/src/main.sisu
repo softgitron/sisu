@@ -1,0 +1,11 @@
+@cfg(target.runtime == "native")
+import fast
+
+def describe() -> str:
+    if comptime target.runtime == "native":
+        return fast.name()
+    else:
+        return "interpreted"
+
+def main():
+    print(describe())

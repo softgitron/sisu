@@ -1,0 +1,10 @@
+# RULES.md, R128: an import's `@cfg` and a dependency's `when` read the
+# runtime the build is for, which `--target-runtime` names: built for the
+# interpreter, as `check.sh` builds it, `fast` is neither a dependency nor
+# imported; built for the native runtime (`sisu run --native`), it is both.
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies]
+fast = { path = "fast", when = { runtime = "native" } }

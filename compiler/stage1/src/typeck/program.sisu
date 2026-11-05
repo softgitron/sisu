@@ -176,6 +176,9 @@ pub struct VariantInfo:
     pub name: String
     pub fields: list[(String?, Ty)]
     pub span: TextRange
+    ## Each field's `##` comment, which reflection gives as `f.doc`
+    ## (RULES.md, R129).
+    pub docs: list[String]
 
 @derive(Eq, Debug)
 pub enum FnKind:

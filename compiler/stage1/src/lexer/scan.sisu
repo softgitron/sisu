@@ -6,7 +6,7 @@
 ##! FORMAT_SPEC` or `EQ`, `INTERP_END`, and `STRING_END` (PEP 701).
 
 from stage1.diag import Diagnostic, Edit, Msg
-from stage1.syntax.kinds import KEYWORDS, PUNCTUATION, SyntaxKind
+from stage1.syntax.kinds import SyntaxKind
 from stage1.syntax.tree import Token
 from stage1.text import char_at, hex, is_alphanumeric
 
@@ -46,21 +46,21 @@ view struct Scanner:
     modes: list[Mode]
     diags: list[Diagnostic]
     last_significant: SyntaxKind
-    ## `KEYWORDS` and `PUNCTUATION` as lookups, the second by the bytes of
-    ## a spelling and its length (`spelling_key`), which needs no text made.
-    keywords: dict[String, SyntaxKind]
-    punctuation: dict[int, SyntaxKind]
 
 ## Scans `text` into raw tokens, appending its diagnostics to `diags`.
 pub pure def scan(text: str, mut diags: list[Diagnostic]) -> list[Token]:
     var s = Scanner.new(text)
     while s.pos < s.n:
         let before = s.pos
-        match s.mode():
-            case Str(triple, start):
-                s.string_text(triple, start)
-            case _:
-                s.code()
+        # Only the first mode is `Code`: the scanner pushes the others.
+        if len(s.modes) == 1:
+            s.code()
+        else:
+            match s.mode():
+                case Str(triple, start):
+                    s.string_text(triple, start)
+                case _:
+                    s.code()
         if s.pos == before:
             # Never stall: consume one character as an error token.
             s.pos += char_at(s.text, s.pos).len_utf8()
@@ -86,12 +86,6 @@ pub pure def scan(text: str, mut diags: list[Diagnostic]) -> list[Token]:
 
 impl Scanner:
     pure def new(text: str) -> Scanner:
-        var keywords: dict[String, SyntaxKind] = {}
-        for (word, kind) in KEYWORDS:
-            _ = keywords.insert(word.to_string(), kind)
-        var punctuation: dict[int, SyntaxKind] = {}
-        for (spelling, kind) in PUNCTUATION:
-            _ = punctuation.insert(spelling_key(spelling, 0, spelling.byte_len()), kind)
         return Scanner(
             text=text,
             n=text.byte_len(),
@@ -100,8 +94,6 @@ impl Scanner:
             modes=[Mode.Code],
             diags=[],
             last_significant=SyntaxKind.Newline,
-            keywords=keywords,
-            punctuation=punctuation,
         )
 
     pure def mode(self) -> Mode:
@@ -165,9 +157,11 @@ impl Scanner:
                 _ = self.modes.pop()
                 self.push(kind, start)
         if b == 32 or b == 9 or b == 12:
-            while self.byte(self.pos) == 32
-                    or self.byte(self.pos) == 9
-                    or self.byte(self.pos) == 12:
+            self.pos += 1
+            while self.pos < self.n:
+                let c = self.text.byte_at(self.pos).to_int()
+                if c != 32 and c != 9 and c != 12:
+                    break
                 self.pos += 1
             self.push(SyntaxKind.Whitespace, start)
         elif b == 10:
@@ -201,14 +195,17 @@ impl Scanner:
             kind = SyntaxKind.ModuleDocComment
         elif self.at_text("##"):
             kind = SyntaxKind.DocComment
-        while self.pos < self.n and self.byte(self.pos) != 10 and self.byte(self.pos) != 13:
+        while self.pos < self.n:
+            let b = self.text.byte_at(self.pos).to_int()
+            if b == 10 or b == 13:
+                break
             self.pos += 1
         self.push(kind, start)
 
     pure def ident(mut self, start: int):
         while self.pos < self.n:
-            let b = self.byte(self.pos)
-            if is_ascii_letter(b) or is_ascii_digit(b) or b == 95:
+            let b = self.text.byte_at(self.pos).to_int()
+            if (97 <= b <= 122) or (65 <= b <= 90) or (48 <= b <= 57) or b == 95:
                 self.pos += 1
             elif b >= 128 and is_alphanumeric(char_at(self.text, self.pos)):
                 self.pos += char_at(self.text, self.pos).len_utf8()
@@ -228,8 +225,7 @@ impl Scanner:
             case Dot | QuestionDot | DefKw:
                 pass
             case _:
-                let word = self.text.byte_slice(start, self.pos).to_string()
-                if let Some(k) = self.keywords.get(word):
+                if let Some(k) = keyword_at(self.text, start, length):
                     kind = k
         self.push(kind, start)
 
@@ -404,8 +400,8 @@ impl Scanner:
     pure def string_text(mut self, triple: bool, opened: int):
         let start = self.pos
         while self.pos < self.n:
-            let b = self.byte(self.pos)
-            if (triple and self.at_text("\"\"\"")) or (not triple and b == 34):
+            let b = self.text.byte_at(self.pos).to_int()
+            if b == 34 and (not triple or self.at_text("\"\"\"")):
                 break
             if not triple and (b == 10 or b == 13):
                 break
@@ -499,24 +495,22 @@ impl Scanner:
             case _:
                 pass
         # The longest operator or punctuation the text starts with.
-        var length = 3
-        while length > 0:
-            if let Some(kind) = self.punctuation_of(length):
-                self.pos += length
-                match kind:
-                    case Semicolon:
-                        self.error(Msg.LexSemicolon, start, self.pos)
-                    case Backslash:
-                        let b = self.byte(self.pos)
-                        if b == 10 or b == 13:
-                            self.error(Msg.LexBackslashContinuation, start, self.pos)
-                        else:
-                            self.error_with(Msg.LexUnknownCharacter, start, self.pos, "char", "\\")
-                    case _:
-                        pass
-                self.push(kind, start)
-                return
-            length -= 1
+        let next = punctuation_of(self.byte(start), self.byte(start + 1), self.byte(start + 2))
+        if let Some((kind, length)) = next:
+            self.pos += length
+            match kind:
+                case Semicolon:
+                    self.error(Msg.LexSemicolon, start, self.pos)
+                case Backslash:
+                    let b = self.byte(self.pos)
+                    if b == 10 or b == 13:
+                        self.error(Msg.LexBackslashContinuation, start, self.pos)
+                    else:
+                        self.error_with(Msg.LexUnknownCharacter, start, self.pos, "char", "\\")
+                case _:
+                    pass
+            self.push(kind, start)
+            return
         let c = char_at(self.text, start)
         self.pos += c.len_utf8()
         # A character that shows as nothing or as a space is written as its
@@ -536,25 +530,274 @@ impl Scanner:
                 self.error_with(Msg.LexUnknownCharacter, start, self.pos, "char", "{c}")
         self.push(SyntaxKind.ErrorToken, start)
 
-    ## The operator or punctuation spelled by the `length` bytes at the
-    ## current position, if they are ASCII and one of `PUNCTUATION`.
-    pure def punctuation_of(self, length: int) -> SyntaxKind?:
-        if self.pos + length > self.n:
+## The operator or punctuation of `PUNCTUATION` that the bytes `b0`, `b1`
+## and `b2` start with (-1 past the end), the longest, with its length: a
+## dispatch on the bytes themselves, which makes no text and looks nothing
+## up (RULES.md, R127). The test "punctuation by its bytes" holds it to
+## `PUNCTUATION`.
+pure def punctuation_of(b0: int, b1: int, b2: int) -> (SyntaxKind, int)?:
+    match b0:
+        case 40:
+            return Some((SyntaxKind.LParen, 1))
+        case 41:
+            return Some((SyntaxKind.RParen, 1))
+        case 91:
+            return Some((SyntaxKind.LBracket, 1))
+        case 93:
+            return Some((SyntaxKind.RBracket, 1))
+        case 123:
+            return Some((SyntaxKind.LBrace, 1))
+        case 125:
+            return Some((SyntaxKind.RBrace, 1))
+        case 44:
+            return Some((SyntaxKind.Comma, 1))
+        case 58:
+            return with_eq(b1, SyntaxKind.Colon, SyntaxKind.Walrus)
+        case 46:
+            if b1 == 46:
+                return Some((SyntaxKind.DotDot, 2))
+            return Some((SyntaxKind.Dot, 1))
+        case 61:
+            return with_eq(b1, SyntaxKind.Eq, SyntaxKind.EqEq)
+        case 43:
+            if b1 == 61:
+                return Some((SyntaxKind.PlusEq, 2))
+            return wrapping(b1, b2, SyntaxKind.Plus, Wrapping.Plus)
+        case 45:
+            if b1 == 61:
+                return Some((SyntaxKind.MinusEq, 2))
+            if b1 == 62:
+                return Some((SyntaxKind.Arrow, 2))
+            return wrapping(b1, b2, SyntaxKind.Minus, Wrapping.Minus)
+        case 42:
+            if b1 == 42:
+                return doubled(b2, SyntaxKind.StarStar, SyntaxKind.StarStarEq)
+            if b1 == 61:
+                return Some((SyntaxKind.StarEq, 2))
+            return wrapping(b1, b2, SyntaxKind.Star, Wrapping.Star)
+        case 47:
+            if b1 == 47:
+                return doubled(b2, SyntaxKind.SlashSlash, SyntaxKind.SlashSlashEq)
+            return with_eq(b1, SyntaxKind.Slash, SyntaxKind.SlashEq)
+        case 60:
+            if b1 == 60:
+                return doubled(b2, SyntaxKind.Shl, SyntaxKind.ShlEq)
+            return with_eq(b1, SyntaxKind.Lt, SyntaxKind.LtEq)
+        case 62:
+            if b1 == 62:
+                return doubled(b2, SyntaxKind.Shr, SyntaxKind.ShrEq)
+            return with_eq(b1, SyntaxKind.Gt, SyntaxKind.GtEq)
+        case 33:
+            return with_eq(b1, SyntaxKind.Bang, SyntaxKind.BangEq)
+        case 37:
+            return with_eq(b1, SyntaxKind.Percent, SyntaxKind.PercentEq)
+        case 38:
+            return with_eq(b1, SyntaxKind.Amp, SyntaxKind.AmpEq)
+        case 124:
+            return with_eq(b1, SyntaxKind.Pipe, SyntaxKind.PipeEq)
+        case 94:
+            return with_eq(b1, SyntaxKind.Caret, SyntaxKind.CaretEq)
+        case 63:
+            if b1 == 46:
+                return Some((SyntaxKind.QuestionDot, 2))
+            if b1 == 63:
+                return Some((SyntaxKind.QuestionQuestion, 2))
+            return Some((SyntaxKind.Question, 1))
+        case 64:
+            return Some((SyntaxKind.At, 1))
+        case 59:
+            return Some((SyntaxKind.Semicolon, 1))
+        case 92:
+            return Some((SyntaxKind.Backslash, 1))
+        case 126:
+            return Some((SyntaxKind.Tilde, 1))
+        case _:
             return None
-        for j in range(length):
-            if self.byte(self.pos + j) >= 128:
-                return None
-        return match self.punctuation.get(spelling_key(self.text, self.pos, length)):
-            case Some(kind): Some(kind)
-            case None: None
 
-## The `length` bytes of `text` at `at` as one number with their length,
-## the key of a spelling in the scanner's lookup of punctuation.
-pure def spelling_key(text: str, at: int, length: int) -> int:
-    var key = 0
-    for j in range(length):
-        key = key * 256 + text.byte_at(at + j).to_int()
-    return key * 4 + length
+## `plain`, or `eq_kind` when an `=` (`b1`) follows it.
+pure def with_eq(b1: int, plain: SyntaxKind, eq_kind: SyntaxKind) -> (SyntaxKind, int)?:
+    if b1 == 61:
+        return Some((eq_kind, 2))
+    return Some((plain, 1))
+
+## A doubled operator (`**`, `//`, `<<`, `>>`), or `eq_kind` when an `=`
+## (`b2`) follows it.
+pure def doubled(b2: int, plain: SyntaxKind, eq_kind: SyntaxKind) -> (SyntaxKind, int)?:
+    if b2 == 61:
+        return Some((eq_kind, 3))
+    return Some((plain, 2))
+
+## The arithmetic operators that wrap (`+%`) or saturate (`+|`).
+@derive(Copy)
+enum Wrapping:
+    Plus
+    Minus
+    Star
+
+## `+`, `-` or `*` (`plain`), or with `%` or `|` (`b1`) after it the
+## operator that wraps or saturates, with `=` (`b2`) its assignment.
+pure def wrapping(b1: int, b2: int, plain: SyntaxKind, op: Wrapping) -> (SyntaxKind, int)?:
+    if b1 != 37 and b1 != 124:
+        return Some((plain, 1))
+    let assign = b2 == 61
+    let kind = match (op, b1 == 37, assign):
+        case (Plus, True, False): SyntaxKind.PlusPercent
+        case (Plus, True, True): SyntaxKind.PlusPercentEq
+        case (Plus, False, False): SyntaxKind.PlusPipe
+        case (Plus, False, True): SyntaxKind.PlusPipeEq
+        case (Minus, True, False): SyntaxKind.MinusPercent
+        case (Minus, True, True): SyntaxKind.MinusPercentEq
+        case (Minus, False, False): SyntaxKind.MinusPipe
+        case (Minus, False, True): SyntaxKind.MinusPipeEq
+        case (Star, True, False): SyntaxKind.StarPercent
+        case (Star, True, True): SyntaxKind.StarPercentEq
+        case (Star, False, False): SyntaxKind.StarPipe
+        case (Star, False, True): SyntaxKind.StarPipeEq
+    return Some((kind, if assign: 3 else: 2))
+
+## The reserved keyword that the `length` bytes of `text` at `start` spell,
+## if they spell one of `KEYWORDS`: a dispatch on the first byte and the
+## length, then the bytes compared, with no text made (RULES.md, R127). The
+## test "keywords by their bytes" holds it to `KEYWORDS`.
+pure def keyword_at(text: str, start: int, length: int) -> SyntaxKind?:
+    if length < 2 or length > 8:
+        return None
+    let k = Word(text=text, start=start, length=length)
+    match text.byte_at(start).to_int():
+        case 97:
+            if k.spells("and"):
+                return Some(SyntaxKind.AndKw)
+            if k.spells("as"):
+                return Some(SyntaxKind.AsKw)
+            if k.spells("assert"):
+                return Some(SyntaxKind.AssertKw)
+        case 98:
+            if k.spells("break"):
+                return Some(SyntaxKind.BreakKw)
+        case 99:
+            if k.spells("case"):
+                return Some(SyntaxKind.CaseKw)
+            if k.spells("comptime"):
+                return Some(SyntaxKind.ComptimeKw)
+            if k.spells("const"):
+                return Some(SyntaxKind.ConstKw)
+            if k.spells("continue"):
+                return Some(SyntaxKind.ContinueKw)
+        case 100:
+            if k.spells("def"):
+                return Some(SyntaxKind.DefKw)
+            if k.spells("defer"):
+                return Some(SyntaxKind.DeferKw)
+            if k.spells("do"):
+                return Some(SyntaxKind.DoKw)
+            if k.spells("dyn"):
+                return Some(SyntaxKind.DynKw)
+        case 101:
+            if k.spells("elif"):
+                return Some(SyntaxKind.ElifKw)
+            if k.spells("else"):
+                return Some(SyntaxKind.ElseKw)
+            if k.spells("enum"):
+                return Some(SyntaxKind.EnumKw)
+            if k.spells("error"):
+                return Some(SyntaxKind.ErrorKw)
+            if k.spells("extern"):
+                return Some(SyntaxKind.ExternKw)
+        case 102:
+            if k.spells("for"):
+                return Some(SyntaxKind.ForKw)
+            if k.spells("from"):
+                return Some(SyntaxKind.FromKw)
+        case 105:
+            if k.spells("if"):
+                return Some(SyntaxKind.IfKw)
+            if k.spells("impl"):
+                return Some(SyntaxKind.ImplKw)
+            if k.spells("import"):
+                return Some(SyntaxKind.ImportKw)
+            if k.spells("in"):
+                return Some(SyntaxKind.InKw)
+        case 108:
+            if k.spells("let"):
+                return Some(SyntaxKind.LetKw)
+        case 109:
+            if k.spells("match"):
+                return Some(SyntaxKind.MatchKw)
+            if k.spells("mut"):
+                return Some(SyntaxKind.MutKw)
+        case 110:
+            if k.spells("not"):
+                return Some(SyntaxKind.NotKw)
+        case 111:
+            if k.spells("or"):
+                return Some(SyntaxKind.OrKw)
+            if k.spells("own"):
+                return Some(SyntaxKind.OwnKw)
+        case 112:
+            if k.spells("pass"):
+                return Some(SyntaxKind.PassKw)
+            if k.spells("pub"):
+                return Some(SyntaxKind.PubKw)
+        case 114:
+            if k.spells("ref"):
+                return Some(SyntaxKind.RefKw)
+            if k.spells("return"):
+                return Some(SyntaxKind.ReturnKw)
+        case 115:
+            if k.spells("select"):
+                return Some(SyntaxKind.SelectKw)
+            if k.spells("self"):
+                return Some(SyntaxKind.SelfKw)
+            if k.spells("struct"):
+                return Some(SyntaxKind.StructKw)
+        case 83:
+            if k.spells("Self"):
+                return Some(SyntaxKind.SelfTypeKw)
+        case 116:
+            if k.spells("test"):
+                return Some(SyntaxKind.TestKw)
+            if k.spells("trait"):
+                return Some(SyntaxKind.TraitKw)
+            if k.spells("type"):
+                return Some(SyntaxKind.TypeKw)
+        case 117:
+            if k.spells("unsafe"):
+                return Some(SyntaxKind.UnsafeKw)
+        case 118:
+            if k.spells("var"):
+                return Some(SyntaxKind.VarKw)
+            if k.spells("view"):
+                return Some(SyntaxKind.ViewKw)
+        case 119:
+            if k.spells("where"):
+                return Some(SyntaxKind.WhereKw)
+            if k.spells("while"):
+                return Some(SyntaxKind.WhileKw)
+            if k.spells("with"):
+                return Some(SyntaxKind.WithKw)
+        case 121:
+            if k.spells("yield"):
+                return Some(SyntaxKind.YieldKw)
+        case _:
+            pass
+    return None
+
+## A word of the text, by where it is, for `keyword_at`.
+view struct Word:
+    text: str
+    start: int
+    length: int
+
+impl Word:
+    ## Whether the word is `word`: the same length, and the same bytes after
+    ## the first, which `keyword_at` has matched.
+    pure def spells(self, word: str) -> bool:
+        if word.byte_len() != self.length:
+            return False
+        for j in range(1, self.length):
+            if self.text.byte_at(self.start + j) != word.byte_at(j):
+                return False
+        return True
 
 pure def is_ascii_digit(b: int) -> bool:
     return 48 <= b <= 57

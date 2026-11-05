@@ -39,10 +39,16 @@ impl When:
 ## the interpreter. Stage 1 knows the host by what stage 0's build of it
 ## reports, Linux on x86-64 here.
 pub pure def target_facts() -> list[(String, String)]:
+    return target_facts_for("interpreter")
+
+## The facts of the target of a build for `runtime`, `interpreter` or
+## `native` (`--target-runtime`, RULES.md, R116), which an import's `@cfg`
+## and a dependency's `when` read (R128).
+pub pure def target_facts_for(runtime: str) -> list[(String, String)]:
     return [
         ("os".to_string(), "linux".to_string()),
         ("arch".to_string(), "x86_64".to_string()),
-        ("runtime".to_string(), "interpreter".to_string()),
+        ("runtime".to_string(), runtime.to_string()),
     ]
 
 pub struct Dependency:

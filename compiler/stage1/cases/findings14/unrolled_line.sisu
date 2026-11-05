@@ -1,0 +1,16 @@
+# An error in code that `comptime for` unrolls stands at the call that made
+# the instance, with the instance's line in a note and a label at the
+# template's line that wrote it, the loop's body (X7; RULES.md, R131).
+
+struct Sauna:
+    heat: int
+    name: String
+
+def total[T](v: T) -> int:
+    var n = 0
+    comptime for f in reflect.fields_of(T):
+        n += v.[f]
+    return n
+
+def main():
+    print(total(Sauna(heat=80, name="Aino")))

@@ -20,7 +20,7 @@
 import stage1.manifest
 import stage1.toml
 from stage1.diag import Catalog, Diagnostic, Label, Msg, Param, TextRange
-from stage1.manifest import Dependency, Feature, is_module_name, target_facts
+from stage1.manifest import Dependency, Feature, is_module_name, target_facts_for
 
 ## A package of the program.
 pub struct Package:
@@ -130,6 +130,9 @@ pub struct Layout:
     ## features: each name as given, and the package it names (decision
     ## 250).
     pub unknown_requested: list[(String, String)]
+    ## The runtime the build is for (`--target-runtime`, RULES.md, R116),
+    ## whose facts the dependencies' `when` read (R128).
+    pub runtime: String
 
 ## The features a command line asks for (`--features`,
 ## `--no-default-features`; 09, decision 250): names of the root package's
@@ -138,11 +141,20 @@ pub struct Layout:
 pub struct FeatureRequest:
     pub names: list[String]
     pub no_default: bool
+    ## The runtime the build is for, `interpreter` or `native`
+    ## (`--target-runtime`, RULES.md, R116 and R128).
+    pub runtime: String
 
 impl FeatureRequest:
     ## What a command line that names no feature asks for.
     pub pure def none() -> FeatureRequest:
-        return FeatureRequest(names=[], no_default=False)
+        return FeatureRequest(names=[], no_default=False, runtime="interpreter".to_string())
+
+    ## The same request, for a build for `runtime`.
+    pub pure def for_runtime(own self, runtime: str) -> FeatureRequest:
+        var out = self
+        out.runtime = runtime.to_string()
+        return out
 
 impl Layout:
     pub pure def new(base: str) -> Layout:
@@ -155,6 +167,7 @@ impl Layout:
             script=False,
             lock=None,
             unknown_requested=[],
+            runtime="interpreter".to_string(),
         )
 
     pub pure def has_errors(self, catalog: Catalog) -> bool:
@@ -528,8 +541,10 @@ pub def load_package(fs: Fs, dir: str, base: str) -> Layout:
 
 ## `load_package`, with the features the command line asks for.
 pub def load_package_with(fs: Fs, dir: str, base: str, request: FeatureRequest) -> Layout:
+    var layout = Layout.new(canonical(base))
+    layout.runtime = request.runtime.copy()
     var l = Loader(
-        layout=Layout.new(canonical(base)), target=target_facts(), dirs=[], edges=[], root=0
+        layout=layout, target=target_facts_for(request.runtime), dirs=[], edges=[], root=0
     )
     var stack: list[int] = []
     _ = l.package(fs, dir, mut stack, None)
@@ -576,6 +591,7 @@ pub def load_file_with(fs: Fs, name: str, disk: str, text: str, request: Feature
         if let Some(dir) = tested_package(fs, disk):
             return load_black_box(fs, disk, dir, request)
     var layout = Layout.new(parent(disk))
+    layout.runtime = request.runtime.copy()
     layout.script = text.starts_with("#!")
     layout.packages.push(
         Package(
@@ -616,7 +632,8 @@ pub def load_file_with(fs: Fs, name: str, disk: str, text: str, request: Feature
         turn_on_features(mut layout, request)
         return layout
     # The script is the first package on the stack, reached by no edge.
-    var l = Loader(layout=layout, target=target_facts(), dirs=[String.new()], edges=[None], root=0)
+    let target = target_facts_for(request.runtime)
+    var l = Loader(layout=layout, target=target, dirs=[String.new()], edges=[None], root=0)
     l.layout.files.push((name.to_string(), found.copy()))
     let (read, diags) = manifest.read(found)
     for d in diags:
@@ -670,6 +687,7 @@ pub def tested_package(fs: Fs, disk: str) -> String?:
 pub def load_black_box(fs: Fs, disk: str, dir: str, request: FeatureRequest) -> Layout:
     let canon = canonical(dir)
     var layout = Layout.new(canon)
+    layout.runtime = request.runtime.copy()
     let shown = relative(canon, canonical(disk))
     layout.packages.push(
         Package(
@@ -690,7 +708,8 @@ pub def load_black_box(fs: Fs, disk: str, dir: str, request: FeatureRequest) -> 
         )
     )
     layout.modules.push(ModuleFile(path=[], name=shown, disk=disk.to_string(), package=0))
-    var l = Loader(layout=layout, target=target_facts(), dirs=[String.new()], edges=[None], root=1)
+    let target = target_facts_for(request.runtime)
+    var l = Loader(layout=layout, target=target, dirs=[String.new()], edges=[None], root=1)
     var stack = [0]
     let found = l.package(fs, canon, mut stack, None)
     if let Some(p) = found:
@@ -1042,12 +1061,31 @@ test "the command line's features are turned on, and a name that is none is kept
         }
     )
     assert load_package(fs, "/p", "/p").packages[0].on == ["a".to_string(), "default".to_string()]
-    let none = FeatureRequest(names=[], no_default=True)
+    let none = FeatureRequest(names=[], no_default=True, runtime="interpreter".to_string())
     assert load_package_with(fs, "/p", "/p", none).packages[0].on.is_empty()
-    let named = FeatureRequest(names=["b".to_string(), "c".to_string()], no_default=True)
+    let named = FeatureRequest(
+        names=["b".to_string(), "c".to_string()], no_default=True, runtime="interpreter".to_string()
+    )
     let l = load_package_with(fs, "/p", "/p", named)
     assert l.packages[0].on == ["a".to_string(), "b".to_string()]
     assert l.unknown_requested == [("c".to_string(), "p".to_string())]
+
+test "a dependency's `when` reads the runtime the build is for":
+    let fs = Fs.in_memory(
+        {
+            "/p/sisu.toml": "[package]\nname = \"p\"\nversion = \"0.1.0\"\n\n[dependencies]\nfast = {{ path = \"fast\", when = {{ runtime = \"native\" }} }}\n",
+            "/p/src/main.sisu": "def main():\n    pass\n",
+            "/p/fast/sisu.toml": "[package]\nname = \"fast\"\nversion = \"0.1.0\"\n",
+            "/p/fast/src/lib.sisu": "pub def name() -> str:\n    return \"fast\"\n",
+        }
+    )
+    let interpreted = load_package_with(fs, "/p", "/p", FeatureRequest.none())
+    assert interpreted.packages[0].deps.is_empty()
+    assert interpreted.runtime == "interpreter"
+    let native = load_package_with(fs, "/p", "/p", FeatureRequest.none().for_runtime("native"))
+    assert len(native.packages[0].deps) == 1
+    assert native.packages[0].deps[0].0 == "fast"
+    assert native.runtime == "native"
 
 test "the lockfile records each package's `unsafe` level, and a level can be read back":
     let fs = Fs.in_memory(
