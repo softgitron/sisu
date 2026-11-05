@@ -134,24 +134,26 @@ weekdays, `week[5:]` runs from index 5 to the end, and `week[:2]` from
 the start up to index 2.
 
 A bound can count from the end with `^`, as an index does: `week[:^2]`
-leaves out the last two days, and `week[1:^1]` the first and the last.
-A worksheet does not take `^` in a slice yet, so this one is a program:
+leaves out the last two days, and `week[1:^1]` the first and the last:
 
 <!-- file: examples/05-collections/slice_ends.sisu -->
 ```sisu
+#!/usr/bin/env sisu
 # A slice's bounds can count from the end with `^`.
-def main():
-    let week = [-3, -1, 2, 5, 4, 1, -2]
-    print(week[:^2])
-    print(week[^2:])
-    print(week[1:^1])
+let week = [-3, -1, 2, 5, 4, 1, -2]
+week[:^2]
+week[^2:]
+week[1:^1]
 ```
 
-<!-- output: examples/05-collections/slice_ends.out -->
+<!-- output: examples/05-collections/slice_ends.ws -->
 ```text
-[-3, -1, 2, 5, 4]
-[1, -2]
-[-1, 2, 5, 4, 1]
+#!/usr/bin/env sisu
+# A slice's bounds can count from the end with `^`.
+let week = [-3, -1, 2, 5, 4, 1, -2]  # => [-3, -1, 2, 5, 4, 1, -2]
+week[:^2]  # => [-3, -1, 2, 5, 4]
+week[^2:]  # => [1, -2]
+week[1:^1]  # => [-1, 2, 5, 4, 1]
 ```
 
 `^` counts from the end of every sequence that takes an index: the
@@ -399,7 +401,8 @@ len(scores)
 sorted(scores)
 sum(scores)
 max(4, 9)
-min(4, 9)
+max(scores)
+min(scores)
 any([s > 8 for s in scores])
 all([s > 5 for s in scores])
 ```
@@ -413,7 +416,8 @@ len(scores)  # => 4
 sorted(scores)  # => [4, 7, 9, 9]
 sum(scores)  # => 29
 max(4, 9)  # => 9
-min(4, 9)  # => 4
+max(scores)  # => 9
+min(scores)  # => 4
 any([s > 8 for s in scores])  # => True
 all([s > 5 for s in scores])  # => False
 ```

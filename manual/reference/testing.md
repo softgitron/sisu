@@ -370,9 +370,10 @@ replay: sisu test --replay 1-c12c6afda705cec9-0.0.1-t0-s0-r0 failing.sisu
 0 passed, 1 failed, 0 blocked
 ```
 
-`expect CONDITION` is the form that lets a test go on: a failed one is
-recorded, with the same sides and place under the line `expectation
-failed:` (R0154), and the test goes on. When the test
+`expect CONDITION` and `expect CONDITION, MESSAGE` are the forms that
+let a test go on: a failed one is recorded, with the same sides, message
+and place under the line `expectation failed:` (R0154, and R0155 with a
+message), and the test goes on. When the test
 ends, or an `assert` or a panic stops it, it fails with every failure
 it recorded, in order, and then the one that stopped it:
 
@@ -384,7 +385,7 @@ def double(n: int) -> int:
 
 test "doubles":
     expect double(2) == 4
-    expect double(3) == 6
+    expect double(3) == 6, "three doubled"
     print("after the expects")
     assert double(5) == 10
     print("after the assert")
@@ -399,6 +400,7 @@ test "doubles" ... FAILED
 what the test printed:
   after the expects
 expectation failed: double(3) == 6
+  message: three doubled
   left:  5
   right: 6
   at test "doubles" (expect.sisu:7:5)
@@ -406,7 +408,7 @@ panic: assertion failed: double(5) == 10
   left:  7
   right: 10
   at test "doubles" (expect.sisu:9:5)
-replay: sisu test --replay 1-f194bbb30a1dcbdc-0.0.1-t0-s0-r0 expect.sisu
+replay: sisu test --replay 1-96a0f787c998578f-0.0.1-t0-s0-r0 expect.sisu
 
 0 passed, 1 failed, 0 blocked
 $ sisu test --native expect.sisu
@@ -416,6 +418,7 @@ test "doubles" ... FAILED
 what the test printed:
   after the expects
 expectation failed: double(3) == 6
+  message: three doubled
   left:  5
   right: 6
   at test "doubles" (expect.sisu:7:5)
@@ -423,7 +426,7 @@ panic: assertion failed: double(5) == 10
   left:  7
   right: 10
   at test "doubles" (expect.sisu:9:5)
-replay: sisu test --replay 1-f194bbb30a1dcbdc-0.0.1-t0-s0-r0 expect.sisu
+replay: sisu test --replay 1-96a0f787c998578f-0.0.1-t0-s0-r0 expect.sisu
 
 0 passed, 1 failed, 0 blocked
 ```
@@ -440,11 +443,16 @@ and `sisu run` by default, and left out, its condition not evaluated, at
 `debug_assert` is a statement only before an expression and a name
 elsewhere. The message of `assert` is a string (E0379).
 
+A condition that is a call taking a call, such as
+`temps.contains(average(temps))`, evaluates that argument once, before
+the call, and a failure shows its value with the parts that only read,
+in the tree that a condition of names and `len` gets.
+
 **Stage 0 differs.** [17](../../proposal/17-testing.md#assertions) shows
 the value of every sub-expression, where stage 0 shows the two sides of
-a comparison (`left`, `right`) and nothing for a condition joined with
-`and`; and `expect` takes no message, `expect CONDITION, MESSAGE` being
-E0117.
+a comparison (`left`, `right`), the tree of the parts that only read or
+that a call's argument evaluated once, and nothing for a condition
+joined with `and`.
 
 **Status.** In stage 0, with the differences noted.
 
@@ -601,9 +609,9 @@ test "word_count refines word_count_ref" ... ok
 2 passed, 0 failed, 0 blocked
 ```
 
-**Stage 0 differs.** A failure of the test that `@refines` adds is
-reported at a place in the module the compiler writes,
-`<arbitrary>/main.sisu`, rather than at the `@refines` line.
+A failure of the test that `@refines` adds is reported at the
+`@refines` line, in the file of the function it checks
+([chapter 19](../tutorial/19-testing.md#a-clear-function-as-the-specification)).
 
 **Status.** In stage 0 (leaning, D-070).
 

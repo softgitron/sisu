@@ -496,7 +496,8 @@ Much of what keeps code working for years is designed and not in the
 compiler. Editions, a new edition every three years with code of every
 edition compiling together, and `sisu fix --edition`, which moves a
 package to the next one, are the compatibility promise of D-036; the
-manifest's `edition` key is read and checked for nothing yet.
+compiler knows one edition so far, and a manifest's `edition` of
+another year is an error.
 `@preview` features, which a program asks for by name and which become
 stable or are removed within four releases, are D-072's. `sisu publish`
 will compare a package's public API with the version before it and

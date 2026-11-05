@@ -5,7 +5,7 @@ error[E0428]: the task borrows `words`, which belongs to the scope's body: the b
 14 |         let with_a = s.spawn(() -> count_with(words, 'a'))
    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    |                              ---------------------------- borrowed here
-  = note: move it into the task instead: write `own () -> ...` (or `do own:`), or copy what the task needs into a local before the `spawn`
+  = note: make `words` before `task.scope`, outside the scope's body, so that it outlives every task; `own () -> ...` (or `do own:`) would move it into the first task and leave none for the next
 
 error[E0428]: the task borrows `words`, which belongs to the scope's body: the body ends before the scope joins its tasks
   --> body_local.sisu:15:22
@@ -13,6 +13,6 @@ error[E0428]: the task borrows `words`, which belongs to the scope's body: the b
 15 |         let with_y = s.spawn(() -> count_with(words, 'y'))
    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    |                              ---------------------------- borrowed here
-  = note: move it into the task instead: write `own () -> ...` (or `do own:`), or copy what the task needs into a local before the `spawn`
+  = note: make `words` before `task.scope`, outside the scope's body, so that it outlives every task; `own () -> ...` (or `do own:`) would move it into the first task and leave none for the next
 
 error[D0021]: the program was not run: the ownership checker found errors (2); `--defer-borrow` runs it under the monitor

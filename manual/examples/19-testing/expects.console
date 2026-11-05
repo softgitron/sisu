@@ -7,9 +7,10 @@ expectation failed: average([70, 75]) == 73
   right: 73
   at test "an average for each evening" (expects.sisu:12:5)
 expectation failed: average([60, 61]) == 61
+  message: two readings a degree apart
   left:  60
   right: 61
   at test "an average for each evening" (expects.sisu:14:5)
-replay: sisu test --replay 1-27b42691e342aea0-0.0.1-t0-s0-r0 expects.sisu
+replay: sisu test --replay 1-8d28ef2a938b01d6-0.0.1-t0-s0-r0 expects.sisu
 
 0 passed, 1 failed, 0 blocked

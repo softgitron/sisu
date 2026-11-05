@@ -1,0 +1,10 @@
+#!/usr/bin/env sisu
+# A `DateTime` gives its parts, in UTC.
+let t = DateTime.parse("2026-11-05T17:30:15Z").expect("a time")
+t.year()
+t.month()
+t.day()
+t.hour()
+t.minute()
+t.weekday()
+t.day_of_year()

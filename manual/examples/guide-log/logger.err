@@ -1,0 +1,4 @@
+info: the stove is on stove=kiuas
+warn: 110 degrees is too hot stove=kiuas
+debug: heating for 20 minutes stove=kiuas room="the sauna"
+error: the stove switched itself off

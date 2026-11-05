@@ -8,4 +8,5 @@ def main():
     print("{mode:03b} {(mode & WRITE) != 0} {(mode & RUN) != 0}")
     print("{mode ^ WRITE:03b} {~mode:08b}")
     let colour: u32 = 0xFF8800
-    print("{colour >> 16} {(colour >> 8) & 0xFF} {colour & 0xFF}")
+    let byte = 8
+    print("{colour >> 16} {(colour >> byte) & 0xFF} {colour & 0xFF}")

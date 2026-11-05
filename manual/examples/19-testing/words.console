@@ -5,7 +5,7 @@ test "word_count refines word_count_ref" ... FAILED
 test "word_count refines word_count_ref" ... FAILED
 panic: the property failed for ("a\na",) (case 48, shrunk 8 times)
   the property returned False
-  at test "word_count refines word_count_ref" (<arbitrary>/main.sisu:7:5)
+  at test "word_count refines word_count_ref" (words.sisu:8:1)
 replay: sisu test --replay 1-87c6db98a4f7b08a-0.0.1-t1-s0-r0-c1.0.1.25.1.0.0 words.sisu
 
 1 passed, 1 failed, 0 blocked

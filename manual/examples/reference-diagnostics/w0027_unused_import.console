@@ -1,0 +1,10 @@
+$ sisu lint w0027_unused_import.sisu
+warning[W0027]: `Deque` is imported and not used in this file
+  --> w0027_unused_import.sisu:2:1
+  |
+2 | from std.collections import Deque
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: remove the import
+
+$ sisu run w0027_unused_import.sisu
+1.0

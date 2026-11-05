@@ -1,9 +1,6 @@
 # Code that takes no capability can only compute.
 pure def word_count(text: str) -> int:
-    var n = 0
-    for _ in text.split_whitespace():
-        n += 1
-    return n
+    return text.split_whitespace().count()
 
 def file_word_count(fs: Fs, path: Path) -> int ! IoError:
     let text = fs.read_to_string(path)?

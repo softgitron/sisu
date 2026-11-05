@@ -1754,7 +1754,10 @@ Shown in [R13](modules.md#imports).
 `from MODULE import NAME` names an item that the module declares `pub`:
 a type, a function, a constant or an error set. A variant is reached
 through its type, as `BookingError.Taken`, and is not an item of the
-module.
+module. When the module has the item and a `@cfg` of it leaves the
+item out of this build, the note `resolve.cfg-left-out` names the
+condition, `@cfg(feature="vat")` or `@cfg(test)`
+([chapter 17](../tutorial/17-modules-and-packages.md#features)).
 
 <!-- file: examples/reference-diagnostics/e0204_not_in_module.sisu -->
 ```sisu
@@ -4714,7 +4717,7 @@ def main():
 <!-- output: examples/reference-diagnostics/e0335_impure_argument.console -->
 ```console
 $ sisu run e0335_impure_argument.sisu
-error[E0335]: this function is passed where a pure function is required, but it calls `noisy_double`, which is not pure
+error[E0335]: this function is passed where a pure function is required, but it calls `print`, which is not pure
   --> e0335_impure_argument.sisu:10:23
    |
 10 |     print(apply_twice(noisy_double, 3))
@@ -4723,8 +4726,11 @@ error[E0335]: this function is passed where a pure function is required, but it 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-Pass a `pure` function. The message names the function passed,
-`noisy_double`, rather than the `print` inside it that makes it impure.
+Pass a `pure` function. The place is the function passed,
+`noisy_double`, and the message names the operation inside it that
+makes it impure, `print`. When that operation is in a function that
+the one passed calls, the note `type.impure-path` gives the way, such
+as "`helper` calls `noisy_double`, which calls `print`".
 
 <!-- file: examples/reference-diagnostics/e0335_impure_argument_fixed.sisu -->
 ```sisu
@@ -5900,7 +5906,10 @@ Shown in [chapter 10](../tutorial/10-ownership.md).
 cannot be modified until that borrow ends on line {end}.
 
 A value that is borrowed cannot change until the borrow's last use. A
-borrow ends at its last use, not at the end of its block.
+borrow ends at its last use, not at the end of its block. Tasks that a
+loop spawns, each changing a captured `var`, get E0402 too, with the
+note `task.shared-change`, which says that the tasks run at once and
+names a `Mutex` ([chapter 20](../tutorial/20-concurrency.md#sharing-a-value-that-changes)).
 
 <!-- file: examples/reference-diagnostics/e0402_modify_while_borrowed.sisu -->
 ```sisu
@@ -6808,13 +6817,14 @@ error[E0428]: the task borrows `words`, which belongs to the scope's body: the b
 11 |         let handle = s.spawn(() -> longest(words))
    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    |                              -------------------- borrowed here
-  = note: move it into the task instead: write `own () -> ...` (or `do own:`), or copy what the task needs into a local before the `spawn`
+  = note: make `words` before `task.scope`, outside the scope's body, so that it outlives every task; `own () -> ...` (or `do own:`) would move it into the first task and leave none for the next
 
 error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```
 
-Make the value outside the scope. The note's `own` task moves the value
-into one task, which leaves none for a second.
+Make the value outside the scope, as the note says. An `own` task
+would move the value into one task, which leaves none for a second;
+the note says so too.
 
 <!-- file: examples/reference-diagnostics/e0428_body_local_fixed.sisu -->
 ```sisu
@@ -9358,7 +9368,7 @@ Shown in the guide [Call a C library](../guides/c-library.md).
 
 ## Warnings
 
-Codes W0001 to W0026. A warning does not stop a program: `sisu run`
+Codes W0001 to W0027. A warning does not stop a program: `sisu run`
 prints it and runs.
 
 ### W0001
@@ -10124,6 +10134,61 @@ True
 ```
 
 Shown in [R14](attributes.md#where-an-attribute-may-stand).
+
+### W0027
+
+`lint.unused-import`: `{name}` is imported and not used in this file.
+
+A lint, which `sisu lint` prints and `sisu check` does not
+([R16](sisu-command.md#sisu-lint)). The file does not spell the name
+an import binds, outside the imports and its doc comments. `sisu fmt`
+keeps such an import, so a file can import what it does not use yet,
+and the program runs.
+
+<!-- file: examples/reference-diagnostics/w0027_unused_import.sisu -->
+```sisu
+# An import that the file does not use, which `sisu lint` names.
+from std.collections import Deque
+from std.math import clamp
+
+def main():
+    print(clamp(1.5, 0.0, 1.0))
+```
+
+<!-- output: examples/reference-diagnostics/w0027_unused_import.console -->
+```console
+$ sisu lint w0027_unused_import.sisu
+warning[W0027]: `Deque` is imported and not used in this file
+  --> w0027_unused_import.sisu:2:1
+  |
+2 | from std.collections import Deque
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: remove the import
+
+$ sisu run w0027_unused_import.sisu
+1.0
+```
+
+The fix `lint.remove-import` removes the import; in a `from` that
+imports other names too, it removes the name and its comma. An import
+that re-exports a name, or holds a comment, is not linted.
+
+<!-- file: examples/reference-diagnostics/w0027_unused_import_fixed.sisu -->
+```sisu
+# Only the import the file uses is left.
+from std.math import clamp
+
+def main():
+    print(clamp(1.5, 0.0, 1.0))
+```
+
+<!-- output: examples/reference-diagnostics/w0027_unused_import_fixed.out -->
+```text
+1.0
+```
+
+Shown in [R16](sisu-command.md#sisu-lint) and
+[R1](lexical-structure.md#the-formatters-layout).
 
 ## Run time
 
@@ -11853,6 +11918,7 @@ it. `sisu explain CODE` prints the same line.
 | [W0024](#w0024) | `resolve.misspelt-attribute` | `@{name}` is not an attribute Sisu reads |
 | [W0025](#w0025) | `type.deprecated-plain` | `{name}` is deprecated |
 | [W0026](#w0026) | `resolve.misplaced-attribute` | `@{name}` means something on {places}, so on {what} it does nothing |
+| [W0027](#w0027) | `lint.unused-import` | `{name}` is imported and not used in this file |
 
 ### Run time, every code
 

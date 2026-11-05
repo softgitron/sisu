@@ -173,8 +173,9 @@ and runs instead the six C functions it knows (`strlen`, `memcpy`,
 `malloc`, `free`, `getenv` and `write`) on its model of memory, where
 the obligations are checked as the program runs. The native debug build
 checks them too, on the blocks that `Global` gives out, such as the
-wrapper's buffer for the name; memory that C gives out, as `getenv`'s
-text, is checked by neither. The test in `main.sisu`
+wrapper's buffer for the name, and on the memory those six functions
+give out: `getenv`'s text is read and never written, and `strlen`
+reads no further than the block that holds its argument. The test in `main.sisu`
 runs there too: it hands `lookup` a fake `Env`, which `getenv` does not
 read, so the process's own `PATH` is found and an unset name is not.
 The runs print the same:

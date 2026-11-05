@@ -230,8 +230,9 @@ notes](../../compiler/docs/architecture.md#compile-time-and-run-time)).
 - **Two front ends, for a while.** Every rule existed twice until the
   Rust front end was frozen, and the oracle stays until nothing checks
   against it. Meanwhile the commands that stage 1 does not serve yet,
-  such as `sisu test --std`, `sisu run --defer-borrow`, a worksheet and
-  a program's transcripts, run the Rust front end, which knows none of
+  such as `sisu test --std`, `sisu run --defer-borrow`, the language
+  server's worksheets and a program's transcripts, run the Rust front
+  end, which knows none of
   the rules added since it was frozen: a transcript of a program that
   uses one fails with the Rust front end's errors (D0128).
 - **The interpreter is slow.** It is fine for development, tests and an

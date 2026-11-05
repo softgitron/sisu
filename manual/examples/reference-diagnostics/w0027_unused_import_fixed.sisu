@@ -1,0 +1,5 @@
+# Only the import the file uses is left.
+from std.math import clamp
+
+def main():
+    print(clamp(1.5, 0.0, 1.0))

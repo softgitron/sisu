@@ -205,7 +205,7 @@ error[E0428]: the task borrows `words`, which belongs to the scope's body: the b
 14 |         let with_a = s.spawn(() -> count_with(words, 'a'))
    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    |                              ---------------------------- borrowed here
-  = note: move it into the task instead: write `own () -> ...` (or `do own:`), or copy what the task needs into a local before the `spawn`
+  = note: make `words` before `task.scope`, outside the scope's body, so that it outlives every task; `own () -> ...` (or `do own:`) would move it into the first task and leave none for the next
 
 error[E0428]: the task borrows `words`, which belongs to the scope's body: the body ends before the scope joins its tasks
   --> body_local.sisu:15:22
@@ -213,16 +213,16 @@ error[E0428]: the task borrows `words`, which belongs to the scope's body: the b
 15 |         let with_y = s.spawn(() -> count_with(words, 'y'))
    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    |                              ---------------------------- borrowed here
-  = note: move it into the task instead: write `own () -> ...` (or `do own:`), or copy what the task needs into a local before the `spawn`
+  = note: make `words` before `task.scope`, outside the scope's body, so that it outlives every task; `own () -> ...` (or `do own:`) would move it into the first task and leave none for the next
 
 error[D0021]: the program was not run: the ownership checker found errors (2); `--defer-borrow` runs it under the monitor
 ```
 
 E0428 (`task.borrows-body-local`) says that the block ends before the
 scope waits for its tasks, so a task cannot borrow a local of the
-block. Its note offers `own`, which moves `words` into the first task
-and leaves none for the second. The fix here is the one the program
-had: make the list outside the scope.
+block. Its note gives the fix the program had, making the list before
+`task.scope`, and says why `own` is not it here: an `own` task would
+move `words` into the first task and leave none for the second.
 
 </details>
 
@@ -257,6 +257,35 @@ def main():
 - The guard lets go of the mutex when it is dropped, at the end of the
   task's block here.
 - `letters.into_inner()` takes the value out once the tasks are done.
+
+**Try it.** Make `letters` a plain `var letters = 0`, and change it in
+each task with `letters += len(w)`.
+
+<details>
+<summary>What Sisu says</summary>
+
+<!-- output: examples/20-concurrency/plain_var.console -->
+```console
+$ sisu run plain_var.sisu
+error[E0402]: `letters` is borrowed on line 7 and cannot be modified until that borrow ends on line 8
+  --> plain_var.sisu:7:21
+  |
+7 |             s.spawn do:
+  |                     ^^^
+  |                     --- borrowed here
+  |             ----------- the borrow is still used here
+  = note: each task the loop spawns changes `letters`, and the tasks run at once: keep it in a `Mutex` (`Mutex(0)`, changed through `letters.lock().value`), or have each task return its part and combine them after the scope
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
+```
+
+E0402 (`borrow.modify-while-borrowed`) refuses the change: each task
+borrows `letters` to change it while the task before it may still be
+running. Its note says why and gives the two ways out, the `Mutex` of
+the program or a part returned by each task and added up after the
+scope.
+
+</details>
 
 **Try it.** Use a `Cell(0)`, the shared value of chapter 13, in place
 of the mutex.

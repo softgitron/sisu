@@ -60,9 +60,9 @@ def main():
 maanantai sauna 7
 ```
 
-A keyword where a name should be is an error. Where a parameter's or a
-field's name should be, it is E0124 (`parse.keyword-as-name`), and the
-line declares nothing; elsewhere, the parser reports what it expected:
+A keyword where a name should be is an error. Where a function's, a
+parameter's or a field's name should be, it is E0124
+(`parse.keyword-as-name`), and the line declares nothing; elsewhere, the parser reports what it expected:
 
 <!-- file: examples/reference-lexical-structure/keyword_name.sisu -->
 ```sisu
@@ -631,8 +631,8 @@ has no `is` (D-025). `:=` is E0123
   elsewhere; every comment keeps its text and its line;
 - `Option[T]` is written `T?`, and `Result[T, E]` is written `T ! E`
   when `E` is an error set;
-- a run of imports is sorted, and the imports the file does not use are
-  removed.
+- a run of imports is sorted, and every import is kept, the ones the
+  file does not use among them, which `sisu lint` names (W0027).
 
 The formatter checks that the text it writes parses to the same program;
 otherwise it leaves the file as it is (D0076). It formats only files
@@ -669,6 +669,7 @@ $ sisu fmt --check layout.sisu
 -     return Some(word.to_string())
 -   return None
 + from std.math import clamp
++ from std.time import Duration
 + 
 + def first_word(text: str) -> String?:
 +     for word in text.split_whitespace():
@@ -688,7 +689,19 @@ $ sisu fmt --check layout.sisu
 +     print("{queue.pop_front() ?? "empty"} {clamp(1.5, 0.0, 1.0)}")
 $ sisu fmt layout.sisu
 $ sisu fmt --check layout.sisu
+$ sisu lint layout.sisu
+warning[W0027]: `Duration` is imported and not used in this file
+  --> layout.sisu:4:1
+  |
+4 | from std.time import Duration
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: remove the import
+
 ```
+
+The formatted file keeps `Duration`, which it does not use, and `sisu
+lint` names it, with the fix that removes it
+([R16](sisu-command.md#sisu-lint)).
 
 **Status.** In stage 0 (D-030).
 
@@ -715,5 +728,6 @@ $ sisu fmt --check layout.sisu
 | E0121 | `parse.empty-interpolation` | [String literals](#string-literals) |
 | [E0123](diagnostics.md#e0123) | `parse.walrus` | [Operators and punctuation](#operators-and-punctuation) |
 | [E0124](diagnostics.md#e0124) | `parse.keyword-as-name` | [Names](#names) |
+| [W0027](diagnostics.md#w0027) | `lint.unused-import` | [The formatter's layout](#the-formatters-layout) |
 
 [R17, Diagnostics](diagnostics.md) lists every code.

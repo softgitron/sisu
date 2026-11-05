@@ -1,0 +1,2 @@
+panic: `ptr.read` through a pointer to a value that no longer exists (`valid`)
+  at main (pointer_gone.sisu:11:18)

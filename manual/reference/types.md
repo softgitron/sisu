@@ -279,7 +279,10 @@ A signed type never widens to an unsigned one, and no integer becomes a
 float or a float an integer without a method. Two operands of different
 integer types widen the narrower when that loses nothing, in arithmetic
 and in a comparison alike, and otherwise they do not mix (E0373,
-[R17](diagnostics.md#e0373)).
+[R17](diagnostics.md#e0373)). A shift is not such an operation: its
+amount is a count of bits, so `x << k` and `x >> k` have the type of
+`x` whatever integer type `k` has, `int` among them, and a literal on
+the left, `1 << k`, is an `int`.
 
 <!-- file: examples/reference-types/widening.sisu -->
 ```sisu
@@ -1085,7 +1088,7 @@ def main():
 <!-- output: examples/reference-types/impure_argument.console -->
 ```console
 $ sisu run impure_argument.sisu
-error[E0335]: this function is passed where a pure function is required, but it calls `noisy`, which is not pure
+error[E0335]: this function is passed where a pure function is required, but it calls `print`, which is not pure
   --> impure_argument.sisu:10:23
    |
 10 |     print(apply_twice(noisy, 2))
@@ -1094,9 +1097,10 @@ error[E0335]: this function is passed where a pure function is required, but it 
 error[D0006]: the program was not run: errors found (1)
 ```
 
-**Stage 0 differs.** [03](../../proposal/03-types-and-generics.md#function-types)
-has E0335 name the operation responsible, here `print`; stage 0 names
-the function passed.
+E0335 names the operation responsible, here `print`, as
+[03](../../proposal/03-types-and-generics.md#function-types) asks,
+following the program's own functions to the first call that is not
+pure; when the way is longer than one call, a note gives it.
 
 **Status.** In stage 0 (D-074).
 

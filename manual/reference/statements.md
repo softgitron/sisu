@@ -364,7 +364,7 @@ type, bindings and tests at once, is designed
 | `match VALUE:` with `case` arms | [R6](patterns.md) |
 | `select:` | [R9](concurrency.md#waiting-for-the-first-of-several) |
 | `assert CONDITION` and `assert CONDITION, MESSAGE` | [R15](testing.md#assertions) |
-| `expect CONDITION`, which records its failure and lets a test go on | [R15](testing.md#assertions) |
+| `expect CONDITION` and `expect CONDITION, MESSAGE`, which record their failure and let a test go on | [R15](testing.md#assertions) |
 | `debug_assert CONDITION` and `debug_assert CONDITION, MESSAGE`, left out below the contract level `all` | [R15](testing.md#assertions), [R11](contracts.md#check-levels) |
 | `unsafe:` with a block | [R7](ownership.md#unsafe-code-and-raw-pointers) |
 | `pass`, the empty block | [R1](lexical-structure.md#indentation-and-blocks) |

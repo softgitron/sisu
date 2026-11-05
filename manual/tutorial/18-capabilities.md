@@ -471,10 +471,7 @@ time:
 ```sisu
 # Code that takes no capability can only compute.
 pure def word_count(text: str) -> int:
-    var n = 0
-    for _ in text.split_whitespace():
-        n += 1
-    return n
+    return text.split_whitespace().count()
 
 def file_word_count(fs: Fs, path: Path) -> int ! IoError:
     let text = fs.read_to_string(path)?
@@ -516,9 +513,9 @@ describes.
 ```console
 $ sisu run pure_file.sisu
 error[E0334]: the pure function `file_word_count` cannot use the capability `Fs`
-  --> pure_file.sisu:8:26
+  --> pure_file.sisu:5:26
   |
-8 | pure def file_word_count(fs: Fs, path: Path) -> int ! IoError:
+5 | pure def file_word_count(fs: Fs, path: Path) -> int ! IoError:
   |                          ^^^^^^
   = fix: remove `pure`
 
@@ -532,9 +529,13 @@ says so.
 
 </details>
 
-`word_count` counts with a loop rather than with `count()`, because the
-iterator methods of chapter 16 are not marked `pure` in the compiler
-yet, and a `pure` function can call only `pure` functions.
+`word_count` may call `count()` because counting is `pure`, and a
+`pure` function can call only `pure` functions. So are the other
+methods that use up an iterator without taking a function, `nth`,
+`collect`, `sum` and `join`. The adapters of chapter 16 that take one,
+`map` and `filter` among them, are not marked `pure` in the compiler
+yet, so a `pure` function that needs them writes a loop or a
+comprehension.
 
 ## Counting a program's capabilities
 

@@ -1,0 +1,6 @@
+# Imports that the file does not use yet, which `sisu lint` names.
+import std.json
+from std.math import clamp, sqrt
+
+def main():
+    print(clamp(1.5, 0.0, 1.0))

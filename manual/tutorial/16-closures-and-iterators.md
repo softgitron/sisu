@@ -245,7 +245,7 @@ squares, and pass it to `apply_twice`.
 <!-- output: examples/16-closures-and-iterators/impure_twice.console -->
 ```console
 $ sisu run impure_twice.sisu
-error[E0335]: this function is passed where a pure function is required, but it calls `noisy_square`, which is not pure
+error[E0335]: this function is passed where a pure function is required, but it calls `print`, which is not pure
   --> impure_twice.sisu:15:23
    |
 15 |     print(apply_twice(noisy_square, 3))

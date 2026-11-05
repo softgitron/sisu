@@ -303,7 +303,7 @@ test "an average for each evening":
     expect average([80, 85, 120]) == 95
     expect average([70, 75]) == 73
     expect average([90]) == 90
-    expect average([60, 61]) == 61
+    expect average([60, 61]) == 61, "two readings a degree apart"
 ```
 
 <!-- output: examples/19-testing/expects.console -->
@@ -317,18 +317,20 @@ expectation failed: average([70, 75]) == 73
   right: 73
   at test "an average for each evening" (expects.sisu:12:5)
 expectation failed: average([60, 61]) == 61
+  message: two readings a degree apart
   left:  60
   right: 61
   at test "an average for each evening" (expects.sisu:14:5)
-replay: sisu test --replay 1-27b42691e342aea0-0.0.1-t0-s0-r0 expects.sisu
+replay: sisu test --replay 1-8d28ef2a938b01d6-0.0.1-t0-s0-r0 expects.sisu
 
 0 passed, 1 failed, 0 blocked
 ```
 
 Both failures are reported under `expectation failed:`, with the sides
-a failed `assert` shows; the checks that hold say nothing. Use `expect` for checks that do not depend on
-each other, and `assert` where a failure makes the lines after it
-meaningless.
+a failed `assert` shows; the checks that hold say nothing. An `expect`
+takes a message, as `assert` does. Use `expect` for checks that do not
+depend on each other, and `assert` where a failure makes the lines
+after it meaningless.
 
 What a test prints is kept with its result and shown only if it fails,
 under `what the test printed:` after the test's name, so a passing
@@ -635,7 +637,7 @@ test "word_count refines word_count_ref" ... FAILED
 test "word_count refines word_count_ref" ... FAILED
 panic: the property failed for ("a\na",) (case 48, shrunk 8 times)
   the property returned False
-  at test "word_count refines word_count_ref" (<arbitrary>/main.sisu:7:5)
+  at test "word_count refines word_count_ref" (words.sisu:8:1)
 replay: sisu test --replay 1-87c6db98a4f7b08a-0.0.1-t1-s0-r0-c1.0.1.25.1.0.0 words.sisu
 
 1 passed, 1 failed, 0 blocked
@@ -644,8 +646,7 @@ replay: sisu test --replay 1-87c6db98a4f7b08a-0.0.1-t1-s0-r0-c1.0.1.25.1.0.0 wor
 The test is named `word_count refines word_count_ref`, and it finds
 that a line break between two words is not a space to the fast
 version: `"a\na"` is one word to it and two to `split_whitespace`. Its
-place is in `<arbitrary>/main.sisu`, the module where the compiler
-writes the generated tests.
+place is the `@refines` line.
 
 **Try it.** Change `c == ' '` to `c.is_whitespace()`, and run the tests
 again.

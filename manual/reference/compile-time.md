@@ -101,6 +101,10 @@ same bits whether it is computed while compiling or while running
 - A panic, a failed `comptime assert` included, is E0602
   (`comptime.panicked`) with its message. An expression that uses one
   that failed is not evaluated again: its error is that one's.
+- A typed hole is not a panic: an expression that reaches one has no
+  value to keep, so it is left to run time, where reaching the hole
+  blocks the test or stops the run, as any hole does (D-061). The build
+  warns of the hole (W0001), and a release build refuses it.
 
 Code that compile-time evaluation writes holds no `unsafe` (E0615,
 `comptime.unsafe-written`), so that every unsafe block stays in a source
@@ -436,8 +440,14 @@ def main():
 ["NAME", "HOUR"]
 ```
 
-**Stage 0 differs.** Inside a derive's template a field has no `ty`,
-so a derive cannot choose code by the type of each field (E0608).
+**Stage 0 differs.** Inside a derive's template, which runs before the
+types are resolved, a struct field's `ty` is the type as its
+declaration writes it: `reflect.name_of(f.ty)` is that text, and
+`reflect.is_str`, `is_list` and the other kinds are known for the
+prelude's types (`int`, `f64`, `bool`, `char`, `str`, `String`, a
+list, an optional value and a tuple of them), so a derive can choose a
+form field by field; any other type's kind is not known there. A
+variant's fields have no `ty` yet (E0608).
 
 **Status.** In stage 0 (D-018).
 

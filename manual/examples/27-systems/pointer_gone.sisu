@@ -1,0 +1,11 @@
+# A pointer that outlives the local it points to.
+from std.mem import ptr
+
+def reading() -> ptr[int]:
+    let celsius = 80
+    return ptr.of(ref celsius)
+
+def main():
+    let p = reading()
+    # safety: valid: wrong, `celsius` went with the frame of `reading`.
+    print(unsafe p.read())

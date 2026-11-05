@@ -4,7 +4,7 @@ def double(n: int) -> int:
 
 test "doubles":
     expect double(2) == 4
-    expect double(3) == 6
+    expect double(3) == 6, "three doubled"
     print("after the expects")
     assert double(5) == 10
     print("after the assert")

@@ -11,4 +11,4 @@ test "an average for each evening":
     expect average([80, 85, 120]) == 95
     expect average([70, 75]) == 73
     expect average([90]) == 90
-    expect average([60, 61]) == 61
+    expect average([60, 61]) == 61, "two readings a degree apart"

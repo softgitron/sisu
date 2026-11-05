@@ -10,6 +10,7 @@ $ sisu fmt --check layout.sisu
 -     return Some(word.to_string())
 -   return None
 + from std.math import clamp
++ from std.time import Duration
 + 
 + def first_word(text: str) -> String?:
 +     for word in text.split_whitespace():
@@ -29,3 +30,11 @@ $ sisu fmt --check layout.sisu
 +     print("{queue.pop_front() ?? "empty"} {clamp(1.5, 0.0, 1.0)}")
 $ sisu fmt layout.sisu
 $ sisu fmt --check layout.sisu
+$ sisu lint layout.sisu
+warning[W0027]: `Duration` is imported and not used in this file
+  --> layout.sisu:4:1
+  |
+4 | from std.time import Duration
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = fix: remove the import
+

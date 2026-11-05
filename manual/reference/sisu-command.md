@@ -297,8 +297,8 @@ The error is printed in its `Debug` form, `Missing(key="port")`.
 The front end reads, checks and lowers a program; the rest of `sisu`
 runs, tests and compiles what it produces. Stage 0 has two: stage 1,
 written in Sisu and compiled natively, which is the default for
-`check`, `sir`, `build`, `run`, `test`, `bench`, `fmt`, `doc`, `tokens`
-and `parse`, and the Rust front end, the oracle that stage 1 is checked
+`check`, `sir`, `build`, `run`, `test`, `bench`, `fmt`, `doc`, `tokens`,
+`parse`, `repl` and `ws`, and the Rust front end, the oracle that stage 1 is checked
 against. `--front-end=rust` among a command's options, or
 `SISU_FRONT_END=rust` in the environment, chooses the Rust one. `sisu
 lint` and `sisu audit --unsafe` are stage 1's alone, and the Rust front
@@ -642,7 +642,12 @@ among them ([Choosing the schedule](#choosing-the-schedule)), and
 `--stats` with no word after it; it does not combine with `--sir`,
 `--monitor`, `--defer-borrow`, `--watch` or `--record` (D0109). A
 native debug build checks raw memory as the interpreter does, with the
-same panics; the release build does not
+same panics: the blocks of `Global` and of C's `malloc`, the text of
+`getenv`, and pointers to the program's own variables, whose frame
+must not have returned and which a shared borrow made read-only. It
+checks a pointer by its address, where the interpreter knows the borrow
+it came from, so it lets pass a few accesses that the interpreter
+stops; the release build checks none
 ([chapter 27](../tutorial/27-systems.md#raw-memory)).
 
 <!-- output: examples/reference-sisu-command/native.console -->
@@ -1335,7 +1340,7 @@ $ sisu test --std --filter std.time greet.sisu
 test "std.time/Ticker (doc example)" ... ok
 test "std.time/Timeline (doc example)" ... ok
 2 passed, 0 failed, 0 blocked
-158 not selected
+161 not selected
 ```
 
 The [package example](#what-a-command-works-on) shows the page of a
@@ -1362,7 +1367,8 @@ examples. It is page R18 of [the plan](../README.md#the-reference).
 
 `sisu fmt` rewrites each file in the canonical layout: four spaces, at
 most 100 columns, trailing commas in constructs that span lines, sorted
-imports with the unused ones removed, one blank line between items, and
+imports, each kept whether the file uses it or not ([`sisu
+lint`](#sisu-lint) names the unused ones), one blank line between items, and
 the sugar spelled one way (`T?`, `T ! E`). It has no options of layout
 (D-030). A path that is a directory formats every `.sisu` file under it
 (D0077 when there is none); without a path, the package's. `--check`
@@ -1412,7 +1418,10 @@ session (D0084 to D0091).
 
 The session reruns the script from the top for each input, with the
 capability log of the run before standing in for the world, so the
-earlier inputs neither print nor touch anything again.
+earlier inputs neither print nor touch anything again. Stage 1 checks
+and lowers each input's program, as for `sisu run`, so an input takes
+every form a script takes; `--front-end=rust` runs the session on the
+Rust front end instead.
 
 Given this file and these inputs on standard input:
 
@@ -1495,10 +1504,11 @@ total.to_f64() / 3.0  # => 15.666666666666666
 
 **Stage 0 differs.** A worksheet is tooling after 0.1 (Q-48), which the
 language server shows as values beside the lines; stage 0 has it now,
-on the command line and in the language server. It runs on the Rust
-front end ([Choosing the front end](#choosing-the-front-end)), so the
-forms that only stage 1 takes, such as `^` in a slice's bound, a
-generator expression or a trait's constant, are errors in a worksheet.
+on the command line and in the language server. `sisu ws` checks and
+lowers the worksheet with stage 1, so it takes every form `sisu run`
+takes, `^` in a slice's bound and a generator expression among them;
+the language server's worksheets still run on the Rust front end
+([Choosing the front end](#choosing-the-front-end)).
 
 **Status.** In stage 0.
 
@@ -1591,10 +1601,14 @@ a long explanation with examples; stage 0 prints the catalog's line
 
 `sisu lint` checks a program as `sisu check` does and prints its lints,
 the warnings that `sisu check` leaves out, each with its fix; a program
-with errors gets its errors instead, and status 1. Its one lint is
-W0015 (`lint.wildcard-own-enum`): a `case _` over an enum of the same
+with errors gets its errors with them, and status 1. It has two lints.
+W0015 (`lint.wildcard-own-enum`) is a `case _` over an enum of the same
 package, which would hide a variant added later
-([R6](patterns.md)). The fix lists the variants the wildcard matches.
+([R6](patterns.md)); its fix lists the variants the wildcard matches.
+W0027 (`lint.unused-import`) is an import whose name the file does not
+use ([R13](modules.md#imports)); its fix removes the import, or the
+name and its comma from a `from` that keeps others. `sisu fmt` keeps
+such an import, so a file can import what it does not use yet.
 
 <!-- file: examples/reference-sisu-command/lint.sisu -->
 ```sisu
@@ -1613,6 +1627,18 @@ def main():
     print(heat(Stove.Smoke))
 ```
 
+The second file imports two names it does not use yet:
+
+<!-- file: examples/reference-sisu-command/unused_import.sisu -->
+```sisu
+# Imports that the file does not use yet, which `sisu lint` names.
+import std.json
+from std.math import clamp, sqrt
+
+def main():
+    print(clamp(1.5, 0.0, 1.0))
+```
+
 <!-- output: examples/reference-sisu-command/lint.console -->
 ```console
 $ sisu lint lint.sisu
@@ -1623,17 +1649,32 @@ warning[W0015]: `case _` matches `Electric`, `Smoke` of `Stove`, an enum of this
    |              ^
   = fix: list them: `Electric | Smoke`
 
+$ sisu lint unused_import.sisu
+warning[W0027]: `json` is imported and not used in this file
+  --> unused_import.sisu:2:1
+  |
+2 | import std.json
+  | ^^^^^^^^^^^^^^^
+  = fix: remove the import
+
+warning[W0027]: `sqrt` is imported and not used in this file
+  --> unused_import.sisu:3:29
+  |
+3 | from std.math import clamp, sqrt
+  |                             ^^^^
+  = fix: remove the import
+
 $ sisu lint --help
 error[D0009]: unknown option `--help` for `sisu lint`
 ```
 
-`sisu check lint.sisu` prints nothing, and the program runs. Without a
-file, `sisu lint` works on the package of the current directory, D0064
-outside one. An option it does not take, `--help` among them, is D0009
+`sisu check` prints nothing for either file, and both programs run.
+Without a file, `sisu lint` works on the package of the current
+directory, D0064 outside one. An option it does not take, `--help` among them, is D0009
 with status 2, as for the other commands; `sisu help` lists them.
 
-**Status.** In stage 0 (10), stage 1's alone (its decision 292 in the
-[architecture notes](../../compiler/docs/architecture.md)).
+**Status.** In stage 0 (10), stage 1's alone (its decisions 292 and 588
+in the [architecture notes](../../compiler/docs/architecture.md)).
 
 ### sisu explain-borrow
 

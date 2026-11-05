@@ -124,6 +124,41 @@ alive, was not enough. Run code that holds `unsafe` under the monitor.
 
 </details>
 
+A pointer can also outlive the local it points to. `reading` returns a
+pointer to its own `celsius`, which ends with the call:
+
+<!-- file: examples/27-systems/pointer_gone.sisu -->
+```sisu
+# A pointer that outlives the local it points to.
+from std.mem import ptr
+
+def reading() -> ptr[int]:
+    let celsius = 80
+    return ptr.of(ref celsius)
+
+def main():
+    let p = reading()
+    # safety: valid: wrong, `celsius` went with the frame of `reading`.
+    print(unsafe p.read())
+```
+
+<!-- output: examples/27-systems/pointer_gone.console -->
+```console
+$ sisu run pointer_gone.sisu
+panic: `ptr.read` through a pointer to a value that no longer exists (`valid`)
+  at main (pointer_gone.sisu:11:18)
+$ sisu run --native pointer_gone.sisu
+panic: `ptr.read` through a pointer to a value that no longer exists (`valid`)
+  at main (pointer_gone.sisu:11:18)
+```
+
+Both the interpreter and a native debug build, `sisu run --native`,
+stop at the read: the obligation `valid` does not hold, since the
+frame of `reading` has returned. A native build checks it by address,
+so it says less than the interpreter: a pointer into a frame that has
+returned, whose stack memory a later call of the same depth now uses,
+looks alive to it.
+
 ## Saying why it holds
 
 An `unsafe def` of your own lists its obligations in a `Safety:` list
@@ -234,7 +269,8 @@ each byte holds, and whether it is still alive. Every read, write and
 offset is checked against it, so a mistake in unsafe code stops the
 program where it happens instead of damaging memory. A native build in
 the debug profile keeps the same model for the blocks that `Global`
-gives out, and only the release profile runs unchecked.
+and C's `malloc` give out and for pointers to the program's own
+variables, and only the release profile runs unchecked.
 
 **Try it.** Write four values in place of three. Then put it back, and
 move the `print` after the `release`.
@@ -468,7 +504,10 @@ with `strlen` and writes it to standard output with `write`. `sisu run
 --native` calls the C library itself. The interpreter cannot, and runs
 the six C functions it knows instead, `strlen`, `memcpy`, `malloc`,
 `free`, `getenv` and `write`, on its model of memory, where the same
-checks apply.
+checks apply. A native debug build calls C's own functions and keeps
+the same model of what they give out: `malloc`'s block is checked as a
+block of `Global` is, `getenv`'s text may be read and not written, and
+a `strlen` of text without its NUL stops the program.
 
 - `@blocking` on a declaration says that the function can block its
   thread for a long time, such as a read from a socket, so that the
@@ -714,9 +753,10 @@ The runtime profiles `full`, `single` and `freestanding`, targets and
 cross compilation (`--target`), and `panic = "abort"` in a profile,
 which the compiler ignores with W0005, wait for the runtime of
 [12](../../proposal/12-interop-and-targets.md). A native debug build
-checks raw memory as the interpreter does, except where the interpreter
-alone knows enough: which borrow a pointer came from, whether the local
-it points to is still alive, and memory that C gave out. The exercises of this
+checks raw memory as the interpreter does, the memory C gives out
+included, except where the interpreter alone knows enough: which
+borrow a pointer came from, which it checks only by address. The
+exercises of this
 chapter practise the safe side of systems work: layouts, bytes and
 code that does not allocate.
 

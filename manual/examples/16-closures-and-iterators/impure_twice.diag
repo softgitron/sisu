@@ -1,1 +1,1 @@
-15:23-15:35 E0335 type.impure-argument callee="noisy_square"
+15:23-15:35 E0335 type.impure-argument callee="print"

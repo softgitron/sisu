@@ -207,7 +207,7 @@ error[E0428]: the task borrows `greeting`, which belongs to the scope's body: th
 6 |         s.spawn do:
   |         ^^^^^^^^^^^
   |                 --- borrowed here
-  = note: move it into the task instead: write `own () -> ...` (or `do own:`), or copy what the task needs into a local before the `spawn`
+  = note: make `greeting` before `task.scope`, outside the scope's body, so that it outlives every task; `own () -> ...` (or `do own:`) would move it into the first task and leave none for the next
 
 error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor
 ```

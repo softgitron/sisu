@@ -142,7 +142,10 @@ which the person who wrote the `@derive` cannot edit: implement
 `Display` for `Stove` instead. Say in the trait's documentation what each field's
 type must implement, so that the error is no surprise.
 
-**Status.** In stage 0 (D-018). A derive's template has no `f.ty`, so
-it cannot choose between `Display` and `Debug` field by field with
-`reflect.implements(f.ty, "Display")`, which a generic function that
-reflects on its type parameter can.
+**Status.** In stage 0 (D-018). A derive's template runs before the
+types are resolved, so a field's `f.ty` is the type as the field
+writes it: the kinds of the prelude's types are known
+(`reflect.is_str(f.ty)` chooses text), but not what a type implements,
+and `reflect.implements(f.ty, "Display")`, which a generic function
+that reflects on its type parameter can ask, is `False` there for every
+field, a `String` included.

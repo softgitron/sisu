@@ -1,0 +1,11 @@
+$ sisu run plain_var.sisu
+error[E0402]: `letters` is borrowed on line 7 and cannot be modified until that borrow ends on line 8
+  --> plain_var.sisu:7:21
+  |
+7 |             s.spawn do:
+  |                     ^^^
+  |                     --- borrowed here
+  |             ----------- the borrow is still used here
+  = note: each task the loop spawns changes `letters`, and the tasks run at once: keep it in a `Mutex` (`Mutex(0)`, changed through `letters.lock().value`), or have each task return its part and combine them after the scope
+
+error[D0021]: the program was not run: the ownership checker found errors (1); `--defer-borrow` runs it under the monitor

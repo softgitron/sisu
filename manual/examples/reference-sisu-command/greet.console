@@ -8,4 +8,4 @@ $ sisu test --std --filter std.time greet.sisu
 test "std.time/Ticker (doc example)" ... ok
 test "std.time/Timeline (doc example)" ... ok
 2 passed, 0 failed, 0 blocked
-158 not selected
+161 not selected

@@ -39,7 +39,8 @@ running its drops, and nothing catches it. There are no exceptions.
 - `T ! {A, B}` takes the errors of both sets: a union, which stands
   only after `!` (E0227);
 - `T !` with no set infers the set from the body, the union of every
-  error it returns or passes on (E0226 anywhere but a function's result);
+  error it returns or passes on, a `?` in the body of a `task.scope` it
+  returns among them (E0226 anywhere but a function's result);
 - a set is a subtype of every set that holds all its variants, so an
   error passes into a wider set with no conversion code.
 

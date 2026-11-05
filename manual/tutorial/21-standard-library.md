@@ -161,6 +161,44 @@ Both run in real time on `sys.clock` and at once on the test clock, so
 the same code is tested without waiting. The source is
 [`compiler/std/time.sisu`](../../compiler/std/time.sisu).
 
+A `DateTime` is a moment, and its methods give its parts in UTC, the
+calendar's and the clock's:
+
+<!-- file: examples/21-standard-library/time_parts.sisu -->
+```sisu
+#!/usr/bin/env sisu
+# A `DateTime` gives its parts, in UTC.
+let t = DateTime.parse("2026-11-05T17:30:15Z").expect("a time")
+t.year()
+t.month()
+t.day()
+t.hour()
+t.minute()
+t.weekday()
+t.day_of_year()
+```
+
+<!-- output: examples/21-standard-library/time_parts.ws -->
+```text
+#!/usr/bin/env sisu
+# A `DateTime` gives its parts, in UTC.
+let t = DateTime.parse("2026-11-05T17:30:15Z").expect("a time")  # => 2026-11-05T17:30:15Z
+t.year()  # => 2026
+t.month()  # => 11
+t.day()  # => 5
+t.hour()  # => 17
+t.minute()  # => 30
+t.weekday()  # => 4
+t.day_of_year()  # => 309
+```
+
+`weekday()` counts as ISO 8601 does, 1 for Monday, so the 5th of
+November 2026 is a Thursday, and `day_of_year()` counts from 1 on the
+1st of January. `second()` and `nanosecond()` give the rest. Time
+zones and an `Instant` for measuring are designed in
+[11](../../proposal/11-stdlib.md) and not in the library
+yet.
+
 ## Randomness
 
 `Rand`, the capability, gives random numbers: `between(lo, hi)`,
@@ -548,7 +586,11 @@ False
 The levels are `debug`, `info`, `warn` and `error`. The records go to
 standard error and the program's results to standard output, so a
 shell can keep them apart, and inside a task each record names the
-task, as chapter 20 showed. The source is
+task, as chapter 20 showed. `log` writes every level; a `Logger`,
+imported from `std.log` with its `Level`, writes only its level and the
+more severe ones, with fields after each message, as the guide
+[Log and trace](../guides/log.md#2-leave-out-the-detail-with-a-logger)
+shows. The source is
 [`compiler/std/log.sisu`](../../compiler/std/log.sisu).
 
 ## Exercise 21.1: predict the library's answers

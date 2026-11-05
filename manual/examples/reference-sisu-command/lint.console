@@ -6,5 +6,20 @@ warning[W0015]: `case _` matches `Electric`, `Smoke` of `Stove`, an enum of this
    |              ^
   = fix: list them: `Electric | Smoke`
 
+$ sisu lint unused_import.sisu
+warning[W0027]: `json` is imported and not used in this file
+  --> unused_import.sisu:2:1
+  |
+2 | import std.json
+  | ^^^^^^^^^^^^^^^
+  = fix: remove the import
+
+warning[W0027]: `sqrt` is imported and not used in this file
+  --> unused_import.sisu:3:29
+  |
+3 | from std.math import clamp, sqrt
+  |                             ^^^^
+  = fix: remove the import
+
 $ sisu lint --help
 error[D0009]: unknown option `--help` for `sisu lint`

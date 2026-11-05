@@ -2,8 +2,8 @@
 
 This guide tests a client of a web service without the service: it
 passes the network in, scripts the answers, counts the requests, and
-tests a client and a server together over a network in the test's own
-process. It assumes capabilities and tests, from chapters 18 and 19 of
+scripts a busy service and a slow one, and tests a client and a server
+together over a network in the test's own process. It assumes capabilities and tests, from chapters 18 and 19 of
 the tutorial.
 
 **See also:** the tutorial's
@@ -82,7 +82,54 @@ Script each answer a test needs, and the cases that go wrong as well
 as the one that goes right: a fake never answers what nobody wrote
 into it, so each test says what the service did.
 
-## 3. Count the requests
+## 3. Script a busy service and a slow one
+
+`respond(method, url, response)` answers a method of a URL with any
+`http.Response`, such as a `503` from a busy service, and
+`respond_after(method, url, response, delay)` answers once `delay` has
+passed on the test clock, which the client waits for at its first
+read. The URL is compared as `Url` writes it, so
+`http://weather.example:80/Oulu` is the same route:
+
+<!-- file: examples/guide-network/scripted.sisu -->
+```sisu
+# A busy service and a slow one, scripted on a `FakeNet`.
+import http
+from std.net import Url, UrlError
+
+const OULU: str = "http://weather.example/Oulu"
+
+## The weather service's answer for `town`.
+def weather(net: Net, town: str) -> String ! {UrlError, HttpError}:
+    let url = Url.parse("http://weather.example/{town}")?
+    let body = http.get(net, url)?
+    return Ok(body.decode().or(String()))
+
+test "a busy service":
+    let busy = http.Response.text(503, "Service Unavailable", "busy")
+    let net = http.FakeNet().respond("GET", OULU, busy)
+    assert weather(net, "Oulu") == Err(Status(503))
+
+test "a slow answer"(clock: TestClock):
+    let wait = Duration.seconds(5)
+    let answer = http.Response.ok(b"-4")
+    let net = http.FakeNet().respond_after("GET", OULU, answer, wait)
+    let start = clock.now()
+    assert weather(net, "Oulu") == Ok("-4")
+    assert clock.now() - start == wait
+```
+
+<!-- output: examples/guide-network/scripted.test -->
+```text
+test "a busy service" ... ok
+test "a slow answer" ... ok
+2 passed, 0 failed, 0 blocked
+```
+
+The slow answer takes five seconds of the test clock and none of the
+test's time, so a test of a client's timeout or retry runs at once.
+
+## 4. Count the requests
 
 `request_count()` gives the number of requests the fake has answered,
 which tells a test whether the code asked too often. The handles share
@@ -125,7 +172,7 @@ test "each town is asked for once" ... ok
 1 passed, 0 failed, 0 blocked
 ```
 
-## 4. Test a client and a server together
+## 5. Test a client and a server together
 
 A test that names `net: Net` as a parameter receives a network of its
 own, in the test's process: `listen` registers an address on it,

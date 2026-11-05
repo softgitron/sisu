@@ -4,6 +4,7 @@ error[E0204]: module `money` has no item `with_vat`
   |
 2 | from money import Money, with_vat
   |                          ^^^^^^^^
+  = note: `with_vat` is left out of this build by its `@cfg(feature="vat")`, which does not hold
 
 error[E0200]: cannot find `with_vat` in this scope
   --> src/main.sisu:9:37

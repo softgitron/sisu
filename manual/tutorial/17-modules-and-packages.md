@@ -117,7 +117,10 @@ std.json` or `from std.collections import Deque`. A few names need no
 import at all: the prelude's fixed list, which holds `print`, `len`,
 `range`, `sorted`, the basic types and collections, `Option`, `Result`
 and the core traits such as `Display` and `Iterator`. Anything else is
-imported by name, so each file says where its names come from.
+imported by name, so each file says where its names come from. An
+import that the file does not use is no error, and `sisu fmt` keeps
+it; `sisu lint` names it, W0027 (`lint.unused-import`), with a fix that
+removes it ([R16](../reference/sisu-command.md#sisu-lint)).
 
 **Try it.** In `src/main.sisu`, change `import trip.distance` to `from
 trip.distance import *`, and call `between` without `distance.`.
@@ -351,6 +354,7 @@ error[E0204]: module `money` has no item `with_vat`
   |
 2 | from money import Money, with_vat
   |                          ^^^^^^^^
+  = note: `with_vat` is left out of this build by its `@cfg(feature="vat")`, which does not hold
 
 error[E0200]: cannot find `with_vat` in this scope
   --> src/main.sisu:9:37
@@ -363,9 +367,8 @@ error[D0006]: the program was not run: errors found (2)
 
 E0204 (`resolve.not-in-module`) says that `money` has no
 `with_vat`: without the feature, the function is not in the build at
-all. The message does not name the feature, so when a library's
-documentation shows an item that your build lacks, look for a
-`@cfg(feature=...)` on it.
+all. Its note names the condition that left it out,
+`@cfg(feature="vat")`, so the fix is to turn the feature on.
 
 </details>
 

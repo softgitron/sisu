@@ -1,0 +1,18 @@
+# A `Logger` writes its level and the more severe ones, with fields.
+from std.log import Level, Logger
+
+## The stove's temperature after `minutes`, from 20 degrees.
+def heat(logger: Logger, minutes: int) -> int:
+    logger.debug("heating for {minutes} minutes")
+    let celsius = 20 + 3 * minutes
+    if celsius > 100:
+        logger.warn("{celsius} degrees is too hot")
+    return celsius
+
+def main():
+    let quiet = Logger(level=Level.Info).with("stove", "kiuas")
+    quiet.info("the stove is on")
+    print(heat(quiet, 30))
+    let chatty = quiet.at_level(Level.Debug).with("room", "the sauna")
+    print(heat(chatty, 20))
+    log.at(Level.Error, "the stove switched itself off")

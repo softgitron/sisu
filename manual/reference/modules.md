@@ -138,8 +138,11 @@ An import binds names in the module that writes it:
   (`resolve.not-a-module`), whose fix writes `from atlas.geo.point import
   Point`.
 - Imports stand at the top level of a module, and the formatter sorts
-  them and removes the ones nothing uses. An import inside a function
-  is E0900 in stage 0.
+  them and keeps each. One whose name the file does not use is W0027
+  (`lint.unused-import`) of [`sisu lint`](sisu-command.md#sisu-lint),
+  whose fix removes it; `sisu check` does not report it, so a file may
+  import what it does not use yet. An import inside a function is E0900
+  in stage 0.
 - A child module is a name in its parent without a declaration, and it
   gives way to an import of the same name there: the root module of
   `bookings` may write `from bookings.clean import clean`, and `clean`
@@ -488,12 +491,12 @@ item only in a build with the feature on.
 - `@cfg(feature="NAME")` with a name that no `[features]` key declares
   is W0006, and turning on a feature that a dependency does not have is
   E1018.
+- An import of an item that a feature left out is E0204, whose note
+  names the condition, as in "`with_vat` is left out of this build by
+  its `@cfg(feature="vat")`, which does not hold".
 
 The workspace in [Workspaces](#workspaces) turns on the feature
 `fahrenheit` of its library.
-
-**Stage 0 differs.** An item that a feature left out is E0204 at its
-use, with no word about the feature.
 
 **Status.** In stage 0.
 
@@ -728,8 +731,9 @@ edition, since the check that makes it loud can stop code that compiled.
 Between editions, a feature that is not stable yet is behind `@preview`,
 and each preview is stabilised or removed within four releases (D-072).
 
-**Stage 0 differs.** Stage 0 knows one edition: it checks that
-`edition` is a year and gives every year the same language. `sisu fix`
+**Stage 0 differs.** Stage 0 knows one edition, `"2027"`: another
+year is E1003 (`package.bad-value`), "`edition` takes an edition this
+compiler knows". `sisu fix`
 and `@preview` are designed ([R16](sisu-command.md#sisu-fix)).
 
 **Status.** Designed (D-036; D-072 leans).
@@ -783,7 +787,7 @@ C++ interop (Q-24).
 | Code | Identifier | Section |
 |---|---|---|
 | E1008, E1009, E1012 | `package.no-root-module`, `package.two-root-modules`, `package.module-name` | [The module tree](#the-module-tree) |
-| [E0100](diagnostics.md#e0100), [E0203](diagnostics.md#e0203), [E0204](diagnostics.md#e0204), [E0220](diagnostics.md#e0220), [E0223](diagnostics.md#e0223), E0260 | `parse.expected`, `resolve.unknown-module`, `resolve.not-in-module`, `resolve.import-unknown`, `resolve.not-a-module`, `resolve.not-a-dependency` | [Imports](#imports) |
+| [E0100](diagnostics.md#e0100), [E0203](diagnostics.md#e0203), [E0204](diagnostics.md#e0204), [E0220](diagnostics.md#e0220), [E0223](diagnostics.md#e0223), E0260, [W0027](diagnostics.md#w0027) | `parse.expected`, `resolve.unknown-module`, `resolve.not-in-module`, `resolve.import-unknown`, `resolve.not-a-module`, `resolve.not-a-dependency`, `lint.unused-import` | [Imports](#imports) |
 | W0016, E0701 | `resolve.shadow-prelude-set`, `cap.internal` | [Names every module sees](#names-every-module-sees) |
 | [E0255](diagnostics.md#e0255), [E0256](diagnostics.md#e0256), [E0258](diagnostics.md#e0258), [E0259](diagnostics.md#e0259), [E0130](diagnostics.md#e0130) | `resolve.private-item`, `resolve.package-item`, `resolve.private-field`, `resolve.private-method`, `parse.visibility-scope` | [Visibility](#visibility) |
 | E0257 | `resolve.not-reexported` | [Re-exports](#re-exports) |

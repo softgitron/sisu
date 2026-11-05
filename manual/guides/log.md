@@ -1,7 +1,8 @@
 # Log and trace
 
-This guide writes log records at their levels, keeps the records of
-one piece of work together across its tasks, and traces every call
+This guide writes log records at their levels, leaves out the detail
+with a logger, keeps the records of one piece of work together across
+its tasks, and traces every call
 that a part of the program makes through a capability. It assumes
 tasks and capabilities, from chapters 18 and 20 of the tutorial.
 
@@ -58,7 +59,57 @@ program and the other read. Use `error` for what failed, `warn` for
 what may fail, `info` for what happened, and `debug` for the detail of
 how.
 
-## 2. Keep the records of one piece of work together
+## 2. Leave out the detail with a `Logger`
+
+`log.debug` and the module's other functions write every level. A
+`Logger` of `std.log` writes the records at its `level` and the levels
+more severe, and leaves out the rest; `with(key, value)` gives a logger
+whose records carry the field `key=value` after the message. Pass the
+logger to the code that logs:
+
+<!-- file: examples/guide-log/logger.sisu -->
+```sisu
+# A `Logger` writes its level and the more severe ones, with fields.
+from std.log import Level, Logger
+
+## The stove's temperature after `minutes`, from 20 degrees.
+def heat(logger: Logger, minutes: int) -> int:
+    logger.debug("heating for {minutes} minutes")
+    let celsius = 20 + 3 * minutes
+    if celsius > 100:
+        logger.warn("{celsius} degrees is too hot")
+    return celsius
+
+def main():
+    let quiet = Logger(level=Level.Info).with("stove", "kiuas")
+    quiet.info("the stove is on")
+    print(heat(quiet, 30))
+    let chatty = quiet.at_level(Level.Debug).with("room", "the sauna")
+    print(heat(chatty, 20))
+    log.at(Level.Error, "the stove switched itself off")
+```
+
+<!-- output: examples/guide-log/logger.console -->
+```console
+$ sisu run logger.sisu
+info: the stove is on stove=kiuas
+warn: 110 degrees is too hot stove=kiuas
+110
+debug: heating for 20 minutes stove=kiuas room="the sauna"
+80
+error: the stove switched itself off
+```
+
+- `Logger(level=Level.Info)` writes `info`, `warn` and `error`, so the
+  first call's `debug` record is left out. *Kiuas* is Finnish for the
+  sauna's stove.
+- `at_level(Level.Debug)` gives the same logger at another level, and
+  each `with` adds a field; a value with a space is quoted.
+- `log.at(level, message)` writes one record at a `Level` without a
+  logger, and `enabled(level)` tells whether a logger writes a level,
+  for a record that is costly to build.
+
+## 3. Keep the records of one piece of work together
 
 Inside a task, each record names the task by its path from the root:
 `[task 2]` is the second task that the root's scope spawned, and
@@ -100,7 +151,7 @@ info [task 1.1]: 18:00 is free
 The tasks ran in the scheduler's order, so the records of the two
 bookings are not in the order of the code; their paths sort them out.
 
-## 3. Trace every call through a capability
+## 4. Trace every call through a capability
 
 To see every file a part of the program reads, wrap its file system in
 `main` with an interceptor: a type that implements `cap.Interceptor`,
@@ -160,7 +211,7 @@ debug: read_to_string gave Err(NotFound(path="old/stove.txt"))
 [11](../../proposal/11-stdlib.md), which makes `std.log` a structured
 facade with levels and context, and
 [06](../../proposal/06-concurrency-and-capabilities.md#interceptors-and-trace-context):
-a record is a message without fields, every level is written (there is
-no setting that hides `debug`), the trace context is the path of spawn
+the module's own functions write every level, and only a `Logger`
+leaves some out and adds fields, the trace context is the path of spawn
 indices rather than trace and span identifiers, and `trace.wrap` with a
 `Tracer` is designed, so an interceptor of your own does its work.

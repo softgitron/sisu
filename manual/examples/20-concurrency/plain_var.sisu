@@ -1,0 +1,9 @@
+# Tasks that change a plain `var`, which only a `Mutex` makes safe.
+def main():
+    let words = ["sauna", "löyly", "vihta", "kiuas", "lauteet"]
+    var letters = 0
+    task.scope do s:
+        for w in words:
+            s.spawn do:
+                letters += len(w)
+    print("{letters} letters")

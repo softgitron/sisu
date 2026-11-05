@@ -95,7 +95,8 @@ def main():
     print("{mode:03b} {(mode & WRITE) != 0} {(mode & RUN) != 0}")
     print("{mode ^ WRITE:03b} {~mode:08b}")
     let colour: u32 = 0xFF8800
-    print("{colour >> 16} {(colour >> 8) & 0xFF} {colour & 0xFF}")
+    let byte = 8
+    print("{colour >> 16} {(colour >> byte) & 0xFF} {colour & 0xFF}")
 ```
 
 <!-- output: examples/24-numbers/bits.out -->
@@ -111,6 +112,9 @@ def main():
   all. `{mode:03b}` prints a number in binary with three digits.
 - `colour >> 16` moves the red byte down to the lowest bits, and `&
   0xFF` keeps the lowest eight.
+- A shift keeps the type of the value it shifts, whatever integer type
+  the amount has: `byte` is an `int`, and `colour >> byte` is still a
+  `u32`.
 - Bits shifted past the top are lost. A shift by the type's width or
   more, such as a `u8` shifted by 8, panics, since no bit would be
   left.
@@ -1010,8 +1014,8 @@ When every test passes, compare your answer with
   whose size is fixed; `int` is `i64` and `uint` is `u64`. A narrower
   integer widens where nothing is lost, and signed and unsigned types
   do not mix (E0310).
-- `&`, `|`, `^`, `~`, `<<` and `>>` work on the bits; a shift by the
-  width panics.
+- `&`, `|`, `^`, `~`, `<<` and `>>` work on the bits; a shift keeps the
+  type of the value shifted, and a shift by the width panics.
 - `+` traps, `+%` wraps, `+|` saturates, and `std.num`'s
   `checked_add` gives `None` where `+` would trap.
 - Conversions that lose information are methods: `to_u8()` gives

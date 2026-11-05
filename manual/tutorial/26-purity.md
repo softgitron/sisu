@@ -270,7 +270,7 @@ readings, however the work was divided.
 <!-- output: examples/26-purity/par_map_impure.console -->
 ```console
 $ sisu run par_map_impure.sisu
-error[E0335]: this function is passed where a pure function is required, but it calls `fahrenheit`, which is not pure
+error[E0335]: this function is passed where a pure function is required, but it calls `print`, which is not pure
   --> par_map_impure.sisu:11:29
    |
 11 |     print(par.map(readings, fahrenheit))
@@ -280,8 +280,10 @@ error[D0006]: the program was not run: errors found (1)
 ```
 
 E0335 (`type.impure-argument`) refuses a function that is not pure
-where `par.map` needs one. It names the function passed, `fahrenheit`,
-rather than the `print` inside it that makes it impure.
+where `par.map` needs one. Its place is the function passed,
+`fahrenheit`, and its message names the operation inside it that makes
+it impure, `print`. When the impure call is further away, in a function
+that `fahrenheit` calls, a note gives the way to it.
 
 </details>
 
@@ -756,7 +758,7 @@ test "no prices":
 <!-- output: solutions/26-purity/vat.console -->
 ```console
 $ sisu test vat.sisu
-error[E0335]: this function is passed where a pure function is required, but it calls `add_vat`, which is not pure
+error[E0335]: this function is passed where a pure function is required, but it calls `print`, which is not pure
   --> vat.sisu:19:28
    |
 19 |     return par.map(prices, add_vat)

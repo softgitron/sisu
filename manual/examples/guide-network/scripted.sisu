@@ -1,0 +1,24 @@
+# A busy service and a slow one, scripted on a `FakeNet`.
+import http
+from std.net import Url, UrlError
+
+const OULU: str = "http://weather.example/Oulu"
+
+## The weather service's answer for `town`.
+def weather(net: Net, town: str) -> String ! {UrlError, HttpError}:
+    let url = Url.parse("http://weather.example/{town}")?
+    let body = http.get(net, url)?
+    return Ok(body.decode().or(String()))
+
+test "a busy service":
+    let busy = http.Response.text(503, "Service Unavailable", "busy")
+    let net = http.FakeNet().respond("GET", OULU, busy)
+    assert weather(net, "Oulu") == Err(Status(503))
+
+test "a slow answer"(clock: TestClock):
+    let wait = Duration.seconds(5)
+    let answer = http.Response.ok(b"-4")
+    let net = http.FakeNet().respond_after("GET", OULU, answer, wait)
+    let start = clock.now()
+    assert weather(net, "Oulu") == Ok("-4")
+    assert clock.now() - start == wait

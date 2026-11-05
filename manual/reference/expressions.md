@@ -101,7 +101,7 @@ error[E0113]: a chained comparison must point one way; `<` and `>` do not
 | `a % b` | integers or floats | the remainder, with the sign of `b`, so `-7 % 3` is 2 |
 | `a ** b` | numbers | the power; a negative integer exponent panics |
 | `+%`, `-%`, `*%` and `+\|`, `-\|`, `*\|` | integers | the wrapping and the saturating forms |
-| `&`, `\|`, `^`, `~a`, `<<`, `>>` | integers | the bits, and shifts by 0 to the width less one |
+| `&`, `\|`, `^`, `~a`, `<<`, `>>` | integers | the bits; a shift has its left side's type, whatever integer type its amount has, and shifts by 0 to the width less one |
 | `-a` | numbers | the negation |
 
 An `int` and an `f64` do not mix (E0373), and an integer widens to a
@@ -321,10 +321,7 @@ error[E0344]: a constant negative index does not compile; count from the end wit
 error[D0006]: the program was not run: errors found (1)
 ```
 
-**Stage 0 differs.** The worksheet, on the Rust front end, takes `^` in
-an index only ([R16](sisu-command.md#sisu-ws)).
-
-**Status.** In stage 0 (D-062), with the differences noted.
+**Status.** In stage 0 (D-062).
 
 ## Comprehensions
 
